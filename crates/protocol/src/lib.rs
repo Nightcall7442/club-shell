@@ -37,6 +37,14 @@ pub const WS_MAX_FRAME_BYTES: usize = 1024 * 1024;
 /// WebSocket subprotocol negotiated on connect.
 pub const WS_SUBPROTOCOL: &str = "clubshell.v1";
 
+/// Current UTC time truncated to whole milliseconds — the precision of the wire format
+/// (`yyyy-MM-ddTHH:mm:ss.fffZ`), so freshly built envelopes/frames round-trip through JSON
+/// byte-for-byte and compare equal.
+pub fn now_ms() -> chrono::DateTime<chrono::Utc> {
+    let now = chrono::Utc::now();
+    now - chrono::Duration::nanoseconds(i64::from(now.timestamp_subsec_nanos() % 1_000_000))
+}
+
 /// Builds the Win32 pipe path for a configured short pipe name.
 pub fn pipe_path(short_name: &str) -> String {
     format!(r"\\.\pipe\{short_name}")
@@ -333,7 +341,7 @@ pub mod prelude {
     pub use crate::user::*;
     pub use crate::wallet::*;
     pub use crate::{
-        pipe_path, MAX_FRAME_BYTES, PIPE_NAME, PIPE_SHORT_NAME, PROTOCOL_VERSION,
+        now_ms, pipe_path, MAX_FRAME_BYTES, PIPE_NAME, PIPE_SHORT_NAME, PROTOCOL_VERSION,
         WS_MAX_FRAME_BYTES, WS_SUBPROTOCOL,
     };
 }

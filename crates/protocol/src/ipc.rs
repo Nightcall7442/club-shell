@@ -75,7 +75,7 @@ impl IpcEnvelope {
             id,
             kind,
             name: name.to_owned(),
-            ts: Utc::now(),
+            ts: crate::now_ms(),
             payload,
             error,
         }

@@ -2648,7 +2648,7 @@ impl WsFrame {
     pub fn ack_of(command_id: Uuid, ack: CommandAck) -> Self {
         Self {
             ack: Some(WsAck::from_ack(command_id, ack)),
-            ..Self::bare(WsFrameType::Ack, Uuid::new_v4(), Utc::now())
+            ..Self::bare(WsFrameType::Ack, Uuid::new_v4(), crate::now_ms())
         }
     }
 
@@ -2663,12 +2663,12 @@ impl WsFrame {
 
     /// [`WsFrameType::Pong`] reply to `ping`.
     pub fn pong_for(ping: &WsFrame) -> Self {
-        Self::bare(WsFrameType::Pong, ping.id, Utc::now())
+        Self::bare(WsFrameType::Pong, ping.id, crate::now_ms())
     }
 
     /// [`WsFrameType::Ping`] frame.
     pub fn ping() -> Self {
-        Self::bare(WsFrameType::Ping, Uuid::new_v4(), Utc::now())
+        Self::bare(WsFrameType::Ping, Uuid::new_v4(), crate::now_ms())
     }
 
     /// Parses `name` as a push kind (frames of type [`WsFrameType::Push`]).
