@@ -10,6 +10,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { GameArtwork, useResolvedAsset } from '@/components/media/GameArtwork';
+import { VideoBackground } from '@/components/media/VideoBackground';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
@@ -449,6 +450,8 @@ export function HomeHero(): JSX.Element {
                   className="rounded-none"
                   style={{ position: 'absolute', inset: 0, height: '100%', aspectRatio: 'auto' }}
                 />
+                {/* Ambient loop over the still; it pauses by itself while a game runs or the window is hidden. */}
+                {hero.videoUrl && <VideoBackground src={hero.videoUrl} poster={hero.heroUrl ?? hero.coverUrl} />}
               </motion.div>
             )}
           </AnimatePresence>

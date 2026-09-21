@@ -305,6 +305,7 @@ const GAME_SEEDS: GameSeed[] = [
     n: 1,
     seed: 'cs2',
     title: 'Counter-Strike 2',
+    video: '/mock-art/cs2-hero.mp4',
     launcher: 'steam',
     appId: '730',
     category: ['shooter', 'multiplayer'],
