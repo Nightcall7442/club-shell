@@ -308,6 +308,16 @@ jobs:
       - name: Build TypeScript contracts
         run: pnpm contracts:build
 
+      # The Tauri CLI downloads WiX 3.14 and NSIS from GitHub releases on first use; those downloads
+      # 504 now and then, so keep them across runs.
+      - name: Cache Tauri bundler tools (WiX, NSIS)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/AppData/Local/tauri/WixTools314
+            ~/AppData/Local/tauri/NSIS
+          key: tauri-bundler-tools-wix314-nsis-${{ runner.os }}
+
       # Release build (no --debug). beforeBuildCommand rebuilds the frontend; --config is relative to the
       # working directory (the Tauri CLI resolves it before changing into src-tauri).
       - name: tauri build

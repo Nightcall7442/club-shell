@@ -9,7 +9,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::menu::{IsMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{TrayIcon, TrayIconBuilder};
-use tauri::{AppHandle, Emitter, Manager, Wry};
+#[cfg(any(debug_assertions, feature = "devtools"))]
+use tauri::Manager;
+use tauri::{AppHandle, Emitter, Wry};
 
 use crate::agent::AgentClient;
 use crate::kiosk::keyboard_hook::{HotkeyPayload, HOTKEY_EVENT};

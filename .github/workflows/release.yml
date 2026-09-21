@@ -161,6 +161,14 @@ jobs:
       # tools/scripts/build.ps1 does) and, when a certificate is present, with a signCommand that runs
       # tools/scripts/sign.ps1 on clubshell-shell.exe before bundling and on each bundle afterwards.
       # The merged file is written without a BOM (serde_json rejects one).
+      - name: Cache Tauri bundler tools (WiX, NSIS)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/AppData/Local/tauri/WixTools314
+            ~/AppData/Local/tauri/NSIS
+          key: tauri-bundler-tools-wix314-nsis-${{ runner.os }}
+
       - name: Build shell (tauri build)
         working-directory: apps/shell
         env:
