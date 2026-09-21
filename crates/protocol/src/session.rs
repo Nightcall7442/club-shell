@@ -16,7 +16,7 @@ pub struct SessionChargedData {
 }
 
 /// Body of `POST /sessions` (SERVER_API.md §4.5). Sent with an `Idempotency-Key`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionCreateRequest {
     /// PC.
@@ -57,7 +57,7 @@ wire_enum! {
 }
 
 /// Body of `POST /sessions/{id}/end`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionEndReport {
     /// End reason.
@@ -70,7 +70,7 @@ pub struct SessionEndReport {
 }
 
 /// `data` of `SessionEventType.Ended`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionEndedData {
     /// End reason.
@@ -236,7 +236,7 @@ pub struct SessionStartedEvent {
 }
 
 /// Payload of the `session.warning` event, emitted at each configured minute mark and once at 0.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionWarning {
     /// Session.
@@ -251,7 +251,7 @@ pub struct SessionWarning {
 }
 
 /// `data` of `SessionEventType.Warning`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionWarningData {
     /// Minutes remaining at the time of the warning.

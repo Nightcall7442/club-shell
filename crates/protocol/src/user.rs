@@ -10,7 +10,7 @@ use crate::session::{Session, SessionEndReason};
 use crate::wallet::Money;
 
 /// Progress towards an achievement.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AchievementProgress {
     /// Current value.
@@ -96,7 +96,7 @@ pub struct AuthRequest {
 }
 
 /// Body of `POST /booking/reserve`. Sent with an `Idempotency-Key`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BookingCreateRequest {
     /// Owner.
@@ -127,7 +127,7 @@ wire_enum! {
 
 /// Seat reservation (IPC_PROTOCOL.md §6.15). In `booking.seats` lists, `userId` is the caller's id
 /// or `Guid.Empty` for other users.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Booking {
     /// Booking id.
@@ -203,7 +203,7 @@ pub struct ChatPostRequest {
 }
 
 /// Body of `POST /chat/{roomId}/read`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatReadRequest {
     /// Mark everything up to and including this message as read.
@@ -211,7 +211,7 @@ pub struct ChatReadRequest {
 }
 
 /// Play time of one game for the stats view.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct FavoriteGame {
     /// Game.
@@ -267,7 +267,7 @@ pub struct GuestAuthRequest {
 }
 
 /// Body of `POST /auth/logout`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LogoutRequest {
     /// Why the user is logged out; the server records it as the session end reason.
@@ -336,7 +336,7 @@ pub struct Notification {
 }
 
 /// Body of `profile.update` and `PATCH /users/{userId}`; all fields optional.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileUpdateRequest {
     /// New display name.
@@ -369,7 +369,7 @@ pub struct QrLoginStart {
 }
 
 /// Body of `POST /auth/qr/start`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct QrStartRequest {
     /// PC requesting the QR login.

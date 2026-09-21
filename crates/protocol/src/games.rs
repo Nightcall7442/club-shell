@@ -428,7 +428,7 @@ pub struct LaunchReport {
 }
 
 /// Screen resolution requested for a launch.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
 pub struct Resolution {
     /// Width in pixels.

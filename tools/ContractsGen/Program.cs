@@ -1748,7 +1748,7 @@ internal static class RsEmitter
     {
         var generics = type.TypeParams.Count == 0 ? string.Empty : "<" + string.Join(", ", type.TypeParams) + ">";
         DocFormat.RustDoc(sb, type.Doc, string.Empty);
-        sb.Append("#[derive(Serialize, Deserialize, Clone, Debug, PartialEq").Append(IsEq(type, model, new HashSet<string>(StringComparer.Ordinal)) ? ", Eq" : string.Empty).Append(")]\n");
+        sb.Append("#[derive(").Append(string.Join(", ", RustDerives(type, model))).Append(")]\n");
         sb.Append("#[serde(rename_all = \"camelCase\")]\n");
         sb.Append("pub struct ").Append(type.Name).Append(generics).Append(" {\n");
         foreach (var property in type.Properties)
@@ -1855,6 +1855,74 @@ internal static class RsEmitter
     private static string ModuleName(string holderName) => holderName == "IpcMessages" ? "names" : Naming.ToSnakeCase(holderName);
 
     /// <summary><c>Eq</c> is derivable when no field (transitively) holds a float or an opaque JSON value.</summary>
+    /// <summary>Records whose value semantics warrant <c>Hash</c> (used as map keys / de-duplicated).</summary>
+    private static readonly HashSet<string> HashRecords = new(StringComparer.Ordinal) { "Money", "Resolution" };
+
+    /// <summary>
+    /// Derive list for a generated struct, mirroring the hand-written conventions: <c>Eq</c> unless a float /
+    /// JSON blob is reachable, <c>Copy</c> when every field is a scalar / enum / <c>Option</c> of those,
+    /// <c>Default</c> when every field is optional (request "patches"), <c>Hash</c> for a small allowlist.
+    /// </summary>
+    private static List<string> RustDerives(ContractType type, ContractModel model)
+    {
+        var derives = new List<string> { "Serialize", "Deserialize", "Clone" };
+        if (type.TypeParams.Count == 0 && type.Properties.All(p => IsCopy(p.Shape, model, new HashSet<string>(StringComparer.Ordinal))))
+        {
+            derives.Add("Copy");
+        }
+
+        derives.Add("Debug");
+        derives.Add("PartialEq");
+        var eq = IsEq(type, model, new HashSet<string>(StringComparer.Ordinal));
+        if (eq)
+        {
+            derives.Add("Eq");
+        }
+
+        if (eq && HashRecords.Contains(type.Name))
+        {
+            derives.Add("Hash");
+        }
+
+        if (type.Properties.Count > 0 && type.Properties.All(p => p.Shape.Nullable))
+        {
+            derives.Add("Default");
+        }
+
+        return derives;
+    }
+
+    private static bool IsCopy(TypeShape shape, ContractModel model, HashSet<string> visiting)
+    {
+        switch (shape.Kind)
+        {
+            case ShapeKind.Primitive:
+                return shape.Name is "guid" or "datetime" or "dateonly" or "timeonly" or "bool" or "int" or "long" or "short" or "byte" or "sbyte" or "ushort" or "uint" or "ulong" or "float" or "double";
+            case ShapeKind.Contract:
+                var target = model.Find(shape.Name);
+                if (target is null || shape.Args.Count > 0)
+                {
+                    return false;
+                }
+
+                if (target.Kind == ContractKind.Enum)
+                {
+                    return true;
+                }
+
+                if (!visiting.Add(target.Name))
+                {
+                    return false;
+                }
+
+                var copy = target.TypeParams.Count == 0 && target.Properties.All(p => IsCopy(p.Shape, model, visiting));
+                visiting.Remove(target.Name);
+                return copy;
+            default:
+                return false;
+        }
+    }
+
     private static bool IsEq(ContractType type, ContractModel model, HashSet<string> visiting)
     {
         if (type.Kind == ContractKind.Enum)

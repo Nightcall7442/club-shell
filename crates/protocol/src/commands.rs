@@ -57,7 +57,7 @@ pub struct AppsLaunchRequest {
 }
 
 /// Response of `apps.launch`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AppsLaunchResponse {
     /// Always `true`.
@@ -162,7 +162,7 @@ pub struct AuthLoginResponse {
 }
 
 /// Request of `auth.logout`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthLogoutRequest {
     /// Why; defaults to `SessionEndReason.User`. Only `user`, `idle`, `admin` are valid from the
@@ -204,7 +204,7 @@ pub struct AuthStatusResponse {
 }
 
 /// Request of `booking.cancel`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BookingCancelRequest {
     /// Booking id.
@@ -212,7 +212,7 @@ pub struct BookingCancelRequest {
 }
 
 /// Request of `booking.reserve`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BookingReserveRequest {
     /// PC.
@@ -226,7 +226,7 @@ pub struct BookingReserveRequest {
 }
 
 /// Request of `booking.seats`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BookingSeatsRequest {
     /// Club-local date.
@@ -269,7 +269,7 @@ wire_enum! {
 }
 
 /// Request of `chat.history`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatHistoryRequest {
     /// Room; defaults to `pc:<pcId>`.
@@ -359,7 +359,7 @@ pub struct ComponentVersions {
 }
 
 /// Request of `games.get`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct GamesGetRequest {
     /// Game id.
@@ -367,7 +367,7 @@ pub struct GamesGetRequest {
 }
 
 /// Request of `games.installStatus`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct GamesInstallStatusRequest {
     /// Game id.
@@ -375,7 +375,7 @@ pub struct GamesInstallStatusRequest {
 }
 
 /// Request of `games.kill`; at least one of `gameId`/`pid`, none = kill all.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct GamesKillRequest {
     /// Game to kill.
@@ -417,7 +417,7 @@ pub struct GamesLaunchRequest {
 }
 
 /// Request of `games.list`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct GamesListRequest {
     /// Filter by category.
@@ -725,7 +725,7 @@ pub mod names {
 }
 
 /// Trivial `{ ok: true }` response.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct OkResponse {
     /// Always `true`.
@@ -747,7 +747,7 @@ pub struct PagedResult<T> {
 }
 
 /// Request of `policy.reload`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct PolicyReloadRequest {
     /// Bypass the ETag cache.
@@ -790,7 +790,7 @@ pub struct ProfileAchievementsResponse {
 }
 
 /// Request of `session.end`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionEndRequest {
     /// End reason; defaults to `SessionEndReason.User`.
@@ -799,7 +799,7 @@ pub struct SessionEndRequest {
 }
 
 /// Request of `session.extend` and body of `POST /sessions/{id}/extend`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionExtendRequest {
     /// Minutes to add.
@@ -810,7 +810,7 @@ pub struct SessionExtendRequest {
 }
 
 /// Request of `session.lock`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionLockRequest {
     /// Free-text reason.
@@ -819,7 +819,7 @@ pub struct SessionLockRequest {
 }
 
 /// Request of `session.pause`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionPauseRequest {
     /// Free-text reason.
@@ -828,7 +828,7 @@ pub struct SessionPauseRequest {
 }
 
 /// Request of `session.start`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionStartRequest {
     /// Tariff.
@@ -841,7 +841,7 @@ pub struct SessionStartRequest {
 }
 
 /// Response of `session.timeLeft`; used for drift correction every 30 s. Never errors when idle.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTimeLeftResponse {
     /// Session state (`SessionState.Idle` when none).
@@ -862,7 +862,7 @@ pub struct SessionTimeLeftResponse {
 }
 
 /// Request of `session.unlock`; exactly one of the secrets is given.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionUnlockRequest {
     /// Account password.
@@ -874,7 +874,7 @@ pub struct SessionUnlockRequest {
 }
 
 /// Request of `sys.setVolume` and payload of the `setVolume` server command.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SetVolumeRequest {
     /// Volume 0–100.
@@ -885,7 +885,7 @@ pub struct SetVolumeRequest {
 }
 
 /// Request of `settings.set`; partial, at least one key.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsSetRequest {
     /// UI locale.
@@ -927,7 +927,7 @@ pub mod shell_capabilities {
 }
 
 /// Feature toggles exposed to the UI (`shell.json → features`).
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ShellFeatures {
     /// Shop.
@@ -989,7 +989,7 @@ pub struct ShopOrderRequest {
 }
 
 /// Request of `shop.orderStatus`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ShopOrderStatusRequest {
     /// Order id.
@@ -997,7 +997,7 @@ pub struct ShopOrderStatusRequest {
 }
 
 /// Request of `shop.orders`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ShopOrdersRequest {
     /// 1-based page.
@@ -1022,7 +1022,7 @@ pub struct ShopOrdersResponse {
 }
 
 /// Request of `shop.products`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ShopProductsRequest {
     /// Filter by category.
@@ -1042,7 +1042,7 @@ pub struct ShopProductsResponse {
 }
 
 /// Request of `sys.ackAdminMessage`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SysAckAdminMessageRequest {
     /// Id of the acknowledged `AdminMessage`.
@@ -1062,7 +1062,7 @@ pub struct SysCallAdminRequest {
 
 /// Response of `sys.callAdmin` and `POST /support/call-admin`. Offline: client-generated ticket id,
 /// `queuePosition``null`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SysCallAdminResponse {
     /// Ticket id.
@@ -1076,7 +1076,7 @@ pub struct SysCallAdminResponse {
 }
 
 /// Request of `sys.hardware`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SysHardwareRequest {
     /// Force a rescan instead of the cached inventory.
@@ -1085,7 +1085,7 @@ pub struct SysHardwareRequest {
 }
 
 /// Request of `sys.lockScreen`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SysLockScreenRequest {
     /// Free-text reason.
@@ -1110,7 +1110,7 @@ pub struct SysLogClientErrorRequest {
 }
 
 /// Request of `sys.ping`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SysPingRequest {
     /// Monotonic sequence number.
@@ -1121,7 +1121,7 @@ pub struct SysPingRequest {
 }
 
 /// Response (`sys.pong`) to `sys.ping`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SysPongResponse {
     /// Echoed sequence number.
@@ -1137,7 +1137,7 @@ pub struct SysPongResponse {
 }
 
 /// Request of `sys.reboot` / `sys.shutdown`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SysPowerRequest {
     /// Delay before the action.
@@ -1149,7 +1149,7 @@ pub struct SysPowerRequest {
 }
 
 /// Request of `sys.setLocale`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SysSetLocaleRequest {
     /// New locale.
@@ -1157,7 +1157,7 @@ pub struct SysSetLocaleRequest {
 }
 
 /// Response of `sys.setLocale`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SysSetLocaleResponse {
     /// Applied locale.
@@ -1197,7 +1197,7 @@ pub struct TariffsResponse {
 }
 
 /// Request of `tournaments.join`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TournamentsJoinRequest {
     /// Tournament id.
@@ -1205,7 +1205,7 @@ pub struct TournamentsJoinRequest {
 }
 
 /// Request of `tournaments.leaderboard`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TournamentsLeaderboardRequest {
     /// Tournament id.
@@ -1232,7 +1232,7 @@ pub struct TournamentsLeaderboardResponse {
 }
 
 /// Request of `tournaments.list`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct TournamentsListRequest {
     /// Filter by state.
@@ -1252,7 +1252,7 @@ pub struct TournamentsListResponse {
 }
 
 /// Response of `update.apply` and result of the `update` server command.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateApplyResponse {
     /// Whether the apply was scheduled.
@@ -1263,7 +1263,7 @@ pub struct UpdateApplyResponse {
 }
 
 /// Response of `sys.setVolume` and result of the `setVolume` server command.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct VolumeState {
     /// Applied volume.
@@ -1273,7 +1273,7 @@ pub struct VolumeState {
 }
 
 /// Request of `wallet.history` (and query of `GET /wallet/{userId}/transactions`).
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct WalletHistoryRequest {
     /// 1-based page.
@@ -1308,7 +1308,7 @@ pub struct WalletHistoryResponse {
 }
 
 /// Request of `wallet.tariffs`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct WalletTariffsRequest {
     /// Zone; defaults to this PC's zone.
@@ -1479,7 +1479,7 @@ pub struct CommandAck {
 }
 
 /// Payload of `ServerCommandType.EndSession`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct EndSessionCommand {
     /// Session to end.
@@ -1489,7 +1489,7 @@ pub struct EndSessionCommand {
 }
 
 /// Payload of `ServerCommandType.ExtendSession`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtendSessionCommand {
     /// Session to extend.
@@ -1501,7 +1501,7 @@ pub struct ExtendSessionCommand {
 }
 
 /// Payload of `AgentEventType.GameExited`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct GameExitedEvent {
     /// Session.
@@ -1520,7 +1520,7 @@ pub struct GameExitedEvent {
 }
 
 /// Payload of `AgentEventType.GameLaunched`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct GameLaunchedEvent {
     /// Session.
@@ -1570,7 +1570,7 @@ pub struct HeartbeatResponse {
 }
 
 /// Running game summary in a heartbeat.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct HeartbeatRunningGame {
     /// Game.
@@ -1624,7 +1624,7 @@ wire_enum! {
 }
 
 /// Payload of `ServerCommandType.KillGame`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct KillGameCommand {
     /// Game to kill.
@@ -1638,7 +1638,7 @@ pub struct KillGameCommand {
 }
 
 /// Payload of `ServerCommandType.Lock`; also `shell.command{lock}` args.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct LockCommand {
     /// Machine-readable reason.
@@ -1666,7 +1666,7 @@ pub struct MessageCommand {
 }
 
 /// Result of `ServerCommandType.Message`; a second ack is sent when the user acknowledges.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageDeliveryResult {
     /// When the Shell displayed it.
@@ -1678,7 +1678,7 @@ pub struct MessageDeliveryResult {
 }
 
 /// Payload of `AgentEventType.OfflineQueueFlushed`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct OfflineQueueFlushedEvent {
     /// Entries delivered.
@@ -1694,7 +1694,7 @@ pub struct OfflineQueueFlushedEvent {
 }
 
 /// Payload of `WsPushKind.PcStatusChanged`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PcStatusChangedPush {
     /// PC.
@@ -1717,7 +1717,7 @@ pub struct PowerCommand {
 }
 
 /// Payload of `ServerCommandType.RefreshConfig`; all flags `false`/absent = refresh everything.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct RefreshConfigCommand {
     /// Re-fetch `/agents/{pcId}/config`.
@@ -1749,7 +1749,7 @@ pub struct RefreshConfigResult {
 }
 
 /// Result of `ServerCommandType.ReloadPolicy`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ReloadPolicyResult {
     /// Policy version now in effect.
@@ -1773,7 +1773,7 @@ pub struct RemoteControlStartCommand {
 }
 
 /// Result of `ServerCommandType.RemoteControlStart`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteControlStartResult {
     /// Start time.
@@ -1790,7 +1790,7 @@ pub struct RemoteControlStopCommand {
 }
 
 /// Result of `ServerCommandType.RemoteControlStop`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteControlStopResult {
     /// Stop time.
@@ -1801,7 +1801,7 @@ pub struct RemoteControlStopResult {
 }
 
 /// Result of power commands and `sys.reboot`/`sys.shutdown`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ScheduledResult {
     /// When the action will run.
@@ -1826,7 +1826,7 @@ pub struct ScreenshotCommand {
 }
 
 /// Result of `ServerCommandType.Screenshot`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ScreenshotResult {
     /// Image width.
@@ -1954,7 +1954,7 @@ pub struct SessionResult {
 }
 
 /// Result of `ServerCommandType.SetPolicy`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SetPolicyResult {
     /// Policy version.
@@ -2038,7 +2038,7 @@ wire_enum! {
 }
 
 /// Request of `update.apply`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateApplyRequest {
     /// Component whose staged package to apply.

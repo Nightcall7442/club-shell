@@ -53,7 +53,7 @@ pub struct AdminMessage {
 }
 
 /// Payload of `auth.expired`; the Shell returns to the login screen.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthExpired {
     /// Why the user context was invalidated.
@@ -61,7 +61,7 @@ pub struct AuthExpired {
 }
 
 /// Payload of `sys.connectivity` (transitions + every 60 s).
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectivityEvent {
     /// Connectivity.

@@ -21,7 +21,7 @@ pub struct OrderItem {
 }
 
 /// Line of an order being placed (`shop.order` / `POST /shop/orders`).
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderLineRequest {
     /// Product id.

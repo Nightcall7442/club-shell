@@ -118,7 +118,7 @@ pub struct GpuInfo {
 }
 
 /// Kiosk UI policy.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct KioskPolicy {
     /// Idle lock timeout.
@@ -130,7 +130,7 @@ pub struct KioskPolicy {
 }
 
 /// Attached monitor.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MonitorInfo {
     /// Display index (0-based).
@@ -158,7 +158,7 @@ pub struct NetworkInfo {
 }
 
 /// Network throughput in Mbit/s.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkThroughput {
     /// Upload.
@@ -312,7 +312,7 @@ pub mod peripheral_kinds {
 }
 
 /// Power policy.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct PowerPolicy {
     /// Shut down after this many idle minutes; `null` = never.
@@ -334,7 +334,7 @@ pub struct ProcessAllowlistPolicy {
 }
 
 /// Server override pushed into `shell.json`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ShellConfigOverride {
     /// Default locale.
@@ -365,7 +365,7 @@ pub struct ShellReplacementPolicy {
 }
 
 /// Temperatures in °C; 0 when unavailable.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Temperatures {
     /// CPU package temperature.
@@ -378,7 +378,7 @@ pub struct Temperatures {
 
 /// One telemetry sample (IPC_PROTOCOL.md §6.7). Payload of `sys.metrics` and batched to `POST
 /// /agents/{pcId}/telemetry`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PcMetrics {
     /// CPU utilisation 0–100.
@@ -466,7 +466,7 @@ pub struct ThemeRef {
 }
 
 /// Daily local-time window (`HH:mm`); `to` < `from` wraps midnight.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TimeWindow {
     /// Start.
@@ -478,7 +478,7 @@ pub struct TimeWindow {
 }
 
 /// Server override of `agent.json → updates`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdatesConfigOverride {
     /// Channel.
@@ -539,7 +539,7 @@ pub struct AgentServerConfig {
 }
 
 /// Update policy (overrides `agent.json → updates`).
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdatesPolicy {
     /// Update channel.
@@ -549,7 +549,7 @@ pub struct UpdatesPolicy {
 }
 
 /// USB device policy.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UsbPolicy {
     /// Allow USB mass storage.

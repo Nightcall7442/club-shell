@@ -144,7 +144,7 @@ pub struct PolicyDeniedDetails {
 }
 
 /// `details` for `ErrorCode.RateLimited`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RateLimitDetails {
     /// Seconds the caller should wait before retrying.
