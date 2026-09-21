@@ -2866,7 +2866,7 @@ mod tests {
         assert_eq!(serde_json::to_string(&UpdateApplyRequest { component: UpdateComponent::Shell }).unwrap(), r#"{"component":"shell"}"#);
     }
 
-    const SAMPLE_MANIFEST_JSON: &str = r#"{"channel":"stable","component":"shell","version":"1.5.0","url":"https://u/shell-1.5.0.msi","sha256":"ab","size":52428800,"signature":"c2ln","releaseNotes":"# 1.5.0","mandatory":false,"publishedAt":"2026-09-21T03:00:00.000Z","minAgentVersion":"1.4.0"}"#;
+    const SAMPLE_MANIFEST_JSON: &str = r##"{"channel":"stable","component":"shell","version":"1.5.0","url":"https://u/shell-1.5.0.msi","sha256":"ab","size":52428800,"signature":"c2ln","releaseNotes":"# 1.5.0","mandatory":false,"publishedAt":"2026-09-21T03:00:00.000Z","minAgentVersion":"1.4.0"}"##;
 
     fn sample_manifest() -> UpdateManifest {
         UpdateManifest {

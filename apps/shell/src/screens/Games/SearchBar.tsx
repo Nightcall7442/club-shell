@@ -142,6 +142,9 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(function S
               type="button"
               data-nav="true"
               aria-label={t('common.clear')}
+              // Keep focus in the field: a blur here closes the on-screen keyboard, which reflows the
+              // layout between mousedown and mouseup and can swallow the click.
+              onMouseDown={(e) => e.preventDefault()}
               onClick={clear}
               className="focus-ring inline-flex h-9 w-9 items-center justify-center rounded-full text-muted hover:bg-text/10 hover:text-text"
             >

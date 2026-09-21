@@ -187,7 +187,7 @@ try {
 
     if ($Check) {
         Write-Step "Comparing with $TargetDir"
-        $drift = Compare-GeneratedTree -Generated $outDir -Committed $TargetDir
+        $drift = @(Compare-GeneratedTree -Generated $outDir -Committed $TargetDir)
         if ($drift.Count -gt 0) {
             Write-Host "`n$($drift.Count) generated file(s) differ from the committed TypeScript contracts." -ForegroundColor Red
             Write-Host 'Run .\tools\scripts\gen-contracts-ts.ps1 and commit packages/contracts-ts/src.' -ForegroundColor Yellow

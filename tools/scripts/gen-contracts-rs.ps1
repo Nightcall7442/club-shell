@@ -184,7 +184,7 @@ try {
 
     if ($Check) {
         Write-Step "Comparing with $TargetDir"
-        $drift = Compare-GeneratedTree -Generated $outDir -Committed $TargetDir
+        $drift = @(Compare-GeneratedTree -Generated $outDir -Committed $TargetDir)
         if ($drift.Count -gt 0) {
             Write-Host "`n$($drift.Count) generated file(s) differ from the committed Rust contracts." -ForegroundColor Red
             Write-Host 'Run .\tools\scripts\gen-contracts-rs.ps1 and commit crates/protocol/src.' -ForegroundColor Yellow

@@ -814,7 +814,7 @@ mod tests {
         let json = serde_json::to_string(&t).unwrap();
         assert_eq!(
             json,
-            r#"{"version":1,"name":"default","displayName":"ClubShell Default","colors":{"bg":"#0B0F1A","surface":"#141A2B","primary":"#3B82F6","accent":"#22D3EE","text":"#F3F4F6","muted":"#8B93A7","danger":"#EF4444","success":"#22C55E"},"radius":12,"font":"Inter","wallpaper":"themes/assets/default-wallpaper.jpg","blur":12,"animations":true}"#
+            r##"{"version":1,"name":"default","displayName":"ClubShell Default","colors":{"bg":"#0B0F1A","surface":"#141A2B","primary":"#3B82F6","accent":"#22D3EE","text":"#F3F4F6","muted":"#8B93A7","danger":"#EF4444","success":"#22C55E"},"radius":12,"font":"Inter","wallpaper":"themes/assets/default-wallpaper.jpg","blur":12,"animations":true}"##
         );
         let file_form = json.replace(r#""wallpaper""#, r#""backgroundVideo":null,"wallpaper""#);
         assert_eq!(serde_json::from_str::<Theme>(&file_form).unwrap(), t);

@@ -130,6 +130,11 @@ jobs:
 
       # .cargo/config.toml pins build.target to x86_64-pc-windows-msvc; on Linux only the portable
       # crates are checked for the host target (their cfg(not(windows)) stubs).
+      # Formatting is platform-independent; checked once on the cheap runner.
+      - name: cargo fmt
+        if: runner.os == 'Linux'
+        run: cargo fmt --all --check
+
       - name: cargo check (protocol + winutil, non-Windows stubs)
         if: runner.os == 'Linux'
         run: cargo check -p clubshell-protocol -p clubshell-winutil --all-targets --target x86_64-unknown-linux-gnu
@@ -141,10 +146,6 @@ jobs:
         with:
           name: web-dist
           path: apps/shell/dist
-
-      - name: cargo fmt
-        if: runner.os == 'Windows'
-        run: cargo fmt --all --check
 
       - name: cargo clippy
         if: runner.os == 'Windows'
