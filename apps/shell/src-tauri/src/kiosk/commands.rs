@@ -53,7 +53,7 @@ pub async fn kiosk_set_guard(
     kiosk: State<'_, Arc<Kiosk>>,
     active: bool,
 ) -> CmdResult<()> {
-    if !active && !(state.game_running() || state.has_admin_unlock()) {
+    if !(active || state.game_running() || state.has_admin_unlock()) {
         return Err(ShellError::forbidden(
             "disabling the guard needs a running game or an admin unlock",
         ));

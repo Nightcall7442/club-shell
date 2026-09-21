@@ -442,11 +442,11 @@ mod tests {
         assert_eq!(union_rect(&[]), None);
 
         assert_eq!(
-            change_reason(&[a.clone()], &list),
+            change_reason(std::slice::from_ref(&a), &list),
             MonitorChangeReason::Added
         );
         assert_eq!(
-            change_reason(&list, &[a.clone()]),
+            change_reason(&list, std::slice::from_ref(&a)),
             MonitorChangeReason::Removed
         );
         let dpi = [a.clone(), mon(1, b.rect, true, 1.5)];
