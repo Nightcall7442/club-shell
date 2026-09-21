@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 72" width="768" height="576">
+<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1c1c20"/><stop offset="1" stop-color="#0c0c0e"/></linearGradient></defs>
+<rect width="96" height="72" fill="url(#g)"/>
+<circle cx="48" cy="36" r="26" fill="none" stroke="#fff" stroke-opacity="0.1" stroke-width="3"/>
+<path d="M48 10 A26 26 0 1 1 32.72 14.97" fill="none" stroke="#f4f4f5" stroke-width="3" stroke-linecap="round"/>
+<text x="48" y="37" text-anchor="middle" dominant-baseline="middle" font-family="Inter, Segoe UI, system-ui, sans-serif" font-weight="800" font-size="15" fill="#fafafa">+180</text>
+<text x="48" y="48" text-anchor="middle" font-family="Inter, Segoe UI, system-ui, sans-serif" font-weight="600" font-size="5.5" letter-spacing="1" fill="#8e8e96">MIN</text>
+</svg>
