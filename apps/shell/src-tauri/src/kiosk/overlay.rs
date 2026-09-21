@@ -5,7 +5,9 @@
 //! (`kiosk_show_overlay`, `kiosk://overlay`; `TAURI_COMMANDS.md` §2.14/§3.2).
 //!
 //! Every `show` broadcasts `kiosk://overlay { kind, payload }` to all windows; the overlay route
-//! renders from it. Non-lock kinds are click-through so the game keeps receiving the mouse.
+//! renders from it. `lock` and `hud` take the mouse and keyboard; every other kind is click-through so
+//! the game keeps receiving input. `hud` is the player's in-game quick panel, toggled by the `hud`
+//! hotkey and auto-hidden after [`HUD_TTL`] as a backstop should the webview stop responding.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -28,6 +30,8 @@ pub const OVERLAY_EVENT: &str = "kiosk://overlay";
 /// Window label.
 pub const OVERLAY_LABEL: &str = "overlay";
 const OVERLAY_URL: &str = "index.html#/overlay";
+/// Backstop auto-hide of the HUD (the route hides itself sooner on inactivity).
+pub const HUD_TTL: Duration = Duration::from_secs(60);
 
 /// `kind` on the wire (`"none"` = hidden).
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,6 +40,7 @@ pub enum OverlayKind {
     Lock,
     Ads,
     Message,
+    Hud,
     #[serde(rename = "none")]
     Hidden,
 }
@@ -89,6 +94,20 @@ impl Overlay {
         self.kind() != OverlayKind::Hidden
     }
 
+    /// Kinds that take pointer and keyboard input (everything else is click-through).
+    const fn interactive(kind: OverlayKind) -> bool {
+        matches!(kind, OverlayKind::Lock | OverlayKind::Hud)
+    }
+
+    /// Hotkey: hides the HUD when it is up, shows it otherwise (any other overlay kind is replaced).
+    pub fn toggle_hud(self: &Arc<Self>) -> CmdResult<()> {
+        if self.kind() == OverlayKind::Hud {
+            self.hide()
+        } else {
+            self.show(OverlayKind::Hud, None, Some(HUD_TTL))
+        }
+    }
+
     /// Existing overlay window, if it was ever created.
     pub fn window(&self) -> Option<WebviewWindow> {
         self.app.get_webview_window(OVERLAY_LABEL)
@@ -134,11 +153,11 @@ impl Overlay {
             return self.hide();
         }
         let window = self.ensure_window()?;
-        window.set_ignore_cursor_events(kind != OverlayKind::Lock)?;
+        window.set_ignore_cursor_events(!Self::interactive(kind))?;
         apply_bounds(&window, *self.bounds.read())?;
         window.show()?;
         window.set_always_on_top(true)?;
-        if kind == OverlayKind::Lock {
+        if Self::interactive(kind) {
             let _ = window.set_focus();
         }
         *self.kind.lock() = kind;
@@ -235,6 +254,10 @@ mod tests {
     fn kind_wire_names() {
         assert_eq!(serde_json::to_value(OverlayKind::Hidden).unwrap(), "none");
         assert_eq!(serde_json::to_value(OverlayKind::Lock).unwrap(), "lock");
+        assert_eq!(serde_json::to_value(OverlayKind::Hud).unwrap(), "hud");
+        assert!(
+            Overlay::interactive(OverlayKind::Hud) && !Overlay::interactive(OverlayKind::Message)
+        );
         assert_eq!(
             serde_json::from_value::<OverlayKind>(serde_json::json!("message")).unwrap(),
             OverlayKind::Message

@@ -1239,6 +1239,9 @@
     "focusLost": "Boshqa oyna oldinda",
     "gameRunning": "O'yin ishlamoqda",
     "returnToShell": "ClubShell ga qaytish",
+    "hudTitle": "Tezkor panel",
+    "hudExtend": "+30 daqiqa",
+    "hudHint": "Esc — yopish · Ctrl+Shift+H — panel",
     "virtualKeyboard": {
       "title": "Ekran klaviaturasi",
       "shift": "Shift",

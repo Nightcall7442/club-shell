@@ -25,7 +25,7 @@ leaves the player inside a locked-down account.
 │  alt_tab.rs        TopmostGuard 250 ms + minimize_others                                          │
 │  window_guard.rs   fullscreen borderless, close prevention, refocus, stray-window sweep 3 s        │
 │  taskbar.rs        ShowWindow(SW_HIDE) / ABM_SETSTATE autohide, re-hide poll 5 s                  │
-│  overlay.rs        always-on-top overlay webview (lock, ads, toasts) — click-through except lock   │
+│  overlay.rs        always-on-top overlay webview (lock, ads, toasts, hud) — click-through except lock/hud │
 │  multi_monitor.rs  ads windows on secondary monitors, WM_DISPLAYCHANGE                            │
 │  idle_detector.rs  GetLastInputInfo ∧ ActivityFeed → kiosk://idle                                 │
 │  mod.rs            clip_cursor on lock, TabTip virtual keyboard, admin mode, kiosk_exit           │
@@ -99,6 +99,7 @@ Hotkeys (`default_hotkeys`):
 | `Ctrl+Alt+Shift+A` (`ADMIN_UNLOCK_CHORD`) | `exit` | yes | yes |
 | `F1` (`CALL_ADMIN_CHORD`) | `callAdmin` | yes | no |
 | `Ctrl+L` (`LOCK_CHORD`) | `lock` | yes | no |
+| `Ctrl+Shift+H` (`HUD_CHORD`) | `hud` | yes | yes — toggles the in-game quick panel natively (`Overlay::toggle_hud`), then forwarded |
 | media volume keys | `volumeUp` / `volumeDown` / `mute` | no | yes |
 | `F11` (dev only) | `devFullscreen` | yes | handled natively |
 

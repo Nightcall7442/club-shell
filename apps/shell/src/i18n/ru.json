@@ -1239,6 +1239,9 @@
     "focusLost": "Другое окно на переднем плане",
     "gameRunning": "Игра запущена",
     "returnToShell": "Вернуться в ClubShell",
+    "hudTitle": "Быстрая панель",
+    "hudExtend": "+30 мин",
+    "hudHint": "Esc — закрыть · Ctrl+Shift+H — панель",
     "virtualKeyboard": {
       "title": "Экранная клавиатура",
       "shift": "Shift",

@@ -351,7 +351,7 @@ export interface KioskMonitor extends MonitorInfo {
 }
 
 /** Native overlay kind. */
-export type OverlayKind = 'lock' | 'ads' | 'message' | 'none';
+export type OverlayKind = 'lock' | 'ads' | 'message' | 'hud' | 'none';
 
 /** Response of `kiosk_state`. */
 export interface KioskState {
@@ -406,7 +406,7 @@ export type GamepadButtonName =
 export type GamepadAxisName = 'leftX' | 'leftY' | 'rightX' | 'rightY' | 'lt' | 'rt';
 
 /** Hotkey names of `kiosk://hotkey`. */
-export type HotkeyName = 'exit' | 'callAdmin' | 'lock' | 'volumeUp' | 'volumeDown' | 'mute' | 'blocked';
+export type HotkeyName = 'exit' | 'callAdmin' | 'lock' | 'hud' | 'volumeUp' | 'volumeDown' | 'mute' | 'blocked';
 
 /** `shell.json` as returned by `settings_get_shell_config`. */
 export interface ShellConfig {

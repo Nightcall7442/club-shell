@@ -208,7 +208,12 @@ impl Kiosk {
                 taskbar.rehide();
             });
         }
-        let consumer = spawn_hotkey_consumer(app.clone(), Arc::clone(&kiosk.window), hotkey_rx);
+        let consumer = spawn_hotkey_consumer(
+            app.clone(),
+            Arc::clone(&kiosk.window),
+            Arc::clone(&kiosk.overlay),
+            hotkey_rx,
+        );
         kiosk.tasks.lock().push(consumer);
         tracing::info!(
             dev,
@@ -564,10 +569,12 @@ impl KioskControl for Kiosk {
     }
 }
 
-/// Hotkey channel → `kiosk://hotkey` (dev fullscreen toggle handled natively).
+/// Hotkey channel → `kiosk://hotkey` (dev fullscreen toggle handled natively; `hud` toggles the overlay
+/// natively as well, so the panel comes up even while the main webview is busy).
 fn spawn_hotkey_consumer(
     app: AppHandle,
     window: Arc<WindowGuard>,
+    overlay: Arc<Overlay>,
     mut rx: mpsc::UnboundedReceiver<keyboard_hook::HotkeyEvent>,
 ) -> JoinHandle<()> {
     tauri::async_runtime::spawn(async move {
@@ -581,6 +588,11 @@ fn spawn_hotkey_consumer(
             match event.kind {
                 HotkeyKind::Blocked => tracing::debug!(combo = %event.combo, "blocked chord"),
                 kind => tracing::info!(name = kind.wire_name(), combo = %event.combo, "hotkey"),
+            }
+            if event.kind == HotkeyKind::Hud {
+                if let Err(e) = overlay.toggle_hud() {
+                    tracing::warn!(error = %e, "hud toggle failed");
+                }
             }
             let payload = HotkeyPayload {
                 name: event.kind.wire_name(),

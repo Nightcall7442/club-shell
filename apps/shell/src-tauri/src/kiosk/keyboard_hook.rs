@@ -32,6 +32,8 @@ pub const ADMIN_UNLOCK_CHORD: &str = "Ctrl+Alt+Shift+A";
 pub const CALL_ADMIN_CHORD: &str = "F1";
 /// `lock` hotkey (Shell UI only).
 pub const LOCK_CHORD: &str = "Ctrl+L";
+/// `hud` hotkey: toggles the in-game quick panel (time, balance, extend, call admin); works while a game runs.
+pub const HUD_CHORD: &str = "Ctrl+Shift+H";
 /// Dev-mode fullscreen toggle, handled natively (never emitted).
 pub const DEV_FULLSCREEN_CHORD: &str = "F11";
 
@@ -53,6 +55,8 @@ pub enum HotkeyKind {
     VolumeUp,
     VolumeDown,
     Mute,
+    /// Toggle the in-game HUD overlay (handled natively, also forwarded).
+    Hud,
     /// A policy-blocked chord was suppressed.
     Blocked,
     /// Dev only: toggles the main window's fullscreen state in Rust.
@@ -69,6 +73,7 @@ impl HotkeyKind {
             Self::VolumeUp => "volumeUp",
             Self::VolumeDown => "volumeDown",
             Self::Mute => "mute",
+            Self::Hud => "hud",
             Self::Blocked => "blocked",
             Self::DevFullscreen => "devFullscreen",
         }
@@ -79,6 +84,7 @@ impl HotkeyKind {
         matches!(
             self,
             Self::Exit
+                | Self::Hud
                 | Self::VolumeUp
                 | Self::VolumeDown
                 | Self::Mute
@@ -136,6 +142,7 @@ pub fn default_hotkeys(kiosk: &KioskConfig, dev: bool) -> Vec<Hotkey> {
     add(HotkeyKind::Exit, ADMIN_UNLOCK_CHORD, true);
     add(HotkeyKind::CallAdmin, CALL_ADMIN_CHORD, true);
     add(HotkeyKind::Lock, LOCK_CHORD, true);
+    add(HotkeyKind::Hud, HUD_CHORD, true);
     add(HotkeyKind::VolumeUp, VK_VOLUME_UP, false);
     add(HotkeyKind::VolumeDown, VK_VOLUME_DOWN, false);
     add(HotkeyKind::Mute, VK_VOLUME_MUTE, false);
@@ -600,6 +607,10 @@ mod tests {
             .all(|h| h.kind != HotkeyKind::DevFullscreen));
         assert_eq!(HotkeyKind::CallAdmin.wire_name(), "callAdmin");
         assert!(HotkeyKind::Exit.allowed_in_game() && !HotkeyKind::Lock.allowed_in_game());
+        assert!(HotkeyKind::Hud.allowed_in_game() && HotkeyKind::Hud.wire_name() == "hud");
+        assert!(hotkeys
+            .iter()
+            .any(|h| h.kind == HotkeyKind::Hud && h.consume));
     }
 
     #[test]

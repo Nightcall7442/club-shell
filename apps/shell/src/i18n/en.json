@@ -1239,6 +1239,9 @@
     "focusLost": "Another window is in front",
     "gameRunning": "Game running",
     "returnToShell": "Return to ClubShell",
+    "hudTitle": "Quick panel",
+    "hudExtend": "+30 min",
+    "hudHint": "Esc — close · Ctrl+Shift+H — panel",
     "virtualKeyboard": {
       "title": "On-screen keyboard",
       "shift": "Shift",

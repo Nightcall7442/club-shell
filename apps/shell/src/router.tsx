@@ -18,6 +18,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { useKioskEvent } from '@/hooks/useTauriEvent';
 import { api, type OverlayKind } from '@/lib/tauri';
 import { AdsCarousel, type AdItem } from '@/screens/Idle/AdsCarousel';
+import { HudScreen } from '@/screens/Overlay/HudScreen';
 import { useAuthStore } from '@/store/auth';
 import { selectHasSession, selectIsLocked, useSessionStore } from '@/store/session';
 import { useSettingsStore } from '@/store/settings';
@@ -274,7 +275,8 @@ export function OverlayScreen(): JSX.Element | null {
   }, []);
 
   useKioskEvent('overlay', (e) => {
-    const kind: OverlayKind = e.kind === 'lock' || e.kind === 'ads' || e.kind === 'message' ? e.kind : 'none';
+    const kind: OverlayKind =
+      e.kind === 'lock' || e.kind === 'ads' || e.kind === 'message' || e.kind === 'hud' ? e.kind : 'none';
     setState({ kind, payload: e.payload });
   });
 
@@ -310,6 +312,10 @@ export function OverlayScreen(): JSX.Element | null {
         </div>
       </div>
     );
+  }
+
+  if (state.kind === 'hud') {
+    return <HudScreen onClose={() => void api.kiosk.showOverlay('none')} />;
   }
 
   if (state.kind === 'ads') {

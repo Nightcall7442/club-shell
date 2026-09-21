@@ -265,7 +265,7 @@ the React `AdsScreen`.
 | `kiosk://themeChanged` | `Theme` | after `settings_set{theme}` or theme file change |
 | `kiosk://localeChanged` | `{ locale: Locale }` | after `settings_set{locale}` / `sys_set_locale` |
 | `kiosk://focus` | `{ hasFocus: boolean; foregroundProcess?: string }` | Shell window gained/lost foreground (game running) |
-| `kiosk://overlay` | `{ kind: "lock" \| "ads" \| "message" \| "none" }` | native overlay shown/hidden |
+| `kiosk://overlay` | `{ kind: "lock" \| "ads" \| "message" \| "hud" \| "none" }` | native overlay shown/hidden; `hud` = the in-game quick panel (time, balance, +30 min, call admin, back to shell), interactive, hidden by Esc / click outside / 15 s idle / 60 s backstop |
 
 ---
 

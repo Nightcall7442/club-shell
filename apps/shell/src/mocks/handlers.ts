@@ -1870,7 +1870,7 @@ cmd(
   'kiosk_show_overlay',
   (args): null => {
     const kind = str(args, 'kind');
-    if (kind !== 'lock' && kind !== 'ads' && kind !== 'message' && kind !== 'none') {
+    if (kind !== 'lock' && kind !== 'ads' && kind !== 'message' && kind !== 'hud' && kind !== 'none') {
       mockError('validation', 'Unknown overlay kind', { field: 'kind', reason: 'format' });
     }
     mockState.kiosk.overlay = kind;
