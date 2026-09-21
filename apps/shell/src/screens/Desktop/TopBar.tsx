@@ -33,12 +33,6 @@ const svgProps = {
   'aria-hidden': true,
 } as const;
 
-const IconWallet = (): JSX.Element => (
-  <svg {...svgProps}>
-    <path d="M3 7a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v2H5a2 2 0 0 1-2-2Zm0 0v10a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-7a1 1 0 0 0-1-1H5" />
-    <circle cx="16" cy="14" r="1.2" fill="currentColor" stroke="none" />
-  </svg>
-);
 const IconVolume = ({ muted }: { muted: boolean }): JSX.Element => (
   <svg {...svgProps}>
     <path d="M4 10v4h3l5 4V6L7 10H4Z" />
@@ -264,12 +258,10 @@ export function LocaleSwitch(): JSX.Element {
           aria-label={`${t('desktop.language')}: ${names[locale]}`}
           aria-haspopup="listbox"
           aria-expanded={open}
+          iconOnly
           icon={<IconGlobe />}
           onClick={() => setOpen((v) => !v)}
-          className="uppercase"
-        >
-          {locale}
-        </Button>
+        />
       }
     >
       <ul role="listbox" aria-label={t('desktop.language')} className="flex flex-col gap-1">
@@ -382,7 +374,7 @@ export function TopBar(): JSX.Element {
           <div className="truncate text-[0.7rem] font-bold uppercase tracking-[0.18em] text-text/80">
             {t('idle.clubName')}
           </div>
-          <div className="truncate text-sm text-muted">{pc ? `${pc.name} · ${pc.zone}` : t('common.loading')}</div>
+          <div className="truncate text-xs text-muted">{pc ? pc.name : t('common.loading')}</div>
         </div>
       </div>
 
@@ -392,30 +384,22 @@ export function TopBar(): JSX.Element {
       {/* Right: balance, user + countdown, status, clock, controls */}
       <div className="flex shrink-0 items-center justify-end gap-1.5">
         {user && (
-          <Button
-            variant="ghost"
-            icon={<IconWallet />}
-            aria-label={`${t('desktop.balance')}: ${formatMoney(user.balance, locale)}`}
-            onClick={() => navigate('/wallet')}
-            className="tnum rounded-full"
-          >
-            {formatMoney(user.balance, locale)}
-          </Button>
-        )}
-        {user && (
           <button
             type="button"
             data-nav="true"
-            aria-label={`${t('desktop.userMenu')}: ${user.displayName}`}
+            aria-label={`${t('desktop.userMenu')}: ${user.displayName}. ${t('desktop.balance')}: ${formatMoney(user.balance, locale)}`}
             disabled={!features.profile}
             onClick={() => navigate('/profile')}
-            className="focus-ring flex h-11 items-center gap-2 rounded-full pl-1 pr-3 transition-colors duration-[var(--dur-fast)] hover:bg-text/10 disabled:cursor-default disabled:hover:bg-transparent"
+            className="focus-ring flex h-11 items-center gap-2.5 rounded-full pl-1 pr-3 transition-colors duration-[var(--dur-fast)] hover:bg-text/10 disabled:cursor-default disabled:hover:bg-transparent"
           >
             <Avatar name={user.displayName} src={user.avatarUrl ?? null} size="sm" ring={user.role === 'vip'} />
-            <span className="hidden max-w-[10rem] truncate text-base font-semibold text-text 2xl:inline">
-              {user.displayName}
+            <span className="hidden min-w-0 flex-col items-start leading-tight 2xl:flex">
+              <span className="flex items-center gap-1.5">
+                <span className="max-w-[10rem] truncate text-sm font-semibold text-text">{user.displayName}</span>
+                {roleBadge}
+              </span>
+              <span className="tnum text-xs text-muted">{formatMoney(user.balance, locale)}</span>
             </span>
-            {roleBadge}
           </button>
         )}
         <SessionTimer compact />

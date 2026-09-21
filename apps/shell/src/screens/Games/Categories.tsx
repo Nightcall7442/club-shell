@@ -93,7 +93,7 @@ export function Categories({
   ];
 
   return (
-    <div className={clsx('flex min-w-0 flex-wrap items-center gap-3', className)}>
+    <div className={clsx('flex min-w-0 items-center gap-3', className)}>
       <div
         role="group"
         aria-label={t('games.categories')}
@@ -122,16 +122,16 @@ export function Categories({
         })}
       </div>
       <Button
-        variant={installedOnly ? 'primary' : 'secondary'}
+        variant={installedOnly ? 'primary' : 'ghost'}
         size="md"
         aria-pressed={installedOnly}
         icon={installedOnly ? <CheckIcon /> : undefined}
         onClick={() => onInstalledOnlyChange(!installedOnly)}
-        className="rounded-full"
+        className="shrink-0 rounded-full text-sm"
       >
         {t('games.installedOnly')}
       </Button>
-      <div role="group" aria-label={t('games.sort')} className="glass flex items-center gap-1 rounded-full p-1">
+      <div role="group" aria-label={t('games.sort')} className="flex shrink-0 items-center gap-1 rounded-full p-1">
         {SORTS.map((s) => {
           const active = s.key === sort;
           return (

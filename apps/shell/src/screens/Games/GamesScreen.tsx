@@ -113,9 +113,10 @@ export default function GamesScreen(): JSX.Element {
         onDetails={openDetails}
         onKill={(g) => void closeGame(g)}
         autoFocus
+        compact
       />
 
-      <div className="flex flex-wrap items-center gap-[var(--gap)]">
+      <div className="flex items-center gap-[var(--gap)]">
         <Categories
           className="min-w-0 flex-1"
           categories={categories}
@@ -128,7 +129,7 @@ export default function GamesScreen(): JSX.Element {
         />
         <SearchBar
           ref={searchRef}
-          className="w-[clamp(240px,22vw,440px)]"
+          className="!w-[clamp(220px,18vw,360px)]"
           value={filters.search}
           onChange={(search) => setFilters({ search })}
           onSubmit={() => focusGameCard(null, gridRef.current ?? document)}
@@ -136,11 +137,9 @@ export default function GamesScreen(): JSX.Element {
       </div>
 
       <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <h2 className="text-2xl font-bold text-text">
+        <h2 className="text-base font-semibold text-muted">
           {t('games.title')}
-          <span className="ml-3 text-base font-medium text-muted">
-            {loading ? '' : pluralize('games', games.length)}
-          </span>
+          <span className="ml-2 font-normal">{loading ? '' : pluralize('games', games.length)}</span>
         </h2>
         <div className="flex items-center gap-3 text-sm text-muted">
           {filters.installedOnly && <span>{t('games.installedFilterOn')}</span>}

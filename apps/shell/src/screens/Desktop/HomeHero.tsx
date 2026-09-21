@@ -20,34 +20,21 @@ import { useLocale } from '@/hooks/useLocale';
 import { useSession } from '@/hooks/useSession';
 import { tiltHandlers } from '@/hooks/useTilt';
 import { whoosh } from '@/lib/sound';
-import { formatGb, formatMoney } from '@/lib/format';
+import { formatMoney } from '@/lib/format';
 import { log } from '@/lib/logger';
 import { api } from '@/lib/tauri';
 import { serverNow, toDateKey } from '@/lib/time';
 import { categoryLabel } from '@/screens/Games/Categories';
 import { launcherLabelKey } from '@/screens/Games/GameCard';
-import { antiCheatLabel } from '@/screens/Games/GameHero';
 import { launchGame } from '@/screens/Games/LaunchOverlay';
-import { QuickActions } from '@/screens/Desktop/QuickActions';
 import { ExtendSessionModal, Ring, timerLabel, type RingProps } from '@/screens/Desktop/SessionTimer';
 import { selectFeaturedGames, selectRecentGames, useGamesStore } from '@/store/games';
 import { useNotificationsStore } from '@/store/notifications';
 import { selectFeatures, useSettingsStore } from '@/store/settings';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
-import { selectTariff, useWalletStore } from '@/store/wallet';
+import { useWalletStore } from '@/store/wallet';
 
 const STRIP_MAX = 6;
-
-/** Greeting key by local hour. */
-export function greetingKey(
-  hour: number,
-): 'desktop.greetingMorning' | 'desktop.greetingDay' | 'desktop.greetingEvening' | 'desktop.greetingNight' {
-  if (hour < 5) return 'desktop.greetingNight';
-  if (hour < 12) return 'desktop.greetingMorning';
-  if (hour < 18) return 'desktop.greetingDay';
-  if (hour < 23) return 'desktop.greetingEvening';
-  return 'desktop.greetingNight';
-}
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Icons
@@ -85,11 +72,6 @@ const GridIcon = (): JSX.Element => (
     <rect x="14" y="3" width="7" height="7" rx="1.5" />
     <rect x="3" y="14" width="7" height="7" rx="1.5" />
     <rect x="14" y="14" width="7" height="7" rx="1.5" />
-  </svg>
-);
-const ArrowIcon = (): JSX.Element => (
-  <svg {...svgProps}>
-    <path d="M5 12h14M13 6l6 6-6 6" />
   </svg>
 );
 
@@ -134,7 +116,7 @@ function PosterTile({
         <motion.span
           layoutId="home-strip-ring"
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 rounded-lg border-glow"
+          className="pointer-events-none absolute inset-0 rounded-lg [box-shadow:inset_0_0_0_2px_rgb(var(--c-primary)/0.95)]"
           transition={animations ? { type: 'spring', stiffness: 480, damping: 40, mass: 0.7 } : { duration: 0 }}
         />
       )}
@@ -156,10 +138,14 @@ function Widget({ children, className }: { children: ReactNode; className?: stri
   return <div className={clsx('glass-strong rounded-2xl p-4', className)}>{children}</div>;
 }
 
+/** Time left and balance in one card: the two numbers a player checks, with one action each. */
 function SessionWidget(): JSX.Element {
   const { t } = useTranslation();
+  const { locale } = useLocale();
+  const navigate = useNavigate();
   const s = useSession();
-  const tariff = useWalletStore(selectTariff(s.tariffId));
+  const wallet = useWalletStore((w) => w.balance?.amount ?? null);
+  const balance = wallet ?? s.user?.balance ?? null;
   const [open, setOpen] = useState(false);
 
   const total = s.secondsUsed + Math.max(0, s.secondsLeft);
@@ -173,59 +159,36 @@ function SessionWidget(): JSX.Element {
   return (
     <Widget>
       <div className="flex items-center gap-4">
-        <div className="relative flex items-center justify-center">
-          <Ring progress={left} size={72} stroke={6} tone={tone} label={t('session.timerLabel')} valueText={label} />
-          <span className="tnum absolute text-xs font-bold text-muted" aria-hidden="true">
-            {s.isOpen && !s.isOpenEnded ? `${Math.round(left * 100)}%` : '∞'}
-          </span>
-        </div>
+        <Ring progress={left} size={64} stroke={5} tone={tone} label={t('session.timerLabel')} valueText={label} />
         <div className="min-w-0 flex-1">
-          <div className="text-xs font-semibold uppercase tracking-wide text-muted">{caption}</div>
+          <div className="text-xs text-muted">{caption}</div>
           <div
             className={clsx(
-              'tnum text-3xl font-bold leading-tight',
+              'tnum text-2xl font-bold leading-tight',
               s.isCritical ? 'timer-critical' : s.isWarning ? 'timer-warning' : 'text-text',
             )}
           >
             {label}
           </div>
-          {tariff && <div className="truncate text-sm text-muted">{tariff.name}</div>}
         </div>
+        {balance && (
+          <div className="shrink-0 text-right">
+            <div className="text-xs text-muted">{t('desktop.balance')}</div>
+            <div className="tnum text-base font-bold leading-tight text-text">{formatMoney(balance, locale)}</div>
+          </div>
+        )}
       </div>
-      {canExtend && (
-        <Button variant="secondary" size="md" block className="mt-3" onClick={() => setOpen(true)}>
-          {t('session.extend')}
+      <div className="mt-4 flex gap-2">
+        {canExtend && (
+          <Button variant="secondary" size="md" block onClick={() => setOpen(true)}>
+            {t('session.extend')}
+          </Button>
+        )}
+        <Button variant="primary" size="md" block onClick={() => navigate('/wallet')}>
+          {t('desktop.topUp')}
         </Button>
-      )}
+      </div>
       <ExtendSessionModal open={open} onClose={() => setOpen(false)} />
-    </Widget>
-  );
-}
-
-function WalletWidget(): JSX.Element | null {
-  const { t } = useTranslation();
-  const { locale } = useLocale();
-  const navigate = useNavigate();
-  const { user } = useSession();
-  const wallet = useWalletStore((s) => s.balance?.amount ?? null);
-  const balance = wallet ?? user?.balance ?? null;
-  if (!balance) {
-    return null;
-  }
-  return (
-    <Widget>
-      <div className="text-xs font-semibold uppercase tracking-wide text-muted">{t('desktop.balance')}</div>
-      <div className="tnum truncate text-3xl font-bold leading-tight text-text">{formatMoney(balance, locale)}</div>
-      <Button
-        variant="primary"
-        size="md"
-        block
-        iconRight={<ArrowIcon />}
-        className="mt-3"
-        onClick={() => navigate('/wallet')}
-      >
-        {t('desktop.topUp')}
-      </Button>
     </Widget>
   );
 }
@@ -264,7 +227,7 @@ function BookingWidget(): JSX.Element {
 
   return (
     <Widget>
-      <div className="text-xs font-semibold uppercase tracking-wide text-muted">{t('desktop.nav.booking')}</div>
+      <div className="text-xs text-muted">{t('desktop.nav.booking')}</div>
       <div className="text-xl font-bold leading-tight text-text">
         {seats === null ? <Skeleton variant="text" width="8rem" /> : t('booking.freeSeats', { count: free })}
       </div>
@@ -275,14 +238,7 @@ function BookingWidget(): JSX.Element {
           ))}
         </div>
       )}
-      <Button
-        variant="secondary"
-        size="md"
-        block
-        iconRight={<ArrowIcon />}
-        className="mt-3"
-        onClick={() => navigate('/booking')}
-      >
+      <Button variant="secondary" size="md" block className="mt-4" onClick={() => navigate('/booking')}>
         {t('booking.reserve')}
       </Button>
     </Widget>
@@ -295,9 +251,7 @@ function BookingWidget(): JSX.Element {
 
 export function HomeHero(): JSX.Element {
   const { t } = useTranslation();
-  const { locale } = useLocale();
   const navigate = useNavigate();
-  const { user } = useSession();
   const features = useSettingsStore(selectFeatures);
   const animations = useThemeStore(selectAnimationsEnabled);
   const status = useGamesStore((s) => s.status);
@@ -331,7 +285,6 @@ export function HomeHero(): JSX.Element {
   const isRunning = hero !== null && running.some((r) => r.gameId === hero.id);
   const isLaunching = hero !== null && launching?.gameId === hero.id;
   const loading = status === 'loading' && strip.length === 0;
-  const duration = animations ? 0.25 : 0;
   const { url: artUrl } = useResolvedAsset(hero ? (hero.heroUrl ?? hero.coverUrl) : null);
   const tint = useImageTint(artUrl);
 
@@ -400,14 +353,10 @@ export function HomeHero(): JSX.Element {
     }
   };
 
-  const greeting = t(greetingKey(new Date().getHours()), { name: user?.displayName ?? '' });
-
   const chips = hero
     ? [
         { key: 'launcher', label: t(launcherLabelKey(hero.launcher)) },
-        ...(hero.antiCheat !== 'none' ? [{ key: 'ac', label: antiCheatLabel(hero.antiCheat) }] : []),
-        { key: 'size', label: formatGb(hero.sizeGb, locale) },
-        ...hero.category.slice(0, 2).map((c) => ({ key: `cat-${c}`, label: categoryLabel(t, c) })),
+        ...hero.category.slice(0, 1).map((c) => ({ key: `cat-${c}`, label: categoryLabel(t, c) })),
       ]
     : [];
 
@@ -505,18 +454,11 @@ export function HomeHero(): JSX.Element {
         className="absolute right-[var(--gutter)] top-[calc(var(--topbar-h)+var(--gap))] z-10 hidden w-[clamp(17rem,19vw,22rem)] flex-col gap-3 2xl:flex"
       >
         <SessionWidget />
-        {features.topup && <WalletWidget />}
         {features.booking && <BookingWidget />}
       </aside>
 
       {/* Title block; the pill row below it may run wider than the text column. */}
       <div className="absolute inset-x-[var(--gutter)] bottom-[var(--gap)] z-10 flex flex-col gap-4 transition-transform duration-[900ms] ease-[var(--ease-out)] [transform:translate3d(calc(var(--px)*0.35%),calc(var(--py)*0.25%),0)] [&>*:not(:last-child)]:max-w-[min(64%,64rem)] 2xl:[&>*:not(:last-child)]:max-w-[min(56%,64rem)]">
-        <p className="text-base font-medium text-text/70">
-          {greeting}
-          <span className="mx-2 text-text/30">·</span>
-          {t('desktop.welcomeBack')}
-        </p>
-
         {loading && (
           <div className="flex flex-col gap-3">
             <Skeleton variant="text" width="60%" height="3.5rem" />
@@ -586,11 +528,6 @@ export function HomeHero(): JSX.Element {
                     </li>
                   ))}
                 </motion.ul>
-                {hero.description && (
-                  <motion.p variants={line} className="line-clamp-2 max-w-[44rem] text-lg leading-snug text-text/80">
-                    {hero.description}
-                  </motion.p>
-                )}
               </motion.div>
             </AnimatePresence>
 
@@ -620,14 +557,12 @@ export function HomeHero(): JSX.Element {
                   {isLaunching ? t('games.launching') : t('games.playNow')}
                 </Button>
               )}
-              <Button variant="secondary" size="xl" icon={<InfoIcon />} onClick={() => navigate(`/games/${hero.id}`)}>
+              <Button variant="ghost" size="xl" icon={<InfoIcon />} onClick={() => navigate(`/games/${hero.id}`)}>
                 {t('games.details')}
               </Button>
             </div>
           </>
         )}
-
-        <QuickActions compact className="mt-2" />
       </div>
 
       <Modal

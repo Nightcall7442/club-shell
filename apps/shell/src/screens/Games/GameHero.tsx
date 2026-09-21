@@ -31,6 +31,8 @@ export interface GameHeroProps {
   size?: HeroSize;
   /** Focus the primary action once, when the first game is shown (initial focus of the screen). */
   autoFocus?: boolean;
+  /** Catalogue banner: launcher + one genre, no description (the details page carries the rest). */
+  compact?: boolean;
   onPlay: (game: Game) => void;
   onDetails?: (game: Game) => void;
   /** Called after the user confirms closing the running game. */
@@ -90,6 +92,7 @@ export function GameHero({
   showDetails = true,
   size = 'md',
   autoFocus = false,
+  compact = false,
   onPlay,
   onDetails,
   onKill,
@@ -129,21 +132,34 @@ export function GameHero({
     );
   }
 
-  const chips: { key: string; label: string; tone: 'neutral' | 'primary' | 'accent' | 'muted' }[] = [
-    { key: 'launcher', label: t(launcherLabelKey(game.launcher)), tone: 'neutral' },
-    ...(game.antiCheat !== 'none'
-      ? [{ key: 'ac', label: `${t('games.antiCheat')}: ${antiCheatLabel(game.antiCheat)}`, tone: 'accent' as const }]
-      : []),
-    { key: 'size', label: formatGb(game.sizeGb, locale), tone: 'muted' },
-    {
-      key: 'age',
-      label: game.ageRating > 0 ? t('games.ageRating', { age: game.ageRating }) : t('games.ageRatingAll'),
-      tone: game.ageRating >= 18 ? 'primary' : 'muted',
-    },
-    ...game.category
-      .slice(0, 2)
-      .map((c) => ({ key: `cat-${c}`, label: categoryLabel(t, c), tone: 'neutral' as const })),
-  ];
+  const chips: { key: string; label: string; tone: 'neutral' | 'primary' | 'accent' | 'muted' }[] = compact
+    ? [
+        { key: 'launcher', label: t(launcherLabelKey(game.launcher)), tone: 'neutral' },
+        ...game.category
+          .slice(0, 1)
+          .map((c) => ({ key: `cat-${c}`, label: categoryLabel(t, c), tone: 'neutral' as const })),
+      ]
+    : [
+        { key: 'launcher', label: t(launcherLabelKey(game.launcher)), tone: 'neutral' },
+        ...(game.antiCheat !== 'none'
+          ? [
+              {
+                key: 'ac',
+                label: `${t('games.antiCheat')}: ${antiCheatLabel(game.antiCheat)}`,
+                tone: 'accent' as const,
+              },
+            ]
+          : []),
+        { key: 'size', label: formatGb(game.sizeGb, locale), tone: 'muted' },
+        {
+          key: 'age',
+          label: game.ageRating > 0 ? t('games.ageRating', { age: game.ageRating }) : t('games.ageRatingAll'),
+          tone: game.ageRating >= 18 ? 'primary' : 'muted',
+        },
+        ...game.category
+          .slice(0, 2)
+          .map((c) => ({ key: `cat-${c}`, label: categoryLabel(t, c), tone: 'neutral' as const })),
+      ];
 
   return (
     <section
@@ -210,13 +226,19 @@ export function GameHero({
             )}
             {chips.map((c) => (
               <li key={c.key}>
-                <Badge tone={c.tone} size="md">
+                <Badge
+                  tone={c.tone}
+                  size="md"
+                  className={c.tone === 'neutral' ? 'bg-text/[0.08] text-text/85' : undefined}
+                >
                   {c.label}
                 </Badge>
               </li>
             ))}
           </ul>
-          {game.description && <p className="line-clamp-2 max-w-[48rem] text-base text-text/80">{game.description}</p>}
+          {!compact && game.description && (
+            <p className="line-clamp-2 max-w-[48rem] text-base text-text/80">{game.description}</p>
+          )}
         </motion.div>
         <div className="mt-1 flex flex-wrap items-center gap-3">
           {running ? (

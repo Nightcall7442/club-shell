@@ -122,7 +122,7 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(function S
   };
 
   return (
-    <div role="search" className={clsx('w-full', className)}>
+    <div role="search" className={clsx('w-full shrink-0', className)}>
       <Input
         ref={ref}
         type="search"
