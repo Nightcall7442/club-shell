@@ -46,7 +46,11 @@ export function PcInfoBadge({ hideMetrics = false, className }: PcInfoBadgeProps
   }, [metrics, hideMetrics, setMetrics]);
 
   const tone = !agentConnected ? 'danger' : serverOnline ? 'success' : 'accent';
-  const linkLabel = !agentConnected ? t('lock.agentOffline') : serverOnline ? t('lock.agentOnline') : t('lock.serverOffline');
+  const linkLabel = !agentConnected
+    ? t('lock.agentOffline')
+    : serverOnline
+      ? t('lock.agentOnline')
+      : t('lock.serverOffline');
   const pc = pcInfo?.pc ?? null;
 
   return (
@@ -64,7 +68,15 @@ export function PcInfoBadge({ hideMetrics = false, className }: PcInfoBadgeProps
             data-nav="true"
             className="focus-ring inline-flex h-6 w-6 items-center justify-center rounded-full"
           >
-            <span aria-hidden="true" className={clsx('h-3 w-3 rounded-full', tone === 'success' && 'bg-success', tone === 'accent' && 'bg-accent', tone === 'danger' && 'bg-danger anim-live-dot')} />
+            <span
+              aria-hidden="true"
+              className={clsx(
+                'h-3 w-3 rounded-full',
+                tone === 'success' && 'bg-success',
+                tone === 'accent' && 'bg-accent',
+                tone === 'danger' && 'bg-danger anim-live-dot',
+              )}
+            />
           </span>
         </Tooltip>
         <span className="text-lg font-bold text-text">{pc?.name ?? t('lock.pc')}</span>
@@ -75,7 +87,9 @@ export function PcInfoBadge({ hideMetrics = false, className }: PcInfoBadgeProps
         )}
       </div>
       {pcInfo && (
-        <p className="tnum">{t('lock.version', { shell: shellVersion ?? pcInfo.shellVersion, agent: pcInfo.agentVersion })}</p>
+        <p className="tnum">
+          {t('lock.version', { shell: shellVersion ?? pcInfo.shellVersion, agent: pcInfo.agentVersion })}
+        </p>
       )}
       {!hideMetrics && metrics && (
         <p className="tnum flex flex-wrap gap-x-4 gap-y-1">

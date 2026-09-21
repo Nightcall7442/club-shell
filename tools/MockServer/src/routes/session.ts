@@ -84,7 +84,8 @@ export function endSession(s: SessionRecord, reason: SessionEndReason, nowMs = D
   } else if (tariff && user) {
     charged = tariffPriceFor(tariff, Math.ceil(used / 60));
     s.paidAmount = charged;
-    if (charged.amount > 0) applyTransaction(user, 'charge', uzs(-charged.amount), `Session ${tariff.name} (postpaid)`, s.id);
+    if (charged.amount > 0)
+      applyTransaction(user, 'charge', uzs(-charged.amount), `Session ${tariff.name} (postpaid)`, s.id);
     record(s.id, 'charged', { amount: charged });
   }
   const pc = findPc(s.pcId);
@@ -148,20 +149,33 @@ export function sessionRoutes(app: FastifyInstance): void {
       const targetPc = findPc(pcId);
       if (!targetPc) throw errors.notFound('pc');
       if (!tariff) throw errors.notFound('tariff');
-      if (Date.now() - Date.parse(startedAt) > MAX_OFFLINE_START_MIN * 60_000) throw errors.validation('startedAt', 'tooOld');
+      if (Date.now() - Date.parse(startedAt) > MAX_OFFLINE_START_MIN * 60_000)
+        throw errors.validation('startedAt', 'tooOld');
       const mine = openSessionForUser(user.id);
-      if (mine) throw new ApiError('sessionAlreadyActive', 'User already has an open session', { sessionId: mine.id, pcId: mine.pcId });
+      if (mine)
+        throw new ApiError('sessionAlreadyActive', 'User already has an open session', {
+          sessionId: mine.id,
+          pcId: mine.pcId,
+        });
       const busy = openSessionForPc(pcId);
-      if (busy) throw new ApiError('sessionAlreadyActive', 'PC already has an open session', { sessionId: busy.id, pcId });
+      if (busy)
+        throw new ApiError('sessionAlreadyActive', 'PC already has an open session', { sessionId: busy.id, pcId });
       if (targetPc.status === 'maintenance') throw errors.policyDenied('pcMaintenance');
       const t = Date.now();
       const booked = db.bookings.find(
-        (bk) => bk.pcId === pcId && bk.userId !== user.id && (bk.status === 'reserved' || bk.status === 'confirmed') && Date.parse(bk.from) <= t && t < Date.parse(bk.to),
+        (bk) =>
+          bk.pcId === pcId &&
+          bk.userId !== user.id &&
+          (bk.status === 'reserved' || bk.status === 'confirmed') &&
+          Date.parse(bk.from) <= t &&
+          t < Date.parse(bk.to),
       );
       if (booked) throw errors.policyDenied('pcBooked');
-      if (tariff.zones.length > 0 && !tariff.zones.some((z) => z.toLowerCase() === targetPc.zone.toLowerCase())) throw errors.policyDenied('tariffZone');
+      if (tariff.zones.length > 0 && !tariff.zones.some((z) => z.toLowerCase() === targetPc.zone.toLowerCase()))
+        throw errors.policyDenied('tariffZone');
       const local = new Date();
-      if (!tariffIsValidFor(tariff, targetPc.zone, weekdayFromJsDay(local.getDay()), localClock(local))) throw errors.policyDenied('tariffTime');
+      if (!tariffIsValidFor(tariff, targetPc.zone, weekdayFromJsDay(local.getDay()), localClock(local)))
+        throw errors.policyDenied('tariffTime');
       if (!prepaid && user.role === 'guest') throw errors.policyDenied('postpaidNotAllowed');
       let mins: number;
       if (tariff.isPackage) {
@@ -175,7 +189,8 @@ export function sessionRoutes(app: FastifyInstance): void {
       const cost = prepaid ? tariffPriceFor(tariff, mins) : zero();
       if (prepaid && user.balance.amount < cost.amount) throw errors.insufficientFunds(cost, user.balance);
       const id = clientSessionId && !findSession(clientSessionId) ? clientSessionId : uuid();
-      if (prepaid && cost.amount > 0) applyTransaction(user, 'charge', uzs(-cost.amount), `Session ${mins} min · ${tariff.name}`, id);
+      if (prepaid && cost.amount > 0)
+        applyTransaction(user, 'charge', uzs(-cost.amount), `Session ${mins} min · ${tariff.name}`, id);
       const rec: SessionRecord = {
         id,
         userId: user.id,
@@ -262,12 +277,15 @@ export function sessionRoutes(app: FastifyInstance): void {
       const minutes = int(b, 'minutes', 1, 1440);
       const tariff = findTariff(optStr(b, 'tariffId', 64) ?? s.tariffId);
       if (!tariff) throw errors.notFound('tariff');
-      if (s.state !== 'active' && s.state !== 'paused' && s.state !== 'locked') throw errors.sessionNotActive(viewSession(s));
+      if (s.state !== 'active' && s.state !== 'paused' && s.state !== 'locked')
+        throw errors.sessionNotActive(viewSession(s));
       if (!s.isPrepaid) throw errors.conflict('postpaidSession');
-      if (tariff.maxMinutes != null && s.purchasedSec / 60 + minutes > tariff.maxMinutes) throw errors.validation('minutes', 'max');
+      if (tariff.maxMinutes != null && s.purchasedSec / 60 + minutes > tariff.maxMinutes)
+        throw errors.validation('minutes', 'max');
       const cost = tariffPriceFor(tariff, minutes);
       if (user.balance.amount < cost.amount) throw errors.insufficientFunds(cost, user.balance);
-      if (cost.amount > 0) applyTransaction(user, 'charge', uzs(-cost.amount), `Extension +${minutes} min · ${tariff.name}`, s.id);
+      if (cost.amount > 0)
+        applyTransaction(user, 'charge', uzs(-cost.amount), `Extension +${minutes} min · ${tariff.name}`, s.id);
       s.purchasedSec += minutes * 60;
       s.paidAmount = uzs(s.paidAmount.amount + cost.amount);
       s.tariffId = tariff.id;
@@ -296,7 +314,12 @@ export function sessionRoutes(app: FastifyInstance): void {
         db.sessionEvents.push({ sessionId: s.id, type, at, data } as SessionEvent);
         if (type === 'locked' && s.state === 'active') s.state = 'locked';
         if (type === 'unlocked' && s.state === 'locked') s.state = 'active';
-        if (type === 'warning' && data && typeof data['minutesLeft'] === 'number' && !s.warningsSent.includes(data['minutesLeft'])) {
+        if (
+          type === 'warning' &&
+          data &&
+          typeof data['minutesLeft'] === 'number' &&
+          !s.warningsSent.includes(data['minutesLeft'])
+        ) {
           s.warningsSent.push(data['minutesLeft']);
         }
       });

@@ -34,9 +34,10 @@ export function groupApps(apps: App[]): { category: string; apps: App[] }[] {
     const i = CATEGORY_ORDER.indexOf(c);
     return i < 0 ? CATEGORY_ORDER.length : i;
   };
-  return Array.from(groups, ([category, list]) => ({ category, apps: [...list].sort((a, b) => a.title.localeCompare(b.title)) })).sort(
-    (a, b) => rank(a.category) - rank(b.category) || a.category.localeCompare(b.category),
-  );
+  return Array.from(groups, ([category, list]) => ({
+    category,
+    apps: [...list].sort((a, b) => a.title.localeCompare(b.title)),
+  })).sort((a, b) => rank(a.category) - rank(b.category) || a.category.localeCompare(b.category));
 }
 
 export default function AppsScreen(): JSX.Element {
@@ -92,7 +93,13 @@ export default function AppsScreen(): JSX.Element {
     track('app.launch', { appId: app.id });
     try {
       await api.apps.launch(app.id);
-      push({ id: `app-${app.id}`, title: t('apps.launched', { title: app.title }), level: 'success', ttlSec: 4, source: 'local' });
+      push({
+        id: `app-${app.id}`,
+        title: t('apps.launched', { title: app.title }),
+        level: 'success',
+        ttlSec: 4,
+        source: 'local',
+      });
     } catch (e) {
       pushError(e, t('apps.openFailed', { title: app.title }));
     } finally {
@@ -121,7 +128,11 @@ export default function AppsScreen(): JSX.Element {
       </header>
 
       {apps === null && !error && (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(clamp(160px,11vw,220px),1fr))] gap-[var(--gap)]" aria-busy="true" aria-label={t('common.loading')}>
+        <div
+          className="grid grid-cols-[repeat(auto-fill,minmax(clamp(160px,11vw,220px),1fr))] gap-[var(--gap)]"
+          aria-busy="true"
+          aria-label={t('common.loading')}
+        >
           {Array.from({ length: 6 }, (_, i) => (
             <Skeleton key={i} variant="rect" height="14rem" />
           ))}
@@ -146,10 +157,18 @@ export default function AppsScreen(): JSX.Element {
       {groups.map((group) => (
         <section key={group.category} aria-label={categoryLabel(group.category)} className="flex flex-col gap-3">
           <h2 className="text-xl font-bold text-text">{categoryLabel(group.category)}</h2>
-          <div role="list" className="grid grid-cols-[repeat(auto-fill,minmax(clamp(160px,11vw,220px),1fr))] gap-[var(--gap)]">
+          <div
+            role="list"
+            className="grid grid-cols-[repeat(auto-fill,minmax(clamp(160px,11vw,220px),1fr))] gap-[var(--gap)]"
+          >
             {group.apps.map((app) => (
               <div key={app.id} role="listitem">
-                <AppTile app={app} onLaunch={(a) => void launch(a)} launching={launchingId === app.id} disabled={launchingId !== null && launchingId !== app.id} />
+                <AppTile
+                  app={app}
+                  onLaunch={(a) => void launch(a)}
+                  launching={launchingId === app.id}
+                  disabled={launchingId !== null && launchingId !== app.id}
+                />
               </div>
             ))}
           </div>

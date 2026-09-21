@@ -42,7 +42,7 @@ const PHASES = Object.values(LaunchReportPhase);
 const LAUNCHERS = Object.values(LauncherType);
 
 function withLastPlayed(game: Game, userId: string | null): Game {
-  return { ...game, lastPlayedAt: userId ? db.lastPlayed[userId]?.[game.id] ?? null : null };
+  return { ...game, lastPlayedAt: userId ? (db.lastPlayed[userId]?.[game.id] ?? null) : null };
 }
 
 function expireLeases(nowMs: number): void {
@@ -60,9 +60,10 @@ export function gamesRoutes(app: FastifyInstance): void {
     requireAgent(req);
     const userId = optionalUser(req)?.id ?? null;
     const all = db.games.map((g) => withLastPlayed(g, userId));
-    const paged = req.query.page || req.query.pageSize
-      ? paginate(all, { page: req.query.page, pageSize: req.query.pageSize ?? '1000' }, 1000)
-      : { items: all, total: all.length, page: 1, pageSize: all.length };
+    const paged =
+      req.query.page || req.query.pageSize
+        ? paginate(all, { page: req.query.page, pageSize: req.query.pageSize ?? '1000' }, 1000)
+        : { items: all, total: all.length, page: 1, pageSize: all.length };
     return sendCached(req, reply, { ...paged, catalogVersion: db.catalogVersion });
   });
 
@@ -73,49 +74,59 @@ export function gamesRoutes(app: FastifyInstance): void {
     return withLastPlayed(game, optionalUser(req)?.id ?? null);
   });
 
-  app.get<{ Params: { id: string }; Querystring: { sessionId?: string } }>('/games/:id/accounts/lease', async (req): Promise<AccountLease> => {
-    const { pc, user } = requireUser(req);
-    const game = findGame(req.params.id);
-    if (!game) throw errors.notFound('game');
-    if (!req.query.sessionId) throw errors.validation('sessionId', 'required');
-    const session = findSession(req.query.sessionId);
-    if (!session || session.userId !== user.id || session.state === 'ended' || session.state === 'idle') throw errors.sessionNotActive(null);
-    if (game.ageRating >= 18 && user.role === 'guest') throw errors.policyDenied('ageRating');
-    const t = Date.now();
-    expireLeases(t);
-    let lease = db.leases.find((l) => l.gameId === game.id && l.userId === user.id && l.releasedAt === null);
-    if (!lease) {
-      const inUse = new Set(db.leases.filter((l) => l.releasedAt === null && l.launcher === game.launcher).map((l) => l.username));
-      const account = db.accountPool.find((a) => a.launcher === game.launcher && !inUse.has(a.username));
-      if (!account) throw new ApiError('accountPoolExhausted', `No free ${game.launcher} account`, { launcher: game.launcher });
-      lease = {
-        leaseId: uuid(),
-        gameId: game.id,
-        userId: user.id,
-        sessionId: session.id,
-        pcId: pc.id,
-        launcher: game.launcher,
-        username: account.username,
-        createdAt: now(),
-        expiresAt: inSec(LEASE_TTL_SEC),
-        releasedAt: null,
+  app.get<{ Params: { id: string }; Querystring: { sessionId?: string } }>(
+    '/games/:id/accounts/lease',
+    async (req): Promise<AccountLease> => {
+      const { pc, user } = requireUser(req);
+      const game = findGame(req.params.id);
+      if (!game) throw errors.notFound('game');
+      if (!req.query.sessionId) throw errors.validation('sessionId', 'required');
+      const session = findSession(req.query.sessionId);
+      if (!session || session.userId !== user.id || session.state === 'ended' || session.state === 'idle')
+        throw errors.sessionNotActive(null);
+      if (game.ageRating >= 18 && user.role === 'guest') throw errors.policyDenied('ageRating');
+      const t = Date.now();
+      expireLeases(t);
+      let lease = db.leases.find((l) => l.gameId === game.id && l.userId === user.id && l.releasedAt === null);
+      if (!lease) {
+        const inUse = new Set(
+          db.leases.filter((l) => l.releasedAt === null && l.launcher === game.launcher).map((l) => l.username),
+        );
+        const account = db.accountPool.find((a) => a.launcher === game.launcher && !inUse.has(a.username));
+        if (!account)
+          throw new ApiError('accountPoolExhausted', `No free ${game.launcher} account`, { launcher: game.launcher });
+        lease = {
+          leaseId: uuid(),
+          gameId: game.id,
+          userId: user.id,
+          sessionId: session.id,
+          pcId: pc.id,
+          launcher: game.launcher,
+          username: account.username,
+          createdAt: now(),
+          expiresAt: inSec(LEASE_TTL_SEC),
+          releasedAt: null,
+        };
+        db.leases.push(lease);
+        if (db.leases.length > 500) db.leases.splice(0, db.leases.length - 500);
+      }
+      markDirty();
+      const account = db.accountPool.find((a) => a.launcher === lease.launcher && a.username === lease.username);
+      const secret = encryptPoolSecret(
+        pc.signingSecret ?? Buffer.alloc(32).toString('base64'),
+        account?.password ?? '',
+      );
+      return {
+        leaseId: lease.leaseId,
+        launcher: lease.launcher,
+        username: lease.username,
+        secret,
+        extra: account?.extra ?? null,
+        expiresAt: lease.expiresAt,
+        cloudSave: null,
       };
-      db.leases.push(lease);
-      if (db.leases.length > 500) db.leases.splice(0, db.leases.length - 500);
-    }
-    markDirty();
-    const account = db.accountPool.find((a) => a.launcher === lease.launcher && a.username === lease.username);
-    const secret = encryptPoolSecret(pc.signingSecret ?? Buffer.alloc(32).toString('base64'), account?.password ?? '');
-    return {
-      leaseId: lease.leaseId,
-      launcher: lease.launcher,
-      username: lease.username,
-      secret,
-      extra: account?.extra ?? null,
-      expiresAt: lease.expiresAt,
-      cloudSave: null,
-    };
-  });
+    },
+  );
 
   app.post<{ Params: { id: string; leaseId: string } }>('/games/:id/accounts/:leaseId/release', async (req, reply) => {
     requireAgent(req);
@@ -175,7 +186,9 @@ export function gamesRoutes(app: FastifyInstance): void {
       db.lastPlayed[report.userId] = perUser;
     }
     markDirty();
-    console.log(`[games] ${pc.name}: ${game.title} ${report.phase} ok=${String(report.result['ok'])} in ${report.durationMs} ms`);
+    console.log(
+      `[games] ${pc.name}: ${game.title} ${report.phase} ok=${String(report.result['ok'])} in ${report.durationMs} ms`,
+    );
     return reply.code(204).send();
   });
 

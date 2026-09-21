@@ -93,7 +93,9 @@ export function NotificationCenter(): JSX.Element {
             transition={{ duration, ease: 'easeOut' }}
           >
             <Badge tone="danger" size="lg" live className="glass-strong normal-case tracking-normal">
-              {remoteControl?.adminName ? t('admin.remoteControlBy', { admin: remoteControl.adminName }) : t('admin.remoteControlActive')}
+              {remoteControl?.adminName
+                ? t('admin.remoteControlBy', { admin: remoteControl.adminName })
+                : t('admin.remoteControlActive')}
             </Badge>
           </motion.div>
         )}
@@ -112,16 +114,30 @@ export function NotificationCenter(): JSX.Element {
             transition={{ duration, ease: 'easeOut' }}
           >
             <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center text-primary">
-              <svg viewBox="0 0 24 24" className="h-full w-full" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <svg
+                viewBox="0 0 24 24"
+                className="h-full w-full"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
                 <path d="M12 3v12M7 10l5 5 5-5M4 19h16" />
               </svg>
             </span>
             <div className="min-w-0 flex-1">
               <p className="text-base font-bold leading-tight text-text">{t('update.readyTitle')}</p>
               <p className="mt-1 text-sm text-muted">
-                {t('update.readyHint', { component: t(`update.component.${updateReady.component}`), version: updateReady.version })}
+                {t('update.readyHint', {
+                  component: t(`update.component.${updateReady.component}`),
+                  version: updateReady.version,
+                })}
               </p>
-              {updateReady.mandatory && <p className="mt-1 text-sm font-semibold text-danger">{t('update.mandatory')}</p>}
+              {updateReady.mandatory && (
+                <p className="mt-1 text-sm font-semibold text-danger">{t('update.mandatory')}</p>
+              )}
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button size="md" loading={applying} onClick={() => void onApplyUpdate()}>
                   {applying ? t('update.applying') : t('update.applyNow')}
@@ -158,7 +174,12 @@ export function NotificationCenter(): JSX.Element {
             <Badge tone={levelTone(adminMessage.level)} dot>
               {t(`notifications.${adminMessage.level}`)}
             </Badge>
-            <p className={clsx('whitespace-pre-wrap text-lg leading-relaxed text-text', adminMessage.level === 'error' && 'font-semibold')}>
+            <p
+              className={clsx(
+                'whitespace-pre-wrap text-lg leading-relaxed text-text',
+                adminMessage.level === 'error' && 'font-semibold',
+              )}
+            >
               {adminMessage.text}
             </p>
           </div>

@@ -61,7 +61,16 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     return (
       <div role="alert" className="flex h-full w-full items-center justify-center bg-bg p-[var(--gutter)] text-text">
         <div className="glass-strong flex w-[min(40rem,90vw)] flex-col items-center gap-5 rounded-[calc(var(--radius)*2)] px-10 py-9 text-center">
-          <svg aria-hidden="true" viewBox="0 0 24 24" className="h-14 w-14 text-danger" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            className="h-14 w-14 text-danger"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <path d="M12 9v4M12 17h.01" />
             <path d="M10.3 3.9 2.6 17.2A2 2 0 0 0 4.3 20h15.4a2 2 0 0 0 1.7-2.8L13.7 3.9a2 2 0 0 0-3.4 0Z" />
           </svg>
@@ -128,8 +137,18 @@ function installKioskGuards(): void {
       }
       const reload = key === 'f5' || (mod && key === 'r');
       const fullscreen = key === 'f11';
-      const devtools = key === 'f12' || (mod && e.shiftKey && (key === 'i' || key === 'j' || key === 'c')) || (mod && key === 'u');
-      const browserUi = mod && (key === 'p' || key === 's' || key === 'o' || key === 'f' || key === 'g' || key === 'h' || key === 'j' || key === 'd');
+      const devtools =
+        key === 'f12' || (mod && e.shiftKey && (key === 'i' || key === 'j' || key === 'c')) || (mod && key === 'u');
+      const browserUi =
+        mod &&
+        (key === 'p' ||
+          key === 's' ||
+          key === 'o' ||
+          key === 'f' ||
+          key === 'g' ||
+          key === 'h' ||
+          key === 'j' ||
+          key === 'd');
       if (reload || fullscreen || browserUi || (devtools && !devtoolsAllowed())) {
         e.preventDefault();
         e.stopPropagation();

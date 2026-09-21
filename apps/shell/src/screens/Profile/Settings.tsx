@@ -72,7 +72,10 @@ export function Toggle({ label, hint, checked, onChange, disabled = false }: Tog
       </span>
       <span
         aria-hidden="true"
-        className={clsx('relative h-8 w-14 shrink-0 rounded-full transition-colors duration-[var(--dur-base)]', checked ? 'bg-primary' : 'bg-text/20')}
+        className={clsx(
+          'relative h-8 w-14 shrink-0 rounded-full transition-colors duration-[var(--dur-base)]',
+          checked ? 'bg-primary' : 'bg-text/20',
+        )}
       >
         <span
           className={clsx(
@@ -99,7 +102,13 @@ export interface OptionGroupProps<K extends string> {
 }
 
 /** Pill radio group. */
-export function OptionGroup<K extends string>({ label, options, value, onChange, disabled = false }: OptionGroupProps<K>): JSX.Element {
+export function OptionGroup<K extends string>({
+  label,
+  options,
+  value,
+  onChange,
+  disabled = false,
+}: OptionGroupProps<K>): JSX.Element {
   return (
     <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-2">
       {options.map((o) => {
@@ -115,7 +124,9 @@ export function OptionGroup<K extends string>({ label, options, value, onChange,
             onClick={() => onChange(o.key)}
             className={clsx(
               'focus-ring inline-flex h-11 items-center rounded-full px-5 text-base font-semibold transition-colors duration-[var(--dur-fast)] disabled:cursor-not-allowed disabled:opacity-50',
-              active ? 'bg-primary text-white shadow-[0_6px_20px_-6px_rgb(var(--c-primary)/0.8)]' : 'bg-text/10 text-text hover:bg-text/15',
+              active
+                ? 'bg-primary text-white shadow-[0_6px_20px_-6px_rgb(var(--c-primary)/0.8)]'
+                : 'bg-text/10 text-text hover:bg-text/15',
             )}
           >
             {o.label}
@@ -164,11 +175,24 @@ function ThemeSwatch({ theme, active, disabled, onSelect }: ThemeSwatchProps): J
         active ? 'border-primary bg-primary/10' : 'border-text/10 bg-surface/40 hover:border-text/25',
       )}
     >
-      <span aria-hidden="true" className="relative block h-28 w-full overflow-hidden" style={{ background: c.bg, borderRadius: theme.radius }}>
+      <span
+        aria-hidden="true"
+        className="relative block h-28 w-full overflow-hidden"
+        style={{ background: c.bg, borderRadius: theme.radius }}
+      >
         <span className="absolute left-3 top-3 h-6 w-[45%]" style={{ background: c.surface, borderRadius: r }} />
-        <span className="absolute left-3 top-12 h-3.5 w-[32%]" style={{ background: c.text, opacity: 0.85, borderRadius: 3 }} />
-        <span className="absolute left-3 top-[4.25rem] h-2.5 w-[22%]" style={{ background: c.muted, borderRadius: 3 }} />
-        <span className="absolute bottom-3 left-3 h-7 w-[36%]" style={{ background: c.primary, borderRadius: r, boxShadow: `0 0 16px ${c.primary}` }} />
+        <span
+          className="absolute left-3 top-12 h-3.5 w-[32%]"
+          style={{ background: c.text, opacity: 0.85, borderRadius: 3 }}
+        />
+        <span
+          className="absolute left-3 top-[4.25rem] h-2.5 w-[22%]"
+          style={{ background: c.muted, borderRadius: 3 }}
+        />
+        <span
+          className="absolute bottom-3 left-3 h-7 w-[36%]"
+          style={{ background: c.primary, borderRadius: r, boxShadow: `0 0 16px ${c.primary}` }}
+        />
         <span className="absolute bottom-3 right-3 h-7 w-7 rounded-full" style={{ background: c.accent }} />
         <span className="absolute right-3 top-3 h-3 w-3 rounded-full" style={{ background: c.success }} />
         <span className="absolute right-8 top-3 h-3 w-3 rounded-full" style={{ background: c.danger }} />
@@ -178,7 +202,16 @@ function ThemeSwatch({ theme, active, disabled, onSelect }: ThemeSwatchProps): J
           {theme.displayName}
         </span>
         {active && (
-          <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0 text-primary" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <svg
+            viewBox="0 0 24 24"
+            className="h-5 w-5 shrink-0 text-primary"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
             <path d="M5 12.5l4.5 4.5L19 7.5" />
           </svg>
         )}
@@ -248,7 +281,15 @@ export function ThemePicker(): JSX.Element {
         if (!theme) {
           return <div key={name} className="anim-skeleton h-40 rounded-xl" aria-hidden="true" />;
         }
-        return <ThemeSwatch key={name} theme={theme} active={name === current.name} disabled={busy !== null} onSelect={() => void select(name)} />;
+        return (
+          <ThemeSwatch
+            key={name}
+            theme={theme}
+            active={name === current.name}
+            disabled={busy !== null}
+            onSelect={() => void select(name)}
+          />
+        );
       })}
     </div>
   );
@@ -260,7 +301,15 @@ export function ThemePicker(): JSX.Element {
 
 function SpeakerIcon({ muted }: { muted: boolean }): JSX.Element {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <path d="M4 9v6h4l5 4V5L8 9z" />
       {muted ? <path d="M17 9l4 6M21 9l-4 6" /> : <path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11" />}
     </svg>
@@ -529,9 +578,16 @@ export function AdminPanel({ open, onClose }: AdminPanelProps): JSX.Element {
       switch (action) {
         case 'reboot':
         case 'shutdown': {
-          const res = action === 'reboot' ? await api.system.reboot(POWER_DELAY_SEC, 'admin') : await api.system.shutdown(POWER_DELAY_SEC, 'admin');
+          const res =
+            action === 'reboot'
+              ? await api.system.reboot(POWER_DELAY_SEC, 'admin')
+              : await api.system.shutdown(POWER_DELAY_SEC, 'admin');
           const seconds = Math.max(0, Math.round(secondsUntil(res.scheduledAt) || POWER_DELAY_SEC));
-          setScheduledPower({ kind: action, at: Date.parse(res.scheduledAt) || Date.now() + seconds * 1000, message: null });
+          setScheduledPower({
+            kind: action,
+            at: Date.parse(res.scheduledAt) || Date.now() + seconds * 1000,
+            message: null,
+          });
           push({
             id: action,
             title: action === 'reboot' ? t('admin.rebootScheduled') : t('admin.shutdownScheduled'),
@@ -562,14 +618,15 @@ export function AdminPanel({ open, onClose }: AdminPanelProps): JSX.Element {
     }
   };
 
-  const actions: { key: AdminAction; label: string; variant: 'primary' | 'secondary' | 'danger'; hidden?: boolean }[] = [
-    { key: 'reload', label: t('settings.reload'), variant: 'secondary' },
-    { key: 'devtools', label: t('settings.devtools'), variant: 'secondary', hidden: !devtoolsAllowed },
-    { key: 'explorer', label: t('settings.exitExplorer'), variant: 'primary' },
-    { key: 'quit', label: t('settings.exitQuit'), variant: 'primary' },
-    { key: 'reboot', label: t('settings.reboot'), variant: 'danger' },
-    { key: 'shutdown', label: t('settings.shutdown'), variant: 'danger' },
-  ];
+  const actions: { key: AdminAction; label: string; variant: 'primary' | 'secondary' | 'danger'; hidden?: boolean }[] =
+    [
+      { key: 'reload', label: t('settings.reload'), variant: 'secondary' },
+      { key: 'devtools', label: t('settings.devtools'), variant: 'secondary', hidden: !devtoolsAllowed },
+      { key: 'explorer', label: t('settings.exitExplorer'), variant: 'primary' },
+      { key: 'quit', label: t('settings.exitQuit'), variant: 'primary' },
+      { key: 'reboot', label: t('settings.reboot'), variant: 'danger' },
+      { key: 'shutdown', label: t('settings.shutdown'), variant: 'danger' },
+    ];
 
   if (!admin) {
     return (
@@ -630,7 +687,15 @@ export function AdminPanel({ open, onClose }: AdminPanelProps): JSX.Element {
         {actions
           .filter((a) => !a.hidden)
           .map((a) => (
-            <Button key={a.key} variant={a.variant} size="lg" block loading={busy === a.key} disabled={busy !== null && busy !== a.key} onClick={() => void run(a.key)}>
+            <Button
+              key={a.key}
+              variant={a.variant}
+              size="lg"
+              block
+              loading={busy === a.key}
+              disabled={busy !== null && busy !== a.key}
+              onClick={() => void run(a.key)}
+            >
               {a.label}
             </Button>
           ))}
@@ -698,10 +763,12 @@ export function Settings(): JSX.Element {
     navigate('/lock', { replace: true });
   };
 
-
   const idleOptions = Array.from(new Set([...IDLE_OPTIONS_SEC, settings.idleTimeoutSec]))
     .sort((a, b) => a - b)
-    .map((sec) => ({ key: String(sec), label: sec === 0 ? t('settings.idleNever') : t('settings.idleTimeoutValue', { minutes: Math.round(sec / 60) }) }));
+    .map((sec) => ({
+      key: String(sec),
+      label: sec === 0 ? t('settings.idleNever') : t('settings.idleTimeoutValue', { minutes: Math.round(sec / 60) }),
+    }));
 
   const isGuest = user?.role === 'guest';
 
@@ -761,7 +828,10 @@ export function Settings(): JSX.Element {
       </div>
 
       <div className="grid gap-[var(--gap)] xl:grid-cols-2">
-        <SettingsSection title={t('profile.settings')} description={isGuest ? t('profile.guestHint') : t('profile.pinHint')}>
+        <SettingsSection
+          title={t('profile.settings')}
+          description={isGuest ? t('profile.guestHint') : t('profile.pinHint')}
+        >
           <div className="flex flex-wrap gap-3">
             {!isGuest && (
               <Button variant="secondary" size="lg" onClick={() => setPinOpen(true)}>

@@ -17,7 +17,10 @@ export interface LoginFormProps {
 /** Human message for a failed password / PIN check; anything unexpected falls back to `describeError`. */
 export function loginErrorMessage(e: unknown, t: TFunction): string {
   const err = toShellApiError(e);
-  const details = (typeof err.details === 'object' && err.details !== null ? err.details : {}) as Record<string, unknown>;
+  const details = (typeof err.details === 'object' && err.details !== null ? err.details : {}) as Record<
+    string,
+    unknown
+  >;
   switch (err.code) {
     case 'unauthorized':
       if (details['reason'] === 'wrongPin') {
@@ -48,7 +51,16 @@ export function loginErrorMessage(e: unknown, t: TFunction): string {
 }
 
 const EyeIcon = ({ off }: { off: boolean }): JSX.Element => (
-  <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+  <svg
+    viewBox="0 0 24 24"
+    className="h-6 w-6"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
     <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
     <circle cx="12" cy="12" r="3" />
     {off && <path d="M4 4l16 16" />}

@@ -35,7 +35,15 @@ export interface OrderStatusProps {
 }
 
 const CheckIcon = (): JSX.Element => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="3"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
     <path d="M5 13l4 4L19 7" />
   </svg>
 );
@@ -51,7 +59,11 @@ export function OrderStatus({ order, onCancel, cancelling = false, className }: 
   return (
     <article
       aria-label={t('shop.orderNumber', { id: shortOrderId(order.id) })}
-      className={clsx('glass flex min-w-[clamp(280px,22vw,380px)] flex-col gap-3 rounded-lg p-4', cancelled && 'opacity-70', className)}
+      className={clsx(
+        'glass flex min-w-[clamp(280px,22vw,380px)] flex-col gap-3 rounded-lg p-4',
+        cancelled && 'opacity-70',
+        className,
+      )}
     >
       <header className="flex items-center justify-between gap-3">
         <div className="min-w-0">
@@ -61,7 +73,10 @@ export function OrderStatus({ order, onCancel, cancelling = false, className }: 
           </p>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
-          <Badge tone={cancelled ? 'danger' : order.status === OrderStatusEnum.Done ? 'success' : 'primary'} live={!cancelled && order.status !== OrderStatusEnum.Done}>
+          <Badge
+            tone={cancelled ? 'danger' : order.status === OrderStatusEnum.Done ? 'success' : 'primary'}
+            live={!cancelled && order.status !== OrderStatusEnum.Done}
+          >
             {t(`shop.status.${order.status}`)}
           </Badge>
           <span className="tnum text-sm text-muted">
@@ -87,10 +102,22 @@ export function OrderStatus({ order, onCancel, cancelling = false, className }: 
                   aria-current={active ? 'step' : undefined}
                   title={t(`shop.status.${step}`)}
                 >
-                  {done ? <span className="h-4 w-4"><CheckIcon /></span> : i + 1}
+                  {done ? (
+                    <span className="h-4 w-4">
+                      <CheckIcon />
+                    </span>
+                  ) : (
+                    i + 1
+                  )}
                 </span>
                 {i < ORDER_STEPS.length - 1 && (
-                  <span className={clsx('h-1 flex-1 rounded-full transition-colors duration-[var(--dur-base)]', done ? 'bg-success' : 'bg-text/10')} aria-hidden="true" />
+                  <span
+                    className={clsx(
+                      'h-1 flex-1 rounded-full transition-colors duration-[var(--dur-base)]',
+                      done ? 'bg-success' : 'bg-text/10',
+                    )}
+                    aria-hidden="true"
+                  />
                 )}
               </li>
             );
@@ -101,7 +128,13 @@ export function OrderStatus({ order, onCancel, cancelling = false, className }: 
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-muted">{t(`shop.statusHint.${order.status}`)}</p>
         {onCancel && order.status === OrderStatusEnum.Pending && (
-          <Button size="md" variant="ghost" loading={cancelling} onClick={() => onCancel(order)} className="shrink-0 text-danger">
+          <Button
+            size="md"
+            variant="ghost"
+            loading={cancelling}
+            onClick={() => onCancel(order)}
+            className="shrink-0 text-danger"
+          >
             {t('shop.cancel')}
           </Button>
         )}

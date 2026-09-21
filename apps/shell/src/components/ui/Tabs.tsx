@@ -165,19 +165,28 @@ export function Tabs<K extends string = string>({
               'focus-ring inline-flex shrink-0 select-none items-center whitespace-nowrap font-semibold leading-none transition-colors duration-[var(--dur-fast)]',
               SIZE[size],
               variant === 'pills' && 'rounded-full',
-              variant === 'pills' && (active ? 'bg-primary text-white shadow-[0_6px_20px_-6px_rgb(var(--c-primary)/0.8)]' : 'text-muted hover:bg-text/10 hover:text-text'),
+              variant === 'pills' &&
+                (active
+                  ? 'bg-primary text-white shadow-[0_6px_20px_-6px_rgb(var(--c-primary)/0.8)]'
+                  : 'text-muted hover:bg-text/10 hover:text-text'),
               variant === 'underline' && '-mb-px border-b-2 rounded-t-md',
-              variant === 'underline' && (active ? 'border-primary text-text' : 'border-transparent text-muted hover:text-text'),
+              variant === 'underline' &&
+                (active ? 'border-primary text-text' : 'border-transparent text-muted hover:text-text'),
               item.disabled && 'cursor-not-allowed opacity-40',
             )}
           >
             {item.icon && (
-              <span aria-hidden="true" className="inline-flex h-[1.2em] w-[1.2em] items-center justify-center [&>svg]:h-full [&>svg]:w-full">
+              <span
+                aria-hidden="true"
+                className="inline-flex h-[1.2em] w-[1.2em] items-center justify-center [&>svg]:h-full [&>svg]:w-full"
+              >
                 {item.icon}
               </span>
             )}
             {item.label}
-            {item.badge !== undefined && item.badge !== null && <span className="ml-1 inline-flex items-center">{item.badge}</span>}
+            {item.badge !== undefined && item.badge !== null && (
+              <span className="ml-1 inline-flex items-center">{item.badge}</span>
+            )}
           </button>
         );
       })}

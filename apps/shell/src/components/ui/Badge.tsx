@@ -79,8 +79,17 @@ export const Badge = forwardRef<HTMLSpanElement, BadgeProps>(function Badge(
       )}
       {...rest}
     >
-      {(dot || live) && <span aria-hidden="true" className={clsx('h-2 w-2 rounded-full', DOT[tone], live && 'anim-live-dot')} />}
-      {icon && <span aria-hidden="true" className="inline-flex h-[1em] w-[1em] items-center justify-center [&>svg]:h-full [&>svg]:w-full">{icon}</span>}
+      {(dot || live) && (
+        <span aria-hidden="true" className={clsx('h-2 w-2 rounded-full', DOT[tone], live && 'anim-live-dot')} />
+      )}
+      {icon && (
+        <span
+          aria-hidden="true"
+          className="inline-flex h-[1em] w-[1em] items-center justify-center [&>svg]:h-full [&>svg]:w-full"
+        >
+          {icon}
+        </span>
+      )}
       {children}
     </span>
   );

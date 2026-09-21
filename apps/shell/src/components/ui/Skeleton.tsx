@@ -29,10 +29,22 @@ export const Skeleton = forwardRef<HTMLDivElement, SkeletonProps>(function Skele
     return (
       <div ref={ref} aria-hidden="true" className={clsx('flex flex-col gap-2', className)} style={box} {...rest}>
         {Array.from({ length: lines }, (_, i) => (
-          <div key={i} className={clsx('anim-skeleton', VARIANT.text)} style={{ width: i === lines - 1 ? '60%' : '100%' }} />
+          <div
+            key={i}
+            className={clsx('anim-skeleton', VARIANT.text)}
+            style={{ width: i === lines - 1 ? '60%' : '100%' }}
+          />
         ))}
       </div>
     );
   }
-  return <div ref={ref} aria-hidden="true" className={clsx('anim-skeleton', VARIANT[variant], className)} style={box} {...rest} />;
+  return (
+    <div
+      ref={ref}
+      aria-hidden="true"
+      className={clsx('anim-skeleton', VARIANT[variant], className)}
+      style={box}
+      {...rest}
+    />
+  );
 });

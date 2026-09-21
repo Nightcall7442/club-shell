@@ -2,7 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { QRCodeSVG } from 'qrcode.react';
 import { useTranslation } from 'react-i18next';
-import { TOPUP_MIN_AMOUNT_MINOR, TopupProvider, type Money, type TopupIntent, type TopupProvider as TopupProviderValue } from '@clubshell/contracts';
+import {
+  TOPUP_MIN_AMOUNT_MINOR,
+  TopupProvider,
+  type Money,
+  type TopupIntent,
+  type TopupProvider as TopupProviderValue,
+} from '@clubshell/contracts';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -27,7 +33,12 @@ export interface TopUpModalProps {
 export const TOPUP_PRESETS_UZS: readonly number[] = [10_000, 20_000, 50_000, 100_000];
 
 /** Provider chips in display order. */
-export const TOPUP_PROVIDERS: readonly TopupProviderValue[] = [TopupProvider.Payme, TopupProvider.Click, TopupProvider.Uzum, TopupProvider.Cash];
+export const TOPUP_PROVIDERS: readonly TopupProviderValue[] = [
+  TopupProvider.Payme,
+  TopupProvider.Click,
+  TopupProvider.Uzum,
+  TopupProvider.Cash,
+];
 
 const POLL_MS = 4000;
 const CLOSE_AFTER_PAID_MS = 2500;
@@ -54,7 +65,15 @@ export function ModalBackHandler({ onBack }: { onBack: () => void }): null {
 }
 
 const CheckIcon = (): JSX.Element => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="3"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
     <path d="M5 13l4 4L19 7" />
   </svg>
 );
@@ -115,7 +134,11 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
       }
       settled.current = true;
       setStep('paid');
-      push({ title: t('notifications.topUpSuccess'), body: t('wallet.topUpSuccess', { amount: formatMoney(paid.amount, locale) }), level: 'success' });
+      push({
+        title: t('notifications.topUpSuccess'),
+        body: t('wallet.topUpSuccess', { amount: formatMoney(paid.amount, locale) }),
+        level: 'success',
+      });
       onPaid?.(paid);
     },
     [push, t, locale, onPaid],
@@ -187,7 +210,11 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
       setStep('pending');
     } catch (e) {
       if (isShellApiError(e) && e.code === 'validation') {
-        push({ title: t('wallet.topUpTitle'), body: t('wallet.minAmount', { amount: formatMoney({ amount: TOPUP_MIN_AMOUNT_MINOR, currency }, locale) }), level: 'error' });
+        push({
+          title: t('wallet.topUpTitle'),
+          body: t('wallet.minAmount', { amount: formatMoney({ amount: TOPUP_MIN_AMOUNT_MINOR, currency }, locale) }),
+          level: 'error',
+        });
       } else {
         pushError(e, t('wallet.topUpTitle'));
       }
@@ -255,7 +282,9 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
                     }}
                     className={clsx(
                       'focus-ring tnum h-14 rounded-lg text-base font-bold transition-colors duration-[var(--dur-fast)]',
-                      active ? 'bg-primary text-white shadow-[0_8px_24px_-8px_rgb(var(--c-primary)/0.8)]' : 'glass text-text hover:bg-surface/80',
+                      active
+                        ? 'bg-primary text-white shadow-[0_8px_24px_-8px_rgb(var(--c-primary)/0.8)]'
+                        : 'glass text-text hover:bg-surface/80',
                     )}
                   >
                     {formatMoney({ amount: value * 100, currency }, locale)}
@@ -272,7 +301,11 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
             autoComplete="off"
             value={custom}
             error={amountError}
-            hint={amountError ? undefined : t('wallet.minAmount', { amount: formatMoney({ amount: TOPUP_MIN_AMOUNT_MINOR, currency }, locale) })}
+            hint={
+              amountError
+                ? undefined
+                : t('wallet.minAmount', { amount: formatMoney({ amount: TOPUP_MIN_AMOUNT_MINOR, currency }, locale) })
+            }
             trailing={<span className="text-sm font-semibold">{t('common.currency')}</span>}
             onChange={(e) => setCustom(e.target.value)}
             onKeyDown={(e) => {
@@ -311,7 +344,9 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
 
           <div className="flex items-center justify-between rounded-lg bg-text/5 px-4 py-3 text-base">
             <span className="text-muted">{t('wallet.amount')}</span>
-            <span className="tnum text-xl font-black text-text">{amountMinor !== null && !amountError ? formatMoney({ amount: amountMinor, currency }, locale) : '—'}</span>
+            <span className="tnum text-xl font-black text-text">
+              {amountMinor !== null && !amountError ? formatMoney({ amount: amountMinor, currency }, locale) : '—'}
+            </span>
           </div>
         </div>
       )}
@@ -327,41 +362,66 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
           ) : qrValue ? (
             <>
               <div className="rounded-xl bg-white p-4 shadow-[var(--shadow-glow)]">
-                <QRCodeSVG value={qrValue} size={240} level="M" marginSize={0} aria-label={t('wallet.scanToPay', { provider: providerName })} />
+                <QRCodeSVG
+                  value={qrValue}
+                  size={240}
+                  level="M"
+                  marginSize={0}
+                  aria-label={t('wallet.scanToPay', { provider: providerName })}
+                />
               </div>
               <p className="text-base text-text">{t('wallet.scanToPay', { provider: providerName })}</p>
               {intent.deepLink && (
-                <p className="max-w-full truncate rounded-md bg-text/5 px-3 py-1.5 font-mono text-sm text-muted" title={intent.deepLink}>
+                <p
+                  className="max-w-full truncate rounded-md bg-text/5 px-3 py-1.5 font-mono text-sm text-muted"
+                  title={intent.deepLink}
+                >
                   {t('wallet.openInApp')}: {intent.deepLink}
                 </p>
               )}
               {intent.paymentUrl && (
-                <p className="max-w-full truncate rounded-md bg-text/5 px-3 py-1.5 font-mono text-sm text-muted" title={intent.paymentUrl}>
+                <p
+                  className="max-w-full truncate rounded-md bg-text/5 px-3 py-1.5 font-mono text-sm text-muted"
+                  title={intent.paymentUrl}
+                >
                   {t('wallet.payOnWeb')}: {intent.paymentUrl}
                 </p>
               )}
             </>
           ) : intent.qrUrl ? (
             <>
-              <img src={intent.qrUrl} alt={t('wallet.scanToPay', { provider: providerName })} width={240} height={240} className="rounded-xl bg-white p-3" />
+              <img
+                src={intent.qrUrl}
+                alt={t('wallet.scanToPay', { provider: providerName })}
+                width={240}
+                height={240}
+                className="rounded-xl bg-white p-3"
+              />
               <p className="text-base text-text">{t('wallet.scanToPay', { provider: providerName })}</p>
             </>
           ) : (
             <Spinner size="lg" />
           )}
-          <p className={clsx('tnum text-sm', secondsLeft <= 60 ? 'text-danger' : 'text-muted')}>{t('wallet.intentExpiresIn', { time: mmss(secondsLeft) })}</p>
+          <p className={clsx('tnum text-sm', secondsLeft <= 60 ? 'text-danger' : 'text-muted')}>
+            {t('wallet.intentExpiresIn', { time: mmss(secondsLeft) })}
+          </p>
         </div>
       )}
 
       {step === 'paid' && intent && (
         <div className="flex flex-col items-center gap-3 py-4 text-center">
-          <span className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-success text-bg anim-pop" aria-hidden="true">
+          <span
+            className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-success text-bg anim-pop"
+            aria-hidden="true"
+          >
             <span className="h-9 w-9">
               <CheckIcon />
             </span>
           </span>
           <p className="text-2xl font-bold text-text">{t('wallet.paid')}</p>
-          <p className="tnum text-lg text-success">{t('wallet.topUpSuccess', { amount: formatMoney(intent.amount, locale) })}</p>
+          <p className="tnum text-lg text-success">
+            {t('wallet.topUpSuccess', { amount: formatMoney(intent.amount, locale) })}
+          </p>
           <p className="text-sm text-muted">{t('wallet.closeAfterPaid')}</p>
         </div>
       )}

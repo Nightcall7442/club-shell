@@ -73,7 +73,9 @@ export function ShopScreen(): JSX.Element {
       return;
     }
     focused.current = true;
-    const first = root.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]') ?? root.current?.querySelector<HTMLElement>('[data-nav]');
+    const first =
+      root.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]') ??
+      root.current?.querySelector<HTMLElement>('[data-nav]');
     if (first) {
       focusElement(first);
     }
@@ -125,7 +127,14 @@ export function ShopScreen(): JSX.Element {
           />
         </header>
 
-        <Tabs<CategoryKey> items={tabs} value={category ?? 'all'} onChange={onTab} label={t('common.category')} size="lg" idPrefix="shop" />
+        <Tabs<CategoryKey>
+          items={tabs}
+          value={category ?? 'all'}
+          onChange={onTab}
+          label={t('common.category')}
+          size="lg"
+          idPrefix="shop"
+        />
 
         <OrderStatusStrip />
 
@@ -147,7 +156,9 @@ export function ShopScreen(): JSX.Element {
             </div>
           ) : products.length === 0 ? (
             <div className="flex h-full min-h-[16rem] flex-col items-center justify-center gap-3 text-center">
-              <p className="text-xl font-semibold text-text">{status === 'error' ? t('common.error') : search ? t('common.noResults') : t('shop.noProducts')}</p>
+              <p className="text-xl font-semibold text-text">
+                {status === 'error' ? t('common.error') : search ? t('common.noResults') : t('shop.noProducts')}
+              </p>
               {status === 'error' ? (
                 <Button variant="secondary" size="lg" onClick={() => void load(true)}>
                   {t('common.retry')}
@@ -157,10 +168,18 @@ export function ShopScreen(): JSX.Element {
               )}
             </div>
           ) : (
-            <ul role="list" className="grid grid-cols-[repeat(auto-fill,minmax(clamp(170px,11.5vw,240px),1fr))] gap-[var(--gap)]">
+            <ul
+              role="list"
+              className="grid grid-cols-[repeat(auto-fill,minmax(clamp(170px,11.5vw,240px),1fr))] gap-[var(--gap)]"
+            >
               {products.map((p) => (
                 <li key={p.id}>
-                  <ProductCard product={p} qty={cart.get(p.id) ?? 0} onChange={(qty) => setQty(p.id, qty)} className="h-full" />
+                  <ProductCard
+                    product={p}
+                    qty={cart.get(p.id) ?? 0}
+                    onChange={(qty) => setQty(p.id, qty)}
+                    className="h-full"
+                  />
                 </li>
               ))}
             </ul>

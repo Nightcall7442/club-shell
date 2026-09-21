@@ -78,7 +78,11 @@ export function isConnected(pcId: string): boolean {
 }
 
 export function connections(): { pcId: string; name: string; connectedAt: string }[] {
-  return [...conns.values()].map((c) => ({ pcId: c.pcId, name: findPc(c.pcId)?.name ?? '?', connectedAt: c.connectedAt }));
+  return [...conns.values()].map((c) => ({
+    pcId: c.pcId,
+    name: findPc(c.pcId)?.name ?? '?',
+    connectedAt: c.connectedAt,
+  }));
 }
 
 export function pushToPc<K extends WsPushKind>(pcId: string, name: K, payload: WsPushPayloadMap[K]): boolean {
@@ -92,7 +96,11 @@ export function pushToUser<K extends WsPushKind>(userId: string, name: K, payloa
   return pcIdsForUser(userId).filter((pcId) => pushToPc(pcId, name, payload)).length;
 }
 
-export function broadcast<K extends WsPushKind>(name: K, payload: WsPushPayloadMap[K], filter?: (pcId: string) => boolean): number {
+export function broadcast<K extends WsPushKind>(
+  name: K,
+  payload: WsPushPayloadMap[K],
+  filter?: (pcId: string) => boolean,
+): number {
   let n = 0;
   for (const pcId of conns.keys()) {
     if (filter && !filter(pcId)) continue;
@@ -165,14 +173,26 @@ export function sendCommand<T extends ServerCommandType>(
   if (!conn || !send(conn, commandFrame(envelope))) {
     return Promise.resolve({
       ok: false,
-      error: { code: 'agentOffline', message: 'PC is not connected; command queued', details: { commandId: envelope.id } },
+      error: {
+        code: 'agentOffline',
+        message: 'PC is not connected; command queued',
+        details: { commandId: envelope.id },
+      },
       result: null,
     });
   }
   return new Promise<CommandAck>((resolve) => {
     const timer = setTimeout(() => {
       pendingAcks.delete(envelope.id);
-      resolve({ ok: false, error: { code: 'timeout', message: 'No ack within 30 s; command stays queued', details: { commandId: envelope.id } }, result: null });
+      resolve({
+        ok: false,
+        error: {
+          code: 'timeout',
+          message: 'No ack within 30 s; command stays queued',
+          details: { commandId: envelope.id },
+        },
+        result: null,
+      });
     }, ACK_TIMEOUT_MS);
     pendingAcks.set(envelope.id, { resolve, timer });
   });
@@ -297,7 +317,9 @@ export function registerWs(app: FastifyInstance): void {
     return { delivered, command, ack };
   };
 
-  app.post<{ Params: { pcId: string } }>('/mock/pcs/:pcId/command', async (req) => injectCommand(req.params.pcId, body(req)));
+  app.post<{ Params: { pcId: string } }>('/mock/pcs/:pcId/command', async (req) =>
+    injectCommand(req.params.pcId, body(req)),
+  );
   app.post('/_mock/command', async (req) => {
     const b = body(req);
     return injectCommand(str(b, 'pcId', 64), b);

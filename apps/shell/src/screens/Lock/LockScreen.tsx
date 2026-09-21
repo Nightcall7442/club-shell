@@ -53,7 +53,11 @@ export function Clock({ className }: ClockProps): JSX.Element {
     return () => clearInterval(id);
   }, []);
   return (
-    <time dateTime={now.toISOString()} aria-label={t('lock.clock')} className={clsx('tnum font-bold leading-none text-text', className)}>
+    <time
+      dateTime={now.toISOString()}
+      aria-label={t('lock.clock')}
+      className={clsx('tnum font-bold leading-none text-text', className)}
+    >
       {formatClock(now, fmt)}
     </time>
   );
@@ -85,7 +89,11 @@ export function LanguageSwitcher({ className }: LanguageSwitcherProps): JSX.Elem
   };
 
   return (
-    <div role="group" aria-label={t('lock.language')} className={clsx('glass flex items-center gap-1 rounded-full p-1', className)}>
+    <div
+      role="group"
+      aria-label={t('lock.language')}
+      className={clsx('glass flex items-center gap-1 rounded-full p-1', className)}
+    >
       {locales.map((l) => (
         <button
           key={l}
@@ -175,7 +183,11 @@ export function UnlockForm({ onSuccess, className }: UnlockFormProps): JSX.Eleme
   const name = user?.displayName ?? t('common.unknown');
 
   return (
-    <form onSubmit={(e) => void submit(e)} noValidate className={clsx('flex flex-col items-center gap-5 text-center', className)}>
+    <form
+      onSubmit={(e) => void submit(e)}
+      noValidate
+      className={clsx('flex flex-col items-center gap-5 text-center', className)}
+    >
       <Avatar name={name} src={user?.avatarUrl} size="xl" ring />
       <div>
         <h1 className="text-3xl font-bold leading-tight text-text">{name}</h1>
@@ -186,7 +198,8 @@ export function UnlockForm({ onSuccess, className }: UnlockFormProps): JSX.Eleme
           {t('lock.locked')}
         </Badge>
         <span className="tnum text-lg text-muted">
-          {t('lock.timeLeft')}: <span className="font-bold text-text">{isOpenEnded ? t('session.openEnded') : timeLabel}</span>
+          {t('lock.timeLeft')}:{' '}
+          <span className="font-bold text-text">{isOpenEnded ? t('session.openEnded') : timeLabel}</span>
         </span>
       </div>
       <Tabs items={tabs} value={method} onChange={switchMethod} label={t('lock.chooseMethod')} idPrefix="unlock" />
@@ -255,7 +268,9 @@ function OptionCard({ selected, onSelect, title, hint, children, className }: Op
       onClick={onSelect}
       className={clsx(
         'focus-ring flex flex-col items-start gap-1 rounded-lg border px-4 py-3 text-left transition-colors duration-[var(--dur-fast)]',
-        selected ? 'border-primary bg-primary/15 text-text shadow-[var(--shadow-glow)]' : 'border-text/10 bg-text/5 text-text hover:bg-text/10',
+        selected
+          ? 'border-primary bg-primary/15 text-text shadow-[var(--shadow-glow)]'
+          : 'border-text/10 bg-text/5 text-text hover:bg-text/10',
         className,
       )}
     >
@@ -306,7 +321,8 @@ export function StartSessionModal({ open, onStarted, onLogout }: StartSessionMod
   const effectiveMinutes = options.includes(minutes) ? minutes : (options.find((m) => m >= 60) ?? options[0] ?? 60);
   const price: Money | null = tariff && effectivePrepaid ? tariffPriceFor(tariff, effectiveMinutes) : null;
   const notEnough = price !== null && balance !== null && price.amount > balance.amount;
-  const after: Money | null = price && balance ? { amount: balance.amount - price.amount, currency: balance.currency } : null;
+  const after: Money | null =
+    price && balance ? { amount: balance.amount - price.amount, currency: balance.currency } : null;
 
   const submit = async (): Promise<void> => {
     if (!tariff) {
@@ -366,7 +382,11 @@ export function StartSessionModal({ open, onStarted, onLogout }: StartSessionMod
       ) : tariffs.length === 0 ? (
         <p className="py-6 text-center text-base text-muted">{t('idle.noTariffs')}</p>
       ) : (
-        <div role="radiogroup" aria-label={t('wallet.tariffs')} className="grid grid-cols-[repeat(auto-fit,minmax(13rem,1fr))] gap-3">
+        <div
+          role="radiogroup"
+          aria-label={t('wallet.tariffs')}
+          className="grid grid-cols-[repeat(auto-fit,minmax(13rem,1fr))] gap-3"
+        >
           {tariffs.map((x) => (
             <OptionCard
               key={x.id}
@@ -375,11 +395,18 @@ export function StartSessionModal({ open, onStarted, onLogout }: StartSessionMod
               title={x.name}
               hint={
                 x.isPackage && x.packagePrice
-                  ? t('wallet.packageMinutes', { minutes: x.packageMinutes ?? x.minMinutes, price: formatMoney(x.packagePrice, locale) })
+                  ? t('wallet.packageMinutes', {
+                      minutes: x.packageMinutes ?? x.minMinutes,
+                      price: formatMoney(x.packagePrice, locale),
+                    })
                   : t('wallet.perHour', { price: formatMoney(x.pricePerHour, locale) })
               }
             >
-              {x.timeWindows.length > 0 && <span className="text-xs text-accent">{x.timeWindows.map((w) => describeWindow(w, locale, t)).join(' · ')}</span>}
+              {x.timeWindows.length > 0 && (
+                <span className="text-xs text-accent">
+                  {x.timeWindows.map((w) => describeWindow(w, locale, t)).join(' · ')}
+                </span>
+              )}
             </OptionCard>
           ))}
         </div>
@@ -388,8 +415,18 @@ export function StartSessionModal({ open, onStarted, onLogout }: StartSessionMod
       {tariff && !tariff.isPackage && (
         <div className="mt-5 flex flex-col gap-4">
           <div role="radiogroup" aria-label={t('wallet.chooseMinutes')} className="grid grid-cols-2 gap-3">
-            <OptionCard selected={prepaid} onSelect={() => setPrepaid(true)} title={t('wallet.prepaid')} hint={t('wallet.prepaidHint')} />
-            <OptionCard selected={!prepaid} onSelect={() => setPrepaid(false)} title={t('wallet.postpaid')} hint={t('wallet.postpaidHint')} />
+            <OptionCard
+              selected={prepaid}
+              onSelect={() => setPrepaid(true)}
+              title={t('wallet.prepaid')}
+              hint={t('wallet.prepaidHint')}
+            />
+            <OptionCard
+              selected={!prepaid}
+              onSelect={() => setPrepaid(false)}
+              title={t('wallet.postpaid')}
+              hint={t('wallet.postpaidHint')}
+            />
           </div>
           {prepaid && (
             <div>
@@ -423,12 +460,16 @@ export function StartSessionModal({ open, onStarted, onLogout }: StartSessionMod
           <dd className="text-right font-semibold text-text">{tariff.name}</dd>
           <dt className="text-muted">{t('wallet.estimatedCost')}</dt>
           <dd className="tnum text-right font-bold text-text">
-            {price ? formatMoney(price, locale) : t('wallet.perHour', { price: formatMoney(tariff.pricePerHour, locale) })}
+            {price
+              ? formatMoney(price, locale)
+              : t('wallet.perHour', { price: formatMoney(tariff.pricePerHour, locale) })}
           </dd>
           {after && (
             <>
               <dt className="text-muted">{t('wallet.balanceAfter')}</dt>
-              <dd className={clsx('tnum text-right font-semibold', notEnough ? 'text-danger' : 'text-success')}>{formatMoney(after, locale)}</dd>
+              <dd className={clsx('tnum text-right font-semibold', notEnough ? 'text-danger' : 'text-success')}>
+                {formatMoney(after, locale)}
+              </dd>
             </>
           )}
         </dl>
@@ -449,13 +490,29 @@ export function StartSessionModal({ open, onStarted, onLogout }: StartSessionMod
 type LoginTab = 'password' | 'qr' | 'guest';
 
 const KeyIcon = (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
     <circle cx="8" cy="15" r="4" />
     <path d="M10.85 12.15L19 4M18 5l2 2M15 8l2 2" />
   </svg>
 );
 const QrIcon = (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
     <rect x="3" y="3" width="7" height="7" rx="1" />
     <rect x="14" y="3" width="7" height="7" rx="1" />
     <rect x="3" y="14" width="7" height="7" rx="1" />
@@ -463,13 +520,29 @@ const QrIcon = (
   </svg>
 );
 const UserIcon = (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
     <circle cx="12" cy="8" r="4" />
     <path d="M4 21c0-4 3.6-7 8-7s8 3 8 7" />
   </svg>
 );
 const BellIcon = (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
     <path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4l2-2zM10 21h4" />
   </svg>
 );
@@ -543,7 +616,13 @@ export default function LockScreen(): JSX.Element {
     setCalling(true);
     try {
       await api.system.callAdmin('help');
-      push({ id: 'call-admin', title: t('notifications.callAdminSent'), body: t('admin.adminOnWay'), level: 'success', source: 'system' });
+      push({
+        id: 'call-admin',
+        title: t('notifications.callAdminSent'),
+        body: t('admin.adminOnWay'),
+        level: 'success',
+        source: 'system',
+      });
     } catch (e) {
       pushError(e, t('admin.callAdminTitle'));
     } finally {
@@ -559,7 +638,9 @@ export default function LockScreen(): JSX.Element {
       <div className="relative z-10 flex h-full w-full flex-col gap-[var(--gap)] px-[var(--gutter)] py-[var(--gap)]">
         <header className="flex items-start justify-between gap-[var(--gap)]">
           <div className="min-w-0">
-            <p className="text-glow truncate text-2xl font-black uppercase tracking-[0.2em] text-text">{t('idle.clubName')}</p>
+            <p className="text-glow truncate text-2xl font-black uppercase tracking-[0.2em] text-text">
+              {t('idle.clubName')}
+            </p>
             {pcName && <p className="mt-1 text-base text-muted">{t('idle.pcName', { name: pcName, zone: pcZone })}</p>}
           </div>
           <div className="flex items-center gap-[var(--gap)]">

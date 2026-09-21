@@ -37,7 +37,13 @@ export function StatCard({ label, value, hint, icon, tone = 'primary', className
   return (
     <div className={clsx('glass flex items-center gap-4 rounded-xl p-5', className)}>
       {icon && (
-        <span aria-hidden="true" className={clsx('inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-lg [&>svg]:h-7 [&>svg]:w-7', TONE[tone])}>
+        <span
+          aria-hidden="true"
+          className={clsx(
+            'inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-lg [&>svg]:h-7 [&>svg]:w-7',
+            TONE[tone],
+          )}
+        >
           {icon}
         </span>
       )}
@@ -50,7 +56,14 @@ export function StatCard({ label, value, hint, icon, tone = 'primary', className
   );
 }
 
-const ICON_PROPS = { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
+const ICON_PROPS = {
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 2,
+  strokeLinecap: 'round',
+  strokeLinejoin: 'round',
+} as const;
 
 function ClockIcon(): JSX.Element {
   return (
@@ -128,7 +141,9 @@ export function FavoriteGames({ games }: FavoriteGamesProps): JSX.Element {
                   max={max}
                   size="sm"
                   label={title}
-                  valueText={t('profile.hoursPlayed', { hours: formatNumber(f.hours, locale, { maximumFractionDigits: 1 }) })}
+                  valueText={t('profile.hoursPlayed', {
+                    hours: formatNumber(f.hours, locale, { maximumFractionDigits: 1 }),
+                  })}
                 />
               </div>
             </button>
@@ -167,7 +182,10 @@ export function Stats({ stats, loading }: StatsProps): JSX.Element {
   if (!stats || stats.sessionsCount === 0) {
     return (
       <div className="glass flex min-h-[16rem] flex-col items-center justify-center gap-2 rounded-xl p-[var(--gap)] text-center">
-        <span aria-hidden="true" className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-primary/15 text-primary [&>svg]:h-8 [&>svg]:w-8">
+        <span
+          aria-hidden="true"
+          className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-primary/15 text-primary [&>svg]:h-8 [&>svg]:w-8"
+        >
           <ClockIcon />
         </span>
         <p className="text-lg text-muted">{stats ? t('profile.statsEmpty') : t('common.unavailable')}</p>
@@ -180,12 +198,24 @@ export function Stats({ stats, loading }: StatsProps): JSX.Element {
       <div className="grid grid-cols-2 gap-[var(--gap)] xl:grid-cols-4">
         <StatCard
           label={t('profile.totalHours')}
-          value={t('profile.hoursPlayed', { hours: formatNumber(stats.totalHours, locale, { maximumFractionDigits: 1 }) })}
+          value={t('profile.hoursPlayed', {
+            hours: formatNumber(stats.totalHours, locale, { maximumFractionDigits: 1 }),
+          })}
           icon={<ClockIcon />}
           tone="primary"
         />
-        <StatCard label={t('profile.sessions')} value={pluralize('sessions', stats.sessionsCount)} icon={<PlayIcon />} tone="accent" />
-        <StatCard label={t('profile.spent')} value={formatMoney(stats.spent, locale)} icon={<WalletIcon />} tone="success" />
+        <StatCard
+          label={t('profile.sessions')}
+          value={pluralize('sessions', stats.sessionsCount)}
+          icon={<PlayIcon />}
+          tone="accent"
+        />
+        <StatCard
+          label={t('profile.spent')}
+          value={formatMoney(stats.spent, locale)}
+          icon={<WalletIcon />}
+          tone="success"
+        />
         <StatCard
           label={t('profile.rank')}
           value={stats.rank > 0 ? t('profile.rankValue', { rank: formatNumber(stats.rank, locale) }) : '—'}

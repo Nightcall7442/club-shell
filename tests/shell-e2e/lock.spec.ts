@@ -16,7 +16,12 @@ function loadStrings(locale: string): Strings {
 /** `t('lock.title')` over a raw bundle (no i18next in the test runner). */
 function translator(bundle: Strings): (key: string, vars?: Record<string, string | number>) => string {
   return (key, vars = {}) => {
-    const value = key.split('.').reduce<unknown>((node, part) => (typeof node === 'object' && node !== null ? (node as Strings)[part] : undefined), bundle);
+    const value = key
+      .split('.')
+      .reduce<unknown>(
+        (node, part) => (typeof node === 'object' && node !== null ? (node as Strings)[part] : undefined),
+        bundle,
+      );
     if (typeof value !== 'string') {
       throw new Error(`missing i18n key: ${key}`);
     }
@@ -191,7 +196,9 @@ test.describe('lock screen', () => {
 
     await startSession(page);
     await expect(page.getByText(en('desktop.guestBadge'), { exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: new RegExp(`^${escapeRegExp(en('desktop.userMenu'))}: Playwright`) })).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: new RegExp(`^${escapeRegExp(en('desktop.userMenu'))}: Playwright`) }),
+    ).toBeVisible();
   });
 
   test('locking from the top bar returns to /lock and unlocking restores the session', async ({ page }) => {

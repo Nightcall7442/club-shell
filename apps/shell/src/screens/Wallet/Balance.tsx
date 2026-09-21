@@ -18,7 +18,15 @@ export interface BalanceProps {
 }
 
 const WalletIcon = (): JSX.Element => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
     <path d="M3 7a2 2 0 0 1 2-2h13v4H5a2 2 0 0 1-2-2zM3 7v10a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1H5" />
     <circle cx="16.5" cy="13.5" r="1.25" fill="currentColor" stroke="none" />
   </svg>
@@ -41,7 +49,10 @@ export const Balance = forwardRef<HTMLButtonElement, BalanceProps>(function Bala
   const loading = balance === null && status !== 'error';
 
   return (
-    <section aria-label={t('wallet.balance')} className={clsx('glass relative shrink-0 overflow-hidden rounded-xl p-6', className)}>
+    <section
+      aria-label={t('wallet.balance')}
+      className={clsx('glass relative shrink-0 overflow-hidden rounded-xl p-6', className)}
+    >
       <div
         aria-hidden="true"
         className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full bg-primary/25 blur-3xl"
@@ -82,7 +93,9 @@ export const Balance = forwardRef<HTMLButtonElement, BalanceProps>(function Bala
                 </div>
                 <div className="flex items-baseline gap-2 text-sm">
                   <dd className="tnum text-muted">
-                    {t('wallet.updatedAt', { time: `${formatRelativeDay(balance.updatedAt, locale)}, ${formatTime(balance.updatedAt, locale)}` })}
+                    {t('wallet.updatedAt', {
+                      time: `${formatRelativeDay(balance.updatedAt, locale)}, ${formatTime(balance.updatedAt, locale)}`,
+                    })}
                   </dd>
                 </div>
               </dl>

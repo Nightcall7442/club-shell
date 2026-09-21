@@ -49,7 +49,15 @@ interface SlideViewProps {
   onEnded: () => void;
 }
 
-function MediaSlide({ item, animations, onEnded }: { item: AdItem; animations: boolean; onEnded: () => void }): JSX.Element {
+function MediaSlide({
+  item,
+  animations,
+  onEnded,
+}: {
+  item: AdItem;
+  animations: boolean;
+  onEnded: () => void;
+}): JSX.Element {
   const { t } = useTranslation();
   const { url, error } = useResolvedAsset(item.url);
   const [failed, setFailed] = useState(false);
@@ -58,7 +66,12 @@ function MediaSlide({ item, animations, onEnded }: { item: AdItem; animations: b
 
   if (error || failed) {
     return (
-      <div role="img" aria-label={t('idle.ads')} className="absolute inset-0" style={{ background: PROMO_GRADIENTS[1] }} />
+      <div
+        role="img"
+        aria-label={t('idle.ads')}
+        className="absolute inset-0"
+        style={{ background: PROMO_GRADIENTS[1] }}
+      />
     );
   }
   if (!url) {
@@ -95,10 +108,17 @@ function MediaSlide({ item, animations, onEnded }: { item: AdItem; animations: b
 function PromoSlide({ n }: { n: 1 | 2 | 3 }): JSX.Element {
   const { t } = useTranslation();
   return (
-    <div className="absolute inset-0 flex items-center justify-center p-[var(--gutter)]" style={{ background: PROMO_GRADIENTS[n] }}>
+    <div
+      className="absolute inset-0 flex items-center justify-center p-[var(--gutter)]"
+      style={{ background: PROMO_GRADIENTS[n] }}
+    >
       <div className="max-w-[60vw] text-center">
-        <p className="text-glow mb-[var(--gap)] text-lg font-bold uppercase tracking-[0.3em] text-accent">{t('idle.promo')}</p>
-        <h2 className="text-[var(--fs-display)] font-black leading-[1.05] text-text">{t(`idle.promoSlides.s${n}.title`)}</h2>
+        <p className="text-glow mb-[var(--gap)] text-lg font-bold uppercase tracking-[0.3em] text-accent">
+          {t('idle.promo')}
+        </p>
+        <h2 className="text-[var(--fs-display)] font-black leading-[1.05] text-text">
+          {t(`idle.promoSlides.s${n}.title`)}
+        </h2>
         <p className="mt-[var(--gap)] text-2xl text-text/80">{t(`idle.promoSlides.s${n}.body`)}</p>
       </div>
     </div>
@@ -106,14 +126,23 @@ function PromoSlide({ n }: { n: 1 | 2 | 3 }): JSX.Element {
 }
 
 function SlideView({ slide, animations, onEnded }: SlideViewProps): JSX.Element {
-  return slide.kind === 'media' ? <MediaSlide item={slide.item} animations={animations} onEnded={onEnded} /> : <PromoSlide n={slide.n} />;
+  return slide.kind === 'media' ? (
+    <MediaSlide item={slide.item} animations={animations} onEnded={onEnded} />
+  ) : (
+    <PromoSlide n={slide.n} />
+  );
 }
 
 /**
  * Auto-advancing full-bleed ad/promo carousel: images (Ken Burns pan) and videos from the configured playlist, or
  * three built-in promo slides. Crossfades between slides; the next image is preloaded.
  */
-export function AdsCarousel({ items, fullscreen = false, showCounter = true, className }: AdsCarouselProps): JSX.Element {
+export function AdsCarousel({
+  items,
+  fullscreen = false,
+  showCounter = true,
+  className,
+}: AdsCarouselProps): JSX.Element {
   const { t } = useTranslation();
   const playlist = useSettingsStore((s) => s.shellConfig?.ads.playlist);
   const animations = useThemeStore((s) => s.theme.animations);
@@ -170,7 +199,11 @@ export function AdsCarousel({ items, fullscreen = false, showCounter = true, cla
   }
 
   return (
-    <div role="region" aria-label={t('idle.ads')} className={clsx(fullscreen ? 'fixed inset-0 z-0' : 'absolute inset-0', 'overflow-hidden bg-bg', className)}>
+    <div
+      role="region"
+      aria-label={t('idle.ads')}
+      className={clsx(fullscreen ? 'fixed inset-0 z-0' : 'absolute inset-0', 'overflow-hidden bg-bg', className)}
+    >
       <AnimatePresence initial={false}>
         <motion.div
           key={slide.key}
@@ -186,10 +219,18 @@ export function AdsCarousel({ items, fullscreen = false, showCounter = true, cla
 
       {showCounter && slides.length > 1 && (
         <div className="pointer-events-none absolute bottom-[var(--gap)] right-[var(--gutter)] flex items-center gap-3 text-sm text-text/80">
-          <span className="tnum glass rounded-full px-3 py-1">{t('idle.adOf', { index: safeIndex + 1, total: slides.length })}</span>
+          <span className="tnum glass rounded-full px-3 py-1">
+            {t('idle.adOf', { index: safeIndex + 1, total: slides.length })}
+          </span>
           <span aria-hidden="true" className="flex items-center gap-1.5">
             {slides.map((s, i) => (
-              <span key={s.key} className={clsx('h-2 rounded-full transition-all duration-[var(--dur-base)]', i === safeIndex ? 'w-6 bg-primary' : 'w-2 bg-text/40')} />
+              <span
+                key={s.key}
+                className={clsx(
+                  'h-2 rounded-full transition-all duration-[var(--dur-base)]',
+                  i === safeIndex ? 'w-6 bg-primary' : 'w-2 bg-text/40',
+                )}
+              />
             ))}
           </span>
         </div>

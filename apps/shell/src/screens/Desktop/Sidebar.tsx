@@ -17,7 +17,15 @@ import { selectFeatures, useSettingsStore } from '@/store/settings';
 // Icons
 // ---------------------------------------------------------------------------------------------------------------------
 
-const svgProps = { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true } as const;
+const svgProps = {
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 1.8,
+  strokeLinecap: 'round',
+  strokeLinejoin: 'round',
+  'aria-hidden': true,
+} as const;
 
 const ICONS = {
   home: (
@@ -142,7 +150,9 @@ export function Sidebar(): JSX.Element {
   const unread = useChatStore(selectUnreadTotal);
   const items = useMemo(() => visibleNavItems(features), [features]);
 
-  const [auto, setAuto] = useState(() => (typeof window === 'undefined' ? false : window.matchMedia(COLLAPSE_QUERY).matches));
+  const [auto, setAuto] = useState(() =>
+    typeof window === 'undefined' ? false : window.matchMedia(COLLAPSE_QUERY).matches,
+  );
   const [manual, setManual] = useState<boolean | null>(null);
   const collapsed = manual ?? auto;
 
@@ -210,10 +220,18 @@ export function Sidebar(): JSX.Element {
                   )
                 }
               >
-                <span aria-hidden="true" className="relative inline-flex h-7 w-7 shrink-0 items-center justify-center [&>svg]:h-full [&>svg]:w-full">
+                <span
+                  aria-hidden="true"
+                  className="relative inline-flex h-7 w-7 shrink-0 items-center justify-center [&>svg]:h-full [&>svg]:w-full"
+                >
                   {ICONS[item.key]}
                   {badge && collapsed && (
-                    <Badge tone="danger" size="sm" solid className="absolute -right-3 -top-2 h-5 min-w-[1.25rem] px-1 text-[0.65rem]">
+                    <Badge
+                      tone="danger"
+                      size="sm"
+                      solid
+                      className="absolute -right-3 -top-2 h-5 min-w-[1.25rem] px-1 text-[0.65rem]"
+                    >
                       {badge}
                     </Badge>
                   )}
@@ -241,7 +259,10 @@ export function Sidebar(): JSX.Element {
             collapsed ? 'justify-center' : 'px-4',
           )}
         >
-          <span aria-hidden="true" className="inline-flex h-6 w-6 shrink-0 items-center justify-center [&>svg]:h-full [&>svg]:w-full">
+          <span
+            aria-hidden="true"
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center [&>svg]:h-full [&>svg]:w-full"
+          >
             {collapsed ? ICONS.expand : ICONS.collapse}
           </span>
           {!collapsed && <span className="truncate text-sm">{t('desktop.sidebarCollapse')}</span>}

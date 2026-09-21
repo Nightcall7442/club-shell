@@ -68,7 +68,10 @@ export default function IdleScreen(): JSX.Element {
   return (
     <div className="relative h-full w-full overflow-hidden bg-bg">
       <AdsCarousel />
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgb(var(--c-bg)/0.55)_0%,transparent_30%,transparent_55%,rgb(var(--c-bg)/0.85)_100%)]" />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgb(var(--c-bg)/0.55)_0%,transparent_30%,transparent_55%,rgb(var(--c-bg)/0.85)_100%)]"
+      />
 
       <div className="pointer-events-none relative z-10 flex h-full w-full flex-col justify-between px-[var(--gutter)] py-[var(--gap)]">
         <motion.header
@@ -78,8 +81,12 @@ export default function IdleScreen(): JSX.Element {
           className="flex items-start justify-between gap-[var(--gap)]"
         >
           <div className="min-w-0">
-            <p className="text-glow truncate text-3xl font-black uppercase tracking-[0.25em] text-text">{t('idle.clubName')}</p>
-            <p className="mt-1 text-lg text-text/80">{pcName ? t('idle.pcName', { name: pcName, zone: pcZone }) : t('idle.pcFree')}</p>
+            <p className="text-glow truncate text-3xl font-black uppercase tracking-[0.25em] text-text">
+              {t('idle.clubName')}
+            </p>
+            <p className="mt-1 text-lg text-text/80">
+              {pcName ? t('idle.pcName', { name: pcName, zone: pcZone }) : t('idle.pcFree')}
+            </p>
           </div>
           <Clock className="text-[var(--fs-display)]" />
         </motion.header>
@@ -101,9 +108,23 @@ export default function IdleScreen(): JSX.Element {
             className="flex flex-col items-center gap-4 pb-[var(--gap)] text-center"
           >
             <span aria-hidden="true" className="relative flex h-24 w-24 items-center justify-center">
-              <span className={animations ? 'absolute inset-0 animate-pulse-glow rounded-full bg-primary/20' : 'absolute inset-0 rounded-full bg-primary/20'} />
+              <span
+                className={
+                  animations
+                    ? 'absolute inset-0 animate-pulse-glow rounded-full bg-primary/20'
+                    : 'absolute inset-0 rounded-full bg-primary/20'
+                }
+              />
               <span className="glass-strong border-glow relative flex h-16 w-16 items-center justify-center rounded-full text-primary">
-                <svg viewBox="0 0 24 24" className="h-8 w-8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-8 w-8"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
                   <path d="M9 11V5a2 2 0 0 1 4 0v6M13 11V8a2 2 0 0 1 4 0v4M17 12a2 2 0 0 1 4 0v3a6 6 0 0 1-6 6h-2a6 6 0 0 1-5-2.7L4 13.5A1.8 1.8 0 0 1 6.8 11l2.2 2.5" />
                 </svg>
               </span>

@@ -23,13 +23,29 @@ export interface CartProps {
 }
 
 const TrashIcon = (): JSX.Element => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
     <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />
   </svg>
 );
 
 const BagIcon = (): JSX.Element => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
     <path d="M6 8h12l1 13H5L6 8zM9 8V6a3 3 0 0 1 6 0v2" />
   </svg>
 );
@@ -129,7 +145,11 @@ export function Cart({ onInsufficientFunds, className }: CartProps): JSX.Element
                       {formatMoney(product.price, locale)} × {qty}
                     </p>
                   </div>
-                  <div className="flex items-center gap-1" role="group" aria-label={`${t('shop.qty')}: ${product.title}`}>
+                  <div
+                    className="flex items-center gap-1"
+                    role="group"
+                    aria-label={`${t('shop.qty')}: ${product.title}`}
+                  >
                     <Button
                       size="md"
                       variant="ghost"
@@ -180,7 +200,9 @@ export function Cart({ onInsufficientFunds, className }: CartProps): JSX.Element
           </div>
           <div className="flex items-center justify-between text-sm">
             <dt className="text-muted">{t('shop.balanceAfter')}</dt>
-            <dd className={clsx('tnum font-semibold', enough ? 'text-muted' : 'text-danger')}>{formatMoney(after, locale)}</dd>
+            <dd className={clsx('tnum font-semibold', enough ? 'text-muted' : 'text-danger')}>
+              {formatMoney(after, locale)}
+            </dd>
           </div>
         </dl>
         {!empty && !enough && <p className="text-sm text-danger">{t('shop.topUpFirst')}</p>}

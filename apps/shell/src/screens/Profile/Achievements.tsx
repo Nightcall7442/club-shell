@@ -14,7 +14,15 @@ import { formatDate, formatNumber } from '@/lib/format';
 
 function TrophyIcon(): JSX.Element {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <path d="M8 4h8v5a4 4 0 0 1-8 0zM8 6H5a3 3 0 0 0 3 5M16 6h3a3 3 0 0 1-3 5M12 13v4M8 20h8" />
     </svg>
   );
@@ -22,7 +30,15 @@ function TrophyIcon(): JSX.Element {
 
 function LockIcon(): JSX.Element {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <rect x="5" y="11" width="14" height="10" rx="2" />
       <path d="M8 11V7a4 4 0 0 1 8 0v4" />
     </svg>
@@ -41,7 +57,10 @@ export function AchievementCard({ item }: AchievementCardProps): JSX.Element {
 
   const unlocked = Boolean(item.unlockedAt);
   const { current, target } = item.progress;
-  const progressText = t('profile.progress', { current: formatNumber(current, locale), target: formatNumber(target, locale) });
+  const progressText = t('profile.progress', {
+    current: formatNumber(current, locale),
+    target: formatNumber(target, locale),
+  });
 
   return (
     <article
@@ -128,7 +147,10 @@ export function Achievements({ items, loading }: AchievementsProps): JSX.Element
   if (!items || items.length === 0) {
     return (
       <div className="glass flex min-h-[16rem] flex-col items-center justify-center gap-2 rounded-xl p-[var(--gap)] text-center">
-        <span aria-hidden="true" className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-primary/15 text-primary [&>svg]:h-8 [&>svg]:w-8">
+        <span
+          aria-hidden="true"
+          className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-primary/15 text-primary [&>svg]:h-8 [&>svg]:w-8"
+        >
           <TrophyIcon />
         </span>
         <p className="text-lg text-muted">{items ? t('profile.noAchievements') : t('common.unavailable')}</p>
@@ -153,9 +175,18 @@ export function Achievements({ items, loading }: AchievementsProps): JSX.Element
     <div className="flex flex-col gap-[var(--gap)]">
       <div className="flex flex-wrap items-center gap-4">
         <p className="text-lg text-muted">
-          {t('profile.achievementsUnlocked', { unlocked: formatNumber(unlockedCount, locale), total: formatNumber(items.length, locale) })}
+          {t('profile.achievementsUnlocked', {
+            unlocked: formatNumber(unlockedCount, locale),
+            total: formatNumber(items.length, locale),
+          })}
         </p>
-        <ProgressBar value={unlockedCount} max={items.length} size="sm" label={t('profile.achievements')} className="max-w-xs" />
+        <ProgressBar
+          value={unlockedCount}
+          max={items.length}
+          size="sm"
+          label={t('profile.achievements')}
+          className="max-w-xs"
+        />
       </div>
       <ul role="list" className="grid grid-cols-2 gap-[var(--gap)] xl:grid-cols-3 2xl:grid-cols-4">
         {sorted.map((item) => (

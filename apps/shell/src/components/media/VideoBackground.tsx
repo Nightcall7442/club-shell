@@ -19,7 +19,13 @@ export interface VideoBackgroundProps {
  * Muted looping background video. Pauses while the page is hidden, the shell lost focus, a game is running,
  * or `paused` is set; renders nothing when the theme disables animations (the wallpaper stays).
  */
-export function VideoBackground({ src, poster, opacity = 1, paused = false, className }: VideoBackgroundProps): JSX.Element | null {
+export function VideoBackground({
+  src,
+  poster,
+  opacity = 1,
+  paused = false,
+  className,
+}: VideoBackgroundProps): JSX.Element | null {
   const video = useRef<HTMLVideoElement>(null);
   const [url, setUrl] = useState<string | null>(null);
   const [posterUrl, setPosterUrl] = useState<string | undefined>(undefined);

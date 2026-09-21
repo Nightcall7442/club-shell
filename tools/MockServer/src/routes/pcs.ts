@@ -65,8 +65,12 @@ function assignPc(hwid: string, previousPcId: string | null, machineName: string
   const byHwid = db.pcs.find((p) => p.hwid === hwid);
   if (byHwid) return byHwid;
   const previous = previousPcId ? db.pcs.find((p) => p.id === previousPcId) : undefined;
-  if (previous && (previous.hwid === null || db.pcs.every((p) => p.hwid !== previous.hwid || p === previous))) return previous;
-  const free = process.env['MOCK_STRICT_REGISTER'] === '1' ? undefined : db.pcs.find((p) => p.hwid === null && p.status !== 'maintenance' && !p.currentSessionId);
+  if (previous && (previous.hwid === null || db.pcs.every((p) => p.hwid !== previous.hwid || p === previous)))
+    return previous;
+  const free =
+    process.env['MOCK_STRICT_REGISTER'] === '1'
+      ? undefined
+      : db.pcs.find((p) => p.hwid === null && p.status !== 'maintenance' && !p.currentSessionId);
   if (free) return free;
   const number = Math.max(...db.pcs.map((p) => p.number)) + 1;
   const pending: PcRecord = {
@@ -188,7 +192,8 @@ export function pcsRoutes(app: FastifyInstance): void {
     if (hardware) pc.hardware = hardware as unknown as HardwareInfo;
     pc.metrics = [...pc.metrics, ...(samples as unknown as PcMetrics[])].slice(-TELEMETRY_MAX_SAMPLES);
     for (const e of events) {
-      if (isObject(e)) console.warn(`[telemetry] ${pc.name}: ${String(e['kind'])} ${JSON.stringify(e['data'] ?? null)}`);
+      if (isObject(e))
+        console.warn(`[telemetry] ${pc.name}: ${String(e['kind'])} ${JSON.stringify(e['data'] ?? null)}`);
     }
     markDirty();
     return reply.code(204).send();
@@ -209,20 +214,29 @@ export function pcsRoutes(app: FastifyInstance): void {
     return { items: pendingCommands(pc.id).map((c) => c.envelope) };
   });
 
-  app.post<{ Params: { pcId: string; commandId: string } }>('/agents/:pcId/commands/:commandId/ack', async (req, reply) => {
-    const pc = requireAgent(req, req.params.pcId);
-    const b = body(req);
-    const ok = bool(b, 'ok');
-    const rec = db.commands.find((c) => c.envelope.id === req.params.commandId);
-    if (!rec || rec.pcId !== pc.id) throw errors.notFound('command');
-    resolveAck(req.params.commandId, { ok, error: isIpcError(b['error']) ? b['error'] : null, result: optObj(b, 'result') });
-    return reply.code(204).send();
-  });
+  app.post<{ Params: { pcId: string; commandId: string } }>(
+    '/agents/:pcId/commands/:commandId/ack',
+    async (req, reply) => {
+      const pc = requireAgent(req, req.params.pcId);
+      const b = body(req);
+      const ok = bool(b, 'ok');
+      const rec = db.commands.find((c) => c.envelope.id === req.params.commandId);
+      if (!rec || rec.pcId !== pc.id) throw errors.notFound('command');
+      resolveAck(req.params.commandId, {
+        ok,
+        error: isIpcError(b['error']) ? b['error'] : null,
+        result: optObj(b, 'result'),
+      });
+      return reply.code(204).send();
+    },
+  );
 
   app.get<{ Querystring: { zone?: string } }>('/pcs', async (req) => {
     const me = requireAgent(req);
     const zone = req.query.zone?.toLowerCase();
-    return { items: db.pcs.filter((p) => !zone || p.zone.toLowerCase() === zone).map((p) => publicPc(p, p.id === me.id)) };
+    return {
+      items: db.pcs.filter((p) => !zone || p.zone.toLowerCase() === zone).map((p) => publicPc(p, p.id === me.id)),
+    };
   });
 
   app.get<{ Params: { pcId: string } }>('/pcs/:pcId', async (req) => {
@@ -257,7 +271,10 @@ export function pcsRoutes(app: FastifyInstance): void {
         });
       }, 3000);
       ack.unref();
-      return { status: 201, body: { ticketId: ticket.ticketId, createdAt: ticket.createdAt, queuePosition: db.tickets.length } };
+      return {
+        status: 201,
+        body: { ticketId: ticket.ticketId, createdAt: ticket.createdAt, queuePosition: db.tickets.length },
+      };
     });
   });
 

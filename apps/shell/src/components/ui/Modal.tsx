@@ -37,7 +37,8 @@ const SIZE: Record<ModalSize, string> = {
   full: 'h-[94vh] w-[96vw]',
 };
 
-const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+const FOCUSABLE =
+  'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
 let openCount = 0;
 
@@ -63,7 +64,9 @@ function useModalGlobals(open: boolean): void {
 }
 
 function focusables(container: HTMLElement): HTMLElement[] {
-  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.offsetParent !== null || el === document.activeElement);
+  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+    (el) => el.offsetParent !== null || el === document.activeElement,
+  );
 }
 
 /** Portal dialog with focus trap, Escape, backdrop click and fade/slide motion. */
@@ -98,7 +101,8 @@ export function Modal({
     }
     restoreTo.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const frame = requestAnimationFrame(() => {
-      const target = initialFocusRef?.current ?? (panel.current ? focusables(panel.current)[0] : undefined) ?? panel.current;
+      const target =
+        initialFocusRef?.current ?? (panel.current ? focusables(panel.current)[0] : undefined) ?? panel.current;
       target?.focus();
     });
     return () => {
@@ -176,7 +180,10 @@ export function Modal({
         <motion.div
           key="backdrop"
           className="fixed inset-0 z-[100] flex items-center justify-center bg-bg/70 p-[var(--gutter)]"
-          style={{ backdropFilter: 'blur(calc(var(--blur) * 0.6))', WebkitBackdropFilter: 'blur(calc(var(--blur) * 0.6))' }}
+          style={{
+            backdropFilter: 'blur(calc(var(--blur) * 0.6))',
+            WebkitBackdropFilter: 'blur(calc(var(--blur) * 0.6))',
+          }}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -191,7 +198,11 @@ export function Modal({
             aria-describedby={description ? descId : undefined}
             tabIndex={-1}
             data-nav-scope="modal"
-            className={clsx('glass-strong flex max-h-[94vh] flex-col overflow-hidden rounded-xl outline-none', SIZE[size], className)}
+            className={clsx(
+              'glass-strong flex max-h-[94vh] flex-col overflow-hidden rounded-xl outline-none',
+              SIZE[size],
+              className,
+            )}
             initial={{ opacity: 0, y: 24, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 12, scale: 0.98 }}
@@ -202,7 +213,10 @@ export function Modal({
               <header className="flex items-start gap-4 px-6 pt-6">
                 <div className="min-w-0 flex-1">
                   {title && (
-                    <h2 id={titleId} className={clsx('text-2xl font-bold leading-tight', danger ? 'text-danger' : 'text-text')}>
+                    <h2
+                      id={titleId}
+                      className={clsx('text-2xl font-bold leading-tight', danger ? 'text-danger' : 'text-text')}
+                    >
                       {title}
                     </h2>
                   )}
@@ -220,15 +234,29 @@ export function Modal({
                     onClick={onClose}
                     className="focus-ring -mr-2 -mt-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted hover:bg-text/10 hover:text-text"
                   >
-                    <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                    <svg
+                      viewBox="0 0 24 24"
+                      className="h-6 w-6"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      aria-hidden="true"
+                    >
                       <path d="M6 6l12 12M18 6L6 18" />
                     </svg>
                   </button>
                 )}
               </header>
             )}
-            <div className="themed-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-6 py-5">{children}</div>
-            {footer && <footer className="flex flex-wrap items-center justify-end gap-3 border-t border-text/10 px-6 py-4">{footer}</footer>}
+            <div className="themed-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-6 py-5">
+              {children}
+            </div>
+            {footer && (
+              <footer className="flex flex-wrap items-center justify-end gap-3 border-t border-text/10 px-6 py-4">
+                {footer}
+              </footer>
+            )}
           </motion.div>
         </motion.div>
       )}

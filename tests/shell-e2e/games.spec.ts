@@ -17,7 +17,12 @@ function loadStrings(locale: string): Strings {
 /** `t('games.title')` over the raw bundle, with `{{var}}` interpolation. */
 function translator(bundle: Strings): (key: string, vars?: Record<string, string | number>) => string {
   return (key, vars = {}) => {
-    const value = key.split('.').reduce<unknown>((node, part) => (typeof node === 'object' && node !== null ? (node as Strings)[part] : undefined), bundle);
+    const value = key
+      .split('.')
+      .reduce<unknown>(
+        (node, part) => (typeof node === 'object' && node !== null ? (node as Strings)[part] : undefined),
+        bundle,
+      );
     if (typeof value !== 'string') {
       throw new Error(`missing i18n key: ${key}`);
     }
@@ -198,11 +203,16 @@ test.describe('games library', () => {
     await expect(page.getByRole('heading', { level: 1, name: DOTA })).toBeVisible();
     await expect(page.getByRole('heading', { level: 2, name: en('games.description'), exact: true })).toBeVisible();
 
-    await page.getByRole('button', { name: en('games.backToGames') }).first().click();
+    await page
+      .getByRole('button', { name: en('games.backToGames') })
+      .first()
+      .click();
     await expect(page).toHaveURL(/#\/games$/);
     await expect(grid(page)).toBeVisible();
 
-    await hero(page, DOTA).getByRole('button', { name: en('games.details') }).click();
+    await hero(page, DOTA)
+      .getByRole('button', { name: en('games.details') })
+      .click();
     await expect(page).toHaveURL(/#\/games\/[0-9a-f-]{36}$/);
     await expect(page.getByRole('heading', { level: 1, name: DOTA })).toBeVisible();
   });

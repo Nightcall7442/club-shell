@@ -36,7 +36,9 @@ export function allowedPresets(tariff: Tariff | null): number[] {
   if (!tariff) {
     return [...EXTEND_PRESETS];
   }
-  const ok = EXTEND_PRESETS.filter((m) => m >= tariff.minMinutes && (tariff.maxMinutes == null || m <= tariff.maxMinutes));
+  const ok = EXTEND_PRESETS.filter(
+    (m) => m >= tariff.minMinutes && (tariff.maxMinutes == null || m <= tariff.maxMinutes),
+  );
   return ok.length > 0 ? ok : [...EXTEND_PRESETS];
 }
 
@@ -112,7 +114,15 @@ export function SessionTimer({ compact = false, className }: SessionTimerProps):
   const total = s.secondsUsed + Math.max(0, s.secondsLeft);
   const progress = s.isOpenEnded ? 1 : total > 0 ? s.secondsUsed / total : 0;
   const label = timerLabel(s.isOpen, s.secondsLeft, s.secondsUsed);
-  const tone: RingProps['tone'] = !s.isOpen ? 'muted' : s.isCritical ? 'danger' : s.isWarning ? 'accent' : s.isOpenEnded ? 'muted' : 'primary';
+  const tone: RingProps['tone'] = !s.isOpen
+    ? 'muted'
+    : s.isCritical
+      ? 'danger'
+      : s.isWarning
+        ? 'accent'
+        : s.isOpenEnded
+          ? 'muted'
+          : 'primary';
   const canExtend = s.isOpen && !s.isOpenEnded;
 
   const badge = s.isLocked ? (
@@ -150,10 +160,20 @@ export function SessionTimer({ compact = false, className }: SessionTimerProps):
         )}
       >
         <div className="relative flex items-center justify-center">
-          <Ring progress={progress} size={ringSize} stroke={ringStroke} tone={tone} label={t('session.timerLabel')} valueText={label} />
+          <Ring
+            progress={progress}
+            size={ringSize}
+            stroke={ringStroke}
+            tone={tone}
+            label={t('session.timerLabel')}
+            valueText={label}
+          />
           {!compact && (
             <span
-              className={clsx('tnum absolute text-4xl font-bold leading-none', s.isCritical ? 'timer-critical' : s.isWarning ? 'timer-warning' : 'text-text')}
+              className={clsx(
+                'tnum absolute text-4xl font-bold leading-none',
+                s.isCritical ? 'timer-critical' : s.isWarning ? 'timer-warning' : 'text-text',
+              )}
               aria-hidden="true"
             >
               {label}
@@ -162,7 +182,12 @@ export function SessionTimer({ compact = false, className }: SessionTimerProps):
         </div>
         {compact ? (
           <span className="flex min-w-0 items-center gap-2">
-            <span className={clsx('tnum text-2xl font-bold leading-none', s.isCritical ? 'timer-critical' : s.isWarning ? 'timer-warning' : 'text-text')}>
+            <span
+              className={clsx(
+                'tnum text-2xl font-bold leading-none',
+                s.isCritical ? 'timer-critical' : s.isWarning ? 'timer-warning' : 'text-text',
+              )}
+            >
               {label}
             </span>
             {badge}
@@ -274,7 +299,9 @@ export function ExtendSessionModal({ open, onClose }: ExtendSessionModalProps): 
                   active ? 'border-glow bg-primary/15 text-text' : 'text-muted hover:bg-surface/80 hover:text-text',
                 )}
               >
-                <span className="text-2xl font-bold leading-none text-text">{t('session.extendMinutes', { minutes: m })}</span>
+                <span className="text-2xl font-bold leading-none text-text">
+                  {t('session.extendMinutes', { minutes: m })}
+                </span>
                 {price && <span className="tnum text-sm">{price}</span>}
               </button>
             );
@@ -291,7 +318,9 @@ export function ExtendSessionModal({ open, onClose }: ExtendSessionModalProps): 
               <dt className="text-muted">{t('wallet.estimatedCost')}</dt>
               <dd className="tnum text-right font-semibold">{formatMoney(cost, locale)}</dd>
               <dt className="text-muted">{t('wallet.balanceAfter')}</dt>
-              <dd className={clsx('tnum text-right font-semibold', insufficient ? 'text-danger' : 'text-success')}>{after ? formatMoney(after, locale) : '—'}</dd>
+              <dd className={clsx('tnum text-right font-semibold', insufficient ? 'text-danger' : 'text-success')}>
+                {after ? formatMoney(after, locale) : '—'}
+              </dd>
             </>
           )}
         </dl>

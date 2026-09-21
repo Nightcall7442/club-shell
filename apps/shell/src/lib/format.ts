@@ -85,7 +85,10 @@ export function formatMbps(mbps: number, locale: Locale): string {
 }
 
 /** Translates `format.<key>` with a count (i18next plural forms `_one/_few/_many/_other`). */
-export function pluralize(key: 'minutes' | 'hours' | 'seconds' | 'days' | 'items' | 'players' | 'games' | 'sessions' | 'points' | 'messages', count: number): string {
+export function pluralize(
+  key: 'minutes' | 'hours' | 'seconds' | 'days' | 'items' | 'players' | 'games' | 'sessions' | 'points' | 'messages',
+  count: number,
+): string {
   return i18n.t(`format.${key}`, { count });
 }
 
@@ -152,7 +155,13 @@ export function formatDateTime(iso: string, locale: Locale): string {
   if (Number.isNaN(t)) {
     return '—';
   }
-  return new Intl.DateTimeFormat(tag(locale), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).format(t);
+  return new Intl.DateTimeFormat(tag(locale), {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(t);
 }
 
 /** Relative day label: `Today` / `Yesterday` / `Tomorrow` / localized date. */
@@ -177,7 +186,10 @@ export function formatRelativeDay(iso: string, locale: Locale): string {
 
 /** Initials for avatar fallbacks (`Bobur Yusupov` → `BY`). */
 export function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter((p) => p.length > 0);
+  const parts = name
+    .trim()
+    .split(/\s+/)
+    .filter((p) => p.length > 0);
   if (parts.length === 0) {
     return '?';
   }

@@ -30,7 +30,14 @@ const OFFSET: Record<TooltipPlacement, { x?: number; y?: number }> = {
 };
 
 /** Delayed hover/focus tooltip; hidden on Escape and when the pointer leaves. */
-export function Tooltip({ content, children, placement = 'top', delayMs = 500, disabled = false, className }: TooltipProps): JSX.Element {
+export function Tooltip({
+  content,
+  children,
+  placement = 'top',
+  delayMs = 500,
+  disabled = false,
+  className,
+}: TooltipProps): JSX.Element {
   const id = useId();
   const [open, setOpen] = useState(false);
   const timer = useRef<number | null>(null);

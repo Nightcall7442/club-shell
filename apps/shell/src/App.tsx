@@ -77,9 +77,15 @@ export function AdsOverlay({ args, onClose }: AdsOverlayProps): JSX.Element {
           exit={{ opacity: 0 }}
           transition={{ duration }}
         >
-          <AdsCarousel items={args.items.length > 0 ? args.items : undefined} fullscreen showCounter={args.items.length > 1} />
+          <AdsCarousel
+            items={args.items.length > 0 ? args.items : undefined}
+            fullscreen
+            showCounter={args.items.length > 1}
+          />
           <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-[var(--gap)]">
-            <span className="glass rounded-full px-4 py-1.5 text-[var(--fs-sm)] uppercase tracking-[0.2em] text-muted">{t('idle.ads')}</span>
+            <span className="glass rounded-full px-4 py-1.5 text-[var(--fs-sm)] uppercase tracking-[0.2em] text-muted">
+              {t('idle.ads')}
+            </span>
             {skippable ? (
               <Button variant="secondary" size="lg" className="pointer-events-auto" onClick={onClose} autoFocus>
                 {t('common.skip')}
@@ -142,7 +148,13 @@ export function GlobalListeners(): JSX.Element {
   // Native idle with nobody logged in → attract screen (the lock screen covers the local fallback).
   useKioskEvent('idle', (p) => {
     const current = pathRef.current;
-    if (p.idle && useAuthStore.getState().user === null && current !== '/idle' && current !== '/overlay' && current !== '/ads') {
+    if (
+      p.idle &&
+      useAuthStore.getState().user === null &&
+      current !== '/idle' &&
+      current !== '/overlay' &&
+      current !== '/ads'
+    ) {
       navigate('/idle', { replace: true });
     }
   });
@@ -178,7 +190,10 @@ export interface AppProps {
 
 /** Router provider for the given window role. Requires `initI18n()` and the store bootstrap to have run. */
 export function App({ role = 'main' }: AppProps): JSX.Element {
-  const router = useMemo(() => createAppRouter({ role, extras: role === 'main' ? <GlobalListeners /> : undefined }), [role]);
+  const router = useMemo(
+    () => createAppRouter({ role, extras: role === 'main' ? <GlobalListeners /> : undefined }),
+    [role],
+  );
   return <RouterProvider router={router} />;
 }
 

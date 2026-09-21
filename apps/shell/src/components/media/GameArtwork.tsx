@@ -112,7 +112,14 @@ export const GameArtwork = forwardRef<HTMLDivElement, GameArtworkProps>(function
           aria-label={title}
           className="absolute inset-0 flex items-end bg-[radial-gradient(120%_80%_at_20%_0%,rgb(var(--c-primary)/0.45)_0%,transparent_60%),radial-gradient(100%_80%_at_100%_100%,rgb(var(--c-accent)/0.35)_0%,transparent_60%)] p-4"
         >
-          <span className={clsx('line-clamp-3 font-bold leading-tight text-text/90', kind === 'cover' ? 'text-xl' : 'text-3xl')}>{title}</span>
+          <span
+            className={clsx(
+              'line-clamp-3 font-bold leading-tight text-text/90',
+              kind === 'cover' ? 'text-xl' : 'text-3xl',
+            )}
+          >
+            {title}
+          </span>
         </div>
       )}
       {overlay}

@@ -46,33 +46,81 @@ export function rangeStart(range: HistoryRange, now: number = Date.now()): numbe
 
 const ICONS: Record<TransactionTypeValue, JSX.Element> = {
   topUp: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <path d="M12 19V5M5 12l7-7 7 7" />
     </svg>
   ),
   charge: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <circle cx="12" cy="12" r="9" />
       <path d="M12 7v5l3 2" />
     </svg>
   ),
   refund: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <path d="M9 14l-4-4 4-4M5 10h9a5 5 0 0 1 0 10h-3" />
     </svg>
   ),
   bonus: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9L12 3z" />
     </svg>
   ),
   purchase: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <path d="M6 8h12l1 13H5L6 8zM9 8V6a3 3 0 0 1 6 0v2" />
     </svg>
   ),
   adjustment: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <path d="M4 7h10M4 17h6M14 7h6M10 17h10M14 4v6M10 14v6" />
     </svg>
   ),
@@ -97,17 +145,31 @@ export function TransactionRow({ transaction: tx }: TransactionRowProps): JSX.El
   const positive = tx.amount.amount > 0;
   return (
     <li className="flex items-center gap-4 border-b border-text/10 py-3 last:border-b-0">
-      <span className={clsx('inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full [&>svg]:h-6 [&>svg]:w-6', TONE[tx.type])} aria-hidden="true">
+      <span
+        className={clsx(
+          'inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full [&>svg]:h-6 [&>svg]:w-6',
+          TONE[tx.type],
+        )}
+        aria-hidden="true"
+      >
         {ICONS[tx.type]}
       </span>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-base font-semibold text-text">{tx.description || t(`wallet.transaction.${tx.type}`)}</p>
+        <p className="truncate text-base font-semibold text-text">
+          {tx.description || t(`wallet.transaction.${tx.type}`)}
+        </p>
         <p className="tnum text-sm text-muted">
-          {t(`wallet.transaction.${tx.type}`)} · {formatRelativeDay(tx.createdAt, locale)}, {formatTime(tx.createdAt, locale)}
+          {t(`wallet.transaction.${tx.type}`)} · {formatRelativeDay(tx.createdAt, locale)},{' '}
+          {formatTime(tx.createdAt, locale)}
         </p>
       </div>
       <div className="shrink-0 text-right">
-        <p className={clsx('tnum text-lg font-bold', positive ? 'text-success' : tx.amount.amount < 0 ? 'text-text' : 'text-muted')}>
+        <p
+          className={clsx(
+            'tnum text-lg font-bold',
+            positive ? 'text-success' : tx.amount.amount < 0 ? 'text-text' : 'text-muted',
+          )}
+        >
           {formatMoneySigned(tx.amount, locale)}
         </p>
         <p className="tnum text-xs text-muted">
@@ -148,7 +210,10 @@ export function History({ className }: HistoryProps): JSX.Element {
   }, [historyStatus, error, pushError, t]);
 
   const typeTabs = useMemo<TabItem<TypeKey>[]>(
-    () => [{ key: 'all', label: t('wallet.allTypes') }, ...HISTORY_TYPES.map((k) => ({ key: k, label: t(`wallet.transaction.${k}`) }))],
+    () => [
+      { key: 'all', label: t('wallet.allTypes') },
+      ...HISTORY_TYPES.map((k) => ({ key: k, label: t(`wallet.transaction.${k}`) })),
+    ],
     [t],
   );
 
@@ -194,7 +259,11 @@ export function History({ className }: HistoryProps): JSX.Element {
         </div>
       </header>
 
-      <div id="wallet-history-panel" role="tabpanel" className="themed-scrollbar min-h-0 flex-1 overflow-y-auto px-5 py-3">
+      <div
+        id="wallet-history-panel"
+        role="tabpanel"
+        className="themed-scrollbar min-h-0 flex-1 overflow-y-auto px-5 py-3"
+      >
         {initialLoading ? (
           <div className="flex flex-col gap-3 py-2">
             {Array.from({ length: 6 }, (_, i) => (
@@ -207,7 +276,9 @@ export function History({ className }: HistoryProps): JSX.Element {
           </div>
         ) : visible.length === 0 ? (
           <div className="flex h-full min-h-[12rem] flex-col items-center justify-center gap-2 text-center">
-            <p className="text-lg font-semibold text-text">{history.length === 0 ? t('wallet.noHistory') : t('common.noResults')}</p>
+            <p className="text-lg font-semibold text-text">
+              {history.length === 0 ? t('wallet.noHistory') : t('common.noResults')}
+            </p>
             {historyStatus === 'error' && (
               <Button variant="secondary" onClick={() => void loadHistory(1, historyType)}>
                 {t('common.retry')}
@@ -225,7 +296,12 @@ export function History({ className }: HistoryProps): JSX.Element {
 
       {hasMore && !initialLoading && (
         <footer className="border-t border-text/10 px-5 py-3">
-          <Button variant="secondary" block loading={loading} onClick={() => void loadHistory(historyPage + 1, historyType)}>
+          <Button
+            variant="secondary"
+            block
+            loading={loading}
+            onClick={() => void loadHistory(historyPage + 1, historyType)}
+          >
             {t('wallet.loadMore')}
           </Button>
         </footer>

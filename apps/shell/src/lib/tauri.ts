@@ -122,7 +122,10 @@ export class ShellApiError extends Error {
 
 /** `true` when `e` is a {@link ShellApiError} (also across module instances). */
 export function isShellApiError(e: unknown): e is ShellApiError {
-  return e instanceof ShellApiError || (typeof e === 'object' && e !== null && (e as { name?: unknown }).name === 'ShellApiError');
+  return (
+    e instanceof ShellApiError ||
+    (typeof e === 'object' && e !== null && (e as { name?: unknown }).name === 'ShellApiError')
+  );
 }
 
 /** Converts any rejection value into a {@link ShellApiError}. */
@@ -133,7 +136,10 @@ export function toShellApiError(e: unknown, fallbackSource: ShellErrorSource = '
   if (typeof e === 'object' && e !== null) {
     const o = e as { code?: unknown; message?: unknown; details?: unknown; source?: unknown };
     if (isErrorCode(o.code)) {
-      const source = o.source === 'ipc' || o.source === 'pipe' || o.source === 'tauri' || o.source === 'mock' ? o.source : fallbackSource;
+      const source =
+        o.source === 'ipc' || o.source === 'pipe' || o.source === 'tauri' || o.source === 'mock'
+          ? o.source
+          : fallbackSource;
       return new ShellApiError({
         code: o.code,
         message: typeof o.message === 'string' ? o.message : o.code,
@@ -142,10 +148,19 @@ export function toShellApiError(e: unknown, fallbackSource: ShellErrorSource = '
       });
     }
     if (e instanceof Error) {
-      return new ShellApiError({ code: 'internal', message: e.message, details: { name: e.name }, source: fallbackSource });
+      return new ShellApiError({
+        code: 'internal',
+        message: e.message,
+        details: { name: e.name },
+        source: fallbackSource,
+      });
     }
   }
-  return new ShellApiError({ code: 'internal', message: typeof e === 'string' ? e : 'Unknown error', source: fallbackSource });
+  return new ShellApiError({
+    code: 'internal',
+    message: typeof e === 'string' ? e : 'Unknown error',
+    source: fallbackSource,
+  });
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -186,24 +201,36 @@ const DEFAULT_TIMEOUT_MS = 20_000;
 const LAUNCH_TIMEOUT_MS = 120_000;
 
 function withTimeout<T>(work: Promise<T>, cmd: string, opts: InvokeOptions | undefined): Promise<T> {
-  const timeoutMs = opts?.timeoutMs ?? (cmd === 'games_launch' || cmd === 'apps_launch' ? LAUNCH_TIMEOUT_MS : DEFAULT_TIMEOUT_MS);
+  const timeoutMs =
+    opts?.timeoutMs ?? (cmd === 'games_launch' || cmd === 'apps_launch' ? LAUNCH_TIMEOUT_MS : DEFAULT_TIMEOUT_MS);
   const signal = opts?.signal;
   if (signal?.aborted) {
-    return Promise.reject(new ShellApiError({ code: 'timeout', message: `${cmd} aborted`, details: { aborted: true }, source: 'pipe' }));
+    return Promise.reject(
+      new ShellApiError({ code: 'timeout', message: `${cmd} aborted`, details: { aborted: true }, source: 'pipe' }),
+    );
   }
   return new Promise<T>((resolve, reject) => {
     let settled = false;
     const timer = setTimeout(() => {
       if (!settled) {
         settled = true;
-        reject(new ShellApiError({ code: 'timeout', message: `${cmd} timed out after ${timeoutMs} ms`, details: { timeoutMs }, source: 'pipe' }));
+        reject(
+          new ShellApiError({
+            code: 'timeout',
+            message: `${cmd} timed out after ${timeoutMs} ms`,
+            details: { timeoutMs },
+            source: 'pipe',
+          }),
+        );
       }
     }, timeoutMs);
     const onAbort = (): void => {
       if (!settled) {
         settled = true;
         clearTimeout(timer);
-        reject(new ShellApiError({ code: 'timeout', message: `${cmd} aborted`, details: { aborted: true }, source: 'pipe' }));
+        reject(
+          new ShellApiError({ code: 'timeout', message: `${cmd} aborted`, details: { aborted: true }, source: 'pipe' }),
+        );
       }
     };
     signal?.addEventListener('abort', onAbort, { once: true });
@@ -238,11 +265,21 @@ export function invoke<T>(cmd: string, args?: Record<string, unknown>, opts?: In
   }
   const handler = registry[cmd];
   if (!handler) {
-    return Promise.reject(new ShellApiError({ code: 'notFound', message: `No mock for command ${cmd}`, details: { name: cmd }, source: 'mock' }));
+    return Promise.reject(
+      new ShellApiError({
+        code: 'notFound',
+        message: `No mock for command ${cmd}`,
+        details: { name: cmd },
+        source: 'mock',
+      }),
+    );
   }
   const work = Promise.resolve()
     .then(() => handler(args ?? {}))
-    .then((v) => v as T, (e: unknown) => Promise.reject(toShellApiError(e, 'mock')));
+    .then(
+      (v) => v as T,
+      (e: unknown) => Promise.reject(toShellApiError(e, 'mock')),
+    );
   return withTimeout(work, cmd, opts);
 }
 
@@ -349,7 +386,21 @@ export interface GamepadState {
 
 /** Gamepad button names of `kiosk://gamepad`. */
 export type GamepadButtonName =
-  | 'a' | 'b' | 'x' | 'y' | 'lb' | 'rb' | 'back' | 'start' | 'ls' | 'rs' | 'up' | 'down' | 'left' | 'right' | 'guide';
+  | 'a'
+  | 'b'
+  | 'x'
+  | 'y'
+  | 'lb'
+  | 'rb'
+  | 'back'
+  | 'start'
+  | 'ls'
+  | 'rs'
+  | 'up'
+  | 'down'
+  | 'left'
+  | 'right'
+  | 'guide';
 
 /** Gamepad axis names of `kiosk://gamepad`. */
 export type GamepadAxisName = 'leftX' | 'leftY' | 'rightX' | 'rightY' | 'lt' | 'rt';
@@ -362,7 +413,13 @@ export interface ShellConfig {
   version: number;
   locale: Locale;
   theme: string;
-  ipc: { pipeName: string; connectTimeoutMs: number; requestTimeoutMs: number; reconnectMinMs: number; reconnectMaxMs: number };
+  ipc: {
+    pipeName: string;
+    connectTimeoutMs: number;
+    requestTimeoutMs: number;
+    reconnectMinMs: number;
+    reconnectMaxMs: number;
+  };
   kiosk: {
     fullscreen: boolean;
     topmostGuard: boolean;
@@ -377,7 +434,12 @@ export interface ShellConfig {
     adminPinHash: string | null;
   };
   idle: { timeoutSec: number; dimAfterSec: number; screensaverAfterSec: number };
-  ads: { enabled: boolean; intervalSec: number; durationSec: number; playlist: { url: string; type: 'image' | 'video'; durationSec: number }[] };
+  ads: {
+    enabled: boolean;
+    intervalSec: number;
+    durationSec: number;
+    playlist: { url: string; type: 'image' | 'video'; durationSec: number }[];
+  };
   gamepad: { enabled: boolean; pollMs: number; deadzone: number; navigation: boolean };
   monitors: { primaryIndex: number; secondaryMode: 'black' | 'ads' | 'mirror' };
   ui: {
@@ -415,7 +477,8 @@ export const api = {
     end: (reason?: SessionEndReason): Promise<SessionEndResult> => invoke('session_end', { reason }),
     extend: (minutes: number, tariffId?: string): Promise<Session> => invoke('session_extend', { minutes, tariffId }),
     lock: (reason?: string): Promise<Session> => invoke('session_lock', { reason }),
-    unlock: (secret: { password?: string; pin?: string }): Promise<Session> => invoke('session_unlock', { password: secret.password, pin: secret.pin }),
+    unlock: (secret: { password?: string; pin?: string }): Promise<Session> =>
+      invoke('session_unlock', { password: secret.password, pin: secret.pin }),
     timeLeft: (): Promise<SessionTimeLeftResponse> => invoke('session_time_left'),
   },
   games: {
@@ -423,7 +486,11 @@ export const api = {
     get: (gameId: string): Promise<Game> => invoke('games_get', { gameId }),
     launch: (req: GamesLaunchRequest): Promise<LaunchResult> => invoke('games_launch', { req }),
     kill: (target?: GamesKillRequest): Promise<GamesKillResponse> =>
-      invoke('games_kill', { gameId: target?.gameId ?? undefined, pid: target?.pid ?? undefined, force: target?.force ?? undefined }),
+      invoke('games_kill', {
+        gameId: target?.gameId ?? undefined,
+        pid: target?.pid ?? undefined,
+        force: target?.force ?? undefined,
+      }),
     running: (): Promise<RunningGame[]> => invoke('games_running'),
     installStatus: (gameId: string): Promise<GameInstallStatus> => invoke('games_install_status', { gameId }),
   },
@@ -435,7 +502,8 @@ export const api = {
     balance: (): Promise<Balance> => invoke('wallet_balance'),
     tariffs: (zone?: string): Promise<WalletTariffsResponse> => invoke('wallet_tariffs', { zone }),
     history: (q?: WalletHistoryRequest): Promise<WalletHistoryResponse> => invoke('wallet_history', { q }),
-    topupIntent: (amount: Money, provider: TopupProvider): Promise<TopupIntent> => invoke('wallet_topup_intent', { amount, provider }),
+    topupIntent: (amount: Money, provider: TopupProvider): Promise<TopupIntent> =>
+      invoke('wallet_topup_intent', { amount, provider }),
   },
   shop: {
     products: (q?: ShopProductsRequest): Promise<Product[]> => invoke('shop_products', { q }),
@@ -445,12 +513,15 @@ export const api = {
   },
   chat: {
     history: (q?: ChatHistoryRequest): Promise<ChatHistoryResponse> => invoke('chat_history', { q }),
-    send: (text: string, roomId?: string): Promise<ChatMessage> => invoke('chat_send', { text, roomId, idempotencyKey: uuid() }),
-    markRead: (upToMessageId: string, roomId?: string): Promise<ChatMarkReadResponse> => invoke('chat_mark_read', { upToMessageId, roomId }),
+    send: (text: string, roomId?: string): Promise<ChatMessage> =>
+      invoke('chat_send', { text, roomId, idempotencyKey: uuid() }),
+    markRead: (upToMessageId: string, roomId?: string): Promise<ChatMarkReadResponse> =>
+      invoke('chat_mark_read', { upToMessageId, roomId }),
   },
   booking: {
     seats: (date: string): Promise<BookingSeatsResponse> => invoke('booking_seats', { date }),
-    reserve: (pcId: string, from: string, to: string): Promise<Booking> => invoke('booking_reserve', { pcId, from, to }),
+    reserve: (pcId: string, from: string, to: string): Promise<Booking> =>
+      invoke('booking_reserve', { pcId, from, to }),
     cancel: (bookingId: string): Promise<Booking> => invoke('booking_cancel', { bookingId }),
   },
   tournaments: {
@@ -481,15 +552,19 @@ export const api = {
     pcInfo: (): Promise<PcInfo> => invoke('sys_pc_info'),
     hardware: (refresh?: boolean): Promise<HardwareInfo> => invoke('sys_hardware', { refresh }),
     metrics: (): Promise<PcMetrics> => invoke('sys_metrics'),
-    callAdmin: (category: CallAdminCategory, message?: string): Promise<SysCallAdminResponse> => invoke('sys_call_admin', { category, message }),
-    reboot: (delaySec?: number, reason?: string): Promise<ScheduledResult> => invoke('sys_reboot', { delaySec, reason }),
-    shutdown: (delaySec?: number, reason?: string): Promise<ScheduledResult> => invoke('sys_shutdown', { delaySec, reason }),
+    callAdmin: (category: CallAdminCategory, message?: string): Promise<SysCallAdminResponse> =>
+      invoke('sys_call_admin', { category, message }),
+    reboot: (delaySec?: number, reason?: string): Promise<ScheduledResult> =>
+      invoke('sys_reboot', { delaySec, reason }),
+    shutdown: (delaySec?: number, reason?: string): Promise<ScheduledResult> =>
+      invoke('sys_shutdown', { delaySec, reason }),
     lockScreen: (reason?: string): Promise<OkResponse> => invoke('sys_lock_screen', { reason }),
     setVolume: (level: number, muted?: boolean): Promise<VolumeState> => invoke('sys_set_volume', { level, muted }),
     setLocale: (locale: Locale): Promise<SysSetLocaleResponse> => invoke('sys_set_locale', { locale }),
     unlockAdmin: (pin: string): Promise<SysUnlockAdminResponse> => invoke('sys_unlock_admin', { pin }),
     ackAdminMessage: (id: string): Promise<OkResponse> => invoke('sys_ack_admin_message', { id }),
-    logClientError: (e: SysLogClientErrorRequest): Promise<void> => invoke<null>('sys_log_client_error', { e }).then(() => undefined),
+    logClientError: (e: SysLogClientErrorRequest): Promise<void> =>
+      invoke<null>('sys_log_client_error', { e }).then(() => undefined),
     updateCheck: (): Promise<UpdateCheckResponse> => invoke('update_check'),
     updateApply: (component: UpdateComponent): Promise<UpdateApplyResponse> => invoke('update_apply', { component }),
   },
@@ -500,8 +575,10 @@ export const api = {
     showOverlay: (kind: OverlayKind, payload?: Record<string, unknown>): Promise<void> =>
       invoke<null>('kiosk_show_overlay', { kind, payload }).then(() => undefined),
     monitors: (): Promise<KioskMonitor[]> => invoke('kiosk_monitors'),
-    moveToMonitor: (index: number): Promise<void> => invoke<null>('kiosk_move_to_monitor', { index }).then(() => undefined),
-    virtualKeyboard: (show: boolean): Promise<void> => invoke<null>('kiosk_virtual_keyboard', { show }).then(() => undefined),
+    moveToMonitor: (index: number): Promise<void> =>
+      invoke<null>('kiosk_move_to_monitor', { index }).then(() => undefined),
+    virtualKeyboard: (show: boolean): Promise<void> =>
+      invoke<null>('kiosk_virtual_keyboard', { show }).then(() => undefined),
     focus: (): Promise<void> => invoke<null>('kiosk_focus').then(() => undefined),
     exit: (adminToken: string, action: 'explorer' | 'quit'): Promise<void> =>
       invoke<null>('kiosk_exit', { adminToken, action }).then(() => undefined),
@@ -524,7 +601,14 @@ export type ShellApi = typeof api;
 /** Payload per `kiosk://<name>` event as delivered to the UI (normalized from the native payloads, §3.2). */
 export interface KioskEventMap {
   idle: { idle: boolean; seconds: number; stage?: 'active' | 'dim' | 'idle' | 'screensaver' };
-  gamepad: { kind: 'button' | 'axis'; name: string; value: number; gamepadId: number; pressed?: boolean; connected?: boolean };
+  gamepad: {
+    kind: 'button' | 'axis';
+    name: string;
+    value: number;
+    gamepadId: number;
+    pressed?: boolean;
+    connected?: boolean;
+  };
   hotkey: { name: string; combo?: string };
   monitorChanged: MonitorInfo[];
   connectivity: { connected: boolean; state: string; attempts?: number; since?: string };
@@ -540,7 +624,14 @@ export type KioskEventName = keyof KioskEventMap;
 /** Raw shapes emitted by the Rust side (`kiosk/*.rs`, `gamepad.rs`, `agent/events.rs`). */
 interface RawKioskPayloads {
   idle: { idle: boolean; idleSec: number; stage: 'active' | 'dim' | 'idle' | 'screensaver' };
-  gamepad: { index: number; button?: GamepadButtonName; axis?: GamepadAxisName; value: number; pressed?: boolean; connected?: boolean };
+  gamepad: {
+    index: number;
+    button?: GamepadButtonName;
+    axis?: GamepadAxisName;
+    value: number;
+    pressed?: boolean;
+    connected?: boolean;
+  };
   hotkey: { name: string; combo: string };
   monitorChanged: { monitors: KioskMonitor[]; primaryIndex: number; reason: string };
   connectivity: { agent: 'connected' | 'disconnected' | 'connecting'; attempts: number; since: string };
@@ -562,11 +653,22 @@ const normalizeKiosk: KioskNormalizers = {
     if (raw.axis !== undefined) {
       return { kind: 'axis', name: raw.axis, value: raw.value, gamepadId: raw.index };
     }
-    return { kind: 'button', name: 'connection', value: raw.connected ? 1 : 0, gamepadId: raw.index, connected: raw.connected ?? false };
+    return {
+      kind: 'button',
+      name: 'connection',
+      value: raw.connected ? 1 : 0,
+      gamepadId: raw.index,
+      connected: raw.connected ?? false,
+    };
   },
   hotkey: (raw) => ({ name: raw.name, combo: raw.combo }),
   monitorChanged: (raw) => raw.monitors,
-  connectivity: (raw) => ({ connected: raw.agent === 'connected', state: raw.agent, attempts: raw.attempts, since: raw.since }),
+  connectivity: (raw) => ({
+    connected: raw.agent === 'connected',
+    state: raw.agent,
+    attempts: raw.attempts,
+    since: raw.since,
+  }),
   themeChanged: (raw) => ({ name: raw.name, theme: raw }),
   localeChanged: (raw) => ({ locale: raw.locale }),
   focus: (raw) => ({ focused: raw.hasFocus, foregroundProcess: raw.foregroundProcess }),

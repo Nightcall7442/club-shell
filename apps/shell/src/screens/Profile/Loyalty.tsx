@@ -40,7 +40,11 @@ export function LevelRing({ level, progress, label, className }: LevelRingProps)
   const { t } = useTranslation();
   const offset = RING_C * (1 - Math.min(1, Math.max(0, progress)));
   return (
-    <div role="img" aria-label={label} className={clsx('relative aspect-square w-[clamp(11rem,14vw,16rem)]', className)}>
+    <div
+      role="img"
+      aria-label={label}
+      className={clsx('relative aspect-square w-[clamp(11rem,14vw,16rem)]', className)}
+    >
       <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90" aria-hidden="true">
         <defs>
           <linearGradient id="loyalty-ring-gradient" x1="0" y1="0" x2="1" y2="1">
@@ -73,7 +77,15 @@ export function LevelRing({ level, progress, label, className }: LevelRingProps)
 
 function CheckIcon(): JSX.Element {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <path d="M5 12.5l4.5 4.5L19 7.5" />
     </svg>
   );
@@ -118,8 +130,15 @@ export function Loyalty({ loyalty, loading }: LoyaltyProps): JSX.Element {
 
   return (
     <div className="grid gap-[var(--gap)] xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-      <section className="glass flex flex-col items-center gap-3 rounded-xl p-[var(--gap)] text-center" aria-label={t('profile.loyalty')}>
-        <LevelRing level={displayLevel(loyalty.level)} progress={progress} label={`${t('profile.levelProgress')}: ${percent}`} />
+      <section
+        className="glass flex flex-col items-center gap-3 rounded-xl p-[var(--gap)] text-center"
+        aria-label={t('profile.loyalty')}
+      >
+        <LevelRing
+          level={displayLevel(loyalty.level)}
+          progress={progress}
+          label={`${t('profile.levelProgress')}: ${percent}`}
+        />
         <h3 className="text-2xl font-bold">{t('profile.level', { level: displayLevel(loyalty.level) })}</h3>
         <p className="tnum text-4xl font-black text-accent">{formatNumber(loyalty.points, locale)}</p>
         <p className="-mt-2 text-muted">{t('profile.points')}</p>
@@ -132,8 +151,12 @@ export function Loyalty({ loyalty, loading }: LoyaltyProps): JSX.Element {
           valueText={percent}
           className="mt-2"
         />
-        <p className="text-base text-muted">{t('profile.nextLevel', { points: formatNumber(loyalty.nextLevelAt, locale) })}</p>
-        {toNext > 0 && <p className="text-sm text-muted">{t('profile.pointsToNext', { points: formatNumber(toNext, locale) })}</p>}
+        <p className="text-base text-muted">
+          {t('profile.nextLevel', { points: formatNumber(loyalty.nextLevelAt, locale) })}
+        </p>
+        {toNext > 0 && (
+          <p className="text-sm text-muted">{t('profile.pointsToNext', { points: formatNumber(toNext, locale) })}</p>
+        )}
       </section>
 
       <section className="glass rounded-xl p-[var(--gap)]" aria-label={t('profile.perks')}>
@@ -144,7 +167,10 @@ export function Loyalty({ loyalty, loading }: LoyaltyProps): JSX.Element {
           <ul role="list" className="mt-4 flex flex-col gap-3">
             {loyalty.perks.map((perk, i) => (
               <li key={`${i}-${perk}`} className="flex items-start gap-3 rounded-lg bg-surface/40 p-4 text-lg">
-                <span aria-hidden="true" className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-success/20 text-success [&>svg]:h-4 [&>svg]:w-4">
+                <span
+                  aria-hidden="true"
+                  className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-success/20 text-success [&>svg]:h-4 [&>svg]:w-4"
+                >
                   <CheckIcon />
                 </span>
                 <span>{perk}</span>

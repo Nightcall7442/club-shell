@@ -1,4 +1,12 @@
-import { forwardRef, useCallback, useId, useRef, type FocusEvent, type InputHTMLAttributes, type ReactNode } from 'react';
+import {
+  forwardRef,
+  useCallback,
+  useId,
+  useRef,
+  type FocusEvent,
+  type InputHTMLAttributes,
+  type ReactNode,
+} from 'react';
 import clsx from 'clsx';
 import { useSettingsStore } from '@/store/settings';
 import { useVirtualKeyboard } from '@/components/ui/VirtualKeyboard';
@@ -97,7 +105,10 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
         )}
       >
         {leading && (
-          <span aria-hidden="true" className="inline-flex h-[1.25em] w-[1.25em] shrink-0 items-center justify-center text-muted [&>svg]:h-full [&>svg]:w-full">
+          <span
+            aria-hidden="true"
+            className="inline-flex h-[1.25em] w-[1.25em] shrink-0 items-center justify-center text-muted [&>svg]:h-full [&>svg]:w-full"
+          >
             {leading}
           </span>
         )}
@@ -119,7 +130,11 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
         {trailing && <span className="inline-flex shrink-0 items-center text-muted">{trailing}</span>}
       </div>
       {(hasError || hint) && (
-        <p id={hintId} role={hasError ? 'alert' : undefined} className={clsx('text-sm', hasError ? 'text-danger' : 'text-muted')}>
+        <p
+          id={hintId}
+          role={hasError ? 'alert' : undefined}
+          className={clsx('text-sm', hasError ? 'text-danger' : 'text-muted')}
+        >
           {hasError ? error : hint}
         </p>
       )}

@@ -84,7 +84,10 @@ function assertMember(roomId: string, pc: PcRecord, user: UserRecord): void {
 function withReadAt(room: ChatRoomRecord, userId: string): ChatMessage[] {
   const marker = room.reads[userId];
   const idx = marker ? room.messages.findIndex((m) => m.id === marker.upTo) : -1;
-  return room.messages.map((m, i) => ({ ...m, readAt: m.senderId === userId ? m.createdAt : i <= idx && marker ? marker.at : null }));
+  return room.messages.map((m, i) => ({
+    ...m,
+    readAt: m.senderId === userId ? m.createdAt : i <= idx && marker ? marker.at : null,
+  }));
 }
 
 function deliver(room: ChatRoomRecord, msg: ChatMessage, exceptPcId: string | null): void {
@@ -139,18 +142,27 @@ function isSlotAligned(iso: string): boolean {
 export function chatRoutes(app: FastifyInstance): void {
   // ---- chat --------------------------------------------------------------------------------------------------------
 
-  app.get<{ Params: { roomId: string }; Querystring: { before?: string; limit?: string } }>('/chat/:roomId/messages', async (req): Promise<ChatHistoryResponse> => {
-    const { pc, user } = requireUser(req);
-    const roomId = decodeURIComponent(req.params.roomId);
-    assertMember(roomId, pc, user);
-    const room = roomFor(roomId);
-    const limit = Math.min(CHAT_HISTORY_MAX_LIMIT, Math.max(1, Number.parseInt(req.query.limit ?? String(CHAT_HISTORY_DEFAULT_LIMIT), 10) || CHAT_HISTORY_DEFAULT_LIMIT));
-    const all = withReadAt(room, user.id);
-    const end = req.query.before ? all.findIndex((m) => m.id === req.query.before) : all.length;
-    if (end < 0) throw errors.notFound('message');
-    const start = Math.max(0, end - limit);
-    return { roomId, items: all.slice(start, end), hasMore: start > 0, unread: unreadCount(room, user.id) };
-  });
+  app.get<{ Params: { roomId: string }; Querystring: { before?: string; limit?: string } }>(
+    '/chat/:roomId/messages',
+    async (req): Promise<ChatHistoryResponse> => {
+      const { pc, user } = requireUser(req);
+      const roomId = decodeURIComponent(req.params.roomId);
+      assertMember(roomId, pc, user);
+      const room = roomFor(roomId);
+      const limit = Math.min(
+        CHAT_HISTORY_MAX_LIMIT,
+        Math.max(
+          1,
+          Number.parseInt(req.query.limit ?? String(CHAT_HISTORY_DEFAULT_LIMIT), 10) || CHAT_HISTORY_DEFAULT_LIMIT,
+        ),
+      );
+      const all = withReadAt(room, user.id);
+      const end = req.query.before ? all.findIndex((m) => m.id === req.query.before) : all.length;
+      if (end < 0) throw errors.notFound('message');
+      const start = Math.max(0, end - limit);
+      return { roomId, items: all.slice(start, end), hasMore: start > 0, unread: unreadCount(room, user.id) };
+    },
+  );
 
   app.post<{ Params: { roomId: string } }>('/chat/:roomId/messages', async (req, reply) => {
     const { pc, user } = requireUser(req);
@@ -207,7 +219,14 @@ export function chatRoutes(app: FastifyInstance): void {
     const bookings = db.bookings
       .filter((b) => b.from.slice(0, 10) === date)
       .map((b) => ({ ...b, userId: b.userId === me ? b.userId : ANONYMOUS_USER_ID }));
-    return { date, seats: db.pcs.map(seatOf), bookings, slotMinutes: SLOT_MINUTES, openFrom: OPEN_FROM, openTo: OPEN_TO };
+    return {
+      date,
+      seats: db.pcs.map(seatOf),
+      bookings,
+      slotMinutes: SLOT_MINUTES,
+      openFrom: OPEN_FROM,
+      openTo: OPEN_TO,
+    };
   });
 
   app.post('/booking/reserve', async (req, reply) => {
@@ -225,10 +244,19 @@ export function chatRoutes(app: FastifyInstance): void {
       if (!isSlotAligned(from) || !isSlotAligned(to)) throw errors.validation('from', 'alignment');
       if (Date.parse(from) < Date.now() - 60_000) throw errors.validation('from', 'past');
       if (Date.parse(to) - Date.parse(from) > MAX_BOOKING_MINUTES * 60_000) {
-        throw new ApiError('validation', 'Booking too long', { field: 'to', reason: 'maxDuration', maxMinutes: MAX_BOOKING_MINUTES });
+        throw new ApiError('validation', 'Booking too long', {
+          field: 'to',
+          reason: 'maxDuration',
+          maxMinutes: MAX_BOOKING_MINUTES,
+        });
       }
       const taken = db.bookings.find(
-        (x) => x.pcId === pcId && x.status !== 'cancelled' && x.status !== 'expired' && Date.parse(x.from) < Date.parse(to) && Date.parse(from) < Date.parse(x.to),
+        (x) =>
+          x.pcId === pcId &&
+          x.status !== 'cancelled' &&
+          x.status !== 'expired' &&
+          Date.parse(x.from) < Date.parse(to) &&
+          Date.parse(from) < Date.parse(x.to),
       );
       if (taken) throw errors.conflict('slotTaken', { bookingId: taken.id, from: taken.from, to: taken.to });
       if (user.role === 'guest') throw errors.policyDenied('guestBooking');
@@ -261,7 +289,9 @@ export function chatRoutes(app: FastifyInstance): void {
     const { state, gameId } = req.query;
     if (state && !(TOURNAMENT_STATES as string[]).includes(state)) throw errors.validation('state', 'enum');
     const me = optionalUser(req)?.id ?? null;
-    const items = db.tournaments.filter((t) => (!state || t.state === state) && (!gameId || t.gameId === gameId)).map((t) => viewTournament(t, me));
+    const items = db.tournaments
+      .filter((t) => (!state || t.state === state) && (!gameId || t.gameId === gameId))
+      .map((t) => viewTournament(t, me));
     return { items };
   });
 
@@ -287,7 +317,12 @@ export function chatRoutes(app: FastifyInstance): void {
     const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit ?? '50', 10) || 50));
     const me = optionalUser(req)?.id ?? null;
     const entries = t.leaderboard.slice(0, limit);
-    const mine = me ? t.leaderboard.find((e) => e.userId === me) ?? null : null;
-    return { tournamentId: t.id, entries, me: mine && !entries.includes(mine) ? mine : null, updatedAt: t.leaderboardUpdatedAt };
+    const mine = me ? (t.leaderboard.find((e) => e.userId === me) ?? null) : null;
+    return {
+      tournamentId: t.id,
+      entries,
+      me: mine && !entries.includes(mine) ? mine : null,
+      updatedAt: t.leaderboardUpdatedAt,
+    };
   });
 }

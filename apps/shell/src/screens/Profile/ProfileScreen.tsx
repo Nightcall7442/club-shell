@@ -48,7 +48,11 @@ export interface ProfileData {
 export function useProfileData(userId: string | null): ProfileData {
   const { t } = useTranslation();
   const pushError = useNotificationsStore((s) => s.pushError);
-  const [data, setData] = useState<Pick<ProfileData, 'stats' | 'achievements' | 'loyalty'>>({ stats: null, achievements: null, loyalty: null });
+  const [data, setData] = useState<Pick<ProfileData, 'stats' | 'achievements' | 'loyalty'>>({
+    stats: null,
+    achievements: null,
+    loyalty: null,
+  });
   const [loading, setLoading] = useState(userId !== null);
   const [generation, setGeneration] = useState(0);
 
@@ -60,21 +64,23 @@ export function useProfileData(userId: string | null): ProfileData {
     }
     let active = true;
     setLoading(true);
-    void Promise.allSettled([api.profile.stats(), api.profile.achievements(), api.profile.loyalty()]).then(([stats, achievements, loyalty]) => {
-      if (!active) {
-        return;
-      }
-      setData({
-        stats: stats.status === 'fulfilled' ? stats.value : null,
-        achievements: achievements.status === 'fulfilled' ? achievements.value : null,
-        loyalty: loyalty.status === 'fulfilled' ? loyalty.value : null,
-      });
-      setLoading(false);
-      const failed = [stats, achievements, loyalty].find((r) => r.status === 'rejected');
-      if (failed?.status === 'rejected') {
-        pushError(failed.reason, t('profile.title'));
-      }
-    });
+    void Promise.allSettled([api.profile.stats(), api.profile.achievements(), api.profile.loyalty()]).then(
+      ([stats, achievements, loyalty]) => {
+        if (!active) {
+          return;
+        }
+        setData({
+          stats: stats.status === 'fulfilled' ? stats.value : null,
+          achievements: achievements.status === 'fulfilled' ? achievements.value : null,
+          loyalty: loyalty.status === 'fulfilled' ? loyalty.value : null,
+        });
+        setLoading(false);
+        const failed = [stats, achievements, loyalty].find((r) => r.status === 'rejected');
+        if (failed?.status === 'rejected') {
+          pushError(failed.reason, t('profile.title'));
+        }
+      },
+    );
     return () => {
       active = false;
     };
@@ -90,7 +96,15 @@ export function useProfileData(userId: string | null): ProfileData {
 
 function PencilIcon(): JSX.Element {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17z" />
       <path d="M13.5 6.5l3 3" />
     </svg>
@@ -192,8 +206,16 @@ export function ProfileHeader({ user, loyalty }: ProfileHeaderProps): JSX.Elemen
   const isGuest = user.role === 'guest';
 
   return (
-    <section className="glass flex flex-wrap items-center gap-[var(--gap)] rounded-xl p-[var(--gap)]" aria-label={t('profile.title')}>
-      <Avatar name={user.displayName} src={user.avatarUrl} size="xl" ring={user.role === 'vip' || user.role === 'admin'} />
+    <section
+      className="glass flex flex-wrap items-center gap-[var(--gap)] rounded-xl p-[var(--gap)]"
+      aria-label={t('profile.title')}
+    >
+      <Avatar
+        name={user.displayName}
+        src={user.avatarUrl}
+        size="xl"
+        ring={user.role === 'vip' || user.role === 'admin'}
+      />
       <div className="min-w-0 flex-1">
         {editing ? (
           <form onSubmit={(e) => void submit(e)} className="flex flex-wrap items-end gap-3" noValidate>
@@ -222,7 +244,14 @@ export function ProfileHeader({ user, loyalty }: ProfileHeaderProps): JSX.Elemen
         ) : (
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="truncate text-3xl font-bold leading-tight">{user.displayName}</h1>
-            <Button ref={editRef} variant="ghost" iconOnly aria-label={t('profile.edit')} onClick={startEdit} icon={<PencilIcon />} />
+            <Button
+              ref={editRef}
+              variant="ghost"
+              iconOnly
+              aria-label={t('profile.edit')}
+              onClick={startEdit}
+              icon={<PencilIcon />}
+            />
             <Badge tone={ROLE_TONE[user.role]} size="lg">
               {t(`profile.role.${user.role}`)}
             </Badge>
@@ -347,7 +376,16 @@ export function ProfileScreen(): JSX.Element {
     >
       {user ? <ProfileHeader user={user} loyalty={data.loyalty} /> : <HeaderSkeleton />}
 
-      <Tabs<ProfileTab> items={items} value={tab} onChange={setTab} label={t('profile.subtitle')} size="lg" gamepad={false} idPrefix="profile" className="self-start" />
+      <Tabs<ProfileTab>
+        items={items}
+        value={tab}
+        onChange={setTab}
+        label={t('profile.subtitle')}
+        size="lg"
+        gamepad={false}
+        idPrefix="profile"
+        className="self-start"
+      />
 
       <div id={`profile-panel-${tab}`} role="tabpanel" aria-labelledby={`profile-tab-${tab}`} className="min-h-[20rem]">
         <AnimatePresence mode="wait" initial={false}>

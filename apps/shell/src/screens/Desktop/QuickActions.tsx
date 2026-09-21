@@ -20,7 +20,15 @@ import { selectFeatures, useSettingsStore } from '@/store/settings';
 // Icons
 // ---------------------------------------------------------------------------------------------------------------------
 
-const svgProps = { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true } as const;
+const svgProps = {
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 1.6,
+  strokeLinecap: 'round',
+  strokeLinejoin: 'round',
+  'aria-hidden': true,
+} as const;
 
 const ICONS: Record<QuickActionKey, JSX.Element> = {
   launch: (
@@ -83,7 +91,16 @@ const TONE: Record<NonNullable<QuickActionTileProps['tone']>, string> = {
   danger: 'text-danger bg-danger/15',
 };
 
-export function QuickActionTile({ icon, label, hint, onClick, disabled = false, loading = false, tone = 'primary', className }: QuickActionTileProps): JSX.Element {
+export function QuickActionTile({
+  icon,
+  label,
+  hint,
+  onClick,
+  disabled = false,
+  loading = false,
+  tone = 'primary',
+  className,
+}: QuickActionTileProps): JSX.Element {
   return (
     <button
       type="button"
@@ -98,7 +115,14 @@ export function QuickActionTile({ icon, label, hint, onClick, disabled = false, 
         className,
       )}
     >
-      <span aria-hidden="true" className={clsx('inline-flex h-14 w-14 items-center justify-center rounded-lg [&>svg]:h-8 [&>svg]:w-8', TONE[tone], loading && 'anim-glow')}>
+      <span
+        aria-hidden="true"
+        className={clsx(
+          'inline-flex h-14 w-14 items-center justify-center rounded-lg [&>svg]:h-8 [&>svg]:w-8',
+          TONE[tone],
+          loading && 'anim-glow',
+        )}
+      >
         {icon}
       </span>
       <span className="flex w-full min-w-0 flex-col gap-0.5">
@@ -143,7 +167,14 @@ export function QuickActions({ className }: { className?: string }): JSX.Element
     }
     try {
       await launch(last.id);
-      push({ id: `launch-${last.id}`, title: t('games.launchTitle', { title: last.title }), body: t('games.launchHint'), level: 'info', ttlSec: 8, source: 'local' });
+      push({
+        id: `launch-${last.id}`,
+        title: t('games.launchTitle', { title: last.title }),
+        body: t('games.launchHint'),
+        level: 'info',
+        ttlSec: 8,
+        source: 'local',
+      });
     } catch (e) {
       pushError(e, t('games.launchFailed'));
     }
@@ -179,8 +210,24 @@ export function QuickActions({ className }: { className?: string }): JSX.Element
           loading={launching !== null && last !== null && launching.gameId === last.id}
           onClick={() => void onLaunch()}
         />
-        {features.topup && <QuickActionTile icon={ICONS.topup} label={t('desktop.topUp')} hint={t('wallet.topUpHint')} tone="accent" onClick={() => go('topup', '/wallet')} />}
-        {features.shop && <QuickActionTile icon={ICONS.shop} label={t('desktop.shop')} hint={t('shop.subtitle')} tone="accent" onClick={() => go('shop', '/shop')} />}
+        {features.topup && (
+          <QuickActionTile
+            icon={ICONS.topup}
+            label={t('desktop.topUp')}
+            hint={t('wallet.topUpHint')}
+            tone="accent"
+            onClick={() => go('topup', '/wallet')}
+          />
+        )}
+        {features.shop && (
+          <QuickActionTile
+            icon={ICONS.shop}
+            label={t('desktop.shop')}
+            hint={t('shop.subtitle')}
+            tone="accent"
+            onClick={() => go('shop', '/shop')}
+          />
+        )}
         {features.callAdmin && (
           <QuickActionTile
             icon={ICONS.callAdmin}
@@ -195,7 +242,13 @@ export function QuickActions({ className }: { className?: string }): JSX.Element
         <QuickActionTile
           icon={ICONS.extend}
           label={t('desktop.extend')}
-          hint={isOpen && !isOpenEnded ? t('session.extendHint') : isOpenEnded ? t('session.openEnded') : t('session.noSession')}
+          hint={
+            isOpen && !isOpenEnded
+              ? t('session.extendHint')
+              : isOpenEnded
+                ? t('session.openEnded')
+                : t('session.noSession')
+          }
           disabled={!isOpen || isOpenEnded}
           onClick={() => {
             track('quickAction', { key: 'extend' });
@@ -225,7 +278,13 @@ export function QuickActions({ className }: { className?: string }): JSX.Element
             <Button variant="ghost" size="lg" onClick={() => setLockOpen(false)} disabled={locking}>
               {t('common.cancel')}
             </Button>
-            <Button variant="danger" size="lg" loading={locking || busy} icon={ICONS.lock} onClick={() => void onLock()}>
+            <Button
+              variant="danger"
+              size="lg"
+              loading={locking || busy}
+              icon={ICONS.lock}
+              onClick={() => void onLock()}
+            >
               {locking ? t('session.locking') : t('session.lock')}
             </Button>
           </>

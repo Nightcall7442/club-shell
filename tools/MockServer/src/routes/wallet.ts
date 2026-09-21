@@ -86,29 +86,31 @@ export function walletRoutes(app: FastifyInstance): void {
     return balanceOf(user);
   });
 
-  app.get<{ Params: { userId: string }; Querystring: { page?: string; pageSize?: string; from?: string; to?: string; type?: string } }>(
-    '/wallet/:userId/transactions',
-    async (req) => {
-      const { user } = requireUser(req, req.params.userId);
-      const { from, to, type } = req.query;
-      if (type && !(TX_TYPES as string[]).includes(type)) throw errors.validation('type', 'enum');
-      if (from && Number.isNaN(Date.parse(from))) throw errors.validation('from', 'format');
-      if (to && Number.isNaN(Date.parse(to))) throw errors.validation('to', 'format');
-      const items = db.transactions.filter(
-        (t) =>
-          t.userId === user.id &&
-          (!type || t.type === type) &&
-          (!from || Date.parse(t.createdAt) >= Date.parse(from)) &&
-          (!to || Date.parse(t.createdAt) < Date.parse(to)),
-      );
-      return paginate(items, req.query);
-    },
-  );
+  app.get<{
+    Params: { userId: string };
+    Querystring: { page?: string; pageSize?: string; from?: string; to?: string; type?: string };
+  }>('/wallet/:userId/transactions', async (req) => {
+    const { user } = requireUser(req, req.params.userId);
+    const { from, to, type } = req.query;
+    if (type && !(TX_TYPES as string[]).includes(type)) throw errors.validation('type', 'enum');
+    if (from && Number.isNaN(Date.parse(from))) throw errors.validation('from', 'format');
+    if (to && Number.isNaN(Date.parse(to))) throw errors.validation('to', 'format');
+    const items = db.transactions.filter(
+      (t) =>
+        t.userId === user.id &&
+        (!type || t.type === type) &&
+        (!from || Date.parse(t.createdAt) >= Date.parse(from)) &&
+        (!to || Date.parse(t.createdAt) < Date.parse(to)),
+    );
+    return paginate(items, req.query);
+  });
 
   app.get<{ Querystring: { zone?: string } }>('/tariffs', async (req, reply) => {
     requireAgent(req);
     const zone = req.query.zone?.toLowerCase();
-    const items = db.tariffs.filter((t) => !zone || t.zones.length === 0 || t.zones.some((z) => z.toLowerCase() === zone));
+    const items = db.tariffs.filter(
+      (t) => !zone || t.zones.length === 0 || t.zones.some((z) => z.toLowerCase() === zone),
+    );
     return sendCached(req, reply, { items, serverTime: now() }, items);
   });
 
@@ -123,14 +125,17 @@ export function walletRoutes(app: FastifyInstance): void {
       if (str(b, 'pcId', 64) !== pc.id) throw errors.forbidden('pcMismatch');
       if (user.role === 'guest' && provider !== 'cash') throw errors.policyDenied('guestTopup');
       const id = uuid();
-      const deepLink = provider === 'cash' ? null : `${provider}://pay?merchant=clubshell&intent=${id}&amount=${amount.amount}`;
+      const deepLink =
+        provider === 'cash' ? null : `${provider}://pay?merchant=clubshell&intent=${id}&amount=${amount.amount}`;
       const intent: TopupIntentRecord = {
         id,
         userId: user.id,
         provider,
         amount,
         status: 'pending',
-        qrUrl: deepLink ? `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(deepLink)}` : null,
+        qrUrl: deepLink
+          ? `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(deepLink)}`
+          : null,
         deepLink,
         paymentUrl: provider === 'cash' ? null : `https://checkout.${provider}.uz/mock/${id}`,
         expiresAt: inSec(INTENT_TTL_SEC),
@@ -139,7 +144,14 @@ export function walletRoutes(app: FastifyInstance): void {
       db.topupIntents.push(intent);
       if (db.topupIntents.length > 200) db.topupIntents.splice(0, db.topupIntents.length - 200);
       if (provider === 'cash') {
-        db.tickets.push({ ticketId: uuid(), pcId: pc.id, userId: user.id, category: 'other', message: `Cash top-up ${amount.amount / 100} UZS`, createdAt: now() });
+        db.tickets.push({
+          ticketId: uuid(),
+          pcId: pc.id,
+          userId: user.id,
+          category: 'other',
+          message: `Cash top-up ${amount.amount / 100} UZS`,
+          createdAt: now(),
+        });
       }
       markDirty();
       return { status: 201, body: publicIntent(intent) };

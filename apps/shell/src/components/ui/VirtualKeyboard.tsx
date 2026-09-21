@@ -32,7 +32,8 @@ export const useVirtualKeyboard = create<VirtualKeyboardState>()((set) => ({
   target: null,
   layout: 'en',
   shift: 'off',
-  open: (el) => set((s) => ({ visible: true, target: el, layout: s.visible ? s.layout : layoutForLocale(), shift: 'off' })),
+  open: (el) =>
+    set((s) => ({ visible: true, target: el, layout: s.visible ? s.layout : layoutForLocale(), shift: 'off' })),
   close: () => set({ visible: false, target: null, shift: 'off' }),
   setLayout: (layout) => set({ layout, shift: 'off' }),
   toggleShift: () => set((s) => ({ shift: s.shift === 'off' ? 'once' : s.shift === 'once' ? 'lock' : 'off' })),
@@ -91,7 +92,8 @@ export function deleteBackward(el: KeyboardTarget): void {
     return;
   }
   // Drop a whole surrogate pair when the previous char is the low half of one.
-  const step = start >= 2 && /[\uDC00-\uDFFF]/.test(v.charAt(start - 1)) && /[\uD800-\uDBFF]/.test(v.charAt(start - 2)) ? 2 : 1;
+  const step =
+    start >= 2 && /[\uDC00-\uDFFF]/.test(v.charAt(start - 1)) && /[\uD800-\uDBFF]/.test(v.charAt(start - 2)) ? 2 : 1;
   setNativeValue(el, v.slice(0, start - step) + v.slice(start));
   setCaret(el, start - step);
 }
@@ -126,7 +128,11 @@ const SYMBOLS: string[][] = [
   ['.', ',', '?', '!', ':', ';', "'", '"', '/', '*'],
 ];
 
-const LAYOUT_LABEL: Record<Exclude<KeyboardLayout, 'symbols'>, string> = { en: 'layoutEn', ru: 'layoutRu', uz: 'layoutUz' };
+const LAYOUT_LABEL: Record<Exclude<KeyboardLayout, 'symbols'>, string> = {
+  en: 'layoutEn',
+  ru: 'layoutRu',
+  uz: 'layoutUz',
+};
 
 const preventFocusSteal = (e: PointerEvent): void => e.preventDefault();
 
@@ -277,7 +283,12 @@ export function VirtualKeyboard(): JSX.Element | null {
             <div className="flex items-center justify-between gap-2">
               <div className="flex gap-1">
                 {(Object.keys(LETTERS) as Exclude<KeyboardLayout, 'symbols'>[]).map((l) => (
-                  <Key key={l} label={t(`kiosk.virtualKeyboard.${LAYOUT_LABEL[l]}`)} onPress={() => setLayout(l)} active={layout === l} />
+                  <Key
+                    key={l}
+                    label={t(`kiosk.virtualKeyboard.${LAYOUT_LABEL[l]}`)}
+                    onPress={() => setLayout(l)}
+                    active={layout === l}
+                  />
                 ))}
                 <Key
                   label={layout === 'symbols' ? t('kiosk.virtualKeyboard.letters') : t('kiosk.virtualKeyboard.symbols')}
@@ -285,12 +296,21 @@ export function VirtualKeyboard(): JSX.Element | null {
                   wide
                 />
               </div>
-              <Key label={t('kiosk.virtualKeyboard.hide')} ariaLabel={t('kiosk.virtualKeyboard.close')} onPress={close} wide />
+              <Key
+                label={t('kiosk.virtualKeyboard.hide')}
+                ariaLabel={t('kiosk.virtualKeyboard.close')}
+                onPress={close}
+                wide
+              />
             </div>
             {rows.map((row, i) => (
               <div key={i} className="flex justify-center gap-1.5">
                 {row.map((ch) => (
-                  <Key key={ch} label={upper && layout !== 'symbols' ? ch.toUpperCase() : ch} onPress={() => type(ch)} />
+                  <Key
+                    key={ch}
+                    label={upper && layout !== 'symbols' ? ch.toUpperCase() : ch}
+                    onPress={() => type(ch)}
+                  />
                 ))}
               </div>
             ))}

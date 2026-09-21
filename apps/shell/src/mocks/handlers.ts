@@ -426,10 +426,22 @@ function endSession(reason: SessionEndReason): SessionEndResult {
   } else if (tariff) {
     charged = tariffPriceFor(tariff, Math.ceil(s.secondsUsed / 60));
     if (charged.amount > 0) {
-      pushTransaction('charge', money(-charged.amount), `Session ${PC.name}, ${Math.ceil(s.secondsUsed / 60)} min ${tariff.name}`, s.id);
+      pushTransaction(
+        'charge',
+        money(-charged.amount),
+        `Session ${PC.name}, ${Math.ceil(s.secondsUsed / 60)} min ${tariff.name}`,
+        s.id,
+      );
     }
   }
-  const ended: Session = { ...s, state: 'ended', secondsLeft: 0, endsAt: nowIso(), pausedAt: null, cost: s.isPrepaid ? s.cost : charged };
+  const ended: Session = {
+    ...s,
+    state: 'ended',
+    secondsLeft: 0,
+    endsAt: nowIso(),
+    pausedAt: null,
+    cost: s.isPrepaid ? s.cost : charged,
+  };
   mockState.session = null;
   mockState.running = [];
   mockState.kiosk.gameMode = false;
@@ -450,7 +462,12 @@ function tick(): void {
       for (const m of WARNING_MARKS) {
         if (s.secondsLeft === m * 60 && !s.warningsSent.includes(m)) {
           s.warningsSent.push(m);
-          emitMock('agent://session.warning', { sessionId: s.id, minutesLeft: m, secondsLeft: s.secondsLeft, endsAt: s.endsAt });
+          emitMock('agent://session.warning', {
+            sessionId: s.id,
+            minutesLeft: m,
+            secondsLeft: s.secondsLeft,
+            endsAt: s.endsAt,
+          });
         }
       }
       if (s.secondsLeft === 0) {
@@ -472,12 +489,16 @@ let metricsSeq = 0;
 function metricsSample(): PcMetrics {
   metricsSeq += 1;
   const gameRunning = mockState.running.length > 0;
-  const wobble = (base: number, amp: number): number => Math.max(0, Math.round(base + Math.sin(metricsSeq / 3) * amp + (Math.random() - 0.5) * amp));
+  const wobble = (base: number, amp: number): number =>
+    Math.max(0, Math.round(base + Math.sin(metricsSeq / 3) * amp + (Math.random() - 0.5) * amp));
   return {
     cpuPct: wobble(gameRunning ? 62 : METRICS.cpuPct, 8),
     gpuPct: wobble(gameRunning ? 88 : METRICS.gpuPct, 6),
     ramUsedMb: wobble(gameRunning ? 16_400 : METRICS.ramUsedMb, 300),
-    temps: { cpu: wobble(gameRunning ? 71 : METRICS.temps.cpu, 2), gpu: wobble(gameRunning ? 68 : METRICS.temps.gpu, 2) },
+    temps: {
+      cpu: wobble(gameRunning ? 71 : METRICS.temps.cpu, 2),
+      gpu: wobble(gameRunning ? 68 : METRICS.temps.gpu, 2),
+    },
     fps: gameRunning ? wobble(214, 20) : null,
     netMbps: { up: Math.round(wobble(24, 10)) / 10, down: Math.round(wobble(187, 60)) / 10 },
     uptimeSec: METRICS.uptimeSec + metricsSeq * 5,
@@ -521,9 +542,17 @@ function ensureStarted(): void {
   setInterval(tick, 1000);
   setInterval(() => emitMock('agent://sys.metrics', metricsSample()), 5000);
   later(1500, () => emitMock('kiosk://connectivity', { agent: 'connected', attempts: 0, since: nowIso() }));
-  later(2500, () => emitMock('agent://sys.connectivity', { state: 'online', since: nowIso(), queuedEvents: 0, serverLatencyMs: 24 }));
+  later(2500, () =>
+    emitMock('agent://sys.connectivity', { state: 'online', since: nowIso(), queuedEvents: 0, serverLatencyMs: 24 }),
+  );
   if (typeof window !== 'undefined') {
-    (window as unknown as { __clubshellMock: unknown }).__clubshellMock = { state: mockState, emit: emitMock, simulate, registry, reset: resetMock };
+    (window as unknown as { __clubshellMock: unknown }).__clubshellMock = {
+      state: mockState,
+      emit: emitMock,
+      simulate,
+      registry,
+      reset: resetMock,
+    };
   }
 }
 
@@ -558,11 +587,22 @@ export const simulate = {
   },
   updateReady(): void {
     mockState.updateReady = true;
-    const r: UpdateReady = { component: 'shell', version: UPDATE_MANIFEST.version, restartRequired: true, mandatory: false, applyAt: null };
+    const r: UpdateReady = {
+      component: 'shell',
+      version: UPDATE_MANIFEST.version,
+      restartRequired: true,
+      mandatory: false,
+      applyAt: null,
+    };
     emitMock('agent://update.ready', r);
   },
   connectivity(state: 'online' | 'offline'): void {
-    emitMock('agent://sys.connectivity', { state, since: nowIso(), queuedEvents: state === 'offline' ? 3 : 0, serverLatencyMs: state === 'online' ? 24 : null });
+    emitMock('agent://sys.connectivity', {
+      state,
+      since: nowIso(),
+      queuedEvents: state === 'offline' ? 3 : 0,
+      serverLatencyMs: state === 'online' ? 24 : null,
+    });
   },
   agentLink(state: 'connected' | 'disconnected' | 'connecting', attempts = 0): void {
     emitMock('kiosk://connectivity', { agent: state, attempts, since: nowIso() });
@@ -617,7 +657,12 @@ export const simulate = {
   policyChanged(): void {
     mockState.policy.version += 1;
     mockState.policy.updatedAt = nowIso();
-    emitMock('agent://policy.changed', { version: mockState.policy.version, updatedAt: mockState.policy.updatedAt, changed: ['kiosk'], policy: clone(mockState.policy) });
+    emitMock('agent://policy.changed', {
+      version: mockState.policy.version,
+      updatedAt: mockState.policy.updatedAt,
+      changed: ['kiosk'],
+      policy: clone(mockState.policy),
+    });
   },
 };
 
@@ -700,7 +745,12 @@ cmd('auth_login', (args): AuthLoginResponse => {
   if (!session) {
     mockState.session = null;
   }
-  return { user: clone(mockState.user as User), session, expiresAt: mockState.expiresAt ?? isoIn(3600), mode: 'online' };
+  return {
+    user: clone(mockState.user as User),
+    session,
+    expiresAt: mockState.expiresAt ?? isoIn(3600),
+    mode: 'online',
+  };
 });
 
 cmd('auth_logout', (args): AuthLogoutResponse => {
@@ -716,13 +766,16 @@ cmd('auth_logout', (args): AuthLogoutResponse => {
   return { ok: true, sessionEnded: ended !== null, session: ended };
 });
 
-cmd('auth_status', (): AuthStatusResponse => ({
-  authenticated: mockState.user !== null,
-  mode: 'online',
-  user: mockState.user ? clone(mockState.user) : null,
-  session: mockState.session ? clone(mockState.session) : null,
-  expiresAt: mockState.expiresAt,
-}));
+cmd(
+  'auth_status',
+  (): AuthStatusResponse => ({
+    authenticated: mockState.user !== null,
+    mode: 'online',
+    user: mockState.user ? clone(mockState.user) : null,
+    session: mockState.session ? clone(mockState.session) : null,
+    expiresAt: mockState.expiresAt,
+  }),
+);
 
 cmd('auth_qr_start', (): QrLoginStart => {
   const token = `qr-${newId().slice(0, 8)}`;
@@ -733,7 +786,12 @@ cmd('auth_qr_start', (): QrLoginStart => {
       mockState.qr.confirmedAt = Date.now();
     }
   });
-  return { ...QR_START, qrToken: token, qrUrl: `https://club.example.uz/q/${token}`, expiresAt: new Date(expiresAt).toISOString() };
+  return {
+    ...QR_START,
+    qrToken: token,
+    qrUrl: `https://club.example.uz/q/${token}`,
+    expiresAt: new Date(expiresAt).toISOString(),
+  };
 });
 
 // ----- session --------------------------------------------------------------------------------------------------------
@@ -880,17 +938,21 @@ cmd('session_unlock', (args): Session => {
   return clone(s);
 });
 
-cmd('session_time_left', (): SessionTimeLeftResponse => {
-  const s = mockState.session;
-  return {
-    state: s?.state ?? 'idle',
-    secondsLeft: s ? s.secondsLeft : 0,
-    secondsUsed: s ? s.secondsUsed : 0,
-    serverTime: nowIso(),
-    sessionId: s?.id ?? null,
-    endsAt: s?.endsAt ?? null,
-  };
-}, { fast: true });
+cmd(
+  'session_time_left',
+  (): SessionTimeLeftResponse => {
+    const s = mockState.session;
+    return {
+      state: s?.state ?? 'idle',
+      secondsLeft: s ? s.secondsLeft : 0,
+      secondsUsed: s ? s.secondsUsed : 0,
+      serverTime: nowIso(),
+      sessionId: s?.id ?? null,
+      endsAt: s?.endsAt ?? null,
+    };
+  },
+  { fast: true },
+);
 
 // ----- games / apps ---------------------------------------------------------------------------------------------------
 
@@ -923,7 +985,13 @@ cmd('games_list', (args): GamesListResponse => {
   const page = Math.max(1, q.page ?? 1);
   const pageSize = Math.min(500, Math.max(1, q.pageSize ?? 100));
   const total = items.length;
-  return { items: clone(items.slice((page - 1) * pageSize, page * pageSize)), total, page, pageSize, catalogVersion: 'v42' };
+  return {
+    items: clone(items.slice((page - 1) * pageSize, page * pageSize)),
+    total,
+    page,
+    pageSize,
+    catalogVersion: 'v42',
+  };
 });
 
 function gameById(id: string): Game {
@@ -959,7 +1027,14 @@ cmd('games_launch', async (args): Promise<LaunchResult> => {
   const pid = 4000 + Math.floor(Math.random() * 5000);
   const startedAt = nowIso();
   const leaseId = game.requiresAccount ? newId() : null;
-  const running: RunningGame = { gameId: game.id, title: game.title, pid, startedAt, accountLeaseId: leaseId, state: 'launching' };
+  const running: RunningGame = {
+    gameId: game.id,
+    title: game.title,
+    pid,
+    startedAt,
+    accountLeaseId: leaseId,
+    state: 'launching',
+  };
   mockState.running.push(running);
   mockState.kiosk.gameMode = true;
   const change = (state: GameStateChanged['state'], extra: Partial<GameStateChanged> = {}): void =>
@@ -980,14 +1055,23 @@ cmd('games_launch', async (args): Promise<LaunchResult> => {
 cmd('games_kill', (args): GamesKillResponse => {
   const gameId = str(args, 'gameId');
   const pid = num(args, 'pid');
-  const victims = mockState.running.filter((r) => (gameId ? r.gameId === gameId : true) && (pid !== undefined ? r.pid === pid : true));
+  const victims = mockState.running.filter(
+    (r) => (gameId ? r.gameId === gameId : true) && (pid !== undefined ? r.pid === pid : true),
+  );
   if ((gameId || pid !== undefined) && victims.length === 0) {
     mockError('notFound', 'No such running game', { name: gameId ?? String(pid) });
   }
   mockState.running = mockState.running.filter((r) => !victims.includes(r));
   mockState.kiosk.gameMode = mockState.running.length > 0;
   for (const v of victims) {
-    emitMock('agent://game.stateChanged', { gameId: v.gameId, title: v.title, pid: v.pid, state: 'killed', at: nowIso(), exitCode: 137 });
+    emitMock('agent://game.stateChanged', {
+      gameId: v.gameId,
+      title: v.title,
+      pid: v.pid,
+      state: 'killed',
+      at: nowIso(),
+      exitCode: 137,
+    });
   }
   return { killed: victims.length, pids: victims.map((v) => v.pid) };
 });
@@ -1001,7 +1085,7 @@ cmd('games_install_status', (args): GameInstallStatus => {
     installed: g.installed,
     installPath: g.installPath ?? null,
     sizeGb: g.installed ? g.sizeGb : 0,
-    version: g.installed ? g.version ?? null : null,
+    version: g.installed ? (g.version ?? null) : null,
     verifiedAt: g.installed ? new Date(Date.now() - 6 * 3600_000).toISOString() : null,
     launcherReady: g.installed && g.launcher !== 'ubisoft',
   };
@@ -1030,13 +1114,22 @@ cmd('wallet_balance', (): Balance => {
 
 cmd('wallet_tariffs', (args): WalletTariffsResponse => {
   const zone = str(args, 'zone') ?? PC.zone;
-  const items = TARIFFS.filter((t) => t.zones.length === 0 || t.zones.some((z) => z.toLowerCase() === zone.toLowerCase()));
+  const items = TARIFFS.filter(
+    (t) => t.zones.length === 0 || t.zones.some((z) => z.toLowerCase() === zone.toLowerCase()),
+  );
   return { items: clone(items), zone, serverTime: nowIso() };
 });
 
 cmd('wallet_history', (args): WalletHistoryResponse => {
   requireUser();
-  const q = obj<{ page?: number | null; pageSize?: number | null; from?: string | null; to?: string | null; type?: Transaction['type'] | null }>(args, 'q') ?? {};
+  const q =
+    obj<{
+      page?: number | null;
+      pageSize?: number | null;
+      from?: string | null;
+      to?: string | null;
+      type?: Transaction['type'] | null;
+    }>(args, 'q') ?? {};
   let items = mockState.transactions.slice();
   if (q.type) {
     items = items.filter((t) => t.type === q.type);
@@ -1073,7 +1166,10 @@ cmd('wallet_topup_intent', (args): TopupIntent => {
     provider,
     amount: { ...amount },
     status: 'pending',
-    qrUrl: provider === 'cash' ? null : `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(`https://pay.example.uz/${provider}/${id}`)}`,
+    qrUrl:
+      provider === 'cash'
+        ? null
+        : `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(`https://pay.example.uz/${provider}/${id}`)}`,
     deepLink: provider === 'cash' ? null : `${provider}://pay/${id}`,
     paymentUrl: provider === 'cash' ? null : `https://pay.example.uz/${provider}/${id}`,
     expiresAt: isoIn(600),
@@ -1095,7 +1191,16 @@ cmd('wallet_topup_intent', (args): TopupIntent => {
     });
   });
   if (provider === 'cash') {
-    later(2500, () => emitMock('agent://admin.message', { id: newId(), from: ADMIN_NAME, text: 'Coming to collect the cash top-up.', level: 'info', requiresAck: false, at: nowIso() }));
+    later(2500, () =>
+      emitMock('agent://admin.message', {
+        id: newId(),
+        from: ADMIN_NAME,
+        text: 'Coming to collect the cash top-up.',
+        level: 'info',
+        requiresAck: false,
+        at: nowIso(),
+      }),
+    );
   }
   return intent;
 });
@@ -1168,7 +1273,12 @@ cmd('shop_order', (args): Order => {
   const total = money(lines.reduce((sum, l) => sum + l.price.amount * l.qty, 0));
   assertFunds(total);
   const id = newId();
-  pushTransaction('purchase', money(-total.amount), `Shop order: ${lines.map((l) => (l.qty > 1 ? `${l.title} ×${l.qty}` : l.title)).join(', ')}`, id);
+  pushTransaction(
+    'purchase',
+    money(-total.amount),
+    `Shop order: ${lines.map((l) => (l.qty > 1 ? `${l.title} ×${l.qty}` : l.title)).join(', ')}`,
+    id,
+  );
   for (const l of lines) {
     const p = PRODUCTS.find((x) => x.id === l.productId);
     if (p && p.stockQty != null) {
@@ -1176,7 +1286,17 @@ cmd('shop_order', (args): Order => {
       p.inStock = p.stockQty > 0;
     }
   }
-  const order: Order = { id, userId: user.id, pcId: PC_ID, items: lines, total, status: 'pending', createdAt: nowIso(), updatedAt: nowIso(), note: req.note ?? null };
+  const order: Order = {
+    id,
+    userId: user.id,
+    pcId: PC_ID,
+    items: lines,
+    total,
+    status: 'pending',
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+    note: req.note ?? null,
+  };
   mockState.orders.unshift(order);
   if (req.idempotencyKey) {
     mockState.idempotency.set(req.idempotencyKey, order);
@@ -1223,7 +1343,9 @@ cmd('chat_history', (args): ChatHistoryResponse => {
   const limit = Math.min(200, Math.max(1, q.limit ?? 50));
   const hasMore = items.length > limit;
   const page = items.slice(-limit);
-  const unread = mockState.messages.filter((m) => m.roomId === roomId && m.readAt === null && m.senderId !== mockState.user?.id).length;
+  const unread = mockState.messages.filter(
+    (m) => m.roomId === roomId && m.readAt === null && m.senderId !== mockState.user?.id,
+  ).length;
   return { roomId, items: clone(page), hasMore, unread };
 });
 
@@ -1231,7 +1353,10 @@ cmd('chat_send', (args): ChatMessage => {
   const user = requireUser();
   const text = (str(args, 'text') ?? '').trim();
   if (text.length === 0 || text.length > 2000) {
-    mockError('validation', 'text must be 1–2000 chars', { field: 'text', reason: text.length === 0 ? 'required' : 'max' });
+    mockError('validation', 'text must be 1–2000 chars', {
+      field: 'text',
+      reason: text.length === 0 ? 'required' : 'max',
+    });
   }
   const roomId = str(args, 'roomId') ?? ROOM_ID;
   const key = str(args, 'idempotencyKey');
@@ -1298,7 +1423,10 @@ cmd('booking_seats', (args): BookingSeatsResponse => {
   const me = mockState.user?.id;
   const bookings = mockState.bookings
     .filter((b) => b.from.slice(0, 10) === date || b.to.slice(0, 10) === date)
-    .map((b) => ({ ...b, userId: b.userId === me || b.userId === USER_ID ? (me ?? b.userId) : '00000000-0000-0000-0000-000000000000' }));
+    .map((b) => ({
+      ...b,
+      userId: b.userId === me || b.userId === USER_ID ? (me ?? b.userId) : '00000000-0000-0000-0000-000000000000',
+    }));
   return { date, seats: clone(SEATS), bookings, slotMinutes: SLOT_MINUTES, openFrom: '10:00', openTo: '06:00' };
 });
 
@@ -1308,7 +1436,10 @@ cmd('booking_reserve', (args): Booking => {
   const from = str(args, 'from');
   const to = str(args, 'to');
   if (!pcId || !from || !to) {
-    mockError('validation', 'pcId, from, to are required', { field: !pcId ? 'pcId' : !from ? 'from' : 'to', reason: 'required' });
+    mockError('validation', 'pcId, from, to are required', {
+      field: !pcId ? 'pcId' : !from ? 'from' : 'to',
+      reason: 'required',
+    });
   }
   const seatRow = SEATS.find((s) => s.pcId === pcId);
   if (!seatRow) {
@@ -1325,11 +1456,25 @@ cmd('booking_reserve', (args): Booking => {
   if (seatRow.status === 'maintenance' || seatRow.status === 'offline') {
     mockError('conflict', 'Seat unavailable', { reason: seatRow.status });
   }
-  const overlap = mockState.bookings.some((b) => b.pcId === pcId && b.status !== 'cancelled' && b.status !== 'expired' && Date.parse(b.from) < t && Date.parse(b.to) > f);
+  const overlap = mockState.bookings.some(
+    (b) =>
+      b.pcId === pcId &&
+      b.status !== 'cancelled' &&
+      b.status !== 'expired' &&
+      Date.parse(b.from) < t &&
+      Date.parse(b.to) > f,
+  );
   if (overlap) {
     mockError('conflict', 'Slot already booked', { reason: 'overlap' });
   }
-  const booking: Booking = { id: newId(), userId: user.id, pcId, from: new Date(f).toISOString(), to: new Date(t).toISOString(), status: 'confirmed' };
+  const booking: Booking = {
+    id: newId(),
+    userId: user.id,
+    pcId,
+    from: new Date(f).toISOString(),
+    to: new Date(t).toISOString(),
+    status: 'confirmed',
+  };
   mockState.bookings.push(booking);
   return clone(booking);
 });
@@ -1388,8 +1533,15 @@ cmd('tournaments_leaderboard', (args): TournamentsLeaderboardResponse => {
   }
   const limit = Math.min(100, Math.max(1, num(args, 'limit') ?? 50));
   const entries = LEADERBOARD.slice(0, limit);
-  const me = mockState.user ? LEADERBOARD.find((e) => e.userId === mockState.user?.id || e.userId === USER_ID) ?? null : null;
-  return { tournamentId: id, entries: clone(entries), updatedAt: nowIso(), me: me && !entries.includes(me) ? clone(me) : null };
+  const me = mockState.user
+    ? (LEADERBOARD.find((e) => e.userId === mockState.user?.id || e.userId === USER_ID) ?? null)
+    : null;
+  return {
+    tournamentId: id,
+    entries: clone(entries),
+    updatedAt: nowIso(),
+    me: me && !entries.includes(me) ? clone(me) : null,
+  };
 });
 
 // ----- profile --------------------------------------------------------------------------------------------------------
@@ -1402,7 +1554,10 @@ cmd('profile_update', (args): User => {
   if (patch.displayName !== undefined && patch.displayName !== null) {
     const name = patch.displayName.trim();
     if (name.length === 0 || name.length > 32) {
-      mockError('validation', 'displayName must be 1–32 chars', { field: 'displayName', reason: name.length === 0 ? 'required' : 'max' });
+      mockError('validation', 'displayName must be 1–32 chars', {
+        field: 'displayName',
+        reason: name.length === 0 ? 'required' : 'max',
+      });
     }
     user.displayName = name;
   }
@@ -1420,7 +1575,9 @@ cmd('profile_update', (args): User => {
 
 cmd('profile_stats', (): UserStats => {
   const user = requireUser();
-  return user.role === 'guest' ? { totalHours: 0, sessionsCount: 0, favoriteGames: [], spent: uzs(0), rank: 0 } : clone(STATS);
+  return user.role === 'guest'
+    ? { totalHours: 0, sessionsCount: 0, favoriteGames: [], spent: uzs(0), rank: 0 }
+    : clone(STATS);
 });
 
 cmd('profile_achievements', (): Achievement[] => {
@@ -1471,7 +1628,10 @@ cmd('settings_set', (args): ShellSettings => {
   }
   if (patch.allowVirtualKeyboard != null) {
     if (!mockState.policy.kiosk.allowVirtualKeyboard && patch.allowVirtualKeyboard) {
-      mockError('policyDenied', 'Virtual keyboard disabled by policy', { rule: 'allowVirtualKeyboard', field: 'allowVirtualKeyboard' });
+      mockError('policyDenied', 'Virtual keyboard disabled by policy', {
+        rule: 'allowVirtualKeyboard',
+        field: 'allowVirtualKeyboard',
+      });
     }
     s.allowVirtualKeyboard = patch.allowVirtualKeyboard;
   }
@@ -1487,10 +1647,14 @@ cmd('settings_set', (args): ShellSettings => {
   return clone(s);
 });
 
-cmd('settings_get_theme', (args): Theme => {
-  const name = str(args, 'name') ?? mockState.settings.theme;
-  return clone(builtinThemes[name] ?? DEFAULT_THEME);
-}, { fast: true });
+cmd(
+  'settings_get_theme',
+  (args): Theme => {
+    const name = str(args, 'name') ?? mockState.settings.theme;
+    return clone(builtinThemes[name] ?? DEFAULT_THEME);
+  },
+  { fast: true },
+);
 
 cmd('settings_list_themes', (): string[] => mockState.settings.availableThemes.slice(), { fast: true });
 
@@ -1505,7 +1669,10 @@ cmd('policy_reload', (args): PolicyReloadResponse => {
 
 // ----- system ---------------------------------------------------------------------------------------------------------
 
-cmd('sys_pc_info', (): PcInfo => ({ ...clone(PC_INFO), serverTime: nowIso(), uptimeSec: METRICS.uptimeSec + metricsSeq * 5 }));
+cmd(
+  'sys_pc_info',
+  (): PcInfo => ({ ...clone(PC_INFO), serverTime: nowIso(), uptimeSec: METRICS.uptimeSec + metricsSeq * 5 }),
+);
 
 cmd('sys_hardware', (): HardwareInfo => clone(HARDWARE));
 
@@ -1522,7 +1689,16 @@ cmd('sys_call_admin', (args): SysCallAdminResponse => {
   }
   mockState.lastCallAdminAt = Date.now();
   const ticketId = newId();
-  later(3000, () => emitMock('agent://admin.message', { id: newId(), from: ADMIN_NAME, text: 'On my way to your seat.', level: 'info', requiresAck: false, at: nowIso() }));
+  later(3000, () =>
+    emitMock('agent://admin.message', {
+      id: newId(),
+      from: ADMIN_NAME,
+      text: 'On my way to your seat.',
+      level: 'info',
+      requiresAck: false,
+      at: nowIso(),
+    }),
+  );
   return { ticketId, createdAt: nowIso(), queuePosition: 1 };
 });
 
@@ -1542,26 +1718,34 @@ cmd('sys_lock_screen', (): OkResponse => {
   return { ok: true };
 });
 
-cmd('sys_set_volume', (args): VolumeState => {
-  const level = num(args, 'level');
-  if (level === undefined || level < 0 || level > 100) {
-    mockError('validation', 'level must be 0–100', { field: 'level', reason: 'max' });
-  }
-  mockState.volume = { level: Math.round(level), muted: bool(args, 'muted') ?? mockState.volume.muted };
-  mockState.settings.volume = mockState.volume.level;
-  mockState.settings.muted = mockState.volume.muted;
-  return { ...mockState.volume };
-}, { fast: true });
+cmd(
+  'sys_set_volume',
+  (args): VolumeState => {
+    const level = num(args, 'level');
+    if (level === undefined || level < 0 || level > 100) {
+      mockError('validation', 'level must be 0–100', { field: 'level', reason: 'max' });
+    }
+    mockState.volume = { level: Math.round(level), muted: bool(args, 'muted') ?? mockState.volume.muted };
+    mockState.settings.volume = mockState.volume.level;
+    mockState.settings.muted = mockState.volume.muted;
+    return { ...mockState.volume };
+  },
+  { fast: true },
+);
 
-cmd('sys_set_locale', (args): SysSetLocaleResponse => {
-  const locale = str(args, 'locale') as Locale | undefined;
-  if (!locale || !['en', 'ru', 'uz'].includes(locale)) {
-    mockError('validation', 'Unknown locale', { field: 'locale', reason: 'format' });
-  }
-  mockState.settings.locale = locale;
-  emitMock('kiosk://localeChanged', { locale });
-  return { locale };
-}, { fast: true });
+cmd(
+  'sys_set_locale',
+  (args): SysSetLocaleResponse => {
+    const locale = str(args, 'locale') as Locale | undefined;
+    if (!locale || !['en', 'ru', 'uz'].includes(locale)) {
+      mockError('validation', 'Unknown locale', { field: 'locale', reason: 'format' });
+    }
+    mockState.settings.locale = locale;
+    emitMock('kiosk://localeChanged', { locale });
+    return { locale };
+  },
+  { fast: true },
+);
 
 cmd('sys_unlock_admin', (args): SysUnlockAdminResponse => {
   const now = Date.now();
@@ -1581,15 +1765,26 @@ cmd('sys_unlock_admin', (args): SysUnlockAdminResponse => {
 
 cmd('sys_ack_admin_message', (): OkResponse => ({ ok: true }), { fast: true });
 
-cmd('sys_log_client_error', (args): null => {
-  const e = obj<{ level: string; message: string; stack?: string | null; route?: string | null }>(args, 'e');
-  if (e && import.meta.env.DEV) {
-    console.debug(`[mock:logClientError] ${e.level}: ${e.message}`, e.route ?? '');
-  }
-  return null;
-}, { fast: true });
+cmd(
+  'sys_log_client_error',
+  (args): null => {
+    const e = obj<{ level: string; message: string; stack?: string | null; route?: string | null }>(args, 'e');
+    if (e && import.meta.env.DEV) {
+      console.debug(`[mock:logClientError] ${e.level}: ${e.message}`, e.route ?? '');
+    }
+    return null;
+  },
+  { fast: true },
+);
 
-cmd('update_check', (): UpdateCheckResponse => ({ current: { agent: '1.4.2', shell: '1.0.0' }, agent: null, shell: clone(UPDATE_MANIFEST) }));
+cmd(
+  'update_check',
+  (): UpdateCheckResponse => ({
+    current: { agent: '1.4.2', shell: '1.0.0' },
+    agent: null,
+    shell: clone(UPDATE_MANIFEST),
+  }),
+);
 
 cmd('update_apply', (args): UpdateApplyResponse => {
   const component = str(args, 'component');
@@ -1604,13 +1799,27 @@ cmd('update_apply', (args): UpdateApplyResponse => {
     const percent = Math.min(100, pct);
     later(500 + step * 500, () => {
       const phase = phases[Math.min(phases.length - 1, Math.floor((percent / 100) * phases.length))] ?? 'downloading';
-      emitMock('agent://update.progress', { component, version, phase, percent, bytesDone: Math.round((total * percent) / 100), bytesTotal: total, error: null });
+      emitMock('agent://update.progress', {
+        component,
+        version,
+        phase,
+        percent,
+        bytesDone: Math.round((total * percent) / 100),
+        bytesTotal: total,
+        error: null,
+      });
     });
     step += 1;
   }
   later(500 + step * 500, () => {
     mockState.updateReady = true;
-    emitMock('agent://update.ready', { component, version, restartRequired: component === 'shell', mandatory: false, applyAt: null });
+    emitMock('agent://update.ready', {
+      component,
+      version,
+      restartRequired: component === 'shell',
+      mandatory: false,
+      applyAt: null,
+    });
   });
   return { scheduled: true, at: isoIn(step * 0.5 + 1) };
 });
@@ -1624,141 +1833,193 @@ function requireAdmin(): void {
   }
 }
 
-cmd('kiosk_state', (): KioskState => ({ ...clone(mockState.kiosk), gameMode: mockState.running.length > 0 }), { fast: true });
+cmd('kiosk_state', (): KioskState => ({ ...clone(mockState.kiosk), gameMode: mockState.running.length > 0 }), {
+  fast: true,
+});
 
-cmd('kiosk_set_guard', (args): null => {
-  const active = bool(args, 'active') ?? true;
-  if (!active && mockState.running.length === 0 && (!mockState.adminToken || mockState.adminToken.expiresAt < Date.now())) {
-    mockError('forbidden', 'Guard may only be released while a game runs or with an admin unlock', { reason: 'guard' });
-  }
-  mockState.kiosk.guardActive = active;
-  return null;
-}, { fast: true });
+cmd(
+  'kiosk_set_guard',
+  (args): null => {
+    const active = bool(args, 'active') ?? true;
+    if (
+      !active &&
+      mockState.running.length === 0 &&
+      (!mockState.adminToken || mockState.adminToken.expiresAt < Date.now())
+    ) {
+      mockError('forbidden', 'Guard may only be released while a game runs or with an admin unlock', {
+        reason: 'guard',
+      });
+    }
+    mockState.kiosk.guardActive = active;
+    return null;
+  },
+  { fast: true },
+);
 
-cmd('kiosk_set_fullscreen', (args): null => {
-  requireAdmin();
-  mockState.kiosk.fullscreen = bool(args, 'on') ?? true;
-  return null;
-}, { fast: true });
+cmd(
+  'kiosk_set_fullscreen',
+  (args): null => {
+    requireAdmin();
+    mockState.kiosk.fullscreen = bool(args, 'on') ?? true;
+    return null;
+  },
+  { fast: true },
+);
 
-cmd('kiosk_show_overlay', (args): null => {
-  const kind = str(args, 'kind');
-  if (kind !== 'lock' && kind !== 'ads' && kind !== 'message' && kind !== 'none') {
-    mockError('validation', 'Unknown overlay kind', { field: 'kind', reason: 'format' });
-  }
-  mockState.kiosk.overlay = kind;
-  emitMock('kiosk://overlay', { kind, payload: args['payload'] });
-  return null;
-}, { fast: true });
+cmd(
+  'kiosk_show_overlay',
+  (args): null => {
+    const kind = str(args, 'kind');
+    if (kind !== 'lock' && kind !== 'ads' && kind !== 'message' && kind !== 'none') {
+      mockError('validation', 'Unknown overlay kind', { field: 'kind', reason: 'format' });
+    }
+    mockState.kiosk.overlay = kind;
+    emitMock('kiosk://overlay', { kind, payload: args['payload'] });
+    return null;
+  },
+  { fast: true },
+);
 
 cmd('kiosk_monitors', () => clone(MONITORS), { fast: true });
 
-cmd('kiosk_move_to_monitor', (args): null => {
-  const index = num(args, 'index') ?? -1;
-  if (!MONITORS.some((m) => m.index === index)) {
-    mockError('notFound', 'Monitor not found', { name: 'monitor' });
-  }
-  return null;
-}, { fast: true });
+cmd(
+  'kiosk_move_to_monitor',
+  (args): null => {
+    const index = num(args, 'index') ?? -1;
+    if (!MONITORS.some((m) => m.index === index)) {
+      mockError('notFound', 'Monitor not found', { name: 'monitor' });
+    }
+    return null;
+  },
+  { fast: true },
+);
 
-cmd('kiosk_virtual_keyboard', (): null => {
-  if (!SHELL_CONFIG.kiosk.allowVirtualKeyboard) {
-    mockError('policyDenied', 'Virtual keyboard disabled', { rule: 'allowVirtualKeyboard' });
-  }
-  return null;
-}, { fast: true });
+cmd(
+  'kiosk_virtual_keyboard',
+  (): null => {
+    if (!SHELL_CONFIG.kiosk.allowVirtualKeyboard) {
+      mockError('policyDenied', 'Virtual keyboard disabled', { rule: 'allowVirtualKeyboard' });
+    }
+    return null;
+  },
+  { fast: true },
+);
 
 cmd('kiosk_focus', (): null => null, { fast: true });
 
-cmd('kiosk_exit', (args): null => {
-  const token = str(args, 'adminToken');
-  const action = str(args, 'action');
-  if (action !== 'explorer' && action !== 'quit') {
-    mockError('validation', 'action must be explorer|quit', { field: 'action', reason: 'format' });
-  }
-  if (!token || mockState.adminToken?.token !== token || mockState.adminToken.expiresAt < Date.now()) {
-    mockError('unauthorized', 'Invalid admin token', { reason: 'adminToken' });
-  }
-  console.info(`[mock] kiosk_exit(${action}) — would exit the shell`);
-  return null;
-}, { fast: true });
+cmd(
+  'kiosk_exit',
+  (args): null => {
+    const token = str(args, 'adminToken');
+    const action = str(args, 'action');
+    if (action !== 'explorer' && action !== 'quit') {
+      mockError('validation', 'action must be explorer|quit', { field: 'action', reason: 'format' });
+    }
+    if (!token || mockState.adminToken?.token !== token || mockState.adminToken.expiresAt < Date.now()) {
+      mockError('unauthorized', 'Invalid admin token', { reason: 'adminToken' });
+    }
+    console.info(`[mock] kiosk_exit(${action}) — would exit the shell`);
+    return null;
+  },
+  { fast: true },
+);
 
-cmd('kiosk_reload', (): null => {
-  if (typeof window !== 'undefined') {
-    setTimeout(() => window.location.reload(), 50);
-  }
-  return null;
-}, { fast: true });
+cmd(
+  'kiosk_reload',
+  (): null => {
+    if (typeof window !== 'undefined') {
+      setTimeout(() => window.location.reload(), 50);
+    }
+    return null;
+  },
+  { fast: true },
+);
 
-cmd('kiosk_open_devtools', (): null => {
-  if (!SHELL_CONFIG.devtools) {
-    mockError('forbidden', 'Devtools disabled', { reason: 'devtools' });
-  }
-  console.info('[mock] kiosk_open_devtools — use the browser devtools');
-  return null;
-}, { fast: true });
+cmd(
+  'kiosk_open_devtools',
+  (): null => {
+    if (!SHELL_CONFIG.devtools) {
+      mockError('forbidden', 'Devtools disabled', { reason: 'devtools' });
+    }
+    console.info('[mock] kiosk_open_devtools — use the browser devtools');
+    return null;
+  },
+  { fast: true },
+);
 
-cmd('kiosk_gamepad_state', (): GamepadState[] => {
-  const pads: GamepadState[] = [];
-  if (typeof navigator !== 'undefined' && typeof navigator.getGamepads === 'function') {
-    for (const gp of navigator.getGamepads()) {
-      if (gp) {
-        let mask = 0;
-        gp.buttons.forEach((b, i) => {
-          if (b.pressed) {
-            mask |= 1 << i;
-          }
-        });
-        pads.push({
-          index: gp.index,
-          connected: gp.connected,
-          buttons: mask,
-          leftX: gp.axes[0] ?? 0,
-          leftY: gp.axes[1] ?? 0,
-          rightX: gp.axes[2] ?? 0,
-          rightY: gp.axes[3] ?? 0,
-          lt: gp.buttons[6]?.value ?? 0,
-          rt: gp.buttons[7]?.value ?? 0,
-        });
+cmd(
+  'kiosk_gamepad_state',
+  (): GamepadState[] => {
+    const pads: GamepadState[] = [];
+    if (typeof navigator !== 'undefined' && typeof navigator.getGamepads === 'function') {
+      for (const gp of navigator.getGamepads()) {
+        if (gp) {
+          let mask = 0;
+          gp.buttons.forEach((b, i) => {
+            if (b.pressed) {
+              mask |= 1 << i;
+            }
+          });
+          pads.push({
+            index: gp.index,
+            connected: gp.connected,
+            buttons: mask,
+            leftX: gp.axes[0] ?? 0,
+            leftY: gp.axes[1] ?? 0,
+            rightX: gp.axes[2] ?? 0,
+            rightY: gp.axes[3] ?? 0,
+            lt: gp.buttons[6]?.value ?? 0,
+            rt: gp.buttons[7]?.value ?? 0,
+          });
+        }
       }
     }
-  }
-  mockState.kiosk.gamepadConnected = pads.some((p) => p.connected);
-  return pads;
-}, { fast: true });
+    mockState.kiosk.gamepadConnected = pads.some((p) => p.connected);
+    return pads;
+  },
+  { fast: true },
+);
 
-cmd('kiosk_idle_reset', (): null => {
-  if (mockState.kiosk.idle) {
-    mockState.kiosk.idle = false;
-    mockState.kiosk.idleSec = 0;
-    emitMock('kiosk://idle', { idle: false, idleSec: 0, stage: 'active' });
-  }
-  return null;
-}, { fast: true });
+cmd(
+  'kiosk_idle_reset',
+  (): null => {
+    if (mockState.kiosk.idle) {
+      mockState.kiosk.idle = false;
+      mockState.kiosk.idleSec = 0;
+      emitMock('kiosk://idle', { idle: false, idleSec: 0, stage: 'active' });
+    }
+    return null;
+  },
+  { fast: true },
+);
 
 cmd('kiosk_i18n_bundle', (): Record<string, string> => ({}), { fast: true });
 
-cmd('kiosk_asset_url', (args): string => {
-  const path = (str(args, 'path') ?? '').replace(/\\/g, '/');
-  if (path.length === 0) {
-    mockError('validation', 'path is required', { field: 'path', reason: 'required' });
-  }
-  if (/^(https?:|data:|blob:)/i.test(path)) {
-    return path;
-  }
-  const base = path.split('/').pop() ?? path;
-  const seed = base.replace(/\.[a-z0-9]+$/i, '');
-  if (path.startsWith('themes/')) {
-    if (/\.(mp4|webm)$/i.test(path)) {
-      return 'https://cdn.jsdelivr.net/gh/mdn/interactive-examples@main/live-examples/media/examples/flower.webm';
+cmd(
+  'kiosk_asset_url',
+  (args): string => {
+    const path = (str(args, 'path') ?? '').replace(/\\/g, '/');
+    if (path.length === 0) {
+      mockError('validation', 'path is required', { field: 'path', reason: 'required' });
     }
-    return `https://picsum.photos/seed/${seed}/1920/1080`;
-  }
-  if (path.startsWith('cache/media/')) {
-    return `https://picsum.photos/seed/${seed}/600/900`;
-  }
-  mockError('forbidden', 'Path outside themes\\ or cache\\media\\', { reason: 'path' });
-}, { fast: true });
+    if (/^(https?:|data:|blob:)/i.test(path)) {
+      return path;
+    }
+    const base = path.split('/').pop() ?? path;
+    const seed = base.replace(/\.[a-z0-9]+$/i, '');
+    if (path.startsWith('themes/')) {
+      if (/\.(mp4|webm)$/i.test(path)) {
+        return 'https://cdn.jsdelivr.net/gh/mdn/interactive-examples@main/live-examples/media/examples/flower.webm';
+      }
+      return `https://picsum.photos/seed/${seed}/1920/1080`;
+    }
+    if (path.startsWith('cache/media/')) {
+      return `https://picsum.photos/seed/${seed}/600/900`;
+    }
+    mockError('forbidden', 'Path outside themes\\ or cache\\media\\', { reason: 'path' });
+  },
+  { fast: true },
+);
 
 /** Every command name TAURI_COMMANDS.md §4.1 lists; `tests/unit/mock-coverage` compares against this. */
 export const MOCKED_COMMANDS: readonly string[] = Object.keys(registry);

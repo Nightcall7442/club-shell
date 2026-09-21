@@ -2,7 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
-import { tariffWindowContains, WEEKDAYS, weekdayFromJsDay, type Locale, type Tariff, type TariffTimeWindow } from '@clubshell/contracts';
+import {
+  tariffWindowContains,
+  WEEKDAYS,
+  weekdayFromJsDay,
+  type Locale,
+  type Tariff,
+  type TariffTimeWindow,
+} from '@clubshell/contracts';
 import { Badge } from '@/components/ui/Badge';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { LOCALE_TAGS } from '@/i18n';
@@ -115,8 +122,13 @@ export function PriceList({ tariffs, compact = false, className }: PriceListProp
   const groups = useMemo(() => groupByZone(list), [list]);
 
   return (
-    <section aria-label={t('idle.priceList')} className={clsx('glass flex flex-col rounded-2xl', compact ? 'gap-3 p-5' : 'gap-5 p-7', className)}>
-      <h2 className={clsx('font-black uppercase tracking-[0.15em] text-text', compact ? 'text-lg' : 'text-2xl')}>{t('idle.tariffsTitle')}</h2>
+    <section
+      aria-label={t('idle.priceList')}
+      className={clsx('glass flex flex-col rounded-2xl', compact ? 'gap-3 p-5' : 'gap-5 p-7', className)}
+    >
+      <h2 className={clsx('font-black uppercase tracking-[0.15em] text-text', compact ? 'text-lg' : 'text-2xl')}>
+        {t('idle.tariffsTitle')}
+      </h2>
 
       {loading && list.length === 0 ? (
         <div className="flex flex-col gap-3">
@@ -137,7 +149,10 @@ export function PriceList({ tariffs, compact = false, className }: PriceListProp
                 const available = tariffAvailableNow(tariff, now);
                 const price =
                   tariff.isPackage && tariff.packagePrice
-                    ? t('idle.packageFor', { minutes: tariff.packageMinutes ?? tariff.minMinutes, price: formatMoney(tariff.packagePrice, locale) })
+                    ? t('idle.packageFor', {
+                        minutes: tariff.packageMinutes ?? tariff.minMinutes,
+                        price: formatMoney(tariff.packagePrice, locale),
+                      })
                     : t('idle.perHour', { price: formatMoney(tariff.pricePerHour, locale) });
                 return (
                   <li
@@ -150,7 +165,9 @@ export function PriceList({ tariffs, compact = false, className }: PriceListProp
                   >
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className={clsx('font-bold text-text', compact ? 'text-lg' : 'text-xl')}>{tariff.name}</span>
+                        <span className={clsx('font-bold text-text', compact ? 'text-lg' : 'text-xl')}>
+                          {tariff.name}
+                        </span>
                         {available && tariff.timeWindows.length > 0 && (
                           <Badge tone="success" size="sm" dot>
                             {t('idle.availableNow')}
@@ -158,10 +175,19 @@ export function PriceList({ tariffs, compact = false, className }: PriceListProp
                         )}
                       </div>
                       {tariff.timeWindows.length > 0 && (
-                        <p className={clsx('text-muted', compact ? 'text-xs' : 'text-sm')}>{tariff.timeWindows.map((w) => describeWindow(w, locale, t)).join(' · ')}</p>
+                        <p className={clsx('text-muted', compact ? 'text-xs' : 'text-sm')}>
+                          {tariff.timeWindows.map((w) => describeWindow(w, locale, t)).join(' · ')}
+                        </p>
                       )}
                     </div>
-                    <span className={clsx('tnum shrink-0 whitespace-nowrap font-black text-primary', compact ? 'text-xl' : 'text-2xl')}>{price}</span>
+                    <span
+                      className={clsx(
+                        'tnum shrink-0 whitespace-nowrap font-black text-primary',
+                        compact ? 'text-xl' : 'text-2xl',
+                      )}
+                    >
+                      {price}
+                    </span>
                   </li>
                 );
               })}

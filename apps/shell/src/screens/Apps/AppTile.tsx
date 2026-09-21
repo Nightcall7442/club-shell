@@ -52,7 +52,15 @@ export function AppTile({ app, onLaunch, launching = false, disabled = false, cl
     >
       <span className="relative flex h-24 w-24 items-center justify-center overflow-hidden rounded-2xl bg-bg/60 shadow-[var(--shadow-card)] transition-transform duration-[var(--dur-base)] group-hover:scale-105 group-focus-visible:scale-105">
         {url && !failed ? (
-          <img src={url} alt={t('apps.iconAlt', { title: app.title })} draggable={false} loading="lazy" decoding="async" onError={() => setFailed(true)} className="h-full w-full object-cover" />
+          <img
+            src={url}
+            alt={t('apps.iconAlt', { title: app.title })}
+            draggable={false}
+            loading="lazy"
+            decoding="async"
+            onError={() => setFailed(true)}
+            className="h-full w-full object-cover"
+          />
         ) : (
           <span aria-hidden="true" className="text-3xl font-bold text-primary">
             {initials(app.title)}
@@ -73,7 +81,11 @@ export function AppTile({ app, onLaunch, launching = false, disabled = false, cl
           {t('apps.notAllowed')}
         </Badge>
       ) : (
-        <Badge tone="primary" size="sm" className="opacity-0 transition-opacity duration-[var(--dur-fast)] group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[focused=true]:opacity-100">
+        <Badge
+          tone="primary"
+          size="sm"
+          className="opacity-0 transition-opacity duration-[var(--dur-fast)] group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[focused=true]:opacity-100"
+        >
           {launching ? t('apps.launching') : t('apps.launch')}
         </Badge>
       )}

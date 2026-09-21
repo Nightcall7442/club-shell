@@ -70,14 +70,18 @@ function emit(level: Level, message: string, args: unknown[]): void {
       if (import.meta.env.DEV) {
         console.debug(prefix, ...args);
         if (isTauri()) {
-          pluginLog.debug(args.length > 0 ? `${message} ${args.map(stringify).join(' ')}` : message).catch(() => undefined);
+          pluginLog
+            .debug(args.length > 0 ? `${message} ${args.map(stringify).join(' ')}` : message)
+            .catch(() => undefined);
         }
       }
       break;
     case 'info':
       console.info(prefix, ...args);
       if (isTauri()) {
-        pluginLog.info(args.length > 0 ? `${message} ${args.map(stringify).join(' ')}` : message).catch(() => undefined);
+        pluginLog
+          .info(args.length > 0 ? `${message} ${args.map(stringify).join(' ')}` : message)
+          .catch(() => undefined);
       }
       break;
     case 'warn':
@@ -101,7 +105,10 @@ export const log = {
 
 /** Registers `window.onerror` / `unhandledrejection` forwarding once. */
 export function installGlobalErrorHandlers(): void {
-  if (typeof window === 'undefined' || (window as { __clubshellErrorsInstalled?: boolean }).__clubshellErrorsInstalled) {
+  if (
+    typeof window === 'undefined' ||
+    (window as { __clubshellErrorsInstalled?: boolean }).__clubshellErrorsInstalled
+  ) {
     return;
   }
   (window as { __clubshellErrorsInstalled?: boolean }).__clubshellErrorsInstalled = true;

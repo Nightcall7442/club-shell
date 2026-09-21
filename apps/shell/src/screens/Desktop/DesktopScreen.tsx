@@ -35,7 +35,9 @@ import { useWalletStore } from '@/store/wallet';
 // ---------------------------------------------------------------------------------------------------------------------
 
 /** Greeting key by local hour. */
-export function greetingKey(hour: number): 'desktop.greetingMorning' | 'desktop.greetingDay' | 'desktop.greetingEvening' | 'desktop.greetingNight' {
+export function greetingKey(
+  hour: number,
+): 'desktop.greetingMorning' | 'desktop.greetingDay' | 'desktop.greetingEvening' | 'desktop.greetingNight' {
   if (hour < 5) return 'desktop.greetingNight';
   if (hour < 12) return 'desktop.greetingMorning';
   if (hour < 18) return 'desktop.greetingDay';
@@ -119,11 +121,25 @@ export function RunningGameBanner(): JSX.Element | null {
 
   return (
     <div role="status" className="glass flex items-center gap-4 rounded-xl px-5 py-3">
-      {running ? <Badge tone="success" live>{t('games.running')}</Badge> : <Spinner size="sm" />}
+      {running ? (
+        <Badge tone="success" live>
+          {t('games.running')}
+        </Badge>
+      ) : (
+        <Spinner size="sm" />
+      )}
       <div className="min-w-0 flex-1">
-        <div className="truncate text-lg font-bold text-text">{running ? t('desktop.gameRunning', { title: running.title }) : t('games.launchTitle', { title: launching?.title ?? '' })}</div>
+        <div className="truncate text-lg font-bold text-text">
+          {running
+            ? t('desktop.gameRunning', { title: running.title })
+            : t('games.launchTitle', { title: launching?.title ?? '' })}
+        </div>
         <div className="truncate text-sm text-muted">
-          {running ? t('desktop.runningSince', { duration: formatDurationSec(secondsSince(running.startedAt), { compact: true }) }) : t('games.launching')}
+          {running
+            ? t('desktop.runningSince', {
+                duration: formatDurationSec(secondsSince(running.startedAt), { compact: true }),
+              })
+            : t('games.launching')}
         </div>
       </div>
       {running && (
@@ -189,7 +205,9 @@ export function GameCoverCard({ game, priority = false }: { game: Game; priority
         }
       />
       <span className="truncate text-base font-semibold text-text">{game.title}</span>
-      <span className="truncate text-sm text-muted">{game.lastPlayedAt ? formatDateTime(game.lastPlayedAt, locale) : t('games.neverPlayed')}</span>
+      <span className="truncate text-sm text-muted">
+        {game.lastPlayedAt ? formatDateTime(game.lastPlayedAt, locale) : t('games.neverPlayed')}
+      </span>
     </button>
   );
 }
@@ -205,7 +223,11 @@ export function ContinuePlaying({ index }: { index: number }): JSX.Element {
 
   return (
     <Section title={title} index={index} action={{ label: t('desktop.seeAll'), onClick: () => navigate('/games') }}>
-      <div role="list" aria-label={title} className="no-scrollbar -mx-1 flex gap-[var(--gap)] overflow-x-auto px-1 pb-2">
+      <div
+        role="list"
+        aria-label={title}
+        className="no-scrollbar -mx-1 flex gap-[var(--gap)] overflow-x-auto px-1 pb-2"
+      >
         {status === 'loading' && games.length === 0
           ? Array.from({ length: 6 }, (_, i) => (
               <div key={i} role="listitem" className="w-[var(--card-cover-w)] shrink-0">
@@ -287,7 +309,9 @@ export function PromoStrip({ index }: { index: number }): JSX.Element | null {
             </motion.div>
           </AnimatePresence>
           {items.length > 1 && (
-            <span className="absolute bottom-3 right-4 rounded-full bg-bg/70 px-3 py-1 text-xs text-muted">{t('idle.adOf', { index: (idx % items.length) + 1, total: items.length })}</span>
+            <span className="absolute bottom-3 right-4 rounded-full bg-bg/70 px-3 py-1 text-xs text-muted">
+              {t('idle.adOf', { index: (idx % items.length) + 1, total: items.length })}
+            </span>
           )}
         </div>
       ) : (
@@ -309,7 +333,10 @@ export function PromoStrip({ index }: { index: number }): JSX.Element | null {
               </span>
               <span className="tnum text-base text-muted">
                 {tf.isPackage && tf.packagePrice && tf.packageMinutes
-                  ? t('wallet.packageMinutes', { minutes: tf.packageMinutes, price: formatMoney(tf.packagePrice, locale) })
+                  ? t('wallet.packageMinutes', {
+                      minutes: tf.packageMinutes,
+                      price: formatMoney(tf.packagePrice, locale),
+                    })
                   : t('wallet.perHour', { price: formatMoney(tf.pricePerHour, locale) })}
               </span>
             </button>
@@ -337,7 +364,11 @@ export function TournamentsTeaser({ index }: { index: number }): JSX.Element {
       (list) => {
         if (active) {
           const order: Record<Tournament['state'], number> = { live: 0, registration: 1, upcoming: 2, finished: 3 };
-          setItems([...list].sort((a, b) => order[a.state] - order[b.state] || Date.parse(a.startsAt) - Date.parse(b.startsAt)).slice(0, 3));
+          setItems(
+            [...list]
+              .sort((a, b) => order[a.state] - order[b.state] || Date.parse(a.startsAt) - Date.parse(b.startsAt))
+              .slice(0, 3),
+          );
         }
       },
       (e: unknown) => {
@@ -353,10 +384,16 @@ export function TournamentsTeaser({ index }: { index: number }): JSX.Element {
   }, []);
 
   return (
-    <Section title={t('desktop.nav.tournaments')} index={index} action={{ label: t('desktop.seeAll'), onClick: () => navigate('/tournaments') }}>
+    <Section
+      title={t('desktop.nav.tournaments')}
+      index={index}
+      action={{ label: t('desktop.seeAll'), onClick: () => navigate('/tournaments') }}
+    >
       <div role="list" className="flex flex-col gap-2">
         {items === null && Array.from({ length: 3 }, (_, i) => <Skeleton key={i} variant="rect" height="4.5rem" />)}
-        {items !== null && items.length === 0 && <p className="glass rounded-xl p-5 text-base text-muted">{t('desktop.noTournaments')}</p>}
+        {items !== null && items.length === 0 && (
+          <p className="glass rounded-xl p-5 text-base text-muted">{t('desktop.noTournaments')}</p>
+        )}
         {items?.map((tr) => (
           <button
             key={tr.id}
@@ -385,7 +422,9 @@ export function TournamentsTeaser({ index }: { index: number }): JSX.Element {
                 )}
               </div>
               <div className="truncate text-sm text-muted">
-                {byId.get(tr.gameId)?.title ?? t('tournaments.game')} · {t('tournaments.playersOf', { players: tr.players, max: tr.maxPlayers })} · {t('tournaments.startsAt', { time: formatDateTime(tr.startsAt, locale) })}
+                {byId.get(tr.gameId)?.title ?? t('tournaments.game')} ·{' '}
+                {t('tournaments.playersOf', { players: tr.players, max: tr.maxPlayers })} ·{' '}
+                {t('tournaments.startsAt', { time: formatDateTime(tr.startsAt, locale) })}
               </div>
             </div>
             <div className="shrink-0 text-right">
@@ -413,11 +452,19 @@ export function RecentChat({ index }: { index: number }): JSX.Element {
   const messages = room.messages.slice(-3);
 
   return (
-    <Section title={t('desktop.recentChat')} index={index} action={{ label: t('notifications.open'), onClick: () => navigate('/chat') }}>
+    <Section
+      title={t('desktop.recentChat')}
+      index={index}
+      action={{ label: t('notifications.open'), onClick: () => navigate('/chat') }}
+    >
       <button
         type="button"
         data-nav="true"
-        aria-label={room.unread > 0 ? `${t('desktop.recentChat')}, ${t('chat.unread', { count: room.unread })}` : t('desktop.recentChat')}
+        aria-label={
+          room.unread > 0
+            ? `${t('desktop.recentChat')}, ${t('chat.unread', { count: room.unread })}`
+            : t('desktop.recentChat')
+        }
         onClick={() => navigate('/chat')}
         className="focus-ring glass flex w-full flex-col gap-3 rounded-xl p-5 text-left transition-colors duration-[var(--dur-fast)] hover:bg-surface/80"
       >
@@ -430,7 +477,9 @@ export function RecentChat({ index }: { index: number }): JSX.Element {
               <Avatar name={mine ? t('chat.you') : m.senderName || t('chat.admin')} size="sm" />
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className={clsx('truncate text-sm font-semibold', mine ? 'text-muted' : 'text-primary')}>{mine ? t('chat.you') : m.senderName || t('chat.admin')}</span>
+                  <span className={clsx('truncate text-sm font-semibold', mine ? 'text-muted' : 'text-primary')}>
+                    {mine ? t('chat.you') : m.senderName || t('chat.admin')}
+                  </span>
                   <span className="tnum shrink-0 text-xs text-muted">{formatTime(m.createdAt, locale)}</span>
                 </div>
                 <p className="line-clamp-2 text-base text-text">{m.text}</p>
@@ -488,7 +537,12 @@ export default function DesktopScreen(): JSX.Element {
       <ContinuePlaying index={1} />
       <QuickActions />
       <PromoStrip index={3} />
-      <div className={clsx('grid gap-[calc(var(--gap)*1.5)]', features.tournaments && features.chat ? 'grid-cols-1 2xl:grid-cols-2' : 'grid-cols-1')}>
+      <div
+        className={clsx(
+          'grid gap-[calc(var(--gap)*1.5)]',
+          features.tournaments && features.chat ? 'grid-cols-1 2xl:grid-cols-2' : 'grid-cols-1',
+        )}
+      >
         {features.tournaments && <TournamentsTeaser index={4} />}
         {features.chat && <RecentChat index={5} />}
       </div>

@@ -65,7 +65,16 @@ export const builtinThemes: Readonly<Record<string, Theme>> = {
 export const BUILTIN_THEME_NAMES: readonly string[] = Object.keys(builtinThemes);
 
 /** Colour keys in the order they are written to CSS. */
-export const THEME_COLOR_KEYS: readonly (keyof ThemeColors)[] = ['bg', 'surface', 'primary', 'accent', 'text', 'muted', 'danger', 'success'];
+export const THEME_COLOR_KEYS: readonly (keyof ThemeColors)[] = [
+  'bg',
+  'surface',
+  'primary',
+  'accent',
+  'text',
+  'muted',
+  'danger',
+  'success',
+];
 
 /**
  * `#RGB`, `#RRGGBB` or `#RRGGBBAA` → `"R G B"` (alpha ignored, Tailwind supplies it).
@@ -78,7 +87,10 @@ export function hexToRgb(hex: string): string | null {
   }
   let h = m[1] ?? '';
   if (h.length === 3) {
-    h = h.split('').map((c) => c + c).join('');
+    h = h
+      .split('')
+      .map((c) => c + c)
+      .join('');
   }
   const r = parseInt(h.slice(0, 2), 16);
   const g = parseInt(h.slice(2, 4), 16);

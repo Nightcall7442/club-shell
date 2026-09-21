@@ -51,10 +51,25 @@ export function FaqAccordion({ items }: { items: FaqItem[] }): JSX.Element {
               aria-expanded={open}
               aria-controls={panelId}
               onClick={() => setOpenIndex(open ? null : i)}
-              className={clsx('focus-ring flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition-colors duration-[var(--dur-fast)] hover:bg-surface/80', open && 'text-primary')}
+              className={clsx(
+                'focus-ring flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition-colors duration-[var(--dur-fast)] hover:bg-surface/80',
+                open && 'text-primary',
+              )}
             >
               <span className="text-base font-semibold">{item.question}</span>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={clsx('h-5 w-5 shrink-0 transition-transform duration-[var(--dur-base)]', open && 'rotate-180')}>
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                className={clsx(
+                  'h-5 w-5 shrink-0 transition-transform duration-[var(--dur-base)]',
+                  open && 'rotate-180',
+                )}
+              >
                 <path d="M6 9l6 6 6-6" />
               </svg>
             </button>
@@ -118,7 +133,12 @@ export function ReportProblemForm(): JSX.Element {
     setSending(true);
     track('support.report', { length: message.length });
     try {
-      await api.system.logClientError({ level: 'warn', message: `[user report] ${message}`, stack: null, route: location.pathname });
+      await api.system.logClientError({
+        level: 'warn',
+        message: `[user report] ${message}`,
+        stack: null,
+        route: location.pathname,
+      });
       push({ title: t('support.reportSent'), body: t('support.reportSentHint'), level: 'success', source: 'local' });
       setText('');
     } catch (e) {
@@ -164,7 +184,11 @@ export function ReportProblemForm(): JSX.Element {
           error && 'border-danger/70',
         )}
       />
-      <p id={`${id}-hint`} role={error ? 'alert' : undefined} className={clsx('text-sm', error ? 'text-danger' : 'text-muted')}>
+      <p
+        id={`${id}-hint`}
+        role={error ? 'alert' : undefined}
+        className={clsx('text-sm', error ? 'text-danger' : 'text-muted')}
+      >
         {error ?? `${text.length} / ${REPORT_MAX}`}
       </p>
       <Button type="submit" variant="secondary" loading={sending} className="self-end">
@@ -201,7 +225,12 @@ export function PcFacts(): JSX.Element {
     <section aria-label={t('support.pcInfo')} className="glass flex flex-col gap-3 rounded-xl p-5">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-xl font-bold text-text">{t('support.pcInfo')}</h2>
-        <Badge tone={!agentConnected ? 'danger' : server === 'online' ? 'success' : 'accent'} size="sm" dot live={!agentConnected}>
+        <Badge
+          tone={!agentConnected ? 'danger' : server === 'online' ? 'success' : 'accent'}
+          size="sm"
+          dot
+          live={!agentConnected}
+        >
           {!agentConnected ? t('lock.agentOffline') : server === 'online' ? t('common.online') : t('common.offline')}
         </Badge>
       </div>
@@ -267,7 +296,10 @@ export default function SupportScreen(): JSX.Element {
       <div className="grid grid-cols-1 gap-[calc(var(--gap)*1.5)] xl:grid-cols-[minmax(0,2fr)_minmax(20rem,1fr)]">
         <div className="flex min-w-0 flex-col gap-[calc(var(--gap)*1.5)]">
           {features.callAdmin && (
-            <section aria-label={t('support.callAdmin')} className="glass flex flex-wrap items-center justify-between gap-4 rounded-xl p-6">
+            <section
+              aria-label={t('support.callAdmin')}
+              className="glass flex flex-wrap items-center justify-between gap-4 rounded-xl p-6"
+            >
               <div className="min-w-0 flex-1">
                 <h2 className="text-2xl font-bold text-text">{t('support.callAdmin')}</h2>
                 <p className="text-base text-muted">{t('support.callHint')}</p>
@@ -301,7 +333,15 @@ export default function SupportScreen(): JSX.Element {
                 {t('support.chatWithStaff')}
               </Button>
             )}
-            {features.callAdmin && <CallAdminButton variant="secondary" size="md" block category="technical" label={t('support.category.technical')} />}
+            {features.callAdmin && (
+              <CallAdminButton
+                variant="secondary"
+                size="md"
+                block
+                category="technical"
+                label={t('support.category.technical')}
+              />
+            )}
             {!features.chat && !features.callAdmin && <p className="text-base text-muted">{t('lock.askStaff')}</p>}
           </section>
 

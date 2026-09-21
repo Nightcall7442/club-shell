@@ -22,7 +22,15 @@ import { selectFeatures, useSettingsStore } from '@/store/settings';
 // Icons
 // ---------------------------------------------------------------------------------------------------------------------
 
-const svgProps = { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true } as const;
+const svgProps = {
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 2,
+  strokeLinecap: 'round',
+  strokeLinejoin: 'round',
+  'aria-hidden': true,
+} as const;
 
 const IconWallet = (): JSX.Element => (
   <svg {...svgProps}>
@@ -88,7 +96,9 @@ function Popover({ open, onClose, label, trigger, children, className }: Popover
     };
     document.addEventListener('pointerdown', onPointer, true);
     window.addEventListener('keydown', onKey, true);
-    const frame = requestAnimationFrame(() => root.current?.querySelector<HTMLElement>('[data-nav]:not([data-popover-trigger])')?.focus());
+    const frame = requestAnimationFrame(() =>
+      root.current?.querySelector<HTMLElement>('[data-nav]:not([data-popover-trigger])')?.focus(),
+    );
     return () => {
       document.removeEventListener('pointerdown', onPointer, true);
       window.removeEventListener('keydown', onKey, true);
@@ -100,7 +110,14 @@ function Popover({ open, onClose, label, trigger, children, className }: Popover
     <div ref={root} className="relative">
       {trigger}
       {open && (
-        <div role="dialog" aria-label={label} className={clsx('glass-strong anim-pop absolute right-0 top-[calc(100%+0.5rem)] z-50 rounded-lg p-3', className)}>
+        <div
+          role="dialog"
+          aria-label={label}
+          className={clsx(
+            'glass-strong anim-pop absolute right-0 top-[calc(100%+0.5rem)] z-50 rounded-lg p-3',
+            className,
+          )}
+        >
           {children}
         </div>
       )}
@@ -201,7 +218,13 @@ export function VolumeControl(): JSX.Element {
           onChange={(e) => commit(Number(e.currentTarget.value))}
           className="focus-ring h-2 w-full cursor-pointer accent-primary"
         />
-        <Button variant="secondary" size="md" block icon={<IconVolume muted={!muted} />} onClick={() => toggleMute().catch((e: unknown) => pushError(e, t('desktop.volume')))}>
+        <Button
+          variant="secondary"
+          size="md"
+          block
+          icon={<IconVolume muted={!muted} />}
+          onClick={() => toggleMute().catch((e: unknown) => pushError(e, t('desktop.volume')))}
+        >
           {muted ? t('desktop.unmute') : t('desktop.mute')}
         </Button>
       </div>
@@ -281,9 +304,21 @@ export function ConnectivityIndicator(): JSX.Element {
   const agentConnected = useNotificationsStore((s) => s.agentConnected);
   const server = useNotificationsStore((s) => s.serverConnectivity);
   const tone = !agentConnected ? 'danger' : server === 'online' ? 'success' : 'accent';
-  const label = !agentConnected ? t('kiosk.agentDisconnected') : server === 'online' ? t('desktop.serverOnline') : t('desktop.serverOffline');
+  const label = !agentConnected
+    ? t('kiosk.agentDisconnected')
+    : server === 'online'
+      ? t('desktop.serverOnline')
+      : t('desktop.serverOffline');
   return (
-    <Badge tone={tone} size="md" dot live={!agentConnected} title={label} aria-label={`${t('desktop.connection')}: ${label}`} className="normal-case tracking-normal">
+    <Badge
+      tone={tone}
+      size="md"
+      dot
+      live={!agentConnected}
+      title={label}
+      aria-label={`${t('desktop.connection')}: ${label}`}
+      className="normal-case tracking-normal"
+    >
       {label}
     </Badge>
   );
@@ -331,12 +366,17 @@ export function TopBar(): JSX.Element {
     <div className="glass flex h-full w-full items-center gap-[var(--gap)] rounded-none border-x-0 border-t-0 px-[var(--gutter)]">
       {/* Left: PC identity */}
       <div className="flex min-w-0 flex-1 items-center gap-3">
-        <span aria-hidden="true" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/15 text-primary [&>svg]:h-6 [&>svg]:w-6">
+        <span
+          aria-hidden="true"
+          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/15 text-primary [&>svg]:h-6 [&>svg]:w-6"
+        >
           <IconPc />
         </span>
         <div className="min-w-0 leading-tight">
           <div className="truncate text-lg font-bold text-text">{pc ? pc.name : t('desktop.pc')}</div>
-          <div className="truncate text-sm text-muted">{pc ? `${t('lock.zone')}: ${pc.zone}` : t('common.loading')}</div>
+          <div className="truncate text-sm text-muted">
+            {pc ? `${t('lock.zone')}: ${pc.zone}` : t('common.loading')}
+          </div>
         </div>
       </div>
 
@@ -348,7 +388,13 @@ export function TopBar(): JSX.Element {
       {/* Right: balance, user, status, clock, controls */}
       <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
         {user && (
-          <Button variant="secondary" icon={<IconWallet />} aria-label={`${t('desktop.balance')}: ${formatMoney(user.balance, locale)}`} onClick={() => navigate('/wallet')} className="tnum">
+          <Button
+            variant="secondary"
+            icon={<IconWallet />}
+            aria-label={`${t('desktop.balance')}: ${formatMoney(user.balance, locale)}`}
+            onClick={() => navigate('/wallet')}
+            className="tnum"
+          >
             {formatMoney(user.balance, locale)}
           </Button>
         )}
@@ -362,7 +408,9 @@ export function TopBar(): JSX.Element {
             className="focus-ring flex h-11 items-center gap-2 rounded-full pl-1 pr-3 transition-colors duration-[var(--dur-fast)] hover:bg-text/10 disabled:cursor-default disabled:hover:bg-transparent"
           >
             <Avatar name={user.displayName} src={user.avatarUrl ?? null} size="sm" ring={user.role === 'vip'} />
-            <span className="hidden max-w-[10rem] truncate text-base font-semibold text-text 2xl:inline">{user.displayName}</span>
+            <span className="hidden max-w-[10rem] truncate text-base font-semibold text-text 2xl:inline">
+              {user.displayName}
+            </span>
             {roleBadge}
           </button>
         )}
@@ -371,7 +419,15 @@ export function TopBar(): JSX.Element {
         <VolumeControl />
         <LocaleSwitch />
         {isActive && (
-          <Button variant="secondary" iconOnly aria-label={t('desktop.lock')} title={t('desktop.lock')} loading={locking || busy} icon={<IconLock />} onClick={() => void onLock()} />
+          <Button
+            variant="secondary"
+            iconOnly
+            aria-label={t('desktop.lock')}
+            title={t('desktop.lock')}
+            loading={locking || busy}
+            icon={<IconLock />}
+            onClick={() => void onLock()}
+          />
         )}
       </div>
     </div>

@@ -43,7 +43,12 @@ function hueOf(text: string): number {
 }
 
 /** Product tile: image (gradient fallback), title, price, stock badge and add / ± quantity controls. */
-export const ProductCard = memo(function ProductCard({ product, qty, onChange, className }: ProductCardProps): JSX.Element {
+export const ProductCard = memo(function ProductCard({
+  product,
+  qty,
+  onChange,
+  className,
+}: ProductCardProps): JSX.Element {
   const { t } = useTranslation();
   const { locale } = useLocale();
   const animations = useThemeStore(selectAnimationsEnabled);
@@ -82,7 +87,10 @@ export const ProductCard = memo(function ProductCard({ product, qty, onChange, c
             className="h-full w-full object-cover transition-transform duration-[var(--dur-slow)] ease-[var(--ease-out)] group-hover:scale-105"
           />
         ) : (
-          <span className="absolute inset-0 flex items-center justify-center text-4xl font-black text-white/70" aria-hidden="true">
+          <span
+            className="absolute inset-0 flex items-center justify-center text-4xl font-black text-white/70"
+            aria-hidden="true"
+          >
             {product.title.slice(0, 1).toUpperCase()}
           </span>
         )}
@@ -124,7 +132,11 @@ export const ProductCard = memo(function ProductCard({ product, qty, onChange, c
               {t('shop.addToCart')}
             </Button>
           ) : (
-            <div className="glass flex items-center gap-1 rounded-full p-1" role="group" aria-label={`${t('shop.qty')}: ${product.title}`}>
+            <div
+              className="glass flex items-center gap-1 rounded-full p-1"
+              role="group"
+              aria-label={`${t('shop.qty')}: ${product.title}`}
+            >
               <Button
                 size="md"
                 variant="ghost"

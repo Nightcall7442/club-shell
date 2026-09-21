@@ -51,11 +51,22 @@ export const Avatar = forwardRef<HTMLSpanElement, AvatarProps>(function Avatar(
         ring && 'border-glow',
         className,
       )}
-      style={showImage ? style : { background: `linear-gradient(135deg, hsl(${hue} 70% 45%), hsl(${(hue + 40) % 360} 70% 30%))`, ...style }}
+      style={
+        showImage
+          ? style
+          : { background: `linear-gradient(135deg, hsl(${hue} 70% 45%), hsl(${(hue + 40) % 360} 70% 30%))`, ...style }
+      }
       {...rest}
     >
       {showImage ? (
-        <img src={src ?? undefined} alt="" className="h-full w-full object-cover" loading="lazy" draggable={false} onError={() => setFailed(true)} />
+        <img
+          src={src ?? undefined}
+          alt=""
+          className="h-full w-full object-cover"
+          loading="lazy"
+          draggable={false}
+          onError={() => setFailed(true)}
+        />
       ) : (
         <span aria-hidden="true">{initials(name)}</span>
       )}

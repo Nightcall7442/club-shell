@@ -25,7 +25,8 @@ const VARIANT: Record<ButtonVariant, string> = {
     'bg-primary text-white shadow-[0_10px_30px_-10px_rgb(var(--c-primary)/0.7)] hover:bg-[rgb(var(--c-primary-hover))] active:bg-[rgb(var(--c-primary-active))]',
   secondary: 'glass text-text hover:bg-surface/80 active:bg-surface',
   ghost: 'bg-transparent text-text hover:bg-text/10 active:bg-text/15',
-  danger: 'bg-danger text-white shadow-[0_10px_30px_-10px_rgb(var(--c-danger)/0.7)] hover:bg-danger/90 active:bg-danger/80',
+  danger:
+    'bg-danger text-white shadow-[0_10px_30px_-10px_rgb(var(--c-danger)/0.7)] hover:bg-danger/90 active:bg-danger/80',
 };
 
 const SIZE: Record<ButtonSize, string> = {
@@ -81,7 +82,12 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
           <Spinner size="sm" inherit />
         </span>
       )}
-      <span className={clsx('inline-flex min-w-0 max-w-full items-center justify-center gap-[inherit]', loading && 'invisible')}>
+      <span
+        className={clsx(
+          'inline-flex min-w-0 max-w-full items-center justify-center gap-[inherit]',
+          loading && 'invisible',
+        )}
+      >
         {icon && (
           <span aria-hidden="true" className={ICON_BOX}>
             {icon}

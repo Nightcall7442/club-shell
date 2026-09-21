@@ -4,7 +4,14 @@
  * every 15 s that pushes `orderUpdated` (+ a notification when done).
  */
 import type { FastifyInstance } from 'fastify';
-import { ORDER_MAX_LINES, ORDER_MAX_QTY, ProductCategory, type Order, type OrderItem, type OrderStatus } from '@clubshell/contracts';
+import {
+  ORDER_MAX_LINES,
+  ORDER_MAX_QTY,
+  ProductCategory,
+  type Order,
+  type OrderItem,
+  type OrderStatus,
+} from '@clubshell/contracts';
 import {
   applyTransaction,
   arr,
@@ -31,7 +38,12 @@ import { pushToUser } from '../ws.js';
 
 const CATEGORIES = Object.values(ProductCategory);
 const PROGRESS_EVERY_MS = 15_000;
-const NEXT: Partial<Record<OrderStatus, OrderStatus>> = { pending: 'accepted', accepted: 'preparing', preparing: 'delivering', delivering: 'done' };
+const NEXT: Partial<Record<OrderStatus, OrderStatus>> = {
+  pending: 'accepted',
+  accepted: 'preparing',
+  preparing: 'delivering',
+  delivering: 'done',
+};
 
 /** Wall-clock tick: advance active orders one step every 15 s. */
 export function tickShop(nowMs: number): void {
@@ -80,7 +92,10 @@ export function shopRoutes(app: FastifyInstance): void {
         const qty = int(line, 'qty', 1, ORDER_MAX_QTY);
         const product = db.products.find((p) => p.id === productId);
         if (!product) throw errors.notFound('product');
-        if (!product.inStock || (product.stockQty !== null && product.stockQty !== undefined && product.stockQty < qty)) {
+        if (
+          !product.inStock ||
+          (product.stockQty !== null && product.stockQty !== undefined && product.stockQty < qty)
+        ) {
           throw errors.conflict('outOfStock', { productId, available: product.stockQty ?? 0 });
         }
         return { productId, title: product.title, qty, price: product.price };
@@ -105,7 +120,13 @@ export function shopRoutes(app: FastifyInstance): void {
         updatedAt: now(),
         note,
       };
-      applyTransaction(user, 'purchase', uzs(-total.amount), `Shop order · ${items.map((i) => i.title).join(', ')}`, order.id);
+      applyTransaction(
+        user,
+        'purchase',
+        uzs(-total.amount),
+        `Shop order · ${items.map((i) => i.title).join(', ')}`,
+        order.id,
+      );
       db.orders.unshift(order);
       if (db.orders.length > 300) db.orders.splice(300);
       markDirty();
@@ -116,12 +137,17 @@ export function shopRoutes(app: FastifyInstance): void {
     });
   });
 
-  app.get<{ Querystring: { userId?: string; page?: string; pageSize?: string; activeOnly?: string } }>('/shop/orders', async (req) => {
-    const { user } = requireUser(req, req.query.userId ?? undefined);
-    const activeOnly = req.query.activeOnly === 'true';
-    const items = db.orders.filter((o) => o.userId === user.id && (!activeOnly || (o.status !== 'done' && o.status !== 'cancelled')));
-    return paginate(items, req.query);
-  });
+  app.get<{ Querystring: { userId?: string; page?: string; pageSize?: string; activeOnly?: string } }>(
+    '/shop/orders',
+    async (req) => {
+      const { user } = requireUser(req, req.query.userId ?? undefined);
+      const activeOnly = req.query.activeOnly === 'true';
+      const items = db.orders.filter(
+        (o) => o.userId === user.id && (!activeOnly || (o.status !== 'done' && o.status !== 'cancelled')),
+      );
+      return paginate(items, req.query);
+    },
+  );
 
   app.get<{ Params: { id: string } }>('/shop/orders/:id', async (req) => {
     const { user } = requireUser(req);

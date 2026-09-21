@@ -65,7 +65,14 @@ const BAR: Record<BadgeTone, string> = {
 };
 
 function LevelIcon({ level }: { level: NotificationLevel }): JSX.Element {
-  const common = { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
+  const common = {
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 2,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+  } as const;
   switch (level) {
     case 'success':
       return (
@@ -127,10 +134,18 @@ export function Toast({ item, onDismiss, onAction }: ToastProps): JSX.Element {
   return (
     <div
       role={item.level === 'error' ? 'alert' : 'status'}
-      className={clsx('glass-strong relative w-[min(92vw,26rem)] overflow-hidden rounded-lg border-l-4 pl-4 pr-3 pt-3 pb-3', EDGE[tone])}
+      className={clsx(
+        'glass-strong relative w-[min(92vw,26rem)] overflow-hidden rounded-lg border-l-4 pl-4 pr-3 pt-3 pb-3',
+        EDGE[tone],
+      )}
     >
       <div className="flex items-start gap-3">
-        <span className={clsx('mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center [&>svg]:h-full [&>svg]:w-full', TEXT[tone])}>
+        <span
+          className={clsx(
+            'mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center [&>svg]:h-full [&>svg]:w-full',
+            TEXT[tone],
+          )}
+        >
           <LevelIcon level={item.level} />
         </span>
         <div className="min-w-0 flex-1">
@@ -146,7 +161,10 @@ export function Toast({ item, onDismiss, onAction }: ToastProps): JSX.Element {
                 }
                 onDismiss(item.id);
               }}
-              className={clsx('focus-ring mt-2 inline-flex h-9 items-center rounded-md px-3 text-sm font-semibold hover:bg-text/10', TEXT[tone])}
+              className={clsx(
+                'focus-ring mt-2 inline-flex h-9 items-center rounded-md px-3 text-sm font-semibold hover:bg-text/10',
+                TEXT[tone],
+              )}
             >
               {item.action.label}
             </button>
@@ -159,7 +177,15 @@ export function Toast({ item, onDismiss, onAction }: ToastProps): JSX.Element {
           onClick={() => onDismiss(item.id)}
           className="focus-ring -mr-1 -mt-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted hover:bg-text/10 hover:text-text"
         >
-          <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+          <svg
+            viewBox="0 0 24 24"
+            className="h-5 w-5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            aria-hidden="true"
+          >
             <path d="M6 6l12 12M18 6L6 18" />
           </svg>
         </button>
@@ -186,7 +212,10 @@ export function ToastViewport({ items, onDismiss, onAction, max = 4, className }
       role="region"
       aria-live="polite"
       aria-label={t('notifications.liveRegion')}
-      className={clsx('pointer-events-none fixed right-[var(--gutter)] top-[calc(var(--topbar-h)+var(--gap))] z-[90] flex flex-col items-end gap-3', className)}
+      className={clsx(
+        'pointer-events-none fixed right-[var(--gutter)] top-[calc(var(--topbar-h)+var(--gap))] z-[90] flex flex-col items-end gap-3',
+        className,
+      )}
     >
       <AnimatePresence initial={false} mode="popLayout">
         {visible.map((item) => (

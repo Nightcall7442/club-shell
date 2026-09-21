@@ -52,7 +52,8 @@ export function describeTimeWindow(w: TariffTimeWindow, t: TFunction): string {
   const days = WEEKDAYS.filter((d) => w.days.includes(d));
   const first = days[0];
   const last = days[days.length - 1];
-  const contiguous = first !== undefined && last !== undefined && WEEKDAYS.indexOf(last) - WEEKDAYS.indexOf(first) === days.length - 1;
+  const contiguous =
+    first !== undefined && last !== undefined && WEEKDAYS.indexOf(last) - WEEKDAYS.indexOf(first) === days.length - 1;
   let label: string;
   if (days.length >= 7) {
     label = t('wallet.everyDay');
@@ -65,7 +66,15 @@ export function describeTimeWindow(w: TariffTimeWindow, t: TFunction): string {
 }
 
 const ClockIcon = (): JSX.Element => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
     <circle cx="12" cy="12" r="9" />
     <path d="M12 7v5l3 2" />
   </svg>
@@ -101,7 +110,9 @@ export function TariffCard({ tariff, available, current, action, onAction }: Tar
         <div className="min-w-0">
           <h3 className="truncate text-xl font-bold text-text">{tariff.name}</h3>
           <p className="tnum text-base text-muted">
-            {pkg ? t('wallet.packageMinutes', { minutes: tariff.packageMinutes, price: formatMoney(pkg, locale) }) : t('wallet.perHour', { price: formatMoney(tariff.pricePerHour, locale) })}
+            {pkg
+              ? t('wallet.packageMinutes', { minutes: tariff.packageMinutes, price: formatMoney(pkg, locale) })
+              : t('wallet.perHour', { price: formatMoney(tariff.pricePerHour, locale) })}
           </p>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
@@ -182,7 +193,13 @@ export interface TariffActionModalProps {
   onInsufficientFunds?: () => void;
 }
 
-export function TariffActionModal({ tariff, action, open, onClose, onInsufficientFunds }: TariffActionModalProps): JSX.Element {
+export function TariffActionModal({
+  tariff,
+  action,
+  open,
+  onClose,
+  onInsufficientFunds,
+}: TariffActionModalProps): JSX.Element {
   const { t } = useTranslation();
   const { locale } = useLocale();
   const session = useSession();
@@ -247,7 +264,13 @@ export function TariffActionModal({ tariff, action, open, onClose, onInsufficien
             {t('common.cancel')}
           </Button>
           <Button size="lg" loading={busy} onClick={() => void submit()}>
-            {action === 'start' ? (busy ? t('wallet.starting') : t('wallet.startSession')) : busy ? t('session.extending') : t('session.extend')}
+            {action === 'start'
+              ? busy
+                ? t('wallet.starting')
+                : t('wallet.startSession')
+              : busy
+                ? t('session.extending')
+                : t('session.extend')}
           </Button>
         </>
       }
@@ -298,13 +321,17 @@ export function TariffActionModal({ tariff, action, open, onClose, onInsufficien
                       onClick={() => setMinutes(m)}
                       className={clsx(
                         'focus-ring tnum flex h-16 flex-col items-center justify-center rounded-lg text-base font-bold transition-colors duration-[var(--dur-fast)]',
-                        active ? 'bg-primary text-white shadow-[0_8px_24px_-8px_rgb(var(--c-primary)/0.8)]' : 'glass text-text hover:bg-surface/80',
+                        active
+                          ? 'bg-primary text-white shadow-[0_8px_24px_-8px_rgb(var(--c-primary)/0.8)]'
+                          : 'glass text-text hover:bg-surface/80',
                       )}
                     >
                       <span>
                         {m} {t('common.min')}
                       </span>
-                      <span className={clsx('text-xs font-medium', active ? 'text-white/80' : 'text-muted')}>{formatMoney(tariffPriceFor(tariff, m), locale)}</span>
+                      <span className={clsx('text-xs font-medium', active ? 'text-white/80' : 'text-muted')}>
+                        {formatMoney(tariffPriceFor(tariff, m), locale)}
+                      </span>
                     </button>
                   );
                 })}
@@ -315,7 +342,9 @@ export function TariffActionModal({ tariff, action, open, onClose, onInsufficien
           <dl className="flex flex-col gap-1 rounded-lg bg-text/5 px-4 py-3 text-base">
             <div className="flex items-center justify-between">
               <dt className="text-muted">{t('wallet.estimatedCost')}</dt>
-              <dd className="tnum text-xl font-black text-text">{charged && cost ? formatMoney(cost, locale) : t('wallet.postpaid')}</dd>
+              <dd className="tnum text-xl font-black text-text">
+                {charged && cost ? formatMoney(cost, locale) : t('wallet.postpaid')}
+              </dd>
             </div>
             {charged && cost && (
               <div className="flex items-center justify-between text-sm">
@@ -361,7 +390,11 @@ export function Tariffs({ onInsufficientFunds, className }: TariffsProps): JSX.E
   }, []);
 
   const zone = pcZone ?? tariffZone ?? '';
-  const action: TariffAction | null = !session.isOpen ? 'start' : session.isLocked || session.isOpenEnded ? null : 'extend';
+  const action: TariffAction | null = !session.isOpen
+    ? 'start'
+    : session.isLocked || session.isOpenEnded
+      ? null
+      : 'extend';
 
   const groups = useMemo(() => {
     const map = new Map<string, Tariff[]>();
@@ -393,7 +426,9 @@ export function Tariffs({ onInsufficientFunds, className }: TariffsProps): JSX.E
       ) : (
         groups.map((group, gi) => (
           <div key={group.key} className="flex flex-col gap-3">
-            {groups.length > 1 && <h3 className="text-base font-semibold uppercase tracking-wide text-muted">{group.key}</h3>}
+            {groups.length > 1 && (
+              <h3 className="text-base font-semibold uppercase tracking-wide text-muted">{group.key}</h3>
+            )}
             <motion.ul
               role="list"
               className="grid grid-cols-[repeat(auto-fill,minmax(clamp(15rem,17vw,20rem),1fr))] gap-[var(--gap)]"
@@ -402,7 +437,11 @@ export function Tariffs({ onInsufficientFunds, className }: TariffsProps): JSX.E
               variants={{ hidden: {}, show: { transition: { staggerChildren: 0.05, delayChildren: gi * 0.05 } } }}
             >
               {group.items.map((tariff) => (
-                <motion.li key={tariff.id} variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }} className="flex">
+                <motion.li
+                  key={tariff.id}
+                  variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}
+                  className="flex"
+                >
                   <TariffCard
                     tariff={tariff}
                     available={tariffAvailableNow(tariff, zone, now)}

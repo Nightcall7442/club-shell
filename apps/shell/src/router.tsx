@@ -10,14 +10,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
-import {
-  createHashRouter,
-  Navigate,
-  Outlet,
-  useLocation,
-  useMatches,
-  type RouteObject,
-} from 'react-router-dom';
+import { createHashRouter, Navigate, Outlet, useLocation, useMatches, type RouteObject } from 'react-router-dom';
 import type { NotificationLevel, ShellFeatures } from '@clubshell/contracts';
 import { AppShell } from '@/components/layout/AppShell';
 import { Badge, levelTone } from '@/components/ui/Badge';
@@ -124,7 +117,13 @@ export function RequireSession({ children }: { children: ReactNode }): JSX.Eleme
 }
 
 /** Renders `children` only when `settings.features[feature]` is on; otherwise goes to the default route. */
-export function RequireFeature({ feature, children }: { feature: keyof ShellFeatures; children: ReactNode }): JSX.Element {
+export function RequireFeature({
+  feature,
+  children,
+}: {
+  feature: keyof ShellFeatures;
+  children: ReactNode;
+}): JSX.Element {
   const enabled = useSettingsStore((s) => s.features[feature]);
   const defaultRoute = useDefaultRoute();
   if (!enabled) {
@@ -204,10 +203,14 @@ function str(rec: Record<string, unknown>, key: string): string | null {
  * The Rust layer forwards heterogeneous payloads under `kind: "message"`: `ShowMessageArgs`, `AdminMessage`,
  * `SessionWarning` or `RemoteControlEvent`. Reduce them to a title/body/level triple.
  */
-export function overlayMessage(payload: unknown, t: (key: string, vars?: Record<string, unknown>) => string): OverlayMessage {
+export function overlayMessage(
+  payload: unknown,
+  t: (key: string, vars?: Record<string, unknown>) => string,
+): OverlayMessage {
   const p = asRecord(payload);
   const rawLevel = str(p, 'level');
-  const level: NotificationLevel = rawLevel && (LEVELS as readonly string[]).includes(rawLevel) ? (rawLevel as NotificationLevel) : 'info';
+  const level: NotificationLevel =
+    rawLevel && (LEVELS as readonly string[]).includes(rawLevel) ? (rawLevel as NotificationLevel) : 'info';
   const title = str(p, 'title');
   if (title) {
     return { title, body: str(p, 'body') ?? '', level };
@@ -281,9 +284,23 @@ export function OverlayScreen(): JSX.Element | null {
 
   if (state.kind === 'lock') {
     return (
-      <div role="dialog" aria-modal="true" aria-label={t('lock.locked')} className="fixed inset-0 flex items-center justify-center bg-bg/90 backdrop-blur-xl">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('lock.locked')}
+        className="fixed inset-0 flex items-center justify-center bg-bg/90 backdrop-blur-xl"
+      >
         <div className="glass-strong border-glow flex max-w-[40rem] flex-col items-center gap-4 rounded-[calc(var(--radius)*2)] px-12 py-10 text-center">
-          <svg aria-hidden="true" viewBox="0 0 24 24" className="h-16 w-16 text-primary" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            className="h-16 w-16 text-primary"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <rect x="4" y="10" width="16" height="11" rx="2" />
             <path d="M8 10V7a4 4 0 0 1 8 0v3" />
             <circle cx="12" cy="15.5" r="1.3" />
@@ -310,7 +327,9 @@ export function OverlayScreen(): JSX.Element | null {
       <div
         role={m.level === 'error' ? 'alert' : 'status'}
         className="anim-toast-in glass-strong absolute right-8 top-8 flex w-[min(34rem,40vw)] flex-col gap-2 rounded-[var(--radius)] border-l-4 px-6 py-5 shadow-glow"
-        style={{ borderLeftColor: `rgb(var(--c-${m.level === 'info' ? 'primary' : m.level === 'warning' ? 'accent' : m.level === 'error' ? 'danger' : 'success'}))` }}
+        style={{
+          borderLeftColor: `rgb(var(--c-${m.level === 'info' ? 'primary' : m.level === 'warning' ? 'accent' : m.level === 'error' ? 'danger' : 'success'}))`,
+        }}
       >
         <div className="flex items-center justify-between gap-3">
           <p className="text-[var(--fs-lg)] font-semibold text-text">{m.title}</p>
@@ -372,17 +391,37 @@ export function mainRoutes(): RouteObject[] {
         { path: 'home', element: <DesktopScreen />, handle: { titleKey: 'desktop.title' } satisfies RouteHandle },
         { path: 'games', element: <GamesScreen />, handle: { titleKey: 'games.title' } satisfies RouteHandle },
         { path: 'games/:id', element: <GameDetails />, handle: { titleKey: 'games.title' } satisfies RouteHandle },
-        { path: 'apps', element: gated('apps', <AppsScreen />), handle: { titleKey: 'apps.title', feature: 'apps' } satisfies RouteHandle },
-        { path: 'shop', element: gated('shop', <ShopScreen />), handle: { titleKey: 'shop.title', feature: 'shop' } satisfies RouteHandle },
+        {
+          path: 'apps',
+          element: gated('apps', <AppsScreen />),
+          handle: { titleKey: 'apps.title', feature: 'apps' } satisfies RouteHandle,
+        },
+        {
+          path: 'shop',
+          element: gated('shop', <ShopScreen />),
+          handle: { titleKey: 'shop.title', feature: 'shop' } satisfies RouteHandle,
+        },
         { path: 'wallet', element: <WalletScreen />, handle: { titleKey: 'wallet.title' } satisfies RouteHandle },
-        { path: 'chat', element: gated('chat', <ChatScreen />), handle: { titleKey: 'chat.title', feature: 'chat' } satisfies RouteHandle },
-        { path: 'booking', element: gated('booking', <BookingScreen />), handle: { titleKey: 'booking.title', feature: 'booking' } satisfies RouteHandle },
+        {
+          path: 'chat',
+          element: gated('chat', <ChatScreen />),
+          handle: { titleKey: 'chat.title', feature: 'chat' } satisfies RouteHandle,
+        },
+        {
+          path: 'booking',
+          element: gated('booking', <BookingScreen />),
+          handle: { titleKey: 'booking.title', feature: 'booking' } satisfies RouteHandle,
+        },
         {
           path: 'tournaments',
           element: gated('tournaments', <TournamentsScreen />),
           handle: { titleKey: 'tournaments.title', feature: 'tournaments' } satisfies RouteHandle,
         },
-        { path: 'profile', element: gated('profile', <ProfileScreen />), handle: { titleKey: 'profile.title', feature: 'profile' } satisfies RouteHandle },
+        {
+          path: 'profile',
+          element: gated('profile', <ProfileScreen />),
+          handle: { titleKey: 'profile.title', feature: 'profile' } satisfies RouteHandle,
+        },
         { path: 'support', element: <SupportScreen />, handle: { titleKey: 'support.title' } satisfies RouteHandle },
       ],
     },
@@ -395,7 +434,9 @@ export function createAppRouter(options: AppRouterOptions = {}): ReturnType<type
   const role = options.role ?? 'main';
   let children: RouteObject[];
   if (role === 'overlay') {
-    children = [{ path: '*', element: <OverlayScreen />, handle: { titleKey: 'kiosk.overlayTitle' } satisfies RouteHandle }];
+    children = [
+      { path: '*', element: <OverlayScreen />, handle: { titleKey: 'kiosk.overlayTitle' } satisfies RouteHandle },
+    ];
   } else if (role === 'ads') {
     children = [{ path: '*', element: <AdsScreen />, handle: { titleKey: 'kiosk.adsTitle' } satisfies RouteHandle }];
   } else {

@@ -48,7 +48,9 @@ const failedAttempts = new Map<string, number>();
 /** Argon2id-shaped PHC string so the Agent can store it; not a real Argon2 hash (mock). */
 function offlineHash(user: UserRecord, password: string): string {
   const salt = Buffer.from(sha256Hex(user.id).slice(0, 16)).toString('base64').replace(/=+$/, '');
-  const hash = Buffer.from(sha256Hex(`${salt}:${password}`), 'hex').toString('base64').replace(/=+$/, '');
+  const hash = Buffer.from(sha256Hex(`${salt}:${password}`), 'hex')
+    .toString('base64')
+    .replace(/=+$/, '');
   return `$argon2id$v=19$m=65536,t=3,p=4$${salt}$${hash}`;
 }
 
@@ -57,7 +59,10 @@ function authResponse(user: UserRecord, pc: PcRecord, extra: { offlineHash?: str
   if (user.flags.includes('banned')) throw errors.forbidden('banned');
   const elsewhere = openSessionForUser(user.id);
   if (elsewhere && elsewhere.pcId !== pc.id) {
-    throw errors.conflict('activeSessionElsewhere', { pcId: elsewhere.pcId, pcName: findPc(elsewhere.pcId)?.name ?? null });
+    throw errors.conflict('activeSessionElsewhere', {
+      pcId: elsewhere.pcId,
+      pcName: findPc(elsewhere.pcId)?.name ?? null,
+    });
   }
   const tokens = createUserToken(user, pc.id);
   const own = openSessionForPc(pc.id);
@@ -160,10 +165,23 @@ export function authRoutes(app: FastifyInstance): void {
     const pcId = optStr(body(req), 'pcId', 64) ?? pc.id;
     if (pcId !== pc.id) throw errors.forbidden('pcMismatch');
     const token = randomBytes(18).toString('base64url');
-    const rec = { token, pcId, createdAt: now(), expiresAt: inSec(QR_TTL_SEC), userId: null, confirmedAt: null, consumed: false };
+    const rec = {
+      token,
+      pcId,
+      createdAt: now(),
+      expiresAt: inSec(QR_TTL_SEC),
+      userId: null,
+      confirmedAt: null,
+      consumed: false,
+    };
     db.qrLogins[token] = rec;
     markDirty();
-    return { qrToken: token, qrUrl: `https://club.example.uz/q/${token}`, expiresAt: rec.expiresAt, pollIntervalSec: 2 };
+    return {
+      qrToken: token,
+      qrUrl: `https://club.example.uz/q/${token}`,
+      expiresAt: rec.expiresAt,
+      pollIntervalSec: 2,
+    };
   });
 
   app.get<{ Params: { token: string } }>('/auth/qr/:token', async (req): Promise<QrLoginStatus> => {
@@ -192,7 +210,8 @@ export function authRoutes(app: FastifyInstance): void {
     const rec = db.qrLogins[req.params.token];
     if (!rec) throw errors.notFound('qrToken');
     const b = (req.body ?? {}) as Record<string, unknown>;
-    const wanted = typeof b['userId'] === 'string' ? b['userId'] : typeof b['username'] === 'string' ? b['username'] : null;
+    const wanted =
+      typeof b['userId'] === 'string' ? b['userId'] : typeof b['username'] === 'string' ? b['username'] : null;
     const user = wanted ? db.users.find((u) => u.id === wanted || u.username === wanted) : demoUser();
     if (!user) throw errors.notFound('user');
     rec.confirmedAt = now();
@@ -223,7 +242,8 @@ export function authRoutes(app: FastifyInstance): void {
 
   app.get<{ Params: { userId: string } }>('/users/:userId', async (req) => {
     const { user } = requireUser(req);
-    const target = user.role === 'admin' ? findUser(req.params.userId) : user.id === req.params.userId ? user : undefined;
+    const target =
+      user.role === 'admin' ? findUser(req.params.userId) : user.id === req.params.userId ? user : undefined;
     if (!target) throw user.role === 'admin' ? errors.notFound('user') : errors.forbidden('notOwner');
     return publicUser(target);
   });
@@ -235,7 +255,8 @@ export function authRoutes(app: FastifyInstance): void {
     const displayName = optStr(b, 'displayName', 32);
     if (displayName !== null && displayName.trim().length < 2) throw errors.validation('displayName', 'min');
     const avatarUrl = optStr(b, 'avatarUrl', 512);
-    if (avatarUrl !== null && avatarUrl.length > 0 && !/^https?:\/\//.test(avatarUrl)) throw errors.validation('avatarUrl', 'format');
+    if (avatarUrl !== null && avatarUrl.length > 0 && !/^https?:\/\//.test(avatarUrl))
+      throw errors.validation('avatarUrl', 'format');
     const locale = optOneOf(b, 'locale', LOCALES);
     const pin = optStr(b, 'pin', 6);
     if (pin !== null && !/^\d{4,6}$/.test(pin)) throw errors.validation('pin', 'format');

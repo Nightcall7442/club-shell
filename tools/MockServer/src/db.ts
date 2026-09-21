@@ -292,8 +292,16 @@ export function paginate<T>(items: T[], q: { page?: string; pageSize?: string },
 }
 
 export function compareSemver(a: string, b: string): number {
-  const pa = a.split('-')[0]?.split('.').map((n) => Number.parseInt(n, 10) || 0) ?? [];
-  const pb = b.split('-')[0]?.split('.').map((n) => Number.parseInt(n, 10) || 0) ?? [];
+  const pa =
+    a
+      .split('-')[0]
+      ?.split('.')
+      .map((n) => Number.parseInt(n, 10) || 0) ?? [];
+  const pb =
+    b
+      .split('-')[0]
+      ?.split('.')
+      .map((n) => Number.parseInt(n, 10) || 0) ?? [];
   for (let i = 0; i < 3; i += 1) {
     const d = (pa[i] ?? 0) - (pb[i] ?? 0);
     if (d !== 0) return d;
@@ -302,11 +310,14 @@ export function compareSemver(a: string, b: string): number {
 }
 
 export const sha256Hex = (data: string | Buffer): string => createHash('sha256').update(data).digest('hex');
-export const hmacHex = (key: Buffer, message: string): string => createHmac('sha256', key).update(message).digest('hex');
+export const hmacHex = (key: Buffer, message: string): string =>
+  createHmac('sha256', key).update(message).digest('hex');
 
 /** AES-256-GCM encryption of an account-pool secret with the per-agent key (HKDF-SHA256(signingSecret, "account-pool")). */
 export function encryptPoolSecret(signingSecretBase64: string, plaintext: string): string {
-  const key = Buffer.from(hkdfSync('sha256', Buffer.from(signingSecretBase64, 'base64'), Buffer.alloc(0), 'account-pool', 32));
+  const key = Buffer.from(
+    hkdfSync('sha256', Buffer.from(signingSecretBase64, 'base64'), Buffer.alloc(0), 'account-pool', 32),
+  );
   const nonce = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', key, nonce);
   const body = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
@@ -434,7 +445,8 @@ export function requireAgent(req: FastifyRequest, pcId?: string): PcRecord {
 export function requireUser(req: FastifyRequest, userId?: string): { pc: PcRecord; user: UserRecord } {
   const pc = requireAgent(req);
   const user = req.auth.user;
-  if (!user) throw errors.unauthorized('userToken', req.auth.userTokenProblem ? { problem: req.auth.userTokenProblem } : {});
+  if (!user)
+    throw errors.unauthorized('userToken', req.auth.userTokenProblem ? { problem: req.auth.userTokenProblem } : {});
   if (userId !== undefined && userId !== user.id) throw errors.forbidden('notOwner');
   return { pc, user };
 }
@@ -446,7 +458,9 @@ export function optionalUser(req: FastifyRequest): UserRecord | null {
 
 /** Sends `body` with an ETag computed over `key ?? body`; replies 304 when `If-None-Match` matches. */
 export function sendCached(req: FastifyRequest, reply: FastifyReply, payload: unknown, key?: unknown): FastifyReply {
-  const tag = `"${createHash('sha1').update(JSON.stringify(key ?? payload)).digest('hex')}"`;
+  const tag = `"${createHash('sha1')
+    .update(JSON.stringify(key ?? payload))
+    .digest('hex')}"`;
   reply.header('ETag', tag);
   reply.header('Cache-Control', 'private, must-revalidate');
   const sent = req.headers['if-none-match'];
@@ -586,7 +600,8 @@ export function viewSession(s: SessionRecord, nowMs = Date.now()): Session {
   if (s.state === 'ended') endsAt = s.endedAt;
   else if (s.isPrepaid) endsAt = new Date(nowMs + left * 1000).toISOString();
   const tariff = findTariff(s.tariffId);
-  const cost = s.isPrepaid || s.state === 'ended' || !tariff ? s.paidAmount : tariffPriceFor(tariff, Math.ceil(used / 60));
+  const cost =
+    s.isPrepaid || s.state === 'ended' || !tariff ? s.paidAmount : tariffPriceFor(tariff, Math.ceil(used / 60));
   return {
     id: s.id,
     userId: s.userId,
@@ -612,7 +627,10 @@ export function agentConfigFor(pc: PcRecord): AgentServerConfig {
     number: pc.number,
     session: { warningMinutes: [15, 5, 1], heartbeatSec: 30, graceSec: 60 },
     offline: { allowNewSessions: true, maxOfflineMinutes: 240 },
-    games: { accountPool: { enabled: true, leaseTtlSec: 14400, releaseOnExit: true }, cloudSave: { enabled: true, maxMb: 512 } },
+    games: {
+      accountPool: { enabled: true, leaseTtlSec: 14400, releaseOnExit: true },
+      cloudSave: { enabled: true, maxMb: 512 },
+    },
     storage: null,
     updates: { channel: 'stable', checkIntervalSec: 3600, applyWindow: { from: '04:00', to: '07:00' } },
     telemetry: { metricsIntervalSec: 5, uploadIntervalSec: 60 },
@@ -647,7 +665,10 @@ export function createAgentTokens(pc: PcRecord): { accessToken: string; refreshT
   return { accessToken, refreshToken, expiresAt };
 }
 
-export function createUserToken(user: UserRecord, pcId: string): { accessToken: string; refreshToken: string; expiresAt: string } {
+export function createUserToken(
+  user: UserRecord,
+  pcId: string,
+): { accessToken: string; refreshToken: string; expiresAt: string } {
   // One user binding per PC: drop older tokens bound to this PC.
   for (const [token, rec] of Object.entries(db.userTokens)) {
     if (rec.pcId === pcId) delete db.userTokens[token];
@@ -815,57 +836,306 @@ function seedUsers(t0: number): UserRecord[] {
     ...extra,
   });
   return [
-    mk('admin', 'admin', 'Администратор', 'admin', 0, { password: 'admin', flags: ['staff'], loyaltyLevel: 0, loyaltyPoints: 0, locale: 'ru' }),
-    mk('alisher', 'alisher', 'Alisher K.', 'member', 4_500_000, { cardId: 'CARD-0001', loginToken: 'tok-alisher', bonus: uzs(50_000), loyaltyPoints: 620 }),
-    mk('dilnoza', 'dilnoza', 'Dilnoza R.', 'vip', 12_000_000, { cardId: 'CARD-0002', loginToken: 'tok-dilnoza', loyaltyLevel: 3, loyaltyPoints: 4_820, locale: 'uz', bonus: uzs(200_000) }),
-    mk('bekzod', 'bekzod', 'Bekzod T.', 'member', 300_000, { cardId: 'CARD-0003', loyaltyLevel: 0, loyaltyPoints: 140, locale: 'en' }),
+    mk('admin', 'admin', 'Администратор', 'admin', 0, {
+      password: 'admin',
+      flags: ['staff'],
+      loyaltyLevel: 0,
+      loyaltyPoints: 0,
+      locale: 'ru',
+    }),
+    mk('alisher', 'alisher', 'Alisher K.', 'member', 4_500_000, {
+      cardId: 'CARD-0001',
+      loginToken: 'tok-alisher',
+      bonus: uzs(50_000),
+      loyaltyPoints: 620,
+    }),
+    mk('dilnoza', 'dilnoza', 'Dilnoza R.', 'vip', 12_000_000, {
+      cardId: 'CARD-0002',
+      loginToken: 'tok-dilnoza',
+      loyaltyLevel: 3,
+      loyaltyPoints: 4_820,
+      locale: 'uz',
+      bonus: uzs(200_000),
+    }),
+    mk('bekzod', 'bekzod', 'Bekzod T.', 'member', 300_000, {
+      cardId: 'CARD-0003',
+      loyaltyLevel: 0,
+      loyaltyPoints: 140,
+      locale: 'en',
+    }),
     mk('guest', 'guest', 'Guest', 'guest', 0, { pin: null, loyaltyLevel: 0, loyaltyPoints: 0, password: 'guest' }),
   ];
 }
 
 function seedGames(): Game[] {
-  type G = [slug: string, title: string, launcher: LauncherType, appId: string | null, ac: Game['antiCheat'], account: boolean, age: number, cats: string[], tags: string[], size: number, pop: number, desc: string];
-  const rows: G[] = [
-    ['cs2', 'Counter-Strike 2', 'steam', '730', 'none', false, 16, ['shooter', 'competitive'], ['fps', 'esports', 'team'], 35.2, 98, 'The definitive competitive tactical shooter. 5v5 bomb defusal on the Source 2 engine.'],
-    ['dota2', 'Dota 2', 'steam', '570', 'none', false, 12, ['moba', 'competitive'], ['moba', 'esports', 'strategy'], 48.7, 95, 'Every day, millions of players worldwide enter battle as one of over a hundred Dota heroes.'],
-    ['valorant', 'VALORANT', 'riot', 'valorant', 'vanguard', true, 16, ['shooter', 'competitive'], ['fps', 'hero', 'esports'], 30.1, 94, 'A 5v5 character-based tactical shooter where precise gunplay meets unique agent abilities.'],
-    ['lol', 'League of Legends', 'riot', 'league_of_legends', 'vanguard', true, 12, ['moba', 'competitive'], ['moba', 'esports'], 22.4, 88, 'Team up with friends and test your skills in 5v5 MOBA combat.'],
-    ['fortnite', 'Fortnite', 'epic', 'fn', 'eac', true, 12, ['battle-royale', 'shooter'], ['br', 'building', 'crossplay'], 42.0, 91, 'Drop in, build up, and be the last one standing in the battle royale that started it all.'],
-    ['apex', 'Apex Legends', 'steam', '1172470', 'eac', true, 16, ['battle-royale', 'shooter'], ['br', 'hero', 'squad'], 75.3, 86, 'Master an ever-growing roster of legendary characters in a squad-based battle royale.'],
-    ['pubg', 'PUBG: BATTLEGROUNDS', 'steam', '578080', 'battlEye', false, 16, ['battle-royale', 'shooter'], ['br', 'realistic'], 40.0, 80, 'Land on strategic locations, loot weapons and supplies, and survive to become the last team standing.'],
-    ['gta5', 'Grand Theft Auto V', 'steam', '271590', 'battlEye', true, 18, ['action', 'open-world'], ['open-world', 'story', 'online'], 105.0, 84, 'Explore the sprawling city of Los Santos and Blaine County in the ultimate open-world experience.'],
-    ['minecraft', 'Minecraft', 'exe', null, 'none', true, 6, ['sandbox', 'survival'], ['sandbox', 'creative', 'family'], 1.2, 82, 'Build, explore and survive in a blocky, procedurally generated 3D world.'],
-    ['rocketleague', 'Rocket League', 'epic', 'rl', 'none', false, 6, ['sports', 'arcade'], ['cars', 'football', 'crossplay'], 20.5, 76, 'Soccer meets driving in this high-octane hybrid of arcade-style sports and vehicular mayhem.'],
-    ['overwatch2', 'Overwatch 2', 'battleNet', 'pro', 'none', true, 12, ['shooter', 'hero'], ['fps', 'hero', 'team'], 50.0, 78, 'Team-based action with a diverse cast of heroes, each with unique abilities.'],
-    ['fc24', 'EA SPORTS FC 24', 'ea', 'fc24', 'eac', true, 3, ['sports'], ['football', 'sim'], 100.0, 79, 'The next chapter in the world\'s game with HyperMotionV technology and over 19 000 players.'],
-    ['warzone', 'Call of Duty: Warzone', 'battleNet', 'auks', 'ricochet', true, 18, ['battle-royale', 'shooter'], ['br', 'fps'], 125.0, 83, 'Massive combat arenas, Resurgence and Plunder modes in the free-to-play battle royale.'],
-    ['rust', 'Rust', 'steam', '252490', 'eac', false, 18, ['survival', 'open-world'], ['survival', 'pvp', 'crafting'], 25.0, 70, 'The only aim in Rust is to survive. Overcome struggles such as hunger, thirst and cold.'],
-    ['thefinals', 'THE FINALS', 'steam', '2073850', 'eac', false, 16, ['shooter', 'competitive'], ['fps', 'destruction', 'team'], 32.0, 72, 'Fight alongside your teammates in a virtual game show with fully destructible arenas.'],
+  type G = [
+    slug: string,
+    title: string,
+    launcher: LauncherType,
+    appId: string | null,
+    ac: Game['antiCheat'],
+    account: boolean,
+    age: number,
+    cats: string[],
+    tags: string[],
+    size: number,
+    pop: number,
+    desc: string,
   ];
-  return rows.map(([slug, title, launcher, launcherAppId, antiCheat, requiresAccount, ageRating, category, tags, sizeGb, popularity, description], i) => ({
-    id: sid(`game:${slug}`),
-    title,
-    launcher,
-    launcherAppId,
-    exePath: launcher === 'exe' ? 'D:\\Games\\Minecraft\\MinecraftLauncher.exe' : null,
-    args: null,
-    installPath: null,
-    installed: false,
-    category,
-    tags,
-    coverUrl: `https://picsum.photos/seed/${slug}/600/900`,
-    heroUrl: `https://picsum.photos/seed/${slug}-hero/1600/900`,
-    videoUrl: slug === 'cs2' ? 'https://cdn.example.uz/trailers/cs2.mp4' : null,
-    description,
-    ageRating,
-    popularity,
-    lastPlayedAt: null,
-    requiresAccount,
-    antiCheat,
-    minSpec: { cpu: 'Intel Core i5-9400F', gpu: 'NVIDIA GeForce GTX 1660', ramMb: 8192 },
-    sizeGb,
-    version: `1.${(i * 7) % 40}.${(i * 13) % 100}`,
-  }));
+  const rows: G[] = [
+    [
+      'cs2',
+      'Counter-Strike 2',
+      'steam',
+      '730',
+      'none',
+      false,
+      16,
+      ['shooter', 'competitive'],
+      ['fps', 'esports', 'team'],
+      35.2,
+      98,
+      'The definitive competitive tactical shooter. 5v5 bomb defusal on the Source 2 engine.',
+    ],
+    [
+      'dota2',
+      'Dota 2',
+      'steam',
+      '570',
+      'none',
+      false,
+      12,
+      ['moba', 'competitive'],
+      ['moba', 'esports', 'strategy'],
+      48.7,
+      95,
+      'Every day, millions of players worldwide enter battle as one of over a hundred Dota heroes.',
+    ],
+    [
+      'valorant',
+      'VALORANT',
+      'riot',
+      'valorant',
+      'vanguard',
+      true,
+      16,
+      ['shooter', 'competitive'],
+      ['fps', 'hero', 'esports'],
+      30.1,
+      94,
+      'A 5v5 character-based tactical shooter where precise gunplay meets unique agent abilities.',
+    ],
+    [
+      'lol',
+      'League of Legends',
+      'riot',
+      'league_of_legends',
+      'vanguard',
+      true,
+      12,
+      ['moba', 'competitive'],
+      ['moba', 'esports'],
+      22.4,
+      88,
+      'Team up with friends and test your skills in 5v5 MOBA combat.',
+    ],
+    [
+      'fortnite',
+      'Fortnite',
+      'epic',
+      'fn',
+      'eac',
+      true,
+      12,
+      ['battle-royale', 'shooter'],
+      ['br', 'building', 'crossplay'],
+      42.0,
+      91,
+      'Drop in, build up, and be the last one standing in the battle royale that started it all.',
+    ],
+    [
+      'apex',
+      'Apex Legends',
+      'steam',
+      '1172470',
+      'eac',
+      true,
+      16,
+      ['battle-royale', 'shooter'],
+      ['br', 'hero', 'squad'],
+      75.3,
+      86,
+      'Master an ever-growing roster of legendary characters in a squad-based battle royale.',
+    ],
+    [
+      'pubg',
+      'PUBG: BATTLEGROUNDS',
+      'steam',
+      '578080',
+      'battlEye',
+      false,
+      16,
+      ['battle-royale', 'shooter'],
+      ['br', 'realistic'],
+      40.0,
+      80,
+      'Land on strategic locations, loot weapons and supplies, and survive to become the last team standing.',
+    ],
+    [
+      'gta5',
+      'Grand Theft Auto V',
+      'steam',
+      '271590',
+      'battlEye',
+      true,
+      18,
+      ['action', 'open-world'],
+      ['open-world', 'story', 'online'],
+      105.0,
+      84,
+      'Explore the sprawling city of Los Santos and Blaine County in the ultimate open-world experience.',
+    ],
+    [
+      'minecraft',
+      'Minecraft',
+      'exe',
+      null,
+      'none',
+      true,
+      6,
+      ['sandbox', 'survival'],
+      ['sandbox', 'creative', 'family'],
+      1.2,
+      82,
+      'Build, explore and survive in a blocky, procedurally generated 3D world.',
+    ],
+    [
+      'rocketleague',
+      'Rocket League',
+      'epic',
+      'rl',
+      'none',
+      false,
+      6,
+      ['sports', 'arcade'],
+      ['cars', 'football', 'crossplay'],
+      20.5,
+      76,
+      'Soccer meets driving in this high-octane hybrid of arcade-style sports and vehicular mayhem.',
+    ],
+    [
+      'overwatch2',
+      'Overwatch 2',
+      'battleNet',
+      'pro',
+      'none',
+      true,
+      12,
+      ['shooter', 'hero'],
+      ['fps', 'hero', 'team'],
+      50.0,
+      78,
+      'Team-based action with a diverse cast of heroes, each with unique abilities.',
+    ],
+    [
+      'fc24',
+      'EA SPORTS FC 24',
+      'ea',
+      'fc24',
+      'eac',
+      true,
+      3,
+      ['sports'],
+      ['football', 'sim'],
+      100.0,
+      79,
+      "The next chapter in the world's game with HyperMotionV technology and over 19 000 players.",
+    ],
+    [
+      'warzone',
+      'Call of Duty: Warzone',
+      'battleNet',
+      'auks',
+      'ricochet',
+      true,
+      18,
+      ['battle-royale', 'shooter'],
+      ['br', 'fps'],
+      125.0,
+      83,
+      'Massive combat arenas, Resurgence and Plunder modes in the free-to-play battle royale.',
+    ],
+    [
+      'rust',
+      'Rust',
+      'steam',
+      '252490',
+      'eac',
+      false,
+      18,
+      ['survival', 'open-world'],
+      ['survival', 'pvp', 'crafting'],
+      25.0,
+      70,
+      'The only aim in Rust is to survive. Overcome struggles such as hunger, thirst and cold.',
+    ],
+    [
+      'thefinals',
+      'THE FINALS',
+      'steam',
+      '2073850',
+      'eac',
+      false,
+      16,
+      ['shooter', 'competitive'],
+      ['fps', 'destruction', 'team'],
+      32.0,
+      72,
+      'Fight alongside your teammates in a virtual game show with fully destructible arenas.',
+    ],
+  ];
+  return rows.map(
+    (
+      [
+        slug,
+        title,
+        launcher,
+        launcherAppId,
+        antiCheat,
+        requiresAccount,
+        ageRating,
+        category,
+        tags,
+        sizeGb,
+        popularity,
+        description,
+      ],
+      i,
+    ) => ({
+      id: sid(`game:${slug}`),
+      title,
+      launcher,
+      launcherAppId,
+      exePath: launcher === 'exe' ? 'D:\\Games\\Minecraft\\MinecraftLauncher.exe' : null,
+      args: null,
+      installPath: null,
+      installed: false,
+      category,
+      tags,
+      coverUrl: `https://picsum.photos/seed/${slug}/600/900`,
+      heroUrl: `https://picsum.photos/seed/${slug}-hero/1600/900`,
+      videoUrl: slug === 'cs2' ? 'https://cdn.example.uz/trailers/cs2.mp4' : null,
+      description,
+      ageRating,
+      popularity,
+      lastPlayedAt: null,
+      requiresAccount,
+      antiCheat,
+      minSpec: { cpu: 'Intel Core i5-9400F', gpu: 'NVIDIA GeForce GTX 1660', ramMb: 8192 },
+      sizeGb,
+      version: `1.${(i * 7) % 40}.${(i * 13) % 100}`,
+    }),
+  );
 }
 
 function seedApps(): App[] {
@@ -890,14 +1160,54 @@ function seedApps(): App[] {
 function seedTariffs(): Tariff[] {
   const allDays: Tariff['timeWindows'][number]['days'] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
   return [
-    { id: sid('tariff:standard'), name: 'Standard', pricePerHour: uzs(1_200_000), minMinutes: 30, maxMinutes: 720, zones: ['Standard', 'Bootcamp'], timeWindows: [], isPackage: false, packageMinutes: null, packagePrice: null },
-    { id: sid('tariff:vip'), name: 'VIP', pricePerHour: uzs(2_000_000), minMinutes: 30, maxMinutes: 720, zones: ['VIP'], timeWindows: [], isPackage: false, packageMinutes: null, packagePrice: null },
-    { id: sid('tariff:night'), name: 'Night Pack (5h)', pricePerHour: uzs(800_000), minMinutes: 300, maxMinutes: 300, zones: [], timeWindows: [{ days: allDays, from: '22:00', to: '08:00' }], isPackage: true, packageMinutes: 300, packagePrice: uzs(4_000_000) },
+    {
+      id: sid('tariff:standard'),
+      name: 'Standard',
+      pricePerHour: uzs(1_200_000),
+      minMinutes: 30,
+      maxMinutes: 720,
+      zones: ['Standard', 'Bootcamp'],
+      timeWindows: [],
+      isPackage: false,
+      packageMinutes: null,
+      packagePrice: null,
+    },
+    {
+      id: sid('tariff:vip'),
+      name: 'VIP',
+      pricePerHour: uzs(2_000_000),
+      minMinutes: 30,
+      maxMinutes: 720,
+      zones: ['VIP'],
+      timeWindows: [],
+      isPackage: false,
+      packageMinutes: null,
+      packagePrice: null,
+    },
+    {
+      id: sid('tariff:night'),
+      name: 'Night Pack (5h)',
+      pricePerHour: uzs(800_000),
+      minMinutes: 300,
+      maxMinutes: 300,
+      zones: [],
+      timeWindows: [{ days: allDays, from: '22:00', to: '08:00' }],
+      isPackage: true,
+      packageMinutes: 300,
+      packagePrice: uzs(4_000_000),
+    },
   ];
 }
 
 function seedProducts(): Product[] {
-  const rows: [slug: string, title: string, category: Product['category'], price: number, stock: number | null, tags: string[]][] = [
+  const rows: [
+    slug: string,
+    title: string,
+    category: Product['category'],
+    price: number,
+    stock: number | null,
+    tags: string[],
+  ][] = [
     ['cola', 'Coca-Cola 0.5L', 'drink', 800_000, 48, ['cold', 'popular']],
     ['redbull', 'Red Bull 0.25L', 'drink', 1_800_000, 20, ['energy']],
     ['water', 'Still water 0.5L', 'drink', 400_000, 100, ['cold']],
@@ -926,7 +1236,13 @@ function seedProducts(): Product[] {
 function seedTournaments(t0: number, users: UserRecord[]): TournamentRecord[] {
   const ids = users.map((u) => u.id);
   const names = users.map((u) => u.displayName);
-  const entry = (rank: number, i: number, score: number): LeaderboardEntry => ({ rank, userId: ids[i] ?? uuid(), name: names[i] ?? `Player ${i}`, score, avatarUrl: users[i]?.avatarUrl ?? null });
+  const entry = (rank: number, i: number, score: number): LeaderboardEntry => ({
+    rank,
+    userId: ids[i] ?? uuid(),
+    name: names[i] ?? `Player ${i}`,
+    score,
+    avatarUrl: users[i]?.avatarUrl ?? null,
+  });
   return [
     {
       id: sid('tournament:cs2-cup'),
@@ -939,10 +1255,12 @@ function seedTournaments(t0: number, users: UserRecord[]): TournamentRecord[] {
       participants: [ids[1] ?? '', ids[2] ?? '', ids[3] ?? '', ids[4] ?? ''].filter(Boolean),
       bracket: {
         rounds: [
-          { matches: [
-            { id: sid('match:1'), a: ids[1], b: ids[3], winner: ids[1], score: '2-0' },
-            { id: sid('match:2'), a: ids[2], b: ids[4], winner: ids[2], score: '2-1' },
-          ] },
+          {
+            matches: [
+              { id: sid('match:1'), a: ids[1], b: ids[3], winner: ids[1], score: '2-0' },
+              { id: sid('match:2'), a: ids[2], b: ids[4], winner: ids[2], score: '2-1' },
+            ],
+          },
           { matches: [{ id: sid('match:3'), a: ids[1], b: ids[2], winner: null, score: '1-1' }] },
         ],
       },
@@ -1002,7 +1320,13 @@ function seedChat(t0: number, users: UserRecord[], pcs: PcRecord[]): ChatRoomRec
   const admin = users[0] as UserRecord;
   const alisher = users[1] as UserRecord;
   const dilnoza = users[2] as UserRecord;
-  const msg = (roomId: string, sender: UserRecord, text: string, minutesAgo: number, kind: ChatMessage['kind'] = 'text'): ChatMessage => ({
+  const msg = (
+    roomId: string,
+    sender: UserRecord,
+    text: string,
+    minutesAgo: number,
+    kind: ChatMessage['kind'] = 'text',
+  ): ChatMessage => ({
     id: sid(`msg:${roomId}:${text}`),
     roomId,
     senderId: sender.id,
@@ -1055,7 +1379,7 @@ function seedAchievements(t0: number, users: UserRecord[]): Record<string, Achie
   const out: Record<string, Achievement[]> = {};
   users.forEach((u, ui) => {
     out[u.id] = defs.map(([slug, title, description, target], i) => {
-      const current = Math.min(target, Math.floor(target * ((ui + 1) * (i + 2)) / 12));
+      const current = Math.min(target, Math.floor((target * ((ui + 1) * (i + 2))) / 12));
       return {
         id: sid(`ach:${slug}`),
         title,
@@ -1089,7 +1413,15 @@ function seed(): Db {
   const pc16 = pcs[15] as PcRecord;
   const cola = products[0] as Product;
   const lavash = products[7] as Product;
-  const tx = (userId: string, type: TransactionType, amount: number, after: number, description: string, hoursAgo: number, ref: string | null = null): Transaction => ({
+  const tx = (
+    userId: string,
+    type: TransactionType,
+    amount: number,
+    after: number,
+    description: string,
+    hoursAgo: number,
+    ref: string | null = null,
+  ): Transaction => ({
     id: sid(`tx:${userId}:${hoursAgo}:${description}`),
     userId,
     type,
@@ -1143,11 +1475,22 @@ function seed(): Db {
     lastPushAt: 0,
   };
   const day = new Date(t0);
-  const slot = (h: number, m = 0): string => new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), h, m)).toISOString();
+  const slot = (h: number, m = 0): string =>
+    new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), h, m)).toISOString();
   const pool: PoolAccount[] = [];
   for (const launcher of ['steam', 'epic', 'battleNet', 'riot', 'ea', 'ubisoft', 'exe'] as LauncherType[]) {
     for (let i = 1; i <= 3; i += 1) {
-      pool.push({ launcher, username: `club_${launcher}_${String(i).padStart(2, '0')}`, password: `P@ss-${launcher}-${i}!`, extra: launcher === 'steam' ? { steamGuardSecret: `SG${i}MOCKSECRET` } : launcher === 'riot' ? { region: 'EUNE' } : null });
+      pool.push({
+        launcher,
+        username: `club_${launcher}_${String(i).padStart(2, '0')}`,
+        password: `P@ss-${launcher}-${i}!`,
+        extra:
+          launcher === 'steam'
+            ? { steamGuardSecret: `SG${i}MOCKSECRET` }
+            : launcher === 'riot'
+              ? { region: 'EUNE' }
+              : null,
+      });
     }
   }
   const stats: Record<string, UserStats> = {};
@@ -1178,14 +1521,54 @@ function seed(): Db {
     orders: [orderActive, orderDone],
     transactions: [
       tx(alisher.id, 'purchase', -orderDone.total.amount, 4_500_000, 'Shop order', 26, orderDone.id),
-      tx(alisher.id, 'charge', -2_400_000, 4_500_000 + orderDone.total.amount, 'Session 2h Standard', 27, sid('session:alisher-1')),
+      tx(
+        alisher.id,
+        'charge',
+        -2_400_000,
+        4_500_000 + orderDone.total.amount,
+        'Session 2h Standard',
+        27,
+        sid('session:alisher-1'),
+      ),
       tx(alisher.id, 'bonus', 50_000, 6_900_000 + orderDone.total.amount, 'Loyalty bonus', 30),
-      tx(alisher.id, 'topUp', 5_000_000, 6_850_000 + orderDone.total.amount, 'Top-up via Payme', 31, sid('topup:alisher-1')),
-      tx(alisher.id, 'charge', -1_200_000, 1_850_000 + orderDone.total.amount, 'Session 1h Standard', 50, sid('session:alisher-0')),
-      tx(alisher.id, 'refund', 600_000, 3_050_000 + orderDone.total.amount, 'Refund: unused 30 min', 72, sid('session:alisher-r')),
+      tx(
+        alisher.id,
+        'topUp',
+        5_000_000,
+        6_850_000 + orderDone.total.amount,
+        'Top-up via Payme',
+        31,
+        sid('topup:alisher-1'),
+      ),
+      tx(
+        alisher.id,
+        'charge',
+        -1_200_000,
+        1_850_000 + orderDone.total.amount,
+        'Session 1h Standard',
+        50,
+        sid('session:alisher-0'),
+      ),
+      tx(
+        alisher.id,
+        'refund',
+        600_000,
+        3_050_000 + orderDone.total.amount,
+        'Refund: unused 30 min',
+        72,
+        sid('session:alisher-r'),
+      ),
       tx(dilnoza.id, 'charge', -6_000_000, 12_000_000, 'Session 3h VIP', 1.6, seededSession.id),
       tx(dilnoza.id, 'purchase', -cola.price.amount, 18_000_000, 'Shop order', 0.07, orderActive.id),
-      tx(dilnoza.id, 'topUp', 10_000_000, 18_000_000 + cola.price.amount, 'Top-up via Click', 20, sid('topup:dilnoza-1')),
+      tx(
+        dilnoza.id,
+        'topUp',
+        10_000_000,
+        18_000_000 + cola.price.amount,
+        'Top-up via Click',
+        20,
+        sid('topup:dilnoza-1'),
+      ),
       tx(bekzod.id, 'topUp', 2_000_000, 300_000, 'Top-up in cash', 48, sid('topup:bekzod-1')),
     ],
     topupIntents: [],
@@ -1200,7 +1583,10 @@ function seed(): Db {
     achievements: seedAchievements(t0, users),
     stats,
     lastPlayed: {
-      [alisher.id]: { [sid('game:cs2')]: new Date(t0 - 86400_000).toISOString(), [sid('game:dota2')]: new Date(t0 - 3 * 86400_000).toISOString() },
+      [alisher.id]: {
+        [sid('game:cs2')]: new Date(t0 - 86400_000).toISOString(),
+        [sid('game:dota2')]: new Date(t0 - 3 * 86400_000).toISOString(),
+      },
       [dilnoza.id]: { [sid('game:valorant')]: new Date(t0 - 2 * 3600_000).toISOString() },
     },
     updateManifests: seedManifests(t0),

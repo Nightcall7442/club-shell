@@ -26,7 +26,15 @@ export const CALL_ADMIN_CATEGORIES: readonly CallAdminCategoryType[] = [
 const MESSAGE_MAX = 200;
 
 const IconBell = (): JSX.Element => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
     <path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15L6 16Z" />
     <path d="M10 20a2 2 0 0 0 4 0" />
   </svg>
@@ -42,7 +50,11 @@ export interface CallAdminModalProps {
   initialCategory?: CallAdminCategoryType;
 }
 
-export function CallAdminModal({ open, onClose, initialCategory = CallAdminCategory.Help }: CallAdminModalProps): JSX.Element {
+export function CallAdminModal({
+  open,
+  onClose,
+  initialCategory = CallAdminCategory.Help,
+}: CallAdminModalProps): JSX.Element {
   const { t } = useTranslation();
   const pcName = useSettingsStore((s) => s.pcInfo?.pc.name ?? t('desktop.pc'));
   const push = useNotificationsStore((s) => s.push);
@@ -68,11 +80,20 @@ export function CallAdminModal({ open, onClose, initialCategory = CallAdminCateg
     track('support.callAdmin', { category });
     try {
       const res = await api.system.callAdmin(category, message.trim().length > 0 ? message.trim() : undefined);
-      const lines = [t('support.calledHint', { pc: pcName }), t('support.ticket', { id: res.ticketId.slice(0, 8).toUpperCase() })];
+      const lines = [
+        t('support.calledHint', { pc: pcName }),
+        t('support.ticket', { id: res.ticketId.slice(0, 8).toUpperCase() }),
+      ];
       if (res.queuePosition != null) {
         lines.push(t('support.queuePosition', { position: res.queuePosition }));
       }
-      push({ id: 'call-admin', title: t('support.called'), body: lines.join(' · '), level: 'success', source: 'local' });
+      push({
+        id: 'call-admin',
+        title: t('support.called'),
+        body: lines.join(' · '),
+        level: 'success',
+        source: 'local',
+      });
       onClose();
     } catch (e) {
       pushError(e, t('support.callAdmin'));
@@ -155,7 +176,14 @@ export interface CallAdminButtonProps extends Pick<ButtonProps, 'variant' | 'siz
 }
 
 /** Renders nothing when the `callAdmin` feature is off. */
-export function CallAdminButton({ category, label, variant = 'primary', size = 'lg', block, className }: CallAdminButtonProps): JSX.Element | null {
+export function CallAdminButton({
+  category,
+  label,
+  variant = 'primary',
+  size = 'lg',
+  block,
+  className,
+}: CallAdminButtonProps): JSX.Element | null {
   const { t } = useTranslation();
   const enabled = useSettingsStore(selectFeature('callAdmin'));
   const [open, setOpen] = useState(false);
@@ -164,7 +192,14 @@ export function CallAdminButton({ category, label, variant = 'primary', size = '
   }
   return (
     <>
-      <Button variant={variant} size={size} block={block} className={className} icon={<IconBell />} onClick={() => setOpen(true)}>
+      <Button
+        variant={variant}
+        size={size}
+        block={block}
+        className={className}
+        icon={<IconBell />}
+        onClick={() => setOpen(true)}
+      >
         {label ?? t('support.callAdmin')}
       </Button>
       <CallAdminModal open={open} onClose={() => setOpen(false)} initialCategory={category} />

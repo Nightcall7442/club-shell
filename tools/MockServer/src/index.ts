@@ -11,7 +11,20 @@ import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import Fastify, { type FastifyError, type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { WS_MAX_FRAME_BYTES, type ErrorCode, type ServerErrorEnvelope } from '@clubshell/contracts';
-import { ApiError, DB_PATH, db, errors, flushDb, hmacHex, now, resolveAgentToken, resolveUserToken, sha256Hex, uuid, type PcRecord } from './db.js';
+import {
+  ApiError,
+  DB_PATH,
+  db,
+  errors,
+  flushDb,
+  hmacHex,
+  now,
+  resolveAgentToken,
+  resolveUserToken,
+  sha256Hex,
+  uuid,
+  type PcRecord,
+} from './db.js';
 import { authRoutes } from './routes/auth.js';
 import { chatRoutes, tickChat } from './routes/chat.js';
 import { gamesRoutes } from './routes/games.js';
@@ -32,7 +45,11 @@ interface Options {
 }
 
 function parseArgs(argv: string[]): Options {
-  const opts: Options = { port: Number.parseInt(process.env['MOCK_SERVER_PORT'] ?? '8080', 10) || 8080, latencyMs: 0, failRate: 0 };
+  const opts: Options = {
+    port: Number.parseInt(process.env['MOCK_SERVER_PORT'] ?? '8080', 10) || 8080,
+    latencyMs: 0,
+    failRate: 0,
+  };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     const next = argv[i + 1];
@@ -44,13 +61,21 @@ function parseArgs(argv: string[]): Options {
 }
 
 const SIGNATURE_MODE: 'skip' | 'enforce' | 'log' =
-  process.env['MOCK_SKIP_SIGNATURE'] === '1' ? 'skip' : process.env['MOCK_VERIFY_SIGNATURE'] === '1' ? 'enforce' : 'log';
+  process.env['MOCK_SKIP_SIGNATURE'] === '1'
+    ? 'skip'
+    : process.env['MOCK_VERIFY_SIGNATURE'] === '1'
+      ? 'enforce'
+      : 'log';
 const CLOCK_SKEW_SEC = 300;
 const RATE_LIMIT_PER_MIN = 600;
 const STARTED_AT = Date.now();
 
 const isExempt = (url: string): boolean =>
-  url === '/health' || url.startsWith('/mock') || url.startsWith('/_mock') || url.startsWith('/ws/') || url.includes('/mock/');
+  url === '/health' ||
+  url.startsWith('/mock') ||
+  url.startsWith('/_mock') ||
+  url.startsWith('/ws/') ||
+  url.includes('/mock/');
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Auth: Bearer → pc, X-User-Token → user, HMAC signature, rate limit
@@ -80,8 +105,11 @@ function verifySignature(req: FastifyRequest, pc: PcRecord): void {
   const ts = req.headers['x-timestamp'];
   const sig = req.headers['x-signature'];
   const fail = (problem: string, extra: Record<string, unknown> = {}): void => {
-    if (SIGNATURE_MODE === 'enforce') throw errors.unauthorized(problem === 'clockSkew' ? 'clockSkew' : 'signature', { problem, ...extra });
-    console.warn(`[sig] ${pc.name} ${req.method} ${req.url}: ${problem} (log-only; set MOCK_VERIFY_SIGNATURE=1 to enforce)`);
+    if (SIGNATURE_MODE === 'enforce')
+      throw errors.unauthorized(problem === 'clockSkew' ? 'clockSkew' : 'signature', { problem, ...extra });
+    console.warn(
+      `[sig] ${pc.name} ${req.method} ${req.url}: ${problem} (log-only; set MOCK_VERIFY_SIGNATURE=1 to enforce)`,
+    );
   };
   if (typeof ts !== 'string' || typeof sig !== 'string') {
     // Agents with signing disabled send neither header; only complain when one of the two is present.
@@ -95,7 +123,10 @@ function verifySignature(req: FastifyRequest, pc: PcRecord): void {
     return;
   }
   const path = req.raw.url ?? req.url;
-  const expected = hmacHex(Buffer.from(pc.signingSecret ?? '', 'base64'), `${ts}${req.method.toUpperCase()}${path}${sha256Hex(req.rawBody)}`);
+  const expected = hmacHex(
+    Buffer.from(pc.signingSecret ?? '', 'base64'),
+    `${ts}${req.method.toUpperCase()}${path}${sha256Hex(req.rawBody)}`,
+  );
   if (expected !== sig.trim().toLowerCase()) fail('mismatch');
   // ponytail: no replay window; add a (pcId, ts, sig) LRU if replay tests are ever needed.
 }
@@ -123,13 +154,25 @@ async function authenticate(req: FastifyRequest): Promise<void> {
 // Errors
 // ---------------------------------------------------------------------------------------------------------------------
 
-const STATUS_TO_CODE: Record<number, ErrorCode> = { 400: 'validation', 401: 'unauthorized', 403: 'forbidden', 404: 'notFound', 409: 'conflict', 413: 'validation', 415: 'validation', 422: 'validation', 429: 'rateLimited' };
+const STATUS_TO_CODE: Record<number, ErrorCode> = {
+  400: 'validation',
+  401: 'unauthorized',
+  403: 'forbidden',
+  404: 'notFound',
+  409: 'conflict',
+  413: 'validation',
+  415: 'validation',
+  422: 'validation',
+  429: 'rateLimited',
+};
 
 function toApiError(err: unknown): ApiError {
   if (err instanceof ApiError) return err;
   const fe = err as Partial<FastifyError> & { validation?: unknown };
-  if (fe.validation) return new ApiError('validation', fe.message ?? 'Validation failed', { field: 'body', reason: 'schema' });
-  if (typeof fe.code === 'string' && fe.code.startsWith('FST_ERR_CTP')) return new ApiError('validation', fe.message ?? 'Bad body', { field: 'body', reason: 'parse' });
+  if (fe.validation)
+    return new ApiError('validation', fe.message ?? 'Validation failed', { field: 'body', reason: 'schema' });
+  if (typeof fe.code === 'string' && fe.code.startsWith('FST_ERR_CTP'))
+    return new ApiError('validation', fe.message ?? 'Bad body', { field: 'body', reason: 'parse' });
   if (typeof fe.statusCode === 'number' && STATUS_TO_CODE[fe.statusCode]) {
     const code = STATUS_TO_CODE[fe.statusCode] as ErrorCode;
     return new ApiError(code, fe.message ?? code, null, fe.statusCode);
@@ -139,7 +182,9 @@ function toApiError(err: unknown): ApiError {
 }
 
 function sendError(err: ApiError, req: FastifyRequest, reply: FastifyReply): FastifyReply {
-  const envelope: ServerErrorEnvelope = { error: { code: err.code, message: err.message, details: err.details, traceId: req.traceId } };
+  const envelope: ServerErrorEnvelope = {
+    error: { code: err.code, message: err.message, details: err.details, traceId: req.traceId },
+  };
   if (err.code === 'rateLimited' && err.details && typeof err.details['retryAfterSec'] === 'number') {
     reply.header('Retry-After', String(err.details['retryAfterSec']));
   }
@@ -151,7 +196,12 @@ function sendError(err: ApiError, req: FastifyRequest, reply: FastifyReply): Fas
 // ---------------------------------------------------------------------------------------------------------------------
 
 export async function buildApp(opts: Options): Promise<FastifyInstance> {
-  const app = Fastify({ logger: { level: process.env['LOG_LEVEL'] ?? 'warn' }, bodyLimit: 64 * 1024 * 1024, disableRequestLogging: true, trustProxy: true });
+  const app = Fastify({
+    logger: { level: process.env['LOG_LEVEL'] ?? 'warn' },
+    bodyLimit: 64 * 1024 * 1024,
+    disableRequestLogging: true,
+    trustProxy: true,
+  });
 
   app.decorateRequest('auth', null);
   app.decorateRequest('rawBody', '');
@@ -176,7 +226,11 @@ export async function buildApp(opts: Options): Promise<FastifyInstance> {
     done(null, payload);
   });
 
-  await app.register(cors, { origin: true, exposedHeaders: ['ETag', 'X-Trace-Id', 'X-Server-Time', 'Retry-After'], allowedHeaders: ['*'] });
+  await app.register(cors, {
+    origin: true,
+    exposedHeaders: ['ETag', 'X-Trace-Id', 'X-Server-Time', 'Retry-After'],
+    allowedHeaders: ['*'],
+  });
   await app.register(websocket, { options: { maxPayload: WS_MAX_FRAME_BYTES } });
 
   app.addHook('onRequest', async (req, reply) => {
@@ -197,11 +251,19 @@ export async function buildApp(opts: Options): Promise<FastifyInstance> {
   app.addHook('onResponse', async (req, reply) => {
     const ms = reply.elapsedTime.toFixed(0);
     const who = req.auth?.pc?.name ?? '-';
-    console.log(`${new Date().toISOString().slice(11, 23)} ${req.method.padEnd(6)} ${req.url} → ${reply.statusCode} ${ms}ms [${who}]`);
+    console.log(
+      `${new Date().toISOString().slice(11, 23)} ${req.method.padEnd(6)} ${req.url} → ${reply.statusCode} ${ms}ms [${who}]`,
+    );
   });
 
   app.setErrorHandler((err, req, reply) => sendError(toApiError(err), req, reply));
-  app.setNotFoundHandler((req, reply) => sendError(new ApiError('notFound', `Route ${req.method} ${req.url} not found`, { route: req.url }, 404), req, reply));
+  app.setNotFoundHandler((req, reply) =>
+    sendError(
+      new ApiError('notFound', `Route ${req.method} ${req.url} not found`, { route: req.url }, 404),
+      req,
+      reply,
+    ),
+  );
 
   app.get('/health', async () => ({
     ok: true,

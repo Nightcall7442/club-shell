@@ -23,7 +23,8 @@ const QR_SIZE = 224;
 
 function reasonOf(e: unknown): string | null {
   const err = toShellApiError(e);
-  const details = typeof err.details === 'object' && err.details !== null ? (err.details as Record<string, unknown>) : {};
+  const details =
+    typeof err.details === 'object' && err.details !== null ? (err.details as Record<string, unknown>) : {};
   return typeof details['reason'] === 'string' ? details['reason'] : null;
 }
 
@@ -148,8 +149,21 @@ export function QrLogin({ onSuccess, className }: QrLoginProps): JSX.Element {
         {phase === 'loading' || !start ? (
           <Skeleton variant="rect" width={QR_SIZE + 32} height={QR_SIZE + 32} className="rounded-xl" />
         ) : (
-          <div className={clsx('rounded-xl bg-white p-4 shadow-[var(--shadow-card)] transition-opacity duration-[var(--dur-base)]', stale && 'opacity-20')}>
-            <QRCodeSVG value={start.qrUrl} size={QR_SIZE} level="M" marginSize={0} bgColor="#ffffff" fgColor="#0b0f1a" title={t('lock.qr')} />
+          <div
+            className={clsx(
+              'rounded-xl bg-white p-4 shadow-[var(--shadow-card)] transition-opacity duration-[var(--dur-base)]',
+              stale && 'opacity-20',
+            )}
+          >
+            <QRCodeSVG
+              value={start.qrUrl}
+              size={QR_SIZE}
+              level="M"
+              marginSize={0}
+              bgColor="#ffffff"
+              fgColor="#0b0f1a"
+              title={t('lock.qr')}
+            />
           </div>
         )}
         {stale && (
@@ -164,16 +178,31 @@ export function QrLogin({ onSuccess, className }: QrLoginProps): JSX.Element {
         )}
         {phase === 'confirmed' && (
           <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-success/80">
-            <svg viewBox="0 0 24 24" className="h-20 w-20 text-white" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <svg
+              viewBox="0 0 24 24"
+              className="h-20 w-20 text-white"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
               <path d="M5 13l4 4L19 7" />
             </svg>
           </div>
         )}
       </div>
 
-      <div role="status" aria-live="polite" className="flex min-h-[1.75rem] items-center justify-center gap-3 text-base">
+      <div
+        role="status"
+        aria-live="polite"
+        className="flex min-h-[1.75rem] items-center justify-center gap-3 text-base"
+      >
         {waiting && <Spinner size="sm" />}
-        <span className={clsx(phase === 'scanned' && 'text-accent', phase === 'confirmed' && 'text-success', 'text-text')}>
+        <span
+          className={clsx(phase === 'scanned' && 'text-accent', phase === 'confirmed' && 'text-success', 'text-text')}
+        >
           {phase === 'pending' && t('lock.qrWaiting')}
           {phase === 'scanned' && t('lock.qrScanned')}
           {phase === 'confirmed' && t('lock.qrConfirmed')}
