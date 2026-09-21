@@ -20,12 +20,12 @@ read those properties. Switching themes never reloads the page.
 | `name` | `string` | yes | — | Theme id; **must equal the file name** without `.json`. Bare name only (no `/`, `\`, `.`) — `ShellConfig::validate` and `validate::bare_name` reject anything else. A mismatch is logged by `load_theme` but the file is still used. |
 | `displayName` | `string` | yes | — | Human-readable name shown in the picker. |
 | `colors` | `ThemeColors` | yes | default palette per key | Eight colours, each `#RRGGBB` or `#RRGGBBAA` (`#RGB` is also accepted by `hexToRgb`). Alpha is ignored; Tailwind supplies opacity. |
-| `colors.bg` | hex | yes | `#0B0F1A` | Page background. |
-| `colors.surface` | hex | yes | `#141A2B` | Cards, panels, bars (`.glass`). |
-| `colors.primary` | hex | yes | `#3B82F6` | Primary actions, focus glow, selection. |
-| `colors.accent` | hex | yes | `#22D3EE` | Secondary highlight, warnings' border in overlays. |
-| `colors.text` | hex | yes | `#F3F4F6` | Primary text. |
-| `colors.muted` | hex | yes | `#8B93A7` | Secondary text, scrollbars. |
+| `colors.bg` | hex | yes | `#09090B` | Page background. |
+| `colors.surface` | hex | yes | `#151518` | Cards, panels, bars (`.glass`). |
+| `colors.primary` | hex | yes | `#F4F4F5` | Primary actions, focus glow, selection. Text on it is `--c-on-primary`, derived by luminance (dark on light primaries, white otherwise). |
+| `colors.accent` | hex | yes | `#F2B84B` | Secondary highlight (VIP, bonuses, timer warning), warnings' border in overlays. Text on it is `--c-on-accent`. |
+| `colors.text` | hex | yes | `#FAFAFA` | Primary text. |
+| `colors.muted` | hex | yes | `#8E8E96` | Secondary text, scrollbars. |
 | `colors.danger` | hex | yes | `#EF4444` | Errors, session timer warning/critical. |
 | `colors.success` | hex | yes | `#22C55E` | Success states. |
 | `radius` | `int` px | yes | `12` | Base corner radius; Tailwind derives `sm`/`md`/`lg`/`xl`/`2xl` from it. |
@@ -94,7 +94,7 @@ spinning) and honours `prefers-reduced-motion` the same way.
 ### 2.4 Typography and layout tokens (not themeable)
 
 `tokens.css` also defines the fluid type scale (`--fs-base: clamp(16px, 0.9375vw, 24px)`, `--fs-xs` …
-`--fs-display`), layout (`--topbar-h`, `--sidebar-w`, `--gutter`, `--gap`, `--card-cover-w`), motion
+`--fs-display`), layout (`--topbar-h`, `--gutter`, `--gap`, `--card-cover-w`), motion
 (`--dur-fast/base/slow`, easings) and elevation (`--shadow-card`, `--shadow-glow`). These are design
 constants, not theme fields; a theme only influences them through the colour variables they reference.
 
@@ -135,16 +135,16 @@ Both ship in `config/themes/` (installed to `C:\ProgramData\ClubShell\themes\` b
 also embedded in the frontend (`builtinThemes` in `theme/themes.ts`) and, for `default`, in the Rust
 binary (`DEFAULT_THEME_JSON`). `default.json` is mandatory and always resolvable.
 
-### 4.1 `default` — "ClubShell Default"
+### 4.1 `default` — "ClubShell Onyx"
 
 | Key | Hex | Role |
 |-----|-----|------|
-| bg | `#0B0F1A` | deep navy background |
-| surface | `#141A2B` | panels |
-| primary | `#3B82F6` | blue actions |
-| accent | `#22D3EE` | cyan highlight |
-| text | `#F3F4F6` | near-white |
-| muted | `#8B93A7` | grey-blue |
+| bg | `#09090B` | neutral near-black background; the artwork carries the colour |
+| surface | `#151518` | charcoal panels |
+| primary | `#F4F4F5` | white actions (dark text via `--c-on-primary`) |
+| accent | `#F2B84B` | gold highlight: VIP, bonuses, timer warning |
+| text | `#FAFAFA` | near-white |
+| muted | `#8E8E96` | neutral grey |
 | danger | `#EF4444` | red |
 | success | `#22C55E` | green |
 

@@ -5,9 +5,11 @@
  */
 import type { GamesSort } from '@clubshell/contracts';
 import clsx from 'clsx';
+import { motion } from 'framer-motion';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
+import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
 
 export interface CategoriesProps {
   categories: string[];
@@ -41,9 +43,22 @@ const SORTS: readonly { key: GamesSort; labelKey: string }[] = [
 ];
 
 const CHIP =
-  'focus-ring inline-flex shrink-0 select-none items-center whitespace-nowrap rounded-full font-semibold leading-none transition-colors duration-[var(--dur-fast)]';
-const CHIP_ON = 'bg-primary text-white shadow-[0_6px_20px_-6px_rgb(var(--c-primary)/0.8)]';
-const CHIP_OFF = 'text-muted hover:bg-text/10 hover:text-text';
+  'focus-ring relative isolate inline-flex shrink-0 select-none items-center whitespace-nowrap rounded-full font-semibold leading-none transition-colors duration-[var(--dur-base)]';
+const CHIP_ON = 'text-on-primary';
+const CHIP_OFF = 'text-muted hover:text-text';
+
+/** The active pill slides between chips of the same group (`layoutId`), so a filter change reads as one motion. */
+function Pill({ id, className }: { id: string; className?: string }): JSX.Element {
+  const animations = useThemeStore(selectAnimationsEnabled);
+  return (
+    <motion.span
+      layoutId={id}
+      aria-hidden="true"
+      className={clsx('absolute inset-0 -z-10 rounded-full', className)}
+      transition={animations ? { type: 'spring', stiffness: 520, damping: 42, mass: 0.8 } : { duration: 0 }}
+    />
+  );
+}
 
 function CheckIcon(): JSX.Element {
   return (
@@ -95,6 +110,12 @@ export function Categories({
               onClick={() => onChange(c.value)}
               className={clsx(CHIP, 'h-11 gap-2 px-4 text-base', active ? CHIP_ON : CHIP_OFF)}
             >
+              {active && (
+                <Pill
+                  id="games-category-pill"
+                  className="bg-primary shadow-[0_6px_20px_-6px_rgb(var(--c-primary)/0.4)]"
+                />
+              )}
               {c.label}
             </button>
           );
@@ -120,8 +141,9 @@ export function Categories({
               data-nav="true"
               aria-pressed={active}
               onClick={() => onSortChange(s.key)}
-              className={clsx(CHIP, 'h-9 px-4 text-sm', active ? 'bg-text/15 text-text' : CHIP_OFF)}
+              className={clsx(CHIP, 'h-9 px-4 text-sm', active ? 'text-text' : CHIP_OFF)}
             >
+              {active && <Pill id="games-sort-pill" className="bg-text/15" />}
               {t(s.labelKey)}
             </button>
           );

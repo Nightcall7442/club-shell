@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next';
 import { GameArtwork } from '@/components/media/GameArtwork';
 import { Badge } from '@/components/ui/Badge';
 import { useLocale } from '@/hooks/useLocale';
+import { tiltHandlers } from '@/hooks/useTilt';
 import { formatRelativeDay } from '@/lib/format';
 import { categoryLabel } from './Categories';
 
@@ -95,11 +96,8 @@ export const GameCard = forwardRef<HTMLButtonElement, GameCardProps>(function Ga
         onActivate?.(game);
         onClick?.(e);
       }}
-      className={clsx(
-        'focus-ring anim-cover-hover group flex w-full flex-col gap-2 rounded-lg text-left outline-none',
-        'transition-[transform,box-shadow] duration-[var(--dur-base)] ease-[var(--ease-out)]',
-        className,
-      )}
+      {...tiltHandlers(6)}
+      className={clsx('focus-ring tilt group relative block w-full rounded-lg text-left outline-none', className)}
       {...rest}
     >
       <GameArtwork
@@ -108,7 +106,7 @@ export const GameCard = forwardRef<HTMLButtonElement, GameCardProps>(function Ga
         kind="cover"
         priority={priority}
         className={clsx(
-          'rounded-lg transition-[box-shadow] duration-[var(--dur-base)]',
+          'rounded-lg shadow-[var(--shadow-card)] transition-[box-shadow,filter] duration-[var(--dur-base)]',
           selected && 'border-glow',
           !game.installed && 'opacity-60 saturate-50',
         )}
@@ -116,46 +114,48 @@ export const GameCard = forwardRef<HTMLButtonElement, GameCardProps>(function Ga
           <>
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-bg/90 to-transparent"
+              className="pointer-events-none absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-bg/95 via-bg/45 to-transparent"
             />
-            <div className="absolute left-2 top-2 flex flex-col items-start gap-1">
-              {running ? (
-                <Badge tone="primary" size="sm" solid live>
-                  {t('games.running')}
-                </Badge>
-              ) : (
-                <Badge tone={game.installed ? 'success' : 'muted'} size="sm" solid={game.installed}>
-                  {game.installed ? t('games.installed') : t('games.notInstalled')}
-                </Badge>
-              )}
-            </div>
-            <div className="absolute bottom-2 left-2 right-2 flex items-end justify-between gap-2">
-              <span
-                aria-label={t(launcherLabelKey(game.launcher))}
-                className="inline-flex h-7 min-w-7 items-center justify-center rounded-md bg-bg/70 px-1.5 text-xs font-bold uppercase tracking-wide text-text backdrop-blur-sm"
-              >
-                {launcherGlyph(game.launcher)}
+            <span aria-hidden="true" className="tilt-sheen rounded-lg" />
+            {(running || !game.installed) && (
+              <div className="absolute left-2 top-2">
+                {running ? (
+                  <Badge tone="primary" size="sm" solid live>
+                    {t('games.running')}
+                  </Badge>
+                ) : (
+                  <Badge tone="muted" size="sm">
+                    {t('games.notInstalled')}
+                  </Badge>
+                )}
+              </div>
+            )}
+            <div className="absolute inset-x-0 bottom-0 flex flex-col gap-1 p-3">
+              <span className="line-clamp-2 text-base font-bold leading-tight text-text [text-shadow:0_1px_12px_rgb(0_0_0/0.7)]">
+                {game.title}
               </span>
-              {game.ageRating > 0 && (
-                <span className="inline-flex h-7 items-center rounded-md bg-bg/70 px-1.5 text-xs font-bold text-text backdrop-blur-sm">
-                  {t('games.ageRating', { age: game.ageRating })}
+              <span
+                className={clsx(
+                  'flex items-center gap-2 text-xs text-text/75 transition-[opacity,transform] duration-[var(--dur-base)] ease-[var(--ease-out)]',
+                  'translate-y-1 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100 group-data-[focused=true]:translate-y-0 group-data-[focused=true]:opacity-100',
+                  selected && 'translate-y-0 opacity-100',
+                )}
+              >
+                <span
+                  aria-label={t(launcherLabelKey(game.launcher))}
+                  className="inline-flex h-5 min-w-5 items-center justify-center rounded bg-text/15 px-1 text-[0.65rem] font-bold uppercase tracking-wide"
+                >
+                  {launcherGlyph(game.launcher)}
                 </span>
-              )}
+                <span className="truncate">{subline}</span>
+                {game.ageRating > 0 && (
+                  <span className="shrink-0 tnum">{t('games.ageRating', { age: game.ageRating })}</span>
+                )}
+              </span>
             </div>
           </>
         }
       />
-      <span className="flex min-w-0 flex-col gap-0.5 px-1">
-        <span
-          className={clsx(
-            'line-clamp-2 text-base font-semibold leading-tight',
-            selected ? 'text-primary' : 'text-text group-hover:text-primary',
-          )}
-        >
-          {game.title}
-        </span>
-        <span className="truncate text-sm text-muted">{subline}</span>
-      </span>
     </button>
   );
 });

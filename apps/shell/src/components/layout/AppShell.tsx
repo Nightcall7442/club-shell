@@ -5,14 +5,14 @@ import { Background } from '@/components/layout/Background';
 import { NotificationCenter } from '@/components/layout/NotificationCenter';
 import { VirtualKeyboard } from '@/components/ui/VirtualKeyboard';
 import { trackScreen } from '@/lib/analytics';
-import { Sidebar } from '@/screens/Desktop/Sidebar';
 import { TopBar } from '@/screens/Desktop/TopBar';
 import { useThemeStore } from '@/store/theme';
 
 /**
- * Authenticated layout: TopBar across the top, Sidebar on the left, the routed screen in the remaining cell with a
+ * Authenticated layout: a translucent TopBar (brand, navigation, session) floating over the routed screen, which
+ * scrolls underneath it (top padding = bar height, so screens may bleed under the bar with a negative margin);
  * fade+slide transition per pathname, overlays (toasts, banners, staff modal, on-screen keyboard) on top and the
- * themed Background behind everything. Never scrolls horizontally; only the screen cell scrolls vertically.
+ * themed Background behind everything. Never scrolls horizontally.
  */
 export function AppShell(): JSX.Element {
   const location = useLocation();
@@ -28,20 +28,17 @@ export function AppShell(): JSX.Element {
   return (
     <div className="relative h-full w-full overflow-hidden">
       <Background />
-      <div className="relative z-10 grid h-full w-full grid-cols-[auto_1fr] grid-rows-[var(--topbar-h)_1fr]">
-        <header className="col-span-2 row-start-1 min-w-0">
+      <div className="relative z-10 h-full w-full">
+        <header className="absolute inset-x-0 top-0 z-20 h-[var(--topbar-h)] min-w-0">
           <TopBar />
         </header>
-        <aside className="col-start-1 row-start-2 min-h-0">
-          <Sidebar />
-        </aside>
-        <div className="relative col-start-2 row-start-2 min-h-0 min-w-0 overflow-hidden">
+        <div className="relative h-full min-h-0 min-w-0 overflow-hidden">
           <AnimatePresence mode="wait" initial={false}>
             <motion.main
               key={location.pathname}
               id="main"
               tabIndex={-1}
-              className="no-scrollbar absolute inset-x-0 top-0 bottom-[var(--vk-h,0px)] overflow-y-auto overflow-x-hidden px-[var(--gutter)] py-[var(--gap)] outline-none"
+              className="no-scrollbar absolute inset-x-0 top-0 bottom-[var(--vk-h,0px)] overflow-y-auto overflow-x-hidden px-[var(--gutter)] pb-[var(--gap)] pt-[calc(var(--topbar-h)+var(--gap))] outline-none"
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}

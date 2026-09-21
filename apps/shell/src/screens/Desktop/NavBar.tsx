@@ -1,9 +1,9 @@
 /**
- * Left navigation: one `NavLink` per feature-enabled screen with an inline icon, the label (hidden when
- * collapsed), a chat unread badge and an active glow. Auto-collapses to icons under 1700 px, toggleable by hand.
- * Gamepad LB/RB cycle the routes unless a tab list is on screen (Tabs owns LB/RB then); B/Escape go home.
+ * Horizontal navigation in the top bar: one `NavLink` per feature-enabled screen (icon, label from 1800 px, the
+ * active one on a soft pill), a chat unread badge. Gamepad LB/RB cycle the routes unless a tab list is on screen
+ * (Tabs owns LB/RB then); B/Escape go home.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
@@ -21,7 +21,7 @@ const svgProps = {
   viewBox: '0 0 24 24',
   fill: 'none',
   stroke: 'currentColor',
-  strokeWidth: 1.8,
+  strokeWidth: 1.9,
   strokeLinecap: 'round',
   strokeLinejoin: 'round',
   'aria-hidden': true,
@@ -94,16 +94,6 @@ const ICONS = {
       <circle cx="12" cy="17" r="0.8" fill="currentColor" stroke="none" />
     </svg>
   ),
-  collapse: (
-    <svg {...svgProps}>
-      <path d="M15 6l-6 6 6 6" />
-    </svg>
-  ),
-  expand: (
-    <svg {...svgProps}>
-      <path d="M9 6l6 6-6 6" />
-    </svg>
-  ),
 } as const;
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -115,6 +105,8 @@ export interface NavItemDef {
   to: string;
   /** Feature toggle that hides the item when off. */
   feature?: keyof ShellFeatures;
+  /** Never show the label (secondary destinations). */
+  iconOnly?: boolean;
 }
 
 export const NAV_ITEMS: readonly NavItemDef[] = [
@@ -126,8 +118,8 @@ export const NAV_ITEMS: readonly NavItemDef[] = [
   { key: 'chat', to: '/chat', feature: 'chat' },
   { key: 'booking', to: '/booking', feature: 'booking' },
   { key: 'tournaments', to: '/tournaments', feature: 'tournaments' },
-  { key: 'profile', to: '/profile', feature: 'profile' },
-  { key: 'support', to: '/support' },
+  { key: 'profile', to: '/profile', feature: 'profile', iconOnly: true },
+  { key: 'support', to: '/support', iconOnly: true },
 ];
 
 /** Items visible under the current feature toggles. */
@@ -135,13 +127,11 @@ export function visibleNavItems(features: ShellFeatures): NavItemDef[] {
   return NAV_ITEMS.filter((i) => !i.feature || features[i.feature]);
 }
 
-const COLLAPSE_QUERY = '(max-width: 1700px)';
-
 // ---------------------------------------------------------------------------------------------------------------------
-// Sidebar
+// Nav bar
 // ---------------------------------------------------------------------------------------------------------------------
 
-export function Sidebar(): JSX.Element {
+export function NavBar({ className }: { className?: string }): JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
@@ -149,22 +139,6 @@ export function Sidebar(): JSX.Element {
   const defaultRoute = useSettingsStore((s) => s.shellConfig?.ui.defaultRoute ?? '/home');
   const unread = useChatStore(selectUnreadTotal);
   const items = useMemo(() => visibleNavItems(features), [features]);
-
-  const [auto, setAuto] = useState(() =>
-    typeof window === 'undefined' ? false : window.matchMedia(COLLAPSE_QUERY).matches,
-  );
-  const [manual, setManual] = useState<boolean | null>(null);
-  const collapsed = manual ?? auto;
-
-  useEffect(() => {
-    const mq = window.matchMedia(COLLAPSE_QUERY);
-    const onChange = (e: MediaQueryListEvent): void => {
-      setAuto(e.matches);
-      setManual(null);
-    };
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, []);
 
   const currentIndex = items.findIndex((i) => location.pathname === i.to || location.pathname.startsWith(`${i.to}/`));
 
@@ -195,50 +169,44 @@ export function Sidebar(): JSX.Element {
   useGamepad({ onTab: cycle, onBack: goHome });
 
   return (
-    <nav
-      aria-label={t('common.menu')}
-      className="glass flex h-full flex-col rounded-none border-y-0 border-l-0 py-[var(--gap)] transition-[width] duration-[var(--dur-base)] ease-[var(--ease-out)]"
-      style={{ width: collapsed ? 'var(--sidebar-w)' : 'var(--sidebar-w-expanded)' }}
-      data-collapsed={collapsed ? 'true' : 'false'}
-    >
-      <ul role="list" className="no-scrollbar flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-3">
+    <nav aria-label={t('common.menu')} className={clsx('min-w-0', className)}>
+      <ul role="list" className="flex items-center">
         {items.map((item) => {
           const label = t(`desktop.nav.${item.key}`);
           const badge = item.key === 'chat' && unread > 0 ? (unread > 99 ? '99+' : String(unread)) : null;
           return (
-            <li key={item.key}>
+            <li key={item.key} className="shrink-0">
               <NavLink
                 to={item.to}
                 data-nav="true"
+                title={label}
                 aria-label={badge ? `${label}, ${t('chat.unread', { count: unread })}` : label}
-                title={collapsed ? label : undefined}
                 className={({ isActive }) =>
                   clsx(
-                    'focus-ring relative flex h-14 items-center gap-3 rounded-lg transition-colors duration-[var(--dur-fast)]',
-                    collapsed ? 'justify-center px-0' : 'px-4',
-                    isActive ? 'border-glow bg-primary/15 text-primary' : 'text-muted hover:bg-text/10 hover:text-text',
+                    'focus-ring relative flex h-10 items-center gap-2 rounded-full px-2.5 text-[0.9rem] font-semibold transition-colors duration-[var(--dur-fast)]',
+                    !item.iconOnly && 'min-[1800px]:px-3',
+                    isActive ? 'bg-text/10 text-text' : 'text-muted hover:bg-text/[0.06] hover:text-text',
                   )
                 }
               >
                 <span
                   aria-hidden="true"
-                  className="relative inline-flex h-7 w-7 shrink-0 items-center justify-center [&>svg]:h-full [&>svg]:w-full"
+                  className={clsx(
+                    'inline-flex h-5 w-5 shrink-0 items-center justify-center [&>svg]:h-full [&>svg]:w-full',
+                    !item.iconOnly && 'min-[1800px]:hidden',
+                  )}
                 >
                   {ICONS[item.key]}
-                  {badge && collapsed && (
-                    <Badge
-                      tone="danger"
-                      size="sm"
-                      solid
-                      className="absolute -right-3 -top-2 h-5 min-w-[1.25rem] px-1 text-[0.65rem]"
-                    >
-                      {badge}
-                    </Badge>
-                  )}
                 </span>
-                {!collapsed && <span className="min-w-0 flex-1 truncate text-base font-semibold">{label}</span>}
-                {!collapsed && badge && (
-                  <Badge tone="danger" size="sm" solid aria-hidden="true">
+                {!item.iconOnly && <span className="hidden whitespace-nowrap min-[1800px]:inline">{label}</span>}
+                {badge && (
+                  <Badge
+                    tone="danger"
+                    size="sm"
+                    solid
+                    aria-hidden="true"
+                    className="h-5 min-w-[1.25rem] px-1 text-[0.65rem]"
+                  >
                     {badge}
                   </Badge>
                 )}
@@ -247,27 +215,6 @@ export function Sidebar(): JSX.Element {
           );
         })}
       </ul>
-      <div className="px-3 pt-2">
-        <button
-          type="button"
-          data-nav="true"
-          aria-label={collapsed ? t('desktop.sidebarExpand') : t('desktop.sidebarCollapse')}
-          aria-expanded={!collapsed}
-          onClick={() => setManual(!collapsed)}
-          className={clsx(
-            'focus-ring flex h-12 w-full items-center gap-3 rounded-lg text-muted transition-colors duration-[var(--dur-fast)] hover:bg-text/10 hover:text-text',
-            collapsed ? 'justify-center' : 'px-4',
-          )}
-        >
-          <span
-            aria-hidden="true"
-            className="inline-flex h-6 w-6 shrink-0 items-center justify-center [&>svg]:h-full [&>svg]:w-full"
-          >
-            {collapsed ? ICONS.expand : ICONS.collapse}
-          </span>
-          {!collapsed && <span className="truncate text-sm">{t('desktop.sidebarCollapse')}</span>}
-        </button>
-      </div>
     </nav>
   );
 }

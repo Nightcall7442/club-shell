@@ -14,6 +14,7 @@ import { useLocale } from '@/hooks/useLocale';
 import { useSession } from '@/hooks/useSession';
 import { formatMoney } from '@/lib/format';
 import { formatClock, serverNow } from '@/lib/time';
+import { NavBar } from '@/screens/Desktop/NavBar';
 import { SessionTimer } from '@/screens/Desktop/SessionTimer';
 import { useNotificationsStore } from '@/store/notifications';
 import { selectFeatures, useSettingsStore } from '@/store/settings';
@@ -309,18 +310,23 @@ export function ConnectivityIndicator(): JSX.Element {
     : server === 'online'
       ? t('desktop.serverOnline')
       : t('desktop.serverOffline');
+  const DOT = { danger: 'bg-danger', success: 'bg-success', accent: 'bg-accent' } as const;
   return (
-    <Badge
-      tone={tone}
-      size="md"
-      dot
-      live={!agentConnected}
+    <span
+      role="status"
       title={label}
       aria-label={`${t('desktop.connection')}: ${label}`}
-      className="normal-case tracking-normal"
+      className="inline-flex h-10 w-6 shrink-0 items-center justify-center"
     >
-      {label}
-    </Badge>
+      <span
+        aria-hidden="true"
+        className={clsx(
+          'h-2 w-2 rounded-full shadow-[0_0_8px_currentColor]',
+          DOT[tone],
+          !agentConnected && 'anim-live-dot',
+        )}
+      />
+    </span>
   );
 }
 
@@ -363,37 +369,35 @@ export function TopBar(): JSX.Element {
   ) : null;
 
   return (
-    <div className="glass flex h-full w-full items-center gap-[var(--gap)] rounded-none border-x-0 border-t-0 px-[var(--gutter)]">
-      {/* Left: PC identity */}
-      <div className="flex min-w-0 flex-1 items-center gap-3">
+    <div className="flex h-full w-full items-center gap-[var(--gap)] bg-bg/60 px-[var(--gutter)] backdrop-blur-2xl">
+      {/* Left: club + PC identity */}
+      <div className="flex min-w-0 shrink-0 items-center gap-3">
         <span
           aria-hidden="true"
-          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/15 text-primary [&>svg]:h-6 [&>svg]:w-6"
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-text/10 text-text [&>svg]:h-5 [&>svg]:w-5"
         >
           <IconPc />
         </span>
         <div className="min-w-0 leading-tight">
-          <div className="truncate text-lg font-bold text-text">{pc ? pc.name : t('desktop.pc')}</div>
-          <div className="truncate text-sm text-muted">
-            {pc ? `${t('lock.zone')}: ${pc.zone}` : t('common.loading')}
+          <div className="truncate text-[0.7rem] font-bold uppercase tracking-[0.18em] text-text/80">
+            {t('idle.clubName')}
           </div>
+          <div className="truncate text-sm text-muted">{pc ? `${pc.name} · ${pc.zone}` : t('common.loading')}</div>
         </div>
       </div>
 
-      {/* Centre: session countdown */}
-      <div className="flex shrink-0 items-center justify-center">
-        <SessionTimer compact />
-      </div>
+      {/* Centre: navigation */}
+      <NavBar className="flex min-w-0 flex-1 justify-center" />
 
-      {/* Right: balance, user, status, clock, controls */}
-      <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
+      {/* Right: balance, user + countdown, status, clock, controls */}
+      <div className="flex shrink-0 items-center justify-end gap-1.5">
         {user && (
           <Button
-            variant="secondary"
+            variant="ghost"
             icon={<IconWallet />}
             aria-label={`${t('desktop.balance')}: ${formatMoney(user.balance, locale)}`}
             onClick={() => navigate('/wallet')}
-            className="tnum"
+            className="tnum rounded-full"
           >
             {formatMoney(user.balance, locale)}
           </Button>
@@ -414,13 +418,14 @@ export function TopBar(): JSX.Element {
             {roleBadge}
           </button>
         )}
+        <SessionTimer compact />
         <ConnectivityIndicator />
         {showClock && <Clock format={clockFormat} />}
         <VolumeControl />
         <LocaleSwitch />
         {isActive && (
           <Button
-            variant="secondary"
+            variant="ghost"
             iconOnly
             aria-label={t('desktop.lock')}
             title={t('desktop.lock')}

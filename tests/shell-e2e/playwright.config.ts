@@ -2,6 +2,8 @@ import { defineConfig, devices } from '@playwright/test';
 
 const baseURL = 'http://localhost:1420';
 const ci = Boolean(process.env.CI);
+// PW_CHANNEL=msedge|chrome drives an installed browser instead of the bundled Chromium (e.g. when it cannot start).
+const channel = process.env.PW_CHANNEL;
 
 export default defineConfig({
   testDir: '.',
@@ -26,7 +28,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'], viewport: { width: 1920, height: 1080 } },
+      use: { ...devices['Desktop Chrome'], viewport: { width: 1920, height: 1080 }, ...(channel ? { channel } : {}) },
     },
   ],
   webServer: {

@@ -22,7 +22,7 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const VARIANT: Record<ButtonVariant, string> = {
   primary:
-    'bg-primary text-white shadow-[0_10px_30px_-10px_rgb(var(--c-primary)/0.7)] hover:bg-[rgb(var(--c-primary-hover))] active:bg-[rgb(var(--c-primary-active))]',
+    'bg-primary text-on-primary shadow-[inset_0_1px_0_rgb(255_255_255/0.5),inset_0_-1px_0_rgb(0_0_0/0.14),0_14px_36px_-12px_rgb(0_0_0/0.85)] hover:bg-[rgb(var(--c-primary-hover))] hover:shadow-[inset_0_1px_0_rgb(255_255_255/0.5),inset_0_-1px_0_rgb(0_0_0/0.14),0_18px_40px_-12px_rgb(0_0_0/0.9)] active:bg-[rgb(var(--c-primary-active))]',
   secondary: 'glass text-text hover:bg-surface/80 active:bg-surface',
   ghost: 'bg-transparent text-text hover:bg-text/10 active:bg-text/15',
   danger:

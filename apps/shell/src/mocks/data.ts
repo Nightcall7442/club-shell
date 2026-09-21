@@ -63,8 +63,9 @@ export function daysAgo(days: number): string {
   return ago(days * 24 * 60);
 }
 
-const cover = (seed: string): string => `https://picsum.photos/seed/${seed}/600/900`;
-const hero = (seed: string): string => `https://picsum.photos/seed/${seed}-hero/1600/900`;
+/** Original key art per game in `public/mock-art/<seed>-{cover,hero}.jpg`. */
+const cover = (seed: string): string => `/mock-art/${seed}-cover.jpg`;
+const hero = (seed: string): string => `/mock-art/${seed}-hero.jpg`;
 const square = (seed: string, size = 256): string => `https://picsum.photos/seed/${seed}/${size}/${size}`;
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -1283,9 +1284,9 @@ export const SHELL_CONFIG: ShellConfig = {
     intervalSec: 900,
     durationSec: 15,
     playlist: [
-      { url: 'https://picsum.photos/seed/ad-1/1920/1080', type: 'image', durationSec: 8 },
-      { url: 'https://picsum.photos/seed/ad-2/1920/1080', type: 'image', durationSec: 8 },
-      { url: 'https://picsum.photos/seed/ad-3/1920/1080', type: 'image', durationSec: 8 },
+      { url: '/mock-art/valorant-hero.jpg', type: 'image', durationSec: 8 },
+      { url: '/mock-art/forza5-hero.jpg', type: 'image', durationSec: 8 },
+      { url: '/mock-art/lol-hero.jpg', type: 'image', durationSec: 8 },
     ],
   },
   gamepad: { enabled: true, pollMs: 16, deadzone: 0.25, navigation: true },

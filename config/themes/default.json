@@ -1,14 +1,14 @@
 {
   "version": 1,
   "name": "default",
-  "displayName": "ClubShell Default",
+  "displayName": "ClubShell Onyx",
   "colors": {
-    "bg": "#0B0F1A",
-    "surface": "#141A2B",
-    "primary": "#3B82F6",
-    "accent": "#22D3EE",
-    "text": "#F3F4F6",
-    "muted": "#8B93A7",
+    "bg": "#09090B",
+    "surface": "#151518",
+    "primary": "#F4F4F5",
+    "accent": "#F2B84B",
+    "text": "#FAFAFA",
+    "muted": "#8E8E96",
     "danger": "#EF4444",
     "success": "#22C55E"
   },

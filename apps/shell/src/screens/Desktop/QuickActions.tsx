@@ -134,10 +134,58 @@ export function QuickActionTile({
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+// Pill (compact variant used over the home hero)
+// ---------------------------------------------------------------------------------------------------------------------
+
+function QuickPill({
+  icon,
+  label,
+  hint,
+  onClick,
+  disabled = false,
+  loading = false,
+  tone = 'primary',
+}: QuickActionTileProps): JSX.Element {
+  return (
+    <button
+      type="button"
+      data-nav="true"
+      disabled={disabled || loading}
+      aria-busy={loading || undefined}
+      aria-label={hint ? `${label}. ${hint}` : label}
+      title={hint}
+      onClick={onClick}
+      className={clsx(
+        'focus-ring flex h-11 items-center gap-2 rounded-full bg-text/[0.08] pl-3 pr-4 text-[0.95rem] font-semibold backdrop-blur-md transition-[transform,background-color] duration-[var(--dur-fast)] ease-[var(--ease-out)]',
+        'hover:bg-text/15 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100',
+        tone === 'danger' ? 'text-danger' : 'text-text',
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className={clsx(
+          'inline-flex shrink-0 items-center justify-center [&>svg]:h-5 [&>svg]:w-5',
+          loading && 'anim-glow',
+        )}
+      >
+        {icon}
+      </span>
+      <span className="truncate">{label}</span>
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 // Grid
 // ---------------------------------------------------------------------------------------------------------------------
 
-export function QuickActions({ className }: { className?: string }): JSX.Element {
+export interface QuickActionsProps {
+  className?: string;
+  /** Pill row without heading or the "launch last" tile (the home hero owns Play). */
+  compact?: boolean;
+}
+
+export function QuickActions({ className, compact = false }: QuickActionsProps): JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const features = useSettingsStore(selectFeatures);
@@ -199,19 +247,29 @@ export function QuickActions({ className }: { className?: string }): JSX.Element
     }
   };
 
+  const Tile = compact ? QuickPill : QuickActionTile;
+
   return (
     <section aria-label={t('desktop.quickActions')} className={className}>
-      <h2 className="mb-3 text-xl font-bold text-text">{t('desktop.quickActions')}</h2>
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(clamp(160px,12vw,240px),1fr))] gap-[var(--gap)]">
-        <QuickActionTile
-          icon={ICONS.launch}
-          label={t('desktop.launchLast')}
-          hint={last ? last.title : t('desktop.noRecent')}
-          loading={launching !== null && last !== null && launching.gameId === last.id}
-          onClick={() => void onLaunch()}
-        />
-        {features.topup && (
+      {!compact && <h2 className="mb-3 text-xl font-bold text-text">{t('desktop.quickActions')}</h2>}
+      <div
+        className={
+          compact
+            ? 'flex flex-wrap items-center gap-2'
+            : 'grid grid-cols-[repeat(auto-fit,minmax(clamp(160px,12vw,240px),1fr))] gap-[var(--gap)]'
+        }
+      >
+        {!compact && (
           <QuickActionTile
+            icon={ICONS.launch}
+            label={t('desktop.launchLast')}
+            hint={last ? last.title : t('desktop.noRecent')}
+            loading={launching !== null && last !== null && launching.gameId === last.id}
+            onClick={() => void onLaunch()}
+          />
+        )}
+        {features.topup && (
+          <Tile
             icon={ICONS.topup}
             label={t('desktop.topUp')}
             hint={t('wallet.topUpHint')}
@@ -220,7 +278,7 @@ export function QuickActions({ className }: { className?: string }): JSX.Element
           />
         )}
         {features.shop && (
-          <QuickActionTile
+          <Tile
             icon={ICONS.shop}
             label={t('desktop.shop')}
             hint={t('shop.subtitle')}
@@ -229,7 +287,7 @@ export function QuickActions({ className }: { className?: string }): JSX.Element
           />
         )}
         {features.callAdmin && (
-          <QuickActionTile
+          <Tile
             icon={ICONS.callAdmin}
             label={t('desktop.callAdmin')}
             hint={t('support.callHint')}
@@ -239,7 +297,7 @@ export function QuickActions({ className }: { className?: string }): JSX.Element
             }}
           />
         )}
-        <QuickActionTile
+        <Tile
           icon={ICONS.extend}
           label={t('desktop.extend')}
           hint={
@@ -255,7 +313,7 @@ export function QuickActions({ className }: { className?: string }): JSX.Element
             setExtendOpen(true);
           }}
         />
-        <QuickActionTile
+        <Tile
           icon={ICONS.lock}
           label={t('desktop.lockPc')}
           hint={t('session.lockedHint')}

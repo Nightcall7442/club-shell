@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useState, type HTMLAttributes, type ReactNode } from 'react';
+import { forwardRef, useEffect, useRef, useState, type HTMLAttributes, type ReactNode } from 'react';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { assetUrl } from '@/lib/tauri';
@@ -69,10 +69,13 @@ export const GameArtwork = forwardRef<HTMLDivElement, GameArtworkProps>(function
   const { url, error } = useResolvedAsset(src);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
+  const img = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
-    setLoaded(false);
     setFailed(false);
+    // A cached image can complete before React wires `onLoad`; read the element instead of waiting for the event.
+    const el = img.current;
+    setLoaded(el !== null && el.complete && el.naturalWidth > 0);
   }, [url]);
 
   const ratio = kind === 'cover' ? aspectToCss(aspect ?? configured, '2 / 3') : aspectToCss(aspect, '16 / 9');
@@ -91,6 +94,7 @@ export const GameArtwork = forwardRef<HTMLDivElement, GameArtworkProps>(function
     >
       {url && !showFallback && (
         <img
+          ref={img}
           src={url}
           alt={kind === 'cover' ? t('games.coverAlt', { title }) : t('games.heroAlt', { title })}
           loading={priority ? 'eager' : 'lazy'}

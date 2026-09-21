@@ -28,8 +28,8 @@ const TINT: Record<BadgeTone, string> = {
 
 const SOLID: Record<BadgeTone, string> = {
   neutral: 'bg-text text-bg',
-  primary: 'bg-primary text-white',
-  accent: 'bg-accent text-bg',
+  primary: 'bg-primary text-on-primary',
+  accent: 'bg-accent text-on-accent',
   success: 'bg-success text-bg',
   danger: 'bg-danger text-white',
   muted: 'bg-muted text-bg',

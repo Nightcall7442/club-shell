@@ -120,7 +120,9 @@ function SlotPicker({ label, options, value, onChange, emptyText, format }: Slot
                 onClick={() => onChange(ms)}
                 className={clsx(
                   'focus-ring tnum h-11 min-w-[4.5rem] rounded-lg px-3 text-base font-semibold transition-colors duration-[var(--dur-fast)]',
-                  active ? 'bg-primary text-white shadow-[var(--shadow-glow)]' : 'glass text-text hover:bg-surface/80',
+                  active
+                    ? 'bg-primary text-on-primary shadow-[var(--shadow-glow)]'
+                    : 'glass text-text hover:bg-surface/80',
                 )}
               >
                 {format(d)}
@@ -372,7 +374,9 @@ export default function BookingScreen(): JSX.Element {
                 onClick={() => changeDate(d.key)}
                 className={clsx(
                   'focus-ring flex h-16 min-w-[6.5rem] shrink-0 flex-col items-center justify-center rounded-xl px-4 transition-colors duration-[var(--dur-fast)]',
-                  active ? 'bg-primary text-white shadow-[var(--shadow-glow)]' : 'glass text-text hover:bg-surface/80',
+                  active
+                    ? 'bg-primary text-on-primary shadow-[var(--shadow-glow)]'
+                    : 'glass text-text hover:bg-surface/80',
                 )}
               >
                 <span className="text-xs font-medium uppercase tracking-wide opacity-80">{label}</span>

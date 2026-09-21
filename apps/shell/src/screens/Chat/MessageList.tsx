@@ -113,7 +113,7 @@ function Bubble({ m, mine, showSender }: { m: ChatMessage; mine: boolean; showSe
         <div
           className={clsx(
             'whitespace-pre-wrap break-words rounded-2xl px-4 py-2.5 text-base leading-relaxed transition-opacity',
-            mine && 'rounded-br-sm bg-primary text-white shadow-[0_8px_24px_-12px_rgb(var(--c-primary)/0.8)]',
+            mine && 'rounded-br-sm bg-primary text-on-primary shadow-[0_8px_24px_-12px_rgb(var(--c-primary)/0.4)]',
             !mine && admin && 'glass rounded-bl-sm border-accent/40 text-text',
             !mine && !admin && 'glass rounded-bl-sm text-text',
             pending && 'opacity-60',
@@ -333,7 +333,7 @@ export function MessageList({
               data-nav="true"
               onClick={() => scrollToBottom(true)}
               aria-label={t('chat.scrollToLatest')}
-              className="focus-ring pointer-events-auto flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white shadow-[var(--shadow-glow)]"
+              className="focus-ring pointer-events-auto flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-on-primary shadow-[var(--shadow-glow)]"
             >
               <ArrowDownIcon />
               {t('chat.newMessages')}

@@ -2002,7 +2002,7 @@ cmd(
     if (path.length === 0) {
       mockError('validation', 'path is required', { field: 'path', reason: 'required' });
     }
-    if (/^(https?:|data:|blob:)/i.test(path)) {
+    if (/^(https?:|data:|blob:)/i.test(path) || path.startsWith('/')) {
       return path;
     }
     const base = path.split('/').pop() ?? path;
@@ -2010,6 +2010,9 @@ cmd(
     if (path.startsWith('themes/')) {
       if (/\.(mp4|webm)$/i.test(path)) {
         return 'https://cdn.jsdelivr.net/gh/mdn/interactive-examples@main/live-examples/media/examples/flower.webm';
+      }
+      if (seed === 'default-wallpaper') {
+        return '/mock-art/default-wallpaper.jpg';
       }
       return `https://picsum.photos/seed/${seed}/1920/1080`;
     }

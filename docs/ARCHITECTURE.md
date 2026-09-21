@@ -652,14 +652,14 @@ unless the key ends with `Ms`.
 {
   "version": 1,
   "name": "default",                              // must equal file name
-  "displayName": "ClubShell Default",
+  "displayName": "ClubShell Onyx",
   "colors": {                                     // all hex #RRGGBB or #RRGGBBAA
-    "bg": "#0B0F1A",
-    "surface": "#141A2B",
-    "primary": "#3B82F6",
-    "accent": "#22D3EE",
-    "text": "#F3F4F6",
-    "muted": "#8B93A7",
+    "bg": "#09090B",
+    "surface": "#151518",
+    "primary": "#F4F4F5",
+    "accent": "#F2B84B",
+    "text": "#FAFAFA",
+    "muted": "#8E8E96",
     "danger": "#EF4444",
     "success": "#22C55E"
   },
@@ -673,6 +673,7 @@ unless the key ends with `Ms`.
 ```
 
 Themes are applied by the Shell as CSS custom properties `--c-bg`, `--c-surface`, `--c-primary`,
-`--c-accent`, `--c-text`, `--c-muted`, `--c-danger`, `--c-success` (`R G B` triplets), `--radius`, `--font`,
-`--blur`; `tailwind.config.ts` maps the colours `bg`, `surface`, `primary`, `accent`, `text`, `muted`, `danger`,
-`success` to `rgb(var(--c-<name>) / <alpha-value>)`. See `THEMING.md`.
+`--c-accent`, `--c-text`, `--c-muted`, `--c-danger`, `--c-success` (`R G B` triplets), the derived contrast
+colours `--c-on-primary` / `--c-on-accent` (dark when the colour is light, white otherwise), `--radius`, `--font`,
+`--blur`; `tailwind.config.ts` maps the colours `bg`, `surface`, `primary`, `on-primary`, `accent`, `on-accent`,
+`text`, `muted`, `danger`, `success` to `rgb(var(--c-<name>) / <alpha-value>)`. See `THEMING.md`.

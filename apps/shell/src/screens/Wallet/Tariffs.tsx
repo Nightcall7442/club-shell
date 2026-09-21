@@ -322,14 +322,14 @@ export function TariffActionModal({
                       className={clsx(
                         'focus-ring tnum flex h-16 flex-col items-center justify-center rounded-lg text-base font-bold transition-colors duration-[var(--dur-fast)]',
                         active
-                          ? 'bg-primary text-white shadow-[0_8px_24px_-8px_rgb(var(--c-primary)/0.8)]'
+                          ? 'bg-primary text-on-primary shadow-[0_8px_24px_-8px_rgb(var(--c-primary)/0.4)]'
                           : 'glass text-text hover:bg-surface/80',
                       )}
                     >
                       <span>
                         {m} {t('common.min')}
                       </span>
-                      <span className={clsx('text-xs font-medium', active ? 'text-white/80' : 'text-muted')}>
+                      <span className={clsx('text-xs font-medium', active ? 'text-on-primary/70' : 'text-muted')}>
                         {formatMoney(tariffPriceFor(tariff, m), locale)}
                       </span>
                     </button>

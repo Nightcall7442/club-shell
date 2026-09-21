@@ -107,7 +107,9 @@ export function Cart({ onInsufficientFunds, className }: CartProps): JSX.Element
           </span>
           {t('shop.cart')}
           {count > 0 && (
-            <span className="tnum rounded-full bg-primary px-2 py-0.5 text-sm font-semibold text-white">{count}</span>
+            <span className="tnum rounded-full bg-primary px-2 py-0.5 text-sm font-semibold text-on-primary">
+              {count}
+            </span>
           )}
         </h2>
         {!empty && (

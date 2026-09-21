@@ -160,7 +160,7 @@ function Key({ label, onPress, wide = false, accent = false, active = false, ari
         'inline-flex h-[3.2rem] select-none items-center justify-center rounded-md text-lg font-semibold transition-colors duration-[var(--dur-fast)] active:scale-95',
         wide ? 'min-w-[5.5rem] px-4 text-base' : 'min-w-[3.2rem] px-2',
         accent ? 'bg-primary/25 text-text hover:bg-primary/40' : 'bg-text/10 text-text hover:bg-text/20',
-        active && 'bg-primary text-white hover:bg-primary',
+        active && 'bg-primary text-on-primary hover:bg-primary',
       )}
     >
       {label}

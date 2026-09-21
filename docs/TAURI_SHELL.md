@@ -434,7 +434,7 @@ Common symptoms:
 2. Add the lazy import and a route in `router.tsx → mainRoutes()` with a `RouteHandle { titleKey,
    feature? }`; wrap with `gated('<feature>', …)` when it is behind a `shell.json → features` flag.
 3. Add the title key (and any strings) to `i18n/en.json`, `ru.json`, `uz.json`.
-4. Add a sidebar entry in `components/layout/AppShell.tsx` (respect the same feature flag).
+4. Add a navigation entry to `NAV_ITEMS` in `screens/Desktop/NavBar.tsx` (respect the same feature flag).
 5. State: extend an existing store or add `store/<domain>.ts`, export it from `store/index.ts`, and if it
    reacts to Agent events, add the listener to `wireListeners()` (never inside a component).
 6. Gamepad/keyboard navigation: mark focusable elements with `data-nav="true"` and the `focus-ring` class.

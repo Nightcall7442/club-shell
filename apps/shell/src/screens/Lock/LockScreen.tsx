@@ -106,7 +106,7 @@ export function LanguageSwitcher({ className }: LanguageSwitcherProps): JSX.Elem
           onClick={() => void change(l)}
           className={clsx(
             'focus-ring h-10 min-w-[3.25rem] rounded-full px-3 text-sm font-bold uppercase tracking-wide transition-colors duration-[var(--dur-fast)]',
-            l === locale ? 'bg-primary text-white' : 'text-muted hover:bg-text/10 hover:text-text',
+            l === locale ? 'bg-primary text-on-primary' : 'text-muted hover:bg-text/10 hover:text-text',
           )}
         >
           {l}
@@ -442,7 +442,7 @@ export function StartSessionModal({ open, onStarted, onLogout }: StartSessionMod
                     onClick={() => setMinutes(m)}
                     className={clsx(
                       'focus-ring tnum h-11 rounded-full px-4 text-base font-semibold transition-colors duration-[var(--dur-fast)]',
-                      m === effectiveMinutes ? 'bg-primary text-white' : 'bg-text/10 text-text hover:bg-text/15',
+                      m === effectiveMinutes ? 'bg-primary text-on-primary' : 'bg-text/10 text-text hover:bg-text/15',
                     )}
                   >
                     {formatDurationSec(m * 60)}

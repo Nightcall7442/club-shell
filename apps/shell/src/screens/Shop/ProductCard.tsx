@@ -6,6 +6,7 @@ import { ORDER_MAX_QTY, type Product } from '@clubshell/contracts';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { useResolvedAsset } from '@/components/media/GameArtwork';
+import { tiltHandlers } from '@/hooks/useTilt';
 import { useLocale } from '@/hooks/useLocale';
 import { formatMoney } from '@/lib/format';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
@@ -64,8 +65,9 @@ export const ProductCard = memo(function ProductCard({
   return (
     <motion.article
       layout={animations}
+      {...tiltHandlers(4)}
       className={clsx(
-        'glass group relative flex flex-col overflow-hidden rounded-lg transition-[box-shadow,transform] duration-[var(--dur-fast)]',
+        'glass tilt group relative flex flex-col overflow-hidden rounded-lg transition-[box-shadow] duration-[var(--dur-fast)]',
         'focus-within:border-glow',
         !available && 'opacity-60',
         className,
@@ -76,6 +78,7 @@ export const ProductCard = memo(function ProductCard({
         className="relative aspect-[4/3] w-full overflow-hidden"
         style={{ background: `linear-gradient(135deg, hsl(${hue} 55% 28%), hsl(${(hue + 40) % 360} 60% 18%))` }}
       >
+        <span aria-hidden="true" className="tilt-sheen z-10" />
         {showImage ? (
           <img
             src={url}

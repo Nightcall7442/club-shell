@@ -46,7 +46,7 @@ export function allowedPresets(tariff: Tariff | null): number[] {
 // Ring
 // ---------------------------------------------------------------------------------------------------------------------
 
-interface RingProps {
+export interface RingProps {
   /** 0–1. */
   progress: number;
   size: number;
@@ -63,7 +63,7 @@ const RING_STROKE: Record<RingProps['tone'], string> = {
   muted: 'stroke-muted',
 };
 
-function Ring({ progress, size, stroke, tone, label, valueText }: RingProps): JSX.Element {
+export function Ring({ progress, size, stroke, tone, label, valueText }: RingProps): JSX.Element {
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const pct = Math.min(1, Math.max(0, progress));

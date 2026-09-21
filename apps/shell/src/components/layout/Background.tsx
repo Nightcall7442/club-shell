@@ -49,8 +49,8 @@ export function Background({ image, video, dim = 0.55, className }: BackgroundPr
           WebkitBackdropFilter: 'blur(calc(var(--blur) * 0.5))',
         }}
       />
-      <div className="absolute -left-[10%] -top-[20%] h-[60vh] w-[60vw] rounded-full bg-primary/15 blur-[120px]" />
-      <div className="absolute -bottom-[25%] -right-[10%] h-[55vh] w-[50vw] rounded-full bg-accent/10 blur-[140px]" />
+      <div className="absolute -left-[10%] -top-[20%] h-[60vh] w-[60vw] rounded-full bg-primary/[0.04] blur-[120px]" />
+      <div className="absolute -bottom-[25%] -right-[10%] h-[55vh] w-[50vw] rounded-full bg-accent/[0.05] blur-[140px]" />
     </div>
   );
 }

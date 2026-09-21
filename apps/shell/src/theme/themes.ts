@@ -13,14 +13,14 @@ export type ThemeDef = Theme;
 export const DEFAULT_THEME: Theme = {
   version: 1,
   name: 'default',
-  displayName: 'ClubShell Default',
+  displayName: 'ClubShell Onyx',
   colors: {
-    bg: '#0B0F1A',
-    surface: '#141A2B',
-    primary: '#3B82F6',
-    accent: '#22D3EE',
-    text: '#F3F4F6',
-    muted: '#8B93A7',
+    bg: '#09090B',
+    surface: '#151518',
+    primary: '#F4F4F5',
+    accent: '#F2B84B',
+    text: '#FAFAFA',
+    muted: '#8E8E96',
     danger: '#EF4444',
     success: '#22C55E',
   },
@@ -112,6 +112,24 @@ export function shade(hex: string, amount: number): string {
   return `#${to(r)}${to(g)}${to(b)}`;
 }
 
+/** WCAG relative luminance 0..1 of a hex colour (`0` for malformed input). */
+export function luminance(hex: string): number {
+  const rgb = hexToRgb(hex);
+  if (!rgb) {
+    return 0;
+  }
+  const [r, g, b] = rgb.split(' ').map((c) => {
+    const v = Number(c) / 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  }) as [number, number, number];
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** `true` when text on this colour should be dark (light primaries such as white buttons). */
+export function isLight(hex: string): boolean {
+  return luminance(hex) > 0.4;
+}
+
 /** Type guard for a `Theme` object read from JSON. */
 export function isTheme(value: unknown): value is Theme {
   if (typeof value !== 'object' || value === null) {
@@ -160,8 +178,14 @@ export function applyTheme(theme: Theme): void {
       root.style.setProperty(`--c-${key}`, rgb);
     }
   }
-  root.style.setProperty('--c-primary-hover', hexToRgb(shade(t.colors.primary, 0.12)) ?? '');
-  root.style.setProperty('--c-primary-active', hexToRgb(shade(t.colors.primary, -0.12)) ?? '');
+  // Light primaries (white buttons) darken on hover; dark ones lighten. Text on them flips likewise.
+  const dir = isLight(t.colors.primary) ? -1 : 1;
+  root.style.setProperty('--c-primary-hover', hexToRgb(shade(t.colors.primary, 0.1 * dir)) ?? '');
+  root.style.setProperty('--c-primary-active', hexToRgb(shade(t.colors.primary, 0.2 * dir)) ?? '');
+  for (const key of ['primary', 'accent'] as const) {
+    const on = isLight(t.colors[key]) ? t.colors.bg : '#FFFFFF';
+    root.style.setProperty(`--c-on-${key}`, hexToRgb(on) ?? '255 255 255');
+  }
   root.style.setProperty('--radius', `${t.radius}px`);
   root.style.setProperty('--font', `"${t.font.replace(/"/g, '')}"`);
   root.style.setProperty('--blur', `${t.blur}px`);

@@ -283,7 +283,7 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
                     className={clsx(
                       'focus-ring tnum h-14 rounded-lg text-base font-bold transition-colors duration-[var(--dur-fast)]',
                       active
-                        ? 'bg-primary text-white shadow-[0_8px_24px_-8px_rgb(var(--c-primary)/0.8)]'
+                        ? 'bg-primary text-on-primary shadow-[0_8px_24px_-8px_rgb(var(--c-primary)/0.4)]'
                         : 'glass text-text hover:bg-surface/80',
                     )}
                   >

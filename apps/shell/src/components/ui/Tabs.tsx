@@ -167,7 +167,7 @@ export function Tabs<K extends string = string>({
               variant === 'pills' && 'rounded-full',
               variant === 'pills' &&
                 (active
-                  ? 'bg-primary text-white shadow-[0_6px_20px_-6px_rgb(var(--c-primary)/0.8)]'
+                  ? 'bg-primary text-on-primary shadow-[0_6px_20px_-6px_rgb(var(--c-primary)/0.4)]'
                   : 'text-muted hover:bg-text/10 hover:text-text'),
               variant === 'underline' && '-mb-px border-b-2 rounded-t-md',
               variant === 'underline' &&

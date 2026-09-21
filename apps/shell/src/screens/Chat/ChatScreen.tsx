@@ -248,7 +248,7 @@ export default function ChatScreen(): JSX.Element {
                     <span
                       className={clsx(
                         'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg [&>svg]:h-5 [&>svg]:w-5',
-                        selected ? 'bg-primary text-white' : 'bg-surface/70',
+                        selected ? 'bg-primary text-on-primary' : 'bg-surface/70',
                       )}
                       aria-hidden="true"
                     >

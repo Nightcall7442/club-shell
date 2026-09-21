@@ -118,8 +118,8 @@ test.describe('games library', () => {
     await expect(grid(page).locator('[data-game-id][tabindex="0"]')).toHaveCount(1);
     await expect(card(page, CS2)).toHaveAttribute('aria-current', 'true');
 
-    // Installed / not installed badges come from the catalogue.
-    await expect(card(page, CS2).getByText(en('games.installed'), { exact: true })).toBeVisible();
+    // Installed is the default state (no badge); only "not installed" and "running" are marked.
+    await expect(card(page, CS2).getByText(en('games.installed'), { exact: true })).toHaveCount(0);
     await expect(card(page, FORZA).getByText(en('games.notInstalled'), { exact: true })).toBeVisible();
     await expect(hero(page, CS2).getByRole('button', { name: en('games.details') })).toBeVisible();
   });
@@ -238,7 +238,7 @@ test.describe('games library', () => {
     await expect(kill).toBeVisible();
     await expect(banner.getByRole('button', { name: en('games.playNow') })).toHaveCount(0);
 
-    // Kill: confirm dialog → the process is gone and the card returns to "Installed".
+    // Kill: confirm dialog → the process is gone and the card drops its "running" badge.
     await kill.click();
     const confirm = page.getByRole('dialog', { name: en('games.killTitle') });
     await expect(confirm).toBeVisible();
@@ -247,7 +247,6 @@ test.describe('games library', () => {
     await expect(confirm).toBeHidden();
     await expect(banner.getByRole('button', { name: en('games.playNow') })).toBeEnabled();
     await expect(card(page, CS2).getByText(en('games.running'), { exact: true })).toHaveCount(0);
-    await expect(card(page, CS2).getByText(en('games.installed'), { exact: true })).toBeVisible();
   });
 
   test('keyboard: ArrowRight moves between cards, Enter opens details', async ({ page }) => {

@@ -1,31 +1,27 @@
 /**
- * Home (`/home`): greeting, running-game banner, "continue playing" cover row, quick actions, promo strip
- * (ads playlist or tariffs), tournaments teaser and recent staff chat. Sections fade in with a small stagger.
+ * Home (`/home`): full-bleed game hero (`HomeHero`), then the promo strip (ads playlist or tariffs), tournaments
+ * teaser and recent staff chat. Sections fade in with a small stagger.
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import type { Game, Tournament } from '@clubshell/contracts';
-import { GameArtwork, useResolvedAsset } from '@/components/media/GameArtwork';
+import type { Tournament } from '@clubshell/contracts';
+import { useResolvedAsset } from '@/components/media/GameArtwork';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { Modal } from '@/components/ui/Modal';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { Spinner } from '@/components/ui/Spinner';
-import { collectNavigables, focusElement } from '@/hooks/useGamepad';
 import { useLocale } from '@/hooks/useLocale';
 import { useSession } from '@/hooks/useSession';
-import { formatDateTime, formatDurationSec, formatMoney, formatTime } from '@/lib/format';
+import { formatDateTime, formatMoney, formatTime } from '@/lib/format';
 import { log } from '@/lib/logger';
 import { api } from '@/lib/tauri';
-import { secondsSince } from '@/lib/time';
-import { QuickActions } from '@/screens/Desktop/QuickActions';
+import { HomeHero } from '@/screens/Desktop/HomeHero';
+import { LaunchOverlay } from '@/screens/Games/LaunchOverlay';
 import { isPendingMessage, selectActiveRoom, useChatStore } from '@/store/chat';
-import { selectFeaturedGames, selectRecentGames, selectRunningGame, useGamesStore } from '@/store/games';
-import { useNotificationsStore } from '@/store/notifications';
+import { useGamesStore } from '@/store/games';
 import { selectFeatures, useSettingsStore } from '@/store/settings';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
 import { useWalletStore } from '@/store/wallet';
@@ -33,17 +29,6 @@ import { useWalletStore } from '@/store/wallet';
 // ---------------------------------------------------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------------------------------------------------
-
-/** Greeting key by local hour. */
-export function greetingKey(
-  hour: number,
-): 'desktop.greetingMorning' | 'desktop.greetingDay' | 'desktop.greetingEvening' | 'desktop.greetingNight' {
-  if (hour < 5) return 'desktop.greetingNight';
-  if (hour < 12) return 'desktop.greetingMorning';
-  if (hour < 18) return 'desktop.greetingDay';
-  if (hour < 23) return 'desktop.greetingEvening';
-  return 'desktop.greetingNight';
-}
 
 interface SectionProps {
   title: string;
@@ -73,183 +58,6 @@ function Section({ title, action, children, className, index = 0 }: SectionProps
       </div>
       {children}
     </motion.section>
-  );
-}
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Running game banner
-// ---------------------------------------------------------------------------------------------------------------------
-
-export function RunningGameBanner(): JSX.Element | null {
-  const { t } = useTranslation();
-  const running = useGamesStore(selectRunningGame);
-  const launching = useGamesStore((s) => s.launching);
-  const kill = useGamesStore((s) => s.kill);
-  const push = useNotificationsStore((s) => s.push);
-  const pushError = useNotificationsStore((s) => s.pushError);
-  const [confirm, setConfirm] = useState(false);
-  const [killing, setKilling] = useState(false);
-  const [, setTick] = useState(0);
-
-  useEffect(() => {
-    if (!running) {
-      return undefined;
-    }
-    const id = setInterval(() => setTick((n) => n + 1), 1000);
-    return () => clearInterval(id);
-  }, [running]);
-
-  if (!running && !launching) {
-    return null;
-  }
-
-  const onKill = async (): Promise<void> => {
-    if (!running) {
-      return;
-    }
-    setKilling(true);
-    try {
-      await kill(running.gameId);
-      push({ title: t('games.killed'), level: 'info', ttlSec: 4, source: 'local' });
-      setConfirm(false);
-    } catch (e) {
-      pushError(e, t('games.killTitle'));
-    } finally {
-      setKilling(false);
-    }
-  };
-
-  return (
-    <div role="status" className="glass flex items-center gap-4 rounded-xl px-5 py-3">
-      {running ? (
-        <Badge tone="success" live>
-          {t('games.running')}
-        </Badge>
-      ) : (
-        <Spinner size="sm" />
-      )}
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-lg font-bold text-text">
-          {running
-            ? t('desktop.gameRunning', { title: running.title })
-            : t('games.launchTitle', { title: launching?.title ?? '' })}
-        </div>
-        <div className="truncate text-sm text-muted">
-          {running
-            ? t('desktop.runningSince', {
-                duration: formatDurationSec(secondsSince(running.startedAt), { compact: true }),
-              })
-            : t('games.launching')}
-        </div>
-      </div>
-      {running && (
-        <Button variant="secondary" onClick={() => setConfirm(true)}>
-          {t('games.kill')}
-        </Button>
-      )}
-      <Modal
-        open={confirm}
-        onClose={() => setConfirm(false)}
-        title={t('games.killTitle')}
-        description={t('games.killConfirm', { title: running?.title ?? '' })}
-        size="sm"
-        danger
-        footer={
-          <>
-            <Button variant="ghost" size="lg" onClick={() => setConfirm(false)} disabled={killing}>
-              {t('common.cancel')}
-            </Button>
-            <Button variant="danger" size="lg" loading={killing} onClick={() => void onKill()}>
-              {t('games.kill')}
-            </Button>
-          </>
-        }
-      />
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Continue playing (cover row)
-// ---------------------------------------------------------------------------------------------------------------------
-
-export function GameCoverCard({ game, priority = false }: { game: Game; priority?: boolean }): JSX.Element {
-  const { t } = useTranslation();
-  const navigate = useNavigate();
-  const { locale } = useLocale();
-  return (
-    <button
-      type="button"
-      data-nav="true"
-      aria-label={game.title}
-      onClick={() => navigate(`/games/${game.id}`)}
-      className="focus-ring group flex w-[var(--card-cover-w)] shrink-0 flex-col gap-2 rounded-lg text-left"
-    >
-      <GameArtwork
-        src={game.coverUrl}
-        title={game.title}
-        priority={priority}
-        className="shadow-[var(--shadow-card)] transition-transform duration-[var(--dur-base)] group-hover:scale-[1.03] group-focus-visible:scale-[1.03]"
-        overlay={
-          <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 bg-gradient-to-t from-bg/90 to-transparent p-3">
-            {game.installed ? (
-              <Badge tone="primary" size="sm" solid>
-                {t('games.launch')}
-              </Badge>
-            ) : (
-              <Badge tone="muted" size="sm">
-                {t('games.notInstalled')}
-              </Badge>
-            )}
-          </div>
-        }
-      />
-      <span className="truncate text-base font-semibold text-text">{game.title}</span>
-      <span className="truncate text-sm text-muted">
-        {game.lastPlayedAt ? formatDateTime(game.lastPlayedAt, locale) : t('games.neverPlayed')}
-      </span>
-    </button>
-  );
-}
-
-export function ContinuePlaying({ index }: { index: number }): JSX.Element {
-  const { t } = useTranslation();
-  const navigate = useNavigate();
-  const status = useGamesStore((s) => s.status);
-  const recent = useGamesStore(selectRecentGames);
-  const featured = useGamesStore(selectFeaturedGames);
-  const games = recent.length > 0 ? recent : featured;
-  const title = recent.length > 0 ? t('desktop.continuePlaying') : t('desktop.popular');
-
-  return (
-    <Section title={title} index={index} action={{ label: t('desktop.seeAll'), onClick: () => navigate('/games') }}>
-      <div
-        role="list"
-        aria-label={title}
-        className="no-scrollbar -mx-1 flex gap-[var(--gap)] overflow-x-auto px-1 pb-2"
-      >
-        {status === 'loading' && games.length === 0
-          ? Array.from({ length: 6 }, (_, i) => (
-              <div key={i} role="listitem" className="w-[var(--card-cover-w)] shrink-0">
-                <Skeleton variant="cover" />
-                <Skeleton variant="text" className="mt-2" width="80%" />
-              </div>
-            ))
-          : games.map((g, i) => (
-              <div key={g.id} role="listitem">
-                <GameCoverCard game={g} priority={i < 4} />
-              </div>
-            ))}
-        {status !== 'loading' && games.length === 0 && (
-          <div className="glass flex w-full flex-col items-start gap-3 rounded-xl p-6">
-            <p className="text-base text-muted">{t('games.empty')}</p>
-            <Button variant="secondary" onClick={() => navigate('/games')}>
-              {t('desktop.allGames')}
-            </Button>
-          </div>
-        )}
-      </div>
-    </Section>
   );
 }
 
@@ -502,50 +310,24 @@ export function RecentChat({ index }: { index: number }): JSX.Element {
 // ---------------------------------------------------------------------------------------------------------------------
 
 export default function DesktopScreen(): JSX.Element {
-  const { t } = useTranslation();
-  const { user } = useSession();
   const features = useSettingsStore(selectFeatures);
-  const root = useRef<HTMLDivElement>(null);
-
-  // Initial focus for keyboard/gamepad users: the first navigable tile when nothing else holds focus.
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => {
-      const active = document.activeElement;
-      if (root.current && (active === null || active === document.body || active.id === 'main')) {
-        const first = collectNavigables(root.current)[0];
-        if (first) {
-          focusElement(first);
-        }
-      }
-    });
-    return () => cancelAnimationFrame(frame);
-  }, []);
-
-  const name = user?.displayName ?? '';
-  const greeting = t(greetingKey(new Date().getHours()), { name });
 
   return (
-    <div ref={root} className="mx-auto flex w-full max-w-[1800px] flex-col gap-[calc(var(--gap)*1.5)]">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold leading-tight text-text">{greeting}</h1>
-          <p className="text-base text-muted">{t('desktop.welcomeBack')}</p>
+    <div className="flex w-full flex-col gap-[calc(var(--gap)*1.5)]">
+      <HomeHero />
+      <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-[calc(var(--gap)*1.5)]">
+        <PromoStrip index={1} />
+        <div
+          className={clsx(
+            'grid gap-[calc(var(--gap)*1.5)]',
+            features.tournaments && features.chat ? 'grid-cols-1 2xl:grid-cols-2' : 'grid-cols-1',
+          )}
+        >
+          {features.tournaments && <TournamentsTeaser index={2} />}
+          {features.chat && <RecentChat index={3} />}
         </div>
-      </header>
-
-      <RunningGameBanner />
-      <ContinuePlaying index={1} />
-      <QuickActions />
-      <PromoStrip index={3} />
-      <div
-        className={clsx(
-          'grid gap-[calc(var(--gap)*1.5)]',
-          features.tournaments && features.chat ? 'grid-cols-1 2xl:grid-cols-2' : 'grid-cols-1',
-        )}
-      >
-        {features.tournaments && <TournamentsTeaser index={4} />}
-        {features.chat && <RecentChat index={5} />}
       </div>
+      <LaunchOverlay />
     </div>
   );
 }
