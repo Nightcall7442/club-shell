@@ -40,6 +40,26 @@
 
 ---
 
+## Как выглядит
+
+<div align="center">
+
+<img src="docs/img/02-home.jpg" alt="Главная" width="100%">
+
+| Вход | Игры | Магазин |
+|:---:|:---:|:---:|
+| <img src="docs/img/01-lock.jpg" alt="Экран входа"> | <img src="docs/img/03-games.jpg" alt="Каталог игр"> | <img src="docs/img/04-shop.jpg" alt="Магазин"> |
+| **Кошелёк** | **Чат** | **Бронь мест** |
+| <img src="docs/img/05-wallet.jpg" alt="Кошелёк и тарифы"> | <img src="docs/img/06-chat.jpg" alt="Чат с администратором"> | <img src="docs/img/07-booking.jpg" alt="Карта зала"> |
+| **Турниры** | **Профиль** | **Простой** |
+| <img src="docs/img/08-tournaments.jpg" alt="Турниры"> | <img src="docs/img/09-profile.jpg" alt="Профиль"> | <img src="docs/img/10-idle.jpg" alt="Экран простоя"> |
+
+</div>
+
+Снимки сделаны в mock-режиме (`VITE_MOCK=1`), 1920×1080, тема `default`; обложки игр — заглушки.
+
+---
+
 ## Какую задачу решает
 
 Компьютерный клуб зарабатывает на минутах, а теряет их в четырёх местах:
