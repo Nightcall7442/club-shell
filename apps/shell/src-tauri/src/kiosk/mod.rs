@@ -118,7 +118,7 @@ pub struct Kiosk {
 /// Agent event bridge. Call once from `setup`.
 pub fn spawn_all(app: &AppHandle, state: &AppState) -> anyhow::Result<Arc<Kiosk>> {
     let kiosk = Kiosk::start(app, &state.config, Vec::new())?;
-    let control: Arc<dyn KioskControl> = Arc::clone(&kiosk);
+    let control: Arc<dyn KioskControl> = kiosk.clone();
     state.set_kiosk(control);
     match Tray::install(app, state.clone()) {
         Ok(tray) => *kiosk.tray.lock() = Some(tray),
