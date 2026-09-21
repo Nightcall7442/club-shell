@@ -92,6 +92,7 @@ export const GameArtwork = forwardRef<HTMLDivElement, GameArtworkProps>(function
       style={{ aspectRatio: ratio, ...style }}
       {...rest}
     >
+      {showSkeleton && <Skeleton variant="rect" className="absolute inset-0 h-full w-full rounded-none" />}
       {url && !showFallback && (
         <img
           ref={img}
@@ -103,13 +104,13 @@ export const GameArtwork = forwardRef<HTMLDivElement, GameArtworkProps>(function
           onLoad={() => setLoaded(true)}
           onError={() => setFailed(true)}
           className={clsx(
-            'absolute inset-0 h-full w-full transition-opacity duration-[var(--dur-slow)]',
+            // Blur-up: progressive JPEG scans show through a blur, then the image snaps to focus once complete.
+            'absolute inset-0 h-full w-full transition-[filter,transform] duration-[600ms] ease-[var(--ease-out)]',
             fit === 'cover' ? 'object-cover' : 'object-contain',
-            loaded ? 'opacity-100' : 'opacity-0',
+            loaded ? 'blur-0 scale-100' : 'blur-xl scale-105',
           )}
         />
       )}
-      {showSkeleton && <Skeleton variant="rect" className="absolute inset-0 h-full w-full rounded-none" />}
       {showFallback && (
         <div
           role="img"

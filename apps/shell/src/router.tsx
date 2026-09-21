@@ -321,23 +321,45 @@ export function OverlayScreen(): JSX.Element | null {
     );
   }
 
+  // Broadcast lower-third over the running game: a colour bar, the minutes left as the hero number, one line of copy.
   const m = overlayMessage(state.payload, t);
+  const rawMinutes = asRecord(state.payload)['minutesLeft'];
+  const minutes = typeof rawMinutes === 'number' ? rawMinutes : null;
+  const tone =
+    m.level === 'info' ? 'primary' : m.level === 'warning' ? 'accent' : m.level === 'error' ? 'danger' : 'success';
   return (
-    <div className="pointer-events-none fixed inset-0">
+    <div className="pointer-events-none fixed inset-x-0 bottom-[7vh] flex justify-center px-[var(--gutter)]">
       <div
         role={m.level === 'error' ? 'alert' : 'status'}
-        className="anim-toast-in glass-strong absolute right-8 top-8 flex w-[min(34rem,40vw)] flex-col gap-2 rounded-[var(--radius)] border-l-4 px-6 py-5 shadow-glow"
+        className="anim-toast-in glass-strong relative flex w-[min(56rem,80vw)] items-center gap-6 overflow-hidden rounded-2xl py-5 pl-8 pr-7"
         style={{
-          borderLeftColor: `rgb(var(--c-${m.level === 'info' ? 'primary' : m.level === 'warning' ? 'accent' : m.level === 'error' ? 'danger' : 'success'}))`,
+          boxShadow: `inset 0 1px 0 rgb(var(--c-text) / 0.08), 0 30px 80px -24px rgb(0 0 0 / 0.9), 0 0 0 1px rgb(var(--c-${tone}) / 0.25)`,
         }}
       >
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-[var(--fs-lg)] font-semibold text-text">{m.title}</p>
-          <Badge tone={levelTone(m.level)} size="sm">
-            {t(`notifications.${m.level}`)}
-          </Badge>
+        <span
+          aria-hidden="true"
+          className="absolute inset-y-0 left-0 w-1.5"
+          style={{ background: `rgb(var(--c-${tone}))` }}
+        />
+        {minutes !== null && (
+          <span
+            aria-hidden="true"
+            className={clsx(
+              'tnum shrink-0 text-[4.5rem] font-black leading-none tracking-tight',
+              minutes <= 1 && 'timer-critical',
+            )}
+            style={{ color: `rgb(var(--c-${tone}))` }}
+          >
+            {Math.max(0, minutes)}
+          </span>
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">{m.title}</p>
+          <p className="mt-1 truncate text-[var(--fs-xl)] font-bold leading-tight text-text">{m.body || m.title}</p>
         </div>
-        {m.body ? <p className="text-[var(--fs-base)] text-text/85">{m.body}</p> : null}
+        <Badge tone={levelTone(m.level)} size="sm" className="shrink-0">
+          {t(`notifications.${m.level}`)}
+        </Badge>
       </div>
     </div>
   );

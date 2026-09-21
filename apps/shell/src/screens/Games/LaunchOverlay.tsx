@@ -14,6 +14,7 @@ import { ProgressBar } from '@/components/ui/ProgressBar';
 import { Spinner } from '@/components/ui/Spinner';
 import { useGamepad } from '@/hooks/useGamepad';
 import i18n from '@/i18n';
+import { chime } from '@/lib/sound';
 import { toShellApiError } from '@/lib/tauri';
 import { useGamesStore } from '@/store/games';
 import { describeError, useNotificationsStore } from '@/store/notifications';
@@ -197,6 +198,7 @@ export function LaunchOverlay(): JSX.Element {
     if (phase !== 'running') {
       return undefined;
     }
+    chime();
     const id = setTimeout(() => setView(null), RUNNING_LINGER_MS);
     return () => clearTimeout(id);
   }, [phase]);

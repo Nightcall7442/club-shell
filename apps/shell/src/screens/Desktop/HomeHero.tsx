@@ -18,6 +18,7 @@ import { useImageTint } from '@/hooks/useImageTint';
 import { useLocale } from '@/hooks/useLocale';
 import { useSession } from '@/hooks/useSession';
 import { tiltHandlers } from '@/hooks/useTilt';
+import { whoosh } from '@/lib/sound';
 import { formatGb, formatMoney } from '@/lib/format';
 import { log } from '@/lib/logger';
 import { api } from '@/lib/tauri';
@@ -108,6 +109,7 @@ function PosterTile({
   running: boolean;
   onSelect: (game: Game) => void;
 }): JSX.Element {
+  const animations = useThemeStore(selectAnimationsEnabled);
   return (
     <button
       type="button"
@@ -122,11 +124,19 @@ function PosterTile({
       className={clsx(
         'focus-ring tilt relative shrink-0 overflow-hidden rounded-lg transition-[opacity,box-shadow] duration-[var(--dur-base)] ease-[var(--ease-out)]',
         TILE_W,
-        selected ? 'border-glow opacity-100 [--zoom:1.06]' : 'opacity-55 hover:opacity-100',
+        selected ? 'opacity-100 [--zoom:1.06]' : 'opacity-55 hover:opacity-100',
       )}
     >
       <GameArtwork src={game.coverUrl} title={game.title} kind="cover" priority className="rounded-lg" />
       <span aria-hidden="true" className="tilt-sheen rounded-lg" />
+      {selected && (
+        <motion.span
+          layoutId="home-strip-ring"
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 rounded-lg border-glow"
+          transition={animations ? { type: 'spring', stiffness: 480, damping: 40, mass: 0.7 } : { duration: 0 }}
+        />
+      )}
       {running && (
         <span
           aria-hidden="true"
@@ -353,6 +363,16 @@ export function HomeHero(): JSX.Element {
       transition: { duration: animations ? 0.5 : 0, ease: [0.16, 1, 0.3, 1] },
     },
   };
+
+  // A whoosh when the hero changes by hand (not on first paint).
+  const lastHeroId = useRef<string | null>(null);
+  useEffect(() => {
+    const id = hero?.id ?? null;
+    if (lastHeroId.current !== null && id !== null && id !== lastHeroId.current) {
+      whoosh();
+    }
+    lastHeroId.current = id;
+  }, [hero?.id]);
 
   // Initial focus for keyboard/gamepad users: Play, unless something else already holds focus.
   useEffect(() => {

@@ -5,6 +5,7 @@ import { Background } from '@/components/layout/Background';
 import { NotificationCenter } from '@/components/layout/NotificationCenter';
 import { VirtualKeyboard } from '@/components/ui/VirtualKeyboard';
 import { trackScreen } from '@/lib/analytics';
+import { press, tick } from '@/lib/sound';
 import { TopBar } from '@/screens/Desktop/TopBar';
 import { useThemeStore } from '@/store/theme';
 
@@ -24,6 +25,33 @@ export function AppShell(): JSX.Element {
   useEffect(() => {
     trackScreen(location.pathname);
   }, [location.pathname]);
+
+  // UI sounds: one tick per `data-nav` element entered by pointer or keyboard, a press on activation.
+  useEffect(() => {
+    let last: Element | null = null;
+    const enter = (target: EventTarget | null): void => {
+      const el = target instanceof Element ? target.closest('[data-nav]') : null;
+      if (el && el !== last) {
+        last = el;
+        tick();
+      }
+    };
+    const onOver = (e: PointerEvent): void => enter(e.target);
+    const onFocus = (e: FocusEvent): void => enter(e.target);
+    const onDown = (e: PointerEvent): void => {
+      if (e.target instanceof Element && e.target.closest('[data-nav]')) {
+        press();
+      }
+    };
+    document.addEventListener('pointerover', onOver, { passive: true });
+    document.addEventListener('focusin', onFocus);
+    document.addEventListener('pointerdown', onDown, { passive: true });
+    return () => {
+      document.removeEventListener('pointerover', onOver);
+      document.removeEventListener('focusin', onFocus);
+      document.removeEventListener('pointerdown', onDown);
+    };
+  }, []);
 
   return (
     <div className="relative h-full w-full overflow-hidden">
