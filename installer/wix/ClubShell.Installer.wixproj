@@ -1,0 +1,121 @@
+<Project Sdk="WixToolset.Sdk/5.0.1">
+
+  <!--
+    ClubShell installer (WiX v5). One project, two configurations:
+
+      dotnet build installer/wix/ClubShell.Installer.wixproj -c Release -p:Version=1.2.3
+          -> bin/Release/ClubShell.msi          (Product.wxs + Components.wxs + Service.wxs + Shortcuts.wxs)
+          -> bin/Bundle/ClubShellSetup.exe      (built automatically afterwards, see BuildBundleAfterPackage;
+                                                 pass -p:BuildBundle=false to get the MSI only)
+
+      dotnet build installer/wix/ClubShell.Installer.wixproj -c Bundle -p:Version=1.2.3
+          -> bin/Bundle/ClubShellSetup.exe      (Bundle.wxs only; needs bin/Release/ClubShell.msi from a Release build)
+
+    Inputs (override with -p:Name=Value; the defaults are where a plain `dotnet publish src/ClubShell.Agent` and
+    `pnpm tauri build` leave their output; tools/scripts/package.ps1 and .github/workflows/release.yml pass them explicitly):
+      AgentPublishDir   dotnet publish output of src/ClubShell.Agent (ClubShellAgent.exe, e_sqlite3.dll, appsettings.json)
+      ShellBundleDir    cargo/tauri release output containing clubshell-shell.exe
+      Version           x.y.z (pre-release / build metadata is stripped for the MSI ProductVersion)
+      MsiPath           the MSI the bundle chains (Bundle configuration; defaults to bin\Release\ClubShell.msi)
+      Dotnet* / WebView2*  remote prerequisite payloads of the bundle; when refreshing them pass the new
+                        size / SHA-512 / file version (the SHA-512 must match the file at the URL).
+
+    Expected validation output: one ICE03 "string overflow" warning for SetCA_SeedAgentConfig (inline PowerShell
+    command line longer than the 255 characters ICE validates; Windows Installer does not enforce that width).
+  -->
+
+  <PropertyGroup>
+    <Configurations>Debug;Release;Bundle</Configurations>
+    <Platform>x64</Platform>
+    <Platforms>x64</Platforms>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <Version Condition="'$(Version)' == ''">1.0.0</Version>
+    <RepoRoot Condition="'$(RepoRoot)' == ''">$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '..', '..'))</RepoRoot>
+
+    <!-- Explicit source list per configuration (no default **/*.wxs glob). -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+    <IntermediateOutputPath>obj\$(Configuration)\</IntermediateOutputPath>
+    <SuppressIces></SuppressIces>
+    <!-- Directory.Build.props sets TreatWarningsAsErrors for the C# projects; WiX/ICE warnings are reported, not fatal. -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <SuppressPdbOutput>false</SuppressPdbOutput>
+    <DefaultCompressionLevel>high</DefaultCompressionLevel>
+    <BuildBundle Condition="'$(BuildBundle)' == ''">true</BuildBundle>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Version normalisation">
+    <!-- 1.2.3-beta.1+sha -> 1.2.3 : Windows Installer only accepts numeric major.minor.build. -->
+    <MsiVersion>$(Version)</MsiVersion>
+    <MsiVersion Condition="$(MsiVersion.Contains('+'))">$(MsiVersion.Substring(0, $(MsiVersion.IndexOf('+'))))</MsiVersion>
+    <MsiVersion Condition="$(MsiVersion.Contains('-'))">$(MsiVersion.Substring(0, $(MsiVersion.IndexOf('-'))))</MsiVersion>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Input locations">
+    <AgentPublishDir Condition="'$(AgentPublishDir)' == ''">$(RepoRoot)artifacts\publish\ClubShell.Agent\release_win-x64</AgentPublishDir>
+    <ShellBundleDir Condition="'$(ShellBundleDir)' == ''">$(RepoRoot)target\x86_64-pc-windows-msvc\release</ShellBundleDir>
+    <ConfigDir Condition="'$(ConfigDir)' == ''">$(RepoRoot)config</ConfigDir>
+    <AgentScriptsDir Condition="'$(AgentScriptsDir)' == ''">$(RepoRoot)src\ClubShell.Agent\Install</AgentScriptsDir>
+    <IconDir Condition="'$(IconDir)' == ''">$(RepoRoot)apps\shell\src-tauri\icons</IconDir>
+    <MsiPath Condition="'$(MsiPath)' == ''">$(MSBuildProjectDirectory)\bin\Release\ClubShell.msi</MsiPath>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Bundle prerequisites (remote payloads)">
+    <!-- .NET 8 runtime (framework-dependent Agent). Fixed, versioned URL; values verified against the published file. -->
+    <DotnetRuntimeVersion Condition="'$(DotnetRuntimeVersion)' == ''">8.0.8</DotnetRuntimeVersion>
+    <DotnetRuntimeFileVersion Condition="'$(DotnetRuntimeFileVersion)' == ''">8.0.8.33916</DotnetRuntimeFileVersion>
+    <DotnetRuntimeUrl Condition="'$(DotnetRuntimeUrl)' == ''">https://builds.dotnet.microsoft.com/dotnet/Runtime/8.0.8/dotnet-runtime-8.0.8-win-x64.exe</DotnetRuntimeUrl>
+    <DotnetRuntimeSha512 Condition="'$(DotnetRuntimeSha512)' == ''">57f2a276176661a340b96991b584bcb81ba3c0150e3684cb109b29cc3a8ebe6fdf1e586d948d498e7aaf22f7401c1cc94062c13cffd20999771ecc5dfc2e917e</DotnetRuntimeSha512>
+    <DotnetRuntimeSize Condition="'$(DotnetRuntimeSize)' == ''">28703680</DotnetRuntimeSize>
+    <!-- WebView2 Evergreen bootstrapper (Tauri shell). Microsoft re-publishes this file under the same fwlink, so
+         the hash drifts: re-download it and pass the new WebView2Size / WebView2Sha512 / WebView2FileVersion. -->
+    <WebView2Url Condition="'$(WebView2Url)' == ''">https://go.microsoft.com/fwlink/p/?LinkId=2124703</WebView2Url>
+    <WebView2FileVersion Condition="'$(WebView2FileVersion)' == ''">1.3.271.7</WebView2FileVersion>
+    <WebView2Sha512 Condition="'$(WebView2Sha512)' == ''">88f03872daa90d4c272bf4a3105e059fd2056a2511de8d851b0e0b7540ec877e84c3a9c380006c6473222bc72e0b0adc2b74c287f2ef1d43263e3878c2776a57</WebView2Sha512>
+    <WebView2Size Condition="'$(WebView2Size)' == ''">1844944</WebView2Size>
+  </PropertyGroup>
+
+  <!-- MSI (Debug / Release) -->
+  <PropertyGroup Condition="'$(Configuration)' != 'Bundle'">
+    <OutputType>Package</OutputType>
+    <OutputName>ClubShell</OutputName>
+    <DefineConstants>$(DefineConstants);Version=$(MsiVersion);AgentPublishDir=$(AgentPublishDir);ShellBundleDir=$(ShellBundleDir);ConfigDir=$(ConfigDir);AgentScriptsDir=$(AgentScriptsDir);IconDir=$(IconDir);DotnetRuntimeVersion=$(DotnetRuntimeVersion)</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(Configuration)' != 'Bundle'">
+    <Compile Include="Product.wxs" />
+    <Compile Include="Components.wxs" />
+    <Compile Include="Service.wxs" />
+    <Compile Include="Shortcuts.wxs" />
+  </ItemGroup>
+
+  <!-- Bundle -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Bundle'">
+    <OutputType>Bundle</OutputType>
+    <OutputName>ClubShellSetup</OutputName>
+    <DefineConstants>$(DefineConstants);Version=$(MsiVersion);MsiPath=$(MsiPath);IconDir=$(IconDir);DotnetRuntimeVersion=$(DotnetRuntimeVersion);DotnetRuntimeFileVersion=$(DotnetRuntimeFileVersion);DotnetRuntimeUrl=$(DotnetRuntimeUrl);DotnetRuntimeSha512=$(DotnetRuntimeSha512);DotnetRuntimeSize=$(DotnetRuntimeSize);WebView2Url=$(WebView2Url);WebView2FileVersion=$(WebView2FileVersion);WebView2Sha512=$(WebView2Sha512);WebView2Size=$(WebView2Size)</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(Configuration)' == 'Bundle'">
+    <Compile Include="Bundle.wxs" />
+  </ItemGroup>
+
+  <!-- Extensions are referenced unconditionally so a single restore serves both configurations. -->
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Util.wixext" Version="5.0.1" />
+    <PackageReference Include="WixToolset.Firewall.wixext" Version="5.0.1" />
+    <PackageReference Include="WixToolset.UI.wixext" Version="5.0.1" />
+    <PackageReference Include="WixToolset.BootstrapperApplications.wixext" Version="5.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="License.rtf" />
+  </ItemGroup>
+
+  <!-- Release build chains the bundle build (same assets file, so no second restore is needed). The MSI just
+       built ($(TargetPath)) is chained, so this also works when the Release build was given -o. -->
+  <Target Name="BuildBundleAfterPackage" AfterTargets="Build" Condition="'$(Configuration)' == 'Release' and '$(BuildBundle)' == 'true'">
+    <MSBuild Projects="$(MSBuildProjectFullPath)"
+             Targets="Build"
+             Properties="Configuration=Bundle;Platform=$(Platform);Version=$(Version);MsiPath=$(TargetPath);IconDir=$(IconDir);BuildBundle=false" />
+  </Target>
+
+</Project>

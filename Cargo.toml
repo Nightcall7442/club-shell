@@ -1,0 +1,82 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/protocol",
+  "crates/winutil",
+  "apps/shell/src-tauri",
+  "tests/shell-rs",
+]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+rust-version = "1.80"
+authors = ["ClubShell"]
+
+# Single place that pins every third-party crate. Members use `<crate>.workspace = true`
+# (additional `features` in a member are additive).
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+thiserror = "1"
+anyhow = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
+parking_lot = "0.12"
+futures = "0.3"
+bytes = "1"
+gilrs = "0.10"
+
+windows = { version = "0.58", features = [
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Input",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Input_XboxController",
+  "Win32_UI_Shell",
+  "Win32_UI_Accessibility",
+  "Win32_UI_HiDpi",
+  "Win32_Graphics_Gdi",
+  "Win32_Graphics_Dwm",
+  "Win32_System_Threading",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Pipes",
+  "Win32_System_IO",
+  "Win32_Storage_FileSystem",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_System_SystemInformation",
+  "Win32_System_Console",
+  "Win32_System_Diagnostics_Debug",
+  "Win32_System_RemoteDesktop",
+  "Win32_System_Shutdown",
+  "Win32_System_Power",
+  "Win32_System_ProcessStatus",
+  "Win32_Media_Audio",
+  "Win32_System_Com",
+] }
+
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-build = { version = "2", features = [] }
+tauri-plugin-log = "2"
+tauri-plugin-process = "2"
+tauri-plugin-os = "2"
+
+clubshell-protocol = { path = "crates/protocol" }
+clubshell-winutil = { path = "crates/winutil" }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+opt-level = 3
+
+# Debug info for workspace crates only; third-party dependencies compile faster without it.
+[profile.dev.package."*"]
+debug = false

@@ -1,0 +1,21 @@
+[package]
+name = "clubshell-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Rust mirror of ClubShell.Contracts: IPC envelope/framing, server API and domain DTOs (serde, camelCase)"
+publish = false
+
+[lib]
+name = "clubshell_protocol"
+path = "src/lib.rs"
+
+[dependencies]
+serde.workspace = true
+# `preserve_order`: opaque `Value` payloads (WsFrame.payload, IpcError.details, ...) must round-trip byte-for-byte
+# (see `server_command_from_ws_frame_matches_server_api_example`); the default BTreeMap would re-sort keys.
+serde_json = { workspace = true, features = ["preserve_order"] }
+chrono.workspace = true
+uuid.workspace = true
+thiserror.workspace = true

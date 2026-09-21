@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Reflects over ClubShell.Contracts and emits the TypeScript (packages/contracts-ts) and Rust (crates/protocol) mirrors. -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>ContractsGen</AssemblyName>
+    <RootNamespace>ContractsGen</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/ClubShell.Contracts/ClubShell.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

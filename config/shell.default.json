@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "locale": "ru",
+  "theme": "default",
+  "ipc": {
+    "pipeName": "clubshell-agent",
+    "connectTimeoutMs": 3000,
+    "requestTimeoutMs": 15000,
+    "reconnectMinMs": 500,
+    "reconnectMaxMs": 5000
+  },
+  "kiosk": {
+    "fullscreen": true,
+    "topmostGuard": true,
+    "hideTaskbar": true,
+    "blockAltTab": true,
+    "blockWinKey": true,
+    "blockCtrlAltDel": false,
+    "hideCursorAfterSec": 0,
+    "overlayOnLock": true,
+    "allowVirtualKeyboard": true,
+    "exitHotkey": "Ctrl+Alt+Shift+F12",
+    "adminPinHash": null
+  },
+  "idle": {
+    "timeoutSec": 300,
+    "dimAfterSec": 120,
+    "screensaverAfterSec": 600
+  },
+  "ads": {
+    "enabled": true,
+    "intervalSec": 900,
+    "durationSec": 15,
+    "playlist": []
+  },
+  "gamepad": {
+    "enabled": true,
+    "pollMs": 16,
+    "deadzone": 0.25,
+    "navigation": true
+  },
+  "monitors": {
+    "primaryIndex": 0,
+    "secondaryMode": "black"
+  },
+  "ui": {
+    "defaultRoute": "/home",
+    "gridColumns": 5,
+    "showClock": true,
+    "clockFormat": "HH:mm",
+    "showMetricsOverlay": false,
+    "showSessionBar": true,
+    "coverAspect": "2:3",
+    "currencyFormat": { "locale": "uz-UZ", "minorDigits": 0 }
+  },
+  "features": {
+    "shop": true,
+    "chat": true,
+    "booking": true,
+    "tournaments": true,
+    "profile": true,
+    "topup": true,
+    "apps": true,
+    "callAdmin": true
+  },
+  "sound": { "uiSounds": true, "defaultVolume": 60 },
+  "logging": { "level": "info", "directory": "logs" },
+  "devtools": false
+}

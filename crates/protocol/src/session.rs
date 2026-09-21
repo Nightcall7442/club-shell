@@ -1,0 +1,422 @@
+//! Mirror of `ClubShell.Contracts.Sessions` (SessionState.cs, SessionEvent.cs).
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use uuid::Uuid;
+
+use crate::wallet::Money;
+
+// ---- BEGIN MANUAL ----
+use serde::de::DeserializeOwned;
+
+use crate::error::ProtocolError;
+use crate::wire::to_value_infallible;
+// ---- END MANUAL ----
+
+wire_enum! {
+    /// Session state machine (IPC_PROTOCOL.md §6.1, §9.2).
+    SessionState {
+        /// No session.
+        Idle = "idle",
+        /// Being created on the server / offline store.
+        Starting = "starting",
+        /// Timer running.
+        Active = "active",
+        /// Paused by the user; timer stopped.
+        Paused = "paused",
+        /// Locked (user away / admin); timer keeps running unless the tariff pauses on lock.
+        Locked = "locked",
+        /// Time is up; grace period before forced end.
+        Ending = "ending",
+        /// Finished and settled.
+        Ended = "ended",
+    }
+}
+
+// ---- BEGIN MANUAL ----
+impl SessionState {
+    /// `true` for states in which a session exists and is not finished (`starting` .. `ending`).
+    pub const fn is_open(self) -> bool {
+        !matches!(self, SessionState::Idle | SessionState::Ended)
+    }
+
+    /// `true` when session-scoped IPC requests are allowed (`active` or `paused`).
+    pub const fn allows_session_requests(self) -> bool {
+        matches!(self, SessionState::Active | SessionState::Paused)
+    }
+
+    /// `true` when the timer is counting down.
+    pub const fn is_timer_running(self) -> bool {
+        matches!(self, SessionState::Active | SessionState::Locked | SessionState::Ending)
+    }
+}
+// ---- END MANUAL ----
+
+/// Play session (IPC_PROTOCOL.md §6.4).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Session {
+    /// Session id (client-generated when created offline).
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub pc_id: Uuid,
+    pub state: SessionState,
+    #[serde(with = "crate::wire::ts")]
+    pub started_at: DateTime<Utc>,
+    /// Scheduled end; `None` while `idle`/`starting` or for open-ended postpaid.
+    #[serde(default, with = "crate::wire::ts_opt", skip_serializing_if = "Option::is_none")]
+    pub ends_at: Option<DateTime<Utc>>,
+    /// Set while paused/locked.
+    #[serde(default, with = "crate::wire::ts_opt", skip_serializing_if = "Option::is_none")]
+    pub paused_at: Option<DateTime<Utc>>,
+    pub tariff_id: Uuid,
+    /// Remaining seconds; [`Session::OPEN_ENDED`] for open-ended postpaid.
+    pub seconds_left: i32,
+    pub seconds_used: i32,
+    /// Cost accrued so far.
+    pub cost: Money,
+    /// Prepaid (charged up front) vs postpaid.
+    pub is_prepaid: bool,
+    /// Minute marks already emitted as `session.warning`, e.g. `[10, 5]`.
+    pub warnings_sent: Vec<i32>,
+}
+
+impl Session {
+    /// Value of `seconds_left` for open-ended postpaid sessions.
+    pub const OPEN_ENDED: i32 = -1;
+}
+
+// ---- BEGIN MANUAL ----
+impl Session {
+    /// `true` when the session has no fixed end.
+    pub fn is_open_ended(&self) -> bool {
+        self.seconds_left == Self::OPEN_ENDED
+    }
+}
+// ---- END MANUAL ----
+
+/// Payload of the `session.warning` event, emitted at each configured minute mark and once at 0.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionWarning {
+    pub session_id: Uuid,
+    /// Whole minutes remaining (0 at expiry).
+    pub minutes_left: i32,
+    pub seconds_left: i32,
+    #[serde(with = "crate::wire::ts")]
+    pub ends_at: DateTime<Utc>,
+}
+
+wire_enum! {
+    /// Kind of [`SessionEvent`].
+    SessionEventType {
+        Started = "started",
+        Paused = "paused",
+        Resumed = "resumed",
+        /// data = [`SessionExtendedData`].
+        Extended = "extended",
+        /// data = [`SessionWarningData`].
+        Warning = "warning",
+        Locked = "locked",
+        Unlocked = "unlocked",
+        /// data = [`SessionEndedData`].
+        Ended = "ended",
+        /// data = [`SessionChargedData`].
+        Charged = "charged",
+    }
+}
+
+wire_enum! {
+    /// Why a session ended.
+    SessionEndReason {
+        User = "user",
+        TimeUp = "timeUp",
+        Admin = "admin",
+        Idle = "idle",
+        /// Agent restarted and could not resume.
+        AgentRestart = "agentRestart",
+        Error = "error",
+    }
+}
+
+/// Audit/replay event of a session (IPC_PROTOCOL.md §6.21). `data` shape depends on `type`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionEvent {
+    pub session_id: Uuid,
+    pub r#type: SessionEventType,
+    #[serde(with = "crate::wire::ts")]
+    pub at: DateTime<Utc>,
+    /// Typed extra data or absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
+}
+
+// ---- BEGIN MANUAL ----
+impl SessionEvent {
+    /// Event without data.
+    pub fn of(session_id: Uuid, r#type: SessionEventType, at: DateTime<Utc>) -> Self {
+        Self { session_id, r#type, at, data: None }
+    }
+
+    /// `extended` event.
+    pub fn extended(session_id: Uuid, at: DateTime<Utc>, minutes: i32, cost: Money) -> Self {
+        Self {
+            session_id,
+            r#type: SessionEventType::Extended,
+            at,
+            data: Some(to_value_infallible(&SessionExtendedData { minutes, cost })),
+        }
+    }
+
+    /// `warning` event.
+    pub fn warning(session_id: Uuid, at: DateTime<Utc>, minutes_left: i32) -> Self {
+        Self {
+            session_id,
+            r#type: SessionEventType::Warning,
+            at,
+            data: Some(to_value_infallible(&SessionWarningData { minutes_left })),
+        }
+    }
+
+    /// `charged` event.
+    pub fn charged(session_id: Uuid, at: DateTime<Utc>, amount: Money) -> Self {
+        Self {
+            session_id,
+            r#type: SessionEventType::Charged,
+            at,
+            data: Some(to_value_infallible(&SessionChargedData { amount })),
+        }
+    }
+
+    /// `ended` event.
+    pub fn ended(session_id: Uuid, at: DateTime<Utc>, reason: SessionEndReason) -> Self {
+        Self {
+            session_id,
+            r#type: SessionEventType::Ended,
+            at,
+            data: Some(to_value_infallible(&SessionEndedData { reason })),
+        }
+    }
+
+    /// Deserializes `data` as `T`; `Ok(None)` when absent or not an object.
+    pub fn data_as<T: DeserializeOwned>(&self) -> Result<Option<T>, ProtocolError> {
+        match &self.data {
+            Some(v @ Value::Object(_)) => Ok(Some(serde_json::from_value(v.clone())?)),
+            _ => Ok(None),
+        }
+    }
+}
+// ---- END MANUAL ----
+
+/// `data` of [`SessionEventType::Extended`].
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionExtendedData {
+    pub minutes: i32,
+    pub cost: Money,
+}
+
+/// `data` of [`SessionEventType::Warning`].
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionWarningData {
+    pub minutes_left: i32,
+}
+
+/// `data` of [`SessionEventType::Charged`].
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionChargedData {
+    pub amount: Money,
+}
+
+/// `data` of [`SessionEventType::Ended`].
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionEndedData {
+    pub reason: SessionEndReason,
+}
+
+/// Settlement returned by `session.end` and `POST /sessions/{id}/end`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionEndResult {
+    /// Final session (state `ended`).
+    pub session: Session,
+    /// Amount charged at settlement (postpaid).
+    pub charged: Money,
+    /// Amount refunded for unused prepaid time.
+    pub refunded: Money,
+}
+
+/// Payload of the `session.ended` IPC event and the `sessionEnded` agent event.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionEndedEvent {
+    pub session: Session,
+    pub reason: SessionEndReason,
+    pub charged: Money,
+}
+
+/// Payload of the `sessionStarted` agent event.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionStartedEvent {
+    pub session: Session,
+}
+
+/// Body of `POST /sessions` (SERVER_API.md §4.5). Sent with an `Idempotency-Key`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionCreateRequest {
+    pub pc_id: Uuid,
+    pub user_id: Uuid,
+    pub tariff_id: Uuid,
+    /// Minutes to buy; required unless the tariff is a package.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minutes: Option<i32>,
+    pub prepaid: bool,
+    /// Actual start for offline-created sessions (≤ `maxOfflineMinutes` in the past).
+    #[serde(default, with = "crate::wire::ts_opt", skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<DateTime<Utc>>,
+    /// Agent-generated id used offline; adopted by the server when free.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_session_id: Option<Uuid>,
+}
+
+/// Body of `POST /sessions/{id}/end`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionEndReport {
+    pub reason: SessionEndReason,
+    /// Seconds consumed as measured by the Agent.
+    pub seconds_used: i32,
+    /// Actual end time (offline replay).
+    #[serde(default, with = "crate::wire::ts_opt", skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<DateTime<Utc>>,
+}
+
+/// Body of `POST /sessions/{id}/events` (≤ 100 events; offline replay and lock/unlock/warning audit).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionEventsBatch {
+    pub events: Vec<SessionEvent>,
+}
+
+impl SessionEventsBatch {
+    /// Maximum events per batch.
+    pub const MAX_EVENTS: usize = 100;
+}
+
+// ---- BEGIN MANUAL ----
+#[cfg(test)]
+pub(crate) fn sample_session() -> Session {
+    use chrono::TimeZone;
+    Session {
+        id: Uuid::parse_str("9c1e0000-0000-4000-8000-000000000001").unwrap(),
+        user_id: Uuid::parse_str("3f9a0000-0000-4000-8000-000000000002").unwrap(),
+        pc_id: Uuid::parse_str("7d2f0000-0000-4000-8000-000000000003").unwrap(),
+        state: SessionState::Active,
+        started_at: Utc.with_ymd_and_hms(2026, 9, 21, 10, 0, 0).unwrap(),
+        ends_at: Some(Utc.with_ymd_and_hms(2026, 9, 21, 11, 0, 0).unwrap()),
+        paused_at: None,
+        tariff_id: Uuid::parse_str("b1a50000-0000-4000-8000-000000000004").unwrap(),
+        seconds_left: 2700,
+        seconds_used: 900,
+        cost: Money::uzs(250_000),
+        is_prepaid: true,
+        warnings_sent: vec![],
+    }
+}
+
+#[cfg(test)]
+pub(crate) const SAMPLE_SESSION_JSON: &str = r#"{"id":"9c1e0000-0000-4000-8000-000000000001","userId":"3f9a0000-0000-4000-8000-000000000002","pcId":"7d2f0000-0000-4000-8000-000000000003","state":"active","startedAt":"2026-09-21T10:00:00.000Z","endsAt":"2026-09-21T11:00:00.000Z","tariffId":"b1a50000-0000-4000-8000-000000000004","secondsLeft":2700,"secondsUsed":900,"cost":{"amount":250000,"currency":"UZS"},"isPrepaid":true,"warningsSent":[]}"#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::assert_wire;
+    use chrono::TimeZone;
+
+    #[test]
+    fn enum_wire_values() {
+        assert_wire(SessionState::ALL, &["idle", "starting", "active", "paused", "locked", "ending", "ended"]);
+        assert_wire(
+            SessionEventType::ALL,
+            &["started", "paused", "resumed", "extended", "warning", "locked", "unlocked", "ended", "charged"],
+        );
+        assert_wire(SessionEndReason::ALL, &["user", "timeUp", "admin", "idle", "agentRestart", "error"]);
+        assert!(SessionState::Locked.is_open());
+        assert!(!SessionState::Ended.is_open());
+        assert!(SessionState::Paused.allows_session_requests());
+        assert!(!SessionState::Locked.allows_session_requests());
+        assert!(SessionState::Ending.is_timer_running());
+        assert!(!SessionState::Paused.is_timer_running());
+    }
+
+    #[test]
+    fn session_json_is_byte_exact() {
+        let s = sample_session();
+        assert_eq!(serde_json::to_string(&s).unwrap(), SAMPLE_SESSION_JSON);
+        assert_eq!(serde_json::from_str::<Session>(SAMPLE_SESSION_JSON).unwrap(), s);
+        // Explicit nulls for optionals are accepted on read.
+        let with_nulls = SAMPLE_SESSION_JSON.replace(r#""endsAt":"2026-09-21T11:00:00.000Z","#, r#""endsAt":null,"pausedAt":null,"#);
+        let back: Session = serde_json::from_str(&with_nulls).unwrap();
+        assert_eq!(back.ends_at, None);
+        assert!(!s.is_open_ended());
+        assert!(Session { seconds_left: Session::OPEN_ENDED, ..s }.is_open_ended());
+    }
+
+    #[test]
+    fn session_event_data_shapes() {
+        let at = Utc.with_ymd_and_hms(2026, 9, 21, 10, 30, 0).unwrap();
+        let e = SessionEvent::extended(Uuid::nil(), at, 30, Money::uzs(125_000));
+        assert_eq!(
+            serde_json::to_string(&e).unwrap(),
+            r#"{"sessionId":"00000000-0000-0000-0000-000000000000","type":"extended","at":"2026-09-21T10:30:00.000Z","data":{"minutes":30,"cost":{"amount":125000,"currency":"UZS"}}}"#
+        );
+        let d: SessionExtendedData = e.data_as().unwrap().unwrap();
+        assert_eq!(d.minutes, 30);
+        let e = SessionEvent::of(Uuid::nil(), SessionEventType::Paused, at);
+        assert_eq!(
+            serde_json::to_string(&e).unwrap(),
+            r#"{"sessionId":"00000000-0000-0000-0000-000000000000","type":"paused","at":"2026-09-21T10:30:00.000Z"}"#
+        );
+        assert_eq!(e.data_as::<SessionExtendedData>().unwrap(), None);
+        let e = SessionEvent::ended(Uuid::nil(), at, SessionEndReason::TimeUp);
+        assert_eq!(serde_json::to_string(&e.data).unwrap(), r#"{"reason":"timeUp"}"#);
+        let e = SessionEvent::warning(Uuid::nil(), at, 5);
+        assert_eq!(serde_json::to_string(&e.data).unwrap(), r#"{"minutesLeft":5}"#);
+        let e = SessionEvent::charged(Uuid::nil(), at, Money::uzs(1));
+        assert_eq!(serde_json::to_string(&e.data).unwrap(), r#"{"amount":{"amount":1,"currency":"UZS"}}"#);
+        assert_eq!(SessionEventsBatch::MAX_EVENTS, 100);
+    }
+
+    #[test]
+    fn end_result_and_create_request() {
+        let r = SessionEndResult { session: sample_session(), charged: Money::uzs(0), refunded: Money::uzs(50_000) };
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(json.starts_with(r#"{"session":{"id":"9c1e0000"#));
+        assert!(json.ends_with(r#""charged":{"amount":0,"currency":"UZS"},"refunded":{"amount":50000,"currency":"UZS"}}"#));
+        assert_eq!(serde_json::from_str::<SessionEndResult>(&json).unwrap(), r);
+
+        let req = SessionCreateRequest {
+            pc_id: Uuid::nil(),
+            user_id: Uuid::nil(),
+            tariff_id: Uuid::nil(),
+            minutes: Some(60),
+            prepaid: true,
+            started_at: None,
+            client_session_id: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&req).unwrap(),
+            r#"{"pcId":"00000000-0000-0000-0000-000000000000","userId":"00000000-0000-0000-0000-000000000000","tariffId":"00000000-0000-0000-0000-000000000000","minutes":60,"prepaid":true}"#
+        );
+        let report = SessionEndReport { reason: SessionEndReason::User, seconds_used: 10, ended_at: None };
+        assert_eq!(serde_json::to_string(&report).unwrap(), r#"{"reason":"user","secondsUsed":10}"#);
+    }
+}
+// ---- END MANUAL ----

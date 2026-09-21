@@ -1,0 +1,8 @@
+# Pinned toolchain for the whole workspace (crates/*, apps/shell/src-tauri, tests/shell-rs).
+# 1.89.0 covers the MSRV of every dependency resolved fresh (icu/url, time, tauri 2.x, windows 0.58)
+# while staying a fixed, reproducible version for `cargo lint` (-D warnings) in CI.
+[toolchain]
+channel = "1.89.0"
+components = ["rustfmt", "clippy"]
+targets = ["x86_64-pc-windows-msvc"]
+profile = "minimal"

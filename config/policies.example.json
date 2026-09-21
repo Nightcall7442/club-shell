@@ -1,0 +1,78 @@
+{
+  "version": 12,
+  "updatedAt": "2026-09-01T08:00:00.000Z",
+  "shellReplacement": {
+    "enabled": true,
+    "shellExe": "C:\\Program Files\\ClubShell\\Shell\\clubshell-shell.exe"
+  },
+  "processAllowlist": {
+    "mode": "deny",
+    "patterns": [
+      "cmd.exe",
+      "powershell.exe",
+      "pwsh.exe",
+      "regedit.exe",
+      "taskmgr.exe",
+      "mmc.exe",
+      "control.exe",
+      "msconfig.exe",
+      "wscript.exe",
+      "cscript.exe",
+      "mshta.exe",
+      "*cheat*",
+      "*inject*"
+    ]
+  },
+  "usb": {
+    "allowStorage": false,
+    "allowHid": true
+  },
+  "webFilter": {
+    "enabled": true,
+    "blockedDomains": [
+      "*.torrent-site.example",
+      "*.casino.example",
+      "*.adult.example"
+    ],
+    "allowedDomains": [],
+    "dnsServers": ["1.1.1.3", "1.0.0.3"]
+  },
+  "explorer": {
+    "disableTaskManager": true,
+    "disableRun": true,
+    "disableSettings": true,
+    "hideTaskbar": true,
+    "disableAltTab": true,
+    "disableWinKey": true,
+    "blockedKeyCombos": [
+      "Ctrl+Shift+Esc",
+      "Ctrl+Esc",
+      "Win+R",
+      "Win+E",
+      "Win+I",
+      "Win+D",
+      "Win+L",
+      "Win+Tab",
+      "Alt+F4",
+      "Alt+Esc",
+      "Ctrl+Alt+Delete"
+    ]
+  },
+  "power": {
+    "idleShutdownMin": null,
+    "scheduledShutdown": "05:00"
+  },
+  "updates": {
+    "channel": "stable",
+    "autoInstall": true
+  },
+  "anticheat": {
+    "required": ["eac", "vanguard"],
+    "blockOnViolation": true
+  },
+  "kiosk": {
+    "idleTimeoutSec": 300,
+    "adsIntervalSec": 900,
+    "allowVirtualKeyboard": true
+  }
+}

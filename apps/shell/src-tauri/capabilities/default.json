@@ -1,0 +1,23 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability of the kiosk windows (main, overlay, ads-*): core IPC/event/window APIs, tray, and the log/process/os plugins. No shell, fs, http or dialog plugin is exposed to the webview; application commands (auth_*, session_*, games_*, ..., kiosk_*) are allowed by default.",
+  "windows": ["main", "overlay", "ads*"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-set-always-on-top",
+    "core:window:allow-set-focus",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-minimize",
+    "core:window:allow-unminimize",
+    "core:window:allow-set-size",
+    "core:window:allow-set-position",
+    "core:event:default",
+    "core:tray:default",
+    "log:default",
+    "process:default",
+    "os:default"
+  ]
+}

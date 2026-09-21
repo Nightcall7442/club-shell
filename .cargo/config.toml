@@ -1,0 +1,18 @@
+# Workspace-wide cargo settings. Output goes to target/x86_64-pc-windows-msvc/{debug,release};
+# the Tauri CLI reads `build.target` and looks there.
+[build]
+target = "x86_64-pc-windows-msvc"
+
+# `+crt-static` is NOT allowed together with Tauri/WebView2 (dynamic CRT is required), so no rustflags.
+[target.x86_64-pc-windows-msvc]
+rustflags = []
+
+[env]
+CARGO_TERM_COLOR = "always"
+
+[term]
+color = "always"
+
+[alias]
+check-all = "check --workspace --all-targets"
+lint = "clippy --workspace --all-targets -- -D warnings"

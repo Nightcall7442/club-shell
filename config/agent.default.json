@@ -1,0 +1,119 @@
+{
+  "version": 1,
+  "pcId": null,
+  "pcName": null,
+  "zone": null,
+  "server": {
+    "baseUrl": "https://club.example.uz/api/v1",
+    "wsUrl": "wss://club.example.uz/ws/agent",
+    "clubApiKey": "",
+    "timeoutSec": 15,
+    "tlsPinSha256": [],
+    "retry": { "maxAttempts": 5, "baseDelayMs": 500, "maxDelayMs": 15000 },
+    "circuitBreaker": { "failures": 5, "openSec": 30 },
+    "clockSkewToleranceSec": 300
+  },
+  "ipc": {
+    "pipeName": "clubshell-agent",
+    "maxMessageBytes": 4194304,
+    "heartbeatIntervalSec": 5,
+    "missedHeartbeatsBeforeKill": 3,
+    "maxConnections": 4,
+    "requestsPerSecond": 50,
+    "shellTokenPath": "secure\\shell.token"
+  },
+  "shell": {
+    "exePath": "C:\\Program Files\\ClubShell\\Shell\\clubshell-shell.exe",
+    "kioskUser": {
+      "name": "club",
+      "createIfMissing": true,
+      "rotatePasswordOnStart": true,
+      "resetProfileOnLogout": true,
+      "profileTemplate": null
+    },
+    "watchdogIntervalMs": 2000,
+    "restartDelayMs": 1500,
+    "maxRestartsPerMinute": 5,
+    "launchTimeoutSec": 30
+  },
+  "session": {
+    "warningMinutes": [10, 5, 1],
+    "heartbeatSec": 30,
+    "graceSec": 60,
+    "autoLockOnIdleSec": 0,
+    "persistIntervalSec": 5
+  },
+  "offline": {
+    "enabled": true,
+    "allowNewSessions": true,
+    "maxOfflineMinutes": 240,
+    "maxQueue": 10000,
+    "storePath": "cache\\offline.db",
+    "userCacheTtlHours": 168
+  },
+  "games": {
+    "libraryRoots": ["D:\\Games", "G:\\Games"],
+    "scanIntervalSec": 900,
+    "launchTimeoutSec": 90,
+    "killGraceSec": 10,
+    "accountPool": { "enabled": true, "leaseTtlSec": 14400, "releaseOnExit": true },
+    "cloudSave": { "enabled": true, "root": "cache\\saves", "maxMb": 512 },
+    "launchers": {
+      "steam": { "exePath": "C:\\Program Files (x86)\\Steam\\steam.exe" },
+      "epic": { "exePath": "C:\\Program Files (x86)\\Epic Games\\Launcher\\Portal\\Binaries\\Win32\\EpicGamesLauncher.exe" },
+      "battleNet": { "exePath": "C:\\Program Files (x86)\\Battle.net\\Battle.net Launcher.exe" },
+      "riot": { "exePath": "C:\\Riot Games\\Riot Client\\RiotClientServices.exe" },
+      "ea": { "exePath": "C:\\Program Files\\Electronic Arts\\EA Desktop\\EA Desktop\\EADesktop.exe" },
+      "ubisoft": { "exePath": "C:\\Program Files (x86)\\Ubisoft\\Ubisoft Game Launcher\\UbisoftConnect.exe" }
+    }
+  },
+  "storage": {
+    "gamesShare": {
+      "enabled": false,
+      "uncPath": "\\\\nas01\\games",
+      "driveLetter": "G",
+      "credentialsRef": "secure\\share.cred",
+      "mountRetries": 3,
+      "iscsi": null
+    }
+  },
+  "updates": {
+    "channel": "stable",
+    "checkIntervalSec": 3600,
+    "autoInstall": true,
+    "applyWindow": { "from": "04:00", "to": "07:00" },
+    "publicKeyPath": "C:\\Program Files\\ClubShell\\Agent\\update-public.pem",
+    "downloadDir": "cache\\updates"
+  },
+  "telemetry": {
+    "enabled": true,
+    "metricsIntervalSec": 5,
+    "uploadIntervalSec": 60,
+    "hardwareRescanSec": 3600
+  },
+  "anticheat": {
+    "checkIntervalSec": 30,
+    "requireSecureBoot": false,
+    "requireTpm": false,
+    "reportViolations": true
+  },
+  "remoteAdmin": {
+    "allowScreenCapture": true,
+    "allowRemoteInput": true,
+    "captureFps": 5,
+    "captureQuality": 60,
+    "showIndicator": true
+  },
+  "power": {
+    "wolEnabled": true,
+    "shutdownGraceSec": 20,
+    "allowShellReboot": true
+  },
+  "logging": {
+    "level": "Information",
+    "directory": "logs",
+    "retainDays": 14,
+    "maxFileMb": 20,
+    "eventLog": true
+  }
+}

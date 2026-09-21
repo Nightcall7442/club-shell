@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Win32 layer: P/Invoke, hooks, WMI, WTS, job objects, registry, firewall, users, storage.
+    Windows 10 1809 (build 17763) is the minimum supported OS; SupportedOSPlatformVersion must not exceed
+    TargetPlatformVersion (NETSDK1135), hence the versioned TFM.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.17763.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <RootNamespace>ClubShell.Windows</RootNamespace>
+    <AssemblyName>ClubShell.Windows</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../ClubShell.Contracts/ClubShell.Contracts.csproj" />
+    <ProjectReference Include="../ClubShell.Core/ClubShell.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Management" />
+    <PackageReference Include="System.Diagnostics.PerformanceCounter" />
+    <PackageReference Include="Microsoft.Win32.Registry" />
+    <PackageReference Include="System.DirectoryServices.AccountManagement" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" />
+    <PackageReference Include="System.IO.Pipes.AccessControl" />
+  </ItemGroup>
+
+</Project>

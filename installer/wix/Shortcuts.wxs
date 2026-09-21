@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Start Menu entries for administrators only. The kiosk Shell deliberately has no Start Menu or desktop shortcut:
+  it is launched by the Agent service in the kiosk user's session (CreateProcessAsUser) and is the kiosk user's
+  Windows shell, so a shortcut would only ever be visible to administrators and could spawn a second instance.
+
+  Per the component rules for user-profile directories (ICE38/ICE43/ICE64): the component's key path is an HKCU
+  registry value and the ProgramMenu\ClubShell folder is removed on uninstall. Targets are directory-based paths
+  rather than [#File] references because the files belong to other components (ICE69).
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Fragment>
+    <ComponentGroup Id="AdminShortcuts">
+      <Component Id="AdminStartMenuShortcuts" Directory="ClubShellMenuDir">
+        <!-- Interactive Agent (same binary with the console switch): diagnostics from an elevated session while the service is stopped. -->
+        <Shortcut Id="AgentConsoleShortcut"
+                  Name="ClubShell Agent Console"
+                  Description="Runs the ClubShell Agent interactively (administrators only; stop the ClubShellAgent service first)."
+                  Target="[AgentDir]ClubShellAgent.exe"
+                  Arguments="--console"
+                  WorkingDirectory="AgentDir"
+                  Icon="ClubShell.ico" />
+        <!-- Folder shortcut to C:\ProgramData\ClubShell\logs (agent-YYYYMMDD.json, shell-YYYYMMDD.json, crash dumps). -->
+        <Shortcut Id="LogsFolderShortcut"
+                  Name="ClubShell Logs"
+                  Description="Opens the ClubShell log folder."
+                  Target="[ClubShellLogsDir]" />
+        <RemoveFolder Id="RemoveClubShellMenuDir" Directory="ClubShellMenuDir" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\ClubShell\Installer" Name="AdminShortcuts" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>

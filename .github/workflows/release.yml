@@ -1,0 +1,315 @@
+# ClubShell release pipeline.
+#
+# Trigger: push of a tag v<major>.<minor>.<patch>[-<pre>] or manual dispatch (channel + version).
+#   meta     derive version/channel/tag (tag with a pre-release suffix -> beta, otherwise stable)
+#   build    windows: web -> Tauri shell (signCommand = tools/scripts/sign.ps1 when a certificate is present)
+#            -> tools/scripts/package.ps1 (Agent publish, Authenticode signing, WiX MSI + bundle, release layout,
+#            manifest.json, SHA256SUMS.txt) -> tools/scripts/sign.ps1 -ManifestPath (RSA-PSS manifest signatures)
+#            -> artifacts/release/<version>
+#   release  GitHub release with the installers, manifest.json, SHA256SUMS.txt and generated notes
+#   publish  environment "production": tools/scripts/publish.ps1 to S3 or the HTTP update endpoint
+#            (stable channel, or any manual dispatch)
+#
+# Secrets: TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD, CODESIGN_PFX_BASE64,
+#          CODESIGN_PFX_PASSWORD, UPDATE_MANIFEST_KEY_PEM, UPDATE_BASE_URL, AWS_ACCESS_KEY_ID,
+#          AWS_SECRET_ACCESS_KEY, CLUBSHELL_PUBLISH_TOKEN. Variables: AWS_REGION, UPDATE_S3_BUCKET.
+# CODESIGN_PFX_BASE64 is decoded into CODESIGN_PFX_PATH, the name sign.ps1 / .env.example use.
+# Signing secrets are optional: unsigned builds are produced with a warning (publish.ps1 refuses them).
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Update channel
+        type: choice
+        options:
+          - stable
+          - beta
+        default: stable
+        required: true
+      version:
+        description: Version to build, e.g. 1.2.0 or 1.2.0-beta.1 (release tag becomes v<version>)
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
+
+jobs:
+  meta:
+    name: Resolve version and channel
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      channel: ${{ steps.meta.outputs.channel }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - name: Derive version, channel and tag
+        id: meta
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            version="${INPUT_VERSION#v}"
+            channel="$INPUT_CHANNEL"
+          else
+            version="${GITHUB_REF_NAME#v}"
+            if [[ "$version" == *-* ]]; then channel=beta; else channel=stable; fi
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::'$version' is not a semantic version (MAJOR.MINOR.PATCH[-pre])"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "Building $version on channel $channel (tag v$version)"
+
+  build:
+    name: Build and package (Windows)
+    needs: meta
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+      CHANNEL: ${{ needs.meta.outputs.channel }}
+      CLUBSHELL_UPDATE_CHANNEL: ${{ needs.meta.outputs.channel }}
+      RELEASE_DIR: artifacts/release/${{ needs.meta.outputs.version }}
+      # Read by tools/scripts/sign.ps1 together with CODESIGN_PFX_PATH (exported once the .pfx is decoded below).
+      CODESIGN_PFX_PASSWORD: ${{ secrets.CODESIGN_PFX_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up pnpm (version from packageManager)
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Set up .NET SDK (global.json)
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Read toolchain channel from rust-toolchain.toml
+        id: toolchain
+        shell: bash
+        run: echo "channel=$(sed -n 's/^channel *= *"\(.*\)".*/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Rust ${{ steps.toolchain.outputs.channel }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # CODESIGN_PFX_BASE64 -> temp .pfx; tools/scripts/sign.ps1 and package.ps1 read CODESIGN_PFX_PATH /
+      # CODESIGN_PFX_PASSWORD (the .env.example contract).
+      - name: Import code-signing certificate
+        id: codesign
+        env:
+          CODESIGN_PFX_BASE64: ${{ secrets.CODESIGN_PFX_BASE64 }}
+        run: |
+          if (-not $env:CODESIGN_PFX_BASE64) {
+            Write-Output '::warning::CODESIGN_PFX_BASE64 is not set; installers and executables will not be Authenticode-signed'
+            'enabled=false' | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding ascii
+            exit 0
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
+          [System.IO.File]::WriteAllBytes($pfx, [System.Convert]::FromBase64String($env:CODESIGN_PFX_BASE64))
+          "CODESIGN_PFX_PATH=$pfx" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+          'enabled=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding ascii
+
+      - name: Build web (contracts + Vite)
+        run: |
+          pnpm contracts:build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm --filter @clubshell/shell build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # The Tauri CLI accepts a single --config: tauri.windows.conf.json is merged with the bundle version (the
+      # MSI/NSIS bundlers only accept numeric x.y.z, so a pre-release suffix is dropped for the bundle, as
+      # tools/scripts/build.ps1 does) and, when a certificate is present, with a signCommand that runs
+      # tools/scripts/sign.ps1 on clubshell-shell.exe before bundling and on each bundle afterwards.
+      # The merged file is written without a BOM (serde_json rejects one).
+      - name: Build shell (tauri build)
+        working-directory: apps/shell
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          $numericVersion = ($env:VERSION -split '[-+]')[0]
+          $config = Get-Content -Path src-tauri/tauri.windows.conf.json -Raw | ConvertFrom-Json
+          $config | Add-Member -NotePropertyName version -NotePropertyValue $numericVersion -Force
+          if ($env:CODESIGN_PFX_PATH) {
+            $signScript = Join-Path $env:GITHUB_WORKSPACE 'tools/scripts/sign.ps1'
+            $config.bundle.windows.signCommand = "pwsh -NoProfile -File $signScript -Files %1"
+          }
+          $merged = Join-Path $env:RUNNER_TEMP 'tauri.release.conf.json'
+          [System.IO.File]::WriteAllText($merged, ($config | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding($false)))
+          pnpm tauri build --ci --config $merged
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # package.ps1: dotnet publish of the Agent (artifacts/publish/agent), Authenticode signing of
+      # ClubShellAgent.exe and of every *.msi / *.exe (when CODESIGN_PFX_PATH is set), WiX MSI + bundle,
+      # artifacts/release/<version> with manifest.json (unsigned) and SHA256SUMS.txt.
+      - name: Package release (artifacts/release/${{ needs.meta.outputs.version }})
+        env:
+          UPDATE_BASE_URL: ${{ secrets.UPDATE_BASE_URL }}
+        run: |
+          $baseUrl = if ($env:UPDATE_BASE_URL) { $env:UPDATE_BASE_URL } else { "https://github.com/$env:GITHUB_REPOSITORY/releases/download/v$env:VERSION" }
+          ./tools/scripts/package.ps1 -Version $env:VERSION -Channel $env:CHANNEL -BaseUrl $baseUrl -NoZip
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # RSA-PSS-SHA256 package signatures + canonical manifest signatures (Signing.ManifestCanonicalBytes);
+      # also refreshes size/sha256 and SHA256SUMS.txt for the signed files.
+      - name: Sign update manifest
+        env:
+          UPDATE_MANIFEST_KEY_PEM: ${{ secrets.UPDATE_MANIFEST_KEY_PEM }}
+        run: |
+          if (-not $env:UPDATE_MANIFEST_KEY_PEM) {
+            Write-Output '::warning::UPDATE_MANIFEST_KEY_PEM is not set; manifest.json is left unsigned (agents reject it and publish.ps1 refuses it)'
+            exit 0
+          }
+          $key = Join-Path $env:RUNNER_TEMP 'update-manifest.pem'
+          [System.IO.File]::WriteAllText($key, $env:UPDATE_MANIFEST_KEY_PEM, (New-Object System.Text.UTF8Encoding($false)))
+          ./tools/scripts/sign.ps1 -ManifestPath (Join-Path $env:RELEASE_DIR 'manifest.json') -ManifestKeyPem $key
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Remove signing material
+        if: always()
+        run: |
+          Remove-Item -Path (Join-Path $env:RUNNER_TEMP 'codesign.pfx'), (Join-Path $env:RUNNER_TEMP 'update-manifest.pem') -Force -ErrorAction SilentlyContinue
+          exit 0
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ needs.meta.outputs.version }}
+          path: artifacts/release/${{ needs.meta.outputs.version }}
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: GitHub release
+    needs: [meta, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-${{ needs.meta.outputs.version }}
+          path: release
+
+      # SHA256SUMS.txt (LF, `<sha256> *<relative path>`) covers every file of the layout except manifest.json and
+      # itself, which are written after the hashes are taken; manifest.json is covered by its RSA signatures.
+      - name: Verify package contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f release/manifest.json || { echo '::error::manifest.json missing from the release package'; exit 1; }
+          test -f release/SHA256SUMS.txt || { echo '::error::SHA256SUMS.txt missing from the release package'; exit 1; }
+          (cd release && sha256sum --check --strict SHA256SUMS.txt)
+
+      - name: Create GitHub release ${{ needs.meta.outputs.tag }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.meta.outputs.tag }}
+          name: ClubShell ${{ needs.meta.outputs.version }}
+          prerelease: ${{ needs.meta.outputs.channel == 'beta' }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            release/*.msi
+            release/*.exe
+            release/manifest.json
+            release/SHA256SUMS.txt
+
+  publish:
+    name: Publish to update server (${{ needs.meta.outputs.channel }})
+    needs: [meta, release]
+    if: needs.meta.outputs.channel == 'stable' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    environment: production
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+      CHANNEL: ${{ needs.meta.outputs.channel }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      CLUBSHELL_PUBLISH_TOKEN: ${{ secrets.CLUBSHELL_PUBLISH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # publish.ps1 looks for artifacts/release/<version>/manifest.json.
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-${{ needs.meta.outputs.version }}
+          path: artifacts/release/${{ needs.meta.outputs.version }}
+
+      - name: Configure AWS credentials
+        if: env.AWS_ACCESS_KEY_ID != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION || 'eu-central-1' }}
+
+      # Layout: s3://<bucket>/<channel>/<version>/<file> + s3://<bucket>/<channel>/manifest.json, the same base
+      # package.ps1 -BaseUrl (UPDATE_BASE_URL) points at.
+      - name: Publish to S3
+        if: env.AWS_ACCESS_KEY_ID != ''
+        env:
+          UPDATE_S3_BUCKET: ${{ vars.UPDATE_S3_BUCKET }}
+          AWS_REGION_NAME: ${{ vars.AWS_REGION || 'eu-central-1' }}
+        run: |
+          if (-not $env:UPDATE_S3_BUCKET) { Write-Output '::error::Set the UPDATE_S3_BUCKET variable (bucket[/prefix]) in the production environment'; exit 1 }
+          ./tools/scripts/publish.ps1 -Target S3 -Destination "s3://$env:UPDATE_S3_BUCKET" -Version $env:VERSION -Channel $env:CHANNEL -AwsRegion $env:AWS_REGION_NAME
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # PUT <UPDATE_BASE_URL>/<channel>/<version>/<file> + POST <UPDATE_BASE_URL>/api/v1/updates/<channel>/manifest
+      # with the CLUBSHELL_PUBLISH_TOKEN bearer token (read by publish.ps1 from the environment).
+      - name: Publish over HTTP
+        if: env.AWS_ACCESS_KEY_ID == '' && env.CLUBSHELL_PUBLISH_TOKEN != ''
+        env:
+          UPDATE_BASE_URL: ${{ secrets.UPDATE_BASE_URL }}
+        run: |
+          if (-not $env:UPDATE_BASE_URL) { Write-Output '::error::Set the UPDATE_BASE_URL secret (https://updates.example.uz) for HTTP publishing'; exit 1 }
+          ./tools/scripts/publish.ps1 -Target Http -Destination $env:UPDATE_BASE_URL -Version $env:VERSION -Channel $env:CHANNEL
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: No publish credentials
+        if: env.AWS_ACCESS_KEY_ID == '' && env.CLUBSHELL_PUBLISH_TOKEN == ''
+        run: |
+          Write-Output '::error::Set AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY (S3) or CLUBSHELL_PUBLISH_TOKEN (HTTP) in the production environment'
+          exit 1

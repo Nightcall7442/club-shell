@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "outDir": "dist",
+    "paths": {
+      "@clubshell/contracts": ["../../packages/contracts-ts/src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}

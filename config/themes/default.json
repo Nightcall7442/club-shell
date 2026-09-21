@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "name": "default",
+  "displayName": "ClubShell Default",
+  "colors": {
+    "bg": "#0B0F1A",
+    "surface": "#141A2B",
+    "primary": "#3B82F6",
+    "accent": "#22D3EE",
+    "text": "#F3F4F6",
+    "muted": "#8B93A7",
+    "danger": "#EF4444",
+    "success": "#22C55E"
+  },
+  "radius": 12,
+  "font": "Inter",
+  "backgroundVideo": null,
+  "wallpaper": "themes/assets/default-wallpaper.jpg",
+  "blur": 12,
+  "animations": true
+}

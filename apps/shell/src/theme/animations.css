@@ -1,0 +1,184 @@
+/*
+ * Keyframes shared across the UI. Tailwind's own `animate-*` (shimmer, pulse-glow, slide-up, fade-in) come
+ * from tailwind.config.ts; the ones here are used by class names in components and by `.timer-critical`.
+ * Everything is disabled under `prefers-reduced-motion` and when the theme sets `animations: false`.
+ */
+
+@keyframes marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(var(--c-primary) / 0.35), 0 0 12px 0 rgb(var(--c-primary) / 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgb(var(--c-primary) / 0.35), 0 0 32px 6px rgb(var(--c-primary) / 0.35);
+  }
+}
+
+@keyframes cover-hover {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    transform: translateY(-6px) scale(1.03);
+  }
+}
+
+@keyframes timer-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    text-shadow: 0 0 0 rgb(var(--c-danger) / 0);
+  }
+  50% {
+    opacity: 0.7;
+    text-shadow: 0 0 18px rgb(var(--c-danger) / 0.8);
+  }
+}
+
+@keyframes skeleton {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes toast-in {
+  0% {
+    opacity: 0;
+    transform: translateX(24px) scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes pop {
+  0% {
+    transform: scale(0.92);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.02);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes bg-pan {
+  0% {
+    transform: scale(1.05) translate(0, 0);
+  }
+  50% {
+    transform: scale(1.1) translate(-1.5%, -1%);
+  }
+  100% {
+    transform: scale(1.05) translate(0, 0);
+  }
+}
+
+@keyframes live-dot {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(var(--c-danger) / 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgb(var(--c-danger) / 0);
+  }
+}
+
+.anim-marquee {
+  animation: marquee 18s linear infinite;
+}
+.anim-glow {
+  animation: glow 2.4s ease-in-out infinite;
+}
+.anim-cover-hover:hover,
+.anim-cover-hover:focus-visible,
+.anim-cover-hover[data-focused="true"] {
+  animation: cover-hover var(--dur-base) var(--ease-out) forwards;
+}
+.anim-timer-pulse {
+  animation: timer-pulse 1s ease-in-out infinite;
+}
+.anim-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgb(var(--c-surface) / 0.9) 25%,
+    rgb(var(--c-text) / 0.08) 50%,
+    rgb(var(--c-surface) / 0.9) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton 1.6s linear infinite;
+}
+.anim-spin {
+  animation: spin 0.9s linear infinite;
+}
+.anim-toast-in {
+  animation: toast-in var(--dur-base) var(--ease-out) both;
+}
+.anim-pop {
+  animation: pop var(--dur-slow) var(--ease-out) both;
+}
+.anim-float {
+  animation: float 6s ease-in-out infinite;
+}
+.anim-bg-pan {
+  animation: bg-pan 40s ease-in-out infinite;
+}
+.anim-live-dot {
+  animation: live-dot 1.6s ease-out infinite;
+}
+
+/* Motion off: system preference or theme.animations = false. Spinners keep turning (they carry meaning). */
+@media (prefers-reduced-motion: reduce) {
+  *:not(.anim-spin),
+  *:not(.anim-spin)::before,
+  *:not(.anim-spin)::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+:root[data-animations="false"] *:not(.anim-spin),
+:root[data-animations="false"] *:not(.anim-spin)::before,
+:root[data-animations="false"] *:not(.anim-spin)::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
+
+:root[data-animations="false"] .anim-skeleton {
+  background: rgb(var(--c-text) / 0.06);
+}

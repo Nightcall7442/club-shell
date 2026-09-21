@@ -1,0 +1,28 @@
+[package]
+name = "clubshell-shell-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Integration tests for the ClubShell shell crates (kiosk helpers, named-pipe client)"
+publish = false
+# Test-only package: no lib/bin, targets are declared explicitly below.
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+
+[dev-dependencies]
+clubshell-protocol.workspace = true
+clubshell-winutil.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+
+[[test]]
+name = "kiosk"
+path = "tests/kiosk.rs"
+
+[[test]]
+name = "pipe_client"
+path = "tests/pipe_client.rs"

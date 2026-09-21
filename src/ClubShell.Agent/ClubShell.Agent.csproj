@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ClubShellAgent.exe: .NET 8 Worker Service running as LocalSystem in session 0.
+    Plain Microsoft.NET.Sdk (not .Worker) so content items and implicit usings are explicit below.
+    Publish: dotnet publish src/ClubShell.Agent -c Release  ->  artifacts/publish/ClubShell.Agent/release_win-x64/
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows10.0.17763.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <RootNamespace>ClubShell.Agent</RootNamespace>
+    <AssemblyName>ClubShellAgent</AssemblyName>
+    <UserSecretsId>clubshell-agent-6d2f9c3a-1b47-4e58-9a0c-7f3e2d1b5c84</UserSecretsId>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Same implicit usings Microsoft.NET.Sdk.Worker would add. -->
+    <Using Include="Microsoft.Extensions.Configuration" />
+    <Using Include="Microsoft.Extensions.DependencyInjection" />
+    <Using Include="Microsoft.Extensions.Hosting" />
+    <Using Include="Microsoft.Extensions.Logging" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../ClubShell.Contracts/ClubShell.Contracts.csproj" />
+    <ProjectReference Include="../ClubShell.Core/ClubShell.Core.csproj" />
+    <ProjectReference Include="../ClubShell.Windows/ClubShell.Windows.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" />
+    <PackageReference Include="Serilog.Sinks.EventLog" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="System.IO.Pipes.AccessControl" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="appsettings*.json" />
+    <Content Include="appsettings*.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <!-- Default configs shipped next to the Agent under config/; the installer seeds C:\ProgramData\ClubShell from them. -->
+    <Content Include="../../config/**/*.json" Link="config/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+  </ItemGroup>
+
+</Project>

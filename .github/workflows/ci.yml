@@ -1,0 +1,318 @@
+# ClubShell continuous integration.
+#
+# Jobs (all skipped when a push/PR touches only docs/**, *.md or LICENSE):
+#   web             ubuntu   pnpm typecheck, contracts build, Vite build, prettier check -> web-dist artifact
+#   rust            windows  cargo fmt/clippy/test for the whole workspace (Tauri codegen needs web-dist)
+#                   ubuntu   cargo check of the portable crates (protocol + winutil non-Windows stubs)
+#   dotnet          windows  restore/build (-warnaserror), test with trx + coverlet coverage
+#   contracts-drift windows  gen-contracts-ts.ps1 -Check / gen-contracts-rs.ps1 -Check (generated mirrors up to date?)
+#   e2e             ubuntu   Playwright against the Vite dev server in mock mode (VITE_MOCK=1)
+#   tauri-build     windows  full `tauri build` bundle, push to main / release/** only
+#
+# Toolchain versions come from the repository: packageManager (package.json), global.json, rust-toolchain.toml.
+
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Classify changed files
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          # 'every': a file counts as code only if it matches '**' AND none of the exclusions.
+          predicate-quantifier: every
+          filters: |
+            code:
+              - '**'
+              - '!docs/**'
+              - '!**/*.md'
+              - '!LICENSE'
+
+  web:
+    name: Web (typecheck, build, prettier)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up pnpm (version from packageManager)
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript contracts
+        run: pnpm contracts:build
+
+      - name: Typecheck all packages
+        run: pnpm typecheck
+
+      - name: Build shell frontend (Vite)
+        run: pnpm --filter @clubshell/shell build
+
+      - name: Prettier check
+        run: pnpm lint
+
+      - name: Upload frontend dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: apps/shell/dist
+          if-no-files-found: error
+          retention-days: 7
+
+  rust:
+    name: Rust (${{ matrix.os }})
+    needs: [changes, web]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read toolchain channel from rust-toolchain.toml
+        id: toolchain
+        shell: bash
+        run: echo "channel=$(sed -n 's/^channel *= *"\(.*\)".*/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Rust ${{ steps.toolchain.outputs.channel }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: rustfmt, clippy
+          targets: ${{ runner.os == 'Windows' && 'x86_64-pc-windows-msvc' || 'x86_64-unknown-linux-gnu' }}
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+
+      # .cargo/config.toml pins build.target to x86_64-pc-windows-msvc; on Linux only the portable
+      # crates are checked for the host target (their cfg(not(windows)) stubs).
+      - name: cargo check (protocol + winutil, non-Windows stubs)
+        if: runner.os == 'Linux'
+        run: cargo check -p clubshell-protocol -p clubshell-winutil --all-targets --target x86_64-unknown-linux-gnu
+
+      # tauri::generate_context! refuses to compile when build.frontendDist (apps/shell/dist) is missing.
+      - name: Download frontend dist (Tauri codegen)
+        if: runner.os == 'Windows'
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: apps/shell/dist
+
+      - name: cargo fmt
+        if: runner.os == 'Windows'
+        run: cargo fmt --all --check
+
+      - name: cargo clippy
+        if: runner.os == 'Windows'
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo test
+        if: runner.os == 'Windows'
+        run: cargo test --workspace
+
+  dotnet:
+    name: .NET (build, test)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET SDK (global.json)
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore ClubShell.sln
+
+      - name: Build
+        run: dotnet build ClubShell.sln -c Release --no-restore /warnaserror
+
+      - name: Test (trx + coverlet coverage)
+        run: dotnet test ClubShell.sln -c Release --no-build --logger trx --collect "XPlat Code Coverage" --results-directory artifacts/test-results
+
+      - name: Upload test results and coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-test-results
+          path: artifacts/test-results
+          if-no-files-found: warn
+          retention-days: 14
+
+  contracts-drift:
+    name: Contracts drift (TS + Rust mirrors)
+    needs: [changes, dotnet]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET SDK (global.json)
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Set up pnpm (version from packageManager)
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: packages/contracts-ts matches ClubShell.Contracts
+        run: ./tools/scripts/gen-contracts-ts.ps1 -Check
+
+      - name: crates/protocol matches ClubShell.Contracts
+        run: ./tools/scripts/gen-contracts-rs.ps1 -Check
+
+  e2e:
+    name: E2E (Playwright, mock mode)
+    needs: [changes, web]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VITE_MOCK: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up pnpm (version from packageManager)
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript contracts
+        run: pnpm contracts:build
+
+      - name: Install Playwright Chromium
+        run: pnpm --filter @clubshell/shell-e2e exec playwright install --with-deps chromium
+
+      - name: Run e2e tests
+        run: pnpm test:e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            tests/shell-e2e/playwright-report
+            tests/shell-e2e/test-results
+          if-no-files-found: ignore
+          retention-days: 14
+
+  tauri-build:
+    name: Tauri bundle (Windows)
+    needs: [changes, web, rust]
+    # push events are limited to main and release/** above, so this never runs for pull requests.
+    if: needs.changes.outputs.code == 'true' && github.event_name == 'push'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up pnpm (version from packageManager)
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Read toolchain channel from rust-toolchain.toml
+        id: toolchain
+        shell: bash
+        run: echo "channel=$(sed -n 's/^channel *= *"\(.*\)".*/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Rust ${{ steps.toolchain.outputs.channel }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript contracts
+        run: pnpm contracts:build
+
+      # Release build (no --debug). beforeBuildCommand rebuilds the frontend; --config is relative to the
+      # working directory (the Tauri CLI resolves it before changing into src-tauri).
+      - name: tauri build
+        working-directory: apps/shell
+        run: pnpm tauri build --config src-tauri/tauri.windows.conf.json
+
+      - name: Upload bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: clubshell-shell-bundle
+          path: |
+            target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+            target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            target/x86_64-pc-windows-msvc/release/clubshell-shell.exe
+          if-no-files-found: error
+          retention-days: 14

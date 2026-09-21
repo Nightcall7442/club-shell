@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="color-scheme" content="dark" />
+    <title>ClubShell</title>
+    <!-- Offline kiosk: no external fonts or preconnects; the theme font is bundled or system-installed. -->
+  </head>
+  <body class="select-none overflow-hidden">
+    <div id="root"></div>
+    <!-- Inline (not an on* attribute) so Tauri can hash it into script-src under the strict CSP. -->
+    <script>
+      document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

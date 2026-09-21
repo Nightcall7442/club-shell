@@ -1,0 +1,53 @@
+<Project>
+
+  <!--
+    Shared MSBuild properties for every .NET project in the repository.
+    TargetFramework is deliberately NOT set here: each project picks net8.0 or net8.0-windows.
+    Package versions live in Directory.Packages.props (Central Package Management).
+  -->
+
+  <PropertyGroup>
+    <RepoRoot>$(MSBuildThisFileDirectory)</RepoRoot>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- NuGet vulnerability audit (NU1901-NU1904) stays a warning: a newly published advisory must not break every build. -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <Deterministic>true</Deterministic>
+    <Platforms>AnyCPU;x64</Platforms>
+    <NeutralLanguage>en</NeutralLanguage>
+    <!-- Only ClubShell.Contracts is packed; it opts in explicitly in its own project file. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Assembly metadata">
+    <Company>ClubShell</Company>
+    <Product>ClubShell</Product>
+    <Authors>ClubShell contributors</Authors>
+    <Copyright>Copyright (c) 2026 ClubShell contributors</Copyright>
+    <VersionPrefix>1.0.0</VersionPrefix>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Output layout">
+    <!-- artifacts/bin/<Project>/<pivot>, artifacts/obj/<Project>/<pivot>, artifacts/publish/<Project>/<pivot>, artifacts/package/<config> -->
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <ArtifactsPath>$(RepoRoot)artifacts</ArtifactsPath>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Test projects (anything under tests/)">
+    <_ClubShellTestsDir>$([MSBuild]::NormalizeDirectory('$(RepoRoot)', 'tests'))</_ClubShellTestsDir>
+    <_ClubShellProjectDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)'))</_ClubShellProjectDir>
+    <IsTestProject Condition="'$(IsTestProject)' == '' and $(_ClubShellProjectDir.StartsWith('$(_ClubShellTestsDir)'))">true</IsTestProject>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(IsTestProject)' == 'true'">
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- CA1707: Test_Method_Names_With_Underscores; CA2007: no SynchronizationContext in tests; CS1591: no XML docs required. -->
+    <NoWarn>$(NoWarn);CA1707;CA2007;CS1591</NoWarn>
+  </PropertyGroup>
+
+</Project>

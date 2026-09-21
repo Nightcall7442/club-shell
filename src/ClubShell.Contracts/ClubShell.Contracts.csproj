@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>ClubShell.Contracts</RootNamespace>
+    <AssemblyName>ClubShell.Contracts</AssemblyName>
+
+    <!-- Trim / AOT safety: all (de)serialization goes through ContractsJsonContext (source generated). -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <EnableAotAnalyzer>true</EnableAotAnalyzer>
+    <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
+
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Deterministic>true</Deterministic>
+    <AnalysisLevel>latest</AnalysisLevel>
+
+    <PackageId>ClubShell.Contracts</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>ClubShell</Authors>
+    <Description>Canonical wire contracts (DTOs, enums, IPC/WS envelopes) shared by the ClubShell Agent, Shell and central server. Source of truth for the generated Rust (crates/protocol) and TypeScript (packages/contracts-ts) mirrors.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryType>git</RepositoryType>
+    <IsPackable>true</IsPackable>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <!-- No external dependencies: System.Text.Json (incl. the source generator) is inbox on net8.0. -->
+
+</Project>

@@ -1,0 +1,199 @@
+//! Mirror of `ClubShell.Contracts.Shop` (Product.cs, Order.cs).
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::wallet::Money;
+
+wire_enum! {
+    /// Shop product category.
+    ProductCategory {
+        Food = "food",
+        Drink = "drink",
+        Snack = "snack",
+        /// Services (e.g. headset rental).
+        Service = "service",
+        Merch = "merch",
+        /// Time packages sold through the shop.
+        Time = "time",
+    }
+}
+
+/// Shop product (IPC_PROTOCOL.md §6.13).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Product {
+    pub id: Uuid,
+    pub title: String,
+    pub category: ProductCategory,
+    pub price: Money,
+    pub image_url: String,
+    /// Availability; when served from cache offline this is unknown and shown as available.
+    pub in_stock: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stock_qty: Option<i32>,
+    pub tags: Vec<String>,
+}
+
+wire_enum! {
+    /// Order lifecycle.
+    OrderStatus {
+        /// Placed, awaiting staff acceptance; cancellable.
+        Pending = "pending",
+        Accepted = "accepted",
+        Preparing = "preparing",
+        Delivering = "delivering",
+        Done = "done",
+        /// Cancelled by the user or staff; charged amount refunded.
+        Cancelled = "cancelled",
+    }
+}
+
+// ---- BEGIN MANUAL ----
+impl OrderStatus {
+    /// `true` while the order is still in progress (not `done` / `cancelled`).
+    pub const fn is_active(self) -> bool {
+        !matches!(self, OrderStatus::Done | OrderStatus::Cancelled)
+    }
+}
+// ---- END MANUAL ----
+
+/// Line of a placed order; `price` is the unit price at order time.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderItem {
+    pub product_id: Uuid,
+    pub title: String,
+    /// Quantity (1–99).
+    pub qty: i32,
+    pub price: Money,
+}
+
+// ---- BEGIN MANUAL ----
+impl OrderItem {
+    /// `price × qty`.
+    pub fn line_total(&self) -> Money {
+        &self.price * i64::from(self.qty)
+    }
+}
+// ---- END MANUAL ----
+
+/// Line of an order being placed (`shop.order` / `POST /shop/orders`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderLineRequest {
+    pub product_id: Uuid,
+    pub qty: i32,
+}
+
+impl OrderLineRequest {
+    /// Maximum quantity per line.
+    pub const MAX_QTY: i32 = 99;
+
+    /// Maximum lines per order.
+    pub const MAX_LINES: usize = 20;
+}
+
+/// Shop order (IPC_PROTOCOL.md §6.13).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Order {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    /// Seat to deliver to.
+    pub pc_id: Uuid,
+    pub items: Vec<OrderItem>,
+    pub total: Money,
+    pub status: OrderStatus,
+    #[serde(with = "crate::wire::ts")]
+    pub created_at: DateTime<Utc>,
+    #[serde(with = "crate::wire::ts")]
+    pub updated_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// Body of `POST /shop/orders` (SERVER_API.md §4.9). Sent with an `Idempotency-Key`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderCreateRequest {
+    pub user_id: Uuid,
+    pub pc_id: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<Uuid>,
+    pub items: Vec<OrderLineRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+// ---- BEGIN MANUAL ----
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::assert_wire;
+    use chrono::TimeZone;
+
+    #[test]
+    fn enum_wire_values() {
+        assert_wire(ProductCategory::ALL, &["food", "drink", "snack", "service", "merch", "time"]);
+        assert_wire(OrderStatus::ALL, &["pending", "accepted", "preparing", "delivering", "done", "cancelled"]);
+        assert!(OrderStatus::Preparing.is_active());
+        assert!(!OrderStatus::Done.is_active());
+    }
+
+    #[test]
+    fn order_json() {
+        let at = Utc.with_ymd_and_hms(2026, 9, 21, 12, 0, 0).unwrap();
+        let o = Order {
+            id: Uuid::nil(),
+            user_id: Uuid::nil(),
+            pc_id: Uuid::nil(),
+            items: vec![OrderItem { product_id: Uuid::nil(), title: "Cola".into(), qty: 2, price: Money::uzs(1_500_000) }],
+            total: Money::uzs(3_000_000),
+            status: OrderStatus::Pending,
+            created_at: at,
+            updated_at: at,
+            note: None,
+        };
+        let json = serde_json::to_string(&o).unwrap();
+        assert_eq!(
+            json,
+            r#"{"id":"00000000-0000-0000-0000-000000000000","userId":"00000000-0000-0000-0000-000000000000","pcId":"00000000-0000-0000-0000-000000000000","items":[{"productId":"00000000-0000-0000-0000-000000000000","title":"Cola","qty":2,"price":{"amount":1500000,"currency":"UZS"}}],"total":{"amount":3000000,"currency":"UZS"},"status":"pending","createdAt":"2026-09-21T12:00:00.000Z","updatedAt":"2026-09-21T12:00:00.000Z"}"#
+        );
+        assert_eq!(serde_json::from_str::<Order>(&json).unwrap(), o);
+        assert_eq!(o.items[0].line_total(), o.total);
+    }
+
+    #[test]
+    fn product_json() {
+        let p = Product {
+            id: Uuid::nil(),
+            title: "Chips".into(),
+            category: ProductCategory::Snack,
+            price: Money::uzs(800_000),
+            image_url: "https://i".into(),
+            in_stock: true,
+            stock_qty: Some(3),
+            tags: vec![],
+        };
+        let json = serde_json::to_string(&p).unwrap();
+        assert_eq!(
+            json,
+            r#"{"id":"00000000-0000-0000-0000-000000000000","title":"Chips","category":"snack","price":{"amount":800000,"currency":"UZS"},"imageUrl":"https://i","inStock":true,"stockQty":3,"tags":[]}"#
+        );
+        assert_eq!(serde_json::from_str::<Product>(&json).unwrap(), p);
+        let req = OrderCreateRequest {
+            user_id: Uuid::nil(),
+            pc_id: Uuid::nil(),
+            session_id: None,
+            items: vec![OrderLineRequest { product_id: Uuid::nil(), qty: 1 }],
+            note: Some("no ice".into()),
+        };
+        assert_eq!(
+            serde_json::to_string(&req).unwrap(),
+            r#"{"userId":"00000000-0000-0000-0000-000000000000","pcId":"00000000-0000-0000-0000-000000000000","items":[{"productId":"00000000-0000-0000-0000-000000000000","qty":1}],"note":"no ice"}"#
+        );
+    }
+}
+// ---- END MANUAL ----

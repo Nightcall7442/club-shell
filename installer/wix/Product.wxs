@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ClubShell.msi: Agent service + kiosk Shell + configuration defaults + themes.
+
+  Public properties (msiexec /i ClubShell.msi PROP=value ... or via ClubShellSetup.exe):
+    SERVERURL        Central server origin, e.g. https://club.example.uz  (baseUrl/wsUrl are derived from it)
+    CLUBAPIKEY       Club registration key written to agent.json -> server.clubApiKey (hidden from logs)
+    KIOSKUSER        Local kiosk account name (default: club); persisted in HKLM\SOFTWARE\ClubShell\KioskUser
+    INSTALLSHELL     1 (default) installs the Shell feature; 0 installs the Agent only
+    INSTALLFOLDER    Install root (default: C:\Program Files\ClubShell)
+    SKIPDOTNETCHECK  1 skips the .NET runtime launch condition (a newer 8.0.x patch is installed)
+
+  The declarative parts mirror src/ClubShell.Agent/Install/*.ps1: service registration (Service.wxs), ProgramData tree
+  and ACLs (Components.wxs), event-log source, firewall rule. Deferred custom actions (WixQuietExec, run as SYSTEM)
+  cover what Windows Installer cannot express: seeding agent.json from the shipped defaults (fresh install only, an
+  existing file is preserved), sc.exe privs / delayed-auto for the service, and Install\uninstall.ps1 on removal
+  (restores explorer.exe as shell, clears auto-logon, removes the Agent's runtime firewall/hosts changes).
+
+  Verified with wix.exe 5.0.1: builds without warnings; ICE validation reports only the documented ICE03.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <Package Name="ClubShell"
+           Manufacturer="ClubShell contributors"
+           Version="$(var.Version)"
+           UpgradeCode="7E3C9C2A-5B1D-4F6E-9A8B-2C4D6E8F0A1B"
+           Language="1033"
+           Scope="perMachine"
+           InstallerVersion="500"
+           Compressed="yes">
+
+    <SummaryInformation Description="ClubShell client software for gaming clubs (Agent service and kiosk Shell)"
+                        Keywords="Installer,ClubShell,Kiosk" />
+
+    <MajorUpgrade Schedule="afterInstallInitialize"
+                  DowngradeErrorMessage="A newer version of ClubShell is already installed. Uninstall it first to install this version." />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="ClubShell.ico" SourceFile="$(var.IconDir)\icon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="ClubShell.ico" />
+    <!-- ARPNOMODIFY=1 is set by WixUI_InstallDir (no feature selection UI). -->
+    <Property Id="ARPCOMMENTS" Value="Kiosk client for gaming clubs: ClubShellAgent service and clubshell-shell kiosk UI." />
+    <!-- Always write a verbose MSI log to %TEMP%\MSI*.LOG (MsiLogFileLocation), even when msiexec is run without /l. -->
+    <Property Id="MsiLogging" Value="voicewarmupx" />
+
+    <!-- Public, secure properties (available to deferred custom actions and passed through by the bundle). -->
+    <Property Id="SERVERURL" Value="https://club.example.uz" Secure="yes" />
+    <Property Id="CLUBAPIKEY" Secure="yes" Hidden="yes" />
+    <Property Id="INSTALLSHELL" Value="1" Secure="yes" />
+    <Property Id="SKIPDOTNETCHECK" Secure="yes" />
+    <Property Id="KIOSKUSER" Value="club" Secure="yes">
+      <!-- Persisted by the RegistryValues component so uninstall/upgrade know the kiosk account without arguments. -->
+      <RegistrySearch Id="KioskUserSearch" Root="HKLM" Key="SOFTWARE\ClubShell" Name="KioskUser" Type="raw" Bitness="always64" />
+    </Property>
+
+    <!-- Detection: existing agent.json (never overwritten) and the exact .NET runtime the bundle ships. -->
+    <Property Id="AGENTJSONEXISTS">
+      <DirectorySearch Id="ClubShellDataSearch" Path="[CommonAppDataFolder]ClubShell" Depth="0">
+        <FileSearch Id="AgentJsonSearch" Name="agent.json" />
+      </DirectorySearch>
+    </Property>
+    <Property Id="DOTNET8RUNTIME">
+      <RegistrySearch Id="DotnetRuntimeSearch" Root="HKLM"
+                      Key="SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.NETCore.App"
+                      Name="$(var.DotnetRuntimeVersion)" Type="raw" Bitness="always64" />
+    </Property>
+
+    <Launch Condition="Installed OR VersionNT64"
+            Message="ClubShell requires a 64-bit version of Windows." />
+    <Launch Condition="Installed OR (VersionNT &gt;= 603 AND WindowsBuild &gt;= 17763)"
+            Message="ClubShell requires Windows 10 version 1809 (build 17763) or later." />
+    <Launch Condition="Installed OR DOTNET8RUNTIME OR SKIPDOTNETCHECK"
+            Message="The Microsoft .NET Runtime $(var.DotnetRuntimeVersion) (x64) is required. Run ClubShellSetup.exe, which installs it, or install it from https://dotnet.microsoft.com and retry. If a newer 8.0.x runtime is already installed, pass SKIPDOTNETCHECK=1." />
+
+    <!-- Directory layout: C:\Program Files\ClubShell\{Agent,Shell} and C:\ProgramData\ClubShell (ARCHITECTURE.md section 9). -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="ClubShell">
+        <Directory Id="AgentDir" Name="Agent">
+          <Directory Id="AgentConfigDir" Name="config" />
+          <Directory Id="AgentInstallDir" Name="Install" />
+        </Directory>
+        <Directory Id="ShellDir" Name="Shell" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="ClubShellDataDir" Name="ClubShell">
+        <Directory Id="ClubShellThemesDir" Name="themes" />
+        <Directory Id="ClubShellCacheDir" Name="cache">
+          <Directory Id="ClubShellCacheMediaDir" Name="media" />
+          <Directory Id="ClubShellCacheUpdatesDir" Name="updates" />
+        </Directory>
+        <Directory Id="ClubShellLogsDir" Name="logs" />
+        <Directory Id="ClubShellSecureDir" Name="secure" />
+        <Directory Id="ClubShellPendingUpdateDir" Name="pending-update" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ClubShellMenuDir" Name="ClubShell" />
+    </StandardDirectory>
+
+    <!-- Features -->
+    <Feature Id="Agent" Title="ClubShell Agent" Level="1" AllowAbsent="no" Display="expand"
+             ConfigurableDirectory="INSTALLFOLDER"
+             Description="Windows service (ClubShellAgent) that controls the kiosk session, launches games and syncs with the central server. Required.">
+      <ComponentGroupRef Id="AgentFiles" />
+      <ComponentGroupRef Id="AgentService" />
+      <ComponentGroupRef Id="DataFolders" />
+      <ComponentGroupRef Id="RegistryValues" />
+      <ComponentGroupRef Id="EnvironmentVars" />
+      <ComponentGroupRef Id="AdminShortcuts" />
+      <Feature Id="Configs" Title="Configuration defaults" Level="1" AllowAbsent="no"
+               Description="agent.default.json, shell.default.json and policies.example.json shipped next to the Agent; C:\ProgramData\ClubShell\agent.json is seeded from them.">
+        <ComponentGroupRef Id="ConfigFiles" />
+      </Feature>
+      <Feature Id="Themes" Title="Themes" Level="1"
+               Description="Shell themes installed to C:\ProgramData\ClubShell\themes (default.json is required by the Shell).">
+        <ComponentGroupRef Id="ThemeFiles" />
+      </Feature>
+    </Feature>
+    <Feature Id="Shell" Title="ClubShell Shell" Level="1"
+             Description="Full-screen kiosk UI (clubshell-shell.exe) launched by the Agent for the kiosk user. Disable with INSTALLSHELL=0 on Agent-only machines.">
+      <ComponentGroupRef Id="ShellFiles" />
+      <Level Value="0" Condition="INSTALLSHELL = 0" />
+    </Feature>
+
+    <!-- UI: WixUI_InstallDir (welcome, license, install folder, progress). Everything else is command-line properties. -->
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(sys.SOURCEFILEDIR)License.rtf" />
+
+    <!--
+      Custom actions (all deferred, non-impersonated = run as SYSTEM in the execute sequence).
+      Command lines are built by SetProperty into the property named after the action (WixQuietExec convention).
+    -->
+
+    <!-- 1. Seed C:\ProgramData\ClubShell\agent.json from Agent\config\agent.default.json with the public properties.
+            Same transformation as install.ps1: baseUrl = <origin>/api/v1, wsUrl = ws(s)://<host>/ws/agent.
+            The script is brace/bracket free on purpose: MSI Formatted strings treat [..] and {..} specially.
+            The command line exceeds the 255-character width ICE03 validates for CustomAction.Target; Windows Installer
+            does not enforce that width and WixQuietExec runs it unchanged, so that single ICE03 warning is expected. -->
+    <SetProperty Id="CA_SeedAgentConfig" Sequence="execute" Before="CA_SeedAgentConfig"
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command &quot;$ErrorActionPreference = 'Stop'; $c = Get-Content -LiteralPath '[AgentConfigDir]agent.default.json' -Raw | ConvertFrom-Json; $u = '[SERVERURL]'.TrimEnd('/') -replace '/api/v\d+$', ''; $c.server.baseUrl = $u + '/api/v1'; $c.server.wsUrl = ($u -replace '^http', 'ws') + '/ws/agent'; $c.server.clubApiKey = '[CLUBAPIKEY]'; $c.shell.kioskUser.name = '[KIOSKUSER]'; $c | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath '[ClubShellDataDir]agent.json' -Encoding utf8&quot;" />
+    <CustomAction Id="CA_SeedAgentConfig" DllEntry="WixQuietExec" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+                  Execute="deferred" Impersonate="no" Return="check" HideTarget="yes" />
+    <!-- The command line carries CLUBAPIKEY: keep the property change out of the MSI log as well. -->
+    <Property Id="CA_SeedAgentConfig" Hidden="yes" />
+
+    <!-- 2. Service privileges (sc.exe privs) and delayed auto-start + failure flag, exactly as register-service.ps1.
+            Both run after InstallServices (service exists) and before StartServices (privileges apply at start). -->
+    <SetProperty Id="CA_ServicePrivileges" Sequence="execute" Before="CA_ServicePrivileges"
+                 Value="&quot;[System64Folder]sc.exe&quot; privs ClubShellAgent SeTcbPrivilege/SeAssignPrimaryTokenPrivilege/SeIncreaseQuotaPrivilege/SeShutdownPrivilege/SeDebugPrivilege/SeBackupPrivilege/SeRestorePrivilege" />
+    <CustomAction Id="CA_ServicePrivileges" DllEntry="WixQuietExec" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+                  Execute="deferred" Impersonate="no" Return="check" />
+    <SetProperty Id="CA_ServiceStartMode" Sequence="execute" Before="CA_ServiceStartMode"
+                 Value="&quot;[System64Folder]cmd.exe&quot; /d /c &quot;sc.exe config ClubShellAgent start= delayed-auto &amp;&amp; sc.exe failureflag ClubShellAgent 1&quot;" />
+    <CustomAction Id="CA_ServiceStartMode" DllEntry="WixQuietExec" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+                  Execute="deferred" Impersonate="no" Return="check" />
+
+    <!-- 3. Full uninstall: Install\uninstall.ps1 (service already removed by MSI; restores shell/auto-logon,
+            removes ClubShell-* firewall rules and the hosts-file block). Never blocks removal. -->
+    <SetProperty Id="CA_UninstallCleanup" Sequence="execute" Before="CA_UninstallCleanup"
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[AgentInstallDir]uninstall.ps1&quot; -KioskUser &quot;[KIOSKUSER]&quot;" />
+    <CustomAction Id="CA_UninstallCleanup" DllEntry="WixQuietExec" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="CA_SeedAgentConfig" After="InstallFiles"
+              Condition="NOT Installed AND NOT AGENTJSONEXISTS AND NOT REMOVE" />
+      <Custom Action="CA_ServicePrivileges" After="InstallServices"
+              Condition="NOT REMOVE" />
+      <Custom Action="CA_ServiceStartMode" After="CA_ServicePrivileges"
+              Condition="NOT REMOVE" />
+      <Custom Action="CA_UninstallCleanup" Before="RemoveFiles"
+              Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+    </InstallExecuteSequence>
+
+  </Package>
+</Wix>

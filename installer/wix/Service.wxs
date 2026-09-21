@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ClubShellAgent Windows service, declared as src/ClubShell.Agent/Install/register-service.ps1 configures it:
+    binPath  C:\Program Files\ClubShell\Agent\ClubShellAgent.exe (no arguments; the exe runs as a service by default)
+    account  LocalSystem, own process, not interactive, start = Automatic
+    depend   LanmanWorkstation / Tcpip
+    failure  restart the service on failure (util:ServiceConfig: three restarts, 5 s delay, counter reset after 1 day)
+    delayed  sc config start= delayed-auto and the service privileges (sc privs SeTcb/SeAssignPrimaryToken/
+             SeIncreaseQuota/SeShutdown/SeDebug/SeBackup/SeRestore) are applied by CA_ServicePrivileges and
+             CA_ServiceStartMode in Product.wxs, deferred between InstallServices and StartServices. The core WiX ServiceConfig elements
+             (MsiServiceConfig) are avoided on purpose: WiX flags them as unreliable (WIX1149).
+  The exe file is the key path of this component because Windows Installer takes the service binary from it.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
+     xmlns:fw="http://wixtoolset.org/schemas/v4/wxs/firewall">
+
+  <Fragment>
+    <ComponentGroup Id="AgentService">
+      <Component Id="AgentExe" Directory="AgentDir">
+        <File Id="ClubShellAgent.exe" Source="$(var.AgentPublishDir)\ClubShellAgent.exe" KeyPath="yes">
+          <!-- Inbound exception for the service binary (server push, remote administration, update delivery). -->
+          <fw:FirewallException Id="AgentFirewallException"
+                                Name="ClubShell Agent"
+                                Description="Allows inbound connections to the ClubShell Agent service."
+                                Profile="all"
+                                IgnoreFailure="yes" />
+        </File>
+
+        <ServiceInstall Id="AgentServiceInstall"
+                        Name="ClubShellAgent"
+                        DisplayName="ClubShell Agent"
+                        Description="ClubShell client agent: kiosk session control, game launching, policy enforcement and server sync."
+                        Type="ownProcess"
+                        Start="auto"
+                        ErrorControl="normal"
+                        Account="LocalSystem"
+                        Interactive="no"
+                        Vital="yes">
+          <ServiceDependency Id="LanmanWorkstation" />
+          <ServiceDependency Id="Tcpip" />
+          <!-- Recovery: sc failure reset= 86400 actions= restart/5000/restart/5000/restart/5000 -->
+          <util:ServiceConfig FirstFailureActionType="restart"
+                              SecondFailureActionType="restart"
+                              ThirdFailureActionType="restart"
+                              RestartServiceDelayInSeconds="5"
+                              ResetPeriodInDays="1" />
+        </ServiceInstall>
+
+        <!-- Start after install (privileges granted first), stop on install/uninstall, delete on uninstall. -->
+        <ServiceControl Id="AgentServiceControl"
+                        Name="ClubShellAgent"
+                        Start="install"
+                        Stop="both"
+                        Remove="uninstall"
+                        Wait="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>

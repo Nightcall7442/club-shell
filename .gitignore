@@ -1,0 +1,72 @@
+# ---- .NET ----
+bin/
+obj/
+artifacts/
+.vs/
+*.user
+*.suo
+*.binlog
+*.nupkg
+*.snupkg
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+
+# ---- Node / pnpm / Vite ----
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+.pnpm-store/
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# ---- Rust / Cargo ----
+target/
+**/*.rs.bk
+
+# ---- Tauri ----
+apps/shell/src-tauri/gen/
+apps/shell/src-tauri/target/
+
+# ---- Playwright ----
+test-results/
+playwright-report/
+playwright/.cache/
+blob-report/
+
+# ---- WiX ----
+*.wixpdb
+*.wixobj
+*.wixmst
+*.wixmsp
+installer/out/
+
+# ---- Environment / secrets ----
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.key
+*.snk
+
+# ---- Logs / dumps ----
+logs/
+*.log
+*.dmp
+
+# ---- Editors / OS ----
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ---- ContractsGen output markers (generated sources themselves are committed) ----
+.contractsgen.stamp
+**/.contractsgen/
+tools/MockServer/.mock-db.json

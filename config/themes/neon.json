@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "name": "neon",
+  "displayName": "Neon Night",
+  "colors": {
+    "bg": "#07060F",
+    "surface": "#120F24",
+    "primary": "#A855F7",
+    "accent": "#F0ABFC",
+    "text": "#FAF5FF",
+    "muted": "#8E85B3",
+    "danger": "#FB7185",
+    "success": "#34D399"
+  },
+  "radius": 16,
+  "font": "Rajdhani",
+  "backgroundVideo": "themes/assets/neon-loop.mp4",
+  "wallpaper": "themes/assets/neon-wallpaper.jpg",
+  "blur": 20,
+  "animations": true
+}

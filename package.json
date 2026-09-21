@@ -1,0 +1,34 @@
+{
+  "name": "clubshell-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ClubShell client software for gaming clubs: kiosk shell (Tauri 2 + React), TS contracts, mock server, e2e tests",
+  "license": "MIT",
+  "packageManager": "pnpm@9.9.0",
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter ./apps/shell --filter ./tools/MockServer dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "prettier --check \"{apps,packages,tools,tests}/**/*.{ts,tsx}\" \"!**/dist/**\"",
+    "format": "prettier --write \"{apps,packages,tools,tests}/**/*.{ts,tsx}\" \"!**/dist/**\"",
+    "test:e2e": "pnpm --filter @clubshell/shell-e2e test",
+    "mock": "pnpm --filter @clubshell/mock-server dev",
+    "tauri": "pnpm --filter @clubshell/shell tauri",
+    "contracts:build": "pnpm --filter @clubshell/contracts build"
+  },
+  "devDependencies": {
+    "prettier": "3.3.3",
+    "typescript": "5.5.4"
+  },
+  "prettier": {
+    "printWidth": 120,
+    "singleQuote": true,
+    "trailingComma": "all",
+    "semi": true,
+    "endOfLine": "lf"
+  }
+}

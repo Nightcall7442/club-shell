@@ -1,0 +1,52 @@
+[package]
+name = "clubshell-shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "ClubShell kiosk shell: Tauri 2 host for the React UI, named-pipe client to ClubShellAgent, kiosk hardening, gamepad, tray"
+publish = false
+default-run = "clubshell-shell"
+
+[lib]
+name = "clubshell_shell_lib"
+path = "src/lib.rs"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "clubshell-shell"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+# `protocol-asset` backs `kiosk_asset_url` (asset:// URLs for themes\ and cache\media\).
+tauri = { workspace = true, features = ["tray-icon", "protocol-asset"] }
+tauri-plugin-log.workspace = true
+tauri-plugin-process.workspace = true
+tauri-plugin-os.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+parking_lot.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+futures.workspace = true
+bytes.workspace = true
+gilrs.workspace = true
+windows.workspace = true
+clubshell-protocol.workspace = true
+clubshell-winutil.workspace = true
+
+[features]
+default = ["custom-protocol"]
+# This feature is used for production builds or when a dev server is not specified; DO NOT REMOVE.
+custom-protocol = ["tauri/custom-protocol"]
+# Devtools are always available in debug builds; enable this to keep them in release (shell.json → devtools).
+devtools = ["tauri/devtools"]

@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ClubShellSetup.exe: Burn bundle = prerequisites + ClubShell.msi.
+
+    ClubShellSetup.exe                                        interactive (license, install folder)
+    ClubShellSetup.exe /quiet SERVERURL=https://club.example.uz CLUBAPIKEY=... KIOSKUSER=club INSTALLSHELL=1
+    ClubShellSetup.exe /layout C:\offline                     download the prerequisites next to the bundle
+    ClubShellSetup.exe /uninstall /quiet
+
+  Chain: .NET 8 runtime (x64, remote payload, skipped when the exact version is registered) ->
+         WebView2 Evergreen bootstrapper (remote payload, skipped when a per-machine runtime exists or INSTALLSHELL=0) ->
+         ClubShell.msi (vital, per-machine, public properties passed through from the bundle variables).
+
+  Payload URL/size/SHA-512 defines come from ClubShell.Installer.wixproj (Dotnet* / WebView2* properties).
+  Built with:  dotnet build installer/wix/ClubShell.Installer.wixproj -c Bundle   (after -c Release produced the MSI)
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <Bundle Name="ClubShell"
+          Version="$(var.Version)"
+          Manufacturer="ClubShell contributors"
+          Copyright="Copyright (c) 2026 ClubShell contributors"
+          UpgradeCode="9B4E0D7C-3A2F-4C8E-B6D1-5F7A9C1E2D3B"
+          IconSourceFile="$(var.IconDir)\icon.ico"
+          Compressed="yes">
+
+    <bal:Condition Condition="VersionNT64"
+                   Message="ClubShell requires a 64-bit version of Windows." />
+    <bal:Condition Condition="WindowsBuildNumber &gt;= 17763"
+                   Message="ClubShell requires Windows 10 version 1809 (build 17763) or later." />
+
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication Theme="rtfLicense"
+                                              LicenseFile="$(sys.SOURCEFILEDIR)License.rtf"
+                                              LogoFile="$(var.IconDir)\128x128.png"
+                                              ShowVersion="yes"
+                                              SuppressOptionsUI="no" />
+    </BootstrapperApplication>
+
+    <Log PathVariable="ClubShellSetupLogPath" Prefix="ClubShellSetup" Extension="log" />
+
+    <!-- Overridable on the command line (NAME=value); forwarded to the MSI as public properties. -->
+    <Variable Name="InstallFolder" Type="formatted" Value="[ProgramFiles64Folder]ClubShell" bal:Overridable="yes" />
+    <Variable Name="SERVERURL" Type="string" Value="https://club.example.uz" bal:Overridable="yes" />
+    <Variable Name="CLUBAPIKEY" Hidden="yes" bal:Overridable="yes" />
+    <Variable Name="KIOSKUSER" Type="string" Value="club" bal:Overridable="yes" />
+    <Variable Name="INSTALLSHELL" Type="string" Value="1" bal:Overridable="yes" />
+
+    <!-- Prerequisite detection -->
+    <util:RegistrySearch Id="DotnetRuntimeSearch"
+                         Variable="DotnetRuntimeInstalled"
+                         Root="HKLM"
+                         Key="SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.NETCore.App"
+                         Value="$(var.DotnetRuntimeVersion)"
+                         Result="exists"
+                         Bitness="always64" />
+    <util:RegistrySearch Id="WebView2Search"
+                         Variable="WebView2Version"
+                         Root="HKLM"
+                         Key="SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+                         Value="pv"
+                         Result="value"
+                         Bitness="always64" />
+
+    <Chain>
+
+      <!-- Microsoft .NET Runtime (framework-dependent Agent service). Never uninstalled by this bundle. -->
+      <ExePackage Id="DotnetRuntime"
+                  DisplayName="Microsoft .NET Runtime $(var.DotnetRuntimeVersion) (x64)"
+                  DetectCondition="DotnetRuntimeInstalled"
+                  InstallArguments="/install /quiet /norestart"
+                  RepairArguments="/repair /quiet /norestart"
+                  PerMachine="yes"
+                  Permanent="yes"
+                  Vital="yes"
+                  Cache="remove">
+        <ExePackagePayload Name="dotnet-runtime-$(var.DotnetRuntimeVersion)-win-x64.exe"
+                           DownloadUrl="$(var.DotnetRuntimeUrl)"
+                           Hash="$(var.DotnetRuntimeSha512)"
+                           Size="$(var.DotnetRuntimeSize)"
+                           Version="$(var.DotnetRuntimeFileVersion)"
+                           ProductName="Microsoft .NET Runtime - $(var.DotnetRuntimeVersion) (x64)"
+                           Description="Microsoft .NET Runtime - $(var.DotnetRuntimeVersion) (x64)" />
+        <ExitCode Value="0" Behavior="success" />
+        <ExitCode Value="1638" Behavior="success" />
+        <ExitCode Value="3010" Behavior="scheduleReboot" />
+      </ExePackage>
+
+      <!-- Microsoft Edge WebView2 Runtime (Tauri shell). The Evergreen bootstrapper downloads the current runtime. -->
+      <ExePackage Id="WebView2Runtime"
+                  DisplayName="Microsoft Edge WebView2 Runtime"
+                  DetectCondition="WebView2Version AND WebView2Version &lt;&gt; &quot;0.0.0.0&quot;"
+                  InstallCondition="INSTALLSHELL &lt;&gt; &quot;0&quot;"
+                  InstallArguments="/silent /install"
+                  RepairArguments="/silent /install"
+                  PerMachine="yes"
+                  Permanent="yes"
+                  Vital="yes"
+                  Cache="remove">
+        <ExePackagePayload Name="MicrosoftEdgeWebView2Setup.exe"
+                           DownloadUrl="$(var.WebView2Url)"
+                           Hash="$(var.WebView2Sha512)"
+                           Size="$(var.WebView2Size)"
+                           Version="$(var.WebView2FileVersion)"
+                           ProductName="Microsoft Edge Update"
+                           Description="Microsoft Edge Update Setup" />
+        <ExitCode Value="0" Behavior="success" />
+        <ExitCode Value="3010" Behavior="scheduleReboot" />
+      </ExePackage>
+
+      <!-- ClubShell itself -->
+      <MsiPackage Id="ClubShellMsi"
+                  SourceFile="$(var.MsiPath)"
+                  DisplayName="ClubShell"
+                  Vital="yes"
+                  ForcePerMachine="yes"
+                  Compressed="yes"
+                  Visible="no"
+                  Cache="keep">
+        <MsiProperty Name="INSTALLFOLDER" Value="[InstallFolder]" />
+        <MsiProperty Name="SERVERURL" Value="[SERVERURL]" />
+        <MsiProperty Name="CLUBAPIKEY" Value="[CLUBAPIKEY]" />
+        <MsiProperty Name="KIOSKUSER" Value="[KIOSKUSER]" />
+        <MsiProperty Name="INSTALLSHELL" Value="[INSTALLSHELL]" />
+      </MsiPackage>
+
+    </Chain>
+  </Bundle>
+</Wix>

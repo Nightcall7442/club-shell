@@ -1,0 +1,117 @@
+/* Imports must precede every other rule (PostCSS `@import` semantics). */
+@import './theme/tokens.css';
+@import './theme/animations.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  html {
+    background-color: rgb(var(--c-bg));
+    color: rgb(var(--c-text));
+    font-family: var(--font), system-ui, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    line-height: 1.4;
+    overscroll-behavior: none;
+    touch-action: manipulation;
+  }
+
+  /* Kiosk: nothing is selectable or draggable except text inputs. */
+  * {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-user-drag: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  input,
+  textarea,
+  [contenteditable="true"] {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  img,
+  video {
+    pointer-events: none;
+    max-width: 100%;
+    display: block;
+  }
+
+  /* Cursor rules: pointer on anything interactive, default elsewhere; hidden when the shell says so. */
+  button,
+  a,
+  [role="button"],
+  [role="tab"],
+  [role="option"],
+  [role="menuitem"],
+  label[for],
+  select,
+  summary {
+    cursor: pointer;
+  }
+  button:disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+  input,
+  textarea {
+    cursor: text;
+  }
+  :root[data-cursor="hidden"],
+  :root[data-cursor="hidden"] * {
+    cursor: none !important;
+  }
+
+  /* Native focus outline is replaced by the themed ring (.focus-ring / ring-primary). */
+  :focus {
+    outline: none;
+  }
+  :focus-visible {
+    outline: 2px solid rgb(var(--c-primary));
+    outline-offset: 2px;
+  }
+  .focus-ring:focus-visible {
+    outline: none;
+  }
+
+  /* Kill the WebView2 default context menu look-alikes and the number spinners. */
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="search"]::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+  }
+
+  ::selection {
+    background: rgb(var(--c-primary) / 0.35);
+  }
+
+  /* Screen container: the app never scrolls horizontally. */
+  #root {
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
+    overflow-y: hidden;
+    position: relative;
+    isolation: isolate;
+  }
+}

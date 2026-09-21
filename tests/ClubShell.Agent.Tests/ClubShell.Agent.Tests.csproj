@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Must match ClubShell.Agent / ClubShell.Windows: a lower TargetPlatformVersion cannot reference a higher one. -->
+    <TargetFramework>net8.0-windows10.0.17763.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <RootNamespace>ClubShell.Agent.Tests</RootNamespace>
+    <!-- ClubShellAgent is built for win-x64; matching the architecture avoids MSB3270 on the project reference. -->
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/ClubShell.Contracts/ClubShell.Contracts.csproj" />
+    <ProjectReference Include="../../src/ClubShell.Core/ClubShell.Core.csproj" />
+    <ProjectReference Include="../../src/ClubShell.Windows/ClubShell.Windows.csproj" />
+    <ProjectReference Include="../../src/ClubShell.Agent/ClubShell.Agent.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="NSubstitute" />
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="coverlet.collector" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="FluentAssertions" />
+    <Using Include="NSubstitute" />
+  </ItemGroup>
+
+</Project>

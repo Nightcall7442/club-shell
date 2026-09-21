@@ -1,0 +1,49 @@
+[package]
+name = "clubshell-winutil"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Win32 helpers for the ClubShell kiosk shell: low-level hooks, input/idle, monitors, named-pipe client, window management (windows 0.58)"
+publish = false
+
+[lib]
+name = "clubshell_winutil"
+path = "src/lib.rs"
+
+[features]
+default = ["test-server"]
+# In-process echo server (`pipe::test_server`) used by `tests/shell-rs`; no extra dependencies.
+# Production builds may opt out with `default-features = false`.
+test-server = []
+
+[dependencies]
+clubshell-protocol.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+parking_lot.workspace = true
+bytes.workspace = true
+tokio = { workspace = true, features = ["rt", "net", "io-util", "time", "sync", "macros"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Shell",
+  "Win32_UI_Accessibility",
+  "Win32_UI_HiDpi",
+  "Win32_Graphics_Gdi",
+  "Win32_Graphics_Dwm",
+  "Win32_System_Threading",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Pipes",
+  "Win32_System_IO",
+  "Win32_Storage_FileSystem",
+  "Win32_Security",
+  "Win32_System_SystemInformation",
+] }

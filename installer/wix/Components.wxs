@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  File, folder, registry, environment and event-log components of ClubShell.msi (service + firewall: Service.wxs).
+  Explicit components (no harvesting): one file per component. File/registry key paths get auto GUIDs;
+  directory-keyed components (CreateFolder / Environment) need the fixed GUIDs below (WIX0230).
+
+  Preprocessor variables (from ClubShell.Installer.wixproj):
+    AgentPublishDir  dotnet publish output of the Agent (single-file exe + native sqlite + appsettings.json)
+    ShellBundleDir   cargo release output containing clubshell-shell.exe
+    ConfigDir        <repo>/config (defaults + themes)
+    AgentScriptsDir  <repo>/src/ClubShell.Agent/Install (*.ps1)
+    Version          numeric product version
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <!-- C:\Program Files\ClubShell\Agent (ClubShellAgent.exe itself lives in Service.wxs: the service binary must be
+       the key path of the component that carries ServiceInstall). -->
+  <Fragment>
+    <ComponentGroup Id="AgentFiles">
+      <!-- Microsoft.Data.Sqlite native library: excluded from the single-file bundle, shipped next to the exe. -->
+      <Component Id="AgentSqliteNative" Directory="AgentDir">
+        <File Id="e_sqlite3.dll" Source="$(var.AgentPublishDir)\e_sqlite3.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="AgentAppSettings" Directory="AgentDir">
+        <File Id="appsettings.json" Source="$(var.AgentPublishDir)\appsettings.json" KeyPath="yes" />
+      </Component>
+
+      <!-- Install\*.ps1: used by the uninstall custom action and for manual (re)configuration by administrators. -->
+      <Component Id="AgentInstallScript" Directory="AgentInstallDir">
+        <File Id="install.ps1" Source="$(var.AgentScriptsDir)\install.ps1" KeyPath="yes" />
+      </Component>
+      <Component Id="AgentRegisterServiceScript" Directory="AgentInstallDir">
+        <File Id="register_service.ps1" Name="register-service.ps1" Source="$(var.AgentScriptsDir)\register-service.ps1" KeyPath="yes" />
+      </Component>
+      <Component Id="AgentUninstallScript" Directory="AgentInstallDir">
+        <File Id="uninstall.ps1" Source="$(var.AgentScriptsDir)\uninstall.ps1" KeyPath="yes" />
+      </Component>
+
+      <!-- Application event-log source used by Serilog (manageEventSource: false -> must exist before first start).
+           Message file: the .NET Framework generic message DLL, the same one New-EventLog registers. -->
+      <Component Id="AgentEventLogSource" Directory="AgentDir">
+        <util:EventSource Name="ClubShellAgent"
+                          Log="Application"
+                          EventMessageFile="[WindowsFolder]Microsoft.NET\Framework64\v4.0.30319\EventLogMessages.dll"
+                          SupportsErrors="yes"
+                          SupportsWarnings="yes"
+                          SupportsInformationals="yes"
+                          KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <!-- C:\Program Files\ClubShell\Shell -->
+  <Fragment>
+    <ComponentGroup Id="ShellFiles">
+      <!-- Tauri 2 embeds the web assets, icons and the WebView2 loader in the executable. -->
+      <Component Id="ShellExe" Directory="ShellDir">
+        <File Id="clubshell_shell.exe" Name="clubshell-shell.exe" Source="$(var.ShellBundleDir)\clubshell-shell.exe" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <!-- C:\Program Files\ClubShell\Agent\config: shipped defaults read by the Agent (ClubShellPaths.ShippedAgentDefaults,
+       PolicyHandlers.ShippedDefaultsPath, PolicyStore.ShippedDefaultsPath) and used to seed agent.json. -->
+  <Fragment>
+    <ComponentGroup Id="ConfigFiles">
+      <Component Id="ConfigAgentDefaults" Directory="AgentConfigDir">
+        <File Id="agent.default.json" Source="$(var.ConfigDir)\agent.default.json" KeyPath="yes" />
+      </Component>
+      <Component Id="ConfigShellDefaults" Directory="AgentConfigDir">
+        <File Id="shell.default.json" Source="$(var.ConfigDir)\shell.default.json" KeyPath="yes" />
+      </Component>
+      <Component Id="ConfigPoliciesExample" Directory="AgentConfigDir">
+        <File Id="policies.example.json" Source="$(var.ConfigDir)\policies.example.json" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <!-- C:\ProgramData\ClubShell\themes: read directly by the Shell; default.json is mandatory. -->
+  <Fragment>
+    <ComponentGroup Id="ThemeFiles">
+      <Component Id="ThemeDefault" Directory="ClubShellThemesDir">
+        <File Id="theme_default.json" Name="default.json" Source="$(var.ConfigDir)\themes\default.json" KeyPath="yes" />
+      </Component>
+      <Component Id="ThemeNeon" Directory="ClubShellThemesDir">
+        <File Id="theme_neon.json" Name="neon.json" Source="$(var.ConfigDir)\themes\neon.json" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <!--
+    C:\ProgramData\ClubShell tree with the ACLs from ARCHITECTURE.md section 9 / install.ps1, as SDDL
+    (MsiLockPermissionsEx, locale independent):
+      root    SYSTEM + Administrators full, Users read/execute; inheritance cut (P) like icacls /inheritance:r
+      secure  SYSTEM + Administrators only (the Agent grants the kiosk user shell.token at runtime)
+      logs    Users modify (Shell log files); everything else inherits the root ACL (cache\media, themes: read)
+    The kiosk account is a member of Users, so it gets the same rights install.ps1 grants per SID.
+  -->
+  <Fragment>
+    <ComponentGroup Id="DataFolders">
+      <Component Id="DataRootFolder" Guid="7A850FC4-B1C6-49AC-AFEE-1EC7FF2F3B82" Directory="ClubShellDataDir">
+        <CreateFolder>
+          <PermissionEx Sddl="D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)" />
+        </CreateFolder>
+      </Component>
+      <Component Id="DataSecureFolder" Guid="71C82E0E-CDD0-49F6-85FC-1A5883DDC982" Directory="ClubShellSecureDir">
+        <CreateFolder>
+          <PermissionEx Sddl="D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+        </CreateFolder>
+      </Component>
+      <Component Id="DataLogsFolder" Guid="D325AE59-78D0-47B6-A09D-B806EBA4C7C9" Directory="ClubShellLogsDir">
+        <CreateFolder>
+          <PermissionEx Sddl="D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1301bf;;;BU)" />
+        </CreateFolder>
+      </Component>
+      <Component Id="DataThemesFolder" Guid="6430302C-36D6-48DD-8D9D-BD996E59FCCE" Directory="ClubShellThemesDir">
+        <CreateFolder />
+      </Component>
+      <Component Id="DataCacheFolder" Guid="019079CA-BC19-43AF-A3F7-B1E60347F45A" Directory="ClubShellCacheDir">
+        <CreateFolder />
+      </Component>
+      <Component Id="DataCacheMediaFolder" Guid="3F2B7C41-8D5E-4A0B-9C6F-1E2D3A4B5C6D" Directory="ClubShellCacheMediaDir">
+        <CreateFolder />
+      </Component>
+      <Component Id="DataCacheUpdatesFolder" Guid="4864C961-80DF-47A3-BD93-F4B277A5F8EA" Directory="ClubShellCacheUpdatesDir">
+        <CreateFolder />
+      </Component>
+      <Component Id="DataPendingUpdateFolder" Guid="9D0A5926-8567-4073-89DD-D9120848E74F" Directory="ClubShellPendingUpdateDir">
+        <CreateFolder />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <!-- HKLM\SOFTWARE\ClubShell: install location, version and the kiosk account (read back by KIOSKUSER on uninstall). -->
+  <Fragment>
+    <ComponentGroup Id="RegistryValues">
+      <Component Id="RegistryInstallInfo" Directory="INSTALLFOLDER">
+        <RegistryKey Root="HKLM" Key="SOFTWARE\ClubShell">
+          <RegistryValue Name="InstallDir" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+          <RegistryValue Name="AgentDir" Type="string" Value="[AgentDir]" />
+          <RegistryValue Name="ShellDir" Type="string" Value="[ShellDir]" />
+          <RegistryValue Name="DataDir" Type="string" Value="[ClubShellDataDir]" />
+          <RegistryValue Name="Version" Type="string" Value="$(var.Version)" />
+          <RegistryValue Name="KioskUser" Type="string" Value="[KIOSKUSER]" />
+        </RegistryKey>
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <!-- Machine-wide CLUBSHELL_HOME = install root, for scripts and support tooling. -->
+  <Fragment>
+    <ComponentGroup Id="EnvironmentVars">
+      <Component Id="EnvClubShellHome" Guid="6A1E4F57-9433-4CB8-B401-B8FD8E07316B" Directory="INSTALLFOLDER">
+        <CreateFolder />
+        <Environment Id="CLUBSHELL_HOME" Name="CLUBSHELL_HOME" Value="[INSTALLFOLDER]"
+                     System="yes" Action="set" Part="all" Permanent="no" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>

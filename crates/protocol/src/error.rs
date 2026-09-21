@@ -1,0 +1,618 @@
+//! Mirror of `ClubShell.Contracts.Errors` (ErrorCode.cs) and `ClubShell.Contracts.Ipc` (IpcErrors.cs),
+//! plus [`ProtocolError`] for framing / serde failures of this crate.
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use crate::games::AntiCheatKind;
+use crate::wallet::Money;
+
+// ---- BEGIN MANUAL ----
+use std::fmt;
+
+use serde::de::DeserializeOwned;
+use serde_json::Map;
+use thiserror::Error;
+
+use crate::wire::to_value_infallible;
+// ---- END MANUAL ----
+
+wire_enum! {
+    /// Error codes shared verbatim by the IPC protocol (`IpcError.code`), the central-server REST error
+    /// envelope (`error.code`) and the Tauri `ShellError.code` (IPC_PROTOCOL.md §5).
+    ErrorCode {
+        /// Not authenticated / bad token / bad credentials (HTTP 401).
+        Unauthorized = "unauthorized",
+        /// Authenticated but not allowed: role, SID, capability (HTTP 403).
+        Forbidden = "forbidden",
+        /// Entity or message name unknown (HTTP 404).
+        NotFound = "notFound",
+        /// Payload invalid; `details.field` / `details.reason` (HTTP 400).
+        Validation = "validation",
+        /// State conflict: duplicate, out of stock, already joined (HTTP 409).
+        Conflict = "conflict",
+        /// Balance too low; `details: { required, available }` (HTTP 402).
+        InsufficientFunds = "insufficientFunds",
+        /// Operation needs an active/paused session (HTTP 409).
+        SessionNotActive = "sessionNotActive",
+        /// `session.start` while a session already exists (HTTP 409).
+        SessionAlreadyActive = "sessionAlreadyActive",
+        /// Game not installed or install path missing (HTTP 409).
+        GameNotInstalled = "gameNotInstalled",
+        /// Launcher error; `details: { stage, exitCode?, stderr? }` (HTTP 500).
+        GameLaunchFailed = "gameLaunchFailed",
+        /// No free pooled account (HTTP 409).
+        AccountPoolExhausted = "accountPoolExhausted",
+        /// Anti-cheat prerequisite failed; `details: { kind, reason }` (HTTP 403).
+        AntiCheatBlocked = "antiCheatBlocked",
+        /// Blocked by policy; `details: { rule }` (HTTP 403).
+        PolicyDenied = "policyDenied",
+        /// Agent has no server connection and cannot serve from cache (HTTP 503).
+        AgentOffline = "agentOffline",
+        /// Server returned 5xx or the circuit breaker is open (HTTP 503).
+        ServerUnavailable = "serverUnavailable",
+        /// Upstream or launch timeout (HTTP 504).
+        Timeout = "timeout",
+        /// Too many requests; `details.retryAfterSec` (HTTP 429).
+        RateLimited = "rateLimited",
+        /// Unexpected exception; `details.traceId` (HTTP 500).
+        Internal = "internal",
+        /// Envelope / framing violation (HTTP 400).
+        ProtocolError = "protocolError",
+        /// Protocol or application version unsupported; `details: { supported, got }` (HTTP 426).
+        VersionMismatch = "versionMismatch",
+    }
+}
+
+// ---- BEGIN MANUAL ----
+impl ErrorCode {
+    /// Human-readable English description (safe for logs; the UI localizes by code).
+    pub const fn describe(self) -> &'static str {
+        match self {
+            ErrorCode::Unauthorized => "Not authenticated, bad token or bad credentials",
+            ErrorCode::Forbidden => "Authenticated but not allowed",
+            ErrorCode::NotFound => "Entity or message name unknown",
+            ErrorCode::Validation => "Payload invalid",
+            ErrorCode::Conflict => "State conflict",
+            ErrorCode::InsufficientFunds => "Balance too low",
+            ErrorCode::SessionNotActive => "Operation requires an active or paused session",
+            ErrorCode::SessionAlreadyActive => "A session is already active",
+            ErrorCode::GameNotInstalled => "Game is not installed",
+            ErrorCode::GameLaunchFailed => "Game launcher failed",
+            ErrorCode::AccountPoolExhausted => "No free pooled account",
+            ErrorCode::AntiCheatBlocked => "Anti-cheat prerequisite failed",
+            ErrorCode::PolicyDenied => "Blocked by policy",
+            ErrorCode::AgentOffline => "Agent is offline and cannot serve the request from cache",
+            ErrorCode::ServerUnavailable => "Server unavailable",
+            ErrorCode::Timeout => "Operation timed out",
+            ErrorCode::RateLimited => "Rate limit exceeded",
+            ErrorCode::Internal => "Internal error",
+            ErrorCode::ProtocolError => "Protocol violation",
+            ErrorCode::VersionMismatch => "Version unsupported",
+        }
+    }
+
+    /// HTTP status equivalent (IPC_PROTOCOL.md §5, "HTTP equiv").
+    pub const fn to_http_status(self) -> u16 {
+        match self {
+            ErrorCode::Unauthorized => 401,
+            ErrorCode::Forbidden => 403,
+            ErrorCode::NotFound => 404,
+            ErrorCode::Validation => 400,
+            ErrorCode::Conflict => 409,
+            ErrorCode::InsufficientFunds => 402,
+            ErrorCode::SessionNotActive => 409,
+            ErrorCode::SessionAlreadyActive => 409,
+            ErrorCode::GameNotInstalled => 409,
+            ErrorCode::GameLaunchFailed => 500,
+            ErrorCode::AccountPoolExhausted => 409,
+            ErrorCode::AntiCheatBlocked => 403,
+            ErrorCode::PolicyDenied => 403,
+            ErrorCode::AgentOffline => 503,
+            ErrorCode::ServerUnavailable => 503,
+            ErrorCode::Timeout => 504,
+            ErrorCode::RateLimited => 429,
+            ErrorCode::Internal => 500,
+            ErrorCode::ProtocolError => 400,
+            ErrorCode::VersionMismatch => 426,
+        }
+    }
+
+    /// Best-effort reverse mapping for responses without a parseable error envelope
+    /// (409 → `Conflict`, 5xx → `ServerUnavailable`).
+    pub const fn from_http_status(status: u16) -> ErrorCode {
+        match status {
+            400 => ErrorCode::Validation,
+            401 => ErrorCode::Unauthorized,
+            402 => ErrorCode::InsufficientFunds,
+            403 => ErrorCode::Forbidden,
+            404 => ErrorCode::NotFound,
+            408 => ErrorCode::Timeout,
+            409 => ErrorCode::Conflict,
+            426 => ErrorCode::VersionMismatch,
+            429 => ErrorCode::RateLimited,
+            504 => ErrorCode::Timeout,
+            s if s >= 500 => ErrorCode::ServerUnavailable,
+            _ => ErrorCode::Internal,
+        }
+    }
+
+    /// `true` when the same request may succeed if repeated later without changes
+    /// (transient transport/availability conditions). Callers still honour `details.retryAfterSec`.
+    pub const fn is_retryable(self) -> bool {
+        matches!(
+            self,
+            ErrorCode::Timeout | ErrorCode::RateLimited | ErrorCode::ServerUnavailable | ErrorCode::AgentOffline
+        )
+    }
+
+    /// `true` for codes that mean the caller must (re)authenticate.
+    pub const fn is_auth_failure(self) -> bool {
+        matches!(self, ErrorCode::Unauthorized | ErrorCode::Forbidden)
+    }
+}
+// ---- END MANUAL ----
+
+/// Error carried by an IPC response envelope (IPC_PROTOCOL.md §2) and by `game.stateChanged` /
+/// `update.progress` events. `details` is always present on the wire (`null` when empty).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct IpcError {
+    /// Error code.
+    pub code: ErrorCode,
+    /// Human-readable English message, safe to display in dev; UI localizes by `code`.
+    pub message: String,
+    /// Structured extra data (e.g. [`ValidationDetails`]); key always present.
+    pub details: Option<Value>,
+}
+
+// ---- BEGIN MANUAL ----
+impl IpcError {
+    /// Error with the default description of `code` and no details.
+    pub fn of(code: ErrorCode) -> Self {
+        Self { code, message: code.describe().to_owned(), details: None }
+    }
+
+    /// Error with a custom message and no details.
+    pub fn with_message(code: ErrorCode, message: impl Into<String>) -> Self {
+        Self { code, message: message.into(), details: None }
+    }
+
+    /// Error with typed details.
+    pub fn with_details<T: Serialize>(code: ErrorCode, message: impl Into<String>, details: &T) -> Self {
+        Self { code, message: message.into(), details: Some(to_value_infallible(details)) }
+    }
+
+    /// `unauthorized` with the default message.
+    pub fn unauthorized() -> Self {
+        Self::of(ErrorCode::Unauthorized)
+    }
+
+    /// `unauthorized` with `details.reason` (`expired`, `userToken`, `clockSkew`, …).
+    pub fn unauthorized_reason(message: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self::with_details(ErrorCode::Unauthorized, message, &ReasonDetails { reason: reason.into() })
+    }
+
+    /// `forbidden` with an optional `details.reason`.
+    pub fn forbidden(reason: Option<&str>) -> Self {
+        match reason {
+            None => Self::of(ErrorCode::Forbidden),
+            Some(r) => Self::with_details(
+                ErrorCode::Forbidden,
+                ErrorCode::Forbidden.describe(),
+                &ReasonDetails { reason: r.to_owned() },
+            ),
+        }
+    }
+
+    /// `notFound` for an unknown IPC message name (`details.name`).
+    pub fn unknown_message(name: &str) -> Self {
+        Self::with_details(ErrorCode::NotFound, format!("Unknown message '{name}'"), &NameDetails { name: name.to_owned() })
+    }
+
+    /// `notFound` for a missing entity.
+    pub fn not_found(what: &str) -> Self {
+        Self::with_message(ErrorCode::NotFound, format!("{what} not found"))
+    }
+
+    /// `validation` with `details: { field, reason }`.
+    pub fn validation(field: &str, reason: &str) -> Self {
+        Self::with_details(
+            ErrorCode::Validation,
+            format!("Invalid '{field}': {reason}"),
+            &ValidationDetails { field: field.to_owned(), reason: reason.to_owned() },
+        )
+    }
+
+    /// `conflict` with an optional `details.reason`.
+    pub fn conflict(message: impl Into<String>, reason: Option<&str>) -> Self {
+        match reason {
+            None => Self::with_message(ErrorCode::Conflict, message),
+            Some(r) => Self::with_details(ErrorCode::Conflict, message, &ReasonDetails { reason: r.to_owned() }),
+        }
+    }
+
+    /// `insufficientFunds` with `details: { required, available }`.
+    pub fn insufficient_funds(required: Money, available: Money) -> Self {
+        Self::with_details(
+            ErrorCode::InsufficientFunds,
+            ErrorCode::InsufficientFunds.describe(),
+            &InsufficientFundsDetails { required, available },
+        )
+    }
+
+    /// `sessionNotActive`.
+    pub fn session_not_active() -> Self {
+        Self::of(ErrorCode::SessionNotActive)
+    }
+
+    /// `sessionAlreadyActive`.
+    pub fn session_already_active() -> Self {
+        Self::of(ErrorCode::SessionAlreadyActive)
+    }
+
+    /// `gameNotInstalled`.
+    pub fn game_not_installed(game_id: uuid::Uuid) -> Self {
+        Self::with_message(ErrorCode::GameNotInstalled, format!("Game {game_id} is not installed"))
+    }
+
+    /// `gameLaunchFailed` with `details: { stage, exitCode?, stderr? }`.
+    pub fn game_launch_failed(stage: &str, message: impl Into<String>, exit_code: Option<i32>, stderr: Option<String>) -> Self {
+        Self::with_details(
+            ErrorCode::GameLaunchFailed,
+            message,
+            &LaunchFailedDetails { stage: stage.to_owned(), exit_code, stderr },
+        )
+    }
+
+    /// `accountPoolExhausted`.
+    pub fn account_pool_exhausted() -> Self {
+        Self::of(ErrorCode::AccountPoolExhausted)
+    }
+
+    /// `antiCheatBlocked` with `details: { kind, reason }`.
+    pub fn anti_cheat_blocked(kind: AntiCheatKind, reason: &str) -> Self {
+        Self::with_details(
+            ErrorCode::AntiCheatBlocked,
+            format!("Anti-cheat check failed: {reason}"),
+            &AntiCheatBlockedDetails { kind, reason: reason.to_owned() },
+        )
+    }
+
+    /// `policyDenied` with `details.rule` (and optional `details.field`).
+    pub fn policy_denied(rule: &str, field: Option<&str>) -> Self {
+        Self::with_details(
+            ErrorCode::PolicyDenied,
+            format!("Denied by policy rule '{rule}'"),
+            &PolicyDeniedDetails { rule: rule.to_owned(), field: field.map(str::to_owned) },
+        )
+    }
+
+    /// `agentOffline`.
+    pub fn agent_offline() -> Self {
+        Self::of(ErrorCode::AgentOffline)
+    }
+
+    /// `serverUnavailable` with an optional custom message.
+    pub fn server_unavailable(message: Option<&str>) -> Self {
+        Self::with_message(ErrorCode::ServerUnavailable, message.unwrap_or(ErrorCode::ServerUnavailable.describe()))
+    }
+
+    /// `timeout` with an optional custom message.
+    pub fn timeout(message: Option<&str>) -> Self {
+        Self::with_message(ErrorCode::Timeout, message.unwrap_or(ErrorCode::Timeout.describe()))
+    }
+
+    /// `rateLimited` with `details.retryAfterSec`.
+    pub fn rate_limited(retry_after_sec: i32) -> Self {
+        Self::with_details(ErrorCode::RateLimited, ErrorCode::RateLimited.describe(), &RateLimitDetails { retry_after_sec })
+    }
+
+    /// `internal` with `details.traceId`. Never leaks exception text to the caller.
+    pub fn internal(trace_id: &str) -> Self {
+        Self::with_details(ErrorCode::Internal, ErrorCode::Internal.describe(), &TraceDetails { trace_id: trace_id.to_owned() })
+    }
+
+    /// `protocolError`.
+    pub fn protocol_error(message: impl Into<String>) -> Self {
+        Self::with_message(ErrorCode::ProtocolError, message)
+    }
+
+    /// `versionMismatch` with `details: { supported, got }`.
+    pub fn version_mismatch(supported: &[i32], got: i32) -> Self {
+        Self::with_details(
+            ErrorCode::VersionMismatch,
+            format!("Protocol version {got} unsupported"),
+            &VersionMismatchDetails { supported: supported.to_vec(), got },
+        )
+    }
+
+    /// `true` when [`ErrorCode::is_retryable`].
+    pub fn is_retryable(&self) -> bool {
+        self.code.is_retryable()
+    }
+
+    /// Deserializes `details` as `T`; `Ok(None)` when absent or not an object.
+    pub fn details_as<T: DeserializeOwned>(&self) -> Result<Option<T>, ProtocolError> {
+        match &self.details {
+            Some(v @ Value::Object(_)) => Ok(Some(serde_json::from_value(v.clone())?)),
+            _ => Ok(None),
+        }
+    }
+
+    /// Copy of `details` with `traceId` added (or `{ traceId }` when `details` is not an object).
+    /// Used when mapping server errors onto IPC errors.
+    pub fn with_trace_id(details: Option<&Value>, trace_id: &str) -> Value {
+        let mut map: Map<String, Value> = match details {
+            Some(Value::Object(obj)) => obj.iter().filter(|(k, _)| k.as_str() != "traceId").map(|(k, v)| (k.clone(), v.clone())).collect(),
+            _ => Map::new(),
+        };
+        map.insert("traceId".to_owned(), Value::String(trace_id.to_owned()));
+        Value::Object(map)
+    }
+}
+
+impl fmt::Display for IpcError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.code, self.message)
+    }
+}
+
+impl std::error::Error for IpcError {}
+
+impl From<ProtocolError> for IpcError {
+    fn from(err: ProtocolError) -> Self {
+        IpcError::protocol_error(err.to_string())
+    }
+}
+// ---- END MANUAL ----
+
+/// Body of every non-2xx central-server response: `{ "error": ServerError }` (SERVER_API.md §3).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerErrorEnvelope {
+    pub error: ServerError,
+}
+
+/// Central-server error object. Maps 1:1 onto [`IpcError`] via [`ServerError::to_ipc_error`].
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerError {
+    pub code: ErrorCode,
+    pub message: String,
+    /// Structured extra data; key always present (`null` when none).
+    pub details: Option<Value>,
+    /// Server trace id (echo of `X-Trace-Id`).
+    pub trace_id: String,
+}
+
+// ---- BEGIN MANUAL ----
+impl ServerError {
+    /// Converts to an [`IpcError`]; `trace_id` is moved into `details.traceId`.
+    pub fn to_ipc_error(&self) -> IpcError {
+        IpcError {
+            code: self.code,
+            message: self.message.clone(),
+            details: Some(IpcError::with_trace_id(self.details.as_ref(), &self.trace_id)),
+        }
+    }
+}
+// ---- END MANUAL ----
+
+/// `details` for [`ErrorCode::Validation`].
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidationDetails {
+    /// JSON path of the offending field, e.g. `minutes` or `items[2].qty`.
+    pub field: String,
+    /// Machine-readable reason code, e.g. `required`, `min`, `max`, `format`.
+    pub reason: String,
+}
+
+/// `details` carrying a single `reason` code (`unauthorized`, `forbidden`, `conflict`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReasonDetails {
+    pub reason: String,
+}
+
+/// `details` for [`ErrorCode::NotFound`] when an IPC message name is unknown.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NameDetails {
+    pub name: String,
+}
+
+/// `details` for [`ErrorCode::RateLimited`].
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RateLimitDetails {
+    pub retry_after_sec: i32,
+}
+
+/// `details` for [`ErrorCode::InsufficientFunds`].
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct InsufficientFundsDetails {
+    pub required: Money,
+    pub available: Money,
+}
+
+/// `details` for [`ErrorCode::PolicyDenied`].
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PolicyDeniedDetails {
+    /// Policy rule identifier, e.g. `ageRating`, `alreadyRunning`, `postpaidNotAllowed`.
+    pub rule: String,
+    /// Optional settings field locked by policy (`settings.set`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub field: Option<String>,
+}
+
+/// `details` for [`ErrorCode::AntiCheatBlocked`].
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AntiCheatBlockedDetails {
+    pub kind: AntiCheatKind,
+    /// Check that failed, e.g. `driverMissing`, `secureBootOff`.
+    pub reason: String,
+}
+
+/// `details` for [`ErrorCode::GameLaunchFailed`].
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchFailedDetails {
+    /// Launch stage, e.g. `lease`, `inject`, `createProcess`, `waitForWindow`.
+    pub stage: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stderr: Option<String>,
+}
+
+/// `details` for [`ErrorCode::VersionMismatch`].
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct VersionMismatchDetails {
+    pub supported: Vec<i32>,
+    pub got: i32,
+}
+
+/// `details` for [`ErrorCode::Internal`] (and any server error mapped to IPC).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TraceDetails {
+    pub trace_id: String,
+}
+
+// ---- BEGIN MANUAL ----
+/// A string that is not a wire literal of the named enum / command.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("unknown {kind} '{got}'")]
+pub struct UnknownWireName {
+    /// Rust type name of the enum.
+    pub kind: &'static str,
+    /// The rejected input.
+    pub got: String,
+}
+
+/// Framing / serde failure of this crate (IPC_PROTOCOL.md §1–2). Converts into
+/// [`ErrorCode::ProtocolError`] via `From<ProtocolError> for IpcError`.
+#[derive(Debug, Error)]
+pub enum ProtocolError {
+    /// Frame length prefix or encoded frame exceeds the limit; the receiver closes the connection.
+    #[error("frame of {size} bytes exceeds the {max}-byte limit")]
+    FrameTooLarge { size: usize, max: usize },
+    /// Buffer holds less than one complete frame.
+    #[error("incomplete frame: need {needed} bytes, got {got}")]
+    Incomplete { needed: usize, got: usize },
+    /// Buffer holds more than one frame.
+    #[error("{0} trailing bytes after frame")]
+    TrailingBytes(usize),
+    /// JSON (de)serialization failure.
+    #[error("invalid JSON: {0}")]
+    Json(#[from] serde_json::Error),
+}
+
+#[cfg(test)]
+pub(crate) fn assert_wire<T>(all: &[T], expected: &[&str])
+where
+    T: Serialize + DeserializeOwned + Copy + PartialEq + fmt::Debug + fmt::Display,
+{
+    assert_eq!(all.len(), expected.len(), "variant count of {}", std::any::type_name::<T>());
+    for (v, wire) in all.iter().zip(expected) {
+        assert_eq!(serde_json::to_string(v).unwrap(), format!("\"{wire}\""));
+        assert_eq!(v.to_string(), *wire);
+        let back: T = serde_json::from_str(&format!("\"{wire}\"")).unwrap();
+        assert_eq!(back, *v);
+    }
+    // Integers are rejected (C# allowIntegerValues: false).
+    assert!(serde_json::from_str::<T>("0").is_err());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_code_wire_values() {
+        assert_wire(
+            ErrorCode::ALL,
+            &[
+                "unauthorized", "forbidden", "notFound", "validation", "conflict", "insufficientFunds",
+                "sessionNotActive", "sessionAlreadyActive", "gameNotInstalled", "gameLaunchFailed",
+                "accountPoolExhausted", "antiCheatBlocked", "policyDenied", "agentOffline", "serverUnavailable",
+                "timeout", "rateLimited", "internal", "protocolError", "versionMismatch",
+            ],
+        );
+        assert_eq!(ErrorCode::parse("NotFound"), Some(ErrorCode::NotFound));
+        assert_eq!(ErrorCode::InsufficientFunds.to_http_status(), 402);
+        assert_eq!(ErrorCode::from_http_status(503), ErrorCode::ServerUnavailable);
+        assert_eq!(ErrorCode::from_http_status(418), ErrorCode::Internal);
+        assert!(ErrorCode::RateLimited.is_retryable());
+        assert!(!ErrorCode::Validation.is_retryable());
+        assert!(ErrorCode::Forbidden.is_auth_failure());
+    }
+
+    #[test]
+    fn ipc_error_json_keeps_null_details() {
+        let e = IpcError::session_not_active();
+        assert_eq!(
+            serde_json::to_string(&e).unwrap(),
+            r#"{"code":"sessionNotActive","message":"Operation requires an active or paused session","details":null}"#
+        );
+        let e = IpcError::validation("minutes", "min");
+        assert_eq!(
+            serde_json::to_string(&e).unwrap(),
+            r#"{"code":"validation","message":"Invalid 'minutes': min","details":{"field":"minutes","reason":"min"}}"#
+        );
+        let d: ValidationDetails = e.details_as().unwrap().unwrap();
+        assert_eq!(d.field, "minutes");
+        let back: IpcError = serde_json::from_str(r#"{"code":"timeout","message":"x"}"#).unwrap();
+        assert_eq!(back.details, None);
+        assert!(back.is_retryable());
+        assert_eq!(back.to_string(), "timeout: x");
+    }
+
+    #[test]
+    fn typed_details_wire_form() {
+        let e = IpcError::insufficient_funds(Money::uzs(500_000), Money::uzs(120_000));
+        assert_eq!(
+            serde_json::to_string(&e.details).unwrap(),
+            r#"{"required":{"amount":500000,"currency":"UZS"},"available":{"amount":120000,"currency":"UZS"}}"#
+        );
+        let e = IpcError::version_mismatch(&[1], 2);
+        assert_eq!(serde_json::to_string(&e.details).unwrap(), r#"{"supported":[1],"got":2}"#);
+        let e = IpcError::game_launch_failed("createProcess", "boom", Some(2), None);
+        assert_eq!(serde_json::to_string(&e.details).unwrap(), r#"{"stage":"createProcess","exitCode":2}"#);
+        let e = IpcError::policy_denied("ageRating", None);
+        assert_eq!(serde_json::to_string(&e.details).unwrap(), r#"{"rule":"ageRating"}"#);
+        let e = IpcError::anti_cheat_blocked(AntiCheatKind::Vanguard, "secureBootOff");
+        assert_eq!(serde_json::to_string(&e.details).unwrap(), r#"{"kind":"vanguard","reason":"secureBootOff"}"#);
+        let e = IpcError::rate_limited(3);
+        assert_eq!(serde_json::to_string(&e.details).unwrap(), r#"{"retryAfterSec":3}"#);
+    }
+
+    #[test]
+    fn server_error_maps_to_ipc_with_trace_id() {
+        let json = r#"{"error":{"code":"insufficientFunds","message":"Balance too low","details":{"required":{"amount":1,"currency":"UZS"},"traceId":"old"},"traceId":"6f1d"}}"#;
+        let env: ServerErrorEnvelope = serde_json::from_str(json).unwrap();
+        let ipc = env.error.to_ipc_error();
+        assert_eq!(ipc.code, ErrorCode::InsufficientFunds);
+        let details = ipc.details.unwrap();
+        assert_eq!(details["traceId"], "6f1d");
+        assert_eq!(details["required"]["amount"], 1);
+        assert_eq!(IpcError::with_trace_id(None, "t"), serde_json::json!({ "traceId": "t" }));
+        assert_eq!(serde_json::to_string(&env).unwrap(), json);
+    }
+
+    #[test]
+    fn protocol_error_becomes_ipc_error() {
+        let e: IpcError = ProtocolError::FrameTooLarge { size: 5, max: 4 }.into();
+        assert_eq!(e.code, ErrorCode::ProtocolError);
+        assert_eq!(e.message, "frame of 5 bytes exceeds the 4-byte limit");
+        let e: UnknownWireName = "nope".parse::<ErrorCode>().unwrap_err();
+        assert_eq!(e.to_string(), "unknown ErrorCode 'nope'");
+    }
+}
+// ---- END MANUAL ----
