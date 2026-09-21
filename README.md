@@ -54,9 +54,27 @@
 | **Турниры** | **Профиль** | **Простой** |
 | <img src="docs/img/08-tournaments.jpg" alt="Турниры"> | <img src="docs/img/09-profile.jpg" alt="Профиль"> | <img src="docs/img/10-idle.jpg" alt="Экран простоя"> |
 
+**Панель в игре** — `Ctrl+Shift+H` поверх полноэкранной игры: время, баланс, «+30 мин», позвать админа
+
+<img src="docs/img/11-hud.jpg" alt="HUD поверх игры" width="100%">
+
 </div>
 
-Снимки сделаны в mock-режиме (`VITE_MOCK=1`), 1920×1080, тема `default`; обложки игр — заглушки.
+Снимки сделаны в mock-режиме (`VITE_MOCK=1`), 1920×1080, тема `default` («Onyx»). Арт, обложки и видеолупы игр —
+оригинальные, сгенерированные для демо (без чужих брендов); на кадре с панелью арт подложен вместо игры.
+
+### Как это устроено визуально
+
+- **Onyx** — нейтральная тема: почти чёрный фон, графитовое стекло, белые действия, золото только для VIP, бонусов и
+  предупреждений. Хром не имеет оттенка — цвет экрана даёт арт выбранной игры: из него берётся доминирующий тон и
+  подсвечивает угол под заголовком (`useImageTint`).
+- **Главная** — арт на весь экран с плавным наездом, живой видеолуп (`Game.videoUrl`, пауза во время игры), rack-focus
+  при смене игры, плёночное зерно и виньетка, параллакс за курсором. Стрип постеров переключает игру; две карточки —
+  сеанс + баланс и бронь с живой картой зала.
+- **Каталог** — стена постеров: наклон за курсором с бликом, название внутри арта, метаданные при наведении, скользящая
+  «таблетка» активной категории.
+- **Мелочи, которые чувствуются**: blur-up обложек, тик/клик/«вжух»/чайм (WebAudio-синтез, без файлов, тумблер
+  `sound.uiSounds`), предупреждение «осталось 5 минут» как нижняя плашка трансляции поверх игры.
 
 ---
 
@@ -82,7 +100,8 @@ ClubShell закрывает контур на самом ПК: **оболочк
 **Оболочка (киоск)**
 
 - Экран блокировки: вход по паролю, QR-коду, карте или как гость; PIN для разблокировки
-- Каталог игр с обложками, категориями, поиском, спецификациями; запуск в один клик
+- Главная: полноэкранный арт выбранной игры с видеолупом, стрип постеров, сеанс и баланс в одной карточке, бронь
+- Каталог-«стена постеров» с категориями, поиском, спецификациями; запуск в один клик
 - Кошелёк: баланс, тарифы по зонам и времени суток, история, пополнение через Payme / Click / Uzum / наличные
 - Магазин с корзиной и статусом заказа, чат с администратором, бронь мест на карте зала, турниры с сеткой и таблицей
 - Профиль: статистика, достижения, программа лояльности, настройки (язык, тема, громкость, PIN)
@@ -202,7 +221,7 @@ Copy-Item .env.example .env
 | .NET | `dotnet build ClubShell.sln -c Release` · `dotnet test ClubShell.sln` |
 | Rust | `cargo build --release --workspace` · `cargo test --workspace` · `cargo lint` (clippy `-D warnings`) |
 | Web | `pnpm typecheck` · `pnpm lint` · `pnpm --filter @clubshell/shell build` · `pnpm tauri build` |
-| E2E | `pnpm test:e2e` (Playwright против `vite dev` в mock-режиме) |
+| E2E | `pnpm test:e2e` (Playwright против `vite dev` в mock-режиме); `PW_CHANNEL=msedge` — прогон в установленном Edge/Chrome, если bundled Chromium не стартует |
 | Контракты | `.\tools\scripts\gen-contracts-ts.ps1` · `.\tools\scripts\gen-contracts-rs.ps1` (`-Check` для CI) |
 | Установщик | `dotnet build installer/wix/ClubShell.Installer.wixproj -c Release -p:Version=<ver>` |
 | Выпуск | `package.ps1` → `sign.ps1` (Authenticode + RSA-PSS манифест) → `publish.ps1` (S3 / HTTP / папка) |
@@ -216,8 +235,8 @@ Copy-Item .env.example .env
 | xUnit | 424 проверки в 4 проектах (Contracts 89, Core 181, Windows 62, Agent 92), включая сквозной тест именованного канала |
 | Компиляция .NET | 8 проектов, Roslyn + NetAnalyzers, `/warnaserror`, 0 предупреждений |
 | TypeScript | `tsc --noEmit` во всех пакетах, `vite build` без предупреждений о размере чанков |
-| Интерфейс | 12 разделов, 47 экранов и компонентов, прогон в mock-режиме на 1600×900 / 1920×1080 / 2560×1440 |
-| Локализация | 1172 ключа, идентичные наборы в `en` / `ru` / `uz` |
+| Интерфейс | 12 разделов, прогон в mock-режиме на 1600×900 / 1920×1080; Playwright e2e — 16 проверок (вход, каталог, HUD в игре) |
+| Локализация | 1175 ключей, идентичные наборы в `en` / `ru` / `uz` |
 | Протоколы | 63 IPC-запроса, 18 событий, 19 серверных команд, 80 Tauri-команд — покрыты обработчиками и документацией |
 
 Что **не** собиралось на машине автора: `cargo` (крейты Rust проверены статически), WiX, `tauri build`, запуск Playwright. Первую сборку этих частей выполняет CI; список известных долгов — в [docs/ROADMAP.md](docs/ROADMAP.md).
@@ -228,6 +247,7 @@ Copy-Item .env.example .env
 
 ```
 apps/shell/            киоск-оболочка: src/ (React) + src-tauri/ (Rust-хост Tauri 2)
+apps/shell/public/mock-art/  оригинальный арт, обложки, видеолупы и фото товаров для mock-режима
 config/                JSON-конфиги по умолчанию → C:\ProgramData\ClubShell
 crates/protocol/       Rust-зеркало контрактов (serde)
 crates/winutil/        Rust Win32: хуки, pipe, окна, мониторы, ввод
@@ -256,7 +276,7 @@ tools/scripts/         build · dev · package · sign · publish · setup-dev-v
 | `agent.json` | URL сервера, ключ клуба, IPC, киоск-пользователь (`club`), сеансы, офлайн, лаунчеры, хранилище, обновления, телеметрия, античит, питание |
 | `shell.json` | язык (`ru` / `uz` / `en`), тема, киоск-защита, простой, реклама, геймпад, мониторы, флаги функций |
 | `policies.json` | последний применённый снимок политик сервера |
-| `themes\*.json` | темы; цвета становятся CSS-переменными `--c-*` |
+| `themes\*.json` | темы (`default` = Onyx); цвета становятся CSS-переменными `--c-*`, контраст текста на `primary` / `accent` выводится из яркости |
 | `cache\`, `logs\`, `secure\` | кэш и офлайн-очередь (SQLite), JSON-логи, секреты под DPAPI |
 
 Любой ключ `agent.json` переопределяется переменной `CLUBSHELL__<Section>__<Key>`. Переменные разработки — в `.env` (`.env.example`).
@@ -304,7 +324,7 @@ tools/scripts/         build · dev · package · sign · publish · setup-dev-v
 <details>
 <summary><b>English summary</b></summary>
 
-**ClubShell** is client software for gaming clubs / internet cafés (Uzbekistan / CIS; UI in Russian, Uzbek and English; prices in UZS). Each gaming PC runs a **.NET 8 Windows service** (`ClubShellAgent`, session 0: sessions and billing timers, game launching via Steam / Epic / Battle.net / Riot / EA / Ubisoft with an account pool, server policies, anti-cheat checks, updates, telemetry, remote admin) and a **Tauri 2 + React kiosk shell** that replaces `explorer.exe` for the local kiosk user. They talk over the named pipe `\\.\pipe\clubshell-agent`; the agent talks to the club server over REST + WebSocket with HMAC-signed requests. Offline mode keeps the timer and queues events in SQLite.
+**ClubShell** is client software for gaming clubs / internet cafés (Uzbekistan / CIS; UI in Russian, Uzbek and English; prices in UZS). Each gaming PC runs a **.NET 8 Windows service** (`ClubShellAgent`, session 0: sessions and billing timers, game launching via Steam / Epic / Battle.net / Riot / EA / Ubisoft with an account pool, server policies, anti-cheat checks, updates, telemetry, remote admin) and a **Tauri 2 + React kiosk shell** that replaces `explorer.exe` for the local kiosk user. The shell ships the neutral "Onyx" theme (near-black, white actions, gold accent — the game art carries the colour), a cinematic home with ambient video loops, a poster-wall catalogue and an in-game HUD (`Ctrl+Shift+H`: time, balance, +30 min, call admin) over the running game. They talk over the named pipe `\\.\pipe\clubshell-agent`; the agent talks to the club server over REST + WebSocket with HMAC-signed requests. Offline mode keeps the timer and queues events in SQLite.
 
 Try the UI in a browser: `pnpm install && pnpm mock` then `VITE_MOCK=1 pnpm --filter @clubshell/shell dev` → http://localhost:1420 (login `demo` / `1234`). Full Windows dev loop: `tools/scripts/dev.ps1`. Verified here: all 8 .NET projects compile with `/warnaserror`, 424 xUnit tests pass, `tsc` and `vite build` are clean; Rust, WiX and Playwright runs are left to CI.
 
