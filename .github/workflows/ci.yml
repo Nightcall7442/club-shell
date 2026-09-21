@@ -155,6 +155,13 @@ jobs:
         if: runner.os == 'Windows'
         run: cargo test --workspace
 
+      # A test binary that dies with STATUS_ENTRYPOINT_NOT_FOUND / STATUS_DLL_NOT_FOUND never prints
+      # which import is missing; resolve every import against the runner's DLLs and say so.
+      - name: Diagnose test binary imports
+        if: runner.os == 'Windows' && failure()
+        shell: pwsh
+        run: ./tools/scripts/diagnose-imports.ps1 -Path 'target/x86_64-pc-windows-msvc/debug/deps/clubshell_*.exe','target/x86_64-pc-windows-msvc/debug/deps/kiosk-*.exe','target/x86_64-pc-windows-msvc/debug/deps/pipe_client-*.exe'
+
   dotnet:
     name: .NET (build, test)
     needs: changes
