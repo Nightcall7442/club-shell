@@ -1,306 +1,291 @@
-# ClubShell
+<div align="center">
 
-[![CI](https://github.com/clubshell/club-shell/actions/workflows/ci.yml/badge.svg)](.github/workflows/ci.yml)
-[![Release](https://github.com/clubshell/club-shell/actions/workflows/release.yml/badge.svg)](.github/workflows/release.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4)](global.json)
-[![Rust 1.89](https://img.shields.io/badge/rust-1.89-orange)](rust-toolchain.toml)
-[![Tauri 2](https://img.shields.io/badge/tauri-2.0-24C8D8)](apps/shell/src-tauri/tauri.conf.json)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-horizontal-dark.svg">
+  <img src="docs/assets/logo-horizontal.svg" alt="ClubShell" width="420">
+</picture>
 
-Client software for gaming clubs and internet cafés. Every gaming PC runs two pieces: a **Windows agent**
-(.NET 8 service in session 0 that owns sessions, billing timers, game launching, policy enforcement and
-the link to the club's central server) and a **kiosk shell** (Tauri 2 + React full-screen UI that replaces
-the Windows desktop for the player). The two talk over a named pipe; the agent talks to the server over
-REST + WebSocket. Target market is Uzbekistan / CIS: UI in English, Russian and Uzbek, prices in UZS.
+**Клиентское ПО для компьютерных клубов**
 
-## Screenshots
+Киоск-оболочка вместо рабочего стола, агент-служба с сеансами и тарифами, запуск игр из любых лаунчеров — на каждом игровом ПК клуба.
 
-| Lock screen | Games grid | Wallet & tariffs | Shop |
-|-------------|------------|------------------|------|
-| TBD (`docs/img/lock.png`) | TBD (`docs/img/games.png`) | TBD (`docs/img/wallet.png`) | TBD (`docs/img/shop.png`) |
+[![CI](https://github.com/Nightcall7442/club-shell/actions/workflows/ci.yml/badge.svg)](https://github.com/Nightcall7442/club-shell/actions/workflows/ci.yml)
+[![Release](https://github.com/Nightcall7442/club-shell/actions/workflows/release.yml/badge.svg)](https://github.com/Nightcall7442/club-shell/actions/workflows/release.yml)
+![.NET](https://img.shields.io/badge/.NET-8.0-512bd4?logo=dotnet&logoColor=white)
+![C#](https://img.shields.io/badge/C%23-12-239120?logo=csharp&logoColor=white)
+![Rust](https://img.shields.io/badge/Rust-1.89-000000?logo=rust&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.5-3178c6?logo=typescript&logoColor=white)
 
-Run the UI in mock mode (below) to see the real thing in a browser.
+![Tauri](https://img.shields.io/badge/Tauri-2.0-24c8d8?logo=tauri&logoColor=white)
+![React](https://img.shields.io/badge/React-18-20232a?logo=react&logoColor=61dafb)
+![Vite](https://img.shields.io/badge/Vite-5-646cff?logo=vite&logoColor=white)
+![Tailwind](https://img.shields.io/badge/Tailwind_CSS-3.4-06b6d4?logo=tailwindcss&logoColor=white)
+![Zustand](https://img.shields.io/badge/Zustand-4-443e38?logo=react&logoColor=white)
+![i18next](https://img.shields.io/badge/i18next-23-26a69a?logo=i18next&logoColor=white)
+![tokio](https://img.shields.io/badge/tokio-1-000000?logo=rust&logoColor=white)
+![WebView2](https://img.shields.io/badge/WebView2-evergreen-0078d4?logo=microsoftedge&logoColor=white)
+![SQLite](https://img.shields.io/badge/SQLite-offline-003b57?logo=sqlite&logoColor=white)
+![Serilog](https://img.shields.io/badge/Serilog-4-cc0000)
 
-## Architecture
+![xUnit](https://img.shields.io/badge/xUnit-424_проверки-5c2d91?logo=dotnet&logoColor=white)
+![Playwright](https://img.shields.io/badge/Playwright-e2e-2ead33?logo=playwright&logoColor=white)
+![Fastify](https://img.shields.io/badge/Fastify-mock--сервер-000000?logo=fastify&logoColor=white)
+![WiX](https://img.shields.io/badge/WiX-v5_MSI-c41e3a?logo=windows&logoColor=white)
+![Windows](https://img.shields.io/badge/Windows-10%2F11_x64-0078d6?logo=windows&logoColor=white)
+![Steam](https://img.shields.io/badge/Steam-Epic_%C2%B7_Battle.net_%C2%B7_Riot_%C2%B7_EA_%C2%B7_Ubisoft-171a21?logo=steam&logoColor=white)
+![Языки](https://img.shields.io/badge/языки-RU_%C2%B7_UZ_%C2%B7_EN-8a6d3b)
+![Лицензия](https://img.shields.io/badge/лицензия-MIT-3da639)
 
-```
-┌────────────────────────────────────────────────────────────────┐
-│  CENTRAL SERVER (separate product)                             │
-│  REST https://<server>/api/v1  ·  WS wss://<server>/ws/agent   │
-└───────────────▲──────────────────────────────▲─────────────────┘
-                │ HTTPS · Bearer JWT · HMAC-SHA256 request signing
-                │                              │ WSS · subprotocol clubshell.v1
-┌───────────────┴──────────────────────────────┴─────────────────┐
-│  GAMING PC (Windows 10/11 x64)                                 │
-│                                                                │
-│  Session 0 ─────────────────────────────────────────────────┐  │
-│  │ ClubShellAgent.exe  (.NET 8 Worker Service, LocalSystem) │  │
-│  │ sessions · timers · launchers · policies · anti-cheat ·  │  │
-│  │ updates · telemetry · watchdog (CreateProcessAsUser)     │  │
-│  └──────────────────────────▲───────────────────────────────┘  │
-│                             │ \\.\pipe\clubshell-agent          │
-│                             │ 4-byte LE length + JSON envelope │
-│                             │ auth.hello (shell token) · sys.ping 5 s
-│  Interactive session ───────┴───────────────────────────────┐  │
-│  │ clubshell-shell.exe  (Tauri 2, local kiosk user)         │  │
-│  │ src-tauri: pipe client · kiosk hardening · gamepad · tray│  │
-│  │ WebView2:  React 18 + Vite + Tailwind + Zustand + i18next│  │
-│  │ Game processes (launched by the Agent into this session) │  │
-│  └──────────────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────────┘
-```
-
-Only the Agent is privileged. The Shell is UI: every OS side effect (launch, kill, firewall, registry,
-power, users) goes through the pipe to the Agent. Full detail in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-## Repository layout
-
-| Path | What lives there |
-|------|------------------|
-| `apps/shell/` | Kiosk shell: React frontend (`src/`) + Tauri 2 Rust host (`src-tauri/`) |
-| `config/` | Default JSON configs deployed to `C:\ProgramData\ClubShell` (`agent.default.json`, `shell.default.json`, `policies.example.json`, `themes/`) |
-| `crates/protocol/` | Rust mirror of the C# contracts (serde), generated |
-| `crates/winutil/` | Rust Win32 helpers (hooks, pipe, window, monitor, input) on `windows` 0.58 |
-| `docs/` | Normative specs and guides (index below) |
-| `installer/wix/` | WiX v5: `ClubShell.msi` (Agent service + Shell + config/themes) and the `ClubShellSetup.exe` Burn bundle (.NET 8 runtime + WebView2 bootstrapper + MSI) |
-| `packages/contracts-ts/` | TypeScript mirror of the C# contracts, generated |
-| `src/ClubShell.Contracts/` | Canonical DTOs / enums (System.Text.Json, camelCase, string enums) |
-| `src/ClubShell.Core/` | Abstractions, config, HTTP client, realtime, security, updates. No Win32. |
-| `src/ClubShell.Windows/` | Win32 layer: P/Invoke, hooks, WMI, WTS, job objects, registry, firewall, users |
-| `src/ClubShell.Agent/` | `ClubShellAgent` Windows service (Worker Service) + `Install/*.ps1` |
-| `tests/` | xUnit projects per .NET assembly, `shell-rs` (cargo integration tests), `shell-e2e` (Playwright) |
-| `tools/ContractsGen/` | Reflection over Contracts → emits the TS and Rust mirrors |
-| `tools/MockServer/` | Fastify + ws mock of the central server on `http://localhost:8080` |
-| `tools/scripts/` | PowerShell dev/build/package/sign/publish scripts |
-| `.github/workflows/` | `ci.yml` (web, Rust, .NET, contracts drift, Playwright e2e, Tauri bundle), `release.yml` (package + sign + GitHub release + publish) |
-
-## Tech stack
-
-| Layer | Technology | Version |
-|-------|------------|---------|
-| Agent / libraries | .NET (C# 12, nullable, `TreatWarningsAsErrors`) | SDK 8.0.400 (`global.json`) |
-| Agent hosting | Worker Service, Serilog, Microsoft.Data.Sqlite | Serilog 4.0.1, Sqlite 8.0.8 |
-| .NET tests | xUnit, FluentAssertions, NSubstitute, coverlet | 2.9.0 / 6.12.0 / 5.1.0 |
-| Shell host | Rust 2021, Tauri 2, tokio, `windows` crate | toolchain 1.89.0 (MSRV 1.80), tauri 2, windows 0.58 |
-| Shell UI | React, Vite, TypeScript, Tailwind, Zustand, react-router, i18next, framer-motion | 18.3.1 / 5.4.2 / 5.5.4 / 3.4.10 / 4.5.5 / 6.26.1 / 23.14.0 |
-| Web runtime | WebView2 (evergreen, bootstrapper embedded in the Shell MSI) | Chromium 110+ target |
-| Mock server | Fastify, @fastify/websocket, tsx | 4.28.1 / 10.0.1 / 4.19.0 |
-| E2E | Playwright (chromium) | 1.47.0 |
-| Package manager | pnpm workspaces | pnpm 9.9.0, node ≥ 20 |
-| Installer | WiX Toolset | v5 |
-| Formatting | Prettier (TS), `.editorconfig` (C#/Rust), rustfmt, clippy | Prettier 3.3.3 |
-
-## Prerequisites
-
-| Goal | Needs |
-|------|-------|
-| UI only, in a browser (mock mode) | Node 20+ and pnpm 9 — works on any OS |
-| Full stack (Agent + Shell + installer) | Windows 11 x64 (Windows 10 1809+ at runtime) |
-| .NET projects | .NET 8 SDK 8.0.400+ |
-| Rust / Tauri | Rust 1.89 via `rustup` (the toolchain file installs it), Visual Studio Build Tools 2022 with the "Desktop development with C++" workload, Windows 10/11 SDK |
-| Running the Shell | WebView2 Runtime (preinstalled on Windows 11; the MSI embeds the bootstrapper) |
-| Installer | WiX v5 SDK, restored from NuGet by `installer/wix/ClubShell.Installer.wixproj` (no global `wix` tool needed) |
-| Scripts | Windows PowerShell 5.1 (all `*.ps1` are 5.1-compatible) |
-
-`tools/scripts/setup-dev-vm.ps1` installs everything above on a fresh Windows VM.
-
-## Quick start (UI only, in a browser)
-
-```powershell
-pnpm install
-pnpm mock                                    # mock central server → http://localhost:8080
-$env:VITE_MOCK = '1'; pnpm --filter @clubshell/shell dev   # → http://localhost:1420
-```
-
-On bash: `VITE_MOCK=1 pnpm --filter @clubshell/shell dev`. `VITE_MOCK=1` replaces every Tauri command and
-event with in-browser handlers (`apps/shell/src/mocks/handlers.ts`), so no Agent, pipe or Windows is
-needed. The mock keeps state (login → session → ticking timer → wallet) in memory for the tab.
-
-Demo accounts (from `apps/shell/src/mocks/data.ts`):
-
-| Login method | Credentials |
-|--------------|-------------|
-| Password | `demo` / `1234` (regular), `vip` / `1234` (VIP), `player` / `player` |
-| Guest | any display name |
-| Card | any card id; ids ending in `9` log in as VIP |
-| QR | start a QR login; the mock auto-confirms it after a few seconds |
-| Session unlock PIN | `1234` |
-| Admin PIN (exit hotkey `Ctrl+Alt+Shift+F12`) | `0000` |
-| `banned` | any password → banned error, to see the failure path |
-
-## Full dev loop (Windows)
-
-```powershell
-Copy-Item .env.example .env         # edit if needed; defaults point at the mock server
-.\tools\scripts\dev.ps1             # mock server + `tauri dev` (Rust host with the mock Agent transport)
-.\tools\scripts\dev.ps1 -Agent      # ... plus the real Agent as a console process (--console --dev)
-.\tools\scripts\dev.ps1 -WebOnly    # mock server + Vite in browser mock mode (no Rust toolchain needed)
-```
-
-`dev.ps1` reads `.env`, starts the mock server on `http://localhost:8080`, exports `CLUBSHELL_DEV=1` and runs
-`pnpm tauri dev`, which builds `src-tauri` and opens the real kiosk window over the Vite dev server with
-hardening off and the in-process mock Agent transport. `-Agent` additionally starts the Agent against
-`http://localhost:8080/api/v1` (`--console --dev` relaxes TLS pinning and points at the mock); a debug Shell
-build probes the pipe and uses it when the Agent is up. Use the exit hotkey and admin PIN to get back to the
-desktop. Individual pieces:
-
-```powershell
-pnpm mock                                   # mock server only
-dotnet run --project src/ClubShell.Agent -- --console --dev   # Agent in the foreground
-pnpm tauri dev                              # Shell only (debug build: real pipe when an Agent runs, mock transport otherwise)
-```
-
-## Building
-
-```powershell
-.\tools\scripts\build.ps1                   # everything, Release
-.\tools\scripts\build.ps1 -Target Agent     # Targets: All | Dotnet | Rust | Web | Installer | Contracts | Agent | Shell
-```
-
-What the targets do, if you want to run them by hand:
-
-| Step | Command |
-|------|---------|
-| .NET solution | `dotnet build ClubShell.sln -c Release` (output under `artifacts/`, see `Directory.Build.props`) |
-| Agent publish | `dotnet publish src/ClubShell.Agent -c Release -r win-x64` |
-| Rust crates | `cargo build --release --workspace` (target `x86_64-pc-windows-msvc` from `.cargo/config.toml`) |
-| Shell (frontend + Tauri) | `pnpm --filter @clubshell/shell build` then `pnpm tauri build` → `target/x86_64-pc-windows-msvc/release/clubshell-shell.exe` |
-| Installer | `dotnet build installer/wix/ClubShell.Installer.wixproj -c Release -p:Version=<ver>` (WiX SDK from NuGet) → `ClubShell.msi` + `ClubShellSetup.exe` |
-| Package | `.\tools\scripts\package.ps1 -Version <ver> -Channel stable\|beta -BaseUrl <url>` — assembles `artifacts/release/<ver>/` (`ClubShell-<ver>.msi`, `ClubShellSetup-<ver>.exe`, `ClubShell-Shell-<ver>.msi`, `agent/`, `manifest.json`, `SHA256SUMS.txt`) and `artifacts/release/ClubShell-<ver>.zip` |
-| Sign | `.\tools\scripts\sign.ps1 -Files <globs>` — Authenticode via `CODESIGN_PFX_PATH` / `CODESIGN_PFX_PASSWORD` (or `-Thumbprint`); `.\tools\scripts\sign.ps1 -ManifestPath <release>/manifest.json -ManifestKeyPem <key.pem>` — RSA-PSS package + manifest signatures (canonical form in `src/ClubShell.Core/Security/Signing.cs`) |
-| Publish | `.\tools\scripts\publish.ps1 -Target S3\|Http\|Folder -Destination <url> [-Channel stable\|beta]` — uploads the release folder and the channel manifest, then verifies it |
-
-The installer (`installer/wix`) produces `ClubShell.msi` (service `ClubShellAgent`, LocalSystem, delayed
-auto-start, recovery configured, plus the Shell under `C:\Program Files\ClubShell\Shell`, config defaults and
-themes; `INSTALLSHELL=0` for Agent-only) and the `ClubShellSetup.exe` Burn bundle that chains the .NET 8 runtime
-and the WebView2 bootstrapper in front of it. Manual service registration without the MSI:
-`src/ClubShell.Agent/Install/install.ps1` (or `ClubShellAgent.exe --install` from the published folder).
-
-## Configuration
-
-Runtime data lives in `C:\ProgramData\ClubShell` (defaults copied from `config/` on first start):
-
-| File | Purpose |
-|------|---------|
-| `agent.json` | Agent config: server URLs, club API key, IPC, kiosk user (`shell.kioskUser.name`, default `club` everywhere: code, `config/agent.default.json`, `install.ps1 -KioskUser`, the MSI `KIOSKUSER` property), session, offline, games/launchers, storage, updates, telemetry, anti-cheat, remote admin, power, logging |
-| `shell.json` | Shell config: locale (`en`/`ru`/`uz`), theme, kiosk hardening, idle, ads, gamepad, monitors, UI, feature flags |
-| `policies.json` | Last applied server policy snapshot (process allowlist, USB, web filter, explorer lockdown, power, update channel) |
-| `themes\*.json` | Themes (`default.json` mandatory); applied as `--c-*` CSS custom properties |
-| `cache\`, `logs\`, `secure\` | Cached server data + offline queue, structured JSON logs, DPAPI-wrapped secrets |
-
-Any `agent.json` key can be overridden with `CLUBSHELL__<Section>__<Key>` (double underscore), e.g.
-`CLUBSHELL__server__baseUrl`. Command line: `--config <path>`, `--console`, `--dev`, `--install` / `--uninstall`.
-
-Development variables come from `.env` (copy `.env.example`):
-
-| Variable | Default | Used by |
-|----------|---------|---------|
-| `CLUBSHELL_SERVER_URL` | `http://localhost:8080/api/v1` | scripts → `agent.json → server.baseUrl` |
-| `CLUBSHELL_WS_URL` | `ws://localhost:8080/ws/agent` | scripts → `server.wsUrl` |
-| `CLUBSHELL_CLUB_API_KEY` | `dev-club-api-key` | first agent registration |
-| `CLUBSHELL_UPDATE_CHANNEL` | `stable` | `stable` or `beta` |
-| `CLUBSHELL_LOG_LEVEL` | `Debug` | Agent Serilog level |
-| `MOCK_SERVER_PORT` | `8080` | `tools/MockServer` |
-| `VITE_MOCK` | `1` | Shell frontend: browser mock mode |
-| `VITE_SERVER_URL` | `http://localhost:8080` | dev-only links (QR pages, images) |
-| `TAURI_SIGNING_PRIVATE_KEY[_PASSWORD]` | — | Tauri updater signing |
-| `CODESIGN_PFX_PATH`, `CODESIGN_PFX_PASSWORD` | — | `sign.ps1` Authenticode |
-
-## Documentation
-
-| Document | Contents |
-|----------|----------|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Normative: component map, process/session model, trust boundaries, data flows, threading, startup, recovery, offline mode, file layout, config schemas |
-| [docs/IPC_PROTOCOL.md](docs/IPC_PROTOCOL.md) | Shell ⇄ Agent named-pipe protocol v1: framing, envelope, every request/response/event, error codes |
-| [docs/SERVER_API.md](docs/SERVER_API.md) | Central server REST `/api/v1` + WebSocket `/ws/agent` as consumed by the Agent; auth, signing, endpoints |
-| [docs/TAURI_COMMANDS.md](docs/TAURI_COMMANDS.md) | Every `#[tauri::command]` and webview event; the frontend `api` / `invoke` wrapper in `lib/tauri.ts` |
-| [docs/TAURI_SHELL.md](docs/TAURI_SHELL.md) | Shell internals: window setup, pipe client, state, tray, gamepad, logging |
-| [docs/KIOSK_MODE.md](docs/KIOSK_MODE.md) | Kiosk hardening: keyboard hooks, blocked combos, taskbar, topmost guard, multi-monitor, idle, exit hotkey |
-| [docs/SHELL_REPLACEMENT.md](docs/SHELL_REPLACEMENT.md) | Replacing `explorer.exe` for the kiosk user: Winlogon `Shell`, auto-logon, watchdog, rollback |
-| [docs/GAME_LAUNCHERS.md](docs/GAME_LAUNCHERS.md) | Steam / Epic / Battle.net / Riot / EA / Ubisoft / plain exe launch strategies, account pool, cloud saves |
-| [docs/ANTICHEAT.md](docs/ANTICHEAT.md) | Coexistence with EAC, FACEIT, Vanguard, Secure Boot / TPM checks |
-| [docs/UPDATES.md](docs/UPDATES.md) | Update state machine: manifests, channels, signature verification, staging, apply, rollback |
-| [docs/SECURITY.md](docs/SECURITY.md) | Threat model, secrets at rest, pipe ACLs, request signing, hardening checklist |
-| [docs/THEMING.md](docs/THEMING.md) | Theme file schema and the `--c-*` CSS variable mapping |
-| [docs/COMPETITORS.md](docs/COMPETITORS.md) | Feature comparison with existing club software |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | Planned work by milestone |
-
-## Testing
-
-```powershell
-dotnet test ClubShell.sln                       # xUnit: Contracts, Core, Windows, Agent test projects
-cargo test --workspace                          # crates + tests/shell-rs (kiosk helpers, pipe client)
-cargo lint                                      # alias: clippy --workspace --all-targets -- -D warnings
-pnpm typecheck                                  # tsc across every workspace package
-pnpm lint                                       # prettier --check
-pnpm test:e2e                                   # Playwright against `vite dev` in VITE_MOCK=1 (auto-started)
-```
-
-E2E needs browsers once: `pnpm --filter @clubshell/shell-e2e exec playwright install chromium`.
-`ClubShell.Windows.Tests` and `tests/shell-rs` touch real Win32 APIs and only run on Windows.
-
-## Contributing
-
-- **Contracts are canonical in C#.** Edit `src/ClubShell.Contracts` only, then regenerate the mirrors:
-  `.\tools\scripts\gen-contracts-ts.ps1` (→ `packages/contracts-ts/src`) and
-  `.\tools\scripts\gen-contracts-rs.ps1` (→ `crates/protocol/src`). Hand edits to generated files are
-  rejected in review; CI diffs the regenerated output.
-- **C#:** file-scoped namespaces, `Nullable` + `ImplicitUsings` on, C# 12, `TreatWarningsAsErrors`,
-  `AnalysisLevel=latest-recommended`, style enforced at build (`EnforceCodeStyleInBuild`). Tests:
-  xUnit + FluentAssertions + NSubstitute.
-- **Rust:** edition 2021, `cargo fmt`, `cargo lint` must pass (`clippy -D warnings`), tokio, no
-  `unsafe` outside `crates/winutil` and `src-tauri/src/kiosk`.
-- **TypeScript:** `strict`, ESM, Prettier (`pnpm format`), no `any` at module boundaries; types come
-  from `@clubshell/contracts`.
-- **PowerShell:** 5.1-compatible, `Set-StrictMode -Version Latest`, comment-based help on every script.
-- Language of code, comments, docs and commit messages: English. UI strings go through i18next
-  (`apps/shell/src/i18n/{en,ru,uz}.json`), all three locales updated together.
-- Keep `docs/*.md` in sync with behaviour; `ARCHITECTURE.md` is normative and the Contracts project is
-  the tie-breaker when a document and the code disagree.
-
-## Status
-
-The TypeScript/Vite build and the mock-mode UI are verified (tsc clean, `vite build` clean, smoke-tested
-in a browser). The .NET and Rust code were authored without compiling in this environment — expect a
-first-build fix pass (typos, missing usings, borrow-checker nits) before `dotnet build` and `cargo lint`
-go green. The installer and CI workflows have not been executed on a real machine yet.
-
-## License
-
-[MIT](LICENSE) © 2026 ClubShell contributors.
+</div>
 
 ---
 
-## Кратко по-русски
+## Какую задачу решает
 
-**ClubShell** — клиентское ПО для компьютерных клубов (Узбекистан / СНГ; интерфейс на английском,
-русском и узбекском; валюта — сум). На каждом игровом ПК работают две части:
+Компьютерный клуб зарабатывает на минутах, а теряет их в четырёх местах:
 
-- **Агент** (`ClubShellAgent`) — служба Windows на .NET 8, работает от `LocalSystem` в сессии 0. Отвечает за
-  сеансы и таймеры, запуск игр (Steam, Epic, Battle.net, Riot, EA, Ubisoft, exe), политики (блокировка
-  процессов, USB, DNS-фильтр, реестр), античит-проверки, обновления, телеметрию и связь с сервером клуба
-  (REST `/api/v1` + WebSocket `/ws/agent`, подпись запросов HMAC-SHA256).
-- **Оболочка** (`clubshell-shell.exe`) — киоск на Tauri 2 + React, заменяет рабочий стол Windows для
-  локального киоск-пользователя (`club` по умолчанию: `agent.default.json`, `install.ps1 -KioskUser`,
-  свойство MSI `KIOSKUSER`). Агент запускает её в интерактивной сессии через `CreateProcessAsUser`; общаются
-  через именованный канал `\\.\pipe\clubshell-agent`. Горячая клавиша выхода — `Ctrl+Alt+Shift+F12`
-  плюс PIN администратора.
+| Где течёт | Что происходит на самом деле |
+|---|---|
+| **Свободный рабочий стол** | Игрок закрывает оболочку, выходит в Windows, ставит свой софт, меняет настройки. Через неделю ПК «тормозит», через месяц — переустановка |
+| **Таймер сеанса** | Время считает сервер, ПК про него не знает. Сервер упал или сеть моргнула — сеанс не заканчивается, деньги не списываются |
+| **Аккаунты лаунчеров** | Один Steam-аккаунт на всех, пароль на стикере. Игрок логинится в свой — библиотека клуба пропадает, чужие сохранения затираются |
+| **Администратор** | Заблокировать ПК, продлить время, перезагрузить, посмотреть экран — только ногами, через весь зал |
 
-Быстрый старт без Windows и без Агента (только интерфейс в браузере):
+ClubShell закрывает контур на самом ПК: **оболочка** заменяет `explorer.exe` для киоск-пользователя и не выпускает его дальше своих экранов; **агент** живёт в сессии 0 как служба Windows, ведёт таймер сам, запускает игры под арендованными аккаунтами и выполняет команды администратора с сервера; всё, что игроку нужно — игры, баланс, магазин, чат, бронь, турниры — на одном экране под мышь, клавиатуру или геймпад.
 
+**Работает без связи.** Сервер недоступен — агент продолжает считать время, пускает по кэшированным учёткам, кладёт события сеанса в очередь SQLite и досылает их, когда связь вернётся. Повторная отправка не создаёт дубль — у каждого запроса свой ключ идемпотентности.
+
+---
+
+## Что внутри
+
+**Оболочка (киоск)**
+
+- Экран блокировки: вход по паролю, QR-коду, карте или как гость; PIN для разблокировки
+- Каталог игр с обложками, категориями, поиском, спецификациями; запуск в один клик
+- Кошелёк: баланс, тарифы по зонам и времени суток, история, пополнение через Payme / Click / Uzum / наличные
+- Магазин с корзиной и статусом заказа, чат с администратором, бронь мест на карте зала, турниры с сеткой и таблицей
+- Профиль: статистика, достижения, программа лояльности, настройки (язык, тема, громкость, PIN)
+- Экран простоя с рекламой и прайс-листом; оверлей для предупреждений поверх полноэкранной игры
+- Три языка (русский, узбекский, английский), темы из JSON, навигация с геймпада и экранной клавиатуры
+
+**Агент (служба Windows)**
+
+- Сеансы: старт / пауза / продление / блокировка, монотонный таймер, предупреждения за 15 / 5 / 1 минуту, тарификация
+- Запуск игр: Steam, Epic, Battle.net, Riot, EA, Ubisoft и обычные exe; ожидание реального игрового процесса; job objects; уборка при выходе
+- Пул аккаунтов: аренда учётки у сервера, подстановка в лаунчер, откат конфигов и Credential Manager, синхронизация облачных сохранений
+- Политики с сервера: белый список процессов, USB, DNS-фильтр, блокировки Explorer, расписание питания, канал обновлений
+- Античит-проверки перед запуском: EAC, FACEIT, Vanguard, Secure Boot / TPM / HVCI
+- Удалённое администрирование: сообщения, блокировка, перезагрузка, скриншот, удалённое управление, Wake-on-LAN
+- Обновления агента и оболочки с проверкой RSA-подписи манифеста, откатом и окном применения
+- Киоск-пользователь: создание, ротация пароля, автологон, перенаправление папок, сброс профиля
+- Сторож: запуск оболочки в интерактивной сессии через `CreateProcessAsUser`, перезапуск при падении, безопасный режим при crash-loop
+
+**Платформа**
+
+- Контракты (DTO, IPC, серверный API) канонически описаны на C#; зеркала для TypeScript и Rust генерируются
+- Именованный канал `\\.\pipe\clubshell-agent` с ACL, токеном оболочки и проверкой процесса-клиента
+- HMAC-SHA256 подпись запросов к серверу, DPAPI для секретов, никаких входящих портов на ПК
+- Mock-сервер на Fastify: весь REST + WebSocket, чтобы разрабатывать и показывать без бэкенда
+- Установщик WiX v5: MSI со службой, оболочкой и конфигами + Burn-бандл с .NET 8 и WebView2
+
+---
+
+## Архитектура
+
+```mermaid
+flowchart TB
+    subgraph Server["Сервер клуба (отдельный продукт)"]
+        REST["REST /api/v1"]
+        WS["WebSocket /ws/agent"]
+    end
+
+    subgraph PC["Игровой ПК — Windows 10/11 x64"]
+        subgraph S0["Сессия 0"]
+            A["ClubShellAgent<br/>.NET 8 Worker Service, LocalSystem<br/>сеансы · лаунчеры · политики · античит · обновления"]
+        end
+        subgraph S1["Интерактивная сессия киоск-пользователя"]
+            SH["clubshell-shell.exe<br/>Tauri 2 (Rust): pipe-клиент, хуки, topmost, геймпад"]
+            UI["WebView2<br/>React 18 + Vite + Tailwind + Zustand + i18next"]
+            G["Игровые процессы"]
+        end
+    end
+
+    A -->|"HTTPS · JWT · HMAC-SHA256"| REST
+    A <-->|"WSS · clubshell.v1"| WS
+    SH <-->|"\\\\.\\pipe\\clubshell-agent<br/>4-байтная длина + JSON envelope"| A
+    UI <-->|"#[tauri::command] · события agent:// kiosk://"| SH
+    A -->|"CreateProcessAsUser"| SH
+    A -->|"CreateProcessAsUser"| G
 ```
+
+Привилегии есть только у агента. Оболочка — интерфейс: любой побочный эффект в ОС (запуск, kill, реестр, firewall, питание, пользователи) уходит по каналу в агент. Подробно — в [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+---
+
+## Технологии
+
+| Слой | Что используется |
+|---|---|
+| Агент и библиотеки | .NET 8, C# 12, Worker Service, Serilog, Microsoft.Data.Sqlite, Polly (Http.Resilience), `TreatWarningsAsErrors` |
+| Win32-слой | `LibraryImport` P/Invoke, низкоуровневые хуки, WMI, WTS, job objects, реестр, DPAPI |
+| Оболочка, хост | Rust 2021, Tauri 2, tokio, `windows` 0.58, gilrs |
+| Оболочка, UI | React 18, Vite 5, TypeScript 5.5, Tailwind CSS 3.4, Zustand 4, react-router 6, i18next 23, framer-motion |
+| Контракты | C# → TypeScript и Rust через `tools/ContractsGen` (рефлексия, MANUAL-блоки сохраняются) |
+| Проверки | xUnit + FluentAssertions + NSubstitute, cargo test, Playwright |
+| Mock-сервер | Fastify 4, @fastify/websocket, tsx |
+| Сборка и выпуск | pnpm 9, Cargo workspace, WiX v5, PowerShell 5.1, GitHub Actions |
+
+---
+
+## Быстрый старт
+
+Только интерфейс, в браузере, на любой ОС — без Windows, агента и сервера:
+
+```bash
 pnpm install
-pnpm mock
+pnpm mock                                        # mock-сервер → http://localhost:8080
 VITE_MOCK=1 pnpm --filter @clubshell/shell dev   # → http://localhost:1420
 ```
 
-Демо-логины: `demo` / `1234`, `vip` / `1234`, гость; PIN сеанса `1234`, PIN администратора `0000`.
+`VITE_MOCK=1` подменяет каждую Tauri-команду и событие обработчиками в браузере (`apps/shell/src/mocks/handlers.ts`): вход, тикающий таймер, кошелёк, заказы и чат живут в памяти вкладки.
 
-Полный цикл разработки на Windows — `tools/scripts/dev.ps1`; сборка — `tools/scripts/build.ps1`;
-конфигурация — `C:\ProgramData\ClubShell\{agent.json,shell.json,policies.json,themes\}`.
-Документация — в `docs/` (главный документ — `ARCHITECTURE.md`). Контракты (DTO) канонически описаны
-на C# в `src/ClubShell.Contracts`, зеркала для TypeScript и Rust генерируются скриптами
-`gen-contracts-*.ps1`.
+### Учётные записи в mock-режиме
 
-Состояние: TypeScript-сборка и UI в mock-режиме проверены; код на .NET и Rust написан без компиляции в этой
-среде — при первой сборке потребуется проход по ошибкам компилятора. Лицензия — MIT.
+| Способ входа | Данные |
+|---|---|
+| Пароль | `demo` / `1234` (обычный), `vip` / `1234` (VIP), `player` / `player` |
+| Гость | любое имя |
+| Карта | любой номер; номера на `9` входят как VIP |
+| QR | mock подтверждает вход сам через несколько секунд |
+| PIN разблокировки сеанса | `1234` |
+| PIN администратора (горячая клавиша `Ctrl+Alt+Shift+F12`) | `0000` |
+| `banned` | любой пароль → ошибка бана, чтобы увидеть путь отказа |
+
+### Полный цикл на Windows
+
+```powershell
+Copy-Item .env.example .env
+.\tools\scripts\setup-dev-vm.ps1     # winget: Node, pnpm, .NET 8 SDK, Rust, VS Build Tools, WebView2 (нужен admin)
+.\tools\scripts\dev.ps1              # mock-сервер + `tauri dev` (реальное киоск-окно, mock-транспорт агента)
+.\tools\scripts\dev.ps1 -Agent       # … плюс настоящий агент консольным процессом (--console --dev)
+.\tools\scripts\dev.ps1 -WebOnly     # mock-сервер + Vite в браузере (без Rust)
+```
+
+---
+
+## Команды
+
+| Что | Команда |
+|---|---|
+| Всё, Release | `.\tools\scripts\build.ps1` (`-Target All \| Dotnet \| Rust \| Web \| Installer \| Contracts \| Agent \| Shell`) |
+| .NET | `dotnet build ClubShell.sln -c Release` · `dotnet test ClubShell.sln` |
+| Rust | `cargo build --release --workspace` · `cargo test --workspace` · `cargo lint` (clippy `-D warnings`) |
+| Web | `pnpm typecheck` · `pnpm lint` · `pnpm --filter @clubshell/shell build` · `pnpm tauri build` |
+| E2E | `pnpm test:e2e` (Playwright против `vite dev` в mock-режиме) |
+| Контракты | `.\tools\scripts\gen-contracts-ts.ps1` · `.\tools\scripts\gen-contracts-rs.ps1` (`-Check` для CI) |
+| Установщик | `dotnet build installer/wix/ClubShell.Installer.wixproj -c Release -p:Version=<ver>` |
+| Выпуск | `package.ps1` → `sign.ps1` (Authenticode + RSA-PSS манифест) → `publish.ps1` (S3 / HTTP / папка) |
+
+---
+
+## Проверки
+
+| Что | Сколько |
+|---|---|
+| xUnit | 424 проверки в 4 проектах (Contracts 89, Core 181, Windows 62, Agent 92), включая сквозной тест именованного канала |
+| Компиляция .NET | 8 проектов, Roslyn + NetAnalyzers, `/warnaserror`, 0 предупреждений |
+| TypeScript | `tsc --noEmit` во всех пакетах, `vite build` без предупреждений о размере чанков |
+| Интерфейс | 12 разделов, 47 экранов и компонентов, прогон в mock-режиме на 1600×900 / 1920×1080 / 2560×1440 |
+| Локализация | 1172 ключа, идентичные наборы в `en` / `ru` / `uz` |
+| Протоколы | 63 IPC-запроса, 18 событий, 19 серверных команд, 80 Tauri-команд — покрыты обработчиками и документацией |
+
+Что **не** собиралось на машине автора: `cargo` (крейты Rust проверены статически), WiX, `tauri build`, запуск Playwright. Первую сборку этих частей выполняет CI; список известных долгов — в [docs/ROADMAP.md](docs/ROADMAP.md).
+
+---
+
+## Структура
+
+```
+apps/shell/            киоск-оболочка: src/ (React) + src-tauri/ (Rust-хост Tauri 2)
+config/                JSON-конфиги по умолчанию → C:\ProgramData\ClubShell
+crates/protocol/       Rust-зеркало контрактов (serde)
+crates/winutil/        Rust Win32: хуки, pipe, окна, мониторы, ввод
+docs/                  спецификации и руководства (14 документов)
+installer/wix/         WiX v5: ClubShell.msi + ClubShellSetup.exe (Burn)
+packages/contracts-ts/ TypeScript-зеркало контрактов
+src/ClubShell.Contracts/  канонические DTO, IPC, серверный API (C#)
+src/ClubShell.Core/       абстракции, конфиг, HTTP/WS-клиенты, безопасность, обновления
+src/ClubShell.Windows/    Win32-слой: P/Invoke, хуки, WMI, WTS, реестр, процессы, пользователи
+src/ClubShell.Agent/      служба ClubShellAgent + Install/*.ps1
+tests/                 xUnit, cargo integration (shell-rs), Playwright (shell-e2e)
+tools/ContractsGen/    генератор зеркал контрактов
+tools/MockServer/      mock центрального сервера (Fastify + ws)
+tools/scripts/         build · dev · package · sign · publish · setup-dev-vm
+.github/workflows/     ci.yml, release.yml
+```
+
+---
+
+## Конфигурация
+
+Рабочие данные — в `C:\ProgramData\ClubShell` (по умолчанию копируются из `config/` при первом старте):
+
+| Файл | Назначение |
+|---|---|
+| `agent.json` | URL сервера, ключ клуба, IPC, киоск-пользователь (`club`), сеансы, офлайн, лаунчеры, хранилище, обновления, телеметрия, античит, питание |
+| `shell.json` | язык (`ru` / `uz` / `en`), тема, киоск-защита, простой, реклама, геймпад, мониторы, флаги функций |
+| `policies.json` | последний применённый снимок политик сервера |
+| `themes\*.json` | темы; цвета становятся CSS-переменными `--c-*` |
+| `cache\`, `logs\`, `secure\` | кэш и офлайн-очередь (SQLite), JSON-логи, секреты под DPAPI |
+
+Любой ключ `agent.json` переопределяется переменной `CLUBSHELL__<Section>__<Key>`. Переменные разработки — в `.env` (`.env.example`).
+
+---
+
+## Роли на ПК
+
+| Кто | Что может |
+|---|---|
+| `LocalSystem` (агент) | всё: процессы в чужой сессии, реестр, firewall, питание, пользователи |
+| `club` (киоск-пользователь) | только группа Users; видит оболочку, свои игры и свои папки; `explorer.exe` заменён |
+| Администратор клуба | через сервер: блокировка, продление, сообщение, скриншот, удалённое управление; локально — горячая клавиша + PIN |
+| Игрок | экраны оболочки; ни одного побочного эффекта в ОС мимо агента |
+
+---
+
+## Документация
+
+- [Архитектура](docs/ARCHITECTURE.md) — компоненты, сессии, границы доверия, потоки данных, восстановление, офлайн, схемы конфигов
+- [Протокол IPC](docs/IPC_PROTOCOL.md) — именованный канал оболочка ⇄ агент: кадры, конверт, каждый запрос и событие
+- [API сервера](docs/SERVER_API.md) — REST `/api/v1` и WebSocket `/ws/agent` глазами агента
+- [Команды Tauri](docs/TAURI_COMMANDS.md) — все `#[tauri::command]` и события webview
+- [Оболочка](docs/TAURI_SHELL.md) · [Киоск-режим](docs/KIOSK_MODE.md) · [Замена shell](docs/SHELL_REPLACEMENT.md) · [Темы](docs/THEMING.md)
+- [Лаунчеры игр](docs/GAME_LAUNCHERS.md) · [Античит](docs/ANTICHEAT.md) · [Обновления](docs/UPDATES.md)
+- [Безопасность](docs/SECURITY.md) — модель угроз, секреты, ACL канала, подпись запросов
+- [Конкуренты](docs/COMPETITORS.md) · [Дорожная карта](docs/ROADMAP.md)
+
+---
+
+## Участие
+
+- Контракты меняются только в `src/ClubShell.Contracts`; зеркала регенерируются `gen-contracts-*.ps1`, CI проверяет дрейф
+- C#: file-scoped namespaces, nullable, `TreatWarningsAsErrors`, `AnalysisLevel=latest-recommended`
+- Rust: `cargo fmt`, `cargo lint`; `unsafe` только в `crates/winutil` и `src-tauri/src/kiosk`
+- TypeScript: `strict`, Prettier, типы из `@clubshell/contracts`
+- Строки интерфейса — через i18next, все три локали обновляются вместе
+
+---
+
+## Лицензия
+
+[MIT](LICENSE) © 2026 ClubShell contributors.
+
+<details>
+<summary><b>English summary</b></summary>
+
+**ClubShell** is client software for gaming clubs / internet cafés (Uzbekistan / CIS; UI in Russian, Uzbek and English; prices in UZS). Each gaming PC runs a **.NET 8 Windows service** (`ClubShellAgent`, session 0: sessions and billing timers, game launching via Steam / Epic / Battle.net / Riot / EA / Ubisoft with an account pool, server policies, anti-cheat checks, updates, telemetry, remote admin) and a **Tauri 2 + React kiosk shell** that replaces `explorer.exe` for the local kiosk user. They talk over the named pipe `\\.\pipe\clubshell-agent`; the agent talks to the club server over REST + WebSocket with HMAC-signed requests. Offline mode keeps the timer and queues events in SQLite.
+
+Try the UI in a browser: `pnpm install && pnpm mock` then `VITE_MOCK=1 pnpm --filter @clubshell/shell dev` → http://localhost:1420 (login `demo` / `1234`). Full Windows dev loop: `tools/scripts/dev.ps1`. Verified here: all 8 .NET projects compile with `/warnaserror`, 424 xUnit tests pass, `tsc` and `vite build` are clean; Rust, WiX and Playwright runs are left to CI.
+
+</details>
