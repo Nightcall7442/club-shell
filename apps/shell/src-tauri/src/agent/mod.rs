@@ -11,7 +11,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use clubshell_protocol::commands::{agent_capabilities, names, AgentCommand, AuthHelloResponse, IpcAuthLevel};
+use clubshell_protocol::commands::{
+    agent_capabilities, names, AgentCommand, AuthHelloResponse, IpcAuthLevel,
+};
 use clubshell_protocol::error::ErrorCode;
 use clubshell_protocol::ipc::IpcEnvelope;
 use clubshell_protocol::wire::format_ts;
@@ -62,7 +64,11 @@ pub struct ConnectivityStatus {
 
 impl ConnectivityStatus {
     pub fn new(agent: ConnectionState, attempts: u32) -> Self {
-        Self { agent, attempts, since: Utc::now() }
+        Self {
+            agent,
+            attempts,
+            since: Utc::now(),
+        }
     }
 
     pub fn is_connected(&self) -> bool {
@@ -144,7 +150,11 @@ impl AgentClient {
         if task.is_some() {
             return;
         }
-        let mut supervisor = Supervisor::new(Arc::clone(&agent.transport), Arc::clone(&agent.config), agent.shutdown.subscribe());
+        let mut supervisor = Supervisor::new(
+            Arc::clone(&agent.transport),
+            Arc::clone(&agent.config),
+            agent.shutdown.subscribe(),
+        );
         if let Some(initial) = agent.initial.lock().take() {
             supervisor = supervisor.with_initial(initial);
         }
@@ -213,41 +223,70 @@ impl AgentClient {
         Req: Serialize + ?Sized,
         Res: DeserializeOwned,
     {
-        self.request_with_timeout(name, payload, self.request_timeout()).await
+        self.request_with_timeout(name, payload, self.request_timeout())
+            .await
     }
 
     /// [`request`](Self::request) with an explicit timeout (`games.launch` uses 120 s).
-    pub async fn request_with_timeout<Req, Res>(&self, name: &str, payload: &Req, timeout: Duration) -> CmdResult<Res>
+    pub async fn request_with_timeout<Req, Res>(
+        &self,
+        name: &str,
+        payload: &Req,
+        timeout: Duration,
+    ) -> CmdResult<Res>
     where
         Req: Serialize + ?Sized,
         Res: DeserializeOwned,
     {
-        match self.request_raw_timeout(name, to_payload(payload)?, timeout).await? {
+        match self
+            .request_raw_timeout(name, to_payload(payload)?, timeout)
+            .await?
+        {
             Some(value) => decode(name, value),
-            None => Err(ShellError::protocol(format!("{name}: response payload missing"))),
+            None => Err(ShellError::protocol(format!(
+                "{name}: response payload missing"
+            ))),
         }
     }
 
     /// Like [`request`](Self::request) for responses whose payload may be `null` (`session.get`).
-    pub async fn request_optional<Req, Res>(&self, name: &str, payload: &Req) -> CmdResult<Option<Res>>
+    pub async fn request_optional<Req, Res>(
+        &self,
+        name: &str,
+        payload: &Req,
+    ) -> CmdResult<Option<Res>>
     where
         Req: Serialize + ?Sized,
         Res: DeserializeOwned,
     {
-        match self.request_raw_timeout(name, to_payload(payload)?, self.request_timeout()).await? {
+        match self
+            .request_raw_timeout(name, to_payload(payload)?, self.request_timeout())
+            .await?
+        {
             Some(value) => decode(name, value).map(Some),
             None => Ok(None),
         }
     }
 
     /// Raw request with the default timeout; `Ok(None)` for a `null` response payload.
-    pub async fn request_raw(&self, name: &str, payload: Option<Value>) -> CmdResult<Option<Value>> {
-        self.request_raw_timeout(name, payload, self.request_timeout()).await
+    pub async fn request_raw(
+        &self,
+        name: &str,
+        payload: Option<Value>,
+    ) -> CmdResult<Option<Value>> {
+        self.request_raw_timeout(name, payload, self.request_timeout())
+            .await
     }
 
     /// Raw request with an explicit timeout. Error envelopes become `ShellError { source: ipc }`.
-    pub async fn request_raw_timeout(&self, name: &str, payload: Option<Value>, timeout: Duration) -> CmdResult<Option<Value>> {
-        self.send(IpcEnvelope::request(name, payload), timeout).await
+    pub async fn request_raw_timeout(
+        &self,
+        name: &str,
+        payload: Option<Value>,
+        timeout: Duration,
+    ) -> CmdResult<Option<Value>> {
+        self.send(IpcEnvelope::request(name, payload), timeout)
+            .await
     }
 
     /// Sends a prepared request envelope (custom `id`, e.g. the frontend `traceId`).
@@ -265,7 +304,8 @@ fn to_payload<Req: Serialize + ?Sized>(payload: &Req) -> CmdResult<Option<Value>
 }
 
 fn decode<Res: DeserializeOwned>(name: &str, value: Value) -> CmdResult<Res> {
-    serde_json::from_value(value).map_err(|e| ShellError::protocol(format!("{name}: invalid response payload: {e}")))
+    serde_json::from_value(value)
+        .map_err(|e| ShellError::protocol(format!("{name}: invalid response payload: {e}")))
 }
 
 // ───────────────────────────── Mock ─────────────────────────────
@@ -344,7 +384,10 @@ fn mock_game(id: Uuid, title: &str, app_id: &str, tag: &str) -> Value {
 }
 
 fn mock_games() -> Vec<Value> {
-    vec![mock_game(MOCK_GAME_CS2, "Counter-Strike 2", "730", "shooter"), mock_game(MOCK_GAME_DOTA, "Dota 2", "570", "moba")]
+    vec![
+        mock_game(MOCK_GAME_CS2, "Counter-Strike 2", "730", "shooter"),
+        mock_game(MOCK_GAME_DOTA, "Dota 2", "570", "moba"),
+    ]
 }
 
 fn mock_pc(shell_version: &str) -> Value {
@@ -435,7 +478,12 @@ impl MockTransport {
             state,
             hello,
             request_timeout: config.ipc.request_timeout(),
-            db: Mutex::new(MockDb { user: None, session: None, settings: mock_settings(config), running_game: None }),
+            db: Mutex::new(MockDb {
+                user: None,
+                session: None,
+                settings: mock_settings(config),
+                running_game: None,
+            }),
         }
     }
 
@@ -446,7 +494,10 @@ impl MockTransport {
     /// Canned answer for `name`; enforces the IPC auth level like the real Agent.
     pub fn request(&self, name: &str, payload: Option<Value>) -> CmdResult<Option<Value>> {
         let Some(cmd) = AgentCommand::parse(name) else {
-            return Err(mock_err(ErrorCode::NotFound, &format!("Unknown message '{name}'")).with_details(json!({ "name": name })));
+            return Err(
+                mock_err(ErrorCode::NotFound, &format!("Unknown message '{name}'"))
+                    .with_details(json!({ "name": name })),
+            );
         };
         let p = payload.unwrap_or(Value::Null);
         let mut db = self.db.lock();
@@ -454,14 +505,22 @@ impl MockTransport {
             refresh_session(s);
         }
         match cmd.required_auth() {
-            IpcAuthLevel::User if db.user.is_none() => return Err(mock_err(ErrorCode::Unauthorized, "Not logged in")),
-            IpcAuthLevel::Session if !matches!(session_state(db.session.as_ref()), "active" | "paused") => {
+            IpcAuthLevel::User if db.user.is_none() => {
+                return Err(mock_err(ErrorCode::Unauthorized, "Not logged in"))
+            }
+            IpcAuthLevel::Session
+                if !matches!(session_state(db.session.as_ref()), "active" | "paused") =>
+            {
                 return Err(mock_err(ErrorCode::SessionNotActive, "No active session"))
             }
             _ => {}
         }
         let shell_version = env!("CARGO_PKG_VERSION");
-        let user_id = db.user.as_ref().map(|u| u["id"].clone()).unwrap_or(Value::Null);
+        let user_id = db
+            .user
+            .as_ref()
+            .map(|u| u["id"].clone())
+            .unwrap_or(Value::Null);
         let mut event: Option<(&str, Value)> = None;
 
         let result = match cmd {
@@ -469,7 +528,8 @@ impl MockTransport {
             AgentCommand::AuthLogin => {
                 let kind = p["kind"].as_str().unwrap_or("password");
                 if kind == "password" && p["password"].as_str().unwrap_or("").is_empty() {
-                    return Err(mock_err(ErrorCode::Validation, "password required").with_details(json!({ "field": "password", "reason": "required" })));
+                    return Err(mock_err(ErrorCode::Validation, "password required")
+                        .with_details(json!({ "field": "password", "reason": "required" })));
                 }
                 let mut user = mock_user();
                 if kind == "guest" {
@@ -482,7 +542,9 @@ impl MockTransport {
                     user["displayName"] = json!(name);
                 }
                 db.user = Some(user.clone());
-                Some(json!({ "user": user, "session": db.session, "expiresAt": in_secs(8 * 3600), "mode": "online" }))
+                Some(
+                    json!({ "user": user, "session": db.session, "expiresAt": in_secs(8 * 3600), "mode": "online" }),
+                )
             }
             AgentCommand::AuthLogout => {
                 let session = db.session.take();
@@ -490,7 +552,10 @@ impl MockTransport {
                 db.running_game = None;
                 if let Some(mut s) = session.clone() {
                     s["state"] = json!("ended");
-                    event = Some((names::events::SESSION_ENDED, json!({ "session": s, "reason": "user", "charged": s["cost"].clone() })));
+                    event = Some((
+                        names::events::SESSION_ENDED,
+                        json!({ "session": s, "reason": "user", "charged": s["cost"].clone() }),
+                    ));
                 }
                 Some(json!({ "ok": true, "sessionEnded": session.is_some(), "session": session }))
             }
@@ -503,12 +568,21 @@ impl MockTransport {
             })),
             AgentCommand::SessionGet => Some(db.session.clone().unwrap_or(Value::Null)),
             AgentCommand::SessionStart => {
-                if matches!(session_state(db.session.as_ref()), "active" | "paused" | "locked" | "ending") {
-                    return Err(mock_err(ErrorCode::SessionAlreadyActive, "A session is already active"));
+                if matches!(
+                    session_state(db.session.as_ref()),
+                    "active" | "paused" | "locked" | "ending"
+                ) {
+                    return Err(mock_err(
+                        ErrorCode::SessionAlreadyActive,
+                        "A session is already active",
+                    ));
                 }
                 let minutes = p["minutes"].as_i64().unwrap_or(60).max(1);
                 let prepaid = p["prepaid"].as_bool().unwrap_or(true);
-                let tariff = p["tariffId"].as_str().and_then(|s| Uuid::parse_str(s).ok()).unwrap_or(MOCK_TARIFF_STD);
+                let tariff = p["tariffId"]
+                    .as_str()
+                    .and_then(|s| Uuid::parse_str(s).ok())
+                    .unwrap_or(MOCK_TARIFF_STD);
                 let session = json!({
                     "id": Uuid::new_v4(), "userId": user_id, "pcId": MOCK_PC, "state": "active", "startedAt": now(),
                     "endsAt": in_secs(minutes * 60), "tariffId": tariff, "secondsLeft": minutes * 60, "secondsUsed": 0,
@@ -518,8 +592,14 @@ impl MockTransport {
                 event = Some((names::events::SESSION_UPDATED, session.clone()));
                 Some(session)
             }
-            AgentCommand::SessionPause | AgentCommand::SessionResume | AgentCommand::SessionLock | AgentCommand::SessionUnlock => {
-                let session = db.session.as_mut().ok_or_else(|| mock_err(ErrorCode::SessionNotActive, "No active session"))?;
+            AgentCommand::SessionPause
+            | AgentCommand::SessionResume
+            | AgentCommand::SessionLock
+            | AgentCommand::SessionUnlock => {
+                let session = db
+                    .session
+                    .as_mut()
+                    .ok_or_else(|| mock_err(ErrorCode::SessionNotActive, "No active session"))?;
                 match cmd {
                     AgentCommand::SessionPause => {
                         session["state"] = json!("paused");
@@ -530,9 +610,15 @@ impl MockTransport {
                         session["pausedAt"] = now();
                     }
                     _ => {
-                        if let Some(paused) = session["pausedAt"].as_str().and_then(clubshell_protocol::wire::parse_ts) {
+                        if let Some(paused) = session["pausedAt"]
+                            .as_str()
+                            .and_then(clubshell_protocol::wire::parse_ts)
+                        {
                             let gap = Utc::now() - paused;
-                            if let Some(ends) = session["endsAt"].as_str().and_then(clubshell_protocol::wire::parse_ts) {
+                            if let Some(ends) = session["endsAt"]
+                                .as_str()
+                                .and_then(clubshell_protocol::wire::parse_ts)
+                            {
                                 session["endsAt"] = ts(ends + gap);
                             }
                         }
@@ -547,18 +633,30 @@ impl MockTransport {
                 Some(session)
             }
             AgentCommand::SessionEnd => {
-                let mut session = db.session.take().ok_or_else(|| mock_err(ErrorCode::SessionNotActive, "No active session"))?;
+                let mut session = db
+                    .session
+                    .take()
+                    .ok_or_else(|| mock_err(ErrorCode::SessionNotActive, "No active session"))?;
                 db.running_game = None;
                 session["state"] = json!("ended");
                 let charged = session["cost"].clone();
                 let reason = p["reason"].as_str().unwrap_or("user");
-                event = Some((names::events::SESSION_ENDED, json!({ "session": session, "reason": reason, "charged": charged })));
+                event = Some((
+                    names::events::SESSION_ENDED,
+                    json!({ "session": session, "reason": reason, "charged": charged }),
+                ));
                 Some(json!({ "session": session, "charged": charged, "refunded": money(0) }))
             }
             AgentCommand::SessionExtend => {
-                let session = db.session.as_mut().ok_or_else(|| mock_err(ErrorCode::SessionNotActive, "No active session"))?;
+                let session = db
+                    .session
+                    .as_mut()
+                    .ok_or_else(|| mock_err(ErrorCode::SessionNotActive, "No active session"))?;
                 let minutes = p["minutes"].as_i64().unwrap_or(30).max(1);
-                if let Some(ends) = session["endsAt"].as_str().and_then(clubshell_protocol::wire::parse_ts) {
+                if let Some(ends) = session["endsAt"]
+                    .as_str()
+                    .and_then(clubshell_protocol::wire::parse_ts)
+                {
                     session["endsAt"] = ts(ends + ChronoDuration::minutes(minutes));
                 }
                 refresh_session(session);
@@ -577,45 +675,73 @@ impl MockTransport {
             AgentCommand::GamesList => {
                 let games = mock_games();
                 let total = games.len();
-                Some(json!({ "items": games, "total": total, "page": 1, "pageSize": 100, "catalogVersion": "mock-1" }))
+                Some(
+                    json!({ "items": games, "total": total, "page": 1, "pageSize": 100, "catalogVersion": "mock-1" }),
+                )
             }
             AgentCommand::GamesGet | AgentCommand::GamesInstallStatus => {
                 let id = p["gameId"].as_str().and_then(|s| Uuid::parse_str(s).ok());
-                let game = mock_games().into_iter().find(|g| g["id"].as_str().and_then(|s| Uuid::parse_str(s).ok()) == id);
+                let game = mock_games()
+                    .into_iter()
+                    .find(|g| g["id"].as_str().and_then(|s| Uuid::parse_str(s).ok()) == id);
                 let game = game.ok_or_else(|| mock_err(ErrorCode::NotFound, "Game not found"))?;
                 if cmd == AgentCommand::GamesGet {
                     Some(game)
                 } else {
-                    Some(json!({ "gameId": game["id"], "installed": true, "installPath": game["installPath"], "sizeGb": game["sizeGb"], "version": game["version"], "verifiedAt": now(), "launcherReady": true }))
+                    Some(
+                        json!({ "gameId": game["id"], "installed": true, "installPath": game["installPath"], "sizeGb": game["sizeGb"], "version": game["version"], "verifiedAt": now(), "launcherReady": true }),
+                    )
                 }
             }
             AgentCommand::GamesLaunch => {
                 let id = p["gameId"].as_str().and_then(|s| Uuid::parse_str(s).ok());
-                let game = mock_games().into_iter().find(|g| g["id"].as_str().and_then(|s| Uuid::parse_str(s).ok()) == id);
-                let game = game.ok_or_else(|| mock_err(ErrorCode::GameNotInstalled, "Game not found"))?;
+                let game = mock_games()
+                    .into_iter()
+                    .find(|g| g["id"].as_str().and_then(|s| Uuid::parse_str(s).ok()) == id);
+                let game =
+                    game.ok_or_else(|| mock_err(ErrorCode::GameNotInstalled, "Game not found"))?;
                 let running = json!({ "gameId": game["id"], "title": game["title"], "pid": MOCK_GAME_PID, "startedAt": now(), "state": "running" });
                 db.running_game = Some(running.clone());
-                event = Some((names::events::GAME_STATE_CHANGED, json!({ "gameId": game["id"], "title": game["title"], "pid": MOCK_GAME_PID, "state": "running", "at": now() })));
+                event = Some((
+                    names::events::GAME_STATE_CHANGED,
+                    json!({ "gameId": game["id"], "title": game["title"], "pid": MOCK_GAME_PID, "state": "running", "at": now() }),
+                ));
                 Some(json!({ "ok": true, "pid": MOCK_GAME_PID, "startedAt": now() }))
             }
             AgentCommand::GamesKill => match db.running_game.take() {
                 Some(game) => {
-                    event = Some((names::events::GAME_STATE_CHANGED, json!({ "gameId": game["gameId"], "title": game["title"], "pid": MOCK_GAME_PID, "state": "killed", "at": now() })));
+                    event = Some((
+                        names::events::GAME_STATE_CHANGED,
+                        json!({ "gameId": game["gameId"], "title": game["title"], "pid": MOCK_GAME_PID, "state": "killed", "at": now() }),
+                    ));
                     Some(json!({ "killed": 1, "pids": [MOCK_GAME_PID] }))
                 }
                 None => Some(json!({ "killed": 0, "pids": [] })),
             },
-            AgentCommand::GamesRunning => Some(json!({ "items": db.running_game.iter().collect::<Vec<_>>() })),
+            AgentCommand::GamesRunning => {
+                Some(json!({ "items": db.running_game.iter().collect::<Vec<_>>() }))
+            }
             AgentCommand::AppsList => Some(json!({ "items": [
                 { "id": MOCK_APP, "title": "Discord", "exePath": "C:\\Program Files\\Discord\\Discord.exe", "iconUrl": "", "category": "chat", "allowed": true }
             ] })),
-            AgentCommand::AppsLaunch => Some(json!({ "ok": true, "pid": 4343, "startedAt": now() })),
-            AgentCommand::WalletBalance => Some(json!({ "userId": user_id, "amount": money(50_000), "bonus": money(0), "currency": "UZS", "updatedAt": now() })),
-            AgentCommand::WalletTariffs => Some(json!({ "items": mock_tariffs(), "zone": p["zone"].as_str().unwrap_or("main"), "serverTime": now() })),
-            AgentCommand::WalletHistory => Some(json!({ "items": [], "total": 0, "page": 1, "pageSize": 20 })),
+            AgentCommand::AppsLaunch => {
+                Some(json!({ "ok": true, "pid": 4343, "startedAt": now() }))
+            }
+            AgentCommand::WalletBalance => Some(
+                json!({ "userId": user_id, "amount": money(50_000), "bonus": money(0), "currency": "UZS", "updatedAt": now() }),
+            ),
+            AgentCommand::WalletTariffs => Some(
+                json!({ "items": mock_tariffs(), "zone": p["zone"].as_str().unwrap_or("main"), "serverTime": now() }),
+            ),
+            AgentCommand::WalletHistory => {
+                Some(json!({ "items": [], "total": 0, "page": 1, "pageSize": 20 }))
+            }
             AgentCommand::WalletTopupIntent => {
                 let provider = p["provider"].as_str().unwrap_or("payme");
-                let amount = p["amount"].as_object().map(|_| p["amount"].clone()).unwrap_or_else(|| money(10_000));
+                let amount = p["amount"]
+                    .as_object()
+                    .map(|_| p["amount"].clone())
+                    .unwrap_or_else(|| money(10_000));
                 Some(json!({
                     "id": Uuid::new_v4(), "provider": provider, "amount": amount, "status": "pending",
                     "paymentUrl": "https://example.invalid/pay/mock", "expiresAt": in_secs(900), "createdAt": now()
@@ -623,15 +749,25 @@ impl MockTransport {
             }
             AgentCommand::ShopProducts => Some(json!({ "items": [] })),
             AgentCommand::ShopOrder | AgentCommand::BookingReserve => {
-                return Err(mock_err(ErrorCode::ServerUnavailable, "Not available in mock mode"));
+                return Err(mock_err(
+                    ErrorCode::ServerUnavailable,
+                    "Not available in mock mode",
+                ));
             }
-            AgentCommand::ShopOrderStatus | AgentCommand::BookingCancel | AgentCommand::TournamentsJoin => {
+            AgentCommand::ShopOrderStatus
+            | AgentCommand::BookingCancel
+            | AgentCommand::TournamentsJoin => {
                 return Err(mock_err(ErrorCode::NotFound, "Not found in mock mode"));
             }
             AgentCommand::ShopOrders => Some(json!({ "items": [], "total": 0 })),
-            AgentCommand::ChatHistory => Some(json!({ "roomId": p["roomId"].as_str().unwrap_or("club"), "items": [], "hasMore": false, "unread": 0 })),
+            AgentCommand::ChatHistory => Some(
+                json!({ "roomId": p["roomId"].as_str().unwrap_or("club"), "items": [], "hasMore": false, "unread": 0 }),
+            ),
             AgentCommand::ChatSend => {
-                let user = db.user.as_ref().ok_or_else(|| mock_err(ErrorCode::Unauthorized, "Not logged in"))?;
+                let user = db
+                    .user
+                    .as_ref()
+                    .ok_or_else(|| mock_err(ErrorCode::Unauthorized, "Not logged in"))?;
                 let message = json!({
                     "id": Uuid::new_v4(), "roomId": p["roomId"].as_str().unwrap_or("club"), "senderId": user["id"],
                     "senderName": user["displayName"], "senderRole": user["role"], "text": p["text"].as_str().unwrap_or(""),
@@ -640,7 +776,9 @@ impl MockTransport {
                 event = Some((names::events::CHAT_MESSAGE, message.clone()));
                 Some(message)
             }
-            AgentCommand::ChatMarkRead => Some(json!({ "roomId": p["roomId"].as_str().unwrap_or("club"), "unread": 0 })),
+            AgentCommand::ChatMarkRead => {
+                Some(json!({ "roomId": p["roomId"].as_str().unwrap_or("club"), "unread": 0 }))
+            }
             AgentCommand::BookingSeats => Some(json!({
                 "date": p["date"].as_str().map(str::to_owned).unwrap_or_else(|| Utc::now().format("%Y-%m-%d").to_string()),
                 "seats": [], "bookings": [], "slotMinutes": 30
@@ -652,7 +790,10 @@ impl MockTransport {
             })),
             AgentCommand::ProfileGet => Some(db.user.clone().unwrap_or(Value::Null)),
             AgentCommand::ProfileUpdate => {
-                let user = db.user.as_mut().ok_or_else(|| mock_err(ErrorCode::Unauthorized, "Not logged in"))?;
+                let user = db
+                    .user
+                    .as_mut()
+                    .ok_or_else(|| mock_err(ErrorCode::Unauthorized, "Not logged in"))?;
                 for key in ["displayName", "avatarUrl", "locale"] {
                     if !p[key].is_null() {
                         user[key] = p[key].clone();
@@ -660,9 +801,13 @@ impl MockTransport {
                 }
                 Some(user.clone())
             }
-            AgentCommand::ProfileStats => Some(json!({ "totalHours": 12.5, "sessionsCount": 8, "favoriteGames": [], "spent": money(120_000), "rank": 42 })),
+            AgentCommand::ProfileStats => Some(
+                json!({ "totalHours": 12.5, "sessionsCount": 8, "favoriteGames": [], "spent": money(120_000), "rank": 42 }),
+            ),
             AgentCommand::ProfileAchievements => Some(json!({ "items": [] })),
-            AgentCommand::ProfileLoyalty => Some(json!({ "level": 1, "points": 120, "nextLevelAt": 500, "perks": [] })),
+            AgentCommand::ProfileLoyalty => {
+                Some(json!({ "level": 1, "points": 120, "nextLevelAt": 500, "perks": [] }))
+            }
             AgentCommand::SettingsGet => Some(db.settings.clone()),
             AgentCommand::SettingsSet => {
                 if let Some(patch) = p.as_object() {
@@ -674,7 +819,9 @@ impl MockTransport {
                 }
                 Some(db.settings.clone())
             }
-            AgentCommand::SysPing => Some(json!({ "seq": p["seq"], "sentAt": p["sentAt"], "receivedAt": now(), "connectivity": "online" })),
+            AgentCommand::SysPing => Some(
+                json!({ "seq": p["seq"], "sentAt": p["sentAt"], "receivedAt": now(), "connectivity": "online" }),
+            ),
             AgentCommand::SysPcInfo => Some(json!({
                 "pc": mock_pc(shell_version), "agentVersion": "mock", "shellVersion": shell_version, "protocolVersion": PROTOCOL_VERSION,
                 "uptimeSec": 3600, "kioskUser": "club", "connectivity": "online", "serverTime": now(), "policyVersion": 1
@@ -693,9 +840,15 @@ impl MockTransport {
                 "cpuPct": 12, "gpuPct": 5, "ramUsedMb": 4096, "temps": { "cpu": 45, "gpu": 40 },
                 "netMbps": { "up": 0.5, "down": 2.5 }, "uptimeSec": 3600, "at": now()
             })),
-            AgentCommand::SysCallAdmin => Some(json!({ "ticketId": Uuid::new_v4(), "createdAt": now(), "queuePosition": 1 })),
-            AgentCommand::SysReboot | AgentCommand::SysShutdown => Some(json!({ "scheduledAt": in_secs(p["delaySec"].as_i64().unwrap_or(0)) })),
-            AgentCommand::SysLockScreen | AgentCommand::SysAckAdminMessage => Some(json!({ "ok": true })),
+            AgentCommand::SysCallAdmin => {
+                Some(json!({ "ticketId": Uuid::new_v4(), "createdAt": now(), "queuePosition": 1 }))
+            }
+            AgentCommand::SysReboot | AgentCommand::SysShutdown => {
+                Some(json!({ "scheduledAt": in_secs(p["delaySec"].as_i64().unwrap_or(0)) }))
+            }
+            AgentCommand::SysLockScreen | AgentCommand::SysAckAdminMessage => {
+                Some(json!({ "ok": true }))
+            }
             AgentCommand::SysSetVolume => {
                 let level = p["level"].as_i64().unwrap_or(50).clamp(0, 100);
                 let muted = p["muted"].as_bool().unwrap_or(false);
@@ -715,15 +868,21 @@ impl MockTransport {
                 if p["pin"].as_str() != Some(MOCK_ADMIN_PIN) {
                     return Err(mock_err(ErrorCode::Unauthorized, "Wrong PIN"));
                 }
-                Some(json!({ "ok": true, "adminToken": format!("mock-admin-{}", Uuid::new_v4().simple()), "expiresAt": in_secs(600) }))
+                Some(
+                    json!({ "ok": true, "adminToken": format!("mock-admin-{}", Uuid::new_v4().simple()), "expiresAt": in_secs(600) }),
+                )
             }
             AgentCommand::SysLogClientError => {
                 tracing::warn!(target: "webview", level = %p["level"], message = %p["message"], route = %p["route"], "client error (mock agent)");
                 None
             }
             AgentCommand::PolicyGet => Some(mock_policy()),
-            AgentCommand::PolicyReload => Some(json!({ "policy": mock_policy(), "source": "cache", "applied": true, "changed": [] })),
-            AgentCommand::UpdateCheck => Some(json!({ "current": { "agent": "mock", "shell": shell_version } })),
+            AgentCommand::PolicyReload => Some(
+                json!({ "policy": mock_policy(), "source": "cache", "applied": true, "changed": [] }),
+            ),
+            AgentCommand::UpdateCheck => {
+                Some(json!({ "current": { "agent": "mock", "shell": shell_version } }))
+            }
             AgentCommand::UpdateApply => Some(json!({ "scheduled": false })),
         };
         drop(db);
@@ -737,7 +896,9 @@ impl MockTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clubshell_protocol::commands::{AuthLoginResponse, GamesListResponse, SessionTimeLeftResponse};
+    use clubshell_protocol::commands::{
+        AuthLoginResponse, GamesListResponse, SessionTimeLeftResponse,
+    };
     use clubshell_protocol::session::{Session, SessionState};
     use clubshell_protocol::user::User;
 
@@ -751,15 +912,33 @@ mod tests {
         let mut events = agent.events();
 
         // Auth gate like the real Agent.
-        let err = agent.request_optional::<_, Session>(names::session::GET, &()).await.unwrap_err();
+        let err = agent
+            .request_optional::<_, Session>(names::session::GET, &())
+            .await
+            .unwrap_err();
         assert_eq!(err.code, ErrorCode::Unauthorized);
 
-        let login: AuthLoginResponse = agent.request(names::auth::LOGIN, &json!({ "kind": "password", "username": "bob", "password": "x" })).await.unwrap();
+        let login: AuthLoginResponse = agent
+            .request(
+                names::auth::LOGIN,
+                &json!({ "kind": "password", "username": "bob", "password": "x" }),
+            )
+            .await
+            .unwrap();
         assert_eq!(login.user.username, "bob");
-        let none: Option<Session> = agent.request_optional(names::session::GET, &()).await.unwrap();
+        let none: Option<Session> = agent
+            .request_optional(names::session::GET, &())
+            .await
+            .unwrap();
         assert!(none.is_none());
 
-        let session: Session = agent.request(names::session::START, &json!({ "tariffId": MOCK_TARIFF_STD, "prepaid": true, "minutes": 30 })).await.unwrap();
+        let session: Session = agent
+            .request(
+                names::session::START,
+                &json!({ "tariffId": MOCK_TARIFF_STD, "prepaid": true, "minutes": 30 }),
+            )
+            .await
+            .unwrap();
         assert_eq!(session.state, SessionState::Active);
         assert_eq!(session.seconds_left, 1800);
         let ev = events.recv().await.unwrap();
@@ -767,7 +946,8 @@ mod tests {
 
         let paused: Session = agent.request(names::session::PAUSE, &()).await.unwrap();
         assert_eq!(paused.state, SessionState::Paused);
-        let left: SessionTimeLeftResponse = agent.request(names::session::TIME_LEFT, &()).await.unwrap();
+        let left: SessionTimeLeftResponse =
+            agent.request(names::session::TIME_LEFT, &()).await.unwrap();
         assert_eq!(left.state, SessionState::Paused);
 
         let games: GamesListResponse = agent.request(names::games::LIST, &()).await.unwrap();
@@ -779,7 +959,12 @@ mod tests {
         for cmd in AgentCommand::ALL {
             let res = agent.request_raw(cmd.name(), Some(json!({ "gameId": MOCK_GAME_CS2, "tournamentId": MOCK_GAME_CS2, "pin": "0000", "locale": "en", "text": "hi", "level": "warn", "message": "m" }))).await;
             if let Err(e) = res {
-                assert_eq!(e.source, crate::state::ErrorSource::Mock, "{}: {e}", cmd.name());
+                assert_eq!(
+                    e.source,
+                    crate::state::ErrorSource::Mock,
+                    "{}: {e}",
+                    cmd.name()
+                );
             }
         }
         let unknown = agent.request_raw("nope.nope", None).await.unwrap_err();

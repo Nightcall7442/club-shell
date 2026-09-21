@@ -15,22 +15,30 @@ mod imp {
     use windows::Win32::Foundation::{BOOL, POINT, RECT};
     use windows::Win32::System::SystemInformation::GetTickCount;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        BlockInput, GetAsyncKeyState, GetLastInputInfo, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
-        KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, LASTINPUTINFO, VIRTUAL_KEY,
+        BlockInput, GetAsyncKeyState, GetLastInputInfo, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD,
+        KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, LASTINPUTINFO,
+        VIRTUAL_KEY,
     };
-    use windows::Win32::UI::WindowsAndMessaging::{ClipCursor, GetCursorPos, SetCursorPos, ShowCursor};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        ClipCursor, GetCursorPos, SetCursorPos, ShowCursor,
+    };
 
     use crate::{last_error, Win32Ret};
 
     /// Time since the last keyboard/mouse input in this session (`GetLastInputInfo`, ~16 ms
     /// resolution, wraps every 49.7 days which `wrapping_sub` handles).
     pub fn idle_duration() -> Result<Duration> {
-        let mut info = LASTINPUTINFO { cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+        let mut info = LASTINPUTINFO {
+            cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32,
+            dwTime: 0,
+        };
         // SAFETY: `info` is a correctly sized, writable struct.
         unsafe { GetLastInputInfo(&mut info) }.ret("GetLastInputInfo")?;
         // SAFETY: no preconditions.
         let now = unsafe { GetTickCount() };
-        Ok(Duration::from_millis(u64::from(now.wrapping_sub(info.dwTime))))
+        Ok(Duration::from_millis(u64::from(
+            now.wrapping_sub(info.dwTime),
+        )))
     }
 
     /// Blocks (or unblocks) all keyboard and mouse input for the calling thread's desktop.
@@ -57,19 +65,34 @@ mod imp {
     fn key_input(vk: u16, scan: u16, flags: KEYBD_EVENT_FLAGS) -> INPUT {
         INPUT {
             r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: VIRTUAL_KEY(vk), wScan: scan, dwFlags: flags, time: 0, dwExtraInfo: 0 } },
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: VIRTUAL_KEY(vk),
+                    wScan: scan,
+                    dwFlags: flags,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
         }
     }
 
     /// Injects one virtual-key transition (`up = false` → key down).
     pub fn send_key(vk: u32, up: bool) -> Result<()> {
-        let flags = if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) };
+        let flags = if up {
+            KEYEVENTF_KEYUP
+        } else {
+            KEYBD_EVENT_FLAGS(0)
+        };
         send_inputs(&[key_input(vk as u16, 0, flags)])
     }
 
     /// Key down followed by key up.
     pub fn tap_key(vk: u32) -> Result<()> {
-        send_inputs(&[key_input(vk as u16, 0, KEYBD_EVENT_FLAGS(0)), key_input(vk as u16, 0, KEYEVENTF_KEYUP)])
+        send_inputs(&[
+            key_input(vk as u16, 0, KEYBD_EVENT_FLAGS(0)),
+            key_input(vk as u16, 0, KEYEVENTF_KEYUP),
+        ])
     }
 
     /// Types `text` into the focused window as Unicode key events (`KEYEVENTF_UNICODE`), so it works
@@ -170,6 +193,6 @@ mod imp {
 }
 
 pub use imp::{
-    block_input, clip_cursor, get_cursor_pos, idle_duration, is_key_down, send_key, send_text, set_cursor_pos,
-    show_cursor, tap_key,
+    block_input, clip_cursor, get_cursor_pos, idle_duration, is_key_down, send_key, send_text,
+    set_cursor_pos, show_cursor, tap_key,
 };

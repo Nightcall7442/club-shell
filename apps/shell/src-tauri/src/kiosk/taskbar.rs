@@ -25,7 +25,11 @@ pub struct Taskbar {
 impl Taskbar {
     /// Creates the controller and hides the taskbar right away when `hide`.
     pub fn start(hide: bool) -> Arc<Self> {
-        let taskbar = Arc::new(Self { hidden: AtomicBool::new(false), autohide_applied: AtomicBool::new(false), task: Mutex::new(None) });
+        let taskbar = Arc::new(Self {
+            hidden: AtomicBool::new(false),
+            autohide_applied: AtomicBool::new(false),
+            task: Mutex::new(None),
+        });
         if hide {
             taskbar.set_hidden(true);
         }
@@ -95,7 +99,10 @@ impl Taskbar {
                 if first {
                     tracing::info!(windows, "taskbar hidden");
                 } else {
-                    tracing::info!(windows, "taskbar re-hidden (explorer restarted or display changed)");
+                    tracing::info!(
+                        windows,
+                        "taskbar re-hidden (explorer restarted or display changed)"
+                    );
                 }
             }
             Err(e) => {

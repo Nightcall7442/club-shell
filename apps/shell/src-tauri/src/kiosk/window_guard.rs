@@ -9,12 +9,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use clubshell_winutil::window::{enumerate_windows, force_foreground, foreground_window, set_window_display_affinity, window_pid};
+use clubshell_winutil::window::{
+    enumerate_windows, force_foreground, foreground_window, set_window_display_affinity, window_pid,
+};
 use clubshell_winutil::Rect;
 use parking_lot::{Mutex, RwLock};
 use serde::Serialize;
 use tauri::async_runtime::JoinHandle;
-use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewWindow, WindowEvent};
+use tauri::{
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewWindow,
+    WindowEvent,
+};
 
 use crate::config::ShellConfig;
 use crate::state::{CmdResult, ShellError};
@@ -55,7 +60,10 @@ mod native {
     use clubshell_winutil::hwnd_from_raw;
     use windows::core::PWSTR;
     use windows::Win32::Foundation::{CloseHandle, BOOL};
-    use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION};
+    use windows::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
+        PROCESS_QUERY_LIMITED_INFORMATION,
+    };
     use windows::Win32::UI::WindowsAndMessaging::{IsIconic, ShowWindow, SW_FORCEMINIMIZE};
 
     pub fn minimize(hwnd: isize) {
@@ -72,16 +80,26 @@ mod native {
     pub fn process_name(pid: u32) -> Option<String> {
         // SAFETY: the handle is closed before returning; the buffer is writable and `len` holds its size.
         unsafe {
-            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, BOOL::from(false), pid).ok()?;
+            let handle =
+                OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, BOOL::from(false), pid).ok()?;
             let mut buf = [0u16; 1024];
             let mut len = buf.len() as u32;
-            let ok = QueryFullProcessImageNameW(handle, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len).is_ok();
+            let ok = QueryFullProcessImageNameW(
+                handle,
+                PROCESS_NAME_WIN32,
+                PWSTR(buf.as_mut_ptr()),
+                &mut len,
+            )
+            .is_ok();
             let _ = CloseHandle(handle);
             if !ok {
                 return None;
             }
             let path = String::from_utf16_lossy(&buf[..(len as usize).min(buf.len())]);
-            path.rsplit(['\\', '/']).next().filter(|s| !s.is_empty()).map(str::to_owned)
+            path.rsplit(['\\', '/'])
+                .next()
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
         }
     }
 }
@@ -139,8 +157,15 @@ pub struct WindowGuard {
 
 impl WindowGuard {
     /// Attaches to the `main` window, applies the kiosk (or dev) window state and starts the sweep.
-    pub fn start(app: &AppHandle, config: &ShellConfig, dev: bool, primary: Rect) -> anyhow::Result<Arc<Self>> {
-        let window = app.get_webview_window(MAIN_LABEL).ok_or_else(|| anyhow::anyhow!("window '{MAIN_LABEL}' not found"))?;
+    pub fn start(
+        app: &AppHandle,
+        config: &ShellConfig,
+        dev: bool,
+        primary: Rect,
+    ) -> anyhow::Result<Arc<Self>> {
+        let window = app
+            .get_webview_window(MAIN_LABEL)
+            .ok_or_else(|| anyhow::anyhow!("window '{MAIN_LABEL}' not found"))?;
         let hwnd = raw_hwnd(&window);
         let guard = Arc::new(Self {
             app: app.clone(),
@@ -175,7 +200,12 @@ impl WindowGuard {
             }
         });
         guard.spawn_sweep();
-        tracing::info!(hwnd, dev, fullscreen = guard.is_fullscreen(), "window guard started");
+        tracing::info!(
+            hwnd,
+            dev,
+            fullscreen = guard.is_fullscreen(),
+            "window guard started"
+        );
         Ok(guard)
     }
 
@@ -189,7 +219,9 @@ impl WindowGuard {
     }
 
     pub fn is_fullscreen(&self) -> bool {
-        self.window.is_fullscreen().unwrap_or_else(|_| self.fullscreen.load(Ordering::Acquire))
+        self.window
+            .is_fullscreen()
+            .unwrap_or_else(|_| self.fullscreen.load(Ordering::Acquire))
     }
 
     /// `kiosk_set_fullscreen`.
@@ -209,7 +241,10 @@ impl WindowGuard {
         let w = &self.window;
         w.set_fullscreen(false)?;
         w.set_position(PhysicalPosition::new(rect.left, rect.top))?;
-        w.set_size(PhysicalSize::new(u32::try_from(rect.width()).unwrap_or(0), u32::try_from(rect.height()).unwrap_or(0)))?;
+        w.set_size(PhysicalSize::new(
+            u32::try_from(rect.width()).unwrap_or(0),
+            u32::try_from(rect.height()).unwrap_or(0),
+        ))?;
         if self.fullscreen.load(Ordering::Acquire) {
             w.set_fullscreen(true)?;
         }
@@ -349,9 +384,19 @@ impl WindowGuard {
 
     fn on_focus(self: &Arc<Self>, focused: bool) {
         let pid = if focused { 0 } else { foreground_pid() };
-        let foreground_process = if focused || pid == 0 { None } else { native::process_name(pid) };
+        let foreground_process = if focused || pid == 0 {
+            None
+        } else {
+            native::process_name(pid)
+        };
         tracing::debug!(has_focus = focused, pid, process = ?foreground_process, "focus changed");
-        if let Err(e) = self.app.emit(FOCUS_EVENT, FocusEvent { has_focus: focused, foreground_process }) {
+        if let Err(e) = self.app.emit(
+            FOCUS_EVENT,
+            FocusEvent {
+                has_focus: focused,
+                foreground_process,
+            },
+        ) {
             tracing::warn!(error = %e, "cannot emit kiosk://focus");
         }
         if focused || !self.should_guard() || self.is_allowed_pid(pid) {
@@ -369,7 +414,10 @@ impl WindowGuard {
 
     /// Guarding is wanted: kiosk mode, guard active, no game, not exiting.
     fn should_guard(&self) -> bool {
-        !self.dev && self.is_active() && !self.is_game_mode() && !self.shutting_down.load(Ordering::Acquire)
+        !self.dev
+            && self.is_active()
+            && !self.is_game_mode()
+            && !self.shutting_down.load(Ordering::Acquire)
     }
 
     fn refocus_if_needed(&self) {
@@ -403,13 +451,20 @@ impl WindowGuard {
     /// Minimizes visible, titled top-level windows of processes that are neither us nor allowlisted.
     /// Returns how many were minimized.
     pub fn sweep_stray_windows(&self) -> usize {
-        let Ok(windows) = enumerate_windows() else { return 0 };
+        let Ok(windows) = enumerate_windows() else {
+            return 0;
+        };
         let mut count = 0;
         for w in windows {
-            if w.hwnd == self.hwnd || !w.visible || w.title.is_empty() || self.is_allowed_pid(w.pid) {
+            if w.hwnd == self.hwnd || !w.visible || w.title.is_empty() || self.is_allowed_pid(w.pid)
+            {
                 continue;
             }
-            if SKIP_CLASSES.iter().any(|c| c.eq_ignore_ascii_case(&w.class)) || native::is_iconic(w.hwnd) {
+            if SKIP_CLASSES
+                .iter()
+                .any(|c| c.eq_ignore_ascii_case(&w.class))
+                || native::is_iconic(w.hwnd)
+            {
                 continue;
             }
             tracing::info!(pid = w.pid, title = %w.title, class = %w.class, "stray window minimized");
@@ -426,10 +481,23 @@ mod tests {
 
     #[test]
     fn focus_event_wire_shape() {
-        let json = serde_json::to_value(FocusEvent { has_focus: false, foreground_process: Some("game.exe".into()) }).unwrap();
-        assert_eq!(json, serde_json::json!({ "hasFocus": false, "foregroundProcess": "game.exe" }));
-        let json = serde_json::to_value(FocusEvent { has_focus: true, foreground_process: None }).unwrap();
+        let json = serde_json::to_value(FocusEvent {
+            has_focus: false,
+            foreground_process: Some("game.exe".into()),
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "hasFocus": false, "foregroundProcess": "game.exe" })
+        );
+        let json = serde_json::to_value(FocusEvent {
+            has_focus: true,
+            foreground_process: None,
+        })
+        .unwrap();
         assert_eq!(json, serde_json::json!({ "hasFocus": true }));
-        assert!(SKIP_CLASSES.iter().any(|c| c.eq_ignore_ascii_case("shell_traywnd")));
+        assert!(SKIP_CLASSES
+            .iter()
+            .any(|c| c.eq_ignore_ascii_case("shell_traywnd")));
     }
 }

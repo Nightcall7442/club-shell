@@ -249,7 +249,11 @@ pub struct UpdateReady {
     /// Will be applied even during a session.
     pub mandatory: bool,
     /// Scheduled apply time, when known.
-    #[serde(default, with = "crate::wire::ts_opt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "crate::wire::ts_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub apply_at: Option<DateTime<Utc>>,
 }
 
@@ -284,12 +288,20 @@ impl AdminMessage {
 // ---- BEGIN MANUAL ----
 impl ShellCommand {
     /// Command with typed args.
-    pub fn of<T: Serialize>(command: ShellCommandKind, args: Option<&T>, command_id: Uuid) -> Result<Self, ProtocolError> {
+    pub fn of<T: Serialize>(
+        command: ShellCommandKind,
+        args: Option<&T>,
+        command_id: Uuid,
+    ) -> Result<Self, ProtocolError> {
         let args = match args {
             Some(a) => Some(serde_json::to_value(a)?),
             None => None,
         };
-        Ok(Self { command, args, command_id })
+        Ok(Self {
+            command,
+            args,
+            command_id,
+        })
     }
 
     /// Deserializes `args` as `T`; `Ok(None)` when absent or not an object.
@@ -314,19 +326,26 @@ mod tests {
     #[test]
     fn enum_wire_values() {
         assert_wire(RemoteControlState::ALL, &["started", "stopped"]);
-        assert_wire(ShellCommandKind::ALL, &["lock", "unlock", "reboot", "showAds", "showMessage"]);
+        assert_wire(
+            ShellCommandKind::ALL,
+            &["lock", "unlock", "reboot", "showAds", "showMessage"],
+        );
         assert_wire(AdMediaType::ALL, &["image", "video"]);
     }
 
     #[test]
     fn shell_command_keeps_null_args() {
-        let cmd = ShellCommand::of::<LockCommand>(ShellCommandKind::Unlock, None, Uuid::nil()).unwrap();
+        let cmd =
+            ShellCommand::of::<LockCommand>(ShellCommandKind::Unlock, None, Uuid::nil()).unwrap();
         assert_eq!(
             serde_json::to_string(&cmd).unwrap(),
             r#"{"command":"unlock","args":null,"commandId":"00000000-0000-0000-0000-000000000000"}"#
         );
         assert_eq!(cmd.args_as::<LockCommand>().unwrap(), None);
-        let lock = LockCommand { reason: Some("admin".into()), message: Some("Please come to the desk".into()) };
+        let lock = LockCommand {
+            reason: Some("admin".into()),
+            message: Some("Please come to the desk".into()),
+        };
         let cmd = ShellCommand::of(ShellCommandKind::Lock, Some(&lock), Uuid::nil()).unwrap();
         let json = serde_json::to_string(&cmd).unwrap();
         assert_eq!(
@@ -335,16 +354,47 @@ mod tests {
         );
         let back: ShellCommand = serde_json::from_str(&json).unwrap();
         assert_eq!(back.args_as::<LockCommand>().unwrap(), Some(lock));
-        let ads = ShowAdsArgs { items: vec![AdItem { url: "https://a.mp4".into(), r#type: AdMediaType::Video, duration_sec: 15 }], skippable: true };
-        assert_eq!(serde_json::to_string(&ads).unwrap(), r#"{"items":[{"url":"https://a.mp4","type":"video","durationSec":15}],"skippable":true}"#);
-        let msg = ShowMessageArgs { title: "t".into(), body: "b".into(), level: NotificationLevel::Info, ttl_sec: None };
-        assert_eq!(serde_json::to_string(&msg).unwrap(), r#"{"title":"t","body":"b","level":"info"}"#);
-        assert_eq!(serde_json::to_string(&ShellRebootArgs { delay_sec: 30, message: None }).unwrap(), r#"{"delaySec":30}"#);
+        let ads = ShowAdsArgs {
+            items: vec![AdItem {
+                url: "https://a.mp4".into(),
+                r#type: AdMediaType::Video,
+                duration_sec: 15,
+            }],
+            skippable: true,
+        };
+        assert_eq!(
+            serde_json::to_string(&ads).unwrap(),
+            r#"{"items":[{"url":"https://a.mp4","type":"video","durationSec":15}],"skippable":true}"#
+        );
+        let msg = ShowMessageArgs {
+            title: "t".into(),
+            body: "b".into(),
+            level: NotificationLevel::Info,
+            ttl_sec: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&msg).unwrap(),
+            r#"{"title":"t","body":"b","level":"info"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&ShellRebootArgs {
+                delay_sec: 30,
+                message: None
+            })
+            .unwrap(),
+            r#"{"delaySec":30}"#
+        );
     }
 
     #[test]
     fn admin_and_remote_control_events() {
-        let cmd = MessageCommand { id: Uuid::nil(), from: "Admin".into(), text: "hi".into(), level: NotificationLevel::Warning, requires_ack: true };
+        let cmd = MessageCommand {
+            id: Uuid::nil(),
+            from: "Admin".into(),
+            text: "hi".into(),
+            level: NotificationLevel::Warning,
+            requires_ack: true,
+        };
         let m = AdminMessage::from_command(&cmd, t(10, 0, 0));
         let json = serde_json::to_string(&m).unwrap();
         assert_eq!(
@@ -352,19 +402,46 @@ mod tests {
             r#"{"id":"00000000-0000-0000-0000-000000000000","from":"Admin","text":"hi","level":"warning","requiresAck":true,"at":"2026-09-21T10:00:00.000Z"}"#
         );
         assert_eq!(serde_json::from_str::<AdminMessage>(&json).unwrap(), m);
-        let rc = RemoteControlEvent { state: RemoteControlState::Started, at: t(10, 0, 0), show_indicator: true, admin_name: Some("Bob".into()) };
+        let rc = RemoteControlEvent {
+            state: RemoteControlState::Started,
+            at: t(10, 0, 0),
+            show_indicator: true,
+            admin_name: Some("Bob".into()),
+        };
         assert_eq!(
             serde_json::to_string(&rc).unwrap(),
             r#"{"state":"started","at":"2026-09-21T10:00:00.000Z","showIndicator":true,"adminName":"Bob"}"#
         );
-        assert_eq!(serde_json::to_string(&AuthExpired { reason: AuthExpiredReason::Revoked }).unwrap(), r#"{"reason":"revoked"}"#);
-        let conn = ConnectivityEvent { state: ConnectivityState::Offline, since: t(9, 0, 0), queued_events: 4, server_latency_ms: None };
-        assert_eq!(serde_json::to_string(&conn).unwrap(), r#"{"state":"offline","since":"2026-09-21T09:00:00.000Z","queuedEvents":4}"#);
+        assert_eq!(
+            serde_json::to_string(&AuthExpired {
+                reason: AuthExpiredReason::Revoked
+            })
+            .unwrap(),
+            r#"{"reason":"revoked"}"#
+        );
+        let conn = ConnectivityEvent {
+            state: ConnectivityState::Offline,
+            since: t(9, 0, 0),
+            queued_events: 4,
+            server_latency_ms: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&conn).unwrap(),
+            r#"{"state":"offline","since":"2026-09-21T09:00:00.000Z","queuedEvents":4}"#
+        );
     }
 
     #[test]
     fn game_policy_update_events() {
-        let g = GameStateChanged { game_id: Uuid::nil(), title: "CS2".into(), state: GameState::Failed, at: t(10, 21, 0), pid: None, exit_code: None, error: Some(IpcError::of(ErrorCode::GameNotInstalled)) };
+        let g = GameStateChanged {
+            game_id: Uuid::nil(),
+            title: "CS2".into(),
+            state: GameState::Failed,
+            at: t(10, 21, 0),
+            pid: None,
+            exit_code: None,
+            error: Some(IpcError::of(ErrorCode::GameNotInstalled)),
+        };
         let json = serde_json::to_string(&g).unwrap();
         assert_eq!(
             json,
@@ -372,7 +449,12 @@ mod tests {
         );
         assert_eq!(serde_json::from_str::<GameStateChanged>(&json).unwrap(), g);
 
-        let p = PolicyChanged { version: 12, updated_at: t(8, 0, 0), changed: vec!["kiosk".into()], policy: crate::pc::sample_policy() };
+        let p = PolicyChanged {
+            version: 12,
+            updated_at: t(8, 0, 0),
+            changed: vec!["kiosk".into()],
+            policy: crate::pc::sample_policy(),
+        };
         let json = serde_json::to_string(&p).unwrap();
         assert!(json.starts_with(r#"{"version":12,"updatedAt":"2026-09-21T08:00:00.000Z","changed":["kiosk"],"policy":{"version":12"#));
         assert_eq!(serde_json::from_str::<PolicyChanged>(&json).unwrap(), p);
@@ -390,16 +472,34 @@ mod tests {
             published_at: t(3, 0, 0),
             min_agent_version: None,
         };
-        let avail = UpdateAvailable { manifest, current: "1.4.2".into() };
+        let avail = UpdateAvailable {
+            manifest,
+            current: "1.4.2".into(),
+        };
         let json = serde_json::to_string(&avail).unwrap();
-        assert!(json.starts_with(r#"{"manifest":{"channel":"beta","component":"agent","version":"1.5.0""#));
+        assert!(json
+            .starts_with(r#"{"manifest":{"channel":"beta","component":"agent","version":"1.5.0""#));
         assert!(json.ends_with(r#""publishedAt":"2026-09-21T03:00:00.000Z"},"current":"1.4.2"}"#));
-        let progress = UpdateProgress { component: UpdateComponent::Agent, version: "1.5.0".into(), phase: UpdatePhase::Downloading, percent: 42, bytes_done: 4200, bytes_total: 10000, error: None };
+        let progress = UpdateProgress {
+            component: UpdateComponent::Agent,
+            version: "1.5.0".into(),
+            phase: UpdatePhase::Downloading,
+            percent: 42,
+            bytes_done: 4200,
+            bytes_total: 10000,
+            error: None,
+        };
         assert_eq!(
             serde_json::to_string(&progress).unwrap(),
             r#"{"component":"agent","version":"1.5.0","phase":"downloading","percent":42,"bytesDone":4200,"bytesTotal":10000}"#
         );
-        let ready = UpdateReady { component: UpdateComponent::Shell, version: "1.5.0".into(), restart_required: true, mandatory: false, apply_at: Some(t(4, 0, 0)) };
+        let ready = UpdateReady {
+            component: UpdateComponent::Shell,
+            version: "1.5.0".into(),
+            restart_required: true,
+            mandatory: false,
+            apply_at: Some(t(4, 0, 0)),
+        };
         assert_eq!(
             serde_json::to_string(&ready).unwrap(),
             r#"{"component":"shell","version":"1.5.0","restartRequired":true,"mandatory":false,"applyAt":"2026-09-21T04:00:00.000Z"}"#

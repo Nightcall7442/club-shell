@@ -16,7 +16,10 @@ use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::async_runtime::JoinHandle;
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
+};
 
 use crate::state::CmdResult;
 
@@ -58,7 +61,10 @@ pub struct Overlay {
 
 fn apply_bounds(window: &WebviewWindow, rect: Rect) -> CmdResult<()> {
     window.set_position(PhysicalPosition::new(rect.left, rect.top))?;
-    window.set_size(PhysicalSize::new(u32::try_from(rect.width()).unwrap_or(0), u32::try_from(rect.height()).unwrap_or(0)))?;
+    window.set_size(PhysicalSize::new(
+        u32::try_from(rect.width()).unwrap_or(0),
+        u32::try_from(rect.height()).unwrap_or(0),
+    ))?;
     Ok(())
 }
 
@@ -92,17 +98,21 @@ impl Overlay {
         if let Some(window) = self.window() {
             return Ok(window);
         }
-        let builder = WebviewWindowBuilder::new(&self.app, OVERLAY_LABEL, WebviewUrl::App(OVERLAY_URL.into()))
-            .title("ClubShell Overlay")
-            .decorations(false)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .resizable(false)
-            .maximizable(false)
-            .minimizable(false)
-            .focused(false)
-            .visible(false)
-            .shadow(false);
+        let builder = WebviewWindowBuilder::new(
+            &self.app,
+            OVERLAY_LABEL,
+            WebviewUrl::App(OVERLAY_URL.into()),
+        )
+        .title("ClubShell Overlay")
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .maximizable(false)
+        .minimizable(false)
+        .focused(false)
+        .visible(false)
+        .shadow(false);
         // `transparent` needs the private-API feature on macOS; the overlay is a Windows feature anyway.
         #[cfg(not(target_os = "macos"))]
         let builder = builder.transparent(true);
@@ -114,7 +124,12 @@ impl Overlay {
 
     /// Shows `kind` with an optional payload for the overlay route and an optional auto-hide TTL.
     /// `Hidden` behaves like [`hide`](Self::hide).
-    pub fn show(self: &Arc<Self>, kind: OverlayKind, payload: Option<Value>, ttl: Option<Duration>) -> CmdResult<()> {
+    pub fn show(
+        self: &Arc<Self>,
+        kind: OverlayKind,
+        payload: Option<Value>,
+        ttl: Option<Duration>,
+    ) -> CmdResult<()> {
         if kind == OverlayKind::Hidden {
             return self.hide();
         }
@@ -142,7 +157,11 @@ impl Overlay {
             });
             *self.ttl.lock() = Some(task);
         }
-        tracing::info!(?kind, ttl_ms = ttl.map(|d| d.as_millis() as u64), "overlay shown");
+        tracing::info!(
+            ?kind,
+            ttl_ms = ttl.map(|d| d.as_millis() as u64),
+            "overlay shown"
+        );
         Ok(())
     }
 
@@ -216,8 +235,15 @@ mod tests {
     fn kind_wire_names() {
         assert_eq!(serde_json::to_value(OverlayKind::Hidden).unwrap(), "none");
         assert_eq!(serde_json::to_value(OverlayKind::Lock).unwrap(), "lock");
-        assert_eq!(serde_json::from_value::<OverlayKind>(serde_json::json!("message")).unwrap(), OverlayKind::Message);
-        let ev = serde_json::to_value(OverlayEvent { kind: OverlayKind::Ads, payload: None }).unwrap();
+        assert_eq!(
+            serde_json::from_value::<OverlayKind>(serde_json::json!("message")).unwrap(),
+            OverlayKind::Message
+        );
+        let ev = serde_json::to_value(OverlayEvent {
+            kind: OverlayKind::Ads,
+            payload: None,
+        })
+        .unwrap();
         assert_eq!(ev, serde_json::json!({ "kind": "ads" }));
     }
 }

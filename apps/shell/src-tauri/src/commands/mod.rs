@@ -216,7 +216,11 @@ pub(crate) mod validate {
     use super::{CmdResult, ShellError};
 
     /// Trims `value`; `Ok(None)` when absent or blank; `validation` when longer than `max` chars.
-    pub fn optional_text(field: &str, value: Option<String>, max: usize) -> CmdResult<Option<String>> {
+    pub fn optional_text(
+        field: &str,
+        value: Option<String>,
+        max: usize,
+    ) -> CmdResult<Option<String>> {
         match value.map(|v| v.trim().to_owned()).filter(|v| !v.is_empty()) {
             Some(v) if v.chars().count() > max => Err(too_long(field, max)),
             other => Ok(other),
@@ -240,7 +244,10 @@ pub(crate) mod validate {
         if (min..=max).contains(&value) {
             Ok(())
         } else {
-            Err(ShellError::validation(field, &format!("must be between {min} and {max}")))
+            Err(ShellError::validation(
+                field,
+                &format!("must be between {min} and {max}"),
+            ))
         }
     }
 
@@ -269,11 +276,16 @@ pub(crate) mod validate {
     pub fn bare_name(field: &str, value: &str) -> CmdResult<()> {
         let ok = !value.is_empty()
             && value.len() <= 64
-            && value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+            && value
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
         if ok {
             Ok(())
         } else {
-            Err(ShellError::validation(field, "must be 1-64 characters of letters, digits, '-' or '_'"))
+            Err(ShellError::validation(
+                field,
+                "must be 1-64 characters of letters, digits, '-' or '_'",
+            ))
         }
     }
 
@@ -290,7 +302,8 @@ mod tests {
     #[test]
     fn handler_lists_every_documented_command_once() {
         // Type-checks every path in the `generate_handler!` list (a wrong path fails to compile).
-        let handler: Box<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync> = Box::new(invoke_handler!());
+        let handler: Box<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync> =
+            Box::new(invoke_handler!());
         drop(handler);
         assert_eq!(COMMAND_NAMES.len(), 64);
         let mut sorted = COMMAND_NAMES.to_vec();
@@ -302,10 +315,21 @@ mod tests {
 
     #[test]
     fn validation_helpers() {
-        assert_eq!(validate::optional_text("f", Some("  hi ".into()), 10).unwrap().as_deref(), Some("hi"));
-        assert_eq!(validate::optional_text("f", Some("   ".into()), 10).unwrap(), None);
+        assert_eq!(
+            validate::optional_text("f", Some("  hi ".into()), 10)
+                .unwrap()
+                .as_deref(),
+            Some("hi")
+        );
+        assert_eq!(
+            validate::optional_text("f", Some("   ".into()), 10).unwrap(),
+            None
+        );
         let e = validate::optional_text("f", Some("x".repeat(11)), 10).unwrap_err();
-        assert_eq!((e.code, e.source), (ErrorCode::Validation, crate::state::ErrorSource::Tauri));
+        assert_eq!(
+            (e.code, e.source),
+            (ErrorCode::Validation, crate::state::ErrorSource::Tauri)
+        );
         assert_eq!(e.details.unwrap()["field"], "f");
         assert!(validate::required_text("f", " ", 10).is_err());
         assert!(validate::range("f", 5, 1, 5).is_ok());

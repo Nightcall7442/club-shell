@@ -170,7 +170,10 @@ fn key_from_name(token: &str) -> Option<u32> {
     if alias.is_some() {
         return alias;
     }
-    if let Some((_, code)) = NAMED_KEYS.iter().find(|(name, _)| name.eq_ignore_ascii_case(&n)) {
+    if let Some((_, code)) = NAMED_KEYS
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(&n))
+    {
         return Some(*code);
     }
     if let Some(num) = n.strip_prefix('f') {
@@ -181,7 +184,9 @@ fn key_from_name(token: &str) -> Option<u32> {
         }
     }
     if let Some(hex) = n.strip_prefix("vk0x").or_else(|| n.strip_prefix("0x")) {
-        return u32::from_str_radix(hex, 16).ok().filter(|v| (1..=0xFE).contains(v));
+        return u32::from_str_radix(hex, 16)
+            .ok()
+            .filter(|v| (1..=0xFE).contains(v));
     }
     let mut chars = n.chars();
     match (chars.next(), chars.next()) {
@@ -199,7 +204,9 @@ pub fn key_name(vk: u32) -> String {
         return format!("F{}", vk - vk::F1 + 1);
     }
     if (0x30..=0x39).contains(&vk) || (0x41..=0x5A).contains(&vk) {
-        return char::from_u32(vk).map(|c| c.to_string()).unwrap_or_default();
+        return char::from_u32(vk)
+            .map(|c| c.to_string())
+            .unwrap_or_default();
     }
     format!("Vk0x{vk:02X}")
 }
@@ -252,7 +259,10 @@ impl BlockedCombo {
 
     /// [`KIOSK_DEFAULTS`] parsed.
     pub fn kiosk_defaults() -> Vec<Self> {
-        KIOSK_DEFAULTS.iter().map(|s| Self::parse(s).expect("built-in combos parse")).collect()
+        KIOSK_DEFAULTS
+            .iter()
+            .map(|s| Self::parse(s).expect("built-in combos parse"))
+            .collect()
     }
 
     fn set(&mut self, m: ModifierKind) {
@@ -280,7 +290,10 @@ impl BlockedCombo {
 
     /// `true` when `ev` (down or up) is this chord.
     pub fn matches(&self, ev: &KeyEvent) -> bool {
-        let held = (!self.ctrl || ev.ctrl) && (!self.alt || ev.alt) && (!self.shift || ev.shift) && (!self.win || ev.win);
+        let held = (!self.ctrl || ev.ctrl)
+            && (!self.alt || ev.alt)
+            && (!self.shift || ev.shift)
+            && (!self.win || ev.win);
         if !held {
             return false;
         }
@@ -304,7 +317,9 @@ impl FromStr for BlockedCombo {
         let mut seen = false;
         for token in s.split('+').map(str::trim) {
             if token.is_empty() {
-                return Err(WinUtilError::Invalid(format!("empty token in key combo '{s}'")));
+                return Err(WinUtilError::Invalid(format!(
+                    "empty token in key combo '{s}'"
+                )));
             }
             seen = true;
             if let Some(m) = modifier_from_name(token) {
@@ -312,9 +327,13 @@ impl FromStr for BlockedCombo {
                 continue;
             }
             if combo.key.is_some() {
-                return Err(WinUtilError::Invalid(format!("more than one key in combo '{s}'")));
+                return Err(WinUtilError::Invalid(format!(
+                    "more than one key in combo '{s}'"
+                )));
             }
-            let code = key_from_name(token).ok_or_else(|| WinUtilError::Invalid(format!("unknown key '{token}' in combo '{s}'")))?;
+            let code = key_from_name(token).ok_or_else(|| {
+                WinUtilError::Invalid(format!("unknown key '{token}' in combo '{s}'"))
+            })?;
             combo.key = Some(code);
         }
         if !seen {
@@ -398,7 +417,11 @@ pub fn edge_blocker(bounds: Rect, margin: i32, corners_only: bool) -> MouseFilte
     Arc::new(move |ev| {
         let near_x = ev.x < bounds.left + margin || ev.x >= bounds.right - margin;
         let near_y = ev.y < bounds.top + margin || ev.y >= bounds.bottom - margin;
-        let hit = if corners_only { near_x && near_y } else { near_x || near_y };
+        let hit = if corners_only {
+            near_x && near_y
+        } else {
+            near_x || near_y
+        };
         if hit {
             HookAction::Block
         } else {
@@ -421,9 +444,10 @@ mod imp {
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::System::Threading::GetCurrentThreadId;
     use windows::Win32::UI::WindowsAndMessaging::{
-        CallNextHookEx, DispatchMessageW, GetMessageW, PeekMessageW, PostThreadMessageW, SetWindowsHookExW,
-        TranslateMessage, UnhookWindowsHookEx, HHOOK, HOOKPROC, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT, PM_NOREMOVE,
-        WH_KEYBOARD_LL, WH_MOUSE_LL, WINDOWS_HOOK_ID, WM_KEYUP, WM_QUIT, WM_SYSKEYUP, WM_USER,
+        CallNextHookEx, DispatchMessageW, GetMessageW, PeekMessageW, PostThreadMessageW,
+        SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, HHOOK, HOOKPROC, KBDLLHOOKSTRUCT,
+        MSG, MSLLHOOKSTRUCT, PM_NOREMOVE, WH_KEYBOARD_LL, WH_MOUSE_LL, WINDOWS_HOOK_ID, WM_KEYUP,
+        WM_QUIT, WM_SYSKEYUP, WM_USER,
     };
 
     use crate::{from_error, Win32Ret};
@@ -514,7 +538,13 @@ mod imp {
             let state = MOUSE.lock().clone();
             if let Some(state) = state {
                 let info = &*(lparam.0 as *const MSLLHOOKSTRUCT);
-                let ev = MouseEvent { x: info.pt.x, y: info.pt.y, message: wparam.0 as u32, data: info.mouseData, flags: info.flags };
+                let ev = MouseEvent {
+                    x: info.pt.x,
+                    y: info.pt.y,
+                    message: wparam.0 as u32,
+                    data: info.mouseData,
+                    flags: info.flags,
+                };
                 if state.decide(&ev) == HookAction::Block {
                     return LRESULT(1);
                 }
@@ -539,11 +569,20 @@ mod imp {
                 .name(format!("winutil-{name}"))
                 .spawn(move || hook_thread_main(kind, proc_, &ready_tx, &flag))?;
             let thread_id = ready_rx.recv().map_err(|_| WinUtilError::Closed)??;
-            Ok(Self { thread_id, join: Some(join), installed })
+            Ok(Self {
+                thread_id,
+                join: Some(join),
+                installed,
+            })
         }
     }
 
-    fn hook_thread_main(kind: WINDOWS_HOOK_ID, proc_: HOOKPROC, ready: &mpsc::Sender<Result<u32>>, installed: &AtomicBool) {
+    fn hook_thread_main(
+        kind: WINDOWS_HOOK_ID,
+        proc_: HOOKPROC,
+        ready: &mpsc::Sender<Result<u32>>,
+        installed: &AtomicBool,
+    ) {
         // SAFETY: plain Win32 calls on this thread; `msg` outlives every call that writes to it and the
         // hook is removed before the thread exits.
         unsafe {
@@ -595,7 +634,10 @@ mod imp {
     impl LowLevelKeyboardHook {
         /// Installs the hook with `filter`; [`WinUtilError::Busy`] when one is already active.
         pub fn install(filter: KeyFilter) -> Result<Self> {
-            let state = Arc::new(KeyboardState { filter: RwLock::new(filter), mods: AtomicU32::new(0) });
+            let state = Arc::new(KeyboardState {
+                filter: RwLock::new(filter),
+                mods: AtomicU32::new(0),
+            });
             {
                 let mut slot = KEYBOARD.lock();
                 if slot.is_some() {
@@ -647,7 +689,9 @@ mod imp {
     impl LowLevelMouseHook {
         /// Installs the hook with `filter`; [`WinUtilError::Busy`] when one is already active.
         pub fn install(filter: MouseFilter) -> Result<Self> {
-            let state = Arc::new(MouseState { filter: RwLock::new(filter) });
+            let state = Arc::new(MouseState {
+                filter: RwLock::new(filter),
+            });
             {
                 let mut slot = MOUSE.lock();
                 if slot.is_some() {
@@ -743,49 +787,196 @@ mod tests {
     use super::*;
 
     fn ev(vk: u32, ctrl: bool, alt: bool, shift: bool, win: bool) -> KeyEvent {
-        KeyEvent { vk, scan: 0, flags: 0, alt, ctrl, shift, win, key_up: false }
+        KeyEvent {
+            vk,
+            scan: 0,
+            flags: 0,
+            alt,
+            ctrl,
+            shift,
+            win,
+            key_up: false,
+        }
     }
 
     #[test]
     fn parses_documented_forms() {
         let cases: &[(&str, BlockedCombo)] = &[
-            ("Ctrl+Alt+Del", BlockedCombo { ctrl: true, alt: true, key: Some(vk::DELETE), ..Default::default() }),
-            ("Alt+Tab", BlockedCombo { alt: true, key: Some(vk::TAB), ..Default::default() }),
-            ("Win", BlockedCombo { win: true, ..Default::default() }),
-            ("Alt+F4", BlockedCombo { alt: true, key: Some(vk::F1 + 3), ..Default::default() }),
-            ("Ctrl+Shift+Esc", BlockedCombo { ctrl: true, shift: true, key: Some(vk::ESCAPE), ..Default::default() }),
-            ("Ctrl+Esc", BlockedCombo { ctrl: true, key: Some(vk::ESCAPE), ..Default::default() }),
-            ("Win+D", BlockedCombo { win: true, key: Some(u32::from(b'D')), ..Default::default() }),
-            ("win + r", BlockedCombo { win: true, key: Some(u32::from(b'R')), ..Default::default() }),
-            ("Win+L", BlockedCombo { win: true, key: Some(u32::from(b'L')), ..Default::default() }),
-            ("Alt+Esc", BlockedCombo { alt: true, key: Some(vk::ESCAPE), ..Default::default() }),
-            ("F1", BlockedCombo { key: Some(vk::F1), ..Default::default() }),
-            ("f24", BlockedCombo { key: Some(vk::F24), ..Default::default() }),
-            ("PrintScreen", BlockedCombo { key: Some(vk::SNAPSHOT), ..Default::default() }),
-            ("Ctrl+Alt+Shift+F12", BlockedCombo { ctrl: true, alt: true, shift: true, key: Some(vk::F1 + 11), ..Default::default() }),
-            ("Ctrl+Alt+Delete", BlockedCombo { ctrl: true, alt: true, key: Some(vk::DELETE), ..Default::default() }),
-            ("Vk0x5D", BlockedCombo { key: Some(vk::APPS), ..Default::default() }),
+            (
+                "Ctrl+Alt+Del",
+                BlockedCombo {
+                    ctrl: true,
+                    alt: true,
+                    key: Some(vk::DELETE),
+                    ..Default::default()
+                },
+            ),
+            (
+                "Alt+Tab",
+                BlockedCombo {
+                    alt: true,
+                    key: Some(vk::TAB),
+                    ..Default::default()
+                },
+            ),
+            (
+                "Win",
+                BlockedCombo {
+                    win: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                "Alt+F4",
+                BlockedCombo {
+                    alt: true,
+                    key: Some(vk::F1 + 3),
+                    ..Default::default()
+                },
+            ),
+            (
+                "Ctrl+Shift+Esc",
+                BlockedCombo {
+                    ctrl: true,
+                    shift: true,
+                    key: Some(vk::ESCAPE),
+                    ..Default::default()
+                },
+            ),
+            (
+                "Ctrl+Esc",
+                BlockedCombo {
+                    ctrl: true,
+                    key: Some(vk::ESCAPE),
+                    ..Default::default()
+                },
+            ),
+            (
+                "Win+D",
+                BlockedCombo {
+                    win: true,
+                    key: Some(u32::from(b'D')),
+                    ..Default::default()
+                },
+            ),
+            (
+                "win + r",
+                BlockedCombo {
+                    win: true,
+                    key: Some(u32::from(b'R')),
+                    ..Default::default()
+                },
+            ),
+            (
+                "Win+L",
+                BlockedCombo {
+                    win: true,
+                    key: Some(u32::from(b'L')),
+                    ..Default::default()
+                },
+            ),
+            (
+                "Alt+Esc",
+                BlockedCombo {
+                    alt: true,
+                    key: Some(vk::ESCAPE),
+                    ..Default::default()
+                },
+            ),
+            (
+                "F1",
+                BlockedCombo {
+                    key: Some(vk::F1),
+                    ..Default::default()
+                },
+            ),
+            (
+                "f24",
+                BlockedCombo {
+                    key: Some(vk::F24),
+                    ..Default::default()
+                },
+            ),
+            (
+                "PrintScreen",
+                BlockedCombo {
+                    key: Some(vk::SNAPSHOT),
+                    ..Default::default()
+                },
+            ),
+            (
+                "Ctrl+Alt+Shift+F12",
+                BlockedCombo {
+                    ctrl: true,
+                    alt: true,
+                    shift: true,
+                    key: Some(vk::F1 + 11),
+                    ..Default::default()
+                },
+            ),
+            (
+                "Ctrl+Alt+Delete",
+                BlockedCombo {
+                    ctrl: true,
+                    alt: true,
+                    key: Some(vk::DELETE),
+                    ..Default::default()
+                },
+            ),
+            (
+                "Vk0x5D",
+                BlockedCombo {
+                    key: Some(vk::APPS),
+                    ..Default::default()
+                },
+            ),
         ];
         for (text, expected) in cases {
             let parsed = BlockedCombo::parse(text).unwrap_or_else(|e| panic!("{text}: {e}"));
             assert_eq!(&parsed, expected, "{text}");
             // Display round-trips through the parser.
-            assert_eq!(BlockedCombo::parse(&parsed.to_string()).unwrap(), parsed, "{text} → {parsed}");
+            assert_eq!(
+                BlockedCombo::parse(&parsed.to_string()).unwrap(),
+                parsed,
+                "{text} → {parsed}"
+            );
         }
-        assert_eq!(BlockedCombo::parse("Ctrl+Alt+Del").unwrap().to_string(), "Ctrl+Alt+Del");
+        assert_eq!(
+            BlockedCombo::parse("Ctrl+Alt+Del").unwrap().to_string(),
+            "Ctrl+Alt+Del"
+        );
         assert_eq!(BlockedCombo::parse("Win+D").unwrap().to_string(), "Win+D");
         assert_eq!(BlockedCombo::parse("f4").unwrap().to_string(), "F4");
-        assert!(BlockedCombo::parse("Ctrl+Alt+Del").unwrap().is_secure_attention());
-        assert!(!BlockedCombo::parse("Alt+Tab").unwrap().is_secure_attention());
+        assert!(BlockedCombo::parse("Ctrl+Alt+Del")
+            .unwrap()
+            .is_secure_attention());
+        assert!(!BlockedCombo::parse("Alt+Tab")
+            .unwrap()
+            .is_secure_attention());
     }
 
     #[test]
     fn rejects_malformed() {
-        for bad in ["", "+", "Ctrl+", "Ctrl+Foo", "Alt+Tab+Esc", "F25", "Vk0x00", "Hyper+X"] {
-            assert!(matches!(BlockedCombo::parse(bad), Err(WinUtilError::Invalid(_))), "{bad}");
+        for bad in [
+            "",
+            "+",
+            "Ctrl+",
+            "Ctrl+Foo",
+            "Alt+Tab+Esc",
+            "F25",
+            "Vk0x00",
+            "Hyper+X",
+        ] {
+            assert!(
+                matches!(BlockedCombo::parse(bad), Err(WinUtilError::Invalid(_))),
+                "{bad}"
+            );
         }
         assert!(BlockedCombo::parse_all(&["Alt+Tab", "Nope"]).is_err());
-        assert_eq!(BlockedCombo::parse_all(&["Alt+Tab", "Win"]).unwrap().len(), 2);
+        assert_eq!(
+            BlockedCombo::parse_all(&["Alt+Tab", "Win"]).unwrap().len(),
+            2
+        );
         assert_eq!(BlockedCombo::kiosk_defaults().len(), KIOSK_DEFAULTS.len());
     }
 
@@ -793,7 +984,10 @@ mod tests {
     fn matching_is_superset_on_modifiers() {
         let alt_tab = BlockedCombo::parse("Alt+Tab").unwrap();
         assert!(alt_tab.matches(&ev(vk::TAB, false, true, false, false)));
-        assert!(alt_tab.matches(&ev(vk::TAB, false, true, true, false)), "Alt+Shift+Tab is also a switcher");
+        assert!(
+            alt_tab.matches(&ev(vk::TAB, false, true, true, false)),
+            "Alt+Shift+Tab is also a switcher"
+        );
         assert!(!alt_tab.matches(&ev(vk::TAB, false, false, false, false)));
         assert!(!alt_tab.matches(&ev(vk::ESCAPE, false, true, false, false)));
 
@@ -801,24 +995,45 @@ mod tests {
         assert!(win.matches(&ev(vk::LWIN, false, false, false, true)));
         assert!(win.matches(&ev(vk::RWIN, false, false, false, true)));
         assert!(!win.matches(&ev(vk::LCONTROL, true, false, false, false)));
-        assert!(!win.matches(&ev(u32::from(b'D'), false, false, false, true)), "Win+D is a separate combo");
+        assert!(
+            !win.matches(&ev(u32::from(b'D'), false, false, false, true)),
+            "Win+D is a separate combo"
+        );
 
         let f1 = BlockedCombo::parse("F1").unwrap();
         assert!(f1.matches(&ev(vk::F1, true, false, false, false)));
 
         let combos = BlockedCombo::kiosk_defaults();
-        assert!(BlockedCombo::any_matches(&combos, &ev(vk::ESCAPE, true, false, true, false)), "Ctrl+Shift+Esc");
-        assert!(!BlockedCombo::any_matches(&combos, &ev(u32::from(b'A'), false, false, false, false)));
+        assert!(
+            BlockedCombo::any_matches(&combos, &ev(vk::ESCAPE, true, false, true, false)),
+            "Ctrl+Shift+Esc"
+        );
+        assert!(!BlockedCombo::any_matches(
+            &combos,
+            &ev(u32::from(b'A'), false, false, false, false)
+        ));
 
         let filter = block_combos(combos);
-        assert_eq!(filter(&ev(vk::SNAPSHOT, false, false, false, false)), HookAction::Block);
-        assert_eq!(filter(&ev(vk::SPACE, false, false, false, false)), HookAction::Pass);
+        assert_eq!(
+            filter(&ev(vk::SNAPSHOT, false, false, false, false)),
+            HookAction::Block
+        );
+        assert_eq!(
+            filter(&ev(vk::SPACE, false, false, false, false)),
+            HookAction::Pass
+        );
     }
 
     #[test]
     fn edge_blocker_geometry() {
         let bounds = Rect::from_size(0, 0, 1920, 1080);
-        let mouse = |x, y| MouseEvent { x, y, message: 0x0200, data: 0, flags: 0 };
+        let mouse = |x, y| MouseEvent {
+            x,
+            y,
+            message: 0x0200,
+            data: 0,
+            flags: 0,
+        };
         let corners = edge_blocker(bounds, 4, true);
         assert_eq!(corners(&mouse(0, 0)), HookAction::Block);
         assert_eq!(corners(&mouse(1919, 1079)), HookAction::Block);
@@ -827,8 +1042,16 @@ mod tests {
         assert_eq!(edges(&mouse(960, 0)), HookAction::Block);
         assert_eq!(edges(&mouse(960, 540)), HookAction::Pass);
         assert!(mouse(0, 0).is_move());
-        assert!(MouseEvent { message: 0x0201, ..mouse(0, 0) }.is_button());
-        assert!(MouseEvent { message: 0x020A, ..mouse(0, 0) }.is_wheel());
+        assert!(MouseEvent {
+            message: 0x0201,
+            ..mouse(0, 0)
+        }
+        .is_button());
+        assert!(MouseEvent {
+            message: 0x020A,
+            ..mouse(0, 0)
+        }
+        .is_wheel());
     }
 
     #[test]
@@ -837,6 +1060,10 @@ mod tests {
         assert_eq!(key_name(vk::F1 + 9), "F10");
         assert_eq!(key_name(u32::from(b'Q')), "Q");
         assert_eq!(key_name(0xBA), "Vk0xBA");
-        assert!(KeyEvent { flags: llkhf::INJECTED, ..ev(1, false, false, false, false) }.injected());
+        assert!(KeyEvent {
+            flags: llkhf::INJECTED,
+            ..ev(1, false, false, false, false)
+        }
+        .injected());
     }
 }

@@ -239,11 +239,15 @@ pub fn default_data_dir() -> PathBuf {
 }
 
 fn non_empty_env(name: &str) -> Option<String> {
-    std::env::var(name).ok().map(|v| v.trim().to_owned()).filter(|v| !v.is_empty())
+    std::env::var(name)
+        .ok()
+        .map(|v| v.trim().to_owned())
+        .filter(|v| !v.is_empty())
 }
 
 fn env_flag(name: &str) -> bool {
-    non_empty_env(name).is_some_and(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+    non_empty_env(name)
+        .is_some_and(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
 }
 
 /// Deep-merges `overlay` into `base`: objects merge key by key, everything else is replaced.
@@ -285,19 +289,30 @@ impl ShellConfig {
 
     /// [`load`](Self::load) with an explicit data directory.
     pub fn load_from(data_dir: &Path) -> Result<Self, ConfigError> {
-        let mut value: Value = serde_json::from_str(DEFAULT_JSON)
-            .map_err(|source| ConfigError::Json { path: PathBuf::from("<embedded shell.default.json>"), source })?;
+        let mut value: Value =
+            serde_json::from_str(DEFAULT_JSON).map_err(|source| ConfigError::Json {
+                path: PathBuf::from("<embedded shell.default.json>"),
+                source,
+            })?;
 
         let overlay_path = data_dir.join(SHELL_JSON);
         let overlay_applied = match std::fs::read_to_string(&overlay_path) {
             Ok(text) => {
-                let overlay: Value = serde_json::from_str(&text)
-                    .map_err(|source| ConfigError::Json { path: overlay_path.clone(), source })?;
+                let overlay: Value =
+                    serde_json::from_str(&text).map_err(|source| ConfigError::Json {
+                        path: overlay_path.clone(),
+                        source,
+                    })?;
                 merge_json(&mut value, overlay);
                 true
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
-            Err(source) => return Err(ConfigError::Io { path: overlay_path, source }),
+            Err(source) => {
+                return Err(ConfigError::Io {
+                    path: overlay_path,
+                    source,
+                })
+            }
         };
 
         if let Some(pipe) = non_empty_env(env::PIPE) {
@@ -307,12 +322,18 @@ impl ShellConfig {
         }
         if let Some(locale) = non_empty_env(env::LOCALE) {
             if let Some(root) = value.as_object_mut() {
-                root.insert("locale".to_owned(), Value::String(locale.to_ascii_lowercase()));
+                root.insert(
+                    "locale".to_owned(),
+                    Value::String(locale.to_ascii_lowercase()),
+                );
             }
         }
 
-        let mut config: ShellConfig = serde_json::from_value(value)
-            .map_err(|source| ConfigError::Json { path: overlay_path.clone(), source })?;
+        let mut config: ShellConfig =
+            serde_json::from_value(value).map_err(|source| ConfigError::Json {
+                path: overlay_path.clone(),
+                source,
+            })?;
         config.runtime = RuntimeConfig {
             data_dir: data_dir.to_path_buf(),
             token_path: non_empty_env(env::SHELL_TOKEN)
@@ -356,7 +377,10 @@ impl ShellConfig {
             return invalid("sound.defaultVolume must be 0..=100".into());
         }
         if self.logging.level.parse::<tracing::Level>().is_err() {
-            return invalid(format!("logging.level '{}' is not trace|debug|info|warn|error", self.logging.level));
+            return invalid(format!(
+                "logging.level '{}' is not trace|debug|info|warn|error",
+                self.logging.level
+            ));
         }
         if self.logging.directory.trim().is_empty() {
             return invalid("logging.directory is empty".into());
@@ -368,10 +392,16 @@ impl ShellConfig {
     /// call this on every `auth.hello`, never cache it).
     pub fn load_shell_token(&self) -> Result<String, ConfigError> {
         let path = &self.runtime.token_path;
-        let text = std::fs::read_to_string(path).map_err(|source| ConfigError::Io { path: path.clone(), source })?;
+        let text = std::fs::read_to_string(path).map_err(|source| ConfigError::Io {
+            path: path.clone(),
+            source,
+        })?;
         let token = text.trim().to_owned();
         if token.len() != 64 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err(ConfigError::Token { path: path.clone(), reason: "expected 64 hex characters".into() });
+            return Err(ConfigError::Token {
+                path: path.clone(),
+                reason: "expected 64 hex characters".into(),
+            });
         }
         Ok(token)
     }
@@ -452,15 +482,31 @@ mod tests {
         let cfg = ShellConfig::load_from(&dir).unwrap();
         assert_eq!(cfg.theme, "neon");
         assert_eq!(cfg.ipc.request_timeout_ms, 500);
-        assert_eq!(cfg.ipc.connect_timeout_ms, 3000, "untouched keys keep defaults");
+        assert_eq!(
+            cfg.ipc.connect_timeout_ms, 3000,
+            "untouched keys keep defaults"
+        );
         assert!(!cfg.features.shop);
         assert!(cfg.features.chat);
-        assert_eq!(cfg.runtime.overlay_path.as_deref(), Some(dir.join(SHELL_JSON).as_path()));
+        assert_eq!(
+            cfg.runtime.overlay_path.as_deref(),
+            Some(dir.join(SHELL_JSON).as_path())
+        );
         assert_eq!(cfg.logs_dir(), dir.join("logs"));
-        assert_eq!(cfg.runtime.token_path, dir.join("secure").join("shell.token"));
+        assert_eq!(
+            cfg.runtime.token_path,
+            dir.join("secure").join("shell.token")
+        );
 
-        std::fs::write(dir.join(SHELL_JSON), r#"{ "ipc": { "reconnectMinMs": 9000 } }"#).unwrap();
-        assert!(matches!(ShellConfig::load_from(&dir), Err(ConfigError::Invalid(_))));
+        std::fs::write(
+            dir.join(SHELL_JSON),
+            r#"{ "ipc": { "reconnectMinMs": 9000 } }"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            ShellConfig::load_from(&dir),
+            Err(ConfigError::Invalid(_))
+        ));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -470,9 +516,15 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let mut cfg = ShellConfig::defaults();
         cfg.runtime.token_path = dir.join("shell.token");
-        assert!(matches!(cfg.load_shell_token(), Err(ConfigError::Io { .. })));
+        assert!(matches!(
+            cfg.load_shell_token(),
+            Err(ConfigError::Io { .. })
+        ));
         std::fs::write(&cfg.runtime.token_path, "abc").unwrap();
-        assert!(matches!(cfg.load_shell_token(), Err(ConfigError::Token { .. })));
+        assert!(matches!(
+            cfg.load_shell_token(),
+            Err(ConfigError::Token { .. })
+        ));
         std::fs::write(&cfg.runtime.token_path, format!("{}\r\n", "ab".repeat(32))).unwrap();
         assert_eq!(cfg.load_shell_token().unwrap(), "ab".repeat(32));
         std::fs::remove_dir_all(&dir).unwrap();
@@ -481,7 +533,13 @@ mod tests {
     #[test]
     fn merge_is_deep() {
         let mut base = serde_json::json!({ "a": { "x": 1, "y": 2 }, "b": [1] });
-        merge_json(&mut base, serde_json::json!({ "a": { "y": 3, "z": 4 }, "b": [2, 3] }));
-        assert_eq!(base, serde_json::json!({ "a": { "x": 1, "y": 3, "z": 4 }, "b": [2, 3] }));
+        merge_json(
+            &mut base,
+            serde_json::json!({ "a": { "y": 3, "z": 4 }, "b": [2, 3] }),
+        );
+        assert_eq!(
+            base,
+            serde_json::json!({ "a": { "x": 1, "y": 3, "z": 4 }, "b": [2, 3] })
+        );
     }
 }

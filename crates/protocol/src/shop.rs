@@ -168,8 +168,21 @@ mod tests {
 
     #[test]
     fn enum_wire_values() {
-        assert_wire(ProductCategory::ALL, &["food", "drink", "snack", "service", "merch", "time"]);
-        assert_wire(OrderStatus::ALL, &["pending", "accepted", "preparing", "delivering", "done", "cancelled"]);
+        assert_wire(
+            ProductCategory::ALL,
+            &["food", "drink", "snack", "service", "merch", "time"],
+        );
+        assert_wire(
+            OrderStatus::ALL,
+            &[
+                "pending",
+                "accepted",
+                "preparing",
+                "delivering",
+                "done",
+                "cancelled",
+            ],
+        );
         assert!(OrderStatus::Preparing.is_active());
         assert!(!OrderStatus::Done.is_active());
     }
@@ -181,7 +194,12 @@ mod tests {
             id: Uuid::nil(),
             user_id: Uuid::nil(),
             pc_id: Uuid::nil(),
-            items: vec![OrderItem { product_id: Uuid::nil(), title: "Cola".into(), qty: 2, price: Money::uzs(1_500_000) }],
+            items: vec![OrderItem {
+                product_id: Uuid::nil(),
+                title: "Cola".into(),
+                qty: 2,
+                price: Money::uzs(1_500_000),
+            }],
             total: Money::uzs(3_000_000),
             status: OrderStatus::Pending,
             created_at: at,
@@ -219,7 +237,10 @@ mod tests {
             user_id: Uuid::nil(),
             pc_id: Uuid::nil(),
             session_id: None,
-            items: vec![OrderLineRequest { product_id: Uuid::nil(), qty: 1 }],
+            items: vec![OrderLineRequest {
+                product_id: Uuid::nil(),
+                qty: 1,
+            }],
             note: Some("no ice".into()),
         };
         assert_eq!(

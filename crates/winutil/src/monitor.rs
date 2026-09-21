@@ -58,19 +58,21 @@ mod imp {
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::{BOOL, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
     use windows::Win32::Graphics::Gdi::{
-        EnumDisplayMonitors, EnumDisplaySettingsW, GetMonitorInfoW, MonitorFromPoint, DEVMODEW, ENUM_CURRENT_SETTINGS,
-        HDC, HMONITOR, MONITORINFO, MONITORINFOEXW, MONITOR_DEFAULTTONEAREST,
+        EnumDisplayMonitors, EnumDisplaySettingsW, GetMonitorInfoW, MonitorFromPoint, DEVMODEW,
+        ENUM_CURRENT_SETTINGS, HDC, HMONITOR, MONITORINFO, MONITORINFOEXW,
+        MONITOR_DEFAULTTONEAREST,
     };
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::System::Threading::GetCurrentThreadId;
     use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, PeekMessageW, PostThreadMessageW,
-        RegisterClassW, TranslateMessage, HMENU, MSG, PM_NOREMOVE, WINDOW_EX_STYLE, WM_DISPLAYCHANGE, WM_QUIT,
-        WM_SETTINGCHANGE, WM_USER, WNDCLASSW, WS_OVERLAPPED,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
+        PeekMessageW, PostThreadMessageW, RegisterClassW, TranslateMessage, HMENU, MSG,
+        PM_NOREMOVE, WINDOW_EX_STYLE, WM_DISPLAYCHANGE, WM_QUIT, WM_SETTINGCHANGE, WM_USER,
+        WNDCLASSW, WS_OVERLAPPED,
     };
 
-    use crate::{last_error, WinUtilError, Win32Ret};
+    use crate::{last_error, Win32Ret, WinUtilError};
 
     const MONITORINFOF_PRIMARY: u32 = 1;
     const WM_DPICHANGED: u32 = 0x02E0;
@@ -80,35 +82,70 @@ mod imp {
     /// All attached monitors in enumeration order.
     pub fn enumerate() -> Result<Vec<MonitorInfo>> {
         // SAFETY: `lparam` is the address of a live `Vec<HMONITOR>` for the duration of the call.
-        unsafe extern "system" fn collect(h: HMONITOR, _dc: HDC, _rect: *mut RECT, lparam: LPARAM) -> BOOL {
+        unsafe extern "system" fn collect(
+            h: HMONITOR,
+            _dc: HDC,
+            _rect: *mut RECT,
+            lparam: LPARAM,
+        ) -> BOOL {
             let handles = &mut *(lparam.0 as *mut Vec<HMONITOR>);
             handles.push(h);
             BOOL(1)
         }
         let mut handles: Vec<HMONITOR> = Vec::new();
         // SAFETY: callback and data pointer are valid for the synchronous enumeration.
-        unsafe { EnumDisplayMonitors(HDC::default(), None, Some(collect), LPARAM(&mut handles as *mut Vec<HMONITOR> as isize)) }
-            .ret("EnumDisplayMonitors")?;
-        Ok(handles.into_iter().enumerate().filter_map(|(index, h)| describe(index, h)).collect())
+        unsafe {
+            EnumDisplayMonitors(
+                HDC::default(),
+                None,
+                Some(collect),
+                LPARAM(&mut handles as *mut Vec<HMONITOR> as isize),
+            )
+        }
+        .ret("EnumDisplayMonitors")?;
+        Ok(handles
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, h)| describe(index, h))
+            .collect())
     }
 
     fn describe(index: usize, handle: HMONITOR) -> Option<MonitorInfo> {
         let mut mi = MONITORINFOEXW {
-            monitorInfo: MONITORINFO { cbSize: std::mem::size_of::<MONITORINFOEXW>() as u32, ..Default::default() },
+            monitorInfo: MONITORINFO {
+                cbSize: std::mem::size_of::<MONITORINFOEXW>() as u32,
+                ..Default::default()
+            },
             ..Default::default()
         };
         // SAFETY: `mi` is a MONITORINFOEXW with cbSize set, which GetMonitorInfoW accepts through a
         // MONITORINFO pointer.
-        let ok = unsafe { GetMonitorInfoW(handle, (&mut mi as *mut MONITORINFOEXW).cast::<MONITORINFO>()) };
+        let ok = unsafe {
+            GetMonitorInfoW(
+                handle,
+                (&mut mi as *mut MONITORINFOEXW).cast::<MONITORINFO>(),
+            )
+        };
         if !ok.as_bool() {
             return None;
         }
-        let name_len = mi.szDevice.iter().position(|&c| c == 0).unwrap_or(mi.szDevice.len());
+        let name_len = mi
+            .szDevice
+            .iter()
+            .position(|&c| c == 0)
+            .unwrap_or(mi.szDevice.len());
         let name = String::from_utf16_lossy(&mi.szDevice[..name_len]);
 
-        let mut dm = DEVMODEW { dmSize: std::mem::size_of::<DEVMODEW>() as u16, ..Default::default() };
+        let mut dm = DEVMODEW {
+            dmSize: std::mem::size_of::<DEVMODEW>() as u16,
+            ..Default::default()
+        };
         // SAFETY: `szDevice` is NUL-terminated (Windows fills it) and `dm` is sized.
-        let hz = if unsafe { EnumDisplaySettingsW(PCWSTR(mi.szDevice.as_ptr()), ENUM_CURRENT_SETTINGS, &mut dm) }.as_bool() {
+        let hz = if unsafe {
+            EnumDisplaySettingsW(PCWSTR(mi.szDevice.as_ptr()), ENUM_CURRENT_SETTINGS, &mut dm)
+        }
+        .as_bool()
+        {
             dm.dmDisplayFrequency
         } else {
             0
@@ -116,10 +153,11 @@ mod imp {
 
         let (mut dpi_x, mut dpi_y) = (0u32, 0u32);
         // SAFETY: out-pointers are valid; fails (→ 1.0) on systems without per-monitor DPI.
-        let scale = match unsafe { GetDpiForMonitor(handle, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) } {
-            Ok(()) if dpi_x > 0 => dpi_x as f32 / 96.0,
-            _ => 1.0,
-        };
+        let scale =
+            match unsafe { GetDpiForMonitor(handle, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) } {
+                Ok(()) if dpi_x > 0 => dpi_x as f32 / 96.0,
+                _ => 1.0,
+            };
 
         let rect = Rect::from(mi.monitorInfo.rcMonitor);
         Some(MonitorInfo {
@@ -139,7 +177,9 @@ mod imp {
     /// The primary monitor (see [`pick_primary`]).
     pub fn primary() -> Result<MonitorInfo> {
         let all = enumerate()?;
-        pick_primary(&all).cloned().ok_or_else(|| WinUtilError::Invalid("no display monitors attached".to_owned()))
+        pick_primary(&all)
+            .cloned()
+            .ok_or_else(|| WinUtilError::Invalid("no display monitors attached".to_owned()))
     }
 
     /// Monitor containing (or nearest to) a screen point (`MonitorFromPoint(MONITOR_DEFAULTTONEAREST)`).
@@ -174,7 +214,12 @@ mod imp {
     }
 
     // SAFETY: standard window procedure contract; only forwards to DefWindowProcW.
-    unsafe extern "system" fn watch_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    unsafe extern "system" fn watch_proc(
+        hwnd: HWND,
+        msg: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
         if msg == WM_DISPLAYCHANGE || msg == WM_SETTINGCHANGE || msg == WM_DPICHANGED {
             notify(hwnd.0 as isize);
             return LRESULT(0);
@@ -185,7 +230,10 @@ mod imp {
     /// Creates the hidden top-level window that receives `WM_DISPLAYCHANGE` broadcasts (message-only
     /// windows do not receive broadcasts, hence a real but never-shown window).
     fn create_hidden_window() -> Result<HWND> {
-        let class: Vec<u16> = WATCH_CLASS.encode_utf16().chain(std::iter::once(0)).collect();
+        let class: Vec<u16> = WATCH_CLASS
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
         // SAFETY: the class-name buffer outlives both calls; the WNDCLASSW fields are valid.
         unsafe {
             let module = GetModuleHandleW(PCWSTR::null()).ret("GetModuleHandleW")?;
@@ -235,7 +283,11 @@ mod imp {
                 }
             };
             let raw = hwnd.0 as isize;
-            WATCHERS.lock().push(Watcher { hwnd: raw, tx: events, last: enumerate().unwrap_or_default() });
+            WATCHERS.lock().push(Watcher {
+                hwnd: raw,
+                tx: events,
+                last: enumerate().unwrap_or_default(),
+            });
             let _ = ready.send(Ok(GetCurrentThreadId()));
             while GetMessageW(&mut msg, HWND::default(), 0, 0).0 > 0 {
                 let _ = TranslateMessage(&msg);
@@ -263,7 +315,13 @@ mod imp {
                 .spawn(move || watcher_main(&ready_tx, events_tx))?;
             let thread_id = ready_rx.recv().map_err(|_| WinUtilError::Closed)??;
             tracing::debug!(thread_id, "display watcher started");
-            Ok((Self { thread_id, join: Some(join) }, events_rx))
+            Ok((
+                Self {
+                    thread_id,
+                    join: Some(join),
+                },
+                events_rx,
+            ))
         }
     }
 
@@ -337,7 +395,14 @@ mod tests {
         assert_eq!(pick_primary(&all), Some(&main));
 
         // No primary flag: the monitor at the virtual-screen origin wins.
-        let unflagged: Vec<MonitorInfo> = all.iter().cloned().map(|m| MonitorInfo { primary: false, ..m }).collect();
+        let unflagged: Vec<MonitorInfo> = all
+            .iter()
+            .cloned()
+            .map(|m| MonitorInfo {
+                primary: false,
+                ..m
+            })
+            .collect();
         assert_eq!(pick_primary(&unflagged).map(|m| m.index), Some(1));
 
         // Nothing at the origin either: first in enumeration order.
@@ -353,7 +418,10 @@ mod tests {
         let all = [a, b];
         assert_eq!(monitor_containing(&all, 10, 10).map(|m| m.index), Some(0));
         assert_eq!(monitor_containing(&all, 1920, 10).map(|m| m.index), Some(1));
-        assert_eq!(monitor_containing(&all, 5000, 2000).map(|m| m.index), Some(1));
+        assert_eq!(
+            monitor_containing(&all, 5000, 2000).map(|m| m.index),
+            Some(1)
+        );
         assert_eq!(monitor_containing(&all, -50, -50).map(|m| m.index), Some(0));
         assert!(monitor_containing(&[], 0, 0).is_none());
     }

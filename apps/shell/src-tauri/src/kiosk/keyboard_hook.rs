@@ -12,7 +12,8 @@ use std::sync::Arc;
 
 use clubshell_protocol::pc::ExplorerPolicy;
 use clubshell_winutil::hooks::{
-    vk, BlockedCombo, HookAction, KeyEvent, KeyFilter, LowLevelKeyboardHook, LowLevelMouseHook, MouseEvent, MouseFilter,
+    vk, BlockedCombo, HookAction, KeyEvent, KeyFilter, LowLevelKeyboardHook, LowLevelMouseHook,
+    MouseEvent, MouseFilter,
 };
 use clubshell_winutil::window::{alt_tab_combos, is_foreground};
 use parking_lot::{Mutex, RwLock};
@@ -75,7 +76,15 @@ impl HotkeyKind {
 
     /// Chords a running game must still be able to trigger (admin exit, volume keys).
     pub const fn allowed_in_game(self) -> bool {
-        matches!(self, Self::Exit | Self::VolumeUp | Self::VolumeDown | Self::Mute | Self::Blocked | Self::DevFullscreen)
+        matches!(
+            self,
+            Self::Exit
+                | Self::VolumeUp
+                | Self::VolumeDown
+                | Self::Mute
+                | Self::Blocked
+                | Self::DevFullscreen
+        )
     }
 
     /// Handled in Rust; never forwarded to the webview.
@@ -113,7 +122,11 @@ pub struct HotkeyPayload {
 pub fn default_hotkeys(kiosk: &KioskConfig, dev: bool) -> Vec<Hotkey> {
     let mut out: Vec<Hotkey> = Vec::new();
     let mut add = |kind: HotkeyKind, text: &str, consume: bool| match BlockedCombo::parse(text) {
-        Ok(combo) => out.push(Hotkey { kind, combo, consume }),
+        Ok(combo) => out.push(Hotkey {
+            kind,
+            combo,
+            consume,
+        }),
         Err(e) => tracing::warn!(chord = text, error = %e, "hotkey chord ignored"),
     };
     let exit = kiosk.exit_hotkey.trim();
@@ -143,7 +156,11 @@ pub struct HookPolicy {
 
 impl HookPolicy {
     pub fn from_config(kiosk: &KioskConfig, extra: &[String]) -> Self {
-        Self { block_alt_tab: kiosk.block_alt_tab, block_win_key: kiosk.block_win_key, extra: parse_combos(extra) }
+        Self {
+            block_alt_tab: kiosk.block_alt_tab,
+            block_win_key: kiosk.block_win_key,
+            extra: parse_combos(extra),
+        }
     }
 
     /// ORs the policy flags in and unions its chords.
@@ -168,7 +185,9 @@ impl HookPolicy {
         };
         for c in BlockedCombo::kiosk_defaults() {
             let is_switcher = switchers.contains(&c);
-            if (is_switcher && !self.block_alt_tab) || (c.win && !is_switcher && !self.block_win_key) {
+            if (is_switcher && !self.block_alt_tab)
+                || (c.win && !is_switcher && !self.block_win_key)
+            {
                 continue;
             }
             push(c);
@@ -188,7 +207,10 @@ impl HookPolicy {
     /// (Task Manager); everything else (`Alt+F4`, `PrintScreen`, `Alt+Tab`, …) is released so games
     /// and their overlays keep working.
     pub fn game_combos(&self) -> Vec<BlockedCombo> {
-        self.combos().into_iter().filter(|c| c.win || (c.ctrl && c.shift && c.key == Some(vk::ESCAPE))).collect()
+        self.combos()
+            .into_iter()
+            .filter(|c| c.win || (c.ctrl && c.shift && c.key == Some(vk::ESCAPE)))
+            .collect()
     }
 }
 
@@ -245,12 +267,24 @@ impl Shared {
         }
         let game = self.game_mode.load(Ordering::Relaxed);
         if !self.dev || is_foreground(self.hwnd) {
-            let hit = self.hotkeys.read().iter().copied().find(|h| h.combo.matches(ev) && (!game || h.kind.allowed_in_game()));
+            let hit = self
+                .hotkeys
+                .read()
+                .iter()
+                .copied()
+                .find(|h| h.combo.matches(ev) && (!game || h.kind.allowed_in_game()));
             if let Some(hotkey) = hit {
                 if !ev.key_up && self.debounce(&self.last_hotkey_ms, HOTKEY_DEBOUNCE_MS) {
-                    let _ = self.tx.send(HotkeyEvent { kind: hotkey.kind, combo: hotkey.combo.to_string() });
+                    let _ = self.tx.send(HotkeyEvent {
+                        kind: hotkey.kind,
+                        combo: hotkey.combo.to_string(),
+                    });
                 }
-                return if hotkey.consume { HookAction::Block } else { HookAction::Pass };
+                return if hotkey.consume {
+                    HookAction::Block
+                } else {
+                    HookAction::Pass
+                };
             }
         }
         if self.dev {
@@ -263,13 +297,20 @@ impl Shared {
             return HookAction::Pass;
         }
         let matched = {
-            let combos = if game { self.game_combos.read() } else { self.combos.read() };
+            let combos = if game {
+                self.game_combos.read()
+            } else {
+                self.combos.read()
+            };
             combos.iter().copied().find(|c| c.matches(ev))
         };
         match matched {
             Some(combo) => {
                 if !ev.key_up && self.debounce(&self.last_blocked_ms, BLOCKED_EVENT_MIN_MS) {
-                    let _ = self.tx.send(HotkeyEvent { kind: HotkeyKind::Blocked, combo: combo.to_string() });
+                    let _ = self.tx.send(HotkeyEvent {
+                        kind: HotkeyKind::Blocked,
+                        combo: combo.to_string(),
+                    });
                 }
                 HookAction::Block
             }
@@ -330,7 +371,12 @@ impl KeyboardHook {
         });
         let hook = match LowLevelKeyboardHook::install(key_filter(Arc::clone(&shared))) {
             Ok(hook) => {
-                tracing::info!(dev, blocked = shared.combos.read().len(), hotkeys = shared.hotkeys.read().len(), "keyboard hook installed");
+                tracing::info!(
+                    dev,
+                    blocked = shared.combos.read().len(),
+                    hotkeys = shared.hotkeys.read().len(),
+                    "keyboard hook installed"
+                );
                 Some(hook)
             }
             Err(e) => {
@@ -342,12 +388,19 @@ impl KeyboardHook {
                 None
             }
         };
-        Self { shared, hook: Mutex::new(hook), mouse: Mutex::new(None) }
+        Self {
+            shared,
+            hook: Mutex::new(hook),
+            mouse: Mutex::new(None),
+        }
     }
 
     /// `true` while the hook thread holds a live `WH_KEYBOARD_LL` hook.
     pub fn is_installed(&self) -> bool {
-        self.hook.lock().as_ref().is_some_and(LowLevelKeyboardHook::is_installed)
+        self.hook
+            .lock()
+            .as_ref()
+            .is_some_and(LowLevelKeyboardHook::is_installed)
     }
 
     /// Replaces the chord sets (policy reload) without reinstalling.
@@ -355,7 +408,11 @@ impl KeyboardHook {
         *self.shared.combos.write() = policy.combos();
         *self.shared.game_combos.write() = policy.game_combos();
         *self.shared.policy.lock() = policy.clone();
-        tracing::info!(blocked = self.shared.combos.read().len(), in_game = self.shared.game_combos.read().len(), "key policy updated");
+        tracing::info!(
+            blocked = self.shared.combos.read().len(),
+            in_game = self.shared.game_combos.read().len(),
+            "key policy updated"
+        );
     }
 
     pub fn policy(&self) -> HookPolicy {
@@ -407,7 +464,9 @@ impl KeyboardHook {
         if mouse.is_none() {
             match LowLevelMouseHook::install(mouse_filter(Arc::clone(&self.shared))) {
                 Ok(hook) => *mouse = Some(hook),
-                Err(e) => tracing::warn!(error = %e, "mouse hook unavailable; lock blocks keys only"),
+                Err(e) => {
+                    tracing::warn!(error = %e, "mouse hook unavailable; lock blocks keys only")
+                }
             }
         }
     }
@@ -432,7 +491,16 @@ mod tests {
     use crate::config::ShellConfig;
 
     fn key(vk_code: u32, ctrl: bool, alt: bool, shift: bool, win: bool) -> KeyEvent {
-        KeyEvent { vk: vk_code, scan: 0, flags: 0, alt, ctrl, shift, win, key_up: false }
+        KeyEvent {
+            vk: vk_code,
+            scan: 0,
+            flags: 0,
+            alt,
+            ctrl,
+            shift,
+            win,
+            key_up: false,
+        }
     }
 
     #[test]
@@ -440,15 +508,37 @@ mod tests {
         let cfg = ShellConfig::defaults();
         let full = HookPolicy::from_config(&cfg.kiosk, &[]);
         let combos = full.combos();
-        assert!(BlockedCombo::any_matches(&combos, &key(vk::TAB, false, true, false, false)), "Alt+Tab");
-        assert!(BlockedCombo::any_matches(&combos, &key(vk::LWIN, false, false, false, true)), "Win");
-        assert!(BlockedCombo::any_matches(&combos, &key(vk::F1 + 3, false, true, false, false)), "Alt+F4");
+        assert!(
+            BlockedCombo::any_matches(&combos, &key(vk::TAB, false, true, false, false)),
+            "Alt+Tab"
+        );
+        assert!(
+            BlockedCombo::any_matches(&combos, &key(vk::LWIN, false, false, false, true)),
+            "Win"
+        );
+        assert!(
+            BlockedCombo::any_matches(&combos, &key(vk::F1 + 3, false, true, false, false)),
+            "Alt+F4"
+        );
 
-        let relaxed = HookPolicy { block_alt_tab: false, block_win_key: false, extra: vec![] };
+        let relaxed = HookPolicy {
+            block_alt_tab: false,
+            block_win_key: false,
+            extra: vec![],
+        };
         let combos = relaxed.combos();
-        assert!(!BlockedCombo::any_matches(&combos, &key(vk::TAB, false, true, false, false)));
-        assert!(!BlockedCombo::any_matches(&combos, &key(vk::LWIN, false, false, false, true)));
-        assert!(BlockedCombo::any_matches(&combos, &key(vk::F1 + 3, false, true, false, false)), "Alt+F4 stays");
+        assert!(!BlockedCombo::any_matches(
+            &combos,
+            &key(vk::TAB, false, true, false, false)
+        ));
+        assert!(!BlockedCombo::any_matches(
+            &combos,
+            &key(vk::LWIN, false, false, false, true)
+        ));
+        assert!(
+            BlockedCombo::any_matches(&combos, &key(vk::F1 + 3, false, true, false, false)),
+            "Alt+F4 stays"
+        );
 
         let mut merged = relaxed.clone();
         merged.merge_explorer(&ExplorerPolicy {
@@ -463,27 +553,51 @@ mod tests {
         assert!(merged.block_alt_tab && !merged.block_win_key);
         assert_eq!(merged.extra.len(), 1, "CAD and malformed entries dropped");
         let combos = merged.combos();
-        assert!(BlockedCombo::any_matches(&combos, &key(vk::TAB, false, true, false, false)));
-        assert!(BlockedCombo::any_matches(&combos, &key(u32::from(b'X'), false, false, false, true)));
+        assert!(BlockedCombo::any_matches(
+            &combos,
+            &key(vk::TAB, false, true, false, false)
+        ));
+        assert!(BlockedCombo::any_matches(
+            &combos,
+            &key(u32::from(b'X'), false, false, false, true)
+        ));
         let dedup: std::collections::HashSet<BlockedCombo> = combos.iter().copied().collect();
         assert_eq!(dedup.len(), combos.len(), "no duplicates");
 
         let game = full.game_combos();
-        assert!(BlockedCombo::any_matches(&game, &key(vk::LWIN, false, false, false, true)));
-        assert!(BlockedCombo::any_matches(&game, &key(vk::ESCAPE, true, false, true, false)), "Ctrl+Shift+Esc");
-        assert!(!BlockedCombo::any_matches(&game, &key(vk::F1 + 3, false, true, false, false)), "Alt+F4 released in game");
+        assert!(BlockedCombo::any_matches(
+            &game,
+            &key(vk::LWIN, false, false, false, true)
+        ));
+        assert!(
+            BlockedCombo::any_matches(&game, &key(vk::ESCAPE, true, false, true, false)),
+            "Ctrl+Shift+Esc"
+        );
+        assert!(
+            !BlockedCombo::any_matches(&game, &key(vk::F1 + 3, false, true, false, false)),
+            "Alt+F4 released in game"
+        );
     }
 
     #[test]
     fn default_hotkeys_follow_config() {
         let cfg = ShellConfig::defaults();
         let hotkeys = default_hotkeys(&cfg.kiosk, true);
-        assert!(hotkeys.iter().any(|h| h.kind == HotkeyKind::Exit && h.combo == BlockedCombo::parse("Ctrl+Alt+Shift+F12").unwrap()));
+        assert!(hotkeys.iter().any(|h| h.kind == HotkeyKind::Exit
+            && h.combo == BlockedCombo::parse("Ctrl+Alt+Shift+F12").unwrap()));
         assert!(hotkeys.iter().any(|h| h.kind == HotkeyKind::DevFullscreen));
-        assert!(hotkeys.iter().filter(|h| h.kind == HotkeyKind::Exit).count() >= 2);
+        assert!(
+            hotkeys
+                .iter()
+                .filter(|h| h.kind == HotkeyKind::Exit)
+                .count()
+                >= 2
+        );
         let mute = hotkeys.iter().find(|h| h.kind == HotkeyKind::Mute).unwrap();
         assert!(!mute.consume && mute.combo.key == Some(0xAD));
-        assert!(default_hotkeys(&cfg.kiosk, false).iter().all(|h| h.kind != HotkeyKind::DevFullscreen));
+        assert!(default_hotkeys(&cfg.kiosk, false)
+            .iter()
+            .all(|h| h.kind != HotkeyKind::DevFullscreen));
         assert_eq!(HotkeyKind::CallAdmin.wire_name(), "callAdmin");
         assert!(HotkeyKind::Exit.allowed_in_game() && !HotkeyKind::Lock.allowed_in_game());
     }
@@ -512,26 +626,66 @@ mod tests {
         // Wait past the debounce windows measured from the feed epoch.
         std::thread::sleep(std::time::Duration::from_millis(1050));
         let filter = key_filter(Arc::clone(&shared));
-        assert_eq!(filter(&key(u32::from(b'A'), false, false, false, false)), HookAction::Pass);
-        assert_eq!(filter(&key(vk::TAB, false, true, false, false)), HookAction::Block);
+        assert_eq!(
+            filter(&key(u32::from(b'A'), false, false, false, false)),
+            HookAction::Pass
+        );
+        assert_eq!(
+            filter(&key(vk::TAB, false, true, false, false)),
+            HookAction::Block
+        );
         let blocked = rx.try_recv().unwrap();
-        assert_eq!((blocked.kind, blocked.combo.as_str()), (HotkeyKind::Blocked, "Alt+Tab"));
-        assert_eq!(filter(&key(vk::ESCAPE, false, true, false, false)), HookAction::Block);
-        assert!(rx.try_recv().is_err(), "second blocked event within 1 s is suppressed");
+        assert_eq!(
+            (blocked.kind, blocked.combo.as_str()),
+            (HotkeyKind::Blocked, "Alt+Tab")
+        );
+        assert_eq!(
+            filter(&key(vk::ESCAPE, false, true, false, false)),
+            HookAction::Block
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "second blocked event within 1 s is suppressed"
+        );
 
         let exit = filter(&key(vk::F1 + 11, true, true, true, false));
         assert_eq!(exit, HookAction::Block, "exit chord is consumed");
         assert_eq!(rx.try_recv().unwrap().kind, HotkeyKind::Exit);
-        assert_eq!(filter(&key(0xAF, false, false, false, false)), HookAction::Pass, "volume keys pass through");
+        assert_eq!(
+            filter(&key(0xAF, false, false, false, false)),
+            HookAction::Pass,
+            "volume keys pass through"
+        );
 
         shared.lock_all.store(true, Ordering::Relaxed);
-        assert_eq!(filter(&key(u32::from(b'A'), false, false, false, false)), HookAction::Block);
+        assert_eq!(
+            filter(&key(u32::from(b'A'), false, false, false, false)),
+            HookAction::Block
+        );
         shared.lock_all.store(false, Ordering::Relaxed);
         shared.game_mode.store(true, Ordering::Relaxed);
-        assert_eq!(filter(&key(vk::F1 + 3, false, true, false, false)), HookAction::Pass, "Alt+F4 released in game mode");
-        assert_eq!(filter(&key(vk::LWIN, false, false, false, true)), HookAction::Block, "Win stays blocked in game mode");
-        let injected = KeyEvent { flags: clubshell_winutil::hooks::llkhf::INJECTED, ..key(vk::LWIN, false, false, false, true) };
-        assert_eq!(filter(&injected), HookAction::Pass, "our own SendInput passes");
-        assert!(feed.since() < std::time::Duration::from_secs(1), "activity recorded");
+        assert_eq!(
+            filter(&key(vk::F1 + 3, false, true, false, false)),
+            HookAction::Pass,
+            "Alt+F4 released in game mode"
+        );
+        assert_eq!(
+            filter(&key(vk::LWIN, false, false, false, true)),
+            HookAction::Block,
+            "Win stays blocked in game mode"
+        );
+        let injected = KeyEvent {
+            flags: clubshell_winutil::hooks::llkhf::INJECTED,
+            ..key(vk::LWIN, false, false, false, true)
+        };
+        assert_eq!(
+            filter(&injected),
+            HookAction::Pass,
+            "our own SendInput passes"
+        );
+        assert!(
+            feed.since() < std::time::Duration::from_secs(1),
+            "activity recorded"
+        );
     }
 }

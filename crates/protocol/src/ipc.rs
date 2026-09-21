@@ -63,8 +63,22 @@ impl IpcEnvelope {
         v == Self::CURRENT_VERSION
     }
 
-    fn create(id: Uuid, kind: IpcKind, name: &str, payload: Option<Value>, error: Option<IpcError>) -> Self {
-        Self { v: Self::CURRENT_VERSION, id, kind, name: name.to_owned(), ts: Utc::now(), payload, error }
+    fn create(
+        id: Uuid,
+        kind: IpcKind,
+        name: &str,
+        payload: Option<Value>,
+        error: Option<IpcError>,
+    ) -> Self {
+        Self {
+            v: Self::CURRENT_VERSION,
+            id,
+            kind,
+            name: name.to_owned(),
+            ts: Utc::now(),
+            payload,
+            error,
+        }
     }
 
     /// Request with a fresh id.
@@ -83,8 +97,16 @@ impl IpcEnvelope {
     }
 
     /// Successful response with a typed payload.
-    pub fn response_with<T: Serialize>(request_id: Uuid, name: &str, payload: &T) -> Result<Self, ProtocolError> {
-        Ok(Self::response(request_id, name, Some(serde_json::to_value(payload)?)))
+    pub fn response_with<T: Serialize>(
+        request_id: Uuid,
+        name: &str,
+        payload: &T,
+    ) -> Result<Self, ProtocolError> {
+        Ok(Self::response(
+            request_id,
+            name,
+            Some(serde_json::to_value(payload)?),
+        ))
     }
 
     /// Successful response to `request` (same id, same name; `sys.ping` answers as `sys.pong`).
@@ -93,8 +115,14 @@ impl IpcEnvelope {
     }
 
     /// Successful typed response to `request`.
-    pub fn reply_to_with<T: Serialize>(request: &IpcEnvelope, payload: &T) -> Result<Self, ProtocolError> {
-        Ok(Self::reply_to(request, Some(serde_json::to_value(payload)?)))
+    pub fn reply_to_with<T: Serialize>(
+        request: &IpcEnvelope,
+        payload: &T,
+    ) -> Result<Self, ProtocolError> {
+        Ok(Self::reply_to(
+            request,
+            Some(serde_json::to_value(payload)?),
+        ))
     }
 
     /// Event with a fresh id.
@@ -142,7 +170,8 @@ impl IpcEnvelope {
     /// "<serde error>")` as an [`IpcError`].
     pub fn require_payload<T: DeserializeOwned>(&self) -> Result<T, IpcError> {
         match &self.payload {
-            Some(v @ Value::Object(_)) => serde_json::from_value(v.clone()).map_err(|e| IpcError::validation("payload", &e.to_string())),
+            Some(v @ Value::Object(_)) => serde_json::from_value(v.clone())
+                .map_err(|e| IpcError::validation("payload", &e.to_string())),
             _ => Err(IpcError::validation("payload", "required")),
         }
     }
@@ -154,19 +183,32 @@ impl IpcEnvelope {
             return Some(IpcError::version_mismatch(Self::SUPPORTED_VERSIONS, self.v));
         }
         if self.id.is_nil() {
-            return Some(IpcError::protocol_error("Envelope id must be a non-empty UUID"));
+            return Some(IpcError::protocol_error(
+                "Envelope id must be a non-empty UUID",
+            ));
         }
         if !Self::is_valid_name(&self.name) {
-            return Some(IpcError::protocol_error("Envelope name must be '<domain>.<action>'"));
+            return Some(IpcError::protocol_error(
+                "Envelope name must be '<domain>.<action>'",
+            ));
         }
         if self.error.is_some() && self.kind != IpcKind::Response {
-            return Some(IpcError::protocol_error("Only responses may carry an error"));
+            return Some(IpcError::protocol_error(
+                "Only responses may carry an error",
+            ));
         }
-        if !matches!(self.payload, None | Some(Value::Null) | Some(Value::Object(_))) {
-            return Some(IpcError::protocol_error("Payload must be an object or null"));
+        if !matches!(
+            self.payload,
+            None | Some(Value::Null) | Some(Value::Object(_))
+        ) {
+            return Some(IpcError::protocol_error(
+                "Payload must be an object or null",
+            ));
         }
         if self.error.is_some() && self.has_payload() {
-            return Some(IpcError::protocol_error("A failed response must not carry a payload"));
+            return Some(IpcError::protocol_error(
+                "A failed response must not carry a payload",
+            ));
         }
         None
     }
@@ -208,7 +250,10 @@ pub fn encode_frame(envelope: &IpcEnvelope) -> Result<Vec<u8>, ProtocolError> {
     serde_json::to_writer(&mut out, envelope)?;
     let len = out.len() - FRAME_HEADER_BYTES;
     if len > MAX_FRAME_BYTES {
-        return Err(ProtocolError::FrameTooLarge { size: len, max: MAX_FRAME_BYTES });
+        return Err(ProtocolError::FrameTooLarge {
+            size: len,
+            max: MAX_FRAME_BYTES,
+        });
     }
     out[..FRAME_HEADER_BYTES].copy_from_slice(&(len as u32).to_le_bytes());
     Ok(out)
@@ -219,7 +264,10 @@ pub fn decode_frame(bytes: &[u8]) -> Result<IpcEnvelope, ProtocolError> {
     let len = frame_body_len(bytes)?;
     let total = FRAME_HEADER_BYTES + len;
     if bytes.len() < total {
-        return Err(ProtocolError::Incomplete { needed: total, got: bytes.len() });
+        return Err(ProtocolError::Incomplete {
+            needed: total,
+            got: bytes.len(),
+        });
     }
     if bytes.len() > total {
         return Err(ProtocolError::TrailingBytes(bytes.len() - total));
@@ -230,11 +278,17 @@ pub fn decode_frame(bytes: &[u8]) -> Result<IpcEnvelope, ProtocolError> {
 /// Reads the length prefix; `Incomplete` when fewer than 4 bytes, `FrameTooLarge` beyond the limit.
 fn frame_body_len(bytes: &[u8]) -> Result<usize, ProtocolError> {
     if bytes.len() < FRAME_HEADER_BYTES {
-        return Err(ProtocolError::Incomplete { needed: FRAME_HEADER_BYTES, got: bytes.len() });
+        return Err(ProtocolError::Incomplete {
+            needed: FRAME_HEADER_BYTES,
+            got: bytes.len(),
+        });
     }
     let len = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
     if len > MAX_FRAME_BYTES {
-        return Err(ProtocolError::FrameTooLarge { size: len, max: MAX_FRAME_BYTES });
+        return Err(ProtocolError::FrameTooLarge {
+            size: len,
+            max: MAX_FRAME_BYTES,
+        });
     }
     Ok(len)
 }
@@ -316,7 +370,9 @@ mod tests {
         };
         IpcEnvelope {
             id: Uuid::parse_str("6f1d2c4e-1b3a-4a7c-9f7d-0e6f2b5a9c11").unwrap(),
-            ..IpcEnvelope::request_with(names::session::START, &payload).unwrap().with_ts(ts())
+            ..IpcEnvelope::request_with(names::session::START, &payload)
+                .unwrap()
+                .with_ts(ts())
         }
     }
 
@@ -340,7 +396,13 @@ mod tests {
         let minimal: IpcEnvelope = serde_json::from_str(r#"{"v":1,"id":"6f1d2c4e-1b3a-4a7c-9f7d-0e6f2b5a9c11","kind":"request","name":"auth.status","ts":"2026-09-21T10:15:30Z"}"#).unwrap();
         assert_eq!(minimal.payload, None);
         assert_eq!(minimal.payload_as::<SessionStartRequest>().unwrap(), None);
-        assert_eq!(minimal.require_payload::<SessionStartRequest>().unwrap_err().code, ErrorCode::Validation);
+        assert_eq!(
+            minimal
+                .require_payload::<SessionStartRequest>()
+                .unwrap_err()
+                .code,
+            ErrorCode::Validation
+        );
     }
 
     #[test]
@@ -350,7 +412,10 @@ mod tests {
         assert_eq!(ok.id, req.id);
         assert_eq!(ok.kind, IpcKind::Response);
         assert_eq!(ok.name, "session.start");
-        assert_eq!(serde_json::to_string(&ok.with_ts(ts())).unwrap(), r#"{"v":1,"id":"6f1d2c4e-1b3a-4a7c-9f7d-0e6f2b5a9c11","kind":"response","name":"session.start","ts":"2026-09-21T10:15:30.123Z","payload":null,"error":null}"#);
+        assert_eq!(
+            serde_json::to_string(&ok.with_ts(ts())).unwrap(),
+            r#"{"v":1,"id":"6f1d2c4e-1b3a-4a7c-9f7d-0e6f2b5a9c11","kind":"response","name":"session.start","ts":"2026-09-21T10:15:30.123Z","payload":null,"error":null}"#
+        );
 
         let failed = IpcEnvelope::fail_for(&req, IpcError::session_already_active()).with_ts(ts());
         assert!(failed.is_error());
@@ -360,12 +425,22 @@ mod tests {
             r#"{"v":1,"id":"6f1d2c4e-1b3a-4a7c-9f7d-0e6f2b5a9c11","kind":"response","name":"session.start","ts":"2026-09-21T10:15:30.123Z","payload":null,"error":{"code":"sessionAlreadyActive","message":"A session is already active","details":null}}"#
         );
 
-        let ping = IpcEnvelope::request_with(names::sys::PING, &SysPingRequest { seq: 1, sent_at: ts() }).unwrap();
+        let ping = IpcEnvelope::request_with(
+            names::sys::PING,
+            &SysPingRequest {
+                seq: 1,
+                sent_at: ts(),
+            },
+        )
+        .unwrap();
         let pong = IpcEnvelope::reply_to(&ping, None);
         assert_eq!(pong.name, names::sys::PONG);
         assert_eq!(IpcEnvelope::response_name_for("games.list"), "games.list");
 
-        let ev = IpcEnvelope::event(names::events::AUTH_EXPIRED, Some(serde_json::json!({ "reason": "revoked" })));
+        let ev = IpcEnvelope::event(
+            names::events::AUTH_EXPIRED,
+            Some(serde_json::json!({ "reason": "revoked" })),
+        );
         assert_eq!(ev.kind, IpcKind::Event);
         assert_eq!(ev.validate(), None);
         assert_ne!(ev.id, req.id);
@@ -374,22 +449,82 @@ mod tests {
     #[test]
     fn validate_rejects_malformed_envelopes() {
         let good = sample_request();
-        let bad_version = IpcEnvelope { v: 2, ..good.clone() };
+        let bad_version = IpcEnvelope {
+            v: 2,
+            ..good.clone()
+        };
         let err = bad_version.validate().unwrap();
         assert_eq!(err.code, ErrorCode::VersionMismatch);
         let d: VersionMismatchDetails = err.details_as().unwrap().unwrap();
-        assert_eq!(d, VersionMismatchDetails { supported: vec![1], got: 2 });
+        assert_eq!(
+            d,
+            VersionMismatchDetails {
+                supported: vec![1],
+                got: 2
+            }
+        );
         // `v` is a C# `int`: a negative major still decodes and is answered with versionMismatch, not protocolError.
-        let negative: IpcEnvelope = serde_json::from_str(&REQ_JSON.replace(r#""v":1"#, r#""v":-1"#)).unwrap();
-        assert_eq!(negative.validate().unwrap().code, ErrorCode::VersionMismatch);
-        assert_eq!(IpcEnvelope { id: Uuid::nil(), ..good.clone() }.validate().unwrap().code, ErrorCode::ProtocolError);
-        assert_eq!(IpcEnvelope { name: "nodot".into(), ..good.clone() }.validate().unwrap().code, ErrorCode::ProtocolError);
-        assert_eq!(IpcEnvelope { payload: Some(serde_json::json!([1])), ..good.clone() }.validate().unwrap().code, ErrorCode::ProtocolError);
-        let err_on_request = IpcEnvelope { error: Some(IpcError::timeout(None)), ..good.clone() };
-        assert_eq!(err_on_request.validate().unwrap().message, "Only responses may carry an error");
-        let err_with_payload = IpcEnvelope { kind: IpcKind::Response, error: Some(IpcError::timeout(None)), ..good.clone() };
-        assert_eq!(err_with_payload.validate().unwrap().message, "A failed response must not carry a payload");
-        assert_eq!(IpcEnvelope { payload: Some(Value::Null), ..good }.validate(), None);
+        let negative: IpcEnvelope =
+            serde_json::from_str(&REQ_JSON.replace(r#""v":1"#, r#""v":-1"#)).unwrap();
+        assert_eq!(
+            negative.validate().unwrap().code,
+            ErrorCode::VersionMismatch
+        );
+        assert_eq!(
+            IpcEnvelope {
+                id: Uuid::nil(),
+                ..good.clone()
+            }
+            .validate()
+            .unwrap()
+            .code,
+            ErrorCode::ProtocolError
+        );
+        assert_eq!(
+            IpcEnvelope {
+                name: "nodot".into(),
+                ..good.clone()
+            }
+            .validate()
+            .unwrap()
+            .code,
+            ErrorCode::ProtocolError
+        );
+        assert_eq!(
+            IpcEnvelope {
+                payload: Some(serde_json::json!([1])),
+                ..good.clone()
+            }
+            .validate()
+            .unwrap()
+            .code,
+            ErrorCode::ProtocolError
+        );
+        let err_on_request = IpcEnvelope {
+            error: Some(IpcError::timeout(None)),
+            ..good.clone()
+        };
+        assert_eq!(
+            err_on_request.validate().unwrap().message,
+            "Only responses may carry an error"
+        );
+        let err_with_payload = IpcEnvelope {
+            kind: IpcKind::Response,
+            error: Some(IpcError::timeout(None)),
+            ..good.clone()
+        };
+        assert_eq!(
+            err_with_payload.validate().unwrap().message,
+            "A failed response must not carry a payload"
+        );
+        assert_eq!(
+            IpcEnvelope {
+                payload: Some(Value::Null),
+                ..good
+            }
+            .validate(),
+            None
+        );
 
         assert!(IpcEnvelope::is_valid_name("auth.hello"));
         assert!(IpcEnvelope::is_valid_name("sys.ackAdminMessage"));
@@ -399,7 +534,11 @@ mod tests {
         assert!(!IpcEnvelope::is_valid_name("auth."));
         assert!(!IpcEnvelope::is_valid_name("a.b.c"));
         assert!(!IpcEnvelope::is_valid_name("auth.hello2"));
-        assert!(!IpcEnvelope::is_valid_name(&format!("{}.{}", "a".repeat(40), "b".repeat(30))));
+        assert!(!IpcEnvelope::is_valid_name(&format!(
+            "{}.{}",
+            "a".repeat(40),
+            "b".repeat(30)
+        )));
     }
 
     #[test]
@@ -411,20 +550,41 @@ mod tests {
         assert_eq!(&frame[4..], body);
         assert_eq!(decode_frame(&frame).unwrap(), req);
 
-        assert!(matches!(decode_frame(&frame[..3]), Err(ProtocolError::Incomplete { needed: 4, got: 3 })));
-        assert!(matches!(decode_frame(&frame[..10]), Err(ProtocolError::Incomplete { .. })));
+        assert!(matches!(
+            decode_frame(&frame[..3]),
+            Err(ProtocolError::Incomplete { needed: 4, got: 3 })
+        ));
+        assert!(matches!(
+            decode_frame(&frame[..10]),
+            Err(ProtocolError::Incomplete { .. })
+        ));
         let mut trailing = frame.clone();
         trailing.push(b'x');
-        assert!(matches!(decode_frame(&trailing), Err(ProtocolError::TrailingBytes(1))));
+        assert!(matches!(
+            decode_frame(&trailing),
+            Err(ProtocolError::TrailingBytes(1))
+        ));
         let mut huge = frame.clone();
         huge[..4].copy_from_slice(&((MAX_FRAME_BYTES as u32) + 1).to_le_bytes());
-        assert!(matches!(decode_frame(&huge), Err(ProtocolError::FrameTooLarge { .. })));
+        assert!(matches!(
+            decode_frame(&huge),
+            Err(ProtocolError::FrameTooLarge { .. })
+        ));
         let mut garbage = frame.clone();
         garbage[4] = b'x';
-        assert!(matches!(decode_frame(&garbage), Err(ProtocolError::Json(_))));
+        assert!(matches!(
+            decode_frame(&garbage),
+            Err(ProtocolError::Json(_))
+        ));
 
-        let oversize = IpcEnvelope::request("x.y", Some(serde_json::json!({ "blob": "a".repeat(MAX_FRAME_BYTES) })));
-        assert!(matches!(encode_frame(&oversize), Err(ProtocolError::FrameTooLarge { .. })));
+        let oversize = IpcEnvelope::request(
+            "x.y",
+            Some(serde_json::json!({ "blob": "a".repeat(MAX_FRAME_BYTES) })),
+        );
+        assert!(matches!(
+            encode_frame(&oversize),
+            Err(ProtocolError::FrameTooLarge { .. })
+        ));
     }
 
     #[test]
@@ -472,7 +632,10 @@ mod tests {
         // Oversize length prefix is fatal and leaves the buffer untouched.
         let mut reader = FrameReader::new();
         reader.push(&(MAX_FRAME_BYTES as u32 + 1).to_le_bytes());
-        assert!(matches!(reader.next_frame(), Err(ProtocolError::FrameTooLarge { .. })));
+        assert!(matches!(
+            reader.next_frame(),
+            Err(ProtocolError::FrameTooLarge { .. })
+        ));
         assert_eq!(reader.pending(), 4);
         reader.clear();
         assert_eq!(reader.pending(), 0);

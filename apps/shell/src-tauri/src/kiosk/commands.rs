@@ -34,7 +34,10 @@ pub struct KioskState {
 
 /// `kiosk_state`.
 #[tauri::command]
-pub async fn kiosk_state(state: State<'_, AppState>, kiosk: State<'_, Arc<Kiosk>>) -> CmdResult<KioskState> {
+pub async fn kiosk_state(
+    state: State<'_, AppState>,
+    kiosk: State<'_, Arc<Kiosk>>,
+) -> CmdResult<KioskState> {
     Ok(KioskState {
         agent_connected: state.agent.is_connected(),
         native: kiosk.snapshot(),
@@ -45,9 +48,15 @@ pub async fn kiosk_state(state: State<'_, AppState>, kiosk: State<'_, Arc<Kiosk>
 
 /// `kiosk_set_guard`: `false` only while a game runs or with a cached admin unlock.
 #[tauri::command]
-pub async fn kiosk_set_guard(state: State<'_, AppState>, kiosk: State<'_, Arc<Kiosk>>, active: bool) -> CmdResult<()> {
+pub async fn kiosk_set_guard(
+    state: State<'_, AppState>,
+    kiosk: State<'_, Arc<Kiosk>>,
+    active: bool,
+) -> CmdResult<()> {
     if !active && !(state.game_running() || state.has_admin_unlock()) {
-        return Err(ShellError::forbidden("disabling the guard needs a running game or an admin unlock"));
+        return Err(ShellError::forbidden(
+            "disabling the guard needs a running game or an admin unlock",
+        ));
     }
     kiosk.set_guard(active);
     Ok(())
@@ -55,16 +64,26 @@ pub async fn kiosk_set_guard(state: State<'_, AppState>, kiosk: State<'_, Arc<Ki
 
 /// `kiosk_set_fullscreen`: admin unlock required (dev mode is exempt; F11 does the same there).
 #[tauri::command]
-pub async fn kiosk_set_fullscreen(state: State<'_, AppState>, kiosk: State<'_, Arc<Kiosk>>, on: bool) -> CmdResult<()> {
+pub async fn kiosk_set_fullscreen(
+    state: State<'_, AppState>,
+    kiosk: State<'_, Arc<Kiosk>>,
+    on: bool,
+) -> CmdResult<()> {
     if !(state.has_admin_unlock() || kiosk.is_dev()) {
-        return Err(ShellError::forbidden("fullscreen change needs an admin unlock"));
+        return Err(ShellError::forbidden(
+            "fullscreen change needs an admin unlock",
+        ));
     }
     kiosk.window().set_fullscreen(on)
 }
 
 /// `kiosk_show_overlay`; `kind: "none"` hides it.
 #[tauri::command]
-pub async fn kiosk_show_overlay(kiosk: State<'_, Arc<Kiosk>>, kind: OverlayKind, payload: Option<Value>) -> CmdResult<()> {
+pub async fn kiosk_show_overlay(
+    kiosk: State<'_, Arc<Kiosk>>,
+    kind: OverlayKind,
+    payload: Option<Value>,
+) -> CmdResult<()> {
     kiosk.overlay().show(kind, payload, None)
 }
 
@@ -77,13 +96,20 @@ pub async fn kiosk_monitors(kiosk: State<'_, Arc<Kiosk>>) -> CmdResult<Vec<Monit
 /// `kiosk_move_to_monitor`; `notFound` for an unknown index.
 #[tauri::command]
 pub async fn kiosk_move_to_monitor(kiosk: State<'_, Arc<Kiosk>>, index: u32) -> CmdResult<()> {
-    let rect = kiosk.monitors().monitor_rect(index as usize).ok_or_else(|| ShellError::not_found("monitor"))?;
+    let rect = kiosk
+        .monitors()
+        .monitor_rect(index as usize)
+        .ok_or_else(|| ShellError::not_found("monitor"))?;
     kiosk.window().move_to_monitor(rect)
 }
 
 /// `kiosk_virtual_keyboard`; `policyDenied` unless `shell.json → kiosk.allowVirtualKeyboard`.
 #[tauri::command]
-pub async fn kiosk_virtual_keyboard(state: State<'_, AppState>, kiosk: State<'_, Arc<Kiosk>>, show: bool) -> CmdResult<()> {
+pub async fn kiosk_virtual_keyboard(
+    state: State<'_, AppState>,
+    kiosk: State<'_, Arc<Kiosk>>,
+    show: bool,
+) -> CmdResult<()> {
     if !state.config.kiosk.allow_virtual_keyboard {
         return Err(ShellError::policy_denied("allowVirtualKeyboard"));
     }
@@ -101,7 +127,12 @@ pub async fn kiosk_focus(kiosk: State<'_, Arc<Kiosk>>) -> CmdResult<()> {
 
 /// `kiosk_exit`: needs the unexpired token from `sys_unlock_admin`; `action` ∈ `explorer` | `quit`.
 #[tauri::command]
-pub async fn kiosk_exit(state: State<'_, AppState>, kiosk: State<'_, Arc<Kiosk>>, admin_token: String, action: String) -> CmdResult<()> {
+pub async fn kiosk_exit(
+    state: State<'_, AppState>,
+    kiosk: State<'_, Arc<Kiosk>>,
+    admin_token: String,
+    action: String,
+) -> CmdResult<()> {
     let start_explorer = match action.as_str() {
         "explorer" => true,
         "quit" => false,
@@ -117,11 +148,17 @@ pub async fn kiosk_exit(state: State<'_, AppState>, kiosk: State<'_, Arc<Kiosk>>
 
 /// `kiosk_reload`: reloads the main webview (dev mode or admin unlock).
 #[tauri::command]
-pub async fn kiosk_reload(app: AppHandle, state: State<'_, AppState>, kiosk: State<'_, Arc<Kiosk>>) -> CmdResult<()> {
+pub async fn kiosk_reload(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    kiosk: State<'_, Arc<Kiosk>>,
+) -> CmdResult<()> {
     if !(state.has_admin_unlock() || kiosk.is_dev()) {
         return Err(ShellError::forbidden("reload needs an admin unlock"));
     }
-    let window = app.get_webview_window(MAIN_LABEL).ok_or_else(|| ShellError::not_found("main window"))?;
+    let window = app
+        .get_webview_window(MAIN_LABEL)
+        .ok_or_else(|| ShellError::not_found("main window"))?;
     tracing::info!("webview reload requested");
     window.eval("window.location.reload()")?;
     Ok(())
@@ -130,7 +167,10 @@ pub async fn kiosk_reload(app: AppHandle, state: State<'_, AppState>, kiosk: Sta
 /// `kiosk_open_devtools`: `forbidden` unless `shell.json → devtools`; `internal` when this build has
 /// no devtools (release without the `devtools` feature).
 #[tauri::command]
-pub async fn kiosk_open_devtools(state: State<'_, AppState>, kiosk: State<'_, Arc<Kiosk>>) -> CmdResult<()> {
+pub async fn kiosk_open_devtools(
+    state: State<'_, AppState>,
+    kiosk: State<'_, Arc<Kiosk>>,
+) -> CmdResult<()> {
     if !state.config.devtools {
         return Err(ShellError::forbidden("devtools are disabled in shell.json"));
     }
@@ -145,7 +185,9 @@ fn open_devtools(window: &WebviewWindow) -> CmdResult<()> {
 
 #[cfg(not(any(debug_assertions, feature = "devtools")))]
 fn open_devtools(_window: &WebviewWindow) -> CmdResult<()> {
-    Err(ShellError::internal("devtools are not compiled into this build"))
+    Err(ShellError::internal(
+        "devtools are not compiled into this build",
+    ))
 }
 
 /// `kiosk_gamepad_state`: last snapshot of every pad.
@@ -164,7 +206,10 @@ pub async fn kiosk_idle_reset(kiosk: State<'_, Arc<Kiosk>>) -> CmdResult<()> {
 /// `kiosk_i18n_bundle`: embedded bundle for `locale` flattened to `a.b.c` keys, with
 /// `<data dir>\locales\<locale>.json` overrides merged on top (missing / invalid files are ignored).
 #[tauri::command]
-pub async fn kiosk_i18n_bundle(state: State<'_, AppState>, locale: Locale) -> CmdResult<BTreeMap<String, String>> {
+pub async fn kiosk_i18n_bundle(
+    state: State<'_, AppState>,
+    locale: Locale,
+) -> CmdResult<BTreeMap<String, String>> {
     let embedded = match locale {
         Locale::En => EMBEDDED_EN,
         Locale::Ru => EMBEDDED_RU,
@@ -172,11 +217,16 @@ pub async fn kiosk_i18n_bundle(state: State<'_, AppState>, locale: Locale) -> Cm
     };
     let mut bundle = BTreeMap::new();
     merge_bundle(&mut bundle, embedded, &format!("embedded {locale}"));
-    let path = state.config.locales_dir().join(format!("{}.json", locale.wire_name()));
+    let path = state
+        .config
+        .locales_dir()
+        .join(format!("{}.json", locale.wire_name()));
     match std::fs::read_to_string(&path) {
         Ok(text) => merge_bundle(&mut bundle, &text, &path.display().to_string()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => tracing::warn!(path = %path.display(), error = %e, "locale override not readable"),
+        Err(e) => {
+            tracing::warn!(path = %path.display(), error = %e, "locale override not readable")
+        }
     }
     Ok(bundle)
 }
@@ -193,9 +243,17 @@ fn merge_bundle(into: &mut BTreeMap<String, String>, text: &str, source: &str) {
     }
 }
 
-fn flatten(prefix: &str, map: &serde_json::Map<String, Value>, into: &mut BTreeMap<String, String>) {
+fn flatten(
+    prefix: &str,
+    map: &serde_json::Map<String, Value>,
+    into: &mut BTreeMap<String, String>,
+) {
     for (key, value) in map {
-        let full = if prefix.is_empty() { key.clone() } else { format!("{prefix}.{key}") };
+        let full = if prefix.is_empty() {
+            key.clone()
+        } else {
+            format!("{prefix}.{key}")
+        };
         match value {
             Value::Object(nested) => flatten(&full, nested, into),
             Value::String(s) => {
@@ -231,13 +289,24 @@ fn resolve_asset(data_dir: &Path, relative: &str) -> CmdResult<PathBuf> {
                 _ => return Err(ShellError::validation("path", "invalid path component")),
             },
             Component::CurDir => {}
-            _ => return Err(ShellError::forbidden("asset path must be relative to the data directory")),
+            _ => {
+                return Err(ShellError::forbidden(
+                    "asset path must be relative to the data directory",
+                ))
+            }
         }
     }
-    if !matches!(parts.as_slice(), ["themes", _, ..] | ["cache", "media", _, ..]) {
-        return Err(ShellError::forbidden("asset path must be under themes\\ or cache\\media\\"));
+    if !matches!(
+        parts.as_slice(),
+        ["themes", _, ..] | ["cache", "media", _, ..]
+    ) {
+        return Err(ShellError::forbidden(
+            "asset path must be under themes\\ or cache\\media\\",
+        ));
     }
-    Ok(parts.iter().fold(data_dir.to_path_buf(), |acc, part| acc.join(part)))
+    Ok(parts
+        .iter()
+        .fold(data_dir.to_path_buf(), |acc, part| acc.join(part)))
 }
 
 /// `convertFileSrc(path, "asset")`: `http://asset.localhost/<encoded>` on Windows, `asset://localhost/<encoded>` elsewhere.
@@ -255,7 +324,18 @@ fn encode_uri_component(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3);
     for byte in s.bytes() {
         match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')' => out.push(byte as char),
+            b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'0'..=b'9'
+            | b'-'
+            | b'_'
+            | b'.'
+            | b'!'
+            | b'~'
+            | b'*'
+            | b'\''
+            | b'('
+            | b')' => out.push(byte as char),
             _ => out.push_str(&format!("%{byte:02X}")),
         }
     }
@@ -270,14 +350,35 @@ mod tests {
     #[test]
     fn asset_paths_are_confined_to_allowed_roots() {
         let root = Path::new(r"C:\ProgramData\ClubShell");
-        assert_eq!(resolve_asset(root, r"themes\neon\bg.png").unwrap(), root.join("themes").join("neon").join("bg.png"));
-        assert_eq!(resolve_asset(root, "cache/media/1.jpg").unwrap(), root.join("cache").join("media").join("1.jpg"));
-        assert_eq!(resolve_asset(root, "./themes/x.json").unwrap(), root.join("themes").join("x.json"));
-        for bad in [r"..\secure\shell.token", "themes/../secure/shell.token", "cache/x.jpg", "cache/covers/1.jpg", "themes", "/etc/passwd", r"C:\Windows\x", "secure/shell.token"] {
+        assert_eq!(
+            resolve_asset(root, r"themes\neon\bg.png").unwrap(),
+            root.join("themes").join("neon").join("bg.png")
+        );
+        assert_eq!(
+            resolve_asset(root, "cache/media/1.jpg").unwrap(),
+            root.join("cache").join("media").join("1.jpg")
+        );
+        assert_eq!(
+            resolve_asset(root, "./themes/x.json").unwrap(),
+            root.join("themes").join("x.json")
+        );
+        for bad in [
+            r"..\secure\shell.token",
+            "themes/../secure/shell.token",
+            "cache/x.jpg",
+            "cache/covers/1.jpg",
+            "themes",
+            "/etc/passwd",
+            r"C:\Windows\x",
+            "secure/shell.token",
+        ] {
             let e = resolve_asset(root, bad).unwrap_err();
             assert_eq!(e.code, ErrorCode::Forbidden, "{bad}");
         }
-        assert_eq!(encode_uri_component(r"C:\A b\ö.png"), "C%3A%5CA%20b%5C%C3%B6.png");
+        assert_eq!(
+            encode_uri_component(r"C:\A b\ö.png"),
+            "C%3A%5CA%20b%5C%C3%B6.png"
+        );
         let url = asset_url(Path::new(r"C:\x\y.png"));
         assert!(url.ends_with("/C%3A%5Cx%5Cy.png"));
     }
@@ -285,7 +386,11 @@ mod tests {
     #[test]
     fn i18n_bundles_flatten_and_override() {
         let mut bundle = BTreeMap::new();
-        merge_bundle(&mut bundle, r#"{ "a": { "b": "1", "c": { "d": "2" } }, "n": 5, "z": null }"#, "base");
+        merge_bundle(
+            &mut bundle,
+            r#"{ "a": { "b": "1", "c": { "d": "2" } }, "n": 5, "z": null }"#,
+            "base",
+        );
         merge_bundle(&mut bundle, r#"{ "a": { "b": "override" } }"#, "overlay");
         merge_bundle(&mut bundle, "", "empty");
         merge_bundle(&mut bundle, "[1]", "array");

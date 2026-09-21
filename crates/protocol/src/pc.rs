@@ -319,7 +319,11 @@ pub struct PowerPolicy {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub idle_shutdown_min: Option<i32>,
     /// Daily shutdown time (local `HH:mm`); `null` = none.
-    #[serde(default, with = "crate::wire::hm_opt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "crate::wire::hm_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub scheduled_shutdown: Option<NaiveTime>,
 }
 
@@ -392,7 +396,11 @@ pub struct PcMetrics {
     /// Temperatures.
     pub temps: Temperatures,
     /// Frame rate from the running game's overlay hook; `null` when none.
-    #[serde(default, with = "crate::wire::num_opt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "crate::wire::num_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub fps: Option<f64>,
     /// Network throughput.
     pub net_mbps: NetworkThroughput,
@@ -630,7 +638,12 @@ impl Policy {
             self.anticheat != other.anticheat,
             self.kiosk != other.kiosk,
         ];
-        Self::SECTION_KEYS.iter().zip(flags).filter(|(_, changed)| *changed).map(|(k, _)| *k).collect()
+        Self::SECTION_KEYS
+            .iter()
+            .zip(flags)
+            .filter(|(_, changed)| *changed)
+            .map(|(k, _)| *k)
+            .collect()
     }
 }
 // ---- END MANUAL ----
@@ -642,10 +655,24 @@ pub(crate) fn sample_policy() -> Policy {
     Policy {
         version: 12,
         updated_at: Utc.with_ymd_and_hms(2026, 9, 1, 8, 0, 0).unwrap(),
-        shell_replacement: ShellReplacementPolicy { enabled: true, shell_exe: r"C:\Program Files\ClubShell\Shell\clubshell-shell.exe".into() },
-        process_allowlist: ProcessAllowlistPolicy { mode: AllowlistMode::Deny, patterns: vec!["cmd.exe".into(), "*cheat*".into()] },
-        usb: UsbPolicy { allow_storage: false, allow_hid: true },
-        web_filter: WebFilterPolicy { enabled: true, blocked_domains: vec!["*.torrent-site.example".into()], allowed_domains: vec![], dns_servers: vec!["1.1.1.3".into()] },
+        shell_replacement: ShellReplacementPolicy {
+            enabled: true,
+            shell_exe: r"C:\Program Files\ClubShell\Shell\clubshell-shell.exe".into(),
+        },
+        process_allowlist: ProcessAllowlistPolicy {
+            mode: AllowlistMode::Deny,
+            patterns: vec!["cmd.exe".into(), "*cheat*".into()],
+        },
+        usb: UsbPolicy {
+            allow_storage: false,
+            allow_hid: true,
+        },
+        web_filter: WebFilterPolicy {
+            enabled: true,
+            blocked_domains: vec!["*.torrent-site.example".into()],
+            allowed_domains: vec![],
+            dns_servers: vec!["1.1.1.3".into()],
+        },
         explorer: ExplorerPolicy {
             disable_task_manager: true,
             disable_run: true,
@@ -655,10 +682,23 @@ pub(crate) fn sample_policy() -> Policy {
             disable_win_key: true,
             blocked_key_combos: vec!["Ctrl+Shift+Esc".into(), "Win+R".into()],
         },
-        power: PowerPolicy { idle_shutdown_min: None, scheduled_shutdown: None },
-        updates: UpdatesPolicy { channel: UpdateChannel::Stable, auto_install: true },
-        anticheat: AntiCheatPolicy { required: vec![], block_on_violation: true },
-        kiosk: KioskPolicy { idle_timeout_sec: 300, ads_interval_sec: 900, allow_virtual_keyboard: true },
+        power: PowerPolicy {
+            idle_shutdown_min: None,
+            scheduled_shutdown: None,
+        },
+        updates: UpdatesPolicy {
+            channel: UpdateChannel::Stable,
+            auto_install: true,
+        },
+        anticheat: AntiCheatPolicy {
+            required: vec![],
+            block_on_violation: true,
+        },
+        kiosk: KioskPolicy {
+            idle_timeout_sec: 300,
+            ads_interval_sec: 900,
+            allow_virtual_keyboard: true,
+        },
     }
 }
 
@@ -674,7 +714,10 @@ mod tests {
     #[test]
     fn enum_wire_values() {
         assert_wire(DiskType::ALL, &["hdd", "ssd", "nvme", "network", "unknown"]);
-        assert_wire(PcStatus::ALL, &["offline", "free", "busy", "locked", "maintenance", "booked"]);
+        assert_wire(
+            PcStatus::ALL,
+            &["offline", "free", "busy", "locked", "maintenance", "booked"],
+        );
         assert_wire(ConnectivityState::ALL, &["online", "offline"]);
         assert_wire(AllowlistMode::ALL, &["allow", "deny"]);
     }
@@ -683,10 +726,16 @@ mod tests {
     fn policy_json_matches_architecture_snapshot() {
         let p = sample_policy();
         assert_eq!(serde_json::to_string(&p).unwrap(), SAMPLE_POLICY_JSON);
-        assert_eq!(serde_json::from_str::<Policy>(SAMPLE_POLICY_JSON).unwrap(), p);
+        assert_eq!(
+            serde_json::from_str::<Policy>(SAMPLE_POLICY_JSON).unwrap(),
+            p
+        );
         // ARCHITECTURE.md §12.3 writes explicit nulls and a second-precision timestamp.
         let doc = SAMPLE_POLICY_JSON
-            .replace(r#""power":{}"#, r#""power":{"idleShutdownMin":null,"scheduledShutdown":null}"#)
+            .replace(
+                r#""power":{}"#,
+                r#""power":{"idleShutdownMin":null,"scheduledShutdown":null}"#,
+            )
             .replace("2026-09-01T08:00:00.000Z", "2026-09-01T08:00:00Z");
         assert_eq!(serde_json::from_str::<Policy>(&doc).unwrap(), p);
 
@@ -695,21 +744,55 @@ mod tests {
         changed.kiosk.idle_timeout_sec = 600;
         assert_eq!(p.diff_sections(&changed), vec!["power", "kiosk"]);
         assert!(p.diff_sections(&p).is_empty());
-        assert_eq!(serde_json::to_string(&changed.power).unwrap(), r#"{"scheduledShutdown":"04:00"}"#);
+        assert_eq!(
+            serde_json::to_string(&changed.power).unwrap(),
+            r#"{"scheduledShutdown":"04:00"}"#
+        );
         assert_eq!(Policy::SECTION_KEYS.len(), 9);
     }
 
     #[test]
     fn hardware_and_metrics_json() {
         let hw = HardwareInfo {
-            cpu: CpuInfo { model: "i7".into(), cores: 8, threads: 16 },
-            gpu: vec![GpuInfo { model: "RTX 4070".into(), vram_mb: 12288, driver: "560.94".into() }],
+            cpu: CpuInfo {
+                model: "i7".into(),
+                cores: 8,
+                threads: 16,
+            },
+            gpu: vec![GpuInfo {
+                model: "RTX 4070".into(),
+                vram_mb: 12288,
+                driver: "560.94".into(),
+            }],
             ram_mb: 32768,
-            disks: vec![DiskInfo { mount: "C:".into(), total_gb: 931.5, free_gb: 400.0, r#type: DiskType::Nvme }],
-            monitors: vec![MonitorInfo { index: 0, width: 2560, height: 1440, hz: 165, primary: true }],
-            network: NetworkInfo { mac: "AA:BB:CC:DD:EE:FF".into(), ip: "10.0.1.12".into(), adapter: "Ethernet".into() },
-            os: OsInfo { version: "Windows 11 Pro".into(), build: "26200.1234".into() },
-            peripherals: vec![PeripheralInfo { kind: peripheral_kinds::MOUSE.into(), name: "G Pro".into(), vendor_id: "046d".into(), product_id: "c539".into() }],
+            disks: vec![DiskInfo {
+                mount: "C:".into(),
+                total_gb: 931.5,
+                free_gb: 400.0,
+                r#type: DiskType::Nvme,
+            }],
+            monitors: vec![MonitorInfo {
+                index: 0,
+                width: 2560,
+                height: 1440,
+                hz: 165,
+                primary: true,
+            }],
+            network: NetworkInfo {
+                mac: "AA:BB:CC:DD:EE:FF".into(),
+                ip: "10.0.1.12".into(),
+                adapter: "Ethernet".into(),
+            },
+            os: OsInfo {
+                version: "Windows 11 Pro".into(),
+                build: "26200.1234".into(),
+            },
+            peripherals: vec![PeripheralInfo {
+                kind: peripheral_kinds::MOUSE.into(),
+                name: "G Pro".into(),
+                vendor_id: "046d".into(),
+                product_id: "c539".into(),
+            }],
         };
         let json = serde_json::to_string(&hw).unwrap();
         assert_eq!(
@@ -722,9 +805,15 @@ mod tests {
             cpu_pct: 12.5,
             gpu_pct: 0.0,
             ram_used_mb: 8000,
-            temps: Temperatures { cpu: 45.0, gpu: 0.0 },
+            temps: Temperatures {
+                cpu: 45.0,
+                gpu: 0.0,
+            },
             fps: None,
-            net_mbps: NetworkThroughput { up: 1.2, down: 30.0 },
+            net_mbps: NetworkThroughput {
+                up: 1.2,
+                down: 30.0,
+            },
             uptime_sec: 8123,
             at: Utc.with_ymd_and_hms(2026, 9, 21, 10, 0, 5).unwrap(),
         };
@@ -734,7 +823,9 @@ mod tests {
             r#"{"cpuPct":12.5,"gpuPct":0,"ramUsedMb":8000,"temps":{"cpu":45,"gpu":0},"netMbps":{"up":1.2,"down":30},"uptimeSec":8123,"at":"2026-09-21T10:00:05.000Z"}"#
         );
         assert_eq!(serde_json::from_str::<PcMetrics>(&json).unwrap(), m);
-        let with_fps: PcMetrics = serde_json::from_str(&json.replace(r#""ramUsedMb""#, r#""fps":144,"ramUsedMb""#)).unwrap();
+        let with_fps: PcMetrics =
+            serde_json::from_str(&json.replace(r#""ramUsedMb""#, r#""fps":144,"ramUsedMb""#))
+                .unwrap();
         assert_eq!(with_fps.fps, Some(144.0));
     }
 
@@ -772,12 +863,25 @@ mod tests {
             updates: Some(UpdatesConfigOverride {
                 channel: Some(UpdateChannel::Beta),
                 check_interval_sec: None,
-                apply_window: Some(TimeWindow { from: NaiveTime::from_hms_opt(4, 0, 0).unwrap(), to: NaiveTime::from_hms_opt(7, 0, 0).unwrap() }),
+                apply_window: Some(TimeWindow {
+                    from: NaiveTime::from_hms_opt(4, 0, 0).unwrap(),
+                    to: NaiveTime::from_hms_opt(7, 0, 0).unwrap(),
+                }),
             }),
             telemetry: None,
             remote_admin: None,
-            shell: Some(ShellConfigOverride { locale: Some(Locale::Uz), theme: None, features: None, ads: None, idle: None }),
-            themes: Some(vec![ThemeRef { name: "neon".into(), url: "https://t/neon.json".into(), sha256: "ab".into() }]),
+            shell: Some(ShellConfigOverride {
+                locale: Some(Locale::Uz),
+                theme: None,
+                features: None,
+                ads: None,
+                idle: None,
+            }),
+            themes: Some(vec![ThemeRef {
+                name: "neon".into(),
+                url: "https://t/neon.json".into(),
+                sha256: "ab".into(),
+            }]),
             ws_url: None,
         };
         let json = serde_json::to_string(&cfg).unwrap();
@@ -785,7 +889,10 @@ mod tests {
             json,
             r#"{"version":3,"pcName":"PC-12","zone":"Standard","number":12,"offline":{"maxOfflineMinutes":120},"updates":{"channel":"beta","applyWindow":{"from":"04:00","to":"07:00"}},"shell":{"locale":"uz"},"themes":[{"name":"neon","url":"https://t/neon.json","sha256":"ab"}]}"#
         );
-        assert_eq!(serde_json::from_str::<AgentServerConfig>(&json).unwrap(), cfg);
+        assert_eq!(
+            serde_json::from_str::<AgentServerConfig>(&json).unwrap(),
+            cfg
+        );
     }
 
     #[test]

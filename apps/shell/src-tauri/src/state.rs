@@ -50,7 +50,12 @@ pub type CmdResult<T> = Result<T, ShellError>;
 
 impl ShellError {
     pub fn new(code: ErrorCode, message: impl Into<String>, source: ErrorSource) -> Self {
-        Self { code, message: message.into(), details: None, source }
+        Self {
+            code,
+            message: message.into(),
+            details: None,
+            source,
+        }
     }
 
     pub fn with_details(mut self, details: Value) -> Self {
@@ -60,12 +65,20 @@ impl ShellError {
 
     /// `agentOffline` from the pipe (not connected, hello pending too long, connection dropped).
     pub fn agent_offline() -> Self {
-        Self::new(ErrorCode::AgentOffline, "Agent is not connected", ErrorSource::Pipe)
+        Self::new(
+            ErrorCode::AgentOffline,
+            "Agent is not connected",
+            ErrorSource::Pipe,
+        )
     }
 
     /// `timeout` from the pipe (no response within the request timeout).
     pub fn timeout() -> Self {
-        Self::new(ErrorCode::Timeout, "Agent did not respond in time", ErrorSource::Pipe)
+        Self::new(
+            ErrorCode::Timeout,
+            "Agent did not respond in time",
+            ErrorSource::Pipe,
+        )
     }
 
     /// `protocolError` from the pipe (bad frame / unexpected payload shape).
@@ -80,8 +93,12 @@ impl ShellError {
 
     /// `validation` raised in Rust before the pipe is touched; `details: { field, reason }`.
     pub fn validation(field: &str, reason: &str) -> Self {
-        Self::new(ErrorCode::Validation, format!("{field}: {reason}"), ErrorSource::Tauri)
-            .with_details(json!({ "field": field, "reason": reason }))
+        Self::new(
+            ErrorCode::Validation,
+            format!("{field}: {reason}"),
+            ErrorSource::Tauri,
+        )
+        .with_details(json!({ "field": field, "reason": reason }))
     }
 
     pub fn forbidden(message: impl Into<String>) -> Self {
@@ -93,13 +110,21 @@ impl ShellError {
     }
 
     pub fn not_found(what: &str) -> Self {
-        Self::new(ErrorCode::NotFound, format!("{what} not found"), ErrorSource::Tauri)
+        Self::new(
+            ErrorCode::NotFound,
+            format!("{what} not found"),
+            ErrorSource::Tauri,
+        )
     }
 
     /// `policyDenied` raised in Rust; `details: { rule }`.
     pub fn policy_denied(rule: &str) -> Self {
-        Self::new(ErrorCode::PolicyDenied, format!("Blocked by policy: {rule}"), ErrorSource::Tauri)
-            .with_details(json!({ "rule": rule }))
+        Self::new(
+            ErrorCode::PolicyDenied,
+            format!("Blocked by policy: {rule}"),
+            ErrorSource::Tauri,
+        )
+        .with_details(json!({ "rule": rule }))
     }
 
     /// `internal` for a Windows-only feature on another platform.
@@ -127,7 +152,12 @@ impl std::error::Error for ShellError {}
 
 impl From<IpcError> for ShellError {
     fn from(e: IpcError) -> Self {
-        Self { code: e.code, message: e.message, details: e.details, source: ErrorSource::Ipc }
+        Self {
+            code: e.code,
+            message: e.message,
+            details: e.details,
+            source: ErrorSource::Ipc,
+        }
     }
 }
 
@@ -137,11 +167,19 @@ impl From<WinUtilError> for ShellError {
             WinUtilError::Ipc(err) => Self::from(*err),
             WinUtilError::Closed => Self::agent_offline(),
             WinUtilError::Timeout => Self::timeout(),
-            WinUtilError::Io(io) => Self::new(ErrorCode::AgentOffline, format!("pipe I/O error: {io}"), ErrorSource::Pipe),
+            WinUtilError::Io(io) => Self::new(
+                ErrorCode::AgentOffline,
+                format!("pipe I/O error: {io}"),
+                ErrorSource::Pipe,
+            ),
             WinUtilError::Frame(p) => Self::protocol(p.to_string()),
             WinUtilError::Unsupported => Self::unsupported(),
             WinUtilError::Invalid(reason) => Self::validation("argument", &reason),
-            WinUtilError::Busy(what) => Self::new(ErrorCode::Conflict, format!("{what} is already installed"), ErrorSource::Tauri),
+            WinUtilError::Busy(what) => Self::new(
+                ErrorCode::Conflict,
+                format!("{what} is already installed"),
+                ErrorSource::Tauri,
+            ),
             win32 @ WinUtilError::Win32 { .. } => Self::internal(win32.to_string()),
         }
     }
@@ -319,12 +357,18 @@ impl AppState {
 
     /// `true` while an unexpired admin unlock is cached.
     pub fn has_admin_unlock(&self) -> bool {
-        self.admin_unlock.lock().as_ref().is_some_and(|a| a.expires_at > Utc::now())
+        self.admin_unlock
+            .lock()
+            .as_ref()
+            .is_some_and(|a| a.expires_at > Utc::now())
     }
 
     /// `true` when `token` equals the cached, unexpired admin token.
     pub fn admin_token_valid(&self, token: &str) -> bool {
-        self.admin_unlock.lock().as_ref().is_some_and(|a| a.expires_at > Utc::now() && a.token == token)
+        self.admin_unlock
+            .lock()
+            .as_ref()
+            .is_some_and(|a| a.expires_at > Utc::now() && a.token == token)
     }
 }
 
@@ -336,17 +380,36 @@ mod tests {
     fn shell_error_wire_shape_and_mapping() {
         let e = ShellError::validation("password", "required");
         let json = serde_json::to_value(e).unwrap();
-        assert_eq!(json, json!({ "code": "validation", "message": "password: required", "details": { "field": "password", "reason": "required" }, "source": "tauri" }));
+        assert_eq!(
+            json,
+            json!({ "code": "validation", "message": "password: required", "details": { "field": "password", "reason": "required" }, "source": "tauri" })
+        );
         let json = serde_json::to_value(ShellError::agent_offline()).unwrap();
         assert_eq!(json["code"], "agentOffline");
-        assert_eq!(json["details"], Value::Null, "details key is always present");
+        assert_eq!(
+            json["details"],
+            Value::Null,
+            "details key is always present"
+        );
         assert_eq!(json["source"], "pipe");
 
-        assert_eq!(ShellError::from(WinUtilError::Timeout).code, ErrorCode::Timeout);
-        assert_eq!(ShellError::from(WinUtilError::Closed).code, ErrorCode::AgentOffline);
+        assert_eq!(
+            ShellError::from(WinUtilError::Timeout).code,
+            ErrorCode::Timeout
+        );
+        assert_eq!(
+            ShellError::from(WinUtilError::Closed).code,
+            ErrorCode::AgentOffline
+        );
         let ipc: ShellError = WinUtilError::from(IpcError::session_not_active()).into();
-        assert_eq!((ipc.code, ipc.source), (ErrorCode::SessionNotActive, ErrorSource::Ipc));
-        assert_eq!(ShellError::from(WinUtilError::Unsupported).code, ErrorCode::Internal);
+        assert_eq!(
+            (ipc.code, ipc.source),
+            (ErrorCode::SessionNotActive, ErrorSource::Ipc)
+        );
+        assert_eq!(
+            ShellError::from(WinUtilError::Unsupported).code,
+            ErrorCode::Internal
+        );
         assert_eq!(ShellError::from(anyhow::anyhow!("boom")).message, "boom");
     }
 

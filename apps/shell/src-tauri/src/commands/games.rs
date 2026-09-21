@@ -9,8 +9,8 @@
 use std::time::Duration;
 
 use clubshell_protocol::commands::{
-    names, GamesGetRequest, GamesInstallStatusRequest, GamesKillRequest, GamesKillResponse, GamesLaunchRequest, GamesListRequest,
-    GamesListResponse, GamesRunningResponse,
+    names, GamesGetRequest, GamesInstallStatusRequest, GamesKillRequest, GamesKillResponse,
+    GamesLaunchRequest, GamesListRequest, GamesListResponse, GamesRunningResponse,
 };
 use clubshell_protocol::games::{Game, GameInstallStatus, LaunchResult, RunningGame};
 use tauri::State;
@@ -27,7 +27,10 @@ const EXTRA_ARGS_MAX: usize = 512;
 
 /// `games_list` → `games.list`.
 #[tauri::command]
-pub async fn games_list(state: State<'_, AppState>, q: Option<GamesListRequest>) -> CmdResult<GamesListResponse> {
+pub async fn games_list(
+    state: State<'_, AppState>,
+    q: Option<GamesListRequest>,
+) -> CmdResult<GamesListResponse> {
     let mut q = q.unwrap_or_default();
     validate::paging(q.page, q.page_size, GamesListRequest::MAX_PAGE_SIZE)?;
     q.search = validate::optional_text("search", q.search, SEARCH_MAX)?;
@@ -38,12 +41,18 @@ pub async fn games_list(state: State<'_, AppState>, q: Option<GamesListRequest>)
 /// `games_get` → `games.get`.
 #[tauri::command]
 pub async fn games_get(state: State<'_, AppState>, game_id: Uuid) -> CmdResult<Game> {
-    state.agent.request(names::games::GET, &GamesGetRequest { game_id }).await
+    state
+        .agent
+        .request(names::games::GET, &GamesGetRequest { game_id })
+        .await
 }
 
 /// `games_launch` → `games.launch` (120 s, serialized, guard suspended; see module docs).
 #[tauri::command]
-pub async fn games_launch(state: State<'_, AppState>, req: GamesLaunchRequest) -> CmdResult<LaunchResult> {
+pub async fn games_launch(
+    state: State<'_, AppState>,
+    req: GamesLaunchRequest,
+) -> CmdResult<LaunchResult> {
     let req = validate_launch(req)?;
     let _launching = state.launch_lock.lock().await;
 
@@ -55,7 +64,10 @@ pub async fn games_launch(state: State<'_, AppState>, req: GamesLaunchRequest) -
     }
     tracing::info!(game_id = %req.game_id, account_pool = ?req.use_account_pool, "launching game");
 
-    let result = state.agent.request_with_timeout::<_, LaunchResult>(names::games::LAUNCH, &req, LAUNCH_TIMEOUT).await;
+    let result = state
+        .agent
+        .request_with_timeout::<_, LaunchResult>(names::games::LAUNCH, &req, LAUNCH_TIMEOUT)
+        .await;
     match &result {
         Ok(r) if r.ok => tracing::info!(game_id = %req.game_id, pid = ?r.pid, "game launched"),
         Ok(r) => {
@@ -72,11 +84,26 @@ pub async fn games_launch(state: State<'_, AppState>, req: GamesLaunchRequest) -
 
 /// `games_kill` → `games.kill`; no target = kill every tracked game.
 #[tauri::command]
-pub async fn games_kill(state: State<'_, AppState>, game_id: Option<Uuid>, pid: Option<i32>, force: Option<bool>) -> CmdResult<GamesKillResponse> {
+pub async fn games_kill(
+    state: State<'_, AppState>,
+    game_id: Option<Uuid>,
+    pid: Option<i32>,
+    force: Option<bool>,
+) -> CmdResult<GamesKillResponse> {
     if pid.is_some_and(|p| p <= 0) {
         return Err(ShellError::validation("pid", "must be positive"));
     }
-    let resp: GamesKillResponse = state.agent.request(names::games::KILL, &GamesKillRequest { game_id, pid, force }).await?;
+    let resp: GamesKillResponse = state
+        .agent
+        .request(
+            names::games::KILL,
+            &GamesKillRequest {
+                game_id,
+                pid,
+                force,
+            },
+        )
+        .await?;
     tracing::info!(killed = resp.killed, pids = ?resp.pids, "games killed");
     Ok(resp)
 }
@@ -90,8 +117,17 @@ pub async fn games_running(state: State<'_, AppState>) -> CmdResult<Vec<RunningG
 
 /// `games_install_status` → `games.installStatus`.
 #[tauri::command]
-pub async fn games_install_status(state: State<'_, AppState>, game_id: Uuid) -> CmdResult<GameInstallStatus> {
-    state.agent.request(names::games::INSTALL_STATUS, &GamesInstallStatusRequest { game_id }).await
+pub async fn games_install_status(
+    state: State<'_, AppState>,
+    game_id: Uuid,
+) -> CmdResult<GameInstallStatus> {
+    state
+        .agent
+        .request(
+            names::games::INSTALL_STATUS,
+            &GamesInstallStatusRequest { game_id },
+        )
+        .await
 }
 
 /// Re-arms the guard after a failed launch unless a game was already running before it, and unless
@@ -122,10 +158,27 @@ mod tests {
 
     #[test]
     fn launch_request_is_checked() {
-        let req = |resolution| GamesLaunchRequest { game_id: Uuid::from_u128(1), use_account_pool: None, extra_args: Some("  ".into()), resolution };
-        let ok = validate_launch(req(Some(Resolution { width: 1920, height: 1080 }))).unwrap();
+        let req = |resolution| GamesLaunchRequest {
+            game_id: Uuid::from_u128(1),
+            use_account_pool: None,
+            extra_args: Some("  ".into()),
+            resolution,
+        };
+        let ok = validate_launch(req(Some(Resolution {
+            width: 1920,
+            height: 1080,
+        })))
+        .unwrap();
         assert_eq!(ok.extra_args, None, "blank extra args are dropped");
-        assert!(validate_launch(req(Some(Resolution { width: 10, height: 1080 }))).is_err());
-        assert!(validate_launch(GamesLaunchRequest { game_id: Uuid::nil(), ..req(None) }).is_err());
+        assert!(validate_launch(req(Some(Resolution {
+            width: 10,
+            height: 1080
+        })))
+        .is_err());
+        assert!(validate_launch(GamesLaunchRequest {
+            game_id: Uuid::nil(),
+            ..req(None)
+        })
+        .is_err());
     }
 }

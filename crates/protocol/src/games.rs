@@ -218,7 +218,11 @@ pub struct GameInstallStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     /// Last successful verification.
-    #[serde(default, with = "crate::wire::ts_opt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "crate::wire::ts_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub verified_at: Option<DateTime<Utc>>,
     /// Launcher client present and logged in (where detectable).
     pub launcher_ready: bool,
@@ -384,7 +388,11 @@ pub struct Game {
     /// Server rank score.
     pub popularity: i32,
     /// Last launch by the current user.
-    #[serde(default, with = "crate::wire::ts_opt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "crate::wire::ts_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub last_played_at: Option<DateTime<Utc>>,
     /// Needs an account-pool lease.
     pub requires_account: bool,
@@ -500,7 +508,10 @@ pub struct SaveUploadTarget {
 impl GameState {
     /// `true` for terminal states (`exited`, `failed`, `killed`).
     pub const fn is_terminal(self) -> bool {
-        matches!(self, GameState::Exited | GameState::Failed | GameState::Killed)
+        matches!(
+            self,
+            GameState::Exited | GameState::Failed | GameState::Killed
+        )
     }
 }
 // ---- END MANUAL ----
@@ -509,12 +520,28 @@ impl GameState {
 impl LaunchResult {
     /// Successful result.
     pub fn success(pid: i32, started_at: DateTime<Utc>, account_lease_id: Option<Uuid>) -> Self {
-        Self { ok: true, pid: Some(pid), started_at, account_lease_id, error: None }
+        Self {
+            ok: true,
+            pid: Some(pid),
+            started_at,
+            account_lease_id,
+            error: None,
+        }
     }
 
     /// Failed result.
-    pub fn failure(error: IpcError, started_at: DateTime<Utc>, account_lease_id: Option<Uuid>) -> Self {
-        Self { ok: false, pid: None, started_at, account_lease_id, error: Some(error) }
+    pub fn failure(
+        error: IpcError,
+        started_at: DateTime<Utc>,
+        account_lease_id: Option<Uuid>,
+    ) -> Self {
+        Self {
+            ok: false,
+            pid: None,
+            started_at,
+            account_lease_id,
+            error: Some(error),
+        }
     }
 }
 // ---- END MANUAL ----
@@ -528,13 +555,28 @@ mod tests {
 
     #[test]
     fn enum_wire_values() {
-        assert_wire(LauncherType::ALL, &["steam", "epic", "battleNet", "riot", "ea", "ubisoft", "exe"]);
-        assert_wire(AntiCheatKind::ALL, &["none", "eac", "battlEye", "vanguard", "faceit", "ricochet"]);
+        assert_wire(
+            LauncherType::ALL,
+            &["steam", "epic", "battleNet", "riot", "ea", "ubisoft", "exe"],
+        );
+        assert_wire(
+            AntiCheatKind::ALL,
+            &["none", "eac", "battlEye", "vanguard", "faceit", "ricochet"],
+        );
         assert_wire(AntiCheatSeverity::ALL, &["info", "warning", "critical"]);
-        assert_wire(AntiCheatAction::ALL, &["none", "blockedLaunch", "killedGame", "lockedSession"]);
+        assert_wire(
+            AntiCheatAction::ALL,
+            &["none", "blockedLaunch", "killedGame", "lockedSession"],
+        );
         assert_wire(GamesSort::ALL, &["popularity", "title", "lastPlayed"]);
-        assert_wire(GameState::ALL, &["launching", "running", "exited", "failed", "killed"]);
-        assert_wire(AccountLeaseReleaseReason::ALL, &["exit", "sessionEnd", "launchFailed", "manual"]);
+        assert_wire(
+            GameState::ALL,
+            &["launching", "running", "exited", "failed", "killed"],
+        );
+        assert_wire(
+            AccountLeaseReleaseReason::ALL,
+            &["exit", "sessionEnd", "launchFailed", "manual"],
+        );
         assert_wire(LaunchReportPhase::ALL, &["launch", "exit"]);
         assert!(GameState::Killed.is_terminal());
         assert!(!GameState::Launching.is_terminal());
@@ -562,7 +604,11 @@ mod tests {
             last_played_at: None,
             requires_account: true,
             anti_cheat: AntiCheatKind::None,
-            min_spec: Some(GameMinSpec { cpu: "i5".into(), gpu: "GTX 1060".into(), ram_mb: 8192 }),
+            min_spec: Some(GameMinSpec {
+                cpu: "i5".into(),
+                gpu: "GTX 1060".into(),
+                ram_mb: 8192,
+            }),
             size_gb: 35.5,
             version: None,
         };
@@ -573,7 +619,10 @@ mod tests {
         );
         assert_eq!(serde_json::from_str::<Game>(&json).unwrap(), g);
         // Explicit nulls from the server are accepted.
-        let with_nulls = json.replace(r#""launcherAppId":"730","#, r#""launcherAppId":null,"exePath":null,"lastPlayedAt":null,"#);
+        let with_nulls = json.replace(
+            r#""launcherAppId":"730","#,
+            r#""launcherAppId":null,"exePath":null,"lastPlayedAt":null,"#,
+        );
         let back: Game = serde_json::from_str(&with_nulls).unwrap();
         assert_eq!(back.launcher_app_id, None);
     }
@@ -582,13 +631,19 @@ mod tests {
     fn launch_types_json() {
         let at = Utc.with_ymd_and_hms(2026, 9, 21, 10, 21, 0).unwrap();
         let ok = LaunchResult::success(7788, at, None);
-        assert_eq!(serde_json::to_string(&ok).unwrap(), r#"{"ok":true,"pid":7788,"startedAt":"2026-09-21T10:21:00.000Z"}"#);
+        assert_eq!(
+            serde_json::to_string(&ok).unwrap(),
+            r#"{"ok":true,"pid":7788,"startedAt":"2026-09-21T10:21:00.000Z"}"#
+        );
         let failed = LaunchResult::failure(IpcError::account_pool_exhausted(), at, None);
         assert_eq!(
             serde_json::to_string(&failed).unwrap(),
             r#"{"ok":false,"startedAt":"2026-09-21T10:21:00.000Z","error":{"code":"accountPoolExhausted","message":"No free pooled account","details":null}}"#
         );
-        assert_eq!(serde_json::from_str::<LaunchResult>(&serde_json::to_string(&failed).unwrap()).unwrap(), failed);
+        assert_eq!(
+            serde_json::from_str::<LaunchResult>(&serde_json::to_string(&failed).unwrap()).unwrap(),
+            failed
+        );
 
         let req = LaunchRequest {
             game_id: Uuid::nil(),
@@ -597,14 +652,24 @@ mod tests {
             use_account_pool: true,
             account_lease_id: None,
             extra_args: None,
-            resolution: Some(Resolution { width: 1920, height: 1080 }),
+            resolution: Some(Resolution {
+                width: 1920,
+                height: 1080,
+            }),
             launch_timeout_sec: 90,
         };
         assert_eq!(
             serde_json::to_string(&req).unwrap(),
             r#"{"gameId":"00000000-0000-0000-0000-000000000000","sessionId":"00000000-0000-0000-0000-000000000000","userId":"00000000-0000-0000-0000-000000000000","useAccountPool":true,"resolution":{"width":1920,"height":1080},"launchTimeoutSec":90}"#
         );
-        let running = RunningGame { game_id: Uuid::nil(), title: "CS2".into(), pid: 1, started_at: at, account_lease_id: None, state: GameState::Running };
+        let running = RunningGame {
+            game_id: Uuid::nil(),
+            title: "CS2".into(),
+            pid: 1,
+            started_at: at,
+            account_lease_id: None,
+            state: GameState::Running,
+        };
         assert_eq!(
             serde_json::to_string(&running).unwrap(),
             r#"{"gameId":"00000000-0000-0000-0000-000000000000","title":"CS2","pid":1,"startedAt":"2026-09-21T10:21:00.000Z","state":"running"}"#
@@ -615,7 +680,11 @@ mod tests {
             result: ok,
             duration_ms: 1500,
             launcher: LauncherType::Steam,
-            anti_cheat: AntiCheatCheckResult { kind: AntiCheatKind::Vanguard, ok: false, reason: Some(anti_cheat_checks::SECURE_BOOT_OFF.into()) },
+            anti_cheat: AntiCheatCheckResult {
+                kind: AntiCheatKind::Vanguard,
+                ok: false,
+                reason: Some(anti_cheat_checks::SECURE_BOOT_OFF.into()),
+            },
             phase: LaunchReportPhase::Exit,
             exit_code: Some(0),
             played_sec: Some(3600),
@@ -643,8 +712,18 @@ mod tests {
             r#"{"leaseId":"00000000-0000-0000-0000-000000000000","launcher":"steam","username":"pool01","secret":"enc","extra":{"region":"eu"},"expiresAt":"2026-09-21T14:00:00.000Z"}"#
         );
         assert_eq!(serde_json::from_str::<AccountLease>(&json).unwrap(), lease);
-        let release = AccountLeaseRelease { reason: AccountLeaseReleaseReason::SessionEnd, cloud_save: Some(CloudSaveUpload { upload_url: None, sha256: "ab".into(), size_bytes: 10 }) };
-        assert_eq!(serde_json::to_string(&release).unwrap(), r#"{"reason":"sessionEnd","cloudSave":{"sha256":"ab","sizeBytes":10}}"#);
+        let release = AccountLeaseRelease {
+            reason: AccountLeaseReleaseReason::SessionEnd,
+            cloud_save: Some(CloudSaveUpload {
+                upload_url: None,
+                sha256: "ab".into(),
+                size_bytes: 10,
+            }),
+        };
+        assert_eq!(
+            serde_json::to_string(&release).unwrap(),
+            r#"{"reason":"sessionEnd","cloudSave":{"sha256":"ab","sizeBytes":10}}"#
+        );
         let report = AntiCheatReport {
             pc_id: Uuid::nil(),
             session_id: None,

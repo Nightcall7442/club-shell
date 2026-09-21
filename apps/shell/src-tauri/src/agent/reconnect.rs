@@ -28,7 +28,11 @@ pub struct Backoff {
 impl Backoff {
     pub fn new(min: Duration, max: Duration) -> Self {
         let min = min.max(Duration::from_millis(1));
-        Self { min, max: max.max(min), current: min }
+        Self {
+            min,
+            max: max.max(min),
+            current: min,
+        }
     }
 
     pub fn reset(&mut self) {
@@ -76,8 +80,18 @@ pub struct Supervisor {
 }
 
 impl Supervisor {
-    pub fn new(transport: Arc<PipeTransport>, config: Arc<ShellConfig>, shutdown: watch::Receiver<bool>) -> Self {
-        Self { transport, config, shutdown, on_state: None, initial: None }
+    pub fn new(
+        transport: Arc<PipeTransport>,
+        config: Arc<ShellConfig>,
+        shutdown: watch::Receiver<bool>,
+    ) -> Self {
+        Self {
+            transport,
+            config,
+            shutdown,
+            on_state: None,
+            initial: None,
+        }
     }
 
     /// Uses an already open connection for the first cycle instead of connecting.
@@ -108,7 +122,10 @@ impl Supervisor {
     /// The supervision loop; returns only after shutdown.
     pub async fn run(mut self) {
         let mut shutdown = self.shutdown.clone();
-        let mut backoff = Backoff::new(self.config.ipc.reconnect_min(), self.config.ipc.reconnect_max());
+        let mut backoff = Backoff::new(
+            self.config.ipc.reconnect_min(),
+            self.config.ipc.reconnect_max(),
+        );
         let mut attempts = 0u32;
         tracing::info!(pipe = %self.transport.pipe_name(), "agent supervisor started");
 
@@ -180,7 +197,9 @@ impl Supervisor {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use clubshell_protocol::commands::{names, AuthHelloRequest, AuthHelloResponse, SysPingRequest, SysPongResponse};
+    use clubshell_protocol::commands::{
+        names, AuthHelloRequest, AuthHelloResponse, SysPingRequest, SysPongResponse,
+    };
     use clubshell_protocol::ipc::{encode_frame, FrameReader, IpcEnvelope, IpcKind};
     use clubshell_protocol::pc::ConnectivityState;
     use clubshell_protocol::PROTOCOL_VERSION;
@@ -198,7 +217,10 @@ mod tests {
             b.next_delay();
         }
         let capped = b.next_delay();
-        assert!(capped <= Duration::from_millis(6250) && capped >= Duration::from_millis(3750), "{capped:?}");
+        assert!(
+            capped <= Duration::from_millis(6250) && capped >= Duration::from_millis(3750),
+            "{capped:?}"
+        );
         b.reset();
         assert!(b.next_delay() <= Duration::from_millis(625));
         // Degenerate configuration is clamped instead of panicking.
@@ -241,12 +263,20 @@ mod tests {
                     IpcEnvelope::reply_to_with(&req, &resp).unwrap()
                 } else if req.name == names::sys::PING {
                     let ping: SysPingRequest = req.require_payload().unwrap();
-                    let pong = SysPongResponse { seq: ping.seq, sent_at: ping.sent_at, received_at: Utc::now(), connectivity: ConnectivityState::Online };
+                    let pong = SysPongResponse {
+                        seq: ping.seq,
+                        sent_at: ping.sent_at,
+                        received_at: Utc::now(),
+                        connectivity: ConnectivityState::Online,
+                    };
                     IpcEnvelope::reply_to_with(&req, &pong).unwrap()
                 } else {
                     IpcEnvelope::reply_to(&req, req.payload.clone())
                 };
-                stream.write_all(&encode_frame(&reply).unwrap()).await.unwrap();
+                stream
+                    .write_all(&encode_frame(&reply).unwrap())
+                    .await
+                    .unwrap();
             }
         }
     }
@@ -267,36 +297,80 @@ mod tests {
         let transport = Arc::new(PipeTransport::new(&cfg));
         let (a, b) = tokio::io::duplex(64 * 1024);
         let agent = tokio::spawn(fake_agent(b, token));
-        let client = PipeClient::from_stream(a, PipeOptions { heartbeat: false, ..PipeOptions::default() });
+        let client = PipeClient::from_stream(
+            a,
+            PipeOptions {
+                heartbeat: false,
+                ..PipeOptions::default()
+            },
+        );
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let seen: Arc<parking_lot::Mutex<Vec<ConnectionState>>> = Arc::default();
         let cb_seen = Arc::clone(&seen);
         let supervisor = Supervisor::new(Arc::clone(&transport), Arc::clone(&cfg), shutdown_rx)
             .with_initial(client)
-            .on_state(Arc::new(move |s: &ConnectivityStatus| cb_seen.lock().push(s.agent)));
+            .on_state(Arc::new(move |s: &ConnectivityStatus| {
+                cb_seen.lock().push(s.agent)
+            }));
         let mut state = transport.state();
         let task = tokio::spawn(supervisor.run());
 
-        tokio::time::timeout(Duration::from_secs(5), state.wait_for(ConnectivityStatus::is_connected)).await.unwrap().unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            state.wait_for(ConnectivityStatus::is_connected),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         let hello = transport.pc_info().unwrap();
         assert_eq!((hello.pc_name.as_str(), hello.policy_version), ("PC-07", 3));
         assert_eq!(transport.current_status().attempts, 0);
 
         // Requests flow through the supervised connection.
-        let echoed = transport.send(IpcEnvelope::request(names::games::RUNNING, Some(serde_json::json!({ "ok": 1 }))), Duration::from_secs(1)).await.unwrap();
+        let echoed = transport
+            .send(
+                IpcEnvelope::request(names::games::RUNNING, Some(serde_json::json!({ "ok": 1 }))),
+                Duration::from_secs(1),
+            )
+            .await
+            .unwrap();
         assert_eq!(echoed, Some(serde_json::json!({ "ok": 1 })));
 
         // Peer goes away → Disconnected → reconnect attempts (no pipe here, so they keep failing).
         agent.abort();
-        tokio::time::timeout(Duration::from_secs(5), state.wait_for(|s| s.agent != ConnectionState::Connected)).await.unwrap().unwrap();
-        tokio::time::timeout(Duration::from_secs(5), state.wait_for(|s| s.agent == ConnectionState::Connecting && s.attempts >= 2)).await.unwrap().unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            state.wait_for(|s| s.agent != ConnectionState::Connected),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            state.wait_for(|s| s.agent == ConnectionState::Connecting && s.attempts >= 2),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert!(transport.pc_info().is_none());
-        let err = transport.send(IpcEnvelope::request(names::auth::STATUS, None), Duration::from_millis(100)).await.unwrap_err();
+        let err = transport
+            .send(
+                IpcEnvelope::request(names::auth::STATUS, None),
+                Duration::from_millis(100),
+            )
+            .await
+            .unwrap_err();
         assert_eq!(err.code, clubshell_protocol::error::ErrorCode::AgentOffline);
 
         let _ = shutdown_tx.send_replace(true);
-        tokio::time::timeout(Duration::from_secs(5), task).await.unwrap().unwrap();
-        assert_eq!(transport.current_status().agent, ConnectionState::Disconnected);
+        tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            transport.current_status().agent,
+            ConnectionState::Disconnected
+        );
         let seen = seen.lock();
         assert_eq!(seen[0], ConnectionState::Connecting);
         assert_eq!(seen[1], ConnectionState::Connected);

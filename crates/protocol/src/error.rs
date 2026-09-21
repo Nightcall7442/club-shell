@@ -276,7 +276,10 @@ impl ErrorCode {
     pub const fn is_retryable(self) -> bool {
         matches!(
             self,
-            ErrorCode::Timeout | ErrorCode::RateLimited | ErrorCode::ServerUnavailable | ErrorCode::AgentOffline
+            ErrorCode::Timeout
+                | ErrorCode::RateLimited
+                | ErrorCode::ServerUnavailable
+                | ErrorCode::AgentOffline
         )
     }
 
@@ -291,17 +294,33 @@ impl ErrorCode {
 impl IpcError {
     /// Error with the default description of `code` and no details.
     pub fn of(code: ErrorCode) -> Self {
-        Self { code, message: code.describe().to_owned(), details: None }
+        Self {
+            code,
+            message: code.describe().to_owned(),
+            details: None,
+        }
     }
 
     /// Error with a custom message and no details.
     pub fn with_message(code: ErrorCode, message: impl Into<String>) -> Self {
-        Self { code, message: message.into(), details: None }
+        Self {
+            code,
+            message: message.into(),
+            details: None,
+        }
     }
 
     /// Error with typed details.
-    pub fn with_details<T: Serialize>(code: ErrorCode, message: impl Into<String>, details: &T) -> Self {
-        Self { code, message: message.into(), details: Some(to_value_infallible(details)) }
+    pub fn with_details<T: Serialize>(
+        code: ErrorCode,
+        message: impl Into<String>,
+        details: &T,
+    ) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            details: Some(to_value_infallible(details)),
+        }
     }
 
     /// `unauthorized` with the default message.
@@ -311,7 +330,13 @@ impl IpcError {
 
     /// `unauthorized` with `details.reason` (`expired`, `userToken`, `clockSkew`, …).
     pub fn unauthorized_reason(message: impl Into<String>, reason: impl Into<String>) -> Self {
-        Self::with_details(ErrorCode::Unauthorized, message, &ReasonDetails { reason: reason.into() })
+        Self::with_details(
+            ErrorCode::Unauthorized,
+            message,
+            &ReasonDetails {
+                reason: reason.into(),
+            },
+        )
     }
 
     /// `forbidden` with an optional `details.reason`.
@@ -321,14 +346,22 @@ impl IpcError {
             Some(r) => Self::with_details(
                 ErrorCode::Forbidden,
                 ErrorCode::Forbidden.describe(),
-                &ReasonDetails { reason: r.to_owned() },
+                &ReasonDetails {
+                    reason: r.to_owned(),
+                },
             ),
         }
     }
 
     /// `notFound` for an unknown IPC message name (`details.name`).
     pub fn unknown_message(name: &str) -> Self {
-        Self::with_details(ErrorCode::NotFound, format!("Unknown message '{name}'"), &NameDetails { name: name.to_owned() })
+        Self::with_details(
+            ErrorCode::NotFound,
+            format!("Unknown message '{name}'"),
+            &NameDetails {
+                name: name.to_owned(),
+            },
+        )
     }
 
     /// `notFound` for a missing entity.
@@ -341,7 +374,10 @@ impl IpcError {
         Self::with_details(
             ErrorCode::Validation,
             format!("Invalid '{field}': {reason}"),
-            &ValidationDetails { field: field.to_owned(), reason: reason.to_owned() },
+            &ValidationDetails {
+                field: field.to_owned(),
+                reason: reason.to_owned(),
+            },
         )
     }
 
@@ -349,7 +385,13 @@ impl IpcError {
     pub fn conflict(message: impl Into<String>, reason: Option<&str>) -> Self {
         match reason {
             None => Self::with_message(ErrorCode::Conflict, message),
-            Some(r) => Self::with_details(ErrorCode::Conflict, message, &ReasonDetails { reason: r.to_owned() }),
+            Some(r) => Self::with_details(
+                ErrorCode::Conflict,
+                message,
+                &ReasonDetails {
+                    reason: r.to_owned(),
+                },
+            ),
         }
     }
 
@@ -358,7 +400,10 @@ impl IpcError {
         Self::with_details(
             ErrorCode::InsufficientFunds,
             ErrorCode::InsufficientFunds.describe(),
-            &InsufficientFundsDetails { required, available },
+            &InsufficientFundsDetails {
+                required,
+                available,
+            },
         )
     }
 
@@ -374,15 +419,27 @@ impl IpcError {
 
     /// `gameNotInstalled`.
     pub fn game_not_installed(game_id: uuid::Uuid) -> Self {
-        Self::with_message(ErrorCode::GameNotInstalled, format!("Game {game_id} is not installed"))
+        Self::with_message(
+            ErrorCode::GameNotInstalled,
+            format!("Game {game_id} is not installed"),
+        )
     }
 
     /// `gameLaunchFailed` with `details: { stage, exitCode?, stderr? }`.
-    pub fn game_launch_failed(stage: &str, message: impl Into<String>, exit_code: Option<i32>, stderr: Option<String>) -> Self {
+    pub fn game_launch_failed(
+        stage: &str,
+        message: impl Into<String>,
+        exit_code: Option<i32>,
+        stderr: Option<String>,
+    ) -> Self {
         Self::with_details(
             ErrorCode::GameLaunchFailed,
             message,
-            &LaunchFailedDetails { stage: stage.to_owned(), exit_code, stderr },
+            &LaunchFailedDetails {
+                stage: stage.to_owned(),
+                exit_code,
+                stderr,
+            },
         )
     }
 
@@ -396,7 +453,10 @@ impl IpcError {
         Self::with_details(
             ErrorCode::AntiCheatBlocked,
             format!("Anti-cheat check failed: {reason}"),
-            &AntiCheatBlockedDetails { kind, reason: reason.to_owned() },
+            &AntiCheatBlockedDetails {
+                kind,
+                reason: reason.to_owned(),
+            },
         )
     }
 
@@ -405,7 +465,10 @@ impl IpcError {
         Self::with_details(
             ErrorCode::PolicyDenied,
             format!("Denied by policy rule '{rule}'"),
-            &PolicyDeniedDetails { rule: rule.to_owned(), field: field.map(str::to_owned) },
+            &PolicyDeniedDetails {
+                rule: rule.to_owned(),
+                field: field.map(str::to_owned),
+            },
         )
     }
 
@@ -416,22 +479,38 @@ impl IpcError {
 
     /// `serverUnavailable` with an optional custom message.
     pub fn server_unavailable(message: Option<&str>) -> Self {
-        Self::with_message(ErrorCode::ServerUnavailable, message.unwrap_or(ErrorCode::ServerUnavailable.describe()))
+        Self::with_message(
+            ErrorCode::ServerUnavailable,
+            message.unwrap_or(ErrorCode::ServerUnavailable.describe()),
+        )
     }
 
     /// `timeout` with an optional custom message.
     pub fn timeout(message: Option<&str>) -> Self {
-        Self::with_message(ErrorCode::Timeout, message.unwrap_or(ErrorCode::Timeout.describe()))
+        Self::with_message(
+            ErrorCode::Timeout,
+            message.unwrap_or(ErrorCode::Timeout.describe()),
+        )
     }
 
     /// `rateLimited` with `details.retryAfterSec`.
     pub fn rate_limited(retry_after_sec: i32) -> Self {
-        Self::with_details(ErrorCode::RateLimited, ErrorCode::RateLimited.describe(), &RateLimitDetails { retry_after_sec })
+        Self::with_details(
+            ErrorCode::RateLimited,
+            ErrorCode::RateLimited.describe(),
+            &RateLimitDetails { retry_after_sec },
+        )
     }
 
     /// `internal` with `details.traceId`. Never leaks exception text to the caller.
     pub fn internal(trace_id: &str) -> Self {
-        Self::with_details(ErrorCode::Internal, ErrorCode::Internal.describe(), &TraceDetails { trace_id: trace_id.to_owned() })
+        Self::with_details(
+            ErrorCode::Internal,
+            ErrorCode::Internal.describe(),
+            &TraceDetails {
+                trace_id: trace_id.to_owned(),
+            },
+        )
     }
 
     /// `protocolError`.
@@ -444,7 +523,10 @@ impl IpcError {
         Self::with_details(
             ErrorCode::VersionMismatch,
             format!("Protocol version {got} unsupported"),
-            &VersionMismatchDetails { supported: supported.to_vec(), got },
+            &VersionMismatchDetails {
+                supported: supported.to_vec(),
+                got,
+            },
         )
     }
 
@@ -465,7 +547,11 @@ impl IpcError {
     /// Used when mapping server errors onto IPC errors.
     pub fn with_trace_id(details: Option<&Value>, trace_id: &str) -> Value {
         let mut map: Map<String, Value> = match details {
-            Some(Value::Object(obj)) => obj.iter().filter(|(k, _)| k.as_str() != "traceId").map(|(k, v)| (k.clone(), v.clone())).collect(),
+            Some(Value::Object(obj)) => obj
+                .iter()
+                .filter(|(k, _)| k.as_str() != "traceId")
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
             _ => Map::new(),
         };
         map.insert("traceId".to_owned(), Value::String(trace_id.to_owned()));
@@ -495,7 +581,10 @@ impl ServerError {
         IpcError {
             code: self.code,
             message: self.message.clone(),
-            details: Some(IpcError::with_trace_id(self.details.as_ref(), &self.trace_id)),
+            details: Some(IpcError::with_trace_id(
+                self.details.as_ref(),
+                &self.trace_id,
+            )),
         }
     }
 }
@@ -535,7 +624,12 @@ pub(crate) fn assert_wire<T>(all: &[T], expected: &[&str])
 where
     T: Serialize + DeserializeOwned + Copy + PartialEq + fmt::Debug + fmt::Display,
 {
-    assert_eq!(all.len(), expected.len(), "variant count of {}", std::any::type_name::<T>());
+    assert_eq!(
+        all.len(),
+        expected.len(),
+        "variant count of {}",
+        std::any::type_name::<T>()
+    );
     for (v, wire) in all.iter().zip(expected) {
         assert_eq!(serde_json::to_string(v).unwrap(), format!("\"{wire}\""));
         assert_eq!(v.to_string(), *wire);
@@ -555,15 +649,34 @@ mod tests {
         assert_wire(
             ErrorCode::ALL,
             &[
-                "unauthorized", "forbidden", "notFound", "validation", "conflict", "insufficientFunds",
-                "sessionNotActive", "sessionAlreadyActive", "gameNotInstalled", "gameLaunchFailed",
-                "accountPoolExhausted", "antiCheatBlocked", "policyDenied", "agentOffline", "serverUnavailable",
-                "timeout", "rateLimited", "internal", "protocolError", "versionMismatch",
+                "unauthorized",
+                "forbidden",
+                "notFound",
+                "validation",
+                "conflict",
+                "insufficientFunds",
+                "sessionNotActive",
+                "sessionAlreadyActive",
+                "gameNotInstalled",
+                "gameLaunchFailed",
+                "accountPoolExhausted",
+                "antiCheatBlocked",
+                "policyDenied",
+                "agentOffline",
+                "serverUnavailable",
+                "timeout",
+                "rateLimited",
+                "internal",
+                "protocolError",
+                "versionMismatch",
             ],
         );
         assert_eq!(ErrorCode::parse("NotFound"), Some(ErrorCode::NotFound));
         assert_eq!(ErrorCode::InsufficientFunds.to_http_status(), 402);
-        assert_eq!(ErrorCode::from_http_status(503), ErrorCode::ServerUnavailable);
+        assert_eq!(
+            ErrorCode::from_http_status(503),
+            ErrorCode::ServerUnavailable
+        );
         assert_eq!(ErrorCode::from_http_status(418), ErrorCode::Internal);
         assert!(ErrorCode::RateLimited.is_retryable());
         assert!(!ErrorCode::Validation.is_retryable());
@@ -598,15 +711,30 @@ mod tests {
             r#"{"required":{"amount":500000,"currency":"UZS"},"available":{"amount":120000,"currency":"UZS"}}"#
         );
         let e = IpcError::version_mismatch(&[1], 2);
-        assert_eq!(serde_json::to_string(&e.details).unwrap(), r#"{"supported":[1],"got":2}"#);
+        assert_eq!(
+            serde_json::to_string(&e.details).unwrap(),
+            r#"{"supported":[1],"got":2}"#
+        );
         let e = IpcError::game_launch_failed("createProcess", "boom", Some(2), None);
-        assert_eq!(serde_json::to_string(&e.details).unwrap(), r#"{"stage":"createProcess","exitCode":2}"#);
+        assert_eq!(
+            serde_json::to_string(&e.details).unwrap(),
+            r#"{"stage":"createProcess","exitCode":2}"#
+        );
         let e = IpcError::policy_denied("ageRating", None);
-        assert_eq!(serde_json::to_string(&e.details).unwrap(), r#"{"rule":"ageRating"}"#);
+        assert_eq!(
+            serde_json::to_string(&e.details).unwrap(),
+            r#"{"rule":"ageRating"}"#
+        );
         let e = IpcError::anti_cheat_blocked(AntiCheatKind::Vanguard, "secureBootOff");
-        assert_eq!(serde_json::to_string(&e.details).unwrap(), r#"{"kind":"vanguard","reason":"secureBootOff"}"#);
+        assert_eq!(
+            serde_json::to_string(&e.details).unwrap(),
+            r#"{"kind":"vanguard","reason":"secureBootOff"}"#
+        );
         let e = IpcError::rate_limited(3);
-        assert_eq!(serde_json::to_string(&e.details).unwrap(), r#"{"retryAfterSec":3}"#);
+        assert_eq!(
+            serde_json::to_string(&e.details).unwrap(),
+            r#"{"retryAfterSec":3}"#
+        );
     }
 
     #[test]
@@ -618,7 +746,10 @@ mod tests {
         let details = ipc.details.unwrap();
         assert_eq!(details["traceId"], "6f1d");
         assert_eq!(details["required"]["amount"], 1);
-        assert_eq!(IpcError::with_trace_id(None, "t"), serde_json::json!({ "traceId": "t" }));
+        assert_eq!(
+            IpcError::with_trace_id(None, "t"),
+            serde_json::json!({ "traceId": "t" })
+        );
         assert_eq!(serde_json::to_string(&env).unwrap(), json);
     }
 

@@ -199,7 +199,11 @@ pub struct AuthStatusResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<Session>,
     /// User token expiry.
-    #[serde(default, with = "crate::wire::ts_opt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "crate::wire::ts_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub expires_at: Option<DateTime<Utc>>,
 }
 
@@ -247,10 +251,18 @@ pub struct BookingSeatsResponse {
     /// Slot granularity.
     pub slot_minutes: i32,
     /// Club opening time (REST only).
-    #[serde(default, with = "crate::wire::hm_opt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "crate::wire::hm_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub open_from: Option<NaiveTime>,
     /// Club closing time (REST only).
-    #[serde(default, with = "crate::wire::hm_opt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "crate::wire::hm_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub open_to: Option<NaiveTime>,
 }
 
@@ -857,7 +869,11 @@ pub struct SessionTimeLeftResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<Uuid>,
     /// Scheduled end, when any.
-    #[serde(default, with = "crate::wire::ts_opt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "crate::wire::ts_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub ends_at: Option<DateTime<Utc>>,
 }
 
@@ -1258,7 +1274,11 @@ pub struct UpdateApplyResponse {
     /// Whether the apply was scheduled.
     pub scheduled: bool,
     /// When it will run.
-    #[serde(default, with = "crate::wire::ts_opt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "crate::wire::ts_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub at: Option<DateTime<Utc>>,
 }
 
@@ -1283,10 +1303,18 @@ pub struct WalletHistoryRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page_size: Option<i32>,
     /// Inclusive lower bound.
-    #[serde(default, with = "crate::wire::ts_opt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "crate::wire::ts_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub from: Option<DateTime<Utc>>,
     /// Exclusive upper bound.
-    #[serde(default, with = "crate::wire::ts_opt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "crate::wire::ts_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub to: Option<DateTime<Utc>>,
     /// Filter by type.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1673,7 +1701,11 @@ pub struct MessageDeliveryResult {
     #[serde(with = "crate::wire::ts")]
     pub delivered_at: DateTime<Utc>,
     /// When the user acknowledged it.
-    #[serde(default, with = "crate::wire::ts_opt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "crate::wire::ts_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub acked_at: Option<DateTime<Utc>>,
 }
 
@@ -1908,7 +1940,11 @@ pub struct ServerCommand {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supersedes: Option<Uuid>,
     /// Discard (ack with `ErrorCode.Timeout`) after this time.
-    #[serde(default, with = "crate::wire::ts_opt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "crate::wire::ts_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub expires_at: Option<DateTime<Utc>>,
 }
 
@@ -1933,7 +1969,11 @@ pub struct ServerCommandEnvelope {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supersedes: Option<Uuid>,
     /// Expiry.
-    #[serde(default, with = "crate::wire::ts_opt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "crate::wire::ts_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub expires_at: Option<DateTime<Utc>>,
 }
 
@@ -2194,7 +2234,11 @@ pub struct WsFrame {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supersedes: Option<Uuid>,
     /// Command only: discard after this time.
-    #[serde(default, with = "crate::wire::ts_opt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "crate::wire::ts_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub expires_at: Option<DateTime<Utc>>,
 }
 
@@ -2240,9 +2284,9 @@ use crate::user::AuthRequest;
 
 pub use crate::events::{AdItem, ShowAdsArgs};
 pub use crate::pc::{
-    AllowlistMode, AntiCheatPolicy, ExplorerPolicy, KioskPolicy, PowerPolicy, ProcessAllowlistPolicy,
-    ShellConfigOverride, ShellReplacementPolicy, ThemeRef, TimeWindow, UpdatesConfigOverride, UpdatesPolicy, UsbPolicy,
-    WebFilterPolicy,
+    AllowlistMode, AntiCheatPolicy, ExplorerPolicy, KioskPolicy, PowerPolicy,
+    ProcessAllowlistPolicy, ShellConfigOverride, ShellReplacementPolicy, ThemeRef, TimeWindow,
+    UpdatesConfigOverride, UpdatesPolicy, UsbPolicy, WebFilterPolicy,
 };
 // ---- END MANUAL ----
 
@@ -2364,7 +2408,10 @@ impl TryFrom<&str> for AgentCommand {
     type Error = UnknownWireName;
 
     fn try_from(name: &str) -> Result<Self, Self::Error> {
-        Self::parse(name).ok_or_else(|| UnknownWireName { kind: "AgentCommand", got: name.to_owned() })
+        Self::parse(name).ok_or_else(|| UnknownWireName {
+            kind: "AgentCommand",
+            got: name.to_owned(),
+        })
     }
 }
 
@@ -2502,17 +2549,29 @@ impl ServerCommand {
 impl CommandAck {
     /// Successful ack without a result.
     pub fn success() -> Self {
-        Self { ok: true, error: None, result: None }
+        Self {
+            ok: true,
+            error: None,
+            result: None,
+        }
     }
 
     /// Successful ack with a typed result.
     pub fn success_with<T: Serialize>(result: &T) -> Result<Self, ProtocolError> {
-        Ok(Self { ok: true, error: None, result: Some(serde_json::to_value(result)?) })
+        Ok(Self {
+            ok: true,
+            error: None,
+            result: Some(serde_json::to_value(result)?),
+        })
     }
 
     /// Failed ack.
     pub fn failure(error: IpcError) -> Self {
-        Self { ok: false, error: Some(error), result: None }
+        Self {
+            ok: false,
+            error: Some(error),
+            result: None,
+        }
     }
 }
 // ---- END MANUAL ----
@@ -2521,7 +2580,15 @@ impl CommandAck {
 impl RefreshConfigCommand {
     /// `true` when no specific cache was selected.
     pub fn is_all(&self) -> bool {
-        ![self.config, self.games, self.apps, self.tariffs, self.products, self.themes].contains(&Some(true))
+        ![
+            self.config,
+            self.games,
+            self.apps,
+            self.tariffs,
+            self.products,
+            self.themes,
+        ]
+        .contains(&Some(true))
     }
 }
 // ---- END MANUAL ----
@@ -2529,8 +2596,16 @@ impl RefreshConfigCommand {
 // ---- BEGIN MANUAL ----
 impl AgentEvent {
     /// Event with a typed payload.
-    pub fn of<T: Serialize>(r#type: AgentEventType, at: DateTime<Utc>, payload: &T) -> Result<Self, ProtocolError> {
-        Ok(Self { r#type, at, payload: Some(serde_json::to_value(payload)?) })
+    pub fn of<T: Serialize>(
+        r#type: AgentEventType,
+        at: DateTime<Utc>,
+        payload: &T,
+    ) -> Result<Self, ProtocolError> {
+        Ok(Self {
+            r#type,
+            at,
+            payload: Some(serde_json::to_value(payload)?),
+        })
     }
 
     /// camelCase wire name used in [`WsFrame::name`].
@@ -2544,7 +2619,12 @@ impl AgentEvent {
 impl WsAck {
     /// Builds from a REST-style [`CommandAck`].
     pub fn from_ack(command_id: Uuid, ack: CommandAck) -> Self {
-        Self { id: command_id, ok: ack.ok, error: ack.error, result: ack.result }
+        Self {
+            id: command_id,
+            ok: ack.ok,
+            error: ack.error,
+            result: ack.result,
+        }
     }
 }
 // ---- END MANUAL ----
@@ -2552,12 +2632,24 @@ impl WsAck {
 // ---- BEGIN MANUAL ----
 impl WsFrame {
     fn bare(r#type: WsFrameType, id: Uuid, ts: DateTime<Utc>) -> Self {
-        Self { r#type, id, ts, name: None, payload: None, ack: None, supersedes: None, expires_at: None }
+        Self {
+            r#type,
+            id,
+            ts,
+            name: None,
+            payload: None,
+            ack: None,
+            supersedes: None,
+            expires_at: None,
+        }
     }
 
     /// [`WsFrameType::Ack`] frame for `command_id`.
     pub fn ack_of(command_id: Uuid, ack: CommandAck) -> Self {
-        Self { ack: Some(WsAck::from_ack(command_id, ack)), ..Self::bare(WsFrameType::Ack, Uuid::new_v4(), Utc::now()) }
+        Self {
+            ack: Some(WsAck::from_ack(command_id, ack)),
+            ..Self::bare(WsFrameType::Ack, Uuid::new_v4(), Utc::now())
+        }
     }
 
     /// [`WsFrameType::Event`] frame.
@@ -2581,7 +2673,9 @@ impl WsFrame {
 
     /// Parses `name` as a push kind (frames of type [`WsFrameType::Push`]).
     pub fn push_kind(&self) -> Option<WsPushKind> {
-        (self.r#type == WsFrameType::Push).then(|| WsPushKind::parse(self.name.as_deref()?)).flatten()
+        (self.r#type == WsFrameType::Push)
+            .then(|| WsPushKind::parse(self.name.as_deref()?))
+            .flatten()
     }
 
     /// Deserializes `payload` as `T`; `Ok(None)` when absent or not an object.
@@ -2591,7 +2685,9 @@ impl WsFrame {
 }
 
 /// Deserializes a JSON object slot; `Ok(None)` when absent, `null` or not an object.
-pub(crate) fn object_as<T: DeserializeOwned>(value: Option<&Value>) -> Result<Option<T>, ProtocolError> {
+pub(crate) fn object_as<T: DeserializeOwned>(
+    value: Option<&Value>,
+) -> Result<Option<T>, ProtocolError> {
     match value {
         Some(v @ Value::Object(_)) => Ok(Some(serde_json::from_value(v.clone())?)),
         _ => Ok(None),
@@ -2615,63 +2711,158 @@ mod tests {
     #[test]
     fn enum_wire_values() {
         assert_wire(IpcAuthLevel::ALL, &["none", "hello", "user", "session"]);
-        assert_wire(CallAdminCategory::ALL, &["help", "technical", "order", "other"]);
+        assert_wire(
+            CallAdminCategory::ALL,
+            &["help", "technical", "order", "other"],
+        );
         assert_wire(ClientErrorLevel::ALL, &["warn", "error"]);
         assert_wire(PolicySource::ALL, &["server", "cache", "file"]);
         assert_wire(UpdateChannel::ALL, &["stable", "beta"]);
         assert_wire(UpdateComponent::ALL, &["agent", "shell"]);
-        assert_wire(UpdatePhase::ALL, &["downloading", "verifying", "staging", "applying", "failed"]);
+        assert_wire(
+            UpdatePhase::ALL,
+            &["downloading", "verifying", "staging", "applying", "failed"],
+        );
         assert_wire(
             ServerCommandType::ALL,
             &[
-                "lock", "unlock", "message", "reboot", "shutdown", "wake", "endSession", "extendSession", "launchGame",
-                "killGame", "setPolicy", "reloadPolicy", "screenshot", "remoteControlStart", "remoteControlStop",
-                "update", "showAds", "setVolume", "refreshConfig",
+                "lock",
+                "unlock",
+                "message",
+                "reboot",
+                "shutdown",
+                "wake",
+                "endSession",
+                "extendSession",
+                "launchGame",
+                "killGame",
+                "setPolicy",
+                "reloadPolicy",
+                "screenshot",
+                "remoteControlStart",
+                "remoteControlStop",
+                "update",
+                "showAds",
+                "setVolume",
+                "refreshConfig",
             ],
         );
         assert_wire(
             AgentEventType::ALL,
-            &["sessionStarted", "sessionEnded", "gameLaunched", "gameExited", "anticheatViolation", "hardwareChanged", "offlineQueueFlushed"],
+            &[
+                "sessionStarted",
+                "sessionEnded",
+                "gameLaunched",
+                "gameExited",
+                "anticheatViolation",
+                "hardwareChanged",
+                "offlineQueueFlushed",
+            ],
         );
-        assert_wire(WsFrameType::ALL, &["command", "ack", "event", "ping", "pong", "push"]);
+        assert_wire(
+            WsFrameType::ALL,
+            &["command", "ack", "event", "ping", "pong", "push"],
+        );
         assert_wire(
             WsPushKind::ALL,
             &[
-                "walletUpdated", "chatMessage", "notification", "orderUpdated", "bookingUpdated", "tournamentUpdated",
-                "sessionUpdated", "pcStatusChanged", "userRevoked",
+                "walletUpdated",
+                "chatMessage",
+                "notification",
+                "orderUpdated",
+                "bookingUpdated",
+                "tournamentUpdated",
+                "sessionUpdated",
+                "pcStatusChanged",
+                "userRevoked",
             ],
         );
-        assert_eq!(ServerCommandType::parse("RemoteControlStart"), Some(ServerCommandType::RemoteControlStart));
+        assert_eq!(
+            ServerCommandType::parse("RemoteControlStart"),
+            Some(ServerCommandType::RemoteControlStart)
+        );
     }
 
     #[test]
     fn agent_command_table_matches_ipc_protocol() {
         assert_eq!(AgentCommand::ALL.len(), 63);
         let expected: &[&str] = &[
-            "auth.hello", "auth.login", "auth.logout", "auth.status", "auth.qrStart",
-            "session.get", "session.start", "session.pause", "session.resume", "session.end", "session.extend",
-            "session.lock", "session.unlock", "session.timeLeft",
-            "games.list", "games.get", "games.launch", "games.kill", "games.running", "games.installStatus",
-            "apps.list", "apps.launch",
-            "wallet.balance", "wallet.tariffs", "wallet.history", "wallet.topupIntent",
-            "shop.products", "shop.order", "shop.orderStatus", "shop.orders",
-            "chat.history", "chat.send", "chat.markRead",
-            "booking.seats", "booking.reserve", "booking.cancel",
-            "tournaments.list", "tournaments.join", "tournaments.leaderboard",
-            "profile.get", "profile.update", "profile.stats", "profile.achievements", "profile.loyalty",
-            "settings.get", "settings.set",
-            "sys.ping", "sys.pcInfo", "sys.hardware", "sys.metrics", "sys.callAdmin", "sys.reboot", "sys.shutdown",
-            "sys.lockScreen", "sys.setVolume", "sys.setLocale", "sys.unlockAdmin", "sys.logClientError",
+            "auth.hello",
+            "auth.login",
+            "auth.logout",
+            "auth.status",
+            "auth.qrStart",
+            "session.get",
+            "session.start",
+            "session.pause",
+            "session.resume",
+            "session.end",
+            "session.extend",
+            "session.lock",
+            "session.unlock",
+            "session.timeLeft",
+            "games.list",
+            "games.get",
+            "games.launch",
+            "games.kill",
+            "games.running",
+            "games.installStatus",
+            "apps.list",
+            "apps.launch",
+            "wallet.balance",
+            "wallet.tariffs",
+            "wallet.history",
+            "wallet.topupIntent",
+            "shop.products",
+            "shop.order",
+            "shop.orderStatus",
+            "shop.orders",
+            "chat.history",
+            "chat.send",
+            "chat.markRead",
+            "booking.seats",
+            "booking.reserve",
+            "booking.cancel",
+            "tournaments.list",
+            "tournaments.join",
+            "tournaments.leaderboard",
+            "profile.get",
+            "profile.update",
+            "profile.stats",
+            "profile.achievements",
+            "profile.loyalty",
+            "settings.get",
+            "settings.set",
+            "sys.ping",
+            "sys.pcInfo",
+            "sys.hardware",
+            "sys.metrics",
+            "sys.callAdmin",
+            "sys.reboot",
+            "sys.shutdown",
+            "sys.lockScreen",
+            "sys.setVolume",
+            "sys.setLocale",
+            "sys.unlockAdmin",
+            "sys.logClientError",
             "sys.ackAdminMessage",
-            "policy.get", "policy.reload",
-            "update.check", "update.apply",
+            "policy.get",
+            "policy.reload",
+            "update.check",
+            "update.apply",
         ];
         let names: Vec<&str> = AgentCommand::ALL.iter().map(|c| c.name()).collect();
         assert_eq!(names, expected);
         for c in AgentCommand::ALL {
             assert_eq!(AgentCommand::try_from(c.name()).unwrap(), *c);
-            assert_eq!(serde_json::to_string(c).unwrap(), format!("\"{}\"", c.name()));
-            assert_eq!(serde_json::from_str::<AgentCommand>(&format!("\"{}\"", c.name())).unwrap(), *c);
+            assert_eq!(
+                serde_json::to_string(c).unwrap(),
+                format!("\"{}\"", c.name())
+            );
+            assert_eq!(
+                serde_json::from_str::<AgentCommand>(&format!("\"{}\"", c.name())).unwrap(),
+                *c
+            );
             assert!(crate::ipc::IpcEnvelope::is_valid_name(c.name()));
         }
         assert_eq!(AgentCommand::SysPing.response_name(), "sys.pong");
@@ -2679,9 +2870,18 @@ mod tests {
         assert_eq!(AgentCommand::AuthHello.required_auth(), IpcAuthLevel::None);
         assert_eq!(AgentCommand::SysPing.required_auth(), IpcAuthLevel::None);
         assert_eq!(AgentCommand::GamesList.required_auth(), IpcAuthLevel::Hello);
-        assert_eq!(AgentCommand::WalletBalance.required_auth(), IpcAuthLevel::User);
-        assert_eq!(AgentCommand::ShopOrder.required_auth(), IpcAuthLevel::Session);
-        assert_eq!(AgentCommand::GamesLaunch.required_auth(), IpcAuthLevel::Session);
+        assert_eq!(
+            AgentCommand::WalletBalance.required_auth(),
+            IpcAuthLevel::User
+        );
+        assert_eq!(
+            AgentCommand::ShopOrder.required_auth(),
+            IpcAuthLevel::Session
+        );
+        assert_eq!(
+            AgentCommand::GamesLaunch.required_auth(),
+            IpcAuthLevel::Session
+        );
         assert!(AgentCommand::try_from("nope.nope").is_err());
         assert!(!AgentCommand::is_known("Session.Start"));
         assert_eq!(names::events::ALL.len(), 18);
@@ -2695,11 +2895,17 @@ mod tests {
             pid: 5120,
             wts_session_id: 1,
             locale: Locale::Ru,
-            capabilities: vec![shell_capabilities::GAMEPAD.into(), shell_capabilities::OVERLAY.into()],
+            capabilities: vec![
+                shell_capabilities::GAMEPAD.into(),
+                shell_capabilities::OVERLAY.into(),
+            ],
         };
         assert_eq!(
             serde_json::to_string(&req).unwrap(),
-            format!(r#"{{"shellToken":"{}","shellVersion":"1.4.2","pid":5120,"wtsSessionId":1,"locale":"ru","capabilities":["gamepad","overlay"]}}"#, "9f".repeat(32))
+            format!(
+                r#"{{"shellToken":"{}","shellVersion":"1.4.2","pid":5120,"wtsSessionId":1,"locale":"ru","capabilities":["gamepad","overlay"]}}"#,
+                "9f".repeat(32)
+            )
         );
         let res = AuthHelloResponse {
             agent_version: "1.4.2".into(),
@@ -2718,74 +2924,256 @@ mod tests {
             json,
             r#"{"agentVersion":"1.4.2","protocol":1,"pcId":"00000000-0000-0000-0000-000000000000","pcName":"PC-12","zone":"Standard","serverOnline":true,"policyVersion":12,"serverTime":"2026-09-21T10:00:00.000Z","capabilities":["accountPool"],"kioskUser":"club"}"#
         );
-        assert_eq!(serde_json::from_str::<AuthHelloResponse>(&json).unwrap(), res);
+        assert_eq!(
+            serde_json::from_str::<AuthHelloResponse>(&json).unwrap(),
+            res
+        );
     }
 
     #[test]
     fn auth_and_session_payloads() {
-        let login = AuthLoginRequest { kind: AuthKind::Password, username: Some("player1".into()), password: Some("***".into()), qr_token: None, card_id: None, token: None };
-        assert_eq!(serde_json::to_string(&login).unwrap(), r#"{"kind":"password","username":"player1","password":"***"}"#);
+        let login = AuthLoginRequest {
+            kind: AuthKind::Password,
+            username: Some("player1".into()),
+            password: Some("***".into()),
+            qr_token: None,
+            card_id: None,
+            token: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&login).unwrap(),
+            r#"{"kind":"password","username":"player1","password":"***"}"#
+        );
         let server = login.to_server_request(Uuid::nil(), "hw");
         assert_eq!(server.hwid, "hw");
         assert_eq!(server.username.as_deref(), Some("player1"));
 
-        let res = AuthLoginResponse { user: sample_user(), session: None, expires_at: t(22, 0, 0), mode: ConnectivityState::Online };
+        let res = AuthLoginResponse {
+            user: sample_user(),
+            session: None,
+            expires_at: t(22, 0, 0),
+            mode: ConnectivityState::Online,
+        };
         let json = serde_json::to_string(&res).unwrap();
-        assert_eq!(json, format!(r#"{{"user":{SAMPLE_USER_JSON},"expiresAt":"2026-09-21T22:00:00.000Z","mode":"online"}}"#));
-        assert_eq!(serde_json::from_str::<AuthLoginResponse>(&json).unwrap(), res);
+        assert_eq!(
+            json,
+            format!(
+                r#"{{"user":{SAMPLE_USER_JSON},"expiresAt":"2026-09-21T22:00:00.000Z","mode":"online"}}"#
+            )
+        );
+        assert_eq!(
+            serde_json::from_str::<AuthLoginResponse>(&json).unwrap(),
+            res
+        );
 
-        let status = AuthStatusResponse { authenticated: false, mode: ConnectivityState::Offline, user: None, session: None, expires_at: None };
-        assert_eq!(serde_json::to_string(&status).unwrap(), r#"{"authenticated":false,"mode":"offline"}"#);
-        let logout = AuthLogoutResponse { ok: true, session_ended: true, session: Some(sample_session()) };
-        assert_eq!(serde_json::to_string(&logout).unwrap(), format!(r#"{{"ok":true,"sessionEnded":true,"session":{SAMPLE_SESSION_JSON}}}"#));
-        assert_eq!(serde_json::to_string(&AuthLogoutRequest::default()).unwrap(), "{}");
-        assert_eq!(serde_json::to_string(&AuthLogoutRequest { reason: Some(SessionEndReason::Idle) }).unwrap(), r#"{"reason":"idle"}"#);
+        let status = AuthStatusResponse {
+            authenticated: false,
+            mode: ConnectivityState::Offline,
+            user: None,
+            session: None,
+            expires_at: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&status).unwrap(),
+            r#"{"authenticated":false,"mode":"offline"}"#
+        );
+        let logout = AuthLogoutResponse {
+            ok: true,
+            session_ended: true,
+            session: Some(sample_session()),
+        };
+        assert_eq!(
+            serde_json::to_string(&logout).unwrap(),
+            format!(r#"{{"ok":true,"sessionEnded":true,"session":{SAMPLE_SESSION_JSON}}}"#)
+        );
+        assert_eq!(
+            serde_json::to_string(&AuthLogoutRequest::default()).unwrap(),
+            "{}"
+        );
+        assert_eq!(
+            serde_json::to_string(&AuthLogoutRequest {
+                reason: Some(SessionEndReason::Idle)
+            })
+            .unwrap(),
+            r#"{"reason":"idle"}"#
+        );
 
-        let start = SessionStartRequest { tariff_id: Uuid::nil(), prepaid: true, minutes: Some(60) };
-        assert_eq!(serde_json::to_string(&start).unwrap(), r#"{"tariffId":"00000000-0000-0000-0000-000000000000","prepaid":true,"minutes":60}"#);
-        let parsed: SessionStartRequest = serde_json::from_str(r#"{"tariffId":"00000000-0000-0000-0000-000000000000","minutes":60,"prepaid":true}"#).unwrap();
+        let start = SessionStartRequest {
+            tariff_id: Uuid::nil(),
+            prepaid: true,
+            minutes: Some(60),
+        };
+        assert_eq!(
+            serde_json::to_string(&start).unwrap(),
+            r#"{"tariffId":"00000000-0000-0000-0000-000000000000","prepaid":true,"minutes":60}"#
+        );
+        let parsed: SessionStartRequest = serde_json::from_str(
+            r#"{"tariffId":"00000000-0000-0000-0000-000000000000","minutes":60,"prepaid":true}"#,
+        )
+        .unwrap();
         assert_eq!(parsed, start);
-        let tl = SessionTimeLeftResponse { state: SessionState::Idle, seconds_left: 0, seconds_used: 0, server_time: t(10, 0, 0), session_id: None, ends_at: None };
-        assert_eq!(serde_json::to_string(&tl).unwrap(), r#"{"state":"idle","secondsLeft":0,"secondsUsed":0,"serverTime":"2026-09-21T10:00:00.000Z"}"#);
-        assert_eq!(serde_json::to_string(&SessionUnlockRequest { password: None, pin: Some("1234".into()) }).unwrap(), r#"{"pin":"1234"}"#);
-        assert_eq!(serde_json::to_string(&SessionExtendRequest { minutes: 30, tariff_id: None }).unwrap(), r#"{"minutes":30}"#);
+        let tl = SessionTimeLeftResponse {
+            state: SessionState::Idle,
+            seconds_left: 0,
+            seconds_used: 0,
+            server_time: t(10, 0, 0),
+            session_id: None,
+            ends_at: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&tl).unwrap(),
+            r#"{"state":"idle","secondsLeft":0,"secondsUsed":0,"serverTime":"2026-09-21T10:00:00.000Z"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&SessionUnlockRequest {
+                password: None,
+                pin: Some("1234".into())
+            })
+            .unwrap(),
+            r#"{"pin":"1234"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&SessionExtendRequest {
+                minutes: 30,
+                tariff_id: None
+            })
+            .unwrap(),
+            r#"{"minutes":30}"#
+        );
     }
 
     #[test]
     fn games_wallet_shop_chat_payloads() {
-        let list = GamesListRequest { installed_only: Some(true), sort: Some(GamesSort::LastPlayed), page: Some(1), page_size: Some(50), ..Default::default() };
-        assert_eq!(serde_json::to_string(&list).unwrap(), r#"{"installedOnly":true,"sort":"lastPlayed","page":1,"pageSize":50}"#);
-        assert_eq!(serde_json::to_string(&GamesListRequest::default()).unwrap(), "{}");
-        let launch = GamesLaunchRequest { game_id: Uuid::nil(), use_account_pool: None, extra_args: None, resolution: Some(Resolution { width: 1920, height: 1080 }) };
-        assert_eq!(serde_json::to_string(&launch).unwrap(), r#"{"gameId":"00000000-0000-0000-0000-000000000000","resolution":{"width":1920,"height":1080}}"#);
-        assert_eq!(serde_json::to_string(&GamesKillResponse { killed: 1, pids: vec![7788] }).unwrap(), r#"{"killed":1,"pids":[7788]}"#);
-        assert_eq!(serde_json::to_string(&AppsLaunchResponse { ok: true, pid: 5, started_at: t(1, 2, 3) }).unwrap(), r#"{"ok":true,"pid":5,"startedAt":"2026-09-21T01:02:03.000Z"}"#);
+        let list = GamesListRequest {
+            installed_only: Some(true),
+            sort: Some(GamesSort::LastPlayed),
+            page: Some(1),
+            page_size: Some(50),
+            ..Default::default()
+        };
+        assert_eq!(
+            serde_json::to_string(&list).unwrap(),
+            r#"{"installedOnly":true,"sort":"lastPlayed","page":1,"pageSize":50}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&GamesListRequest::default()).unwrap(),
+            "{}"
+        );
+        let launch = GamesLaunchRequest {
+            game_id: Uuid::nil(),
+            use_account_pool: None,
+            extra_args: None,
+            resolution: Some(Resolution {
+                width: 1920,
+                height: 1080,
+            }),
+        };
+        assert_eq!(
+            serde_json::to_string(&launch).unwrap(),
+            r#"{"gameId":"00000000-0000-0000-0000-000000000000","resolution":{"width":1920,"height":1080}}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&GamesKillResponse {
+                killed: 1,
+                pids: vec![7788]
+            })
+            .unwrap(),
+            r#"{"killed":1,"pids":[7788]}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&AppsLaunchResponse {
+                ok: true,
+                pid: 5,
+                started_at: t(1, 2, 3)
+            })
+            .unwrap(),
+            r#"{"ok":true,"pid":5,"startedAt":"2026-09-21T01:02:03.000Z"}"#
+        );
 
-        let hist = WalletHistoryRequest { page: Some(2), from: Some(t(0, 0, 0)), r#type: Some(TransactionType::Charge), ..Default::default() };
-        assert_eq!(serde_json::to_string(&hist).unwrap(), r#"{"page":2,"from":"2026-09-21T00:00:00.000Z","type":"charge"}"#);
-        let paged: WalletHistoryResponse = serde_json::from_str(r#"{"items":[],"total":120,"page":2,"pageSize":50}"#).unwrap();
+        let hist = WalletHistoryRequest {
+            page: Some(2),
+            from: Some(t(0, 0, 0)),
+            r#type: Some(TransactionType::Charge),
+            ..Default::default()
+        };
+        assert_eq!(
+            serde_json::to_string(&hist).unwrap(),
+            r#"{"page":2,"from":"2026-09-21T00:00:00.000Z","type":"charge"}"#
+        );
+        let paged: WalletHistoryResponse =
+            serde_json::from_str(r#"{"items":[],"total":120,"page":2,"pageSize":50}"#).unwrap();
         assert!(paged.has_more());
-        assert_eq!(serde_json::to_string(&paged).unwrap(), r#"{"items":[],"total":120,"page":2,"pageSize":50}"#);
-        let topup = WalletTopupIntentRequest { amount: Money::uzs(100_000), provider: TopupProvider::Click };
-        assert_eq!(serde_json::to_string(&topup).unwrap(), r#"{"amount":{"amount":100000,"currency":"UZS"},"provider":"click"}"#);
+        assert_eq!(
+            serde_json::to_string(&paged).unwrap(),
+            r#"{"items":[],"total":120,"page":2,"pageSize":50}"#
+        );
+        let topup = WalletTopupIntentRequest {
+            amount: Money::uzs(100_000),
+            provider: TopupProvider::Click,
+        };
+        assert_eq!(
+            serde_json::to_string(&topup).unwrap(),
+            r#"{"amount":{"amount":100000,"currency":"UZS"},"provider":"click"}"#
+        );
 
-        let order = ShopOrderRequest { items: vec![OrderLineRequest { product_id: Uuid::nil(), qty: 2 }], idempotency_key: Uuid::nil(), note: None };
+        let order = ShopOrderRequest {
+            items: vec![OrderLineRequest {
+                product_id: Uuid::nil(),
+                qty: 2,
+            }],
+            idempotency_key: Uuid::nil(),
+            note: None,
+        };
         assert_eq!(
             serde_json::to_string(&order).unwrap(),
             r#"{"items":[{"productId":"00000000-0000-0000-0000-000000000000","qty":2}],"idempotencyKey":"00000000-0000-0000-0000-000000000000"}"#
         );
-        assert_eq!(serde_json::to_string(&ShopProductsRequest { category: Some(ProductCategory::Drink), search: None }).unwrap(), r#"{"category":"drink"}"#);
-        let send = ChatSendRequest { text: "hi".into(), idempotency_key: Uuid::nil(), room_id: None };
-        assert_eq!(serde_json::to_string(&send).unwrap(), r#"{"text":"hi","idempotencyKey":"00000000-0000-0000-0000-000000000000"}"#);
-        assert_eq!(serde_json::to_string(&ChatMarkReadResponse { room_id: "club".into(), unread: 0 }).unwrap(), r#"{"roomId":"club","unread":0}"#);
-        let history = ChatHistoryResponse { room_id: "club".into(), items: vec![], has_more: false, unread: 3 };
-        assert_eq!(serde_json::to_string(&history).unwrap(), r#"{"roomId":"club","items":[],"hasMore":false,"unread":3}"#);
+        assert_eq!(
+            serde_json::to_string(&ShopProductsRequest {
+                category: Some(ProductCategory::Drink),
+                search: None
+            })
+            .unwrap(),
+            r#"{"category":"drink"}"#
+        );
+        let send = ChatSendRequest {
+            text: "hi".into(),
+            idempotency_key: Uuid::nil(),
+            room_id: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&send).unwrap(),
+            r#"{"text":"hi","idempotencyKey":"00000000-0000-0000-0000-000000000000"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&ChatMarkReadResponse {
+                room_id: "club".into(),
+                unread: 0
+            })
+            .unwrap(),
+            r#"{"roomId":"club","unread":0}"#
+        );
+        let history = ChatHistoryResponse {
+            room_id: "club".into(),
+            items: vec![],
+            has_more: false,
+            unread: 3,
+        };
+        assert_eq!(
+            serde_json::to_string(&history).unwrap(),
+            r#"{"roomId":"club","items":[],"hasMore":false,"unread":3}"#
+        );
     }
 
     #[test]
     fn booking_tournament_settings_payloads() {
-        let seats = BookingSeatsRequest { date: NaiveDate::from_ymd_opt(2026, 9, 21).unwrap() };
-        assert_eq!(serde_json::to_string(&seats).unwrap(), r#"{"date":"2026-09-21"}"#);
+        let seats = BookingSeatsRequest {
+            date: NaiveDate::from_ymd_opt(2026, 9, 21).unwrap(),
+        };
+        assert_eq!(
+            serde_json::to_string(&seats).unwrap(),
+            r#"{"date":"2026-09-21"}"#
+        );
         let res = BookingSeatsResponse {
             date: seats.date,
             seats: vec![],
@@ -2795,16 +3183,41 @@ mod tests {
             open_to: None,
         };
         let json = serde_json::to_string(&res).unwrap();
-        assert_eq!(json, r#"{"date":"2026-09-21","seats":[],"bookings":[],"slotMinutes":30,"openFrom":"09:00"}"#);
-        assert_eq!(serde_json::from_str::<BookingSeatsResponse>(&json).unwrap(), res);
-        let reserve = BookingReserveRequest { pc_id: Uuid::nil(), from: t(12, 0, 0), to: t(13, 0, 0) };
+        assert_eq!(
+            json,
+            r#"{"date":"2026-09-21","seats":[],"bookings":[],"slotMinutes":30,"openFrom":"09:00"}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<BookingSeatsResponse>(&json).unwrap(),
+            res
+        );
+        let reserve = BookingReserveRequest {
+            pc_id: Uuid::nil(),
+            from: t(12, 0, 0),
+            to: t(13, 0, 0),
+        };
         assert_eq!(
             serde_json::to_string(&reserve).unwrap(),
             r#"{"pcId":"00000000-0000-0000-0000-000000000000","from":"2026-09-21T12:00:00.000Z","to":"2026-09-21T13:00:00.000Z"}"#
         );
-        let lb = TournamentsLeaderboardResponse { tournament_id: Uuid::nil(), entries: vec![], updated_at: t(0, 0, 0), me: None };
-        assert_eq!(serde_json::to_string(&lb).unwrap(), r#"{"tournamentId":"00000000-0000-0000-0000-000000000000","entries":[],"updatedAt":"2026-09-21T00:00:00.000Z"}"#);
-        assert_eq!(serde_json::to_string(&TournamentsListRequest { state: Some(TournamentState::Live), game_id: None }).unwrap(), r#"{"state":"live"}"#);
+        let lb = TournamentsLeaderboardResponse {
+            tournament_id: Uuid::nil(),
+            entries: vec![],
+            updated_at: t(0, 0, 0),
+            me: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&lb).unwrap(),
+            r#"{"tournamentId":"00000000-0000-0000-0000-000000000000","entries":[],"updatedAt":"2026-09-21T00:00:00.000Z"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&TournamentsListRequest {
+                state: Some(TournamentState::Live),
+                game_id: None
+            })
+            .unwrap(),
+            r#"{"state":"live"}"#
+        );
 
         let settings = ShellSettings {
             locale: Locale::En,
@@ -2816,54 +3229,166 @@ mod tests {
             show_metrics_overlay: false,
             allow_virtual_keyboard: true,
             ui_sounds: true,
-            features: ShellFeatures { shop: true, chat: true, booking: true, tournaments: true, profile: true, topup: true, apps: true, call_admin: true },
+            features: ShellFeatures {
+                shop: true,
+                chat: true,
+                booking: true,
+                tournaments: true,
+                profile: true,
+                topup: true,
+                apps: true,
+                call_admin: true,
+            },
         };
         let json = serde_json::to_string(&settings).unwrap();
         assert_eq!(
             json,
             r#"{"locale":"en","theme":"default","availableThemes":["default","neon"],"volume":60,"muted":false,"idleTimeoutSec":300,"showMetricsOverlay":false,"allowVirtualKeyboard":true,"uiSounds":true,"features":{"shop":true,"chat":true,"booking":true,"tournaments":true,"profile":true,"topup":true,"apps":true,"callAdmin":true}}"#
         );
-        assert_eq!(serde_json::from_str::<ShellSettings>(&json).unwrap(), settings);
+        assert_eq!(
+            serde_json::from_str::<ShellSettings>(&json).unwrap(),
+            settings
+        );
         assert!(SettingsSetRequest::default().is_empty());
-        let set = SettingsSetRequest { volume: Some(80), muted: Some(false), ..Default::default() };
+        let set = SettingsSetRequest {
+            volume: Some(80),
+            muted: Some(false),
+            ..Default::default()
+        };
         assert!(!set.is_empty());
-        assert_eq!(serde_json::to_string(&set).unwrap(), r#"{"volume":80,"muted":false}"#);
+        assert_eq!(
+            serde_json::to_string(&set).unwrap(),
+            r#"{"volume":80,"muted":false}"#
+        );
     }
 
     #[test]
     fn sys_policy_update_payloads() {
-        let ping = SysPingRequest { seq: 7, sent_at: t(10, 0, 0) };
-        assert_eq!(serde_json::to_string(&ping).unwrap(), r#"{"seq":7,"sentAt":"2026-09-21T10:00:00.000Z"}"#);
-        let pong = SysPongResponse { seq: 7, sent_at: t(10, 0, 0), received_at: t(10, 0, 1), connectivity: ConnectivityState::Online };
+        let ping = SysPingRequest {
+            seq: 7,
+            sent_at: t(10, 0, 0),
+        };
+        assert_eq!(
+            serde_json::to_string(&ping).unwrap(),
+            r#"{"seq":7,"sentAt":"2026-09-21T10:00:00.000Z"}"#
+        );
+        let pong = SysPongResponse {
+            seq: 7,
+            sent_at: t(10, 0, 0),
+            received_at: t(10, 0, 1),
+            connectivity: ConnectivityState::Online,
+        };
         assert_eq!(
             serde_json::to_string(&pong).unwrap(),
             r#"{"seq":7,"sentAt":"2026-09-21T10:00:00.000Z","receivedAt":"2026-09-21T10:00:01.000Z","connectivity":"online"}"#
         );
-        let call = SysCallAdminRequest { category: CallAdminCategory::Technical, message: Some("no sound".into()) };
-        assert_eq!(serde_json::to_string(&call).unwrap(), r#"{"category":"technical","message":"no sound"}"#);
-        let ticket = SysCallAdminResponse { ticket_id: Uuid::nil(), created_at: t(10, 0, 0), queue_position: None };
-        assert_eq!(serde_json::to_string(&ticket).unwrap(), r#"{"ticketId":"00000000-0000-0000-0000-000000000000","createdAt":"2026-09-21T10:00:00.000Z"}"#);
-        assert_eq!(serde_json::to_string(&SetVolumeRequest { level: 40, muted: None }).unwrap(), r#"{"level":40}"#);
-        assert_eq!(serde_json::to_string(&VolumeState { level: 40, muted: false }).unwrap(), r#"{"level":40,"muted":false}"#);
-        assert_eq!(serde_json::to_string(&OkResponse::OK).unwrap(), r#"{"ok":true}"#);
-        let log = SysLogClientErrorRequest { level: ClientErrorLevel::Error, message: "boom".into(), stack: None, route: Some("/home".into()) };
-        assert_eq!(serde_json::to_string(&log).unwrap(), r#"{"level":"error","message":"boom","route":"/home"}"#);
-        let unlock = SysUnlockAdminResponse { ok: true, admin_token: "tok".into(), expires_at: t(10, 5, 0) };
-        assert_eq!(serde_json::to_string(&unlock).unwrap(), r#"{"ok":true,"adminToken":"tok","expiresAt":"2026-09-21T10:05:00.000Z"}"#);
+        let call = SysCallAdminRequest {
+            category: CallAdminCategory::Technical,
+            message: Some("no sound".into()),
+        };
+        assert_eq!(
+            serde_json::to_string(&call).unwrap(),
+            r#"{"category":"technical","message":"no sound"}"#
+        );
+        let ticket = SysCallAdminResponse {
+            ticket_id: Uuid::nil(),
+            created_at: t(10, 0, 0),
+            queue_position: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&ticket).unwrap(),
+            r#"{"ticketId":"00000000-0000-0000-0000-000000000000","createdAt":"2026-09-21T10:00:00.000Z"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&SetVolumeRequest {
+                level: 40,
+                muted: None
+            })
+            .unwrap(),
+            r#"{"level":40}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&VolumeState {
+                level: 40,
+                muted: false
+            })
+            .unwrap(),
+            r#"{"level":40,"muted":false}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&OkResponse::OK).unwrap(),
+            r#"{"ok":true}"#
+        );
+        let log = SysLogClientErrorRequest {
+            level: ClientErrorLevel::Error,
+            message: "boom".into(),
+            stack: None,
+            route: Some("/home".into()),
+        };
+        assert_eq!(
+            serde_json::to_string(&log).unwrap(),
+            r#"{"level":"error","message":"boom","route":"/home"}"#
+        );
+        let unlock = SysUnlockAdminResponse {
+            ok: true,
+            admin_token: "tok".into(),
+            expires_at: t(10, 5, 0),
+        };
+        assert_eq!(
+            serde_json::to_string(&unlock).unwrap(),
+            r#"{"ok":true,"adminToken":"tok","expiresAt":"2026-09-21T10:05:00.000Z"}"#
+        );
 
-        let reload = PolicyReloadResponse { policy: crate::pc::sample_policy(), source: PolicySource::Cache, applied: true, changed: vec!["kiosk".into()] };
+        let reload = PolicyReloadResponse {
+            policy: crate::pc::sample_policy(),
+            source: PolicySource::Cache,
+            applied: true,
+            changed: vec!["kiosk".into()],
+        };
         let json = serde_json::to_string(&reload).unwrap();
         assert!(json.starts_with(&format!(r#"{{"policy":{}"#, crate::pc::SAMPLE_POLICY_JSON)));
         assert!(json.ends_with(r#""source":"cache","applied":true,"changed":["kiosk"]}"#));
-        assert_eq!(serde_json::from_str::<PolicyReloadResponse>(&json).unwrap(), reload);
+        assert_eq!(
+            serde_json::from_str::<PolicyReloadResponse>(&json).unwrap(),
+            reload
+        );
 
         let manifest = sample_manifest();
-        let check = UpdateCheckResponse { current: ComponentVersions { agent: "1.4.2".into(), shell: "1.4.2".into() }, agent: None, shell: Some(manifest.clone()) };
+        let check = UpdateCheckResponse {
+            current: ComponentVersions {
+                agent: "1.4.2".into(),
+                shell: "1.4.2".into(),
+            },
+            agent: None,
+            shell: Some(manifest.clone()),
+        };
         let json = serde_json::to_string(&check).unwrap();
-        assert_eq!(json, format!(r#"{{"current":{{"agent":"1.4.2","shell":"1.4.2"}},"shell":{}}}"#, SAMPLE_MANIFEST_JSON));
-        assert_eq!(serde_json::from_str::<UpdateCheckResponse>(&json).unwrap(), check);
-        assert_eq!(serde_json::to_string(&UpdateApplyResponse { scheduled: true, at: Some(t(4, 0, 0)) }).unwrap(), r#"{"scheduled":true,"at":"2026-09-21T04:00:00.000Z"}"#);
-        assert_eq!(serde_json::to_string(&UpdateApplyRequest { component: UpdateComponent::Shell }).unwrap(), r#"{"component":"shell"}"#);
+        assert_eq!(
+            json,
+            format!(
+                r#"{{"current":{{"agent":"1.4.2","shell":"1.4.2"}},"shell":{}}}"#,
+                SAMPLE_MANIFEST_JSON
+            )
+        );
+        assert_eq!(
+            serde_json::from_str::<UpdateCheckResponse>(&json).unwrap(),
+            check
+        );
+        assert_eq!(
+            serde_json::to_string(&UpdateApplyResponse {
+                scheduled: true,
+                at: Some(t(4, 0, 0))
+            })
+            .unwrap(),
+            r#"{"scheduled":true,"at":"2026-09-21T04:00:00.000Z"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&UpdateApplyRequest {
+                component: UpdateComponent::Shell
+            })
+            .unwrap(),
+            r#"{"component":"shell"}"#
+        );
     }
 
     const SAMPLE_MANIFEST_JSON: &str = r##"{"channel":"stable","component":"shell","version":"1.5.0","url":"https://u/shell-1.5.0.msi","sha256":"ab","size":52428800,"signature":"c2ln","releaseNotes":"# 1.5.0","mandatory":false,"publishedAt":"2026-09-21T03:00:00.000Z","minAgentVersion":"1.4.0"}"##;
@@ -2888,9 +3413,19 @@ mod tests {
     fn update_manifest_json() {
         let m = sample_manifest();
         assert_eq!(serde_json::to_string(&m).unwrap(), SAMPLE_MANIFEST_JSON);
-        assert_eq!(serde_json::from_str::<UpdateManifest>(SAMPLE_MANIFEST_JSON).unwrap(), m);
-        let cmd = UpdateCommand { component: UpdateComponent::Agent, apply_now: true, manifest: None };
-        assert_eq!(serde_json::to_string(&cmd).unwrap(), r#"{"component":"agent","applyNow":true}"#);
+        assert_eq!(
+            serde_json::from_str::<UpdateManifest>(SAMPLE_MANIFEST_JSON).unwrap(),
+            m
+        );
+        let cmd = UpdateCommand {
+            component: UpdateComponent::Agent,
+            apply_now: true,
+            manifest: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&cmd).unwrap(),
+            r#"{"component":"agent","applyNow":true}"#
+        );
     }
 
     #[test]
@@ -2910,7 +3445,8 @@ mod tests {
             r#"{"id":"c0a80000-0000-4000-8000-000000000001","type":"lock","issuedAt":"2026-09-21T10:20:00.000Z","payload":{"reason":"admin","message":"Please come to the desk"},"expiresAt":"2026-09-21T10:25:00.000Z"}"#
         );
         // Unknown command names and non-command frames yield None.
-        let bad: WsFrame = serde_json::from_str(&json.replace(r#""name":"lock""#, r#""name":"dance""#)).unwrap();
+        let bad: WsFrame =
+            serde_json::from_str(&json.replace(r#""name":"lock""#, r#""name":"dance""#)).unwrap();
         assert!(ServerCommand::from_frame(&bad).is_none());
         let ping = WsFrame::ping();
         assert!(ServerCommand::from_frame(&ping).is_none());
@@ -2930,7 +3466,13 @@ mod tests {
 
     #[test]
     fn ws_ack_event_pong_frames() {
-        let ack = WsFrame::ack_of(Uuid::nil(), CommandAck::success_with(&ScheduledResult { scheduled_at: t(10, 20, 30) }).unwrap());
+        let ack = WsFrame::ack_of(
+            Uuid::nil(),
+            CommandAck::success_with(&ScheduledResult {
+                scheduled_at: t(10, 20, 30),
+            })
+            .unwrap(),
+        );
         let json = serde_json::to_string(&ack).unwrap();
         assert!(json.starts_with(r#"{"type":"ack","id":""#));
         assert!(json.ends_with(r#""payload":null,"ack":{"id":"00000000-0000-0000-0000-000000000000","ok":true,"result":{"scheduledAt":"2026-09-21T10:20:30.000Z"}}}"#));
@@ -2942,9 +3484,18 @@ mod tests {
             serde_json::to_string(&failed).unwrap(),
             r#"{"id":"00000000-0000-0000-0000-000000000000","ok":false,"error":{"code":"timeout","message":"Operation timed out","details":null}}"#
         );
-        assert_eq!(serde_json::to_string(&CommandAck::success()).unwrap(), r#"{"ok":true}"#);
+        assert_eq!(
+            serde_json::to_string(&CommandAck::success()).unwrap(),
+            r#"{"ok":true}"#
+        );
 
-        let launched = GameLaunchedEvent { session_id: Uuid::nil(), game_id: Uuid::nil(), pid: 7788, account_lease_id: None, at: t(10, 21, 0) };
+        let launched = GameLaunchedEvent {
+            session_id: Uuid::nil(),
+            game_id: Uuid::nil(),
+            pid: 7788,
+            account_lease_id: None,
+            at: t(10, 21, 0),
+        };
         let event = AgentEvent::of(AgentEventType::GameLaunched, t(10, 21, 0), &launched).unwrap();
         assert_eq!(event.wire_name(), "gameLaunched");
         assert_eq!(
@@ -2955,7 +3506,10 @@ mod tests {
         assert_eq!(frame.r#type, WsFrameType::Event);
         assert_eq!(frame.name.as_deref(), Some("gameLaunched"));
         assert_eq!(frame.ts, t(10, 21, 0));
-        assert_eq!(frame.payload_as::<GameLaunchedEvent>().unwrap().unwrap(), launched);
+        assert_eq!(
+            frame.payload_as::<GameLaunchedEvent>().unwrap().unwrap(),
+            launched
+        );
 
         let ping: WsFrame = serde_json::from_str(r#"{"type":"ping","id":"00000000-0000-0000-0000-000000000000","ts":"2026-09-21T10:00:00.000Z","payload":null}"#).unwrap();
         let pong = WsFrame::pong_for(&ping);
@@ -2981,7 +3535,11 @@ mod tests {
             uptime_sec: 8123,
             ip_address: "10.0.1.12".into(),
             policy_version: 12,
-            running_games: vec![HeartbeatRunningGame { game_id: Uuid::nil(), pid: 7788, started_at: t(10, 21, 0) }],
+            running_games: vec![HeartbeatRunningGame {
+                game_id: Uuid::nil(),
+                pid: 7788,
+                started_at: t(10, 21, 0),
+            }],
             offline_queue: 0,
             shell_connected: true,
         };
@@ -2998,50 +3556,182 @@ mod tests {
         assert_eq!(res.policy_version, 13);
         assert_eq!(res.session, None);
 
-        let refresh = AgentRefreshResponse { access_token: "a".into(), refresh_token: "r".into(), expires_at: t(11, 0, 0), signing_secret: None };
-        assert_eq!(serde_json::to_string(&refresh).unwrap(), r#"{"accessToken":"a","refreshToken":"r","expiresAt":"2026-09-21T11:00:00.000Z"}"#);
-        let batch = TelemetryBatch { samples: vec![], events: vec![TelemetryEvent { kind: telemetry_event_kinds::PIPE_ERROR.into(), at: t(1, 0, 0), data: serde_json::json!({"code":109}) }], hardware: None, logs_tail: Some(vec!["warn".into()]) };
+        let refresh = AgentRefreshResponse {
+            access_token: "a".into(),
+            refresh_token: "r".into(),
+            expires_at: t(11, 0, 0),
+            signing_secret: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&refresh).unwrap(),
+            r#"{"accessToken":"a","refreshToken":"r","expiresAt":"2026-09-21T11:00:00.000Z"}"#
+        );
+        let batch = TelemetryBatch {
+            samples: vec![],
+            events: vec![TelemetryEvent {
+                kind: telemetry_event_kinds::PIPE_ERROR.into(),
+                at: t(1, 0, 0),
+                data: serde_json::json!({"code":109}),
+            }],
+            hardware: None,
+            logs_tail: Some(vec!["warn".into()]),
+        };
         assert_eq!(
             serde_json::to_string(&batch).unwrap(),
             r#"{"samples":[],"events":[{"kind":"pipeError","at":"2026-09-21T01:00:00.000Z","data":{"code":109}}],"logsTail":["warn"]}"#
         );
-        let ticket = CallAdminTicketRequest { pc_id: Uuid::nil(), user_id: None, category: CallAdminCategory::Help, message: None, at: t(1, 0, 0) };
-        assert_eq!(serde_json::to_string(&ticket).unwrap(), r#"{"pcId":"00000000-0000-0000-0000-000000000000","category":"help","at":"2026-09-21T01:00:00.000Z"}"#);
+        let ticket = CallAdminTicketRequest {
+            pc_id: Uuid::nil(),
+            user_id: None,
+            category: CallAdminCategory::Help,
+            message: None,
+            at: t(1, 0, 0),
+        };
+        assert_eq!(
+            serde_json::to_string(&ticket).unwrap(),
+            r#"{"pcId":"00000000-0000-0000-0000-000000000000","category":"help","at":"2026-09-21T01:00:00.000Z"}"#
+        );
         assert_eq!(TelemetryBatch::MAX_SAMPLES, 120);
     }
 
     #[test]
     fn command_payloads_and_results() {
         assert!(RefreshConfigCommand::default().is_all());
-        assert!(RefreshConfigCommand { config: Some(false), ..Default::default() }.is_all());
-        assert!(!RefreshConfigCommand { games: Some(true), ..Default::default() }.is_all());
-        assert_eq!(serde_json::to_string(&RefreshConfigCommand { games: Some(true), ..Default::default() }).unwrap(), r#"{"games":true}"#);
-        let msg = MessageCommand { id: Uuid::nil(), from: "admin".into(), text: "hi".into(), level: NotificationLevel::Warning, requires_ack: true };
+        assert!(RefreshConfigCommand {
+            config: Some(false),
+            ..Default::default()
+        }
+        .is_all());
+        assert!(!RefreshConfigCommand {
+            games: Some(true),
+            ..Default::default()
+        }
+        .is_all());
+        assert_eq!(
+            serde_json::to_string(&RefreshConfigCommand {
+                games: Some(true),
+                ..Default::default()
+            })
+            .unwrap(),
+            r#"{"games":true}"#
+        );
+        let msg = MessageCommand {
+            id: Uuid::nil(),
+            from: "admin".into(),
+            text: "hi".into(),
+            level: NotificationLevel::Warning,
+            requires_ack: true,
+        };
         assert_eq!(
             serde_json::to_string(&msg).unwrap(),
             r#"{"id":"00000000-0000-0000-0000-000000000000","from":"admin","text":"hi","level":"warning","requiresAck":true}"#
         );
-        assert_eq!(serde_json::to_string(&PowerCommand { delay_sec: 30, force: false, message: None }).unwrap(), r#"{"delaySec":30,"force":false}"#);
-        assert_eq!(serde_json::to_string(&KillGameCommand { game_id: None, pid: Some(1), force: true }).unwrap(), r#"{"pid":1,"force":true}"#);
-        let shot = ScreenshotCommand { quality: 60, upload_url: "https://up".into(), monitor: None, max_width: Some(1280) };
-        assert_eq!(serde_json::to_string(&shot).unwrap(), r#"{"quality":60,"uploadUrl":"https://up","maxWidth":1280}"#);
-        let rc = RemoteControlStartCommand { session_token: "t".into(), relay_url: "wss://r".into(), fps: 5, allow_input: true, admin_name: "Bob".into() };
-        assert_eq!(serde_json::to_string(&rc).unwrap(), r#"{"sessionToken":"t","relayUrl":"wss://r","fps":5,"allowInput":true,"adminName":"Bob"}"#);
-        let stop = RemoteControlStopResult { stopped_at: t(10, 30, 0), duration_sec: 600 };
-        assert_eq!(serde_json::to_string(&stop).unwrap(), r#"{"stoppedAt":"2026-09-21T10:30:00.000Z","durationSec":600}"#);
-        let ext = ExtendSessionCommand { session_id: Uuid::nil(), minutes: 15, charge: false };
-        assert_eq!(serde_json::to_string(&ext).unwrap(), r#"{"sessionId":"00000000-0000-0000-0000-000000000000","minutes":15,"charge":false}"#);
-        let end = EndSessionCommand { session_id: Uuid::nil(), reason: SessionEndReason::Admin };
-        assert_eq!(serde_json::to_string(&end).unwrap(), r#"{"sessionId":"00000000-0000-0000-0000-000000000000","reason":"admin"}"#);
-        assert_eq!(serde_json::to_string(&SetPolicyResult { version: 13, applied: true }).unwrap(), r#"{"version":13,"applied":true}"#);
-        assert_eq!(serde_json::to_string(&RefreshConfigResult { refreshed: vec!["games".into()] }).unwrap(), r#"{"refreshed":["games"]}"#);
-        let flushed = OfflineQueueFlushedEvent { count: 5, deadlettered: 1, offline_from: t(9, 0, 0), offline_to: t(9, 30, 0) };
-        assert_eq!(serde_json::to_string(&flushed).unwrap(), r#"{"count":5,"deadlettered":1,"offlineFrom":"2026-09-21T09:00:00.000Z","offlineTo":"2026-09-21T09:30:00.000Z"}"#);
+        assert_eq!(
+            serde_json::to_string(&PowerCommand {
+                delay_sec: 30,
+                force: false,
+                message: None
+            })
+            .unwrap(),
+            r#"{"delaySec":30,"force":false}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&KillGameCommand {
+                game_id: None,
+                pid: Some(1),
+                force: true
+            })
+            .unwrap(),
+            r#"{"pid":1,"force":true}"#
+        );
+        let shot = ScreenshotCommand {
+            quality: 60,
+            upload_url: "https://up".into(),
+            monitor: None,
+            max_width: Some(1280),
+        };
+        assert_eq!(
+            serde_json::to_string(&shot).unwrap(),
+            r#"{"quality":60,"uploadUrl":"https://up","maxWidth":1280}"#
+        );
+        let rc = RemoteControlStartCommand {
+            session_token: "t".into(),
+            relay_url: "wss://r".into(),
+            fps: 5,
+            allow_input: true,
+            admin_name: "Bob".into(),
+        };
+        assert_eq!(
+            serde_json::to_string(&rc).unwrap(),
+            r#"{"sessionToken":"t","relayUrl":"wss://r","fps":5,"allowInput":true,"adminName":"Bob"}"#
+        );
+        let stop = RemoteControlStopResult {
+            stopped_at: t(10, 30, 0),
+            duration_sec: 600,
+        };
+        assert_eq!(
+            serde_json::to_string(&stop).unwrap(),
+            r#"{"stoppedAt":"2026-09-21T10:30:00.000Z","durationSec":600}"#
+        );
+        let ext = ExtendSessionCommand {
+            session_id: Uuid::nil(),
+            minutes: 15,
+            charge: false,
+        };
+        assert_eq!(
+            serde_json::to_string(&ext).unwrap(),
+            r#"{"sessionId":"00000000-0000-0000-0000-000000000000","minutes":15,"charge":false}"#
+        );
+        let end = EndSessionCommand {
+            session_id: Uuid::nil(),
+            reason: SessionEndReason::Admin,
+        };
+        assert_eq!(
+            serde_json::to_string(&end).unwrap(),
+            r#"{"sessionId":"00000000-0000-0000-0000-000000000000","reason":"admin"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&SetPolicyResult {
+                version: 13,
+                applied: true
+            })
+            .unwrap(),
+            r#"{"version":13,"applied":true}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&RefreshConfigResult {
+                refreshed: vec!["games".into()]
+            })
+            .unwrap(),
+            r#"{"refreshed":["games"]}"#
+        );
+        let flushed = OfflineQueueFlushedEvent {
+            count: 5,
+            deadlettered: 1,
+            offline_from: t(9, 0, 0),
+            offline_to: t(9, 30, 0),
+        };
+        assert_eq!(
+            serde_json::to_string(&flushed).unwrap(),
+            r#"{"count":5,"deadlettered":1,"offlineFrom":"2026-09-21T09:00:00.000Z","offlineTo":"2026-09-21T09:30:00.000Z"}"#
+        );
         let err_ack = CommandAck::failure(IpcError::of(ErrorCode::PolicyDenied));
         assert!(!err_ack.ok);
-        assert_eq!(serde_json::to_string(&WakeCommand { target_mac: "AA:BB:CC:DD:EE:FF".into() }).unwrap(), r#"{"targetMac":"AA:BB:CC:DD:EE:FF"}"#);
-        let delivered = MessageDeliveryResult { delivered_at: t(10, 0, 0), acked_at: None };
-        assert_eq!(serde_json::to_string(&delivered).unwrap(), r#"{"deliveredAt":"2026-09-21T10:00:00.000Z"}"#);
+        assert_eq!(
+            serde_json::to_string(&WakeCommand {
+                target_mac: "AA:BB:CC:DD:EE:FF".into()
+            })
+            .unwrap(),
+            r#"{"targetMac":"AA:BB:CC:DD:EE:FF"}"#
+        );
+        let delivered = MessageDeliveryResult {
+            delivered_at: t(10, 0, 0),
+            acked_at: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&delivered).unwrap(),
+            r#"{"deliveredAt":"2026-09-21T10:00:00.000Z"}"#
+        );
     }
 }
 // ---- END MANUAL ----

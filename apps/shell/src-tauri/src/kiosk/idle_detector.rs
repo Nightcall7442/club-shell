@@ -31,7 +31,10 @@ pub struct ActivityFeed {
 
 impl ActivityFeed {
     pub fn new() -> Arc<Self> {
-        Arc::new(Self { epoch: Instant::now(), last_ms: AtomicU64::new(0) })
+        Arc::new(Self {
+            epoch: Instant::now(),
+            last_ms: AtomicU64::new(0),
+        })
     }
 
     /// Milliseconds since the feed was created (monotonic).
@@ -46,7 +49,10 @@ impl ActivityFeed {
 
     /// Time since the last [`touch`](Self::touch) (or since creation).
     pub fn since(&self) -> Duration {
-        Duration::from_millis(self.now_ms().saturating_sub(self.last_ms.load(Ordering::Relaxed)))
+        Duration::from_millis(
+            self.now_ms()
+                .saturating_sub(self.last_ms.load(Ordering::Relaxed)),
+        )
     }
 }
 
@@ -79,7 +85,11 @@ pub struct IdleThresholds {
 
 impl IdleThresholds {
     pub fn from_config(config: &IdleConfig) -> Self {
-        Self { dim_sec: config.dim_after_sec, idle_sec: config.timeout_sec, screensaver_sec: config.screensaver_after_sec }
+        Self {
+            dim_sec: config.dim_after_sec,
+            idle_sec: config.timeout_sec,
+            screensaver_sec: config.screensaver_after_sec,
+        }
     }
 
     /// Stage for `secs` of inactivity (highest enabled threshold that was crossed).
@@ -117,7 +127,11 @@ impl IdleDetector {
             thresholds: RwLock::new(IdleThresholds::from_config(config)),
             paused: AtomicBool::new(false),
             stopped: AtomicBool::new(false),
-            last: Mutex::new(IdleStatus { idle: false, idle_sec: 0, stage: IdleStage::Active }),
+            last: Mutex::new(IdleStatus {
+                idle: false,
+                idle_sec: 0,
+                stage: IdleStage::Active,
+            }),
             task: Mutex::new(None),
         });
         let me = Arc::clone(&detector);
@@ -189,9 +203,17 @@ impl IdleDetector {
     }
 
     fn evaluate(&self) -> IdleStatus {
-        let secs = if self.is_paused() { 0 } else { self.idle_seconds() };
+        let secs = if self.is_paused() {
+            0
+        } else {
+            self.idle_seconds()
+        };
         let stage = self.thresholds.read().stage_for(secs);
-        let status = IdleStatus { idle: stage >= IdleStage::Idle, idle_sec: secs, stage };
+        let status = IdleStatus {
+            idle: stage >= IdleStage::Idle,
+            idle_sec: secs,
+            stage,
+        };
         let changed = {
             let mut last = self.last.lock();
             let changed = last.stage != stage;
@@ -214,7 +236,11 @@ mod tests {
 
     #[test]
     fn stages_follow_thresholds_and_zero_disables() {
-        let t = IdleThresholds { dim_sec: 120, idle_sec: 300, screensaver_sec: 600 };
+        let t = IdleThresholds {
+            dim_sec: 120,
+            idle_sec: 300,
+            screensaver_sec: 600,
+        };
         assert_eq!(t.stage_for(0), IdleStage::Active);
         assert_eq!(t.stage_for(119), IdleStage::Active);
         assert_eq!(t.stage_for(120), IdleStage::Dim);
@@ -223,8 +249,16 @@ mod tests {
         let no_dim = IdleThresholds { dim_sec: 0, ..t };
         assert_eq!(no_dim.stage_for(200), IdleStage::Active);
         assert!(IdleStage::Idle >= IdleStage::Dim);
-        let json = serde_json::to_value(IdleStatus { idle: true, idle_sec: 301, stage: IdleStage::Idle }).unwrap();
-        assert_eq!(json, serde_json::json!({ "idle": true, "idleSec": 301, "stage": "idle" }));
+        let json = serde_json::to_value(IdleStatus {
+            idle: true,
+            idle_sec: 301,
+            stage: IdleStage::Idle,
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "idle": true, "idleSec": 301, "stage": "idle" })
+        );
     }
 
     #[test]

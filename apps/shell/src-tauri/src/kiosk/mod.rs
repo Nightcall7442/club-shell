@@ -28,7 +28,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clubshell_protocol::commands::names::events as ev;
-use clubshell_protocol::events::{GameStateChanged, PolicyChanged, RemoteControlEvent, RemoteControlState, ShellCommand, ShellCommandKind, ShowMessageArgs};
+use clubshell_protocol::events::{
+    GameStateChanged, PolicyChanged, RemoteControlEvent, RemoteControlState, ShellCommand,
+    ShellCommandKind, ShowMessageArgs,
+};
 use clubshell_protocol::games::GameState;
 use clubshell_protocol::ipc::IpcEnvelope;
 use clubshell_protocol::pc::{ExplorerPolicy, Policy};
@@ -43,7 +46,9 @@ use tokio::sync::mpsc;
 pub use alt_tab::AltTabBlocker;
 pub use commands::KioskState;
 pub use idle_detector::{ActivityFeed, IdleDetector, IdleStage, IdleStatus, IdleThresholds};
-pub use keyboard_hook::{HookPolicy, Hotkey, HotkeyKind, HotkeyPayload, KeyboardHook, HOTKEY_EVENT};
+pub use keyboard_hook::{
+    HookPolicy, Hotkey, HotkeyKind, HotkeyPayload, KeyboardHook, HOTKEY_EVENT,
+};
 pub use multi_monitor::{MonitorChangeReason, MonitorChangedEvent, MonitorDto, MultiMonitor};
 pub use overlay::{Overlay, OverlayEvent, OverlayKind};
 pub use taskbar::Taskbar;
@@ -127,10 +132,18 @@ pub fn spawn_all(app: &AppHandle, state: &AppState) -> anyhow::Result<Arc<Kiosk>
 impl Kiosk {
     /// Builds every guard from `config`; `policy_combos` are extra blocked chords from a cached policy
     /// (`policy.explorer.blockedKeyCombos`), usually empty until `policy.changed` arrives.
-    pub fn start(app: &AppHandle, config: &ShellConfig, policy_combos: Vec<String>) -> anyhow::Result<Arc<Self>> {
+    pub fn start(
+        app: &AppHandle,
+        config: &ShellConfig,
+        policy_combos: Vec<String>,
+    ) -> anyhow::Result<Arc<Self>> {
         let dev = dev_mode(config);
         if dev {
-            tracing::warn!(env_dev = config.is_dev(), debug = cfg!(debug_assertions), "DEV MODE: kiosk hardening disabled");
+            tracing::warn!(
+                env_dev = config.is_dev(),
+                debug = cfg!(debug_assertions),
+                "DEV MODE: kiosk hardening disabled"
+            );
         }
         let monitors = MultiMonitor::start(app, config, dev);
         let window = WindowGuard::start(app, config, dev, monitors.primary_rect())?;
@@ -177,7 +190,11 @@ impl Kiosk {
         // Display changes: main window back to the primary, overlay spans the new virtual screen,
         // taskbar re-hidden (Explorer re-shows it on WM_DISPLAYCHANGE).
         {
-            let (window, overlay, taskbar) = (Arc::clone(&kiosk.window), Arc::clone(&kiosk.overlay), Arc::clone(&kiosk.taskbar));
+            let (window, overlay, taskbar) = (
+                Arc::clone(&kiosk.window),
+                Arc::clone(&kiosk.overlay),
+                Arc::clone(&kiosk.taskbar),
+            );
             let preferred = config.monitors.primary_index;
             kiosk.monitors.on_change(move |list| {
                 if let Some(primary) = multi_monitor::primary_of(list, preferred) {
@@ -303,15 +320,22 @@ impl Kiosk {
         policy.merge_explorer(explorer);
         self.keyboard.set_policy(&policy);
         if !self.dev {
-            self.taskbar.set_hidden(self.config.kiosk.hide_taskbar || explorer.hide_taskbar);
+            self.taskbar
+                .set_hidden(self.config.kiosk.hide_taskbar || explorer.hide_taskbar);
         }
-        tracing::info!(alt_tab = policy.block_alt_tab, win = policy.block_win_key, extra = policy.extra.len(), "explorer policy applied");
+        tracing::info!(
+            alt_tab = policy.block_alt_tab,
+            win = policy.block_win_key,
+            extra = policy.extra.len(),
+            "explorer policy applied"
+        );
     }
 
     /// `policy.changed` / `policy_get`: explorer section + `kiosk.idleTimeoutSec`.
     pub fn apply_policy(&self, policy: &Policy) {
         self.update_policy(&policy.explorer);
-        self.idle.set_timeout(u32::try_from(policy.kiosk.idle_timeout_sec).unwrap_or(0));
+        self.idle
+            .set_timeout(u32::try_from(policy.kiosk.idle_timeout_sec).unwrap_or(0));
     }
 
     /// Admin mode (unexpired `sys.unlockAdmin`): shows the tray. Dev mode is always admin mode.
@@ -352,9 +376,12 @@ impl Kiosk {
         if !cfg!(windows) {
             return Err(ShellError::unsupported());
         }
-        let common = std::env::var("CommonProgramFiles").unwrap_or_else(|_| r"C:\Program Files\Common Files".to_owned());
+        let common = std::env::var("CommonProgramFiles")
+            .unwrap_or_else(|_| r"C:\Program Files\Common Files".to_owned());
         let path = std::path::Path::new(&common).join(TABTIP_RELATIVE);
-        let child = Command::new(&path).spawn().map_err(|e| ShellError::internal(format!("cannot start {}: {e}", path.display())))?;
+        let child = Command::new(&path)
+            .spawn()
+            .map_err(|e| ShellError::internal(format!("cannot start {}: {e}", path.display())))?;
         self.window.allow_foreground_pid(child.id());
         tracing::info!(pid = child.id(), "virtual keyboard started");
         *slot = Some(child);
@@ -392,7 +419,9 @@ impl Kiosk {
                                 self.window.allow_foreground_pid(pid);
                             }
                         }
-                        GameState::Exited | GameState::Failed | GameState::Killed => self.window.clear_allowed_pids(),
+                        GameState::Exited | GameState::Failed | GameState::Killed => {
+                            self.window.clear_allowed_pids()
+                        }
                     }
                 }
             }
@@ -411,7 +440,9 @@ impl Kiosk {
                     if remote.show_indicator && state.game_running() {
                         match remote.state {
                             RemoteControlState::Started => self.toast(env.payload.clone(), None),
-                            RemoteControlState::Stopped => self.overlay.hide_unless(OverlayKind::Lock),
+                            RemoteControlState::Stopped => {
+                                self.overlay.hide_unless(OverlayKind::Lock)
+                            }
                         }
                     }
                 }
@@ -450,7 +481,12 @@ impl Kiosk {
         self.show_overlay(OverlayKind::Message, payload, ttl);
     }
 
-    fn show_overlay(&self, kind: OverlayKind, payload: Option<serde_json::Value>, ttl: Option<Duration>) {
+    fn show_overlay(
+        &self,
+        kind: OverlayKind,
+        payload: Option<serde_json::Value>,
+        ttl: Option<Duration>,
+    ) {
         if let Err(e) = self.overlay.show(kind, payload, ttl) {
             tracing::warn!(?kind, error = %e, "overlay show failed");
         }
@@ -475,7 +511,11 @@ impl KioskControl for Kiosk {
                 tracing::debug!(error = %e, "clip_cursor failed");
             }
         }
-        let result = if locked { self.overlay.show(OverlayKind::Lock, None, None) } else { self.overlay.hide() };
+        let result = if locked {
+            self.overlay.show(OverlayKind::Lock, None, None)
+        } else {
+            self.overlay.hide()
+        };
         if let Err(e) = result {
             tracing::warn!(locked, error = %e, "lock overlay failed");
         }
@@ -525,7 +565,11 @@ impl KioskControl for Kiosk {
 }
 
 /// Hotkey channel → `kiosk://hotkey` (dev fullscreen toggle handled natively).
-fn spawn_hotkey_consumer(app: AppHandle, window: Arc<WindowGuard>, mut rx: mpsc::UnboundedReceiver<keyboard_hook::HotkeyEvent>) -> JoinHandle<()> {
+fn spawn_hotkey_consumer(
+    app: AppHandle,
+    window: Arc<WindowGuard>,
+    mut rx: mpsc::UnboundedReceiver<keyboard_hook::HotkeyEvent>,
+) -> JoinHandle<()> {
     tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
             if event.kind.is_internal() {
@@ -538,7 +582,10 @@ fn spawn_hotkey_consumer(app: AppHandle, window: Arc<WindowGuard>, mut rx: mpsc:
                 HotkeyKind::Blocked => tracing::debug!(combo = %event.combo, "blocked chord"),
                 kind => tracing::info!(name = kind.wire_name(), combo = %event.combo, "hotkey"),
             }
-            let payload = HotkeyPayload { name: event.kind.wire_name(), combo: event.combo };
+            let payload = HotkeyPayload {
+                name: event.kind.wire_name(),
+                combo: event.combo,
+            };
             if let Err(e) = app.emit(HOTKEY_EVENT, payload) {
                 tracing::warn!(error = %e, "cannot emit kiosk://hotkey");
             }

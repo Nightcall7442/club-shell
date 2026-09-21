@@ -9,7 +9,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use clubshell_winutil::hooks::BlockedCombo;
-use clubshell_winutil::window::{alt_tab_combos, force_foreground, minimize_others, set_topmost, TopmostGuard};
+use clubshell_winutil::window::{
+    alt_tab_combos, force_foreground, minimize_others, set_topmost, TopmostGuard,
+};
 use parking_lot::Mutex;
 
 /// Re-assert period of the topmost/foreground guard.
@@ -36,7 +38,10 @@ impl AltTabBlocker {
         let guard = if wanted {
             match TopmostGuard::start(hwnd, GUARD_INTERVAL) {
                 Ok(guard) => {
-                    tracing::info!(interval_ms = GUARD_INTERVAL.as_millis() as u64, "topmost guard started");
+                    tracing::info!(
+                        interval_ms = GUARD_INTERVAL.as_millis() as u64,
+                        "topmost guard started"
+                    );
                     Some(guard)
                 }
                 Err(e) => {
@@ -47,7 +52,12 @@ impl AltTabBlocker {
         } else {
             None
         };
-        Self { hwnd, dev, guard: Mutex::new(guard), enabled: AtomicBool::new(wanted) }
+        Self {
+            hwnd,
+            dev,
+            guard: Mutex::new(guard),
+            enabled: AtomicBool::new(wanted),
+        }
     }
 
     pub fn hwnd(&self) -> isize {
@@ -136,7 +146,10 @@ mod tests {
         assert!(!blocker.is_enabled() && !blocker.has_guard());
         assert!(!blocker.assert_foreground());
         blocker.set_enabled(true);
-        assert!(blocker.is_enabled(), "state is tracked even without a window");
+        assert!(
+            blocker.is_enabled(),
+            "state is tracked even without a window"
+        );
         blocker.shutdown();
         assert!(!blocker.is_enabled());
         assert_eq!(AltTabBlocker::combos().len(), 4);

@@ -37,8 +37,14 @@ impl Tray {
         let icon = match app.tray_by_id(Self::ID) {
             Some(icon) => icon,
             None => {
-                let image = app.default_window_icon().cloned().ok_or_else(|| anyhow::anyhow!("no default window icon for the tray"))?;
-                TrayIconBuilder::with_id(Self::ID).icon(image).tooltip("ClubShell").build(app)?
+                let image = app
+                    .default_window_icon()
+                    .cloned()
+                    .ok_or_else(|| anyhow::anyhow!("no default window icon for the tray"))?;
+                TrayIconBuilder::with_id(Self::ID)
+                    .icon(image)
+                    .tooltip("ClubShell")
+                    .build(app)?
             }
         };
         icon.set_menu(Some(build_menu(app)?))?;
@@ -46,7 +52,10 @@ impl Tray {
         icon.on_menu_event(move |app, event| on_menu(app, &state, event.id().0.as_str()));
         icon.set_visible(dev)?;
         tracing::info!(visible = dev, "tray installed");
-        Ok(Self { icon, visible: AtomicBool::new(dev) })
+        Ok(Self {
+            icon,
+            visible: AtomicBool::new(dev),
+        })
     }
 
     /// Shows / hides the icon (idempotent).
@@ -104,9 +113,13 @@ fn reconnect(state: &AppState) {
                 tracing::info!("reconnect requested; closing pipe");
                 client.close();
             }
-            None => tracing::info!("reconnect requested; not connected (supervisor already retrying)"),
+            None => {
+                tracing::info!("reconnect requested; not connected (supervisor already retrying)")
+            }
         },
-        AgentClient::Mock(_) => tracing::info!("reconnect requested on the mock agent; nothing to do"),
+        AgentClient::Mock(_) => {
+            tracing::info!("reconnect requested on the mock agent; nothing to do")
+        }
     }
 }
 
@@ -145,7 +158,13 @@ fn exit(app: &AppHandle, state: &AppState) {
     if dev || state.has_admin_unlock() {
         tracing::warn!("exit requested from the tray");
         crate::shutdown(app);
-    } else if let Err(e) = app.emit(HOTKEY_EVENT, HotkeyPayload { name: "exit", combo: "tray".to_owned() }) {
+    } else if let Err(e) = app.emit(
+        HOTKEY_EVENT,
+        HotkeyPayload {
+            name: "exit",
+            combo: "tray".to_owned(),
+        },
+    ) {
         tracing::warn!(error = %e, "cannot emit kiosk://hotkey");
     }
 }

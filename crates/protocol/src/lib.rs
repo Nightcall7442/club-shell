@@ -144,7 +144,8 @@ pub mod wire {
 
         pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<DateTime<Utc>, D::Error> {
             let text = String::deserialize(d)?;
-            parse_ts(&text).ok_or_else(|| de::Error::custom(format!("invalid ISO-8601 timestamp '{text}'")))
+            parse_ts(&text)
+                .ok_or_else(|| de::Error::custom(format!("invalid ISO-8601 timestamp '{text}'")))
         }
     }
 
@@ -152,19 +153,24 @@ pub mod wire {
     pub mod ts_opt {
         use super::*;
 
-        pub fn serialize<S: Serializer>(v: &Option<DateTime<Utc>>, s: S) -> Result<S::Ok, S::Error> {
+        pub fn serialize<S: Serializer>(
+            v: &Option<DateTime<Utc>>,
+            s: S,
+        ) -> Result<S::Ok, S::Error> {
             match v {
                 Some(dt) => super::ts::serialize(dt, s),
                 None => s.serialize_none(),
             }
         }
 
-        pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<DateTime<Utc>>, D::Error> {
+        pub fn deserialize<'de, D: Deserializer<'de>>(
+            d: D,
+        ) -> Result<Option<DateTime<Utc>>, D::Error> {
             match Option::<String>::deserialize(d)? {
                 None => Ok(None),
-                Some(text) => parse_ts(&text)
-                    .map(Some)
-                    .ok_or_else(|| de::Error::custom(format!("invalid ISO-8601 timestamp '{text}'"))),
+                Some(text) => parse_ts(&text).map(Some).ok_or_else(|| {
+                    de::Error::custom(format!("invalid ISO-8601 timestamp '{text}'"))
+                }),
             }
         }
     }
@@ -179,7 +185,8 @@ pub mod wire {
 
         pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<NaiveTime, D::Error> {
             let text = String::deserialize(d)?;
-            parse_time(&text).ok_or_else(|| de::Error::custom(format!("invalid time '{text}', expected HH:mm")))
+            parse_time(&text)
+                .ok_or_else(|| de::Error::custom(format!("invalid time '{text}', expected HH:mm")))
         }
     }
 
@@ -197,9 +204,9 @@ pub mod wire {
         pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<NaiveTime>, D::Error> {
             match Option::<String>::deserialize(d)? {
                 None => Ok(None),
-                Some(text) => parse_time(&text)
-                    .map(Some)
-                    .ok_or_else(|| de::Error::custom(format!("invalid time '{text}', expected HH:mm"))),
+                Some(text) => parse_time(&text).map(Some).ok_or_else(|| {
+                    de::Error::custom(format!("invalid time '{text}', expected HH:mm"))
+                }),
             }
         }
     }
@@ -284,9 +291,19 @@ pub mod wire {
                 #[serde(default, with = "num_opt", skip_serializing_if = "Option::is_none")]
                 c: Option<f64>,
             }
-            let json = serde_json::to_string(&D { a: 50.0, b: 50.5, c: None }).unwrap();
+            let json = serde_json::to_string(&D {
+                a: 50.0,
+                b: 50.5,
+                c: None,
+            })
+            .unwrap();
             assert_eq!(json, r#"{"a":50,"b":50.5}"#);
-            let json = serde_json::to_string(&D { a: -3.0, b: 0.1, c: Some(2.0) }).unwrap();
+            let json = serde_json::to_string(&D {
+                a: -3.0,
+                b: 0.1,
+                c: Some(2.0),
+            })
+            .unwrap();
             assert_eq!(json, r#"{"a":-3,"b":0.1,"c":2}"#);
         }
     }
@@ -316,8 +333,8 @@ pub mod prelude {
     pub use crate::user::*;
     pub use crate::wallet::*;
     pub use crate::{
-        pipe_path, MAX_FRAME_BYTES, PIPE_NAME, PIPE_SHORT_NAME, PROTOCOL_VERSION, WS_MAX_FRAME_BYTES,
-        WS_SUBPROTOCOL,
+        pipe_path, MAX_FRAME_BYTES, PIPE_NAME, PIPE_SHORT_NAME, PROTOCOL_VERSION,
+        WS_MAX_FRAME_BYTES, WS_SUBPROTOCOL,
     };
 }
 

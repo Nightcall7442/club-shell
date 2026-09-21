@@ -5,7 +5,9 @@
 use std::time::{Duration, Instant};
 
 use clubshell_protocol::commands::names::events as ev;
-use clubshell_protocol::events::{ConnectivityEvent, GameStateChanged, ShellCommand, ShellCommandKind};
+use clubshell_protocol::events::{
+    ConnectivityEvent, GameStateChanged, ShellCommand, ShellCommandKind,
+};
 use clubshell_protocol::games::GameState;
 use clubshell_protocol::ipc::IpcEnvelope;
 use clubshell_protocol::session::Session;
@@ -70,7 +72,10 @@ impl EventFilter {
     /// `true` when a `sys.metrics` event may be forwarded now.
     fn allow_metrics(&mut self) -> bool {
         let now = Instant::now();
-        if self.last_metrics.is_some_and(|t| now.duration_since(t) < METRICS_MIN_INTERVAL) {
+        if self
+            .last_metrics
+            .is_some_and(|t| now.duration_since(t) < METRICS_MIN_INTERVAL)
+        {
             return false;
         }
         self.last_metrics = Some(now);
@@ -105,18 +110,21 @@ fn forward(app: &AppHandle, state: &AppState, filter: &mut EventFilter, env: Ipc
             state.set_session(None);
             state.clear_admin_unlock();
         }
-        ev::SYS_CONNECTIVITY => match serde_json::from_value::<ConnectivityEvent>(payload.clone()) {
-            Ok(connectivity) => {
-                let _ = state.connectivity.send_replace(Some(connectivity));
+        ev::SYS_CONNECTIVITY => {
+            match serde_json::from_value::<ConnectivityEvent>(payload.clone()) {
+                Ok(connectivity) => {
+                    let _ = state.connectivity.send_replace(Some(connectivity));
+                }
+                Err(e) => tracing::warn!(error = %e, "sys.connectivity payload malformed"),
             }
-            Err(e) => tracing::warn!(error = %e, "sys.connectivity payload malformed"),
-        },
+        }
         ev::SYS_METRICS => {
             if !filter.allow_metrics() {
                 return;
             }
         }
-        ev::GAME_STATE_CHANGED => match serde_json::from_value::<GameStateChanged>(payload.clone()) {
+        ev::GAME_STATE_CHANGED => match serde_json::from_value::<GameStateChanged>(payload.clone())
+        {
             Ok(change) => {
                 let running = matches!(change.state, GameState::Launching | GameState::Running);
                 if state.game_running() != running {
@@ -162,7 +170,10 @@ mod tests {
 
     #[test]
     fn event_names_are_mirrored() {
-        assert_eq!(agent_event_name(ev::SESSION_UPDATED), "agent://session.updated");
+        assert_eq!(
+            agent_event_name(ev::SESSION_UPDATED),
+            "agent://session.updated"
+        );
         assert_eq!(ev::ALL.len(), 18);
     }
 }

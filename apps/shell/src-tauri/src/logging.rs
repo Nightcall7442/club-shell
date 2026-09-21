@@ -34,7 +34,10 @@ pub fn init_logging(config: &ShellConfig) -> WorkerGuard {
             (writer, guard, true)
         }
         Err(e) => {
-            eprintln!("clubshell-shell: cannot open log directory {}: {e}; logging to stderr only", logs_dir.display());
+            eprintln!(
+                "clubshell-shell: cannot open log directory {}: {e}; logging to stderr only",
+                logs_dir.display()
+            );
             let (writer, guard) = tracing_appender::non_blocking(std::io::stderr());
             (writer, guard, false)
         }
@@ -47,11 +50,20 @@ pub fn init_logging(config: &ShellConfig) -> WorkerGuard {
         .with_span_list(false)
         .with_target(true)
         .with_writer(writer);
-    let stderr_layer = (config.is_dev() || cfg!(debug_assertions))
-        .then(|| tracing_subscriber::fmt::layer().with_ansi(false).with_target(true).with_writer(std::io::stderr));
+    let stderr_layer = (config.is_dev() || cfg!(debug_assertions)).then(|| {
+        tracing_subscriber::fmt::layer()
+            .with_ansi(false)
+            .with_target(true)
+            .with_writer(std::io::stderr)
+    });
 
     // `init` also installs the `log` → `tracing` bridge (tracing-subscriber's `tracing-log` feature).
-    if let Err(e) = tracing_subscriber::registry().with(filter).with(file_layer).with(stderr_layer).try_init() {
+    if let Err(e) = tracing_subscriber::registry()
+        .with(filter)
+        .with(file_layer)
+        .with(stderr_layer)
+        .try_init()
+    {
         tracing::warn!(error = %e, "logging already initialised; keeping the existing subscriber");
         return guard;
     }
@@ -103,10 +115,21 @@ fn install_panic_hook(crash_log: std::path::PathBuf) {
             .map(|s| (*s).to_owned())
             .or_else(|| info.payload().downcast_ref::<String>().cloned())
             .unwrap_or_else(|| "non-string panic payload".to_owned());
-        let location = info.location().map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column())).unwrap_or_default();
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_default();
         tracing::error!(target: "panic", payload = %payload, location = %location, "panic");
-        if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&crash_log) {
-            let _ = writeln!(file, "{} panic at {location}: {payload}", chrono::Utc::now().to_rfc3339());
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&crash_log)
+        {
+            let _ = writeln!(
+                file,
+                "{} panic at {location}: {payload}",
+                chrono::Utc::now().to_rfc3339()
+            );
         }
         previous(info);
     }));

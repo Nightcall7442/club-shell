@@ -101,7 +101,9 @@ pub fn drain_frames(reader: &mut FrameReader, bytes: &[u8]) -> Result<Vec<IpcEnv
         match reader.next_frame() {
             Ok(Some(env)) => out.push(env),
             Ok(None) => return Ok(out),
-            Err(ProtocolError::Json(e)) => tracing::warn!(error = %e, "malformed IPC frame skipped"),
+            Err(ProtocolError::Json(e)) => {
+                tracing::warn!(error = %e, "malformed IPC frame skipped")
+            }
             Err(e) => return Err(e.into()),
         }
     }
@@ -150,14 +152,18 @@ impl Shared {
                     Some(tx) => {
                         let _ = tx.send(env);
                     }
-                    None => tracing::debug!(id = %env.id, name = %env.name, "response without a pending request (late or unknown)"),
+                    None => {
+                        tracing::debug!(id = %env.id, name = %env.name, "response without a pending request (late or unknown)")
+                    }
                 }
             }
             IpcKind::Event => {
                 // No subscribers is not an error: the shell may not have wired listeners yet.
                 let _ = self.events.send(env);
             }
-            IpcKind::Request => tracing::warn!(name = %env.name, "agent sent a request over the shell pipe; ignored"),
+            IpcKind::Request => {
+                tracing::warn!(name = %env.name, "agent sent a request over the shell pipe; ignored")
+            }
         }
     }
 
@@ -228,7 +234,11 @@ async fn reader_loop<R: AsyncRead + Unpin>(mut rd: R, shared: Arc<Shared>) -> Cl
     }
 }
 
-async fn writer_loop<W: AsyncWrite + Unpin>(mut wr: W, mut queue: mpsc::Receiver<Bytes>, shared: Arc<Shared>) -> CloseReason {
+async fn writer_loop<W: AsyncWrite + Unpin>(
+    mut wr: W,
+    mut queue: mpsc::Receiver<Bytes>,
+    shared: Arc<Shared>,
+) -> CloseReason {
     let mut state = shared.state.subscribe();
     loop {
         tokio::select! {
@@ -261,7 +271,13 @@ async fn heartbeat_loop(shared: Arc<Shared>) {
             _ = wait_closed(&mut state) => return,
         }
         let seq = shared.ping_seq.fetch_add(1, Ordering::Relaxed) + 1;
-        let ping = match IpcEnvelope::request_with(names::sys::PING, &SysPingRequest { seq, sent_at: Utc::now() }) {
+        let ping = match IpcEnvelope::request_with(
+            names::sys::PING,
+            &SysPingRequest {
+                seq,
+                sent_at: Utc::now(),
+            },
+        ) {
             Ok(env) => env,
             Err(e) => {
                 tracing::error!(error = %e, "cannot encode sys.ping");
@@ -355,7 +371,8 @@ impl PipeClient {
                 }
                 Err(e) => {
                     let code = e.raw_os_error();
-                    let retryable = code == Some(ERROR_PIPE_BUSY.0 as i32) || code == Some(ERROR_FILE_NOT_FOUND.0 as i32);
+                    let retryable = code == Some(ERROR_PIPE_BUSY.0 as i32)
+                        || code == Some(ERROR_FILE_NOT_FOUND.0 as i32);
                     if !retryable {
                         return Err(WinUtilError::Io(e));
                     }
@@ -371,7 +388,11 @@ impl PipeClient {
 
     /// Non-Windows stub: always [`WinUtilError::Unsupported`].
     #[cfg(not(windows))]
-    pub async fn connect_with(_name: &str, _timeout: Duration, _options: PipeOptions) -> Result<Self> {
+    pub async fn connect_with(
+        _name: &str,
+        _timeout: Duration,
+        _options: PipeOptions,
+    ) -> Result<Self> {
         Err(WinUtilError::Unsupported)
     }
 
@@ -382,11 +403,17 @@ impl PipeClient {
     /// Sends a request envelope and awaits the response with the same id (default timeout). The
     /// response is returned as-is: an error envelope is `Ok(env)` with `env.error.is_some()`.
     pub async fn request(&self, env: IpcEnvelope) -> Result<IpcEnvelope> {
-        self.shared.request(env, self.shared.options.request_timeout).await
+        self.shared
+            .request(env, self.shared.options.request_timeout)
+            .await
     }
 
     /// [`request`](Self::request) with an explicit timeout (`games.launch` uses 120 s).
-    pub async fn request_timeout(&self, env: IpcEnvelope, timeout: Duration) -> Result<IpcEnvelope> {
+    pub async fn request_timeout(
+        &self,
+        env: IpcEnvelope,
+        timeout: Duration,
+    ) -> Result<IpcEnvelope> {
         self.shared.request(env, timeout).await
     }
 
@@ -404,7 +431,10 @@ impl PipeClient {
         Req: Serialize,
         Resp: DeserializeOwned,
     {
-        let resp = Self::check(self.request(IpcEnvelope::request_with(name, payload)?).await?)?;
+        let resp = Self::check(
+            self.request(IpcEnvelope::request_with(name, payload)?)
+                .await?,
+        )?;
         resp.require_payload::<Resp>().map_err(WinUtilError::from)
     }
 
@@ -414,7 +444,10 @@ impl PipeClient {
         Req: Serialize,
         Resp: DeserializeOwned,
     {
-        let resp = Self::check(self.request(IpcEnvelope::request_with(name, payload)?).await?)?;
+        let resp = Self::check(
+            self.request(IpcEnvelope::request_with(name, payload)?)
+                .await?,
+        )?;
         resp.payload_as::<Resp>().map_err(WinUtilError::from)
     }
 
@@ -471,7 +504,12 @@ pub mod test_server {
     pub fn echo_reply(req: &IpcEnvelope) -> Result<IpcEnvelope> {
         if req.name == names::sys::PING {
             let ping: SysPingRequest = req.require_payload()?;
-            let pong = SysPongResponse { seq: ping.seq, sent_at: ping.sent_at, received_at: Utc::now(), connectivity: ConnectivityState::Online };
+            let pong = SysPongResponse {
+                seq: ping.seq,
+                sent_at: ping.sent_at,
+                received_at: Utc::now(),
+                connectivity: ConnectivityState::Online,
+            };
             return IpcEnvelope::reply_to_with(req, &pong).map_err(WinUtilError::from);
         }
         Ok(IpcEnvelope::reply_to(req, req.payload.clone()))
@@ -486,7 +524,10 @@ pub mod test_server {
 
     /// Serves one connection until the peer closes it: answers every request with [`echo_reply`] and
     /// forwards envelopes received on `events` (closing that channel just stops event injection).
-    pub async fn serve_echo<S>(stream: S, mut events: Option<mpsc::Receiver<IpcEnvelope>>) -> Result<()>
+    pub async fn serve_echo<S>(
+        stream: S,
+        mut events: Option<mpsc::Receiver<IpcEnvelope>>,
+    ) -> Result<()>
     where
         S: AsyncRead + AsyncWrite + Unpin,
     {
@@ -529,8 +570,13 @@ pub mod test_server {
         pub fn bind(name: &str) -> Result<Self> {
             use tokio::net::windows::named_pipe::ServerOptions;
             let path = full_pipe_path(name);
-            let next = ServerOptions::new().first_pipe_instance(true).create(&path)?;
-            Ok(Self { path, next: Some(next) })
+            let next = ServerOptions::new()
+                .first_pipe_instance(true)
+                .create(&path)?;
+            Ok(Self {
+                path,
+                next: Some(next),
+            })
         }
 
         pub fn path(&self) -> &str {
@@ -582,13 +628,23 @@ mod tests {
 
         // Oversize prefix is fatal.
         let mut reader = FrameReader::new();
-        let err = drain_frames(&mut reader, &(IpcEnvelope::MAX_FRAME_BYTES as u32 + 1).to_le_bytes()).unwrap_err();
-        assert!(matches!(err, WinUtilError::Frame(ProtocolError::FrameTooLarge { .. })));
+        let err = drain_frames(
+            &mut reader,
+            &(IpcEnvelope::MAX_FRAME_BYTES as u32 + 1).to_le_bytes(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            WinUtilError::Frame(ProtocolError::FrameTooLarge { .. })
+        ));
     }
 
     #[test]
     fn pipe_path_expansion() {
-        assert_eq!(full_pipe_path("clubshell-agent"), r"\\.\pipe\clubshell-agent");
+        assert_eq!(
+            full_pipe_path("clubshell-agent"),
+            r"\\.\pipe\clubshell-agent"
+        );
         assert_eq!(full_pipe_path(r"\\.\pipe\custom"), r"\\.\pipe\custom");
     }
 
@@ -601,7 +657,13 @@ mod tests {
         let client = PipeClient::from_stream(a, opts(true));
         let mut events = client.subscribe();
 
-        let resp = client.request(IpcEnvelope::request(names::games::RUNNING, Some(json!({ "x": 1 })))).await.unwrap();
+        let resp = client
+            .request(IpcEnvelope::request(
+                names::games::RUNNING,
+                Some(json!({ "x": 1 })),
+            ))
+            .await
+            .unwrap();
         assert_eq!(resp.kind, IpcKind::Response);
         assert_eq!(resp.name, names::games::RUNNING);
         assert_eq!(resp.payload, Some(json!({ "x": 1 })));
@@ -610,9 +672,15 @@ mod tests {
         struct P {
             x: i32,
         }
-        let p: P = client.call(names::games::RUNNING, &P { x: 7 }).await.unwrap();
+        let p: P = client
+            .call(names::games::RUNNING, &P { x: 7 })
+            .await
+            .unwrap();
         assert_eq!(p, P { x: 7 });
-        let none: Option<P> = client.call_optional(names::session::GET, &()).await.unwrap();
+        let none: Option<P> = client
+            .call_optional(names::session::GET, &())
+            .await
+            .unwrap();
         assert_eq!(none, None);
         let raw = client.call_raw(names::auth::STATUS, None).await.unwrap();
         assert_eq!(raw.payload, None);
@@ -622,16 +690,34 @@ mod tests {
         assert!(client.is_connected());
         assert!(client.shared.ping_seq.load(Ordering::Relaxed) >= 1);
 
-        ev_tx.send(IpcEnvelope::event(names::events::SESSION_UPDATED, Some(json!({ "a": 1 })))).await.unwrap();
-        let ev = tokio::time::timeout(Duration::from_secs(2), events.recv()).await.unwrap().unwrap();
+        ev_tx
+            .send(IpcEnvelope::event(
+                names::events::SESSION_UPDATED,
+                Some(json!({ "a": 1 })),
+            ))
+            .await
+            .unwrap();
+        let ev = tokio::time::timeout(Duration::from_secs(2), events.recv())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(ev.kind, IpcKind::Event);
         assert_eq!(ev.name, names::events::SESSION_UPDATED);
 
         client.close();
         assert_eq!(client.closed().await, CloseReason::Shutdown);
-        assert!(matches!(client.request(IpcEnvelope::request(names::auth::STATUS, None)).await, Err(WinUtilError::Closed)));
+        assert!(matches!(
+            client
+                .request(IpcEnvelope::request(names::auth::STATUS, None))
+                .await,
+            Err(WinUtilError::Closed)
+        ));
         drop(client);
-        tokio::time::timeout(Duration::from_secs(2), server).await.unwrap().unwrap().unwrap();
+        tokio::time::timeout(Duration::from_secs(2), server)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
     }
 
     #[tokio::test]
@@ -646,10 +732,19 @@ mod tests {
             }
         });
         let client = PipeClient::from_stream(a, opts(false));
-        let err = client.request(IpcEnvelope::request(names::auth::STATUS, None)).await.unwrap_err();
+        let err = client
+            .request(IpcEnvelope::request(names::auth::STATUS, None))
+            .await
+            .unwrap_err();
         assert!(matches!(err, WinUtilError::Timeout));
-        assert!(client.is_connected(), "a timed-out request does not close the connection");
-        assert!(client.shared.pending.lock().is_empty(), "timed-out waiter is removed");
+        assert!(
+            client.is_connected(),
+            "a timed-out request does not close the connection"
+        );
+        assert!(
+            client.shared.pending.lock().is_empty(),
+            "timed-out waiter is removed"
+        );
         drop(client);
         let _ = tokio::time::timeout(Duration::from_secs(2), sink).await;
     }
@@ -666,10 +761,15 @@ mod tests {
             }
         });
         let client = PipeClient::from_stream(a, opts(true));
-        let reason = tokio::time::timeout(Duration::from_secs(3), client.closed()).await.unwrap();
+        let reason = tokio::time::timeout(Duration::from_secs(3), client.closed())
+            .await
+            .unwrap();
         assert_eq!(reason, CloseReason::HeartbeatTimeout);
         assert!(!client.is_connected());
-        assert_eq!(*client.state().borrow(), ConnectionState::Closed(CloseReason::HeartbeatTimeout));
+        assert_eq!(
+            *client.state().borrow(),
+            ConnectionState::Closed(CloseReason::HeartbeatTimeout)
+        );
         drop(client);
         let _ = tokio::time::timeout(Duration::from_secs(2), sink).await;
     }
@@ -680,7 +780,14 @@ mod tests {
         let client = PipeClient::from_stream(a, opts(false));
         let pending = tokio::spawn({
             let shared = Arc::clone(&client.shared);
-            async move { shared.request(IpcEnvelope::request(names::auth::STATUS, None), Duration::from_secs(5)).await }
+            async move {
+                shared
+                    .request(
+                        IpcEnvelope::request(names::auth::STATUS, None),
+                        Duration::from_secs(5),
+                    )
+                    .await
+            }
         });
         tokio::time::sleep(Duration::from_millis(20)).await;
         drop(b);

@@ -8,7 +8,9 @@
 
 use std::path::Path;
 
-use clubshell_protocol::commands::{names, SettingsSetRequest, ShellSettings, SysSetLocaleResponse};
+use clubshell_protocol::commands::{
+    names, SettingsSetRequest, ShellSettings, SysSetLocaleResponse,
+};
 use clubshell_protocol::pc::Theme;
 use tauri::{AppHandle, State};
 
@@ -48,14 +50,18 @@ fn load_theme_from(path: &Path, name: &str) -> Theme {
                 }
                 return theme;
             }
-            Err(e) => tracing::warn!(path = %path.display(), error = %e, "theme file invalid; using embedded default"),
+            Err(e) => {
+                tracing::warn!(path = %path.display(), error = %e, "theme file invalid; using embedded default")
+            }
         },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             if name != DEFAULT_THEME_NAME {
                 tracing::warn!(path = %path.display(), "theme file missing; using embedded default");
             }
         }
-        Err(e) => tracing::warn!(path = %path.display(), error = %e, "cannot read theme file; using embedded default"),
+        Err(e) => {
+            tracing::warn!(path = %path.display(), error = %e, "cannot read theme file; using embedded default")
+        }
     }
     default_theme()
 }
@@ -71,15 +77,24 @@ fn list_themes_in(dir: &Path) -> Vec<String> {
         Ok(entries) => {
             for entry in entries.flatten() {
                 let path = entry.path();
-                let is_json = path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("json"));
-                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()).filter(|_| is_json) {
+                let is_json = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("json"));
+                if let Some(stem) = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .filter(|_| is_json)
+                {
                     if validate::bare_name("theme", stem).is_ok() {
                         names.push(stem.to_owned());
                     }
                 }
             }
         }
-        Err(e) => tracing::debug!(dir = %dir.display(), error = %e, "themes directory not readable"),
+        Err(e) => {
+            tracing::debug!(dir = %dir.display(), error = %e, "themes directory not readable")
+        }
     }
     names.sort_unstable();
     names.dedup();
@@ -100,12 +115,24 @@ pub async fn settings_get(state: State<'_, AppState>) -> CmdResult<ShellSettings
 /// `settings_set` → `settings.set` (partial patch, at least one key), then `kiosk://themeChanged` /
 /// `kiosk://localeChanged` when those keys were part of the patch.
 #[tauri::command]
-pub async fn settings_set(app: AppHandle, state: State<'_, AppState>, patch: SettingsSetRequest) -> CmdResult<ShellSettings> {
+pub async fn settings_set(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    patch: SettingsSetRequest,
+) -> CmdResult<ShellSettings> {
     if patch.is_empty() {
-        return Err(ShellError::validation("patch", "at least one setting required"));
+        return Err(ShellError::validation(
+            "patch",
+            "at least one setting required",
+        ));
     }
     validate::optional_range("volume", patch.volume, 0, 100)?;
-    validate::optional_range("idleTimeoutSec", patch.idle_timeout_sec, 0, IDLE_TIMEOUT_MAX)?;
+    validate::optional_range(
+        "idleTimeoutSec",
+        patch.idle_timeout_sec,
+        0,
+        IDLE_TIMEOUT_MAX,
+    )?;
     if let Some(theme) = patch.theme.as_deref() {
         validate::bare_name("theme", theme)?;
         if !list_themes(&state.config).iter().any(|t| t == theme) {
@@ -116,10 +143,20 @@ pub async fn settings_set(app: AppHandle, state: State<'_, AppState>, patch: Set
     let settings: ShellSettings = state.agent.request(names::settings::SET, &patch).await?;
     tracing::info!(theme = %settings.theme, locale = %settings.locale, volume = settings.volume, "settings updated");
     if patch.theme.is_some() {
-        emit(&app, THEME_CHANGED_EVENT, load_theme(&state.config, &settings.theme));
+        emit(
+            &app,
+            THEME_CHANGED_EVENT,
+            load_theme(&state.config, &settings.theme),
+        );
     }
     if patch.locale.is_some() {
-        emit(&app, LOCALE_CHANGED_EVENT, SysSetLocaleResponse { locale: settings.locale });
+        emit(
+            &app,
+            LOCALE_CHANGED_EVENT,
+            SysSetLocaleResponse {
+                locale: settings.locale,
+            },
+        );
     }
     Ok(settings)
 }
@@ -127,8 +164,14 @@ pub async fn settings_set(app: AppHandle, state: State<'_, AppState>, patch: Set
 /// `settings_get_theme` (local): `themes\<name>.json`, default `shell.json → theme`; embedded
 /// default when the file is missing.
 #[tauri::command]
-pub async fn settings_get_theme(state: State<'_, AppState>, name: Option<String>) -> CmdResult<Theme> {
-    let name = name.map(|n| n.trim().to_owned()).filter(|n| !n.is_empty()).unwrap_or_else(|| state.config.theme.clone());
+pub async fn settings_get_theme(
+    state: State<'_, AppState>,
+    name: Option<String>,
+) -> CmdResult<Theme> {
+    let name = name
+        .map(|n| n.trim().to_owned())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| state.config.theme.clone());
     validate::bare_name("name", &name)?;
     Ok(load_theme(&state.config, &name))
 }
@@ -170,11 +213,23 @@ mod tests {
         std::fs::write(dir.join("bad name.json"), "{}").unwrap();
         std::fs::write(dir.join("readme.txt"), "x").unwrap();
 
-        assert_eq!(list_themes_in(&dir), vec!["broken".to_owned(), "default".to_owned(), "neon".to_owned()]);
-        assert_eq!(list_themes_in(&dir.join("missing")), vec!["default".to_owned()]);
+        assert_eq!(
+            list_themes_in(&dir),
+            vec!["broken".to_owned(), "default".to_owned(), "neon".to_owned()]
+        );
+        assert_eq!(
+            list_themes_in(&dir.join("missing")),
+            vec!["default".to_owned()]
+        );
         assert_eq!(load_theme_from(&dir.join("neon.json"), "neon").name, "neon");
-        assert_eq!(load_theme_from(&dir.join("broken.json"), "broken").name, DEFAULT_THEME_NAME);
-        assert_eq!(load_theme_from(&dir.join("nope.json"), "nope").name, DEFAULT_THEME_NAME);
+        assert_eq!(
+            load_theme_from(&dir.join("broken.json"), "broken").name,
+            DEFAULT_THEME_NAME
+        );
+        assert_eq!(
+            load_theme_from(&dir.join("nope.json"), "nope").name,
+            DEFAULT_THEME_NAME
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -12,7 +12,10 @@ use clubshell_winutil::monitor::{enumerate, pick_primary, DisplayWatcher, Monito
 use clubshell_winutil::Rect;
 use parking_lot::{Mutex, RwLock};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
+};
 
 use crate::config::{MonitorsConfig, SecondaryMode, ShellConfig};
 
@@ -83,14 +86,24 @@ pub fn primary_of(list: &[MonitorInfo], preferred: usize) -> Option<&MonitorInfo
 /// Position of the primary inside `list` (wire `primaryIndex`).
 pub fn primary_position(list: &[MonitorInfo], preferred: usize) -> u32 {
     primary_of(list, preferred)
-        .and_then(|p| list.iter().position(|m| m.handle == p.handle && m.name == p.name))
+        .and_then(|p| {
+            list.iter()
+                .position(|m| m.handle == p.handle && m.name == p.name)
+        })
         .and_then(|i| u32::try_from(i).ok())
         .unwrap_or(0)
 }
 
 /// Bounding rectangle of all monitors (the virtual screen).
 pub fn union_rect(list: &[MonitorInfo]) -> Option<Rect> {
-    list.iter().map(|m| m.rect).reduce(|a, b| Rect::new(a.left.min(b.left), a.top.min(b.top), a.right.max(b.right), a.bottom.max(b.bottom)))
+    list.iter().map(|m| m.rect).reduce(|a, b| {
+        Rect::new(
+            a.left.min(b.left),
+            a.top.min(b.top),
+            a.right.max(b.right),
+            a.bottom.max(b.bottom),
+        )
+    })
 }
 
 /// Classifies a topology change for the event's `reason`.
@@ -100,7 +113,10 @@ pub fn change_reason(old: &[MonitorInfo], new: &[MonitorInfo]) -> MonitorChangeR
         std::cmp::Ordering::Less => MonitorChangeReason::Removed,
         std::cmp::Ordering::Equal => {
             let same_geometry = old.iter().zip(new).all(|(a, b)| a.rect == b.rect);
-            let dpi_changed = old.iter().zip(new).any(|(a, b)| (a.scale - b.scale).abs() > 1e-3);
+            let dpi_changed = old
+                .iter()
+                .zip(new)
+                .any(|(a, b)| (a.scale - b.scale).abs() > 1e-3);
             if same_geometry && dpi_changed {
                 MonitorChangeReason::Dpi
             } else {
@@ -112,18 +128,28 @@ pub fn change_reason(old: &[MonitorInfo], new: &[MonitorInfo]) -> MonitorChangeR
 
 fn apply_bounds(window: &WebviewWindow, rect: Rect) -> tauri::Result<()> {
     window.set_position(PhysicalPosition::new(rect.left, rect.top))?;
-    window.set_size(PhysicalSize::new(u32::try_from(rect.width()).unwrap_or(0), u32::try_from(rect.height()).unwrap_or(0)))
+    window.set_size(PhysicalSize::new(
+        u32::try_from(rect.width()).unwrap_or(0),
+        u32::try_from(rect.height()).unwrap_or(0),
+    ))
 }
 
 /// Monitors from Tauri (non-Windows / winutil failure): no refresh rate, primary by name.
 fn tauri_monitors(app: &AppHandle) -> Vec<MonitorInfo> {
-    let primary_name = app.primary_monitor().ok().flatten().and_then(|m| m.name().cloned());
+    let primary_name = app
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .and_then(|m| m.name().cloned());
     app.available_monitors()
         .unwrap_or_default()
         .iter()
         .enumerate()
         .map(|(index, m)| {
-            let name = m.name().cloned().unwrap_or_else(|| format!("DISPLAY{}", index + 1));
+            let name = m
+                .name()
+                .cloned()
+                .unwrap_or_else(|| format!("DISPLAY{}", index + 1));
             let rect = Rect::from_size(
                 m.position().x,
                 m.position().y,
@@ -175,7 +201,11 @@ impl MultiMonitor {
     /// Enumerates, lays out the secondary windows and starts the display watcher.
     pub fn start(app: &AppHandle, config: &ShellConfig, dev: bool) -> Arc<Self> {
         let monitors = enumerate_monitors(app);
-        tracing::info!(count = monitors.len(), primary = primary_position(&monitors, config.monitors.primary_index), "monitors enumerated");
+        tracing::info!(
+            count = monitors.len(),
+            primary = primary_position(&monitors, config.monitors.primary_index),
+            "monitors enumerated"
+        );
         let me = Arc::new(Self {
             app: app.clone(),
             config: config.monitors.clone(),
@@ -191,14 +221,16 @@ impl MultiMonitor {
             Ok((watcher, rx)) => {
                 *me.watcher.lock() = Some(watcher);
                 let weak: Weak<Self> = Arc::downgrade(&me);
-                let spawned = std::thread::Builder::new().name("clubshell-displays".to_owned()).spawn(move || {
-                    for list in rx {
-                        match weak.upgrade() {
-                            Some(monitors) => monitors.handle_change(list),
-                            None => break,
+                let spawned = std::thread::Builder::new()
+                    .name("clubshell-displays".to_owned())
+                    .spawn(move || {
+                        for list in rx {
+                            match weak.upgrade() {
+                                Some(monitors) => monitors.handle_change(list),
+                                None => break,
+                            }
                         }
-                    }
-                });
+                    });
                 match spawned {
                     Ok(handle) => *me.thread.lock() = Some(handle),
                     Err(e) => tracing::warn!(error = %e, "cannot start display thread"),
@@ -244,7 +276,11 @@ impl MultiMonitor {
 
     /// Rectangle of the monitor with enumeration index `index` (`kiosk_move_to_monitor`).
     pub fn monitor_rect(&self, index: usize) -> Option<Rect> {
-        self.current.read().iter().find(|m| m.index == index).map(|m| m.rect)
+        self.current
+            .read()
+            .iter()
+            .find(|m| m.index == index)
+            .map(|m| m.rect)
     }
 
     /// Registers a listener called after every topology change (from the display thread).
@@ -258,8 +294,11 @@ impl MultiMonitor {
             return;
         }
         let list = self.monitors();
-        let Some(primary) = primary_of(&list, self.config.primary_index).cloned() else { return };
-        let secondaries: Vec<&MonitorInfo> = list.iter().filter(|m| m.name != primary.name).collect();
+        let Some(primary) = primary_of(&list, self.config.primary_index).cloned() else {
+            return;
+        };
+        let secondaries: Vec<&MonitorInfo> =
+            list.iter().filter(|m| m.name != primary.name).collect();
         let wanted: HashSet<&str> = secondaries.iter().map(|m| m.name.as_str()).collect();
         let mut ads = self.ads.lock();
         ads.retain(|name, window| {
@@ -283,7 +322,9 @@ impl MultiMonitor {
                     tracing::info!(monitor = %monitor.name, label = window.label(), "secondary window created");
                     ads.insert(monitor.name.clone(), window);
                 }
-                Err(e) => tracing::warn!(monitor = %monitor.name, error = %e, "cannot create secondary window"),
+                Err(e) => {
+                    tracing::warn!(monitor = %monitor.name, error = %e, "cannot create secondary window")
+                }
             }
         }
     }
@@ -291,7 +332,11 @@ impl MultiMonitor {
     fn free_label(&self, taken: &HashSet<String>) -> String {
         let mut n = 1u32;
         loop {
-            let label = if n == 1 { ADS_LABEL.to_owned() } else { format!("{ADS_LABEL}-{n}") };
+            let label = if n == 1 {
+                ADS_LABEL.to_owned()
+            } else {
+                format!("{ADS_LABEL}-{n}")
+            };
             if !taken.contains(&label) && self.app.get_webview_window(&label).is_none() {
                 return label;
             }
@@ -299,7 +344,11 @@ impl MultiMonitor {
         }
     }
 
-    fn create_ads_window(&self, monitor: &MonitorInfo, taken: &HashSet<String>) -> tauri::Result<WebviewWindow> {
+    fn create_ads_window(
+        &self,
+        monitor: &MonitorInfo,
+        taken: &HashSet<String>,
+    ) -> tauri::Result<WebviewWindow> {
         let mode = match self.config.secondary_mode {
             SecondaryMode::Black => "black",
             SecondaryMode::Mirror => "mirror",
@@ -378,14 +427,28 @@ mod tests {
         let a = mon(0, Rect::from_size(0, 0, 1920, 1080), false, 1.0);
         let b = mon(1, Rect::from_size(1920, 0, 2560, 1440), true, 1.25);
         let list = [a.clone(), b.clone()];
-        assert_eq!(primary_of(&list, 0).map(|m| m.index), Some(0), "configured index wins");
-        assert_eq!(primary_of(&list, 7).map(|m| m.index), Some(1), "out of range → OS primary");
+        assert_eq!(
+            primary_of(&list, 0).map(|m| m.index),
+            Some(0),
+            "configured index wins"
+        );
+        assert_eq!(
+            primary_of(&list, 7).map(|m| m.index),
+            Some(1),
+            "out of range → OS primary"
+        );
         assert_eq!(primary_position(&list, 7), 1);
         assert_eq!(union_rect(&list), Some(Rect::new(0, 0, 4480, 1440)));
         assert_eq!(union_rect(&[]), None);
 
-        assert_eq!(change_reason(&[a.clone()], &list), MonitorChangeReason::Added);
-        assert_eq!(change_reason(&list, &[a.clone()]), MonitorChangeReason::Removed);
+        assert_eq!(
+            change_reason(&[a.clone()], &list),
+            MonitorChangeReason::Added
+        );
+        assert_eq!(
+            change_reason(&list, &[a.clone()]),
+            MonitorChangeReason::Removed
+        );
         let dpi = [a.clone(), mon(1, b.rect, true, 1.5)];
         assert_eq!(change_reason(&list, &dpi), MonitorChangeReason::Dpi);
         let res = [a, mon(1, Rect::from_size(1920, 0, 1920, 1080), true, 1.25)];

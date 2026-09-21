@@ -31,7 +31,11 @@ pub struct SessionCreateRequest {
     /// Charge now vs open-ended postpaid.
     pub prepaid: bool,
     /// Actual start for offline-created sessions (≤ `maxOfflineMinutes` in the past).
-    #[serde(default, with = "crate::wire::ts_opt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "crate::wire::ts_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub started_at: Option<DateTime<Utc>>,
     /// Agent-generated id used offline; adopted by the server when free.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -65,7 +69,11 @@ pub struct SessionEndReport {
     /// Seconds consumed as measured by the Agent.
     pub seconds_used: i32,
     /// Actual end time (offline replay).
-    #[serde(default, with = "crate::wire::ts_opt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "crate::wire::ts_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub ended_at: Option<DateTime<Utc>>,
 }
 
@@ -179,10 +187,18 @@ pub struct Session {
     pub started_at: DateTime<Utc>,
     /// Scheduled end; `null` while `SessionState.Idle`/`SessionState.Starting` or for open-ended
     /// postpaid.
-    #[serde(default, with = "crate::wire::ts_opt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "crate::wire::ts_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub ends_at: Option<DateTime<Utc>>,
     /// Set while paused/locked.
-    #[serde(default, with = "crate::wire::ts_opt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "crate::wire::ts_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub paused_at: Option<DateTime<Utc>>,
     /// Tariff in effect.
     pub tariff_id: Uuid,
@@ -279,7 +295,10 @@ impl SessionState {
 
     /// `true` when the timer is counting down.
     pub const fn is_timer_running(self) -> bool {
-        matches!(self, SessionState::Active | SessionState::Locked | SessionState::Ending)
+        matches!(
+            self,
+            SessionState::Active | SessionState::Locked | SessionState::Ending
+        )
     }
 }
 // ---- END MANUAL ----
@@ -297,7 +316,12 @@ impl Session {
 impl SessionEvent {
     /// Event without data.
     pub fn of(session_id: Uuid, r#type: SessionEventType, at: DateTime<Utc>) -> Self {
-        Self { session_id, r#type, at, data: None }
+        Self {
+            session_id,
+            r#type,
+            at,
+            data: None,
+        }
     }
 
     /// `extended` event.
@@ -382,12 +406,23 @@ mod tests {
 
     #[test]
     fn enum_wire_values() {
-        assert_wire(SessionState::ALL, &["idle", "starting", "active", "paused", "locked", "ending", "ended"]);
+        assert_wire(
+            SessionState::ALL,
+            &[
+                "idle", "starting", "active", "paused", "locked", "ending", "ended",
+            ],
+        );
         assert_wire(
             SessionEventType::ALL,
-            &["started", "paused", "resumed", "extended", "warning", "locked", "unlocked", "ended", "charged"],
+            &[
+                "started", "paused", "resumed", "extended", "warning", "locked", "unlocked",
+                "ended", "charged",
+            ],
         );
-        assert_wire(SessionEndReason::ALL, &["user", "timeUp", "admin", "idle", "agentRestart", "error"]);
+        assert_wire(
+            SessionEndReason::ALL,
+            &["user", "timeUp", "admin", "idle", "agentRestart", "error"],
+        );
         assert!(SessionState::Locked.is_open());
         assert!(!SessionState::Ended.is_open());
         assert!(SessionState::Paused.allows_session_requests());
@@ -400,13 +435,23 @@ mod tests {
     fn session_json_is_byte_exact() {
         let s = sample_session();
         assert_eq!(serde_json::to_string(&s).unwrap(), SAMPLE_SESSION_JSON);
-        assert_eq!(serde_json::from_str::<Session>(SAMPLE_SESSION_JSON).unwrap(), s);
+        assert_eq!(
+            serde_json::from_str::<Session>(SAMPLE_SESSION_JSON).unwrap(),
+            s
+        );
         // Explicit nulls for optionals are accepted on read.
-        let with_nulls = SAMPLE_SESSION_JSON.replace(r#""endsAt":"2026-09-21T11:00:00.000Z","#, r#""endsAt":null,"pausedAt":null,"#);
+        let with_nulls = SAMPLE_SESSION_JSON.replace(
+            r#""endsAt":"2026-09-21T11:00:00.000Z","#,
+            r#""endsAt":null,"pausedAt":null,"#,
+        );
         let back: Session = serde_json::from_str(&with_nulls).unwrap();
         assert_eq!(back.ends_at, None);
         assert!(!s.is_open_ended());
-        assert!(Session { seconds_left: Session::OPEN_ENDED, ..s }.is_open_ended());
+        assert!(Session {
+            seconds_left: Session::OPEN_ENDED,
+            ..s
+        }
+        .is_open_ended());
     }
 
     #[test]
@@ -426,17 +471,30 @@ mod tests {
         );
         assert_eq!(e.data_as::<SessionExtendedData>().unwrap(), None);
         let e = SessionEvent::ended(Uuid::nil(), at, SessionEndReason::TimeUp);
-        assert_eq!(serde_json::to_string(&e.data).unwrap(), r#"{"reason":"timeUp"}"#);
+        assert_eq!(
+            serde_json::to_string(&e.data).unwrap(),
+            r#"{"reason":"timeUp"}"#
+        );
         let e = SessionEvent::warning(Uuid::nil(), at, 5);
-        assert_eq!(serde_json::to_string(&e.data).unwrap(), r#"{"minutesLeft":5}"#);
+        assert_eq!(
+            serde_json::to_string(&e.data).unwrap(),
+            r#"{"minutesLeft":5}"#
+        );
         let e = SessionEvent::charged(Uuid::nil(), at, Money::uzs(1));
-        assert_eq!(serde_json::to_string(&e.data).unwrap(), r#"{"amount":{"amount":1,"currency":"UZS"}}"#);
+        assert_eq!(
+            serde_json::to_string(&e.data).unwrap(),
+            r#"{"amount":{"amount":1,"currency":"UZS"}}"#
+        );
         assert_eq!(SessionEventsBatch::MAX_EVENTS, 100);
     }
 
     #[test]
     fn end_result_and_create_request() {
-        let r = SessionEndResult { session: sample_session(), charged: Money::uzs(0), refunded: Money::uzs(50_000) };
+        let r = SessionEndResult {
+            session: sample_session(),
+            charged: Money::uzs(0),
+            refunded: Money::uzs(50_000),
+        };
         let json = serde_json::to_string(&r).unwrap();
         assert!(json.starts_with(r#"{"session":{"id":"9c1e0000"#));
         assert!(json.ends_with(r#""charged":{"amount":0,"currency":"UZS"},"refunded":{"amount":50000,"currency":"UZS"}}"#));
@@ -455,8 +513,15 @@ mod tests {
             serde_json::to_string(&req).unwrap(),
             r#"{"pcId":"00000000-0000-0000-0000-000000000000","userId":"00000000-0000-0000-0000-000000000000","tariffId":"00000000-0000-0000-0000-000000000000","minutes":60,"prepaid":true}"#
         );
-        let report = SessionEndReport { reason: SessionEndReason::User, seconds_used: 10, ended_at: None };
-        assert_eq!(serde_json::to_string(&report).unwrap(), r#"{"reason":"user","secondsUsed":10}"#);
+        let report = SessionEndReport {
+            reason: SessionEndReason::User,
+            seconds_used: 10,
+            ended_at: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&report).unwrap(),
+            r#"{"reason":"user","secondsUsed":10}"#
+        );
     }
 }
 // ---- END MANUAL ----

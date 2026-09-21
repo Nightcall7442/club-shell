@@ -180,15 +180,36 @@ pub struct GamepadEvent {
 
 impl GamepadEvent {
     pub fn button(index: u32, button: GamepadButton, pressed: bool) -> Self {
-        Self { index, button: Some(button), axis: None, value: if pressed { 1.0 } else { 0.0 }, pressed: Some(pressed), connected: None }
+        Self {
+            index,
+            button: Some(button),
+            axis: None,
+            value: if pressed { 1.0 } else { 0.0 },
+            pressed: Some(pressed),
+            connected: None,
+        }
     }
 
     pub fn axis(index: u32, axis: GamepadAxis, value: f32) -> Self {
-        Self { index, button: None, axis: Some(axis), value, pressed: None, connected: None }
+        Self {
+            index,
+            button: None,
+            axis: Some(axis),
+            value,
+            pressed: None,
+            connected: None,
+        }
     }
 
     pub fn connection(index: u32, connected: bool) -> Self {
-        Self { index, button: None, axis: None, value: 0.0, pressed: None, connected: Some(connected) }
+        Self {
+            index,
+            button: None,
+            axis: None,
+            value: 0.0,
+            pressed: None,
+            connected: Some(connected),
+        }
     }
 }
 
@@ -208,16 +229,26 @@ impl GamepadService {
     /// Starts the poll thread (`gamepad.enabled` decides whether events are emitted; the thread runs
     /// either way so `set_enabled(true)` works later).
     pub fn start(app: &AppHandle, config: &GamepadConfig) -> Arc<Self> {
-        let shared = Arc::new(Shared { enabled: AtomicBool::new(config.enabled), stop: AtomicBool::new(false), states: Mutex::new(Vec::new()) });
+        let shared = Arc::new(Shared {
+            enabled: AtomicBool::new(config.enabled),
+            stop: AtomicBool::new(false),
+            states: Mutex::new(Vec::new()),
+        });
         let poller = Poller::new(app.clone(), config.clone(), Arc::clone(&shared));
-        let thread = match std::thread::Builder::new().name("clubshell-gamepad".to_owned()).spawn(move || poller.run()) {
+        let thread = match std::thread::Builder::new()
+            .name("clubshell-gamepad".to_owned())
+            .spawn(move || poller.run())
+        {
             Ok(handle) => Some(handle),
             Err(e) => {
                 tracing::error!(error = %e, "cannot start gamepad thread");
                 None
             }
         };
-        Arc::new(Self { shared, thread: Mutex::new(thread) })
+        Arc::new(Self {
+            shared,
+            thread: Mutex::new(thread),
+        })
     }
 
     pub fn set_enabled(&self, on: bool) {
@@ -272,18 +303,31 @@ fn pad_index(id: gilrs::GamepadId) -> u32 {
 }
 
 fn trigger_value(pad: &Gamepad<'_>, button: Button, axis: Axis) -> f32 {
-    pad.button_data(button).map_or(0.0, |d| d.value()).max(pad.value(axis))
+    pad.button_data(button)
+        .map_or(0.0, |d| d.value())
+        .max(pad.value(axis))
 }
 
 /// Quantizes an axis value after the dead-zone, so only real changes are reported.
 fn quantize(value: f32, deadzone: f32) -> i32 {
-    let v = if value.abs() < deadzone { 0.0 } else { value.clamp(-1.0, 1.0) };
+    let v = if value.abs() < deadzone {
+        0.0
+    } else {
+        value.clamp(-1.0, 1.0)
+    };
     (v * 100.0).round() as i32
 }
 
 impl Poller {
     fn new(app: AppHandle, cfg: GamepadConfig, shared: Arc<Shared>) -> Self {
-        Self { app, cfg, shared, axes: HashMap::new(), stick_dirs: HashMap::new(), holds: HashMap::new() }
+        Self {
+            app,
+            cfg,
+            shared,
+            axes: HashMap::new(),
+            stick_dirs: HashMap::new(),
+            holds: HashMap::new(),
+        }
     }
 
     fn run(mut self) {
@@ -304,7 +348,12 @@ impl Poller {
             self.emit(GamepadEvent::connection(pad_index(id), true));
         }
         self.refresh(&gilrs);
-        tracing::info!(poll_ms = self.cfg.poll_ms, deadzone = self.cfg.deadzone, navigation = self.cfg.navigation, "gamepad poll thread started");
+        tracing::info!(
+            poll_ms = self.cfg.poll_ms,
+            deadzone = self.cfg.deadzone,
+            navigation = self.cfg.navigation,
+            "gamepad poll thread started"
+        );
         while !self.shared.stop.load(Ordering::Acquire) {
             let enabled = self.shared.enabled.load(Ordering::Acquire);
             let mut dirty = false;
@@ -358,8 +407,15 @@ impl Poller {
                     self.axis(index, a, value);
                     if self.cfg.navigation {
                         match a {
-                            GamepadAxis::LeftX => self.stick_dir(index, value, GamepadButton::Left, GamepadButton::Right),
-                            GamepadAxis::LeftY => self.stick_dir(index, value, GamepadButton::Down, GamepadButton::Up),
+                            GamepadAxis::LeftX => self.stick_dir(
+                                index,
+                                value,
+                                GamepadButton::Left,
+                                GamepadButton::Right,
+                            ),
+                            GamepadAxis::LeftY => {
+                                self.stick_dir(index, value, GamepadButton::Down, GamepadButton::Up)
+                            }
                             _ => {}
                         }
                     }
@@ -376,7 +432,14 @@ impl Poller {
         }
         if pressed {
             let now = Instant::now();
-            self.holds.insert(index, NavHold { dir: button, since: now, last: now });
+            self.holds.insert(
+                index,
+                NavHold {
+                    dir: button,
+                    since: now,
+                    last: now,
+                },
+            );
         } else if self.holds.get(&index).is_some_and(|h| h.dir == button) {
             self.holds.remove(&index);
         }
@@ -391,11 +454,21 @@ impl Poller {
 
     /// Turns a stick axis into `negative` / `positive` direction presses with hysteresis
     /// (gilrs: positive Y is up).
-    fn stick_dir(&mut self, index: u32, value: f32, negative: GamepadButton, positive: GamepadButton) {
+    fn stick_dir(
+        &mut self,
+        index: u32,
+        value: f32,
+        negative: GamepadButton,
+        positive: GamepadButton,
+    ) {
         for (dir, v) in [(negative, -value), (positive, value)] {
             let key = (index, dir);
             let held = self.stick_dirs.get(&key).copied().unwrap_or(false);
-            let now_held = if held { v >= STICK_RELEASE } else { v >= STICK_PRESS };
+            let now_held = if held {
+                v >= STICK_RELEASE
+            } else {
+                v >= STICK_PRESS
+            };
             if now_held != held {
                 self.stick_dirs.insert(key, now_held);
                 self.press(index, dir, now_held);
@@ -407,7 +480,9 @@ impl Poller {
         let now = Instant::now();
         let mut fire: Vec<(u32, GamepadButton)> = Vec::new();
         for (index, hold) in &mut self.holds {
-            if now.duration_since(hold.since) >= REPEAT_DELAY && now.duration_since(hold.last) >= REPEAT_INTERVAL {
+            if now.duration_since(hold.since) >= REPEAT_DELAY
+                && now.duration_since(hold.last) >= REPEAT_INTERVAL
+            {
                 hold.last = now;
                 fire.push((*index, hold.dir));
             }
@@ -421,7 +496,10 @@ impl Poller {
         let states: Vec<GamepadState> = gilrs
             .gamepads()
             .map(|(id, pad)| {
-                let buttons = GamepadButton::ALL.iter().filter(|b| pad.is_pressed(b.to_gilrs())).fold(0u32, |acc, b| acc | b.bit());
+                let buttons = GamepadButton::ALL
+                    .iter()
+                    .filter(|b| pad.is_pressed(b.to_gilrs()))
+                    .fold(0u32, |acc, b| acc | b.bit());
                 GamepadState {
                     index: pad_index(id),
                     connected: pad.is_connected(),
@@ -456,15 +534,27 @@ mod tests {
         assert_eq!(GamepadButton::A.bit(), 1);
         assert_eq!(GamepadButton::Guide.bit(), 1 << 14);
         assert!(GamepadButton::Up.is_direction() && !GamepadButton::Start.is_direction());
-        assert_eq!(GamepadButton::from_gilrs(Button::South), Some(GamepadButton::A));
-        assert_eq!(GamepadButton::from_gilrs(GamepadButton::Rs.to_gilrs()), Some(GamepadButton::Rs));
+        assert_eq!(
+            GamepadButton::from_gilrs(Button::South),
+            Some(GamepadButton::A)
+        );
+        assert_eq!(
+            GamepadButton::from_gilrs(GamepadButton::Rs.to_gilrs()),
+            Some(GamepadButton::Rs)
+        );
         assert_eq!(GamepadButton::from_gilrs(Button::Unknown), None);
         assert_eq!(quantize(0.1, 0.25), 0);
         assert_eq!(quantize(-0.734, 0.25), -73);
         assert_eq!(quantize(1.7, 0.25), 100);
         let ev = serde_json::to_value(GamepadEvent::button(0, GamepadButton::Up, true)).unwrap();
-        assert_eq!(ev, serde_json::json!({ "index": 0, "button": "up", "value": 1.0, "pressed": true }));
+        assert_eq!(
+            ev,
+            serde_json::json!({ "index": 0, "button": "up", "value": 1.0, "pressed": true })
+        );
         let ev = serde_json::to_value(GamepadEvent::connection(1, false)).unwrap();
-        assert_eq!(ev, serde_json::json!({ "index": 1, "value": 0.0, "connected": false }));
+        assert_eq!(
+            ev,
+            serde_json::json!({ "index": 1, "value": 0.0, "connected": false })
+        );
     }
 }

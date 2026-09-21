@@ -32,7 +32,11 @@ pub struct Achievement {
     /// Icon URL.
     pub icon_url: String,
     /// Unlock time; `null` while locked.
-    #[serde(default, with = "crate::wire::ts_opt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "crate::wire::ts_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub unlocked_at: Option<DateTime<Utc>>,
     /// Progress.
     pub progress: AchievementProgress,
@@ -494,7 +498,11 @@ pub struct ChatMessage {
     #[serde(with = "crate::wire::ts")]
     pub created_at: DateTime<Utc>,
     /// When the current user read it.
-    #[serde(default, with = "crate::wire::ts_opt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "crate::wire::ts_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub read_at: Option<DateTime<Utc>>,
     /// Kind.
     pub kind: ChatMessageKind,
@@ -525,7 +533,11 @@ pub struct User {
     #[serde(with = "crate::wire::ts")]
     pub created_at: DateTime<Utc>,
     /// Last activity.
-    #[serde(default, with = "crate::wire::ts_opt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "crate::wire::ts_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub last_seen_at: Option<DateTime<Utc>>,
     /// Preferred locale.
     pub locale: Locale,
@@ -619,7 +631,11 @@ pub mod chat_rooms {
 
     /// Direct-message room: `dm:<a>:<b>` with ids sorted by `System.Guid.CompareTo` order.
     pub fn for_direct(a: Uuid, b: Uuid) -> String {
-        let (first, second) = if guid_key(a) <= guid_key(b) { (a, b) } else { (b, a) };
+        let (first, second) = if guid_key(a) <= guid_key(b) {
+            (a, b)
+        } else {
+            (b, a)
+        };
         format!("dm:{first}:{second}")
     }
 
@@ -690,13 +706,28 @@ mod tests {
     fn enum_wire_values() {
         assert_wire(UserRole::ALL, &["guest", "member", "vip", "admin"]);
         assert_wire(Locale::ALL, &["en", "ru", "uz"]);
-        assert_wire(NotificationLevel::ALL, &["info", "warning", "error", "success"]);
+        assert_wire(
+            NotificationLevel::ALL,
+            &["info", "warning", "error", "success"],
+        );
         assert_wire(ChatMessageKind::ALL, &["text", "system", "admin"]);
-        assert_wire(BookingStatus::ALL, &["reserved", "confirmed", "cancelled", "expired"]);
-        assert_wire(TournamentState::ALL, &["upcoming", "registration", "live", "finished"]);
+        assert_wire(
+            BookingStatus::ALL,
+            &["reserved", "confirmed", "cancelled", "expired"],
+        );
+        assert_wire(
+            TournamentState::ALL,
+            &["upcoming", "registration", "live", "finished"],
+        );
         assert_wire(AuthKind::ALL, &["password", "qr", "guest", "card", "token"]);
-        assert_wire(QrStatus::ALL, &["pending", "scanned", "confirmed", "expired"]);
-        assert_wire(AuthExpiredReason::ALL, &["tokenExpired", "revoked", "admin"]);
+        assert_wire(
+            QrStatus::ALL,
+            &["pending", "scanned", "confirmed", "expired"],
+        );
+        assert_wire(
+            AuthExpiredReason::ALL,
+            &["tokenExpired", "revoked", "admin"],
+        );
     }
 
     #[test]
@@ -706,7 +737,11 @@ mod tests {
         assert_eq!(serde_json::from_str::<User>(SAMPLE_USER_JSON).unwrap(), u);
         assert!(u.is_member());
         assert!(!u.has_flag(user_flags::BANNED));
-        assert!(!User { role: UserRole::Guest, ..u }.is_member());
+        assert!(!User {
+            role: UserRole::Guest,
+            ..u
+        }
+        .is_member());
     }
 
     #[test]
@@ -739,7 +774,11 @@ mod tests {
             body: "b".into(),
             level: NotificationLevel::Success,
             ttl_sec: Some(5),
-            action: Some(NotificationAction { label: "Shop".into(), command: "/shop".into(), args: None }),
+            action: Some(NotificationAction {
+                label: "Shop".into(),
+                command: "/shop".into(),
+                args: None,
+            }),
         };
         assert_eq!(
             serde_json::to_string(&n).unwrap(),
@@ -781,7 +820,15 @@ mod tests {
             players: 3,
             joined: false,
             bracket: Some(Bracket {
-                rounds: vec![BracketRound { matches: vec![BracketMatch { id: Uuid::nil(), a: None, b: None, winner: None, score: Some("2-1".into()) }] }],
+                rounds: vec![BracketRound {
+                    matches: vec![BracketMatch {
+                        id: Uuid::nil(),
+                        a: None,
+                        b: None,
+                        winner: None,
+                        score: Some("2-1".into()),
+                    }],
+                }],
             }),
         };
         let json = serde_json::to_string(&t).unwrap();
@@ -791,7 +838,10 @@ mod tests {
         let s = UserStats {
             total_hours: 12.5,
             sessions_count: 4,
-            favorite_games: vec![FavoriteGame { game_id: Uuid::nil(), hours: 3.0 }],
+            favorite_games: vec![FavoriteGame {
+                game_id: Uuid::nil(),
+                hours: 3.0,
+            }],
             spent: Money::uzs(1),
             rank: 7,
         };
@@ -799,7 +849,14 @@ mod tests {
             serde_json::to_string(&s).unwrap(),
             r#"{"totalHours":12.5,"sessionsCount":4,"favoriteGames":[{"gameId":"00000000-0000-0000-0000-000000000000","hours":3}],"spent":{"amount":1,"currency":"UZS"},"rank":7}"#
         );
-        let seat = Seat { pc_id: Uuid::nil(), name: "PC-1".into(), zone: "VIP".into(), x: 1, y: 2, status: PcStatus::Free };
+        let seat = Seat {
+            pc_id: Uuid::nil(),
+            name: "PC-1".into(),
+            zone: "VIP".into(),
+            x: 1,
+            y: 2,
+            status: PcStatus::Free,
+        };
         assert_eq!(
             serde_json::to_string(&seat).unwrap(),
             r#"{"pcId":"00000000-0000-0000-0000-000000000000","name":"PC-1","zone":"VIP","x":1,"y":2,"status":"free"}"#

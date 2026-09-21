@@ -8,7 +8,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use clubshell_protocol::commands::{names, shell_capabilities, AuthHelloRequest, AuthHelloResponse};
+use clubshell_protocol::commands::{
+    names, shell_capabilities, AuthHelloRequest, AuthHelloResponse,
+};
 use clubshell_protocol::ipc::IpcEnvelope;
 use clubshell_protocol::PROTOCOL_VERSION;
 use clubshell_winutil::pipe::{PipeClient, PipeOptions, EVENT_BUFFER};
@@ -66,7 +68,10 @@ impl PipeTransport {
         Self {
             pipe_name: config.ipc.pipe_name.clone(),
             connect_timeout: config.ipc.connect_timeout(),
-            options: PipeOptions { request_timeout: config.ipc.request_timeout(), ..PipeOptions::default() },
+            options: PipeOptions {
+                request_timeout: config.ipc.request_timeout(),
+                ..PipeOptions::default()
+            },
             current: RwLock::new(None),
             forwarder: Mutex::new(None),
             events,
@@ -98,7 +103,9 @@ impl PipeTransport {
                     Ok(env) => {
                         let _ = events.send(env);
                     }
-                    Err(broadcast::error::RecvError::Lagged(n)) => tracing::warn!(skipped = n, "agent events lagged"),
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!(skipped = n, "agent events lagged")
+                    }
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
             }
@@ -125,7 +132,14 @@ impl PipeTransport {
     pub fn publish(&self, agent: ConnectionState, attempts: u32) -> bool {
         let (changed, since) = {
             let cur = self.state.borrow();
-            (cur.agent != agent || cur.attempts != attempts, if cur.agent == agent { cur.since } else { Utc::now() })
+            (
+                cur.agent != agent || cur.attempts != attempts,
+                if cur.agent == agent {
+                    cur.since
+                } else {
+                    Utc::now()
+                },
+            )
         };
         if !changed {
             return false;
@@ -133,17 +147,28 @@ impl PipeTransport {
         if agent == ConnectionState::Connected {
             *self.metrics.connected_since.write() = Some(since);
         }
-        let _ = self.state.send_replace(ConnectivityStatus { agent, attempts, since });
+        let _ = self.state.send_replace(ConnectivityStatus {
+            agent,
+            attempts,
+            since,
+        });
         true
     }
 
     /// `auth.hello` on `client`: reads the token file (regenerated at every Agent start, so never
     /// cached), sends `AuthHelloRequest` and stores the response for [`pc_info`](Self::pc_info).
-    pub async fn hello(&self, client: &PipeClient, config: &ShellConfig) -> CmdResult<AuthHelloResponse> {
+    pub async fn hello(
+        &self,
+        client: &PipeClient,
+        config: &ShellConfig,
+    ) -> CmdResult<AuthHelloResponse> {
         let shell_token = config
             .load_shell_token()
             .map_err(|e| ShellError::unauthorized(format!("shell token unavailable: {e}")))?;
-        let mut capabilities = vec![shell_capabilities::MULTI_MONITOR.to_owned(), shell_capabilities::OVERLAY.to_owned()];
+        let mut capabilities = vec![
+            shell_capabilities::MULTI_MONITOR.to_owned(),
+            shell_capabilities::OVERLAY.to_owned(),
+        ];
         if config.gamepad.enabled {
             capabilities.push(shell_capabilities::GAMEPAD.to_owned());
         }
@@ -159,13 +184,19 @@ impl PipeTransport {
             capabilities,
         };
         let envelope = IpcEnvelope::request_with(names::auth::HELLO, &request)?;
-        let response = client.request_timeout(envelope, self.options.request_timeout).await?;
+        let response = client
+            .request_timeout(envelope, self.options.request_timeout)
+            .await?;
         if let Some(err) = response.error {
             return Err(err.into());
         }
         let hello: AuthHelloResponse = response.require_payload()?;
         if hello.protocol != PROTOCOL_VERSION {
-            tracing::warn!(agent_protocol = hello.protocol, shell_protocol = PROTOCOL_VERSION, "IPC protocol major differs");
+            tracing::warn!(
+                agent_protocol = hello.protocol,
+                shell_protocol = PROTOCOL_VERSION,
+                "IPC protocol major differs"
+            );
         }
         self.metrics.hellos.fetch_add(1, Ordering::Relaxed);
         *self.hello.write() = Some(hello.clone());
@@ -207,7 +238,10 @@ impl PipeTransport {
         let mut rx = self.state.subscribe();
         // The `Ref` returned by `wait_for` holds the watch's read lock; it must be released (end of
         // this statement) before `ready_client` takes the same lock again on this thread.
-        let connected = matches!(tokio::time::timeout(max, rx.wait_for(ConnectivityStatus::is_connected)).await, Ok(Ok(_)));
+        let connected = matches!(
+            tokio::time::timeout(max, rx.wait_for(ConnectivityStatus::is_connected)).await,
+            Ok(Ok(_))
+        );
         if !connected {
             return Err(ShellError::agent_offline());
         }
@@ -218,7 +252,11 @@ impl PipeTransport {
         if !self.state.borrow().is_connected() {
             return None;
         }
-        self.current.read().as_ref().filter(|c| c.is_connected()).cloned()
+        self.current
+            .read()
+            .as_ref()
+            .filter(|c| c.is_connected())
+            .cloned()
     }
 
     /// Current physical connection, hello or not.
@@ -248,7 +286,11 @@ impl PipeTransport {
             requests: self.metrics.requests.load(Ordering::Relaxed),
             errors: self.metrics.errors.load(Ordering::Relaxed),
             timeouts: self.metrics.timeouts.load(Ordering::Relaxed),
-            reconnects: self.metrics.hellos.load(Ordering::Relaxed).saturating_sub(1),
+            reconnects: self
+                .metrics
+                .hellos
+                .load(Ordering::Relaxed)
+                .saturating_sub(1),
             connected: self.state.borrow().is_connected(),
             connected_since: *self.metrics.connected_since.read(),
         }
@@ -265,7 +307,9 @@ impl Drop for PipeTransport {
 #[cfg(windows)]
 #[allow(unsafe_code)]
 fn wts_session_id() -> i32 {
-    use windows::Win32::System::RemoteDesktop::{ProcessIdToSessionId, WTSGetActiveConsoleSessionId};
+    use windows::Win32::System::RemoteDesktop::{
+        ProcessIdToSessionId, WTSGetActiveConsoleSessionId,
+    };
     let mut session = u32::MAX;
     // SAFETY: `session` is a live, writable u32 for the duration of the call; the pid is our own.
     let _ = unsafe { ProcessIdToSessionId(std::process::id(), &mut session) };
@@ -291,9 +335,18 @@ mod tests {
     async fn requests_wait_for_hello_then_fail_fast_when_offline() {
         let cfg = ShellConfig::defaults();
         let transport = PipeTransport::new(&cfg);
-        assert_eq!(transport.current_status().agent, ConnectionState::Disconnected);
+        assert_eq!(
+            transport.current_status().agent,
+            ConnectionState::Disconnected
+        );
         let started = std::time::Instant::now();
-        let err = transport.send(IpcEnvelope::request(names::auth::STATUS, None), Duration::from_millis(200)).await.unwrap_err();
+        let err = transport
+            .send(
+                IpcEnvelope::request(names::auth::STATUS, None),
+                Duration::from_millis(200),
+            )
+            .await
+            .unwrap_err();
         assert_eq!(err.code, ErrorCode::AgentOffline);
         assert!(started.elapsed() < Duration::from_secs(2));
         assert_eq!(transport.metrics().requests, 0);
@@ -308,7 +361,13 @@ mod tests {
         assert!(transport.current_status().is_connected());
         assert!(transport.metrics().connected_since.is_some());
         // Connected state without a live client still fails closed.
-        let err = transport.send(IpcEnvelope::request(names::auth::STATUS, None), Duration::from_millis(50)).await.unwrap_err();
+        let err = transport
+            .send(
+                IpcEnvelope::request(names::auth::STATUS, None),
+                Duration::from_millis(50),
+            )
+            .await
+            .unwrap_err();
         assert_eq!(err.code, ErrorCode::AgentOffline);
     }
 
@@ -320,18 +379,45 @@ mod tests {
         let (a, b) = tokio::io::duplex(64 * 1024);
         let (ev_tx, ev_rx) = tokio::sync::mpsc::channel(4);
         let server = tokio::spawn(serve_echo(b, Some(ev_rx)));
-        let client = Arc::new(PipeClient::from_stream(a, PipeOptions { heartbeat: false, ..PipeOptions::default() }));
+        let client = Arc::new(PipeClient::from_stream(
+            a,
+            PipeOptions {
+                heartbeat: false,
+                ..PipeOptions::default()
+            },
+        ));
         let mut events = transport.subscribe();
         transport.attach(Arc::clone(&client));
         transport.publish(ConnectionState::Connected, 0);
 
-        let echoed = transport.send(IpcEnvelope::request(names::games::RUNNING, Some(json!({ "x": 1 }))), Duration::from_secs(1)).await.unwrap();
+        let echoed = transport
+            .send(
+                IpcEnvelope::request(names::games::RUNNING, Some(json!({ "x": 1 }))),
+                Duration::from_secs(1),
+            )
+            .await
+            .unwrap();
         assert_eq!(echoed, Some(json!({ "x": 1 })));
-        let none = transport.send(IpcEnvelope::request(names::session::GET, None), Duration::from_secs(1)).await.unwrap();
+        let none = transport
+            .send(
+                IpcEnvelope::request(names::session::GET, None),
+                Duration::from_secs(1),
+            )
+            .await
+            .unwrap();
         assert_eq!(none, None);
 
-        ev_tx.send(IpcEnvelope::event(names::events::WALLET_UPDATED, Some(json!({ "amount": 1 })))).await.unwrap();
-        let ev = tokio::time::timeout(Duration::from_secs(2), events.recv()).await.unwrap().unwrap();
+        ev_tx
+            .send(IpcEnvelope::event(
+                names::events::WALLET_UPDATED,
+                Some(json!({ "amount": 1 })),
+            ))
+            .await
+            .unwrap();
+        let ev = tokio::time::timeout(Duration::from_secs(2), events.recv())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(ev.name, names::events::WALLET_UPDATED);
 
         transport.detach();

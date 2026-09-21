@@ -226,7 +226,10 @@ pub struct Money {
     /// Signed minor units (negative for charges/purchases where noted).
     pub amount: i64,
     /// ISO-4217 code, upper case, never empty.
-    #[serde(default = "default_currency", deserialize_with = "deserialize_currency")]
+    #[serde(
+        default = "default_currency",
+        deserialize_with = "deserialize_currency"
+    )]
     pub currency: String,
 }
 
@@ -235,7 +238,9 @@ fn default_currency() -> String {
 }
 
 fn deserialize_currency<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
-    Ok(normalize_currency(Option::<String>::deserialize(d)?.as_deref()))
+    Ok(normalize_currency(
+        Option::<String>::deserialize(d)?.as_deref(),
+    ))
 }
 
 /// Trims and upper-cases a currency code; blank/absent → [`DEFAULT_CURRENCY`].
@@ -249,12 +254,18 @@ pub fn normalize_currency(currency: Option<&str>) -> String {
 impl Money {
     /// Amount in `currency` (normalized).
     pub fn new(amount: i64, currency: &str) -> Self {
-        Self { amount, currency: normalize_currency(Some(currency)) }
+        Self {
+            amount,
+            currency: normalize_currency(Some(currency)),
+        }
     }
 
     /// Amount in [`DEFAULT_CURRENCY`].
     pub fn uzs(amount: i64) -> Self {
-        Self { amount, currency: default_currency() }
+        Self {
+            amount,
+            currency: default_currency(),
+        }
     }
 
     /// Zero in [`DEFAULT_CURRENCY`].
@@ -281,7 +292,10 @@ impl Money {
 
     /// Absolute value.
     pub fn abs(&self) -> Money {
-        Money { amount: self.amount.abs(), currency: self.currency.clone() }
+        Money {
+            amount: self.amount.abs(),
+            currency: self.currency.clone(),
+        }
     }
 
     /// Sum; `None` on currency mismatch or overflow.
@@ -289,7 +303,10 @@ impl Money {
         if !self.is_same_currency(other) {
             return None;
         }
-        Some(Money { amount: self.amount.checked_add(other.amount)?, currency: self.currency.clone() })
+        Some(Money {
+            amount: self.amount.checked_add(other.amount)?,
+            currency: self.currency.clone(),
+        })
     }
 
     /// Difference; `None` on currency mismatch or overflow.
@@ -297,16 +314,27 @@ impl Money {
         if !self.is_same_currency(other) {
             return None;
         }
-        Some(Money { amount: self.amount.checked_sub(other.amount)?, currency: self.currency.clone() })
+        Some(Money {
+            amount: self.amount.checked_sub(other.amount)?,
+            currency: self.currency.clone(),
+        })
     }
 
     /// Scales by an integer factor (unit price × quantity); `None` on overflow.
     pub fn checked_mul(&self, factor: i64) -> Option<Money> {
-        Some(Money { amount: self.amount.checked_mul(factor)?, currency: self.currency.clone() })
+        Some(Money {
+            amount: self.amount.checked_mul(factor)?,
+            currency: self.currency.clone(),
+        })
     }
 
     fn expect_same_currency(&self, other: &Money) {
-        assert!(self.is_same_currency(other), "currency mismatch: {} vs {}", self.currency, other.currency);
+        assert!(
+            self.is_same_currency(other),
+            "currency mismatch: {} vs {}",
+            self.currency,
+            other.currency
+        );
     }
 }
 
@@ -328,7 +356,10 @@ impl Add for Money {
 
     fn add(self, rhs: Money) -> Money {
         self.expect_same_currency(&rhs);
-        Money { amount: self.amount + rhs.amount, currency: self.currency }
+        Money {
+            amount: self.amount + rhs.amount,
+            currency: self.currency,
+        }
     }
 }
 
@@ -337,7 +368,10 @@ impl<'a> Add<&'a Money> for &'a Money {
 
     fn add(self, rhs: &Money) -> Money {
         self.expect_same_currency(rhs);
-        Money { amount: self.amount + rhs.amount, currency: self.currency.clone() }
+        Money {
+            amount: self.amount + rhs.amount,
+            currency: self.currency.clone(),
+        }
     }
 }
 
@@ -353,7 +387,10 @@ impl Sub for Money {
 
     fn sub(self, rhs: Money) -> Money {
         self.expect_same_currency(&rhs);
-        Money { amount: self.amount - rhs.amount, currency: self.currency }
+        Money {
+            amount: self.amount - rhs.amount,
+            currency: self.currency,
+        }
     }
 }
 
@@ -362,7 +399,10 @@ impl<'a> Sub<&'a Money> for &'a Money {
 
     fn sub(self, rhs: &Money) -> Money {
         self.expect_same_currency(rhs);
-        Money { amount: self.amount - rhs.amount, currency: self.currency.clone() }
+        Money {
+            amount: self.amount - rhs.amount,
+            currency: self.currency.clone(),
+        }
     }
 }
 
@@ -377,7 +417,10 @@ impl Neg for Money {
     type Output = Money;
 
     fn neg(self) -> Money {
-        Money { amount: -self.amount, currency: self.currency }
+        Money {
+            amount: -self.amount,
+            currency: self.currency,
+        }
     }
 }
 
@@ -385,7 +428,10 @@ impl Mul<i64> for Money {
     type Output = Money;
 
     fn mul(self, factor: i64) -> Money {
-        Money { amount: self.amount * factor, currency: self.currency }
+        Money {
+            amount: self.amount * factor,
+            currency: self.currency,
+        }
     }
 }
 
@@ -393,23 +439,29 @@ impl Mul<i64> for &Money {
     type Output = Money;
 
     fn mul(self, factor: i64) -> Money {
-        Money { amount: self.amount * factor, currency: self.currency.clone() }
+        Money {
+            amount: self.amount * factor,
+            currency: self.currency.clone(),
+        }
     }
 }
 
 impl PartialOrd for Money {
     fn partial_cmp(&self, other: &Money) -> Option<Ordering> {
-        self.is_same_currency(other).then(|| self.amount.cmp(&other.amount))
+        self.is_same_currency(other)
+            .then(|| self.amount.cmp(&other.amount))
     }
 }
 
 /// Sums a sequence; an empty sequence yields [`Money::zero`].
 impl Sum for Money {
     fn sum<I: Iterator<Item = Money>>(iter: I) -> Money {
-        iter.fold(None, |acc: Option<Money>, m| Some(match acc {
-            None => m,
-            Some(t) => t + m,
-        }))
+        iter.fold(None, |acc: Option<Money>, m| {
+            Some(match acc {
+                None => m,
+                Some(t) => t + m,
+            })
+        })
         .unwrap_or_default()
     }
 }
@@ -516,7 +568,10 @@ impl Tariff {
         }
         let total = self.price_per_hour.amount * i64::from(minutes);
         let rounded = total / 60 + i64::from(total % 60 != 0);
-        Money { amount: rounded, currency: self.price_per_hour.currency.clone() }
+        Money {
+            amount: rounded,
+            currency: self.price_per_hour.currency.clone(),
+        }
     }
 
     /// `true` when the tariff is valid for `zone` at the given local day/time.
@@ -524,7 +579,11 @@ impl Tariff {
         if !self.zones.is_empty() && !self.zones.iter().any(|z| z.eq_ignore_ascii_case(zone)) {
             return false;
         }
-        self.time_windows.is_empty() || self.time_windows.iter().any(|w| w.contains(day, local_time))
+        self.time_windows.is_empty()
+            || self
+                .time_windows
+                .iter()
+                .any(|w| w.contains(day, local_time))
     }
 }
 // ---- END MANUAL ----
@@ -538,18 +597,38 @@ mod tests {
 
     #[test]
     fn enum_wire_values() {
-        assert_wire(Weekday::ALL, &["mon", "tue", "wed", "thu", "fri", "sat", "sun"]);
-        assert_wire(TransactionType::ALL, &["topUp", "charge", "refund", "bonus", "purchase", "adjustment"]);
+        assert_wire(
+            Weekday::ALL,
+            &["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+        );
+        assert_wire(
+            TransactionType::ALL,
+            &[
+                "topUp",
+                "charge",
+                "refund",
+                "bonus",
+                "purchase",
+                "adjustment",
+            ],
+        );
         assert_wire(TopupProvider::ALL, &["payme", "click", "uzum", "cash"]);
-        assert_wire(TopupStatus::ALL, &["pending", "paid", "expired", "cancelled"]);
+        assert_wire(
+            TopupStatus::ALL,
+            &["pending", "paid", "expired", "cancelled"],
+        );
     }
 
     #[test]
     fn money_wire_and_arithmetic() {
         let m = Money::uzs(1_500_000);
-        assert_eq!(serde_json::to_string(&m).unwrap(), r#"{"amount":1500000,"currency":"UZS"}"#);
+        assert_eq!(
+            serde_json::to_string(&m).unwrap(),
+            r#"{"amount":1500000,"currency":"UZS"}"#
+        );
         assert_eq!(m.to_string(), "1500000 UZS");
-        let back: Money = serde_json::from_str(r#"{"currency":"uzs","amount":5,"extra":1}"#).unwrap();
+        let back: Money =
+            serde_json::from_str(r#"{"currency":"uzs","amount":5,"extra":1}"#).unwrap();
         assert_eq!(back, Money::uzs(5));
         let back: Money = serde_json::from_str(r#"{"amount":7,"currency":null}"#).unwrap();
         assert_eq!(back, Money::uzs(7));
@@ -563,8 +642,16 @@ mod tests {
         assert_eq!(-Money::uzs(3), Money::uzs(-3));
         assert_eq!(Money::uzs(-3).abs(), Money::uzs(3));
         assert_eq!(Money::uzs(3) * 4, Money::uzs(12));
-        assert_eq!(vec![Money::uzs(1), Money::uzs(2)].into_iter().sum::<Money>(), Money::uzs(3));
-        assert_eq!(Vec::<Money>::new().into_iter().sum::<Money>(), Money::zero());
+        assert_eq!(
+            vec![Money::uzs(1), Money::uzs(2)]
+                .into_iter()
+                .sum::<Money>(),
+            Money::uzs(3)
+        );
+        assert_eq!(
+            Vec::<Money>::new().into_iter().sum::<Money>(),
+            Money::zero()
+        );
         assert!(Money::uzs(1) < Money::uzs(2));
         assert_eq!(Money::uzs(1).partial_cmp(&Money::new(1, "usd")), None);
         assert_eq!(Money::uzs(1).checked_add(&Money::new(1, "USD")), None);
@@ -633,7 +720,12 @@ mod tests {
         assert!(!t.is_valid_for("Standard", Weekday::Sat, sat_2300));
         assert!(!t.is_valid_for("VIP", Weekday::Mon, sun_0300)); // Sunday not in days
 
-        let package = Tariff { is_package: true, package_minutes: Some(180), package_price: Some(Money::uzs(250)), ..t };
+        let package = Tariff {
+            is_package: true,
+            package_minutes: Some(180),
+            package_price: Some(Money::uzs(250)),
+            ..t
+        };
         assert_eq!(package.price_for(1), Money::uzs(250));
     }
 

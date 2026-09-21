@@ -104,7 +104,11 @@ pub fn run() {
     };
 
     app.run(move |app, event| match event {
-        RunEvent::WindowEvent { label, event: WindowEvent::Destroyed, .. } if label == MAIN_LABEL => {
+        RunEvent::WindowEvent {
+            label,
+            event: WindowEvent::Destroyed,
+            ..
+        } if label == MAIN_LABEL => {
             if !EXITING.load(Ordering::Acquire) {
                 // The kiosk window is gone (webview crash): leave cleanly so the Agent watchdog restarts us.
                 tracing::error!("main window destroyed; shutting down");
@@ -148,7 +152,10 @@ fn acquire_single_instance() -> bool {
     use windows::Win32::Foundation::{GetLastError, BOOL, ERROR_ALREADY_EXISTS};
     use windows::Win32::System::Threading::CreateMutexW;
 
-    let name: Vec<u16> = SINGLE_INSTANCE_MUTEX.encode_utf16().chain(std::iter::once(0)).collect();
+    let name: Vec<u16> = SINGLE_INSTANCE_MUTEX
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
     // SAFETY: `name` is a NUL-terminated UTF-16 buffer that outlives the call; no security attributes.
     let created = unsafe { CreateMutexW(None, BOOL::from(false), PCWSTR(name.as_ptr())) };
     match created {

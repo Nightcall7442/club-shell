@@ -9,20 +9,43 @@ use std::collections::HashSet;
 use clubshell_winutil::hooks::{block_combos, edge_blocker, key_name, llkhf, vk, KIOSK_DEFAULTS};
 use clubshell_winutil::monitor::{monitor_containing, pick_primary};
 use clubshell_winutil::window::alt_tab_combos;
-use clubshell_winutil::{BlockedCombo, HookAction, KeyEvent, MonitorInfo, MouseEvent, Rect, WinUtilError};
+use clubshell_winutil::{
+    BlockedCombo, HookAction, KeyEvent, MonitorInfo, MouseEvent, Rect, WinUtilError,
+};
 
 // ───────────────────────────── Helpers ─────────────────────────────
 
 fn combo(ctrl: bool, alt: bool, shift: bool, win: bool, key: Option<u32>) -> BlockedCombo {
-    BlockedCombo { ctrl, alt, shift, win, key }
+    BlockedCombo {
+        ctrl,
+        alt,
+        shift,
+        win,
+        key,
+    }
 }
 
 fn key(vk: u32) -> KeyEvent {
-    KeyEvent { vk, scan: 0, flags: 0, alt: false, ctrl: false, shift: false, win: false, key_up: false }
+    KeyEvent {
+        vk,
+        scan: 0,
+        flags: 0,
+        alt: false,
+        ctrl: false,
+        shift: false,
+        win: false,
+        key_up: false,
+    }
 }
 
 fn chord(vk: u32, ctrl: bool, alt: bool, shift: bool, win: bool) -> KeyEvent {
-    KeyEvent { ctrl, alt, shift, win, ..key(vk) }
+    KeyEvent {
+        ctrl,
+        alt,
+        shift,
+        win,
+        ..key(vk)
+    }
 }
 
 fn letter(c: u8) -> u32 {
@@ -30,7 +53,13 @@ fn letter(c: u8) -> u32 {
 }
 
 fn mouse(x: i32, y: i32) -> MouseEvent {
-    MouseEvent { x, y, message: 0x0200, data: 0, flags: 0 }
+    MouseEvent {
+        x,
+        y,
+        message: 0x0200,
+        data: 0,
+        flags: 0,
+    }
 }
 
 fn monitor(index: usize, rect: Rect, primary: bool) -> MonitorInfo {
@@ -56,67 +85,171 @@ fn parses_the_documented_combo_forms() {
     let cases: &[(&str, BlockedCombo)] = &[
         // ARCHITECTURE.md §5 kiosk set
         ("Alt+Tab", combo(false, true, false, false, Some(vk::TAB))),
-        ("Alt+Esc", combo(false, true, false, false, Some(vk::ESCAPE))),
-        ("Ctrl+Esc", combo(true, false, false, false, Some(vk::ESCAPE))),
+        (
+            "Alt+Esc",
+            combo(false, true, false, false, Some(vk::ESCAPE)),
+        ),
+        (
+            "Ctrl+Esc",
+            combo(true, false, false, false, Some(vk::ESCAPE)),
+        ),
         ("Alt+F4", combo(false, true, false, false, Some(f(4)))),
-        ("Ctrl+Shift+Esc", combo(true, false, true, false, Some(vk::ESCAPE))),
+        (
+            "Ctrl+Shift+Esc",
+            combo(true, false, true, false, Some(vk::ESCAPE)),
+        ),
         ("Win", combo(false, false, false, true, None)),
-        ("Win+D", combo(false, false, false, true, Some(letter(b'd')))),
-        ("Win+R", combo(false, false, false, true, Some(letter(b'r')))),
-        ("Win+E", combo(false, false, false, true, Some(letter(b'e')))),
-        ("Win+L", combo(false, false, false, true, Some(letter(b'l')))),
-        ("Win+I", combo(false, false, false, true, Some(letter(b'i')))),
+        (
+            "Win+D",
+            combo(false, false, false, true, Some(letter(b'd'))),
+        ),
+        (
+            "Win+R",
+            combo(false, false, false, true, Some(letter(b'r'))),
+        ),
+        (
+            "Win+E",
+            combo(false, false, false, true, Some(letter(b'e'))),
+        ),
+        (
+            "Win+L",
+            combo(false, false, false, true, Some(letter(b'l'))),
+        ),
+        (
+            "Win+I",
+            combo(false, false, false, true, Some(letter(b'i'))),
+        ),
         ("Win+Tab", combo(false, false, false, true, Some(vk::TAB))),
-        ("PrintScreen", combo(false, false, false, false, Some(vk::SNAPSHOT))),
+        (
+            "PrintScreen",
+            combo(false, false, false, false, Some(vk::SNAPSHOT)),
+        ),
         // shell.json → kiosk.exitHotkey default
-        ("Ctrl+Alt+Shift+F12", combo(true, true, true, false, Some(f(12)))),
+        (
+            "Ctrl+Alt+Shift+F12",
+            combo(true, true, true, false, Some(f(12))),
+        ),
         // Secure attention sequence (parses, never intercepted)
-        ("Ctrl+Alt+Del", combo(true, true, false, false, Some(vk::DELETE))),
-        ("Ctrl+Alt+Delete", combo(true, true, false, false, Some(vk::DELETE))),
+        (
+            "Ctrl+Alt+Del",
+            combo(true, true, false, false, Some(vk::DELETE)),
+        ),
+        (
+            "Ctrl+Alt+Delete",
+            combo(true, true, false, false, Some(vk::DELETE)),
+        ),
         // Modifier aliases, case and whitespace tolerance
-        ("control+delete", combo(true, false, false, false, Some(vk::DELETE))),
-        ("CTL + ESCAPE", combo(true, false, false, false, Some(vk::ESCAPE))),
-        ("Meta+E", combo(false, false, false, true, Some(letter(b'e')))),
-        ("Super+R", combo(false, false, false, true, Some(letter(b'r')))),
-        ("Windows+L", combo(false, false, false, true, Some(letter(b'l')))),
-        ("cmd+space", combo(false, false, false, true, Some(vk::SPACE))),
+        (
+            "control+delete",
+            combo(true, false, false, false, Some(vk::DELETE)),
+        ),
+        (
+            "CTL + ESCAPE",
+            combo(true, false, false, false, Some(vk::ESCAPE)),
+        ),
+        (
+            "Meta+E",
+            combo(false, false, false, true, Some(letter(b'e'))),
+        ),
+        (
+            "Super+R",
+            combo(false, false, false, true, Some(letter(b'r'))),
+        ),
+        (
+            "Windows+L",
+            combo(false, false, false, true, Some(letter(b'l'))),
+        ),
+        (
+            "cmd+space",
+            combo(false, false, false, true, Some(vk::SPACE)),
+        ),
         ("LWin", combo(false, false, false, true, None)),
         ("RWin+Tab", combo(false, false, false, true, Some(vk::TAB))),
-        ("Shift+Ctrl+Alt+Win+X", combo(true, true, true, true, Some(letter(b'x')))),
+        (
+            "Shift+Ctrl+Alt+Win+X",
+            combo(true, true, true, true, Some(letter(b'x'))),
+        ),
         // Key aliases
         ("PgUp", combo(false, false, false, false, Some(vk::PRIOR))),
-        ("PageDown", combo(false, false, false, false, Some(vk::NEXT))),
-        ("PrtSc", combo(false, false, false, false, Some(vk::SNAPSHOT))),
-        ("Snapshot", combo(false, false, false, false, Some(vk::SNAPSHOT))),
+        (
+            "PageDown",
+            combo(false, false, false, false, Some(vk::NEXT)),
+        ),
+        (
+            "PrtSc",
+            combo(false, false, false, false, Some(vk::SNAPSHOT)),
+        ),
+        (
+            "Snapshot",
+            combo(false, false, false, false, Some(vk::SNAPSHOT)),
+        ),
         ("Break", combo(false, false, false, false, Some(vk::PAUSE))),
-        ("ContextMenu", combo(false, false, false, false, Some(vk::APPS))),
+        (
+            "ContextMenu",
+            combo(false, false, false, false, Some(vk::APPS)),
+        ),
         ("Apps", combo(false, false, false, false, Some(vk::APPS))),
-        ("Return", combo(false, false, false, false, Some(vk::RETURN))),
+        (
+            "Return",
+            combo(false, false, false, false, Some(vk::RETURN)),
+        ),
         ("Enter", combo(false, false, false, false, Some(vk::RETURN))),
-        ("Backspace", combo(false, false, false, false, Some(vk::BACK))),
+        (
+            "Backspace",
+            combo(false, false, false, false, Some(vk::BACK)),
+        ),
         ("Ins", combo(false, false, false, false, Some(vk::INSERT))),
-        ("CapsLock", combo(false, false, false, false, Some(vk::CAPITAL))),
-        ("NumLock", combo(false, false, false, false, Some(vk::NUMLOCK))),
-        ("ScrollLock", combo(false, false, false, false, Some(vk::SCROLL))),
+        (
+            "CapsLock",
+            combo(false, false, false, false, Some(vk::CAPITAL)),
+        ),
+        (
+            "NumLock",
+            combo(false, false, false, false, Some(vk::NUMLOCK)),
+        ),
+        (
+            "ScrollLock",
+            combo(false, false, false, false, Some(vk::SCROLL)),
+        ),
         ("Left", combo(false, false, false, false, Some(vk::LEFT))),
-        ("Ctrl+Home", combo(true, false, false, false, Some(vk::HOME))),
+        (
+            "Ctrl+Home",
+            combo(true, false, false, false, Some(vk::HOME)),
+        ),
         // Function keys, digits, letters, raw virtual-key codes
         ("F1", combo(false, false, false, false, Some(vk::F1))),
         ("f12", combo(false, false, false, false, Some(f(12)))),
         ("F24", combo(false, false, false, false, Some(vk::F24))),
-        ("Ctrl+1", combo(true, false, false, false, Some(u32::from(b'1')))),
-        ("ctrl+a", combo(true, false, false, false, Some(letter(b'a')))),
+        (
+            "Ctrl+1",
+            combo(true, false, false, false, Some(u32::from(b'1'))),
+        ),
+        (
+            "ctrl+a",
+            combo(true, false, false, false, Some(letter(b'a'))),
+        ),
         ("Vk0x5D", combo(false, false, false, false, Some(vk::APPS))),
-        ("0x2C", combo(false, false, false, false, Some(vk::SNAPSHOT))),
+        (
+            "0x2C",
+            combo(false, false, false, false, Some(vk::SNAPSHOT)),
+        ),
         ("Alt+vk0xBA", combo(false, true, false, false, Some(0xBA))),
     ];
     for (text, expected) in cases {
         let parsed = BlockedCombo::parse(text).unwrap_or_else(|e| panic!("{text}: {e}"));
         assert_eq!(&parsed, expected, "{text}");
-        assert_eq!(text.parse::<BlockedCombo>().unwrap(), parsed, "FromStr and parse agree for {text}");
+        assert_eq!(
+            text.parse::<BlockedCombo>().unwrap(),
+            parsed,
+            "FromStr and parse agree for {text}"
+        );
         // Display is canonical and round-trips through the parser.
         let shown = parsed.to_string();
-        assert_eq!(BlockedCombo::parse(&shown).unwrap(), parsed, "{text} → {shown}");
+        assert_eq!(
+            BlockedCombo::parse(&shown).unwrap(),
+            parsed,
+            "{text} → {shown}"
+        );
     }
 }
 
@@ -135,7 +268,11 @@ fn display_is_canonical() {
         ("control+delete", "Ctrl+Del"),
         ("Ctrl+1", "Ctrl+1"),
     ] {
-        assert_eq!(BlockedCombo::parse(text).unwrap().to_string(), shown, "{text}");
+        assert_eq!(
+            BlockedCombo::parse(text).unwrap().to_string(),
+            shown,
+            "{text}"
+        );
     }
     assert_eq!(key_name(vk::DELETE), "Del");
     assert_eq!(key_name(vk::F1 + 11), "F12");
@@ -174,8 +311,14 @@ fn rejects_malformed_combos() {
         }
     }
     // A modifier-only combo is fine; a single modifier repeated is idempotent.
-    assert_eq!(BlockedCombo::parse("Ctrl+Ctrl").unwrap(), combo(true, false, false, false, None));
-    assert_eq!(BlockedCombo::parse("Shift").unwrap(), combo(false, false, true, false, None));
+    assert_eq!(
+        BlockedCombo::parse("Ctrl+Ctrl").unwrap(),
+        combo(true, false, false, false, None)
+    );
+    assert_eq!(
+        BlockedCombo::parse("Shift").unwrap(),
+        combo(false, false, true, false, None)
+    );
 }
 
 #[test]
@@ -183,28 +326,54 @@ fn parse_all_and_kiosk_defaults() {
     let defaults = BlockedCombo::kiosk_defaults();
     assert_eq!(defaults.len(), KIOSK_DEFAULTS.len());
     assert_eq!(defaults, BlockedCombo::parse_all(KIOSK_DEFAULTS).unwrap());
-    assert!(defaults.contains(&combo(false, false, false, true, None)), "bare Win is part of the kiosk set");
-    assert!(!defaults.iter().any(BlockedCombo::is_secure_attention), "Ctrl+Alt+Del is policy, not a hook");
+    assert!(
+        defaults.contains(&combo(false, false, false, true, None)),
+        "bare Win is part of the kiosk set"
+    );
+    assert!(
+        !defaults.iter().any(BlockedCombo::is_secure_attention),
+        "Ctrl+Alt+Del is policy, not a hook"
+    );
     let unique: HashSet<BlockedCombo> = defaults.iter().copied().collect();
     assert_eq!(unique.len(), defaults.len(), "no duplicate defaults");
 
-    let policy = vec!["Alt+Tab".to_owned(), "Win".to_owned(), "Ctrl+Alt+Del".to_owned()];
+    let policy = vec![
+        "Alt+Tab".to_owned(),
+        "Win".to_owned(),
+        "Ctrl+Alt+Del".to_owned(),
+    ];
     let parsed = BlockedCombo::parse_all(&policy).unwrap();
     assert_eq!(parsed.len(), 3);
     assert!(parsed[2].is_secure_attention());
 
     let err = BlockedCombo::parse_all(&["Alt+Tab", "Nope", "Win"]).unwrap_err();
-    assert!(matches!(err, WinUtilError::Invalid(ref m) if m.contains("Nope")), "{err}");
+    assert!(
+        matches!(err, WinUtilError::Invalid(ref m) if m.contains("Nope")),
+        "{err}"
+    );
     assert!(BlockedCombo::parse_all::<&str>(&[]).unwrap().is_empty());
 }
 
 #[test]
 fn secure_attention_detection() {
-    assert!(BlockedCombo::parse("Ctrl+Alt+Del").unwrap().is_secure_attention());
-    assert!(BlockedCombo::parse("Ctrl+Alt+Shift+Del").unwrap().is_secure_attention(), "extra modifiers still hit winlogon");
-    assert!(!BlockedCombo::parse("Ctrl+Del").unwrap().is_secure_attention());
-    assert!(!BlockedCombo::parse("Alt+Del").unwrap().is_secure_attention());
-    assert!(!BlockedCombo::parse("Ctrl+Alt+End").unwrap().is_secure_attention());
+    assert!(BlockedCombo::parse("Ctrl+Alt+Del")
+        .unwrap()
+        .is_secure_attention());
+    assert!(
+        BlockedCombo::parse("Ctrl+Alt+Shift+Del")
+            .unwrap()
+            .is_secure_attention(),
+        "extra modifiers still hit winlogon"
+    );
+    assert!(!BlockedCombo::parse("Ctrl+Del")
+        .unwrap()
+        .is_secure_attention());
+    assert!(!BlockedCombo::parse("Alt+Del")
+        .unwrap()
+        .is_secure_attention());
+    assert!(!BlockedCombo::parse("Ctrl+Alt+End")
+        .unwrap()
+        .is_secure_attention());
     assert!(!BlockedCombo::default().is_secure_attention());
 }
 
@@ -214,25 +383,58 @@ fn secure_attention_detection() {
 fn matching_requires_listed_modifiers_and_ignores_extra_ones() {
     let alt_tab = BlockedCombo::parse("Alt+Tab").unwrap();
     assert!(alt_tab.matches(&chord(vk::TAB, false, true, false, false)));
-    assert!(alt_tab.matches(&chord(vk::TAB, false, true, true, false)), "Alt+Shift+Tab");
-    assert!(alt_tab.matches(&chord(vk::TAB, true, true, false, true)), "every modifier held");
+    assert!(
+        alt_tab.matches(&chord(vk::TAB, false, true, true, false)),
+        "Alt+Shift+Tab"
+    );
+    assert!(
+        alt_tab.matches(&chord(vk::TAB, true, true, false, true)),
+        "every modifier held"
+    );
     assert!(!alt_tab.matches(&key(vk::TAB)), "Tab alone");
-    assert!(!alt_tab.matches(&chord(vk::TAB, true, false, false, false)), "Ctrl+Tab is not Alt+Tab");
-    assert!(!alt_tab.matches(&chord(vk::ESCAPE, false, true, false, false)), "Alt+Esc is another combo");
-    assert!(alt_tab.matches(&KeyEvent { key_up: true, ..chord(vk::TAB, false, true, false, false) }), "up events match too");
+    assert!(
+        !alt_tab.matches(&chord(vk::TAB, true, false, false, false)),
+        "Ctrl+Tab is not Alt+Tab"
+    );
+    assert!(
+        !alt_tab.matches(&chord(vk::ESCAPE, false, true, false, false)),
+        "Alt+Esc is another combo"
+    );
+    assert!(
+        alt_tab.matches(&KeyEvent {
+            key_up: true,
+            ..chord(vk::TAB, false, true, false, false)
+        }),
+        "up events match too"
+    );
 
     let exit = BlockedCombo::parse("Ctrl+Alt+Shift+F12").unwrap();
     assert!(exit.matches(&chord(vk::F1 + 11, true, true, true, false)));
-    assert!(!exit.matches(&chord(vk::F1 + 11, true, true, false, false)), "Shift missing");
-    assert!(!exit.matches(&chord(vk::F1 + 10, true, true, true, false)), "F11");
+    assert!(
+        !exit.matches(&chord(vk::F1 + 11, true, true, false, false)),
+        "Shift missing"
+    );
+    assert!(
+        !exit.matches(&chord(vk::F1 + 10, true, true, true, false)),
+        "F11"
+    );
 
     // Modifier-only combos match the modifier key itself, left or right, and nothing else.
     let win = BlockedCombo::parse("Win").unwrap();
     assert!(win.matches(&chord(vk::LWIN, false, false, false, true)));
     assert!(win.matches(&chord(vk::RWIN, false, false, false, true)));
-    assert!(!win.matches(&chord(vk::LWIN, false, false, false, false)), "hook state says Win is not held");
-    assert!(!win.matches(&chord(letter(b'd'), false, false, false, true)), "Win+D needs its own entry");
-    assert!(!win.matches(&chord(vk::LCONTROL, true, false, false, true)), "another modifier while Win is held");
+    assert!(
+        !win.matches(&chord(vk::LWIN, false, false, false, false)),
+        "hook state says Win is not held"
+    );
+    assert!(
+        !win.matches(&chord(letter(b'd'), false, false, false, true)),
+        "Win+D needs its own entry"
+    );
+    assert!(
+        !win.matches(&chord(vk::LCONTROL, true, false, false, true)),
+        "another modifier while Win is held"
+    );
 
     let ctrl = BlockedCombo::parse("Ctrl").unwrap();
     for k in [vk::CONTROL, vk::LCONTROL, vk::RCONTROL] {
@@ -240,7 +442,10 @@ fn matching_requires_listed_modifiers_and_ignores_extra_ones() {
     }
     assert!(!ctrl.matches(&chord(vk::LSHIFT, true, true, false, false)));
     let ctrl_alt = BlockedCombo::parse("Ctrl+Alt").unwrap();
-    assert!(ctrl_alt.matches(&chord(vk::LMENU, true, true, false, false)), "second modifier of the chord");
+    assert!(
+        ctrl_alt.matches(&chord(vk::LMENU, true, true, false, false)),
+        "second modifier of the chord"
+    );
     assert!(!ctrl_alt.matches(&chord(vk::LMENU, false, true, false, false)));
 
     // The secure attention sequence matches structurally; the OS just never delivers it.
@@ -257,7 +462,10 @@ fn kiosk_filter_blocks_the_documented_chords_and_passes_everything_else() {
         ("Alt+Esc", chord(vk::ESCAPE, false, true, false, false)),
         ("Ctrl+Esc", chord(vk::ESCAPE, true, false, false, false)),
         ("Alt+F4", chord(vk::F1 + 3, false, true, false, false)),
-        ("Ctrl+Shift+Esc", chord(vk::ESCAPE, true, false, true, false)),
+        (
+            "Ctrl+Shift+Esc",
+            chord(vk::ESCAPE, true, false, true, false),
+        ),
         ("LWin", chord(vk::LWIN, false, false, false, true)),
         ("RWin", chord(vk::RWIN, false, false, false, true)),
         ("Win+D", chord(letter(b'd'), false, false, false, true)),
@@ -267,9 +475,24 @@ fn kiosk_filter_blocks_the_documented_chords_and_passes_everything_else() {
         ("Win+I", chord(letter(b'i'), false, false, false, true)),
         ("Win+Tab", chord(vk::TAB, false, false, false, true)),
         ("PrintScreen", key(vk::SNAPSHOT)),
-        ("Alt+PrintScreen", chord(vk::SNAPSHOT, false, true, false, false)),
-        ("Win+L key up", KeyEvent { key_up: true, ..chord(letter(b'l'), false, false, false, true) }),
-        ("injected Alt+Tab", KeyEvent { flags: llkhf::INJECTED, ..chord(vk::TAB, false, true, false, false) }),
+        (
+            "Alt+PrintScreen",
+            chord(vk::SNAPSHOT, false, true, false, false),
+        ),
+        (
+            "Win+L key up",
+            KeyEvent {
+                key_up: true,
+                ..chord(letter(b'l'), false, false, false, true)
+            },
+        ),
+        (
+            "injected Alt+Tab",
+            KeyEvent {
+                flags: llkhf::INJECTED,
+                ..chord(vk::TAB, false, true, false, false)
+            },
+        ),
     ];
     for (name, ev) in blocked {
         assert_eq!(filter(&ev), HookAction::Block, "{name}");
@@ -283,7 +506,10 @@ fn kiosk_filter_blocks_the_documented_chords_and_passes_everything_else() {
         ("F4", key(vk::F1 + 3)),
         ("Ctrl+F4", chord(vk::F1 + 3, true, false, false, false)),
         ("Ctrl+C", chord(letter(b'c'), true, false, false, false)),
-        ("Ctrl+Alt+Shift+F12 exit hotkey", chord(vk::F1 + 11, true, true, true, false)),
+        (
+            "Ctrl+Alt+Shift+F12 exit hotkey",
+            chord(vk::F1 + 11, true, true, true, false),
+        ),
         ("Space", key(vk::SPACE)),
         ("letter W without Win", key(letter(b'w'))),
         ("Alt alone", chord(vk::LMENU, false, true, false, false)),
@@ -296,20 +522,46 @@ fn kiosk_filter_blocks_the_documented_chords_and_passes_everything_else() {
     }
 
     // Policy combos extend the built-in set; an empty policy blocks nothing.
-    let with_policy = block_combos(BlockedCombo::parse_all(&["Ctrl+Alt+Del", "F1", "Win+P"]).unwrap());
+    let with_policy =
+        block_combos(BlockedCombo::parse_all(&["Ctrl+Alt+Del", "F1", "Win+P"]).unwrap());
     assert_eq!(with_policy(&key(vk::F1)), HookAction::Block);
-    assert_eq!(with_policy(&chord(letter(b'p'), false, false, false, true)), HookAction::Block);
-    assert_eq!(with_policy(&chord(vk::TAB, false, true, false, false)), HookAction::Pass, "Alt+Tab is not in this policy");
+    assert_eq!(
+        with_policy(&chord(letter(b'p'), false, false, false, true)),
+        HookAction::Block
+    );
+    assert_eq!(
+        with_policy(&chord(vk::TAB, false, true, false, false)),
+        HookAction::Pass,
+        "Alt+Tab is not in this policy"
+    );
     let nothing = block_combos(Vec::new());
-    assert_eq!(nothing(&chord(vk::TAB, false, true, false, false)), HookAction::Pass);
-    assert!(!BlockedCombo::any_matches(&[], &chord(vk::LWIN, false, false, false, true)));
+    assert_eq!(
+        nothing(&chord(vk::TAB, false, true, false, false)),
+        HookAction::Pass
+    );
+    assert!(!BlockedCombo::any_matches(
+        &[],
+        &chord(vk::LWIN, false, false, false, true)
+    ));
 }
 
 #[test]
 fn key_event_flags() {
-    assert!(KeyEvent { flags: llkhf::INJECTED, ..key(vk::SPACE) }.injected());
-    assert!(KeyEvent { flags: llkhf::INJECTED | llkhf::UP | llkhf::EXTENDED, ..key(vk::SPACE) }.injected());
-    assert!(!KeyEvent { flags: llkhf::ALTDOWN | llkhf::UP, ..key(vk::SPACE) }.injected());
+    assert!(KeyEvent {
+        flags: llkhf::INJECTED,
+        ..key(vk::SPACE)
+    }
+    .injected());
+    assert!(KeyEvent {
+        flags: llkhf::INJECTED | llkhf::UP | llkhf::EXTENDED,
+        ..key(vk::SPACE)
+    }
+    .injected());
+    assert!(!KeyEvent {
+        flags: llkhf::ALTDOWN | llkhf::UP,
+        ..key(vk::SPACE)
+    }
+    .injected());
     assert!(!key(vk::SPACE).injected());
 }
 
@@ -325,8 +577,14 @@ fn alt_tab_combos_cover_every_switcher_chord() {
     ] {
         assert!(BlockedCombo::any_matches(&combos, &ev), "{name}");
     }
-    assert!(!BlockedCombo::any_matches(&combos, &chord(vk::TAB, true, false, false, false)), "Ctrl+Tab switches tabs, not windows");
-    assert!(!BlockedCombo::any_matches(&combos, &chord(vk::LWIN, false, false, false, true)), "bare Win belongs to the kiosk set");
+    assert!(
+        !BlockedCombo::any_matches(&combos, &chord(vk::TAB, true, false, false, false)),
+        "Ctrl+Tab switches tabs, not windows"
+    );
+    assert!(
+        !BlockedCombo::any_matches(&combos, &chord(vk::LWIN, false, false, false, true)),
+        "bare Win belongs to the kiosk set"
+    );
 }
 
 #[test]
@@ -353,11 +611,19 @@ fn mouse_edge_blocker_geometry() {
     }
 
     let edges = edge_blocker(bounds, 4, false);
-    assert_eq!(edges(&mouse(960, 0)), HookAction::Block, "top strip (auto-hidden taskbar)");
+    assert_eq!(
+        edges(&mouse(960, 0)),
+        HookAction::Block,
+        "top strip (auto-hidden taskbar)"
+    );
     assert_eq!(edges(&mouse(960, 1079)), HookAction::Block, "bottom strip");
     assert_eq!(edges(&mouse(0, 540)), HookAction::Block, "left strip");
     assert_eq!(edges(&mouse(1916, 540)), HookAction::Block, "right strip");
-    assert_eq!(edges(&mouse(960, 4)), HookAction::Pass, "first row past the margin");
+    assert_eq!(
+        edges(&mouse(960, 4)),
+        HookAction::Pass,
+        "first row past the margin"
+    );
     assert_eq!(edges(&mouse(960, 540)), HookAction::Pass);
 
     // A zero margin never blocks anything inside the bounds; the blocker follows the monitor origin.
@@ -373,13 +639,38 @@ fn mouse_edge_blocker_geometry() {
     assert!(mouse(0, 0).is_move());
     assert!(!mouse(0, 0).is_button());
     assert!(!mouse(0, 0).is_wheel());
-    for msg in [0x0201u32, 0x0202, 0x0204, 0x0205, 0x0207, 0x0208, 0x020B, 0x020C] {
-        assert!(MouseEvent { message: msg, ..mouse(0, 0) }.is_button(), "{msg:#x}");
+    for msg in [
+        0x0201u32, 0x0202, 0x0204, 0x0205, 0x0207, 0x0208, 0x020B, 0x020C,
+    ] {
+        assert!(
+            MouseEvent {
+                message: msg,
+                ..mouse(0, 0)
+            }
+            .is_button(),
+            "{msg:#x}"
+        );
     }
-    assert!(MouseEvent { message: 0x020A, ..mouse(0, 0) }.is_wheel());
-    assert!(MouseEvent { message: 0x020E, ..mouse(0, 0) }.is_wheel());
-    assert!(MouseEvent { flags: 1, ..mouse(0, 0) }.injected());
-    assert!(!MouseEvent { flags: 2, ..mouse(0, 0) }.injected());
+    assert!(MouseEvent {
+        message: 0x020A,
+        ..mouse(0, 0)
+    }
+    .is_wheel());
+    assert!(MouseEvent {
+        message: 0x020E,
+        ..mouse(0, 0)
+    }
+    .is_wheel());
+    assert!(MouseEvent {
+        flags: 1,
+        ..mouse(0, 0)
+    }
+    .injected());
+    assert!(!MouseEvent {
+        flags: 2,
+        ..mouse(0, 0)
+    }
+    .injected());
 }
 
 // ───────────────────────────── Rect ─────────────────────────────
@@ -429,16 +720,29 @@ fn primary_monitor_selection_rules() {
     assert_eq!(pick_primary(&all), Some(&main));
 
     // 2. Without a flag, the monitor containing the virtual-screen origin.
-    let unflagged: Vec<MonitorInfo> = all.iter().cloned().map(|m| MonitorInfo { primary: false, ..m }).collect();
+    let unflagged: Vec<MonitorInfo> = all
+        .iter()
+        .cloned()
+        .map(|m| MonitorInfo {
+            primary: false,
+            ..m
+        })
+        .collect();
     assert_eq!(pick_primary(&unflagged).map(|m| m.index), Some(1));
 
     // 3. Otherwise the first enumerated.
-    let offset = [monitor(0, Rect::from_size(100, 100, 800, 600), false), monitor(1, Rect::from_size(900, 100, 800, 600), false)];
+    let offset = [
+        monitor(0, Rect::from_size(100, 100, 800, 600), false),
+        monitor(1, Rect::from_size(900, 100, 800, 600), false),
+    ];
     assert_eq!(pick_primary(&offset).map(|m| m.index), Some(0));
     assert_eq!(pick_primary(&[]), None);
 
     // Two flagged primaries (transient during a topology change): the first flagged one.
-    let two = [monitor(0, Rect::from_size(0, 0, 1920, 1080), true), monitor(1, Rect::from_size(1920, 0, 1920, 1080), true)];
+    let two = [
+        monitor(0, Rect::from_size(0, 0, 1920, 1080), true),
+        monitor(1, Rect::from_size(1920, 0, 1920, 1080), true),
+    ];
     assert_eq!(pick_primary(&two).map(|m| m.index), Some(0));
 }
 
@@ -450,16 +754,36 @@ fn monitor_containing_prefers_containing_then_nearest() {
     let all = [a, b, c];
 
     assert_eq!(monitor_containing(&all, 0, 0).map(|m| m.index), Some(0));
-    assert_eq!(monitor_containing(&all, 1919, 1079).map(|m| m.index), Some(0));
-    assert_eq!(monitor_containing(&all, 1920, 0).map(|m| m.index), Some(1), "shared edge belongs to the right monitor");
-    assert_eq!(monitor_containing(&all, 100, 1080).map(|m| m.index), Some(2));
+    assert_eq!(
+        monitor_containing(&all, 1919, 1079).map(|m| m.index),
+        Some(0)
+    );
+    assert_eq!(
+        monitor_containing(&all, 1920, 0).map(|m| m.index),
+        Some(1),
+        "shared edge belongs to the right monitor"
+    );
+    assert_eq!(
+        monitor_containing(&all, 100, 1080).map(|m| m.index),
+        Some(2)
+    );
 
     // Outside every monitor: nearest by edge distance.
     assert_eq!(monitor_containing(&all, -50, -50).map(|m| m.index), Some(0));
     assert_eq!(monitor_containing(&all, 5000, 10).map(|m| m.index), Some(1));
-    assert_eq!(monitor_containing(&all, 100, 3000).map(|m| m.index), Some(2));
-    assert_eq!(monitor_containing(&all, 1500, 1500).map(|m| m.index), Some(2), "closer to the bottom monitor's right edge");
-    assert_eq!(monitor_containing(&all, 3000, 1500).map(|m| m.index), Some(1));
+    assert_eq!(
+        monitor_containing(&all, 100, 3000).map(|m| m.index),
+        Some(2)
+    );
+    assert_eq!(
+        monitor_containing(&all, 1500, 1500).map(|m| m.index),
+        Some(2),
+        "closer to the bottom monitor's right edge"
+    );
+    assert_eq!(
+        monitor_containing(&all, 3000, 1500).map(|m| m.index),
+        Some(1)
+    );
     assert!(monitor_containing(&[], 0, 0).is_none());
 }
 
@@ -468,10 +792,20 @@ fn monitor_info_is_plain_data() {
     let m = monitor(0, Rect::from_size(0, 0, 1920, 1080), true);
     assert_eq!(m.width, 1920);
     assert_eq!(m.height, 1080);
-    assert_eq!(m.work_rect.height(), 1032, "taskbar excluded from the work area");
+    assert_eq!(
+        m.work_rect.height(),
+        1032,
+        "taskbar excluded from the work area"
+    );
     assert_eq!(m.name, r"\\.\DISPLAY1");
     assert_eq!(m.clone(), m);
-    assert_ne!(MonitorInfo { scale: 1.5, ..m.clone() }, m);
+    assert_ne!(
+        MonitorInfo {
+            scale: 1.5,
+            ..m.clone()
+        },
+        m
+    );
 }
 
 // ───────────────────────────── Windows desktop ─────────────────────────────
@@ -503,21 +837,38 @@ fn enumerates_attached_monitors() {
         assert_eq!((m.width, m.height), (m.rect.width(), m.rect.height()));
         assert!(m.width > 0 && m.height > 0);
         assert!(!m.work_rect.is_empty(), "{}: {:?}", m.name, m.work_rect);
-        assert!(m.work_rect.width() <= m.rect.width() && m.work_rect.height() <= m.rect.height(), "work area fits the monitor");
-        assert!((1.0..=5.0).contains(&m.scale), "{}: scale {}", m.name, m.scale);
+        assert!(
+            m.work_rect.width() <= m.rect.width() && m.work_rect.height() <= m.rect.height(),
+            "work area fits the monitor"
+        );
+        assert!(
+            (1.0..=5.0).contains(&m.scale),
+            "{}: scale {}",
+            m.name,
+            m.scale
+        );
     }
     let handles: HashSet<isize> = monitors.iter().map(|m| m.handle).collect();
     assert_eq!(handles.len(), monitors.len(), "handles are unique");
-    assert!(monitors.iter().filter(|m| m.primary).count() <= 1, "at most one primary");
+    assert!(
+        monitors.iter().filter(|m| m.primary).count() <= 1,
+        "at most one primary"
+    );
 
     let chosen = pick_primary(&monitors).expect("non-empty list has a primary");
     let p = primary().expect("primary()");
     assert_eq!(p.handle, chosen.handle);
-    assert!(p.rect.contains(0, 0), "the primary monitor owns the virtual-screen origin");
+    assert!(
+        p.rect.contains(0, 0),
+        "the primary monitor owns the virtual-screen origin"
+    );
 
     let at_origin = monitor_at_point(0, 0).expect("monitor_at_point");
     assert_eq!(at_origin.handle, p.handle);
-    let (cx, cy) = (p.rect.left + p.rect.width() / 2, p.rect.top + p.rect.height() / 2);
+    let (cx, cy) = (
+        p.rect.left + p.rect.width() / 2,
+        p.rect.top + p.rect.height() / 2,
+    );
     assert_eq!(monitor_at_point(cx, cy).expect("centre").handle, p.handle);
     let far = monitor_at_point(i32::MAX / 2, i32::MAX / 2).expect("nearest to a far point");
     assert!(handles.contains(&far.handle));
@@ -525,9 +876,15 @@ fn enumerates_attached_monitors() {
     // The watcher thread starts, publishes nothing without a topology change, and stops on drop.
     let (watcher, rx) = DisplayWatcher::start().expect("DisplayWatcher::start");
     std::thread::sleep(std::time::Duration::from_millis(50));
-    assert!(rx.try_recv().is_err(), "no change event without a display change");
+    assert!(
+        rx.try_recv().is_err(),
+        "no change event without a display change"
+    );
     drop(watcher);
-    assert!(rx.recv().is_err(), "sender is gone once the watcher thread exits");
+    assert!(
+        rx.recv().is_err(),
+        "sender is gone once the watcher thread exits"
+    );
 }
 
 /// The desktop window (`Progman`, owned by explorer) exists in every interactive session; without one
@@ -553,16 +910,43 @@ fn finds_the_desktop_window() {
         return;
     };
     assert_ne!(desktop, 0);
-    assert!(windows.iter().any(|w| w.hwnd == desktop), "find_window picks from enumerate_windows");
-    let info = windows.iter().find(|w| w.hwnd == desktop).expect("desktop info");
+    assert!(
+        windows.iter().any(|w| w.hwnd == desktop),
+        "find_window picks from enumerate_windows"
+    );
+    let info = windows
+        .iter()
+        .find(|w| w.hwnd == desktop)
+        .expect("desktop info");
     assert!(info.class.eq_ignore_ascii_case("Progman"));
-    assert_eq!(find_window(Some("Progman"), Some(info.title.as_str())).expect("class+title"), Some(desktop));
-    assert_eq!(find_window(Some("ClubShellNoSuchClass"), None).expect("unknown class"), None);
-    assert!(matches!(find_window(None, None), Err(WinUtilError::Invalid(_))), "needs a class or a title");
+    assert_eq!(
+        find_window(Some("Progman"), Some(info.title.as_str())).expect("class+title"),
+        Some(desktop)
+    );
+    assert_eq!(
+        find_window(Some("ClubShellNoSuchClass"), None).expect("unknown class"),
+        None
+    );
+    assert!(
+        matches!(find_window(None, None), Err(WinUtilError::Invalid(_))),
+        "needs a class or a title"
+    );
 
     let pid = window_pid(desktop).expect("window_pid");
     assert!(pid > 0);
     assert_eq!(pid, info.pid);
-    assert!(!window_rect(desktop).expect("window_rect").is_empty(), "the desktop covers the screen");
-    assert!(matches!(window_pid(0), Err(WinUtilError::Win32 { api: "GetWindowThreadProcessId", .. })), "a null handle is rejected");
+    assert!(
+        !window_rect(desktop).expect("window_rect").is_empty(),
+        "the desktop covers the screen"
+    );
+    assert!(
+        matches!(
+            window_pid(0),
+            Err(WinUtilError::Win32 {
+                api: "GetWindowThreadProcessId",
+                ..
+            })
+        ),
+        "a null handle is rejected"
+    );
 }

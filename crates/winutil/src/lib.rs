@@ -20,7 +20,8 @@ pub mod pipe;
 pub mod window;
 
 pub use hooks::{
-    BlockedCombo, HookAction, KeyEvent, KeyFilter, LowLevelKeyboardHook, LowLevelMouseHook, MouseEvent, MouseFilter,
+    BlockedCombo, HookAction, KeyEvent, KeyFilter, LowLevelKeyboardHook, LowLevelMouseHook,
+    MouseEvent, MouseFilter,
 };
 pub use monitor::{DisplayWatcher, MonitorInfo};
 pub use pipe::{CloseReason, ConnectionState, PipeClient, PipeOptions};
@@ -88,12 +89,22 @@ pub struct Rect {
 impl Rect {
     /// Rectangle from edges.
     pub const fn new(left: i32, top: i32, right: i32, bottom: i32) -> Self {
-        Self { left, top, right, bottom }
+        Self {
+            left,
+            top,
+            right,
+            bottom,
+        }
     }
 
     /// Rectangle from origin and size.
     pub const fn from_size(x: i32, y: i32, width: i32, height: i32) -> Self {
-        Self { left: x, top: y, right: x + width, bottom: y + height }
+        Self {
+            left: x,
+            top: y,
+            right: x + width,
+            bottom: y + height,
+        }
     }
 
     pub const fn width(&self) -> i32 {
@@ -125,7 +136,11 @@ mod win {
     }
 
     pub(crate) fn from_error(api: &'static str, e: windows::core::Error) -> WinUtilError {
-        WinUtilError::Win32 { api, code: e.code().0 as u32, msg: e.message() }
+        WinUtilError::Win32 {
+            api,
+            code: e.code().0 as u32,
+            msg: e.message(),
+        }
     }
 
     /// Wraps a raw `HWND` value (as passed across this crate's API).
@@ -178,21 +193,31 @@ mod win {
 
     impl From<RECT> for Rect {
         fn from(r: RECT) -> Self {
-            Rect { left: r.left, top: r.top, right: r.right, bottom: r.bottom }
+            Rect {
+                left: r.left,
+                top: r.top,
+                right: r.right,
+                bottom: r.bottom,
+            }
         }
     }
 
     impl From<Rect> for RECT {
         fn from(r: Rect) -> Self {
-            RECT { left: r.left, top: r.top, right: r.right, bottom: r.bottom }
+            RECT {
+                left: r.left,
+                top: r.top,
+                right: r.right,
+                bottom: r.bottom,
+            }
         }
     }
 }
 
 #[cfg(windows)]
-pub use win::{hwnd_from_raw, hwnd_to_raw, last_error};
-#[cfg(windows)]
 pub(crate) use win::{from_error, Win32Ret};
+#[cfg(windows)]
+pub use win::{hwnd_from_raw, hwnd_to_raw, last_error};
 
 #[cfg(test)]
 mod tests {
@@ -211,10 +236,22 @@ mod tests {
 
     #[test]
     fn error_display() {
-        let e = WinUtilError::Win32 { api: "SetWindowPos", code: 0x8007_0005, msg: "Access is denied.".into() };
-        assert_eq!(e.to_string(), "SetWindowPos failed: Access is denied. (0x80070005)");
-        assert_eq!(WinUtilError::Busy("WH_KEYBOARD_LL hook").to_string(), "WH_KEYBOARD_LL hook is already installed in this process");
+        let e = WinUtilError::Win32 {
+            api: "SetWindowPos",
+            code: 0x8007_0005,
+            msg: "Access is denied.".into(),
+        };
+        assert_eq!(
+            e.to_string(),
+            "SetWindowPos failed: Access is denied. (0x80070005)"
+        );
+        assert_eq!(
+            WinUtilError::Busy("WH_KEYBOARD_LL hook").to_string(),
+            "WH_KEYBOARD_LL hook is already installed in this process"
+        );
         let ipc: WinUtilError = IpcError::timeout(None).into();
-        assert!(matches!(ipc, WinUtilError::Ipc(ref e) if e.code == clubshell_protocol::error::ErrorCode::Timeout));
+        assert!(
+            matches!(ipc, WinUtilError::Ipc(ref e) if e.code == clubshell_protocol::error::ErrorCode::Timeout)
+        );
     }
 }
