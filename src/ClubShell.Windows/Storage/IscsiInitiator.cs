@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.Versioning;
 using System.ServiceProcess;
+using System.Text;
 using ClubShell.Core.Abstractions;
 using ClubShell.Windows.Hardware;
 using ClubShell.Windows.Network;
@@ -27,12 +28,16 @@ public sealed record IscsiSession(string TargetIqn, string SessionId, bool IsCon
 /// and the Storage Management WMI classes (<c>MSFT_iSCSISession</c>, <c>MSFT_iSCSITarget</c>) for state, which avoids
 /// parsing localized tool output. The MSiSCSI service must run: <see cref="EnsureServiceRunningAsync"/> starts it and
 /// sets it to automatic start so persistent logins survive reboots (agent.json <c>storage.gamesShare.iscsi</c>).
+/// <see cref="SetDisksReadOnlyAsync"/> protects a LUN shared by several PCs (<c>iscsi.readOnly</c>).
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class IscsiInitiator
 {
     /// <summary>Default iSCSI portal port.</summary>
     public const int DefaultPort = 3260;
+
+    /// <summary><c>MSFT_Disk.BusType</c> of a disk reached over iSCSI.</summary>
+    public const int IscsiBusType = 9;
 
     private const string ServiceName = "MSiSCSI";
     private static readonly TimeSpan ToolTimeout = TimeSpan.FromSeconds(60);
@@ -43,6 +48,7 @@ public sealed class IscsiInitiator
     private readonly ILogger<IscsiInitiator> _logger;
     private readonly string _iscsicli = Path.Combine(Environment.SystemDirectory, "iscsicli.exe");
     private readonly string _sc = Path.Combine(Environment.SystemDirectory, "sc.exe");
+    private readonly string _diskpart = Path.Combine(Environment.SystemDirectory, "diskpart.exe");
 
     /// <summary>Creates the wrapper.</summary>
     public IscsiInitiator(WmiQueries wmi, IClock? clock = null, ILogger<IscsiInitiator>? logger = null)
@@ -223,6 +229,49 @@ public sealed class IscsiInitiator
         }
     }
 
+    /// <summary>
+    /// Marks every writable disk on the iSCSI bus read-only (<c>diskpart attributes disk set readonly</c>) and returns
+    /// how many were changed. Called between login and first use of the volume: on a LUN several PCs mount at once,
+    /// the first client that writes to it breaks the file system for all the others.
+    /// </summary>
+    public async Task<int> SetDisksReadOnlyAsync(CancellationToken cancellationToken)
+    {
+        WmiQueryResult disks = await _wmi.TryQueryAsync(WmiQueries.StorageScope, "SELECT Number, BusType, IsReadOnly FROM MSFT_Disk", null, cancellationToken).ConfigureAwait(false);
+        if (!disks.Succeeded)
+        {
+            _logger.LogWarning("iSCSI disks could not be enumerated; volume stays writable");
+            return 0;
+        }
+
+        var numbers = new List<int>();
+        foreach (IReadOnlyDictionary<string, object?> row in disks.Rows)
+        {
+            if (row.GetInt32("BusType", -1) == IscsiBusType && !row.GetBoolean("IsReadOnly"))
+            {
+                numbers.Add(row.GetInt32("Number"));
+            }
+        }
+
+        if (numbers.Count == 0)
+        {
+            return 0;
+        }
+
+        var script = new StringBuilder();
+        foreach (int number in numbers)
+        {
+            script.Append(CultureInfo.InvariantCulture, $"select disk {number}\r\nattributes disk set readonly\r\n");
+        }
+
+        if (!await RunDiskpartAsync(script.ToString(), cancellationToken).ConfigureAwait(false))
+        {
+            return 0;
+        }
+
+        _logger.LogInformation("iSCSI disk(s) {Disks} marked read-only", string.Join(", ", numbers));
+        return numbers.Count;
+    }
+
     /// <summary>Polls until the drive letter is ready (volume mounted after login) or <paramref name="timeout"/> elapses.</summary>
     public async Task<bool> WaitForVolumeAsync(char driveLetter, TimeSpan timeout, CancellationToken cancellationToken)
     {
@@ -316,6 +365,40 @@ public sealed class IscsiInitiator
         catch (System.ServiceProcess.TimeoutException ex)
         {
             throw new InvalidOperationException("MSiSCSI service did not start in time", ex);
+        }
+    }
+
+    /// <summary>Runs a diskpart script from a temporary file; failures are logged, not thrown (the mount still works, just writable).</summary>
+    private async Task<bool> RunDiskpartAsync(string script, CancellationToken cancellationToken)
+    {
+        string path = Path.Combine(Path.GetTempPath(), "clubshell-diskpart-" + Environment.ProcessId.ToString(CultureInfo.InvariantCulture) + ".txt");
+        try
+        {
+            await File.WriteAllTextAsync(path, script, cancellationToken).ConfigureAwait(false);
+            ProcessResult result = await ProcessRunner.RunAsync(_diskpart, new[] { "/s", path }, ToolTimeout, cancellationToken).ConfigureAwait(false);
+            if (result.Success)
+            {
+                return true;
+            }
+
+            _logger.LogWarning("diskpart exited with {ExitCode}: {Output}", result.ExitCode, Tail(result.CombinedOutput));
+            return false;
+        }
+        catch (Exception ex) when (ex is Win32Exception or System.TimeoutException or IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "diskpart could not be run");
+            return false;
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(path);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogDebug(ex, "Temporary diskpart script {Path} could not be removed", path);
+            }
         }
     }
 

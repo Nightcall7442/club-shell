@@ -121,11 +121,18 @@ allowed to be stopped before the launch because the game starts it.
 | `SecureBootEnabled` | `WmiQueries.GetSecureBootEnabled()` (`null` = legacy BIOS / unknown) | `agent.json → anticheat.requireSecureBoot` and not `true` → `secureBootOff` |
 | `TpmPresent` | `WmiQueries.GetTpmPresentAsync` | `anticheat.requireTpm` and not `true` → `tpmOff` |
 | `VbsEnabled` | `HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\EnableVirtualizationBasedSecurity` | informational (debug log) |
-| `HvciEnabled` | `...\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity\Enabled` | informational; `hvciOff` is **logged**, never returned as a failure |
-| `TestSigningEnabled` | `bcdedit /enum {current}` parsed by `ParseTestSigning` (15 s timeout; yes/no in several locales) | `true` → `testSigningOn` (always a violation); unknown (`null`) is tolerated |
+| `HvciEnabled` | `...\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity\Enabled` | `anticheat.requireHvci` and not effectively on → `hvciOff`; otherwise logged only |
+| `HypervisorEnabled` | `bcdedit` element `hypervisorlaunchtype` (absent = `Auto`) | `off` kills VBS and HVCI, so it counts as HVCI being off |
+| `TestSigningEnabled` | `bcdedit` element `testsigning` | `true` → `testSigningOn` (always a violation); unknown (`null`) is tolerated |
+| `CodeIntegrityDisabled` | `bcdedit` element `nointegritychecks` | `true` → `codeIntegrityOff` (always a violation) |
+| `KernelDebugEnabled` | `bcdedit` element `debug` | `true` → `kernelDebugOn` (always a violation) |
+
+The four boot elements come from one `bcdedit /enum {current}` run (15 s timeout) parsed by `ParseBcdFlag` /
+`ParseBcdElement`, which recognise yes/no in several locales; a failed run leaves all four `null` (tolerated).
 
 Results are cached for `SecureBootChecker.CacheTtl` (60 s) under a `SemaphoreSlim`; `CheckRuntimeAsync`
-delegates to `CheckAsync`. Order of evaluation is Secure Boot → TPM → test-signing, and the first failure wins.
+delegates to `CheckAsync`. Order of evaluation is Secure Boot → TPM → test-signing → code integrity → kernel
+debugging → HVCI, and the first failure wins.
 
 ---
 
@@ -140,8 +147,10 @@ delegates to `CheckAsync`. Order of evaluation is Secure Boot → TPM → test-s
 | `serviceStopped` | EAC, FACEIT, Vanguard | `warning` |
 | `secureBootOff` | Vanguard (Win 11), SecureBoot | `warning` |
 | `tpmOff` | Vanguard (Win 11), SecureBoot | `warning` |
-| `hvciOff` | logged only | — |
+| `hvciOff` | SecureBoot, only with `anticheat.requireHvci` | `warning` |
 | `testSigningOn` | SecureBoot | `critical` |
+| `codeIntegrityOff` | SecureBoot | `critical` |
+| `kernelDebugOn` | SecureBoot | `critical` |
 | `blockedProcess` | reserved (no checker emits it today) | `critical` |
 | `injectedModule` | reserved | `critical` |
 | `vmDetected` | reserved | `critical` |

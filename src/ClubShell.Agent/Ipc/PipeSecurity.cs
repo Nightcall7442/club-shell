@@ -129,8 +129,10 @@ public static class PipeSecurityFactory
             var expected = expectedSignerThumbprint ?? AgentSignerThumbprint;
             if (expected is null)
             {
-                logger.LogDebug("Signed client validation requested but no signer thumbprint is known (Agent unsigned); skipping");
-                return info;
+                // Falling back to the weaker ExePath check here would silently downgrade the mode the operator asked
+                // for, so a signature-verified pipe with no signer to compare against accepts nobody.
+                logger.LogWarning("Pipe client rejected: signed client validation is configured but no signer thumbprint is known (Agent unsigned and ipc.expectedSignerThumbprint unset)");
+                return null;
             }
 
             var actual = info.ExePath is null ? null : GetSignerThumbprint(info.ExePath);

@@ -74,6 +74,15 @@ public sealed class SecureBootChecker : IAntiCheatChecker, IDisposable
     /// <summary>Test-signing mode from <c>bcdedit</c> (<see langword="null"/> = could not be determined).</summary>
     public bool? TestSigningEnabled { get; private set; }
 
+    /// <summary>Driver signature enforcement disabled from <c>bcdedit</c> (<c>nointegritychecks</c>).</summary>
+    public bool? CodeIntegrityDisabled { get; private set; }
+
+    /// <summary>Kernel debugging enabled from <c>bcdedit</c> (<c>debug</c>).</summary>
+    public bool? KernelDebugEnabled { get; private set; }
+
+    /// <summary>Hypervisor launched at boot (<c>hypervisorlaunchtype</c> other than <c>off</c>); <see langword="false"/> kills VBS and HVCI.</summary>
+    public bool? HypervisorEnabled { get; private set; }
+
     /// <inheritdoc />
     public async Task<AntiCheatCheckResult> CheckAsync(CancellationToken cancellationToken)
     {
@@ -115,33 +124,45 @@ public sealed class SecureBootChecker : IAntiCheatChecker, IDisposable
     }
 
     /// <summary>Parses <c>bcdedit /enum</c> output for the <c>testsigning</c> element; <see langword="null"/> when the value is not recognisable.</summary>
-    public static bool? ParseTestSigning(string bcdOutput)
+    public static bool? ParseTestSigning(string bcdOutput) => ParseBcdFlag(bcdOutput, "testsigning");
+
+    /// <summary>
+    /// Parses <c>bcdedit /enum</c> output for a boolean boot element (<c>testsigning</c>, <c>nointegritychecks</c>,
+    /// <c>debug</c>): <see langword="false"/> when absent (that is the element's default), <see langword="null"/> when
+    /// present with a value this parser does not recognise in any of the locales <c>bcdedit</c> prints.
+    /// </summary>
+    public static bool? ParseBcdFlag(string bcdOutput, string element)
+    {
+        var value = ParseBcdElement(bcdOutput, element);
+        if (value is null)
+        {
+            // Element absent: default is off.
+            return false;
+        }
+
+        if (YesValues.Contains(value))
+        {
+            return true;
+        }
+
+        return NoValues.Contains(value) ? false : (bool?)null;
+    }
+
+    /// <summary>Last token of the <paramref name="element"/> line of <c>bcdedit /enum</c>, or <see langword="null"/> when the element is absent.</summary>
+    public static string? ParseBcdElement(string bcdOutput, string element)
     {
         ArgumentNullException.ThrowIfNull(bcdOutput);
+        ArgumentException.ThrowIfNullOrEmpty(element);
         foreach (var raw in bcdOutput.Split('\n'))
         {
             var parts = raw.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length < 2 || !string.Equals(parts[0], "testsigning", StringComparison.OrdinalIgnoreCase))
+            if (parts.Length >= 2 && string.Equals(parts[0], element, StringComparison.OrdinalIgnoreCase))
             {
-                continue;
+                return parts[^1];
             }
-
-            var value = parts[^1];
-            if (YesValues.Contains(value))
-            {
-                return true;
-            }
-
-            if (NoValues.Contains(value))
-            {
-                return false;
-            }
-
-            return null;
         }
 
-        // Element absent: default is off.
-        return false;
+        return null;
     }
 
     private async Task<AntiCheatCheckResult> EvaluateAsync(CancellationToken cancellationToken)
@@ -151,8 +172,17 @@ public sealed class SecureBootChecker : IAntiCheatChecker, IDisposable
         TpmPresent = await _wmi.GetTpmPresentAsync(cancellationToken).ConfigureAwait(false);
         VbsEnabled = ReadFlag(DeviceGuardKey, "EnableVirtualizationBasedSecurity");
         HvciEnabled = ReadFlag(HvciKey, "Enabled");
-        TestSigningEnabled = await ReadTestSigningAsync(cancellationToken).ConfigureAwait(false);
-        _logger.LogDebug("Platform security: secureBoot {SecureBoot}, tpm {Tpm}, vbs {Vbs}, hvci {Hvci}, testSigning {TestSigning}", SecureBootEnabled, TpmPresent, VbsEnabled, HvciEnabled, TestSigningEnabled);
+        await ReadBootConfigurationAsync(cancellationToken).ConfigureAwait(false);
+        _logger.LogDebug(
+            "Platform security: secureBoot {SecureBoot}, tpm {Tpm}, vbs {Vbs}, hvci {Hvci}, hypervisor {Hypervisor}, testSigning {TestSigning}, noIntegrityChecks {CodeIntegrityOff}, kernelDebug {KernelDebug}",
+            SecureBootEnabled,
+            TpmPresent,
+            VbsEnabled,
+            HvciEnabled,
+            HypervisorEnabled,
+            TestSigningEnabled,
+            CodeIntegrityDisabled,
+            KernelDebugEnabled);
 
         if (anticheat.RequireSecureBoot && SecureBootEnabled != true)
         {
@@ -172,8 +202,29 @@ public sealed class SecureBootChecker : IAntiCheatChecker, IDisposable
             return new AntiCheatCheckResult(Kind, false, AntiCheatChecks.TestSigningOn);
         }
 
-        if (HvciEnabled != true)
+        // nointegritychecks and kernel debugging are unconditional violations for the same reason test-signing is:
+        // both let unsigned drivers load, both are what an anti-cheat reads the boot configuration for.
+        if (CodeIntegrityDisabled == true)
         {
+            _logger.LogWarning("Driver signature enforcement is disabled (bcdedit nointegritychecks)");
+            return new AntiCheatCheckResult(Kind, false, AntiCheatChecks.CodeIntegrityOff);
+        }
+
+        if (KernelDebugEnabled == true)
+        {
+            _logger.LogWarning("Kernel debugging is enabled (bcdedit debug)");
+            return new AntiCheatCheckResult(Kind, false, AntiCheatChecks.KernelDebugOn);
+        }
+
+        bool hvci = HvciEnabled == true && HypervisorEnabled != false;
+        if (!hvci)
+        {
+            if (anticheat.RequireHvci)
+            {
+                _logger.LogWarning("HVCI is required but {State}", HypervisorEnabled == false ? "the hypervisor is off in the boot configuration" : "it is not enabled");
+                return new AntiCheatCheckResult(Kind, false, AntiCheatChecks.HvciOff);
+            }
+
             _logger.LogInformation("HVCI is not enabled (informational; {Check})", AntiCheatChecks.HvciOff);
         }
 
@@ -197,23 +248,32 @@ public sealed class SecureBootChecker : IAntiCheatChecker, IDisposable
         }
     }
 
-    private async Task<bool?> ReadTestSigningAsync(CancellationToken cancellationToken)
+    /// <summary>Reads every boot element from one <c>bcdedit /enum</c> run; all four stay <see langword="null"/> when the tool cannot be run.</summary>
+    private async Task ReadBootConfigurationAsync(CancellationToken cancellationToken)
     {
+        TestSigningEnabled = null;
+        CodeIntegrityDisabled = null;
+        KernelDebugEnabled = null;
+        HypervisorEnabled = null;
         try
         {
             var result = await ProcessRunner.RunAsync(_bcdedit, new[] { "/enum", "{current}" }, ToolTimeout, cancellationToken).ConfigureAwait(false);
             if (!result.Success)
             {
-                _logger.LogDebug("bcdedit exited with {ExitCode}; test-signing state unknown", result.ExitCode);
-                return null;
+                _logger.LogDebug("bcdedit exited with {ExitCode}; boot configuration unknown", result.ExitCode);
+                return;
             }
 
-            return ParseTestSigning(result.StandardOutput);
+            TestSigningEnabled = ParseBcdFlag(result.StandardOutput, "testsigning");
+            CodeIntegrityDisabled = ParseBcdFlag(result.StandardOutput, "nointegritychecks");
+            KernelDebugEnabled = ParseBcdFlag(result.StandardOutput, "debug");
+            // hypervisorlaunchtype is Auto/Off rather than yes/no, and an absent element means Auto (hypervisor on).
+            var hypervisor = ParseBcdElement(result.StandardOutput, "hypervisorlaunchtype");
+            HypervisorEnabled = hypervisor is null || !NoValues.Contains(hypervisor);
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or TimeoutException)
         {
-            _logger.LogDebug(ex, "bcdedit could not be run; test-signing state unknown");
-            return null;
+            _logger.LogDebug(ex, "bcdedit could not be run; boot configuration unknown");
         }
     }
 }

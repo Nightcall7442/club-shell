@@ -49,6 +49,10 @@ pub mod anti_cheat_checks {
     pub const HVCI_OFF: &str = "hvciOff";
     /// Windows test-signing mode is on.
     pub const TEST_SIGNING_ON: &str = "testSigningOn";
+    /// Driver signature enforcement is disabled in the boot configuration.
+    pub const CODE_INTEGRITY_OFF: &str = "codeIntegrityOff";
+    /// Kernel debugging is enabled in the boot configuration.
+    pub const KERNEL_DEBUG_ON: &str = "kernelDebugOn";
     /// A blocked process was found running.
     pub const BLOCKED_PROCESS: &str = "blockedProcess";
     /// A foreign module was injected into a game process.

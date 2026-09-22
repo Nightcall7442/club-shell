@@ -15,7 +15,8 @@ namespace ClubShell.Agent.Policy;
 /// Section <c>webFilter</c>: <see cref="DnsFilter"/> sink-holes <c>blockedDomains</c> in the hosts file and enforces
 /// <c>dnsServers</c> on every physical adapter; in addition the public IPv4 addresses the blocked domains resolve to
 /// (resolved before the sink-hole lands, cached per process) are blocked outbound with <see cref="FirewallRules"/>
-/// so typing the IP does not bypass the filter. <c>allowedDomains</c> needs a filtering resolver and is only logged.
+/// so typing the IP does not bypass the filter. <see cref="DnsFilter.ProtectedDomains"/> and every address they
+/// resolve to are exempt from both. <c>allowedDomains</c> needs a filtering resolver and is only logged.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class WebFilterPolicyModule : IPolicyModule, IDisposable
@@ -91,9 +92,15 @@ public sealed class WebFilterPolicyModule : IPolicyModule, IDisposable
 
             IReadOnlyList<string> domains = DnsFilter.NormalizeDomains(filter.BlockedDomains);
             List<string> ips = await ResolveAsync(domains, cancellationToken).ConfigureAwait(false);
+            int spared = await SpareProtectedAddressesAsync(ips, cancellationToken).ConfigureAwait(false);
             await _dns.ApplyAsync(filter, cancellationToken).ConfigureAwait(false);
             int rules = await WriteBlockRulesAsync(ips, cancellationToken).ConfigureAwait(false);
             notes.Add($"{domains.Count} domain(s) sink-holed; {ips.Count} public IPv4 address(es) blocked outbound by {rules} firewall rule(s)");
+            if (spared > 0)
+            {
+                notes.Add($"{spared} address(es) left open: shared with a launcher or anti-cheat back-end");
+            }
+
             if (filter.DnsServers.Count > 0)
             {
                 notes.Add("DNS servers enforced on every physical adapter: " + string.Join(", ", filter.DnsServers));
@@ -182,6 +189,34 @@ public sealed class WebFilterPolicyModule : IPolicyModule, IDisposable
         }
 
         return all.Order(StringComparer.Ordinal).ToList();
+    }
+
+    /// <summary>
+    /// Removes from <paramref name="ips"/> every address a <see cref="DnsFilter.ProtectedDomains"/> host also resolves
+    /// to, and returns how many were removed. A blocked domain parked on a shared CDN would otherwise take Steam or
+    /// Riot down with it, and the firewall rule outlives the IP that justified it.
+    /// </summary>
+    private async Task<int> SpareProtectedAddressesAsync(List<string> ips, CancellationToken cancellationToken)
+    {
+        if (ips.Count == 0)
+        {
+            return 0;
+        }
+
+        List<string> protectedIps = await ResolveAsync(DnsFilter.ProtectedDomains, cancellationToken).ConfigureAwait(false);
+        if (protectedIps.Count == 0)
+        {
+            return 0;
+        }
+
+        var shared = new HashSet<string>(protectedIps, StringComparer.Ordinal);
+        int removed = ips.RemoveAll(shared.Contains);
+        if (removed > 0)
+        {
+            _logger.LogWarning("{Count} blocked address(es) are shared with a launcher or anti-cheat back-end and stay open", removed);
+        }
+
+        return removed;
     }
 
     private async Task<string[]> ResolveOneAsync(string host, CancellationToken cancellationToken)

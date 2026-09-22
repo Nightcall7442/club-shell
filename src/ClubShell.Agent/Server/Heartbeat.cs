@@ -217,8 +217,10 @@ public sealed class HeartbeatService : BackgroundService
 
     private async Task ApplyCacheVersionsAsync(HeartbeatResponse response, CancellationToken cancellationToken)
     {
-        // First heartbeat establishes the baseline (caches were loaded at boot); later changes trigger a refresh.
-        var configChanged = _lastConfigVersion >= 0 && response.ConfigVersion != _lastConfigVersion;
+        // The game catalogue is loaded from cache at boot, so its first heartbeat only establishes the baseline. The
+        // server config is not: nothing fetches it before the first heartbeat, so skipping it here would leave the PC
+        // on its local agent.json (and every feature flag on) until the operator happened to bump configVersion.
+        var configChanged = response.ConfigVersion != _lastConfigVersion;
         var catalogChanged = _lastCatalogVersion is not null && !string.Equals(response.CatalogVersion, _lastCatalogVersion, StringComparison.Ordinal);
         _lastConfigVersion = response.ConfigVersion;
         _lastCatalogVersion = response.CatalogVersion;

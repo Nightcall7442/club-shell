@@ -19,7 +19,9 @@ public sealed record ProfileResetResult(bool Deleted, long FreedBytes, IReadOnly
 /// <summary>
 /// Deletes the kiosk user's profile between sessions (ARCHITECTURE.md §6.1 step 9, <c>resetProfileOnLogout</c>):
 /// logs the user off, then tries DeleteProfileW, WMI <c>Win32_UserProfile.Delete</c> and finally a manual
-/// directory + ProfileList removal. <see cref="CleanCaches"/> is the light variant that only empties caches.
+/// directory + ProfileList removal. <see cref="PreservedDirectories"/> are moved aside first and put back by
+/// <see cref="RestorePreserved"/> after the next logon. <see cref="CleanCaches"/> is the light variant that only
+/// empties caches.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class ProfileReset
@@ -29,13 +31,35 @@ public sealed class ProfileReset
     private static readonly TimeSpan UnloadTimeout = TimeSpan.FromSeconds(20);
     private readonly ILogger<ProfileReset> _logger;
     private readonly string _markerPath;
+    private readonly string _stashRoot;
 
     /// <summary>Creates the helper; <paramref name="markerPath"/> defaults to <c>%ProgramData%\ClubShell\cache\profile-reset.marker</c>.</summary>
-    public ProfileReset(ILogger<ProfileReset>? logger = null, string? markerPath = null)
+    /// <param name="logger">Logger.</param>
+    /// <param name="markerPath">Where the time of the last reset is remembered.</param>
+    /// <param name="stashRoot">Where <see cref="PreservedDirectories"/> wait between the deletion and the next logon (default: next to the marker).</param>
+    public ProfileReset(ILogger<ProfileReset>? logger = null, string? markerPath = null, string? stashRoot = null)
     {
         _logger = logger ?? NullLogger<ProfileReset>.Instance;
         _markerPath = markerPath ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "ClubShell", "cache", "profile-reset.marker");
+        _stashRoot = stashRoot ?? Path.Combine(Path.GetDirectoryName(_markerPath) ?? ".", "profile-keep");
     }
+
+    /// <summary>
+    /// Profile-relative directories carried across <see cref="ResetProfile(string)"/> by default: the anti-cheat
+    /// vendors that bootstrap per machine. Deleting these every session is not a clean slate, it is a fresh install
+    /// of FACEIT and Vanguard before every match.
+    /// </summary>
+    public static IReadOnlyList<string> PreservedDirectories { get; } = new[]
+    {
+        @"AppData\Local\Riot Games",
+        @"AppData\Roaming\Riot Games",
+        @"AppData\Local\FACEIT",
+        @"AppData\Local\FACEIT AC",
+        @"AppData\Roaming\FACEIT",
+        @"AppData\Roaming\EasyAntiCheat",
+        @"AppData\Local\EasyAntiCheat",
+        @"AppData\Roaming\BattlEye",
+    };
 
     /// <summary>Profile-relative directories emptied by <see cref="CleanCaches"/>.</summary>
     public static IReadOnlyList<string> CacheDirectories { get; } = new[]
@@ -82,9 +106,17 @@ public sealed class ProfileReset
     }
 
     /// <summary>Logs <paramref name="userName"/> off everywhere and deletes its profile directory and registry entry.</summary>
-    public ProfileResetResult ResetProfile(string userName)
+    public ProfileResetResult ResetProfile(string userName) => ResetProfile(userName, PreservedDirectories);
+
+    /// <summary>
+    /// Logs <paramref name="userName"/> off everywhere and deletes its profile directory and registry entry.
+    /// <paramref name="preserve"/> (profile-relative directories) is moved aside first and put back by
+    /// <see cref="RestorePreserved"/> once the profile has been recreated at the next logon.
+    /// </summary>
+    public ProfileResetResult ResetProfile(string userName, IReadOnlyList<string> preserve)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(userName);
+        ArgumentNullException.ThrowIfNull(preserve);
         var errors = new List<string>();
         string sid = Advapi32.LookupAccountSid(userName) ?? throw new InvalidOperationException($"Account {userName} not found.");
 
@@ -92,6 +124,7 @@ public sealed class ProfileReset
         WaitForHiveUnload(sid);
 
         string? profilePath = RegistryHelper.GetProfileImagePath(sid);
+        Stash(sid, profilePath, preserve, errors);
         long size = profilePath is not null ? DirectorySize(profilePath) : 0;
         bool deleted = false;
 
@@ -150,6 +183,61 @@ public sealed class ProfileReset
         return new ProfileResetResult(all, freed, errors);
     }
 
+    /// <summary>
+    /// Moves the directories stashed by the last <see cref="ResetProfile(string, IReadOnlyList{string})"/> back into
+    /// the recreated profile and returns how many were restored, or <see langword="null"/> when the profile does not
+    /// exist yet — the stash is kept and the call can be repeated after the next logon.
+    /// </summary>
+    public int? RestorePreserved(string userName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(userName);
+        string? sid = Advapi32.LookupAccountSid(userName);
+        string stash = sid is null ? string.Empty : Path.Combine(_stashRoot, sid);
+        if (sid is null || !Directory.Exists(stash))
+        {
+            return 0;
+        }
+
+        string? profilePath = RegistryHelper.GetProfileImagePath(sid);
+        if (profilePath is null || !Directory.Exists(profilePath))
+        {
+            _logger.LogInformation("Restore of preserved directories deferred: profile of {User} does not exist yet", userName);
+            return null;
+        }
+
+        int restored = 0;
+        foreach (string source in Directory.GetDirectories(stash))
+        {
+            string relative = Unescape(Path.GetFileName(source));
+            string target = Path.Combine(profilePath, relative);
+            try
+            {
+                if (Directory.Exists(target))
+                {
+                    // The profile was used before the restore ran; the freshly bootstrapped copy wins.
+                    Directory.Delete(source, recursive: true);
+                    continue;
+                }
+
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                Directory.Move(source, target);
+                restored++;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning(ex, "Preserved directory {Relative} could not be restored into {Profile}", relative, profilePath);
+            }
+        }
+
+        TryDeleteEmpty(stash);
+        if (restored > 0)
+        {
+            _logger.LogInformation("{Count} preserved directory/-ies restored into the profile of {User}", restored, userName);
+        }
+
+        return restored;
+    }
+
     /// <summary>Total size of all files under <paramref name="path"/>; unreadable entries are skipped.</summary>
     public static long DirectorySize(string path)
     {
@@ -173,6 +261,69 @@ public sealed class ProfileReset
         }
 
         return total;
+    }
+
+    // A stashed directory keeps its profile-relative path as its own name; '\' is not legal in one, so it is escaped.
+    private static string Escape(string relative) => relative.Replace("\\", "%5C", StringComparison.Ordinal);
+
+    private static string Unescape(string name) => name.Replace("%5C", "\\", StringComparison.Ordinal);
+
+    /// <summary>Moves <paramref name="preserve"/> out of the profile before it is deleted; a stash left over from a failed restore is replaced.</summary>
+    private void Stash(string sid, string? profilePath, IReadOnlyList<string> preserve, List<string> errors)
+    {
+        if (profilePath is null || preserve.Count == 0 || !Directory.Exists(profilePath))
+        {
+            return;
+        }
+
+        string stash = Path.Combine(_stashRoot, sid);
+        int moved = 0;
+        foreach (string relative in preserve)
+        {
+            string source = Path.Combine(profilePath, relative);
+            if (!Directory.Exists(source))
+            {
+                continue;
+            }
+
+            string target = Path.Combine(stash, Escape(relative));
+            try
+            {
+                if (Directory.Exists(target))
+                {
+                    Directory.Delete(target, recursive: true);
+                }
+
+                Directory.CreateDirectory(stash);
+                Directory.Move(source, target);
+                moved++;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                errors.Add($"preserve {relative}: {ex.Message}");
+                _logger.LogWarning(ex, "Preserved directory {Relative} could not be moved out of {Profile}", relative, profilePath);
+            }
+        }
+
+        if (moved > 0)
+        {
+            _logger.LogInformation("{Count} directory/-ies moved to {Stash} to survive the reset", moved, stash);
+        }
+    }
+
+    private void TryDeleteEmpty(string path)
+    {
+        try
+        {
+            if (Directory.GetFileSystemEntries(path).Length == 0)
+            {
+                Directory.Delete(path);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogDebug(ex, "Stash directory {Path} could not be removed", path);
+        }
     }
 
     private void LogoffEverywhere(string userName, List<string> errors)

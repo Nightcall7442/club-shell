@@ -340,6 +340,14 @@ public sealed class KioskUserSettings
 
     /// <summary>Folder copied into a fresh profile, when set.</summary>
     public string? ProfileTemplate { get; set; }
+
+    /// <summary>
+    /// Profile-relative directories carried across a profile reset; <see langword="null"/> keeps the built-in
+    /// anti-cheat list (<c>ProfileReset.PreservedDirectories</c>), an empty array preserves nothing. Wiping these
+    /// makes FACEIT and Riot bootstrap from scratch every session, which costs the player a grace period and the
+    /// club a stream of false <c>serviceStopped</c> reports.
+    /// </summary>
+    public string[]? PreserveOnReset { get; set; }
 }
 
 /// <summary><c>agent.json → session</c>.</summary>
@@ -535,6 +543,13 @@ public sealed class IscsiSettings
     /// <summary>Target IQN.</summary>
     [Required]
     public string TargetIqn { get; set; } = "";
+
+    /// <summary>
+    /// Mark the target's disks read-only before the volume is used. Set it for a LUN several PCs mount at once: the
+    /// first client that writes to a shared games volume — Windows setting the NTFS dirty bit is enough — corrupts it
+    /// for every other client. Off by default because a LUN dedicated to one PC is legitimately writable.
+    /// </summary>
+    public bool ReadOnly { get; set; }
 }
 
 /// <summary><c>agent.json → updates</c>.</summary>
@@ -609,6 +624,13 @@ public sealed class AntiCheatSettings
 
     /// <summary>Require a TPM.</summary>
     public bool RequireTpm { get; set; }
+
+    /// <summary>
+    /// Require hypervisor-enforced code integrity. Off by default because VBS costs frames and many clubs disable it;
+    /// clubs whose titles are checked for it (FACEIT, Vanguard) turn it on and get <c>hvciOff</c> as a violation
+    /// instead of a log line, including when the hypervisor itself is off in the boot configuration.
+    /// </summary>
+    public bool RequireHvci { get; set; }
 
     /// <summary>Report violations to the server.</summary>
     public bool ReportViolations { get; set; } = true;

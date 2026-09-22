@@ -314,6 +314,12 @@ public sealed class GamesShareMounter : IHostedService, IDisposable
             await _iscsi.AddTargetPortalAsync(host, port, cancellationToken).ConfigureAwait(false);
             var chap = credentials is null ? null : new IscsiChapCredentials(credentials.Username, credentials.Password);
             await _iscsi.LoginAsync(iscsi.TargetIqn, persistent: false, chap, cancellationToken).ConfigureAwait(false);
+            if (iscsi.ReadOnly)
+            {
+                // Before the volume is waited for, so nothing has opened it for writing yet.
+                _ = await _iscsi.SetDisksReadOnlyAsync(cancellationToken).ConfigureAwait(false);
+            }
+
             if (await _iscsi.WaitForVolumeAsync(letter, VolumeTimeout, cancellationToken).ConfigureAwait(false))
             {
                 return true;

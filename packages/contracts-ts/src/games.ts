@@ -44,6 +44,10 @@ export const AntiCheatChecks = {
   HvciOff: 'hvciOff',
   /** Windows test-signing mode is on. */
   TestSigningOn: 'testSigningOn',
+  /** Driver signature enforcement is disabled in the boot configuration. */
+  CodeIntegrityOff: 'codeIntegrityOff',
+  /** Kernel debugging is enabled in the boot configuration. */
+  KernelDebugOn: 'kernelDebugOn',
   /** A blocked process was found running. */
   BlockedProcess: 'blockedProcess',
   /** A foreign module was injected into a game process. */

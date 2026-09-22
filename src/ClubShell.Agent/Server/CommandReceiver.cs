@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Runtime.Versioning;
+using System.Text.Json;
 using ClubShell.Agent.Games;
 using ClubShell.Agent.Policy;
 using ClubShell.Agent.Power;
@@ -17,6 +18,8 @@ using ClubShell.Core.Security;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using PcPolicy = ClubShell.Contracts.Pcs.Policy;
+using ServerConfig = ClubShell.Contracts.Pcs.AgentServerConfig;
+using ShellSettingsStore = ClubShell.Agent.Ipc.Handlers.ShellSettingsStore;
 
 namespace ClubShell.Agent.Server;
 
@@ -75,6 +78,7 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
     private readonly AgentUpdater _updater;
     private readonly IShellCommandSender _shell;
     private readonly IVolumeController? _volume;
+    private readonly ShellSettingsStore? _shellSettings;
     private readonly IOptionsMonitor<AgentSettings> _settings;
     private readonly IClock _clock;
     private readonly ILogger<CommandReceiver> _logger;
@@ -103,7 +107,8 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
         IOptionsMonitor<AgentSettings> settings,
         IClock clock,
         ILogger<CommandReceiver> logger,
-        IVolumeController? volume = null)
+        IVolumeController? volume = null,
+        ShellSettingsStore? shellSettings = null)
     {
         ArgumentNullException.ThrowIfNull(tokens);
         ArgumentNullException.ThrowIfNull(server);
@@ -142,6 +147,7 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
         _updater = updater;
         _shell = shell;
         _volume = volume;
+        _shellSettings = shellSettings;
         _settings = settings;
         _clock = clock;
         _logger = logger;
@@ -522,6 +528,7 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
             if (response.Value is { } config)
             {
                 _settingsLoader.ApplyServerOverrides(config);
+                ApplyShellOverride(config);
                 return true;
             }
         }
@@ -531,6 +538,29 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Writes the server's <c>shell</c> block (feature flags, theme, locale, ads, idle) into <c>shell.json</c>.
+    /// <see cref="SettingsLoader.ApplyServerOverrides"/> only covers the Agent's own sections, so without this the
+    /// UI keeps every feature on and calls endpoints the server never implemented.
+    /// </summary>
+    private void ApplyShellOverride(ServerConfig config)
+    {
+        if (config.Shell is not { } shell || _shellSettings is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var applied = _shellSettings.ApplyServerOverride(shell);
+            _logger.LogInformation("Shell config from the server applied: theme {Theme}, locale {Locale}, features {Features}", applied.Theme, applied.Locale, applied.Features);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            _logger.LogWarning(ex, "Shell config from the server could not be written to shell.json");
+        }
     }
 
     private static TPayload Require<TPayload>(ServerCommand command)

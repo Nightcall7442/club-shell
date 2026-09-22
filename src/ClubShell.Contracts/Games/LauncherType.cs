@@ -105,6 +105,12 @@ public static class AntiCheatChecks
     /// <summary>Windows test-signing mode is on.</summary>
     public const string TestSigningOn = "testSigningOn";
 
+    /// <summary>Driver signature enforcement is disabled in the boot configuration.</summary>
+    public const string CodeIntegrityOff = "codeIntegrityOff";
+
+    /// <summary>Kernel debugging is enabled in the boot configuration.</summary>
+    public const string KernelDebugOn = "kernelDebugOn";
+
     /// <summary>A blocked process was found running.</summary>
     public const string BlockedProcess = "blockedProcess";
 

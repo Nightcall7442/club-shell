@@ -120,7 +120,46 @@ public sealed class DnsFilter
 
     // ---- hosts file ---------------------------------------------------------------------------
 
-    /// <summary>Lower-cases, strips a leading <c>*.</c>/<c>.</c>, drops duplicates and anything that is not a host name.</summary>
+    /// <summary>
+    /// Domain suffixes the web filter never blocks, whatever the policy says: launcher, content-delivery and
+    /// anti-cheat back-ends. Blocking one of them does not stop a player browsing, it stops the games starting —
+    /// and an anti-cheat that cannot reach its back-end reports a violation rather than a network error.
+    /// </summary>
+    public static IReadOnlyList<string> ProtectedDomains { get; } = new[]
+    {
+        // Valve
+        "steampowered.com", "steamcommunity.com", "steamstatic.com", "steamcontent.com", "steamusercontent.com",
+        "steamserver.net", "valvesoftware.com",
+        // Riot (includes Vanguard)
+        "riotgames.com", "riotcdn.net", "leagueoflegends.com",
+        // Epic
+        "epicgames.com", "epicgames.dev", "unrealengine.com",
+        // EA, Ubisoft, Blizzard
+        "ea.com", "origin.com", "ubi.com", "ubisoft.com", "battle.net", "blizzard.com",
+        // Anti-cheat vendors
+        "easyanticheat.net", "kamu.gg", "battleye.com", "faceit.com", "faceit-cdn.net",
+    };
+
+    /// <summary><see langword="true"/> when <paramref name="host"/> is or is a sub-domain of a <see cref="ProtectedDomains"/> entry.</summary>
+    public static bool IsProtected(string host)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+        foreach (string suffix in ProtectedDomains)
+        {
+            if (host.Equals(suffix, StringComparison.OrdinalIgnoreCase)
+                || (host.Length > suffix.Length && host[host.Length - suffix.Length - 1] == '.' && host.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Lower-cases, strips a leading <c>*.</c>/<c>.</c>, drops duplicates, anything that is not a host name and
+    /// anything under <see cref="ProtectedDomains"/>.
+    /// </summary>
     public static IReadOnlyList<string> NormalizeDomains(IEnumerable<string> domains)
     {
         ArgumentNullException.ThrowIfNull(domains);
@@ -137,7 +176,7 @@ public sealed class DnsFilter
             }
 
             domain = domain.TrimStart('.').TrimEnd('.');
-            if (domain.Length == 0 || domain.Length > 253 || !IsHostName(domain))
+            if (domain.Length == 0 || domain.Length > 253 || !IsHostName(domain) || IsProtected(domain))
             {
                 continue;
             }

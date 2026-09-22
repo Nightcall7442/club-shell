@@ -445,7 +445,9 @@ unless the key ends with `Ms`.
       "createIfMissing": true,
       "rotatePasswordOnStart": true,
       "resetProfileOnLogout": true,
-      "profileTemplate": null                     // string path | null. Folder copied into a fresh profile.
+      "profileTemplate": null,                    // string path | null. Folder copied into a fresh profile.
+      "preserveOnReset": null                     // string[] | null. Profile-relative dirs carried across a reset;
+                                                  // null = ProfileReset.PreservedDirectories (anti-cheat vendors).
     },
     "watchdogIntervalMs": 2000,
     "restartDelayMs": 1500,
@@ -490,7 +492,9 @@ unless the key ends with `Ms`.
       "driveLetter": "G",
       "credentialsRef": "secure\\share.cred",     // DPAPI file with {username,password}
       "mountRetries": 3,
-      "iscsi": null                               // { "portal": "10.0.0.5:3260", "targetIqn": "iqn..." } | null
+      "iscsi": null                               // { "portal": "10.0.0.5:3260", "targetIqn": "iqn...",
+                                                  //   "readOnly": false } | null. readOnly marks the target's disks
+                                                  //   read-only before first use — set it for a LUN several PCs share.
     }
   },
   "updates": {
@@ -511,6 +515,7 @@ unless the key ends with `Ms`.
     "checkIntervalSec": 30,
     "requireSecureBoot": false,
     "requireTpm": false,
+    "requireHvci": false,                         // HVCI/VBS off (or hypervisorlaunchtype=off) becomes hvciOff
     "reportViolations": true
   },
   "remoteAdmin": {

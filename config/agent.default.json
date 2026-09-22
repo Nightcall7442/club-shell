@@ -29,7 +29,8 @@
       "createIfMissing": true,
       "rotatePasswordOnStart": true,
       "resetProfileOnLogout": true,
-      "profileTemplate": null
+      "profileTemplate": null,
+      "preserveOnReset": null
     },
     "watchdogIntervalMs": 2000,
     "restartDelayMs": 1500,
@@ -95,6 +96,7 @@
     "checkIntervalSec": 30,
     "requireSecureBoot": false,
     "requireTpm": false,
+    "requireHvci": false,
     "reportViolations": true
   },
   "remoteAdmin": {

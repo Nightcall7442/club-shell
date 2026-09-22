@@ -148,6 +148,48 @@ public sealed class ShellSettingsStore
         });
     }
 
+    /// <summary>
+    /// Merges the server's <c>shell</c> block from <c>GET /config</c> into <c>shell.json</c>. Only the keys the server
+    /// sent are touched, so a player's own volume and locale survive. A feature the server turns off reaches the UI as
+    /// <c>features.&lt;name&gt; = false</c>, which hides its tab and stops the screen behind it calling an endpoint the
+    /// server does not implement. The running Shell re-reads the file at its next start; there is no live push.
+    /// </summary>
+    public ShellSettings ApplyServerOverride(ClubShell.Contracts.Pcs.ShellConfigOverride shell)
+    {
+        ArgumentNullException.ThrowIfNull(shell);
+        return Mutate(root =>
+        {
+            if (shell.Locale is { } locale)
+            {
+                root["locale"] = WireName(locale);
+            }
+
+            if (!string.IsNullOrWhiteSpace(shell.Theme))
+            {
+                root["theme"] = shell.Theme;
+            }
+
+            MergeSection(root, "features", shell.Features);
+            MergeSection(root, "ads", shell.Ads);
+            MergeSection(root, "idle", shell.Idle);
+        });
+    }
+
+    /// <summary>Copies the top-level keys of <paramref name="element"/> into <paramref name="name"/>; anything that is not an object is ignored.</summary>
+    private static void MergeSection(JsonObject root, string name, JsonElement? element)
+    {
+        if (element is not { ValueKind: JsonValueKind.Object } value)
+        {
+            return;
+        }
+
+        JsonObject section = Section(root, name);
+        foreach (JsonProperty property in value.EnumerateObject())
+        {
+            section[property.Name] = JsonNode.Parse(property.Value.GetRawText());
+        }
+    }
+
     /// <summary>Persists the volume (<c>sound.volume</c> / <c>sound.muted</c>).</summary>
     public VolumeState SetVolume(int level, bool? muted)
     {

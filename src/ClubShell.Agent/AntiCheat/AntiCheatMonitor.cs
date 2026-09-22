@@ -128,7 +128,7 @@ public sealed class AntiCheatMonitor : BackgroundService, IAntiCheatGate
             kinds.Add(game.AntiCheat);
         }
 
-        if (kinds.Count > 0 || anticheat.RequireSecureBoot || anticheat.RequireTpm)
+        if (kinds.Count > 0 || anticheat.RequireSecureBoot || anticheat.RequireTpm || anticheat.RequireHvci)
         {
             kinds.Insert(0, AntiCheatKind.None);
         }
@@ -240,7 +240,8 @@ public sealed class AntiCheatMonitor : BackgroundService, IAntiCheatGate
     private static AntiCheatSeverity SeverityOf(string check) => check switch
     {
         AntiCheatChecks.TestSigningOn or AntiCheatChecks.InjectedModule or AntiCheatChecks.DebuggerAttached
-            or AntiCheatChecks.BlockedProcess or AntiCheatChecks.VmDetected => AntiCheatSeverity.Critical,
+            or AntiCheatChecks.BlockedProcess or AntiCheatChecks.VmDetected
+            or AntiCheatChecks.CodeIntegrityOff or AntiCheatChecks.KernelDebugOn => AntiCheatSeverity.Critical,
         _ => AntiCheatSeverity.Warning,
     };
 

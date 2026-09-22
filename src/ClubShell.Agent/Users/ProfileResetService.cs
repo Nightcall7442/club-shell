@@ -28,16 +28,20 @@ public interface IShellRelauncher
 
 /// <summary>
 /// Deletes the kiosk user's profile between sessions (<c>shell.kioskUser.resetProfileOnLogout</c>): stops the Shell,
-/// logs the kiosk user off, runs <see cref="ProfileReset.ResetProfile"/>, re-applies the shell-folder redirection
-/// and relaunches the Shell. Resets are serialized, skipped while a session is open and rate-limited by
-/// <see cref="Cooldown"/>. Triggered automatically on <see cref="SessionEventType.Ended"/> (subscribed while the
-/// hosted service runs) and on demand through <see cref="IProfileResetTrigger"/>.
+/// logs the kiosk user off, runs <see cref="ProfileReset.ResetProfile(string, IReadOnlyList{string})"/>, re-applies
+/// the shell-folder redirection, relaunches the Shell and moves the preserved anti-cheat directories
+/// (<c>shell.kioskUser.preserveOnReset</c>) back into the recreated profile. Resets are serialized, skipped while a
+/// session is open and rate-limited by <see cref="Cooldown"/>. Triggered automatically on
+/// <see cref="SessionEventType.Ended"/> (subscribed while the hosted service runs) and on demand through
+/// <see cref="IProfileResetTrigger"/>.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, IDisposable
 {
     private const int MaxLogoffRounds = 4;
     private static readonly TimeSpan SessionSettleDelay = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan RestoreTimeout = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan RestorePollInterval = TimeSpan.FromSeconds(2);
 
     private readonly ProfileReset _reset;
     private readonly TempUserProvisioner _provisioner;
@@ -126,7 +130,8 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
             {
                 await _relauncher.StopAsync(cancellationToken).ConfigureAwait(false);
                 LogoffKioskSessions(user);
-                var result = await Task.Run(() => _reset.ResetProfile(user), cancellationToken).ConfigureAwait(false);
+                IReadOnlyList<string> preserve = _settings.CurrentValue.Shell.KioskUser.PreserveOnReset ?? ProfileReset.PreservedDirectories;
+                var result = await Task.Run(() => _reset.ResetProfile(user, preserve), cancellationToken).ConfigureAwait(false);
                 _lastResetAt = _clock.UtcNow;
                 if (result.Deleted)
                 {
@@ -142,6 +147,7 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
                 await _relauncher.RelaunchAsync(cancellationToken).ConfigureAwait(false);
                 // The profile is recreated at logon; redirection applies once the hive exists (best effort here, retried by the provisioner).
                 _ = _provisioner.ApplyFolderRedirect();
+                await RestorePreservedAsync(user, cancellationToken).ConfigureAwait(false);
             }
         }
         finally
@@ -162,6 +168,38 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
         _sessions.Changed -= OnSessionChanged;
         _lock.Dispose();
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// Waits for the relaunch to recreate the profile and moves the preserved anti-cheat directories back in. Gives
+    /// up after <see cref="RestoreTimeout"/>; the stash survives and the next reset restores it instead.
+    /// </summary>
+    private async Task RestorePreservedAsync(string user, CancellationToken cancellationToken)
+    {
+        var deadline = _clock.UtcNow + RestoreTimeout;
+        while (true)
+        {
+            try
+            {
+                if (_reset.RestorePreserved(user) is not null)
+                {
+                    return;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                _logger.LogWarning(ex, "Restoring preserved directories of {User} failed", user);
+                return;
+            }
+
+            if (_clock.UtcNow >= deadline)
+            {
+                _logger.LogWarning("Profile of {User} did not reappear within {Timeout}; preserved directories stay in the stash", user, RestoreTimeout);
+                return;
+            }
+
+            await _clock.Delay(RestorePollInterval, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private void LogoffKioskSessions(string user)

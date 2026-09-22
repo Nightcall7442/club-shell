@@ -69,8 +69,10 @@ For every accepted connection, without impersonation:
 2. `IsTrusted` = token user is the kiosk SID, or `IsSystem`, or member of `Administrators`. Otherwise dropped.
 3. `ClientValidationMode` (default `ExePath`): kiosk-user clients must run from `shell.exePath`
    (`PathsEqual`). `SignatureVerified` additionally requires the client's Authenticode signer thumbprint to equal
-   `ExpectedSignerThumbprint` or the Agent's own signer (`AgentSignerThumbprint`); when the Agent is unsigned the
-   check is skipped with a debug log. `None` disables the exe check (tests only).
+   `ExpectedSignerThumbprint` or the Agent's own signer (`AgentSignerThumbprint`); when neither is known (unsigned
+   Agent, no thumbprint configured) there is nothing to compare against and **every** client is dropped, because
+   falling back to the weaker exe check would silently downgrade the mode the operator asked for. `None` disables the
+   exe check (tests only).
 4. Privileged clients (SYSTEM / Administrators) skip steps 3 — they can do anything to the PC anyway.
 
 ### 3.3 Shell token (`ShellTokenStore`)
@@ -176,7 +178,7 @@ Input validation at the boundaries:
 | `game.exePath` / `installPath` | must resolve to an existing file (`GameDetector.ResolveExe`); allow-list / deny-list applied (`PolicyDenies`) |
 | `policy.shellReplacement.shellExe` | absolute path to an existing file, signer logged |
 | Registry policy | only the fixed keys in `PolicyRegistry.RulesFor`, `ShellRegistry`, `FolderRedirect`; snapshot/revert |
-| `webFilter.blockedDomains` | resolved to **public** IPv4 only (`WebFilterPolicyModule.IsPublicIpv4`); LAN, loopback and the sink-hole address are never firewalled |
+| `webFilter.blockedDomains` | resolved to **public** IPv4 only (`WebFilterPolicyModule.IsPublicIpv4`); LAN, loopback and the sink-hole address are never firewalled. `DnsFilter.ProtectedDomains` (launcher, CDN and anti-cheat back-ends) are dropped from the block list, and every address they resolve to is removed from the firewall set — a blocked domain parked on a shared CDN must not take Steam or Vanguard down with it |
 | `blockedKeyCombos` | parsed (`KeyCombo.TryParse`, `BlockedCombo::parse`); `Ctrl+Alt+Del` dropped; malformed entries skipped |
 | IPC payloads | Contracts DTOs, `validation` errors, size and rate caps |
 
