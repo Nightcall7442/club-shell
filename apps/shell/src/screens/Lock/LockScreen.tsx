@@ -487,7 +487,8 @@ export function StartSessionModal({ open, onStarted, onLogout }: StartSessionMod
 // Screen
 // ---------------------------------------------------------------------------------------------------------------------
 
-type LoginTab = 'password' | 'qr' | 'guest';
+/** QR first: signing in from the phone needs no keyboard and keeps the password off a shared screen. */
+type LoginTab = 'qr' | 'password' | 'guest';
 
 const KeyIcon = (
   <svg
@@ -567,7 +568,7 @@ export default function LockScreen(): JSX.Element {
   const animations = useThemeStore((s) => s.theme.animations);
   const push = useNotificationsStore((s) => s.push);
   const pushError = useNotificationsStore((s) => s.pushError);
-  const [tab, setTab] = useState<LoginTab>('password');
+  const [tab, setTab] = useState<LoginTab>('qr');
   const [calling, setCalling] = useState(false);
   const card = useRef<HTMLDivElement>(null);
   const { idle } = useIdle();
@@ -605,8 +606,8 @@ export default function LockScreen(): JSX.Element {
 
   const tabs = useMemo<TabItem<LoginTab>[]>(
     () => [
-      { key: 'password', label: t('lock.methodPassword'), icon: KeyIcon },
       { key: 'qr', label: t('lock.methodQr'), icon: QrIcon },
+      { key: 'password', label: t('lock.methodPassword'), icon: KeyIcon },
       { key: 'guest', label: t('lock.methodGuest'), icon: UserIcon },
     ],
     [t],
@@ -684,8 +685,8 @@ export default function LockScreen(): JSX.Element {
                   className="mb-6 w-full [&>button]:flex-1 [&>button]:justify-center"
                 />
                 <div role="tabpanel" id={`lock-panel-${tab}`} aria-labelledby={`lock-tab-${tab}`}>
-                  {tab === 'password' && <LoginForm />}
                   {tab === 'qr' && <QrLogin />}
+                  {tab === 'password' && <LoginForm />}
                   {tab === 'guest' && <GuestLogin />}
                 </div>
               </>

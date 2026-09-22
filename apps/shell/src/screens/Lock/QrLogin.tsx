@@ -124,6 +124,11 @@ export function QrLogin({ onSuccess, className }: QrLoginProps): JSX.Element {
         } else if (err.code === 'unauthorized' && reason === 'expired') {
           clearError();
           setPhase('expired');
+        } else if (err.code === 'unauthorized' && reason === 'invalidToken') {
+          // The server forgot this handshake (restart, another device consumed it): quietly issue a new code
+          // rather than telling a player who typed nothing that their credentials are wrong.
+          clearError();
+          setAttempt((n) => n + 1);
         } else {
           setPhase('error');
           setMessage(describeError(err));

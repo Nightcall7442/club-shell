@@ -5,7 +5,8 @@
  * `{ code, message, details, source: 'mock' }` objects; `lib/tauri.ts` normalizes them.
  *
  * Handy accounts: `demo` / `1234`, `vip` / `1234`, guest. User PIN `1234`, admin PIN `0000`.
- * Add `?mock=auth` to the URL to boot already logged in with an active session.
+ * Add `?mock=auth` to the URL to boot already logged in with an active session, `?mock=qr` to have the QR
+ * handshake confirm itself a few seconds after it is shown.
  */
 import type {
   Achievement,
@@ -777,15 +778,31 @@ cmd(
   }),
 );
 
+/**
+ * Seconds until the mock "phone" confirms a QR handshake. Off by default so the lock screen does not sign itself
+ * in while someone looks at it (QR is the first method now); `?mock=qr` replays the happy path in a demo.
+ */
+const QR_AUTOCONFIRM_SEC = 7;
+
+function qrAutoConfirms(): boolean {
+  try {
+    return new URLSearchParams(window.location.search).get('mock') === 'qr';
+  } catch {
+    return false;
+  }
+}
+
 cmd('auth_qr_start', (): QrLoginStart => {
   const token = `qr-${newId().slice(0, 8)}`;
   const expiresAt = Date.now() + 120_000;
   mockState.qr = { token, expiresAt, confirmedAt: null };
-  later(7000, () => {
-    if (mockState.qr?.token === token) {
-      mockState.qr.confirmedAt = Date.now();
-    }
-  });
+  if (qrAutoConfirms()) {
+    later(QR_AUTOCONFIRM_SEC * 1000, () => {
+      if (mockState.qr?.token === token) {
+        mockState.qr.confirmedAt = Date.now();
+      }
+    });
+  }
   return {
     ...QR_START,
     qrToken: token,

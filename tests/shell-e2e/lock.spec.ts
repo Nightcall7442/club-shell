@@ -101,10 +101,13 @@ test.describe('lock screen', () => {
     const tabs = page.getByRole('tablist', { name: en('lock.chooseMethod') });
     await expect(tabs).toBeVisible();
     await expect(tabs.getByRole('tab')).toHaveCount(3);
-    for (const key of ['lock.methodPassword', 'lock.methodQr', 'lock.methodGuest']) {
+    for (const key of ['lock.methodQr', 'lock.methodPassword', 'lock.methodGuest']) {
       await expect(tabs.getByRole('tab', { name: en(key) })).toBeVisible();
     }
-    await expect(tabs.getByRole('tab', { name: en('lock.methodPassword') })).toHaveAttribute('aria-selected', 'true');
+    // QR is the default: no keyboard needed and no password typed on a shared screen.
+    await expect(tabs.getByRole('tab', { name: en('lock.methodQr') })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByText(en('lock.scanQr'))).toBeVisible();
+    await page.getByRole('tab', { name: en('lock.methodPassword') }).click();
 
     await expect(field(page, en('lock.username'))).toBeVisible();
     await expect(field(page, en('lock.password'))).toBeVisible();
@@ -118,6 +121,7 @@ test.describe('lock screen', () => {
 
   test('wrong password shows a localized error', async ({ page }) => {
     await openLock(page);
+    await page.getByRole('tab', { name: en('lock.methodPassword') }).click();
 
     // Client-side validation first: nothing typed.
     await page.getByRole('button', { name: en('lock.login'), exact: true }).click();
@@ -157,12 +161,23 @@ test.describe('lock screen', () => {
     await expect(page.getByRole('heading', { level: 1, name: en('lock.title') })).toBeVisible();
     await expect(page.getByRole('heading', { level: 1, name: ru('lock.title') })).toHaveCount(0);
     await expect(page.getByRole('tab', { name: en('lock.methodGuest') })).toBeVisible();
-    await expect(page.getByRole('button', { name: en('lock.login'), exact: true })).toBeVisible();
+    await expect(page.getByText(en('lock.scanQr'))).toBeVisible();
     await expect(page.getByRole('button', { name: 'English', exact: true })).toHaveAttribute('aria-pressed', 'true');
 
-    // The choice is persisted through settings_set: it survives a route change within the session.
-    await page.getByRole('tab', { name: en('lock.methodQr') }).click();
+    // The choice is persisted through settings_set: it survives a tab change within the session.
+    await page.getByRole('tab', { name: en('lock.methodPassword') }).click();
+    await expect(page.getByRole('button', { name: en('lock.login'), exact: true })).toBeVisible();
+  });
+
+  test('QR sign-in completes when the phone confirms the code', async ({ page }) => {
+    await page.goto('/?mock=qr#/lock');
+    await useEnglish(page);
+    // QR is the default method: the code is on screen without touching anything.
     await expect(page.getByText(en('lock.scanQr'))).toBeVisible();
+    await expect(page.getByRole('img', { name: en('lock.qr') })).toBeVisible();
+
+    // The mock phone confirms a few seconds later; the shell signs in and asks for a tariff.
+    await expect(page.getByRole('dialog', { name: en('wallet.chooseTariff') })).toBeVisible({ timeout: 20_000 });
   });
 
   test('QR tab renders an SVG QR code with a countdown', async ({ page }) => {
