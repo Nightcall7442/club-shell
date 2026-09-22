@@ -25,6 +25,7 @@ import {
   uuid,
   type PcRecord,
 } from './db.js';
+import { adminRoutes } from './routes/admin.js';
 import { authRoutes } from './routes/auth.js';
 import { chatRoutes, tickChat } from './routes/chat.js';
 import { gamesRoutes } from './routes/games.js';
@@ -72,6 +73,7 @@ const STARTED_AT = Date.now();
 
 const isExempt = (url: string): boolean =>
   url === '/health' ||
+  url.startsWith('/api/v1/admin') ||
   url.startsWith('/mock') ||
   url.startsWith('/_mock') ||
   url.startsWith('/ws/') ||
@@ -282,6 +284,7 @@ export async function buildApp(opts: Options): Promise<FastifyInstance> {
     async (api) => {
       pcsRoutes(api);
       authRoutes(api);
+      adminRoutes(api);
       sessionRoutes(api);
       gamesRoutes(api);
       walletRoutes(api);

@@ -17,6 +17,7 @@
     "format": "prettier --write \"{apps,packages,tools,tests}/**/*.{ts,tsx}\" \"!**/dist/**\"",
     "test:e2e": "pnpm --filter @clubshell/shell-e2e test",
     "mock": "pnpm --filter @clubshell/mock-server dev",
+    "admin": "pnpm --filter @clubshell/admin dev",
     "tauri": "pnpm --filter @clubshell/shell tauri",
     "contracts:build": "pnpm --filter @clubshell/contracts build"
   },
