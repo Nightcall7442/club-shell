@@ -343,6 +343,9 @@ public sealed class AgentWorker : BackgroundService
             {
                 await ExpireUserIfNeededAsync(cancellationToken).ConfigureAwait(false);
                 await PersistIdentityIfNeededAsync(cancellationToken).ConfigureAwait(false);
+                // A reset owed but not paid at startup — the deletion failed, or the debt was incurred since — would
+                // otherwise wait for the next Agent restart. Throttles itself; a no-op when nothing is owed.
+                await _profileReset.ResetIfDirtyAsync(cancellationToken).ConfigureAwait(false);
                 if (_connection.IsOnline)
                 {
                     await FlushOutboxAsync(cancellationToken).ConfigureAwait(false);
