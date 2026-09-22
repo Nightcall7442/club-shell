@@ -56,12 +56,17 @@ public sealed class AgentWorker : BackgroundService
     private static readonly TimeSpan ProvisionTimeout = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan PolicyTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan SessionRestoreTimeout = TimeSpan.FromSeconds(30);
+
+    // Logging the kiosk user off, deleting the profile, relaunching the Shell and waiting for the profile to come
+    // back so the preserved anti-cheat directories can be restored — around a minute on a healthy PC.
+    private static readonly TimeSpan DirtyResetTimeout = TimeSpan.FromMinutes(3);
     private static readonly TimeSpan StepRetryDelay = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan MaintenanceInterval = TimeSpan.FromSeconds(15);
     private const int MaxStepAttempts = 3;
 
     private readonly Hwid _hwid;
     private readonly TempUserProvisioner _provisioner;
+    private readonly IProfileResetTrigger _profileReset;
     private readonly PolicyStore _policyStore;
     private readonly IPolicyEnforcer _policy;
     private readonly SessionManager _sessions;
@@ -86,6 +91,7 @@ public sealed class AgentWorker : BackgroundService
     public AgentWorker(
         Hwid hwid,
         TempUserProvisioner provisioner,
+        IProfileResetTrigger profileReset,
         PolicyStore policyStore,
         IPolicyEnforcer policy,
         SessionManager sessions,
@@ -105,6 +111,7 @@ public sealed class AgentWorker : BackgroundService
     {
         ArgumentNullException.ThrowIfNull(hwid);
         ArgumentNullException.ThrowIfNull(provisioner);
+        ArgumentNullException.ThrowIfNull(profileReset);
         ArgumentNullException.ThrowIfNull(policyStore);
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(sessions);
@@ -124,6 +131,7 @@ public sealed class AgentWorker : BackgroundService
 
         _hwid = hwid;
         _provisioner = provisioner;
+        _profileReset = profileReset;
         _policyStore = policyStore;
         _policy = policy;
         _sessions = sessions;
@@ -247,6 +255,15 @@ public sealed class AgentWorker : BackgroundService
             "session-restore",
             ct => _sessions.RestoreAsync(ct),
             SessionRestoreTimeout,
+            critical: false,
+            cancellationToken).ConfigureAwait(false);
+
+        // 7. Profile hygiene (§6.1 step 9): a session that never closed cleanly leaves the previous player's profile
+        //    on disk. Runs after the restore so a session that is still legitimately open is left alone.
+        await RunStepAsync(
+            "profile-dirty-reset",
+            _profileReset.ResetIfDirtyAsync,
+            DirtyResetTimeout,
             critical: false,
             cancellationToken).ConfigureAwait(false);
 

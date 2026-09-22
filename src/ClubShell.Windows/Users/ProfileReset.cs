@@ -31,6 +31,7 @@ public sealed class ProfileReset
     private static readonly TimeSpan UnloadTimeout = TimeSpan.FromSeconds(20);
     private readonly ILogger<ProfileReset> _logger;
     private readonly string _markerPath;
+    private readonly string _dirtyPath;
     private readonly string _stashRoot;
 
     /// <summary>Creates the helper; <paramref name="markerPath"/> defaults to <c>%ProgramData%\ClubShell\cache\profile-reset.marker</c>.</summary>
@@ -42,6 +43,7 @@ public sealed class ProfileReset
         _logger = logger ?? NullLogger<ProfileReset>.Instance;
         _markerPath = markerPath ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "ClubShell", "cache", "profile-reset.marker");
         _stashRoot = stashRoot ?? Path.Combine(Path.GetDirectoryName(_markerPath) ?? ".", "profile-keep");
+        _dirtyPath = Path.Combine(Path.GetDirectoryName(_markerPath) ?? ".", "profile-dirty.marker");
     }
 
     /// <summary>
@@ -90,6 +92,64 @@ public sealed class ProfileReset
             {
                 return null;
             }
+        }
+    }
+
+    /// <summary>
+    /// User whose profile is owed a reset, or <see langword="null"/> when nothing is outstanding. Set from the moment
+    /// a session opens and cleared only once a reset has actually run, so it survives a power cut: the marker is what
+    /// tells the next Agent start that the previous player's profile is still on disk.
+    /// </summary>
+    public string? DirtyUser
+    {
+        get
+        {
+            try
+            {
+                if (!File.Exists(_dirtyPath))
+                {
+                    return null;
+                }
+
+                string user = File.ReadAllText(_dirtyPath).Trim();
+                return user.Length == 0 ? null : user;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return null;
+            }
+        }
+    }
+
+    /// <summary>Records that the profile of <paramref name="userName"/> is in use and owes a reset.</summary>
+    public void MarkDirty(string userName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(userName);
+        if (string.Equals(DirtyUser, userName, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        string? directory = Path.GetDirectoryName(_dirtyPath);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        File.WriteAllText(_dirtyPath, userName);
+        _logger.LogDebug("Profile of {User} marked as owing a reset", userName);
+    }
+
+    /// <summary>Drops the marker written by <see cref="MarkDirty"/>; call only after a reset has run.</summary>
+    public void ClearDirty()
+    {
+        try
+        {
+            File.Delete(_dirtyPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Dirty-profile marker {Path} could not be removed; the next start will reset again", _dirtyPath);
         }
     }
 

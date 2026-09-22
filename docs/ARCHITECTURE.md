@@ -252,8 +252,11 @@ correct drift.
  6. GET /agents/{pcId}/config  → merge server overrides into runtime config
  7. GET /agents/{pcId}/policies → PolicyEnforcer.Apply (registry, firewall, DNS filter, USB, hooks config)
  8. Storage: mount games share if configured (retry 3×, non-fatal)
- 9. UserProvisioning: ensure kiosk user exists, password rotated (random, stored DPAPI), profile reset if
-    shell.kioskUser.resetProfileOnLogout and previous session ended dirty
+ 9. UserProvisioning: ensure kiosk user exists, password rotated (random, stored DPAPI). Profile reset if
+    shell.kioskUser.resetProfileOnLogout and the previous session never closed cleanly — a debt marker written at
+    session start and cleared only once a reset has run, so a power cut cannot hand the profile to the next player.
+    Runs after the persisted session has been restored and ignores the cooldown; a session that is still
+    legitimately open is left alone.
 10. Write secure\shell.token (new random), set ACL
 11. PipeServer.StartAsync (pipe with DACL), Heartbeat loop, Telemetry loop
 12. RealtimeClient.Connect (WS) — non-blocking; offline mode if it fails

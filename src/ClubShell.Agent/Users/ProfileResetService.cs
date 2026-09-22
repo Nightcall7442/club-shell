@@ -14,6 +14,13 @@ public interface IProfileResetTrigger
 {
     /// <summary>Resets the kiosk profile unless a session is open, a reset is running or the cooldown has not elapsed.</summary>
     Task RequestResetAsync(string reason, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Resets the kiosk profile when the previous session never closed cleanly (see <c>ProfileReset.DirtyUser</c>),
+    /// ignoring the cooldown. Called once at Agent start, after the session has been restored so a session that is
+    /// legitimately still running is not wiped from under the player.
+    /// </summary>
+    Task ResetIfDirtyAsync(CancellationToken cancellationToken);
 }
 
 /// <summary>Control over the interactive Shell process (implemented by the watchdog).</summary>
@@ -34,6 +41,12 @@ public interface IShellRelauncher
 /// session is open and rate-limited by <see cref="Cooldown"/>. Triggered automatically on
 /// <see cref="SessionEventType.Ended"/> (subscribed while the hosted service runs) and on demand through
 /// <see cref="IProfileResetTrigger"/>.
+/// <para>
+/// A session that never ends — the PC loses power, the Agent is killed — produces no <see cref="SessionEventType.Ended"/>
+/// and would leave the profile for the next player. <see cref="SessionEventType.Started"/> therefore writes a debt
+/// marker that outlives the crash, and <see cref="ResetIfDirtyAsync"/> pays it at the next Agent start, cooldown or
+/// not. The marker is cleared only once a reset has actually run, so a deletion that failed is retried too.
+/// </para>
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, IDisposable
@@ -99,7 +112,30 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
     public bool IsResetting => _lock.CurrentCount == 0;
 
     /// <inheritdoc />
-    public async Task RequestResetAsync(string reason, CancellationToken cancellationToken)
+    public Task RequestResetAsync(string reason, CancellationToken cancellationToken) => RequestResetAsync(reason, force: false, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task ResetIfDirtyAsync(CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_reset.DirtyUser is not { } dirtyUser)
+        {
+            return;
+        }
+
+        if (_sessions.State.IsOpen())
+        {
+            // The session survived the restart and is still the same player's: the profile is theirs until it ends.
+            _logger.LogInformation("Profile of {User} is marked dirty but its session is still open; the reset waits for the session to end", dirtyUser);
+            return;
+        }
+
+        _logger.LogWarning("Profile of {User} was left behind by a session that did not close cleanly; resetting before the next player", dirtyUser);
+        await RequestResetAsync("dirtyStartup", force: true, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Shared body of both triggers; <paramref name="force"/> skips the cooldown for a debt that must be paid.</summary>
+    private async Task RequestResetAsync(string reason, bool force, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(reason);
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -112,7 +148,7 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
         try
         {
             var now = _clock.UtcNow;
-            if (_lastResetAt is { } last && now - last < Cooldown)
+            if (!force && _lastResetAt is { } last && now - last < Cooldown)
             {
                 _logger.LogInformation("Profile reset ({Reason}) skipped: last reset {Last}, cooldown {Cooldown}", reason, last, Cooldown);
                 return;
@@ -140,6 +176,13 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
                 else
                 {
                     _logger.LogWarning("Profile of {User} not fully deleted: {Errors}", user, string.Join("; ", result.Errors));
+                }
+
+                // The debt is paid when the profile is gone, and equally when there was none to delete. It survives a
+                // failed deletion on purpose: the next Agent start is the only thing that will try again.
+                if (result.Deleted || result.Errors.Count == 0)
+                {
+                    _reset.ClearDirty();
                 }
             }
             finally
@@ -227,7 +270,28 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
 
     private void OnSessionChanged(object? sender, SessionEvent e)
     {
-        if (e.Type != SessionEventType.Ended || !_settings.CurrentValue.Shell.KioskUser.ResetProfileOnLogout)
+        if (!_settings.CurrentValue.Shell.KioskUser.ResetProfileOnLogout)
+        {
+            return;
+        }
+
+        // Marked at the start, not at the end: a power cut mid-session never produces an Ended event, and the profile
+        // is dirty from the moment the player logs in.
+        if (e.Type == SessionEventType.Started)
+        {
+            try
+            {
+                _reset.MarkDirty(_provisioner.UserName);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning(ex, "Profile could not be marked dirty; a crash during this session would leave it behind");
+            }
+
+            return;
+        }
+
+        if (e.Type != SessionEventType.Ended)
         {
             return;
         }
