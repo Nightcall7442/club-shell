@@ -54,6 +54,23 @@ pub struct OverlayEvent {
     pub payload: Option<Value>,
 }
 
+/// What the `hud` hotkey does from a given overlay state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HudAction {
+    Show,
+    Hide,
+    /// An admin lock is up: the player may not toggle it away, and the HUD does not open over it.
+    Keep,
+}
+
+const fn hud_action(current: OverlayKind) -> HudAction {
+    match current {
+        OverlayKind::Hud => HudAction::Hide,
+        OverlayKind::Lock => HudAction::Keep,
+        _ => HudAction::Show,
+    }
+}
+
 /// Controller of the overlay window.
 pub struct Overlay {
     app: AppHandle,
@@ -101,10 +118,10 @@ impl Overlay {
 
     /// Hotkey: hides the HUD when it is up, shows it otherwise (any other overlay kind is replaced).
     pub fn toggle_hud(self: &Arc<Self>) -> CmdResult<()> {
-        if self.kind() == OverlayKind::Hud {
-            self.hide()
-        } else {
-            self.show(OverlayKind::Hud, None, Some(HUD_TTL))
+        match hud_action(self.kind()) {
+            HudAction::Show => self.show(OverlayKind::Hud, None, Some(HUD_TTL)),
+            HudAction::Hide => self.hide(),
+            HudAction::Keep => Ok(()),
         }
     }
 
@@ -268,5 +285,20 @@ mod tests {
         })
         .unwrap();
         assert_eq!(ev, serde_json::json!({ "kind": "ads" }));
+    }
+
+    #[test]
+    fn hud_hotkey_toggles_and_never_dismisses_a_lock() {
+        assert_eq!(hud_action(OverlayKind::Hidden), HudAction::Show);
+        assert_eq!(hud_action(OverlayKind::Message), HudAction::Show);
+        assert_eq!(hud_action(OverlayKind::Ads), HudAction::Show);
+        // Second press closes it.
+        assert_eq!(hud_action(OverlayKind::Hud), HudAction::Hide);
+        // An admin lock is not a panel the player may toggle away.
+        assert_eq!(hud_action(OverlayKind::Lock), HudAction::Keep);
+        assert!(
+            HUD_TTL.as_secs() >= 30,
+            "the backstop must outlast the route's own idle timer"
+        );
     }
 }
