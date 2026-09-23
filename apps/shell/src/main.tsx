@@ -8,6 +8,9 @@
  */
 import { Component, StrictMode, type ErrorInfo, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+// Bundled, not assumed: a club PC rarely has Inter installed, and without this every screen quietly fell back to
+// Segoe UI. Latin and Cyrillic subsets load on demand by unicode-range.
+import '@fontsource-variable/inter';
 import './index.css';
 import i18n, { initI18n } from '@/i18n';
 import { installGlobalErrorHandlers, log } from '@/lib/logger';
@@ -74,21 +77,21 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
             <path d="M12 9v4M12 17h.01" />
             <path d="M10.3 3.9 2.6 17.2A2 2 0 0 0 4.3 20h15.4a2 2 0 0 0 1.7-2.8L13.7 3.9a2 2 0 0 0-3.4 0Z" />
           </svg>
-          <p className="text-[var(--fs-2xl)] font-bold">{t('common.error')}</p>
-          <p className="text-[var(--fs-base)] text-muted">{t('errors.generic')}</p>
+          <p className="text-[length:var(--fs-2xl)] font-bold">{t('common.error')}</p>
+          <p className="text-[length:var(--fs-base)] text-muted">{t('errors.generic')}</p>
           <div className="mt-2 flex flex-wrap justify-center gap-3">
             <button
               type="button"
               autoFocus
               onClick={this.retry}
-              className="focus-ring rounded-[var(--radius)] bg-primary px-6 py-3 text-[var(--fs-base)] font-semibold text-text shadow-glow hover:bg-primary/90"
+              className="focus-ring rounded-[var(--radius)] bg-primary px-6 py-3 text-[length:var(--fs-base)] font-semibold text-text shadow-glow hover:bg-primary/90"
             >
               {t('common.retry')}
             </button>
             <button
               type="button"
               onClick={this.reload}
-              className="focus-ring rounded-[var(--radius)] bg-surface/80 px-6 py-3 text-[var(--fs-base)] font-semibold text-text hover:bg-surface"
+              className="focus-ring rounded-[var(--radius)] bg-surface/80 px-6 py-3 text-[length:var(--fs-base)] font-semibold text-text hover:bg-surface"
             >
               {t('settings.reload')}
             </button>

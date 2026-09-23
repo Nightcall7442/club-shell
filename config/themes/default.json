@@ -15,7 +15,7 @@
   "radius": 12,
   "font": "Inter",
   "backgroundVideo": null,
-  "wallpaper": "themes/assets/default-wallpaper.jpg",
+  "wallpaper": null,
   "blur": 12,
   "animations": true
 }

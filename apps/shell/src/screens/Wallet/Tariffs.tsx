@@ -109,11 +109,12 @@ export function TariffCard({ tariff, available, current, action, onAction }: Tar
       <header className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="truncate text-xl font-bold text-text">{tariff.name}</h3>
-          <p className="tnum text-base text-muted">
-            {pkg
-              ? t('wallet.packageMinutes', { minutes: tariff.packageMinutes, price: formatMoney(pkg, locale) })
-              : t('wallet.perHour', { price: formatMoney(tariff.pricePerHour, locale) })}
-          </p>
+          {/* The hourly rate is the big number below; only a package needs a line here, for its minutes. */}
+          {pkg && (
+            <p className="tnum text-base text-muted">
+              {t('wallet.packageMinutes', { minutes: tariff.packageMinutes, price: formatMoney(pkg, locale) })}
+            </p>
+          )}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           {current && (

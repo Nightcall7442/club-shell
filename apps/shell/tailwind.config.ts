@@ -32,7 +32,7 @@ export default {
         '2xl': 'calc(var(--radius) * 2)',
       },
       fontFamily: {
-        sans: ['var(--font)', 'system-ui', 'Segoe UI', 'sans-serif'],
+        sans: ['var(--font)', '"Inter Variable"', 'system-ui', 'Segoe UI', 'sans-serif'],
       },
       keyframes: {
         shimmer: {

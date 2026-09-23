@@ -29,6 +29,7 @@ import { useSessionStore } from '@/store/session';
 import { useSettingsStore } from '@/store/settings';
 import { useThemeStore } from '@/store/theme';
 import { useWalletStore } from '@/store/wallet';
+import { AdsCarousel } from '@/screens/Idle/AdsCarousel';
 import { describeWindow } from '@/screens/Idle/PriceList';
 import { GuestLogin } from './GuestLogin';
 import { LoginForm, loginErrorMessage } from './LoginForm';
@@ -566,6 +567,10 @@ export default function LockScreen(): JSX.Element {
   const pcZone = useSettingsStore((s) => s.pcInfo?.pc.zone ?? '');
   const callAdminEnabled = useSettingsStore((s) => s.features.callAdmin);
   const animations = useThemeStore((s) => s.theme.animations);
+  const playlist = useSettingsStore((s) => s.shellConfig?.ads.playlist);
+  // The club's own art, the same the attract screen plays — stills only: a moving picture behind a code the player is
+  // trying to scan is a distraction, not a showcase.
+  const art = useMemo(() => (playlist ?? []).filter((i) => i.type === 'image'), [playlist]);
   const push = useNotificationsStore((s) => s.push);
   const pushError = useNotificationsStore((s) => s.pushError);
   const [tab, setTab] = useState<LoginTab>('qr');
@@ -635,7 +640,16 @@ export default function LockScreen(): JSX.Element {
 
   return (
     <div className="relative h-full w-full overflow-hidden">
-      <Background dim={0.6} />
+      {art.length > 0 ? (
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-0">
+          <AdsCarousel items={art} showCounter={false} />
+          <div className="absolute inset-0 bg-[linear-gradient(180deg,rgb(var(--c-bg)/0.8)_0%,rgb(var(--c-bg)/0.35)_28%,rgb(var(--c-bg)/0.4)_62%,rgb(var(--c-bg)/0.92)_100%)]" />
+          <div className="film-vignette" />
+          <div className="film-grain" />
+        </div>
+      ) : (
+        <Background dim={0.6} />
+      )}
       <div className="relative z-10 flex h-full w-full flex-col gap-[var(--gap)] px-[var(--gutter)] py-[var(--gap)]">
         <header className="flex items-start justify-between gap-[var(--gap)]">
           <div className="min-w-0">

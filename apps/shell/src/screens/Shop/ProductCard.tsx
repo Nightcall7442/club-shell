@@ -122,18 +122,23 @@ export const ProductCard = memo(function ProductCard({
       <div className="flex flex-1 flex-col gap-2 p-3">
         <h3 className="line-clamp-2 min-h-[2.6em] text-base font-semibold leading-snug text-text">{product.title}</h3>
         <div className="mt-auto flex items-center justify-between gap-2">
-          <span className="tnum text-lg font-bold text-text">{formatMoney(product.price, locale)}</span>
+          <span className="tnum whitespace-nowrap text-lg font-bold text-text">
+            {formatMoney(product.price, locale)}
+          </span>
           {qty === 0 ? (
+            // Icon-only rather than labelled: next to the price the label wrapped the amount onto two lines. Size lg
+            // (3.25rem) is exactly the height of the − n + stepper it turns into, so the card does not jump.
             <Button
-              size="md"
+              size="lg"
               variant="primary"
+              iconOnly
               icon={<PlusIcon />}
               disabled={!available}
               aria-label={`${t('shop.addToCart')}: ${product.title}`}
+              title={t('shop.addToCart')}
+              className="shrink-0"
               onClick={() => onChange(1)}
-            >
-              {t('shop.addToCart')}
-            </Button>
+            />
           ) : (
             <div
               className="glass flex items-center gap-1 rounded-full p-1"

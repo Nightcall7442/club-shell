@@ -119,8 +119,11 @@ export function SeatMap({
         aria-label={t('booking.map')}
         className="no-scrollbar overflow-x-auto [--seat:clamp(3.75rem,5.2vw,6rem)]"
       >
+        {/* w-max: an `auto` track in a stretched grid swallows all spare width, which parked the zone labels half a
+            screen away from their seats. Sized to content and centred instead; the auto margins collapse and the
+            wrapper scrolls when the hall is wider than the panel. */}
         <div
-          className="grid gap-[clamp(0.4rem,0.6vw,0.75rem)]"
+          className="mx-auto grid w-max gap-[clamp(0.4rem,0.6vw,0.75rem)]"
           style={{
             gridTemplateColumns: `auto repeat(${cols}, var(--seat))`,
             gridTemplateRows: `repeat(${rows}, var(--seat))`,

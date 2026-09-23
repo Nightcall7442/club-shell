@@ -67,7 +67,8 @@ export default function IdleScreen(): JSX.Element {
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-bg">
-      <AdsCarousel />
+      {/* No "1 of 3" counter here: it sat on top of the tap-to-start prompt and told a passer-by nothing. */}
+      <AdsCarousel showCounter={false} />
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgb(var(--c-bg)/0.55)_0%,transparent_30%,transparent_55%,rgb(var(--c-bg)/0.85)_100%)]"
@@ -88,7 +89,7 @@ export default function IdleScreen(): JSX.Element {
               {pcName ? t('idle.pcName', { name: pcName, zone: pcZone }) : t('idle.pcFree')}
             </p>
           </div>
-          <Clock className="text-[var(--fs-display)]" />
+          <Clock className="text-[length:var(--fs-display)]" />
         </motion.header>
 
         <div className="flex items-end justify-between gap-[var(--gap)]">

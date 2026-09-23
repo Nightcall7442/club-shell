@@ -627,7 +627,7 @@
     "custom": "Boshqa",
     "hourlyRate": "Soatlik narx",
     "useTariff": "Shu tarif bilan boshlash",
-    "extendWith": "Shu tarif bilan vaqt qo'shish",
+    "extendWith": "Vaqt qo'shish",
     "availableNow": "Hozir mavjud",
     "notAvailableNow": "Hozir mavjud emas",
     "currentTariff": "Joriy tarif",

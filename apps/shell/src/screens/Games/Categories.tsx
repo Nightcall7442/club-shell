@@ -4,11 +4,13 @@
  * field and the grid; LB/RB cycling is wired by the screen through {@link cycleCategory}.
  */
 import type { GamesSort } from '@clubshell/contracts';
+import { useRef } from 'react';
 import clsx from 'clsx';
 import { motion } from 'framer-motion';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
+import { useOverflowFade } from '@/hooks/useOverflowFade';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
 
 export interface CategoriesProps {
@@ -91,13 +93,16 @@ export function Categories({
     { key: '__all', value: null, label: t('games.allCategories') },
     ...categories.map((c) => ({ key: c, value: c, label: categoryLabel(t, c) })),
   ];
+  const row = useRef<HTMLDivElement>(null);
+  useOverflowFade(row, chips.length);
 
   return (
     <div className={clsx('flex min-w-0 items-center gap-3', className)}>
       <div
+        ref={row}
         role="group"
         aria-label={t('games.categories')}
-        className="glass no-scrollbar flex min-w-0 max-w-full flex-1 items-center gap-1 overflow-x-auto rounded-full p-1"
+        className="fade-x glass no-scrollbar flex min-w-0 max-w-full flex-1 items-center gap-1 overflow-x-auto rounded-full p-1"
       >
         {chips.map((c) => {
           const active = c.value === value;

@@ -29,9 +29,9 @@ read those properties. Switching themes never reloads the page.
 | `colors.danger` | hex | yes | `#EF4444` | Errors, session timer warning/critical. |
 | `colors.success` | hex | yes | `#22C55E` | Success states. |
 | `radius` | `int` px | yes | `12` | Base corner radius; Tailwind derives `sm`/`md`/`lg`/`xl`/`2xl` from it. |
-| `font` | `string` | yes | `"Inter"` | Installed font family name; falls back through `system-ui`, `Segoe UI`, `sans-serif`. Empty → default. |
+| `font` | `string` | yes | `"Inter"` | Font family name; falls back to the bundled `Inter Variable` (`@fontsource-variable/inter`, so the default renders the same on a PC that never had Inter installed), then `system-ui`, `Segoe UI`, `sans-serif`. Empty → default. |
 | `backgroundVideo` | `string \| null` | no | `null` | Looping muted video behind the UI. Path relative to the data directory (`themes/assets/…`) or absolute URL. |
-| `wallpaper` | `string \| null` | no | `"themes/assets/default-wallpaper.jpg"` | Still image behind the UI (also the video poster). Same path rules. |
+| `wallpaper` | `string \| null` | no | `null` | Still image behind the UI (also the video poster). Same path rules. `null` = the ambient backdrop (see §3). |
 | `blur` | `int` px | yes | `12` | Backdrop blur on `.glass` surfaces; `0` disables `backdrop-filter`. |
 | `animations` | `bool` | yes | `true` | `false` sets `data-animations="false"`, which turns off every CSS animation/transition (`animations.css`) and framer-motion durations. |
 
@@ -103,7 +103,16 @@ constants, not theme fields; a theme only influences them through the colour var
 ## 3. Background assets
 
 `wallpaper` and `backgroundVideo` are rendered by `components/layout/Background.tsx`
-(colour → wallpaper with a slow pan → `VideoBackground` → gradient veil → primary glow). Paths are
+(colour → wallpaper with a slow pan → `VideoBackground` → gradient veil → primary glow).
+
+With neither set (the default theme) the backdrop is **ambient**: `bg` black lit by two soft glows in the
+colour of the game last featured on Home, plus film grain. `HomeHero` samples its art with `useImageTint` and
+publishes the result as the CSS variable `--ambient` (`setAmbientLight`); the glows transition their
+`background-color`, so the light glides when the hero changes and stays after the player leaves Home. Until
+Home has been shown the light is `accent`. The lock screen does not use this backdrop when the club has art:
+it plays the still images of `shell.json → ads.playlist` (the attract screen's playlist) under a dark veil.
+
+Paths are
 resolved by `useResolvedAsset` (`components/media/GameArtwork.tsx`) → `assetUrl(path)` (`lib/tauri.ts`):
 
 * Absolute `https:` / `data:` / `blob:` / `asset:` URLs pass through unchanged (the CSP allows `https:`
@@ -148,8 +157,7 @@ binary (`DEFAULT_THEME_JSON`). `default.json` is mandatory and always resolvable
 | danger | `#EF4444` | red |
 | success | `#22C55E` | green |
 
-`radius 12`, `font "Inter"`, `blur 12`, `animations true`, wallpaper `themes/assets/default-wallpaper.jpg`,
-no video.
+`radius 12`, `font "Inter"`, `blur 12`, `animations true`, no wallpaper (ambient backdrop), no video.
 
 ### 4.2 `neon` — "Neon Night"
 

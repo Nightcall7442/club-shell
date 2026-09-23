@@ -14,7 +14,28 @@ export interface BackgroundProps {
   className?: string;
 }
 
-/** Full-screen backdrop: theme colour → wallpaper (slow pan) → video → gradient/blur veil → primary glow. */
+/** `"R G B"` of the light cast on the ambient backdrop: the last game Home featured, else the theme accent. */
+const AMBIENT = 'var(--ambient, var(--c-accent))';
+
+/**
+ * Publishes the light the ambient backdrop is lit with, as an `"R G B"` triplet (from `useImageTint`). A CSS
+ * variable rather than state: every screen's backdrop follows it without re-rendering, and the colour glides because
+ * the glows transition `background-color`.
+ */
+export function setAmbientLight(rgb: string | null): void {
+  if (rgb) {
+    document.documentElement.style.setProperty('--ambient', rgb);
+  }
+}
+
+/**
+ * Full-screen backdrop behind every authenticated screen and the lock screen.
+ *
+ * With a wallpaper or video (a club's own theme): theme colour → wallpaper (slow pan) → video → gradient/blur veil.
+ * Without (the default): Onyx black, lit from the top left by the colour of the game last featured on Home and
+ * finished with film grain, so the inner screens carry the mood of the hero instead of a stock picture showing
+ * through every glass panel.
+ */
 export function Background({ image, video, dim = 0.55, className }: BackgroundProps): JSX.Element {
   const theme = useThemeStore((s) => s.theme);
   const wallpaper = image ?? theme.wallpaper ?? null;
@@ -24,6 +45,25 @@ export function Background({ image, video, dim = 0.55, className }: BackgroundPr
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => setLoaded(false), [url]);
+
+  if (!wallpaper && !videoSrc) {
+    return (
+      <div
+        aria-hidden="true"
+        className={clsx('pointer-events-none fixed inset-0 z-0 overflow-hidden bg-bg', className)}
+      >
+        <div
+          className="absolute -left-[20%] -top-[45%] h-[90vh] w-[75vw] rounded-full blur-[160px] transition-[background-color] duration-1000"
+          style={{ backgroundColor: `rgb(${AMBIENT} / 0.16)` }}
+        />
+        <div
+          className="absolute -bottom-[50%] -right-[20%] h-[80vh] w-[65vw] rounded-full blur-[180px] transition-[background-color] duration-1000"
+          style={{ backgroundColor: `rgb(${AMBIENT} / 0.07)` }}
+        />
+        <div className="film-grain" />
+      </div>
+    );
+  }
 
   return (
     <div aria-hidden="true" className={clsx('pointer-events-none fixed inset-0 z-0 overflow-hidden bg-bg', className)}>

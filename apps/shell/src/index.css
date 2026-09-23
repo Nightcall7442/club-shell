@@ -20,7 +20,7 @@
   html {
     background-color: rgb(var(--c-bg));
     color: rgb(var(--c-text));
-    font-family: var(--font), system-ui, "Segoe UI", sans-serif;
+    font-family: var(--font), "Inter Variable", system-ui, "Segoe UI", sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;

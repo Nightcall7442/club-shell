@@ -100,6 +100,16 @@ html {
     background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
     background-size: 180px 180px;
   }
+  /* Soft edge on a horizontally scrolling row, set by useOverflowFade only on the side that has more to show. */
+  .fade-x[data-fade-end] {
+    mask-image: linear-gradient(to right, #000 calc(100% - 4rem), transparent);
+  }
+  .fade-x[data-fade-start] {
+    mask-image: linear-gradient(to left, #000 calc(100% - 4rem), transparent);
+  }
+  .fade-x[data-fade-start][data-fade-end] {
+    mask-image: linear-gradient(to right, transparent, #000 4rem, #000 calc(100% - 4rem), transparent);
+  }
   .film-vignette {
     pointer-events: none;
     position: absolute;

@@ -307,8 +307,8 @@ export function OverlayScreen(): JSX.Element | null {
             <path d="M8 10V7a4 4 0 0 1 8 0v3" />
             <circle cx="12" cy="15.5" r="1.3" />
           </svg>
-          <p className="text-glow text-[var(--fs-2xl)] font-bold text-text">{t('lock.locked')}</p>
-          <p className="text-[var(--fs-lg)] text-muted">{t('admin.lockedByAdmin')}</p>
+          <p className="text-glow text-[length:var(--fs-2xl)] font-bold text-text">{t('lock.locked')}</p>
+          <p className="text-[length:var(--fs-lg)] text-muted">{t('admin.lockedByAdmin')}</p>
         </div>
       </div>
     );
@@ -361,7 +361,9 @@ export function OverlayScreen(): JSX.Element | null {
         )}
         <div className="min-w-0 flex-1">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">{m.title}</p>
-          <p className="mt-1 truncate text-[var(--fs-xl)] font-bold leading-tight text-text">{m.body || m.title}</p>
+          <p className="mt-1 truncate text-[length:var(--fs-xl)] font-bold leading-tight text-text">
+            {m.body || m.title}
+          </p>
         </div>
         <Badge tone={levelTone(m.level)} size="sm" className="shrink-0">
           {t(`notifications.${m.level}`)}

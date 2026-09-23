@@ -627,7 +627,7 @@
     "custom": "Своя",
     "hourlyRate": "Почасовая ставка",
     "useTariff": "Начать по этому тарифу",
-    "extendWith": "Добавить время по этому тарифу",
+    "extendWith": "Добавить время",
     "availableNow": "Доступен сейчас",
     "notAvailableNow": "Сейчас недоступен",
     "currentTariff": "Текущий тариф",

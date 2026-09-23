@@ -9,6 +9,7 @@ import clsx from 'clsx';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
+import { setAmbientLight } from '@/components/layout/Background';
 import { GameArtwork, useResolvedAsset } from '@/components/media/GameArtwork';
 import { VideoBackground } from '@/components/media/VideoBackground';
 import { Badge } from '@/components/ui/Badge';
@@ -287,6 +288,8 @@ export function HomeHero(): JSX.Element {
   const loading = status === 'loading' && strip.length === 0;
   const { url: artUrl } = useResolvedAsset(hero ? (hero.heroUrl ?? hero.coverUrl) : null);
   const tint = useImageTint(artUrl);
+  // The inner screens keep the light of the last game featured here after the player navigates away.
+  useEffect(() => setAmbientLight(tint), [tint]);
 
   // Parallax: pointer position → --px/--py in −1..1 on the section (CSS moves art and text in opposite directions).
   const onPointerMove = (e: PointerEvent<HTMLElement>): void => {
@@ -366,7 +369,9 @@ export function HomeHero(): JSX.Element {
       onPointerMove={onPointerMove}
       onPointerLeave={onPointerLeave}
       style={tint ? ({ '--hero-tint': tint } as CSSProperties) : undefined}
-      className="relative -mx-[var(--gutter)] -mt-[calc(var(--topbar-h)+var(--gap))] h-[calc(100vh-4.5rem)] min-h-[38rem] overflow-hidden [--px:0] [--py:0]"
+      // 100vh minus a peek deep enough for the next row's cards to show above the fold, not just its heading — a
+      // lone heading on the bottom edge read as clipped rather than as "there is more below".
+      className="relative -mx-[var(--gutter)] -mt-[calc(var(--topbar-h)+var(--gap))] h-[calc(100vh-10rem)] min-h-[38rem] overflow-hidden [--px:0] [--py:0]"
     >
       {/* Art + veils, faded out at the bottom so the hero melts into the page. */}
       <div

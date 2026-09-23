@@ -27,7 +27,9 @@ export const DEFAULT_THEME: Theme = {
   radius: 12,
   font: 'Inter',
   backgroundVideo: null,
-  wallpaper: 'themes/assets/default-wallpaper.jpg',
+  // No wallpaper: inner screens sit on Onyx black lit by the game last featured on Home (see Background). A club that
+  // wants its own picture behind every screen still sets one here.
+  wallpaper: null,
   blur: 12,
   animations: true,
 };

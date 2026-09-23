@@ -627,7 +627,7 @@
     "custom": "Custom",
     "hourlyRate": "Hourly rate",
     "useTariff": "Start with this tariff",
-    "extendWith": "Add time with this tariff",
+    "extendWith": "Add time",
     "availableNow": "Available now",
     "notAvailableNow": "Not available now",
     "currentTariff": "Current tariff",
