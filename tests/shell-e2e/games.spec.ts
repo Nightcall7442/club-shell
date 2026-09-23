@@ -52,7 +52,12 @@ function card(page: Page, title: string): Locator {
   return grid(page).getByRole('button', { name: title, exact: true });
 }
 
-/** Selected-game banner (`<section aria-label={title}>`). */
+/** The hover play disc of a card (a mouse shortcut, hidden from assistive tech). */
+function playDisc(page: Page, title: string): Locator {
+  return card(page, title).locator('[data-card-play]');
+}
+
+/** The game hero of the details page (`<section aria-label={title}>`). */
 function hero(page: Page, title: string): Locator {
   return page.getByRole('region', { name: title, exact: true });
 }
@@ -67,8 +72,8 @@ function searchBox(page: Page): Locator {
 
 /**
  * The shell boots in Russian (mock settings); switch to English through the top bar's sound-and-language menu (its
- * only popover). The option is activated with Enter (kiosk keyboard/gamepad navigation): the popover drops below
- * the hero artwork on the library screen, so a pointer click there is intercepted by the page.
+ * only popover). The option is activated with Enter, the way kiosk keyboard/gamepad navigation does it: the panel
+ * drops over the page content, where a pointer click can land on whatever the page stacks above it.
  */
 async function useEnglish(page: Page): Promise<void> {
   const trigger = page.locator('header [data-popover-trigger]');
@@ -111,17 +116,20 @@ test.describe('games library', () => {
       await expect(card(page, title)).toBeVisible();
     }
 
-    // Most popular title is the default hero; exactly one card is the roving tab stop.
-    await expect(hero(page, CS2)).toBeVisible();
-    await expect(hero(page, CS2).getByRole('heading', { level: 1 })).toHaveText(CS2);
-    await expect(hero(page, CS2).getByRole('button', { name: en('games.playNow') })).toBeEnabled();
+    // No hero on the library (Home has one); the grid takes focus, so the most popular title is selected and is
+    // the single roving tab stop.
+    await expect(page.getByRole('region', { name: CS2, exact: true })).toHaveCount(0);
     await expect(grid(page).locator('[data-game-id][tabindex="0"]')).toHaveCount(1);
     await expect(card(page, CS2)).toHaveAttribute('aria-current', 'true');
 
     // Installed is the default state (no badge); only "not installed" and "running" are marked.
     await expect(card(page, CS2).getByText(en('games.installed'), { exact: true })).toHaveCount(0);
     await expect(card(page, FORZA).getByText(en('games.notInstalled'), { exact: true })).toBeVisible();
-    await expect(hero(page, CS2).getByRole('button', { name: en('games.details') })).toBeVisible();
+
+    // Hovering an installed card reveals its play disc; an uninstalled one has none.
+    await card(page, CS2).hover();
+    await expect(playDisc(page, CS2)).toBeVisible();
+    await expect(playDisc(page, FORZA)).toHaveCount(0);
   });
 
   test('search filters the grid', async ({ page }) => {
@@ -131,7 +139,6 @@ test.describe('games library', () => {
     await searchBox(page).fill('rocket');
     await expect(cards(page)).toHaveCount(1);
     await expect(card(page, ROCKET_LEAGUE)).toBeVisible();
-    await expect(hero(page, ROCKET_LEAGUE)).toBeVisible();
     await expect(page.getByRole('button', { name: en('games.clearFilters') })).toBeVisible();
 
     // Tags are searched too ("esports" is shared by several titles), and case does not matter.
@@ -165,7 +172,6 @@ test.describe('games library', () => {
     await expect(cards(page)).toHaveCount(2);
     await expect(card(page, ROCKET_LEAGUE)).toBeVisible();
     await expect(card(page, FORZA)).toBeVisible();
-    await expect(hero(page, ROCKET_LEAGUE)).toBeVisible();
 
     // Filters combine: installed-only hides the uninstalled racer.
     await page.getByRole('button', { name: en('games.installedOnly') }).click();
@@ -177,24 +183,21 @@ test.describe('games library', () => {
     await expect(cards(page)).toHaveCount(total);
   });
 
-  test('selecting a card updates the hero', async ({ page }) => {
+  test('hovering or focusing a card selects it', async ({ page }) => {
     await openLibrary(page);
-    await expect(hero(page, CS2)).toBeVisible();
+    await expect(card(page, CS2)).toHaveAttribute('aria-current', 'true');
 
+    // The selection is what Home's hero opens on when the player goes back.
     await card(page, VALORANT).hover();
-    await expect(hero(page, VALORANT)).toBeVisible();
-    await expect(hero(page, VALORANT).getByRole('heading', { level: 1 })).toHaveText(VALORANT);
-    await expect(hero(page, CS2)).toHaveCount(0);
     await expect(card(page, VALORANT)).toHaveAttribute('aria-current', 'true');
     await expect(card(page, CS2)).not.toHaveAttribute('aria-current', 'true');
 
     // Keyboard focus selects as well.
     await card(page, DOTA).focus();
-    await expect(hero(page, DOTA)).toBeVisible();
     await expect(card(page, DOTA)).toHaveAttribute('aria-current', 'true');
   });
 
-  test('opens the details route from a card and from the hero', async ({ page }) => {
+  test('opens the details route from a card and comes back', async ({ page }) => {
     await openLibrary(page);
 
     await card(page, DOTA).click();
@@ -209,18 +212,13 @@ test.describe('games library', () => {
       .click();
     await expect(page).toHaveURL(/#\/games$/);
     await expect(grid(page)).toBeVisible();
-
-    await hero(page, DOTA)
-      .getByRole('button', { name: en('games.details') })
-      .click();
-    await expect(page).toHaveURL(/#\/games\/[0-9a-f-]{36}$/);
-    await expect(page.getByRole('heading', { level: 1, name: DOTA })).toBeVisible();
+    await expect(card(page, DOTA)).toHaveAttribute('aria-current', 'true');
   });
 
-  test('launches a game, sees it running and closes it', async ({ page }) => {
+  test('launches a game from its card, sees it running and closes it from details', async ({ page }) => {
     await openLibrary(page);
-    const banner = hero(page, CS2);
-    await banner.getByRole('button', { name: en('games.playNow') }).click();
+    await card(page, CS2).hover();
+    await playDisc(page, CS2).click();
 
     // Launch overlay: progress steps, then the "running" state, then it goes away on its own.
     const overlay = page.getByRole('dialog', { name: en('games.launchTitle', { title: CS2 }) });
@@ -231,8 +229,16 @@ test.describe('games library', () => {
     await expect(ready).toBeVisible({ timeout: 10_000 });
     await expect(ready).toBeHidden({ timeout: 10_000 });
 
-    // Running badge on the card, "Close game" in the hero.
+    // Running badge on the card and no play disc (it would only say "already running"). The disc, not the card,
+    // took the click, so the library is still on screen.
+    await expect(page).toHaveURL(/#\/games$/);
     await expect(card(page, CS2).getByText(en('games.running'), { exact: true })).toBeVisible();
+    await card(page, CS2).hover();
+    await expect(playDisc(page, CS2)).toHaveCount(0);
+
+    // "Close game" lives in the details hero.
+    await card(page, CS2).click();
+    const banner = hero(page, CS2);
     await expect(banner.getByText(en('games.nowPlaying'), { exact: true })).toBeVisible();
     const kill = banner.getByRole('button', { name: en('games.kill') });
     await expect(kill).toBeVisible();
@@ -246,6 +252,8 @@ test.describe('games library', () => {
     await confirm.getByRole('button', { name: en('games.kill') }).click();
     await expect(confirm).toBeHidden();
     await expect(banner.getByRole('button', { name: en('games.playNow') })).toBeEnabled();
+    await page.keyboard.press('Escape');
+    await expect(grid(page)).toBeVisible();
     await expect(card(page, CS2).getByText(en('games.running'), { exact: true })).toHaveCount(0);
   });
 
@@ -260,7 +268,6 @@ test.describe('games library', () => {
     await expect(first).toBeFocused();
     await page.keyboard.press('ArrowRight');
     await expect(second).toBeFocused();
-    await expect(hero(page, secondTitle ?? '')).toBeVisible();
     await expect(second).toHaveAttribute('aria-current', 'true');
 
     await page.keyboard.press('ArrowLeft');
@@ -270,8 +277,8 @@ test.describe('games library', () => {
 
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(/#\/games\/[0-9a-f-]{36}$/);
-    // The library keeps rendering during its exit transition (its hero already shows the same title), so
-    // wait for a details-only control before asserting the page.
+    // The library keeps rendering during its exit transition, so wait for a details-only control before
+    // asserting the page.
     await expect(page.getByRole('button', { name: en('games.backToGames') }).first()).toBeVisible();
     await expect(grid(page)).toHaveCount(0);
     await expect(page.getByRole('heading', { level: 1, name: secondTitle ?? '' })).toBeVisible();

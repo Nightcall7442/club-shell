@@ -1,6 +1,7 @@
 /**
- * 2:3 cover tile of the library grid. A native `<button>` (Enter/Space/click activate for free) with
- * `data-nav` for spatial navigation; focus and pointer-enter select the game (the hero follows the selection).
+ * 2:3 cover tile of the library grid. A native `<button>` (Enter/Space/click open details) with `data-nav` for
+ * spatial navigation; focus and pointer-enter select the game (Home's hero follows the selection). With `onLaunch`, a
+ * play disc appears on hover and launches without the detour through details.
  */
 import type { Game, LauncherType } from '@clubshell/contracts';
 import { forwardRef, type ButtonHTMLAttributes } from 'react';
@@ -23,6 +24,16 @@ export interface GameCardProps extends Omit<ButtonHTMLAttributes<HTMLButtonEleme
   priority?: boolean;
   onSelect?: (game: Game) => void;
   onActivate?: (game: Game) => void;
+  /** Launch straight from the card (mouse shortcut on hover); omitted = the card only opens details. */
+  onLaunch?: (game: Game) => void;
+}
+
+function PlayIcon(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5Z" />
+    </svg>
+  );
 }
 
 /** i18n label of a launcher (`games.launcherSteam`, …). */
@@ -58,6 +69,7 @@ export const GameCard = forwardRef<HTMLButtonElement, GameCardProps>(function Ga
     priority = false,
     onSelect,
     onActivate,
+    onLaunch,
     className,
     onFocus,
     onPointerEnter,
@@ -108,15 +120,35 @@ export const GameCard = forwardRef<HTMLButtonElement, GameCardProps>(function Ga
         className={clsx(
           'rounded-lg shadow-[var(--shadow-card)] transition-[box-shadow,filter] duration-[var(--dur-base)]',
           selected && 'border-glow',
-          !game.installed && 'opacity-60 saturate-50',
         )}
         overlay={
           <>
+            {/* Dims and greys only the art under it: fading the whole tile also faded the "not installed" badge
+                that explains why. */}
+            {!game.installed && (
+              <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-bg/55 backdrop-saturate-0" />
+            )}
             <div
               aria-hidden="true"
               className="pointer-events-none absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-bg/95 via-bg/45 to-transparent"
             />
             <span aria-hidden="true" className="tilt-sheen rounded-lg" />
+            {onLaunch && game.installed && !running && (
+              // A mouse shortcut, not a second control: a button inside the card's button is invalid HTML, and
+              // keyboard and gamepad reach Play in one step anyway — Enter opens details, where Play has focus.
+              <span
+                aria-hidden="true"
+                title={t('games.playNow')}
+                data-card-play="true"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onLaunch(game);
+                }}
+                className="absolute right-3 top-3 inline-flex h-12 w-12 scale-90 cursor-pointer items-center justify-center rounded-full bg-primary pl-0.5 text-on-primary opacity-0 shadow-[0_10px_28px_-8px_rgb(0_0_0/0.8)] transition-[opacity,transform] duration-[var(--dur-base)] ease-[var(--ease-out)] hover:!scale-110 group-hover:scale-100 group-hover:opacity-100 [&>svg]:h-5 [&>svg]:w-5"
+              >
+                <PlayIcon />
+              </span>
+            )}
             {(running || !game.installed) && (
               <div className="absolute left-2 top-2">
                 {running ? (

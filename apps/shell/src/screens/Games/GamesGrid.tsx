@@ -13,7 +13,7 @@ import { GameCard } from './GameCard';
 
 export interface GamesGridProps {
   games: Game[];
-  /** Columns (default 5). */
+  /** Columns (default 7). */
   columns?: number;
   selectedId: string | null;
   /** Ids of games whose process is alive. */
@@ -25,6 +25,8 @@ export interface GamesGridProps {
   autoFocus?: boolean;
   onSelect: (game: Game) => void;
   onActivate: (game: Game) => void;
+  /** Launch from the card's hover play disc; omitted = cards only open details. */
+  onPlay?: (game: Game) => void;
   className?: string;
 }
 
@@ -62,7 +64,7 @@ function EmptyIcon(): JSX.Element {
 
 export function GamesGrid({
   games,
-  columns = 5,
+  columns = 7,
   selectedId,
   runningIds,
   loading = false,
@@ -70,6 +72,7 @@ export function GamesGrid({
   autoFocus = false,
   onSelect,
   onActivate,
+  onPlay,
   className,
 }: GamesGridProps): JSX.Element {
   const { t } = useTranslation();
@@ -154,6 +157,7 @@ export function GamesGrid({
               tabIndex={game.id === rovingId ? 0 : -1}
               onSelect={onSelect}
               onActivate={onActivate}
+              onLaunch={onPlay}
             />
           </li>
         ))}

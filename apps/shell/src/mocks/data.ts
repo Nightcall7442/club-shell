@@ -1298,7 +1298,7 @@ export const SHELL_CONFIG: ShellConfig = {
   monitors: { primaryIndex: 0, secondaryMode: 'black' },
   ui: {
     defaultRoute: '/home',
-    gridColumns: 5,
+    gridColumns: 7,
     showClock: true,
     clockFormat: 'HH:mm',
     showMetricsOverlay: false,

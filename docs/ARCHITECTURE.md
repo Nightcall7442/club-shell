@@ -594,7 +594,7 @@ unless the key ends with `Ms`.
   },
   "ui": {
     "defaultRoute": "/home",
-    "gridColumns": 5,
+    "gridColumns": 7,
     "showClock": true,
     "clockFormat": "HH:mm",
     "showMetricsOverlay": false,

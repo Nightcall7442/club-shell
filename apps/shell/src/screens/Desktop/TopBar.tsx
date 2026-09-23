@@ -3,7 +3,7 @@
  * profile), the session timer (→ add time), the balance (→ wallet / top up), a link dot only while the link is down,
  * the clock, one sound-and-language menu and lock. Every control is a `data-nav` button.
  */
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -11,6 +11,7 @@ import type { Locale, Money } from '@clubshell/contracts';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Popover } from '@/components/ui/Popover';
 import { useLocale } from '@/hooks/useLocale';
 import { useSession } from '@/hooks/useSession';
 import { formatMoney } from '@/lib/format';
@@ -59,69 +60,6 @@ const IconPc = (): JSX.Element => (
     <path d="M8 20h8M12 16v4" />
   </svg>
 );
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Popover (anchored panel; closes on outside pointer-down and Escape)
-// ---------------------------------------------------------------------------------------------------------------------
-
-interface PopoverProps {
-  open: boolean;
-  onClose: () => void;
-  label: string;
-  trigger: ReactNode;
-  children: ReactNode;
-  className?: string;
-}
-
-function Popover({ open, onClose, label, trigger, children, className }: PopoverProps): JSX.Element {
-  const root = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-    const onPointer = (e: PointerEvent): void => {
-      if (root.current && e.target instanceof Node && !root.current.contains(e.target)) {
-        onClose();
-      }
-    };
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    document.addEventListener('pointerdown', onPointer, true);
-    window.addEventListener('keydown', onKey, true);
-    const frame = requestAnimationFrame(() =>
-      root.current?.querySelector<HTMLElement>('[data-nav]:not([data-popover-trigger])')?.focus(),
-    );
-    return () => {
-      document.removeEventListener('pointerdown', onPointer, true);
-      window.removeEventListener('keydown', onKey, true);
-      cancelAnimationFrame(frame);
-    };
-  }, [open, onClose]);
-
-  return (
-    <div ref={root} className="relative">
-      {trigger}
-      {open && (
-        <div
-          role="dialog"
-          aria-label={label}
-          className={clsx(
-            // Near-opaque: at glass-strong's 82% the page's own text read through the menu's lines.
-            'glass-strong anim-pop absolute right-0 top-[calc(100%+0.5rem)] z-50 rounded-lg bg-surface/95 p-3',
-            className,
-          )}
-        >
-          {children}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Clock

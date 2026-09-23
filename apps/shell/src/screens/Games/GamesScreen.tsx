@@ -1,7 +1,9 @@
 /**
- * `/games` — library: hero of the selected game, filter row (categories / installed / sort + search) and the
- * cover grid. Selection lives in the games store so it survives a trip to `/games/:id`; the launch dialog is
- * mounted here so a launch started from the hero or the grid shows progress in place.
+ * `/games` — library: filter row (categories / installed / sort + search) over the cover grid. No hero here: Home
+ * already opens on one, and on this screen it pushed the grid down to a single row above the fold. A card opens
+ * details (where Play and Close live); its hover play disc launches directly. Selection lives in the games store,
+ * so the last card looked at is Home's hero on the way back; the launch dialog is mounted here so a launch started
+ * from a card shows progress in place.
  */
 import type { Game } from '@clubshell/contracts';
 import { useEffect, useMemo, useRef } from 'react';
@@ -17,7 +19,6 @@ import { useNotificationsStore } from '@/store/notifications';
 import { useSettingsStore } from '@/store/settings';
 import { useThemeStore } from '@/store/theme';
 import { Categories, cycleCategory } from './Categories';
-import { GameHero } from './GameHero';
 import { GamesGrid, focusGameCard } from './GamesGrid';
 import { LaunchOverlay, launchGame } from './LaunchOverlay';
 import { SearchBar } from './SearchBar';
@@ -37,10 +38,8 @@ export default function GamesScreen(): JSX.Element {
   const selectedId = useGamesStore((s) => s.selectedId);
   const select = useGamesStore((s) => s.select);
   const running = useGamesStore((s) => s.running);
-  const launching = useGamesStore((s) => s.launching);
-  const kill = useGamesStore((s) => s.kill);
   const pushError = useNotificationsStore((s) => s.pushError);
-  const columns = useSettingsStore((s) => s.shellConfig?.ui.gridColumns ?? 5);
+  const columns = useSettingsStore((s) => s.shellConfig?.ui.gridColumns ?? 7);
   const homeRoute = useSettingsStore((s) => s.shellConfig?.ui.defaultRoute ?? '/home');
   const animations = useThemeStore((s) => s.theme.animations);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -60,7 +59,6 @@ export default function GamesScreen(): JSX.Element {
   }, [status, error, pushError, t]);
 
   const loading = status === 'loading' || (status === 'idle' && total === 0);
-  const hero = useMemo(() => games.find((g) => g.id === selectedId) ?? games[0] ?? null, [games, selectedId]);
   const runningIds = useMemo(() => new Set(running.map((r) => r.gameId)), [running]);
   const filtersActive =
     filters.category !== DEFAULT_FILTERS.category ||
@@ -76,14 +74,6 @@ export default function GamesScreen(): JSX.Element {
   const play = (game: Game): void => {
     select(game.id);
     void launchGame(game.id);
-  };
-
-  const closeGame = async (game: Game): Promise<void> => {
-    try {
-      await kill(game.id);
-    } catch (e) {
-      pushError(e, t('games.killTitle'));
-    }
   };
 
   useGamepad({
@@ -104,18 +94,6 @@ export default function GamesScreen(): JSX.Element {
       transition={{ duration, ease: 'easeOut' }}
       className="flex min-h-full w-full flex-col gap-[var(--gap)]"
     >
-      <GameHero
-        game={hero}
-        loading={loading}
-        running={hero !== null && runningIds.has(hero.id)}
-        launching={hero !== null && launching?.gameId === hero.id}
-        onPlay={play}
-        onDetails={openDetails}
-        onKill={(g) => void closeGame(g)}
-        autoFocus
-        compact
-      />
-
       <div className="flex items-center gap-[var(--gap)]">
         <Categories
           className="min-w-0 flex-1"
@@ -155,12 +133,14 @@ export default function GamesScreen(): JSX.Element {
         <GamesGrid
           games={games}
           columns={columns}
-          selectedId={hero?.id ?? null}
+          selectedId={selectedId}
           runningIds={runningIds}
           loading={loading}
           emptyText={filtersActive ? t('games.noResults') : t('games.empty')}
+          autoFocus
           onSelect={(g) => select(g.id)}
           onActivate={openDetails}
+          onPlay={play}
         />
       </div>
 

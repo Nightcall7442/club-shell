@@ -4,12 +4,13 @@
  * field and the grid; LB/RB cycling is wired by the screen through {@link cycleCategory}.
  */
 import type { GamesSort } from '@clubshell/contracts';
-import { useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { motion } from 'framer-motion';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
+import { Popover } from '@/components/ui/Popover';
 import { useOverflowFade } from '@/hooks/useOverflowFade';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
 
@@ -126,35 +127,110 @@ export function Categories({
           );
         })}
       </div>
+      {/* A filter, so it reads as one: a box that gets ticked, not a chip beside the sort options. */}
       <Button
         variant={installedOnly ? 'primary' : 'ghost'}
         size="md"
         aria-pressed={installedOnly}
-        icon={installedOnly ? <CheckIcon /> : undefined}
+        icon={installedOnly ? <CheckIcon /> : <BoxIcon />}
         onClick={() => onInstalledOnlyChange(!installedOnly)}
         className="shrink-0 rounded-full text-sm"
       >
         {t('games.installedOnly')}
       </Button>
-      <div role="group" aria-label={t('games.sort')} className="flex shrink-0 items-center gap-1 rounded-full p-1">
+      <SortMenu value={sort} onChange={onSortChange} />
+    </div>
+  );
+}
+
+function BoxIcon(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <rect x="4" y="4" width="16" height="16" rx="4" />
+    </svg>
+  );
+}
+
+function SortIcon(): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M4 7h16M7 12h10M10 17h4" />
+    </svg>
+  );
+}
+
+/**
+ * Sort as one button naming the current order, with the three orders in a list under it. As a segmented row it took
+ * a third of the toolbar and looked like more category chips; this leaves that width to the categories.
+ */
+function SortMenu({ value, onChange }: { value: GamesSort; onChange: (sort: GamesSort) => void }): JSX.Element {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const close = useCallback(() => setOpen(false), []);
+  const current = SORTS.find((s) => s.key === value) ?? SORTS[0];
+  const currentLabel = current ? t(current.labelKey) : '';
+
+  return (
+    <Popover
+      open={open}
+      onClose={close}
+      label={t('games.sort')}
+      className="w-56"
+      trigger={
+        <Button
+          variant="ghost"
+          size="md"
+          data-popover-trigger="true"
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-label={`${t('games.sort')}: ${currentLabel}`}
+          icon={<SortIcon />}
+          onClick={() => setOpen((v) => !v)}
+          className="shrink-0 rounded-full text-sm"
+        >
+          {currentLabel}
+        </Button>
+      }
+    >
+      <ul role="listbox" aria-label={t('games.sort')} className="flex flex-col gap-1">
         {SORTS.map((s) => {
-          const active = s.key === sort;
+          const active = s.key === value;
           return (
-            <button
-              key={s.key}
-              type="button"
-              data-nav="true"
-              aria-pressed={active}
-              onClick={() => onSortChange(s.key)}
-              className={clsx(CHIP, 'h-9 px-4 text-sm', active ? 'text-text' : CHIP_OFF)}
-            >
-              {active && <Pill id="games-sort-pill" className="bg-text/15" />}
-              {t(s.labelKey)}
-            </button>
+            <li key={s.key} role="none">
+              <button
+                type="button"
+                role="option"
+                aria-selected={active}
+                data-nav="true"
+                onClick={() => {
+                  setOpen(false);
+                  onChange(s.key);
+                }}
+                className={clsx(
+                  'focus-ring flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-base transition-colors duration-[var(--dur-fast)]',
+                  active ? 'bg-primary/15 text-primary' : 'text-text hover:bg-text/10',
+                )}
+              >
+                {t(s.labelKey)}
+                {active && (
+                  <span className="inline-flex h-4 w-4 shrink-0">
+                    <CheckIcon />
+                  </span>
+                )}
+              </button>
+            </li>
           );
         })}
-      </div>
-    </div>
+      </ul>
+    </Popover>
   );
 }
 
