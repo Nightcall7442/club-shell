@@ -1,12 +1,13 @@
 /**
- * Top bar of the authenticated shell: PC / zone (left), session countdown (centre) and, on the right, balance,
- * user, connectivity, clock, volume popover, language switch and lock. Every control is a `data-nav` button.
+ * Top bar of the authenticated shell: club / PC (left), navigation (centre) and, on the right, the player (avatar →
+ * profile), the session timer (→ add time), the balance (→ wallet / top up), a link dot only while the link is down,
+ * the clock, one sound-and-language menu and lock. Every control is a `data-nav` button.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
-import type { Locale } from '@clubshell/contracts';
+import { useLocation, useNavigate } from 'react-router-dom';
+import type { Locale, Money } from '@clubshell/contracts';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -15,9 +16,10 @@ import { useSession } from '@/hooks/useSession';
 import { formatMoney } from '@/lib/format';
 import { formatClock, serverNow } from '@/lib/time';
 import { NavBar } from '@/screens/Desktop/NavBar';
-import { SessionTimer } from '@/screens/Desktop/SessionTimer';
+import { PlusDisc, SessionTimer } from '@/screens/Desktop/SessionTimer';
 import { useNotificationsStore } from '@/store/notifications';
 import { selectFeatures, useSettingsStore } from '@/store/settings';
+import { useWalletStore } from '@/store/wallet';
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Icons
@@ -109,7 +111,8 @@ function Popover({ open, onClose, label, trigger, children, className }: Popover
           role="dialog"
           aria-label={label}
           className={clsx(
-            'glass-strong anim-pop absolute right-0 top-[calc(100%+0.5rem)] z-50 rounded-lg p-3',
+            // Near-opaque: at glass-strong's 82% the page's own text read through the menu's lines.
+            'glass-strong anim-pop absolute right-0 top-[calc(100%+0.5rem)] z-50 rounded-lg bg-surface/95 p-3',
             className,
           )}
         >
@@ -139,17 +142,18 @@ export function Clock({ format }: { format: string }): JSX.Element {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Volume
+// Sound and language (one menu: both are set once per visit, neither earns a permanent icon in the bar)
 // ---------------------------------------------------------------------------------------------------------------------
 
 const VOLUME_COMMIT_MS = 150;
 
-export function VolumeControl(): JSX.Element {
+export function SystemMenu(): JSX.Element {
   const { t } = useTranslation();
   const volume = useSettingsStore((s) => s.settings.volume);
   const muted = useSettingsStore((s) => s.settings.muted);
   const setVolume = useSettingsStore((s) => s.setVolume);
   const toggleMute = useSettingsStore((s) => s.toggleMute);
+  const { locale, setLocale, locales, names } = useLocale();
   const pushError = useNotificationsStore((s) => s.pushError);
   const [open, setOpen] = useState(false);
   const [local, setLocal] = useState(volume);
@@ -178,18 +182,26 @@ export function VolumeControl(): JSX.Element {
 
   const close = useCallback(() => setOpen(false), []);
 
+  const choose = (next: Locale): void => {
+    setOpen(false);
+    if (next !== locale) {
+      setLocale(next).catch((e: unknown) => pushError(e, t('desktop.language')));
+    }
+  };
+
   return (
     <Popover
       open={open}
       onClose={close}
-      label={t('desktop.volume')}
-      className="w-64"
+      label={t('desktop.soundAndLanguage')}
+      className="w-72"
       trigger={
         <Button
           variant="ghost"
           iconOnly
           data-popover-trigger="true"
-          aria-label={t('desktop.volume')}
+          aria-label={t('desktop.soundAndLanguage')}
+          title={t('desktop.soundAndLanguage')}
           aria-haspopup="dialog"
           aria-expanded={open}
           icon={<IconVolume muted={muted || volume === 0} />}
@@ -200,7 +212,7 @@ export function VolumeControl(): JSX.Element {
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between text-sm text-muted">
           <span>{t('desktop.volume')}</span>
-          <span className="tnum">{t('settings.volumeLevel', { level: local })}</span>
+          <span className="tnum">{local}%</span>
         </div>
         <input
           type="range"
@@ -223,47 +235,13 @@ export function VolumeControl(): JSX.Element {
           {muted ? t('desktop.unmute') : t('desktop.mute')}
         </Button>
       </div>
-    </Popover>
-  );
-}
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Language
-// ---------------------------------------------------------------------------------------------------------------------
-
-export function LocaleSwitch(): JSX.Element {
-  const { t } = useTranslation();
-  const { locale, setLocale, locales, names } = useLocale();
-  const pushError = useNotificationsStore((s) => s.pushError);
-  const [open, setOpen] = useState(false);
-  const close = useCallback(() => setOpen(false), []);
-
-  const choose = (next: Locale): void => {
-    setOpen(false);
-    if (next !== locale) {
-      setLocale(next).catch((e: unknown) => pushError(e, t('desktop.language')));
-    }
-  };
-
-  return (
-    <Popover
-      open={open}
-      onClose={close}
-      label={t('desktop.language')}
-      className="w-48"
-      trigger={
-        <Button
-          variant="ghost"
-          data-popover-trigger="true"
-          aria-label={`${t('desktop.language')}: ${names[locale]}`}
-          aria-haspopup="listbox"
-          aria-expanded={open}
-          iconOnly
-          icon={<IconGlobe />}
-          onClick={() => setOpen((v) => !v)}
-        />
-      }
-    >
+      <div className="my-3 h-px bg-text/10" aria-hidden="true" />
+      <p className="mb-2 flex items-center gap-2 text-sm text-muted">
+        <span className="inline-flex h-4 w-4" aria-hidden="true">
+          <IconGlobe />
+        </span>
+        {t('desktop.language')}
+      </p>
       <ul role="listbox" aria-label={t('desktop.language')} className="flex flex-col gap-1">
         {locales.map((l) => (
           <li key={l} role="none">
@@ -292,17 +270,15 @@ export function LocaleSwitch(): JSX.Element {
 // Connectivity
 // ---------------------------------------------------------------------------------------------------------------------
 
-export function ConnectivityIndicator(): JSX.Element {
+/** A dot that only appears when something is wrong: a green "all fine" light is one more thing to look past. */
+export function ConnectivityIndicator(): JSX.Element | null {
   const { t } = useTranslation();
   const agentConnected = useNotificationsStore((s) => s.agentConnected);
   const server = useNotificationsStore((s) => s.serverConnectivity);
-  const tone = !agentConnected ? 'danger' : server === 'online' ? 'success' : 'accent';
-  const label = !agentConnected
-    ? t('kiosk.agentDisconnected')
-    : server === 'online'
-      ? t('desktop.serverOnline')
-      : t('desktop.serverOffline');
-  const DOT = { danger: 'bg-danger', success: 'bg-success', accent: 'bg-accent' } as const;
+  if (agentConnected && server === 'online') {
+    return null;
+  }
+  const label = agentConnected ? t('desktop.serverOffline') : t('kiosk.agentDisconnected');
   return (
     <span
       role="status"
@@ -314,11 +290,44 @@ export function ConnectivityIndicator(): JSX.Element {
         aria-hidden="true"
         className={clsx(
           'h-2 w-2 rounded-full shadow-[0_0_8px_currentColor]',
-          DOT[tone],
-          !agentConnected && 'anim-live-dot',
+          agentConnected ? 'bg-accent' : 'anim-live-dot bg-danger',
         )}
       />
     </span>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Balance
+// ---------------------------------------------------------------------------------------------------------------------
+
+/**
+ * Balance as its own button to the wallet, with a "+" when top-ups are enabled. It replaces both the balance line
+ * under the user's name and the top-up card Home used to carry, so the money action is one click away on every
+ * screen instead of only on the first one.
+ */
+function BalanceButton({ amount, topUp }: { amount: Money; topUp: boolean }): JSX.Element {
+  const { t } = useTranslation();
+  const { locale } = useLocale();
+  const navigate = useNavigate();
+  const money = formatMoney(amount, locale);
+  return (
+    <button
+      type="button"
+      data-nav="true"
+      aria-label={
+        topUp ? `${t('desktop.balance')}: ${money}. ${t('desktop.topUp')}` : `${t('desktop.balance')}: ${money}`
+      }
+      title={topUp ? t('desktop.topUp') : undefined}
+      onClick={() => navigate('/wallet')}
+      className={clsx(
+        'focus-ring glass group flex h-12 shrink-0 items-center gap-2.5 rounded-full pl-4 transition-colors duration-[var(--dur-fast)] hover:bg-surface/80',
+        topUp ? 'pr-1.5' : 'pr-4',
+      )}
+    >
+      <span className="tnum text-lg font-semibold text-text">{money}</span>
+      {topUp && <PlusDisc />}
+    </button>
   );
 }
 
@@ -328,14 +337,18 @@ export function ConnectivityIndicator(): JSX.Element {
 
 export function TopBar(): JSX.Element {
   const { t } = useTranslation();
-  const { locale } = useLocale();
   const navigate = useNavigate();
+  // The avatar is the only way to the profile now, so it carries the "you are here" state the nav item used to.
+  const onProfile = useLocation().pathname.startsWith('/profile');
   const pc = useSettingsStore((s) => s.pcInfo?.pc ?? null);
   const showClock = useSettingsStore((s) => s.shellConfig?.ui.showClock ?? true);
   const clockFormat = useSettingsStore((s) => s.shellConfig?.ui.clockFormat ?? 'HH:mm');
   const features = useSettingsStore(selectFeatures);
   const pushError = useNotificationsStore((s) => s.pushError);
   const { user, isGuest, isActive, lock, busy } = useSession();
+  // The wallet store follows `wallet.updated`; the user record only refreshes on login.
+  const walletBalance = useWalletStore((w) => w.balance?.amount ?? null);
+  const balance = walletBalance ?? user?.balance ?? null;
   const [locking, setLocking] = useState(false);
 
   const onLock = async (): Promise<void> => {
@@ -381,32 +394,33 @@ export function TopBar(): JSX.Element {
       {/* Centre: navigation */}
       <NavBar className="flex min-w-0 flex-1 justify-center" />
 
-      {/* Right: balance, user + countdown, status, clock, controls */}
-      <div className="flex shrink-0 items-center justify-end gap-1.5">
+      {/* Right: who, how long, how much — then clock, sound & language, lock. The link dot only shows when broken. */}
+      <div className="flex shrink-0 items-center justify-end gap-2">
         {user && (
           <button
             type="button"
             data-nav="true"
-            aria-label={`${t('desktop.userMenu')}: ${user.displayName}. ${t('desktop.balance')}: ${formatMoney(user.balance, locale)}`}
+            aria-label={`${t('desktop.userMenu')}: ${user.displayName}`}
+            aria-current={onProfile ? 'page' : undefined}
             disabled={!features.profile}
             onClick={() => navigate('/profile')}
-            className="focus-ring flex h-11 items-center gap-2.5 rounded-full pl-1 pr-3 transition-colors duration-[var(--dur-fast)] hover:bg-text/10 disabled:cursor-default disabled:hover:bg-transparent"
+            className={clsx(
+              'focus-ring flex h-11 items-center gap-2.5 rounded-full pl-1 pr-3 transition-colors duration-[var(--dur-fast)] hover:bg-text/10 disabled:cursor-default disabled:hover:bg-transparent',
+              onProfile && 'bg-text/10',
+            )}
           >
             <Avatar name={user.displayName} src={user.avatarUrl ?? null} size="sm" ring={user.role === 'vip'} />
-            <span className="hidden min-w-0 flex-col items-start leading-tight 2xl:flex">
-              <span className="flex items-center gap-1.5">
-                <span className="max-w-[10rem] truncate text-sm font-semibold text-text">{user.displayName}</span>
-                {roleBadge}
-              </span>
-              <span className="tnum text-xs text-muted">{formatMoney(user.balance, locale)}</span>
+            <span className="hidden min-w-0 items-center gap-1.5 2xl:flex">
+              <span className="max-w-[10rem] truncate text-sm font-semibold text-text">{user.displayName}</span>
+              {roleBadge}
             </span>
           </button>
         )}
         <SessionTimer compact />
+        {balance && <BalanceButton amount={balance} topUp={features.topup} />}
         <ConnectivityIndicator />
         {showClock && <Clock format={clockFormat} />}
-        <VolumeControl />
-        <LocaleSwitch />
+        <SystemMenu />
         {isActive && (
           <Button
             variant="ghost"

@@ -33,7 +33,6 @@ import { AdsCarousel } from '@/screens/Idle/AdsCarousel';
 import { describeWindow } from '@/screens/Idle/PriceList';
 import { GuestLogin } from './GuestLogin';
 import { LoginForm, loginErrorMessage } from './LoginForm';
-import { PcInfoBadge } from './PcInfoBadge';
 import { QrLogin } from './QrLogin';
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -554,6 +553,28 @@ const BellIcon = (
  * unlocked session exists; shows the tariff picker when the user is logged in without a session; drops to `/idle`
  * after the idle timeout while nobody is signed in.
  */
+/**
+ * The only line about this PC's connection on the sign-in screen, and only while it is down — a player about to sign
+ * in needs to know why it might not work; when all is well there is nothing to say.
+ */
+function LinkWarning(): JSX.Element | null {
+  const { t } = useTranslation();
+  const agentConnected = useNotificationsStore((s) => s.agentConnected);
+  const serverOnline = useNotificationsStore((s) => s.serverConnectivity === 'online');
+  if (agentConnected && serverOnline) {
+    return null;
+  }
+  return (
+    <p role="status" className="glass flex items-center gap-3 rounded-full px-5 py-2.5 text-base text-text">
+      <span
+        aria-hidden="true"
+        className={clsx('h-2.5 w-2.5 shrink-0 rounded-full', agentConnected ? 'bg-accent' : 'anim-live-dot bg-danger')}
+      />
+      {agentConnected ? t('lock.serverOffline') : t('lock.agentOffline')}
+    </p>
+  );
+}
+
 export default function LockScreen(): JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -709,7 +730,10 @@ export default function LockScreen(): JSX.Element {
         </main>
 
         <footer className="flex items-end justify-between gap-[var(--gap)]">
-          <PcInfoBadge />
+          {/* Versions and CPU/GPU/RAM used to sit here for every passer-by; staff find them on Support. */}
+          <div className="min-w-0">
+            <LinkWarning />
+          </div>
           {callAdminEnabled && (
             <Button variant="ghost" size="lg" icon={BellIcon} loading={calling} onClick={() => void callAdmin()}>
               {t('lock.callAdmin')}

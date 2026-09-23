@@ -1,6 +1,7 @@
 /**
  * Home hero: full-bleed key art of the selected game (slow Ken Burns, crossfade on change), a poster strip to switch
- * it, the title block with Play / Close / Details, quick-action pills and floating session / wallet / booking widgets.
+ * it, the title block with Play / Close / Details, quick-action pills and a floating booking widget (time left and
+ * balance are in the top bar, on every screen).
  * Selection is the games-store `selectedId`, so the pick carries over to `/games`; the running game is always shown.
  */
 import type { Game } from '@clubshell/contracts';
@@ -17,23 +18,18 @@ import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useImageTint } from '@/hooks/useImageTint';
-import { useLocale } from '@/hooks/useLocale';
-import { useSession } from '@/hooks/useSession';
 import { tiltHandlers } from '@/hooks/useTilt';
 import { whoosh } from '@/lib/sound';
-import { formatMoney } from '@/lib/format';
 import { log } from '@/lib/logger';
 import { api } from '@/lib/tauri';
 import { serverNow, toDateKey } from '@/lib/time';
 import { categoryLabel } from '@/screens/Games/Categories';
 import { launcherLabelKey } from '@/screens/Games/GameCard';
 import { launchGame } from '@/screens/Games/LaunchOverlay';
-import { ExtendSessionModal, Ring, timerLabel, type RingProps } from '@/screens/Desktop/SessionTimer';
 import { selectFeaturedGames, selectRecentGames, useGamesStore } from '@/store/games';
 import { useNotificationsStore } from '@/store/notifications';
 import { selectFeatures, useSettingsStore } from '@/store/settings';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
-import { useWalletStore } from '@/store/wallet';
 
 const STRIP_MAX = 6;
 
@@ -137,61 +133,6 @@ function PosterTile({
 
 function Widget({ children, className }: { children: ReactNode; className?: string }): JSX.Element {
   return <div className={clsx('glass-strong rounded-2xl p-4', className)}>{children}</div>;
-}
-
-/** Time left and balance in one card: the two numbers a player checks, with one action each. */
-function SessionWidget(): JSX.Element {
-  const { t } = useTranslation();
-  const { locale } = useLocale();
-  const navigate = useNavigate();
-  const s = useSession();
-  const wallet = useWalletStore((w) => w.balance?.amount ?? null);
-  const balance = wallet ?? s.user?.balance ?? null;
-  const [open, setOpen] = useState(false);
-
-  const total = s.secondsUsed + Math.max(0, s.secondsLeft);
-  const left = s.isOpenEnded ? 1 : total > 0 ? Math.max(0, s.secondsLeft) / total : 0;
-  const label = timerLabel(s.isOpen, s.secondsLeft, s.secondsUsed);
-  const tone: RingProps['tone'] =
-    !s.isOpen || s.isOpenEnded ? 'muted' : s.isCritical ? 'danger' : s.isWarning ? 'accent' : 'primary';
-  const caption = !s.isOpen ? t('session.noSession') : s.isOpenEnded ? t('session.timeUsed') : t('session.timeLeft');
-  const canExtend = s.isOpen && !s.isOpenEnded;
-
-  return (
-    <Widget>
-      <div className="flex items-center gap-4">
-        <Ring progress={left} size={64} stroke={5} tone={tone} label={t('session.timerLabel')} valueText={label} />
-        <div className="min-w-0 flex-1">
-          <div className="text-xs text-muted">{caption}</div>
-          <div
-            className={clsx(
-              'tnum text-2xl font-bold leading-tight',
-              s.isCritical ? 'timer-critical' : s.isWarning ? 'timer-warning' : 'text-text',
-            )}
-          >
-            {label}
-          </div>
-        </div>
-        {balance && (
-          <div className="shrink-0 text-right">
-            <div className="text-xs text-muted">{t('desktop.balance')}</div>
-            <div className="tnum text-base font-bold leading-tight text-text">{formatMoney(balance, locale)}</div>
-          </div>
-        )}
-      </div>
-      <div className="mt-4 flex gap-2">
-        {canExtend && (
-          <Button variant="secondary" size="md" block onClick={() => setOpen(true)}>
-            {t('session.extend')}
-          </Button>
-        )}
-        <Button variant="primary" size="md" block onClick={() => navigate('/wallet')}>
-          {t('desktop.topUp')}
-        </Button>
-      </div>
-      <ExtendSessionModal open={open} onClose={() => setOpen(false)} />
-    </Widget>
-  );
 }
 
 const SEAT_DOT: Record<string, string> = {
@@ -453,14 +394,15 @@ export function HomeHero(): JSX.Element {
         </div>
       )}
 
-      {/* Floating widgets */}
-      <aside
-        aria-label={t('desktop.sessionBar')}
-        className="absolute right-[var(--gutter)] top-[calc(var(--topbar-h)+var(--gap))] z-10 hidden w-[clamp(17rem,19vw,22rem)] flex-col gap-3 2xl:flex"
-      >
-        <SessionWidget />
-        {features.booking && <BookingWidget />}
-      </aside>
+      {/* Time and balance live in the top bar on every screen; Home only adds what the bar cannot show. */}
+      {features.booking && (
+        <aside
+          aria-label={t('desktop.nav.booking')}
+          className="absolute right-[var(--gutter)] top-[calc(var(--topbar-h)+var(--gap))] z-10 hidden w-[clamp(17rem,19vw,22rem)] flex-col gap-3 2xl:flex"
+        >
+          <BookingWidget />
+        </aside>
+      )}
 
       {/* Title block; the pill row below it may run wider than the text column. */}
       <div className="absolute inset-x-[var(--gutter)] bottom-[var(--gap)] z-10 flex flex-col gap-4 transition-transform duration-[900ms] ease-[var(--ease-out)] [transform:translate3d(calc(var(--px)*0.35%),calc(var(--py)*0.25%),0)] [&>*:not(:last-child)]:max-w-[min(64%,64rem)] 2xl:[&>*:not(:last-child)]:max-w-[min(56%,64rem)]">

@@ -66,12 +66,12 @@ function searchBox(page: Page): Locator {
 }
 
 /**
- * The shell boots in Russian (mock settings); switch to English through the top-bar language popover. The
- * option is activated with Enter (kiosk keyboard/gamepad navigation): the popover drops below the hero
- * artwork on the library screen, so a pointer click there is intercepted by the page.
+ * The shell boots in Russian (mock settings); switch to English through the top bar's sound-and-language menu (its
+ * only popover). The option is activated with Enter (kiosk keyboard/gamepad navigation): the popover drops below
+ * the hero artwork on the library screen, so a pointer click there is intercepted by the page.
  */
 async function useEnglish(page: Page): Promise<void> {
-  const trigger = page.locator('[data-popover-trigger][aria-haspopup="listbox"]');
+  const trigger = page.locator('header [data-popover-trigger]');
   await expect(trigger).toBeVisible();
   if ((await page.locator('html').getAttribute('lang')) === 'en') {
     return;

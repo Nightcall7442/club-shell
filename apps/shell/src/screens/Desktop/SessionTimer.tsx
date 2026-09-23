@@ -149,13 +149,15 @@ export function SessionTimer({ compact = false, className }: SessionTimerProps):
         type="button"
         data-nav="true"
         disabled={!canExtend}
-        aria-label={`${t('session.timerLabel')}: ${label}`}
+        aria-label={`${t('session.timerLabel')}: ${label}${canExtend ? `. ${t('session.extend')}` : ''}`}
         title={canExtend ? t('session.extend') : undefined}
         onClick={() => canExtend && setExtendOpen(true)}
         className={clsx(
-          'focus-ring glass flex select-none items-center rounded-full text-left transition-colors duration-[var(--dur-fast)] disabled:cursor-default',
+          'focus-ring glass group flex select-none items-center rounded-full text-left transition-colors duration-[var(--dur-fast)] disabled:cursor-default',
           canExtend && 'hover:bg-surface/80',
-          compact ? 'h-12 gap-3 pl-1 pr-4' : 'flex-col justify-center gap-3 rounded-2xl px-8 py-6',
+          compact
+            ? clsx('h-12 gap-3 pl-1', canExtend ? 'pr-1.5' : 'pr-4')
+            : 'flex-col justify-center gap-3 rounded-2xl px-8 py-6',
           className,
         )}
       >
@@ -191,6 +193,7 @@ export function SessionTimer({ compact = false, className }: SessionTimerProps):
               {label}
             </span>
             {badge}
+            {canExtend && <PlusDisc />}
           </span>
         ) : (
           <span className="flex flex-col items-center gap-2">
@@ -202,6 +205,23 @@ export function SessionTimer({ compact = false, className }: SessionTimerProps):
       </button>
       <ExtendSessionModal open={extendOpen} onClose={() => setExtendOpen(false)} />
     </>
+  );
+}
+
+/**
+ * "+" disc at the end of a top-bar pill (the session timer, the balance) that fills in when the pill is hovered:
+ * says "add" without a word, and the pill around it stays the target.
+ */
+export function PlusDisc(): JSX.Element {
+  return (
+    <span
+      aria-hidden="true"
+      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-text/10 text-text transition-colors duration-[var(--dur-fast)] group-hover:bg-primary group-hover:text-on-primary [&>svg]:h-4 [&>svg]:w-4"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+        <path d="M12 5v14M5 12h14" />
+      </svg>
+    </span>
   );
 }
 

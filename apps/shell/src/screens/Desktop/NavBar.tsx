@@ -81,12 +81,6 @@ const ICONS = {
       <path d="M12 13v4M8 21h8M9 17h6" />
     </svg>
   ),
-  profile: (
-    <svg {...svgProps}>
-      <circle cx="12" cy="8" r="4" />
-      <path d="M4 21a8 8 0 0 1 16 0" />
-    </svg>
-  ),
   support: (
     <svg {...svgProps}>
       <circle cx="12" cy="12" r="9" />
@@ -118,7 +112,6 @@ export const NAV_ITEMS: readonly NavItemDef[] = [
   { key: 'chat', to: '/chat', feature: 'chat' },
   { key: 'booking', to: '/booking', feature: 'booking' },
   { key: 'tournaments', to: '/tournaments', feature: 'tournaments' },
-  { key: 'profile', to: '/profile', feature: 'profile', iconOnly: true },
   { key: 'support', to: '/support', iconOnly: true },
 ];
 
