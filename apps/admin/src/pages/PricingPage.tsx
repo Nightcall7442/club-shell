@@ -229,12 +229,7 @@ function TariffsTab({ zones }: { zones: string[] }): JSX.Element {
     (form.isPackage ? form.packageMinutes >= 5 && form.packagePrice > 0 : form.pricePerHour > 0);
 
   return (
-    <div
-      className={clsx(
-        'grid grid-cols-1 items-start gap-5',
-        editing && 'lg:grid-cols-[minmax(0,1fr)_24rem]',
-      )}
-    >
+    <div className={clsx('grid grid-cols-1 items-start gap-5', editing && 'lg:grid-cols-[minmax(0,1fr)_24rem]')}>
       <Section
         title={t('Тарифы')}
         actions={
@@ -379,7 +374,7 @@ function TariffsTab({ zones }: { zones: string[] }): JSX.Element {
                     </Chip>
                   ))}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto] items-center gap-2">
                   <input
                     type="time"
                     className={clsx(inputCls, 'tnum')}
@@ -550,6 +545,7 @@ function GroupsTab({ s, set }: { s: ClubSettings; set: ClubSettingsState['set'] 
   return (
     <Section
       title={t('Группы клиентов')}
+      className="max-w-3xl"
       bodyClassName="p-2"
       actions={
         <Button
@@ -982,7 +978,7 @@ function LoyaltyTab({ s, set }: { s: ClubSettings; set: ClubSettingsState['set']
       s.loyalty.map((l) => (l.level === level ? { ...l, ...p } : l)),
     );
   return (
-    <Section title={t('Уровни лояльности')} bodyClassName="p-2">
+    <Section title={t('Уровни лояльности')} className="max-w-4xl" bodyClassName="p-2">
       <Table
         rows={rows}
         rowKey={(l) => String(l.level)}
