@@ -67,7 +67,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       aria-busy={loading || undefined}
       className={clsx(
         'focus-ring relative inline-flex select-none items-center justify-center whitespace-nowrap font-semibold leading-none',
-        'transition-[background-color,box-shadow] duration-[var(--dur-fast)] ease-[var(--ease-out)]',
+        'transition-[background-color,box-shadow,transform] duration-[var(--dur-fast)] ease-[var(--ease-out)] active:scale-[0.97] disabled:active:scale-100',
         'disabled:cursor-not-allowed disabled:opacity-40',
         VARIANT[variant],
         SIZE[size],

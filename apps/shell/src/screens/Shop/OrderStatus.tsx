@@ -96,7 +96,7 @@ export function OrderStatus({ order, onCancel, cancelling = false, className }: 
                   className={clsx(
                     'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-colors duration-[var(--dur-base)]',
                     done && 'bg-success text-bg',
-                    active && 'bg-primary text-on-primary',
+                    active && 'bg-accent text-on-accent',
                     !done && !active && 'bg-text/10 text-muted',
                   )}
                   aria-current={active ? 'step' : undefined}

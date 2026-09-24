@@ -241,7 +241,7 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
             <Button variant="secondary" size="lg" onClick={close}>
               {t('common.cancel')}
             </Button>
-            <Button size="lg" loading={creating} disabled={!canContinue} onClick={() => void submit()}>
+            <Button variant="cta" size="lg" loading={creating} disabled={!canContinue} onClick={() => void submit()}>
               {creating ? t('wallet.creating') : t('wallet.createIntent')}
             </Button>
           </>
@@ -282,7 +282,7 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
                     }}
                     className={clsx(
                       'focus-ring tnum h-14 rounded-lg text-base font-bold transition-colors duration-[var(--dur-fast)]',
-                      active ? 'bg-primary text-on-primary' : 'glass text-text hover:bg-surface/80',
+                      active ? 'choice choice-on' : 'choice',
                     )}
                   >
                     {formatMoney({ amount: value * 100, currency }, locale)}
@@ -328,8 +328,8 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
                     aria-checked={active}
                     onClick={() => setProvider(p)}
                     className={clsx(
-                      'focus-ring h-12 rounded-full text-base font-semibold transition-colors duration-[var(--dur-fast)]',
-                      active ? 'bg-accent text-bg' : 'glass text-text hover:bg-surface/80',
+                      'focus-ring h-12 rounded-md text-base font-semibold',
+                      active ? 'choice choice-on' : 'choice',
                     )}
                   >
                     {t(`wallet.provider.${p}`)}

@@ -311,7 +311,7 @@ export default function GameDetails(): JSX.Element {
                 </p>
                 {game.tags.length > 0 && (
                   <div className="flex flex-col gap-2">
-                    <h3 className="text-sm font-semibold text-muted">{t('games.tags')}</h3>
+                    <h3 className="hud-label">{t('games.tags')}</h3>
                     <ul className="flex flex-wrap gap-2" aria-label={t('games.tags')}>
                       {game.tags.map((tag) => (
                         <li key={tag}>
@@ -337,7 +337,7 @@ export default function GameDetails(): JSX.Element {
                   </p>
                 )}
                 <div className="flex flex-col gap-2">
-                  <h3 className="text-sm font-semibold text-muted">{t('games.minSpec')}</h3>
+                  <h3 className="hud-label">{t('games.minSpec')}</h3>
                   <SpecTable game={game} hardware={hardware} />
                 </div>
               </section>
@@ -359,7 +359,7 @@ export default function GameDetails(): JSX.Element {
                   />
                 </dl>
                 <div className="flex flex-col gap-2">
-                  <h3 className="text-sm font-semibold text-muted">{t('games.installStatus')}</h3>
+                  <h3 className="hud-label">{t('games.installStatus')}</h3>
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge tone={game.installed ? 'success' : 'muted'} dot>
                       {game.installed ? t('games.installed') : t('games.notInstalled')}

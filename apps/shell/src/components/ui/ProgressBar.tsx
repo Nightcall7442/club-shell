@@ -19,7 +19,7 @@ export interface ProgressBarProps extends HTMLAttributes<HTMLDivElement> {
 }
 
 const FILL: Record<ProgressTone, string> = {
-  primary: 'bg-primary',
+  primary: 'bg-accent',
   accent: 'bg-accent',
   success: 'bg-success',
   danger: 'bg-danger',

@@ -323,7 +323,7 @@ export function TariffActionModal({
                       onClick={() => setMinutes(m)}
                       className={clsx(
                         'focus-ring tnum flex h-16 flex-col items-center justify-center rounded-lg text-base font-bold transition-colors duration-[var(--dur-fast)]',
-                        active ? 'bg-primary text-on-primary' : 'glass text-text hover:bg-surface/80',
+                        active ? 'choice choice-on' : 'choice',
                       )}
                     >
                       <span>
@@ -426,7 +426,7 @@ export function Tariffs({ onInsufficientFunds, className }: TariffsProps): JSX.E
       ) : (
         groups.map((group, gi) => (
           <div key={group.key} className="flex flex-col gap-3">
-            {groups.length > 1 && <h3 className="text-base font-semibold text-muted">{group.key}</h3>}
+            {groups.length > 1 && <h3 className="hud-label">{group.key}</h3>}
             <motion.ul
               role="list"
               className="grid grid-cols-[repeat(auto-fill,minmax(clamp(15rem,17vw,20rem),1fr))] gap-[var(--gap)]"

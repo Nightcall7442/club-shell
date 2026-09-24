@@ -17,6 +17,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { DotAmount } from '@/components/ui/DotAmount';
 import { Popover } from '@/components/ui/Popover';
+import { useGamepadConnected } from '@/hooks/useGamepad';
 import { useLocale } from '@/hooks/useLocale';
 import { useSession } from '@/hooks/useSession';
 import { formatMoney } from '@/lib/format';
@@ -152,9 +153,9 @@ export function SystemMenu(): JSX.Element {
       }
     >
       <div className="flex flex-col gap-3">
-        <div className="flex items-center justify-between text-sm text-muted">
-          <span>{t('desktop.volume')}</span>
-          <span className="tnum">{local}%</span>
+        <div className="flex items-center justify-between">
+          <span className="hud-label">{t('desktop.volume')}</span>
+          <span className="num-dot text-lg leading-none text-text">{local}%</span>
         </div>
         <input
           type="range"
@@ -165,7 +166,7 @@ export function SystemMenu(): JSX.Element {
           data-nav="true"
           aria-label={t('desktop.volume')}
           onChange={(e) => commit(Number(e.currentTarget.value))}
-          className="focus-ring h-2 w-full cursor-pointer accent-primary"
+          className="focus-ring h-2 w-full cursor-pointer"
         />
         <Button
           variant="secondary"
@@ -178,7 +179,7 @@ export function SystemMenu(): JSX.Element {
         </Button>
       </div>
       <div className="my-3 h-px bg-text/10" aria-hidden="true" />
-      <p className="mb-2 flex items-center gap-2 text-sm text-muted">
+      <p className="hud-label mb-2 flex items-center gap-2">
         <span className="inline-flex h-4 w-4" aria-hidden="true">
           <IconGlobe />
         </span>
@@ -195,11 +196,13 @@ export function SystemMenu(): JSX.Element {
               onClick={() => choose(l)}
               className={clsx(
                 'focus-ring flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-base transition-colors duration-[var(--dur-fast)]',
-                l === locale ? 'bg-primary/15 text-primary' : 'text-text hover:bg-text/10',
+                l === locale
+                  ? 'bg-accent/10 text-text shadow-[inset_2px_0_0_rgb(var(--c-accent))]'
+                  : 'text-text hover:bg-text/[0.06]',
               )}
             >
               <span>{names[l]}</span>
-              <span className="text-xs uppercase text-muted">{l}</span>
+              <span className="font-mono text-[0.65rem] uppercase tracking-[0.12em] text-muted">{l}</span>
             </button>
           </li>
         ))}
@@ -313,7 +316,7 @@ export function TopBar(): JSX.Element {
   };
 
   return (
-    <div className="grid h-full w-full grid-cols-[1fr_auto_1fr] items-center gap-[var(--gap)] bg-gradient-to-b from-bg via-bg/80 to-transparent px-[var(--gutter)]">
+    <div className="grid h-full w-full grid-cols-[1fr_auto_1fr] items-center gap-[var(--gap)] px-[var(--gutter)]">
       {/* Club mark + PC */}
       <div className="flex min-w-0 items-center gap-3">
         <span aria-hidden="true" className="h-6 w-6 shrink-0 rotate-45 border border-accent/70" />
@@ -362,6 +365,7 @@ export function StatusBar(): JSX.Element {
   const walletBalance = useWalletStore((w) => w.balance?.amount ?? null);
   const balance = walletBalance ?? user?.balance ?? null;
   const role = isGuest ? t('desktop.guestBadge') : user?.role === 'vip' ? t('desktop.vipBadge') : null;
+  const pad = useGamepadConnected();
 
   return (
     <div className="flex h-full w-full items-center gap-2 border-t border-[color:var(--hairline)] bg-bg/90 px-[var(--gutter)]">
@@ -389,10 +393,20 @@ export function StatusBar(): JSX.Element {
       <SessionTimer compact />
       {balance && <BalanceButton amount={balance} topUp={features.topup} />}
 
+      {/* Controller glyphs while a pad is connected, keyboard keys otherwise. */}
       <div aria-label={t('desktop.prompts.title')} className="ml-auto flex items-center gap-6">
-        <Prompt glyph="A" label={t('desktop.prompts.select')} />
-        <Prompt glyph="B" label={t('desktop.prompts.back')} />
-        <Prompt glyph="LB RB" label={t('desktop.prompts.sections')} round={false} />
+        {pad ? (
+          <>
+            <Prompt glyph="A" label={t('desktop.prompts.select')} />
+            <Prompt glyph="B" label={t('desktop.prompts.back')} />
+            <Prompt glyph="LB RB" label={t('desktop.prompts.sections')} round={false} />
+          </>
+        ) : (
+          <>
+            <Prompt glyph="Enter" label={t('desktop.prompts.select')} round={false} />
+            <Prompt glyph="Esc" label={t('desktop.prompts.back')} round={false} />
+          </>
+        )}
       </div>
     </div>
   );

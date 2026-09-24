@@ -141,7 +141,7 @@ export const GameCard = forwardRef<HTMLButtonElement, GameCardProps>(function Ga
                   e.stopPropagation();
                   onLaunch(game);
                 }}
-                className="absolute right-3 top-3 inline-flex h-12 w-12 scale-90 cursor-pointer items-center justify-center rounded-full bg-primary pl-0.5 text-on-primary opacity-0 transition-[opacity,transform] duration-[var(--dur-base)] ease-[var(--ease-out)] hover:!scale-110 group-hover:scale-100 group-hover:opacity-100 [&>svg]:h-5 [&>svg]:w-5"
+                className="absolute right-3 top-3 inline-flex h-12 w-12 scale-90 cursor-pointer items-center justify-center rounded-full bg-accent pl-0.5 text-on-accent opacity-0 transition-[opacity,transform] duration-[var(--dur-base)] ease-[var(--ease-out)] hover:!scale-110 group-hover:scale-100 group-hover:opacity-100 [&>svg]:h-5 [&>svg]:w-5"
               >
                 <PlayIcon />
               </span>

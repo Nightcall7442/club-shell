@@ -212,6 +212,34 @@ html {
     mask-image: linear-gradient(90deg, #000 calc(var(--value, 0) * 100%), rgb(0 0 0 / 0.18) 0);
   }
 
+  /*
+   * One language for every "pick one of these" control (amounts, presets, dates, payment methods, languages):
+   * quiet at rest, an accent edge and a faint accent fill when chosen. Never a white slab.
+   */
+  .choice {
+    border: 1px solid var(--hairline);
+    background-color: rgb(var(--c-text) / 0.03);
+    color: rgb(var(--c-text));
+    transition:
+      background-color var(--dur-fast) var(--ease-out),
+      border-color var(--dur-fast) var(--ease-out),
+      color var(--dur-fast) var(--ease-out);
+  }
+  .choice:hover {
+    background-color: rgb(var(--c-text) / 0.06);
+  }
+  .choice-on,
+  .choice-on:hover {
+    border-color: rgb(var(--c-accent) / 0.7);
+    background-color: rgb(var(--c-accent) / 0.1);
+    color: rgb(var(--c-text));
+  }
+
+  /* Native range inputs in the accent. */
+  input[type="range"] {
+    accent-color: rgb(var(--c-accent));
+  }
+
   /* Selected card / option: a plain 2 px ring. */
   .border-glow {
     box-shadow: 0 0 0 1.5px rgb(var(--c-accent) / 0.9);

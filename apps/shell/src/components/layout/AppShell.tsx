@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState, type UIEvent } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useLocation, useOutlet } from 'react-router-dom';
 import { Background } from '@/components/layout/Background';
@@ -22,6 +22,14 @@ export function AppShell(): JSX.Element {
   const outlet = useOutlet();
   const animations = useThemeStore((s) => s.theme.animations);
   const duration = animations ? 0.15 : 0;
+  // The top bar floats over the screen; once the screen scrolls under it, it turns solid so nothing reads through.
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => setScrolled(false), [location.pathname]);
+  const onScroll = (e: UIEvent<HTMLDivElement>): void => {
+    if (e.target instanceof HTMLElement && e.target.id === 'main') {
+      setScrolled(e.target.scrollTop > 8);
+    }
+  };
 
   useEffect(() => {
     trackScreen(location.pathname);
@@ -58,8 +66,11 @@ export function AppShell(): JSX.Element {
     <div className="relative h-full w-full overflow-hidden">
       <Background />
       <div className="relative z-10 flex h-full w-full flex-col">
-        <div className="relative min-h-0 flex-1 overflow-hidden">
-          <header className="absolute inset-x-0 top-0 z-20 h-[var(--topbar-h)] min-w-0">
+        <div className="relative min-h-0 flex-1 overflow-hidden" onScrollCapture={onScroll}>
+          <header
+            data-scrolled={scrolled}
+            className="absolute inset-x-0 top-0 z-20 h-[var(--topbar-h)] min-w-0 border-b border-transparent bg-gradient-to-b from-bg/90 via-bg/50 to-transparent transition-[background-color,border-color] duration-[var(--dur-base)] data-[scrolled=true]:border-[color:var(--hairline)] data-[scrolled=true]:bg-bg"
+          >
             <TopBar />
           </header>
           <AnimatePresence mode="wait" initial={false}>

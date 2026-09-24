@@ -44,8 +44,8 @@ export function AppTile({ app, onLaunch, launching = false, disabled = false, cl
       aria-label={blocked ? `${app.title}. ${t('apps.notAllowed')}` : `${t('apps.launch')} ${app.title}`}
       onClick={() => onLaunch(app)}
       className={clsx(
-        'focus-ring glass group relative flex flex-col items-center gap-3 overflow-hidden rounded-xl p-5 text-center transition-[background-color] duration-[var(--dur-fast)] ease-[var(--ease-out)]',
-        'hover:bg-surface/80 active:[--zoom:0.98] disabled:cursor-not-allowed',
+        'focus-ring hud-focus glass group relative flex w-full flex-col items-center gap-3 rounded-xl p-5 text-center transition-[background-color] duration-[var(--dur-fast)] ease-[var(--ease-out)]',
+        'hover:bg-text/[0.04] disabled:cursor-not-allowed',
         blocked && 'opacity-50',
         className,
       )}

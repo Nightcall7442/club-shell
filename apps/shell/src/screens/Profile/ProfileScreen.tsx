@@ -6,8 +6,10 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import type { Achievement, Loyalty as LoyaltyInfo, User, UserRole, UserStats } from '@clubshell/contracts';
 import { AnimatePresence, motion } from 'framer-motion';
+import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { DotAmount } from '@/components/ui/DotAmount';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge, type BadgeTone } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -120,8 +122,8 @@ interface HeaderStatProps {
 function HeaderStat({ label, value, accent = false }: HeaderStatProps): JSX.Element {
   return (
     <div className="min-w-[7rem] rounded-lg bg-surface/40 px-4 py-3">
-      <p className="text-xs text-muted">{label}</p>
-      <p className={accent ? 'tnum num-dot text-2xl text-accent' : 'tnum num-dot text-2xl'}>{value}</p>
+      <p className="hud-label">{label}</p>
+      <DotAmount value={value} className={clsx('mt-1 text-2xl', accent ? 'text-accent' : 'text-text')} />
     </div>
   );
 }

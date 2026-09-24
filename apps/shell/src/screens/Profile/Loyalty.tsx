@@ -139,7 +139,9 @@ export function Loyalty({ loyalty, loading }: LoyaltyProps): JSX.Element {
           progress={progress}
           label={`${t('profile.levelProgress')}: ${percent}`}
         />
-        <h3 className="text-2xl font-bold">{t('profile.level', { level: displayLevel(loyalty.level) })}</h3>
+        <h3 className="font-display text-2xl font-normal tracking-tight">
+          {t('profile.level', { level: displayLevel(loyalty.level) })}
+        </h3>
         <p className="tnum text-4xl font-semibold text-accent">{formatNumber(loyalty.points, locale)}</p>
         <p className="-mt-2 text-muted">{t('profile.points')}</p>
         <ProgressBar
@@ -160,7 +162,7 @@ export function Loyalty({ loyalty, loading }: LoyaltyProps): JSX.Element {
       </section>
 
       <section className="glass rounded-xl p-[var(--gap)]" aria-label={t('profile.perks')}>
-        <h3 className="text-xl font-bold">{t('profile.perks')}</h3>
+        <h3 className="font-display text-xl font-normal tracking-tight">{t('profile.perks')}</h3>
         {loyalty.perks.length === 0 ? (
           <p className="mt-4 text-muted">{t('profile.noPerks')}</p>
         ) : (

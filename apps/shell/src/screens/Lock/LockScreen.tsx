@@ -92,7 +92,7 @@ export function LanguageSwitcher({ className }: LanguageSwitcherProps): JSX.Elem
     <div
       role="group"
       aria-label={t('lock.language')}
-      className={clsx('glass flex items-center gap-1 rounded-full p-1', className)}
+      className={clsx('glass flex items-center gap-1 rounded-lg p-1', className)}
     >
       {locales.map((l) => (
         <button
@@ -105,8 +105,8 @@ export function LanguageSwitcher({ className }: LanguageSwitcherProps): JSX.Elem
           disabled={busy !== null}
           onClick={() => void change(l)}
           className={clsx(
-            'focus-ring h-10 min-w-[3.25rem] rounded-full px-3 text-sm font-bold uppercase tracking-wide transition-colors duration-[var(--dur-fast)]',
-            l === locale ? 'bg-primary text-on-primary' : 'text-muted hover:bg-text/10 hover:text-text',
+            'focus-ring h-9 min-w-[3.25rem] rounded-md px-3 font-mono text-xs font-medium uppercase tracking-[0.12em] transition-colors duration-[var(--dur-fast)]',
+            l === locale ? 'bg-accent/15 text-accent' : 'text-muted hover:bg-text/[0.06] hover:text-text',
           )}
         >
           {l}
@@ -441,8 +441,8 @@ export function StartSessionModal({ open, onStarted, onLogout }: StartSessionMod
                     data-nav="true"
                     onClick={() => setMinutes(m)}
                     className={clsx(
-                      'focus-ring tnum h-11 rounded-full px-4 text-base font-semibold transition-colors duration-[var(--dur-fast)]',
-                      m === effectiveMinutes ? 'bg-primary text-on-primary' : 'bg-text/10 text-text hover:bg-text/15',
+                      'focus-ring tnum h-11 rounded-md px-4 text-base font-semibold',
+                      m === effectiveMinutes ? 'choice choice-on' : 'choice',
                     )}
                   >
                     {formatDurationSec(m * 60)}

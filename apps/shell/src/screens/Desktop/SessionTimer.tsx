@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next';
 import { SESSION_OPEN_ENDED, tariffPriceFor, type Money, type Tariff } from '@clubshell/contracts';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { DotAmount } from '@/components/ui/DotAmount';
 import { Modal } from '@/components/ui/Modal';
 import { useLocale } from '@/hooks/useLocale';
 import { MMSS_BELOW_SEC, useSession } from '@/hooks/useSession';
@@ -299,7 +300,7 @@ export function ExtendSessionModal({ open, onClose }: ExtendSessionModalProps): 
           <Button variant="ghost" size="lg" onClick={onClose}>
             {t('common.cancel')}
           </Button>
-          <Button size="lg" loading={submitting} disabled={disabled} onClick={() => void confirm()}>
+          <Button variant="cta" size="lg" loading={submitting} disabled={disabled} onClick={() => void confirm()}>
             {submitting ? t('session.extending') : t('session.extendMinutes', { minutes })}
           </Button>
         </>
@@ -319,13 +320,14 @@ export function ExtendSessionModal({ open, onClose }: ExtendSessionModalProps): 
                 data-nav="true"
                 onClick={() => setMinutes(m)}
                 className={clsx(
-                  'focus-ring glass flex flex-col items-center gap-1 rounded-lg px-3 py-4 transition-colors duration-[var(--dur-fast)]',
-                  active ? 'border-glow bg-primary/15 text-text' : 'text-muted hover:bg-surface/80 hover:text-text',
+                  'focus-ring flex flex-col items-center gap-1 rounded-lg px-3 py-4',
+                  active ? 'choice choice-on' : 'choice text-muted',
                 )}
               >
-                <span className="text-2xl font-bold leading-none text-text">
-                  {t('session.extendMinutes', { minutes: m })}
-                </span>
+                <DotAmount
+                  value={t('session.extendMinutes', { minutes: m })}
+                  className="text-[1.7rem] leading-none text-text"
+                />
                 {price && <span className="tnum text-sm">{price}</span>}
               </button>
             );

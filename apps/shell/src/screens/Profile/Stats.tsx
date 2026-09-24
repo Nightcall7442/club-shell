@@ -8,6 +8,7 @@ import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { GameArtwork } from '@/components/media/GameArtwork';
+import { DotAmount } from '@/components/ui/DotAmount';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useLocale } from '@/hooks/useLocale';
@@ -49,7 +50,9 @@ export function StatCard({ label, value, hint, icon, tone = 'primary', className
       )}
       <div className="min-w-0">
         <p className="text-sm text-muted">{label}</p>
-        <p className="tnum num-dot truncate text-3xl leading-tight">{value}</p>
+        <p className="truncate text-3xl leading-tight">
+          <DotAmount value={value} />
+        </p>
         {hint && <p className="text-sm text-muted">{hint}</p>}
       </div>
     </div>
@@ -225,7 +228,7 @@ export function Stats({ stats, loading }: StatsProps): JSX.Element {
       </div>
 
       <section className="glass rounded-xl p-[var(--gap)]" aria-label={t('profile.favoriteGames')}>
-        <h3 className="mb-4 text-xl font-bold">{t('profile.favoriteGames')}</h3>
+        <h3 className="mb-4 font-display text-xl font-normal tracking-tight">{t('profile.favoriteGames')}</h3>
         {stats.favoriteGames.length === 0 ? (
           <p className="text-muted">{t('common.empty')}</p>
         ) : (
