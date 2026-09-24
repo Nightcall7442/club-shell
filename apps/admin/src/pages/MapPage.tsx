@@ -272,7 +272,7 @@ function SeatPanel({
                       })
                     }
                   >
-                    {a / 1000}к
+                    {t('{n}к', { n: a / 1000 })}
                   </Button>
                 ))}
               </div>
@@ -337,10 +337,10 @@ function SeatPanel({
           </Field>
           <Field label={t('Тариф')}>
             <select className={inputCls} value={tariffId} onChange={(e) => setTariffId(e.target.value)}>
-              {zoneTariffs.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name} · {money(t.isPackage ? (t.packagePrice ?? t.pricePerHour) : t.pricePerHour)}
-                  {t.isPackage ? '' : ' / ч'}
+              {zoneTariffs.map((tf) => (
+                <option key={tf.id} value={tf.id}>
+                  {tf.name} · {money(tf.isPackage ? (tf.packagePrice ?? tf.pricePerHour) : tf.pricePerHour)}
+                  {tf.isPackage ? '' : t(' / ч')}
                 </option>
               ))}
             </select>

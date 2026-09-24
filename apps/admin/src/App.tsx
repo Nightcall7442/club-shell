@@ -7,7 +7,7 @@ import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from
 import clsx from 'clsx';
 import { adminApi, clubApi, hasToken, setToken, type Shift, type StaffMember } from '@/api';
 import { describe } from '@/errors';
-import { LANGS, setLang, t, useLang } from '@/i18n';
+import { LANGS, dateLocale, setLang, t, useLang } from '@/i18n';
 import { Button } from '@/ui';
 
 const MapPage = lazy(() => import('@/pages/MapPage'));
@@ -331,7 +331,7 @@ export function App(): JSX.Element {
   const allowed = ALL.filter((s) => !s.ownerOnly || staff.role === 'owner');
   const current = allowed.find((s) => s.id === section) ?? allowed[0];
   const Page = current?.page ?? MapPage;
-  const locale = lang === 'en' ? 'en-GB' : lang === 'uz' ? 'uz-Latn' : 'ru-RU';
+  const locale = dateLocale();
 
   return (
     <div className="grid h-screen grid-cols-[15rem_minmax(0,1fr)] grid-rows-[4rem_minmax(0,1fr)]">

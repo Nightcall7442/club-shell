@@ -1,4 +1,5 @@
 import type { Money } from '@clubshell/contracts';
+import { t } from './i18n';
 
 const nf = new Intl.NumberFormat('ru-RU');
 
@@ -7,7 +8,7 @@ export function money(m: Money | null | undefined): string {
   if (!m) {
     return '—';
   }
-  return `${nf.format(Math.round(m.amount / 100))} сум`;
+  return t('{n} сум', { n: nf.format(Math.round(m.amount / 100)) });
 }
 
 /** Seconds → `1:26` (hours:minutes), `05:12` under an hour. */
@@ -24,7 +25,7 @@ export function duration(sec: number): string {
 
 export function minutesLabel(min: number): string {
   if (min % 60 === 0) {
-    return `${min / 60} ч`;
+    return t('{n} ч', { n: min / 60 });
   }
-  return `${min} мин`;
+  return t('{n} мин', { n: min });
 }

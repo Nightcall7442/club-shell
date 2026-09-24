@@ -18,7 +18,7 @@ import {
 } from '@/api';
 import { describe } from '@/errors';
 import { money } from '@/format';
-import { t } from '@/i18n';
+import { dateLocale, t } from '@/i18n';
 import { useClubSettings, type ClubSettingsState } from '@/settings';
 import {
   Button,
@@ -529,7 +529,7 @@ function DaysTab({
             {holidays.map((h) => (
               <li key={h} className="flex items-center justify-between py-1.5">
                 <span className="tnum text-sm">
-                  {new Date(`${h}T00:00:00`).toLocaleDateString('ru-RU', {
+                  {new Date(`${h}T00:00:00`).toLocaleDateString(dateLocale(), {
                     day: 'numeric',
                     month: 'long',
                     year: 'numeric',
