@@ -319,7 +319,15 @@
     "runningSince": "{{duration}} davomida ishlamoqda",
     "noTournaments": "Hozircha turnirlar yo‘q",
     "noPromo": "Hozircha takliflar yo‘q",
-    "selectedOf": "Tanlangan · {{index}} / {{total}}"
+    "selectedOf": "Tanlangan · {{index}} / {{total}}",
+    "prevSection": "Oldingi boʻlim",
+    "nextSection": "Keyingi boʻlim",
+    "prompts": {
+      "title": "Boshqaruv",
+      "select": "Tanlash",
+      "back": "Orqaga",
+      "sections": "Boʻlimlar"
+    }
   },
   "games": {
     "title": "O'yinlar",

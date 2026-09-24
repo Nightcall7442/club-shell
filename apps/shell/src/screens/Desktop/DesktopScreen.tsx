@@ -105,9 +105,9 @@ export function BookingPanel({ index }: { index: number }): JSX.Element {
           {seats === null ? <Skeleton variant="text" width="8rem" /> : t('booking.freeSeats', { count: free })}
         </div>
         {seats && seats.length > 0 && (
-          <div aria-hidden="true" className="grid grid-cols-12 gap-1.5">
+          <div aria-hidden="true" className="grid grid-cols-[repeat(24,minmax(0,1fr))] gap-1">
             {seats.slice(0, 48).map((s, i) => (
-              <span key={i} className={clsx('aspect-square rounded-sm', SEAT_DOT[s.status] ?? SEAT_DOT.busy)} />
+              <span key={i} className={clsx('h-2.5 rounded-[2px]', SEAT_DOT[s.status] ?? SEAT_DOT.busy)} />
             ))}
           </div>
         )}
@@ -364,7 +364,7 @@ export default function DesktopScreen(): JSX.Element {
   const panels = [features.booking, features.tournaments, features.chat].filter(Boolean).length;
 
   return (
-    <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-[calc(var(--gap)*2)]">
+    <div className="flex w-full flex-col gap-[calc(var(--gap)*2)]">
       <HomeHero />
       {panels > 0 && (
         <div

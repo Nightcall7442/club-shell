@@ -21,7 +21,7 @@ read those properties. Switching themes never reloads the page.
 | `displayName` | `string` | yes | — | Human-readable name shown in the picker. |
 | `colors` | `ThemeColors` | yes | default palette per key | Eight colours, each `#RRGGBB` or `#RRGGBBAA` (`#RGB` is also accepted by `hexToRgb`). Alpha is ignored; Tailwind supplies opacity. |
 | `colors.bg` | hex | yes | `#07090C` | Page background. |
-| `colors.surface` | hex | yes | `#0D1117` | Cards, panels, the sidebar's popovers (`.glass`, `.glass-strong`). |
+| `colors.surface` | hex | yes | `#0D1117` | Cards, panels, popovers (`.glass`, `.glass-strong`). |
 | `colors.primary` | hex | yes | `#F4F4F5` | Primary actions, focus ring, selection. Text on it is `--c-on-primary`, derived by luminance (dark on light primaries, white otherwise). |
 | `colors.accent` | hex | yes | `#9ADFFF` | The one colour in the chrome: focus brackets, active nav rail, the `cta` button, grid, bonuses, booked seats, timer warning. Text on it is `--c-on-accent`. Text on it is `--c-on-accent`. |
 | `colors.text` | hex | yes | `#E8F1F6` | Primary text. |
@@ -94,7 +94,7 @@ spinning) and honours `prefers-reduced-motion` the same way.
 ### 2.4 Typography and layout tokens (not themeable)
 
 `tokens.css` also defines the fluid type scale (`--fs-base: clamp(16px, 0.9375vw, 24px)`, `--fs-xs` …
-`--fs-display`), layout (`--sidebar-w`, `--gutter`, `--gap`, `--card-cover-w`), motion
+`--fs-display`), layout (`--topbar-h`, `--statusbar-h`, `--gutter`, `--gap`, `--card-cover-w`), motion
 (`--dur-fast/base/slow`, easings) and elevation (`--hairline`, `--shadow-float` for popovers and modals only,
 `--shadow-glow`, which is now a plain 2 px focus ring). These are design
 constants, not theme fields; a theme only influences them through the colour variables they reference.

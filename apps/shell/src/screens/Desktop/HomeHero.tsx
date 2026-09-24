@@ -1,6 +1,7 @@
 /**
- * Home hero: a greeting, one contained card with the selected game (key art, title, Play / Close / Details) and a row
- * of recent covers to switch it (time left and balance are in the sidebar, on every screen).
+ * Home hero: a full-width stage with the selected game's art under the HUD bar — greeting top left, title and Play /
+ * Close / Details bottom left, a rail of recent covers bottom right that switches it (time left and balance are in
+ * the status line, on every screen).
  * Selection is the games-store `selectedId`, so the pick carries over to `/games`; the running game is always shown.
  */
 import type { Game } from '@clubshell/contracts';
@@ -21,10 +22,9 @@ import { selectFeaturedGames, selectRecentGames, useGamesStore } from '@/store/g
 import { useSession } from '@/hooks/useSession';
 import { serverNow } from '@/lib/time';
 import { useNotificationsStore } from '@/store/notifications';
-import { useSettingsStore } from '@/store/settings';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
 
-const STRIP_MAX = 8;
+const STRIP_MAX = 6;
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Icons
@@ -94,7 +94,7 @@ function PosterTile({
       aria-pressed={selected}
       onClick={() => onSelect(game)}
       onFocus={() => onSelect(game)}
-      className="focus-ring group flex min-w-0 flex-col gap-2 rounded-lg text-left focus-visible:shadow-none"
+      className="focus-ring group flex w-[clamp(5.5rem,6.2vw,8rem)] min-w-0 flex-col gap-2 rounded-lg text-left focus-visible:shadow-none"
     >
       <span
         className={clsx(
@@ -133,7 +133,6 @@ export function HomeHero(): JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { user } = useSession();
-  const pc = useSettingsStore((s) => s.pcInfo?.pc ?? null);
   const animations = useThemeStore(selectAnimationsEnabled);
   const status = useGamesStore((s) => s.status);
   const byId = useGamesStore((s) => s.byId);
@@ -203,17 +202,48 @@ export function HomeHero(): JSX.Element {
   const name = user?.displayName.split(' ')[0] ?? '';
 
   return (
-    <section aria-label={t('desktop.title')} className="flex flex-col gap-[calc(var(--gap)*1.5)]">
-      <div className="flex flex-col gap-2">
-        {pc && <span className="hud-label">{[pc.name, pc.zone].filter(Boolean).join(' · ')}</span>}
-        <h1 className="font-display text-[length:var(--fs-2xl)] font-light tracking-tight text-text">
-          {name ? t(greetingKey(serverNow().getHours()), { name }) : t('desktop.title')}
-        </h1>
-      </div>
+    <section aria-label={t('desktop.title')} className="flex flex-col">
+      {/* Stage: the selected game's art across the whole screen, under the HUD bar, melting into the page. */}
+      <div className="relative -mx-[var(--gutter)] -mt-[calc(var(--topbar-h)+var(--gap))] h-[clamp(32rem,68vh,50rem)] overflow-hidden">
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 [mask-image:linear-gradient(to_bottom,black_65%,transparent)]"
+        >
+          {loading && <Skeleton variant="rect" className="absolute inset-0 h-full w-full rounded-none" />}
+          <AnimatePresence initial={false}>
+            {hero && (
+              <motion.div
+                key={hero.id}
+                className="absolute inset-0"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={fade}
+              >
+                <GameArtwork
+                  src={hero.heroUrl ?? hero.coverUrl}
+                  title={hero.title}
+                  kind="hero"
+                  priority
+                  className="rounded-none"
+                  style={{ position: 'absolute', inset: 0, height: '100%', aspectRatio: 'auto' }}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <div className="absolute inset-0 bg-gradient-to-r from-bg via-bg/55 to-transparent" />
+          <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-bg to-transparent" />
+        </div>
 
-      {/* Selected game: art on the right, copy and actions on a plain panel on the left. */}
-      <div className="glass hud-brackets relative grid min-h-[22rem] grid-cols-[minmax(0,5fr)_minmax(0,7fr)] overflow-hidden rounded-xl [--brk-inset:12px] [--brk-size:18px]">
-        <div className="relative z-10 flex flex-col justify-end gap-5 p-[calc(var(--gap)*1.5)]">
+        {/* Greeting, top left under the HUD bar */}
+        <div className="absolute left-[var(--gutter)] top-[calc(var(--topbar-h)+var(--gap))] z-10 flex flex-col gap-2">
+          <h1 className="font-display text-[length:var(--fs-xl)] font-light tracking-tight text-text">
+            {name ? t(greetingKey(serverNow().getHours()), { name }) : t('desktop.title')}
+          </h1>
+        </div>
+
+        {/* Title block, bottom left */}
+        <div className="absolute bottom-[calc(var(--gap)*2)] left-[var(--gutter)] z-10 flex max-w-[min(52%,56rem)] flex-col gap-5">
           {loading && (
             <div className="flex flex-col gap-3">
               <Skeleton variant="text" width="70%" height="2.5rem" />
@@ -253,7 +283,7 @@ export function HomeHero(): JSX.Element {
                       {t('games.nowPlaying')}
                     </span>
                   )}
-                  <h2 className="line-clamp-2 font-display text-[length:var(--fs-display)] font-normal leading-[1.05] tracking-[-0.02em] text-text">
+                  <h2 className="line-clamp-2 font-display text-[clamp(2.75rem,4.6vw,5.5rem)] font-normal leading-[1.05] tracking-[-0.02em] text-text">
                     {hero.title}
                   </h2>
                   <ul className="flex flex-wrap items-center gap-2" aria-label={t('common.details')}>
@@ -312,57 +342,29 @@ export function HomeHero(): JSX.Element {
           )}
         </div>
 
-        <div aria-hidden="true" className="relative">
-          {loading && <Skeleton variant="rect" className="absolute inset-0 h-full w-full rounded-none" />}
-          <AnimatePresence initial={false}>
-            {hero && (
-              <motion.div
-                key={hero.id}
-                className="absolute inset-0"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={fade}
-              >
-                <GameArtwork
-                  src={hero.heroUrl ?? hero.coverUrl}
-                  title={hero.title}
-                  kind="hero"
-                  priority
-                  className="rounded-none"
-                  style={{ position: 'absolute', inset: 0, height: '100%', aspectRatio: 'auto' }}
+        {/* Recent games rail, bottom right: switches the stage */}
+        {strip.length > 0 && (
+          <div className="absolute bottom-[calc(var(--gap)*2)] right-[var(--gutter)] z-10 flex flex-col items-end gap-3">
+            <div className="flex items-center gap-4">
+              <span className="hud-label">{t('desktop.recentlyPlayed')}</span>
+              <Button variant="ghost" size="md" iconRight={<ArrowIcon />} onClick={() => navigate('/games')}>
+                {t('desktop.allGames')}
+              </Button>
+            </div>
+            <div role="list" aria-label={t('desktop.continuePlaying')} className="flex gap-3">
+              {strip.slice(0, 6).map((g) => (
+                <PosterTile
+                  key={g.id}
+                  game={g}
+                  selected={hero?.id === g.id}
+                  running={running.some((r) => r.gameId === g.id)}
+                  onSelect={(x) => select(x.id)}
                 />
-              </motion.div>
-            )}
-          </AnimatePresence>
-          {/* One soft edge where the art meets the panel; no other veils. */}
-          <div className="absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-[rgb(var(--c-surface))] to-transparent" />
-        </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
-
-      {strip.length > 0 && (
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center justify-between gap-4">
-            <h2 className="font-display text-base font-normal tracking-tight text-text">
-              {t('desktop.recentlyPlayed')}
-            </h2>
-            <Button variant="ghost" size="md" iconRight={<ArrowIcon />} onClick={() => navigate('/games')}>
-              {t('desktop.allGames')}
-            </Button>
-          </div>
-          <div role="list" aria-label={t('desktop.continuePlaying')} className="grid grid-cols-8 gap-[var(--gap)]">
-            {strip.map((g) => (
-              <PosterTile
-                key={g.id}
-                game={g}
-                selected={hero?.id === g.id}
-                running={running.some((r) => r.gameId === g.id)}
-                onSelect={(x) => select(x.id)}
-              />
-            ))}
-          </div>
-        </div>
-      )}
 
       <Modal
         open={confirmKill}

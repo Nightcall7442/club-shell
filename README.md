@@ -70,9 +70,12 @@
 - **HUD-детали**: уголки-скобки «захватывают» выбранную игру и элемент в фокусе (мышь, клавиатура, геймпад);
   служебные подписи моноширинным капсом (`PC-12 · STANDARD`); время и деньги точечными цифрами, как на дисплее
   прибора; остаток сессии на шкале-засечках; главная кнопка экрана со срезанными углами; красная точка только для LIVE.
-- **Каркас** — боковая панель: клуб, ПК и часы; навигация с акцентной направляющей у активного пункта; остаток
-  времени (→ продлить) и баланс (→ пополнить); профиль, звук и язык, блокировка.
-- **Главная** — приветствие, карточка выбранной игры в скобках, ряд недавних игр, панели мест, турниров и сообщений.
+- **Каркас — HUD-рамка, как меню паузы в игре.** Сверху полоса: знак клуба и ПК, разделы вкладками между
+  клавишами `LB` / `RB` (геймпад листает их так же, по клику тоже), часы, звук и язык, блокировка. Снизу строка
+  статуса: игрок, остаток времени (→ продлить), баланс (→ пополнить) и подсказки кнопок «Ⓐ Выбрать · Ⓑ Назад».
+  По углам экрана скобки; всё между полосами отдано контенту.
+- **Главная** — полноэкранная сцена с артом выбранной игры под верхней полосой: приветствие, крупное название,
+  «Играть» / «Подробнее», справа рельс недавних игр в скобках; ниже панели мест, турниров и сообщений.
 - **Шрифты** вшиты в сборку и работают офлайн: Unbounded (заголовки), Inter (текст), JetBrains Mono (подписи),
   Doto (цифры). У всех, кроме Doto, есть кириллица; Doto используется только для цифр.
 
@@ -334,7 +337,7 @@ tools/scripts/         build · dev · package · sign · publish · setup-dev-v
 <details>
 <summary><b>English summary</b></summary>
 
-**ClubShell** is client software for gaming clubs / internet cafés (Uzbekistan / CIS; UI in Russian, Uzbek and English; prices in UZS). Each gaming PC runs a **.NET 8 Windows service** (`ClubShellAgent`, session 0: sessions and billing timers, game launching via Steam / Epic / Battle.net / Riot / EA / Ubisoft with an account pool, server policies, anti-cheat checks, updates, telemetry, remote admin) and a **Tauri 2 + React kiosk shell** that replaces `explorer.exe` for the local kiosk user. The shell ships the "Obsidian" theme (a minimal layout with a restrained HUD layer: corner-bracket focus, mono telemetry labels, dot-matrix time and money, one ice-blue accent — the game art carries the colour), a sidebar layout with time and balance always in view, a calm home with the selected game, a poster-wall catalogue and an in-game HUD (`Ctrl+Shift+H`: time, balance, +30 min, call admin) over the running game. They talk over the named pipe `\\.\pipe\clubshell-agent`; the agent talks to the club server over REST + WebSocket with HMAC-signed requests. Offline mode keeps the timer and queues events in SQLite.
+**ClubShell** is client software for gaming clubs / internet cafés (Uzbekistan / CIS; UI in Russian, Uzbek and English; prices in UZS). Each gaming PC runs a **.NET 8 Windows service** (`ClubShellAgent`, session 0: sessions and billing timers, game launching via Steam / Epic / Battle.net / Riot / EA / Ubisoft with an account pool, server policies, anti-cheat checks, updates, telemetry, remote admin) and a **Tauri 2 + React kiosk shell** that replaces `explorer.exe` for the local kiosk user. The shell ships the "Obsidian" theme (a minimal layout with a restrained HUD layer: corner-bracket focus, mono telemetry labels, dot-matrix time and money, one ice-blue accent — the game art carries the colour), a pause-menu HUD frame (section tabs between LB/RB on top, a status line with time, balance and controller prompts at the bottom), a calm home with the selected game, a poster-wall catalogue and an in-game HUD (`Ctrl+Shift+H`: time, balance, +30 min, call admin) over the running game. They talk over the named pipe `\\.\pipe\clubshell-agent`; the agent talks to the club server over REST + WebSocket with HMAC-signed requests. Offline mode keeps the timer and queues events in SQLite.
 
 Try the UI in a browser: `pnpm install && pnpm mock` then `VITE_MOCK=1 pnpm --filter @clubshell/shell dev` → http://localhost:1420 (login `demo` / `1234`). Full Windows dev loop: `tools/scripts/dev.ps1`. Verified here: all 8 .NET projects compile with `/warnaserror`, 424 xUnit tests pass, `tsc` and `vite build` are clean; Rust, WiX and Playwright runs are left to CI.
 

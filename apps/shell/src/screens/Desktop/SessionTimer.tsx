@@ -1,5 +1,5 @@
 /**
- * Session countdown: a sidebar row with a hairline progress bar, or a card with an SVG ring (used / total); `mm:ss`
+ * Session countdown: a status-line row with a tick scale, or a card with an SVG ring (used / total); `mm:ss`
  * under 10 minutes or `hh:mm:ss` otherwise, paused/locked badges and a pulsing danger state under 5 minutes. Clicking a timed session opens {@link ExtendSessionModal}
  * (30/60/120 minute presets priced by the session tariff → `session_extend`).
  */
@@ -101,7 +101,7 @@ export function Ring({ progress, size, stroke, tone, label, valueText }: RingPro
 // ---------------------------------------------------------------------------------------------------------------------
 
 export interface SessionTimerProps {
-  /** Sidebar row (caption, number, hairline progress) instead of the large ring card. */
+  /** One status-line row (caption, number, tick scale, +) instead of the large ring card. */
   compact?: boolean;
   className?: string;
 }
@@ -158,32 +158,28 @@ export function SessionTimer({ compact = false, className }: SessionTimerProps):
           'focus-ring hud-focus group relative flex select-none text-left transition-colors duration-[var(--dur-fast)] disabled:cursor-default',
           canExtend && 'hover:bg-text/[0.04]',
           compact
-            ? 'w-full flex-col gap-2 rounded-md px-3 py-2.5'
+            ? 'h-12 items-center gap-3 rounded-md px-3'
             : 'glass flex-col items-center justify-center gap-3 rounded-xl px-8 py-6',
           className,
         )}
       >
         {compact ? (
           <>
-            <span className="flex w-full items-center gap-3">
-              <span className="min-w-0 flex-1">
-                <span className="hud-label flex items-center gap-2">
-                  {caption}
-                  {badge}
-                </span>
-                <span className={clsx('num-dot mt-1 block text-[1.6rem] leading-none', valueClass)}>{label}</span>
-              </span>
-              {canExtend && <PlusButton />}
+            <span className="hud-label flex items-center gap-2">
+              {caption}
+              {badge}
             </span>
+            <span className={clsx('num-dot text-[1.45rem] leading-none', valueClass)}>{label}</span>
             {/* Time left on an instrument scale: lit ticks are what remains. */}
             <span
               aria-hidden="true"
               className={clsx(
-                'tick-scale block w-full',
+                'tick-scale block w-[clamp(4rem,5vw,6rem)]',
                 tone === 'danger' ? 'text-danger' : tone === 'accent' ? 'text-accent' : 'text-text/80',
               )}
               style={{ '--value': Math.min(1, Math.max(0, 1 - progress)) } as CSSProperties}
             />
+            {canExtend && <PlusButton />}
           </>
         ) : (
           <>
@@ -217,7 +213,7 @@ export function SessionTimer({ compact = false, className }: SessionTimerProps):
 }
 
 /**
- * Small "+" square at the end of a sidebar row (time left, balance) that fills in when the row is hovered: says "add"
+ * Small "+" square at the end of a status-line row (time left, balance) that fills in when the row is hovered: says "add"
  * without a word, and the row around it stays the target.
  */
 export function PlusButton(): JSX.Element {

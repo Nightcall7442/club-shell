@@ -35,8 +35,9 @@
   --fs-3xl: 2.5rem;
   --fs-display: clamp(2.25rem, 3vw, 3.5rem);
 
-  /* Layout: a fixed navigation rail on the left, content to its right. */
-  --sidebar-w: clamp(232px, 13.5vw, 300px);
+  /* Layout: a HUD bar on top (tabs), a status line at the bottom, the screen between them. */
+  --topbar-h: clamp(64px, 4.4vw, 88px);
+  --statusbar-h: clamp(56px, 3.6vw, 72px);
   --gutter: clamp(20px, 2vw, 48px);
   --gap: clamp(12px, 1.2vw, 28px);
   --card-cover-w: clamp(180px, 12.5vw, 300px);
