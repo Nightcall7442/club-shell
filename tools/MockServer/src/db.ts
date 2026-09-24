@@ -1646,8 +1646,46 @@ function load(): Db {
   return fresh;
 }
 
+/** The kiosk's demo art (`apps/shell/public/mock-art`), served by this server at `/mock-art/*`. */
+export const MOCK_ART_DIR = fileURLToPath(new URL('../../../apps/shell/public/mock-art/', import.meta.url));
+const PUBLIC_URL = process.env['MOCK_PUBLIC_URL'] ?? 'http://localhost:8080';
+const ART_ALIASES: Record<string, string> = { americano: 'coffee', lays: 'chips', popcorn: 'chips' };
+
+/**
+ * Swaps the seed's placeholder image hosts (picsum.photos, unreachable offline) for the local demo art when a matching
+ * file exists: `seed/cs2/…` → `cs2-cover.jpg`, `seed/cs2-hero/…` → `cs2-hero.jpg`, `seed/product-cola/…` → `p-cola.jpg`,
+ * `seed/app-discord/…` → `app-discord.svg`, `seed/ach-owl/…` → `ach-owl.svg`. Runs on every load, so an existing
+ * `.mock-db.json` is fixed too.
+ */
+function localArt(url: string | null | undefined): string | null | undefined {
+  const m = typeof url === 'string' ? /picsum\.photos\/seed\/([^/]+)\//.exec(url) : null;
+  if (!m) return url;
+  const seed = m[1] as string;
+  const candidates: string[] = [];
+  if (seed.startsWith('product-')) {
+    const slug = seed.slice(8);
+    candidates.push(`p-${ART_ALIASES[slug] ?? slug}.jpg`, `p-${slug}.svg`);
+  } else if (seed.startsWith('app-') || seed.startsWith('ach-')) candidates.push(`${seed}.svg`);
+  else if (seed.endsWith('-hero')) candidates.push(`${seed}.jpg`);
+  else candidates.push(`${seed}-cover.jpg`);
+  const hit = candidates.find((f) => existsSync(`${MOCK_ART_DIR}${f}`));
+  return hit ? `${PUBLIC_URL}/mock-art/${hit}` : url;
+}
+
+function withLocalArt(store: Db): Db {
+  for (const g of store.games) {
+    g.coverUrl = localArt(g.coverUrl) ?? g.coverUrl;
+    g.heroUrl = localArt(g.heroUrl) ?? g.heroUrl;
+  }
+  for (const p of store.products) p.imageUrl = localArt(p.imageUrl) ?? p.imageUrl;
+  for (const a of store.apps) a.iconUrl = localArt(a.iconUrl) ?? a.iconUrl;
+  for (const list of Object.values(store.achievements))
+    for (const a of list) a.iconUrl = localArt(a.iconUrl) ?? a.iconUrl;
+  return store;
+}
+
 /** The store. Mutate freely, then call {@link markDirty}. */
-export const db: Db = load();
+export const db: Db = withLocalArt(load());
 
 /** Schedules a debounced write of the store to disk. */
 export function markDirty(): void {

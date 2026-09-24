@@ -7,6 +7,7 @@
  * Env:   MOCK_SERVER_PORT, MOCK_VERIFY_SIGNATURE=1 (enforce HMAC), MOCK_SKIP_SIGNATURE=1 (never check),
  *        MOCK_STRICT_REGISTER=1, MOCK_QR_AUTOCONFIRM_SEC, MOCK_GUEST_DISABLED=1, LOG_LEVEL
  */
+import { existsSync, readFileSync } from 'node:fs';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import Fastify, { type FastifyError, type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
@@ -14,6 +15,7 @@ import { WS_MAX_FRAME_BYTES, type ErrorCode, type ServerErrorEnvelope } from '@c
 import {
   ApiError,
   DB_PATH,
+  MOCK_ART_DIR,
   db,
   errors,
   flushDb,
@@ -281,6 +283,25 @@ export async function buildApp(opts: Options): Promise<FastifyInstance> {
     chaos: { latencyMs: opts.latencyMs, failRate: opts.failRate },
     db: DB_PATH,
   }));
+
+  // The kiosk's demo art, so images work without internet (see `localArt` in db.ts).
+  app.get<{ Params: { file: string } }>('/mock-art/:file', async (req, reply) => {
+    const file = req.params.file;
+    if (!/^[\w.-]+\.(jpg|png|svg|webp|mp4)$/.test(file) || !existsSync(`${MOCK_ART_DIR}${file}`)) {
+      return reply.code(404).send();
+    }
+    const type = file.endsWith('.svg')
+      ? 'image/svg+xml'
+      : file.endsWith('.mp4')
+        ? 'video/mp4'
+        : file.endsWith('.png')
+          ? 'image/png'
+          : 'image/jpeg';
+    return reply
+      .type(type)
+      .header('cache-control', 'public, max-age=86400')
+      .send(readFileSync(`${MOCK_ART_DIR}${file}`));
+  });
 
   await app.register(
     async (api) => {

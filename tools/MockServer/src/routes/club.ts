@@ -300,7 +300,10 @@ export function clubRoutes(app: FastifyInstance): void {
       c.notifications = {
         telegramBotToken: token === '••••' ? c.notifications.telegramBotToken : token,
         telegramChatId: typeof n['telegramChatId'] === 'string' ? n['telegramChatId'] : '',
-        events: { ...c.notifications.events, ...(isObject(n['events']) ? (n['events'] as Record<ClubEvent, boolean>) : {}) },
+        events: {
+          ...c.notifications.events,
+          ...(isObject(n['events']) ? (n['events'] as Record<ClubEvent, boolean>) : {}),
+        },
         bigTopupAt: typeof n['bigTopupAt'] === 'number' ? n['bigTopupAt'] : c.notifications.bigTopupAt,
       };
     }
@@ -370,7 +373,13 @@ export function clubRoutes(app: FastifyInstance): void {
     const q = (req.query.q ?? '').trim().toLowerCase();
     const items = db.users
       .filter((u) => !u.transient && u.role !== 'admin')
-      .filter((u) => !q || u.displayName.toLowerCase().includes(q) || u.username.toLowerCase().includes(q) || profileOf(u.id).phone.includes(q))
+      .filter(
+        (u) =>
+          !q ||
+          u.displayName.toLowerCase().includes(q) ||
+          u.username.toLowerCase().includes(q) ||
+          profileOf(u.id).phone.includes(q),
+      )
       .map(clientView);
     return { items };
   });
@@ -500,7 +509,8 @@ export function clubRoutes(app: FastifyInstance): void {
     const rec: PcRecord = {
       ...(db.pcs[0] as PcRecord),
       id: uuid(),
-      name: optStr(b, 'name', 32) ?? `${device === 'pc' ? 'PC' : device.toUpperCase()}-${String(number).padStart(2, '0')}`,
+      name:
+        optStr(b, 'name', 32) ?? `${device === 'pc' ? 'PC' : device.toUpperCase()}-${String(number).padStart(2, '0')}`,
       zone: str(b, 'zone', 32),
       number,
       x: optInt(b, 'x', 0, 200) ?? 0,

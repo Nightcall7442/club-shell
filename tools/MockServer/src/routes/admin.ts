@@ -86,9 +86,7 @@ export function adminRoutes(app: FastifyInstance): void {
       club: { free: seats.filter((s) => s.pc.status === 'free').length, total: seats.length },
       seats,
       tariffs: db.tariffs,
-      users: db.users
-        .filter((u) => !u.transient && u.role !== 'admin' && !profileOf(u.id).blacklisted)
-        .map(userView),
+      users: db.users.filter((u) => !u.transient && u.role !== 'admin' && !profileOf(u.id).blacklisted).map(userView),
       zones: club().zones,
     };
   });

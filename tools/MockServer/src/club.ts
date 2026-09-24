@@ -347,9 +347,7 @@ export function saveClub(): void {
 
 export function profileOf(userId: string): ClientProfile {
   const c = club();
-  return (
-    c.clients[userId] ?? { groupId: null, note: '', blacklisted: false, phone: '', birthYear: null, telegram: '' }
-  );
+  return c.clients[userId] ?? { groupId: null, note: '', blacklisted: false, phone: '', birthYear: null, telegram: '' };
 }
 
 /** Lifetime spend on time and the shop, minor units (positive number). */
@@ -424,11 +422,19 @@ export interface PriceQuote {
  * discount among client group, loyalty level and a happy hour (discounts do not stack — the club always knows the
  * worst case).
  */
-export function quote(tariff: Tariff, minutes: number, userId: string | null, zone: string, at = new Date()): PriceQuote {
+export function quote(
+  tariff: Tariff,
+  minutes: number,
+  userId: string | null,
+  zone: string,
+  at = new Date(),
+): PriceQuote {
   const c = club();
   const base = tariffPriceFor(tariff, minutes);
   const dateKey = at.toISOString().slice(0, 10);
-  const dayPct = c.pricing.holidays.includes(dateKey) ? c.pricing.holidayPct : (c.pricing.weekdayPct[at.getDay()] ?? 100);
+  const dayPct = c.pricing.holidays.includes(dateKey)
+    ? c.pricing.holidayPct
+    : (c.pricing.weekdayPct[at.getDay()] ?? 100);
   const candidates: { pct: number; reason: string }[] = [];
   if (userId) {
     const group = c.groups.find((g) => g.id === profileOf(userId).groupId);
@@ -505,7 +511,13 @@ async function run(rule: AutomationRule, target: { pcId?: string | null; user?: 
   switch (a.kind) {
     case 'message':
       if (pcId)
-        await sendCommand(pcId, 'message', { id: uuid(), from: club().branding.clubName, text: a.text, level: 'info', requiresAck: false });
+        await sendCommand(pcId, 'message', {
+          id: uuid(),
+          from: club().branding.clubName,
+          text: a.text,
+          level: 'info',
+          requiresAck: false,
+        });
       break;
     case 'bonus':
       if (user) {
@@ -545,7 +557,8 @@ export const clubHooks = {
     for (const r of club().automation) {
       if (!r.enabled) continue;
       if (r.trigger.kind === 'sessionStarted') fire(r, { pcId: rec.pcId, user });
-      if (r.trigger.kind === 'visitCount' && r.trigger.value > 0 && visits % r.trigger.value === 0) fire(r, { pcId: rec.pcId, user });
+      if (r.trigger.kind === 'visitCount' && r.trigger.value > 0 && visits % r.trigger.value === 0)
+        fire(r, { pcId: rec.pcId, user });
     }
     emit('sessionOpened', `${findPc(rec.pcId)?.name ?? rec.pcId} · ${user?.displayName ?? ''}`, { sessionId: rec.id });
   },
@@ -554,7 +567,10 @@ export const clubHooks = {
       if (r.enabled && r.trigger.kind === 'topupAtLeast' && amount >= r.trigger.value) fire(r, { user, pcId: null });
     }
     if (amount >= club().notifications.bigTopupAt) {
-      emit('bigTopup', `${user.displayName}: ${Math.round(amount / 100).toLocaleString('ru-RU')} сум`, { userId: user.id, amount });
+      emit('bigTopup', `${user.displayName}: ${Math.round(amount / 100).toLocaleString('ru-RU')} сум`, {
+        userId: user.id,
+        amount,
+      });
     }
   },
   stockChanged(title: string, qty: number): void {
@@ -598,7 +614,8 @@ export function tickClub(t: number): void {
         const rec = openSessionForPc(pc.id);
         if (!rec || rec.state !== 'active') continue;
         const left = viewSession(rec).secondsLeft;
-        if (left >= 0 && left <= limit && once(r.id, rec.id)) fire(r, { pcId: pc.id, user: findUser(rec.userId) ?? null });
+        if (left >= 0 && left <= limit && once(r.id, rec.id))
+          fire(r, { pcId: pc.id, user: findUser(rec.userId) ?? null });
       }
     } else if (r.trigger.kind === 'pcIdleMinutes') {
       const limit = r.trigger.value * 60_000;

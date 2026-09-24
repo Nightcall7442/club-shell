@@ -388,7 +388,16 @@ function TariffsTab({ zones }: { zones: string[] }): JSX.Element {
                     value={w.to}
                     onChange={(e) => patchWindow(i, { to: e.target.value })}
                   />
-                  <RemoveButton onClick={() => patch({ timeWindows: form.timeWindows.filter((_, j) => j !== i) })} />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-8 px-0 text-base"
+                    aria-label={t('Удалить')}
+                    title={t('Удалить')}
+                    onClick={() => patch({ timeWindows: form.timeWindows.filter((_, j) => j !== i) })}
+                  >
+                    ×
+                  </Button>
                 </div>
               </div>
             ))}
