@@ -1,574 +1,448 @@
 /**
- * Club counter, in the kiosk's Obsidian material: a top bar (club, clock, hall usage), the hall map as strict numbered
- * cells per zone with a status legend that counts, and the selected seat on the right. Everything a cashier does at
- * the desk — open time, add time, end a session, top up a wallet, message or lock a PC — is one click from that panel.
- * Polls `/admin/overview` every 2 s (the real console would follow the server's WebSocket).
+ * The console shell: PIN sign-in, then a top bar (club, clock, hall usage, shift, language, staff) and a sidebar of
+ * sections the way Senet lays out its club console — the counter first, the owner's configuration below it. Cashiers
+ * see the counter, shift, clients and stock; owners see everything. The section lives in the URL hash (`#/tariffs`).
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
-import type { Session } from '@clubshell/contracts';
-import { adminApi, AdminError, type Member, type Overview, type Seat } from '@/api';
-import { duration, minutesLabel, money } from '@/format';
+import { adminApi, clubApi, hasToken, setToken, type Shift, type StaffMember } from '@/api';
+import { describe } from '@/errors';
+import { LANGS, setLang, t, useLang } from '@/i18n';
+import { Button } from '@/ui';
 
-const POLL_MS = 2000;
-const MINUTE_PRESETS = [30, 60, 120, 180];
-const TOPUP_PRESETS = [20_000, 50_000, 100_000, 200_000];
+const MapPage = lazy(() => import('@/pages/MapPage'));
+const ShiftPage = lazy(() => import('@/pages/ShiftPage'));
+const ClientsPage = lazy(() => import('@/pages/ClientsPage'));
+const PricingPage = lazy(() => import('@/pages/PricingPage'));
+const HallPage = lazy(() => import('@/pages/HallPage'));
+const ShopPage = lazy(() => import('@/pages/ShopPage'));
+const CatalogPage = lazy(() => import('@/pages/CatalogPage'));
+const ClubPage = lazy(() => import('@/pages/ClubPage'));
+const AutomationPage = lazy(() => import('@/pages/AutomationPage'));
+const IntegrationsPage = lazy(() => import('@/pages/IntegrationsPage'));
+const ReportsPage = lazy(() => import('@/pages/ReportsPage'));
+const StaffPage = lazy(() => import('@/pages/StaffPage'));
 
-const STATUS: Record<Seat['pc']['status'], { label: string; short: string; dot: string; cell: string }> = {
-  free: { label: 'Свободен', short: 'своб.', dot: 'bg-success', cell: 'border-success/40 text-text' },
-  busy: { label: 'Занят', short: 'занят', dot: 'bg-accent', cell: 'border-accent/60 bg-accent/[0.06] text-accent' },
-  locked: { label: 'Заблокирован', short: 'блок', dot: 'bg-danger', cell: 'border-danger/60 text-danger' },
-  maintenance: {
-    label: 'Обслуживание',
-    short: 'сервис',
-    dot: 'bg-fuchsia-400',
-    cell: 'border-fuchsia-400/50 text-fuchsia-300',
+interface SectionDef {
+  id: string;
+  title: string;
+  ownerOnly: boolean;
+  icon: ReactNode;
+  page: React.LazyExoticComponent<() => JSX.Element>;
+}
+
+const svg = (d: string): JSX.Element => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.6}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d={d} />
+  </svg>
+);
+
+/** Grouped like the work: the counter, then the club's setup, then the business. */
+const GROUPS: { title: string; items: SectionDef[] }[] = [
+  {
+    title: 'Касса',
+    items: [
+      {
+        id: 'map',
+        title: 'Карта',
+        ownerOnly: false,
+        icon: svg('M3 4h7v7H3zM14 4h7v7h-7zM3 15h7v5H3zM14 15h7v5h-7z'),
+        page: MapPage,
+      },
+      {
+        id: 'shift',
+        title: 'Смена',
+        ownerOnly: false,
+        icon: svg('M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z'),
+        page: ShiftPage,
+      },
+      {
+        id: 'clients',
+        title: 'Клиенты',
+        ownerOnly: false,
+        icon: svg(
+          'M16 20v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 20v-1a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8',
+        ),
+        page: ClientsPage,
+      },
+      {
+        id: 'shop',
+        title: 'Магазин и склад',
+        ownerOnly: false,
+        icon: svg('M4 7h16l-1.2 11a2 2 0 0 1-2 1.8H7.2a2 2 0 0 1-2-1.8L4 7zM8 10V6a4 4 0 0 1 8 0v4'),
+        page: ShopPage,
+      },
+    ],
   },
-  booked: { label: 'Бронь', short: 'бронь', dot: 'bg-amber-300', cell: 'border-amber-300/50 text-amber-200' },
-  offline: { label: 'Офлайн', short: 'офлайн', dot: 'bg-muted/40', cell: 'border-line text-muted/50' },
-};
+  {
+    title: 'Настройка клуба',
+    items: [
+      {
+        id: 'pricing',
+        title: 'Тарифы и цены',
+        ownerOnly: true,
+        icon: svg('M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8zM7.5 7.5h.01'),
+        page: PricingPage,
+      },
+      {
+        id: 'hall',
+        title: 'Зал и устройства',
+        ownerOnly: true,
+        icon: svg('M3 5h18v11H3zM8 20h8M12 16v4'),
+        page: HallPage,
+      },
+      {
+        id: 'catalog',
+        title: 'Игры',
+        ownerOnly: true,
+        icon: svg(
+          'M6 8h12a4 4 0 0 1 4 4v3a3 3 0 0 1-5.4 1.8L15 15H9l-1.6 1.8A3 3 0 0 1 2 15v-3a4 4 0 0 1 4-4zM7 11v3M5.5 12.5h3',
+        ),
+        page: CatalogPage,
+      },
+      {
+        id: 'club',
+        title: 'Экран игрока',
+        ownerOnly: true,
+        icon: svg('M12 3a9 9 0 1 0 9 9M12 3v9l6-6'),
+        page: ClubPage,
+      },
+      {
+        id: 'automation',
+        title: 'Автоматизация',
+        ownerOnly: true,
+        icon: svg('M13 2 3 14h9l-1 8 10-12h-9l1-8z'),
+        page: AutomationPage,
+      },
+      {
+        id: 'integrations',
+        title: 'Уведомления и API',
+        ownerOnly: true,
+        icon: svg('M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0'),
+        page: IntegrationsPage,
+      },
+    ],
+  },
+  {
+    title: 'Бизнес',
+    items: [
+      { id: 'reports', title: 'Отчёты', ownerOnly: true, icon: svg('M3 3v18h18M7 15l4-4 3 3 5-6'), page: ReportsPage },
+      {
+        id: 'staff',
+        title: 'Персонал',
+        ownerOnly: true,
+        icon: svg('M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0'),
+        page: StaffPage,
+      },
+    ],
+  },
+];
 
-const LEGEND_ORDER: Seat['pc']['status'][] = ['free', 'busy', 'booked', 'locked', 'maintenance', 'offline'];
+const ALL = GROUPS.flatMap((g) => g.items);
 
-const ERROR_COPY: Record<string, string> = {
-  insufficientFunds: 'Недостаточно средств на балансе',
-  sessionAlreadyActive: 'На этом ПК или у клиента уже открыт сеанс',
-  policyDenied: 'Действие запрещено политикой',
-  notFound: 'Не найдено',
-  network: 'Нет связи с сервером. Запущен ли mock-сервер (pnpm mock)?',
-};
-
-function describe(e: unknown): string {
-  if (e instanceof AdminError) {
-    return ERROR_COPY[e.code] ?? e.message;
-  }
-  return e instanceof Error ? e.message : 'Ошибка';
-}
-
-function secondsLeft(s: Session | null): number {
-  if (!s) {
-    return 0;
-  }
-  if (s.secondsLeft < 0) {
-    return -1;
-  }
-  return s.endsAt ? Math.max(0, Math.round((Date.parse(s.endsAt) - Date.now()) / 1000)) : s.secondsLeft;
-}
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Pieces
-// ---------------------------------------------------------------------------------------------------------------------
-
-function Button({
-  children,
-  variant = 'secondary',
-  ...rest
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      {...rest}
-      className={clsx(
-        'focus-ring inline-flex h-10 select-none items-center justify-center gap-2 whitespace-nowrap rounded-md px-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40',
-        variant === 'primary' && 'cut-corners rounded-none text-on-accent hover:brightness-110',
-        variant === 'secondary' && 'choice',
-        variant === 'ghost' && 'text-muted hover:bg-white/[0.06] hover:text-text',
-        variant === 'danger' && 'text-danger hover:bg-danger/10',
-        rest.className,
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
-function SeatTile({
-  seat,
-  selected,
-  onSelect,
-  tick,
-}: {
-  seat: Seat;
-  selected: boolean;
-  onSelect: () => void;
-  tick: number;
-}): JSX.Element {
-  void tick;
-  const s = STATUS[seat.pc.status];
-  const left = secondsLeft(seat.session);
-  const warn = seat.session !== null && left >= 0 && left <= 5 * 60;
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-pressed={selected}
-      title={`${seat.pc.name} · ${s.label}${seat.user ? ` · ${seat.user.displayName}` : ''}`}
-      className={clsx(
-        'focus-ring relative flex aspect-square flex-col items-center justify-center gap-1.5 rounded-md border bg-bg text-center transition-colors hover:bg-white/[0.04]',
-        s.cell,
-        selected && 'ring-2 ring-accent ring-offset-2 ring-offset-surface',
-      )}
-    >
-      <span className="num-dot text-[1.6rem] leading-none">{String(seat.pc.number).padStart(2, '0')}</span>
-      {seat.session ? (
-        <span className={clsx('tnum font-mono text-[0.68rem] leading-none', warn ? 'text-danger' : 'text-muted')}>
-          {left < 0 ? '∞' : duration(left)}
-        </span>
-      ) : (
-        <span className="font-mono text-[0.62rem] uppercase leading-none tracking-[0.1em] text-muted">{s.short}</span>
-      )}
-      {warn && <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 animate-pulse rounded-full bg-danger" />}
-    </button>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }): JSX.Element {
-  return (
-    <label className="flex flex-col gap-1.5">
-      <span className="label">{label}</span>
-      {children}
-    </label>
-  );
-}
-
-const inputCls =
-  'focus-ring h-10 w-full rounded-md border border-line bg-bg px-3 text-sm text-text placeholder:text-muted';
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Seat panel
-// ---------------------------------------------------------------------------------------------------------------------
-
-function SeatPanel({
-  seat,
-  members,
-  tariffs,
-  tick,
-  onDone,
-}: {
-  seat: Seat;
-  members: Member[];
-  tariffs: Overview['tariffs'];
-  tick: number;
-  onDone: () => void;
-}): JSX.Element {
-  const zoneTariffs = useMemo(
-    () =>
-      tariffs.filter(
-        (t) => t.zones.length === 0 || t.zones.some((z) => z.toLowerCase() === seat.pc.zone.toLowerCase()),
-      ),
-    [tariffs, seat.pc.zone],
-  );
-  const [userId, setUserId] = useState('');
-  const [tariffId, setTariffId] = useState('');
-  const [minutes, setMinutes] = useState(60);
-  const [message, setMessage] = useState('');
-  const [busy, setBusy] = useState<string | null>(null);
-  const [note, setNote] = useState<{ text: string; tone: 'ok' | 'err' } | null>(null);
-
+function useHashSection(): [string, (id: string) => void] {
+  const read = (): string => window.location.hash.replace(/^#\/?/, '') || 'map';
+  const [id, setId] = useState(read);
   useEffect(() => {
-    setNote(null);
-    setUserId('');
-    setMinutes(60);
-  }, [seat.pc.id]);
-  useEffect(() => {
-    if (!tariffId || !zoneTariffs.some((t) => t.id === tariffId)) {
-      setTariffId(zoneTariffs[0]?.id ?? '');
-    }
-  }, [zoneTariffs, tariffId]);
+    const on = (): void => setId(read());
+    window.addEventListener('hashchange', on);
+    return () => window.removeEventListener('hashchange', on);
+  }, []);
+  return [id, (next) => (window.location.hash = `/${next}`)];
+}
 
-  const run = async (key: string, fn: () => Promise<string>): Promise<void> => {
-    setBusy(key);
-    setNote(null);
+// ---------------------------------------------------------------------------------------------------------------------
+// Sign-in
+// ---------------------------------------------------------------------------------------------------------------------
+
+function Login({ onDone }: { onDone: (staff: StaffMember, shift: Shift | null) => void }): JSX.Element {
+  useLang();
+  const [pin, setPin] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (value: string): Promise<void> => {
+    setBusy(true);
+    setError(null);
     try {
-      setNote({ text: await fn(), tone: 'ok' });
-      onDone();
+      const r = await clubApi.login(value);
+      setToken(r.token);
+      onDone(r.staff, r.shift);
     } catch (e) {
-      setNote({ text: describe(e), tone: 'err' });
+      setError(describe(e));
+      setPin('');
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   };
 
-  const tariff = zoneTariffs.find((t) => t.id === tariffId);
-  const price =
-    tariff && !tariff.isPackage
-      ? Math.round((tariff.pricePerHour.amount / 60) * minutes)
-      : (tariff?.packagePrice?.amount ?? 0);
-  const left = secondsLeft(seat.session);
-  void tick;
+  const press = (d: string): void => {
+    if (busy) return;
+    const next = (pin + d).slice(0, 8);
+    setPin(next);
+  };
+
+  useEffect(() => {
+    const on = (e: KeyboardEvent): void => {
+      if (/^\d$/.test(e.key)) press(e.key);
+      else if (e.key === 'Backspace') setPin((p) => p.slice(0, -1));
+      else if (e.key === 'Enter' && pin.length >= 4) void submit(pin);
+    };
+    window.addEventListener('keydown', on);
+    return () => window.removeEventListener('keydown', on);
+  });
 
   return (
-    <div className="flex h-full flex-col gap-5 overflow-y-auto pr-1">
-      <header className="flex flex-col gap-1">
-        <span className="label flex items-center gap-2">
-          <span className={clsx('h-2 w-2 rounded-full', STATUS[seat.pc.status].dot)} />
-          {seat.pc.zone} · {STATUS[seat.pc.status].label}
-        </span>
-        <h2 className="font-display text-2xl font-normal leading-tight tracking-tight">
-          {seat.user ? seat.user.displayName : seat.pc.name}
-        </h2>
-        {seat.user && <span className="font-mono text-xs text-muted">{seat.pc.name}</span>}
-      </header>
-
-      {seat.session && seat.user && (
-        <dl className="grid grid-cols-2 divide-x divide-line overflow-hidden rounded-md border border-line bg-bg text-center">
-          <div className="flex flex-col gap-1.5 px-3 py-3">
-            <dt className="label">Осталось</dt>
-            <dd className={clsx('num-dot text-2xl leading-none', left >= 0 && left <= 300 && 'text-danger')}>
-              {left < 0 ? '∞' : duration(left)}
-            </dd>
-          </div>
-          <div className="flex flex-col gap-1.5 px-3 py-3">
-            <dt className="label">Баланс</dt>
-            <dd className="tnum text-lg font-semibold leading-none">{money(seat.user.balance)}</dd>
-          </div>
-        </dl>
-      )}
-
-      {note && (
-        <p
-          className={clsx(
-            'rounded-md px-3 py-2 text-sm',
-            note.tone === 'ok' ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger',
-          )}
-        >
-          {note.text}
-        </p>
-      )}
-
-      {seat.session && seat.user ? (
-        <>
-          <section className="flex flex-col gap-4">
-            <Field label="Добавить время">
-              <div className="grid grid-cols-4 gap-1.5">
-                {MINUTE_PRESETS.map((m) => (
-                  <Button
-                    key={m}
-                    disabled={busy !== null}
-                    onClick={() =>
-                      void run(`ext-${m}`, async () => {
-                        const r = await adminApi.extend({ pcId: seat.pc.id, minutes: m });
-                        return `Добавлено ${minutesLabel(m)} · списано ${money(r.charged)}`;
-                      })
-                    }
-                  >
-                    <span className="whitespace-nowrap">+{minutesLabel(m)}</span>
-                  </Button>
-                ))}
-              </div>
-            </Field>
-
-            <Field label="Пополнить баланс">
-              <div className="grid grid-cols-4 gap-1.5">
-                {TOPUP_PRESETS.map((a) => (
-                  <Button
-                    key={a}
-                    disabled={busy !== null}
-                    onClick={() =>
-                      void run(`top-${a}`, async () => {
-                        const r = await adminApi.topUp({ userId: seat.user?.id ?? '', amount: a * 100 });
-                        return `Баланс пополнен · теперь ${money(r.balance)}`;
-                      })
-                    }
-                  >
-                    {a / 1000}к
-                  </Button>
-                ))}
-              </div>
-            </Field>
-          </section>
-
-          <section className="flex flex-col gap-2 border-t border-line pt-4">
-            <Button
-              variant="danger"
-              className="justify-start"
-              disabled={busy !== null}
-              onClick={() =>
-                void run('end', async () => {
-                  const r = await adminApi.end({ pcId: seat.pc.id });
-                  return r.refunded && r.refunded.amount > 0
-                    ? `Сеанс завершён · возврат ${money(r.refunded)}`
-                    : 'Сеанс завершён';
-                })
-              }
-            >
-              Завершить сеанс
-            </Button>
-            <div className="grid grid-cols-2 gap-1.5">
-              <Button
-                variant="ghost"
-                disabled={busy !== null}
-                onClick={() =>
-                  void run('lock', async () => {
-                    await adminApi.command(seat.pc.id, { kind: 'lock' });
-                    return 'ПК заблокирован';
-                  })
-                }
-              >
-                Заблокировать
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={busy !== null}
-                onClick={() =>
-                  void run('unlock', async () => {
-                    await adminApi.command(seat.pc.id, { kind: 'unlock' });
-                    return 'ПК разблокирован';
-                  })
-                }
-              >
-                Разблокировать
-              </Button>
-            </div>
-          </section>
-        </>
-      ) : (
-        <section className="flex flex-col gap-4">
-          <Field label="Клиент">
-            <select className={inputCls} value={userId} onChange={(e) => setUserId(e.target.value)}>
-              <option value="">— выберите клиента —</option>
-              {members.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.displayName} · {money(m.balance)}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Тариф">
-            <select className={inputCls} value={tariffId} onChange={(e) => setTariffId(e.target.value)}>
-              {zoneTariffs.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name} · {money(t.isPackage ? (t.packagePrice ?? t.pricePerHour) : t.pricePerHour)}
-                  {t.isPackage ? '' : ' / ч'}
-                </option>
-              ))}
-            </select>
-          </Field>
-          {!tariff?.isPackage && (
-            <Field label="Время">
-              <div className="grid grid-cols-4 gap-1.5">
-                {MINUTE_PRESETS.map((m) => (
-                  <Button key={m} className={clsx(m === minutes && 'choice-on')} onClick={() => setMinutes(m)}>
-                    {minutesLabel(m)}
-                  </Button>
-                ))}
-              </div>
-            </Field>
-          )}
-          <div className="flex items-center justify-between gap-3 border-t border-line pt-4">
-            <span className="flex flex-col gap-1">
-              <span className="label">К списанию</span>
-              <span className="tnum text-lg font-semibold text-text">{money({ amount: price, currency: 'UZS' })}</span>
-            </span>
-            <Button
-              variant="primary"
-              disabled={busy !== null || !userId || !tariffId || seat.pc.status === 'maintenance'}
-              onClick={() =>
-                void run('open', async () => {
-                  const r = await adminApi.openSession({ pcId: seat.pc.id, userId, tariffId, minutes });
-                  return `Сеанс открыт · списано ${money(r.charged)}`;
-                })
-              }
-            >
-              Открыть сеанс
-            </Button>
-          </div>
-        </section>
-      )}
-
-      <section className="mt-auto flex flex-col gap-2 border-t border-line pt-4">
-        <Field label="Сообщение на экран">
-          <div className="flex gap-1.5">
-            <input
-              className={inputCls}
-              value={message}
-              placeholder="Закрываемся через 20 минут"
-              onChange={(e) => setMessage(e.target.value)}
-            />
-            <Button
-              disabled={busy !== null || message.trim().length === 0}
-              onClick={() =>
-                void run('msg', async () => {
-                  await adminApi.command(seat.pc.id, { kind: 'message', text: message.trim() });
-                  setMessage('');
-                  return 'Сообщение отправлено';
-                })
-              }
-            >
-              Отправить
-            </Button>
-          </div>
-        </Field>
-        <div className="grid grid-cols-2 gap-1.5">
-          <Button
-            variant="ghost"
-            disabled={busy !== null}
-            onClick={() =>
-              void run('reboot', async () => {
-                await adminApi.command(seat.pc.id, { kind: 'reboot' });
-                return 'ПК перезагружается';
-              })
-            }
-          >
-            Перезагрузить
-          </Button>
-          <Button
-            variant="ghost"
-            disabled={busy !== null}
-            onClick={() =>
-              void run('shutdown', async () => {
-                await adminApi.command(seat.pc.id, { kind: 'shutdown' });
-                return 'ПК выключается';
-              })
-            }
-          >
-            Выключить
-          </Button>
+    <div className="flex h-screen items-center justify-center p-6">
+      <div className="panel flex w-[22rem] flex-col items-center gap-6 p-8">
+        <div className="flex items-center gap-3">
+          <span aria-hidden="true" className="h-6 w-6 rotate-45 border border-accent/70" />
+          <span className="font-display text-lg tracking-tight">ClubShell</span>
         </div>
-      </section>
+        <div className="flex flex-col items-center gap-2">
+          <span className="label">{t('Введите PIN')}</span>
+          <div className="flex h-10 items-center gap-2" aria-live="polite">
+            {Array.from({ length: Math.max(4, pin.length) }, (_, i) => (
+              <span
+                key={i}
+                className={clsx(
+                  'h-3 w-3 rounded-full border',
+                  i < pin.length ? 'border-accent bg-accent' : 'border-line',
+                )}
+              />
+            ))}
+          </div>
+        </div>
+        <div className="grid w-full grid-cols-3 gap-2">
+          {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((d) => (
+            <button
+              key={d}
+              type="button"
+              className="focus-ring choice num-dot h-14 rounded-md text-2xl"
+              onClick={() => press(d)}
+            >
+              {d}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="focus-ring h-14 rounded-md text-sm text-muted hover:text-text"
+            onClick={() => setPin('')}
+          >
+            {t('Сброс')}
+          </button>
+          <button
+            type="button"
+            className="focus-ring choice num-dot h-14 rounded-md text-2xl"
+            onClick={() => press('0')}
+          >
+            0
+          </button>
+          <button
+            type="button"
+            className="focus-ring h-14 rounded-md text-sm text-muted hover:text-text"
+            onClick={() => setPin((p) => p.slice(0, -1))}
+          >
+            ⌫
+          </button>
+        </div>
+        <Button variant="primary" className="w-full" disabled={pin.length < 4 || busy} onClick={() => void submit(pin)}>
+          {t('Войти')}
+        </Button>
+        {error && <p className="text-center text-sm text-danger">{error}</p>}
+        <p className="text-center text-xs text-muted">{t('Демо: владелец 0000, кассир 1111')}</p>
+      </div>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// App
+// Shell
 // ---------------------------------------------------------------------------------------------------------------------
 
 export function App(): JSX.Element {
-  const [data, setData] = useState<Overview | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [tick, setTick] = useState(0);
+  const lang = useLang();
+  const [staff, setStaff] = useState<StaffMember | null>(null);
+  const [shift, setShift] = useState<Shift | null>(null);
+  const [checking, setChecking] = useState(hasToken());
+  const [section, go] = useHashSection();
+  const [usage, setUsage] = useState<{ busy: number; total: number } | null>(null);
+  const [now, setNow] = useState(new Date());
 
-  const load = useCallback(async () => {
+  useEffect(() => {
+    if (!hasToken()) return;
+    clubApi
+      .me()
+      .then((r) => {
+        setStaff(r.staff);
+        setShift(r.shift);
+      })
+      .catch(() => setToken(null))
+      .finally(() => setChecking(false));
+  }, []);
+
+  useEffect(() => {
+    const out = (): void => setStaff(null);
+    window.addEventListener('admin:signed-out', out);
+    return () => window.removeEventListener('admin:signed-out', out);
+  }, []);
+
+  const refreshTop = useCallback(async () => {
     try {
-      setData(await adminApi.overview());
-      setError(null);
-    } catch (e) {
-      setError(describe(e));
+      const o = await adminApi.overview();
+      setUsage({ busy: o.club.total - o.club.free, total: o.club.total });
+      const me = await clubApi.me();
+      setShift(me.shift);
+    } catch {
+      // the pages show their own errors
     }
   }, []);
 
   useEffect(() => {
-    void load();
-    const poll = setInterval(() => void load(), POLL_MS);
-    const clock = setInterval(() => setTick((n) => n + 1), 1000);
+    if (!staff) return undefined;
+    void refreshTop();
+    const a = setInterval(() => void refreshTop(), 5000);
+    const b = setInterval(() => setNow(new Date()), 1000);
     return () => {
-      clearInterval(poll);
-      clearInterval(clock);
+      clearInterval(a);
+      clearInterval(b);
     };
-  }, [load]);
+  }, [staff, refreshTop]);
 
-  const seats = data?.seats ?? [];
-  const seat = seats.find((s) => s.pc.id === selected) ?? null;
-  const zones = useMemo(() => {
-    const out = new Map<string, Seat[]>();
-    for (const s of seats) {
-      out.set(s.pc.zone, [...(out.get(s.pc.zone) ?? []), s]);
-    }
-    return [...out.entries()];
-  }, [seats]);
+  if (checking) return <div className="h-screen" />;
+  if (!staff)
+    return (
+      <Login
+        onDone={(s, sh) => {
+          setStaff(s);
+          setShift(sh);
+        }}
+      />
+    );
 
-  const counts = useMemo(() => {
-    const c = new Map<Seat['pc']['status'], number>();
-    for (const x of seats) {
-      c.set(x.pc.status, (c.get(x.pc.status) ?? 0) + 1);
-    }
-    return c;
-  }, [seats]);
-  const now = new Date();
-  void tick;
-  const busy = data ? data.club.total - data.club.free : 0;
+  const allowed = ALL.filter((s) => !s.ownerOnly || staff.role === 'owner');
+  const current = allowed.find((s) => s.id === section) ?? allowed[0];
+  const Page = current?.page ?? MapPage;
+  const locale = lang === 'en' ? 'en-GB' : lang === 'uz' ? 'uz-Latn' : 'ru-RU';
 
   return (
-    <div className="flex h-screen flex-col">
-      {/* Top bar: club, clock and date, hall usage */}
-      <header className="flex h-16 shrink-0 items-center gap-6 border-b border-line px-6">
-        <div className="flex items-center gap-3">
-          <span aria-hidden="true" className="h-5 w-5 rotate-45 border border-accent/70" />
-          <div className="leading-tight">
-            <div className="font-display text-sm tracking-tight">CyberArena Tashkent</div>
-            <div className="label">Касса</div>
-          </div>
+    <div className="grid h-screen grid-cols-[15rem_minmax(0,1fr)] grid-rows-[4rem_minmax(0,1fr)]">
+      {/* Brand cell (top left), like Senet's red block — here the club mark in the accent */}
+      <div className="flex items-center gap-3 border-b border-r border-line px-5">
+        <span aria-hidden="true" className="h-5 w-5 shrink-0 rotate-45 border border-accent/70" />
+        <div className="min-w-0 leading-tight">
+          <div className="truncate font-display text-sm tracking-tight">CyberArena</div>
+          <div className="label">{staff.role === 'owner' ? t('Владелец') : t('Касса')}</div>
         </div>
-        <span className="h-8 w-px bg-line" />
+      </div>
+
+      {/* Top bar */}
+      <header className="flex items-center gap-6 border-b border-line px-6">
         <div className="flex items-baseline gap-3">
           <span className="num-dot text-2xl leading-none">
-            {now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+            {now.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}
           </span>
           <span className="text-sm text-muted">
-            {now.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}
+            {now.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' })}
           </span>
         </div>
-        {error && <p className="rounded-md bg-danger/10 px-3 py-1.5 text-sm text-danger">{error}</p>}
-        <div className="ml-auto flex items-baseline gap-3">
-          <span className="label">Загрузка зала</span>
-          <span className="num-dot text-2xl leading-none">
-            <span className="text-accent">{String(busy).padStart(2, '0')}</span>
-            <span className="text-muted">/{String(data?.club.total ?? 0).padStart(2, '0')}</span>
-          </span>
+        <span className="h-8 w-px bg-line" />
+        <button
+          type="button"
+          onClick={() => go('shift')}
+          className="focus-ring flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-white/[0.04]"
+        >
+          <span className={clsx('h-2 w-2 rounded-full', shift ? 'bg-success' : 'bg-danger')} />
+          {shift ? t('Смена открыта · {name}', { name: shift.staffName }) : t('Смена не открыта')}
+        </button>
+        <div className="ml-auto flex items-center gap-5">
+          {usage && (
+            <div className="flex items-baseline gap-3">
+              <span className="label">{t('Загрузка зала')}</span>
+              <span className="num-dot text-2xl leading-none">
+                <span className="text-accent">{String(usage.busy).padStart(2, '0')}</span>
+                <span className="text-muted">/{String(usage.total).padStart(2, '0')}</span>
+              </span>
+            </div>
+          )}
+          <span className="h-8 w-px bg-line" />
+          <div className="flex rounded-md border border-line p-0.5">
+            {LANGS.map((l) => (
+              <button
+                key={l}
+                type="button"
+                onClick={() => setLang(l)}
+                className={clsx(
+                  'focus-ring h-7 rounded px-2 font-mono text-[0.68rem] uppercase tracking-[0.12em]',
+                  l === lang ? 'bg-accent/15 text-accent' : 'text-muted hover:text-text',
+                )}
+              >
+                {l}
+              </button>
+            ))}
+          </div>
+          <div className="text-right leading-tight">
+            <div className="text-sm">{staff.name}</div>
+            <button
+              type="button"
+              className="focus-ring label hover:text-text"
+              onClick={() => {
+                setToken(null);
+                setStaff(null);
+              }}
+            >
+              {t('Выйти')}
+            </button>
+          </div>
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_24rem]">
-        <div className="flex min-h-0 flex-col gap-5">
-          <div className="panel min-h-0 flex-1 overflow-y-auto p-5">
-            <h1 className="mb-5 font-display text-2xl font-light tracking-tight">Карта зала</h1>
-            <div className="flex flex-col gap-6">
-              {zones.map(([zone, list]) => (
-                <section key={zone} className="flex flex-col gap-2.5">
-                  <h2 className="flex items-baseline justify-between gap-2 border-b border-line pb-2">
-                    <span className="label text-text">{zone}</span>
-                    <span className="tnum font-mono text-xs text-muted">
-                      {list.filter((x) => x.pc.status === 'free').length}/{list.length} свободно
-                    </span>
-                  </h2>
-                  <div className="grid grid-cols-[repeat(auto-fill,minmax(4.5rem,1fr))] gap-2">
-                    {list.map((x) => (
-                      <SeatTile
-                        key={x.pc.id}
-                        seat={x}
-                        tick={tick}
-                        selected={x.pc.id === selected}
-                        onSelect={() => setSelected(x.pc.id)}
-                      />
-                    ))}
-                  </div>
-                </section>
-              ))}
-              {seats.length === 0 && !error && <p className="text-sm text-muted">Нет данных о ПК</p>}
+      {/* Sidebar */}
+      <nav aria-label={t('Разделы')} className="flex flex-col gap-5 overflow-y-auto border-r border-line py-4">
+        {GROUPS.map((g) => {
+          const items = g.items.filter((s) => !s.ownerOnly || staff.role === 'owner');
+          if (items.length === 0) return null;
+          return (
+            <div key={g.title} className="flex flex-col">
+              <span className="label px-5 pb-2">{t(g.title)}</span>
+              {items.map((s) => {
+                const active = s.id === current?.id;
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => go(s.id)}
+                    aria-current={active ? 'page' : undefined}
+                    className={clsx(
+                      'focus-ring flex h-11 items-center gap-3 border-l-2 px-5 text-left text-sm transition-colors [&>svg]:h-5 [&>svg]:w-5 [&>svg]:shrink-0',
+                      active
+                        ? 'border-accent bg-accent/[0.08] text-text'
+                        : 'border-transparent text-muted hover:bg-white/[0.03] hover:text-text',
+                    )}
+                  >
+                    {s.icon}
+                    <span className="truncate">{t(s.title)}</span>
+                  </button>
+                );
+              })}
             </div>
-          </div>
+          );
+        })}
+      </nav>
 
-          {/* Legend that counts: every status, how many seats are in it right now */}
-          <ul className="panel grid shrink-0 grid-cols-3 divide-x divide-line xl:grid-cols-6">
-            {LEGEND_ORDER.map((k) => (
-              <li key={k} className="flex items-center justify-between gap-3 px-4 py-3">
-                <span className="flex items-center gap-2.5 text-sm">
-                  <span className={clsx('h-3 w-3 rounded-[3px] border-2 bg-transparent', STATUS[k].cell)} />
-                  {STATUS[k].label}
-                </span>
-                <span className="num-dot text-lg leading-none">{String(counts.get(k) ?? 0).padStart(2, '0')}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <aside className="panel min-h-0 p-5">
-          {seat && data ? (
-            <SeatPanel seat={seat} members={data.users} tariffs={data.tariffs} tick={tick} onDone={() => void load()} />
-          ) : (
-            <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-              <p className="font-display text-lg tracking-tight">Выберите место</p>
-              <p className="max-w-[20rem] text-sm text-muted">
-                Откройте время, пополните баланс, продлите или завершите сеанс, отправьте сообщение на экран.
-              </p>
-            </div>
-          )}
-        </aside>
-      </div>
+      <main className="min-h-0 overflow-y-auto p-6">
+        <Suspense fallback={null}>
+          <Page key={`${current?.id}-${lang}`} />
+        </Suspense>
+      </main>
     </div>
   );
 }

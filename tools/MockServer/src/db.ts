@@ -619,6 +619,12 @@ export function viewSession(s: SessionRecord, nowMs = Date.now()): Session {
   };
 }
 
+/** Player-facing features set in the admin console, read without importing the club module (it imports this one). */
+function clubFeatures(): Record<string, boolean> | null {
+  const c = (db as unknown as { club?: { features?: Record<string, boolean> } }).club;
+  return c?.features ?? null;
+}
+
 export function agentConfigFor(pc: PcRecord): AgentServerConfig {
   return {
     version: db.configVersion,
@@ -638,7 +644,14 @@ export function agentConfigFor(pc: PcRecord): AgentServerConfig {
     shell: {
       locale: 'ru',
       theme: pc.zone === 'VIP' ? 'neon' : 'default',
-      features: { shop: true, chat: true, booking: true, tournaments: true, ads: pc.zone !== 'VIP' },
+      // The owner's switches from the admin console (`db.club.features`) win over the defaults.
+      features: {
+        shop: clubFeatures()?.shop ?? true,
+        chat: clubFeatures()?.chat ?? true,
+        booking: clubFeatures()?.booking ?? true,
+        tournaments: clubFeatures()?.tournaments ?? true,
+        ads: pc.zone !== 'VIP',
+      },
       ads: { enabled: pc.zone !== 'VIP', intervalSec: 900 },
       idle: { timeoutSec: 300 },
     },

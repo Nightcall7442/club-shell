@@ -26,6 +26,8 @@ import {
   type PcRecord,
 } from './db.js';
 import { adminRoutes } from './routes/admin.js';
+import { clubRoutes } from './routes/club.js';
+import { tickClub } from './club.js';
 import { authRoutes } from './routes/auth.js';
 import { chatRoutes, tickChat } from './routes/chat.js';
 import { gamesRoutes } from './routes/games.js';
@@ -285,6 +287,7 @@ export async function buildApp(opts: Options): Promise<FastifyInstance> {
       pcsRoutes(api);
       authRoutes(api);
       adminRoutes(api);
+      clubRoutes(api);
       sessionRoutes(api);
       gamesRoutes(api);
       walletRoutes(api);
@@ -302,6 +305,7 @@ export async function buildApp(opts: Options): Promise<FastifyInstance> {
       tickShop(t);
       tickWallet(t);
       tickChat(t);
+      tickClub(t);
     } catch (err) {
       console.error('[tick]', err);
     }
