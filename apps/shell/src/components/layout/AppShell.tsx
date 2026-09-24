@@ -67,12 +67,16 @@ export function AppShell(): JSX.Element {
       <Background />
       <div className="relative z-10 flex h-full w-full flex-col">
         <div className="relative min-h-0 flex-1 overflow-hidden" onScrollCapture={onScroll}>
-          <header
+          {/* Boot: after sign-in the HUD powers on — the bars slide in and the brackets fly out to the corners. */}
+          <motion.header
+            initial={animations ? { y: '-100%', opacity: 0 } : false}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ duration: 0.6, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
             data-scrolled={scrolled}
             className="absolute inset-x-0 top-0 z-20 h-[var(--topbar-h)] min-w-0 border-b border-transparent bg-gradient-to-b from-bg/90 via-bg/50 to-transparent transition-[background-color,border-color] duration-[var(--dur-base)] data-[scrolled=true]:border-[color:var(--hairline)] data-[scrolled=true]:bg-bg"
           >
             <TopBar />
-          </header>
+          </motion.header>
           <AnimatePresence mode="wait" initial={false}>
             <motion.main
               key={location.pathname}
@@ -88,14 +92,23 @@ export function AppShell(): JSX.Element {
             </motion.main>
           </AnimatePresence>
         </div>
-        <footer className="h-[var(--statusbar-h)] shrink-0">
+        <motion.footer
+          className="h-[var(--statusbar-h)] shrink-0"
+          initial={animations ? { y: '100%', opacity: 0 } : false}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ duration: 0.6, delay: 0.25, ease: [0.16, 1, 0.3, 1] }}
+        >
           <StatusBar />
-        </footer>
+        </motion.footer>
       </div>
       {/* The screen itself is the target: four brackets on its corners. */}
-      <div
+      <motion.div
         aria-hidden="true"
-        className="hud-brackets pointer-events-none fixed inset-0 z-30 opacity-60 [--brk-inset:10px] [--brk-size:22px]"
+        className="hud-brackets pointer-events-none fixed z-30 opacity-60 [--brk-inset:10px] [--brk-size:22px]"
+        initial={animations ? { inset: '40% 44%' } : false}
+        animate={{ inset: '0%' }}
+        style={{ inset: 0 }}
+        transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1] }}
       />
       <NotificationCenter />
       <VirtualKeyboard />

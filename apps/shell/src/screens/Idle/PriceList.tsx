@@ -17,6 +17,7 @@ import { useLocale } from '@/hooks/useLocale';
 import { formatMoney } from '@/lib/format';
 import { formatClock, serverNow } from '@/lib/time';
 import { useWalletStore } from '@/store/wallet';
+import { DotAmount } from '@/components/ui/DotAmount';
 
 export interface PriceListProps {
   /** Tariffs to show; defaults to the wallet store (loaded on mount when empty). */
@@ -126,7 +127,9 @@ export function PriceList({ tariffs, compact = false, className }: PriceListProp
       aria-label={t('idle.priceList')}
       className={clsx('glass flex flex-col rounded-2xl', compact ? 'gap-3 p-5' : 'gap-5 p-7', className)}
     >
-      <h2 className={clsx('font-semibold text-text', compact ? 'text-lg' : 'text-2xl')}>{t('idle.tariffsTitle')}</h2>
+      <h2 className={clsx('font-display font-normal tracking-tight text-text', compact ? 'text-lg' : 'text-2xl')}>
+        {t('idle.tariffsTitle')}
+      </h2>
 
       {loading && list.length === 0 ? (
         <div className="flex flex-col gap-3">
@@ -178,14 +181,10 @@ export function PriceList({ tariffs, compact = false, className }: PriceListProp
                         </p>
                       )}
                     </div>
-                    <span
-                      className={clsx(
-                        'tnum shrink-0 whitespace-nowrap font-semibold text-primary',
-                        compact ? 'text-xl' : 'text-2xl',
-                      )}
-                    >
-                      {price}
-                    </span>
+                    <DotAmount
+                      value={price}
+                      className={clsx('tnum shrink-0 text-text', compact ? 'text-xl' : 'text-[1.7rem]')}
+                    />
                   </li>
                 );
               })}

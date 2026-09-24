@@ -8,6 +8,7 @@ import { Badge, type BadgeTone } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { useGamepad } from '@/hooks/useGamepad';
 import { useLocale } from '@/hooks/useLocale';
 import { formatDate, formatDurationSec, formatTime } from '@/lib/format';
@@ -464,7 +465,7 @@ export default function BookingScreen(): JSX.Element {
         <div className="glass flex min-h-0 flex-1 flex-col rounded-2xl p-5">
           <h2 className="font-display mb-3 text-xl font-normal text-text tracking-tight">{t('booking.myBookings')}</h2>
           {myBookings.length === 0 ? (
-            <p className="text-muted">{t('booking.noBookings')}</p>
+            <EmptyState icon={<CalendarIcon />} title={t('booking.noBookings')} className="flex-1" />
           ) : (
             <ul role="list" className="no-scrollbar flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
               {myBookings.map((b) => {

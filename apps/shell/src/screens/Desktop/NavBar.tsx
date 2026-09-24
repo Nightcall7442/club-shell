@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import type { ShellFeatures } from '@clubshell/contracts';
 import { useGamepad } from '@/hooks/useGamepad';
+import { press } from '@/lib/sound';
 import { selectUnreadTotal, useChatStore } from '@/store/chat';
 import { selectFeatures, useSettingsStore } from '@/store/settings';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
@@ -70,6 +71,7 @@ export function NavBar({ className }: { className?: string }): JSX.Element {
       const from = currentIndex < 0 ? 0 : currentIndex;
       const next = items[(from + (dir === 'next' ? 1 : -1) + items.length) % items.length];
       if (next) {
+        press();
         navigate(next.to);
       }
     },

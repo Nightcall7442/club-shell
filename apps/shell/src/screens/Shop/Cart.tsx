@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { DotAmount } from '@/components/ui/DotAmount';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { useLocale } from '@/hooks/useLocale';
 import { formatMoney } from '@/lib/format';
 import { isShellApiError } from '@/lib/tauri';
@@ -122,12 +123,8 @@ export function Cart({ onInsufficientFunds, className }: CartProps): JSX.Element
 
       <ul role="list" className="themed-scrollbar min-h-0 flex-1 overflow-y-auto px-5 py-4" aria-live="polite">
         {empty ? (
-          <li className="flex h-full min-h-[10rem] flex-col items-center justify-center gap-2 text-center">
-            <span className="inline-flex h-12 w-12 text-muted/60" aria-hidden="true">
-              <BagIcon />
-            </span>
-            <p className="text-lg font-semibold text-text">{t('shop.emptyCart')}</p>
-            <p className="text-base text-muted">{t('shop.emptyCartHint')}</p>
+          <li className="flex h-full min-h-[10rem] items-center justify-center">
+            <EmptyState icon={<BagIcon />} title={t('shop.emptyCart')} hint={t('shop.emptyCartHint')} />
           </li>
         ) : (
           <AnimatePresence initial={false}>
