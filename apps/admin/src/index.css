@@ -7,20 +7,39 @@
     color-scheme: dark;
   }
   body {
-    @apply bg-bg text-text antialiased;
-    font-feature-settings: 'tnum' 0;
+    @apply bg-bg font-sans text-text antialiased;
   }
 }
 
+/* Same material as the kiosk shell (Obsidian): flat panels, hairlines, one ice-blue accent, mono labels, dot digits. */
 @layer components {
-  /* Charcoal panel with the glass thickness line, same material as the kiosk shell. */
   .panel {
-    @apply rounded-2xl border border-line bg-surface/70 shadow-[inset_0_1px_0_rgba(250,250,250,0.06),0_16px_48px_-16px_rgba(0,0,0,0.7)];
+    @apply rounded-xl border border-line bg-surface;
+  }
+  .label {
+    @apply font-mono text-[0.68rem] font-medium uppercase tracking-[0.14em] text-muted;
+  }
+  .num-dot {
+    @apply font-dot font-black;
+    font-variant-numeric: tabular-nums;
   }
   .tnum {
     font-variant-numeric: tabular-nums;
   }
   .focus-ring:focus-visible {
-    @apply outline-none ring-2 ring-primary/90;
+    @apply outline-none ring-[1.5px] ring-accent;
+  }
+  .choice {
+    @apply border border-line bg-white/[0.03] text-text hover:bg-white/[0.06];
+  }
+  .choice-on {
+    @apply border-accent/70 bg-accent/10;
+  }
+  .cut-corners {
+    --cut: 9px;
+    --fill: theme('colors.accent');
+    background:
+      linear-gradient(135deg, transparent var(--cut), var(--fill) 0) left top / 100% 51% no-repeat,
+      linear-gradient(-45deg, transparent var(--cut), var(--fill) 0) right bottom / 100% 51% no-repeat;
   }
 }

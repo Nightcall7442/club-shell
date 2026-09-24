@@ -20,6 +20,18 @@ importers:
       '@clubshell/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts-ts
+      '@fontsource-variable/doto':
+        specifier: 5.3.0
+        version: 5.3.0
+      '@fontsource-variable/inter':
+        specifier: ^5.3.0
+        version: 5.3.0
+      '@fontsource-variable/jetbrains-mono':
+        specifier: 5.3.0
+        version: 5.3.0
+      '@fontsource-variable/unbounded':
+        specifier: 5.3.0
+        version: 5.3.0
       clsx:
         specifier: 2.1.1
         version: 2.1.1

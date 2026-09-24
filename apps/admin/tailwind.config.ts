@@ -8,7 +8,8 @@ export default {
       colors: {
         bg: '#07090C',
         surface: '#0D1117',
-        line: 'rgba(250,250,250,0.08)',
+        line: 'rgba(154,223,255,0.1)',
+        'on-accent': '#031018',
         primary: '#F4F4F5',
         'on-primary': '#07090C',
         accent: '#9ADFFF',
@@ -17,7 +18,12 @@ export default {
         danger: '#EF4444',
         success: '#22C55E',
       },
-      fontFamily: { sans: ['Inter', 'Segoe UI', 'system-ui', 'sans-serif'] },
+      fontFamily: {
+        sans: ['"Inter Variable"', 'Inter', 'Segoe UI', 'system-ui', 'sans-serif'],
+        display: ['"Unbounded Variable"', '"Inter Variable"', 'sans-serif'],
+        mono: ['"JetBrains Mono Variable"', 'ui-monospace', 'monospace'],
+        dot: ['"Doto Variable"', '"JetBrains Mono Variable"', 'monospace'],
+      },
     },
   },
   plugins: [],

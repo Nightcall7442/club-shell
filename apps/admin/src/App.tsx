@@ -1,6 +1,7 @@
 /**
- * Club counter: the hall map on the left, the selected seat on the right. Everything a cashier does at the desk —
- * open time, add time, end a session, top up a wallet, message or lock a PC — is one click from the seat panel.
+ * Club counter, in the kiosk's Obsidian material: a top bar (club, clock, hall usage), the hall map as strict numbered
+ * cells per zone with a status legend that counts, and the selected seat on the right. Everything a cashier does at
+ * the desk — open time, add time, end a session, top up a wallet, message or lock a PC — is one click from that panel.
  * Polls `/admin/overview` every 2 s (the real console would follow the server's WebSocket).
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -13,14 +14,21 @@ const POLL_MS = 2000;
 const MINUTE_PRESETS = [30, 60, 120, 180];
 const TOPUP_PRESETS = [20_000, 50_000, 100_000, 200_000];
 
-const STATUS: Record<Seat['pc']['status'], { label: string; short: string; dot: string; ring: string }> = {
-  free: { label: 'Свободен', short: 'своб.', dot: 'bg-success', ring: 'border-success/25' },
-  busy: { label: 'Занят', short: 'занят', dot: 'bg-accent', ring: 'border-accent/30' },
-  locked: { label: 'Заблокирован', short: 'блок', dot: 'bg-danger', ring: 'border-danger/30' },
-  maintenance: { label: 'Обслуживание', short: 'сервис', dot: 'bg-danger/70', ring: 'border-line' },
-  booked: { label: 'Бронь', short: 'бронь', dot: 'bg-primary', ring: 'border-primary/30' },
-  offline: { label: 'Офлайн', short: 'офлайн', dot: 'bg-muted/40', ring: 'border-line' },
+const STATUS: Record<Seat['pc']['status'], { label: string; short: string; dot: string; cell: string }> = {
+  free: { label: 'Свободен', short: 'своб.', dot: 'bg-success', cell: 'border-success/40 text-text' },
+  busy: { label: 'Занят', short: 'занят', dot: 'bg-accent', cell: 'border-accent/60 bg-accent/[0.06] text-accent' },
+  locked: { label: 'Заблокирован', short: 'блок', dot: 'bg-danger', cell: 'border-danger/60 text-danger' },
+  maintenance: {
+    label: 'Обслуживание',
+    short: 'сервис',
+    dot: 'bg-fuchsia-400',
+    cell: 'border-fuchsia-400/50 text-fuchsia-300',
+  },
+  booked: { label: 'Бронь', short: 'бронь', dot: 'bg-amber-300', cell: 'border-amber-300/50 text-amber-200' },
+  offline: { label: 'Офлайн', short: 'офлайн', dot: 'bg-muted/40', cell: 'border-line text-muted/50' },
 };
+
+const LEGEND_ORDER: Seat['pc']['status'][] = ['free', 'busy', 'booked', 'locked', 'maintenance', 'offline'];
 
 const ERROR_COPY: Record<string, string> = {
   insufficientFunds: 'Недостаточно средств на балансе',
@@ -63,9 +71,9 @@ function Button({
       type="button"
       {...rest}
       className={clsx(
-        'focus-ring inline-flex h-10 select-none items-center justify-center gap-2 rounded-lg px-3.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40',
-        variant === 'primary' && 'bg-primary text-on-primary hover:bg-white',
-        variant === 'secondary' && 'bg-white/[0.06] text-text hover:bg-white/[0.12]',
+        'focus-ring inline-flex h-10 select-none items-center justify-center gap-2 whitespace-nowrap rounded-md px-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+        variant === 'primary' && 'cut-corners rounded-none text-on-accent hover:brightness-110',
+        variant === 'secondary' && 'choice',
         variant === 'ghost' && 'text-muted hover:bg-white/[0.06] hover:text-text',
         variant === 'danger' && 'text-danger hover:bg-danger/10',
         rest.className,
@@ -90,7 +98,7 @@ function SeatTile({
   void tick;
   const s = STATUS[seat.pc.status];
   const left = secondsLeft(seat.session);
-  const warn = left >= 0 && left <= 5 * 60;
+  const warn = seat.session !== null && left >= 0 && left <= 5 * 60;
   return (
     <button
       type="button"
@@ -98,19 +106,20 @@ function SeatTile({
       aria-pressed={selected}
       title={`${seat.pc.name} · ${s.label}${seat.user ? ` · ${seat.user.displayName}` : ''}`}
       className={clsx(
-        'focus-ring relative flex aspect-square flex-col items-center justify-center gap-0.5 rounded-lg border text-center transition-colors',
-        selected ? 'border-primary bg-primary/10' : `${s.ring} bg-white/[0.02] hover:bg-white/[0.06]`,
+        'focus-ring relative flex aspect-square flex-col items-center justify-center gap-1.5 rounded-md border bg-bg text-center transition-colors hover:bg-white/[0.04]',
+        s.cell,
+        selected && 'ring-2 ring-accent ring-offset-2 ring-offset-surface',
       )}
     >
-      <span className={clsx('absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full', s.dot)} />
-      <span className="tnum text-base font-bold leading-none">{seat.pc.number}</span>
+      <span className="num-dot text-[1.6rem] leading-none">{String(seat.pc.number).padStart(2, '0')}</span>
       {seat.session ? (
-        <span className={clsx('tnum text-[0.65rem] leading-none', warn ? 'text-danger' : 'text-muted')}>
+        <span className={clsx('tnum font-mono text-[0.68rem] leading-none', warn ? 'text-danger' : 'text-muted')}>
           {left < 0 ? '∞' : duration(left)}
         </span>
       ) : (
-        <span className="text-[0.65rem] leading-none text-muted">{s.short}</span>
+        <span className="font-mono text-[0.62rem] uppercase leading-none tracking-[0.1em] text-muted">{s.short}</span>
       )}
+      {warn && <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 animate-pulse rounded-full bg-danger" />}
     </button>
   );
 }
@@ -118,14 +127,14 @@ function SeatTile({
 function Field({ label, children }: { label: string; children: React.ReactNode }): JSX.Element {
   return (
     <label className="flex flex-col gap-1.5">
-      <span className="text-xs uppercase tracking-wide text-muted">{label}</span>
+      <span className="label">{label}</span>
       {children}
     </label>
   );
 }
 
 const inputCls =
-  'focus-ring h-10 w-full rounded-lg border border-line bg-white/[0.03] px-3 text-sm text-text placeholder:text-muted';
+  'focus-ring h-10 w-full rounded-md border border-line bg-bg px-3 text-sm text-text placeholder:text-muted';
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Seat panel
@@ -192,27 +201,36 @@ function SeatPanel({
 
   return (
     <div className="flex h-full flex-col gap-5 overflow-y-auto pr-1">
-      <header className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="text-xl font-bold leading-tight">{seat.pc.name}</h2>
-          <p className="text-sm text-muted">
-            {seat.pc.zone} · {STATUS[seat.pc.status].label}
-          </p>
-        </div>
-        {seat.session && (
-          <div className="shrink-0 text-right">
-            <div className="text-[0.7rem] uppercase tracking-wide text-muted">Осталось</div>
-            <div className={clsx('tnum text-2xl font-bold leading-none', left >= 0 && left <= 300 && 'text-danger')}>
-              {left < 0 ? '∞' : duration(left)}
-            </div>
-          </div>
-        )}
+      <header className="flex flex-col gap-1">
+        <span className="label flex items-center gap-2">
+          <span className={clsx('h-2 w-2 rounded-full', STATUS[seat.pc.status].dot)} />
+          {seat.pc.zone} · {STATUS[seat.pc.status].label}
+        </span>
+        <h2 className="font-display text-2xl font-normal leading-tight tracking-tight">
+          {seat.user ? seat.user.displayName : seat.pc.name}
+        </h2>
+        {seat.user && <span className="font-mono text-xs text-muted">{seat.pc.name}</span>}
       </header>
+
+      {seat.session && seat.user && (
+        <dl className="grid grid-cols-2 divide-x divide-line overflow-hidden rounded-md border border-line bg-bg text-center">
+          <div className="flex flex-col gap-1.5 px-3 py-3">
+            <dt className="label">Осталось</dt>
+            <dd className={clsx('num-dot text-2xl leading-none', left >= 0 && left <= 300 && 'text-danger')}>
+              {left < 0 ? '∞' : duration(left)}
+            </dd>
+          </div>
+          <div className="flex flex-col gap-1.5 px-3 py-3">
+            <dt className="label">Баланс</dt>
+            <dd className="tnum text-lg font-semibold leading-none">{money(seat.user.balance)}</dd>
+          </div>
+        </dl>
+      )}
 
       {note && (
         <p
           className={clsx(
-            'rounded-lg px-3 py-2 text-sm',
+            'rounded-md px-3 py-2 text-sm',
             note.tone === 'ok' ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger',
           )}
         >
@@ -223,11 +241,6 @@ function SeatPanel({
       {seat.session && seat.user ? (
         <>
           <section className="flex flex-col gap-4">
-            <div className="flex items-baseline justify-between gap-3">
-              <span className="truncate text-base font-semibold">{seat.user.displayName}</span>
-              <span className="tnum shrink-0 text-sm text-muted">{money(seat.user.balance)}</span>
-            </div>
-
             <Field label="Добавить время">
               <div className="grid grid-cols-4 gap-1.5">
                 {MINUTE_PRESETS.map((m) => (
@@ -241,7 +254,7 @@ function SeatPanel({
                       })
                     }
                   >
-                    +{minutesLabel(m)}
+                    <span className="whitespace-nowrap">+{minutesLabel(m)}</span>
                   </Button>
                 ))}
               </div>
@@ -337,7 +350,7 @@ function SeatPanel({
             <Field label="Время">
               <div className="grid grid-cols-4 gap-1.5">
                 {MINUTE_PRESETS.map((m) => (
-                  <Button key={m} variant={m === minutes ? 'primary' : 'secondary'} onClick={() => setMinutes(m)}>
+                  <Button key={m} className={clsx(m === minutes && 'choice-on')} onClick={() => setMinutes(m)}>
                     {minutesLabel(m)}
                   </Button>
                 ))}
@@ -345,9 +358,9 @@ function SeatPanel({
             </Field>
           )}
           <div className="flex items-center justify-between gap-3 border-t border-line pt-4">
-            <span className="text-sm text-muted">
-              К списанию{' '}
-              <span className="tnum text-base font-bold text-text">{money({ amount: price, currency: 'UZS' })}</span>
+            <span className="flex flex-col gap-1">
+              <span className="label">К списанию</span>
+              <span className="tnum text-lg font-semibold text-text">{money({ amount: price, currency: 'UZS' })}</span>
             </span>
             <Button
               variant="primary"
@@ -458,53 +471,98 @@ export function App(): JSX.Element {
     return [...out.entries()];
   }, [seats]);
 
+  const counts = useMemo(() => {
+    const c = new Map<Seat['pc']['status'], number>();
+    for (const x of seats) {
+      c.set(x.pc.status, (c.get(x.pc.status) ?? 0) + 1);
+    }
+    return c;
+  }, [seats]);
+  const now = new Date();
+  void tick;
+  const busy = data ? data.club.total - data.club.free : 0;
+
   return (
-    <div className="mx-auto flex h-screen max-w-[1800px] flex-col gap-4 p-5">
-      <header className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">
-            Касса <span className="text-muted">· CyberArena Tashkent</span>
-          </h1>
-          <p className="text-sm text-muted">
-            {data ? `Свободно ${data.club.free} из ${data.club.total}` : 'Загрузка…'}
-          </p>
+    <div className="flex h-screen flex-col">
+      {/* Top bar: club, clock and date, hall usage */}
+      <header className="flex h-16 shrink-0 items-center gap-6 border-b border-line px-6">
+        <div className="flex items-center gap-3">
+          <span aria-hidden="true" className="h-5 w-5 rotate-45 border border-accent/70" />
+          <div className="leading-tight">
+            <div className="font-display text-sm tracking-tight">CyberArena Tashkent</div>
+            <div className="label">Касса</div>
+          </div>
         </div>
-        {error && <p className="rounded-xl bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>}
+        <span className="h-8 w-px bg-line" />
+        <div className="flex items-baseline gap-3">
+          <span className="num-dot text-2xl leading-none">
+            {now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+          </span>
+          <span className="text-sm text-muted">
+            {now.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}
+          </span>
+        </div>
+        {error && <p className="rounded-md bg-danger/10 px-3 py-1.5 text-sm text-danger">{error}</p>}
+        <div className="ml-auto flex items-baseline gap-3">
+          <span className="label">Загрузка зала</span>
+          <span className="num-dot text-2xl leading-none">
+            <span className="text-accent">{String(busy).padStart(2, '0')}</span>
+            <span className="text-muted">/{String(data?.club.total ?? 0).padStart(2, '0')}</span>
+          </span>
+        </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_26rem]">
-        <div className="panel min-h-0 overflow-y-auto p-4">
-          {zones.map(([zone, list]) => (
-            <section key={zone} className="mb-6 last:mb-0">
-              <h2 className="mb-2 flex items-baseline gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-                {zone}
-                <span className="tnum font-normal normal-case tracking-normal">
-                  {list.filter((s) => s.pc.status === 'free').length} / {list.length} свободно
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_24rem]">
+        <div className="flex min-h-0 flex-col gap-5">
+          <div className="panel min-h-0 flex-1 overflow-y-auto p-5">
+            <h1 className="mb-5 font-display text-2xl font-light tracking-tight">Карта зала</h1>
+            <div className="flex flex-col gap-6">
+              {zones.map(([zone, list]) => (
+                <section key={zone} className="flex flex-col gap-2.5">
+                  <h2 className="flex items-baseline justify-between gap-2 border-b border-line pb-2">
+                    <span className="label text-text">{zone}</span>
+                    <span className="tnum font-mono text-xs text-muted">
+                      {list.filter((x) => x.pc.status === 'free').length}/{list.length} свободно
+                    </span>
+                  </h2>
+                  <div className="grid grid-cols-[repeat(auto-fill,minmax(4.5rem,1fr))] gap-2">
+                    {list.map((x) => (
+                      <SeatTile
+                        key={x.pc.id}
+                        seat={x}
+                        tick={tick}
+                        selected={x.pc.id === selected}
+                        onSelect={() => setSelected(x.pc.id)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              ))}
+              {seats.length === 0 && !error && <p className="text-sm text-muted">Нет данных о ПК</p>}
+            </div>
+          </div>
+
+          {/* Legend that counts: every status, how many seats are in it right now */}
+          <ul className="panel grid shrink-0 grid-cols-3 divide-x divide-line xl:grid-cols-6">
+            {LEGEND_ORDER.map((k) => (
+              <li key={k} className="flex items-center justify-between gap-3 px-4 py-3">
+                <span className="flex items-center gap-2.5 text-sm">
+                  <span className={clsx('h-3 w-3 rounded-[3px] border-2 bg-transparent', STATUS[k].cell)} />
+                  {STATUS[k].label}
                 </span>
-              </h2>
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(3.25rem,1fr))] gap-1.5">
-                {list.map((s) => (
-                  <SeatTile
-                    key={s.pc.id}
-                    seat={s}
-                    tick={tick}
-                    selected={s.pc.id === selected}
-                    onSelect={() => setSelected(s.pc.id)}
-                  />
-                ))}
-              </div>
-            </section>
-          ))}
-          {seats.length === 0 && !error && <p className="text-sm text-muted">Нет данных о ПК</p>}
+                <span className="num-dot text-lg leading-none">{String(counts.get(k) ?? 0).padStart(2, '0')}</span>
+              </li>
+            ))}
+          </ul>
         </div>
 
-        <aside className="panel min-h-0 p-4">
+        <aside className="panel min-h-0 p-5">
           {seat && data ? (
             <SeatPanel seat={seat} members={data.users} tariffs={data.tariffs} tick={tick} onDone={() => void load()} />
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-              <p className="text-lg font-semibold">Выберите место</p>
-              <p className="max-w-[22rem] text-sm text-muted">
+              <p className="font-display text-lg tracking-tight">Выберите место</p>
+              <p className="max-w-[20rem] text-sm text-muted">
                 Откройте время, пополните баланс, продлите или завершите сеанс, отправьте сообщение на экран.
               </p>
             </div>
