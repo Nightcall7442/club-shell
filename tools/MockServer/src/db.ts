@@ -1649,7 +1649,15 @@ function load(): Db {
 /** The kiosk's demo art (`apps/shell/public/mock-art`), served by this server at `/mock-art/*`. */
 export const MOCK_ART_DIR = fileURLToPath(new URL('../../../apps/shell/public/mock-art/', import.meta.url));
 const PUBLIC_URL = process.env['MOCK_PUBLIC_URL'] ?? 'http://localhost:8080';
-const ART_ALIASES: Record<string, string> = { americano: 'coffee', lays: 'chips', popcorn: 'chips' };
+const ART_ALIASES: Record<string, string> = {
+  americano: 'coffee',
+  lays: 'chips',
+  popcorn: 'chips',
+  gta5: 'gtav',
+  rocketleague: 'rocket',
+  overwatch2: 'ow2',
+  fc24: 'fc25',
+};
 
 /**
  * Swaps the seed's placeholder image hosts (picsum.photos, unreachable offline) for the local demo art when a matching
@@ -1666,8 +1674,10 @@ function localArt(url: string | null | undefined): string | null | undefined {
     const slug = seed.slice(8);
     candidates.push(`p-${ART_ALIASES[slug] ?? slug}.jpg`, `p-${slug}.svg`);
   } else if (seed.startsWith('app-') || seed.startsWith('ach-')) candidates.push(`${seed}.svg`);
-  else if (seed.endsWith('-hero')) candidates.push(`${seed}.jpg`);
-  else candidates.push(`${seed}-cover.jpg`);
+  else if (seed.endsWith('-hero')) {
+    const slug = seed.slice(0, -5);
+    candidates.push(`${ART_ALIASES[slug] ?? slug}-hero.jpg`);
+  } else candidates.push(`${ART_ALIASES[seed] ?? seed}-cover.jpg`);
   const hit = candidates.find((f) => existsSync(`${MOCK_ART_DIR}${f}`));
   return hit ? `${PUBLIC_URL}/mock-art/${hit}` : url;
 }
