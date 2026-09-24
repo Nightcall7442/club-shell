@@ -35,6 +35,7 @@ import {
   uuid,
   type LeaseRecord,
 } from '../db.js';
+import { club } from '../club.js';
 
 const LEASE_TTL_SEC = 14_400;
 const RELEASE_REASONS = Object.values(AccountLeaseReleaseReason);
@@ -59,7 +60,16 @@ export function gamesRoutes(app: FastifyInstance): void {
   app.get<{ Querystring: { zone?: string; page?: string; pageSize?: string } }>('/games', async (req, reply) => {
     requireAgent(req);
     const userId = optionalUser(req)?.id ?? null;
-    const all = db.games.map((g) => withLastPlayed(g, userId));
+    // The club's catalogue settings: hidden games are left out, the owner's order comes first.
+    const { hidden, order } = club().catalog;
+    const rank = (id: string): number => {
+      const i = order.indexOf(id);
+      return i < 0 ? Number.MAX_SAFE_INTEGER : i;
+    };
+    const all = db.games
+      .filter((g) => !hidden.includes(g.id))
+      .sort((a, b) => rank(a.id) - rank(b.id))
+      .map((g) => withLastPlayed(g, userId));
     const paged =
       req.query.page || req.query.pageSize
         ? paginate(all, { page: req.query.page, pageSize: req.query.pageSize ?? '1000' }, 1000)

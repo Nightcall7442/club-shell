@@ -36,15 +36,14 @@ import {
   type UserRecord,
 } from '../db.js';
 import { endSession } from './session.js';
+import { requireStaff, topUpWithBonus } from './club.js';
+import { club, clubHooks, inCurfew, isMinor, profileOf, quote } from '../club.js';
 import { broadcast, pushToPc, pushToUser, sendCommand } from '../ws.js';
 
-const ADMIN_TOKEN = process.env['MOCK_ADMIN_TOKEN'] ?? 'admin-dev-token';
 const STAFF_NAME = 'Администратор';
 
 function requireAdmin(req: FastifyRequest): void {
-  const authz = req.headers.authorization;
-  const token = typeof authz === 'string' && authz.startsWith('Bearer ') ? authz.slice(7).trim() : '';
-  if (token !== ADMIN_TOKEN) throw errors.unauthorized('invalid');
+  requireStaff(req);
 }
 
 /** One row of the hall map: the PC, who is on it and how much time is left. */
@@ -87,7 +86,8 @@ export function adminRoutes(app: FastifyInstance): void {
       club: { free: seats.filter((s) => s.pc.status === 'free').length, total: seats.length },
       seats,
       tariffs: db.tariffs,
-      users: db.users.filter((u) => !u.transient && u.role !== 'admin').map(userView),
+      users: db.users.filter((u) => !u.transient && u.role !== 'admin' && !profileOf(u.id).blacklisted).map(userView),
+      zones: club().zones,
     };
   });
 
@@ -112,8 +112,10 @@ export function adminRoutes(app: FastifyInstance): void {
         sessionId: mine.id,
         pcId: mine.pcId,
       });
+    if (profileOf(userId).blacklisted) throw errors.policyDenied('blacklisted');
+    if (isMinor(userId) && inCurfew()) throw errors.policyDenied('minorCurfew');
     const mins = tariff.isPackage ? (tariff.packageMinutes ?? minutes) : minutes;
-    const cost = tariffPriceFor(tariff, mins);
+    const cost = quote(tariff, mins, userId, pc.zone).total;
     if (user.balance.amount < cost.amount) throw errors.insufficientFunds(cost, user.balance);
     const id = uuid();
     if (cost.amount > 0)
@@ -144,6 +146,7 @@ export function adminRoutes(app: FastifyInstance): void {
     pushToPc(pcId, 'sessionUpdated', session);
     broadcast('pcStatusChanged', { pcId, status: 'busy' });
     pushToUser(userId, 'walletUpdated', balanceOf(user));
+    clubHooks.sessionOpened(rec);
     return reply.code(201).send({ session, charged: cost, balance: user.balance });
   });
 
@@ -158,7 +161,7 @@ export function adminRoutes(app: FastifyInstance): void {
     if (!tariff) throw errors.notFound('tariff');
     if (!user) throw errors.notFound('user');
     if (!rec.isPrepaid) throw errors.conflict('postpaidSession');
-    const cost = tariffPriceFor(tariff, minutes);
+    const cost = quote(tariff, minutes, user.id, findPc(rec.pcId)?.zone ?? '').total;
     if (user.balance.amount < cost.amount) throw errors.insufficientFunds(cost, user.balance);
     if (cost.amount > 0)
       applyTransaction(user, 'charge', uzs(-cost.amount), `Extension +${minutes} min · ${tariff.name} (staff)`, rec.id);
@@ -189,9 +192,8 @@ export function adminRoutes(app: FastifyInstance): void {
     const amount = int(b, 'amount', 1, 100_000_000);
     const method = optStr(b, 'method', 16) ?? 'cash';
     if (!user) throw errors.notFound('user');
-    const tx = applyTransaction(user, 'topUp', uzs(amount), `Top-up at the counter (${method})`, null);
-    pushToUser(user.id, 'walletUpdated', balanceOf(user));
-    return { balance: user.balance, transaction: tx };
+    const { bonus } = topUpWithBonus(user, amount, method);
+    return { balance: user.balance, bonus: uzs(bonus) };
   });
 
   /** Staff message, lock/unlock and power commands — the existing `ServerCommand` set. */
