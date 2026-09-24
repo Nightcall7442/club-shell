@@ -62,10 +62,21 @@
 
 <img src="docs/img/11-hud.jpg" alt="HUD поверх игры" width="100%">
 
-**Касса администратора** (`apps/admin`) — карта зала по зонам, легенда-счётчик статусов, сеанс, пополнение,
-команды на ПК
+**Админка клуба** (`apps/admin`) — касса и настройка клуба в одном окне. Вход по PIN, роли «владелец» и
+«кассир», интерфейс на русском, узбекском и английском
 
-<img src="docs/img/13-admin.jpg" alt="Касса администратора" width="100%">
+<img src="docs/img/13-admin.jpg" alt="Карта зала" width="100%">
+
+| | | |
+|:-:|:-:|:-:|
+| <img src="docs/img/14-admin-login.jpg" alt="Вход по PIN"> | <img src="docs/img/15-admin-shift.jpg" alt="Смена"> | <img src="docs/img/16-admin-clients.jpg" alt="Клиенты"> |
+| Вход по PIN | Смена и X-отчёт | Клиенты, группы, лояльность |
+| <img src="docs/img/17-admin-shop.jpg" alt="Магазин и склад"> | <img src="docs/img/18-admin-pricing.jpg" alt="Тарифы и цены"> | <img src="docs/img/19-admin-hall.jpg" alt="Зал и устройства"> |
+| Магазин и склад | Тарифы, дни, бонусы, счастливые часы | Редактор зала по сетке |
+| <img src="docs/img/20-admin-catalog.jpg" alt="Каталог игр"> | <img src="docs/img/21-admin-club.jpg" alt="Экран игрока"> | <img src="docs/img/22-admin-automation.jpg" alt="Автоматизация"> |
+| Каталог игр: порядок, скрытие | Экран игрока: бренд, разделы, правила | Автоматизация «если → то» |
+| <img src="docs/img/23-admin-integrations.jpg" alt="Уведомления и API"> | <img src="docs/img/24-admin-reports.jpg" alt="Отчёты"> | <img src="docs/img/25-admin-staff.jpg" alt="Персонал"> |
+| Telegram, вебхуки, API-ключ | Отчёты и тепловая карта загрузки | Персонал и роли |
 
 </div>
 
@@ -139,12 +150,22 @@ ClubShell закрывает контур на самом ПК: **оболочк
 - Киоск-пользователь: создание, ротация пароля, автологон, перенаправление папок, сброс профиля
 - Сторож: запуск оболочки в интерактивной сессии через `CreateProcessAsUser`, перезапуск при падении, безопасный режим при crash-loop
 
-**Касса (`apps/admin`)**
+**Админка клуба (`apps/admin`)** — каждый владелец настраивает клуб под себя, без программиста
 
-- В том же стиле Obsidian, что и оболочка: верхняя полоса с часами и загрузкой зала «07/24»
-- Карта зала: пронумерованные ячейки по зонам, статус цветом рамки, таймер сеанса; легенда под картой считает ПК в каждом статусе
-- Открыть время на месте (клиент, тариф, минуты, цена до подтверждения), добавить время, завершить сеанс с возвратом
-- Пополнение баланса на кассе, сообщение на экран игрока, блокировка / перезагрузка / выключение ПК
+- В том же стиле Obsidian, что и оболочка: верхняя полоса с часами, статусом смены, загрузкой зала «07/24» и языком RU / UZ / EN
+- Вход по PIN; роли «владелец» (всё) и «кассир» (только касса); API-ключ клуба работает как токен владельца
+- **Касса:** карта зала по зонам со статусами и таймерами; открыть время (цена считается сервером со всеми скидками), добавить, завершить с возвратом; пополнение, сообщение на экран, блокировка / перезагрузка / выключение ПК
+- **Смена:** открытие с наличными на начало, X-отчёт в любой момент, закрытие с пересчётом кассы и расхождением, история смен
+- **Клиенты:** поиск, группы со скидкой, уровни лояльности по сумме трат, чёрный список, ограничение для несовершеннолетних, история операций
+- **Тарифы и цены:** почасовые и пакетные тарифы по зонам и времени суток, наценка или скидка по дням недели и праздникам, группы, бонусы к пополнению, промокоды, счастливые часы, лояльность; из всех скидок применяется одна лучшая
+- **Зал и устройства:** редактор зала по сетке — зоны, ПК, консоли, характеристики
+- **Магазин и склад:** цены, остатки, приход товара, порог «заканчивается» с уведомлением
+- **Игры:** порядок в каталоге, «рекомендуем», скрыть игру с экранов игроков
+- **Экран игрока:** название, логотип, акцентный цвет, обои, какие разделы видят игроки, баннеры, правила клуба на трёх языках — с живым предпросмотром
+- **Автоматизация:** правила «если → то» (скоро конец сеанса, ПК свободен N минут, каждый N-й визит, пополнение от суммы, начало сеанса → сообщение, бонус, блокировка или выключение ПК, уведомление владельцу) и готовые шаблоны
+- **Уведомления и API:** Telegram-бот, вебхуки на события клуба, ротация API-ключа
+- **Отчёты:** выручка по дням, загрузка зала тепловой картой по часам, популярные игры и товары, смены за период
+- **Персонал:** сотрудники, роли и PIN-коды
 - Работает против mock-сервера (`/api/v1/admin/*`); в бою указывает на серверный продукт оператора
 
 **Платформа**
@@ -214,7 +235,7 @@ pnpm mock                                        # mock-сервер → http://
 VITE_MOCK=1 pnpm --filter @clubshell/shell dev   # → http://localhost:1420
 ```
 
-Касса — отдельное приложение: `pnpm mock` (сервер) и `pnpm admin` → http://localhost:1421.
+Админка — отдельное приложение: `pnpm mock` (сервер) и `pnpm admin` → http://localhost:1421. PIN владельца `0000`, кассира `1111`.
 
 `VITE_MOCK=1` подменяет каждую Tauri-команду и событие обработчиками в браузере (`apps/shell/src/mocks/handlers.ts`): вход, тикающий таймер, кошелёк, заказы и чат живут в памяти вкладки.
 
@@ -228,6 +249,7 @@ VITE_MOCK=1 pnpm --filter @clubshell/shell dev   # → http://localhost:1420
 | QR | mock подтверждает вход сам через несколько секунд |
 | PIN разблокировки сеанса | `1234` |
 | PIN администратора (горячая клавиша `Ctrl+Alt+Shift+F12`) | `0000` |
+| Админка (`pnpm admin`) | PIN владельца `0000`, кассира `1111` |
 | `banned` | любой пароль → ошибка бана, чтобы увидеть путь отказа |
 
 ### Полный цикл на Windows
@@ -275,7 +297,7 @@ Copy-Item .env.example .env
 ## Структура
 
 ```
-apps/admin/            касса: карта зала, открыть время, пополнить баланс, команды на ПК (React + Vite)
+apps/admin/            админка клуба: касса, смена, клиенты, тарифы, зал, игры, экран игрока, автоматизация, отчёты (React + Vite)
 apps/shell/            киоск-оболочка: src/ (React) + src-tauri/ (Rust-хост Tauri 2)
 apps/shell/public/mock-art/  оригинальный арт, обложки, видеолупы и фото товаров для mock-режима
 config/                JSON-конфиги по умолчанию → C:\ProgramData\ClubShell
@@ -355,6 +377,8 @@ tools/scripts/         build · dev · package · sign · publish · setup-dev-v
 <summary><b>English summary</b></summary>
 
 **ClubShell** is client software for gaming clubs / internet cafés (Uzbekistan / CIS; UI in Russian, Uzbek and English; prices in UZS). Each gaming PC runs a **.NET 8 Windows service** (`ClubShellAgent`, session 0: sessions and billing timers, game launching via Steam / Epic / Battle.net / Riot / EA / Ubisoft with an account pool, server policies, anti-cheat checks, updates, telemetry, remote admin) and a **Tauri 2 + React kiosk shell** that replaces `explorer.exe` for the local kiosk user. The shell ships the "Obsidian" theme (a minimal layout with a restrained HUD layer: corner-bracket focus, mono telemetry labels, dot-matrix time and money, one ice-blue accent — the game art carries the colour), a pause-menu HUD frame (section tabs between LB/RB on top, a status line with time, balance and controller prompts at the bottom), a calm home with the selected game, a poster-wall catalogue and an in-game HUD (`Ctrl+Shift+H`: time, balance, +30 min, call admin) over the running game. They talk over the named pipe `\\.\pipe\clubshell-agent`; the agent talks to the club server over REST + WebSocket with HMAC-signed requests. Offline mode keeps the timer and queues events in SQLite.
+
+The **admin console** (`apps/admin`, `pnpm admin` → http://localhost:1421; owner PIN `0000`, cashier `1111`) lets each club owner configure their own club without a developer: counter and hall map, shifts with X reports and cash count on close, clients (groups, loyalty tiers, blacklist, minor curfew), pricing (weekday/holiday rates, happy hours, top-up bonuses, promo codes — the single best discount applies), a grid hall editor, stock, game catalogue order and visibility, the player screen (branding, sections, banners, rules with live preview), “if → then” automation rules, Telegram and webhooks, reports with an hourly heat map, and staff roles. UI in Russian, Uzbek and English.
 
 Try the UI in a browser: `pnpm install && pnpm mock` then `VITE_MOCK=1 pnpm --filter @clubshell/shell dev` → http://localhost:1420 (login `demo` / `1234`). Full Windows dev loop: `tools/scripts/dev.ps1`. Verified here: all 8 .NET projects compile with `/warnaserror`, 424 xUnit tests pass, `tsc` and `vite build` are clean; Rust, WiX and Playwright runs are left to CI.
 
