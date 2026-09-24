@@ -436,7 +436,7 @@ export default function HallPage(): JSX.Element {
       const p = at.get(`${x}:${y}`);
       const on = p !== undefined && p.id === selected;
       cells.push(
-        <div key={`${x}:${y}`} className="relative aspect-square border-b border-r border-line/50">
+        <div key={`${x}:${y}`} className="relative aspect-square border-b border-r border-line/40">
           {p ? (
             <button
               type="button"
@@ -475,7 +475,7 @@ export default function HallPage(): JSX.Element {
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader title={t('Зал')} />
+      <PageHeader title={t('Зал и устройства')} />
       {error && <Note note={{ text: error, tone: 'err' }} />}
       <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_24rem]">
         <div
@@ -485,7 +485,7 @@ export default function HallPage(): JSX.Element {
           className="focus-ring panel overflow-x-auto p-5 outline-none"
         >
           <div
-            className="grid border-l border-t border-line/50"
+            className="grid border-l border-t border-line/40"
             style={{
               gridTemplateColumns: `repeat(${cols}, minmax(2.75rem, 1fr))`,
             }}

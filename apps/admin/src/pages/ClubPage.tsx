@@ -52,21 +52,24 @@ function Preview({ s }: { s: ClubSettings }): JSX.Element {
     >
       <div className="absolute inset-0 bg-gradient-to-b from-bg/70 via-bg/40 to-bg/90" />
       <div className="relative flex h-full flex-col">
-        <div className="flex items-center gap-3 border-b border-white/10 bg-bg/70 px-3">
-          <div className="flex min-w-0 items-center gap-1.5 py-2">
-            {s.branding.logoUrl?.trim() ? (
-              <img src={s.branding.logoUrl} alt="" className="h-4 w-4 shrink-0 rounded-sm object-cover" />
-            ) : (
-              <span className="h-3 w-3 shrink-0 rounded-sm" style={{ background: accent }} />
-            )}
-            <span className="truncate font-display text-[0.62rem] font-medium">{s.branding.clubName || '—'}</span>
+        <div className="border-b border-white/10 bg-bg/70 px-3">
+          <div className="flex items-center justify-between gap-3 pt-2">
+            <div className="flex min-w-0 items-center gap-1.5">
+              {s.branding.logoUrl?.trim() ? (
+                <img src={s.branding.logoUrl} alt="" className="h-4 w-4 shrink-0 rounded-sm object-cover" />
+              ) : (
+                <span className="h-3 w-3 shrink-0 rounded-sm" style={{ background: accent }} />
+              )}
+              <span className="truncate font-display text-[0.62rem] font-medium">{s.branding.clubName || '—'}</span>
+            </div>
+            <span className="tnum shrink-0 font-mono text-[0.55rem] text-muted">45 000 сум</span>
           </div>
-          <nav className="flex min-w-0 flex-1 gap-2.5 overflow-hidden">
+          <nav className="flex flex-wrap gap-x-3">
             {tabs.map((x, i) => (
               <span
                 key={x.label}
                 className={clsx(
-                  'whitespace-nowrap border-b-2 py-2 text-[0.55rem]',
+                  'whitespace-nowrap border-b-2 py-1.5 text-[0.58rem]',
                   i === 0 ? 'text-text' : 'border-transparent text-muted',
                 )}
                 style={i === 0 ? { borderColor: accent } : undefined}
@@ -75,7 +78,6 @@ function Preview({ s }: { s: ClubSettings }): JSX.Element {
               </span>
             ))}
           </nav>
-          <span className="tnum shrink-0 font-mono text-[0.55rem] text-muted">45 000 сум</span>
         </div>
         <div className="flex flex-1 flex-col justify-end gap-2 p-3">
           {banner && (

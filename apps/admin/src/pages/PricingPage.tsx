@@ -229,7 +229,12 @@ function TariffsTab({ zones }: { zones: string[] }): JSX.Element {
     (form.isPackage ? form.packageMinutes >= 5 && form.packagePrice > 0 : form.pricePerHour > 0);
 
   return (
-    <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_24rem]">
+    <div
+      className={clsx(
+        'grid grid-cols-1 items-start gap-5',
+        editing && 'lg:grid-cols-[minmax(0,1fr)_24rem]',
+      )}
+    >
       <Section
         title={t('Тарифы')}
         actions={
@@ -388,9 +393,7 @@ function TariffsTab({ zones }: { zones: string[] }): JSX.Element {
                     value={w.to}
                     onChange={(e) => patchWindow(i, { to: e.target.value })}
                   />
-                  <RemoveButton
-                    onClick={() => patch({ timeWindows: form.timeWindows.filter((_, j) => j !== i) })}
-                  />
+                  <RemoveButton onClick={() => patch({ timeWindows: form.timeWindows.filter((_, j) => j !== i) })} />
                 </div>
               </div>
             ))}
@@ -528,9 +531,7 @@ function DaysTab({
                     year: 'numeric',
                   })}
                 </span>
-                <RemoveButton
-                  onClick={() => set('pricing', { ...p, holidays: p.holidays.filter((x) => x !== h) })}
-                />
+                <RemoveButton onClick={() => set('pricing', { ...p, holidays: p.holidays.filter((x) => x !== h) })} />
               </li>
             ))}
           </ul>
@@ -706,7 +707,14 @@ function BonusTab({ s, set }: { s: ClubSettings; set: ClubSettingsState['set'] }
             onClick={() =>
               set('promoCodes', [
                 ...s.promoCodes,
-                { code: `PROMO${s.promoCodes.length + 1}`, kind: 'bonus', value: 0, usesLeft: null, expiresAt: null, used: 0 },
+                {
+                  code: `PROMO${s.promoCodes.length + 1}`,
+                  kind: 'bonus',
+                  value: 0,
+                  usesLeft: null,
+                  expiresAt: null,
+                  used: 0,
+                },
               ])
             }
           >

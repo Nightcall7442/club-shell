@@ -162,12 +162,12 @@ export default function ShopPage(): JSX.Element {
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader title={t('Магазин')} />
+      <PageHeader title={t('Магазин и склад')} />
       {error && <Note note={{ text: error, tone: 'err' }} />}
       {s.error && <Note note={{ text: s.error, tone: 'err' }} />}
       <Note note={rowNote} />
 
-      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_24rem]">
+      <div className={clsx('grid grid-cols-1 items-start gap-5', product && 'lg:grid-cols-[minmax(0,1fr)_24rem]')}>
         <div className="flex flex-col gap-5">
           <Section
             title={t('Товары')}
@@ -195,12 +195,15 @@ export default function ShopPage(): JSX.Element {
                   title: t('Фото'),
                   width: '4rem',
                   render: (p) => (
-                    <img
-                      src={p.imageUrl}
-                      alt=""
-                      loading="lazy"
-                      className="h-10 w-10 rounded-md border border-line object-cover"
-                    />
+                    <span className="block h-10 w-10 overflow-hidden rounded-md border border-line bg-bg">
+                      <img
+                        src={p.imageUrl}
+                        alt=""
+                        loading="lazy"
+                        onError={(e) => (e.currentTarget.style.visibility = 'hidden')}
+                        className="h-full w-full object-cover"
+                      />
+                    </span>
                   ),
                 },
                 { key: 'title', title: t('Название'), render: (p) => <span className="font-medium">{p.title}</span> },

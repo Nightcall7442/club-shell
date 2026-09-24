@@ -15,6 +15,8 @@ const LAUNCHER: Record<string, string> = {
   epic: 'Epic Games',
   riot: 'Riot',
   battlenet: 'Battle.net',
+  battleNet: 'Battle.net',
+  exe: 'Отдельно',
   ea: 'EA',
   ubisoft: 'Ubisoft',
   standalone: 'Отдельно',
@@ -105,12 +107,15 @@ export default function CatalogPage(): JSX.Element {
               width: '4rem',
               render: (g) =>
                 g.coverUrl ? (
-                  <img
-                    src={g.coverUrl}
-                    alt=""
-                    loading="lazy"
-                    className="h-12 w-8 rounded-[4px] border border-line object-cover"
-                  />
+                  <span className="block h-12 w-8 overflow-hidden rounded-[4px] border border-line bg-bg">
+                    <img
+                      src={g.coverUrl}
+                      alt=""
+                      loading="lazy"
+                      onError={(e) => (e.currentTarget.style.visibility = 'hidden')}
+                      className="h-full w-full object-cover"
+                    />
+                  </span>
                 ) : (
                   <span className="block h-12 w-8 rounded-[4px] border border-line bg-bg" />
                 ),

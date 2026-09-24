@@ -165,7 +165,12 @@ function problem(d: Draft): string | null {
 }
 
 function dateTime(iso: string): string {
-  return new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return new Date(iso).toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 function RuleCard({
@@ -202,9 +207,7 @@ function RuleCard({
       </div>
       <div className="flex flex-col items-end gap-1 text-right">
         <span className="tnum text-sm">{t('Сработало: {n}', { n: rule.fired })}</span>
-        <span className="tnum font-mono text-xs text-muted">
-          {rule.lastFiredAt ? dateTime(rule.lastFiredAt) : '—'}
-        </span>
+        <span className="tnum font-mono text-xs text-muted">{rule.lastFiredAt ? dateTime(rule.lastFiredAt) : '—'}</span>
       </div>
       <div className="flex gap-1">
         <Button variant="ghost" size="sm" onClick={onEdit}>
@@ -416,9 +419,7 @@ export default function AutomationPage(): JSX.Element {
       {st.error && <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{st.error}</p>}
 
       {st.draft && (
-        <div
-          className={clsx('grid items-start gap-5', editing && 'xl:grid-cols-[minmax(0,1fr)_26rem]')}
-        >
+        <div className={clsx('grid items-start gap-5', editing && 'xl:grid-cols-[minmax(0,1fr)_26rem]')}>
           <div className="flex min-w-0 flex-col gap-2">
             {rules.map((r) => (
               <RuleCard
