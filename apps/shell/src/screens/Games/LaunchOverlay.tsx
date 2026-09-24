@@ -448,7 +448,7 @@ function LaunchSequence({
                         OK
                       </span>
                     ) : s.state === 'active' ? (
-                      <span className="anim-live-dot">···</span>
+                      <span className="animate-pulse">···</span>
                     ) : (
                       '—'
                     )}
