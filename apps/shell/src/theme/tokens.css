@@ -240,6 +240,14 @@ html {
     accent-color: rgb(var(--c-accent));
   }
 
+  /*
+   * A side column (history, cart, bookings) starts on the same line as the main column's first block, under the page
+   * title — never level with the title itself. Page titles are one line at --fs-2xl × 1.2.
+   */
+  .page-aside {
+    margin-top: calc(var(--fs-2xl) * 1.2 + var(--gap));
+  }
+
   /* Selected card / option: a plain 2 px ring. */
   .border-glow {
     box-shadow: 0 0 0 1.5px rgb(var(--c-accent) / 0.9);

@@ -220,97 +220,96 @@ export default function ChatScreen(): JSX.Element {
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: animations ? 0.2 : 0, ease: 'easeOut' }}
-      className="grid h-full min-h-0 grid-cols-[clamp(15rem,18vw,22rem)_1fr] gap-[var(--gap)]"
+      className="flex h-full min-h-0 flex-col gap-[var(--gap)]"
     >
-      <aside className="glass flex min-h-0 flex-col rounded-2xl p-3" aria-label={t('chat.rooms')}>
-        <header className="px-2 pb-3 pt-1">
-          <h1 className="font-display text-[length:var(--fs-2xl)] font-light tracking-tight text-text">
-            {t('chat.title')}
-          </h1>
-          <p className="text-sm text-muted">{t('chat.subtitle')}</p>
-        </header>
-        <nav className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
-          <ul role="list" className="flex flex-col gap-1">
-            {entries.map((r) => {
-              const selected = r.roomId === activeRoomId;
-              return (
-                <li key={r.roomId}>
-                  <button
-                    type="button"
-                    data-nav="true"
-                    aria-current={selected ? 'true' : undefined}
-                    onClick={() => openRoom(r.roomId)}
-                    className={clsx(
-                      'focus-ring flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors duration-[var(--dur-fast)]',
-                      selected
-                        ? 'bg-primary/20 text-text shadow-[inset_0_0_0_1px_rgb(var(--c-primary)/0.5)]'
-                        : 'text-muted hover:bg-text/5 hover:text-text',
-                    )}
-                  >
-                    <span
+      <h1 className="font-display text-[length:var(--fs-2xl)] font-light leading-[1.2] tracking-tight text-text">
+        {t('chat.title')}
+      </h1>
+      <div className="grid min-h-0 flex-1 grid-cols-[clamp(15rem,18vw,22rem)_1fr] gap-[var(--gap)]">
+        <aside className="glass flex min-h-0 flex-col rounded-xl p-3" aria-label={t('chat.rooms')}>
+          <nav className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
+            <ul role="list" className="flex flex-col gap-1">
+              {entries.map((r) => {
+                const selected = r.roomId === activeRoomId;
+                return (
+                  <li key={r.roomId}>
+                    <button
+                      type="button"
+                      data-nav="true"
+                      aria-current={selected ? 'true' : undefined}
+                      onClick={() => openRoom(r.roomId)}
                       className={clsx(
-                        'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg [&>svg]:h-5 [&>svg]:w-5',
-                        selected ? 'bg-primary text-on-primary' : 'bg-surface/70',
+                        'focus-ring flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left',
+                        selected
+                          ? 'choice choice-on'
+                          : 'border border-transparent text-muted hover:bg-text/5 hover:text-text',
                       )}
-                      aria-hidden="true"
                     >
-                      {roomIcon(r.roomId)}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-base font-semibold">{r.label}</span>
-                      {r.hint && <span className="block truncate text-xs text-muted">{r.hint}</span>}
-                    </span>
-                    {r.unread > 0 && (
-                      <Badge tone="primary" size="sm" solid aria-label={t('chat.unread', { count: r.unread })}>
-                        {r.unread > 99 ? '99+' : r.unread}
-                      </Badge>
-                    )}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </nav>
-      </aside>
+                      <span
+                        className={clsx(
+                          'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg [&>svg]:h-5 [&>svg]:w-5',
+                          selected ? 'bg-accent/15 text-accent' : 'bg-surface/70',
+                        )}
+                        aria-hidden="true"
+                      >
+                        {roomIcon(r.roomId)}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-base font-semibold">{r.label}</span>
+                        {r.hint && <span className="block truncate text-xs text-muted">{r.hint}</span>}
+                      </span>
+                      {r.unread > 0 && (
+                        <Badge tone="primary" size="sm" solid aria-label={t('chat.unread', { count: r.unread })}>
+                          {r.unread > 99 ? '99+' : r.unread}
+                        </Badge>
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </nav>
+        </aside>
 
-      <section
-        className="glass flex min-h-0 flex-col overflow-hidden rounded-2xl"
-        aria-label={active.roomId ? roomLabel(active.roomId, t) : t('chat.title')}
-      >
-        <header className="flex items-center gap-3 border-b border-text/10 px-5 py-3">
-          <span
-            className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-primary/15 text-primary [&>svg]:h-5 [&>svg]:w-5"
-            aria-hidden="true"
-          >
-            {active.roomId ? roomIcon(active.roomId) : ICONS.other}
-          </span>
-          <div className="min-w-0 flex-1">
-            <h2 className="font-display truncate text-lg font-normal text-text tracking-tight">
-              {active.roomId ? roomLabel(active.roomId, t) : t('chat.title')}
-            </h2>
-            <p className="truncate text-sm text-muted">
-              {active.roomId.startsWith('pc:') || !active.roomId ? t('chat.subtitle') : active.roomId}
-            </p>
-          </div>
-          {active.unread > 0 && (
-            <Badge tone="primary" size="md" solid>
-              {t('chat.unread', { count: active.unread })}
-            </Badge>
-          )}
-        </header>
-        <MessageList
-          className="min-h-0 flex-1"
-          messages={active.messages}
-          meId={meId}
-          loading={loading}
-          hasMore={active.hasMore}
-          onLoadMore={() => void loadMore(active.roomId)}
-          onReachBottom={onReachBottom}
-        />
-        <footer className="border-t border-text/10 px-4 pb-3 pt-3">
-          <Composer ref={composerRef} onSend={onSend} disabled={!meId || status === 'error'} />
-        </footer>
-      </section>
+        <section
+          className="glass flex min-h-0 flex-col overflow-hidden rounded-xl"
+          aria-label={active.roomId ? roomLabel(active.roomId, t) : t('chat.title')}
+        >
+          <header className="flex items-center gap-3 border-b border-text/10 px-5 py-3">
+            <span
+              className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-primary/15 text-primary [&>svg]:h-5 [&>svg]:w-5"
+              aria-hidden="true"
+            >
+              {active.roomId ? roomIcon(active.roomId) : ICONS.other}
+            </span>
+            <div className="min-w-0 flex-1">
+              <h2 className="font-display truncate text-lg font-normal text-text tracking-tight">
+                {active.roomId ? roomLabel(active.roomId, t) : t('chat.title')}
+              </h2>
+              <p className="truncate text-sm text-muted">
+                {active.roomId.startsWith('pc:') || !active.roomId ? t('chat.subtitle') : active.roomId}
+              </p>
+            </div>
+            {active.unread > 0 && (
+              <Badge tone="primary" size="md" solid>
+                {t('chat.unread', { count: active.unread })}
+              </Badge>
+            )}
+          </header>
+          <MessageList
+            className="min-h-0 flex-1"
+            messages={active.messages}
+            meId={meId}
+            loading={loading}
+            hasMore={active.hasMore}
+            onLoadMore={() => void loadMore(active.roomId)}
+            onReachBottom={onReachBottom}
+          />
+          <footer className="border-t border-text/10 px-4 pb-3 pt-3">
+            <Composer ref={composerRef} onSend={onSend} disabled={!meId || status === 'error'} />
+          </footer>
+        </section>
+      </div>
     </motion.div>
   );
 }

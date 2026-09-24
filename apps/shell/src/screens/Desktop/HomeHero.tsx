@@ -1,6 +1,6 @@
 /**
- * Home hero: a full-width stage with the selected game's art under the HUD bar — greeting top left, title and Play /
- * Close / Details bottom left, a rail of recent covers bottom right that switches it (time left and balance are in
+ * Home hero: a full-width stage with the selected game's art under the HUD bar — title and Play / Close / Details
+ * bottom left, a rail of recent covers bottom right that switches it (time left and balance are in
  * the status line, on every screen).
  * Selection is the games-store `selectedId`, so the pick carries over to `/games`; the running game is always shown.
  */
@@ -19,8 +19,6 @@ import { categoryLabel } from '@/screens/Games/Categories';
 import { launcherLabelKey } from '@/screens/Games/GameCard';
 import { launchGame } from '@/screens/Games/LaunchOverlay';
 import { selectFeaturedGames, selectRecentGames, useGamesStore } from '@/store/games';
-import { useSession } from '@/hooks/useSession';
-import { serverNow } from '@/lib/time';
 import { useNotificationsStore } from '@/store/notifications';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
 
@@ -111,20 +109,6 @@ function PosterTile({
   );
 }
 
-/** Greeting by the club's clock ("Good evening, Bobur"). */
-function greetingKey(hour: number): string {
-  if (hour < 5) {
-    return 'desktop.greetingNight';
-  }
-  if (hour < 12) {
-    return 'desktop.greetingMorning';
-  }
-  if (hour < 18) {
-    return 'desktop.greetingDay';
-  }
-  return 'desktop.greetingEvening';
-}
-
 // ---------------------------------------------------------------------------------------------------------------------
 // Hero
 // ---------------------------------------------------------------------------------------------------------------------
@@ -132,7 +116,6 @@ function greetingKey(hour: number): string {
 export function HomeHero(): JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { user } = useSession();
   const animations = useThemeStore(selectAnimationsEnabled);
   const status = useGamesStore((s) => s.status);
   const byId = useGamesStore((s) => s.byId);
@@ -195,11 +178,9 @@ export function HomeHero(): JSX.Element {
   const chips = hero
     ? [
         { key: 'launcher', label: t(launcherLabelKey(hero.launcher)) },
-        ...hero.category.slice(0, 2).map((c) => ({ key: `cat-${c}`, label: categoryLabel(t, c) })),
+        ...hero.category.slice(0, 1).map((c) => ({ key: `cat-${c}`, label: categoryLabel(t, c) })),
       ]
     : [];
-
-  const name = user?.displayName.split(' ')[0] ?? '';
 
   return (
     <section aria-label={t('desktop.title')} className="flex flex-col">
@@ -235,13 +216,6 @@ export function HomeHero(): JSX.Element {
           <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-bg to-transparent" />
         </div>
 
-        {/* Greeting, top left under the HUD bar */}
-        <div className="absolute left-[var(--gutter)] top-[calc(var(--topbar-h)+var(--gap))] z-10 flex flex-col gap-2">
-          <h1 className="font-display text-[length:var(--fs-xl)] font-light tracking-tight text-text">
-            {name ? t(greetingKey(serverNow().getHours()), { name }) : t('desktop.title')}
-          </h1>
-        </div>
-
         {/* Title block, bottom left */}
         <div className="absolute bottom-[calc(var(--gap)*2)] left-[var(--gutter)] z-10 flex max-w-[min(52%,56rem)] flex-col gap-5">
           {loading && (
@@ -271,21 +245,15 @@ export function HomeHero(): JSX.Element {
                   transition={fade}
                   className="flex flex-col gap-3"
                 >
-                  <span className="hud-label">
-                    {t('desktop.selectedOf', {
-                      index: strip.findIndex((g) => g.id === hero.id) + 1,
-                      total: strip.length,
-                    })}
-                  </span>
                   {isRunning && (
                     <span className="flex items-center gap-2 text-sm font-medium text-success">
                       <span aria-hidden="true" className="h-2 w-2 rounded-full bg-success" />
                       {t('games.nowPlaying')}
                     </span>
                   )}
-                  <h2 className="line-clamp-2 font-display text-[clamp(2.75rem,4.6vw,5.5rem)] font-normal leading-[1.05] tracking-[-0.02em] text-text">
+                  <h1 className="line-clamp-2 font-display text-[clamp(2.75rem,4.6vw,5.5rem)] font-normal leading-[1.05] tracking-[-0.02em] text-text">
                     {hero.title}
-                  </h2>
+                  </h1>
                   <ul className="flex flex-wrap items-center gap-2" aria-label={t('common.details')}>
                     {!hero.installed && (
                       <li>

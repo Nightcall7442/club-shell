@@ -319,7 +319,6 @@
     "runningSince": "Running for {{duration}}",
     "noTournaments": "No tournaments scheduled",
     "noPromo": "No offers right now",
-    "selectedOf": "Selected · {{index}} of {{total}}",
     "prevSection": "Previous section",
     "nextSection": "Next section",
     "prompts": {

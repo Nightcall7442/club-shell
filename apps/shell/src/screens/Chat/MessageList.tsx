@@ -112,7 +112,7 @@ function Bubble({ m, mine, showSender }: { m: ChatMessage; mine: boolean; showSe
         )}
         <div
           className={clsx(
-            'whitespace-pre-wrap break-words rounded-2xl px-4 py-2.5 text-base leading-relaxed transition-opacity',
+            'whitespace-pre-wrap break-words rounded-xl px-4 py-2.5 text-base leading-relaxed transition-opacity',
             mine && 'rounded-br-sm bg-primary text-on-primary',
             !mine && admin && 'glass rounded-bl-sm border-accent/40 text-text',
             !mine && !admin && 'glass rounded-bl-sm text-text',
@@ -271,7 +271,7 @@ export function MessageList({
             {[0, 1, 2, 3, 4].map((i) => (
               <div key={i} className={clsx('flex items-end gap-2', i % 2 === 1 ? 'justify-end' : 'justify-start')}>
                 {i % 2 === 0 && <Skeleton variant="circle" width={32} height={32} />}
-                <Skeleton variant="rect" width={`${28 + ((i * 13) % 30)}%`} height={52} className="rounded-2xl" />
+                <Skeleton variant="rect" width={`${28 + ((i * 13) % 30)}%`} height={52} className="rounded-xl" />
               </div>
             ))}
           </div>

@@ -687,7 +687,7 @@ export default function LockScreen(): JSX.Element {
             initial={{ opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration, ease: 'easeOut' }}
-            className="glass-strong themed-scrollbar max-h-full w-[min(92vw,34rem)] overflow-y-auto overflow-x-hidden rounded-2xl p-8"
+            className="glass-strong themed-scrollbar max-h-full w-[min(92vw,34rem)] overflow-y-auto overflow-x-hidden rounded-xl p-8"
           >
             {!ready ? (
               <div className="flex justify-center py-16">

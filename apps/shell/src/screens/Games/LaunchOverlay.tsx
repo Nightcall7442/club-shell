@@ -390,7 +390,6 @@ function LaunchSequence({
         )}
         <div className="absolute inset-0 bg-gradient-to-r from-bg via-bg/75 to-bg/10" />
         <div className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-bg via-bg/70 to-transparent" />
-        <div className="hud-grid absolute inset-0 opacity-70" />
       </div>
 
       {/* Brackets: from the middle of the screen out to its corners */}

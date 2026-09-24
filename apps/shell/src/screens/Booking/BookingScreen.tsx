@@ -343,10 +343,9 @@ export default function BookingScreen(): JSX.Element {
       <section className="flex min-h-0 flex-col gap-4">
         <header className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h1 className="font-display text-[length:var(--fs-2xl)] font-light tracking-tight text-text">
+            <h1 className="font-display text-[length:var(--fs-2xl)] font-light leading-[1.2] tracking-tight text-text">
               {t('booking.title')}
             </h1>
-            <p className="text-muted">{t('booking.subtitle')}</p>
           </div>
           {data && (
             <div className="flex items-center gap-3 text-sm text-muted">
@@ -385,7 +384,7 @@ export default function BookingScreen(): JSX.Element {
           })}
         </div>
 
-        <div className="glass no-scrollbar min-h-0 flex-1 overflow-y-auto rounded-2xl p-5">
+        <div className="glass no-scrollbar min-h-0 flex-1 overflow-y-auto rounded-xl p-5">
           {loading && !data ? (
             <div className="grid grid-cols-6 gap-3" aria-hidden="true">
               {Array.from({ length: 24 }, (_, i) => (
@@ -413,8 +412,8 @@ export default function BookingScreen(): JSX.Element {
         </div>
       </section>
 
-      <aside className="flex min-h-0 flex-col gap-4">
-        <div className="glass flex flex-col gap-4 rounded-2xl p-5">
+      <aside className="page-aside flex min-h-0 flex-col gap-4">
+        <div className="glass flex flex-col gap-4 rounded-xl p-5">
           <h2 className="font-display flex items-center gap-2 text-xl font-normal text-text tracking-tight">
             <span className="inline-flex h-6 w-6 text-primary [&>svg]:h-full [&>svg]:w-full" aria-hidden="true">
               <CalendarIcon />
@@ -462,7 +461,7 @@ export default function BookingScreen(): JSX.Element {
           )}
         </div>
 
-        <div className="glass flex min-h-0 flex-1 flex-col rounded-2xl p-5">
+        <div className="glass flex min-h-0 flex-1 flex-col rounded-xl p-5">
           <h2 className="font-display mb-3 text-xl font-normal text-text tracking-tight">{t('booking.myBookings')}</h2>
           {myBookings.length === 0 ? (
             <EmptyState icon={<CalendarIcon />} title={t('booking.noBookings')} className="flex-1" />

@@ -98,7 +98,7 @@ export function TournamentCard({
   return (
     <article
       className={clsx(
-        'glass relative flex gap-4 rounded-2xl p-3 transition-[box-shadow,transform] duration-[var(--dur-fast)]',
+        'glass relative flex gap-4 rounded-xl p-3 transition-[box-shadow,transform] duration-[var(--dur-fast)]',
         selected && 'shadow-[var(--shadow-glow)] ring-2 ring-primary',
       )}
       aria-current={selected ? 'true' : undefined}
@@ -108,7 +108,7 @@ export function TournamentCard({
         data-nav="true"
         onClick={onSelect}
         aria-label={`${tr.title} — ${t(`tournaments.state.${tr.state}`)}`}
-        className="focus-ring absolute inset-0 rounded-2xl"
+        className="focus-ring absolute inset-0 rounded-xl"
       />
       <div className="w-[clamp(5rem,6.5vw,7.5rem)] shrink-0 self-start">
         <GameArtwork src={cover} title={gameTitle} kind="cover" className="rounded-xl" />
@@ -335,15 +335,14 @@ export default function TournamentsScreen(): JSX.Element {
     >
       <section className="flex min-h-0 flex-col gap-4">
         <header>
-          <h1 className="font-display text-[length:var(--fs-2xl)] font-light tracking-tight text-text">
+          <h1 className="font-display text-[length:var(--fs-2xl)] font-light leading-[1.2] tracking-tight text-text">
             {t('tournaments.title')}
           </h1>
-          <p className="text-muted">{t('tournaments.subtitle')}</p>
         </header>
         <div ref={firstCardRef} className="no-scrollbar flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pb-2 pr-1">
           {loading ? (
             [0, 1, 2].map((i) => (
-              <div key={i} className="glass flex gap-4 rounded-2xl p-3" aria-hidden="true">
+              <div key={i} className="glass flex gap-4 rounded-xl p-3" aria-hidden="true">
                 <Skeleton variant="cover" width="6.5rem" className="rounded-xl" />
                 <div className="flex flex-1 flex-col gap-2 py-1">
                   <Skeleton variant="text" lines={2} />
@@ -353,14 +352,14 @@ export default function TournamentsScreen(): JSX.Element {
               </div>
             ))
           ) : failed ? (
-            <div className="glass flex flex-col items-center gap-4 rounded-2xl p-8 text-center">
+            <div className="glass flex flex-col items-center gap-4 rounded-xl p-8 text-center">
               <p className="text-lg text-muted">{t('errors.generic')}</p>
               <Button variant="secondary" onClick={() => void load()}>
                 {t('common.retry')}
               </Button>
             </div>
           ) : items.length === 0 ? (
-            <div className="glass flex flex-col items-center gap-3 rounded-2xl p-10 text-center text-muted">
+            <div className="glass flex flex-col items-center gap-3 rounded-xl p-10 text-center text-muted">
               <span className="inline-flex h-12 w-12 text-primary [&>svg]:h-full [&>svg]:w-full" aria-hidden="true">
                 <TrophyIcon />
               </span>
@@ -387,7 +386,7 @@ export default function TournamentsScreen(): JSX.Element {
         </div>
       </section>
 
-      <section className="glass flex min-h-0 flex-col overflow-hidden rounded-2xl">
+      <section className="glass page-aside flex min-h-0 flex-col overflow-hidden rounded-xl">
         <AnimatePresence mode="wait" initial={false}>
           {selected ? (
             <motion.div

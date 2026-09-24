@@ -195,8 +195,7 @@ export function Modal({
             tabIndex={-1}
             data-nav-scope="modal"
             className={clsx(
-              // Brackets on the corners and a lit top edge: the dialog is the target now.
-              'glass-strong hud-brackets relative flex max-h-[94vh] flex-col overflow-hidden rounded-xl outline-none [--brk-inset:8px] [--brk-size:14px]',
+              'glass-strong relative flex max-h-[94vh] flex-col overflow-hidden rounded-xl outline-none',
               SIZE[size],
               className,
             )}
@@ -206,10 +205,6 @@ export function Modal({
             transition={animations ? { type: 'spring', stiffness: 420, damping: 34, mass: 0.9 } : { duration: 0 }}
             onKeyDown={onKeyDown}
           >
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-accent/60 to-transparent"
-            />
             {(title || showClose) && (
               <header className="flex items-start gap-4 px-6 pt-6">
                 <div className="min-w-0 flex-1">

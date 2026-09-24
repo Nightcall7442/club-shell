@@ -50,7 +50,7 @@ export function AppTile({ app, onLaunch, launching = false, disabled = false, cl
         className,
       )}
     >
-      <span className="relative flex h-24 w-24 items-center justify-center overflow-hidden rounded-2xl bg-bg/60 transition-transform duration-[var(--dur-base)] group-hover:scale-105 group-focus-visible:scale-105">
+      <span className="relative flex h-24 w-24 items-center justify-center overflow-hidden rounded-xl bg-bg/60 transition-transform duration-[var(--dur-base)] group-hover:scale-105 group-focus-visible:scale-105">
         {url && !failed ? (
           <img
             src={url}

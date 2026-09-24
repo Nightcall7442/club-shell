@@ -18,7 +18,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Tabs, type TabItem } from '@/components/ui/Tabs';
 import { focusElement, useGamepad } from '@/hooks/useGamepad';
 import { useLocale } from '@/hooks/useLocale';
-import { formatDate, formatMoney, formatNumber } from '@/lib/format';
+import { formatDate, formatNumber } from '@/lib/format';
 import { api } from '@/lib/tauri';
 import { useAuthStore, useNotificationsStore, useSettingsStore, useThemeStore } from '@/store';
 import Achievements from './Achievements';
@@ -245,7 +245,7 @@ export function ProfileHeader({ user, loyalty }: ProfileHeaderProps): JSX.Elemen
           </form>
         ) : (
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="truncate font-display text-[length:var(--fs-2xl)] font-light tracking-tight text-text">
+            <h1 className="truncate font-display text-[length:var(--fs-2xl)] font-light leading-[1.2] tracking-tight text-text">
               {user.displayName}
             </h1>
             <Button
@@ -269,7 +269,6 @@ export function ProfileHeader({ user, loyalty }: ProfileHeaderProps): JSX.Elemen
       <div className="flex flex-wrap gap-3">
         <HeaderStat label={t('profile.loyaltyLevel')} value={t('profile.level', { level: displayLevel(level) })} />
         <HeaderStat label={t('profile.points')} value={formatNumber(points, locale)} accent />
-        <HeaderStat label={t('profile.balance')} value={formatMoney(user.balance, locale)} />
       </div>
     </section>
   );
@@ -373,7 +372,7 @@ export function ProfileScreen(): JSX.Element {
 
   return (
     <motion.div
-      className="mx-auto flex w-full max-w-[110rem] flex-col gap-[var(--gap)] pb-[var(--gap)]"
+      className="flex w-full flex-col gap-[var(--gap)] pb-[var(--gap)]"
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration, ease: 'easeOut' }}

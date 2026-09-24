@@ -196,7 +196,7 @@ export function HudScreen({ onClose }: { onClose: () => void }): JSX.Element {
         aria-modal="true"
         aria-label={t('kiosk.hudTitle')}
         onPointerDown={(e) => e.stopPropagation()}
-        className="anim-toast-in glass-strong hud-brackets relative flex w-[min(62rem,86vw)] items-center gap-6 rounded-xl py-4 pl-6 pr-4 text-text [--brk-inset:6px] [--brk-size:14px]"
+        className="anim-toast-in glass-strong relative flex w-[min(62rem,86vw)] items-center gap-6 rounded-xl py-4 pl-6 pr-4 text-text"
       >
         <div className="flex items-center gap-4">
           <Ring
@@ -265,10 +265,6 @@ export function HudScreen({ onClose }: { onClose: () => void }): JSX.Element {
           />
         </div>
 
-        <span
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-accent/60 to-transparent"
-        />
         <div className="hud-label pointer-events-none absolute -top-8 left-6 flex items-center gap-3">
           <span>{t('kiosk.hudHint')}</span>
           {note && <span className={note.tone === 'ok' ? 'text-success' : 'text-danger'}>{note.text}</span>}

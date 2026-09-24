@@ -73,11 +73,6 @@ export default function IdleScreen(): JSX.Element {
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgb(var(--c-bg)/0.7)_0%,rgb(var(--c-bg)/0.25)_35%,rgb(var(--c-bg)/0.35)_60%,rgb(var(--c-bg)/0.9)_100%)]"
       />
-      <div aria-hidden="true" className="hud-grid pointer-events-none absolute inset-0" />
-      <div
-        aria-hidden="true"
-        className="hud-brackets pointer-events-none absolute inset-0 opacity-70 [--brk-inset:20px] [--brk-size:28px]"
-      />
 
       <div className="pointer-events-none relative z-10 flex h-full w-full flex-col justify-between px-[calc(var(--gutter)*1.5)] py-[calc(var(--gutter)*1.2)]">
         <motion.header

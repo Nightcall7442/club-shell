@@ -393,21 +393,14 @@ export function StatusBar(): JSX.Element {
       <SessionTimer compact />
       {balance && <BalanceButton amount={balance} topUp={features.topup} />}
 
-      {/* Controller glyphs while a pad is connected, keyboard keys otherwise. */}
-      <div aria-label={t('desktop.prompts.title')} className="ml-auto flex items-center gap-6">
-        {pad ? (
-          <>
-            <Prompt glyph="A" label={t('desktop.prompts.select')} />
-            <Prompt glyph="B" label={t('desktop.prompts.back')} />
-            <Prompt glyph="LB RB" label={t('desktop.prompts.sections')} round={false} />
-          </>
-        ) : (
-          <>
-            <Prompt glyph="Enter" label={t('desktop.prompts.select')} round={false} />
-            <Prompt glyph="Esc" label={t('desktop.prompts.back')} round={false} />
-          </>
-        )}
-      </div>
+      {/* Controller prompts only with a pad connected: a keyboard player already knows Enter and Esc. */}
+      {pad && (
+        <div aria-label={t('desktop.prompts.title')} className="ml-auto flex items-center gap-6">
+          <Prompt glyph="A" label={t('desktop.prompts.select')} />
+          <Prompt glyph="B" label={t('desktop.prompts.back')} />
+          <Prompt glyph="LB RB" label={t('desktop.prompts.sections')} round={false} />
+        </div>
+      )}
     </div>
   );
 }

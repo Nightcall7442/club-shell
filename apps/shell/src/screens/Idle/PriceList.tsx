@@ -125,7 +125,7 @@ export function PriceList({ tariffs, compact = false, className }: PriceListProp
   return (
     <section
       aria-label={t('idle.priceList')}
-      className={clsx('glass flex flex-col rounded-2xl', compact ? 'gap-3 p-5' : 'gap-5 p-7', className)}
+      className={clsx('glass flex flex-col rounded-xl', compact ? 'gap-3 p-5' : 'gap-5 p-7', className)}
     >
       <h2 className={clsx('font-display font-normal tracking-tight text-text', compact ? 'text-lg' : 'text-2xl')}>
         {t('idle.tariffsTitle')}
