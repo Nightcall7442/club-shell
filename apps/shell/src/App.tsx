@@ -83,7 +83,7 @@ export function AdsOverlay({ args, onClose }: AdsOverlayProps): JSX.Element {
             showCounter={args.items.length > 1}
           />
           <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-[var(--gap)]">
-            <span className="glass rounded-full px-4 py-1.5 text-[length:var(--fs-sm)] uppercase tracking-[0.2em] text-muted">
+            <span className="glass rounded-full px-4 py-1.5 text-[length:var(--fs-sm)] text-muted">
               {t('idle.ads')}
             </span>
             {skippable ? (

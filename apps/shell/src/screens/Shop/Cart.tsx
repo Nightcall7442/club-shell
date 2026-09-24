@@ -198,7 +198,7 @@ export function Cart({ onInsufficientFunds, className }: CartProps): JSX.Element
         <dl className="flex flex-col gap-1 text-base">
           <div className="flex items-center justify-between">
             <dt className="text-muted">{t('shop.total')}</dt>
-            <dd className="tnum text-2xl font-black text-text">{formatMoney(total, locale)}</dd>
+            <dd className="tnum text-2xl font-semibold text-text">{formatMoney(total, locale)}</dd>
           </div>
           <div className="flex items-center justify-between text-sm">
             <dt className="text-muted">{t('shop.balanceAfter')}</dt>

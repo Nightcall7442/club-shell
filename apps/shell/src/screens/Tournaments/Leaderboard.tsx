@@ -22,7 +22,7 @@ export interface LeaderboardProps {
 }
 
 const MEDAL: Record<number, string> = {
-  1: 'bg-[#f5c542] text-black shadow-[0_0_14px_rgba(245,197,66,0.6)]',
+  1: 'bg-[#f5c542] text-black',
   2: 'bg-[#c9ced6] text-black',
   3: 'bg-[#cd7f32] text-black',
 };
@@ -105,7 +105,7 @@ export function Leaderboard({
       ) : (
         <table className="w-full border-separate border-spacing-y-1 text-base">
           <thead>
-            <tr className="text-left text-xs uppercase tracking-wide text-muted">
+            <tr className="text-left text-xs text-muted">
               <th scope="col" className="pl-3 text-center font-medium">
                 {t('tournaments.rank')}
               </th>

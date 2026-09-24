@@ -213,7 +213,7 @@ export function ToastViewport({ items, onDismiss, onAction, max = 4, className }
       aria-live="polite"
       aria-label={t('notifications.liveRegion')}
       className={clsx(
-        'pointer-events-none fixed right-[var(--gutter)] top-[calc(var(--topbar-h)+var(--gap))] z-[90] flex flex-col items-end gap-3',
+        'pointer-events-none fixed right-[var(--gutter)] top-[var(--gap)] z-[90] flex flex-col items-end gap-3',
         className,
       )}
     >

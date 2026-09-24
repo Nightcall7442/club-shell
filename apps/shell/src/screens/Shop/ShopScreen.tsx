@@ -113,7 +113,7 @@ export function ShopScreen(): JSX.Element {
       <div className="flex min-h-0 min-w-0 flex-col gap-[var(--gap)]">
         <header className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-black text-text">{t('shop.title')}</h1>
+            <h1 className="text-[length:var(--fs-2xl)] font-semibold tracking-tight text-text">{t('shop.title')}</h1>
             <p className="text-base text-muted">{t('shop.subtitle')}</p>
           </div>
           <Input

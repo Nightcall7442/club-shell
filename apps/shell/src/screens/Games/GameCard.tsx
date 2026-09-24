@@ -10,7 +10,6 @@ import { useTranslation } from 'react-i18next';
 import { GameArtwork } from '@/components/media/GameArtwork';
 import { Badge } from '@/components/ui/Badge';
 import { useLocale } from '@/hooks/useLocale';
-import { tiltHandlers } from '@/hooks/useTilt';
 import { formatRelativeDay } from '@/lib/format';
 import { categoryLabel } from './Categories';
 
@@ -108,8 +107,7 @@ export const GameCard = forwardRef<HTMLButtonElement, GameCardProps>(function Ga
         onActivate?.(game);
         onClick?.(e);
       }}
-      {...tiltHandlers(6)}
-      className={clsx('focus-ring tilt group relative block w-full rounded-lg text-left outline-none', className)}
+      className={clsx('focus-ring group relative block w-full rounded-lg text-left outline-none', className)}
       {...rest}
     >
       <GameArtwork
@@ -118,7 +116,7 @@ export const GameCard = forwardRef<HTMLButtonElement, GameCardProps>(function Ga
         kind="cover"
         priority={priority}
         className={clsx(
-          'rounded-lg shadow-[var(--shadow-card)] transition-[box-shadow,filter] duration-[var(--dur-base)]',
+          'rounded-lg transition-[box-shadow,filter] duration-[var(--dur-base)]',
           selected && 'border-glow',
         )}
         overlay={
@@ -132,7 +130,6 @@ export const GameCard = forwardRef<HTMLButtonElement, GameCardProps>(function Ga
               aria-hidden="true"
               className="pointer-events-none absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-bg/95 via-bg/45 to-transparent"
             />
-            <span aria-hidden="true" className="tilt-sheen rounded-lg" />
             {onLaunch && game.installed && !running && (
               // A mouse shortcut, not a second control: a button inside the card's button is invalid HTML, and
               // keyboard and gamepad reach Play in one step anyway — Enter opens details, where Play has focus.
@@ -144,7 +141,7 @@ export const GameCard = forwardRef<HTMLButtonElement, GameCardProps>(function Ga
                   e.stopPropagation();
                   onLaunch(game);
                 }}
-                className="absolute right-3 top-3 inline-flex h-12 w-12 scale-90 cursor-pointer items-center justify-center rounded-full bg-primary pl-0.5 text-on-primary opacity-0 shadow-[0_10px_28px_-8px_rgb(0_0_0/0.8)] transition-[opacity,transform] duration-[var(--dur-base)] ease-[var(--ease-out)] hover:!scale-110 group-hover:scale-100 group-hover:opacity-100 [&>svg]:h-5 [&>svg]:w-5"
+                className="absolute right-3 top-3 inline-flex h-12 w-12 scale-90 cursor-pointer items-center justify-center rounded-full bg-primary pl-0.5 text-on-primary opacity-0 transition-[opacity,transform] duration-[var(--dur-base)] ease-[var(--ease-out)] hover:!scale-110 group-hover:scale-100 group-hover:opacity-100 [&>svg]:h-5 [&>svg]:w-5"
               >
                 <PlayIcon />
               </span>

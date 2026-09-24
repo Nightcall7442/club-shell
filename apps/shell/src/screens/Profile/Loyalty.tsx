@@ -68,8 +68,8 @@ export function LevelRing({ level, progress, label, className }: LevelRingProps)
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center" aria-hidden="true">
-        <span className="tnum text-glow text-[3.25rem] font-black leading-none">{level}</span>
-        <span className="mt-1 text-sm uppercase tracking-wide text-muted">{t('profile.loyaltyLevel')}</span>
+        <span className="tnum text-[3.25rem] font-semibold leading-none">{level}</span>
+        <span className="mt-1 text-sm text-muted">{t('profile.loyaltyLevel')}</span>
       </div>
     </div>
   );
@@ -140,7 +140,7 @@ export function Loyalty({ loyalty, loading }: LoyaltyProps): JSX.Element {
           label={`${t('profile.levelProgress')}: ${percent}`}
         />
         <h3 className="text-2xl font-bold">{t('profile.level', { level: displayLevel(loyalty.level) })}</h3>
-        <p className="tnum text-4xl font-black text-accent">{formatNumber(loyalty.points, locale)}</p>
+        <p className="tnum text-4xl font-semibold text-accent">{formatNumber(loyalty.points, locale)}</p>
         <p className="-mt-2 text-muted">{t('profile.points')}</p>
         <ProgressBar
           value={loyalty.points}

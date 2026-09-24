@@ -124,9 +124,7 @@ export function OptionGroup<K extends string>({
             onClick={() => onChange(o.key)}
             className={clsx(
               'focus-ring inline-flex h-11 items-center rounded-full px-5 text-base font-semibold transition-colors duration-[var(--dur-fast)] disabled:cursor-not-allowed disabled:opacity-50',
-              active
-                ? 'bg-primary text-on-primary shadow-[0_6px_20px_-6px_rgb(var(--c-primary)/0.4)]'
-                : 'bg-text/10 text-text hover:bg-text/15',
+              active ? 'bg-primary text-on-primary' : 'bg-text/10 text-text hover:bg-text/15',
             )}
           >
             {o.label}

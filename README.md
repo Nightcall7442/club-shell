@@ -60,21 +60,23 @@
 
 </div>
 
-Снимки сделаны в mock-режиме (`VITE_MOCK=1`), 1920×1080, тема `default` («Onyx»). Арт, обложки и видеолупы игр —
+Снимки сделаны в mock-режиме (`VITE_MOCK=1`), 1920×1080, тема `default` («Graphite»). Арт и обложки игр —
 оригинальные, сгенерированные для демо (без чужих брендов); на кадре с панелью арт подложен вместо игры.
 
 ### Как это устроено визуально
 
-- **Onyx** — нейтральная тема: почти чёрный фон, графитовое стекло, белые действия, золото только для VIP, бонусов и
-  предупреждений. Хром не имеет оттенка — цвет экрана даёт арт выбранной игры: из него берётся доминирующий тон и
-  подсвечивает угол под заголовком (`useImageTint`).
-- **Главная** — арт на весь экран с плавным наездом, живой видеолуп (`Game.videoUrl`, пауза во время игры), rack-focus
-  при смене игры, плёночное зерно и виньетка, параллакс за курсором. Стрип постеров переключает игру; две карточки —
-  сеанс + баланс и бронь с живой картой зала.
-- **Каталог** — стена постеров: наклон за курсором с бликом, название внутри арта, метаданные при наведении, скользящая
-  «таблетка» активной категории.
-- **Мелочи, которые чувствуются**: blur-up обложек, тик/клик/«вжух»/чайм (WebAudio-синтез, без файлов, тумблер
-  `sound.uiSounds`), предупреждение «осталось 5 минут» как нижняя плашка трансляции поверх игры.
+- **Graphite** — строгая минималистичная тёмная тема: плоские графитовые панели с тонкой границей, без стекла,
+  свечений, зерна и 3D-наклонов; белые действия и один приглушённый синий акцент для немногого, что должно
+  выделяться (бонусы, аккаунт клуба, бронь, предупреждение таймера). Цвет на экране даёт только арт игр.
+- **Каркас** — боковая панель слева: клуб, ПК и часы; навигация; внизу то, что игрок проверяет взглядом, — остаток
+  времени (→ продлить) и баланс (→ пополнить); последней строкой профиль, звук и язык, блокировка.
+- **Главная** — приветствие, одна карточка выбранной игры (арт, «Играть» / «Подробнее»), ряд недавних игр под ней и
+  три спокойные панели: свободные места, турниры, последние сообщения.
+- **Каталог** — сетка постеров с названием внутри арта, метаданные при наведении, категории — тихие вкладки без
+  «таблеток».
+- **Мелочи**: blur-up обложек, тик/клик/чайм (WebAudio-синтез, без файлов, тумблер `sound.uiSounds`), предупреждение
+  «осталось 5 минут» как нижняя плашка поверх игры. Тема с `blur > 0` (например, `neon`) по-прежнему получает
+  полупрозрачные «стеклянные» панели.
 
 ---
 
@@ -286,7 +288,7 @@ tools/scripts/         build · dev · package · sign · publish · setup-dev-v
 | `agent.json` | URL сервера, ключ клуба, IPC, киоск-пользователь (`club`), сеансы, офлайн, лаунчеры, хранилище, обновления, телеметрия, античит, питание |
 | `shell.json` | язык (`ru` / `uz` / `en`), тема, киоск-защита, простой, реклама, геймпад, мониторы, флаги функций |
 | `policies.json` | последний применённый снимок политик сервера |
-| `themes\*.json` | темы (`default` = Onyx); цвета становятся CSS-переменными `--c-*`, контраст текста на `primary` / `accent` выводится из яркости |
+| `themes\*.json` | темы (`default` = Graphite); цвета становятся CSS-переменными `--c-*`, контраст текста на `primary` / `accent` выводится из яркости |
 | `cache\`, `logs\`, `secure\` | кэш и офлайн-очередь (SQLite), JSON-логи, секреты под DPAPI |
 
 Любой ключ `agent.json` переопределяется переменной `CLUBSHELL__<Section>__<Key>`. Переменные разработки — в `.env` (`.env.example`).
@@ -334,7 +336,7 @@ tools/scripts/         build · dev · package · sign · publish · setup-dev-v
 <details>
 <summary><b>English summary</b></summary>
 
-**ClubShell** is client software for gaming clubs / internet cafés (Uzbekistan / CIS; UI in Russian, Uzbek and English; prices in UZS). Each gaming PC runs a **.NET 8 Windows service** (`ClubShellAgent`, session 0: sessions and billing timers, game launching via Steam / Epic / Battle.net / Riot / EA / Ubisoft with an account pool, server policies, anti-cheat checks, updates, telemetry, remote admin) and a **Tauri 2 + React kiosk shell** that replaces `explorer.exe` for the local kiosk user. The shell ships the neutral "Onyx" theme (near-black, white actions, gold accent — the game art carries the colour), a cinematic home with ambient video loops, a poster-wall catalogue and an in-game HUD (`Ctrl+Shift+H`: time, balance, +30 min, call admin) over the running game. They talk over the named pipe `\\.\pipe\clubshell-agent`; the agent talks to the club server over REST + WebSocket with HMAC-signed requests. Offline mode keeps the timer and queues events in SQLite.
+**ClubShell** is client software for gaming clubs / internet cafés (Uzbekistan / CIS; UI in Russian, Uzbek and English; prices in UZS). Each gaming PC runs a **.NET 8 Windows service** (`ClubShellAgent`, session 0: sessions and billing timers, game launching via Steam / Epic / Battle.net / Riot / EA / Ubisoft with an account pool, server policies, anti-cheat checks, updates, telemetry, remote admin) and a **Tauri 2 + React kiosk shell** that replaces `explorer.exe` for the local kiosk user. The shell ships the minimal "Graphite" theme (flat near-black panels, white actions, one muted blue accent — the game art carries the colour), a sidebar layout with time and balance always in view, a calm home with the selected game, a poster-wall catalogue and an in-game HUD (`Ctrl+Shift+H`: time, balance, +30 min, call admin) over the running game. They talk over the named pipe `\\.\pipe\clubshell-agent`; the agent talks to the club server over REST + WebSocket with HMAC-signed requests. Offline mode keeps the timer and queues events in SQLite.
 
 Try the UI in a browser: `pnpm install && pnpm mock` then `VITE_MOCK=1 pnpm --filter @clubshell/shell dev` → http://localhost:1420 (login `demo` / `1234`). Full Windows dev loop: `tools/scripts/dev.ps1`. Verified here: all 8 .NET projects compile with `/warnaserror`, 424 xUnit tests pass, `tsc` and `vite build` are clean; Rust, WiX and Playwright runs are left to CI.
 

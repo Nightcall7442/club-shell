@@ -82,9 +82,7 @@ export default function IdleScreen(): JSX.Element {
           className="flex items-start justify-between gap-[var(--gap)]"
         >
           <div className="min-w-0">
-            <p className="text-glow truncate text-3xl font-black uppercase tracking-[0.25em] text-text">
-              {t('idle.clubName')}
-            </p>
+            <p className="truncate text-3xl font-semibold text-text">{t('idle.clubName')}</p>
             <p className="mt-1 text-lg text-text/80">
               {pcName ? t('idle.pcName', { name: pcName, zone: pcZone }) : t('idle.pcFree')}
             </p>
@@ -130,7 +128,7 @@ export default function IdleScreen(): JSX.Element {
                 </svg>
               </span>
             </span>
-            <p className="text-glow text-3xl font-black text-text">{t('idle.touchToStart')}</p>
+            <p className="text-3xl font-semibold text-text">{t('idle.touchToStart')}</p>
             <p className="text-lg text-text/80">{t('idle.subtitle')}</p>
           </motion.div>
         </div>

@@ -335,7 +335,9 @@ export default function TournamentsScreen(): JSX.Element {
     >
       <section className="flex min-h-0 flex-col gap-4">
         <header>
-          <h1 className="text-3xl font-bold text-text">{t('tournaments.title')}</h1>
+          <h1 className="text-[length:var(--fs-2xl)] font-semibold tracking-tight text-text">
+            {t('tournaments.title')}
+          </h1>
           <p className="text-muted">{t('tournaments.subtitle')}</p>
         </header>
         <div ref={firstCardRef} className="no-scrollbar flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pb-2 pr-1">
@@ -418,7 +420,7 @@ export default function TournamentsScreen(): JSX.Element {
                       </Badge>
                       <span className="tnum text-sm text-muted">{tournamentTimeLabel(selected, nowMs, locale, t)}</span>
                     </div>
-                    <h2 className="text-glow text-3xl font-bold text-text">{selected.title}</h2>
+                    <h2 className="text-3xl font-bold text-text">{selected.title}</h2>
                     <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-base">
                       <span className="text-muted">
                         {t('tournaments.game')}: <span className="text-text">{gameOf(selected.gameId).title}</span>

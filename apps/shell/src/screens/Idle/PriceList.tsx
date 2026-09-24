@@ -126,9 +126,7 @@ export function PriceList({ tariffs, compact = false, className }: PriceListProp
       aria-label={t('idle.priceList')}
       className={clsx('glass flex flex-col rounded-2xl', compact ? 'gap-3 p-5' : 'gap-5 p-7', className)}
     >
-      <h2 className={clsx('font-black uppercase tracking-[0.15em] text-text', compact ? 'text-lg' : 'text-2xl')}>
-        {t('idle.tariffsTitle')}
-      </h2>
+      <h2 className={clsx('font-semibold text-text', compact ? 'text-lg' : 'text-2xl')}>{t('idle.tariffsTitle')}</h2>
 
       {loading && list.length === 0 ? (
         <div className="flex flex-col gap-3">
@@ -141,7 +139,7 @@ export function PriceList({ tariffs, compact = false, className }: PriceListProp
       ) : (
         groups.map((group) => (
           <div key={group.zone ?? '*'} className="flex flex-col gap-2">
-            <h3 className={clsx('font-semibold uppercase tracking-wide text-muted', compact ? 'text-xs' : 'text-sm')}>
+            <h3 className={clsx('font-semibold text-muted', compact ? 'text-xs' : 'text-sm')}>
               {group.zone ?? t('idle.allZones')}
             </h3>
             <ul role="list" className="flex flex-col gap-2">
@@ -182,7 +180,7 @@ export function PriceList({ tariffs, compact = false, className }: PriceListProp
                     </div>
                     <span
                       className={clsx(
-                        'tnum shrink-0 whitespace-nowrap font-black text-primary',
+                        'tnum shrink-0 whitespace-nowrap font-semibold text-primary',
                         compact ? 'text-xl' : 'text-2xl',
                       )}
                     >

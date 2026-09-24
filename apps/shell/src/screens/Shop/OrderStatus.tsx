@@ -96,7 +96,7 @@ export function OrderStatus({ order, onCancel, cancelling = false, className }: 
                   className={clsx(
                     'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-colors duration-[var(--dur-base)]',
                     done && 'bg-success text-bg',
-                    active && 'bg-primary text-on-primary shadow-[0_0_14px_rgb(var(--c-primary)/0.4)]',
+                    active && 'bg-primary text-on-primary',
                     !done && !active && 'bg-text/10 text-muted',
                   )}
                   aria-current={active ? 'step' : undefined}
@@ -177,7 +177,7 @@ export function OrderStatusStrip({ className }: OrderStatusStripProps): JSX.Elem
 
   return (
     <section aria-label={t('shop.activeOrders')} className={clsx('flex flex-col gap-2', className)}>
-      <h2 className="text-base font-semibold uppercase tracking-wide text-muted">{t('shop.activeOrders')}</h2>
+      <h2 className="text-base font-semibold text-muted">{t('shop.activeOrders')}</h2>
       <ul role="list" className="no-scrollbar flex gap-3 overflow-x-auto pb-1">
         <AnimatePresence initial={false}>
           {orders.map((order) => (

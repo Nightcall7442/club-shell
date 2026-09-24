@@ -29,30 +29,24 @@ export function isActiveBooking(b: Booking): boolean {
   return ACTIVE_BOOKING.has(b.status);
 }
 
+/** Free seats are the bright ones; everything unavailable recedes, so the eye finds a place without a colour key. */
 const STATUS_CLASS: Record<PcStatus, string> = {
-  free: 'bg-success/15 text-success border-success/50',
-  busy: 'bg-danger/15 text-danger border-danger/50',
-  booked: 'bg-accent/15 text-accent border-accent/50',
-  locked: 'bg-muted/15 text-muted border-muted/40',
-  maintenance: 'bg-muted/10 text-muted/70 border-dashed border-muted/40',
-  offline: 'bg-muted/10 text-muted/60 border-muted/30',
+  free: 'bg-text/[0.07] text-text border-text/25 hover:bg-text/[0.12]',
+  busy: 'bg-transparent text-muted/70 border-text/[0.07]',
+  booked: 'bg-accent/10 text-accent border-accent/35',
+  locked: 'bg-transparent text-muted/70 border-text/[0.07]',
+  maintenance: 'bg-transparent text-muted/50 border-dashed border-text/15',
+  offline: 'bg-transparent text-muted/40 border-text/[0.05]',
 };
 
 const STATUS_DOT: Record<PcStatus, string> = {
-  free: 'bg-success',
-  busy: 'bg-danger',
+  free: 'bg-text',
+  busy: 'bg-text/25',
   booked: 'bg-accent',
-  locked: 'bg-muted',
-  maintenance: 'bg-muted/60',
-  offline: 'bg-muted/40',
+  locked: 'bg-text/25',
+  maintenance: 'bg-text/15',
+  offline: 'bg-text/10',
 };
-
-const ZONE_CLASS = [
-  'text-primary border-primary/40',
-  'text-accent border-accent/40',
-  'text-success border-success/40',
-  'text-muted border-muted/40',
-] as const;
 
 const LEGEND: readonly PcStatus[] = ['free', 'busy', 'booked', 'locked', 'maintenance', 'offline'];
 
@@ -89,7 +83,7 @@ export function SeatMap({
   const { cols, rows, zones, mineByPc, othersByPc } = useMemo(() => {
     let maxX = 0;
     let maxY = 0;
-    const zoneMap = new Map<string, { minY: number; maxY: number; index: number }>();
+    const zoneMap = new Map<string, { minY: number; maxY: number }>();
     for (const s of seats) {
       maxX = Math.max(maxX, s.x);
       maxY = Math.max(maxY, s.y);
@@ -98,7 +92,7 @@ export function SeatMap({
         z.minY = Math.min(z.minY, s.y);
         z.maxY = Math.max(z.maxY, s.y);
       } else {
-        zoneMap.set(s.zone, { minY: s.y, maxY: s.y, index: zoneMap.size });
+        zoneMap.set(s.zone, { minY: s.y, maxY: s.y });
       }
     }
     const mine = new Set<string>();
@@ -134,10 +128,7 @@ export function SeatMap({
               key={zone}
               role="presentation"
               style={{ gridColumn: 1, gridRow: `${z.minY + 1} / ${z.maxY + 2}` }}
-              className={clsx(
-                'flex items-center justify-center rounded-lg border-l-4 px-2 text-sm font-bold uppercase tracking-widest [writing-mode:vertical-rl] [transform:rotate(180deg)]',
-                ZONE_CLASS[z.index % ZONE_CLASS.length],
-              )}
+              className="flex items-center justify-center border-l border-text/15 px-2 text-sm font-medium text-muted [writing-mode:vertical-rl] [transform:rotate(180deg)]"
             >
               {zone}
             </div>
@@ -172,11 +163,10 @@ export function SeatMap({
                     aria-pressed={selected}
                     onClick={() => onSelect(s)}
                     className={clsx(
-                      'focus-ring relative flex h-[var(--seat)] w-[var(--seat)] flex-col items-center justify-center gap-0.5 rounded-xl border transition-[transform,box-shadow,background-color] duration-[var(--dur-fast)] ease-[var(--ease-out)]',
+                      'focus-ring relative flex h-[var(--seat)] w-[var(--seat)] flex-col items-center justify-center gap-0.5 rounded-lg border transition-[box-shadow,background-color] duration-[var(--dur-fast)] ease-[var(--ease-out)]',
                       STATUS_CLASS[s.status],
-                      selectable && 'hover:scale-[1.04] hover:shadow-[var(--shadow-card)] active:scale-[0.98]',
                       !selectable && 'cursor-not-allowed',
-                      selected && 'scale-[1.06] shadow-[var(--shadow-glow)] ring-2 ring-primary',
+                      selected && 'ring-2 ring-primary',
                       mine && !selected && 'ring-2 ring-primary/70',
                     )}
                   >
@@ -187,14 +177,14 @@ export function SeatMap({
                         aria-hidden="true"
                         className={clsx(
                           'absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full',
-                          mine ? 'bg-primary shadow-[0_0_8px_rgb(var(--c-primary))]' : 'bg-accent',
+                          mine ? 'bg-primary' : 'bg-accent',
                         )}
                       />
                     )}
                     {s.pcId === thisPcId && (
                       <span
                         aria-hidden="true"
-                        className="absolute left-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-success shadow-[0_0_8px_rgb(var(--c-success))]"
+                        className="absolute left-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-success"
                       />
                     )}
                   </button>
@@ -216,7 +206,7 @@ export function SeatMap({
           {t('booking.mine')}
         </li>
         <li className="flex items-center gap-2">
-          <span aria-hidden="true" className="h-3 w-3 rounded-full bg-success shadow-[0_0_6px_rgb(var(--c-success))]" />
+          <span aria-hidden="true" className="h-3 w-3 rounded-full bg-success" />
           {t('booking.thisPc')}
         </li>
       </ul>

@@ -665,8 +665,6 @@ export default function LockScreen(): JSX.Element {
         <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-0">
           <AdsCarousel items={art} showCounter={false} />
           <div className="absolute inset-0 bg-[linear-gradient(180deg,rgb(var(--c-bg)/0.8)_0%,rgb(var(--c-bg)/0.35)_28%,rgb(var(--c-bg)/0.4)_62%,rgb(var(--c-bg)/0.92)_100%)]" />
-          <div className="film-vignette" />
-          <div className="film-grain" />
         </div>
       ) : (
         <Background dim={0.6} />
@@ -674,9 +672,7 @@ export default function LockScreen(): JSX.Element {
       <div className="relative z-10 flex h-full w-full flex-col gap-[var(--gap)] px-[var(--gutter)] py-[var(--gap)]">
         <header className="flex items-start justify-between gap-[var(--gap)]">
           <div className="min-w-0">
-            <p className="text-glow truncate text-2xl font-black uppercase tracking-[0.2em] text-text">
-              {t('idle.clubName')}
-            </p>
+            <p className="truncate text-2xl font-semibold text-text">{t('idle.clubName')}</p>
             {pcName && <p className="mt-1 text-base text-muted">{t('idle.pcName', { name: pcName, zone: pcZone })}</p>}
           </div>
           <div className="flex items-center gap-[var(--gap)]">

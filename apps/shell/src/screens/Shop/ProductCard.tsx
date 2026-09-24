@@ -6,7 +6,6 @@ import { ORDER_MAX_QTY, type Product } from '@clubshell/contracts';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { useResolvedAsset } from '@/components/media/GameArtwork';
-import { tiltHandlers } from '@/hooks/useTilt';
 import { useLocale } from '@/hooks/useLocale';
 import { formatMoney } from '@/lib/format';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
@@ -65,9 +64,8 @@ export const ProductCard = memo(function ProductCard({
   return (
     <motion.article
       layout={animations}
-      {...tiltHandlers(4)}
       className={clsx(
-        'glass tilt group relative flex flex-col overflow-hidden rounded-lg transition-[box-shadow] duration-[var(--dur-fast)]',
+        'glass group relative flex flex-col overflow-hidden rounded-lg transition-[box-shadow] duration-[var(--dur-fast)]',
         'focus-within:border-glow',
         !available && 'opacity-60',
         className,
@@ -78,7 +76,6 @@ export const ProductCard = memo(function ProductCard({
         className="relative aspect-[4/3] w-full overflow-hidden"
         style={{ background: `linear-gradient(135deg, hsl(${hue} 55% 28%), hsl(${(hue + 40) % 360} 60% 18%))` }}
       >
-        <span aria-hidden="true" className="tilt-sheen z-10" />
         {showImage ? (
           <img
             src={url}
@@ -91,14 +88,14 @@ export const ProductCard = memo(function ProductCard({
           />
         ) : (
           <span
-            className="absolute inset-0 flex items-center justify-center text-4xl font-black text-white/70"
+            className="absolute inset-0 flex items-center justify-center text-4xl font-semibold text-white/70"
             aria-hidden="true"
           >
             {product.title.slice(0, 1).toUpperCase()}
           </span>
         )}
         <div className="absolute left-2 top-2 flex flex-wrap gap-1.5">
-          <Badge size="sm" tone="neutral" className="bg-bg/60 backdrop-blur">
+          <Badge size="sm" tone="neutral" className="bg-bg/70">
             {t(`shop.category.${product.category}`)}
           </Badge>
           {!available && (
@@ -127,10 +124,10 @@ export const ProductCard = memo(function ProductCard({
           </span>
           {qty === 0 ? (
             // Icon-only rather than labelled: next to the price the label wrapped the amount onto two lines. Size lg
-            // (3.25rem) is exactly the height of the − n + stepper it turns into, so the card does not jump.
+            // (3rem) is exactly the height of the − n + stepper it turns into, so the card does not jump.
             <Button
               size="lg"
-              variant="primary"
+              variant="secondary"
               iconOnly
               icon={<PlusIcon />}
               disabled={!available}
@@ -141,7 +138,7 @@ export const ProductCard = memo(function ProductCard({
             />
           ) : (
             <div
-              className="glass flex items-center gap-1 rounded-full p-1"
+              className="flex items-center gap-1 rounded-lg bg-text/[0.06] p-1"
               role="group"
               aria-label={`${t('shop.qty')}: ${product.title}`}
             >
@@ -151,7 +148,7 @@ export const ProductCard = memo(function ProductCard({
                 iconOnly
                 icon={<MinusIcon />}
                 aria-label={qty === 1 ? t('shop.removeFromCart') : t('shop.decrease')}
-                className="h-10 w-10 rounded-full"
+                className="h-10 w-10"
                 onClick={() => onChange(qty - 1)}
               />
               <span className="tnum min-w-[2ch] text-center text-lg font-bold" aria-live="polite">
@@ -164,7 +161,7 @@ export const ProductCard = memo(function ProductCard({
                 icon={<PlusIcon />}
                 aria-label={t('shop.increase')}
                 disabled={qty >= maxQty}
-                className="h-10 w-10 rounded-full"
+                className="h-10 w-10"
                 onClick={() => onChange(Math.min(maxQty, qty + 1))}
               />
             </div>

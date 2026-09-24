@@ -224,7 +224,7 @@ export default function ChatScreen(): JSX.Element {
     >
       <aside className="glass flex min-h-0 flex-col rounded-2xl p-3" aria-label={t('chat.rooms')}>
         <header className="px-2 pb-3 pt-1">
-          <h1 className="text-2xl font-bold text-text">{t('chat.title')}</h1>
+          <h1 className="text-[length:var(--fs-2xl)] font-semibold tracking-tight text-text">{t('chat.title')}</h1>
           <p className="text-sm text-muted">{t('chat.subtitle')}</p>
         </header>
         <nav className="no-scrollbar min-h-0 flex-1 overflow-y-auto">

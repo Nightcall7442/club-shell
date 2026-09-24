@@ -120,7 +120,7 @@ interface HeaderStatProps {
 function HeaderStat({ label, value, accent = false }: HeaderStatProps): JSX.Element {
   return (
     <div className="min-w-[7rem] rounded-lg bg-surface/40 px-4 py-3">
-      <p className="text-xs uppercase tracking-wide text-muted">{label}</p>
+      <p className="text-xs text-muted">{label}</p>
       <p className={accent ? 'tnum text-2xl font-bold text-accent' : 'tnum text-2xl font-bold'}>{value}</p>
     </div>
   );
@@ -243,7 +243,9 @@ export function ProfileHeader({ user, loyalty }: ProfileHeaderProps): JSX.Elemen
           </form>
         ) : (
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="truncate text-3xl font-bold leading-tight">{user.displayName}</h1>
+            <h1 className="truncate text-[length:var(--fs-2xl)] font-semibold tracking-tight text-text">
+              {user.displayName}
+            </h1>
             <Button
               ref={editRef}
               variant="ghost"

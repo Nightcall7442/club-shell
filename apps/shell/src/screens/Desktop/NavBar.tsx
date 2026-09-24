@@ -1,14 +1,13 @@
 /**
- * Horizontal navigation in the top bar: one `NavLink` per feature-enabled screen (icon, label from 1800 px, the
- * active one on a soft pill), a chat unread badge. Gamepad LB/RB cycle the routes unless a tab list is on screen
- * (Tabs owns LB/RB then); B/Escape go home.
+ * Vertical navigation of the sidebar: one `NavLink` per feature-enabled screen (icon + label, the active one on a
+ * quiet fill), a chat unread count. Gamepad LB/RB cycle the routes unless a tab list is on screen (Tabs owns LB/RB
+ * then); B/Escape go home.
  */
 import { useCallback, useMemo } from 'react';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import type { ShellFeatures } from '@clubshell/contracts';
-import { Badge } from '@/components/ui/Badge';
 import { useGamepad } from '@/hooks/useGamepad';
 import { selectUnreadTotal, useChatStore } from '@/store/chat';
 import { selectFeatures, useSettingsStore } from '@/store/settings';
@@ -21,7 +20,7 @@ const svgProps = {
   viewBox: '0 0 24 24',
   fill: 'none',
   stroke: 'currentColor',
-  strokeWidth: 1.9,
+  strokeWidth: 1.6,
   strokeLinecap: 'round',
   strokeLinejoin: 'round',
   'aria-hidden': true,
@@ -99,8 +98,6 @@ export interface NavItemDef {
   to: string;
   /** Feature toggle that hides the item when off. */
   feature?: keyof ShellFeatures;
-  /** Never show the label (secondary destinations). */
-  iconOnly?: boolean;
 }
 
 export const NAV_ITEMS: readonly NavItemDef[] = [
@@ -112,7 +109,7 @@ export const NAV_ITEMS: readonly NavItemDef[] = [
   { key: 'chat', to: '/chat', feature: 'chat' },
   { key: 'booking', to: '/booking', feature: 'booking' },
   { key: 'tournaments', to: '/tournaments', feature: 'tournaments' },
-  { key: 'support', to: '/support', iconOnly: true },
+  { key: 'support', to: '/support' },
 ];
 
 /** Items visible under the current feature toggles. */
@@ -163,45 +160,34 @@ export function NavBar({ className }: { className?: string }): JSX.Element {
 
   return (
     <nav aria-label={t('common.menu')} className={clsx('min-w-0', className)}>
-      <ul role="list" className="flex items-center">
+      <ul role="list" className="flex flex-col gap-0.5">
         {items.map((item) => {
           const label = t(`desktop.nav.${item.key}`);
           const badge = item.key === 'chat' && unread > 0 ? (unread > 99 ? '99+' : String(unread)) : null;
           return (
-            <li key={item.key} className="shrink-0">
+            <li key={item.key}>
               <NavLink
                 to={item.to}
                 data-nav="true"
-                title={label}
                 aria-label={badge ? `${label}, ${t('chat.unread', { count: unread })}` : label}
                 className={({ isActive }) =>
                   clsx(
-                    'focus-ring relative flex h-10 items-center gap-2 rounded-full px-2.5 text-[0.9rem] font-semibold transition-colors duration-[var(--dur-fast)]',
-                    !item.iconOnly && 'min-[1800px]:px-3',
-                    isActive ? 'bg-text/10 text-text' : 'text-muted hover:bg-text/[0.06] hover:text-text',
+                    'focus-ring flex h-11 items-center gap-3 rounded-md px-3 text-[0.95rem] font-medium transition-colors duration-[var(--dur-fast)]',
+                    isActive ? 'bg-text/[0.08] text-text' : 'text-muted hover:bg-text/[0.04] hover:text-text',
                   )
                 }
               >
                 <span
                   aria-hidden="true"
-                  className={clsx(
-                    'inline-flex h-5 w-5 shrink-0 items-center justify-center [&>svg]:h-full [&>svg]:w-full',
-                    !item.iconOnly && 'min-[1800px]:hidden',
-                  )}
+                  className="inline-flex h-5 w-5 shrink-0 items-center justify-center [&>svg]:h-full [&>svg]:w-full"
                 >
                   {ICONS[item.key]}
                 </span>
-                {!item.iconOnly && <span className="hidden whitespace-nowrap min-[1800px]:inline">{label}</span>}
+                <span className="min-w-0 flex-1 truncate">{label}</span>
                 {badge && (
-                  <Badge
-                    tone="danger"
-                    size="sm"
-                    solid
-                    aria-hidden="true"
-                    className="h-5 min-w-[1.25rem] px-1 text-[0.65rem]"
-                  >
+                  <span aria-hidden="true" className="tnum text-xs font-semibold text-text">
                     {badge}
-                  </Badge>
+                  </span>
                 )}
               </NavLink>
             </li>

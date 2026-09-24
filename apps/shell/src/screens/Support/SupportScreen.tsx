@@ -289,7 +289,7 @@ export default function SupportScreen(): JSX.Element {
       transition={{ duration: animations ? 0.25 : 0, ease: 'easeOut' }}
     >
       <header>
-        <h1 className="text-3xl font-bold leading-tight text-text">{t('support.title')}</h1>
+        <h1 className="text-[length:var(--fs-2xl)] font-semibold tracking-tight text-text">{t('support.title')}</h1>
         <p className="text-base text-muted">{t('support.subtitle')}</p>
       </header>
 

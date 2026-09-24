@@ -134,7 +134,7 @@ export function TariffCard({ tariff, available, current, action, onAction }: Tar
         </div>
       </header>
 
-      <p className="tnum text-[clamp(1.6rem,2.2vw,2.4rem)] font-black leading-none text-text">
+      <p className="tnum text-[clamp(1.6rem,2.2vw,2.4rem)] font-semibold leading-none text-text">
         {formatMoney(pkg ?? tariff.pricePerHour, locale)}
         {!pkg && <span className="ml-1 text-base font-semibold text-muted">/ {t('common.hourShort')}</span>}
       </p>
@@ -322,9 +322,7 @@ export function TariffActionModal({
                       onClick={() => setMinutes(m)}
                       className={clsx(
                         'focus-ring tnum flex h-16 flex-col items-center justify-center rounded-lg text-base font-bold transition-colors duration-[var(--dur-fast)]',
-                        active
-                          ? 'bg-primary text-on-primary shadow-[0_8px_24px_-8px_rgb(var(--c-primary)/0.4)]'
-                          : 'glass text-text hover:bg-surface/80',
+                        active ? 'bg-primary text-on-primary' : 'glass text-text hover:bg-surface/80',
                       )}
                     >
                       <span>
@@ -343,7 +341,7 @@ export function TariffActionModal({
           <dl className="flex flex-col gap-1 rounded-lg bg-text/5 px-4 py-3 text-base">
             <div className="flex items-center justify-between">
               <dt className="text-muted">{t('wallet.estimatedCost')}</dt>
-              <dd className="tnum text-xl font-black text-text">
+              <dd className="tnum text-xl font-semibold text-text">
                 {charged && cost ? formatMoney(cost, locale) : t('wallet.postpaid')}
               </dd>
             </div>
@@ -427,9 +425,7 @@ export function Tariffs({ onInsufficientFunds, className }: TariffsProps): JSX.E
       ) : (
         groups.map((group, gi) => (
           <div key={group.key} className="flex flex-col gap-3">
-            {groups.length > 1 && (
-              <h3 className="text-base font-semibold uppercase tracking-wide text-muted">{group.key}</h3>
-            )}
+            {groups.length > 1 && <h3 className="text-base font-semibold text-muted">{group.key}</h3>}
             <motion.ul
               role="list"
               className="grid grid-cols-[repeat(auto-fill,minmax(clamp(15rem,17vw,20rem),1fr))] gap-[var(--gap)]"

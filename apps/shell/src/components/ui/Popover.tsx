@@ -9,14 +9,24 @@ export interface PopoverProps {
   /** The button that toggles it; mark it `data-popover-trigger` so opening focuses the panel, not the trigger. */
   trigger: ReactNode;
   children: ReactNode;
+  /** `below-end`: under the trigger, right edges aligned (default); `above-start`: over it, left edges aligned. */
+  placement?: 'below-end' | 'above-start';
   className?: string;
 }
 
 /**
- * Panel anchored under its trigger (right-aligned): closes on an outside pointer-down and on Escape, and moves focus
+ * Panel anchored to its trigger (see `placement`): closes on an outside pointer-down and on Escape, and moves focus
  * to its first `data-nav` control when it opens so keyboard and gamepad land inside it.
  */
-export function Popover({ open, onClose, label, trigger, children, className }: PopoverProps): JSX.Element {
+export function Popover({
+  open,
+  onClose,
+  label,
+  trigger,
+  children,
+  placement = 'below-end',
+  className,
+}: PopoverProps): JSX.Element {
   const root = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -54,8 +64,8 @@ export function Popover({ open, onClose, label, trigger, children, className }: 
           role="dialog"
           aria-label={label}
           className={clsx(
-            // Near-opaque: at glass-strong's 82% the page's own text read through the panel's lines.
-            'glass-strong anim-pop absolute right-0 top-[calc(100%+0.5rem)] z-50 rounded-lg bg-surface/95 p-3',
+            'glass-strong anim-pop absolute z-50 rounded-lg p-3',
+            placement === 'below-end' ? 'right-0 top-[calc(100%+0.5rem)]' : 'bottom-[calc(100%+0.5rem)] left-0',
             className,
           )}
         >

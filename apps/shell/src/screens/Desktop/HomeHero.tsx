@@ -1,37 +1,29 @@
 /**
- * Home hero: full-bleed key art of the selected game (slow Ken Burns, crossfade on change), a poster strip to switch
- * it, the title block with Play / Close / Details, quick-action pills and a floating booking widget (time left and
- * balance are in the top bar, on every screen).
+ * Home hero: a greeting, one contained card with the selected game (key art, title, Play / Close / Details) and a row
+ * of recent covers to switch it (time left and balance are in the sidebar, on every screen).
  * Selection is the games-store `selectedId`, so the pick carries over to `/games`; the running game is always shown.
  */
 import type { Game } from '@clubshell/contracts';
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { setAmbientLight } from '@/components/layout/Background';
-import { GameArtwork, useResolvedAsset } from '@/components/media/GameArtwork';
-import { VideoBackground } from '@/components/media/VideoBackground';
+import { GameArtwork } from '@/components/media/GameArtwork';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { useImageTint } from '@/hooks/useImageTint';
-import { tiltHandlers } from '@/hooks/useTilt';
-import { whoosh } from '@/lib/sound';
-import { log } from '@/lib/logger';
-import { api } from '@/lib/tauri';
-import { serverNow, toDateKey } from '@/lib/time';
 import { categoryLabel } from '@/screens/Games/Categories';
 import { launcherLabelKey } from '@/screens/Games/GameCard';
 import { launchGame } from '@/screens/Games/LaunchOverlay';
 import { selectFeaturedGames, selectRecentGames, useGamesStore } from '@/store/games';
+import { useSession } from '@/hooks/useSession';
+import { serverNow } from '@/lib/time';
 import { useNotificationsStore } from '@/store/notifications';
-import { selectFeatures, useSettingsStore } from '@/store/settings';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
 
-const STRIP_MAX = 6;
+const STRIP_MAX = 8;
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Icons
@@ -63,6 +55,11 @@ const InfoIcon = (): JSX.Element => (
     <path d="M12 11v5M12 8h.01" />
   </svg>
 );
+const ArrowIcon = (): JSX.Element => (
+  <svg {...svgProps}>
+    <path d="M5 12h14M13 6l6 6-6 6" />
+  </svg>
+);
 const GridIcon = (): JSX.Element => (
   <svg {...svgProps}>
     <rect x="3" y="3" width="7" height="7" rx="1.5" />
@@ -73,10 +70,8 @@ const GridIcon = (): JSX.Element => (
 );
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Poster strip
+// Recent covers
 // ---------------------------------------------------------------------------------------------------------------------
-
-const TILE_W = 'w-[clamp(4.25rem,5vw,5.75rem)]';
 
 function PosterTile({
   game,
@@ -89,7 +84,6 @@ function PosterTile({
   running: boolean;
   onSelect: (game: Game) => void;
 }): JSX.Element {
-  const animations = useThemeStore(selectAnimationsEnabled);
   return (
     <button
       type="button"
@@ -99,92 +93,34 @@ function PosterTile({
       aria-pressed={selected}
       onClick={() => onSelect(game)}
       onFocus={() => onSelect(game)}
-      onMouseEnter={() => onSelect(game)}
-      {...tiltHandlers(9)}
-      className={clsx(
-        'focus-ring tilt relative shrink-0 overflow-hidden rounded-lg transition-[opacity,box-shadow] duration-[var(--dur-base)] ease-[var(--ease-out)]',
-        TILE_W,
-        selected ? 'opacity-100 [--zoom:1.06]' : 'opacity-55 hover:opacity-100',
-      )}
+      className="focus-ring group flex min-w-0 flex-col gap-2 rounded-lg text-left"
     >
-      <GameArtwork src={game.coverUrl} title={game.title} kind="cover" priority className="rounded-lg" />
-      <span aria-hidden="true" className="tilt-sheen rounded-lg" />
-      {selected && (
-        <motion.span
-          layoutId="home-strip-ring"
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 rounded-lg [box-shadow:inset_0_0_0_2px_rgb(var(--c-primary)/0.95)]"
-          transition={animations ? { type: 'spring', stiffness: 480, damping: 40, mass: 0.7 } : { duration: 0 }}
-        />
-      )}
-      {running && (
-        <span
-          aria-hidden="true"
-          className="anim-live-dot absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-success shadow-[0_0_10px_rgb(var(--c-success))]"
-        />
-      )}
+      <span
+        className={clsx(
+          'relative block overflow-hidden rounded-lg transition-[box-shadow,opacity] duration-[var(--dur-base)]',
+          selected ? 'opacity-100 [box-shadow:0_0_0_2px_rgb(var(--c-primary))]' : 'opacity-70 group-hover:opacity-100',
+        )}
+      >
+        <GameArtwork src={game.coverUrl} title={game.title} kind="cover" priority className="rounded-lg" />
+        {running && <span aria-hidden="true" className="absolute right-2 top-2 h-2 w-2 rounded-full bg-success" />}
+      </span>
+      <span className={clsx('truncate text-sm', selected ? 'text-text' : 'text-muted')}>{game.title}</span>
     </button>
   );
 }
 
-// ---------------------------------------------------------------------------------------------------------------------
-// Widgets
-// ---------------------------------------------------------------------------------------------------------------------
-
-function Widget({ children, className }: { children: ReactNode; className?: string }): JSX.Element {
-  return <div className={clsx('glass-strong rounded-2xl p-4', className)}>{children}</div>;
-}
-
-const SEAT_DOT: Record<string, string> = {
-  free: 'bg-accent shadow-[0_0_6px_rgb(var(--c-accent)/0.8)]',
-  booked: 'bg-primary',
-  busy: 'bg-text/25',
-  locked: 'bg-text/25',
-  maintenance: 'bg-danger/60',
-  offline: 'bg-text/15',
-};
-
-function BookingWidget(): JSX.Element {
-  const { t } = useTranslation();
-  const navigate = useNavigate();
-  const [seats, setSeats] = useState<{ status: string }[] | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    api.booking.seats(toDateKey(serverNow())).then(
-      (r) => active && setSeats(r.seats),
-      (e: unknown) => {
-        log.warn('booking widget failed', e);
-        if (active) {
-          setSeats([]);
-        }
-      },
-    );
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const free = seats?.filter((s) => s.status === 'free').length ?? 0;
-
-  return (
-    <Widget>
-      <div className="text-xs text-muted">{t('desktop.nav.booking')}</div>
-      <div className="text-xl font-bold leading-tight text-text">
-        {seats === null ? <Skeleton variant="text" width="8rem" /> : t('booking.freeSeats', { count: free })}
-      </div>
-      {seats && seats.length > 0 && (
-        <div aria-hidden="true" className="mt-3 grid grid-cols-12 gap-1.5">
-          {seats.slice(0, 48).map((s, i) => (
-            <span key={i} className={clsx('h-2 rounded-sm', SEAT_DOT[s.status] ?? SEAT_DOT.busy)} />
-          ))}
-        </div>
-      )}
-      <Button variant="secondary" size="md" block className="mt-4" onClick={() => navigate('/booking')}>
-        {t('booking.reserve')}
-      </Button>
-    </Widget>
-  );
+/** Greeting by the club's clock ("Good evening, Bobur"). */
+function greetingKey(hour: number): string {
+  if (hour < 5) {
+    return 'desktop.greetingNight';
+  }
+  if (hour < 12) {
+    return 'desktop.greetingMorning';
+  }
+  if (hour < 18) {
+    return 'desktop.greetingDay';
+  }
+  return 'desktop.greetingEvening';
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -194,7 +130,7 @@ function BookingWidget(): JSX.Element {
 export function HomeHero(): JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const features = useSettingsStore(selectFeatures);
+  const { user } = useSession();
   const animations = useThemeStore(selectAnimationsEnabled);
   const status = useGamesStore((s) => s.status);
   const byId = useGamesStore((s) => s.byId);
@@ -227,50 +163,7 @@ export function HomeHero(): JSX.Element {
   const isRunning = hero !== null && running.some((r) => r.gameId === hero.id);
   const isLaunching = hero !== null && launching?.gameId === hero.id;
   const loading = status === 'loading' && strip.length === 0;
-  const { url: artUrl } = useResolvedAsset(hero ? (hero.heroUrl ?? hero.coverUrl) : null);
-  const tint = useImageTint(artUrl);
-  // The inner screens keep the light of the last game featured here after the player navigates away.
-  useEffect(() => setAmbientLight(tint), [tint]);
-
-  // Parallax: pointer position → --px/--py in −1..1 on the section (CSS moves art and text in opposite directions).
-  const onPointerMove = (e: PointerEvent<HTMLElement>): void => {
-    if (!animations || e.pointerType === 'touch') {
-      return;
-    }
-    const r = e.currentTarget.getBoundingClientRect();
-    e.currentTarget.style.setProperty('--px', (((e.clientX - r.left) / r.width) * 2 - 1).toFixed(3));
-    e.currentTarget.style.setProperty('--py', (((e.clientY - r.top) / r.height) * 2 - 1).toFixed(3));
-  };
-  const onPointerLeave = (e: PointerEvent<HTMLElement>): void => {
-    e.currentTarget.style.setProperty('--px', '0');
-    e.currentTarget.style.setProperty('--py', '0');
-  };
-
-  // Entrance choreography of the title block: each line arrives a beat after the previous, out of a soft blur.
-  const stagger = {
-    hidden: {},
-    show: { transition: { staggerChildren: animations ? 0.07 : 0 } },
-    exit: { opacity: 0, y: -8, transition: { duration: animations ? 0.18 : 0 } },
-  };
-  const line = {
-    hidden: { opacity: 0, y: 18, filter: 'blur(8px)' },
-    show: {
-      opacity: 1,
-      y: 0,
-      filter: 'blur(0px)',
-      transition: { duration: animations ? 0.5 : 0, ease: [0.16, 1, 0.3, 1] },
-    },
-  };
-
-  // A whoosh when the hero changes by hand (not on first paint).
-  const lastHeroId = useRef<string | null>(null);
-  useEffect(() => {
-    const id = hero?.id ?? null;
-    if (lastHeroId.current !== null && id !== null && id !== lastHeroId.current) {
-      whoosh();
-    }
-    lastHeroId.current = id;
-  }, [hero?.id]);
+  const fade = { duration: animations ? 0.25 : 0 };
 
   // Initial focus for keyboard/gamepad users: Play, unless something else already holds focus.
   useEffect(() => {
@@ -300,42 +193,124 @@ export function HomeHero(): JSX.Element {
   const chips = hero
     ? [
         { key: 'launcher', label: t(launcherLabelKey(hero.launcher)) },
-        ...hero.category.slice(0, 1).map((c) => ({ key: `cat-${c}`, label: categoryLabel(t, c) })),
+        ...hero.category.slice(0, 2).map((c) => ({ key: `cat-${c}`, label: categoryLabel(t, c) })),
       ]
     : [];
 
+  const name = user?.displayName.split(' ')[0] ?? '';
+
   return (
-    <section
-      aria-label={t('desktop.title')}
-      onPointerMove={onPointerMove}
-      onPointerLeave={onPointerLeave}
-      style={tint ? ({ '--hero-tint': tint } as CSSProperties) : undefined}
-      // 100vh minus a peek deep enough for the next row's cards to show above the fold, not just its heading — a
-      // lone heading on the bottom edge read as clipped rather than as "there is more below".
-      className="relative -mx-[var(--gutter)] -mt-[calc(var(--topbar-h)+var(--gap))] h-[calc(100vh-10rem)] min-h-[38rem] overflow-hidden [--px:0] [--py:0]"
-    >
-      {/* Art + veils, faded out at the bottom so the hero melts into the page. */}
-      <div
-        aria-hidden="true"
-        className="absolute inset-0 [mask-image:linear-gradient(to_bottom,black_70%,transparent)]"
-      >
-        {loading && <Skeleton variant="rect" className="absolute inset-0 h-full w-full rounded-none" />}
-        {/* Oversized so the parallax drift never shows an edge; drifts against the pointer for depth. */}
-        <div className="absolute -inset-[2%] transition-transform duration-[900ms] ease-[var(--ease-out)] [transform:translate3d(calc(var(--px)*-1.1%),calc(var(--py)*-0.7%),0)]">
+    <section aria-label={t('desktop.title')} className="flex flex-col gap-[calc(var(--gap)*1.5)]">
+      <h1 className="text-[length:var(--fs-2xl)] font-semibold tracking-tight text-text">
+        {name ? t(greetingKey(serverNow().getHours()), { name }) : t('desktop.title')}
+      </h1>
+
+      {/* Selected game: art on the right, copy and actions on a plain panel on the left. */}
+      <div className="glass relative grid min-h-[22rem] grid-cols-[minmax(0,5fr)_minmax(0,7fr)] overflow-hidden rounded-xl">
+        <div className="relative z-10 flex flex-col justify-end gap-5 p-[calc(var(--gap)*1.5)]">
+          {loading && (
+            <div className="flex flex-col gap-3">
+              <Skeleton variant="text" width="70%" height="2.5rem" />
+              <Skeleton variant="text" width="40%" />
+            </div>
+          )}
+
+          {!loading && !hero && (
+            <div className="flex flex-col items-start gap-4">
+              <p className="text-[length:var(--fs-xl)] font-semibold text-text">{t('games.empty')}</p>
+              <Button ref={primary} variant="primary" size="lg" icon={<GridIcon />} onClick={() => navigate('/games')}>
+                {t('desktop.allGames')}
+              </Button>
+            </div>
+          )}
+
+          {hero && (
+            <>
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.div
+                  key={hero.id}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={fade}
+                  className="flex flex-col gap-3"
+                >
+                  {isRunning && (
+                    <span className="flex items-center gap-2 text-sm font-medium text-success">
+                      <span aria-hidden="true" className="h-2 w-2 rounded-full bg-success" />
+                      {t('games.nowPlaying')}
+                    </span>
+                  )}
+                  <h2 className="line-clamp-2 text-[length:var(--fs-display)] font-semibold leading-[1.05] tracking-[-0.02em] text-text">
+                    {hero.title}
+                  </h2>
+                  <ul className="flex flex-wrap items-center gap-2" aria-label={t('common.details')}>
+                    {!hero.installed && (
+                      <li>
+                        <Badge tone="muted">{t('games.notInstalled')}</Badge>
+                      </li>
+                    )}
+                    {hero.requiresAccount && (
+                      <li>
+                        <Badge tone="accent" title={t('games.requiresAccountHint')}>
+                          {t('games.requiresAccount')}
+                        </Badge>
+                      </li>
+                    )}
+                    {chips.map((c) => (
+                      <li key={c.key}>
+                        <Badge tone="neutral">{c.label}</Badge>
+                      </li>
+                    ))}
+                  </ul>
+                </motion.div>
+              </AnimatePresence>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {isRunning ? (
+                  <Button
+                    ref={primary}
+                    variant="danger"
+                    size="lg"
+                    icon={<StopIcon />}
+                    onClick={() => setConfirmKill(true)}
+                  >
+                    {t('games.kill')}
+                  </Button>
+                ) : (
+                  <Button
+                    ref={primary}
+                    variant="primary"
+                    size="lg"
+                    icon={<PlayIcon />}
+                    loading={isLaunching}
+                    disabled={!hero.installed}
+                    title={hero.installed ? undefined : t('errors.gameNotInstalled')}
+                    onClick={() => play(hero)}
+                    className="min-w-[11rem]"
+                  >
+                    {isLaunching ? t('games.launching') : t('games.playNow')}
+                  </Button>
+                )}
+                <Button variant="secondary" size="lg" icon={<InfoIcon />} onClick={() => navigate(`/games/${hero.id}`)}>
+                  {t('games.details')}
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div aria-hidden="true" className="relative">
+          {loading && <Skeleton variant="rect" className="absolute inset-0 h-full w-full rounded-none" />}
           <AnimatePresence initial={false}>
             {hero && (
               <motion.div
                 key={hero.id}
                 className="absolute inset-0"
-                style={{ transformOrigin: '65% 40%' }}
-                initial={{ opacity: 0, scale: 1.02, filter: 'blur(14px)' }}
-                animate={{ opacity: 1, scale: animations ? 1.08 : 1, filter: 'blur(0px)' }}
-                exit={{ opacity: 0, scale: 1.04, filter: 'blur(10px)' }}
-                transition={{
-                  opacity: { duration: animations ? 0.8 : 0 },
-                  filter: { duration: animations ? 1.1 : 0, ease: 'easeOut' },
-                  scale: { duration: 34, ease: 'linear' },
-                }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={fade}
               >
                 <GameArtwork
                   src={hero.heroUrl ?? hero.coverUrl}
@@ -345,172 +320,35 @@ export function HomeHero(): JSX.Element {
                   className="rounded-none"
                   style={{ position: 'absolute', inset: 0, height: '100%', aspectRatio: 'auto' }}
                 />
-                {/* Ambient loop over the still; it pauses by itself while a game runs or the window is hidden. */}
-                {hero.videoUrl && <VideoBackground src={hero.videoUrl} poster={hero.heroUrl ?? hero.coverUrl} />}
               </motion.div>
             )}
           </AnimatePresence>
+          {/* One soft edge where the art meets the panel; no other veils. */}
+          <div className="absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-[rgb(var(--c-surface))] to-transparent" />
         </div>
-        <div className="film-grain" />
-        <div className="film-vignette" />
-        <div className="absolute inset-0 bg-gradient-to-r from-bg/95 via-bg/40 to-bg/5" />
-        <div className="absolute inset-x-0 bottom-0 h-3/5 bg-gradient-to-t from-bg/95 via-bg/45 to-transparent" />
-        <div className="absolute inset-x-0 top-0 h-64 bg-gradient-to-b from-bg/80 via-bg/30 to-transparent" />
-        {/* Stage light: the artwork's own colour, bleeding into the dark corner under the title. */}
-        {tint && (
-          <div className="absolute inset-0 transition-opacity duration-[1200ms] [background:radial-gradient(70%_60%_at_18%_100%,rgb(var(--hero-tint)/0.28),transparent_70%)]" />
-        )}
       </div>
 
-      {/* Poster strip */}
       {strip.length > 0 && (
-        <div
-          role="list"
-          aria-label={t('desktop.continuePlaying')}
-          className="absolute left-[var(--gutter)] top-[calc(var(--topbar-h)+var(--gap))] z-10 flex items-stretch gap-2.5"
-        >
-          {strip.map((g) => (
-            <PosterTile
-              key={g.id}
-              game={g}
-              selected={hero?.id === g.id}
-              running={running.some((r) => r.gameId === g.id)}
-              onSelect={(x) => select(x.id)}
-            />
-          ))}
-          <button
-            type="button"
-            role="listitem"
-            data-nav="true"
-            onClick={() => navigate('/games')}
-            className={clsx(
-              'focus-ring glass flex shrink-0 flex-col items-center justify-center gap-1.5 rounded-lg px-1 text-center text-xs font-semibold leading-tight text-muted transition-colors duration-[var(--dur-fast)] hover:bg-surface/80 hover:text-text [&>svg]:h-6 [&>svg]:w-6',
-              TILE_W,
-            )}
-          >
-            <GridIcon />
-            {t('desktop.allGames')}
-          </button>
-        </div>
-      )}
-
-      {/* Time and balance live in the top bar on every screen; Home only adds what the bar cannot show. */}
-      {features.booking && (
-        <aside
-          aria-label={t('desktop.nav.booking')}
-          className="absolute right-[var(--gutter)] top-[calc(var(--topbar-h)+var(--gap))] z-10 hidden w-[clamp(17rem,19vw,22rem)] flex-col gap-3 2xl:flex"
-        >
-          <BookingWidget />
-        </aside>
-      )}
-
-      {/* Title block; the pill row below it may run wider than the text column. */}
-      <div className="absolute inset-x-[var(--gutter)] bottom-[var(--gap)] z-10 flex flex-col gap-4 transition-transform duration-[900ms] ease-[var(--ease-out)] [transform:translate3d(calc(var(--px)*0.35%),calc(var(--py)*0.25%),0)] [&>*:not(:last-child)]:max-w-[min(64%,64rem)] 2xl:[&>*:not(:last-child)]:max-w-[min(56%,64rem)]">
-        {loading && (
-          <div className="flex flex-col gap-3">
-            <Skeleton variant="text" width="60%" height="3.5rem" />
-            <Skeleton variant="text" width="40%" />
-          </div>
-        )}
-
-        {!loading && !hero && (
-          <div className="flex flex-col items-start gap-4">
-            <h1 className="text-[length:var(--fs-3xl)] font-black leading-none tracking-tight text-text">
-              {t('games.empty')}
-            </h1>
-            <Button ref={primary} variant="primary" size="xl" icon={<GridIcon />} onClick={() => navigate('/games')}>
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-4">
+            <h2 className="text-lg font-semibold text-text">{t('desktop.recentlyPlayed')}</h2>
+            <Button variant="ghost" size="md" iconRight={<ArrowIcon />} onClick={() => navigate('/games')}>
               {t('desktop.allGames')}
             </Button>
           </div>
-        )}
-
-        {hero && (
-          <>
-            <AnimatePresence mode="wait" initial={false}>
-              <motion.div
-                key={hero.id}
-                variants={stagger}
-                initial="hidden"
-                animate="show"
-                exit="exit"
-                className="flex flex-col gap-3"
-              >
-                <motion.h1
-                  variants={line}
-                  className="text-glow line-clamp-2 text-[length:var(--fs-display)] font-black leading-[0.95] tracking-[-0.03em] text-text"
-                >
-                  {hero.title}
-                </motion.h1>
-                <motion.ul
-                  variants={line}
-                  className="flex flex-wrap items-center gap-2"
-                  aria-label={t('common.details')}
-                >
-                  {isRunning && (
-                    <li>
-                      <Badge tone="primary" solid live>
-                        {t('games.nowPlaying')}
-                      </Badge>
-                    </li>
-                  )}
-                  {!hero.installed && (
-                    <li>
-                      <Badge tone="muted" solid>
-                        {t('games.notInstalled')}
-                      </Badge>
-                    </li>
-                  )}
-                  {hero.requiresAccount && (
-                    <li>
-                      <Badge tone="accent" solid title={t('games.requiresAccountHint')}>
-                        {t('games.requiresAccount')}
-                      </Badge>
-                    </li>
-                  )}
-                  {chips.map((c) => (
-                    <li key={c.key}>
-                      <Badge tone="neutral" size="md" className="bg-text/[0.08] text-text/85">
-                        {c.label}
-                      </Badge>
-                    </li>
-                  ))}
-                </motion.ul>
-              </motion.div>
-            </AnimatePresence>
-
-            <div className="mt-1 flex flex-wrap items-center gap-3">
-              {isRunning ? (
-                <Button
-                  ref={primary}
-                  variant="danger"
-                  size="xl"
-                  icon={<StopIcon />}
-                  onClick={() => setConfirmKill(true)}
-                >
-                  {t('games.kill')}
-                </Button>
-              ) : (
-                <Button
-                  ref={primary}
-                  variant="primary"
-                  size="xl"
-                  icon={<PlayIcon />}
-                  loading={isLaunching}
-                  disabled={!hero.installed}
-                  title={hero.installed ? undefined : t('errors.gameNotInstalled')}
-                  onClick={() => play(hero)}
-                  className="min-w-[14rem] [box-shadow:0_14px_44px_-12px_rgb(var(--hero-tint,var(--c-primary))/0.65)]"
-                >
-                  {isLaunching ? t('games.launching') : t('games.playNow')}
-                </Button>
-              )}
-              <Button variant="ghost" size="xl" icon={<InfoIcon />} onClick={() => navigate(`/games/${hero.id}`)}>
-                {t('games.details')}
-              </Button>
-            </div>
-          </>
-        )}
-      </div>
+          <div role="list" aria-label={t('desktop.continuePlaying')} className="grid grid-cols-8 gap-[var(--gap)]">
+            {strip.map((g) => (
+              <PosterTile
+                key={g.id}
+                game={g}
+                selected={hero?.id === g.id}
+                running={running.some((r) => r.gameId === g.id)}
+                onSelect={(x) => select(x.id)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       <Modal
         open={confirmKill}

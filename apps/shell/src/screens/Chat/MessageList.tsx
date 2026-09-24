@@ -104,7 +104,7 @@ function Bubble({ m, mine, showSender }: { m: ChatMessage; mine: boolean; showSe
           <span className="flex items-center gap-2 px-1 text-sm text-muted">
             {m.senderName}
             {admin && (
-              <Badge tone="accent" size="sm" solid>
+              <Badge tone="accent" size="sm">
                 {t('chat.admin')}
               </Badge>
             )}
@@ -113,7 +113,7 @@ function Bubble({ m, mine, showSender }: { m: ChatMessage; mine: boolean; showSe
         <div
           className={clsx(
             'whitespace-pre-wrap break-words rounded-2xl px-4 py-2.5 text-base leading-relaxed transition-opacity',
-            mine && 'rounded-br-sm bg-primary text-on-primary shadow-[0_8px_24px_-12px_rgb(var(--c-primary)/0.4)]',
+            mine && 'rounded-br-sm bg-primary text-on-primary',
             !mine && admin && 'glass rounded-bl-sm border-accent/40 text-text',
             !mine && !admin && 'glass rounded-bl-sm text-text',
             pending && 'opacity-60',
@@ -304,9 +304,7 @@ export function MessageList({
         {groups.map((g) => (
           <section key={g.key} aria-label={g.label} className="mb-2">
             <div className="sticky top-0 z-10 my-2 flex justify-center">
-              <span className="glass-strong rounded-full px-3 py-1 text-xs font-medium uppercase tracking-wide text-muted">
-                {g.label}
-              </span>
+              <span className="glass-strong rounded-full px-3 py-1 text-xs font-medium text-muted">{g.label}</span>
             </div>
             <ul className="flex flex-col gap-2">
               {g.items.map((m, i) => {

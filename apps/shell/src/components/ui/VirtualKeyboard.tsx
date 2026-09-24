@@ -330,7 +330,7 @@ export function VirtualKeyboard(): JSX.Element | null {
                 aria-label={t('kiosk.virtualKeyboard.space')}
                 onPointerDown={preventFocusSteal}
                 onClick={() => type(' ')}
-                className="inline-flex h-[3.2rem] min-w-[18rem] flex-1 items-center justify-center rounded-md bg-text/10 text-base font-semibold text-muted hover:bg-text/20 active:scale-[0.98]"
+                className="inline-flex h-[3.2rem] min-w-[18rem] flex-1 items-center justify-center rounded-md bg-text/10 text-base font-semibold text-muted hover:bg-text/20"
               >
                 {t('kiosk.virtualKeyboard.space')}
               </button>

@@ -344,7 +344,7 @@ export default function BookingScreen(): JSX.Element {
       <section className="flex min-h-0 flex-col gap-4">
         <header className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-bold text-text">{t('booking.title')}</h1>
+            <h1 className="text-[length:var(--fs-2xl)] font-semibold tracking-tight text-text">{t('booking.title')}</h1>
             <p className="text-muted">{t('booking.subtitle')}</p>
           </div>
           {data && (
@@ -379,7 +379,7 @@ export default function BookingScreen(): JSX.Element {
                     : 'glass text-text hover:bg-surface/80',
                 )}
               >
-                <span className="text-xs font-medium uppercase tracking-wide opacity-80">{label}</span>
+                <span className="text-xs font-medium opacity-80">{label}</span>
                 <span className="tnum text-lg font-bold leading-tight">{dayMonth.format(d.date)}</span>
               </button>
             );

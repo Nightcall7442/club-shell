@@ -3,22 +3,22 @@
  * Defaults = config/themes/default.json; theme/themes.ts overwrites them at runtime.
  */
 :root {
-  --c-bg: 9 9 11;
-  --c-surface: 21 21 24;
+  --c-bg: 12 12 14;
+  --c-surface: 22 22 25;
   --c-primary: 244 244 245;
   --c-primary-hover: 224 224 227;
   --c-primary-active: 205 205 209;
   --c-on-primary: 9 9 11;
-  --c-accent: 242 184 75;
+  --c-accent: 122 162 247;
   --c-on-accent: 9 9 11;
   --c-text: 250 250 250;
   --c-muted: 142 142 150;
   --c-danger: 239 68 68;
   --c-success: 34 197 94;
 
-  --radius: 12px;
+  --radius: 10px;
   --font: "Inter";
-  --blur: 12px;
+  --blur: 0px;
 
   /* Typography scale: 18px base on 1080p, fluid between 1600×900 and 2560×1440. */
   --fs-base: clamp(16px, 0.9375vw, 24px);
@@ -28,11 +28,11 @@
   --fs-lg: 1.2rem;
   --fs-xl: 1.5rem;
   --fs-2xl: 2rem;
-  --fs-3xl: 2.75rem;
-  --fs-display: clamp(2.5rem, 4.5vw, 5rem);
+  --fs-3xl: 2.5rem;
+  --fs-display: clamp(2.25rem, 3vw, 3.5rem);
 
-  /* Layout. */
-  --topbar-h: clamp(64px, 4.6vw, 96px);
+  /* Layout: a fixed navigation rail on the left, content to its right. */
+  --sidebar-w: clamp(232px, 13.5vw, 300px);
   --gutter: clamp(20px, 2vw, 48px);
   --gap: clamp(12px, 1.2vw, 28px);
   --card-cover-w: clamp(180px, 12.5vw, 300px);
@@ -46,10 +46,12 @@
   --dur-base: 200ms;
   --dur-slow: 400ms;
 
-  /* Elevation / glow. */
-  --shadow-card: 0 16px 48px -16px rgb(0 0 0 / 0.7);
-  --shadow-glow: 0 0 0 2px rgb(var(--c-primary) / 0.9), 0 0 22px 2px rgb(var(--c-primary) / 0.25);
-  --shadow-glow-danger: 0 0 0 2px rgb(var(--c-danger) / 0.9), 0 0 22px 2px rgb(var(--c-danger) / 0.3);
+  /* Elevation: flat by default; only floating layers (popovers, modals) cast a shadow. Focus is a plain ring. */
+  --hairline: rgb(var(--c-text) / 0.07);
+  --shadow-card: none;
+  --shadow-float: 0 24px 64px -24px rgb(0 0 0 / 0.8);
+  --shadow-glow: 0 0 0 2px rgb(var(--c-primary) / 0.9);
+  --shadow-glow-danger: 0 0 0 2px rgb(var(--c-danger) / 0.9);
 
   color-scheme: dark;
 }
@@ -74,32 +76,31 @@ html {
     box-shadow: var(--shadow-glow-danger);
   }
 
-  /* Blur-glass surface used by cards, bars and modals; the inset top line reads as the thickness of the glass. */
+  /*
+   * Surfaces: flat panels with a hairline edge — `.glass` for cards and rows, `.glass-strong` for floating layers
+   * (popovers, modals, dropdowns). A theme with `blur > 0` sets `data-glass` and gets translucent, blurred panels
+   * instead (the names date from when that was the only look).
+   */
   .glass {
+    background-color: rgb(var(--c-surface));
+    border: 1px solid var(--hairline);
+  }
+  .glass-strong {
+    background-color: rgb(var(--c-surface));
+    border: 1px solid rgb(var(--c-text) / 0.09);
+    box-shadow: var(--shadow-float);
+  }
+  :root[data-glass] .glass {
     background-color: rgb(var(--c-surface) / 0.55);
     -webkit-backdrop-filter: blur(var(--blur)) saturate(120%);
     backdrop-filter: blur(var(--blur)) saturate(120%);
-    border: 1px solid rgb(var(--c-text) / 0.06);
-    box-shadow: inset 0 1px 0 rgb(var(--c-text) / 0.06), var(--shadow-card);
   }
-  .glass-strong {
-    background-color: rgb(var(--c-surface) / 0.82);
+  :root[data-glass] .glass-strong {
+    background-color: rgb(var(--c-surface) / 0.9);
     -webkit-backdrop-filter: blur(calc(var(--blur) * 1.5)) saturate(120%);
     backdrop-filter: blur(calc(var(--blur) * 1.5)) saturate(120%);
-    border: 1px solid rgb(var(--c-text) / 0.07);
-    box-shadow: inset 0 1px 0 rgb(var(--c-text) / 0.08), var(--shadow-card);
   }
 
-  /* Film look for full-bleed artwork: static grain (SVG noise, blended) and an edge vignette. */
-  .film-grain {
-    pointer-events: none;
-    position: absolute;
-    inset: 0;
-    opacity: 0.07;
-    mix-blend-mode: overlay;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
-    background-size: 180px 180px;
-  }
   /* Soft edge on a horizontally scrolling row, set by useOverflowFade only on the side that has more to show. */
   .fade-x[data-fade-end] {
     mask-image: linear-gradient(to right, #000 calc(100% - 4rem), transparent);
@@ -110,58 +111,10 @@ html {
   .fade-x[data-fade-start][data-fade-end] {
     mask-image: linear-gradient(to right, transparent, #000 4rem, #000 calc(100% - 4rem), transparent);
   }
-  .film-vignette {
-    pointer-events: none;
-    position: absolute;
-    inset: 0;
-    background: radial-gradient(120% 90% at 55% 45%, transparent 55%, rgb(var(--c-bg) / 0.55) 100%);
-  }
 
-  /* Pointer-following 3D tilt with a specular sheen (vars set by `tiltHandlers`). */
-  .tilt {
-    --rx: 0deg;
-    --ry: 0deg;
-    --mx: 50%;
-    --my: 50%;
-    --lift: 0px;
-    --zoom: 1;
-    transform: perspective(900px) rotateX(var(--rx)) rotateY(var(--ry)) translateY(var(--lift)) scale(var(--zoom));
-    transform-style: preserve-3d;
-    transition: transform var(--dur-slow) var(--ease-out);
-    will-change: transform;
-  }
-  .tilt[data-tilting="true"] {
-    transition: transform 90ms linear;
-  }
-  .tilt:hover,
-  .tilt:focus-visible,
-  .tilt[data-focused="true"] {
-    --lift: -6px;
-    --zoom: 1.04;
-  }
-  .tilt-sheen {
-    pointer-events: none;
-    position: absolute;
-    inset: 0;
-    opacity: 0;
-    background: radial-gradient(55% 40% at var(--mx) var(--my), rgb(255 255 255 / 0.22), transparent 62%);
-    transition: opacity var(--dur-base) var(--ease-out);
-  }
-  .tilt:hover .tilt-sheen,
-  .tilt:focus-visible .tilt-sheen,
-  .tilt[data-focused="true"] .tilt-sheen {
-    opacity: 1;
-  }
-  :root[data-animations="false"] .tilt {
-    transform: none;
-  }
-
-  /* Text / border accents (soft; the artwork carries the colour). */
-  .text-glow {
-    text-shadow: 0 2px 24px rgb(0 0 0 / 0.6);
-  }
+  /* Selected card / option: a plain 2 px ring. */
   .border-glow {
-    box-shadow: 0 0 0 2px rgb(var(--c-primary) / 0.9), 0 0 20px rgb(var(--c-primary) / 0.2);
+    box-shadow: 0 0 0 2px rgb(var(--c-primary) / 0.9);
   }
 
   /* Hide scrollbars but keep scrolling (kiosk). */
@@ -196,7 +149,7 @@ html {
     width: 100%;
     overflow: hidden;
     border-radius: var(--radius);
-    background: linear-gradient(160deg, rgb(var(--c-surface)) 0%, rgb(var(--c-bg)) 100%);
+    background: rgb(var(--c-surface));
   }
 
   /* Truncation helpers. */

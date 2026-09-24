@@ -1,6 +1,6 @@
 /**
- * Session countdown: SVG ring (used / total), big `mm:ss` under 10 minutes or `hh:mm:ss` otherwise, paused/locked
- * badges and a pulsing danger state under 5 minutes. Clicking a timed session opens {@link ExtendSessionModal}
+ * Session countdown: a sidebar row with a hairline progress bar, or a card with an SVG ring (used / total); `mm:ss`
+ * under 10 minutes or `hh:mm:ss` otherwise, paused/locked badges and a pulsing danger state under 5 minutes. Clicking a timed session opens {@link ExtendSessionModal}
  * (30/60/120 minute presets priced by the session tariff → `session_extend`).
  */
 import { useEffect, useMemo, useState } from 'react';
@@ -101,7 +101,7 @@ export function Ring({ progress, size, stroke, tone, label, valueText }: RingPro
 // ---------------------------------------------------------------------------------------------------------------------
 
 export interface SessionTimerProps {
-  /** Top-bar size (44 px ring, 2xl text) instead of the large card. */
+  /** Sidebar row (caption, number, hairline progress) instead of the large ring card. */
   compact?: boolean;
   className?: string;
 }
@@ -139,9 +139,11 @@ export function SessionTimer({ compact = false, className }: SessionTimerProps):
     </Badge>
   ) : null;
 
-  const ringSize = compact ? 44 : 168;
-  const ringStroke = compact ? 4 : 10;
+  const ringSize = 168;
+  const ringStroke = 6;
   const caption = !s.isOpen ? t('session.noSession') : s.isOpenEnded ? t('session.timeUsed') : t('session.timeLeft');
+
+  const valueClass = s.isCritical ? 'timer-critical' : s.isWarning ? 'timer-warning' : 'text-text';
 
   return (
     <>
@@ -153,54 +155,61 @@ export function SessionTimer({ compact = false, className }: SessionTimerProps):
         title={canExtend ? t('session.extend') : undefined}
         onClick={() => canExtend && setExtendOpen(true)}
         className={clsx(
-          'focus-ring glass group flex select-none items-center rounded-full text-left transition-colors duration-[var(--dur-fast)] disabled:cursor-default',
-          canExtend && 'hover:bg-surface/80',
+          'focus-ring group flex select-none text-left transition-colors duration-[var(--dur-fast)] disabled:cursor-default',
+          canExtend && 'hover:bg-text/[0.04]',
           compact
-            ? clsx('h-12 gap-3 pl-1', canExtend ? 'pr-1.5' : 'pr-4')
-            : 'flex-col justify-center gap-3 rounded-2xl px-8 py-6',
+            ? 'w-full flex-col gap-2 rounded-md px-3 py-2.5'
+            : 'glass flex-col items-center justify-center gap-3 rounded-xl px-8 py-6',
           className,
         )}
       >
-        <div className="relative flex items-center justify-center">
-          <Ring
-            progress={progress}
-            size={ringSize}
-            stroke={ringStroke}
-            tone={tone}
-            label={t('session.timerLabel')}
-            valueText={label}
-          />
-          {!compact && (
-            <span
-              className={clsx(
-                'tnum absolute text-4xl font-bold leading-none',
-                s.isCritical ? 'timer-critical' : s.isWarning ? 'timer-warning' : 'text-text',
-              )}
-              aria-hidden="true"
-            >
-              {label}
-            </span>
-          )}
-        </div>
         {compact ? (
-          <span className="flex min-w-0 items-center gap-2">
-            <span
-              className={clsx(
-                'tnum text-2xl font-bold leading-none',
-                s.isCritical ? 'timer-critical' : s.isWarning ? 'timer-warning' : 'text-text',
-              )}
-            >
-              {label}
+          <>
+            <span className="flex w-full items-center gap-3">
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-2 text-xs text-muted">
+                  {caption}
+                  {badge}
+                </span>
+                <span className={clsx('tnum block text-2xl font-semibold leading-tight', valueClass)}>{label}</span>
+              </span>
+              {canExtend && <PlusButton />}
             </span>
-            {badge}
-            {canExtend && <PlusDisc />}
-          </span>
+            {/* Used share of the session as a hairline: the number is the message, the bar only its context. */}
+            <span aria-hidden="true" className="block h-0.5 w-full overflow-hidden rounded-full bg-text/10">
+              <span
+                className={clsx(
+                  'block h-full rounded-full transition-[width] duration-1000 ease-linear',
+                  tone === 'danger' ? 'bg-danger' : tone === 'accent' ? 'bg-accent' : 'bg-text/60',
+                )}
+                style={{ width: `${Math.round(Math.min(1, Math.max(0, 1 - progress)) * 100)}%` }}
+              />
+            </span>
+          </>
         ) : (
-          <span className="flex flex-col items-center gap-2">
-            <span className="text-sm uppercase tracking-wide text-muted">{caption}</span>
-            {badge}
-            {canExtend && <span className="text-sm text-primary">{t('session.extend')}</span>}
-          </span>
+          <>
+            <div className="relative flex items-center justify-center">
+              <Ring
+                progress={progress}
+                size={ringSize}
+                stroke={ringStroke}
+                tone={tone}
+                label={t('session.timerLabel')}
+                valueText={label}
+              />
+              <span
+                className={clsx('tnum absolute text-4xl font-semibold leading-none', valueClass)}
+                aria-hidden="true"
+              >
+                {label}
+              </span>
+            </div>
+            <span className="flex flex-col items-center gap-2">
+              <span className="text-sm text-muted">{caption}</span>
+              {badge}
+              {canExtend && <span className="text-sm text-primary">{t('session.extend')}</span>}
+            </span>
+          </>
         )}
       </button>
       <ExtendSessionModal open={extendOpen} onClose={() => setExtendOpen(false)} />
@@ -209,16 +218,16 @@ export function SessionTimer({ compact = false, className }: SessionTimerProps):
 }
 
 /**
- * "+" disc at the end of a top-bar pill (the session timer, the balance) that fills in when the pill is hovered:
- * says "add" without a word, and the pill around it stays the target.
+ * Small "+" square at the end of a sidebar row (time left, balance) that fills in when the row is hovered: says "add"
+ * without a word, and the row around it stays the target.
  */
-export function PlusDisc(): JSX.Element {
+export function PlusButton(): JSX.Element {
   return (
     <span
       aria-hidden="true"
-      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-text/10 text-text transition-colors duration-[var(--dur-fast)] group-hover:bg-primary group-hover:text-on-primary [&>svg]:h-4 [&>svg]:w-4"
+      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-text/[0.06] text-muted transition-colors duration-[var(--dur-fast)] group-hover:bg-primary group-hover:text-on-primary [&>svg]:h-4 [&>svg]:w-4"
     >
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
         <path d="M12 5v14M5 12h14" />
       </svg>
     </span>
