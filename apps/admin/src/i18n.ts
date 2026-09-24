@@ -49,3 +49,8 @@ export function t(ru: string, vars?: Record<string, string | number>): string {
   }
   return out;
 }
+
+/** BCP 47 locale for dates and month names in the current console language. */
+export function dateLocale(): string {
+  return lang === 'en' ? 'en-GB' : lang === 'uz' ? 'uz-Latn' : 'ru-RU';
+}

@@ -87,7 +87,9 @@ export function MoneyInput({
           onChange(Number(digits || '0') * 100);
         }}
       />
-      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted">сум</span>
+      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted">
+        {t('сум')}
+      </span>
     </div>
   );
 }

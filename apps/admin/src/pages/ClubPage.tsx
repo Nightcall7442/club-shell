@@ -62,7 +62,7 @@ function Preview({ s }: { s: ClubSettings }): JSX.Element {
               )}
               <span className="truncate font-display text-[0.62rem] font-medium">{s.branding.clubName || '—'}</span>
             </div>
-            <span className="tnum shrink-0 font-mono text-[0.55rem] text-muted">45 000 сум</span>
+            <span className="tnum shrink-0 font-mono text-[0.55rem] text-muted">{t('{n} сум', { n: '45 000' })}</span>
           </div>
           <nav className="flex flex-wrap gap-x-3">
             {tabs.map((x, i) => (
