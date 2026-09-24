@@ -20,18 +20,18 @@ read those properties. Switching themes never reloads the page.
 | `name` | `string` | yes | — | Theme id; **must equal the file name** without `.json`. Bare name only (no `/`, `\`, `.`) — `ShellConfig::validate` and `validate::bare_name` reject anything else. A mismatch is logged by `load_theme` but the file is still used. |
 | `displayName` | `string` | yes | — | Human-readable name shown in the picker. |
 | `colors` | `ThemeColors` | yes | default palette per key | Eight colours, each `#RRGGBB` or `#RRGGBBAA` (`#RGB` is also accepted by `hexToRgb`). Alpha is ignored; Tailwind supplies opacity. |
-| `colors.bg` | hex | yes | `#0C0C0E` | Page background. |
-| `colors.surface` | hex | yes | `#161619` | Cards, panels, the sidebar's popovers (`.glass`, `.glass-strong`). |
+| `colors.bg` | hex | yes | `#07090C` | Page background. |
+| `colors.surface` | hex | yes | `#0D1117` | Cards, panels, the sidebar's popovers (`.glass`, `.glass-strong`). |
 | `colors.primary` | hex | yes | `#F4F4F5` | Primary actions, focus ring, selection. Text on it is `--c-on-primary`, derived by luminance (dark on light primaries, white otherwise). |
-| `colors.accent` | hex | yes | `#7AA2F7` | The one colour in the chrome: bonuses, club-account and booked-seat marks, timer warning, warnings' bar in overlays. Text on it is `--c-on-accent`. |
-| `colors.text` | hex | yes | `#FAFAFA` | Primary text. |
-| `colors.muted` | hex | yes | `#8E8E96` | Secondary text, scrollbars. |
+| `colors.accent` | hex | yes | `#9ADFFF` | The one colour in the chrome: focus brackets, active nav rail, the `cta` button, grid, bonuses, booked seats, timer warning. Text on it is `--c-on-accent`. Text on it is `--c-on-accent`. |
+| `colors.text` | hex | yes | `#E8F1F6` | Primary text. |
+| `colors.muted` | hex | yes | `#7D8A96` | Secondary text, scrollbars. |
 | `colors.danger` | hex | yes | `#EF4444` | Errors, session timer warning/critical. |
 | `colors.success` | hex | yes | `#22C55E` | Success states. |
 | `radius` | `int` px | yes | `10` | Base corner radius; Tailwind derives `sm`/`md`/`lg`/`xl`/`2xl` from it. |
 | `font` | `string` | yes | `"Inter"` | Font family name; falls back to the bundled `Inter Variable` (`@fontsource-variable/inter`, so the default renders the same on a PC that never had Inter installed), then `system-ui`, `Segoe UI`, `sans-serif`. Empty → default. |
 | `backgroundVideo` | `string \| null` | no | `null` | Looping muted video behind the UI. Path relative to the data directory (`themes/assets/…`) or absolute URL. |
-| `wallpaper` | `string \| null` | no | `null` | Still image behind the UI (also the video poster). Same path rules. `null` = the plain `bg` backdrop (see §3). |
+| `wallpaper` | `string \| null` | no | `null` | Still image behind the UI (also the video poster). Same path rules. `null` = the `bg` + grid backdrop (see §3). |
 | `blur` | `int` px | yes | `0` | `0` = flat, opaque panels (the default). Above `0` the theme opts into translucent panels: `applyTheme` sets `data-glass` and `.glass` / `.glass-strong` blur what is behind them by this much. Also softens the veil over a wallpaper. |
 | `animations` | `bool` | yes | `true` | `false` sets `data-animations="false"`, which turns off every CSS animation/transition (`animations.css`) and framer-motion durations. |
 
@@ -106,8 +106,8 @@ constants, not theme fields; a theme only influences them through the colour var
 `wallpaper` and `backgroundVideo` are rendered by `components/layout/Background.tsx`
 (colour → wallpaper with a slow pan → `VideoBackground` → gradient veil).
 
-With neither set (the default theme) the backdrop is the plain `bg` colour: the content carries the screen, not
-the backdrop. The lock screen does not use this backdrop when the club has art:
+With neither set (the default theme) the backdrop is the `bg` colour with a faint accent grid (`.hud-grid`)
+that fades out towards the edges. The lock screen does not use this backdrop when the club has art:
 it plays the still images of `shell.json → ads.playlist` (the attract screen's playlist) under a dark veil.
 
 Paths are
@@ -142,23 +142,30 @@ Both ship in `config/themes/` (installed to `C:\ProgramData\ClubShell\themes\` b
 also embedded in the frontend (`builtinThemes` in `theme/themes.ts`) and, for `default`, in the Rust
 binary (`DEFAULT_THEME_JSON`). `default.json` is mandatory and always resolvable.
 
-### 4.1 `default` — "ClubShell Graphite"
+### 4.1 `default` — "ClubShell Obsidian"
 
-A strict, minimal dark theme: flat graphite panels with hairline borders, no glass, glow, grain or tilt; white
-for actions, one muted blue for the few things that must stand out; the game art is the only colour on screen.
+A minimal layout with a restrained sci-fi HUD layer on top: flat obsidian panels with hairline borders, a faint
+blueprint grid behind the screens, corner brackets that lock onto the selected game and the focused element,
+mono telemetry labels, dot-matrix numbers for time and money, a tick scale for the session and one ice-blue
+accent. The game art carries the colour.
 
 | Key | Hex | Role |
 |-----|-----|------|
-| bg | `#0C0C0E` | neutral near-black background |
-| surface | `#161619` | flat graphite panels |
+| bg | `#07090C` | obsidian background |
+| surface | `#0D1117` | flat panels |
 | primary | `#F4F4F5` | white actions (dark text via `--c-on-primary`) |
-| accent | `#7AA2F7` | muted blue: bonuses, club account, booked seats, timer warning |
-| text | `#FAFAFA` | near-white |
-| muted | `#8E8E96` | neutral grey |
-| danger | `#EF4444` | red |
+| accent | `#9ADFFF` | ice blue: brackets, active nav rail, the main call to action, bonuses, booked seats |
+| text | `#E8F1F6` | cool near-white |
+| muted | `#7D8A96` | cool grey |
+| danger | `#EF4444` | red: LIVE, errors, critical timer |
 | success | `#22C55E` | green |
 
-`radius 10`, `font "Inter"`, `blur 0` (flat panels), `animations true`, no wallpaper (plain backdrop), no video.
+`radius 10`, `font "Inter"`, `blur 0` (flat panels), `animations true`, no wallpaper (grid backdrop), no video.
+
+The HUD layer is not themeable data but CSS in `tokens.css`, driven by the colour variables: `.hud-label`
+(mono caps), `.num-dot` and `<DotAmount>` (Doto digits, units in the UI face), `.hud-brackets` / `.hud-focus`
+(corner brackets), `.cut-corners` (the `cta` button), `.hud-grid` (backdrop) and `.tick-scale`. The faces are
+bundled (`@fontsource-variable/unbounded`, `jetbrains-mono`, `doto`), so they render offline.
 
 ### 4.2 `neon` — "Neon Night"
 

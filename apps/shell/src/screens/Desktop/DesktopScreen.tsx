@@ -50,7 +50,7 @@ function Section({ title, action, children, className, index = 0 }: SectionProps
       transition={{ duration: animations ? 0.25 : 0, delay: animations ? index * 0.04 : 0, ease: 'easeOut' }}
     >
       <div className="mb-3 flex h-11 items-center justify-between gap-4">
-        <h2 className="text-lg font-semibold text-text">{title}</h2>
+        <h2 className="font-display text-base font-normal tracking-tight text-text">{title}</h2>
         {action && (
           <Button variant="ghost" size="md" className="text-muted hover:text-text" onClick={action.onClick}>
             {action.label}
@@ -67,7 +67,7 @@ function Section({ title, action, children, className, index = 0 }: SectionProps
 // ---------------------------------------------------------------------------------------------------------------------
 
 const SEAT_DOT: Record<string, string> = {
-  free: 'bg-text/80',
+  free: 'bg-accent',
   booked: 'bg-text/40',
   busy: 'bg-text/15',
   locked: 'bg-text/15',
@@ -101,7 +101,7 @@ export function BookingPanel({ index }: { index: number }): JSX.Element {
   return (
     <Section title={t('desktop.nav.booking')} index={index}>
       <div className="glass flex flex-1 flex-col gap-4 rounded-xl p-5">
-        <div className="text-[length:var(--fs-xl)] font-semibold leading-tight text-text">
+        <div className="font-display text-[length:var(--fs-xl)] font-light leading-tight text-text">
           {seats === null ? <Skeleton variant="text" width="8rem" /> : t('booking.freeSeats', { count: free })}
         </div>
         {seats && seats.length > 0 && (

@@ -114,7 +114,7 @@ function PromoSlide({ n }: { n: 1 | 2 | 3 }): JSX.Element {
     >
       <div className="max-w-[60vw] text-center">
         <p className="mb-[var(--gap)] text-lg font-bold text-accent">{t('idle.promo')}</p>
-        <h2 className="text-[length:var(--fs-display)] font-semibold leading-[1.05] text-text">
+        <h2 className="font-display text-[length:var(--fs-display)] font-normal leading-[1.05] text-text tracking-tight">
           {t(`idle.promoSlides.s${n}.title`)}
         </h2>
         <p className="mt-[var(--gap)] text-2xl text-text/80">{t(`idle.promoSlides.s${n}.body`)}</p>

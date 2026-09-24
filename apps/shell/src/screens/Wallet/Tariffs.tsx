@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { DotAmount } from '@/components/ui/DotAmount';
 import { useLocale } from '@/hooks/useLocale';
 import { useSession } from '@/hooks/useSession';
 import { formatMoney } from '@/lib/format';
@@ -134,8 +135,8 @@ export function TariffCard({ tariff, available, current, action, onAction }: Tar
         </div>
       </header>
 
-      <p className="tnum text-[clamp(1.6rem,2.2vw,2.4rem)] font-semibold leading-none text-text">
-        {formatMoney(pkg ?? tariff.pricePerHour, locale)}
+      <p className="tnum text-[clamp(1.6rem,2.2vw,2.4rem)] leading-none text-text">
+        <DotAmount value={formatMoney(pkg ?? tariff.pricePerHour, locale)} />
         {!pkg && <span className="ml-1 text-base font-semibold text-muted">/ {t('common.hourShort')}</span>}
       </p>
 
@@ -413,7 +414,7 @@ export function Tariffs({ onInsufficientFunds, className }: TariffsProps): JSX.E
 
   return (
     <section aria-label={t('wallet.tariffs')} className={clsx('flex flex-col gap-4', className)}>
-      <h2 className="text-2xl font-bold text-text">{t('wallet.tariffs')}</h2>
+      <h2 className="font-display text-2xl font-normal text-text tracking-tight">{t('wallet.tariffs')}</h2>
       {loading ? (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(clamp(15rem,17vw,20rem),1fr))] gap-[var(--gap)]">
           {Array.from({ length: 3 }, (_, i) => (

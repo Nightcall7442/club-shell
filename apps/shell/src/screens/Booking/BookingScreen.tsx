@@ -344,7 +344,9 @@ export default function BookingScreen(): JSX.Element {
       <section className="flex min-h-0 flex-col gap-4">
         <header className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h1 className="text-[length:var(--fs-2xl)] font-semibold tracking-tight text-text">{t('booking.title')}</h1>
+            <h1 className="font-display text-[length:var(--fs-2xl)] font-light tracking-tight text-text">
+              {t('booking.title')}
+            </h1>
             <p className="text-muted">{t('booking.subtitle')}</p>
           </div>
           {data && (
@@ -416,7 +418,7 @@ export default function BookingScreen(): JSX.Element {
 
       <aside className="flex min-h-0 flex-col gap-4">
         <div className="glass flex flex-col gap-4 rounded-2xl p-5">
-          <h2 className="flex items-center gap-2 text-xl font-semibold text-text">
+          <h2 className="font-display flex items-center gap-2 text-xl font-normal text-text tracking-tight">
             <span className="inline-flex h-6 w-6 text-primary [&>svg]:h-full [&>svg]:w-full" aria-hidden="true">
               <CalendarIcon />
             </span>
@@ -464,7 +466,7 @@ export default function BookingScreen(): JSX.Element {
         </div>
 
         <div className="glass flex min-h-0 flex-1 flex-col rounded-2xl p-5">
-          <h2 className="mb-3 text-xl font-semibold text-text">{t('booking.myBookings')}</h2>
+          <h2 className="font-display mb-3 text-xl font-normal text-text tracking-tight">{t('booking.myBookings')}</h2>
           {myBookings.length === 0 ? (
             <p className="text-muted">{t('booking.noBookings')}</p>
           ) : (

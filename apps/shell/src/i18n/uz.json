@@ -318,7 +318,8 @@
     "lockPc": "Kompyuterni qulflash",
     "runningSince": "{{duration}} davomida ishlamoqda",
     "noTournaments": "Hozircha turnirlar yo‘q",
-    "noPromo": "Hozircha takliflar yo‘q"
+    "noPromo": "Hozircha takliflar yo‘q",
+    "selectedOf": "Tanlangan · {{index}} / {{total}}"
   },
   "games": {
     "title": "O'yinlar",

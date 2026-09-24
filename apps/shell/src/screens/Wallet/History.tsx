@@ -230,7 +230,7 @@ export function History({ className }: HistoryProps): JSX.Element {
   return (
     <section aria-label={t('wallet.history')} className={clsx('glass flex min-h-0 flex-col rounded-xl', className)}>
       <header className="flex flex-col gap-3 px-5 pt-5">
-        <h2 className="text-2xl font-bold text-text">{t('wallet.history')}</h2>
+        <h2 className="font-display text-2xl font-normal text-text tracking-tight">{t('wallet.history')}</h2>
         <Tabs<TypeKey>
           items={typeTabs}
           value={historyType ?? 'all'}

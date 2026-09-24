@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { ORDER_MAX_QTY, type Product } from '@clubshell/contracts';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { DotAmount } from '@/components/ui/DotAmount';
 import { useResolvedAsset } from '@/components/media/GameArtwork';
 import { useLocale } from '@/hooks/useLocale';
 import { formatMoney } from '@/lib/format';
@@ -119,9 +120,7 @@ export const ProductCard = memo(function ProductCard({
       <div className="flex flex-1 flex-col gap-2 p-3">
         <h3 className="line-clamp-2 min-h-[2.6em] text-base font-semibold leading-snug text-text">{product.title}</h3>
         <div className="mt-auto flex items-center justify-between gap-2">
-          <span className="tnum whitespace-nowrap text-lg font-bold text-text">
-            {formatMoney(product.price, locale)}
-          </span>
+          <DotAmount value={formatMoney(product.price, locale)} className="tnum text-xl text-text" />
           {qty === 0 ? (
             // Icon-only rather than labelled: next to the price the label wrapped the amount onto two lines. Size lg
             // (3rem) is exactly the height of the − n + stepper it turns into, so the card does not jump.

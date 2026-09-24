@@ -3,7 +3,7 @@
  * under 10 minutes or `hh:mm:ss` otherwise, paused/locked badges and a pulsing danger state under 5 minutes. Clicking a timed session opens {@link ExtendSessionModal}
  * (30/60/120 minute presets priced by the session tariff → `session_extend`).
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { SESSION_OPEN_ENDED, tariffPriceFor, type Money, type Tariff } from '@clubshell/contracts';
@@ -155,7 +155,7 @@ export function SessionTimer({ compact = false, className }: SessionTimerProps):
         title={canExtend ? t('session.extend') : undefined}
         onClick={() => canExtend && setExtendOpen(true)}
         className={clsx(
-          'focus-ring group flex select-none text-left transition-colors duration-[var(--dur-fast)] disabled:cursor-default',
+          'focus-ring hud-focus group relative flex select-none text-left transition-colors duration-[var(--dur-fast)] disabled:cursor-default',
           canExtend && 'hover:bg-text/[0.04]',
           compact
             ? 'w-full flex-col gap-2 rounded-md px-3 py-2.5'
@@ -167,24 +167,23 @@ export function SessionTimer({ compact = false, className }: SessionTimerProps):
           <>
             <span className="flex w-full items-center gap-3">
               <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-2 text-xs text-muted">
+                <span className="hud-label flex items-center gap-2">
                   {caption}
                   {badge}
                 </span>
-                <span className={clsx('tnum block text-2xl font-semibold leading-tight', valueClass)}>{label}</span>
+                <span className={clsx('num-dot mt-1 block text-[1.6rem] leading-none', valueClass)}>{label}</span>
               </span>
               {canExtend && <PlusButton />}
             </span>
-            {/* Used share of the session as a hairline: the number is the message, the bar only its context. */}
-            <span aria-hidden="true" className="block h-0.5 w-full overflow-hidden rounded-full bg-text/10">
-              <span
-                className={clsx(
-                  'block h-full rounded-full transition-[width] duration-1000 ease-linear',
-                  tone === 'danger' ? 'bg-danger' : tone === 'accent' ? 'bg-accent' : 'bg-text/60',
-                )}
-                style={{ width: `${Math.round(Math.min(1, Math.max(0, 1 - progress)) * 100)}%` }}
-              />
-            </span>
+            {/* Time left on an instrument scale: lit ticks are what remains. */}
+            <span
+              aria-hidden="true"
+              className={clsx(
+                'tick-scale block w-full',
+                tone === 'danger' ? 'text-danger' : tone === 'accent' ? 'text-accent' : 'text-text/80',
+              )}
+              style={{ '--value': Math.min(1, Math.max(0, 1 - progress)) } as CSSProperties}
+            />
           </>
         ) : (
           <>

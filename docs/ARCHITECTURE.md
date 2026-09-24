@@ -661,14 +661,14 @@ unless the key ends with `Ms`.
 {
   "version": 1,
   "name": "default",                              // must equal file name
-  "displayName": "ClubShell Graphite",
+  "displayName": "ClubShell Obsidian",
   "colors": {                                     // all hex #RRGGBB or #RRGGBBAA
-    "bg": "#0C0C0E",
-    "surface": "#161619",
+    "bg": "#07090C",
+    "surface": "#0D1117",
     "primary": "#F4F4F5",
-    "accent": "#7AA2F7",
-    "text": "#FAFAFA",
-    "muted": "#8E8E96",
+    "accent": "#9ADFFF",
+    "text": "#E8F1F6",
+    "muted": "#7D8A96",
     "danger": "#EF4444",
     "success": "#22C55E"
   },

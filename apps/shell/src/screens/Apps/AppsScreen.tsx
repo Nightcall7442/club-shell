@@ -117,7 +117,9 @@ export default function AppsScreen(): JSX.Element {
     >
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-[length:var(--fs-2xl)] font-semibold tracking-tight text-text">{t('apps.title')}</h1>
+          <h1 className="font-display text-[length:var(--fs-2xl)] font-light tracking-tight text-text">
+            {t('apps.title')}
+          </h1>
           <p className="text-base text-muted">{t('apps.subtitle')}</p>
         </div>
         {error && (
@@ -156,7 +158,7 @@ export default function AppsScreen(): JSX.Element {
 
       {groups.map((group) => (
         <section key={group.category} aria-label={categoryLabel(group.category)} className="flex flex-col gap-3">
-          <h2 className="text-xl font-bold text-text">{categoryLabel(group.category)}</h2>
+          <h2 className="font-display text-xl font-normal text-text tracking-tight">{categoryLabel(group.category)}</h2>
           <div
             role="list"
             className="grid grid-cols-[repeat(auto-fill,minmax(clamp(160px,11vw,220px),1fr))] gap-[var(--gap)]"

@@ -56,7 +56,7 @@ export function Clock({ className }: ClockProps): JSX.Element {
     <time
       dateTime={now.toISOString()}
       aria-label={t('lock.clock')}
-      className={clsx('tnum font-bold leading-none text-text', className)}
+      className={clsx('tnum num-dot leading-none text-text', className)}
     >
       {formatClock(now, fmt)}
     </time>
@@ -190,7 +190,7 @@ export function UnlockForm({ onSuccess, className }: UnlockFormProps): JSX.Eleme
     >
       <Avatar name={name} src={user?.avatarUrl} size="xl" ring />
       <div>
-        <h1 className="text-3xl font-bold leading-tight text-text">{name}</h1>
+        <h1 className="font-display text-3xl font-light leading-tight tracking-tight text-text">{name}</h1>
         <p className="mt-1 text-base text-muted">{t('lock.lockedHint')}</p>
       </div>
       <div className="flex flex-wrap items-center justify-center gap-3">
@@ -355,7 +355,7 @@ export function StartSessionModal({ open, onStarted, onLogout }: StartSessionMod
           <Button variant="ghost" size="lg" disabled={busy} onClick={onLogout}>
             {t('lock.logoutInstead')}
           </Button>
-          <Button size="lg" loading={busy} disabled={!tariff || notEnough} onClick={() => void submit()}>
+          <Button variant="cta" size="lg" loading={busy} disabled={!tariff || notEnough} onClick={() => void submit()}>
             {busy ? t('session.starting') : t('lock.startPlaying')}
           </Button>
         </>
@@ -672,8 +672,8 @@ export default function LockScreen(): JSX.Element {
       <div className="relative z-10 flex h-full w-full flex-col gap-[var(--gap)] px-[var(--gutter)] py-[var(--gap)]">
         <header className="flex items-start justify-between gap-[var(--gap)]">
           <div className="min-w-0">
-            <p className="truncate text-2xl font-semibold text-text">{t('idle.clubName')}</p>
-            {pcName && <p className="mt-1 text-base text-muted">{t('idle.pcName', { name: pcName, zone: pcZone })}</p>}
+            <p className="truncate font-display text-2xl font-light tracking-tight text-text">{t('idle.clubName')}</p>
+            {pcName && <p className="hud-label mt-2">{t('idle.pcName', { name: pcName, zone: pcZone })}</p>}
           </div>
           <div className="flex items-center gap-[var(--gap)]">
             <LanguageSwitcher />
@@ -698,7 +698,9 @@ export default function LockScreen(): JSX.Element {
             ) : (
               <>
                 <div className="mb-6 text-center">
-                  <h1 className="text-3xl font-bold leading-tight text-text">{t('lock.title')}</h1>
+                  <h1 className="font-display text-3xl font-light leading-tight tracking-tight text-text">
+                    {t('lock.title')}
+                  </h1>
                   <p className="mt-1 text-base text-muted">{t('lock.subtitle')}</p>
                 </div>
                 {expiredReason && (

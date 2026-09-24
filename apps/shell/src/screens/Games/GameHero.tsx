@@ -196,7 +196,7 @@ export function GameHero({
         >
           <h1
             className={clsx(
-              'line-clamp-2 font-semibold leading-none tracking-tight text-text',
+              'line-clamp-2 font-display font-normal leading-[1.05] tracking-tight text-text',
               size === 'lg' ? 'text-[length:var(--fs-display)]' : 'text-[length:var(--fs-3xl)]',
             )}
           >
@@ -248,7 +248,7 @@ export function GameHero({
           ) : (
             <Button
               ref={primary}
-              variant="primary"
+              variant="cta"
               size="xl"
               icon={<PlayIcon />}
               loading={launching}

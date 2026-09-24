@@ -73,7 +73,9 @@ export function WalletScreen(): JSX.Element {
     >
       <div className="themed-scrollbar flex min-h-0 min-w-0 flex-col gap-[var(--gap)] overflow-y-auto overflow-x-hidden pr-1">
         <header>
-          <h1 className="text-[length:var(--fs-2xl)] font-semibold tracking-tight text-text">{t('wallet.title')}</h1>
+          <h1 className="font-display text-[length:var(--fs-2xl)] font-light tracking-tight text-text">
+            {t('wallet.title')}
+          </h1>
           <p className="text-base text-muted">{t('wallet.subtitle')}</p>
         </header>
         <Balance ref={topUpButton} onTopUp={openTopUp} />

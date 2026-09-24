@@ -156,7 +156,7 @@ export function ReportProblemForm(): JSX.Element {
         void submit();
       }}
     >
-      <h2 className="text-xl font-bold text-text">{t('support.reportProblem')}</h2>
+      <h2 className="font-display text-xl font-normal text-text tracking-tight">{t('support.reportProblem')}</h2>
       <p className="text-sm text-muted">{t('support.reportProblemHint')}</p>
       <label htmlFor={id} className="text-sm font-medium text-muted">
         {t('support.message')}
@@ -224,7 +224,7 @@ export function PcFacts(): JSX.Element {
   return (
     <section aria-label={t('support.pcInfo')} className="glass flex flex-col gap-3 rounded-xl p-5">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-xl font-bold text-text">{t('support.pcInfo')}</h2>
+        <h2 className="font-display text-xl font-normal text-text tracking-tight">{t('support.pcInfo')}</h2>
         <Badge
           tone={!agentConnected ? 'danger' : server === 'online' ? 'success' : 'accent'}
           size="sm"
@@ -289,7 +289,9 @@ export default function SupportScreen(): JSX.Element {
       transition={{ duration: animations ? 0.25 : 0, ease: 'easeOut' }}
     >
       <header>
-        <h1 className="text-[length:var(--fs-2xl)] font-semibold tracking-tight text-text">{t('support.title')}</h1>
+        <h1 className="font-display text-[length:var(--fs-2xl)] font-light tracking-tight text-text">
+          {t('support.title')}
+        </h1>
         <p className="text-base text-muted">{t('support.subtitle')}</p>
       </header>
 
@@ -301,7 +303,7 @@ export default function SupportScreen(): JSX.Element {
               className="glass flex flex-wrap items-center justify-between gap-4 rounded-xl p-6"
             >
               <div className="min-w-0 flex-1">
-                <h2 className="text-2xl font-bold text-text">{t('support.callAdmin')}</h2>
+                <h2 className="font-display text-2xl font-normal text-text tracking-tight">{t('support.callAdmin')}</h2>
                 <p className="text-base text-muted">{t('support.callHint')}</p>
               </div>
               <CallAdminButton size="xl" />
@@ -309,12 +311,12 @@ export default function SupportScreen(): JSX.Element {
           )}
 
           <section aria-label={t('support.faqTitle')} className="flex flex-col gap-3">
-            <h2 className="text-xl font-bold text-text">{t('support.faqTitle')}</h2>
+            <h2 className="font-display text-xl font-normal text-text tracking-tight">{t('support.faqTitle')}</h2>
             <FaqAccordion items={faq} />
           </section>
 
           <section aria-label={t('support.rulesTitle')} className="glass flex flex-col gap-3 rounded-xl p-5">
-            <h2 className="text-xl font-bold text-text">{t('support.rulesTitle')}</h2>
+            <h2 className="font-display text-xl font-normal text-text tracking-tight">{t('support.rulesTitle')}</h2>
             <ol className="flex list-decimal flex-col gap-2 pl-6 text-base text-text marker:font-bold marker:text-primary">
               {rules.map((r) => (
                 <li key={r}>{r}</li>
@@ -327,7 +329,7 @@ export default function SupportScreen(): JSX.Element {
           <PcFacts />
 
           <section aria-label={t('support.contact')} className="glass flex flex-col gap-3 rounded-xl p-5">
-            <h2 className="text-xl font-bold text-text">{t('support.contact')}</h2>
+            <h2 className="font-display text-xl font-normal text-text tracking-tight">{t('support.contact')}</h2>
             {features.chat && (
               <Button variant="secondary" block onClick={() => navigate('/chat')}>
                 {t('support.chatWithStaff')}

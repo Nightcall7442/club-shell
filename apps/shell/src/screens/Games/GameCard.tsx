@@ -107,7 +107,10 @@ export const GameCard = forwardRef<HTMLButtonElement, GameCardProps>(function Ga
         onActivate?.(game);
         onClick?.(e);
       }}
-      className={clsx('focus-ring group relative block w-full rounded-lg text-left outline-none', className)}
+      className={clsx(
+        'focus-ring hud-focus group relative block w-full rounded-lg text-left outline-none [--brk-inset:-7px]',
+        className,
+      )}
       {...rest}
     >
       <GameArtwork
@@ -115,10 +118,7 @@ export const GameCard = forwardRef<HTMLButtonElement, GameCardProps>(function Ga
         title={game.title}
         kind="cover"
         priority={priority}
-        className={clsx(
-          'rounded-lg transition-[box-shadow,filter] duration-[var(--dur-base)]',
-          selected && 'border-glow',
-        )}
+        className="rounded-lg transition-[filter] duration-[var(--dur-base)] group-hover:brightness-110"
         overlay={
           <>
             {/* Dims and greys only the art under it: fading the whole tile also faded the "not installed" badge

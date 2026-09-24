@@ -82,8 +82,8 @@ export default function IdleScreen(): JSX.Element {
           className="flex items-start justify-between gap-[var(--gap)]"
         >
           <div className="min-w-0">
-            <p className="truncate text-3xl font-semibold text-text">{t('idle.clubName')}</p>
-            <p className="mt-1 text-lg text-text/80">
+            <p className="truncate font-display text-3xl font-light tracking-tight text-text">{t('idle.clubName')}</p>
+            <p className="hud-label mt-2">
               {pcName ? t('idle.pcName', { name: pcName, zone: pcZone }) : t('idle.pcFree')}
             </p>
           </div>

@@ -5,6 +5,7 @@ import { balanceTotal } from '@clubshell/contracts';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { DotAmount } from '@/components/ui/DotAmount';
 import { useLocale } from '@/hooks/useLocale';
 import { formatMoney, formatRelativeDay, formatTime } from '@/lib/format';
 import { useNotificationsStore } from '@/store/notifications';
@@ -73,8 +74,8 @@ export const Balance = forwardRef<HTMLButtonElement, BalanceProps>(function Bala
             </div>
           ) : balance ? (
             <>
-              <p className="tnum mt-2 text-[clamp(2.4rem,3.6vw,4rem)] font-semibold leading-none text-text">
-                {formatMoney(balance.amount, locale)}
+              <p className="tnum mt-2 text-[clamp(2.4rem,3.6vw,4rem)] leading-none text-text">
+                <DotAmount value={formatMoney(balance.amount, locale)} />
               </p>
               <dl className="mt-4 flex flex-wrap gap-x-8 gap-y-2 text-base">
                 {balance.bonus.amount > 0 && (
@@ -102,7 +103,7 @@ export const Balance = forwardRef<HTMLButtonElement, BalanceProps>(function Bala
           )}
         </div>
         {topupEnabled && (
-          <Button ref={ref} size="lg" icon={<PlusIcon />} onClick={onTopUp} className="shrink-0">
+          <Button ref={ref} variant="cta" size="lg" icon={<PlusIcon />} onClick={onTopUp} className="shrink-0">
             {t('wallet.topUp')}
           </Button>
         )}

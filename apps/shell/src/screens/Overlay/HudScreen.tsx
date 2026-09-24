@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
+import { DotAmount } from '@/components/ui/DotAmount';
 import { useLocale } from '@/hooks/useLocale';
 import { CRITICAL_MINUTES, WARNING_MINUTES } from '@/hooks/useSession';
 import { formatMoney } from '@/lib/format';
@@ -212,7 +213,7 @@ export function HudScreen({ onClose }: { onClose: () => void }): JSX.Element {
             </div>
             <div
               className={clsx(
-                'tnum text-3xl font-bold',
+                'tnum num-dot text-3xl',
                 tone === 'danger' ? 'timer-critical' : tone === 'accent' ? 'timer-warning' : 'text-text',
               )}
             >
@@ -224,7 +225,9 @@ export function HudScreen({ onClose }: { onClose: () => void }): JSX.Element {
         {balance && (
           <div className="border-l border-text/10 pl-6 leading-tight">
             <div className="text-xs text-muted">{t('desktop.balance')}</div>
-            <div className="tnum whitespace-nowrap text-xl font-bold">{formatMoney(balance, locale)}</div>
+            <div className="tnum whitespace-nowrap text-xl">
+              <DotAmount value={formatMoney(balance, locale)} />
+            </div>
           </div>
         )}
 

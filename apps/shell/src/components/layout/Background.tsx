@@ -18,7 +18,7 @@ export interface BackgroundProps {
  * Full-screen backdrop behind every authenticated screen and the lock screen.
  *
  * With a wallpaper or video (a club's own theme): theme colour → wallpaper (slow pan) → video → gradient/blur veil.
- * Without (the default): the plain theme background — the content, not the backdrop, carries the screen.
+ * Without (the default): the theme background with a faint blueprint grid that fades out towards the edges.
  */
 export function Background({ image, video, dim = 0.55, className }: BackgroundProps): JSX.Element {
   const theme = useThemeStore((s) => s.theme);
@@ -31,7 +31,11 @@ export function Background({ image, video, dim = 0.55, className }: BackgroundPr
   useEffect(() => setLoaded(false), [url]);
 
   if (!wallpaper && !videoSrc) {
-    return <div aria-hidden="true" className={clsx('pointer-events-none fixed inset-0 z-0 bg-bg', className)} />;
+    return (
+      <div aria-hidden="true" className={clsx('pointer-events-none fixed inset-0 z-0 bg-bg', className)}>
+        <div className="hud-grid absolute inset-0" />
+      </div>
+    );
   }
 
   return (

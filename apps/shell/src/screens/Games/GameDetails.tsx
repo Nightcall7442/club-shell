@@ -300,7 +300,7 @@ export default function GameDetails(): JSX.Element {
           {game ? (
             <div className="grid grid-cols-1 gap-[var(--gap)] lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
               <section className="glass flex flex-col gap-5 rounded-xl p-[var(--gutter)]">
-                <h2 className="text-2xl font-bold text-text">{t('games.description')}</h2>
+                <h2 className="font-display text-2xl font-normal text-text tracking-tight">{t('games.description')}</h2>
                 <p
                   className={clsx(
                     'whitespace-pre-line text-lg leading-relaxed',
@@ -343,7 +343,7 @@ export default function GameDetails(): JSX.Element {
               </section>
 
               <aside className="glass flex flex-col gap-5 rounded-xl p-[var(--gutter)]">
-                <h2 className="text-2xl font-bold text-text">{t('games.details')}</h2>
+                <h2 className="font-display text-2xl font-normal text-text tracking-tight">{t('games.details')}</h2>
                 <dl className="flex flex-col text-base">
                   <Fact label={t('games.launcher')} value={t(launcherLabelKey(game.launcher))} />
                   <Fact label={t('games.category')} value={game.category.map((c) => categoryLabel(t, c)).join(', ')} />

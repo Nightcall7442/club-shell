@@ -49,7 +49,7 @@ export function StatCard({ label, value, hint, icon, tone = 'primary', className
       )}
       <div className="min-w-0">
         <p className="text-sm text-muted">{label}</p>
-        <p className="tnum truncate text-3xl font-bold leading-tight">{value}</p>
+        <p className="tnum num-dot truncate text-3xl leading-tight">{value}</p>
         {hint && <p className="text-sm text-muted">{hint}</p>}
       </div>
     </div>

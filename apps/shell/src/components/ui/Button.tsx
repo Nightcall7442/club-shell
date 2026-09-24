@@ -2,7 +2,8 @@ import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import clsx from 'clsx';
 import { Spinner } from '@/components/ui/Spinner';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
+/** `cta`: the screen's one main call to action (accent, cut corners, focus brackets). */
+export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'cta';
 export type ButtonSize = 'md' | 'lg' | 'xl';
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -25,6 +26,7 @@ const VARIANT: Record<ButtonVariant, string> = {
   secondary: 'bg-text/[0.06] text-text hover:bg-text/10 active:bg-text/[0.14]',
   ghost: 'bg-transparent text-text hover:bg-text/[0.06] active:bg-text/10',
   danger: 'bg-danger text-white hover:bg-danger/90 active:bg-danger/80',
+  cta: 'cut-corners hud-focus !rounded-none text-on-accent',
 };
 
 const SIZE: Record<ButtonSize, string> = {

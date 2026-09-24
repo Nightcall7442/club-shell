@@ -157,7 +157,7 @@ export function LoginForm({ onSuccess, className }: LoginFormProps): JSX.Element
           {errors.form}
         </p>
       )}
-      <Button type="submit" size="xl" block loading={busy}>
+      <Button type="submit" variant="cta" size="xl" block loading={busy}>
         {busy ? t('lock.loggingIn') : t('lock.login')}
       </Button>
       <p className="text-center text-sm text-muted">

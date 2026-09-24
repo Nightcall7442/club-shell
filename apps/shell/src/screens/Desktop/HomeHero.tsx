@@ -21,6 +21,7 @@ import { selectFeaturedGames, selectRecentGames, useGamesStore } from '@/store/g
 import { useSession } from '@/hooks/useSession';
 import { serverNow } from '@/lib/time';
 import { useNotificationsStore } from '@/store/notifications';
+import { useSettingsStore } from '@/store/settings';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
 
 const STRIP_MAX = 8;
@@ -93,18 +94,19 @@ function PosterTile({
       aria-pressed={selected}
       onClick={() => onSelect(game)}
       onFocus={() => onSelect(game)}
-      className="focus-ring group flex min-w-0 flex-col gap-2 rounded-lg text-left"
+      className="focus-ring group flex min-w-0 flex-col gap-2 rounded-lg text-left focus-visible:shadow-none"
     >
       <span
         className={clsx(
-          'relative block overflow-hidden rounded-lg transition-[box-shadow,opacity] duration-[var(--dur-base)]',
-          selected ? 'opacity-100 [box-shadow:0_0_0_2px_rgb(var(--c-primary))]' : 'opacity-70 group-hover:opacity-100',
+          'hud-focus relative block rounded-lg transition-opacity duration-[var(--dur-base)] [--brk-inset:-5px] group-focus-visible:[--brk-inset:-5px]',
+          selected ? 'opacity-100' : 'opacity-60 group-hover:opacity-100',
         )}
+        aria-current={selected ? 'true' : undefined}
       >
         <GameArtwork src={game.coverUrl} title={game.title} kind="cover" priority className="rounded-lg" />
         {running && <span aria-hidden="true" className="absolute right-2 top-2 h-2 w-2 rounded-full bg-success" />}
       </span>
-      <span className={clsx('truncate text-sm', selected ? 'text-text' : 'text-muted')}>{game.title}</span>
+      <span className={clsx('hud-label truncate', selected && 'text-accent')}>{game.title}</span>
     </button>
   );
 }
@@ -131,6 +133,7 @@ export function HomeHero(): JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { user } = useSession();
+  const pc = useSettingsStore((s) => s.pcInfo?.pc ?? null);
   const animations = useThemeStore(selectAnimationsEnabled);
   const status = useGamesStore((s) => s.status);
   const byId = useGamesStore((s) => s.byId);
@@ -201,12 +204,15 @@ export function HomeHero(): JSX.Element {
 
   return (
     <section aria-label={t('desktop.title')} className="flex flex-col gap-[calc(var(--gap)*1.5)]">
-      <h1 className="text-[length:var(--fs-2xl)] font-semibold tracking-tight text-text">
-        {name ? t(greetingKey(serverNow().getHours()), { name }) : t('desktop.title')}
-      </h1>
+      <div className="flex flex-col gap-2">
+        {pc && <span className="hud-label">{[pc.name, pc.zone].filter(Boolean).join(' · ')}</span>}
+        <h1 className="font-display text-[length:var(--fs-2xl)] font-light tracking-tight text-text">
+          {name ? t(greetingKey(serverNow().getHours()), { name }) : t('desktop.title')}
+        </h1>
+      </div>
 
       {/* Selected game: art on the right, copy and actions on a plain panel on the left. */}
-      <div className="glass relative grid min-h-[22rem] grid-cols-[minmax(0,5fr)_minmax(0,7fr)] overflow-hidden rounded-xl">
+      <div className="glass hud-brackets relative grid min-h-[22rem] grid-cols-[minmax(0,5fr)_minmax(0,7fr)] overflow-hidden rounded-xl [--brk-inset:12px] [--brk-size:18px]">
         <div className="relative z-10 flex flex-col justify-end gap-5 p-[calc(var(--gap)*1.5)]">
           {loading && (
             <div className="flex flex-col gap-3">
@@ -235,13 +241,19 @@ export function HomeHero(): JSX.Element {
                   transition={fade}
                   className="flex flex-col gap-3"
                 >
+                  <span className="hud-label">
+                    {t('desktop.selectedOf', {
+                      index: strip.findIndex((g) => g.id === hero.id) + 1,
+                      total: strip.length,
+                    })}
+                  </span>
                   {isRunning && (
                     <span className="flex items-center gap-2 text-sm font-medium text-success">
                       <span aria-hidden="true" className="h-2 w-2 rounded-full bg-success" />
                       {t('games.nowPlaying')}
                     </span>
                   )}
-                  <h2 className="line-clamp-2 text-[length:var(--fs-display)] font-semibold leading-[1.05] tracking-[-0.02em] text-text">
+                  <h2 className="line-clamp-2 font-display text-[length:var(--fs-display)] font-normal leading-[1.05] tracking-[-0.02em] text-text">
                     {hero.title}
                   </h2>
                   <ul className="flex flex-wrap items-center gap-2" aria-label={t('common.details')}>
@@ -280,7 +292,7 @@ export function HomeHero(): JSX.Element {
                 ) : (
                   <Button
                     ref={primary}
-                    variant="primary"
+                    variant="cta"
                     size="lg"
                     icon={<PlayIcon />}
                     loading={isLaunching}
@@ -331,7 +343,9 @@ export function HomeHero(): JSX.Element {
       {strip.length > 0 && (
         <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between gap-4">
-            <h2 className="text-lg font-semibold text-text">{t('desktop.recentlyPlayed')}</h2>
+            <h2 className="font-display text-base font-normal tracking-tight text-text">
+              {t('desktop.recentlyPlayed')}
+            </h2>
             <Button variant="ghost" size="md" iconRight={<ArrowIcon />} onClick={() => navigate('/games')}>
               {t('desktop.allGames')}
             </Button>

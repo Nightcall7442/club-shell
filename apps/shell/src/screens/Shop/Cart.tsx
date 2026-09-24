@@ -6,6 +6,7 @@ import { ORDER_MAX_QTY, type Money } from '@clubshell/contracts';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
+import { DotAmount } from '@/components/ui/DotAmount';
 import { useLocale } from '@/hooks/useLocale';
 import { formatMoney } from '@/lib/format';
 import { isShellApiError } from '@/lib/tauri';
@@ -101,7 +102,7 @@ export function Cart({ onInsufficientFunds, className }: CartProps): JSX.Element
       data-nav-scope="cart"
     >
       <header className="flex items-center justify-between gap-3 px-5 pt-5">
-        <h2 className="flex items-center gap-2 text-xl font-bold text-text">
+        <h2 className="font-display flex items-center gap-2 text-xl font-normal text-text tracking-tight">
           <span className="inline-flex h-6 w-6 text-primary" aria-hidden="true">
             <BagIcon />
           </span>
@@ -198,7 +199,9 @@ export function Cart({ onInsufficientFunds, className }: CartProps): JSX.Element
         <dl className="flex flex-col gap-1 text-base">
           <div className="flex items-center justify-between">
             <dt className="text-muted">{t('shop.total')}</dt>
-            <dd className="tnum text-2xl font-semibold text-text">{formatMoney(total, locale)}</dd>
+            <dd className="tnum text-2xl text-text">
+              <DotAmount value={formatMoney(total, locale)} />
+            </dd>
           </div>
           <div className="flex items-center justify-between text-sm">
             <dt className="text-muted">{t('shop.balanceAfter')}</dt>

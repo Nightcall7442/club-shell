@@ -18,7 +18,7 @@ export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
 }
 
 const TINT: Record<BadgeTone, string> = {
-  neutral: 'bg-text/[0.07] text-text/80',
+  neutral: 'border border-accent/20 bg-accent/[0.04] text-text/80',
   primary: 'bg-primary/15 text-primary',
   accent: 'bg-accent/15 text-accent',
   success: 'bg-success/15 text-success',
@@ -45,9 +45,9 @@ const DOT: Record<BadgeTone, string> = {
 };
 
 const SIZES: Record<BadgeSize, string> = {
-  sm: 'h-6 px-2 text-xs gap-1.5',
-  md: 'h-7 px-2.5 text-sm gap-1.5',
-  lg: 'h-9 px-3.5 text-base gap-2',
+  sm: 'h-6 px-2 text-[0.62rem] gap-1.5',
+  md: 'h-7 px-2.5 text-[0.68rem] gap-1.5',
+  lg: 'h-9 px-3.5 text-xs gap-2',
 };
 
 /** Maps a notification/admin severity to a badge tone (also used by toasts and banners). */
@@ -72,7 +72,7 @@ export const Badge = forwardRef<HTMLSpanElement, BadgeProps>(function Badge(
     <span
       ref={ref}
       className={clsx(
-        'inline-flex shrink-0 items-center whitespace-nowrap rounded-md font-medium',
+        'inline-flex shrink-0 items-center whitespace-nowrap rounded-sm font-mono font-medium uppercase tracking-[0.1em]',
         SIZES[size],
         solid ? SOLID[tone] : TINT[tone],
         className,

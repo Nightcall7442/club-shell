@@ -318,7 +318,8 @@
     "lockPc": "Lock PC",
     "runningSince": "Running for {{duration}}",
     "noTournaments": "No tournaments scheduled",
-    "noPromo": "No offers right now"
+    "noPromo": "No offers right now",
+    "selectedOf": "Selected · {{index}} of {{total}}"
   },
   "games": {
     "title": "Games",

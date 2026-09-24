@@ -173,7 +173,10 @@ export function NavBar({ className }: { className?: string }): JSX.Element {
                 className={({ isActive }) =>
                   clsx(
                     'focus-ring flex h-11 items-center gap-3 rounded-md px-3 text-[0.95rem] font-medium transition-colors duration-[var(--dur-fast)]',
-                    isActive ? 'bg-text/[0.08] text-text' : 'text-muted hover:bg-text/[0.04] hover:text-text',
+                    // Active: an accent rail on the left edge and a light that fades out to the right.
+                    isActive
+                      ? 'rounded-l-none bg-gradient-to-r from-accent/[0.13] to-transparent text-text shadow-[inset_2px_0_0_rgb(var(--c-accent))]'
+                      : 'text-muted hover:bg-text/[0.04] hover:text-text',
                   )
                 }
               >
@@ -185,7 +188,7 @@ export function NavBar({ className }: { className?: string }): JSX.Element {
                 </span>
                 <span className="min-w-0 flex-1 truncate">{label}</span>
                 {badge && (
-                  <span aria-hidden="true" className="tnum text-xs font-semibold text-text">
+                  <span aria-hidden="true" className="font-mono text-xs font-medium text-accent">
                     {badge}
                   </span>
                 )}
