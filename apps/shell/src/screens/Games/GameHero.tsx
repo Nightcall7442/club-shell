@@ -196,7 +196,7 @@ export function GameHero({
         >
           <h1
             className={clsx(
-              'text-glow line-clamp-2 font-black leading-none tracking-tight text-text',
+              'line-clamp-2 font-display font-normal leading-[1.05] tracking-tight text-text',
               size === 'lg' ? 'text-[length:var(--fs-display)]' : 'text-[length:var(--fs-3xl)]',
             )}
           >
@@ -219,7 +219,7 @@ export function GameHero({
             )}
             {game.requiresAccount && (
               <li>
-                <Badge tone="accent" solid title={t('games.requiresAccountHint')}>
+                <Badge tone="accent" title={t('games.requiresAccountHint')}>
                   {t('games.requiresAccount')}
                 </Badge>
               </li>
@@ -248,7 +248,7 @@ export function GameHero({
           ) : (
             <Button
               ref={primary}
-              variant="primary"
+              variant="cta"
               size="xl"
               icon={<PlayIcon />}
               loading={launching}

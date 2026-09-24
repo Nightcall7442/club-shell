@@ -11,6 +11,9 @@ import { createRoot, type Root } from 'react-dom/client';
 // Bundled, not assumed: a club PC rarely has Inter installed, and without this every screen quietly fell back to
 // Segoe UI. Latin and Cyrillic subsets load on demand by unicode-range.
 import '@fontsource-variable/inter';
+import '@fontsource-variable/unbounded';
+import '@fontsource-variable/jetbrains-mono';
+import '@fontsource-variable/doto';
 import './index.css';
 import i18n, { initI18n } from '@/i18n';
 import { installGlobalErrorHandlers, log } from '@/lib/logger';

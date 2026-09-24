@@ -32,7 +32,7 @@ export interface TabsProps<K extends string = string> {
 /** Stack of mounted Tabs; the top one owns LB/RB. */
 const mounted: symbol[] = [];
 
-const SIZE: Record<TabsSize, string> = { md: 'h-11 px-4 text-base gap-2', lg: 'h-14 px-6 text-lg gap-3' };
+const SIZE: Record<TabsSize, string> = { md: 'h-10 px-4 text-[0.95rem] gap-2', lg: 'h-12 px-5 text-base gap-2.5' };
 
 /** Roving-tabindex tab list: arrows/Home/End move focus and select; gamepad LB/RB cycle. */
 export function Tabs<K extends string = string>({
@@ -141,7 +141,7 @@ export function Tabs<K extends string = string>({
       onKeyDown={onKeyDown}
       className={clsx(
         'no-scrollbar flex max-w-full items-center overflow-x-auto',
-        variant === 'pills' ? 'glass gap-1 rounded-full p-1' : 'gap-2 border-b border-text/10',
+        variant === 'pills' ? 'gap-1' : 'gap-2 border-b border-[color:var(--hairline)]',
         className,
       )}
     >
@@ -162,13 +162,11 @@ export function Tabs<K extends string = string>({
             data-tab-key={item.key}
             onClick={() => onChange(item.key)}
             className={clsx(
-              'focus-ring inline-flex shrink-0 select-none items-center whitespace-nowrap font-semibold leading-none transition-colors duration-[var(--dur-fast)]',
+              'focus-ring inline-flex shrink-0 select-none items-center whitespace-nowrap font-medium leading-none transition-colors duration-[var(--dur-fast)]',
               SIZE[size],
-              variant === 'pills' && 'rounded-full',
+              variant === 'pills' && 'rounded-md',
               variant === 'pills' &&
-                (active
-                  ? 'bg-primary text-on-primary shadow-[0_6px_20px_-6px_rgb(var(--c-primary)/0.4)]'
-                  : 'text-muted hover:bg-text/10 hover:text-text'),
+                (active ? 'bg-text/10 text-text' : 'text-muted hover:bg-text/[0.05] hover:text-text'),
               variant === 'underline' && '-mb-px border-b-2 rounded-t-md',
               variant === 'underline' &&
                 (active ? 'border-primary text-text' : 'border-transparent text-muted hover:text-text'),

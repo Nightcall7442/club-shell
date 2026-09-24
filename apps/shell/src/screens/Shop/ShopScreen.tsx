@@ -113,8 +113,9 @@ export function ShopScreen(): JSX.Element {
       <div className="flex min-h-0 min-w-0 flex-col gap-[var(--gap)]">
         <header className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-black text-text">{t('shop.title')}</h1>
-            <p className="text-base text-muted">{t('shop.subtitle')}</p>
+            <h1 className="font-display text-[length:var(--fs-2xl)] font-light leading-[1.2] tracking-tight text-text">
+              {t('shop.title')}
+            </h1>
           </div>
           <Input
             aria-label={t('shop.search')}
@@ -187,7 +188,7 @@ export function ShopScreen(): JSX.Element {
         </div>
       </div>
 
-      <Cart onInsufficientFunds={onInsufficientFunds} className="min-h-0" />
+      <Cart onInsufficientFunds={onInsufficientFunds} className="page-aside min-h-0" />
 
       <TopUpModal open={topUpOpen} onClose={() => setTopUpOpen(false)} />
     </motion.div>

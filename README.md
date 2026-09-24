@@ -54,27 +54,45 @@
 | **Турниры** | **Профиль** | **Простой** |
 | <img src="docs/img/08-tournaments.jpg" alt="Турниры"> | <img src="docs/img/09-profile.jpg" alt="Профиль"> | <img src="docs/img/10-idle.jpg" alt="Экран простоя"> |
 
+**Запуск игры** — полноэкранная последовательность поверх арта: шаги запуска, шкала-засечки и процент
+
+<img src="docs/img/12-launch.jpg" alt="Запуск игры" width="100%">
+
 **Панель в игре** — `Ctrl+Shift+H` поверх полноэкранной игры: время, баланс, «+30 мин», позвать админа
 
 <img src="docs/img/11-hud.jpg" alt="HUD поверх игры" width="100%">
 
+**Касса администратора** (`apps/admin`) — карта зала по зонам, легенда-счётчик статусов, сеанс, пополнение,
+команды на ПК
+
+<img src="docs/img/13-admin.jpg" alt="Касса администратора" width="100%">
+
 </div>
 
-Снимки сделаны в mock-режиме (`VITE_MOCK=1`), 1920×1080, тема `default` («Onyx»). Арт, обложки и видеолупы игр —
+Снимки сделаны в mock-режиме (`VITE_MOCK=1`), 1920×1080, тема `default` («Obsidian»). Арт и обложки игр —
 оригинальные, сгенерированные для демо (без чужих брендов); на кадре с панелью арт подложен вместо игры.
 
 ### Как это устроено визуально
 
-- **Onyx** — нейтральная тема: почти чёрный фон, графитовое стекло, белые действия, золото только для VIP, бонусов и
-  предупреждений. Хром не имеет оттенка — цвет экрана даёт арт выбранной игры: из него берётся доминирующий тон и
-  подсвечивает угол под заголовком (`useImageTint`).
-- **Главная** — арт на весь экран с плавным наездом, живой видеолуп (`Game.videoUrl`, пауза во время игры), rack-focus
-  при смене игры, плёночное зерно и виньетка, параллакс за курсором. Стрип постеров переключает игру; две карточки —
-  сеанс + баланс и бронь с живой картой зала.
-- **Каталог** — стена постеров: наклон за курсором с бликом, название внутри арта, метаданные при наведении, скользящая
-  «таблетка» активной категории.
-- **Мелочи, которые чувствуются**: blur-up обложек, тик/клик/«вжух»/чайм (WebAudio-синтез, без файлов, тумблер
-  `sound.uiSounds`), предупреждение «осталось 5 минут» как нижняя плашка трансляции поверх игры.
+- **Obsidian** — минималистичный каркас со сдержанным футуристичным слоем поверх: плоские обсидиановые панели с
+  тонкой границей и один ледяной акцент. Цвет на экране даёт арт игр. Ничего лишнего: без подзаголовков-пояснений,
+  без декоративных сеток, одна строка заголовка страницы, колонки выровнены по одной линии.
+- **HUD-детали**: уголки-скобки «захватывают» выбранную игру и элемент в фокусе (мышь, клавиатура, геймпад);
+  служебные подписи моноширинным капсом (`PC-12 · STANDARD`); время и деньги точечными цифрами, как на дисплее
+  прибора; остаток сессии на шкале-засечках; главная кнопка экрана со срезанными углами; красная точка только для LIVE.
+- **Каркас — HUD-рамка, как меню паузы в игре.** Сверху полоса: знак клуба и ПК, разделы вкладками между
+  клавишами `LB` / `RB` (геймпад листает их так же, по клику тоже), часы, звук и язык, блокировка. Снизу строка
+  статуса: игрок, остаток времени (→ продлить), баланс (→ пополнить) и подсказки кнопок геймпада, только когда он подключён.
+  Всё между полосами отдано контенту.
+- **Главная** — полноэкранная сцена с артом выбранной игры под верхней полосой: приветствие, крупное название,
+  «Играть» / «Подробнее», справа рельс недавних игр в скобках; ниже панели мест, турниров и сообщений.
+- **Фирменные моменты.** После входа HUD «включается»: полосы выезжают.
+  Запуск игры — полноэкранная последовательность поверх арта: наезд камеры, телеметрия шагов, шкала-засечки с
+  точечным процентом, вспышка «готово». Экран простоя — огромные точечные часы и мигающая каретка.
+  Панель в игре (`Ctrl+Shift+H`) в том же стиле.
+  Листание разделов LB/RB звучит.
+- **Шрифты** вшиты в сборку и работают офлайн: Unbounded (заголовки), Inter (текст), JetBrains Mono (подписи),
+  Doto (цифры). У всех, кроме Doto, есть кириллица; Doto используется только для цифр.
 
 ---
 
@@ -100,12 +118,13 @@ ClubShell закрывает контур на самом ПК: **оболочк
 **Оболочка (киоск)**
 
 - Экран блокировки: вход по паролю, QR-коду, карте или как гость; PIN для разблокировки
-- Главная: полноэкранный арт выбранной игры с видеолупом, стрип постеров, сеанс и баланс в одной карточке, бронь
-- Каталог-«стена постеров» с категориями, поиском, спецификациями; запуск в один клик
+- HUD-рамка вместо меню: разделы вкладками между `LB` / `RB` сверху, внизу строка статуса — игрок, остаток времени, баланс
+- Главная: полноэкранный арт выбранной игры, крупное название, «Играть», рельс недавних игр; панели мест, турниров, сообщений
+- Каталог-«стена постеров» с категориями, поиском, спецификациями; запуск в один клик — полноэкранной последовательностью с шагами и процентом
 - Кошелёк: баланс, тарифы по зонам и времени суток, история, пополнение через Payme / Click / Uzum / наличные
 - Магазин с корзиной и статусом заказа, чат с администратором, бронь мест на карте зала, турниры с сеткой и таблицей
 - Профиль: статистика, достижения, программа лояльности, настройки (язык, тема, громкость, PIN)
-- Экран простоя с рекламой и прайс-листом; оверлей для предупреждений поверх полноэкранной игры; быстрая панель в игре по `Ctrl+Shift+H` — время, баланс, «+30 мин», позвать админа
+- Экран простоя с огромными точечными часами, рекламой и прайс-листом; оверлей для предупреждений поверх полноэкранной игры; быстрая панель в игре по `Ctrl+Shift+H` — время, баланс, «+30 мин», позвать админа
 - Три языка (русский, узбекский, английский), темы из JSON, навигация с геймпада и экранной клавиатуры
 
 **Агент (служба Windows)**
@@ -122,7 +141,8 @@ ClubShell закрывает контур на самом ПК: **оболочк
 
 **Касса (`apps/admin`)**
 
-- Карта зала: все ПК с зонами, статусом и таймером сеанса; счётчик свободных мест по зонам
+- В том же стиле Obsidian, что и оболочка: верхняя полоса с часами и загрузкой зала «07/24»
+- Карта зала: пронумерованные ячейки по зонам, статус цветом рамки, таймер сеанса; легенда под картой считает ПК в каждом статусе
 - Открыть время на месте (клиент, тариф, минуты, цена до подтверждения), добавить время, завершить сеанс с возвратом
 - Пополнение баланса на кассе, сообщение на экран игрока, блокировка / перезагрузка / выключение ПК
 - Работает против mock-сервера (`/api/v1/admin/*`); в бою указывает на серверный продукт оператора
@@ -286,7 +306,7 @@ tools/scripts/         build · dev · package · sign · publish · setup-dev-v
 | `agent.json` | URL сервера, ключ клуба, IPC, киоск-пользователь (`club`), сеансы, офлайн, лаунчеры, хранилище, обновления, телеметрия, античит, питание |
 | `shell.json` | язык (`ru` / `uz` / `en`), тема, киоск-защита, простой, реклама, геймпад, мониторы, флаги функций |
 | `policies.json` | последний применённый снимок политик сервера |
-| `themes\*.json` | темы (`default` = Onyx); цвета становятся CSS-переменными `--c-*`, контраст текста на `primary` / `accent` выводится из яркости |
+| `themes\*.json` | темы (`default` = Obsidian); цвета становятся CSS-переменными `--c-*`, контраст текста на `primary` / `accent` выводится из яркости |
 | `cache\`, `logs\`, `secure\` | кэш и офлайн-очередь (SQLite), JSON-логи, секреты под DPAPI |
 
 Любой ключ `agent.json` переопределяется переменной `CLUBSHELL__<Section>__<Key>`. Переменные разработки — в `.env` (`.env.example`).
@@ -334,7 +354,7 @@ tools/scripts/         build · dev · package · sign · publish · setup-dev-v
 <details>
 <summary><b>English summary</b></summary>
 
-**ClubShell** is client software for gaming clubs / internet cafés (Uzbekistan / CIS; UI in Russian, Uzbek and English; prices in UZS). Each gaming PC runs a **.NET 8 Windows service** (`ClubShellAgent`, session 0: sessions and billing timers, game launching via Steam / Epic / Battle.net / Riot / EA / Ubisoft with an account pool, server policies, anti-cheat checks, updates, telemetry, remote admin) and a **Tauri 2 + React kiosk shell** that replaces `explorer.exe` for the local kiosk user. The shell ships the neutral "Onyx" theme (near-black, white actions, gold accent — the game art carries the colour), a cinematic home with ambient video loops, a poster-wall catalogue and an in-game HUD (`Ctrl+Shift+H`: time, balance, +30 min, call admin) over the running game. They talk over the named pipe `\\.\pipe\clubshell-agent`; the agent talks to the club server over REST + WebSocket with HMAC-signed requests. Offline mode keeps the timer and queues events in SQLite.
+**ClubShell** is client software for gaming clubs / internet cafés (Uzbekistan / CIS; UI in Russian, Uzbek and English; prices in UZS). Each gaming PC runs a **.NET 8 Windows service** (`ClubShellAgent`, session 0: sessions and billing timers, game launching via Steam / Epic / Battle.net / Riot / EA / Ubisoft with an account pool, server policies, anti-cheat checks, updates, telemetry, remote admin) and a **Tauri 2 + React kiosk shell** that replaces `explorer.exe` for the local kiosk user. The shell ships the "Obsidian" theme (a minimal layout with a restrained HUD layer: corner-bracket focus, mono telemetry labels, dot-matrix time and money, one ice-blue accent — the game art carries the colour), a pause-menu HUD frame (section tabs between LB/RB on top, a status line with time, balance and controller prompts at the bottom), a calm home with the selected game, a poster-wall catalogue and an in-game HUD (`Ctrl+Shift+H`: time, balance, +30 min, call admin) over the running game. They talk over the named pipe `\\.\pipe\clubshell-agent`; the agent talks to the club server over REST + WebSocket with HMAC-signed requests. Offline mode keeps the timer and queues events in SQLite.
 
 Try the UI in a browser: `pnpm install && pnpm mock` then `VITE_MOCK=1 pnpm --filter @clubshell/shell dev` → http://localhost:1420 (login `demo` / `1234`). Full Windows dev loop: `tools/scripts/dev.ps1`. Verified here: all 8 .NET projects compile with `/warnaserror`, 424 xUnit tests pass, `tsc` and `vite build` are clean; Rust, WiX and Playwright runs are left to CI.
 

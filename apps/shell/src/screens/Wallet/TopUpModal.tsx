@@ -241,7 +241,7 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
             <Button variant="secondary" size="lg" onClick={close}>
               {t('common.cancel')}
             </Button>
-            <Button size="lg" loading={creating} disabled={!canContinue} onClick={() => void submit()}>
+            <Button variant="cta" size="lg" loading={creating} disabled={!canContinue} onClick={() => void submit()}>
               {creating ? t('wallet.creating') : t('wallet.createIntent')}
             </Button>
           </>
@@ -282,9 +282,7 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
                     }}
                     className={clsx(
                       'focus-ring tnum h-14 rounded-lg text-base font-bold transition-colors duration-[var(--dur-fast)]',
-                      active
-                        ? 'bg-primary text-on-primary shadow-[0_8px_24px_-8px_rgb(var(--c-primary)/0.4)]'
-                        : 'glass text-text hover:bg-surface/80',
+                      active ? 'choice choice-on' : 'choice',
                     )}
                   >
                     {formatMoney({ amount: value * 100, currency }, locale)}
@@ -330,8 +328,8 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
                     aria-checked={active}
                     onClick={() => setProvider(p)}
                     className={clsx(
-                      'focus-ring h-12 rounded-full text-base font-semibold transition-colors duration-[var(--dur-fast)]',
-                      active ? 'bg-accent text-bg' : 'glass text-text hover:bg-surface/80',
+                      'focus-ring h-12 rounded-md text-base font-semibold',
+                      active ? 'choice choice-on' : 'choice',
                     )}
                   >
                     {t(`wallet.provider.${p}`)}
@@ -344,7 +342,7 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
 
           <div className="flex items-center justify-between rounded-lg bg-text/5 px-4 py-3 text-base">
             <span className="text-muted">{t('wallet.amount')}</span>
-            <span className="tnum text-xl font-black text-text">
+            <span className="tnum text-xl font-semibold text-text">
               {amountMinor !== null && !amountError ? formatMoney({ amount: amountMinor, currency }, locale) : '—'}
             </span>
           </div>
@@ -356,7 +354,7 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
           <Badge tone="primary" size="lg" live>
             {t('wallet.waitingPayment')}
           </Badge>
-          <p className="tnum text-3xl font-black text-text">{formatMoney(intent.amount, locale)}</p>
+          <p className="tnum text-3xl font-semibold text-text">{formatMoney(intent.amount, locale)}</p>
           {intent.provider === TopupProvider.Cash ? (
             <p className="max-w-[28rem] text-lg text-text">{t('wallet.cashHint')}</p>
           ) : qrValue ? (

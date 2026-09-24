@@ -1,6 +1,6 @@
 /**
- * Home (`/home`): full-bleed game hero (`HomeHero`), then the promo strip (ads playlist or tariffs), tournaments
- * teaser and recent staff chat. Sections fade in with a small stagger.
+ * Home (`/home`): greeting and selected game (`HomeHero`), then one row of glanceable panels — free seats,
+ * tournaments, recent staff chat — and the promo strip (ads playlist or tariffs) last.
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
@@ -16,6 +16,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { useLocale } from '@/hooks/useLocale';
 import { useSession } from '@/hooks/useSession';
 import { formatDateTime, formatMoney, formatTime } from '@/lib/format';
+import { serverNow, toDateKey } from '@/lib/time';
 import { log } from '@/lib/logger';
 import { api } from '@/lib/tauri';
 import { HomeHero } from '@/screens/Desktop/HomeHero';
@@ -43,21 +44,78 @@ function Section({ title, action, children, className, index = 0 }: SectionProps
   return (
     <motion.section
       aria-label={title}
-      className={className}
-      initial={animations ? { opacity: 0, y: 12 } : false}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: animations ? 0.25 : 0, delay: animations ? index * 0.05 : 0, ease: 'easeOut' }}
+      className={clsx('flex min-w-0 flex-col', className)}
+      initial={animations ? { opacity: 0 } : false}
+      animate={{ opacity: 1 }}
+      transition={{ duration: animations ? 0.25 : 0, delay: animations ? index * 0.04 : 0, ease: 'easeOut' }}
     >
-      <div className="mb-3 flex items-center justify-between gap-4">
-        <h2 className="text-xl font-bold text-text">{title}</h2>
+      <div className="mb-3 flex h-11 items-center justify-between gap-4">
+        <h2 className="font-display text-base font-normal tracking-tight text-text">{title}</h2>
         {action && (
-          <Button variant="ghost" size="md" onClick={action.onClick}>
+          <Button variant="ghost" size="md" className="text-muted hover:text-text" onClick={action.onClick}>
             {action.label}
           </Button>
         )}
       </div>
       {children}
     </motion.section>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Free seats
+// ---------------------------------------------------------------------------------------------------------------------
+
+const SEAT_DOT: Record<string, string> = {
+  free: 'bg-accent',
+  booked: 'bg-text/40',
+  busy: 'bg-text/15',
+  locked: 'bg-text/15',
+  maintenance: 'bg-danger/60',
+  offline: 'bg-text/10',
+};
+
+export function BookingPanel({ index }: { index: number }): JSX.Element {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const [seats, setSeats] = useState<{ status: string }[] | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    api.booking.seats(toDateKey(serverNow())).then(
+      (r) => active && setSeats(r.seats),
+      (e: unknown) => {
+        log.warn('booking panel failed', e);
+        if (active) {
+          setSeats([]);
+        }
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const free = seats?.filter((s) => s.status === 'free').length ?? 0;
+
+  return (
+    <Section title={t('desktop.nav.booking')} index={index}>
+      <div className="glass flex flex-1 flex-col gap-4 rounded-xl p-5">
+        <div className="font-display text-[length:var(--fs-xl)] font-light leading-tight text-text">
+          {seats === null ? <Skeleton variant="text" width="8rem" /> : t('booking.freeSeats', { count: free })}
+        </div>
+        {seats && seats.length > 0 && (
+          <div aria-hidden="true" className="grid grid-cols-[repeat(24,minmax(0,1fr))] gap-1">
+            {seats.slice(0, 48).map((s, i) => (
+              <span key={i} className={clsx('h-2.5 rounded-[2px]', SEAT_DOT[s.status] ?? SEAT_DOT.busy)} />
+            ))}
+          </div>
+        )}
+        <Button variant="secondary" size="md" block className="mt-auto" onClick={() => navigate('/booking')}>
+          {t('booking.reserve')}
+        </Button>
+      </div>
+    </Section>
   );
 }
 
@@ -103,7 +161,7 @@ export function PromoStrip({ index }: { index: number }): JSX.Element | null {
   return (
     <Section title={t('desktop.promo')} index={index}>
       {current ? (
-        <div className="glass relative aspect-[6/1] w-full overflow-hidden rounded-xl">
+        <div className="relative aspect-[6/1] w-full overflow-hidden rounded-xl">
           <AnimatePresence initial={false}>
             <motion.div
               key={current.url}
@@ -131,10 +189,10 @@ export function PromoStrip({ index }: { index: number }): JSX.Element | null {
               role="listitem"
               data-nav="true"
               onClick={() => navigate('/wallet')}
-              className="focus-ring glass flex flex-col gap-1 rounded-xl p-5 text-left transition-colors duration-[var(--dur-fast)] hover:bg-surface/80"
+              className="focus-ring glass flex flex-col gap-1 rounded-xl p-5 text-left transition-colors duration-[var(--dur-fast)] hover:bg-text/[0.03]"
             >
               <span className="flex items-center justify-between gap-2">
-                <span className="truncate text-lg font-bold text-text">{tf.name}</span>
+                <span className="truncate text-lg font-semibold text-text">{tf.name}</span>
                 <Badge tone={tf.isPackage ? 'accent' : 'primary'} size="sm">
                   {tf.isPackage ? t('wallet.package') : t('wallet.hourlyRate')}
                 </Badge>
@@ -197,10 +255,11 @@ export function TournamentsTeaser({ index }: { index: number }): JSX.Element {
       index={index}
       action={{ label: t('desktop.seeAll'), onClick: () => navigate('/tournaments') }}
     >
-      <div role="list" className="flex flex-col gap-2">
-        {items === null && Array.from({ length: 3 }, (_, i) => <Skeleton key={i} variant="rect" height="4.5rem" />)}
+      <div role="list" className="glass flex flex-1 flex-col divide-y divide-[color:var(--hairline)] rounded-xl">
+        {items === null &&
+          Array.from({ length: 3 }, (_, i) => <Skeleton key={i} variant="rect" height="4.5rem" className="m-4" />)}
         {items !== null && items.length === 0 && (
-          <p className="glass rounded-xl p-5 text-base text-muted">{t('desktop.noTournaments')}</p>
+          <p className="p-5 text-base text-muted">{t('desktop.noTournaments')}</p>
         )}
         {items?.map((tr) => (
           <button
@@ -209,11 +268,11 @@ export function TournamentsTeaser({ index }: { index: number }): JSX.Element {
             role="listitem"
             data-nav="true"
             onClick={() => navigate('/tournaments')}
-            className="focus-ring glass flex items-center gap-4 rounded-xl px-5 py-3 text-left transition-colors duration-[var(--dur-fast)] hover:bg-surface/80"
+            className="focus-ring flex items-center gap-4 px-5 py-4 text-left transition-colors duration-[var(--dur-fast)] first:rounded-t-xl last:rounded-b-xl hover:bg-text/[0.03]"
           >
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <span className="truncate text-base font-bold text-text">{tr.title}</span>
+                <span className="truncate text-base font-semibold text-text">{tr.title}</span>
                 {tr.state === 'live' ? (
                   <Badge tone="danger" size="sm" live>
                     {t('tournaments.liveBadge')}
@@ -223,21 +282,14 @@ export function TournamentsTeaser({ index }: { index: number }): JSX.Element {
                     {t(`tournaments.state.${tr.state}`)}
                   </Badge>
                 )}
-                {tr.joined && (
-                  <Badge tone="primary" size="sm">
-                    {t('tournaments.joined')}
-                  </Badge>
-                )}
               </div>
               <div className="truncate text-sm text-muted">
                 {byId.get(tr.gameId)?.title ?? t('tournaments.game')} ·{' '}
-                {t('tournaments.playersOf', { players: tr.players, max: tr.maxPlayers })} ·{' '}
                 {t('tournaments.startsAt', { time: formatDateTime(tr.startsAt, locale) })}
               </div>
             </div>
-            <div className="shrink-0 text-right">
-              <div className="text-xs uppercase tracking-wide text-muted">{t('tournaments.prizePool')}</div>
-              <div className="tnum text-base font-bold text-accent">{formatMoney(tr.prizePool, locale)}</div>
+            <div className="tnum shrink-0 text-right text-sm font-medium text-text">
+              {formatMoney(tr.prizePool, locale)}
             </div>
           </button>
         ))}
@@ -274,7 +326,7 @@ export function RecentChat({ index }: { index: number }): JSX.Element {
             : t('desktop.recentChat')
         }
         onClick={() => navigate('/chat')}
-        className="focus-ring glass flex w-full flex-col gap-3 rounded-xl p-5 text-left transition-colors duration-[var(--dur-fast)] hover:bg-surface/80"
+        className="focus-ring glass flex w-full flex-1 flex-col gap-4 rounded-xl p-5 text-left transition-colors duration-[var(--dur-fast)] hover:bg-text/[0.03]"
       >
         {status === 'loading' && messages.length === 0 && <Skeleton variant="text" lines={3} />}
         {status !== 'loading' && messages.length === 0 && <p className="text-base text-muted">{t('chat.empty')}</p>}
@@ -285,7 +337,7 @@ export function RecentChat({ index }: { index: number }): JSX.Element {
               <Avatar name={mine ? t('chat.you') : m.senderName || t('chat.admin')} size="sm" />
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className={clsx('truncate text-sm font-semibold', mine ? 'text-muted' : 'text-primary')}>
+                  <span className={clsx('truncate text-sm font-medium', mine ? 'text-muted' : 'text-text')}>
                     {mine ? t('chat.you') : m.senderName || t('chat.admin')}
                   </span>
                   <span className="tnum shrink-0 text-xs text-muted">{formatTime(m.createdAt, locale)}</span>
@@ -296,9 +348,7 @@ export function RecentChat({ index }: { index: number }): JSX.Element {
           );
         })}
         {room.unread > 0 && (
-          <Badge tone="danger" size="sm" solid className="self-start">
-            {t('chat.unread', { count: room.unread })}
-          </Badge>
+          <span className="mt-auto text-sm font-medium text-text">{t('chat.unread', { count: room.unread })}</span>
         )}
       </button>
     </Section>
@@ -311,22 +361,24 @@ export function RecentChat({ index }: { index: number }): JSX.Element {
 
 export default function DesktopScreen(): JSX.Element {
   const features = useSettingsStore(selectFeatures);
+  const panels = [features.booking, features.tournaments, features.chat].filter(Boolean).length;
 
   return (
-    <div className="flex w-full flex-col gap-[calc(var(--gap)*1.5)]">
+    <div className="flex w-full flex-col gap-[calc(var(--gap)*2)]">
       <HomeHero />
-      <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-[calc(var(--gap)*1.5)]">
-        <PromoStrip index={1} />
+      {panels > 0 && (
         <div
           className={clsx(
-            'grid gap-[calc(var(--gap)*1.5)]',
-            features.tournaments && features.chat ? 'grid-cols-1 2xl:grid-cols-2' : 'grid-cols-1',
+            'grid items-stretch gap-[var(--gap)]',
+            panels === 3 ? 'grid-cols-3' : panels === 2 ? 'grid-cols-2' : 'grid-cols-1',
           )}
         >
+          {features.booking && <BookingPanel index={1} />}
           {features.tournaments && <TournamentsTeaser index={2} />}
           {features.chat && <RecentChat index={3} />}
         </div>
-      </div>
+      )}
+      <PromoStrip index={4} />
       <LaunchOverlay />
     </div>
   );

@@ -17,6 +17,7 @@ import { useLocale } from '@/hooks/useLocale';
 import { formatMoney } from '@/lib/format';
 import { formatClock, serverNow } from '@/lib/time';
 import { useWalletStore } from '@/store/wallet';
+import { DotAmount } from '@/components/ui/DotAmount';
 
 export interface PriceListProps {
   /** Tariffs to show; defaults to the wallet store (loaded on mount when empty). */
@@ -124,9 +125,9 @@ export function PriceList({ tariffs, compact = false, className }: PriceListProp
   return (
     <section
       aria-label={t('idle.priceList')}
-      className={clsx('glass flex flex-col rounded-2xl', compact ? 'gap-3 p-5' : 'gap-5 p-7', className)}
+      className={clsx('glass flex flex-col rounded-xl', compact ? 'gap-3 p-5' : 'gap-5 p-7', className)}
     >
-      <h2 className={clsx('font-black uppercase tracking-[0.15em] text-text', compact ? 'text-lg' : 'text-2xl')}>
+      <h2 className={clsx('font-display font-normal tracking-tight text-text', compact ? 'text-lg' : 'text-2xl')}>
         {t('idle.tariffsTitle')}
       </h2>
 
@@ -141,7 +142,7 @@ export function PriceList({ tariffs, compact = false, className }: PriceListProp
       ) : (
         groups.map((group) => (
           <div key={group.zone ?? '*'} className="flex flex-col gap-2">
-            <h3 className={clsx('font-semibold uppercase tracking-wide text-muted', compact ? 'text-xs' : 'text-sm')}>
+            <h3 className={clsx('font-semibold text-muted', compact ? 'text-xs' : 'text-sm')}>
               {group.zone ?? t('idle.allZones')}
             </h3>
             <ul role="list" className="flex flex-col gap-2">
@@ -180,14 +181,10 @@ export function PriceList({ tariffs, compact = false, className }: PriceListProp
                         </p>
                       )}
                     </div>
-                    <span
-                      className={clsx(
-                        'tnum shrink-0 whitespace-nowrap font-black text-primary',
-                        compact ? 'text-xl' : 'text-2xl',
-                      )}
-                    >
-                      {price}
-                    </span>
+                    <DotAmount
+                      value={price}
+                      className={clsx('tnum shrink-0 text-text', compact ? 'text-xl' : 'text-[1.7rem]')}
+                    />
                   </li>
                 );
               })}

@@ -71,26 +71,38 @@ export default function IdleScreen(): JSX.Element {
       <AdsCarousel showCounter={false} />
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgb(var(--c-bg)/0.55)_0%,transparent_30%,transparent_55%,rgb(var(--c-bg)/0.85)_100%)]"
+        className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgb(var(--c-bg)/0.7)_0%,rgb(var(--c-bg)/0.25)_35%,rgb(var(--c-bg)/0.35)_60%,rgb(var(--c-bg)/0.9)_100%)]"
       />
 
-      <div className="pointer-events-none relative z-10 flex h-full w-full flex-col justify-between px-[var(--gutter)] py-[var(--gap)]">
+      <div className="pointer-events-none relative z-10 flex h-full w-full flex-col justify-between px-[calc(var(--gutter)*1.5)] py-[calc(var(--gutter)*1.2)]">
         <motion.header
           initial={{ opacity: 0, y: -16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration, ease: 'easeOut' }}
           className="flex items-start justify-between gap-[var(--gap)]"
         >
-          <div className="min-w-0">
-            <p className="text-glow truncate text-3xl font-black uppercase tracking-[0.25em] text-text">
-              {t('idle.clubName')}
-            </p>
-            <p className="mt-1 text-lg text-text/80">
-              {pcName ? t('idle.pcName', { name: pcName, zone: pcZone }) : t('idle.pcFree')}
-            </p>
+          <div className="flex min-w-0 items-center gap-4">
+            <span aria-hidden="true" className="h-8 w-8 shrink-0 rotate-45 border border-accent/70" />
+            <div className="min-w-0">
+              <p className="truncate font-display text-3xl font-light tracking-tight text-text">{t('idle.clubName')}</p>
+              {pcName && <p className="hud-label mt-2">{t('idle.pcName', { name: pcName, zone: pcZone })}</p>}
+            </div>
           </div>
-          <Clock className="text-[length:var(--fs-display)]" />
+          <span className="hud-label flex items-center gap-2 text-success">
+            <span aria-hidden="true" className="h-2 w-2 rounded-full bg-success" />
+            {t('idle.pcFree')}
+          </span>
         </motion.header>
+
+        {/* The clock is the poster: huge dot-matrix time in the middle of the screen. */}
+        <motion.div
+          initial={{ opacity: 0, scale: 0.96 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: animations ? 0.8 : 0, ease: [0.16, 1, 0.3, 1] }}
+          className="flex flex-col items-center gap-3"
+        >
+          <Clock className="text-[clamp(7rem,13vw,15rem)] tracking-[0.02em]" />
+        </motion.div>
 
         <div className="flex items-end justify-between gap-[var(--gap)]">
           <motion.div
@@ -106,32 +118,16 @@ export default function IdleScreen(): JSX.Element {
             initial={{ opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration, ease: 'easeOut', delay: animations ? 0.2 : 0 }}
-            className="flex flex-col items-center gap-4 pb-[var(--gap)] text-center"
+            className="flex flex-col items-end gap-3 pb-[var(--gap)] text-right"
           >
-            <span aria-hidden="true" className="relative flex h-24 w-24 items-center justify-center">
+            <p className="font-display text-[clamp(1.8rem,2.4vw,2.8rem)] font-light tracking-tight text-text">
+              {t('idle.touchToStart')}
               <span
-                className={
-                  animations
-                    ? 'absolute inset-0 animate-pulse-glow rounded-full bg-primary/20'
-                    : 'absolute inset-0 rounded-full bg-primary/20'
-                }
+                aria-hidden="true"
+                className="anim-caret ml-2 inline-block h-[0.8em] w-[0.45em] translate-y-[0.08em] bg-accent"
               />
-              <span className="glass-strong border-glow relative flex h-16 w-16 items-center justify-center rounded-full text-primary">
-                <svg
-                  viewBox="0 0 24 24"
-                  className="h-8 w-8"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M9 11V5a2 2 0 0 1 4 0v6M13 11V8a2 2 0 0 1 4 0v4M17 12a2 2 0 0 1 4 0v3a6 6 0 0 1-6 6h-2a6 6 0 0 1-5-2.7L4 13.5A1.8 1.8 0 0 1 6.8 11l2.2 2.5" />
-                </svg>
-              </span>
-            </span>
-            <p className="text-glow text-3xl font-black text-text">{t('idle.touchToStart')}</p>
-            <p className="text-lg text-text/80">{t('idle.subtitle')}</p>
+            </p>
+            <p className="hud-label">{t('idle.subtitle')}</p>
           </motion.div>
         </div>
       </div>

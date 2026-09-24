@@ -156,7 +156,7 @@ export function QrLogin({ onSuccess, className }: QrLoginProps): JSX.Element {
         ) : (
           <div
             className={clsx(
-              'rounded-xl bg-white p-4 shadow-[var(--shadow-card)] transition-opacity duration-[var(--dur-base)]',
+              'rounded-xl bg-white p-4 transition-opacity duration-[var(--dur-base)]',
               stale && 'opacity-20',
             )}
           >

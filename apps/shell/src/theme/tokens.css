@@ -3,22 +3,26 @@
  * Defaults = config/themes/default.json; theme/themes.ts overwrites them at runtime.
  */
 :root {
-  --c-bg: 9 9 11;
-  --c-surface: 21 21 24;
+  --c-bg: 7 9 12;
+  --c-surface: 13 17 23;
   --c-primary: 244 244 245;
   --c-primary-hover: 224 224 227;
   --c-primary-active: 205 205 209;
   --c-on-primary: 9 9 11;
-  --c-accent: 242 184 75;
-  --c-on-accent: 9 9 11;
-  --c-text: 250 250 250;
-  --c-muted: 142 142 150;
+  --c-accent: 154 223 255;
+  --c-on-accent: 3 16 24;
+  --c-text: 232 241 246;
+  --c-muted: 125 138 150;
   --c-danger: 239 68 68;
   --c-success: 34 197 94;
 
-  --radius: 12px;
+  --radius: 10px;
   --font: "Inter";
-  --blur: 12px;
+  --blur: 0px;
+  /* Obsidian HUD faces (bundled): wide display for titles, mono for telemetry labels, dot matrix for numbers. */
+  --font-display: "Unbounded Variable", "Unbounded", var(--font), sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, "Cascadia Mono", monospace;
+  --font-dot: "Doto Variable", "Doto", var(--font-mono);
 
   /* Typography scale: 18px base on 1080p, fluid between 1600×900 and 2560×1440. */
   --fs-base: clamp(16px, 0.9375vw, 24px);
@@ -28,11 +32,12 @@
   --fs-lg: 1.2rem;
   --fs-xl: 1.5rem;
   --fs-2xl: 2rem;
-  --fs-3xl: 2.75rem;
-  --fs-display: clamp(2.5rem, 4.5vw, 5rem);
+  --fs-3xl: 2.5rem;
+  --fs-display: clamp(2.25rem, 3vw, 3.5rem);
 
-  /* Layout. */
-  --topbar-h: clamp(64px, 4.6vw, 96px);
+  /* Layout: a HUD bar on top (tabs), a status line at the bottom, the screen between them. */
+  --topbar-h: clamp(64px, 4.4vw, 88px);
+  --statusbar-h: clamp(56px, 3.6vw, 72px);
   --gutter: clamp(20px, 2vw, 48px);
   --gap: clamp(12px, 1.2vw, 28px);
   --card-cover-w: clamp(180px, 12.5vw, 300px);
@@ -46,10 +51,12 @@
   --dur-base: 200ms;
   --dur-slow: 400ms;
 
-  /* Elevation / glow. */
-  --shadow-card: 0 16px 48px -16px rgb(0 0 0 / 0.7);
-  --shadow-glow: 0 0 0 2px rgb(var(--c-primary) / 0.9), 0 0 22px 2px rgb(var(--c-primary) / 0.25);
-  --shadow-glow-danger: 0 0 0 2px rgb(var(--c-danger) / 0.9), 0 0 22px 2px rgb(var(--c-danger) / 0.3);
+  /* Elevation: flat by default; only floating layers (popovers, modals) cast a shadow. Focus is a plain ring. */
+  --hairline: rgb(var(--c-accent) / 0.1);
+  --shadow-card: none;
+  --shadow-float: 0 24px 64px -24px rgb(0 0 0 / 0.8);
+  --shadow-glow: 0 0 0 1.5px rgb(var(--c-accent) / 0.9);
+  --shadow-glow-danger: 0 0 0 2px rgb(var(--c-danger) / 0.9);
 
   color-scheme: dark;
 }
@@ -74,32 +81,31 @@ html {
     box-shadow: var(--shadow-glow-danger);
   }
 
-  /* Blur-glass surface used by cards, bars and modals; the inset top line reads as the thickness of the glass. */
+  /*
+   * Surfaces: flat panels with a hairline edge — `.glass` for cards and rows, `.glass-strong` for floating layers
+   * (popovers, modals, dropdowns). A theme with `blur > 0` sets `data-glass` and gets translucent, blurred panels
+   * instead (the names date from when that was the only look).
+   */
   .glass {
+    background-color: rgb(var(--c-surface));
+    border: 1px solid var(--hairline);
+  }
+  .glass-strong {
+    background-color: rgb(var(--c-surface));
+    border: 1px solid rgb(var(--c-text) / 0.09);
+    box-shadow: var(--shadow-float);
+  }
+  :root[data-glass] .glass {
     background-color: rgb(var(--c-surface) / 0.55);
     -webkit-backdrop-filter: blur(var(--blur)) saturate(120%);
     backdrop-filter: blur(var(--blur)) saturate(120%);
-    border: 1px solid rgb(var(--c-text) / 0.06);
-    box-shadow: inset 0 1px 0 rgb(var(--c-text) / 0.06), var(--shadow-card);
   }
-  .glass-strong {
-    background-color: rgb(var(--c-surface) / 0.82);
+  :root[data-glass] .glass-strong {
+    background-color: rgb(var(--c-surface) / 0.9);
     -webkit-backdrop-filter: blur(calc(var(--blur) * 1.5)) saturate(120%);
     backdrop-filter: blur(calc(var(--blur) * 1.5)) saturate(120%);
-    border: 1px solid rgb(var(--c-text) / 0.07);
-    box-shadow: inset 0 1px 0 rgb(var(--c-text) / 0.08), var(--shadow-card);
   }
 
-  /* Film look for full-bleed artwork: static grain (SVG noise, blended) and an edge vignette. */
-  .film-grain {
-    pointer-events: none;
-    position: absolute;
-    inset: 0;
-    opacity: 0.07;
-    mix-blend-mode: overlay;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
-    background-size: 180px 180px;
-  }
   /* Soft edge on a horizontally scrolling row, set by useOverflowFade only on the side that has more to show. */
   .fade-x[data-fade-end] {
     mask-image: linear-gradient(to right, #000 calc(100% - 4rem), transparent);
@@ -110,58 +116,141 @@ html {
   .fade-x[data-fade-start][data-fade-end] {
     mask-image: linear-gradient(to right, transparent, #000 4rem, #000 calc(100% - 4rem), transparent);
   }
-  .film-vignette {
-    pointer-events: none;
-    position: absolute;
-    inset: 0;
-    background: radial-gradient(120% 90% at 55% 45%, transparent 55%, rgb(var(--c-bg) / 0.55) 100%);
+
+  /* ---- Obsidian HUD layer ---- */
+
+  /* Telemetry label: small mono caps ("SESSION / LEFT", "PC-12 · STANDARD"). */
+  .hud-label {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 500;
+    line-height: 1.2;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: rgb(var(--c-muted));
   }
 
-  /* Pointer-following 3D tilt with a specular sheen (vars set by `tiltHandlers`). */
-  .tilt {
-    --rx: 0deg;
-    --ry: 0deg;
-    --mx: 50%;
-    --my: 50%;
-    --lift: 0px;
-    --zoom: 1;
-    transform: perspective(900px) rotateX(var(--rx)) rotateY(var(--ry)) translateY(var(--lift)) scale(var(--zoom));
-    transform-style: preserve-3d;
-    transition: transform var(--dur-slow) var(--ease-out);
-    will-change: transform;
+  /* Dot-matrix numbers (time, money, counts). Doto has no Cyrillic: "сум" falls through to the next face. */
+  .num-dot {
+    font-family: var(--font-dot);
+    font-weight: 900;
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
   }
-  .tilt[data-tilting="true"] {
-    transition: transform 90ms linear;
-  }
-  .tilt:hover,
-  .tilt:focus-visible,
-  .tilt[data-focused="true"] {
-    --lift: -6px;
-    --zoom: 1.04;
-  }
-  .tilt-sheen {
-    pointer-events: none;
+
+  /*
+   * Corner brackets, the target-lock mark. `.hud-brackets` always shows them (the selected game); `.hud-focus`
+   * shows them only on focus / selection, closing in from inside. The host must be positioned; tune with
+   * --brk-size and --brk-inset.
+   */
+  .hud-brackets::after,
+  .hud-focus::after {
+    --brk: rgb(var(--c-accent));
+    --l: var(--brk-size, 14px);
+    content: "";
     position: absolute;
-    inset: 0;
-    opacity: 0;
-    background: radial-gradient(55% 40% at var(--mx) var(--my), rgb(255 255 255 / 0.22), transparent 62%);
-    transition: opacity var(--dur-base) var(--ease-out);
+    inset: var(--brk-inset, 0px);
+    z-index: 5;
+    pointer-events: none;
+    background:
+      linear-gradient(var(--brk), var(--brk)) left top / var(--l) 1px no-repeat,
+      linear-gradient(var(--brk), var(--brk)) left top / 1px var(--l) no-repeat,
+      linear-gradient(var(--brk), var(--brk)) right top / var(--l) 1px no-repeat,
+      linear-gradient(var(--brk), var(--brk)) right top / 1px var(--l) no-repeat,
+      linear-gradient(var(--brk), var(--brk)) left bottom / var(--l) 1px no-repeat,
+      linear-gradient(var(--brk), var(--brk)) left bottom / 1px var(--l) no-repeat,
+      linear-gradient(var(--brk), var(--brk)) right bottom / var(--l) 1px no-repeat,
+      linear-gradient(var(--brk), var(--brk)) right bottom / 1px var(--l) no-repeat;
+    transition:
+      inset var(--dur-slow) var(--ease-out),
+      opacity var(--dur-base) var(--ease-out);
   }
-  .tilt:hover .tilt-sheen,
-  .tilt:focus-visible .tilt-sheen,
-  .tilt[data-focused="true"] .tilt-sheen {
+  .hud-focus::after {
+    inset: 8px;
+    opacity: 0;
+  }
+  .hud-focus:focus-visible::after,
+  .hud-focus[data-focused="true"]::after,
+  .hud-focus[aria-current="true"]::after,
+  .hud-focus[aria-pressed="true"]::after {
+    inset: var(--brk-inset, -6px);
     opacity: 1;
   }
-  :root[data-animations="false"] .tilt {
-    transform: none;
+  /* Brackets replace the ring on these elements. */
+  .hud-focus.focus-ring:focus-visible,
+  .hud-focus.focus-ring[data-focused="true"] {
+    box-shadow: none;
   }
 
-  /* Text / border accents (soft; the artwork carries the colour). */
-  .text-glow {
-    text-shadow: 0 2px 24px rgb(0 0 0 / 0.6);
+  /* Main call to action: accent fill with two cut corners (drawn by gradients, so focus brackets stay visible). */
+  .cut-corners {
+    --cut: 10px;
+    --fill: rgb(var(--c-accent));
+    background:
+      linear-gradient(135deg, transparent var(--cut), var(--fill) 0) left top / 100% 51% no-repeat,
+      linear-gradient(-45deg, transparent var(--cut), var(--fill) 0) right bottom / 100% 51% no-repeat;
   }
+  .cut-corners:hover {
+    --fill: rgb(var(--c-accent) / 0.85);
+  }
+
+  /* Blueprint grid behind the screens, fading out towards the edges. */
+  .hud-grid {
+    background-image:
+      linear-gradient(rgb(var(--c-accent) / 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(var(--c-accent) / 0.035) 1px, transparent 1px);
+    background-size: 48px 48px;
+    -webkit-mask-image: radial-gradient(ellipse 80% 70% at 60% 40%, #000 20%, transparent 85%);
+    mask-image: radial-gradient(ellipse 80% 70% at 60% 40%, #000 20%, transparent 85%);
+  }
+
+  /* Tick scale (instrument dial) as a progress bar in currentColor: set --value 0..1 on the element. */
+  .tick-scale {
+    height: 8px;
+    background: repeating-linear-gradient(90deg, currentColor 0 1px, transparent 1px 5%);
+    -webkit-mask-image: linear-gradient(90deg, #000 calc(var(--value, 0) * 100%), rgb(0 0 0 / 0.18) 0);
+    mask-image: linear-gradient(90deg, #000 calc(var(--value, 0) * 100%), rgb(0 0 0 / 0.18) 0);
+  }
+
+  /*
+   * One language for every "pick one of these" control (amounts, presets, dates, payment methods, languages):
+   * quiet at rest, an accent edge and a faint accent fill when chosen. Never a white slab.
+   */
+  .choice {
+    border: 1px solid var(--hairline);
+    background-color: rgb(var(--c-text) / 0.03);
+    color: rgb(var(--c-text));
+    transition:
+      background-color var(--dur-fast) var(--ease-out),
+      border-color var(--dur-fast) var(--ease-out),
+      color var(--dur-fast) var(--ease-out);
+  }
+  .choice:hover {
+    background-color: rgb(var(--c-text) / 0.06);
+  }
+  .choice-on,
+  .choice-on:hover {
+    border-color: rgb(var(--c-accent) / 0.7);
+    background-color: rgb(var(--c-accent) / 0.1);
+    color: rgb(var(--c-text));
+  }
+
+  /* Native range inputs in the accent. */
+  input[type="range"] {
+    accent-color: rgb(var(--c-accent));
+  }
+
+  /*
+   * A side column (history, cart, bookings) starts on the same line as the main column's first block, under the page
+   * title — never level with the title itself. Page titles are one line at --fs-2xl × 1.2.
+   */
+  .page-aside {
+    margin-top: calc(var(--fs-2xl) * 1.2 + var(--gap));
+  }
+
+  /* Selected card / option: a plain 2 px ring. */
   .border-glow {
-    box-shadow: 0 0 0 2px rgb(var(--c-primary) / 0.9), 0 0 20px rgb(var(--c-primary) / 0.2);
+    box-shadow: 0 0 0 1.5px rgb(var(--c-accent) / 0.9);
   }
 
   /* Hide scrollbars but keep scrolling (kiosk). */
@@ -196,7 +285,7 @@ html {
     width: 100%;
     overflow: hidden;
     border-radius: var(--radius);
-    background: linear-gradient(160deg, rgb(var(--c-surface)) 0%, rgb(var(--c-bg)) 100%);
+    background: rgb(var(--c-surface));
   }
 
   /* Truncation helpers. */

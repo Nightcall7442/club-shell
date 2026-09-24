@@ -110,15 +110,16 @@ export default function AppsScreen(): JSX.Element {
   return (
     <motion.div
       ref={root}
-      className="mx-auto flex w-full max-w-[1800px] flex-col gap-[calc(var(--gap)*1.5)]"
+      className="flex w-full flex-col gap-[calc(var(--gap)*1.5)]"
       initial={animations ? { opacity: 0, y: 12 } : false}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: animations ? 0.25 : 0, ease: 'easeOut' }}
     >
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold leading-tight text-text">{t('apps.title')}</h1>
-          <p className="text-base text-muted">{t('apps.subtitle')}</p>
+          <h1 className="font-display text-[length:var(--fs-2xl)] font-light leading-[1.2] tracking-tight text-text">
+            {t('apps.title')}
+          </h1>
         </div>
         {error && (
           <Button variant="secondary" onClick={() => void load()}>
@@ -156,7 +157,7 @@ export default function AppsScreen(): JSX.Element {
 
       {groups.map((group) => (
         <section key={group.category} aria-label={categoryLabel(group.category)} className="flex flex-col gap-3">
-          <h2 className="text-xl font-bold text-text">{categoryLabel(group.category)}</h2>
+          <h2 className="font-display text-xl font-normal text-text tracking-tight">{categoryLabel(group.category)}</h2>
           <div
             role="list"
             className="grid grid-cols-[repeat(auto-fill,minmax(clamp(160px,11vw,220px),1fr))] gap-[var(--gap)]"

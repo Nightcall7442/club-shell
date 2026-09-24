@@ -161,7 +161,7 @@ export function Bracket({ bracket, meId, nameOf, className }: BracketProps): JSX
         {bracket.rounds.map((round, r) => (
           <div
             key={r}
-            className="absolute top-0 text-center text-xs font-semibold uppercase tracking-widest text-muted"
+            className="absolute top-0 text-center text-xs font-semibold text-muted"
             style={{ left: r * (MATCH_W + GAP_X), width: MATCH_W }}
           >
             {roundLabel(r, total, t)} · {t('tournaments.matches')} {round.matches.length}

@@ -477,6 +477,15 @@ function detachSources(): void {
 // Hook
 // ---------------------------------------------------------------------------------------------------------------------
 
+/** Whether a controller is connected right now (prompts switch between controller glyphs and keys on it). */
+export function useGamepadConnected(): boolean {
+  return useSyncExternalStore(
+    subscribeConnected,
+    () => connected,
+    () => false,
+  );
+}
+
 export function useGamepad(options: UseGamepadOptions = {}): GamepadController {
   const optsRef = useRef<UseGamepadOptions>(options);
   optsRef.current = options;

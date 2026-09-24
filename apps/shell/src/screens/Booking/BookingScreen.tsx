@@ -8,6 +8,7 @@ import { Badge, type BadgeTone } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { useGamepad } from '@/hooks/useGamepad';
 import { useLocale } from '@/hooks/useLocale';
 import { formatDate, formatDurationSec, formatTime } from '@/lib/format';
@@ -120,9 +121,7 @@ function SlotPicker({ label, options, value, onChange, emptyText, format }: Slot
                 onClick={() => onChange(ms)}
                 className={clsx(
                   'focus-ring tnum h-11 min-w-[4.5rem] rounded-lg px-3 text-base font-semibold transition-colors duration-[var(--dur-fast)]',
-                  active
-                    ? 'bg-primary text-on-primary shadow-[var(--shadow-glow)]'
-                    : 'glass text-text hover:bg-surface/80',
+                  active ? 'choice choice-on' : 'choice',
                 )}
               >
                 {format(d)}
@@ -344,8 +343,9 @@ export default function BookingScreen(): JSX.Element {
       <section className="flex min-h-0 flex-col gap-4">
         <header className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-bold text-text">{t('booking.title')}</h1>
-            <p className="text-muted">{t('booking.subtitle')}</p>
+            <h1 className="font-display text-[length:var(--fs-2xl)] font-light leading-[1.2] tracking-tight text-text">
+              {t('booking.title')}
+            </h1>
           </div>
           {data && (
             <div className="flex items-center gap-3 text-sm text-muted">
@@ -373,20 +373,18 @@ export default function BookingScreen(): JSX.Element {
                 aria-pressed={active}
                 onClick={() => changeDate(d.key)}
                 className={clsx(
-                  'focus-ring flex h-16 min-w-[6.5rem] shrink-0 flex-col items-center justify-center rounded-xl px-4 transition-colors duration-[var(--dur-fast)]',
-                  active
-                    ? 'bg-primary text-on-primary shadow-[var(--shadow-glow)]'
-                    : 'glass text-text hover:bg-surface/80',
+                  'focus-ring flex h-16 min-w-[6.5rem] shrink-0 flex-col items-center justify-center rounded-lg px-4 transition-colors duration-[var(--dur-fast)]',
+                  active ? 'choice choice-on' : 'choice',
                 )}
               >
-                <span className="text-xs font-medium uppercase tracking-wide opacity-80">{label}</span>
+                <span className="text-xs font-medium opacity-80">{label}</span>
                 <span className="tnum text-lg font-bold leading-tight">{dayMonth.format(d.date)}</span>
               </button>
             );
           })}
         </div>
 
-        <div className="glass no-scrollbar min-h-0 flex-1 overflow-y-auto rounded-2xl p-5">
+        <div className="glass no-scrollbar min-h-0 flex-1 overflow-y-auto rounded-xl p-5">
           {loading && !data ? (
             <div className="grid grid-cols-6 gap-3" aria-hidden="true">
               {Array.from({ length: 24 }, (_, i) => (
@@ -414,9 +412,9 @@ export default function BookingScreen(): JSX.Element {
         </div>
       </section>
 
-      <aside className="flex min-h-0 flex-col gap-4">
-        <div className="glass flex flex-col gap-4 rounded-2xl p-5">
-          <h2 className="flex items-center gap-2 text-xl font-semibold text-text">
+      <aside className="page-aside flex min-h-0 flex-col gap-4">
+        <div className="glass flex flex-col gap-4 rounded-xl p-5">
+          <h2 className="font-display flex items-center gap-2 text-xl font-normal text-text tracking-tight">
             <span className="inline-flex h-6 w-6 text-primary [&>svg]:h-full [&>svg]:w-full" aria-hidden="true">
               <CalendarIcon />
             </span>
@@ -463,10 +461,10 @@ export default function BookingScreen(): JSX.Element {
           )}
         </div>
 
-        <div className="glass flex min-h-0 flex-1 flex-col rounded-2xl p-5">
-          <h2 className="mb-3 text-xl font-semibold text-text">{t('booking.myBookings')}</h2>
+        <div className="glass flex min-h-0 flex-1 flex-col rounded-xl p-5">
+          <h2 className="font-display mb-3 text-xl font-normal text-text tracking-tight">{t('booking.myBookings')}</h2>
           {myBookings.length === 0 ? (
-            <p className="text-muted">{t('booking.noBookings')}</p>
+            <EmptyState icon={<CalendarIcon />} title={t('booking.noBookings')} className="flex-1" />
           ) : (
             <ul role="list" className="no-scrollbar flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
               {myBookings.map((b) => {

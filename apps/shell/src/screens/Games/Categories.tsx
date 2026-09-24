@@ -46,8 +46,8 @@ const SORTS: readonly { key: GamesSort; labelKey: string }[] = [
 ];
 
 const CHIP =
-  'focus-ring relative isolate inline-flex shrink-0 select-none items-center whitespace-nowrap rounded-full font-semibold leading-none transition-colors duration-[var(--dur-base)]';
-const CHIP_ON = 'text-on-primary';
+  'focus-ring relative isolate inline-flex shrink-0 select-none items-center whitespace-nowrap rounded-md font-medium leading-none transition-colors duration-[var(--dur-base)]';
+const CHIP_ON = 'text-text';
 const CHIP_OFF = 'text-muted hover:text-text';
 
 /** The active pill slides between chips of the same group (`layoutId`), so a filter change reads as one motion. */
@@ -57,7 +57,7 @@ function Pill({ id, className }: { id: string; className?: string }): JSX.Elemen
     <motion.span
       layoutId={id}
       aria-hidden="true"
-      className={clsx('absolute inset-0 -z-10 rounded-full', className)}
+      className={clsx('absolute inset-0 -z-10 rounded-md', className)}
       transition={animations ? { type: 'spring', stiffness: 520, damping: 42, mass: 0.8 } : { duration: 0 }}
     />
   );
@@ -103,7 +103,7 @@ export function Categories({
         ref={row}
         role="group"
         aria-label={t('games.categories')}
-        className="fade-x glass no-scrollbar flex min-w-0 max-w-full flex-1 items-center gap-1 overflow-x-auto rounded-full p-1"
+        className="fade-x no-scrollbar flex min-w-0 max-w-full flex-1 items-center gap-1 overflow-x-auto"
       >
         {chips.map((c) => {
           const active = c.value === value;
@@ -114,14 +114,9 @@ export function Categories({
               data-nav="true"
               aria-pressed={active}
               onClick={() => onChange(c.value)}
-              className={clsx(CHIP, 'h-11 gap-2 px-4 text-base', active ? CHIP_ON : CHIP_OFF)}
+              className={clsx(CHIP, 'h-10 gap-2 px-4 text-[0.95rem]', active ? CHIP_ON : CHIP_OFF)}
             >
-              {active && (
-                <Pill
-                  id="games-category-pill"
-                  className="bg-primary shadow-[0_6px_20px_-6px_rgb(var(--c-primary)/0.4)]"
-                />
-              )}
+              {active && <Pill id="games-category-pill" className="bg-text/10" />}
               {c.label}
             </button>
           );
@@ -134,7 +129,7 @@ export function Categories({
         aria-pressed={installedOnly}
         icon={installedOnly ? <CheckIcon /> : <BoxIcon />}
         onClick={() => onInstalledOnlyChange(!installedOnly)}
-        className="shrink-0 rounded-full text-sm"
+        className="shrink-0 rounded-md text-sm"
       >
         {t('games.installedOnly')}
       </Button>
@@ -194,7 +189,7 @@ function SortMenu({ value, onChange }: { value: GamesSort; onChange: (sort: Game
           aria-label={`${t('games.sort')}: ${currentLabel}`}
           icon={<SortIcon />}
           onClick={() => setOpen((v) => !v)}
-          className="shrink-0 rounded-full text-sm"
+          className="shrink-0 rounded-md text-sm"
         >
           {currentLabel}
         </Button>

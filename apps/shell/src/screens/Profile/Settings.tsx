@@ -36,7 +36,7 @@ export function SettingsSection({ title, description, children, className }: Set
   return (
     <section aria-labelledby={id} className={clsx('glass flex flex-col gap-4 rounded-xl p-[var(--gap)]', className)}>
       <header>
-        <h3 id={id} className="text-xl font-bold">
+        <h3 id={id} className="font-display text-xl font-normal tracking-tight">
           {title}
         </h3>
         {description && <p className="text-sm text-muted">{description}</p>}
@@ -73,14 +73,14 @@ export function Toggle({ label, hint, checked, onChange, disabled = false }: Tog
       <span
         aria-hidden="true"
         className={clsx(
-          'relative h-8 w-14 shrink-0 rounded-full transition-colors duration-[var(--dur-base)]',
-          checked ? 'bg-primary' : 'bg-text/20',
+          'relative h-8 w-14 shrink-0 rounded-full border transition-colors duration-[var(--dur-base)]',
+          checked ? 'border-accent/70 bg-accent/25' : 'border-text/15 bg-text/10',
         )}
       >
         <span
           className={clsx(
-            'absolute top-1 h-6 w-6 rounded-full bg-white shadow transition-transform duration-[var(--dur-base)]',
-            checked ? 'translate-x-7' : 'translate-x-1',
+            'absolute top-[3px] h-6 w-6 rounded-full transition-[transform,background-color] duration-[var(--dur-base)] ease-[var(--ease-out)]',
+            checked ? 'translate-x-[1.6rem] bg-accent' : 'translate-x-[3px] bg-text/70',
           )}
         />
       </span>
@@ -123,10 +123,8 @@ export function OptionGroup<K extends string>({
             disabled={disabled}
             onClick={() => onChange(o.key)}
             className={clsx(
-              'focus-ring inline-flex h-11 items-center rounded-full px-5 text-base font-semibold transition-colors duration-[var(--dur-fast)] disabled:cursor-not-allowed disabled:opacity-50',
-              active
-                ? 'bg-primary text-on-primary shadow-[0_6px_20px_-6px_rgb(var(--c-primary)/0.4)]'
-                : 'bg-text/10 text-text hover:bg-text/15',
+              'focus-ring inline-flex h-11 items-center rounded-md px-5 text-base font-semibold transition-colors duration-[var(--dur-fast)] disabled:cursor-not-allowed disabled:opacity-50',
+              active ? 'choice choice-on' : 'choice',
             )}
           >
             {o.label}
@@ -378,7 +376,6 @@ export function VolumeControl(): JSX.Element {
         aria-valuetext={label}
         onChange={(e) => onInput(Number(e.target.value))}
         className={clsx('focus-ring h-3 min-w-0 flex-1 cursor-pointer rounded-full', muted && 'opacity-50')}
-        style={{ accentColor: 'rgb(var(--c-primary))' }}
       />
       <span className="tnum w-24 shrink-0 text-right text-base text-muted" aria-live="polite">
         {label}

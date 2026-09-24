@@ -1,7 +1,12 @@
 /**
- * Top bar of the authenticated shell: club / PC (left), navigation (centre) and, on the right, the player (avatar →
- * profile), the session timer (→ add time), the balance (→ wallet / top up), a link dot only while the link is down,
- * the clock, one sound-and-language menu and lock. Every control is a `data-nav` button.
+ * The two HUD bars that frame every authenticated screen, like a game's pause menu.
+ *
+ * - Top: club mark and PC, the section tabs (`LB` · tabs · `RB`), a link dot only while the link is down, the clock,
+ *   one sound-and-language menu and lock.
+ * - Bottom (status line): the player (→ profile), time left (→ add time), balance (→ wallet / top up) and the
+ *   controller prompts for what the buttons do here.
+ *
+ * Every control is a `data-nav` button.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
@@ -9,15 +14,16 @@ import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import type { Locale, Money } from '@clubshell/contracts';
 import { Avatar } from '@/components/ui/Avatar';
-import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { DotAmount } from '@/components/ui/DotAmount';
 import { Popover } from '@/components/ui/Popover';
+import { useGamepadConnected } from '@/hooks/useGamepad';
 import { useLocale } from '@/hooks/useLocale';
 import { useSession } from '@/hooks/useSession';
 import { formatMoney } from '@/lib/format';
 import { formatClock, serverNow } from '@/lib/time';
 import { NavBar } from '@/screens/Desktop/NavBar';
-import { PlusDisc, SessionTimer } from '@/screens/Desktop/SessionTimer';
+import { PlusButton, SessionTimer } from '@/screens/Desktop/SessionTimer';
 import { useNotificationsStore } from '@/store/notifications';
 import { selectFeatures, useSettingsStore } from '@/store/settings';
 import { useWalletStore } from '@/store/wallet';
@@ -54,12 +60,6 @@ const IconGlobe = (): JSX.Element => (
     <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
   </svg>
 );
-const IconPc = (): JSX.Element => (
-  <svg {...svgProps}>
-    <rect x="3" y="4" width="18" height="12" rx="2" />
-    <path d="M8 20h8M12 16v4" />
-  </svg>
-);
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Clock
@@ -73,7 +73,11 @@ export function Clock({ format }: { format: string }): JSX.Element {
     return () => clearInterval(id);
   }, []);
   return (
-    <time dateTime={now.toISOString()} aria-label={t('desktop.clock')} className="tnum text-xl font-semibold text-text">
+    <time
+      dateTime={now.toISOString()}
+      aria-label={t('desktop.clock')}
+      className="num-dot text-2xl leading-none text-text"
+    >
       {formatClock(now, format)}
     </time>
   );
@@ -137,6 +141,7 @@ export function SystemMenu(): JSX.Element {
         <Button
           variant="ghost"
           iconOnly
+          className="h-9 w-9 text-muted hover:text-text"
           data-popover-trigger="true"
           aria-label={t('desktop.soundAndLanguage')}
           title={t('desktop.soundAndLanguage')}
@@ -148,9 +153,9 @@ export function SystemMenu(): JSX.Element {
       }
     >
       <div className="flex flex-col gap-3">
-        <div className="flex items-center justify-between text-sm text-muted">
-          <span>{t('desktop.volume')}</span>
-          <span className="tnum">{local}%</span>
+        <div className="flex items-center justify-between">
+          <span className="hud-label">{t('desktop.volume')}</span>
+          <span className="num-dot text-lg leading-none text-text">{local}%</span>
         </div>
         <input
           type="range"
@@ -161,7 +166,7 @@ export function SystemMenu(): JSX.Element {
           data-nav="true"
           aria-label={t('desktop.volume')}
           onChange={(e) => commit(Number(e.currentTarget.value))}
-          className="focus-ring h-2 w-full cursor-pointer accent-primary"
+          className="focus-ring h-2 w-full cursor-pointer"
         />
         <Button
           variant="secondary"
@@ -174,7 +179,7 @@ export function SystemMenu(): JSX.Element {
         </Button>
       </div>
       <div className="my-3 h-px bg-text/10" aria-hidden="true" />
-      <p className="mb-2 flex items-center gap-2 text-sm text-muted">
+      <p className="hud-label mb-2 flex items-center gap-2">
         <span className="inline-flex h-4 w-4" aria-hidden="true">
           <IconGlobe />
         </span>
@@ -191,11 +196,13 @@ export function SystemMenu(): JSX.Element {
               onClick={() => choose(l)}
               className={clsx(
                 'focus-ring flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-base transition-colors duration-[var(--dur-fast)]',
-                l === locale ? 'bg-primary/15 text-primary' : 'text-text hover:bg-text/10',
+                l === locale
+                  ? 'bg-accent/10 text-text shadow-[inset_2px_0_0_rgb(var(--c-accent))]'
+                  : 'text-text hover:bg-text/[0.06]',
               )}
             >
               <span>{names[l]}</span>
-              <span className="text-xs uppercase text-muted">{l}</span>
+              <span className="font-mono text-[0.65rem] uppercase tracking-[0.12em] text-muted">{l}</span>
             </button>
           </li>
         ))}
@@ -222,14 +229,11 @@ export function ConnectivityIndicator(): JSX.Element | null {
       role="status"
       title={label}
       aria-label={`${t('desktop.connection')}: ${label}`}
-      className="inline-flex h-10 w-6 shrink-0 items-center justify-center"
+      className="inline-flex h-5 w-5 shrink-0 items-center justify-center"
     >
       <span
         aria-hidden="true"
-        className={clsx(
-          'h-2 w-2 rounded-full shadow-[0_0_8px_currentColor]',
-          agentConnected ? 'bg-accent' : 'anim-live-dot bg-danger',
-        )}
+        className={clsx('h-2 w-2 rounded-full', agentConnected ? 'bg-accent' : 'anim-live-dot bg-danger')}
       />
     </span>
   );
@@ -239,11 +243,7 @@ export function ConnectivityIndicator(): JSX.Element | null {
 // Balance
 // ---------------------------------------------------------------------------------------------------------------------
 
-/**
- * Balance as its own button to the wallet, with a "+" when top-ups are enabled. It replaces both the balance line
- * under the user's name and the top-up card Home used to carry, so the money action is one click away on every
- * screen instead of only on the first one.
- */
+/** Balance in the status line: opens the wallet, where top-ups live; the "+" says so when top-ups are enabled. */
 function BalanceButton({ amount, topUp }: { amount: Money; topUp: boolean }): JSX.Element {
   const { t } = useTranslation();
   const { locale } = useLocale();
@@ -258,14 +258,34 @@ function BalanceButton({ amount, topUp }: { amount: Money; topUp: boolean }): JS
       }
       title={topUp ? t('desktop.topUp') : undefined}
       onClick={() => navigate('/wallet')}
-      className={clsx(
-        'focus-ring glass group flex h-12 shrink-0 items-center gap-2.5 rounded-full pl-4 transition-colors duration-[var(--dur-fast)] hover:bg-surface/80',
-        topUp ? 'pr-1.5' : 'pr-4',
-      )}
+      className="focus-ring group flex h-12 items-center gap-3 rounded-md px-3 text-left transition-colors duration-[var(--dur-fast)] hover:bg-text/[0.04]"
     >
-      <span className="tnum text-lg font-semibold text-text">{money}</span>
-      {topUp && <PlusDisc />}
+      <span className="hud-label">{t('desktop.balance')}</span>
+      <DotAmount value={money} className="text-[1.45rem] leading-none text-text" />
+      {topUp && <PlusButton />}
     </button>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Controller prompts
+// ---------------------------------------------------------------------------------------------------------------------
+
+/** A face-button glyph (Ⓐ-style disc) with what it does here. */
+function Prompt({ glyph, label, round = true }: { glyph: string; label: string; round?: boolean }): JSX.Element {
+  return (
+    <span className="flex items-center gap-2 whitespace-nowrap">
+      <span
+        aria-hidden="true"
+        className={clsx(
+          'inline-flex h-6 min-w-6 items-center justify-center border border-text/25 px-1 font-mono text-[0.62rem] font-medium text-text',
+          round ? 'rounded-full' : 'rounded-md',
+        )}
+      >
+        {glyph}
+      </span>
+      <span className="hud-label text-text/70">{label}</span>
+    </span>
   );
 }
 
@@ -276,17 +296,11 @@ function BalanceButton({ amount, topUp }: { amount: Money; topUp: boolean }): JS
 export function TopBar(): JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  // The avatar is the only way to the profile now, so it carries the "you are here" state the nav item used to.
-  const onProfile = useLocation().pathname.startsWith('/profile');
   const pc = useSettingsStore((s) => s.pcInfo?.pc ?? null);
   const showClock = useSettingsStore((s) => s.shellConfig?.ui.showClock ?? true);
   const clockFormat = useSettingsStore((s) => s.shellConfig?.ui.clockFormat ?? 'HH:mm');
-  const features = useSettingsStore(selectFeatures);
   const pushError = useNotificationsStore((s) => s.pushError);
-  const { user, isGuest, isActive, lock, busy } = useSession();
-  // The wallet store follows `wallet.updated`; the user record only refreshes on login.
-  const walletBalance = useWalletStore((w) => w.balance?.amount ?? null);
-  const balance = walletBalance ?? user?.balance ?? null;
+  const { isActive, lock, busy } = useSession();
   const [locking, setLocking] = useState(false);
 
   const onLock = async (): Promise<void> => {
@@ -301,63 +315,23 @@ export function TopBar(): JSX.Element {
     }
   };
 
-  const roleBadge = isGuest ? (
-    <Badge tone="muted" size="sm">
-      {t('desktop.guestBadge')}
-    </Badge>
-  ) : user?.role === 'vip' ? (
-    <Badge tone="accent" size="sm" solid>
-      {t('desktop.vipBadge')}
-    </Badge>
-  ) : null;
-
   return (
-    <div className="flex h-full w-full items-center gap-[var(--gap)] bg-bg/60 px-[var(--gutter)] backdrop-blur-2xl">
-      {/* Left: club + PC identity */}
-      <div className="flex min-w-0 shrink-0 items-center gap-3">
-        <span
-          aria-hidden="true"
-          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-text/10 text-text [&>svg]:h-5 [&>svg]:w-5"
-        >
-          <IconPc />
-        </span>
+    <div className="grid h-full w-full grid-cols-[1fr_auto_1fr] items-center gap-[var(--gap)] px-[var(--gutter)]">
+      {/* Club mark + PC */}
+      <div className="flex min-w-0 items-center gap-3">
+        <span aria-hidden="true" className="h-6 w-6 shrink-0 rotate-45 border border-accent/70" />
         <div className="min-w-0 leading-tight">
-          <div className="truncate text-[0.7rem] font-bold uppercase tracking-[0.18em] text-text/80">
-            {t('idle.clubName')}
-          </div>
-          <div className="truncate text-xs text-muted">{pc ? pc.name : t('common.loading')}</div>
+          <div className="truncate font-display text-sm font-normal tracking-tight text-text">{t('idle.clubName')}</div>
+          <div className="hud-label mt-0.5 truncate">{pc ? `${pc.name} · ${pc.zone}` : t('common.loading')}</div>
         </div>
       </div>
 
-      {/* Centre: navigation */}
-      <NavBar className="flex min-w-0 flex-1 justify-center" />
+      <NavBar className="justify-center" />
 
-      {/* Right: who, how long, how much — then clock, sound & language, lock. The link dot only shows when broken. */}
-      <div className="flex shrink-0 items-center justify-end gap-2">
-        {user && (
-          <button
-            type="button"
-            data-nav="true"
-            aria-label={`${t('desktop.userMenu')}: ${user.displayName}`}
-            aria-current={onProfile ? 'page' : undefined}
-            disabled={!features.profile}
-            onClick={() => navigate('/profile')}
-            className={clsx(
-              'focus-ring flex h-11 items-center gap-2.5 rounded-full pl-1 pr-3 transition-colors duration-[var(--dur-fast)] hover:bg-text/10 disabled:cursor-default disabled:hover:bg-transparent',
-              onProfile && 'bg-text/10',
-            )}
-          >
-            <Avatar name={user.displayName} src={user.avatarUrl ?? null} size="sm" ring={user.role === 'vip'} />
-            <span className="hidden min-w-0 items-center gap-1.5 2xl:flex">
-              <span className="max-w-[10rem] truncate text-sm font-semibold text-text">{user.displayName}</span>
-              {roleBadge}
-            </span>
-          </button>
-        )}
-        <SessionTimer compact />
-        {balance && <BalanceButton amount={balance} topUp={features.topup} />}
+      <div className="flex items-center justify-end gap-2">
         <ConnectivityIndicator />
         {showClock && <Clock format={clockFormat} />}
+        <span aria-hidden="true" className="mx-2 h-6 w-px bg-text/15" />
         <SystemMenu />
         {isActive && (
           <Button
@@ -365,12 +339,68 @@ export function TopBar(): JSX.Element {
             iconOnly
             aria-label={t('desktop.lock')}
             title={t('desktop.lock')}
+            className="h-10 w-10 text-muted hover:text-text"
             loading={locking || busy}
             icon={<IconLock />}
             onClick={() => void onLock()}
           />
         )}
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Status line
+// ---------------------------------------------------------------------------------------------------------------------
+
+export function StatusBar(): JSX.Element {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  // The avatar is the only way to the profile, so it carries the "you are here" state.
+  const onProfile = useLocation().pathname.startsWith('/profile');
+  const features = useSettingsStore(selectFeatures);
+  const { user, isGuest } = useSession();
+  // The wallet store follows `wallet.updated`; the user record only refreshes on login.
+  const walletBalance = useWalletStore((w) => w.balance?.amount ?? null);
+  const balance = walletBalance ?? user?.balance ?? null;
+  const role = isGuest ? t('desktop.guestBadge') : user?.role === 'vip' ? t('desktop.vipBadge') : null;
+  const pad = useGamepadConnected();
+
+  return (
+    <div className="flex h-full w-full items-center gap-2 border-t border-[color:var(--hairline)] bg-bg/90 px-[var(--gutter)]">
+      {user && (
+        <button
+          type="button"
+          data-nav="true"
+          aria-label={`${t('desktop.userMenu')}: ${user.displayName}`}
+          aria-current={onProfile ? 'page' : undefined}
+          disabled={!features.profile}
+          onClick={() => navigate('/profile')}
+          className={clsx(
+            'focus-ring flex h-12 min-w-0 items-center gap-2.5 rounded-md pl-1.5 pr-3 text-left transition-colors duration-[var(--dur-fast)] hover:bg-text/[0.04] disabled:cursor-default disabled:hover:bg-transparent',
+            onProfile && 'bg-text/[0.08]',
+          )}
+        >
+          <Avatar name={user.displayName} src={user.avatarUrl ?? null} size="sm" />
+          <span className="min-w-0 leading-tight">
+            <span className="block max-w-[12rem] truncate text-sm font-medium text-text">{user.displayName}</span>
+            {role && <span className="hud-label block truncate">{role}</span>}
+          </span>
+        </button>
+      )}
+      <span aria-hidden="true" className="mx-1 h-6 w-px bg-text/15" />
+      <SessionTimer compact />
+      {balance && <BalanceButton amount={balance} topUp={features.topup} />}
+
+      {/* Controller prompts only with a pad connected: a keyboard player already knows Enter and Esc. */}
+      {pad && (
+        <div aria-label={t('desktop.prompts.title')} className="ml-auto flex items-center gap-6">
+          <Prompt glyph="A" label={t('desktop.prompts.select')} />
+          <Prompt glyph="B" label={t('desktop.prompts.back')} />
+          <Prompt glyph="LB RB" label={t('desktop.prompts.sections')} round={false} />
+        </div>
+      )}
     </div>
   );
 }

@@ -6,6 +6,8 @@ import { ORDER_MAX_QTY, type Money } from '@clubshell/contracts';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
+import { DotAmount } from '@/components/ui/DotAmount';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { useLocale } from '@/hooks/useLocale';
 import { formatMoney } from '@/lib/format';
 import { isShellApiError } from '@/lib/tauri';
@@ -101,7 +103,7 @@ export function Cart({ onInsufficientFunds, className }: CartProps): JSX.Element
       data-nav-scope="cart"
     >
       <header className="flex items-center justify-between gap-3 px-5 pt-5">
-        <h2 className="flex items-center gap-2 text-xl font-bold text-text">
+        <h2 className="font-display flex items-center gap-2 text-xl font-normal text-text tracking-tight">
           <span className="inline-flex h-6 w-6 text-primary" aria-hidden="true">
             <BagIcon />
           </span>
@@ -121,12 +123,8 @@ export function Cart({ onInsufficientFunds, className }: CartProps): JSX.Element
 
       <ul role="list" className="themed-scrollbar min-h-0 flex-1 overflow-y-auto px-5 py-4" aria-live="polite">
         {empty ? (
-          <li className="flex h-full min-h-[10rem] flex-col items-center justify-center gap-2 text-center">
-            <span className="inline-flex h-12 w-12 text-muted/60" aria-hidden="true">
-              <BagIcon />
-            </span>
-            <p className="text-lg font-semibold text-text">{t('shop.emptyCart')}</p>
-            <p className="text-base text-muted">{t('shop.emptyCartHint')}</p>
+          <li className="flex h-full min-h-[10rem] items-center justify-center">
+            <EmptyState icon={<BagIcon />} title={t('shop.emptyCart')} hint={t('shop.emptyCartHint')} />
           </li>
         ) : (
           <AnimatePresence initial={false}>
@@ -198,7 +196,9 @@ export function Cart({ onInsufficientFunds, className }: CartProps): JSX.Element
         <dl className="flex flex-col gap-1 text-base">
           <div className="flex items-center justify-between">
             <dt className="text-muted">{t('shop.total')}</dt>
-            <dd className="tnum text-2xl font-black text-text">{formatMoney(total, locale)}</dd>
+            <dd className="tnum text-2xl text-text">
+              <DotAmount value={formatMoney(total, locale)} />
+            </dd>
           </div>
           <div className="flex items-center justify-between text-sm">
             <dt className="text-muted">{t('shop.balanceAfter')}</dt>

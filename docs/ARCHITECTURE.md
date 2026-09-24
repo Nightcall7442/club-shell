@@ -661,22 +661,22 @@ unless the key ends with `Ms`.
 {
   "version": 1,
   "name": "default",                              // must equal file name
-  "displayName": "ClubShell Onyx",
+  "displayName": "ClubShell Obsidian",
   "colors": {                                     // all hex #RRGGBB or #RRGGBBAA
-    "bg": "#09090B",
-    "surface": "#151518",
+    "bg": "#07090C",
+    "surface": "#0D1117",
     "primary": "#F4F4F5",
-    "accent": "#F2B84B",
-    "text": "#FAFAFA",
-    "muted": "#8E8E96",
+    "accent": "#9ADFFF",
+    "text": "#E8F1F6",
+    "muted": "#7D8A96",
     "danger": "#EF4444",
     "success": "#22C55E"
   },
-  "radius": 12,                                   // px
+  "radius": 10,                                   // px
   "font": "Inter",                                // installed font family name; fallback system-ui
   "backgroundVideo": null,                        // string URL/path | null
   "wallpaper": "themes/assets/default-wallpaper.jpg",   // string | null, relative to ProgramData root or absolute URL
-  "blur": 12,                                     // px backdrop blur on surfaces; 0 = off
+  "blur": 0,                                      // px; 0 = flat panels, > 0 = translucent blurred panels
   "animations": true
 }
 ```

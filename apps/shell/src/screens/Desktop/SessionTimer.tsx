@@ -1,14 +1,15 @@
 /**
- * Session countdown: SVG ring (used / total), big `mm:ss` under 10 minutes or `hh:mm:ss` otherwise, paused/locked
- * badges and a pulsing danger state under 5 minutes. Clicking a timed session opens {@link ExtendSessionModal}
+ * Session countdown: a status-line row with a tick scale, or a card with an SVG ring (used / total); `mm:ss`
+ * under 10 minutes or `hh:mm:ss` otherwise, paused/locked badges and a pulsing danger state under 5 minutes. Clicking a timed session opens {@link ExtendSessionModal}
  * (30/60/120 minute presets priced by the session tariff → `session_extend`).
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { SESSION_OPEN_ENDED, tariffPriceFor, type Money, type Tariff } from '@clubshell/contracts';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { DotAmount } from '@/components/ui/DotAmount';
 import { Modal } from '@/components/ui/Modal';
 import { useLocale } from '@/hooks/useLocale';
 import { MMSS_BELOW_SEC, useSession } from '@/hooks/useSession';
@@ -101,7 +102,7 @@ export function Ring({ progress, size, stroke, tone, label, valueText }: RingPro
 // ---------------------------------------------------------------------------------------------------------------------
 
 export interface SessionTimerProps {
-  /** Top-bar size (44 px ring, 2xl text) instead of the large card. */
+  /** One status-line row (caption, number, tick scale, +) instead of the large ring card. */
   compact?: boolean;
   className?: string;
 }
@@ -139,9 +140,11 @@ export function SessionTimer({ compact = false, className }: SessionTimerProps):
     </Badge>
   ) : null;
 
-  const ringSize = compact ? 44 : 168;
-  const ringStroke = compact ? 4 : 10;
+  const ringSize = 168;
+  const ringStroke = 6;
   const caption = !s.isOpen ? t('session.noSession') : s.isOpenEnded ? t('session.timeUsed') : t('session.timeLeft');
+
+  const valueClass = s.isCritical ? 'timer-critical' : s.isWarning ? 'timer-warning' : 'text-text';
 
   return (
     <>
@@ -153,54 +156,56 @@ export function SessionTimer({ compact = false, className }: SessionTimerProps):
         title={canExtend ? t('session.extend') : undefined}
         onClick={() => canExtend && setExtendOpen(true)}
         className={clsx(
-          'focus-ring glass group flex select-none items-center rounded-full text-left transition-colors duration-[var(--dur-fast)] disabled:cursor-default',
-          canExtend && 'hover:bg-surface/80',
+          'focus-ring hud-focus group relative flex select-none text-left transition-colors duration-[var(--dur-fast)] disabled:cursor-default',
+          canExtend && 'hover:bg-text/[0.04]',
           compact
-            ? clsx('h-12 gap-3 pl-1', canExtend ? 'pr-1.5' : 'pr-4')
-            : 'flex-col justify-center gap-3 rounded-2xl px-8 py-6',
+            ? 'h-12 items-center gap-3 rounded-md px-3'
+            : 'glass flex-col items-center justify-center gap-3 rounded-xl px-8 py-6',
           className,
         )}
       >
-        <div className="relative flex items-center justify-center">
-          <Ring
-            progress={progress}
-            size={ringSize}
-            stroke={ringStroke}
-            tone={tone}
-            label={t('session.timerLabel')}
-            valueText={label}
-          />
-          {!compact && (
-            <span
-              className={clsx(
-                'tnum absolute text-4xl font-bold leading-none',
-                s.isCritical ? 'timer-critical' : s.isWarning ? 'timer-warning' : 'text-text',
-              )}
-              aria-hidden="true"
-            >
-              {label}
-            </span>
-          )}
-        </div>
         {compact ? (
-          <span className="flex min-w-0 items-center gap-2">
-            <span
-              className={clsx(
-                'tnum text-2xl font-bold leading-none',
-                s.isCritical ? 'timer-critical' : s.isWarning ? 'timer-warning' : 'text-text',
-              )}
-            >
-              {label}
+          <>
+            <span className="hud-label flex items-center gap-2">
+              {caption}
+              {badge}
             </span>
-            {badge}
-            {canExtend && <PlusDisc />}
-          </span>
+            <span className={clsx('num-dot text-[1.45rem] leading-none', valueClass)}>{label}</span>
+            {/* Time left on an instrument scale: lit ticks are what remains. */}
+            <span
+              aria-hidden="true"
+              className={clsx(
+                'tick-scale block w-[clamp(4rem,5vw,6rem)]',
+                tone === 'danger' ? 'text-danger' : tone === 'accent' ? 'text-accent' : 'text-text/80',
+              )}
+              style={{ '--value': Math.min(1, Math.max(0, 1 - progress)) } as CSSProperties}
+            />
+            {canExtend && <PlusButton />}
+          </>
         ) : (
-          <span className="flex flex-col items-center gap-2">
-            <span className="text-sm uppercase tracking-wide text-muted">{caption}</span>
-            {badge}
-            {canExtend && <span className="text-sm text-primary">{t('session.extend')}</span>}
-          </span>
+          <>
+            <div className="relative flex items-center justify-center">
+              <Ring
+                progress={progress}
+                size={ringSize}
+                stroke={ringStroke}
+                tone={tone}
+                label={t('session.timerLabel')}
+                valueText={label}
+              />
+              <span
+                className={clsx('tnum absolute text-4xl font-semibold leading-none', valueClass)}
+                aria-hidden="true"
+              >
+                {label}
+              </span>
+            </div>
+            <span className="flex flex-col items-center gap-2">
+              <span className="text-sm text-muted">{caption}</span>
+              {badge}
+              {canExtend && <span className="text-sm text-primary">{t('session.extend')}</span>}
+            </span>
+          </>
         )}
       </button>
       <ExtendSessionModal open={extendOpen} onClose={() => setExtendOpen(false)} />
@@ -209,16 +214,16 @@ export function SessionTimer({ compact = false, className }: SessionTimerProps):
 }
 
 /**
- * "+" disc at the end of a top-bar pill (the session timer, the balance) that fills in when the pill is hovered:
- * says "add" without a word, and the pill around it stays the target.
+ * Small "+" square at the end of a status-line row (time left, balance) that fills in when the row is hovered: says "add"
+ * without a word, and the row around it stays the target.
  */
-export function PlusDisc(): JSX.Element {
+export function PlusButton(): JSX.Element {
   return (
     <span
       aria-hidden="true"
-      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-text/10 text-text transition-colors duration-[var(--dur-fast)] group-hover:bg-primary group-hover:text-on-primary [&>svg]:h-4 [&>svg]:w-4"
+      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-text/[0.06] text-muted transition-colors duration-[var(--dur-fast)] group-hover:bg-primary group-hover:text-on-primary [&>svg]:h-4 [&>svg]:w-4"
     >
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
         <path d="M12 5v14M5 12h14" />
       </svg>
     </span>
@@ -295,7 +300,7 @@ export function ExtendSessionModal({ open, onClose }: ExtendSessionModalProps): 
           <Button variant="ghost" size="lg" onClick={onClose}>
             {t('common.cancel')}
           </Button>
-          <Button size="lg" loading={submitting} disabled={disabled} onClick={() => void confirm()}>
+          <Button variant="cta" size="lg" loading={submitting} disabled={disabled} onClick={() => void confirm()}>
             {submitting ? t('session.extending') : t('session.extendMinutes', { minutes })}
           </Button>
         </>
@@ -315,13 +320,14 @@ export function ExtendSessionModal({ open, onClose }: ExtendSessionModalProps): 
                 data-nav="true"
                 onClick={() => setMinutes(m)}
                 className={clsx(
-                  'focus-ring glass flex flex-col items-center gap-1 rounded-lg px-3 py-4 transition-colors duration-[var(--dur-fast)]',
-                  active ? 'border-glow bg-primary/15 text-text' : 'text-muted hover:bg-surface/80 hover:text-text',
+                  'focus-ring flex flex-col items-center gap-1 rounded-lg px-3 py-4',
+                  active ? 'choice choice-on' : 'choice text-muted',
                 )}
               >
-                <span className="text-2xl font-bold leading-none text-text">
-                  {t('session.extendMinutes', { minutes: m })}
-                </span>
+                <DotAmount
+                  value={t('session.extendMinutes', { minutes: m })}
+                  className="text-[1.7rem] leading-none text-text"
+                />
                 {price && <span className="tnum text-sm">{price}</span>}
               </button>
             );

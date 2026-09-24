@@ -6,8 +6,10 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import type { Achievement, Loyalty as LoyaltyInfo, User, UserRole, UserStats } from '@clubshell/contracts';
 import { AnimatePresence, motion } from 'framer-motion';
+import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { DotAmount } from '@/components/ui/DotAmount';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge, type BadgeTone } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -16,7 +18,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Tabs, type TabItem } from '@/components/ui/Tabs';
 import { focusElement, useGamepad } from '@/hooks/useGamepad';
 import { useLocale } from '@/hooks/useLocale';
-import { formatDate, formatMoney, formatNumber } from '@/lib/format';
+import { formatDate, formatNumber } from '@/lib/format';
 import { api } from '@/lib/tauri';
 import { useAuthStore, useNotificationsStore, useSettingsStore, useThemeStore } from '@/store';
 import Achievements from './Achievements';
@@ -120,8 +122,8 @@ interface HeaderStatProps {
 function HeaderStat({ label, value, accent = false }: HeaderStatProps): JSX.Element {
   return (
     <div className="min-w-[7rem] rounded-lg bg-surface/40 px-4 py-3">
-      <p className="text-xs uppercase tracking-wide text-muted">{label}</p>
-      <p className={accent ? 'tnum text-2xl font-bold text-accent' : 'tnum text-2xl font-bold'}>{value}</p>
+      <p className="hud-label">{label}</p>
+      <DotAmount value={value} className={clsx('mt-1 text-2xl', accent ? 'text-accent' : 'text-text')} />
     </div>
   );
 }
@@ -243,7 +245,9 @@ export function ProfileHeader({ user, loyalty }: ProfileHeaderProps): JSX.Elemen
           </form>
         ) : (
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="truncate text-3xl font-bold leading-tight">{user.displayName}</h1>
+            <h1 className="truncate font-display text-[length:var(--fs-2xl)] font-light leading-[1.2] tracking-tight text-text">
+              {user.displayName}
+            </h1>
             <Button
               ref={editRef}
               variant="ghost"
@@ -265,7 +269,6 @@ export function ProfileHeader({ user, loyalty }: ProfileHeaderProps): JSX.Elemen
       <div className="flex flex-wrap gap-3">
         <HeaderStat label={t('profile.loyaltyLevel')} value={t('profile.level', { level: displayLevel(level) })} />
         <HeaderStat label={t('profile.points')} value={formatNumber(points, locale)} accent />
-        <HeaderStat label={t('profile.balance')} value={formatMoney(user.balance, locale)} />
       </div>
     </section>
   );
@@ -369,7 +372,7 @@ export function ProfileScreen(): JSX.Element {
 
   return (
     <motion.div
-      className="mx-auto flex w-full max-w-[110rem] flex-col gap-[var(--gap)] pb-[var(--gap)]"
+      className="flex w-full flex-col gap-[var(--gap)] pb-[var(--gap)]"
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration, ease: 'easeOut' }}

@@ -5,6 +5,7 @@ import { balanceTotal } from '@clubshell/contracts';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { DotAmount } from '@/components/ui/DotAmount';
 import { useLocale } from '@/hooks/useLocale';
 import { formatMoney, formatRelativeDay, formatTime } from '@/lib/format';
 import { useNotificationsStore } from '@/store/notifications';
@@ -53,13 +54,9 @@ export const Balance = forwardRef<HTMLButtonElement, BalanceProps>(function Bala
       aria-label={t('wallet.balance')}
       className={clsx('glass relative shrink-0 overflow-hidden rounded-xl p-6', className)}
     >
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full bg-primary/25 blur-3xl"
-      />
       <div className="relative flex flex-wrap items-start justify-between gap-6">
         <div className="min-w-0 flex-1">
-          <p className="flex items-center gap-2 text-base font-semibold uppercase tracking-wide text-muted">
+          <p className="flex items-center gap-2 text-sm text-muted">
             <span className="inline-flex h-5 w-5" aria-hidden="true">
               <WalletIcon />
             </span>
@@ -77,8 +74,8 @@ export const Balance = forwardRef<HTMLButtonElement, BalanceProps>(function Bala
             </div>
           ) : balance ? (
             <>
-              <p className="tnum text-glow mt-2 text-[clamp(2.4rem,3.6vw,4rem)] font-black leading-none text-text">
-                {formatMoney(balance.amount, locale)}
+              <p className="tnum mt-2 text-[clamp(2.4rem,3.6vw,4rem)] leading-none text-text">
+                <DotAmount value={formatMoney(balance.amount, locale)} />
               </p>
               <dl className="mt-4 flex flex-wrap gap-x-8 gap-y-2 text-base">
                 {balance.bonus.amount > 0 && (
@@ -106,7 +103,7 @@ export const Balance = forwardRef<HTMLButtonElement, BalanceProps>(function Bala
           )}
         </div>
         {topupEnabled && (
-          <Button ref={ref} size="xl" icon={<PlusIcon />} onClick={onTopUp} className="shrink-0 anim-glow">
+          <Button ref={ref} variant="cta" size="lg" icon={<PlusIcon />} onClick={onTopUp} className="shrink-0">
             {t('wallet.topUp')}
           </Button>
         )}

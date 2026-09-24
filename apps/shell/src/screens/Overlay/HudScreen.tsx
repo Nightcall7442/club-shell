@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
+import { DotAmount } from '@/components/ui/DotAmount';
 import { useLocale } from '@/hooks/useLocale';
 import { CRITICAL_MINUTES, WARNING_MINUTES } from '@/hooks/useSession';
 import { formatMoney } from '@/lib/format';
@@ -195,24 +196,24 @@ export function HudScreen({ onClose }: { onClose: () => void }): JSX.Element {
         aria-modal="true"
         aria-label={t('kiosk.hudTitle')}
         onPointerDown={(e) => e.stopPropagation()}
-        className="anim-toast-in glass-strong relative flex w-[min(60rem,84vw)] items-center gap-6 rounded-2xl py-4 pl-6 pr-4 text-text"
+        className="anim-toast-in glass-strong relative flex w-[min(62rem,86vw)] items-center gap-6 rounded-xl py-4 pl-6 pr-4 text-text"
       >
         <div className="flex items-center gap-4">
           <Ring
             progress={fraction}
-            size={60}
-            stroke={5}
+            size={56}
+            stroke={3}
             tone={tone}
             label={t('session.timerLabel')}
             valueText={label}
           />
           <div className="leading-tight">
-            <div className="text-xs text-muted">
+            <div className="hud-label">
               {!open ? t('session.noSession') : openEnded ? t('session.timeUsed') : t('session.timeLeft')}
             </div>
             <div
               className={clsx(
-                'tnum text-3xl font-bold',
+                'tnum num-dot text-3xl',
                 tone === 'danger' ? 'timer-critical' : tone === 'accent' ? 'timer-warning' : 'text-text',
               )}
             >
@@ -222,16 +223,18 @@ export function HudScreen({ onClose }: { onClose: () => void }): JSX.Element {
         </div>
 
         {balance && (
-          <div className="border-l border-text/10 pl-6 leading-tight">
-            <div className="text-xs text-muted">{t('desktop.balance')}</div>
-            <div className="tnum whitespace-nowrap text-xl font-bold">{formatMoney(balance, locale)}</div>
+          <div className="border-l border-[color:var(--hairline)] pl-6 leading-tight">
+            <div className="hud-label">{t('desktop.balance')}</div>
+            <div className="tnum whitespace-nowrap text-xl">
+              <DotAmount value={formatMoney(balance, locale)} />
+            </div>
           </div>
         )}
 
         <div className="ml-auto flex items-center gap-2">
           <Button
             ref={first}
-            variant="primary"
+            variant="cta"
             size="lg"
             icon={<PlusIcon />}
             disabled={!open || openEnded}
@@ -262,7 +265,7 @@ export function HudScreen({ onClose }: { onClose: () => void }): JSX.Element {
           />
         </div>
 
-        <div className="pointer-events-none absolute -top-8 left-6 flex items-center gap-3 text-xs text-muted">
+        <div className="hud-label pointer-events-none absolute -top-8 left-6 flex items-center gap-3">
           <span>{t('kiosk.hudHint')}</span>
           {note && <span className={note.tone === 'ok' ? 'text-success' : 'text-danger'}>{note.text}</span>}
         </div>

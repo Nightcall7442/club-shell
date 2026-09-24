@@ -156,7 +156,7 @@ export function ReportProblemForm(): JSX.Element {
         void submit();
       }}
     >
-      <h2 className="text-xl font-bold text-text">{t('support.reportProblem')}</h2>
+      <h2 className="font-display text-xl font-normal text-text tracking-tight">{t('support.reportProblem')}</h2>
       <p className="text-sm text-muted">{t('support.reportProblemHint')}</p>
       <label htmlFor={id} className="text-sm font-medium text-muted">
         {t('support.message')}
@@ -224,7 +224,7 @@ export function PcFacts(): JSX.Element {
   return (
     <section aria-label={t('support.pcInfo')} className="glass flex flex-col gap-3 rounded-xl p-5">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-xl font-bold text-text">{t('support.pcInfo')}</h2>
+        <h2 className="font-display text-xl font-normal text-text tracking-tight">{t('support.pcInfo')}</h2>
         <Badge
           tone={!agentConnected ? 'danger' : server === 'online' ? 'success' : 'accent'}
           size="sm"
@@ -283,14 +283,15 @@ export default function SupportScreen(): JSX.Element {
   return (
     <motion.div
       ref={root}
-      className="mx-auto flex w-full max-w-[1800px] flex-col gap-[calc(var(--gap)*1.5)]"
+      className="flex w-full flex-col gap-[calc(var(--gap)*1.5)]"
       initial={animations ? { opacity: 0, y: 12 } : false}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: animations ? 0.25 : 0, ease: 'easeOut' }}
     >
       <header>
-        <h1 className="text-3xl font-bold leading-tight text-text">{t('support.title')}</h1>
-        <p className="text-base text-muted">{t('support.subtitle')}</p>
+        <h1 className="font-display text-[length:var(--fs-2xl)] font-light leading-[1.2] tracking-tight text-text">
+          {t('support.title')}
+        </h1>
       </header>
 
       <div className="grid grid-cols-1 gap-[calc(var(--gap)*1.5)] xl:grid-cols-[minmax(0,2fr)_minmax(20rem,1fr)]">
@@ -300,21 +301,18 @@ export default function SupportScreen(): JSX.Element {
               aria-label={t('support.callAdmin')}
               className="glass flex flex-wrap items-center justify-between gap-4 rounded-xl p-6"
             >
-              <div className="min-w-0 flex-1">
-                <h2 className="text-2xl font-bold text-text">{t('support.callAdmin')}</h2>
-                <p className="text-base text-muted">{t('support.callHint')}</p>
-              </div>
+              <p className="min-w-0 flex-1 text-lg text-text">{t('support.callHint')}</p>
               <CallAdminButton size="xl" />
             </section>
           )}
 
           <section aria-label={t('support.faqTitle')} className="flex flex-col gap-3">
-            <h2 className="text-xl font-bold text-text">{t('support.faqTitle')}</h2>
+            <h2 className="font-display text-xl font-normal text-text tracking-tight">{t('support.faqTitle')}</h2>
             <FaqAccordion items={faq} />
           </section>
 
           <section aria-label={t('support.rulesTitle')} className="glass flex flex-col gap-3 rounded-xl p-5">
-            <h2 className="text-xl font-bold text-text">{t('support.rulesTitle')}</h2>
+            <h2 className="font-display text-xl font-normal text-text tracking-tight">{t('support.rulesTitle')}</h2>
             <ol className="flex list-decimal flex-col gap-2 pl-6 text-base text-text marker:font-bold marker:text-primary">
               {rules.map((r) => (
                 <li key={r}>{r}</li>
@@ -327,7 +325,7 @@ export default function SupportScreen(): JSX.Element {
           <PcFacts />
 
           <section aria-label={t('support.contact')} className="glass flex flex-col gap-3 rounded-xl p-5">
-            <h2 className="text-xl font-bold text-text">{t('support.contact')}</h2>
+            <h2 className="font-display text-xl font-normal text-text tracking-tight">{t('support.contact')}</h2>
             {features.chat && (
               <Button variant="secondary" block onClick={() => navigate('/chat')}>
                 {t('support.chatWithStaff')}

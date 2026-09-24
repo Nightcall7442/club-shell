@@ -33,6 +33,9 @@ export default {
       },
       fontFamily: {
         sans: ['var(--font)', '"Inter Variable"', 'system-ui', 'Segoe UI', 'sans-serif'],
+        display: ['var(--font-display)'],
+        mono: ['var(--font-mono)'],
+        dot: ['var(--font-dot)'],
       },
       keyframes: {
         shimmer: {

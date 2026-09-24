@@ -1,7 +1,8 @@
 /**
  * Theme loading and application. A `Theme` (contracts, `themes\<name>.json`) is written to CSS variables on
  * `:root`: `--c-<name>: R G B` (so Tailwind opacity modifiers work), `--radius`, `--font`, `--blur`, plus
- * `data-theme` / `data-animations` attributes that `animations.css` keys off.
+ * `data-theme` / `data-animations` attributes that `animations.css` keys off and `data-glass` (blur > 0) for
+ * translucent panels.
  */
 import type { Theme, ThemeColors } from '@clubshell/contracts';
 import { api } from '@/lib/tauri';
@@ -13,24 +14,24 @@ export type ThemeDef = Theme;
 export const DEFAULT_THEME: Theme = {
   version: 1,
   name: 'default',
-  displayName: 'ClubShell Onyx',
+  displayName: 'ClubShell Obsidian',
   colors: {
-    bg: '#09090B',
-    surface: '#151518',
+    bg: '#07090C',
+    surface: '#0D1117',
     primary: '#F4F4F5',
-    accent: '#F2B84B',
-    text: '#FAFAFA',
-    muted: '#8E8E96',
+    accent: '#9ADFFF',
+    text: '#E8F1F6',
+    muted: '#7D8A96',
     danger: '#EF4444',
     success: '#22C55E',
   },
-  radius: 12,
+  radius: 10,
   font: 'Inter',
   backgroundVideo: null,
-  // No wallpaper: inner screens sit on Onyx black lit by the game last featured on Home (see Background). A club that
-  // wants its own picture behind every screen still sets one here.
+  // No wallpaper: every screen sits on the plain background (see Background). A club that wants its own picture
+  // behind every screen still sets one here.
   wallpaper: null,
-  blur: 12,
+  blur: 0,
   animations: true,
 };
 
@@ -192,6 +193,8 @@ export function applyTheme(theme: Theme): void {
   root.style.setProperty('--font', `"${t.font.replace(/"/g, '')}"`);
   root.style.setProperty('--blur', `${t.blur}px`);
   root.dataset['theme'] = t.name;
+  // Blurred, translucent panels only when the theme asks for them (see `.glass` in tokens.css).
+  root.toggleAttribute('data-glass', t.blur > 0);
   root.dataset['animations'] = t.animations ? 'true' : 'false';
   root.classList.add('dark');
   const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');

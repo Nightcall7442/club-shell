@@ -149,7 +149,7 @@ export function SpecTable({ game, hardware }: SpecTableProps): JSX.Element {
   return (
     <table className="w-full border-collapse text-base">
       <thead>
-        <tr className="text-left text-sm uppercase tracking-wide text-muted">
+        <tr className="text-left text-sm text-muted">
           <th scope="col" className="py-2 pr-3 font-semibold" />
           <th scope="col" className="py-2 pr-3 font-semibold">
             {t('common.required')}
@@ -300,7 +300,7 @@ export default function GameDetails(): JSX.Element {
           {game ? (
             <div className="grid grid-cols-1 gap-[var(--gap)] lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
               <section className="glass flex flex-col gap-5 rounded-xl p-[var(--gutter)]">
-                <h2 className="text-2xl font-bold text-text">{t('games.description')}</h2>
+                <h2 className="font-display text-2xl font-normal text-text tracking-tight">{t('games.description')}</h2>
                 <p
                   className={clsx(
                     'whitespace-pre-line text-lg leading-relaxed',
@@ -311,7 +311,7 @@ export default function GameDetails(): JSX.Element {
                 </p>
                 {game.tags.length > 0 && (
                   <div className="flex flex-col gap-2">
-                    <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">{t('games.tags')}</h3>
+                    <h3 className="hud-label">{t('games.tags')}</h3>
                     <ul className="flex flex-wrap gap-2" aria-label={t('games.tags')}>
                       {game.tags.map((tag) => (
                         <li key={tag}>
@@ -325,7 +325,7 @@ export default function GameDetails(): JSX.Element {
                 )}
                 {game.requiresAccount && (
                   <div className="flex items-start gap-3 rounded-lg bg-accent/10 p-4 text-text">
-                    <Badge tone="accent" solid size="sm" className="mt-0.5">
+                    <Badge tone="accent" size="sm" className="mt-0.5">
                       {t('games.requiresAccount')}
                     </Badge>
                     <p className="text-base">{t('games.requiresAccountHint')}</p>
@@ -337,13 +337,13 @@ export default function GameDetails(): JSX.Element {
                   </p>
                 )}
                 <div className="flex flex-col gap-2">
-                  <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">{t('games.minSpec')}</h3>
+                  <h3 className="hud-label">{t('games.minSpec')}</h3>
                   <SpecTable game={game} hardware={hardware} />
                 </div>
               </section>
 
               <aside className="glass flex flex-col gap-5 rounded-xl p-[var(--gutter)]">
-                <h2 className="text-2xl font-bold text-text">{t('games.details')}</h2>
+                <h2 className="font-display text-2xl font-normal text-text tracking-tight">{t('games.details')}</h2>
                 <dl className="flex flex-col text-base">
                   <Fact label={t('games.launcher')} value={t(launcherLabelKey(game.launcher))} />
                   <Fact label={t('games.category')} value={game.category.map((c) => categoryLabel(t, c)).join(', ')} />
@@ -359,9 +359,7 @@ export default function GameDetails(): JSX.Element {
                   />
                 </dl>
                 <div className="flex flex-col gap-2">
-                  <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">
-                    {t('games.installStatus')}
-                  </h3>
+                  <h3 className="hud-label">{t('games.installStatus')}</h3>
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge tone={game.installed ? 'success' : 'muted'} dot>
                       {game.installed ? t('games.installed') : t('games.notInstalled')}

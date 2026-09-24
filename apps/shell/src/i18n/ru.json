@@ -318,7 +318,15 @@
     "lockPc": "Заблокировать ПК",
     "runningSince": "Запущена {{duration}}",
     "noTournaments": "Турниров пока нет",
-    "noPromo": "Сейчас нет предложений"
+    "noPromo": "Сейчас нет предложений",
+    "prevSection": "Предыдущий раздел",
+    "nextSection": "Следующий раздел",
+    "prompts": {
+      "title": "Управление",
+      "select": "Выбрать",
+      "back": "Назад",
+      "sections": "Разделы"
+    }
   },
   "games": {
     "title": "Игры",

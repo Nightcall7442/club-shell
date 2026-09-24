@@ -19,10 +19,10 @@ export interface ProgressBarProps extends HTMLAttributes<HTMLDivElement> {
 }
 
 const FILL: Record<ProgressTone, string> = {
-  primary: 'bg-primary shadow-[0_0_12px_rgb(var(--c-primary)/0.6)]',
-  accent: 'bg-accent shadow-[0_0_12px_rgb(var(--c-accent)/0.6)]',
-  success: 'bg-success shadow-[0_0_12px_rgb(var(--c-success)/0.6)]',
-  danger: 'bg-danger shadow-[0_0_12px_rgb(var(--c-danger)/0.6)]',
+  primary: 'bg-accent',
+  accent: 'bg-accent',
+  success: 'bg-success',
+  danger: 'bg-danger',
 };
 
 const TRACK_H: Record<ProgressSize, string> = { sm: 'h-1.5', md: 'h-2.5', lg: 'h-4' };

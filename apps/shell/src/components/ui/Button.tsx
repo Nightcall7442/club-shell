@@ -2,7 +2,8 @@ import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import clsx from 'clsx';
 import { Spinner } from '@/components/ui/Spinner';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
+/** `cta`: the screen's one main call to action (accent, cut corners, focus brackets). */
+export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'cta';
 export type ButtonSize = 'md' | 'lg' | 'xl';
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -21,21 +22,20 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const VARIANT: Record<ButtonVariant, string> = {
-  primary:
-    'bg-primary text-on-primary shadow-[inset_0_1px_0_rgb(255_255_255/0.5),inset_0_-1px_0_rgb(0_0_0/0.14),0_14px_36px_-12px_rgb(0_0_0/0.85)] hover:bg-[rgb(var(--c-primary-hover))] hover:shadow-[inset_0_1px_0_rgb(255_255_255/0.5),inset_0_-1px_0_rgb(0_0_0/0.14),0_18px_40px_-12px_rgb(0_0_0/0.9)] active:bg-[rgb(var(--c-primary-active))]',
-  secondary: 'glass text-text hover:bg-surface/80 active:bg-surface',
-  ghost: 'bg-transparent text-text hover:bg-text/10 active:bg-text/15',
-  danger:
-    'bg-danger text-white shadow-[0_10px_30px_-10px_rgb(var(--c-danger)/0.7)] hover:bg-danger/90 active:bg-danger/80',
+  primary: 'bg-primary text-on-primary hover:bg-[rgb(var(--c-primary-hover))] active:bg-[rgb(var(--c-primary-active))]',
+  secondary: 'bg-text/[0.06] text-text hover:bg-text/10 active:bg-text/[0.14]',
+  ghost: 'bg-transparent text-text hover:bg-text/[0.06] active:bg-text/10',
+  danger: 'bg-danger text-white hover:bg-danger/90 active:bg-danger/80',
+  cta: 'cut-corners hud-focus !rounded-none text-on-accent',
 };
 
 const SIZE: Record<ButtonSize, string> = {
   md: 'h-11 gap-2 rounded-md px-4 text-base',
-  lg: 'h-[3.25rem] gap-3 rounded-lg px-6 text-lg',
-  xl: 'h-16 gap-3 rounded-xl px-8 text-xl',
+  lg: 'h-12 gap-2.5 rounded-lg px-5 text-base',
+  xl: 'h-14 gap-3 rounded-lg px-7 text-lg',
 };
 
-const ICON_ONLY: Record<ButtonSize, string> = { md: 'w-11 px-0', lg: 'w-[3.25rem] px-0', xl: 'w-16 px-0' };
+const ICON_ONLY: Record<ButtonSize, string> = { md: 'w-11 px-0', lg: 'w-12 px-0', xl: 'w-14 px-0' };
 
 const ICON_BOX = 'inline-flex h-[1.25em] w-[1.25em] shrink-0 items-center justify-center [&>svg]:h-full [&>svg]:w-full';
 
@@ -67,8 +67,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       aria-busy={loading || undefined}
       className={clsx(
         'focus-ring relative inline-flex select-none items-center justify-center whitespace-nowrap font-semibold leading-none',
-        'transition-[background-color,transform,box-shadow] duration-[var(--dur-fast)] ease-[var(--ease-out)] active:scale-[0.98]',
-        'disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100',
+        'transition-[background-color,box-shadow,transform] duration-[var(--dur-fast)] ease-[var(--ease-out)] active:scale-[0.97] disabled:active:scale-100',
+        'disabled:cursor-not-allowed disabled:opacity-40',
         VARIANT[variant],
         SIZE[size],
         iconOnly && ICON_ONLY[size],

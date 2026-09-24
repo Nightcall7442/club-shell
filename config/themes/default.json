@@ -1,21 +1,21 @@
 {
   "version": 1,
   "name": "default",
-  "displayName": "ClubShell Onyx",
+  "displayName": "ClubShell Obsidian",
   "colors": {
-    "bg": "#09090B",
-    "surface": "#151518",
+    "bg": "#07090C",
+    "surface": "#0D1117",
     "primary": "#F4F4F5",
-    "accent": "#F2B84B",
-    "text": "#FAFAFA",
-    "muted": "#8E8E96",
+    "accent": "#9ADFFF",
+    "text": "#E8F1F6",
+    "muted": "#7D8A96",
     "danger": "#EF4444",
     "success": "#22C55E"
   },
-  "radius": 12,
+  "radius": 10,
   "font": "Inter",
   "backgroundVideo": null,
   "wallpaper": null,
-  "blur": 12,
+  "blur": 0,
   "animations": true
 }

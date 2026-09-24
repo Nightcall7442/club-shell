@@ -409,8 +409,8 @@ Common symptoms:
   clamp(16px, 0.9375vw, 24px)`), so one layout serves 1080p and 1440p without media queries.
 * **WebView2**: one process per window (`main`, `overlay`, `ads-*`); the overlay is created lazily and the
   ads windows only when a secondary monitor exists. Keep the overlay route cheap — it is drawn over a
-  running game. `backdrop-filter` (`.glass`, `--blur`) is the most expensive effect; themes can set
-  `blur: 0` for weak GPUs, and `animations: false` disables every animation via `data-animations`.
+  running game. `backdrop-filter` (`.glass` under `data-glass`, `--blur`) is the most expensive effect; the
+  default theme ships with `blur: 0` (flat panels, no backdrop filter), which is also the setting for weak GPUs, and `animations: false` disables every animation via `data-animations`.
 * **Code-splitting**: every screen is a `React.lazy` chunk; the boot path loads only `main.tsx`, the
   stores, i18n and the current screen. `framer-motion` is used only in `AdsOverlay` and a few transitions
   and honours `theme.animations`.

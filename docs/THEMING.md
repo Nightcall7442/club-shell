@@ -20,19 +20,19 @@ read those properties. Switching themes never reloads the page.
 | `name` | `string` | yes | — | Theme id; **must equal the file name** without `.json`. Bare name only (no `/`, `\`, `.`) — `ShellConfig::validate` and `validate::bare_name` reject anything else. A mismatch is logged by `load_theme` but the file is still used. |
 | `displayName` | `string` | yes | — | Human-readable name shown in the picker. |
 | `colors` | `ThemeColors` | yes | default palette per key | Eight colours, each `#RRGGBB` or `#RRGGBBAA` (`#RGB` is also accepted by `hexToRgb`). Alpha is ignored; Tailwind supplies opacity. |
-| `colors.bg` | hex | yes | `#09090B` | Page background. |
-| `colors.surface` | hex | yes | `#151518` | Cards, panels, bars (`.glass`). |
-| `colors.primary` | hex | yes | `#F4F4F5` | Primary actions, focus glow, selection. Text on it is `--c-on-primary`, derived by luminance (dark on light primaries, white otherwise). |
-| `colors.accent` | hex | yes | `#F2B84B` | Secondary highlight (VIP, bonuses, timer warning), warnings' border in overlays. Text on it is `--c-on-accent`. |
-| `colors.text` | hex | yes | `#FAFAFA` | Primary text. |
-| `colors.muted` | hex | yes | `#8E8E96` | Secondary text, scrollbars. |
+| `colors.bg` | hex | yes | `#07090C` | Page background. |
+| `colors.surface` | hex | yes | `#0D1117` | Cards, panels, popovers (`.glass`, `.glass-strong`). |
+| `colors.primary` | hex | yes | `#F4F4F5` | Primary actions, focus ring, selection. Text on it is `--c-on-primary`, derived by luminance (dark on light primaries, white otherwise). |
+| `colors.accent` | hex | yes | `#9ADFFF` | The one colour in the chrome: focus brackets, active nav rail, the `cta` button, grid, bonuses, booked seats, timer warning. Text on it is `--c-on-accent`. Text on it is `--c-on-accent`. |
+| `colors.text` | hex | yes | `#E8F1F6` | Primary text. |
+| `colors.muted` | hex | yes | `#7D8A96` | Secondary text, scrollbars. |
 | `colors.danger` | hex | yes | `#EF4444` | Errors, session timer warning/critical. |
 | `colors.success` | hex | yes | `#22C55E` | Success states. |
-| `radius` | `int` px | yes | `12` | Base corner radius; Tailwind derives `sm`/`md`/`lg`/`xl`/`2xl` from it. |
+| `radius` | `int` px | yes | `10` | Base corner radius; Tailwind derives `sm`/`md`/`lg`/`xl`/`2xl` from it. |
 | `font` | `string` | yes | `"Inter"` | Font family name; falls back to the bundled `Inter Variable` (`@fontsource-variable/inter`, so the default renders the same on a PC that never had Inter installed), then `system-ui`, `Segoe UI`, `sans-serif`. Empty → default. |
 | `backgroundVideo` | `string \| null` | no | `null` | Looping muted video behind the UI. Path relative to the data directory (`themes/assets/…`) or absolute URL. |
-| `wallpaper` | `string \| null` | no | `null` | Still image behind the UI (also the video poster). Same path rules. `null` = the ambient backdrop (see §3). |
-| `blur` | `int` px | yes | `12` | Backdrop blur on `.glass` surfaces; `0` disables `backdrop-filter`. |
+| `wallpaper` | `string \| null` | no | `null` | Still image behind the UI (also the video poster). Same path rules. `null` = the plain `bg` backdrop (see §3). |
+| `blur` | `int` px | yes | `0` | `0` = flat, opaque panels (the default). Above `0` the theme opts into translucent panels: `applyTheme` sets `data-glass` and `.glass` / `.glass-strong` blur what is behind them by this much. Also softens the veil over a wallpaper. |
 | `animations` | `bool` | yes | `true` | `false` sets `data-animations="false"`, which turns off every CSS animation/transition (`animations.css`) and framer-motion durations. |
 
 Unknown keys are ignored on read. Missing optional fields are filled by `normalizeTheme` in
@@ -81,12 +81,12 @@ before the first `applyTheme`.
 |-------------|--------------|----------|
 | `radius` | `--radius: <n>px` | `rounded` = `var(--radius)`; `rounded-sm` ×0.5, `rounded-md` ×0.75, `rounded-lg` ×1, `rounded-xl` ×1.5, `rounded-2xl` ×2 |
 | `font` | `--font: "<family>"` (quotes stripped from the value) | `font-sans` = `['var(--font)', 'system-ui', 'Segoe UI', 'sans-serif']` |
-| `blur` | `--blur: <n>px` | `.glass` uses `blur(var(--blur))`, `.glass-strong` `blur(calc(var(--blur) * 1.5))` |
+| `blur` | `--blur: <n>px`, `data-glass` when `> 0` | under `data-glass`, `.glass` uses `blur(var(--blur))` at 55 % surface opacity, `.glass-strong` `blur(calc(var(--blur) * 1.5))` at 90 %; otherwise both are opaque `surface` with a hairline border |
 
 ### 2.3 Data attributes
 
 `applyTheme` also sets on `<html>`: `data-theme="<name>"` (for theme-specific CSS hooks),
-`data-animations="true|false"`, the `dark` class (Tailwind `darkMode: 'class'`; every theme is dark), and
+`data-animations="true|false"`, `data-glass` (only when `blur > 0`), the `dark` class (Tailwind `darkMode: 'class'`; every theme is dark), and
 updates `<meta name="theme-color">` to `colors.bg`. `animations.css` contains
 `:root[data-animations="false"] *:not(.anim-spin) { animation: none; transition: none }` (spinners keep
 spinning) and honours `prefers-reduced-motion` the same way.
@@ -94,8 +94,9 @@ spinning) and honours `prefers-reduced-motion` the same way.
 ### 2.4 Typography and layout tokens (not themeable)
 
 `tokens.css` also defines the fluid type scale (`--fs-base: clamp(16px, 0.9375vw, 24px)`, `--fs-xs` …
-`--fs-display`), layout (`--topbar-h`, `--gutter`, `--gap`, `--card-cover-w`), motion
-(`--dur-fast/base/slow`, easings) and elevation (`--shadow-card`, `--shadow-glow`). These are design
+`--fs-display`), layout (`--topbar-h`, `--statusbar-h`, `--gutter`, `--gap`, `--card-cover-w`), motion
+(`--dur-fast/base/slow`, easings) and elevation (`--hairline`, `--shadow-float` for popovers and modals only,
+`--shadow-glow`, which is now a plain 2 px focus ring). These are design
 constants, not theme fields; a theme only influences them through the colour variables they reference.
 
 ---
@@ -103,13 +104,9 @@ constants, not theme fields; a theme only influences them through the colour var
 ## 3. Background assets
 
 `wallpaper` and `backgroundVideo` are rendered by `components/layout/Background.tsx`
-(colour → wallpaper with a slow pan → `VideoBackground` → gradient veil → primary glow).
+(colour → wallpaper with a slow pan → `VideoBackground` → gradient veil).
 
-With neither set (the default theme) the backdrop is **ambient**: `bg` black lit by two soft glows in the
-colour of the game last featured on Home, plus film grain. `HomeHero` samples its art with `useImageTint` and
-publishes the result as the CSS variable `--ambient` (`setAmbientLight`); the glows transition their
-`background-color`, so the light glides when the hero changes and stays after the player leaves Home. Until
-Home has been shown the light is `accent`. The lock screen does not use this backdrop when the club has art:
+With neither set (the default theme) the backdrop is the plain `bg` colour. The lock screen does not use this backdrop when the club has art:
 it plays the still images of `shell.json → ads.playlist` (the attract screen's playlist) under a dark veil.
 
 Paths are
@@ -144,20 +141,31 @@ Both ship in `config/themes/` (installed to `C:\ProgramData\ClubShell\themes\` b
 also embedded in the frontend (`builtinThemes` in `theme/themes.ts`) and, for `default`, in the Rust
 binary (`DEFAULT_THEME_JSON`). `default.json` is mandatory and always resolvable.
 
-### 4.1 `default` — "ClubShell Onyx"
+### 4.1 `default` — "ClubShell Obsidian"
+
+A minimal layout with a restrained sci-fi HUD layer on top: flat obsidian panels with hairline borders, corner
+brackets that lock onto the selected game and the focused element,
+mono telemetry labels, dot-matrix numbers for time and money, a tick scale for the session and one ice-blue
+accent. The game art carries the colour.
 
 | Key | Hex | Role |
 |-----|-----|------|
-| bg | `#09090B` | neutral near-black background; the artwork carries the colour |
-| surface | `#151518` | charcoal panels |
+| bg | `#07090C` | obsidian background |
+| surface | `#0D1117` | flat panels |
 | primary | `#F4F4F5` | white actions (dark text via `--c-on-primary`) |
-| accent | `#F2B84B` | gold highlight: VIP, bonuses, timer warning |
-| text | `#FAFAFA` | near-white |
-| muted | `#8E8E96` | neutral grey |
-| danger | `#EF4444` | red |
+| accent | `#9ADFFF` | ice blue: brackets, active nav rail, the main call to action, bonuses, booked seats |
+| text | `#E8F1F6` | cool near-white |
+| muted | `#7D8A96` | cool grey |
+| danger | `#EF4444` | red: LIVE, errors, critical timer |
 | success | `#22C55E` | green |
 
-`radius 12`, `font "Inter"`, `blur 12`, `animations true`, no wallpaper (ambient backdrop), no video.
+`radius 10`, `font "Inter"`, `blur 0` (flat panels), `animations true`, no wallpaper (grid backdrop), no video.
+
+The HUD layer is not themeable data but CSS in `tokens.css`, driven by the colour variables: `.hud-label`
+(mono caps), `.num-dot` and `<DotAmount>` (Doto digits, units in the UI face), `.hud-brackets` / `.hud-focus`
+(corner brackets), `.cut-corners` (the `cta` button), `.choice` (pick-one controls), `.page-aside` (side columns start level with
+the main column's first block) and `.tick-scale`. The faces are
+bundled (`@fontsource-variable/unbounded`, `jetbrains-mono`, `doto`), so they render offline.
 
 ### 4.2 `neon` — "Neon Night"
 
@@ -237,9 +245,9 @@ ThemePicker (screens/Profile/Settings.tsx)
    lower-case ASCII, no spaces or dots (e.g. `arena-red`).
 2. Set `"name": "<name>"` (identical to the file name) and a `displayName`.
 3. Pick the eight colours. Start from `bg` and `surface` (surface should be 4–8 % lighter than bg so
-   `.glass` at 60 % opacity still separates), then `text`/`muted`, then `primary`/`accent`, then the
+   panels separate from the page — at 55 % opacity too, if the theme sets `blur`), then `text`/`muted`, then `primary`/`accent`, then the
    semantic `danger`/`success`.
-4. Choose `radius` (8–20 px reads well at 1080p), `blur` (0 on weak GPUs), `font` (must be installed on
+4. Choose `radius` (8–20 px reads well at 1080p), `blur` (0 = flat panels; keep 0 on weak GPUs), `font` (must be installed on
    the PC; `Inter` and `Segoe UI` are safe), `animations`.
 5. Drop `wallpaper` / `backgroundVideo` files into `themes\assets\` and reference them as
    `themes/assets/<file>`, or leave `null`.

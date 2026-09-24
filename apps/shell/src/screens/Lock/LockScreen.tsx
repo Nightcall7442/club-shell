@@ -56,7 +56,7 @@ export function Clock({ className }: ClockProps): JSX.Element {
     <time
       dateTime={now.toISOString()}
       aria-label={t('lock.clock')}
-      className={clsx('tnum font-bold leading-none text-text', className)}
+      className={clsx('tnum num-dot leading-none text-text', className)}
     >
       {formatClock(now, fmt)}
     </time>
@@ -92,7 +92,7 @@ export function LanguageSwitcher({ className }: LanguageSwitcherProps): JSX.Elem
     <div
       role="group"
       aria-label={t('lock.language')}
-      className={clsx('glass flex items-center gap-1 rounded-full p-1', className)}
+      className={clsx('glass flex items-center gap-1 rounded-lg p-1', className)}
     >
       {locales.map((l) => (
         <button
@@ -105,8 +105,8 @@ export function LanguageSwitcher({ className }: LanguageSwitcherProps): JSX.Elem
           disabled={busy !== null}
           onClick={() => void change(l)}
           className={clsx(
-            'focus-ring h-10 min-w-[3.25rem] rounded-full px-3 text-sm font-bold uppercase tracking-wide transition-colors duration-[var(--dur-fast)]',
-            l === locale ? 'bg-primary text-on-primary' : 'text-muted hover:bg-text/10 hover:text-text',
+            'focus-ring h-9 min-w-[3.25rem] rounded-md px-3 font-mono text-xs font-medium uppercase tracking-[0.12em] transition-colors duration-[var(--dur-fast)]',
+            l === locale ? 'bg-accent/15 text-accent' : 'text-muted hover:bg-text/[0.06] hover:text-text',
           )}
         >
           {l}
@@ -190,7 +190,7 @@ export function UnlockForm({ onSuccess, className }: UnlockFormProps): JSX.Eleme
     >
       <Avatar name={name} src={user?.avatarUrl} size="xl" ring />
       <div>
-        <h1 className="text-3xl font-bold leading-tight text-text">{name}</h1>
+        <h1 className="font-display text-3xl font-light leading-tight tracking-tight text-text">{name}</h1>
         <p className="mt-1 text-base text-muted">{t('lock.lockedHint')}</p>
       </div>
       <div className="flex flex-wrap items-center justify-center gap-3">
@@ -355,7 +355,7 @@ export function StartSessionModal({ open, onStarted, onLogout }: StartSessionMod
           <Button variant="ghost" size="lg" disabled={busy} onClick={onLogout}>
             {t('lock.logoutInstead')}
           </Button>
-          <Button size="lg" loading={busy} disabled={!tariff || notEnough} onClick={() => void submit()}>
+          <Button variant="cta" size="lg" loading={busy} disabled={!tariff || notEnough} onClick={() => void submit()}>
             {busy ? t('session.starting') : t('lock.startPlaying')}
           </Button>
         </>
@@ -441,8 +441,8 @@ export function StartSessionModal({ open, onStarted, onLogout }: StartSessionMod
                     data-nav="true"
                     onClick={() => setMinutes(m)}
                     className={clsx(
-                      'focus-ring tnum h-11 rounded-full px-4 text-base font-semibold transition-colors duration-[var(--dur-fast)]',
-                      m === effectiveMinutes ? 'bg-primary text-on-primary' : 'bg-text/10 text-text hover:bg-text/15',
+                      'focus-ring tnum h-11 rounded-md px-4 text-base font-semibold',
+                      m === effectiveMinutes ? 'choice choice-on' : 'choice',
                     )}
                   >
                     {formatDurationSec(m * 60)}
@@ -665,8 +665,6 @@ export default function LockScreen(): JSX.Element {
         <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-0">
           <AdsCarousel items={art} showCounter={false} />
           <div className="absolute inset-0 bg-[linear-gradient(180deg,rgb(var(--c-bg)/0.8)_0%,rgb(var(--c-bg)/0.35)_28%,rgb(var(--c-bg)/0.4)_62%,rgb(var(--c-bg)/0.92)_100%)]" />
-          <div className="film-vignette" />
-          <div className="film-grain" />
         </div>
       ) : (
         <Background dim={0.6} />
@@ -674,10 +672,8 @@ export default function LockScreen(): JSX.Element {
       <div className="relative z-10 flex h-full w-full flex-col gap-[var(--gap)] px-[var(--gutter)] py-[var(--gap)]">
         <header className="flex items-start justify-between gap-[var(--gap)]">
           <div className="min-w-0">
-            <p className="text-glow truncate text-2xl font-black uppercase tracking-[0.2em] text-text">
-              {t('idle.clubName')}
-            </p>
-            {pcName && <p className="mt-1 text-base text-muted">{t('idle.pcName', { name: pcName, zone: pcZone })}</p>}
+            <p className="truncate font-display text-2xl font-light tracking-tight text-text">{t('idle.clubName')}</p>
+            {pcName && <p className="hud-label mt-2">{t('idle.pcName', { name: pcName, zone: pcZone })}</p>}
           </div>
           <div className="flex items-center gap-[var(--gap)]">
             <LanguageSwitcher />
@@ -691,7 +687,7 @@ export default function LockScreen(): JSX.Element {
             initial={{ opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration, ease: 'easeOut' }}
-            className="glass-strong themed-scrollbar max-h-full w-[min(92vw,34rem)] overflow-y-auto overflow-x-hidden rounded-2xl p-8"
+            className="glass-strong themed-scrollbar max-h-full w-[min(92vw,34rem)] overflow-y-auto overflow-x-hidden rounded-xl p-8"
           >
             {!ready ? (
               <div className="flex justify-center py-16">
@@ -702,7 +698,9 @@ export default function LockScreen(): JSX.Element {
             ) : (
               <>
                 <div className="mb-6 text-center">
-                  <h1 className="text-3xl font-bold leading-tight text-text">{t('lock.title')}</h1>
+                  <h1 className="font-display text-3xl font-light leading-tight tracking-tight text-text">
+                    {t('lock.title')}
+                  </h1>
                   <p className="mt-1 text-base text-muted">{t('lock.subtitle')}</p>
                 </div>
                 {expiredReason && (

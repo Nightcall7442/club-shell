@@ -179,11 +179,7 @@ export function Modal({
       {open && (
         <motion.div
           key="backdrop"
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-bg/70 p-[var(--gutter)]"
-          style={{
-            backdropFilter: 'blur(calc(var(--blur) * 0.6))',
-            WebkitBackdropFilter: 'blur(calc(var(--blur) * 0.6))',
-          }}
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-bg/75 p-[var(--gutter)]"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -199,14 +195,14 @@ export function Modal({
             tabIndex={-1}
             data-nav-scope="modal"
             className={clsx(
-              'glass-strong flex max-h-[94vh] flex-col overflow-hidden rounded-xl outline-none',
+              'glass-strong relative flex max-h-[94vh] flex-col overflow-hidden rounded-xl outline-none',
               SIZE[size],
               className,
             )}
-            initial={{ opacity: 0, y: 24, scale: 0.98 }}
+            initial={{ opacity: 0, y: 14, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 12, scale: 0.98 }}
-            transition={{ duration, ease: 'easeOut' }}
+            exit={{ opacity: 0, y: 8, scale: 0.98 }}
+            transition={animations ? { type: 'spring', stiffness: 420, damping: 34, mass: 0.9 } : { duration: 0 }}
             onKeyDown={onKeyDown}
           >
             {(title || showClose) && (
@@ -215,7 +211,10 @@ export function Modal({
                   {title && (
                     <h2
                       id={titleId}
-                      className={clsx('text-2xl font-bold leading-tight', danger ? 'text-danger' : 'text-text')}
+                      className={clsx(
+                        'font-display text-[1.55rem] font-normal leading-tight tracking-tight',
+                        danger ? 'text-danger' : 'text-text',
+                      )}
                     >
                       {title}
                     </h2>
@@ -232,7 +231,7 @@ export function Modal({
                     data-nav="true"
                     aria-label={t('common.close')}
                     onClick={onClose}
-                    className="focus-ring -mr-2 -mt-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted hover:bg-text/10 hover:text-text"
+                    className="focus-ring -mr-2 -mt-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted transition-colors duration-[var(--dur-fast)] hover:bg-text/[0.06] hover:text-text"
                   >
                     <svg
                       viewBox="0 0 24 24"
@@ -253,7 +252,7 @@ export function Modal({
               {children}
             </div>
             {footer && (
-              <footer className="flex flex-wrap items-center justify-end gap-3 border-t border-text/10 px-6 py-4">
+              <footer className="flex flex-wrap items-center justify-end gap-3 border-t border-[color:var(--hairline)] px-6 py-4">
                 {footer}
               </footer>
             )}
