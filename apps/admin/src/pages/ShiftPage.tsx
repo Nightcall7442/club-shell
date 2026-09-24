@@ -46,8 +46,8 @@ function Stat({
   tone?: 'ok' | 'err';
 }): JSX.Element {
   return (
-    <div className="flex min-w-0 flex-col gap-2 bg-surface px-5 py-4">
-      <span className="label truncate">{label}</span>
+    <div className="flex min-w-0 flex-col justify-between gap-2 bg-surface px-5 py-4">
+      <span className="label">{label}</span>
       <span className="flex items-baseline gap-1.5">
         <span
           className={clsx(

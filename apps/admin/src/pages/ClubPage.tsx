@@ -220,9 +220,7 @@ export default function ClubPage(): JSX.Element {
                   key: 'title',
                   title: t('Заголовок'),
                   width: '22%',
-                  render: (b) => (
-                    <Input value={b.title} onChange={(e) => banner(b.id, { title: e.target.value })} />
-                  ),
+                  render: (b) => <Input value={b.title} onChange={(e) => banner(b.id, { title: e.target.value })} />,
                 },
                 {
                   key: 'image',
@@ -265,12 +263,7 @@ export default function ClubPage(): JSX.Element {
                   key: 'on',
                   title: t('Показ'),
                   width: '4.5rem',
-                  render: (b) => (
-                    <Toggle
-                      checked={b.enabled}
-                      onChange={(v) => banner(b.id, { enabled: v })}
-                    />
-                  ),
+                  render: (b) => <Toggle checked={b.enabled} onChange={(v) => banner(b.id, { enabled: v })} />,
                 },
                 {
                   key: 'del',

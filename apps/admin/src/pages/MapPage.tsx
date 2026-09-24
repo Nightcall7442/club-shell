@@ -104,7 +104,9 @@ function SeatTile({
           {left < 0 ? '∞' : duration(left)}
         </span>
       ) : (
-        <span className="font-mono text-[0.62rem] uppercase leading-none tracking-[0.1em] text-muted">{t(s.short)}</span>
+        <span className="font-mono text-[0.62rem] uppercase leading-none tracking-[0.1em] text-muted">
+          {t(s.short)}
+        </span>
       )}
       {warn && <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 animate-pulse rounded-full bg-danger" />}
     </button>
@@ -500,7 +502,10 @@ export function MapPage(): JSX.Element {
                   <h2 className="flex items-baseline justify-between gap-2 border-b border-line pb-2">
                     <span className="label text-text">{zone}</span>
                     <span className="tnum font-mono text-xs text-muted">
-                      {t('{free}/{total} свободно', { free: list.filter((x) => x.pc.status === 'free').length, total: list.length })}
+                      {t('{free}/{total} свободно', {
+                        free: list.filter((x) => x.pc.status === 'free').length,
+                        total: list.length,
+                      })}
                     </span>
                   </h2>
                   <div className="grid grid-cols-[repeat(auto-fill,minmax(4.5rem,1fr))] gap-2">

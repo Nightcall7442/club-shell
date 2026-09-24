@@ -153,7 +153,12 @@ function DevicePanel({
         />
       </Field>
       <Field label={t('Тип устройства')}>
-        <Choice cols={4} value={device} onChange={setDevice} options={DEVICES.map((d) => ({ ...d, label: t(d.label) }))} />
+        <Choice
+          cols={4}
+          value={device}
+          onChange={setDevice}
+          options={DEVICES.map((d) => ({ ...d, label: t(d.label) }))}
+        />
       </Field>
       <Toggle
         label={t('Обслуживание')}
@@ -271,7 +276,12 @@ function AddDevice({
         <NumberInput value={number} min={1} max={9999} onChange={setNumber} />
       </Field>
       <Field label={t('Тип устройства')}>
-        <Choice cols={4} value={device} onChange={setDevice} options={DEVICES.map((d) => ({ ...d, label: t(d.label) }))} />
+        <Choice
+          cols={4}
+          value={device}
+          onChange={setDevice}
+          options={DEVICES.map((d) => ({ ...d, label: t(d.label) }))}
+        />
       </Field>
       <Note note={note} />
       <Button
@@ -341,7 +351,9 @@ function ZonesEditor({ onSaved }: { onSaved: () => Promise<void> }): JSX.Element
         onReset={s.reset}
         onSave={() => {
           if (invalid) return;
-          void s.save().then((ok) => ok && onSaved());
+          void s.save().then(async (ok) => {
+            if (ok) await onSaved();
+          });
         }}
       />
     </>
@@ -485,9 +497,7 @@ export default function HallPage(): JSX.Element {
               <li key={z.name} className="flex items-center gap-2 text-sm">
                 <span className="h-3 w-3 rounded-[3px] border-2" style={{ borderColor: z.color }} />
                 {z.name}
-                <span className="tnum font-mono text-xs text-muted">
-                  {pcs.filter((p) => p.zone === z.name).length}
-                </span>
+                <span className="tnum font-mono text-xs text-muted">{pcs.filter((p) => p.zone === z.name).length}</span>
               </li>
             ))}
           </ul>
