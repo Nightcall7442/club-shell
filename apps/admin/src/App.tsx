@@ -23,6 +23,7 @@ const IntegrationsPage = lazy(() => import('@/pages/IntegrationsPage'));
 const ReportsPage = lazy(() => import('@/pages/ReportsPage'));
 const ControlPage = lazy(() => import('@/pages/ControlPage'));
 const NetworkPage = lazy(() => import('@/pages/NetworkPage'));
+const InsightsPage = lazy(() => import('@/pages/InsightsPage'));
 const HealthPage = lazy(() => import('@/pages/HealthPage'));
 const StaffPage = lazy(() => import('@/pages/StaffPage'));
 
@@ -145,6 +146,13 @@ const GROUPS: { title: string; items: SectionDef[] }[] = [
   {
     title: 'Бизнес',
     items: [
+      {
+        id: 'insights',
+        title: 'Подсказки',
+        ownerOnly: true,
+        icon: svg('M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z'),
+        page: InsightsPage,
+      },
       {
         id: 'network',
         title: 'Сеть клубов',

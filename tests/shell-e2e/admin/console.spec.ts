@@ -261,3 +261,40 @@ test('the owner sees every club of the network and adds one', async ({ page, req
   await expect(added).toBeVisible();
   await expect(added.getByText('играют сейчас')).toBeVisible();
 });
+
+test('insights turn the club data into actions — a happy hour in one click, a dismissed one stays hidden', async ({
+  page,
+  request,
+}) => {
+  // Start from a club with no happy hours (an earlier test sets its own).
+  const owner = await tokenFor(request, OWNER_PIN);
+  expect(
+    (await request.patch(`${API}/admin/club`, { headers: auth(owner), data: { happyHours: [] } })).ok(),
+  ).toBeTruthy();
+  const cashier = await tokenFor(request, CASHIER_PIN);
+  expect((await request.get(`${API}/admin/insights`, { headers: auth(cashier) })).status()).toBe(403);
+
+  await signIn(page, OWNER_PIN);
+  await page.goto('/#/insights');
+  await expect(page.getByRole('heading', { name: 'Подсказки' })).toBeVisible();
+
+  // Demo sales: Red Bull runs out before the next delivery, nobody buys the club T-shirt.
+  const redBull = page.getByRole('article', { name: /Red Bull 0\.25L закончится/ });
+  await expect(redBull).toBeVisible();
+  await expect(redBull.getByText(/Закажите \d+ шт\./)).toBeVisible();
+  await expect(page.getByRole('article', { name: 'Club T-shirt не продаётся' })).toBeVisible();
+
+  // An empty zone gets its happy hour straight from the card, and the card is gone once it exists.
+  const idle = page.getByRole('article', { name: /пустует/ }).first();
+  const title = (await idle.getByRole('heading').textContent()) ?? '';
+  await idle.getByRole('button', { name: /Создать счастливый час/ }).click();
+  await expect(page.getByText(/Счастливый час «.+» создан/)).toBeVisible();
+  await expect(page.getByRole('article', { name: title })).toHaveCount(0);
+
+  const shirt = page.getByRole('article', { name: 'Club T-shirt не продаётся' });
+  await shirt.getByRole('button', { name: 'Скрыть' }).click();
+  await expect(shirt).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole('article', { name: /Red Bull 0\.25L закончится/ })).toBeVisible();
+  await expect(page.getByRole('article', { name: 'Club T-shirt не продаётся' })).toHaveCount(0);
+});

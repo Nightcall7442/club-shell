@@ -443,6 +443,22 @@ export interface NetworkReport {
   players: { total: number; balance: number; multiClub: number };
 }
 
+export type InsightKind = 'idleWindow' | 'peakWindow' | 'stockOut' | 'staleStock' | 'repairWaiting' | 'winBack';
+
+export type InsightAction =
+  | { kind: 'createHappyHour'; happyHour: Omit<HappyHour, 'id'> }
+  | { kind: 'open'; section: 'pricing' | 'shop' | 'health' | 'clients' };
+
+/** A conclusion from the club's data: facts to phrase, an estimated monthly effect (minor units) and an action. */
+export interface Insight {
+  id: string;
+  kind: InsightKind;
+  tone: 'money' | 'risk';
+  impact: number;
+  params: Record<string, string | number>;
+  action: InsightAction | null;
+}
+
 export interface ControlReport {
   from: string;
   to: string;
@@ -611,6 +627,10 @@ export const clubApi = {
   network: (days: number): Promise<NetworkReport> => call(`/admin/network?days=${days}`),
   addNetworkClub: (input: { name: string; city: string; address: string; pcs: number }): Promise<unknown> =>
     post('/admin/network/clubs', input),
+  insights: (): Promise<{ items: Insight[] }> => call('/admin/insights'),
+  dismissInsight: (id: string): Promise<unknown> => post(`/admin/insights/${encodeURIComponent(id)}/dismiss`, {}),
+  applyInsight: (id: string): Promise<{ happyHour: HappyHour }> =>
+    post(`/admin/insights/${encodeURIComponent(id)}/apply`, {}),
   health: (): Promise<HealthReport> => call('/admin/health'),
   updateTicket: (id: string, status: TicketStatus, note?: string): Promise<{ ticket: HealthTicket }> =>
     patch(`/admin/health/tickets/${id}`, { status, note: note ?? null }),

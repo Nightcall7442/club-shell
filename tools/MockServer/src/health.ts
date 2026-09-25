@@ -383,8 +383,25 @@ function simulated(pc: PcRecord, at: number, busy: boolean): PcMetrics {
   };
 }
 
+/**
+ * Share of a zone's seats busy in the demo week: quiet mornings everywhere, VIP packed in the evening, Bootcamp full of
+ * students in the afternoon, busier weekends — the patterns the owner's insights are meant to find.
+ */
+export function demoOccupancy(zone: string, at: Date): number {
+  const hour = at.getHours();
+  const block = hour < 1 ? 'night' : hour < 11 ? 'morning' : hour < 16 ? 'day' : 'evening';
+  const table: Record<string, Record<typeof block, number>> = {
+    VIP: { morning: 0.05, day: 0.2, evening: 0.95, night: 0.6 },
+    Bootcamp: { morning: 0.1, day: 0.6, evening: 0.7, night: 0.35 },
+    Standard: { morning: 0.08, day: 0.35, evening: 0.75, night: 0.5 },
+  };
+  const base = (table[zone] ?? table['Standard'])![block];
+  const weekend = at.getDay() === 0 || at.getDay() === 6 ? 1.2 : 1;
+  return Math.min(1, base * weekend);
+}
+
 /** One week of hourly history for every PC, so trends exist from the first start of the demo. */
-function backfill(): void {
+export function backfill(): void {
   const hs = health();
   if (hs.backfilled) return;
   const nowH = Math.floor(Date.now() / HOUR) * HOUR;
@@ -392,9 +409,7 @@ function backfill(): void {
     const list: HealthBucket[] = [];
     for (let i = WEEK_HOURS; i >= 1; i -= 1) {
       const h = nowH - i * HOUR;
-      const hour = new Date(h).getHours();
-      // Evenings are busy, mornings quiet.
-      const busy = hour >= 16 || hour < 1 ? 0.8 : hour >= 11 ? 0.45 : 0.1;
+      const busy = demoOccupancy(pc.zone, new Date(h));
       const on = simulated(pc, h + 30 * 60_000, true);
       const off = simulated(pc, h + 30 * 60_000, false);
       list.push({

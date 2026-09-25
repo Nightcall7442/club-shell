@@ -57,6 +57,7 @@ import {
 import { broadcast, pushToUser } from '../ws.js';
 import { flagsFor, record, summaries } from '../control.js';
 import { addClub, network, networkReport } from '../network.js';
+import { applyInsight, dismissInsight, insights } from '../insights.js';
 import { DEFAULT_HEALTH, diagnose, health, updateTicket, type TicketStatus } from '../health.js';
 
 const LEGACY_TOKEN = process.env['MOCK_ADMIN_TOKEN'] ?? 'admin-dev-token';
@@ -770,6 +771,26 @@ export function clubRoutes(app: FastifyInstance): void {
     n.name = str(body(req), 'name', 64);
     markDirty();
     return { name: n.name };
+  });
+
+  // ------------------------------------------------------------------------------------------------ insights
+  /** What the club's data says to do: empty and full hours, stock, repairs, players who stopped coming. */
+  app.get('/admin/insights', async (req) => {
+    requireStaff(req, 'owner');
+    return { items: insights() };
+  });
+
+  app.post<{ Params: { id: string } }>('/admin/insights/:id/dismiss', async (req) => {
+    requireStaff(req, 'owner');
+    dismissInsight(req.params.id);
+    return { ok: true };
+  });
+
+  app.post<{ Params: { id: string } }>('/admin/insights/:id/apply', async (req) => {
+    requireStaff(req, 'owner');
+    const done = applyInsight(req.params.id);
+    if (!done) throw errors.notFound('insight');
+    return done;
   });
 
   // ------------------------------------------------------------------------------------------------ reports

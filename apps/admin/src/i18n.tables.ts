@@ -1,5 +1,46 @@
 /** Uzbek and English lines of the console, keyed by the Russian source text (see `i18n.ts`). */
 export const UZ: Record<string, string> = {
+  Подсказки: 'Maslahatlar',
+  'по будням': 'ish kunlari',
+  'в выходные': 'dam olish kunlari',
+  'каждый день': 'har kuni',
+  'Открыть тарифы': 'Tariflarni ochish',
+  'Открыть склад': 'Omborni ochish',
+  'Открыть «Состояние ПК»': '«Kompyuterlar holati»ni ochish',
+  'Открыть клиентов': 'Mijozlarni ochish',
+  '{zone} пустует {days} {range}': '{zone} {days} {range} boʻsh turibdi',
+  'Занято в среднем {occupancy}% мест. Счастливый час −{discount}% именно для этой зоны и этих часов приведёт игроков, которые сейчас не приходят.':
+    'Oʻrtacha {occupancy}% oʻrin band. Aynan shu zona va shu soatlar uchun −{discount}% baxtli soat hozir kelmayotgan oʻyinchilarni olib keladi.',
+  '≈ +{sum} сум в месяц': '≈ oyiga +{sum} soʻm',
+  '{zone} заполнен {days} {range}': '{zone} {days} {range} toʻla',
+  'Занято {occupancy}% мест — свободных почти не бывает. Поднимите цену в эти часы на 10% или продавайте их бронью с предоплатой.':
+    '{occupancy}% oʻrin band — boʻsh joy deyarli boʻlmaydi. Bu soatlarda narxni 10% oshiring yoki ularni oldindan toʻlovli bron bilan soting.',
+  'Пик продаж — {day}.': 'Eng koʻp sotuv — {day}.',
+  '{product} закончился': '{product} tugadi',
+  '{product} закончится через {days} дн.': '{product} {days} kundan keyin tugaydi',
+  'Продаётся ≈{perDay} шт. в день, осталось {qty}. Закажите {order} шт. — хватит на неделю.':
+    'Kuniga ≈{perDay} dona sotiladi, {qty} qoldi. {order} dona buyurtma qiling — bir haftaga yetadi.',
+  '−{sum} сум за неделю без товара': 'mahsulotsiz bir haftada −{sum} soʻm',
+  '{product} не продаётся': '{product} sotilmayapti',
+  'За {days} дней ни одной продажи, на складе {qty} шт. Сделайте скидку или добавьте в пакет с часами — деньги лежат на полке.':
+    '{days} kunda birorta ham sotuv yoʻq, omborda {qty} dona. Chegirma qiling yoki soatlar paketiga qoʻshing — pul javonda yotibdi.',
+  '{sum} сум в товаре': '{sum} soʻm mahsulotda',
+  '{pc} ждёт ремонта {days} дн.': '{pc} {days} kundan beri taʼmir kutmoqda',
+  'Место простаивает или его обходят стороной — каждый день без ремонта это потерянные часы.':
+    'Oʻrin boʻsh turibdi yoki undan qochishadi — taʼmirsiz har bir kun yoʻqotilgan soatlar.',
+  '−{sum} сум в месяц': 'oyiga −{sum} soʻm',
+  'Перестали приходить: {players}': 'Kelmay qoʻydi: {players}',
+  'Не были в клубе больше двух недель, а деньги на балансе остались. Напомните о себе — бонус к пополнению вернёт часть из них.':
+    'Ikki haftadan beri klubda boʻlmagan, balansida esa pul qolgan. Oʻzingizni eslating — toʻldirishga bonus ularning bir qismini qaytaradi.',
+  '{sum} сум на их балансах': 'ularning balansida {sum} soʻm',
+  'Счастливый час «{name}» создан': '«{name}» baxtli soati yaratildi',
+  'Создать счастливый час −{discount}%': '−{discount}% baxtli soat yaratish',
+  'Скрыто на неделю': 'Bir haftaga yashirildi',
+  'Выводы из данных клуба: загрузка зон по часам за неделю, продажи за две недели, ремонт и игроки. Суммы — оценка на месяц.':
+    'Klub maʼlumotlaridan xulosalar: bir haftalik zonalar bandligi soatlar boʻyicha, ikki haftalik sotuvlar, taʼmir va oʻyinchilar. Summalar — oylik baho.',
+  'Сейчас подсказок нет — всё идёт хорошо.': 'Hozircha maslahat yoʻq — hammasi yaxshi.',
+  'Подсказок: {n}': 'Maslahatlar: {n}',
+  'Срочно: {n}': 'Shoshilinch: {n}',
   'Выручка за период': 'Davr uchun tushum',
   'Выручка сегодня': 'Bugungi tushum',
   Город: 'Shahar',
@@ -535,6 +576,47 @@ export const UZ: Record<string, string> = {
   '№': '№',
 };
 export const EN: Record<string, string> = {
+  Подсказки: 'Insights',
+  'по будням': 'on weekdays',
+  'в выходные': 'at weekends',
+  'каждый день': 'every day',
+  'Открыть тарифы': 'Open pricing',
+  'Открыть склад': 'Open stock',
+  'Открыть «Состояние ПК»': 'Open PC health',
+  'Открыть клиентов': 'Open clients',
+  '{zone} пустует {days} {range}': '{zone} stands empty {days} {range}',
+  'Занято в среднем {occupancy}% мест. Счастливый час −{discount}% именно для этой зоны и этих часов приведёт игроков, которые сейчас не приходят.':
+    'On average {occupancy}% of seats are taken. A −{discount}% happy hour for exactly this zone and these hours brings players who do not come now.',
+  '≈ +{sum} сум в месяц': '≈ +{sum} UZS a month',
+  '{zone} заполнен {days} {range}': '{zone} is full {days} {range}',
+  'Занято {occupancy}% мест — свободных почти не бывает. Поднимите цену в эти часы на 10% или продавайте их бронью с предоплатой.':
+    '{occupancy}% of seats are taken — there is hardly ever a free one. Raise the price for these hours by 10% or sell them as prepaid bookings.',
+  'Пик продаж — {day}.': 'Sales peak on {day}.',
+  '{product} закончился': '{product} is out of stock',
+  '{product} закончится через {days} дн.': '{product} runs out in {days} d',
+  'Продаётся ≈{perDay} шт. в день, осталось {qty}. Закажите {order} шт. — хватит на неделю.':
+    'Sells ≈{perDay} a day, {qty} left. Order {order} — enough for a week.',
+  '−{sum} сум за неделю без товара': '−{sum} UZS for a week without it',
+  '{product} не продаётся': '{product} does not sell',
+  'За {days} дней ни одной продажи, на складе {qty} шт. Сделайте скидку или добавьте в пакет с часами — деньги лежат на полке.':
+    'Not one sale in {days} days, {qty} in stock. Discount it or bundle it with hours — the money is sitting on the shelf.',
+  '{sum} сум в товаре': '{sum} UZS in stock',
+  '{pc} ждёт ремонта {days} дн.': '{pc} has waited for repair for {days} d',
+  'Место простаивает или его обходят стороной — каждый день без ремонта это потерянные часы.':
+    'The seat stands idle or players avoid it — every day without repair is lost hours.',
+  '−{sum} сум в месяц': '−{sum} UZS a month',
+  'Перестали приходить: {players}': 'Stopped coming: {players}',
+  'Не были в клубе больше двух недель, а деньги на балансе остались. Напомните о себе — бонус к пополнению вернёт часть из них.':
+    'Not seen for more than two weeks, with money still on their balance. Remind them — a top-up bonus brings some of them back.',
+  '{sum} сум на их балансах': '{sum} UZS on their balances',
+  'Счастливый час «{name}» создан': 'Happy hour “{name}” created',
+  'Создать счастливый час −{discount}%': 'Create a −{discount}% happy hour',
+  'Скрыто на неделю': 'Hidden for a week',
+  'Выводы из данных клуба: загрузка зон по часам за неделю, продажи за две недели, ремонт и игроки. Суммы — оценка на месяц.':
+    'Conclusions from the club’s data: zone load by hour over a week, two weeks of sales, repairs and players. Amounts are monthly estimates.',
+  'Сейчас подсказок нет — всё идёт хорошо.': 'No insights right now — all is well.',
+  'Подсказок: {n}': 'Insights: {n}',
+  'Срочно: {n}': 'Urgent: {n}',
   'Выручка за период': 'Revenue for the period',
   'Выручка сегодня': 'Revenue today',
   Город: 'City',
