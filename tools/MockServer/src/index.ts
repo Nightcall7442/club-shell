@@ -30,6 +30,7 @@ import {
 import { adminRoutes } from './routes/admin.js';
 import { clubRoutes } from './routes/club.js';
 import { tickClub } from './club.js';
+import { tickHealth } from './health.js';
 import { authRoutes } from './routes/auth.js';
 import { chatRoutes, tickChat } from './routes/chat.js';
 import { gamesRoutes } from './routes/games.js';
@@ -327,6 +328,7 @@ export async function buildApp(opts: Options): Promise<FastifyInstance> {
       tickWallet(t);
       tickChat(t);
       tickClub(t);
+      tickHealth(t);
     } catch (err) {
       console.error('[tick]', err);
     }

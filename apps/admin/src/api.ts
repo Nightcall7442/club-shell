@@ -5,6 +5,7 @@
  */
 import type {
   Money,
+  PcStatus,
   Product,
   Session,
   ServerErrorEnvelope,
@@ -69,6 +70,8 @@ export interface Overview {
   tariffs: Tariff[];
   users: Member[];
   zones: Zone[];
+  /** PCs with an open repair ticket and its worst severity. */
+  repairs?: { pcId: string; severity: 'high' | 'medium' }[];
 }
 
 /** Error carrying the server's `ErrorCode` so screens can map `insufficientFunds` and friends to copy. */
@@ -251,7 +254,8 @@ export type ClubEvent =
   | 'lowStock'
   | 'ruleFired'
   | 'sessionOpened'
-  | 'suspicious';
+  | 'suspicious'
+  | 'hardware';
 export interface Webhook {
   id: string;
   url: string;
@@ -354,6 +358,59 @@ export interface StaffSummary {
   discounts: number;
   shortfall: number;
   flags: Record<Severity, number>;
+}
+
+export type HealthKind = 'cpuHot' | 'gpuHot' | 'cpuTrend' | 'gpuTrend' | 'fpsDrop' | 'unstable';
+export type HealthSeverity = 'high' | 'medium';
+export type TicketStatus = 'open' | 'inWork' | 'resolved';
+
+export interface HealthIssue {
+  kind: HealthKind;
+  severity: HealthSeverity;
+  params: Record<string, number>;
+}
+
+export interface HealthTicket {
+  id: string;
+  pcId: string;
+  pcName: string;
+  kind: HealthKind;
+  severity: HealthSeverity;
+  params: Record<string, number>;
+  status: TicketStatus;
+  openedAt: string;
+  updatedAt: string;
+  resolvedAt: string | null;
+  note: string;
+  autoMaintenance: boolean;
+}
+
+export interface HealthSettings {
+  cpuHotC: number;
+  gpuHotC: number;
+  trendC: number;
+  fpsDropPct: number;
+  offlinePerDay: number;
+  autoMaintenance: boolean;
+}
+
+export interface PcHealth {
+  id: string;
+  name: string;
+  zone: string;
+  status: PcStatus;
+  score: number;
+  live: { cpu: number | null; gpu: number | null; fps: number | null };
+  baseline: { cpu: number | null; gpu: number | null; fps: number | null };
+  hourly: { cpu: (number | null)[]; gpu: (number | null)[]; fps: (number | null)[] };
+  issues: HealthIssue[];
+  ticket: HealthTicket | null;
+}
+
+export interface HealthReport {
+  settings: HealthSettings;
+  pcs: PcHealth[];
+  tickets: HealthTicket[];
 }
 
 export interface ControlReport {
@@ -517,6 +574,11 @@ export const clubApi = {
   games: (): Promise<{ items: AdminGame[]; order: string[] }> => call('/admin/games'),
 
   reports: (days: number): Promise<Reports> => call(`/admin/reports?days=${days}`),
+  health: (): Promise<HealthReport> => call('/admin/health'),
+  updateTicket: (id: string, status: TicketStatus, note?: string): Promise<{ ticket: HealthTicket }> =>
+    patch(`/admin/health/tickets/${id}`, { status, note: note ?? null }),
+  saveHealthSettings: (settings: HealthSettings): Promise<{ settings: HealthSettings }> =>
+    patch('/admin/health/settings', settings),
   control: (days: number, staffId: string | null): Promise<ControlReport> =>
     call(`/admin/control?days=${days}${staffId ? `&staffId=${encodeURIComponent(staffId)}` : ''}`),
 };

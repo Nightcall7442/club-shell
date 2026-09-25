@@ -208,3 +208,21 @@ test('cashier control flags a cash shortfall and quick refunds, and only the own
   await expect(page.getByText('3 сеанса за смену закрыты с возвратом вскоре после открытия').first()).toBeVisible();
   await expect(page.getByRole('cell', { name: 'Кассир Азиз' }).first()).toBeVisible();
 });
+
+test('PC health opens repair tickets from telemetry; staff take them and close them', async ({ page }) => {
+  // The mock plays the Agents' telemetry: PC-15's GPU runs hot, PC-07 heats up day by day, PC-19 lost frames.
+  await signIn(page, CASHIER_PIN);
+  await expect(page.locator('[aria-label="Нужен ремонт"]').first()).toBeVisible();
+
+  await page.goto('/#/health');
+  await expect(page.getByRole('heading', { name: 'Состояние ПК' })).toBeVisible();
+  const tickets = page.getByRole('list', { name: 'Заявки на ремонт' });
+  const hot = tickets.getByRole('listitem').filter({ hasText: /Видеокарта \d+ °C — перегрев/ });
+  await expect(hot).toHaveCount(1);
+  await hot.getByRole('button', { name: 'Взять в работу' }).click();
+  await expect(hot.getByText('В работе')).toBeVisible();
+  await hot.getByRole('button', { name: 'Решено' }).click();
+  await expect(tickets.getByRole('listitem').filter({ hasText: /Видеокарта \d+ °C — перегрев/ })).toHaveCount(0);
+  // Thresholds are the owner's.
+  await expect(page.getByText('Пороги')).toHaveCount(0);
+});
