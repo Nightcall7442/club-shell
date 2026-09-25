@@ -265,6 +265,15 @@ Request `{ reason: "user" | "idle" | "admin" | "agentRestart" }` → `204`. Ends
 #### `GET /users/{userId}/achievements` → `{ items: Achievement[] }`.
 #### `GET /users/{userId}/loyalty` → `Loyalty`.
 
+**Player game settings** — a player's own binds / sensitivity / graphics for one game (`Game.settingsPaths` zipped by
+the Agent), so they follow the player to any PC. Separate from the pooled account's cloud save (§4.6).
+
+#### `GET /users/{userId}/game-settings` — auth: user (self) → `{ items: PlayerSettingsItem[] }`, most recent first.
+#### `GET /users/{userId}/game-settings/{gameId}` — auth: agent → `PlayerSettingsBundle` `{ gameId, url, sha256, sizeBytes, updatedAt }`, or `204` when the player saved none.
+#### `POST /users/{userId}/game-settings/{gameId}/upload-target` — auth: agent → `SaveUploadTarget` `{ uploadUrl, expiresAt, maxBytes }`; the Agent `PUT`s the zip there (`application/zip`).
+#### `PUT /users/{userId}/game-settings/{gameId}` — auth: agent — Request `PlayerSettingsCommitRequest` `{ uploadUrl, sha256, sizeBytes }` → `PlayerSettingsBundle`. Errors: `400` (sha / size do not match the upload).
+#### `DELETE /users/{userId}/game-settings/{gameId}` — auth: user (self) → `204`.
+
 ### 4.5 Sessions
 
 #### `GET /sessions/current?pcId=` — auth: agent → `Session` or `204 No Content`.
@@ -445,6 +454,11 @@ Response `204`.
 | GET | `/users/{userId}/stats` | user |
 | GET | `/users/{userId}/achievements` | user |
 | GET | `/users/{userId}/loyalty` | user |
+| GET | `/users/{userId}/game-settings` | user |
+| GET | `/users/{userId}/game-settings/{gameId}` | agent |
+| POST | `/users/{userId}/game-settings/{gameId}/upload-target` | agent |
+| PUT | `/users/{userId}/game-settings/{gameId}` | agent |
+| DELETE | `/users/{userId}/game-settings/{gameId}` | user |
 | GET | `/sessions/current?pcId=` | agent |
 | POST | `/sessions` | user |
 | POST | `/sessions/{id}/pause` | user |

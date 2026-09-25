@@ -323,6 +323,23 @@ export default function GameDetails(): JSX.Element {
                     </ul>
                   </div>
                 )}
+                {(game.settingsPaths?.length ?? 0) > 0 && (
+                  <p className="flex items-start gap-2.5 text-base text-muted">
+                    <svg
+                      viewBox="0 0 24 24"
+                      className="mt-0.5 h-5 w-5 shrink-0 text-accent"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4" />
+                    </svg>
+                    {t('games.settingsFollow')}
+                  </p>
+                )}
                 {game.requiresAccount && (
                   <div className="flex items-start gap-3 rounded-lg bg-accent/10 p-4 text-text">
                     <Badge tone="accent" size="sm" className="mt-0.5">

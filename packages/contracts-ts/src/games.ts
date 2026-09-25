@@ -354,6 +354,12 @@ export interface Game {
   sizeGb: number;
   /** Installed/catalogue version. */
   version?: string | null;
+  /**
+   * Where the game keeps a player's own settings (binds, sensitivity, graphics): file or directory templates with
+   * `%LOCALAPPDATA%`, `%APPDATA%`, `%USERPROFILE%`, `{installPath}`. The Agent carries them from PC to PC per player
+   * (`PlayerSettingsBundle`); `null` or empty = not carried.
+   */
+  settingsPaths?: string[] | null;
 }
 
 /** Body of `POST /games/{id}/launch-report` (SERVER_API.md §4.6). */
@@ -376,6 +382,57 @@ export interface LaunchReport {
   exitCode?: number | null;
   /** Seconds played (`LaunchReportPhase.Exit`). */
   playedSec?: number | null;
+}
+
+/**
+ * A player's own settings for one game (`Game.SettingsPaths` zipped), stored on the server so they follow the player to
+ * any PC. Response of `GET /users/{userId}/game-settings/{gameId}` and of the commit.
+ */
+export interface PlayerSettingsBundle {
+  /** Game id. */
+  gameId: string;
+  /** Download URL of the zip. */
+  url: string;
+  /** Lower-case hex SHA-256 of the zip. */
+  sha256: string;
+  /** Zip size. */
+  sizeBytes: number;
+  /** When the settings were last saved. */
+  updatedAt: string;
+}
+
+/** Body of `PUT /users/{userId}/game-settings/{gameId}` after the zip was uploaded to the target. */
+export interface PlayerSettingsCommitRequest {
+  /** The URL the zip was `PUT` to (from `SaveUploadTarget`). */
+  uploadUrl: string;
+  /** Lower-case hex SHA-256 of the zip. */
+  sha256: string;
+  /** Zip size. */
+  sizeBytes: number;
+}
+
+/** One game whose settings the player has saved. */
+export interface PlayerSettingsItem {
+  /** Game id. */
+  gameId: string;
+  /** Game title. */
+  title: string;
+  /** Stored size. */
+  sizeBytes: number;
+  /** Last save. */
+  updatedAt: string;
+}
+
+/** Response of `profile.gameSettings` / `GET /users/{userId}/game-settings`. */
+export interface PlayerSettingsListResponse {
+  /** Games with saved settings, most recent first. */
+  items: PlayerSettingsItem[];
+}
+
+/** Request of `profile.gameSettingsReset`: forget the saved settings of one game. */
+export interface PlayerSettingsResetRequest {
+  /** Game id. */
+  gameId: string;
 }
 
 /** Screen resolution requested for a launch. */

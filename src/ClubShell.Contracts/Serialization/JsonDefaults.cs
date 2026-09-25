@@ -426,6 +426,11 @@ public sealed class ClubTimeConverter : JsonConverter<TimeOnly>
 [JsonSerializable(typeof(CloudSaveUpload))]
 [JsonSerializable(typeof(AccountLeaseRelease))]
 [JsonSerializable(typeof(SaveUploadTarget))]
+[JsonSerializable(typeof(PlayerSettingsBundle))]
+[JsonSerializable(typeof(PlayerSettingsCommitRequest))]
+[JsonSerializable(typeof(PlayerSettingsItem))]
+[JsonSerializable(typeof(PlayerSettingsListResponse))]
+[JsonSerializable(typeof(PlayerSettingsResetRequest))]
 [JsonSerializable(typeof(LaunchReportPhase))]
 [JsonSerializable(typeof(LaunchReport))]
 

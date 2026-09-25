@@ -370,6 +370,32 @@ public sealed class ServerClient : IServerClient, IDisposable
         GetAsync<SaveUploadTarget>(Endpoints.GameAccountSaveUpload(gameId, leaseId), AuthMode.Agent, cancellationToken);
 
     /// <inheritdoc />
+    public Task<PlayerSettingsBundle?> GetPlayerSettingsAsync(Guid userId, Guid gameId, CancellationToken cancellationToken) =>
+        GetOrNoContentAsync<PlayerSettingsBundle>(Endpoints.UserGameSetting(userId, gameId), AuthMode.Agent, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<SaveUploadTarget> GetPlayerSettingsUploadTargetAsync(Guid userId, Guid gameId, CancellationToken cancellationToken) =>
+        PostEmptyAsync<SaveUploadTarget>(Endpoints.UserGameSettingUploadTarget(userId, gameId), AuthMode.Agent, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<PlayerSettingsBundle> CommitPlayerSettingsAsync(Guid userId, Guid gameId, PlayerSettingsCommitRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return SendJsonAsync<PlayerSettingsCommitRequest, PlayerSettingsBundle>(HttpMethod.Put, Endpoints.UserGameSetting(userId, gameId), request, AuthMode.Agent, null, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task<PlayerSettingsListResponse> ListPlayerSettingsAsync(Guid userId, CancellationToken cancellationToken) =>
+        GetAsync<PlayerSettingsListResponse>(Endpoints.UserGameSettings(userId), AuthMode.User, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task DeletePlayerSettingsAsync(Guid userId, Guid gameId, CancellationToken cancellationToken)
+    {
+        using var response = await SendAsync(HttpMethod.Delete, Endpoints.UserGameSetting(userId, gameId), null, AuthMode.User, null, null, cancellationToken).ConfigureAwait(false);
+        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public Task SendLaunchReportAsync(Guid gameId, LaunchReport report, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(report);

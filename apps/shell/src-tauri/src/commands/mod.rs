@@ -79,6 +79,8 @@ pub const COMMAND_NAMES: &[&str] = &[
     "profile_stats",
     "profile_achievements",
     "profile_loyalty",
+    "profile_game_settings",
+    "profile_game_settings_reset",
     "settings_get",
     "settings_set",
     "settings_get_theme",
@@ -159,6 +161,8 @@ macro_rules! invoke_handler {
             crate::commands::session::profile_stats,
             crate::commands::session::profile_achievements,
             crate::commands::session::profile_loyalty,
+            crate::commands::session::profile_game_settings,
+            crate::commands::session::profile_game_settings_reset,
             crate::commands::settings::settings_get,
             crate::commands::settings::settings_set,
             crate::commands::settings::settings_get_theme,
@@ -305,7 +309,7 @@ mod tests {
         let handler: Box<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync> =
             Box::new(invoke_handler!());
         drop(handler);
-        assert_eq!(COMMAND_NAMES.len(), 64);
+        assert_eq!(COMMAND_NAMES.len(), 66);
         let mut sorted = COMMAND_NAMES.to_vec();
         sorted.sort_unstable();
         sorted.dedup();

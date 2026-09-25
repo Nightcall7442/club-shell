@@ -22,13 +22,14 @@ import { formatDate, formatNumber } from '@/lib/format';
 import { api } from '@/lib/tauri';
 import { useAuthStore, useNotificationsStore, useSettingsStore, useThemeStore } from '@/store';
 import Achievements from './Achievements';
+import GameSettings from './GameSettings';
 import Loyalty, { displayLevel } from './Loyalty';
 import Settings, { nudgeRange } from './Settings';
 import Stats from './Stats';
 
-export type ProfileTab = 'stats' | 'achievements' | 'loyalty' | 'settings';
+export type ProfileTab = 'stats' | 'achievements' | 'loyalty' | 'games' | 'settings';
 
-export const PROFILE_TABS: readonly ProfileTab[] = ['stats', 'achievements', 'loyalty', 'settings'];
+export const PROFILE_TABS: readonly ProfileTab[] = ['stats', 'achievements', 'loyalty', 'games', 'settings'];
 
 const isProfileTab = (v: string | null): v is ProfileTab => PROFILE_TABS.includes(v as ProfileTab);
 
@@ -350,6 +351,7 @@ export function ProfileScreen(): JSX.Element {
     { key: 'stats', label: t('profile.stats') },
     { key: 'achievements', label: t('profile.achievements') },
     { key: 'loyalty', label: t('profile.loyalty') },
+    { key: 'games', label: t('profile.gameSettings.tab') },
     { key: 'settings', label: t('profile.settings') },
   ];
 
@@ -362,6 +364,9 @@ export function ProfileScreen(): JSX.Element {
       break;
     case 'loyalty':
       panel = <Loyalty loyalty={data.loyalty} loading={data.loading} />;
+      break;
+    case 'games':
+      panel = <GameSettings />;
       break;
     case 'settings':
       panel = <Settings />;

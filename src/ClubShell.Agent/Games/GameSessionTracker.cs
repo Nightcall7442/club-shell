@@ -52,6 +52,7 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
     private readonly AccountPool _pool;
     private readonly AccountInjector _injector;
     private readonly CloudSaveSync _saves;
+    private readonly PlayerSettingsSync? _playerSettings;
     private readonly IGameEventSink _events;
     private readonly IOptionsMonitor<AgentSettings> _settings;
     private readonly IClock _clock;
@@ -68,8 +69,10 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
         IGameEventSink events,
         IOptionsMonitor<AgentSettings> settings,
         IClock clock,
-        ILogger<GameSessionTracker> logger)
+        ILogger<GameSessionTracker> logger,
+        PlayerSettingsSync? playerSettings = null)
     {
+        _playerSettings = playerSettings;
         _server = server;
         _pool = pool;
         _injector = injector;
@@ -232,6 +235,13 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
         catch (Exception ex) when (ex is ServerApiException or HttpRequestException or TaskCanceledException)
         {
             _logger.LogWarning(ex, "Exit launch report for {Title} not delivered", record.Game.Title);
+        }
+
+        // After the account is back in the pool and the exit is reported: the settings upload must not hold up the
+        // session-end cleanup, which only waits a few seconds for exit processing.
+        if (_playerSettings is not null)
+        {
+            await _playerSettings.SaveAsync(record.Game, record.Request.UserId, ct).ConfigureAwait(false);
         }
 
         try

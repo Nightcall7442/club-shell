@@ -425,6 +425,10 @@ public sealed class GamesSettings
     [Required]
     public CloudSaveSettings CloudSave { get; set; } = new();
 
+    /// <summary>A player's own game settings carried from PC to PC.</summary>
+    [Required]
+    public PlayerSettingsSyncSettings PlayerSettings { get; set; } = new();
+
     /// <summary>Launcher clients.</summary>
     [Required]
     public LaunchersSettings Launchers { get; set; } = new();
@@ -457,6 +461,21 @@ public sealed class CloudSaveSettings
     /// <summary>Maximum bundle size.</summary>
     [Range(1, 100000)]
     public int MaxMb { get; set; } = 512;
+}
+
+/// <summary><c>agent.json → games.playerSettings</c>.</summary>
+public sealed class PlayerSettingsSyncSettings
+{
+    /// <summary>Carry each player's game settings (<c>Game.SettingsPaths</c>) between PCs.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Local bundle directory (relative to ProgramData).</summary>
+    [Required]
+    public string Root { get; set; } = "cache\\player-settings";
+
+    /// <summary>Maximum bundle size; settings are small, anything bigger is a misconfigured path.</summary>
+    [Range(1, 1000)]
+    public int MaxMb { get; set; } = 16;
 }
 
 /// <summary>One launcher client (<c>agent.json → games.launchers.*</c>).</summary>

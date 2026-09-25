@@ -615,6 +615,10 @@ pub mod names {
         pub const ACHIEVEMENTS: &str = "profile.achievements";
         /// — → `Loyalty`.
         pub const LOYALTY: &str = "profile.loyalty";
+        /// — → `PlayerSettingsListResponse`: games whose settings follow the player.
+        pub const GAME_SETTINGS: &str = "profile.gameSettings";
+        /// `PlayerSettingsResetRequest` → `PlayerSettingsListResponse`.
+        pub const GAME_SETTINGS_RESET: &str = "profile.gameSettingsReset";
     }
 
     /// `settings.*`
@@ -2365,6 +2369,8 @@ agent_commands! {
     ProfileStats => names::profile::STATS, User;
     ProfileAchievements => names::profile::ACHIEVEMENTS, User;
     ProfileLoyalty => names::profile::LOYALTY, User;
+    ProfileGameSettings => names::profile::GAME_SETTINGS, User;
+    ProfileGameSettingsReset => names::profile::GAME_SETTINGS_RESET, User;
     SettingsGet => names::settings::GET, Hello;
     SettingsSet => names::settings::SET, Hello;
     /// Answered as `sys.pong`.
@@ -2788,7 +2794,7 @@ mod tests {
 
     #[test]
     fn agent_command_table_matches_ipc_protocol() {
-        assert_eq!(AgentCommand::ALL.len(), 63);
+        assert_eq!(AgentCommand::ALL.len(), 65);
         let expected: &[&str] = &[
             "auth.hello",
             "auth.login",
@@ -2834,6 +2840,8 @@ mod tests {
             "profile.stats",
             "profile.achievements",
             "profile.loyalty",
+            "profile.gameSettings",
+            "profile.gameSettingsReset",
             "settings.get",
             "settings.set",
             "sys.ping",

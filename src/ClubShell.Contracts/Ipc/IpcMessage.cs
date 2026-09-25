@@ -187,6 +187,12 @@ public static class IpcMessages
 
         /// <summary>— → <see cref="Users.Loyalty"/>.</summary>
         public const string Loyalty = "profile.loyalty";
+
+        /// <summary>— → <see cref="PlayerSettingsListResponse"/>: games whose settings follow the player.</summary>
+        public const string GameSettings = "profile.gameSettings";
+
+        /// <summary><see cref="PlayerSettingsResetRequest"/> → <see cref="PlayerSettingsListResponse"/>.</summary>
+        public const string GameSettingsReset = "profile.gameSettingsReset";
     }
 
     /// <summary><c>settings.*</c></summary>

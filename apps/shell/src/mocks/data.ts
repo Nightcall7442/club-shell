@@ -17,6 +17,7 @@ import type {
   Pc,
   PcInfo,
   PcMetrics,
+  PlayerSettingsItem,
   Policy,
   Product,
   QrLoginStart,
@@ -554,6 +555,20 @@ const GAME_SEEDS: GameSeed[] = [
   },
 ];
 
+/** Where each game keeps a player's own settings (`Game.settingsPaths`); Riot titles keep them in the Riot account. */
+const SETTINGS_PATHS: Record<string, string[]> = {
+  cs2: ['{installPath}\\game\\csgo\\cfg\\autoexec.cfg'],
+  dota2: ['{installPath}\\game\\dota\\cfg\\autoexec.cfg'],
+  fortnite: ['%LOCALAPPDATA%\\FortniteGame\\Saved\\Config\\WindowsClient'],
+  pubg: ['%LOCALAPPDATA%\\TslGame\\Saved\\Config\\WindowsNoEditor'],
+  gtav: ['%USERPROFILE%\\Documents\\Rockstar Games\\GTA V\\settings.xml'],
+  apex: ['%USERPROFILE%\\Saved Games\\Respawn\\Apex\\local'],
+  rocket: ['%USERPROFILE%\\Documents\\My Games\\Rocket League\\TAGame\\Config'],
+  minecraft: ['%APPDATA%\\.minecraft\\options.txt'],
+  ow2: ['%USERPROFILE%\\Documents\\Overwatch\\Settings'],
+  warzone: ['%USERPROFILE%\\Documents\\Call of Duty\\players'],
+};
+
 export const GAMES: Game[] = GAME_SEEDS.map((g) => ({
   id: uid(5, g.n),
   title: g.title,
@@ -577,6 +592,17 @@ export const GAMES: Game[] = GAME_SEEDS.map((g) => ({
   minSpec: { cpu: 'Intel Core i5-9400F', gpu: 'GeForce GTX 1660', ramMb: 8_192 },
   sizeGb: g.sizeGb,
   version: '1.0',
+  settingsPaths: SETTINGS_PATHS[g.seed] ?? null,
+}));
+
+/** Games whose settings the demo player already carries between PCs (`profile.gameSettings`). */
+export const PLAYER_GAME_SETTINGS: PlayerSettingsItem[] = GAMES.filter((g) =>
+  ['Counter-Strike 2', 'Fortnite'].includes(g.title),
+).map((g, i) => ({
+  gameId: g.id,
+  title: g.title,
+  sizeBytes: i === 0 ? 3_412 : 18_904,
+  updatedAt: ago(i === 0 ? 2 * 1440 : 6 * 1440),
 }));
 
 /** Category ids present in the catalogue (order of first appearance). */

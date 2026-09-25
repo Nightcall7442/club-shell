@@ -42,7 +42,27 @@ export default function CatalogPage(): JSX.Element {
   const [games, setGames] = useState<AdminGame[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  const [savingPaths, setSavingPaths] = useState(false);
   const s = useClubSettings();
+
+  const savePaths = async (): Promise<void> => {
+    if (!editing) return;
+    setSavingPaths(true);
+    try {
+      const paths = editing.text
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
+      const r = await clubApi.saveGameSettingsPaths(editing.id, paths);
+      setGames((list) => list.map((g) => (g.id === editing.id ? { ...g, settingsPaths: r.settingsPaths } : g)));
+      setEditing(null);
+    } catch (e) {
+      setError(describe(e));
+    } finally {
+      setSavingPaths(false);
+    }
+  };
 
   useEffect(() => {
     clubApi
@@ -87,6 +107,34 @@ export default function CatalogPage(): JSX.Element {
       />
       {error && <Note note={{ text: error, tone: 'err' }} />}
       {s.error && <Note note={{ text: s.error, tone: 'err' }} />}
+
+      {editing && (
+        <Section
+          title={t('Настройки игрока · {title}', { title: byId.get(editing.id)?.title ?? '' })}
+          actions={
+            <div className="flex gap-2">
+              <Button variant="ghost" onClick={() => setEditing(null)} disabled={savingPaths}>
+                {t('Отменить')}
+              </Button>
+              <Button variant="primary" onClick={() => void savePaths()} disabled={savingPaths}>
+                {savingPaths ? t('Сохраняем…') : t('Сохранить')}
+              </Button>
+            </div>
+          }
+        >
+          <p className="mb-3 text-sm text-muted">
+            {t(
+              'Файлы и папки, где игра хранит бинды, чувствительность и графику игрока. Агент сохраняет их после игры и возвращает игроку на любом ПК. По одному пути в строке; можно {installPath}, %LOCALAPPDATA%, %APPDATA%, %USERPROFILE%.',
+            )}
+          </p>
+          <textarea
+            aria-label={t('Пути к настройкам игрока')}
+            className="focus-ring h-32 w-full rounded-md border border-line bg-bg p-3 font-mono text-sm"
+            value={editing.text}
+            onChange={(e) => setEditing({ ...editing, text: e.target.value })}
+          />
+        </Section>
+      )}
 
       <Section bodyClassName="p-2">
         <Table
@@ -141,6 +189,23 @@ export default function CatalogPage(): JSX.Element {
                 ) : (
                   <span className="text-muted">{t('Нет')}</span>
                 ),
+            },
+            {
+              key: 'settings',
+              title: t('Настройки игрока'),
+              render: (g) => (
+                <button
+                  type="button"
+                  className="focus-ring rounded px-1.5 py-0.5 text-sm hover:bg-white/[0.04]"
+                  onClick={() => setEditing({ id: g.id, text: g.settingsPaths.join('\n') })}
+                >
+                  {g.settingsPaths.length > 0 ? (
+                    <span className="text-success">{t('Переносятся')}</span>
+                  ) : (
+                    <span className="text-muted">{t('Не заданы')}</span>
+                  )}
+                </button>
+              ),
             },
             {
               key: 'featured',

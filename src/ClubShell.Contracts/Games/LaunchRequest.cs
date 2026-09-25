@@ -201,3 +201,47 @@ public sealed record LaunchReport(
     LaunchReportPhase Phase,
     int? ExitCode = null,
     int? PlayedSec = null);
+
+/// <summary>
+/// A player's own settings for one game (<see cref="Game.SettingsPaths"/> zipped), stored on the server so they follow
+/// the player to any PC. Response of <c>GET /users/{userId}/game-settings/{gameId}</c> and of the commit.
+/// </summary>
+/// <param name="GameId">Game id.</param>
+/// <param name="Url">Download URL of the zip.</param>
+/// <param name="Sha256">Lower-case hex SHA-256 of the zip.</param>
+/// <param name="SizeBytes">Zip size.</param>
+/// <param name="UpdatedAt">When the settings were last saved.</param>
+public sealed record PlayerSettingsBundle(
+    Guid GameId,
+    string Url,
+    string Sha256,
+    long SizeBytes,
+    DateTimeOffset UpdatedAt);
+
+/// <summary>Body of <c>PUT /users/{userId}/game-settings/{gameId}</c> after the zip was uploaded to the target.</summary>
+/// <param name="UploadUrl">The URL the zip was <c>PUT</c> to (from <see cref="SaveUploadTarget"/>).</param>
+/// <param name="Sha256">Lower-case hex SHA-256 of the zip.</param>
+/// <param name="SizeBytes">Zip size.</param>
+public sealed record PlayerSettingsCommitRequest(
+    string UploadUrl,
+    string Sha256,
+    long SizeBytes);
+
+/// <summary>One game whose settings the player has saved.</summary>
+/// <param name="GameId">Game id.</param>
+/// <param name="Title">Game title.</param>
+/// <param name="SizeBytes">Stored size.</param>
+/// <param name="UpdatedAt">Last save.</param>
+public sealed record PlayerSettingsItem(
+    Guid GameId,
+    string Title,
+    long SizeBytes,
+    DateTimeOffset UpdatedAt);
+
+/// <summary>Response of <c>profile.gameSettings</c> / <c>GET /users/{userId}/game-settings</c>.</summary>
+/// <param name="Items">Games with saved settings, most recent first.</param>
+public sealed record PlayerSettingsListResponse(IReadOnlyList<PlayerSettingsItem> Items);
+
+/// <summary>Request of <c>profile.gameSettingsReset</c>: forget the saved settings of one game.</summary>
+/// <param name="GameId">Game id.</param>
+public sealed record PlayerSettingsResetRequest(Guid GameId);

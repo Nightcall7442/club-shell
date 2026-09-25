@@ -226,3 +226,16 @@ test('PC health opens repair tickets from telemetry; staff take them and close t
   // Thresholds are the owner's.
   await expect(page.getByText('Пороги')).toHaveCount(0);
 });
+
+test('the owner sees and edits where a game keeps player settings', async ({ page }) => {
+  await signIn(page, OWNER_PIN);
+  await page.goto('/#/catalog');
+  const cs2 = page.getByRole('row').filter({ hasText: 'Counter-Strike 2' });
+  await expect(cs2.getByRole('button', { name: 'Переносятся' })).toBeVisible();
+
+  const rust = page.getByRole('row').filter({ hasText: 'Rust' });
+  await rust.getByRole('button', { name: 'Не заданы' }).click();
+  await page.getByLabel('Пути к настройкам игрока').fill('%APPDATA%\\Rust\\cfg');
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+  await expect(rust.getByRole('button', { name: 'Переносятся' })).toBeVisible();
+});

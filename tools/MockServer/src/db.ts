@@ -1722,8 +1722,29 @@ function localArt(url: string | null | undefined): string | null | undefined {
   return hit ? `${PUBLIC_URL}/mock-art/${hit}` : url;
 }
 
+/**
+ * Where popular games keep a player's own settings (binds, sensitivity, graphics) — `Game.settingsPaths`, which the
+ * Agent carries from PC to PC per player. Riot titles keep them in the player's Riot account already.
+ */
+export const DEFAULT_SETTINGS_PATHS: Record<string, string[]> = {
+  cs2: ['{installPath}\\game\\csgo\\cfg\\autoexec.cfg'],
+  dota2: ['{installPath}\\game\\dota\\cfg\\autoexec.cfg'],
+  fortnite: ['%LOCALAPPDATA%\\FortniteGame\\Saved\\Config\\WindowsClient'],
+  apex: ['%USERPROFILE%\\Saved Games\\Respawn\\Apex\\local'],
+  pubg: ['%LOCALAPPDATA%\\TslGame\\Saved\\Config\\WindowsNoEditor'],
+  minecraft: ['%APPDATA%\\.minecraft\\options.txt'],
+  gta5: ['%USERPROFILE%\\Documents\\Rockstar Games\\GTA V\\settings.xml'],
+  rocketleague: ['%USERPROFILE%\\Documents\\My Games\\Rocket League\\TAGame\\Config'],
+  overwatch2: ['%USERPROFILE%\\Documents\\Overwatch\\Settings'],
+  fc24: ['%USERPROFILE%\\Documents\\FC 24\\settings'],
+  warzone: ['%USERPROFILE%\\Documents\\Call of Duty\\players'],
+};
+
 function withLocalArt(store: Db): Db {
+  const defaults = new Map(Object.entries(DEFAULT_SETTINGS_PATHS).map(([slug, paths]) => [sid(`game:${slug}`), paths]));
   for (const g of store.games) {
+    // Older stores predate settings paths: give the known games theirs.
+    if (g.settingsPaths === undefined && defaults.has(g.id)) g.settingsPaths = defaults.get(g.id) ?? null;
     g.coverUrl = localArt(g.coverUrl) ?? g.coverUrl;
     g.heroUrl = localArt(g.heroUrl) ?? g.heroUrl;
   }

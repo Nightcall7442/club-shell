@@ -471,6 +471,8 @@ export interface AdminGame {
   category: string[];
   hidden: boolean;
   featured: boolean;
+  /** Where the game keeps a player's own settings (carried from PC to PC per player). */
+  settingsPaths: string[];
 }
 
 export interface PriceQuote {
@@ -572,6 +574,8 @@ export const clubApi = {
   receiveProduct: (id: string, qty: number): Promise<unknown> => post(`/admin/products/${id}/receive`, { qty }),
 
   games: (): Promise<{ items: AdminGame[]; order: string[] }> => call('/admin/games'),
+  saveGameSettingsPaths: (id: string, settingsPaths: string[]): Promise<{ settingsPaths: string[] }> =>
+    patch(`/admin/games/${id}`, { settingsPaths }),
 
   reports: (days: number): Promise<Reports> => call(`/admin/reports?days=${days}`),
   health: (): Promise<HealthReport> => call('/admin/health'),

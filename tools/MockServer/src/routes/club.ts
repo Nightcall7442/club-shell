@@ -16,6 +16,7 @@ import {
   bool,
   db,
   errors,
+  findGame,
   findPc,
   findTariff,
   findUser,
@@ -645,12 +646,29 @@ export function clubRoutes(app: FastifyInstance): void {
         category: g.category,
         hidden: c.catalog.hidden.includes(g.id),
         featured: c.catalog.featured.includes(g.id),
+        settingsPaths: g.settingsPaths ?? [],
       })),
       order: c.catalog.order,
     };
   });
 
-  // ------------------------------------------------------------------------------------------------ reports
+  /** Where a game keeps a player's own settings, carried from PC to PC per player (`Game.settingsPaths`). */
+  app.patch<{ Params: { id: string } }>('/admin/games/:id', async (req) => {
+    requireStaff(req, 'owner');
+    const game = findGame(req.params.id);
+    if (!game) throw errors.notFound('game');
+    const raw = body(req)['settingsPaths'];
+    if (!Array.isArray(raw)) throw errors.validation('settingsPaths', 'array');
+    const paths = raw
+      .filter((p): p is string => typeof p === 'string')
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0 && p.length <= 260)
+      .slice(0, 10);
+    game.settingsPaths = paths.length > 0 ? paths : null;
+    bumpCatalog();
+    return { settingsPaths: game.settingsPaths ?? [] };
+  });
+
   // ------------------------------------------------------------------------------------------------ PC health
   /** Every PC's health (score, live and usual temperatures, FPS, last 24 h, problems) and the repair tickets. */
   app.get('/admin/health', async (req) => {
@@ -725,6 +743,7 @@ export function clubRoutes(app: FastifyInstance): void {
     };
   });
 
+  // ------------------------------------------------------------------------------------------------ reports
   app.get<{ Querystring: { days?: string } }>('/admin/reports', async (req) => {
     requireStaff(req, 'owner');
     const days = Math.min(90, Math.max(1, Number(req.query.days ?? 7) || 7));

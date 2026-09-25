@@ -794,6 +794,8 @@ Default `roomId` when omitted: `pc:<pcId>` (support chat with admins).
 #### `profile.stats` (auth: user) — Request: — Response: `UserStats`. Errors: `agentOffline`.
 #### `profile.achievements` (auth: user) — Request: — Response: `{ items: Achievement[] }`. Errors: `agentOffline`.
 #### `profile.loyalty` (auth: user) — Request: — Response: `Loyalty`. Errors: `agentOffline`.
+#### `profile.gameSettings` (auth: user) — Request: — Response: `{ items: PlayerSettingsItem[] }` — games whose settings (binds, sensitivity, graphics) follow the player between PCs. Errors: `agentOffline`.
+#### `profile.gameSettingsReset` (auth: user) — Request: `{ gameId: uuid }` — Response: `{ items: PlayerSettingsItem[] }` (what is left). Errors: `agentOffline`, `notFound`.
 
 ### 7.11 settings
 

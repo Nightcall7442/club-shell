@@ -1,5 +1,12 @@
 /** Uzbek and English lines of the console, keyed by the Russian source text (see `i18n.ts`). */
 export const UZ: Record<string, string> = {
+  'Настройки игрока': 'Oʻyinchi sozlamalari',
+  'Настройки игрока · {title}': 'Oʻyinchi sozlamalari · {title}',
+  'Файлы и папки, где игра хранит бинды, чувствительность и графику игрока. Агент сохраняет их после игры и возвращает игроку на любом ПК. По одному пути в строке; можно {installPath}, %LOCALAPPDATA%, %APPDATA%, %USERPROFILE%.':
+    'Oʻyin oʻyinchining tugmalari, sezgirligi va grafikasini saqlaydigan fayl va papkalar. Agent ularni oʻyindan keyin saqlaydi va istalgan kompyuterda oʻyinchiga qaytaradi. Har qatorda bitta yoʻl; {installPath}, %LOCALAPPDATA%, %APPDATA%, %USERPROFILE% ishlatish mumkin.',
+  'Пути к настройкам игрока': 'Oʻyinchi sozlamalari yoʻllari',
+  Переносятся: 'Koʻchiriladi',
+  'Не заданы': 'Belgilanmagan',
   'CPU за сутки': 'CPU bir sutkada',
   'CPU сейчас / обычно': 'CPU hozir / odatda',
   'FPS упал на {drop}%: было {before}, сейчас {today}': 'FPS {drop}% ga tushdi: {before} edi, hozir {today}',
@@ -507,6 +514,13 @@ export const UZ: Record<string, string> = {
   '№': '№',
 };
 export const EN: Record<string, string> = {
+  'Настройки игрока': 'Player settings',
+  'Настройки игрока · {title}': 'Player settings · {title}',
+  'Файлы и папки, где игра хранит бинды, чувствительность и графику игрока. Агент сохраняет их после игры и возвращает игроку на любом ПК. По одному пути в строке; можно {installPath}, %LOCALAPPDATA%, %APPDATA%, %USERPROFILE%.':
+    "Files and folders where the game keeps the player's binds, sensitivity and graphics. The Agent saves them after the game and gives them back to the player on any PC. One path per line; {installPath}, %LOCALAPPDATA%, %APPDATA%, %USERPROFILE% are allowed.",
+  'Пути к настройкам игрока': 'Player settings paths',
+  Переносятся: 'Carried',
+  'Не заданы': 'Not set',
   'CPU за сутки': 'CPU, 24 h',
   'CPU сейчас / обычно': 'CPU now / usual',
   'FPS упал на {drop}%: было {before}, сейчас {today}': 'FPS down {drop}%: was {before}, now {today}',

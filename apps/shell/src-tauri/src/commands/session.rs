@@ -11,6 +11,9 @@ use clubshell_protocol::commands::{
     TournamentsJoinRequest, TournamentsLeaderboardRequest, TournamentsLeaderboardResponse,
     TournamentsListRequest, TournamentsListResponse,
 };
+use clubshell_protocol::games::{
+    PlayerSettingsItem, PlayerSettingsListResponse, PlayerSettingsResetRequest,
+};
 use clubshell_protocol::session::{Session, SessionEndReason, SessionEndResult};
 use clubshell_protocol::user::{
     Achievement, Booking, Loyalty, ProfileUpdateRequest, Tournament, User, UserStats,
@@ -352,6 +355,34 @@ pub async fn profile_achievements(state: State<'_, AppState>) -> CmdResult<Vec<A
 #[tauri::command]
 pub async fn profile_loyalty(state: State<'_, AppState>) -> CmdResult<Loyalty> {
     state.agent.request(names::profile::LOYALTY, &()).await
+}
+
+/// `profile_game_settings` → `profile.gameSettings` (unwrapped `items`): games whose settings follow the player.
+#[tauri::command]
+pub async fn profile_game_settings(
+    state: State<'_, AppState>,
+) -> CmdResult<Vec<PlayerSettingsItem>> {
+    let resp: PlayerSettingsListResponse = state
+        .agent
+        .request(names::profile::GAME_SETTINGS, &())
+        .await?;
+    Ok(resp.items)
+}
+
+/// `profile_game_settings_reset` → `profile.gameSettingsReset`: forget one game's saved settings.
+#[tauri::command]
+pub async fn profile_game_settings_reset(
+    state: State<'_, AppState>,
+    game_id: Uuid,
+) -> CmdResult<Vec<PlayerSettingsItem>> {
+    let resp: PlayerSettingsListResponse = state
+        .agent
+        .request(
+            names::profile::GAME_SETTINGS_RESET,
+            &PlayerSettingsResetRequest { game_id },
+        )
+        .await?;
+    Ok(resp.items)
 }
 
 fn validate_profile_patch(mut patch: ProfileUpdateRequest) -> CmdResult<ProfileUpdateRequest> {

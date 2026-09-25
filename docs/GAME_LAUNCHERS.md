@@ -278,6 +278,19 @@ reason, cloudSave)` → `POST /games/{id}/accounts/{leaseId}/release`).
 | Upload | `ZipFile.CreateFromDirectory` → sha256 → `IServerClient.GetSaveUploadTargetAsync(gameId, leaseId)` → HTTP PUT `application/zip` → `CloudSaveUpload(url, sha256, size)` returned to the lease release |
 | Failure policy | every failure is logged and swallowed: saves never block a launch or an exit |
 
+### 7.1 Player settings (`PlayerSettingsSync`)
+
+Cloud saves follow the pooled *account*; a player's own binds, sensitivity and graphics follow the *player*.
+
+| Item | Value |
+|------|-------|
+| Enabled | `agent.json → games.playerSettings.enabled` (default on); only games with `Game.settingsPaths` |
+| Paths | `Game.settingsPaths`: file or directory templates, `%LOCALAPPDATA%`, `%APPDATA%`, `%USERPROFILE%`, `{installPath}`; unresolvable ones are skipped |
+| Bundle | `SettingsBundle`: zip with `<index>/f/<file>` for a file template and `<index>/d/<relative path>` for a directory template; entries escaping their target or of an unknown index are ignored on restore |
+| Restore | before launch, after the account injection and the cloud save: `GET /users/{userId}/game-settings/{gameId}` → download (bounded by `maxMb`, default 16) → SHA-256 → unpack over the PC's own files |
+| Save | after exit, before the lease release: pack → `POST …/upload-target` → `PUT` zip → `PUT /users/{userId}/game-settings/{gameId}` |
+| Failure policy | logged and swallowed: a launch or an exit never waits on settings |
+
 ---
 
 ## 8. Kill semantics

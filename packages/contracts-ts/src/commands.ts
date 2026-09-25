@@ -604,6 +604,10 @@ export const IpcNames = {
     Achievements: 'profile.achievements',
     /** — → `Loyalty`. */
     Loyalty: 'profile.loyalty',
+    /** — → `PlayerSettingsListResponse`: games whose settings follow the player. */
+    GameSettings: 'profile.gameSettings',
+    /** `PlayerSettingsResetRequest` → `PlayerSettingsListResponse`. */
+    GameSettingsReset: 'profile.gameSettingsReset',
   },
   /** `settings.*` */
   Settings: {
@@ -1298,6 +1302,10 @@ export const AgentCommand = {
   ProfileAchievements: 'profile.achievements',
   /** `profile.loyalty` */
   ProfileLoyalty: 'profile.loyalty',
+  /** `profile.gameSettings` */
+  ProfileGameSettings: 'profile.gameSettings',
+  /** `profile.gameSettingsReset` */
+  ProfileGameSettingsReset: 'profile.gameSettingsReset',
   /** `settings.get` */
   SettingsGet: 'settings.get',
   /** `settings.set` */
@@ -2114,7 +2122,15 @@ export interface PolicyReloadResponse {
 
 // ---- BEGIN MANUAL ----
 import type { Notification, ShowAdsArgs } from './events.js';
-import type { AntiCheatReport, Game, GameInstallStatus, LaunchRequest, LaunchResult } from './games.js';
+import type {
+  AntiCheatReport,
+  Game,
+  GameInstallStatus,
+  LaunchRequest,
+  LaunchResult,
+  PlayerSettingsListResponse,
+  PlayerSettingsResetRequest,
+} from './games.js';
 import type { PcInfo } from './pc.js';
 import type { SessionEndResult, SessionEndedEvent, SessionStartedEvent } from './session.js';
 import type { Loyalty, ProfileUpdateRequest, QrLoginStart, UserStats } from './user.js';
@@ -2291,6 +2307,8 @@ const USER_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
   AgentCommand.ProfileStats,
   AgentCommand.ProfileAchievements,
   AgentCommand.ProfileLoyalty,
+  AgentCommand.ProfileGameSettings,
+  AgentCommand.ProfileGameSettingsReset,
 ]);
 
 const SESSION_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
@@ -2409,6 +2427,8 @@ export interface IpcRequestMap {
   [IpcNames.Profile.Stats]: { request: null; response: UserStats };
   [IpcNames.Profile.Achievements]: { request: null; response: ProfileAchievementsResponse };
   [IpcNames.Profile.Loyalty]: { request: null; response: Loyalty };
+  [IpcNames.Profile.GameSettings]: { request: null; response: PlayerSettingsListResponse };
+  [IpcNames.Profile.GameSettingsReset]: { request: PlayerSettingsResetRequest; response: PlayerSettingsListResponse };
   [IpcNames.Settings.Get]: { request: null; response: ShellSettings };
   [IpcNames.Settings.Set]: { request: SettingsSetRequest; response: ShellSettings };
   [IpcNames.Sys.Ping]: { request: SysPingRequest; response: SysPongResponse };
