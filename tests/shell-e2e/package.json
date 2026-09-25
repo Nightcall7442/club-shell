@@ -2,7 +2,7 @@
   "name": "@clubshell/shell-e2e",
   "version": "1.0.0",
   "private": true,
-  "description": "Playwright end-to-end tests for the ClubShell kiosk UI, run against the Vite dev server in mock mode (VITE_MOCK=1)",
+  "description": "Playwright end-to-end tests: the ClubShell kiosk UI in mock mode (VITE_MOCK=1) and the admin console against a throwaway mock server",
   "type": "module",
   "scripts": {
     "test": "playwright test",

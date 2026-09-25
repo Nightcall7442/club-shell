@@ -249,6 +249,7 @@ function Login({ onDone }: { onDone: (staff: StaffMember, shift: Shift | null) =
           <button
             type="button"
             className="focus-ring h-14 rounded-md text-sm text-muted hover:text-text"
+            aria-label={t('Стереть')}
             onClick={() => setPin((p) => p.slice(0, -1))}
           >
             ⌫
@@ -379,6 +380,7 @@ export function App(): JSX.Element {
               <button
                 key={l}
                 type="button"
+                aria-pressed={l === lang}
                 onClick={() => setLang(l)}
                 className={clsx(
                   'focus-ring h-7 rounded px-2 font-mono text-[0.68rem] uppercase tracking-[0.12em]',

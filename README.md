@@ -272,7 +272,7 @@ Copy-Item .env.example .env
 | .NET | `dotnet build ClubShell.sln -c Release` · `dotnet test ClubShell.sln` |
 | Rust | `cargo build --release --workspace` · `cargo test --workspace` · `cargo lint` (clippy `-D warnings`) |
 | Web | `pnpm typecheck` · `pnpm lint` · `pnpm --filter @clubshell/shell build` · `pnpm tauri build` |
-| E2E | `pnpm test:e2e` (Playwright против `vite dev` в mock-режиме); `PW_CHANNEL=msedge` — прогон в установленном Edge/Chrome, если bundled Chromium не стартует |
+| E2E | `pnpm test:e2e` — Playwright: киоск против `vite dev` в mock-режиме, админка против отдельного mock-сервера (:8091) с чистой базой, dev-база не трогается; `PW_CHANNEL=msedge` — прогон в установленном Edge/Chrome, если bundled Chromium не стартует |
 | Контракты | `.\tools\scripts\gen-contracts-ts.ps1` · `.\tools\scripts\gen-contracts-rs.ps1` (`-Check` для CI) |
 | Установщик | `dotnet build installer/wix/ClubShell.Installer.wixproj -c Release -p:Version=<ver>` |
 | Выпуск | `package.ps1` → `sign.ps1` (Authenticode + RSA-PSS манифест) → `publish.ps1` (S3 / HTTP / папка) |
@@ -283,14 +283,14 @@ Copy-Item .env.example .env
 
 | Что | Сколько |
 |---|---|
-| xUnit | 424 проверки в 4 проектах (Contracts 89, Core 181, Windows 62, Agent 92), включая сквозной тест именованного канала |
+| xUnit | 429 проверок в 4 проектах (Contracts 89, Core 181, Windows 62, Agent 97), включая сквозной тест именованного канала |
 | Компиляция .NET | 8 проектов, Roslyn + NetAnalyzers, `/warnaserror`, 0 предупреждений |
 | TypeScript | `tsc --noEmit` во всех пакетах, `vite build` без предупреждений о размере чанков |
-| Интерфейс | 12 разделов, прогон в mock-режиме на 1600×900 / 1920×1080; Playwright e2e — 16 проверок (вход, каталог, HUD в игре) |
+| Интерфейс | 12 разделов, прогон в mock-режиме на 1600×900 / 1920×1080; Playwright e2e — 28 проверок: киоск 21 (вход, каталог, HUD в игре, оформление клуба), админка 7 (PIN и роли, язык, смена, расчёт цены, экран игрока) |
 | Локализация | 1175 ключей, идентичные наборы в `en` / `ru` / `uz` |
 | Протоколы | 63 IPC-запроса, 18 событий, 19 серверных команд, 80 Tauri-команд — покрыты обработчиками и документацией |
 
-Что **не** собиралось на машине автора: `cargo` (крейты Rust проверены статически), WiX, `tauri build`, запуск Playwright. Первую сборку этих частей выполняет CI; список известных долгов — в [docs/ROADMAP.md](docs/ROADMAP.md).
+Что **не** собиралось на машине автора: WiX и `tauri build`. Первую сборку этих частей выполняет CI; список известных долгов — в [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
 
@@ -380,6 +380,6 @@ tools/scripts/         build · dev · package · sign · publish · setup-dev-v
 
 The **admin console** (`apps/admin`, `pnpm admin` → http://localhost:1421; owner PIN `0000`, cashier `1111`) lets each club owner configure their own club without a developer: counter and hall map, shifts with X reports and cash count on close, clients (groups, loyalty tiers, blacklist, minor curfew), pricing (weekday/holiday rates, happy hours, top-up bonuses, promo codes — the single best discount applies), a grid hall editor, stock, game catalogue order and visibility, the player screen (branding, sections, banners, rules with live preview), “if → then” automation rules, Telegram and webhooks, reports with an hourly heat map, and staff roles. UI in Russian, Uzbek and English.
 
-Try the UI in a browser: `pnpm install && pnpm mock` then `VITE_MOCK=1 pnpm --filter @clubshell/shell dev` → http://localhost:1420 (login `demo` / `1234`). Full Windows dev loop: `tools/scripts/dev.ps1`. Verified here: all 8 .NET projects compile with `/warnaserror`, 424 xUnit tests pass, `tsc` and `vite build` are clean; Rust, WiX and Playwright runs are left to CI.
+Try the UI in a browser: `pnpm install && pnpm mock` then `VITE_MOCK=1 pnpm --filter @clubshell/shell dev` → http://localhost:1420 (login `demo` / `1234`). Full Windows dev loop: `tools/scripts/dev.ps1`. Verified here: all 8 .NET projects compile with `/warnaserror`, 429 xUnit tests pass, `tsc` and `vite build` are clean, 28 Playwright e2e checks cover the kiosk and the admin console; WiX and `tauri build` are left to CI.
 
 </details>

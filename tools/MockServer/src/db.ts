@@ -1661,7 +1661,8 @@ function seed(): Db {
 // Persistence
 // ---------------------------------------------------------------------------------------------------------------------
 
-const DB_FILE = fileURLToPath(new URL('../.mock-db.json', import.meta.url));
+// `MOCK_DB_FILE` points a throwaway server (the admin e2e tests) at its own file so it never touches the dev database.
+const DB_FILE = process.env['MOCK_DB_FILE'] ?? fileURLToPath(new URL('../.mock-db.json', import.meta.url));
 let dirty = false;
 let saveTimer: NodeJS.Timeout | null = null;
 
