@@ -413,6 +413,36 @@ export interface HealthReport {
   tickets: HealthTicket[];
 }
 
+export interface NetworkClubReport {
+  id: string;
+  name: string;
+  city: string;
+  address: string;
+  /** The club this server runs (real numbers). */
+  local: boolean;
+  /** Played by the demo simulator, not by real Agents. */
+  simulated: boolean;
+  pcs: number;
+  busyNow: number;
+  revenueToday: number;
+  revenue: number;
+  sessions: number;
+  avgCheck: number;
+  byDay: number[];
+  hourly: number[];
+  repairs: number;
+  signals: number;
+  shift: { staffName: string; since: string } | null;
+}
+
+export interface NetworkReport {
+  name: string;
+  days: number;
+  clubs: NetworkClubReport[];
+  totals: { clubs: number; pcs: number; busyNow: number; revenue: number; revenueToday: number; sessions: number };
+  players: { total: number; balance: number; multiClub: number };
+}
+
 export interface ControlReport {
   from: string;
   to: string;
@@ -578,6 +608,9 @@ export const clubApi = {
     patch(`/admin/games/${id}`, { settingsPaths }),
 
   reports: (days: number): Promise<Reports> => call(`/admin/reports?days=${days}`),
+  network: (days: number): Promise<NetworkReport> => call(`/admin/network?days=${days}`),
+  addNetworkClub: (input: { name: string; city: string; address: string; pcs: number }): Promise<unknown> =>
+    post('/admin/network/clubs', input),
   health: (): Promise<HealthReport> => call('/admin/health'),
   updateTicket: (id: string, status: TicketStatus, note?: string): Promise<{ ticket: HealthTicket }> =>
     patch(`/admin/health/tickets/${id}`, { status, note: note ?? null }),

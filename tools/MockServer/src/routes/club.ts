@@ -56,6 +56,7 @@ import {
 } from '../club.js';
 import { broadcast, pushToUser } from '../ws.js';
 import { flagsFor, record, summaries } from '../control.js';
+import { addClub, network, networkReport } from '../network.js';
 import { DEFAULT_HEALTH, diagnose, health, updateTicket, type TicketStatus } from '../health.js';
 
 const LEGACY_TOKEN = process.env['MOCK_ADMIN_TOKEN'] ?? 'admin-dev-token';
@@ -741,6 +742,34 @@ export function clubRoutes(app: FastifyInstance): void {
       flags: staffId ? flags.filter((f) => f.staffId === staffId) : flags,
       log: (staffId ? inPeriod.filter((e) => e.staffId === staffId) : inPeriod).slice(0, 300),
     };
+  });
+
+  // ------------------------------------------------------------------------------------------------ network
+  /** Every club of the owner's network side by side, and the shared player base. */
+  app.get<{ Querystring: { days?: string } }>('/admin/network', async (req) => {
+    requireStaff(req, 'owner');
+    const days = Math.min(90, Math.max(1, Number.parseInt(req.query.days ?? '7', 10) || 7));
+    return networkReport(days);
+  });
+
+  app.post('/admin/network/clubs', async (req) => {
+    requireStaff(req, 'owner');
+    const b = body(req);
+    const created = addClub({
+      name: str(b, 'name', 64),
+      city: str(b, 'city', 64),
+      address: optStr(b, 'address', 128) ?? '',
+      pcs: int(b, 'pcs', 1, 1000),
+    });
+    return { club: created };
+  });
+
+  app.patch('/admin/network', async (req) => {
+    requireStaff(req, 'owner');
+    const n = network();
+    n.name = str(body(req), 'name', 64);
+    markDirty();
+    return { name: n.name };
   });
 
   // ------------------------------------------------------------------------------------------------ reports

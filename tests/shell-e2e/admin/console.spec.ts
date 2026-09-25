@@ -239,3 +239,25 @@ test('the owner sees and edits where a game keeps player settings', async ({ pag
   await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
   await expect(rust.getByRole('button', { name: 'Переносятся' })).toBeVisible();
 });
+
+test('the owner sees every club of the network and adds one', async ({ page, request }) => {
+  const cashier = await tokenFor(request, CASHIER_PIN);
+  expect((await request.get(`${API}/admin/network`, { headers: auth(cashier) })).status()).toBe(403);
+
+  await signIn(page, OWNER_PIN);
+  await page.goto('/#/network');
+  await expect(page.getByRole('heading', { name: /Сеть клубов/ })).toBeVisible();
+  // The local club (renamed by an earlier test) plus the two demo neighbours.
+  await expect(page.getByRole('article')).toHaveCount(3);
+  await expect(page.getByText('этот сервер')).toHaveCount(1);
+  for (const name of ['CyberArena Чиланзар', 'CyberArena Самарканд']) {
+    await expect(page.getByRole('article', { name })).toBeVisible();
+  }
+
+  await page.getByLabel('Название').fill('CyberArena Бухара');
+  await page.getByLabel('Город').fill('Бухара');
+  await page.getByRole('button', { name: 'Добавить', exact: true }).click();
+  const added = page.getByRole('article', { name: 'CyberArena Бухара' });
+  await expect(added).toBeVisible();
+  await expect(added.getByText('играют сейчас')).toBeVisible();
+});
