@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import clsx from 'clsx';
 import type { AutomationRule, RuleAction, RuleTrigger } from '@/api';
-import { t } from '@/i18n';
+import { dateLocale, t } from '@/i18n';
 import { money } from '@/format';
 import { useClubSettings } from '@/settings';
 import { Button, Field, Input, MoneyInput, NumberInput, PageHeader, SaveBar, Section, Toggle, inputCls } from '@/ui';
@@ -165,7 +165,7 @@ function problem(d: Draft): string | null {
 }
 
 function dateTime(iso: string): string {
-  return new Date(iso).toLocaleString('ru-RU', {
+  return new Date(iso).toLocaleString(dateLocale(), {
     day: '2-digit',
     month: '2-digit',
     hour: '2-digit',

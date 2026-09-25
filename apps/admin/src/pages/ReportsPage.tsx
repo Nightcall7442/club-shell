@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import clsx from 'clsx';
 import { clubApi, type Reports } from '@/api';
 import { describe } from '@/errors';
-import { t } from '@/i18n';
+import { dateLocale, t } from '@/i18n';
 import { money } from '@/format';
 import { Note, PageHeader, Section, Table } from '@/ui';
 
@@ -46,7 +46,7 @@ function shortDate(iso: string): string {
 
 function dateTime(iso: string | null): string {
   if (!iso) return '…';
-  return new Date(iso).toLocaleString('ru-RU', {
+  return new Date(iso).toLocaleString(dateLocale(), {
     day: '2-digit',
     month: '2-digit',
     hour: '2-digit',

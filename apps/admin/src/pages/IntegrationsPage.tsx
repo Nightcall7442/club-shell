@@ -6,7 +6,7 @@ import { useState } from 'react';
 import clsx from 'clsx';
 import { clubApi, type ClubEvent, type Webhook } from '@/api';
 import { describe } from '@/errors';
-import { t } from '@/i18n';
+import { dateLocale, t } from '@/i18n';
 import { useClubSettings } from '@/settings';
 import { Button, Field, Input, MoneyInput, Note, PageHeader, SaveBar, Section, Table, Toggle } from '@/ui';
 
@@ -23,7 +23,7 @@ const EVENT_LABEL: Record<ClubEvent, string> = {
 const ALL_EVENTS = Object.keys(EVENT_LABEL) as ClubEvent[];
 
 function dateTime(iso: string): string {
-  return new Date(iso).toLocaleString('ru-RU', {
+  return new Date(iso).toLocaleString(dateLocale(), {
     day: '2-digit',
     month: '2-digit',
     hour: '2-digit',

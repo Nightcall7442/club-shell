@@ -492,7 +492,7 @@ export function MapPage(): JSX.Element {
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
       {error && <p className="rounded-md bg-danger/10 px-3 py-1.5 text-sm text-danger">{error}</p>}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_24rem]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_19rem] xl:grid-cols-[minmax(0,1fr)_24rem]">
         <div className="flex min-h-0 flex-col gap-5">
           <div className="panel min-h-0 flex-1 overflow-y-auto p-5">
             <h1 className="mb-5 font-display text-2xl font-light tracking-tight">{t('Карта зала')}</h1>
@@ -526,12 +526,12 @@ export function MapPage(): JSX.Element {
           </div>
 
           {/* Legend that counts: every status, how many seats are in it right now */}
-          <ul className="panel grid shrink-0 grid-cols-3 divide-x divide-line xl:grid-cols-6">
+          <ul className="panel grid shrink-0 grid-cols-2 divide-x divide-line xl:grid-cols-6">
             {LEGEND_ORDER.map((k) => (
-              <li key={k} className="flex items-center justify-between gap-3 px-4 py-3">
-                <span className="flex items-center gap-2.5 text-sm">
-                  <span className={clsx('h-3 w-3 rounded-[3px] border-2 bg-transparent', STATUS[k].cell)} />
-                  {t(STATUS[k].label)}
+              <li key={k} className="flex min-w-0 items-center justify-between gap-2 px-3 py-3 xl:gap-3 xl:px-4">
+                <span className="flex min-w-0 items-center gap-2.5 text-sm">
+                  <span className={clsx('h-3 w-3 shrink-0 rounded-[3px] border-2 bg-transparent', STATUS[k].cell)} />
+                  <span className="truncate">{t(STATUS[k].label)}</span>
                 </span>
                 <span className="num-dot text-lg leading-none">{String(counts.get(k) ?? 0).padStart(2, '0')}</span>
               </li>

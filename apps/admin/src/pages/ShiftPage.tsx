@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from 'react';
 import clsx from 'clsx';
 import { clubApi, type Shift, type ShiftTotals } from '@/api';
 import { describe } from '@/errors';
-import { t } from '@/i18n';
+import { dateLocale, t } from '@/i18n';
 import { money } from '@/format';
 import { Button, Field, MoneyInput, Note, PageHeader, Section, Table } from '@/ui';
 
@@ -21,7 +21,7 @@ const uzs = (minor: number | null | undefined): string =>
 
 function dateTime(iso: string | null): string {
   if (!iso) return '—';
-  return new Date(iso).toLocaleString('ru-RU', {
+  return new Date(iso).toLocaleString(dateLocale(), {
     day: '2-digit',
     month: '2-digit',
     hour: '2-digit',
@@ -30,7 +30,7 @@ function dateTime(iso: string | null): string {
 }
 
 function time(iso: string): string {
-  return new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  return new Date(iso).toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' });
 }
 
 /** One stat cell: mono label, dot-matrix figure, small unit. */
