@@ -59,6 +59,7 @@
     "killGraceSec": 10,
     "accountPool": { "enabled": true, "leaseTtlSec": 14400, "releaseOnExit": true },
     "cloudSave": { "enabled": true, "root": "cache\\saves", "maxMb": 512 },
+    "playerSettings": { "enabled": true, "root": "cache\\player-settings", "maxMb": 16 },
     "launchers": {
       "steam": { "exePath": "C:\\Program Files (x86)\\Steam\\steam.exe" },
       "epic": { "exePath": "C:\\Program Files (x86)\\Epic Games\\Launcher\\Portal\\Binaries\\Win32\\EpicGamesLauncher.exe" },

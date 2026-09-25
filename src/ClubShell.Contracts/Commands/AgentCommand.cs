@@ -144,6 +144,12 @@ public enum AgentCommand
     /// <summary><c>profile.loyalty</c></summary>
     ProfileLoyalty,
 
+    /// <summary><c>profile.gameSettings</c></summary>
+    ProfileGameSettings,
+
+    /// <summary><c>profile.gameSettingsReset</c></summary>
+    ProfileGameSettingsReset,
+
     /// <summary><c>settings.get</c></summary>
     SettingsGet,
 
@@ -280,6 +286,8 @@ public static class AgentCommands
         AgentCommand.ProfileStats => IpcMessages.Profile.Stats,
         AgentCommand.ProfileAchievements => IpcMessages.Profile.Achievements,
         AgentCommand.ProfileLoyalty => IpcMessages.Profile.Loyalty,
+        AgentCommand.ProfileGameSettings => IpcMessages.Profile.GameSettings,
+        AgentCommand.ProfileGameSettingsReset => IpcMessages.Profile.GameSettingsReset,
         AgentCommand.SettingsGet => IpcMessages.Settings.Get,
         AgentCommand.SettingsSet => IpcMessages.Settings.Set,
         AgentCommand.SysPing => IpcMessages.Sys.Ping,
@@ -319,7 +327,8 @@ public static class AgentCommands
             or AgentCommand.BookingReserve or AgentCommand.BookingCancel
             or AgentCommand.TournamentsJoin
             or AgentCommand.ProfileGet or AgentCommand.ProfileUpdate or AgentCommand.ProfileStats
-            or AgentCommand.ProfileAchievements or AgentCommand.ProfileLoyalty => IpcAuthLevel.User,
+            or AgentCommand.ProfileAchievements or AgentCommand.ProfileLoyalty
+            or AgentCommand.ProfileGameSettings or AgentCommand.ProfileGameSettingsReset => IpcAuthLevel.User,
 
         AgentCommand.SessionPause or AgentCommand.SessionResume or AgentCommand.SessionEnd
             or AgentCommand.SessionExtend or AgentCommand.SessionLock or AgentCommand.SessionUnlock

@@ -34,6 +34,7 @@ import { tickHealth } from './health.js';
 import { authRoutes } from './routes/auth.js';
 import { chatRoutes, tickChat } from './routes/chat.js';
 import { gamesRoutes } from './routes/games.js';
+import { playerSettingsRoutes } from './routes/playerSettings.js';
 import { pcsRoutes } from './routes/pcs.js';
 import { sessionRoutes, tickSessions } from './routes/session.js';
 import { shopRoutes, tickShop } from './routes/shop.js';
@@ -312,6 +313,7 @@ export async function buildApp(opts: Options): Promise<FastifyInstance> {
       clubRoutes(api);
       sessionRoutes(api);
       gamesRoutes(api);
+      playerSettingsRoutes(api);
       walletRoutes(api);
       shopRoutes(api);
       chatRoutes(api);

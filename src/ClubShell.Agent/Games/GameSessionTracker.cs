@@ -52,6 +52,7 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
     private readonly AccountPool _pool;
     private readonly AccountInjector _injector;
     private readonly CloudSaveSync _saves;
+    private readonly PlayerSettingsSync? _playerSettings;
     private readonly IGameEventSink _events;
     private readonly IOptionsMonitor<AgentSettings> _settings;
     private readonly IClock _clock;
@@ -68,8 +69,10 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
         IGameEventSink events,
         IOptionsMonitor<AgentSettings> settings,
         IClock clock,
-        ILogger<GameSessionTracker> logger)
+        ILogger<GameSessionTracker> logger,
+        PlayerSettingsSync? playerSettings = null)
     {
+        _playerSettings = playerSettings;
         _server = server;
         _pool = pool;
         _injector = injector;
@@ -204,6 +207,11 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
             {
                 _logger.LogWarning(ex, "Credential restore failed for {Title}", record.Game.Title);
             }
+        }
+
+        if (_playerSettings is not null)
+        {
+            await _playerSettings.SaveAsync(record.Game, record.Request.UserId, ct).ConfigureAwait(false);
         }
 
         if (record.Lease is { } lease)

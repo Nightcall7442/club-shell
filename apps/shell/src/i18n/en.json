@@ -456,7 +456,8 @@
     "thisPc": "This PC",
     "selectGame": "Select a game",
     "resultsCount": "{{count}} shown",
-    "installedFilterOn": "Showing installed games only"
+    "installedFilterOn": "Showing installed games only",
+    "settingsFollow": "Your binds, sensitivity and graphics load on this PC and are saved after the game"
   },
   "apps": {
     "title": "Apps",
@@ -878,7 +879,17 @@
     "loyaltyLevel": "Loyalty level",
     "rankValue": "#{{rank}}",
     "achievementsUnlocked": "{{unlocked}} of {{total}} unlocked",
-    "noPerks": "Perks unlock at the next level"
+    "noPerks": "Perks unlock at the next level",
+    "gameSettings": {
+      "tab": "Game settings",
+      "title": "Game settings",
+      "hint": "Binds, sensitivity and graphics are saved after every game and wait for you at any PC in the club — sit down and play like at home.",
+      "emptyTitle": "Nothing yet",
+      "emptyHint": "Play CS2, Dota 2, Fortnite or another game — your settings will be saved on their own.",
+      "saved": "Saved {{when}} · {{size}}",
+      "reset": "Reset",
+      "resetFor": "Reset {{title}} settings"
+    }
   },
   "support": {
     "title": "Support",

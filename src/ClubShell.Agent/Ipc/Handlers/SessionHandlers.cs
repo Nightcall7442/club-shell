@@ -18,6 +18,8 @@ using ClubShell.Core.Configuration;
 using ClubShell.Core.Http;
 using ClubShell.Core.Security;
 using Microsoft.Extensions.Options;
+using PlayerSettingsListResponse = ClubShell.Contracts.Games.PlayerSettingsListResponse;
+using PlayerSettingsResetRequest = ClubShell.Contracts.Games.PlayerSettingsResetRequest;
 using PlaySession = ClubShell.Contracts.Sessions.Session;
 
 namespace ClubShell.Agent.Ipc.Handlers;
@@ -629,6 +631,19 @@ public sealed class UserDomainHandlers : IIpcHandlerGroup
         dispatcher.RegisterNoPayload<UserStats>(IpcMessages.Profile.Stats, (context, cancellationToken) => Online(() => _server.GetUserStatsAsync(context.RequireUser().Id, cancellationToken)));
         dispatcher.RegisterNoPayload<ProfileAchievementsResponse>(IpcMessages.Profile.Achievements, (context, cancellationToken) => Online(() => _server.GetUserAchievementsAsync(context.RequireUser().Id, cancellationToken)));
         dispatcher.RegisterNoPayload<Loyalty>(IpcMessages.Profile.Loyalty, (context, cancellationToken) => Online(() => _server.GetUserLoyaltyAsync(context.RequireUser().Id, cancellationToken)));
+        dispatcher.RegisterNoPayload<PlayerSettingsListResponse>(IpcMessages.Profile.GameSettings, (context, cancellationToken) => Online(() => _server.ListPlayerSettingsAsync(context.RequireUser().Id, cancellationToken)));
+        dispatcher.Register<PlayerSettingsResetRequest, PlayerSettingsListResponse>(IpcMessages.Profile.GameSettingsReset, GameSettingsResetAsync);
+    }
+
+    /// <summary>Forgets the player's saved settings of one game and returns what is left.</summary>
+    private Task<PlayerSettingsListResponse> GameSettingsResetAsync(IpcContext context, PlayerSettingsResetRequest request, CancellationToken cancellationToken)
+    {
+        Guid userId = context.RequireUser().Id;
+        return Online(async () =>
+        {
+            await _server.DeletePlayerSettingsAsync(userId, request.GameId, cancellationToken).ConfigureAwait(false);
+            return await _server.ListPlayerSettingsAsync(userId, cancellationToken).ConfigureAwait(false);
+        });
     }
 
     // ---- wallet -----------------------------------------------------------------------------

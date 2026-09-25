@@ -49,6 +49,11 @@ public sealed record GameMinSpec(
 /// <param name="MinSpec">Minimum spec.</param>
 /// <param name="SizeGb">Install size in GB (1 fraction digit).</param>
 /// <param name="Version">Installed/catalogue version.</param>
+/// <param name="SettingsPaths">
+/// Where the game keeps a player's own settings (binds, sensitivity, graphics): file or directory templates with
+/// <c>%LOCALAPPDATA%</c>, <c>%APPDATA%</c>, <c>%USERPROFILE%</c>, <c>{installPath}</c>. The Agent carries them from PC
+/// to PC per player (<see cref="PlayerSettingsBundle"/>); <see langword="null"/> or empty = not carried.
+/// </param>
 public sealed record Game(
     Guid Id,
     string Title,
@@ -71,7 +76,8 @@ public sealed record Game(
     AntiCheatKind AntiCheat,
     GameMinSpec? MinSpec,
     double SizeGb,
-    string? Version = null);
+    string? Version = null,
+    IReadOnlyList<string>? SettingsPaths = null);
 
 /// <summary>Response of <c>games.installStatus</c>.</summary>
 /// <param name="GameId">Game id.</param>

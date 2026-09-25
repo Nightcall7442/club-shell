@@ -456,7 +456,8 @@
     "thisPc": "Bu kompyuter",
     "selectGame": "O'yinni tanlang",
     "resultsCount": "Ko'rsatilgan: {{count}}",
-    "installedFilterOn": "Faqat o'rnatilgan o'yinlar ko'rsatilmoqda"
+    "installedFilterOn": "Faqat o'rnatilgan o'yinlar ko'rsatilmoqda",
+    "settingsFollow": "Tugmalar, sezgirlik va grafika sozlamalaringiz shu kompyuterga yuklanadi va oʻyindan keyin saqlanadi"
   },
   "apps": {
     "title": "Ilovalar",
@@ -878,7 +879,17 @@
     "loyaltyLevel": "Sodiqlik darajasi",
     "rankValue": "#{{rank}}",
     "achievementsUnlocked": "{{total}} tadan {{unlocked}} tasi ochilgan",
-    "noPerks": "Imtiyozlar keyingi darajada ochiladi"
+    "noPerks": "Imtiyozlar keyingi darajada ochiladi",
+    "gameSettings": {
+      "tab": "Oʻyin sozlamalari",
+      "title": "Oʻyin sozlamalari",
+      "hint": "Tugmalar, sezgirlik va grafika har bir oʻyindan keyin saqlanadi va klubning istalgan kompyuterida sizni kutadi — oʻtiring va uydagidek oʻynang.",
+      "emptyTitle": "Hozircha boʻsh",
+      "emptyHint": "CS2, Dota 2, Fortnite yoki boshqa oʻyinni oʻynang — sozlamalaringiz oʻzi saqlanadi.",
+      "saved": "Saqlangan {{when}} · {{size}}",
+      "reset": "Tiklash",
+      "resetFor": "{{title}} sozlamalarini tiklash"
+    }
   },
   "support": {
     "title": "Yordam",

@@ -411,6 +411,12 @@ pub struct Game {
     /// Installed/catalogue version.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// Where the game keeps a player's own settings (binds, sensitivity, graphics): file or
+    /// directory templates with `%LOCALAPPDATA%`, `%APPDATA%`, `%USERPROFILE%`, `{installPath}`.
+    /// The Agent carries them from PC to PC per player (`PlayerSettingsBundle`); `null` or empty =
+    /// not carried.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settings_paths: Option<Vec<String>>,
 }
 
 /// Body of `POST /games/{id}/launch-report` (SERVER_API.md §4.6).
@@ -437,6 +443,68 @@ pub struct LaunchReport {
     /// Seconds played (`LaunchReportPhase.Exit`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub played_sec: Option<i32>,
+}
+
+/// A player's own settings for one game (`Game.SettingsPaths` zipped), stored on the server so they
+/// follow the player to any PC. Response of `GET /users/{userId}/game-settings/{gameId}` and of the
+/// commit.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerSettingsBundle {
+    /// Game id.
+    pub game_id: Uuid,
+    /// Download URL of the zip.
+    pub url: String,
+    /// Lower-case hex SHA-256 of the zip.
+    pub sha256: String,
+    /// Zip size.
+    pub size_bytes: i64,
+    /// When the settings were last saved.
+    #[serde(with = "crate::wire::ts")]
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Body of `PUT /users/{userId}/game-settings/{gameId}` after the zip was uploaded to the target.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerSettingsCommitRequest {
+    /// The URL the zip was `PUT` to (from `SaveUploadTarget`).
+    pub upload_url: String,
+    /// Lower-case hex SHA-256 of the zip.
+    pub sha256: String,
+    /// Zip size.
+    pub size_bytes: i64,
+}
+
+/// One game whose settings the player has saved.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerSettingsItem {
+    /// Game id.
+    pub game_id: Uuid,
+    /// Game title.
+    pub title: String,
+    /// Stored size.
+    pub size_bytes: i64,
+    /// Last save.
+    #[serde(with = "crate::wire::ts")]
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Response of `profile.gameSettings` / `GET /users/{userId}/game-settings`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerSettingsListResponse {
+    /// Games with saved settings, most recent first.
+    pub items: Vec<PlayerSettingsItem>,
+}
+
+/// Request of `profile.gameSettingsReset`: forget the saved settings of one game.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerSettingsResetRequest {
+    /// Game id.
+    pub game_id: Uuid,
 }
 
 /// Screen resolution requested for a launch.
@@ -615,6 +683,7 @@ mod tests {
             }),
             size_gb: 35.5,
             version: None,
+            settings_paths: None,
         };
         let json = serde_json::to_string(&g).unwrap();
         assert_eq!(

@@ -56,6 +56,7 @@ import type {
   SessionStartRequest,
   SessionTimeLeftResponse,
   SettingsSetRequest,
+  PlayerSettingsItem,
   ShellClub,
   ShellSettings,
   ShopOrderRequest,
@@ -108,6 +109,7 @@ import {
   PC,
   PC_ID,
   PC_INFO,
+  PLAYER_GAME_SETTINGS,
   POLICY,
   PRODUCTS,
   QR_START,
@@ -245,6 +247,7 @@ interface MockState {
   games: Game[];
   running: RunningGame[];
   settings: ShellSettings;
+  gameSettings: PlayerSettingsItem[];
   policy: Policy;
   volume: VolumeState;
   qr: QrState | null;
@@ -280,6 +283,7 @@ function freshState(): MockState {
     games: clone(GAMES),
     running: [],
     settings: { ...clone(SETTINGS), club: demoClubRequested() ? clone(DEMO_CLUB) : null },
+    gameSettings: clone(PLAYER_GAME_SETTINGS),
     policy: clone(POLICY),
     volume: { level: SETTINGS.volume, muted: SETTINGS.muted },
     qr: null,
@@ -1616,6 +1620,18 @@ cmd('profile_achievements', (): Achievement[] => {
 cmd('profile_loyalty', (): Loyalty => {
   const user = requireUser();
   return user.role === 'guest' ? { level: 0, points: 0, nextLevelAt: 500, perks: [] } : clone(LOYALTY);
+});
+
+cmd('profile_game_settings', (): PlayerSettingsItem[] => {
+  const user = requireUser();
+  return user.role === 'guest' ? [] : clone(mockState.gameSettings);
+});
+
+cmd('profile_game_settings_reset', (args): PlayerSettingsItem[] => {
+  requireUser();
+  const gameId = str(args, 'gameId');
+  mockState.gameSettings = mockState.gameSettings.filter((g) => g.gameId !== gameId);
+  return clone(mockState.gameSettings);
 });
 
 // ----- settings / policy ----------------------------------------------------------------------------------------------

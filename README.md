@@ -143,6 +143,7 @@ ClubShell закрывает контур на самом ПК: **оболочк
 - Сеансы: старт / пауза / продление / блокировка, монотонный таймер, предупреждения за 15 / 5 / 1 минуту, тарификация
 - Запуск игр: Steam, Epic, Battle.net, Riot, EA, Ubisoft и обычные exe; ожидание реального игрового процесса; job objects; уборка при выходе
 - Пул аккаунтов: аренда учётки у сервера, подстановка в лаунчер, откат конфигов и Credential Manager, синхронизация облачных сохранений
+- «Сел за любой ПК — всё как дома»: бинды, чувствительность и графика игрока (пути `settingsPaths` у игры) сохраняются после игры и возвращаются перед запуском на любом ПК клуба — отдельно от сохранений общего аккаунта; в профиле игрока вкладка «Настройки игр» со сбросом по игре, в админке владелец задаёт пути для каждой игры
 - Политики с сервера: белый список процессов, USB, DNS-фильтр, блокировки Explorer, расписание питания, канал обновлений
 - Античит-проверки перед запуском: EAC, FACEIT, Vanguard, Secure Boot / TPM / HVCI
 - Удалённое администрирование: сообщения, блокировка, перезагрузка, скриншот, удалённое управление, Wake-on-LAN
@@ -285,12 +286,12 @@ Copy-Item .env.example .env
 
 | Что | Сколько |
 |---|---|
-| xUnit | 429 проверок в 4 проектах (Contracts 89, Core 181, Windows 62, Agent 97), включая сквозной тест именованного канала |
+| xUnit | 434 проверки в 4 проектах (Contracts 89, Core 181, Windows 62, Agent 102), включая сквозной тест именованного канала |
 | Компиляция .NET | 8 проектов, Roslyn + NetAnalyzers, `/warnaserror`, 0 предупреждений |
 | TypeScript | `tsc --noEmit` во всех пакетах, `vite build` без предупреждений о размере чанков |
-| Интерфейс | 12 разделов, прогон в mock-режиме на 1600×900 / 1920×1080; Playwright e2e — 30 проверок: киоск 21 (вход, каталог, HUD в игре, оформление клуба), админка 9 (PIN и роли, язык, смена, расчёт цены, экран игрока, контроль кассиров, состояние ПК) |
+| Интерфейс | 12 разделов, прогон в mock-режиме на 1600×900 / 1920×1080; Playwright e2e — 33 проверки: киоск 23 (вход, каталог, HUD в игре, оформление клуба, настройки игр игрока), админка 10 (PIN и роли, язык, смена, расчёт цены, экран игрока, контроль кассиров, состояние ПК, пути настроек игр) |
 | Локализация | 1175 ключей, идентичные наборы в `en` / `ru` / `uz` |
-| Протоколы | 63 IPC-запроса, 18 событий, 19 серверных команд, 80 Tauri-команд — покрыты обработчиками и документацией |
+| Протоколы | 65 IPC-запросов, 18 событий, 19 серверных команд, 82 Tauri-команды — покрыты обработчиками и документацией |
 
 Что **не** собиралось на машине автора: WiX и `tauri build`. Первую сборку этих частей выполняет CI; список известных долгов — в [docs/ROADMAP.md](docs/ROADMAP.md).
 
@@ -382,6 +383,6 @@ tools/scripts/         build · dev · package · sign · publish · setup-dev-v
 
 The **admin console** (`apps/admin`, `pnpm admin` → http://localhost:1421; owner PIN `0000`, cashier `1111`) lets each club owner configure their own club without a developer: counter and hall map, shifts with X reports and cash count on close, clients (groups, loyalty tiers, blacklist, minor curfew), pricing (weekday/holiday rates, happy hours, top-up bonuses, promo codes — the single best discount applies), a grid hall editor, stock, game catalogue order and visibility, the player screen (branding, sections, banners, rules with live preview), “if → then” automation rules, Telegram and webhooks, reports with an hourly heat map, staff roles, PC health (repair tickets from telemetry: overheating, running hotter than its own last week, FPS drop, network drop-outs) and cashier control (an activity log plus theft signals: cash short at close, quick refunds, big discounts, repeated top-ups, money taken with no shift open). UI in Russian, Uzbek and English.
 
-Try the UI in a browser: `pnpm install && pnpm mock` then `VITE_MOCK=1 pnpm --filter @clubshell/shell dev` → http://localhost:1420 (login `demo` / `1234`). Full Windows dev loop: `tools/scripts/dev.ps1`. Verified here: all 8 .NET projects compile with `/warnaserror`, 429 xUnit tests pass, `tsc` and `vite build` are clean, 30 Playwright e2e checks cover the kiosk and the admin console; WiX and `tauri build` are left to CI.
+Try the UI in a browser: `pnpm install && pnpm mock` then `VITE_MOCK=1 pnpm --filter @clubshell/shell dev` → http://localhost:1420 (login `demo` / `1234`). Full Windows dev loop: `tools/scripts/dev.ps1`. Verified here: all 8 .NET projects compile with `/warnaserror`, 434 xUnit tests pass, `tsc` and `vite build` are clean, 33 Playwright e2e checks cover the kiosk and the admin console; WiX and `tauri build` are left to CI.
 
 </details>

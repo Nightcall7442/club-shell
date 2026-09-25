@@ -224,6 +224,21 @@ public interface IGamesApi
     /// <summary><c>GET /games/{id}/accounts/{leaseId}/save-upload</c>.</summary>
     Task<SaveUploadTarget> GetSaveUploadTargetAsync(Guid gameId, Guid leaseId, CancellationToken cancellationToken);
 
+    /// <summary><c>GET /users/{userId}/game-settings/{gameId}</c> (agent auth); <see langword="null"/> when the player saved none (<c>204</c>).</summary>
+    Task<PlayerSettingsBundle?> GetPlayerSettingsAsync(Guid userId, Guid gameId, CancellationToken cancellationToken);
+
+    /// <summary><c>POST /users/{userId}/game-settings/{gameId}/upload-target</c> (agent auth).</summary>
+    Task<SaveUploadTarget> GetPlayerSettingsUploadTargetAsync(Guid userId, Guid gameId, CancellationToken cancellationToken);
+
+    /// <summary><c>PUT /users/{userId}/game-settings/{gameId}</c> (agent auth): records the uploaded zip as the player's settings.</summary>
+    Task<PlayerSettingsBundle> CommitPlayerSettingsAsync(Guid userId, Guid gameId, PlayerSettingsCommitRequest request, CancellationToken cancellationToken);
+
+    /// <summary><c>GET /users/{userId}/game-settings</c> (user auth).</summary>
+    Task<PlayerSettingsListResponse> ListPlayerSettingsAsync(Guid userId, CancellationToken cancellationToken);
+
+    /// <summary><c>DELETE /users/{userId}/game-settings/{gameId}</c> (user auth).</summary>
+    Task DeletePlayerSettingsAsync(Guid userId, Guid gameId, CancellationToken cancellationToken);
+
     /// <summary><c>POST /games/{id}/launch-report</c>.</summary>
     Task SendLaunchReportAsync(Guid gameId, LaunchReport report, CancellationToken cancellationToken);
 

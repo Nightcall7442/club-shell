@@ -808,6 +808,9 @@ impl MockTransport {
             AgentCommand::ProfileLoyalty => {
                 Some(json!({ "level": 1, "points": 120, "nextLevelAt": 500, "perks": [] }))
             }
+            AgentCommand::ProfileGameSettings | AgentCommand::ProfileGameSettingsReset => {
+                Some(json!({ "items": [] }))
+            }
             AgentCommand::SettingsGet => Some(db.settings.clone()),
             AgentCommand::SettingsSet => {
                 if let Some(patch) = p.as_object() {

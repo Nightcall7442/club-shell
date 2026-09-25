@@ -43,6 +43,7 @@ import type {
   Order,
   PcInfo,
   PcMetrics,
+  PlayerSettingsItem,
   Policy,
   PolicyReloadResponse,
   Product,
@@ -536,6 +537,9 @@ export const api = {
     stats: (): Promise<UserStats> => invoke('profile_stats'),
     achievements: (): Promise<Achievement[]> => invoke('profile_achievements'),
     loyalty: (): Promise<Loyalty> => invoke('profile_loyalty'),
+    gameSettings: (): Promise<PlayerSettingsItem[]> => invoke('profile_game_settings'),
+    resetGameSettings: (gameId: string): Promise<PlayerSettingsItem[]> =>
+      invoke('profile_game_settings_reset', { gameId }),
   },
   settings: {
     get: (): Promise<ShellSettings> => invoke('settings_get'),

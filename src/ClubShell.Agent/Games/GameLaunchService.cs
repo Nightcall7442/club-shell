@@ -60,6 +60,7 @@ public sealed class GameLaunchService : IDisposable
     private readonly AccountPool _pool;
     private readonly AccountInjector _injector;
     private readonly CloudSaveSync _saves;
+    private readonly PlayerSettingsSync? _playerSettings;
     private readonly GameSessionTracker _tracker;
     private readonly IKioskSessionLocator _kiosk;
     private readonly IServerClient _server;
@@ -85,9 +86,11 @@ public sealed class GameLaunchService : IDisposable
         IGameEventSink events,
         IOptionsMonitor<AgentSettings> settings,
         IClock clock,
-        ILogger<GameLaunchService> logger)
+        ILogger<GameLaunchService> logger,
+        PlayerSettingsSync? playerSettings = null)
     {
         ArgumentNullException.ThrowIfNull(launchers);
+        _playerSettings = playerSettings;
         _library = library;
         _sessions = sessions;
         _policy = policy;
@@ -209,6 +212,12 @@ public sealed class GameLaunchService : IDisposable
                 lease = await _pool.LeaseAsync(game, request.SessionId, request.AccountLeaseId, cancellationToken).ConfigureAwait(false);
                 injection = await _injector.InjectAsync(game, lease, cancellationToken).ConfigureAwait(false);
                 await _saves.DownloadAsync(game, lease, cancellationToken).ConfigureAwait(false);
+            }
+
+            // The player's own binds / sensitivity / graphics, whatever PC they sit at.
+            if (_playerSettings is not null)
+            {
+                await _playerSettings.RestoreAsync(game, request.UserId, cancellationToken).ConfigureAwait(false);
             }
 
             var env = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

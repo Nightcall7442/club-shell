@@ -110,6 +110,15 @@ public static class Endpoints
     /// <summary><c>GET /users/{userId}/achievements</c>.</summary>
     public static string UserAchievements(Guid userId) => $"users/{Id(userId)}/achievements";
 
+    /// <summary><c>GET /users/{userId}/game-settings</c>.</summary>
+    public static string UserGameSettings(Guid userId) => $"users/{Id(userId)}/game-settings";
+
+    /// <summary><c>GET|PUT|DELETE /users/{userId}/game-settings/{gameId}</c>.</summary>
+    public static string UserGameSetting(Guid userId, Guid gameId) => $"users/{Id(userId)}/game-settings/{Id(gameId)}";
+
+    /// <summary><c>POST /users/{userId}/game-settings/{gameId}/upload-target</c>.</summary>
+    public static string UserGameSettingUploadTarget(Guid userId, Guid gameId) => $"users/{Id(userId)}/game-settings/{Id(gameId)}/upload-target";
+
     /// <summary><c>GET /users/{userId}/loyalty</c>.</summary>
     public static string UserLoyalty(Guid userId) => $"users/{Id(userId)}/loyalty";
 
