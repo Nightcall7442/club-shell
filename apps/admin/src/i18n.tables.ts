@@ -1,5 +1,6 @@
 /** Uzbek and English lines of the console, keyed by the Russian source text (see `i18n.ts`). */
 export const UZ: Record<string, string> = {
+  Стереть: 'Oʻchirish',
   '{n} сум': '{n} soʻm',
   '{n} ч': '{n} soat',
   '{n} мин': '{n} daq',
@@ -426,6 +427,7 @@ export const UZ: Record<string, string> = {
   '№': '№',
 };
 export const EN: Record<string, string> = {
+  Стереть: 'Delete',
   '{n} сум': '{n} sum',
   '{n} ч': '{n} h',
   '{n} мин': '{n} min',
