@@ -166,6 +166,7 @@ ClubShell закрывает контур на самом ПК: **оболочк
 - **Уведомления и API:** Telegram-бот, вебхуки на события клуба, ротация API-ключа
 - **Отчёты:** выручка по дням, загрузка зала тепловой картой по часам, популярные игры и товары, смены за период
 - **Персонал:** сотрудники, роли и PIN-коды
+- **Контроль кассиров:** журнал всех действий персонала и сигналы кражи — недостача при закрытии смены, сеансы, закрытые с возвратом сразу после открытия, крупные скидки «своим», частые пополнения одному клиенту, операции без открытой смены; пороги настраиваются, серьёзное сразу уходит в Telegram
 - Работает против mock-сервера (`/api/v1/admin/*`); в бою указывает на серверный продукт оператора
 
 **Платформа**
@@ -286,7 +287,7 @@ Copy-Item .env.example .env
 | xUnit | 429 проверок в 4 проектах (Contracts 89, Core 181, Windows 62, Agent 97), включая сквозной тест именованного канала |
 | Компиляция .NET | 8 проектов, Roslyn + NetAnalyzers, `/warnaserror`, 0 предупреждений |
 | TypeScript | `tsc --noEmit` во всех пакетах, `vite build` без предупреждений о размере чанков |
-| Интерфейс | 12 разделов, прогон в mock-режиме на 1600×900 / 1920×1080; Playwright e2e — 28 проверок: киоск 21 (вход, каталог, HUD в игре, оформление клуба), админка 7 (PIN и роли, язык, смена, расчёт цены, экран игрока) |
+| Интерфейс | 12 разделов, прогон в mock-режиме на 1600×900 / 1920×1080; Playwright e2e — 29 проверок: киоск 21 (вход, каталог, HUD в игре, оформление клуба), админка 8 (PIN и роли, язык, смена, расчёт цены, экран игрока, контроль кассиров) |
 | Локализация | 1175 ключей, идентичные наборы в `en` / `ru` / `uz` |
 | Протоколы | 63 IPC-запроса, 18 событий, 19 серверных команд, 80 Tauri-команд — покрыты обработчиками и документацией |
 
@@ -378,8 +379,8 @@ tools/scripts/         build · dev · package · sign · publish · setup-dev-v
 
 **ClubShell** is client software for gaming clubs / internet cafés (Uzbekistan / CIS; UI in Russian, Uzbek and English; prices in UZS). Each gaming PC runs a **.NET 8 Windows service** (`ClubShellAgent`, session 0: sessions and billing timers, game launching via Steam / Epic / Battle.net / Riot / EA / Ubisoft with an account pool, server policies, anti-cheat checks, updates, telemetry, remote admin) and a **Tauri 2 + React kiosk shell** that replaces `explorer.exe` for the local kiosk user. The shell ships the "Obsidian" theme (a minimal layout with a restrained HUD layer: corner-bracket focus, mono telemetry labels, dot-matrix time and money, one ice-blue accent — the game art carries the colour), a pause-menu HUD frame (section tabs between LB/RB on top, a status line with time, balance and controller prompts at the bottom), a calm home with the selected game, a poster-wall catalogue and an in-game HUD (`Ctrl+Shift+H`: time, balance, +30 min, call admin) over the running game. They talk over the named pipe `\\.\pipe\clubshell-agent`; the agent talks to the club server over REST + WebSocket with HMAC-signed requests. Offline mode keeps the timer and queues events in SQLite.
 
-The **admin console** (`apps/admin`, `pnpm admin` → http://localhost:1421; owner PIN `0000`, cashier `1111`) lets each club owner configure their own club without a developer: counter and hall map, shifts with X reports and cash count on close, clients (groups, loyalty tiers, blacklist, minor curfew), pricing (weekday/holiday rates, happy hours, top-up bonuses, promo codes — the single best discount applies), a grid hall editor, stock, game catalogue order and visibility, the player screen (branding, sections, banners, rules with live preview), “if → then” automation rules, Telegram and webhooks, reports with an hourly heat map, and staff roles. UI in Russian, Uzbek and English.
+The **admin console** (`apps/admin`, `pnpm admin` → http://localhost:1421; owner PIN `0000`, cashier `1111`) lets each club owner configure their own club without a developer: counter and hall map, shifts with X reports and cash count on close, clients (groups, loyalty tiers, blacklist, minor curfew), pricing (weekday/holiday rates, happy hours, top-up bonuses, promo codes — the single best discount applies), a grid hall editor, stock, game catalogue order and visibility, the player screen (branding, sections, banners, rules with live preview), “if → then” automation rules, Telegram and webhooks, reports with an hourly heat map, staff roles, and cashier control (an activity log plus theft signals: cash short at close, quick refunds, big discounts, repeated top-ups, money taken with no shift open). UI in Russian, Uzbek and English.
 
-Try the UI in a browser: `pnpm install && pnpm mock` then `VITE_MOCK=1 pnpm --filter @clubshell/shell dev` → http://localhost:1420 (login `demo` / `1234`). Full Windows dev loop: `tools/scripts/dev.ps1`. Verified here: all 8 .NET projects compile with `/warnaserror`, 429 xUnit tests pass, `tsc` and `vite build` are clean, 28 Playwright e2e checks cover the kiosk and the admin console; WiX and `tauri build` are left to CI.
+Try the UI in a browser: `pnpm install && pnpm mock` then `VITE_MOCK=1 pnpm --filter @clubshell/shell dev` → http://localhost:1420 (login `demo` / `1234`). Full Windows dev loop: `tools/scripts/dev.ps1`. Verified here: all 8 .NET projects compile with `/warnaserror`, 429 xUnit tests pass, `tsc` and `vite build` are clean, 29 Playwright e2e checks cover the kiosk and the admin console; WiX and `tauri build` are left to CI.
 
 </details>

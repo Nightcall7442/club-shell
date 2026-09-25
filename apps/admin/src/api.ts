@@ -244,7 +244,14 @@ export interface Banner {
   to: string | null;
   enabled: boolean;
 }
-export type ClubEvent = 'shiftClosed' | 'pcOffline' | 'bigTopup' | 'lowStock' | 'ruleFired' | 'sessionOpened';
+export type ClubEvent =
+  | 'shiftClosed'
+  | 'pcOffline'
+  | 'bigTopup'
+  | 'lowStock'
+  | 'ruleFired'
+  | 'sessionOpened'
+  | 'suspicious';
 export interface Webhook {
   id: string;
   url: string;
@@ -278,8 +285,84 @@ export interface ClubSettings {
     bigTopupAt: number;
   };
   webhooks: Webhook[];
+  control: ControlSettings;
   apiKey: string;
   events: ClubEvent[];
+}
+
+/** Thresholds of the cashier-control rules. Money in minor units. */
+export interface ControlSettings {
+  earlyEndMinutes: number;
+  earlyEndsPerShift: number;
+  discountPct: number;
+  sameClientTopups: number;
+  shortfallFrom: number;
+}
+
+export type AuditAction =
+  | 'shiftOpen'
+  | 'shiftClose'
+  | 'topUp'
+  | 'sessionOpen'
+  | 'sessionExtend'
+  | 'sessionEnd'
+  | 'promoRedeem'
+  | 'clientGroup'
+  | 'blacklist'
+  | 'stockReceive'
+  | 'stockEdit'
+  | 'pcCommand';
+
+export interface AuditEntry {
+  id: string;
+  at: string;
+  staffId: string;
+  staffName: string;
+  shiftId: string | null;
+  action: AuditAction;
+  userId: string | null;
+  pcId: string | null;
+  amount: number;
+  detail: string;
+  meta: Record<string, string | number | boolean | null>;
+}
+
+export type FlagKind = 'shortfall' | 'earlyEnds' | 'earlyEnd' | 'discount' | 'sameClient' | 'noShift' | 'bigCash';
+export type Severity = 'high' | 'medium' | 'low';
+
+export interface ControlFlag {
+  id: string;
+  kind: FlagKind;
+  severity: Severity;
+  at: string;
+  staffId: string;
+  staffName: string;
+  shiftId: string | null;
+  userId: string | null;
+  pcId: string | null;
+  amount: number;
+  params: Record<string, string | number>;
+}
+
+export interface StaffSummary {
+  staffId: string;
+  staffName: string;
+  operations: number;
+  topUps: number;
+  refunds: number;
+  earlyEnds: number;
+  discounts: number;
+  shortfall: number;
+  flags: Record<Severity, number>;
+}
+
+export interface ControlReport {
+  from: string;
+  to: string;
+  settings: ControlSettings;
+  staff: StaffSummary[];
+  flags: ControlFlag[];
+  log: AuditEntry[];
 }
 
 export interface Client {
@@ -434,4 +517,6 @@ export const clubApi = {
   games: (): Promise<{ items: AdminGame[]; order: string[] }> => call('/admin/games'),
 
   reports: (days: number): Promise<Reports> => call(`/admin/reports?days=${days}`),
+  control: (days: number, staffId: string | null): Promise<ControlReport> =>
+    call(`/admin/control?days=${days}${staffId ? `&staffId=${encodeURIComponent(staffId)}` : ''}`),
 };

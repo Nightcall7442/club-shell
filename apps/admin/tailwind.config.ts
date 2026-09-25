@@ -16,6 +16,7 @@ export default {
         text: '#E8F1F6',
         muted: '#7D8A96',
         danger: '#EF4444',
+        warning: '#F2B84B',
         success: '#22C55E',
       },
       fontFamily: {

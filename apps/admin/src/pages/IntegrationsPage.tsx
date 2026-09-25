@@ -19,6 +19,7 @@ const EVENT_LABEL: Record<ClubEvent, string> = {
   lowStock: 'Товар заканчивается',
   ruleFired: 'Сработало правило',
   sessionOpened: 'Открыт сеанс',
+  suspicious: 'Подозрительная операция',
 };
 const ALL_EVENTS = Object.keys(EVENT_LABEL) as ClubEvent[];
 

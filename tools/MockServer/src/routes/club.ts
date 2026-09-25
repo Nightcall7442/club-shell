@@ -35,6 +35,7 @@ import {
 } from '../db.js';
 import {
   CLUB_EVENTS,
+  DEFAULT_CONTROL,
   club,
   clubHooks,
   emit,
@@ -53,6 +54,7 @@ import {
   type StaffRole,
 } from '../club.js';
 import { broadcast, pushToUser } from '../ws.js';
+import { flagsFor, record, summaries } from '../control.js';
 
 const LEGACY_TOKEN = process.env['MOCK_ADMIN_TOKEN'] ?? 'admin-dev-token';
 
@@ -212,11 +214,12 @@ export function clubRoutes(app: FastifyInstance): void {
     };
     club().shifts.push(shift);
     markDirty();
+    record(me, 'shiftOpen', { amount: shift.openingCash, detail: me.name, meta: { openingCash: shift.openingCash } });
     return { shift };
   });
 
   app.post('/admin/shift/close', async (req) => {
-    requireStaff(req);
+    const me = requireStaff(req);
     const shift = openShift();
     if (!shift) throw errors.conflict('noShift');
     shift.closedAt = now();
@@ -224,6 +227,13 @@ export function clubRoutes(app: FastifyInstance): void {
     shift.totals = totalsSince(shift.openedAt, shift.closedAt);
     markDirty();
     const expected = shift.openingCash + shift.totals.topUpCash;
+    // The shift is already marked closed, so `record` sees no open shift: tag the entry with it explicitly.
+    const entry = record(me, 'shiftClose', {
+      amount: shift.closingCash,
+      detail: shift.staffName,
+      meta: { expected, counted: shift.closingCash, diff: shift.closingCash - expected },
+    });
+    entry.shiftId = shift.id;
     emit(
       'shiftClosed',
       `${shift.staffName}: сеансы ${money(shift.totals.sessions)}, магазин ${money(shift.totals.shop)}, ` +
@@ -256,6 +266,7 @@ export function clubRoutes(app: FastifyInstance): void {
       automation: c.automation,
       notifications: { ...c.notifications, telegramBotToken: c.notifications.telegramBotToken ? '••••' : '' },
       webhooks: c.webhooks,
+      control: c.control,
       apiKey: c.apiKey,
       events: CLUB_EVENTS,
     };
@@ -285,6 +296,20 @@ export function clubRoutes(app: FastifyInstance): void {
     ] as const;
     for (const k of keys) {
       if (k in b) (c as unknown as Record<string, unknown>)[k] = b[k];
+    }
+    if ('control' in b) {
+      // Thresholds must stay usable numbers whatever the client sent.
+      const n = (v: unknown, fallback: number, min: number, max: number): number =>
+        typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : fallback;
+      const raw = isObject(b['control']) ? (b['control'] as Record<string, unknown>) : {};
+      const cur = { ...DEFAULT_CONTROL, ...c.control };
+      c.control = {
+        earlyEndMinutes: n(raw['earlyEndMinutes'], cur.earlyEndMinutes, 1, 120),
+        earlyEndsPerShift: n(raw['earlyEndsPerShift'], cur.earlyEndsPerShift, 1, 50),
+        discountPct: n(raw['discountPct'], cur.discountPct, 1, 100),
+        sameClientTopups: n(raw['sameClientTopups'], cur.sameClientTopups, 2, 50),
+        shortfallFrom: n(raw['shortfallFrom'], cur.shortfallFrom, 0, 1_000_000_000),
+      };
     }
     if ('automation' in b && Array.isArray(b['automation'])) {
       c.automation = (b['automation'] as AutomationRule[]).map((r) => ({
@@ -426,6 +451,8 @@ export function clubRoutes(app: FastifyInstance): void {
     if (!user) throw errors.notFound('user');
     const b = body(req);
     const p = { ...profileOf(user.id) };
+    const groupBefore = p.groupId;
+    const blacklistedBefore = p.blacklisted;
     if ('groupId' in b) p.groupId = optStr(b, 'groupId', 64);
     if ('note' in b) p.note = optStr(b, 'note', 2000) ?? '';
     if ('phone' in b) p.phone = optStr(b, 'phone', 32) ?? '';
@@ -438,6 +465,22 @@ export function clubRoutes(app: FastifyInstance): void {
     if (typeof b['displayName'] === 'string') user.displayName = str(b, 'displayName', 64);
     club().clients[user.id] = p;
     markDirty();
+    if (p.groupId !== groupBefore) {
+      const group = club().groups.find((g) => g.id === p.groupId);
+      record(me, 'clientGroup', {
+        userId: user.id,
+        detail: `${user.displayName} → ${group?.name ?? '—'}`,
+        meta: {
+          groupId: p.groupId,
+          groupName: group?.name ?? null,
+          discountPct: group?.discountPct ?? 0,
+          clientName: user.displayName,
+        },
+      });
+    }
+    if (p.blacklisted !== blacklistedBefore) {
+      record(me, 'blacklist', { userId: user.id, detail: user.displayName, meta: { blacklisted: p.blacklisted } });
+    }
     return { client: clientView(user) };
   });
 
@@ -449,7 +492,7 @@ export function clubRoutes(app: FastifyInstance): void {
   // ------------------------------------------------------------------------------------------------ promo codes
   /** Redeems a promo code for a client at the counter (bonus credit). */
   app.post('/admin/promo/redeem', async (req) => {
-    requireStaff(req);
+    const me = requireStaff(req);
     const b = body(req);
     const user = findUser(str(b, 'userId', 64));
     if (!user) throw errors.notFound('user');
@@ -463,6 +506,12 @@ export function clubRoutes(app: FastifyInstance): void {
     if (code.usesLeft !== null) code.usesLeft -= 1;
     markDirty();
     pushToUser(user.id, 'walletUpdated', balanceOf(user));
+    record(me, 'promoRedeem', {
+      userId: user.id,
+      amount: code.value,
+      detail: `${user.displayName} · ${code.code}`,
+      meta: { code: code.code },
+    });
     return { balance: user.balance };
   });
 
@@ -549,26 +598,35 @@ export function clubRoutes(app: FastifyInstance): void {
   });
 
   app.patch<{ Params: { id: string } }>('/admin/products/:id', async (req) => {
-    requireStaff(req, 'owner');
+    const me = requireStaff(req, 'owner');
     const p = db.products.find((x) => x.id === req.params.id);
     if (!p) throw errors.notFound('product');
     const b = body(req);
+    const qtyBefore = p.stockQty;
     if (typeof b['title'] === 'string') p.title = str(b, 'title', 80);
     if (typeof b['price'] === 'number') p.price = uzs(int(b, 'price', 0, 1_000_000_000));
     if (typeof b['inStock'] === 'boolean') p.inStock = b['inStock'];
     if ('stockQty' in b) p.stockQty = optInt(b, 'stockQty', 0, 1_000_000);
     markDirty();
+    if (p.stockQty !== qtyBefore) {
+      record(me, 'stockEdit', {
+        detail: `${p.title}: ${qtyBefore ?? '—'} → ${p.stockQty ?? '—'}`,
+        meta: { productId: p.id, before: qtyBefore ?? null, after: p.stockQty ?? null },
+      });
+    }
     return { product: p };
   });
 
   /** Goods received: adds to the tracked quantity. */
   app.post<{ Params: { id: string } }>('/admin/products/:id/receive', async (req) => {
-    requireStaff(req);
+    const me = requireStaff(req);
     const p = db.products.find((x) => x.id === req.params.id);
     if (!p) throw errors.notFound('product');
-    p.stockQty = (p.stockQty ?? 0) + int(body(req), 'qty', 1, 100_000);
+    const qty = int(body(req), 'qty', 1, 100_000);
+    p.stockQty = (p.stockQty ?? 0) + qty;
     p.inStock = true;
     markDirty();
+    record(me, 'stockReceive', { detail: `${p.title} +${qty}`, meta: { productId: p.id, qty } });
     return { product: p };
   });
 
@@ -592,6 +650,26 @@ export function clubRoutes(app: FastifyInstance): void {
   });
 
   // ------------------------------------------------------------------------------------------------ reports
+  // ------------------------------------------------------------------------------------------------ cashier control
+  /** Flags, per-cashier totals and the journal for the last `days` days (owner only). */
+  app.get<{ Querystring: { days?: string; staffId?: string } }>('/admin/control', async (req) => {
+    requireStaff(req, 'owner');
+    const days = Math.min(90, Math.max(1, Number.parseInt(req.query.days ?? '7', 10) || 7));
+    const from = new Date(Date.now() - days * 86_400_000).toISOString();
+    const c = club();
+    const inPeriod = c.audit.filter((e) => e.at >= from);
+    const flags = flagsFor(inPeriod);
+    const staffId = req.query.staffId;
+    return {
+      from,
+      to: now(),
+      settings: c.control,
+      staff: summaries(inPeriod, flags),
+      flags: staffId ? flags.filter((f) => f.staffId === staffId) : flags,
+      log: (staffId ? inPeriod.filter((e) => e.staffId === staffId) : inPeriod).slice(0, 300),
+    };
+  });
+
   app.get<{ Querystring: { days?: string } }>('/admin/reports', async (req) => {
     requireStaff(req, 'owner');
     const days = Math.min(90, Math.max(1, Number(req.query.days ?? 7) || 7));

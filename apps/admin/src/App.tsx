@@ -21,6 +21,7 @@ const ClubPage = lazy(() => import('@/pages/ClubPage'));
 const AutomationPage = lazy(() => import('@/pages/AutomationPage'));
 const IntegrationsPage = lazy(() => import('@/pages/IntegrationsPage'));
 const ReportsPage = lazy(() => import('@/pages/ReportsPage'));
+const ControlPage = lazy(() => import('@/pages/ControlPage'));
 const StaffPage = lazy(() => import('@/pages/StaffPage'));
 
 interface SectionDef {
@@ -135,6 +136,13 @@ const GROUPS: { title: string; items: SectionDef[] }[] = [
     title: 'Бизнес',
     items: [
       { id: 'reports', title: 'Отчёты', ownerOnly: true, icon: svg('M3 3v18h18M7 15l4-4 3 3 5-6'), page: ReportsPage },
+      {
+        id: 'control',
+        title: 'Контроль',
+        ownerOnly: true,
+        icon: svg('M12 3 4 6v6c0 5 3.4 8.5 8 9 4.6-.5 8-4 8-9V6l-8-3zM9 12l2 2 4-4'),
+        page: ControlPage,
+      },
       {
         id: 'staff',
         title: 'Персонал',
