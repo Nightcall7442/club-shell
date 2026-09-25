@@ -2307,6 +2307,8 @@ const USER_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
   AgentCommand.ProfileStats,
   AgentCommand.ProfileAchievements,
   AgentCommand.ProfileLoyalty,
+  AgentCommand.ProfileGameSettings,
+  AgentCommand.ProfileGameSettingsReset,
 ]);
 
 const SESSION_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([

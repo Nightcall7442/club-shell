@@ -309,7 +309,7 @@ mod tests {
         let handler: Box<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync> =
             Box::new(invoke_handler!());
         drop(handler);
-        assert_eq!(COMMAND_NAMES.len(), 64);
+        assert_eq!(COMMAND_NAMES.len(), 66);
         let mut sorted = COMMAND_NAMES.to_vec();
         sorted.sort_unstable();
         sorted.dedup();

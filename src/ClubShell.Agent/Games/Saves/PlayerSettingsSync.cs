@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Runtime.Versioning;
 using ClubShell.Agent.Games.Accounts;
@@ -14,7 +15,13 @@ namespace ClubShell.Agent.Games.Saves;
 /// "Sit at any PC — it plays like home": before a launch the player's own settings for the game (binds, sensitivity,
 /// graphics — <see cref="Game.SettingsPaths"/>) are downloaded and put in place, after the game exits they are zipped
 /// and stored back on the server. Unlike <see cref="CloudSaveSync"/>, which follows a pooled account, these follow the
-/// player. Every failure is logged and swallowed: settings never block a launch or an exit.
+/// player.
+/// <para>
+/// The PC's own files at those paths are the club's baseline: they are snapshotted before the first restore and put
+/// back after every save, so the next player — with no saved settings, a guest, or after a reset — starts from the
+/// club's defaults, never from the previous player's. Restore and save of one game are serialised, so a quick relaunch
+/// waits for the save of the last run. Every failure is logged and swallowed: settings never block a launch or an exit.
+/// </para>
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class PlayerSettingsSync
@@ -26,6 +33,7 @@ public sealed class PlayerSettingsSync
     private readonly IKioskProfilePaths _profile;
     private readonly IOptionsMonitor<AgentSettings> _settings;
     private readonly ILogger<PlayerSettingsSync> _logger;
+    private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _locks = new();
 
     /// <summary>Creates the sync.</summary>
     public PlayerSettingsSync(
@@ -51,6 +59,8 @@ public sealed class PlayerSettingsSync
 
     private string BundleRoot => _settings.CurrentValue.ResolvePath(Options.Root);
 
+    private string BaselinePath(Game game) => Path.Combine(BundleRoot, $"baseline-{game.Id:N}.zip");
+
     private bool Applies(Game game, Guid userId) =>
         Options.Enabled && userId != Guid.Empty && game.SettingsPaths is { Count: > 0 };
 
@@ -63,12 +73,28 @@ public sealed class PlayerSettingsSync
             return false;
         }
 
+        SemaphoreSlim gate = _locks.GetOrAdd(game.Id, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         string tmp = Path.Combine(BundleRoot, $"{userId:N}-{game.Id:N}-download.zip");
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TransferTimeout);
             CancellationToken ct = timeout.Token;
+
+            IReadOnlyList<SettingsTarget> targets = SettingsBundle.Targets(game, _profile);
+            // The club's own files, kept until the save of this run puts them back. A snapshot left by a crash is
+            // still the club's (it was taken before any player's settings were written), so it is never retaken.
+            string baseline = BaselinePath(game);
+            if (!File.Exists(baseline))
+            {
+                int packed = await Task.Run(() => SettingsBundle.Pack(targets, baseline, MaxBytes, writeEmpty: true, ct), ct).ConfigureAwait(false);
+                if (packed < 0)
+                {
+                    _logger.LogWarning("Settings paths of {Title} hold more than {Max} bytes; player settings skipped for this game", game.Title, MaxBytes);
+                    return false;
+                }
+            }
 
             PlayerSettingsBundle? bundle = await _server.GetPlayerSettingsAsync(userId, game.Id, ct).ConfigureAwait(false);
             if (bundle is null)
@@ -82,7 +108,6 @@ public sealed class PlayerSettingsSync
                 return false;
             }
 
-            Directory.CreateDirectory(BundleRoot);
             using HttpClient http = _httpClientFactory.CreateClient(RetryPolicy.DownloadHttpClientName);
             using (HttpResponseMessage response = await http.GetAsync(new Uri(bundle.Url), HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false))
             {
@@ -99,7 +124,7 @@ public sealed class PlayerSettingsSync
                 return false;
             }
 
-            int files = await Task.Run(() => SettingsBundle.Unpack(tmp, SettingsBundle.Targets(game, _profile)), ct).ConfigureAwait(false);
+            int files = await Task.Run(() => SettingsBundle.Unpack(tmp, targets), ct).ConfigureAwait(false);
             _logger.LogInformation("Player settings restored for {Title}: {Files} files", game.Title, files);
             return files > 0;
         }
@@ -107,7 +132,7 @@ public sealed class PlayerSettingsSync
         {
             throw;
         }
-        catch (Exception ex) when (ex is ServerApiException or HttpRequestException or IOException or UnauthorizedAccessException or InvalidDataException or OperationCanceledException or UriFormatException)
+        catch (Exception ex)
         {
             _logger.LogWarning(ex, "Player settings for {Title} not restored; launching with the PC's own", game.Title);
             return false;
@@ -115,10 +140,14 @@ public sealed class PlayerSettingsSync
         finally
         {
             TryDelete(tmp);
+            gate.Release();
         }
     }
 
-    /// <summary>Zips the player's settings after the game exited and stores them on the server. Returns the new bundle, or <see langword="null"/> when skipped or failed.</summary>
+    /// <summary>
+    /// Zips the player's settings after the game exited, stores them on the server and puts the club's baseline back.
+    /// Returns the new bundle, or <see langword="null"/> when skipped or failed.
+    /// </summary>
     public async Task<PlayerSettingsBundle?> SaveAsync(Game game, Guid userId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(game);
@@ -127,27 +156,43 @@ public sealed class PlayerSettingsSync
             return null;
         }
 
+        SemaphoreSlim gate = _locks.GetOrAdd(game.Id, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         string tmp = Path.Combine(BundleRoot, $"{userId:N}-{game.Id:N}-upload.zip");
+        IReadOnlyList<SettingsTarget> targets = SettingsBundle.Targets(game, _profile);
+        try
+        {
+            return await UploadAsync(game, userId, targets, tmp, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            TryDelete(tmp);
+            ResetToBaseline(game, targets);
+            gate.Release();
+        }
+    }
+
+    private async Task<PlayerSettingsBundle?> UploadAsync(Game game, Guid userId, IReadOnlyList<SettingsTarget> targets, string tmp, CancellationToken cancellationToken)
+    {
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TransferTimeout);
             CancellationToken ct = timeout.Token;
 
-            Directory.CreateDirectory(BundleRoot);
-            int files = await Task.Run(() => SettingsBundle.Pack(SettingsBundle.Targets(game, _profile), tmp), ct).ConfigureAwait(false);
+            int files = await Task.Run(() => SettingsBundle.Pack(targets, tmp, MaxBytes, writeEmpty: false, ct), ct).ConfigureAwait(false);
             if (files == 0)
             {
                 return null;
             }
 
-            long size = new FileInfo(tmp).Length;
-            if (size > MaxBytes)
+            if (files < 0)
             {
-                _logger.LogWarning("Settings for {Title} are {Size} bytes, above the {Max} byte limit; not saved", game.Title, size, MaxBytes);
+                _logger.LogWarning("Settings for {Title} are above the {Max} byte limit; not saved", game.Title, MaxBytes);
                 return null;
             }
 
+            long size = new FileInfo(tmp).Length;
             string sha = await Signing.Sha256FileAsync(tmp, ct).ConfigureAwait(false);
             SaveUploadTarget target = await _server.GetPlayerSettingsUploadTargetAsync(userId, game.Id, ct).ConfigureAwait(false);
             if (size > target.MaxBytes)
@@ -176,14 +221,32 @@ public sealed class PlayerSettingsSync
         {
             throw;
         }
-        catch (Exception ex) when (ex is ServerApiException or HttpRequestException or IOException or UnauthorizedAccessException or InvalidDataException or OperationCanceledException or UriFormatException)
+        catch (Exception ex)
         {
             _logger.LogWarning(ex, "Player settings for {Title} not saved", game.Title);
             return null;
         }
-        finally
+    }
+
+    /// <summary>Removes the player's files at the targets and restores the club's snapshot taken before the launch.</summary>
+    private void ResetToBaseline(Game game, IReadOnlyList<SettingsTarget> targets)
+    {
+        string baseline = BaselinePath(game);
+        if (!File.Exists(baseline))
         {
-            TryDelete(tmp);
+            return;
+        }
+
+        try
+        {
+            SettingsBundle.Clear(targets);
+            SettingsBundle.Unpack(baseline, targets);
+            File.Delete(baseline);
+        }
+        catch (Exception ex)
+        {
+            // The snapshot stays for the next attempt; the next restore reuses it instead of snapshotting this player.
+            _logger.LogWarning(ex, "Club settings of {Title} could not be put back after the game", game.Title);
         }
     }
 

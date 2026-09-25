@@ -344,7 +344,7 @@ Rules:
 ### 4.1 Command registry
 
 There is no generated `commands.json`: `src-tauri/build.rs` only runs `tauri_build::build()`. The registry is the
-`COMMAND_NAMES` constant in `apps/shell/src-tauri/src/commands/mod.rs` (the 64 proxy commands below, asserted by a
+`COMMAND_NAMES` constant in `apps/shell/src-tauri/src/commands/mod.rs` (the 66 proxy commands below, asserted by a
 unit test) plus the 15 `kiosk_*` commands registered from `kiosk/commands.rs` through the `invoke_handler!` macro in
 `lib.rs`:
 

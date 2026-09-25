@@ -209,11 +209,6 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
             }
         }
 
-        if (_playerSettings is not null)
-        {
-            await _playerSettings.SaveAsync(record.Game, record.Request.UserId, ct).ConfigureAwait(false);
-        }
-
         if (record.Lease is { } lease)
         {
             CloudSaveUpload? upload = await _saves.UploadAsync(record.Game, lease, ct).ConfigureAwait(false);
@@ -240,6 +235,13 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
         catch (Exception ex) when (ex is ServerApiException or HttpRequestException or TaskCanceledException)
         {
             _logger.LogWarning(ex, "Exit launch report for {Title} not delivered", record.Game.Title);
+        }
+
+        // After the account is back in the pool and the exit is reported: the settings upload must not hold up the
+        // session-end cleanup, which only waits a few seconds for exit processing.
+        if (_playerSettings is not null)
+        {
+            await _playerSettings.SaveAsync(record.Game, record.Request.UserId, ct).ConfigureAwait(false);
         }
 
         try

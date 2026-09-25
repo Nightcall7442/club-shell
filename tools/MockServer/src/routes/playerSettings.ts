@@ -32,7 +32,7 @@ function store(): Record<string, StoredSettings> {
 const keyOf = (userId: string, gameId: string): string => `${userId}:${gameId}`;
 
 /** Uploads received but not yet committed: token → bytes. */
-const pending = new Map<string, { bytes: Buffer; at: number }>();
+const pending = new Map<string, { bytes: Buffer | null; at: number; userId: string; gameId: string }>();
 
 function base(req: { protocol: string; hostname: string }): string {
   return process.env['MOCK_PUBLIC_URL'] ?? `${req.protocol}://${req.hostname}`;
@@ -82,6 +82,7 @@ export function playerSettingsRoutes(app: FastifyInstance): void {
       requireAgent(req);
       if (!findGame(req.params.gameId)) throw errors.notFound('game');
       const token = randomBytes(16).toString('hex');
+      pending.set(token, { bytes: null, at: Date.now(), userId: req.params.userId, gameId: req.params.gameId });
       return {
         uploadUrl: `${base(req)}/api/v1/mock/player-settings/upload/${token}`,
         expiresAt: inSec(UPLOAD_TTL_MS / 1000),
@@ -95,7 +96,9 @@ export function playerSettingsRoutes(app: FastifyInstance): void {
     const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.rawBody ?? '', 'utf8');
     if (bytes.length > MAX_BYTES) throw errors.validation('body', 'tooLarge');
     for (const [k, v] of pending) if (Date.now() - v.at > UPLOAD_TTL_MS) pending.delete(k);
-    pending.set(req.params.token, { bytes, at: Date.now() });
+    const slot = pending.get(req.params.token);
+    if (!slot) throw errors.notFound('uploadTarget');
+    slot.bytes = bytes;
     return { ok: true, bytes: bytes.length };
   });
 
@@ -107,7 +110,9 @@ export function playerSettingsRoutes(app: FastifyInstance): void {
     const sizeBytes = int(b, 'sizeBytes', 1, MAX_BYTES);
     const token = uploadUrl.split('/').pop() ?? '';
     const upload = pending.get(token);
-    if (!upload) throw errors.validation('uploadUrl', 'unknown');
+    // The token was issued for this player and game only: an upload cannot be committed under someone else.
+    if (!upload?.bytes || upload.userId !== req.params.userId || upload.gameId !== req.params.gameId)
+      throw errors.validation('uploadUrl', 'unknown');
     const actual = createHash('sha256').update(upload.bytes).digest('hex');
     if (actual !== sha256 || upload.bytes.length !== sizeBytes) throw errors.validation('sha256', 'mismatch');
     pending.delete(token);
