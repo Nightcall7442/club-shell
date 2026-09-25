@@ -52,6 +52,7 @@ import {
   type PcRecord,
 } from '../db.js';
 import { pendingCommands, pushToPc, resolveAck } from '../ws.js';
+import { realTelemetry } from '../health.js';
 
 const PC_STATUSES = Object.values(PcStatus);
 const CALL_CATEGORIES = Object.values(CallAdminCategory);
@@ -191,6 +192,7 @@ export function pcsRoutes(app: FastifyInstance): void {
     const hardware = optObj(b, 'hardware');
     if (hardware) pc.hardware = hardware as unknown as HardwareInfo;
     pc.metrics = [...pc.metrics, ...(samples as unknown as PcMetrics[])].slice(-TELEMETRY_MAX_SAMPLES);
+    realTelemetry(pc, samples as unknown as PcMetrics[]);
     for (const e of events) {
       if (isObject(e))
         console.warn(`[telemetry] ${pc.name}: ${String(e['kind'])} ${JSON.stringify(e['data'] ?? null)}`);

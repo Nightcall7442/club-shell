@@ -39,6 +39,7 @@ import { endSession } from './session.js';
 import { requireStaff, topUpWithBonus } from './club.js';
 import { club, clubHooks, inCurfew, isMinor, profileOf, quote, type StaffRecord } from '../club.js';
 import { record } from '../control.js';
+import { openTicketMarks } from '../health.js';
 import { broadcast, pushToPc, pushToUser, sendCommand } from '../ws.js';
 
 const STAFF_NAME = 'Администратор';
@@ -89,6 +90,7 @@ export function adminRoutes(app: FastifyInstance): void {
       tariffs: db.tariffs,
       users: db.users.filter((u) => !u.transient && u.role !== 'admin' && !profileOf(u.id).blacklisted).map(userView),
       zones: club().zones,
+      repairs: openTicketMarks(),
     };
   });
 

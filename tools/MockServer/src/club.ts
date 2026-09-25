@@ -159,7 +159,8 @@ export type ClubEvent =
   | 'lowStock'
   | 'ruleFired'
   | 'sessionOpened'
-  | 'suspicious';
+  | 'suspicious'
+  | 'hardware';
 
 export const CLUB_EVENTS: readonly ClubEvent[] = [
   'shiftClosed',
@@ -169,6 +170,7 @@ export const CLUB_EVENTS: readonly ClubEvent[] = [
   'ruleFired',
   'sessionOpened',
   'suspicious',
+  'hardware',
 ];
 
 /** What a staff member did at the counter; the journal the owner's "Контроль" page reads. */
@@ -268,7 +270,7 @@ export interface ClubConfig {
   control: ControlSettings;
 }
 
-const CONFIG_VERSION = 2;
+const CONFIG_VERSION = 3;
 
 export const DEFAULT_CONTROL: ControlSettings = {
   earlyEndMinutes: 10,
@@ -375,6 +377,7 @@ function defaults(): ClubConfig {
         ruleFired: false,
         sessionOpened: false,
         suspicious: true,
+        hardware: true,
       },
       bigTopupAt: 20_000_000,
     },
@@ -551,6 +554,7 @@ const EVENT_TITLE: Record<ClubEvent, string> = {
   ruleFired: 'Сработало правило',
   sessionOpened: 'Открыт сеанс',
   suspicious: '⚠ Подозрительная операция',
+  hardware: '🛠 Нужен ремонт ПК',
 };
 
 /** Fire-and-forget: Telegram message to the owner and POSTs to subscribed webhooks. Never throws. */

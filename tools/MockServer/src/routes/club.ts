@@ -55,6 +55,7 @@ import {
 } from '../club.js';
 import { broadcast, pushToUser } from '../ws.js';
 import { flagsFor, record, summaries } from '../control.js';
+import { DEFAULT_HEALTH, diagnose, health, updateTicket, type TicketStatus } from '../health.js';
 
 const LEGACY_TOKEN = process.env['MOCK_ADMIN_TOKEN'] ?? 'admin-dev-token';
 
@@ -650,6 +651,60 @@ export function clubRoutes(app: FastifyInstance): void {
   });
 
   // ------------------------------------------------------------------------------------------------ reports
+  // ------------------------------------------------------------------------------------------------ PC health
+  /** Every PC's health (score, live and usual temperatures, FPS, last 24 h, problems) and the repair tickets. */
+  app.get('/admin/health', async (req) => {
+    requireStaff(req);
+    const hs = health();
+    const t = Date.now();
+    return {
+      settings: hs.settings,
+      pcs: db.pcs.map((pc) => ({
+        id: pc.id,
+        name: pc.name,
+        zone: pc.zone,
+        status: pc.status,
+        ...diagnose(pc, t),
+        ticket: hs.tickets.find((x) => x.pcId === pc.id && x.status !== 'resolved') ?? null,
+      })),
+      tickets: hs.tickets.slice(0, 100),
+    };
+  });
+
+  app.patch<{ Params: { id: string } }>('/admin/health/tickets/:id', async (req) => {
+    const me = requireStaff(req);
+    const b = body(req);
+    const status = str(b, 'status', 16) as TicketStatus;
+    if (!['open', 'inWork', 'resolved'].includes(status)) throw errors.validation('status', 'unknown');
+    const ticket = updateTicket(req.params.id, status, optStr(b, 'note', 500));
+    if (!ticket) throw errors.notFound('ticket');
+    record(me, 'pcCommand', {
+      pcId: ticket.pcId,
+      detail: `${ticket.pcName} · ${status}`,
+      meta: { kind: 'repair', ticketId: ticket.id, status },
+    });
+    return { ticket };
+  });
+
+  app.patch('/admin/health/settings', async (req) => {
+    requireStaff(req, 'owner');
+    const raw = body(req);
+    const hs = health();
+    const n = (v: unknown, fallback: number, min: number, max: number): number =>
+      typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : fallback;
+    const cur = { ...DEFAULT_HEALTH, ...hs.settings };
+    hs.settings = {
+      cpuHotC: n(raw['cpuHotC'], cur.cpuHotC, 50, 110),
+      gpuHotC: n(raw['gpuHotC'], cur.gpuHotC, 50, 110),
+      trendC: n(raw['trendC'], cur.trendC, 2, 40),
+      fpsDropPct: n(raw['fpsDropPct'], cur.fpsDropPct, 5, 90),
+      offlinePerDay: n(raw['offlinePerDay'], cur.offlinePerDay, 1, 50),
+      autoMaintenance: typeof raw['autoMaintenance'] === 'boolean' ? raw['autoMaintenance'] : cur.autoMaintenance,
+    };
+    markDirty();
+    return { settings: hs.settings };
+  });
+
   // ------------------------------------------------------------------------------------------------ cashier control
   /** Flags, per-cashier totals and the journal for the last `days` days (owner only). */
   app.get<{ Querystring: { days?: string; staffId?: string } }>('/admin/control', async (req) => {

@@ -22,6 +22,7 @@ const AutomationPage = lazy(() => import('@/pages/AutomationPage'));
 const IntegrationsPage = lazy(() => import('@/pages/IntegrationsPage'));
 const ReportsPage = lazy(() => import('@/pages/ReportsPage'));
 const ControlPage = lazy(() => import('@/pages/ControlPage'));
+const HealthPage = lazy(() => import('@/pages/HealthPage'));
 const StaffPage = lazy(() => import('@/pages/StaffPage'));
 
 interface SectionDef {
@@ -29,7 +30,8 @@ interface SectionDef {
   title: string;
   ownerOnly: boolean;
   icon: ReactNode;
-  page: React.LazyExoticComponent<() => JSX.Element>;
+  /** Pages get whether the signed-in staff member is the owner (for owner-only parts inside shared pages). */
+  page: React.LazyExoticComponent<(props: { isOwner?: boolean }) => JSX.Element>;
 }
 
 const svg = (d: string): JSX.Element => (
@@ -80,6 +82,13 @@ const GROUPS: { title: string; items: SectionDef[] }[] = [
         ownerOnly: false,
         icon: svg('M4 7h16l-1.2 11a2 2 0 0 1-2 1.8H7.2a2 2 0 0 1-2-1.8L4 7zM8 10V6a4 4 0 0 1 8 0v4'),
         page: ShopPage,
+      },
+      {
+        id: 'health',
+        title: 'Состояние ПК',
+        ownerOnly: false,
+        icon: svg('M3 12h4l3-8 4 16 3-8h4'),
+        page: HealthPage,
       },
     ],
   },
@@ -450,7 +459,7 @@ export function App(): JSX.Element {
 
       <main className="min-h-0 overflow-y-auto p-6">
         <Suspense fallback={null}>
-          <Page key={`${current?.id}-${lang}`} />
+          <Page key={`${current?.id}-${lang}`} isOwner={staff.role === 'owner'} />
         </Suspense>
       </main>
     </div>

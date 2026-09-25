@@ -76,11 +76,14 @@ function SeatTile({
   selected,
   onSelect,
   tick,
+  repair,
 }: {
   seat: Seat;
   selected: boolean;
   onSelect: () => void;
   tick: number;
+  /** Worst open repair ticket on this PC (from "Состояние ПК"). */
+  repair?: 'high' | 'medium';
 }): JSX.Element {
   void tick;
   const s = STATUS[seat.pc.status];
@@ -91,7 +94,7 @@ function SeatTile({
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
-      title={`${seat.pc.name} · ${t(s.label)}${seat.user ? ` · ${seat.user.displayName}` : ''}`}
+      title={`${seat.pc.name} · ${t(s.label)}${seat.user ? ` · ${seat.user.displayName}` : ''}${repair ? ` · ${t('Нужен ремонт')}` : ''}`}
       className={clsx(
         'focus-ring relative flex aspect-square flex-col items-center justify-center gap-1.5 rounded-md border bg-bg text-center transition-colors hover:bg-white/[0.04]',
         s.cell,
@@ -109,6 +112,20 @@ function SeatTile({
         </span>
       )}
       {warn && <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 animate-pulse rounded-full bg-danger" />}
+      {repair && (
+        <svg
+          viewBox="0 0 24 24"
+          aria-label={t('Нужен ремонт')}
+          className={clsx('absolute left-1.5 top-1.5 h-3 w-3', repair === 'high' ? 'text-danger' : 'text-warning')}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4 2.6-2.6z" />
+        </svg>
+      )}
     </button>
   );
 }
@@ -472,6 +489,10 @@ export function MapPage(): JSX.Element {
 
   const seats = data?.seats ?? [];
   const seat = seats.find((s) => s.pc.id === selected) ?? null;
+  const repairs = useMemo(
+    () => new Map((data?.repairs ?? []).map((r) => [r.pcId, r.severity] as const)),
+    [data?.repairs],
+  );
   const zones = useMemo(() => {
     const out = new Map<string, Seat[]>();
     for (const s of seats) {
@@ -514,6 +535,7 @@ export function MapPage(): JSX.Element {
                         key={x.pc.id}
                         seat={x}
                         tick={tick}
+                        repair={repairs.get(x.pc.id)}
                         selected={x.pc.id === selected}
                         onSelect={() => setSelected(x.pc.id)}
                       />
