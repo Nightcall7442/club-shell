@@ -154,7 +154,8 @@ test('the player-screen settings are saved on the server', async ({ page, reques
   await name.fill('E2E Arena');
   const save = page.getByRole('button', { name: 'Сохранить', exact: true });
   await save.click();
-  // The save bar only exists while there are unsaved changes.
+  // The save bar gives way to a short confirmation.
+  await expect(page.getByRole('status').filter({ hasText: 'Сохранено' })).toBeVisible();
   await expect(save).toHaveCount(0);
 
   const owner = await tokenFor(request, OWNER_PIN);

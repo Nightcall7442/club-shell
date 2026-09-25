@@ -9,7 +9,7 @@ import type { Transaction } from '@clubshell/contracts';
 import { clubApi, type Client, type ClientGroup } from '@/api';
 import { describe } from '@/errors';
 import { money } from '@/format';
-import { t } from '@/i18n';
+import { dateLocale, t } from '@/i18n';
 import { Button, Field, Input, Note, PageHeader, Section, Table, Toggle, inputCls } from '@/ui';
 
 type NoteState = { text: string; tone: 'ok' | 'err' } | null;
@@ -240,7 +240,7 @@ function ClientPanel({
                 <span className="flex min-w-0 flex-col">
                   <span className="truncate text-sm">{x.description}</span>
                   <span className="tnum font-mono text-[0.68rem] text-muted">
-                    {new Date(x.createdAt).toLocaleString('ru-RU', {
+                    {new Date(x.createdAt).toLocaleString(dateLocale(), {
                       day: '2-digit',
                       month: '2-digit',
                       hour: '2-digit',

@@ -2,7 +2,14 @@
  * Console building blocks in the Obsidian material: buttons, fields, inputs, toggles, panels, section headers, tables
  * and a money input. Every page is made of these, so a change here changes the whole console.
  */
-import { useEffect, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ButtonHTMLAttributes,
+  type InputHTMLAttributes,
+  type ReactNode,
+} from 'react';
 import clsx from 'clsx';
 import { t } from '@/i18n';
 
@@ -295,7 +302,28 @@ export function SaveBar({
   onReset: () => void;
   label: string;
 }): JSX.Element | null {
-  if (!dirty) return null;
+  // A save that went through leaves nothing dirty: say so for a moment instead of the bar just vanishing.
+  const [saved, setSaved] = useState(false);
+  const wasSaving = useRef(false);
+  useEffect(() => {
+    if (wasSaving.current && !saving && !dirty) setSaved(true);
+    wasSaving.current = saving;
+  }, [saving, dirty]);
+  useEffect(() => {
+    if (dirty) setSaved(false);
+    if (!saved) return undefined;
+    const id = setTimeout(() => setSaved(false), 2500);
+    return () => clearTimeout(id);
+  }, [saved, dirty]);
+
+  if (!dirty) {
+    return saved ? (
+      <div role="status" className="panel sticky bottom-0 z-10 flex items-center gap-2 px-5 py-3 text-sm text-success">
+        <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-success" />
+        {t('Сохранено')}
+      </div>
+    ) : null;
+  }
   return (
     <div className="panel sticky bottom-0 z-10 flex items-center justify-between gap-3 px-5 py-3">
       <span className="text-sm text-muted">{label}</span>

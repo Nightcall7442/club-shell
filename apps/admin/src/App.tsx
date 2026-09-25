@@ -346,12 +346,12 @@ export function App(): JSX.Element {
       </div>
 
       {/* Top bar */}
-      <header className="flex items-center gap-6 border-b border-line px-6">
+      <header className="flex min-w-0 items-center gap-4 border-b border-line px-6 xl:gap-6">
         <div className="flex items-baseline gap-3">
           <span className="num-dot text-2xl leading-none">
             {now.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}
           </span>
-          <span className="text-sm text-muted">
+          <span className="hidden whitespace-nowrap text-sm text-muted xl:inline">
             {now.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' })}
           </span>
         </div>
@@ -359,15 +359,15 @@ export function App(): JSX.Element {
         <button
           type="button"
           onClick={() => go('shift')}
-          className="focus-ring flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-white/[0.04]"
+          className="focus-ring flex min-w-0 items-center gap-2 whitespace-nowrap rounded-md px-2 py-1 text-sm hover:bg-white/[0.04]"
         >
-          <span className={clsx('h-2 w-2 rounded-full', shift ? 'bg-success' : 'bg-danger')} />
+          <span className={clsx('h-2 w-2 shrink-0 rounded-full', shift ? 'bg-success' : 'bg-danger')} />
           {shift ? t('Смена открыта · {name}', { name: shift.staffName }) : t('Смена не открыта')}
         </button>
         <div className="ml-auto flex items-center gap-5">
           {usage && (
             <div className="flex items-baseline gap-3">
-              <span className="label">{t('Загрузка зала')}</span>
+              <span className="label hidden whitespace-nowrap xl:inline">{t('Загрузка зала')}</span>
               <span className="num-dot text-2xl leading-none">
                 <span className="text-accent">{String(usage.busy).padStart(2, '0')}</span>
                 <span className="text-muted">/{String(usage.total).padStart(2, '0')}</span>

@@ -119,6 +119,22 @@ function ProductPanel({ product, onChanged }: { product: Product; onChanged: () 
   );
 }
 
+/** Product photo; the first letter of the name when there is none or it fails to load. */
+function ProductThumb({ url, title }: { url: string | null | undefined; title: string }): JSX.Element {
+  const [failed, setFailed] = useState(false);
+  return (
+    <span className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-md border border-line bg-bg">
+      {url && !failed ? (
+        <img src={url} alt="" loading="lazy" onError={() => setFailed(true)} className="h-full w-full object-cover" />
+      ) : (
+        <span aria-hidden="true" className="font-display text-sm text-muted">
+          {title.trim().charAt(0).toUpperCase()}
+        </span>
+      )}
+    </span>
+  );
+}
+
 export default function ShopPage(): JSX.Element {
   const [items, setItems] = useState<Product[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -194,17 +210,7 @@ export default function ShopPage(): JSX.Element {
                   key: 'img',
                   title: t('Фото'),
                   width: '4rem',
-                  render: (p) => (
-                    <span className="block h-10 w-10 overflow-hidden rounded-md border border-line bg-bg">
-                      <img
-                        src={p.imageUrl}
-                        alt=""
-                        loading="lazy"
-                        onError={(e) => (e.currentTarget.style.visibility = 'hidden')}
-                        className="h-full w-full object-cover"
-                      />
-                    </span>
-                  ),
+                  render: (p) => <ProductThumb url={p.imageUrl} title={p.title} />,
                 },
                 { key: 'title', title: t('Название'), render: (p) => <span className="font-medium">{p.title}</span> },
                 {
