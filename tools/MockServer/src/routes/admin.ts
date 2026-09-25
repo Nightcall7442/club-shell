@@ -37,13 +37,14 @@ import {
 } from '../db.js';
 import { endSession } from './session.js';
 import { requireStaff, topUpWithBonus } from './club.js';
-import { club, clubHooks, inCurfew, isMinor, profileOf, quote } from '../club.js';
+import { club, clubHooks, inCurfew, isMinor, profileOf, quote, type StaffRecord } from '../club.js';
+import { record } from '../control.js';
 import { broadcast, pushToPc, pushToUser, sendCommand } from '../ws.js';
 
 const STAFF_NAME = 'Администратор';
 
-function requireAdmin(req: FastifyRequest): void {
-  requireStaff(req);
+function requireAdmin(req: FastifyRequest): StaffRecord {
+  return requireStaff(req);
 }
 
 /** One row of the hall map: the PC, who is on it and how much time is left. */
@@ -93,7 +94,7 @@ export function adminRoutes(app: FastifyInstance): void {
 
   /** Opens a session on a seat for an existing member (prepaid) — the "add time" of a cashier. */
   app.post('/admin/sessions', async (req, reply) => {
-    requireAdmin(req);
+    const staff = requireAdmin(req);
     const b = body(req);
     const pcId = str(b, 'pcId', 64);
     const userId = str(b, 'userId', 64);
@@ -115,7 +116,8 @@ export function adminRoutes(app: FastifyInstance): void {
     if (profileOf(userId).blacklisted) throw errors.policyDenied('blacklisted');
     if (isMinor(userId) && inCurfew()) throw errors.policyDenied('minorCurfew');
     const mins = tariff.isPackage ? (tariff.packageMinutes ?? minutes) : minutes;
-    const cost = quote(tariff, mins, userId, pc.zone).total;
+    const priced = quote(tariff, mins, userId, pc.zone);
+    const cost = priced.total;
     if (user.balance.amount < cost.amount) throw errors.insufficientFunds(cost, user.balance);
     const id = uuid();
     if (cost.amount > 0)
@@ -147,12 +149,19 @@ export function adminRoutes(app: FastifyInstance): void {
     broadcast('pcStatusChanged', { pcId, status: 'busy' });
     pushToUser(userId, 'walletUpdated', balanceOf(user));
     clubHooks.sessionOpened(rec);
+    record(staff, 'sessionOpen', {
+      userId,
+      pcId,
+      amount: cost.amount,
+      detail: `${user.displayName} · ${pc.name} · ${tariff.name}`,
+      meta: { minutes: mins, discountPct: priced.discountPct, sessionId: id },
+    });
     return reply.code(201).send({ session, charged: cost, balance: user.balance });
   });
 
   /** Adds paid minutes to a running session (by seat or by session id). */
   app.post('/admin/sessions/extend', async (req) => {
-    requireAdmin(req);
+    const staff = requireAdmin(req);
     const b = body(req);
     const rec = targetSession(b);
     const minutes = int(b, 'minutes', 5, 1440);
@@ -172,39 +181,62 @@ export function adminRoutes(app: FastifyInstance): void {
     const session = viewSession(rec);
     pushToPc(rec.pcId, 'sessionUpdated', session);
     pushToUser(user.id, 'walletUpdated', balanceOf(user));
+    record(staff, 'sessionExtend', {
+      userId: user.id,
+      pcId: rec.pcId,
+      amount: cost.amount,
+      detail: `${user.displayName} · ${findPc(rec.pcId)?.name ?? rec.pcId} · +${minutes}`,
+      meta: { minutes, sessionId: rec.id },
+    });
     return { session, charged: cost, balance: user.balance };
   });
 
   /** Ends a session from the counter; unused prepaid time is refunded by `endSession`. */
   app.post('/admin/sessions/end', async (req) => {
-    requireAdmin(req);
+    const staff = requireAdmin(req);
     const b = body(req);
     const rec = targetSession(b);
+    const sessionMinutes = Math.floor((Date.now() - Date.parse(rec.startedAt)) / 60_000);
     const result = endSession(rec, 'admin');
+    const user = findUser(rec.userId);
+    record(staff, 'sessionEnd', {
+      userId: rec.userId,
+      pcId: rec.pcId,
+      amount: result.refunded?.amount ?? 0,
+      detail: `${user?.displayName ?? rec.userId} · ${findPc(rec.pcId)?.name ?? rec.pcId}`,
+      meta: { sessionMinutes, sessionId: rec.id },
+    });
     return { session: result.session, charged: result.charged, refunded: result.refunded };
   });
 
   /** Cash / card top-up at the counter. */
   app.post('/admin/wallet/topup', async (req) => {
-    requireAdmin(req);
+    const staff = requireAdmin(req);
     const b = body(req);
     const user = findUser(str(b, 'userId', 64));
     const amount = int(b, 'amount', 1, 100_000_000);
     const method = optStr(b, 'method', 16) ?? 'cash';
     if (!user) throw errors.notFound('user');
     const { bonus } = topUpWithBonus(user, amount, method);
+    record(staff, 'topUp', {
+      userId: user.id,
+      amount,
+      detail: user.displayName,
+      meta: { method, bonus },
+    });
     return { balance: user.balance, bonus: uzs(bonus) };
   });
 
   /** Staff message, lock/unlock and power commands — the existing `ServerCommand` set. */
   app.post('/admin/pcs/:pcId/command', async (req) => {
-    requireAdmin(req);
+    const staff = requireAdmin(req);
     const { pcId } = req.params as { pcId: string };
     const pc = findPc(pcId);
     if (!pc) throw errors.notFound('pc');
     const b = body(req);
     const kind = str(b, 'kind', 32);
     const text = optStr(b, 'text', 500);
+    record(staff, 'pcCommand', { pcId, detail: `${pc.name} · ${kind}`, meta: { kind } });
     switch (kind) {
       case 'message': {
         if (!text) throw errors.validation('text', 'required');

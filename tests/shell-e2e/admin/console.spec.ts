@@ -164,3 +164,47 @@ test('the player-screen settings are saved on the server', async ({ page, reques
   };
   expect(club.branding.clubName).toBe('E2E Arena');
 });
+
+test('cashier control flags a cash shortfall and quick refunds, and only the owner sees it', async ({
+  page,
+  request,
+}) => {
+  const cashier = await tokenFor(request, CASHIER_PIN);
+  const headers = auth(cashier);
+  const call = async (method: 'GET' | 'POST', path: string, data?: unknown): Promise<any> => {
+    const res = await request.fetch(`${API}${path}`, { method, headers, data });
+    expect(res.ok(), `${method} ${path}: ${await res.text()}`).toBeTruthy();
+    return res.json();
+  };
+
+  const current = (await call('GET', '/admin/shift')) as { shift: { openingCash: number } | null };
+  if (current.shift) await call('POST', '/admin/shift/close', { closingCash: current.shift.openingCash });
+
+  const overview = (await call('GET', '/admin/overview')) as {
+    users: { id: string }[];
+    tariffs: { id: string; name: string }[];
+    seats: { pc: { id: string; status: string }; session: unknown }[];
+  };
+  const user = overview.users[0]!;
+  const standard = overview.tariffs.find((t) => t.name === 'Standard')!;
+  const free = overview.seats.filter((s) => s.pc.status === 'free' && !s.session).map((s) => s.pc.id);
+
+  await call('POST', '/admin/shift/open', { openingCash: 20_000_000 });
+  await call('POST', '/admin/wallet/topup', { userId: user.id, amount: 10_000_000, method: 'cash' });
+  // Three sessions opened and ended with a refund at once: the classic "sell time, refund it, pocket the cash".
+  for (const pcId of free.slice(0, 3)) {
+    await call('POST', '/admin/sessions', { pcId, userId: user.id, tariffId: standard.id, minutes: 120 });
+    await call('POST', '/admin/sessions/end', { pcId });
+  }
+  // 300 000 expected in the drawer, 250 000 counted.
+  await call('POST', '/admin/shift/close', { closingCash: 25_000_000 });
+
+  expect((await request.get(`${API}/admin/control`, { headers })).status()).toBe(403);
+
+  await signIn(page, OWNER_PIN);
+  await page.goto('/#/control');
+  await expect(page.getByRole('heading', { name: 'Контроль кассиров' })).toBeVisible();
+  await expect(page.getByText('Недостача в кассе при закрытии смены: 50 000 сум').first()).toBeVisible();
+  await expect(page.getByText('3 сеанса за смену закрыты с возвратом вскоре после открытия').first()).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'Кассир Азиз' }).first()).toBeVisible();
+});

@@ -152,7 +152,14 @@ export interface Zone {
 
 export type DeviceKind = 'pc' | 'console' | 'vr' | 'other';
 
-export type ClubEvent = 'shiftClosed' | 'pcOffline' | 'bigTopup' | 'lowStock' | 'ruleFired' | 'sessionOpened';
+export type ClubEvent =
+  | 'shiftClosed'
+  | 'pcOffline'
+  | 'bigTopup'
+  | 'lowStock'
+  | 'ruleFired'
+  | 'sessionOpened'
+  | 'suspicious';
 
 export const CLUB_EVENTS: readonly ClubEvent[] = [
   'shiftClosed',
@@ -161,7 +168,55 @@ export const CLUB_EVENTS: readonly ClubEvent[] = [
   'lowStock',
   'ruleFired',
   'sessionOpened',
+  'suspicious',
 ];
+
+/** What a staff member did at the counter; the journal the owner's "Контроль" page reads. */
+export type AuditAction =
+  | 'shiftOpen'
+  | 'shiftClose'
+  | 'topUp'
+  | 'sessionOpen'
+  | 'sessionExtend'
+  | 'sessionEnd'
+  | 'promoRedeem'
+  | 'clientGroup'
+  | 'blacklist'
+  | 'stockReceive'
+  | 'stockEdit'
+  | 'pcCommand';
+
+export interface AuditEntry {
+  id: string;
+  at: string;
+  staffId: string;
+  staffName: string;
+  /** Shift open at the time, `null` when the operation happened with no shift open. */
+  shiftId: string | null;
+  action: AuditAction;
+  userId: string | null;
+  pcId: string | null;
+  /** Money moved, minor units (refunds and top-ups positive); 0 when none. */
+  amount: number;
+  /** Short human-readable detail in Russian (the console translates the fixed parts). */
+  detail: string;
+  /** Extra facts the rules read (e.g. `sessionMinutes`, `discountPct`, `method`). */
+  meta: Record<string, string | number | boolean | null>;
+}
+
+/** Thresholds of the cashier-control rules, tuned by the owner. */
+export interface ControlSettings {
+  /** A session ended with a refund within this many minutes of opening counts as an early end. */
+  earlyEndMinutes: number;
+  /** This many early ends by one cashier in one shift is a red flag. */
+  earlyEndsPerShift: number;
+  /** Moving a client into a group with at least this discount is flagged. */
+  discountPct: number;
+  /** Topping up the same client this many times in one shift is flagged. */
+  sameClientTopups: number;
+  /** Cash short at shift close by more than this (minor units) is a red flag. */
+  shortfallFrom: number;
+}
 
 export interface Webhook {
   id: string;
@@ -208,9 +263,20 @@ export interface ClubConfig {
   shifts: ShiftRecord[];
   /** Tokens of signed-in staff → staff id. */
   staffTokens: Record<string, string>;
+  /** Staff actions, newest first (capped). */
+  audit: AuditEntry[];
+  control: ControlSettings;
 }
 
-const CONFIG_VERSION = 1;
+const CONFIG_VERSION = 2;
+
+export const DEFAULT_CONTROL: ControlSettings = {
+  earlyEndMinutes: 10,
+  earlyEndsPerShift: 3,
+  discountPct: 30,
+  sameClientTopups: 3,
+  shortfallFrom: 500_000,
+};
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Defaults
@@ -308,6 +374,7 @@ function defaults(): ClubConfig {
         lowStock: true,
         ruleFired: false,
         sessionOpened: false,
+        suspicious: true,
       },
       bigTopupAt: 20_000_000,
     },
@@ -319,6 +386,8 @@ function defaults(): ClubConfig {
     ],
     shifts: [],
     staffTokens: {},
+    audit: [],
+    control: { ...DEFAULT_CONTROL },
   };
 }
 
@@ -331,7 +400,21 @@ export function club(): ClubConfig {
     store.club = defaults();
     markDirty();
   } else if (store.club.version !== CONFIG_VERSION) {
-    store.club = { ...defaults(), ...store.club, version: CONFIG_VERSION };
+    const base = defaults();
+    const old = store.club;
+    store.club = {
+      ...base,
+      ...old,
+      // Sections added later keep the stored values and gain the new keys.
+      notifications: {
+        ...base.notifications,
+        ...old.notifications,
+        events: { ...base.notifications.events, ...old.notifications?.events },
+      },
+      control: { ...base.control, ...old.control },
+      audit: old.audit ?? [],
+      version: CONFIG_VERSION,
+    };
     markDirty();
   }
   return store.club;
@@ -467,6 +550,7 @@ const EVENT_TITLE: Record<ClubEvent, string> = {
   lowStock: 'Товар заканчивается',
   ruleFired: 'Сработало правило',
   sessionOpened: 'Открыт сеанс',
+  suspicious: '⚠ Подозрительная операция',
 };
 
 /** Fire-and-forget: Telegram message to the owner and POSTs to subscribed webhooks. Never throws. */
