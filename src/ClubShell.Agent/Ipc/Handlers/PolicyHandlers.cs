@@ -3,11 +3,13 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using ClubShell.Agent.Policy;
 using ClubShell.Contracts.Ipc;
+using ClubShell.Contracts.Serialization;
 using ClubShell.Contracts.Users;
 using ClubShell.Core.Abstractions;
 using ClubShell.Core.Configuration;
 using Microsoft.Extensions.Options;
 using PcPolicy = ClubShell.Contracts.Pcs.Policy;
+using ShellClub = ClubShell.Contracts.Pcs.ShellClub;
 
 namespace ClubShell.Agent.Ipc.Handlers;
 
@@ -172,6 +174,11 @@ public sealed class ShellSettingsStore
             MergeSection(root, "features", shell.Features);
             MergeSection(root, "ads", shell.Ads);
             MergeSection(root, "idle", shell.Idle);
+            if (shell.Club is { } club)
+            {
+                // Replaced as a whole: a banner the owner deleted must disappear, not linger from the last merge.
+                root["club"] = JsonSerializer.SerializeToNode(club, JsonDefaults.TypeInfo<ShellClub>());
+            }
         });
     }
 
@@ -268,7 +275,26 @@ public sealed class ShellSettingsStore
                 GetBool(features?["profile"], true),
                 GetBool(features?["topup"], true),
                 GetBool(features?["apps"], true),
-                GetBool(features?["callAdmin"], true)));
+                GetBool(features?["callAdmin"], true)),
+            MapClub(root["club"]));
+    }
+
+    /// <summary>Reads <c>shell.json → club</c>; anything malformed reads as "no club branding" rather than failing settings.</summary>
+    private static ShellClub? MapClub(JsonNode? node)
+    {
+        if (node is not JsonObject)
+        {
+            return null;
+        }
+
+        try
+        {
+            return node.Deserialize(JsonDefaults.TypeInfo<ShellClub>());
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private ShellSettings Mutate(Action<JsonObject> mutate)

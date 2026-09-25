@@ -33,6 +33,7 @@ import {
   type Policy,
   type Product,
   type ServerCommandEnvelope,
+  type ShellClub,
   type Session,
   type SessionEndReason,
   type SessionEvent,
@@ -619,10 +620,43 @@ export function viewSession(s: SessionRecord, nowMs = Date.now()): Session {
   };
 }
 
-/** Player-facing features set in the admin console, read without importing the club module (it imports this one). */
+/** The slice of `db.club` the kiosk sees, read without importing the club module (it imports this one). */
+interface ClubForShell {
+  features?: Record<string, boolean>;
+  branding?: { clubName: string; accent: string; logoUrl: string | null; wallpaperUrl: string | null };
+  banners?: { id: string; title: string; imageUrl: string; from: string | null; to: string | null; enabled: boolean }[];
+  rulesText?: { ru: string; uz: string; en: string };
+}
+
+function clubDoc(): ClubForShell | null {
+  return (db as unknown as { club?: ClubForShell }).club ?? null;
+}
+
+/** Player-facing features set in the admin console. */
 function clubFeatures(): Record<string, boolean> | null {
-  const c = (db as unknown as { club?: { features?: Record<string, boolean> } }).club;
-  return c?.features ?? null;
+  return clubDoc()?.features ?? null;
+}
+
+/** Branding, banners live right now and rules, as pushed into `shell.json → club`. */
+function clubForShell(): ShellClub | null {
+  const c = clubDoc();
+  if (!c?.branding) return null;
+  const nowMs = Date.now();
+  const live = (c.banners ?? []).filter(
+    (b) =>
+      b.enabled &&
+      b.imageUrl.trim() !== '' &&
+      (!b.from || Date.parse(b.from) <= nowMs) &&
+      (!b.to || Date.parse(b.to) + 86_400_000 > nowMs),
+  );
+  return {
+    name: c.branding.clubName || null,
+    accent: c.branding.accent || null,
+    logoUrl: c.branding.logoUrl,
+    wallpaperUrl: c.branding.wallpaperUrl,
+    banners: live.map((b) => ({ id: b.id, title: b.title, imageUrl: b.imageUrl })),
+    rules: c.rulesText ?? null,
+  };
 }
 
 export function agentConfigFor(pc: PcRecord): AgentServerConfig {
@@ -650,8 +684,13 @@ export function agentConfigFor(pc: PcRecord): AgentServerConfig {
         chat: clubFeatures()?.chat ?? true,
         booking: clubFeatures()?.booking ?? true,
         tournaments: clubFeatures()?.tournaments ?? true,
+        profile: clubFeatures()?.profile ?? true,
+        topup: clubFeatures()?.topup ?? true,
+        apps: clubFeatures()?.apps ?? true,
+        callAdmin: clubFeatures()?.callAdmin ?? true,
         ads: pc.zone !== 'VIP',
       },
+      club: clubForShell(),
       ads: { enabled: pc.zone !== 'VIP', intervalSec: 900 },
       idle: { timeoutSec: 300 },
     },

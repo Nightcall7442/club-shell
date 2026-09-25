@@ -542,6 +542,7 @@ virtual-key name without `VK_` (`Esc`, `Tab`, `F4`, `R`, `Delete`, `PrintScreen`
 | `allowVirtualKeyboard` | bool | yes | |
 | `uiSounds` | bool | yes | |
 | `features` | `{ shop, chat, booking, tournaments, profile, topup, apps, callAdmin: bool }` | yes | read-only |
+| `club` | `{ name?, accent?, logoUrl?, wallpaperUrl?: string, banners?: { id, title, imageUrl }[], rules?: { ru?, uz?, en? } }` | no | read-only; the owner's set-up from the admin console, written by the Agent from the server's `shell.club`. The Shell uses the name and logo on the lock, idle and top bar, the accent over the theme's, the wallpaper behind the lock screen, the banners in the home promo strip and the rules on Support; each missing field keeps the bundled default |
 
 `PcInfo`: `{ pc: Pc, agentVersion: string, shellVersion: string, protocolVersion: int, uptimeSec: long, kioskUser: string, connectivity: ConnectivityState, serverTime: datetime, policyVersion: int }`
 

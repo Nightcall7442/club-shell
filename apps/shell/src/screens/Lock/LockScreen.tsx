@@ -31,6 +31,8 @@ import { useThemeStore } from '@/store/theme';
 import { useWalletStore } from '@/store/wallet';
 import { AdsCarousel } from '@/screens/Idle/AdsCarousel';
 import { describeWindow } from '@/screens/Idle/PriceList';
+import { ClubMark } from '@/components/brand/ClubMark';
+import { useClub } from '@/hooks/useClub';
 import { GuestLogin } from './GuestLogin';
 import { LoginForm, loginErrorMessage } from './LoginForm';
 import { QrLogin } from './QrLogin';
@@ -585,6 +587,7 @@ export default function LockScreen(): JSX.Element {
   const logout = useAuthStore((s) => s.logout);
   const defaultRoute = useSettingsStore((s) => s.shellConfig?.ui.defaultRoute ?? '/home');
   const pcName = useSettingsStore((s) => s.pcInfo?.pc.name ?? null);
+  const club = useClub();
   const pcZone = useSettingsStore((s) => s.pcInfo?.pc.zone ?? '');
   const callAdminEnabled = useSettingsStore((s) => s.features.callAdmin);
   const animations = useThemeStore((s) => s.theme.animations);
@@ -606,6 +609,12 @@ export default function LockScreen(): JSX.Element {
   useEffect(() => {
     trackScreen(pathname);
   }, [pathname]);
+
+  // Between players, pick up what the owner changed in the admin console (name, wallpaper, banners, rules): the Agent
+  // writes the server's club block into shell.json whenever the config version moves.
+  useEffect(() => {
+    void useSettingsStore.getState().load();
+  }, []);
 
   useEffect(() => {
     if (hasUser && isOpen && !isLocked) {
@@ -661,7 +670,8 @@ export default function LockScreen(): JSX.Element {
 
   return (
     <div className="relative h-full w-full overflow-hidden">
-      {art.length > 0 ? (
+      {/* The owner's wallpaper from the admin console, when set, wins over the rotating art. */}
+      {!club.wallpaperUrl && art.length > 0 ? (
         <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-0">
           <AdsCarousel items={art} showCounter={false} />
           <div className="absolute inset-0 bg-[linear-gradient(180deg,rgb(var(--c-bg)/0.8)_0%,rgb(var(--c-bg)/0.35)_28%,rgb(var(--c-bg)/0.4)_62%,rgb(var(--c-bg)/0.92)_100%)]" />
@@ -672,7 +682,10 @@ export default function LockScreen(): JSX.Element {
       <div className="relative z-10 flex h-full w-full flex-col gap-[var(--gap)] px-[var(--gutter)] py-[var(--gap)]">
         <header className="flex items-start justify-between gap-[var(--gap)]">
           <div className="min-w-0">
-            <p className="truncate font-display text-2xl font-light tracking-tight text-text">{t('idle.clubName')}</p>
+            <div className="flex min-w-0 items-center gap-3">
+              <ClubMark className="h-7 w-7" />
+              <p className="truncate font-display text-2xl font-light tracking-tight text-text">{club.name}</p>
+            </div>
             {pcName && <p className="hud-label mt-2">{t('idle.pcName', { name: pcName, zone: pcZone })}</p>}
           </div>
           <div className="flex items-center gap-[var(--gap)]">

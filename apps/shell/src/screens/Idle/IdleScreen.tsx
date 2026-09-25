@@ -8,6 +8,8 @@ import { trackScreen } from '@/lib/analytics';
 import { Clock } from '@/screens/Lock/LockScreen';
 import { useSettingsStore } from '@/store/settings';
 import { useThemeStore } from '@/store/theme';
+import { ClubMark } from '@/components/brand/ClubMark';
+import { useClub } from '@/hooks/useClub';
 import { AdsCarousel } from './AdsCarousel';
 import { PriceList } from './PriceList';
 
@@ -23,6 +25,7 @@ export default function IdleScreen(): JSX.Element {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const pcName = useSettingsStore((s) => s.pcInfo?.pc.name ?? null);
+  const club = useClub();
   const pcZone = useSettingsStore((s) => s.pcInfo?.pc.zone ?? '');
   const animations = useThemeStore((s) => s.theme.animations);
 
@@ -82,9 +85,9 @@ export default function IdleScreen(): JSX.Element {
           className="flex items-start justify-between gap-[var(--gap)]"
         >
           <div className="flex min-w-0 items-center gap-4">
-            <span aria-hidden="true" className="h-8 w-8 shrink-0 rotate-45 border border-accent/70" />
+            <ClubMark className="h-8 w-8" />
             <div className="min-w-0">
-              <p className="truncate font-display text-3xl font-light tracking-tight text-text">{t('idle.clubName')}</p>
+              <p className="truncate font-display text-3xl font-light tracking-tight text-text">{club.name}</p>
               {pcName && <p className="hud-label mt-2">{t('idle.pcName', { name: pcName, zone: pcZone })}</p>}
             </div>
           </div>

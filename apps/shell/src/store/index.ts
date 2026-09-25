@@ -8,6 +8,7 @@ import type { Session } from '@clubshell/contracts';
 import i18n, { initI18n } from '@/i18n';
 import { log } from '@/lib/logger';
 import { api, events, isTauri } from '@/lib/tauri';
+import { setAccentOverride } from '@/theme/themes';
 import { useAuthStore } from './auth';
 import { useChatStore } from './chat';
 import { useGamesStore } from './games';
@@ -78,6 +79,8 @@ function wireListeners(): void {
         }
       },
     ),
+    // The owner's accent from the admin console, over whichever theme is active.
+    useSettingsStore.subscribe((s) => s.settings.club?.accent ?? null, setAccentOverride, { fireImmediately: true }),
     useSettingsStore.subscribe(
       (s) => s.settings.locale,
       (locale) => {

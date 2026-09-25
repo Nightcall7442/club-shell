@@ -18,6 +18,7 @@ import { CallAdminButton } from '@/screens/Support/CallAdminButton';
 import { useNotificationsStore } from '@/store/notifications';
 import { selectFeatures, useSettingsStore } from '@/store/settings';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
+import { useClub } from '@/hooks/useClub';
 
 const FAQ_COUNT = 4;
 const RULES_COUNT = 5;
@@ -256,6 +257,7 @@ export function PcFacts(): JSX.Element {
 
 export default function SupportScreen(): JSX.Element {
   const { t } = useTranslation();
+  const club = useClub();
   const navigate = useNavigate();
   const features = useSettingsStore(selectFeatures);
   const animations = useThemeStore(selectAnimationsEnabled);
@@ -278,7 +280,8 @@ export default function SupportScreen(): JSX.Element {
     question: t(`support.faqItems.q${i + 1}`),
     answer: t(`support.faqItems.a${i + 1}`),
   }));
-  const rules = Array.from({ length: RULES_COUNT }, (_, i) => t(`support.rules.r${i + 1}`));
+  // The owner's own rules from the admin console win over the bundled list.
+  const rules = club.rules ?? Array.from({ length: RULES_COUNT }, (_, i) => t(`support.rules.r${i + 1}`));
 
   return (
     <motion.div
@@ -314,8 +317,8 @@ export default function SupportScreen(): JSX.Element {
           <section aria-label={t('support.rulesTitle')} className="glass flex flex-col gap-3 rounded-xl p-5">
             <h2 className="font-display text-xl font-normal text-text tracking-tight">{t('support.rulesTitle')}</h2>
             <ol className="flex list-decimal flex-col gap-2 pl-6 text-base text-text marker:font-bold marker:text-primary">
-              {rules.map((r) => (
-                <li key={r}>{r}</li>
+              {rules.map((r, i) => (
+                <li key={`${i}-${r}`}>{r}</li>
               ))}
             </ol>
           </section>

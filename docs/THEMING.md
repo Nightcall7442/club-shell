@@ -239,6 +239,14 @@ ThemePicker (screens/Profile/Settings.tsx)
 
 ---
 
+## 6.1 The club's own accent and wallpaper
+
+A club owner does not need a theme file to make the screen theirs. In the admin console (**Экран игрока**) they set a
+name, an accent colour, a logo, a wallpaper, banners and rules; the server sends them as `shell.club` and the Agent
+exposes them as `ShellSettings.club`. `setAccentOverride()` (`src/theme/themes.ts`) puts the club accent over whichever
+theme is active, including after a live theme switch; `Background` prefers the club wallpaper over `theme.wallpaper`
+(a game's own hero still wins on its details screen). Empty fields keep the theme's values.
+
 ## 7. Creating a custom theme
 
 1. Copy `config/themes/default.json` to `C:\ProgramData\ClubShell\themes\<name>.json`. `<name>` is

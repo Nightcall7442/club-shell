@@ -3,6 +3,26 @@
 import type { JsonObject, UpdateChannel } from './commands.js';
 import type { Locale } from './user.js';
 
+/** A promo banner on the player's home screen, set by the club owner in the admin console. */
+export interface ClubBanner {
+  /** Banner id. */
+  id: string;
+  /** Caption. */
+  title: string;
+  /** Image URL (wide, ~16:5). */
+  imageUrl: string;
+}
+
+/** Club rules in each UI language; a missing language falls back to Russian. */
+export interface ClubRules {
+  /** Russian. */
+  ru?: string | null;
+  /** Uzbek. */
+  uz?: string | null;
+  /** English. */
+  en?: string | null;
+}
+
 /** Agent ⇄ server connectivity. */
 export const ConnectivityState = {
   /** Server reachable. */
@@ -221,6 +241,25 @@ export const PeripheralKinds = {
 /** One of the {@link PeripheralKinds} values. */
 export type PeripheralKind = (typeof PeripheralKinds)[keyof typeof PeripheralKinds];
 
+/**
+ * The club's own look on the player screen (`shell.json → club`), set by the owner in the admin console and pushed with
+ * the server config. Every field is optional: without it the Shell keeps its bundled defaults.
+ */
+export interface ShellClub {
+  /** Club name shown on the lock, idle and top bar. */
+  name?: string | null;
+  /** Accent colour `#RRGGBB`, overrides the theme's accent. */
+  accent?: string | null;
+  /** Logo image URL. */
+  logoUrl?: string | null;
+  /** Wallpaper behind the lock and idle screens. */
+  wallpaperUrl?: string | null;
+  /** Active banners, in display order. */
+  banners?: ClubBanner[] | null;
+  /** Club rules shown on the support screen. */
+  rules?: ClubRules | null;
+}
+
 /** Server override pushed into `shell.json`. */
 export interface ShellConfigOverride {
   /** Default locale. */
@@ -233,6 +272,8 @@ export interface ShellConfigOverride {
   ads?: JsonObject | null;
   /** Partial `shell.json → idle`. */
   idle?: JsonObject | null;
+  /** Club branding, banners and rules; replaces `shell.json → club` as a whole. */
+  club?: ShellClub | null;
 }
 
 /** Temperatures in °C; 0 when unavailable. */
