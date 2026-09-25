@@ -464,6 +464,9 @@ public sealed class ClubTimeConverter : JsonConverter<TimeOnly>
 [JsonSerializable(typeof(TimeWindow))]
 [JsonSerializable(typeof(UpdatesConfigOverride))]
 [JsonSerializable(typeof(ShellConfigOverride))]
+[JsonSerializable(typeof(ShellClub))]
+[JsonSerializable(typeof(ClubBanner))]
+[JsonSerializable(typeof(ClubRules))]
 [JsonSerializable(typeof(AgentServerConfig))]
 
 // Sessions.

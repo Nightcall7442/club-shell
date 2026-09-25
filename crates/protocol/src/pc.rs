@@ -29,6 +29,33 @@ pub struct AntiCheatPolicy {
     pub block_on_violation: bool,
 }
 
+/// A promo banner on the player's home screen, set by the club owner in the admin console.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ClubBanner {
+    /// Banner id.
+    pub id: String,
+    /// Caption.
+    pub title: String,
+    /// Image URL (wide, ~16:5).
+    pub image_url: String,
+}
+
+/// Club rules in each UI language; a missing language falls back to Russian.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ClubRules {
+    /// Russian.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ru: Option<String>,
+    /// Uzbek.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uz: Option<String>,
+    /// English.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub en: Option<String>,
+}
+
 wire_enum! {
     /// Agent ⇄ server connectivity.
     ConnectivityState {
@@ -337,6 +364,32 @@ pub struct ProcessAllowlistPolicy {
     pub patterns: Vec<String>,
 }
 
+/// The club's own look on the player screen (`shell.json → club`), set by the owner in the admin
+/// console and pushed with the server config. Every field is optional: without it the Shell keeps
+/// its bundled defaults.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellClub {
+    /// Club name shown on the lock, idle and top bar.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Accent colour `#RRGGBB`, overrides the theme's accent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accent: Option<String>,
+    /// Logo image URL.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logo_url: Option<String>,
+    /// Wallpaper behind the lock and idle screens.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wallpaper_url: Option<String>,
+    /// Active banners, in display order.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub banners: Option<Vec<ClubBanner>>,
+    /// Club rules shown on the support screen.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rules: Option<ClubRules>,
+}
+
 /// Server override pushed into `shell.json`.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -356,6 +409,9 @@ pub struct ShellConfigOverride {
     /// Partial `shell.json → idle`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub idle: Option<Value>,
+    /// Club branding, banners and rules; replaces `shell.json → club` as a whole.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub club: Option<ShellClub>,
 }
 
 /// Shell replacement for the kiosk user.
@@ -876,6 +932,7 @@ mod tests {
                 features: None,
                 ads: None,
                 idle: None,
+                club: None,
             }),
             themes: Some(vec![ThemeRef {
                 name: "neon".into(),

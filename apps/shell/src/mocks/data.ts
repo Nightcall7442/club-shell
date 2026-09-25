@@ -22,6 +22,7 @@ import type {
   QrLoginStart,
   Seat,
   Session,
+  ShellClub,
   ShellSettings,
   Tariff,
   Tournament,
@@ -1256,6 +1257,24 @@ export const SETTINGS: ShellSettings = {
     topup: true,
     apps: true,
     callAdmin: true,
+  },
+};
+
+/**
+ * A club as the owner sets it up in the admin console (`apps/admin` → Экран игрока): own name, an orange accent over
+ * the theme, a wallpaper, one banner and house rules. Off by default so the stock look stays the baseline; open the
+ * shell with `?club=demo` (or call `__clubshellMock.simulate.club()`) to see it.
+ */
+export const DEMO_CLUB: ShellClub = {
+  name: 'CyberArena Tashkent',
+  accent: '#FF8A3D',
+  logoUrl: null,
+  wallpaperUrl: '/mock-art/default-wallpaper.jpg',
+  banners: [{ id: 'banner-night', title: 'Ночной пакет: 5 часов за 40 000 сум', imageUrl: '/mock-art/cs2-hero.jpg' }],
+  rules: {
+    ru: 'Бережно относитесь к оборудованию.\nЕда и напитки только на приставном столике.\nЧиты запрещены.',
+    uz: 'Uskunalarga ehtiyotkorlik bilan munosabatda boʻling.\nOvqat va ichimliklar faqat yon stolchada.\nChitlar taqiqlangan.',
+    en: 'Treat the equipment with care.\nFood and drinks on the side table only.\nNo cheats.',
   },
 };
 

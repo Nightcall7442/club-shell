@@ -27,6 +27,8 @@ import { PlusButton, SessionTimer } from '@/screens/Desktop/SessionTimer';
 import { useNotificationsStore } from '@/store/notifications';
 import { selectFeatures, useSettingsStore } from '@/store/settings';
 import { useWalletStore } from '@/store/wallet';
+import { ClubMark } from '@/components/brand/ClubMark';
+import { useClub } from '@/hooks/useClub';
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Icons
@@ -295,6 +297,7 @@ function Prompt({ glyph, label, round = true }: { glyph: string; label: string; 
 
 export function TopBar(): JSX.Element {
   const { t } = useTranslation();
+  const club = useClub();
   const navigate = useNavigate();
   const pc = useSettingsStore((s) => s.pcInfo?.pc ?? null);
   const showClock = useSettingsStore((s) => s.shellConfig?.ui.showClock ?? true);
@@ -319,9 +322,9 @@ export function TopBar(): JSX.Element {
     <div className="grid h-full w-full grid-cols-[1fr_auto_1fr] items-center gap-[var(--gap)] px-[var(--gutter)]">
       {/* Club mark + PC */}
       <div className="flex min-w-0 items-center gap-3">
-        <span aria-hidden="true" className="h-6 w-6 shrink-0 rotate-45 border border-accent/70" />
+        <ClubMark className="h-6 w-6" />
         <div className="min-w-0 leading-tight">
-          <div className="truncate font-display text-sm font-normal tracking-tight text-text">{t('idle.clubName')}</div>
+          <div className="truncate font-display text-sm font-normal tracking-tight text-text">{club.name}</div>
           <div className="hud-label mt-0.5 truncate">{pc ? `${pc.name} · ${pc.zone}` : t('common.loading')}</div>
         </div>
       </div>

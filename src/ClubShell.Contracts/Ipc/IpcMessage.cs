@@ -933,6 +933,7 @@ public sealed record ShellFeatures(
 /// <param name="AllowVirtualKeyboard">Allow the on-screen keyboard.</param>
 /// <param name="UiSounds">UI sounds.</param>
 /// <param name="Features">Feature toggles (read-only).</param>
+/// <param name="Club">Club branding, banners and rules (read-only); <see langword="null"/> when the server sent none.</param>
 public sealed record ShellSettings(
     Locale Locale,
     string Theme,
@@ -943,7 +944,8 @@ public sealed record ShellSettings(
     bool ShowMetricsOverlay,
     bool AllowVirtualKeyboard,
     bool UiSounds,
-    ShellFeatures Features);
+    ShellFeatures Features,
+    ShellClub? Club = null);
 
 /// <summary>Request of <c>settings.set</c>; partial, at least one key.</summary>
 /// <param name="Locale">UI locale.</param>

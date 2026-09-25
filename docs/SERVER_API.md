@@ -213,7 +213,7 @@ Response `AgentServerConfig` — server-side overrides merged over `agent.json` 
 | `updates` | `{ channel?: UpdateChannel, checkIntervalSec?: int, applyWindow?: {from,to} }` | no | |
 | `telemetry` | partial | no | |
 | `remoteAdmin` | partial | no | |
-| `shell` | `{ locale?: Locale, theme?: string, features?: object, ads?: object, idle?: object }` | no | pushed into `shell.json` |
+| `shell` | `{ locale?: Locale, theme?: string, features?: object, ads?: object, idle?: object, club?: ShellClub }` | no | pushed into `shell.json`; `club` (name, accent, logo, wallpaper, active banners, rules) replaces `shell.json → club` as a whole, so a banner the owner removed disappears |
 | `themes` | `{ name: string, url: string, sha256: string }[]` | no | Agent downloads into `themes\` |
 | `wsUrl` | string | no | override |
 

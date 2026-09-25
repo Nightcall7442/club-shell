@@ -2,7 +2,7 @@
 
 import type { NotificationLevel } from './events.js';
 import type { AntiCheatKind, App, GamesSort, LauncherType, Resolution, RunningGame } from './games.js';
-import type { AgentServerConfig, ConnectivityState, HardwareInfo, Pc, PcMetrics, PcStatus } from './pc.js';
+import type { AgentServerConfig, ConnectivityState, HardwareInfo, Pc, PcMetrics, PcStatus, ShellClub } from './pc.js';
 import type { Session, SessionEndReason, SessionState } from './session.js';
 import type { Order, OrderLineRequest, Product, ProductCategory } from './shop.js';
 import type {
@@ -922,6 +922,8 @@ export interface ShellSettings {
   uiSounds: boolean;
   /** Feature toggles (read-only). */
   features: ShellFeatures;
+  /** Club branding, banners and rules (read-only); `null` when the server sent none. */
+  club?: ShellClub | null;
 }
 
 /** Request of `shop.order`. */

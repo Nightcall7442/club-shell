@@ -162,6 +162,21 @@ export function normalizeTheme(theme: Theme): Theme {
 /** Theme currently applied to the document (or `null` before the first `applyTheme`). */
 let current: Theme | null = null;
 
+/** The club's accent from the admin console (`ShellSettings.club.accent`); wins over every theme's own accent. */
+let accentOverride: string | null = null;
+
+/** Sets (or clears with `null`) the club accent and re-applies the current theme. Invalid colours are ignored. */
+export function setAccentOverride(hex: string | null | undefined): void {
+  const next = hex && hexToRgb(hex) ? hex : null;
+  if (next === accentOverride) {
+    return;
+  }
+  accentOverride = next;
+  if (current) {
+    applyTheme(current);
+  }
+}
+
 /** The theme last passed to {@link applyTheme}. */
 export function currentTheme(): Theme | null {
   return current;
@@ -169,8 +184,9 @@ export function currentTheme(): Theme | null {
 
 /** Writes the theme to `:root` CSS variables and data attributes. Safe to call repeatedly. */
 export function applyTheme(theme: Theme): void {
-  const t = normalizeTheme(theme);
-  current = t;
+  const base = normalizeTheme(theme);
+  current = base;
+  const t = accentOverride ? { ...base, colors: { ...base.colors, accent: accentOverride } } : base;
   if (typeof document === 'undefined') {
     return;
   }

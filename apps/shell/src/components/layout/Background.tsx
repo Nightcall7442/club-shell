@@ -3,9 +3,10 @@ import clsx from 'clsx';
 import { useResolvedAsset } from '@/components/media/GameArtwork';
 import { VideoBackground } from '@/components/media/VideoBackground';
 import { useThemeStore } from '@/store/theme';
+import { useClub } from '@/hooks/useClub';
 
 export interface BackgroundProps {
-  /** Wallpaper override (game hero on details screens); falls back to `theme.wallpaper`. */
+  /** Wallpaper override (game hero on details screens); falls back to the club's wallpaper, then `theme.wallpaper`. */
   image?: string | null;
   /** Video override; falls back to `theme.backgroundVideo`. */
   video?: string | null;
@@ -22,7 +23,9 @@ export interface BackgroundProps {
  */
 export function Background({ image, video, dim = 0.55, className }: BackgroundProps): JSX.Element {
   const theme = useThemeStore((s) => s.theme);
-  const wallpaper = image ?? theme.wallpaper ?? null;
+  const club = useClub();
+  // A game's hero first, then the owner's wallpaper from the admin console, then the theme's own.
+  const wallpaper = image ?? club.wallpaperUrl ?? theme.wallpaper ?? null;
   const videoSrc = video ?? theme.backgroundVideo ?? null;
   const animations = theme.animations;
   const { url } = useResolvedAsset(wallpaper);

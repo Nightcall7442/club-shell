@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::error::IpcError;
 use crate::games::{App, Game, GamesSort, LauncherType, Resolution, RunningGame};
 use crate::pc::{
-    AgentServerConfig, ConnectivityState, HardwareInfo, Pc, PcMetrics, PcStatus, Policy,
+    AgentServerConfig, ConnectivityState, HardwareInfo, Pc, PcMetrics, PcStatus, Policy, ShellClub,
 };
 use crate::session::{Session, SessionEndReason, SessionState};
 use crate::shop::{Order, OrderLineRequest, Product, ProductCategory};
@@ -989,6 +989,9 @@ pub struct ShellSettings {
     pub ui_sounds: bool,
     /// Feature toggles (read-only).
     pub features: ShellFeatures,
+    /// Club branding, banners and rules (read-only); `null` when the server sent none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub club: Option<ShellClub>,
 }
 
 /// Request of `shop.order`.
@@ -3239,6 +3242,7 @@ mod tests {
                 apps: true,
                 call_admin: true,
             },
+            club: None,
         };
         let json = serde_json::to_string(&settings).unwrap();
         assert_eq!(

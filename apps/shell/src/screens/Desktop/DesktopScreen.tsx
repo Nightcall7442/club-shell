@@ -13,6 +13,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { useClub } from '@/hooks/useClub';
 import { useLocale } from '@/hooks/useLocale';
 import { useSession } from '@/hooks/useSession';
 import { formatDateTime, formatMoney, formatTime } from '@/lib/format';
@@ -123,14 +124,25 @@ export function BookingPanel({ index }: { index: number }): JSX.Element {
 // Promo strip
 // ---------------------------------------------------------------------------------------------------------------------
 
-function PromoImage({ url }: { url: string }): JSX.Element {
+function PromoImage({ url, alt }: { url: string; alt?: string }): JSX.Element {
   const { t } = useTranslation();
   const { url: resolved } = useResolvedAsset(url);
   return resolved ? (
-    <img src={resolved} alt={t('idle.ads')} draggable={false} className="absolute inset-0 h-full w-full object-cover" />
+    <img
+      src={resolved}
+      alt={alt ?? t('idle.ads')}
+      draggable={false}
+      className="absolute inset-0 h-full w-full object-cover"
+    />
   ) : (
     <Skeleton variant="rect" className="absolute inset-0 h-full w-full rounded-none" />
   );
+}
+
+interface PromoItem {
+  url: string;
+  title: string | null;
+  durationSec?: number | null;
 }
 
 export function PromoStrip({ index }: { index: number }): JSX.Element | null {
@@ -138,9 +150,21 @@ export function PromoStrip({ index }: { index: number }): JSX.Element | null {
   const { locale } = useLocale();
   const navigate = useNavigate();
   const ads = useSettingsStore((s) => s.shellConfig?.ads ?? null);
+  const { banners } = useClub();
   const tariffs = useWalletStore((s) => s.tariffs);
   const animations = useThemeStore(selectAnimationsEnabled);
-  const items = useMemo(() => (ads?.enabled ? ads.playlist.filter((p) => p.type === 'image') : []), [ads]);
+  // The owner's banners from the admin console come first, captioned; then the stills of the ads playlist.
+  const items = useMemo<PromoItem[]>(
+    () => [
+      ...banners.map((b) => ({ url: b.imageUrl, title: b.title || null, durationSec: 8 })),
+      ...(ads?.enabled
+        ? ads.playlist
+            .filter((p) => p.type === 'image')
+            .map((p) => ({ url: p.url, title: null, durationSec: p.durationSec }))
+        : []),
+    ],
+    [ads, banners],
+  );
   const [idx, setIdx] = useState(0);
 
   useEffect(() => {
@@ -171,7 +195,18 @@ export function PromoStrip({ index }: { index: number }): JSX.Element | null {
               exit={{ opacity: 0 }}
               transition={{ duration: animations ? 0.5 : 0 }}
             >
-              <PromoImage url={current.url} />
+              <PromoImage url={current.url} alt={current.title ?? undefined} />
+              {current.title && (
+                <>
+                  <div
+                    aria-hidden="true"
+                    className="absolute inset-0 bg-[linear-gradient(90deg,rgb(var(--c-bg)/0.75)_0%,rgb(var(--c-bg)/0.2)_45%,transparent_70%)]"
+                  />
+                  <p className="absolute bottom-4 left-5 max-w-[60%] truncate font-display text-[length:var(--fs-xl)] font-light tracking-tight text-text">
+                    {current.title}
+                  </p>
+                </>
+              )}
             </motion.div>
           </AnimatePresence>
           {items.length > 1 && (

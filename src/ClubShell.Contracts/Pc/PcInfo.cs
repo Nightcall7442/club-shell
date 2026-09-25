@@ -289,18 +289,50 @@ public sealed record UpdatesConfigOverride(
     int? CheckIntervalSec = null,
     TimeWindow? ApplyWindow = null);
 
+/// <summary>A promo banner on the player's home screen, set by the club owner in the admin console.</summary>
+/// <param name="Id">Banner id.</param>
+/// <param name="Title">Caption.</param>
+/// <param name="ImageUrl">Image URL (wide, ~16:5).</param>
+public sealed record ClubBanner(string Id, string Title, string ImageUrl);
+
+/// <summary>Club rules in each UI language; a missing language falls back to Russian.</summary>
+/// <param name="Ru">Russian.</param>
+/// <param name="Uz">Uzbek.</param>
+/// <param name="En">English.</param>
+public sealed record ClubRules(string? Ru = null, string? Uz = null, string? En = null);
+
+/// <summary>
+/// The club's own look on the player screen (<c>shell.json → club</c>), set by the owner in the admin console and
+/// pushed with the server config. Every field is optional: without it the Shell keeps its bundled defaults.
+/// </summary>
+/// <param name="Name">Club name shown on the lock, idle and top bar.</param>
+/// <param name="Accent">Accent colour <c>#RRGGBB</c>, overrides the theme's accent.</param>
+/// <param name="LogoUrl">Logo image URL.</param>
+/// <param name="WallpaperUrl">Wallpaper behind the lock and idle screens.</param>
+/// <param name="Banners">Active banners, in display order.</param>
+/// <param name="Rules">Club rules shown on the support screen.</param>
+public sealed record ShellClub(
+    string? Name = null,
+    string? Accent = null,
+    string? LogoUrl = null,
+    string? WallpaperUrl = null,
+    IReadOnlyList<ClubBanner>? Banners = null,
+    ClubRules? Rules = null);
+
 /// <summary>Server override pushed into <c>shell.json</c>.</summary>
 /// <param name="Locale">Default locale.</param>
 /// <param name="Theme">Theme id.</param>
 /// <param name="Features">Partial <c>shell.json → features</c>.</param>
 /// <param name="Ads">Partial <c>shell.json → ads</c>.</param>
 /// <param name="Idle">Partial <c>shell.json → idle</c>.</param>
+/// <param name="Club">Club branding, banners and rules; replaces <c>shell.json → club</c> as a whole.</param>
 public sealed record ShellConfigOverride(
     Locale? Locale = null,
     string? Theme = null,
     JsonElement? Features = null,
     JsonElement? Ads = null,
-    JsonElement? Idle = null);
+    JsonElement? Idle = null,
+    ShellClub? Club = null);
 
 /// <summary>
 /// Server-side configuration overrides (<c>GET /agents/{pcId}/config</c>, SERVER_API.md §4.1), merged over

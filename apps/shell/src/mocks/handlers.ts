@@ -56,6 +56,7 @@ import type {
   SessionStartRequest,
   SessionTimeLeftResponse,
   SettingsSetRequest,
+  ShellClub,
   ShellSettings,
   ShopOrderRequest,
   ShopOrdersResponse,
@@ -97,6 +98,7 @@ import {
   LEADERBOARD,
   LOYALTY,
   METRICS,
+  DEMO_CLUB,
   MOCK_ADMIN_PIN,
   MOCK_CREDENTIALS,
   MOCK_USER_PIN,
@@ -277,7 +279,7 @@ function freshState(): MockState {
     tournaments: clone(TOURNAMENTS),
     games: clone(GAMES),
     running: [],
-    settings: clone(SETTINGS),
+    settings: { ...clone(SETTINGS), club: demoClubRequested() ? clone(DEMO_CLUB) : null },
     policy: clone(POLICY),
     volume: { level: SETTINGS.volume, muted: SETTINGS.muted },
     qr: null,
@@ -571,7 +573,16 @@ export function resetMock(): void {
 // Dev simulation helpers (also on window.__clubshellMock.simulate)
 // ---------------------------------------------------------------------------------------------------------------------
 
+/** `?club=demo` in the URL starts with the owner's branding from {@link DEMO_CLUB}. */
+function demoClubRequested(): boolean {
+  return typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('club') === 'demo';
+}
+
 export const simulate = {
+  /** Replaces the club block as if the Agent had written a new one from the server (`null` clears it). */
+  club(club: ShellClub | null = DEMO_CLUB): void {
+    mockState.settings = { ...mockState.settings, club: club ? clone(club) : null };
+  },
   adminMessage(text = 'Please finish your match, the club closes in 20 minutes.', requiresAck = true): AdminMessage {
     const m: AdminMessage = { id: newId(), from: ADMIN_NAME, text, level: 'warning', requiresAck, at: nowIso() };
     emitMock('agent://admin.message', m);
