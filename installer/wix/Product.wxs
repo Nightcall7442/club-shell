@@ -9,6 +9,8 @@
     INSTALLSHELL     1 (default) installs the Shell feature; 0 installs the Agent only
     INSTALLFOLDER    Install root (default: C:\Program Files\ClubShell)
     SKIPDOTNETCHECK  1 skips the .NET runtime launch condition (a newer 8.0.x patch is installed)
+    INSTALLDISKLESS  1 installs the optional ClubDisklessHelper feature (only in MSIs built with DisklessHelperDir;
+                     its DISKLESS* properties are listed in DisklessHelper.wxs, the feature itself in docs/DISKLESS.md)
 
   The declarative parts mirror src/ClubShell.Agent/Install/*.ps1: service registration (Service.wxs), ProgramData tree
   and ACLs (Components.wxs), event-log source, firewall rule. Deferred custom actions (WixQuietExec, run as SYSTEM)
@@ -125,6 +127,14 @@
       <ComponentGroupRef Id="ShellFiles" />
       <Level Value="0" Condition="INSTALLSHELL = 0" />
     </Feature>
+<?ifdef DisklessHelperDir ?>
+    <!-- Optional, off by default: only in MSIs built with -p:DisklessHelperDir (DisklessHelper.wxs). -->
+    <Feature Id="DisklessHelper" Title="Club diskless helper" Level="1000"
+             Description="ClubDisklessHelper service: mounts the club's games library volume read-only over iSCSI as the club server assigns it. While it is installed the Agent does not mount storage.gamesShare. Install with INSTALLDISKLESS=1.">
+      <ComponentGroupRef Id="DisklessHelper" />
+      <Level Value="1" Condition="INSTALLDISKLESS = 1" />
+    </Feature>
+<?endif?>
 
     <!-- UI: WixUI_InstallDir (welcome, license, install folder, progress). Everything else is command-line properties. -->
     <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />

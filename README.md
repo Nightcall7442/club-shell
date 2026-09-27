@@ -27,7 +27,7 @@
 ![SQLite](https://img.shields.io/badge/SQLite-offline-003b57?logo=sqlite&logoColor=white)
 ![Serilog](https://img.shields.io/badge/Serilog-4-cc0000)
 
-![xUnit](https://img.shields.io/badge/xUnit-424_проверки-5c2d91?logo=dotnet&logoColor=white)
+![xUnit](https://img.shields.io/badge/xUnit-465_проверок-5c2d91?logo=dotnet&logoColor=white)
 ![Playwright](https://img.shields.io/badge/Playwright-e2e-2ead33?logo=playwright&logoColor=white)
 ![Fastify](https://img.shields.io/badge/Fastify-mock--сервер-000000?logo=fastify&logoColor=white)
 ![WiX](https://img.shields.io/badge/WiX-v5_MSI-c41e3a?logo=windows&logoColor=white)
@@ -145,6 +145,7 @@ ClubShell закрывает контур на самом ПК: **оболочк
 - Пул аккаунтов: аренда учётки у сервера, подстановка в лаунчер, откат конфигов и Credential Manager, синхронизация облачных сохранений
 - «Сел за любой ПК — всё как дома»: бинды, чувствительность и графика игрока (пути `settingsPaths` у игры) сохраняются после игры и возвращаются перед запуском на любом ПК клуба — отдельно от сохранений общего аккаунта; в профиле игрока вкладка «Настройки игр» со сбросом по игре, в админке владелец задаёт пути для каждой игры
 - Политики с сервера: белый список процессов, USB, DNS-фильтр, блокировки Explorer, расписание питания, канал обновлений
+- Бездиск: том библиотеки игр монтирует служба ClubDisklessHelper (read-only iSCSI, новая версия не выдёргивает диск из-под игры); пока она установлена, агент не трогает свой `storage.gamesShare` — [docs/DISKLESS.md](docs/DISKLESS.md)
 - Античит-проверки перед запуском: EAC, FACEIT, Vanguard, Secure Boot / TPM / HVCI
 - Удалённое администрирование: сообщения, блокировка, перезагрузка, скриншот, удалённое управление, Wake-on-LAN
 - Обновления агента и оболочки с проверкой RSA-подписи манифеста, откатом и окном применения
@@ -178,7 +179,7 @@ ClubShell закрывает контур на самом ПК: **оболочк
 - Именованный канал `\\.\pipe\clubshell-agent` с ACL, токеном оболочки и проверкой процесса-клиента
 - HMAC-SHA256 подпись запросов к серверу, DPAPI для секретов, никаких входящих портов на ПК
 - Mock-сервер на Fastify: весь REST + WebSocket, чтобы разрабатывать и показывать без бэкенда
-- Установщик WiX v5: MSI со службой, оболочкой и конфигами + Burn-бандл с .NET 8 и WebView2
+- Установщик WiX v5: MSI со службой, оболочкой и конфигами (+ по желанию служба ClubDisklessHelper, `INSTALLDISKLESS=1`) + Burn-бандл с .NET 8 и WebView2
 
 ---
 
@@ -287,7 +288,7 @@ Copy-Item .env.example .env
 
 | Что | Сколько |
 |---|---|
-| xUnit | 434 проверки в 4 проектах (Contracts 89, Core 181, Windows 62, Agent 102), включая сквозной тест именованного канала |
+| xUnit | 465 проверок в 4 проектах (Contracts 89, Core 181, Windows 79, Agent 116), включая сквозной тест именованного канала |
 | Компиляция .NET | 8 проектов, Roslyn + NetAnalyzers, `/warnaserror`, 0 предупреждений |
 | TypeScript | `tsc --noEmit` во всех пакетах, `vite build` без предупреждений о размере чанков |
 | Интерфейс | 12 разделов, прогон в mock-режиме на 1600×900 / 1920×1080; Playwright e2e — 34 проверки: киоск 23 (вход, каталог, HUD в игре, оформление клуба, настройки игр игрока), админка 11 (PIN и роли, язык, смена, расчёт цены, экран игрока, контроль кассиров, состояние ПК, пути настроек игр, сеть клубов) |
@@ -307,7 +308,7 @@ apps/shell/public/mock-art/  оригинальный арт, обложки, в
 config/                JSON-конфиги по умолчанию → C:\ProgramData\ClubShell
 crates/protocol/       Rust-зеркало контрактов (serde)
 crates/winutil/        Rust Win32: хуки, pipe, окна, мониторы, ввод
-docs/                  спецификации и руководства (14 документов)
+docs/                  спецификации и руководства (15 документов)
 installer/wix/         WiX v5: ClubShell.msi + ClubShellSetup.exe (Burn)
 packages/contracts-ts/ TypeScript-зеркало контрактов
 src/ClubShell.Contracts/  канонические DTO, IPC, серверный API (C#)
@@ -358,6 +359,7 @@ tools/scripts/         build · dev · package · sign · publish · setup-dev-v
 - [Команды Tauri](docs/TAURI_COMMANDS.md) — все `#[tauri::command]` и события webview
 - [Оболочка](docs/TAURI_SHELL.md) · [Киоск-режим](docs/KIOSK_MODE.md) · [Замена shell](docs/SHELL_REPLACEMENT.md) · [Темы](docs/THEMING.md)
 - [Лаунчеры игр](docs/GAME_LAUNCHERS.md) · [Античит](docs/ANTICHEAT.md) · [Обновления](docs/UPDATES.md)
+- [Бездиск](docs/DISKLESS.md) — ClubDisklessHelper: кто владеет томом библиотеки, установка из MSI, проверка на стенде
 - [Безопасность](docs/SECURITY.md) — модель угроз, секреты, ACL канала, подпись запросов
 - [Конкуренты](docs/COMPETITORS.md) · [Дорожная карта](docs/ROADMAP.md)
 
@@ -384,6 +386,6 @@ tools/scripts/         build · dev · package · sign · publish · setup-dev-v
 
 The **admin console** (`apps/admin`, `pnpm admin` → http://localhost:1421; owner PIN `0000`, cashier `1111`) lets each club owner configure their own club without a developer: counter and hall map, shifts with X reports and cash count on close, clients (groups, loyalty tiers, blacklist, minor curfew), pricing (weekday/holiday rates, happy hours, top-up bonuses, promo codes — the single best discount applies), a grid hall editor, stock, game catalogue order and visibility, the player screen (branding, sections, banners, rules with live preview), “if → then” automation rules, Telegram and webhooks, reports with an hourly heat map, staff roles, a club-network view (every club side by side, one player balance for all), PC health (repair tickets from telemetry: overheating, running hotter than its own last week, FPS drop, network drop-outs) and cashier control (an activity log plus theft signals: cash short at close, quick refunds, big discounts, repeated top-ups, money taken with no shift open). UI in Russian, Uzbek and English.
 
-Try the UI in a browser: `pnpm install && pnpm mock` then `VITE_MOCK=1 pnpm --filter @clubshell/shell dev` → http://localhost:1420 (login `demo` / `1234`). Full Windows dev loop: `tools/scripts/dev.ps1`. Verified here: all 8 .NET projects compile with `/warnaserror`, 434 xUnit tests pass, `tsc` and `vite build` are clean, 34 Playwright e2e checks cover the kiosk and the admin console; WiX and `tauri build` are left to CI.
+Try the UI in a browser: `pnpm install && pnpm mock` then `VITE_MOCK=1 pnpm --filter @clubshell/shell dev` → http://localhost:1420 (login `demo` / `1234`). Full Windows dev loop: `tools/scripts/dev.ps1`. Verified here: all 8 .NET projects compile with `/warnaserror`, 465 xUnit tests pass, `tsc` and `vite build` are clean, 34 Playwright e2e checks cover the kiosk and the admin console; WiX and `tauri build` are left to CI.
 
 </details>

@@ -17,11 +17,15 @@
       ShellBundleDir    cargo/tauri release output containing clubshell-shell.exe
       Version           x.y.z (pre-release / build metadata is stripped for the MSI ProductVersion)
       MsiPath           the MSI the bundle chains (Bundle configuration; defaults to bin\Release\ClubShell.msi)
+      DisklessHelperDir optional: folder holding ClubDisklessHelper.exe (a separate product, not in this repository).
+                        When set, the MSI gains the off-by-default DisklessHelper feature (DisklessHelper.wxs,
+                        docs/DISKLESS.md); when empty the MSI is exactly as before.
       Dotnet* / WebView2*  remote prerequisite payloads of the bundle; when refreshing them pass the new
                         size / SHA-512 / file version (the SHA-512 must match the file at the URL).
 
     Expected validation output: one ICE03 "string overflow" warning for SetCA_SeedAgentConfig (inline PowerShell
-    command line longer than the 255 characters ICE validates; Windows Installer does not enforce that width).
+    command line longer than the 255 characters ICE validates; Windows Installer does not enforce that width). The
+    DisklessHelper feature adds none.
   -->
 
   <PropertyGroup>
@@ -86,6 +90,12 @@
     <Compile Include="Components.wxs" />
     <Compile Include="Service.wxs" />
     <Compile Include="Shortcuts.wxs" />
+  </ItemGroup>
+  <PropertyGroup Condition="'$(Configuration)' != 'Bundle' and '$(DisklessHelperDir)' != ''">
+    <DefineConstants>$(DefineConstants);DisklessHelperDir=$(DisklessHelperDir)</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(Configuration)' != 'Bundle' and '$(DisklessHelperDir)' != ''">
+    <Compile Include="DisklessHelper.wxs" />
   </ItemGroup>
 
   <!-- Bundle -->

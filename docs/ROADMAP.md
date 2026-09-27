@@ -31,6 +31,7 @@ languages, UZS.
 | `docs/ARCHITECTURE.md`, `IPC_PROTOCOL.md`, `SERVER_API.md`, `TAURI_COMMANDS.md` | Done | Normative |
 | `docs/TAURI_SHELL.md`, `THEMING.md`, `UPDATES.md`, `ROADMAP.md`, `COMPETITORS.md` | Done | This batch |
 | `docs/KIOSK_MODE.md`, `SHELL_REPLACEMENT.md`, `GAME_LAUNCHERS.md`, `ANTICHEAT.md`, `SECURITY.md`, `README.md` | Done | Descriptive; audited against the code (file paths, symbols, config keys) |
+| `docs/DISKLESS.md` | Done | ClubDisklessHelper coexistence, optional MSI feature, bench checklist |
 
 ### Agent (`src/ClubShell.Core`, `src/ClubShell.Windows`, `src/ClubShell.Agent`)
 
@@ -49,7 +50,7 @@ languages, UZS.
 | Power: shutdown/reboot scheduling, Wake-on-LAN | Implemented-untested | |
 | Kiosk user provisioning, password rotation, profile reset between sessions | Implemented-untested | |
 | Shell watchdog with crash-loop budget and safe mode (`CrashRecovery`) | Implemented-untested | |
-| Games share mount (SMB); iSCSI config slot present | Partial | iSCSI orchestration is v2.0 |
+| Games share mount (SMB); iSCSI config slot present | Partial | Diskless library volumes are ClubDisklessHelper's job; the Agent stands down while it is installed (`DISKLESS.md`) |
 | Telemetry (WMI/perf, 5 s metrics, batched upload, hardware rescan) | Implemented-untested | |
 | Updates: checker, downloader (resume, SHA-256, RSA-PSS), applier, Agent self-update, Shell update + backup/rollback, server `update` command | Implemented-untested | `ClubShell.Updater.exe` helper is referenced but not in the repo; msiexec fallback is used. The `--cs-*` / `--c-*` theme-variable mismatch once listed here is fixed in `ARCHITECTURE.md` |
 | Local media cache (`LocalCache`, LRU, sha256) | Implemented-untested | Server-provided themes (`ThemeRef`) not yet downloaded through it |
@@ -117,7 +118,7 @@ Theme: turn *Implemented-untested* into *Done*, then close the gaps that block a
 
 | Item | Status | Detail |
 |------|--------|--------|
-| Diskless / iSCSI boot orchestration | Idea | `storage.gamesShare.iscsi` slot exists in `agent.json`; needs PXE/iPXE boot images, per-PC write-back cache, image versioning and a server component — large scope |
+| Diskless / iSCSI boot orchestration | Idea | The games *library* side is covered by the separate ClubDisklessHelper service (read-only iSCSI library volume, versioned, optional MSI feature, Agent stands down; `DISKLESS.md`), pending bench verification. Diskless *boot* (PXE/iPXE images, per-PC write-back cache) remains out of scope |
 | Per-game GPU profiles | Idea | Apply NVIDIA/AMD driver profiles and display settings (refresh rate, HDR) per launch; revert on exit |
 | Multi-club federation | Idea | One user/wallet across clubs; `clubId` in contracts, server-side federation; Agent mostly unaffected |
 | Linux shell | Idea | Tauri already builds for Linux; the Agent (`ClubShell.Windows` P/Invoke) does not. Would need a `ClubShell.Linux` layer (systemd service, X11/Wayland kiosk session, Proton launchers) |
@@ -179,8 +180,9 @@ Explicit and known. Items are ordered by risk.
 * **Uzbek script**: Latin only, or both Latin and Cyrillic (`uz-Cyrl`) locales?
 * **Payments**: which top-up providers (Payme, Click, Uzum) get first-class `TopupProvider` support and
   which run purely as server-side QR flows?
-* **Diskless**: is v2.0 diskless worth building in-house versus integrating an existing solution (e.g.
-  CCBoot-class products, "(as of 2026, verify)") through the `storage` config?
+* **Diskless**: the games library is delegated to ClubDisklessHelper (`DISKLESS.md`); open is whether diskless
+  *boot* is worth building in-house versus integrating an existing solution (e.g. CCBoot-class products,
+  "(as of 2026, verify)").
 * **Linux**: is there real demand (cost-sensitive clubs with Proton-friendly catalogues) or is it a
   long-tail idea?
 * **Update apply window vs. 24 h clubs**: the default 04:00–07:00 window assumes a nightly lull; 24/7

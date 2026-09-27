@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Optional feature DisklessHelper: ClubDisklessHelper, the shell-agnostic service that mounts the club's games library
+  volume read-only over iSCSI as the club server assigns it (docs/DISKLESS.md). It is a separate product: this file is
+  compiled in only when the build gets -p:DisklessHelperDir=<folder holding ClubDisklessHelper.exe>, and the feature
+  (Level 1000) is installed only with INSTALLDISKLESS=1 or ADDLOCAL=DisklessHelper. Major upgrades keep it installed
+  (MigrateFeatureStates), so an Agent MSI update does not need the property again.
+
+    C:\Program Files\ClubDiskless\ClubDisklessHelper.exe   service ClubDisklessHelper: LocalSystem, automatic start,
+                                                            restart on failure
+    C:\Program Files\ClubDiskless\configure-helper.ps1      writes helper.json; also for later re-configuration
+    C:\ProgramData\ClubDiskless                             SYSTEM + Administrators only: helper.json carries the club
+                                                            key; credentials.bin / assignment.json are the helper's state
+
+  Public properties:
+    INSTALLDISKLESS    1 installs this feature
+    DISKLESSSERVERURL  club server for the helper (helper.json -> Helper.ServerUrl); with DISKLESSCLUBKEY, helper.json is
+    DISKLESSCLUBKEY    written on install unless it already exists (hidden from logs)
+    DISKLESSCACERT     PEM of the club CA (helper.json -> Helper.CaCertificatePath); omitted when empty
+    DISKLESSSTART      1 starts the service at the end of the install (a PC that is not a reference image)
+
+  Start policy: a fresh install registers the service but does not start it. On a reference image a start before
+  sysprep would register that machine with the club server, and every PC cloned from the image would share the
+  registration. The service starts at the next boot, at once with DISKLESSSTART=1, and after every upgrade: replacing
+  the exe stops it, and the library must not stay unmanaged until the next reboot. The start is best effort (sc.exe,
+  Return="ignore") so a helper that cannot start never rolls back the ClubShell install.
+
+  While the service is installed the Agent's GamesShareMounter stands down: storage.gamesShare is ignored.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <Fragment>
+    <Property Id="INSTALLDISKLESS" Secure="yes" />
+    <Property Id="DISKLESSSTART" Secure="yes" />
+    <Property Id="DISKLESSSERVERURL" Secure="yes" />
+    <Property Id="DISKLESSCLUBKEY" Secure="yes" Hidden="yes" />
+    <Property Id="DISKLESSCACERT" Secure="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="DisklessDir" Name="ClubDiskless" />
+    </StandardDirectory>
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="DisklessDataDir" Name="ClubDiskless" />
+    </StandardDirectory>
+
+    <ComponentGroup Id="DisklessHelper">
+      <Component Id="DisklessHelperExe" Directory="DisklessDir">
+        <File Id="ClubDisklessHelper.exe" Source="$(var.DisklessHelperDir)\ClubDisklessHelper.exe" KeyPath="yes" />
+
+        <ServiceInstall Id="DisklessHelperServiceInstall"
+                        Name="ClubDisklessHelper"
+                        DisplayName="Club diskless helper"
+                        Description="Mounts the club's games library volume read-only over iSCSI, as assigned by the club server."
+                        Type="ownProcess"
+                        Start="auto"
+                        ErrorControl="normal"
+                        Account="LocalSystem"
+                        Interactive="no"
+                        Vital="yes">
+          <util:ServiceConfig FirstFailureActionType="restart"
+                              SecondFailureActionType="restart"
+                              ThirdFailureActionType="restart"
+                              RestartServiceDelayInSeconds="5"
+                              ResetPeriodInDays="1" />
+        </ServiceInstall>
+
+        <!-- No Start here (start policy above): stop before the exe is replaced or removed, delete on uninstall. -->
+        <ServiceControl Id="DisklessHelperServiceControl"
+                        Name="ClubDisklessHelper"
+                        Stop="both"
+                        Remove="uninstall"
+                        Wait="yes" />
+      </Component>
+
+      <Component Id="DisklessConfigureScript" Directory="DisklessDir">
+        <File Id="configure_helper.ps1" Name="configure-helper.ps1" Source="$(sys.SOURCEFILEDIR)diskless\configure-helper.ps1" KeyPath="yes" />
+      </Component>
+
+      <Component Id="DisklessDataFolder" Guid="B6E2F0D3-4C7A-4E19-9A58-3D1F6C2B8E74" Directory="DisklessDataDir">
+        <CreateFolder>
+          <PermissionEx Sddl="D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+        </CreateFolder>
+      </Component>
+    </ComponentGroup>
+
+    <!-- helper.json from the public properties (configure-helper.ps1 leaves an existing file alone and drops an empty
+         CaCertificatePath; verified: Windows PowerShell -File binds a trailing "" as an empty string). -->
+    <SetProperty Id="CA_ConfigureDisklessHelper" Sequence="execute" Before="CA_ConfigureDisklessHelper"
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[DisklessDir]configure-helper.ps1&quot; -ServerUrl &quot;[DISKLESSSERVERURL]&quot; -ClubKey &quot;[DISKLESSCLUBKEY]&quot; -CaCertificatePath &quot;[DISKLESSCACERT]&quot;" />
+    <CustomAction Id="CA_ConfigureDisklessHelper" DllEntry="WixQuietExec" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+                  Execute="deferred" Impersonate="no" Return="check" HideTarget="yes" />
+    <!-- The command line carries DISKLESSCLUBKEY: keep the property change out of the MSI log as well. -->
+    <Property Id="CA_ConfigureDisklessHelper" Hidden="yes" />
+
+    <SetProperty Id="CA_StartDisklessHelper" Sequence="execute" Before="CA_StartDisklessHelper"
+                 Value="&quot;[System64Folder]sc.exe&quot; start ClubDisklessHelper" />
+    <CustomAction Id="CA_StartDisklessHelper" DllEntry="WixQuietExec" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="CA_ConfigureDisklessHelper" After="InstallFiles"
+              Condition="(&amp;DisklessHelper = 3) AND DISKLESSSERVERURL AND DISKLESSCLUBKEY AND NOT REMOVE" />
+      <Custom Action="CA_StartDisklessHelper" After="StartServices"
+              Condition="(&amp;DisklessHelper = 3) AND (DISKLESSSTART = 1 OR WIX_UPGRADE_DETECTED) AND NOT REMOVE" />
+    </InstallExecuteSequence>
+  </Fragment>
+
+</Wix>
