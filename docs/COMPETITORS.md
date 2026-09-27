@@ -46,7 +46,7 @@ in `ROADMAP.md`.
 | Tournaments / leaderboards | ● | ● | ◐ | ○ | ○ | ◐ | ● `tournaments.*` (client side; server logic external) |
 | In-club chat / staff messaging / call admin | ● | ● | ● | ● | ◐ | ● | ● `chat.*`, `admin.message`, `sys.callAdmin`, hotkey |
 | Remote admin (screen view, remote input, lock, message, reboot) | ● | ● | ● | ● | ◐ | ● | ● `RemoteAdmin`, `ServerCommand` set |
-| Diskless / image distribution | ○ (partners) | ◐ (ggRock) | ○ | ◐ (deployment tools) | ○ | ● (iCafe8) | ○ v2.0 idea; iSCSI config slot only |
+| Diskless / image distribution | ○ (partners) | ◐ (ggRock) | ○ | ◐ (deployment tools) | ○ | ● (iCafe8) | ◐ games library via the ClubDisklessHelper companion service (read-only iSCSI, versioned; `DISKLESS.md`); no diskless boot |
 | Multi-language UI | ● (incl. ru) | ● | ● | ● | ◐ | ● (zh/en/…) | ● en / ru / **uz** bundled; per-PC overrides |
 | Uzbek (uz) UI | ○ ? | ○ ? | ○ ? | ○ ? | ○ | ○ ? | ● |
 | Local currency formatting (UZS, no minor units) | ◐ | ◐ | ◐ | ◐ | ◐ | ◐ | ● `Money{amount, "UZS"}`, `ui.currencyFormat.minorDigits = 0` |
@@ -69,8 +69,9 @@ Notes on specific cells:
   check that the vendor driver/service is present and healthy and refuse to launch when policy requires
   it. Riot Vanguard's interaction with kernel-level lockdown/DNS drivers is the recurring pain point for
   every vendor.
-* **Diskless** is a separate product line for the vendors that offer it (ggRock, iCafe8). ClubShell
-  leaves boot orchestration to the operator's existing solution in v1.x.
+* **Diskless** is a separate product line for the vendors that offer it (ggRock, iCafe8). ClubShell likewise
+  keeps it separate: the games library comes from the shell-agnostic ClubDisklessHelper service
+  (`DISKLESS.md`), and boot orchestration stays with the operator's existing solution.
 
 ---
 
@@ -114,7 +115,7 @@ Notes on specific cells:
 | Gap | Who has it | ClubShell plan |
 |-----|-----------|----------------|
 | Turn-key server + admin console + POS | Every SaaS vendor | Out of scope for this repo by design; needs a partner server product or the operator's own. The admin console *integration* is v1.2. |
-| Diskless boot / game image distribution | iCafeCloud, ggLeap (ggRock), Gizmo (deployment) | v2.0 idea (`ROADMAP.md`); v1.x relies on the operator's existing solution and the SMB games share |
+| Diskless boot / game image distribution | iCafeCloud, ggLeap (ggRock), Gizmo (deployment) | Library: ClubDisklessHelper companion service (`DISKLESS.md`), pending bench verification; boot: operator's existing solution |
 | Proven anti-cheat compatibility matrix maintained per game | Senet, ggLeap publish guidance | Best-effort checks only; needs field data and a maintained per-game profile list (v1.2 idea: per-game process allow-lists) |
 | Printer receipts / fiscal integration | SmartLaunch, Gizmo, iCafeCloud (POS) | v1.2 |
 | RFID/NFC card readers beyond keyboard-wedge | Gizmo, SmartLaunch | v1.2 (PC/SC abstraction) |

@@ -4,6 +4,7 @@
 
     ClubShellSetup.exe                                        interactive (license, install folder)
     ClubShellSetup.exe /quiet SERVERURL=https://club.example.uz CLUBAPIKEY=... KIOSKUSER=club INSTALLSHELL=1
+    ClubShellSetup.exe /quiet ... INSTALLDISKLESS=1 DISKLESSSERVERURL=https://club-server DISKLESSCLUBKEY=... (DisklessHelper.wxs)
     ClubShellSetup.exe /layout C:\offline                     download the prerequisites next to the bundle
     ClubShellSetup.exe /uninstall /quiet
 
@@ -47,6 +48,12 @@
     <Variable Name="CLUBAPIKEY" Hidden="yes" bal:Overridable="yes" />
     <Variable Name="KIOSKUSER" Type="string" Value="club" bal:Overridable="yes" />
     <Variable Name="INSTALLSHELL" Type="string" Value="1" bal:Overridable="yes" />
+    <!-- Optional ClubDisklessHelper feature (only present in MSIs built with DisklessHelperDir; docs/DISKLESS.md). -->
+    <Variable Name="INSTALLDISKLESS" Type="string" Value="0" bal:Overridable="yes" />
+    <Variable Name="DISKLESSSTART" Type="string" Value="0" bal:Overridable="yes" />
+    <Variable Name="DISKLESSSERVERURL" Type="string" Value="" bal:Overridable="yes" />
+    <Variable Name="DISKLESSCLUBKEY" Hidden="yes" bal:Overridable="yes" />
+    <Variable Name="DISKLESSCACERT" Type="string" Value="" bal:Overridable="yes" />
 
     <!-- Prerequisite detection -->
     <util:RegistrySearch Id="DotnetRuntimeSearch"
@@ -124,6 +131,11 @@
         <MsiProperty Name="CLUBAPIKEY" Value="[CLUBAPIKEY]" />
         <MsiProperty Name="KIOSKUSER" Value="[KIOSKUSER]" />
         <MsiProperty Name="INSTALLSHELL" Value="[INSTALLSHELL]" />
+        <MsiProperty Name="INSTALLDISKLESS" Value="[INSTALLDISKLESS]" />
+        <MsiProperty Name="DISKLESSSTART" Value="[DISKLESSSTART]" />
+        <MsiProperty Name="DISKLESSSERVERURL" Value="[DISKLESSSERVERURL]" />
+        <MsiProperty Name="DISKLESSCLUBKEY" Value="[DISKLESSCLUBKEY]" />
+        <MsiProperty Name="DISKLESSCACERT" Value="[DISKLESSCACERT]" />
       </MsiPackage>
 
     </Chain>

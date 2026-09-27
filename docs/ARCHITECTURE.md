@@ -251,7 +251,8 @@ correct drift.
  5. TokenStore.Load() (DPAPI). If none or refresh fails → POST /agents/register (clubApiKey + hwid)
  6. GET /agents/{pcId}/config  → merge server overrides into runtime config
  7. GET /agents/{pcId}/policies → PolicyEnforcer.Apply (registry, firewall, DNS filter, USB, hooks config)
- 8. Storage: mount games share if configured (retry 3×, non-fatal)
+ 8. Storage: mount games share if configured (retry 3×, non-fatal); skipped entirely while the ClubDisklessHelper
+    service is installed — it owns the games library volume (DISKLESS.md)
  9. UserProvisioning: ensure kiosk user exists, password rotated (random, stored DPAPI). Profile reset if
     shell.kioskUser.resetProfileOnLogout and the previous session never closed cleanly — a debt marker written at
     session start and cleared only once a reset has run, so a power cut cannot hand the profile to the next player.
@@ -499,6 +500,7 @@ unless the key ends with `Ms`.
       "iscsi": null                               // { "portal": "10.0.0.5:3260", "targetIqn": "iqn...",
                                                   //   "readOnly": false } | null. readOnly marks the target's disks
                                                   //   read-only before first use — set it for a LUN several PCs share.
+                                                  // Ignored while ClubDisklessHelper is installed (DISKLESS.md).
     }
   },
   "updates": {

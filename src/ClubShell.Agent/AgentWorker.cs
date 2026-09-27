@@ -248,7 +248,7 @@ public sealed class AgentWorker : BackgroundService
         _policyStore.Watch();
 
         // 4/5. GamesShareMounter and ServerConnection are hosted services already running; log their state only.
-        _logger.LogInformation("Games share: {State}", _share.IsEnabled ? (_share.IsMounted ? "mounted" : "mounting") : "disabled");
+        _logger.LogInformation("Games share: {State}", _share.OwnedByDisklessHelper ? "managed by " + GamesShareMounter.DisklessHelperServiceName : _share.IsEnabled ? (_share.IsMounted ? "mounted" : "mounting") : "disabled");
 
         // 6. Restore the persisted session (§6.1 step 6 equivalent; timer resumes from persisted endsAt).
         await RunStepAsync(

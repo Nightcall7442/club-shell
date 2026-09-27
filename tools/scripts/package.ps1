@@ -51,6 +51,11 @@
     Re-run `dotnet publish` even when artifacts/publish/agent already contains ClubShellAgent.exe.
 .PARAMETER SkipInstaller
     Do not build the WiX MSI/bundle (the "agent" component is then omitted from the manifest).
+.PARAMETER DisklessHelperDir
+    Folder holding ClubDisklessHelper.exe (a separate product, docs/DISKLESS.md). When given, the exe is copied to
+    artifacts/installer/diskless, Authenticode-signed there when CODESIGN_PFX_PATH is set (the file in this folder is
+    never modified), and the MSI gains the optional DisklessHelper feature (INSTALLDISKLESS=1). Without it the MSI
+    is built exactly as before.
 .PARAMETER NoZip
     Do not create artifacts/release/ClubShell-<version>.zip.
 .PARAMETER OutputRoot
@@ -84,6 +89,7 @@ param(
 
     [switch] $ForceAgentPublish,
     [switch] $SkipInstaller,
+    [string] $DisklessHelperDir,
     [switch] $NoZip,
     [string] $OutputRoot
 )
@@ -378,6 +384,17 @@ try {
         if ($PSCmdlet.ShouldProcess($wixproj, 'dotnet build (Release + Bundle)')) {
             if (Test-Path -LiteralPath $wixOut) { Remove-Item -LiteralPath $wixOut -Recurse -Force }
             $wixProps = @("-p:AgentPublishDir=$agentPublish", "-p:ShellBundleDir=$shellExeDir", "-p:Version=$numericVersion", '-nologo')
+            if ($DisklessHelperDir) {
+                # Staged copy: signing rewrites the file, and the operator's download must stay byte-identical to its .sha256.
+                $helperExe = Join-Path $DisklessHelperDir 'ClubDisklessHelper.exe'
+                if (-not (Test-Path -LiteralPath $helperExe)) { throw "ClubDisklessHelper.exe not found in $DisklessHelperDir" }
+                $helperStage = Join-Path $wixOut 'diskless'
+                New-Item -ItemType Directory -Force -Path $helperStage | Out-Null
+                Copy-Item -LiteralPath $helperExe -Destination $helperStage -Force
+                if ($env:CODESIGN_PFX_PATH) { Invoke-Sign -Files @((Join-Path $helperStage 'ClubDisklessHelper.exe')) }
+                $wixProps += "-p:DisklessHelperDir=$helperStage"
+                Write-Ok "optional DisklessHelper feature included ($helperExe)"
+            }
             # Release with BuildBundle=false: the MSI only (its default chained bundle build would look for the MSI
             # under installer\wix\bin, not under -o). The bundle is built explicitly against that MSI.
             Invoke-Native -Command 'dotnet' -Arguments (@('build', $wixproj, '-c', 'Release', '-o', $msiOut, '-p:BuildBundle=false') + $wixProps)

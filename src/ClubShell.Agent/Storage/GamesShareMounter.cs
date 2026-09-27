@@ -8,9 +8,11 @@ using ClubShell.Core.Abstractions;
 using ClubShell.Core.Configuration;
 using ClubShell.Core.Security;
 using ClubShell.Windows.Network;
+using ClubShell.Windows.Registry;
 using ClubShell.Windows.Sessions;
 using ClubShell.Windows.Storage;
 using Microsoft.Extensions.Options;
+using Microsoft.Win32;
 
 namespace ClubShell.Agent.Storage;
 
@@ -21,6 +23,12 @@ namespace ClubShell.Agent.Storage;
 /// Microsoft initiator and waited for as a volume. Mounting is retried with exponential backoff, verified with a
 /// read test every 30 s and redone on network changes. Credentials come DPAPI-protected from
 /// <c>credentialsRef</c> (<c>{ "username": ..., "password": ... }</c>, also used as CHAP for iSCSI).
+/// <para>
+/// When ClubDisklessHelper is installed (docs/DISKLESS.md) the helper owns the games library volume and this
+/// mounter stands down completely: it never maps, logs in, marks read-only or logs out anything, even when
+/// <c>storage.gamesShare</c> is also configured — two owners of one drive letter would fight every 30 s, and a
+/// logout on Agent shutdown would pull the library from under a running game.
+/// </para>
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class GamesShareMounter : IHostedService, IDisposable
@@ -32,6 +40,9 @@ public sealed class GamesShareMounter : IHostedService, IDisposable
     private static readonly TimeSpan VolumeTimeout = TimeSpan.FromSeconds(60);
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
 
+    /// <summary>Windows service name of ClubDisklessHelper.</summary>
+    public const string DisklessHelperServiceName = "ClubDisklessHelper";
+
     private readonly NetworkShare _share;
     private readonly IscsiInitiator _iscsi;
     private readonly NetworkProbe _network;
@@ -39,6 +50,7 @@ public sealed class GamesShareMounter : IHostedService, IDisposable
     private readonly IOptionsMonitor<AgentSettings> _settings;
     private readonly IClock _clock;
     private readonly ILogger<GamesShareMounter> _logger;
+    private readonly Func<bool> _disklessHelperInstalled;
     private readonly SemaphoreSlim _wake = new(0, 1);
     private readonly SemaphoreSlim _mountLock = new(1, 1);
     private CancellationTokenSource? _cts;
@@ -47,7 +59,8 @@ public sealed class GamesShareMounter : IHostedService, IDisposable
     private bool _disposed;
 
     /// <summary>Creates the mounter.</summary>
-    public GamesShareMounter(NetworkShare share, IscsiInitiator iscsi, NetworkProbe network, ITokenProtector protector, IOptionsMonitor<AgentSettings> settings, IClock clock, ILogger<GamesShareMounter> logger)
+    /// <param name="disklessHelperInstalled">Probe for ClubDisklessHelper; defaults to checking its service key.</param>
+    public GamesShareMounter(NetworkShare share, IscsiInitiator iscsi, NetworkProbe network, ITokenProtector protector, IOptionsMonitor<AgentSettings> settings, IClock clock, ILogger<GamesShareMounter> logger, Func<bool>? disklessHelperInstalled = null)
     {
         ArgumentNullException.ThrowIfNull(share);
         ArgumentNullException.ThrowIfNull(iscsi);
@@ -63,6 +76,7 @@ public sealed class GamesShareMounter : IHostedService, IDisposable
         _settings = settings;
         _clock = clock;
         _logger = logger;
+        _disklessHelperInstalled = disklessHelperInstalled ?? IsDisklessHelperInstalled;
     }
 
     /// <summary>Raised on every transition of <see cref="IsMounted"/>.</summary>
@@ -77,6 +91,9 @@ public sealed class GamesShareMounter : IHostedService, IDisposable
     /// <summary><see langword="true"/> when <c>storage.gamesShare.enabled</c>.</summary>
     public bool IsEnabled => _settings.CurrentValue.Storage.GamesShare.Enabled;
 
+    /// <summary><see langword="true"/> after <see cref="StartAsync"/> found ClubDisklessHelper installed: the helper owns the library.</summary>
+    public bool OwnedByDisklessHelper { get; private set; }
+
     /// <summary>Drive root (<c>G:\</c>) when enabled, otherwise <see langword="null"/>.</summary>
     public string? MountPoint => IsEnabled ? DriveRoot(DriveLetter(_settings.CurrentValue.Storage.GamesShare)) : null;
 
@@ -84,6 +101,23 @@ public sealed class GamesShareMounter : IHostedService, IDisposable
     public Task StartAsync(CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        OwnedByDisklessHelper = _disklessHelperInstalled();
+        if (OwnedByDisklessHelper)
+        {
+            if (IsEnabled)
+            {
+                _logger.LogWarning(
+                    "storage.gamesShare is enabled, but {Service} is installed and owns the games library volume; the Agent will not map, log in or log out anything. Set storage.gamesShare.enabled = false",
+                    DisklessHelperServiceName);
+            }
+            else
+            {
+                _logger.LogInformation("Games library volume is managed by {Service}", DisklessHelperServiceName);
+            }
+
+            return Task.CompletedTask;
+        }
+
         if (!IsEnabled)
         {
             _logger.LogInformation("Games share disabled (storage.gamesShare.enabled = false)");
@@ -200,6 +234,9 @@ public sealed class GamesShareMounter : IHostedService, IDisposable
         options.MakeReadOnly(populateMissingResolver: true);
         return options;
     }
+
+    private static bool IsDisklessHelperInstalled() =>
+        RegistryHelper.Exists(RegistryHive.LocalMachine, @"SYSTEM\CurrentControlSet\Services\" + DisklessHelperServiceName);
 
     private static char DriveLetter(GamesShareSettings config) =>
         string.IsNullOrEmpty(config.DriveLetter) ? 'G' : char.ToUpperInvariant(config.DriveLetter[0]);
@@ -338,7 +375,7 @@ public sealed class GamesShareMounter : IHostedService, IDisposable
     private async Task UnmountAsync(CancellationToken cancellationToken)
     {
         var config = _settings.CurrentValue.Storage.GamesShare;
-        if (!config.Enabled)
+        if (!config.Enabled || OwnedByDisklessHelper)
         {
             return;
         }
