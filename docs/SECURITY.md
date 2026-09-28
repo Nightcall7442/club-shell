@@ -243,7 +243,7 @@ not ship new code; downgrade protection limits the replay to "current or newer".
 
 | Layer | Pin | Reproducibility |
 |-------|-----|-----------------|
-| .NET | `global.json` (SDK 8.0.400, `rollForward: latestFeature`), `Directory.Packages.props` central package management, `nuget.config` with `<clear/>` + nuget.org only | restore is feed-independent; versions are single-sourced |
+| .NET | `global.json` (SDK 10.0.100, `rollForward: latestFeature`), `Directory.Packages.props` central package management, `nuget.config` with `<clear/>` + nuget.org only | restore is feed-independent; versions are single-sourced |
 | Rust | `rust-toolchain.toml` (`channel = "1.89.0"`, `x86_64-pc-windows-msvc`, clippy + rustfmt), `Cargo.toml` workspace with `windows 0.58`, `tauri 2`; commit `Cargo.lock` | `clippy -D warnings` |
 | Node | `pnpm-workspace.yaml`, `pnpm-lock.yaml`, `package.json` engines | `pnpm install --frozen-lockfile` |
 | Contracts | `tools/ContractsGen` regenerates `crates/protocol` and `packages/contracts-ts`; hand edits only inside MANUAL blocks (ARCHITECTURE.md §1.2) | CI diff check keeps mirrors byte-identical |

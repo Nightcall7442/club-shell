@@ -248,7 +248,7 @@ try {
         Assert-Tool -Command 'pnpm' -Hint 'Install pnpm: corepack enable; corepack prepare pnpm@9.9.0 --activate'
     }
     if ($doDotnet -or $doInstaller) {
-        Assert-Tool -Command 'dotnet' -Hint 'Install the .NET 8 SDK: winget install Microsoft.DotNet.SDK.8'
+        Assert-Tool -Command 'dotnet' -Hint 'Install the .NET 10 SDK (global.json): winget install Microsoft.DotNet.SDK.10'
     }
     if ($doRust) {
         Assert-Tool -Command 'cargo' -Hint 'Install Rust: winget install Rustlang.Rustup (then restart the shell)' -VersionArguments @('-V')

@@ -18,7 +18,7 @@
 .PARAMETER WebOnly
     Run the UI in the browser (Vite + in-page Tauri mocks) instead of the Tauri window; no Rust toolchain needed.
 .PARAMETER Agent
-    Also run the Agent as a console process against the mock server (needs the .NET 8 SDK; elevation recommended
+    Also run the Agent as a console process against the mock server (needs the .NET 10 SDK, global.json; elevation recommended
     because the Agent creates C:\ProgramData\ClubShell and the named pipe with ACLs).
 .PARAMETER NoMock
     Do not start the mock server (one is already running, or CLUBSHELL_SERVER_URL points elsewhere).
@@ -296,8 +296,8 @@ $ok = (Test-Prerequisite -Name 'node_modules' -Test { if (Test-Path -LiteralPath
 if ($Agent) {
     $ok = (Test-Prerequisite -Name '.NET SDK' -Test {
             $sdks = Get-NativeOutput -Command 'dotnet' -Arguments @('--list-sdks')
-            if ($sdks.ExitCode -eq 0 -and $sdks.Output.Count -gt 0 -and ($sdks.Output -match '^8\.')) { ($sdks.Output -match '^8\.')[-1] }
-        } -Hint 'winget install Microsoft.DotNet.SDK.8') -and $ok
+            if ($sdks.ExitCode -eq 0 -and $sdks.Output.Count -gt 0 -and ($sdks.Output -match '^10\.')) { ($sdks.Output -match '^10\.')[-1] }
+        } -Hint 'winget install Microsoft.DotNet.SDK.10') -and $ok
     if (-not (Test-Administrator)) {
         Write-Warn 'not elevated: the Agent needs to create C:\ProgramData\ClubShell and the named pipe ACLs; run this shell as Administrator if it fails'
     }
