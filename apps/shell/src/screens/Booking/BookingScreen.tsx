@@ -29,6 +29,7 @@ const BOOKING_TONE: Record<Booking['status'], BadgeTone> = {
   confirmed: 'success',
   cancelled: 'muted',
   expired: 'muted',
+  unknown: 'muted',
 };
 
 function parseHm(hm: string | null | undefined): [number, number] | null {

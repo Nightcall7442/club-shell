@@ -140,11 +140,38 @@ public sealed class DnsFilter
         "easyanticheat.net", "kamu.gg", "battleye.com", "faceit.com", "faceit-cdn.net",
     };
 
-    /// <summary><see langword="true"/> when <paramref name="host"/> is or is a sub-domain of a <see cref="ProtectedDomains"/> entry.</summary>
-    public static bool IsProtected(string host)
+    /// <summary>
+    /// <see cref="ProtectedDomains"/> plus <paramref name="extra"/> (the server's <c>webFilter.protectedDomains</c>, the
+    /// server's own host), normalised like blocked domains.
+    /// </summary>
+    public static IReadOnlyList<string> WithProtected(IEnumerable<string>? extra)
+    {
+        if (extra is null)
+        {
+            return ProtectedDomains;
+        }
+
+        var all = new List<string>(ProtectedDomains);
+        foreach (string raw in extra)
+        {
+            string domain = Normalize(raw);
+            if (domain.Length is > 0 and <= 253 && IsHostName(domain) && !all.Contains(domain, StringComparer.Ordinal))
+            {
+                all.Add(domain);
+            }
+        }
+
+        return all;
+    }
+
+    /// <summary>
+    /// <see langword="true"/> when <paramref name="host"/> is or is a sub-domain of an entry of
+    /// <paramref name="protectedDomains"/> (default <see cref="ProtectedDomains"/>).
+    /// </summary>
+    public static bool IsProtected(string host, IReadOnlyList<string>? protectedDomains = null)
     {
         ArgumentNullException.ThrowIfNull(host);
-        foreach (string suffix in ProtectedDomains)
+        foreach (string suffix in protectedDomains ?? ProtectedDomains)
         {
             if (host.Equals(suffix, StringComparison.OrdinalIgnoreCase)
                 || (host.Length > suffix.Length && host[host.Length - suffix.Length - 1] == '.' && host.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)))
@@ -158,25 +185,17 @@ public sealed class DnsFilter
 
     /// <summary>
     /// Lower-cases, strips a leading <c>*.</c>/<c>.</c>, drops duplicates, anything that is not a host name and
-    /// anything under <see cref="ProtectedDomains"/>.
+    /// anything under <paramref name="protectedDomains"/> (default <see cref="ProtectedDomains"/>).
     /// </summary>
-    public static IReadOnlyList<string> NormalizeDomains(IEnumerable<string> domains)
+    public static IReadOnlyList<string> NormalizeDomains(IEnumerable<string> domains, IReadOnlyList<string>? protectedDomains = null)
     {
         ArgumentNullException.ThrowIfNull(domains);
         var result = new List<string>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (string raw in domains)
         {
-#pragma warning disable CA1308 // hosts entries are conventionally lower-case; not a security comparison
-            string domain = raw.Trim().ToLowerInvariant();
-#pragma warning restore CA1308
-            if (domain.StartsWith("*.", StringComparison.Ordinal))
-            {
-                domain = domain[2..];
-            }
-
-            domain = domain.TrimStart('.').TrimEnd('.');
-            if (domain.Length == 0 || domain.Length > 253 || !IsHostName(domain) || IsProtected(domain))
+            string domain = Normalize(raw);
+            if (domain.Length == 0 || domain.Length > 253 || !IsHostName(domain) || IsProtected(domain, protectedDomains))
             {
                 continue;
             }
@@ -286,6 +305,20 @@ public sealed class DnsFilter
 
         File.Move(temp, _hostsPath, overwrite: true);
         _logger.LogDebug("Hosts file rewritten ({Length} chars)", rewritten.Length);
+    }
+
+    /// <summary>Lower-cases and strips a leading <c>*.</c> and surrounding dots.</summary>
+    private static string Normalize(string raw)
+    {
+#pragma warning disable CA1308 // hosts entries are conventionally lower-case; not a security comparison
+        string domain = raw.Trim().ToLowerInvariant();
+#pragma warning restore CA1308
+        if (domain.StartsWith("*.", StringComparison.Ordinal))
+        {
+            domain = domain[2..];
+        }
+
+        return domain.TrimStart('.').TrimEnd('.');
     }
 
     private static bool IsHostName(string domain)

@@ -54,6 +54,11 @@ export const OrderStatus = {
   Done: 'done',
   /** Cancelled by the user or staff; charged amount refunded. */
   Cancelled: 'cancelled',
+  /**
+   * A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the
+   * server.
+   */
+  Unknown: 'unknown',
 } as const;
 /** Order lifecycle. */
 export type OrderStatus = (typeof OrderStatus)[keyof typeof OrderStatus];
@@ -94,6 +99,11 @@ export const ProductCategory = {
   Merch: 'merch',
   /** Time packages sold through the shop. */
   Time: 'time',
+  /**
+   * A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the
+   * server.
+   */
+  Unknown: 'unknown',
 } as const;
 /** Shop product category. */
 export type ProductCategory = (typeof ProductCategory)[keyof typeof ProductCategory];

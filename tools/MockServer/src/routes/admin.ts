@@ -6,7 +6,8 @@
  *
  * Auth is a static bearer token (`MOCK_ADMIN_TOKEN`, default `admin-dev-token`) rather than a staff login: the
  * real console authenticates against the operator's own server. These routes are exempt from the agent Bearer /
- * HMAC gate (`isExempt` in `index.ts`).
+ * HMAC gate (`isExempt` in `index.ts`). The money routes honour `Idempotency-Key` ({@link idempotent}): the console
+ * sends one per cashier action and reuses it when the cashier retries after a lost answer.
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { tariffPriceFor, type Money, type Session } from '@clubshell/contracts';
@@ -21,6 +22,7 @@ import {
   findSession,
   findTariff,
   findUser,
+  idempotent,
   int,
   now,
   openSessionForPc,
@@ -97,136 +99,151 @@ export function adminRoutes(app: FastifyInstance): void {
   /** Opens a session on a seat for an existing member (prepaid) — the "add time" of a cashier. */
   app.post('/admin/sessions', async (req, reply) => {
     const staff = requireAdmin(req);
-    const b = body(req);
-    const pcId = str(b, 'pcId', 64);
-    const userId = str(b, 'userId', 64);
-    const minutes = int(b, 'minutes', 5, 1440);
-    const pc = findPc(pcId);
-    const user = findUser(userId);
-    const tariff = findTariff(str(b, 'tariffId', 64));
-    if (!pc) throw errors.notFound('pc');
-    if (!user) throw errors.notFound('user');
-    if (!tariff) throw errors.notFound('tariff');
-    if (pc.status === 'maintenance') throw errors.policyDenied('pcMaintenance');
-    if (openSessionForPc(pcId)) throw new ApiError('sessionAlreadyActive', 'PC already has an open session', { pcId });
-    const mine = openSessionForUser(userId);
-    if (mine)
-      throw new ApiError('sessionAlreadyActive', 'User already has an open session', {
-        sessionId: mine.id,
-        pcId: mine.pcId,
+    return idempotent(req, reply, async () => {
+      const b = body(req);
+      const pcId = str(b, 'pcId', 64);
+      const userId = str(b, 'userId', 64);
+      const minutes = int(b, 'minutes', 5, 1440);
+      const pc = findPc(pcId);
+      const user = findUser(userId);
+      const tariff = findTariff(str(b, 'tariffId', 64));
+      if (!pc) throw errors.notFound('pc');
+      if (!user) throw errors.notFound('user');
+      if (!tariff) throw errors.notFound('tariff');
+      if (pc.status === 'maintenance') throw errors.policyDenied('pcMaintenance');
+      if (openSessionForPc(pcId))
+        throw new ApiError('sessionAlreadyActive', 'PC already has an open session', { pcId });
+      const mine = openSessionForUser(userId);
+      if (mine)
+        throw new ApiError('sessionAlreadyActive', 'User already has an open session', {
+          sessionId: mine.id,
+          pcId: mine.pcId,
+        });
+      if (profileOf(userId).blacklisted) throw errors.policyDenied('blacklisted');
+      if (isMinor(userId) && inCurfew()) throw errors.policyDenied('minorCurfew');
+      const mins = tariff.isPackage ? (tariff.packageMinutes ?? minutes) : minutes;
+      const priced = quote(tariff, mins, userId, pc.zone);
+      const cost = priced.total;
+      if (user.balance.amount < cost.amount) throw errors.insufficientFunds(cost, user.balance);
+      const id = uuid();
+      if (cost.amount > 0)
+        applyTransaction(user, 'charge', uzs(-cost.amount), `Session ${mins} min · ${tariff.name} (staff)`, id);
+      const startedAt = now();
+      const rec: SessionRecord = {
+        id,
+        userId,
+        pcId,
+        tariffId: tariff.id,
+        state: 'active',
+        startedAt,
+        isPrepaid: true,
+        purchasedSec: mins * 60,
+        paidAmount: cost,
+        usedBeforeSec: 0,
+        runningSince: startedAt,
+        pausedAt: null,
+        endedAt: null,
+        endReason: null,
+        warningsSent: [],
+        lastPushAt: Date.now(),
+      };
+      db.sessions.push(rec);
+      pc.status = 'busy';
+      pc.currentSessionId = id;
+      const session = viewSession(rec);
+      pushToPc(pcId, 'sessionUpdated', session);
+      broadcast('pcStatusChanged', { pcId, status: 'busy' });
+      pushToUser(userId, 'walletUpdated', balanceOf(user));
+      clubHooks.sessionOpened(rec);
+      record(staff, 'sessionOpen', {
+        userId,
+        pcId,
+        amount: cost.amount,
+        detail: `${user.displayName} · ${pc.name} · ${tariff.name}`,
+        meta: { minutes: mins, discountPct: priced.discountPct, sessionId: id },
       });
-    if (profileOf(userId).blacklisted) throw errors.policyDenied('blacklisted');
-    if (isMinor(userId) && inCurfew()) throw errors.policyDenied('minorCurfew');
-    const mins = tariff.isPackage ? (tariff.packageMinutes ?? minutes) : minutes;
-    const priced = quote(tariff, mins, userId, pc.zone);
-    const cost = priced.total;
-    if (user.balance.amount < cost.amount) throw errors.insufficientFunds(cost, user.balance);
-    const id = uuid();
-    if (cost.amount > 0)
-      applyTransaction(user, 'charge', uzs(-cost.amount), `Session ${mins} min · ${tariff.name} (staff)`, id);
-    const startedAt = now();
-    const rec: SessionRecord = {
-      id,
-      userId,
-      pcId,
-      tariffId: tariff.id,
-      state: 'active',
-      startedAt,
-      isPrepaid: true,
-      purchasedSec: mins * 60,
-      paidAmount: cost,
-      usedBeforeSec: 0,
-      runningSince: startedAt,
-      pausedAt: null,
-      endedAt: null,
-      endReason: null,
-      warningsSent: [],
-      lastPushAt: Date.now(),
-    };
-    db.sessions.push(rec);
-    pc.status = 'busy';
-    pc.currentSessionId = id;
-    const session = viewSession(rec);
-    pushToPc(pcId, 'sessionUpdated', session);
-    broadcast('pcStatusChanged', { pcId, status: 'busy' });
-    pushToUser(userId, 'walletUpdated', balanceOf(user));
-    clubHooks.sessionOpened(rec);
-    record(staff, 'sessionOpen', {
-      userId,
-      pcId,
-      amount: cost.amount,
-      detail: `${user.displayName} · ${pc.name} · ${tariff.name}`,
-      meta: { minutes: mins, discountPct: priced.discountPct, sessionId: id },
+      return { status: 201, body: { session, charged: cost, balance: user.balance } };
     });
-    return reply.code(201).send({ session, charged: cost, balance: user.balance });
   });
 
   /** Adds paid minutes to a running session (by seat or by session id). */
-  app.post('/admin/sessions/extend', async (req) => {
+  app.post('/admin/sessions/extend', async (req, reply) => {
     const staff = requireAdmin(req);
-    const b = body(req);
-    const rec = targetSession(b);
-    const minutes = int(b, 'minutes', 5, 1440);
-    const tariff = findTariff(optStr(b, 'tariffId', 64) ?? rec.tariffId);
-    const user = findUser(rec.userId);
-    if (!tariff) throw errors.notFound('tariff');
-    if (!user) throw errors.notFound('user');
-    if (!rec.isPrepaid) throw errors.conflict('postpaidSession');
-    const cost = quote(tariff, minutes, user.id, findPc(rec.pcId)?.zone ?? '').total;
-    if (user.balance.amount < cost.amount) throw errors.insufficientFunds(cost, user.balance);
-    if (cost.amount > 0)
-      applyTransaction(user, 'charge', uzs(-cost.amount), `Extension +${minutes} min · ${tariff.name} (staff)`, rec.id);
-    rec.purchasedSec += minutes * 60;
-    rec.paidAmount = uzs(rec.paidAmount.amount + cost.amount);
-    rec.tariffId = tariff.id;
-    rec.warningsSent = [];
-    const session = viewSession(rec);
-    pushToPc(rec.pcId, 'sessionUpdated', session);
-    pushToUser(user.id, 'walletUpdated', balanceOf(user));
-    record(staff, 'sessionExtend', {
-      userId: user.id,
-      pcId: rec.pcId,
-      amount: cost.amount,
-      detail: `${user.displayName} · ${findPc(rec.pcId)?.name ?? rec.pcId} · +${minutes}`,
-      meta: { minutes, sessionId: rec.id },
+    return idempotent(req, reply, async () => {
+      const b = body(req);
+      const rec = targetSession(b);
+      const minutes = int(b, 'minutes', 5, 1440);
+      const tariff = findTariff(optStr(b, 'tariffId', 64) ?? rec.tariffId);
+      const user = findUser(rec.userId);
+      if (!tariff) throw errors.notFound('tariff');
+      if (!user) throw errors.notFound('user');
+      if (!rec.isPrepaid) throw errors.conflict('postpaidSession');
+      const cost = quote(tariff, minutes, user.id, findPc(rec.pcId)?.zone ?? '').total;
+      if (user.balance.amount < cost.amount) throw errors.insufficientFunds(cost, user.balance);
+      if (cost.amount > 0)
+        applyTransaction(
+          user,
+          'charge',
+          uzs(-cost.amount),
+          `Extension +${minutes} min · ${tariff.name} (staff)`,
+          rec.id,
+        );
+      rec.purchasedSec += minutes * 60;
+      rec.paidAmount = uzs(rec.paidAmount.amount + cost.amount);
+      rec.tariffId = tariff.id;
+      rec.warningsSent = [];
+      const session = viewSession(rec);
+      pushToPc(rec.pcId, 'sessionUpdated', session);
+      pushToUser(user.id, 'walletUpdated', balanceOf(user));
+      record(staff, 'sessionExtend', {
+        userId: user.id,
+        pcId: rec.pcId,
+        amount: cost.amount,
+        detail: `${user.displayName} · ${findPc(rec.pcId)?.name ?? rec.pcId} · +${minutes}`,
+        meta: { minutes, sessionId: rec.id },
+      });
+      return { status: 200, body: { session, charged: cost, balance: user.balance } };
     });
-    return { session, charged: cost, balance: user.balance };
   });
 
   /** Ends a session from the counter; unused prepaid time is refunded by `endSession`. */
-  app.post('/admin/sessions/end', async (req) => {
+  app.post('/admin/sessions/end', async (req, reply) => {
     const staff = requireAdmin(req);
-    const b = body(req);
-    const rec = targetSession(b);
-    const sessionMinutes = Math.floor((Date.now() - Date.parse(rec.startedAt)) / 60_000);
-    const result = endSession(rec, 'admin');
-    const user = findUser(rec.userId);
-    record(staff, 'sessionEnd', {
-      userId: rec.userId,
-      pcId: rec.pcId,
-      amount: result.refunded?.amount ?? 0,
-      detail: `${user?.displayName ?? rec.userId} · ${findPc(rec.pcId)?.name ?? rec.pcId}`,
-      meta: { sessionMinutes, sessionId: rec.id },
+    return idempotent(req, reply, async () => {
+      const b = body(req);
+      const rec = targetSession(b);
+      const sessionMinutes = Math.floor((Date.now() - Date.parse(rec.startedAt)) / 60_000);
+      const result = endSession(rec, 'admin');
+      const user = findUser(rec.userId);
+      record(staff, 'sessionEnd', {
+        userId: rec.userId,
+        pcId: rec.pcId,
+        amount: result.refunded?.amount ?? 0,
+        detail: `${user?.displayName ?? rec.userId} · ${findPc(rec.pcId)?.name ?? rec.pcId}`,
+        meta: { sessionMinutes, sessionId: rec.id },
+      });
+      return { status: 200, body: { session: result.session, charged: result.charged, refunded: result.refunded } };
     });
-    return { session: result.session, charged: result.charged, refunded: result.refunded };
   });
 
   /** Cash / card top-up at the counter. */
-  app.post('/admin/wallet/topup', async (req) => {
+  app.post('/admin/wallet/topup', async (req, reply) => {
     const staff = requireAdmin(req);
-    const b = body(req);
-    const user = findUser(str(b, 'userId', 64));
-    const amount = int(b, 'amount', 1, 100_000_000);
-    const method = optStr(b, 'method', 16) ?? 'cash';
-    if (!user) throw errors.notFound('user');
-    const { bonus } = topUpWithBonus(user, amount, method);
-    record(staff, 'topUp', {
-      userId: user.id,
-      amount,
-      detail: user.displayName,
-      meta: { method, bonus },
+    return idempotent(req, reply, async () => {
+      const b = body(req);
+      const user = findUser(str(b, 'userId', 64));
+      const amount = int(b, 'amount', 1, 100_000_000);
+      const method = optStr(b, 'method', 16) ?? 'cash';
+      if (!user) throw errors.notFound('user');
+      const { bonus } = topUpWithBonus(user, amount, method);
+      record(staff, 'topUp', {
+        userId: user.id,
+        amount,
+        detail: user.displayName,
+        meta: { method, bonus },
+      });
+      return { status: 200, body: { balance: user.balance, bonus: uzs(bonus) } };
     });
-    return { balance: user.balance, bonus: uzs(bonus) };
   });
 
   /** Staff message, lock/unlock and power commands — the existing `ServerCommand` set. */

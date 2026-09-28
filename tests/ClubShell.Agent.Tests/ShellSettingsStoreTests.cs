@@ -1,6 +1,7 @@
 using System.Text.Json;
 using ClubShell.Agent.Ipc.Handlers;
 using ClubShell.Contracts.Pcs;
+using ClubShell.Contracts.Users;
 using ClubShell.Core.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -79,5 +80,16 @@ public sealed class ShellSettingsStoreTests : IDisposable
         File.WriteAllText(_store.FilePath, """{"version":1,"club":{"banners":"not-a-list"}}""");
 
         Assert.Null(_store.Get().Club);
+    }
+
+    [Fact]
+    public void Locale_a_newer_server_sent_never_replaces_the_current_one()
+    {
+        File.WriteAllText(_store.FilePath, """{"version":1,"locale":"unknown"}""");
+        Assert.Equal(Locale.Ru, _store.Get().Locale);
+
+        _store.ApplyServerOverride(new ShellConfigOverride(Locale: Locale.Uz));
+        _store.ApplyServerOverride(new ShellConfigOverride(Locale: Locale.Unknown));
+        Assert.Equal(Locale.Uz, _store.Get().Locale);
     }
 }

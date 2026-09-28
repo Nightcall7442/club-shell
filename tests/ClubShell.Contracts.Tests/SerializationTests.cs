@@ -66,6 +66,7 @@ public sealed class SerializationTests
     [InlineData("\"timeUp\"", SessionEndReason.TimeUp)]
     [InlineData("\"insufficientFunds\"", ErrorCode.InsufficientFunds)]
     [InlineData("\"sessionAlreadyActive\"", ErrorCode.SessionAlreadyActive)]
+    [InlineData("\"notImplemented\"", ErrorCode.NotImplemented)]
     [InlineData("\"remoteControlStart\"", ServerCommandType.RemoteControlStart)]
     [InlineData("\"offlineQueueFlushed\"", AgentEventType.OfflineQueueFlushed)]
     [InlineData("\"pcStatusChanged\"", WsPushKind.PcStatusChanged)]
@@ -81,10 +82,25 @@ public sealed class SerializationTests
     }
 
     [Fact]
-    public void Unknown_enum_literal_is_rejected()
+    public void Unrecognised_literal_reads_as_Unknown_only_in_enums_that_declare_it()
     {
-        Action act = () => _ = JsonDefaults.Deserialize<Locale>("\"fr\"");
-        act.Should().Throw<JsonException>();
+        const string body = """
+            { "serverTime": "2026-09-21T10:15:30.123Z", "pcStatus": "hibernating", "policyVersion": 3, "configVersion": 4,
+              "catalogVersion": "c1", "pendingCommands": 0 }
+            """;
+        var response = JsonDefaults.Deserialize<HeartbeatResponse>(body)!;
+        response.PcStatus.Should().Be(PcStatus.Unknown, "a status a newer server added must not fail the whole heartbeat");
+        response.PolicyVersion.Should().Be(3);
+
+        var known = response with { PcStatus = PcStatus.Busy };
+        JsonDefaults.Deserialize<HeartbeatResponse>(JsonDefaults.Serialize(known)).Should().Be(known);
+        JsonDefaults.Deserialize<Locale>("\"FR\"").Should().Be(Locale.Unknown);
+        JsonDefaults.Serialize(Locale.Unknown).Should().Be("\"unknown\"");
+
+        Action agentOnly = () => _ = JsonDefaults.Deserialize<AgentEventType>("\"fr\"");
+        agentOnly.Should().Throw<JsonException>("enums without an Unknown member stay strict");
+        Action number = () => _ = JsonDefaults.Deserialize<Locale>("1");
+        number.Should().Throw<JsonException>("integers are rejected even where Unknown exists");
     }
 
     #endregion
@@ -492,7 +508,10 @@ public sealed class SerializationTests
 
         ErrorCodes.FromHttpStatus(402).Should().Be(ErrorCode.InsufficientFunds);
         ErrorCodes.FromHttpStatus(426).Should().Be(ErrorCode.VersionMismatch);
+        ErrorCodes.FromHttpStatus(501).Should().Be(ErrorCode.NotImplemented);
         ErrorCodes.FromHttpStatus(502).Should().Be(ErrorCode.ServerUnavailable);
+        ErrorCode.NotImplemented.ToHttpStatus().Should().Be(501);
+        ErrorCode.NotImplemented.IsRetryable().Should().BeFalse("the same server will answer 501 again");
         ErrorCodes.FromHttpStatus(504).Should().Be(ErrorCode.Timeout);
         ErrorCode.Forbidden.IsAuthFailure().Should().BeTrue();
         ErrorCode.AgentOffline.IsRetryable().Should().BeTrue();
@@ -530,6 +549,21 @@ public sealed class SerializationTests
         unlock.PayloadAs<LockCommand>().Should().BeNull();
         unlock.ExpiresAt.Should().BeNull();
         unlock.IsExpired(Ts.AddYears(10)).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Unknown_command_name_does_not_fail_the_batch()
+    {
+        const string body = """
+            { "items": [ { "id": "6f1d2c4e-1b3a-4a7c-9f7d-0e6f2b5a9c11", "ts": "2026-09-21T10:15:30.123Z", "name": "dance" },
+                         { "id": "0a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", "ts": "2026-09-21T10:15:30.123Z", "name": "unlock" } ] }
+            """;
+
+        var response = JsonDefaults.Deserialize<ServerCommandsResponse>(body)!;
+
+        Action unknown = () => ServerCommand.FromEnvelope(response.Items[0]);
+        unknown.Should().Throw<ArgumentException>().WithMessage("*dance*");
+        ServerCommand.FromEnvelope(response.Items[1]).Type.Should().Be(ServerCommandType.Unlock);
     }
 
     [Fact]

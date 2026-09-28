@@ -50,17 +50,19 @@ import {
   uuid,
   viewSession,
   type PcRecord,
+  knownValues,
+  type Known,
 } from '../db.js';
 import { pendingCommands, pushToPc, resolveAck } from '../ws.js';
 import { realTelemetry } from '../health.js';
 
-const PC_STATUSES = Object.values(PcStatus);
+const PC_STATUSES = knownValues(PcStatus);
 const CALL_CATEGORIES = Object.values(CallAdminCategory);
-const AC_KINDS = Object.values(AntiCheatKind);
+const AC_KINDS = knownValues(AntiCheatKind);
 const AC_SEVERITIES = Object.values(AntiCheatSeverity);
 const AC_ACTIONS = Object.values(AntiCheatAction);
-const CHANNELS = Object.values(UpdateChannel);
-const COMPONENTS = Object.values(UpdateComponent);
+const CHANNELS = knownValues(UpdateChannel);
+const COMPONENTS = knownValues(UpdateComponent);
 
 function assignPc(hwid: string, previousPcId: string | null, machineName: string): PcRecord {
   const byHwid = db.pcs.find((p) => p.hwid === hwid);
@@ -307,8 +309,8 @@ export function pcsRoutes(app: FastifyInstance): void {
     '/updates/:channel/manifest',
     async (req, reply) => {
       requireAgent(req);
-      const channel = req.params.channel as UpdateChannel;
-      const component = req.query.component as UpdateComponent | undefined;
+      const channel = req.params.channel as Known<UpdateChannel>;
+      const component = req.query.component as Known<UpdateComponent> | undefined;
       if (!CHANNELS.includes(channel)) throw errors.notFound('channel');
       if (!component || !COMPONENTS.includes(component)) throw errors.notFound('component');
       if (!req.query.current) throw errors.validation('current', 'required');

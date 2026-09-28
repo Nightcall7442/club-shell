@@ -57,6 +57,9 @@ wire_enum! {
         AgentRestart = "agentRestart",
         /// Internal error.
         Error = "error",
+        /// A value this agent does not know (sent by a newer server). Read-side fallback only: the
+        /// Agent never sends it to the server.
+        Unknown = "unknown",
     }
 }
 
@@ -167,6 +170,9 @@ wire_enum! {
         Ending = "ending",
         /// Finished and settled.
         Ended = "ended",
+        /// A value this agent does not know (sent by a newer server). Read-side fallback only: the
+        /// Agent never sends it to the server.
+        Unknown = "unknown",
     }
 }
 
@@ -409,7 +415,7 @@ mod tests {
         assert_wire(
             SessionState::ALL,
             &[
-                "idle", "starting", "active", "paused", "locked", "ending", "ended",
+                "idle", "starting", "active", "paused", "locked", "ending", "ended", "unknown",
             ],
         );
         assert_wire(
@@ -421,7 +427,15 @@ mod tests {
         );
         assert_wire(
             SessionEndReason::ALL,
-            &["user", "timeUp", "admin", "idle", "agentRestart", "error"],
+            &[
+                "user",
+                "timeUp",
+                "admin",
+                "idle",
+                "agentRestart",
+                "error",
+                "unknown",
+            ],
         );
         assert!(SessionState::Locked.is_open());
         assert!(!SessionState::Ended.is_open());

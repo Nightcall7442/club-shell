@@ -21,6 +21,9 @@ public enum UpdateChannel
 
     /// <summary>Beta releases.</summary>
     Beta,
+
+    /// <summary>A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the server.</summary>
+    Unknown,
 }
 
 /// <summary>Updatable component.</summary>
@@ -32,6 +35,9 @@ public enum UpdateComponent
 
     /// <summary>Kiosk shell.</summary>
     Shell,
+
+    /// <summary>A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the server.</summary>
+    Unknown,
 }
 
 /// <summary>Phase reported by <c>update.progress</c>.</summary>
@@ -169,11 +175,16 @@ public sealed record ServerCommand(
     public TPayload? PayloadAs<TPayload>() where TPayload : class =>
         Payload is { ValueKind: JsonValueKind.Object } p ? JsonDefaults.FromElement<TPayload>(p) : null;
 
-    /// <summary>Builds from a REST polling envelope.</summary>
+    /// <summary>Builds from a REST polling envelope; throws <see cref="ArgumentException"/> for an unknown <see cref="ServerCommandEnvelope.Name"/>.</summary>
     public static ServerCommand FromEnvelope(ServerCommandEnvelope envelope)
     {
         ArgumentNullException.ThrowIfNull(envelope);
-        return new(envelope.Id, envelope.Name, envelope.Ts, envelope.Payload, envelope.IssuedBy, envelope.Supersedes, envelope.ExpiresAt);
+        if (!ServerCommandTypes.TryParse(envelope.Name, out var type))
+        {
+            throw new ArgumentException($"Unknown server command '{envelope.Name}'", nameof(envelope));
+        }
+
+        return new(envelope.Id, type, envelope.Ts, envelope.Payload, envelope.IssuedBy, envelope.Supersedes, envelope.ExpiresAt);
     }
 
     /// <summary>Builds from a WS <c>command</c> frame; throws <see cref="ArgumentException"/> for other frame types.</summary>
@@ -197,7 +208,7 @@ public sealed record ServerCommand(
 /// <summary>Wire form of a queued command returned by <c>GET /agents/{pcId}/commands</c>.</summary>
 /// <param name="Id">Command id.</param>
 /// <param name="Ts">Server timestamp.</param>
-/// <param name="Name">Command type.</param>
+/// <param name="Name"><see cref="ServerCommandType"/> wire name. A string, like <see cref="WsFrame.Name"/>, so a command this agent does not know is acked <c>notFound</c> instead of failing the whole batch.</param>
 /// <param name="Payload">Payload or <see langword="null"/>.</param>
 /// <param name="IssuedBy">Admin login, when known.</param>
 /// <param name="Supersedes">Earlier pending command this one cancels.</param>
@@ -205,7 +216,7 @@ public sealed record ServerCommand(
 public sealed record ServerCommandEnvelope(
     Guid Id,
     DateTimeOffset Ts,
-    ServerCommandType Name,
+    string Name,
     JsonElement? Payload,
     string? IssuedBy = null,
     Guid? Supersedes = null,
@@ -544,6 +555,9 @@ public enum WsFrameType
 
     /// <summary>Server → Agent push; not acked.</summary>
     Push,
+
+    /// <summary>A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the server.</summary>
+    Unknown,
 }
 
 /// <summary>Server → Agent pushes (<see cref="WsFrameType.Push"/>, SERVER_API.md §6.3).</summary>
@@ -771,6 +785,8 @@ public sealed record HeartbeatRunningGame(
 /// <param name="RunningGames">Running games.</param>
 /// <param name="OfflineQueue">Outbox size.</param>
 /// <param name="ShellConnected">Whether the Shell pipe connection is alive.</param>
+/// <param name="GamesVolume">Who mounts the games library and whether it is mounted (omitted by older agents).</param>
+/// <param name="AntiCheat">Riot Vanguard and platform security state (omitted by older agents).</param>
 public sealed record HeartbeatRequest(
     PcStatus Status,
     Guid? CurrentSessionId,
@@ -781,7 +797,45 @@ public sealed record HeartbeatRequest(
     int PolicyVersion,
     IReadOnlyList<HeartbeatRunningGame> RunningGames,
     int OfflineQueue,
-    bool ShellConnected);
+    bool ShellConnected,
+    HeartbeatGamesVolume? GamesVolume = null,
+    HeartbeatAntiCheat? AntiCheat = null);
+
+/// <summary>Who mounts the games library volume on the PC (heartbeat <c>gamesVolume.owner</c>).</summary>
+[JsonConverter(typeof(CamelCaseEnumConverter<GamesVolumeOwner>))]
+public enum GamesVolumeOwner
+{
+    /// <summary>Nobody: <c>storage.gamesShare</c> is off and ClubDisklessHelper is not installed (local disks only).</summary>
+    None,
+
+    /// <summary>The Agent maps the SMB share of <c>storage.gamesShare</c>.</summary>
+    Agent,
+
+    /// <summary>ClubDisklessHelper (read-only iSCSI, docs/DISKLESS.md); it reports the volume to its own server.</summary>
+    DisklessHelper,
+}
+
+/// <summary>Games library volume in a heartbeat.</summary>
+/// <param name="Owner">Who mounts it.</param>
+/// <param name="Mounted">Mapped and readable; <see langword="null"/> when the Agent cannot tell (<see cref="GamesVolumeOwner.DisklessHelper"/>). Stays <see langword="false"/> while <c>storage.gamesShare.iscsi</c> is set: the Agent refuses iSCSI.</param>
+/// <param name="DriveLetter">Drive letter the Agent maps (<c>G</c>); <see langword="null"/> unless the owner is the Agent.</param>
+/// <param name="Since">When <paramref name="Mounted"/> last changed; <see langword="null"/> = not since the Agent started.</param>
+public sealed record HeartbeatGamesVolume(
+    GamesVolumeOwner Owner,
+    bool? Mounted,
+    string? DriveLetter,
+    DateTimeOffset? Since);
+
+/// <summary>Anti-cheat prerequisites in a heartbeat, so the server can hide Riot games on PCs without Vanguard. <see langword="null"/> = unknown.</summary>
+/// <param name="VanguardInstalled">The Vanguard driver <c>vgk</c> is installed.</param>
+/// <param name="VanguardLoaded">The <c>vgk</c> driver is loaded (it loads at boot; a fresh install needs a reboot).</param>
+/// <param name="SecureBoot">UEFI Secure Boot is on.</param>
+/// <param name="Tpm">A TPM is present.</param>
+public sealed record HeartbeatAntiCheat(
+    bool? VanguardInstalled,
+    bool? VanguardLoaded,
+    bool? SecureBoot,
+    bool? Tpm);
 
 /// <summary>Response of <c>POST /agents/{pcId}/heartbeat</c>.</summary>
 /// <param name="ServerTime">Server clock (used for offset correction).</param>

@@ -33,7 +33,13 @@ export const PROFILE_TABS: readonly ProfileTab[] = ['stats', 'achievements', 'lo
 
 const isProfileTab = (v: string | null): v is ProfileTab => PROFILE_TABS.includes(v as ProfileTab);
 
-const ROLE_TONE: Record<UserRole, BadgeTone> = { guest: 'muted', member: 'primary', vip: 'accent', admin: 'danger' };
+const ROLE_TONE: Record<UserRole, BadgeTone> = {
+  guest: 'muted',
+  member: 'primary',
+  vip: 'accent',
+  admin: 'danger',
+  unknown: 'muted',
+};
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Data

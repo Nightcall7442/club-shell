@@ -422,6 +422,8 @@ export function App(): JSX.Element {
               type="button"
               className="focus-ring label hover:text-text"
               onClick={() => {
+                // Revokes the token on the server (sent before it is dropped below); signing out does not wait for it.
+                void clubApi.logout().catch(() => undefined);
                 setToken(null);
                 setStaff(null);
               }}

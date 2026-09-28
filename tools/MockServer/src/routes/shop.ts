@@ -33,10 +33,11 @@ import {
   str,
   uuid,
   uzs,
+  knownValues,
 } from '../db.js';
 import { pushToUser } from '../ws.js';
 
-const CATEGORIES = Object.values(ProductCategory);
+const CATEGORIES = knownValues(ProductCategory);
 const PROGRESS_EVERY_MS = 15_000;
 const NEXT: Partial<Record<OrderStatus, OrderStatus>> = {
   pending: 'accepted',

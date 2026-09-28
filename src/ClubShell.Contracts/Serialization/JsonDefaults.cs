@@ -108,15 +108,56 @@ public static class JsonDefaults
 /// <see cref="JsonStringEnumConverter{TEnum}"/> with the camelCase naming policy and integer values rejected.
 /// Applied to every contract enum via <see cref="JsonConverterAttribute"/> so that both reflection and
 /// source-generated paths agree on the wire form (<c>battleNet</c>, <c>insufficientFunds</c>, …).
+/// <para>
+/// Enums that declare a member named <c>Unknown</c> (the ones the server sends) read any string they do not
+/// recognise as <c>Unknown</c> instead of failing the whole body, so a newer server can add values without breaking
+/// older agents; numbers and <see langword="null"/> are still rejected. Writing <c>Unknown</c> emits <c>"unknown"</c>
+/// like any other member: the Agent may forward it to the Shell over IPC, but never puts it into a request to the
+/// server (handlers map it to a known value or refuse the operation first).
+/// </para>
 /// </summary>
 /// <typeparam name="TEnum">Enum type.</typeparam>
-public sealed class CamelCaseEnumConverter<TEnum> : JsonStringEnumConverter<TEnum>
+public sealed class CamelCaseEnumConverter<TEnum> : JsonConverterFactory
     where TEnum : struct, Enum
 {
-    /// <summary>Creates the converter.</summary>
-    public CamelCaseEnumConverter()
-        : base(JsonNamingPolicy.CamelCase, allowIntegerValues: false)
+    private static readonly JsonStringEnumConverter<TEnum> Strict = new(JsonNamingPolicy.CamelCase, allowIntegerValues: false);
+
+    /// <inheritdoc />
+    public override bool CanConvert(Type typeToConvert) => typeToConvert == typeof(TEnum);
+
+    /// <inheritdoc />
+    public override JsonConverter? CreateConverter(Type typeToConvert, JsonSerializerOptions options)
     {
+        var strict = (JsonConverter<TEnum>)Strict.CreateConverter(typeToConvert, options)!;
+        return Enum.TryParse<TEnum>("Unknown", out var unknown) ? new UnknownFallbackConverter(strict, unknown) : strict;
+    }
+
+    private sealed class UnknownFallbackConverter : JsonConverter<TEnum>
+    {
+        // camelCase only changes letter case, so a case-insensitive match on member names is a match on wire names.
+        private static readonly Dictionary<string, TEnum> Known =
+            Enum.GetNames<TEnum>().ToDictionary(n => n, Enum.Parse<TEnum>, StringComparer.OrdinalIgnoreCase);
+
+        private readonly JsonConverter<TEnum> _strict;
+        private readonly TEnum _unknown;
+
+        public UnknownFallbackConverter(JsonConverter<TEnum> strict, TEnum unknown)
+        {
+            _strict = strict;
+            _unknown = unknown;
+        }
+
+        public override TEnum Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+            reader.TokenType == JsonTokenType.String ? Parse(reader.GetString()) : _strict.Read(ref reader, typeToConvert, options);
+
+        public override void Write(Utf8JsonWriter writer, TEnum value, JsonSerializerOptions options) => _strict.Write(writer, value, options);
+
+        public override TEnum ReadAsPropertyName(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) => Parse(reader.GetString());
+
+        public override void WriteAsPropertyName(Utf8JsonWriter writer, TEnum value, JsonSerializerOptions options) =>
+            _strict.WriteAsPropertyName(writer, value, options);
+
+        private TEnum Parse(string? text) => text is not null && Known.TryGetValue(text, out var value) ? value : _unknown;
     }
 }
 

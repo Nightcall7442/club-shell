@@ -14,6 +14,8 @@ using ClubShell.Core.Abstractions;
 using ClubShell.Core.Configuration;
 using ClubShell.Core.Http;
 using ClubShell.Core.Security;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Polly;
@@ -45,26 +47,18 @@ public sealed class ServerClientTests : IDisposable
     private readonly FakeHttpHandler _handler = new();
     private readonly AgentSettings _settings = new() { Server = { BaseUrl = BaseUrl } };
     private readonly TokenStore _tokens;
+    private readonly IOptionsMonitor<AgentSettings> _options = Substitute.For<IOptionsMonitor<AgentSettings>>();
     private readonly ServerClient _client;
 
     public ServerClientTests()
     {
         _tokens = new TokenStore(Path.Combine(_tempDir, "agent.tokens"), new NullTokenProtector(), _clock);
+        _options.CurrentValue.Returns(_settings);
 
+        // No resilience pipeline here (one attempt per call); the signing handler is the one the real client has.
         var factory = Substitute.For<IHttpClientFactory>();
-        factory.CreateClient(RetryPolicy.HttpClientName).Returns(new HttpClient(_handler));
-        var hardware = Substitute.For<IHardwareIdSource>();
-        hardware.GetComponentsAsync(Arg.Any<CancellationToken>()).Returns(HardwareComponents);
-        var options = Substitute.For<IOptionsMonitor<AgentSettings>>();
-        options.CurrentValue.Returns(_settings);
-
-        _client = new ServerClient(
-            factory,
-            _tokens,
-            new Hwid(hardware, Path.Combine(_tempDir, "hwid.fallback")),
-            _clock,
-            options,
-            NullLogger<ServerClient>.Instance);
+        factory.CreateClient(RetryPolicy.HttpClientName).Returns(new HttpClient(new RequestSigningHandler { InnerHandler = _handler }));
+        _client = NewClient(factory);
     }
 
     public static TheoryData<string, string> Routes => new()
@@ -299,6 +293,24 @@ public sealed class ServerClientTests : IDisposable
         error.Error.Should().BeNull();
         error.IsRetryable.Should().BeTrue();
         error.ToIpcError().DetailsAs<TraceDetails>()!.TraceId.Should().Be("hdr-trace");
+    }
+
+    [Fact]
+    public async Task Unknown_error_code_keeps_message_details_and_trace_id()
+    {
+        await RegisterAsync();
+        const string body = """{ "error": { "code": "someFutureCode", "message": "Chat is not available yet", "details": { "reason": "notImplemented" }, "traceId": "t-501" } }""";
+        _handler.Responder = _ => Json(HttpStatusCode.NotImplemented, body);
+
+        Func<Task> act = () => _client.GetPcAsync(PcId, CancellationToken.None);
+
+        var error = (await act.Should().ThrowAsync<ServerApiException>()).Which;
+        error.Code.Should().Be(ErrorCode.NotImplemented, "an unknown error.code falls back to the HTTP status mapping");
+        error.Message.Should().Be("Chat is not available yet");
+        error.TraceId.Should().Be("t-501");
+        error.Reason.Should().Be("notImplemented");
+        error.IsRetryable.Should().BeFalse();
+        error.ToIpcError().DetailsAs<TraceDetails>()!.TraceId.Should().Be("t-501");
     }
 
     [Fact]
@@ -600,6 +612,7 @@ public sealed class ServerClientTests : IDisposable
     [InlineData(425, true)]
     [InlineData(429, true)]
     [InlineData(500, true)]
+    [InlineData(501, false)]
     [InlineData(502, true)]
     [InlineData(503, true)]
     [InlineData(504, true)]
@@ -670,6 +683,58 @@ public sealed class ServerClientTests : IDisposable
         RetryPolicy.IdempotencyKeyHeader.Should().Be("Idempotency-Key");
     }
 
+    [Fact]
+    public async Task Not_implemented_is_neither_retried_nor_counted_by_the_circuit_breaker()
+    {
+        var builder = new ResiliencePipelineBuilder<HttpResponseMessage>();
+        RetryPolicy.ConfigurePipeline(builder, new ServerSettings
+        {
+            Retry = new RetrySettings { MaxAttempts = 5, BaseDelayMs = 1, MaxDelayMs = 1 },
+            CircuitBreaker = new CircuitBreakerSettings { Failures = 2 },
+        });
+        var pipeline = builder.Build();
+        var calls = 0;
+
+        for (var i = 0; i < 10; i++)
+        {
+            using var response = await pipeline.ExecuteAsync(_ =>
+            {
+                calls++;
+                return ValueTask.FromResult(new HttpResponseMessage(HttpStatusCode.NotImplemented));
+            });
+            response.StatusCode.Should().Be(HttpStatusCode.NotImplemented);
+        }
+
+        calls.Should().Be(10, "each 501 is final (no retry) and the breaker stays closed");
+    }
+
+    [Fact]
+    public async Task Every_retry_attempt_is_signed_afresh()
+    {
+        await RegisterAsync();
+        _settings.Server.Retry = new RetrySettings { MaxAttempts = 2, BaseDelayMs = 1, MaxDelayMs = 1 };
+        var services = new ServiceCollection();
+        services.AddSingleton(_options);
+        services.ConfigureServerHttpClient(new ConfigurationBuilder().Build()).ConfigurePrimaryHttpMessageHandler(() => _handler);
+        using var provider = services.BuildServiceProvider();
+        using var client = NewClient(provider.GetRequiredService<IHttpClientFactory>());
+        var attempt = 0;
+        _handler.Responder = _ => ++attempt == 1 ? Json(HttpStatusCode.ServiceUnavailable, "{}") : Ok(SamplePc());
+
+        await client.GetPcAsync(PcId, CancellationToken.None);
+
+        var requests = _handler.Requests;
+        requests.Should().HaveCount(2, "the 503 is retried by the resilience pipeline");
+        requests[0].Header(Signing.TimestampHeader).Should().Be(Unix(UnixNow));
+        requests[1].Header(Signing.TimestampHeader).Should().Be(Unix(UnixNow + 1), "a retry in the same second still gets a new timestamp");
+        requests[1].Header(Signing.SignatureHeader).Should().NotBe(requests[0].Header(Signing.SignatureHeader));
+        foreach (var request in requests)
+        {
+            var timestamp = long.Parse(request.Header(Signing.TimestampHeader)!, CultureInfo.InvariantCulture);
+            request.Header(Signing.SignatureHeader).Should().Be(Signing.Sign(Secret, timestamp, "GET", PcPath, Signing.EmptyBodySha256));
+        }
+    }
+
     #endregion
 
     private static string Unix(long seconds) => seconds.ToString(CultureInfo.InvariantCulture);
@@ -682,6 +747,13 @@ public sealed class ServerClientTests : IDisposable
 
     private static string ErrorBody(ErrorCode code, string message, string? reason, string traceId) =>
         JsonDefaults.Serialize(new ServerErrorEnvelope(new ServerError(code, message, reason is null ? null : JsonDefaults.ToElement(new ReasonDetails(reason)), traceId)));
+
+    private ServerClient NewClient(IHttpClientFactory factory)
+    {
+        var hardware = Substitute.For<IHardwareIdSource>();
+        hardware.GetComponentsAsync(Arg.Any<CancellationToken>()).Returns(HardwareComponents);
+        return new ServerClient(factory, _tokens, new Hwid(hardware, Path.Combine(_tempDir, "hwid.fallback")), _clock, _options, NullLogger<ServerClient>.Instance);
+    }
 
     private Task RegisterAsync() =>
         _tokens.SetAgentAsync(new AgentTokens(PcId, "access-1", "refresh-1", Convert.ToBase64String(Secret), _clock.UtcNow.AddHours(1)), CancellationToken.None);

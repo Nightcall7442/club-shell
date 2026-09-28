@@ -626,14 +626,6 @@ export const APPS: App[] = [
     allowed: true,
   },
   {
-    id: uid(6, 3),
-    title: 'Telegram',
-    exePath: 'C:\\Program Files\\Telegram Desktop\\Telegram.exe',
-    iconUrl: '/mock-art/app-telegram.svg',
-    category: 'voice',
-    allowed: true,
-  },
-  {
     id: uid(6, 4),
     title: 'Spotify',
     exePath: 'C:\\Users\\kiosk\\AppData\\Roaming\\Spotify\\Spotify.exe',

@@ -478,7 +478,7 @@ mod tests {
     fn overlay_and_env_apply() {
         let dir = std::env::temp_dir().join(format!("clubshell-cfg-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(SHELL_JSON), r#"{ "theme": "neon", "ipc": { "requestTimeoutMs": 500 }, "features": { "shop": false } }"#).unwrap();
+        std::fs::write(dir.join(SHELL_JSON), r#"{ "theme": "neon", "ipc": { "requestTimeoutMs": 500 }, "features": { "shop": true } }"#).unwrap();
         let cfg = ShellConfig::load_from(&dir).unwrap();
         assert_eq!(cfg.theme, "neon");
         assert_eq!(cfg.ipc.request_timeout_ms, 500);
@@ -486,8 +486,8 @@ mod tests {
             cfg.ipc.connect_timeout_ms, 3000,
             "untouched keys keep defaults"
         );
-        assert!(!cfg.features.shop);
-        assert!(cfg.features.chat);
+        assert!(cfg.features.shop);
+        assert!(!cfg.features.chat, "server-backed features default off");
         assert_eq!(
             cfg.runtime.overlay_path.as_deref(),
             Some(dir.join(SHELL_JSON).as_path())

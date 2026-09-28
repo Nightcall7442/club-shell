@@ -38,6 +38,11 @@ export const TopupProvider = {
   Uzum: 'uzum',
   /** Cash at the desk; creates an admin ticket. */
   Cash: 'cash',
+  /**
+   * A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the
+   * server.
+   */
+  Unknown: 'unknown',
 } as const;
 /** Top-up payment provider. */
 export type TopupProvider = (typeof TopupProvider)[keyof typeof TopupProvider];
@@ -64,6 +69,11 @@ export const TopupStatus = {
   Expired: 'expired',
   /** Cancelled by the user or an admin. */
   Cancelled: 'cancelled',
+  /**
+   * A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the
+   * server.
+   */
+  Unknown: 'unknown',
 } as const;
 /** Lifecycle of a `TopupIntent`. */
 export type TopupStatus = (typeof TopupStatus)[keyof typeof TopupStatus];
@@ -104,6 +114,11 @@ export const TransactionType = {
   Purchase: 'purchase',
   /** Manual admin adjustment. */
   Adjustment: 'adjustment',
+  /**
+   * A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the
+   * server.
+   */
+  Unknown: 'unknown',
 } as const;
 /** Kind of wallet transaction. */
 export type TransactionType = (typeof TransactionType)[keyof typeof TransactionType];

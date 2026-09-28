@@ -20,7 +20,7 @@ public sealed record ProcessResult(int ExitCode, string StandardOutput, string S
 }
 
 /// <summary>
-/// Runs a console tool (netsh, iscsicli, powercfg, ipconfig, nvidia-smi) hidden, with captured output and a hard
+/// Runs a console tool (netsh, powercfg, ipconfig, nvidia-smi) hidden, with captured output and a hard
 /// timeout. Arguments are passed through <see cref="ProcessStartInfo.ArgumentList"/>, so each element is quoted
 /// correctly regardless of spaces. Output of localized OS tools is parsed structurally by callers (exit codes,
 /// value patterns), never by label text.

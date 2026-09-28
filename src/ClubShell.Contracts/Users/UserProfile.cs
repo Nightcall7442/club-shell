@@ -23,6 +23,9 @@ public enum UserRole
 
     /// <summary>Club staff / admin.</summary>
     Admin,
+
+    /// <summary>A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the server.</summary>
+    Unknown,
 }
 
 /// <summary>UI locale.</summary>
@@ -37,6 +40,9 @@ public enum Locale
 
     /// <summary>Uzbek.</summary>
     Uz,
+
+    /// <summary>A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the server.</summary>
+    Unknown,
 }
 
 /// <summary>Well-known values of <see cref="User.Flags"/>.</summary>
@@ -174,6 +180,9 @@ public enum NotificationLevel
 
     /// <summary>Success.</summary>
     Success,
+
+    /// <summary>A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the server.</summary>
+    Unknown,
 }
 
 /// <summary>Optional call-to-action of a <see cref="Notification"/>.</summary>
@@ -216,6 +225,9 @@ public enum ChatMessageKind
 
     /// <summary>Message from club staff.</summary>
     Admin,
+
+    /// <summary>A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the server.</summary>
+    Unknown,
 }
 
 /// <summary>Chat room id helpers (SERVER_API.md §4.10).</summary>
@@ -293,6 +305,9 @@ public enum BookingStatus
 
     /// <summary>Expired unused.</summary>
     Expired,
+
+    /// <summary>A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the server.</summary>
+    Unknown,
 }
 
 /// <summary>Seat on the club map (IPC_PROTOCOL.md §6.15).</summary>
@@ -355,6 +370,9 @@ public enum TournamentState
 
     /// <summary>Finished.</summary>
     Finished,
+
+    /// <summary>A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the server.</summary>
+    Unknown,
 }
 
 /// <summary>Bracket match; <paramref name="A"/>, <paramref name="B"/>, <paramref name="Winner"/> are user ids.</summary>

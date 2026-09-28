@@ -16,6 +16,9 @@ wire_enum! {
         Allow = "allow",
         /// Matching processes are killed.
         Deny = "deny",
+        /// A value this agent does not know (sent by a newer server). Read-side fallback only: the
+        /// Agent never sends it to the server.
+        Unknown = "unknown",
     }
 }
 
@@ -221,6 +224,9 @@ wire_enum! {
         Maintenance = "maintenance",
         /// Reserved by a booking.
         Booked = "booked",
+        /// A value this agent does not know (sent by a newer server). Read-side fallback only: the
+        /// Agent never sends it to the server.
+        Unknown = "unknown",
     }
 }
 
@@ -554,6 +560,9 @@ pub struct UpdatesConfigOverride {
     /// Window in which non-mandatory updates may be applied.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub apply_window: Option<TimeWindow>,
+    /// `false` stops the periodic manifest check; `null` keeps `agent.json` (default on).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
 }
 
 /// Server-side configuration overrides (`GET /agents/{pcId}/config`, SERVER_API.md §4.1), merged
@@ -600,6 +609,9 @@ pub struct AgentServerConfig {
     /// WebSocket URL override.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ws_url: Option<String>,
+    /// Partial `agent.json → anticheat`, e.g. `{ "reportViolations": false }` (default on).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anticheat: Option<Value>,
 }
 
 /// Update policy (overrides `agent.json → updates`).
@@ -634,6 +646,14 @@ pub struct WebFilterPolicy {
     pub allowed_domains: Vec<String>,
     /// Filtering DNS resolvers to enforce.
     pub dns_servers: Vec<String>,
+    /// Also firewall the public IPv4 addresses the blocked domains resolve to; `null` = `false`.
+    /// Off by default: a blocked site on a shared CDN address takes launchers down with it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_resolved_ips: Option<bool>,
+    /// Domains never blocked, added to the Agent's built-in launcher/anti-cheat list (the host of
+    /// `server.baseUrl` is always protected); `null` = built-in list only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protected_domains: Option<Vec<String>>,
 }
 
 /// Enforced PC policy (IPC_PROTOCOL.md §6.18, ARCHITECTURE.md §12.3). Snapshot persisted to
@@ -728,6 +748,8 @@ pub(crate) fn sample_policy() -> Policy {
             blocked_domains: vec!["*.torrent-site.example".into()],
             allowed_domains: vec![],
             dns_servers: vec!["1.1.1.3".into()],
+            block_resolved_ips: None,
+            protected_domains: None,
         },
         explorer: ExplorerPolicy {
             disable_task_manager: true,
@@ -772,10 +794,18 @@ mod tests {
         assert_wire(DiskType::ALL, &["hdd", "ssd", "nvme", "network", "unknown"]);
         assert_wire(
             PcStatus::ALL,
-            &["offline", "free", "busy", "locked", "maintenance", "booked"],
+            &[
+                "offline",
+                "free",
+                "busy",
+                "locked",
+                "maintenance",
+                "booked",
+                "unknown",
+            ],
         );
         assert_wire(ConnectivityState::ALL, &["online", "offline"]);
-        assert_wire(AllowlistMode::ALL, &["allow", "deny"]);
+        assert_wire(AllowlistMode::ALL, &["allow", "deny", "unknown"]);
     }
 
     #[test]
@@ -923,6 +953,7 @@ mod tests {
                     from: NaiveTime::from_hms_opt(4, 0, 0).unwrap(),
                     to: NaiveTime::from_hms_opt(7, 0, 0).unwrap(),
                 }),
+                enabled: None,
             }),
             telemetry: None,
             remote_admin: None,
@@ -940,6 +971,7 @@ mod tests {
                 sha256: "ab".into(),
             }]),
             ws_url: None,
+            anticheat: None,
         };
         let json = serde_json::to_string(&cfg).unwrap();
         assert_eq!(

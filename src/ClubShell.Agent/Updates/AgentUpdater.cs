@@ -106,6 +106,7 @@ public sealed class AgentUpdater : BackgroundService
     /// </summary>
     public async Task<UpdateApplyResponse> ApplyAsync(UpdateComponent component, CancellationToken cancellationToken)
     {
+        RequireKnown(component);
         await _work.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -137,6 +138,7 @@ public sealed class AgentUpdater : BackgroundService
     public async Task<UpdateApplyResponse> HandleCommandAsync(UpdateCommand command, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
+        RequireKnown(command.Component);
         await _work.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -226,7 +228,10 @@ public sealed class AgentUpdater : BackgroundService
         {
             try
             {
-                _ = await _checker.CheckOnceAsync(stoppingToken).ConfigureAwait(false);
+                if (_settings.CurrentValue.Updates.Enabled)
+                {
+                    _ = await _checker.CheckOnceAsync(stoppingToken).ConfigureAwait(false);
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -274,6 +279,15 @@ public sealed class AgentUpdater : BackgroundService
     }
 
     private static string ComponentName(UpdateComponent component) => component == UpdateComponent.Agent ? "Agent" : "Shell";
+
+    /// <summary>Everything below treats "not the Agent" as the Shell, so a component a newer server added must stop here.</summary>
+    private static void RequireKnown(UpdateComponent component)
+    {
+        if (component == UpdateComponent.Unknown)
+        {
+            throw IpcError.Validation("component", "unknown").ToException();
+        }
+    }
 
     private async Task StartupAsync(CancellationToken cancellationToken)
     {

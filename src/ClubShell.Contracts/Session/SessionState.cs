@@ -28,12 +28,15 @@ public enum SessionState
 
     /// <summary>Finished and settled.</summary>
     Ended,
+
+    /// <summary>A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the server.</summary>
+    Unknown,
 }
 
 /// <summary>Helpers over <see cref="SessionState"/>.</summary>
 public static class SessionStateExtensions
 {
-    /// <summary><see langword="true"/> for states in which a session exists and is not finished (<see cref="SessionState.Starting"/> .. <see cref="SessionState.Ending"/>).</summary>
+    /// <summary><see langword="true"/> for states in which a session exists and is not finished (<see cref="SessionState.Starting"/> .. <see cref="SessionState.Ending"/>, and <see cref="SessionState.Unknown"/>: a newer server's state never ends a local session).</summary>
     public static bool IsOpen(this SessionState state) => state is not (SessionState.Idle or SessionState.Ended);
 
     /// <summary><see langword="true"/> when session-scoped IPC requests are allowed (<see cref="SessionState.Active"/> or <see cref="SessionState.Paused"/>).</summary>

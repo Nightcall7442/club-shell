@@ -614,6 +614,7 @@ public sealed class ServerClient : IServerClient, IDisposable
 
     private static async Task<ServerApiException> ReadErrorAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
+        var status = (int)response.StatusCode;
         ServerError? error = null;
         if (response.Content.Headers.ContentLength != 0)
         {
@@ -622,7 +623,13 @@ public sealed class ServerClient : IServerClient, IDisposable
                 var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
                 await using (stream.ConfigureAwait(false))
                 {
-                    error = (await JsonDefaults.DeserializeAsync<ServerErrorEnvelope>(stream, cancellationToken).ConfigureAwait(false))?.Error;
+                    using var document = await JsonDocument.ParseAsync(stream, default, cancellationToken).ConfigureAwait(false);
+                    if (document.RootElement.ValueKind == JsonValueKind.Object
+                        && document.RootElement.TryGetProperty("error", out var element)
+                        && element.ValueKind == JsonValueKind.Object)
+                    {
+                        error = ParseServerError(element, status);
+                    }
                 }
             }
             catch (Exception ex) when (ex is JsonException or IOException or HttpRequestException)
@@ -631,9 +638,30 @@ public sealed class ServerClient : IServerClient, IDisposable
             }
         }
 
-        var code = error?.Code ?? ErrorCodes.FromHttpStatus((int)response.StatusCode);
+        var code = error?.Code ?? ErrorCodes.FromHttpStatus(status);
         return new ServerApiException(code, response.StatusCode, error, error?.TraceId ?? ReadTraceId(response));
     }
+
+    private static ServerError? ParseServerError(JsonElement element, int status)
+    {
+        try
+        {
+            return JsonDefaults.FromElement<ServerError>(element);
+        }
+        catch (JsonException)
+        {
+            // A newer server may send an error.code this build does not know: keep message/details/traceId and take
+            // the code from the HTTP status.
+            return new ServerError(
+                ErrorCodes.FromHttpStatus(status),
+                ReadString(element, "message") ?? string.Empty,
+                element.TryGetProperty("details", out var details) && details.ValueKind == JsonValueKind.Object ? details.Clone() : null,
+                ReadString(element, "traceId")!); // null when absent, as from the deserializer: X-Trace-Id is the fallback
+        }
+    }
+
+    private static string? ReadString(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
@@ -797,7 +825,7 @@ public sealed class ServerClient : IServerClient, IDisposable
             request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
         }
 
-        var accessToken = Authorize(request, auth, body, uri, server);
+        var accessToken = Authorize(request, auth, server);
         var started = _clock.GetTimestamp();
         try
         {
@@ -829,7 +857,7 @@ public sealed class ServerClient : IServerClient, IDisposable
         return new ServerApiException(code, status, null, traceId.ToString("D"), $"{code.Describe()}: {exception.Message}", exception);
     }
 
-    private string? Authorize(HttpRequestMessage request, AuthMode auth, byte[]? body, Uri uri, ServerSettings server)
+    private string? Authorize(HttpRequestMessage request, AuthMode auth, ServerSettings server)
     {
         switch (auth)
         {
@@ -850,11 +878,8 @@ public sealed class ServerClient : IServerClient, IDisposable
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
                 if (server.SigningEnabled)
                 {
-                    var timestamp = ServerNow.ToUnixTimeSeconds();
-                    var bodyHash = body is null ? Signing.EmptyBodySha256 : Signing.Sha256Hex(body);
-                    var signature = Signing.Sign(tokens.DecodeSigningSecret(), timestamp, request.Method.Method, uri.PathAndQuery, bodyHash);
-                    request.Headers.Add(Signing.TimestampHeader, timestamp.ToString(CultureInfo.InvariantCulture));
-                    request.Headers.Add(Signing.SignatureHeader, signature);
+                    // X-Timestamp/X-Signature are added per attempt by RequestSigningHandler (inside the retry pipeline).
+                    request.Options.Set(RequestSigningHandler.SignerOption, new RequestSigner(tokens.DecodeSigningSecret(), () => ServerNow));
                 }
 
                 if (auth == AuthMode.User && _tokens.User is { } user)

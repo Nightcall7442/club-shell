@@ -52,6 +52,9 @@ wire_enum! {
         /// Protocol or application version unsupported; `details: { supported: [..], got }` (HTTP
         /// 426).
         VersionMismatch = "versionMismatch",
+        /// Operation is in the contract but this server version does not implement it (HTTP 501);
+        /// not retryable.
+        NotImplemented = "notImplemented",
     }
 }
 
@@ -223,6 +226,7 @@ impl ErrorCode {
             ErrorCode::Internal => "Internal error",
             ErrorCode::ProtocolError => "Protocol violation",
             ErrorCode::VersionMismatch => "Version unsupported",
+            ErrorCode::NotImplemented => "Not implemented by the server",
         }
     }
 
@@ -249,11 +253,12 @@ impl ErrorCode {
             ErrorCode::Internal => 500,
             ErrorCode::ProtocolError => 400,
             ErrorCode::VersionMismatch => 426,
+            ErrorCode::NotImplemented => 501,
         }
     }
 
     /// Best-effort reverse mapping for responses without a parseable error envelope
-    /// (409 → `Conflict`, 5xx → `ServerUnavailable`).
+    /// (409 → `Conflict`, 501 → `NotImplemented`, other 5xx → `ServerUnavailable`).
     pub const fn from_http_status(status: u16) -> ErrorCode {
         match status {
             400 => ErrorCode::Validation,
@@ -265,6 +270,7 @@ impl ErrorCode {
             409 => ErrorCode::Conflict,
             426 => ErrorCode::VersionMismatch,
             429 => ErrorCode::RateLimited,
+            501 => ErrorCode::NotImplemented,
             504 => ErrorCode::Timeout,
             s if s >= 500 => ErrorCode::ServerUnavailable,
             _ => ErrorCode::Internal,
@@ -669,6 +675,7 @@ mod tests {
                 "internal",
                 "protocolError",
                 "versionMismatch",
+                "notImplemented",
             ],
         );
         assert_eq!(ErrorCode::parse("NotFound"), Some(ErrorCode::NotFound));
@@ -678,6 +685,8 @@ mod tests {
             ErrorCode::ServerUnavailable
         );
         assert_eq!(ErrorCode::from_http_status(418), ErrorCode::Internal);
+        assert_eq!(ErrorCode::from_http_status(501), ErrorCode::NotImplemented);
+        assert!(!ErrorCode::NotImplemented.is_retryable());
         assert!(ErrorCode::RateLimited.is_retryable());
         assert!(!ErrorCode::Validation.is_retryable());
         assert!(ErrorCode::Forbidden.is_auth_failure());

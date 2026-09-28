@@ -2,7 +2,7 @@
  * Club customisation: everything a club owner configures for their own venue from the admin console — staff and
  * roles, cashier shifts, pricing (weekday / holiday multipliers, client groups, happy hours, top-up bonus tiers, promo
  * codes, loyalty levels), branding and the player-facing features, the game catalogue, banners, club rules, stock
- * thresholds, "if → then" automation rules, Telegram notifications and outbound webhooks.
+ * thresholds, "if → then" automation rules and outbound webhooks (Telegram is banned in the product).
  *
  * Stored as `db.club` next to the rest of the mock store (persisted with it). {@link ensureClub} fills a missing or
  * older document with defaults, so an existing `.mock-db.json` keeps working. The pricing and rule engines live here
@@ -74,7 +74,6 @@ export interface ClientProfile {
   blacklisted: boolean;
   phone: string;
   birthYear: number | null;
-  telegram: string;
 }
 
 export interface BonusTier {
@@ -186,7 +185,9 @@ export type AuditAction =
   | 'blacklist'
   | 'stockReceive'
   | 'stockEdit'
-  | 'pcCommand';
+  | 'pcCommand'
+  | 'clientPassword'
+  | 'clientCard';
 
 export interface AuditEntry {
   id: string;
@@ -253,12 +254,8 @@ export interface ClubConfig {
   rulesText: { ru: string; uz: string; en: string };
   stock: { lowAt: number };
   automation: AutomationRule[];
-  notifications: {
-    telegramBotToken: string;
-    telegramChatId: string;
-    events: Record<ClubEvent, boolean>;
-    bigTopupAt: number;
-  };
+  /** A top-up of at least this much (minor units) raises the `bigTopup` event. */
+  notifications: { bigTopupAt: number };
   webhooks: Webhook[];
   apiKey: string;
   staff: StaffRecord[];
@@ -270,7 +267,7 @@ export interface ClubConfig {
   control: ControlSettings;
 }
 
-const CONFIG_VERSION = 3;
+const CONFIG_VERSION = 4;
 
 export const DEFAULT_CONTROL: ControlSettings = {
   earlyEndMinutes: 10,
@@ -366,21 +363,7 @@ function defaults(): ClubConfig {
         lastFiredAt: null,
       },
     ],
-    notifications: {
-      telegramBotToken: '',
-      telegramChatId: '',
-      events: {
-        shiftClosed: true,
-        pcOffline: true,
-        bigTopup: true,
-        lowStock: true,
-        ruleFired: false,
-        sessionOpened: false,
-        suspicious: true,
-        hardware: true,
-      },
-      bigTopupAt: 20_000_000,
-    },
+    notifications: { bigTopupAt: 20_000_000 },
     webhooks: [],
     apiKey: `ck_${uuid().replace(/-/g, '')}`,
     staff: [
@@ -408,12 +391,8 @@ export function club(): ClubConfig {
     store.club = {
       ...base,
       ...old,
-      // Sections added later keep the stored values and gain the new keys.
-      notifications: {
-        ...base.notifications,
-        ...old.notifications,
-        events: { ...base.notifications.events, ...old.notifications?.events },
-      },
+      // Sections added later keep the stored values and gain the new keys; v4 drops the Telegram settings.
+      notifications: { bigTopupAt: old.notifications?.bigTopupAt ?? base.notifications.bigTopupAt },
       control: { ...base.control, ...old.control },
       audit: old.audit ?? [],
       version: CONFIG_VERSION,
@@ -433,7 +412,7 @@ export function saveClub(): void {
 
 export function profileOf(userId: string): ClientProfile {
   const c = club();
-  return c.clients[userId] ?? { groupId: null, note: '', blacklisted: false, phone: '', birthYear: null, telegram: '' };
+  return c.clients[userId] ?? { groupId: null, note: '', blacklisted: false, phone: '', birthYear: null };
 }
 
 /** Lifetime spend on time and the shop, minor units (positive number). */
@@ -546,29 +525,9 @@ export function topupBonus(amount: number): number {
 // Notifications and webhooks
 // ---------------------------------------------------------------------------------------------------------------------
 
-const EVENT_TITLE: Record<ClubEvent, string> = {
-  shiftClosed: 'Смена закрыта',
-  pcOffline: 'ПК не в сети',
-  bigTopup: 'Крупное пополнение',
-  lowStock: 'Товар заканчивается',
-  ruleFired: 'Сработало правило',
-  sessionOpened: 'Открыт сеанс',
-  suspicious: '⚠ Подозрительная операция',
-  hardware: '🛠 Нужен ремонт ПК',
-};
-
-/** Fire-and-forget: Telegram message to the owner and POSTs to subscribed webhooks. Never throws. */
+/** Fire-and-forget POSTs to the webhooks subscribed to `event`. Never throws. */
 export function emit(event: ClubEvent, text: string, data: Record<string, unknown> = {}): void {
-  const c = club();
-  const n = c.notifications;
-  if (n.events[event] && n.telegramBotToken && n.telegramChatId) {
-    void fetch(`https://api.telegram.org/bot${n.telegramBotToken}/sendMessage`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ chat_id: n.telegramChatId, text: `${EVENT_TITLE[event]}\n${text}` }),
-    }).catch(() => undefined);
-  }
-  for (const hook of c.webhooks) {
+  for (const hook of club().webhooks) {
     if (!hook.enabled || !hook.events.includes(event)) continue;
     void fetch(hook.url, {
       method: 'POST',

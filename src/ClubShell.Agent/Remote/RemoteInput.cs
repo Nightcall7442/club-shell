@@ -3,8 +3,10 @@ using System.Net.WebSockets;
 using System.Runtime.Versioning;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ClubShell.Agent.Games;
 using ClubShell.Contracts.Commands;
 using ClubShell.Contracts.Errors;
+using ClubShell.Contracts.Games;
 using ClubShell.Contracts.Ipc;
 using ClubShell.Core.Abstractions;
 using ClubShell.Core.Configuration;
@@ -18,7 +20,8 @@ namespace ClubShell.Agent.Remote;
 /// Runs an interactive remote-control session (SERVER_API.md §6.1 <c>remoteControlStart</c>/<c>remoteControlStop</c>):
 /// connects to the relay WebSocket with the session token, streams periodic <see cref="ScreenCapture"/> frames as binary
 /// messages at the requested FPS, and — when input is allowed by both the command and <c>remoteAdmin.allowRemoteInput</c>
-/// — injects the mouse/keyboard events the relay sends back via <c>SendInput</c> on the input desktop. The session stops
+/// — injects the mouse/keyboard events the relay sends back via <c>SendInput</c> on the input desktop, except while a
+/// game with an anti-cheat runs (<see cref="BlocksRemoteInput"/>). The session stops
 /// on <see cref="StopAsync"/>, when the socket closes, after an idle period, or at a hard duration cap. Frames are never
 /// logged.
 /// </summary>
@@ -38,6 +41,7 @@ public sealed class RemoteInputService : IDisposable
     private static readonly JsonSerializerOptions InputJson = new(JsonSerializerDefaults.Web);
 
     private readonly ScreenCapture _screen;
+    private readonly GameSessionTracker _games;
     private readonly IAdminEventSink _adminSink;
     private readonly IClock _clock;
     private readonly IOptionsMonitor<AgentSettings> _settings;
@@ -50,21 +54,34 @@ public sealed class RemoteInputService : IDisposable
     /// <summary>Creates the service.</summary>
     public RemoteInputService(
         ScreenCapture screen,
+        GameSessionTracker games,
         IAdminEventSink adminSink,
         IClock clock,
         IOptionsMonitor<AgentSettings> settings,
         ILogger<RemoteInputService> logger)
     {
         ArgumentNullException.ThrowIfNull(screen);
+        ArgumentNullException.ThrowIfNull(games);
         ArgumentNullException.ThrowIfNull(adminSink);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(logger);
         _screen = screen;
+        _games = games;
         _adminSink = adminSink;
         _clock = clock;
         _settings = settings;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// <see langword="true"/> when one of <paramref name="running"/> is protected by an anti-cheat: Vanguard, FACEIT and
+    /// EAC flag synthetic input, so remote input is dropped while such a game runs.
+    /// </summary>
+    public static bool BlocksRemoteInput(IEnumerable<Game> running)
+    {
+        ArgumentNullException.ThrowIfNull(running);
+        return running.Any(game => GameLaunchService.EffectiveAntiCheat(game) != AntiCheatKind.None);
     }
 
     /// <summary><see langword="true"/> while a remote-control session is running.</summary>
@@ -347,10 +364,24 @@ public sealed class RemoteInputService : IDisposable
             }
 
             Interlocked.Exchange(ref session.LastActivityUtcTicks, _clock.UtcNow.UtcTicks);
-            if (result.MessageType == WebSocketMessageType.Text && queue is not null)
+            if (result.MessageType != WebSocketMessageType.Text || queue is null)
             {
-                DispatchInput(message.ToArray(), queue);
+                continue;
             }
+
+            if (BlocksRemoteInput(_games.All().Select(r => r.Game)))
+            {
+                if (!session.InputBlocked)
+                {
+                    session.InputBlocked = true;
+                    _logger.LogWarning("Remote input ignored while a game with an anti-cheat runs");
+                }
+
+                continue;
+            }
+
+            session.InputBlocked = false;
+            DispatchInput(message.ToArray(), queue);
         }
     }
 
@@ -514,6 +545,8 @@ public sealed class RemoteInputService : IDisposable
         public Task Runner { get; set; } = Task.CompletedTask;
 
         public long LastActivityUtcTicks;
+
+        public bool InputBlocked;
     }
 
     private sealed record InputMessage(

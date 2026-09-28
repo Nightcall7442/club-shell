@@ -1572,6 +1572,20 @@ pub struct GameLaunchedEvent {
     pub at: DateTime<Utc>,
 }
 
+wire_enum! {
+    /// Who mounts the games library volume on the PC (heartbeat `gamesVolume.owner`).
+    GamesVolumeOwner {
+        /// Nobody: `storage.gamesShare` is off and ClubDisklessHelper is not installed (local disks
+        /// only).
+        None = "none",
+        /// The Agent maps the SMB share of `storage.gamesShare`.
+        Agent = "agent",
+        /// ClubDisklessHelper (read-only iSCSI, docs/DISKLESS.md); it reports the volume to its own
+        /// server.
+        DisklessHelper = "disklessHelper",
+    }
+}
+
 /// Payload of `AgentEventType.HardwareChanged`.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -1580,6 +1594,47 @@ pub struct HardwareChangedEvent {
     pub hardware: HardwareInfo,
     /// Changed top-level keys (`gpu`, `disks`, …).
     pub diff: Vec<String>,
+}
+
+/// Anti-cheat prerequisites in a heartbeat, so the server can hide Riot games on PCs without
+/// Vanguard. `null` = unknown.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct HeartbeatAntiCheat {
+    /// The Vanguard driver `vgk` is installed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vanguard_installed: Option<bool>,
+    /// The `vgk` driver is loaded (it loads at boot; a fresh install needs a reboot).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vanguard_loaded: Option<bool>,
+    /// UEFI Secure Boot is on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secure_boot: Option<bool>,
+    /// A TPM is present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tpm: Option<bool>,
+}
+
+/// Games library volume in a heartbeat.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct HeartbeatGamesVolume {
+    /// Who mounts it.
+    pub owner: GamesVolumeOwner,
+    /// Mapped and readable; `null` when the Agent cannot tell (`GamesVolumeOwner.DisklessHelper`).
+    /// Stays `false` while `storage.gamesShare.iscsi` is set: the Agent refuses iSCSI.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mounted: Option<bool>,
+    /// Drive letter the Agent maps (`G`); `null` unless the owner is the Agent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drive_letter: Option<String>,
+    /// When `mounted` last changed; `null` = not since the Agent started.
+    #[serde(
+        default,
+        with = "crate::wire::ts_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub since: Option<DateTime<Utc>>,
 }
 
 /// Response of `POST /agents/{pcId}/heartbeat`.
@@ -1642,6 +1697,12 @@ pub struct HeartbeatRequest {
     pub offline_queue: i32,
     /// Whether the Shell pipe connection is alive.
     pub shell_connected: bool,
+    /// Who mounts the games library and whether it is mounted (omitted by older agents).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub games_volume: Option<HeartbeatGamesVolume>,
+    /// Riot Vanguard and platform security state (omitted by older agents).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anti_cheat: Option<HeartbeatAntiCheat>,
 }
 
 wire_enum! {
@@ -1879,6 +1940,36 @@ pub struct ScreenshotResult {
     pub uploaded_at: DateTime<Utc>,
 }
 
+/// Wire form of a queued command returned by `GET /agents/{pcId}/commands`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerCommandEnvelope {
+    /// Command id.
+    pub id: Uuid,
+    /// Server timestamp.
+    #[serde(with = "crate::wire::ts")]
+    pub ts: DateTime<Utc>,
+    /// `ServerCommandType` wire name. A string, like `WsFrame.Name`, so a command this agent does
+    /// not know is acked `notFound` instead of failing the whole batch.
+    pub name: String,
+    /// Payload or `null`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload: Option<Value>,
+    /// Admin login, when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub issued_by: Option<String>,
+    /// Earlier pending command this one cancels.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supersedes: Option<Uuid>,
+    /// Expiry.
+    #[serde(
+        default,
+        with = "crate::wire::ts_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub expires_at: Option<DateTime<Utc>>,
+}
+
 wire_enum! {
     /// Command types the server may send over WS / `GET /agents/{pcId}/commands` (SERVER_API.md
     /// §6.1).
@@ -1947,35 +2038,6 @@ pub struct ServerCommand {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supersedes: Option<Uuid>,
     /// Discard (ack with `ErrorCode.Timeout`) after this time.
-    #[serde(
-        default,
-        with = "crate::wire::ts_opt",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub expires_at: Option<DateTime<Utc>>,
-}
-
-/// Wire form of a queued command returned by `GET /agents/{pcId}/commands`.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ServerCommandEnvelope {
-    /// Command id.
-    pub id: Uuid,
-    /// Server timestamp.
-    #[serde(with = "crate::wire::ts")]
-    pub ts: DateTime<Utc>,
-    /// Command type.
-    pub name: ServerCommandType,
-    /// Payload or `null`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub payload: Option<Value>,
-    /// Admin login, when known.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub issued_by: Option<String>,
-    /// Earlier pending command this one cancels.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub supersedes: Option<Uuid>,
-    /// Expiry.
     #[serde(
         default,
         with = "crate::wire::ts_opt",
@@ -2071,6 +2133,9 @@ wire_enum! {
         Stable = "stable",
         /// Beta releases.
         Beta = "beta",
+        /// A value this agent does not know (sent by a newer server). Read-side fallback only: the
+        /// Agent never sends it to the server.
+        Unknown = "unknown",
     }
 }
 
@@ -2081,6 +2146,9 @@ wire_enum! {
         Agent = "agent",
         /// Kiosk shell.
         Shell = "shell",
+        /// A value this agent does not know (sent by a newer server). Read-side fallback only: the
+        /// Agent never sends it to the server.
+        Unknown = "unknown",
     }
 }
 
@@ -2214,6 +2282,9 @@ wire_enum! {
         Pong = "pong",
         /// Server → Agent push; not acked.
         Push = "push",
+        /// A value this agent does not know (sent by a newer server). Read-side fallback only: the
+        /// Agent never sends it to the server.
+        Unknown = "unknown",
     }
 }
 
@@ -2522,17 +2593,18 @@ impl ServerCommand {
         object_as(self.payload.as_ref())
     }
 
-    /// Builds from a REST polling envelope.
-    pub fn from_envelope(envelope: ServerCommandEnvelope) -> Self {
-        Self {
+    /// Builds from a REST polling envelope; `None` for an unknown command name.
+    pub fn from_envelope(envelope: ServerCommandEnvelope) -> Option<Self> {
+        let r#type = ServerCommandType::parse(&envelope.name)?;
+        Some(Self {
             id: envelope.id,
-            r#type: envelope.name,
+            r#type,
             issued_at: envelope.ts,
             payload: envelope.payload,
             issued_by: envelope.issued_by,
             supersedes: envelope.supersedes,
             expires_at: envelope.expires_at,
-        }
+        })
     }
 
     /// Builds from a WS `command` frame; `None` for other frame types or an unknown command name.
@@ -2726,8 +2798,8 @@ mod tests {
         );
         assert_wire(ClientErrorLevel::ALL, &["warn", "error"]);
         assert_wire(PolicySource::ALL, &["server", "cache", "file"]);
-        assert_wire(UpdateChannel::ALL, &["stable", "beta"]);
-        assert_wire(UpdateComponent::ALL, &["agent", "shell"]);
+        assert_wire(UpdateChannel::ALL, &["stable", "beta", "unknown"]);
+        assert_wire(UpdateComponent::ALL, &["agent", "shell", "unknown"]);
         assert_wire(
             UpdatePhase::ALL,
             &["downloading", "verifying", "staging", "applying", "failed"],
@@ -2770,7 +2842,7 @@ mod tests {
         );
         assert_wire(
             WsFrameType::ALL,
-            &["command", "ack", "event", "ping", "pong", "push"],
+            &["command", "ack", "event", "ping", "pong", "push", "unknown"],
         );
         assert_wire(
             WsPushKind::ALL,
@@ -3468,8 +3540,13 @@ mod tests {
             r#"{"id":"c0a80000-0000-4000-8000-000000000001","ts":"2026-09-21T10:20:00.000Z","name":"unlock","payload":null,"issuedBy":"admin1"}"#,
         )
         .unwrap();
-        let cmd = ServerCommand::from_envelope(env);
+        let cmd = ServerCommand::from_envelope(env).unwrap();
         assert_eq!(cmd.r#type, ServerCommandType::Unlock);
+        let unknown: ServerCommandEnvelope = serde_json::from_str(
+            r#"{"id":"c0a80000-0000-4000-8000-000000000001","ts":"2026-09-21T10:20:00.000Z","name":"dance"}"#,
+        )
+        .unwrap();
+        assert!(ServerCommand::from_envelope(unknown).is_none());
         assert_eq!(cmd.payload, None);
         assert_eq!(cmd.issued_by.as_deref(), Some("admin1"));
         let items: ServerCommandsResponse = serde_json::from_str(r#"{"items":[]}"#).unwrap();
@@ -3554,11 +3631,23 @@ mod tests {
             }],
             offline_queue: 0,
             shell_connected: true,
+            games_volume: Some(HeartbeatGamesVolume {
+                owner: GamesVolumeOwner::DisklessHelper,
+                mounted: None,
+                drive_letter: None,
+                since: None,
+            }),
+            anti_cheat: Some(HeartbeatAntiCheat {
+                vanguard_installed: Some(true),
+                vanguard_loaded: None,
+                secure_boot: None,
+                tpm: None,
+            }),
         };
         let json = serde_json::to_string(&hb).unwrap();
         assert_eq!(
             json,
-            r#"{"status":"busy","currentSessionId":"00000000-0000-0000-0000-000000000000","agentVersion":"1.4.2","shellVersion":"1.4.2","uptimeSec":8123,"ipAddress":"10.0.1.12","policyVersion":12,"runningGames":[{"gameId":"00000000-0000-0000-0000-000000000000","pid":7788,"startedAt":"2026-09-21T10:21:00.000Z"}],"offlineQueue":0,"shellConnected":true}"#
+            r#"{"status":"busy","currentSessionId":"00000000-0000-0000-0000-000000000000","agentVersion":"1.4.2","shellVersion":"1.4.2","uptimeSec":8123,"ipAddress":"10.0.1.12","policyVersion":12,"runningGames":[{"gameId":"00000000-0000-0000-0000-000000000000","pid":7788,"startedAt":"2026-09-21T10:21:00.000Z"}],"offlineQueue":0,"shellConnected":true,"gamesVolume":{"owner":"disklessHelper"},"antiCheat":{"vanguardInstalled":true}}"#
         );
         assert_eq!(serde_json::from_str::<HeartbeatRequest>(&json).unwrap(), hb);
         let res: HeartbeatResponse = serde_json::from_str(

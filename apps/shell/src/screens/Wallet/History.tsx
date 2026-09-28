@@ -44,6 +44,20 @@ export function rangeStart(range: HistoryRange, now: number = Date.now()): numbe
   }
 }
 
+const ADJUSTMENT_ICON = (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M4 7h10M4 17h6M14 7h6M10 17h10M14 4v6M10 14v6" />
+  </svg>
+);
+
 const ICONS: Record<TransactionTypeValue, JSX.Element> = {
   topUp: (
     <svg
@@ -111,19 +125,8 @@ const ICONS: Record<TransactionTypeValue, JSX.Element> = {
       <path d="M6 8h12l1 13H5L6 8zM9 8V6a3 3 0 0 1 6 0v2" />
     </svg>
   ),
-  adjustment: (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M4 7h10M4 17h6M14 7h6M10 17h10M14 4v6M10 14v6" />
-    </svg>
-  ),
+  adjustment: ADJUSTMENT_ICON,
+  unknown: ADJUSTMENT_ICON,
 };
 
 const TONE: Record<TransactionTypeValue, string> = {
@@ -133,6 +136,7 @@ const TONE: Record<TransactionTypeValue, string> = {
   bonus: 'bg-accent/15 text-accent',
   purchase: 'bg-text/10 text-text',
   adjustment: 'bg-muted/15 text-muted',
+  unknown: 'bg-muted/15 text-muted',
 };
 
 export interface TransactionRowProps {

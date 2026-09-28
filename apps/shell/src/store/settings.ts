@@ -27,14 +27,17 @@ export function asShellError(e: unknown): ShellError {
   return toShellApiError(e).toJSON();
 }
 
-/** Every feature on until the Agent says otherwise (avoids a flash of hidden navigation). */
+/**
+ * Mirrors the Agent's fallbacks: server-backed sections (shop, chat, booking, tournaments, top-up) stay off until the
+ * server's config turns them on, so a club whose server lacks them never shows a screen that calls a missing endpoint.
+ */
 export const DEFAULT_FEATURES: ShellFeatures = {
-  shop: true,
-  chat: true,
-  booking: true,
-  tournaments: true,
+  shop: false,
+  chat: false,
+  booking: false,
+  tournaments: false,
   profile: true,
-  topup: true,
+  topup: false,
   apps: true,
   callAdmin: true,
 };

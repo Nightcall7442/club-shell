@@ -126,6 +126,9 @@ wire_enum! {
         Cancelled = "cancelled",
         /// Expired unused.
         Expired = "expired",
+        /// A value this agent does not know (sent by a newer server). Read-side fallback only: the
+        /// Agent never sends it to the server.
+        Unknown = "unknown",
     }
 }
 
@@ -195,6 +198,9 @@ wire_enum! {
         System = "system",
         /// Message from club staff.
         Admin = "admin",
+        /// A value this agent does not know (sent by a newer server). Read-side fallback only: the
+        /// Agent never sends it to the server.
+        Unknown = "unknown",
     }
 }
 
@@ -251,6 +257,9 @@ wire_enum! {
         Ru = "ru",
         /// Uzbek.
         Uz = "uz",
+        /// A value this agent does not know (sent by a newer server). Read-side fallback only: the
+        /// Agent never sends it to the server.
+        Unknown = "unknown",
     }
 }
 
@@ -316,6 +325,9 @@ wire_enum! {
         Error = "error",
         /// Success.
         Success = "success",
+        /// A value this agent does not know (sent by a newer server). Read-side fallback only: the
+        /// Agent never sends it to the server.
+        Unknown = "unknown",
     }
 }
 
@@ -391,6 +403,9 @@ wire_enum! {
         Confirmed = "confirmed",
         /// Expired or already consumed.
         Expired = "expired",
+        /// A value this agent does not know (sent by a newer server). Read-side fallback only: the
+        /// Agent never sends it to the server.
+        Unknown = "unknown",
     }
 }
 
@@ -423,6 +438,9 @@ wire_enum! {
         Live = "live",
         /// Finished.
         Finished = "finished",
+        /// A value this agent does not know (sent by a newer server). Read-side fallback only: the
+        /// Agent never sends it to the server.
+        Unknown = "unknown",
     }
 }
 
@@ -475,6 +493,9 @@ wire_enum! {
         Vip = "vip",
         /// Club staff / admin.
         Admin = "admin",
+        /// A value this agent does not know (sent by a newer server). Read-side fallback only: the
+        /// Agent never sends it to the server.
+        Unknown = "unknown",
     }
 }
 
@@ -704,25 +725,31 @@ mod tests {
 
     #[test]
     fn enum_wire_values() {
-        assert_wire(UserRole::ALL, &["guest", "member", "vip", "admin"]);
-        assert_wire(Locale::ALL, &["en", "ru", "uz"]);
+        assert_wire(
+            UserRole::ALL,
+            &["guest", "member", "vip", "admin", "unknown"],
+        );
+        assert_wire(Locale::ALL, &["en", "ru", "uz", "unknown"]);
         assert_wire(
             NotificationLevel::ALL,
-            &["info", "warning", "error", "success"],
+            &["info", "warning", "error", "success", "unknown"],
         );
-        assert_wire(ChatMessageKind::ALL, &["text", "system", "admin"]);
+        assert_wire(
+            ChatMessageKind::ALL,
+            &["text", "system", "admin", "unknown"],
+        );
         assert_wire(
             BookingStatus::ALL,
-            &["reserved", "confirmed", "cancelled", "expired"],
+            &["reserved", "confirmed", "cancelled", "expired", "unknown"],
         );
         assert_wire(
             TournamentState::ALL,
-            &["upcoming", "registration", "live", "finished"],
+            &["upcoming", "registration", "live", "finished", "unknown"],
         );
         assert_wire(AuthKind::ALL, &["password", "qr", "guest", "card", "token"]);
         assert_wire(
             QrStatus::ALL,
-            &["pending", "scanned", "confirmed", "expired"],
+            &["pending", "scanned", "confirmed", "expired", "unknown"],
         );
         assert_wire(
             AuthExpiredReason::ALL,

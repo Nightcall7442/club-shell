@@ -212,7 +212,8 @@ pub async fn kiosk_i18n_bundle(
 ) -> CmdResult<BTreeMap<String, String>> {
     let embedded = match locale {
         Locale::En => EMBEDDED_EN,
-        Locale::Ru => EMBEDDED_RU,
+        // `unknown` (a locale newer than this build) falls back to the default bundle.
+        Locale::Ru | Locale::Unknown => EMBEDDED_RU,
         Locale::Uz => EMBEDDED_UZ,
     };
     let mut bundle = BTreeMap::new();

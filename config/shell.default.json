@@ -54,12 +54,12 @@
     "currencyFormat": { "locale": "uz-UZ", "minorDigits": 0 }
   },
   "features": {
-    "shop": true,
-    "chat": true,
-    "booking": true,
-    "tournaments": true,
+    "shop": false,
+    "chat": false,
+    "booking": false,
+    "tournaments": false,
     "profile": true,
-    "topup": true,
+    "topup": false,
     "apps": true,
     "callAdmin": true
   },

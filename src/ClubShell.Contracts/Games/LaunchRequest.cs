@@ -191,6 +191,10 @@ public enum LaunchReportPhase
 /// <param name="Phase">Lifecycle point.</param>
 /// <param name="ExitCode">Process exit code (<see cref="LaunchReportPhase.Exit"/>).</param>
 /// <param name="PlayedSec">Seconds played (<see cref="LaunchReportPhase.Exit"/>).</param>
+/// <param name="InjectionError">
+/// Account-pool launches: why the launcher was not prepared cleanly (e.g. the kiosk's Steam auto-login could not be
+/// reset, or the lease had no session data so the launcher started without credentials); absent when it was.
+/// </param>
 public sealed record LaunchReport(
     Guid SessionId,
     Guid UserId,
@@ -200,7 +204,8 @@ public sealed record LaunchReport(
     AntiCheatCheckResult AntiCheat,
     LaunchReportPhase Phase,
     int? ExitCode = null,
-    int? PlayedSec = null);
+    int? PlayedSec = null,
+    string? InjectionError = null);
 
 /// <summary>
 /// A player's own settings for one game (<see cref="Game.SettingsPaths"/> zipped), stored on the server so they follow

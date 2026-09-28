@@ -264,7 +264,13 @@ export function TournamentsTeaser({ index }: { index: number }): JSX.Element {
     api.tournaments.list().then(
       (list) => {
         if (active) {
-          const order: Record<Tournament['state'], number> = { live: 0, registration: 1, upcoming: 2, finished: 3 };
+          const order: Record<Tournament['state'], number> = {
+            live: 0,
+            registration: 1,
+            upcoming: 2,
+            finished: 3,
+            unknown: 4,
+          };
           setItems(
             [...list]
               .sort((a, b) => order[a.state] - order[b.state] || Date.parse(a.startsAt) - Date.parse(b.startsAt))

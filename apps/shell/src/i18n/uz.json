@@ -162,6 +162,7 @@
     "internal": "Nimadir noto'g'ri ketdi",
     "protocolError": "Aloqa xatosi",
     "versionMismatch": "Mijoz dasturini yangilash kerak",
+    "notImplemented": "Bu funksiya hozircha klub serverida mavjud emas",
     "unknown": "Noma'lum xatolik",
     "network": "Tarmoq xatosi",
     "generic": "Nimadir noto'g'ri ketdi. Qayta urinib ko'ring"
@@ -509,7 +510,8 @@
       "snack": "Gazaklar",
       "service": "Xizmatlar",
       "merch": "Merch",
-      "time": "O'yin vaqti"
+      "time": "O'yin vaqti",
+      "unknown": "Boshqa"
     },
     "orders": "Buyurtmalar",
     "activeOrders": "Faol buyurtmalar",
@@ -522,7 +524,8 @@
       "preparing": "Tayyorlanmoqda",
       "delivering": "Yo'lda",
       "done": "Yetkazildi",
-      "cancelled": "Bekor qilindi"
+      "cancelled": "Bekor qilindi",
+      "unknown": "Noma'lum"
     },
     "statusHint": {
       "pending": "Xodimlar tasdig'ini kutmoqdamiz",
@@ -530,7 +533,8 @@
       "preparing": "Buyurtmangiz tayyorlanmoqda",
       "delivering": "Joyingizga olib kelinmoqda",
       "done": "Yoqimli ishtaha!",
-      "cancelled": "Buyurtma bekor qilindi"
+      "cancelled": "Buyurtma bekor qilindi",
+      "unknown": "Batafsil ma'lumotni xodimlardan so'rang"
     },
     "noOrders": "Hozircha buyurtmalar yo'q",
     "cancel": "Buyurtmani bekor qilish",
@@ -598,7 +602,8 @@
       "refund": "Qaytarish",
       "bonus": "Bonus",
       "purchase": "Xarid",
-      "adjustment": "Tuzatish"
+      "adjustment": "Tuzatish",
+      "unknown": "Boshqa"
     },
     "tariffs": "Tariflar",
     "tariff": "Tarif",
@@ -725,13 +730,15 @@
       "locked": "Bloklangan",
       "maintenance": "Texnik xizmat",
       "booked": "Bron qilingan",
-      "offline": "Oflayn"
+      "offline": "Oflayn",
+      "unknown": "Mavjud emas"
     },
     "bookingStatus": {
       "reserved": "Bron qilingan",
       "confirmed": "Tasdiqlangan",
       "cancelled": "Bekor qilingan",
-      "expired": "Muddati o'tgan"
+      "expired": "Muddati o'tgan",
+      "unknown": "Noma'lum"
     },
     "legend": "Belgilar",
     "slot": "Slot",
@@ -798,7 +805,8 @@
       "upcoming": "Tez kunda",
       "registration": "Ro'yxatga olish",
       "live": "Jonli",
-      "finished": "Yakunlangan"
+      "finished": "Yakunlangan",
+      "unknown": "Noma'lum"
     },
     "viewBracket": "Jadvalni ko'rish",
     "viewLeaderboard": "Yetakchilar jadvali",
@@ -834,7 +842,8 @@
       "guest": "Mehmon",
       "member": "A'zo",
       "vip": "VIP",
-      "admin": "Administrator"
+      "admin": "Administrator",
+      "unknown": "Mehmon"
     },
     "memberSince": "{{date}} dan beri a'zo",
     "lastSeen": "Oxirgi tashrif {{date}}",
@@ -1029,7 +1038,8 @@
       "admin": "Administrator tomonidan tugatildi",
       "idle": "Faolsizlik tufayli tugatildi",
       "agentRestart": "Xizmat qayta ishga tushgani uchun tugatildi",
-      "error": "Xatolik tufayli tugatildi"
+      "error": "Xatolik tufayli tugatildi",
+      "unknown": "Seans tugatildi"
     },
     "endedCharged": "Yechildi {{amount}}",
     "endedRefunded": "Qaytarildi {{amount}}",
@@ -1183,7 +1193,8 @@
     "warning": "Diqqat",
     "error": "Xatolik",
     "liveRegion": "Bildirishnomalar",
-    "closeToast": "Bildirishnomani yopish"
+    "closeToast": "Bildirishnomani yopish",
+    "unknown": "Xabar"
   },
   "admin": {
     "message": "Xodimlardan xabar",

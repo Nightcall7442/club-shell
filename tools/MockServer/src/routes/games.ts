@@ -34,13 +34,14 @@ import {
   str,
   uuid,
   type LeaseRecord,
+  knownValues,
 } from '../db.js';
 import { club } from '../club.js';
 
 const LEASE_TTL_SEC = 14_400;
 const RELEASE_REASONS = Object.values(AccountLeaseReleaseReason);
 const PHASES = Object.values(LaunchReportPhase);
-const LAUNCHERS = Object.values(LauncherType);
+const LAUNCHERS = knownValues(LauncherType);
 
 function withLastPlayed(game: Game, userId: string | null): Game {
   return { ...game, lastPlayedAt: userId ? (db.lastPlayed[userId]?.[game.id] ?? null) : null };

@@ -98,7 +98,13 @@ export interface NotificationsActions {
 export type NotificationsStore = NotificationsState & NotificationsActions;
 
 const MAX_TOASTS = 5;
-const DEFAULT_TTL: Readonly<Record<NotificationLevel, number>> = { info: 6, success: 6, warning: 10, error: 12 };
+const DEFAULT_TTL: Readonly<Record<NotificationLevel, number>> = {
+  info: 6,
+  success: 6,
+  warning: 10,
+  error: 12,
+  unknown: 6,
+};
 
 const initialState: NotificationsState = {
   toasts: [],

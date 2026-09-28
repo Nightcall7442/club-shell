@@ -1,7 +1,8 @@
 /**
  * Clients (cashier + owner): search, the client list with group, loyalty level and money, and a side panel to edit a
- * profile, redeem a promo code and see the latest wallet entries — or to register a new client. Blacklisting is the
- * owner's call: the server answers 403 to a cashier and the panel shows why.
+ * profile, bind a club card, reset the sign-in password, redeem a promo code and see the latest wallet entries — or to
+ * register a new client with a password and card, so they can sign in on a PC. A password the console generates is
+ * shown to the cashier once. Blacklisting is the owner's call: the server answers 403 to a cashier and the panel says.
  */
 import { useCallback, useEffect, useState } from 'react';
 import clsx from 'clsx';
@@ -15,6 +16,25 @@ import { Button, Field, Input, Note, PageHeader, Section, Table, Toggle, inputCl
 type NoteState = { text: string; tone: 'ok' | 'err' } | null;
 
 const nf = new Intl.NumberFormat('ru-RU');
+
+const PASSWORD_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789';
+
+/** A temporary sign-in password: 8 characters without look-alikes (0/o, 1/l/i), easy to read out at the counter. */
+function tempPassword(): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => PASSWORD_CHARS[b % PASSWORD_CHARS.length]).join(
+    '',
+  );
+}
+
+/** A generated password, shown once for the cashier to pass on to the client. */
+function IssuedPassword({ password }: { password: string }): JSX.Element {
+  return (
+    <div role="status" className="flex flex-col gap-1 rounded-md bg-success/10 px-3 py-2 text-sm text-success">
+      <span>{t('Временный пароль — сообщите клиенту, он показывается один раз')}</span>
+      <span className="font-mono text-lg tracking-[0.12em] text-text">{password}</span>
+    </div>
+  );
+}
 
 function yearOf(text: string): number | null {
   const n = Number(text);
@@ -69,15 +89,20 @@ function GroupChoice({
 function ClientPanel({
   client,
   groups,
+  issuedPassword,
   onSaved,
+  onPasswordIssued,
 }: {
   client: Client;
   groups: ClientGroup[];
+  issuedPassword: string | null;
   onSaved: (c: Client) => void;
+  onPasswordIssued: (password: string) => void;
 }): JSX.Element {
   const [name, setName] = useState(client.displayName);
   const [phone, setPhone] = useState(client.phone);
-  const [telegram, setTelegram] = useState(client.telegram);
+  const [card, setCard] = useState(client.cardId ?? '');
+  const [loginNote, setLoginNote] = useState<NoteState>(null);
   const [birth, setBirth] = useState(client.birthYear ? String(client.birthYear) : '');
   const [groupId, setGroupId] = useState(client.groupId);
   const [note, setNote] = useState(client.note);
@@ -100,7 +125,8 @@ function ClientPanel({
   useEffect(() => {
     setName(client.displayName);
     setPhone(client.phone);
-    setTelegram(client.telegram);
+    setCard(client.cardId ?? '');
+    setLoginNote(null);
     setBirth(client.birthYear ? String(client.birthYear) : '');
     setGroupId(client.groupId);
     setNote(client.note);
@@ -120,7 +146,6 @@ function ClientPanel({
       const input: Partial<Client> = {
         displayName: name.trim(),
         phone: phone.trim(),
-        telegram: telegram.trim(),
         birthYear: yearOf(birth),
         groupId,
         note,
@@ -131,6 +156,34 @@ function ClientPanel({
       setResult({ text: t('Сохранено'), tone: 'ok' });
     } catch (e) {
       setResult({ text: describe(e), tone: 'err' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const bindCard = async (): Promise<void> => {
+    setBusy(true);
+    setLoginNote(null);
+    try {
+      const r = await clubApi.bindCard(client.id, card.trim() || null);
+      onSaved(r.client);
+      setLoginNote({ text: r.client.cardId ? t('Карта привязана') : t('Карта отвязана'), tone: 'ok' });
+    } catch (e) {
+      setLoginNote({ text: describe(e), tone: 'err' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resetPassword = async (): Promise<void> => {
+    const password = tempPassword();
+    setBusy(true);
+    setLoginNote(null);
+    try {
+      await clubApi.setClientPassword(client.id, password);
+      onPasswordIssued(password);
+    } catch (e) {
+      setLoginNote({ text: describe(e), tone: 'err' });
     } finally {
       setBusy(false);
     }
@@ -191,9 +244,6 @@ function ClientPanel({
             />
           </Field>
         </div>
-        <Field label={t('Telegram')}>
-          <Input value={telegram} placeholder="@username" onChange={(e) => setTelegram(e.target.value)} />
-        </Field>
         <div className="flex flex-col gap-1.5">
           <span className="label">{t('Группа')}</span>
           <GroupChoice groups={groups} value={groupId} onChange={setGroupId} />
@@ -210,6 +260,23 @@ function ClientPanel({
         <Note note={result} />
         <Button variant="primary" disabled={busy || !name.trim()} onClick={() => void save()}>
           {t('Сохранить')}
+        </Button>
+      </section>
+
+      <section className="flex flex-col gap-3 border-t border-line pt-4">
+        <span className="label">{t('Вход на ПК')}</span>
+        <Field label={t('Номер карты')}>
+          <div className="flex gap-1.5">
+            <Input value={card} className="font-mono" onChange={(e) => setCard(e.target.value)} />
+            <Button disabled={busy || card.trim() === (client.cardId ?? '')} onClick={() => void bindCard()}>
+              {card.trim() ? t('Привязать карту') : t('Отвязать карту')}
+            </Button>
+          </div>
+        </Field>
+        <Note note={loginNote} />
+        {issuedPassword && <IssuedPassword password={issuedPassword} />}
+        <Button disabled={busy} onClick={() => void resetPassword()}>
+          {t('Сбросить пароль')}
         </Button>
       </section>
 
@@ -272,31 +339,35 @@ function NewClientPanel({
   onCancel,
 }: {
   groups: ClientGroup[];
-  onCreated: (c: Client) => void;
+  /** `password` is the generated one to show once; `null` when the cashier typed it. */
+  onCreated: (c: Client, password: string | null) => void;
   onCancel: () => void;
 }): JSX.Element {
   const [name, setName] = useState('');
   const [login, setLogin] = useState('');
+  const [password, setPassword] = useState('');
+  const [card, setCard] = useState('');
   const [phone, setPhone] = useState('');
   const [birth, setBirth] = useState('');
   const [groupId, setGroupId] = useState<string | null>(null);
-  const [telegram, setTelegram] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<NoteState>(null);
 
   const create = async (): Promise<void> => {
     setBusy(true);
     setResult(null);
+    const sent = password || tempPassword();
     try {
       const r = await clubApi.addClient({
         displayName: name.trim(),
         username: login.trim(),
+        password: sent,
+        cardId: card.trim() || null,
         phone: phone.trim() || undefined,
         birthYear: yearOf(birth),
         groupId,
-        telegram: telegram.trim() || undefined,
       });
-      onCreated(r.client);
+      onCreated(r.client, password ? null : sent);
     } catch (e) {
       setResult({ text: describe(e), tone: 'err' });
     } finally {
@@ -319,6 +390,19 @@ function NewClientPanel({
           />
         </Field>
         <div className="grid grid-cols-2 gap-3">
+          <Field label={t('Пароль')} hint={t('Не короче 4 символов. Пусто — выдадим временный')}>
+            <Input
+              type="password"
+              autoComplete="new-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </Field>
+          <Field label={t('Номер карты')}>
+            <Input value={card} className="font-mono" onChange={(e) => setCard(e.target.value)} />
+          </Field>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
           <Field label={t('Телефон')}>
             <Input value={phone} inputMode="tel" onChange={(e) => setPhone(e.target.value)} />
           </Field>
@@ -332,9 +416,6 @@ function NewClientPanel({
             />
           </Field>
         </div>
-        <Field label={t('Telegram')}>
-          <Input value={telegram} placeholder="@username" onChange={(e) => setTelegram(e.target.value)} />
-        </Field>
         <div className="flex flex-col gap-1.5">
           <span className="label">{t('Группа')}</span>
           <GroupChoice groups={groups} value={groupId} onChange={setGroupId} />
@@ -363,6 +444,12 @@ export default function ClientsPage(): JSX.Element {
   const [groups, setGroups] = useState<ClientGroup[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | 'new' | null>(null);
+  // A generated password stays on screen only until the cashier moves to another client.
+  const [issued, setIssued] = useState<{ id: string; password: string } | null>(null);
+  const select = (id: string | 'new' | null): void => {
+    setSelected(id);
+    setIssued(null);
+  };
 
   const load = useCallback(async (query: string) => {
     try {
@@ -402,7 +489,7 @@ export default function ClientsPage(): JSX.Element {
               placeholder={t('Имя, логин или телефон')}
               onChange={(e) => setQ(e.target.value)}
             />
-            <Button variant="primary" onClick={() => setSelected('new')}>
+            <Button variant="primary" onClick={() => select('new')}>
               {t('Новый клиент')}
             </Button>
           </>
@@ -417,7 +504,7 @@ export default function ClientsPage(): JSX.Element {
             rows={items}
             rowKey={(c) => c.id}
             selectedKey={selected}
-            onRowClick={(c) => setSelected(c.id)}
+            onRowClick={(c) => select(c.id)}
             empty={q ? t('Никого не нашли') : t('Клиентов нет')}
             columns={[
               {
@@ -463,14 +550,21 @@ export default function ClientsPage(): JSX.Element {
           {selected === 'new' ? (
             <NewClientPanel
               groups={groups}
-              onCancel={() => setSelected(null)}
-              onCreated={(c) => {
+              onCancel={() => select(null)}
+              onCreated={(c, password) => {
                 setItems((list) => [c, ...list.filter((x) => x.id !== c.id)]);
                 setSelected(c.id);
+                setIssued(password ? { id: c.id, password } : null);
               }}
             />
           ) : client ? (
-            <ClientPanel client={client} groups={groups} onSaved={replace} />
+            <ClientPanel
+              client={client}
+              groups={groups}
+              issuedPassword={issued?.id === client.id ? issued.password : null}
+              onSaved={replace}
+              onPasswordIssued={(password) => setIssued({ id: client.id, password })}
+            />
           ) : (
             <p className="py-10 text-center text-sm text-muted">{t('Выберите клиента')}</p>
           )}

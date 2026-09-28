@@ -72,6 +72,9 @@ public enum ErrorCode
 
     /// <summary>Protocol or application version unsupported; <c>details: { supported: [..], got }</c> (HTTP 426).</summary>
     VersionMismatch,
+
+    /// <summary>Operation is in the contract but this server version does not implement it (HTTP 501); not retryable.</summary>
+    NotImplemented,
 }
 
 /// <summary>Static metadata about <see cref="ErrorCode"/> values: descriptions, HTTP mapping, retry semantics.</summary>
@@ -100,6 +103,7 @@ public static class ErrorCodes
         ErrorCode.Internal => "Internal error",
         ErrorCode.ProtocolError => "Protocol violation",
         ErrorCode.VersionMismatch => "Version unsupported",
+        ErrorCode.NotImplemented => "Not implemented by the server",
         _ => "Unknown error",
     };
 
@@ -126,6 +130,7 @@ public static class ErrorCodes
         ErrorCode.Internal => 500,
         ErrorCode.ProtocolError => 400,
         ErrorCode.VersionMismatch => 426,
+        ErrorCode.NotImplemented => 501,
         _ => 500,
     };
 
@@ -144,6 +149,7 @@ public static class ErrorCodes
         409 => ErrorCode.Conflict,
         426 => ErrorCode.VersionMismatch,
         429 => ErrorCode.RateLimited,
+        501 => ErrorCode.NotImplemented,
         504 => ErrorCode.Timeout,
         >= 500 => ErrorCode.ServerUnavailable,
         _ => ErrorCode.Internal,

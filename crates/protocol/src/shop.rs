@@ -70,6 +70,9 @@ wire_enum! {
         Done = "done",
         /// Cancelled by the user or staff; charged amount refunded.
         Cancelled = "cancelled",
+        /// A value this agent does not know (sent by a newer server). Read-side fallback only: the
+        /// Agent never sends it to the server.
+        Unknown = "unknown",
     }
 }
 
@@ -115,6 +118,9 @@ wire_enum! {
         Merch = "merch",
         /// Time packages sold through the shop.
         Time = "time",
+        /// A value this agent does not know (sent by a newer server). Read-side fallback only: the
+        /// Agent never sends it to the server.
+        Unknown = "unknown",
     }
 }
 
@@ -170,7 +176,9 @@ mod tests {
     fn enum_wire_values() {
         assert_wire(
             ProductCategory::ALL,
-            &["food", "drink", "snack", "service", "merch", "time"],
+            &[
+                "food", "drink", "snack", "service", "merch", "time", "unknown",
+            ],
         );
         assert_wire(
             OrderStatus::ALL,
@@ -181,6 +189,7 @@ mod tests {
                 "delivering",
                 "done",
                 "cancelled",
+                "unknown",
             ],
         );
         assert!(OrderStatus::Preparing.is_active());

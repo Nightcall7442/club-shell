@@ -24,12 +24,19 @@ import { Bracket } from './Bracket';
 import { Leaderboard } from './Leaderboard';
 
 const LEADERBOARD_REFRESH_MS = 30_000;
-const STATE_ORDER: Record<TournamentState, number> = { live: 0, registration: 1, upcoming: 2, finished: 3 };
+const STATE_ORDER: Record<TournamentState, number> = {
+  live: 0,
+  registration: 1,
+  upcoming: 2,
+  finished: 3,
+  unknown: 4,
+};
 const STATE_TONE: Record<TournamentState, BadgeTone> = {
   live: 'danger',
   registration: 'success',
   upcoming: 'primary',
   finished: 'muted',
+  unknown: 'muted',
 };
 
 type DetailTab = 'bracket' | 'leaderboard';

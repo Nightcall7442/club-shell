@@ -80,6 +80,8 @@ export class AdminError extends Error {
     readonly code: string,
     message: string,
     readonly details: Record<string, unknown> | null,
+    /** HTTP status; 0 when no answer came back. */
+    readonly status = 0,
   ) {
     super(message);
     this.name = 'AdminError';
@@ -107,9 +109,51 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
       setToken(null);
       window.dispatchEvent(new Event('admin:signed-out'));
     }
-    throw new AdminError(err?.code ?? 'internal', err?.message ?? res.statusText, err?.details ?? null);
+    throw new AdminError(err?.code ?? 'internal', err?.message ?? res.statusText, err?.details ?? null, res.status);
   }
   return (await res.json()) as T;
+}
+
+/** A UUID for `Idempotency-Key`; `crypto.randomUUID` exists only on https/localhost, a LAN console may be plain http. */
+function newKey(): string {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = ((b[6] ?? 0) & 0x0f) | 0x40;
+  b[8] = ((b[8] ?? 0) & 0x3f) | 0x80;
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+/** Keys of money actions still waiting for a definite answer, by path + body. */
+const pendingKeys = new Map<string, { key: string; at: number }>();
+
+/**
+ * How long a lost answer may be retried under the same key. Later, an identical body (the same top-up, `end` of the
+ * same PC) is a new cashier action: reusing the key would replay the old result and silently skip it.
+ */
+const RETRY_WINDOW_MS = 2 * 60_000;
+
+/**
+ * POST of a money action with an `Idempotency-Key`: one key per cashier action, reused when the cashier repeats the
+ * same action shortly after a lost answer (no response or 5xx), so the server replays the first result instead of
+ * charging twice. A success, a refusal (4xx) or {@link RETRY_WINDOW_MS} ends the action: the next identical request is
+ * a new one.
+ */
+async function postMoney<T>(path: string, payload: unknown): Promise<T> {
+  const body = JSON.stringify(payload);
+  const action = `${path} ${body}`;
+  const now = Date.now();
+  const pending = pendingKeys.get(action);
+  const key = pending && now - pending.at < RETRY_WINDOW_MS ? pending.key : newKey();
+  pendingKeys.set(action, { key, at: now });
+  try {
+    const r = await call<T>(path, { method: 'POST', body, headers: { 'Idempotency-Key': key } });
+    pendingKeys.delete(action);
+    return r;
+  } catch (e) {
+    if (e instanceof AdminError && e.status >= 400 && e.status < 500) pendingKeys.delete(action);
+    throw e;
+  }
 }
 
 const post = <T>(path: string, payload: unknown): Promise<T> =>
@@ -130,10 +174,10 @@ export interface SessionResult {
 export const adminApi = {
   overview: (): Promise<Overview> => call<Overview>('/admin/overview'),
   openSession: (input: { pcId: string; userId: string; tariffId: string; minutes: number }): Promise<SessionResult> =>
-    post<SessionResult>('/admin/sessions', input),
+    postMoney<SessionResult>('/admin/sessions', input),
   extend: (input: { pcId: string; minutes: number; tariffId?: string }): Promise<SessionResult> =>
-    post<SessionResult>('/admin/sessions/extend', input),
-  end: (input: { pcId: string }): Promise<SessionResult> => post<SessionResult>('/admin/sessions/end', input),
+    postMoney<SessionResult>('/admin/sessions/extend', input),
+  end: (input: { pcId: string }): Promise<SessionResult> => postMoney<SessionResult>('/admin/sessions/end', input),
   topUp: (input: {
     userId: string;
     amount: number;
@@ -141,7 +185,7 @@ export const adminApi = {
   }): Promise<{
     balance: Money;
     transaction: Transaction;
-  }> => post('/admin/wallet/topup', input),
+  }> => postMoney('/admin/wallet/topup', input),
   command: (
     pcId: string,
     input: { kind: 'message' | 'lock' | 'unlock' | 'reboot' | 'shutdown'; text?: string },
@@ -282,15 +326,12 @@ export interface ClubSettings {
   rulesText: { ru: string; uz: string; en: string };
   stock: { lowAt: number };
   automation: AutomationRule[];
-  notifications: {
-    telegramBotToken: string;
-    telegramChatId: string;
-    events: Record<ClubEvent, boolean>;
-    bigTopupAt: number;
-  };
+  /** Threshold of the `bigTopup` event, minor units. Telegram fields an older server still sends are ignored. */
+  notifications?: { bigTopupAt: number };
   webhooks: Webhook[];
   control: ControlSettings;
-  apiKey: string;
+  /** Only from an older server; the key is read by the owner from `GET /admin/club/api-key`. */
+  apiKey?: string;
   events: ClubEvent[];
 }
 
@@ -315,7 +356,9 @@ export type AuditAction =
   | 'blacklist'
   | 'stockReceive'
   | 'stockEdit'
-  | 'pcCommand';
+  | 'pcCommand'
+  | 'clientPassword'
+  | 'clientCard';
 
 export interface AuditEntry {
   id: string;
@@ -464,7 +507,8 @@ export interface Client {
   blacklisted: boolean;
   phone: string;
   birthYear: number | null;
-  telegram: string;
+  /** Club card the client signs in with; absent from an older server. */
+  cardId?: string | null;
   spent: number;
   visits: number;
   level: number;
@@ -534,6 +578,8 @@ export const clubApi = {
   login: (pin: string): Promise<{ token: string; staff: StaffMember; shift: Shift | null }> =>
     post('/admin/login', { pin }),
   me: (): Promise<{ staff: StaffMember; shift: Shift | null }> => call('/admin/me'),
+  /** Revokes the staff token on the server; the caller drops it locally. */
+  logout: (): Promise<unknown> => post('/admin/logout', {}),
 
   staff: (): Promise<{ items: StaffMember[] }> => call('/admin/staff'),
   addStaff: (input: { name: string; role: StaffRole; pin: string }): Promise<{ id: string }> =>
@@ -544,12 +590,12 @@ export const clubApi = {
   shift: (): Promise<{ shift: Shift | null; x: ShiftTotals | null; history: Shift[] }> => call('/admin/shift'),
   openShift: (openingCash: number): Promise<{ shift: Shift }> => post('/admin/shift/open', { openingCash }),
   closeShift: (closingCash: number): Promise<{ shift: Shift; expectedCash: number }> =>
-    post('/admin/shift/close', { closingCash }),
+    postMoney('/admin/shift/close', { closingCash }),
 
   settings: (): Promise<ClubSettings> => call('/admin/club'),
   saveSettings: (partial: Partial<ClubSettings>): Promise<unknown> => patch('/admin/club', partial),
+  apiKey: (): Promise<{ apiKey: string }> => call('/admin/club/api-key'),
   rotateApiKey: (): Promise<{ apiKey: string }> => post('/admin/club/api-key', {}),
-  testNotification: (): Promise<unknown> => post('/admin/notifications/test', {}),
 
   tariffs: (): Promise<{ items: Tariff[] }> => call('/admin/tariffs'),
   addTariff: (t: TariffInput): Promise<{ tariff: Tariff }> => post('/admin/tariffs', t),
@@ -565,13 +611,18 @@ export const clubApi = {
     phone?: string;
     birthYear?: number | null;
     groupId?: string | null;
-    telegram?: string;
+    password?: string;
+    cardId?: string | null;
   }): Promise<{ client: Client }> => post('/admin/clients', input),
+  setClientPassword: (id: string, password: string): Promise<unknown> =>
+    post(`/admin/clients/${id}/password`, { password }),
+  bindCard: (id: string, cardId: string | null): Promise<{ client: Client }> =>
+    post(`/admin/clients/${id}/card`, { cardId }),
   updateClient: (id: string, input: Partial<Client>): Promise<{ client: Client }> =>
     patch(`/admin/clients/${id}`, input),
   clientTransactions: (id: string): Promise<{ items: Transaction[] }> => call(`/admin/clients/${id}/transactions`),
   redeemPromo: (userId: string, code: string): Promise<{ balance: Money }> =>
-    post('/admin/promo/redeem', { userId, code }),
+    postMoney('/admin/promo/redeem', { userId, code }),
 
   pcs: (): Promise<{ items: HallPc[]; zones: Zone[] }> => call('/admin/pcs'),
   updatePc: (
@@ -601,7 +652,7 @@ export const clubApi = {
     id: string,
     input: Partial<{ title: string; price: number; inStock: boolean; stockQty: number | null }>,
   ): Promise<unknown> => patch(`/admin/products/${id}`, input),
-  receiveProduct: (id: string, qty: number): Promise<unknown> => post(`/admin/products/${id}/receive`, { qty }),
+  receiveProduct: (id: string, qty: number): Promise<unknown> => postMoney(`/admin/products/${id}/receive`, { qty }),
 
   games: (): Promise<{ items: AdminGame[]; order: string[] }> => call('/admin/games'),
   saveGameSettingsPaths: (id: string, settingsPaths: string[]): Promise<{ settingsPaths: string[] }> =>

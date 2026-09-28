@@ -1,8 +1,9 @@
 /**
  * Club owner / cashier console API (`/api/v1/admin/*`, next to the counter routes in `admin.ts`): staff sign-in by
  * PIN with roles, shifts with X / Z reports, tariffs and pricing, client groups and profiles, promo codes, the hall map
- * editor, stock, the game catalogue, branding and player features, banners, automation rules, notifications,
- * webhooks and reports. Owner-only sections are guarded by {@link requireStaff}.
+ * editor, stock, the game catalogue, branding and player features, banners, automation rules, webhooks and reports.
+ * Owner-only sections are guarded by {@link requireStaff}. Telegram is banned in the product: no route reads or
+ * returns a Telegram field.
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { Weekday, type ShellFeatures, type Tariff, type TariffTimeWindow } from '@clubshell/contracts';
@@ -20,6 +21,7 @@ import {
   findPc,
   findTariff,
   findUser,
+  idempotent,
   int,
   isObject,
   markDirty,
@@ -49,7 +51,6 @@ import {
   totalsSince,
   visitsOf,
   type AutomationRule,
-  type ClubEvent,
   type DeviceKind,
   type StaffRecord,
   type StaffRole,
@@ -61,10 +62,14 @@ import { DEFAULT_HEALTH, diagnose, health, updateTicket, type TicketStatus } fro
 
 const LEGACY_TOKEN = process.env['MOCK_ADMIN_TOKEN'] ?? 'admin-dev-token';
 
+function bearer(req: FastifyRequest): string {
+  const authz = req.headers.authorization;
+  return typeof authz === 'string' && authz.startsWith('Bearer ') ? authz.slice(7).trim() : '';
+}
+
 /** The signed-in staff member; the legacy static token acts as the owner. `role` limits the route to owners. */
 export function requireStaff(req: FastifyRequest, role: StaffRole | 'any' = 'any'): StaffRecord {
-  const authz = req.headers.authorization;
-  const token = typeof authz === 'string' && authz.startsWith('Bearer ') ? authz.slice(7).trim() : '';
+  const token = bearer(req);
   const c = club();
   let staff: StaffRecord | undefined;
   // The legacy static token and the club's API key (integrations, `Authorization: Bearer ck_…`) act as the owner.
@@ -88,12 +93,32 @@ function clientView(u: UserRecord): Record<string, unknown> {
     role: u.role,
     balance: u.balance,
     bonus: u.bonus,
-    ...p,
+    groupId: p.groupId,
+    note: p.note,
+    blacklisted: p.blacklisted,
+    phone: p.phone,
+    birthYear: p.birthYear,
+    cardId: u.cardId,
     spent: spentOf(u.id),
     visits: visitsOf(u.id),
     level: level.level,
     levelName: level.name,
   };
+}
+
+/** A client's sign-in password as the cashier set it: 4-64 characters. */
+function passwordOf(b: Record<string, unknown>): string {
+  const password = str(b, 'password', 64);
+  if (password.length < 4) throw errors.validation('password', 'min');
+  return password;
+}
+
+/** The card number to bind to `userId` (`null` unbinds); one card belongs to one client. */
+function cardOf(b: Record<string, unknown>, userId: string | null): string | null {
+  const card = optStr(b, 'cardId', 64)?.trim() || null;
+  if (card && db.users.some((u) => u.id !== userId && u.cardId?.toLowerCase() === card.toLowerCase()))
+    throw errors.validation('cardId', 'taken');
+  return card;
 }
 
 function money(n: number): string {
@@ -144,6 +169,17 @@ export function clubRoutes(app: FastifyInstance): void {
     c.staffTokens[token] = staff.id;
     markDirty();
     return { token, staff: { id: staff.id, name: staff.name, role: staff.role }, shift: openShift() };
+  });
+
+  /** Signs the staff member out: the token stops working at once. Always 200, so a repeated sign-out is harmless. */
+  app.post('/admin/logout', async (req) => {
+    const c = club();
+    const token = bearer(req);
+    if (token && c.staffTokens[token]) {
+      delete c.staffTokens[token];
+      markDirty();
+    }
+    return { ok: true };
   });
 
   app.get('/admin/me', async (req) => {
@@ -221,33 +257,35 @@ export function clubRoutes(app: FastifyInstance): void {
     return { shift };
   });
 
-  app.post('/admin/shift/close', async (req) => {
+  app.post('/admin/shift/close', async (req, reply) => {
     const me = requireStaff(req);
-    const shift = openShift();
-    if (!shift) throw errors.conflict('noShift');
-    shift.closedAt = now();
-    shift.closingCash = int(body(req), 'closingCash', 0, 10_000_000_000);
-    shift.totals = totalsSince(shift.openedAt, shift.closedAt);
-    markDirty();
-    const expected = shift.openingCash + shift.totals.topUpCash;
-    // The shift is already marked closed, so `record` sees no open shift: tag the entry with it explicitly.
-    const entry = record(me, 'shiftClose', {
-      amount: shift.closingCash,
-      detail: shift.staffName,
-      meta: { expected, counted: shift.closingCash, diff: shift.closingCash - expected },
+    return idempotent(req, reply, async () => {
+      const shift = openShift();
+      if (!shift) throw errors.conflict('noShift');
+      shift.closedAt = now();
+      shift.closingCash = int(body(req), 'closingCash', 0, 10_000_000_000);
+      shift.totals = totalsSince(shift.openedAt, shift.closedAt);
+      markDirty();
+      const expected = shift.openingCash + shift.totals.topUpCash;
+      // The shift is already marked closed, so `record` sees no open shift: tag the entry with it explicitly.
+      const entry = record(me, 'shiftClose', {
+        amount: shift.closingCash,
+        detail: shift.staffName,
+        meta: { expected, counted: shift.closingCash, diff: shift.closingCash - expected },
+      });
+      entry.shiftId = shift.id;
+      emit(
+        'shiftClosed',
+        `${shift.staffName}: сеансы ${money(shift.totals.sessions)}, магазин ${money(shift.totals.shop)}, ` +
+          `касса ${money(shift.closingCash)} (ожидалось ${money(expected)})`,
+        { shiftId: shift.id },
+      );
+      return { status: 200, body: { shift, expectedCash: expected } };
     });
-    entry.shiftId = shift.id;
-    emit(
-      'shiftClosed',
-      `${shift.staffName}: сеансы ${money(shift.totals.sessions)}, магазин ${money(shift.totals.shop)}, ` +
-        `касса ${money(shift.closingCash)} (ожидалось ${money(expected)})`,
-      { shiftId: shift.id },
-    );
-    return { shift, expectedCash: expected };
   });
 
   // ------------------------------------------------------------------------------------------------ settings doc
-  /** Everything the owner edits on the "Клуб" pages, minus secrets that have their own routes. */
+  /** Everything the owner edits on the "Клуб" pages, minus secrets: the API key has its own owner-only route. */
   app.get('/admin/club', async (req) => {
     requireStaff(req);
     const c = club();
@@ -267,10 +305,9 @@ export function clubRoutes(app: FastifyInstance): void {
       rulesText: c.rulesText,
       stock: c.stock,
       automation: c.automation,
-      notifications: { ...c.notifications, telegramBotToken: c.notifications.telegramBotToken ? '••••' : '' },
+      notifications: { bigTopupAt: c.notifications.bigTopupAt },
       webhooks: c.webhooks,
       control: c.control,
-      apiKey: c.apiKey,
       events: CLUB_EVENTS,
     };
   });
@@ -323,15 +360,9 @@ export function clubRoutes(app: FastifyInstance): void {
       }));
     }
     if ('notifications' in b) {
+      // Only the big top-up threshold; Telegram fields an older console still sends are ignored.
       const n = obj(b, 'notifications');
-      const token = typeof n['telegramBotToken'] === 'string' ? n['telegramBotToken'] : '';
       c.notifications = {
-        telegramBotToken: token === '••••' ? c.notifications.telegramBotToken : token,
-        telegramChatId: typeof n['telegramChatId'] === 'string' ? n['telegramChatId'] : '',
-        events: {
-          ...c.notifications.events,
-          ...(isObject(n['events']) ? (n['events'] as Record<ClubEvent, boolean>) : {}),
-        },
         bigTopupAt: typeof n['bigTopupAt'] === 'number' ? n['bigTopupAt'] : c.notifications.bigTopupAt,
       };
     }
@@ -340,17 +371,17 @@ export function clubRoutes(app: FastifyInstance): void {
     return { ok: true };
   });
 
+  /** The club API key acts as an owner token, so only the owner reads it (a cashier gets 403). */
+  app.get('/admin/club/api-key', async (req) => {
+    requireStaff(req, 'owner');
+    return { apiKey: club().apiKey };
+  });
+
   app.post('/admin/club/api-key', async (req) => {
     requireStaff(req, 'owner');
     club().apiKey = `ck_${uuid().replace(/-/g, '')}`;
     markDirty();
     return { apiKey: club().apiKey };
-  });
-
-  app.post('/admin/notifications/test', async (req) => {
-    requireStaff(req, 'owner');
-    emit('ruleFired', 'Тестовое уведомление ClubShell', { test: true });
-    return { ok: true };
   });
 
   // ------------------------------------------------------------------------------------------------ tariffs
@@ -412,11 +443,15 @@ export function clubRoutes(app: FastifyInstance): void {
     return { items };
   });
 
+  /** Registers a client with the password (the console generates a temporary one) and card they sign in with. */
   app.post('/admin/clients', async (req) => {
     requireStaff(req);
     const b = body(req);
     const username = str(b, 'username', 32).toLowerCase();
     if (db.users.some((u) => u.username.toLowerCase() === username)) throw errors.validation('username', 'taken');
+    // No password sent: nobody knows one until the cashier resets it.
+    const password = b['password'] === undefined || b['password'] === null ? uuid() : passwordOf(b);
+    const cardId = cardOf(b, null);
     const template = db.users.find((u) => u.role === 'member') as UserRecord;
     const user: UserRecord = {
       ...template,
@@ -426,9 +461,9 @@ export function clubRoutes(app: FastifyInstance): void {
       role: 'member',
       balance: uzs(0),
       bonus: uzs(0),
-      password: optStr(b, 'password', 64) ?? 'demo',
+      password,
       pin: null,
-      cardId: null,
+      cardId,
       loginToken: null,
       avatarUrl: null,
       createdAt: now(),
@@ -442,7 +477,6 @@ export function clubRoutes(app: FastifyInstance): void {
       blacklisted: false,
       phone: optStr(b, 'phone', 32) ?? '',
       birthYear: optInt(b, 'birthYear', 1900, 2100),
-      telegram: optStr(b, 'telegram', 64) ?? '',
     };
     markDirty();
     return { client: clientView(user) };
@@ -459,7 +493,6 @@ export function clubRoutes(app: FastifyInstance): void {
     if ('groupId' in b) p.groupId = optStr(b, 'groupId', 64);
     if ('note' in b) p.note = optStr(b, 'note', 2000) ?? '';
     if ('phone' in b) p.phone = optStr(b, 'phone', 32) ?? '';
-    if ('telegram' in b) p.telegram = optStr(b, 'telegram', 64) ?? '';
     if ('birthYear' in b) p.birthYear = optInt(b, 'birthYear', 1900, 2100);
     if ('blacklisted' in b) {
       if (me.role !== 'owner') throw errors.forbidden('ownerOnly');
@@ -487,6 +520,32 @@ export function clubRoutes(app: FastifyInstance): void {
     return { client: clientView(user) };
   });
 
+  /** Sets a new sign-in password for a client (the console generates a temporary one and shows it once). */
+  app.post<{ Params: { id: string } }>('/admin/clients/:id/password', async (req) => {
+    const me = requireStaff(req);
+    const user = findUser(req.params.id);
+    if (!user || user.transient) throw errors.notFound('user');
+    user.password = passwordOf(body(req));
+    markDirty();
+    record(me, 'clientPassword', { userId: user.id, detail: user.displayName });
+    return { ok: true };
+  });
+
+  /** Binds a club card to a client (`cardId: null` unbinds it). */
+  app.post<{ Params: { id: string } }>('/admin/clients/:id/card', async (req) => {
+    const me = requireStaff(req);
+    const user = findUser(req.params.id);
+    if (!user || user.transient) throw errors.notFound('user');
+    user.cardId = cardOf(body(req), user.id);
+    markDirty();
+    record(me, 'clientCard', {
+      userId: user.id,
+      detail: `${user.displayName} · ${user.cardId ?? '—'}`,
+      meta: { cardId: user.cardId },
+    });
+    return { client: clientView(user) };
+  });
+
   app.get<{ Params: { id: string } }>('/admin/clients/:id/transactions', async (req) => {
     requireStaff(req);
     return { items: db.transactions.filter((t) => t.userId === req.params.id).slice(0, 100) };
@@ -494,28 +553,30 @@ export function clubRoutes(app: FastifyInstance): void {
 
   // ------------------------------------------------------------------------------------------------ promo codes
   /** Redeems a promo code for a client at the counter (bonus credit). */
-  app.post('/admin/promo/redeem', async (req) => {
+  app.post('/admin/promo/redeem', async (req, reply) => {
     const me = requireStaff(req);
-    const b = body(req);
-    const user = findUser(str(b, 'userId', 64));
-    if (!user) throw errors.notFound('user');
-    const code = club().promoCodes.find((p) => p.code.toUpperCase() === str(b, 'code', 32).toUpperCase());
-    if (!code) throw errors.notFound('promo');
-    if (code.expiresAt && code.expiresAt < now()) throw errors.validation('code', 'expired');
-    if (code.usesLeft !== null && code.usesLeft <= 0) throw errors.validation('code', 'exhausted');
-    if (code.kind !== 'bonus') throw errors.validation('code', 'discountAtCheckout');
-    applyTransaction(user, 'bonus', uzs(code.value), `Промокод ${code.code}`, null);
-    code.used += 1;
-    if (code.usesLeft !== null) code.usesLeft -= 1;
-    markDirty();
-    pushToUser(user.id, 'walletUpdated', balanceOf(user));
-    record(me, 'promoRedeem', {
-      userId: user.id,
-      amount: code.value,
-      detail: `${user.displayName} · ${code.code}`,
-      meta: { code: code.code },
+    return idempotent(req, reply, async () => {
+      const b = body(req);
+      const user = findUser(str(b, 'userId', 64));
+      if (!user) throw errors.notFound('user');
+      const code = club().promoCodes.find((p) => p.code.toUpperCase() === str(b, 'code', 32).toUpperCase());
+      if (!code) throw errors.notFound('promo');
+      if (code.expiresAt && code.expiresAt < now()) throw errors.validation('code', 'expired');
+      if (code.usesLeft !== null && code.usesLeft <= 0) throw errors.validation('code', 'exhausted');
+      if (code.kind !== 'bonus') throw errors.validation('code', 'discountAtCheckout');
+      applyTransaction(user, 'bonus', uzs(code.value), `Промокод ${code.code}`, null);
+      code.used += 1;
+      if (code.usesLeft !== null) code.usesLeft -= 1;
+      markDirty();
+      pushToUser(user.id, 'walletUpdated', balanceOf(user));
+      record(me, 'promoRedeem', {
+        userId: user.id,
+        amount: code.value,
+        detail: `${user.displayName} · ${code.code}`,
+        meta: { code: code.code },
+      });
+      return { status: 200, body: { balance: user.balance } };
     });
-    return { balance: user.balance };
   });
 
   // ------------------------------------------------------------------------------------------------ hall map
@@ -621,16 +682,19 @@ export function clubRoutes(app: FastifyInstance): void {
   });
 
   /** Goods received: adds to the tracked quantity. */
-  app.post<{ Params: { id: string } }>('/admin/products/:id/receive', async (req) => {
+  app.post<{ Params: { id: string } }>('/admin/products/:id/receive', async (req, reply) => {
     const me = requireStaff(req);
-    const p = db.products.find((x) => x.id === req.params.id);
-    if (!p) throw errors.notFound('product');
-    const qty = int(body(req), 'qty', 1, 100_000);
-    p.stockQty = (p.stockQty ?? 0) + qty;
-    p.inStock = true;
-    markDirty();
-    record(me, 'stockReceive', { detail: `${p.title} +${qty}`, meta: { productId: p.id, qty } });
-    return { product: p };
+    return idempotent(req, reply, async () => {
+      const p = db.products.find((x) => x.id === req.params.id);
+      if (!p) throw errors.notFound('product');
+      const qty = int(body(req), 'qty', 1, 100_000);
+      p.stockQty = (p.stockQty ?? 0) + qty;
+      p.inStock = true;
+      markDirty();
+      record(me, 'stockReceive', { detail: `${p.title} +${qty}`, meta: { productId: p.id, qty } });
+      // A copy: a replay answers with the stock right after this delivery, not the live record.
+      return { status: 200, body: { product: { ...p } } };
+    });
   });
 
   // ------------------------------------------------------------------------------------------------ games

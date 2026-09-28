@@ -800,6 +800,7 @@ public sealed class UserDomainHandlers : IIpcHandlerGroup
     private async Task<ShopOrdersResponse> OrdersAsync(IpcContext context, ShopOrdersRequest? request, CancellationToken cancellationToken)
     {
         User user = context.RequireUser();
+        RequireFeature(_shellSettings.Features.Shop, "features.shop");
         RequireOnline();
         PagedResult<Order> page = await _server.GetOrdersAsync(user.Id, request?.Page, request?.PageSize, request?.ActiveOnly, cancellationToken).ConfigureAwait(false);
         return new ShopOrdersResponse(page.Items, page.Total);

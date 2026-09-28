@@ -1,9 +1,9 @@
 using System.ComponentModel;
-using System.Globalization;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ClubShell.Contracts.Commands;
 using ClubShell.Core.Abstractions;
 using ClubShell.Core.Configuration;
 using ClubShell.Core.Security;
@@ -17,17 +17,23 @@ using Microsoft.Win32;
 namespace ClubShell.Agent.Storage;
 
 /// <summary>
-/// Mounts the games storage described by <c>storage.gamesShare</c> (ARCHITECTURE.md §6.1 step 8): an SMB share
-/// mapped to <c>driveLetter</c> for the Agent (session 0) and, whenever a user is logged on to the console, inside
-/// that user's logon session too (drive letters are per logon session); or an iSCSI target logged in through the
-/// Microsoft initiator and waited for as a volume. Mounting is retried with exponential backoff, verified with a
-/// read test every 30 s and redone on network changes. Credentials come DPAPI-protected from
-/// <c>credentialsRef</c> (<c>{ "username": ..., "password": ... }</c>, also used as CHAP for iSCSI).
+/// Mounts the games SMB share described by <c>storage.gamesShare</c> (ARCHITECTURE.md §6.1 step 8) at
+/// <c>driveLetter</c> for the Agent (session 0) and, whenever a user is logged on to the console, inside that user's
+/// logon session too (drive letters are per logon session). Mounting is retried with exponential backoff; a healthy
+/// mapping is only verified (still readable) every 30 s and on network changes, never redone. Settings changes
+/// (<c>agent.json</c>, server config) are followed: enabling starts mounting, and disabling or changing
+/// <c>uncPath</c> / <c>driveLetter</c> / <c>credentialsRef</c> first unmaps what the previous settings mapped.
+/// Stopping the Agent (restart, update) leaves the mapping alone, so a running game keeps its files. Credentials
+/// come DPAPI-protected from <c>credentialsRef</c> (<c>{ "username": ..., "password": ... }</c>).
+/// <para>
+/// The Agent never mounts iSCSI: a games library over iSCSI belongs to ClubDisklessHelper, which marks the disk
+/// read-only before it goes online. A configured <c>storage.gamesShare.iscsi</c> makes this mounter mount nothing
+/// (fail closed) and log an error.
+/// </para>
 /// <para>
 /// When ClubDisklessHelper is installed (docs/DISKLESS.md) the helper owns the games library volume and this
-/// mounter stands down completely: it never maps, logs in, marks read-only or logs out anything, even when
-/// <c>storage.gamesShare</c> is also configured — two owners of one drive letter would fight every 30 s, and a
-/// logout on Agent shutdown would pull the library from under a running game.
+/// mounter stands down completely: it never maps or unmaps anything, even when <c>storage.gamesShare</c> is also
+/// configured — two owners of one drive letter would fight every 30 s.
 /// </para>
 /// </summary>
 [SupportedOSPlatform("windows")]
@@ -37,14 +43,12 @@ public sealed class GamesShareMounter : IHostedService, IDisposable
     private static readonly TimeSpan VerifyInterval = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan MinBackoff = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan MaxBackoff = TimeSpan.FromMinutes(2);
-    private static readonly TimeSpan VolumeTimeout = TimeSpan.FromSeconds(60);
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
 
     /// <summary>Windows service name of ClubDisklessHelper.</summary>
     public const string DisklessHelperServiceName = "ClubDisklessHelper";
 
     private readonly NetworkShare _share;
-    private readonly IscsiInitiator _iscsi;
     private readonly NetworkProbe _network;
     private readonly ITokenProtector _protector;
     private readonly IOptionsMonitor<AgentSettings> _settings;
@@ -52,25 +56,25 @@ public sealed class GamesShareMounter : IHostedService, IDisposable
     private readonly ILogger<GamesShareMounter> _logger;
     private readonly Func<bool> _disklessHelperInstalled;
     private readonly SemaphoreSlim _wake = new(0, 1);
-    private readonly SemaphoreSlim _mountLock = new(1, 1);
     private CancellationTokenSource? _cts;
     private Task? _loop;
+    private IDisposable? _onChange;
+    private volatile ShareConfig? _applied;
+    private ShareCredentials? _credentials;
     private volatile bool _mounted;
     private bool _disposed;
 
     /// <summary>Creates the mounter.</summary>
     /// <param name="disklessHelperInstalled">Probe for ClubDisklessHelper; defaults to checking its service key.</param>
-    public GamesShareMounter(NetworkShare share, IscsiInitiator iscsi, NetworkProbe network, ITokenProtector protector, IOptionsMonitor<AgentSettings> settings, IClock clock, ILogger<GamesShareMounter> logger, Func<bool>? disklessHelperInstalled = null)
+    public GamesShareMounter(NetworkShare share, NetworkProbe network, ITokenProtector protector, IOptionsMonitor<AgentSettings> settings, IClock clock, ILogger<GamesShareMounter> logger, Func<bool>? disklessHelperInstalled = null)
     {
         ArgumentNullException.ThrowIfNull(share);
-        ArgumentNullException.ThrowIfNull(iscsi);
         ArgumentNullException.ThrowIfNull(network);
         ArgumentNullException.ThrowIfNull(protector);
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(logger);
         _share = share;
-        _iscsi = iscsi;
         _network = network;
         _protector = protector;
         _settings = settings;
@@ -107,7 +111,7 @@ public sealed class GamesShareMounter : IHostedService, IDisposable
             if (IsEnabled)
             {
                 _logger.LogWarning(
-                    "storage.gamesShare is enabled, but {Service} is installed and owns the games library volume; the Agent will not map, log in or log out anything. Set storage.gamesShare.enabled = false",
+                    "storage.gamesShare is enabled, but {Service} is installed and owns the games library volume; the Agent will not map or unmap anything. Set storage.gamesShare.enabled = false",
                     DisklessHelperServiceName);
             }
             else
@@ -118,22 +122,23 @@ public sealed class GamesShareMounter : IHostedService, IDisposable
             return Task.CompletedTask;
         }
 
-        if (!IsEnabled)
-        {
-            _logger.LogInformation("Games share disabled (storage.gamesShare.enabled = false)");
-            return Task.CompletedTask;
-        }
-
+        // The loop always runs (it only waits while nothing is to be mounted), so enabling from the server works.
+        var initial = ShareConfig.From(_settings.CurrentValue.Storage.GamesShare);
+        LogConfig(initial, _settings.CurrentValue.Storage.GamesShare);
+        _applied = initial;
+        _onChange = _settings.OnChange((settings, _) => OnSettingsChanged(settings));
         _network.Changed += OnNetworkChanged;
         _cts = new CancellationTokenSource();
         _loop = RunAsync(_cts.Token);
         return Task.CompletedTask;
     }
 
-    /// <inheritdoc />
+    /// <summary>Stops the loop. The mapping is left in place: an Agent restart or update must not pull the library from under a running game.</summary>
     public async Task StopAsync(CancellationToken cancellationToken)
     {
         _network.Changed -= OnNetworkChanged;
+        _onChange?.Dispose();
+        _onChange = null;
         if (_cts is { } cts)
         {
             await cts.CancelAsync().ConfigureAwait(false);
@@ -150,47 +155,24 @@ public sealed class GamesShareMounter : IHostedService, IDisposable
                 // Loop cancelled or host stop timed out.
             }
         }
-
-        await UnmountAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>One mount attempt (SMB map or iSCSI login + volume wait) followed by a read test; updates <see cref="IsMounted"/>.</summary>
-    public async Task<bool> MountAsync(CancellationToken cancellationToken)
-    {
-        await _mountLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            var config = _settings.CurrentValue.Storage.GamesShare;
-            var letter = DriveLetter(config);
-            var root = DriveRoot(letter);
-            var credentials = await LoadCredentialsAsync(config, cancellationToken).ConfigureAwait(false);
-
-            var ok = config.Iscsi is { } iscsi
-                ? await MountIscsiAsync(iscsi, letter, credentials, cancellationToken).ConfigureAwait(false)
-                : MountSmb(config, letter, credentials);
-
-            if (ok && !NetworkShare.TestReadAccess(root))
-            {
-                _logger.LogWarning("Games storage {Root} is mapped but not readable", root);
-                ok = false;
-            }
-
-            if (ok && config.Iscsi is null)
-            {
-                MapForConsoleSession(config, letter, credentials);
-            }
-
-            SetMounted(ok, root);
-            return ok;
-        }
-        finally
-        {
-            _mountLock.Release();
-        }
     }
 
     /// <summary>Asks the background loop to re-verify / re-map immediately.</summary>
     public void RequestRemount() => Signal();
+
+    /// <summary>Games library state for the heartbeat (<c>gamesVolume</c>). The Agent does not see ClubDisklessHelper's mount, so <c>mounted</c> is unknown then.</summary>
+    public HeartbeatGamesVolume VolumeState()
+    {
+        if (OwnedByDisklessHelper)
+        {
+            return new HeartbeatGamesVolume(GamesVolumeOwner.DisklessHelper, null, null, null);
+        }
+
+        var config = _settings.CurrentValue.Storage.GamesShare;
+        return config.Enabled
+            ? new HeartbeatGamesVolume(GamesVolumeOwner.Agent, _mounted, DriveLetter(config).ToString(), ChangedAt)
+            : new HeartbeatGamesVolume(GamesVolumeOwner.None, false, null, null);
+    }
 
     /// <inheritdoc />
     public void Dispose()
@@ -202,25 +184,10 @@ public sealed class GamesShareMounter : IHostedService, IDisposable
 
         _disposed = true;
         _network.Changed -= OnNetworkChanged;
+        _onChange?.Dispose();
         _cts?.Dispose();
         _wake.Dispose();
-        _mountLock.Dispose();
         GC.SuppressFinalize(this);
-    }
-
-    /// <summary>Splits <c>host[:port]</c>; IPv6 literals without brackets are treated as host only.</summary>
-    public static (string Host, int Port) ParsePortal(string portal)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(portal);
-        var text = portal.Trim();
-        var colon = text.LastIndexOf(':');
-        if (colon > 0 && colon < text.Length - 1 && text.IndexOf(':', StringComparison.Ordinal) == colon
-            && int.TryParse(text.AsSpan(colon + 1), NumberStyles.None, CultureInfo.InvariantCulture, out var port) && port > 0)
-        {
-            return (text[..colon], port);
-        }
-
-        return (text, IscsiInitiator.DefaultPort);
     }
 
     private static JsonSerializerOptions CreateJsonOptions()
@@ -250,40 +217,78 @@ public sealed class GamesShareMounter : IHostedService, IDisposable
         return delay > MaxBackoff ? MaxBackoff : delay;
     }
 
+    private void LogConfig(ShareConfig config, GamesShareSettings settings)
+    {
+        if (config.Mounts)
+        {
+            _logger.LogInformation("Games share {Unc} -> {Letter}:", config.UncPath, config.Letter);
+        }
+        else if (config.Enabled)
+        {
+            _logger.LogError(
+                "storage.gamesShare.iscsi is set ({Target}), but the Agent does not mount iSCSI: the games library over iSCSI is handled by {Service} (docs/DISKLESS.md). Nothing is mounted; install {Service} or set storage.gamesShare.iscsi = null for an SMB share",
+                settings.Iscsi?.TargetIqn,
+                DisklessHelperServiceName,
+                DisklessHelperServiceName);
+        }
+        else
+        {
+            _logger.LogInformation("Games share disabled (storage.gamesShare.enabled = false)");
+        }
+    }
+
     private async Task RunAsync(CancellationToken cancellationToken)
     {
         var attempt = 0;
-        var retries = Math.Max(1, _settings.CurrentValue.Storage.GamesShare.MountRetries);
         while (!cancellationToken.IsCancellationRequested)
         {
-            bool ok;
-            try
+            var settings = _settings.CurrentValue.Storage.GamesShare;
+            var config = ShareConfig.From(settings);
+            if (_applied is { } previous && previous != config)
             {
-                ok = await MountAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Games storage mount attempt failed");
-                ok = false;
+                // Unmap by the old snapshot: the new settings no longer say what was mapped.
+                if (previous.Mounts)
+                {
+                    Unmap(previous);
+                }
+
+                _credentials = null;
+                attempt = 0;
+                LogConfig(config, settings);
             }
 
-            TimeSpan wait;
-            if (ok)
+            _applied = config;
+            var wait = Timeout.InfiniteTimeSpan;
+            if (config.Mounts)
             {
-                attempt = 0;
-                wait = VerifyInterval;
-            }
-            else
-            {
-                attempt++;
-                wait = Backoff(attempt);
-                if (attempt == retries)
+                bool ok;
+                try
                 {
-                    _logger.LogError("Games storage could not be mounted after {Attempts} attempts; continuing with backoff up to {Max}", attempt, MaxBackoff);
+                    ok = await MountAsync(config, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Games storage mount attempt failed");
+                    ok = false;
+                }
+
+                if (ok)
+                {
+                    attempt = 0;
+                    wait = VerifyInterval;
+                }
+                else
+                {
+                    attempt++;
+                    wait = Backoff(attempt);
+                    if (attempt == Math.Max(1, settings.MountRetries))
+                    {
+                        _logger.LogError("Games storage could not be mounted after {Attempts} attempts; continuing with backoff up to {Max}", attempt, MaxBackoff);
+                    }
                 }
             }
 
@@ -298,43 +303,61 @@ public sealed class GamesShareMounter : IHostedService, IDisposable
         }
     }
 
-    private bool MountSmb(GamesShareSettings config, char letter, ShareCredentials? credentials)
+    /// <summary>One mount attempt followed by a read test; a mapping made earlier that is still readable is only verified.</summary>
+    private async Task<bool> MountAsync(ShareConfig config, CancellationToken cancellationToken)
+    {
+        var root = DriveRoot(config.Letter);
+        var ok = _mounted && NetworkShare.TestReadAccess(root);
+        if (!ok)
+        {
+            _credentials = await LoadCredentialsAsync(config.CredentialsRef, cancellationToken).ConfigureAwait(false);
+            ok = MountSmb(config);
+            if (ok && !NetworkShare.TestReadAccess(root))
+            {
+                _logger.LogWarning("Games storage {Root} is mapped but not readable", root);
+                ok = false;
+            }
+        }
+
+        if (ok)
+        {
+            MapForConsoleSession(config);
+        }
+
+        SetMounted(ok, root);
+        return ok;
+    }
+
+    private bool MountSmb(ShareConfig config)
     {
         try
         {
-            _share.Map(letter, config.UncPath, credentials?.Username, credentials?.Password);
+            _share.Map(config.Letter, config.UncPath, _credentials?.Username, _credentials?.Password);
             return true;
         }
         catch (Exception ex) when (ex is Win32Exception or ArgumentException)
         {
-            _logger.LogWarning(ex, "Mapping {Unc} to {Letter}: failed", config.UncPath, letter);
+            _logger.LogWarning(ex, "Mapping {Unc} to {Letter}: failed", config.UncPath, config.Letter);
             return false;
         }
     }
 
-    private void MapForConsoleSession(GamesShareSettings config, char letter, ShareCredentials? credentials)
+    private void MapForConsoleSession(ShareConfig config)
     {
-        var sessionId = WtsSessions.GetActiveConsoleSessionId();
-        if (sessionId is 0 or NoSession)
-        {
-            return;
-        }
-
-        var session = WtsSessions.Get(sessionId);
-        if (session is null || !session.HasUser)
+        if (ConsoleUserSession() is not { } sessionId)
         {
             return;
         }
 
         try
         {
-            if (NetworkShare.IsMappedForSession(sessionId, letter, out _))
+            if (NetworkShare.IsMappedForSession(sessionId, config.Letter, out _))
             {
                 return;
             }
 
-            _share.MapForSession(sessionId, letter, config.UncPath, credentials?.Username, credentials?.Password);
-            _logger.LogInformation("{Unc} mapped to {Letter}: in session {SessionId} ({User})", config.UncPath, letter, sessionId, session.UserName);
+            _share.MapForSession(sessionId, config.Letter, config.UncPath, _credentials?.Username, _credentials?.Password);
+            _logger.LogInformation("{Unc} mapped to {Letter}: in session {SessionId}", config.UncPath, config.Letter, sessionId);
         }
         catch (Exception ex) when (ex is Win32Exception or ArgumentException)
         {
@@ -342,72 +365,40 @@ public sealed class GamesShareMounter : IHostedService, IDisposable
         }
     }
 
-    private async Task<bool> MountIscsiAsync(IscsiSettings iscsi, char letter, ShareCredentials? credentials, CancellationToken cancellationToken)
+    /// <summary>Removes the mapping of <paramref name="config"/> from session 0 and the console user's session.</summary>
+    private void Unmap(ShareConfig config)
     {
         try
         {
-            var (host, port) = ParsePortal(iscsi.Portal);
-            await _iscsi.EnsureServiceRunningAsync(cancellationToken).ConfigureAwait(false);
-            await _iscsi.AddTargetPortalAsync(host, port, cancellationToken).ConfigureAwait(false);
-            var chap = credentials is null ? null : new IscsiChapCredentials(credentials.Username, credentials.Password);
-            await _iscsi.LoginAsync(iscsi.TargetIqn, persistent: false, chap, cancellationToken).ConfigureAwait(false);
-            if (iscsi.ReadOnly)
+            _ = _share.Unmap(config.Letter);
+            if (ConsoleUserSession() is { } sessionId && NetworkShare.IsMappedForSession(sessionId, config.Letter, out _))
             {
-                // Before the volume is waited for, so nothing has opened it for writing yet.
-                _ = await _iscsi.SetDisksReadOnlyAsync(cancellationToken).ConfigureAwait(false);
+                _ = _share.UnmapForSession(sessionId, config.Letter);
             }
-
-            if (await _iscsi.WaitForVolumeAsync(letter, VolumeTimeout, cancellationToken).ConfigureAwait(false))
-            {
-                return true;
-            }
-
-            _logger.LogWarning("iSCSI target {Target} logged in but volume {Letter}: did not appear within {Timeout}", iscsi.TargetIqn, letter, VolumeTimeout);
-            return false;
         }
-        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or TimeoutException or ArgumentException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "iSCSI mount of {Target} failed", iscsi.TargetIqn);
-            return false;
+            // Never let a failed unmap end the loop: the new settings still have to be mounted.
+            _logger.LogWarning(ex, "Unmapping {Unc} from {Letter}: failed", config.UncPath, config.Letter);
         }
+
+        SetMounted(false, DriveRoot(config.Letter));
     }
 
-    private async Task UnmountAsync(CancellationToken cancellationToken)
+    private static uint? ConsoleUserSession()
     {
-        var config = _settings.CurrentValue.Storage.GamesShare;
-        if (!config.Enabled || OwnedByDisklessHelper)
-        {
-            return;
-        }
-
-        var letter = DriveLetter(config);
-        try
-        {
-            if (config.Iscsi is { } iscsi)
-            {
-                _ = await _iscsi.LogoutAsync(iscsi.TargetIqn, cancellationToken).ConfigureAwait(false);
-            }
-            else
-            {
-                _ = _share.Unmap(letter);
-            }
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or TimeoutException)
-        {
-            _logger.LogWarning(ex, "Games storage unmount failed");
-        }
-
-        SetMounted(false, DriveRoot(letter));
+        var sessionId = WtsSessions.GetActiveConsoleSessionId();
+        return sessionId is not (0 or NoSession) && WtsSessions.Get(sessionId) is { HasUser: true } ? sessionId : null;
     }
 
-    private async Task<ShareCredentials?> LoadCredentialsAsync(GamesShareSettings config, CancellationToken cancellationToken)
+    private async Task<ShareCredentials?> LoadCredentialsAsync(string credentialsRef, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(config.CredentialsRef))
+        if (string.IsNullOrWhiteSpace(credentialsRef))
         {
             return null;
         }
 
-        var path = _settings.CurrentValue.ResolvePath(config.CredentialsRef);
+        var path = _settings.CurrentValue.ResolvePath(credentialsRef);
         if (!File.Exists(path))
         {
             return null;
@@ -448,6 +439,15 @@ public sealed class GamesShareMounter : IHostedService, IDisposable
         }
     }
 
+    private void OnSettingsChanged(AgentSettings settings)
+    {
+        // Every settings publish lands here (server config refresh, agent.json edit); only a share change wakes the loop.
+        if (ShareConfig.From(settings.Storage.GamesShare) != _applied)
+        {
+            Signal();
+        }
+    }
+
     private void OnNetworkChanged(object? sender, EventArgs e)
     {
         _logger.LogDebug("Network change detected; re-verifying games storage");
@@ -473,6 +473,16 @@ public sealed class GamesShareMounter : IHostedService, IDisposable
         {
             // Stopped concurrently.
         }
+    }
+
+    /// <summary>The <c>storage.gamesShare</c> values a mapping depends on; a different value means unmap and start over.</summary>
+    private sealed record ShareConfig(bool Enabled, bool Iscsi, char Letter, string UncPath, string CredentialsRef)
+    {
+        /// <summary><see langword="true"/> when the Agent maps an SMB share (enabled, no iSCSI).</summary>
+        public bool Mounts => Enabled && !Iscsi;
+
+        public static ShareConfig From(GamesShareSettings settings) =>
+            new(settings.Enabled, settings.Iscsi is not null, DriveLetter(settings), settings.UncPath ?? "", settings.CredentialsRef ?? "");
     }
 
     /// <summary>Contents of <c>credentialsRef</c> after DPAPI unwrapping.</summary>

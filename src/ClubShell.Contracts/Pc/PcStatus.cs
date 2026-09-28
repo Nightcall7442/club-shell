@@ -24,6 +24,9 @@ public enum PcStatus
 
     /// <summary>Reserved by a booking.</summary>
     Booked,
+
+    /// <summary>A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the server.</summary>
+    Unknown,
 }
 
 /// <summary>Agent ⇄ server connectivity.</summary>

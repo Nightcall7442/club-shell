@@ -33,6 +33,9 @@ wire_enum! {
         Uzum = "uzum",
         /// Cash at the desk; creates an admin ticket.
         Cash = "cash",
+        /// A value this agent does not know (sent by a newer server). Read-side fallback only: the
+        /// Agent never sends it to the server.
+        Unknown = "unknown",
     }
 }
 
@@ -64,6 +67,9 @@ wire_enum! {
         Expired = "expired",
         /// Cancelled by the user or an admin.
         Cancelled = "cancelled",
+        /// A value this agent does not know (sent by a newer server). Read-side fallback only: the
+        /// Agent never sends it to the server.
+        Unknown = "unknown",
     }
 }
 
@@ -111,6 +117,9 @@ wire_enum! {
         Purchase = "purchase",
         /// Manual admin adjustment.
         Adjustment = "adjustment",
+        /// A value this agent does not know (sent by a newer server). Read-side fallback only: the
+        /// Agent never sends it to the server.
+        Unknown = "unknown",
     }
 }
 
@@ -610,12 +619,16 @@ mod tests {
                 "bonus",
                 "purchase",
                 "adjustment",
+                "unknown",
             ],
         );
-        assert_wire(TopupProvider::ALL, &["payme", "click", "uzum", "cash"]);
+        assert_wire(
+            TopupProvider::ALL,
+            &["payme", "click", "uzum", "cash", "unknown"],
+        );
         assert_wire(
             TopupStatus::ALL,
-            &["pending", "paid", "expired", "cancelled"],
+            &["pending", "paid", "expired", "cancelled", "unknown"],
         );
     }
 

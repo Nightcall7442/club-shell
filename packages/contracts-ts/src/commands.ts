@@ -68,6 +68,8 @@ export const ErrorCode = {
   ProtocolError: 'protocolError',
   /** Protocol or application version unsupported; `details: { supported: [..], got }` (HTTP 426). */
   VersionMismatch: 'versionMismatch',
+  /** Operation is in the contract but this server version does not implement it (HTTP 501); not retryable. */
+  NotImplemented: 'notImplemented',
 } as const;
 /**
  * Error codes shared verbatim by the IPC protocol (`IpcError.code`), the central server REST error envelope
@@ -1491,12 +1493,53 @@ export interface GameLaunchedEvent {
   at: string;
 }
 
+/** Who mounts the games library volume on the PC (heartbeat `gamesVolume.owner`). */
+export const GamesVolumeOwner = {
+  /** Nobody: `storage.gamesShare` is off and ClubDisklessHelper is not installed (local disks only). */
+  None: 'none',
+  /** The Agent maps the SMB share of `storage.gamesShare`. */
+  Agent: 'agent',
+  /** ClubDisklessHelper (read-only iSCSI, docs/DISKLESS.md); it reports the volume to its own server. */
+  DisklessHelper: 'disklessHelper',
+} as const;
+/** Who mounts the games library volume on the PC (heartbeat `gamesVolume.owner`). */
+export type GamesVolumeOwner = (typeof GamesVolumeOwner)[keyof typeof GamesVolumeOwner];
+
 /** Payload of `AgentEventType.HardwareChanged`. */
 export interface HardwareChangedEvent {
   /** New inventory. */
   hardware: HardwareInfo;
   /** Changed top-level keys (`gpu`, `disks`, …). */
   diff: string[];
+}
+
+/**
+ * Anti-cheat prerequisites in a heartbeat, so the server can hide Riot games on PCs without Vanguard. `null` = unknown.
+ */
+export interface HeartbeatAntiCheat {
+  /** The Vanguard driver `vgk` is installed. */
+  vanguardInstalled?: boolean | null;
+  /** The `vgk` driver is loaded (it loads at boot; a fresh install needs a reboot). */
+  vanguardLoaded?: boolean | null;
+  /** UEFI Secure Boot is on. */
+  secureBoot?: boolean | null;
+  /** A TPM is present. */
+  tpm?: boolean | null;
+}
+
+/** Games library volume in a heartbeat. */
+export interface HeartbeatGamesVolume {
+  /** Who mounts it. */
+  owner: GamesVolumeOwner;
+  /**
+   * Mapped and readable; `null` when the Agent cannot tell (`GamesVolumeOwner.DisklessHelper`). Stays `false` while
+   * `storage.gamesShare.iscsi` is set: the Agent refuses iSCSI.
+   */
+  mounted?: boolean | null;
+  /** Drive letter the Agent maps (`G`); `null` unless the owner is the Agent. */
+  driveLetter?: string | null;
+  /** When `mounted` last changed; `null` = not since the Agent started. */
+  since?: string | null;
 }
 
 /** Response of `POST /agents/{pcId}/heartbeat`. */
@@ -1549,6 +1592,10 @@ export interface HeartbeatRequest {
   offlineQueue: number;
   /** Whether the Shell pipe connection is alive. */
   shellConnected: boolean;
+  /** Who mounts the games library and whether it is mounted (omitted by older agents). */
+  gamesVolume?: HeartbeatGamesVolume | null;
+  /** Riot Vanguard and platform security state (omitted by older agents). */
+  antiCheat?: HeartbeatAntiCheat | null;
 }
 
 /** Authentication level an IPC request requires (IPC_PROTOCOL.md §7 "auth" column). */
@@ -1843,6 +1890,11 @@ export const UpdateChannel = {
   Stable: 'stable',
   /** Beta releases. */
   Beta: 'beta',
+  /**
+   * A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the
+   * server.
+   */
+  Unknown: 'unknown',
 } as const;
 /** Update channel. */
 export type UpdateChannel = (typeof UpdateChannel)[keyof typeof UpdateChannel];
@@ -1853,6 +1905,11 @@ export const UpdateComponent = {
   Agent: 'agent',
   /** Kiosk shell. */
   Shell: 'shell',
+  /**
+   * A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the
+   * server.
+   */
+  Unknown: 'unknown',
 } as const;
 /** Updatable component. */
 export type UpdateComponent = (typeof UpdateComponent)[keyof typeof UpdateComponent];
@@ -1953,6 +2010,11 @@ export const WsFrameType = {
   Pong: 'pong',
   /** Server → Agent push; not acked. */
   Push: 'push',
+  /**
+   * A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the
+   * server.
+   */
+  Unknown: 'unknown',
 } as const;
 /** WS frame type (SERVER_API.md §6). */
 export type WsFrameType = (typeof WsFrameType)[keyof typeof WsFrameType];
@@ -1987,6 +2049,11 @@ export const AllowlistMode = {
   Allow: 'allow',
   /** Matching processes are killed. */
   Deny: 'deny',
+  /**
+   * A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the
+   * server.
+   */
+  Unknown: 'unknown',
 } as const;
 /** Semantics of `ProcessAllowlistPolicy.Patterns`. */
 export type AllowlistMode = (typeof AllowlistMode)[keyof typeof AllowlistMode];
@@ -2080,6 +2147,16 @@ export interface WebFilterPolicy {
   allowedDomains: string[];
   /** Filtering DNS resolvers to enforce. */
   dnsServers: string[];
+  /**
+   * Also firewall the public IPv4 addresses the blocked domains resolve to; `null` = `false`. Off by default: a blocked
+   * site on a shared CDN address takes launchers down with it.
+   */
+  blockResolvedIps?: boolean | null;
+  /**
+   * Domains never blocked, added to the Agent's built-in launcher/anti-cheat list (the host of `server.baseUrl` is
+   * always protected); `null` = built-in list only.
+   */
+  protectedDomains?: string[] | null;
 }
 
 /** Enforced PC policy (IPC_PROTOCOL.md §6.18, ARCHITECTURE.md §12.3). Snapshot persisted to `policies.json`. */
@@ -2191,6 +2268,7 @@ export const ERROR_CODE_HTTP_STATUS: Readonly<Record<ErrorCode, number>> = {
   internal: 500,
   protocolError: 400,
   versionMismatch: 426,
+  notImplemented: 501,
 };
 // ---- END MANUAL ----
 

@@ -39,6 +39,9 @@ public enum QrStatus
 
     /// <summary>Expired or already consumed.</summary>
     Expired,
+
+    /// <summary>A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the server.</summary>
+    Unknown,
 }
 
 /// <summary>Why the user context was invalidated (<c>auth.expired</c> event).</summary>

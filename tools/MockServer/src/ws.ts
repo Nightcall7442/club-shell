@@ -1,7 +1,7 @@
 /**
- * `GET /ws/agent?token=` (subprotocol `clubshell.v1`, SERVER_API.md §6): per-PC connection registry, server pings,
- * command delivery with ack correlation (at-least-once: un-acked commands are redelivered on reconnect), pushes,
- * an agent event log, and the `/mock` control endpoints used by demos and e2e tests.
+ * `GET /ws/agent` with `Authorization: Bearer` or `?token=` (subprotocol `clubshell.v1`, SERVER_API.md §6): per-PC
+ * connection registry, server pings, command delivery with ack correlation (at-least-once: un-acked commands are
+ * redelivered on reconnect), pushes, an agent event log, and the `/mock` control endpoints used by demos and e2e tests.
  */
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
@@ -245,7 +245,8 @@ function detach(conn: Conn): void {
 
 export function registerWs(app: FastifyInstance): void {
   app.get('/ws/agent', { websocket: true }, (socket, req) => {
-    const token = (req.query as { token?: string }).token ?? '';
+    const bearer = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1];
+    const token = bearer ?? (req.query as { token?: string }).token ?? '';
     const { pc, problem } = resolveAgentToken(token);
     if (!pc) {
       socket.close(4401, `unauthorized: ${problem ?? 'invalid'}`);

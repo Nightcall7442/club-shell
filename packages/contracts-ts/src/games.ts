@@ -74,6 +74,11 @@ export const AntiCheatKind = {
   Faceit: 'faceit',
   /** Activision Ricochet. */
   Ricochet: 'ricochet',
+  /**
+   * A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the
+   * server.
+   */
+  Unknown: 'unknown',
 } as const;
 /** Anti-cheat subsystem a game depends on. */
 export type AntiCheatKind = (typeof AntiCheatKind)[keyof typeof AntiCheatKind];
@@ -280,6 +285,11 @@ export const LauncherType = {
   Ubisoft: 'ubisoft',
   /** Plain executable, no launcher. */
   Exe: 'exe',
+  /**
+   * A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the
+   * server.
+   */
+  Unknown: 'unknown',
 } as const;
 /** Game launcher / store client used to start a game. */
 export type LauncherType = (typeof LauncherType)[keyof typeof LauncherType];
@@ -382,6 +392,11 @@ export interface LaunchReport {
   exitCode?: number | null;
   /** Seconds played (`LaunchReportPhase.Exit`). */
   playedSec?: number | null;
+  /**
+   * Account-pool launches: why the launcher was not prepared cleanly (e.g. the kiosk's Steam auto-login could not be
+   * reset, or the lease had no session data so the launcher started without credentials); absent when it was.
+   */
+  injectionError?: string | null;
 }
 
 /**

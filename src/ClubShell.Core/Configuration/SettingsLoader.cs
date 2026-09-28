@@ -180,6 +180,7 @@ public static class SettingsJson
         AddSection(root, "storage", config.Storage);
         AddSection(root, "telemetry", config.Telemetry);
         AddSection(root, "remoteAdmin", config.RemoteAdmin);
+        AddSection(root, "anticheat", config.Anticheat);
         if (config.Updates is { } updates)
         {
             AddSection(root, "updates", JsonDefaults.ToElement(updates));
@@ -272,11 +273,16 @@ public static class SettingsJson
 /// Loads the effective Agent configuration (ARCHITECTURE.md §6.1 step 2, §9): code defaults ⊕ shipped
 /// <c>agent.default.json</c> ⊕ <c>C:\ProgramData\ClubShell\agent.json</c> ⊕ <c>CLUBSHELL__*</c> environment
 /// variables ⊕ server-provided overrides. Validates every load and keeps the last good snapshot when a reload fails.
+/// The last applied server config is kept in <c>cache\server-config.json</c> and applied at start-up, so server
+/// settings (<c>storage.gamesShare</c>, feature flags) hold from boot instead of only after the first heartbeat.
 /// Watches <c>agent.json</c> (debounced) and exposes changes as <see cref="IOptionsMonitor{TOptions}"/>,
 /// <see cref="Changed"/> and <see cref="ReloadToken"/>. Writes are atomic (temp file + move).
 /// </summary>
 public sealed class SettingsLoader : IOptionsMonitor<AgentSettings>, IOptions<AgentSettings>, IDisposable
 {
+    /// <summary>File in the cache directory holding the last applied server config.</summary>
+    public const string ServerConfigCacheFileName = "server-config.json";
+
     private readonly SettingsLoaderOptions _loaderOptions;
     private readonly ILogger<SettingsLoader> _logger;
     private readonly SemaphoreSlim _loadLock = new(1, 1);
@@ -287,6 +293,7 @@ public sealed class SettingsLoader : IOptionsMonitor<AgentSettings>, IOptions<Ag
     private JsonObject? _serverOverrides;
     private AgentSettings? _current;
     private CancellationTokenSource _reloadCts = new();
+    private bool _serverConfigCacheRead;
     private bool _disposed;
 
     /// <summary>Creates a loader; nothing is read until <see cref="LoadAsync"/> / <see cref="Load"/>.</summary>
@@ -370,6 +377,11 @@ public sealed class SettingsLoader : IOptionsMonitor<AgentSettings>, IOptions<Ag
             {
                 _baseLayer = layer;
                 snapshot = Rebuild();
+                if (!_serverConfigCacheRead)
+                {
+                    _serverConfigCacheRead = true;
+                    snapshot = ApplyCachedServerConfig(snapshot);
+                }
             }
 
             Publish(snapshot);
@@ -414,6 +426,7 @@ public sealed class SettingsLoader : IOptionsMonitor<AgentSettings>, IOptions<Ag
         }
 
         Publish(snapshot);
+        WriteServerConfigCache(snapshot, config);
         return snapshot;
     }
 
@@ -485,6 +498,58 @@ public sealed class SettingsLoader : IOptionsMonitor<AgentSettings>, IOptions<Ag
         _loadLock.Dispose();
         _reloadCts.Dispose();
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>Applies <c>cache\server-config.json</c> on top of <paramref name="local"/>; an unreadable or invalid file is ignored.</summary>
+    private AgentSettings ApplyCachedServerConfig(AgentSettings local)
+    {
+        var path = Path.Combine(local.CacheDir, ServerConfigCacheFileName);
+        AgentServerConfig? cached;
+        try
+        {
+            cached = File.Exists(path) ? JsonDefaults.Deserialize<AgentServerConfig>(File.ReadAllBytes(path)) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            _logger.LogWarning(ex, "Cached server config {Path} is unreadable; waiting for the server", path);
+            return local;
+        }
+
+        if (cached is null)
+        {
+            return local;
+        }
+
+        _serverOverrides = SettingsJson.FromServerConfig(cached);
+        try
+        {
+            var snapshot = Rebuild();
+            ServerConfig = cached;
+            _logger.LogInformation("Applied the cached server config (version {Version}) until the server sends a newer one", cached.Version);
+            return snapshot;
+        }
+        catch (OptionsValidationException ex)
+        {
+            _serverOverrides = null;
+            _logger.LogWarning("Cached server config {Path} is invalid and was ignored: {Errors}", path, ex.Message);
+            return local;
+        }
+    }
+
+    /// <summary>Best effort: a config that cannot be cached still applies now, it just waits for the server after a restart.</summary>
+    private void WriteServerConfigCache(AgentSettings settings, AgentServerConfig config)
+    {
+        var path = Path.Combine(settings.CacheDir, ServerConfigCacheFileName);
+        try
+        {
+            Directory.CreateDirectory(settings.CacheDir);
+            File.WriteAllBytes(path + ".tmp", JsonDefaults.SerializeToUtf8Bytes(config));
+            File.Move(path + ".tmp", path, overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Could not cache the server config in {Path}", path);
+        }
     }
 
     private AgentSettings Rebuild()

@@ -1,9 +1,15 @@
+using System.ComponentModel;
 using System.Runtime.Versioning;
+using ClubShell.Agent.AntiCheat;
+using ClubShell.Agent.Storage;
 using ClubShell.Contracts.Commands;
+using ClubShell.Contracts.Errors;
+using ClubShell.Contracts.Ipc;
 using ClubShell.Contracts.Pcs;
 using ClubShell.Contracts.Sessions;
 using ClubShell.Core.Abstractions;
 using ClubShell.Core.Configuration;
+using ClubShell.Windows.Hardware;
 using ClubShell.Windows.Network;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -50,7 +56,8 @@ public interface IConfigRefresh
 /// response: a newer <c>policyVersion</c> triggers <see cref="IPolicyRefresh"/>; a changed <c>configVersion</c> /
 /// <c>catalogVersion</c> triggers <see cref="IConfigRefresh"/>; <c>pendingCommands &gt; 0</c> pulls
 /// <c>GET /agents/{pcId}/commands</c> and dispatches each to <see cref="IServerCommandSink"/>; the returned
-/// <c>serverTime</c> is used to log clock skew.
+/// <c>serverTime</c> is used to log clock skew. Each beat also carries the games library state
+/// (<see cref="GamesShareMounter.VolumeState"/>) and the Vanguard / Secure Boot / TPM state.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class HeartbeatService : BackgroundService
@@ -66,12 +73,15 @@ public sealed class HeartbeatService : BackgroundService
     private readonly IPolicyRefresh _policyRefresh;
     private readonly IConfigRefresh _configRefresh;
     private readonly NetworkProbe _network;
+    private readonly GamesShareMounter _gamesVolume;
+    private readonly WmiQueries _wmi;
     private readonly IClock _clock;
     private readonly IOptionsMonitor<AgentSettings> _settings;
     private readonly ILogger<HeartbeatService> _logger;
 
     private int _lastConfigVersion = -1;
     private string? _lastCatalogVersion;
+    private bool? _tpmPresent;
 
     /// <summary>Creates the heartbeat service.</summary>
     public HeartbeatService(
@@ -86,6 +96,8 @@ public sealed class HeartbeatService : BackgroundService
         IPolicyRefresh policyRefresh,
         IConfigRefresh configRefresh,
         NetworkProbe network,
+        GamesShareMounter gamesVolume,
+        WmiQueries wmi,
         IClock clock,
         IOptionsMonitor<AgentSettings> settings,
         ILogger<HeartbeatService> logger)
@@ -101,6 +113,8 @@ public sealed class HeartbeatService : BackgroundService
         ArgumentNullException.ThrowIfNull(policyRefresh);
         ArgumentNullException.ThrowIfNull(configRefresh);
         ArgumentNullException.ThrowIfNull(network);
+        ArgumentNullException.ThrowIfNull(gamesVolume);
+        ArgumentNullException.ThrowIfNull(wmi);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(logger);
@@ -116,6 +130,8 @@ public sealed class HeartbeatService : BackgroundService
         _policyRefresh = policyRefresh;
         _configRefresh = configRefresh;
         _network = network;
+        _gamesVolume = gamesVolume;
+        _wmi = wmi;
         _clock = clock;
         _settings = settings;
         _logger = logger;
@@ -173,7 +189,9 @@ public sealed class HeartbeatService : BackgroundService
             appliedPolicy,
             _runningGames.Snapshot(),
             _queueDepth.Count,
-            _shell.IsConnected);
+            _shell.IsConnected,
+            _gamesVolume.VolumeState(),
+            await AntiCheatStateAsync(cancellationToken).ConfigureAwait(false));
 
         var sentAt = _clock.UtcNow;
         var response = await _server.HeartbeatAsync(pcId, request, cancellationToken).ConfigureAwait(false);
@@ -198,6 +216,27 @@ public sealed class HeartbeatService : BackgroundService
         {
             await DrainPendingCommandsAsync(pcId, response.PendingCommands, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>Vanguard driver, Secure Boot and TPM; a probe that fails leaves its field unknown instead of failing the beat.</summary>
+    private async Task<HeartbeatAntiCheat> AntiCheatStateAsync(CancellationToken cancellationToken)
+    {
+        // TPM presence only changes across a reboot, which restarts the Agent, so one answered WMI query is kept.
+        _tpmPresent ??= await _wmi.GetTpmPresentAsync(cancellationToken).ConfigureAwait(false);
+        bool? installed = null;
+        bool? loaded = null;
+        try
+        {
+            var vgk = AntiCheatProbe.QueryService(VanguardChecker.DriverName);
+            installed = vgk.Installed && vgk.ImageExists;
+            loaded = vgk.IsRunning;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or Win32Exception)
+        {
+            _logger.LogDebug(ex, "Vanguard driver state unknown");
+        }
+
+        return new HeartbeatAntiCheat(installed, loaded, WmiQueries.GetSecureBootEnabled(), _tpmPresent);
     }
 
     private PcStatus MapStatus()
@@ -258,54 +297,87 @@ public sealed class HeartbeatService : BackgroundService
         }
     }
 
-    private async Task DrainPendingCommandsAsync(Guid pcId, int pending, CancellationToken cancellationToken)
+    private Task DrainPendingCommandsAsync(Guid pcId, int pending, CancellationToken cancellationToken)
     {
         _logger.LogInformation("Fetching {Pending} pending command(s) over REST", pending);
+        return DrainCommandsAsync(_server, _commandSink, _clock, _logger, pcId, cancellationToken);
+    }
+
+    /// <summary>
+    /// Pulls <c>GET /agents/{pcId}/commands</c> and acks every item through <c>POST /agents/{pcId}/commands/{id}/ack</c>:
+    /// known commands go to <paramref name="sink"/>, expired ones are acked <c>timeout</c> and names this agent does not
+    /// know <c>notFound</c> (like the WebSocket path), so one item never blocks the rest of the batch.
+    /// </summary>
+    /// <param name="server">Server client.</param>
+    /// <param name="sink">Command dispatcher.</param>
+    /// <param name="clock">Clock for expiry checks.</param>
+    /// <param name="logger">Logger.</param>
+    /// <param name="pcId">This PC.</param>
+    /// <param name="cancellationToken">Cancellation.</param>
+    /// <returns>A task that completes once every fetched command has been acked (or its ack failed).</returns>
+    public static async Task DrainCommandsAsync(IServerClient server, IServerCommandSink sink, IClock clock, ILogger logger, Guid pcId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(server);
+        ArgumentNullException.ThrowIfNull(sink);
+        ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(logger);
+
         ServerCommandsResponse commands;
         try
         {
-            commands = await _server.GetCommandsAsync(pcId, cancellationToken).ConfigureAwait(false);
+            commands = await server.GetCommandsAsync(pcId, cancellationToken).ConfigureAwait(false);
         }
         catch (ServerApiException ex)
         {
-            _logger.LogWarning("Fetching pending commands failed: {Code}", ex.Code);
+            logger.LogWarning("Fetching pending commands failed: {Code}", ex.Code);
             return;
         }
 
         foreach (var envelope in commands.Items)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var command = ServerCommand.FromEnvelope(envelope);
-            CommandAck ack;
-            if (command.IsExpired(_clock.UtcNow))
-            {
-                ack = CommandAck.Failure(ClubShell.Contracts.Ipc.IpcError.Timeout("Command expired before delivery"));
-            }
-            else
-            {
-                try
-                {
-                    ack = await _commandSink.HandleAsync(command, cancellationToken).ConfigureAwait(false);
-                }
-                catch (ClubShell.Contracts.Ipc.IpcException ex)
-                {
-                    ack = CommandAck.Failure(ex.Error);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    _logger.LogError(ex, "Pending command {Id} ({Type}) handler threw", command.Id, command.Type);
-                    ack = CommandAck.Failure(ClubShell.Contracts.Ipc.IpcError.Internal(command.Id.ToString("D")));
-                }
-            }
-
+            var ack = await ExecuteAsync(envelope, sink, clock, logger, cancellationToken).ConfigureAwait(false);
             try
             {
-                await _server.AckCommandAsync(pcId, command.Id, ack, cancellationToken).ConfigureAwait(false);
+                await server.AckCommandAsync(pcId, envelope.Id, ack, cancellationToken).ConfigureAwait(false);
             }
             catch (ServerApiException ex)
             {
-                _logger.LogWarning("Acking command {Id} failed: {Code}", command.Id, ex.Code);
+                logger.LogWarning("Acking command {Id} failed: {Code}", envelope.Id, ex.Code);
             }
+        }
+    }
+
+    private static async Task<CommandAck> ExecuteAsync(ServerCommandEnvelope envelope, IServerCommandSink sink, IClock clock, ILogger logger, CancellationToken cancellationToken)
+    {
+        ServerCommand command;
+        try
+        {
+            command = ServerCommand.FromEnvelope(envelope);
+        }
+        catch (ArgumentException ex)
+        {
+            logger.LogWarning("Unknown pending command {Name} ({Id}): {Message}", envelope.Name, envelope.Id, ex.Message);
+            return CommandAck.Failure(IpcError.Of(ErrorCode.NotFound, $"Unknown command '{envelope.Name}'"));
+        }
+
+        if (command.IsExpired(clock.UtcNow))
+        {
+            return CommandAck.Failure(IpcError.Timeout("Command expired before delivery"));
+        }
+
+        try
+        {
+            return await sink.HandleAsync(command, cancellationToken).ConfigureAwait(false);
+        }
+        catch (IpcException ex)
+        {
+            return CommandAck.Failure(ex.Error);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Pending command {Id} ({Type}) handler threw", command.Id, command.Type);
+            return CommandAck.Failure(IpcError.Internal(command.Id.ToString("D")));
         }
     }
 }

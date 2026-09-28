@@ -1,8 +1,9 @@
 /**
- * "Уведомления и API": Telegram notifications to the owner, outbound webhooks per club event and the club API key
- * (accepted as an owner token on `/api/v1/admin/*`). The bot token comes back masked as `••••` and is kept unless edited.
+ * "Уведомления и API": outbound webhooks per club event, the big top-up threshold and the club API key (accepted as
+ * an owner token on `/api/v1/admin/*`, so it comes from the owner-only `GET /admin/club/api-key`, not the settings
+ * document). No Telegram: it is banned in the product, and Telegram fields an older server still sends are ignored.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import clsx from 'clsx';
 import { clubApi, type ClubEvent, type Webhook } from '@/api';
 import { describe } from '@/errors';
@@ -58,8 +59,6 @@ function EventChip({ ev, on, onClick }: { ev: ClubEvent; on?: boolean; onClick?:
 export default function IntegrationsPage(): JSX.Element {
   const st = useClubSettings();
   const s = st.draft;
-  const [note, setNote] = useState<NoteState>(null);
-  const [testing, setTesting] = useState(false);
   const [hookUrl, setHookUrl] = useState('');
   const [hookEvents, setHookEvents] = useState<ClubEvent[]>([]);
   const [hookError, setHookError] = useState<string | null>(null);
@@ -67,6 +66,14 @@ export default function IntegrationsPage(): JSX.Element {
   const [confirmRotate, setConfirmRotate] = useState(false);
   const [rotating, setRotating] = useState(false);
   const [keyNote, setKeyNote] = useState<NoteState>(null);
+
+  useEffect(() => {
+    // An older server has no such route and still puts the key into the settings document (below).
+    clubApi
+      .apiKey()
+      .then((r) => setApiKey(r.apiKey))
+      .catch(() => undefined);
+  }, []);
 
   if (!s) {
     return (
@@ -77,33 +84,13 @@ export default function IntegrationsPage(): JSX.Element {
     );
   }
 
-  const n = s.notifications;
-  const notify = (patch: Partial<typeof n>): void => st.set('notifications', { ...n, ...patch });
   const hooks = s.webhooks;
   const setHook = (id: string, patch: Partial<Webhook>): void =>
     st.set(
       'webhooks',
       hooks.map((h) => (h.id === id ? { ...h, ...patch } : h)),
     );
-  const key = apiKey ?? s.apiKey;
-
-  const test = async (): Promise<void> => {
-    const saved = st.data?.notifications;
-    if (!saved?.telegramBotToken || !saved.telegramChatId) {
-      setNote({ text: t('Сначала сохраните токен бота и chat id'), tone: 'err' });
-      return;
-    }
-    setTesting(true);
-    setNote(null);
-    try {
-      await clubApi.testNotification();
-      setNote({ text: t('Тестовое уведомление отправлено'), tone: 'ok' });
-    } catch (e) {
-      setNote({ text: describe(e), tone: 'err' });
-    } finally {
-      setTesting(false);
-    }
-  };
+  const key = apiKey ?? s.apiKey ?? '';
 
   const addHook = (): void => {
     const url = hookUrl.trim();
@@ -152,54 +139,6 @@ export default function IntegrationsPage(): JSX.Element {
     <div className="flex flex-col gap-5">
       <PageHeader title={t('Уведомления и API')} />
       {st.error && <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{st.error}</p>}
-
-      <Section
-        title={t('Telegram')}
-        actions={
-          <Button size="sm" disabled={testing} onClick={() => void test()}>
-            {testing ? t('Отправляем…') : t('Отправить тест')}
-          </Button>
-        }
-      >
-        <Note note={note} />
-        <div className="grid gap-4 md:grid-cols-3">
-          <Field label={t('Токен бота')}>
-            <Input
-              type="password"
-              autoComplete="off"
-              className="font-mono"
-              value={n.telegramBotToken}
-              placeholder="123456:ABC…"
-              onFocus={(e) => e.currentTarget.select()}
-              onChange={(e) => notify({ telegramBotToken: e.target.value })}
-            />
-          </Field>
-          <Field label={t('Chat ID')}>
-            <Input
-              className="font-mono"
-              value={n.telegramChatId}
-              placeholder="-1001234567890"
-              onChange={(e) => notify({ telegramChatId: e.target.value.trim() })}
-            />
-          </Field>
-          <Field label={t('Крупное пополнение — от')}>
-            <MoneyInput value={n.bigTopupAt} onChange={(v) => notify({ bigTopupAt: v })} />
-          </Field>
-        </div>
-        <div className="flex flex-col gap-3 border-t border-line pt-4">
-          <span className="label">{t('События')}</span>
-          <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
-            {ALL_EVENTS.map((ev) => (
-              <Toggle
-                key={ev}
-                label={t(EVENT_LABEL[ev])}
-                checked={n.events[ev] ?? false}
-                onChange={(v) => notify({ events: { ...n.events, [ev]: v } })}
-              />
-            ))}
-          </div>
-        </div>
-      </Section>
 
       <Section title={t('Вебхуки')} bodyClassName="p-0 gap-0">
         <div className="p-2">
@@ -298,6 +237,16 @@ export default function IntegrationsPage(): JSX.Element {
           </div>
           {hookError && <p className="text-sm text-danger">{hookError}</p>}
         </div>
+        {s.notifications && (
+          <div className="border-t border-line p-5">
+            <Field label={t('Крупное пополнение — от')} className="max-w-xs">
+              <MoneyInput
+                value={s.notifications.bigTopupAt}
+                onChange={(v) => st.set('notifications', { bigTopupAt: v })}
+              />
+            </Field>
+          </div>
+        )}
       </Section>
 
       <Section title={t('API')}>
@@ -310,7 +259,9 @@ export default function IntegrationsPage(): JSX.Element {
               onFocus={(e) => e.currentTarget.select()}
               className="min-w-[18rem] flex-1 font-mono"
             />
-            <Button onClick={() => void copy()}>{t('Копировать')}</Button>
+            <Button disabled={!key} onClick={() => void copy()}>
+              {t('Копировать')}
+            </Button>
             {confirmRotate ? (
               <div className="flex items-center gap-1">
                 <span className="px-1 text-sm text-muted">{t('Старый ключ перестанет работать')}</span>

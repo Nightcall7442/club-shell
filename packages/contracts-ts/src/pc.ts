@@ -135,6 +135,11 @@ export const PcStatus = {
   Maintenance: 'maintenance',
   /** Reserved by a booking. */
   Booked: 'booked',
+  /**
+   * A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the
+   * server.
+   */
+  Unknown: 'unknown',
 } as const;
 /** Seat/PC status as shown on the club map. */
 export type PcStatus = (typeof PcStatus)[keyof typeof PcStatus];
@@ -376,6 +381,8 @@ export interface UpdatesConfigOverride {
   checkIntervalSec?: number | null;
   /** Window in which non-mandatory updates may be applied. */
   applyWindow?: TimeWindow | null;
+  /** `false` stops the periodic manifest check; `null` keeps `agent.json` (default on). */
+  enabled?: boolean | null;
 }
 
 /**
@@ -412,6 +419,8 @@ export interface AgentServerConfig {
   themes?: ThemeRef[] | null;
   /** WebSocket URL override. */
   wsUrl?: string | null;
+  /** Partial `agent.json → anticheat`, e.g. `{ "reportViolations": false }` (default on). */
+  anticheat?: JsonObject | null;
 }
 
 // ---- BEGIN MANUAL ----

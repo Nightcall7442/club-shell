@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using ClubShell.Contracts.Errors;
+using ClubShell.Contracts.Games;
 using ClubShell.Contracts.Serialization;
 using ClubShell.Contracts.Sessions;
 using ClubShell.Contracts.Users;
@@ -51,9 +52,9 @@ public sealed record OfflineFlushResult(int Sent, int DeadLettered, int Remainin
 }
 
 /// <summary>
-/// SQLite store (<c>offline.storePath</c>, WAL) holding the current session, the session-event outbox and the offline
-/// login cache (ARCHITECTURE.md §8). One connection per operation (Microsoft.Data.Sqlite pools them); writes are
-/// serialized by a semaphore so callers never see <c>SQLITE_BUSY</c>.
+/// SQLite store (<c>offline.storePath</c>, WAL) holding the current session, the session-event outbox, the
+/// launch-report outbox and the offline login cache (ARCHITECTURE.md §8). One connection per operation
+/// (Microsoft.Data.Sqlite pools them); writes are serialized by a semaphore so callers never see <c>SQLITE_BUSY</c>.
 /// </summary>
 public sealed class OfflineSessionStore : IDisposable
 {
@@ -154,6 +155,11 @@ public sealed class OfflineSessionStore : IDisposable
                     deadLetter INTEGER NOT NULL DEFAULT 0,
                     lastError TEXT NULL);
                 CREATE INDEX IF NOT EXISTS ix_events_pending ON events(deadLetter, id);
+                CREATE TABLE IF NOT EXISTS reports(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    gameId TEXT NOT NULL,
+                    json TEXT NOT NULL,
+                    createdAt TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS users(
                     username TEXT PRIMARY KEY,
                     userId TEXT NOT NULL,
@@ -446,9 +452,9 @@ public sealed class OfflineSessionStore : IDisposable
         using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT
-                (SELECT COUNT(*) FROM events WHERE deadLetter = 0),
+                (SELECT COUNT(*) FROM events WHERE deadLetter = 0) + (SELECT COUNT(*) FROM reports),
                 (SELECT COUNT(*) FROM events WHERE deadLetter = 1),
-                (SELECT MIN(createdAt) FROM events WHERE deadLetter = 0);
+                (SELECT MIN(createdAt) FROM (SELECT createdAt FROM events WHERE deadLetter = 0 UNION ALL SELECT createdAt FROM reports));
             """;
         using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
@@ -460,9 +466,77 @@ public sealed class OfflineSessionStore : IDisposable
     }
 
     /// <summary>
-    /// Replays the outbox through <c>POST /sessions/{id}/events</c> in FIFO batches of ≤ 100 grouped by session. A retryable
-    /// failure (server unreachable, auth) stops the round and arms an exponential backoff (5 s → 5 min); any other server
-    /// error counts one attempt and dead-letters the batch after <see cref="MaxDeliveryAttempts"/>.
+    /// Sends <c>POST /games/{id}/launch-report</c>. When the server cannot be reached (transport failure, timeout,
+    /// retryable or auth error, or the Agent stopping) the report is kept in the outbox and replayed by
+    /// <see cref="FlushAsync"/>; any other rejection is logged and the report dropped. Never throws for delivery failures.
+    /// </summary>
+    public async Task SendLaunchReportAsync(IServerClient server, Guid gameId, LaunchReport report, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(server);
+        ArgumentNullException.ThrowIfNull(report);
+
+        // A catalogue value newer than this build reads as Unknown; "unknown" is not a wire value, so never send it.
+        if (report.Launcher == LauncherType.Unknown)
+        {
+            _logger.LogWarning("Launch report ({Phase}) for game {GameId} not sent: its launcher is unknown to this Agent", report.Phase, gameId);
+            return;
+        }
+
+        if (report.AntiCheat.Kind == AntiCheatKind.Unknown)
+        {
+            // No checker exists for it, so nothing was checked.
+            report = report with { AntiCheat = report.AntiCheat with { Kind = AntiCheatKind.None } };
+        }
+
+        try
+        {
+            await server.SendLaunchReportAsync(gameId, report, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        catch (ServerApiException ex) when (!IsUndelivered(ex))
+        {
+            _logger.LogWarning("Launch report ({Phase}) for game {GameId} rejected: {Code} ({Message}); dropped", report.Phase, gameId, ex.Code, ex.Message);
+            return;
+        }
+        catch (Exception ex) when (IsUndelivered(ex))
+        {
+            _logger.LogWarning("Launch report ({Phase}) for game {GameId} not delivered ({Message}); queued for replay", report.Phase, gameId, ex.Message);
+        }
+
+        try
+        {
+            await InitializeAsync(CancellationToken.None).ConfigureAwait(false);
+            await _writeLock.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+            try
+            {
+                using var connection = await OpenAsync(CancellationToken.None).ConfigureAwait(false);
+                using var command = connection.CreateCommand();
+                command.CommandText = """
+                    INSERT INTO reports(gameId, json, createdAt) VALUES (@gameId, @json, @createdAt);
+                    DELETE FROM reports WHERE id NOT IN (SELECT id FROM reports ORDER BY id DESC LIMIT @max);
+                    """;
+                command.Parameters.AddWithValue("@gameId", gameId.ToString("D"));
+                command.Parameters.AddWithValue("@json", JsonDefaults.Serialize(report));
+                command.Parameters.AddWithValue("@createdAt", Stamp(_clock.UtcNow));
+                command.Parameters.AddWithValue("@max", Math.Max(1, _settings.CurrentValue.Offline.MaxQueue));
+                await command.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            finally
+            {
+                _writeLock.Release();
+            }
+        }
+        catch (Exception ex) when (ex is SqliteException or IOException or ObjectDisposedException)
+        {
+            _logger.LogWarning(ex, "Launch report for game {GameId} could not be queued; it is lost", gameId);
+        }
+    }
+
+    /// <summary>
+    /// Replays the outbox through <c>POST /sessions/{id}/events</c> in FIFO batches of ≤ 100 grouped by session, then the
+    /// queued launch reports (≤ 100 per round). A retryable failure (server unreachable, auth) stops the round and arms
+    /// an exponential backoff (5 s → 5 min); any other server error counts one attempt and dead-letters the event batch
+    /// after <see cref="MaxDeliveryAttempts"/>, or drops the launch report.
     /// </summary>
     public async Task<OfflineFlushResult> FlushAsync(IServerClient server, CancellationToken cancellationToken)
     {
@@ -534,6 +608,36 @@ public sealed class OfflineSessionStore : IDisposable
                 _logger.LogWarning(ex, "Offline flush transport failure; next attempt in {Backoff}", _backoff);
                 ArmBackoff();
                 stopped = true;
+            }
+        }
+
+        if (!stopped)
+        {
+            foreach (var (id, gameId, report, createdAt) in await PendingLaunchReportsAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (report is not null)
+                {
+                    try
+                    {
+                        await server.SendLaunchReportAsync(gameId, report, cancellationToken).ConfigureAwait(false);
+                        sent++;
+                        from = from is { } first && first <= createdAt ? first : createdAt;
+                        to = to is { } last && last >= createdAt ? last : createdAt;
+                        ResetBackoff();
+                    }
+                    catch (ServerApiException ex) when (!IsUndelivered(ex))
+                    {
+                        _logger.LogWarning("Queued launch report for game {GameId} rejected: {Code} ({Message}); dropped", gameId, ex.Code, ex.Message);
+                    }
+                    catch (Exception ex) when (IsUndelivered(ex) && !(ex is OperationCanceledException && cancellationToken.IsCancellationRequested))
+                    {
+                        _logger.LogWarning("Launch report replay paused ({Message}); next attempt in {Backoff}", ex.Message, _backoff);
+                        ArmBackoff();
+                        break;
+                    }
+                }
+
+                await UpdateByIdsAsync("DELETE FROM reports WHERE id IN ({0});", [id], null, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -758,6 +862,38 @@ public sealed class OfflineSessionStore : IDisposable
     {
         var name = state.ToString();
         return char.ToLowerInvariant(name[0]) + name[1..];
+    }
+
+    /// <summary>The server could not take the request now; the same request may succeed later.</summary>
+    private static bool IsUndelivered(Exception ex) =>
+        ex is HttpRequestException or TimeoutException or OperationCanceledException or ServerApiException { IsRetryable: true } or ServerApiException { IsAuthFailure: true };
+
+    /// <summary>Oldest queued launch reports (FIFO, ≤ 100); an unreadable row comes back with a <see langword="null"/> report so it is deleted.</summary>
+    private async Task<List<(long Id, Guid GameId, LaunchReport? Report, DateTimeOffset CreatedAt)>> PendingLaunchReportsAsync(CancellationToken cancellationToken)
+    {
+        await InitializeAsync(cancellationToken).ConfigureAwait(false);
+        using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT id, gameId, json, createdAt FROM reports ORDER BY id LIMIT 100;";
+        var rows = new List<(long Id, Guid GameId, LaunchReport? Report, DateTimeOffset CreatedAt)>();
+        using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            LaunchReport? report = null;
+            try
+            {
+                report = JsonDefaults.Deserialize<LaunchReport>(reader.GetString(2));
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                // Deleted by the caller.
+            }
+
+            var validGame = Guid.TryParse(reader.GetString(1), out var gameId);
+            rows.Add((reader.GetInt64(0), gameId, validGame ? report : null, ParseStamp(reader.GetString(3))));
+        }
+
+        return rows;
     }
 
     private static string Stamp(DateTimeOffset at) => at.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
