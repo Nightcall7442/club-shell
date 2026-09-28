@@ -1,12 +1,26 @@
 # ClubShell Central Server
 
-Центральный сервер клуба: REST `/api/v1/*` для агента, игрока (через агента) и кассы, позже — WebSocket `/ws/agent`.
+Центральный сервер клуба: REST `/api/v1/*` для агента, игрока (через агента) и кассы, WebSocket `/ws/agent`.
 Заменяет `tools/MockServer` в продакшене. Дизайн и план срезов — [`docs/server/DESIGN.md`](../docs/server/DESIGN.md);
 провод задаёт контракт `deepunites/club-contracts`, его копия лежит в [`contracts/`](contracts).
 
-Состояние: **срез S0** — скелет, миграции, аутентификация, `/health`, 501 на все операции контракта.
+Состояние: **срез S1** — агенты и WS hub поверх S0 (скелет, миграции, аутентификация, `/health`, 501).
 
-- Все 102 операции контракта смаплены и отвечают `501` с `error.code = notImplemented`, никогда `404`. Перед 501
+- Реализованы 8 операций агента: `register`, `refresh`, `heartbeat`, `sendTelemetry`, `getConfig`, `getPolicies`,
+  `getCommands`, `ackCommand`, и канал `/ws/agent` (рукопожатие, ping/pong, очередь команд с ack по WS и REST,
+  7 событий агента). Остальные 94 операции отвечают `501`.
+- Регистрация строгая (D-7): новый ПК получает `403 forbidden`, `details.reason = pendingApproval`, `details.pcId`, пока
+  владелец его не одобрит (`PATCH /admin/pcs/{pcId} {maintenance:false}` появится в S4; до этого —
+  `UPDATE pcs SET approved = true, maintenance = false`). `Club:AutoApprovePcs=true` — только для dev и тестов.
+  Неизвестный HWID с MAC живого ПК клуба (замена диска) создаёт ПК в ожидании с номером и именем старого места.
+- Refresh-токен одноразовый; повтор использованного отзывает все токены ПК (`401 reused`), WS закрывается `4401`.
+- Политика ПК берётся из `data/policy.json`, а если его нет — из `config/policies.example.json` (копируется в
+  `seed/`). Изменённый seed при старте поднимает `policyVersion`.
+- Команды лежат в `agent_commands` и доставляются при подключении и через REST; `pendingCommands` в heartbeat не
+  считает команды, уже отправленные по живому WS за последние 5 мин (N1).
+- Один инстанс на базу: при старте берётся `pg_try_advisory_lock('CSHub')` (при `Workers:Enabled`); занят — сервер
+  не стартует.
+- Все 102 операции контракта смаплены: нереализованные отвечают `501` с `error.code = notImplemented`, никогда `404`. Перед 501
   проверяется аутентификация в режиме операции (`club` / `agent` / `user` / `staff`, DESIGN §3.1). Режимы `user` и
   `staff` в S0 — заглушки: требуется только наличие `X-User-Token` / `Authorization: Bearer`.
 - Подпись запросов агента (HMAC, окно ±300 с) проверяется всегда; повтор подписи только журналируется (D-4).
@@ -18,8 +32,8 @@
 
 ```
 server/
-  ClubShell.Server.sln        сервер + тесты (+ src/ClubShell.Contracts)
-  contracts/                  вендорный контракт: openapi.yaml, asyncapi.yaml, openapi.json, REF
+  ClubShell.Server.sln        сервер + тесты (+ src/ClubShell.Contracts, src/ClubShell.Core — реальный агентский клиент для тестов)
+  contracts/                  вендорный контракт: openapi.yaml, asyncapi.yaml, openapi.json, asyncapi.json, REF
   scripts/sync-contracts.ps1  обновление contracts/ из club-contracts
   src/ClubShell.Server/       ASP.NET Core minimal API, net10.0
   tests/ClubShell.Server.Tests/  xunit + WebApplicationFactory + временная база PostgreSQL
@@ -56,16 +70,24 @@ dotnet test server/ClubShell.Server.sln
 ```
 
 Каждый ответ `/api/v1/*` в тестах проходит через `ContractValidatingHandler`: статус должен быть объявлен в контракте
-(501 допускается всегда), тело — соответствовать схеме из `contracts/openapi.json`.
+(501 допускается всегда), тело — соответствовать схеме из `contracts/openapi.json`. Кадры WS проверяются по сообщениям
+`contracts/asyncapi.json`. `AgentHarness` гоняет настоящий `ServerClient` и `RealtimeClient` из `src/ClubShell.Core`;
+WS-тесты поднимают Kestrel на `127.0.0.1` со случайным портом.
 
 CI: job `server` в `.github/workflows/server.yml` (ubuntu, сервис `postgres:18`).
 
 ## Конфигурация
 
-Все ключи и значения по умолчанию — таблица в DESIGN §2.5. В S0 используются: `ConnectionStrings:Club`,
+Все ключи и значения по умолчанию — таблица в DESIGN §2.5. Используются: `ConnectionStrings:Club`,
 `Database:MigrateOnStart`, `Contracts:OpenApiPath`, `Auth:Issuer` / `Audience` / `SigningKeyPath` /
-`AgentTokenMinutes` / `SignatureWindowSec`, `Club:Name` / `TimeZone` / `EnrollmentKey` / `PreviousEnrollmentKey`,
-`Proxy:Trusted` / `ClientIpHeader`, переменная окружения `PORT`.
+`AgentTokenMinutes` / `RefreshTokenDays` / `SignatureWindowSec`, `Club:Name` / `TimeZone` / `EnrollmentKey` /
+`PreviousEnrollmentKey` / `AutoApprovePcs`, `Realtime:PingSec` / `PongTimeoutSec` / `MaxFrameBytes`,
+`Agents:HeartbeatSec` / `OfflineAfterSec` / `CommandTtlMin`, `Sessions:GraceSec` / `MaxOfflineMinutes` (уходят в
+конфиг агента), `Catalog:PolicySeedPath`, `Workers:Enabled`, `Proxy:Trusted` / `ClientIpHeader`, переменная
+окружения `PORT`.
+
+`pcs.signing_secret` (HMAC-ключ подписи агента) хранится открытым: подпись симметрична (DESIGN §3.2). Резервные копии
+базы нужно защищать как секрет.
 
 `Proxy:ClientIpHeader` (Railway: `X-Real-IP`) включайте, только если сервер доступен исключительно через этот прокси:
 иначе клиент подставит любой адрес сам.
@@ -79,6 +101,6 @@ CI: job `server` в `.github/workflows/server.yml` (ubuntu, сервис `postgr
 ./server/scripts/sync-contracts.ps1 -Ref <commit>
 ```
 
-Скрипт берёт файлы из git-объектов коммита, пишет `REF` и пересобирает `openapi.json` (нужны git и python с PyYAML).
-CI проверяет, что `openapi.json` собран из `openapi.yaml` и что оба yaml совпадают с `club-contracts@REF`. Если
+Скрипт берёт файлы из git-объектов коммита, пишет `REF` и пересобирает `openapi.json` и `asyncapi.json` (нужны git и
+python с PyYAML). CI проверяет, что оба json собраны из своих yaml и что оба yaml совпадают с `club-contracts@REF`. Если
 коммит `REF` ещё не запушен в `deepunites/club-contracts`, сравнение пропускается с предупреждением.

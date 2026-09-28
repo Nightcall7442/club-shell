@@ -1,3 +1,4 @@
+using System.Buffers.Text;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -17,6 +18,9 @@ public sealed class AuthOptions
     public string SigningKeyPath { get; set; } = "data/jwt-signing-key.pem";
 
     public int AgentTokenMinutes { get; set; } = 60;
+
+    /// <summary>Lifetime of an agent refresh token, days.</summary>
+    public int RefreshTokenDays { get; set; } = 30;
 
     /// <summary>Request signature window, seconds (contract: ±300).</summary>
     public int SignatureWindowSec { get; set; } = 300;
@@ -66,6 +70,11 @@ public sealed class TokenService
         });
         return (token, expires);
     }
+
+    /// <summary>Opaque refresh token: 32 random bytes, base64url. Only its SHA-256 is stored (DESIGN §3.2).</summary>
+    public static string NewRefreshToken() => Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
+
+    public static byte[] HashRefreshToken(string token) => SHA256.HashData(Encoding.UTF8.GetBytes(token));
 
     /// <summary>The principal, or <c>null</c> and the 401 reason (<c>expired</c> | <c>invalid</c>).</summary>
     public async Task<(AgentPrincipal? Principal, string? Reason)> ValidateAsync(string token)

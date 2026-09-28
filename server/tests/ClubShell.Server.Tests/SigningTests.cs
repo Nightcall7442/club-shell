@@ -88,12 +88,12 @@ public sealed class SigningTests(ServerFixture server) : IClassFixture<ServerFix
         var agent = await TestAgent.CreateAsync(server);
         var ts = server.Clock.GetUtcNow().ToUnixTimeSeconds();
         var heartbeat = $"/api/v1/agents/{agent.PcId}/heartbeat";
-        foreach (var (method, target, body) in new[] { (HttpMethod.Get, Tariffs, (string?)null), (HttpMethod.Post, heartbeat, "{}") })
+        foreach (var (method, target, body, status) in new[] { (HttpMethod.Get, Tariffs, (string?)null, 501), (HttpMethod.Post, heartbeat, TestAgent.Heartbeat(), 200) })
         {
             for (var i = 0; i < 2; i++)
             {
                 using var response = await server.Http.SendAsync(agent.Request(method, target, body, timestamp: ts));
-                Assert.Equal(501, (int)response.StatusCode);
+                Assert.Equal(status, (int)response.StatusCode);
             }
         }
     }

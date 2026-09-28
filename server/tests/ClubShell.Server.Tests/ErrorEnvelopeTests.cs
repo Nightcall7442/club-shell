@@ -43,7 +43,7 @@ public sealed class ErrorEnvelopeTests(ServerFixture server) : IClassFixture<Ser
     [InlineData("not-a-guid")]
     public async Task Missing_or_invalid_trace_id_gets_a_new_guid(string? trace)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/agents/refresh") { Content = new StringContent("{}") };
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/admin/login") { Content = new StringContent("{}") };
         if (trace is not null)
         {
             request.Headers.Add(ApiErrorWriter.TraceHeader, trace);
