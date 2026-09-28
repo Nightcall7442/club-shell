@@ -7,6 +7,7 @@ using ClubShell.Contracts.Serialization;
 using ClubShell.Server.Agents;
 using ClubShell.Server.Auth;
 using ClubShell.Server.Infrastructure;
+using Npgsql;
 
 namespace ClubShell.Server.Realtime;
 
@@ -26,9 +27,9 @@ public sealed class RealtimeOptions
 /// (else close 4426). One connection per PC: a new one replaces the old (close 1000). On connect every pending command
 /// is delivered, oldest first. The server pings every <see cref="RealtimeOptions.PingSec"/> and drops a connection
 /// whose pong does not come within <see cref="RealtimeOptions.PongTimeoutSec"/>; the token's <c>exp</c>, a revocation
-/// or a Bearer/<c>?token=</c> mismatch close it with 4401, a frame over 1 MiB with 1009. Agent events are stored, acks
-/// go to <see cref="CommandRepository"/>, unknown frame types are ignored. Single instance (D-20): the registry lives in
-/// memory, commands in the database, so a restart loses nothing.
+/// or a Bearer/<c>?token=</c> mismatch close it with 4401, a frame over 1 MiB with 1009, server shutdown with 1001.
+/// Agent events are stored, acks go to <see cref="CommandRepository"/>, unknown frame types are ignored. Single instance
+/// (D-20): the registry lives in memory, commands in the database, so a restart loses nothing.
 /// </summary>
 public sealed class AgentSocketHub(
     TokenService tokens,
@@ -36,6 +37,7 @@ public sealed class AgentSocketHub(
     CommandRepository commands,
     RealtimeOptions options,
     TimeProvider clock,
+    IHostApplicationLifetime host,
     ILogger<AgentSocketHub> logger)
 {
     public const WebSocketCloseStatus Unauthorized = (WebSocketCloseStatus)4401;
@@ -60,7 +62,11 @@ public sealed class AgentSocketHub(
         return connection.Delivered.Where(d => d.Value > since).Select(d => d.Key).ToList();
     }
 
-    /// <summary>Sends a queued command if the PC is connected; a failure loses nothing, the command stays queued.</summary>
+    /// <summary>
+    /// Sends a queued command if the PC is connected; a failure loses nothing, the command stays queued. A connection
+    /// still delivering its backlog is waited for: a live command must not overtake older pending ones (§6.2, oldest
+    /// first; the agent honours <c>supersedes</c> only for a command it already has).
+    /// </summary>
     public async Task<bool> TrySendCommandAsync(Guid pcId, ServerCommandEnvelope command)
     {
         if (!_connections.TryGetValue(pcId, out var connection))
@@ -70,6 +76,7 @@ public sealed class AgentSocketHub(
 
         try
         {
+            await connection.Ready.Task.WaitAsync(connection.Lifetime.Token);
             await DeliverAsync(connection, [command], connection.Lifetime.Token);
             return true;
         }
@@ -127,19 +134,37 @@ public sealed class AgentSocketHub(
         }
 
         logger.LogInformation("Agent {PcId} connected over WebSocket", agent.Pc.Id);
+        using var stopping = host.ApplicationStopping.Register(() => _ = connection.CloseAsync(WebSocketCloseStatus.EndpointUnavailable, "server stopping"));
         Task[] background = [];
         try
         {
-            await DeliverAsync(connection, await commands.PendingAsync(agent.Pc.Id), lifetime.Token);
+            // A revocation committed between the token check above and the registration found no socket to close
+            // (RevokeAsync runs after the commit): cv is read again now that RevokeAsync would see this one (§6.7).
+            if (await pcs.FindAsync(agent.Pc.Id) is not { DeletedAt: null } pc || pc.CredentialsVersion != agent.Principal.CredentialsVersion)
+            {
+                await connection.CloseAsync(Unauthorized, "credentials revoked");
+            }
+            else
+            {
+                // Registered before the backlog is read, so no command falls in between; live sends wait for Ready.
+                await DeliverAsync(connection, await commands.PendingAsync(agent.Pc.Id), lifetime.Token);
+                connection.Ready.TrySetResult();
 
-            // Keepalive and expiry only send our close frame; the receive loop reads the peer's answer and ends the
-            // connection (CloseAsync drops it after a grace period when the peer stays silent).
-            background = [KeepAliveLoopAsync(connection, lifetime.Token), ExpiryAsync(agent, connection, lifetime.Token)];
+                // Keepalive and expiry only send our close frame; the receive loop reads the peer's answer and ends
+                // the connection (CloseAsync drops it after a grace period when the peer stays silent).
+                background = [KeepAliveLoopAsync(connection, lifetime.Token), ExpiryAsync(agent, connection, lifetime.Token)];
+            }
+
             await Swallow(ReceiveLoopAsync(agent, connection, lifetime.Token));
         }
         catch (Exception ex) when (ex is WebSocketException or OperationCanceledException)
         {
             // The peer vanished during redelivery; the commands stay queued.
+        }
+        catch (NpgsqlException ex)
+        {
+            // Past the upgrade the error middleware cannot answer; the agent reconnects and gets the backlog again.
+            logger.LogWarning(ex, "Database error on the socket of {PcId}", agent.Pc.Id);
         }
         finally
         {
@@ -164,7 +189,16 @@ public sealed class AgentSocketHub(
 
         if (batch.Count > 0)
         {
-            await commands.MarkDeliveredAsync(batch.Select(c => c.Id).ToList());
+            try
+            {
+                await commands.MarkDeliveredAsync(batch.Select(c => c.Id).ToList());
+            }
+            catch (NpgsqlException ex)
+            {
+                // The frames went out: a missing delivered_at only lets a later supersedes miss them, nothing is lost.
+                // Throwing would fail EnqueueAsync for a command that is queued and delivered, and a retry duplicates it.
+                logger.LogWarning(ex, "delivered_at not stored for {Count} command(s)", batch.Count);
+            }
         }
     }
 
@@ -209,7 +243,8 @@ public sealed class AgentSocketHub(
                 continue;
             }
 
-            if (frame is not null)
+            // After a 4401 the token no longer speaks for the PC: frames arriving within the close grace are dropped.
+            if (frame is not null && !connection.Revoked)
             {
                 await HandleFrameAsync(agent, connection, frame, cancellationToken);
             }
@@ -227,9 +262,17 @@ public sealed class AgentSocketHub(
                 await connection.SendAsync(WsFrame.PongFor(frame, clock.GetUtcNow()), cancellationToken);
                 break;
             case WsFrameType.Ack when frame.Ack is { } ack:
-                if (!await commands.AckAsync(agent.Pc.Id, ack.Id, new CommandAck(ack.Ok, ack.Error, ack.Result)))
+                try
                 {
-                    logger.LogWarning("Agent {PcId} acked unknown command {CommandId}", agent.Pc.Id, ack.Id);
+                    if (!await commands.AckAsync(agent.Pc.Id, ack.Id, new CommandAck(ack.Ok, ack.Error, ack.Result)))
+                    {
+                        logger.LogWarning("Agent {PcId} acked unknown command {CommandId}", agent.Pc.Id, ack.Id);
+                    }
+                }
+                catch (NpgsqlException ex)
+                {
+                    // As for events below: the socket stays, the command stays pending and its redelivery is re-acked.
+                    logger.LogWarning(ex, "Ack of {CommandId} from {PcId} not stored", ack.Id, agent.Pc.Id);
                 }
 
                 break;
@@ -239,7 +282,7 @@ public sealed class AgentSocketHub(
                 {
                     await pcs.WriteAgentEventAsync(agent.Pc, type, name, frame.Ts, frame.Payload ?? JsonElement.Parse("null"), clock.GetUtcNow());
                 }
-                catch (Npgsql.NpgsqlException ex)
+                catch (NpgsqlException ex)
                 {
                     // An event that cannot be stored must not cost the command channel; there is no ack for events.
                     logger.LogWarning(ex, "Event {Name} of {PcId} not stored", name, agent.Pc.Id);
@@ -322,8 +365,16 @@ public sealed class AgentSocketHub(
 
         public CancellationTokenSource Lifetime { get; } = lifetime;
 
+        private bool _revoked;
+
         /// <summary>Command id → when this socket delivered it.</summary>
         public ConcurrentDictionary<Guid, DateTimeOffset> Delivered { get; } = new();
+
+        /// <summary>Set once the backlog of pending commands went out; live sends wait for it.</summary>
+        public TaskCompletionSource Ready { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>A 4401 close has started: incoming frames are no longer handled.</summary>
+        public bool Revoked => Volatile.Read(ref _revoked);
 
         public Task ExpectPong(Guid pingId)
         {
@@ -362,6 +413,11 @@ public sealed class AgentSocketHub(
         /// <summary>Sends our close frame (once the socket still allows it) and drops the connection if the peer stays silent.</summary>
         public async Task CloseAsync(WebSocketCloseStatus status, string description)
         {
+            if (status == Unauthorized)
+            {
+                Volatile.Write(ref _revoked, true);
+            }
+
             try
             {
                 await _send.WaitAsync(Lifetime.Token);

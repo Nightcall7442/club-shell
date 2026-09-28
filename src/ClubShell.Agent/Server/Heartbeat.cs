@@ -300,7 +300,7 @@ public sealed class HeartbeatService : BackgroundService
     private Task DrainPendingCommandsAsync(Guid pcId, int pending, CancellationToken cancellationToken)
     {
         _logger.LogInformation("Fetching {Pending} pending command(s) over REST", pending);
-        return DrainCommandsAsync(_server, _commandSink, _clock, _logger, pcId, cancellationToken);
+        return DrainCommandsAsync(_server, _commandSink, _logger, pcId, cancellationToken);
     }
 
     /// <summary>
@@ -308,18 +308,16 @@ public sealed class HeartbeatService : BackgroundService
     /// known commands go to <paramref name="sink"/>, expired ones are acked <c>timeout</c> and names this agent does not
     /// know <c>notFound</c> (like the WebSocket path), so one item never blocks the rest of the batch.
     /// </summary>
-    /// <param name="server">Server client.</param>
+    /// <param name="server">Server client; its server-corrected clock decides expiry.</param>
     /// <param name="sink">Command dispatcher.</param>
-    /// <param name="clock">Clock for expiry checks.</param>
     /// <param name="logger">Logger.</param>
     /// <param name="pcId">This PC.</param>
     /// <param name="cancellationToken">Cancellation.</param>
     /// <returns>A task that completes once every fetched command has been acked (or its ack failed).</returns>
-    public static async Task DrainCommandsAsync(IServerClient server, IServerCommandSink sink, IClock clock, ILogger logger, Guid pcId, CancellationToken cancellationToken)
+    public static async Task DrainCommandsAsync(IServerClient server, IServerCommandSink sink, ILogger logger, Guid pcId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(server);
         ArgumentNullException.ThrowIfNull(sink);
-        ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(logger);
 
         ServerCommandsResponse commands;
@@ -336,7 +334,7 @@ public sealed class HeartbeatService : BackgroundService
         foreach (var envelope in commands.Items)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var ack = await ExecuteAsync(envelope, sink, clock, logger, cancellationToken).ConfigureAwait(false);
+            var ack = await ExecuteAsync(envelope, sink, server.ServerNow, logger, cancellationToken).ConfigureAwait(false);
             try
             {
                 await server.AckCommandAsync(pcId, envelope.Id, ack, cancellationToken).ConfigureAwait(false);
@@ -348,7 +346,7 @@ public sealed class HeartbeatService : BackgroundService
         }
     }
 
-    private static async Task<CommandAck> ExecuteAsync(ServerCommandEnvelope envelope, IServerCommandSink sink, IClock clock, ILogger logger, CancellationToken cancellationToken)
+    private static async Task<CommandAck> ExecuteAsync(ServerCommandEnvelope envelope, IServerCommandSink sink, DateTimeOffset serverNow, ILogger logger, CancellationToken cancellationToken)
     {
         ServerCommand command;
         try
@@ -361,7 +359,7 @@ public sealed class HeartbeatService : BackgroundService
             return CommandAck.Failure(IpcError.Of(ErrorCode.NotFound, $"Unknown command '{envelope.Name}'"));
         }
 
-        if (command.IsExpired(clock.UtcNow))
+        if (command.IsExpired(serverNow))
         {
             return CommandAck.Failure(IpcError.Timeout("Command expired before delivery"));
         }

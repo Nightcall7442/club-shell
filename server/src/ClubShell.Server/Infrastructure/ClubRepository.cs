@@ -38,7 +38,11 @@ public sealed class ClubRepository(NpgsqlDataSource db, TimeProvider clock)
 {
     /// <summary>
     /// First start creates the network and the club; every start writes the enrollment key hashes from config, so a
-    /// rotation is a config change plus restart. Serialized by a transaction-scoped advisory lock.
+    /// rotation is a config change plus restart. Every later start also bumps <c>config_version</c>: the agent config
+    /// carries <c>Agents:*</c>/<c>Sessions:*</c> from appsettings, which change only with a restart, and running agents
+    /// refetch it only when the heartbeat's <c>configVersion</c> changes (the ETag <c>"c&lt;v&gt;"</c> follows too).
+    /// ponytail: bumped even when those values did not change, one <c>GET /config</c> per PC per restart; store a
+    /// fingerprint of them if that ever costs. Serialized by a transaction-scoped advisory lock.
     /// </summary>
     public async Task EnsureAsync(ClubOptions options, CancellationToken cancellationToken = default)
     {
@@ -59,6 +63,10 @@ public sealed class ClubRepository(NpgsqlDataSource db, TimeProvider clock)
                 """,
                 new { networkId, clubId, name = options.Name, timeZone = options.TimeZone, now },
                 tx);
+        }
+        else
+        {
+            await c.ExecuteAsync("UPDATE clubs SET config_version = config_version + 1, updated_at = @now WHERE id = @clubId", new { clubId, now }, tx);
         }
 
         await c.ExecuteAsync(

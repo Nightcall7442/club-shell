@@ -84,7 +84,7 @@ public sealed class PcRepository(NpgsqlDataSource db)
         await using var tx = await c.BeginTransactionAsync();
         await c.ExecuteAsync("SELECT 1 FROM clubs WHERE id = @clubId FOR UPDATE", new { clubId }, tx);
 
-        var hardware = JsonDefaults.Serialize(request.Hardware);
+        var hardware = ServerJson.Jsonb(JsonDefaults.Serialize(request.Hardware));
         var known = await c.QuerySingleOrDefaultAsync<PcRow>(
             $"SELECT {Columns} FROM pcs WHERE hwid = @hwid AND deleted_at IS NULL", new { hwid = request.Hwid }, tx);
         Guid id;
@@ -207,7 +207,7 @@ public sealed class PcRepository(NpgsqlDataSource db)
             """,
             new
             {
-                id, now, heartbeat = JsonDefaults.Serialize(request), agentVersion = request.AgentVersion,
+                id, now, heartbeat = ServerJson.Jsonb(JsonDefaults.Serialize(request)), agentVersion = request.AgentVersion,
                 shellVersion = request.ShellVersion, ip = request.IpAddress,
             });
     }
@@ -227,7 +227,7 @@ public sealed class PcRepository(NpgsqlDataSource db)
             SELECT @pcId, at, data::jsonb FROM unnest(@ats, @data) AS s(at, data)
             ON CONFLICT DO NOTHING
             """,
-            new { pcId = pc.Id, ats = batch.Samples.Select(s => Utc(s.At)).ToArray(), data = batch.Samples.Select(s => JsonDefaults.Serialize(s)).ToArray() },
+            new { pcId = pc.Id, ats = batch.Samples.Select(s => Utc(s.At)).ToArray(), data = batch.Samples.Select(s => ServerJson.Jsonb(JsonDefaults.Serialize(s))).ToArray() },
             tx);
         await c.ExecuteAsync(
             """
@@ -239,12 +239,12 @@ public sealed class PcRepository(NpgsqlDataSource db)
                 clubId = pc.ClubId, pcId = pc.Id, now,
                 kinds = batch.Events.Select(e => e.Kind).ToArray(),
                 ats = batch.Events.Select(e => Utc(e.At)).ToArray(),
-                data = batch.Events.Select(e => e.Data.GetRawText()).ToArray(),
+                data = batch.Events.Select(e => ServerJson.Jsonb(e.Data.GetRawText())).ToArray(),
             },
             tx);
         if (batch.Hardware is { } hardware)
         {
-            await c.ExecuteAsync("UPDATE pcs SET hardware = @hardware::jsonb WHERE id = @id", new { id = pc.Id, hardware = JsonDefaults.Serialize(hardware) }, tx);
+            await c.ExecuteAsync("UPDATE pcs SET hardware = @hardware::jsonb WHERE id = @id", new { id = pc.Id, hardware = ServerJson.Jsonb(JsonDefaults.Serialize(hardware)) }, tx);
         }
 
         await tx.CommitAsync();
@@ -258,7 +258,7 @@ public sealed class PcRepository(NpgsqlDataSource db)
     public async Task WriteAgentEventAsync(PcRow pc, AgentEventType type, string name, DateTimeOffset at, JsonElement payload, DateTimeOffset now)
     {
         await using var c = await db.OpenConnectionAsync();
-        var data = payload.GetRawText();
+        var data = ServerJson.Jsonb(payload.GetRawText());
         if (type == AgentEventType.AnticheatViolation)
         {
             await c.ExecuteAsync(
@@ -269,7 +269,7 @@ public sealed class PcRepository(NpgsqlDataSource db)
 
         if (type == AgentEventType.HardwareChanged && payload.TryGetProperty("hardware", out var hardware) && hardware.ValueKind == JsonValueKind.Object)
         {
-            await c.ExecuteAsync("UPDATE pcs SET hardware = @hardware::jsonb WHERE id = @id", new { id = pc.Id, hardware = hardware.GetRawText() });
+            await c.ExecuteAsync("UPDATE pcs SET hardware = @hardware::jsonb WHERE id = @id", new { id = pc.Id, hardware = ServerJson.Jsonb(hardware.GetRawText()) });
         }
 
         await c.ExecuteAsync(

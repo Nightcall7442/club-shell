@@ -152,6 +152,35 @@ public sealed class AgentHarnessRealtimeTests(KestrelServerFixture server) : ICl
     }
 
     [Fact]
+    public async Task Agent_clock_two_hours_ahead_still_executes_a_live_socket_command()
+    {
+        await using var agent = await AgentHarness.CreateAsync(server);
+        var pcId = (await agent.Client.RegisterAsync(agent.RegisterRequest(), CancellationToken.None)).PcId;
+        var dispatcher = server.Services.GetRequiredService<CommandDispatcher>();
+        var commands = server.Services.GetRequiredService<CommandRepository>();
+
+        // Local time stored as UTC: the PC clock leads by 2 h, far past the 10 min command expiry.
+        agent.Clock.Advance(TimeSpan.FromHours(2));
+        var handled = 0;
+        agent.Realtime.CommandHandler = (_, _) =>
+        {
+            Interlocked.Increment(ref handled);
+            return Task.FromResult(CommandAck.Success());
+        };
+        using var stop = new CancellationTokenSource();
+        var run = agent.Realtime.RunAsync(null, stop.Token);
+        await Wait.UntilAsync(() => Hub.IsConnected(pcId));
+
+        var live = await dispatcher.EnqueueAsync(await ClubOfAsync(pcId), pcId, NewCommand.Lock(new LockCommand("staff")));
+        var ack = await commands.WaitForAckAsync(live.Id, TimeSpan.FromSeconds(10), CancellationToken.None);
+        Assert.True(ack!.Ok);
+        Assert.Equal(1, handled);
+
+        await stop.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+    }
+
+    [Fact]
     public async Task A_second_connection_of_the_pc_replaces_the_first_with_1000()
     {
         await using var agent = await AgentHarness.CreateAsync(server);

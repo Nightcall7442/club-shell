@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.WebSockets;
 using System.Text;
@@ -15,8 +16,8 @@ namespace ClubShell.Server.Tests;
 
 /// <summary>
 /// <c>/ws/agent</c> on a real Kestrel socket (DESIGN §6.1–6.3, §6.7): 401 before the upgrade, 4426 without
-/// <c>clubshell.v1</c>, Bearer vs <c>?token=</c>, replacement 1000, pong timeout, 1009, redelivery on connect, 4401 at
-/// <c>exp</c> and on revocation.
+/// <c>clubshell.v1</c>, Bearer vs <c>?token=</c>, replacement 1000, pong timeout, 1009, redelivery on connect (a live
+/// command after the backlog), 4401 at <c>exp</c> and on revocation (also one racing the connect), 1001 on shutdown.
 /// </summary>
 public sealed class SocketHubTests(KestrelServerFixture server) : IClassFixture<KestrelServerFixture>
 {
@@ -152,22 +153,109 @@ public sealed class SocketHubTests(KestrelServerFixture server) : IClassFixture<
     }
 
     [Fact]
+    public async Task A_revocation_between_the_token_check_and_the_registration_still_closes_4401()
+    {
+        var agent = await TestAgent.CreateAsync(server);
+        var db = server.Services.GetRequiredService<NpgsqlDataSource>();
+        var connected = $"Agent {agent.PcId} connected over WebSocket";
+
+        // The hook runs after the socket is registered, before the hub reads cv again: a re-registration committed
+        // there (cv + 1, then RevokeAsync) is the race where RevokeAsync found no socket to close.
+        server.Services.GetRequiredService<ILoggerFactory>().AddProvider(new LogHook(message =>
+        {
+            if (message == connected)
+            {
+                using var c = db.OpenConnection();
+                c.Execute("UPDATE pcs SET credentials_version = credentials_version + 1 WHERE id = @id", new { id = agent.PcId });
+            }
+        }));
+
+        // Bounded: an open socket answers pings forever, so ClosedAsync alone would never return.
+        using var socket = await WsTestSocket.ConnectAsync(server, agent.AccessToken);
+        Assert.Equal((WebSocketCloseStatus)4401, await socket.ClosedAsync().WaitAsync(TimeSpan.FromSeconds(10)));
+    }
+
+    [Fact]
+    public async Task A_live_command_waits_for_the_backlog_of_a_new_connection()
+    {
+        var agent = await TestAgent.CreateAsync(server);
+        var dispatcher = server.Services.GetRequiredService<CommandDispatcher>();
+        var club = await ClubOfAsync(agent);
+        var expected = new List<Guid>();
+        for (var i = 0; i < 300; i++)
+        {
+            expected.Add((await dispatcher.EnqueueAsync(club, agent.PcId, NewCommand.ReloadPolicy())).Id);
+        }
+
+        // The command is issued the moment the socket is registered, while the 300 older ones are still going out.
+        var connecting = WsTestSocket.ConnectAsync(server, agent.AccessToken);
+        Assert.True(SpinWait.SpinUntil(() => Hub.IsConnected(agent.PcId), TimeSpan.FromSeconds(10)));
+        var unlock = await dispatcher.EnqueueAsync(club, agent.PcId, NewCommand.Unlock());
+        expected.Add(unlock.Id);
+
+        using var socket = await connecting;
+        var received = new List<Guid>();
+        while (!received.Contains(unlock.Id))
+        {
+            received.Add((await socket.ReceiveAsync()).GetProperty("id").GetGuid());
+        }
+
+        Assert.Equal(expected, received);
+    }
+
+    [Fact]
+    public async Task Server_shutdown_closes_1001_without_waiting_for_the_host_timeout()
+    {
+        var own = new KestrelServerFixture();
+        await own.InitializeAsync();
+        var agent = await TestAgent.CreateAsync(own);
+        var hub = own.Services.GetRequiredService<AgentSocketHub>();
+        using var socket = await WsTestSocket.ConnectAsync(own, agent.AccessToken);
+        await Wait.UntilAsync(() => hub.IsConnected(agent.PcId));
+
+        var watch = Stopwatch.StartNew();
+        var stopping = ((IAsyncLifetime)own).DisposeAsync();
+        Assert.Equal(WebSocketCloseStatus.EndpointUnavailable, await socket.ClosedAsync());
+        await socket.Socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, CancellationToken.None);
+        await stopping;
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(15), $"host stopped after {watch.Elapsed}");
+    }
+
+    [Fact]
     public async Task Only_one_instance_holds_the_hub_lock()
     {
         var db = server.Services.GetRequiredService<NpgsqlDataSource>();
         var logs = server.Services.GetRequiredService<ILoggerFactory>();
         await using var first = new HubLock(db, logs.CreateLogger<HubLock>());
         await using var second = new HubLock(db, logs.CreateLogger<HubLock>());
-        await first.StartAsync(CancellationToken.None);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => second.StartAsync(CancellationToken.None));
-        await first.StopAsync(CancellationToken.None);
-        await second.StartAsync(CancellationToken.None);
+        await first.AcquireAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => second.AcquireAsync());
+        await first.DisposeAsync();
+        await second.AcquireAsync();
     }
 
     private async Task<Guid> ClubOfAsync(TestAgent agent)
     {
         await using var c = await server.Services.GetRequiredService<NpgsqlDataSource>().OpenConnectionAsync();
         return await c.QuerySingleAsync<Guid>("SELECT club_id FROM pcs WHERE id = @id", new { id = agent.PcId });
+    }
+
+    /// <summary>Runs a callback inside the server's logging call: a hook at a known point of its flow.</summary>
+    private sealed class LogHook(Action<string> onMessage) : ILoggerProvider, ILogger
+    {
+        public ILogger CreateLogger(string categoryName) => this;
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            onMessage(formatter(state, exception));
+
+        public void Dispose()
+        {
+        }
     }
 }
 

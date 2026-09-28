@@ -44,8 +44,23 @@ public sealed class ConfigTests(ServerFixture server) : IClassFixture<ServerFixt
 
         using var cached = agent.Request(HttpMethod.Get, agent.Path("config"));
         cached.Headers.TryAddWithoutValidation("If-None-Match", "\"c1\"");
-        using var notModified = await server.Http.SendAsync(cached);
-        Assert.Equal(304, (int)notModified.StatusCode);
+        using (var notModified = await server.Http.SendAsync(cached))
+        {
+            Assert.Equal(304, (int)notModified.StatusCode);
+        }
+
+        // A restart may carry other Agents:*/Sessions:* values: the version moves, so agents refetch and "c1" is stale.
+        await server.Services.GetRequiredService<ClubRepository>().EnsureAsync(server.Services.GetRequiredService<ClubOptions>());
+        using (var restarted = await agent.SendAsync(HttpMethod.Post, agent.Path("heartbeat"), TestAgent.Heartbeat()))
+        {
+            Assert.Equal(2, (await restarted.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("configVersion").GetInt32());
+        }
+
+        using var stale = agent.Request(HttpMethod.Get, agent.Path("config"));
+        stale.Headers.TryAddWithoutValidation("If-None-Match", "\"c1\"");
+        using var fresh = await server.Http.SendAsync(stale);
+        Assert.Equal(200, (int)fresh.StatusCode);
+        Assert.Equal("\"c2\"", fresh.Headers.ETag!.ToString());
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 # ClubShell central server (server/, docs/server/DESIGN.md).
 #
+#   changes  ubuntu  does this push/PR touch the server or what it builds from? (dorny/paths-filter)
 #   server   ubuntu  restore/build (-warnaserror)/test of server/ClubShell.Server.sln against a postgres:18 service,
 #                    then contract drift: server/contracts vs deepunites/club-contracts at server/contracts/REF
 #
@@ -7,28 +8,14 @@
 
 name: Server
 
+# No workflow-level `paths:` filter: the server check is required on main, and a workflow skipped by `paths:` leaves a
+# required check pending forever. The `changes` job decides instead; a job skipped by `if:` reports success.
 on:
   push:
     branches:
       - main
       - 'release/**'
-    paths:
-      - 'server/**'
-      - 'src/ClubShell.Contracts/**'
-      - 'Directory.*.props'
-      - 'global.json'
-      - 'nuget.config'
-      - '.editorconfig'
-      - '.github/workflows/server.yml'
   pull_request:
-    paths:
-      - 'server/**'
-      - 'src/ClubShell.Contracts/**'
-      - 'Directory.*.props'
-      - 'global.json'
-      - 'nuget.config'
-      - '.editorconfig'
-      - '.github/workflows/server.yml'
 
 permissions:
   contents: read
@@ -43,8 +30,37 @@ env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
 
 jobs:
+  changes:
+    name: Detect server changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      server: ${{ steps.filter.outputs.server }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Classify changed files
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            server:
+              - 'server/**'
+              - 'src/ClubShell.Contracts/**'
+              - 'src/ClubShell.Core/**'
+              - 'Directory.*.props'
+              - 'global.json'
+              - 'nuget.config'
+              - '.editorconfig'
+              - '.github/workflows/server.yml'
+
   server:
     name: Server (build, test on PostgreSQL 18)
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:

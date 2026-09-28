@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using ClubShell.Contracts.Commands;
 using ClubShell.Contracts.Serialization;
+using ClubShell.Server.Infrastructure;
 using Dapper;
 using Npgsql;
 
@@ -43,7 +44,7 @@ public sealed class CommandRepository(NpgsqlDataSource db, TimeProvider clock)
                 WHERE id = @supersedes AND pc_id = @pcId AND delivered_at IS NULL AND acked_at IS NULL)
             SELECT id FROM inserted
             """,
-            new { clubId, pcId, name, payload = payload?.GetRawText(), issuedByStaffId, supersedes, now, expiresAt = now + ttl });
+            new { clubId, pcId, name, payload = payload is { } p ? ServerJson.Jsonb(p.GetRawText()) : null, issuedByStaffId, supersedes, now, expiresAt = now + ttl });
         return new ServerCommandEnvelope(id, now, name, payload, null, supersedes, now + ttl);
     }
 
@@ -60,7 +61,11 @@ public sealed class CommandRepository(NpgsqlDataSource db, TimeProvider clock)
             r.Id, r.CreatedAt, r.Name, r.Payload is null ? null : JsonElement.Parse(r.Payload), null, r.Supersedes, r.ExpiresAt)).ToList();
     }
 
-    /// <summary>Pending commands except <paramref name="liveOnWs"/> (N1: those the current live socket already carries).</summary>
+    /// <summary>
+    /// Pending commands except <paramref name="liveOnWs"/> (N1: those the current live socket already carries), so it
+    /// may be less than <c>GET /commands</c> returns. The vendored contract (AsyncAPI §7, <c>HeartbeatResponse</c>) counts
+    /// WS-sent commands too; the wording change is DESIGN §12.2 item 8.
+    /// </summary>
     public async Task<int> PendingCountAsync(Guid pcId, IReadOnlyCollection<Guid> liveOnWs)
     {
         await using var c = await db.OpenConnectionAsync();
@@ -83,7 +88,7 @@ public sealed class CommandRepository(NpgsqlDataSource db, TimeProvider clock)
         await using var c = await db.OpenConnectionAsync();
         var found = await c.ExecuteAsync(
             "UPDATE agent_commands SET acked_at = @now, ack = @ack::jsonb WHERE id = @commandId AND pc_id = @pcId",
-            new { pcId, commandId, now = clock.GetUtcNow(), ack = JsonDefaults.Serialize(ack) }) == 1;
+            new { pcId, commandId, now = clock.GetUtcNow(), ack = ServerJson.Jsonb(JsonDefaults.Serialize(ack)) }) == 1;
         if (found && _waiters.TryGetValue(commandId, out var waiter))
         {
             waiter.TrySetResult(ack);

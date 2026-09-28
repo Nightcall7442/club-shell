@@ -126,8 +126,14 @@ public static class AgentEndpoints
         AgentOptions agents, TimeProvider clock)
     {
         Require(request.AgentVersion, "agentVersion");
-        Require(request.ShellVersion, "shellVersion");
-        Require(request.IpAddress, "ipAddress");
+
+        // Keys required, values may be empty (the contract sets no minLength): an agent without a usable IPv4 adapter
+        // sends "" and must still beat, or it never learns versions, pending commands or the clock offset.
+        if (request.ShellVersion is null || request.IpAddress is null)
+        {
+            throw ApiException.Validation(request.ShellVersion is null ? "shellVersion" : "ipAddress", "required");
+        }
+
         if (request.RunningGames is null)
         {
             throw ApiException.Validation("runningGames", "required");

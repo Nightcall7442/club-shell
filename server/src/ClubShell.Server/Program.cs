@@ -52,9 +52,10 @@ builder.Services.AddSingleton<IdempotencyStore>();
 builder.Services.AddSingleton<CommandRepository>();
 builder.Services.AddSingleton<AgentSocketHub>();
 builder.Services.AddSingleton<CommandDispatcher>();
-if (builder.Configuration.GetValue("Workers:Enabled", true))
+var workers = builder.Configuration.GetValue("Workers:Enabled", true);
+if (workers)
 {
-    builder.Services.AddHostedService<HubLock>();
+    builder.Services.AddSingleton<HubLock>();
 }
 builder.Services.Configure<ForwardedHeadersOptions>(o =>
 {
@@ -68,6 +69,12 @@ builder.Services.Configure<ForwardedHeadersOptions>(o =>
 });
 
 var app = builder.Build();
+
+// Single-instance guard (DESIGN §6.8) before anything below writes shared state: migrations, enrollment key, policy seed.
+if (workers)
+{
+    await app.Services.GetRequiredService<HubLock>().AcquireAsync();
+}
 
 if (builder.Configuration.GetValue("Database:MigrateOnStart", true))
 {

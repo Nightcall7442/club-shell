@@ -213,6 +213,38 @@ public sealed class AgentApiTests(ServerFixture server) : IClassFixture<ServerFi
     }
 
     [Fact]
+    public async Task Heartbeat_accepts_an_empty_ip_and_shell_version()
+    {
+        // The agent sends "" when no usable IPv4 adapter exists; the contract requires the keys, not a value.
+        var agent = await TestAgent.CreateAsync(server);
+        var body = TestAgent.Heartbeat().Replace("\"ipAddress\":\"10.0.0.12\"", "\"ipAddress\":\"\"").Replace("\"shellVersion\":\"1.4.2\"", "\"shellVersion\":\"\"");
+        using var response = await agent.SendAsync(HttpMethod.Post, agent.Path("heartbeat"), body);
+        Assert.Equal(200, (int)response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Telemetry_with_a_nul_character_is_stored_not_failed()
+    {
+        // jsonb rejects \u0000: without the replacement the batch fails with 500 and the agent retries it forever.
+        var agent = await TestAgent.CreateAsync(server);
+        var now = server.Clock.GetUtcNow();
+        var batch = JsonSerializer.Serialize(new
+        {
+            samples = Array.Empty<object>(),
+            events = new[] { new { kind = "shellCrash", at = now, data = new { module = "shell\0.dll", path = "C:\\u0000" } } },
+        });
+        using (var response = await agent.SendAsync(HttpMethod.Post, agent.Path("telemetry"), batch))
+        {
+            Assert.Equal(204, (int)response.StatusCode);
+        }
+
+        await using var c = await server.Services.GetRequiredService<NpgsqlDataSource>().OpenConnectionAsync();
+        var (module, path) = await c.QuerySingleAsync<(string, string)>("SELECT data->>'module', data->>'path' FROM telemetry_events WHERE pc_id = @id", new { id = agent.PcId });
+        Assert.Equal("shell\ufffd.dll", module);
+        Assert.Equal("C:\\u0000", path);
+    }
+
+    [Fact]
     public async Task Telemetry_takes_120_samples_and_1024_events_and_keeps_callAdmin()
     {
         var agent = await TestAgent.CreateAsync(server);

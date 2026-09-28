@@ -53,6 +53,13 @@ public sealed class ServerConnection : IHostedService, IDisposable
 {
     private const string IdentityFileName = "agent-identity.json";
     private static readonly TimeSpan TokenRefreshLeeway = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// Floor on the wait before a proactive refresh + reconnect. A token that still looks expired right after a refresh
+    /// (clock offset not learned yet) would otherwise refresh and reconnect in a tight loop.
+    /// </summary>
+    public static readonly TimeSpan MinRefreshDelay = TimeSpan.FromMinutes(1);
+
     private static readonly TimeSpan RegisterRetryMin = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan RegisterRetryMax = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan MaxTimerWait = TimeSpan.FromDays(1);
@@ -227,7 +234,7 @@ public sealed class ServerConnection : IHostedService, IDisposable
         var attempt = 0;
         while (!cancellationToken.IsCancellationRequested)
         {
-            if (_tokens.Agent is { } existing && !existing.IsExpired(_clock.UtcNow, TokenRefreshLeeway))
+            if (_tokens.Agent is { } existing && !existing.IsExpired(_server.ServerNow, TokenRefreshLeeway))
             {
                 _pcId = existing.PcId;
                 await PersistPcIdAsync(existing.PcId, cancellationToken).ConfigureAwait(false);
@@ -275,7 +282,8 @@ public sealed class ServerConnection : IHostedService, IDisposable
     }
 
     /// <summary>
-    /// Waits until <paramref name="leeway"/> before the current agent token expires, refreshes it (unless another caller
+    /// Waits until <paramref name="leeway"/> before the current agent token expires (by <paramref name="serverNow"/>, as
+    /// <c>exp</c> is server time), but at least <see cref="MinRefreshDelay"/>, refreshes it (unless another caller
     /// already replaced it) and calls <paramref name="reconnect"/> so the open WebSocket switches to the new token before
     /// the server closes it with 4401 at <c>exp</c>.
     /// </summary>
@@ -284,6 +292,7 @@ public sealed class ServerConnection : IHostedService, IDisposable
         Func<CancellationToken, Task> refresh,
         Action reconnect,
         IClock clock,
+        Func<DateTimeOffset> serverNow,
         TimeSpan leeway,
         CancellationToken cancellationToken)
     {
@@ -291,16 +300,23 @@ public sealed class ServerConnection : IHostedService, IDisposable
         ArgumentNullException.ThrowIfNull(refresh);
         ArgumentNullException.ThrowIfNull(reconnect);
         ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(serverNow);
         if (tokens.Agent is not { } current)
         {
             return;
         }
 
-        TimeSpan wait;
-        while ((wait = current.ExpiresAt - leeway - clock.UtcNow) > TimeSpan.Zero)
+        var wait = current.ExpiresAt - leeway - serverNow();
+        if (wait < MinRefreshDelay)
+        {
+            wait = MinRefreshDelay;
+        }
+
+        do
         {
             await clock.Delay(wait < MaxTimerWait ? wait : MaxTimerWait, cancellationToken).ConfigureAwait(false);
         }
+        while ((wait = current.ExpiresAt - leeway - serverNow()) > TimeSpan.Zero);
 
         if (tokens.Agent?.AccessToken == current.AccessToken)
         {
@@ -337,7 +353,7 @@ public sealed class ServerConnection : IHostedService, IDisposable
     {
         try
         {
-            await RefreshBeforeExpiryAsync(_tokens, RefreshOrReregisterAsync, _reconnector.TriggerReconnect, _clock, TokenRefreshLeeway, cancellationToken).ConfigureAwait(false);
+            await RefreshBeforeExpiryAsync(_tokens, RefreshOrReregisterAsync, _reconnector.TriggerReconnect, _clock, () => _server.ServerNow, TokenRefreshLeeway, cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("Agent token refreshed before expiry; reconnecting the WebSocket with the new token");
         }
         catch (OperationCanceledException)
@@ -359,7 +375,7 @@ public sealed class ServerConnection : IHostedService, IDisposable
             return;
         }
 
-        if (tokens.IsExpired(_clock.UtcNow, TokenRefreshLeeway))
+        if (tokens.IsExpired(_server.ServerNow, TokenRefreshLeeway))
         {
             await RefreshOrReregisterAsync(cancellationToken).ConfigureAwait(false);
         }
