@@ -4,7 +4,8 @@
     Rust toolchain, Developer Mode, the kiosk test user, D:\Games, a firewall rule for the mock server, and
     `pnpm install`. Idempotent; every step is skipped when already done. Supports -WhatIf.
 .DESCRIPTION
-    Installs (winget, silent, license accepted): Git.Git, OpenJS.NodeJS.LTS, Microsoft.DotNet.SDK.8,
+    Installs (winget, silent, license accepted): Git.Git, OpenJS.NodeJS.LTS, Microsoft.DotNet.SDK.10 and
+    Microsoft.DotNet.SDK.8 (global.json pins SDK 10; the 8.0 runtime runs the net8.0 agent tests),
     Rustlang.Rustup (+ toolchain from rust-toolchain.toml with rustfmt/clippy and the x86_64-pc-windows-msvc target),
     Microsoft.VisualStudio.2022.BuildTools with the "Desktop development with C++" workload (override args; an
     existing Build Tools install is modified in place when the workload is missing), Microsoft.EdgeWebView2Runtime
@@ -213,6 +214,7 @@ try {
     Write-Step 'Toolchains'
     Install-WingetPackage -Id 'Git.Git' -Name 'Git' | Out-Null
     Install-WingetPackage -Id 'OpenJS.NodeJS.LTS' -Name 'Node.js LTS' | Out-Null
+    Install-WingetPackage -Id 'Microsoft.DotNet.SDK.10' -Name '.NET SDK 10' | Out-Null
     Install-WingetPackage -Id 'Microsoft.DotNet.SDK.8' -Name '.NET SDK 8' | Out-Null
     Install-WingetPackage -Id 'Microsoft.EdgeWebView2Runtime' -Name 'WebView2 Runtime' | Out-Null
     if ($WithWindowsSdk) { Install-WingetPackage -Id 'Microsoft.WindowsSDK.10.0.22621' -Name 'Windows SDK (signtool)' | Out-Null }

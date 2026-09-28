@@ -294,7 +294,7 @@ try {
     if ($hasDotnetSdk) { Write-Ok "dotnet SDK $((Get-NativeOutput -Command 'dotnet' -Arguments @('--version')).Output -join '')" }
     $needsPublish = $ForceAgentPublish -or -not (Test-Path -LiteralPath (Join-Path $agentPublish 'ClubShellAgent.exe'))
     if (($needsPublish -or -not $SkipInstaller) -and -not $hasDotnetSdk) {
-        Write-Host 'ERROR: the .NET 8 SDK is required to publish the Agent / build the installer (winget install Microsoft.DotNet.SDK.8).' -ForegroundColor Red
+        Write-Host 'ERROR: the .NET 10 SDK (global.json) is required to publish the Agent / build the installer (winget install Microsoft.DotNet.SDK.10).' -ForegroundColor Red
         exit 2
     }
 

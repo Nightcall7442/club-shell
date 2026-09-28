@@ -261,7 +261,7 @@ VITE_MOCK=1 pnpm --filter @clubshell/shell dev   # → http://localhost:1420
 
 ```powershell
 Copy-Item .env.example .env
-.\tools\scripts\setup-dev-vm.ps1     # winget: Node, pnpm, .NET 8 SDK, Rust, VS Build Tools, WebView2 (нужен admin)
+.\tools\scripts\setup-dev-vm.ps1     # winget: Node, pnpm, .NET SDK 10 + 8, Rust, VS Build Tools, WebView2 (нужен admin)
 .\tools\scripts\dev.ps1              # mock-сервер + `tauri dev` (реальное киоск-окно, mock-транспорт агента)
 .\tools\scripts\dev.ps1 -Agent       # … плюс настоящий агент консольным процессом (--console --dev)
 .\tools\scripts\dev.ps1 -WebOnly     # mock-сервер + Vite в браузере (без Rust)

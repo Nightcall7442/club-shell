@@ -171,10 +171,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up .NET SDK (global.json)
+      # SDK from global.json (10.x) plus the 8.0 runtime: the agent projects, their tests and ContractsGen are net8.0.
+      - name: Set up .NET SDK (global.json) and .NET 8 runtime
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+          dotnet-version: 8.0.x
 
       - name: Restore
         run: dotnet restore ClubShell.sln
@@ -203,10 +205,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up .NET SDK (global.json)
+      # SDK from global.json (10.x) plus the 8.0 runtime: the agent projects, their tests and ContractsGen are net8.0.
+      - name: Set up .NET SDK (global.json) and .NET 8 runtime
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+          dotnet-version: 8.0.x
 
       - name: Set up pnpm (version from packageManager)
         uses: pnpm/action-setup@v4

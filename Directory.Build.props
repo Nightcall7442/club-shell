@@ -15,6 +15,8 @@
     <!-- NuGet vulnerability audit (NU1901-NU1904) stays a warning: a newly published advisory must not break every build. -->
     <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <!-- SDK 10 ships newer analyzers than the pinned NetAnalyzers 8.0.0 package and warns about it; the package wins. -->
+    <_SkipUpgradeNetAnalyzersNuGetWarning>true</_SkipUpgradeNetAnalyzersNuGetWarning>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <Deterministic>true</Deterministic>
     <Platforms>AnyCPU;x64</Platforms>

@@ -142,7 +142,7 @@ $exitCode = 0
 try {
     Write-Step 'Checking toolchain'
     if (-not (Test-DotnetSdk)) {
-        Write-Host 'ERROR: the .NET 8 SDK is required (winget install Microsoft.DotNet.SDK.8).' -ForegroundColor Red
+        Write-Host 'ERROR: the .NET 10 SDK is required, global.json (winget install Microsoft.DotNet.SDK.10).' -ForegroundColor Red
         exit 2
     }
     Write-Ok "dotnet SDK $((Get-NativeOutput -Command 'dotnet' -Arguments @('--version')).Output -join '')"

@@ -1,0 +1,128 @@
+# ClubShell central server (server/, docs/server/DESIGN.md).
+#
+#   server   ubuntu  restore/build (-warnaserror)/test of server/ClubShell.Server.sln against a postgres:18 service,
+#                    then contract drift: server/contracts vs deepunites/club-contracts at server/contracts/REF
+#
+# Separate from ci.yml: the server needs PostgreSQL and runs on Linux like production; the agent jobs stay on Windows.
+
+name: Server
+
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+    paths:
+      - 'server/**'
+      - 'src/ClubShell.Contracts/**'
+      - 'Directory.*.props'
+      - 'global.json'
+      - 'nuget.config'
+      - '.editorconfig'
+      - '.github/workflows/server.yml'
+  pull_request:
+    paths:
+      - 'server/**'
+      - 'src/ClubShell.Contracts/**'
+      - 'Directory.*.props'
+      - 'global.json'
+      - 'nuget.config'
+      - '.editorconfig'
+      - '.github/workflows/server.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
+
+jobs:
+  server:
+    name: Server (build, test on PostgreSQL 18)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          # Throwaway CI container, reachable only from this job.
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      CLUBSHELL_TEST_PG: Host=localhost;Port=5432;Username=postgres;Password=postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET SDK (global.json)
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore server/ClubShell.Server.sln
+
+      - name: Build
+        run: dotnet build server/ClubShell.Server.sln -c Release --no-restore /warnaserror
+
+      - name: Test
+        run: dotnet test server/ClubShell.Server.sln -c Release --no-build --logger trx --results-directory artifacts/server-test-results
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-test-results
+          path: artifacts/server-test-results
+          if-no-files-found: warn
+          retention-days: 14
+
+      # openapi.json must be openapi.yaml converted (the schema tests read the json, the 501 table the yaml), and both
+      # yaml files must equal club-contracts at REF. REF may be a club-contracts commit that is not pushed yet (52a895a,
+      # branch shell-changes-p0-p1): then the remote comparison is skipped with a warning, so main does not go red over
+      # another repository. Once REF is fetchable the comparison is strict.
+      - name: Contract drift (server/contracts vs club-contracts@REF)
+        shell: bash
+        env:
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+          python3 -c 'import yaml' 2>/dev/null || python3 -m pip install --quiet --user --break-system-packages pyyaml
+          python3 - <<'PY'
+          import json, sys, yaml
+          with open('server/contracts/openapi.yaml', encoding='utf-8') as f:
+              expected = yaml.safe_load(f)
+          with open('server/contracts/openapi.json', encoding='utf-8') as f:
+              actual = json.load(f)
+          if expected != actual:
+              print('::error file=server/contracts/openapi.json::not generated from openapi.yaml; run server/scripts/sync-contracts.ps1')
+              sys.exit(1)
+          PY
+
+          ref=$(tr -d '[:space:]' < server/contracts/REF)
+          checkout="$RUNNER_TEMP/club-contracts"
+          git init -q "$checkout"
+          if ! git -C "$checkout" fetch -q --depth 1 https://github.com/deepunites/club-contracts.git "$ref"; then
+            echo "::warning file=server/contracts/REF::club-contracts@$ref cannot be fetched (not pushed yet or not accessible); drift check skipped"
+            exit 0
+          fi
+
+          failed=0
+          for pair in openapi/openapi.yaml:openapi.yaml asyncapi/asyncapi.yaml:asyncapi.yaml; do
+            if ! git -C "$checkout" show "FETCH_HEAD:${pair%%:*}" | cmp -s - "server/contracts/${pair##*:}"; then
+              echo "::error file=server/contracts/${pair##*:}::differs from club-contracts@$ref:${pair%%:*}; run server/scripts/sync-contracts.ps1"
+              failed=1
+            fi
+          done
+          exit $failed

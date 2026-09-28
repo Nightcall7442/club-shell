@@ -45,6 +45,9 @@ blob-report/
 installer/out/
 
 # ---- Environment / secrets ----
+# Central server runtime state (JWT signing key, PIN pepper, seed JSON; server/README.md). Source code must never
+# live in a folder named data/ or Data/: on Windows they are the same folder (migrations are in Db/).
+server/**/data/
 .env
 .env.*
 !.env.example
