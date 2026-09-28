@@ -1213,6 +1213,9 @@ public enum AdMediaType
 
     /// <summary>Video.</summary>
     Video,
+
+    /// <summary>A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the server.</summary>
+    Unknown,
 }
 
 /// <summary>Payload of <c>admin.message</c>.</summary>

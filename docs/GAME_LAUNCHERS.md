@@ -77,9 +77,9 @@ which is stripped before the process is created.
 | Launcher exe | `agent.json → games.launchers.steam.exePath`; else `HKLM\SOFTWARE\WOW6432Node\Valve\Steam\InstallPath` / `HKLM\SOFTWARE\Valve\Steam\InstallPath` + `steam.exe`; else `%ProgramFiles(x86)%\Steam\steam.exe` (`GameDetector.ResolveLauncherExe`, `SteamRoot`) |
 | Install detection | `GameDetector.DetectSteam`: for every library in `steamapps\libraryfolders.vdf` (parsed by `VdfNode`), read `steamapps\appmanifest_<appid>.acf`; `StateFlags & 4` must be set (fully installed); install dir = `steamapps\common\<installdir>`, size from `SizeOnDisk`, version from `buildid` |
 | `launcherAppId` | numeric app id (validated: digits only → `validation{launcherAppId}`) |
-| Command | `steam.exe [-login <user> <pass>] -applaunch <appid> [game.Args] [extraArgs]` |
+| Command | `steam.exe -applaunch <appid> [game.Args] [extraArgs]`; `-login <user> <pass>` is prepended only when `games.accountPool.allowPasswordOnCommandLine` is on (section 6.2) |
 | Game process | `ExpectedProcessNames` default = file name of `game.ExePath`; when the catalogue has no `exePath`, any non-helper process whose image lives under the install dir |
-| Credential injection | `SteamStrategy`: `-login user pass` on the command line (through `CLUBSHELL_LAUNCHER_ARGS`), and `<steam>\config\loginusers.vdf` patched so every stored user has `RememberPassword=0`, `MostRecent=0`, `AllowAutoLogin=0` (backed up, restored after exit) |
+| Credential injection | `SteamStrategy`, no password on the command line by default. With session files in `extra.files` (e.g. `%LOCALAPPDATA%\Steam\local.vdf`): written to the kiosk profile, and `HKU\<kioskSID>\Software\Valve\Steam` gets `AutoLoginUser = <username>`, `RememberPassword = 1`. Without them: `AutoLoginUser = ""`, `RememberPassword = 0` in the kiosk hive (`AccountInjector.SteamAutoLogin`), `<steam>\config\loginusers.vdf` best effort (every user `RememberPassword=0`, `MostRecent=0`, `AllowAutoLogin=0`, restored after exit; a read-only Steam volume is only logged), and Steam starts without credentials (`injectionError` in the launch report). After exit the kiosk hive is reset to `AutoLoginUser = ""` again |
 | Cleanup | launcher processes `steam.exe`, `steamwebhelper.exe` killed before injection and after exit; no Credential Manager filter |
 | Save dir default | `%USERPROFILE%\Saved Games\{title}` |
 
@@ -89,10 +89,10 @@ which is stripped before the process is created.
 |--------|----------------|
 | Launcher exe | configured path, else `%ProgramFiles(x86)%\Epic Games\Launcher\Portal\Binaries\Win32\EpicGamesLauncher.exe` |
 | Install detection | `DetectEpic`: every `%ProgramData%\Epic\EpicGamesLauncher\Data\Manifests\*.item` (JSON); matches `AppName`, `CatalogNamespace:CatalogItemId` or `CatalogItemId` against `launcherAppId`; skips `bIsIncompleteInstall`; `InstallLocation`, `InstallSize`, `AppVersionString` |
-| Command | `EpicGamesLauncher.exe [-AUTH_LOGIN=… -AUTH_PASSWORD=… -AUTH_TYPE=password] com.epicgames.launcher://apps/<id>?action=launch&silent=true` |
+| Command | `EpicGamesLauncher.exe [auth args] com.epicgames.launcher://apps/<id>?action=launch&silent=true`; auth args are `-AUTH_LOGIN=unused -AUTH_PASSWORD=<exchange code> -AUTH_TYPE=exchangecode`, or the password form only when `allowPasswordOnCommandLine` is on |
 | Arguments | the URL cannot carry game arguments; `game.Args` / `extraArgs` are ignored (debug log) |
 | Game process | as Steam (expected exe name or install-dir fallback) |
-| Credential injection | `EpicStrategy`: `-AUTH_LOGIN/-AUTH_PASSWORD/-AUTH_TYPE=password` launch args; `%LOCALAPPDATA%\EpicGamesLauncher\Saved\Config\Windows\GameUserSettings.ini` stripped of `[RememberMe] Data=/Enable=`; then `extra.files` |
+| Credential injection | `EpicStrategy`: `%LOCALAPPDATA%\EpicGamesLauncher\Saved\Config\Windows\GameUserSettings.ini` stripped of `[RememberMe] Data=/Enable=`; then `extra.files` (a `GameUserSettings.ini` with the leased account's `[RememberMe]` counts as a session); a lease with `extra.authType = "exchangeCode"` carries a one-time exchange code in `secret`, passed as `-AUTH_TYPE=exchangecode`. No exchange code and no session files → no auth args, `injectionError` in the launch report |
 | Cleanup | kills `EpicGamesLauncher.exe`, `EpicWebHelper.exe`; Credential Manager filter `Epic*` |
 | Save dir default | `%LOCALAPPDATA%\{title}\Saved` |
 
@@ -226,11 +226,24 @@ strategy.InjectAsync(game, lease, launcherExe)
         │  ProfileFiles.ApplyAsync: lease.extra.files { "<path>": "<base64>" } — %LOCALAPPDATA% / %APPDATA% / %USERPROFILE%
         │     expanded against IKioskProfilePaths; any target outside the kiosk profile is refused (warning)
         ▼
-InjectionResult(ExtraArgs, EnvVars, RestoreAction)
+InjectionResult(ExtraArgs, EnvVars, RestoreAction, Error)
         │  ExtraArgs → LaunchContext.Env["CLUBSHELL_LAUNCHER_ARGS"] → placed on the launcher command line by LauncherBase
+        │  Error → LaunchReport.injectionError (launch phase)
         ▼
 CloudSaveSync.DownloadAsync(game, lease)   (section 7)
 ```
+
+`AccountInjector.CredentialArgs` is the only place a lease secret can reach a command line: an Epic exchange code
+(single use, minutes-long), or the account password (Steam `-login`, Epic `-AUTH_PASSWORD`) only when
+`games.accountPool.allowPasswordOnCommandLine` is on and the lease brought no session files. Every use of the password
+path logs a `SECURITY:` warning. The setting is off by default because any process in the kiosk session can read a
+command line (WMI `Win32_Process.CommandLine`, Task Manager). A re-used lease (`reuseLeaseId`, same game and session)
+carries an already spent exchange code; Epic then shows its login form.
+
+`injectionError` (launch report, `LaunchReport.InjectionError`) is set when a Steam or Epic launcher was not prepared
+cleanly: the kiosk hive's Steam auto-login could not be written (`HKU\<kioskSID>` not loaded, access denied), the
+remembered Epic login could not be stripped, or the lease had neither session files nor an exchange code. Several
+problems are joined with `; `. Other launchers keep logging only.
 
 `IKioskProfilePaths` is implemented by `ShellLauncher` (`SHELL_REPLACEMENT.md`): `UserProfile` from
 `ProfileList\<sid>\ProfileImagePath`, `LocalAppData`, `RoamingAppData`.
@@ -242,7 +255,8 @@ injection. Never throws.
 
 1. Kill the launcher client again (`LauncherProcessNames`).
 2. `InjectionResult.RestoreAsync` → `FileBackups.RestoreAsync`: original bytes written back, files that did not exist
-   deleted.
+   deleted. Steam first resets `HKU\<kioskSID>\Software\Valve\Steam` to `AutoLoginUser = ""`, `RememberPassword = 0`
+   so neither the leased account nor one the player ticked "remember me" for carries over.
 3. `ClearCredentialManagerAsync`: obtains the kiosk session token (`ProcessAsUser.GetUserToken(session)`),
    duplicates it, `WindowsIdentity.RunImpersonated`, then `Advapi32.EnumerateCredentials(filter)` +
    `Advapi32.CredDeleteW` for every `CredentialFilters(launcher)` pattern — removes tokens the launcher stored in the
@@ -325,7 +339,8 @@ Exit processing (`GameSessionTracker.WatchAsync`, one task per tracked pid): wai
 | Epic / EA / Ubisoft | URL launches cannot pass game arguments | `game.Args` and `extraArgs` are ignored with a debug log |
 | Battle.net | `--exec="launch <code>"` requires the client to be logged in; there is no password argument | `SavedAccountNames` pre-fills the account, `extra.files` may carry a session; otherwise the player types the password |
 | Battle.net | Product codes are not the display names (`pro` = Overwatch, `fenris` = Diablo IV) | `BattleNetProducts` / `ProductExes` tables |
-| Steam | `-login` on the command line is visible to `Process.GetProcesses` callers in the same session | Accepted: the kiosk user owns the session; the argument is not logged by the Agent |
+| Steam / Epic | A password on the command line is visible to every process in the kiosk session | Not used by default; only behind `games.accountPool.allowPasswordOnCommandLine` (off), logged as a `SECURITY:` warning on every use |
+| Steam | The Steam directory can sit on a read-only games volume, so `loginusers.vdf` cannot be patched | Auto-login is reset in the kiosk user's hive instead; `loginusers.vdf` is best effort |
 | Steam | Steam Guard / mobile confirmation on a fresh PC | Out of scope for the Agent; pool accounts must be pre-authorised on the club image |
 | All stores | Auto-updates on launch delay process discovery | `launchTimeoutSec` (default 90 s) is the only knob; pre-update games during maintenance |
 | All | `WaitForGameProcess` can match a wrong process when the catalogue has no `exePath` and the install dir also hosts a launcher stub | Provide `exePath` in the catalogue; path fallback is disabled once names are known |
@@ -397,10 +412,11 @@ restored, lease released (`launchFailed`), `game.stateChanged{failed, error}`, l
 | `scanIntervalSec` | 900 | reserved: parsed into `GamesSettings` but no periodic rescan timer reads it today; `GameLibrary.RescanAsync` runs on demand (`games.list` refresh) |
 | `launchTimeoutSec` | 90 | `LaunchRequest.LaunchTimeoutSec`, `WaitForGameProcessAsync` |
 | `killGraceSec` | 10 | `LauncherBase.KillAsync` graceful window, `KillAllAsync` wait |
-| `accountPool.enabled` | true | `AccountPool.Enabled` (disabled → `accountPoolExhausted` for games needing an account) |
+| `accountPool.enabled` | false (server config turns it on) | `AccountPool.Enabled` (disabled → `accountPoolExhausted` for games needing an account) |
 | `accountPool.leaseTtlSec` | 14400 | server-side hint; expiry is `AccountLease.ExpiresAt` |
 | `accountPool.releaseOnExit` | true | release on game exit |
-| `cloudSave.enabled` / `root` / `maxMb` | true / `cache\saves` / 512 | `CloudSaveSync` |
+| `accountPool.allowPasswordOnCommandLine` | false | `AccountInjector.CredentialArgs`: last-resort Steam `-login` / Epic `-AUTH_PASSWORD` when a lease has no session files or exchange code |
+| `cloudSave.enabled` / `root` / `maxMb` | false (server config turns it on) / `cache\saves` / 512 | `CloudSaveSync` |
 | `launchers.<steam\|epic\|battleNet\|riot\|ea\|ubisoft>.exePath` | see `config/agent.default.json` | `GameDetector.ResolveLauncherExe` first candidate |
 
 Related policy: `policies.json → processAllowlist` is evaluated against the game's exe name before every launch

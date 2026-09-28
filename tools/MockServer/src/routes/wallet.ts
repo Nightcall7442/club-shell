@@ -25,11 +25,12 @@ import {
   uuid,
   uzs,
   type TopupIntentRecord,
+  knownValues,
 } from '../db.js';
 import { pushToUser } from '../ws.js';
 
-const PROVIDERS = Object.values(TopupProvider);
-const TX_TYPES = Object.values(TransactionType);
+const PROVIDERS = knownValues(TopupProvider);
+const TX_TYPES = knownValues(TransactionType);
 const AUTO_PAY_AFTER_MS = 10_000;
 const INTENT_TTL_SEC = 900;
 

@@ -8,7 +8,11 @@ using Microsoft.Extensions.Options;
 
 namespace ClubShell.Agent.Games.Launchers;
 
-/// <summary>Steam: <c>steam.exe [-login user pass] -applaunch &lt;appid&gt; [args]</c>, then waits for the game executable.</summary>
+/// <summary>
+/// Steam: <c>steam.exe -applaunch &lt;appid&gt; [args]</c>, then waits for the game executable. Account-pool credentials
+/// come from the kiosk profile (<c>AccountInjector</c>); <c>-login user pass</c> is prepended only when
+/// <c>games.accountPool.allowPasswordOnCommandLine</c> is on.
+/// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class SteamLauncher : LauncherBase
 {

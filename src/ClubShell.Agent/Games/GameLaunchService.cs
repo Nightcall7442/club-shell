@@ -3,6 +3,7 @@ using System.Runtime.Versioning;
 using ClubShell.Agent.Games.Accounts;
 using ClubShell.Agent.Games.Launchers;
 using ClubShell.Agent.Games.Saves;
+using ClubShell.Agent.Session;
 using ClubShell.Contracts.Commands;
 using ClubShell.Contracts.Errors;
 using ClubShell.Contracts.Games;
@@ -64,6 +65,7 @@ public sealed class GameLaunchService : IDisposable
     private readonly GameSessionTracker _tracker;
     private readonly IKioskSessionLocator _kiosk;
     private readonly IServerClient _server;
+    private readonly OfflineSessionStore _outbox;
     private readonly IGameEventSink _events;
     private readonly IOptionsMonitor<AgentSettings> _settings;
     private readonly IClock _clock;
@@ -83,6 +85,7 @@ public sealed class GameLaunchService : IDisposable
         GameSessionTracker tracker,
         IKioskSessionLocator kiosk,
         IServerClient server,
+        OfflineSessionStore outbox,
         IGameEventSink events,
         IOptionsMonitor<AgentSettings> settings,
         IClock clock,
@@ -101,6 +104,7 @@ public sealed class GameLaunchService : IDisposable
         _tracker = tracker;
         _kiosk = kiosk;
         _server = server;
+        _outbox = outbox;
         _events = events;
         _settings = settings;
         _clock = clock;
@@ -271,12 +275,13 @@ public sealed class GameLaunchService : IDisposable
             int durationMs = (int)_clock.GetElapsedTime(startedTs).TotalMilliseconds;
             var running = new RunningGame(game.Id, game.Title, pid, result.StartedAt, lease?.LeaseId, GameState.Running);
             await _tracker.TrackAsync(new GameLaunchRecord(game, effective, running, lease, injection, antiCheat, job, durationMs), cancellationToken).ConfigureAwait(false);
+            string? injectionError = injection?.Error;
             job = null;
             injection = null;
             lease = null;
 
             await PublishAsync(new GameStateChanged(game.Id, game.Title, GameState.Running, _clock.UtcNow, pid), cancellationToken).ConfigureAwait(false);
-            await ReportAsync(game, effective, result, durationMs, antiCheat, cancellationToken).ConfigureAwait(false);
+            await ReportAsync(game, effective, result, durationMs, antiCheat, injectionError, cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("{Title} running as pid {Pid} after {Duration} ms", game.Title, pid, durationMs);
             return result;
         }
@@ -365,6 +370,16 @@ public sealed class GameLaunchService : IDisposable
         GC.SuppressFinalize(this);
     }
 
+    /// <summary>
+    /// Anti-cheat the launch gate checks for <paramref name="game"/>: the catalogue value, except that a Riot title the
+    /// catalogue did not tag is treated as Vanguard (every current Riot game ships it).
+    /// </summary>
+    public static AntiCheatKind EffectiveAntiCheat(Game game)
+    {
+        ArgumentNullException.ThrowIfNull(game);
+        return game.AntiCheat == AntiCheatKind.None && game.Launcher == LauncherType.Riot ? AntiCheatKind.Vanguard : game.AntiCheat;
+    }
+
     /// <summary>Strips control characters and caps the length of caller-supplied arguments.</summary>
     public static string? SanitizeArgs(string? args)
     {
@@ -423,6 +438,7 @@ public sealed class GameLaunchService : IDisposable
 
     private async Task<AntiCheatCheckResult> CheckAntiCheatAsync(Game game, CancellationToken cancellationToken)
     {
+        game = game with { AntiCheat = EffectiveAntiCheat(game) };
         if (game.AntiCheat == AntiCheatKind.None)
         {
             return new AntiCheatCheckResult(AntiCheatKind.None, true);
@@ -466,21 +482,14 @@ public sealed class GameLaunchService : IDisposable
 
         var result = LaunchResult.Failure(error, startedAt, lease?.LeaseId);
         await PublishAsync(new GameStateChanged(game.Id, game.Title, GameState.Failed, _clock.UtcNow, null, null, error), ct).ConfigureAwait(false);
-        await ReportAsync(game, request, result, (int)_clock.GetElapsedTime(startedTs).TotalMilliseconds, antiCheat, ct).ConfigureAwait(false);
+        await ReportAsync(game, request, result, (int)_clock.GetElapsedTime(startedTs).TotalMilliseconds, antiCheat, injection?.Error, ct).ConfigureAwait(false);
         return result;
     }
 
-    private async Task ReportAsync(Game game, LaunchRequest request, LaunchResult result, int durationMs, AntiCheatCheckResult antiCheat, CancellationToken cancellationToken)
+    private Task ReportAsync(Game game, LaunchRequest request, LaunchResult result, int durationMs, AntiCheatCheckResult antiCheat, string? injectionError, CancellationToken cancellationToken)
     {
-        var report = new LaunchReport(request.SessionId, request.UserId, result, durationMs, game.Launcher, antiCheat, LaunchReportPhase.Launch);
-        try
-        {
-            await _server.SendLaunchReportAsync(game.Id, report, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is ServerApiException or HttpRequestException || (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
-        {
-            _logger.LogWarning(ex, "Launch report for {Title} not delivered", game.Title);
-        }
+        var report = new LaunchReport(request.SessionId, request.UserId, result, durationMs, game.Launcher, antiCheat, LaunchReportPhase.Launch, InjectionError: injectionError);
+        return _outbox.SendLaunchReportAsync(_server, game.Id, report, cancellationToken);
     }
 
     private async Task PublishAsync(GameStateChanged change, CancellationToken cancellationToken)

@@ -247,7 +247,7 @@ export interface Db {
   achievements: Record<string, Achievement[]>;
   stats: Record<string, UserStats>;
   lastPlayed: Record<string, Record<string, string>>;
-  updateManifests: Record<UpdateChannel, Record<UpdateComponent, UpdateManifest>>;
+  updateManifests: Record<Known<UpdateChannel>, Record<Known<UpdateComponent>, UpdateManifest>>;
   agentTokens: Record<string, AgentTokenRecord>;
   refreshTokens: Record<string, RefreshTokenRecord>;
   userTokens: Record<string, UserTokenRecord>;
@@ -374,6 +374,14 @@ export function bool(o: JsonObject, key: string): boolean {
   const v = o[key];
   if (typeof v !== 'boolean') throw errors.validation(key, 'required');
   return v;
+}
+
+/** An enum's wire values without the read-side `unknown` sentinel, which the mock never accepts or stores. */
+export type Known<T extends string> = Exclude<T, 'unknown'>;
+
+/** `Object.values(e)` minus `unknown`, for request validation lists. */
+export function knownValues<T extends string>(e: Readonly<Record<string, T>>): Known<T>[] {
+  return Object.values(e).filter((v): v is Known<T> => v !== 'unknown');
 }
 
 export function oneOf<T extends string>(o: JsonObject, key: string, values: readonly T[]): T {
@@ -1194,7 +1202,6 @@ function seedApps(): App[] {
   const rows: [slug: string, title: string, exe: string, category: string][] = [
     ['chrome', 'Google Chrome', 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', 'browser'],
     ['discord', 'Discord', 'C:\\Users\\club\\AppData\\Local\\Discord\\Update.exe', 'voice'],
-    ['telegram', 'Telegram Desktop', 'C:\\Program Files\\Telegram Desktop\\Telegram.exe', 'tool'],
     ['spotify', 'Spotify', 'C:\\Users\\club\\AppData\\Roaming\\Spotify\\Spotify.exe', 'media'],
     ['obs', 'OBS Studio', 'C:\\Program Files\\obs-studio\\bin\\64bit\\obs64.exe', 'tool'],
     ['vlc', 'VLC media player', 'C:\\Program Files\\VideoLAN\\VLC\\vlc.exe', 'media'],
@@ -1349,7 +1356,7 @@ function seedTournaments(t0: number, users: UserRecord[]): TournamentRecord[] {
 }
 
 function seedManifests(t0: number): Db['updateManifests'] {
-  const mk = (channel: UpdateChannel, component: UpdateComponent, version: string): UpdateManifest => ({
+  const mk = (channel: Known<UpdateChannel>, component: Known<UpdateComponent>, version: string): UpdateManifest => ({
     channel,
     component,
     version,

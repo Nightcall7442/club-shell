@@ -42,8 +42,8 @@ public interface IConnectivityEventSink
 
 /// <summary>
 /// Owns the Agent's relationship with the central server (SERVER_API.md §2, §6): registers the PC (or reuses valid
-/// tokens), keeps the access token fresh, and runs the <see cref="RealtimeClient"/> WebSocket under a
-/// <see cref="Reconnector"/>. Commands are routed to <see cref="IServerCommandSink"/>, pushes to
+/// tokens), keeps the access token fresh (refreshing it shortly before <c>exp</c> and reconnecting the live socket with
+/// it), and runs the <see cref="RealtimeClient"/> WebSocket under a <see cref="Reconnector"/>. Commands are routed to <see cref="IServerCommandSink"/>, pushes to
 /// <see cref="IServerPushSink"/>, and connectivity transitions to <see cref="IConnectivityEventSink"/>. Registered as
 /// a singleton and as an <see cref="IHostedService"/>; other services take it to read <see cref="PcId"/>,
 /// <see cref="IsOnline"/> and <see cref="ServerTimeOffset"/>.
@@ -55,6 +55,7 @@ public sealed class ServerConnection : IHostedService, IDisposable
     private static readonly TimeSpan TokenRefreshLeeway = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan RegisterRetryMin = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan RegisterRetryMax = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan MaxTimerWait = TimeSpan.FromDays(1);
 
     private readonly IServerClient _server;
     private readonly ITokenStore _tokens;
@@ -273,10 +274,48 @@ public sealed class ServerConnection : IHostedService, IDisposable
         _logger.LogInformation("Registered as PC {PcId} ({PcName}, zone {Zone})", response.PcId, response.Pc.Name, response.Pc.Zone);
     }
 
+    /// <summary>
+    /// Waits until <paramref name="leeway"/> before the current agent token expires, refreshes it (unless another caller
+    /// already replaced it) and calls <paramref name="reconnect"/> so the open WebSocket switches to the new token before
+    /// the server closes it with 4401 at <c>exp</c>.
+    /// </summary>
+    public static async Task RefreshBeforeExpiryAsync(
+        ITokenStore tokens,
+        Func<CancellationToken, Task> refresh,
+        Action reconnect,
+        IClock clock,
+        TimeSpan leeway,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(tokens);
+        ArgumentNullException.ThrowIfNull(refresh);
+        ArgumentNullException.ThrowIfNull(reconnect);
+        ArgumentNullException.ThrowIfNull(clock);
+        if (tokens.Agent is not { } current)
+        {
+            return;
+        }
+
+        TimeSpan wait;
+        while ((wait = current.ExpiresAt - leeway - clock.UtcNow) > TimeSpan.Zero)
+        {
+            await clock.Delay(wait < MaxTimerWait ? wait : MaxTimerWait, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (tokens.Agent?.AccessToken == current.AccessToken)
+        {
+            await refresh(cancellationToken).ConfigureAwait(false);
+        }
+
+        reconnect();
+    }
+
     private async Task ConnectAndRunAsync(CancellationToken cancellationToken)
     {
         await EnsureFreshTokenAsync(cancellationToken).ConfigureAwait(false);
 
+        using var connection = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var refresher = RefreshLiveTokenAsync(connection.Token);
         try
         {
             await _realtime.RunAsync(_reconnector.MarkConnected, cancellationToken).ConfigureAwait(false);
@@ -286,6 +325,29 @@ public sealed class ServerConnection : IHostedService, IDisposable
             _logger.LogWarning("WebSocket rejected the token; refreshing before the next attempt");
             await RefreshOrReregisterAsync(cancellationToken).ConfigureAwait(false);
             throw;
+        }
+        finally
+        {
+            await connection.CancelAsync().ConfigureAwait(false);
+            await refresher.ConfigureAwait(false);
+        }
+    }
+
+    private async Task RefreshLiveTokenAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await RefreshBeforeExpiryAsync(_tokens, RefreshOrReregisterAsync, _reconnector.TriggerReconnect, _clock, TokenRefreshLeeway, cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation("Agent token refreshed before expiry; reconnecting the WebSocket with the new token");
+        }
+        catch (OperationCanceledException)
+        {
+            // The connection ended first.
+        }
+        catch (Exception ex)
+        {
+            // Not fatal: the server closes the socket with 4401 at exp and the reconnect path refreshes then.
+            _logger.LogWarning(ex, "Refreshing the agent token before expiry failed");
         }
     }
 

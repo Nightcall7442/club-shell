@@ -5,12 +5,17 @@ using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using ClubShell.Agent.Policy;
 using ClubShell.Contracts.Errors;
 using ClubShell.Contracts.Games;
 using ClubShell.Contracts.Ipc;
+using ClubShell.Core.Configuration;
 using ClubShell.Windows.Native;
 using ClubShell.Windows.Processes;
+using ClubShell.Windows.Registry;
 using ClubShell.Windows.Sessions;
+using Microsoft.Extensions.Options;
+using Microsoft.Win32;
 using Microsoft.Win32.SafeHandles;
 
 namespace ClubShell.Agent.Games.Accounts;
@@ -29,10 +34,11 @@ public interface IKioskProfilePaths
 }
 
 /// <summary>Outcome of a credential injection.</summary>
-/// <param name="ExtraArgs">Arguments placed on the launcher command line before the launch command (e.g. Steam <c>-login</c>), or <see langword="null"/>.</param>
+/// <param name="ExtraArgs">Arguments placed on the launcher command line before the launch command (see <see cref="AccountInjector.CredentialArgs"/>), or <see langword="null"/>.</param>
 /// <param name="EnvVars">Extra environment variables for the launcher process (never credentials).</param>
 /// <param name="RestoreAction">Undo action (restores backed-up config files); <see langword="null"/> when nothing was changed.</param>
-public sealed record InjectionResult(string? ExtraArgs, IReadOnlyDictionary<string, string> EnvVars, Func<CancellationToken, Task>? RestoreAction)
+/// <param name="Error">Why the launcher was not prepared cleanly (sent as <see cref="LaunchReport.InjectionError"/>), or <see langword="null"/>.</param>
+public sealed record InjectionResult(string? ExtraArgs, IReadOnlyDictionary<string, string> EnvVars, Func<CancellationToken, Task>? RestoreAction, string? Error = null)
 {
     /// <summary>Nothing injected, nothing to restore.</summary>
     public static InjectionResult None { get; } = new(null, ImmutableDictionary<string, string>.Empty, null);
@@ -59,6 +65,12 @@ public interface ILauncherCredentialStrategy
 [SupportedOSPlatform("windows")]
 public sealed class AccountInjector
 {
+    /// <summary><c>extra.authType</c> of an Epic lease whose <see cref="AccountLease.Secret"/> is a one-time exchange code, not a password.</summary>
+    public const string ExchangeCodeAuthType = "exchangeCode";
+
+    /// <summary>Steam's per-user key; <see cref="SteamAutoLogin"/> writes it in the kiosk user's hive.</summary>
+    public const string SteamUserKey = @"Software\Valve\Steam";
+
     private const uint DuplicateSameAccess = 0x2;
     private static readonly TimeSpan KillGrace = TimeSpan.FromSeconds(5);
 
@@ -75,18 +87,22 @@ public sealed class AccountInjector
         IKioskSessionLocator kiosk,
         GameDetector detector,
         ProcessKiller killer,
+        IKioskCredentials kioskAccount,
+        IOptionsMonitor<AgentSettings> settings,
         ILogger<AccountInjector> logger)
     {
+        ArgumentNullException.ThrowIfNull(settings);
         _profile = profile;
         _kiosk = kiosk;
         _detector = detector;
         _killer = killer;
         _logger = logger;
         var files = new ProfileFiles(profile, logger);
+        Func<bool> allowPassword = () => settings.CurrentValue.Games.AccountPool.AllowPasswordOnCommandLine;
         _strategies = new ILauncherCredentialStrategy[]
         {
-            new SteamStrategy(logger),
-            new EpicStrategy(files, logger),
+            new SteamStrategy(files, kioskAccount, allowPassword, logger),
+            new EpicStrategy(files, allowPassword, logger),
             new BattleNetStrategy(files, logger),
             new RiotStrategy(files),
             new EaStrategy(files, logger),
@@ -117,6 +133,51 @@ public sealed class AccountInjector
         LauncherType.Ubisoft => new[] { "Ubisoft*", "Uplay*" },
         _ => Array.Empty<string>(),
     };
+
+    /// <summary>
+    /// The only place a lease secret may reach a launcher command line. An Epic lease with <c>extra.authType</c> =
+    /// <see cref="ExchangeCodeAuthType"/> carries a one-time exchange code (<c>-AUTH_TYPE=exchangecode</c>). Otherwise the
+    /// account password goes on the command line (Steam <c>-login</c>, Epic <c>-AUTH_PASSWORD</c>) only when
+    /// <paramref name="allowPasswordOnCommandLine"/> (<c>games.accountPool.allowPasswordOnCommandLine</c>, default off)
+    /// and no session files were injected; in every other case there are no arguments.
+    /// </summary>
+    public static string? CredentialArgs(LauncherType launcher, string username, string secret, string? authType, bool sessionInjected, bool allowPasswordOnCommandLine)
+    {
+        ArgumentNullException.ThrowIfNull(username);
+        ArgumentNullException.ThrowIfNull(secret);
+        if (IsExchangeCode(launcher, authType))
+        {
+            return "-AUTH_LOGIN=unused -AUTH_PASSWORD=" + Quote(secret) + " -AUTH_TYPE=exchangecode";
+        }
+
+        if (sessionInjected || !allowPasswordOnCommandLine)
+        {
+            return null;
+        }
+
+        return launcher switch
+        {
+            LauncherType.Steam => "-login " + Quote(username) + " " + Quote(secret),
+            LauncherType.Epic => "-AUTH_LOGIN=" + Quote(username) + " -AUTH_PASSWORD=" + Quote(secret) + " -AUTH_TYPE=password",
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Steam auto-login values for <c>HKEY_USERS\&lt;kioskSid&gt;\</c><see cref="SteamUserKey"/>: the kiosk user's hive,
+    /// never the (possibly read-only) Steam directory. An empty <paramref name="autoLoginUser"/> clears auto-login
+    /// (<c>AutoLoginUser = ""</c>, <c>RememberPassword = 0</c>).
+    /// </summary>
+    public static IReadOnlyList<(string Key, string Name, object Value, RegistryValueKind Kind)> SteamAutoLogin(string kioskSid, string autoLoginUser)
+    {
+        ArgumentNullException.ThrowIfNull(autoLoginUser);
+        string key = RegistryHelper.UserHiveKey(kioskSid, SteamUserKey);
+        return new (string, string, object, RegistryValueKind)[]
+        {
+            (key, "AutoLoginUser", autoLoginUser, RegistryValueKind.String),
+            (key, "RememberPassword", autoLoginUser.Length > 0 ? 1 : 0, RegistryValueKind.DWord),
+        };
+    }
 
     /// <summary>Kills the launcher client, then applies the launcher's strategy. Throws <see cref="IpcException"/> when the lease cannot be used.</summary>
     public async Task<InjectionResult> InjectAsync(Game game, ActiveLease lease, CancellationToken cancellationToken)
@@ -267,8 +328,8 @@ public sealed class AccountInjector
             }
         }
 
-        public InjectionResult ToResult(string? extraArgs) =>
-            new(extraArgs, ImmutableDictionary<string, string>.Empty, IsEmpty ? null : RestoreAsync);
+        public InjectionResult ToResult(string? extraArgs, IReadOnlyCollection<string>? problems = null) =>
+            new(extraArgs, ImmutableDictionary<string, string>.Empty, IsEmpty ? null : RestoreAsync, problems is { Count: > 0 } ? string.Join("; ", problems) : null);
     }
 
     /// <summary>Writes server-provided session files (<c>extra.files</c>: path → base64) into the kiosk profile.</summary>
@@ -354,64 +415,158 @@ public sealed class AccountInjector
     private static string Quote(string value) =>
         value.Length > 0 && value.AsSpan().IndexOfAny(QuoteTriggers) < 0 ? value : "\"" + value.Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
 
+    private static bool IsExchangeCode(LauncherType launcher, string? authType) =>
+        launcher == LauncherType.Epic && string.Equals(authType, ExchangeCodeAuthType, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary><see cref="CredentialArgs"/> for <paramref name="lease"/>; a password on the command line is logged as a warning on every use.</summary>
+    private static string? LaunchArgs(ActiveLease lease, bool sessionInjected, bool allowPassword, ILogger logger)
+    {
+        string? authType = lease.ExtraString("authType");
+        string? args = CredentialArgs(lease.Launcher, lease.Username, lease.RevealSecret(), authType, sessionInjected, allowPassword);
+        if (args is not null && !IsExchangeCode(lease.Launcher, authType))
+        {
+            logger.LogWarning(
+                "SECURITY: games.accountPool.allowPasswordOnCommandLine is on; the {Launcher} password of account {Username} is on the launcher command line, readable by every process in the kiosk session",
+                lease.Launcher,
+                lease.Username);
+        }
+
+        return args;
+    }
+
     // ---- strategies ------------------------------------------------------------------------------
 
-    /// <summary>Steam: <c>-login user pass</c> on the launcher command line; <c>loginusers.vdf</c> neutralized so no previous account auto-logs in.</summary>
+    /// <summary>
+    /// Steam: session files from <c>extra.files</c> (e.g. <c>%LOCALAPPDATA%\Steam\local.vdf</c>) with auto-login set to the
+    /// leased account in the kiosk hive; without them auto-login is cleared there (<see cref="SteamAutoLogin"/>),
+    /// <c>loginusers.vdf</c> is neutralized best effort and Steam starts without credentials. Auto-login is cleared again
+    /// on restore, so Steam's own "remember me" never carries an account to the next player.
+    /// </summary>
     private sealed class SteamStrategy : ILauncherCredentialStrategy
     {
+        private readonly ProfileFiles _files;
+        private readonly IKioskCredentials _kiosk;
+        private readonly Func<bool> _allowPassword;
         private readonly ILogger _logger;
 
-        public SteamStrategy(ILogger logger) => _logger = logger;
+        public SteamStrategy(ProfileFiles files, IKioskCredentials kiosk, Func<bool> allowPassword, ILogger logger)
+        {
+            _files = files;
+            _kiosk = kiosk;
+            _allowPassword = allowPassword;
+            _logger = logger;
+        }
 
         public LauncherType Launcher => LauncherType.Steam;
 
         public async Task<InjectionResult> InjectAsync(Game game, ActiveLease lease, string? launcherExe, CancellationToken cancellationToken)
         {
             var backups = new FileBackups();
-            string? steamDir = launcherExe is null ? null : Path.GetDirectoryName(launcherExe);
-            if (steamDir is not null)
+            var problems = new List<string>();
+            bool session = await _files.ApplyAsync(lease, backups, cancellationToken).ConfigureAwait(false) > 0;
+            if (SetAutoLogin(session ? lease.Username : string.Empty) is { } error)
             {
-                string loginUsers = Path.Combine(steamDir, "config", "loginusers.vdf");
-                if (File.Exists(loginUsers))
-                {
-                    try
-                    {
-                        backups.Capture(loginUsers);
-                        VdfNode root = VdfNode.Parse(await File.ReadAllTextAsync(loginUsers, cancellationToken).ConfigureAwait(false));
-                        VdfNode? users = root["users"];
-                        if (users is not null)
-                        {
-                            foreach (VdfNode user in users.Children.Values)
-                            {
-                                user.Set("RememberPassword", "0");
-                                user.Set("MostRecent", "0");
-                                user.Set("AllowAutoLogin", "0");
-                            }
-
-                            await File.WriteAllTextAsync(loginUsers, root.Serialize(), new UTF8Encoding(false), cancellationToken).ConfigureAwait(false);
-                        }
-                    }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException)
-                    {
-                        _logger.LogWarning(ex, "Cannot neutralize {File}; previous Steam account may auto-login", loginUsers);
-                    }
-                }
+                problems.Add(error);
             }
 
-            string args = "-login " + Quote(lease.Username) + " " + Quote(lease.RevealSecret());
-            return backups.ToResult(args);
+            if (!session)
+            {
+                await NeutralizeLoginUsersAsync(launcherExe, backups, cancellationToken).ConfigureAwait(false);
+            }
+
+            string? args = LaunchArgs(lease, session, _allowPassword(), _logger);
+            if (!session && args is null)
+            {
+                _logger.LogWarning("Steam lease {LeaseId} carries no session files; Steam starts without credentials", lease.LeaseId);
+                problems.Add("Steam lease has no session files; Steam started without credentials");
+            }
+
+            InjectionResult result = backups.ToResult(args, problems);
+            return result with
+            {
+                RestoreAction = async ct =>
+                {
+                    _ = SetAutoLogin(string.Empty);
+                    await result.RestoreAsync(ct).ConfigureAwait(false);
+                },
+            };
+        }
+
+        /// <summary>Writes <see cref="SteamAutoLogin"/> into the kiosk hive; returns the problem, or <see langword="null"/>.</summary>
+        private string? SetAutoLogin(string user)
+        {
+            string sid = _kiosk.Sid;
+            try
+            {
+                if (string.IsNullOrEmpty(sid) || !RegistryHelper.Exists(RegistryHive.Users, sid))
+                {
+                    throw new InvalidOperationException("the kiosk user's hive is not loaded");
+                }
+
+                foreach ((string key, string name, object value, RegistryValueKind kind) in SteamAutoLogin(sid, user))
+                {
+                    RegistryHelper.Set(RegistryHive.Users, key, name, value, kind);
+                }
+
+                return null;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                _logger.LogWarning(ex, "Cannot set Steam auto-login in the kiosk hive; a previous Steam account may auto-login");
+                return "Steam auto-login reset in the kiosk hive failed: " + ex.Message;
+            }
+        }
+
+        /// <summary>Best effort: the Steam directory may sit on a read-only games volume.</summary>
+        private async Task NeutralizeLoginUsersAsync(string? launcherExe, FileBackups backups, CancellationToken cancellationToken)
+        {
+            string? steamDir = launcherExe is null ? null : Path.GetDirectoryName(launcherExe);
+            string? loginUsers = steamDir is null ? null : Path.Combine(steamDir, "config", "loginusers.vdf");
+            if (loginUsers is null || !File.Exists(loginUsers))
+            {
+                return;
+            }
+
+            try
+            {
+                VdfNode root = VdfNode.Parse(await File.ReadAllTextAsync(loginUsers, cancellationToken).ConfigureAwait(false));
+                VdfNode? users = root["users"];
+                if (users is null)
+                {
+                    return;
+                }
+
+                foreach (VdfNode user in users.Children.Values)
+                {
+                    user.Set("RememberPassword", "0");
+                    user.Set("MostRecent", "0");
+                    user.Set("AllowAutoLogin", "0");
+                }
+
+                backups.Capture(loginUsers);
+                await File.WriteAllTextAsync(loginUsers, root.Serialize(), new UTF8Encoding(false), cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException)
+            {
+                _logger.LogInformation(ex, "Cannot neutralize {File} (best effort; auto-login is reset in the kiosk hive)", loginUsers);
+            }
         }
     }
 
-    /// <summary>Epic Games Launcher: <c>-AUTH_LOGIN/-AUTH_PASSWORD/-AUTH_TYPE=password</c>; remembered login stripped from <c>GameUserSettings.ini</c>.</summary>
+    /// <summary>
+    /// Epic Games Launcher: remembered login stripped from <c>GameUserSettings.ini</c>, then <c>extra.files</c>; a one-time
+    /// exchange code (<c>extra.authType = "exchangeCode"</c>) goes on the command line, a password only when allowed.
+    /// </summary>
     private sealed class EpicStrategy : ILauncherCredentialStrategy
     {
         private readonly ProfileFiles _files;
+        private readonly Func<bool> _allowPassword;
         private readonly ILogger _logger;
 
-        public EpicStrategy(ProfileFiles files, ILogger logger)
+        public EpicStrategy(ProfileFiles files, Func<bool> allowPassword, ILogger logger)
         {
             _files = files;
+            _allowPassword = allowPassword;
             _logger = logger;
         }
 
@@ -420,6 +575,7 @@ public sealed class AccountInjector
         public async Task<InjectionResult> InjectAsync(Game game, ActiveLease lease, string? launcherExe, CancellationToken cancellationToken)
         {
             var backups = new FileBackups();
+            var problems = new List<string>();
             string ini = _files.Local("EpicGamesLauncher", "Saved", "Config", "Windows", "GameUserSettings.ini");
             if (File.Exists(ini))
             {
@@ -450,12 +606,19 @@ public sealed class AccountInjector
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
                     _logger.LogWarning(ex, "Cannot strip remembered Epic login from {File}", ini);
+                    problems.Add("Epic remembered login could not be removed: " + ex.Message);
                 }
             }
 
-            await _files.ApplyAsync(lease, backups, cancellationToken).ConfigureAwait(false);
-            string args = "-AUTH_LOGIN=" + Quote(lease.Username) + " -AUTH_PASSWORD=" + Quote(lease.RevealSecret()) + " -AUTH_TYPE=password";
-            return backups.ToResult(args);
+            bool session = await _files.ApplyAsync(lease, backups, cancellationToken).ConfigureAwait(false) > 0;
+            string? args = LaunchArgs(lease, session, _allowPassword(), _logger);
+            if (!session && args is null)
+            {
+                _logger.LogWarning("Epic lease {LeaseId} carries no exchange code or session files; the launcher starts without credentials", lease.LeaseId);
+                problems.Add("Epic lease has no exchange code or session files; the launcher started without credentials");
+            }
+
+            return backups.ToResult(args, problems);
         }
     }
 

@@ -24,6 +24,9 @@ public enum TransactionType
 
     /// <summary>Manual admin adjustment.</summary>
     Adjustment,
+
+    /// <summary>A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the server.</summary>
+    Unknown,
 }
 
 /// <summary>Top-up payment provider.</summary>
@@ -41,6 +44,9 @@ public enum TopupProvider
 
     /// <summary>Cash at the desk; creates an admin ticket.</summary>
     Cash,
+
+    /// <summary>A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the server.</summary>
+    Unknown,
 }
 
 /// <summary>Lifecycle of a <see cref="TopupIntent"/>.</summary>
@@ -58,6 +64,9 @@ public enum TopupStatus
 
     /// <summary>Cancelled by the user or an admin.</summary>
     Cancelled,
+
+    /// <summary>A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the server.</summary>
+    Unknown,
 }
 
 /// <summary>Wallet ledger entry (IPC_PROTOCOL.md §6.12).</summary>

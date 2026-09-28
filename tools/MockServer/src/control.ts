@@ -3,7 +3,7 @@
  * which shift ({@link record}), and a small rule set reads that journal for the patterns behind most counter theft —
  * cash short at close, sessions opened and refunded minutes later, big discounts handed to friends, the same client
  * topped up again and again, money taken with no shift open. The owner's "Контроль" page lists the flags per cashier;
- * the serious ones also go out as the `suspicious` event (Telegram / webhooks) the moment they happen.
+ * the serious ones also go out as the `suspicious` webhook event the moment they happen.
  */
 import { club, emit, openShift, type AuditAction, type AuditEntry, type StaffRecord } from './club.js';
 import { markDirty, now, uuid } from './db.js';

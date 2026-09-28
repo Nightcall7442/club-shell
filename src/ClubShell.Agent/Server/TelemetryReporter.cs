@@ -87,14 +87,20 @@ public interface ISysMetricsSink
 /// the Shell overlay via <see cref="ISysMetricsSink"/>, and uploads a <see cref="TelemetryBatch"/> to
 /// <c>POST /agents/{pcId}/telemetry</c> every <c>telemetry.uploadIntervalSec</c> (or sooner when 50 diagnostic events
 /// have queued). A hardware rescan every <c>telemetry.hardwareRescanSec</c> attaches the inventory to the next batch and
-/// emits an <see cref="AgentEventType.HardwareChanged"/> event when it changed. When the server is unreachable the
-/// oldest samples/events are dropped past their caps.
+/// emits an <see cref="AgentEventType.HardwareChanged"/> event when it changed. A batch carries at most
+/// <see cref="MaxBatchEvents"/> events (the rest go in the next ones). A batch the server rejects with a 4xx other than
+/// 401/408/429 is dropped; after any other failure the upload backs off exponentially (upload interval → 15 min) and
+/// the oldest samples/events are dropped past their caps.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class TelemetryReporter : BackgroundService
 {
+    /// <summary>Events per <see cref="TelemetryBatch"/>.</summary>
+    public const int MaxBatchEvents = 100;
+
     private const int MaxPendingEvents = 1024;
     private const int LogTailBytes = 128 * 1024;
+    private static readonly TimeSpan MaxUploadBackoff = TimeSpan.FromMinutes(15);
 
     private readonly ServerConnection _connection;
     private readonly IServerClient _server;
@@ -112,6 +118,8 @@ public sealed class TelemetryReporter : BackgroundService
     private HardwareInfo? _previousHardware;
     private HardwareInfo? _pendingHardware;
     private int _logTailRequested;
+    private int _uploadFailures;
+    private DateTimeOffset _nextUploadAt;
 
     /// <summary>Creates the reporter.</summary>
     public TelemetryReporter(
@@ -190,18 +198,35 @@ public sealed class TelemetryReporter : BackgroundService
                 await RescanHardwareAsync(now, stoppingToken).ConfigureAwait(false);
             }
 
-            var uploadDue = now - lastUpload >= TimeSpan.FromSeconds(Math.Max(5, settings.UploadIntervalSec));
-            if (uploadDue || _pendingEvents.Count >= TelemetryBatchTrigger || _samples.Count >= TelemetryBatch.MaxSamples)
+            var uploadInterval = TimeSpan.FromSeconds(Math.Max(5, settings.UploadIntervalSec));
+            var uploadDue = now - lastUpload >= uploadInterval;
+            if ((uploadDue || _pendingEvents.Count >= TelemetryBatchTrigger || _samples.Count >= TelemetryBatch.MaxSamples) && now >= _nextUploadAt)
             {
                 if (await UploadAsync(stoppingToken).ConfigureAwait(false))
                 {
                     lastUpload = now;
+                    _uploadFailures = 0;
+                }
+                else
+                {
+                    _uploadFailures++;
+                    _nextUploadAt = now + Reconnector.ComputeDelay(_uploadFailures, uploadInterval, MaxUploadBackoff, 2.0);
                 }
             }
         }
     }
 
     private const int TelemetryBatchTrigger = 50;
+
+    /// <summary>
+    /// <see langword="true"/> when the server rejected the batch itself (a 4xx other than 401/408/429): sending it again
+    /// cannot succeed, so it is dropped instead of blocking every later upload.
+    /// </summary>
+    public static bool IsRejectedBatch(ServerApiException ex)
+    {
+        ArgumentNullException.ThrowIfNull(ex);
+        return (int)ex.Status is >= 400 and < 500 and not (401 or 408 or 429);
+    }
 
     private async Task SampleAsync(CancellationToken cancellationToken)
     {
@@ -283,7 +308,7 @@ public sealed class TelemetryReporter : BackgroundService
             return true;
         }
 
-        var events = _pendingEvents.ToArray();
+        var events = _pendingEvents.Take(MaxBatchEvents).ToArray();
         var samples = _samples.ToArray();
         var includeLogs = events.Length > 0 || Interlocked.Exchange(ref _logTailRequested, 0) == 1;
         var logs = includeLogs ? ReadLogTail() : null;
@@ -292,10 +317,10 @@ public sealed class TelemetryReporter : BackgroundService
         try
         {
             await _server.SendTelemetryAsync(pcId, batch, cancellationToken).ConfigureAwait(false);
-            _samples.Clear();
-            _pendingEvents.Clear();
-            _pendingHardware = null;
-            return true;
+        }
+        catch (ServerApiException ex) when (IsRejectedBatch(ex))
+        {
+            _logger.LogWarning("Telemetry batch rejected ({Code}, HTTP {Status}); {Samples} samples / {Events} events dropped", ex.Code, (int)ex.Status, samples.Length, events.Length);
         }
         catch (ServerApiException ex)
         {
@@ -309,6 +334,11 @@ public sealed class TelemetryReporter : BackgroundService
             TrimForOffline();
             return false;
         }
+
+        _samples.Clear();
+        _pendingEvents.RemoveRange(0, events.Length);
+        _pendingHardware = null;
+        return true;
     }
 
     private void TrimForOffline()

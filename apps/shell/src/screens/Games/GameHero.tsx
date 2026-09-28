@@ -52,6 +52,7 @@ const ANTI_CHEAT_LABEL: Readonly<Record<AntiCheatKind, string>> = {
   vanguard: 'Vanguard',
   faceit: 'FACEIT',
   ricochet: 'Ricochet',
+  unknown: '',
 };
 
 /** Human label of an anti-cheat subsystem (`''` for none). */

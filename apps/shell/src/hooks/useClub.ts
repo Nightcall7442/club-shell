@@ -27,7 +27,7 @@ function clean(value: string | null | undefined): string | null {
 
 /** Rules text for `locale` split into lines, falling back to Russian (the owner's source language). */
 export function clubRules(rules: ClubRules | null | undefined, locale: Locale): string[] | null {
-  const text = clean(rules?.[locale]) ?? clean(rules?.ru);
+  const text = (locale !== 'unknown' ? clean(rules?.[locale]) : null) ?? clean(rules?.ru);
   if (!text) {
     return null;
   }

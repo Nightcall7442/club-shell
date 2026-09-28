@@ -25,6 +25,9 @@ public enum ProductCategory
 
     /// <summary>Time packages sold through the shop.</summary>
     Time,
+
+    /// <summary>A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the server.</summary>
+    Unknown,
 }
 
 /// <summary>Shop product (IPC_PROTOCOL.md §6.13).</summary>

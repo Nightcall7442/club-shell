@@ -25,6 +25,9 @@ public enum OrderStatus
 
     /// <summary>Cancelled by the user or staff; charged amount refunded.</summary>
     Cancelled,
+
+    /// <summary>A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the server.</summary>
+    Unknown,
 }
 
 /// <summary>Helpers over <see cref="OrderStatus"/>.</summary>

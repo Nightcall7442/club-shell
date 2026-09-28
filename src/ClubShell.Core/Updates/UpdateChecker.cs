@@ -140,13 +140,22 @@ public sealed class UpdateChecker
         return new UpdateCheckResponse(current, agent?.Manifest, shell?.Manifest);
     }
 
-    /// <summary>Runs <see cref="CheckOnceAsync"/> every jittered <c>updates.checkIntervalSec</c> until cancelled (the first check happens after one interval; call <see cref="CheckOnceAsync"/> at start-up explicitly).</summary>
+    /// <summary>
+    /// Runs <see cref="CheckOnceAsync"/> every jittered <c>updates.checkIntervalSec</c> until cancelled (the first check
+    /// happens after one interval; call <see cref="CheckOnceAsync"/> at start-up explicitly). Skipped while
+    /// <c>updates.enabled</c> is off; the loop keeps running so the server can turn it back on.
+    /// </summary>
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
             var interval = TimeSpan.FromSeconds(Math.Max(60, _settings.CurrentValue.Updates.CheckIntervalSec));
             await _clock.Delay(Jitter(interval), cancellationToken).ConfigureAwait(false);
+            if (!_settings.CurrentValue.Updates.Enabled)
+            {
+                continue;
+            }
+
             try
             {
                 await CheckOnceAsync(cancellationToken).ConfigureAwait(false);

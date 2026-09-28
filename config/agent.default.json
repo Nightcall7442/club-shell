@@ -57,8 +57,8 @@
     "scanIntervalSec": 900,
     "launchTimeoutSec": 90,
     "killGraceSec": 10,
-    "accountPool": { "enabled": true, "leaseTtlSec": 14400, "releaseOnExit": true },
-    "cloudSave": { "enabled": true, "root": "cache\\saves", "maxMb": 512 },
+    "accountPool": { "enabled": false, "leaseTtlSec": 14400, "releaseOnExit": true, "allowPasswordOnCommandLine": false },
+    "cloudSave": { "enabled": false, "root": "cache\\saves", "maxMb": 512 },
     "playerSettings": { "enabled": true, "root": "cache\\player-settings", "maxMb": 16 },
     "launchers": {
       "steam": { "exePath": "C:\\Program Files (x86)\\Steam\\steam.exe" },
@@ -80,6 +80,7 @@
     }
   },
   "updates": {
+    "enabled": true,
     "channel": "stable",
     "checkIntervalSec": 3600,
     "autoInstall": true,
@@ -102,7 +103,7 @@
   },
   "remoteAdmin": {
     "allowScreenCapture": true,
-    "allowRemoteInput": true,
+    "allowRemoteInput": false,
     "captureFps": 5,
     "captureQuality": 60,
     "showIndicator": true

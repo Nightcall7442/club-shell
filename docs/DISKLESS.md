@@ -29,15 +29,15 @@ One drive letter, one owner. The Agent mounts the library itself only when ClubD
 | `storage.gamesShare.enabled` | Helper service installed | Games library mounted by |
 |---|---|---|
 | `false` | no | nobody (local disks only) |
-| `true` | no | the Agent (`GamesShareMounter`: SMB share or `iscsi` target) |
-| any | yes | **ClubDisklessHelper** — the Agent does not map, log in, mark read-only or log out anything |
+| `true` | no | the Agent (`GamesShareMounter`, SMB share only; see below) |
+| any | yes | **ClubDisklessHelper** — the Agent does not map or unmap anything |
 
 The check is the service key `HKLM\SYSTEM\CurrentControlSet\Services\ClubDisklessHelper`, evaluated when the Agent
 starts (`GamesShareMounter.StartAsync`). The Agent log says which case applies:
 
 ```
 Games library volume is managed by ClubDisklessHelper
-storage.gamesShare is enabled, but ClubDisklessHelper is installed and owns the games library volume; the Agent will not map, log in or log out anything. Set storage.gamesShare.enabled = false
+storage.gamesShare is enabled, but ClubDisklessHelper is installed and owns the games library volume; the Agent will not map or unmap anything. Set storage.gamesShare.enabled = false
 Games share: managed by ClubDisklessHelper        (AgentWorker startup summary)
 ```
 
@@ -45,9 +45,42 @@ Leave `storage.gamesShare.enabled = false` on diskless PCs; the warning above me
 decision is taken at Agent start: after installing or removing the helper, restart `ClubShellAgent` (a ClubShell
 install or upgrade restarts it by itself).
 
+The heartbeat tells the club server who owns the library (`gamesVolume.owner`: `agent`, `disklessHelper` or `none`,
+SERVER_API.md §4.1). With the helper, `mounted` is left out: the helper reports the volume to its own server.
+
 Everything else in the Agent is unaffected: game detection reads the launchers' manifests wherever the library is
 mounted, and the process allow-list only polices the kiosk session (the helper and its PowerShell children run in
 session 0).
+
+## The Agent's own share (clubs without the helper)
+
+The Agent mounts only an **SMB share**. It no longer logs in to iSCSI targets: a shared LUN must be read-only before
+Windows brings the disk online, and doing that fail-closed is the helper's job. An `agent.json` (or server config)
+that still has `storage.gamesShare.iscsi` loads fine, but the Agent then mounts nothing and logs an error:
+
+```
+storage.gamesShare.iscsi is set (iqn...), but the Agent does not mount iSCSI: the games library over iSCSI is handled by ClubDisklessHelper (docs/DISKLESS.md). Nothing is mounted; install ClubDisklessHelper or set storage.gamesShare.iscsi = null for an SMB share
+```
+
+The heartbeat then reports `gamesVolume: { owner: "agent", mounted: false }`.
+
+How the SMB share behaves:
+
+* **Settings are followed live.** `storage.gamesShare` from `agent.json` or from the server config
+  (`GET /agents/{pcId}/config`) takes effect without an Agent restart: `enabled: true` starts mounting,
+  `enabled: false` unmaps. A new `uncPath`, `driveLetter` or `credentialsRef` first unmaps the old letter (in session 0
+  and in the logged-on user's session), then maps the new one. The unmap is forced, so a game running from the old
+  share loses its files: publish a new library path between sessions.
+* **From the first boot.** The last server config is kept in `cache\server-config.json` and applied when the Agent
+  starts, before the first heartbeat; the heartbeat then fetches the current one.
+* **Healthy mapping is only verified.** Every 30 s (and on network changes) the Agent checks that the letter is still
+  readable; it remaps only when it is not (backoff 5 s → 2 min).
+* **Agent stop, restart or update never unmaps.** Mappings are not persistent (`CONNECT_TEMPORARY`), so a reboot
+  clears them; an Agent restart finds the letter already mapped and keeps it.
+* **Anti-cheat caveat.** Games on a network share are a poor fit for kernel anti-cheats: some refuse to start from a
+  network path or a mapped network drive. Keep games with Vanguard, FACEIT, EAC or BattlEye on a local disk, or use
+  ClubDisklessHelper (its iSCSI volume is a local disk to Windows; bench step 8 below), and put only the rest of the
+  library on the share.
 
 ## Installing with ClubShell.msi
 
@@ -121,6 +154,7 @@ enabling it in a club, on one bench PC (Windows 11 Pro, TrueNAS with a published
 
 * The helper's server API (`diskless/v1/…`) belongs to the club's diskless server; it is not part of
   `SERVER_API.md`, and `tools/MockServer` does not emulate it.
-* The Agent reports nothing about the helper to the club server; the helper reports its own state to its server.
+* The Agent tells the club server only that the helper owns the library (`gamesVolume.owner = disklessHelper`); the
+  mounted version, letter and read-only state go from the helper to its own server.
 * The release workflow does not fetch the helper: pass `-DisklessHelperDir` to `package.ps1` for builds that
   should carry the feature.

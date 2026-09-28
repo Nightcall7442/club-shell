@@ -10,6 +10,7 @@ using ClubShell.Agent.Server;
 using ClubShell.Agent.Session;
 using ClubShell.Agent.Updates;
 using ClubShell.Contracts.Commands;
+using ClubShell.Contracts.Errors;
 using ClubShell.Contracts.Ipc;
 using ClubShell.Contracts.Pcs;
 using ClubShell.Contracts.Serialization;
@@ -244,8 +245,9 @@ public sealed class SystemHandlers : IIpcHandlerGroup
                 _logger.LogInformation("Admin called ({Category}); ticket {TicketId}, queue position {Position}", request.Category, response.TicketId, response.QueuePosition);
                 return response;
             }
-            catch (Exception ex) when (ex is HttpRequestException || ex is ServerApiException { IsRetryable: true })
+            catch (Exception ex) when (ex is HttpRequestException or ServerApiException { IsRetryable: true } or ServerApiException { Code: ErrorCode.NotImplemented })
             {
+                // notImplemented (server v1): telemetry is the only channel that reaches the club.
                 _logger.LogWarning("sys.callAdmin: server unavailable; ticket queued in telemetry");
             }
         }

@@ -11,6 +11,11 @@ export const AdMediaType = {
   Image: 'image',
   /** Video. */
   Video: 'video',
+  /**
+   * A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the
+   * server.
+   */
+  Unknown: 'unknown',
 } as const;
 /** Media type of an ad item. */
 export type AdMediaType = (typeof AdMediaType)[keyof typeof AdMediaType];
@@ -187,6 +192,11 @@ export const NotificationLevel = {
   Error: 'error',
   /** Success. */
   Success: 'success',
+  /**
+   * A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the
+   * server.
+   */
+  Unknown: 'unknown',
 } as const;
 /** Notification severity. */
 export type NotificationLevel = (typeof NotificationLevel)[keyof typeof NotificationLevel];

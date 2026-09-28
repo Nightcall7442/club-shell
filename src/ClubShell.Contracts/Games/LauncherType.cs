@@ -28,6 +28,9 @@ public enum LauncherType
 
     /// <summary>Plain executable, no launcher.</summary>
     Exe,
+
+    /// <summary>A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the server.</summary>
+    Unknown,
 }
 
 /// <summary>Anti-cheat subsystem a game depends on.</summary>
@@ -51,6 +54,9 @@ public enum AntiCheatKind
 
     /// <summary>Activision Ricochet.</summary>
     Ricochet,
+
+    /// <summary>A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the server.</summary>
+    Unknown,
 }
 
 /// <summary>Severity of an anti-cheat finding.</summary>

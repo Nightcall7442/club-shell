@@ -37,10 +37,11 @@ import {
   type ChatRoomRecord,
   type PcRecord,
   type UserRecord,
+  knownValues,
 } from '../db.js';
 import { broadcast, pushToPc, pushToUser } from '../ws.js';
 
-const TOURNAMENT_STATES = Object.values(TournamentState);
+const TOURNAMENT_STATES = knownValues(TournamentState);
 const SLOT_MINUTES = 30;
 const OPEN_FROM = '10:00';
 const OPEN_TO = '02:00';

@@ -17,7 +17,8 @@ namespace ClubShell.Core.Http;
 /// <summary>
 /// Resilience pipeline of the server <see cref="HttpClient"/> (ARCHITECTURE.md §5.1, SERVER_API.md §1 "Retry"):
 /// total timeout → retry (exponential backoff with jitter, <c>Retry-After</c> honoured) → circuit breaker → per-attempt
-/// timeout. Only <c>GET</c>/<c>PUT</c>/<c>DELETE</c> and <c>POST</c>s carrying an <c>Idempotency-Key</c> are retried.
+/// timeout → <see cref="RequestSigningHandler"/> (so every attempt is signed afresh). Only <c>GET</c>/<c>PUT</c>/<c>DELETE</c>
+/// and <c>POST</c>s carrying an <c>Idempotency-Key</c> are retried.
 /// </summary>
 public static class RetryPolicy
 {
@@ -36,7 +37,8 @@ public static class RetryPolicy
     private const long MaxRetryDelayMs = 3_600_000;
 
     /// <summary>
-    /// <see langword="true"/> for transient outcomes: connection errors, per-attempt timeouts, HTTP 408/425/429/5xx.
+    /// <see langword="true"/> for transient outcomes: connection errors, per-attempt timeouts, HTTP 408/425/429/5xx except
+    /// 501 (<see cref="ErrorCode.NotImplemented"/> will not change on a retry and must not trip the circuit breaker).
     /// Mirrors <see cref="ErrorCodes.IsRetryable"/> at the HTTP layer.
     /// </summary>
     public static bool IsTransient(HttpResponseMessage? response, Exception? exception)
@@ -52,7 +54,7 @@ public static class RetryPolicy
         }
 
         var status = (int)response.StatusCode;
-        return status is 408 or 425 or 429 || status >= 500;
+        return status is 408 or 425 or 429 || (status >= 500 && status != 501);
     }
 
     /// <summary><see langword="true"/> when <paramref name="request"/> may be replayed safely.</summary>
@@ -157,6 +159,9 @@ public static class RetryPolicy
             var settings = context.ServiceProvider.GetRequiredService<IOptionsMonitor<AgentSettings>>().CurrentValue;
             ConfigurePipeline(pipeline, settings.Server);
         });
+
+        // Registered after the resilience handler, so it runs inside it: each retry is re-signed.
+        builder.AddHttpMessageHandler(() => new RequestSigningHandler());
 
         return builder;
     }

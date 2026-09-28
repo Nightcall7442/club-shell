@@ -15,7 +15,7 @@ import { useHotkeys } from '@/hooks/useHotkeys';
 import { useAgentEvent, useKioskEvent } from '@/hooks/useTauriEvent';
 import { trackScreen } from '@/lib/analytics';
 import { createAppRouter, isBareRoute, type WindowRole } from '@/router';
-import { AdsCarousel } from '@/screens/Idle/AdsCarousel';
+import { AdsCarousel, type AdItem } from '@/screens/Idle/AdsCarousel';
 import { AdminPanel } from '@/screens/Profile/Settings';
 import { useAuthStore } from '@/store/auth';
 import { useGamesStore } from '@/store/games';
@@ -43,14 +43,16 @@ export function AdsOverlay({ args, onClose }: AdsOverlayProps): JSX.Element {
   const fallbackSec = useSettingsStore((s) => s.shellConfig?.ads.durationSec ?? ADS_FALLBACK_SEC);
   const open = args !== null;
   const skippable = args?.skippable ?? true;
+  // Media types newer than this build (`unknown`) are skipped.
+  const items = useMemo(() => args?.items.filter((i): i is AdItem => i.type !== 'unknown') ?? [], [args]);
 
   const totalSec = useMemo(() => {
     if (!args) {
       return 0;
     }
-    const sum = args.items.reduce((acc, i) => acc + (i.durationSec > 0 ? i.durationSec : fallbackSec), 0);
+    const sum = items.reduce((acc, i) => acc + (i.durationSec > 0 ? i.durationSec : fallbackSec), 0);
     return Math.max(3, sum || fallbackSec);
-  }, [args, fallbackSec]);
+  }, [args, items, fallbackSec]);
 
   useEffect(() => {
     if (!open) {
@@ -77,11 +79,7 @@ export function AdsOverlay({ args, onClose }: AdsOverlayProps): JSX.Element {
           exit={{ opacity: 0 }}
           transition={{ duration }}
         >
-          <AdsCarousel
-            items={args.items.length > 0 ? args.items : undefined}
-            fullscreen
-            showCounter={args.items.length > 1}
-          />
+          <AdsCarousel items={items.length > 0 ? items : undefined} fullscreen showCounter={items.length > 1} />
           <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-[var(--gap)]">
             <span className="glass rounded-full px-4 py-1.5 text-[length:var(--fs-sm)] text-muted">
               {t('idle.ads')}

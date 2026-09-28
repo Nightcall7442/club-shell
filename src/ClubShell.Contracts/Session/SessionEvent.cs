@@ -58,6 +58,9 @@ public enum SessionEndReason
 
     /// <summary>Internal error.</summary>
     Error,
+
+    /// <summary>A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the server.</summary>
+    Unknown,
 }
 
 /// <summary>Audit/replay event of a session (IPC_PROTOCOL.md §6.21). <paramref name="Data"/> shape depends on <paramref name="Type"/>.</summary>

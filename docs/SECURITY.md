@@ -39,7 +39,7 @@ administrator of the same machine).
 |----------|--------------------|
 | Player → Shell | `apps/shell/src-tauri/src/kiosk/*` hooks and guards; `tauri.conf.json → app.security.csp` (`default-src 'self'`, `object-src 'none'`, `frame-ancestors 'none'`, `connect-src` limited to the Tauri IPC origins and `https:`); the webview has no filesystem or shell plugin — every effect goes through `#[tauri::command]` proxies to IPC |
 | Shell → Agent | `PipeSecurityFactory.Create` DACL, `PipeSecurityFactory.ValidateClient`, `ShellTokenStore.Verify` in `auth.hello`, per-connection rate limit and frame cap (`PipeServer`) |
-| Agent → Server | `RetryPolicy` handler (TLS 1.2+, SPKI pins), `ServerClient` (Bearer + `Signing.Sign`), `TokenStore` (DPAPI) |
+| Agent → Server | `RetryPolicy` handler (TLS 1.2+, SPKI pins), `ServerClient` (Bearer), `RequestSigningHandler` (`Signing.Sign`, every attempt incl. retries), `TokenStore` (DPAPI) |
 | Agent → OS | `ProcessAsUser` with per-call `PrivilegeScope`, `ProcessStartSpec` never uses `UseShellExecute`, registry writes only through `RegistryHelper` under the keys listed in `PolicyRegistry`, `ShellRegistry`, `FolderRedirect` |
 | Update package → Agent | `UpdateDownloader` size + SHA-256 + RSA-PSS (`Signing.VerifyFileSignatureAsync`), `UpdateManifest.IsNewerThan` downgrade protection |
 
@@ -118,7 +118,7 @@ sealed, signed binary (`SignatureVerified` mode on production builds).
 | Replay | server-side uniqueness of (`pcId`, `X-Timestamp`, `X-Signature`); the Agent additionally sends `Idempotency-Key` on creating POSTs so retries are safe |
 | Expiry | `401{reason: expired}` → `POST /agents/refresh` once (rotates the refresh token; a new `signingSecret` replaces the old one); refresh failure → re-register |
 | User scope | `X-User-Token` for user endpoints; the server checks the user is bound to this `pcId` |
-| WebSocket | `wss://…/ws/agent?token=<accessToken>`, subprotocol `clubshell.v1`; reconnect with backoff; commands are acked, never executed without a valid envelope |
+| WebSocket | `wss://…/ws/agent` with `Authorization: Bearer <accessToken>` (never in the URL), subprotocol `clubshell.v1`; reconnect with backoff; commands are acked, never executed without a valid envelope |
 | Tracing | `X-Trace-Id` propagates the IPC envelope id; `User-Agent` / `X-Agent-Version` / `X-Shell-Version` for `426 versionMismatch` |
 
 `Signing.Verify` (constant-time compare + skew window) exists in Core for tests and tooling; the Agent only signs.
@@ -178,7 +178,7 @@ Input validation at the boundaries:
 | `game.exePath` / `installPath` | must resolve to an existing file (`GameDetector.ResolveExe`); allow-list / deny-list applied (`PolicyDenies`) |
 | `policy.shellReplacement.shellExe` | absolute path to an existing file, signer logged |
 | Registry policy | only the fixed keys in `PolicyRegistry.RulesFor`, `ShellRegistry`, `FolderRedirect`; snapshot/revert |
-| `webFilter.blockedDomains` | resolved to **public** IPv4 only (`WebFilterPolicyModule.IsPublicIpv4`); LAN, loopback and the sink-hole address are never firewalled. `DnsFilter.ProtectedDomains` (launcher, CDN and anti-cheat back-ends) are dropped from the block list, and every address they resolve to is removed from the firewall set — a blocked domain parked on a shared CDN must not take Steam or Vanguard down with it |
+| `webFilter.blockedDomains` | firewalled by IP only with `webFilter.blockResolvedIps` (default off), and then to **public** IPv4 only (`WebFilterPolicyModule.IsPublicIpv4`); LAN, loopback and the sink-hole address are never firewalled. `DnsFilter.ProtectedDomains` (launcher, CDN and anti-cheat back-ends), the server's `webFilter.protectedDomains` and the host of `server.baseUrl` are dropped from the block list, and every address they resolve to is removed from the firewall set — a blocked domain parked on a shared CDN must not take Steam or Vanguard down with it |
 | `blockedKeyCombos` | parsed (`KeyCombo.TryParse`, `BlockedCombo::parse`); `Ctrl+Alt+Del` dropped; malformed entries skipped |
 | IPC payloads | Contracts DTOs, `validation` errors, size and rate caps |
 
@@ -282,7 +282,7 @@ Agent
 - [ ] `PipeServer.ClientValidation = SignatureVerified` on signed release builds; Agent and Shell binaries Authenticode-signed with the same certificate.
 - [ ] `shell.kioskUser.rotatePasswordOnStart = true`, `resetProfileOnLogout = true`, `createIfMissing = true`.
 - [ ] `anticheat.reportViolations = true`; `requireSecureBoot` / `requireTpm` where the game catalogue needs it.
-- [ ] `remoteAdmin.showIndicator = true`; disable `allowRemoteInput` if the club does not use remote assistance.
+- [ ] `remoteAdmin.showIndicator = true`; `allowRemoteInput` stays off (the default) unless the club uses remote assistance; input is refused while a game with an anti-cheat runs.
 - [ ] `logging.level = Information` (never `Verbose`), `retainDays` per local data-retention rules.
 - [ ] `C:\ProgramData\ClubShell` ACLs as written by `install.ps1` (root Users read, `secure\` SYSTEM/Admins only, `logs\` kiosk modify, `agent.json` not writable by the kiosk user).
 

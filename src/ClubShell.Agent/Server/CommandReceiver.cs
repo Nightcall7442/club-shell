@@ -1,6 +1,9 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Runtime.Versioning;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using ClubShell.Agent.Games;
 using ClubShell.Agent.Policy;
 using ClubShell.Agent.Power;
@@ -11,6 +14,7 @@ using ClubShell.Contracts.Commands;
 using ClubShell.Contracts.Errors;
 using ClubShell.Contracts.Games;
 using ClubShell.Contracts.Ipc;
+using ClubShell.Contracts.Serialization;
 using ClubShell.Contracts.Sessions;
 using ClubShell.Core.Abstractions;
 using ClubShell.Core.Configuration;
@@ -47,7 +51,9 @@ public interface IVolumeController
 /// <see cref="IPolicyRefresh"/> / <see cref="IConfigRefresh"/> (both declared in <c>Heartbeat.cs</c>). Every command is
 /// deduplicated by id for <see cref="DedupeWindow"/> (at-least-once delivery), checked for expiry, honours
 /// <c>supersedes</c> (cancels the still-running earlier command), runs under a per-command timeout and is audit-logged
-/// with its <c>issuedBy</c>. Handlers translate results into <see cref="CommandAck.Success{TResult}"/> /
+/// with its <c>issuedBy</c>. Acks of executed <c>reboot</c>/<c>shutdown</c> commands are also kept on disk
+/// (<see cref="PowerAckStore"/>), so a power command redelivered after the reboot it caused is answered, not re-run.
+/// Handlers translate results into <see cref="CommandAck.Success{TResult}"/> /
 /// <see cref="CommandAck.Failure"/> (<see cref="IpcException"/> maps to its <see cref="IpcError"/>). The ack itself is
 /// sent by the transport: <see cref="ServerConnection"/> over the WS, <see cref="HeartbeatService"/> via
 /// <c>POST /commands/{id}/ack</c> for the REST path.
@@ -59,6 +65,7 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
     public static readonly TimeSpan DedupeWindow = TimeSpan.FromHours(24);
 
     private const int MaxDedupeEntries = 1024;
+    private const string PowerAcksFileName = "power-acks.json";
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromMinutes(5);
 
     private readonly ITokenStore _tokens;
@@ -85,6 +92,7 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
 
     private readonly ConcurrentDictionary<Guid, SeenEntry> _seen = new();
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _inflight = new();
+    private readonly PowerAckStore _powerAcks;
 
     /// <summary>Creates the receiver. All dependencies are singletons.</summary>
     public CommandReceiver(
@@ -151,6 +159,7 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
         _settings = settings;
         _clock = clock;
         _logger = logger;
+        _powerAcks = new PowerAckStore(Path.Combine(settings.CurrentValue.CacheDir, PowerAcksFileName), clock, logger);
     }
 
     /// <inheritdoc />
@@ -163,6 +172,13 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
         {
             _logger.LogDebug("Duplicate command {Id} ({Type}); returning cached ack", command.Id, command.Type);
             return await existing.Result.ConfigureAwait(false);
+        }
+
+        if (_powerAcks.TryGet(command.Id, out var executed))
+        {
+            _logger.LogInformation("Power command {Id} ({Type}) was executed before a restart; returning its ack", command.Id, command.Type);
+            Remember(command.Id, Task.FromResult(executed));
+            return executed;
         }
 
         if (command.Supersedes is { } superseded && _inflight.TryGetValue(superseded, out var supersededCts))
@@ -226,6 +242,11 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
         finally
         {
             _inflight.TryRemove(command.Id, out _);
+        }
+
+        if (command.Type is ServerCommandType.Reboot or ServerCommandType.Shutdown)
+        {
+            _powerAcks.Save(command.Id, ack);
         }
 
         completion.TrySetResult(ack);
@@ -527,8 +548,9 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
             var response = await _server.GetConfigAsync(pcId, null, cancellationToken).ConfigureAwait(false);
             if (response.Value is { } config)
             {
-                _settingsLoader.ApplyServerOverrides(config);
+                // Shell first: an Agent section that fails validation must not leave every Shell feature switched on.
                 ApplyShellOverride(config);
+                _settingsLoader.ApplyServerOverrides(config);
                 return true;
             }
         }
@@ -557,7 +579,7 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
             var applied = _shellSettings.ApplyServerOverride(shell);
             _logger.LogInformation("Shell config from the server applied: theme {Theme}, locale {Locale}, features {Features}", applied.Theme, applied.Locale, applied.Features);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "Shell config from the server could not be written to shell.json");
         }
@@ -597,4 +619,110 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
     }
 
     private sealed record SeenEntry(Task<CommandAck> Result, DateTimeOffset At);
+}
+
+/// <summary>
+/// Acks of executed <c>reboot</c>/<c>shutdown</c> commands, kept for <see cref="CommandReceiver.DedupeWindow"/> in one
+/// small JSON file (<c>cache/power-acks.json</c>, rewritten atomically). When the ack did not leave before the PC went
+/// down, the server redelivers the command after boot; it is then answered with this ack instead of rebooting again.
+/// </summary>
+public sealed class PowerAckStore
+{
+    private readonly string _path;
+    private readonly IClock _clock;
+    private readonly ILogger _logger;
+    private readonly object _gate = new();
+    private Dictionary<Guid, (CommandAck Ack, DateTimeOffset At)>? _acks;
+
+    /// <summary>Creates the store over <paramref name="path"/>; the file is read on first use.</summary>
+    public PowerAckStore(string path, IClock clock, ILogger logger)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(path);
+        ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(logger);
+        _path = path;
+        _clock = clock;
+        _logger = logger;
+    }
+
+    /// <summary>The ack recorded for <paramref name="commandId"/> within the dedupe window.</summary>
+    public bool TryGet(Guid commandId, [NotNullWhen(true)] out CommandAck? ack)
+    {
+        lock (_gate)
+        {
+            ack = Load().TryGetValue(commandId, out var entry) && entry.At > _clock.UtcNow - CommandReceiver.DedupeWindow ? entry.Ack : null;
+            return ack is not null;
+        }
+    }
+
+    /// <summary>Records <paramref name="ack"/> and rewrites the file without the entries older than the dedupe window.</summary>
+    public void Save(Guid commandId, CommandAck ack)
+    {
+        ArgumentNullException.ThrowIfNull(ack);
+        lock (_gate)
+        {
+            var acks = Load();
+            var now = _clock.UtcNow;
+            acks[commandId] = (ack, now);
+            var root = new JsonObject();
+            foreach (var (id, entry) in acks.ToList())
+            {
+                if (entry.At <= now - CommandReceiver.DedupeWindow)
+                {
+                    acks.Remove(id);
+                    continue;
+                }
+
+                root[id.ToString("D")] = new JsonObject
+                {
+                    ["at"] = entry.At.ToString("O", CultureInfo.InvariantCulture),
+                    ["ack"] = JsonNode.Parse(JsonDefaults.Serialize(entry.Ack)),
+                };
+            }
+
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+                var temp = _path + ".tmp";
+                File.WriteAllText(temp, root.ToJsonString());
+                File.Move(temp, _path, overwrite: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning(ex, "Could not persist the ack of power command {Id} to {Path}", commandId, _path);
+            }
+        }
+    }
+
+    private Dictionary<Guid, (CommandAck Ack, DateTimeOffset At)> Load()
+    {
+        if (_acks is not null)
+        {
+            return _acks;
+        }
+
+        _acks = new();
+        try
+        {
+            if (File.Exists(_path) && JsonNode.Parse(File.ReadAllText(_path)) is JsonObject root)
+            {
+                foreach (var (key, node) in root)
+                {
+                    if (Guid.TryParse(key, out var id)
+                        && DateTimeOffset.TryParse(node?["at"]?.GetValue<string>(), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var at)
+                        && node?["ack"] is { } ackNode
+                        && JsonDefaults.Deserialize<CommandAck>(ackNode.ToJsonString()) is { } ack)
+                    {
+                        _acks[id] = (ack, at);
+                    }
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or FormatException)
+        {
+            _logger.LogWarning(ex, "Could not read executed power commands from {Path}", _path);
+        }
+
+        return _acks;
+    }
 }

@@ -324,7 +324,10 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
         try
         {
             _ = RequireSession();
-            return await EndCoreAsync(reason, settleWithServer: true, cancellationToken).ConfigureAwait(false);
+
+            // A reason this agent does not know (a newer server's endSession) must not be echoed back in the end report.
+            var known = reason == SessionEndReason.Unknown ? SessionEndReason.Admin : reason;
+            return await EndCoreAsync(known, settleWithServer: true, cancellationToken).ConfigureAwait(false);
         }
         finally
         {

@@ -25,7 +25,7 @@ Base URL: `https://<server>/api/v1` (`agent.json → server.baseUrl`). WebSocket
 | Compression | `Accept-Encoding: gzip, br` supported; responses > 1 KiB compressed |
 | Caching | `ETag` on `GET /games`, `/apps`, `/tariffs`, `/shop/products`, `/agents/{pcId}/policies`, `/agents/{pcId}/config`; Agent sends `If-None-Match`, `304` = use cache |
 | Timeouts | Agent: 15 s per request (`server.timeoutSec`); long uploads (telemetry batch) 30 s |
-| Retry | Agent retries `GET`, `PUT`, `DELETE`, and idempotent-keyed `POST` on `408/425/429/5xx` and network errors with exponential backoff (`server.retry`); never retries `4xx` other than those |
+| Retry | Agent retries `GET`, `PUT`, `DELETE`, and idempotent-keyed `POST` on `408/425/429`, `5xx` except `501`, and network errors with exponential backoff (`server.retry`); never retries `4xx` other than those. `501` (`notImplemented`) is final: not retried and not counted by the circuit breaker. Each attempt is signed afresh (§2.2) |
 
 ---
 
@@ -62,6 +62,10 @@ Every request with a Bearer token MUST carry:
 - Server rejects `|now − X-Timestamp| > 300 s` with `401 unauthorized`, `details.reason = "clockSkew"`,
   and returns `X-Server-Time` (ISO-8601) so the Agent can compute an offset and retry once.
 - Server rejects replay: (`pcId`, `X-Timestamp`, `X-Signature`) tuple must be unique within the window.
+- The Agent signs every attempt, retries included (§1 Retry). A retry within the same second carries
+  `X-Timestamp` = previous + 1 (at most a few seconds ahead of the Agent clock), so the attempts of one request
+  never share a tuple. Two separate, byte-identical requests (same method, path and body) in one second still
+  do: the signing string has no nonce (open question for the server's replay check).
 
 Example (`signingSecret` = base64 `c2VjcmV0MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NQ==`, decoded bytes are the key):
 
@@ -101,7 +105,9 @@ Every non-2xx response:
 
 HTTP status ↔ `ErrorCode` mapping is the "HTTP equiv" column in `IPC_PROTOCOL.md` §5. The Agent maps
 server errors 1:1 onto IPC errors (`details` passed through, `traceId` moved into `details.traceId`).
-Transport failures map to `serverUnavailable` (5xx/connection) or `timeout`.
+Transport failures map to `serverUnavailable` (5xx/connection) or `timeout`; `501` maps to `notImplemented`
+(an endpoint this server version does not implement; final, not retried). When `error.code` is a value this
+Agent does not know, it keeps `message`, `details` and `traceId` and derives the code from the HTTP status.
 
 ---
 
@@ -164,6 +170,8 @@ Request
 | `runningGames` | `{ gameId: uuid, pid: int, startedAt: datetime }[]` | yes | |
 | `offlineQueue` | int | yes | outbox size |
 | `shellConnected` | bool | yes | |
+| `gamesVolume` | `{ owner: "agent" \| "disklessHelper" \| "none", mounted?: bool, driveLetter?: string, since?: datetime }` | no | games library: `agent` = the Agent's SMB share (`mounted` false also while a refused `storage.gamesShare.iscsi` is set), `disklessHelper` = ClubDisklessHelper owns it (`mounted` omitted: unknown to the Agent), `none` = local disks; `since` = last change of `mounted` (omitted when unchanged since Agent start). Older agents omit the field (DISKLESS.md) |
+| `antiCheat` | `{ vanguardInstalled?: bool, vanguardLoaded?: bool, secureBoot?: bool, tpm?: bool }` | no | `vgk` driver installed / loaded (loads at boot), UEFI Secure Boot, TPM present; a field is omitted when unknown. Lets the server hide Riot games on PCs without a working Vanguard. Older agents omit the field |
 
 Response `200`
 
@@ -181,7 +189,7 @@ Errors: `404 notFound` (pc deleted → re-register).
 
 #### `GET /agents/{pcId}/commands` — auth: agent (fallback when WS unavailable)
 
-Response `{ items: ServerCommandEnvelope[] }` — each item is a `command` `WsFrame` without `type` (§6, §6.1). Acked by `POST /agents/{pcId}/commands/{commandId}/ack` with `{ ok: bool, error?: IpcError, result?: object }`.
+Response `{ items: ServerCommandEnvelope[] }` — each item is a `command` `WsFrame` without `type` (§6, §6.1). Acked by `POST /agents/{pcId}/commands/{commandId}/ack` with `{ ok: bool, error?: IpcError, result?: object }`. `name` is a plain string: a command this Agent does not know is acked `ok: false` with `error.code = notFound` instead of failing the whole batch.
 
 #### `POST /agents/{pcId}/telemetry` — auth: agent
 
@@ -191,10 +199,12 @@ Request
 |-------|------|----------|-------|
 | `samples` | `PcMetrics[]` | yes | ≤ 120 per batch |
 | `hardware` | `HardwareInfo` | no | when changed / every `hardwareRescanSec` |
-| `events` | `{ kind: string, at: datetime, data: object }[]` | yes | agent diagnostics: `shellCrash`, `shellCrashLoop`, `policyApplyFailed`, `updateFailed`, `pipeError`, `launcherError`, `deadletter` |
+| `events` | `{ kind: string, at: datetime, data: object }[]` | yes | agent diagnostics: `shellCrash`, `shellCrashLoop`, `policyApplyFailed`, `updateFailed`, `pipeError`, `launcherError`, `deadletter`; the Agent sends ≤ 100 per batch (the rest go in the next ones) |
 | `logsTail` | string[] | no | last ≤ 50 Warning+ log lines when `events` non-empty |
 
-Response `204`.
+Response `204`. A `4xx` other than `401`/`408`/`429` drops the batch (the server rejected its content); after any
+other failure (including `501`) the Agent keeps the batch and backs off exponentially from `uploadIntervalSec` up to
+15 min.
 
 #### `GET /agents/{pcId}/config` — auth: agent, ETag
 
@@ -208,14 +218,18 @@ Response `AgentServerConfig` — server-side overrides merged over `agent.json` 
 | `number` | int | yes | |
 | `session` | partial `agent.json → session` | no | |
 | `offline` | partial `agent.json → offline` | no | |
-| `games` | `{ libraryRoots?: string[], accountPool?: {...}, cloudSave?: {...} }` | no | |
-| `storage` | partial `agent.json → storage` | no | |
-| `updates` | `{ channel?: UpdateChannel, checkIntervalSec?: int, applyWindow?: {from,to} }` | no | |
+| `games` | `{ libraryRoots?: string[], accountPool?: {...}, cloudSave?: {...} }` | no | `accountPool.enabled` / `cloudSave.enabled` default `false` on the PC: only this config turns them on |
+| `storage` | partial `agent.json → storage` | no | `gamesShare` (SMB) applies without an Agent restart; a changed `uncPath` / `driveLetter` remaps at once. `gamesShare.iscsi` is refused: the Agent then mounts nothing (DISKLESS.md) |
+| `updates` | `{ channel?: UpdateChannel, checkIntervalSec?: int, applyWindow?: {from,to}, enabled?: bool }` | no | `enabled: false` stops the scheduled manifest checks (default `true`); explicit `update.check` and the `update` command still work |
 | `telemetry` | partial | no | |
-| `remoteAdmin` | partial | no | |
-| `shell` | `{ locale?: Locale, theme?: string, features?: object, ads?: object, idle?: object, club?: ShellClub }` | no | pushed into `shell.json`; `club` (name, accent, logo, wallpaper, active banners, rules) replaces `shell.json → club` as a whole, so a banner the owner removed disappears |
+| `remoteAdmin` | partial | no | `allowRemoteInput` defaults to `false` on the PC; input is dropped anyway while a game with an anti-cheat runs |
+| `anticheat` | partial `agent.json → anticheat`, e.g. `{ reportViolations?: bool }` | no | `reportViolations: false` stops `POST /anticheat/report` (default `true`) |
+| `shell` | `{ locale?: Locale, theme?: string, features?: object, ads?: object, idle?: object, club?: ShellClub }` | no | `features.shop/chat/booking/tournaments/topup` are off on the PC until sent `true`; pushed into `shell.json`; `club` (name, accent, logo, wallpaper, active banners, rules) replaces `shell.json → club` as a whole, so a banner the owner removed disappears |
 | `themes` | `{ name: string, url: string, sha256: string }[]` | no | Agent downloads into `themes\` |
 | `wsUrl` | string | no | override |
+
+The Agent keeps the last applied config in `cache\server-config.json` and applies it at start-up, before the first
+heartbeat; the first heartbeat always fetches the current one.
 
 #### `GET /agents/{pcId}/policies` — auth: agent, ETag
 
@@ -324,7 +338,7 @@ Query `sessionId` (required). Response `200`
 | `launcher` | `LauncherType` | yes | |
 | `username` | string | yes | |
 | `secret` | string | yes | password or token; AES-256-GCM encrypted with a per-agent key derived from `signingSecret` (`HKDF-SHA256`, info `"account-pool"`), base64 `nonce\|\|ciphertext\|\|tag` |
-| `extra` | object | no | launcher-specific (`steamGuardSecret`, `authenticatorSeed`, `region`) |
+| `extra` | object | no | launcher-specific (`steamGuardSecret`, `authenticatorSeed`, `region`); `files` (kiosk-profile path → base64 session file); Epic `authType: "exchangeCode"` = `secret` is a one-time exchange code, not a password. The Agent never puts a password on a launcher command line unless `games.accountPool.allowPasswordOnCommandLine` (default off) |
 | `expiresAt` | datetime | yes | lease TTL |
 | `cloudSave` | `{ url: string, sha256: string, sizeBytes: long }` | no | pre-signed download of the user's save bundle for this game |
 
@@ -351,8 +365,11 @@ Request
 | `exitCode` | int | no | on exit reports |
 | `playedSec` | int | no | on exit reports |
 | `phase` | `"launch" \| "exit"` | yes | |
+| `injectionError` | string | no | account-pool launch reports: why the launcher was not prepared cleanly (Steam auto-login reset in the kiosk hive failed, no session files / exchange code so the launcher started without credentials); absent when clean |
 
-Response `204`.
+Response `204`. When the server cannot be reached (transport failure, timeout, `5xx`, `408`, `429`, `401`/`403`) the
+Agent keeps the report in its offline outbox and replays it later. The replay has no `Idempotency-Key`, so a report
+whose response was lost can arrive twice. Other `4xx` drop the report.
 
 ### 4.7 Apps
 
@@ -498,16 +515,16 @@ Response `204`.
 
 ---
 
-## 6. WebSocket `wss://<server>/ws/agent?token=<accessToken>`
+## 6. WebSocket `wss://<server>/ws/agent`
 
 | Property | Value |
 |----------|-------|
 | Subprotocol | `clubshell.v1` |
-| Auth | query `token` = agent JWT; `401` close (code 4401) when invalid; `4426` when protocol unsupported |
+| Auth | `Authorization: Bearer <agent JWT>` on the handshake (the Agent no longer puts the token in the URL, where proxies log it; a server may still accept query `token` from older agents); HTTP `401`/`403` on the handshake or close code 4401 when invalid, expired or revoked; `4426` when protocol unsupported |
 | Frames | text, one JSON `WsFrame` per frame, ≤ 1 MiB |
 | Keepalive | server `ping` frame every 20 s; Agent replies `pong` (WsFrame) within 10 s; Agent also sends WebSocket-level pings every 30 s |
-| Reconnect | Agent backoff 1 s → 60 s (×2, ±20 % jitter); on token expiry refresh first |
-| Delivery | commands are at-least-once: server retries un-acked commands on reconnect (`pendingCommands` in heartbeat); Agent dedupes by `id` for 24 h |
+| Reconnect | Agent backoff 1 s → 60 s (×2, ±20 % jitter); the token is refreshed first when it is within 2 min of `exp` or the server answered 401/4401. On a live socket the Agent refreshes the token 2 min before `exp` and reconnects with the new one, so a server may close the socket with 4401 at `exp` |
+| Delivery | commands are at-least-once: server retries un-acked commands on reconnect (`pendingCommands` in heartbeat); Agent dedupes by `id` for 24 h and answers a redelivered id with the ack of the first execution (WS and REST). Acks of `reboot`/`shutdown` are also kept on disk for 24 h, so a power command redelivered after the reboot it caused is acked, not executed again |
 | Ordering | per-connection FIFO; a command with `supersedes` cancels a pending earlier command id |
 
 `WsFrame`
@@ -549,19 +566,25 @@ Response `204`.
 
 ### 6.2 Agent → Server events (`AgentEventType`)
 
-| name | payload |
-|------|---------|
-| `sessionStarted` | `{ session: Session }` |
-| `sessionEnded` | `{ session: Session, reason: SessionEndReason, charged: Money }` |
-| `gameLaunched` | `{ sessionId: uuid, gameId: uuid, pid: int, accountLeaseId?: uuid, at: datetime }` |
-| `gameExited` | `{ sessionId: uuid, gameId: uuid, pid: int, exitCode: int, playedSec: int, at: datetime }` |
-| `anticheatViolation` | body of `POST /anticheat/report` |
-| `hardwareChanged` | `{ hardware: HardwareInfo, diff: string[] }` |
-| `offlineQueueFlushed` | `{ count: int, deadlettered: int, offlineFrom: datetime, offlineTo: datetime }` |
+| name | payload | sent by the Agent |
+|------|---------|-------------------|
+| `sessionStarted` | `{ session: Session }` | no |
+| `sessionEnded` | `{ session: Session, reason: SessionEndReason, charged: Money }` | no |
+| `gameLaunched` | `{ sessionId: uuid, gameId: uuid, pid: int, accountLeaseId?: uuid, at: datetime }` | no |
+| `gameExited` | `{ sessionId: uuid, gameId: uuid, pid: int, exitCode: int, playedSec: int, at: datetime }` | no |
+| `anticheatViolation` | body of `POST /anticheat/report` | yes |
+| `hardwareChanged` | `{ hardware: HardwareInfo, diff: string[] }` | yes |
+| `offlineQueueFlushed` | `{ count: int, deadlettered: int, offlineFrom: datetime, offlineTo: datetime }` | yes |
 
-Events are fire-and-forget over WS; the server does not ack them. When WS is down they are stored in the
-outbox and replayed via their REST equivalents (`/sessions/{id}/events`, `/games/{id}/launch-report`,
-`/anticheat/report`, `/agents/{pcId}/telemetry`), never re-sent over WS.
+The four session/game names are reserved; the Agent does not send them. REST is the source of truth for sessions
+and games: `POST /sessions`, `POST /sessions/{id}/end`, `POST /sessions/{id}/events` and
+`POST /games/{id}/launch-report`. Session events always go through the SQLite outbox; a launch report that cannot be
+delivered goes there too. Both are replayed over REST when the server is reachable again.
+
+The events that are sent are fire-and-forget over WS; the server does not ack them. While the WS is down they are
+dropped, not queued. Each has a REST path of its own: `anticheatViolation` is also sent as `POST /anticheat/report`
+(when `anticheat.reportViolations` is on), `hardwareChanged` also attaches the inventory to the next
+`POST /agents/{pcId}/telemetry` batch, and `offlineQueueFlushed` is informational only.
 
 ### 6.3 Server → Agent pushes (`type = "push"`, no ack)
 
@@ -582,7 +605,7 @@ Example frames:
 ```json
 { "type": "command", "id": "c0a8…", "ts": "2026-09-21T10:20:00.000Z", "name": "lock", "payload": { "reason": "admin", "message": "Please come to the desk" }, "expiresAt": "2026-09-21T10:25:00.000Z" }
 { "type": "ack", "id": "77aa…", "ts": "2026-09-21T10:20:00.050Z", "ack": { "id": "c0a8…", "ok": true, "result": null } }
-{ "type": "event", "id": "e1f2…", "ts": "2026-09-21T10:21:00.000Z", "name": "gameLaunched", "payload": { "sessionId": "9c1e…", "gameId": "5a6b…", "pid": 7788, "accountLeaseId": "1c2d…", "at": "2026-09-21T10:21:00.000Z" } }
+{ "type": "event", "id": "e1f2…", "ts": "2026-09-21T10:21:00.000Z", "name": "offlineQueueFlushed", "payload": { "count": 12, "deadlettered": 0, "offlineFrom": "2026-09-21T09:40:00.000Z", "offlineTo": "2026-09-21T10:20:00.000Z" } }
 { "type": "push", "id": "p9…", "ts": "2026-09-21T10:22:00.000Z", "name": "walletUpdated", "payload": { "userId": "3f9a…", "amount": { "amount": 2000000, "currency": "UZS" }, "bonus": { "amount": 50000, "currency": "UZS" }, "currency": "UZS", "updatedAt": "2026-09-21T10:22:00.000Z" } }
 ```
 

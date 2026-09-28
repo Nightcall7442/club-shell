@@ -15,10 +15,20 @@ import uz from './uz.json';
 export const LOCALES: readonly Locale[] = [LocaleValues.En, LocaleValues.Ru, LocaleValues.Uz];
 
 /** Native display name per locale (for the language switcher). */
-export const LOCALE_NAMES: Readonly<Record<Locale, string>> = { en: 'English', ru: 'Русский', uz: "O'zbekcha" };
+export const LOCALE_NAMES: Readonly<Record<Locale, string>> = {
+  en: 'English',
+  ru: 'Русский',
+  uz: "O'zbekcha",
+  unknown: 'English',
+};
 
-/** BCP-47 tag per UI locale (Intl formatting). */
-export const LOCALE_TAGS: Readonly<Record<Locale, string>> = { en: 'en-US', ru: 'ru-RU', uz: 'uz-UZ' };
+/** BCP-47 tag per UI locale (Intl formatting); `unknown` is never a UI locale ({@link toLocale} maps it to `en`). */
+export const LOCALE_TAGS: Readonly<Record<Locale, string>> = {
+  en: 'en-US',
+  ru: 'ru-RU',
+  uz: 'uz-UZ',
+  unknown: 'en-US',
+};
 
 /** Narrows any string to a supported {@link Locale}, defaulting to `en`. */
 export function toLocale(value: string | null | undefined): Locale {

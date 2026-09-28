@@ -413,6 +413,20 @@ public sealed class SessionManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task End_WithAReasonFromANewerServer_IsReportedAsAdmin()
+    {
+        Guid id = Guid.NewGuid();
+        _server.CreateSessionAsync(Arg.Any<SessionCreateRequest>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(ServerSession(id));
+        _server.EndSessionAsync(id, Arg.Any<SessionEndReport>(), Arg.Any<CancellationToken>())
+            .Returns(new SessionEndResult(ServerSession(id, state: SessionState.Ended), Money.Zero, Money.Zero));
+        await _manager.StartAsync(Request(), CancellationToken.None);
+
+        await _manager.EndAsync(SessionEndReason.Unknown, CancellationToken.None);
+
+        await _server.Received(1).EndSessionAsync(id, Arg.Is<SessionEndReport>(r => r.Reason == SessionEndReason.Admin), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Extend_AddsMinutes_AndAdoptsTheServerFigures()
     {
         Guid id = Guid.NewGuid();

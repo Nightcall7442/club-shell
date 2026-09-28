@@ -90,7 +90,7 @@ public sealed class ShellSettingsStore
         }
     }
 
-    /// <summary>Feature toggles (<c>features.*</c>, default on).</summary>
+    /// <summary>Feature toggles (<c>features.*</c>; shop, chat, booking, tournaments and topup default off, the rest on).</summary>
     public ShellFeatures Features => Get().Features;
 
     /// <summary>Current settings.</summary>
@@ -161,7 +161,7 @@ public sealed class ShellSettingsStore
         ArgumentNullException.ThrowIfNull(shell);
         return Mutate(root =>
         {
-            if (shell.Locale is { } locale)
+            if (shell.Locale is { } locale && locale != Locale.Unknown)
             {
                 root["locale"] = WireName(locale);
             }
@@ -256,7 +256,7 @@ public sealed class ShellSettingsStore
         JsonNode? sound = root["sound"];
         JsonNode? features = root["features"];
         string localeText = GetString(root["locale"]) ?? "ru";
-        Locale locale = Enum.TryParse(localeText, ignoreCase: true, out Locale parsed) ? parsed : Locale.Ru;
+        Locale locale = Enum.TryParse(localeText, ignoreCase: true, out Locale parsed) && parsed != Locale.Unknown ? parsed : Locale.Ru;
         return new ShellSettings(
             locale,
             GetString(root["theme"]) ?? DefaultTheme,
@@ -267,13 +267,14 @@ public sealed class ShellSettingsStore
             GetBool(root["ui"]?["showMetricsOverlay"], false),
             GetBool(root["kiosk"]?["allowVirtualKeyboard"], true),
             GetBool(sound?["uiSounds"], true),
+            // Server-backed sections stay off until shell.json (the server's config) turns them on.
             new ShellFeatures(
-                GetBool(features?["shop"], true),
-                GetBool(features?["chat"], true),
-                GetBool(features?["booking"], true),
-                GetBool(features?["tournaments"], true),
+                GetBool(features?["shop"], false),
+                GetBool(features?["chat"], false),
+                GetBool(features?["booking"], false),
+                GetBool(features?["tournaments"], false),
                 GetBool(features?["profile"], true),
-                GetBool(features?["topup"], true),
+                GetBool(features?["topup"], false),
                 GetBool(features?["apps"], true),
                 GetBool(features?["callAdmin"], true)),
             MapClub(root["club"]));

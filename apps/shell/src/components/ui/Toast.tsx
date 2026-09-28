@@ -35,7 +35,7 @@ export interface ToastViewportProps {
   className?: string;
 }
 
-const DEFAULT_TTL: Record<NotificationLevel, number> = { info: 6, success: 5, warning: 8, error: 10 };
+const DEFAULT_TTL: Record<NotificationLevel, number> = { info: 6, success: 5, warning: 8, error: 10, unknown: 6 };
 
 const EDGE: Record<BadgeTone, string> = {
   neutral: 'border-l-text',

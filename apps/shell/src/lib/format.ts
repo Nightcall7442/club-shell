@@ -7,7 +7,7 @@ import i18n, { LOCALE_TAGS, toLocale } from '@/i18n';
 
 /** Display label for currencies where the ISO code is not what people say. */
 const CURRENCY_LABELS: Readonly<Record<string, Readonly<Record<Locale, string>>>> = {
-  UZS: { en: 'UZS', ru: 'сум', uz: "so'm" },
+  UZS: { en: 'UZS', ru: 'сум', uz: "so'm", unknown: 'UZS' },
 };
 
 function tag(locale: Locale | string): string {

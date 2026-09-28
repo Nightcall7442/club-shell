@@ -162,6 +162,7 @@
     "internal": "Something went wrong",
     "protocolError": "Communication error",
     "versionMismatch": "The client needs an update",
+    "notImplemented": "This feature is not available on the club server yet",
     "unknown": "Unknown error",
     "network": "Network error",
     "generic": "Something went wrong. Please try again"
@@ -509,7 +510,8 @@
       "snack": "Snacks",
       "service": "Services",
       "merch": "Merch",
-      "time": "Game time"
+      "time": "Game time",
+      "unknown": "Other"
     },
     "orders": "Orders",
     "activeOrders": "Active orders",
@@ -522,7 +524,8 @@
       "preparing": "Preparing",
       "delivering": "On the way",
       "done": "Delivered",
-      "cancelled": "Cancelled"
+      "cancelled": "Cancelled",
+      "unknown": "Unknown"
     },
     "statusHint": {
       "pending": "Waiting for staff to confirm",
@@ -530,7 +533,8 @@
       "preparing": "Your order is being prepared",
       "delivering": "Heading to your seat",
       "done": "Enjoy!",
-      "cancelled": "The order was cancelled"
+      "cancelled": "The order was cancelled",
+      "unknown": "Ask the staff for details"
     },
     "noOrders": "No orders yet",
     "cancel": "Cancel order",
@@ -598,7 +602,8 @@
       "refund": "Refund",
       "bonus": "Bonus",
       "purchase": "Purchase",
-      "adjustment": "Adjustment"
+      "adjustment": "Adjustment",
+      "unknown": "Other"
     },
     "tariffs": "Tariffs",
     "tariff": "Tariff",
@@ -725,13 +730,15 @@
       "locked": "Locked",
       "maintenance": "Maintenance",
       "booked": "Booked",
-      "offline": "Offline"
+      "offline": "Offline",
+      "unknown": "Unavailable"
     },
     "bookingStatus": {
       "reserved": "Reserved",
       "confirmed": "Confirmed",
       "cancelled": "Cancelled",
-      "expired": "Expired"
+      "expired": "Expired",
+      "unknown": "Unknown"
     },
     "legend": "Legend",
     "slot": "Slot",
@@ -798,7 +805,8 @@
       "upcoming": "Upcoming",
       "registration": "Registration",
       "live": "Live",
-      "finished": "Finished"
+      "finished": "Finished",
+      "unknown": "Unknown"
     },
     "viewBracket": "View bracket",
     "viewLeaderboard": "View leaderboard",
@@ -834,7 +842,8 @@
       "guest": "Guest",
       "member": "Member",
       "vip": "VIP",
-      "admin": "Admin"
+      "admin": "Admin",
+      "unknown": "Guest"
     },
     "memberSince": "Member since {{date}}",
     "lastSeen": "Last seen {{date}}",
@@ -1029,7 +1038,8 @@
       "admin": "Ended by an administrator",
       "idle": "Ended due to inactivity",
       "agentRestart": "Ended by a service restart",
-      "error": "Ended due to an error"
+      "error": "Ended due to an error",
+      "unknown": "The session has ended"
     },
     "endedCharged": "Charged {{amount}}",
     "endedRefunded": "Refunded {{amount}}",
@@ -1183,7 +1193,8 @@
     "warning": "Warning",
     "error": "Error",
     "liveRegion": "Notifications",
-    "closeToast": "Close notification"
+    "closeToast": "Close notification",
+    "unknown": "Notice"
   },
   "admin": {
     "message": "Message from staff",

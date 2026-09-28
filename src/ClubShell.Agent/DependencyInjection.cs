@@ -110,7 +110,6 @@ public static class AgentServiceCollectionExtensions
         services.TryAddSingleton<DnsFilter>();
         services.TryAddSingleton<FirewallRules>();
         services.TryAddSingleton<PowerControl>();
-        services.TryAddSingleton<IscsiInitiator>();
         services.TryAddSingleton<NetworkShare>();
     }
 

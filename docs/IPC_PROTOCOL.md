@@ -134,12 +134,13 @@ Ping/pong are exempt from rate limiting and are not logged above Verbose.
 | `antiCheatBlocked` | AntiCheatBlocked | 403 | Anti-cheat prerequisite failed; `details: {kind, reason}` |
 | `policyDenied` | PolicyDenied | 403 | Blocked by Policy; `details: {rule}` |
 | `agentOffline` | AgentOffline | 503 | Agent has no server connection and operation cannot be served from cache |
-| `serverUnavailable` | ServerUnavailable | 503 | Server returned 5xx / circuit open |
+| `serverUnavailable` | ServerUnavailable | 503 | Server returned 5xx other than 501 / circuit open |
 | `timeout` | Timeout | 504 | Upstream or launch timeout |
 | `rateLimited` | RateLimited | 429 | `details.retryAfterSec` |
 | `internal` | Internal | 500 | Unexpected exception; `details.traceId` |
 | `protocolError` | ProtocolError | 400 | Envelope/framing violation |
 | `versionMismatch` | VersionMismatch | 426 | Protocol/app version unsupported; `details: {supported: [..], got}` |
+| `notImplemented` | NotImplemented | 501 | The server does not implement this endpoint (yet); final, not retryable |
 
 Any request may additionally return `internal`, `protocolError`, `rateLimited`, `timeout`, `unauthorized`
 (before hello) — these are not repeated in the per-message tables.
@@ -157,40 +158,45 @@ member names (C#/Rust/TS) are PascalCase.
 
 | Enum | Wire values |
 |------|-------------|
-| `UserRole` | `guest`, `member`, `vip`, `admin` |
-| `Locale` | `en`, `ru`, `uz` |
-| `SessionState` | `idle`, `starting`, `active`, `paused`, `locked`, `ending`, `ended` |
-| `PcStatus` | `offline`, `free`, `busy`, `locked`, `maintenance`, `booked` |
-| `LauncherType` | `steam`, `epic`, `battleNet`, `riot`, `ea`, `ubisoft`, `exe` |
-| `AntiCheatKind` | `none`, `eac`, `battlEye`, `vanguard`, `faceit`, `ricochet` |
+| `UserRole` | `guest`, `member`, `vip`, `admin`, `unknown` |
+| `Locale` | `en`, `ru`, `uz`, `unknown` |
+| `SessionState` | `idle`, `starting`, `active`, `paused`, `locked`, `ending`, `ended`, `unknown` |
+| `PcStatus` | `offline`, `free`, `busy`, `locked`, `maintenance`, `booked`, `unknown` |
+| `LauncherType` | `steam`, `epic`, `battleNet`, `riot`, `ea`, `ubisoft`, `exe`, `unknown` |
+| `AntiCheatKind` | `none`, `eac`, `battlEye`, `vanguard`, `faceit`, `ricochet`, `unknown` |
 | `GameState` | `launching`, `running`, `exited`, `failed`, `killed` |
 | `DiskType` | `hdd`, `ssd`, `nvme`, `network`, `unknown` |
-| `TransactionType` | `topUp`, `charge`, `refund`, `bonus`, `purchase`, `adjustment` |
-| `TopupProvider` | `payme`, `click`, `uzum`, `cash` |
-| `TopupStatus` | `pending`, `paid`, `expired`, `cancelled` |
-| `ProductCategory` | `food`, `drink`, `snack`, `service`, `merch`, `time` |
-| `OrderStatus` | `pending`, `accepted`, `preparing`, `delivering`, `done`, `cancelled` |
-| `ChatMessageKind` | `text`, `system`, `admin` |
-| `BookingStatus` | `reserved`, `confirmed`, `cancelled`, `expired` |
-| `TournamentState` | `upcoming`, `registration`, `live`, `finished` |
+| `TransactionType` | `topUp`, `charge`, `refund`, `bonus`, `purchase`, `adjustment`, `unknown` |
+| `TopupProvider` | `payme`, `click`, `uzum`, `cash`, `unknown` |
+| `TopupStatus` | `pending`, `paid`, `expired`, `cancelled`, `unknown` |
+| `ProductCategory` | `food`, `drink`, `snack`, `service`, `merch`, `time`, `unknown` |
+| `OrderStatus` | `pending`, `accepted`, `preparing`, `delivering`, `done`, `cancelled`, `unknown` |
+| `ChatMessageKind` | `text`, `system`, `admin`, `unknown` |
+| `BookingStatus` | `reserved`, `confirmed`, `cancelled`, `expired`, `unknown` |
+| `TournamentState` | `upcoming`, `registration`, `live`, `finished`, `unknown` |
 | `SessionEventType` | `started`, `paused`, `resumed`, `extended`, `warning`, `locked`, `unlocked`, `ended`, `charged` |
-| `SessionEndReason` | `user`, `timeUp`, `admin`, `idle`, `agentRestart`, `error` |
-| `NotificationLevel` | `info`, `warning`, `error`, `success` |
+| `SessionEndReason` | `user`, `timeUp`, `admin`, `idle`, `agentRestart`, `error`, `unknown` |
+| `NotificationLevel` | `info`, `warning`, `error`, `success`, `unknown` |
 | `AuthKind` | `password`, `qr`, `guest`, `card`, `token` |
-| `AllowlistMode` | `allow`, `deny` |
-| `UpdateChannel` | `stable`, `beta` |
-| `UpdateComponent` | `agent`, `shell` |
+| `AllowlistMode` | `allow`, `deny`, `unknown` |
+| `UpdateChannel` | `stable`, `beta`, `unknown` |
+| `UpdateComponent` | `agent`, `shell`, `unknown` |
 | `UpdatePhase` | `downloading`, `verifying`, `staging`, `applying`, `failed` |
 | `ConnectivityState` | `online`, `offline` |
 | `RemoteControlState` | `started`, `stopped` |
 | `ShellCommandKind` | `lock`, `unlock`, `reboot`, `showAds`, `showMessage` |
 | `CallAdminCategory` | `help`, `technical`, `order`, `other` |
-| `QrStatus` | `pending`, `scanned`, `confirmed`, `expired` |
+| `QrStatus` | `pending`, `scanned`, `confirmed`, `expired`, `unknown` |
 | `Weekday` | `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun` |
 | `IpcKind` | `request`, `response`, `event` |
 | `ErrorCode` | section 5 |
 | `AgentCommand` | every request `name` in sections 7–8 (Shell → Agent) |
 | `ServerCommandType`, `AgentEventType` | `SERVER_API.md` §6.1 / §6.2 |
+
+`unknown` (last value of the enums that carry it, and of `DiskType`) is a read-side fallback: a value this build does
+not know (sent by a newer server) deserializes as `unknown` instead of failing the whole message. The Agent never
+sends `unknown` to the server: `SessionEndReason.unknown` is reported as `admin`, an `unknown` update component is
+refused with `validation`, and an `unknown` server locale is ignored. `ErrorCode` and the other enums stay strict.
 
 ### 6.2 Money
 
@@ -477,7 +483,7 @@ See `ARCHITECTURE.md` §12.3 for the annotated example. Field types:
 | `shellReplacement` | `{ enabled: bool, shellExe: string }` |
 | `processAllowlist` | `{ mode: AllowlistMode, patterns: string[] }` |
 | `usb` | `{ allowStorage: bool, allowHid: bool }` |
-| `webFilter` | `{ enabled: bool, blockedDomains: string[], allowedDomains: string[], dnsServers: string[] }` |
+| `webFilter` | `{ enabled: bool, blockedDomains: string[], allowedDomains: string[], dnsServers: string[], blockResolvedIps?: bool, protectedDomains?: string[] }` |
 | `explorer` | `{ disableTaskManager: bool, disableRun: bool, disableSettings: bool, hideTaskbar: bool, disableAltTab: bool, disableWinKey: bool, blockedKeyCombos: string[] }` |
 | `power` | `{ idleShutdownMin?: int, scheduledShutdown?: time }` |
 | `updates` | `{ channel: UpdateChannel, autoInstall: bool }` |

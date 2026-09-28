@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Runtime.Versioning;
 using ClubShell.Agent.Games.Accounts;
 using ClubShell.Agent.Games.Saves;
+using ClubShell.Agent.Session;
 using ClubShell.Contracts.Games;
 using ClubShell.Contracts.Ipc;
 using ClubShell.Core.Abstractions;
@@ -41,7 +42,7 @@ public sealed record GameExitedEventArgs(GameLaunchRecord Record, GameState Fina
 /// <summary>
 /// Tracks running games by pid: waits for process exit, publishes <c>game.stateChanged</c>, restores injected
 /// credentials, uploads cloud saves, releases account leases, sends the <see cref="LaunchReportPhase.Exit"/> report
-/// and disposes the per-launch <see cref="JobObject"/>.
+/// (through the offline outbox when the server is unreachable) and disposes the per-launch <see cref="JobObject"/>.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
@@ -49,6 +50,7 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
     private static readonly TimeSpan DisposeWait = TimeSpan.FromSeconds(5);
 
     private readonly IServerClient _server;
+    private readonly OfflineSessionStore _outbox;
     private readonly AccountPool _pool;
     private readonly AccountInjector _injector;
     private readonly CloudSaveSync _saves;
@@ -63,6 +65,7 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
     /// <summary>Creates the tracker.</summary>
     public GameSessionTracker(
         IServerClient server,
+        OfflineSessionStore outbox,
         AccountPool pool,
         AccountInjector injector,
         CloudSaveSync saves,
@@ -74,6 +77,7 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
     {
         _playerSettings = playerSettings;
         _server = server;
+        _outbox = outbox;
         _pool = pool;
         _injector = injector;
         _saves = saves;
@@ -228,14 +232,7 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
             LaunchReportPhase.Exit,
             exitCode,
             playedSec);
-        try
-        {
-            await _server.SendLaunchReportAsync(record.Game.Id, report, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is ServerApiException or HttpRequestException or TaskCanceledException)
-        {
-            _logger.LogWarning(ex, "Exit launch report for {Title} not delivered", record.Game.Title);
-        }
+        await _outbox.SendLaunchReportAsync(_server, record.Game.Id, report, ct).ConfigureAwait(false);
 
         // After the account is back in the pool and the exit is reported: the settings upload must not hold up the
         // session-end cleanup, which only waits a few seconds for exit processing.

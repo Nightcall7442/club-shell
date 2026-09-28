@@ -72,6 +72,9 @@ public enum AllowlistMode
 
     /// <summary>Matching processes are killed.</summary>
     Deny,
+
+    /// <summary>A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the server.</summary>
+    Unknown,
 }
 
 /// <summary>Shell replacement for the kiosk user.</summary>
@@ -100,11 +103,21 @@ public sealed record UsbPolicy(
 /// <param name="BlockedDomains">Wildcard domains to block.</param>
 /// <param name="AllowedDomains">Non-empty = allow-list mode.</param>
 /// <param name="DnsServers">Filtering DNS resolvers to enforce.</param>
+/// <param name="BlockResolvedIps">
+/// Also firewall the public IPv4 addresses the blocked domains resolve to; <see langword="null"/> = <see langword="false"/>.
+/// Off by default: a blocked site on a shared CDN address takes launchers down with it.
+/// </param>
+/// <param name="ProtectedDomains">
+/// Domains never blocked, added to the Agent's built-in launcher/anti-cheat list (the host of <c>server.baseUrl</c> is
+/// always protected); <see langword="null"/> = built-in list only.
+/// </param>
 public sealed record WebFilterPolicy(
     bool Enabled,
     IReadOnlyList<string> BlockedDomains,
     IReadOnlyList<string> AllowedDomains,
-    IReadOnlyList<string> DnsServers);
+    IReadOnlyList<string> DnsServers,
+    bool? BlockResolvedIps = null,
+    IReadOnlyList<string>? ProtectedDomains = null);
 
 /// <summary>
 /// Explorer / input lockdown. Key combos use the grammar
@@ -198,7 +211,9 @@ public sealed record Policy(
         if (WebFilter.Enabled != other.WebFilter.Enabled
             || !WebFilter.BlockedDomains.SequenceEqual(other.WebFilter.BlockedDomains, StringComparer.Ordinal)
             || !WebFilter.AllowedDomains.SequenceEqual(other.WebFilter.AllowedDomains, StringComparer.Ordinal)
-            || !WebFilter.DnsServers.SequenceEqual(other.WebFilter.DnsServers, StringComparer.Ordinal)) changed.Add("webFilter");
+            || !WebFilter.DnsServers.SequenceEqual(other.WebFilter.DnsServers, StringComparer.Ordinal)
+            || WebFilter.BlockResolvedIps != other.WebFilter.BlockResolvedIps
+            || !(WebFilter.ProtectedDomains ?? []).SequenceEqual(other.WebFilter.ProtectedDomains ?? [], StringComparer.Ordinal)) changed.Add("webFilter");
         if (Explorer.DisableTaskManager != other.Explorer.DisableTaskManager
             || Explorer.DisableRun != other.Explorer.DisableRun
             || Explorer.DisableSettings != other.Explorer.DisableSettings
@@ -284,10 +299,12 @@ public sealed record TimeWindow(
 /// <param name="Channel">Channel.</param>
 /// <param name="CheckIntervalSec">Manifest check interval.</param>
 /// <param name="ApplyWindow">Window in which non-mandatory updates may be applied.</param>
+/// <param name="Enabled"><see langword="false"/> stops the periodic manifest check; <see langword="null"/> keeps <c>agent.json</c> (default on).</param>
 public sealed record UpdatesConfigOverride(
     UpdateChannel? Channel = null,
     int? CheckIntervalSec = null,
-    TimeWindow? ApplyWindow = null);
+    TimeWindow? ApplyWindow = null,
+    bool? Enabled = null);
 
 /// <summary>A promo banner on the player's home screen, set by the club owner in the admin console.</summary>
 /// <param name="Id">Banner id.</param>
@@ -353,6 +370,7 @@ public sealed record ShellConfigOverride(
 /// <param name="Shell">Shell overrides.</param>
 /// <param name="Themes">Themes to download.</param>
 /// <param name="WsUrl">WebSocket URL override.</param>
+/// <param name="Anticheat">Partial <c>agent.json → anticheat</c>, e.g. <c>{ "reportViolations": false }</c> (default on).</param>
 public sealed record AgentServerConfig(
     int Version,
     string PcName,
@@ -367,6 +385,7 @@ public sealed record AgentServerConfig(
     JsonElement? RemoteAdmin = null,
     ShellConfigOverride? Shell = null,
     IReadOnlyList<ThemeRef>? Themes = null,
-    string? WsUrl = null);
+    string? WsUrl = null,
+    JsonElement? Anticheat = null);
 
 #endregion

@@ -102,6 +102,11 @@ export const BookingStatus = {
   Cancelled: 'cancelled',
   /** Expired unused. */
   Expired: 'expired',
+  /**
+   * A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the
+   * server.
+   */
+  Unknown: 'unknown',
 } as const;
 /** Booking lifecycle. */
 export type BookingStatus = (typeof BookingStatus)[keyof typeof BookingStatus];
@@ -159,6 +164,11 @@ export const ChatMessageKind = {
   System: 'system',
   /** Message from club staff. */
   Admin: 'admin',
+  /**
+   * A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the
+   * server.
+   */
+  Unknown: 'unknown',
 } as const;
 /** Kind of chat message. */
 export type ChatMessageKind = (typeof ChatMessageKind)[keyof typeof ChatMessageKind];
@@ -205,6 +215,11 @@ export const Locale = {
   Ru: 'ru',
   /** Uzbek. */
   Uz: 'uz',
+  /**
+   * A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the
+   * server.
+   */
+  Unknown: 'unknown',
 } as const;
 /** UI locale. */
 export type Locale = (typeof Locale)[keyof typeof Locale];
@@ -279,6 +294,11 @@ export const QrStatus = {
   Confirmed: 'confirmed',
   /** Expired or already consumed. */
   Expired: 'expired',
+  /**
+   * A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the
+   * server.
+   */
+  Unknown: 'unknown',
 } as const;
 /** State of a QR login handshake. */
 export type QrStatus = (typeof QrStatus)[keyof typeof QrStatus];
@@ -309,6 +329,11 @@ export const TournamentState = {
   Live: 'live',
   /** Finished. */
   Finished: 'finished',
+  /**
+   * A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the
+   * server.
+   */
+  Unknown: 'unknown',
 } as const;
 /** Tournament lifecycle. */
 export type TournamentState = (typeof TournamentState)[keyof typeof TournamentState];
@@ -359,6 +384,11 @@ export const UserRole = {
   Vip: 'vip',
   /** Club staff / admin. */
   Admin: 'admin',
+  /**
+   * A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the
+   * server.
+   */
+  Unknown: 'unknown',
 } as const;
 /** User role; ordered by privilege. */
 export type UserRole = (typeof UserRole)[keyof typeof UserRole];
@@ -452,8 +482,14 @@ export interface UserStats {
 }
 
 // ---- BEGIN MANUAL ----
-/** Privilege rank of each role (higher = more privileged). */
-export const USER_ROLE_RANK: Readonly<Record<UserRole, number>> = { guest: 0, member: 1, vip: 2, admin: 3 };
+/** Privilege rank of each role (higher = more privileged); `unknown` ranks as a guest. */
+export const USER_ROLE_RANK: Readonly<Record<UserRole, number>> = {
+  guest: 0,
+  member: 1,
+  vip: 2,
+  admin: 3,
+  unknown: 0,
+};
 // ---- END MANUAL ----
 
 // ---- BEGIN MANUAL ----

@@ -37,6 +37,7 @@ const STATUS_CLASS: Record<PcStatus, string> = {
   locked: 'bg-transparent text-muted/70 border-text/[0.07]',
   maintenance: 'bg-transparent text-muted/50 border-dashed border-text/15',
   offline: 'bg-transparent text-muted/40 border-text/[0.05]',
+  unknown: 'bg-transparent text-muted/40 border-text/[0.05]',
 };
 
 const STATUS_DOT: Record<PcStatus, string> = {
@@ -46,6 +47,7 @@ const STATUS_DOT: Record<PcStatus, string> = {
   locked: 'bg-text/25',
   maintenance: 'bg-text/15',
   offline: 'bg-text/10',
+  unknown: 'bg-text/10',
 };
 
 const LEGEND: readonly PcStatus[] = ['free', 'busy', 'booked', 'locked', 'maintenance', 'offline'];

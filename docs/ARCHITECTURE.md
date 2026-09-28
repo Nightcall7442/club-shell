@@ -245,14 +245,15 @@ correct drift.
 ```
  1. SCM starts service → Program.Main → Host.Build
  2. SettingsLoader: read C:\ProgramData\ClubShell\agent.json (create from config/agent.default.json if absent),
-    validate schema, apply env overrides CLUBSHELL__*
+    validate schema, apply env overrides CLUBSHELL__*, then the last server config from cache\server-config.json
  3. Serilog init (file sink logs\agent-<date>.json, rolling)
  4. Hwid.Compute() (SMBIOS UUID + disk serial + MAC, SHA-256)  → hwid
  5. TokenStore.Load() (DPAPI). If none or refresh fails → POST /agents/register (clubApiKey + hwid)
  6. GET /agents/{pcId}/config  → merge server overrides into runtime config
  7. GET /agents/{pcId}/policies → PolicyEnforcer.Apply (registry, firewall, DNS filter, USB, hooks config)
- 8. Storage: mount games share if configured (retry 3×, non-fatal); skipped entirely while the ClubDisklessHelper
-    service is installed — it owns the games library volume (DISKLESS.md)
+ 8. Storage: mount the SMB games share if configured (backoff, non-fatal; follows later settings changes, never
+    unmapped on Agent stop); skipped entirely while the ClubDisklessHelper service is installed — it owns the games
+    library volume. storage.gamesShare.iscsi is refused: nothing is mounted (DISKLESS.md)
  9. UserProvisioning: ensure kiosk user exists, password rotated (random, stored DPAPI). Profile reset if
     shell.kioskUser.resetProfileOnLogout and the previous session never closed cleanly — a debt marker written at
     session start and cleared only once a reset has run, so a power cut cannot hand the profile to the next player.
@@ -322,7 +323,8 @@ succeeds.
 | Policies | server | cached |
 | Updates | server | skipped |
 
-Queue: `OfflineSessionStore` (SQLite WAL, `cache\offline.db`, tables `sessions`, `events`, `users`). Session
+Queue: `OfflineSessionStore` (SQLite WAL, `cache\offline.db`, tables `sessions`, `events`, `reports`, `users`;
+`reports` holds undelivered `POST /games/{id}/launch-report` bodies, replayed after the events). Session
 events are appended to the `events` outbox (capped at `offline.maxQueue`, oldest dropped) and replayed FIFO
 through `POST /sessions/{id}/events` in batches of ≤ 100 with client-generated ids (`Idempotency-Key`). A
 non-retryable 4xx marks the batch dead-lettered (counted in `OfflineQueueStats.DeadLettered`, surfaced via
@@ -479,8 +481,8 @@ unless the key ends with `Ms`.
     "scanIntervalSec": 900,
     "launchTimeoutSec": 90,
     "killGraceSec": 10,
-    "accountPool": { "enabled": true, "leaseTtlSec": 14400, "releaseOnExit": true },
-    "cloudSave": { "enabled": true, "root": "cache\\saves", "maxMb": 512 },
+    "accountPool": { "enabled": false, "leaseTtlSec": 14400, "releaseOnExit": true, "allowPasswordOnCommandLine": false },  // on only via server config
+    "cloudSave": { "enabled": false, "root": "cache\\saves", "maxMb": 512 },           // on only via server config
     "launchers": {
       "steam":     { "exePath": "C:\\Program Files (x86)\\Steam\\steam.exe" },
       "epic":      { "exePath": "C:\\Program Files (x86)\\Epic Games\\Launcher\\Portal\\Binaries\\Win32\\EpicGamesLauncher.exe" },
@@ -497,13 +499,13 @@ unless the key ends with `Ms`.
       "driveLetter": "G",
       "credentialsRef": "secure\\share.cred",     // DPAPI file with {username,password}
       "mountRetries": 3,
-      "iscsi": null                               // { "portal": "10.0.0.5:3260", "targetIqn": "iqn...",
-                                                  //   "readOnly": false } | null. readOnly marks the target's disks
-                                                  //   read-only before first use — set it for a LUN several PCs share.
-                                                  // Ignored while ClubDisklessHelper is installed (DISKLESS.md).
+      "iscsi": null                               // legacy; non-null = the Agent mounts nothing and logs an error:
+                                                  //   iSCSI libraries belong to ClubDisklessHelper (DISKLESS.md).
+                                                  // The whole section is ignored while the helper is installed.
     }
   },
   "updates": {
+    "enabled": true,                              // false = no scheduled manifest checks (server config may send it)
     "channel": "stable",                          // stable | beta (policy overrides)
     "checkIntervalSec": 3600,
     "autoInstall": true,
@@ -522,11 +524,11 @@ unless the key ends with `Ms`.
     "requireSecureBoot": false,
     "requireTpm": false,
     "requireHvci": false,                         // HVCI/VBS off (or hypervisorlaunchtype=off) becomes hvciOff
-    "reportViolations": true
+    "reportViolations": true                      // server config `anticheat.reportViolations` may turn it off
   },
   "remoteAdmin": {
     "allowScreenCapture": true,
-    "allowRemoteInput": true,
+    "allowRemoteInput": false,                    // on only via server config; never while an anti-cheat game runs
     "captureFps": 5,
     "captureQuality": 60,
     "showIndicator": true
@@ -604,13 +606,13 @@ unless the key ends with `Ms`.
     "coverAspect": "2:3",
     "currencyFormat": { "locale": "uz-UZ", "minorDigits": 0 }
   },
-  "features": {
-    "shop": true,
-    "chat": true,
-    "booking": true,
-    "tournaments": true,
+  "features": {                                   // a missing key reads as the value below
+    "shop": false,                                // shop/chat/booking/tournaments/topup: on only via server config
+    "chat": false,
+    "booking": false,
+    "tournaments": false,
     "profile": true,
-    "topup": true,
+    "topup": false,
     "apps": true,
     "callAdmin": true
   },
@@ -636,7 +638,10 @@ unless the key ends with `Ms`.
     "enabled": true,
     "blockedDomains": ["*.torrent-site.example"],
     "allowedDomains": [],                         // non-empty = allow-list mode
-    "dnsServers": ["1.1.1.3", "1.0.0.3"]
+    "dnsServers": ["1.1.1.3", "1.0.0.3"],
+    "blockResolvedIps": false,                    // optional; true = also firewall the IPs blocked domains resolve to
+    "protectedDomains": []                        // optional; never blocked, on top of the built-in launcher/anti-cheat
+                                                  // list and the host of server.baseUrl
   },
   "explorer": {
     "disableTaskManager": true,

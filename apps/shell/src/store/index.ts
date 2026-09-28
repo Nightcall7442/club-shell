@@ -40,11 +40,13 @@ function currentRoute(): string {
 
 /** Loads everything a logged-in user needs; each part fails on its own. */
 async function loadUserData(): Promise<void> {
+  // Sections the club server has not switched on are refused by the Agent (policyDenied); do not ask for them.
+  const { features } = useSettingsStore.getState();
   await Promise.allSettled([
     useWalletStore.getState().load(),
     useGamesStore.getState().refreshRunning(),
-    useChatStore.getState().load(),
-    useShopStore.getState().loadOrders(true),
+    features.chat ? useChatStore.getState().load() : undefined,
+    features.shop ? useShopStore.getState().loadOrders(true) : undefined,
   ]);
 }
 
@@ -376,7 +378,9 @@ export function bootstrapStores(): Promise<void> {
     startSessionTicker();
     await useAuthStore.getState().refresh();
     void useGamesStore.getState().load();
-    void useShopStore.getState().load();
+    if (useSettingsStore.getState().features.shop) {
+      void useShopStore.getState().load();
+    }
     void useThemeStore.getState().loadList();
     if (useAuthStore.getState().user) {
       await loadUserData();

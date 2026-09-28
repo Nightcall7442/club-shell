@@ -45,10 +45,11 @@ import {
   viewSession,
   zero,
   type SessionRecord,
+  knownValues,
 } from '../db.js';
 import { broadcast, pushToPc, pushToUser } from '../ws.js';
 
-const END_REASONS = Object.values(SessionEndReason);
+const END_REASONS = knownValues(SessionEndReason);
 const EVENT_TYPES = Object.values(SessionEventType);
 const RECONCILE_PUSH_MS = 30_000;
 const MAX_OFFLINE_START_MIN = 240;

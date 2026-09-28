@@ -50,7 +50,7 @@ languages, UZS.
 | Power: shutdown/reboot scheduling, Wake-on-LAN | Implemented-untested | |
 | Kiosk user provisioning, password rotation, profile reset between sessions | Implemented-untested | |
 | Shell watchdog with crash-loop budget and safe mode (`CrashRecovery`) | Implemented-untested | |
-| Games share mount (SMB); iSCSI config slot present | Partial | Diskless library volumes are ClubDisklessHelper's job; the Agent stands down while it is installed (`DISKLESS.md`) |
+| Games share mount (SMB); `storage.gamesShare.iscsi` is refused (the Agent mounts nothing) | Partial | Diskless library volumes, iSCSI included, are ClubDisklessHelper's job; the Agent stands down while it is installed (`DISKLESS.md`) |
 | Telemetry (WMI/perf, 5 s metrics, batched upload, hardware rescan) | Implemented-untested | |
 | Updates: checker, downloader (resume, SHA-256, RSA-PSS), applier, Agent self-update, Shell update + backup/rollback, server `update` command | Implemented-untested | `ClubShell.Updater.exe` helper is referenced but not in the repo; msiexec fallback is used. The `--cs-*` / `--c-*` theme-variable mismatch once listed here is fixed in `ARCHITECTURE.md` |
 | Local media cache (`LocalCache`, LRU, sha256) | Implemented-untested | Server-provided themes (`ThemeRef`) not yet downloaded through it |

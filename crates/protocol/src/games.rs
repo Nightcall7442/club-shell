@@ -78,6 +78,9 @@ wire_enum! {
         Faceit = "faceit",
         /// Activision Ricochet.
         Ricochet = "ricochet",
+        /// A value this agent does not know (sent by a newer server). Read-side fallback only: the
+        /// Agent never sends it to the server.
+        Unknown = "unknown",
     }
 }
 
@@ -320,6 +323,9 @@ wire_enum! {
         Ubisoft = "ubisoft",
         /// Plain executable, no launcher.
         Exe = "exe",
+        /// A value this agent does not know (sent by a newer server). Read-side fallback only: the
+        /// Agent never sends it to the server.
+        Unknown = "unknown",
     }
 }
 
@@ -443,6 +449,11 @@ pub struct LaunchReport {
     /// Seconds played (`LaunchReportPhase.Exit`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub played_sec: Option<i32>,
+    /// Account-pool launches: why the launcher was not prepared cleanly (e.g. the kiosk's Steam
+    /// auto-login could not be reset, or the lease had no session data so the launcher started
+    /// without credentials); absent when it was.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub injection_error: Option<String>,
 }
 
 /// A player's own settings for one game (`Game.SettingsPaths` zipped), stored on the server so they
@@ -629,11 +640,22 @@ mod tests {
     fn enum_wire_values() {
         assert_wire(
             LauncherType::ALL,
-            &["steam", "epic", "battleNet", "riot", "ea", "ubisoft", "exe"],
+            &[
+                "steam",
+                "epic",
+                "battleNet",
+                "riot",
+                "ea",
+                "ubisoft",
+                "exe",
+                "unknown",
+            ],
         );
         assert_wire(
             AntiCheatKind::ALL,
-            &["none", "eac", "battlEye", "vanguard", "faceit", "ricochet"],
+            &[
+                "none", "eac", "battlEye", "vanguard", "faceit", "ricochet", "unknown",
+            ],
         );
         assert_wire(AntiCheatSeverity::ALL, &["info", "warning", "critical"]);
         assert_wire(
@@ -761,6 +783,7 @@ mod tests {
             phase: LaunchReportPhase::Exit,
             exit_code: Some(0),
             played_sec: Some(3600),
+            injection_error: None,
         };
         let json = serde_json::to_string(&report).unwrap();
         assert!(json.ends_with(r#""durationMs":1500,"launcher":"steam","antiCheat":{"kind":"vanguard","ok":false,"reason":"secureBootOff"},"phase":"exit","exitCode":0,"playedSec":3600}"#));

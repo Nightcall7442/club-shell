@@ -261,3 +261,119 @@ test('the owner sees every club of the network and adds one', async ({ page, req
   await expect(added).toBeVisible();
   await expect(added.getByText('играют сейчас')).toBeVisible();
 });
+
+test('a money action retried after a lost answer is applied once (Idempotency-Key)', async ({ page, request }) => {
+  const owner = await tokenFor(request, OWNER_PIN);
+  const username = `e2e-promo-${Date.now()}`;
+  const created = await request.post(`${API}/admin/clients`, {
+    headers: auth(owner),
+    data: { username, displayName: 'E2E Промокод' },
+  });
+  expect(created.ok()).toBeTruthy();
+
+  await signIn(page, CASHIER_PIN);
+  await page.goto('/#/clients');
+  await page.getByRole('row').filter({ hasText: username }).click();
+  await page.getByLabel('Промокод').fill('WELCOME');
+
+  // The server applies the code, but its answer is lost on the way back; the cashier presses again.
+  const keys: string[] = [];
+  await page.route('**/admin/promo/redeem', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    keys.push(route.request().headers()['idempotency-key'] ?? '');
+    if (keys.length > 1) return route.continue();
+    await route.fetch();
+    return route.abort('failed');
+  });
+  const apply = page.getByRole('button', { name: 'Применить' });
+  await apply.click();
+  await expect(page.getByText(/Нет связи с сервером/)).toBeVisible();
+  await apply.click();
+  await expect(page.getByText(/Промокод применён/)).toBeVisible();
+
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  expect(keys[1]).toBe(keys[0]);
+  // WELCOME is 10 000 sum, credited once.
+  const found = (await (await request.get(`${API}/admin/clients?q=${username}`, { headers: auth(owner) })).json()) as {
+    items: { balance: { amount: number } }[];
+  };
+  expect(found.items[0]?.balance.amount).toBe(1_000_000);
+});
+
+test('only the owner reads the API key, Telegram is gone, and signing out revokes the token', async ({
+  page,
+  request,
+}) => {
+  const cashier = await tokenFor(request, CASHIER_PIN);
+  const settings = (await (await request.get(`${API}/admin/club`, { headers: auth(cashier) })).json()) as Record<
+    string,
+    unknown
+  >;
+  expect(settings['apiKey']).toBeUndefined();
+  expect(JSON.stringify(settings)).not.toMatch(/telegram/i);
+  expect((await request.get(`${API}/admin/club/api-key`, { headers: auth(cashier) })).status()).toBe(403);
+
+  await signIn(page, OWNER_PIN);
+  await page.goto('/#/integrations');
+  await expect(page.getByLabel('Ключ API')).toHaveValue(/^ck_/);
+  await expect(page.getByText('Telegram')).toHaveCount(0);
+
+  const token = await page.evaluate(() => localStorage.getItem('clubshell.admin.token'));
+  expect(token).toBeTruthy();
+  const loggedOut = page.waitForResponse((r) => r.url().endsWith('/admin/logout') && r.request().method() === 'POST');
+  await page.getByRole('button', { name: 'Выйти' }).click();
+  expect((await loggedOut).ok()).toBeTruthy();
+  await expect(page.getByText('Введите PIN')).toBeVisible();
+  expect((await request.get(`${API}/admin/me`, { headers: auth(token ?? '') })).status()).toBe(401);
+});
+
+test('a client registered at the counter signs in on a PC with the issued password and the bound card', async ({
+  page,
+  request,
+}) => {
+  const username = `e2e-login-${Date.now()}`;
+  await signIn(page, CASHIER_PIN);
+  await page.goto('/#/clients');
+  await page.getByRole('button', { name: 'Новый клиент' }).click();
+  await page.getByLabel('Имя').fill('E2E Вход');
+  await page.getByLabel('Логин').fill(username);
+  await page.getByLabel('Номер карты').fill(`CARD-${username}`);
+  await page.getByRole('button', { name: 'Создать' }).click();
+  const issued = page.getByRole('status').filter({ hasText: 'Временный пароль' }).locator('.font-mono');
+  await expect(issued).toHaveText(/^[a-z2-9]{8}$/);
+  const first = (await issued.textContent()) ?? '';
+
+  // The PC side: an agent registers, then signs the client in (POST /auth/login).
+  const hwid = `e2e-hwid-${username}`;
+  const reg = await request.post(`${API}/agents/register`, {
+    headers: { 'X-Club-Key': 'e2e' },
+    data: {
+      hwid,
+      machineName: 'E2E-PC',
+      agentVersion: '1.0.0',
+      hardware: {},
+      ipAddress: '10.0.0.99',
+      macAddress: '00-00-00-00-00-99',
+    },
+  });
+  expect(reg.ok()).toBeTruthy();
+  const { pcId, accessToken } = (await reg.json()) as { pcId: string; accessToken: string };
+  const login = async (data: Record<string, string>): Promise<number> =>
+    (
+      await request.post(`${API}/auth/login`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        data: { pcId, hwid, ...data },
+      })
+    ).status();
+  expect(await login({ kind: 'password', username, password: first })).toBe(200);
+  expect(await login({ kind: 'password', username, password: 'not-the-one' })).toBe(401);
+  expect(await login({ kind: 'card', cardId: `CARD-${username}` })).toBe(200);
+
+  // A reset issues a new temporary password; the old one stops working.
+  await page.getByRole('button', { name: 'Сбросить пароль' }).click();
+  await expect(issued).not.toHaveText(first);
+  const second = (await issued.textContent()) ?? '';
+  expect(await login({ kind: 'password', username, password: first })).toBe(401);
+  expect(await login({ kind: 'password', username, password: second })).toBe(200);
+});

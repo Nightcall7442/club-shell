@@ -34,12 +34,13 @@ import {
   zero,
   type PcRecord,
   type UserRecord,
+  knownValues,
 } from '../db.js';
 import { endSession } from './session.js';
 
 const AUTH_KINDS = Object.values(AuthKind);
-const LOCALES = Object.values(Locale);
-const END_REASONS = Object.values(SessionEndReason);
+const LOCALES = knownValues(Locale);
+const END_REASONS = knownValues(SessionEndReason);
 const QR_TTL_SEC = 120;
 const QR_SCANNED_AFTER_MS = 4_000;
 const qrAutoConfirmMs = Number.parseInt(process.env['MOCK_QR_AUTOCONFIRM_SEC'] ?? '8', 10) * 1000;

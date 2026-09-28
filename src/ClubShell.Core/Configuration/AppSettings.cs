@@ -437,8 +437,8 @@ public sealed class GamesSettings
 /// <summary><c>agent.json → games.accountPool</c>.</summary>
 public sealed class AccountPoolSettings
 {
-    /// <summary>Use pooled accounts.</summary>
-    public bool Enabled { get; set; } = true;
+    /// <summary>Use pooled accounts. Off until the server config turns it on: the pool needs server endpoints.</summary>
+    public bool Enabled { get; set; }
 
     /// <summary>Lease TTL.</summary>
     [Range(60, 604800)]
@@ -446,13 +446,20 @@ public sealed class AccountPoolSettings
 
     /// <summary>Release the lease when the game exits.</summary>
     public bool ReleaseOnExit { get; set; } = true;
+
+    /// <summary>
+    /// Last resort: put the pooled account's password on the launcher command line (Steam <c>-login</c>, Epic
+    /// <c>-AUTH_PASSWORD</c>) when the lease has no session files or exchange code. Every process in the kiosk session
+    /// can read it, so it is off by default and logged as a warning on every use.
+    /// </summary>
+    public bool AllowPasswordOnCommandLine { get; set; }
 }
 
 /// <summary><c>agent.json → games.cloudSave</c>.</summary>
 public sealed class CloudSaveSettings
 {
-    /// <summary>Cloud saves enabled.</summary>
-    public bool Enabled { get; set; } = true;
+    /// <summary>Cloud saves enabled. Off until the server config turns it on: saves need server endpoints.</summary>
+    public bool Enabled { get; set; }
 
     /// <summary>Local bundle directory (relative to ProgramData).</summary>
     [Required]
@@ -548,32 +555,30 @@ public sealed class GamesShareSettings
     [Range(1, 20)]
     public int MountRetries { get; set; } = 3;
 
-    /// <summary>iSCSI target, when used instead of SMB.</summary>
+    /// <summary>
+    /// Legacy iSCSI target. The Agent no longer mounts iSCSI: the games library volume over iSCSI is
+    /// ClubDisklessHelper's job (docs/DISKLESS.md). The key still parses so old files validate, but a non-null value
+    /// makes the Agent mount nothing (fail closed) and log an error.
+    /// </summary>
     public IscsiSettings? Iscsi { get; set; }
 }
 
-/// <summary><c>agent.json → storage.gamesShare.iscsi</c>.</summary>
+/// <summary><c>agent.json → storage.gamesShare.iscsi</c> (legacy, refused; see <see cref="GamesShareSettings.Iscsi"/>). Other old keys such as <c>readOnly</c> are skipped.</summary>
 public sealed class IscsiSettings
 {
-    /// <summary>Portal <c>host:port</c>.</summary>
-    [Required]
+    /// <summary>Portal <c>host:port</c> (only logged).</summary>
     public string Portal { get; set; } = "";
 
-    /// <summary>Target IQN.</summary>
-    [Required]
+    /// <summary>Target IQN (only logged).</summary>
     public string TargetIqn { get; set; } = "";
-
-    /// <summary>
-    /// Mark the target's disks read-only before the volume is used. Set it for a LUN several PCs mount at once: the
-    /// first client that writes to a shared games volume — Windows setting the NTFS dirty bit is enough — corrupts it
-    /// for every other client. Off by default because a LUN dedicated to one PC is legitimately writable.
-    /// </summary>
-    public bool ReadOnly { get; set; }
 }
 
 /// <summary><c>agent.json → updates</c>.</summary>
 public sealed class UpdatesSettings
 {
+    /// <summary>Check for updates on a schedule; <see langword="false"/> leaves only explicit checks (IPC <c>update.check</c>, the server's <c>update</c> command).</summary>
+    public bool Enabled { get; set; } = true;
+
     /// <summary>Channel (policy overrides).</summary>
     public UpdateChannel Channel { get; set; } = UpdateChannel.Stable;
 
@@ -661,8 +666,8 @@ public sealed class RemoteAdminSettings
     /// <summary>Allow screenshots.</summary>
     public bool AllowScreenCapture { get; set; } = true;
 
-    /// <summary>Allow remote input.</summary>
-    public bool AllowRemoteInput { get; set; } = true;
+    /// <summary>Allow remote input (never while a game with an anti-cheat runs). Off until the server config turns it on.</summary>
+    public bool AllowRemoteInput { get; set; }
 
     /// <summary>Capture frame rate.</summary>
     [Range(1, 60)]

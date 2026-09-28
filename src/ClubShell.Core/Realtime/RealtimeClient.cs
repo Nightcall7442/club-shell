@@ -19,12 +19,13 @@ using Microsoft.Extensions.Options;
 namespace ClubShell.Core.Realtime;
 
 /// <summary>
-/// WebSocket client of <c>wss://&lt;server&gt;/ws/agent</c> (SERVER_API.md §6): connects with the agent JWT and the
-/// <c>clubshell.v1</c> subprotocol, reads <see cref="WsFrame"/>s (≤ 1 MiB), answers server pings, dispatches commands
-/// (deduplicated by id for 24 h, expired ones acked with <c>timeout</c>, <c>supersedes</c> honoured) to
-/// <see cref="CommandHandler"/> and acks them, raises pushes through <see cref="PushReceived"/>, and sends agent
-/// events from a bounded outbound channel. One <see cref="RunAsync"/> call is one connection; wrap it in a
-/// <see cref="Reconnector"/>.
+/// WebSocket client of <c>wss://&lt;server&gt;/ws/agent</c> (SERVER_API.md §6): connects with the agent JWT in
+/// <c>Authorization: Bearer</c> (never in the URL, which proxies log) and the <c>clubshell.v1</c> subprotocol, reads
+/// <see cref="WsFrame"/>s (≤ 1 MiB), answers server pings, dispatches commands (expired ones acked with
+/// <c>timeout</c>, <c>supersedes</c> honoured) to <see cref="CommandHandler"/> and acks them, raises pushes through
+/// <see cref="PushReceived"/>, and sends agent events from a bounded outbound channel. Redelivered command ids are
+/// passed to the handler again, which deduplicates and answers with the cached ack. One <see cref="RunAsync"/> call is
+/// one connection; wrap it in a <see cref="Reconnector"/>.
 /// </summary>
 public sealed class RealtimeClient
 {
@@ -37,9 +38,6 @@ public sealed class RealtimeClient
     /// <summary>WebSocket-level keepalive interval (SERVER_API.md §6: 30 s).</summary>
     public static TimeSpan KeepAliveInterval { get; } = TimeSpan.FromSeconds(30);
 
-    /// <summary>How long command ids are remembered for deduplication.</summary>
-    public static TimeSpan DedupeWindow { get; } = TimeSpan.FromHours(24);
-
     private const int CloseStatusUnauthorized = 4401;
     private const int CloseStatusUpgradeRequired = 4426;
     private const int ReceiveChunkBytes = 16 * 1024;
@@ -48,7 +46,6 @@ public sealed class RealtimeClient
     private readonly IOptionsMonitor<AgentSettings> _settings;
     private readonly IClock _clock;
     private readonly ILogger<RealtimeClient> _logger;
-    private readonly ConcurrentDictionary<Guid, DateTimeOffset> _seenCommands = new();
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _inflight = new();
     private Channel<WsFrame>? _outbound;
     private int _connected;
@@ -104,7 +101,7 @@ public sealed class RealtimeClient
     public async Task RunAsync(Action? onConnected, CancellationToken cancellationToken)
     {
         var tokens = _tokens.Agent ?? throw new ServerApiException(ErrorCode.Unauthorized, HttpStatusCode.Unauthorized, null, null, "Agent is not registered (no tokens)");
-        var uri = BuildUri(tokens.AccessToken);
+        var uri = new Uri(WsUrlOverride ?? _settings.CurrentValue.Server.WsUrl);
 
         using var socket = new ClientWebSocket();
         socket.Options.AddSubProtocol(WsFrame.Subprotocol);
@@ -261,14 +258,6 @@ public sealed class RealtimeClient
         }
     }
 
-    private Uri BuildUri(string accessToken)
-    {
-        var builder = new UriBuilder(WsUrlOverride ?? _settings.CurrentValue.Server.WsUrl);
-        var tokenQuery = "token=" + Uri.EscapeDataString(accessToken);
-        builder.Query = string.IsNullOrEmpty(builder.Query) ? tokenQuery : builder.Query.TrimStart('?') + "&" + tokenQuery;
-        return builder.Uri;
-    }
-
     private async Task ReadLoopAsync(ClientWebSocket socket, ChannelWriter<WsFrame> outbound, CancellationToken cancellationToken)
     {
         var buffer = new ArrayBufferWriter<byte>(ReceiveChunkBytes);
@@ -361,13 +350,6 @@ public sealed class RealtimeClient
     private void DispatchCommand(WsFrame frame, ChannelWriter<WsFrame> outbound, CancellationToken cancellationToken)
     {
         var now = _clock.UtcNow;
-        PruneSeen(now);
-        if (!_seenCommands.TryAdd(frame.Id, now))
-        {
-            _logger.LogInformation("Duplicate command {Id} ({Name}) ignored", frame.Id, frame.Name);
-            return;
-        }
-
         ServerCommand command;
         try
         {
@@ -451,11 +433,7 @@ public sealed class RealtimeClient
             _ = _inflight.TryRemove(new KeyValuePair<Guid, CancellationTokenSource>(command.Id, cts));
         }
 
-        if (!Ack(outbound, command.Id, ack))
-        {
-            // Not delivered: forget the id so the server's redelivery (at-least-once) is processed again.
-            _ = _seenCommands.TryRemove(command.Id, out _);
-        }
+        _ = Ack(outbound, command.Id, ack);
     }
 
     private bool Ack(ChannelWriter<WsFrame> outbound, Guid commandId, CommandAck ack)
@@ -480,23 +458,6 @@ public sealed class RealtimeClient
         catch (Exception ex)
         {
             _logger.LogError(ex, "Push handler for {Name} threw", frame.Name);
-        }
-    }
-
-    private void PruneSeen(DateTimeOffset now)
-    {
-        if (_seenCommands.Count < 4096)
-        {
-            return;
-        }
-
-        var cutoff = now - DedupeWindow;
-        foreach (var pair in _seenCommands)
-        {
-            if (pair.Value < cutoff)
-            {
-                _ = _seenCommands.TryRemove(pair.Key, out _);
-            }
         }
     }
 

@@ -8,7 +8,11 @@ using Microsoft.Extensions.Options;
 
 namespace ClubShell.Agent.Games.Launchers;
 
-/// <summary>Epic Games Launcher: <c>EpicGamesLauncher.exe [auth args] com.epicgames.launcher://apps/&lt;id&gt;?action=launch&amp;silent=true</c>.</summary>
+/// <summary>
+/// Epic Games Launcher: <c>EpicGamesLauncher.exe [auth args] com.epicgames.launcher://apps/&lt;id&gt;?action=launch&amp;silent=true</c>.
+/// Auth args are a one-time exchange code from the lease, or a password only when
+/// <c>games.accountPool.allowPasswordOnCommandLine</c> is on (<c>AccountInjector.CredentialArgs</c>).
+/// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class EpicLauncher : LauncherBase
 {

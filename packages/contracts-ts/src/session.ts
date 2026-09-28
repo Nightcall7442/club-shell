@@ -40,6 +40,11 @@ export const SessionEndReason = {
   AgentRestart: 'agentRestart',
   /** Internal error. */
   Error: 'error',
+  /**
+   * A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the
+   * server.
+   */
+  Unknown: 'unknown',
 } as const;
 /** Why a session ended. */
 export type SessionEndReason = (typeof SessionEndReason)[keyof typeof SessionEndReason];
@@ -116,6 +121,11 @@ export const SessionState = {
   Ending: 'ending',
   /** Finished and settled. */
   Ended: 'ended',
+  /**
+   * A value this agent does not know (sent by a newer server). Read-side fallback only: the Agent never sends it to the
+   * server.
+   */
+  Unknown: 'unknown',
 } as const;
 /** Session state machine (IPC_PROTOCOL.md §6.1, §9.2). */
 export type SessionState = (typeof SessionState)[keyof typeof SessionState];

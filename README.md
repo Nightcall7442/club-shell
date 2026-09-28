@@ -27,7 +27,7 @@
 ![SQLite](https://img.shields.io/badge/SQLite-offline-003b57?logo=sqlite&logoColor=white)
 ![Serilog](https://img.shields.io/badge/Serilog-4-cc0000)
 
-![xUnit](https://img.shields.io/badge/xUnit-465_проверок-5c2d91?logo=dotnet&logoColor=white)
+![xUnit](https://img.shields.io/badge/xUnit-501_проверка-5c2d91?logo=dotnet&logoColor=white)
 ![Playwright](https://img.shields.io/badge/Playwright-e2e-2ead33?logo=playwright&logoColor=white)
 ![Fastify](https://img.shields.io/badge/Fastify-mock--сервер-000000?logo=fastify&logoColor=white)
 ![WiX](https://img.shields.io/badge/WiX-v5_MSI-c41e3a?logo=windows&logoColor=white)
@@ -76,7 +76,7 @@
 | <img src="docs/img/20-admin-catalog.jpg" alt="Каталог игр"> | <img src="docs/img/21-admin-club.jpg" alt="Экран игрока"> | <img src="docs/img/22-admin-automation.jpg" alt="Автоматизация"> |
 | Каталог игр: порядок, скрытие | Экран игрока: бренд, разделы, правила | Автоматизация «если → то» |
 | <img src="docs/img/23-admin-integrations.jpg" alt="Уведомления и API"> | <img src="docs/img/24-admin-reports.jpg" alt="Отчёты"> | <img src="docs/img/25-admin-staff.jpg" alt="Персонал"> |
-| Telegram, вебхуки, API-ключ | Отчёты и тепловая карта загрузки | Персонал и роли |
+| Вебхуки, API-ключ | Отчёты и тепловая карта загрузки | Персонал и роли |
 
 </div>
 
@@ -162,15 +162,15 @@ ClubShell закрывает контур на самом ПК: **оболочк
 - **Тарифы и цены:** почасовые и пакетные тарифы по зонам и времени суток, наценка или скидка по дням недели и праздникам, группы, бонусы к пополнению, промокоды, счастливые часы, лояльность; из всех скидок применяется одна лучшая
 - **Зал и устройства:** редактор зала по сетке — зоны, ПК, консоли, характеристики
 - **Магазин и склад:** цены, остатки, приход товара, порог «заканчивается» с уведомлением
-- **Состояние ПК:** агент шлёт температуру CPU/GPU и FPS, сервер сравнивает каждый ПК с его же прошлой неделей и заранее открывает заявку на ремонт: перегрев, «греется сильнее обычного — пора чистить», падение FPS, частые пропадания из сети; значок ремонта на карте зала, «взять в работу» / «решено», по желанию — автоматический вывод ПК в сервис, уведомление в Telegram
+- **Состояние ПК:** агент шлёт температуру CPU/GPU и FPS, сервер сравнивает каждый ПК с его же прошлой неделей и заранее открывает заявку на ремонт: перегрев, «греется сильнее обычного — пора чистить», падение FPS, частые пропадания из сети; значок ремонта на карте зала, «взять в работу» / «решено», по желанию — автоматический вывод ПК в сервис, событие на вебхуки
 - **Игры:** порядок в каталоге, «рекомендуем», скрыть игру с экранов игроков
 - **Экран игрока:** название, логотип, акцентный цвет, обои, какие разделы видят игроки, баннеры, правила клуба на трёх языках — с живым предпросмотром
 - **Автоматизация:** правила «если → то» (скоро конец сеанса, ПК свободен N минут, каждый N-й визит, пополнение от суммы, начало сеанса → сообщение, бонус, блокировка или выключение ПК, уведомление владельцу) и готовые шаблоны
-- **Уведомления и API:** Telegram-бот, вебхуки на события клуба, ротация API-ключа
+- **Уведомления и API:** вебхуки на события клуба, ротация API-ключа
 - **Отчёты:** выручка по дням, загрузка зала тепловой картой по часам, популярные игры и товары, смены за период
 - **Персонал:** сотрудники, роли и PIN-коды
 - **Сеть клубов:** все клубы владельца рядом — кто играет сейчас, загрузка по часам, выручка за день и период, сеансы, средний чек, ремонт, сигналы, кто на смене; итоги по сети; один аккаунт и один баланс игрока работают в любом клубе; добавление клуба (в демо два соседних клуба симулируются)
-- **Контроль кассиров:** журнал всех действий персонала и сигналы кражи — недостача при закрытии смены, сеансы, закрытые с возвратом сразу после открытия, крупные скидки «своим», частые пополнения одному клиенту, операции без открытой смены; пороги настраиваются, серьёзное сразу уходит в Telegram
+- **Контроль кассиров:** журнал всех действий персонала и сигналы кражи — недостача при закрытии смены, сеансы, закрытые с возвратом сразу после открытия, крупные скидки «своим», частые пополнения одному клиенту, операции без открытой смены; пороги настраиваются, серьёзное сразу уходит на вебхуки
 - Работает против mock-сервера (`/api/v1/admin/*`); в бою указывает на серверный продукт оператора
 
 **Платформа**
@@ -288,11 +288,11 @@ Copy-Item .env.example .env
 
 | Что | Сколько |
 |---|---|
-| xUnit | 465 проверок в 4 проектах (Contracts 89, Core 181, Windows 79, Agent 116), включая сквозной тест именованного канала |
+| xUnit | 502 проверки в 4 проектах (Contracts 91, Core 185, Windows 79, Agent 147), включая сквозной тест именованного канала |
 | Компиляция .NET | 8 проектов, Roslyn + NetAnalyzers, `/warnaserror`, 0 предупреждений |
 | TypeScript | `tsc --noEmit` во всех пакетах, `vite build` без предупреждений о размере чанков |
-| Интерфейс | 12 разделов, прогон в mock-режиме на 1600×900 / 1920×1080; Playwright e2e — 34 проверки: киоск 23 (вход, каталог, HUD в игре, оформление клуба, настройки игр игрока), админка 11 (PIN и роли, язык, смена, расчёт цены, экран игрока, контроль кассиров, состояние ПК, пути настроек игр, сеть клубов) |
-| Локализация | 1175 ключей, идентичные наборы в `en` / `ru` / `uz` |
+| Интерфейс | 12 разделов, прогон в mock-режиме на 1600×900 / 1920×1080; Playwright e2e — 37 проверок: киоск 23 (вход, каталог, HUD в игре, оформление клуба, настройки игр игрока), админка 14 (PIN и роли, язык, смена, расчёт цены, экран игрока, контроль кассиров, состояние ПК, пути настроек игр, сеть клубов, Idempotency-Key денежных операций, ключ API и выход, регистрация клиента с паролем и картой) |
+| Локализация | 1202 ключа, идентичные наборы в `en` / `ru` / `uz` |
 | Протоколы | 65 IPC-запросов, 18 событий, 19 серверных команд, 82 Tauri-команды — покрыты обработчиками и документацией |
 
 Что **не** собиралось на машине автора: WiX и `tauri build`. Первую сборку этих частей выполняет CI; список известных долгов — в [docs/ROADMAP.md](docs/ROADMAP.md).
@@ -384,8 +384,8 @@ tools/scripts/         build · dev · package · sign · publish · setup-dev-v
 
 **ClubShell** is client software for gaming clubs / internet cafés (Uzbekistan / CIS; UI in Russian, Uzbek and English; prices in UZS). Each gaming PC runs a **.NET 8 Windows service** (`ClubShellAgent`, session 0: sessions and billing timers, game launching via Steam / Epic / Battle.net / Riot / EA / Ubisoft with an account pool, server policies, anti-cheat checks, updates, telemetry, remote admin) and a **Tauri 2 + React kiosk shell** that replaces `explorer.exe` for the local kiosk user. The shell ships the "Obsidian" theme (a minimal layout with a restrained HUD layer: corner-bracket focus, mono telemetry labels, dot-matrix time and money, one ice-blue accent — the game art carries the colour), a pause-menu HUD frame (section tabs between LB/RB on top, a status line with time, balance and controller prompts at the bottom), a calm home with the selected game, a poster-wall catalogue and an in-game HUD (`Ctrl+Shift+H`: time, balance, +30 min, call admin) over the running game. They talk over the named pipe `\\.\pipe\clubshell-agent`; the agent talks to the club server over REST + WebSocket with HMAC-signed requests. Offline mode keeps the timer and queues events in SQLite.
 
-The **admin console** (`apps/admin`, `pnpm admin` → http://localhost:1421; owner PIN `0000`, cashier `1111`) lets each club owner configure their own club without a developer: counter and hall map, shifts with X reports and cash count on close, clients (groups, loyalty tiers, blacklist, minor curfew), pricing (weekday/holiday rates, happy hours, top-up bonuses, promo codes — the single best discount applies), a grid hall editor, stock, game catalogue order and visibility, the player screen (branding, sections, banners, rules with live preview), “if → then” automation rules, Telegram and webhooks, reports with an hourly heat map, staff roles, a club-network view (every club side by side, one player balance for all), PC health (repair tickets from telemetry: overheating, running hotter than its own last week, FPS drop, network drop-outs) and cashier control (an activity log plus theft signals: cash short at close, quick refunds, big discounts, repeated top-ups, money taken with no shift open). UI in Russian, Uzbek and English.
+The **admin console** (`apps/admin`, `pnpm admin` → http://localhost:1421; owner PIN `0000`, cashier `1111`) lets each club owner configure their own club without a developer: counter and hall map, shifts with X reports and cash count on close, clients (groups, loyalty tiers, blacklist, minor curfew), pricing (weekday/holiday rates, happy hours, top-up bonuses, promo codes — the single best discount applies), a grid hall editor, stock, game catalogue order and visibility, the player screen (branding, sections, banners, rules with live preview), “if → then” automation rules, webhooks, reports with an hourly heat map, staff roles, a club-network view (every club side by side, one player balance for all), PC health (repair tickets from telemetry: overheating, running hotter than its own last week, FPS drop, network drop-outs) and cashier control (an activity log plus theft signals: cash short at close, quick refunds, big discounts, repeated top-ups, money taken with no shift open). UI in Russian, Uzbek and English.
 
-Try the UI in a browser: `pnpm install && pnpm mock` then `VITE_MOCK=1 pnpm --filter @clubshell/shell dev` → http://localhost:1420 (login `demo` / `1234`). Full Windows dev loop: `tools/scripts/dev.ps1`. Verified here: all 8 .NET projects compile with `/warnaserror`, 465 xUnit tests pass, `tsc` and `vite build` are clean, 34 Playwright e2e checks cover the kiosk and the admin console; WiX and `tauri build` are left to CI.
+Try the UI in a browser: `pnpm install && pnpm mock` then `VITE_MOCK=1 pnpm --filter @clubshell/shell dev` → http://localhost:1420 (login `demo` / `1234`). Full Windows dev loop: `tools/scripts/dev.ps1`. Verified here: all 8 .NET projects compile with `/warnaserror`, 502 xUnit tests pass, `tsc` and `vite build` are clean, 37 Playwright e2e checks cover the kiosk and the admin console; WiX and `tauri build` are left to CI.
 
 </details>

@@ -37,6 +37,8 @@ const ACTION_LABEL: Record<AuditAction, string> = {
   stockReceive: 'Приход товара',
   stockEdit: 'Правка остатка',
   pcCommand: 'Команда ПК',
+  clientPassword: 'Пароль клиента',
+  clientCard: 'Карта клиента',
 };
 
 const SEVERITY_DOT: Record<Severity, string> = {
@@ -154,7 +156,7 @@ function Thresholds(): JSX.Element | null {
           </Field>
         </div>
         <p className="mt-4 text-sm text-muted">
-          {t('Серьёзные сигналы сразу приходят в Telegram, если включено событие «Подозрительная операция».')}
+          {t('Серьёзные сигналы сразу уходят на вебхуки, подписанные на событие suspicious.')}
         </p>
       </Section>
       <SaveBar

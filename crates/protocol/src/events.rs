@@ -18,6 +18,9 @@ wire_enum! {
         Image = "image",
         /// Video.
         Video = "video",
+        /// A value this agent does not know (sent by a newer server). Read-side fallback only: the
+        /// Agent never sends it to the server.
+        Unknown = "unknown",
     }
 }
 
@@ -330,7 +333,7 @@ mod tests {
             ShellCommandKind::ALL,
             &["lock", "unlock", "reboot", "showAds", "showMessage"],
         );
-        assert_wire(AdMediaType::ALL, &["image", "video"]);
+        assert_wire(AdMediaType::ALL, &["image", "video", "unknown"]);
     }
 
     #[test]
