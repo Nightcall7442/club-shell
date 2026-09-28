@@ -79,9 +79,17 @@ public sealed class AgentAuthMiddleware(
         return header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) && header.Length > 7 ? header[7..].Trim() : null;
     }
 
-    private async Task<AgentContext> AuthenticateAgentAsync(HttpContext context)
+    /// <summary>
+    /// The access token alone (REST agent modes and the <c>/ws/agent</c> handshake): valid RS256 JWT, PC not deleted,
+    /// <c>cv</c> current. Throws <c>401</c> <c>missing</c> | <c>expired</c> | <c>invalid</c> | <c>revoked</c>.
+    /// </summary>
+    public static async Task<AgentContext> AuthenticateTokenAsync(string? token, TokenService tokens, PcRepository pcs)
     {
-        var token = BearerToken(context) ?? throw ApiException.Unauthorized("missing", "Missing bearer token");
+        if (string.IsNullOrEmpty(token))
+        {
+            throw ApiException.Unauthorized("missing", "Missing bearer token");
+        }
+
         var (principal, reason) = await tokens.ValidateAsync(token);
         if (principal is null)
         {
@@ -96,11 +104,18 @@ public sealed class AgentAuthMiddleware(
             throw ApiException.Unauthorized("revoked", "Access token revoked");
         }
 
+        return new AgentContext(principal, pc);
+    }
+
+    private async Task<AgentContext> AuthenticateAgentAsync(HttpContext context)
+    {
+        var agent = await AuthenticateTokenAsync(BearerToken(context), tokens, pcs);
+        var pc = agent.Pc;
         string timestamp, signature;
         try
         {
             (timestamp, signature) = await RequestSignature.VerifyAsync(
-                context, pc.SigningSecret, TimeSpan.FromSeconds(options.SignatureWindowSec), clock.GetUtcNow());
+                context, pc.SigningSecret!, TimeSpan.FromSeconds(options.SignatureWindowSec), clock.GetUtcNow());
         }
         catch (ApiException ex)
         {
@@ -117,6 +132,6 @@ public sealed class AgentAuthMiddleware(
             logger.LogInformation("Repeated signature tuple for {Method} {Path} from PC {PcId}", method, context.Request.Path, pc.Id);
         }
 
-        return new AgentContext(principal, pc);
+        return agent;
     }
 }

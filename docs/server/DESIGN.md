@@ -80,7 +80,7 @@ server/
   README.md                      запуск, конфиг, деплой, ротация ключей
   contracts/
     openapi.yaml, asyncapi.yaml  вендорная копия бандла club-contracts
-    openapi.json                 генерируется из yaml (для JsonSchema.Net в тестах)
+    openapi.json, asyncapi.json  генерируются из yaml (для JsonSchema.Net в тестах: ответы REST и кадры WS)
     REF                          sha коммита club-contracts (сейчас 52a895a)
   scripts/sync-contracts.ps1     копирует из ../club-contracts, пишет REF, конвертирует в json (python yaml, как srv@1c68cc8:scripts/sync-contracts.sh)
   src/ClubShell.Server/          ASP.NET Core minimal API, net10.0
@@ -286,8 +286,10 @@ server/
 2. HWID уже известен в этом клубе → тот же `pcId`, новые токены, новый `signingSecret` (32 байта),
    `credentials_version += 1`, старые refresh-токены удаляются. Статус, одобрение и открытый сеанс не меняются.
 3. HWID неизвестен:
-   - сначала проверяется `previousPcId`: если такой ПК есть, `hwid IS NULL` и совпадает нормализованный MAC,
-     сервер предлагает место этого ПК (pre-fill);
+   - сначала ищется живой ПК клуба с тем же нормализованным MAC (при нескольких предпочитается `previousPcId`);
+     если он есть, сервер предлагает место этого ПК (pre-fill: номер, имя, зона, координаты). Условие «`hwid IS
+     NULL`» в S1 снято: при замене диска у старого ПК HWID остаётся прежним (§9), и с ним pre-fill не сработал бы.
+     Такой ПК всегда создаётся pending, даже при `AutoApprovePcs`;
    - создаётся ПК `approved = Club:AutoApprovePcs`, `maintenance = !approved`;
    - если ПК не одобрен → `403 forbidden {reason: pendingApproval, pcId}` (`frag/paths-agents.yaml:14-15`).
 4. Прочие ответы: HWID принадлежит другому клубу сети → `409 conflict`; клуб отключён → `403 clubDisabled`.
@@ -457,7 +459,7 @@ X-Signature = lowercase hex( HMAC-SHA256( base64decode(signingSecret),
 | `clubs` | id, network_id, name, city, address, time_zone (default `Asia/Tashkent`), currency (`UZS`), enrollment_key_hash bytea, prev_enrollment_key_hash bytea NULL, api_key text NULL, settings jsonb (AdminClubSettings без `promoCodes`/`automation`/`webhooks`, `apiKey`, `events`), health_settings jsonb (`AdminHealthSettings` — в AdminClubSettings его нет), settings_version int, config_version int, catalog_version int, policy jsonb, policy_version int, disabled bool, created_at, updated_at | CHECK currency='UZS' | M0001 |
 | `pcs` | id, club_id, number, name, zone, x, y, device_kind (`pc\|console\|vr\|other`), hwid NULL, mac_address NULL (нормализованный lower-case с двоеточиями), machine_name, ip_address, approved bool, maintenance bool, credentials_version int, signing_secret bytea, agent_version, shell_version, last_heartbeat_at NULL, last_heartbeat jsonb NULL (runningGames, offlineQueue, shellConnected, …), hardware jsonb NULL, created_at, updated_at, deleted_at NULL | `UNIQUE(club_id,id)`; `UNIQUE(club_id,number) WHERE deleted_at IS NULL AND approved` (место держит только одобренный ПК: ожидающий одобрения может нести предзаполненное место заменяемого ПК, §3.2/§9, такой ПК всегда создаётся pending; одобрение на занятое место → 409); `UNIQUE(hwid) WHERE hwid IS NOT NULL AND deleted_at IS NULL` (HWID уникален в пределах всей сети, иначе 409); `number BETWEEN 1 AND 9999` | M0001 |
 | `agent_refresh_tokens` | token_hash bytea PK, pc_id FK ON DELETE CASCADE, cv int, expires_at, used_at NULL, created_at | | M0001 |
-| `agent_commands` | id, club_id, pc_id, name, payload jsonb NULL, issued_by_staff_id NULL, supersedes uuid NULL, created_at, expires_at NULL, delivered_at NULL, acked_at NULL, ack jsonb NULL, superseded_at NULL | `INDEX (pc_id, created_at) WHERE acked_at IS NULL AND superseded_at IS NULL` | M0001 |
+| `agent_commands` | id (`uuidv7()` PostgreSQL 18: монотонен внутри миллисекунды, так что «от старых к новым» = `ORDER BY created_at, id` сохраняет порядок постановки), club_id, pc_id, name, payload jsonb NULL, issued_by_staff_id NULL, supersedes uuid NULL, created_at, expires_at NULL, delivered_at NULL, acked_at NULL, ack jsonb NULL, superseded_at NULL | `INDEX (pc_id, created_at) WHERE acked_at IS NULL AND superseded_at IS NULL` | M0001 |
 | `pc_metrics` | pc_id, at, data jsonb | PK (pc_id, at); чистка по `Telemetry:RetentionDays` | M0001 |
 | `telemetry_events` | id bigint identity, club_id, pc_id, kind text, at, data jsonb, received_at | `INDEX (club_id, received_at)`; чистка 30 д | M0001 |
 | `staff` | id, network_id, club_id, name, role (`owner\|cashier`), pin_hmac bytea, active, created_at, updated_at | `UNIQUE(network_id, pin_hmac)` | M0001 (для bootstrap) |
@@ -685,7 +687,8 @@ endsAt      = ends_at | ended_at
 
 Что отправляется:
 
-- `session.graceSec` = `Sessions:GraceSec`; `offline.maxOfflineMinutes` = 240.
+- `session.graceSec` = `Sessions:GraceSec`, `session.heartbeatSec` = `Agents:HeartbeatSec`;
+  `offline.maxOfflineMinutes` = `Sessions:MaxOfflineMinutes` (240).
 - `shell.features`: `shop`, `chat`, `booking`, `tournaments`, `topup`, `apps`, `callAdmin` = **false** явно;
   `profile` = true. Старые агенты считают отсутствующий флаг равным true.
 - `games.accountPool.enabled=false`, `games.cloudSave.enabled=false`, `updates.enabled=false`,
@@ -819,6 +822,7 @@ FOR UPDATE SKIP LOCKED LIMIT 100
   | `1000` | Соединение вытеснено новым |
   | `1001` | Остановка сервера |
   | `1009` | Кадр больше 1 MiB |
+  | `1008` | Нет `pong` на ping сервера за `PongTimeoutSec` |
 
 ### 6.3 Кадры и keepalive
 
@@ -917,7 +921,9 @@ v1 — **один инстанс**: реестр соединений и ожи�
 - маршрутизация команд и push через `LISTEN/NOTIFY` (канал `pc_<id>`) к инстансу, держащему сокет;
 - sticky-сессии для WS.
 
-Воркеры уже безопасны: advisory lock и `SKIP LOCKED`. Защита от случайного второго инстанса: при старте берётся
+Воркеры уже безопасны: advisory lock и `SKIP LOCKED`. Защита от случайного второго инстанса (hosted service
+`Realtime/HubLock.cs`, регистрируется вместе с воркерами при `Workers:Enabled`, так что тестовые хосты его не берут):
+при старте берётся
 `pg_try_advisory_lock('CSHub')`. Если он занят — лог `Critical` и выход.
 
 ---
@@ -973,7 +979,8 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
 Коды, которые формирует только агент, сервер не отдаёт: `gameNotInstalled`, `gameLaunchFailed`,
 `accountPoolExhausted`, `antiCheatBlocked`, `agentOffline` (последний бывает только внутри `ack`), `timeout`,
 `protocolError`. Неизвестный маршрут `/api/v1/*` → `404 notFound details.route`. Некорректный JSON →
-`400 validation`.
+`400 validation`. Не-JSON `Content-Type` у реализованной операции — тоже `400 validation`: эндпоинты принимают любой
+тип (`AcceptsMetadata */*`), иначе маршрутизация отбросила бы их и ответил бы fallback `404`.
 
 ### 7.3 Трассировка и время
 
@@ -1107,6 +1114,10 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
 `AgentHarness` (`server/tests/ClubShell.Server.Tests/AgentHarness.cs`) использует `ClubShell.Core` как
 `ProjectReference` и собирает DI:
 
+- WS-сценарии идут против `KestrelServerFixture` (`UseKestrel`, `127.0.0.1`, порт 0). С Kestrel `TestServer`
+  недоступен, поэтому там `ServerClient` оставляет свой штатный socket-handler и ходит на `127.0.0.1`; REST-сценарий
+  S1 идёт через in-process handler, как описано ниже. В обоих случаях в конвейер клиента добавлен
+  `ContractValidatingHandler`;
 - `ConfigureServerHttpClient(...)` (`cs/src/ClubShell.Core/Http/RetryPolicy.cs:137`); primary handler именованного
   клиента `RetryPolicy.HttpClientName` заменяется на `factory.Server.CreateHandler()`. Так реальный конвейер Polly и
   `RequestSigningHandler` работают поверх in-process сервера;
@@ -1192,8 +1203,10 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
 
 - **Операции:** `register`, `refresh`, `heartbeat`, `sendTelemetry`, `getConfig`, `getPolicies`, `getCommands`,
   `ackCommand`, `/ws/agent`.
-- **Файлы:** `Agents/*`, `Realtime/*`, `Auth/TokenService` (refresh, cv), `Admin/Club/ClubSettings.cs` (чтение jsonb
-  для конфига), seed политики из `config/policies.example.json`.
+- **Файлы:** `Agents/*`, `Realtime/*`, `Auth/TokenService` (refresh, cv), seed политики из `data/policy.json`, иначе
+  `config/policies.example.json`. `Admin/Club/ClubSettings.cs` в S1 не нужен: `clubs.settings` пуст до
+  `PATCH /admin/club` (S5), поэтому `shell.club` несёт только имя клуба; чтение jsonb приходит с S5. Rate limit
+  register/refresh (§3.6) — не в S1.
 - **Тесты:**
   - `AgentApiTests` (pendingApproval + `details.pcId`, повторная регистрация = тот же pcId, refresh reuse → 401
     reused и отзыв, hwid mismatch → revoked, удалённый ПК → 401 revoked, pcMismatch, telemetry 120/1024, callAdmin

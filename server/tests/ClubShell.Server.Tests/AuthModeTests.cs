@@ -19,14 +19,15 @@ public sealed class AuthModeTests(ServerFixture server) : IClassFixture<ServerFi
     [Fact]
     public async Task Club_mode_requires_a_current_or_previous_enrollment_key()
     {
-        await Register(new (string?, int)[] { (null, 401), ("wrong", 401), (ServerFixture.ClubKey, 501) });
+        // 400: authentication passed, the empty body is then rejected.
+        await Register(new (string?, int)[] { (null, 401), ("wrong", 401), (ServerFixture.ClubKey, 400) });
 
         // Rotation: config change plus restart rewrites the hashes; the previous key keeps working.
         var clubs = server.Services.GetRequiredService<ClubRepository>();
         await clubs.EnsureAsync(new ClubOptions { EnrollmentKey = "rotated", PreviousEnrollmentKey = ServerFixture.ClubKey });
         try
         {
-            await Register(new (string?, int)[] { ("rotated", 501), (ServerFixture.ClubKey, 501), ("wrong", 401) });
+            await Register(new (string?, int)[] { ("rotated", 400), (ServerFixture.ClubKey, 400), ("wrong", 401) });
         }
         finally
         {
@@ -78,8 +79,8 @@ public sealed class AuthModeTests(ServerFixture server) : IClassFixture<ServerFi
     [Fact]
     public async Task None_mode_answers_501_without_credentials()
     {
-        using var refresh = await server.Http.PostAsync("/api/v1/agents/refresh", new StringContent("{}"));
-        await Contract.ReadErrorAsync(refresh, 501, "notImplemented", "notImplemented");
+        using var login = await server.Http.PostAsync("/api/v1/admin/login", new StringContent("{}"));
+        await Contract.ReadErrorAsync(login, 501, "notImplemented", "notImplemented");
     }
 
     [Fact]

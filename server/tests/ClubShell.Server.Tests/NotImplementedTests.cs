@@ -18,6 +18,11 @@ public sealed class NotImplementedTests(ServerFixture server) : IClassFixture<Se
         var agent = await TestAgent.CreateAsync(server);
         Assert.Equal(102, Contract.Operations.Count);
 
+        // Exactly the operations of the slices done so far (S1: the eight agent operations), each required by the contract.
+        string[] s1 = ["register", "refresh", "heartbeat", "sendTelemetry", "getConfig", "getPolicies", "getCommands", "ackCommand"];
+        Assert.Equal(s1.Order(), ContractStatus.Implemented.Order());
+        Assert.All(s1, id => Assert.Equal("required", Contract.Operations.Single(o => o.OperationId == id).Operation.GetProperty("x-server-status").GetString()));
+
         var pending = Contract.Operations.Where(o => !ContractStatus.Implemented.Contains(o.OperationId)).ToList();
         foreach (var op in pending)
         {
@@ -38,7 +43,7 @@ public sealed class NotImplementedTests(ServerFixture server) : IClassFixture<Se
             Assert.False(response.Headers.Contains("Retry-After"), op.OperationId);
         }
 
-        Assert.Equal(102 - ContractStatus.Implemented.Count, pending.Count);
+        Assert.Equal(94, pending.Count);
     }
 
     /// <summary>Credentials of the operation's contract <c>security</c>; user-token routes also get a (stub-accepted) token.</summary>

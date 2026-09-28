@@ -6,6 +6,8 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/ClubShell.Server/ClubShell.Server.csproj" />
+    <!-- The real agent client (DESIGN §10.b): ServerClient and RealtimeClient drive the server in AgentHarness. -->
+    <ProjectReference Include="../../../src/ClubShell.Core/ClubShell.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -23,6 +25,7 @@
 
   <ItemGroup>
     <Content Include="../../contracts/openapi.json" Link="contracts/openapi.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../contracts/asyncapi.json" Link="contracts/asyncapi.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

@@ -9,15 +9,29 @@ namespace ClubShell.Server.Tests;
 public sealed class MigrationTests(ServerFixture server) : IClassFixture<ServerFixture>
 {
     [Fact]
-    public void All_migrations_roll_back_to_empty_and_forward_again()
+    public async Task All_migrations_roll_back_to_empty_and_forward_again()
     {
         using var scope = server.Services.CreateScope();
         var runner = scope.ServiceProvider.GetRequiredService<IMigrationRunner>();
 
         runner.MigrateDown(0);
+        Assert.Equal(["VersionInfo"], await TablesAsync());
         runner.MigrateUp();
         runner.MigrateDown(0);
+        Assert.Equal(["VersionInfo"], await TablesAsync());
         runner.MigrateUp();
+        Assert.Contains("agent_commands", await TablesAsync());
+    }
+
+    /// <summary>Tables, views and sequences of the public schema: a Down must leave nothing but FluentMigrator's own table.</summary>
+    private async Task<List<string>> TablesAsync()
+    {
+        await using var c = await server.Services.GetRequiredService<NpgsqlDataSource>().OpenConnectionAsync();
+        return (await c.QueryAsync<string>(
+            """
+            SELECT relname FROM pg_class JOIN pg_namespace n ON n.oid = relnamespace
+            WHERE nspname = 'public' AND relkind IN ('r', 'v', 'm', 'S', 'p') ORDER BY relname
+            """)).ToList();
     }
 
     [Fact]
