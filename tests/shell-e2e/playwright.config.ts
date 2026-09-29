@@ -23,10 +23,13 @@ const chromium = {
  * "вход/карта/смена" (login/map/shift) run; S5 drops the grep.
  */
 const realServer = process.env['ADMIN_SERVER'] === 'real';
-const REAL_SERVER_TESTS = /wrong PIN|owner sees every section|cashier sees only the counter|language switch|shift opens/;
+const REAL_SERVER_TESTS =
+  /wrong PIN|owner sees every section|cashier sees only the counter|language switch|shift opens/;
 const adminDb = process.env['ADMIN_SERVER_DB'];
 if (realServer && !adminDb) {
-  throw new Error('ADMIN_SERVER=real needs ADMIN_SERVER_DB: a connection string to an empty throwaway PostgreSQL database');
+  throw new Error(
+    'ADMIN_SERVER=real needs ADMIN_SERVER_DB: a connection string to an empty throwaway PostgreSQL database',
+  );
 }
 
 const kioskServer = {
