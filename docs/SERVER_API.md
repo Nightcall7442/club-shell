@@ -3,6 +3,8 @@
 Status: normative for the client. The server team implements this surface; `tools/MockServer` implements
 it for development. Types referenced by name are defined in `IPC_PROTOCOL.md` §6 and are byte-compatible.
 
+Реализация сервера — [`docs/server/DESIGN.md`](server/DESIGN.md); запуск, конфигурация и развёртывание — [`server/README.md`](../server/README.md).
+
 Base URL: `https://<server>/api/v1` (`agent.json → server.baseUrl`). WebSocket: `wss://<server>/ws/agent`.
 
 ---
