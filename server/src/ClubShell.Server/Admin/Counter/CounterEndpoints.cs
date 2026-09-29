@@ -25,8 +25,9 @@ namespace ClubShell.Server.Admin;
 /// commands and the price preview. Money goes through the kiosk's own <see cref="SessionService"/> (the §5.2 rules and
 /// the single <see cref="Pricing"/> function) and <see cref="Ledger"/>; each action and its <see cref="Audit"/> entry
 /// commit together, <c>Idempotency-Key</c> (optional) under principal <c>club:&lt;id&gt;</c>. Pushes and commands go out
-/// after the commit; <c>pcStatusChanged</c> is never sent (AsyncAPI notImplemented, the console polls, §6.5).
-/// ponytail: automation hooks and webhooks of these actions (<c>sessionStarted</c>, <c>bigTopup</c>, …) come with S5.
+/// after the commit; <c>pcStatusChanged</c> is never sent (AsyncAPI notImplemented, the console polls, §6.5). Events for the
+/// webhooks (<c>sessionOpened</c>, <c>bigTopup</c>, <c>suspicious</c>) commit with the action; the automation of a top-up
+/// (<c>topupAtLeast</c>) and of an opened session runs after the commit (S5).
 /// </summary>
 public static class CounterEndpoints
 {
@@ -154,8 +155,9 @@ public static class CounterEndpoints
             var session = effects.Sessions[^1];
             effects.Sessions.RemoveAll(pushed => pushed.Id == s.Id);
             effects.Commands.Add((s.ClubId, s.PcId, NewCommand.EndSession(new EndSessionCommand(s.Id, SessionEndReason.Admin))));
-            await Audit.WriteAsync(c, tx, staff, now, "sessionEnd", s.UserId, s.PcId, refunded, "",
-                new { sessionMinutes = (int)(now - s.StartedAt).TotalMinutes, sessionId = s.Id });
+            var sessionMinutes = (int)(now - s.StartedAt).TotalMinutes;
+            await Audit.WriteAsync(c, tx, staff, now, "sessionEnd", s.UserId, s.PcId, refunded, "", new { sessionMinutes, sessionId = s.Id });
+            await ControlAlerts.SessionEndedAsync(c, tx, staff, refunded, sessionMinutes, now);
             return new IdempotentResult(StatusCodes.Status200OK, AdminJson.ToElement(new AdminSessionResult(session, Money.Uzs(charged), Refunded: Money.Uzs(refunded))));
         });
         await sessions.PublishAsync(effects);
@@ -166,7 +168,8 @@ public static class CounterEndpoints
     /// <c>adminTopUp</c>: the top-up and the tier bonus (<c>settings.bonusTiers</c>, highest reached tier, half-up to 100 tiyin)
     /// are one ledger operation; the answer carries the top-up row as <c>transaction</c>.
     /// </summary>
-    private static async Task<IResult> TopUpAsync(HttpContext context, [FromBody] JsonElement body, IdempotencyStore store, SessionService sessions)
+    private static async Task<IResult> TopUpAsync(
+        HttpContext context, [FromBody] JsonElement body, IdempotencyStore store, SessionService sessions, AutomationService automation, ILoggerFactory logs)
     {
         var staff = context.Features.GetRequiredFeature<StaffContext>();
         var r = Api.Read<AdminTopUpRequest>(body, "userId", "amount");
@@ -178,6 +181,7 @@ public static class CounterEndpoints
         }
 
         var effects = new SessionEffects();
+        Guid? topUp = null;
         var result = await store.ExecuteHttpAsync(context, ShiftEndpoints.Principal(staff), keyRequired: false, body, async (c, tx) =>
         {
             var now = sessions.Clock.GetUtcNow();
@@ -194,11 +198,29 @@ public static class CounterEndpoints
             var row = await c.QuerySingleAsync<(long BalanceAfter, string Description, DateTimeOffset CreatedAt)>(
                 "SELECT balance_after, description, created_at FROM ledger_entries WHERE id = @id", new { id }, tx);
             await Audit.WriteAsync(c, tx, staff, now, "topUp", userId, amount: amount, detail: who, meta: new { method, bonus });
+            if (amount >= await ClubSettingsEndpoints.BigTopupAtAsync(c, tx, staff.ClubId))
+            {
+                await Webhooks.EnqueueAsync(c, tx, staff.ClubId, "bigTopup", now, $"{who}: {Webhooks.Sum(amount)}", new { userId, amount });
+            }
+
+            topUp = id;
             effects.Wallets.Add(userId);
             var transaction = new Transaction(id, userId, TransactionType.TopUp, Money.Uzs(amount), Money.Uzs(row.BalanceAfter), row.Description, row.CreatedAt);
             return new IdempotentResult(StatusCodes.Status200OK, AdminJson.ToElement(new AdminTopUpResponse(Money.Uzs(balance), transaction, Money.Uzs(bonus))));
         });
         await sessions.PublishAsync(effects);
+        if (topUp is { } entryId)
+        {
+            try
+            {
+                await automation.TopUpAsync(staff.ClubId, r.UserId!.Value, amount, entryId);
+            }
+            catch (NpgsqlException ex)
+            {
+                logs.CreateLogger(typeof(CounterEndpoints).FullName!).LogWarning(ex, "Automation after a top-up failed");
+            }
+        }
+
         return result;
     }
 

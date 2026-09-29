@@ -121,8 +121,7 @@ public sealed class StaffAuthTests(ServerFixture server) : IClassFixture<ServerF
     [Fact]
     public async Task Club_api_key_is_the_owner_and_owner_only_routes_refuse_a_cashier()
     {
-        var key = "ck_" + Guid.NewGuid().ToString("N");
-        await Players.ExecuteAsync(server, "UPDATE clubs SET api_key = @key", new { key });
+        var key = await ApiKeyAsync(server);
         try
         {
             var me = (await ExpectAsync(server, 200, HttpMethod.Get, "/me", key)).GetProperty("staff");
@@ -143,13 +142,15 @@ public sealed class StaffAuthTests(ServerFixture server) : IClassFixture<ServerF
                 await Contract.ReadErrorAsync(refused, 403, "forbidden", "ownerOnly");
             }
 
-            // For the owner the not-yet-implemented owner route is the 501 it has always been.
-            using var owner = await server.Http.SendAsync(Request(HttpMethod.Patch, "/club", key, new { }));
+            // For the owner a not-implemented owner route (the network page, D-19) is its 501; a cashier got 403 before it.
+            using var owner = await server.Http.SendAsync(Request(HttpMethod.Get, "/network", key));
             await Contract.ReadErrorAsync(owner, 501, "notImplemented");
+            using var cashierNetwork = await server.Http.SendAsync(Request(HttpMethod.Get, "/network", cashier));
+            await Contract.ReadErrorAsync(cashierNetwork, 403, "forbidden", "ownerOnly");
         }
         finally
         {
-            await Players.ExecuteAsync(server, "UPDATE clubs SET api_key = NULL");
+            await ClearApiKeyAsync(server);
         }
     }
 

@@ -159,6 +159,9 @@ public sealed class SessionEffects
     public HashSet<Guid> Wallets { get; } = [];
 
     public List<(Guid ClubId, Guid PcId, NewCommand Command)> Commands { get; } = [];
+
+    /// <summary>Sessions opened (not replayed): the <c>sessionStarted</c>/<c>visitCount</c> automation runs after the commit (§5.3).</summary>
+    public List<(Guid ClubId, Guid SessionId, Guid PcId, Guid UserId)> Opened { get; } = [];
 }
 
 /// <summary>The club facts every rule needs.</summary>
@@ -183,7 +186,9 @@ public sealed class Buyer
 /// <see cref="Ledger"/> — the lock order of §4.4. Methods taking a connection run in the caller's transaction (the
 /// idempotency store's); the others open their own.
 /// </summary>
-public sealed class SessionService(NpgsqlDataSource db, TimeProvider clock, SessionsOptions options, Pushes pushes, CommandDispatcher commands, ILogger<SessionService> logger)
+public sealed class SessionService(
+    NpgsqlDataSource db, TimeProvider clock, SessionsOptions options, Pushes pushes, CommandDispatcher commands, Admin.AutomationService automation,
+    ILogger<SessionService> logger)
 {
     public TimeProvider Clock => clock;
 
@@ -366,6 +371,14 @@ public sealed class SessionService(NpgsqlDataSource db, TimeProvider clock, Sess
 
         var session = row.ToWire(now);
         effects.Sessions.Add(session);
+        if (!replay)
+        {
+            // The event commits with the session; the rules run after the commit (§5.3).
+            var who = await c.QuerySingleAsync<string>("SELECT display_name FROM users WHERE id = @Id", new { buyer.Id }, tx);
+            await Admin.Webhooks.EnqueueAsync(c, tx, club.Id, "sessionOpened", now, $"{pc.Name} · {who}", new { sessionId = row.Id, pcId = pc.Id, userId = buyer.Id });
+            effects.Opened.Add((club.Id, row.Id, pc.Id, buyer.Id));
+        }
+
         return session;
     }
 
@@ -715,6 +728,18 @@ public sealed class SessionService(NpgsqlDataSource db, TimeProvider clock, Sess
         catch (Exception ex) when (ex is NpgsqlException or InvalidOperationException)
         {
             logger.LogWarning(ex, "Pushes after a committed session change failed");
+        }
+
+        foreach (var (clubId, sessionId, pcId, userId) in effects.Opened)
+        {
+            try
+            {
+                await automation.SessionOpenedAsync(clubId, sessionId, pcId, userId);
+            }
+            catch (NpgsqlException ex)
+            {
+                logger.LogWarning(ex, "Automation after session {SessionId} opened failed", sessionId);
+            }
         }
     }
 

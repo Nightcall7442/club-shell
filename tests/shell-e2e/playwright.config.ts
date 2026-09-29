@@ -19,12 +19,9 @@ const chromium = {
  * ADMIN_SERVER=real: the admin project runs against the real central server (docs/server/DESIGN.md §10.c) instead of the
  * mock: `dotnet run` in Development (Seed:Dev — staff 0000/1111, demo tariffs and players) on ADMIN_SERVER_DB, an Npgsql
  * connection string to a throwaway empty database the server migrates, with CORS for the console. The kiosk dev server is
- * not started (run `--project admin`). Until slice S5 the server has the counter only, so just the parts
- * "вход/карта/смена" (login/map/shift) run; S5 drops the grep.
+ * not started (run `--project admin`). Since slice S5 the whole admin spec runs against it.
  */
 const realServer = process.env['ADMIN_SERVER'] === 'real';
-const REAL_SERVER_TESTS =
-  /wrong PIN|owner sees every section|cashier sees only the counter|language switch|shift opens/;
 const adminDb = process.env['ADMIN_SERVER_DB'];
 if (realServer && !adminDb) {
   throw new Error(
@@ -97,7 +94,6 @@ export default defineConfig({
     {
       name: 'admin',
       testMatch: /admin\/.*\.spec\.ts$/,
-      ...(realServer ? { grep: REAL_SERVER_TESTS } : {}),
       use: { ...chromium, baseURL: ADMIN_URL },
     },
   ],

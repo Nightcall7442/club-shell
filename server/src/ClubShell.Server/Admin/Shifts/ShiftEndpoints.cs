@@ -17,8 +17,8 @@ namespace ClubShell.Server.Admin;
 /// shift after its Z report; a row racing the close gets <c>shift_id NULL</c>, as with no shift open — S5 <c>noShift</c>
 /// counts those). X/Z report = sums by <c>shift_id</c> grouped by type and method; <c>expectedCash = openingCash + Σ topUp
 /// cash</c>. A shortfall over <c>settings.control.shortfallFrom</c> (default 500 000 tiyin) flags the <c>shiftClose</c>
-/// entry. Any staff member may close (not only who opened).
-/// ponytail: the <c>shiftClosed</c>/<c>suspicious</c> webhooks come with the webhook outbox (S5).
+/// entry. Any staff member may close (not only who opened). Closing raises <c>shiftClosed</c>, and <c>suspicious</c> on a
+/// shortfall, for the webhooks (S5), in the close's transaction.
 /// </summary>
 public static class ShiftEndpoints
 {
@@ -42,6 +42,12 @@ public static class ShiftEndpoints
         api.MapPost("/open", OpenAsync);
         api.MapPost("/close", CloseAsync);
     }
+
+    /// <summary>Shifts opened at or after <paramref name="since"/>, newest first (<c>adminReports</c>).</summary>
+    public static async Task<IReadOnlyList<AdminShift>> OpenedSinceAsync(NpgsqlConnection c, Guid clubId, DateTimeOffset since) =>
+        (await c.QueryAsync<ShiftRow>(
+            $"SELECT {ShiftRow.Columns} FROM shifts WHERE club_id = @clubId AND opened_at >= @since ORDER BY opened_at DESC, id DESC", new { clubId, since }))
+        .Select(s => s.ToWire()).ToList();
 
     public static async Task<AdminShift?> OpenShiftAsync(NpgsqlConnection c, Guid clubId) =>
         (await c.QuerySingleOrDefaultAsync<ShiftRow>($"SELECT {ShiftRow.Columns} FROM shifts WHERE club_id = @clubId AND closed_at IS NULL", new { clubId }))?.ToWire();
@@ -99,6 +105,10 @@ public static class ShiftEndpoints
                 new { shift.Id, now, counted, expected, totals = JsonSerializer.Serialize(totals, ServerJson.Options) }, tx);
             await Audit.WriteAsync(c, tx, staff, now, "shiftClose", amount: counted, detail: shift.StaffName,
                 meta: new { expected, counted, diff = counted - expected, shortfall }, shiftId: shift.Id);
+            await Webhooks.EnqueueAsync(c, tx, staff.ClubId, "shiftClosed", now,
+                $"{shift.StaffName}: сеансы {Webhooks.Sum(totals.Sessions)}, магазин {Webhooks.Sum(totals.Shop)}, касса {Webhooks.Sum(counted)} (ожидалось {Webhooks.Sum(expected)})",
+                new { shiftId = shift.Id });
+            await ControlAlerts.ShiftClosedAsync(c, tx, staff, shift.StaffName, counted - expected, now);
             var closed = await c.QuerySingleAsync<ShiftRow>($"SELECT {ShiftRow.Columns} FROM shifts WHERE id = @Id", new { shift.Id }, tx);
             return new IdempotentResult(StatusCodes.Status200OK, AdminJson.ToElement(new AdminShiftCloseResponse(closed.ToWire(), expected)));
         });
