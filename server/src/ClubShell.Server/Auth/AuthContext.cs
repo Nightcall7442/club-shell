@@ -24,8 +24,22 @@ public enum AuthMode
     Staff,
 }
 
-/// <summary>Endpoint metadata read by <see cref="AgentAuthMiddleware"/>; every <c>/api/v1</c> endpoint must declare one.</summary>
-public sealed record AuthRequirement(AuthMode Mode);
+/// <summary>
+/// Endpoint metadata read by <see cref="AgentAuthMiddleware"/>; every <c>/api/v1</c> endpoint must declare one.
+/// <paramref name="OwnerOnly"/>: staff mode for the owner only (contract <c>x-roles: [owner]</c>), else <c>403 ownerOnly</c>.
+/// </summary>
+public sealed record AuthRequirement(AuthMode Mode, bool OwnerOnly = false);
+
+/// <summary>
+/// The staff member of a <c>staff</c>-mode request (DESIGN §3.5): a PIN token's staff row, or for the club API key
+/// <c>ck_…</c> the synthetic owner "API key" (<see cref="StaffId"/> null). <see cref="WireId"/> is <c>AdminStaffMember.id</c>.
+/// </summary>
+public sealed record StaffContext(Guid? StaffId, string Name, string Role, Guid ClubId, Guid NetworkId)
+{
+    public bool IsOwner => Role == "owner";
+
+    public string WireId => StaffId?.ToString() ?? "apiKey";
+}
 
 /// <summary>Validated claims of an agent access token.</summary>
 public sealed record AgentPrincipal(Guid PcId, Guid ClubId, string Hwid, int CredentialsVersion, DateTimeOffset ExpiresAt);

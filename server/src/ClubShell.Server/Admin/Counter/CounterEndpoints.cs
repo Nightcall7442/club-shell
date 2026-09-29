@@ -1,0 +1,311 @@
+using System.Text.Json;
+using ClubShell.Contracts.Commands;
+using ClubShell.Contracts.Errors;
+using ClubShell.Contracts.Ipc;
+using ClubShell.Contracts.Sessions;
+using ClubShell.Contracts.Users;
+using ClubShell.Contracts.Wallet;
+using ClubShell.Server.Agents;
+using ClubShell.Server.Auth;
+using ClubShell.Server.Idempotency;
+using ClubShell.Server.Infrastructure;
+using ClubShell.Server.Realtime;
+using ClubShell.Server.Sessions;
+using ClubShell.Server.Sessions.Billing;
+using ClubShell.Server.Wallet;
+using Dapper;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Mvc;
+using Npgsql;
+
+namespace ClubShell.Server.Admin;
+
+/// <summary>
+/// The counter (slice S4): hall snapshot, sessions opened/extended/ended by the cashier, top-up with the tier bonus, PC
+/// commands and the price preview. Money goes through the kiosk's own <see cref="SessionService"/> (the §5.2 rules and
+/// the single <see cref="Pricing"/> function) and <see cref="Ledger"/>; each action and its <see cref="Audit"/> entry
+/// commit together, <c>Idempotency-Key</c> (optional) under principal <c>club:&lt;id&gt;</c>. Pushes and commands go out
+/// after the commit; <c>pcStatusChanged</c> is never sent (AsyncAPI notImplemented, the console polls, §6.5).
+/// ponytail: automation hooks and webhooks of these actions (<c>sessionStarted</c>, <c>bigTopup</c>, …) come with S5.
+/// </summary>
+public static class CounterEndpoints
+{
+    public static readonly string[] Operations =
+        ["adminOverview", "adminOpenSession", "adminExtend", "adminEnd", "adminTopUp", "adminCommand", "adminQuote"];
+
+    /// <summary><c>ledger_entries.method</c> values.</summary>
+    private static readonly string[] Methods = ["cash", "card", "payme", "click", "uzum"];
+
+    public static void MapCounterEndpoints(this IEndpointRouteBuilder app)
+    {
+        var api = app.MapApiGroup("/api/v1/admin").WithMetadata(new AuthRequirement(AuthMode.Staff));
+        api.MapGet("/overview", OverviewAsync);
+        api.MapPost("/sessions", OpenAsync);
+        api.MapPost("/sessions/extend", ExtendAsync);
+        api.MapPost("/sessions/end", EndAsync);
+        api.MapPost("/wallet/topup", TopUpAsync);
+        api.MapPost("/pcs/{pcId:guid}/command", CommandAsync);
+        api.MapPost("/quote", QuoteAsync);
+    }
+
+    /// <summary>
+    /// Everything the counter screen draws (polled every 2 s). ponytail: all members of the network in one list, as the mock;
+    /// page or search when a club outgrows it.
+    /// </summary>
+    private static async Task<IResult> OverviewAsync(
+        HttpContext context, NpgsqlDataSource db, PcRepository pcs, AgentSocketHub hub, AgentOptions agents, TimeProvider clock)
+    {
+        var staff = context.Features.GetRequiredFeature<StaffContext>();
+        var now = clock.GetUtcNow();
+        var hall = await pcs.ListAsync(staff.ClubId);
+        await using var c = await db.OpenConnectionAsync();
+        var open = (await c.QueryAsync<SessionRow>($"SELECT {SessionRow.Columns} FROM sessions WHERE club_id = @ClubId AND state <> 'ended'", new { staff.ClubId }))
+            .ToDictionary(s => s.PcId);
+        var players = (await c.QueryAsync<(Guid Id, string DisplayName, string Role, long Balance)>(
+                "SELECT u.id, u.display_name, u.role, w.main_balance FROM users u JOIN wallets w ON w.user_id = u.id WHERE u.id = ANY(@ids)",
+                new { ids = open.Values.Select(s => s.UserId).ToArray() }))
+            .ToDictionary(u => u.Id, u => new AdminSeatUser(u.Id, u.DisplayName, u.Role, Money.Uzs(u.Balance)));
+        var seats = hall.Select(pc => new AdminSeat(
+            pc.ToPc(pc.Status(hub.IsConnected(pc.Id), now, TimeSpan.FromSeconds(agents.OfflineAfterSec)), withHwid: false),
+            open.TryGetValue(pc.Id, out var s) ? s.ToWire(now) : null,
+            s is not null && players.TryGetValue(s.UserId, out var user) ? user : null)).ToList();
+        var tariffs = (await c.QueryAsync<TariffRow>(
+            $"SELECT {TariffRow.Columns} FROM tariffs WHERE club_id = @ClubId AND deleted_at IS NULL ORDER BY created_at, id", new { staff.ClubId }))
+            .Select(t => t.ToWire()).ToList();
+        var members = (await c.QueryAsync<(Guid Id, string DisplayName, string Role, long Balance, string Username)>(
+            """
+            SELECT u.id, u.display_name, u.role, w.main_balance, u.username
+            FROM users u JOIN wallets w ON w.user_id = u.id
+            LEFT JOIN client_profiles cp ON cp.user_id = u.id AND cp.club_id = @ClubId
+            WHERE u.network_id = @NetworkId AND u.deleted_at IS NULL AND NOT u.transient AND u.role NOT IN ('guest', 'admin')
+              AND NOT coalesce(cp.blacklisted, false)
+            ORDER BY u.display_name, u.id
+            """,
+            new { staff.ClubId, staff.NetworkId }))
+            .Select(u => new AdminMember(u.Id, u.DisplayName, u.Role, Money.Uzs(u.Balance), u.Username)).ToList();
+        return AdminJson.Ok(new AdminOverview(
+            now, new AdminOccupancy(seats.Count(s => s.Pc.Status == Contracts.Pcs.PcStatus.Free), seats.Count), seats, tariffs, members,
+            await ZonesAsync(c, staff.ClubId), []));
+    }
+
+    /// <summary><c>adminOpenSession</c> (§5.3): prepaid, priced by the club rules; <c>201 {session, charged, balance}</c>.</summary>
+    private static async Task<IResult> OpenAsync(
+        HttpContext context, [FromBody] JsonElement body, IdempotencyStore store, SessionService sessions, PcRepository pcs)
+    {
+        var staff = context.Features.GetRequiredFeature<StaffContext>();
+        var r = Api.Read<AdminOpenSessionRequest>(body, "pcId", "userId", "tariffId", "minutes");
+        var minutes = Minutes(r.Minutes!.Value);
+        var pc = await LivePcAsync(pcs, staff, r.PcId!.Value);
+        var effects = new SessionEffects();
+        var result = await store.ExecuteHttpAsync(context, ShiftEndpoints.Principal(staff), keyRequired: false, body, async (c, tx) =>
+        {
+            var session = await sessions.CreateAsync(
+                c, tx, pc, new SessionCreateRequest(pc.Id, r.UserId!.Value, r.TariffId!.Value, minutes, true), replay: false, effects, staff);
+            var (who, tariff, discount, balance) = await c.QuerySingleAsync<(string, string, int, long)>(
+                """
+                SELECT u.display_name, t.name, s.discount_pct, w.main_balance
+                FROM sessions s JOIN users u ON u.id = s.user_id JOIN tariffs t ON t.id = s.tariff_id JOIN wallets w ON w.user_id = s.user_id
+                WHERE s.id = @Id
+                """,
+                new { session.Id }, tx);
+            await Audit.WriteAsync(c, tx, staff, sessions.Clock.GetUtcNow(), "sessionOpen", session.UserId, pc.Id, session.Cost.Amount,
+                $"{who} · {pc.Name} · {tariff}", new { minutes = session.SecondsLeft / 60, discountPct = discount, sessionId = session.Id });
+            return new IdempotentResult(StatusCodes.Status201Created, AdminJson.ToElement(new AdminSessionResult(session, session.Cost, Money.Uzs(balance))));
+        });
+        await sessions.PublishAsync(effects);
+        return result;
+    }
+
+    /// <summary><c>adminExtend</c> (§5.6): the kiosk's extend, plus <c>extendSession {charge:false}</c> to the PC.</summary>
+    private static async Task<IResult> ExtendAsync(HttpContext context, [FromBody] JsonElement body, IdempotencyStore store, SessionService sessions)
+    {
+        var staff = context.Features.GetRequiredFeature<StaffContext>();
+        var r = Api.Read<AdminSessionTarget>(body, "minutes");
+        var minutes = Minutes(r.Minutes!.Value);
+        var effects = new SessionEffects();
+        var result = await store.ExecuteHttpAsync(context, ShiftEndpoints.Principal(staff), keyRequired: false, body, async (c, tx) =>
+        {
+            var s = await TargetAsync(c, tx, staff, r);
+            var (session, charged) = await sessions.ExtendAsync(c, tx, s.Id, s.UserId, s.PcId, minutes, r.TariffId, effects, staff);
+            var balance = await c.ExecuteScalarAsync<long>("SELECT main_balance FROM wallets WHERE user_id = @UserId", new { s.UserId }, tx);
+            await Audit.WriteAsync(c, tx, staff, sessions.Clock.GetUtcNow(), "sessionExtend", s.UserId, s.PcId, charged,
+                $"+{minutes}", new { minutes, sessionId = s.Id });
+            return new IdempotentResult(StatusCodes.Status200OK, AdminJson.ToElement(new AdminSessionResult(session, Money.Uzs(charged), Money.Uzs(balance))));
+        });
+        await sessions.PublishAsync(effects);
+        return result;
+    }
+
+    /// <summary>
+    /// <c>adminEnd</c> (§5.7): settled with reason <c>admin</c> (unused hourly time refunded pro rata to what was paid) and
+    /// <c>endSession</c> queued for the PC — without a <c>sessionUpdated</c> push, which the agent would take first and close
+    /// the session itself.
+    /// </summary>
+    private static async Task<IResult> EndAsync(HttpContext context, [FromBody] JsonElement body, IdempotencyStore store, SessionService sessions)
+    {
+        var staff = context.Features.GetRequiredFeature<StaffContext>();
+        var r = Api.Read<AdminSessionTarget>(body);
+        var effects = new SessionEffects();
+        var result = await store.ExecuteHttpAsync(context, ShiftEndpoints.Principal(staff), keyRequired: false, body, async (c, tx) =>
+        {
+            var now = sessions.Clock.GetUtcNow();
+            var s = await TargetAsync(c, tx, staff, r);
+            var (charged, refunded) = await sessions.SettleAsync(c, tx, s, now, SessionEndReason.Admin, effects);
+            var session = effects.Sessions[^1];
+            effects.Sessions.RemoveAll(pushed => pushed.Id == s.Id);
+            effects.Commands.Add((s.ClubId, s.PcId, NewCommand.EndSession(new EndSessionCommand(s.Id, SessionEndReason.Admin))));
+            await Audit.WriteAsync(c, tx, staff, now, "sessionEnd", s.UserId, s.PcId, refunded, "",
+                new { sessionMinutes = (int)(now - s.StartedAt).TotalMinutes, sessionId = s.Id });
+            return new IdempotentResult(StatusCodes.Status200OK, AdminJson.ToElement(new AdminSessionResult(session, Money.Uzs(charged), Refunded: Money.Uzs(refunded))));
+        });
+        await sessions.PublishAsync(effects);
+        return result;
+    }
+
+    /// <summary>
+    /// <c>adminTopUp</c>: the top-up and the tier bonus (<c>settings.bonusTiers</c>, highest reached tier, half-up to 100 tiyin)
+    /// are one ledger operation; the answer carries the top-up row as <c>transaction</c>.
+    /// </summary>
+    private static async Task<IResult> TopUpAsync(HttpContext context, [FromBody] JsonElement body, IdempotencyStore store, SessionService sessions)
+    {
+        var staff = context.Features.GetRequiredFeature<StaffContext>();
+        var r = Api.Read<AdminTopUpRequest>(body, "userId", "amount");
+        var amount = r.Amount!.Value is < 1 or > 100_000_000 ? throw ApiException.Validation("amount", r.Amount < 1 ? "min" : "max") : r.Amount.Value;
+        var method = r.Method ?? "cash";
+        if (!Methods.Contains(method, StringComparer.Ordinal))
+        {
+            throw ApiException.Validation("method", "enum");
+        }
+
+        var effects = new SessionEffects();
+        var result = await store.ExecuteHttpAsync(context, ShiftEndpoints.Principal(staff), keyRequired: false, body, async (c, tx) =>
+        {
+            var now = sessions.Clock.GetUtcNow();
+            var userId = r.UserId!.Value;
+            var who = await c.QuerySingleOrDefaultAsync<string>(
+                "SELECT display_name FROM users WHERE id = @userId AND network_id = @NetworkId AND deleted_at IS NULL", new { userId, staff.NetworkId }, tx)
+                ?? throw ApiException.NotFound("user");
+            var tiers = await c.ExecuteScalarAsync<string?>("SELECT (settings -> 'bonusTiers')::text FROM clubs WHERE id = @ClubId", new { staff.ClubId }, tx);
+            var bonus = Bonus(amount, tiers);
+            var id = Guid.CreateVersion7(now);
+            var balance = await Ledger.PostAsync(c, tx, userId, allowOverdraft: false, now,
+                new LedgerLine("topUp", amount, $"Пополнение на кассе ({method})", staff.ClubId, Method: method, StaffId: staff.StaffId, Id: id),
+                new LedgerLine("bonus", bonus, "Бонус за пополнение", staff.ClubId, StaffId: staff.StaffId));
+            var row = await c.QuerySingleAsync<(long BalanceAfter, string Description, DateTimeOffset CreatedAt)>(
+                "SELECT balance_after, description, created_at FROM ledger_entries WHERE id = @id", new { id }, tx);
+            await Audit.WriteAsync(c, tx, staff, now, "topUp", userId, amount: amount, detail: who, meta: new { method, bonus });
+            effects.Wallets.Add(userId);
+            var transaction = new Transaction(id, userId, TransactionType.TopUp, Money.Uzs(amount), Money.Uzs(row.BalanceAfter), row.Description, row.CreatedAt);
+            return new IdempotentResult(StatusCodes.Status200OK, AdminJson.ToElement(new AdminTopUpResponse(Money.Uzs(balance), transaction, Money.Uzs(bonus))));
+        });
+        await sessions.PublishAsync(effects);
+        return result;
+    }
+
+    /// <summary>The bonus of <c>AdminBonusTier[]</c> <c>{minAmount, bonusPct}</c>: the highest tier reached, half-up to 100 tiyin.</summary>
+    public static long Bonus(long amount, string? tiersJson)
+    {
+        var tiers = string.IsNullOrEmpty(tiersJson) ? [] : JsonSerializer.Deserialize<BonusTier[]>(tiersJson, JsonSerializerOptions.Web) ?? [];
+        var pct = tiers.Where(t => amount >= t.MinAmount).OrderByDescending(t => t.MinAmount).Select(t => t.BonusPct).FirstOrDefault();
+        return ((amount * pct) + 5_000) / 10_000 * 100;
+    }
+
+    /// <summary>
+    /// <c>adminCommand</c> (§6.4 step 4): queued, then its ack awaited up to <see cref="AgentOptions.AckWaitSec"/>; an offline PC
+    /// answers <c>agentOffline</c> at once (the command stays queued), no ack in time <c>timeout</c> — both inside a 200.
+    /// <c>unlock</c> supersedes the PC's pending <c>lock</c>.
+    /// </summary>
+    private static async Task<IResult> CommandAsync(
+        HttpContext context, Guid pcId, [FromBody] JsonElement body, PcRepository pcs, NpgsqlDataSource db, CommandDispatcher dispatcher,
+        CommandRepository commands, AgentSocketHub hub, AgentOptions agents, TimeProvider clock)
+    {
+        var staff = context.Features.GetRequiredFeature<StaffContext>();
+        var pc = await LivePcAsync(pcs, staff, pcId);
+        var r = Api.Read<AdminPcCommandRequest>(body, "kind");
+        if (r.Text is { Length: > 500 })
+        {
+            throw ApiException.Validation("text", "max");
+        }
+
+        var text = string.IsNullOrWhiteSpace(r.Text) ? null : r.Text;
+        var command = r.Kind switch
+        {
+            "message" => NewCommand.Message(new MessageCommand(Guid.NewGuid(), "Администратор", text ?? throw ApiException.Validation("text", "required"), NotificationLevel.Info, RequiresAck: true)),
+            "lock" => NewCommand.Lock(new LockCommand("staff", text)),
+            "unlock" => NewCommand.Unlock(),
+            "reboot" => NewCommand.Reboot(new PowerCommand(5, false, text)),
+            "shutdown" => NewCommand.Shutdown(new PowerCommand(5, false, text)),
+            _ => throw ApiException.Validation("kind", "unknown"),
+        };
+
+        Guid? supersedes;
+        await using (var c = await db.OpenConnectionAsync())
+        await using (var tx = await c.BeginTransactionAsync())
+        {
+            supersedes = r.Kind != "unlock" ? null : await c.QuerySingleOrDefaultAsync<Guid?>(
+                "SELECT id FROM agent_commands WHERE pc_id = @Id AND name = 'lock' AND acked_at IS NULL AND superseded_at IS NULL ORDER BY created_at DESC, id DESC LIMIT 1",
+                new { pc.Id }, tx);
+            await Audit.WriteAsync(c, tx, staff, clock.GetUtcNow(), "pcCommand", pcId: pc.Id, detail: $"{pc.Name} · {r.Kind}", meta: new { kind = r.Kind });
+            await tx.CommitAsync();
+        }
+
+        var online = hub.IsConnected(pc.Id);
+        var queued = await dispatcher.EnqueueAsync(pc.ClubId, pc.Id, command, supersedes, staff.StaffId);
+        var ack = !online
+            ? new CommandAck(false, IpcError.Of(ErrorCode.AgentOffline, "The PC is offline; the command stays queued"))
+            : await commands.WaitForAckAsync(queued.Id, TimeSpan.FromSeconds(agents.AckWaitSec), context.RequestAborted)
+              ?? new CommandAck(false, IpcError.Of(ErrorCode.Timeout, "No acknowledgement from the PC in time"));
+        return AdminJson.Ok(new { ack });
+    }
+
+    /// <summary>
+    /// <c>adminQuote</c>: the single price function now, without charging. An unknown <c>userId</c> is priced as a walk-in
+    /// (the contract's 404 names only tariff and pc).
+    /// </summary>
+    private static async Task<IResult> QuoteAsync(HttpContext context, [FromBody] JsonElement body, NpgsqlDataSource db, TimeProvider clock)
+    {
+        var staff = context.Features.GetRequiredFeature<StaffContext>();
+        var r = Api.Read<AdminQuoteRequest>(body, "tariffId", "pcId");
+        await using var c = await db.OpenConnectionAsync();
+        var club = await SessionService.ClubAsync(c, null, staff.ClubId);
+        var tariff = await SessionService.TariffAsync(c, null, club.Id, r.TariffId!.Value) ?? throw ApiException.NotFound("tariff");
+        var zone = await c.QuerySingleOrDefaultAsync<string>(
+            "SELECT zone FROM pcs WHERE id = @PcId AND club_id = @ClubId AND deleted_at IS NULL", new { r.PcId, staff.ClubId })
+            ?? throw ApiException.NotFound("pc");
+        var minutes = tariff.IsPackage ? tariff.PackageMinutes!.Value : Minutes(r.Minutes ?? throw ApiException.Validation("minutes", "required"));
+        var buyer = r.UserId is { } userId ? await SessionService.BuyerAsync(c, null, club, userId) : null;
+        var q = Pricing.Compute(tariff, minutes, buyer?.GroupId, buyer?.LifetimeSpent, zone, clock.GetUtcNow(), club.Pricing);
+        return AdminJson.Ok(new AdminPriceQuote(Money.Uzs(q.Base), q.DayPct, q.DiscountPct, q.DiscountReason, Money.Uzs(q.Total)));
+    }
+
+    /// <summary><c>settings.zones</c> (<c>AdminZone[]</c>); none configured — no zones.</summary>
+    public static async Task<IReadOnlyList<AdminZone>> ZonesAsync(NpgsqlConnection c, Guid clubId)
+    {
+        var json = await c.ExecuteScalarAsync<string?>("SELECT (settings -> 'zones')::text FROM clubs WHERE id = @clubId", new { clubId });
+        return string.IsNullOrEmpty(json) ? [] : JsonSerializer.Deserialize<AdminZone[]>(json, JsonSerializerOptions.Web) ?? [];
+    }
+
+    /// <summary>A live PC of the staff member's club, else <c>404 what=pc</c>.</summary>
+    public static async Task<PcRow> LivePcAsync(PcRepository pcs, StaffContext staff, Guid pcId) =>
+        await pcs.FindAsync(pcId) is { DeletedAt: null } pc && pc.ClubId == staff.ClubId ? pc : throw ApiException.NotFound("pc");
+
+    /// <summary>The open session to act on, locked: by <c>sessionId</c> when given (it wins, as in the mock), else the PC's.</summary>
+    private static async Task<SessionRow> TargetAsync(NpgsqlConnection c, NpgsqlTransaction tx, StaffContext staff, AdminSessionTarget r)
+    {
+        var id = r.SessionId ?? (r.PcId is { } pcId
+            ? await c.QuerySingleOrDefaultAsync<Guid?>("SELECT id FROM sessions WHERE pc_id = @pcId AND state <> 'ended'", new { pcId }, tx)
+            : throw ApiException.Validation("pcId", "required"));
+        return id is { } sessionId && await SessionService.LockAsync(c, tx, sessionId) is { Ended: false } s && s.ClubId == staff.ClubId
+            ? s
+            : throw ApiException.NotFound("session");
+    }
+
+    private static int Minutes(int minutes) =>
+        minutes < 5 ? throw ApiException.Validation("minutes", "min") : minutes > 1440 ? throw ApiException.Validation("minutes", "max") : minutes;
+
+    private sealed class BonusTier
+    {
+        public long MinAmount { get; init; }
+        public int BonusPct { get; init; }
+    }
+}

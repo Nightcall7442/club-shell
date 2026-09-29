@@ -27,6 +27,20 @@ public sealed class AuthOptions
 
     /// <summary>Request signature window, seconds (contract: ±300).</summary>
     public int SignatureWindowSec { get; set; } = 300;
+
+    /// <summary>32-byte HMAC key of staff PINs (DESIGN §3.5), created on first start; relative paths resolve against the content root.</summary>
+    public string PepperPath { get; set; } = "data/pin-pepper.key";
+
+    /// <summary>A staff token dies this long after its last use…</summary>
+    public int StaffTokenSlidingHours { get; set; } = 12;
+
+    /// <summary>…and this long after sign-in in any case.</summary>
+    public int StaffTokenAbsoluteDays { get; set; } = 7;
+
+    /// <summary>Wrong PINs per client IP within <see cref="PinWindowSec"/> before <c>POST /admin/login</c> answers 429 (<c>RateLimit:*</c>).</summary>
+    public int PinAttempts { get; set; } = 5;
+
+    public int PinWindowSec { get; set; } = 300;
 }
 
 /// <summary>

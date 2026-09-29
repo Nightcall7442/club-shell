@@ -187,14 +187,15 @@ public static class AgentEndpoints
     }
 
     /// <summary>Strong ETag (RFC 9110, quoted); a matching <c>If-None-Match</c> gets <c>304</c> without a body.</summary>
-    private static IResult WithETag(HttpContext context, string tag, Func<IResult> body)
+    private static IResult WithETag(HttpContext context, string tag, Func<IResult> body) =>
+        NotModified(context, tag) ? Results.StatusCode(StatusCodes.Status304NotModified) : body();
+
+    /// <summary>Sets the strong <c>ETag</c> <paramref name="tag"/>; true when <c>If-None-Match</c> matches it (answer 304).</summary>
+    public static bool NotModified(HttpContext context, string tag)
     {
         var etag = new EntityTagHeaderValue($"\"{tag}\"");
         context.Response.Headers.ETag = etag.ToString();
-        var match = context.Request.GetTypedHeaders().IfNoneMatch;
-        return match.Any(m => m.Equals(EntityTagHeaderValue.Any) || m.Compare(etag, useStrongComparison: false))
-            ? Results.StatusCode(StatusCodes.Status304NotModified)
-            : body();
+        return context.Request.GetTypedHeaders().IfNoneMatch.Any(m => m.Equals(EntityTagHeaderValue.Any) || m.Compare(etag, useStrongComparison: false));
     }
 
     /// <summary><c>pcs.mac_address</c>: lower case with colons (DESIGN §9); an unparsable value is kept lower-cased.</summary>

@@ -1187,6 +1187,10 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
   признанное неправильным (возврат по базе и т.п.). Каждая такая правка перечисляется в PR.
 - CI job `e2e-admin-real` на ubuntu + `postgres:18` запускается в S4 (частичный набор: map/shift) и в полном объёме
   в S5.
+- Как сделано в S4: базу создаёт не конфиг, а вызывающий — `ADMIN_SERVER_DB` (строка Npgsql к пустой одноразовой БД;
+  в CI её создаёт сервис `postgres:18` через `POSTGRES_DB`). В режиме `real` dev-сервер киоска не стартует (запуск
+  `--project admin`), а проект `admin` получает `grep` частей «вход/карта/смена» (5 тестов; S5 снимает `grep`).
+  Ключ JWT и pepper — во временном каталоге. Правок `console.spec.ts` не понадобилось.
 
 ### 10.d Паритет с MockServer
 
@@ -1339,6 +1343,10 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
 - **Выход (тесты):** `AgentHarness` S3: `GameLibrary` реального агента собирает каталог из 2+ страниц и на
   повторном старте получает 304; `ServerClient.GetPcAsync` возвращает `Pc` с `hwid` своего ПК; manifest → 204;
   `Coverage` = 5 операций S3 + `reportAntiCheat`.
+- **Отличие реализации:** `GameLibrary` живёт в `ClubShell.Agent` (net8.0-windows, детектор установок Windows) и в
+  тестовый хост net10 не грузится; `AgentHarnessS3Tests` повторяет его цикл `RefreshAsync` строка в строку поверх
+  реального `ServerClient` (страница 1 по 500 с ETag, остальные без него до `total`, повтор → 304). `zone` в
+  `GET /games` входит в ETag, но каталог не фильтрует (как мок): позонного каталога в настройках клуба пока нет.
 
 ### S4 — касса, часть 1
 
@@ -1348,6 +1356,13 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
 - **Файлы:** `M0004_Counter.cs`, `Auth/StaffTokens.cs` + `StaffAuthMiddleware`, `Infrastructure/Cors.cs`,
   `Admin/AdminJson.cs`, `Admin/Staff/Login*`, `Admin/Counter/*`, `Admin/Shifts/*`, `Admin/Pricing/Quote*`,
   `Admin/Pcs/*`, `Admin/Control/Audit.cs`, `PcStatusWorker`.
+- **Отличия реализации:** режим `staff` проверяется в той же `AgentAuthMiddleware` (ветка `AuthMode.Staff` через
+  `StaffTokens`), отдельной `StaffAuthMiddleware` нет; `adminQuote` — в `Admin/Counter`, admin-DTO — в
+  `Admin/AdminJson.cs`. 501 операции с `x-roles: [owner]` кассиру отвечает `403 ownerOnly` раньше 501. Занятый номер
+  места в `adminAddPc`/`adminUpdatePc` — `400 validation field=number reason=taken` (409 там в контракте нет).
+  `PcStatusWorker` в S4 пишет только `telemetry_events kind=pcOffline`; вебхук и `pcIdleMinutes` — в S5. Лимит
+  неверных PIN — в памяти по IP (`RateLimit:PinAttempts`/`PinWindowSec`), `429` на `adminLogin` ждёт правки
+  контракта (§12.2 п. 4).
 - **Тесты:**
   - `StaffAuthTests` (invalidPin, 429 после 5, logout всегда 200, деактивация убивает токены, `ck_` = owner,
     ownerOnly);

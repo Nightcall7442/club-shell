@@ -1,12 +1,15 @@
 using ClubShell.Contracts.Errors;
 using ClubShell.Contracts.Pcs;
 using ClubShell.Contracts.Serialization;
+using ClubShell.Server.Admin;
 using ClubShell.Server.Agents;
 using ClubShell.Server.Auth;
+using ClubShell.Server.Games;
 using ClubShell.Server.Idempotency;
 using ClubShell.Server.Infrastructure;
 using ClubShell.Server.Realtime;
 using ClubShell.Server.Sessions;
+using ClubShell.Server.Updates;
 using ClubShell.Server.Users;
 using ClubShell.Server.Wallet;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -23,11 +26,15 @@ var connectionString = builder.Configuration.GetConnectionString("Club")
     ?? throw new InvalidOperationException("ConnectionStrings:Club is not configured");
 var authOptions = builder.Configuration.GetSection("Auth").Get<AuthOptions>() ?? new AuthOptions();
 authOptions.SigningKeyPath = Path.Combine(builder.Environment.ContentRootPath, authOptions.SigningKeyPath);
+authOptions.PepperPath = Path.Combine(builder.Environment.ContentRootPath, authOptions.PepperPath);
+authOptions.PinAttempts = builder.Configuration.GetValue("RateLimit:PinAttempts", authOptions.PinAttempts);
+authOptions.PinWindowSec = builder.Configuration.GetValue("RateLimit:PinWindowSec", authOptions.PinWindowSec);
 var clubOptions = builder.Configuration.GetSection("Club").Get<ClubOptions>() ?? new ClubOptions();
 var proxyOptions = builder.Configuration.GetSection("Proxy").Get<ProxyOptions>() ?? new ProxyOptions();
 var agentOptions = builder.Configuration.GetSection("Agents").Get<AgentOptions>() ?? new AgentOptions();
 var sessionOptions = builder.Configuration.GetSection("Sessions").Get<SessionsOptions>() ?? new SessionsOptions();
 var realtimeOptions = builder.Configuration.GetSection("Realtime").Get<RealtimeOptions>() ?? new RealtimeOptions();
+var corsOptions = builder.Configuration.GetSection("Cors").Get<CorsOptions>() ?? new CorsOptions();
 
 // Policy seed (D-14): data/policy.json when the operator put one there, else the example policy shipped with the build.
 var policySeedPath = Path.Combine(builder.Environment.ContentRootPath, builder.Configuration["Catalog:PolicySeedPath"] ?? "data/policy.json");
@@ -35,6 +42,8 @@ if (!File.Exists(policySeedPath))
 {
     policySeedPath = Path.Combine(AppContext.BaseDirectory, "seed", "policies.example.json");
 }
+// Games seed (D-14): data/games.json; without it the catalog is left as it is.
+var gamesSeedPath = Path.Combine(builder.Environment.ContentRootPath, builder.Configuration["Catalog:GamesSeedPath"] ?? "data/games.json");
 var contractPath = Path.Combine(AppContext.BaseDirectory, builder.Configuration["Contracts:OpenApiPath"] ?? "contracts/openapi.yaml");
 
 builder.Services.ConfigureHttpJsonOptions(o => ServerJson.Apply(o.SerializerOptions));
@@ -46,6 +55,7 @@ builder.Services.AddSingleton(proxyOptions);
 builder.Services.AddSingleton(agentOptions);
 builder.Services.AddSingleton(sessionOptions);
 builder.Services.AddSingleton(realtimeOptions);
+builder.Services.AddSingleton(corsOptions);
 builder.Services.AddClubDatabase(connectionString);
 builder.Services.AddSingleton<ClubRepository>();
 builder.Services.AddSingleton<PcRepository>();
@@ -56,14 +66,17 @@ builder.Services.AddSingleton<CommandRepository>();
 builder.Services.AddSingleton<AgentSocketHub>();
 builder.Services.AddSingleton<CommandDispatcher>();
 builder.Services.AddSingleton<UserTokens>();
+builder.Services.AddSingleton<StaffTokens>();
 builder.Services.AddSingleton<Pushes>();
 builder.Services.AddSingleton<SessionService>();
 builder.Services.AddSingleton<SessionTickWorker>();
+builder.Services.AddSingleton<PcStatusWorker>();
 var workers = builder.Configuration.GetValue("Workers:Enabled", true);
 if (workers)
 {
     builder.Services.AddSingleton<HubLock>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<SessionTickWorker>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<PcStatusWorker>());
 }
 builder.Services.Configure<ForwardedHeadersOptions>(o =>
 {
@@ -93,10 +106,15 @@ var clubs = app.Services.GetRequiredService<ClubRepository>();
 await clubs.EnsureAsync(clubOptions);
 await clubs.SeedPolicyAsync(JsonDefaults.Deserialize<Policy>(File.ReadAllText(policySeedPath))
     ?? throw new InvalidOperationException($"Policy seed {policySeedPath} is empty"));
+await CatalogSeed.ApplyAsync(app.Services.GetRequiredService<Npgsql.NpgsqlDataSource>(), gamesSeedPath, app.Services.GetRequiredService<TimeProvider>());
+var staffTokens = app.Services.GetRequiredService<StaffTokens>();
 if (builder.Configuration.GetValue("Seed:Dev", false))
 {
-    await DevSeed.SeedAsync(app.Services.GetRequiredService<Npgsql.NpgsqlDataSource>(), app.Services.GetRequiredService<TimeProvider>());
+    await DevSeed.SeedAsync(app.Services.GetRequiredService<Npgsql.NpgsqlDataSource>(), app.Services.GetRequiredService<TimeProvider>(), staffTokens);
 }
+
+// After the dev seed: its staff fills the table, so no owner PIN is generated in Development.
+await staffTokens.EnsureOwnerAsync(builder.Configuration["Club:OwnerPin"]);
 
 if (proxyOptions.ClientIpHeader.Length > 0)
 {
@@ -108,6 +126,7 @@ else if (proxyOptions.Trusted.Length > 0)
 }
 
 app.UseMiddleware<ApiErrorMiddleware>();
+app.UseMiddleware<CorsMiddleware>();
 app.UseWebSockets();
 app.UseRouting();
 app.UseMiddleware<AgentAuthMiddleware>();
@@ -118,6 +137,13 @@ app.MapPlayerAuthEndpoints();
 app.MapUserEndpoints();
 app.MapSessionEndpoints();
 app.MapWalletEndpoints();
+app.MapGameEndpoints();
+app.MapUpdateEndpoints();
+app.MapPcEndpoints();
+app.MapStaffEndpoints();
+app.MapCounterEndpoints();
+app.MapShiftEndpoints();
+app.MapPcAdminEndpoints();
 app.Map("/ws/agent", (HttpContext context, AgentSocketHub hub) => hub.HandleAsync(context));
 app.MapNotImplemented(ContractStatus.Load(contractPath), ContractStatus.Implemented);
 app.MapFallback("/api/v1/{**route}", context =>

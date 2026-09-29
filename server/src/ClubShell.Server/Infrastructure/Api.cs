@@ -1,5 +1,4 @@
 using System.Text.Json;
-using ClubShell.Contracts.Serialization;
 using ClubShell.Server.Auth;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Http.Metadata;
@@ -37,7 +36,8 @@ public static class Api
         });
 
     /// <summary>
-    /// A contract DTO from a JSON body, with <c>400 validation</c> <c>field</c>/<c>required</c> for each of
+    /// A contract DTO (or a hand-written admin request, which resolves by reflection through <see cref="ServerJson.Options"/>)
+    /// from a JSON body, with <c>400 validation</c> <c>field</c>/<c>required</c> for each of
     /// <paramref name="required"/> that is missing or null (the record binder would silently default it) and
     /// <c>reason=format</c> when a value does not parse.
     /// </summary>
@@ -58,7 +58,7 @@ public static class Api
 
         try
         {
-            return JsonDefaults.FromElement<T>(body) ?? throw ApiException.Validation("body", "format");
+            return body.Deserialize<T>(ServerJson.Options) ?? throw ApiException.Validation("body", "format");
         }
         catch (JsonException ex)
         {

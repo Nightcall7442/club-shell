@@ -50,7 +50,7 @@ public sealed class ErrorEnvelopeTests(ServerFixture server) : IClassFixture<Ser
         }
 
         using var response = await server.Http.SendAsync(request);
-        var body = await Contract.ReadErrorAsync(response, 501, "notImplemented", "notImplemented");
+        var body = await Contract.ReadErrorAsync(response, 400, "validation");
         var echoed = response.Headers.GetValues(ApiErrorWriter.TraceHeader).Single();
         Assert.True(Guid.TryParse(echoed, out _), echoed);
         Assert.Equal(echoed, body.GetProperty("error").GetProperty("traceId").GetString());

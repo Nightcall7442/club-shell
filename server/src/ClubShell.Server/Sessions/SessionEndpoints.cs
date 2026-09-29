@@ -101,7 +101,7 @@ public static class SessionEndpoints
 
         var effects = new SessionEffects();
         var result = await store.ExecuteHttpAsync(context, Principal(agent), keyRequired: true, body, async (c, tx) =>
-            new IdempotentResult(StatusCodes.Status200OK, JsonDefaults.ToElement(await sessions.ExtendAsync(c, tx, id, user.UserId, agent.Pc.Id, request.Minutes, request.TariffId, effects))));
+            new IdempotentResult(StatusCodes.Status200OK, JsonDefaults.ToElement((await sessions.ExtendAsync(c, tx, id, user.UserId, agent.Pc.Id, request.Minutes, request.TariffId, effects)).Session)));
         await sessions.PublishAsync(effects);
         return result;
     }

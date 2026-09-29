@@ -13,14 +13,15 @@ namespace ClubShell.Server.Infrastructure;
 /// and the MockServer demo expect of a fresh club — tariffs Standard 12 000 sum/h, VIP 20 000 sum/h and the package
 /// "Night Pack (5h)", client groups (staff −50 %, student −15 %, …) and the demo players alisher / dilnoza / bekzod
 /// (password <c>demo</c>, cards CARD-0001..0003) with their demo balances posted through the ledger. Ids are the mock's
-/// (<c>db.ts sid()</c>), so fixtures written against the mock keep working. Rows that exist are left alone.
-/// ponytail: the staff PINs 0000/1111 come with the staff tables' pepper in S4.
+/// (<c>db.ts sid()</c>), so fixtures written against the mock keep working. Staff as in the mock: owner "Владелец" PIN 0000,
+/// cashier "Кассир Азиз" PIN 1111; the mock's hall zones and top-up bonus tiers (5/10/15 % from 50 000/100 000/200 000 sum).
+/// Rows and settings keys that exist are left alone.
 /// </summary>
 public static class DevSeed
 {
     private static readonly Lazy<string> DemoPassword = new(() => Passwords.Hash("demo"));
 
-    public static async Task SeedAsync(NpgsqlDataSource db, TimeProvider clock)
+    public static async Task SeedAsync(NpgsqlDataSource db, TimeProvider clock, StaffTokens staff)
     {
         var now = clock.GetUtcNow();
         await using var c = await db.OpenConnectionAsync();
@@ -57,10 +58,37 @@ public static class DevSeed
             new { id = "student", name = "Школьник", discountPct = 15, color = "#A855F7" },
             new { id = "staff", name = "Сотрудник", discountPct = 50, color = "#3B82F6" },
         });
-        await c.ExecuteAsync(
-            "UPDATE clubs SET settings = settings || jsonb_build_object('groups', @groups::jsonb) WHERE id = @clubId AND settings -> 'groups' IS NULL",
-            new { clubId, groups },
-            tx);
+        var hall = JsonSerializer.Serialize(new[]
+        {
+            new { name = "Standard", color = "#22C55E" },
+            new { name = "VIP", color = "#F2B84B" },
+            new { name = "Bootcamp", color = "#9ADFFF" },
+        });
+        var tiers = JsonSerializer.Serialize(new[]
+        {
+            new { minAmount = 5_000_000, bonusPct = 5 },
+            new { minAmount = 10_000_000, bonusPct = 10 },
+            new { minAmount = 20_000_000, bonusPct = 15 },
+        });
+        foreach (var (key, value) in new[] { ("groups", groups), ("zones", hall), ("bonusTiers", tiers) })
+        {
+            await c.ExecuteAsync(
+                "UPDATE clubs SET settings = settings || jsonb_build_object(@key, @value::jsonb) WHERE id = @clubId AND settings -> @key IS NULL",
+                new { clubId, key, value },
+                tx);
+        }
+
+        foreach (var (id, name, role, pin) in new[] { ("owner", "Владелец", "owner", "0000"), ("cashier-1", "Кассир Азиз", "cashier", "1111") })
+        {
+            await c.ExecuteAsync(
+                """
+                INSERT INTO staff (id, network_id, club_id, name, role, pin_hmac, created_at, updated_at)
+                VALUES (@id, @networkId, @clubId, @name, @role, @hmac, @now, @now)
+                ON CONFLICT DO NOTHING
+                """,
+                new { id = Sid("staff:" + id), networkId, clubId, name, role, hmac = staff.PinHmac(pin), now },
+                tx);
+        }
 
         foreach (var (key, display, role, locale, card, balance) in new[]
         {

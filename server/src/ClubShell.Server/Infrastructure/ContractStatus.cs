@@ -4,7 +4,7 @@ using YamlDotNet.Serialization;
 namespace ClubShell.Server.Infrastructure;
 
 /// <summary>One operation of the vendored contract (<c>server/contracts/openapi.yaml</c>).</summary>
-public sealed record ContractOperation(string Method, string Path, string OperationId, string ServerStatus, AuthMode Auth);
+public sealed record ContractOperation(string Method, string Path, string OperationId, string ServerStatus, AuthMode Auth, bool OwnerOnly = false);
 
 /// <summary>
 /// The 501 table (DESIGN §1): every contract operation this server does not implement answers
@@ -19,7 +19,9 @@ public static class ContractStatus
     /// </summary>
     public static readonly IReadOnlySet<string> Implemented = new HashSet<string>(
         [.. Agents.AgentEndpoints.Operations, .. Auth.PlayerAuthEndpoints.Operations, .. Users.UserEndpoints.Operations,
-         .. Sessions.SessionEndpoints.Operations, .. Wallet.WalletEndpoints.Operations],
+         .. Sessions.SessionEndpoints.Operations, .. Wallet.WalletEndpoints.Operations, .. Games.GameEndpoints.Operations,
+         .. Updates.UpdateEndpoints.Operations, .. Agents.PcEndpoints.Operations, .. Admin.StaffEndpoints.Operations,
+         .. Admin.CounterEndpoints.Operations, .. Admin.ShiftEndpoints.Operations, .. Admin.PcAdminEndpoints.Operations],
         StringComparer.Ordinal);
 
     private static readonly string[] Methods = ["get", "put", "post", "delete", "patch"];
@@ -44,7 +46,9 @@ public static class ContractStatus
                         (string)path,
                         operation.TryGetValue("operationId", out var id) ? (string)id : "",
                         operation.TryGetValue("x-server-status", out var status) ? (string)status : "notImplemented",
-                        ModeOf(operation)));
+                        ModeOf(operation),
+                        // x-roles [owner]: a cashier gets 403 ownerOnly before the 501, as the implementation will answer.
+                        operation.TryGetValue("x-roles", out var roles) && roles is List<object> r && r.Cast<string>().SequenceEqual(["owner"])));
                 }
             }
         }
@@ -58,7 +62,7 @@ public static class ContractStatus
         foreach (var op in operations.Where(o => !implemented.Contains(o.OperationId)))
         {
             app.MapMethods("/api/v1" + op.Path, [op.Method], (RequestDelegate)(_ => throw ApiException.NotImplemented(op.OperationId)))
-                .WithMetadata(new AuthRequirement(op.Auth));
+                .WithMetadata(new AuthRequirement(op.Auth, op.OwnerOnly));
         }
     }
 

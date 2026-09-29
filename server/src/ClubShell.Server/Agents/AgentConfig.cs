@@ -15,6 +15,9 @@ public sealed class AgentOptions
 
     /// <summary><c>expiresAt</c> of every command v1 sends (§6.4).</summary>
     public int CommandTtlMin { get; set; } = 10;
+
+    /// <summary>How long <c>adminCommand</c> waits for the agent's ack before answering <c>timeout</c> (§6.4 step 4).</summary>
+    public int AckWaitSec { get; set; } = 30;
 }
 
 /// <summary><c>Sessions:*</c> (DESIGN §2.5): the agent config carries grace and the offline budget; the rest is billing (§5.10).</summary>
