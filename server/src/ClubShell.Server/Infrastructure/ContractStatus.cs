@@ -21,7 +21,11 @@ public static class ContractStatus
         [.. Agents.AgentEndpoints.Operations, .. Auth.PlayerAuthEndpoints.Operations, .. Users.UserEndpoints.Operations,
          .. Sessions.SessionEndpoints.Operations, .. Wallet.WalletEndpoints.Operations, .. Games.GameEndpoints.Operations,
          .. Updates.UpdateEndpoints.Operations, .. Agents.PcEndpoints.Operations, .. Admin.StaffEndpoints.Operations,
-         .. Admin.CounterEndpoints.Operations, .. Admin.ShiftEndpoints.Operations, .. Admin.PcAdminEndpoints.Operations],
+         .. Admin.CounterEndpoints.Operations, .. Admin.ShiftEndpoints.Operations, .. Admin.PcAdminEndpoints.Operations,
+         .. Admin.StaffAdminEndpoints.Operations, .. Admin.ClientEndpoints.Operations, .. Admin.PromoEndpoints.Operations,
+         .. Admin.TariffEndpoints.Operations, .. Admin.StockEndpoints.Operations, .. Admin.ClubSettingsEndpoints.Operations,
+         .. Admin.CatalogAdminEndpoints.Operations, .. Admin.HealthEndpoints.Operations, .. Admin.ControlEndpoints.Operations,
+         .. Admin.ReportsEndpoints.Operations],
         StringComparer.Ordinal);
 
     private static readonly string[] Methods = ["get", "put", "post", "delete", "patch"];

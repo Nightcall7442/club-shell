@@ -92,3 +92,53 @@ public sealed record AdminCashRequest(long? OpeningCash, long? ClosingCash);
 public sealed record AdminQuoteRequest(Guid? TariffId, Guid? PcId, int? Minutes, Guid? UserId);
 
 public sealed record AdminPcChange(string? Zone, int? Number, string? Device, string? Name, int? X, int? Y, bool? Maintenance);
+
+// Slice S5, part A: staff, clients, promo codes, tariffs, stock.
+public sealed record AdminStaffList(IReadOnlyList<AdminStaffMember> Items);
+
+public sealed record AdminStaffCreateResponse(string Id);
+
+/// <summary><c>AdminClient</c>: the user, the club profile and loyalty; <c>bonus</c> is always 0 (D-9), <c>telegram</c> is never sent.</summary>
+public sealed record AdminClient(
+    Guid Id, string Username, string DisplayName, string Role, Money Balance, Money Bonus, string? GroupId, string Note, bool Blacklisted,
+    string Phone, int? BirthYear, string? CardId, long Spent, int Visits, int Level, string LevelName);
+
+public sealed record AdminClientList(IReadOnlyList<AdminClient> Items);
+
+public sealed record AdminClientResponse(AdminClient Client);
+
+public sealed record AdminTransactionList(IReadOnlyList<Transaction> Items);
+
+public sealed record AdminPromoRedeemResponse(Money Balance);
+
+public sealed record AdminTariffList(IReadOnlyList<Tariff> Items);
+
+public sealed record AdminTariffResponse(Tariff Tariff);
+
+public sealed record AdminProductList(IReadOnlyList<Contracts.Shop.Product> Items, int LowAt);
+
+public sealed record AdminProductResponse(Contracts.Shop.Product Product);
+
+public sealed record AdminStaffCreateRequest(string? Name, string? Role, string? Pin);
+
+public sealed record AdminStaffUpdateRequest(string? Name, bool? Active, string? Pin);
+
+/// <summary><c>telegram</c> is prohibited: not a member, so the binder skips it (accepted and ignored).</summary>
+public sealed record AdminClientCreateRequest(
+    string? DisplayName, string? Username, string? Phone, int? BirthYear, string? GroupId, string? Password, string? CardId);
+
+public sealed record AdminClientUpdateRequest(string? DisplayName, string? GroupId, string? Note, string? Phone, int? BirthYear, bool? Blacklisted);
+
+public sealed record AdminClientCardRequest(string? CardId);
+
+public sealed record AdminClientPasswordRequest(string? Password);
+
+public sealed record AdminPromoRedeemRequest(Guid? UserId, string? Code);
+
+public sealed record AdminTariffInput(
+    string? Name, long? PricePerHour, int? MinMinutes, int? MaxMinutes, IReadOnlyList<string>? Zones, JsonElement? TimeWindows, bool? IsPackage,
+    int? PackageMinutes, long? PackagePrice);
+
+public sealed record AdminProductUpdateRequest(string? Title, long? Price, bool? InStock, int? StockQty);
+
+public sealed record AdminProductReceiveRequest(int? Qty);

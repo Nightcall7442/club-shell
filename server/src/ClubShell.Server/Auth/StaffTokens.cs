@@ -18,7 +18,7 @@ namespace ClubShell.Server.Auth;
 /// (<c>st_</c> + base64url), only its SHA-256 is stored; it lives <see cref="AuthOptions.StaffTokenSlidingHours"/> since its
 /// last use and at most <see cref="AuthOptions.StaffTokenAbsoluteDays"/>, and dies with logout or the staff member's
 /// deactivation (checked on every request). <c>ck_…</c> is the owner (synthetic "API key"), compared in constant time
-/// with <c>clubs.api_key</c> and never revoked by logout.
+/// with <c>clubs.api_key_hash</c> and never revoked by logout.
 /// </summary>
 public sealed class StaffTokens(NpgsqlDataSource db, AuthOptions options, TimeProvider clock, ILogger<StaffTokens> logger)
 {
@@ -171,17 +171,19 @@ public sealed class StaffTokens(NpgsqlDataSource db, AuthOptions options, TimePr
         await using var c = await db.OpenConnectionAsync();
         if (token.StartsWith("ck_", StringComparison.Ordinal))
         {
-            var clubs = await c.QueryAsync<(Guid Id, Guid NetworkId, string Key)>("SELECT id, network_id, api_key FROM clubs WHERE api_key IS NOT NULL");
-            var presented = Encoding.UTF8.GetBytes(token);
+            var clubs = await c.QueryAsync<(Guid Id, Guid NetworkId, byte[] Hash)>("SELECT id, network_id, api_key_hash FROM clubs WHERE api_key_hash IS NOT NULL");
+            var presented = ApiKeyHash(token);
+            StaffContext? found = null;
             foreach (var club in clubs)
             {
-                if (CryptographicOperations.FixedTimeEquals(presented, Encoding.UTF8.GetBytes(club.Key)))
+                // Every club is compared: no early exit that would time which one matched.
+                if (CryptographicOperations.FixedTimeEquals(presented, club.Hash))
                 {
-                    return new StaffContext(null, ApiKeyName, "owner", club.Id, club.NetworkId);
+                    found ??= new StaffContext(null, ApiKeyName, "owner", club.Id, club.NetworkId);
                 }
             }
 
-            return null;
+            return found;
         }
 
         var now = clock.GetUtcNow();
@@ -233,6 +235,55 @@ public sealed class StaffTokens(NpgsqlDataSource db, AuthOptions options, TimePr
         {
             logger.LogWarning("No staff yet: owner created with PIN {Pin}; change it in the console", pin);
         }
+    }
+
+    /// <summary>
+    /// The club API key (<c>adminApiKey</c>): the current <c>ck_&lt;32 hex&gt;</c>, created on first read (a fresh club has
+    /// none; the mock creates one with the club). Runs in the caller's transaction, which must hold the <c>clubs</c> row.
+    /// </summary>
+    public async Task<string> CurrentApiKeyAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid clubId)
+    {
+        var sealedKey = await c.ExecuteScalarAsync<byte[]?>("SELECT api_key_sealed FROM clubs WHERE id = @clubId", new { clubId }, tx);
+        return sealedKey is null ? await RotateApiKeyAsync(c, tx, clubId) : Unseal(sealedKey);
+    }
+
+    /// <summary>
+    /// A new club API key (<c>adminRotateApiKey</c>); the previous one stops at this commit, without a grace period
+    /// (D-6). Stored as an HMAC under the pepper for <see cref="ValidateAsync"/> and sealed (AES-GCM, key derived from the
+    /// pepper) for <see cref="CurrentApiKeyAsync"/>: never in plain text, never logged.
+    /// </summary>
+    public async Task<string> RotateApiKeyAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid clubId)
+    {
+        var key = "ck_" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(16));
+        await c.ExecuteAsync(
+            "UPDATE clubs SET api_key_hash = @hash, api_key_sealed = @sealed, updated_at = @now WHERE id = @clubId",
+            new { clubId, hash = ApiKeyHash(key), @sealed = Seal(key), now = clock.GetUtcNow() },
+            tx);
+        return key;
+    }
+
+    private byte[] ApiKeyHash(string key) => HMACSHA256.HashData(_pepper.Value, Encoding.UTF8.GetBytes("api-key:" + key));
+
+    /// <summary>The AES-256 key of the sealed API key: derived from the pepper, so a database dump alone does not reveal it.</summary>
+    private byte[] SealingKey() => HMACSHA256.HashData(_pepper.Value, "clubshell/api-key/seal/v1"u8);
+
+    /// <summary><c>nonce(12) ‖ ciphertext ‖ tag(16)</c>.</summary>
+    private byte[] Seal(string key)
+    {
+        var plain = Encoding.UTF8.GetBytes(key);
+        var box = new byte[12 + plain.Length + 16];
+        RandomNumberGenerator.Fill(box.AsSpan(0, 12));
+        using var aes = new AesGcm(SealingKey(), 16);
+        aes.Encrypt(box.AsSpan(0, 12), plain, box.AsSpan(12, plain.Length), box.AsSpan(12 + plain.Length));
+        return box;
+    }
+
+    private string Unseal(byte[] box)
+    {
+        var plain = new byte[box.Length - 28];
+        using var aes = new AesGcm(SealingKey(), 16);
+        aes.Decrypt(box.AsSpan(0, 12), box.AsSpan(12, plain.Length), box.AsSpan(12 + plain.Length), plain);
+        return Encoding.UTF8.GetString(plain);
     }
 
     private static byte[] Hash(string token) => SHA256.HashData(Encoding.UTF8.GetBytes(token));

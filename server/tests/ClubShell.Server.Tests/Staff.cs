@@ -73,5 +73,14 @@ public static class Staff
         return first;
     }
 
+    /// <summary>A fresh club API key <c>ck_…</c>: the owner rotates it (<c>adminRotateApiKey</c>).</summary>
+    public static async Task<string> ApiKeyAsync(ServerFixture server) =>
+        (await ExpectAsync(server, 200, HttpMethod.Post, "/club/api-key", await LoginAsync(server, OwnerPin), new { }))
+            .GetProperty("apiKey").GetString()!;
+
+    /// <summary>Removes the club API key (no <c>ck_</c> is accepted until the owner reads or rotates one).</summary>
+    public static Task ClearApiKeyAsync(ServerFixture server) =>
+        Players.ExecuteAsync(server, "UPDATE clubs SET api_key_hash = NULL, api_key_sealed = NULL");
+
     public static StringContent JsonBody(object body) => new(body as string ?? JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
 }

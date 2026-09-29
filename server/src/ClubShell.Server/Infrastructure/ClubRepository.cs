@@ -31,13 +31,18 @@ public sealed class ClubOptions
     public bool GuestLogin { get; set; } = true;
 }
 
-/// <summary>What the agent surface reads of a club: name for <c>shell.club</c> and the three versions (DESIGN §5.9).</summary>
+/// <summary>What the agent surface reads of a club: <c>shell.club</c> and the three versions (DESIGN §5.9).</summary>
 public sealed class ClubAgentView
 {
     public string Name { get; init; } = "";
     public int ConfigVersion { get; init; }
     public int CatalogVersion { get; init; }
     public int PolicyVersion { get; init; }
+    public string TimeZone { get; init; } = "Asia/Tashkent";
+    public string? Settings { get; init; }
+
+    /// <summary>Branding, the banners live on the club's local date and the rules (<see cref="Agents.AgentConfig.ShellClubOf"/>).</summary>
+    public ShellClub Club { get; set; } = new();
 }
 
 public sealed class ClubRepository(NpgsqlDataSource db, TimeProvider clock)
@@ -85,8 +90,10 @@ public sealed class ClubRepository(NpgsqlDataSource db, TimeProvider clock)
     public async Task<ClubAgentView> GetAgentViewAsync(Guid clubId)
     {
         await using var c = await db.OpenConnectionAsync();
-        return await c.QuerySingleAsync<ClubAgentView>(
-            "SELECT name, config_version, catalog_version, policy_version FROM clubs WHERE id = @clubId", new { clubId });
+        var view = await c.QuerySingleAsync<ClubAgentView>(
+            "SELECT name, config_version, catalog_version, policy_version, time_zone, settings::text AS settings FROM clubs WHERE id = @clubId", new { clubId });
+        view.Club = Agents.AgentConfig.ShellClubOf(view.Name, view.Settings, DateOnly.FromDateTime(ClubTime.Local(clock.GetUtcNow(), view.TimeZone)));
+        return view;
     }
 
     /// <summary>The stored policy document (<c>version</c> = <c>policy_version</c>), or null before the first seed.</summary>

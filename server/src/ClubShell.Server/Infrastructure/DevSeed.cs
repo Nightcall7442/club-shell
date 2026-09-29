@@ -1,6 +1,9 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using ClubShell.Contracts.Shop;
+using ClubShell.Contracts.Wallet;
+using ClubShell.Server.Admin;
 using ClubShell.Server.Auth;
 using ClubShell.Server.Wallet;
 using Dapper;
@@ -14,14 +17,16 @@ namespace ClubShell.Server.Infrastructure;
 /// "Night Pack (5h)", client groups (staff −50 %, student −15 %, …) and the demo players alisher / dilnoza / bekzod
 /// (password <c>demo</c>, cards CARD-0001..0003) with their demo balances posted through the ledger. Ids are the mock's
 /// (<c>db.ts sid()</c>), so fixtures written against the mock keep working. Staff as in the mock: owner "Владелец" PIN 0000,
-/// cashier "Кассир Азиз" PIN 1111; the mock's hall zones and top-up bonus tiers (5/10/15 % from 50 000/100 000/200 000 sum).
-/// Rows and settings keys that exist are left alone.
+/// cashier "Кассир Азиз" PIN 1111; the mock's hall zones and top-up bonus tiers (5/10/15 % from 50 000/100 000/200 000 sum);
+/// the mock's twelve shop products with their stock and its promo code WELCOME (bonus 10 000 sum, 100 uses).
+/// Rows and settings keys that exist are left alone. <c>Seed:DevPcs</c> adds twelve hall seats (approved, just seen) for
+/// the admin e2e; the e2e server also raises <c>Agents:OfflineAfterSec</c> so that they stay free with no agent behind them.
 /// </summary>
 public static class DevSeed
 {
     private static readonly Lazy<string> DemoPassword = new(() => Passwords.Hash("demo"));
 
-    public static async Task SeedAsync(NpgsqlDataSource db, TimeProvider clock, StaffTokens staff)
+    public static async Task SeedAsync(NpgsqlDataSource db, TimeProvider clock, StaffTokens staff, bool seats = false)
     {
         var now = clock.GetUtcNow();
         await using var c = await db.OpenConnectionAsync();
@@ -111,6 +116,53 @@ public static class DevSeed
                 await c.ExecuteAsync("INSERT INTO wallets (user_id, network_id, updated_at) VALUES (@id, @networkId, @now)", new { id, networkId, now }, tx);
                 await Ledger.PostAsync(c, tx, id, allowOverdraft: false, now, new LedgerLine("adjustment", balance, "Демо-баланс", clubId));
             }
+        }
+
+        foreach (var (slug, title, category, price, stock, tags) in new (string, string, ProductCategory, long, int?, string[])[]
+        {
+            ("cola", "Coca-Cola 0.5L", ProductCategory.Drink, 800_000, 48, ["cold", "popular"]),
+            ("redbull", "Red Bull 0.25L", ProductCategory.Drink, 1_800_000, 20, ["energy"]),
+            ("water", "Still water 0.5L", ProductCategory.Drink, 400_000, 100, ["cold"]),
+            ("americano", "Americano", ProductCategory.Drink, 1_200_000, null, ["hot", "coffee"]),
+            ("lays", "Lay's Crab 90g", ProductCategory.Snack, 1_000_000, 30, ["chips"]),
+            ("snickers", "Snickers", ProductCategory.Snack, 700_000, 0, ["chocolate"]),
+            ("popcorn", "Popcorn (salted)", ProductCategory.Snack, 900_000, 15, ["popular"]),
+            ("lavash", "Lavash with chicken", ProductCategory.Food, 2_800_000, 12, ["hot", "popular"]),
+            ("burger", "Club Burger", ProductCategory.Food, 3_200_000, 8, ["hot"]),
+            ("somsa", "Somsa (beef)", ProductCategory.Food, 800_000, 25, ["hot", "local"]),
+            ("headset", "Headset rental (session)", ProductCategory.Service, 1_000_000, null, ["rental"]),
+            ("tshirt", "Club T-shirt", ProductCategory.Merch, 12_000_000, 5, ["merch"]),
+        })
+        {
+            await ProductSeed.InsertAsync(c, tx, clubId, new Product(
+                Sid("product:" + slug), title, category, Money.Uzs(price), $"https://picsum.photos/seed/product-{slug}/400/400", stock is null or > 0, stock, tags), now);
+        }
+
+        await c.ExecuteAsync(
+            """
+            INSERT INTO promo_codes (id, club_id, code, kind, value, uses_left, created_at)
+            SELECT @id, @clubId, 'WELCOME', 'bonus', 1000000, 100, @now
+            WHERE NOT EXISTS (SELECT 1 FROM promo_codes WHERE club_id = @clubId AND upper(code) = 'WELCOME' AND deleted_at IS NULL)
+            ON CONFLICT DO NOTHING
+            """,
+            new { id = Sid("promo:WELCOME"), clubId, now },
+            tx);
+
+        for (var n = 1; seats && n <= 12; n++)
+        {
+            await c.ExecuteAsync(
+                """
+                INSERT INTO pcs (id, club_id, number, name, zone, x, y, approved, last_heartbeat_at, created_at, updated_at)
+                SELECT @id, @clubId, @n, @name, @zone, @x, @y, true, @now, @now, @now
+                WHERE NOT EXISTS (SELECT 1 FROM pcs WHERE club_id = @clubId AND number = @n AND deleted_at IS NULL)
+                ON CONFLICT DO NOTHING
+                """,
+                new
+                {
+                    id = Sid("pc:" + n), clubId, n, name = $"PC-{n:00}", zone = n <= 8 ? "Standard" : n <= 10 ? "VIP" : "Bootcamp",
+                    x = ((n - 1) % 6) * 120 + 60, y = ((n - 1) / 6) * 120 + 60, now,
+                },
+                tx);
         }
 
         await tx.CommitAsync();

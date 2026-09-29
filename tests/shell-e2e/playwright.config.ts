@@ -1,5 +1,6 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig, devices } from '@playwright/test';
 
 const baseURL = 'http://localhost:1420';
@@ -19,12 +20,9 @@ const chromium = {
  * ADMIN_SERVER=real: the admin project runs against the real central server (docs/server/DESIGN.md §10.c) instead of the
  * mock: `dotnet run` in Development (Seed:Dev — staff 0000/1111, demo tariffs and players) on ADMIN_SERVER_DB, an Npgsql
  * connection string to a throwaway empty database the server migrates, with CORS for the console. The kiosk dev server is
- * not started (run `--project admin`). Until slice S5 the server has the counter only, so just the parts
- * "вход/карта/смена" (login/map/shift) run; S5 drops the grep.
+ * not started (run `--project admin`). Since slice S5 the whole admin spec runs against it.
  */
 const realServer = process.env['ADMIN_SERVER'] === 'real';
-const REAL_SERVER_TESTS =
-  /wrong PIN|owner sees every section|cashier sees only the counter|language switch|shift opens/;
 const adminDb = process.env['ADMIN_SERVER_DB'];
 if (realServer && !adminDb) {
   throw new Error(
@@ -62,6 +60,14 @@ const realAdminApi = {
     ASPNETCORE_ENVIRONMENT: 'Development',
     ConnectionStrings__Club: adminDb ?? '',
     Seed__Dev: 'true',
+    // Twelve hall seats with no agent behind them: the seed marks them just seen and the window below keeps them free.
+    Seed__DevPcs: 'true',
+    Agents__OfflineAfterSec: '31536000',
+    // The console spec registers a PC itself (POST /agents/register with X-Club-Key: e2e) and expects it to be usable at once.
+    Club__EnrollmentKey: 'e2e',
+    Club__AutoApprovePcs: 'true',
+    // Cs2 (with player-settings paths) and Rust (without): what the catalog test edits.
+    Catalog__GamesSeedPath: fileURLToPath(new URL('./admin/games.e2e.json', import.meta.url)),
     Cors__AllowedOrigins__0: ADMIN_URL,
     Auth__SigningKeyPath: join(tmpdir(), `clubshell-admin-e2e-${process.pid}`, 'jwt-signing-key.pem'),
     Auth__PepperPath: join(tmpdir(), `clubshell-admin-e2e-${process.pid}`, 'pin-pepper.key'),
@@ -97,7 +103,6 @@ export default defineConfig({
     {
       name: 'admin',
       testMatch: /admin\/.*\.spec\.ts$/,
-      ...(realServer ? { grep: REAL_SERVER_TESTS } : {}),
       use: { ...chromium, baseURL: ADMIN_URL },
     },
   ],

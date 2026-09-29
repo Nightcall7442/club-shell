@@ -35,6 +35,7 @@ var agentOptions = builder.Configuration.GetSection("Agents").Get<AgentOptions>(
 var sessionOptions = builder.Configuration.GetSection("Sessions").Get<SessionsOptions>() ?? new SessionsOptions();
 var realtimeOptions = builder.Configuration.GetSection("Realtime").Get<RealtimeOptions>() ?? new RealtimeOptions();
 var corsOptions = builder.Configuration.GetSection("Cors").Get<CorsOptions>() ?? new CorsOptions();
+var maintenanceOptions = builder.Configuration.GetSection("Maintenance").Get<MaintenanceOptions>() ?? new MaintenanceOptions();
 
 // Policy seed (D-14): data/policy.json when the operator put one there, else the example policy shipped with the build.
 var policySeedPath = Path.Combine(builder.Environment.ContentRootPath, builder.Configuration["Catalog:PolicySeedPath"] ?? "data/policy.json");
@@ -44,6 +45,8 @@ if (!File.Exists(policySeedPath))
 }
 // Games seed (D-14): data/games.json; without it the catalog is left as it is.
 var gamesSeedPath = Path.Combine(builder.Environment.ContentRootPath, builder.Configuration["Catalog:GamesSeedPath"] ?? "data/games.json");
+// Products seed (D-14): data/products.json; without it the products are left as they are.
+var productsSeedPath = Path.Combine(builder.Environment.ContentRootPath, builder.Configuration["Catalog:ProductsSeedPath"] ?? "data/products.json");
 var contractPath = Path.Combine(AppContext.BaseDirectory, builder.Configuration["Contracts:OpenApiPath"] ?? "contracts/openapi.yaml");
 
 builder.Services.ConfigureHttpJsonOptions(o => ServerJson.Apply(o.SerializerOptions));
@@ -56,6 +59,7 @@ builder.Services.AddSingleton(agentOptions);
 builder.Services.AddSingleton(sessionOptions);
 builder.Services.AddSingleton(realtimeOptions);
 builder.Services.AddSingleton(corsOptions);
+builder.Services.AddSingleton(maintenanceOptions);
 builder.Services.AddClubDatabase(connectionString);
 builder.Services.AddSingleton<ClubRepository>();
 builder.Services.AddSingleton<PcRepository>();
@@ -69,14 +73,24 @@ builder.Services.AddSingleton<UserTokens>();
 builder.Services.AddSingleton<StaffTokens>();
 builder.Services.AddSingleton<Pushes>();
 builder.Services.AddSingleton<SessionService>();
+builder.Services.AddSingleton<AutomationService>();
+builder.Services.AddSingleton<WebhookClient>();
 builder.Services.AddSingleton<SessionTickWorker>();
 builder.Services.AddSingleton<PcStatusWorker>();
+builder.Services.AddSingleton<HealthWorker>();
+builder.Services.AddSingleton<ClubTickWorker>();
+builder.Services.AddSingleton<WebhookWorker>();
+builder.Services.AddSingleton<MaintenanceWorker>();
 var workers = builder.Configuration.GetValue("Workers:Enabled", true);
 if (workers)
 {
     builder.Services.AddSingleton<HubLock>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<SessionTickWorker>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<PcStatusWorker>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<HealthWorker>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<ClubTickWorker>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<WebhookWorker>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<MaintenanceWorker>());
 }
 builder.Services.Configure<ForwardedHeadersOptions>(o =>
 {
@@ -107,10 +121,12 @@ await clubs.EnsureAsync(clubOptions);
 await clubs.SeedPolicyAsync(JsonDefaults.Deserialize<Policy>(File.ReadAllText(policySeedPath))
     ?? throw new InvalidOperationException($"Policy seed {policySeedPath} is empty"));
 await CatalogSeed.ApplyAsync(app.Services.GetRequiredService<Npgsql.NpgsqlDataSource>(), gamesSeedPath, app.Services.GetRequiredService<TimeProvider>());
+await ProductSeed.ApplyAsync(app.Services.GetRequiredService<Npgsql.NpgsqlDataSource>(), productsSeedPath, app.Services.GetRequiredService<TimeProvider>());
 var staffTokens = app.Services.GetRequiredService<StaffTokens>();
 if (builder.Configuration.GetValue("Seed:Dev", false))
 {
-    await DevSeed.SeedAsync(app.Services.GetRequiredService<Npgsql.NpgsqlDataSource>(), app.Services.GetRequiredService<TimeProvider>(), staffTokens);
+    await DevSeed.SeedAsync(app.Services.GetRequiredService<Npgsql.NpgsqlDataSource>(), app.Services.GetRequiredService<TimeProvider>(), staffTokens,
+        seats: builder.Configuration.GetValue("Seed:DevPcs", false));
 }
 
 // After the dev seed: its staff fills the table, so no owner PIN is generated in Development.
@@ -144,6 +160,17 @@ app.MapStaffEndpoints();
 app.MapCounterEndpoints();
 app.MapShiftEndpoints();
 app.MapPcAdminEndpoints();
+app.MapStaffAdminEndpoints();
+app.MapClientEndpoints();
+app.MapPromoEndpoints();
+app.MapTariffEndpoints();
+app.MapStockEndpoints();
+app.MapClubSettingsEndpoints();
+app.MapCatalogAdminEndpoints();
+app.MapHealthEndpoints();
+app.MapControlEndpoints();
+app.MapReportsEndpoints();
+app.MapNetworkEndpoints();
 app.Map("/ws/agent", (HttpContext context, AgentSocketHub hub) => hub.HandleAsync(context));
 app.MapNotImplemented(ContractStatus.Load(contractPath), ContractStatus.Implemented);
 app.MapFallback("/api/v1/{**route}", context =>

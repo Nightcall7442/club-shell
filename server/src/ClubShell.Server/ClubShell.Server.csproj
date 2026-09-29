@@ -8,6 +8,8 @@
   <ItemGroup>
     <PackageReference Include="Dapper" />
     <PackageReference Include="FluentMigrator.Runner.Postgres" />
+    <!-- JSON Schema of the contract for the settings documents of the console (PATCH /admin/club, DESIGN §4.2). -->
+    <PackageReference Include="JsonSchema.Net" />
     <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
     <PackageReference Include="Npgsql" />
     <PackageReference Include="YamlDotNet" />
@@ -19,6 +21,7 @@
 
   <ItemGroup>
     <Content Include="../../contracts/openapi.yaml" Link="contracts/openapi.yaml" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../contracts/openapi.json" Link="contracts/openapi.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <!-- Default policy seed (DESIGN §11 S1, D-14) when data/policy.json is absent. -->
     <Content Include="../../../config/policies.example.json" Link="seed/policies.example.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>

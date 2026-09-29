@@ -3,11 +3,14 @@
  * (playwright.config.ts, project `admin`). Seeded staff: owner PIN `0000`, cashier PIN `1111`. Tests share one
  * database and run in file order, so each one sets up what it checks instead of relying on another's leftovers.
  */
+import { createHash, createHmac } from 'node:crypto';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 const API = 'http://localhost:8091/api/v1';
 const OWNER_PIN = '0000';
 const CASHIER_PIN = '1111';
+/** ADMIN_SERVER=real: the console runs against the central server (playwright.config.ts), not the mock. */
+const REAL = process.env['ADMIN_SERVER'] === 'real';
 
 async function signIn(page: Page, pin: string): Promise<void> {
   await page.goto('/');
@@ -26,6 +29,22 @@ async function tokenFor(request: APIRequestContext, pin: string): Promise<string
 
 function auth(token: string): Record<string, string> {
   return { Authorization: `Bearer ${token}` };
+}
+
+/** The Agent's request signature (docs/SERVER_API.md §2.2): HMAC-SHA256 over timestamp + METHOD + target + sha256(body). The mock ignores it. */
+function signature(
+  secretB64: string | undefined,
+  method: string,
+  target: string,
+  body: string,
+): Record<string, string> {
+  if (!secretB64) return {};
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const bodyHash = createHash('sha256').update(body).digest('hex');
+  const value = createHmac('sha256', Buffer.from(secretB64, 'base64'))
+    .update(timestamp + method + target + bodyHash)
+    .digest('hex');
+  return { 'X-Timestamp': timestamp, 'X-Signature': value };
 }
 
 const nav = (page: Page) => page.getByRole('navigation');
@@ -210,6 +229,10 @@ test('cashier control flags a cash shortfall and quick refunds, and only the own
 });
 
 test('PC health opens repair tickets from telemetry; staff take them and close them', async ({ page }) => {
+  test.skip(
+    REAL,
+    "The tickets come from the mock's telemetry simulator; the server derives them from Agent telemetry (HealthTests).",
+  );
   // The mock plays the Agents' telemetry: PC-15's GPU runs hot, PC-07 heats up day by day, PC-19 lost frames.
   await signIn(page, CASHIER_PIN);
   await expect(page.locator('[aria-label="Нужен ремонт"]').first()).toBeVisible();
@@ -241,6 +264,7 @@ test('the owner sees and edits where a game keeps player settings', async ({ pag
 });
 
 test('the owner sees every club of the network and adds one', async ({ page, request }) => {
+  test.skip(REAL, 'The club network answers 501 on the central server (DESIGN D-19).');
   const cashier = await tokenFor(request, CASHIER_PIN);
   expect((await request.get(`${API}/admin/network`, { headers: auth(cashier) })).status()).toBe(403);
 
@@ -352,20 +376,40 @@ test('a client registered at the counter signs in on a PC with the issued passwo
       hwid,
       machineName: 'E2E-PC',
       agentVersion: '1.0.0',
-      hardware: {},
+      hardware: {
+        cpu: { model: 'E2E CPU', cores: 4, threads: 8 },
+        gpu: [],
+        ramMb: 8192,
+        disks: [],
+        monitors: [],
+        network: { mac: '00:00:00:00:00:99', ip: '10.0.0.99', adapter: 'Ethernet' },
+        os: { version: '10.0.22631', build: '22631' },
+        peripherals: [],
+      },
       ipAddress: '10.0.0.99',
-      macAddress: '00-00-00-00-00-99',
+      macAddress: '00:00:00:00:00:99',
     },
   });
   expect(reg.ok()).toBeTruthy();
-  const { pcId, accessToken } = (await reg.json()) as { pcId: string; accessToken: string };
-  const login = async (data: Record<string, string>): Promise<number> =>
-    (
+  const { pcId, accessToken, signingSecret } = (await reg.json()) as {
+    pcId: string;
+    accessToken: string;
+    signingSecret?: string;
+  };
+  const loginTarget = new URL(`${API}/auth/login`).pathname;
+  const login = async (data: Record<string, string>): Promise<number> => {
+    const body = JSON.stringify({ pcId, hwid, ...data });
+    return (
       await request.post(`${API}/auth/login`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-        data: { pcId, hwid, ...data },
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          ...signature(signingSecret, 'POST', loginTarget, body),
+        },
+        data: body,
       })
     ).status();
+  };
   expect(await login({ kind: 'password', username, password: first })).toBe(200);
   expect(await login({ kind: 'password', username, password: 'not-the-one' })).toBe(401);
   expect(await login({ kind: 'card', cardId: `CARD-${username}` })).toBe(200);
