@@ -5,6 +5,7 @@ using ClubShell.Contracts.Serialization;
 using ClubShell.Contracts.Sessions;
 using ClubShell.Contracts.Wallet;
 using ClubShell.Server.Agents;
+using ClubShell.Server.Auth;
 using ClubShell.Server.Infrastructure;
 using ClubShell.Server.Realtime;
 using ClubShell.Server.Sessions.Billing;
@@ -240,10 +241,11 @@ public sealed class SessionService(NpgsqlDataSource db, TimeProvider clock, Sess
     /// <summary>
     /// <c>POST /sessions</c> in the idempotency transaction (§5.2, §5.3); with <paramref name="replay"/> the offline replay
     /// of §5.11: priced at <c>startedAt</c>, overdraft instead of 402, of the rules only the player's (exists, not banned or
-    /// blacklisted), and a session this PC already has under <c>clientSessionId</c> is returned as it is.
+    /// blacklisted), and a session this PC already has under <c>clientSessionId</c> is returned as it is. With
+    /// <paramref name="staffId"/> it is the cashier's <c>adminOpenSession</c> (origin <c>cashier</c>): the same rules and price.
     /// </summary>
     public async Task<Session> CreateAsync(
-        NpgsqlConnection c, NpgsqlTransaction tx, PcRow pc, SessionCreateRequest request, bool replay, SessionEffects effects)
+        NpgsqlConnection c, NpgsqlTransaction tx, PcRow pc, SessionCreateRequest request, bool replay, SessionEffects effects, StaffContext? staff = null)
     {
         var now = clock.GetUtcNow();
         if (replay && await c.QuerySingleOrDefaultAsync<SessionRow>(
@@ -251,6 +253,15 @@ public sealed class SessionService(NpgsqlDataSource db, TimeProvider clock, Sess
                 new { pcId = pc.Id, id = request.ClientSessionId }, tx) is { } known)
         {
             return known.ToWire(now);
+        }
+
+        // The caller checked the PC before this transaction; adminDeletePc may have soft-deleted it since (it holds the row
+        // FOR UPDATE, so this waits for its commit and then sees deleted_at). KEY SHARE keeps a delete from starting until
+        // this session is committed, which it then finds and refuses with pcBusy.
+        if (await c.ExecuteScalarAsync<int?>(
+                "SELECT 1 FROM pcs WHERE id = @Id AND club_id = @ClubId AND deleted_at IS NULL FOR KEY SHARE", new { pc.Id, pc.ClubId }, tx) is null)
+        {
+            throw ApiException.NotFound("pc");
         }
 
         // The replay records a game the agent already let happen (§5.11): a tariff deleted and a PC put in maintenance or
@@ -326,16 +337,16 @@ public sealed class SessionService(NpgsqlDataSource db, TimeProvider clock, Sess
                 """
                 INSERT INTO sessions (id, club_id, pc_id, user_id, tariff_id, state, is_prepaid, origin, started_at, purchased_sec,
                                       running_since, ends_at, last_transition_at, price_per_hour_snapshot, day_pct, discount_pct,
-                                      discount_reason, charged_total, client_session_id, created_at, updated_at)
+                                      discount_reason, charged_total, client_session_id, created_by_staff_id, created_at, updated_at)
                 VALUES (@Id, @ClubId, @PcId, @UserId, @TariffId, 'active', @IsPrepaid, @origin, @StartedAt, @PurchasedSec,
                         @RunningSince, @EndsAt, @LastTransitionAt, @PricePerHourSnapshot, @DayPct, @DiscountPct,
-                        @reason, @ChargedTotal, @ClientSessionId, @now, @now)
+                        @reason, @ChargedTotal, @ClientSessionId, @staffId, @now, @now)
                 """,
                 new
                 {
-                    row.Id, row.ClubId, row.PcId, row.UserId, row.TariffId, row.IsPrepaid, origin = replay ? "offline" : "kiosk",
+                    row.Id, row.ClubId, row.PcId, row.UserId, row.TariffId, row.IsPrepaid, origin = replay ? "offline" : staff is null ? "kiosk" : "cashier",
                     row.StartedAt, row.PurchasedSec, row.RunningSince, row.EndsAt, row.LastTransitionAt, row.PricePerHourSnapshot,
-                    row.DayPct, row.DiscountPct, reason = quote.DiscountReason, row.ChargedTotal, row.ClientSessionId, now,
+                    row.DayPct, row.DiscountPct, reason = quote.DiscountReason, row.ChargedTotal, row.ClientSessionId, staffId = staff?.StaffId, now,
                 },
                 tx);
         }
@@ -349,7 +360,7 @@ public sealed class SessionService(NpgsqlDataSource db, TimeProvider clock, Sess
         if (row.ChargedTotal > 0)
         {
             await Ledger.PostAsync(c, tx, buyer.Id, allowOverdraft: replay, now, new LedgerLine(
-                "charge", -row.ChargedTotal, $"Сеанс {minutes} мин · {tariff.Name}", club.Id, row.Id, pc.Id, Meta: quote));
+                "charge", -row.ChargedTotal, $"Сеанс {minutes} мин · {tariff.Name}", club.Id, row.Id, pc.Id, StaffId: staff?.StaffId, Meta: quote));
             effects.Wallets.Add(buyer.Id);
         }
 
@@ -423,10 +434,14 @@ public sealed class SessionService(NpgsqlDataSource db, TimeProvider clock, Sess
 
     /// <summary>
     /// <c>POST /sessions/{id}/extend</c> in the idempotency transaction (§5.6): prepaid only, the full rules of §5.2 for the
-    /// (possibly new) tariff, priced now, charged at once. The cashier's extend (S4) also queues <c>extendSession</c>.
+    /// (possibly new) tariff, priced now, charged at once; returns the session and the charge. The cashier's extend
+    /// (<paramref name="staff"/>, S4) also queues <c>extendSession {charge:false}</c>: the agent rereads the session instead
+    /// of charging again (§5.6). Both are <c>extend = online</c> in the charge's meta, so a late agent <c>extended</c> event
+    /// for the same minutes is not charged twice (§5.12).
     /// </summary>
-    public async Task<Session> ExtendAsync(
-        NpgsqlConnection c, NpgsqlTransaction tx, Guid sessionId, Guid userId, Guid pcId, int minutes, Guid? tariffId, SessionEffects effects)
+    public async Task<(Session Session, long Charged)> ExtendAsync(
+        NpgsqlConnection c, NpgsqlTransaction tx, Guid sessionId, Guid userId, Guid pcId, int minutes, Guid? tariffId, SessionEffects effects,
+        StaffContext? staff = null)
     {
         var now = clock.GetUtcNow();
         var s = await OwnedAsync(c, tx, sessionId, userId, pcId);
@@ -463,7 +478,8 @@ public sealed class SessionService(NpgsqlDataSource db, TimeProvider clock, Sess
         if (quote.Total > 0)
         {
             await Ledger.PostAsync(c, tx, s.UserId, allowOverdraft: false, now, new LedgerLine(
-                "charge", -quote.Total, $"Продление +{minutes} мин · {tariff.Name}", club.Id, s.Id, s.PcId, Meta: new { quote, extend = "online" }));
+                "charge", -quote.Total, $"Продление +{minutes} мин · {tariff.Name}", club.Id, s.Id, s.PcId, StaffId: staff?.StaffId,
+                Meta: new { quote, extend = "online" }));
             effects.Wallets.Add(s.UserId);
         }
 
@@ -472,7 +488,12 @@ public sealed class SessionService(NpgsqlDataSource db, TimeProvider clock, Sess
         await SaveAsync(c, tx, s, now);
         var session = s.ToWire(now);
         effects.Sessions.Add(session);
-        return session;
+        if (staff is not null)
+        {
+            effects.Commands.Add((s.ClubId, s.PcId, NewCommand.ExtendSession(new ExtendSessionCommand(s.Id, minutes, Charge: false))));
+        }
+
+        return (session, quote.Total);
     }
 
     /// <summary>

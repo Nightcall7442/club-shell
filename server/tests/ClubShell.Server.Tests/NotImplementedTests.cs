@@ -18,8 +18,9 @@ public sealed class NotImplementedTests(ServerFixture server) : IClassFixture<Se
         var (agent, _) = await Players.SignedInAsync(server);
         Assert.Equal(102, Contract.Operations.Count);
 
-        // Exactly the operations of the slices done so far (S1: the eight agent operations; S2: 18 player operations), each
-        // required by the contract, plus getBalance, which S2 implements beyond it (DESIGN §1, §12.2 item 1).
+        // Exactly the operations of the slices done so far (S1: the eight agent operations; S2: 18 player operations; S3: five
+        // catalog/update/PC operations; S4: 17 cashier operations), each required by the contract, plus getBalance (S2) and
+        // reportAntiCheat (S3), which the server implements beyond it (DESIGN §1, §12.2 item 1).
         string[] s1 = ["register", "refresh", "heartbeat", "sendTelemetry", "getConfig", "getPolicies", "getCommands", "ackCommand"];
         string[] s2 =
         [
@@ -27,8 +28,17 @@ public sealed class NotImplementedTests(ServerFixture server) : IClassFixture<Se
             "getUserAchievements", "getUserLoyalty", "getCurrentSession", "createSession", "pauseSession", "resumeSession",
             "endSession", "extendSession", "postSessionEvents", "getTariffs",
         ];
-        Assert.Equal(s1.Concat(s2).Append("getBalance").Order(), ContractStatus.Implemented.Order());
-        Assert.All(s1.Concat(s2), id => Assert.Equal("required", Contract.Operations.Single(o => o.OperationId == id).Operation.GetProperty("x-server-status").GetString()));
+        string[] s3 = ["getGames", "getGame", "sendLaunchReport", "getUpdateManifest", "getPc"];
+        string[] s4 =
+        [
+            "adminLogin", "adminLogout", "adminMe", "adminOverview", "adminOpenSession", "adminExtend", "adminEnd", "adminTopUp",
+            "adminCommand", "adminShift", "adminOpenShift", "adminCloseShift", "adminQuote", "adminPcs", "adminAddPc", "adminUpdatePc",
+            "adminDeletePc",
+        ];
+        string[] required = [.. s1, .. s2, .. s3, .. s4];
+        Assert.Equal(required.Append("getBalance").Append("reportAntiCheat").Order(), ContractStatus.Implemented.Order());
+        var owner = await Staff.LoginAsync(server, Staff.OwnerPin);
+        Assert.All(required, id => Assert.Equal("required", Contract.Operations.Single(o => o.OperationId == id).Operation.GetProperty("x-server-status").GetString()));
 
         var pending = Contract.Operations.Where(o => !ContractStatus.Implemented.Contains(o.OperationId)).ToList();
         foreach (var op in pending)
@@ -42,7 +52,7 @@ public sealed class NotImplementedTests(ServerFixture server) : IClassFixture<Se
             var method = new HttpMethod(op.Method);
             var body = method == HttpMethod.Get || method == HttpMethod.Delete ? null : "{}";
 
-            using var request = Authenticated(op, agent, method, url, body);
+            using var request = Authenticated(op, agent, owner, method, url, body);
             using var response = await server.Http.SendAsync(request);
             var error = await response.Content.ReadAsStringAsync();
             Assert.True(501 == (int)response.StatusCode, $"{op.OperationId} {op.Method} {url} -> {(int)response.StatusCode} {error}");
@@ -50,11 +60,11 @@ public sealed class NotImplementedTests(ServerFixture server) : IClassFixture<Se
             Assert.False(response.Headers.Contains("Retry-After"), op.OperationId);
         }
 
-        Assert.Equal(75, pending.Count);
+        Assert.Equal(52, pending.Count);
     }
 
-    /// <summary>Credentials of the operation's contract <c>security</c>; agent routes also carry the signed-in player's token.</summary>
-    private static HttpRequestMessage Authenticated(ContractOp op, TestAgent agent, HttpMethod method, string url, string? body)
+    /// <summary>Credentials of the operation's contract <c>security</c>: agent routes also carry the signed-in player's token, staff routes the owner's.</summary>
+    private static HttpRequestMessage Authenticated(ContractOp op, TestAgent agent, string staffToken, HttpMethod method, string url, string? body)
     {
         var schemes = op.Operation.TryGetProperty("security", out var security)
             ? security.EnumerateArray().SelectMany(s => s.EnumerateObject().Select(p => p.Name)).ToHashSet()
@@ -77,7 +87,7 @@ public sealed class NotImplementedTests(ServerFixture server) : IClassFixture<Se
         }
         else if (schemes.Contains("staffBearer"))
         {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "staff-token");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", staffToken);
         }
 
         return request;

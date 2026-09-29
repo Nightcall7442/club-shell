@@ -407,7 +407,7 @@ X-Signature = lowercase hex( HMAC-SHA256( base64decode(signingSecret),
 |---|---|---|---|
 | agent | `sub` JWT | token bucket 600/мин, burst 100 | `429 rateLimited`, `Retry-After`, `details.retryAfterSec` |
 | register/refresh | IP | 30/мин | то же |
-| admin login | IP | 5 неудач за 300 с | то же (нужна правка контракта, OQ-4) |
+| admin login | IP (IPv6 — /64) | 5 неудач за 300 с | то же (нужна правка контракта, OQ-4) |
 | player login | (user, pc) | см. §3.4 | `401 badCredentials attemptsLeft=0` |
 
 ### 3.7 Аудит
@@ -531,7 +531,8 @@ X-Signature = lowercase hex( HMAC-SHA256( base64decode(signingSecret),
   {required, available}`.
 - `lifetime_spent` += |charge|, |purchase| и −= refund. Мок возвраты не учитывает (`mock/club.ts:419-427`).
 - **Смена:** каждая строка получает `shift_id` открытой смены. Писатель берёт `SELECT id FROM shifts … FOR SHARE`,
-  закрытие берёт `FOR UPDATE`, так что ни одна строка не проскочит мимо Z-отчёта.
+  закрытие берёт `FOR UPDATE`, так что строка не попадёт в смену после подсчёта Z-отчёта. Строка, пришедшая во время
+  закрытия, ждёт его и получает `shift_id NULL`, как строка без открытой смены (её учитывает флаг `noShift`, S5).
 - **X/Z-отчёт:** суммы по `shift_id` с группировкой по type/method. `expectedCash = opening_cash + Σ topUp` с
   `method='cash'`. Регулярки по описанию, как в `mock/club.ts:689`, нет.
 - **Провод:** `Transaction {id, userId, type, amount:Money, balanceAfter:Money, description, createdAt, ref}`
@@ -1019,7 +1020,9 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
 `accountPoolExhausted`, `antiCheatBlocked`, `agentOffline` (последний бывает только внутри `ack`), `timeout`,
 `protocolError`. Неизвестный маршрут `/api/v1/*` → `404 notFound details.route`. Некорректный JSON →
 `400 validation`. Не-JSON `Content-Type` у реализованной операции — тоже `400 validation`: эндпоинты принимают любой
-тип (`AcceptsMetadata */*`), иначе маршрутизация отбросила бы их и ответил бы fallback `404`.
+тип (`AcceptsMetadata */*`), иначе маршрутизация отбросила бы их и ответил бы fallback `404`. Ошибки тела целиком —
+`field=body` с `reason` из контракта (как в моке): `json` — не JSON, `parse` — `Content-Type` или размер, `schema` —
+тела нет или это не объект.
 
 ### 7.3 Трассировка и время
 
@@ -1187,6 +1190,10 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
   признанное неправильным (возврат по базе и т.п.). Каждая такая правка перечисляется в PR.
 - CI job `e2e-admin-real` на ubuntu + `postgres:18` запускается в S4 (частичный набор: map/shift) и в полном объёме
   в S5.
+- Как сделано в S4: базу создаёт не конфиг, а вызывающий — `ADMIN_SERVER_DB` (строка Npgsql к пустой одноразовой БД;
+  в CI её создаёт сервис `postgres:18` через `POSTGRES_DB`). В режиме `real` dev-сервер киоска не стартует (запуск
+  `--project admin`), а проект `admin` получает `grep` частей «вход/карта/смена» (5 тестов; S5 снимает `grep`).
+  Ключ JWT и pepper — во временном каталоге. Правок `console.spec.ts` не понадобилось.
 
 ### 10.d Паритет с MockServer
 
@@ -1339,6 +1346,10 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
 - **Выход (тесты):** `AgentHarness` S3: `GameLibrary` реального агента собирает каталог из 2+ страниц и на
   повторном старте получает 304; `ServerClient.GetPcAsync` возвращает `Pc` с `hwid` своего ПК; manifest → 204;
   `Coverage` = 5 операций S3 + `reportAntiCheat`.
+- **Отличие реализации:** `GameLibrary` живёт в `ClubShell.Agent` (net8.0-windows, детектор установок Windows) и в
+  тестовый хост net10 не грузится; `AgentHarnessS3Tests` повторяет его цикл `RefreshAsync` строка в строку поверх
+  реального `ServerClient` (страница 1 по 500 с ETag, остальные без него до `total`, повтор → 304). `zone` в
+  `GET /games` входит в ETag, но каталог не фильтрует (как мок): позонного каталога в настройках клуба пока нет.
 
 ### S4 — касса, часть 1
 
@@ -1348,6 +1359,14 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
 - **Файлы:** `M0004_Counter.cs`, `Auth/StaffTokens.cs` + `StaffAuthMiddleware`, `Infrastructure/Cors.cs`,
   `Admin/AdminJson.cs`, `Admin/Staff/Login*`, `Admin/Counter/*`, `Admin/Shifts/*`, `Admin/Pricing/Quote*`,
   `Admin/Pcs/*`, `Admin/Control/Audit.cs`, `PcStatusWorker`.
+- **Отличия реализации:** режим `staff` проверяется в той же `AgentAuthMiddleware` (ветка `AuthMode.Staff` через
+  `StaffTokens`), отдельной `StaffAuthMiddleware` нет; `adminQuote` — в `Admin/Counter`, admin-DTO — в
+  `Admin/AdminJson.cs`. 501 операции с `x-roles: [owner]` кассиру отвечает `403 ownerOnly` раньше 501. Занятый номер
+  места в `adminAddPc`/`adminUpdatePc` — `400 validation field=number reason=taken` (409 там в контракте нет).
+  `PcStatusWorker` в S4 пишет только `telemetry_events kind=pcOffline`; вебхук и `pcIdleMinutes` — в S5. Лимит
+  неверных PIN — в памяти по IP, для IPv6 — по /64 (`RateLimit:PinAttempts`/`PinWindowSec`); попытка засчитывается
+  до проверки PIN и возвращается при верном PIN, поэтому параллельные запросы лимит не обходят. `429` на
+  `adminLogin` ждёт правки контракта (§12.2 п. 4).
 - **Тесты:**
   - `StaffAuthTests` (invalidPin, 429 после 5, logout всегда 200, деактивация убивает токены, `ck_` = owner,
     ownerOnly);
@@ -1386,7 +1405,8 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
   - `TariffTests` (soft delete, ETag `/tariffs`);
   - `StockTests` (lowStock-вебхук при пересечении `lowAt`);
   - `HealthTests` (FakeClock + засеянные метрики → тикеты, эскалация, автоматическое обслуживание и возврат);
-  - `ControlTests` (7 флагов);
+  - `ControlTests` (7 флагов). Флаги `noShift`/`shortfall` (`adminControl`, `adminReports`) учитывают и строки
+    леджера с `shift_id IS NULL`: их получает и строка, записанная во время закрытия смены (§4.3);
   - `ReportsTests` (местные дни для `byDay` и `heat`, выручка = charges − refunds, `days` 0 → 1 и > 90 → 90,
     `topGames` — различные игроки по `launch_reports` за период, `topProducts = []` в v1: заказов нет);
   - `AutomationTests` (`rule_firings` переживает рестарт);
@@ -1426,6 +1446,8 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
     (приватная сеть Railway).
   - Переменные: `Proxy__ClientIpHeader=X-Real-IP`, `Club__EnrollmentKey`, `Club__OwnerPin`,
     `Cors__AllowedOrigins__0=<origin кассы>`, `ASPNETCORE_ENVIRONMENT=Production`.
+  - Край Railway должен перезаписывать присланный клиентом `X-Real-IP`: по `Proxy:ClientIpHeader` работает лимит
+    неверных PIN (§3.6). Не проверено; проверить при первом деплое.
   - WS: Railway не ограничивает длительность и простой WebSocket. HTTP-запрос живёт до 15 мин, тело загружается
     до 5 мин, лимит — 10 000 одновременных соединений.
   - Бэкапы: автоматические бэкапы volume и у Postgres, и у `/app/data` (тариф Pro). Без pepper все PIN
@@ -1581,6 +1603,8 @@ anticheat/report — S3; `PATCH /admin/games/{id}` (реализуется) и `
 10. `SessionExtendedData`: необязательный `idempotencyKey` онлайн-продления, ответ на которое агент потерял — сервер
     сверял бы по нему, а не по времени (§5.12).
 11. AsyncAPI `pushUserRevoked`: уточнить, что `logout` самого ПК его не вызывает.
+12. `adminExtend`: добавить `403 Forbidden`. Сервер отвечает `403 policyDenied` (`pcMaintenance`, `blacklisted`,
+    `minorCurfew`, `tariffZone`, `tariffTime`, §5.6), а контракт объявляет только 200/400/401/402/404/409/500.
 
 ### 12.3 Вопросы владельцу (только то, что без него не решить)
 
@@ -1595,3 +1619,6 @@ anticheat/report — S3; `PATCH /admin/games/{id}` (реализуется) и `
 | Q-7 | ~~Где разворачиваем?~~ **Отвечено: Railway (D-23).** Открыто: домен кассы и API, тариф Railway (для бэкапов volume нужен Pro) | `*.up.railway.app` до выбора домена |
 | Q-8 | Связывать ли ПК с club-server (фаза 2): добавит ли владелец в club-server read-only эндпоинт и токен для списка машин? | v1: хранится только MAC |
 | Q-9 | Промокод — один раз на клиента? | D-15: да |
+| Q-10 | Лимит неверных PIN `adminLogin` считается по IP, а игроки выходят в интернет с того же публичного IP клуба, что и касса: 5 неверных PIN от любого игрока на 5 мин блокируют вход всем кассирам (выданные токены продолжают работать). Варианты: пропускать консоль, уже входившую раньше (метка устройства); считать неудачи ещё и по сотруднику | Как сейчас: по IP (IPv6 — по /64) |
+| Q-11 | `adminTopUp.method`: сервер принимает только `cash`/`card`/`payme`/`click`/`uzum` (CHECK в M0002), контракт — любую строку до 16 символов (`cash` → `topUpCash`, остальное → `topUpOther`). Любой кассир может провести безналичное пополнение: оно не меняет `expectedCash` и ни с чем не сверяется. Варианты: безналичное только владельцу; обязательный номер платежа; сузить контракт до списка | Как сейчас: 5 способов, любой кассир |
+| Q-12 | `getUpdateManifest` принимает только токен агента, а контракт допускает и `publishToken` (им проверяет `publish.ps1`). Сервер v1 обновлений не раздаёт (всегда 204) — подтвердить, что `publishToken` пока не нужен | Только токен агента, `publishToken` → 401 |

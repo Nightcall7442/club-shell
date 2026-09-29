@@ -19,6 +19,12 @@ public class ServerFixture : WebApplicationFactory<Program>, IAsyncLifetime
 
     private readonly string _database = "clubshell_test_" + Guid.NewGuid().ToString("N");
     private readonly string _dataDir = Path.Combine(Path.GetTempPath(), "clubshell-test-" + Guid.NewGuid().ToString("N"));
+
+    /// <summary>The console origin allowed by CORS in every fixture.</summary>
+    public const string AdminOrigin = "http://localhost:1431";
+
+    /// <summary>Temporary directory of this fixture (JWT key, PIN pepper, seed files); deleted with it.</summary>
+    protected string DataDir => _dataDir;
     private HttpClient? _http;
 
     /// <summary>Overrides on top of the defaults below, applied last.</summary>
@@ -55,6 +61,8 @@ public class ServerFixture : WebApplicationFactory<Program>, IAsyncLifetime
     {
         builder.UseSetting("ConnectionStrings:Club", TestDatabases.ConnectionTo(_database));
         builder.UseSetting("Auth:SigningKeyPath", Path.Combine(_dataDir, "jwt-signing-key.pem"));
+        builder.UseSetting("Auth:PepperPath", Path.Combine(_dataDir, "pin-pepper.key"));
+        builder.UseSetting("Cors:AllowedOrigins:0", AdminOrigin);
         builder.UseSetting("Club:EnrollmentKey", ClubKey);
         builder.UseSetting("Club:AutoApprovePcs", "true");
         builder.UseSetting("Workers:Enabled", "false");
@@ -73,7 +81,7 @@ public class ServerFixture : WebApplicationFactory<Program>, IAsyncLifetime
 /// <c>/ws/agent</c> tests and the <c>RealtimeClient</c>: bound to 127.0.0.1 on a free port (never any-address, which
 /// would ask for a firewall rule), server pings every second so keepalive is observable.
 /// </summary>
-public sealed class KestrelServerFixture : ServerFixture
+public class KestrelServerFixture : ServerFixture
 {
     public KestrelServerFixture()
     {

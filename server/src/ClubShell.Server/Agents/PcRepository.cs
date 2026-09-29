@@ -78,6 +78,14 @@ public sealed class PcRepository(NpgsqlDataSource db)
         return await c.QuerySingleOrDefaultAsync<PcRow>($"SELECT {Columns} FROM pcs WHERE id = @id", new { id });
     }
 
+    /// <summary>The live PCs and seats of a club by seat number (the hall map, <c>PcStatusWorker</c>).</summary>
+    public async Task<IReadOnlyList<PcRow>> ListAsync(Guid? clubId = null)
+    {
+        await using var c = await db.OpenConnectionAsync();
+        return (await c.QueryAsync<PcRow>(
+            $"SELECT {Columns} FROM pcs WHERE deleted_at IS NULL AND (@clubId IS NULL OR club_id = @clubId) ORDER BY number, created_at", new { clubId })).ToList();
+    }
+
     /// <summary>
     /// Registration by HWID (DESIGN §3.2, §9) in one transaction; registrations of a club are serialized on its row.
     /// Known HWID: same PC, inventory updated, approval/status untouched. Unknown: a new PC, pre-filled with the seat of

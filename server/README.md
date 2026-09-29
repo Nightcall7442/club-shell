@@ -4,8 +4,8 @@
 Заменяет `tools/MockServer` в продакшене. Дизайн и план срезов — [`docs/server/DESIGN.md`](../docs/server/DESIGN.md);
 провод задаёт контракт `deepunites/club-contracts`, его копия лежит в [`contracts/`](contracts).
 
-Состояние: **срез S2** — вход игрока, пользователи, сеансы, биллинг и кошелёк поверх S1 (агенты, WS hub) и S0 (скелет,
-миграции, аутентификация, `/health`, 501).
+Состояние: **срезы S3 и S4** — каталог игр, обновления, ПК и касса (часть 1) поверх S2 (вход игрока, пользователи,
+сеансы, биллинг, кошелёк), S1 (агенты, WS hub) и S0 (скелет, миграции, аутентификация, `/health`, 501).
 
 - Реализованы 8 операций агента: `register`, `refresh`, `heartbeat`, `sendTelemetry`, `getConfig`, `getPolicies`,
   `getCommands`, `ackCommand`, и канал `/ws/agent` (рукопожатие, ping/pong, очередь команд с ack по WS и REST,
@@ -15,8 +15,22 @@
   `resumeSession`, `endSession`, `extendSession`, `postSessionEvents`, `getTariffs` — и сверх контракта
   `GET /wallet/{userId}/balance` (`getBalance`) и `/users/{userId}/game-settings` (список → `{items:[]}`, `DELETE` → 204,
   остальные game-settings → 501). Пуши `sessionUpdated`, `walletUpdated` (`userRevoked` — с кассой в S4: `logout`
-  самого ПК его не шлёт). Остальные 75 операций контракта
-  отвечают `501`.
+  самого ПК его не шлёт).
+- S3: `getGames` (страницы до 1000, скрытые исключены, порядок владельца, ETag `"g<catalogVersion>-<hash>"` с
+  `lastPlayedAt` игрока), `getGame`, `sendLaunchReport` (повтор из офлайн-очереди хранится один раз), `getUpdateManifest`
+  (всегда `204`, решение владельца), `getPc` (`hwid` только своего ПК) и сверх контракта `POST /anticheat/report` (204).
+  Каталог — из `data/games.json` (`Catalog:GamesSeedPath`, массив контрактных `Game` + `settingsPaths`): upsert по id при
+  старте, пропавшие — soft delete, изменение поднимает `catalogVersion`. Нет файла — каталог не трогается.
+- S4: 17 операций кассы — вход по PIN (`adminLogin`/`Logout`/`Me`; PIN хранится как HMAC с pepper из
+  `data/pin-pepper.key`, токен скользящий 12 ч / абсолютный 7 д, 5 неверных PIN с IP за 300 с → `429`; `ck_…` из
+  `clubs.api_key` = владелец), карта (`adminOverview`, `adminPcs`, `adminAddPc`/`UpdatePc`/`DeletePc` — одобрение ПК
+  через `maintenance:false`), сеансы и деньги (`adminOpenSession`/`Extend`/`End`, `adminTopUp` с бонусом `bonusTiers`,
+  `adminQuote` — та же `SessionService`/`Pricing`/`Ledger`, что у киоска), команды ПК (`adminCommand`: ack до
+  `Agents:AckWaitSec`, офлайн → `agentOffline`), смена (`adminShift`/`OpenShift`/`CloseShift`, X/Z по `shift_id` строк
+  леджера, `expectedCash` = открытие + наличные пополнения). Журнал действий — `audit_entries` (append-only). CORS только
+  для `/api/v1/admin/*` и `Cors:AllowedOrigins`. `PcStatusWorker` пишет `pcOffline` в `telemetry_events`. Первый старт с
+  пустой `staff` создаёт владельца с `Club:OwnerPin` (пусто — PIN пишется в лог один раз).
+- Остальные 52 операции контракта отвечают `501` (кассиру на owner-only из них — сначала `403 ownerOnly`).
 - Деньги (DESIGN §4.3, §5): единственная точка записи — `Wallet/Ledger.cs` (строка кошелька под `FOR UPDATE`,
   append-only `ledger_entries` с `balance_after`; `wallets.main_balance` — кеш суммы леджера). Цена — одна функция
   `Sessions/Billing/Pricing.cs`: день недели и праздники в зоне клуба, лучшая из скидок группы, уровня лояльности и
@@ -30,10 +44,11 @@
   офлайн-ПК не трогается до 240 мин тишины; resync-пуш `sessionUpdated` каждые `Sessions:ResyncSec`.
 - `Seed:Dev` (Development и тесты): тарифы Standard 12 000 сум/ч, VIP, «Night Pack (5h)», группы клиентов
   (staff −50 %, student −15 %, …), демо-игроки alisher / dilnoza / bekzod (пароль `demo`, карты CARD-0001..0003) с
-  балансом строками леджера; id — как у мока. PIN персонала 0000/1111 появятся в S4.
+  балансом строками леджера; id — как у мока. Персонал: владелец 0000, «Кассир Азиз» 1111; зоны зала и бонусы пополнения
+  как у мока.
 - Регистрация строгая (D-7): новый ПК получает `403 forbidden`, `details.reason = pendingApproval`, `details.pcId`, пока
-  владелец его не одобрит (`PATCH /admin/pcs/{pcId} {maintenance:false}` появится в S4; до этого —
-  `UPDATE pcs SET approved = true, maintenance = false`). `Club:AutoApprovePcs=true` — только для dev и тестов.
+  владелец его не одобрит (`PATCH /admin/pcs/{pcId} {maintenance:false}`). `Club:AutoApprovePcs=true` — только для dev
+  и тестов.
   Неизвестный HWID с MAC живого ПК клуба (замена диска) создаёт ПК в ожидании с номером и именем старого места.
 - Refresh-токен одноразовый; повтор использованного отзывает все токены ПК (`401 reused`), WS закрывается `4401`.
 - Политика ПК берётся из `data/policy.json`, а если его нет — из `config/policies.example.json` (копируется в
@@ -44,8 +59,8 @@
   не стартует.
 - Все 102 операции контракта смаплены: нереализованные отвечают `501` с `error.code = notImplemented`, никогда `404`. Перед 501
   проверяется аутентификация в режиме операции (`club` / `agent` / `user` / `staff`, DESIGN §3.1). Режим `user`
-  проверяет токен игрока (живой, привязан к ПК токена агента, иначе `401 userToken` с `problem`); режим `staff` до S4 —
-  заглушка: требуется только наличие `Authorization: Bearer`.
+  проверяет токен игрока (живой, привязан к ПК токена агента, иначе `401 userToken` с `problem`); режим `staff` — живой
+  токен персонала или `ck_` (иначе `401 invalid`).
 - Подпись запросов агента (HMAC, окно ±300 с) проверяется всегда; повтор подписи только журналируется (D-4).
 - Неизвестный маршрут `/api/v1/*` → `404 notFound`, `details.route`.
 - `GET /health` → `200 {"status":"ok"}`.
@@ -101,15 +116,27 @@ WS-тесты поднимают Kestrel на `127.0.0.1` со случайны�
 
 CI: job `server` в `.github/workflows/server.yml` (ubuntu, сервис `postgres:18`).
 
+E2e кассы против этого сервера (DESIGN §10.c; job `e2e-admin-real`): пустая одноразовая база и
+
+```powershell
+$env:ADMIN_SERVER = 'real'
+$env:ADMIN_SERVER_DB = 'Host=localhost;Port=5433;Database=clubshell_e2e_x;Username=postgres;Password=...'
+pnpm --filter @clubshell/shell-e2e exec playwright test --project admin   # PW_CHANNEL=chrome, если bundled Chromium не стартует
+```
+
+Playwright сам запускает `dotnet run` (Development, `Seed:Dev`, CORS для `:1431`) и кассу; в S4 идут части
+«вход/карта/смена».
+
 ## Конфигурация
 
 Все ключи и значения по умолчанию — таблица в DESIGN §2.5. Используются: `ConnectionStrings:Club`,
 `Database:MigrateOnStart`, `Contracts:OpenApiPath`, `Auth:Issuer` / `Audience` / `SigningKeyPath` /
-`AgentTokenMinutes` / `RefreshTokenDays` / `SignatureWindowSec` / `UserTokenHours`, `Club:Name` / `TimeZone` /
-`EnrollmentKey` / `PreviousEnrollmentKey` / `AutoApprovePcs` / `OfflineLogin` / `GuestLogin`, `Realtime:PingSec` /
-`PongTimeoutSec` / `MaxFrameBytes`, `Agents:HeartbeatSec` / `OfflineAfterSec` / `CommandTtlMin`, `Sessions:GraceSec` /
+`AgentTokenMinutes` / `RefreshTokenDays` / `SignatureWindowSec` / `UserTokenHours` / `PepperPath` / `StaffTokenSlidingHours` /
+`StaffTokenAbsoluteDays`, `Club:Name` / `TimeZone` / `EnrollmentKey` / `PreviousEnrollmentKey` / `AutoApprovePcs` /
+`OwnerPin` / `OfflineLogin` / `GuestLogin`, `Realtime:PingSec` / `PongTimeoutSec` / `MaxFrameBytes`, `Agents:HeartbeatSec` /
+`OfflineAfterSec` / `CommandTtlMin` / `AckWaitSec`, `RateLimit:PinAttempts` / `PinWindowSec`, `Cors:AllowedOrigins`, `Sessions:GraceSec` /
 `MaxOfflineMinutes` (уходят в конфиг агента) / `TickMs` / `ResyncSec` / `PostpaidCreditLimit` (тиёны; `null` — без
-лимита), `Catalog:PolicySeedPath`, `Workers:Enabled`, `Seed:Dev`, `Proxy:Trusted` / `ClientIpHeader`, переменная
+лимита), `Catalog:PolicySeedPath` / `GamesSeedPath`, `Workers:Enabled`, `Seed:Dev`, `Proxy:Trusted` / `ClientIpHeader`, переменная
 окружения `PORT`.
 
 Скидки и календарь цены (`pricing`, `groups`, `happyHours`, `loyalty`, `limits`) читаются из `clubs.settings` — документа
@@ -142,6 +169,12 @@ CI: job `server` в `.github/workflows/server.yml` (ubuntu, сервис `postgr
 | Лояльность | очки на киоске отдельно от уровней кассы | уровни клуба по `lifetime_spent`; `points = spent / 100` |
 | `lifetime_spent` | возвраты не учитываются | `− refund` |
 | Тариф удалён | удаляется совсем | soft delete, цена постоплаты заморожена в сеансе |
+| Журнал кассира | пишется до проверок, 5000 записей | после проверок, в транзакции действия, append-only без лимита |
+| X/Z-отчёт смены | транзакции по времени, наличные — регуляркой по описанию | строки леджера по `shift_id`, наличные — `method = cash` |
+| Неверный PIN | без ограничений | 5 с одного IP за 300 с → `429` |
+| Номер места | повторы разрешены | занятый номер — `400 number taken` |
+| Завершение с кассы | `sessionUpdated` агенту | команда `endSession {reason: admin}`, без push (§5.7) |
+| `pcStatusChanged` | рассылается | не шлётся (AsyncAPI notImplemented), касса опрашивает |
 
 ## Контракт
 

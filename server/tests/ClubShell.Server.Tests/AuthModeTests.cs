@@ -10,7 +10,7 @@ namespace ClubShell.Server.Tests;
 
 /// <summary>
 /// Authentication runs in the operation's mode before the 501 (DESIGN §1, §3.1); every 401 carries <c>details.reason</c>.
-/// Staff mode is still the S0 stub that only requires a bearer token to be present (S4).
+/// Staff mode needs a live staff token (S4, <see cref="StaffAuthTests"/>).
 /// </summary>
 public sealed class AuthModeTests(ServerFixture server) : IClassFixture<ServerFixture>
 {
@@ -79,8 +79,9 @@ public sealed class AuthModeTests(ServerFixture server) : IClassFixture<ServerFi
     [Fact]
     public async Task None_mode_answers_501_without_credentials()
     {
-        using var login = await server.Http.PostAsync("/api/v1/admin/login", new StringContent("{}"));
-        await Contract.ReadErrorAsync(login, 501, "notImplemented", "notImplemented");
+        // publishUpdateManifest: its only scheme is the release publisher's token, which this server does not issue.
+        using var publish = await server.Http.PostAsync("/api/v1/updates/stable/manifest", new StringContent("{}"));
+        await Contract.ReadErrorAsync(publish, 501, "notImplemented", "notImplemented");
     }
 
     [Fact]
@@ -166,16 +167,16 @@ public sealed class AuthModeTests(ServerFixture server) : IClassFixture<ServerFi
         // GET /games: the user token only enriches the answer, a bad one is never 401.
         using (var response = await other.SendAsync(HttpMethod.Get, "/api/v1/games"))
         {
-            Assert.Equal(501, (int)response.StatusCode);
+            Assert.Equal(200, (int)response.StatusCode);
         }
     }
 
     [Fact]
     public async Task Operation_without_a_401_response_is_not_authenticated()
     {
-        // adminLogout: "always 200", the contract declares no 401 — its 501 must not become one.
+        // adminLogout: "always 200", the contract declares no 401 — even without a token.
         using var response = await server.Http.PostAsync("/api/v1/admin/logout", new StringContent("{}"));
-        await Contract.ReadErrorAsync(response, 501, "notImplemented", "notImplemented");
+        Assert.Equal(200, (int)response.StatusCode);
     }
 
     [Theory]
@@ -191,18 +192,18 @@ public sealed class AuthModeTests(ServerFixture server) : IClassFixture<ServerFi
     }
 
     [Fact]
-    public async Task Staff_mode_requires_a_bearer_token()
+    public async Task Staff_mode_requires_a_live_staff_token()
     {
         using (var response = await server.Http.GetAsync("/api/v1/admin/me"))
         {
-            await Contract.ReadErrorAsync(response, 401, "unauthorized", "missing");
+            await Contract.ReadErrorAsync(response, 401, "unauthorized", "invalid");
         }
 
         using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/admin/me");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "staff-token");
         using (var response = await server.Http.SendAsync(request))
         {
-            Assert.Equal(501, (int)response.StatusCode);
+            await Contract.ReadErrorAsync(response, 401, "unauthorized", "invalid");
         }
     }
 }

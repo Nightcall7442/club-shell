@@ -92,13 +92,17 @@ public sealed class ApiErrorMiddleware(RequestDelegate next, ILogger<ApiErrorMid
         }
         catch (BadHttpRequestException ex) when (!context.Response.HasStarted)
         {
-            // Minimal-API binding failures (malformed JSON, wrong types, 415 content type) with ThrowOnBadRequest, Kestrel's
-            // 413 body limit. Always 400: validation's x-http-status, and the contract declares none of 408/413/415.
-            await ApiErrorWriter.WriteAsync(context, StatusCodes.Status400BadRequest, ErrorCode.Validation, ex.Message, new { field = "body", reason = "format" });
+            // Minimal-API binding failures (malformed JSON, no body, 415 content type) with ThrowOnBadRequest, Kestrel's 413
+            // body limit. Always 400: validation's x-http-status, and the contract declares none of 408/413/415. The reason is
+            // one of the contract's whole-body ones, as in the mock it cites (index.ts): json — not JSON; parse — the body
+            // could not be taken as JSON (content type, size); schema — no body.
+            var reason = ex.StatusCode is 413 or 415 ? "parse" : ex.InnerException is JsonException && context.Request.ContentLength is not 0 ? "json" : "schema";
+            await ApiErrorWriter.WriteAsync(context, StatusCodes.Status400BadRequest, ErrorCode.Validation, ex.Message, new { field = "body", reason });
         }
         catch (JsonException ex) when (!context.Response.HasStarted)
         {
-            await ApiErrorWriter.WriteAsync(context, StatusCodes.Status400BadRequest, ErrorCode.Validation, "Malformed JSON body", new { field = ex.Path ?? "body", reason = "format" });
+            await ApiErrorWriter.WriteAsync(context, StatusCodes.Status400BadRequest, ErrorCode.Validation, "Malformed JSON body",
+                new { field = ex.Path ?? "body", reason = ex.Path is null ? "json" : "format" });
         }
         catch (NpgsqlException ex) when (ex.IsTransient && !context.Response.HasStarted && !context.RequestAborted.IsCancellationRequested)
         {

@@ -20,7 +20,8 @@ public sealed record LedgerLine(
     Guid? PcId = null,
     string? Method = null,
     Guid? StaffId = null,
-    object? Meta = null);
+    object? Meta = null,
+    Guid? Id = null);
 
 /// <summary>
 /// The only writer of money (DESIGN §4.3): inside the caller's transaction it locks the wallet row
@@ -28,7 +29,10 @@ public sealed record LedgerLine(
 /// <c>op_id</c> and the running <c>balance_after</c>, and updates the cached balance, <c>version</c> and
 /// <c>lifetime_spent</c> (+|charge|, +|purchase|, −refund). A debit below zero is <c>402 insufficientFunds
 /// {required, available}</c> unless <paramref name="allowOverdraft"/> (postpaid settlement, offline replay), which marks the
-/// row <c>overdraft</c>. Pushes go out after the commit, never from here.
+/// row <c>overdraft</c>. Every row of a club gets its open shift (<c>shift_id</c>, taken <c>FOR SHARE</c> after the wallet —
+/// lock order §4.4; closing a shift takes it <c>FOR UPDATE</c>, so no row joins a shift after its Z report was summed). A
+/// row racing the close waits for it, no longer finds an open shift and gets <c>shift_id NULL</c>, like a row posted with
+/// no shift open: the S5 <c>noShift</c> flag must count those. Pushes go out after the commit, never from here.
 /// </summary>
 public static class Ledger
 {
@@ -41,6 +45,10 @@ public static class Ledger
         {
             throw ApiException.NotFound("user");
         }
+
+        var clubId = lines.FirstOrDefault(l => l.ClubId is not null)?.ClubId;
+        var shiftId = clubId is null ? null : await c.QuerySingleOrDefaultAsync<Guid?>(
+            "SELECT id FROM shifts WHERE club_id = @clubId AND closed_at IS NULL FOR SHARE", new { clubId }, tx);
 
         var balance = wallet.Balance;
         var spent = 0L;
@@ -58,13 +66,14 @@ public static class Ledger
             await c.ExecuteAsync(
                 """
                 INSERT INTO ledger_entries (id, op_id, user_id, network_id, club_id, type, amount, balance_after, method, description,
-                                            ref, session_id, staff_id, pc_id, overdraft, meta, created_at)
+                                            ref, session_id, shift_id, staff_id, pc_id, overdraft, meta, created_at)
                 VALUES (@id, @opId, @userId, @networkId, @clubId, @type, @amount, @balance, @method, @description,
-                        @reference, @sessionId, @staffId, @pcId, @overdraft, @meta::jsonb, @now)
+                        @reference, @sessionId, @shiftId, @staffId, @pcId, @overdraft, @meta::jsonb, @now)
                 """,
                 new
                 {
-                    id = Guid.CreateVersion7(now), opId, userId, networkId = wallet.NetworkId, clubId = line.ClubId, type = line.Type,
+                    id = line.Id ?? Guid.CreateVersion7(now), opId, userId, networkId = wallet.NetworkId, clubId = line.ClubId, type = line.Type,
+                    shiftId = line.ClubId is null ? null : shiftId,
                     amount = line.Amount, balance, method = line.Method, description = line.Description,
                     reference = line.SessionId?.ToString(), sessionId = line.SessionId, staffId = line.StaffId, pcId = line.PcId,
                     overdraft = balance < 0 && line.Amount < 0,

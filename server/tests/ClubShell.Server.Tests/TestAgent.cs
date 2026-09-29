@@ -21,6 +21,8 @@ public sealed class TestAgent(ServerFixture server, JsonElement registration, st
     public string Hwid { get; } = hwid;
     public JsonElement Registration { get; } = registration;
 
+    public ServerFixture Server => server;
+
     /// <summary>Registers a new PC (the fixture auto-approves) with a random HWID and MAC unless given.</summary>
     public static async Task<TestAgent> CreateAsync(ServerFixture server, string? hwid = null, string? mac = null)
     {

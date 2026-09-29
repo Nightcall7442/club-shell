@@ -3,6 +3,8 @@
 #   changes  ubuntu  does this push/PR touch the server or what it builds from? (dorny/paths-filter)
 #   server   ubuntu  restore/build (-warnaserror)/test of server/ClubShell.Server.sln against a postgres:18 service,
 #                    then contract drift: server/contracts vs deepunites/club-contracts at server/contracts/REF
+#   e2e-admin-real  ubuntu  the admin console's Playwright suite (tests/shell-e2e, project admin) against this server
+#                    (ADMIN_SERVER=real, DESIGN §10.c) on a throwaway postgres:18 database; S4 runs the login/map/shift part
 #
 # Separate from ci.yml: the server needs PostgreSQL and runs on Linux like production; the agent jobs stay on Windows.
 
@@ -145,3 +147,70 @@ jobs:
             fi
           done
           exit $failed
+
+  e2e-admin-real:
+    name: Admin console e2e against the real server
+    needs: [changes, server]
+    if: needs.changes.outputs.server == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          # Throwaway CI container: the database the server migrates and seeds (Seed:Dev) for this run only.
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: clubshell_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      ADMIN_SERVER: real
+      ADMIN_SERVER_DB: Host=localhost;Port=5432;Database=clubshell_e2e;Username=postgres;Password=postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET SDK (global.json)
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Set up pnpm (version from packageManager)
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript contracts
+        run: pnpm contracts:build
+
+      - name: Install Playwright Chromium
+        run: pnpm --filter @clubshell/shell-e2e exec playwright install --with-deps chromium
+
+      # Built ahead so the webServer's `dotnet run` starts within its timeout.
+      - name: Build the server
+        run: dotnet build server/src/ClubShell.Server
+
+      - name: Run the admin e2e against the real server
+        run: pnpm --filter @clubshell/shell-e2e exec playwright test --project admin
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-admin-real
+          path: |
+            tests/shell-e2e/playwright-report
+            tests/shell-e2e/test-results
+          if-no-files-found: ignore
+          retention-days: 14

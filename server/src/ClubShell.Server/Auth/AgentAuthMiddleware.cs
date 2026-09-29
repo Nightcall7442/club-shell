@@ -13,13 +13,15 @@ namespace ClubShell.Server.Auth;
 /// User mode: <c>X-User-Token</c> must be a live player token bound to the PC of the agent token, else
 /// <c>401 userToken</c> with <c>problem</c> (<see cref="UserTokens.ValidateAsync"/>). Agent-optional-user mode validates
 /// the same way but never fails: a valid token sets <see cref="UserContext"/>, a bad one only <see cref="UserTokenProblem"/>.
-/// S0 stub left for S4: <b>staff</b> checks only that a Bearer token is present (S4 moves staff to <c>StaffAuthMiddleware</c>).
+/// Staff mode (S4, §3.5): a live staff token or the club API key <c>ck_</c> (<see cref="StaffTokens"/>) sets
+/// <see cref="StaffContext"/>, else <c>401 invalid</c>; owner-only operations refuse a cashier with <c>403 ownerOnly</c>.
 /// </para>
 /// </summary>
 public sealed class AgentAuthMiddleware(
     RequestDelegate next,
     TokenService tokens,
     UserTokens users,
+    StaffTokens staffTokens,
     PcRepository pcs,
     ClubRepository clubs,
     ReplayLog replays,
@@ -84,7 +86,15 @@ public sealed class AgentAuthMiddleware(
 
                 break;
             case AuthMode.Staff:
-                _ = BearerToken(context) ?? throw ApiException.Unauthorized("missing", "Missing bearer token");
+                // 401 on /admin/* means only an authentication problem: the console drops its token on any 401 (§3.5).
+                var staff = await staffTokens.ValidateAsync(BearerToken(context))
+                    ?? throw ApiException.Unauthorized("invalid", "Missing or invalid staff token");
+                if (requirement.OwnerOnly && !staff.IsOwner)
+                {
+                    throw ApiException.Forbidden("ownerOnly", "This action needs the owner role");
+                }
+
+                context.Features.Set(staff);
                 break;
         }
 
