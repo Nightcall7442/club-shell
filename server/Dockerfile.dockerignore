@@ -1,0 +1,19 @@
+# Build context = repository root. Send only what server/Dockerfile copies (BuildKit reads <Dockerfile>.dockerignore).
+*
+!global.json
+!nuget.config
+!.editorconfig
+!Directory.Build.props
+!Directory.Packages.props
+!config/policies.example.json
+!src/ClubShell.Contracts/**
+!server/Directory.Build.props
+!server/contracts/**
+!server/src/ClubShell.Server/**
+
+**/bin
+**/obj
+server/**/data
+# Development-only files stay out of the image.
+server/src/ClubShell.Server/appsettings.Development.json
+server/src/ClubShell.Server/Properties

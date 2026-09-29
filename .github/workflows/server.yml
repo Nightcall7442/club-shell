@@ -4,7 +4,9 @@
 #   server   ubuntu  restore/build (-warnaserror)/test of server/ClubShell.Server.sln against a postgres:18 service,
 #                    then contract drift: server/contracts vs deepunites/club-contracts at server/contracts/REF
 #   e2e-admin-real  ubuntu  the admin console's Playwright suite (tests/shell-e2e, project admin) against this server
-#                    (ADMIN_SERVER=real, DESIGN §10.c) on a throwaway postgres:18 database; S4 runs the login/map/shift part
+#                    (ADMIN_SERVER=real, DESIGN §10.c) on a throwaway postgres:18 database
+#   docker-smoke  ubuntu  server/Dockerfile + server/compose.yaml: build the image, `docker compose up --wait`, then
+#                    server/scripts/smoke.sh (/health, register a PC, signed heartbeat) against the container (DESIGN §11 S6)
 #
 # Separate from ci.yml: the server needs PostgreSQL and runs on Linux like production; the agent jobs stay on Windows.
 
@@ -53,6 +55,7 @@ jobs:
               - 'server/**'
               - 'src/ClubShell.Contracts/**'
               - 'src/ClubShell.Core/**'
+              - 'config/policies.example.json'
               - 'Directory.*.props'
               - 'global.json'
               - 'nuget.config'
@@ -214,3 +217,34 @@ jobs:
             tests/shell-e2e/test-results
           if-no-files-found: ignore
           retention-days: 14
+
+  docker-smoke:
+    name: Docker image and compose smoke
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Throwaway values for this run only; the auto-approve flag is for tests (a real deployment approves PCs by hand).
+      POSTGRES_PASSWORD: smokepassword
+      CLUB_ENROLLMENT_KEY: smoke-club-key
+      CLUB_AUTO_APPROVE_PCS: 'true'
+      CORS_ORIGIN: http://localhost:1431
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image and start the stack
+        run: docker compose -f server/compose.yaml up -d --build --wait --wait-timeout 90
+
+      - name: Smoke (health, register, signed heartbeat)
+        env:
+          CLUB_KEY: smoke-club-key
+        run: bash server/scripts/smoke.sh http://localhost:8080
+
+      - name: Container logs
+        if: failure()
+        run: docker compose -f server/compose.yaml logs --no-color --tail 200
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f server/compose.yaml down -v
