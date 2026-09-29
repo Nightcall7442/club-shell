@@ -6,7 +6,6 @@ using ClubShell.Server.Auth;
 using ClubShell.Server.Infrastructure;
 using ClubShell.Server.Realtime;
 using Microsoft.AspNetCore.Http.Features;
-using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.Net.Http.Headers;
 
 namespace ClubShell.Server.Agents;
@@ -23,10 +22,7 @@ public static class AgentEndpoints
 
     public static void MapAgentEndpoints(this IEndpointRouteBuilder app)
     {
-        // Any Content-Type reaches the handler: body binding then rejects a non-JSON one (415 → 400 validation). With the
-        // inferred application/json only, routing would skip these endpoints and the /api/v1 fallback would answer 404.
-        var api = app.MapGroup("/api/v1/agents");
-        ((IEndpointConventionBuilder)api).Finally(endpoint => endpoint.Metadata.Add(new AcceptsMetadata(["application/json", "*/*"])));
+        var api = app.MapApiGroup("/api/v1/agents");
         api.MapPost("/register", RegisterAsync).WithMetadata(new AuthRequirement(AuthMode.Club));
         api.MapPost("/refresh", RefreshAsync).WithMetadata(new AuthRequirement(AuthMode.None));
 

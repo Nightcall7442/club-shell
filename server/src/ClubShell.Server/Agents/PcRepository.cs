@@ -31,18 +31,25 @@ public sealed class PcRow
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset? DeletedAt { get; init; }
 
+    /// <summary>The open session of the PC: the status and <c>Pc.currentSessionId</c> are derived from it (DESIGN §6.6).</summary>
+    public Guid? OpenSessionId { get; init; }
+
+    public string? OpenSessionState { get; init; }
+
     /// <summary>
-    /// Derived status (DESIGN §6.6): maintenance, else offline without a live socket or a fresh heartbeat, else free.
-    /// ponytail: busy/locked come from the open-session index, which arrives with sessions (S2).
+    /// Derived status (DESIGN §6.6): maintenance, else offline without a live socket or a fresh heartbeat, else locked or
+    /// busy by the open session, else free.
     /// </summary>
     public PcStatus Status(bool connected, DateTimeOffset now, TimeSpan offlineAfter) =>
         Maintenance ? PcStatus.Maintenance
         : !connected && (LastHeartbeatAt is not { } at || now - at >= offlineAfter) ? PcStatus.Offline
+        : OpenSessionState == "locked" ? PcStatus.Locked
+        : OpenSessionState is not null ? PcStatus.Busy
         : PcStatus.Free;
 
     /// <summary>The wire <c>Pc</c>; <c>hwid</c> is set only for the PC itself.</summary>
     public Pc ToPc(PcStatus status, bool withHwid) => new(
-        Id, Name, Zone, Number, withHwid ? Hwid : null, IpAddress, status, CurrentSessionId: null, AgentVersion,
+        Id, Name, Zone, Number, withHwid ? Hwid : null, IpAddress, status, CurrentSessionId: OpenSessionId, AgentVersion,
         ShellVersion.Length > 0 ? ShellVersion : "0.0.0", LastHeartbeatAt ?? CreatedAt);
 }
 
@@ -60,7 +67,9 @@ public sealed class PcRepository(NpgsqlDataSource db)
 {
     private const string Columns = """
         id, club_id, number, name, zone, hwid, ip_address, approved, maintenance, signing_secret, credentials_version,
-        agent_version, shell_version, last_heartbeat_at, created_at, deleted_at
+        agent_version, shell_version, last_heartbeat_at, created_at, deleted_at,
+        (SELECT s.id FROM sessions s WHERE s.pc_id = pcs.id AND s.state <> 'ended') AS open_session_id,
+        (SELECT s.state FROM sessions s WHERE s.pc_id = pcs.id AND s.state <> 'ended') AS open_session_state
         """;
 
     public async Task<PcRow?> FindAsync(Guid id)

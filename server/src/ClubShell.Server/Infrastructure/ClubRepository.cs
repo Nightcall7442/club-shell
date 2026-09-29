@@ -23,6 +23,12 @@ public sealed class ClubOptions
 
     /// <summary>New PCs are approved at registration (dev and tests only, D-7); otherwise they wait for the owner.</summary>
     public bool AutoApprovePcs { get; set; }
+
+    /// <summary>A password login returns <c>offlineHash</c>, so the PC can sign the player in while the server is away.</summary>
+    public bool OfflineLogin { get; set; } = true;
+
+    /// <summary><c>POST /auth/guest</c> is allowed; otherwise <c>403 guestDisabled</c>.</summary>
+    public bool GuestLogin { get; set; } = true;
 }
 
 /// <summary>What the agent surface reads of a club: name for <c>shell.club</c> and the three versions (DESIGN §5.9).</summary>

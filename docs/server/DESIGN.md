@@ -373,11 +373,14 @@ X-Signature = lowercase hex( HMAC-SHA256( base64decode(signingSecret),
   отдаётся (модели «зона только для роли» нет); `pcMismatch` — `pcId` тела ≠ `sub`. `409 conflict
   reason=activeSessionElsewhere {pcId, pcName}` — открытый сеанс пользователя на другом ПК.
 - Успешный вход отзывает прежний user-токен этого ПК и возвращает открытый сеанс этого пользователя на этом ПК.
-- `badCredentials`: `401` с `details.attemptsLeft`. Неудачи считаются **один раз на `X-Trace-Id`** — агент повторяет
-  запрос после refresh с тем же trace-id (N2). Блокировка после 5 неудач за 15 мин: `attemptsLeft=0`, дальше тот же
-  401 до конца окна.
-- Отзыв: `logout`, смена пароля кассиром (OQ-24), блокировка или бан. Токены удаляются, агенту уходит push
-  `userRevoked {userId, reason}`.
+- `badCredentials`: `401` с `details.attemptsLeft`. Неудачи считаются по имени (`lower(username)` сети), известному
+  или нет: `attemptsLeft` не выдаёт, какие логины существуют. Агент повторяет 401 после refresh с тем же `X-Trace-Id`
+  (N2): **первый** повтор trace-id бесплатный, каждый следующий считается. Блокировка после 5 неудач за 15 мин:
+  `attemptsLeft=0`, дальше тот же 401 до конца окна. Попытки по одному имени идут по очереди
+  (`pg_advisory_xact_lock`): параллельные догадки не проходят проверку счётчика разом.
+- Отзыв: смена пароля кассиром (OQ-24), блокировка или бан. Токены удаляются, агенту уходит push
+  `userRevoked {userId, reason}`. `logout` токен этого ПК удаляет **без** push: агент считает `userRevoked`
+  принудительным отзывом и показал бы после обычного выхода «срок входа истёк».
 
 ### 3.5 Персонал, роли, ключ API
 
@@ -466,7 +469,7 @@ X-Signature = lowercase hex( HMAC-SHA256( base64decode(signingSecret),
 | `staff_tokens` | token_hash PK, staff_id, club_id, created_at, last_used_at, expires_at, revoked_at NULL | | M0001 |
 | `users` | id, network_id, username, display_name, avatar_url NULL, role (`guest\|member\|vip\|admin`), locale (`en\|ru\|uz`), flags text[], password_hash NULL, unlock_pin_hash NULL, card_id NULL, banned bool, transient bool (гость), created_at, last_seen_at, deleted_at NULL | `UNIQUE(network_id, lower(username))`; `UNIQUE(network_id, lower(card_id)) WHERE card_id IS NOT NULL` | M0002 |
 | `user_tokens` | token_hash PK, user_id, pc_id, created_at, expires_at | `UNIQUE(pc_id)` | M0002 |
-| `login_failures` | user_id, trace_id uuid, at | PK (user_id, trace_id) — считаем один раз на trace-id | M0002 |
+| `login_failures` | network_id, username (lower), trace_id uuid, attempts, at | PK (network_id, username, trace_id); неудача = `greatest(attempts − 1, 1)` (§3.4) | M0002 |
 | `qr_logins` | token_hash PK, club_id, pc_id, user_id NULL, created_at, expires_at, confirmed_at NULL, consumed_at NULL | | M0002 |
 | `client_profiles` | club_id, user_id, group_id text NULL, note, blacklisted, phone, birth_year NULL, updated_at | PK (club_id, user_id) | M0002 |
 | `wallets` | user_id PK, network_id, currency, main_balance bigint, bonus_balance bigint (=0 в v1, §5.8), lifetime_spent bigint ≥0, version bigint, updated_at | CHECK bonus ≥ 0 | M0002 |
@@ -593,9 +596,9 @@ total   = (base × dayPct × (100 − disc) + 500_000) / 1_000_000 × 100       
 | 5 | Комендантский час для несовершеннолетних (`limits.minorCurfew`, до 06:00, `birth_year`) | `403 rule=minorCurfew` | mock club.ts:443-453 |
 | 6 | Зона тарифа (без учёта регистра; пустая = все зоны) | `403 rule=tariffZone` | OQ-8 (касса тоже) |
 | 7 | Окно времени тарифа по местному времени | `403 rule=tariffTime` | Tariff.cs:134-155 |
-| 8 | Минуты: почасовой тариф — min..max при создании; сумма купленного ≤ max при продлении. Пакет — `minutes := package_minutes` | `400 minutes required\|min\|max` | ≠ mock session.ts:286-290 |
+| 8 | Минуты: почасовой тариф с предоплатой — min..max при создании; сумма купленного ≤ max при продлении. Пакет — `minutes := package_minutes`. Постоплата минут не покупает: киоск их не шлёт, присланные игнорируются | `400 minutes required\|min\|max` | ≠ mock session.ts:286-290 |
 | 9 | Постоплата запрещена гостю | `403 rule=postpaidNotAllowed` | |
-| 10 | Средства: `available = main_balance` ≥ цене (кроме офлайн-реплея) | `402 {required, available}` | |
+| 10 | Средства: `available = main_balance` ≥ цене (кроме офлайн-реплея); постоплата — первая минута ≤ `main_balance + PostpaidCreditLimit` | `402 {required, available}` | |
 
 ### 5.3 Создание (`POST /sessions`, `adminOpenSession`)
 
@@ -633,12 +636,18 @@ endsAt      = ends_at | ended_at
 
 ### 5.5 Pause / resume
 
-- **pause** (`active` → `paused`): `used_before = used(now)`, `running_since=NULL`, `paused_at=now`,
-  `ends_at=NULL`. Ошибки: `409 alreadyPaused`, `409 sessionNotActive`.
+- **pause** (`active` или `locked` → `paused`): `used_before += ceil(now − running_since)`, `running_since=NULL`,
+  `paused_at=now`, `ends_at=NULL`. Секунда, в которую попала пауза, считается: при floor пауза/resume чаще раза в
+  секунду не оплачивались бы. `locked` приходит из очереди событий агента и оплаты не касается (D-12): игрок мог уже
+  разблокировать ПК. Ошибки: `409 alreadyPaused`, `409 sessionNotActive`.
 - **resume** (`paused` → `active`):
   - для предоплаты нужно `left > 0`, иначе `409 sessionNotActive`;
+  - для постоплаты следующая секунда должна быть по средствам: `quote_frozen(ceil((used_before + 1)/60)) ≤
+    main_balance + PostpaidCreditLimit`, иначе `402` (тик остановил бы сеанс сразу);
   - `running_since=now`, `ends_at` пересчитывается;
   - ошибки: `409 notPaused`, `402`.
+- pause, resume и extend принимают сеанс только своего ПК: сеанс того же игрока на другом ПК → `403 pcMismatch`
+  (как `/end` и `/sessions/current`).
 - Каждый переход обновляет `last_transition_at` и пушит `sessionUpdated`.
 
 ### 5.6 Продление (`/sessions/{id}/extend`, `adminExtend`)
@@ -646,6 +655,8 @@ endsAt      = ends_at | ended_at
 - Только предоплата, иначе `409 postpaidSession`. Допустимые состояния: `active`, `paused`, `locked`, `ending`,
   иначе `409 sessionNotActive`.
 - Проверки из §5.2, цена `quote(now)`, списание.
+- Если `used(now) > purchased_sec` (грация или перерасход офлайн), сначала `used_before = purchased_sec`,
+  `running_since = now`: грация бесплатна (§5.10) и не вычитается из купленного продления.
 - `purchased_sec += minutes×60`; `tariff_id` меняется на тариф продления; `warnings_sent='{}'`; `ending` → `active`;
   `ends_at` пересчитывается.
 - Push `sessionUpdated` и `walletUpdated`, аудит `sessionExtend` (касса). Продление кассой дополнительно ставит
@@ -660,15 +671,21 @@ endsAt      = ends_at | ended_at
 2. `t_end` = серверное `now` для живых вызовов и `at` события для `ended`. Присланные агентом `secondsUsed`/`endedAt`
    записываются в `agent_reported` только для аудита (`frag/paths-auth-sessions.yaml:1104-1107`).
 3. Для предоплаты `used = min(used(t_end), purchased)`.
-4. **Возврат** — только при предоплате, причине ∈ {`admin`, `error`} и не пакетном тарифе:
-   `refund = floor_to_100((charged_total − refunded_total) × (purchased − used) / purchased)`. Возврат
-   пропорционален **фактически оплаченному**, поэтому утечки нет. У мока при happy hour: оплачено 840 000, вернули
-   1 200 000 (`mock/routes/session.ts:81-83`).
-5. **Постоплата:** `charge = quote_frozen(ceil(used/60))`, `overdraft` допускается.
+4. **Возврат** — только при предоплате и причине ∈ {`admin`, `error`}, и только за почасовые покупки. Неиспользованы
+   последние купленные секунды: списания сеанса (создание, продления) перебираются от новых к старым, каждое покрывает
+   минуты своей `meta.quote`; пакетная часть не возвращается, почасовая — пропорционально тому, что взяло это
+   списание. Итог — вниз до 100 тиёнов, не больше `charged_total − refunded_total`. Для одной покупки это
+   `floor_to_100(paid × (purchased − used) / purchased)`. Возврат пропорционален **фактически оплаченному**, поэтому
+   утечки нет. У мока при happy hour: оплачено 840 000, вернули 1 200 000 (`mock/routes/session.ts:81-83`).
+   Возвратность по текущему `tariff_id` не годится: продление его перезаписывает.
+5. **Постоплата:** `charge = quote_frozen(ceil(used/60)) − charged_total` (у переоткрытого сеанса, §5.12, часть уже
+   списана), `overdraft` допускается.
 6. `state=ended`, заполняются `ended_at` и `end_reason`.
 7. После commit: `sessionUpdated`, `walletUpdated`, аудит `sessionEnd` с `meta.sessionMinutes` (флаги earlyEnd).
    Если завершение начал сервер (касса, тик), в очередь ставится команда `endSession {sessionId, reason}` (§6.4):
    агент завершает локально, его `/end` получает `409 sessionNotActive` с `details.session` и считает это успехом.
+   `sessionUpdated` для такого сеанса **не** шлётся: push дошёл бы до агента раньше команды, и тот закрыл бы сеанс
+   с причиной `admin` («завершена администратором») вместо `timeUp`.
 
 Ответ: `SessionEndResult {session, charged, refunded}`.
 
@@ -716,17 +733,27 @@ endsAt      = ends_at | ended_at
 `SessionTickWorker`, раз в 1 с:
 
 ```
-SELECT … FROM sessions
-WHERE is_prepaid AND state IN ('active','locked','ending') AND ends_at <= now()
-FOR UPDATE SKIP LOCKED LIMIT 100
+SELECT … FROM sessions JOIN pcs
+WHERE state <> 'ended'
+  AND ((pc «устоялся» AND state IN ('active','locked','ending') AND (NOT is_prepaid OR ends_at <= now()))
+       OR greatest(last_heartbeat_at, last_transition_at) <= now() − MaxOfflineMinutes)
+FOR UPDATE OF sessions SKIP LOCKED LIMIT 100
 ```
 
 - В `ends_at`: `state=ending`, push.
 - В `ends_at + GraceSec`: завершение с `timeUp`. Грация бесплатна: `used` ограничен купленным.
-- Это касается только ПК **онлайн** (§6.6). Для ПК офлайн сервер ждёт реплея событий от агента — пока агент офлайн,
-  авторитет он. После `MaxOfflineMinutes` тишины сеанс завершается принудительно с `timeUp`.
-- **Постоплата:** если `cost ≥ main_balance + PostpaidCreditLimit`, сеанс завершается `timeUp` (решение D-10). Мок
-  так не делает (`mock/routes/session.ts:85-90`).
+- Тик решает только за ПК, который «устоялся»: свежий heartbeat (моложе `OfflineAfterSec`) с пустой очередью
+  агента (`offlineQueue = 0`). ПК, вернувшийся из офлайна, сначала отправляет накопленные события (паузы, продления,
+  своё завершение); расчёт до них выставил бы офлайн-отрезок неверно (постоплату — до «сейчас», предоплату — без
+  продления). Одного WS-подключения мало. Фильтр в SQL: сеансы офлайн-ПК не занимают пачку в 100 строк.
+- Для ПК офлайн сервер ждёт событий от агента: пока агент офлайн, авторитет он. После `MaxOfflineMinutes` тишины
+  (и без WS) сеанс завершается принудительно с `timeUp` на момент последнего признака жизни, с отметкой
+  `session_events (source='server', type='offlineTimeout', data.running)`. Если агент потом приходит со своим
+  `ended@t` позже этого момента, сеанс переоткрывается (§5.12) и офлайн-игра оплачивается.
+- **Постоплата (D-10):** сеанс завершается `timeUp` на границе минуты, когда следующая секунда начала бы минуту
+  сверх средств: `quote_frozen(ceil((used + 1)/60)) > main_balance + PostpaidCreditLimit`. Опоздавший тик всё равно
+  закрывает на `floor(used/60)` минутах (`ended_at` назад на остаток): списываются только сыгранные целиком минуты, и
+  лимит соблюдается. Мок так не делает (`mock/routes/session.ts:85-90`).
 - Каждые `ResyncSec` активным ПК уходит `sessionUpdated`.
 - Предупреждения `warning` шлёт сам агент. Сервер только пишет их в `warnings_sent` и запускает автоматизацию
   `minutesLeft`.
@@ -737,7 +764,11 @@ FOR UPDATE SKIP LOCKED LIMIT 100
   `pcId` = `sub`; пользователь существует, не забанен и не blacklisted.
 - `startedAt` старше `MaxOfflineMinutes` → `400 tooOld`. `startedAt` ограничивается сверху значением `now`.
 - Цена — `quote(startedAt)`. Списание идёт с `overdraft`, без `402`: иначе агент завершит сеанс `error`, и игра
-  потеряется (`SessionManager.cs:717-721`). Диапазон минут для постоплаты и отказ `tariffTime` не применяются.
+  потеряется (`SessionManager.cs:717-721`). По той же причине из правил §5.2 проверяется только игрок (есть, не
+  забанен, не blacklisted): тариф берётся и удалённый, `pcMaintenance`, `tariffZone`, `minorCurfew`, `tariffTime` и
+  диапазон минут постоплаты не применяются.
+- `409 sessionAlreadyActive` агент откладывает, а не завершает сеанс: обычно это прошлый сеанс этого ПК, чей
+  `ended` ещё в очереди (после рестарта реплей идёт раньше flush); цикл обслуживания сначала отправит очередь.
 - `id = clientSessionId`, если свободен. Если такой id уже есть на этом ПК, возвращается существующий сеанс.
   `running_since = startedAt`, `origin='offline'`.
 - Идемпотентность: при реплее тело отличается от исходного, но возвращается сохранённый ответ
@@ -758,12 +789,16 @@ FOR UPDATE SKIP LOCKED LIMIT 100
 | `locked` / `unlocked` | `state` ⇄ `locked`, на оплату не влияет |
 | `warning {minutesLeft}` | добавить в `warnings_sent` |
 | `paused@t` / `resumed@t` | как §5.5 в момент `t` (офлайн-пауза не оплачивается) |
-| `extended@t {minutes, cost}` | предоплата и сеанс открыт → `quote(t)`, `overdraft`. `data.cost` агента → `meta` (агент считал по базе, `SessionManager.cs:380-388`) |
+| `extended@t {minutes, cost}` | предоплата, сеанс открыт, `minutes` 1..1440 (как онлайн; пакет — `package_minutes`) → `quote(t)`, `overdraft`, продление как §5.6. `data.cost` агента → `meta` (агент считал по базе, `SessionManager.cs:380-388`). Онлайн-продление тех же минут, списанное в пределах ±2 мин от `t`, второй раз не списывается: агент, потеряв ответ, применяет продление локально и ставит его в очередь (сверка по времени; надёжнее — `Idempotency-Key` агента в `data`, правка контракта) |
 | `ended@t {reason}` | §5.7 с `t_end=t`. **Обязательно** по контракту (`frag/paths-auth-sessions.yaml:1287-1288`), мок не делает |
 | `charged`, `started` | только записать |
 | любое для `ended`-сеанса | только записать |
 
-Событие старше `last_transition_at` записывается с `applied=false`. Ответ: `204`.
+Событие старше `last_transition_at` записывается с `applied=false`, кроме `ended`: оно закрывает сеанс в
+`last_transition_at` (часы агента отстают, а сеанс, оставленный открытым, агент подхватил бы как «зомби»).
+Сеанс, закрытый тиком после `MaxOfflineMinutes` тишины (отметка `offlineTimeout`), переоткрывается в `ended_at`,
+если пачка несёт `ended@t` позже него: часы снова идут (или стоят на паузе, как было), события пачки применяются,
+`ended@t` рассчитывает заново (§5.7). Ответ: `204`.
 
 ### 5.13 Разрешённые несоответствия (сводка)
 
@@ -886,7 +921,7 @@ FOR UPDATE SKIP LOCKED LIMIT 100
 |---|---|---|
 | `sessionUpdated` (`Session`) | ПК сеанса | любой переход, resync 30 с |
 | `walletUpdated` (`Balance`) | все ПК с валидным токеном пользователя | после commit денег |
-| `userRevoked {userId, reason}` | ПК пользователя | logout, бан/blacklist, сброс пароля кассиром (OQ-24) |
+| `userRevoked {userId, reason}` | ПК пользователя | бан/blacklist, сброс пароля кассиром (OQ-24); не `logout` (§3.4) — триггеры появятся в S4 |
 
 Это все три push с `x-server-status: required`. `notification`, `pcStatusChanged`, `chatMessage`, `orderUpdated`,
 `bookingUpdated`, `tournamentUpdated` в AsyncAPI — `notImplemented`: сервер v1 их **не** шлёт (мок шлёт
@@ -1248,11 +1283,45 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
   - `EventsTests` (paused/resumed/extended/ended в прошлом, дедупликация);
   - `TickTests` (FakeClock: ending → grace → timeUp; офлайн-ПК не трогается до 240 мин; постоплата по средствам);
   - `AuthTests` (badCredentials один раз на trace, `UNIQUE(pc_id)` вытесняет, `offlineHash` проверяется алгоритмом
-    агента, userRevoked push);
+    агента, нет `userRevoked` после logout);
   - `LedgerInvariantTests`;
   - `AgentHarness` S2.
 - **Выход (тесты):** `AgentHarness` S2 проходит сценарий §10b S2, включая офлайн-сеанс; после каждого теста
   среза `LedgerInvariantTests` (`SUM(ledger) = wallets`) зелёный; `Coverage` = 18 операций S2 + `getBalance`.
+- **Как сделано (отклонения от плана, с причинами):**
+  - Файлов меньше, чем в §2.2: `Sessions/SessionService.cs` держит строку сеанса и её часы, правила §5.2, расчёт §5.7
+    и применение событий §5.12; `Sessions/Billing/Pricing.cs` — цену и настройки клуба; `Users/UserEndpoints.cs` —
+    профиль, статистику, лояльность и заглушки game-settings; `Wallet/WalletEndpoints.cs` — тарифы и баланс. Отдельные
+    `SessionRepository`, `PurchaseRules`, `Settlement`, `UserRepository`, `Loyalty` с одним вызывающим не нужны.
+  - Промо- и скидочных таблиц в M0002 нет: скидки (группы, happy hours, уровни) живут в `clubs.settings` (§4.2),
+    `promo_codes` — M0005. Пока ключа в `settings` нет, правила нет (100 %, без скидок, комендантский час 22:00–06:00
+    для младше 18). `Seed:Dev` кладёт туда группы мока (staff −50 %, student −15 %, …).
+  - В `Seed:Dev` тариф Standard без зон (у мока — `Standard`, `Bootcamp`): ПК, зарегистрированный агентом, приходит без
+    зоны (`pcs.zone = ''`), и правило `tariffZone` закрыло бы ему Standard. Демо-балансы — строки `adjustment`.
+  - Постоплата на пакетном тарифе считается почасово по `price_per_hour_snapshot`: в сеансе заморожена только почасовая
+    цена, а «пакет за любые минуты» для открытого сеанса не определён.
+  - Постоплата останавливается на границе минуты, когда следующая секунда не по средствам (§5.10); тот же порог даёт
+    `402` на создание (первая минута) и `resume` постоплаты — иначе сеанс на пустом кошельке закрывался бы через
+    секунду со списанием целой минуты в минус.
+  - Сеанс офлайн-ПК, закрытый тиком после 240 мин тишины, рассчитывается на момент последнего признака жизни
+    (`max(last_heartbeat_at, last_transition_at)`), а не на «сейчас»: выключенный ПК не должен набирать постоплату.
+  - `secondsLeft` завершённого сеанса — 0 (как у мока), `endsAt` — `ended_at`.
+  - Офлайн-реплей: сеанс, уже известный этому ПК по `clientSessionId`, возвращается до проверки `tooOld` — повтор
+    после долгого офлайна не должен терять уже принятый сеанс.
+  - Событие `extended` оплачивается по текущему тарифу сеанса (в `data` тарифа нет) с минутами из `data`; `ended` без
+    понятной причины закрывается как `user` (без возврата).
+  - Неизвестный логин считается так же, как известный (`login_failures` ключуется по `lower(username)`, §4.2):
+    `attemptsLeft` не выдаёт, существует ли имя. Время ответа выровнено холостым PBKDF2.
+  - Событие `extended` с чужим для онлайн-продления числом минут (вне 1..1440) только записывается: иначе
+    `minutes × 60` переполнял `int`, и пачка списывала бы произвольную сумму за секунды.
+  - `refreshToken` игрока — случайная строка, которую сервер не принимает: обновления токена игрока нет (§3.4).
+  - Имя гостя — `guest-<номер ПК>-<8 hex>` вместо счётчика мока: без общей последовательности и гонок.
+  - `session_events` пока хранит только события агента (`source='agent'`); переходы сервера и кассы — S4.
+  - GET/PUT `/users/{userId}/game-settings/{gameId}` и `…/upload-target` отвечают 501 уже в S2 (план — S5): иначе
+    агент получил бы fallback-404.
+  - Не в S2 (нет вызывающих): команда `extendSession` при продлении кассой (S4, `adminExtend`), хуки автоматизации,
+    вебхуки и аудит при открытии/завершении (S4/S5), автоматизация `minutesLeft` по событию `warning` (S5),
+    `refreshConfig` по изменению тарифов (S5, CRUD тарифов), PIN персонала в `Seed:Dev` (S4, нужен pepper).
 
 ### S3 — игры, обновления, ПК
 
@@ -1386,7 +1455,7 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
 | 6 | getPolicies | GET /agents/{pcId}/policies | S1 |
 | 7 | getCommands | GET /agents/{pcId}/commands | S1 |
 | 8 | ackCommand | POST /agents/{pcId}/commands/{commandId}/ack | S1 |
-| — | (AsyncAPI) | WS /ws/agent: все required-операции — `sendPing`/`receiveAgentPing`, 10 команд (§6.4), 7 событий (§6.3), push `walletUpdated`/`sessionUpdated`/`userRevoked` (§6.5) | S1: рукопожатие, ping/pong, очередь и ack, все 10 построителей команд, 7 событий; S2: push сеансов/кошелька/`userRevoked`, `endSession`/`extendSession`; S4: триггеры кассы; S5: `refreshConfig`/`reloadPolicy` по bump версий |
+| — | (AsyncAPI) | WS /ws/agent: все required-операции — `sendPing`/`receiveAgentPing`, 10 команд (§6.4), 7 событий (§6.3), push `walletUpdated`/`sessionUpdated`/`userRevoked` (§6.5) | S1: рукопожатие, ping/pong, очередь и ack, все 10 построителей команд, 7 событий; S2: push сеансов/кошелька; S4: `userRevoked`, `endSession`/`extendSession`; S4: триггеры кассы; S5: `refreshConfig`/`reloadPolicy` по bump версий |
 | 9 | login | POST /auth/login | S2 |
 | 10 | startQrLogin | POST /auth/qr/start | S2 |
 | 11 | getQrLoginStatus | GET /auth/qr/{token} | S2 |
@@ -1477,14 +1546,14 @@ anticheat/report — S3; `PATCH /admin/games/{id}` (реализуется) и `
 | D-7 | Регистрация строгая: неизвестный HWID → pendingApproval, одобрение через `PATCH maintenance:false`; `AutoApprovePcs` только для dev и тестов |
 | D-8 | Цена — одна функция для всех каналов; возврат пропорционален оплаченному; soft delete тарифов и снимок цены в сеансе |
 | D-9 | Бонусы идут на основной баланс (`type=bonus`), `bonus_balance=0` |
-| D-10 | Постоплата останавливается, когда стоимость ≥ баланс + `PostpaidCreditLimit` (0) |
+| D-10 | Постоплата останавливается на границе минуты, когда следующая минута не по средствам (баланс + `PostpaidCreditLimit` = 0); не хватает на первую минуту — `402` |
 | D-11 | Офлайн-реплей принимается по одному токену агента при выполнении условий §5.11, с overdraft |
 | D-12 | Блокировка не останавливает оплату; grace 60 с бесплатно; сервер не завершает сеансы офлайн-ПК раньше 240 мин |
 | D-13 | `features.callAdmin=false`, как и shop/chat/booking/tournaments/topup/apps: у кассы нет окна тикетов; события `callAdmin` из телеметрии сохраняются |
 | D-14 | Каталог игр, товары и политика берутся из seed-JSON в `data/` (upsert по id при старте, bump версий): в контракте нет CRUD игр и товаров |
 | D-15 | Один промокод — один раз на клиента |
 | D-16 | Зона времени клуба `Asia/Tashkent` из конфига; вся календарная логика в местном времени |
-| D-17 | TTL токена игрока 12 ч; неудачный вход считается один раз на `X-Trace-Id` |
+| D-17 | TTL токена игрока 12 ч; неудачный вход считается по имени; один повтор `X-Trace-Id` (refresh агента) бесплатный, следующие считаются |
 | D-18 | QR: `start` и `status` реализованы, но без маршрута подтверждения статус всегда `pending`→`expired`; вкладку QR прячем флагом, когда он появится в контракте |
 | D-19 | Одна сеть, один клуб на развёртывание, `club_id` везде; `/admin/network` → 501 |
 | D-20 | Один инстанс (advisory lock `CSHub`); масштабирование — позже, через LISTEN/NOTIFY |
@@ -1507,6 +1576,11 @@ anticheat/report — S3; `PATCH /admin/games/{id}` (реализуется) и `
 8. `HeartbeatResponse.pendingCommands` и AsyncAPI §7: не считать команды, доставленные по текущему живому WS за
    последние 5 мин (правило N1, §6.4). Сейчас контракт их включает («включая уже отправленные по WS») и обещает
    совпадение с `GET /agents/{pcId}/commands`; сервер отдаёт меньше.
+9. `createSession`: `minutes` обязателен только для почасовой **предоплаты** (киоск для постоплаты его не шлёт, а
+   абзац об офлайне сам говорит, что агент подставляет `maxOfflineMinutes`). Сервер уже так и принимает (§5.2 п. 8).
+10. `SessionExtendedData`: необязательный `idempotencyKey` онлайн-продления, ответ на которое агент потерял — сервер
+    сверял бы по нему, а не по времени (§5.12).
+11. AsyncAPI `pushUserRevoked`: уточнить, что `logout` самого ПК его не вызывает.
 
 ### 12.3 Вопросы владельцу (только то, что без него не решить)
 

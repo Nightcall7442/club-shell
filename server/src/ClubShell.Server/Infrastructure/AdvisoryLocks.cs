@@ -17,5 +17,8 @@ public static class AdvisoryLocks
     /// <summary>The single server instance that holds the WS registry (D-20, DESIGN §6.8); session-scoped for the process life.</summary>
     public static readonly long Hub = Key("CSHub");
 
+    /// <summary>The session tick (DESIGN §8): held by <c>SessionTickWorker</c> for its life, a second instance waits.</summary>
+    public static readonly long Sessions = Key("CSSess");
+
     public static long Key(string tag) => Encoding.ASCII.GetBytes(tag).Aggregate(0L, (key, b) => (key << 8) | b);
 }

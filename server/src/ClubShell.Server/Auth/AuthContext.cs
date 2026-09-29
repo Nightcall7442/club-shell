@@ -35,3 +35,12 @@ public sealed record AgentContext(AgentPrincipal Principal, PcRow Pc);
 
 /// <summary>The club whose enrollment key authenticated a <c>club</c>-mode request.</summary>
 public sealed record ClubContext(Guid ClubId);
+
+/// <summary>The player of the request: <c>X-User-Token</c> valid and bound to the PC of the agent token (DESIGN §3.4).</summary>
+public sealed record UserContext(Guid UserId);
+
+/// <summary>
+/// Why <c>X-User-Token</c> was not accepted (<c>invalid</c> | <c>expired</c> | <c>boundElsewhere</c> | <c>revoked</c>): set in
+/// the agent-optional-user mode, where the request goes on without a player (offline replay of <c>POST /sessions</c>).
+/// </summary>
+public sealed record UserTokenProblem(string Problem);
