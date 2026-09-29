@@ -1,0 +1,462 @@
+[
+  {
+    "id": "5f504f55-cff1-4d58-bedc-5976a3cee48b",
+    "title": "Counter-Strike 2",
+    "launcher": "steam",
+    "launcherAppId": "730",
+    "exePath": null,
+    "args": null,
+    "installPath": null,
+    "installed": false,
+    "category": [
+      "shooter",
+      "competitive"
+    ],
+    "tags": [
+      "fps",
+      "esports",
+      "team"
+    ],
+    "coverUrl": "https://cdn.cloudflare.steamstatic.com/steam/apps/730/library_600x900.jpg",
+    "heroUrl": "https://cdn.cloudflare.steamstatic.com/steam/apps/730/library_hero.jpg",
+    "videoUrl": null,
+    "description": "The definitive competitive tactical shooter. 5v5 bomb defusal on the Source 2 engine.",
+    "ageRating": 16,
+    "popularity": 98,
+    "lastPlayedAt": null,
+    "requiresAccount": false,
+    "antiCheat": "none",
+    "minSpec": null,
+    "sizeGb": 35.2,
+    "version": null
+  },
+  {
+    "id": "b3f9dd56-a3ec-4c5e-abf6-412ce22c1e2b",
+    "title": "Dota 2",
+    "launcher": "steam",
+    "launcherAppId": "570",
+    "exePath": null,
+    "args": null,
+    "installPath": null,
+    "installed": false,
+    "category": [
+      "moba",
+      "competitive"
+    ],
+    "tags": [
+      "moba",
+      "esports",
+      "strategy"
+    ],
+    "coverUrl": "https://cdn.cloudflare.steamstatic.com/steam/apps/570/library_600x900.jpg",
+    "heroUrl": "https://cdn.cloudflare.steamstatic.com/steam/apps/570/library_hero.jpg",
+    "videoUrl": null,
+    "description": "Every day, millions of players worldwide enter battle as one of over a hundred Dota heroes.",
+    "ageRating": 12,
+    "popularity": 95,
+    "lastPlayedAt": null,
+    "requiresAccount": false,
+    "antiCheat": "none",
+    "minSpec": null,
+    "sizeGb": 48.7,
+    "version": null
+  },
+  {
+    "id": "33174b83-0a7e-4d2c-a637-c242aedcfe67",
+    "title": "VALORANT",
+    "launcher": "riot",
+    "launcherAppId": "valorant",
+    "exePath": null,
+    "args": null,
+    "installPath": null,
+    "installed": false,
+    "category": [
+      "shooter",
+      "competitive"
+    ],
+    "tags": [
+      "fps",
+      "hero",
+      "esports"
+    ],
+    "coverUrl": "",
+    "heroUrl": null,
+    "videoUrl": null,
+    "description": "A 5v5 character-based tactical shooter where precise gunplay meets unique agent abilities.",
+    "ageRating": 16,
+    "popularity": 94,
+    "lastPlayedAt": null,
+    "requiresAccount": true,
+    "antiCheat": "vanguard",
+    "minSpec": null,
+    "sizeGb": 30.1,
+    "version": null
+  },
+  {
+    "id": "1c705348-c142-44ba-b3bf-4aeae6147250",
+    "title": "League of Legends",
+    "launcher": "riot",
+    "launcherAppId": "league_of_legends",
+    "exePath": null,
+    "args": null,
+    "installPath": null,
+    "installed": false,
+    "category": [
+      "moba",
+      "competitive"
+    ],
+    "tags": [
+      "moba",
+      "esports"
+    ],
+    "coverUrl": "",
+    "heroUrl": null,
+    "videoUrl": null,
+    "description": "Team up with friends and test your skills in 5v5 MOBA combat.",
+    "ageRating": 12,
+    "popularity": 88,
+    "lastPlayedAt": null,
+    "requiresAccount": true,
+    "antiCheat": "vanguard",
+    "minSpec": null,
+    "sizeGb": 22.4,
+    "version": null
+  },
+  {
+    "id": "0af65032-34eb-4c08-99ab-43377f0d305e",
+    "title": "Fortnite",
+    "launcher": "epic",
+    "launcherAppId": "fn",
+    "exePath": null,
+    "args": null,
+    "installPath": null,
+    "installed": false,
+    "category": [
+      "battle-royale",
+      "shooter"
+    ],
+    "tags": [
+      "br",
+      "building",
+      "crossplay"
+    ],
+    "coverUrl": "",
+    "heroUrl": null,
+    "videoUrl": null,
+    "description": "Drop in, build up, and be the last one standing in the battle royale that started it all.",
+    "ageRating": 12,
+    "popularity": 91,
+    "lastPlayedAt": null,
+    "requiresAccount": true,
+    "antiCheat": "eac",
+    "minSpec": null,
+    "sizeGb": 42,
+    "version": null
+  },
+  {
+    "id": "8af2ad7f-1a50-44c4-ba25-1f86163b8fb6",
+    "title": "Apex Legends",
+    "launcher": "steam",
+    "launcherAppId": "1172470",
+    "exePath": null,
+    "args": null,
+    "installPath": null,
+    "installed": false,
+    "category": [
+      "battle-royale",
+      "shooter"
+    ],
+    "tags": [
+      "br",
+      "hero",
+      "squad"
+    ],
+    "coverUrl": "https://cdn.cloudflare.steamstatic.com/steam/apps/1172470/library_600x900.jpg",
+    "heroUrl": "https://cdn.cloudflare.steamstatic.com/steam/apps/1172470/library_hero.jpg",
+    "videoUrl": null,
+    "description": "Master an ever-growing roster of legendary characters in a squad-based battle royale.",
+    "ageRating": 16,
+    "popularity": 86,
+    "lastPlayedAt": null,
+    "requiresAccount": true,
+    "antiCheat": "eac",
+    "minSpec": null,
+    "sizeGb": 75.3,
+    "version": null
+  },
+  {
+    "id": "de8ba117-0468-496f-ade2-18b420271424",
+    "title": "PUBG: BATTLEGROUNDS",
+    "launcher": "steam",
+    "launcherAppId": "578080",
+    "exePath": null,
+    "args": null,
+    "installPath": null,
+    "installed": false,
+    "category": [
+      "battle-royale",
+      "shooter"
+    ],
+    "tags": [
+      "br",
+      "realistic"
+    ],
+    "coverUrl": "https://cdn.cloudflare.steamstatic.com/steam/apps/578080/library_600x900.jpg",
+    "heroUrl": "https://cdn.cloudflare.steamstatic.com/steam/apps/578080/library_hero.jpg",
+    "videoUrl": null,
+    "description": "Land on strategic locations, loot weapons and supplies, and survive to become the last team standing.",
+    "ageRating": 16,
+    "popularity": 80,
+    "lastPlayedAt": null,
+    "requiresAccount": false,
+    "antiCheat": "battlEye",
+    "minSpec": null,
+    "sizeGb": 40,
+    "version": null
+  },
+  {
+    "id": "a0f8000e-382c-4637-8054-83cca5c0bee8",
+    "title": "Grand Theft Auto V",
+    "launcher": "steam",
+    "launcherAppId": "271590",
+    "exePath": null,
+    "args": null,
+    "installPath": null,
+    "installed": false,
+    "category": [
+      "action",
+      "open-world"
+    ],
+    "tags": [
+      "open-world",
+      "story",
+      "online"
+    ],
+    "coverUrl": "https://cdn.cloudflare.steamstatic.com/steam/apps/271590/library_600x900.jpg",
+    "heroUrl": "https://cdn.cloudflare.steamstatic.com/steam/apps/271590/library_hero.jpg",
+    "videoUrl": null,
+    "description": "Explore the sprawling city of Los Santos and Blaine County in the ultimate open-world experience.",
+    "ageRating": 18,
+    "popularity": 84,
+    "lastPlayedAt": null,
+    "requiresAccount": true,
+    "antiCheat": "battlEye",
+    "minSpec": null,
+    "sizeGb": 105,
+    "version": null
+  },
+  {
+    "id": "c2b598ef-df8d-4fdc-8e66-a44e480d5447",
+    "title": "Minecraft",
+    "launcher": "exe",
+    "launcherAppId": null,
+    "exePath": "D:\\Games\\Minecraft\\MinecraftLauncher.exe",
+    "args": null,
+    "installPath": null,
+    "installed": false,
+    "category": [
+      "sandbox",
+      "survival"
+    ],
+    "tags": [
+      "sandbox",
+      "creative",
+      "family"
+    ],
+    "coverUrl": "",
+    "heroUrl": null,
+    "videoUrl": null,
+    "description": "Build, explore and survive in a blocky, procedurally generated 3D world.",
+    "ageRating": 6,
+    "popularity": 82,
+    "lastPlayedAt": null,
+    "requiresAccount": true,
+    "antiCheat": "none",
+    "minSpec": null,
+    "sizeGb": 1.2,
+    "version": null
+  },
+  {
+    "id": "0b3c62d4-421f-4751-9ff6-92e250adce39",
+    "title": "Rocket League",
+    "launcher": "epic",
+    "launcherAppId": "rl",
+    "exePath": null,
+    "args": null,
+    "installPath": null,
+    "installed": false,
+    "category": [
+      "sports",
+      "arcade"
+    ],
+    "tags": [
+      "cars",
+      "football",
+      "crossplay"
+    ],
+    "coverUrl": "",
+    "heroUrl": null,
+    "videoUrl": null,
+    "description": "Soccer meets driving in this high-octane hybrid of arcade-style sports and vehicular mayhem.",
+    "ageRating": 6,
+    "popularity": 76,
+    "lastPlayedAt": null,
+    "requiresAccount": false,
+    "antiCheat": "none",
+    "minSpec": null,
+    "sizeGb": 20.5,
+    "version": null
+  },
+  {
+    "id": "a21edc1f-0f8b-4dc4-88e4-2b3d5d737efb",
+    "title": "Overwatch 2",
+    "launcher": "battleNet",
+    "launcherAppId": "pro",
+    "exePath": null,
+    "args": null,
+    "installPath": null,
+    "installed": false,
+    "category": [
+      "shooter",
+      "hero"
+    ],
+    "tags": [
+      "fps",
+      "hero",
+      "team"
+    ],
+    "coverUrl": "",
+    "heroUrl": null,
+    "videoUrl": null,
+    "description": "Team-based action with a diverse cast of heroes, each with unique abilities.",
+    "ageRating": 12,
+    "popularity": 78,
+    "lastPlayedAt": null,
+    "requiresAccount": true,
+    "antiCheat": "none",
+    "minSpec": null,
+    "sizeGb": 50,
+    "version": null
+  },
+  {
+    "id": "f0874527-034c-4469-8cf6-1943c175ced3",
+    "title": "EA SPORTS FC 24",
+    "launcher": "ea",
+    "launcherAppId": "fc24",
+    "exePath": null,
+    "args": null,
+    "installPath": null,
+    "installed": false,
+    "category": [
+      "sports"
+    ],
+    "tags": [
+      "football",
+      "sim"
+    ],
+    "coverUrl": "",
+    "heroUrl": null,
+    "videoUrl": null,
+    "description": "The next chapter in the world's game with HyperMotionV technology and over 19 000 players.",
+    "ageRating": 3,
+    "popularity": 79,
+    "lastPlayedAt": null,
+    "requiresAccount": true,
+    "antiCheat": "eac",
+    "minSpec": null,
+    "sizeGb": 100,
+    "version": null
+  },
+  {
+    "id": "cbc0251d-0ded-42f4-b1fb-f5b9691a9f97",
+    "title": "Call of Duty: Warzone",
+    "launcher": "battleNet",
+    "launcherAppId": "auks",
+    "exePath": null,
+    "args": null,
+    "installPath": null,
+    "installed": false,
+    "category": [
+      "battle-royale",
+      "shooter"
+    ],
+    "tags": [
+      "br",
+      "fps"
+    ],
+    "coverUrl": "",
+    "heroUrl": null,
+    "videoUrl": null,
+    "description": "Massive combat arenas, Resurgence and Plunder modes in the free-to-play battle royale.",
+    "ageRating": 18,
+    "popularity": 83,
+    "lastPlayedAt": null,
+    "requiresAccount": true,
+    "antiCheat": "ricochet",
+    "minSpec": null,
+    "sizeGb": 125,
+    "version": null
+  },
+  {
+    "id": "2d803fa4-ef83-4642-aa18-b6c27b9fa9bb",
+    "title": "Rust",
+    "launcher": "steam",
+    "launcherAppId": "252490",
+    "exePath": null,
+    "args": null,
+    "installPath": null,
+    "installed": false,
+    "category": [
+      "survival",
+      "open-world"
+    ],
+    "tags": [
+      "survival",
+      "pvp",
+      "crafting"
+    ],
+    "coverUrl": "https://cdn.cloudflare.steamstatic.com/steam/apps/252490/library_600x900.jpg",
+    "heroUrl": "https://cdn.cloudflare.steamstatic.com/steam/apps/252490/library_hero.jpg",
+    "videoUrl": null,
+    "description": "The only aim in Rust is to survive. Overcome struggles such as hunger, thirst and cold.",
+    "ageRating": 18,
+    "popularity": 70,
+    "lastPlayedAt": null,
+    "requiresAccount": false,
+    "antiCheat": "eac",
+    "minSpec": null,
+    "sizeGb": 25,
+    "version": null
+  },
+  {
+    "id": "7321bddd-728b-4529-8fb6-1e74e11c4524",
+    "title": "THE FINALS",
+    "launcher": "steam",
+    "launcherAppId": "2073850",
+    "exePath": null,
+    "args": null,
+    "installPath": null,
+    "installed": false,
+    "category": [
+      "shooter",
+      "competitive"
+    ],
+    "tags": [
+      "fps",
+      "destruction",
+      "team"
+    ],
+    "coverUrl": "https://cdn.cloudflare.steamstatic.com/steam/apps/2073850/library_600x900.jpg",
+    "heroUrl": "https://cdn.cloudflare.steamstatic.com/steam/apps/2073850/library_hero.jpg",
+    "videoUrl": null,
+    "description": "Fight alongside your teammates in a virtual game show with fully destructible arenas.",
+    "ageRating": 16,
+    "popularity": 72,
+    "lastPlayedAt": null,
+    "requiresAccount": false,
+    "antiCheat": "eac",
+    "minSpec": null,
+    "sizeGb": 32,
+    "version": null
+  }
+]

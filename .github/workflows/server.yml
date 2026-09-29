@@ -55,7 +55,7 @@ jobs:
               - 'server/**'
               - 'src/ClubShell.Contracts/**'
               - 'src/ClubShell.Core/**'
-              - 'config/policies.example.json'
+              - 'config/*.example.json'
               - 'Directory.*.props'
               - 'global.json'
               - 'nuget.config'

@@ -1590,6 +1590,10 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
     подкаталоге версии.
   - Railway монтирует volume от root, процесс в образе идёт от `app`: при отказе записи в чек-листе README — переменная
     `RAILWAY_RUN_UID=0`. Не проверено на Railway.
+  - Стартовые каталоги: `config/games.example.json` (15 игр, обложки Steam с CDN Steam) и `config/products.example.json`
+    (12 товаров) копируются в образ как `seed/*.example.json` и включаются переменными `Catalog__GamesSeedPath` /
+    `Catalog__ProductsSeedPath`; по умолчанию пути остаются `data/*.json` (D-14 не меняется). Тест `SeedExamplesTests`
+    грузит оба файла и читает их как агент и как касса.
   - В образ не попадают `appsettings.Development.json` и `Properties/`: `server/Dockerfile.dockerignore` (BuildKit) пропускает
     только то, что копирует Dockerfile. Файлы: `server/.env.example` (переменные compose), `server/Dockerfile.dockerignore`.
 

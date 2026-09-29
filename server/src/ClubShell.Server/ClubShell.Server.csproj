@@ -24,6 +24,9 @@
     <Content Include="../../contracts/openapi.json" Link="contracts/openapi.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <!-- Default policy seed (DESIGN §11 S1, D-14) when data/policy.json is absent. -->
     <Content Include="../../../config/policies.example.json" Link="seed/policies.example.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- Starter catalogs: enabled with Catalog:GamesSeedPath=seed/games.example.json and Catalog:ProductsSeedPath=seed/products.example.json. -->
+    <Content Include="../../../config/games.example.json" Link="seed/games.example.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../../config/products.example.json" Link="seed/products.example.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
