@@ -1,0 +1,23 @@
+# Railway config-as-code for the central server (docs/server/DESIGN.md §11 S6, D-23; region EU West, Amsterdam).
+# Service settings: Root Directory = repository root (the Dockerfile builds from src/ClubShell.Contracts), config path
+# /server/railway.toml, one replica, auto-deploy from main with "Wait for CI", a volume on /app/data.
+# Checklist of the first deploy: server/README.md.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "server/Dockerfile"
+watchPatterns = [
+  "server/**",
+  "src/ClubShell.Contracts/**",
+  "config/policies.example.json",
+  "Directory.*.props",
+  "global.json",
+  "nuget.config",
+]
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+# A service with a volume cannot have replicas: the WebSocket hub keeps its state in memory (DESIGN D-20).
+numReplicas = 1

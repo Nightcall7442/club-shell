@@ -4,8 +4,9 @@
 Заменяет `tools/MockServer` в продакшене. Дизайн и план срезов — [`docs/server/DESIGN.md`](../docs/server/DESIGN.md);
 провод задаёт контракт `deepunites/club-contracts`, его копия лежит в [`contracts/`](contracts).
 
-Состояние: **срезы S3 и S4** — каталог игр, обновления, ПК и касса (часть 1) поверх S2 (вход игрока, пользователи,
-сеансы, биллинг, кошелёк), S1 (агенты, WS hub) и S0 (скелет, миграции, аутентификация, `/health`, 501).
+Состояние: **срезы S0–S6** — скелет и аутентификация (S0), агенты и WS hub (S1), игрок, сеансы, биллинг, кошелёк (S2),
+игры, обновления, ПК (S3), касса (S4, S5), образ, compose, Railway и smoke в CI (S6). Развёртывание — раздел
+[«Docker и развёртывание»](#docker-и-развёртывание).
 
 - Реализованы 8 операций агента: `register`, `refresh`, `heartbeat`, `sendTelemetry`, `getConfig`, `getPolicies`,
   `getCommands`, `ackCommand`, и канал `/ws/agent` (рукопожатие, ping/pong, очередь команд с ack по WS и REST,
@@ -30,7 +31,14 @@
   леджера, `expectedCash` = открытие + наличные пополнения). Журнал действий — `audit_entries` (append-only). CORS только
   для `/api/v1/admin/*` и `Cors:AllowedOrigins`. `PcStatusWorker` пишет `pcOffline` в `telemetry_events`. Первый старт с
   пустой `staff` создаёт владельца с `Club:OwnerPin` (пусто — PIN пишется в лог один раз).
-- Остальные 52 операции контракта отвечают `501` (кассиру на owner-only из них — сначала `403 ownerOnly`).
+- S5: 27 операций кассы, часть 2 — персонал (`adminStaff`/`AddStaff`/`UpdateStaff`; последний активный владелец не
+  отключается), клиенты (`adminClients` … `adminClientTransactions`; `adminRedeemPromo` — атомарно и раз на клиента), тарифы,
+  товары и остатки (вебхук `lowStock`), настройки клуба (`adminSettings`/`SaveSettings` по JSON Schema контракта,
+  `refreshConfig` подключённым ПК), ключ API (`ck_…`: HMAC под pepper + запечатанная копия для владельца), игры
+  (`adminGames`, сверх контракта `PATCH /admin/games/{id}`), здоровье ПК (`adminHealth`, тикеты, автообслуживание), контроль
+  (`adminControl`, 7 флагов) и отчёты (`adminReports`). Воркеры `HealthWorker`, `ClubTickWorker` (автоматизация),
+  `WebhookWorker` (защита от SSRF, 3 повтора), `MaintenanceWorker`.
+- Остальные 25 операций контракта отвечают `501` (кассиру на owner-only из них — сначала `403 ownerOnly`).
 - Деньги (DESIGN §4.3, §5): единственная точка записи — `Wallet/Ledger.cs` (строка кошелька под `FOR UPDATE`,
   append-only `ledger_entries` с `balance_after`; `wallets.main_balance` — кеш суммы леджера). Цена — одна функция
   `Sessions/Billing/Pricing.cs`: день недели и праздники в зоне клуба, лучшая из скидок группы, уровня лояльности и
@@ -71,8 +79,12 @@
 ```
 server/
   ClubShell.Server.sln        сервер + тесты (+ src/ClubShell.Contracts, src/ClubShell.Core — реальный агентский клиент для тестов)
+  Dockerfile                  образ (контекст сборки — корень репозитория), Dockerfile.dockerignore
+  compose.yaml, .env.example  postgres:18 + сервер для запуска одной командой
+  railway.toml                конфигурация сервиса Railway
   contracts/                  вендорный контракт: openapi.yaml, asyncapi.yaml, openapi.json, asyncapi.json, REF
   scripts/sync-contracts.ps1  обновление contracts/ из club-contracts
+  scripts/smoke.sh            smoke запущенного сервера: /health, регистрация ПК, подписанный heartbeat
   src/ClubShell.Server/       ASP.NET Core minimal API, net10.0
   tests/ClubShell.Server.Tests/  xunit + WebApplicationFactory + временная база PostgreSQL
 ```
@@ -96,6 +108,96 @@ dotnet run --project server/src/ClubShell.Server
 Каталог `data/` в git не попадает; в продакшене это volume. Ротация ключа — заменить файл и перезапустить сервер:
 агенты один раз обновят токен.
 
+## Docker и развёртывание
+
+Образ собирается из **корня репозитория** (сервер берёт `src/ClubShell.Contracts` и `config/`):
+
+```bash
+docker build -f server/Dockerfile -t clubshell-server .
+```
+
+Многоэтапная сборка `mcr.microsoft.com/dotnet/sdk:10.0` → `aspnet:10.0`; процесс идёт от пользователя `app` (не root), слушает
+8080 (при заданном `PORT` — его). Каталог `/app/data` (ключ JWT, pepper PINов, seed-JSON) отдаётся под volume; `VOLUME` в
+Dockerfile нет намеренно: Railway его не принимает. В образ не попадают `appsettings.Development.json` и `launchSettings.json`.
+
+### docker compose
+
+```bash
+cp server/.env.example server/.env        # POSTGRES_PASSWORD, CLUB_ENROLLMENT_KEY, CORS_ORIGIN
+docker compose -f server/compose.yaml up -d --build
+curl http://localhost:8080/health          # {"status":"ok"}
+```
+
+`server/compose.yaml`: `postgres:18` (volume `pgdata` монтируется в `/var/lib/postgresql`: у образов PostgreSQL 18 кластер лежит
+в подкаталоге версии) и сервер (volume `data` в `/app/data`), у обоих healthcheck. Один экземпляр сервера на базу (D-20).
+
+Smoke — то же самое делает CI (job `docker-smoke`): `/health`, регистрация ПК и подписанный heartbeat агента.
+
+```bash
+CLUB_KEY=<CLUB_ENROLLMENT_KEY> bash server/scripts/smoke.sh http://localhost:8080
+```
+
+Сервер должен работать с `Club__AutoApprovePcs=true` (иначе регистрация отвечает `403 pendingApproval` — так задумано); нужны
+`curl`, `openssl`, `jq`.
+
+### Reverse proxy
+
+- TLS завершает прокси, сервер слушает HTTP. Прокси **не переписывает путь** (`/api/v1/*` и `/ws/agent` уходят как есть) и
+  пропускает WebSocket upgrade (`Upgrade`, `Connection`); таймаут простоя WS — не меньше минуты (сервер шлёт ping раз в 20 с).
+- Адрес клиента (по нему считается лимит неверных PIN): либо `Proxy__ClientIpHeader=X-Real-IP`, либо список доверенных
+  прокси `Proxy__Trusted__0=<CIDR>` (тогда читается `X-Forwarded-For` / `-Proto`). Включайте только если сервер доступен
+  исключительно через этот прокси и тот перезаписывает присланный клиентом заголовок; иначе клиент подставит любой адрес сам.
+
+### Секреты и ротация
+
+| Что | Где | Ротация |
+|---|---|---|
+| Ключ подписи JWT агента | `data/jwt-signing-key.pem` (создаётся при первом старте) | заменить файл и перезапустить: агенты один раз обновят токен |
+| Pepper PINов и паролей | `data/pin-pepper.key` | **не менять**: без него все PIN персонала и пароли клиентов недействительны |
+| Ключ регистрации агентов | `Club__EnrollmentKey` | новый ключ в `Club__EnrollmentKey`, старый в `Club__PreviousEnrollmentKey`; раздать агентам; убрать старый |
+| Ключ API `ck_…` | хеш в базе, показывается владельцу в кассе | `adminRotateApiKey`: старый ключ недействителен сразу |
+| PIN владельца | первый старт: `Club__OwnerPin`, пусто — случайный PIN один раз в лог | менять в кассе (`adminUpdateStaff`) |
+| Пароль PostgreSQL | `POSTGRES_PASSWORD` / переменные Railway | менять вместе со строкой подключения |
+
+### Резервное копирование и восстановление
+
+Копируйте **вместе**: базу PostgreSQL и каталог `data/`. Без `pin-pepper.key` PIN и пароли из базы не проверить; без ключа
+JWT агенты один раз пройдут refresh. Восстановление: развернуть базу из копии, положить `data/` на volume, запустить сервер
+(миграции добавят недостающее).
+
+```bash
+docker compose -f server/compose.yaml exec db pg_dump -U clubshell -Fc clubshell > clubshell.dump
+docker compose -f server/compose.yaml cp server:/app/data ./data-backup
+```
+
+### Railway (прод, EU West — Амстердам)
+
+`server/railway.toml` задаёт сборку из Dockerfile, healthcheck `/health` и одну реплику. Настройки сервиса Railway: Root
+Directory — корень репозитория, config path `/server/railway.toml`, автодеплой из `main` с «Wait for CI». Сервис с volume не
+масштабируется и не деплоится параллельно: старый инстанс останавливается до старта нового (короткий простой на деплой;
+агенты переподключаются сами, команды лежат в БД).
+
+Чек-лист первого деплоя (нужны аккаунт Railway и домен клуба):
+
+1. Проект Railway, регион EU West; сервис **PostgreSQL** в том же проекте.
+2. Сервис из этого репозитория (Root Directory = корень, config path `/server/railway.toml`), реплик — 1.
+3. Volume на `/app/data`. Если сервис не может писать в volume (Railway монтирует его от root, а процесс идёт от `app`),
+   задать переменную `RAILWAY_RUN_UID=0`.
+4. Переменные сервиса:
+   - `ConnectionStrings__Club=Host=${{Postgres.PGHOST}};Port=${{Postgres.PGPORT}};Username=${{Postgres.PGUSER}};Password=${{Postgres.PGPASSWORD}};Database=${{Postgres.PGDATABASE}}`
+   - `ASPNETCORE_ENVIRONMENT=Production`
+   - `Proxy__ClientIpHeader=X-Real-IP`
+   - `Club__EnrollmentKey=<случайная строка>`, `Club__OwnerPin=<PIN владельца>`, `Club__TimeZone=<зона клуба>`
+   - `Cors__AllowedOrigins__0=<origin кассы>`
+5. Проверить, что край Railway перезаписывает присланный клиентом `X-Real-IP` (от этого зависит лимит неверных PIN): запрос
+   с поддельным `X-Real-IP` должен считаться по реальному адресу. **Не проверено.**
+6. Домен: сертификат Railway на `*.up.railway.app` или CNAME домена клуба; `https://<домен>/health` → 200.
+7. `ServerUrl` в MSI агента — этот адрес; ключ регистрации — `Club__EnrollmentKey`. Первый ПК ждёт одобрения владельца в кассе.
+8. Включить автоматические бэкапы volume у PostgreSQL и у `/app/data` (тариф Pro).
+
+Файлы обновлений агента (MSI) сервер не раздаёт: когда `getUpdateManifest` перестанет отвечать 204, MSI лежат в GitHub Releases
+или S3, сервер отдаёт только манифест (лимит HTTP-запроса Railway — 15 минут).
+
 ## Тесты
 
 Тесты создают для каждого класса временную базу `clubshell_test_<guid>` и удаляют её в конце. Строка подключения
@@ -114,7 +216,7 @@ WS-тесты поднимают Kestrel на `127.0.0.1` со случайны�
 каждого теста проверяется инвариант `SUM(ledger_entries.amount) = wallets.main_balance`. Тик сеансов тесты вызывают
 напрямую (`SessionTickWorker.RunOnceAsync`) с `FakeClock` фикстуры.
 
-CI: job `server` в `.github/workflows/server.yml` (ubuntu, сервис `postgres:18`).
+CI: job `server` в `.github/workflows/server.yml` (ubuntu, сервис `postgres:18`) и job `docker-smoke` (образ, compose, `scripts/smoke.sh`).
 
 E2e кассы против этого сервера (DESIGN §10.c; job `e2e-admin-real`): пустая одноразовая база и
 
@@ -124,8 +226,7 @@ $env:ADMIN_SERVER_DB = 'Host=localhost;Port=5433;Database=clubshell_e2e_x;Userna
 pnpm --filter @clubshell/shell-e2e exec playwright test --project admin   # PW_CHANNEL=chrome, если bundled Chromium не стартует
 ```
 
-Playwright сам запускает `dotnet run` (Development, `Seed:Dev`, CORS для `:1431`) и кассу; в S4 идут части
-«вход/карта/смена».
+Playwright сам запускает `dotnet run` (Development, `Seed:Dev`, CORS для `:1431`) и кассу.
 
 ## Конфигурация
 

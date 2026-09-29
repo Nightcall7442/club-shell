@@ -1575,6 +1575,24 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
   down -v`. Сам деплой на Railway не входит в критерии выхода CI: первый деплой проходит по чек-листу README
   вместе с владельцем (нужен его аккаунт Railway и домен).
 
+- **Отличия реализации:**
+  - Smoke против контейнера — `server/scripts/smoke.sh` (curl, openssl, jq), а не `TestAgent`: `TestAgent` привязан к `ServerFixture`
+    (сервер в памяти) и берёт время у его `FakeClock`. Скрипт делает то же: `/health` (≤ 60 с) → register (`X-Club-Key`,
+    `Club__AutoApprovePcs=true`) → подписанный heartbeat (HMAC-SHA256 по `timestamp + METHOD + target + sha256(body)`, ключ —
+    `signingSecret` из base64) → 200. Скрипт проверен локально на собранном сервере и временной базе; образ и compose проверяет
+    job `docker-smoke` (на машине автора Docker не было).
+  - Отдельный тест `PORT` / `Proxy:ClientIpHeader` появился в S0: `HostingTests`.
+  - Job `docker-smoke` не ждёт job `server` (идёт параллельно); `up --wait` ждёт healthcheck до 90 с (сборка образа не входит).
+  - `railway.toml` добавляет `numReplicas = 1` и в `watchPatterns` — `config/policies.example.json` и `nuget.config`: из них
+    собирается образ.
+  - Healthcheck сервера в compose — `bash` и `/dev/tcp`: в образе `aspnet` нет curl, а `sh` (dash) не умеет `/dev/tcp`.
+  - Volume PostgreSQL 18 монтируется в `/var/lib/postgresql`, а не в `.../data`: с 18-й версии образ хранит кластер в
+    подкаталоге версии.
+  - Railway монтирует volume от root, процесс в образе идёт от `app`: при отказе записи в чек-листе README — переменная
+    `RAILWAY_RUN_UID=0`. Не проверено на Railway.
+  - В образ не попадают `appsettings.Development.json` и `Properties/`: `server/Dockerfile.dockerignore` (BuildKit) пропускает
+    только то, что копирует Dockerfile. Файлы: `server/.env.example` (переменные compose), `server/Dockerfile.dockerignore`.
+
 ### 11.1 Все 75 required-операций + WS → срезы
 
 | # | operationId | Метод и путь | Срез |
