@@ -10,7 +10,7 @@ namespace ClubShell.Server.Tests;
 
 /// <summary>
 /// Authentication runs in the operation's mode before the 501 (DESIGN §1, §3.1); every 401 carries <c>details.reason</c>.
-/// User and staff modes are S0 stubs that only require the credential to be present.
+/// Staff mode is still the S0 stub that only requires a bearer token to be present (S4).
 /// </summary>
 public sealed class AuthModeTests(ServerFixture server) : IClassFixture<ServerFixture>
 {
@@ -136,26 +136,35 @@ public sealed class AuthModeTests(ServerFixture server) : IClassFixture<ServerFi
     }
 
     [Fact]
-    public async Task User_mode_requires_user_token_optional_user_does_not()
+    public async Task User_mode_requires_a_live_player_token_of_this_pc_optional_user_does_not()
     {
-        var agent = await TestAgent.CreateAsync(server);
-        var user = $"/api/v1/users/{Guid.NewGuid()}";
-
-        using (var response = await agent.SendAsync(HttpMethod.Get, user))
+        var (agent, player) = await Players.SignedInAsync(server);
+        var transactions = $"/api/v1/wallet/{player.Id}/transactions"; // user mode, still 501
+        using (var response = await agent.SendAsync(HttpMethod.Get, transactions))
         {
-            var body = await Contract.ReadErrorAsync(response, 401, "unauthorized", "userToken");
-            Assert.Equal("invalid", body.GetProperty("error").GetProperty("details").GetProperty("problem").GetString());
-        }
-
-        using (var request = agent.Request(HttpMethod.Get, user))
-        {
-            request.Headers.Add(AgentAuthMiddleware.UserTokenHeader, "user-token");
-            using var response = await server.Http.SendAsync(request);
             Assert.Equal(501, (int)response.StatusCode);
         }
 
-        // GET /games: the user token only enriches the answer, its absence is never 401.
-        using (var response = await agent.SendAsync(HttpMethod.Get, "/api/v1/games"))
+        var token = agent.UserToken;
+        foreach (var (presented, problem) in new[] { ((string?)null, "invalid"), ("not-a-token", "invalid") })
+        {
+            agent.UserToken = presented;
+            using var response = await agent.SendAsync(HttpMethod.Get, transactions);
+            var body = await Contract.ReadErrorAsync(response, 401, "unauthorized", "userToken");
+            Assert.Equal(problem, body.GetProperty("error").GetProperty("details").GetProperty("problem").GetString());
+        }
+
+        // A player token is bound to the PC it was issued on.
+        var other = await TestAgent.CreateAsync(server);
+        other.UserToken = token;
+        using (var response = await other.SendAsync(HttpMethod.Get, transactions))
+        {
+            var body = await Contract.ReadErrorAsync(response, 401, "unauthorized", "userToken");
+            Assert.Equal("boundElsewhere", body.GetProperty("error").GetProperty("details").GetProperty("problem").GetString());
+        }
+
+        // GET /games: the user token only enriches the answer, a bad one is never 401.
+        using (var response = await other.SendAsync(HttpMethod.Get, "/api/v1/games"))
         {
             Assert.Equal(501, (int)response.StatusCode);
         }

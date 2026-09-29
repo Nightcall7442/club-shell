@@ -22,6 +22,9 @@ public sealed class AuthOptions
     /// <summary>Lifetime of an agent refresh token, days.</summary>
     public int RefreshTokenDays { get; set; } = 30;
 
+    /// <summary>Lifetime of a player token, hours: the limit of one continuous sign-in (N3, DESIGN §3.4). There is no player refresh.</summary>
+    public int UserTokenHours { get; set; } = 12;
+
     /// <summary>Request signature window, seconds (contract: ±300).</summary>
     public int SignatureWindowSec { get; set; } = 300;
 }

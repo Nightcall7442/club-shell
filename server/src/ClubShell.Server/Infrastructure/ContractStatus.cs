@@ -17,7 +17,10 @@ public static class ContractStatus
     /// operationIds this server implements; the 501 table and <c>NotImplementedTests</c> both read this list. Slices add
     /// theirs here (S2 also adds <c>getBalance</c>, S3 <c>reportAntiCheat</c>, which the contract still marks notImplemented).
     /// </summary>
-    public static readonly IReadOnlySet<string> Implemented = new HashSet<string>(Agents.AgentEndpoints.Operations, StringComparer.Ordinal);
+    public static readonly IReadOnlySet<string> Implemented = new HashSet<string>(
+        [.. Agents.AgentEndpoints.Operations, .. Auth.PlayerAuthEndpoints.Operations, .. Users.UserEndpoints.Operations,
+         .. Sessions.SessionEndpoints.Operations, .. Wallet.WalletEndpoints.Operations],
+        StringComparer.Ordinal);
 
     private static readonly string[] Methods = ["get", "put", "post", "delete", "patch"];
 

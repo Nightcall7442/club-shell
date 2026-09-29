@@ -6,6 +6,9 @@ using ClubShell.Server.Auth;
 using ClubShell.Server.Idempotency;
 using ClubShell.Server.Infrastructure;
 using ClubShell.Server.Realtime;
+using ClubShell.Server.Sessions;
+using ClubShell.Server.Users;
+using ClubShell.Server.Wallet;
 using Microsoft.AspNetCore.HttpOverrides;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -52,10 +55,15 @@ builder.Services.AddSingleton<IdempotencyStore>();
 builder.Services.AddSingleton<CommandRepository>();
 builder.Services.AddSingleton<AgentSocketHub>();
 builder.Services.AddSingleton<CommandDispatcher>();
+builder.Services.AddSingleton<UserTokens>();
+builder.Services.AddSingleton<Pushes>();
+builder.Services.AddSingleton<SessionService>();
+builder.Services.AddSingleton<SessionTickWorker>();
 var workers = builder.Configuration.GetValue("Workers:Enabled", true);
 if (workers)
 {
     builder.Services.AddSingleton<HubLock>();
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<SessionTickWorker>());
 }
 builder.Services.Configure<ForwardedHeadersOptions>(o =>
 {
@@ -85,6 +93,10 @@ var clubs = app.Services.GetRequiredService<ClubRepository>();
 await clubs.EnsureAsync(clubOptions);
 await clubs.SeedPolicyAsync(JsonDefaults.Deserialize<Policy>(File.ReadAllText(policySeedPath))
     ?? throw new InvalidOperationException($"Policy seed {policySeedPath} is empty"));
+if (builder.Configuration.GetValue("Seed:Dev", false))
+{
+    await DevSeed.SeedAsync(app.Services.GetRequiredService<Npgsql.NpgsqlDataSource>(), app.Services.GetRequiredService<TimeProvider>());
+}
 
 if (proxyOptions.ClientIpHeader.Length > 0)
 {
@@ -102,6 +114,10 @@ app.UseMiddleware<AgentAuthMiddleware>();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapAgentEndpoints();
+app.MapPlayerAuthEndpoints();
+app.MapUserEndpoints();
+app.MapSessionEndpoints();
+app.MapWalletEndpoints();
 app.Map("/ws/agent", (HttpContext context, AgentSocketHub hub) => hub.HandleAsync(context));
 app.MapNotImplemented(ContractStatus.Load(contractPath), ContractStatus.Implemented);
 app.MapFallback("/api/v1/{**route}", context =>

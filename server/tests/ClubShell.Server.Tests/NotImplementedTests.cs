@@ -15,13 +15,20 @@ public sealed class NotImplementedTests(ServerFixture server) : IClassFixture<Se
     [Fact]
     public async Task Every_unimplemented_operation_answers_501_never_404()
     {
-        var agent = await TestAgent.CreateAsync(server);
+        var (agent, _) = await Players.SignedInAsync(server);
         Assert.Equal(102, Contract.Operations.Count);
 
-        // Exactly the operations of the slices done so far (S1: the eight agent operations), each required by the contract.
+        // Exactly the operations of the slices done so far (S1: the eight agent operations; S2: 18 player operations), each
+        // required by the contract, plus getBalance, which S2 implements beyond it (DESIGN §1, §12.2 item 1).
         string[] s1 = ["register", "refresh", "heartbeat", "sendTelemetry", "getConfig", "getPolicies", "getCommands", "ackCommand"];
-        Assert.Equal(s1.Order(), ContractStatus.Implemented.Order());
-        Assert.All(s1, id => Assert.Equal("required", Contract.Operations.Single(o => o.OperationId == id).Operation.GetProperty("x-server-status").GetString()));
+        string[] s2 =
+        [
+            "login", "startQrLogin", "getQrLoginStatus", "guestLogin", "logout", "getUser", "updateUser", "getUserStats",
+            "getUserAchievements", "getUserLoyalty", "getCurrentSession", "createSession", "pauseSession", "resumeSession",
+            "endSession", "extendSession", "postSessionEvents", "getTariffs",
+        ];
+        Assert.Equal(s1.Concat(s2).Append("getBalance").Order(), ContractStatus.Implemented.Order());
+        Assert.All(s1.Concat(s2), id => Assert.Equal("required", Contract.Operations.Single(o => o.OperationId == id).Operation.GetProperty("x-server-status").GetString()));
 
         var pending = Contract.Operations.Where(o => !ContractStatus.Implemented.Contains(o.OperationId)).ToList();
         foreach (var op in pending)
@@ -43,10 +50,10 @@ public sealed class NotImplementedTests(ServerFixture server) : IClassFixture<Se
             Assert.False(response.Headers.Contains("Retry-After"), op.OperationId);
         }
 
-        Assert.Equal(94, pending.Count);
+        Assert.Equal(75, pending.Count);
     }
 
-    /// <summary>Credentials of the operation's contract <c>security</c>; user-token routes also get a (stub-accepted) token.</summary>
+    /// <summary>Credentials of the operation's contract <c>security</c>; agent routes also carry the signed-in player's token.</summary>
     private static HttpRequestMessage Authenticated(ContractOp op, TestAgent agent, HttpMethod method, string url, string? body)
     {
         var schemes = op.Operation.TryGetProperty("security", out var security)
@@ -55,9 +62,7 @@ public sealed class NotImplementedTests(ServerFixture server) : IClassFixture<Se
         HttpRequestMessage request;
         if (schemes.Contains("agentBearer"))
         {
-            request = agent.Request(method, url, body);
-            request.Headers.Add(AgentAuthMiddleware.UserTokenHeader, "user-token");
-            return request;
+            return agent.Request(method, url, body);
         }
 
         request = new HttpRequestMessage(method, url);

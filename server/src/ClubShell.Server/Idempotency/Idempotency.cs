@@ -1,4 +1,7 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using ClubShell.Server.Infrastructure;
 using Dapper;
 using Npgsql;
 
@@ -21,6 +24,35 @@ public sealed record IdempotentResult(int Status, JsonElement? Body, bool Replay
 public sealed class IdempotencyStore(NpgsqlDataSource db, ILogger<IdempotencyStore> logger)
 {
     public const string KeyHeader = "Idempotency-Key";
+    public const string ReplayedHeader = "Idempotent-Replayed";
+
+    /// <summary>
+    /// HTTP glue: the <c>Idempotency-Key</c> of the request (<c>400 validation</c> when <paramref name="keyRequired"/> and
+    /// absent, or not a UUID — its version is not checked, the events key is a hash), the handler in the key's transaction,
+    /// and the answer — a replay with <c>Idempotent-Replayed: true</c>. <paramref name="body"/> is hashed for the log only.
+    /// </summary>
+    public async Task<IResult> ExecuteHttpAsync(
+        HttpContext context, string principal, bool keyRequired, JsonElement? body,
+        Func<NpgsqlConnection, NpgsqlTransaction, Task<IdempotentResult>> handler)
+    {
+        var raw = context.Request.Headers[KeyHeader].ToString();
+        Guid? key = raw.Length == 0 ? null : Guid.TryParse(raw, out var parsed) ? parsed : throw ApiException.Validation(KeyHeader, "format");
+        if (key is null && keyRequired)
+        {
+            throw ApiException.Validation(KeyHeader, "required");
+        }
+
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(body?.GetRawText() ?? ""));
+        var result = await ExecuteAsync(principal, context.Request.Method, context.Request.Path.Value ?? "", key, hash, handler, context.RequestAborted);
+        if (result.Replayed)
+        {
+            context.Response.Headers[ReplayedHeader] = "true";
+        }
+
+        return result.Body is { } stored
+            ? Results.Content(stored.GetRawText(), "application/json; charset=utf-8", statusCode: result.Status)
+            : Results.StatusCode(result.Status);
+    }
 
     /// <summary>
     /// Runs <paramref name="handler"/> in a READ COMMITTED transaction with <c>lock_timeout = 10s</c> (below the agent's

@@ -86,6 +86,29 @@ public sealed class AgentSocketHub(
         }
     }
 
+    /// <summary>
+    /// A push frame (<c>WsPushFrame</c>, DESIGN §6.5) to the PC if it is connected: at most once, never queued — the agent
+    /// reconciles over REST (<c>GET /sessions/current</c>, <c>GET /wallet/…/balance</c>) and the tick resyncs sessions.
+    /// </summary>
+    public async Task<bool> TryPushAsync(Guid pcId, WsPushKind kind, JsonElement payload)
+    {
+        if (!_connections.TryGetValue(pcId, out var connection))
+        {
+            return false;
+        }
+
+        try
+        {
+            await connection.Ready.Task.WaitAsync(connection.Lifetime.Token);
+            await connection.SendAsync(new WsFrame(WsFrameType.Push, Guid.NewGuid(), clock.GetUtcNow(), kind.ToWireName(), payload), connection.Lifetime.Token);
+            return true;
+        }
+        catch (Exception ex) when (ex is WebSocketException or ObjectDisposedException or OperationCanceledException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>Credentials revoked (<c>cv</c> bumped, PC deleted): the socket closes with 4401 at once (§6.7).</summary>
     public Task RevokeAsync(Guid pcId) =>
         _connections.TryGetValue(pcId, out var connection) ? connection.CloseAsync(Unauthorized, "credentials revoked") : Task.CompletedTask;

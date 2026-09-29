@@ -17,12 +17,22 @@ public sealed class AgentOptions
     public int CommandTtlMin { get; set; } = 10;
 }
 
-/// <summary>The <c>Sessions:*</c> values the agent config carries (DESIGN §2.5, §5.9); S2 adds the billing ones.</summary>
+/// <summary><c>Sessions:*</c> (DESIGN §2.5): the agent config carries grace and the offline budget; the rest is billing (§5.10).</summary>
 public sealed class SessionsOptions
 {
+    /// <summary>Free time after <c>ends_at</c> before the tick ends a prepaid session with <c>timeUp</c> (D-12).</summary>
     public int GraceSec { get; set; } = 60;
 
+    /// <summary>Oldest accepted offline <c>startedAt</c>; silence after which the tick ends a session of an offline PC.</summary>
     public int MaxOfflineMinutes { get; set; } = 240;
+
+    public int TickMs { get; set; } = 1000;
+
+    /// <summary>Every this many seconds an open session is pushed to its PC again (<c>sessionUpdated</c>).</summary>
+    public int ResyncSec { get; set; } = 30;
+
+    /// <summary>Postpaid stops when its cost reaches balance + this (tiyin, D-10); null = no limit.</summary>
+    public long? PostpaidCreditLimit { get; set; } = 0;
 }
 
 /// <summary>
