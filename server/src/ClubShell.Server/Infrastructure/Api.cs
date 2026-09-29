@@ -38,31 +38,41 @@ public static class Api
     /// <summary>
     /// A contract DTO (or a hand-written admin request, which resolves by reflection through <see cref="ServerJson.Options"/>)
     /// from a JSON body, with <c>400 validation</c> <c>field</c>/<c>required</c> for each of
-    /// <paramref name="required"/> that is missing or null (the record binder would silently default it) and
-    /// <c>reason=format</c> when a value does not parse.
+    /// <paramref name="required"/> that is missing or null (the record binder would silently default it; a dotted name such
+    /// as <c>result.ok</c> is looked up inside its parent object) and <c>reason=format</c> when a value does not parse. A body
+    /// that is not an object is <c>field=body</c> <c>reason=schema</c> (contract <c>BadRequest</c>: whole-body reasons).
     /// </summary>
     public static T Read<T>(JsonElement body, params string[] required)
     {
         if (body.ValueKind != JsonValueKind.Object)
         {
-            throw ApiException.Validation("body", "format", "JSON object expected");
+            throw ApiException.Validation("body", "schema", "JSON object expected");
         }
 
         foreach (var name in required)
         {
-            if (!body.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)
+            var value = body;
+            foreach (var part in name.Split('.'))
             {
-                throw ApiException.Validation(name, "required");
+                // A parent that is not an object is left to the binder (format).
+                if (value.ValueKind == JsonValueKind.Object && (!value.TryGetProperty(part, out value) || value.ValueKind == JsonValueKind.Null))
+                {
+                    throw ApiException.Validation(name, "required");
+                }
             }
         }
 
         try
         {
-            return body.Deserialize<T>(ServerJson.Options) ?? throw ApiException.Validation("body", "format");
+            return body.Deserialize<T>(ServerJson.Options) ?? throw ApiException.Validation("body", "schema");
         }
-        catch (JsonException ex)
+        catch (JsonException ex) when (ex.Path is { Length: > 2 } path)
         {
-            throw ApiException.Validation(ex.Path is { Length: > 2 } path ? path[2..] : "body", "format", "Malformed JSON body");
+            throw ApiException.Validation(path[2..], "format", "Malformed JSON body");
+        }
+        catch (JsonException)
+        {
+            throw ApiException.Validation("body", "schema", "JSON body does not match the request schema");
         }
     }
 }

@@ -1,5 +1,4 @@
 using System.Text.Json;
-using ClubShell.Contracts.Errors;
 using ClubShell.Server.Auth;
 using ClubShell.Server.Infrastructure;
 using Microsoft.AspNetCore.Http.Features;
@@ -10,8 +9,8 @@ namespace ClubShell.Server.Admin;
 
 /// <summary>
 /// Staff sign-in (slice S4, DESIGN §3.5): <c>adminLogin</c> by PIN (<c>401 invalidPin</c>; after
-/// <see cref="AuthOptions.PinAttempts"/> wrong PINs from one IP within the window <c>429 rateLimited</c> + <c>Retry-After</c>,
-/// for any PIN — the contract does not declare that 429 yet, OQ-4 / §12.2 item 4), <c>adminLogout</c> (always
+/// <see cref="AuthOptions.PinAttempts"/> wrong PINs from one IP (IPv6: one /64) within the window <c>429 rateLimited</c> +
+/// <c>Retry-After</c>, for any PIN — the contract does not declare that 429 yet, OQ-4 / §12.2 item 4), <c>adminLogout</c> (always
 /// <c>200 {ok:true}</c>, <c>ck_</c> is not revoked) and <c>adminMe</c>. <c>active</c> is always true: an inactive member
 /// cannot sign in.
 /// </summary>
@@ -46,16 +45,8 @@ public static class StaffEndpoints
             throw ApiException.Validation("pin", pin.Length == 0 ? "min" : "max");
         }
 
-        var ip = context.Connection.RemoteIpAddress?.ToString() ?? "";
-        if (staff.RetryAfter(ip) is > 0 and var wait)
-        {
-            throw new ApiException(StatusCodes.Status429TooManyRequests, ErrorCode.RateLimited, "Too many wrong PINs", new { retryAfterSec = wait })
-            {
-                Headers = { ["Retry-After"] = wait.ToString(System.Globalization.CultureInfo.InvariantCulture) },
-            };
-        }
-
-        var (token, member) = await staff.LoginAsync(pin, ip) ?? throw ApiException.Unauthorized("invalidPin", "No active staff member with this PIN");
+        var (token, member) = await staff.LoginAsync(pin, context.Connection.RemoteIpAddress)
+            ?? throw ApiException.Unauthorized("invalidPin", "No active staff member with this PIN");
         await using var c = await db.OpenConnectionAsync();
         return AdminJson.Ok(new AdminLoginResponse(token, Member(member), await ShiftEndpoints.OpenShiftAsync(c, member.ClubId)));
     }

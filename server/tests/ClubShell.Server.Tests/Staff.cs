@@ -59,5 +59,19 @@ public static class Staff
         return await Players.ReadAsync(response, status);
     }
 
+    /// <summary>
+    /// The same request twice under one <c>Idempotency-Key</c>: the second answer is the first replayed (same body,
+    /// <c>Idempotent-Replayed: true</c>); the first answer.
+    /// </summary>
+    public static async Task<JsonElement> ReplayedAsync(ServerFixture server, int status, HttpMethod method, string path, string token, object body)
+    {
+        var key = Guid.NewGuid();
+        var first = await ExpectAsync(server, status, method, path, token, body, key);
+        using var again = await server.Http.SendAsync(Request(method, path, token, body, key));
+        Assert.True(JsonElement.DeepEquals(first, await Players.ReadAsync(again, status)), $"{path}: the replay differs from {first}");
+        Assert.Equal("true", again.Headers.GetValues("Idempotent-Replayed").Single());
+        return first;
+    }
+
     public static StringContent JsonBody(object body) => new(body as string ?? JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
 }

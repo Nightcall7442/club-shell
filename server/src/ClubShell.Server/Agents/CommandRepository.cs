@@ -20,16 +20,19 @@ public sealed class CommandRepository(NpgsqlDataSource db, TimeProvider clock)
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<CommandAck>> _waiters = new();
 
     /// <summary>
-    /// Inserts a command; when <paramref name="supersedes"/> names a command of the PC that was not delivered yet, it is
-    /// marked superseded and never delivered (a delivered one is cancelled by the agent itself, AsyncAPI §7).
+    /// Inserts a command (in <paramref name="tx"/> when given, else on its own); when <paramref name="supersedes"/> names a
+    /// command of the PC that was not delivered yet, it is marked superseded and never delivered (a delivered one is
+    /// cancelled by the agent itself, AsyncAPI §7).
     /// </summary>
     public async Task<ServerCommandEnvelope> EnqueueAsync(
-        Guid clubId, Guid pcId, ServerCommandType type, JsonElement? payload, Guid? supersedes, Guid? issuedByStaffId, TimeSpan ttl)
+        Guid clubId, Guid pcId, ServerCommandType type, JsonElement? payload, Guid? supersedes, Guid? issuedByStaffId, TimeSpan ttl,
+        NpgsqlTransaction? tx = null)
     {
         var now = clock.GetUtcNow();
         now = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerMillisecond));
         var name = type.ToWireName();
-        await using var c = await db.OpenConnectionAsync();
+        await using var own = tx is null ? await db.OpenConnectionAsync() : null;
+        var c = tx?.Connection ?? own!;
 
         // The id comes from PostgreSQL 18 uuidv7(): sub-millisecond and monotonic within a backend, so "oldest first"
         // (created_at, id) keeps the enqueue order of commands issued within one millisecond (lock → unlock).
@@ -44,7 +47,8 @@ public sealed class CommandRepository(NpgsqlDataSource db, TimeProvider clock)
                 WHERE id = @supersedes AND pc_id = @pcId AND delivered_at IS NULL AND acked_at IS NULL)
             SELECT id FROM inserted
             """,
-            new { clubId, pcId, name, payload = payload is { } p ? ServerJson.Jsonb(p.GetRawText()) : null, issuedByStaffId, supersedes, now, expiresAt = now + ttl });
+            new { clubId, pcId, name, payload = payload is { } p ? ServerJson.Jsonb(p.GetRawText()) : null, issuedByStaffId, supersedes, now, expiresAt = now + ttl },
+            tx);
         return new ServerCommandEnvelope(id, now, name, payload, null, supersedes, now + ttl);
     }
 

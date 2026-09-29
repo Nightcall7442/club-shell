@@ -1,8 +1,11 @@
 using System.Buffers.Text;
-using System.Collections.Concurrent;
 using System.Globalization;
+using System.Net;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
+using ClubShell.Contracts.Errors;
+using ClubShell.Server.Infrastructure;
 using Dapper;
 using Npgsql;
 
@@ -23,62 +26,138 @@ public sealed class StaffTokens(NpgsqlDataSource db, AuthOptions options, TimePr
 
     private readonly Lazy<byte[]> _pepper = new(() => LoadOrCreatePepper(options.PepperPath));
 
-    /// <summary>Failed PIN logins per client IP (DESIGN §3.6: 5 in 300 s, then 429).</summary>
-    private readonly ConcurrentDictionary<string, Queue<DateTimeOffset>> _failures = new();
+    /// <summary>
+    /// Wrong PINs per client (DESIGN §3.6: 5 in 300 s, then 429), keyed by <see cref="PinLimitKey"/>, oldest first. One
+    /// lock guards the map: login attempts are rare, and a key emptied by a right PIN or swept once per window is dropped,
+    /// so the map holds only clients with failures inside the window.
+    /// </summary>
+    private readonly Dictionary<string, List<DateTimeOffset>> _failures = [];
+
+    private DateTimeOffset _nextSweep;
 
     public byte[] PinHmac(string pin) => HMACSHA256.HashData(_pepper.Value, Encoding.UTF8.GetBytes(pin));
 
     /// <summary>
-    /// Seconds until <paramref name="ip"/> may try a PIN again, or 0. ponytail: in memory, per instance (one instance,
-    /// D-20); a restart forgets the failures.
+    /// The PIN limiter's client key: an IPv4 address (also when mapped into IPv6), or the /64 of an IPv6 one — a single
+    /// subscriber usually holds a whole /64 and could otherwise rotate addresses; "" when unknown.
     /// </summary>
-    public int RetryAfter(string ip)
+    public static string PinLimitKey(IPAddress? ip)
     {
-        if (!_failures.TryGetValue(ip, out var times))
+        if (ip is null)
         {
-            return 0;
+            return "";
         }
 
-        lock (times)
+        if (ip.IsIPv4MappedToIPv6)
+        {
+            ip = ip.MapToIPv4();
+        }
+
+        if (ip.AddressFamily != AddressFamily.InterNetworkV6)
+        {
+            return ip.ToString();
+        }
+
+        var bytes = ip.GetAddressBytes();
+        Array.Clear(bytes, 8, 8);
+        return new IPAddress(bytes) + "/64";
+    }
+
+    /// <summary>
+    /// The active staff member of <paramref name="pin"/> with a new token, or null for a wrong PIN; <c>429 rateLimited</c>
+    /// when <paramref name="client"/> used up its attempts. The attempt is counted as a failure before the lookup and given
+    /// back unless the PIN turned out wrong: check and count are one step, so parallel requests cannot all pass the check
+    /// before any failure is recorded. ponytail: in memory, per instance (one instance, D-20); a restart forgets the failures.
+    /// </summary>
+    public async Task<(string Token, StaffContext Staff)?> LoginAsync(string pin, IPAddress? client)
+    {
+        var key = PinLimitKey(client);
+        var attempt = TakeAttempt(key);
+        var wrong = false;
+        try
         {
             var now = clock.GetUtcNow();
-            while (times.Count > 0 && now - times.Peek() >= TimeSpan.FromSeconds(options.PinWindowSec))
+            await using var c = await db.OpenConnectionAsync();
+            var staff = await c.QuerySingleOrDefaultAsync<StaffRow>(
+                $"{StaffRow.Select} WHERE s.pin_hmac = @hmac AND s.active", new { hmac = PinHmac(pin) });
+            if (staff is null)
             {
-                times.Dequeue();
+                wrong = true;
+
+                // Security event (DESIGN §3.7); the PIN itself is never logged.
+                logger.LogWarning("Wrong staff PIN from {Ip}", client);
+                return null;
             }
 
-            return times.Count < options.PinAttempts ? 0 : Math.Max(1, (int)Math.Ceiling((times.Peek().AddSeconds(options.PinWindowSec) - now).TotalSeconds));
+            var token = "st_" + Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
+            await c.ExecuteAsync(
+                """
+                INSERT INTO staff_tokens (token_hash, staff_id, club_id, created_at, last_used_at, expires_at)
+                VALUES (@hash, @Id, @ClubId, @now, @now, @expires)
+                """,
+                new { hash = Hash(token), staff.Id, staff.ClubId, now, expires = now.AddDays(options.StaffTokenAbsoluteDays) });
+            return (token, staff.ToContext());
+        }
+        finally
+        {
+            if (!wrong)
+            {
+                GiveBack(key, attempt);
+            }
         }
     }
 
-    /// <summary>The active staff member of <paramref name="pin"/> with a new token, or null (the failure is counted for <paramref name="ip"/>).</summary>
-    public async Task<(string Token, StaffContext Staff)?> LoginAsync(string pin, string ip)
+    /// <summary>Counts one attempt of <paramref name="key"/> and returns its time, or throws 429 with <c>Retry-After</c> when the window is full.</summary>
+    private DateTimeOffset TakeAttempt(string key)
     {
-        var now = clock.GetUtcNow();
-        await using var c = await db.OpenConnectionAsync();
-        var staff = await c.QuerySingleOrDefaultAsync<StaffRow>(
-            $"{StaffRow.Select} WHERE s.pin_hmac = @hmac AND s.active", new { hmac = PinHmac(pin) });
-        if (staff is null)
+        var window = TimeSpan.FromSeconds(options.PinWindowSec);
+        lock (_failures)
         {
-            var times = _failures.GetOrAdd(ip, _ => new Queue<DateTimeOffset>());
-            lock (times)
+            var now = clock.GetUtcNow();
+            if (now >= _nextSweep)
             {
-                times.Enqueue(now);
+                foreach (var (other, old) in _failures)
+                {
+                    old.RemoveAll(t => now - t >= window);
+                    if (old.Count == 0)
+                    {
+                        _failures.Remove(other);
+                    }
+                }
+
+                _nextSweep = now + window;
             }
 
-            // Security event (DESIGN §3.7); the PIN itself is never logged.
-            logger.LogWarning("Wrong staff PIN from {Ip}", ip);
-            return null;
-        }
+            if (!_failures.TryGetValue(key, out var times))
+            {
+                _failures[key] = times = [];
+            }
 
-        var token = "st_" + Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
-        await c.ExecuteAsync(
-            """
-            INSERT INTO staff_tokens (token_hash, staff_id, club_id, created_at, last_used_at, expires_at)
-            VALUES (@hash, @Id, @ClubId, @now, @now, @expires)
-            """,
-            new { hash = Hash(token), staff.Id, staff.ClubId, now, expires = now.AddDays(options.StaffTokenAbsoluteDays) });
-        return (token, staff.ToContext());
+            times.RemoveAll(t => now - t >= window);
+            if (times.Count >= options.PinAttempts)
+            {
+                var wait = Math.Max(1, (int)Math.Ceiling((times[0] + window - now).TotalSeconds));
+                throw new ApiException(StatusCodes.Status429TooManyRequests, ErrorCode.RateLimited, "Too many wrong PINs", new { retryAfterSec = wait })
+                {
+                    Headers = { ["Retry-After"] = wait.ToString(CultureInfo.InvariantCulture) },
+                };
+            }
+
+            times.Add(now);
+            return now;
+        }
+    }
+
+    /// <summary>Takes back the attempt of a login that was not a wrong PIN.</summary>
+    private void GiveBack(string key, DateTimeOffset attempt)
+    {
+        lock (_failures)
+        {
+            if (_failures.TryGetValue(key, out var times) && times.Remove(attempt) && times.Count == 0)
+            {
+                _failures.Remove(key);
+            }
+        }
     }
 
     /// <summary>The staff member of a live token or of the club API key; null when neither.</summary>

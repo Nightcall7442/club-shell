@@ -255,6 +255,15 @@ public sealed class SessionService(NpgsqlDataSource db, TimeProvider clock, Sess
             return known.ToWire(now);
         }
 
+        // The caller checked the PC before this transaction; adminDeletePc may have soft-deleted it since (it holds the row
+        // FOR UPDATE, so this waits for its commit and then sees deleted_at). KEY SHARE keeps a delete from starting until
+        // this session is committed, which it then finds and refuses with pcBusy.
+        if (await c.ExecuteScalarAsync<int?>(
+                "SELECT 1 FROM pcs WHERE id = @Id AND club_id = @ClubId AND deleted_at IS NULL FOR KEY SHARE", new { pc.Id, pc.ClubId }, tx) is null)
+        {
+            throw ApiException.NotFound("pc");
+        }
+
         // The replay records a game the agent already let happen (§5.11): a tariff deleted and a PC put in maintenance or
         // moved to another zone meanwhile, or a curfew, do not refuse it — only a missing, banned or blacklisted player.
         var club = await ClubAsync(c, tx, pc.ClubId);

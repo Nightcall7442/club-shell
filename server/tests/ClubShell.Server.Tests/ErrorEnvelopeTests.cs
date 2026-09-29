@@ -79,7 +79,21 @@ public sealed class ErrorEnvelopeTests(ServerFixture server) : IClassFixture<Ser
         await middleware.InvokeAsync(context);
 
         Assert.Equal(400, context.Response.StatusCode);
-        Contract.AssertError(JsonElement.Parse(((MemoryStream)context.Response.Body).ToArray()), "validation");
+        var body = JsonElement.Parse(((MemoryStream)context.Response.Body).ToArray());
+        Contract.AssertError(body, "validation");
+        Assert.Equal("parse", body.GetProperty("error").GetProperty("details").GetProperty("reason").GetString());
+    }
+
+    /// <summary>Whole-body reasons of the contract's <c>BadRequest</c>: <c>json</c> — not JSON, <c>schema</c> — empty or not an object.</summary>
+    [Theory]
+    [InlineData("{\"pin\":", "json")]
+    [InlineData("", "schema")]
+    [InlineData("[\"0000\"]", "schema")]
+    public async Task Whole_body_errors_are_json_or_schema(string text, string reason)
+    {
+        using var response = await server.Http.PostAsync("/api/v1/admin/login", new StringContent(text, System.Text.Encoding.UTF8, "application/json"));
+        var details = (await Contract.ReadErrorAsync(response, 400, "validation")).GetProperty("error").GetProperty("details");
+        Assert.Equal(("body", reason), (details.GetProperty("field").GetString(), details.GetProperty("reason").GetString()));
     }
 
     [Fact]

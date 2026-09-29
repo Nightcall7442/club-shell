@@ -3,6 +3,7 @@ using ClubShell.Contracts.Commands;
 using ClubShell.Contracts.Pcs;
 using ClubShell.Contracts.Serialization;
 using ClubShell.Server.Agents;
+using Npgsql;
 
 namespace ClubShell.Server.Realtime;
 
@@ -60,13 +61,21 @@ public sealed class CommandDispatcher(CommandRepository commands, AgentSocketHub
     /// <param name="supersedes">An earlier command this one cancels (<c>lock</c> → <c>unlock</c>, AsyncAPI §7).</param>
     public async Task<ServerCommandEnvelope> EnqueueAsync(Guid clubId, Guid pcId, NewCommand command, Guid? supersedes = null, Guid? issuedByStaffId = null)
     {
-        if (!Required.Contains(command.Type))
-        {
-            throw new ArgumentException($"Command {command.Type.ToWireName()} is notImplemented in the contract and is never sent", nameof(command));
-        }
-
-        var envelope = await commands.EnqueueAsync(clubId, pcId, command.Type, command.Payload, supersedes, issuedByStaffId, TimeSpan.FromMinutes(options.CommandTtlMin));
-        await hub.TrySendCommandAsync(pcId, envelope);
+        var envelope = await QueueAsync(null, clubId, pcId, command, supersedes, issuedByStaffId);
+        await SendAsync(pcId, envelope);
         return envelope;
     }
+
+    /// <summary>
+    /// Queues without sending, in <paramref name="tx"/> when given: the command commits with the caller's action and its
+    /// audit entry (DESIGN §3.7); after the commit the caller sends it with <see cref="SendAsync"/>.
+    /// </summary>
+    public Task<ServerCommandEnvelope> QueueAsync(
+        NpgsqlTransaction? tx, Guid clubId, Guid pcId, NewCommand command, Guid? supersedes = null, Guid? issuedByStaffId = null) =>
+        Required.Contains(command.Type)
+            ? commands.EnqueueAsync(clubId, pcId, command.Type, command.Payload, supersedes, issuedByStaffId, TimeSpan.FromMinutes(options.CommandTtlMin), tx)
+            : throw new ArgumentException($"Command {command.Type.ToWireName()} is notImplemented in the contract and is never sent", nameof(command));
+
+    /// <summary>Sends a queued command at once when the PC is connected.</summary>
+    public Task SendAsync(Guid pcId, ServerCommandEnvelope envelope) => hub.TrySendCommandAsync(pcId, envelope);
 }

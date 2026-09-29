@@ -54,7 +54,9 @@ public static class PcAdminEndpoints
         var items = (await pcs.ListAsync(staff.ClubId)).Select(pc =>
         {
             var wire = pc.ToPc(pc.Status(hub.IsConnected(pc.Id), now, TimeSpan.FromSeconds(agents.OfflineAfterSec)), withHwid: false);
-            var m = map[pc.Id];
+
+            // A PC registered between the two reads is drawn with the column defaults of a new seat.
+            var m = map.TryGetValue(pc.Id, out var row) ? row : (pc.Id, 0, 0, "pc", null, null);
             return new AdminHallPc(
                 wire.Id, wire.Name, wire.Zone, wire.Number, wire.Hwid, wire.IpAddress, wire.Status, wire.CurrentSessionId, wire.AgentVersion,
                 wire.ShellVersion, wire.LastHeartbeatAt, m.X, m.Y, m.DeviceKind,
@@ -142,9 +144,9 @@ public static class PcAdminEndpoints
         {
             var now = clock.GetUtcNow();
 
-            // A session insert takes KEY SHARE on this row (its FK): FOR UPDATE orders the two, so the check below sees a
-            // session committed first. ponytail: one racing in right after the delete lands on the deleted seat; its agent
-            // is revoked at once, the cashier ends it from the map.
+            // SessionService.CreateAsync takes KEY SHARE on this row and re-checks deleted_at: FOR UPDATE orders the two. A
+            // session committed first is seen by the check below (pcBusy); a create that locks after us waits for this
+            // commit and answers 404 pc, so no session opens on a deleted seat.
             await c.ExecuteAsync("SELECT 1 FROM pcs WHERE id = @pcId FOR UPDATE", new { pcId }, tx);
             if (await c.ExecuteScalarAsync<bool>("SELECT EXISTS (SELECT 1 FROM sessions WHERE pc_id = @pcId AND state <> 'ended')", new { pcId }, tx))
             {

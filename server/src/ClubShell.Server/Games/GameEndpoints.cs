@@ -17,7 +17,7 @@ namespace ClubShell.Server.Games;
 
 /// <summary>
 /// Games catalog (slice S3, DESIGN §4.2, §7.3): <c>getGames</c> (owner's order first, hidden left out, ETag
-/// <c>"g&lt;catalog_version&gt;-&lt;hash(zone, player's lastPlayedAt)&gt;"</c>, pages up to 1000), <c>getGame</c> and
+/// <c>"g&lt;catalog_version&gt;-&lt;hash(page, zone, player's lastPlayedAt)&gt;"</c>, pages up to 1000), <c>getGame</c> and
 /// <c>sendLaunchReport</c>. <c>X-User-Token</c> only fills <c>lastPlayedAt</c> — the newest successful launch of the
 /// player — and an invalid one is ignored. <c>settingsPaths</c> never leaves the server.
 /// ponytail: <c>zone</c> is echoed into the ETag but filters nothing (no per-zone catalog in the club settings yet), as the mock.
@@ -44,7 +44,13 @@ public static class GameEndpoints
         var (version, catalog) = await c.QuerySingleAsync<(int, string?)>(
             "SELECT catalog_version, (settings -> 'catalog')::text FROM clubs WHERE id = @ClubId", new { pc.ClubId });
         var played = await LastPlayedAsync(c, userId, null);
-        var tag = $"g{version}-{Hash(zone + "|" + string.Join(',', played.OrderBy(p => p.Key).Select(p => $"{p.Key:N}={p.Value.ToUnixTimeMilliseconds()}")))}";
+
+        // No page and no pageSize: the whole catalog at once; only page: pages of 1000 (mock paginate(…, 1000)). The applied
+        // page is part of the ETag: every page is its own representation.
+        var whole = page is null && pageSize is null;
+        var (p, size) = whole ? (1, 0) : Paging.Normalize(page, pageSize ?? "1000", MaxPageSize);
+        var view = whole ? "all" : $"{p}x{size}";
+        var tag = $"g{version}-{Hash($"{view}|{zone}|{string.Join(',', played.OrderBy(g => g.Key).Select(g => $"{g.Key:N}={g.Value.ToUnixTimeMilliseconds()}"))}")}";
         if (AgentEndpoints.NotModified(context, tag))
         {
             return Results.StatusCode(StatusCodes.Status304NotModified);
@@ -61,8 +67,7 @@ public static class GameEndpoints
             .ThenBy(g => g.Id)
             .ToList();
 
-        // No page and no pageSize: the whole catalog at once; only page: pages of 1000 (mock paginate(…, 1000)).
-        var (p, size) = page is null && pageSize is null ? (1, all.Count) : Paging.Normalize(page, pageSize ?? "1000", MaxPageSize);
+        size = whole ? all.Count : size;
         IReadOnlyList<Game> items = all.Skip((int)Math.Min((long)(p - 1) * size, int.MaxValue)).Take(size).ToList();
         return TypedResults.Ok(new GamesListResponse(items, all.Count, p, size, version.ToString(CultureInfo.InvariantCulture)));
     }
@@ -81,19 +86,26 @@ public static class GameEndpoints
     /// <summary>
     /// <c>POST /games/{id}/launch-report</c>: stored once per (session, phase, <c>result.startedAt</c>) — the agent repeats
     /// undelivered reports from its offline queue. A soft-deleted game still takes reports of launches made before.
+    /// Session and player are kept only when the session is this PC's and the body names its player; otherwise the report
+    /// is stored without them (still 204: the contract has no error for it), so a PC can neither set another player's
+    /// <c>lastPlayedAt</c> nor take the dedup slot of another PC's report.
     /// </summary>
     private static async Task<IResult> LaunchReportAsync(HttpContext context, Guid id, [FromBody] JsonElement body, NpgsqlDataSource db, TimeProvider clock)
     {
         var pc = context.Features.GetRequiredFeature<AgentContext>().Pc;
-        var report = Api.Read<LaunchReport>(body, "sessionId", "userId", "result", "durationMs", "launcher", "antiCheat", "phase");
-        if (!body.GetProperty("result").TryGetProperty("startedAt", out _))
+
+        // phase has no Unknown fallback: the binder would answer an unknown value with format, the contract wants enum (§2.4).
+        if (body.ValueKind == JsonValueKind.Object && body.TryGetProperty("phase", out var phase) && phase.ValueKind == JsonValueKind.String
+            && phase.GetString() is not ("launch" or "exit"))
         {
-            throw ApiException.Validation("result.startedAt", "required");
+            throw ApiException.Validation("phase", "enum");
         }
 
-        if (report.Launcher == LauncherType.Unknown)
+        var report = Api.Read<LaunchReport>(
+            body, "sessionId", "userId", "result", "result.ok", "result.startedAt", "durationMs", "launcher", "antiCheat", "antiCheat.kind", "antiCheat.ok", "phase");
+        if (report.Launcher == LauncherType.Unknown || report.AntiCheat.Kind == AntiCheatKind.Unknown)
         {
-            throw ApiException.Validation("launcher", "enum");
+            throw ApiException.Validation(report.Launcher == LauncherType.Unknown ? "launcher" : "antiCheat.kind", "enum");
         }
 
         if (report.DurationMs < 0 || report.PlayedSec < 0)
@@ -107,16 +119,20 @@ public static class GameEndpoints
             throw ApiException.NotFound("game");
         }
 
+        var own = await c.ExecuteScalarAsync<bool>(
+            "SELECT EXISTS (SELECT 1 FROM sessions WHERE id = @SessionId AND pc_id = @pcId AND user_id = @UserId)",
+            new { report.SessionId, pcId = pc.Id, report.UserId });
         var now = clock.GetUtcNow();
         await c.ExecuteAsync(
             """
             INSERT INTO launch_reports (id, club_id, pc_id, game_id, user_id, session_id, phase, started_at, data, created_at)
-            VALUES (@rowId, @ClubId, @pcId, @id, @UserId, @SessionId, @phase, @startedAt, @data::jsonb, @now)
+            VALUES (@rowId, @ClubId, @pcId, @id, @userId, @sessionId, @phase, @startedAt, @data::jsonb, @now)
             ON CONFLICT (session_id, phase, started_at) DO NOTHING
             """,
             new
             {
-                rowId = Guid.CreateVersion7(now), pc.ClubId, pcId = pc.Id, id, report.UserId, report.SessionId,
+                rowId = Guid.CreateVersion7(now), pc.ClubId, pcId = pc.Id, id, userId = own ? report.UserId : (Guid?)null,
+                sessionId = own ? report.SessionId : (Guid?)null,
                 phase = report.Phase == LaunchReportPhase.Exit ? "exit" : "launch", startedAt = report.Result.StartedAt,
                 data = ServerJson.Jsonb(body.GetRawText()), now,
             });

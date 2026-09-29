@@ -85,6 +85,8 @@ public sealed class GamesTests(CatalogServerFixture server) : IClassFixture<Cata
         Assert.Matches("^\"g[0-9]+-[0-9a-f]+\"$", etag);
 
         Assert.Equal(304, await StatusWithETagAsync(agent, etag));
+        Assert.Equal(200, await StatusWithETagAsync(agent, etag, "?page=2&pageSize=500")); // another page is another representation
+        Assert.Equal(200, await StatusWithETagAsync(agent, etag, "?page=1&pageSize=499"));
         await Players.ExecuteAsync(server, "UPDATE clubs SET catalog_version = catalog_version + 1");
         Assert.Equal(200, await StatusWithETagAsync(agent, etag));
     }
@@ -97,6 +99,9 @@ public sealed class GamesTests(CatalogServerFixture server) : IClassFixture<Cata
         Assert.False(game.TryGetProperty("settingsPaths", out _));
         Assert.False(game.GetProperty("installed").GetBoolean());
         Assert.Equal(new[] { @"%APPDATA%\Game0\cfg" }, await Players.ScalarAsync<string[]>(server, "SELECT settings_paths FROM games WHERE id = @id", new { id = CatalogServerFixture.GameId(0) }));
+        var listed = (await Players.ReadAsync(await agent.SendAsync(HttpMethod.Get, "/api/v1/games?page=1&pageSize=1"), 200)).GetProperty("items")[0];
+        Assert.Equal(CatalogServerFixture.GameId(0), listed.GetProperty("id").GetGuid());
+        Assert.False(listed.TryGetProperty("settingsPaths", out _));
 
         using var missing = await agent.SendAsync(HttpMethod.Get, $"/api/v1/games/{Guid.NewGuid()}");
         Assert.Equal("game", (await Contract.ReadErrorAsync(missing, 404, "notFound")).GetProperty("error").GetProperty("details").GetProperty("what").GetString());
@@ -118,9 +123,15 @@ public sealed class LaunchReportTests(CatalogServerFixture server) : IClassFixtu
     public async Task A_repeated_report_is_stored_once_and_sets_lastPlayedAt()
     {
         var (agent, player) = await Players.SignedInAsync(server);
-        var session = Guid.NewGuid();
+        var session = (await Players.StartAsync(agent, player)).Body.GetProperty("id").GetGuid();
         var startedAt = server.Clock.GetUtcNow().AddMinutes(-1);
         var game = CatalogServerFixture.GameId(2);
+        string etagBefore;
+        using (var before = await agent.SendAsync(HttpMethod.Get, "/api/v1/games?page=1&pageSize=5"))
+        {
+            etagBefore = before.Headers.ETag!.ToString();
+        }
+
         for (var i = 0; i < 2; i++)
         {
             await Players.ReadAsync(await agent.PostAsync($"/api/v1/games/{game}/launch-report", Report(session, player.Id, startedAt, ok: true, "launch")), 204);
@@ -142,6 +153,29 @@ public sealed class LaunchReportTests(CatalogServerFixture server) : IClassFixtu
         using var mine = await agent.SendAsync(HttpMethod.Get, "/api/v1/games?page=1&pageSize=5");
         var anonymous = await TestAgent.CreateAsync(server);
         Assert.Equal(200, await GamesTests.StatusWithETagAsync(anonymous, mine.Headers.ETag!.ToString(), "?page=1&pageSize=5"));
+        Assert.Equal(200, await GamesTests.StatusWithETagAsync(agent, etagBefore, "?page=1&pageSize=5")); // same player, new lastPlayedAt
+    }
+
+    /// <summary>
+    /// A PC reports only for its own sessions: another PC's <c>sessionId</c>/<c>userId</c> is stored without them, so it
+    /// neither sets that player's <c>lastPlayedAt</c> nor takes the dedup slot of that PC's real report.
+    /// </summary>
+    [Fact]
+    public async Task A_report_naming_another_pcs_session_is_stored_without_user_and_session()
+    {
+        var (other, _) = await Players.SignedInAsync(server);
+        var (owner, player) = await Players.SignedInAsync(server);
+        var session = (await Players.StartAsync(owner, player)).Body.GetProperty("id").GetGuid();
+        var startedAt = server.Clock.GetUtcNow().AddMinutes(-1);
+        var game = $"/api/v1/games/{CatalogServerFixture.GameId(4)}";
+        await Players.ReadAsync(await other.PostAsync(game + "/launch-report", Report(session, player.Id, startedAt, ok: true, "launch")), 204);
+        await Players.ReadAsync(await owner.PostAsync(game + "/launch-report", Report(session, Guid.NewGuid(), startedAt, ok: true, "exit")), 204); // not its player
+        Assert.Equal(2, await Players.ScalarAsync<int>(server,
+            "SELECT count(*)::int FROM launch_reports WHERE game_id = @game AND user_id IS NULL AND session_id IS NULL", new { game = CatalogServerFixture.GameId(4) }));
+        Assert.False((await Players.ReadAsync(await owner.SendAsync(HttpMethod.Get, game), 200)).TryGetProperty("lastPlayedAt", out _));
+
+        await Players.ReadAsync(await owner.PostAsync(game + "/launch-report", Report(session, player.Id, startedAt, ok: true, "launch")), 204);
+        Assert.Equal(startedAt, (await Players.ReadAsync(await owner.SendAsync(HttpMethod.Get, game), 200)).GetProperty("lastPlayedAt").GetDateTimeOffset());
     }
 
     [Fact]
@@ -154,19 +188,30 @@ public sealed class LaunchReportTests(CatalogServerFixture server) : IClassFixtu
         }
 
         var game = CatalogServerFixture.GameId(1);
-        foreach (var (body, field) in new (object, string)[]
+        var now = server.Clock.GetUtcNow();
+        object Body(object? result = null, object? antiCheat = null, string phase = "launch") => new
         {
-            (new { sessionId = Guid.NewGuid() }, "userId"),
+            sessionId = Guid.NewGuid(), userId = Guid.NewGuid(), result = result ?? new { ok = true, startedAt = now }, durationMs = 10, launcher = "steam",
+            antiCheat = antiCheat ?? new { kind = "eac", ok = true }, phase,
+        };
+        foreach (var (body, field, reason) in new (object, string, string)[]
+        {
+            (new { sessionId = Guid.NewGuid() }, "userId", "required"),
             (new
             {
-                sessionId = Guid.NewGuid(), userId = Guid.NewGuid(), result = new { ok = true, startedAt = server.Clock.GetUtcNow() }, launcher = "steam",
+                sessionId = Guid.NewGuid(), userId = Guid.NewGuid(), result = new { ok = true, startedAt = now }, launcher = "steam",
                 antiCheat = new { kind = "eac", ok = true }, phase = "launch",
-            }, "durationMs"),
+            }, "durationMs", "required"),
+            (Body(phase: "foo"), "phase", "enum"),
+            (Body(antiCheat: new { kind = "vac", ok = true }), "antiCheat.kind", "enum"),
+            (Body(result: new { startedAt = now }), "result.ok", "required"),
+            (Body(antiCheat: new { ok = true }), "antiCheat.kind", "required"),
+            (Body(antiCheat: new { kind = "eac" }), "antiCheat.ok", "required"),
         })
         {
             using var response = await agent.PostAsync($"/api/v1/games/{game}/launch-report", body);
-            var error = await Contract.ReadErrorAsync(response, 400, "validation");
-            Assert.Equal(field, error.GetProperty("error").GetProperty("details").GetProperty("field").GetString());
+            var details = (await Contract.ReadErrorAsync(response, 400, "validation")).GetProperty("error").GetProperty("details");
+            Assert.Equal((field, reason), (details.GetProperty("field").GetString(), details.GetProperty("reason").GetString()));
         }
     }
 

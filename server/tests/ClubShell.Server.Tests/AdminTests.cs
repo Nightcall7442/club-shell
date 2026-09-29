@@ -42,6 +42,45 @@ public sealed class StaffAuthTests(ServerFixture server) : IClassFixture<ServerF
     }
 
     [Fact]
+    public async Task Parallel_wrong_pins_get_only_the_allowed_attempts_and_a_right_pin_costs_none()
+    {
+        server.Clock.Advance(TimeSpan.FromMinutes(6));
+        using var raw = server.CreateDefaultClient(); // 429 is not in the vendored contract yet
+        var answers = await Task.WhenAll(Enumerable.Range(0, 40).Select(async _ =>
+        {
+            using var response = await raw.PostAsync("/api/v1/admin/login", JsonBody(new { pin = "9999" }));
+            var details = (await Players.ReadAsync(response, (int)response.StatusCode)).GetProperty("error").GetProperty("details");
+            return $"{(int)response.StatusCode} {(details.TryGetProperty("reason", out var reason) ? reason.GetString() : "")}";
+        }));
+        Assert.Equal([("401 invalidPin", 5), ("429 ", 35)], answers.GroupBy(a => a).Select(g => (g.Key, g.Count())).OrderBy(g => g.Key));
+
+        // After the window: a right PIN gives its attempt back, so five wrong ones still get 401 and only then 429.
+        server.Clock.Advance(TimeSpan.FromSeconds(301));
+        await LoginAsync(server, OwnerPin);
+        for (var i = 0; i < 5; i++)
+        {
+            using var wrong = await server.Http.PostAsync("/api/v1/admin/login", JsonBody(new { pin = "9999" }));
+            await Contract.ReadErrorAsync(wrong, 401, "unauthorized", "invalidPin");
+        }
+
+        using (var limited = await raw.PostAsync("/api/v1/admin/login", JsonBody(new { pin = OwnerPin })))
+        {
+            Assert.Equal(429, (int)limited.StatusCode);
+        }
+
+        server.Clock.Advance(TimeSpan.FromSeconds(301));
+    }
+
+    [Fact]
+    public void Pin_limit_counts_an_ipv6_client_by_its_64_and_a_mapped_ipv4_as_ipv4()
+    {
+        static string Key(string ip) => StaffTokens.PinLimitKey(System.Net.IPAddress.Parse(ip));
+        Assert.Equal(Key("2001:db8:1:2::1"), Key("2001:db8:1:2:ffff:ffff:ffff:fffe"));
+        Assert.NotEqual(Key("2001:db8:1:2::1"), Key("2001:db8:1:3::1"));
+        Assert.Equal(("10.0.0.5", "10.0.0.5", ""), (Key("::ffff:10.0.0.5"), Key("10.0.0.5"), StaffTokens.PinLimitKey(null)));
+    }
+
+    [Fact]
     public async Task Logout_is_always_200_and_revokes_the_token()
     {
         var token = await LoginAsync(server, OwnerPin);
@@ -239,6 +278,16 @@ public sealed class CounterTests(ServerFixture server) : LedgerCheckedTest(serve
         Assert.Equal(4_400_000, await Players.BalanceAsync(Server, player.Id));
         await ExpectAsync(Server, 404, HttpMethod.Post, "/sessions/end", token, new { pcId = agent.PcId });
 
+        // Extend refuses an unknown tariff, a short balance and a player deleted meanwhile.
+        var poor = await Players.CreateAsync(Server, balance: 1_500_000);
+        await ExpectAsync(Server, 201, HttpMethod.Post, "/sessions", token, new { pcId = idle.PcId, userId = poor.Id, tariffId = Players.Standard, minutes = 60 });
+        Assert.Equal("tariff", (await ExpectAsync(Server, 404, HttpMethod.Post, "/sessions/extend", token, new { pcId = idle.PcId, minutes = 30, tariffId = Guid.NewGuid() }))
+            .GetProperty("error").GetProperty("details").GetProperty("what").GetString());
+        Contract.AssertError(await ExpectAsync(Server, 402, HttpMethod.Post, "/sessions/extend", token, new { pcId = idle.PcId, minutes = 30 }), "insufficientFunds");
+        await Players.ExecuteAsync(Server, "UPDATE users SET deleted_at = now() WHERE id = @Id", new { poor.Id });
+        Assert.Equal("user", (await ExpectAsync(Server, 404, HttpMethod.Post, "/sessions/extend", token, new { pcId = idle.PcId, minutes = 5 }))
+            .GetProperty("error").GetProperty("details").GetProperty("what").GetString());
+
         // A kiosk postpaid session: no time is bought for it at the counter; ending it charges the minutes played.
         await agent.LoginAsync(player);
         var (_, postpaid) = await Players.StartAsync(agent, player, prepaid: false);
@@ -246,6 +295,48 @@ public sealed class CounterTests(ServerFixture server) : LedgerCheckedTest(serve
         Server.Clock.Advance(TimeSpan.FromMinutes(10));
         var settled = await ExpectAsync(Server, 200, HttpMethod.Post, "/sessions/end", token, new { sessionId = postpaid.GetProperty("id").GetGuid() });
         Assert.Equal((200_000L, 0L), (settled.GetProperty("charged").GetProperty("amount").GetInt64(), settled.GetProperty("refunded").GetProperty("amount").GetInt64()));
+    }
+
+    [Fact]
+    public async Task Open_extend_and_end_replay_by_key_without_a_second_effect()
+    {
+        var token = await LoginAsync(Server, CashierPin);
+        var agent = await TestAgent.CreateAsync(Server);
+        var player = await Players.CreateAsync(Server, balance: 5_000_000);
+        await ReplayedAsync(Server, 201, HttpMethod.Post, "/sessions", token, new { pcId = agent.PcId, userId = player.Id, tariffId = Players.Standard, minutes = 60 });
+        await ReplayedAsync(Server, 200, HttpMethod.Post, "/sessions/extend", token, new { pcId = agent.PcId, minutes = 30 });
+        await ReplayedAsync(Server, 200, HttpMethod.Post, "/sessions/end", token, new { pcId = agent.PcId });
+        Assert.Equal("sessionEnd,sessionExtend,sessionOpen", await Players.ScalarAsync<string>(Server,
+            "SELECT string_agg(action, ',' ORDER BY action) FROM audit_entries WHERE user_id = @Id", new { player.Id }));
+        Assert.Equal("charge,charge,refund", await Players.ScalarAsync<string>(Server,
+            "SELECT string_agg(type, ',' ORDER BY type) FROM ledger_entries WHERE user_id = @Id AND type <> 'adjustment'", new { player.Id }));
+    }
+
+    /// <summary>
+    /// <c>adminDeletePc</c> racing a create that already passed its PC check (agent auth or <c>LivePcAsync</c>): the create
+    /// holds a stale row of a PC that is now deleted and must answer <c>404 pc</c> before it charges anything.
+    /// </summary>
+    [Fact]
+    public async Task A_pc_deleted_after_the_callers_check_gets_no_session_and_no_charge()
+    {
+        var agent = await TestAgent.CreateAsync(Server);
+        var player = await Players.CreateAsync(Server);
+        var pc = (await Server.Services.GetRequiredService<Agents.PcRepository>().FindAsync(agent.PcId))!;
+        await Players.ExecuteAsync(Server, "UPDATE pcs SET deleted_at = now() WHERE id = @PcId", new { agent.PcId });
+        var sessions = Server.Services.GetRequiredService<Sessions.SessionService>();
+        var network = await Players.ScalarAsync<Guid>(Server, "SELECT network_id FROM clubs WHERE id = @ClubId", new { pc.ClubId });
+        foreach (var staff in new StaffContext?[] { null, new(null, StaffTokens.ApiKeyName, "owner", pc.ClubId, network) })
+        {
+            var (c, tx) = await Sessions.SessionService.BeginAsync(Server.Services.GetRequiredService<Npgsql.NpgsqlDataSource>());
+            await using (c)
+            await using (tx)
+            {
+                var error = await Assert.ThrowsAsync<ApiException>(() => sessions.CreateAsync(
+                    c, tx, pc, new SessionCreateRequest(pc.Id, player.Id, Players.Standard, 60, true), replay: false, new Sessions.SessionEffects(), staff));
+                Assert.Equal((404, "pc"), (error.Status, JsonSerializer.SerializeToElement(error.Details).GetProperty("what").GetString()));
+                Assert.Equal(0, await Dapper.SqlMapper.ExecuteScalarAsync<int>(c, "SELECT count(*)::int FROM ledger_entries WHERE user_id = @Id AND type = 'charge'", new { player.Id }, tx));
+            }
+        }
     }
 
     [Fact]
@@ -369,7 +460,9 @@ public sealed class ShiftTests(ServerFixture server) : LedgerCheckedTest(server)
             x.GetProperty("sessions").GetInt64(), x.GetProperty("count").GetInt32()));
 
         // Expected in the drawer: 100 000 + 1 000 000 cash; 500 000 counted — 600 000 short, over the 500 000 threshold.
-        var closed = await ExpectAsync(Server, 200, HttpMethod.Post, "/shift/close", cashier, new { closingCash = 500_000 });
+        // A retry under the same key replays the Z report and closes nothing twice.
+        var closed = await ReplayedAsync(Server, 200, HttpMethod.Post, "/shift/close", cashier, new { closingCash = 500_000 });
+        Assert.Equal(1, await Players.ScalarAsync<int>(Server, "SELECT count(*)::int FROM audit_entries WHERE action = 'shiftClose'"));
         Assert.Equal((1_100_000L, 500_000L, 1_000_000L), (closed.GetProperty("expectedCash").GetInt64(), closed.GetProperty("shift").GetProperty("closingCash").GetInt64(),
             closed.GetProperty("shift").GetProperty("totals").GetProperty("topUpCash").GetInt64()));
         Assert.True(await Players.ScalarAsync<bool>(Server, "SELECT (meta->>'shortfall')::boolean FROM audit_entries WHERE action = 'shiftClose'"));
@@ -420,9 +513,14 @@ public sealed class PcAdminTests(ApprovalServerFixture server) : IClassFixture<A
         var cashier = await LoginAsync(server, CashierPin);
         Contract.AssertError(await ExpectAsync(server, 403, HttpMethod.Post, "/pcs", cashier, new { zone = "VIP", number = 500 }), "forbidden", "ownerOnly");
 
-        var added = (await ExpectAsync(server, 200, HttpMethod.Post, "/pcs", owner, new { zone = "VIP", number = 500, device = "console", x = 3, y = 4 })).GetProperty("pc");
+        var added = (await ReplayedAsync(server, 200, HttpMethod.Post, "/pcs", owner, new { zone = "VIP", number = 500, device = "console", x = 3, y = 4 })).GetProperty("pc");
         Assert.Equal(("CONSOLE-500", "offline"), (added.GetProperty("name").GetString(), added.GetProperty("status").GetString()));
         Assert.Equal(("number", "taken"), Details(await ExpectAsync(server, 400, HttpMethod.Post, "/pcs", owner, new { zone = "VIP", number = 500 })));
+        foreach (var method in new[] { HttpMethod.Patch, HttpMethod.Delete })
+        {
+            Contract.AssertError(await ExpectAsync(server, 403, method, $"/pcs/{added.GetProperty("id").GetGuid()}", cashier, method == HttpMethod.Patch ? new { x = 1 } : null),
+                "forbidden", "ownerOnly");
+        }
 
         var hall = await ExpectAsync(server, 200, HttpMethod.Get, "/pcs", cashier);
         var seat = hall.GetProperty("items").EnumerateArray().Single(p => p.GetProperty("id").GetGuid() == added.GetProperty("id").GetGuid());

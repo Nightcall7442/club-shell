@@ -30,8 +30,9 @@ public sealed record LedgerLine(
 /// <c>lifetime_spent</c> (+|charge|, +|purchase|, −refund). A debit below zero is <c>402 insufficientFunds
 /// {required, available}</c> unless <paramref name="allowOverdraft"/> (postpaid settlement, offline replay), which marks the
 /// row <c>overdraft</c>. Every row of a club gets its open shift (<c>shift_id</c>, taken <c>FOR SHARE</c> after the wallet —
-/// lock order §4.4; closing a shift takes it <c>FOR UPDATE</c>, so no row slips past the Z report). Pushes go out after
-/// the commit, never from here.
+/// lock order §4.4; closing a shift takes it <c>FOR UPDATE</c>, so no row joins a shift after its Z report was summed). A
+/// row racing the close waits for it, no longer finds an open shift and gets <c>shift_id NULL</c>, like a row posted with
+/// no shift open: the S5 <c>noShift</c> flag must count those. Pushes go out after the commit, never from here.
 /// </summary>
 public static class Ledger
 {

@@ -238,19 +238,21 @@ public static class CounterEndpoints
             _ => throw ApiException.Validation("kind", "unknown"),
         };
 
-        Guid? supersedes;
+        // The command and its audit entry commit together (DESIGN §3.7); it goes to the PC after the commit.
+        var online = hub.IsConnected(pc.Id);
+        ServerCommandEnvelope queued;
         await using (var c = await db.OpenConnectionAsync())
         await using (var tx = await c.BeginTransactionAsync())
         {
-            supersedes = r.Kind != "unlock" ? null : await c.QuerySingleOrDefaultAsync<Guid?>(
+            var supersedes = r.Kind != "unlock" ? null : await c.QuerySingleOrDefaultAsync<Guid?>(
                 "SELECT id FROM agent_commands WHERE pc_id = @Id AND name = 'lock' AND acked_at IS NULL AND superseded_at IS NULL ORDER BY created_at DESC, id DESC LIMIT 1",
                 new { pc.Id }, tx);
+            queued = await dispatcher.QueueAsync(tx, pc.ClubId, pc.Id, command, supersedes, staff.StaffId);
             await Audit.WriteAsync(c, tx, staff, clock.GetUtcNow(), "pcCommand", pcId: pc.Id, detail: $"{pc.Name} · {r.Kind}", meta: new { kind = r.Kind });
             await tx.CommitAsync();
         }
 
-        var online = hub.IsConnected(pc.Id);
-        var queued = await dispatcher.EnqueueAsync(pc.ClubId, pc.Id, command, supersedes, staff.StaffId);
+        await dispatcher.SendAsync(pc.Id, queued);
         var ack = !online
             ? new CommandAck(false, IpcError.Of(ErrorCode.AgentOffline, "The PC is offline; the command stays queued"))
             : await commands.WaitForAckAsync(queued.Id, TimeSpan.FromSeconds(agents.AckWaitSec), context.RequestAborted)

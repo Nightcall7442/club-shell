@@ -13,8 +13,9 @@ namespace ClubShell.Server.Admin;
 
 /// <summary>
 /// Cash shifts (slice S4, DESIGN §4.3): at most one open per club (<c>shifts_open</c>), every ledger row gets the open
-/// shift's id (<see cref="Wallet.Ledger"/> takes it <c>FOR SHARE</c>, closing takes it <c>FOR UPDATE</c>, so no row slips past
-/// the Z report). X/Z report = sums by <c>shift_id</c> grouped by type and method; <c>expectedCash = openingCash + Σ topUp
+/// shift's id (<see cref="Wallet.Ledger"/> takes it <c>FOR SHARE</c>, closing takes it <c>FOR UPDATE</c>, so no row joins the
+/// shift after its Z report; a row racing the close gets <c>shift_id NULL</c>, as with no shift open — S5 <c>noShift</c>
+/// counts those). X/Z report = sums by <c>shift_id</c> grouped by type and method; <c>expectedCash = openingCash + Σ topUp
 /// cash</c>. A shortfall over <c>settings.control.shortfallFrom</c> (default 500 000 tiyin) flags the <c>shiftClose</c>
 /// entry. Any staff member may close (not only who opened).
 /// ponytail: the <c>shiftClosed</c>/<c>suspicious</c> webhooks come with the webhook outbox (S5).
