@@ -47,6 +47,7 @@ public sealed class ServerLinkTests : IDisposable
             },
             () => reconnected++,
             new SystemClock(_time),
+            _time.GetUtcNow,
             TimeSpan.FromMinutes(2),
             CancellationToken.None);
 
@@ -58,6 +59,84 @@ public sealed class ServerLinkTests : IDisposable
         await run.WaitAsync(TimeSpan.FromSeconds(10));
         refreshed.Should().Be(1);
         reconnected.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Agent_clock_two_hours_ahead_refreshes_once_per_token_lifetime()
+    {
+        // Local time stored as UTC: the PC clock leads the server by 2 h; exp is server time, the offset is known.
+        var ahead = TimeSpan.FromHours(2);
+        var agentTime = new FakeTimeProvider(T0 + ahead);
+        DateTimeOffset ServerNow() => agentTime.GetUtcNow() - ahead;
+        var token = new AgentTokens(Guid.NewGuid(), "t0", "refresh", "c2VjcmV0", T0.AddHours(1));
+        var tokens = Substitute.For<ITokenStore>();
+        tokens.Agent.Returns(_ => token);
+        var refreshed = 0;
+        var reconnected = 0;
+
+        Task Start() => ServerConnection.RefreshBeforeExpiryAsync(
+            tokens,
+            _ =>
+            {
+                refreshed++;
+                token = token with { AccessToken = "t" + refreshed, ExpiresAt = ServerNow().AddHours(1) };
+                return Task.CompletedTask;
+            },
+            () => reconnected++,
+            new SystemClock(agentTime),
+            ServerNow,
+            TimeSpan.FromMinutes(2),
+            CancellationToken.None);
+
+        // Each reconnect starts the next wait, as ConnectAndRunAsync does; 3 h of 1 h tokens.
+        Task run = Start();
+        for (var minute = 0; minute < 180; minute++)
+        {
+            agentTime.Advance(TimeSpan.FromMinutes(1));
+            while (!run.IsCompleted && agentTime.ActiveTimers == 0)
+            {
+                await Task.Delay(1);
+            }
+
+            if (run.IsCompleted)
+            {
+                await run;
+                run = Start();
+            }
+        }
+
+        refreshed.Should().Be(3);
+        reconnected.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task Token_that_still_looks_expired_is_not_refreshed_before_the_floor()
+    {
+        // Offset not learned yet: the 2 h lead makes the token look expired; refresh + reconnect must not spin.
+        var tokens = Substitute.For<ITokenStore>();
+        tokens.Agent.Returns(new AgentTokens(Guid.NewGuid(), "old", "refresh", "c2VjcmV0", T0.AddHours(1)));
+        var refreshed = 0;
+
+        Task run = ServerConnection.RefreshBeforeExpiryAsync(
+            tokens,
+            _ =>
+            {
+                refreshed++;
+                return Task.CompletedTask;
+            },
+            () => { },
+            new SystemClock(_time),
+            () => _time.GetUtcNow().AddHours(2),
+            TimeSpan.FromMinutes(2),
+            CancellationToken.None);
+
+        _time.Advance(ServerConnection.MinRefreshDelay - TimeSpan.FromSeconds(1));
+        run.IsCompleted.Should().BeFalse();
+        refreshed.Should().Be(0);
+
+        _time.Advance(TimeSpan.FromSeconds(1));
+        await run.WaitAsync(TimeSpan.FromSeconds(10));
+        refreshed.Should().Be(1);
     }
 
     [Fact]

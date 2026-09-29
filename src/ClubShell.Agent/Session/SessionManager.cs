@@ -709,8 +709,11 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
                 var created = await _server.CreateSessionAsync(pending.Request, pending.IdempotencyKey, cancellationToken).ConfigureAwait(false);
                 await AdoptCreatedAsync(created, cancellationToken).ConfigureAwait(false);
             }
-            catch (ServerApiException ex) when (ex.IsRetryable)
+            catch (ServerApiException ex) when (ex.IsRetryable || ex.Code == ErrorCode.SessionAlreadyActive)
             {
+                // sessionAlreadyActive: usually this PC's previous session, ended offline, whose `ended` is still in the
+                // outbox (a restart replays before any flush). The maintenance loop flushes first, then the replay passes;
+                // ending the running game here would lose it unbilled.
                 _logger.LogDebug("Offline session replay deferred: {Code}", ex.Code);
                 return;
             }

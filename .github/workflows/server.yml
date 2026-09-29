@@ -1,5 +1,6 @@
 # ClubShell central server (server/, docs/server/DESIGN.md).
 #
+#   changes  ubuntu  does this push/PR touch the server or what it builds from? (dorny/paths-filter)
 #   server   ubuntu  restore/build (-warnaserror)/test of server/ClubShell.Server.sln against a postgres:18 service,
 #                    then contract drift: server/contracts vs deepunites/club-contracts at server/contracts/REF
 #
@@ -7,28 +8,14 @@
 
 name: Server
 
+# No workflow-level `paths:` filter: the server check is required on main, and a workflow skipped by `paths:` leaves a
+# required check pending forever. The `changes` job decides instead; a job skipped by `if:` reports success.
 on:
   push:
     branches:
       - main
       - 'release/**'
-    paths:
-      - 'server/**'
-      - 'src/ClubShell.Contracts/**'
-      - 'Directory.*.props'
-      - 'global.json'
-      - 'nuget.config'
-      - '.editorconfig'
-      - '.github/workflows/server.yml'
   pull_request:
-    paths:
-      - 'server/**'
-      - 'src/ClubShell.Contracts/**'
-      - 'Directory.*.props'
-      - 'global.json'
-      - 'nuget.config'
-      - '.editorconfig'
-      - '.github/workflows/server.yml'
 
 permissions:
   contents: read
@@ -43,8 +30,37 @@ env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
 
 jobs:
+  changes:
+    name: Detect server changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      server: ${{ steps.filter.outputs.server }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Classify changed files
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            server:
+              - 'server/**'
+              - 'src/ClubShell.Contracts/**'
+              - 'src/ClubShell.Core/**'
+              - 'Directory.*.props'
+              - 'global.json'
+              - 'nuget.config'
+              - '.editorconfig'
+              - '.github/workflows/server.yml'
+
   server:
     name: Server (build, test on PostgreSQL 18)
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -88,7 +104,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      # openapi.json must be openapi.yaml converted (the schema tests read the json, the 501 table the yaml), and both
+      # openapi.json/asyncapi.json must be the yaml converted (the schema tests read the json, the 501 table the yaml), and both
       # yaml files must equal club-contracts at REF. REF may be a club-contracts commit that is not pushed yet (52a895a,
       # branch shell-changes-p0-p1): then the remote comparison is skipped with a warning, so main does not go red over
       # another repository. Once REF is fetchable the comparison is strict.
@@ -101,13 +117,16 @@ jobs:
           python3 -c 'import yaml' 2>/dev/null || python3 -m pip install --quiet --user --break-system-packages pyyaml
           python3 - <<'PY'
           import json, sys, yaml
-          with open('server/contracts/openapi.yaml', encoding='utf-8') as f:
-              expected = yaml.safe_load(f)
-          with open('server/contracts/openapi.json', encoding='utf-8') as f:
-              actual = json.load(f)
-          if expected != actual:
-              print('::error file=server/contracts/openapi.json::not generated from openapi.yaml; run server/scripts/sync-contracts.ps1')
-              sys.exit(1)
+          failed = False
+          for name in ('openapi', 'asyncapi'):
+              with open(f'server/contracts/{name}.yaml', encoding='utf-8') as f:
+                  expected = yaml.safe_load(f)
+              with open(f'server/contracts/{name}.json', encoding='utf-8') as f:
+                  actual = json.load(f)
+              if expected != actual:
+                  print(f'::error file=server/contracts/{name}.json::not generated from {name}.yaml; run server/scripts/sync-contracts.ps1')
+                  failed = True
+          sys.exit(1 if failed else 0)
           PY
 
           ref=$(tr -d '[:space:]' < server/contracts/REF)

@@ -7,7 +7,7 @@ namespace ClubShell.Server.Tests;
 /// <summary>HMAC request signature (DESIGN §3.3): contract vectors, window, missing/mismatch, repeats are not rejected (D-4).</summary>
 public sealed class SigningTests(ServerFixture server) : IClassFixture<ServerFixture>
 {
-    // An agent-mode operation; 501 means authentication passed.
+    // An agent-mode operation (S2); 200 means authentication passed.
     private const string Tariffs = "/api/v1/tariffs";
 
     [Theory]
@@ -25,12 +25,12 @@ public sealed class SigningTests(ServerFixture server) : IClassFixture<ServerFix
     {
         var agent = await TestAgent.CreateAsync(server);
         using var response = await agent.SendAsync(HttpMethod.Get, Tariffs);
-        await Contract.ReadErrorAsync(response, 501, "notImplemented", "notImplemented");
+        Assert.Equal(200, (int)response.StatusCode);
     }
 
     [Theory]
-    [InlineData(-300, 501)]
-    [InlineData(300, 501)]
+    [InlineData(-300, 200)]
+    [InlineData(300, 200)]
     [InlineData(-301, 401)]
     [InlineData(301, 401)]
     public async Task Timestamp_window_is_300_seconds_and_skew_answers_clockSkew_with_server_time(int offsetSec, int status)
@@ -79,7 +79,7 @@ public sealed class SigningTests(ServerFixture server) : IClassFixture<ServerFix
     {
         var agent = await TestAgent.CreateAsync(server);
         using var response = await agent.SendAsync(HttpMethod.Get, "/api/v1/tariffs?page=2&pageSize=10");
-        Assert.Equal(501, (int)response.StatusCode);
+        Assert.Equal(200, (int)response.StatusCode);
     }
 
     [Fact]
@@ -88,12 +88,12 @@ public sealed class SigningTests(ServerFixture server) : IClassFixture<ServerFix
         var agent = await TestAgent.CreateAsync(server);
         var ts = server.Clock.GetUtcNow().ToUnixTimeSeconds();
         var heartbeat = $"/api/v1/agents/{agent.PcId}/heartbeat";
-        foreach (var (method, target, body) in new[] { (HttpMethod.Get, Tariffs, (string?)null), (HttpMethod.Post, heartbeat, "{}") })
+        foreach (var (method, target, body, status) in new[] { (HttpMethod.Get, Tariffs, (string?)null, 200), (HttpMethod.Post, heartbeat, TestAgent.Heartbeat(), 200) })
         {
             for (var i = 0; i < 2; i++)
             {
                 using var response = await server.Http.SendAsync(agent.Request(method, target, body, timestamp: ts));
-                Assert.Equal(501, (int)response.StatusCode);
+                Assert.Equal(status, (int)response.StatusCode);
             }
         }
     }

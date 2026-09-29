@@ -19,6 +19,8 @@
 
   <ItemGroup>
     <Content Include="../../contracts/openapi.yaml" Link="contracts/openapi.yaml" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- Default policy seed (DESIGN §11 S1, D-14) when data/policy.json is absent. -->
+    <Content Include="../../../config/policies.example.json" Link="seed/policies.example.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

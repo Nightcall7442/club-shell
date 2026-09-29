@@ -20,14 +20,37 @@ public sealed class HeartbeatTests
         server.GetCommandsAsync(pcId, Arg.Any<CancellationToken>()).Returns(new ServerCommandsResponse([unknown, unlock]));
         var sink = Substitute.For<IServerCommandSink>();
         sink.HandleAsync(Arg.Any<ServerCommand>(), Arg.Any<CancellationToken>()).Returns(CommandAck.Success());
-        var clock = Substitute.For<IClock>();
-        clock.UtcNow.Returns(T0);
+        server.ServerNow.Returns(T0);
 
-        await HeartbeatService.DrainCommandsAsync(server, sink, clock, NullLogger.Instance, pcId, CancellationToken.None);
+        await HeartbeatService.DrainCommandsAsync(server, sink, NullLogger.Instance, pcId, CancellationToken.None);
 
         await sink.Received(1).HandleAsync(Arg.Is<ServerCommand>(c => c.Id == unlock.Id && c.Type == ServerCommandType.Unlock), Arg.Any<CancellationToken>());
         await sink.Received(1).HandleAsync(Arg.Any<ServerCommand>(), Arg.Any<CancellationToken>());
         await server.Received(1).AckCommandAsync(pcId, unknown.Id, Arg.Is<CommandAck>(a => !a.Ok && a.Error!.Code == ErrorCode.NotFound), Arg.Any<CancellationToken>());
         await server.Received(1).AckCommandAsync(pcId, unlock.Id, Arg.Is<CommandAck>(a => a.Ok), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Pending_command_expiry_is_judged_on_the_server_corrected_clock()
+    {
+        // The PC clock may lead by hours (local time stored as UTC); ServerNow = local + learned offset.
+        Guid pcId = Guid.NewGuid();
+        var envelope = new ServerCommandEnvelope(Guid.NewGuid(), T0, "unlock", null, ExpiresAt: T0.AddMinutes(10));
+        var server = Substitute.For<IServerClient>();
+        server.GetCommandsAsync(pcId, Arg.Any<CancellationToken>()).Returns(new ServerCommandsResponse([envelope]));
+        var sink = Substitute.For<IServerCommandSink>();
+        sink.HandleAsync(Arg.Any<ServerCommand>(), Arg.Any<CancellationToken>()).Returns(CommandAck.Success());
+
+        server.ServerNow.Returns(T0.AddMinutes(1));
+        await HeartbeatService.DrainCommandsAsync(server, sink, NullLogger.Instance, pcId, CancellationToken.None);
+
+        await sink.Received(1).HandleAsync(Arg.Is<ServerCommand>(c => c.Id == envelope.Id), Arg.Any<CancellationToken>());
+        await server.Received(1).AckCommandAsync(pcId, envelope.Id, Arg.Is<CommandAck>(a => a.Ok), Arg.Any<CancellationToken>());
+
+        server.ServerNow.Returns(T0.AddMinutes(11));
+        await HeartbeatService.DrainCommandsAsync(server, sink, NullLogger.Instance, pcId, CancellationToken.None);
+
+        await sink.Received(1).HandleAsync(Arg.Any<ServerCommand>(), Arg.Any<CancellationToken>());
+        await server.Received(1).AckCommandAsync(pcId, envelope.Id, Arg.Is<CommandAck>(a => !a.Ok && a.Error!.Code == ErrorCode.Timeout), Arg.Any<CancellationToken>());
     }
 }

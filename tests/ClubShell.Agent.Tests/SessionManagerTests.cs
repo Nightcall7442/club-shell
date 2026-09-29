@@ -573,6 +573,25 @@ public sealed class SessionManagerTests : IDisposable
         stored.PendingCreate.Should().BeNull();
     }
 
+    [Fact]
+    public async Task Sync_DefersTheOfflineReplay_WhileTheServerStillHasThePcsPreviousSessionOpen()
+    {
+        _server.CreateSessionAsync(Arg.Any<SessionCreateRequest>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>()).ThrowsAsync(Unavailable());
+        _server.GetTariffsAsync(Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(new EtagResponse<TariffsResponse>(new TariffsResponse([StandardTariff()], T0), null, false));
+        PlaySession local = await _manager.StartAsync(Request(), CancellationToken.None);
+
+        // The previous session's `ended` is still queued: the server answers 409 until the outbox is flushed.
+        _server.CreateSessionAsync(Arg.Any<SessionCreateRequest>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new ServerApiException(ErrorCode.SessionAlreadyActive, HttpStatusCode.Conflict, null, null, "An open session already exists"));
+        await _manager.SyncWithServerAsync(CancellationToken.None);
+
+        _manager.State.Should().Be(SessionState.Active, "the running game is kept, not ended as error");
+        _manager.IsOfflineSession.Should().BeTrue("the replay is still owed");
+        _manager.Current!.Id.Should().Be(local.Id);
+        await _server.DidNotReceive().GetCurrentSessionAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+    }
+
     // ---- helpers --------------------------------------------------------------------------------
 
     private List<SessionEvent> Events()

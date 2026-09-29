@@ -17,19 +17,29 @@ public sealed record ContractOp(string Method, string Path, string OperationId, 
 public static class Contract
 {
     private static readonly Uri BaseUri = new("https://clubshell.local/openapi.json");
+
+    // asyncapi.json refers to "../openapi/openapi.yaml#…": the same openapi document is registered at that address too.
+    private static readonly Uri AsyncApiUri = new("https://clubshell.local/asyncapi/asyncapi.yaml");
+    private static readonly Uri OpenApiFromAsyncApi = new("https://clubshell.local/openapi/openapi.yaml");
     private static readonly Dialect Dialect = Dialect.Draft202012.With([], allowUnknownKeywords: true);
     private static readonly ConcurrentDictionary<string, JsonSchema> Schemas = new();
     private static readonly string[] Methods = ["get", "put", "post", "delete", "patch"];
 
-    private static readonly Lazy<(SchemaRegistry Registry, JsonElement Document)> Loaded = new(() =>
+    private static readonly Lazy<(SchemaRegistry Registry, JsonElement Document, JsonElement AsyncApi)> Loaded = new(() =>
     {
         var document = JsonElement.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "contracts", "openapi.json")));
+        var asyncApi = JsonElement.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "contracts", "asyncapi.json")));
         var registry = new SchemaRegistry();
         registry.Register(BaseUri, new JsonElementBaseDocument(document, BaseUri));
-        return (registry, document);
+        registry.Register(OpenApiFromAsyncApi, new JsonElementBaseDocument(document, OpenApiFromAsyncApi));
+        registry.Register(AsyncApiUri, new JsonElementBaseDocument(asyncApi, AsyncApiUri));
+        return (registry, document, asyncApi);
     });
 
     public static JsonElement Document => Loaded.Value.Document;
+
+    /// <summary><c>server/contracts/asyncapi.json</c>: the <c>/ws/agent</c> channel.</summary>
+    public static JsonElement AsyncApi => Loaded.Value.AsyncApi;
 
     public static IReadOnlyList<ContractOp> Operations { get; } = LoadOperations();
 
@@ -68,10 +78,13 @@ public static class Contract
 
         Assert.True(body is not null, $"{operationId} {status}: body expected");
         var reference = content.GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString()!;
-        AssertMatchesRef(reference, body.Value);
+        AssertMatchesUri(BaseUri + reference, body.Value);
     }
 
-    public static void AssertMatches(string schemaName, JsonElement instance) => AssertMatchesRef("#/components/schemas/" + schemaName, instance);
+    public static void AssertMatches(string schemaName, JsonElement instance) => AssertMatchesUri($"{BaseUri}#/components/schemas/{schemaName}", instance);
+
+    /// <summary>A WS frame against the payload of AsyncAPI message <paramref name="message"/> (<c>commandLock</c>, <c>ping</c>, …).</summary>
+    public static void AssertMessage(string message, JsonElement frame) => AssertMatchesUri($"{AsyncApiUri}#/components/messages/{message}/payload", frame);
 
     public static void AssertError(JsonElement body, string code, string? reason = null)
     {
@@ -91,12 +104,12 @@ public static class Contract
         return body;
     }
 
-    private static void AssertMatchesRef(string reference, JsonElement instance)
+    private static void AssertMatchesUri(string reference, JsonElement instance)
     {
         var schema = Schemas.GetOrAdd(reference, r =>
         {
             var options = new BuildOptions { SchemaRegistry = Loaded.Value.Registry, Dialect = Dialect };
-            var wrapper = JsonElement.Parse($$"""{ "$ref": "{{BaseUri}}{{r}}" }""");
+            var wrapper = JsonElement.Parse($$"""{ "$ref": "{{r}}" }""");
             return JsonSchema.Build(wrapper, options, new Uri($"https://clubshell.local/check/{Guid.NewGuid():N}"));
         });
         var result = schema.Evaluate(instance, new EvaluationOptions { OutputFormat = OutputFormat.List, RequireFormatValidation = true });

@@ -5,7 +5,7 @@
 .DESCRIPTION
     Takes openapi/openapi.yaml and asyncapi/asyncapi.yaml from a club-contracts commit (git blobs, so line endings
     are exactly the committed ones), writes server/contracts/REF with the full commit sha and regenerates
-    openapi.json for the schema tests. Needs git and python with PyYAML.
+    openapi.json and asyncapi.json for the schema tests. Needs git and python with PyYAML.
 
 .EXAMPLE
     ./server/scripts/sync-contracts.ps1                       # ../club-contracts at HEAD
@@ -27,10 +27,11 @@ sha = subprocess.check_output(['git', '-C', source, 'rev-parse', ref + '^{commit
 for path, name in (('openapi/openapi.yaml', 'openapi.yaml'), ('asyncapi/asyncapi.yaml', 'asyncapi.yaml')):
     with open(f'{out}/{name}', 'wb') as f:
         f.write(subprocess.check_output(['git', '-C', source, 'show', f'{sha}:{path}']))
-with open(f'{out}/openapi.yaml', encoding='utf-8') as f:
-    document = yaml.safe_load(f)
-with open(f'{out}/openapi.json', 'w', encoding='utf-8', newline='\n') as f:
-    json.dump(document, f, ensure_ascii=False)
+for name in ('openapi', 'asyncapi'):
+    with open(f'{out}/{name}.yaml', encoding='utf-8') as f:
+        document = yaml.safe_load(f)
+    with open(f'{out}/{name}.json', 'w', encoding='utf-8', newline='\n') as f:
+        json.dump(document, f, ensure_ascii=False)
 with open(f'{out}/REF', 'w', newline='\n') as f:
     f.write(sha + '\n')
 print(f'ok: server/contracts <- club-contracts@{sha}')

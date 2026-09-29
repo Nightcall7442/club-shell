@@ -17,6 +17,18 @@ public sealed class ApiException(int status, ErrorCode code, string message, obj
     public static ApiException Unauthorized(string reason, string message, string? problem = null) =>
         new(StatusCodes.Status401Unauthorized, ErrorCode.Unauthorized, message, new { reason, problem });
 
+    /// <summary><c>400 validation</c> with <c>details.field</c> and <c>details.reason</c> (DESIGN §7.2).</summary>
+    public static ApiException Validation(string field, string reason, string? message = null) =>
+        new(StatusCodes.Status400BadRequest, ErrorCode.Validation, message ?? $"Invalid {field}: {reason}", new { field, reason });
+
+    /// <summary><c>403 forbidden</c> with <c>details.reason</c>.</summary>
+    public static ApiException Forbidden(string reason, string message) =>
+        new(StatusCodes.Status403Forbidden, ErrorCode.Forbidden, message, new { reason });
+
+    /// <summary><c>404 notFound</c> with <c>details.what</c>.</summary>
+    public static ApiException NotFound(string what) =>
+        new(StatusCodes.Status404NotFound, ErrorCode.NotFound, $"{what} not found", new { what });
+
     public static ApiException NotImplemented(string operationId) =>
         new(StatusCodes.Status501NotImplemented, ErrorCode.NotImplemented, $"Operation {operationId} is not implemented by this server", new { reason = "notImplemented" });
 }

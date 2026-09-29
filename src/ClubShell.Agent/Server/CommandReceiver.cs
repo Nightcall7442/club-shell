@@ -194,7 +194,7 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
             }
         }
 
-        if (command.IsExpired(_clock.UtcNow))
+        if (command.IsExpired(_server.ServerNow))
         {
             _logger.LogInformation("Command {Id} ({Type}) expired before delivery", command.Id, command.Type);
             var expiredAck = CommandAck.Failure(IpcError.Timeout("Command expired before delivery"));

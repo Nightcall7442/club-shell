@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
@@ -65,6 +66,27 @@ public class ServerFixture : WebApplicationFactory<Program>, IAsyncLifetime
 
         builder.ConfigureTestServices(services => services.AddSingleton<TimeProvider>(Clock));
     }
+}
+
+/// <summary>
+/// <see cref="ServerFixture"/> on a real Kestrel socket (<c>WebApplicationFactory.UseKestrel</c>, .NET 10) for the
+/// <c>/ws/agent</c> tests and the <c>RealtimeClient</c>: bound to 127.0.0.1 on a free port (never any-address, which
+/// would ask for a firewall rule), server pings every second so keepalive is observable.
+/// </summary>
+public sealed class KestrelServerFixture : ServerFixture
+{
+    public KestrelServerFixture()
+    {
+        UseKestrel(o => o.Listen(System.Net.IPAddress.Loopback, 0));
+        Settings["Realtime:PingSec"] = "1";
+        Settings["Realtime:PongTimeoutSec"] = "1";
+    }
+
+    /// <summary><c>http://127.0.0.1:&lt;port&gt;/</c>; starts the server.</summary>
+    public Uri BaseAddress => new(Services.GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>().Features
+        .GetRequiredFeature<Microsoft.AspNetCore.Hosting.Server.Features.IServerAddressesFeature>().Addresses.First() + "/");
+
+    public Uri WsUri => new(BaseAddress.ToString().Replace("http://", "ws://", StringComparison.Ordinal) + "ws/agent");
 }
 
 public static class TestDatabases

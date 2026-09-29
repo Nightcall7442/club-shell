@@ -347,9 +347,9 @@ public sealed class RealtimeClient
         }
     }
 
+    // Expiry is the command handler's call: it knows the server-corrected clock, this client only the local one.
     private void DispatchCommand(WsFrame frame, ChannelWriter<WsFrame> outbound, CancellationToken cancellationToken)
     {
-        var now = _clock.UtcNow;
         ServerCommand command;
         try
         {
@@ -359,13 +359,6 @@ public sealed class RealtimeClient
         {
             _logger.LogWarning("Unknown server command {Name} ({Id}): {Message}", frame.Name, frame.Id, ex.Message);
             Ack(outbound, frame.Id, CommandAck.Failure(IpcError.Of(ErrorCode.NotFound, $"Unknown command '{frame.Name}'")));
-            return;
-        }
-
-        if (command.IsExpired(now))
-        {
-            _logger.LogWarning("Command {Id} ({Type}) expired at {ExpiresAt}; acking timeout", command.Id, command.Type, command.ExpiresAt);
-            Ack(outbound, command.Id, CommandAck.Failure(IpcError.Timeout("Command expired before delivery")));
             return;
         }
 
