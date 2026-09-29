@@ -1196,6 +1196,16 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
   против реального сервера идёт весь `console.spec.ts`. Ключ JWT и pepper — во временном каталоге. Правок
   `console.spec.ts` в S4 не понадобилось.
 
+- Как сделано в S5 (весь `console.spec.ts` против реального сервера: 12 тестов проходят, 2 пропускаются):
+  - окружение сервера e2e: `Club__EnrollmentKey=e2e` и `Club__AutoApprovePcs=true` (спека сама регистрирует ПК с ключом `e2e`);
+    `Seed__DevPcs=true` — 12 мест зала, одобренные и только что виденные (флаг только для e2e: тесты сервера работают с
+    `Seed:Dev` без мест) вместе с `Agents__OfflineAfterSec=31536000`: без агентов места остаются свободными;
+    `Catalog__GamesSeedPath=tests/shell-e2e/admin/games.e2e.json` (CS2 с путями настроек игрока, Rust без);
+  - правки `console.spec.ts` (перечислены в PR): тест регистрации клиента шлёт полное `hardware`, MAC через двоеточия и
+    подписывает `POST /auth/login` подписью агента (`signature()`; мок её не проверяет); два теста, рассчитанные на мок,
+    при `ADMIN_SERVER=real` пропускаются — «PC health…» (симулятор телеметрии мока; сервер выводит заявки из телеметрии
+    агентов, это `HealthTests`) и «the owner sees every club of the network…» (`GET /admin/network` → 501, D-19).
+
 ### 10.d Паритет с MockServer
 
 - Мок остаётся dev- и e2e-сервером для киоска.

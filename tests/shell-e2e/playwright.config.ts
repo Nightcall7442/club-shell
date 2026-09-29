@@ -1,5 +1,6 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig, devices } from '@playwright/test';
 
 const baseURL = 'http://localhost:1420';
@@ -59,6 +60,14 @@ const realAdminApi = {
     ASPNETCORE_ENVIRONMENT: 'Development',
     ConnectionStrings__Club: adminDb ?? '',
     Seed__Dev: 'true',
+    // Twelve hall seats with no agent behind them: the seed marks them just seen and the window below keeps them free.
+    Seed__DevPcs: 'true',
+    Agents__OfflineAfterSec: '31536000',
+    // The console spec registers a PC itself (POST /agents/register with X-Club-Key: e2e) and expects it to be usable at once.
+    Club__EnrollmentKey: 'e2e',
+    Club__AutoApprovePcs: 'true',
+    // Cs2 (with player-settings paths) and Rust (without): what the catalog test edits.
+    Catalog__GamesSeedPath: fileURLToPath(new URL('./admin/games.e2e.json', import.meta.url)),
     Cors__AllowedOrigins__0: ADMIN_URL,
     Auth__SigningKeyPath: join(tmpdir(), `clubshell-admin-e2e-${process.pid}`, 'jwt-signing-key.pem'),
     Auth__PepperPath: join(tmpdir(), `clubshell-admin-e2e-${process.pid}`, 'pin-pepper.key'),

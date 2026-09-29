@@ -125,7 +125,8 @@ await ProductSeed.ApplyAsync(app.Services.GetRequiredService<Npgsql.NpgsqlDataSo
 var staffTokens = app.Services.GetRequiredService<StaffTokens>();
 if (builder.Configuration.GetValue("Seed:Dev", false))
 {
-    await DevSeed.SeedAsync(app.Services.GetRequiredService<Npgsql.NpgsqlDataSource>(), app.Services.GetRequiredService<TimeProvider>(), staffTokens);
+    await DevSeed.SeedAsync(app.Services.GetRequiredService<Npgsql.NpgsqlDataSource>(), app.Services.GetRequiredService<TimeProvider>(), staffTokens,
+        seats: builder.Configuration.GetValue("Seed:DevPcs", false));
 }
 
 // After the dev seed: its staff fills the table, so no owner PIN is generated in Development.
