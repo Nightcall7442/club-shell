@@ -9,7 +9,7 @@ dockerfilePath = "server/Dockerfile"
 watchPatterns = [
   "server/**",
   "src/ClubShell.Contracts/**",
-  "config/policies.example.json",
+  "config/*.example.json",
   "Directory.*.props",
   "global.json",
   "nuget.config",

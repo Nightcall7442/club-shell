@@ -5,7 +5,7 @@
 !.editorconfig
 !Directory.Build.props
 !Directory.Packages.props
-!config/policies.example.json
+!config/*.example.json
 !src/ClubShell.Contracts/**
 !server/Directory.Build.props
 !server/contracts/**

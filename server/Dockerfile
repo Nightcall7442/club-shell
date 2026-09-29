@@ -17,7 +17,7 @@ COPY src/ClubShell.Contracts/ src/ClubShell.Contracts/
 COPY server/src/ClubShell.Server/ClubShell.Server.csproj server/src/ClubShell.Server/
 RUN dotnet restore server/src/ClubShell.Server/ClubShell.Server.csproj
 
-COPY config/policies.example.json config/
+COPY config/policies.example.json config/games.example.json config/products.example.json config/
 COPY server/contracts/ server/contracts/
 COPY server/src/ClubShell.Server/ server/src/ClubShell.Server/
 RUN dotnet publish server/src/ClubShell.Server/ClubShell.Server.csproj -c Release --no-restore -o /app/publish

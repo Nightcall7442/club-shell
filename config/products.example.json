@@ -1,0 +1,186 @@
+[
+  {
+    "id": "a258efb7-e494-43a8-9876-fccc64e826e7",
+    "title": "Coca-Cola 0.5L",
+    "category": "drink",
+    "price": {
+      "amount": 800000,
+      "currency": "UZS"
+    },
+    "imageUrl": "",
+    "inStock": true,
+    "stockQty": 48,
+    "tags": [
+      "cold",
+      "popular"
+    ]
+  },
+  {
+    "id": "f35111a6-c7e1-4b75-88a7-a5bfd7f24424",
+    "title": "Red Bull 0.25L",
+    "category": "drink",
+    "price": {
+      "amount": 1800000,
+      "currency": "UZS"
+    },
+    "imageUrl": "",
+    "inStock": true,
+    "stockQty": 20,
+    "tags": [
+      "energy"
+    ]
+  },
+  {
+    "id": "2f2f791b-ea7f-4be9-b7fa-4eeb92468df8",
+    "title": "Still water 0.5L",
+    "category": "drink",
+    "price": {
+      "amount": 400000,
+      "currency": "UZS"
+    },
+    "imageUrl": "",
+    "inStock": true,
+    "stockQty": 100,
+    "tags": [
+      "cold"
+    ]
+  },
+  {
+    "id": "0f80ea74-6cc8-4913-a84b-470aa8fc0266",
+    "title": "Americano",
+    "category": "drink",
+    "price": {
+      "amount": 1200000,
+      "currency": "UZS"
+    },
+    "imageUrl": "",
+    "inStock": true,
+    "stockQty": null,
+    "tags": [
+      "hot",
+      "coffee"
+    ]
+  },
+  {
+    "id": "cb723299-6762-4790-85d4-e66e506b8f15",
+    "title": "Lay's Crab 90g",
+    "category": "snack",
+    "price": {
+      "amount": 1000000,
+      "currency": "UZS"
+    },
+    "imageUrl": "",
+    "inStock": true,
+    "stockQty": 30,
+    "tags": [
+      "chips"
+    ]
+  },
+  {
+    "id": "4b01e57e-dae8-47cd-bc7b-9629a1c3fece",
+    "title": "Snickers",
+    "category": "snack",
+    "price": {
+      "amount": 700000,
+      "currency": "UZS"
+    },
+    "imageUrl": "",
+    "inStock": false,
+    "stockQty": 0,
+    "tags": [
+      "chocolate"
+    ]
+  },
+  {
+    "id": "d23034c6-eeb8-4347-8402-4dff9c57be17",
+    "title": "Popcorn (salted)",
+    "category": "snack",
+    "price": {
+      "amount": 900000,
+      "currency": "UZS"
+    },
+    "imageUrl": "",
+    "inStock": true,
+    "stockQty": 15,
+    "tags": [
+      "popular"
+    ]
+  },
+  {
+    "id": "7c780f4e-673a-41db-8529-d74e42ba9761",
+    "title": "Lavash with chicken",
+    "category": "food",
+    "price": {
+      "amount": 2800000,
+      "currency": "UZS"
+    },
+    "imageUrl": "",
+    "inStock": true,
+    "stockQty": 12,
+    "tags": [
+      "hot",
+      "popular"
+    ]
+  },
+  {
+    "id": "a83304a9-5232-4c5d-9430-e7bec46acb97",
+    "title": "Club Burger",
+    "category": "food",
+    "price": {
+      "amount": 3200000,
+      "currency": "UZS"
+    },
+    "imageUrl": "",
+    "inStock": true,
+    "stockQty": 8,
+    "tags": [
+      "hot"
+    ]
+  },
+  {
+    "id": "35ef5d7a-7fe8-4247-be5d-caf2e3f76ac3",
+    "title": "Somsa (beef)",
+    "category": "food",
+    "price": {
+      "amount": 800000,
+      "currency": "UZS"
+    },
+    "imageUrl": "",
+    "inStock": true,
+    "stockQty": 25,
+    "tags": [
+      "hot",
+      "local"
+    ]
+  },
+  {
+    "id": "85bb59ee-76c3-45b4-b50c-abd50bbebeb5",
+    "title": "Headset rental (session)",
+    "category": "service",
+    "price": {
+      "amount": 1000000,
+      "currency": "UZS"
+    },
+    "imageUrl": "",
+    "inStock": true,
+    "stockQty": null,
+    "tags": [
+      "rental"
+    ]
+  },
+  {
+    "id": "d06a6e46-0a85-431c-9a88-f854b23d73e9",
+    "title": "Club T-shirt",
+    "category": "merch",
+    "price": {
+      "amount": 12000000,
+      "currency": "UZS"
+    },
+    "imageUrl": "",
+    "inStock": true,
+    "stockQty": 5,
+    "tags": [
+      "merch"
+    ]
+  }
+]

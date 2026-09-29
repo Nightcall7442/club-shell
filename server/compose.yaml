@@ -45,6 +45,9 @@ services:
       Cors__AllowedOrigins__0: ${CORS_ORIGIN:?set CORS_ORIGIN (origin of the admin console) in server/.env}
       # Only behind a proxy that overwrites this header; leave empty when the server is exposed directly.
       Proxy__ClientIpHeader: ${PROXY_CLIENT_IP_HEADER:-}
+      # Catalog seeds: files in /app/data, or the samples shipped in the image (server/README.md, "Каталог игр и товаров").
+      Catalog__GamesSeedPath: ${CATALOG_GAMES_SEED:-data/games.json}
+      Catalog__ProductsSeedPath: ${CATALOG_PRODUCTS_SEED:-data/products.json}
     ports:
       - "${SERVER_PORT:-8080}:8080"
     volumes:
