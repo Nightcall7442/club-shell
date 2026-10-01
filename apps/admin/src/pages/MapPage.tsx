@@ -370,7 +370,7 @@ function SeatPanel({
                       })
                     }
                   >
-                    {t('Пополнить на {sum} — хватит на сеанс', { sum: money({ amount: shortfall, currency: 'UZS' }) })}
+                    {t('Пополнить на {sum}', { sum: money({ amount: shortfall, currency: 'UZS' }) })}
                   </Button>
                 )}
                 {TOPUP_PRESETS.map((a) => (

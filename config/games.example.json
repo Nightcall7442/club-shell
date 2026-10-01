@@ -31,6 +31,37 @@
     "version": null
   },
   {
+    "id": "c016600d-9340-4cb1-84c3-3515b75aface",
+    "title": "Counter-Strike 1.6",
+    "launcher": "exe",
+    "launcherAppId": null,
+    "exePath": "G:\\Counter Strike 1.6 PRO\\cstrike.exe",
+    "args": null,
+    "installPath": null,
+    "installed": false,
+    "category": [
+      "shooter",
+      "competitive"
+    ],
+    "tags": [
+      "fps",
+      "classic",
+      "team"
+    ],
+    "coverUrl": "",
+    "heroUrl": null,
+    "videoUrl": null,
+    "description": "The classic 5v5 tactical shooter on the GoldSrc engine.",
+    "ageRating": 16,
+    "popularity": 90,
+    "lastPlayedAt": null,
+    "requiresAccount": false,
+    "antiCheat": "none",
+    "minSpec": null,
+    "sizeGb": 0.7,
+    "version": null
+  },
+  {
     "id": "b3f9dd56-a3ec-4c5e-abf6-412ce22c1e2b",
     "title": "Dota 2",
     "launcher": "steam",
