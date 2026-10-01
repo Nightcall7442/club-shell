@@ -284,7 +284,8 @@ function Login({ onDone }: { onDone: (staff: StaffMember, shift: Shift | null) =
           {t('Войти')}
         </Button>
         {error && <p className="text-center text-sm text-danger">{error}</p>}
-        <p className="text-center text-xs text-muted">{t('Демо: владелец 0000, кассир 1111')}</p>
+        {/* The demo PINs exist only on the mock and the dev seed; a production build talks to a real club. */}
+        {import.meta.env.DEV && <p className="text-center text-xs text-muted">{t('Демо: владелец 0000, кассир 1111')}</p>}
       </div>
     </div>
   );
