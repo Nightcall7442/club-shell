@@ -79,6 +79,12 @@ public sealed class SessionTickWorker(
 
                 if (s.IsPrepaid && s.EndsAt is { } endsAt && endsAt <= now)
                 {
+                    // The club extends from the balance instead of ending (limits.autoExtendMinutes), while the grace lasts.
+                    if (now < endsAt.AddSeconds(options.GraceSec) && await AutoExtendAsync(c, tx, s, effects))
+                    {
+                        continue;
+                    }
+
                     if (now >= endsAt.AddSeconds(options.GraceSec))
                     {
                         await EndAsync(c, tx, s, now, effects);
@@ -172,6 +178,35 @@ public sealed class SessionTickWorker(
     }
 
     private static DateTimeOffset Max(DateTimeOffset a, DateTimeOffset b) => a > b ? a : b;
+
+    /// <summary>
+    /// Extends a prepaid session that ran out by the club's <c>limits.autoExtendMinutes</c>, through the same
+    /// <see cref="SessionService.ExtendAsync"/> as the cashier (rules, price, charge, <c>extendSession</c> to the agent).
+    /// A refusal — balance short, tariff window, curfew, maintenance, the tariff's maximum — is rolled back to a savepoint
+    /// and the session ends as before.
+    /// </summary>
+    private async Task<bool> AutoExtendAsync(NpgsqlConnection c, NpgsqlTransaction tx, TickRow s, SessionEffects effects)
+    {
+        var minutes = ClubPricing.Parse(s.TimeZone, s.ClubSettings).AutoExtendMinutes;
+        if (minutes <= 0)
+        {
+            return false;
+        }
+
+        await tx.SaveAsync("auto_extend");
+        try
+        {
+            var (_, charged) = await sessions.ExtendAsync(c, tx, s.Id, s.UserId, s.PcId, minutes, null, effects, notifyAgent: true);
+            await tx.ReleaseAsync("auto_extend");
+            logger.LogInformation("Session {SessionId} auto-extended by {Minutes} min for {Charged}", s.Id, minutes, charged);
+            return true;
+        }
+        catch (ApiException)
+        {
+            await tx.RollbackAsync("auto_extend");
+            return false;
+        }
+    }
 
     private sealed class TickRow : SessionRow
     {

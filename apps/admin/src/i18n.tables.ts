@@ -142,6 +142,12 @@ export const UZ: Record<string, string> = {
   'Баланс пополнен · теперь {sum}': 'Balans toʻldirildi · endi {sum}',
   'Пополнить на {sum}': '{sum} ga toʻldirish',
   'Долги гостей': 'Mehmonlar qarzi',
+  'Автопродление сеанса': 'Seansni avtomatik uzaytirish',
+  'Когда оплаченное время кончается, а на балансе клиента хватает денег, сеанс продлевается сам.':
+    'Toʻlangan vaqt tugaganda mijoz balansida pul yetarli boʻlsa, seans oʻzi uzayadi.',
+  'Продлевать на': 'Uzaytirish',
+  'Принято {cash} · добавлено {time}': '{cash} qabul qilindi · {time} qoʻshildi',
+  'доплата {sum}': 'qoʻshimcha {sum}',
   'Зон пока нет: добавьте зону в блоке «Зоны» ниже и сохраните.':
     'Hali zonalar yoʻq: quyidagi «Zonalar» blokida zona qoʻshing va saqlang.',
   'Принять {sum}': '{sum} qabul qilish',
@@ -696,6 +702,12 @@ export const EN: Record<string, string> = {
   'Баланс пополнен · теперь {sum}': 'Balance topped up · now {sum}',
   'Пополнить на {sum}': 'Top up {sum}',
   'Долги гостей': 'Guest debts',
+  'Автопродление сеанса': 'Auto-extend sessions',
+  'Когда оплаченное время кончается, а на балансе клиента хватает денег, сеанс продлевается сам.':
+    'When the paid time runs out and the client has enough on balance, the session extends itself.',
+  'Продлевать на': 'Extend by',
+  'Принято {cash} · добавлено {time}': 'Took {cash} · added {time}',
+  'доплата {sum}': 'pay {sum}',
   'Зон пока нет: добавьте зону в блоке «Зоны» ниже и сохраните.':
     'No zones yet: add one in the "Zones" block below and save.',
   'Принять {sum}': 'Collect {sum}',
