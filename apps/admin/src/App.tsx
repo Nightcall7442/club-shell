@@ -5,7 +5,17 @@
  */
 import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
-import { adminApi, clubApi, hasToken, setToken, type Shift, type StaffMember } from '@/api';
+import {
+  AdminError,
+  adminApi,
+  clubApi,
+  getClubCode,
+  hasToken,
+  setClubCode,
+  setToken,
+  type Shift,
+  type StaffMember,
+} from '@/api';
 import { describe } from '@/errors';
 import { LANGS, dateLocale, setLang, t, useLang } from '@/i18n';
 import { Button } from '@/ui';
@@ -191,18 +201,22 @@ function useHashSection(): [string, (id: string) => void] {
 function Login({ onDone }: { onDone: (staff: StaffMember, shift: Shift | null) => void }): JSX.Element {
   useLang();
   const [pin, setPin] = useState('');
+  const [clubCode, setClubCodeState] = useState(getClubCode);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const submit = async (value: string): Promise<void> => {
     setBusy(true);
     setError(null);
+    const code = clubCode.trim().toUpperCase();
     try {
-      const r = await clubApi.login(value);
+      const r = await clubApi.login(value, code || undefined);
+      setClubCode(code);
       setToken(r.token);
       onDone(r.staff, r.shift);
     } catch (e) {
-      setError(describe(e));
+      const needsCode = e instanceof AdminError && e.details?.['field'] === 'clubCode';
+      setError(needsCode ? t('Введите код клуба') : describe(e));
       setPin('');
     } finally {
       setBusy(false);
@@ -217,6 +231,8 @@ function Login({ onDone }: { onDone: (staff: StaffMember, shift: Shift | null) =
 
   useEffect(() => {
     const on = (e: KeyboardEvent): void => {
+      // Typing the club code must not feed the PIN.
+      if (e.target instanceof HTMLInputElement) return;
       if (/^\d$/.test(e.key)) press(e.key);
       else if (e.key === 'Backspace') setPin((p) => p.slice(0, -1));
       else if (e.key === 'Enter' && pin.length >= 4) void submit(pin);
@@ -232,6 +248,21 @@ function Login({ onDone }: { onDone: (staff: StaffMember, shift: Shift | null) =
           <span aria-hidden="true" className="h-6 w-6 rotate-45 border border-accent/70" />
           <span className="font-display text-lg tracking-tight">ClubShell</span>
         </div>
+        <label className="flex w-full flex-col gap-1">
+          <span className="label">{t('Код клуба')}</span>
+          <input
+            className="focus-ring h-10 rounded-md border border-line bg-transparent px-3 text-center font-mono uppercase tracking-widest placeholder:font-sans placeholder:normal-case placeholder:tracking-normal"
+            value={clubCode}
+            maxLength={12}
+            autoComplete="off"
+            spellCheck={false}
+            placeholder={t('если клубов несколько')}
+            onChange={(e) => setClubCodeState(e.target.value.replace(/[^0-9a-z]/gi, ''))}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.currentTarget.blur();
+            }}
+          />
+        </label>
         <div className="flex flex-col items-center gap-2">
           <span className="label">{t('Введите PIN')}</span>
           <div className="flex h-10 items-center gap-2" aria-live="polite">
@@ -305,6 +336,8 @@ export function App(): JSX.Element {
   const [section, go] = useHashSection();
   const [usage, setUsage] = useState<{ busy: number; total: number } | null>(null);
   const [now, setNow] = useState(new Date());
+  // The club this console is signed in to (a server may hold several): its display name from the club settings.
+  const [clubName, setClubName] = useState<string | null>(null);
 
   useEffect(() => {
     if (!hasToken()) return;
@@ -334,6 +367,14 @@ export function App(): JSX.Element {
       // the pages show their own errors
     }
   }, []);
+
+  useEffect(() => {
+    if (!staff) return;
+    clubApi
+      .settings()
+      .then((s) => setClubName(s.branding.clubName))
+      .catch(() => setClubName(null));
+  }, [staff]);
 
   useEffect(() => {
     if (!staff) return undefined;
@@ -368,7 +409,7 @@ export function App(): JSX.Element {
       <div className="flex items-center gap-3 border-b border-r border-line px-5">
         <span aria-hidden="true" className="h-5 w-5 shrink-0 rotate-45 border border-accent/70" />
         <div className="min-w-0 leading-tight">
-          <div className="truncate font-display text-sm tracking-tight">CyberArena</div>
+          <div className="truncate font-display text-sm tracking-tight">{clubName ?? 'ClubShell'}</div>
           <div className="label">{staff.role === 'owner' ? t('Владелец') : t('Касса')}</div>
         </div>
       </div>

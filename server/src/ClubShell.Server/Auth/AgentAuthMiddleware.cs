@@ -26,6 +26,7 @@ public sealed class AgentAuthMiddleware(
     ClubRepository clubs,
     ReplayLog replays,
     AuthOptions options,
+    Platform.PlatformOptions platform,
     TimeProvider clock,
     ILogger<AgentAuthMiddleware> logger)
 {
@@ -95,6 +96,9 @@ public sealed class AgentAuthMiddleware(
                 }
 
                 context.Features.Set(staff);
+                break;
+            case AuthMode.Platform:
+                Platform.PlatformEndpoints.Authenticate(context, platform, logger);
                 break;
         }
 

@@ -69,7 +69,12 @@ public sealed class StaffTokens(NpgsqlDataSource db, AuthOptions options, TimePr
     /// back unless the PIN turned out wrong: check and count are one step, so parallel requests cannot all pass the check
     /// before any failure is recorded. ponytail: in memory, per instance (one instance, D-20); a restart forgets the failures.
     /// </summary>
-    public async Task<(string Token, StaffContext Staff)?> LoginAsync(string pin, IPAddress? client)
+    /// <remarks>
+    /// The PIN is unique only inside its network, so it is looked up in one club: the one of <paramref name="clubCode"/>, or
+    /// the only club of the server when no code is sent (400 <c>clubCode required</c> once there are more). An unknown code
+    /// or a disabled club is a wrong PIN: it counts as an attempt and does not tell which codes exist.
+    /// </remarks>
+    public async Task<(string Token, StaffContext Staff)?> LoginAsync(string pin, string? clubCode, IPAddress? client)
     {
         var key = PinLimitKey(client);
         var attempt = TakeAttempt(key);
@@ -78,8 +83,15 @@ public sealed class StaffTokens(NpgsqlDataSource db, AuthOptions options, TimePr
         {
             var now = clock.GetUtcNow();
             await using var c = await db.OpenConnectionAsync();
+            var code = string.IsNullOrWhiteSpace(clubCode) ? null : clubCode.Trim().ToUpperInvariant();
+            if (code is null && await c.ExecuteScalarAsync<long>("SELECT count(*) FROM clubs") > 1)
+            {
+                throw ApiException.Validation("clubCode", "required", "This server holds several clubs: send the club code with the PIN");
+            }
+
             var staff = await c.QuerySingleOrDefaultAsync<StaffRow>(
-                $"{StaffRow.Select} WHERE s.pin_hmac = @hmac AND s.active", new { hmac = PinHmac(pin) });
+                $"{StaffRow.Select} WHERE s.pin_hmac = @hmac AND s.active AND NOT cl.disabled AND (@code IS NULL OR cl.code = @code)",
+                new { hmac = PinHmac(pin), code });
             if (staff is null)
             {
                 wrong = true;
@@ -171,7 +183,7 @@ public sealed class StaffTokens(NpgsqlDataSource db, AuthOptions options, TimePr
         await using var c = await db.OpenConnectionAsync();
         if (token.StartsWith("ck_", StringComparison.Ordinal))
         {
-            var clubs = await c.QueryAsync<(Guid Id, Guid NetworkId, byte[] Hash)>("SELECT id, network_id, api_key_hash FROM clubs WHERE api_key_hash IS NOT NULL");
+            var clubs = await c.QueryAsync<(Guid Id, Guid NetworkId, byte[] Hash)>("SELECT id, network_id, api_key_hash FROM clubs WHERE api_key_hash IS NOT NULL AND NOT disabled");
             var presented = ApiKeyHash(token);
             StaffContext? found = null;
             foreach (var club in clubs)
@@ -191,7 +203,7 @@ public sealed class StaffTokens(NpgsqlDataSource db, AuthOptions options, TimePr
             $"""
             UPDATE staff_tokens t SET last_used_at = @now
             FROM staff s JOIN clubs cl ON cl.id = s.club_id
-            WHERE t.token_hash = @hash AND s.id = t.staff_id AND s.active AND t.revoked_at IS NULL
+            WHERE t.token_hash = @hash AND s.id = t.staff_id AND s.active AND NOT cl.disabled AND t.revoked_at IS NULL
               AND t.expires_at > @now AND t.last_used_at > @idle
             RETURNING s.id, s.name, s.role, s.club_id, cl.network_id
             """,
@@ -227,7 +239,7 @@ public sealed class StaffTokens(NpgsqlDataSource db, AuthOptions options, TimePr
         await c.ExecuteAsync(
             """
             INSERT INTO staff (id, network_id, club_id, name, role, pin_hmac)
-            SELECT @id, network_id, id, 'Владелец', 'owner', @hmac FROM clubs ORDER BY created_at LIMIT 1
+            SELECT @id, network_id, id, 'Владелец', 'owner', @hmac FROM clubs ORDER BY created_at, id LIMIT 1
             ON CONFLICT DO NOTHING
             """,
             new { id = Guid.CreateVersion7(clock.GetUtcNow()), hmac = PinHmac(pin) });

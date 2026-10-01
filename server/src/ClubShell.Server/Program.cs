@@ -6,6 +6,7 @@ using ClubShell.Server.Agents;
 using ClubShell.Server.Auth;
 using ClubShell.Server.Games;
 using ClubShell.Server.Idempotency;
+using ClubShell.Server.Platform;
 using ClubShell.Server.Infrastructure;
 using ClubShell.Server.Realtime;
 using ClubShell.Server.Sessions;
@@ -55,6 +56,8 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(authOptions);
 builder.Services.AddSingleton(clubOptions);
 builder.Services.AddSingleton(proxyOptions);
+builder.Services.AddSingleton(builder.Configuration.GetSection("Platform").Get<PlatformOptions>() ?? new PlatformOptions());
+builder.Services.AddSingleton(new ClubSeeds(policySeedPath, gamesSeedPath, productsSeedPath));
 builder.Services.AddSingleton(agentOptions);
 builder.Services.AddSingleton(sessionOptions);
 builder.Services.AddSingleton(realtimeOptions);
@@ -118,10 +121,7 @@ if (builder.Configuration.GetValue("Database:MigrateOnStart", true))
 
 var clubs = app.Services.GetRequiredService<ClubRepository>();
 await clubs.EnsureAsync(clubOptions);
-await clubs.SeedPolicyAsync(JsonDefaults.Deserialize<Policy>(File.ReadAllText(policySeedPath))
-    ?? throw new InvalidOperationException($"Policy seed {policySeedPath} is empty"));
-await CatalogSeed.ApplyAsync(app.Services.GetRequiredService<Npgsql.NpgsqlDataSource>(), gamesSeedPath, app.Services.GetRequiredService<TimeProvider>());
-await ProductSeed.ApplyAsync(app.Services.GetRequiredService<Npgsql.NpgsqlDataSource>(), productsSeedPath, app.Services.GetRequiredService<TimeProvider>());
+await app.Services.GetRequiredService<ClubSeeds>().ApplyAsync(app.Services);
 var staffTokens = app.Services.GetRequiredService<StaffTokens>();
 if (builder.Configuration.GetValue("Seed:Dev", false))
 {
@@ -170,6 +170,7 @@ app.MapCatalogAdminEndpoints();
 app.MapHealthEndpoints();
 app.MapControlEndpoints();
 app.MapReportsEndpoints();
+app.MapPlatformEndpoints();
 app.MapNetworkEndpoints();
 app.Map("/ws/agent", (HttpContext context, AgentSocketHub hub) => hub.HandleAsync(context));
 app.MapNotImplemented(ContractStatus.Load(contractPath), ContractStatus.Implemented);

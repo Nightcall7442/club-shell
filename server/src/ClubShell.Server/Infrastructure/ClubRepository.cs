@@ -15,7 +15,10 @@ public sealed class ClubOptions
     /// <summary>IANA zone for all calendar logic; set on first start only.</summary>
     public string TimeZone { get; set; } = "Asia/Tashkent";
 
-    /// <summary>Agent <c>X-Club-Key</c>. Empty closes registration.</summary>
+    /// <summary>
+    /// Agent <c>X-Club-Key</c> of the first (bootstrap) club. Empty leaves the stored key as it is: a fresh server then has
+    /// none (registration closed), and a key issued by the platform administration is not wiped by a restart.
+    /// </summary>
     public string EnrollmentKey { get; set; } = "";
 
     /// <summary>The key before the last rotation, still accepted: agents re-register every morning.</summary>
@@ -48,8 +51,8 @@ public sealed class ClubAgentView
 public sealed class ClubRepository(NpgsqlDataSource db, TimeProvider clock)
 {
     /// <summary>
-    /// First start creates the network and the club; every start writes the enrollment key hashes from config, so a
-    /// rotation is a config change plus restart. Every later start also bumps <c>config_version</c>: the agent config
+    /// First start creates the network and the club; every start with a configured key writes the enrollment key hashes,
+    /// so a rotation is a config change plus restart (more clubs and their keys: <see cref="CreateAsync"/>). Every later start also bumps <c>config_version</c>: the agent config
     /// carries <c>Agents:*</c>/<c>Sessions:*</c> from appsettings, which change only with a restart, and running agents
     /// refetch it only when the heartbeat's <c>configVersion</c> changes (the ETag <c>"c&lt;v&gt;"</c> follows too).
     /// ponytail: bumped even when those values did not change, one <c>GET /config</c> per PC per restart; store a
@@ -61,7 +64,7 @@ public sealed class ClubRepository(NpgsqlDataSource db, TimeProvider clock)
         await using var tx = await c.BeginTransactionAsync(cancellationToken);
         await c.ExecuteAsync("SELECT pg_advisory_xact_lock(@key)", new { key = AdvisoryLocks.Bootstrap }, tx);
         var now = clock.GetUtcNow();
-        var clubId = await c.QuerySingleOrDefaultAsync<Guid?>("SELECT id FROM clubs ORDER BY created_at LIMIT 1", transaction: tx);
+        var clubId = await c.QuerySingleOrDefaultAsync<Guid?>("SELECT id FROM clubs ORDER BY created_at, id LIMIT 1", transaction: tx);
         if (clubId is null)
         {
             var networkId = Guid.CreateVersion7(now);
@@ -80,12 +83,56 @@ public sealed class ClubRepository(NpgsqlDataSource db, TimeProvider clock)
             await c.ExecuteAsync("UPDATE clubs SET config_version = config_version + 1, updated_at = @now WHERE id = @clubId", new { clubId, now }, tx);
         }
 
-        await c.ExecuteAsync(
-            "UPDATE clubs SET enrollment_key_hash = @current, prev_enrollment_key_hash = @previous WHERE id = @clubId",
-            new { clubId, current = Hash(options.EnrollmentKey), previous = Hash(options.PreviousEnrollmentKey) },
-            tx);
+        // Every club has a code (M0006): the console sends it with the PIN once the server holds more than one club.
+        await c.ExecuteAsync("UPDATE clubs SET code = @code WHERE id = @clubId AND code IS NULL", new { clubId, code = NewCode() }, tx);
+
+        if (!string.IsNullOrEmpty(options.EnrollmentKey))
+        {
+            await c.ExecuteAsync(
+                "UPDATE clubs SET enrollment_key_hash = @current, prev_enrollment_key_hash = @previous WHERE id = @clubId",
+                new { clubId, current = Hash(options.EnrollmentKey), previous = Hash(options.PreviousEnrollmentKey) },
+                tx);
+        }
+
         await tx.CommitAsync(cancellationToken);
     }
+
+    /// <summary>The club the configured key belongs to (<see cref="EnsureAsync"/>): its key is managed by config, not by the platform.</summary>
+    public async Task<Guid?> BootstrapClubIdAsync()
+    {
+        await using var c = await db.OpenConnectionAsync();
+        return await c.QuerySingleOrDefaultAsync<Guid?>("SELECT id FROM clubs ORDER BY created_at, id LIMIT 1");
+    }
+
+    /// <summary>
+    /// A new club in a network of its own (platform administration): wallets and players are per network, so clubs of
+    /// different owners never share them. Returns the club id; the caller adds the owner in the same transaction.
+    /// </summary>
+    public static async Task<(Guid ClubId, Guid NetworkId)> CreateAsync(
+        NpgsqlConnection c, NpgsqlTransaction tx, string name, string code, string timeZone, string enrollmentKey, DateTimeOffset now)
+    {
+        var networkId = Guid.CreateVersion7(now);
+        var clubId = Guid.CreateVersion7(now);
+        await c.ExecuteAsync(
+            """
+            INSERT INTO networks (id, name, created_at) VALUES (@networkId, @name, @now);
+            INSERT INTO clubs (id, network_id, name, code, time_zone, enrollment_key_hash, created_at, updated_at)
+            VALUES (@clubId, @networkId, @name, @code, @timeZone, @key, @now, @now);
+            """,
+            new { networkId, clubId, name, code, timeZone, key = Hash(enrollmentKey), now },
+            tx);
+        return (clubId, networkId);
+    }
+
+    /// <summary>Replaces the club's key; the old one stays accepted as the previous key until the next rotation.</summary>
+    public static Task<int> RotateEnrollmentKeyAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid clubId, string enrollmentKey, DateTimeOffset now) =>
+        c.ExecuteAsync(
+            """
+            UPDATE clubs SET prev_enrollment_key_hash = enrollment_key_hash, enrollment_key_hash = @key, updated_at = @now
+            WHERE id = @clubId
+            """,
+            new { clubId, key = Hash(enrollmentKey), now },
+            tx);
 
     public async Task<ClubAgentView> GetAgentViewAsync(Guid clubId)
     {
@@ -159,6 +206,13 @@ public sealed class ClubRepository(NpgsqlDataSource db, TimeProvider clock)
 
         return found;
     }
+
+    /// <summary>A club code: six characters without the look-alikes 0/O and 1/I, typed once on the console's login screen.</summary>
+    public static string NewCode() => RandomNumberGenerator.GetString("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6);
+
+    /// <summary>A club's enrollment key for the agents' installer: 24 letters and digits, safe on any command line.</summary>
+    public static string NewEnrollmentKey() =>
+        RandomNumberGenerator.GetString("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789", 24);
 
     private static bool Matches(byte[] presented, byte[]? stored) =>
         stored is not null && CryptographicOperations.FixedTimeEquals(presented, stored);

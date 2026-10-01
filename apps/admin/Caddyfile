@@ -6,6 +6,8 @@
 
 :{$PORT:8080} {
 	root * /srv
+	# The platform administration page (apps/admin/platform.html) at a short address.
+	rewrite /platform /platform.html
 	encode zstd gzip
 	file_server
 

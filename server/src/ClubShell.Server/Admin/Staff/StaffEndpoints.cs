@@ -39,13 +39,14 @@ public static class StaffEndpoints
 
     private static async Task<IResult> LoginAsync(HttpContext context, [FromBody] JsonElement body, StaffTokens staff, NpgsqlDataSource db)
     {
-        var pin = Api.Read<AdminLoginRequest>(body, "pin").Pin!;
+        var request = Api.Read<AdminLoginRequest>(body, "pin");
+        var pin = request.Pin!;
         if (pin.Length is 0 or > 12)
         {
             throw ApiException.Validation("pin", pin.Length == 0 ? "min" : "max");
         }
 
-        var (token, member) = await staff.LoginAsync(pin, context.Connection.RemoteIpAddress)
+        var (token, member) = await staff.LoginAsync(pin, request.ClubCode, context.Connection.RemoteIpAddress)
             ?? throw ApiException.Unauthorized("invalidPin", "No active staff member with this PIN");
         await using var c = await db.OpenConnectionAsync();
         return AdminJson.Ok(new AdminLoginResponse(token, Member(member), await ShiftEndpoints.OpenShiftAsync(c, member.ClubId)));

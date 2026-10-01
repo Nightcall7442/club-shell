@@ -122,10 +122,10 @@ public static partial class StaffAdminEndpoints
     }
 
     /// <summary>4–8 ASCII digits (<c>\d</c> would take any Unicode digit), else <c>400 pin digits4to8</c>.</summary>
-    private static string Pin(string pin) => PinPattern().IsMatch(pin) ? pin : throw ApiException.Validation("pin", "digits4to8");
+    internal static string Pin(string pin) => PinPattern().IsMatch(pin) ? pin : throw ApiException.Validation("pin", "digits4to8");
 
     /// <summary>A PIN another member of the network holds is <c>400 pin taken</c>.</summary>
-    private static async Task PinWriteAsync(NpgsqlConnection c, NpgsqlTransaction tx, Func<Task<int>> write)
+    internal static async Task PinWriteAsync(NpgsqlConnection c, NpgsqlTransaction tx, Func<Task<int>> write)
     {
         await c.ExecuteAsync("SAVEPOINT pin", transaction: tx);
         try
