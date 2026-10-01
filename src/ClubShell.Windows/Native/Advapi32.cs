@@ -387,6 +387,14 @@ public static partial class Userenv
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool DeleteProfileW(string lpSidString, string? lpProfilePath, string? lpComputerName);
 
+    /// <summary>
+    /// Creates the profile of an account that has never logged on: the directory from the Default profile, its NTUSER.DAT
+    /// and the ProfileList entry. Returns an HRESULT: <c>S_OK</c>, or <c>HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS)</c>
+    /// (0x800700B7) when the profile exists. Needs administrator rights (LocalSystem has them).
+    /// </summary>
+    [LibraryImport(Lib, EntryPoint = "CreateProfile", StringMarshalling = StringMarshalling.Utf16)]
+    public static partial int CreateProfile(string pszUserSid, string pszUserName, ref char pszProfilePath, uint cchProfilePath);
+
     [LibraryImport(Lib, SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool GetUserProfileDirectoryW(SafeTokenHandle hToken, ref char lpProfileDir, ref uint lpcchSize);

@@ -176,6 +176,17 @@ public sealed class TempUserProvisioner : IKioskCredentials, IHostedService, IDi
             }
 
             var sid = _users.GetSid(name) ?? throw new InvalidOperationException($"SID of kiosk user '{name}' could not be resolved.");
+
+            // A fresh account has no profile until its first logon, and the shell replacement (per-user hive) and the
+            // auto-logon it turns on wait for one: create the profile now, so the first boot already logs the kiosk on.
+            try
+            {
+                _ = _users.EnsureProfile(name, sid);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or EntryPointNotFoundException or DllNotFoundException)
+            {
+                _logger.LogWarning(ex, "Profile of kiosk user {User} could not be created; the shell waits for its first logon", name);
+            }
             var record = rotated || stored is null
                 ? new KioskCredentialsRecord(name, password, sid, now)
                 : stored with { Sid = sid };
