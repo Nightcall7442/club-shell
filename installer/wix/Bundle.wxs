@@ -17,7 +17,8 @@
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal"
-     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
+     xmlns:netfx="http://wixtoolset.org/schemas/v4/wxs/netfx">
 
   <Bundle Name="ClubShell"
           Version="$(var.Version)"
@@ -69,6 +70,9 @@
                          Value="$(var.DotnetRuntimeVersion)"
                          Result="exists"
                          Bitness="always64" />
+    <!-- The newest installed .NET 8 runtime: a later 8.0.x serves the agent (patch roll-forward), and the 8.0.x installer
+         would exit "already newer" without registering the version pinned here (seen on the pilot PC). -->
+    <netfx:DotNetCoreSearch Id="Dotnet8Search" RuntimeType="core" Platform="x64" MajorVersion="8" Variable="Dotnet8Version" />
     <util:RegistrySearch Id="WebView2Search"
                          Variable="WebView2Version"
                          Root="HKLM"
@@ -82,7 +86,7 @@
       <!-- Microsoft .NET Runtime (framework-dependent Agent service). Never uninstalled by this bundle. -->
       <ExePackage Id="DotnetRuntime"
                   DisplayName="Microsoft .NET Runtime $(var.DotnetRuntimeVersion) (x64)"
-                  DetectCondition="DotnetRuntimeInstalled"
+                  DetectCondition="DotnetRuntimeInstalled OR (Dotnet8Version AND Dotnet8Version &gt;= v$(var.DotnetRuntimeVersion))"
                   InstallArguments="/install /quiet /norestart"
                   RepairArguments="/repair /quiet /norestart"
                   PerMachine="yes"
@@ -142,6 +146,9 @@
         <MsiProperty Name="DISKLESSSERVERURL" Value="[DISKLESSSERVERURL]" />
         <MsiProperty Name="DISKLESSCLUBKEY" Value="[DISKLESSCLUBKEY]" />
         <MsiProperty Name="DISKLESSCACERT" Value="[DISKLESSCACERT]" />
+        <!-- The bundle has made sure of a .NET 8 runtime (pinned version or a later 8.0.x); the MSI's own check wants the
+             pinned version exactly and stays for MSIs installed on their own. -->
+        <MsiProperty Name="SKIPDOTNETCHECK" Value="1" />
       </MsiPackage>
 
     </Chain>

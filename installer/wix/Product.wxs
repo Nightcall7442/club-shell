@@ -72,7 +72,13 @@
 
     <Launch Condition="Installed OR VersionNT64"
             Message="ClubShell requires a 64-bit version of Windows." />
-    <Launch Condition="Installed OR (VersionNT &gt;= 603 AND WindowsBuild &gt;= 17763)"
+    <!-- The build number from the registry: Windows Installer reports VersionNT 603 / WindowsBuild 9600 (Windows 8.1) on
+         Windows 10 and 11, so WindowsBuild >= 17763 is false on every PC and the install stops (seen on the pilot PC). -->
+    <Property Id="WINDOWSBUILDNUMBER" Secure="yes">
+      <RegistrySearch Id="WindowsBuildNumberSearch" Root="HKLM" Key="SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+                      Name="CurrentBuildNumber" Type="raw" Bitness="always64" />
+    </Property>
+    <Launch Condition="Installed OR (WINDOWSBUILDNUMBER &gt;= 17763)"
             Message="ClubShell requires Windows 10 version 1809 (build 17763) or later." />
     <Launch Condition="Installed OR DOTNET8RUNTIME OR SKIPDOTNETCHECK"
             Message="The Microsoft .NET Runtime $(var.DotnetRuntimeVersion) (x64) is required. Run ClubShellSetup.exe, which installs it, or install it from https://dotnet.microsoft.com and retry. If a newer 8.0.x runtime is already installed, pass SKIPDOTNETCHECK=1." />
