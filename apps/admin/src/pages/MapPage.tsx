@@ -212,6 +212,9 @@ function SeatPanel({
     };
   }, [tariffId, minutes, userId, seat.pc.id]);
   const price = priceQuote?.total.amount ?? 0;
+  // Opening a session debits the client's balance, so a new client (balance 0) must be topped up first, here.
+  const member = members.find((m) => m.id === userId);
+  const shortfall = member ? Math.max(0, price - member.balance.amount) : 0;
   const left = secondsLeft(seat.session);
   void tick;
 
@@ -352,6 +355,41 @@ function SeatPanel({
               ))}
             </select>
           </Field>
+          {member && (
+            <Field label={t('Пополнить баланс')}>
+              <div className="grid grid-cols-4 gap-1.5">
+                {shortfall > 0 && (
+                  <Button
+                    className="col-span-4"
+                    variant="primary"
+                    disabled={busy !== null}
+                    onClick={() =>
+                      void run('top-shortfall', async () => {
+                        const r = await adminApi.topUp({ userId: member.id, amount: shortfall });
+                        return t('Баланс пополнен · теперь {sum}', { sum: money(r.balance) });
+                      })
+                    }
+                  >
+                    {t('Пополнить на {sum} — хватит на сеанс', { sum: money({ amount: shortfall, currency: 'UZS' }) })}
+                  </Button>
+                )}
+                {TOPUP_PRESETS.map((a) => (
+                  <Button
+                    key={a}
+                    disabled={busy !== null}
+                    onClick={() =>
+                      void run(`top-${a}`, async () => {
+                        const r = await adminApi.topUp({ userId: member.id, amount: a * 100 });
+                        return t('Баланс пополнен · теперь {sum}', { sum: money(r.balance) });
+                      })
+                    }
+                  >
+                    {t('{n}к', { n: a / 1000 })}
+                  </Button>
+                ))}
+              </div>
+            </Field>
+          )}
           <Field label={t('Тариф')}>
             <select className={inputCls} value={tariffId} onChange={(e) => setTariffId(e.target.value)}>
               {zoneTariffs.map((tf) => (
