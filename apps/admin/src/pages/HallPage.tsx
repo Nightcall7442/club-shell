@@ -130,7 +130,9 @@ function DevicePanel({
   };
 
   const changed = name !== pc.name || number !== pc.number || zone !== pc.zone || device !== pc.device;
-  const zoneOptions = zones.some((z) => z.name === pc.zone) ? zones : [...zones, { name: pc.zone, color: '' }];
+  // A PC approved before any zone existed has zone "": not a choice, just nothing chosen yet.
+  const zoneOptions =
+    pc.zone === '' || zones.some((z) => z.name === pc.zone) ? zones : [...zones, { name: pc.zone, color: '' }];
   const m = pc.metrics;
   const cpuT = m?.temps.cpu ?? null;
   const gpuT = m?.temps.gpu ?? null;
@@ -145,12 +147,16 @@ function DevicePanel({
         <NumberInput value={number} min={1} max={9999} onChange={setNumber} />
       </Field>
       <Field label={t('Зона')}>
-        <Choice
-          cols={3}
-          value={zone}
-          onChange={setZone}
-          options={zoneOptions.map((z) => ({ id: z.name, label: z.name }))}
-        />
+        {zoneOptions.length > 0 ? (
+          <Choice
+            cols={3}
+            value={zone}
+            onChange={setZone}
+            options={zoneOptions.map((z) => ({ id: z.name, label: z.name }))}
+          />
+        ) : (
+          <p className="text-sm text-muted">{t('Зон пока нет: добавьте зону в блоке «Зоны» ниже и сохраните.')}</p>
+        )}
       </Field>
       <Field label={t('Тип устройства')}>
         <Choice
@@ -515,19 +521,18 @@ export default function HallPage(): JSX.Element {
               }}
             />
           ) : (
-            <>
-              <AddDevice
-                zones={zones}
-                pcs={pcs}
-                freeCell={freeCell}
-                onAdded={async (id) => {
-                  await load();
-                  if (id) setSelected(id);
-                }}
-              />
-              <ZonesEditor onSaved={load} />
-            </>
+            <AddDevice
+              zones={zones}
+              pcs={pcs}
+              freeCell={freeCell}
+              onAdded={async (id) => {
+                await load();
+                if (id) setSelected(id);
+              }}
+            />
           )}
+          {/* Always here: a PC can only be put in a zone that exists, so the zones must be reachable from its panel too. */}
+          <ZonesEditor onSaved={load} />
         </aside>
       </div>
     </div>
