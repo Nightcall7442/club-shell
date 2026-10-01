@@ -29,6 +29,37 @@ Add "Kiosk user 'club': $([bool](Get-LocalUser -Name club -ErrorAction SilentlyC
 Add "agent.json present: $(Test-Path (Join-Path $data 'agent.json'))"
 
 Add ''
+Add '--- Kiosk account and auto-logon'
+$club = Get-LocalUser -Name club -ErrorAction SilentlyContinue
+if ($club) {
+    $sid = $club.SID.Value
+    $profilePath = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$sid" -ErrorAction SilentlyContinue).ProfileImagePath
+    Add "club: enabled $($club.Enabled), SID $sid"
+    Add "club profile: $(if ($profilePath) { "$profilePath (NTUSER.DAT present: $(Test-Path (Join-Path ([Environment]::ExpandEnvironmentVariables($profilePath)) 'NTUSER.DAT')))" } else { 'none' })"
+}
+$winlogon = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -ErrorAction SilentlyContinue
+Add "Winlogon: AutoAdminLogon=$($winlogon.AutoAdminLogon) DefaultUserName=$($winlogon.DefaultUserName) DefaultDomainName=$($winlogon.DefaultDomainName) Shell=$($winlogon.Shell) DefaultPassword in registry=$([bool]($winlogon.PSObject.Properties.Name -contains 'DefaultPassword'))"
+$passwordless = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\PasswordLess\Device' -ErrorAction SilentlyContinue).DevicePasswordLessBuildVersion
+Add "Windows Hello passwordless (2 blocks auto-logon): $passwordless"
+Add "Sessions: $((query session 2>$null) -join ' | ')"
+Add "Shell process: $(@(Get-Process clubshell-shell -ErrorAction SilentlyContinue | ForEach-Object { "pid $($_.Id) session $($_.SessionId)" }) -join ', ')"
+
+Add ''
+Add '--- Agent log: kiosk, policy and shell messages'
+$keyLog = Get-ChildItem -Path (Join-Path $data 'logs') -Filter 'agent-*.json' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if ($keyLog) {
+    $pattern = 'Kiosk|kiosk|Profile|profile|Policy|policy|shell|Shell|auto-logon|Auto-logon|logon|Registered'
+    foreach ($line in Get-Content -LiteralPath $keyLog.FullName -ErrorAction SilentlyContinue | Select-String -Pattern $pattern | Select-Object -Last 40) {
+        try { $e = $line.Line | ConvertFrom-Json } catch { continue }
+        $msg = [string] $e.'@mt'
+        foreach ($p in $e.PSObject.Properties) { if ($p.Name -notlike '@*') { $msg = $msg.Replace('{' + $p.Name + '}', [string] $p.Value) } }
+        $time = ([string] $e.'@t'); if ($time.Length -ge 19) { $time = $time.Substring(11, 8) }
+        $x = if ($e.'@x') { ' | ' + (([string] $e.'@x') -split "`n")[0].Trim() } else { '' }
+        Add ("{0} {1}{2}" -f $time, $msg, $x)
+    }
+}
+
+Add ''
 Add '--- Agent log (newest last)'
 $log = Get-ChildItem -Path (Join-Path $data 'logs') -Filter 'agent-*.json' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if (-not $log) {
