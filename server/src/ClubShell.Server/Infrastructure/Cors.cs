@@ -7,7 +7,7 @@ public sealed class CorsOptions
 }
 
 /// <summary>
-/// CORS of the admin console, only on <c>/api/v1/admin/*</c> (DESIGN §3.8). First in the pipeline, so the headers are on
+/// CORS of the admin console, only on <c>/api/v1/admin/*</c> (DESIGN §3.8) and the platform page on <c>/api/v1/platform/*</c>. First in the pipeline, so the headers are on
 /// every answer, errors included (else the console cannot read the envelope). A preflight is <c>204</c> before any
 /// authentication; an origin not in <see cref="CorsOptions.AllowedOrigins"/> gets no CORS headers at all.
 /// </summary>
@@ -15,7 +15,8 @@ public sealed class CorsMiddleware(RequestDelegate next, CorsOptions options)
 {
     public Task InvokeAsync(HttpContext context)
     {
-        if (!context.Request.Path.StartsWithSegments("/api/v1/admin", StringComparison.OrdinalIgnoreCase))
+        if (!context.Request.Path.StartsWithSegments("/api/v1/admin", StringComparison.OrdinalIgnoreCase)
+            && !context.Request.Path.StartsWithSegments("/api/v1/platform", StringComparison.OrdinalIgnoreCase))
         {
             return next(context);
         }

@@ -17,6 +17,7 @@ import type {
 
 const BASE = (import.meta.env['VITE_ADMIN_API'] as string | undefined) ?? 'http://localhost:8080/api/v1';
 const TOKEN_KEY = 'clubshell.admin.token';
+const CLUB_CODE_KEY = 'clubshell.admin.clubCode';
 
 let token: string | null = (() => {
   try {
@@ -33,6 +34,24 @@ export function setToken(value: string | null): void {
     else localStorage.removeItem(TOKEN_KEY);
   } catch {
     // private mode: the session just does not survive a reload
+  }
+}
+
+/** The club code of this console (a server may hold several clubs; the PIN is looked up in the club of the code). */
+export function getClubCode(): string {
+  try {
+    return localStorage.getItem(CLUB_CODE_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+export function setClubCode(value: string): void {
+  try {
+    if (value) localStorage.setItem(CLUB_CODE_KEY, value);
+    else localStorage.removeItem(CLUB_CODE_KEY);
+  } catch {
+    // private mode: the code is typed again next time
   }
 }
 
@@ -575,8 +594,8 @@ export type TariffInput = Omit<Tariff, 'id' | 'pricePerHour' | 'packagePrice'> &
 };
 
 export const clubApi = {
-  login: (pin: string): Promise<{ token: string; staff: StaffMember; shift: Shift | null }> =>
-    post('/admin/login', { pin }),
+  login: (pin: string, clubCode?: string): Promise<{ token: string; staff: StaffMember; shift: Shift | null }> =>
+    post('/admin/login', clubCode ? { pin, clubCode } : { pin }),
   me: (): Promise<{ staff: StaffMember; shift: Shift | null }> => call('/admin/me'),
   /** Revokes the staff token on the server; the caller drops it locally. */
   logout: (): Promise<unknown> => post('/admin/logout', {}),

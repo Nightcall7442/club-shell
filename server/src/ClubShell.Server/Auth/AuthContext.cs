@@ -22,6 +22,9 @@ public enum AuthMode
 
     /// <summary><c>Authorization: Bearer</c> staff token or <c>ck_</c> key.</summary>
     Staff,
+
+    /// <summary><c>Authorization: Bearer</c> platform administrator key (<c>Platform:AdminKey</c>, beyond the contract).</summary>
+    Platform,
 }
 
 /// <summary>

@@ -13,5 +13,11 @@ export default defineConfig({
     },
   },
   server: { port: 1421, strictPort: true },
-  build: { target: 'es2022', outDir: 'dist', emptyOutDir: true },
+  build: {
+    target: 'es2022',
+    outDir: 'dist',
+    emptyOutDir: true,
+    // Two pages: the console (index.html) and the platform administration (platform.html).
+    rollupOptions: { input: { main: here('./index.html'), platform: here('./platform.html') } },
+  },
 });

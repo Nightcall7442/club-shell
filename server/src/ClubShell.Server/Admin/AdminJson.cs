@@ -77,7 +77,8 @@ public sealed record AdminHallPc(
 public sealed record AdminHallPcList(IReadOnlyList<AdminHallPc> Items, IReadOnlyList<AdminZone> Zones);
 
 // Requests: every field nullable, so a missing one is told apart from a default (400 required).
-public sealed record AdminLoginRequest(string? Pin);
+/// <summary><c>clubCode</c> is beyond the contract: needed once the server holds more than one club (M0006).</summary>
+public sealed record AdminLoginRequest(string? Pin, string? ClubCode);
 
 public sealed record AdminOpenSessionRequest(Guid? PcId, Guid? UserId, Guid? TariffId, int? Minutes);
 
