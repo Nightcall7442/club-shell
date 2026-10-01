@@ -46,7 +46,8 @@ export default function GamesScreen(): JSX.Element {
   const gridRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    void load();
+    // Forced: picks up games the owner added since the Shell started (quiet when a list is already shown).
+    void load(true);
     document.getElementById('main')?.scrollTo({ top: 0 });
   }, [load]);
 

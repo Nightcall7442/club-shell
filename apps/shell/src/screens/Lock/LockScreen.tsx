@@ -25,6 +25,7 @@ import { api, toShellApiError } from '@/lib/tauri';
 import { formatClock } from '@/lib/time';
 import { selectIsGuest, useAuthStore } from '@/store/auth';
 import { useNotificationsStore } from '@/store/notifications';
+import { useGamesStore } from '@/store/games';
 import { useSessionStore } from '@/store/session';
 import { useSettingsStore } from '@/store/settings';
 import { useThemeStore } from '@/store/theme';
@@ -614,6 +615,7 @@ export default function LockScreen(): JSX.Element {
   // writes the server's club block into shell.json whenever the config version moves.
   useEffect(() => {
     void useSettingsStore.getState().load();
+    void useGamesStore.getState().load(true);
   }, []);
 
   useEffect(() => {
