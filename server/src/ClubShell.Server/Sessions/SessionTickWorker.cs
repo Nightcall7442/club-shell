@@ -42,8 +42,9 @@ public sealed class SessionTickWorker(
             // ponytail: 100 per tick and all open postpaid re-read each second; page by ends_at/id if a club outgrows it.
             var open = (await c.QueryAsync<TickRow>(
                 """
-                SELECT s.*, p.last_heartbeat_at, w.main_balance, t.settled
+                SELECT s.*, p.last_heartbeat_at, w.main_balance, t.settled, u.role, cl.time_zone, cl.settings::text AS club_settings
                 FROM sessions s JOIN pcs p ON p.id = s.pc_id JOIN wallets w ON w.user_id = s.user_id
+                JOIN users u ON u.id = s.user_id JOIN clubs cl ON cl.id = s.club_id
                 CROSS JOIN LATERAL (SELECT coalesce(p.last_heartbeat_at > @fresh AND coalesce((p.last_heartbeat->>'offlineQueue')::int, 0) = 0, false) AS settled) t
                 WHERE s.state <> 'ended'
                   AND ((t.settled AND s.state IN ('active', 'locked', 'ending') AND (NOT s.is_prepaid OR s.ends_at <= @now))
@@ -89,7 +90,7 @@ public sealed class SessionTickWorker(
                         effects.Sessions.Add(s.ToWire(now));
                     }
                 }
-                else if (!s.IsPrepaid && options.PostpaidCreditLimit is { } limit)
+                else if (!s.IsPrepaid && sessions.PostpaidLimit(s.Role, ClubPricing.Parse(s.TimeZone, s.ClubSettings)) is { } limit)
                 {
                     // D-10: stop at the minute boundary where the next second would start a minute beyond balance + limit;
                     // a late tick still ends there, so only fully played minutes are charged and the limit holds.
@@ -176,6 +177,11 @@ public sealed class SessionTickWorker(
     {
         public DateTimeOffset? LastHeartbeatAt { get; init; }
         public long MainBalance { get; init; }
+
+        /// <summary>The player's role and the club's zone and settings: a guest's postpaid limit is the club's (<c>limits.guestDebtLimit</c>).</summary>
+        public string Role { get; init; } = "";
+        public string TimeZone { get; init; } = "Asia/Tashkent";
+        public string? ClubSettings { get; init; }
 
         /// <summary>Fresh heartbeat with an empty outbox: the server's clock decides (§5.10).</summary>
         public bool Settled { get; init; }

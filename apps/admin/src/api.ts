@@ -91,6 +91,8 @@ export interface Overview {
   zones: Zone[];
   /** PCs with an open repair ticket and its worst severity. */
   repairs?: { pcId: string; severity: 'high' | 'medium' }[];
+  /** Guests left with a postpaid bill (`limits.guestPostpaid`); a top-up of `debt` clears one. */
+  guestDebts?: { userId: string; displayName: string; debt: Money; pc: string | null; endedAt: string | null }[];
 }
 
 /** Error carrying the server's `ErrorCode` so screens can map `insufficientFunds` and friends to copy. */
@@ -339,7 +341,11 @@ export interface ClubSettings {
   promoCodes: PromoCode[];
   happyHours: HappyHour[];
   loyalty: LoyaltyLevel[];
-  limits: { minorAge: number; minorCurfew: string };
+  /**
+   * `guestPostpaid` / `guestDebtLimit` (tiyin, null or 0 — no limit) are beyond the contract: guests may play postpaid and
+   * pay at the counter afterwards; their unpaid bills come back in `Overview.guestDebts`.
+   */
+  limits: { minorAge: number; minorCurfew: string; guestPostpaid?: boolean; guestDebtLimit?: number | null };
   catalog: { order: string[]; hidden: string[]; featured: string[] };
   banners: Banner[];
   rulesText: { ru: string; uz: string; en: string };

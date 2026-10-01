@@ -334,7 +334,9 @@ public sealed class SessionHandlers : IIpcHandlerGroup
         User user = context.RequireUser();
         PlaySession? ended = null;
         bool sessionEnded = false;
-        if (_sessions.State.IsOpen())
+        // Only the player's own session ends with the sign-out: a session the cashier opened for someone else on this PC
+        // (a guest signed in meanwhile) stays theirs — ending it here settled it as "user" with no refund.
+        if (_sessions.State.IsOpen() && _sessions.Current is { } open && open.UserId == user.Id)
         {
             SessionEndResult result = await _sessions.EndAsync(reason, cancellationToken).ConfigureAwait(false);
             ended = result.Session;
@@ -399,7 +401,9 @@ public sealed class SessionHandlers : IIpcHandlerGroup
             throw IpcError.Forbidden("Account is banned", "banned").ToException();
         }
 
-        if (!request.Prepaid && !user.IsMember)
+        // Online the server decides: a club may let guests play postpaid (settings limits.guestPostpaid). Offline the
+        // agent cannot know it, so a guest stays prepaid-only then.
+        if (!request.Prepaid && !user.IsMember && !IsOnline)
         {
             throw IpcError.PolicyDenied("postpaidNotAllowed").ToException();
         }

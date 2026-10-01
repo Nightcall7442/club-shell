@@ -497,6 +497,72 @@ function SeatPanel({
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+// Guest debts (postpaid guests, settings "Постоплата для гостей")
+// ---------------------------------------------------------------------------------------------------------------------
+
+function GuestDebts({
+  debts,
+  onDone,
+}: {
+  debts: NonNullable<Overview['guestDebts']>;
+  onDone: () => void;
+}): JSX.Element {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [note, setNote] = useState<{ text: string; tone: 'ok' | 'err' } | null>(null);
+
+  // A cash top-up of exactly the debt brings the guest's balance back to zero.
+  const collect = async (d: NonNullable<Overview['guestDebts']>[number]): Promise<void> => {
+    setBusy(d.userId);
+    setNote(null);
+    try {
+      await adminApi.topUp({ userId: d.userId, amount: d.debt.amount, method: 'cash' });
+      setNote({ text: t('Оплата принята · {name} · {sum}', { name: d.displayName, sum: money(d.debt) }), tone: 'ok' });
+      onDone();
+    } catch (e) {
+      setNote({ text: describe(e), tone: 'err' });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <section className="panel flex shrink-0 flex-col gap-2 p-4">
+      <h2 className="label text-warning">{t('Долги гостей')}</h2>
+      {note && (
+        <p
+          className={clsx(
+            'rounded-md px-3 py-1.5 text-sm',
+            note.tone === 'ok' ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger',
+          )}
+        >
+          {note.text}
+        </p>
+      )}
+      <ul className="flex flex-col divide-y divide-line">
+        {debts.map((d) => (
+          <li key={d.userId} className="flex items-center justify-between gap-3 py-2">
+            <span className="flex min-w-0 flex-col">
+              <span className="truncate text-sm text-text">{d.displayName}</span>
+              <span className="font-mono text-xs text-muted">
+                {[
+                  d.pc,
+                  d.endedAt ? new Date(d.endedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </span>
+            </span>
+            <Button variant="primary" disabled={busy !== null} onClick={() => void collect(d)}>
+              {t('Принять {sum}', { sum: money(d.debt) })}
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------------------------------------------------
 
@@ -584,6 +650,10 @@ export function MapPage(): JSX.Element {
               {seats.length === 0 && !error && <p className="text-sm text-muted">{t('Нет данных о ПК')}</p>}
             </div>
           </div>
+
+          {data?.guestDebts && data.guestDebts.length > 0 && (
+            <GuestDebts debts={data.guestDebts} onDone={() => void load()} />
+          )}
 
           {/* Legend that counts: every status, how many seats are in it right now */}
           <ul className="panel grid shrink-0 grid-cols-2 divide-x divide-line xl:grid-cols-6">

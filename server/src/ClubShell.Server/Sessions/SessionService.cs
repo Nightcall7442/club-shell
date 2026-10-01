@@ -192,6 +192,13 @@ public sealed class SessionService(
 {
     public TimeProvider Clock => clock;
 
+    /// <summary>
+    /// How far below zero a postpaid session of <paramref name="role"/> may run (D-10): a guest by the club's
+    /// <c>limits.guestDebtLimit</c> (null — no limit; guests are let in at all only with <c>limits.guestPostpaid</c>), anyone
+    /// else by <see cref="SessionsOptions.PostpaidCreditLimit"/>.
+    /// </summary>
+    public long? PostpaidLimit(string role, ClubPricing club) => role == "guest" ? club.GuestDebtLimit : options.PostpaidCreditLimit;
+
     public static ApiException PolicyDenied(string rule) =>
         new(StatusCodes.Status403Forbidden, ErrorCode.PolicyDenied, $"Denied by club policy: {rule}", new { rule });
 
@@ -304,13 +311,13 @@ public sealed class SessionService(
             CheckMinutes(tariff, minutes);
         }
 
-        if (!request.Prepaid && buyer.Role == "guest")
+        if (!request.Prepaid && buyer.Role == "guest" && !club.Pricing.GuestPostpaid)
         {
             throw PolicyDenied("postpaidNotAllowed");
         }
 
         var quote = Pricing.Compute(tariff, minutes, buyer.GroupId, buyer.LifetimeSpent, pc.Zone, start, club.Pricing);
-        if (!request.Prepaid && !replay && options.PostpaidCreditLimit is { } limit)
+        if (!request.Prepaid && !replay && PostpaidLimit(buyer.Role, club.Pricing) is { } limit)
         {
             // Rule 10 for postpaid (D-10): the first minute must be affordable, as the tick would stop it at once.
             var first = Pricing.Frozen(tariff.PricePerHour, 1, quote.DayPct, quote.DiscountPct);
@@ -430,7 +437,8 @@ public sealed class SessionService(
                 throw NotActive(s.ToWire(now));
             }
 
-            if (!s.IsPrepaid && options.PostpaidCreditLimit is { } limit)
+            var role = s.IsPrepaid ? "" : await c.ExecuteScalarAsync<string>("SELECT role FROM users WHERE id = @UserId", new { s.UserId }, tx) ?? "";
+            if (!s.IsPrepaid && PostpaidLimit(role, (await ClubAsync(c, tx, s.ClubId)).Pricing) is { } limit)
             {
                 var balance = await c.ExecuteScalarAsync<long>("SELECT main_balance FROM wallets WHERE user_id = @UserId", new { s.UserId }, tx);
                 var next = Pricing.Frozen(s.PricePerHourSnapshot, s.UsedBeforeSec + 1, s.DayPct, s.DiscountPct);

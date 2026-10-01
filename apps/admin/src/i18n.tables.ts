@@ -141,6 +141,15 @@ export const UZ: Record<string, string> = {
   Баланс: 'Balans',
   'Баланс пополнен · теперь {sum}': 'Balans toʻldirildi · endi {sum}',
   'Пополнить на {sum}': '{sum} ga toʻldirish',
+  'Долги гостей': 'Mehmonlar qarzi',
+  'Зон пока нет: добавьте зону в блоке «Зоны» ниже и сохраните.':
+    'Hali zonalar yoʻq: quyidagi «Zonalar» blokida zona qoʻshing va saqlang.',
+  'Принять {sum}': '{sum} qabul qilish',
+  'Оплата принята · {name} · {sum}': 'Toʻlov qabul qilindi · {name} · {sum}',
+  'Постоплата для гостей': 'Mehmonlar uchun keyin toʻlash',
+  'Гость играет без предоплаты и платит на кассе после сеанса. Неоплаченные счета видны на карте зала.':
+    'Mehmon oldindan toʻlamasdan oʻynaydi va seansdan keyin kassada toʻlaydi. Toʻlanmagan hisoblar zal xaritasida koʻrinadi.',
+  'Наибольший долг гостя (0 — без ограничения)': 'Mehmonning eng katta qarzi (0 — cheklovsiz)',
   'Баннеров нет': 'Bannerlar yoʻq',
   Баннеры: 'Bannerlar',
   'Без группы': 'Guruhsiz',
@@ -686,6 +695,15 @@ export const EN: Record<string, string> = {
   Баланс: 'Balance',
   'Баланс пополнен · теперь {sum}': 'Balance topped up · now {sum}',
   'Пополнить на {sum}': 'Top up {sum}',
+  'Долги гостей': 'Guest debts',
+  'Зон пока нет: добавьте зону в блоке «Зоны» ниже и сохраните.':
+    'No zones yet: add one in the "Zones" block below and save.',
+  'Принять {sum}': 'Collect {sum}',
+  'Оплата принята · {name} · {sum}': 'Payment taken · {name} · {sum}',
+  'Постоплата для гостей': 'Postpaid for guests',
+  'Гость играет без предоплаты и платит на кассе после сеанса. Неоплаченные счета видны на карте зала.':
+    'A guest plays without paying first and pays at the counter after the session. Unpaid bills show on the hall map.',
+  'Наибольший долг гостя (0 — без ограничения)': 'Largest guest debt (0 — no limit)',
   'Баннеров нет': 'No banners',
   Баннеры: 'Banners',
   'Без группы': 'No group',

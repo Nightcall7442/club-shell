@@ -54,7 +54,13 @@ public sealed record AdminOccupancy(int Free, int Total);
 
 public sealed record AdminOverview(
     DateTimeOffset At, AdminOccupancy Club, IReadOnlyList<AdminSeat> Seats, IReadOnlyList<Tariff> Tariffs, IReadOnlyList<AdminMember> Users,
-    IReadOnlyList<AdminZone> Zones, IReadOnlyList<object> Repairs);
+    IReadOnlyList<AdminZone> Zones, IReadOnlyList<object> Repairs, IReadOnlyList<AdminGuestDebt> GuestDebts);
+
+/// <summary>
+/// An unpaid postpaid bill of a guest (beyond the contract, <c>limits.guestPostpaid</c>): the guest account's negative
+/// balance, to be taken at the counter (a top-up of <c>debt</c> clears it). <c>pc</c>: the PC of the guest's last session.
+/// </summary>
+public sealed record AdminGuestDebt(Guid UserId, string DisplayName, Money Debt, string? Pc, DateTimeOffset? EndedAt);
 
 /// <summary>Open/extend: <c>balance</c>; end: <c>refunded</c> — the other key is left out (optional, not nullable).</summary>
 public sealed record AdminSessionResult(
