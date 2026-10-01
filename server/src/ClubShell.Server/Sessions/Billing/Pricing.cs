@@ -76,6 +76,15 @@ public sealed class ClubPricing
     public int MinorAge { get; init; } = 18;
     public string MinorCurfew { get; init; } = "22:00";
 
+    /// <summary>
+    /// <c>limits.guestPostpaid</c> (beyond the contract, owner's choice in the console): a guest may play postpaid and pay at
+    /// the counter afterwards. Off by default — a guest who walks away leaves an unpaid bill.
+    /// </summary>
+    public bool GuestPostpaid { get; init; }
+
+    /// <summary><c>limits.guestDebtLimit</c> (tiyin): how far a guest's postpaid bill may run; null or 0 — no limit.</summary>
+    public long? GuestDebtLimit { get; init; }
+
     public static ClubPricing Parse(string timeZone, string? settingsJson)
     {
         var doc = string.IsNullOrEmpty(settingsJson) ? null : JsonSerializer.Deserialize<SettingsDoc>(settingsJson, JsonSerializerOptions.Web);
@@ -90,6 +99,8 @@ public sealed class ClubPricing
             Loyalty = (doc?.Loyalty ?? []).OrderBy(l => l.MinSpent).ToArray(),
             MinorAge = doc?.Limits?.MinorAge ?? 18,
             MinorCurfew = doc?.Limits?.MinorCurfew ?? "22:00",
+            GuestPostpaid = doc?.Limits?.GuestPostpaid ?? false,
+            GuestDebtLimit = doc?.Limits?.GuestDebtLimit is > 0 and var limit ? limit : null,
         };
     }
 
@@ -132,6 +143,8 @@ public sealed class ClubPricing
     {
         public int? MinorAge { get; init; }
         public string? MinorCurfew { get; init; }
+        public bool? GuestPostpaid { get; init; }
+        public long? GuestDebtLimit { get; init; }
     }
 }
 

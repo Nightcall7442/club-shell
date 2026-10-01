@@ -337,6 +337,29 @@ export default function ClubPage(): JSX.Element {
                 />
               </Field>
             </div>
+            <div className="mt-5 flex flex-col gap-4 border-t border-line pt-4 md:max-w-lg">
+              <Toggle
+                label={t('Постоплата для гостей')}
+                checked={s.limits.guestPostpaid ?? false}
+                onChange={(v) => st.set('limits', { ...s.limits, guestPostpaid: v })}
+              />
+              <p className="text-xs text-muted">
+                {t(
+                  'Гость играет без предоплаты и платит на кассе после сеанса. Неоплаченные счета видны на карте зала.',
+                )}
+              </p>
+              {s.limits.guestPostpaid && (
+                <Field label={t('Наибольший долг гостя (0 — без ограничения)')}>
+                  <NumberInput
+                    value={Math.round((s.limits.guestDebtLimit ?? 0) / 100)}
+                    min={0}
+                    max={10_000_000}
+                    suffix={t('сум')}
+                    onChange={(n) => st.set('limits', { ...s.limits, guestDebtLimit: n > 0 ? n * 100 : null })}
+                  />
+                </Field>
+              )}
+            </div>
           </Section>
         </div>
 

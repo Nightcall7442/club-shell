@@ -84,9 +84,23 @@ public static class CounterEndpoints
             """,
             new { staff.ClubId, staff.NetworkId }))
             .Select(u => new AdminMember(u.Id, u.DisplayName, u.Role, Money.Uzs(u.Balance), u.Username)).ToList();
+        // Guests of this club left with a postpaid bill: their accounts are transient, so the client list never shows them.
+        var debts = (await c.QueryAsync<(Guid Id, string DisplayName, long Balance, string? Pc, DateTimeOffset? EndedAt)>(
+            """
+            SELECT u.id, u.display_name, w.main_balance, last.pc, last.ended_at
+            FROM users u JOIN wallets w ON w.user_id = u.id
+            CROSS JOIN LATERAL (
+                SELECT p.name AS pc, s.ended_at FROM sessions s JOIN pcs p ON p.id = s.pc_id
+                WHERE s.user_id = u.id AND s.club_id = @ClubId ORDER BY s.started_at DESC, s.id DESC LIMIT 1) last
+            WHERE u.network_id = @NetworkId AND u.role = 'guest' AND u.deleted_at IS NULL AND w.main_balance < 0
+            ORDER BY last.ended_at DESC NULLS FIRST, u.id
+            LIMIT 100
+            """,
+            new { staff.ClubId, staff.NetworkId }))
+            .Select(d => new AdminGuestDebt(d.Id, d.DisplayName, Money.Uzs(-d.Balance), d.Pc, d.EndedAt)).ToList();
         return AdminJson.Ok(new AdminOverview(
             now, new AdminOccupancy(seats.Count(s => s.Pc.Status == Contracts.Pcs.PcStatus.Free), seats.Count), seats, tariffs, members,
-            await ZonesAsync(c, staff.ClubId), []));
+            await ZonesAsync(c, staff.ClubId), [], debts));
     }
 
     /// <summary><c>adminOpenSession</c> (§5.3): prepaid, priced by the club rules; <c>201 {session, charged, balance}</c>.</summary>
