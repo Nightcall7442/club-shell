@@ -1,0 +1,23 @@
+# Static admin console. Sections live in the URL hash (#/tariffs), so no SPA rewrites are needed.
+{
+	admin off
+	auto_https off
+}
+
+:{$PORT:8080} {
+	root * /srv
+	encode zstd gzip
+	file_server
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+		-Server
+	}
+	# Hashed bundle files never change; index.html must be revalidated so a new deploy is picked up at once.
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+	@index path / /index.html
+	header @index Cache-Control "no-cache"
+}

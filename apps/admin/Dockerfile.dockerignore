@@ -1,0 +1,14 @@
+# Build context = repository root. Send only what apps/admin/Dockerfile copies (BuildKit reads <Dockerfile>.dockerignore).
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!tsconfig.base.json
+!apps/admin/**
+!apps/shell/package.json
+!packages/contracts-ts/**
+!tools/MockServer/package.json
+!tests/shell-e2e/package.json
+
+**/node_modules
+**/dist
