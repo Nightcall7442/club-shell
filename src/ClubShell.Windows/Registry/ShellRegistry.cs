@@ -39,6 +39,12 @@ public sealed class ShellRegistry
     /// <summary>LSA secret name read by winlogon for auto-logon.</summary>
     public const string DefaultPasswordSecret = "DefaultPassword";
 
+    /// <summary>
+    /// Key of the Windows 11 "only allow Windows Hello sign-in" switch (<c>DevicePasswordLessBuildVersion</c> = 2): while it
+    /// is on, Windows hides the password sign-in and can skip auto-logon.
+    /// </summary>
+    public const string PasswordLessDeviceKey = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\PasswordLess\Device";
+
     private readonly ILogger<ShellRegistry> _logger;
 
     /// <summary>Creates the helper.</summary>
@@ -99,17 +105,31 @@ public sealed class ShellRegistry
 
     /// <summary>
     /// Enables auto-logon for <paramref name="userName"/>: AutoAdminLogon=1, DefaultUserName/DefaultDomainName,
-    /// password stored as LSA secret, any clear-text DefaultPassword value removed.
-    /// <paramref name="count"/> sets AutoLogonCount (auto-logon disables itself after that many boots).
+    /// password stored as LSA secret, any clear-text DefaultPassword value removed, and the Windows Hello-only sign-in
+    /// switched off. A local account (<paramref name="domain"/> empty or ".") gets the computer name, the value Windows
+    /// documents for DefaultDomainName. <paramref name="count"/> sets AutoLogonCount (auto-logon disables itself after
+    /// that many boots).
     /// </summary>
-    public void SetAutoLogon(string userName, string password, string domain = ".", int? count = null)
+    public void SetAutoLogon(string userName, string password, string? domain = null, int? count = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(userName);
         ArgumentNullException.ThrowIfNull(password);
+        if (string.IsNullOrWhiteSpace(domain) || domain == ".")
+        {
+            domain = Environment.MachineName;
+        }
+
         LsaSecrets.Store(DefaultPasswordSecret, password);
         RegistryHelper.Set(RegistryHive.LocalMachine, MachineWinlogonKey, "DefaultUserName", userName, RegistryValueKind.String);
-        RegistryHelper.Set(RegistryHive.LocalMachine, MachineWinlogonKey, "DefaultDomainName", string.IsNullOrWhiteSpace(domain) ? "." : domain, RegistryValueKind.String);
+        RegistryHelper.Set(RegistryHive.LocalMachine, MachineWinlogonKey, "DefaultDomainName", domain, RegistryValueKind.String);
         RegistryHelper.Set(RegistryHive.LocalMachine, MachineWinlogonKey, "AutoAdminLogon", "1", RegistryValueKind.String);
+        int passwordLess = RegistryHelper.Get<int>(RegistryHive.LocalMachine, PasswordLessDeviceKey, "DevicePasswordLessBuildVersion");
+        if (passwordLess != 0)
+        {
+            RegistryHelper.Set(RegistryHive.LocalMachine, PasswordLessDeviceKey, "DevicePasswordLessBuildVersion", 0, RegistryValueKind.DWord);
+            _logger.LogInformation("Windows Hello-only sign-in turned off (DevicePasswordLessBuildVersion {Old} -> 0) so auto-logon is honoured", passwordLess);
+        }
+
         _ = RegistryHelper.DeleteValue(RegistryHive.LocalMachine, MachineWinlogonKey, "DefaultPassword");
         if (count is { } n)
         {

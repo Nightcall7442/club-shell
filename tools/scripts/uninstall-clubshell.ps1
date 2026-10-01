@@ -42,6 +42,9 @@ foreach ($entry in $entries) {
     }
 }
 
+# Pilot helper task from enable-kiosk-autologon.ps1 (keeps the auto-logon domain); harmless when absent.
+Unregister-ScheduledTask -TaskPath '\ClubShell\' -TaskName 'AutoLogonDomain' -Confirm:$false -ErrorAction SilentlyContinue
+
 if ($RemoveData) {
     Remove-Item -LiteralPath (Join-Path $env:ProgramData 'ClubShell') -Recurse -Force -ErrorAction SilentlyContinue
 }

@@ -35,7 +35,8 @@ $Privileges    = @(
     'SeShutdownPrivilege',
     'SeDebugPrivilege',
     'SeBackupPrivilege',
-    'SeRestorePrivilege'
+    'SeRestorePrivilege',
+    'SeTakeOwnershipPrivilege'   # CreateProfile of the kiosk account fails with 0x80070522 without it
 ) -join '/'
 
 function Invoke-Sc {

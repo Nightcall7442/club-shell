@@ -6,7 +6,8 @@
     depend   LanmanWorkstation / Tcpip
     failure  restart the service on failure (util:ServiceConfig: three restarts, 5 s delay, counter reset after 1 day)
     delayed  sc config start= delayed-auto and the service privileges (sc privs SeTcb/SeAssignPrimaryToken/
-             SeIncreaseQuota/SeShutdown/SeDebug/SeBackup/SeRestore) are applied by CA_ServicePrivileges and
+             SeIncreaseQuota/SeShutdown/SeDebug/SeBackup/SeRestore/SeTakeOwnership; CreateProfile of the kiosk
+             account needs SeTakeOwnership) are applied by CA_ServicePrivileges and
              CA_ServiceStartMode in Product.wxs, deferred between InstallServices and StartServices. The core WiX ServiceConfig elements
              (MsiServiceConfig) are avoided on purpose: WiX flags them as unreliable (WIX1149).
   The exe file is the key path of this component because Windows Installer takes the service binary from it.

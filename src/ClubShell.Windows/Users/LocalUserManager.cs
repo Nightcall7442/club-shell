@@ -200,6 +200,13 @@ public sealed class LocalUserManager
         char[] buffer = new char[NativeConst.MAX_PATH + 1];
         int hr = Userenv.CreateProfile(sid, name, ref buffer[0], (uint)buffer.Length);
         const int AlreadyExists = unchecked((int)0x800700B7);
+        const int PrivilegeNotHeld = unchecked((int)0x80070522);
+        if (hr == PrivilegeNotHeld)
+        {
+            throw new InvalidOperationException(
+                $"CreateProfile for '{name}' failed with 0x{hr:X8}: the service lacks SeTakeOwnershipPrivilege (sc privs ClubShellAgent).");
+        }
+
         if (hr != 0 && hr != AlreadyExists)
         {
             throw new InvalidOperationException($"CreateProfile for '{name}' failed with 0x{hr:X8}.");

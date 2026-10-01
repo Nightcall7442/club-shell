@@ -36,19 +36,26 @@ logs the executable's Authenticode signer (`DescribeSignature`) — presence onl
 
 ## 2. Auto-logon
 
-`ShellRegistry.SetAutoLogon(userName, password, domain = ".", count = null)`:
+`ShellRegistry.SetAutoLogon(userName, password, domain = null, count = null)`:
 
 | HKLM `Winlogon` value | Written |
 |-----------------------|---------|
 | `AutoAdminLogon` | `"1"` |
 | `DefaultUserName` | kiosk account name |
-| `DefaultDomainName` | `"."` (local machine) |
+| `DefaultDomainName` | the computer name for a local account (`domain` empty or `"."`), as Windows documents it |
 | `DefaultPassword` | **deleted** — the clear-text registry value is never used |
 | `AutoLogonCount` | set when `count` is given, otherwise deleted (unlimited) |
 | LSA secret `DefaultPassword` (`ShellRegistry.DefaultPasswordSecret`) | password, via `LsaSecrets.Store` → `LsaOpenPolicy(POLICY_CREATE_SECRET)` + `LsaStorePrivateData` |
 
 Winlogon reads the LSA secret exactly like the registry value, but the secret is only readable by SYSTEM (and
 administrators through LSA), which matters because the kiosk password rotates and is otherwise unknown to anyone.
+
+`SetAutoLogon` also sets HKLM `...\PasswordLess\Device\DevicePasswordLessBuildVersion` to 0 when it is not 0: with
+Windows 11's "only allow Windows Hello sign-in" on (value 2) the password sign-in is hidden and auto-logon can be skipped.
+
+Auto-logon is turned on only after the shell is written into the kiosk hive, so the kiosk account needs a profile
+first: `LocalUserManager.EnsureProfile` creates it with `CreateProfile`, which fails with 0x80070522 unless the service
+holds `SeTakeOwnershipPrivilege` (part of the `sc privs` list the installer sets).
 `ClearAutoLogon()` sets `AutoAdminLogon = 0`, deletes `DefaultPassword` / `AutoLogonCount` and stores a `null`
 secret (deletes it).
 

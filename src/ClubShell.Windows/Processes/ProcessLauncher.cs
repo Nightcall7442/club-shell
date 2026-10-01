@@ -203,6 +203,55 @@ public sealed class ProcessLauncher
         }
     }
 
+    /// <summary>
+    /// Takes over a process already running <paramref name="exe"/> (full path, case-insensitive) in session
+    /// <paramref name="sessionId"/>, for example the kiosk Shell that Winlogon starts at logon as the user's shell.
+    /// Returns <see langword="null"/> when there is none.
+    /// </summary>
+    public LaunchedProcess? TryAttach(string exe, uint sessionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(exe);
+        string fullExe = Path.GetFullPath(exe);
+        foreach (Process candidate in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(fullExe)))
+        {
+            using (candidate)
+            {
+                int pid;
+                DateTimeOffset startedAt;
+                try
+                {
+                    if (candidate.SessionId != sessionId)
+                    {
+                        continue;
+                    }
+
+                    pid = candidate.Id;
+                    startedAt = new DateTimeOffset(candidate.StartTime).ToUniversalTime();
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+                {
+                    continue; // exited meanwhile, or not queryable
+                }
+
+                SafeProcessHandle handle = Kernel32.OpenProcess(NativeConst.SYNCHRONIZE | NativeConst.PROCESS_QUERY_LIMITED_INFORMATION | NativeConst.PROCESS_TERMINATE, false, (uint)pid);
+                if (handle.IsInvalid
+                    || Kernel32.QueryFullProcessImageName(handle) is not { } image
+                    || !string.Equals(Path.GetFullPath(image), fullExe, StringComparison.OrdinalIgnoreCase)
+                    || !Kernel32.GetExitCodeProcess(handle, out uint code)
+                    || code != NativeConst.STILL_ACTIVE)
+                {
+                    handle.Dispose();
+                    continue;
+                }
+
+                _logger.LogInformation("Attached to running {Exe} pid {Pid} (session {SessionId})", fullExe, pid, sessionId);
+                return new LaunchedProcess(pid, handle, fullExe, startedAt);
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>Polls until the process owns a visible top-level window; returns the HWND or 0 on timeout / exit.</summary>
     public static async Task<nint> WaitForWindowAsync(int pid, TimeSpan timeout, CancellationToken ct)
     {

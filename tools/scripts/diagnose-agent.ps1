@@ -14,6 +14,20 @@ $data = Join-Path $env:ProgramData 'ClubShell'
 $out = New-Object System.Collections.Generic.List[string]
 function Add([string] $text) { $out.Add($text); Write-Host $text }
 
+# ConvertFrom-Json (Windows PowerShell 5.1) rejects keys that differ only in case, and agent events carry "Version"
+# (a message property) next to "version" (the agent version): parse case-sensitively and keep the first such key.
+Add-Type -AssemblyName System.Web.Extensions
+$jsonReader = New-Object System.Web.Script.Serialization.JavaScriptSerializer
+function ConvertFrom-LogLine([string] $Line) {
+    try { $map = $jsonReader.DeserializeObject($Line) } catch { return $null }
+    if ($map -isnot [System.Collections.IDictionary]) { return $null }
+    $entry = New-Object psobject
+    foreach ($key in $map.Keys) {
+        if (-not $entry.PSObject.Properties[$key]) { Add-Member -InputObject $entry -NotePropertyName $key -NotePropertyValue $map[$key] }
+    }
+    return $entry
+}
+
 Add "=== ClubShell diagnose $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') on $env:COMPUTERNAME"
 
 $svc = Get-Service ClubShellAgent -ErrorAction SilentlyContinue
@@ -49,8 +63,9 @@ Add '--- Agent log: kiosk, policy and shell messages'
 $keyLog = Get-ChildItem -Path (Join-Path $data 'logs') -Filter 'agent-*.json' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if ($keyLog) {
     $pattern = 'Kiosk|kiosk|Profile|profile|Policy|policy|shell|Shell|auto-logon|Auto-logon|logon|Registered'
-    foreach ($line in Get-Content -LiteralPath $keyLog.FullName -ErrorAction SilentlyContinue | Select-String -Pattern $pattern | Select-Object -Last 40) {
-        try { $e = $line.Line | ConvertFrom-Json } catch { continue }
+    foreach ($line in Get-Content -LiteralPath $keyLog.FullName -Encoding UTF8 -ErrorAction SilentlyContinue | Select-String -Pattern $pattern | Select-Object -Last 40) {
+        $e = ConvertFrom-LogLine $line.Line
+        if (-not $e) { continue }
         $msg = [string] $e.'@mt'
         foreach ($p in $e.PSObject.Properties) { if ($p.Name -notlike '@*') { $msg = $msg.Replace('{' + $p.Name + '}', [string] $p.Value) } }
         $time = ([string] $e.'@t'); if ($time.Length -ge 19) { $time = $time.Substring(11, 8) }
@@ -65,8 +80,9 @@ $log = Get-ChildItem -Path (Join-Path $data 'logs') -Filter 'agent-*.json' -Erro
 if (-not $log) {
     Add 'no agent log yet'
 } else {
-    foreach ($line in Get-Content -LiteralPath $log.FullName -Tail $Lines -ErrorAction SilentlyContinue) {
-        try { $e = $line | ConvertFrom-Json } catch { continue }
+    foreach ($line in Get-Content -LiteralPath $log.FullName -Tail $Lines -Encoding UTF8 -ErrorAction SilentlyContinue) {
+        $e = ConvertFrom-LogLine $line
+        if (-not $e) { continue }
         $msg = [string] $e.'@mt'
         foreach ($p in $e.PSObject.Properties) {
             if ($p.Name -notlike '@*') { $msg = $msg.Replace('{' + $p.Name + '}', [string] $p.Value) }
