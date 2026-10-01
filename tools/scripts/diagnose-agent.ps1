@@ -33,7 +33,8 @@ Add "=== ClubShell diagnose $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') on $env:CO
 $svc = Get-Service ClubShellAgent -ErrorAction SilentlyContinue
 if ($svc) {
     $proc = Get-CimInstance Win32_Service -Filter "Name='ClubShellAgent'"
-    Add "Service: $($svc.Status), start type $($svc.StartType), process id $($proc.ProcessId)"
+    $delayed = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\ClubShellAgent' -ErrorAction SilentlyContinue).DelayedAutostart
+    Add "Service: $($svc.Status), start type $($svc.StartType)$(if ($delayed -eq 1) { ' (delayed)' }), process id $($proc.ProcessId)"
 } else {
     Add 'Service: NOT INSTALLED'
 }
@@ -62,8 +63,8 @@ Add ''
 Add '--- Agent log: kiosk, policy and shell messages'
 $keyLog = Get-ChildItem -Path (Join-Path $data 'logs') -Filter 'agent-*.json' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if ($keyLog) {
-    $pattern = 'Kiosk|kiosk|Profile|profile|Policy|policy|shell|Shell|auto-logon|Auto-logon|logon|Registered'
-    foreach ($line in Get-Content -LiteralPath $keyLog.FullName -Encoding UTF8 -ErrorAction SilentlyContinue | Select-String -Pattern $pattern | Select-Object -Last 40) {
+    $pattern = 'Kiosk|kiosk|Profile|profile|Policy|policy|shell|Shell|auto-logon|Auto-logon|logon|Registered|[Pp]ipe|auth\.hello|IPC|[Ss]afe mode|Watchdog'
+    foreach ($line in Get-Content -LiteralPath $keyLog.FullName -Encoding UTF8 -ErrorAction SilentlyContinue | Select-String -Pattern $pattern | Select-Object -Last 60) {
         $e = ConvertFrom-LogLine $line.Line
         if (-not $e) { continue }
         $msg = [string] $e.'@mt'

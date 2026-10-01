@@ -3,7 +3,7 @@
 .SYNOPSIS
     Creates, updates, or removes the 'ClubShellAgent' Windows service.
 .DESCRIPTION
-    Registers ClubShellAgent.exe as a LocalSystem service (start = delayed-auto), grants it the privileges the
+    Registers ClubShellAgent.exe as a LocalSystem service (start = auto; not delayed-auto, so it is up when the kiosk logs on), grants it the privileges the
     Agent needs to run processes in the interactive session and control power/registry/storage, sets recovery
     (restart 5s / 10s / 30s, reset after 1 day), a dependency on the workstation and TCP/IP stacks, and an
     Application event-log source. Idempotent: re-running reconfigures the existing service. See ARCHITECTURE.md section 2.
@@ -85,10 +85,10 @@ if (-not $PSCmdlet.ShouldProcess($ServiceName, 'Register/update service')) {
 
 if (Test-Service) {
     Write-Host "Updating existing service '$ServiceName'."
-    Invoke-Sc -Arguments @('config', $ServiceName, 'binPath=', "`"$exePath`"", 'start=', 'delayed-auto', 'obj=', 'LocalSystem', 'DisplayName=', $DisplayName) | Out-Null
+    Invoke-Sc -Arguments @('config', $ServiceName, 'binPath=', "`"$exePath`"", 'start=', 'auto', 'obj=', 'LocalSystem', 'DisplayName=', $DisplayName) | Out-Null
 } else {
     Write-Host "Creating service '$ServiceName'."
-    Invoke-Sc -Arguments @('create', $ServiceName, 'binPath=', "`"$exePath`"", 'start=', 'delayed-auto', 'obj=', 'LocalSystem', 'DisplayName=', $DisplayName) | Out-Null
+    Invoke-Sc -Arguments @('create', $ServiceName, 'binPath=', "`"$exePath`"", 'start=', 'auto', 'obj=', 'LocalSystem', 'DisplayName=', $DisplayName) | Out-Null
 }
 
 Invoke-Sc -Arguments @('description', $ServiceName, $Description) | Out-Null
@@ -102,4 +102,4 @@ if (-not [System.Diagnostics.EventLog]::SourceExists($EventSource)) {
     Write-Host "Event-log source '$EventSource' created."
 }
 
-Write-Host "Service '$ServiceName' registered (LocalSystem, start = delayed-auto, recovery configured)."
+Write-Host "Service '$ServiceName' registered (LocalSystem, start = auto, recovery configured)."

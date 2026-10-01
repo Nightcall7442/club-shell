@@ -12,7 +12,9 @@
          (DevicePasswordLessBuildVersion), a logon message (legal notice), IgnoreShiftOverride, the first-logon animation
          and the privacy questions for a new account; and turns off the kiosk profile reset after each session
          (shell.kioskUser.resetProfileOnLogout), which in 1.0.6/1.0.7 recreates the profile without the shell;
-      4. restarts the agent: on start it sets its own password for the account, writes the shell into the profile and
+      4. sets the service to plain auto start (installers up to 1.0.7 use delayed-auto, so the Shell showed "agent
+         disconnected" for about two minutes after every boot) and restarts the agent: on start it sets its own
+         password for the account, writes the shell into the profile and
          only then turns auto-logon on (LSA secret), so an interrupted run never leaves auto-logon without the shell;
       5. waits for the agent log to confirm it. When the agent wrote "." as the auto-logon domain (1.0.6), the computer
          name is written instead and the scheduled task \ClubShell\AutoLogonDomain keeps it so after the agent's next
@@ -239,7 +241,11 @@ public static extern int CreateProfile(string pszUserSid, string pszUserName, Sy
 
     # --- 4. Agent restart: provisioning, shell into the profile, then auto-logon
     Write-Step '4/5  Перезапуск агента'
-    if ((Get-Service $serviceName).StartType -eq 'Disabled') { & sc.exe config $serviceName start= delayed-auto | Out-Null }
+    # Plain auto start (1.0.6/1.0.7 install delayed-auto): the kiosk logs on at boot and its Shell shows "Служба клуба
+    # отключена" until the agent is up, about two minutes later with delayed-auto.
+    & sc.exe config $serviceName start= auto | Out-Null
+    if ($LASTEXITCODE -eq 0) { Write-Ok 'агент запускается сразу при старте Windows (без задержки в 2 минуты)' }
+    else { Write-Note 'не удалось убрать задержку запуска агента' }
     if ((Get-Service $serviceName).Status -ne 'Stopped') {
         & sc.exe stop $serviceName | Out-Null
         $deadline = (Get-Date).AddSeconds(45)

@@ -287,7 +287,7 @@ Prerequisites: Administrator PowerShell, published Agent payload, server URL and
 1. Install the Agent:
    `.\install.ps1 -ServerUrl https://club.example.uz -ClubApiKey <key>`
    (creates `C:\ProgramData\ClubShell` with the §9 ACLs, writes `agent.json`, registers `ClubShellAgent` as
-   LocalSystem delayed-auto with recovery, starts it).
+   LocalSystem auto-start with recovery, starts it; not delayed-auto, so the Agent is up when the kiosk logs on).
 2. Install the Shell MSI to `C:\Program Files\ClubShell\Shell` (or point `agent.json → shell.exePath` and
    `policies.json → shellReplacement.shellExe` elsewhere).
 3. Make sure the server policy (or `C:\ProgramData\ClubShell\policies.json` while offline) has

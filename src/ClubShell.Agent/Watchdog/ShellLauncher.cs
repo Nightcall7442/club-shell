@@ -168,8 +168,8 @@ public sealed class ShellLauncher : IShellRelauncher, IKioskSessionLocator, IKio
 
             DisposeProcess();
 
-            // The Shell is the kiosk user's Winlogon shell, so userinit starts it at logon, usually before the Agent
-            // (delayed-auto start) is up. Watch that copy: a second one would find the single-instance mutex taken,
+            // The Shell is the kiosk user's Winlogon shell, so userinit starts it at logon, often before the watchdog
+            // sees the session. Watch that copy: a second one would find the single-instance mutex taken,
             // exit at once and count as a crash, and five of those put the kiosk into safe mode with explorer.exe.
             if (_processes.TryAttach(exe, (uint)sessionId) is { } running)
             {
