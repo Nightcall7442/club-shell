@@ -45,18 +45,28 @@ $DataDir = Join-Path $env:ProgramData 'ClubShell'
 function Say([string] $text, [string] $color = 'White') { Write-Host $text -ForegroundColor $color }
 function Fail([string] $text) { Say "ОШИБКА: $text" Red; exit 1 }
 
-# What the agent says about its registration, newest state wins. Pure function over log text: easy to test.
+# What the agent says about its registration, newest state wins. The log is Serilog compact JSON: the message template is
+# in "@mt", its values are properties of the same object, the exception text in "@x". Pure function: easy to test.
 function Get-RegistrationState([string[]] $lines) {
     $state = [pscustomobject]@{ Kind = 'none'; Detail = '' }
     foreach ($line in $lines) {
-        if ($line -match 'Registered as PC (?<id>[0-9a-fA-F-]{36}) \((?<name>[^,)]*), zone (?<zone>[^)]*)\)') {
-            $state = [pscustomobject]@{ Kind = 'registered'; Detail = "место «$($Matches.name)», зона «$($Matches.zone)», id $($Matches.id)" }
-        }
-        elseif ($line -match 'Reusing stored agent tokens for PC (?<id>[0-9a-fA-F-]{36})') {
-            $state = [pscustomobject]@{ Kind = 'reused'; Detail = "id $($Matches.id)" }
-        }
-        elseif ($line -match 'Registration attempt (?<n>\d+) failed') {
-            $state = [pscustomobject]@{ Kind = 'waiting'; Detail = "попытка $($Matches.n)" }
+        if ($line -notmatch '"@mt"') { continue }
+        try { $e = $line | ConvertFrom-Json } catch { continue }
+        switch -Wildcard ($e.'@mt') {
+            'Registered as PC*' {
+                $state = [pscustomobject]@{ Kind = 'registered'; Detail = "место «$($e.PcName)», зона «$($e.Zone)», id $($e.PcId)" }
+            }
+            'Reusing stored agent tokens*' {
+                $state = [pscustomobject]@{ Kind = 'reused'; Detail = "id $($e.PcId)" }
+            }
+            'Registration attempt*failed*' {
+                $x = [string] $e.'@x'
+                $kind = if ($x -match 'waiting for approval|pendingApproval') { 'waiting' }
+                        elseif ($x -match 'X-Club-Key|clubKey') { 'badKey' }
+                        else { 'failing' }
+                $first = ($x -split "`n")[0].Trim()
+                $state = [pscustomobject]@{ Kind = $kind; Detail = "попытка $($e.Attempt)$(if ($kind -eq 'failing') { ": $first" })" }
+            }
         }
     }
     $state
@@ -138,9 +148,11 @@ while ((Get-Date) -lt $deadline) {
             'waiting'    { Say "ПК зарегистрирован на сервере и ждёт одобрения владельца ($($state.Detail)). В кассе откройте «Карта» и одобрите новый ПК: укажите номер и зону." Yellow }
             'registered' { Say "Готово: ПК зарегистрирован — $($state.Detail)." Green }
             'reused'     { Say "Агент использует прежнюю регистрацию ($($state.Detail)). Если это клон образа — вы забыли подготовить эталон (-ForImage)." Yellow }
+            'badKey'     { Say "Сервер не принял ключ клуба ($($state.Detail)). Ключ должен совпадать с Club__EnrollmentKey на Railway; переустановите с правильным ключом." Red }
+            'failing'    { Say "Агент не может зарегистрироваться ($($state.Detail)). Он продолжает попытки сам." Red }
         }
     }
-    if ($state.Kind -in 'registered', 'reused') { break }
+    if ($state.Kind -in 'registered', 'reused', 'badKey') { break }
     Start-Sleep -Seconds 5
 }
 
