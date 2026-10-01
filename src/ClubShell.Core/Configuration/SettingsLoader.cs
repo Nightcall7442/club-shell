@@ -17,6 +17,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
+using Serilog.Extensions.Logging;
 
 namespace ClubShell.Core.Configuration;
 
@@ -797,7 +798,14 @@ public static class CoreServiceCollectionExtensions
         services.TryAddSingleton<IClock>(SystemClock.Instance);
         services.TryAddSingleton(provider =>
         {
-            var loader = new SettingsLoader(SettingsLoaderOptions.FromConfiguration(configuration), provider.GetRequiredService<ILogger<SettingsLoader>>());
+            // Not ILogger<SettingsLoader> from the container: the Agent's Serilog pipeline is configured from these settings
+            // (LoggingSetup.UseClubShellSerilog resolves SettingsLoader), so a container logger here closes a resolution
+            // cycle ILoggerFactory -> SettingsLoader -> ILoggerFactory. The container's stack guard moves the inner
+            // resolution to another thread, which then waits for the outer one: the host build deadlocks and the service
+            // never reaches the SCM (Windows times out after 30 s). Log.Logger is the bootstrap ReloadableLogger, which
+            // the host reloads into the configured pipeline once built, so these messages still reach the agent log.
+            var logger = new SerilogLoggerFactory(Serilog.Log.Logger).CreateLogger<SettingsLoader>();
+            var loader = new SettingsLoader(SettingsLoaderOptions.FromConfiguration(configuration), logger);
             loader.Load();
             return loader;
         });
