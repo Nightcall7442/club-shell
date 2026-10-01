@@ -34,6 +34,8 @@
     <Platforms>x64</Platforms>
     <InstallerPlatform>x64</InstallerPlatform>
     <Version Condition="'$(Version)' == ''">1.0.0</Version>
+    <!-- The repository manages NuGet versions centrally (Directory.Packages.props); this project pins its WiX extensions itself. -->
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <RepoRoot Condition="'$(RepoRoot)' == ''">$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '..', '..'))</RepoRoot>
 
     <!-- Explicit source list per configuration (no default **/*.wxs glob). -->
@@ -103,6 +105,10 @@
     <OutputType>Bundle</OutputType>
     <OutputName>ClubShellSetup</OutputName>
     <DefineConstants>$(DefineConstants);Version=$(MsiVersion);MsiPath=$(MsiPath);IconDir=$(IconDir);DotnetRuntimeVersion=$(DotnetRuntimeVersion);DotnetRuntimeFileVersion=$(DotnetRuntimeFileVersion);DotnetRuntimeUrl=$(DotnetRuntimeUrl);DotnetRuntimeSha512=$(DotnetRuntimeSha512);DotnetRuntimeSize=$(DotnetRuntimeSize);WebView2Url=$(WebView2Url);WebView2FileVersion=$(WebView2FileVersion);WebView2Sha512=$(WebView2Sha512);WebView2Size=$(WebView2Size)</DefineConstants>
+    <!-- Club-specific bundle (Bundle.wxs): the server origin and, optionally, the club registration key as variable defaults. -->
+    <DefaultServerUrl Condition="'$(DefaultServerUrl)' == ''">https://club.example.uz</DefaultServerUrl>
+    <DefineConstants>$(DefineConstants);DefaultServerUrl=$(DefaultServerUrl)</DefineConstants>
+    <DefineConstants Condition="'$(DefaultClubApiKey)' != ''">$(DefineConstants);DefaultClubApiKey=$(DefaultClubApiKey)</DefineConstants>
   </PropertyGroup>
   <ItemGroup Condition="'$(Configuration)' == 'Bundle'">
     <Compile Include="Bundle.wxs" />

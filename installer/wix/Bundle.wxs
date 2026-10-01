@@ -44,8 +44,14 @@
 
     <!-- Overridable on the command line (NAME=value); forwarded to the MSI as public properties. -->
     <Variable Name="InstallFolder" Type="formatted" Value="[ProgramFiles64Folder]ClubShell" bal:Overridable="yes" />
-    <Variable Name="SERVERURL" Type="string" Value="https://club.example.uz" bal:Overridable="yes" />
+    <!-- A club-specific build bakes its server and key in (-p:DefaultServerUrl / -p:DefaultClubApiKey), so a double click
+         installs a working PC; the generic build keeps the placeholder and expects SERVERURL/CLUBAPIKEY on the command line. -->
+    <Variable Name="SERVERURL" Type="string" Value="$(var.DefaultServerUrl)" bal:Overridable="yes" />
+    <?ifdef DefaultClubApiKey?>
+    <Variable Name="CLUBAPIKEY" Type="string" Value="$(var.DefaultClubApiKey)" Hidden="yes" bal:Overridable="yes" />
+    <?else?>
     <Variable Name="CLUBAPIKEY" Hidden="yes" bal:Overridable="yes" />
+    <?endif?>
     <Variable Name="KIOSKUSER" Type="string" Value="club" bal:Overridable="yes" />
     <Variable Name="INSTALLSHELL" Type="string" Value="1" bal:Overridable="yes" />
     <!-- Optional ClubDisklessHelper feature (only present in MSIs built with DisklessHelperDir; docs/DISKLESS.md). -->
