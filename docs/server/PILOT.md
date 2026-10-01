@@ -59,6 +59,8 @@ ClubShellSetup.exe /quiet SERVERURL=https://<api> CLUBAPIKEY=<Club__EnrollmentKe
 
 `baseUrl` (`…/api/v1`) и `wsUrl` (`wss://…/ws/agent`) выводятся из `SERVERURL`, ключ пишется в `agent.json → server.clubApiKey`.
 
+**Установщик клуба «под ключ».** Bundle можно собрать с вшитыми адресом сервера и ключом клуба: `dotnet build installer/wix/ClubShell.Installer.wixproj -c Bundle -p:MsiPath=<msi> -p:DefaultServerUrl=https://<api> -p:DefaultClubApiKey=<ключ>`. Такой exe ставит рабочий ПК двойным щелчком; храните его только в клубе (с ним можно поставить ПК в очередь на одобрение). Эталон для образа: после установки `tools\scripts\prepare-image.ps1` останавливает агента и стирает регистрацию. Перед сборкой без ключа удалите `installer/wix/obj/Bundle`: WiX переиспользует промежуточные файлы.
+
 **Проще скриптом.** `tools\scripts\pilot-install.ps1` (PowerShell от администратора, рядом с `ClubShellSetup-*.exe`) спрашивает адрес сервера и
 ключ клуба (ключ вводится скрыто), проверяет `GET /health`, ставит ClubShell и следит за регистрацией: по журналу агента пишет по-русски, что
 происходит и что делать (ПК ждёт одобрения в кассе → «Карта» → одобрить; ПК зарегистрирован).

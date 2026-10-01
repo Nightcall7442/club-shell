@@ -105,6 +105,10 @@
     <OutputType>Bundle</OutputType>
     <OutputName>ClubShellSetup</OutputName>
     <DefineConstants>$(DefineConstants);Version=$(MsiVersion);MsiPath=$(MsiPath);IconDir=$(IconDir);DotnetRuntimeVersion=$(DotnetRuntimeVersion);DotnetRuntimeFileVersion=$(DotnetRuntimeFileVersion);DotnetRuntimeUrl=$(DotnetRuntimeUrl);DotnetRuntimeSha512=$(DotnetRuntimeSha512);DotnetRuntimeSize=$(DotnetRuntimeSize);WebView2Url=$(WebView2Url);WebView2FileVersion=$(WebView2FileVersion);WebView2Sha512=$(WebView2Sha512);WebView2Size=$(WebView2Size)</DefineConstants>
+    <!-- Club-specific bundle (Bundle.wxs): the server origin and, optionally, the club registration key as variable defaults. -->
+    <DefaultServerUrl Condition="'$(DefaultServerUrl)' == ''">https://club.example.uz</DefaultServerUrl>
+    <DefineConstants>$(DefineConstants);DefaultServerUrl=$(DefaultServerUrl)</DefineConstants>
+    <DefineConstants Condition="'$(DefaultClubApiKey)' != ''">$(DefineConstants);DefaultClubApiKey=$(DefaultClubApiKey)</DefineConstants>
   </PropertyGroup>
   <ItemGroup Condition="'$(Configuration)' == 'Bundle'">
     <Compile Include="Bundle.wxs" />
