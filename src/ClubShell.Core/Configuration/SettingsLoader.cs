@@ -796,19 +796,21 @@ public static class CoreServiceCollectionExtensions
 
         services.AddOptions();
         services.TryAddSingleton<IClock>(SystemClock.Instance);
-        services.TryAddSingleton(provider =>
+        // Loaded here, while the host registers its services, not lazily on first resolution. The Agent's Serilog pipeline
+        // is configured from these settings (LoggingSetup.UseClubShellSerilog) inside ReloadableLogger.Reload, which holds
+        // the bootstrap logger's lock. A lazy load ran inside that lock, and the loader reads files asynchronously and waits
+        // synchronously, so a message it logged from a thread-pool continuation (e.g. "Applied the cached server config")
+        // waited for the lock while the lock's owner waited for the load: the host build deadlocked and the service never
+        // reached the SCM (Windows times out after 30 s). Its logger is not taken from the container either, which would
+        // close the cycle ILoggerFactory -> Serilog -> SettingsLoader -> ILoggerFactory. Log.Logger is the bootstrap
+        // ReloadableLogger: messages logged now go to it, later ones (reloads) to the configured pipeline once frozen.
+        if (!services.Any(static d => d.ServiceType == typeof(SettingsLoader)))
         {
-            // Not ILogger<SettingsLoader> from the container: the Agent's Serilog pipeline is configured from these settings
-            // (LoggingSetup.UseClubShellSerilog resolves SettingsLoader), so a container logger here closes a resolution
-            // cycle ILoggerFactory -> SettingsLoader -> ILoggerFactory. The container's stack guard moves the inner
-            // resolution to another thread, which then waits for the outer one: the host build deadlocks and the service
-            // never reaches the SCM (Windows times out after 30 s). Log.Logger is the bootstrap ReloadableLogger, which
-            // the host reloads into the configured pipeline once built, so these messages still reach the agent log.
-            var logger = new SerilogLoggerFactory(Serilog.Log.Logger).CreateLogger<SettingsLoader>();
-            var loader = new SettingsLoader(SettingsLoaderOptions.FromConfiguration(configuration), logger);
+            var loader = new SettingsLoader(
+                SettingsLoaderOptions.FromConfiguration(configuration), new SerilogLoggerFactory(Serilog.Log.Logger).CreateLogger<SettingsLoader>());
             loader.Load();
-            return loader;
-        });
+            services.AddSingleton(_ => loader);
+        }
         services.TryAddSingleton<IOptionsMonitor<AgentSettings>>(provider => provider.GetRequiredService<SettingsLoader>());
         services.TryAddSingleton<IOptions<AgentSettings>>(provider => provider.GetRequiredService<SettingsLoader>());
         services.TryAddSingleton<IValidateOptions<AgentSettings>, AgentSettingsValidator>();
