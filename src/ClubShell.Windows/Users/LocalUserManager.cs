@@ -182,6 +182,41 @@ public sealed class LocalUserManager
         return names;
     }
 
+    /// <summary>
+    /// The profile directory of <paramref name="sid"/>, created when the account has never logged on. The kiosk account
+    /// needs it before its first logon: its shell and lockdown live in its own registry hive (NTUSER.DAT), and auto-logon
+    /// is turned on only once the shell is set — without a profile neither happens and the kiosk never logs on.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">CreateProfile failed.</exception>
+    public string EnsureProfile(string name, string sid)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sid);
+        if (Registry.RegistryHelper.GetProfileImagePath(sid) is { } existing)
+        {
+            return existing;
+        }
+
+        char[] buffer = new char[NativeConst.MAX_PATH + 1];
+        int hr = Userenv.CreateProfile(sid, name, ref buffer[0], (uint)buffer.Length);
+        const int AlreadyExists = unchecked((int)0x800700B7);
+        const int PrivilegeNotHeld = unchecked((int)0x80070522);
+        if (hr == PrivilegeNotHeld)
+        {
+            throw new InvalidOperationException(
+                $"CreateProfile for '{name}' failed with 0x{hr:X8}: the service lacks SeTakeOwnershipPrivilege (sc privs ClubShellAgent).");
+        }
+
+        if (hr != 0 && hr != AlreadyExists)
+        {
+            throw new InvalidOperationException($"CreateProfile for '{name}' failed with 0x{hr:X8}.");
+        }
+
+        string path = Registry.RegistryHelper.GetProfileImagePath(sid) ?? NativeString.FromBuffer(buffer);
+        _logger.LogInformation("Profile of {User} created at {Path}", name, path);
+        return path;
+    }
+
     /// <summary>SID string of a local account, or <see langword="null"/> when absent.</summary>
     public string? GetSid(string name)
     {

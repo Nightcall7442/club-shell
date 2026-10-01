@@ -163,14 +163,17 @@
     <!-- The command line carries CLUBAPIKEY: keep the property change out of the MSI log as well. -->
     <Property Id="CA_SeedAgentConfig" Hidden="yes" />
 
-    <!-- 2. Service privileges (sc.exe privs) and delayed auto-start + failure flag, exactly as register-service.ps1.
-            Both run after InstallServices (service exists) and before StartServices (privileges apply at start). -->
+    <!-- 2. Service privileges (sc.exe privs) and automatic start + failure flag, exactly as register-service.ps1.
+            Both run after InstallServices (service exists) and before StartServices (privileges apply at start).
+            Plain auto, not delayed-auto: the kiosk logs on at boot and its Shell shows "agent disconnected" until the
+            Agent is up, which delayed-auto puts about two minutes later. -->
+
     <SetProperty Id="CA_ServicePrivileges" Sequence="execute" Before="CA_ServicePrivileges"
-                 Value="&quot;[System64Folder]sc.exe&quot; privs ClubShellAgent SeTcbPrivilege/SeAssignPrimaryTokenPrivilege/SeIncreaseQuotaPrivilege/SeShutdownPrivilege/SeDebugPrivilege/SeBackupPrivilege/SeRestorePrivilege" />
+                 Value="&quot;[System64Folder]sc.exe&quot; privs ClubShellAgent SeTcbPrivilege/SeAssignPrimaryTokenPrivilege/SeIncreaseQuotaPrivilege/SeShutdownPrivilege/SeDebugPrivilege/SeBackupPrivilege/SeRestorePrivilege/SeTakeOwnershipPrivilege" />
     <CustomAction Id="CA_ServicePrivileges" DllEntry="WixQuietExec" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
                   Execute="deferred" Impersonate="no" Return="check" />
     <SetProperty Id="CA_ServiceStartMode" Sequence="execute" Before="CA_ServiceStartMode"
-                 Value="&quot;[System64Folder]cmd.exe&quot; /d /c &quot;sc.exe config ClubShellAgent start= delayed-auto &amp;&amp; sc.exe failureflag ClubShellAgent 1&quot;" />
+                 Value="&quot;[System64Folder]cmd.exe&quot; /d /c &quot;sc.exe config ClubShellAgent start= auto &amp;&amp; sc.exe failureflag ClubShellAgent 1&quot;" />
     <CustomAction Id="CA_ServiceStartMode" DllEntry="WixQuietExec" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
                   Execute="deferred" Impersonate="no" Return="check" />
 

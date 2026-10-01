@@ -291,7 +291,7 @@ internal static class ServiceControl
             return 2;
         }
 
-        int code = Run("create", "ClubShellAgent", "binPath=", exe, "start=", "delayed-auto", "obj=", "LocalSystem", "DisplayName=", DisplayName);
+        int code = Run("create", "ClubShellAgent", "binPath=", exe, "start=", "auto", "obj=", "LocalSystem", "DisplayName=", DisplayName);
         if (code != 0)
         {
             Console.Error.WriteLine("Service creation failed. Run the shell elevated, or use Install\\register-service.ps1 for the full setup.");
@@ -302,7 +302,7 @@ internal static class ServiceControl
         _ = Run("failure", "ClubShellAgent", "reset=", "86400", "actions=", "restart/5000/restart/10000/restart/30000");
         _ = Run("config", "ClubShellAgent", "depend=", "LanmanWorkstation/Tcpip");
 
-        Console.WriteLine("Service 'ClubShellAgent' installed (start = delayed-auto, account = LocalSystem).");
+        Console.WriteLine("Service 'ClubShellAgent' installed (start = auto, account = LocalSystem).");
         Console.WriteLine("Start it with:  sc.exe start ClubShellAgent");
         Console.WriteLine("For service privileges and the event-log source, run Install\\register-service.ps1.");
         return 0;

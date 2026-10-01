@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.Versioning;
+using System.Security.Principal;
 using System.Text.RegularExpressions;
 
 using ClubShell.Contracts.Pcs;
@@ -111,7 +112,7 @@ public sealed class ProcessAllowlistModule : IPolicyModule, IDisposable
             }
         }
 
-        var rules = new Ruleset(allowlist.Mode, compiled.ToArray(), context.KioskSessionId);
+        var rules = new Ruleset(allowlist.Mode, compiled.ToArray(), context.KioskSessionId, context.KioskUserSid);
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -131,7 +132,9 @@ public sealed class ProcessAllowlistModule : IPolicyModule, IDisposable
 
         _watcher.Start();
         int killed = Sweep(rules);
-        string sessionText = rules.SessionId is { } id ? id.ToString(System.Globalization.CultureInfo.InvariantCulture) : "console";
+        string sessionText = rules.SessionId is { } id
+            ? id.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : "console (only while the kiosk account is logged on there)";
         notes.Add($"{allowlist.Mode} mode with {rules.Patterns.Length} pattern(s) in session {sessionText}; initial sweep killed {killed} process(es)");
         return Task.FromResult(PolicyModuleResult.Ok(notes.ToArray()));
     }
@@ -210,8 +213,7 @@ public sealed class ProcessAllowlistModule : IPolicyModule, IDisposable
 
     private int Sweep(Ruleset rules)
     {
-        int session = rules.SessionId ?? unchecked((int)WtsSessions.GetActiveConsoleSessionId());
-        if (session <= 0)
+        if (TargetSession(rules) is not { } session || session <= 0)
         {
             return 0;
         }
@@ -305,8 +307,7 @@ public sealed class ProcessAllowlistModule : IPolicyModule, IDisposable
             return;
         }
 
-        uint session = rules.SessionId is { } configured ? unchecked((uint)configured) : WtsSessions.GetActiveConsoleSessionId();
-        if (e.SessionId != session)
+        if (TargetSession(rules) is not { } session || e.SessionId != unchecked((uint)session))
         {
             return;
         }
@@ -322,5 +323,40 @@ public sealed class ProcessAllowlistModule : IPolicyModule, IDisposable
     }
 
     /// <summary>Immutable rule snapshot swapped atomically on apply.</summary>
-    private sealed record Ruleset(AllowlistMode Mode, (string Pattern, Regex Regex)[] Patterns, int? SessionId);
+    /// <summary>
+    /// The session the rules apply to: the kiosk session found at apply time, otherwise the console session only while the
+    /// kiosk account is the one logged on there — never an administrator's session (on the pilot PC, before the kiosk
+    /// account had ever logged on, the console fallback killed the administrator's PowerShell, cmd and mmc).
+    /// </summary>
+    private static int? TargetSession(Ruleset rules)
+    {
+        if (rules.SessionId is { } known)
+        {
+            return known;
+        }
+
+        uint console = WtsSessions.GetActiveConsoleSessionId();
+        if (rules.KioskSid is null || console == 0 || console == uint.MaxValue)
+        {
+            return null;
+        }
+
+        try
+        {
+            if (WtsSessions.Get(console) is not { UserName: { Length: > 0 } user } session)
+            {
+                return null;
+            }
+
+            string domain = string.IsNullOrEmpty(session.Domain) ? Environment.MachineName : session.Domain;
+            string sid = new NTAccount(domain, user).Translate(typeof(SecurityIdentifier)).Value;
+            return string.Equals(sid, rules.KioskSid, StringComparison.OrdinalIgnoreCase) ? unchecked((int)console) : null;
+        }
+        catch (Exception ex) when (ex is IdentityNotMappedException or SystemException)
+        {
+            return null;
+        }
+    }
+
+    private sealed record Ruleset(AllowlistMode Mode, (string Pattern, Regex Regex)[] Patterns, int? SessionId, string? KioskSid);
 }
