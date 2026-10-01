@@ -75,6 +75,6 @@
   "kiosk": {
     "idleTimeoutSec": 300,
     "adsIntervalSec": 900,
-    "allowVirtualKeyboard": true
+    "allowVirtualKeyboard": false
   }
 }
