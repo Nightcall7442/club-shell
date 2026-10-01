@@ -47,13 +47,19 @@
                               ResetPeriodInDays="1" />
         </ServiceInstall>
 
-        <!-- Start after install (privileges granted first), stop on install/uninstall, delete on uninstall. -->
+        <!-- Stop on install/uninstall (waited for, files are replaced next), delete on uninstall. -->
         <ServiceControl Id="AgentServiceControl"
                         Name="ClubShellAgent"
-                        Start="install"
                         Stop="both"
                         Remove="uninstall"
                         Wait="yes" />
+        <!-- Start after install without waiting: the install must not hang or roll back on how long the agent takes to come
+             up (on the pilot PC Windows gave up after its 30 s service-start timeout and the MSI rolled back with 1920). A
+             failed start is restarted by the recovery actions above and shows in the agent log. -->
+        <ServiceControl Id="AgentServiceStart"
+                        Name="ClubShellAgent"
+                        Start="install"
+                        Wait="no" />
       </Component>
     </ComponentGroup>
   </Fragment>
