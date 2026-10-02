@@ -32,7 +32,7 @@ import type {
   User,
   UserStats,
 } from '@clubshell/contracts';
-import type { KioskMonitor, KioskState, ShellConfig } from '@/lib/tauri';
+import type { KioskMonitor, KioskState, ShellConfig, OpenWindow } from '@/lib/tauri';
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Helpers
@@ -1406,5 +1406,23 @@ export const NOTIFICATIONS: Notification[] = [
     level: 'success',
     ttlSec: 10,
     action: { label: 'View', command: '/tournaments', args: null },
+  },
+];
+
+/** Programs open in the session besides a running game (`kiosk_open_windows`; the handler adds the game's window). */
+export const OPEN_WINDOWS: OpenWindow[] = [
+  {
+    pid: 6120,
+    hwnd: 0x0003_04a2,
+    title: 'Discord',
+    exePath: 'C:\\Users\\kiosk\\AppData\\Local\\Discord\\app-1.0.9163\\Discord.exe',
+    icon: '/mock-art/app-discord.svg',
+  },
+  {
+    pid: 7344,
+    hwnd: 0x0005_1b30,
+    title: 'Twitch - Google Chrome',
+    exePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    icon: '/mock-art/app-chrome.svg',
   },
 ];

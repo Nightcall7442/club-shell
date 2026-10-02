@@ -80,6 +80,8 @@ pub fn run() {
             kiosk::commands::kiosk_idle_reset,
             kiosk::commands::kiosk_i18n_bundle,
             kiosk::commands::kiosk_asset_url,
+            kiosk::open_windows::kiosk_open_windows,
+            kiosk::open_windows::kiosk_focus_window,
         ))
         .setup(move |app| {
             let handle = app.handle().clone();

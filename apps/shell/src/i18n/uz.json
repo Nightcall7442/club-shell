@@ -327,6 +327,11 @@
       "select": "Tanlash",
       "back": "Orqaga",
       "sections": "Boʻlimlar"
+    },
+    "dock": {
+      "label": "Ochiq dasturlar",
+      "switchFailed": "Oʻtib boʻlmadi",
+      "switchFailedBody": "Dastur javob bermayapti yoki allaqachon yopilgan. Qayta urinib koʻring."
     }
   },
   "games": {

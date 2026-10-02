@@ -82,7 +82,7 @@ import type {
   WalletTariffsResponse,
 } from '@clubshell/contracts';
 import { tariffPriceFor } from '@clubshell/contracts';
-import type { GamepadState, KioskState, ShellConfig } from '@/lib/tauri';
+import type { GamepadState, KioskState, ShellConfig, OpenWindow } from '@/lib/tauri';
 import { builtinThemes, DEFAULT_THEME } from '@/theme/themes';
 import {
   ACHIEVEMENTS,
@@ -128,6 +128,7 @@ import {
   USER_ID,
   VIP_USER,
   uzs,
+  OPEN_WINDOWS,
 } from './data';
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -2064,6 +2065,35 @@ cmd(
       return `https://picsum.photos/seed/${seed}/600/900`;
     }
     mockError('forbidden', 'Path outside themes\\ or cache\\media\\', { reason: 'path' });
+  },
+  { fast: true },
+);
+
+// ----- open programs (status-bar dock) --------------------------------------------------------------------------------
+
+/** The fake programs plus a window per running game (its pid, an exe in its install folder), front-most first. */
+function openWindows(): OpenWindow[] {
+  const games = mockState.running
+    .filter((r) => r.state === 'running')
+    .map((r): OpenWindow => {
+      const dir = mockState.games.find((g) => g.id === r.gameId)?.installPath ?? 'D:\\Games';
+      return { pid: r.pid, hwnd: r.pid * 16, title: r.title, exePath: `${dir}\\game.exe`, icon: null };
+    });
+  return [...games, ...clone(OPEN_WINDOWS)];
+}
+
+cmd('kiosk_open_windows', (): OpenWindow[] => openWindows(), { fast: true });
+
+cmd(
+  'kiosk_focus_window',
+  (args): boolean => {
+    requireSession();
+    const target = openWindows().find((w) => w.hwnd === num(args, 'hwnd'));
+    if (!target) {
+      mockError('notFound', 'window not found', { name: 'window' });
+    }
+    console.info(`[mock] kiosk_focus_window(${target.title}) — the Shell would go behind it`);
+    return true;
   },
   { fast: true },
 );
