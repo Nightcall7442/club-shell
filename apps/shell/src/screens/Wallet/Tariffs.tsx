@@ -371,7 +371,7 @@ export interface TariffsProps {
   className?: string;
 }
 
-/** Tariff cards grouped by zone with live availability and the start / extend action for the current session. */
+/** Tariff cards with live availability and the start / extend action for the current session. */
 export function Tariffs({ onInsufficientFunds, className }: TariffsProps): JSX.Element {
   const { t } = useTranslation();
   const animations = useThemeStore(selectAnimationsEnabled);
@@ -396,25 +396,27 @@ export function Tariffs({ onInsufficientFunds, className }: TariffsProps): JSX.E
       ? null
       : 'extend';
 
-  const groups = useMemo(() => {
-    const map = new Map<string, Tariff[]>();
-    for (const tariff of tariffs) {
-      const key = tariff.zones.length === 0 ? t('common.all') : tariff.zones.join(', ');
-      map.set(key, [...(map.get(key) ?? []), tariff]);
-    }
-    // This PC's zone first, then the rest alphabetically.
-    return Array.from(map, ([key, items]) => ({ key, items })).sort((a, b) => {
-      const az = a.items[0]?.zones.some((z) => z.toLowerCase() === zone.toLowerCase()) ? 0 : 1;
-      const bz = b.items[0]?.zones.some((z) => z.toLowerCase() === zone.toLowerCase()) ? 0 : 1;
-      return az - bz || a.key.localeCompare(b.key);
-    });
-  }, [tariffs, zone, t]);
+  // One grid (the card names its zones): the current tariff, then what is open now, this PC's zone before the rest,
+  // hourly before packages, cheaper first. Zone groups left a heading over a single card each.
+  const sorted = useMemo(() => {
+    const own = (x: Tariff): boolean => x.zones.some((z) => z.toLowerCase() === zone.toLowerCase());
+    const rank = (x: Tariff): number =>
+      (session.tariffId === x.id ? 0 : 8) +
+      (tariffAvailableNow(x, zone, now) ? 0 : 4) +
+      (own(x) ? 0 : 2) +
+      (x.isPackage ? 1 : 0);
+    const price = (x: Tariff): number => (x.isPackage ? (x.packagePrice?.amount ?? 0) : x.pricePerHour.amount);
+    return [...tariffs].sort((a, b) => rank(a) - rank(b) || price(a) - price(b));
+  }, [tariffs, zone, now, session.tariffId]);
 
   const loading = status === 'loading' && tariffs.length === 0;
 
   return (
     <section aria-label={t('wallet.tariffs')} className={clsx('flex flex-col gap-4', className)}>
-      <h2 className="font-display text-2xl font-normal text-text tracking-tight">{t('wallet.tariffs')}</h2>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <h2 className="font-display text-2xl font-normal text-text tracking-tight">{t('wallet.tariffs')}</h2>
+        {zone && <p className="hud-label">{t('wallet.zoneOfPc', { zone })}</p>}
+      </div>
       {loading ? (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(clamp(15rem,17vw,20rem),1fr))] gap-[var(--gap)]">
           {Array.from({ length: 3 }, (_, i) => (
@@ -424,34 +426,29 @@ export function Tariffs({ onInsufficientFunds, className }: TariffsProps): JSX.E
       ) : tariffs.length === 0 ? (
         <p className="glass rounded-lg p-6 text-center text-lg text-muted">{t('wallet.noTariffs')}</p>
       ) : (
-        groups.map((group, gi) => (
-          <div key={group.key} className="flex flex-col gap-3">
-            {groups.length > 1 && <h3 className="hud-label">{group.key}</h3>}
-            <motion.ul
-              role="list"
-              className="grid grid-cols-[repeat(auto-fill,minmax(clamp(15rem,17vw,20rem),1fr))] gap-[var(--gap)]"
-              initial={animations ? 'hidden' : false}
-              animate="show"
-              variants={{ hidden: {}, show: { transition: { staggerChildren: 0.05, delayChildren: gi * 0.05 } } }}
+        <motion.ul
+          role="list"
+          className="grid grid-cols-[repeat(auto-fill,minmax(clamp(15rem,17vw,20rem),1fr))] gap-[var(--gap)]"
+          initial={animations ? 'hidden' : false}
+          animate="show"
+          variants={{ hidden: {}, show: { transition: { staggerChildren: 0.05 } } }}
+        >
+          {sorted.map((tariff) => (
+            <motion.li
+              key={tariff.id}
+              variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}
+              className="flex"
             >
-              {group.items.map((tariff) => (
-                <motion.li
-                  key={tariff.id}
-                  variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}
-                  className="flex"
-                >
-                  <TariffCard
-                    tariff={tariff}
-                    available={tariffAvailableNow(tariff, zone, now)}
-                    current={session.tariffId === tariff.id}
-                    action={action}
-                    onAction={(tf, a) => setDialog({ tariff: tf, action: a })}
-                  />
-                </motion.li>
-              ))}
-            </motion.ul>
-          </div>
-        ))
+              <TariffCard
+                tariff={tariff}
+                available={tariffAvailableNow(tariff, zone, now)}
+                current={session.tariffId === tariff.id}
+                action={action}
+                onAction={(tf, a) => setDialog({ tariff: tf, action: a })}
+              />
+            </motion.li>
+          ))}
+        </motion.ul>
       )}
       <TariffActionModal
         tariff={dialog?.tariff ?? null}

@@ -540,12 +540,23 @@ function bootFromUrl(): void {
   }
 }
 
+/**
+ * `?topup=off`: online top-up off, as the central server sends it while it has no payment provider — the wallet then
+ * shows the counter's steps (`__clubshellMock.simulate.counterTopUp()` plays the cashier).
+ */
+function topupFromUrl(): void {
+  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('topup') === 'off') {
+    mockState.settings.features = { ...mockState.settings.features, topup: false };
+  }
+}
+
 function ensureStarted(): void {
   if (started) {
     return;
   }
   started = true;
   bootFromUrl();
+  topupFromUrl();
   setInterval(tick, 1000);
   setInterval(() => emitMock('agent://sys.metrics', metricsSample()), 5000);
   later(1500, () => emitMock('kiosk://connectivity', { agent: 'connected', attempts: 0, since: nowIso() }));
@@ -679,6 +690,12 @@ export const simulate = {
       changed: ['kiosk'],
       policy: clone(mockState.policy),
     });
+  },
+  /** A cashier's top-up at the counter (`adminTopUp`): the ledger row and the `wallet.updated` push. `sum` in UZS. */
+  counterTopUp(sum = 50_000): void {
+    if (mockState.user) {
+      pushTransaction('topUp', money(sum * 100), 'Пополнение на кассе наличными', null);
+    }
   },
 };
 
@@ -1181,6 +1198,10 @@ cmd('wallet_history', (args): WalletHistoryResponse => {
 
 cmd('wallet_topup_intent', (args): TopupIntent => {
   const user = requireUser();
+  // Like the Agent: no intent while the club's config turns online top-up off.
+  if (!mockState.settings.features.topup) {
+    mockError('policyDenied', 'Online top-up is off', { rule: 'features.topup' });
+  }
   const amount = obj<Money>(args, 'amount');
   const provider = str(args, 'provider') as TopupProvider | undefined;
   if (!amount || typeof amount.amount !== 'number') {
