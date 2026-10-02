@@ -11,7 +11,7 @@ import { api, events, isTauri } from '@/lib/tauri';
 import { setAccentOverride } from '@/theme/themes';
 import { useAuthStore } from './auth';
 import { useChatStore } from './chat';
-import { useGamesStore } from './games';
+import { isLaunchCancelled, useGamesStore } from './games';
 import { stopToastTimer, useNotificationsStore } from './notifications';
 import { startSessionTicker, stopSessionTicker, useSessionStore } from './session';
 import { useSettingsStore } from './settings';
@@ -161,7 +161,7 @@ function wireListeners(): void {
     // ----- games -------------------------------------------------------------------------------------------------------
     events.on('game.stateChanged', (e) => {
       games().onStateChanged(e);
-      if (e.state === 'failed') {
+      if (e.state === 'failed' && !isLaunchCancelled(e.error)) {
         notify().push({
           title: t('notifications.gameFailed', { title: e.title }),
           body: e.error ? t(`errors.${e.error.code}`) : '',
@@ -202,6 +202,8 @@ function wireListeners(): void {
     }),
     events.on('policy.changed', (p) => {
       settings().setPolicy(p.policy);
+      // The Agent answers settings with the policy applied (allowVirtualKeyboard = player's choice && policy).
+      void settings().load();
       notify().push({
         id: 'policy',
         title: t('notifications.policyChanged'),
@@ -277,6 +279,9 @@ function wireListeners(): void {
         });
         if (c.connected) {
           void auth().refresh();
+          // The Shell starts at logon, usually before the Agent link is up: the settings read at boot failed and the
+          // defaults stayed (the on-screen keyboard on the lock screen although the club policy forbids it).
+          void settings().load();
         }
       }
     }),

@@ -89,6 +89,10 @@ pub fn run() {
             if !kiosk.is_dev() && !kiosk.window().focus() {
                 tracing::warn!("main window did not take the foreground at startup");
             }
+            #[cfg(windows)]
+            if !kiosk.is_dev() && !setup_state.config.devtools {
+                disable_browser_accelerators(&handle);
+            }
             app.manage(kiosk);
             tracing::info!(version = env!("CARGO_PKG_VERSION"), "shell started");
             Ok(())
@@ -141,6 +145,39 @@ pub fn shutdown(app: &AppHandle) {
 fn cleanup(state: &AppState) {
     state.kiosk().shutdown();
     state.agent.shutdown();
+}
+
+/// Reload (F5, Ctrl+R, Ctrl+Shift+R), find, print, zoom and the developer tools are WebView2's own chords, and the
+/// page's `preventDefault` (main.tsx) does not stop every one of them: a player's Ctrl+Shift+R reloaded the kiosk. WebView2
+/// is told to drop them; the page still gets the keys. Left on with `shell.json → devtools` (and in dev).
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn disable_browser_accelerators(app: &AppHandle) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings3;
+    use windows_core::Interface;
+
+    let Some(window) = app.get_webview_window(MAIN_LABEL) else {
+        tracing::warn!("main webview not found; browser accelerator keys stay on");
+        return;
+    };
+    let posted = window.with_webview(|webview| {
+        // SAFETY: COM calls on the controller Tauri hands out, on the webview's own (UI) thread.
+        let outcome = unsafe {
+            webview
+                .controller()
+                .CoreWebView2()
+                .and_then(|core| core.Settings())
+        }
+        .and_then(|settings| settings.cast::<ICoreWebView2Settings3>())
+        .and_then(|settings| unsafe { settings.SetAreBrowserAcceleratorKeysEnabled(false) });
+        match outcome {
+            Ok(()) => tracing::info!("browser accelerator keys disabled"),
+            Err(e) => tracing::warn!(error = %e, "cannot disable browser accelerator keys"),
+        }
+    });
+    if let Err(e) = posted {
+        tracing::warn!(error = %e, "cannot reach the webview to disable browser accelerator keys");
+    }
 }
 
 /// Creates [`SINGLE_INSTANCE_MUTEX`]; `false` when another process already owns it. The handle is

@@ -18,7 +18,7 @@ import i18n from '@/i18n';
 import { chime } from '@/lib/sound';
 import { toShellApiError } from '@/lib/tauri';
 import { launcherLabelKey } from '@/screens/Games/GameCard';
-import { useGamesStore } from '@/store/games';
+import { isLaunchCancelled, useGamesStore } from '@/store/games';
 import { describeError, useNotificationsStore } from '@/store/notifications';
 import { useSessionStore } from '@/store/session';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
@@ -77,6 +77,9 @@ export async function launchGame(gameId: string): Promise<LaunchResult | null> {
   try {
     return await games.launch(gameId);
   } catch (e) {
+    if (isLaunchCancelled(toShellApiError(e))) {
+      return null;
+    }
     notify.push({
       title: i18n.t('games.launchFailed'),
       body: describeLaunchError(e, game),
