@@ -600,6 +600,7 @@ export const UZ: Record<string, string> = {
   Кооператив: 'Kooperativ',
   Мультиплеер: 'Multipleyer',
   Одиночная: 'Yakka',
+  'Установить приложение': 'Ilovani oʻrnatish',
 };
 export const EN: Record<string, string> = {
   'Выручка за период': 'Revenue for the period',
@@ -1202,4 +1203,5 @@ export const EN: Record<string, string> = {
   Кооператив: 'Co-op',
   Мультиплеер: 'Multiplayer',
   Одиночная: 'Single-player',
+  'Установить приложение': 'Install the app',
 };

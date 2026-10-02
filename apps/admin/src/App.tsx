@@ -18,6 +18,7 @@ import {
 } from '@/api';
 import { describe } from '@/errors';
 import { LANGS, dateLocale, setLang, t, useLang } from '@/i18n';
+import { useInstall } from '@/pwa';
 import { Button } from '@/ui';
 
 const MapPage = lazy(() => import('@/pages/MapPage'));
@@ -319,8 +320,28 @@ function Login({ onDone }: { onDone: (staff: StaffMember, shift: Shift | null) =
         {import.meta.env.DEV && (
           <p className="text-center text-xs text-muted">{t('Демо: владелец 0000, кассир 1111')}</p>
         )}
+        <InstallButton className="h-9 justify-center rounded-md px-3" />
       </div>
     </div>
+  );
+}
+
+/** The browser's install offer as the console's own button; nothing when there is none (installed, or no such browser). */
+function InstallButton({ className }: { className?: string }): JSX.Element | null {
+  const { canInstall, install } = useInstall();
+  if (!canInstall) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => void install()}
+      className={clsx(
+        'focus-ring flex items-center gap-3 text-left text-sm text-muted transition-colors hover:bg-white/[0.03] hover:text-text [&>svg]:h-5 [&>svg]:w-5 [&>svg]:shrink-0',
+        className,
+      )}
+    >
+      {svg('M12 4v11m0 0-4-4m4 4 4-4M5 19h14')}
+      {t('Установить приложение')}
+    </button>
   );
 }
 
@@ -509,6 +530,7 @@ export function App(): JSX.Element {
             </div>
           );
         })}
+        <InstallButton className="mt-auto h-11 border-l-2 border-transparent px-5" />
       </nav>
 
       <main className="min-h-0 overflow-y-auto p-6">
