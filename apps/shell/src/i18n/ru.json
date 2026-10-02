@@ -411,7 +411,11 @@
       "horror": "Хоррор",
       "survival": "Выживание",
       "multiplayer": "Мультиплеер",
-      "singleplayer": "Одиночная"
+      "singleplayer": "Одиночная",
+      "arcade": "Аркады",
+      "competitive": "Соревновательные",
+      "hero": "Геройские",
+      "openWorld": "Открытый мир"
     },
     "gridLabel": "Библиотека игр",
     "coverAlt": "Обложка {{title}}",

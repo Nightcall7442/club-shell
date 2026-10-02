@@ -90,13 +90,27 @@ const initialState: GamesState = {
   error: null,
 };
 
+/**
+ * One key per category, whichever way the catalogue spells it: `battle-royale`, `battle_royale` and `battleRoyale` are
+ * all `battleRoyale` (the `games.cat.*` keys), so a category is one chip with one translated name.
+ */
+export function categoryKey(category: string): string {
+  const words = category
+    .trim()
+    .split(/[-_\s]+/)
+    .filter(Boolean);
+  return words
+    .map((w, i) => (i === 0 ? w.charAt(0).toLowerCase() + w.slice(1) : w.charAt(0).toUpperCase() + w.slice(1)))
+    .join('');
+}
+
 function indexGames(games: Game[]): Pick<GamesState, 'byId' | 'ids' | 'categories'> {
   const byId = new Map<string, Game>();
   const categories = new Set<string>();
   for (const g of games) {
     byId.set(g.id, g);
     for (const c of g.category) {
-      categories.add(c);
+      categories.add(categoryKey(c));
     }
   }
   return { byId, ids: games.map((g) => g.id), categories: Array.from(categories).sort((a, b) => a.localeCompare(b)) };
@@ -240,8 +254,9 @@ export const useGamesStore = create<GamesStore>()(
         const byId = new Map(s.byId);
         byId.set(game.id, game);
         const ids = s.ids.includes(game.id) ? s.ids : [...s.ids, game.id];
-        const categories = game.category.some((c) => !s.categories.includes(c))
-          ? Array.from(new Set([...s.categories, ...game.category])).sort((a, b) => a.localeCompare(b))
+        const keys = game.category.map(categoryKey);
+        const categories = keys.some((c) => !s.categories.includes(c))
+          ? Array.from(new Set([...s.categories, ...keys])).sort((a, b) => a.localeCompare(b))
           : s.categories;
         return { byId, ids, categories };
       });
@@ -349,7 +364,7 @@ const filteredGames = memo2((games: Game[], f: GamesFilters): Game[] => {
   const q = f.search.trim().toLowerCase();
   const out = games.filter(
     (g) =>
-      (!f.category || g.category.includes(f.category)) &&
+      (!f.category || g.category.some((c) => categoryKey(c) === f.category)) &&
       (!f.installedOnly || g.installed) &&
       (q.length === 0 || g.title.toLowerCase().includes(q) || g.tags.some((t) => t.toLowerCase().includes(q))),
   );

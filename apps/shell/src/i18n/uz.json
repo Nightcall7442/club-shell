@@ -411,7 +411,11 @@
       "horror": "Qo'rqinchli",
       "survival": "Omon qolish",
       "multiplayer": "Ko'p o'yinchili",
-      "singleplayer": "Yakka"
+      "singleplayer": "Yakka",
+      "arcade": "Arkada",
+      "competitive": "Musobaqa",
+      "hero": "Qahramonlar",
+      "openWorld": "Ochiq dunyo"
     },
     "gridLabel": "O'yinlar kutubxonasi",
     "coverAlt": "{{title}} muqovasi",

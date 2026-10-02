@@ -4,14 +4,14 @@
  * field and the grid; LB/RB cycling is wired by the screen through {@link cycleCategory}.
  */
 import type { GamesSort } from '@clubshell/contracts';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 import clsx from 'clsx';
 import { motion } from 'framer-motion';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Popover } from '@/components/ui/Popover';
-import { useOverflowFade } from '@/hooks/useOverflowFade';
+import { categoryKey } from '@/store/games';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
 
 export interface CategoriesProps {
@@ -26,9 +26,9 @@ export interface CategoriesProps {
   className?: string;
 }
 
-/** Localized category name (`games.cat.<id>`), falling back to the raw id from the catalogue. */
+/** Localized category name (`games.cat.<key>`, see {@link categoryKey}), falling back to the id from the catalogue. */
 export function categoryLabel(t: TFunction, category: string): string {
-  return t(`games.cat.${category}`, { defaultValue: category });
+  return t(`games.cat.${categoryKey(category)}`, { defaultValue: category });
 }
 
 /** Next/previous category in the chip order (`null` = "all" comes first); wraps around. */
@@ -94,16 +94,13 @@ export function Categories({
     { key: '__all', value: null, label: t('games.allCategories') },
     ...categories.map((c) => ({ key: c, value: c, label: categoryLabel(t, c) })),
   ];
-  const row = useRef<HTMLDivElement>(null);
-  useOverflowFade(row, chips.length);
-
   return (
-    <div className={clsx('flex min-w-0 items-center gap-3', className)}>
+    <div className={clsx('flex min-w-0 items-start gap-3', className)}>
+      {/* Wraps onto a second line rather than scrolling sideways: a chip cut at the edge read as broken. */}
       <div
-        ref={row}
         role="group"
         aria-label={t('games.categories')}
-        className="fade-x no-scrollbar flex min-w-0 max-w-full flex-1 items-center gap-1 overflow-x-auto"
+        className="flex min-w-0 max-w-full flex-1 flex-wrap items-center gap-1"
       >
         {chips.map((c) => {
           const active = c.value === value;

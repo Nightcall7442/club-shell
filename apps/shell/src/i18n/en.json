@@ -411,7 +411,11 @@
       "horror": "Horror",
       "survival": "Survival",
       "multiplayer": "Multiplayer",
-      "singleplayer": "Singleplayer"
+      "singleplayer": "Singleplayer",
+      "arcade": "Arcade",
+      "competitive": "Competitive",
+      "hero": "Hero",
+      "openWorld": "Open world"
     },
     "gridLabel": "Game library",
     "coverAlt": "{{title}} cover",
