@@ -1485,9 +1485,16 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
     `config_version`; первый хеш клуба только записывается;
   - `GET /admin/games` отдаёт сверх `AdminGame` поле `settingsPaths` (его читает касса); `PATCH /admin/games/{id}` —
     только владелец, не-массив → `400 format`, нет поля → `required`, мусорные пути отбрасываются как в моке, пустой
-    список = `NULL`; поднимает `catalog_version` и шлёт `refreshConfig {games:true}`. `/admin/network` и
+    список = `NULL`; поднимает `catalog_version` и шлёт `refreshConfig {games:true}`. Тоже сверх контракта — свои игры
+    владельца: `POST /admin/games` (id сервера), `PUT /admin/games/{id}` (как запускается и выглядит; теги, популярность,
+    античит сида остаются; `404 game`), `DELETE /admin/games/{id}` (мягко; неизвестная — `200`, как тарифы). `exe` — полный
+    путь к `.exe` (диск или UNC, кавычки снимаются), иной лаунчер — `launcherAppId` (Steam — цифры; обложка и арт из CDN
+    Steam, если своей нет); категории — до 5 ключей киоска. Любая правка владельца (и пути настроек) ставит
+    `games.origin = 'club'` (M0007): сид на старте трогает только `origin = 'seed'`. `GET /admin/games` отдаёт сверх
+    `AdminGame` ещё `launcherAppId`, `exePath`, `args`, `description`, `custom`. `/admin/network` и
     `/admin/network/clubs` — `501` владельцу, кассиру раньше `403 ownerOnly`;
-  - журнал: сверх enum пишутся `settingsSave`, `apiKeyRotate`, `healthSettings`, `gameSettingsPaths`; `adminControl`
+  - журнал: сверх enum пишутся `settingsSave`, `apiKeyRotate`, `healthSettings`, `gameSettingsPaths`, `gameAdd`,
+    `gameSave`, `gameDelete`; `adminControl`
     отдаёт только значения `AdminAuditAction`, `meta` — только скалярные поля;
   - здоровье: часовые корзины в UTC; FPS считается по сэмплам с `fps > 0` (доли «занятого часа» у агента нет);
     `health_tickets` хранит `pc_name` и `params` (вместо `issues`), `put_maintenance` = `autoMaintenance`. С

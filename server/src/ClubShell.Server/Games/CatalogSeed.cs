@@ -11,7 +11,9 @@ namespace ClubShell.Server.Games;
 /// The games catalog from seed JSON (DESIGN §12 D-14: the contract has no games CRUD). <c>Catalog:GamesSeedPath</c> is a
 /// JSON array of contract <c>Game</c> objects, optionally with <c>settingsPaths</c>. Every start upserts it by id into each
 /// club; a game missing from the file is soft-deleted; any change bumps <c>catalog_version</c> (the heartbeat tells the
-/// agents, <c>GET /games</c> answers a new ETag). No file: the catalog stays as it is.
+/// agents, <c>GET /games</c> answers a new ETag). No file: the catalog stays as it is. Games of <c>origin = 'club'</c> —
+/// added by the owner, or a seed game the owner edited or deleted (<see cref="Admin.CatalogAdminEndpoints"/>) — are the
+/// club's: the seed neither overwrites, restores nor deletes them.
 /// </summary>
 public static class CatalogSeed
 {
@@ -44,7 +46,7 @@ public static class CatalogSeed
                     VALUES (@Id, @clubId, @Title, @paths, @data::jsonb, @now)
                     ON CONFLICT (id) DO UPDATE SET title = excluded.title, settings_paths = excluded.settings_paths,
                                                    data = excluded.data, updated_at = excluded.updated_at, deleted_at = NULL
-                    WHERE games.club_id = excluded.club_id AND (games.data <> excluded.data OR games.deleted_at IS NOT NULL
+                    WHERE games.club_id = excluded.club_id AND games.origin = 'seed' AND (games.data <> excluded.data OR games.deleted_at IS NOT NULL
                           OR games.settings_paths IS DISTINCT FROM excluded.settings_paths)
                     """,
                     new { game.Id, clubId, game.Title, paths = game.SettingsPaths?.ToArray(), data, now },
@@ -52,7 +54,7 @@ public static class CatalogSeed
             }
 
             rows += await c.ExecuteAsync(
-                "UPDATE games SET deleted_at = @now WHERE club_id = @clubId AND deleted_at IS NULL AND NOT (id = ANY(@ids))",
+                "UPDATE games SET deleted_at = @now WHERE club_id = @clubId AND origin = 'seed' AND deleted_at IS NULL AND NOT (id = ANY(@ids))",
                 new { clubId, now, ids = games.Select(g => g.Id).ToArray() },
                 tx);
             if (rows > 0)
