@@ -62,7 +62,7 @@
   },
   "power": {
     "idleShutdownMin": null,
-    "scheduledShutdown": "05:00"
+    "scheduledShutdown": null
   },
   "updates": {
     "channel": "stable",
