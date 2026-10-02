@@ -48,7 +48,7 @@ export function GuestLogin({ onSuccess, className }: GuestLoginProps): JSX.Eleme
       <Input
         name="displayName"
         size="lg"
-        autoComplete="nickname"
+        autoComplete="off"
         maxLength={NAME_MAX}
         label={t('lock.guestName')}
         placeholder={t('lock.guestNamePlaceholder')}

@@ -212,7 +212,7 @@ export function UnlockForm({ onSuccess, className }: UnlockFormProps): JSX.Eleme
         size="lg"
         type="password"
         inputMode={method === 'pin' ? 'numeric' : undefined}
-        autoComplete={method === 'pin' ? 'one-time-code' : 'current-password'}
+        autoComplete={method === 'pin' ? 'one-time-code' : 'new-password'}
         maxLength={method === 'pin' ? 6 : undefined}
         autoFocus
         label={method === 'pin' ? t('lock.pin') : t('lock.password')}
