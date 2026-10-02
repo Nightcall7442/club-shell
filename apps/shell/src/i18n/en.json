@@ -165,7 +165,15 @@
     "notImplemented": "This feature is not available on the club server yet",
     "unknown": "Unknown error",
     "network": "Network error",
-    "generic": "Something went wrong. Please try again"
+    "generic": "Something went wrong. Please try again",
+    "policy": {
+      "postpaidNotAllowed": "Pay-later is off here: top up at the counter and pick your time in advance.",
+      "minorCurfew": "Minors cannot play at this time.",
+      "tariffZone": "This tariff does not apply in this PC's zone: pick another one.",
+      "tariffTime": "This tariff is not available right now: pick another one.",
+      "pcMaintenance": "This PC is under maintenance: take another one or call the staff.",
+      "blacklisted": "Sign-in is closed for this account: please talk to the staff."
+    }
   },
   "lock": {
     "title": "Welcome",
@@ -180,7 +188,7 @@
     "login": "Sign in",
     "loggingIn": "Signing in…",
     "guest": "Play as guest",
-    "guestHint": "Postpaid time, no account needed",
+    "guestHint": "No account: time is paid at the counter",
     "guestName": "Your name (optional)",
     "qr": "QR code",
     "scanQr": "Scan with the club app to sign in",

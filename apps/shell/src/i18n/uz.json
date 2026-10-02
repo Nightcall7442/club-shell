@@ -165,7 +165,15 @@
     "notImplemented": "Bu funksiya hozircha klub serverida mavjud emas",
     "unknown": "Noma'lum xatolik",
     "network": "Tarmoq xatosi",
-    "generic": "Nimadir noto'g'ri ketdi. Qayta urinib ko'ring"
+    "generic": "Nimadir noto'g'ri ketdi. Qayta urinib ko'ring",
+    "policy": {
+      "postpaidNotAllowed": "Keyin toʻlov bu yerda oʻchirilgan: kassada balansni toʻldiring va vaqtni oldindan tanlang.",
+      "minorCurfew": "Bu vaqtda voyaga yetmaganlar oʻynay olmaydi.",
+      "tariffZone": "Bu tarif shu kompyuter zonasida amal qilmaydi: boshqasini tanlang.",
+      "tariffTime": "Bu tarif hozir amal qilmaydi: boshqasini tanlang.",
+      "pcMaintenance": "Kompyuter taʼmirda: boshqasiga oʻtiring yoki administratorni chaqiring.",
+      "blacklisted": "Bu akkaunt uchun kirish yopiq: administratorga murojaat qiling."
+    }
   },
   "lock": {
     "title": "Xush kelibsiz",
@@ -180,7 +188,7 @@
     "login": "Kirish",
     "loggingIn": "Kirilmoqda…",
     "guest": "Mehmon sifatida o'ynash",
-    "guestHint": "Akkauntsiz, to'lov o'yin oxirida",
+    "guestHint": "Akkauntsiz: vaqt kassada toʻlanadi",
     "guestName": "Ismingiz (ixtiyoriy)",
     "qr": "QR-kod",
     "scanQr": "Kirish uchun klub ilovasida skanerlang",
