@@ -93,6 +93,26 @@ public sealed record User(
     public bool IsMember => Role >= UserRole.Member;
 }
 
+/// <summary>
+/// What a profile's avatar may be: an absolute http(s) URL, or one of the preset pictures every Shell ships
+/// (<c>/avatars/&lt;id&gt;.svg</c>, served by each Shell from its own origin, so it shows on any PC of the club, offline too).
+/// </summary>
+public static class AvatarUrls
+{
+    private static readonly System.Text.RegularExpressions.Regex Preset = new(
+        "^/avatars/[a-z0-9-]{1,32}\\.svg$",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+        TimeSpan.FromMilliseconds(100));
+
+    /// <summary>Whether <paramref name="value"/> is a preset path or an absolute http(s) URL.</summary>
+    public static bool IsValid(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return Preset.IsMatch(value)
+            || (Uri.TryCreate(value, UriKind.Absolute, out Uri? uri) && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp));
+    }
+}
+
 /// <summary>Body of <c>profile.update</c> and <c>PATCH /users/{userId}</c>; all fields optional.</summary>
 /// <param name="DisplayName">New display name.</param>
 /// <param name="AvatarUrl">New avatar URL.</param>

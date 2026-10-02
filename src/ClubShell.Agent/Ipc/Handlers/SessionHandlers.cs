@@ -985,7 +985,7 @@ public sealed class UserDomainHandlers : IIpcHandlerGroup
             throw IpcError.Validation("displayName", "length").ToException();
         }
 
-        if (request.AvatarUrl is { } avatar && !(Uri.TryCreate(avatar, UriKind.Absolute, out Uri? uri) && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp)))
+        if (request.AvatarUrl is { } avatar && !AvatarUrls.IsValid(avatar))
         {
             throw IpcError.Validation("avatarUrl", "format").ToException();
         }
