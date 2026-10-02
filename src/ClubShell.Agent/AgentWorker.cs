@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using ClubShell.Agent.AntiCheat;
+using ClubShell.Agent.Games;
 using ClubShell.Agent.Ipc;
 using ClubShell.Agent.Policy;
 using ClubShell.Agent.Server;
@@ -56,6 +57,7 @@ public sealed class AgentWorker : BackgroundService
     private static readonly TimeSpan ProvisionTimeout = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan PolicyTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan SessionRestoreTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan GamesLoadTimeout = TimeSpan.FromMinutes(2);
 
     // Logging the kiosk user off, deleting the profile, relaunching the Shell and waiting for the profile to come
     // back so the preserved anti-cheat directories can be restored — around a minute on a healthy PC.
@@ -76,6 +78,7 @@ public sealed class AgentWorker : BackgroundService
     private readonly Ipc.PipeServer _pipe;
     private readonly ShellWatchdog _watchdog;
     private readonly GamesShareMounter _share;
+    private readonly GameLibrary _games;
     private readonly IAgentEventSink _events;
     private readonly TelemetryBus _telemetry;
     private readonly ShellUserContext _users;
@@ -101,6 +104,7 @@ public sealed class AgentWorker : BackgroundService
         Ipc.PipeServer pipe,
         ShellWatchdog watchdog,
         GamesShareMounter share,
+        GameLibrary games,
         IAgentEventSink events,
         TelemetryBus telemetry,
         ShellUserContext users,
@@ -121,6 +125,7 @@ public sealed class AgentWorker : BackgroundService
         ArgumentNullException.ThrowIfNull(pipe);
         ArgumentNullException.ThrowIfNull(watchdog);
         ArgumentNullException.ThrowIfNull(share);
+        ArgumentNullException.ThrowIfNull(games);
         ArgumentNullException.ThrowIfNull(events);
         ArgumentNullException.ThrowIfNull(telemetry);
         ArgumentNullException.ThrowIfNull(users);
@@ -141,6 +146,7 @@ public sealed class AgentWorker : BackgroundService
         _pipe = pipe;
         _watchdog = watchdog;
         _share = share;
+        _games = games;
         _events = events;
         _telemetry = telemetry;
         _users = users;
@@ -257,6 +263,10 @@ public sealed class AgentWorker : BackgroundService
             SessionRestoreTimeout,
             critical: false,
             cancellationToken).ConfigureAwait(false);
+
+        // 6b. Game catalogue (§7.3): the cached copy, then the server's. Nothing else loads it at start: without this step
+        //     the Shell's Games screen was empty after every restart until the catalogue changed on the server.
+        await RunStepAsync("games-load", _games.LoadAsync, GamesLoadTimeout, critical: false, cancellationToken).ConfigureAwait(false);
 
         // 7. Profile hygiene (§6.1 step 9): a session that never closed cleanly leaves the previous player's profile
         //    on disk. Runs after the restore so a session that is still legitimately open is left alone.
