@@ -11,7 +11,7 @@ import { api, events, isTauri } from '@/lib/tauri';
 import { setAccentOverride } from '@/theme/themes';
 import { useAuthStore } from './auth';
 import { useChatStore } from './chat';
-import { useGamesStore } from './games';
+import { isLaunchCancelled, useGamesStore } from './games';
 import { stopToastTimer, useNotificationsStore } from './notifications';
 import { startSessionTicker, stopSessionTicker, useSessionStore } from './session';
 import { useSettingsStore } from './settings';
@@ -161,7 +161,7 @@ function wireListeners(): void {
     // ----- games -------------------------------------------------------------------------------------------------------
     events.on('game.stateChanged', (e) => {
       games().onStateChanged(e);
-      if (e.state === 'failed') {
+      if (e.state === 'failed' && !isLaunchCancelled(e.error)) {
         notify().push({
           title: t('notifications.gameFailed', { title: e.title }),
           body: e.error ? t(`errors.${e.error.code}`) : '',

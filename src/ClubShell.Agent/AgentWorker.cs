@@ -86,6 +86,7 @@ public sealed class AgentWorker : BackgroundService
     private readonly IClock _clock;
     private readonly SettingsLoader _settingsLoader;
     private readonly ILogger<AgentWorker> _logger;
+    private readonly SteamFolderAccess? _steamAccess;
 
     private volatile bool _ready;
     private Guid _persistedPcId;
@@ -111,7 +112,8 @@ public sealed class AgentWorker : BackgroundService
         IIpcEventPublisher publisher,
         IClock clock,
         SettingsLoader settingsLoader,
-        ILogger<AgentWorker> logger)
+        ILogger<AgentWorker> logger,
+        SteamFolderAccess? steamAccess = null)
     {
         ArgumentNullException.ThrowIfNull(hwid);
         ArgumentNullException.ThrowIfNull(provisioner);
@@ -154,6 +156,7 @@ public sealed class AgentWorker : BackgroundService
         _clock = clock;
         _settingsLoader = settingsLoader;
         _logger = logger;
+        _steamAccess = steamAccess;
     }
 
     /// <summary><see langword="true"/> once the startup sequence completed.</summary>
@@ -267,6 +270,9 @@ public sealed class AgentWorker : BackgroundService
         // 6b. Game catalogue (§7.3): the cached copy, then the server's. Nothing else loads it at start: without this step
         //     the Shell's Games screen was empty after every restart until the catalogue changed on the server.
         await RunStepAsync("games-load", _games.LoadAsync, GamesLoadTimeout, critical: false, cancellationToken).ConfigureAwait(false);
+
+        // 6c. Steam as the player needs its folder writable (SteamFolderAccess); granted in the background, once.
+        _ = _steamAccess?.EnsureInBackground();
 
         // 7. Profile hygiene (§6.1 step 9): a session that never closed cleanly leaves the previous player's profile
         //    on disk. Runs after the restore so a session that is still legitimately open is left alone.

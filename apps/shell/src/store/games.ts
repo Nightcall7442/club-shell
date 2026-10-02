@@ -174,10 +174,11 @@ export const useGamesStore = create<GamesStore>()(
           launching: s.launching?.gameId === gameId ? { ...s.launching, pid: result.pid ?? null } : s.launching,
         }));
         void get().refreshRunning();
+        settleLaunch(gameId);
         return result;
       } catch (e) {
         const err = toShellApiError(e);
-        set({ launching: null, launchError: err.toJSON() });
+        set({ launching: null, launchError: isLaunchCancelled(err) ? null : err.toJSON() });
         track('game.launchFailed', { gameId, code: err.code });
         throw err;
       }
@@ -224,7 +225,7 @@ export const useGamesStore = create<GamesStore>()(
         }
         const launching = s.launching?.gameId === e.gameId && e.state !== 'launching' ? null : s.launching;
         const launchError =
-          e.state === 'failed' && e.error
+          e.state === 'failed' && e.error && !isLaunchCancelled(e.error)
             ? { code: e.error.code, message: e.error.message, details: e.error.details ?? undefined }
             : s.launchError;
         const game = s.byId.get(e.gameId);
@@ -258,6 +259,51 @@ export const useGamesStore = create<GamesStore>()(
     },
   })),
 );
+
+/** How often (and how many times) a launch the Agent has finished is checked against its list of running games. */
+const LAUNCH_SETTLE_MS = 3000;
+const LAUNCH_SETTLE_TRIES = 3;
+
+/**
+ * Safety net for the launch screen. `game.stateChanged{running}` ends a launch; should that event get lost, the screen
+ * stayed at "waiting for the game window" for good, its "cancel" the only way out. Once the Agent has returned the
+ * game's pid, its `games.running` settles the launch instead: the game is there (running), or after a few checks it
+ * is not (gone already).
+ */
+function settleLaunch(gameId: string, attempt = 1): void {
+  setTimeout(() => {
+    const before = useGamesStore.getState().launching;
+    if (before?.gameId !== gameId || before.pid == null) {
+      return;
+    }
+    void useGamesStore
+      .getState()
+      .refreshRunning()
+      .then(() => {
+        const s = useGamesStore.getState();
+        if (s.launching?.gameId !== gameId) {
+          return;
+        }
+        if (s.running.some((r) => r.gameId === gameId) || attempt >= LAUNCH_SETTLE_TRIES) {
+          log.warn(`games.launch(${gameId}): no running event; settled from games.running (attempt ${attempt})`);
+          useGamesStore.setState({ launching: null });
+        } else {
+          settleLaunch(gameId, attempt + 1);
+        }
+      });
+  }, LAUNCH_SETTLE_MS);
+}
+
+/** The player cancelled the launch ("cancel launch"): `gameLaunchFailed{stage: cancelled}`, not worth an error. */
+export function isLaunchCancelled(error: { code?: string; details?: unknown } | null | undefined): boolean {
+  const details = error?.details;
+  return (
+    error?.code === 'gameLaunchFailed' &&
+    typeof details === 'object' &&
+    details !== null &&
+    (details as Record<string, unknown>)['stage'] === 'cancelled'
+  );
+}
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Memoized selectors (reference-stable while inputs are unchanged)

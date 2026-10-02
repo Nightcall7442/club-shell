@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Runtime.Versioning;
 using ClubShell.Agent.Games.Accounts;
@@ -53,7 +54,16 @@ public sealed class GameLaunchService : IDisposable
     private const int MaxExtraArgsLength = 512;
     private static readonly TimeSpan LaunchGrace = TimeSpan.FromSeconds(15);
 
+    /// <summary>How long a "cancel launch" waits for the cancelled launch to unwind before it closes what it started.</summary>
+    private static readonly TimeSpan CancelWait = TimeSpan.FromSeconds(5);
+
+    /// <summary>How long a Steam launch waits for the Steam folder rights (<see cref="SteamFolderAccess"/>).</summary>
+    private static readonly TimeSpan SteamAccessWait = TimeSpan.FromSeconds(5);
+
     private readonly GameLibrary _library;
+
+    /// <summary>Launches still starting, by game: <c>games.kill</c> for such a game cancels its launch ("cancel launch").</summary>
+    private readonly ConcurrentDictionary<Guid, InFlightLaunch> _inFlight = new();
     private readonly Dictionary<LauncherType, IGameLauncher> _launchers = new();
     private readonly ISessionService _sessions;
     private readonly IPolicyEnforcer _policy;
@@ -62,6 +72,7 @@ public sealed class GameLaunchService : IDisposable
     private readonly AccountInjector _injector;
     private readonly CloudSaveSync _saves;
     private readonly PlayerSettingsSync? _playerSettings;
+    private readonly SteamFolderAccess? _steamAccess;
     private readonly GameSessionTracker _tracker;
     private readonly IKioskSessionLocator _kiosk;
     private readonly IServerClient _server;
@@ -90,10 +101,12 @@ public sealed class GameLaunchService : IDisposable
         IOptionsMonitor<AgentSettings> settings,
         IClock clock,
         ILogger<GameLaunchService> logger,
-        PlayerSettingsSync? playerSettings = null)
+        PlayerSettingsSync? playerSettings = null,
+        SteamFolderAccess? steamAccess = null)
     {
         ArgumentNullException.ThrowIfNull(launchers);
         _playerSettings = playerSettings;
+        _steamAccess = steamAccess;
         _library = library;
         _sessions = sessions;
         _policy = policy;
@@ -166,6 +179,33 @@ public sealed class GameLaunchService : IDisposable
             return LaunchResult.Failure(IpcError.NotFound($"Game {request.GameId}"), startedAt);
         }
 
+        // One launch per game at a time. A second one is refused without events, so the first launch's progress on the
+        // Shell is left alone.
+        var inFlight = new InFlightLaunch();
+        if (!_inFlight.TryAdd(game.Id, inFlight))
+        {
+            inFlight.Dispose();
+            return LaunchResult.Failure(IpcError.Conflict($"{game.Title} is already starting", "alreadyRunning"), startedAt);
+        }
+
+        try
+        {
+            return await LaunchCoreAsync(game, request, startedAt, startedTs, inFlight, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _inFlight.TryRemove(new KeyValuePair<Guid, InFlightLaunch>(game.Id, inFlight));
+            inFlight.Finish();
+        }
+    }
+
+    private async Task<LaunchResult> LaunchCoreAsync(
+        Game game, LaunchRequest request, DateTimeOffset startedAt, long startedTs, InFlightLaunch inFlight, CancellationToken cancellationToken)
+    {
+        // The steps up to the game's start also stop on "cancel launch"; what follows the start (events, tracking,
+        // report) only on the request's own cancellation.
+        using var cancel = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, inFlight.Token);
+        CancellationToken token = cancel.Token;
         var antiCheat = new AntiCheatCheckResult(game.AntiCheat, true);
         ActiveLease? lease = null;
         InjectionResult? injection = null;
@@ -184,7 +224,7 @@ public sealed class GameLaunchService : IDisposable
                 throw IpcError.PolicyDenied(rule, "exePath").ToException();
             }
 
-            antiCheat = await CheckAntiCheatAsync(game, cancellationToken).ConfigureAwait(false);
+            antiCheat = await CheckAntiCheatAsync(game, token).ConfigureAwait(false);
             if (!antiCheat.Ok && (_policy.Current?.Anticheat.BlockOnViolation ?? true))
             {
                 throw IpcError.AntiCheatBlocked(antiCheat.Kind, antiCheat.Reason ?? "violation").ToException();
@@ -196,7 +236,7 @@ public sealed class GameLaunchService : IDisposable
                 throw IpcError.GameLaunchFailed("launcher", $"No launcher backend for {game.Launcher}").ToException();
             }
 
-            if (!await launcher.IsAvailableAsync(cancellationToken).ConfigureAwait(false))
+            if (!await launcher.IsAvailableAsync(token).ConfigureAwait(false))
             {
                 throw IpcError.GameLaunchFailed("launcher", $"{game.Launcher} client is not available").ToException();
             }
@@ -213,15 +253,15 @@ public sealed class GameLaunchService : IDisposable
                     throw IpcError.Of(ErrorCode.AccountPoolExhausted, "Account pool is disabled on this PC").ToException();
                 }
 
-                lease = await _pool.LeaseAsync(game, request.SessionId, request.AccountLeaseId, cancellationToken).ConfigureAwait(false);
-                injection = await _injector.InjectAsync(game, lease, cancellationToken).ConfigureAwait(false);
-                await _saves.DownloadAsync(game, lease, cancellationToken).ConfigureAwait(false);
+                lease = await _pool.LeaseAsync(game, request.SessionId, request.AccountLeaseId, token).ConfigureAwait(false);
+                injection = await _injector.InjectAsync(game, lease, token).ConfigureAwait(false);
+                await _saves.DownloadAsync(game, lease, token).ConfigureAwait(false);
             }
 
             // The player's own binds / sensitivity / graphics, whatever PC they sit at.
             if (_playerSettings is not null)
             {
-                await _playerSettings.RestoreAsync(game, request.UserId, cancellationToken).ConfigureAwait(false);
+                await _playerSettings.RestoreAsync(game, request.UserId, token).ConfigureAwait(false);
             }
 
             var env = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -248,11 +288,12 @@ public sealed class GameLaunchService : IDisposable
             };
             var context = new LaunchContext(wtsSession, _kiosk.KioskUser, env, request.Resolution);
 
-            await PublishAsync(new GameStateChanged(game.Id, game.Title, GameState.Launching, _clock.UtcNow), cancellationToken).ConfigureAwait(false);
+            await PublishAsync(new GameStateChanged(game.Id, game.Title, GameState.Launching, _clock.UtcNow), token).ConfigureAwait(false);
             _logger.LogInformation("Launching {Title} via {Launcher} in session {WtsSession} (lease {LeaseId})", game.Title, game.Launcher, wtsSession, lease?.LeaseId);
+            await EnsureSteamWritableAsync(game, token).ConfigureAwait(false);
 
             LaunchResult result;
-            using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+            using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(token))
             {
                 timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSec) + LaunchGrace);
                 try
@@ -261,7 +302,7 @@ public sealed class GameLaunchService : IDisposable
                 }
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                 {
-                    throw IpcError.Timeout($"Launch of {game.Title} timed out after {timeoutSec}s").ToException();
+                    throw (inFlight.Cancelled ? Cancelled(game) : IpcError.Timeout($"Launch of {game.Title} timed out after {timeoutSec}s")).ToException();
                 }
             }
 
@@ -271,6 +312,14 @@ public sealed class GameLaunchService : IDisposable
             }
 
             int pid = result.Pid.Value;
+            if (inFlight.Cancelled)
+            {
+                // Cancelled while the launcher was finishing: the game started all the same, so it is closed again.
+                _logger.LogInformation("{Title} started as pid {Pid} after its launch was cancelled; closing it", game.Title, pid);
+                await KillStartedAsync(launcher, game, pid).ConfigureAwait(false);
+                throw Cancelled(game).ToException();
+            }
+
             job = CreateJob(pid);
             int durationMs = (int)_clock.GetElapsedTime(startedTs).TotalMilliseconds;
             var running = new RunningGame(game.Id, game.Title, pid, result.StartedAt, lease?.LeaseId, GameState.Running);
@@ -301,11 +350,61 @@ public sealed class GameLaunchService : IDisposable
             _logger.LogError(ex, "Unexpected failure launching {Title}", game.Title);
             error = IpcError.GameLaunchFailed("internal", ex.Message);
         }
+        catch (OperationCanceledException) when (inFlight.Cancelled && !cancellationToken.IsCancellationRequested)
+        {
+            error = Cancelled(game);
+        }
 
         return await FailAsync(game, request, startedAt, startedTs, antiCheat, error, lease, injection, job, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Handles <c>games.kill</c>: by game, by pid, or everything when neither is given.</summary>
+    /// <summary>
+    /// Before Steam starts (a Steam game, or Steam itself as the catalogue's program): its folder must be writable for
+    /// the player. Already so — done at once; otherwise the grant runs on in the background and the launch waits a little
+    /// for it (a big Steam folder takes Windows a while).
+    /// </summary>
+    private async Task EnsureSteamWritableAsync(Game game, CancellationToken cancellationToken)
+    {
+        if (_steamAccess is null || !(game.Launcher == LauncherType.Steam || (game.Launcher == LauncherType.Exe && SteamFolderAccess.IsSteam(game.ExePath))))
+        {
+            return;
+        }
+
+        try
+        {
+            await _steamAccess.EnsureInBackground().WaitAsync(SteamAccessWait, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            _logger.LogInformation("Steam folder rights still being granted; launching {Title} meanwhile", game.Title);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Steam folder rights check failed; launching {Title} as is", game.Title);
+        }
+    }
+
+    /// <summary>The player cancelled the launch (<c>games.kill</c> while it was starting): <c>gameLaunchFailed{stage: cancelled}</c>.</summary>
+    private static IpcError Cancelled(Game game) => IpcError.GameLaunchFailed("cancelled", $"Launch of {game.Title} cancelled");
+
+    /// <summary>Closes a game that started after its launch was cancelled.</summary>
+    private async Task KillStartedAsync(IGameLauncher launcher, Game game, int pid)
+    {
+        try
+        {
+            await launcher.KillAsync(pid, force: true, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+        {
+            _logger.LogWarning(ex, "Closing {Title} pid {Pid} after a cancelled launch failed", game.Title, pid);
+        }
+    }
+
+    /// <summary>
+    /// Handles <c>games.kill</c>: by game, by pid, or everything when neither is given. A game still starting (a launcher
+    /// waiting for its game process) has its launch cancelled — the Shell's "cancel launch" — and whatever it started is
+    /// closed as well.
+    /// </summary>
     public async Task<GamesKillResponse> KillAsync(GamesKillRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -315,9 +414,19 @@ public sealed class GameLaunchService : IDisposable
             { GameId: { } gameId } => _tracker.FindByGame(gameId),
             _ => _tracker.All(),
         };
-        if (request.GameId is { } id && request.Pid is null && targets.Count == 0)
+        if (request.Pid is null)
         {
-            throw IpcError.NotFound($"Running game {id}").ToException();
+            // Waits for a cancelled launch only when nothing tracked answered: then it is what the player sees.
+            bool cancelled = await CancelLaunchesAsync(request.GameId, wait: targets.Count == 0, cancellationToken).ConfigureAwait(false);
+            if (cancelled && targets.Count == 0)
+            {
+                // A launch that got as far as tracking its game before it saw the cancel.
+                targets = request.GameId is { } gameId ? _tracker.FindByGame(gameId) : _tracker.All();
+            }
+            else if (request.GameId is { } id && targets.Count == 0)
+            {
+                throw IpcError.NotFound($"Running game {id}").ToException();
+            }
         }
 
         List<int> killed = await KillRecordsAsync(targets, request.Force == true, AccountLeaseReleaseReason.Manual, cancellationToken).ConfigureAwait(false);
@@ -335,6 +444,9 @@ public sealed class GameLaunchService : IDisposable
     public async Task KillAllAsync(SessionEndReason reason, CancellationToken cancellationToken)
     {
         bool force = reason is not SessionEndReason.User;
+
+        // A game still starting would come up after the session is over.
+        await CancelLaunchesAsync(null, wait: true, cancellationToken).ConfigureAwait(false);
         IReadOnlyList<GameLaunchRecord> targets = _tracker.All();
         if (targets.Count > 0)
         {
@@ -409,11 +521,10 @@ public sealed class GameLaunchService : IDisposable
                 {
                     await launcher.KillAsync(pid, force, cancellationToken).ConfigureAwait(false);
                 }
-                else
-                {
-                    record.Job.Terminate();
-                }
 
+                // The tree walk misses processes whose parent has already exited — the process a launcher handed over
+                // to, its children — but they are still in the game's job.
+                TerminateJob(record);
                 killed.Add(pid);
             }
             catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or ObjectDisposedException)
@@ -423,6 +534,48 @@ public sealed class GameLaunchService : IDisposable
         }
 
         return killed;
+    }
+
+    /// <summary>
+    /// Cancels the launches still starting (of <paramref name="gameId"/>, or all); with <paramref name="wait"/>, waits
+    /// up to <see cref="CancelWait"/> for them to unwind. Returns whether there was any.
+    /// </summary>
+    private async Task<bool> CancelLaunchesAsync(Guid? gameId, bool wait, CancellationToken cancellationToken)
+    {
+        List<InFlightLaunch> launches = _inFlight.Where(l => gameId is null || l.Key == gameId).Select(l => l.Value).ToList();
+        if (launches.Count == 0)
+        {
+            return false;
+        }
+
+        _logger.LogInformation("Cancelling {Count} game launch(es) still starting ({GameId})", launches.Count, gameId?.ToString() ?? "all");
+        launches.ForEach(l => l.Cancel());
+        if (wait)
+        {
+            try
+            {
+                await Task.WhenAll(launches.Select(l => l.Done)).WaitAsync(CancelWait, cancellationToken).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                _logger.LogWarning("Cancelled game launch did not finish within {Wait}", CancelWait);
+            }
+        }
+
+        return true;
+    }
+
+    private void TerminateJob(GameLaunchRecord record)
+    {
+        try
+        {
+            record.Job.Terminate();
+        }
+        catch (Exception ex) when (ex is Win32Exception or ObjectDisposedException or InvalidOperationException)
+        {
+            // The job is gone with the game (its exit already processed), or the game could not be put in one.
+            _logger.LogDebug(ex, "Job of {Title} not terminated", record.Game.Title);
+        }
     }
 
     private bool PolicyDenies(Game game, out string rule)
@@ -545,4 +698,41 @@ public sealed class GameLaunchService : IDisposable
         });
     }
 
+    /// <summary>A launch between its start and its outcome: what "cancel launch" stops and then waits for.</summary>
+    private sealed class InFlightLaunch : IDisposable
+    {
+        private readonly CancellationTokenSource _cancel = new();
+        private readonly TaskCompletionSource _done = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _cancelled;
+
+        /// <summary>Cancelled by <see cref="Cancel"/>.</summary>
+        public CancellationToken Token => _cancel.Token;
+
+        /// <summary>The player (or the session's end) cancelled it.</summary>
+        public bool Cancelled => Volatile.Read(ref _cancelled) == 1;
+
+        /// <summary>Completes once the launch has its outcome (success, failure or cancellation).</summary>
+        public Task Done => _done.Task;
+
+        public void Cancel()
+        {
+            Volatile.Write(ref _cancelled, 1);
+            try
+            {
+                _cancel.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Finished meanwhile.
+            }
+        }
+
+        public void Finish()
+        {
+            _done.TrySetResult();
+            Dispose();
+        }
+
+        public void Dispose() => _cancel.Dispose();
+    }
 }

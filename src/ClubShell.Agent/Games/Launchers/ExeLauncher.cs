@@ -149,7 +149,18 @@ public abstract class LauncherBase : IGameLauncher
             }
 
             int timeoutSec = request.LaunchTimeoutSec > 0 ? request.LaunchTimeoutSec : Settings.CurrentValue.Games.LaunchTimeoutSec;
-            int? pid = await WaitForGameProcessAsync(resolved, expectedNames, sessionId, before, TimeSpan.FromSeconds(timeoutSec), cancellationToken).ConfigureAwait(false);
+            int? pid;
+            try
+            {
+                pid = await WaitForGameProcessAsync(resolved, expectedNames, sessionId, before, TimeSpan.FromSeconds(timeoutSec), cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // The launch was cancelled ("cancel launch", the session's end): the launcher started for it must not
+                // bring the game up after all.
+                CloseLauncher(launched.Pid, game.Title);
+                throw;
+            }
             if (pid is null)
             {
                 int? exit = launched.HasExited ? launched.ExitCode : null;
@@ -173,6 +184,19 @@ public abstract class LauncherBase : IGameLauncher
             Logger.LogInformation("{Launcher}: killed {Count} processes of tree {Pid} (force={Force})", Launcher, killed.Count, pid, force);
         },
         cancellationToken);
+
+    private void CloseLauncher(int pid, string title)
+    {
+        try
+        {
+            IReadOnlyList<KilledProcess> killed = _killer.KillTree(pid, TimeSpan.Zero);
+            Logger.LogInformation("{Launcher}: launch of {Title} cancelled; closed {Count} launcher processes of pid {Pid}", Launcher, title, killed.Count, pid);
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+        {
+            Logger.LogWarning(ex, "{Launcher}: launcher pid {Pid} not closed after the cancelled launch of {Title}", Launcher, pid, title);
+        }
+    }
 
     /// <summary>Builds the command for <paramref name="game"/>; <see langword="null"/> when the launcher client is missing. May throw <see cref="IpcException"/>.</summary>
     protected abstract LaunchCommand? BuildCommand(Game game, LaunchRequest request, LaunchContext context);

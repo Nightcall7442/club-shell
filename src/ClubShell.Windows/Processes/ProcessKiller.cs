@@ -44,7 +44,10 @@ public sealed class ProcessKiller
         "textinputhost.exe", "applicationframehost.exe", "clubshellagent.exe", "clubshell-shell.exe",
     };
 
-    /// <summary>Kills <paramref name="pid"/> and all of its descendants (children first), gracefully when <paramref name="gracefulTimeout"/> &gt; 0.</summary>
+    /// <summary>
+    /// Kills <paramref name="pid"/> and all of its descendants (children first). With <paramref name="gracefulTimeout"/>
+    /// &gt; 0 the processes whose windows took WM_CLOSE get that long to exit on their own; the rest are terminated at once.
+    /// </summary>
     public IReadOnlyList<KilledProcess> KillTree(int pid, TimeSpan gracefulTimeout)
     {
         List<ProcessSnapshotEntry> snapshot = Toolhelp32.Snapshot();
@@ -168,19 +171,20 @@ public sealed class ProcessKiller
                 pending.Add((entry, handle));
             }
 
-            if (gracefulTimeout > TimeSpan.Zero)
+            // WM_CLOSE reaches only windows on this desktop: from the service session the windows of a game in the
+            // player's session are out of reach, and waiting for a close that was never asked for only delays the kill
+            // (it used to cost every "close game" the whole grace). Only the processes that got it are given the grace.
+            List<SafeProcessHandle> notified = gracefulTimeout > TimeSpan.Zero
+                ? pending.Where(p => ProcessWindows.PostClose((uint)p.Entry.Pid) > 0).Select(p => p.Handle).ToList()
+                : [];
+            if (notified.Count > 0)
             {
-                foreach ((ProcessSnapshotEntry entry, _) in pending)
-                {
-                    _ = ProcessWindows.PostClose((uint)entry.Pid);
-                }
-
                 long deadline = Environment.TickCount64 + (long)gracefulTimeout.TotalMilliseconds;
                 bool anyRunning = true;
                 while (anyRunning && Environment.TickCount64 < deadline)
                 {
                     anyRunning = false;
-                    foreach ((_, SafeProcessHandle handle) in pending)
+                    foreach (SafeProcessHandle handle in notified)
                     {
                         if (Kernel32.WaitForSingleObject(handle, 0) == (uint)WaitResult.WAIT_TIMEOUT)
                         {
