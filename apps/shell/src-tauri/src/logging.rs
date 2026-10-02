@@ -69,7 +69,7 @@ pub fn init_logging(config: &ShellConfig) -> WorkerGuard {
     }
     install_panic_hook(logs_dir.join(CRASH_LOG));
     tracing::info!(
-        version = env!("CARGO_PKG_VERSION"),
+        version = crate::shell_version(),
         level = %config.logging.level,
         dir = %logs_dir.display(),
         file = file_ok,

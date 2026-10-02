@@ -336,7 +336,7 @@ form the pipeline `package → sign → publish`.
 | Step | Script | Input | Output |
 |------|--------|-------|--------|
 | Build | `build.ps1 [-Target All\|Dotnet\|Rust\|Web\|Installer\|Contracts\|Agent\|Shell]` | repo | `dotnet build`/`test`, `dotnet publish` of the Agent (win-x64) into `artifacts/publish/agent`, `pnpm --filter @clubshell/shell build`, `cargo build --release` / `tauri build`, `artifacts/build-info.json` |
-| Package | `package.ps1 -Version <ver> -Channel stable\|beta -BaseUrl <url> [-NotesFile] [-Mandatory] [-MinAgentVersion]` | build outputs | `artifacts/release/<ver>/`: `ClubShell-<ver>.msi` (WiX Agent+Shell MSI → component `agent`), `ClubShellSetup-<ver>.exe` (Burn bundle), `ClubShell-Shell-<ver>.msi` (Tauri MSI → component `shell`), `agent/` payload, `manifest.json` (one unsigned `UpdateManifest` per component under `components.{agent,shell}`), `SHA256SUMS.txt`, plus `artifacts/release/ClubShell-<ver>.zip` |
+| Package | `package.ps1 -Version <ver> -Channel stable\|beta -BaseUrl <url> [-NotesFile] [-Mandatory] [-MinAgentVersion]` | build outputs | `artifacts/release/<ver>/`: `ClubShell-<ver>.msi` (WiX Agent+Shell MSI → component `agent`), `ClubShellSetup-<ver>.exe` (Burn bundle), `ClubShell-Shell-<ver>.zip` (`clubshell-shell.exe` alone → component `shell`, extracted over the Shell directory by `ShellUpdater`; the Tauri MSI next to it installs into `ClubShell` rather than `ClubShellShell` and is for manual installs only), `agent/` payload, `manifest.json` (one unsigned `UpdateManifest` per component under `components.{agent,shell}`), `SHA256SUMS.txt`, plus `artifacts/release/ClubShell-<ver>.zip` |
 | Sign | `sign.ps1 -Files <globs>` (Authenticode: `-PfxPath`/`-PfxPassword` or `CODESIGN_PFX_PATH`/`CODESIGN_PFX_PASSWORD`, or `-Thumbprint`) and `sign.ps1 -ManifestPath <release>/manifest.json -ManifestKeyPem <private.pem>` | MSI/EXE files, RSA private key PEM | Authenticode-signed binaries; `manifest.json` with `components.<c>.signature` = base64 RSA-PSS-SHA256 over the package bytes (the `signature` field), `manifestSignatures.<c>` over `Signing.ManifestCanonicalBytes`, refreshed `sha256`/`size`/`SHA256SUMS.txt`/zip. `-Verify` re-checks either |
 | Publish | `publish.ps1 -Target S3\|Http\|Folder -Destination <s3://…\|https://…\|\\share> [-Version] [-Channel]` | signed release folder | uploads `<Destination>/<channel>/<version>/<files>` and `<Destination>/<channel>/manifest.json` (HTTP target: `PUT` files + `POST /api/v1/updates/<channel>/manifest` with `Authorization: Bearer $CLUBSHELL_PUBLISH_TOKEN`), then reads the manifest back and compares |
 
@@ -352,10 +352,11 @@ dotnet/cargo build was executed in the authoring environment; the first CI run i
 errors — `ROADMAP.md`, technical debt).
 
 Versioning: the Agent version comes from `Directory.Build.props` (`ClubShellVersion.Current` reads the
-assembly informational version), the Shell from `Cargo.toml` (`[workspace.package] version`) and
-`tauri.conf.json → version`; keep all three equal for a release. The manifest `version` must match the
-MSI's `ProductVersion` or `ConfirmAppliedAsync` will never see a match and the rollback logic will flag a
-successful install as failed.
+assembly informational version), the Shell from `tauri.conf.json → version` as merged with the build
+`--config` (`clubshell_shell::shell_version()`, which `auth.hello`, `kiosk_state` and the logs report; the
+`Cargo.toml` workspace version is not used). The manifest `version` must match the version the component
+reports or `ConfirmAppliedAsync` will never see a match and the rollback logic will flag a successful
+install as failed.
 
 ---
 

@@ -247,7 +247,7 @@ mod tests {
                 let reply = if req.name == names::auth::HELLO {
                     let hello: AuthHelloRequest = req.require_payload().unwrap();
                     assert_eq!(hello.shell_token, token);
-                    assert_eq!(hello.shell_version, env!("CARGO_PKG_VERSION"));
+                    assert_eq!(hello.shell_version, crate::shell_version());
                     let resp = AuthHelloResponse {
                         agent_version: "1.0.0".into(),
                         protocol: PROTOCOL_VERSION,

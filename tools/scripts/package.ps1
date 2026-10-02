@@ -9,7 +9,9 @@
       artifacts/release/<version>/
         ClubShell-<version>.msi             WiX Agent MSI          -> manifest component "agent"
         ClubShellSetup-<version>.exe        WiX bundle (Agent + Shell + WebView2 bootstrapper)
-        ClubShell-Shell-<version>.msi       Tauri MSI              -> manifest component "shell"
+        ClubShell-Shell-<version>.zip       clubshell-shell.exe    -> manifest component "shell" (ShellUpdater extracts
+                                            it over C:\Program Files\ClubShell\Shell, with backup and rollback)
+        ClubShell-Shell-<version>.msi       Tauri MSI (manual installs only: it installs into ClubShell\, not ClubShell\Shell)
         ClubShell-Shell-<version>-setup.exe Tauri NSIS installer (when built)
         agent/                              published Agent payload (+ config/, Install/*.ps1 for manual installs)
         manifest.json                       { version, channel, publishedAt, components{agent,shell}, packages, files }
@@ -337,6 +339,13 @@ try {
     }
     Write-Ok "$($shellMsi.FullName)"
     if ($shellNsis) { Write-Ok "$($shellNsis.FullName)" }
+    # Components.wxs and the shell update ZIP take clubshell-shell.exe from the cargo release folder next to bundle\,
+    # or artifacts\shell where build.ps1 copies the exe.
+    $shellExeDir = Split-Path -Parent $bundleDir
+    if (-not (Test-Path -LiteralPath (Join-Path $shellExeDir 'clubshell-shell.exe'))) { $shellExeDir = Join-Path $ArtifactsDir 'shell' }
+    if (-not (Test-Path -LiteralPath (Join-Path $shellExeDir 'clubshell-shell.exe'))) {
+        throw "clubshell-shell.exe not found in $(Split-Path -Parent $bundleDir) or $shellExeDir (run build.ps1 -Target Rust)"
+    }
 
     # -----------------------------------------------------------------------------------------------------------
     # Release layout
@@ -353,6 +362,15 @@ try {
         Copy-Tree -Source (Join-Path $RepoRoot 'src\ClubShell.Agent\Install') -Destination (Join-Path $agentDir 'Install')
         Write-Ok 'agent/ (payload, config/, Install/)'
 
+        # The shell update package (UPDATES.md §5.3): the Tauri MSI would install into C:\Program Files\ClubShell\
+        # while the Agent runs C:\Program Files\ClubShell\Shell\clubshell-shell.exe, so updates ship the exe alone.
+        $shellZip = Join-Path $releaseDir "ClubShell-Shell-$Version.zip"
+        Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+        $zip = [IO.Compression.ZipFile]::Open($shellZip, [IO.Compression.ZipArchiveMode]::Create)
+        try {
+            [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, (Join-Path $shellExeDir 'clubshell-shell.exe'), 'clubshell-shell.exe', [IO.Compression.CompressionLevel]::Optimal)
+        } finally { $zip.Dispose() }
+        Write-Ok "ClubShell-Shell-$Version.zip"
         Copy-Item -LiteralPath $shellMsi.FullName -Destination (Join-Path $releaseDir "ClubShell-Shell-$Version.msi") -Force
         Write-Ok "ClubShell-Shell-$Version.msi"
         if ($shellNsis) {
@@ -374,13 +392,6 @@ try {
         $wixOut = Join-Path $ArtifactsDir 'installer'
         $msiOut = Join-Path $wixOut 'msi'
         $bundleOut = Join-Path $wixOut 'bundle'
-        # Components.wxs takes clubshell-shell.exe from ShellBundleDir: the cargo release folder next to bundle\,
-        # or artifacts\shell where build.ps1 copies the exe.
-        $shellExeDir = Split-Path -Parent $bundleDir
-        if (-not (Test-Path -LiteralPath (Join-Path $shellExeDir 'clubshell-shell.exe'))) { $shellExeDir = Join-Path $ArtifactsDir 'shell' }
-        if (-not (Test-Path -LiteralPath (Join-Path $shellExeDir 'clubshell-shell.exe'))) {
-            throw "clubshell-shell.exe not found in $(Split-Path -Parent $bundleDir) or $shellExeDir (run build.ps1 -Target Rust)"
-        }
         if ($PSCmdlet.ShouldProcess($wixproj, 'dotnet build (Release + Bundle)')) {
             if (Test-Path -LiteralPath $wixOut) { Remove-Item -LiteralPath $wixOut -Recurse -Force }
             $wixProps = @("-p:AgentPublishDir=$agentPublish", "-p:ShellBundleDir=$shellExeDir", "-p:Version=$numericVersion", '-nologo')
@@ -441,8 +452,8 @@ try {
             $components['agent'] = New-ComponentManifest -Component 'agent' -Path (Join-Path $releaseDir $agentMsiName) -ReleaseNotes $notes -PublishedAt $publishedAt
             $packages['agent'] = $agentMsiName
         }
-        $components['shell'] = New-ComponentManifest -Component 'shell' -Path (Join-Path $releaseDir "ClubShell-Shell-$Version.msi") -ReleaseNotes $notes -PublishedAt $publishedAt -MinAgent $MinAgentVersion
-        $packages['shell'] = "ClubShell-Shell-$Version.msi"
+        $components['shell'] = New-ComponentManifest -Component 'shell' -Path (Join-Path $releaseDir "ClubShell-Shell-$Version.zip") -ReleaseNotes $notes -PublishedAt $publishedAt -MinAgent $MinAgentVersion
+        $packages['shell'] = "ClubShell-Shell-$Version.zip"
 
         $files = New-Object 'System.Collections.Generic.List[object]'
         $sums = New-Object 'System.Collections.Generic.List[string]'

@@ -177,7 +177,7 @@ impl PipeTransport {
         }
         let request = AuthHelloRequest {
             shell_token,
-            shell_version: env!("CARGO_PKG_VERSION").to_owned(),
+            shell_version: crate::shell_version().to_owned(),
             pid: std::process::id() as i32,
             wts_session_id: wts_session_id(),
             locale: config.locale,
