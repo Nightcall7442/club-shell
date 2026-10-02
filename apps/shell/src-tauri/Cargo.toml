@@ -44,6 +44,11 @@ windows.workspace = true
 clubshell-protocol.workspace = true
 clubshell-winutil.workspace = true
 
+# WebView2 settings beyond Tauri's config (browser accelerator keys); the versions wry already uses.
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.38"
+windows-core = "0.61"
+
 [features]
 default = ["custom-protocol"]
 # This feature is used for production builds or when a dev server is not specified; DO NOT REMOVE.
