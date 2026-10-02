@@ -454,7 +454,7 @@ unless the key ends with `Ms`.
       "resetProfileOnLogout": true,
       "profileTemplate": null,                    // string path | null. Folder copied into a fresh profile.
       "preserveOnReset": null                     // string[] | null. Profile-relative dirs carried across a reset;
-                                                  // null = ProfileReset.PreservedDirectories (anti-cheat vendors).
+                                                  // null = ProfileReset.PreservedDirectories (anti-cheat, shader caches).
     },
     "watchdogIntervalMs": 2000,
     "restartDelayMs": 1500,

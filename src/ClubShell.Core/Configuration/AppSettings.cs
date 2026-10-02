@@ -354,7 +354,7 @@ public sealed class KioskUserSettings
 
     /// <summary>
     /// Profile-relative directories carried across a profile reset; <see langword="null"/> keeps the built-in
-    /// anti-cheat list (<c>ProfileReset.PreservedDirectories</c>), an empty array preserves nothing. Wiping these
+    /// anti-cheat and shader-cache list (<c>ProfileReset.PreservedDirectories</c>), an empty array preserves nothing. Wiping these
     /// makes FACEIT and Riot bootstrap from scratch every session, which costs the player a grace period and the
     /// club a stream of false <c>serviceStopped</c> reports.
     /// </summary>
