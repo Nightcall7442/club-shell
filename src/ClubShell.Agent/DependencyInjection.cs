@@ -131,7 +131,6 @@ public static class AgentServiceCollectionExtensions
     {
         services.TryAddSingleton<GameDetector>();
         services.TryAddSingleton<GameLibrary>();
-        services.TryAddSingleton<SteamFolderAccess>();
         services.TryAddSingleton<AccountPool>();
         services.TryAddSingleton<AccountInjector>();
         services.TryAddSingleton<CloudSaveSync>();

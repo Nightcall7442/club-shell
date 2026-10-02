@@ -57,9 +57,6 @@ public sealed class GameLaunchService : IDisposable
     /// <summary>How long a "cancel launch" waits for the cancelled launch to unwind before it closes what it started.</summary>
     private static readonly TimeSpan CancelWait = TimeSpan.FromSeconds(5);
 
-    /// <summary>How long a Steam launch waits for the Steam folder rights (<see cref="SteamFolderAccess"/>).</summary>
-    private static readonly TimeSpan SteamAccessWait = TimeSpan.FromSeconds(5);
-
     private readonly GameLibrary _library;
 
     /// <summary>Launches still starting, by game: <c>games.kill</c> for such a game cancels its launch ("cancel launch").</summary>
@@ -72,7 +69,6 @@ public sealed class GameLaunchService : IDisposable
     private readonly AccountInjector _injector;
     private readonly CloudSaveSync _saves;
     private readonly PlayerSettingsSync? _playerSettings;
-    private readonly SteamFolderAccess? _steamAccess;
     private readonly GameSessionTracker _tracker;
     private readonly IKioskSessionLocator _kiosk;
     private readonly IServerClient _server;
@@ -101,12 +97,10 @@ public sealed class GameLaunchService : IDisposable
         IOptionsMonitor<AgentSettings> settings,
         IClock clock,
         ILogger<GameLaunchService> logger,
-        PlayerSettingsSync? playerSettings = null,
-        SteamFolderAccess? steamAccess = null)
+        PlayerSettingsSync? playerSettings = null)
     {
         ArgumentNullException.ThrowIfNull(launchers);
         _playerSettings = playerSettings;
-        _steamAccess = steamAccess;
         _library = library;
         _sessions = sessions;
         _policy = policy;
@@ -296,7 +290,6 @@ public sealed class GameLaunchService : IDisposable
 
             await PublishAsync(new GameStateChanged(game.Id, game.Title, GameState.Launching, _clock.UtcNow), cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("Launching {Title} via {Launcher} in session {WtsSession} (lease {LeaseId})", game.Title, game.Launcher, wtsSession, lease?.LeaseId);
-            await EnsureSteamWritableAsync(game, token).ConfigureAwait(false);
 
             LaunchResult result;
             using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(token))
@@ -363,32 +356,6 @@ public sealed class GameLaunchService : IDisposable
         }
 
         return await FailAsync(game, request, startedAt, startedTs, antiCheat, error, lease, injection, job, () => Settled(game, inFlight), cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Before Steam starts (a Steam game, or Steam itself as the catalogue's program): its folder must be writable for
-    /// the player. Already so — done at once; otherwise the grant runs on in the background and the launch waits a little
-    /// for it (a big Steam folder takes Windows a while).
-    /// </summary>
-    private async Task EnsureSteamWritableAsync(Game game, CancellationToken cancellationToken)
-    {
-        if (_steamAccess is null || !(game.Launcher == LauncherType.Steam || (game.Launcher == LauncherType.Exe && SteamFolderAccess.IsSteam(game.ExePath))))
-        {
-            return;
-        }
-
-        try
-        {
-            await _steamAccess.EnsureInBackground().WaitAsync(SteamAccessWait, cancellationToken).ConfigureAwait(false);
-        }
-        catch (TimeoutException)
-        {
-            _logger.LogInformation("Steam folder rights still being granted; launching {Title} meanwhile", game.Title);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogWarning(ex, "Steam folder rights check failed; launching {Title} as is", game.Title);
-        }
     }
 
     /// <summary>The player cancelled the launch (<c>games.kill</c> while it was starting): <c>gameLaunchFailed{stage: cancelled}</c>.</summary>

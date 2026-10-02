@@ -46,7 +46,7 @@ public abstract class LauncherBase : IGameLauncher
     private readonly ProcessWatcher _watcher;
 
     /// <summary>Games whose launch was cancelled, watched for in case their launcher still starts them (<see cref="WatchCancelled"/>).</summary>
-    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _cancelledWatches = new();
+    private readonly ConcurrentDictionary<Guid, CancelledWatch> _cancelledWatches = new();
 
     /// <summary>Initializes the shared plumbing.</summary>
     protected LauncherBase(
@@ -99,10 +99,7 @@ public abstract class LauncherBase : IGameLauncher
         Guid? leaseId = lease?.LeaseId;
 
         // Launched again after a cancel: this launch takes the game over, the watch must not close it.
-        if (_cancelledWatches.TryRemove(game.Id, out CancellationTokenSource? watch))
-        {
-            StopWatch(watch);
-        }
+        bool tookOver = StopWatches(game.Id, []);
 
         GameInstallStatus status = await Detector.DetectAsync(game, cancellationToken).ConfigureAwait(false);
         if (!status.Installed)
@@ -129,7 +126,11 @@ public abstract class LauncherBase : IGameLauncher
         (IReadOnlyDictionary<string, string> env, string? launcherArgs) = SplitEnv(context.Env);
         uint sessionId = (uint)context.WtsSessionId;
         IReadOnlyList<string> expectedNames = ExpectedProcessNames(resolved);
-        HashSet<int> before = command.WaitForGameProcess ? SnapshotMatchingPids(resolved, expectedNames, sessionId) : new HashSet<int>();
+
+        // Another catalogue entry running the same executable takes it over too. After a cancel the game may be up
+        // already (the launcher started it all the same): it is adopted, not left out as a process that ran before.
+        tookOver |= StopWatches(game.Id, expectedNames);
+        HashSet<int> before = command.WaitForGameProcess && !tookOver ? SnapshotMatchingPids(resolved, expectedNames, sessionId) : new HashSet<int>();
 
         var spec = new ProcessStartSpec
         {
@@ -172,6 +173,7 @@ public abstract class LauncherBase : IGameLauncher
                 WatchCancelled(resolved, expectedNames, sessionId, before, TimeSpan.FromSeconds(timeoutSec));
                 throw;
             }
+
             if (pid is null)
             {
                 int? exit = launched.HasExited ? launched.ExitCode : null;
@@ -198,14 +200,14 @@ public abstract class LauncherBase : IGameLauncher
 
     /// <summary>
     /// After a cancelled launch: closes the game should it still come up within <paramref name="window"/>. A new launch
-    /// of the same game ends the watch (that launch then takes the game over).
+    /// of the game, or of another catalogue entry running the same executable, ends the watch (<see cref="StopWatches"/>).
     /// </summary>
     private void WatchCancelled(Game game, IReadOnlyList<string> expectedNames, uint sessionId, HashSet<int> before, TimeSpan window)
     {
-        var watch = new CancellationTokenSource();
+        var watch = new CancelledWatch(new CancellationTokenSource(), expectedNames);
         _cancelledWatches.AddOrUpdate(game.Id, watch, (_, previous) =>
         {
-            StopWatch(previous);
+            previous.Stop();
             return watch;
         });
         Logger.LogInformation("{Launcher}: launch of {Title} cancelled; closing the game should it still start within {Window}", Launcher, game.Title, window);
@@ -221,7 +223,7 @@ public abstract class LauncherBase : IGameLauncher
             }
             catch (OperationCanceledException)
             {
-                // A new launch of the game took over.
+                // A new launch took over.
             }
             catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
             {
@@ -229,22 +231,52 @@ public abstract class LauncherBase : IGameLauncher
             }
             finally
             {
-                _cancelledWatches.TryRemove(new KeyValuePair<Guid, CancellationTokenSource>(game.Id, watch));
+                _cancelledWatches.TryRemove(new KeyValuePair<Guid, CancelledWatch>(game.Id, watch));
                 watch.Dispose();
             }
         });
     }
 
-    private static void StopWatch(CancellationTokenSource watch)
+    /// <summary>
+    /// Ends the watches a new launch takes over: the one of <paramref name="gameId"/>, and those looking for one of
+    /// <paramref name="names"/>. Returns whether there was any.
+    /// </summary>
+    private bool StopWatches(Guid gameId, IReadOnlyList<string> names)
     {
-        try
+        bool stopped = false;
+        foreach ((Guid id, CancelledWatch watch) in _cancelledWatches)
         {
-            watch.Cancel();
+            if ((id == gameId || watch.Names.Any(n => names.Any(m => NameMatches(n, [m]))))
+                && _cancelledWatches.TryRemove(new KeyValuePair<Guid, CancelledWatch>(id, watch)))
+            {
+                watch.Stop();
+                stopped = true;
+            }
         }
-        catch (ObjectDisposedException)
+
+        return stopped;
+    }
+
+    /// <summary>A watch after a cancelled launch (<see cref="WatchCancelled"/>) and the image names it looks for.</summary>
+    private sealed class CancelledWatch(CancellationTokenSource stop, IReadOnlyList<string> names) : IDisposable
+    {
+        public IReadOnlyList<string> Names { get; } = names;
+
+        public CancellationToken Token => stop.Token;
+
+        public void Stop()
         {
-            // Ended meanwhile.
+            try
+            {
+                stop.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Ended meanwhile.
+            }
         }
+
+        public void Dispose() => stop.Dispose();
     }
 
     /// <summary>Builds the command for <paramref name="game"/>; <see langword="null"/> when the launcher client is missing. May throw <see cref="IpcException"/>.</summary>
