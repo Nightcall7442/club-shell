@@ -46,8 +46,10 @@ export default function GamesScreen(): JSX.Element {
   const gridRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Forced: picks up games the owner added since the Shell started (quiet when a list is already shown).
+    // Forced: picks up games the owner added since the Shell started (quiet when a list is already shown); the running
+    // list is resynced with the Agent so a stale "running" game does not block launching another.
     void load(true);
+    void useGamesStore.getState().refreshRunning();
     document.getElementById('main')?.scrollTo({ top: 0 });
   }, [load]);
 

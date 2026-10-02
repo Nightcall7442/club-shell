@@ -193,7 +193,18 @@ export const useGamesStore = create<GamesStore>()(
         track('game.kill', { gameId: gameId ?? '*', killed: res.killed });
         return res;
       } catch (e) {
-        throw toShellApiError(e);
+        const error = toShellApiError(e);
+        // The Agent no longer tracks it: the game is gone (or its launcher handed over and exited). Drop the stale
+        // "running" entry, so the player is not stuck on a game that cannot be closed or replaced.
+        if (gameId && error.code === 'notFound') {
+          set((s) => ({
+            running: s.running.filter((r) => r.gameId !== gameId),
+            launching: s.launching?.gameId === gameId ? null : s.launching,
+          }));
+          void get().refreshRunning();
+          return { killed: 0, pids: [] };
+        }
+        throw error;
       }
     },
 
