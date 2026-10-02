@@ -32,8 +32,15 @@ import type {
   User,
   UserStats,
 } from '@clubshell/contracts';
-import type { GpuPanelInfo, PcAudioOutputs, PcMouseSettings } from '@/lib/tauri';
-import type { KioskMonitor, KioskState, OpenWindow, ShellConfig } from '@/lib/tauri';
+import type {
+  GpuPanelInfo,
+  KioskMonitor,
+  KioskState,
+  OpenWindow,
+  PcAudioOutputs,
+  PcMouseSettings,
+  ShellConfig,
+} from '@/lib/tauri';
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Helpers
@@ -1442,6 +1449,7 @@ export const PC_AUDIO_OUTPUTS: PcAudioOutputs = {
 
 /** Panels found on the mock PC; the GPU itself comes from `HARDWARE` (NVIDIA). */
 export const PC_GPU_PANELS: GpuPanelInfo[] = [{ vendor: 'nvidia', name: 'NVIDIA Control Panel' }];
+
 /** Programs open in the session besides a running game (`kiosk_open_windows`; the handler adds the game's window). */
 export const OPEN_WINDOWS: OpenWindow[] = [
   {

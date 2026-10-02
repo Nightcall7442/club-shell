@@ -2,7 +2,7 @@
 //!
 //! Modules:
 //! - [`display`]: display modes (`EnumDisplaySettingsExW`) and refresh-rate switching.
-//! - [`hooks`]:`WH_KEYBOARD_LL` / `WH_MOUSE_LL` on a dedicated message-loop thread, blocked-combo parsing.
+//! - [`hooks`]: `WH_KEYBOARD_LL` / `WH_MOUSE_LL` on a dedicated message-loop thread, blocked-combo parsing.
 //! - [`input`]: idle time (`GetLastInputInfo`), `BlockInput`, `SendInput`, cursor show/clip/position.
 //! - [`monitor`]: display enumeration (`EnumDisplayMonitors`) and a `WM_DISPLAYCHANGE` watcher.
 //! - [`pipe`]: async client for `\\.\pipe\clubshell-agent` (IPC_PROTOCOL.md §1–§4).

@@ -480,6 +480,8 @@ export interface DisplayInfo {
   /** Selectable rates at the current resolution, ascending. */
   rates: number[];
   pending: DisplayPending | null;
+}
+
 /** A program with an open window in the player's session (`kiosk_open_windows`), one per process. */
 export interface OpenWindow {
   pid: number;
@@ -637,6 +639,7 @@ export const api = {
     gpuPanels: (): Promise<GpuPanelInfo[]> => invoke('pc_gpu_panels'),
     openGpuPanel: (vendor: GpuVendor): Promise<void> =>
       invoke<null>('pc_gpu_panel_open', { vendor }).then(() => undefined),
+  },
   display: {
     list: (): Promise<DisplayInfo[]> => invoke('display_list'),
     /** Mode switches blank the screen for a moment; the result carries the confirmation countdown. */

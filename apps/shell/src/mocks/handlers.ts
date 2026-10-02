@@ -82,9 +82,16 @@ import type {
   WalletTariffsResponse,
 } from '@clubshell/contracts';
 import { tariffPriceFor } from '@clubshell/contracts';
-import type { GpuPanelInfo, PcAudioOutputs, PcMouseSettings } from '@/lib/tauri';
-import type { DisplayInfo } from '@/lib/tauri';
-import type { GamepadState, KioskState, OpenWindow, ShellConfig } from '@/lib/tauri';
+import type {
+  DisplayInfo,
+  GamepadState,
+  GpuPanelInfo,
+  KioskState,
+  OpenWindow,
+  PcAudioOutputs,
+  PcMouseSettings,
+  ShellConfig,
+} from '@/lib/tauri';
 import { builtinThemes, DEFAULT_THEME } from '@/theme/themes';
 import {
   ACHIEVEMENTS,
@@ -2174,6 +2181,8 @@ cmd('pc_gpu_panel_open', (args): null => {
   }
   console.info(`[mock] pc_gpu_panel_open(${vendor}) — would open the vendor panel over the shell`);
   return null;
+});
+
 // ----- display (refresh rates, local to the Shell: src-tauri/src/commands/display.rs) ----------------------------------
 
 /** Rates each mock monitor offers at its resolution, by monitor index. */
@@ -2281,6 +2290,7 @@ cmd('display_revert', (args): DisplayInfo => {
   }
   return displayInfo(index);
 });
+
 // ----- open programs (status-bar dock) --------------------------------------------------------------------------------
 
 /** The fake programs plus a window per running game (its pid, an exe in its install folder), front-most first. */

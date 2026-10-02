@@ -405,7 +405,7 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
             <p className="max-w-[28rem] text-lg text-text">{t('wallet.cashHint')}</p>
           ) : qrValue ? (
             <>
-              <div className="rounded-xl bg-white p-4 shadow-[var(--shadow-glow)]">
+              <div className="rounded-xl bg-white p-4 [box-shadow:var(--shadow-glow)]">
                 <QRCodeSVG
                   value={qrValue}
                   size={240}
