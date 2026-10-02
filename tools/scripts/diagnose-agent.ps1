@@ -59,12 +59,10 @@ Add "Windows Hello passwordless (2 blocks auto-logon): $passwordless"
 Add "Sessions: $((query session 2>$null) -join ' | ')"
 Add "Shell process: $(@(Get-Process clubshell-shell -ErrorAction SilentlyContinue | ForEach-Object { "pid $($_.Id) session $($_.SessionId)" }) -join ', ')"
 
-Add ''
-Add '--- Agent log: kiosk, policy and shell messages'
 $keyLog = Get-ChildItem -Path (Join-Path $data 'logs') -Filter 'agent-*.json' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-if ($keyLog) {
-    $pattern = 'Kiosk|kiosk|Profile|profile|Policy|policy|shell|Shell|auto-logon|Auto-logon|logon|Registered|[Pp]ipe|auth\.hello|IPC|[Ss]afe mode|Watchdog'
-    foreach ($line in Get-Content -LiteralPath $keyLog.FullName -Encoding UTF8 -ErrorAction SilentlyContinue | Select-String -Pattern $pattern | Select-Object -Last 60) {
+function Add-LogLines([string] $Pattern, [int] $Count) {
+    if (-not $keyLog) { Add 'no agent log yet'; return }
+    foreach ($line in Get-Content -LiteralPath $keyLog.FullName -Encoding UTF8 -ErrorAction SilentlyContinue | Select-String -Pattern $Pattern | Select-Object -Last $Count) {
         $e = ConvertFrom-LogLine $line.Line
         if (-not $e) { continue }
         $msg = [string] $e.'@mt'
@@ -74,6 +72,23 @@ if ($keyLog) {
         Add ("{0} {1}{2}" -f $time, $msg, $x)
     }
 }
+
+Add ''
+Add '--- Agent log: kiosk, policy and shell messages'
+Add-LogLines 'Kiosk|kiosk|Profile|profile|Policy|policy|shell|Shell|auto-logon|Auto-logon|logon|Registered|[Pp]ipe|auth\.hello|IPC|[Ss]afe mode|Watchdog' 60
+
+Add ''
+Add '--- Games: Steam folder and the last launches / closes'
+$steam = (Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam' -ErrorAction SilentlyContinue).InstallPath
+if (-not $steam) { $steam = (Get-ItemProperty 'HKLM:\SOFTWARE\Valve\Steam' -ErrorAction SilentlyContinue).InstallPath }
+if ($steam -and (Test-Path -LiteralPath $steam)) {
+    $drive = [System.IO.DriveInfo]::new([System.IO.Path]::GetPathRoot($steam))
+    $usersAce = @(icacls $steam 2>$null | Select-String -Pattern 'BUILTIN\\|S-1-5-32-545' | ForEach-Object { $_.Line.Trim() })
+    Add "Steam: $steam (drive $($drive.Name) $($drive.DriveType)); Users rights: $(if ($usersAce) { $usersAce -join ' ; ' } else { 'none' })"
+} else {
+    Add 'Steam: not installed (no InstallPath in the registry)'
+}
+Add-LogLines 'Launching |running as pid|Tracking |handed over|Killed |Kill of|killed |cancel|Cancel|Steam folder|game process|Launch of|exited with|Game process|launch\.' 40
 
 Add ''
 Add '--- Agent log (newest last)'
