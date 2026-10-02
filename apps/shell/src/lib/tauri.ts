@@ -593,6 +593,15 @@ export const api = {
     i18nBundle: (locale: Locale): Promise<Record<string, string>> => invoke('kiosk_i18n_bundle', { locale }),
     assetUrl: (path: string): Promise<string> => invoke('kiosk_asset_url', { path }),
   },
+  pc: {
+    mouse: (): Promise<PcMouseSettings> => invoke('pc_mouse_get'),
+    setMouse: (patch: Partial<PcMouseSettings>): Promise<PcMouseSettings> => invoke('pc_mouse_set', { patch }),
+    audioOutputs: (): Promise<PcAudioOutputs> => invoke('pc_audio_outputs'),
+    setAudioOutput: (deviceId: string): Promise<PcAudioOutputs> => invoke('pc_audio_set_output', { deviceId }),
+    gpuPanels: (): Promise<GpuPanelInfo[]> => invoke('pc_gpu_panels'),
+    openGpuPanel: (vendor: GpuVendor): Promise<void> =>
+      invoke<null>('pc_gpu_panel_open', { vendor }).then(() => undefined),
+  },
 };
 
 /** Type of the {@link api} object. */
@@ -694,3 +703,42 @@ export const events = {
     return listen<RawKioskPayloads[K]>(kioskEventName(name), (raw) => h(normalize(raw)));
   },
 };
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Player PC settings (`pc_*`, local): put back to the club's values when the player leaves
+// ---------------------------------------------------------------------------------------------------------------------
+
+/** `pc_mouse_get` / `pc_mouse_set`: Windows pointer speed (1–20), "Enhance pointer precision", double-click time. */
+export interface PcMouseSettings {
+  speed: number;
+  enhancePrecision: boolean;
+  doubleClickMs: number;
+}
+
+/** Rough kind of an audio output (endpoint form factor), for its icon. */
+export type PcAudioKind = 'speakers' | 'headphones' | 'headset' | 'digital' | 'other';
+
+/** One active audio output. */
+export interface PcAudioOutput {
+  id: string;
+  name: string;
+  kind: PcAudioKind;
+  /** What games and the desktop play to. */
+  isDefault: boolean;
+}
+
+/** `pc_audio_outputs`: `canSwitch: false` when this PC cannot change the default device (the list is read-only). */
+export interface PcAudioOutputs {
+  devices: PcAudioOutput[];
+  canSwitch: boolean;
+}
+
+/** Graphics-card vendor with a control panel. */
+export type GpuVendor = 'nvidia' | 'amd' | 'intel';
+
+/** `pc_gpu_panels` item: a vendor panel installed for the kiosk user. */
+export interface GpuPanelInfo {
+  vendor: GpuVendor;
+  /** Product name (not translated). */
+  name: string;
+}

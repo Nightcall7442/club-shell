@@ -114,7 +114,8 @@ pub async fn sys_lock_screen(
         .await
 }
 
-/// `sys_set_volume` → `sys.setVolume`; `level` 0–100, `muted` unchanged when absent.
+/// `sys_set_volume` → `sys.setVolume`; `level` 0–100, `muted` unchanged when absent. The confirmed
+/// value is also applied in the player's session (the Agent in session 0 often has no endpoint).
 #[tauri::command]
 pub async fn sys_set_volume(
     state: State<'_, AppState>,
@@ -122,10 +123,12 @@ pub async fn sys_set_volume(
     muted: Option<bool>,
 ) -> CmdResult<VolumeState> {
     validate::range("level", level, 0, 100)?;
-    state
+    let applied: VolumeState = state
         .agent
         .request(names::sys::SET_VOLUME, &SetVolumeRequest { level, muted })
-        .await
+        .await?;
+    super::pc::audio::set_volume(applied.level, applied.muted);
+    Ok(applied)
 }
 
 /// `sys_set_locale` → `sys.setLocale`, then `kiosk://localeChanged`.

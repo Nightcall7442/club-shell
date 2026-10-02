@@ -18,6 +18,7 @@ import { api, isTauri, toShellApiError } from '@/lib/tauri';
 import { secondsUntil } from '@/lib/time';
 import { describeError, useAuthStore, useNotificationsStore, useSettingsStore, useThemeStore } from '@/store';
 import { builtinThemes, loadTheme } from '@/theme/themes';
+import { PcInputSettings } from './pc/PcSettings';
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Primitives local to the settings tab
@@ -792,6 +793,8 @@ export function Settings(): JSX.Element {
           />
         </SettingsSection>
       </div>
+
+      <PcInputSettings />
 
       <SettingsSection title={t('settings.theme')}>
         <ThemePicker />

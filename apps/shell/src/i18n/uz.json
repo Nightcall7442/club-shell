@@ -1343,5 +1343,46 @@
     "volumeChanged": "Ovoz {{level}}%",
     "muted": "Ovoz o'chirilgan",
     "unmuted": "Ovoz yoqilgan"
+  },
+  "pcSettings": {
+    "restoredHint": "Seansingiz tugaguncha amal qiladi, keyin klub sozlamalari qaytadi",
+    "mouse": "Sichqoncha",
+    "pointerSpeed": "Kursor tezligi",
+    "speedValue": "{{value}} / {{max}}",
+    "slower": "Sekinroq",
+    "faster": "Tezroq",
+    "decrease": "Kamaytirish: {{label}}",
+    "increase": "Oshirish: {{label}}",
+    "precision": "Kursor aniqligini oshirish",
+    "precisionHint": "Tezlashtirish: harakat qanchalik keskin bo'lsa, kursor shunchalik uzoqqa ketadi. Shuterlarda odatda o'chiriladi",
+    "doubleClick": "Ikki marta bosish tezligi",
+    "doubleClickValue": "{{ms}} ms",
+    "doubleClickTest": "Ikki marta bosishni tekshirish",
+    "doubleClickTestIdle": "Papkani ikki marta bosing",
+    "doubleClickTestOk": "Bo'ldi, bu ikki marta bosish",
+    "doubleClickTestSlow": "Juda sekin: tezroq bosing yoki slayderni «Sekinroq» tomonga suring",
+    "unavailable": "Bu kompyuterda mavjud emas",
+    "output": "Ovoz chiqarish qurilmasi",
+    "outputHint": "O'yinlar va ilovalar ovozi qayerdan chiqadi",
+    "outputDefault": "Hozir shu yerda yangramoqda",
+    "outputChanged": "Endi ovoz «{{name}}» orqali chiqadi",
+    "outputReadOnly": "Bu kompyuterda qurilmani administrator almashtiradi",
+    "outputNone": "Ovoz chiqarish qurilmalari topilmadi. Quloqchin ulanganini tekshiring",
+    "refresh": "Qurilmalar ro'yxatini yangilash",
+    "kind": {
+      "speakers": "Karnaylar",
+      "headphones": "Quloqchinlar",
+      "headset": "Garnitura",
+      "digital": "Monitor / HDMI",
+      "other": "Audio chiqish"
+    },
+    "gpu": "Videokarta",
+    "gpuHint": "Panel qobiq ustida ochiladi. Uni yoping va bu yerga qaytasiz",
+    "gpuOpen": "Ochish: {{name}}",
+    "vendor": {
+      "nvidia": "NVIDIA videokartasi",
+      "amd": "AMD videokartasi",
+      "intel": "Intel grafikasi"
+    }
   }
 }

@@ -80,6 +80,12 @@ pub fn run() {
             kiosk::commands::kiosk_idle_reset,
             kiosk::commands::kiosk_i18n_bundle,
             kiosk::commands::kiosk_asset_url,
+            commands::pc::pc_mouse_get,
+            commands::pc::pc_mouse_set,
+            commands::pc::pc_audio_outputs,
+            commands::pc::pc_audio_set_output,
+            commands::pc::pc_gpu_panels,
+            commands::pc::pc_gpu_panel_open,
         ))
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -94,6 +100,7 @@ pub fn run() {
                 disable_browser_accelerators(&handle);
             }
             app.manage(kiosk);
+            commands::pc::spawn(&setup_state);
             tracing::info!(version = env!("CARGO_PKG_VERSION"), "shell started");
             Ok(())
         })
