@@ -14,7 +14,6 @@ import { Modal } from '@/components/ui/Modal';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Spinner } from '@/components/ui/Spinner';
 import { Tabs, type TabItem } from '@/components/ui/Tabs';
-import { VirtualKeyboard } from '@/components/ui/VirtualKeyboard';
 import { focusElement, useGamepad } from '@/hooks/useGamepad';
 import { useIdle } from '@/hooks/useIdle';
 import { useLocale } from '@/hooks/useLocale';
@@ -796,7 +795,6 @@ export default function LockScreen(): JSX.Element {
 
       <StartSessionModal open={showTariffs} onLogout={() => void logout('user')} />
       <NotificationCenter />
-      <VirtualKeyboard />
     </div>
   );
 }

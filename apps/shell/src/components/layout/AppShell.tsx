@@ -3,7 +3,6 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useLocation, useOutlet } from 'react-router-dom';
 import { Background } from '@/components/layout/Background';
 import { NotificationCenter } from '@/components/layout/NotificationCenter';
-import { VirtualKeyboard } from '@/components/ui/VirtualKeyboard';
 import { trackScreen } from '@/lib/analytics';
 import { press, tick } from '@/lib/sound';
 import { StatusBar, TopBar } from '@/screens/Desktop/HudBars';
@@ -102,7 +101,6 @@ export function AppShell(): JSX.Element {
         </motion.footer>
       </div>
       <NotificationCenter />
-      <VirtualKeyboard />
     </div>
   );
 }

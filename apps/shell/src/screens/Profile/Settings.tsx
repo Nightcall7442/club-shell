@@ -815,12 +815,6 @@ export function Settings(): JSX.Element {
             disabled={busy === 'metrics'}
             onChange={(v) => void patch('metrics', { showMetricsOverlay: v }, t('settings.showMetrics'))}
           />
-          <Toggle
-            label={t('settings.virtualKeyboard')}
-            checked={settings.allowVirtualKeyboard}
-            disabled={busy === 'vk'}
-            onChange={(v) => void patch('vk', { allowVirtualKeyboard: v }, t('settings.virtualKeyboard'))}
-          />
         </SettingsSection>
       </div>
 
