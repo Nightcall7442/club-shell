@@ -343,9 +343,48 @@ export function StartSessionModal({ open, onStarted, onLogout }: StartSessionMod
     }
   };
 
+  // A member with money on the balance plays at once, without the picker (owner's request): postpaid on the cheapest
+  // hourly tariff of this PC's zone, charged from the balance; the server stops the session when the balance runs out.
+  // The picker shows only when that start fails (or there is no such tariff); guests always choose.
+  const pcZone = useSettingsStore((s) => s.pcInfo?.pc.zone ?? '');
+  const autoTariff = useMemo(
+    () =>
+      tariffs
+        .filter(
+          (x) =>
+            !x.isPackage && (x.zones.length === 0 || x.zones.some((z) => z.toLowerCase() === pcZone.toLowerCase())),
+        )
+        .sort((a, b) => a.pricePerHour.amount - b.pricePerHour.amount)[0] ?? null,
+    [tariffs, pcZone],
+  );
+  const [autoState, setAutoState] = useState<'idle' | 'starting' | 'failed'>('idle');
+  useEffect(() => {
+    if (!open) {
+      setAutoState('idle');
+    }
+  }, [open]);
+  const wantsAuto = open && !isGuest && (balance?.amount ?? 0) > 0 && autoState !== 'failed';
+  useEffect(() => {
+    if (!wantsAuto || autoState !== 'idle' || !autoTariff) {
+      return;
+    }
+    setAutoState('starting');
+    start(autoTariff.id, false)
+      .then((session) => onStarted?.(session))
+      .catch((e: unknown) => {
+        const err = toShellApiError(e);
+        if (err.code === 'sessionAlreadyActive') {
+          void reload();
+        }
+        pushError(err, t('session.start'));
+        setAutoState('failed');
+      });
+  }, [wantsAuto, autoState, autoTariff, start, onStarted, reload, pushError, t]);
+  const modalOpen = open && !(wantsAuto && (loading || autoTariff !== null));
+
   return (
     <Modal
-      open={open}
+      open={modalOpen}
       onClose={() => undefined}
       closeOnBackdrop={false}
       closeOnEscape={false}
