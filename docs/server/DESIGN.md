@@ -17,8 +17,8 @@
 - реализует все 75 операций с `x-server-status: required`: admin 44, agents 8, sessions 7, auth 5, users 5, games 3,
   pcs 1, updates 1, wallet 1;
 - реализует канал `/ws/agent` из AsyncAPI: все операции с `x-server-status: required` (§6);
-- на остальные 27 операций контракта отвечает `501`, кроме `getBalance` и `reportAntiCheat`, которые реализуются
-  сверх контракта (список ниже) — итого 25 × 501 после S3;
+- на остальные 27 операций контракта отвечает `501`, кроме `getBalance`, `reportAntiCheat` и `getTransactions`, которые
+  реализуются сверх контракта (список ниже) — итого 24 × 501;
 - является единственным авторитетом по деньгам, времени сеансов и статусу ПК.
 
 **Границы.**
@@ -48,7 +48,8 @@ Content-Type: application/json
 - Сначала проверяется аутентификация в режиме операции (agent/user/staff), затем сразу отдаётся 501. Тело не
   валидируется.
 - Таблица 501 строится при старте из `server/contracts/openapi.yaml` (порт `srv@1c68cc8:src/Club.Server/Api/ContractStatus.cs`).
-  Реализованные операции исключаются по их `operationId`; `getBalance` и `reportAntiCheat` стоят в этом списке явно,
+  Реализованные операции исключаются по их `operationId`; `getBalance`, `reportAntiCheat` и `getTransactions` стоят в
+  этом списке явно,
   хотя в контракте они notImplemented. Тест «каждая notImplemented-операция отвечает 501, никогда 404» переносится
   из `srv@1c68cc8:tests/Club.Server.Tests/AgentApiTests.cs:209-234` и пропускает этот явный список.
 - Код ошибки — `notImplemented`, **не** `serverUnavailable`, как было в `srv@1c68cc8` (`ContractStatus.cs:54`), см.
@@ -61,6 +62,9 @@ Content-Type: application/json
 
 - `GET /wallet/{userId}/balance` (`getBalance`) — делаем required (агент на 501 даёт жёсткую ошибку,
   `SessionHandlers.cs:651-672`);
+- `GET /wallet/{userId}/transactions` (`getTransactions`) — история кошелька в киоске (агент отдаёт 501 шеллу как
+  ошибку, страница «Кошелёк» показывала «функция недоступна»): новые первыми, `Paging` (50, максимум 200), `type` —
+  `400 enum`, `from`/`to` — `400 format`; `topup-intent` остаются 501 — провайдера оплаты нет, пополнение на кассе;
 - `POST /anticheat/report` (`reportAntiCheat`) — 204 и запись в `anticheat_reports`: WS-событие теряется, пока ПК
   офлайн, а REST-путь агент ставит в очередь; поэтому `config.anticheat.reportViolations=true` (§5.9);
 - `/users/{userId}/game-settings*`: список → `{items:[]}`, `DELETE` → 204, остальное 501;
@@ -1740,7 +1744,8 @@ anticheat/report — S3; `PATCH /admin/games/{id}` (реализуется) и `
 
 ### 12.2 Изменения контракта (PR в club-contracts, ведёт лид, владелец не нужен)
 
-1. `getBalance` → required (агент на 501 отдаёт шеллу жёсткую ошибку). `reportAntiCheat` → required (204).
+1. `getBalance` и `getTransactions` → required (агент на 501 отдаёт шеллу жёсткую ошибку). `reportAntiCheat` → required
+   (204).
 2. Добавить `/users/{userId}/game-settings*`: list, DELETE — required; GET, PUT и upload-target — notImplemented.
 3. Добавить `PATCH /admin/games/{id}` (required) и поле `AdminGame.settingsPaths`. Добавить `GET /admin/network` и
    `POST /admin/network/clubs` как notImplemented.

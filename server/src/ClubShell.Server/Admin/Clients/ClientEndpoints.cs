@@ -7,6 +7,7 @@ using ClubShell.Server.Infrastructure;
 using ClubShell.Server.Realtime;
 using ClubShell.Server.Sessions;
 using ClubShell.Server.Sessions.Billing;
+using ClubShell.Server.Wallet;
 using Dapper;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
@@ -275,9 +276,9 @@ public static class ClientEndpoints
         }
 
         await using var c = await db.OpenConnectionAsync();
-        var rows = await c.QueryAsync<LedgerRow>(
-            """
-            SELECT id, user_id, type, amount, balance_after, description, created_at, ref
+        var rows = await c.QueryAsync<TransactionRow>(
+            $"""
+            SELECT {TransactionRow.Columns}
             FROM ledger_entries WHERE user_id = @userId AND network_id = @NetworkId
             ORDER BY created_at DESC, id DESC LIMIT 100
             """,
@@ -385,20 +386,5 @@ public static class ClientEndpoints
                 Id, Username, DisplayName, Role, Money.Uzs(MainBalance), Money.Uzs(0), GroupId, Note, Blacklisted, Phone, BirthYear, CardId,
                 LifetimeSpent, Visits, level?.Level ?? 1, level?.Name ?? "");
         }
-    }
-
-    private sealed class LedgerRow
-    {
-        public Guid Id { get; init; }
-        public Guid UserId { get; init; }
-        public string Type { get; init; } = "";
-        public long Amount { get; init; }
-        public long BalanceAfter { get; init; }
-        public string Description { get; init; } = "";
-        public DateTimeOffset CreatedAt { get; init; }
-        public string? Ref { get; init; }
-
-        public Transaction ToWire() => new(
-            Id, UserId, Enum.Parse<TransactionType>(Type, ignoreCase: true), Money.Uzs(Amount), Money.Uzs(BalanceAfter), Description, CreatedAt, Ref);
     }
 }

@@ -153,8 +153,8 @@ public sealed class AgentHarnessS2Tests(LongClockServerFixture server) : LedgerC
 }
 
 /// <summary>
-/// Coverage of slice S2 (DESIGN §10.a, §11): each of its 18 operations and <c>getBalance</c> got a contract-valid success
-/// response through the real agent client in this fixture.
+/// Coverage of slice S2 (DESIGN §10.a, §11): each of its 18 operations, <c>getBalance</c> and <c>getTransactions</c> got a
+/// contract-valid success response through the real agent client in this fixture.
 /// </summary>
 public sealed class CoverageS2Tests(ServerFixture server) : LedgerCheckedTest(server), IClassFixture<ServerFixture>
 {
@@ -177,6 +177,7 @@ public sealed class CoverageS2Tests(ServerFixture server) : LedgerCheckedTest(se
         await client.GetUserAchievementsAsync(player.Id, ct);
         await client.GetUserLoyaltyAsync(player.Id, ct);
         await client.GetBalanceAsync(player.Id, ct);
+        await client.GetTransactionsAsync(player.Id, new WalletHistoryRequest(PageSize: 500, Type: Contracts.Wallet.TransactionType.Adjustment), ct);
         await client.GetTariffsAsync(null, null, ct);
         var session = await client.CreateSessionAsync(new SessionCreateRequest(pcId, player.Id, Players.Standard, 60, true), Guid.NewGuid(), ct);
         await client.GetCurrentSessionAsync(pcId, ct);
@@ -193,6 +194,7 @@ public sealed class CoverageS2Tests(ServerFixture server) : LedgerCheckedTest(se
             ["getUser"] = 200, ["updateUser"] = 200, ["getUserStats"] = 200, ["getUserAchievements"] = 200, ["getUserLoyalty"] = 200,
             ["getCurrentSession"] = 200, ["createSession"] = 201, ["pauseSession"] = 200, ["resumeSession"] = 200, ["endSession"] = 200,
             ["extendSession"] = 200, ["postSessionEvents"] = 204, ["getTariffs"] = 200, ["getBalance"] = 200,
+            ["getTransactions"] = 200,
         };
         Assert.Equal(
             Auth.PlayerAuthEndpoints.Operations.Concat(Users.UserEndpoints.Operations).Concat(Sessions.SessionEndpoints.Operations).Concat(WalletEndpoints.Operations).Order(),

@@ -14,7 +14,8 @@
 - S2: 18 операций игрока — `login`, `startQrLogin`, `getQrLoginStatus`, `guestLogin`, `logout`, `getUser`, `updateUser`,
   `getUserStats`, `getUserAchievements`, `getUserLoyalty`, `getCurrentSession`, `createSession`, `pauseSession`,
   `resumeSession`, `endSession`, `extendSession`, `postSessionEvents`, `getTariffs` — и сверх контракта
-  `GET /wallet/{userId}/balance` (`getBalance`) и `/users/{userId}/game-settings` (список → `{items:[]}`, `DELETE` → 204,
+  `GET /wallet/{userId}/balance` (`getBalance`), история кошелька `GET /wallet/{userId}/transactions` (`getTransactions`:
+  новые первыми, страницы по 50 до 200, фильтры `type`/`from`/`to`) и `/users/{userId}/game-settings` (список → `{items:[]}`, `DELETE` → 204,
   остальные game-settings → 501). Пуши `sessionUpdated`, `walletUpdated` (`userRevoked` — с кассой в S4: `logout`
   самого ПК его не шлёт).
 - S3: `getGames` (страницы до 1000, скрытые исключены, порядок владельца, ETag `"g<catalogVersion>-<hash>"` с
@@ -38,7 +39,8 @@
   (`adminGames`, сверх контракта `PATCH /admin/games/{id}`), здоровье ПК (`adminHealth`, тикеты, автообслуживание), контроль
   (`adminControl`, 7 флагов) и отчёты (`adminReports`). Воркеры `HealthWorker`, `ClubTickWorker` (автоматизация),
   `WebhookWorker` (защита от SSRF, 3 повтора), `MaintenanceWorker`.
-- Остальные 25 операций контракта отвечают `501` (кассиру на owner-only из них — сначала `403 ownerOnly`).
+- Остальные 24 операции контракта отвечают `501` (в том числе `topup-intent`: платёжного провайдера нет, игрок пополняет
+  счёт на кассе) (кассиру на owner-only из них — сначала `403 ownerOnly`).
 - Деньги (DESIGN §4.3, §5): единственная точка записи — `Wallet/Ledger.cs` (строка кошелька под `FOR UPDATE`,
   append-only `ledger_entries` с `balance_after`; `wallets.main_balance` — кеш суммы леджера). Цена — одна функция
   `Sessions/Billing/Pricing.cs`: день недели и праздники в зоне клуба, лучшая из скидок группы, уровня лояльности и
