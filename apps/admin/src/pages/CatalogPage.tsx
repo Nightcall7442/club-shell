@@ -110,7 +110,8 @@ const steamId = (s: string): string => /store\.steampowered\.com\/app\/(\d+)/i.e
 function problem(f: GameForm): string | null {
   if (!f.title.trim()) return t('Введите название');
   if (f.launcher === 'exe') {
-    if (!EXE_PATH.test(unquote(f.exePath))) return t('Укажите полный путь к .exe, например G:\\Games\\CS 1.6\\cstrike.exe');
+    if (!EXE_PATH.test(unquote(f.exePath)))
+      return t('Укажите полный путь к .exe, например G:\\Games\\CS 1.6\\cstrike.exe');
   } else if (f.launcher === 'steam') {
     if (!/^\d{1,10}$/.test(f.launcherAppId.trim())) return t('Укажите номер игры в Steam');
   } else if (!f.launcherAppId.trim()) {
@@ -177,8 +178,13 @@ function GameEditor({
   const issue = problem(form);
   const exe = form.launcher === 'exe';
   const steam = form.launcher === 'steam';
-  const cover = form.coverUrl.trim() || (steam && /^\d+$/.test(form.launcherAppId.trim()) ? steamCoverUrl(form.launcherAppId.trim()) : '');
-  const chips = [...CATEGORIES, ...form.category.filter((c) => !CATEGORIES.some((k) => k.key === c)).map((c) => ({ key: c, label: c }))];
+  const cover =
+    form.coverUrl.trim() ||
+    (steam && /^\d+$/.test(form.launcherAppId.trim()) ? steamCoverUrl(form.launcherAppId.trim()) : '');
+  const chips = [
+    ...CATEGORIES,
+    ...form.category.filter((c) => !CATEGORIES.some((k) => k.key === c)).map((c) => ({ key: c, label: c })),
+  ];
 
   const run = async (action: () => Promise<unknown>): Promise<void> => {
     setBusy(true);
@@ -217,7 +223,9 @@ function GameEditor({
             <>
               <Field
                 label={t('Путь к .exe на игровых ПК')}
-                hint={t('Полный путь, одинаковый на всех ПК. В проводнике: Shift + правый клик по файлу → «Копировать как путь».')}
+                hint={t(
+                  'Полный путь, одинаковый на всех ПК. В проводнике: Shift + правый клик по файлу → «Копировать как путь».',
+                )}
               >
                 <Input
                   className="font-mono"
@@ -248,7 +256,11 @@ function GameEditor({
           )}
           <Field
             label={t('Обложка')}
-            hint={steam ? t('Ссылка на картинку. Пусто — обложка из Steam.') : t('Ссылка на картинку (вертикальная, 2:3). Необязательно.')}
+            hint={
+              steam
+                ? t('Ссылка на картинку. Пусто — обложка из Steam.')
+                : t('Ссылка на картинку (вертикальная, 2:3). Необязательно.')
+            }
           >
             <Input placeholder="https://…" value={form.coverUrl} onChange={(e) => set({ coverUrl: e.target.value })} />
           </Field>
@@ -308,7 +320,12 @@ function GameEditor({
           (confirmDelete ? (
             <span className="flex items-center gap-1">
               <span className="text-sm text-muted">{t('Удалить игру?')}</span>
-              <Button variant="danger" size="sm" disabled={busy} onClick={() => void run(() => clubApi.deleteGame(game.id))}>
+              <Button
+                variant="danger"
+                size="sm"
+                disabled={busy}
+                onClick={() => void run(() => clubApi.deleteGame(game.id))}
+              >
                 {t('Да')}
               </Button>
               <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(false)}>
