@@ -17,12 +17,14 @@
 //!
 //! Grouping: booking, tournaments and profile (§2.8–§2.10) live in [`session`]; policy and update
 //! (§2.12, §2.13) in [`system`]. The kiosk commands (§2.14, `kiosk_*`) are implemented by
-//! `crate::kiosk` and appended through the crate-private `invoke_handler!` macro (see [`register`]).
+//! `crate::kiosk` and appended through the crate-private `invoke_handler!` macro (see [`register`]); so are the
+//! local `pc_*` commands (§2.15) of [`pc`].
 
 pub mod apps;
 pub mod auth;
 pub mod chat;
 pub mod games;
+pub mod pc;
 pub mod session;
 pub mod settings;
 pub mod shop;

@@ -393,6 +393,26 @@ impl Kiosk {
         Ok(())
     }
 
+    /// A club-approved window of another process (the graphics-card panel, `commands::pc`) takes the screen: the
+    /// topmost/foreground guard and the stray-window sweep pause as in game mode; the keyboard policy stays.
+    pub fn begin_external_window(&self) {
+        tracing::info!("external window: foreground guard paused");
+        self.alt_tab.set_enabled(false);
+        self.window.set_active(false);
+    }
+
+    /// The external window is gone: the guard comes back as `kiosk_set_guard` / game mode want it and, when armed,
+    /// puts the Shell back on top.
+    pub fn end_external_window(&self) {
+        let guard = self.guard_wanted.load(Ordering::Acquire) && !self.is_game_mode();
+        self.alt_tab.set_enabled(guard);
+        self.window.set_active(guard);
+        if guard && !self.window.focus() {
+            tracing::debug!("shell window not in the foreground after an external window");
+        }
+        tracing::info!(guard, "external window closed");
+    }
+
     /// `kiosk_exit`: tears everything down, optionally starts `explorer.exe`, exits the process.
     pub fn exit(&self, start_explorer: bool) {
         tracing::warn!(start_explorer, "kiosk exit");
