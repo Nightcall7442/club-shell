@@ -117,10 +117,11 @@ export default function GamesScreen(): JSX.Element {
         />
       </div>
 
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <h2 className="text-base font-semibold text-muted">
+      <div className="flex min-h-11 flex-wrap items-center justify-between gap-3">
+        {/* Same heading as Home's sections; the count as a telemetry label beside it. */}
+        <h2 className="flex items-baseline gap-3 font-display text-base font-normal tracking-tight text-text">
           {t('games.title')}
-          <span className="ml-2 font-normal">{loading ? '' : pluralize('games', games.length)}</span>
+          <span className="hud-label">{loading ? '' : pluralize('games', games.length)}</span>
         </h2>
         <div className="flex items-center gap-3 text-sm text-muted">
           {filters.installedOnly && <span>{t('games.installedFilterOn')}</span>}

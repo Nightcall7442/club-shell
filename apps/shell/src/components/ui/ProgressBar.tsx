@@ -18,11 +18,12 @@ export interface ProgressBarProps extends HTMLAttributes<HTMLDivElement> {
   indeterminate?: boolean;
 }
 
+/** Fill plus a faint glow in its own colour, so a thin bar reads as lit rather than printed. */
 const FILL: Record<ProgressTone, string> = {
-  primary: 'bg-accent',
-  accent: 'bg-accent',
-  success: 'bg-success',
-  danger: 'bg-danger',
+  primary: 'bg-accent shadow-[0_0_10px_rgb(var(--c-accent)/0.45)]',
+  accent: 'bg-accent shadow-[0_0_10px_rgb(var(--c-accent)/0.45)]',
+  success: 'bg-success shadow-[0_0_10px_rgb(var(--c-success)/0.4)]',
+  danger: 'bg-danger shadow-[0_0_10px_rgb(var(--c-danger)/0.4)]',
 };
 
 const TRACK_H: Record<ProgressSize, string> = { sm: 'h-1.5', md: 'h-2.5', lg: 'h-4' };

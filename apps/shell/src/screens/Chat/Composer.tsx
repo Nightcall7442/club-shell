@@ -150,7 +150,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       <div
         className={clsx(
           'glass flex items-end gap-2 rounded-xl p-2 pl-4 transition-[box-shadow,border-color] duration-[var(--dur-fast)]',
-          'focus-within:border-primary/60 focus-within:shadow-[var(--shadow-glow)]',
+          'focus-within:border-accent/60 focus-within:[box-shadow:var(--shadow-glow)]',
           failed && 'border-danger/70',
         )}
       >

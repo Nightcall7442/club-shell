@@ -7,6 +7,7 @@ import type { Game } from '@clubshell/contracts';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { focusElement } from '@/hooks/useGamepad';
 import { GameCard } from './GameCard';
@@ -48,7 +49,6 @@ function EmptyIcon(): JSX.Element {
   return (
     <svg
       viewBox="0 0 24 24"
-      className="h-14 w-14"
       fill="none"
       stroke="currentColor"
       strokeWidth="1.5"
@@ -118,13 +118,12 @@ export function GamesGrid({
   const style: CSSProperties = { gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: 'var(--gap)' };
 
   if (loading) {
+    // Covers only: the real cards carry their title on the art, so text lines under the placeholders made the grid
+    // jump when the catalogue arrived.
     return (
       <div className={clsx('grid', className)} style={style} aria-busy="true" aria-label={t('common.loading')}>
         {Array.from({ length: cols * 2 }, (_, i) => (
-          <div key={i} className="flex flex-col gap-2">
-            <Skeleton variant="cover" />
-            <Skeleton variant="text" lines={2} className="px-1" />
-          </div>
+          <Skeleton key={i} variant="cover" className="rounded-lg" />
         ))}
       </div>
     );
@@ -132,15 +131,11 @@ export function GamesGrid({
 
   if (games.length === 0) {
     return (
-      <div
-        className={clsx(
-          'glass flex flex-col items-center justify-center gap-3 rounded-xl px-6 py-16 text-center text-muted',
-          className,
-        )}
-      >
-        <EmptyIcon />
-        <p className="text-xl font-semibold text-text">{emptyText ?? t('games.empty')}</p>
-      </div>
+      <EmptyState
+        icon={<EmptyIcon />}
+        title={emptyText ?? t('games.empty')}
+        className={clsx('glass rounded-xl px-6 py-16', className)}
+      />
     );
   }
 

@@ -179,7 +179,8 @@ export function Modal({
       {open && (
         <motion.div
           key="backdrop"
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-bg/75 p-[var(--gutter)]"
+          // A light blur pushes the screen behind back a plane, so the dialog is the only thing in focus.
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-bg/70 p-[var(--gutter)] backdrop-blur-[6px]"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}

@@ -51,12 +51,21 @@
   --dur-base: 200ms;
   --dur-slow: 400ms;
 
-  /* Elevation: flat by default; only floating layers (popovers, modals) cast a shadow. Focus is a plain ring. */
+  /*
+   * Elevation: flat by default; only floating layers (popovers, modals) and a card the pointer lifts cast a shadow.
+   * Panels get depth from a faint top-down sheen, not from edges. Focus is a solid ring with a soft halo, so it
+   * still reads from the couch with a gamepad.
+   */
   --hairline: rgb(var(--c-accent) / 0.1);
+  --hairline-hover: rgb(var(--c-accent) / 0.26);
+  --sheen: linear-gradient(180deg, rgb(var(--c-text) / 0.035) 0%, rgb(var(--c-text) / 0) 42%);
   --shadow-card: none;
+  --shadow-lift: 0 22px 40px -20px rgb(0 0 0 / 0.9);
   --shadow-float: 0 24px 64px -24px rgb(0 0 0 / 0.8);
-  --shadow-glow: 0 0 0 1.5px rgb(var(--c-accent) / 0.9);
-  --shadow-glow-danger: 0 0 0 2px rgb(var(--c-danger) / 0.9);
+  --shadow-glow: 0 0 0 2px rgb(var(--c-accent) / 0.95), 0 0 22px -4px rgb(var(--c-accent) / 0.6);
+  --shadow-glow-inset: inset 0 0 0 2px rgb(var(--c-accent) / 0.95);
+  --shadow-glow-danger: 0 0 0 2px rgb(var(--c-danger) / 0.9), 0 0 22px -4px rgb(var(--c-danger) / 0.55);
+  --glow-accent: drop-shadow(0 0 14px rgb(var(--c-accent) / 0.45));
 
   color-scheme: dark;
 }
@@ -80,19 +89,26 @@ html {
   .focus-ring-danger:focus-visible {
     box-shadow: var(--shadow-glow-danger);
   }
+  /* Rows that fill a clipping container (accordion headers, list rows): an outer ring would be cut off. */
+  .focus-ring-inset:focus-visible,
+  .focus-ring-inset[data-focused="true"] {
+    box-shadow: var(--shadow-glow-inset);
+  }
 
   /*
-   * Surfaces: flat panels with a hairline edge — `.glass` for cards and rows, `.glass-strong` for floating layers
-   * (popovers, modals, dropdowns). A theme with `blur > 0` sets `data-glass` and gets translucent, blurred panels
-   * instead (the names date from when that was the only look).
+   * Surfaces: flat panels with a hairline edge and a faint sheen from the top — `.glass` for cards and rows,
+   * `.glass-strong` for floating layers (popovers, modals, dropdowns). A theme with `blur > 0` sets `data-glass` and
+   * gets translucent, blurred panels instead (the names date from when that was the only look).
    */
   .glass {
     background-color: rgb(var(--c-surface));
+    background-image: var(--sheen);
     border: 1px solid var(--hairline);
   }
   .glass-strong {
     background-color: rgb(var(--c-surface));
-    border: 1px solid rgb(var(--c-text) / 0.09);
+    background-image: var(--sheen);
+    border: 1px solid rgb(var(--c-text) / 0.1);
     box-shadow: var(--shadow-float);
   }
   :root[data-glass] .glass {
@@ -104,6 +120,25 @@ html {
     background-color: rgb(var(--c-surface) / 0.9);
     -webkit-backdrop-filter: blur(calc(var(--blur) * 1.5)) saturate(120%);
     backdrop-filter: blur(calc(var(--blur) * 1.5)) saturate(120%);
+  }
+  /*
+   * A panel that is itself a control answers the pointer with a brighter edge. `:where` keeps this at the weight of
+   * a single class, so a component's own border colour (an active state) still wins.
+   */
+  :where(button.glass:not(:disabled), a.glass, [role="button"].glass):hover {
+    border-color: var(--hairline-hover);
+  }
+
+  /* Text field well: recessed into the panel it sits on (a field the colour of its card read as a second card). */
+  .field {
+    background-color: rgb(var(--c-bg) / 0.55);
+    border: 1px solid rgb(var(--c-text) / 0.1);
+    transition:
+      border-color var(--dur-fast) var(--ease-out),
+      box-shadow var(--dur-fast) var(--ease-out);
+  }
+  :where(.field):hover {
+    border-color: rgb(var(--c-text) / 0.18);
   }
 
   /* Soft edge on a horizontally scrolling row, set by useOverflowFade only on the side that has more to show. */
@@ -161,6 +196,8 @@ html {
       linear-gradient(var(--brk), var(--brk)) left bottom / 1px var(--l) no-repeat,
       linear-gradient(var(--brk), var(--brk)) right bottom / var(--l) 1px no-repeat,
       linear-gradient(var(--brk), var(--brk)) right bottom / 1px var(--l) no-repeat;
+    /* A faint glow: hairline brackets over bright cover art otherwise vanish against it. */
+    filter: drop-shadow(0 0 3px rgb(var(--c-accent) / 0.7));
     transition:
       inset var(--dur-slow) var(--ease-out),
       opacity var(--dur-base) var(--ease-out);
@@ -193,6 +230,15 @@ html {
   .cut-corners:hover {
     --fill: rgb(var(--c-accent) / 0.85);
   }
+  /* The one main action glows when aimed at; a drop shadow follows the cut shape where a box shadow would not. */
+  .cut-corners:hover,
+  .cut-corners:focus-visible,
+  .cut-corners[data-focused="true"] {
+    filter: var(--glow-accent);
+  }
+  .cut-corners:disabled {
+    filter: none;
+  }
 
   /* Blueprint grid behind the screens, fading out towards the edges. */
   .hud-grid {
@@ -223,6 +269,7 @@ html {
     transition:
       background-color var(--dur-fast) var(--ease-out),
       border-color var(--dur-fast) var(--ease-out),
+      box-shadow var(--dur-fast) var(--ease-out),
       color var(--dur-fast) var(--ease-out);
   }
   .choice:hover {
@@ -232,6 +279,7 @@ html {
   .choice-on:hover {
     border-color: rgb(var(--c-accent) / 0.7);
     background-color: rgb(var(--c-accent) / 0.1);
+    box-shadow: inset 0 0 20px -8px rgb(var(--c-accent) / 0.45);
     color: rgb(var(--c-text));
   }
 
@@ -286,6 +334,26 @@ html {
     overflow: hidden;
     border-radius: var(--radius);
     background: rgb(var(--c-surface));
+  }
+
+  /*
+   * A cover inside a `.group` tile: rises a little and its art leans in while the tile is aimed at — by the pointer,
+   * the keyboard or the pad alike. Lifting the art rather than the tile keeps the hit area still (no hover flicker
+   * at the bottom edge).
+   */
+  .cover-lift {
+    transition:
+      transform var(--dur-base) var(--ease-out),
+      box-shadow var(--dur-base) var(--ease-out),
+      filter var(--dur-base) var(--ease-out);
+  }
+  .group:is(:hover, :focus-visible, [data-focused="true"]) .cover-lift {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-lift);
+    filter: brightness(1.08);
+  }
+  .group:is(:hover, :focus-visible, [data-focused="true"]) .cover-lift > img {
+    transform: scale(1.04);
   }
 
   /* Truncation helpers. */
