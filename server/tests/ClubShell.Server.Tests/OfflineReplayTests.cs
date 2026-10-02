@@ -28,11 +28,23 @@ public sealed class OfflineReplayTests(LongClockServerFixture server) : LedgerCh
     }
 
     [Fact]
-    public async Task Replay_older_than_the_offline_budget_is_400_too_old()
+    public async Task Replay_after_an_evening_offline_is_still_charged()
+    {
+        // Older than the agent's 240-minute budget: the club's internet was down longer, the game was still played.
+        var agent = await TestAgent.CreateAsync(Server);
+        var player = await Players.CreateAsync(Server);
+        var clientId = Guid.NewGuid();
+        await Players.ReadAsync(await agent.PostAsync("/api/v1/sessions", Replay(agent, player, clientId, Server.Clock.GetUtcNow().AddHours(-5)), Guid.NewGuid()), 201);
+        Assert.Equal("offline", await Players.ScalarAsync<string>(Server, "SELECT origin FROM sessions WHERE id = @clientId", new { clientId }));
+        Assert.True(await Players.BalanceAsync(Server, player.Id) < 10_000_000);
+    }
+
+    [Fact]
+    public async Task Replay_older_than_three_days_is_400_too_old()
     {
         var agent = await TestAgent.CreateAsync(Server);
         var player = await Players.CreateAsync(Server);
-        using var response = await agent.PostAsync("/api/v1/sessions", Replay(agent, player, Guid.NewGuid(), Server.Clock.GetUtcNow().AddMinutes(-241)), Guid.NewGuid());
+        using var response = await agent.PostAsync("/api/v1/sessions", Replay(agent, player, Guid.NewGuid(), Server.Clock.GetUtcNow().AddHours(-73)), Guid.NewGuid());
         var error = await Contract.ReadErrorAsync(response, 400, "validation");
         Assert.Equal(("startedAt", "tooOld"), (Details(error).GetProperty("field").GetString(), Details(error).GetProperty("reason").GetString()));
     }

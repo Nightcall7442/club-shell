@@ -26,8 +26,15 @@ public sealed class SessionsOptions
     /// <summary>Free time after <c>ends_at</c> before the tick ends a prepaid session with <c>timeUp</c> (D-12).</summary>
     public int GraceSec { get; set; } = 60;
 
-    /// <summary>Oldest accepted offline <c>startedAt</c>; silence after which the tick ends a session of an offline PC.</summary>
+    /// <summary>The agent's offline budget (sent in its config); silence after which the tick ends a session of an offline PC.</summary>
     public int MaxOfflineMinutes { get; set; } = 240;
+
+    /// <summary>
+    /// Oldest accepted offline <c>startedAt</c> of a replay. Longer than <see cref="MaxOfflineMinutes"/> on purpose: a game
+    /// played while the club's internet was down for an evening reaches the server only when it is back, and refusing it
+    /// would make that play free.
+    /// </summary>
+    public int MaxReplayHours { get; set; } = 72;
 
     public int TickMs { get; set; } = 1000;
 
