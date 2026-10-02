@@ -1,0 +1,65 @@
+# Nightly copy of the club's database outside Railway (wallets, ledger, shifts, players).
+#
+# pg_dump (custom format) of the Railway Postgres through its public TCP proxy, encrypted with AES-256 (gpg, symmetric)
+# and kept as a workflow artifact for 90 days. The repository is public: without the passphrase an artifact is noise,
+# so the passphrase lives only in the BACKUP_PASSPHRASE secret and the owner's password manager.
+#
+# Secrets (Settings -> Secrets and variables -> Actions):
+#   RAILWAY_DATABASE_URL  postgresql://... of the Postgres service (DATABASE_PUBLIC_URL in Railway)
+#   BACKUP_PASSPHRASE     long random passphrase; restore needs it
+# Without them the job only warns. Restore drill: server/scripts/restore-backup.ps1.
+# data/pin-pepper.key on the server volume is not in the database: keep a copy with the passphrase (server/README.md).
+name: db-backup
+
+on:
+  schedule:
+    - cron: '30 22 * * *' # 03:30 in Tashkent, after closing
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ${{ secrets.RAILWAY_DATABASE_URL }}
+      PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+    steps:
+      - name: Check the secrets
+        id: check
+        run: |
+          if [ -z "$DATABASE_URL" ] || [ -z "$PASSPHRASE" ]; then
+            echo "::warning::RAILWAY_DATABASE_URL / BACKUP_PASSPHRASE are not set: no backup was made"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Dump and encrypt
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          stamp=$(date -u +%Y%m%d-%H%M)
+          # The server runs PostgreSQL 18: the client of the same major version.
+          docker run --rm -e PGCONNECT_TIMEOUT=30 postgres:18 \
+            pg_dump "$DATABASE_URL" --format=custom --no-owner --no-privileges > clubshell.dump
+          test -s clubshell.dump
+          echo "dump: $(stat -c %s clubshell.dump) bytes"
+          gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --symmetric --cipher-algo AES256 \
+            --output "clubshell-$stamp.dump.gpg" clubshell.dump <<< "$PASSPHRASE"
+          rm clubshell.dump
+
+      - name: Keep for 90 days
+        if: steps.check.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ github.run_id }}
+          path: '*.dump.gpg'
+          retention-days: 90
+          if-no-files-found: error

@@ -172,6 +172,13 @@ docker compose -f server/compose.yaml exec db pg_dump -U clubshell -Fc clubshell
 docker compose -f server/compose.yaml cp server:/app/data ./data-backup
 ```
 
+**Ночная копия базы вне Railway.** `.github/workflows/db-backup.yml` каждую ночь (03:30 по Ташкенту) снимает `pg_dump` через
+публичный TCP-прокси Railway, шифрует его AES-256 (gpg, по паролю) и хранит артефактом 90 дней. Нужны секреты репозитория
+`RAILWAY_DATABASE_URL` (значение `DATABASE_PUBLIC_URL` сервиса Postgres) и `BACKUP_PASSPHRASE` (длинный случайный пароль; без него
+копию не открыть — храните его в менеджере паролей вместе с копией `data/pin-pepper.key`). Без секретов задача только
+предупреждает. Учения по восстановлению: скачать артефакт и `server\scripts\restore-backup.ps1 -Path <файл>.dump.gpg` — он
+расшифрует копию, развернёт её в локальный PostgreSQL (порт 5433, база `clubshell_restore`) и сверит каждый кошелёк с журналом.
+
 ### Railway (прод, EU West — Амстердам)
 
 `server/railway.toml` задаёт сборку из Dockerfile, healthcheck `/health` и одну реплику. Настройки сервиса Railway: Root
