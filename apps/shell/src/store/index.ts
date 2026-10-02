@@ -202,6 +202,8 @@ function wireListeners(): void {
     }),
     events.on('policy.changed', (p) => {
       settings().setPolicy(p.policy);
+      // The Agent answers settings with the policy applied (allowVirtualKeyboard = player's choice && policy).
+      void settings().load();
       notify().push({
         id: 'policy',
         title: t('notifications.policyChanged'),
@@ -277,6 +279,9 @@ function wireListeners(): void {
         });
         if (c.connected) {
           void auth().refresh();
+          // The Shell starts at logon, usually before the Agent link is up: the settings read at boot failed and the
+          // defaults stayed (the on-screen keyboard on the lock screen although the club policy forbids it).
+          void settings().load();
         }
       }
     }),

@@ -42,7 +42,10 @@ export const DEFAULT_FEATURES: ShellFeatures = {
   callAdmin: true,
 };
 
-/** Mirrors `config/shell.default.json` until `settings_get` answers. */
+/**
+ * Mirrors `config/shell.default.json` until `settings_get` answers — except the on-screen keyboard, off until the Agent
+ * says the club allows it: the Shell often starts before the Agent link is up.
+ */
 export const DEFAULT_SETTINGS: ShellSettings = {
   locale: 'ru',
   theme: 'default',
@@ -51,7 +54,7 @@ export const DEFAULT_SETTINGS: ShellSettings = {
   muted: false,
   idleTimeoutSec: 300,
   showMetricsOverlay: false,
-  allowVirtualKeyboard: true,
+  allowVirtualKeyboard: false,
   uiSounds: true,
   features: DEFAULT_FEATURES,
 };
