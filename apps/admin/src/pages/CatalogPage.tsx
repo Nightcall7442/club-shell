@@ -1,14 +1,14 @@
 /**
- * Game catalogue of the player shell: order, featured and hidden games. Everything is a draft of `catalog` in the club
- * settings, saved with the save bar.
+ * Game catalogue of the player shell: the club's games (add, edit, delete — saved at once), and their order, featured
+ * and hidden marks — a draft of `catalog` in the club settings, saved with the save bar.
  */
 import { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
-import { clubApi, type AdminGame, type ClubSettings } from '@/api';
+import { clubApi, type AdminGame, type ClubSettings, type GameInput } from '@/api';
 import { describe } from '@/errors';
 import { t } from '@/i18n';
 import { useClubSettings } from '@/settings';
-import { Button, Input, Note, PageHeader, SaveBar, Section, Table, Toggle } from '@/ui';
+import { Button, Field, Input, inputCls, Note, PageHeader, SaveBar, Section, Table, Toggle } from '@/ui';
 
 const LAUNCHER: Record<string, string> = {
   steam: 'Steam',
@@ -22,11 +22,315 @@ const LAUNCHER: Record<string, string> = {
   standalone: 'Отдельно',
 };
 
+/** Launchers the owner can pick for a game, in the order of the form. */
+const LAUNCHERS: { key: string; label: string }[] = [
+  { key: 'exe', label: 'Программа (.exe)' },
+  { key: 'steam', label: 'Steam' },
+  { key: 'epic', label: 'Epic Games' },
+  { key: 'riot', label: 'Riot' },
+  { key: 'battleNet', label: 'Battle.net' },
+  { key: 'ea', label: 'EA' },
+  { key: 'ubisoft', label: 'Ubisoft' },
+];
+
+/** Category keys the player shell names (its `games.cat.*`), with the console's labels. */
+const CATEGORIES: { key: string; label: string }[] = [
+  { key: 'shooter', label: 'Шутер' },
+  { key: 'moba', label: 'MOBA' },
+  { key: 'battleRoyale', label: 'Королевская битва' },
+  { key: 'action', label: 'Экшен' },
+  { key: 'strategy', label: 'Стратегия' },
+  { key: 'racing', label: 'Гонки' },
+  { key: 'sports', label: 'Спорт' },
+  { key: 'rpg', label: 'RPG' },
+  { key: 'sandbox', label: 'Песочница' },
+  { key: 'survival', label: 'Выживание' },
+  { key: 'simulation', label: 'Симулятор' },
+  { key: 'fighting', label: 'Файтинг' },
+  { key: 'horror', label: 'Хоррор' },
+  { key: 'casual', label: 'Казуальные' },
+  { key: 'coop', label: 'Кооператив' },
+  { key: 'multiplayer', label: 'Мультиплеер' },
+  { key: 'singleplayer', label: 'Одиночная' },
+];
+
+const MAX_CATEGORIES = 5;
+
+/** A full Windows path to an .exe: a drive (`G:\`) or a share (`\\nas\games\`), as the server checks it. */
+const EXE_PATH = /^(?:[A-Za-z]:\\|\\\\[^\\/:*?"<>|]+\\[^\\/:*?"<>|]+\\)[^/:*?"<>|]*\.exe$/i;
+
+interface GameForm {
+  title: string;
+  launcher: string;
+  exePath: string;
+  args: string;
+  launcherAppId: string;
+  coverUrl: string;
+  category: string[];
+  description: string;
+}
+
+const EMPTY_FORM: GameForm = {
+  title: '',
+  launcher: 'exe',
+  exePath: '',
+  args: '',
+  launcherAppId: '',
+  coverUrl: '',
+  category: [],
+  description: '',
+};
+
+function formOf(g: AdminGame): GameForm {
+  const steamCover = g.launcher === 'steam' && g.coverUrl === steamCoverUrl(g.launcherAppId ?? '');
+  return {
+    title: g.title,
+    launcher: g.launcher === 'battlenet' ? 'battleNet' : g.launcher,
+    exePath: g.exePath ?? '',
+    args: g.args ?? '',
+    launcherAppId: g.launcherAppId ?? '',
+    // The store art of a Steam game follows its id by itself.
+    coverUrl: steamCover ? '' : (g.coverUrl ?? ''),
+    category: g.category,
+    description: g.description ?? '',
+  };
+}
+
+function steamCoverUrl(appId: string): string {
+  return `https://cdn.cloudflare.steamstatic.com/steam/apps/${appId}/library_600x900.jpg`;
+}
+
+/** Explorer's "Copy as path" wraps the path in quotes. */
+const unquote = (s: string): string => s.trim().replace(/^"+|"+$/g, '');
+
+/** A Steam store link turns into its app id (`store.steampowered.com/app/730/…` → `730`). */
+const steamId = (s: string): string => /store\.steampowered\.com\/app\/(\d+)/i.exec(s)?.[1] ?? s.trim();
+
+/** The form's problem in the console's words, or null when it can be saved. */
+function problem(f: GameForm): string | null {
+  if (!f.title.trim()) return t('Введите название');
+  if (f.launcher === 'exe') {
+    if (!EXE_PATH.test(unquote(f.exePath))) return t('Укажите полный путь к .exe, например G:\\Games\\CS 1.6\\cstrike.exe');
+  } else if (f.launcher === 'steam') {
+    if (!/^\d{1,10}$/.test(f.launcherAppId.trim())) return t('Укажите номер игры в Steam');
+  } else if (!f.launcherAppId.trim()) {
+    return t('Укажите код игры в лаунчере');
+  }
+  const cover = f.coverUrl.trim();
+  if (cover && !/^https?:\/\/\S+$/i.test(cover)) return t('Обложка — ссылка на картинку (https://…)');
+  return null;
+}
+
+function inputOf(f: GameForm): GameInput {
+  const exe = f.launcher === 'exe';
+  return {
+    title: f.title.trim(),
+    launcher: f.launcher,
+    exePath: exe ? unquote(f.exePath) : null,
+    launcherAppId: exe ? null : f.launcherAppId.trim(),
+    args: f.args.trim() || null,
+    coverUrl: f.coverUrl.trim() || null,
+    category: f.category,
+    description: f.description.trim() || null,
+  };
+}
+
 function Arrow({ up }: { up: boolean }): JSX.Element {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-4 w-4">
       <path d={up ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6'} strokeLinecap="round" strokeLinejoin="round" />
     </svg>
+  );
+}
+
+function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }): JSX.Element {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      onClick={onClick}
+      className={clsx(
+        'choice focus-ring inline-flex h-8 items-center justify-center whitespace-nowrap rounded-md px-2.5 text-xs font-medium transition-colors',
+        on && 'choice-on',
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Add or edit one game of the club; saves straight to the server. */
+function GameEditor({
+  game,
+  onDone,
+  onCancel,
+}: {
+  game: AdminGame | null;
+  onDone: () => void;
+  onCancel: () => void;
+}): JSX.Element {
+  const [form, setForm] = useState<GameForm>(() => (game ? formOf(game) : EMPTY_FORM));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const set = (p: Partial<GameForm>): void => setForm((f) => ({ ...f, ...p }));
+  const issue = problem(form);
+  const exe = form.launcher === 'exe';
+  const steam = form.launcher === 'steam';
+  const cover = form.coverUrl.trim() || (steam && /^\d+$/.test(form.launcherAppId.trim()) ? steamCoverUrl(form.launcherAppId.trim()) : '');
+  const chips = [...CATEGORIES, ...form.category.filter((c) => !CATEGORIES.some((k) => k.key === c)).map((c) => ({ key: c, label: c }))];
+
+  const run = async (action: () => Promise<unknown>): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+      onDone();
+    } catch (e) {
+      setError(describe(e));
+    } finally {
+      setBusy(false);
+      setConfirmDelete(false);
+    }
+  };
+
+  const save = (): Promise<void> =>
+    run(() => (game ? clubApi.saveGame(game.id, inputOf(form)) : clubApi.addGame(inputOf(form))));
+
+  return (
+    <Section title={game ? t('Игра · {title}', { title: game.title }) : t('Новая игра')}>
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-[minmax(0,1fr)_7.5rem]">
+        <div className="flex flex-col gap-4">
+          <Field label={t('Название')}>
+            <Input value={form.title} maxLength={100} onChange={(e) => set({ title: e.target.value })} />
+          </Field>
+          <Field label={t('Как запускается')}>
+            <select className={inputCls} value={form.launcher} onChange={(e) => set({ launcher: e.target.value })}>
+              {LAUNCHERS.map((l) => (
+                <option key={l.key} value={l.key}>
+                  {t(l.label)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {exe ? (
+            <>
+              <Field
+                label={t('Путь к .exe на игровых ПК')}
+                hint={t('Полный путь, одинаковый на всех ПК. В проводнике: Shift + правый клик по файлу → «Копировать как путь».')}
+              >
+                <Input
+                  className="font-mono"
+                  placeholder="G:\Games\Counter Strike 1.6\cstrike.exe"
+                  value={form.exePath}
+                  onChange={(e) => set({ exePath: e.target.value })}
+                />
+              </Field>
+              <Field label={t('Параметры запуска')} hint={t('Необязательно, например -console -novid')}>
+                <Input className="font-mono" value={form.args} onChange={(e) => set({ args: e.target.value })} />
+              </Field>
+            </>
+          ) : (
+            <Field
+              label={steam ? t('Номер игры в Steam') : t('Код игры в лаунчере')}
+              hint={
+                steam
+                  ? t('Число из ссылки магазина: store.steampowered.com/app/730 → 730. Можно вставить всю ссылку.')
+                  : undefined
+              }
+            >
+              <Input
+                className="font-mono"
+                value={form.launcherAppId}
+                onChange={(e) => set({ launcherAppId: steam ? steamId(e.target.value) : e.target.value })}
+              />
+            </Field>
+          )}
+          <Field
+            label={t('Обложка')}
+            hint={steam ? t('Ссылка на картинку. Пусто — обложка из Steam.') : t('Ссылка на картинку (вертикальная, 2:3). Необязательно.')}
+          >
+            <Input placeholder="https://…" value={form.coverUrl} onChange={(e) => set({ coverUrl: e.target.value })} />
+          </Field>
+          <Field label={t('Категории')} hint={t('До {n}', { n: MAX_CATEGORIES })}>
+            <div className="flex flex-wrap gap-1.5">
+              {chips.map((c) => {
+                const on = form.category.includes(c.key);
+                return (
+                  <Chip
+                    key={c.key}
+                    on={on}
+                    onClick={() =>
+                      set({
+                        category: on
+                          ? form.category.filter((x) => x !== c.key)
+                          : form.category.length < MAX_CATEGORIES
+                            ? [...form.category, c.key]
+                            : form.category,
+                      })
+                    }
+                  >
+                    {t(c.label)}
+                  </Chip>
+                );
+              })}
+            </div>
+          </Field>
+          <Field label={t('Описание')} hint={t('Необязательно')}>
+            <textarea
+              className="focus-ring h-20 w-full rounded-md border border-line bg-bg p-3 text-sm"
+              maxLength={1000}
+              value={form.description}
+              onChange={(e) => set({ description: e.target.value })}
+            />
+          </Field>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <span className="label">{t('Обложка')}</span>
+          <span className="block aspect-[2/3] w-full overflow-hidden rounded-md border border-line bg-bg">
+            {cover && (
+              <img
+                key={cover}
+                src={cover}
+                alt=""
+                onError={(e) => (e.currentTarget.style.visibility = 'hidden')}
+                className="h-full w-full object-cover"
+              />
+            )}
+          </span>
+        </div>
+      </div>
+
+      {error && <Note note={{ text: error, tone: 'err' }} />}
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-4">
+        {game &&
+          (confirmDelete ? (
+            <span className="flex items-center gap-1">
+              <span className="text-sm text-muted">{t('Удалить игру?')}</span>
+              <Button variant="danger" size="sm" disabled={busy} onClick={() => void run(() => clubApi.deleteGame(game.id))}>
+                {t('Да')}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(false)}>
+                {t('Нет')}
+              </Button>
+            </span>
+          ) : (
+            <Button variant="danger" disabled={busy} onClick={() => setConfirmDelete(true)}>
+              {t('Удалить')}
+            </Button>
+          ))}
+        <span className="ml-auto flex items-center gap-3">
+          {issue && <span className="text-sm text-muted">{issue}</span>}
+          <Button variant="ghost" disabled={busy} onClick={onCancel}>
+            {t('Закрыть')}
+          </Button>
+          <Button variant="primary" disabled={busy || issue !== null} onClick={() => void save()}>
+            {busy ? t('Сохраняем…') : game ? t('Сохранить') : t('Добавить')}
+          </Button>
+        </span>
+      </div>
+    </Section>
   );
 }
 
@@ -44,6 +348,8 @@ export default function CatalogPage(): JSX.Element {
   const [query, setQuery] = useState('');
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [savingPaths, setSavingPaths] = useState(false);
+  /** The game open in the editor: `new` — a new one. */
+  const [gameEdit, setGameEdit] = useState<string | null>(null);
   const s = useClubSettings();
 
   const savePaths = async (): Promise<void> => {
@@ -64,11 +370,14 @@ export default function CatalogPage(): JSX.Element {
     }
   };
 
-  useEffect(() => {
+  const load = (): Promise<void> =>
     clubApi
       .games()
       .then((r) => setGames(r.items))
       .catch((e: unknown) => setError(describe(e)));
+
+  useEffect(() => {
+    void load();
   }, []);
 
   const catalog: ClubSettings['catalog'] = s.draft?.catalog ?? { order: [], hidden: [], featured: [] };
@@ -90,23 +399,44 @@ export default function CatalogPage(): JSX.Element {
     [next[i], next[j]] = [next[j] as string, next[i] as string];
     setCatalog({ order: next });
   };
+  const openGame = (id: string): void => {
+    setEditing(null);
+    setGameEdit(id);
+  };
 
   return (
     <div className="flex flex-col gap-5">
       <PageHeader
         title={t('Каталог игр')}
         actions={
-          <Input
-            type="search"
-            className="w-64"
-            placeholder={t('Поиск')}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
+          <div className="flex items-center gap-2">
+            <Input
+              type="search"
+              className="w-64"
+              placeholder={t('Поиск')}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            <Button variant="primary" onClick={() => openGame('new')}>
+              {t('Добавить игру')}
+            </Button>
+          </div>
         }
       />
       {error && <Note note={{ text: error, tone: 'err' }} />}
       {s.error && <Note note={{ text: s.error, tone: 'err' }} />}
+
+      {gameEdit && (
+        <GameEditor
+          key={gameEdit}
+          game={gameEdit === 'new' ? null : (byId.get(gameEdit) ?? null)}
+          onCancel={() => setGameEdit(null)}
+          onDone={() => {
+            setGameEdit(null);
+            void load();
+          }}
+        />
+      )}
 
       {editing && (
         <Section
@@ -172,7 +502,18 @@ export default function CatalogPage(): JSX.Element {
               key: 'title',
               title: t('Название'),
               render: (g) => (
-                <span className={clsx('font-medium', catalog.hidden.includes(g.id) && 'text-muted')}>{g.title}</span>
+                <button
+                  type="button"
+                  className={clsx(
+                    'focus-ring rounded px-1 py-0.5 text-left font-medium hover:bg-white/[0.04]',
+                    catalog.hidden.includes(g.id) && 'text-muted',
+                  )}
+                  title={t('Изменить')}
+                  onClick={() => openGame(g.id)}
+                >
+                  {g.title}
+                  {g.exePath && <span className="block font-mono text-xs font-normal text-muted">{g.exePath}</span>}
+                </button>
               ),
             },
             {
@@ -197,7 +538,10 @@ export default function CatalogPage(): JSX.Element {
                 <button
                   type="button"
                   className="focus-ring rounded px-1.5 py-0.5 text-sm hover:bg-white/[0.04]"
-                  onClick={() => setEditing({ id: g.id, text: g.settingsPaths.join('\n') })}
+                  onClick={() => {
+                    setGameEdit(null);
+                    setEditing({ id: g.id, text: g.settingsPaths.join('\n') });
+                  }}
                 >
                   {g.settingsPaths.length > 0 ? (
                     <span className="text-success">{t('Переносятся')}</span>
@@ -258,6 +602,16 @@ export default function CatalogPage(): JSX.Element {
                   </div>
                 );
               },
+            },
+            {
+              key: 'edit',
+              title: '',
+              width: '6.5rem',
+              render: (g) => (
+                <Button variant="ghost" size="sm" onClick={() => openGame(g.id)}>
+                  {t('Изменить')}
+                </Button>
+              ),
             },
           ]}
         />

@@ -579,6 +579,26 @@ export interface AdminGame {
   featured: boolean;
   /** Where the game keeps a player's own settings (carried from PC to PC per player). */
   settingsPaths: string[];
+  /** Steam app id (the number in the store link) or the game's code in its launcher; null for an exe game. */
+  launcherAppId?: string | null;
+  /** Full path of the game's .exe on the PCs; null for a launcher game. */
+  exePath?: string | null;
+  args?: string | null;
+  description?: string;
+  /** The club's own game (added or changed here): server updates of the starter catalogue leave it alone. */
+  custom?: boolean;
+}
+
+/** What the owner sets for a game of the club (`POST /admin/games`, `PUT /admin/games/{id}`). */
+export interface GameInput {
+  title: string;
+  launcher: string;
+  exePath?: string | null;
+  args?: string | null;
+  launcherAppId?: string | null;
+  coverUrl?: string | null;
+  category: string[];
+  description?: string | null;
 }
 
 export interface PriceQuote {
@@ -689,6 +709,9 @@ export const clubApi = {
   games: (): Promise<{ items: AdminGame[]; order: string[] }> => call('/admin/games'),
   saveGameSettingsPaths: (id: string, settingsPaths: string[]): Promise<{ settingsPaths: string[] }> =>
     patch(`/admin/games/${id}`, { settingsPaths }),
+  addGame: (input: GameInput): Promise<{ game: AdminGame }> => post('/admin/games', input),
+  saveGame: (id: string, input: GameInput): Promise<{ game: AdminGame }> => put(`/admin/games/${id}`, input),
+  deleteGame: (id: string): Promise<unknown> => del(`/admin/games/${id}`),
 
   reports: (days: number): Promise<Reports> => call(`/admin/reports?days=${days}`),
   network: (days: number): Promise<NetworkReport> => call(`/admin/network?days=${days}`),
