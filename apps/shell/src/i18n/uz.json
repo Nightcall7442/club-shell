@@ -302,7 +302,7 @@
     "seeAll": "Barchasini ko'rish",
     "welcomeBack": "Qaytganingiz bilan",
     "sessionBar": "Seans",
-    "openEnded": "Cheklovsiz",
+    "openEnded": "Keyin toʻlov",
     "volume": "Ovoz balandligi",
     "mute": "Ovozni o'chirish",
     "unmute": "Ovozni yoqish",
@@ -694,7 +694,9 @@
     "noFilteredHistory": "Bu filtr bo'yicha operatsiyalar yo'q",
     "periodIn": "To'ldirildi",
     "periodOut": "Sarflandi",
-    "zoneOfPc": "Bu kompyuter zonasi: {{zone}}"
+    "zoneOfPc": "Bu kompyuter zonasi: {{zone}}",
+    "dueNow": "Hozir toʻlanadi:",
+    "dueHint": "Keyin toʻlov: summa oʻyinni tugatganingizda balansdan yechiladi."
   },
   "chat": {
     "title": "Chat",
@@ -1141,7 +1143,7 @@
       "ending": "Tugatilmoqda",
       "ended": "Tugagan"
     },
-    "openEnded": "Cheklovsiz",
+    "openEnded": "Keyin toʻlov",
     "cost": "Hozirgi narx",
     "tariff": "Tarif",
     "startedAt": "Boshlandi {{time}}",
@@ -1161,7 +1163,8 @@
     "timerLabel": "Seans taymeri",
     "lastMinute": "Oxirgi daqiqa!",
     "overtime": "Qo'shimcha vaqt",
-    "extendPostpaid": "Cheksiz seans uchun vaqt qo'shish shart emas"
+    "extendPostpaid": "Keyin toʻlovda vaqt qoʻshish shart emas: balans yetguncha oʻynaysiz, toʻlov oxirida.",
+    "due": "Toʻlov"
   },
   "settings": {
     "title": "Sozlamalar",

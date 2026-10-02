@@ -263,18 +263,41 @@ function SeatPanel({
       </header>
 
       {seat.session && seat.user && (
-        <dl className="grid grid-cols-2 divide-x divide-line overflow-hidden rounded-md border border-line bg-bg text-center">
-          <div className="flex flex-col gap-1.5 px-3 py-3">
-            <dt className="label">{t('Осталось')}</dt>
-            <dd className={clsx('num-dot text-2xl leading-none', left >= 0 && left <= 300 && 'text-danger')}>
-              {left < 0 ? '∞' : duration(left)}
-            </dd>
-          </div>
+        <dl
+          className={clsx(
+            'grid divide-x divide-line overflow-hidden rounded-md border border-line bg-bg text-center',
+            seat.session.isPrepaid ? 'grid-cols-2' : 'grid-cols-3',
+          )}
+        >
+          {seat.session.isPrepaid ? (
+            <div className="flex flex-col gap-1.5 px-3 py-3">
+              <dt className="label">{t('Осталось')}</dt>
+              <dd className={clsx('num-dot text-2xl leading-none', left >= 0 && left <= 300 && 'text-danger')}>
+                {left < 0 ? '∞' : duration(left)}
+              </dd>
+            </div>
+          ) : (
+            // Postpaid is charged in one go when the session ends: the balance stays untouched until then, so the
+            // running bill is what the counter needs to see.
+            <>
+              <div className="flex flex-col gap-1.5 px-3 py-3">
+                <dt className="label">{t('Играет')}</dt>
+                <dd className="num-dot text-2xl leading-none">{duration(seat.session.secondsUsed)}</dd>
+              </div>
+              <div className="flex flex-col gap-1.5 px-3 py-3">
+                <dt className="label">{t('Набежало')}</dt>
+                <dd className="tnum text-lg font-semibold leading-none">{money(seat.session.cost)}</dd>
+              </div>
+            </>
+          )}
           <div className="flex flex-col gap-1.5 px-3 py-3">
             <dt className="label">{t('Баланс')}</dt>
             <dd className="tnum text-lg font-semibold leading-none">{money(seat.user.balance)}</dd>
           </div>
         </dl>
+      )}
+      {seat.session && seat.user && !seat.session.isPrepaid && (
+        <p className="text-xs text-muted">{t('Постоплата: сумма спишется с баланса, когда сеанс закончится.')}</p>
       )}
 
       {note && (

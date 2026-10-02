@@ -302,7 +302,7 @@
     "seeAll": "See all",
     "welcomeBack": "Welcome back",
     "sessionBar": "Session",
-    "openEnded": "Open-ended",
+    "openEnded": "Postpaid",
     "volume": "Volume",
     "mute": "Mute",
     "unmute": "Unmute",
@@ -694,7 +694,9 @@
     "noFilteredHistory": "No operations match this filter",
     "periodIn": "Topped up",
     "periodOut": "Spent",
-    "zoneOfPc": "This PC's zone: {{zone}}"
+    "zoneOfPc": "This PC's zone: {{zone}}",
+    "dueNow": "Due so far:",
+    "dueHint": "Postpaid: the amount is taken from your balance when you finish playing."
   },
   "chat": {
     "title": "Chat",
@@ -1141,7 +1143,7 @@
       "ending": "Ending",
       "ended": "Ended"
     },
-    "openEnded": "Open-ended",
+    "openEnded": "Postpaid",
     "cost": "Cost so far",
     "tariff": "Tariff",
     "startedAt": "Started {{time}}",
@@ -1161,7 +1163,8 @@
     "timerLabel": "Session timer",
     "lastMinute": "Last minute!",
     "overtime": "Overtime",
-    "extendPostpaid": "Open-ended sessions do not need extra time"
+    "extendPostpaid": "No need to add time on postpaid: you play while the balance lasts and pay at the end.",
+    "due": "Due"
   },
   "settings": {
     "title": "Settings",
