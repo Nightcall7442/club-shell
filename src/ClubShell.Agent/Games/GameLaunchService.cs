@@ -253,15 +253,21 @@ public sealed class GameLaunchService : IDisposable
                     throw IpcError.Of(ErrorCode.AccountPoolExhausted, "Account pool is disabled on this PC").ToException();
                 }
 
-                lease = await _pool.LeaseAsync(game, request.SessionId, request.AccountLeaseId, token).ConfigureAwait(false);
-                injection = await _injector.InjectAsync(game, lease, token).ConfigureAwait(false);
-                await _saves.DownloadAsync(game, lease, token).ConfigureAwait(false);
+                // Lease, credentials and saves are not interrupted half-way (an injection cut short is never restored, a
+                // lease the server granted would be lost): "cancel launch" is honoured between the steps.
+                lease = await _pool.LeaseAsync(game, request.SessionId, request.AccountLeaseId, cancellationToken).ConfigureAwait(false);
+                ThrowIfCancelled(game, inFlight);
+                injection = await _injector.InjectAsync(game, lease, cancellationToken).ConfigureAwait(false);
+                ThrowIfCancelled(game, inFlight);
+                await _saves.DownloadAsync(game, lease, cancellationToken).ConfigureAwait(false);
+                ThrowIfCancelled(game, inFlight);
             }
 
             // The player's own binds / sensitivity / graphics, whatever PC they sit at.
             if (_playerSettings is not null)
             {
-                await _playerSettings.RestoreAsync(game, request.UserId, token).ConfigureAwait(false);
+                await _playerSettings.RestoreAsync(game, request.UserId, cancellationToken).ConfigureAwait(false);
+                ThrowIfCancelled(game, inFlight);
             }
 
             var env = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -288,7 +294,7 @@ public sealed class GameLaunchService : IDisposable
             };
             var context = new LaunchContext(wtsSession, _kiosk.KioskUser, env, request.Resolution);
 
-            await PublishAsync(new GameStateChanged(game.Id, game.Title, GameState.Launching, _clock.UtcNow), token).ConfigureAwait(false);
+            await PublishAsync(new GameStateChanged(game.Id, game.Title, GameState.Launching, _clock.UtcNow), cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("Launching {Title} via {Launcher} in session {WtsSession} (lease {LeaseId})", game.Title, game.Launcher, wtsSession, lease?.LeaseId);
             await EnsureSteamWritableAsync(game, token).ConfigureAwait(false);
 
@@ -329,6 +335,7 @@ public sealed class GameLaunchService : IDisposable
             // "running" for good, its "close game" answered notFound.
             await PublishAsync(new GameStateChanged(game.Id, game.Title, GameState.Running, _clock.UtcNow, pid), cancellationToken).ConfigureAwait(false);
             await _tracker.TrackAsync(new GameLaunchRecord(game, effective, running, lease, injection, antiCheat, job, durationMs), cancellationToken).ConfigureAwait(false);
+            Settled(game, inFlight); // tracked: "close game" reaches it through the tracker from here on
             string? injectionError = injection?.Error;
             job = null;
             injection = null;
@@ -355,7 +362,7 @@ public sealed class GameLaunchService : IDisposable
             error = Cancelled(game);
         }
 
-        return await FailAsync(game, request, startedAt, startedTs, antiCheat, error, lease, injection, job, cancellationToken).ConfigureAwait(false);
+        return await FailAsync(game, request, startedAt, startedTs, antiCheat, error, lease, injection, job, () => Settled(game, inFlight), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -386,6 +393,20 @@ public sealed class GameLaunchService : IDisposable
 
     /// <summary>The player cancelled the launch (<c>games.kill</c> while it was starting): <c>gameLaunchFailed{stage: cancelled}</c>.</summary>
     private static IpcError Cancelled(Game game) => IpcError.GameLaunchFailed("cancelled", $"Launch of {game.Title} cancelled");
+
+    private static void ThrowIfCancelled(Game game, InFlightLaunch inFlight)
+    {
+        if (inFlight.Cancelled)
+        {
+            throw Cancelled(game).ToException();
+        }
+    }
+
+    /// <summary>
+    /// The launch has its outcome: it no longer answers "cancel launch" and a retry of the game may start (the failure
+    /// cleanup and the reports still running). <see cref="InFlightLaunch.Done"/> completes only after them.
+    /// </summary>
+    private void Settled(Game game, InFlightLaunch inFlight) => _inFlight.TryRemove(new KeyValuePair<Guid, InFlightLaunch>(game.Id, inFlight));
 
     /// <summary>Closes a game that started after its launch was cancelled.</summary>
     private async Task KillStartedAsync(IGameLauncher launcher, Game game, int pid)
@@ -621,6 +642,7 @@ public sealed class GameLaunchService : IDisposable
         ActiveLease? lease,
         InjectionResult? injection,
         JobObject? job,
+        Action settled,
         CancellationToken cancellationToken)
     {
         _logger.LogWarning("Launch of {Title} failed: {Code} {Message}", game.Title, error.Code, error.Message);
@@ -638,6 +660,10 @@ public sealed class GameLaunchService : IDisposable
 
         var result = LaunchResult.Failure(error, startedAt, lease?.LeaseId);
         await PublishAsync(new GameStateChanged(game.Id, game.Title, GameState.Failed, _clock.UtcNow, null, null, error), ct).ConfigureAwait(false);
+
+        // A retry may start now: after "failed" went out, so that event cannot end the retry's progress on the Shell, and
+        // without waiting for the report (a slow or unreachable server).
+        settled();
         await ReportAsync(game, request, result, (int)_clock.GetElapsedTime(startedTs).TotalMilliseconds, antiCheat, injection?.Error, ct).ConfigureAwait(false);
         return result;
     }

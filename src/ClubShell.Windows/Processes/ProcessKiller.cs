@@ -66,9 +66,13 @@ public sealed class ProcessKiller
             }
 
             targets.Add(entry);
+            DateTime? currentStart = StartTime(current);
             foreach (ProcessSnapshotEntry child in byParent[current])
             {
-                if (child.Pid != current && child.Pid != pid)
+                // A parent pid is only a number: once the real parent exits, Windows may give it to a new process, and an
+                // older process (the player's Shell, started by userinit) would pass for that one's child. A child is
+                // never older than its parent.
+                if (child.Pid != current && child.Pid != pid && !(StartTime(child.Pid) < currentStart))
                 {
                     queue.Enqueue(child.Pid);
                 }
@@ -135,6 +139,20 @@ public sealed class ProcessKiller
 
         List<KilledProcess> killed = Kill(new[] { entry }, gracefulTimeout);
         return killed.Count == 0 ? null : killed[0];
+    }
+
+    /// <summary>When <paramref name="pid"/> started, or <see langword="null"/> when it is gone or not queryable.</summary>
+    private static DateTime? StartTime(int pid)
+    {
+        try
+        {
+            using var process = System.Diagnostics.Process.GetProcessById(pid);
+            return process.StartTime;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
+        {
+            return null;
+        }
     }
 
     /// <summary>Converts a <c>*cheat*.exe</c> style pattern into an anchored, case-insensitive regex.</summary>

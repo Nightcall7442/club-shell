@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using ClubShell.Agent.Games;
@@ -6,8 +7,8 @@ namespace ClubShell.Agent.Tests;
 
 /// <summary>
 /// "The Steam install folder is currently not writable": <see cref="SteamFolderAccess"/> grants BUILTIN\Users Modify on a
-/// Steam folder that lacks it (as Steam's installer would), inherited by what is already inside, and never on a folder
-/// that is not a Steam installation — the catalogue's paths come from the club's owner.
+/// Steam folder that lacks it (as Steam's installer would), inherited by what is already inside — and only where the
+/// grant, made as LocalSystem by name, cannot be steered by a player.
 /// </summary>
 public sealed class SteamFolderAccessTests : IDisposable
 {
@@ -29,29 +30,53 @@ public sealed class SteamFolderAccessTests : IDisposable
         MakeSteam(_steam);
 
         SteamFolderAccess.IsSteamInstallation(_steam).Should().BeTrue();
-        SteamFolderAccess.IsWritableByUsers(_steam).Should().BeFalse();
-        SteamFolderAccess.IsWritableByUsers(bin).Should().BeFalse();
+        SteamFolderAccess.IsWritableByPlayers(_steam).Should().BeFalse();
+        SteamFolderAccess.IsWritableByPlayers(bin).Should().BeFalse();
 
         SteamFolderAccess.Grant(_steam).Should().BeTrue();
 
-        SteamFolderAccess.IsWritableByUsers(_steam).Should().BeTrue();
-        SteamFolderAccess.IsWritableByUsers(bin).Should().BeTrue("what is already inside inherits the right");
+        SteamFolderAccess.IsWritableByPlayers(_steam).Should().BeTrue();
+        SteamFolderAccess.IsWritableByPlayers(bin).Should().BeTrue("what is already inside inherits the right");
         SteamFolderAccess.Grant(_steam).Should().BeFalse("it is writable already");
     }
 
     [Fact]
-    public void Only_a_Steam_installation_qualifies()
+    public void A_Steam_installation_has_steam_exe_and_steamclient_dll()
     {
-        SteamFolderAccess.IsSteamInstallation(_steam).Should().BeFalse("no steam.exe and steamclient.dll in it");
-        SteamFolderAccess.IsSteamInstallation(new DirectoryInfo(Environment.SystemDirectory)).Should().BeFalse();
-        SteamFolderAccess.IsSteamInstallation(new DirectoryInfo(Path.GetPathRoot(_steam.FullName)!)).Should().BeFalse();
-
+        SteamFolderAccess.IsSteamInstallation(_steam).Should().BeFalse();
         File.WriteAllText(Path.Combine(_steam.FullName, "steam.exe"), string.Empty);
         SteamFolderAccess.IsSteamInstallation(_steam).Should().BeFalse("steamclient.dll is missing");
         MakeSteam(_steam);
         SteamFolderAccess.IsSteamInstallation(_steam).Should().BeTrue();
-        SteamFolderAccess.IsSteam(@"G:\Steam\Steam.exe").Should().BeTrue();
+        SteamFolderAccess.IsSteam(@"C:\Program Files (x86)\Steam\Steam.exe").Should().BeTrue();
         SteamFolderAccess.IsSteam(@"G:\Games\cstrike.exe").Should().BeFalse();
+    }
+
+    [Fact]
+    public void Only_a_folder_no_player_can_steer_is_safe_to_grant()
+    {
+        string programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+        SteamFolderAccess.IsSafeToGrant(new DirectoryInfo(programFiles), out string reason).Should().BeTrue(reason);
+
+        SteamFolderAccess.IsSafeToGrant(new DirectoryInfo(Environment.SystemDirectory), out reason).Should().BeFalse();
+        reason.Should().Be("inside Windows");
+        SteamFolderAccess.IsSafeToGrant(new DirectoryInfo(Path.GetPathRoot(programFiles)!), out reason).Should().BeFalse();
+        reason.Should().Be("a drive root");
+
+        // A folder in a player's own profile: they own it, they could swap it for a junction.
+        SteamFolderAccess.IsSafeToGrant(_steam, out reason).Should().BeFalse();
+        reason.Should().Contain("not owned by");
+
+        // A junction on the way is refused whatever it points at.
+        string junction = Path.Combine(_steam.FullName, "link");
+        string target = _steam.CreateSubdirectory("target").FullName;
+        using (Process mklink = Process.Start(new ProcessStartInfo("cmd.exe", $"/c mklink /J \"{junction}\" \"{target}\"") { CreateNoWindow = true, UseShellExecute = false })!)
+        {
+            mklink.WaitForExit(10_000).Should().BeTrue();
+        }
+
+        SteamFolderAccess.IsSafeToGrant(new DirectoryInfo(junction), out reason).Should().BeFalse();
+        reason.Should().Contain("junction or symlink");
     }
 
     [Fact]
@@ -61,7 +86,16 @@ public sealed class SteamFolderAccessTests : IDisposable
         SteamFolderAccess.IsOnNetwork(new DirectoryInfo(@"\\nas01\games\Steam")).Should().BeTrue();
     }
 
-    public void Dispose() => _steam.Delete(recursive: true);
+    public void Dispose()
+    {
+        // The junction goes without its target: Directory.Delete removes a junction, never what it points at.
+        foreach (DirectoryInfo link in _steam.EnumerateDirectories().Where(d => (d.Attributes & FileAttributes.ReparsePoint) != 0))
+        {
+            link.Delete();
+        }
+
+        _steam.Delete(recursive: true);
+    }
 
     private static void MakeSteam(DirectoryInfo folder)
     {

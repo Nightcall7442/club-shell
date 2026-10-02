@@ -59,11 +59,6 @@ public sealed class GameDetector
     private readonly ILogger<GameDetector> _logger;
     private readonly ConcurrentDictionary<Guid, (DateTimeOffset At, GameInstallStatus Status)> _cache = new();
 
-    /// <summary>Where a Steam copied onto a drive is looked for, relative to the drive's root.</summary>
-    private static readonly string[] SteamFolders = ["Steam", @"Program Files (x86)\Steam", @"Program Files\Steam", @"Games\Steam"];
-    private static readonly TimeSpan SteamScanTtl = TimeSpan.FromMinutes(1);
-    private SteamScan? _steamScan;
-
     /// <summary>Creates a detector.</summary>
     public GameDetector(IOptionsMonitor<AgentSettings> settings, IClock clock, ILogger<GameDetector> logger)
     {
@@ -285,53 +280,8 @@ public sealed class GameDetector
         }
 
         string fallback = Path.Combine(ProgramFilesX86(), "Steam");
-        return Directory.Exists(fallback) ? fallback : ScannedSteamRoot();
+        return Directory.Exists(fallback) ? fallback : null;
     }
-
-    /// <summary>
-    /// Steam copied onto another local disk (<c>D:\Steam</c>) has no registry entry: the usual folders of every local
-    /// drive are looked at, the answer kept for <see cref="SteamScanTtl"/>. Network drives are not: Steam cannot run from
-    /// one folder shared by several PCs (it writes there), so a club installs it on each PC.
-    /// </summary>
-    private string? ScannedSteamRoot()
-    {
-        SteamScan? cached = Volatile.Read(ref _steamScan);
-        DateTimeOffset now = _clock.UtcNow;
-        if (cached is not null && now - cached.At < SteamScanTtl)
-        {
-            return cached.Root;
-        }
-
-        string? found = null;
-        foreach (DriveInfo drive in DriveInfo.GetDrives())
-        {
-            try
-            {
-                if (drive.DriveType != DriveType.Fixed || !drive.IsReady)
-                {
-                    continue;
-                }
-
-                found = SteamFolders.Select(f => new DirectoryInfo(Path.Combine(drive.RootDirectory.FullName, f)))
-                    .FirstOrDefault(d => d.Exists && SteamFolderAccess.IsSteamInstallation(d))?.FullName;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                _logger.LogDebug(ex, "Drive {Drive} not searched for Steam", drive.Name);
-            }
-
-            if (found is not null)
-            {
-                _logger.LogInformation("Steam found at {Folder} (no registry entry)", found);
-                break;
-            }
-        }
-
-        Volatile.Write(ref _steamScan, new SteamScan(now, found));
-        return found;
-    }
-
-    private sealed record SteamScan(DateTimeOffset At, string? Root);
 
     // ---- Epic -----------------------------------------------------------------------------------
 
