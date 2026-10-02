@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
-import { assetUrl, events } from '@/lib/tauri';
+import { assetUrl } from '@/lib/tauri';
 import { useGamesStore } from '@/store/games';
 import { useThemeStore } from '@/store/theme';
+import { selectTrailerPlaying, useShellVisible, useTrailerStore } from './playback';
 
 export interface VideoBackgroundProps {
   /** Video URL or ProgramData-relative path; resolved through `assetUrl`. */
@@ -16,8 +17,9 @@ export interface VideoBackgroundProps {
 }
 
 /**
- * Muted looping background video. Pauses while the page is hidden, the shell lost focus, a game is running,
- * or `paused` is set; renders nothing when the theme disables animations (the wallpaper stays).
+ * Muted looping background video. Pauses while the page is hidden, the shell lost focus, a game is running, a game
+ * trailer plays (`GameTrailer`) or `paused` is set; renders nothing when the theme disables animations (the wallpaper
+ * stays).
  */
 export function VideoBackground({
   src,
@@ -29,11 +31,11 @@ export function VideoBackground({
   const video = useRef<HTMLVideoElement>(null);
   const [url, setUrl] = useState<string | null>(null);
   const [posterUrl, setPosterUrl] = useState<string | undefined>(undefined);
-  const [hidden, setHidden] = useState(() => typeof document !== 'undefined' && document.hidden);
-  const [focused, setFocused] = useState(true);
   const [ready, setReady] = useState(false);
   const animations = useThemeStore((s) => s.theme.animations);
   const gameRunning = useGamesStore((s) => s.running.length > 0);
+  const visible = useShellVisible();
+  const trailer = useTrailerStore(selectTrailerPlaying);
 
   useEffect(() => {
     let active = true;
@@ -74,17 +76,7 @@ export function VideoBackground({
     };
   }, [poster]);
 
-  useEffect(() => {
-    const onVisibility = (): void => setHidden(document.hidden);
-    document.addEventListener('visibilitychange', onVisibility);
-    const off = events.onKiosk('focus', (p) => setFocused(p.focused));
-    return () => {
-      document.removeEventListener('visibilitychange', onVisibility);
-      off();
-    };
-  }, []);
-
-  const shouldPlay = animations && !paused && !hidden && focused && !gameRunning;
+  const shouldPlay = animations && !paused && visible && !gameRunning && !trailer;
 
   useEffect(() => {
     const el = video.current;

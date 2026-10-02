@@ -27,22 +27,24 @@ public sealed class CatalogOwnerGamesTests(ExampleCatalogFixture server) : IClas
         var (status, body) = await SendRawAsync(HttpMethod.Post, "/games", owner, new
         {
             title = "  Half-Life  ", launcher = "exe", exePath = @"G:\Games\Half-Life\hl.exe", args = " -console ", category = new[] { "shooter", " singleplayer ", "shooter" },
-            description = "Классика.",
+            description = "Классика.", videoUrl = " https://cdn.example.com/hl.webm ",
         });
         Assert.Equal(200, status);
         var game = body.GetProperty("game");
         var id = game.GetProperty("id").GetGuid();
-        Assert.Equal(("Half-Life", "exe", @"G:\Games\Half-Life\hl.exe", "-console", true, JsonValueKind.Null, "Классика."), (
+        Assert.Equal(("Half-Life", "exe", @"G:\Games\Half-Life\hl.exe", "-console", true, JsonValueKind.Null, "Классика.", "https://cdn.example.com/hl.webm"), (
             game.GetProperty("title").GetString(), game.GetProperty("launcher").GetString(), game.GetProperty("exePath").GetString(),
             game.GetProperty("args").GetString(), game.GetProperty("custom").GetBoolean(), game.GetProperty("coverUrl").ValueKind,
-            game.GetProperty("description").GetString()));
+            game.GetProperty("description").GetString(), game.GetProperty("videoUrl").GetString()));
         Assert.Equal(["shooter", "singleplayer"], game.GetProperty("category").EnumerateArray().Select(c => c.GetString()));
         Assert.Equal(version + 1, await Players.ScalarAsync<int>(server, "SELECT catalog_version FROM clubs"));
 
+        // The trailer reaches the PCs with the rest of the card: the shell plays it behind the game's art.
         var agent = await TestAgent.CreateAsync(server);
         var seen = (await AgentGamesAsync(agent)).Single(g => g.GetProperty("id").GetGuid() == id);
-        Assert.Equal(("exe", @"G:\Games\Half-Life\hl.exe", "-console"),
-            (seen.GetProperty("launcher").GetString(), seen.GetProperty("exePath").GetString(), seen.GetProperty("args").GetString()));
+        Assert.Equal(("exe", @"G:\Games\Half-Life\hl.exe", "-console", "https://cdn.example.com/hl.webm"),
+            (seen.GetProperty("launcher").GetString(), seen.GetProperty("exePath").GetString(), seen.GetProperty("args").GetString(),
+             seen.GetProperty("videoUrl").GetString()));
 
         // A Steam game without a cover gets its store art and runs no exe of its own.
         (status, body) = await SendRawAsync(HttpMethod.Post, "/games", owner, new { title = "Terraria", launcher = "steam", launcherAppId = "105600", exePath = @"C:\x.exe" });
@@ -56,9 +58,10 @@ public sealed class CatalogOwnerGamesTests(ExampleCatalogFixture server) : IClas
         });
         Assert.Equal(200, status);
         game = body.GetProperty("game");
-        Assert.Equal(("Half-Life 1", @"\\nas\games\Half-Life\hl.exe", "https://cdn.example.com/hl.jpg", JsonValueKind.Null, 0), (
+        // A save replaces the card: no videoUrl in it is no trailer, as no args are none.
+        Assert.Equal(("Half-Life 1", @"\\nas\games\Half-Life\hl.exe", "https://cdn.example.com/hl.jpg", JsonValueKind.Null, 0, JsonValueKind.Null), (
             game.GetProperty("title").GetString(), game.GetProperty("exePath").GetString(), game.GetProperty("coverUrl").GetString(),
-            game.GetProperty("args").ValueKind, game.GetProperty("category").GetArrayLength()));
+            game.GetProperty("args").ValueKind, game.GetProperty("category").GetArrayLength(), game.GetProperty("videoUrl").ValueKind));
         Assert.Equal(version + 3, await Players.ScalarAsync<int>(server, "SELECT catalog_version FROM clubs"));
 
         // The contract's list (through the validating client) carries the new fields too.
@@ -101,6 +104,10 @@ public sealed class CatalogOwnerGamesTests(ExampleCatalogFixture server) : IClas
             (owner, HttpMethod.Post, "/games", new { title = "Game", launcher = "steam" }, 400, "required"),
             (owner, HttpMethod.Post, "/games", new { title = "Game", launcher = "steam", launcherAppId = "abc" }, 400, "format"),
             (owner, HttpMethod.Post, "/games", new { title = "Game", launcher = "exe", exePath = @"G:\g.exe", coverUrl = "ftp://x/y.jpg" }, 400, "format"),
+            (owner, HttpMethod.Post, "/games", new { title = "Game", launcher = "exe", exePath = @"G:\g.exe", videoUrl = "http://cdn.example.com/g.mp4" }, 400, "format"),
+            (owner, HttpMethod.Post, "/games", new { title = "Game", launcher = "exe", exePath = @"G:\g.exe", videoUrl = "g.mp4" }, 400, "format"),
+            (owner, HttpMethod.Post, "/games", new { title = "Game", launcher = "exe", exePath = @"G:\g.exe", videoUrl = "https://x.com/" + new string('v', 2000) }, 400, "max"),
+            (owner, HttpMethod.Put, $"/games/{Cs16}", new { title = "Game", launcher = "exe", exePath = @"G:\g.exe", videoUrl = "javascript:alert(1)" }, 400, "format"),
             (owner, HttpMethod.Post, "/games", new { title = "Game", launcher = "exe", exePath = @"G:\g.exe", category = new[] { "a", "b", "c", "d", "e", "f" } }, 400, "max"),
             (owner, HttpMethod.Post, "/games", new { title = "Game", launcher = "exe", exePath = @"G:\g.exe", category = new[] { "bad key" } }, 400, "format"),
             (owner, HttpMethod.Post, "/games", new { title = "Game", launcher = "exe", exePath = @"G:\g.exe", category = "shooter" }, 400, "format"),

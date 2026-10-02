@@ -605,6 +605,13 @@ export const UZ: Record<string, string> = {
   Геройские: 'Qahramonlar',
   'Открытый мир': 'Ochiq dunyo',
   'Установить приложение': 'Ilovani oʻrnatish',
+  'Ролик (ссылка на .mp4/.webm)': 'Rolik (.mp4/.webm havolasi)',
+  'Необязательно. Прямая ссылка на сам файл: ролик без звука идёт за картинкой игры на ПК. Ссылка на YouTube не подойдёт.':
+    'Ixtiyoriy. Faylning oʻziga toʻgʻridan-toʻgʻri havola: rolik kompyuterlarda oʻyin rasmi ortida ovozsiz aylanadi. YouTube havolasi toʻgʻri kelmaydi.',
+  'Ролик — ссылка https://… на файл .mp4 или .webm': 'Rolik — .mp4 yoki .webm fayliga https://… havola',
+  'Ролик не открывается: нужна прямая ссылка на файл .mp4 или .webm':
+    'Rolik ochilmayapti: .mp4 yoki .webm fayliga toʻgʻridan-toʻgʻri havola kerak',
+  Ролик: 'Rolik',
 };
 export const EN: Record<string, string> = {
   'Выручка за период': 'Revenue for the period',
@@ -1212,4 +1219,11 @@ export const EN: Record<string, string> = {
   Геройские: 'Hero',
   'Открытый мир': 'Open world',
   'Установить приложение': 'Install the app',
+  'Ролик (ссылка на .mp4/.webm)': 'Trailer (link to an .mp4/.webm)',
+  'Необязательно. Прямая ссылка на сам файл: ролик без звука идёт за картинкой игры на ПК. Ссылка на YouTube не подойдёт.':
+    "Optional. A direct link to the file itself: the trailer plays muted behind the game's art on the PCs. A YouTube link will not work.",
+  'Ролик — ссылка https://… на файл .mp4 или .webm': 'The trailer is an https://… link to an .mp4 or .webm file',
+  'Ролик не открывается: нужна прямая ссылка на файл .mp4 или .webm':
+    'The trailer does not open: it needs a direct link to an .mp4 or .webm file',
+  Ролик: 'Trailer',
 };
