@@ -83,6 +83,7 @@ import type {
 } from '@clubshell/contracts';
 import { tariffPriceFor } from '@clubshell/contracts';
 import type { GamepadState, KioskState, ShellConfig } from '@/lib/tauri';
+import type { GpuPanelInfo, PcAudioOutputs, PcMouseSettings } from '@/lib/tauri';
 import { builtinThemes, DEFAULT_THEME } from '@/theme/themes';
 import {
   ACHIEVEMENTS,
@@ -128,6 +129,9 @@ import {
   USER_ID,
   VIP_USER,
   uzs,
+  PC_AUDIO_OUTPUTS,
+  PC_GPU_PANELS,
+  PC_MOUSE,
 } from './data';
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -2067,6 +2071,85 @@ cmd(
   },
   { fast: true },
 );
+
+// ----- pc (player PC settings) ----------------------------------------------------------------------------------------
+
+/** Mouse / audio output the mock "PC" currently has; logout and session end put the club's values back, as in Rust. */
+const pcMock = { mouse: clone(PC_MOUSE), audio: clone(PC_AUDIO_OUTPUTS) };
+
+function restorePcMock(): void {
+  pcMock.mouse = clone(PC_MOUSE);
+  pcMock.audio = clone(PC_AUDIO_OUTPUTS);
+}
+
+function requirePlayer(): void {
+  if (!mockState.user) {
+    mockError('forbidden', 'needs a signed-in player');
+  }
+}
+
+subscribeMock('agent://session.ended', restorePcMock);
+subscribeMock('agent://auth.expired', restorePcMock);
+const logoutWithoutRestore = registry['auth_logout'];
+if (logoutWithoutRestore) {
+  registry['auth_logout'] = (args) => {
+    restorePcMock();
+    return logoutWithoutRestore(args);
+  };
+}
+
+cmd('pc_mouse_get', (): PcMouseSettings => clone(pcMock.mouse), { fast: true });
+
+cmd('pc_mouse_set', (args): PcMouseSettings => {
+  const patch = obj<Partial<PcMouseSettings>>(args, 'patch') ?? {};
+  const { speed, enhancePrecision, doubleClickMs } = patch;
+  if (speed !== undefined && (!Number.isInteger(speed) || speed < 1 || speed > 20)) {
+    mockError('validation', 'speed: must be between 1 and 20', { field: 'speed', reason: 'must be between 1 and 20' });
+  }
+  if (doubleClickMs !== undefined && (!Number.isInteger(doubleClickMs) || doubleClickMs < 200 || doubleClickMs > 900)) {
+    mockError('validation', 'doubleClickMs: must be between 200 and 900', {
+      field: 'doubleClickMs',
+      reason: 'must be between 200 and 900',
+    });
+  }
+  requirePlayer();
+  pcMock.mouse = {
+    speed: speed ?? pcMock.mouse.speed,
+    enhancePrecision: enhancePrecision ?? pcMock.mouse.enhancePrecision,
+    doubleClickMs: doubleClickMs ?? pcMock.mouse.doubleClickMs,
+  };
+  return clone(pcMock.mouse);
+});
+
+cmd('pc_audio_outputs', (): PcAudioOutputs => clone(pcMock.audio));
+
+cmd('pc_audio_set_output', (args): PcAudioOutputs => {
+  const deviceId = (str(args, 'deviceId') ?? '').trim();
+  if (deviceId.length === 0) {
+    mockError('validation', 'deviceId: required', { field: 'deviceId', reason: 'required' });
+  }
+  requirePlayer();
+  if (!pcMock.audio.devices.some((d) => d.id === deviceId)) {
+    mockError('notFound', 'audio device not found');
+  }
+  pcMock.audio.devices = pcMock.audio.devices.map((d) => ({ ...d, isDefault: d.id === deviceId }));
+  return clone(pcMock.audio);
+});
+
+cmd('pc_gpu_panels', (): GpuPanelInfo[] => clone(PC_GPU_PANELS), { fast: true });
+
+cmd('pc_gpu_panel_open', (args): null => {
+  const vendor = str(args, 'vendor');
+  if (vendor !== 'nvidia' && vendor !== 'amd' && vendor !== 'intel') {
+    mockError('validation', 'vendor: must be nvidia, amd or intel', { field: 'vendor', reason: 'format' });
+  }
+  requirePlayer();
+  if (!PC_GPU_PANELS.some((p) => p.vendor === vendor)) {
+    mockError('notFound', 'graphics panel not found');
+  }
+  console.info(`[mock] pc_gpu_panel_open(${vendor}) — would open the vendor panel over the shell`);
+  return null;
+});
 
 /** Every command name TAURI_COMMANDS.md §4.1 lists; `tests/unit/mock-coverage` compares against this. */
 export const MOCKED_COMMANDS: readonly string[] = Object.keys(registry);

@@ -1291,5 +1291,46 @@
     "volumeChanged": "Volume {{level}}%",
     "muted": "Muted",
     "unmuted": "Sound on"
+  },
+  "pcSettings": {
+    "restoredHint": "Applies until your session ends, then the club's settings come back",
+    "mouse": "Mouse",
+    "pointerSpeed": "Pointer speed",
+    "speedValue": "{{value}} of {{max}}",
+    "slower": "Slower",
+    "faster": "Faster",
+    "decrease": "Decrease: {{label}}",
+    "increase": "Increase: {{label}}",
+    "precision": "Enhance pointer precision",
+    "precisionHint": "Acceleration: the sharper the move, the further the pointer goes. Usually off for shooters",
+    "doubleClick": "Double-click speed",
+    "doubleClickValue": "{{ms}} ms",
+    "doubleClickTest": "Double-click test",
+    "doubleClickTestIdle": "Double-click the folder",
+    "doubleClickTestOk": "Got it, that was a double click",
+    "doubleClickTestSlow": "Too slow: click faster or move the slider towards “Slower”",
+    "unavailable": "Not available on this PC",
+    "output": "Output device",
+    "outputHint": "Where game and app sound goes",
+    "outputDefault": "Playing here now",
+    "outputChanged": "Sound now plays on “{{name}}”",
+    "outputReadOnly": "On this PC the staff switches the device",
+    "outputNone": "No output devices found. Check that your headphones are plugged in",
+    "refresh": "Refresh the device list",
+    "kind": {
+      "speakers": "Speakers",
+      "headphones": "Headphones",
+      "headset": "Headset",
+      "digital": "Monitor / HDMI",
+      "other": "Audio output"
+    },
+    "gpu": "Graphics card",
+    "gpuHint": "The panel opens over the shell. Close it to come back here",
+    "gpuOpen": "Open {{name}}",
+    "vendor": {
+      "nvidia": "NVIDIA graphics card",
+      "amd": "AMD graphics card",
+      "intel": "Intel graphics"
+    }
   }
 }
