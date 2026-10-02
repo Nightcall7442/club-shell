@@ -79,7 +79,7 @@ public sealed class ShellSettingsStore
         }
     }
 
-    /// <summary>The admin PIN file: <c>secureadmin-pin</c> (SYSTEM and Administrators only), written by <c>set-admin-pin.ps1</c>.</summary>
+    /// <summary>The admin PIN file: <c>secure\admin-pin</c> (SYSTEM and Administrators only), written by <c>set-admin-pin.ps1</c>.</summary>
     public string AdminPinPath => _settings.CurrentValue.ResolvePath(Path.Combine(ClubShellPaths.SecureDirName, "admin-pin"));
 
     /// <summary>

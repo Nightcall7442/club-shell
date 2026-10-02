@@ -126,7 +126,7 @@ public sealed class PcRepository(NpgsqlDataSource db)
 
             // A clone boots with the reference PC's Windows name and the owner renames it afterwards: while the PC still
             // waits for approval and keeps its generated name, the new name moves it to that seat number (when free).
-            if (!known.Approved && known.Name == $"PC-{known.Number:D2}" && SeatNumberOf(request.MachineName) is { } wanted && wanted != known.Number)
+            if (!known.Approved && known.Name == GeneratedName(known.Number) && SeatNumberOf(request.MachineName) is { } wanted && wanted != known.Number)
             {
                 await c.ExecuteAsync(
                     """
@@ -134,7 +134,7 @@ public sealed class PcRepository(NpgsqlDataSource db)
                     WHERE id = @id AND NOT EXISTS (
                         SELECT 1 FROM pcs o WHERE o.club_id = @clubId AND o.deleted_at IS NULL AND o.number = @wanted AND o.id <> @id)
                     """,
-                    new { id, clubId, wanted, name = $"PC-{wanted:D2}" },
+                    new { id, clubId, wanted, name = GeneratedName(wanted) },
                     tx);
             }
         }
@@ -169,7 +169,7 @@ public sealed class PcRepository(NpgsqlDataSource db)
                 """,
                 new
                 {
-                    id, clubId, number, name = seat?.Name ?? $"PC-{number:D2}", zone = seat?.Zone ?? "", x = seat?.X ?? 0, y = seat?.Y ?? 0,
+                    id, clubId, number, name = seat?.Name ?? GeneratedName(number), zone = seat?.Zone ?? "", x = seat?.X ?? 0, y = seat?.Y ?? 0,
                     deviceKind = seat?.DeviceKind ?? "pc", hwid = request.Hwid, mac, machineName = request.MachineName,
                     ip = request.IpAddress, hardware, approved, agentVersion = request.AgentVersion, now,
                 },
@@ -356,6 +356,9 @@ public sealed class PcRepository(NpgsqlDataSource db)
     private static DateTime Utc(DateTimeOffset at) => new(at.UtcTicks - at.UtcTicks % TimeSpan.TicksPerMillisecond, DateTimeKind.Utc);
 
     private static readonly Regex SeatName = new("^(?:PC|ПК)?[ _-]?0*([1-9][0-9]{0,2})$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+
+    /// <summary>The name a new PC gets from its seat number (<c>PC-07</c>) until the owner renames it.</summary>
+    public static string GeneratedName(int number) => string.Create(CultureInfo.InvariantCulture, $"PC-{number:D2}");
 
     /// <summary>The seat number a Windows name such as <c>PC-17</c>, <c>pc17</c>, <c>ПК-05</c> or <c>17</c> stands for.</summary>
     public static int? SeatNumberOf(string machineName)

@@ -928,7 +928,7 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
         _state = SessionState.Idle;
         _logger.LogInformation("Session {SessionId} ended ({Reason}): used={SecondsUsed}s charged={Charged} refunded={Refunded} offline={Offline}", final.Id, reason, final.SecondsUsed, result.Charged, result.Refunded, offline);
 
-        if (wasPending && settleWithServer && pendingCreate is not null)
+        if (settleWithServer && pendingCreate is not null)
         {
             // Played while the server was unreachable and never seen by it: without this the play would be free.
             await _store.QueueFinishedAsync(pendingCreate, new SessionEndReport(reason, final.SecondsUsed, now), cancellationToken).ConfigureAwait(false);

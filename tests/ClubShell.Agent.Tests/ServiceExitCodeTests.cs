@@ -36,7 +36,9 @@ public sealed class ServiceExitCodeTests
     {
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            await Task.Yield();
+            // Not Task.Yield: a fault that lands before BackgroundService.StartAsync returns makes Host.StartAsync throw
+            // instead (a race the busy test machine hit), and the case here is a worker that crashes while running.
+            await Task.Delay(TimeSpan.FromMilliseconds(100), stoppingToken);
             throw new InvalidOperationException("worker crashed");
         }
     }
