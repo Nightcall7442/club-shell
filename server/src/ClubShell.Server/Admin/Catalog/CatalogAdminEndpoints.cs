@@ -15,13 +15,14 @@ namespace ClubShell.Server.Admin;
 
 /// <summary>
 /// <c>AdminGame</c>, plus what the console's catalog page reads and edits beyond the contract: <c>settingsPaths</c> (S5),
-/// how the game starts (<c>launcherAppId</c>, <c>exePath</c>, <c>args</c>), <c>description</c>, and <c>custom</c> — the
-/// club's own game (added or changed by the owner), which the seed no longer touches.
+/// how the game starts (<c>launcherAppId</c>, <c>exePath</c>, <c>args</c>), <c>description</c>, <c>custom</c> — the
+/// club's own game (added or changed by the owner), which the seed no longer touches — and <c>videoUrl</c>, the trailer
+/// the shell plays behind the game's art.
 /// </summary>
 public sealed record AdminGame(
     Guid Id, string Title, string? CoverUrl, bool Installed, string Launcher, IReadOnlyList<string> Category, bool Hidden, bool Featured,
     IReadOnlyList<string> SettingsPaths, string? LauncherAppId = null, string? ExePath = null, string? Args = null, string Description = "",
-    bool Custom = false);
+    bool Custom = false, string? VideoUrl = null);
 
 public sealed record AdminGameList(IReadOnlyList<AdminGame> Items, IReadOnlyList<Guid> Order);
 
@@ -243,8 +244,10 @@ public static partial class CatalogAdminEndpoints
     /// The owner's game card: <c>title</c> (up to 100) and <c>launcher</c> are required. An <c>exe</c> game needs the full
     /// path of its <c>.exe</c> on the PCs (<c>C:\…</c> or <c>\\server\…</c>, quotes around it dropped); any other launcher needs its
     /// <c>launcherAppId</c> (Steam: the number from the store link) and runs no exe of its own. <c>coverUrl</c> is an
-    /// http(s) link; without one a Steam game gets its store cover. <c>category</c>: up to 5 keys as the shell knows them
-    /// (<c>shooter</c>, <c>moba</c>, …). Empty texts count as absent.
+    /// http(s) link; without one a Steam game gets its store cover. <c>videoUrl</c>, the trailer, is an https link to the
+    /// file itself (<c>.mp4</c>/<c>.webm</c>; the shell plays https media only, and drops back to the art when it cannot);
+    /// without one the game has none. <c>category</c>: up to 5 keys as the shell knows them (<c>shooter</c>, <c>moba</c>,
+    /// …). Empty texts count as absent.
     /// </summary>
     private static GameInput Parse(JsonElement body)
     {
@@ -276,6 +279,12 @@ public static partial class CatalogAdminEndpoints
             throw ApiException.Validation("coverUrl", "format");
         }
 
+        var video = AdminInput.OptionalText(Blank(r.VideoUrl), "videoUrl", 2000);
+        if (video is not null && !(Uri.TryCreate(video, UriKind.Absolute, out var link) && link.Scheme == Uri.UriSchemeHttps))
+        {
+            throw ApiException.Validation("videoUrl", "format");
+        }
+
         var category = (r.Category ?? []).Select(x => x?.Trim() ?? "").Where(x => x.Length > 0).Distinct(StringComparer.Ordinal).ToList();
         if (category.Count > 5)
         {
@@ -289,7 +298,7 @@ public static partial class CatalogAdminEndpoints
 
         return new GameInput(
             title, launcher, appId, exePath, AdminInput.OptionalText(Blank(r.Args), "args", 500), cover, category,
-            AdminInput.OptionalText(Blank(r.Description), "description", 1000) ?? "");
+            AdminInput.OptionalText(Blank(r.Description), "description", 1000) ?? "", video);
     }
 
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
@@ -316,10 +325,12 @@ public static partial class CatalogAdminEndpoints
 
     /// <summary>The request body as sent; <see cref="Parse"/> checks it.</summary>
     private sealed record GameInputBody(
-        string? Title, string? Launcher, string? LauncherAppId, string? ExePath, string? Args, string? CoverUrl, string?[]? Category, string? Description);
+        string? Title, string? Launcher, string? LauncherAppId, string? ExePath, string? Args, string? CoverUrl, string?[]? Category, string? Description,
+        string? VideoUrl);
 
     private sealed record GameInput(
-        string Title, LauncherType Launcher, string? LauncherAppId, string? ExePath, string? Args, string? CoverUrl, List<string> Category, string Description)
+        string Title, LauncherType Launcher, string? LauncherAppId, string? ExePath, string? Args, string? CoverUrl, List<string> Category, string Description,
+        string? VideoUrl)
     {
         /// <summary>
         /// <paramref name="game"/> started and shown as this input says. A Steam game without a cover gets its store art; a
@@ -338,6 +349,7 @@ public static partial class CatalogAdminEndpoints
                 Args = Args,
                 CoverUrl = CoverUrl ?? (steam ? $"{SteamCdn}{LauncherAppId}/library_600x900.jpg" : ""),
                 HeroUrl = steam ? $"{SteamCdn}{LauncherAppId}/library_hero.jpg" : same ? game.HeroUrl : null,
+                VideoUrl = VideoUrl,
                 Category = Category,
                 Description = Description,
             };
@@ -372,7 +384,8 @@ public static partial class CatalogAdminEndpoints
                 data.TryGetProperty("category", out var category) && category.ValueKind == JsonValueKind.Array
                     ? [.. category.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!)]
                     : [],
-                hidden, featured, SettingsPaths ?? [], Text("launcherAppId"), Text("exePath"), Text("args"), Text("description") ?? "", Origin == "club");
+                hidden, featured, SettingsPaths ?? [], Text("launcherAppId"), Text("exePath"), Text("args"), Text("description") ?? "", Origin == "club",
+                Text("videoUrl"));
         }
     }
 }

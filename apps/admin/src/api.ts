@@ -587,6 +587,8 @@ export interface AdminGame {
   description?: string;
   /** The club's own game (added or changed here): server updates of the starter catalogue leave it alone. */
   custom?: boolean;
+  /** Trailer the player shell plays behind the game's art: a direct https link to an .mp4/.webm file. */
+  videoUrl?: string | null;
 }
 
 /** What the owner sets for a game of the club (`POST /admin/games`, `PUT /admin/games/{id}`). */
@@ -599,6 +601,8 @@ export interface GameInput {
   coverUrl?: string | null;
   category: string[];
   description?: string | null;
+  /** https only; null — no trailer (a save replaces the game's card, so send the current one to keep it). */
+  videoUrl?: string | null;
 }
 
 export interface PriceQuote {

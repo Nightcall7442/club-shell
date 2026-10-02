@@ -1,6 +1,6 @@
 /**
- * Featured/selected game banner: hero artwork behind a gradient, title, meta chips and the primary actions
- * (Play, or Close game while running, plus Details). Owns the "close game?" confirmation. Reused as the header of
+ * Featured/selected game banner: hero artwork (then its trailer) behind a gradient, title, meta chips and the primary
+ * actions (Play, or Close game while running, plus Details). Owns the "close game?" confirmation. Reused as the header of
  * the details page (`showDetails={false}`, `size="lg"`).
  */
 import type { AntiCheatKind, Game } from '@clubshell/contracts';
@@ -9,6 +9,7 @@ import clsx from 'clsx';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { GameArtwork } from '@/components/media/GameArtwork';
+import { GameTrailer } from '@/components/media/GameTrailer';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
@@ -177,6 +178,7 @@ export function GameHero({
         className="rounded-none"
         style={{ position: 'absolute', inset: 0, height: '100%', aspectRatio: 'auto' }}
       />
+      <GameTrailer key={`trailer-${game.id}`} src={game.videoUrl} poster={game.heroUrl ?? game.coverUrl} />
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 bg-gradient-to-r from-bg/95 via-bg/70 to-bg/10"
