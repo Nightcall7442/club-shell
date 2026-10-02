@@ -41,6 +41,7 @@ public sealed class WalletTests(ServerFixture server) : LedgerCheckedTest(server
             [("bonus", 250_000L), ("topUp", 5_000_000L)],
             items[1..3].Select(t => (t.GetProperty("type").GetString(), t.GetProperty("amount").GetProperty("amount").GetInt64())).Order());
         Assert.Equal(6_250_000L, items[1..3].Max(t => t.GetProperty("balanceAfter").GetProperty("amount").GetInt64()));
+        Assert.Equal("Пополнение на кассе наличными", items[1..3].Single(t => t.GetProperty("type").GetString() == "topUp").GetProperty("description").GetString());
         Assert.Equal(("adjustment", 1_000_000L), (items[3].GetProperty("type").GetString(), items[3].GetProperty("balanceAfter").GetProperty("amount").GetInt64()));
     }
 
