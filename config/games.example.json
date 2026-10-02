@@ -163,7 +163,7 @@
     "installPath": null,
     "installed": false,
     "category": [
-      "battle-royale",
+      "battleRoyale",
       "shooter"
     ],
     "tags": [
@@ -194,7 +194,7 @@
     "installPath": null,
     "installed": false,
     "category": [
-      "battle-royale",
+      "battleRoyale",
       "shooter"
     ],
     "tags": [
@@ -225,7 +225,7 @@
     "installPath": null,
     "installed": false,
     "category": [
-      "battle-royale",
+      "battleRoyale",
       "shooter"
     ],
     "tags": [
@@ -256,10 +256,10 @@
     "installed": false,
     "category": [
       "action",
-      "open-world"
+      "openWorld"
     ],
     "tags": [
-      "open-world",
+      "openWorld",
       "story",
       "online"
     ],
@@ -408,7 +408,7 @@
     "installPath": null,
     "installed": false,
     "category": [
-      "battle-royale",
+      "battleRoyale",
       "shooter"
     ],
     "tags": [
@@ -439,7 +439,7 @@
     "installed": false,
     "category": [
       "survival",
-      "open-world"
+      "openWorld"
     ],
     "tags": [
       "survival",

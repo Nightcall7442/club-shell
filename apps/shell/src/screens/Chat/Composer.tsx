@@ -4,7 +4,6 @@ import {
   useImperativeHandle,
   useRef,
   useState,
-  type FocusEvent,
   type FormEvent,
   type KeyboardEvent,
 } from 'react';
@@ -12,8 +11,7 @@ import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { ChatRooms } from '@clubshell/contracts';
 import { Button } from '@/components/ui/Button';
-import { insertText, useVirtualKeyboard } from '@/components/ui/VirtualKeyboard';
-import { useSettingsStore } from '@/store/settings';
+import { insertText } from '@/lib/insertText';
 
 export interface ComposerProps {
   /** Resolves when the message is accepted; rejections keep the draft so the user can retry. */
@@ -58,7 +56,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const [sending, setSending] = useState(false);
   const [failed, setFailed] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const vkAllowed = useSettingsStore((s) => s.settings.allowVirtualKeyboard);
 
   useImperativeHandle(ref, () => ({ focus: () => textareaRef.current?.focus() }), []);
 
@@ -102,19 +99,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       void submit();
-    }
-  };
-
-  const onFocus = (e: FocusEvent<HTMLTextAreaElement>): void => {
-    if (vkAllowed) {
-      useVirtualKeyboard.getState().open(e.currentTarget);
-    }
-  };
-
-  const onBlur = (e: FocusEvent<HTMLTextAreaElement>): void => {
-    const vk = useVirtualKeyboard.getState();
-    if (vk.target === e.currentTarget) {
-      vk.close();
     }
   };
 
@@ -186,8 +170,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             autoGrow(e.target);
           }}
           onKeyDown={onKeyDown}
-          onFocus={onFocus}
-          onBlur={onBlur}
           className="max-h-[11rem] min-h-[2.75rem] flex-1 resize-none select-text bg-transparent py-2 text-base leading-7 text-text outline-none placeholder:text-muted/70 disabled:cursor-not-allowed"
         />
         <Button

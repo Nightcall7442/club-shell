@@ -52,6 +52,10 @@ const CATEGORIES: { key: string; label: string }[] = [
   { key: 'coop', label: 'Кооператив' },
   { key: 'multiplayer', label: 'Мультиплеер' },
   { key: 'singleplayer', label: 'Одиночная' },
+  { key: 'competitive', label: 'Соревновательные' },
+  { key: 'arcade', label: 'Аркады' },
+  { key: 'hero', label: 'Геройские' },
+  { key: 'openWorld', label: 'Открытый мир' },
 ];
 
 const MAX_CATEGORIES = 5;

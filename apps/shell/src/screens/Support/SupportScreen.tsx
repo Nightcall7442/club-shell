@@ -2,14 +2,13 @@
  * Support (`/support`): call-admin card, FAQ accordion, club rules, "this PC" facts (from `PcInfo`), contact
  * shortcuts and a "report a problem" form forwarded through `sys_log_client_error`.
  */
-import { useEffect, useId, useRef, useState, type FocusEvent } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { useVirtualKeyboard } from '@/components/ui/VirtualKeyboard';
 import { collectNavigables, focusElement } from '@/hooks/useGamepad';
 import { track } from '@/lib/analytics';
 import { formatDurationSec } from '@/lib/format';
@@ -106,23 +105,10 @@ export function ReportProblemForm(): JSX.Element {
   const location = useLocation();
   const push = useNotificationsStore((s) => s.push);
   const pushError = useNotificationsStore((s) => s.pushError);
-  const vkAllowed = useSettingsStore((s) => s.settings.allowVirtualKeyboard);
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const id = useId();
-
-  const onFocus = (e: FocusEvent<HTMLTextAreaElement>): void => {
-    if (vkAllowed) {
-      useVirtualKeyboard.getState().open(e.currentTarget);
-    }
-  };
-  const onBlur = (e: FocusEvent<HTMLTextAreaElement>): void => {
-    const vk = useVirtualKeyboard.getState();
-    if (vk.target === e.currentTarget) {
-      vk.close();
-    }
-  };
 
   const submit = async (): Promise<void> => {
     const message = text.trim();
@@ -171,8 +157,6 @@ export function ReportProblemForm(): JSX.Element {
         placeholder={t('support.reportPlaceholder')}
         aria-invalid={error ? true : undefined}
         aria-describedby={`${id}-hint`}
-        onFocus={onFocus}
-        onBlur={onBlur}
         onChange={(e) => {
           setText(e.currentTarget.value);
           if (error) {

@@ -600,6 +600,10 @@ export const UZ: Record<string, string> = {
   Кооператив: 'Kooperativ',
   Мультиплеер: 'Multipleyer',
   Одиночная: 'Yakka',
+  Соревновательные: 'Musobaqa',
+  Аркады: 'Arkada',
+  Геройские: 'Qahramonlar',
+  'Открытый мир': 'Ochiq dunyo',
   'Установить приложение': 'Ilovani oʻrnatish',
 };
 export const EN: Record<string, string> = {
@@ -1203,5 +1207,9 @@ export const EN: Record<string, string> = {
   Кооператив: 'Co-op',
   Мультиплеер: 'Multiplayer',
   Одиночная: 'Single-player',
+  Соревновательные: 'Competitive',
+  Аркады: 'Arcade',
+  Геройские: 'Hero',
+  'Открытый мир': 'Open world',
   'Установить приложение': 'Install the app',
 };

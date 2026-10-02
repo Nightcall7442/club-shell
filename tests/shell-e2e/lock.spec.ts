@@ -45,15 +45,6 @@ function field(page: Page, label: string): Locator {
   return page.getByLabel(label, { exact: true }).and(page.locator('input'));
 }
 
-/**
- * Focusing an input opens the on-screen keyboard (mock settings allow it), which shifts the layout; blur
- * the field and wait for the panel to leave before clicking anything below it.
- */
-async function dismissKeyboard(page: Page): Promise<void> {
-  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-  await expect(page.getByRole('group', { name: en('kiosk.virtualKeyboard.title') })).toBeHidden();
-}
-
 /** Top-bar session countdown (`aria-label="Session timer: HH:MM:SS"`). */
 function sessionTimer(page: Page): Locator {
   return page.getByRole('button', { name: new RegExp(`^${escapeRegExp(en('session.timerLabel'))}: \\d`) });
@@ -212,7 +203,6 @@ test.describe('lock screen', () => {
     const submit = page.getByRole('button', { name: en('lock.guest'), exact: true });
     await expect(submit).toBeDisabled();
     await field(page, en('lock.guestName')).fill('Playwright');
-    await dismissKeyboard(page);
     await page.getByRole('checkbox', { name: en('lock.guestTerms') }).check();
     await expect(submit).toBeEnabled();
     await submit.click();
