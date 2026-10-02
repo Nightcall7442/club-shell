@@ -282,7 +282,7 @@ public sealed class SessionService(
         var buyer = await BuyerAsync(c, tx, club, request.UserId) ?? throw ApiException.NotFound("user");
         var tariff = await TariffAsync(c, tx, club.Id, request.TariffId, withDeleted: replay) ?? throw ApiException.NotFound("tariff");
         var start = replay ? Min(request.StartedAt!.Value, now) : now;
-        if (replay && now - start > TimeSpan.FromMinutes(options.MaxOfflineMinutes))
+        if (replay && now - start > TimeSpan.FromHours(options.MaxReplayHours))
         {
             throw ApiException.Validation("startedAt", "tooOld");
         }

@@ -98,9 +98,17 @@ public static class CounterEndpoints
             """,
             new { staff.ClubId, staff.NetworkId }))
             .Select(d => new AdminGuestDebt(d.Id, d.DisplayName, Money.Uzs(-d.Balance), d.Pc, d.EndedAt)).ToList();
+        // The wrench on the map: the worst open repair ticket of each PC ("Состояние ПК"), so nobody is seated at it.
+        var repairs = (await c.QueryAsync<(Guid PcId, string Severity)>(
+            """
+            SELECT pc_id, CASE WHEN bool_or(severity = 'high') THEN 'high' ELSE 'medium' END
+            FROM health_tickets WHERE club_id = @ClubId AND status IN ('open', 'inWork') GROUP BY pc_id
+            """,
+            new { staff.ClubId }))
+            .Select(r => (object)new { pcId = r.PcId, severity = r.Severity }).ToList();
         return AdminJson.Ok(new AdminOverview(
             now, new AdminOccupancy(seats.Count(s => s.Pc.Status == Contracts.Pcs.PcStatus.Free), seats.Count), seats, tariffs, members,
-            await ZonesAsync(c, staff.ClubId), [], debts));
+            await ZonesAsync(c, staff.ClubId), repairs, debts));
     }
 
     /// <summary><c>adminOpenSession</c> (§5.3): prepaid, priced by the club rules; <c>201 {session, charged, balance}</c>.</summary>

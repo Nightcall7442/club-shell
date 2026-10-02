@@ -17,6 +17,7 @@ pub mod state;
 pub mod tray;
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
 
 use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
 
@@ -32,9 +33,24 @@ pub const SINGLE_INSTANCE_MUTEX: &str = "Global\\ClubShellShell";
 /// second exit.
 static EXITING: AtomicBool = AtomicBool::new(false);
 
+/// The release version (`tauri.conf.json` merged with the build `--config`), set first thing in [`run`].
+static SHELL_VERSION: OnceLock<String> = OnceLock::new();
+
+/// Version of this Shell build as the installer and the update manifest know it. `CARGO_PKG_VERSION` is the
+/// workspace version (`1.0.0`), which a release never bumps, so `auth.hello` would never confirm a Shell update
+/// (`UPDATES.md` §5.3). Falls back to it in tests and before [`run`].
+pub fn shell_version() -> &'static str {
+    SHELL_VERSION
+        .get()
+        .map(String::as_str)
+        .unwrap_or(env!("CARGO_PKG_VERSION"))
+}
+
 /// Process entry point (called from `main.rs`).
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let context = tauri::generate_context!();
+    let _ = SHELL_VERSION.set(context.package_info().version.to_string());
     let (config, config_error) = match ShellConfig::load() {
         Ok(config) => (config, None),
         Err(e) => {
@@ -107,10 +123,10 @@ pub fn run() {
             }
             app.manage(kiosk);
             commands::pc::spawn(&setup_state);
-            tracing::info!(version = env!("CARGO_PKG_VERSION"), "shell started");
+            tracing::info!(version = shell_version(), "shell started");
             Ok(())
         })
-        .build(tauri::generate_context!());
+        .build(context);
 
     let app = match app {
         Ok(app) => app,

@@ -14,8 +14,8 @@
 
   The declarative parts mirror src/ClubShell.Agent/Install/*.ps1: service registration (Service.wxs), ProgramData tree
   and ACLs (Components.wxs), event-log source, firewall rule. Deferred custom actions (WixQuietExec, run as SYSTEM)
-  cover what Windows Installer cannot express: seeding agent.json from the shipped defaults (fresh install only, an
-  existing file is preserved), sc.exe privs / delayed-auto for the service, and Install\uninstall.ps1 on removal
+  cover what Windows Installer cannot express: seeding agent.json from the shipped defaults (fresh install only; an
+  existing file is kept and only gets an explicitly passed CLUBAPIKEY / SERVERURL), sc.exe privs / delayed-auto for the service, and Install\uninstall.ps1 on removal
   (restores explorer.exe as shell, clears auto-logon, removes the Agent's runtime firewall/hosts changes).
 
   Verified with wix.exe 5.0.1: builds without warnings; ICE validation reports only the documented ICE03.
@@ -163,6 +163,20 @@
     <!-- The command line carries CLUBAPIKEY: keep the property change out of the MSI log as well. -->
     <Property Id="CA_SeedAgentConfig" Hidden="yes" />
 
+    <!-- 1b. Upgrade over an existing agent.json (kept, see 1): an explicitly given CLUBAPIKEY / SERVERURL still replaces
+             the stored one, so a rotated enrollment key or a new server address reaches a PC by running the new setup
+             (the reference PC before imaging, PILOT.md). The rest of the file is kept. Return="ignore": a hand-edited
+             file must never block an upgrade. Two actions because the script cannot use braces for an if. -->
+    <SetProperty Id="CA_UpdateAgentKey" Sequence="execute" Before="CA_UpdateAgentKey"
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command &quot;$ErrorActionPreference = 'Stop'; $p = '[ClubShellDataDir]agent.json'; $c = Get-Content -LiteralPath $p -Raw | ConvertFrom-Json; $c.server.clubApiKey = '[CLUBAPIKEY]'; $c | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $p -Encoding utf8&quot;" />
+    <CustomAction Id="CA_UpdateAgentKey" DllEntry="WixQuietExec" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+                  Execute="deferred" Impersonate="no" Return="ignore" HideTarget="yes" />
+    <Property Id="CA_UpdateAgentKey" Hidden="yes" />
+    <SetProperty Id="CA_UpdateAgentServer" Sequence="execute" Before="CA_UpdateAgentServer"
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command &quot;$ErrorActionPreference = 'Stop'; $p = '[ClubShellDataDir]agent.json'; $c = Get-Content -LiteralPath $p -Raw | ConvertFrom-Json; $u = '[SERVERURL]'.TrimEnd('/') -replace '/api/v\d+$', ''; $c.server.baseUrl = $u + '/api/v1'; $c.server.wsUrl = ($u -replace '^http', 'ws') + '/ws/agent'; $c | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $p -Encoding utf8&quot;" />
+    <CustomAction Id="CA_UpdateAgentServer" DllEntry="WixQuietExec" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
     <!-- 2. Service privileges (sc.exe privs) and automatic start + failure flag, exactly as register-service.ps1.
             Both run after InstallServices (service exists) and before StartServices (privileges apply at start).
             Plain auto, not delayed-auto: the kiosk logs on at boot and its Shell shows "agent disconnected" until the
@@ -187,6 +201,10 @@
     <InstallExecuteSequence>
       <Custom Action="CA_SeedAgentConfig" After="InstallFiles"
               Condition="NOT Installed AND NOT AGENTJSONEXISTS AND NOT REMOVE" />
+      <Custom Action="CA_UpdateAgentKey" After="CA_SeedAgentConfig"
+              Condition="AGENTJSONEXISTS AND CLUBAPIKEY AND NOT REMOVE" />
+      <Custom Action="CA_UpdateAgentServer" After="CA_UpdateAgentKey"
+              Condition="AGENTJSONEXISTS AND SERVERURL AND SERVERURL &lt;&gt; &quot;https://club.example.uz&quot; AND NOT REMOVE" />
       <Custom Action="CA_ServicePrivileges" After="InstallServices"
               Condition="NOT REMOVE" />
       <Custom Action="CA_ServiceStartMode" After="CA_ServicePrivileges"

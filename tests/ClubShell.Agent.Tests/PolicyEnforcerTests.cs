@@ -85,6 +85,21 @@ public sealed class PolicyEnforcerTests : IDisposable
     }
 
     [Fact]
+    public async Task ReapplyAll_WritesEverySectionAgain_ForARecreatedProfile()
+    {
+        using PolicyEnforcer enforcer = Enforcer(Module("usb"), Module("explorer"));
+        await enforcer.ReapplyAllAsync(CancellationToken.None);
+        _log.Should().BeEmpty("nothing was applied yet");
+
+        await enforcer.ApplyAsync(PolicyFactory.Create(), CancellationToken.None);
+        _log.Clear();
+        await enforcer.ReapplyAllAsync(CancellationToken.None);
+
+        _log.Should().Equal("apply:usb", "apply:explorer");
+        await _sink.Received(1).PublishAsync(Arg.Any<PolicyChanged>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task SecondApply_TouchesOnlyTheSectionsThatChanged()
     {
         IPolicyModule usb = Module("usb");
@@ -287,6 +302,38 @@ public sealed class ProcessAllowlistTests
         Action act = () => ProcessKiller.WildcardToRegex(pattern);
 
         act.Should().Throw<ArgumentException>();
+    }
+
+    [WindowsFact]
+    public async Task ClubPolicy_BlocksRenamedToolsInThePlayersFolders_AndLeavesGamesAlone()
+    {
+        // The policy every club is seeded with (config/policies.example.json, also the server's seed).
+        string path = Path.Combine(AppContext.BaseDirectory, "config", "policies.example.json");
+        if (!File.Exists(path))
+        {
+            path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "config", "policies.example.json"));
+        }
+
+        PcPolicy policy = JsonDefaults.Deserialize<PcPolicy>(await File.ReadAllBytesAsync(path))!;
+        using var watcher = new ProcessWatcher();
+        using var module = new ProcessAllowlistModule(watcher, new ProcessKiller(), [], SystemClock.Instance, NullLogger<ProcessAllowlistModule>.Instance);
+        (await module.ApplyAsync(policy, UnusedSession, CancellationToken.None)).Error.Should().BeNull();
+
+        // A copy of cmd.exe renamed and dropped where the player can write (redirected to the data drive on club PCs).
+        module.IsAllowed(@"D:\ClubShell\Users\club\Downloads\minecraft.exe").Should().BeFalse();
+        module.IsAllowed(@"C:\Users\club\Desktop\game.exe").Should().BeFalse();
+        module.IsAllowed(@"D:\ClubShell\Users\club\Documents\x\tool.exe").Should().BeFalse();
+        module.IsAllowed(@"C:\Windows\System32\cmd.exe").Should().BeFalse();
+        module.IsAllowed(@"C:\Program Files\WindowsApps\Microsoft.WindowsTerminal_1.21\WindowsTerminal.exe").Should().BeFalse();
+        module.IsAllowed(@"C:\Program Files\AnyDesk\AnyDesk.exe").Should().BeFalse();
+
+        module.IsAllowed(@"C:\Program Files (x86)\Steam\steamapps\common\Counter-Strike Global Offensive\game\bin\win64\cs2.exe").Should().BeTrue();
+        module.IsAllowed(@"C:\Program Files (x86)\Steam\bin\cef\cef.win7x64\steamwebhelper.exe").Should().BeTrue();
+        module.IsAllowed(@"G:\Games\Counter-Strike 1.6\hl.exe").Should().BeTrue();
+        module.IsAllowed(@"C:\Program Files\ClubShell\Shell\clubshell-shell.exe").Should().BeTrue();
+        module.IsAllowed(@"C:\Program Files (x86)\Microsoft\EdgeWebView\Application\129.0.2792.65\msedgewebview2.exe").Should().BeTrue();
+
+        await module.RevertAsync(CancellationToken.None);
     }
 
     [WindowsFact]

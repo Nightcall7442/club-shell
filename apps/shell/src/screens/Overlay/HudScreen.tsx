@@ -222,6 +222,15 @@ export function HudScreen({ onClose }: { onClose: () => void }): JSX.Element {
           </div>
         </div>
 
+        {openEnded && session.cost.amount > 0 && (
+          <div className="border-l border-[color:var(--hairline)] pl-6 leading-tight">
+            <div className="hud-label">{t('session.due')}</div>
+            <div className="tnum whitespace-nowrap text-xl">
+              <DotAmount value={formatMoney(session.cost, locale)} />
+            </div>
+          </div>
+        )}
+
         {balance && (
           <div className="border-l border-[color:var(--hairline)] pl-6 leading-tight">
             <div className="hud-label">{t('desktop.balance')}</div>

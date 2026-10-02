@@ -515,7 +515,7 @@ impl MockTransport {
             }
             _ => {}
         }
-        let shell_version = env!("CARGO_PKG_VERSION");
+        let shell_version = crate::shell_version();
         let user_id = db
             .user
             .as_ref()

@@ -99,14 +99,18 @@ export const Balance = forwardRef<HTMLButtonElement, BalanceProps>(function Bala
   const session = useSession();
   const loading = balance === null && status !== 'error';
 
+  // An open postpaid session is charged in one go when it ends: the balance does not move meanwhile, and the billing stops
+  // once the bill reaches the main balance (bonus money does not count there).
+  const due = session.isOpen && session.isOpenEnded && session.cost ? session.cost : null;
   const play = useMemo(() => {
     if (!balance) {
       return null;
     }
     const tariff = playTariff(tariffs, session.tariffId, pcZone ?? tariffZone ?? '', serverNow());
-    const minutes = tariff ? playMinutes(balanceTotal(balance), tariff) : 0;
+    const funds = due ? { ...balance.amount, amount: balance.amount.amount - due.amount } : balanceTotal(balance);
+    const minutes = tariff ? playMinutes(funds, tariff) : 0;
     return tariff && minutes > 0 ? { tariff, minutes } : null;
-  }, [balance, tariffs, session.tariffId, pcZone, tariffZone]);
+  }, [balance, due, tariffs, session.tariffId, pcZone, tariffZone]);
 
   return (
     <section
@@ -146,6 +150,13 @@ export const Balance = forwardRef<HTMLButtonElement, BalanceProps>(function Bala
               >
                 <DotAmount value={formatMoney(balance.amount, locale)} />
               </p>
+              {due && due.amount > 0 && (
+                <p className="mt-3 text-base">
+                  <span className="text-muted">{t('wallet.dueNow')}</span>{' '}
+                  <span className="tnum font-semibold text-accent">{formatMoney(due, locale)}</span>
+                  <span className="block text-sm text-muted">{t('wallet.dueHint')}</span>
+                </p>
+              )}
               {balance.bonus.amount > 0 && (
                 <dl className="mt-4 flex flex-wrap items-baseline gap-x-8 gap-y-2 text-base">
                   <div className="flex items-baseline gap-2">

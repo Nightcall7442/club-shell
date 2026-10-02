@@ -41,7 +41,7 @@ pub async fn kiosk_state(
     Ok(KioskState {
         agent_connected: state.agent.is_connected(),
         native: kiosk.snapshot(),
-        version: env!("CARGO_PKG_VERSION"),
+        version: crate::shell_version(),
         devtools: state.config.devtools,
     })
 }

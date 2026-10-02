@@ -135,7 +135,7 @@ sealed, signed binary (`SignatureVerified` mode on production builds).
 | Shell token | `secure\shell.token` | plain hex by design (the Shell must read it); ACL kiosk `Read` only; regenerated per Agent start |
 | Games share credentials | `secure\share.cred` | DPAPI |
 | Account-pool secrets | memory only (`ActiveLease`) | see section 6 |
-| Admin PIN | `shell.json → kiosk.adminPinHash` (sha256 hex) | verified by the Agent (`SystemHandlers.UnlockAdmin`), 3 failures/min, tokens 32 random bytes with 5 min lifetime; `settings_get_shell_config` blanks the hash before it reaches the webview |
+| Admin PIN | `C:ProgramDataClubShellsecureadmin-pin` (PBKDF2-SHA256 `pbkdf2$600000$…`, written by `tools/scripts/set-admin-pin.ps1`; SYSTEM + Administrators only) | verified by the Agent (`SystemHandlers.UnlockAdmin`), PBKDF2 only, 3 failures/min, tokens 32 random bytes with 5 min lifetime. `shell.json → kiosk.adminPinHash` is ignored: the kiosk account can read shell.json and would guess a short PIN offline |
 | `NullTokenProtector` | tests only | pass-through; must never be registered in production DI |
 
 `secure\` is SYSTEM/Administrators only (`install.ps1`, `ARCHITECTURE.md` §9); the kiosk user cannot list it. DPAPI
@@ -297,7 +297,7 @@ Policy (`policies.json`)
 
 Shell
 
-- [ ] `shell.json → kiosk.adminPinHash` set (sha256 of a PIN not shared with players), `exitHotkey` changed from the default, `devtools = false`.
+- [ ] Admin PIN set with `tools/scripts/set-admin-pin.ps1` (6-12 digits, not shared with players), `exitHotkey` changed from the default, `devtools = false`.
 - [ ] Release build only (`cfg!(debug_assertions)` turns hardening off), `CLUBSHELL_DEV` never set on club PCs.
 - [ ] Theme / wallpaper / ads assets served from trusted hosts (`img-src https:` in the CSP is broad by necessity for covers).
 

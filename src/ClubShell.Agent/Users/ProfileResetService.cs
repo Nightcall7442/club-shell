@@ -1,7 +1,9 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.Versioning;
 using ClubShell.Contracts.Sessions;
 using ClubShell.Core.Abstractions;
+using ClubShell.Agent.Policy;
 using ClubShell.Core.Configuration;
 using ClubShell.Windows.Sessions;
 using ClubShell.Windows.Users;
@@ -57,6 +59,7 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
     private static readonly TimeSpan SessionSettleDelay = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan RestoreTimeout = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan RestorePollInterval = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan ExplorerWatch = TimeSpan.FromSeconds(30);
 
     private readonly ProfileReset _reset;
     private readonly TempUserProvisioner _provisioner;
@@ -65,13 +68,14 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
     private readonly IOptionsMonitor<AgentSettings> _settings;
     private readonly IClock _clock;
     private readonly ILogger<ProfileResetService> _logger;
+    private readonly PolicyEnforcer? _enforcer;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private DateTimeOffset? _lastResetAt;
     private DateTimeOffset? _lastDirtyAttemptAt;
     private bool _disposed;
 
     /// <summary>Creates the service; <see cref="StartAsync"/> subscribes it to session changes.</summary>
-    public ProfileResetService(ProfileReset reset, TempUserProvisioner provisioner, IShellRelauncher relauncher, ISessionService sessions, IOptionsMonitor<AgentSettings> settings, IClock clock, ILogger<ProfileResetService> logger)
+    public ProfileResetService(ProfileReset reset, TempUserProvisioner provisioner, IShellRelauncher relauncher, ISessionService sessions, IOptionsMonitor<AgentSettings> settings, IClock clock, ILogger<ProfileResetService> logger, PolicyEnforcer? enforcer = null)
     {
         ArgumentNullException.ThrowIfNull(reset);
         ArgumentNullException.ThrowIfNull(provisioner);
@@ -87,6 +91,7 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
         _settings = settings;
         _clock = clock;
         _logger = logger;
+        _enforcer = enforcer;
         _lastResetAt = reset.LastReset;
     }
 
@@ -207,6 +212,7 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
                 // The profile is recreated at logon; redirection applies once the hive exists (best effort here, retried by the provisioner).
                 _ = _provisioner.ApplyFolderRedirect();
                 await RestorePreservedAsync(user, cancellationToken).ConfigureAwait(false);
+                await SealFreshProfileAsync(user, cancellationToken).ConfigureAwait(false);
             }
         }
         finally
@@ -258,6 +264,73 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
             }
 
             await _clock.Delay(RestorePollInterval, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// The profile Windows recreates at the next logon comes from Default: no per-user shell replacement, no Explorer
+    /// lockdown, so userinit starts explorer.exe and the player would get a desktop (the reason the pilot ran with the
+    /// reset off). Once the kiosk user is logged on again, every policy section is written into the new hive, and the
+    /// explorer.exe of that session is closed for <see cref="ExplorerWatch"/>; the watchdog starts the Shell. The next
+    /// logon already reads the shell from the hive.
+    /// </summary>
+    private async Task SealFreshProfileAsync(string user, CancellationToken cancellationToken)
+    {
+        if (_enforcer is null)
+        {
+            return;
+        }
+
+        var deadline = _clock.UtcNow + RestoreTimeout;
+        WtsSession? session;
+        while ((session = WtsSessions.FindByUser(user)) is null)
+        {
+            if (_clock.UtcNow >= deadline)
+            {
+                _logger.LogWarning("Kiosk user {User} did not log on again within {Timeout}; policies are re-applied at the next logon", user, RestoreTimeout);
+                return;
+            }
+
+            await _clock.Delay(RestorePollInterval, cancellationToken).ConfigureAwait(false);
+        }
+
+        try
+        {
+            await _enforcer.ReapplyAllAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Re-applying the kiosk policies to the recreated profile of {User} failed", user);
+        }
+
+        if (_enforcer.Current?.ShellReplacement.Enabled != true)
+        {
+            return;
+        }
+
+        var watchEnd = _clock.UtcNow + ExplorerWatch;
+        while (_clock.UtcNow < watchEnd)
+        {
+            foreach (Process explorer in Process.GetProcessesByName("explorer"))
+            {
+                using (explorer)
+                {
+                    try
+                    {
+                        if (explorer.SessionId == (int)session.Id)
+                        {
+                            explorer.Kill(entireProcessTree: false);
+                            _logger.LogInformation("Closed explorer.exe (pid {Pid}) started by the recreated profile of {User}", explorer.Id, user);
+                        }
+                    }
+                    catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or NotSupportedException)
+                    {
+                        _logger.LogDebug(ex, "explorer.exe {Pid} could not be closed", explorer.Id);
+                    }
+                }
+            }
+
+            await _clock.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
         }
     }
 

@@ -48,11 +48,19 @@ public sealed class ProfileReset
 
     /// <summary>
     /// Profile-relative directories carried across <see cref="ResetProfile(string)"/> by default: the anti-cheat
-    /// vendors that bootstrap per machine. Deleting these every session is not a clean slate, it is a fresh install
-    /// of FACEIT and Vanguard before every match.
+    /// vendors that bootstrap per machine, and the graphics shader caches. Deleting the first every session is not a
+    /// clean slate, it is a fresh install of FACEIT and Vanguard before every match; deleting the second makes every
+    /// game recompile its shaders and stutter through its first minutes. Neither holds anything of the player.
     /// </summary>
     public static IReadOnlyList<string> PreservedDirectories { get; } = new[]
     {
+        @"AppData\Local\D3DSCache",
+        @"AppData\Local\NVIDIA\DXCache",
+        @"AppData\Local\NVIDIA\GLCache",
+        @"AppData\Local\AMD\DxCache",
+        @"AppData\Local\AMD\DxcCache",
+        @"AppData\Local\AMD\VkCache",
+        @"AppData\Local\Intel\ShaderCache",
         @"AppData\Local\Riot Games",
         @"AppData\Roaming\Riot Games",
         @"AppData\Local\FACEIT",
@@ -63,7 +71,7 @@ public sealed class ProfileReset
         @"AppData\Roaming\BattlEye",
     };
 
-    /// <summary>Profile-relative directories emptied by <see cref="CleanCaches"/>.</summary>
+    /// <summary>Profile-relative directories emptied by <see cref="CleanCaches"/> (shader caches stay: see <see cref="PreservedDirectories"/>).</summary>
     public static IReadOnlyList<string> CacheDirectories { get; } = new[]
     {
         @"AppData\Local\Temp",
@@ -72,7 +80,6 @@ public sealed class ProfileReset
         @"AppData\Local\Microsoft\Windows\Explorer",
         @"AppData\Local\Microsoft\Windows\WER",
         @"AppData\Local\CrashDumps",
-        @"AppData\Local\D3DSCache",
         @"AppData\LocalLow\Temp",
         @"Downloads",
     };

@@ -26,8 +26,15 @@ public sealed class SessionsOptions
     /// <summary>Free time after <c>ends_at</c> before the tick ends a prepaid session with <c>timeUp</c> (D-12).</summary>
     public int GraceSec { get; set; } = 60;
 
-    /// <summary>Oldest accepted offline <c>startedAt</c>; silence after which the tick ends a session of an offline PC.</summary>
+    /// <summary>The agent's offline budget (sent in its config); silence after which the tick ends a session of an offline PC.</summary>
     public int MaxOfflineMinutes { get; set; } = 240;
+
+    /// <summary>
+    /// Oldest accepted offline <c>startedAt</c> of a replay. Longer than <see cref="MaxOfflineMinutes"/> on purpose: a game
+    /// played while the club's internet was down for an evening reaches the server only when it is back, and refusing it
+    /// would make that play free.
+    /// </summary>
+    public int MaxReplayHours { get; set; } = 72;
 
     public int TickMs { get; set; } = 1000;
 
@@ -47,7 +54,7 @@ public sealed class SessionsOptions
 /// </summary>
 public static class AgentConfig
 {
-    private static readonly JsonElement Features = JsonSerializer.SerializeToElement(new Dictionary<string, bool>
+    private static readonly Dictionary<string, bool> ServedFeatures = new()
     {
         ["shop"] = false,
         ["chat"] = false,
@@ -57,7 +64,22 @@ public static class AgentConfig
         ["topup"] = false,
         ["apps"] = false,
         ["callAdmin"] = false,
-    });
+
+        // No route confirms a scanned code yet (D-18): the lock screen opens on the password tab.
+        ["qrLogin"] = false,
+    };
+
+    /// <summary>
+    /// <see cref="ServedFeatures"/> plus the owner's <c>features.gpuPanel</c> (off unless switched on): the vendor panel
+    /// pauses the kiosk guard and its driver settings stay for the next player, so the club decides.
+    /// </summary>
+    public static JsonElement FeaturesOf(string? settingsJson)
+    {
+        using var doc = JsonDocument.Parse(string.IsNullOrEmpty(settingsJson) ? "{}" : settingsJson);
+        var gpuPanel = doc.RootElement.TryGetProperty("features", out var f) && f.ValueKind == JsonValueKind.Object
+            && f.TryGetProperty("gpuPanel", out var g) && g.ValueKind == JsonValueKind.True;
+        return JsonSerializer.SerializeToElement(new Dictionary<string, bool>(ServedFeatures) { ["gpuPanel"] = gpuPanel });
+    }
 
     private static readonly JsonElement Games = JsonSerializer.SerializeToElement(new
     {
@@ -78,7 +100,7 @@ public static class AgentConfig
         Games: Games,
         Updates: new UpdatesConfigOverride(Enabled: false),
         Anticheat: Anticheat,
-        Shell: new ShellConfigOverride(Theme: "default", Features: Features, Club: club.Club),
+        Shell: new ShellConfigOverride(Theme: "default", Features: FeaturesOf(club.Settings), Club: club.Club),
         Themes: []);
 
     /// <summary>

@@ -73,6 +73,9 @@ export interface Seat {
     zone: string;
     number: number;
     status: 'free' | 'busy' | 'locked' | 'maintenance' | 'booked' | 'offline';
+    /** Versions the PC reported in its last heartbeat (absent from an older server). */
+    agentVersion?: string;
+    shellVersion?: string;
   };
   session: Session | null;
   user: SeatUser | null;

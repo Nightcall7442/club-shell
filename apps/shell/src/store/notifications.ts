@@ -144,6 +144,14 @@ export function describeError(e: unknown): string {
   if (err.code === 'rateLimited') {
     vars['seconds'] = typeof details['retryAfterSec'] === 'number' ? details['retryAfterSec'] : 30;
   }
+  // Which club rule said no (`details.rule`, server and Agent alike): "policy" alone tells the player nothing.
+  const rule = details['rule'];
+  if (err.code === 'policyDenied' && typeof rule === 'string' && !rule.includes('.')) {
+    const ruleKey = `errors.policy.${rule}`;
+    if (i18n.exists(ruleKey)) {
+      return i18n.t(ruleKey);
+    }
+  }
   const key = `errors.${err.code}`;
   return i18n.exists(key) ? i18n.t(key, vars) : i18n.t('errors.generic');
 }

@@ -336,6 +336,13 @@ export const UZ: Record<string, string> = {
   'Окна времени': 'Vaqt oraliqlari',
   Операций: 'Operatsiyalar',
   'Операций нет': 'Operatsiyalar yoʻq',
+  'Панель видеокарты (NVIDIA / AMD / Intel)': 'Videokarta paneli (NVIDIA / AMD / Intel)',
+  'Агент {agent} · Оболочка {shell}': 'Agent {agent} · Qobiq {shell}',
+  'На старой версии ({newest} есть): {list}': 'Eski versiyada ({newest} bor): {list}',
+  Играет: 'Oʻynayapti',
+  Набежало: 'Toʻplandi',
+  'Постоплата: сумма спишется с баланса, когда сеанс закончится.':
+    'Keyin toʻlov: summa seans tugaganda balansdan yechiladi.',
   Осталось: 'Qoldi',
   'Осталось 5 минут. Добавьте время в кошельке, чтобы не прерывать игру.':
     '5 daqiqa qoldi. Oʻyin toʻxtamasligi uchun hamyonda vaqt qoʻshing.',
@@ -950,6 +957,13 @@ export const EN: Record<string, string> = {
   'Окна времени': 'Time windows',
   Операций: 'Transactions',
   'Операций нет': 'No transactions',
+  'Панель видеокарты (NVIDIA / AMD / Intel)': 'Graphics panel (NVIDIA / AMD / Intel)',
+  'Агент {agent} · Оболочка {shell}': 'Agent {agent} · Shell {shell}',
+  'На старой версии ({newest} есть): {list}': 'On an older version ({newest} is out): {list}',
+  Играет: 'Playing',
+  Набежало: 'Running bill',
+  'Постоплата: сумма спишется с баланса, когда сеанс закончится.':
+    'Postpaid: the amount is taken from the balance when the session ends.',
   Осталось: 'Left',
   'Осталось 5 минут. Добавьте время в кошельке, чтобы не прерывать игру.':
     '5 minutes left. Add time in your wallet to keep playing.',

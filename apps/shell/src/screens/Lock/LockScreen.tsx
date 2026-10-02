@@ -615,6 +615,36 @@ function LinkWarning(): JSX.Element | null {
   );
 }
 
+/** How long the lock screen shows what the visit that just ended cost. */
+const RECEIPT_MS = 15_000;
+
+/** "Сессия завершена · Вы играли 2 ч 05 мин · Списано 25 000 сум" for the player who just left, for a few seconds. */
+function LeaveReceiptNote(): JSX.Element | null {
+  const { t } = useTranslation();
+  const { locale } = useLocale();
+  const receipt = useAuthStore((s) => s.receipt);
+  const dismiss = useAuthStore((s) => s.dismissReceipt);
+  useEffect(() => {
+    if (!receipt) {
+      return;
+    }
+    const timer = window.setTimeout(dismiss, Math.max(0, receipt.at + RECEIPT_MS - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [receipt, dismiss]);
+  if (!receipt || Date.now() - receipt.at > RECEIPT_MS) {
+    return null;
+  }
+  return (
+    <div role="status" className="mb-4 rounded-md bg-success/10 px-4 py-3 text-base">
+      <p className="font-semibold text-success">{t('session.endedTitle')}</p>
+      <p className="tnum mt-1 text-text">
+        {t('session.endedPlayed', { duration: formatDurationSec(receipt.secondsUsed, { compact: true }) })}
+        {receipt.cost.amount > 0 && <> · {t('session.endedCharged', { amount: formatMoney(receipt.cost, locale) })}</>}
+      </p>
+    </div>
+  );
+}
+
 export default function LockScreen(): JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -628,6 +658,8 @@ export default function LockScreen(): JSX.Element {
   const club = useClub();
   const pcZone = useSettingsStore((s) => s.pcInfo?.pc.zone ?? '');
   const callAdminEnabled = useSettingsStore((s) => s.features.callAdmin);
+  // Off until the server can confirm a scanned code (D-18): a QR that can never sign in only costs the player time.
+  const qrLogin = useSettingsStore((s) => s.features.qrLogin);
   const animations = useThemeStore((s) => s.theme.animations);
   const playlist = useSettingsStore((s) => s.shellConfig?.ads.playlist);
   // The club's own art, the same the attract screen plays — stills only: a moving picture behind a code the player is
@@ -635,7 +667,7 @@ export default function LockScreen(): JSX.Element {
   const art = useMemo(() => (playlist ?? []).filter((i) => i.type === 'image'), [playlist]);
   const push = useNotificationsStore((s) => s.push);
   const pushError = useNotificationsStore((s) => s.pushError);
-  const [tab, setTab] = useState<LoginTab>('qr');
+  const [tab, setTab] = useState<LoginTab>(() => (useSettingsStore.getState().features.qrLogin ? 'qr' : 'password'));
   const [calling, setCalling] = useState(false);
   const card = useRef<HTMLDivElement>(null);
   const { idle } = useIdle();
@@ -678,13 +710,23 @@ export default function LockScreen(): JSX.Element {
     }
   }, [ready, isLocked, hasUser]);
 
+  // The settings arrive after the first render: follow the flag both ways while the player has not picked a tab.
+  const picked = useRef(false);
+  useEffect(() => {
+    if (!picked.current) {
+      setTab(qrLogin ? 'qr' : 'password');
+    } else if (!qrLogin) {
+      setTab((current) => (current === 'qr' ? 'password' : current));
+    }
+  }, [qrLogin]);
+
   const tabs = useMemo<TabItem<LoginTab>[]>(
     () => [
-      { key: 'qr', label: t('lock.methodQr'), icon: QrIcon },
+      ...(qrLogin ? [{ key: 'qr' as const, label: t('lock.methodQr'), icon: QrIcon }] : []),
       { key: 'password', label: t('lock.methodPassword'), icon: KeyIcon },
       { key: 'guest', label: t('lock.methodGuest'), icon: UserIcon },
     ],
-    [t],
+    [t, qrLogin],
   );
 
   const callAdmin = async (): Promise<void> => {
@@ -763,10 +805,14 @@ export default function LockScreen(): JSX.Element {
                     {t('lock.sessionExpired')}
                   </p>
                 )}
+                <LeaveReceiptNote />
                 <Tabs
                   items={tabs}
                   value={tab}
-                  onChange={setTab}
+                  onChange={(next) => {
+                    picked.current = true;
+                    setTab(next);
+                  }}
                   label={t('lock.chooseMethod')}
                   size="lg"
                   idPrefix="lock"

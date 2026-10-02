@@ -154,6 +154,49 @@ public sealed class PolicyEnforcer : IPolicyEnforcer, IDisposable
         }
     }
 
+    /// <summary>
+    /// Applies the current policy again to every section, changed or not. After a profile reset Windows recreates the kiosk
+    /// profile from Default at the next logon: the per-user shell replacement and Explorer lockdown live in that hive, so
+    /// they are gone until written again. No-op before the first <see cref="ApplyAsync"/>.
+    /// </summary>
+    public async Task ReapplyAllAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_current is not { } policy)
+            {
+                return;
+            }
+
+            PolicyContext context = BuildContext();
+            foreach (IPolicyModule module in _modules)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    PolicyModuleResult result = await module.ApplyAsync(policy, context, cancellationToken).ConfigureAwait(false);
+                    if (result.Error is { } error)
+                    {
+                        _failed.Add(module.Section);
+                        _logger.LogError(error, "Policy section {Section} could not be re-applied; retried on next apply", module.Section);
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+                {
+                    _failed.Add(module.Section);
+                    _logger.LogError(ex, "Policy section {Section} could not be re-applied; retried on next apply", module.Section);
+                }
+            }
+
+            _logger.LogInformation("Policy v{Version} re-applied to every section", policy.Version);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     /// <inheritdoc />
     public async Task RevertAllAsync(CancellationToken cancellationToken)
     {

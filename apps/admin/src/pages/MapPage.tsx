@@ -32,6 +32,24 @@ const STATUS: Record<Seat['pc']['status'], { label: string; short: string; dot: 
 
 const LEGEND_ORDER: Seat['pc']['status'][] = ['free', 'busy', 'booked', 'locked', 'maintenance', 'offline'];
 
+/** `1.0.15` → [1, 0, 15]; anything unparsable sorts first. */
+function versionParts(v: string | undefined): number[] {
+  return (v ?? '')
+    .split(/[.+-]/)
+    .slice(0, 3)
+    .map((x) => Number.parseInt(x, 10) || 0);
+}
+
+function compareVersions(a: string | undefined, b: string | undefined): number {
+  const [x, y] = [versionParts(a), versionParts(b)];
+  for (let i = 0; i < 3; i++) {
+    if ((x[i] ?? 0) !== (y[i] ?? 0)) {
+      return (x[i] ?? 0) - (y[i] ?? 0);
+    }
+  }
+  return 0;
+}
+
 function secondsLeft(s: Session | null): number {
   if (!s) {
     return 0;
@@ -260,21 +278,49 @@ function SeatPanel({
           {seat.user ? seat.user.displayName : seat.pc.name}
         </h2>
         {seat.user && <span className="font-mono text-xs text-muted">{seat.pc.name}</span>}
+        {seat.pc.agentVersion && (
+          <span className="tnum font-mono text-xs text-muted">
+            {t('Агент {agent} · Оболочка {shell}', { agent: seat.pc.agentVersion, shell: seat.pc.shellVersion ?? '—' })}
+          </span>
+        )}
       </header>
 
       {seat.session && seat.user && (
-        <dl className="grid grid-cols-2 divide-x divide-line overflow-hidden rounded-md border border-line bg-bg text-center">
-          <div className="flex flex-col gap-1.5 px-3 py-3">
-            <dt className="label">{t('Осталось')}</dt>
-            <dd className={clsx('num-dot text-2xl leading-none', left >= 0 && left <= 300 && 'text-danger')}>
-              {left < 0 ? '∞' : duration(left)}
-            </dd>
-          </div>
+        <dl
+          className={clsx(
+            'grid divide-x divide-line overflow-hidden rounded-md border border-line bg-bg text-center',
+            seat.session.isPrepaid ? 'grid-cols-2' : 'grid-cols-3',
+          )}
+        >
+          {seat.session.isPrepaid ? (
+            <div className="flex flex-col gap-1.5 px-3 py-3">
+              <dt className="label">{t('Осталось')}</dt>
+              <dd className={clsx('num-dot text-2xl leading-none', left >= 0 && left <= 300 && 'text-danger')}>
+                {left < 0 ? '∞' : duration(left)}
+              </dd>
+            </div>
+          ) : (
+            // Postpaid is charged in one go when the session ends: the balance stays untouched until then, so the
+            // running bill is what the counter needs to see.
+            <>
+              <div className="flex flex-col gap-1.5 px-3 py-3">
+                <dt className="label">{t('Играет')}</dt>
+                <dd className="num-dot text-2xl leading-none">{duration(seat.session.secondsUsed)}</dd>
+              </div>
+              <div className="flex flex-col gap-1.5 px-3 py-3">
+                <dt className="label">{t('Набежало')}</dt>
+                <dd className="tnum text-lg font-semibold leading-none">{money(seat.session.cost)}</dd>
+              </div>
+            </>
+          )}
           <div className="flex flex-col gap-1.5 px-3 py-3">
             <dt className="label">{t('Баланс')}</dt>
             <dd className="tnum text-lg font-semibold leading-none">{money(seat.user.balance)}</dd>
           </div>
         </dl>
+      )}
+      {seat.session && seat.user && !seat.session.isPrepaid && (
+        <p className="text-xs text-muted">{t('Постоплата: сумма спишется с баланса, когда сеанс закончится.')}</p>
       )}
 
       {note && (
@@ -653,6 +699,19 @@ export function MapPage(): JSX.Element {
     return [...out.entries()];
   }, [seats]);
 
+  // PCs behind the newest version seen in the hall: the check list of a manual update round.
+  const outdated = useMemo(() => {
+    const reported = seats.filter((x) => x.pc.agentVersion);
+    const newest = reported.reduce<string | undefined>(
+      (best, x) => (compareVersions(x.pc.agentVersion, best) > 0 ? x.pc.agentVersion : best),
+      undefined,
+    );
+    return {
+      newest,
+      names: reported.filter((x) => compareVersions(x.pc.agentVersion, newest) < 0).map((x) => x.pc.name),
+    };
+  }, [seats]);
+
   const counts = useMemo(() => {
     const c = new Map<Seat['pc']['status'], number>();
     for (const x of seats) {
@@ -665,6 +724,14 @@ export function MapPage(): JSX.Element {
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
       {error && <p className="rounded-md bg-danger/10 px-3 py-1.5 text-sm text-danger">{error}</p>}
+      {outdated.names.length > 0 && (
+        <p className="rounded-md bg-warning/10 px-3 py-1.5 text-sm text-warning">
+          {t('На старой версии ({newest} есть): {list}', {
+            newest: outdated.newest ?? '',
+            list: outdated.names.join(', '),
+          })}
+        </p>
+      )}
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_19rem] xl:grid-cols-[minmax(0,1fr)_24rem]">
         <div className="flex min-h-0 flex-col gap-5">
           <div className="panel min-h-0 flex-1 overflow-y-auto p-5">

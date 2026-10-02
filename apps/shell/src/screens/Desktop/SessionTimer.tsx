@@ -109,7 +109,10 @@ export interface SessionTimerProps {
 
 export function SessionTimer({ compact = false, className }: SessionTimerProps): JSX.Element {
   const { t } = useTranslation();
+  const { locale } = useLocale();
   const s = useSession();
+  // Postpaid is charged in one go at the end, so the balance does not move meanwhile: show what is owed so far.
+  const due = s.isOpen && s.isOpenEnded && s.cost ? formatMoney(s.cost, locale) : null;
   const [extendOpen, setExtendOpen] = useState(false);
 
   const total = s.secondsUsed + Math.max(0, s.secondsLeft);
@@ -171,15 +174,22 @@ export function SessionTimer({ compact = false, className }: SessionTimerProps):
               {badge}
             </span>
             <span className={clsx('num-dot text-[1.45rem] leading-none', valueClass)}>{label}</span>
-            {/* Time left on an instrument scale: lit ticks are what remains. */}
-            <span
-              aria-hidden="true"
-              className={clsx(
-                'tick-scale block w-[clamp(4rem,5vw,6rem)]',
-                tone === 'danger' ? 'text-danger' : tone === 'accent' ? 'text-accent' : 'text-text/80',
-              )}
-              style={{ '--value': Math.min(1, Math.max(0, 1 - progress)) } as CSSProperties}
-            />
+            {due !== null ? (
+              <span className="flex flex-col leading-tight">
+                <span className="hud-label">{t('session.due')}</span>
+                <span className="tnum whitespace-nowrap text-sm font-semibold">{due}</span>
+              </span>
+            ) : (
+              /* Time left on an instrument scale: lit ticks are what remains. */
+              <span
+                aria-hidden="true"
+                className={clsx(
+                  'tick-scale block w-[clamp(4rem,5vw,6rem)]',
+                  tone === 'danger' ? 'text-danger' : tone === 'accent' ? 'text-accent' : 'text-text/80',
+                )}
+                style={{ '--value': Math.min(1, Math.max(0, 1 - progress)) } as CSSProperties}
+              />
+            )}
             {canExtend && <PlusButton />}
           </>
         ) : (
@@ -203,6 +213,11 @@ export function SessionTimer({ compact = false, className }: SessionTimerProps):
             <span className="flex flex-col items-center gap-2">
               <span className="text-sm text-muted">{caption}</span>
               {badge}
+              {due !== null && (
+                <span className="tnum text-sm">
+                  {t('session.due')}: <span className="font-semibold">{due}</span>
+                </span>
+              )}
               {canExtend && <span className="text-sm text-primary">{t('session.extend')}</span>}
             </span>
           </>

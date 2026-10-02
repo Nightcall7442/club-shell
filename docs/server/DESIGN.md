@@ -767,7 +767,7 @@ FOR UPDATE OF sessions SKIP LOCKED LIMIT 100
 
 - **Аутентификация:** достаточно токена агента (решение D-11, `frag/paths-auth-sessions.yaml:825-831`).
   `pcId` = `sub`; пользователь существует, не забанен и не blacklisted.
-- `startedAt` старше `MaxOfflineMinutes` → `400 tooOld`. `startedAt` ограничивается сверху значением `now`.
+- `startedAt` старше `MaxReplayHours` (72 ч; дольше офлайн-бюджета агента `MaxOfflineMinutes`, чтобы вечер без интернета не стал бесплатным) → `400 tooOld`. `startedAt` ограничивается сверху значением `now`.
 - Цена — `quote(startedAt)`. Списание идёт с `overdraft`, без `402`: иначе агент завершит сеанс `error`, и игра
   потеряется (`SessionManager.cs:717-721`). По той же причине из правил §5.2 проверяется только игрок (есть, не
   забанен, не blacklisted): тариф берётся и удалённый, `pcMaintenance`, `tariffZone`, `minorCurfew`, `tariffTime` и

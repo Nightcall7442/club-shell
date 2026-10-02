@@ -143,7 +143,9 @@ internal sealed record TypeShape(ShapeKind Kind, string Name, bool Nullable, IRe
 
 internal sealed record EnumMember(string Name, string Wire, string? Doc);
 
-internal sealed record Property(string Name, string JsonName, TypeShape Shape, bool AlwaysPresent, string? Doc)
+/// <param name="ZeroDefault">The constructor parameter defaults to the type's zero value (<c>bool X = false</c>), so a payload
+/// without it still reads (<c>#[serde(default)]</c> in Rust): an older peer that does not send the field yet.</param>
+internal sealed record Property(string Name, string JsonName, TypeShape Shape, bool AlwaysPresent, string? Doc, bool ZeroDefault = false)
 {
     /// <summary>Omitted from the wire when null (<c>?</c> in TS, <c>skip_serializing_if</c> in Rust).</summary>
     public bool Optional => Shape.Nullable && !AlwaysPresent;
@@ -364,6 +366,7 @@ internal static class ModelBuilder
     private static List<Property> Properties(Type type, Assembly assembly, string prefix, string typeId, XmlDocs docs)
     {
         var order = new Dictionary<string, int>(StringComparer.Ordinal);
+        var zeroDefaults = new HashSet<string>(StringComparer.Ordinal);
         var ctor = type.GetConstructors(BindingFlags.Public | BindingFlags.Instance).MaxBy(c => c.GetParameters().Length);
         if (ctor is not null)
         {
@@ -371,6 +374,11 @@ internal static class ModelBuilder
             for (var i = 0; i < parameters.Length; i++)
             {
                 order[parameters[i].Name ?? string.Empty] = i;
+                if (parameters[i].HasDefaultValue && parameters[i].ParameterType.IsValueType
+                    && Equals(parameters[i].DefaultValue, Activator.CreateInstance(parameters[i].ParameterType)))
+                {
+                    zeroDefaults.Add(parameters[i].Name ?? string.Empty);
+                }
             }
         }
 
@@ -392,7 +400,7 @@ internal static class ModelBuilder
             var jsonName = property.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ?? Naming.ToCamelCase(property.Name);
             var shape = ShapeOf(Nullability.Create(property), assembly);
             var doc = docs.Summary("P:" + prefix + "." + property.Name) ?? docs.Param(typeId, property.Name);
-            result.Add(new Property(property.Name, jsonName, shape, ignore is { Condition: JsonIgnoreCondition.Never }, doc));
+            result.Add(new Property(property.Name, jsonName, shape, ignore is { Condition: JsonIgnoreCondition.Never }, doc, zeroDefaults.Contains(property.Name)));
         }
 
         return result;
@@ -1777,6 +1785,10 @@ internal static class RsEmitter
             if (property.Optional)
             {
                 attributes.Add("skip_serializing_if = \"Option::is_none\"");
+            }
+            else if (property.ZeroDefault && !property.Shape.Nullable && with is null)
+            {
+                attributes.Add("default");
             }
 
             if (attributes.Count > 0)

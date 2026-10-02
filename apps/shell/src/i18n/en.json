@@ -165,7 +165,15 @@
     "notImplemented": "This feature is not available on the club server yet",
     "unknown": "Unknown error",
     "network": "Network error",
-    "generic": "Something went wrong. Please try again"
+    "generic": "Something went wrong. Please try again",
+    "policy": {
+      "postpaidNotAllowed": "Pay-later is off here: top up at the counter and pick your time in advance.",
+      "minorCurfew": "Minors cannot play at this time.",
+      "tariffZone": "This tariff does not apply in this PC's zone: pick another one.",
+      "tariffTime": "This tariff is not available right now: pick another one.",
+      "pcMaintenance": "This PC is under maintenance: take another one or call the staff.",
+      "blacklisted": "Sign-in is closed for this account: please talk to the staff."
+    }
   },
   "lock": {
     "title": "Welcome",
@@ -180,7 +188,7 @@
     "login": "Sign in",
     "loggingIn": "Signing in…",
     "guest": "Play as guest",
-    "guestHint": "Postpaid time, no account needed",
+    "guestHint": "No account: time is paid at the counter",
     "guestName": "Your name (optional)",
     "qr": "QR code",
     "scanQr": "Scan with the club app to sign in",
@@ -302,7 +310,7 @@
     "seeAll": "See all",
     "welcomeBack": "Welcome back",
     "sessionBar": "Session",
-    "openEnded": "Open-ended",
+    "openEnded": "Postpaid",
     "volume": "Volume",
     "mute": "Mute",
     "unmute": "Unmute",
@@ -694,7 +702,9 @@
     "noFilteredHistory": "No operations match this filter",
     "periodIn": "Topped up",
     "periodOut": "Spent",
-    "zoneOfPc": "This PC's zone: {{zone}}"
+    "zoneOfPc": "This PC's zone: {{zone}}",
+    "dueNow": "Due so far:",
+    "dueHint": "Postpaid: the amount is taken from your balance when you finish playing."
   },
   "chat": {
     "title": "Chat",
@@ -1141,7 +1151,7 @@
       "ending": "Ending",
       "ended": "Ended"
     },
-    "openEnded": "Open-ended",
+    "openEnded": "Postpaid",
     "cost": "Cost so far",
     "tariff": "Tariff",
     "startedAt": "Started {{time}}",
@@ -1161,7 +1171,17 @@
     "timerLabel": "Session timer",
     "lastMinute": "Last minute!",
     "overtime": "Overtime",
-    "extendPostpaid": "Open-ended sessions do not need extra time"
+    "extendPostpaid": "No need to add time on postpaid: you play while the balance lasts and pay at the end.",
+    "due": "Due",
+    "leave": "End and leave",
+    "leaveTitle": "End the game and leave?",
+    "leaveConfirm": "End and leave",
+    "leaveNoSession": "You will be signed out of your account on this PC.",
+    "leavePostpaid": "You played {{duration}}. {{amount}} will be taken from your balance and you will be signed out.",
+    "leavePrepaid": "You played {{duration}}. Unused time goes back to your balance and you will be signed out.",
+    "idleTitle": "Are you still here?",
+    "idleBody": "Nobody has touched this PC for 10 minutes. In {{seconds}} s the game ends and the account closes.",
+    "idleStay": "I am here"
   },
   "settings": {
     "title": "Settings",

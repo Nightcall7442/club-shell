@@ -25,6 +25,11 @@
       <Component Id="AgentAppSettings" Directory="AgentDir">
         <File Id="appsettings.json" Source="$(var.AgentPublishDir)\appsettings.json" KeyPath="yes" />
       </Component>
+      <!-- Update signing public key (UPDATES.md §11, agent.json updates.publicKeyPath): without it the Agent refuses
+           every update package, and a PC cloned without it can only get one by a visit. -->
+      <Component Id="AgentUpdateKey" Directory="AgentDir">
+        <File Id="update_public.pem" Name="update-public.pem" Source="$(var.ConfigDir)\update-public.pem" KeyPath="yes" />
+      </Component>
 
       <!-- Install\*.ps1: used by the uninstall custom action and for manual (re)configuration by administrators. -->
       <Component Id="AgentInstallScript" Directory="AgentInstallDir">

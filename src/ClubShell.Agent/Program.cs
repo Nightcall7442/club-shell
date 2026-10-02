@@ -118,8 +118,9 @@ try
     });
 
     using IHost host = builder.Build();
+    Func<int> exitCode = ServiceExitCode.Attach(host);
     await host.RunAsync().ConfigureAwait(false);
-    return 0;
+    return exitCode();
 }
 catch (Exception ex)
 {

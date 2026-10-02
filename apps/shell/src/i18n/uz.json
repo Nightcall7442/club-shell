@@ -165,7 +165,15 @@
     "notImplemented": "Bu funksiya hozircha klub serverida mavjud emas",
     "unknown": "Noma'lum xatolik",
     "network": "Tarmoq xatosi",
-    "generic": "Nimadir noto'g'ri ketdi. Qayta urinib ko'ring"
+    "generic": "Nimadir noto'g'ri ketdi. Qayta urinib ko'ring",
+    "policy": {
+      "postpaidNotAllowed": "Keyin toʻlov bu yerda oʻchirilgan: kassada balansni toʻldiring va vaqtni oldindan tanlang.",
+      "minorCurfew": "Bu vaqtda voyaga yetmaganlar oʻynay olmaydi.",
+      "tariffZone": "Bu tarif shu kompyuter zonasida amal qilmaydi: boshqasini tanlang.",
+      "tariffTime": "Bu tarif hozir amal qilmaydi: boshqasini tanlang.",
+      "pcMaintenance": "Kompyuter taʼmirda: boshqasiga oʻtiring yoki administratorni chaqiring.",
+      "blacklisted": "Bu akkaunt uchun kirish yopiq: administratorga murojaat qiling."
+    }
   },
   "lock": {
     "title": "Xush kelibsiz",
@@ -180,7 +188,7 @@
     "login": "Kirish",
     "loggingIn": "Kirilmoqda…",
     "guest": "Mehmon sifatida o'ynash",
-    "guestHint": "Akkauntsiz, to'lov o'yin oxirida",
+    "guestHint": "Akkauntsiz: vaqt kassada toʻlanadi",
     "guestName": "Ismingiz (ixtiyoriy)",
     "qr": "QR-kod",
     "scanQr": "Kirish uchun klub ilovasida skanerlang",
@@ -302,7 +310,7 @@
     "seeAll": "Barchasini ko'rish",
     "welcomeBack": "Qaytganingiz bilan",
     "sessionBar": "Seans",
-    "openEnded": "Cheklovsiz",
+    "openEnded": "Keyin toʻlov",
     "volume": "Ovoz balandligi",
     "mute": "Ovozni o'chirish",
     "unmute": "Ovozni yoqish",
@@ -694,7 +702,9 @@
     "noFilteredHistory": "Bu filtr bo'yicha operatsiyalar yo'q",
     "periodIn": "To'ldirildi",
     "periodOut": "Sarflandi",
-    "zoneOfPc": "Bu kompyuter zonasi: {{zone}}"
+    "zoneOfPc": "Bu kompyuter zonasi: {{zone}}",
+    "dueNow": "Hozir toʻlanadi:",
+    "dueHint": "Keyin toʻlov: summa oʻyinni tugatganingizda balansdan yechiladi."
   },
   "chat": {
     "title": "Chat",
@@ -1141,7 +1151,7 @@
       "ending": "Tugatilmoqda",
       "ended": "Tugagan"
     },
-    "openEnded": "Cheklovsiz",
+    "openEnded": "Keyin toʻlov",
     "cost": "Hozirgi narx",
     "tariff": "Tarif",
     "startedAt": "Boshlandi {{time}}",
@@ -1161,7 +1171,17 @@
     "timerLabel": "Seans taymeri",
     "lastMinute": "Oxirgi daqiqa!",
     "overtime": "Qo'shimcha vaqt",
-    "extendPostpaid": "Cheksiz seans uchun vaqt qo'shish shart emas"
+    "extendPostpaid": "Keyin toʻlovda vaqt qoʻshish shart emas: balans yetguncha oʻynaysiz, toʻlov oxirida.",
+    "due": "Toʻlov",
+    "leave": "Tugatib chiqish",
+    "leaveTitle": "Oʻyinni tugatib chiqasizmi?",
+    "leaveConfirm": "Tugatib chiqish",
+    "leaveNoSession": "Shu kompyuterdagi akkauntingizdan chiqasiz.",
+    "leavePostpaid": "Siz {{duration}} oʻynadingiz. Balansdan {{amount}} yechiladi va akkauntdan chiqasiz.",
+    "leavePrepaid": "Siz {{duration}} oʻynadingiz. Ishlatilmagan vaqt balansga qaytadi va akkauntdan chiqasiz.",
+    "idleTitle": "Shu yerdamisiz?",
+    "idleBody": "10 daqiqa davomida kompyuterga hech kim tegmadi. {{seconds}} soniyadan keyin oʻyin tugaydi va akkaunt yopiladi.",
+    "idleStay": "Shu yerdaman"
   },
   "settings": {
     "title": "Sozlamalar",

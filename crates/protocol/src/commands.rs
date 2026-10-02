@@ -966,6 +966,13 @@ pub struct ShellFeatures {
     pub apps: bool,
     /// Call admin.
     pub call_admin: bool,
+    /// QR sign-in on the lock screen (off until the server can confirm a scanned code).
+    #[serde(default)]
+    pub qr_login: bool,
+    /// Button that opens the NVIDIA / AMD / Intel panel over the Shell (off by default: the panel
+    /// pauses the kiosk guard and its settings stay for the next player).
+    #[serde(default)]
+    pub gpu_panel: bool,
 }
 
 /// Settings subset of `shell.json` exposed to the UI (IPC_PROTOCOL.md §6.21); persisted by the
@@ -3321,14 +3328,20 @@ mod tests {
                 topup: true,
                 apps: true,
                 call_admin: true,
+                qr_login: false,
+                gpu_panel: true,
             },
             club: None,
         };
         let json = serde_json::to_string(&settings).unwrap();
         assert_eq!(
             json,
-            r#"{"locale":"en","theme":"default","availableThemes":["default","neon"],"volume":60,"muted":false,"idleTimeoutSec":300,"showMetricsOverlay":false,"allowVirtualKeyboard":true,"uiSounds":true,"features":{"shop":true,"chat":true,"booking":true,"tournaments":true,"profile":true,"topup":true,"apps":true,"callAdmin":true}}"#
+            r#"{"locale":"en","theme":"default","availableThemes":["default","neon"],"volume":60,"muted":false,"idleTimeoutSec":300,"showMetricsOverlay":false,"allowVirtualKeyboard":true,"uiSounds":true,"features":{"shop":true,"chat":true,"booking":true,"tournaments":true,"profile":true,"topup":true,"apps":true,"callAdmin":true,"qrLogin":false,"gpuPanel":true}}"#
         );
+        // An Agent from before qrLogin / gpuPanel: both read as off.
+        let older: ShellSettings =
+            serde_json::from_str(&json.replace(r#","qrLogin":false,"gpuPanel":true"#, "")).unwrap();
+        assert!(!older.features.qr_login && !older.features.gpu_panel);
         assert_eq!(
             serde_json::from_str::<ShellSettings>(&json).unwrap(),
             settings

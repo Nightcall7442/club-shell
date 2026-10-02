@@ -40,6 +40,8 @@ export const DEFAULT_FEATURES: ShellFeatures = {
   topup: false,
   apps: true,
   callAdmin: true,
+  qrLogin: false,
+  gpuPanel: false,
 };
 
 /**

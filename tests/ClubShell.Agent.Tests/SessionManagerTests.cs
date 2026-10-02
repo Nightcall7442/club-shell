@@ -531,6 +531,31 @@ public sealed class SessionManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_session_played_and_ended_offline_is_replayed_as_create_then_end_when_the_server_is_back()
+    {
+        _server.CreateSessionAsync(Arg.Any<SessionCreateRequest>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>()).ThrowsAsync(Unavailable());
+        _server.GetTariffsAsync(Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(new EtagResponse<TariffsResponse>(new TariffsResponse([StandardTariff()], T0), null, false));
+        PlaySession local = await _manager.StartAsync(Request(), CancellationToken.None);
+        _time.Advance(TimeSpan.FromMinutes(40));
+        await _manager.EndAsync(SessionEndReason.User, CancellationToken.None);
+
+        // Kept for the server instead of dropped: one owed replay, its queued events superseded by it.
+        (await _store.PendingFinishedAsync(CancellationToken.None)).Should().ContainSingle();
+        (await _store.GetQueueStatsAsync(CancellationToken.None)).Pending.Should().Be(1);
+
+        _server.CreateSessionAsync(Arg.Any<SessionCreateRequest>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(ServerSession(local.Id, cost: 6_000));
+        OfflineFlushResult flush = await _store.FlushAsync(_server, CancellationToken.None);
+
+        flush.Sent.Should().Be(1);
+        await _server.Received().CreateSessionAsync(Arg.Is<SessionCreateRequest>(r => r.ClientSessionId == local.Id), Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+        await _server.Received(1).EndSessionAsync(local.Id, Arg.Is<SessionEndReport>(r => r.Reason == SessionEndReason.User && r.SecondsUsed >= 2400), Arg.Any<CancellationToken>());
+        await _server.DidNotReceive().PostSessionEventsAsync(Arg.Any<Guid>(), Arg.Any<SessionEventsBatch>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+        (await _store.PendingFinishedAsync(CancellationToken.None)).Should().BeEmpty();
+        (await _store.GetQueueStatsAsync(CancellationToken.None)).Pending.Should().Be(0);
+    }
+
+    [Fact]
     public async Task Flush_StopsAndBacksOff_WhileTheServerIsStillDown()
     {
         _server.CreateSessionAsync(Arg.Any<SessionCreateRequest>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>()).ThrowsAsync(Unavailable());
