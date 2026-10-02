@@ -37,7 +37,7 @@ public sealed class SeedExamplesTests(ExampleCatalogFixture server) : IClassFixt
         var games = body.GetProperty("items").EnumerateArray().ToList();
         Assert.Contains(games, g => g.GetProperty("title").GetString() == "Counter-Strike 2" && g.GetProperty("coverUrl").GetString()!.StartsWith("https://", StringComparison.Ordinal));
         Assert.Contains(games, g => g.GetProperty("title").GetString() == "Minecraft" && g.GetProperty("launcher").GetString() == "exe");
-        Assert.Contains(games, g => g.GetProperty("title").GetString() == "Counter-Strike 1.6" && g.GetProperty("exePath").GetString() == @"G:\Counter Strike 1.6 PRO\hl.exe");
+        Assert.Contains(games, g => g.GetProperty("title").GetString() == "Counter-Strike 1.6" && g.GetProperty("exePath").GetString() == @"G:\Counter Strike 1.6 PRO\cstrike.exe");
     }
 
     [Fact]

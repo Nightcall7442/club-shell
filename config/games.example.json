@@ -35,8 +35,8 @@
     "title": "Counter-Strike 1.6",
     "launcher": "exe",
     "launcherAppId": null,
-    "exePath": "G:\\Counter Strike 1.6 PRO\\hl.exe",
-    "args": "-game cstrike",
+    "exePath": "G:\\Counter Strike 1.6 PRO\\cstrike.exe",
+    "args": null,
     "installPath": null,
     "installed": false,
     "category": [

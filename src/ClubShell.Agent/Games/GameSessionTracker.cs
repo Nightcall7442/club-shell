@@ -49,6 +49,10 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
 {
     private static readonly TimeSpan DisposeWait = TimeSpan.FromSeconds(5);
 
+    /// <summary>How long after a game process exits a successor (a launcher's hand-over) is looked for.</summary>
+    private static readonly TimeSpan SuccessorWait = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan SuccessorPoll = TimeSpan.FromMilliseconds(250);
+
     private readonly IServerClient _server;
     private readonly OfflineSessionStore _outbox;
     private readonly AccountPool _pool;
@@ -174,25 +178,51 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
 
     private async Task WatchAsync(TrackedGame tracked)
     {
-        GameLaunchRecord record = tracked.Record;
-        int pid = record.Running.Pid;
+        int pid = tracked.Record.Running.Pid;
         CancellationToken ct = _cts.Token;
         int exitCode;
-        try
+        while (true)
         {
-            exitCode = await ProcessWatcher.WatchPidAsync(pid, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            // Agent shutting down: leave the game alone, keep leases for the next Agent instance to reconcile.
-            return;
-        }
-        catch (Exception ex) when (ex is ArgumentException or System.ComponentModel.Win32Exception)
-        {
-            _logger.LogDebug(ex, "Pid {Pid} already gone when the watcher attached", pid);
-            exitCode = -1;
+            try
+            {
+                exitCode = await ProcessWatcher.WatchPidAsync(pid, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Agent shutting down: leave the game alone, keep leases for the next Agent instance to reconcile.
+                return;
+            }
+            catch (Exception ex) when (ex is ArgumentException or System.ComponentModel.Win32Exception)
+            {
+                _logger.LogDebug(ex, "Pid {Pid} already gone when the watcher attached", pid);
+                exitCode = -1;
+            }
+
+            // A launcher that hands over and exits (Counter-Strike 1.6's cstrike.exe restarts itself): follow the
+            // process that carries on, so the game stays "running", can be closed and is ended with the session.
+            int? next;
+            try
+            {
+                next = tracked.Killed ? null : await FindSuccessorAsync(tracked, pid, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            if (next is not { } successor || !_games.TryAdd(successor, tracked))
+            {
+                break;
+            }
+
+            _games.TryRemove(pid, out _);
+            tracked.Record = tracked.Record with { Running = tracked.Record.Running with { Pid = successor } };
+            _logger.LogInformation("{Title}: pid {Pid} exited and handed over to pid {Successor}; following it", tracked.Record.Game.Title, pid, successor);
+            await PublishAsync(new GameStateChanged(tracked.Record.Game.Id, tracked.Record.Game.Title, GameState.Running, _clock.UtcNow, successor), ct).ConfigureAwait(false);
+            pid = successor;
         }
 
+        GameLaunchRecord record = tracked.Record;
         _games.TryRemove(pid, out _);
         DateTimeOffset now = _clock.UtcNow;
         int playedSec = (int)Math.Max(0, (now - record.Running.StartedAt).TotalSeconds);
@@ -260,6 +290,87 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
         }
     }
 
+    /// <summary>
+    /// The process a game's exited launcher handed over to, looked for during <see cref="SuccessorWait"/> (real time):
+    /// first what is left in the game's job (children inherit it), else a process with the game's image name in the
+    /// same session, started since the launch and not tracked already.
+    /// </summary>
+    private async Task<int?> FindSuccessorAsync(TrackedGame tracked, int exitedPid, CancellationToken cancellationToken)
+    {
+        GameLaunchRecord record = tracked.Record;
+        string? name = string.IsNullOrWhiteSpace(record.Game.ExePath) ? null : Path.GetFileNameWithoutExtension(record.Game.ExePath);
+        long deadline = Environment.TickCount64 + (long)SuccessorWait.TotalMilliseconds;
+        while (true)
+        {
+            if (Successor(record, exitedPid, name, tracked.SessionId) is { } found)
+            {
+                return found;
+            }
+
+            if (Environment.TickCount64 >= deadline)
+            {
+                return null;
+            }
+
+            await Task.Delay(SuccessorPoll, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private int? Successor(GameLaunchRecord record, int exitedPid, string? name, uint? sessionId)
+    {
+        try
+        {
+            IReadOnlyList<int> inJob = record.Job.QueryProcessIds().Where(id => id != exitedPid && !_games.ContainsKey(id)).ToList();
+            if (inJob.Count > 0)
+            {
+                return inJob.FirstOrDefault(id => name is not null && ImageNameIs(id, name)) is var named and > 0 ? named : inJob[0];
+            }
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or ObjectDisposedException or InvalidOperationException)
+        {
+            _logger.LogDebug(ex, "Job of {Title} not queryable", record.Game.Title);
+        }
+
+        if (name is null || sessionId is null)
+        {
+            return null;
+        }
+
+        DateTime launchedLocal = record.Running.StartedAt.LocalDateTime.AddSeconds(-5);
+        foreach (System.Diagnostics.Process candidate in System.Diagnostics.Process.GetProcessesByName(name))
+        {
+            using (candidate)
+            {
+                try
+                {
+                    if (candidate.Id != exitedPid && !_games.ContainsKey(candidate.Id) && (uint)candidate.SessionId == sessionId && candidate.StartTime >= launchedLocal)
+                    {
+                        return candidate.Id;
+                    }
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+                {
+                    // Exited meanwhile or not queryable.
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static bool ImageNameIs(int pid, string name)
+    {
+        try
+        {
+            using System.Diagnostics.Process process = System.Diagnostics.Process.GetProcessById(pid);
+            return string.Equals(process.ProcessName, name, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
     private async Task PublishAsync(GameStateChanged change, CancellationToken cancellationToken)
     {
         try
@@ -274,9 +385,17 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
 
     private sealed class TrackedGame
     {
-        public TrackedGame(GameLaunchRecord record) => Record = record;
+        public TrackedGame(GameLaunchRecord record)
+        {
+            Record = record;
+            SessionId = ClubShell.Windows.Native.Kernel32.ProcessIdToSessionId((uint)record.Running.Pid, out uint session) ? session : null;
+        }
 
-        public GameLaunchRecord Record { get; }
+        /// <summary>Re-pointed at the successor when a launcher hands over (see <c>FindSuccessorAsync</c>).</summary>
+        public GameLaunchRecord Record { get; set; }
+
+        /// <summary>WTS session of the launched process, for finding its successor.</summary>
+        public uint? SessionId { get; }
 
         public Task? Watch { get; set; }
 
