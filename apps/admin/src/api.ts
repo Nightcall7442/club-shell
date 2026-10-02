@@ -345,7 +345,14 @@ export interface ClubSettings {
    * `guestPostpaid` / `guestDebtLimit` (tiyin, null or 0 — no limit) are beyond the contract: guests may play postpaid and
    * pay at the counter afterwards; their unpaid bills come back in `Overview.guestDebts`.
    */
-  limits: { minorAge: number; minorCurfew: string; guestPostpaid?: boolean; guestDebtLimit?: number | null };
+  limits: {
+    minorAge: number;
+    minorCurfew: string;
+    guestPostpaid?: boolean;
+    guestDebtLimit?: number | null;
+    /** Minutes the server extends a prepaid session by when it runs out and the balance pays; 0 — off. */
+    autoExtendMinutes?: number;
+  };
   catalog: { order: string[]; hidden: string[]; featured: string[] };
   banners: Banner[];
   rulesText: { ru: string; uz: string; en: string };

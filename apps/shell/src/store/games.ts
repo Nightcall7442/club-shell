@@ -107,17 +107,25 @@ export const useGamesStore = create<GamesStore>()(
     ...initialState,
 
     async load(force = false) {
-      if (!force && (get().status === 'loading' || get().ids.length > 0)) {
+      if (get().status === 'loading' || (!force && get().ids.length > 0)) {
         return;
       }
-      set({ status: 'loading', error: null });
+      // A forced reload over a loaded list (the Games screen opening, the lock screen between players) is quiet: the
+      // list stays on screen and a failure keeps it. That is how a game the owner added reaches a running Shell — the
+      // Agent refreshes its catalogue on the server's catalogVersion, but sends no event for it.
+      const quiet = get().ids.length > 0;
+      if (!quiet) {
+        set({ status: 'loading', error: null });
+      }
       try {
         const res = await api.games.list({ pageSize: 500, sort: 'popularity' });
         set({ ...indexGames(res.items), total: res.total, catalogVersion: res.catalogVersion, status: 'ready' });
       } catch (e) {
         const error = asShellError(e);
         log.warn('games.load failed', error);
-        set({ status: 'error', error });
+        if (!quiet) {
+          set({ status: 'error', error });
+        }
       }
     },
 

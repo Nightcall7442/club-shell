@@ -458,11 +458,12 @@ public sealed class SessionService(
     /// (possibly new) tariff, priced now, charged at once; returns the session and the charge. The cashier's extend
     /// (<paramref name="staff"/>, S4) also queues <c>extendSession {charge:false}</c>: the agent rereads the session instead
     /// of charging again (§5.6). Both are <c>extend = online</c> in the charge's meta, so a late agent <c>extended</c> event
-    /// for the same minutes is not charged twice (§5.12).
+    /// for the same minutes is not charged twice (§5.12). The tick's auto-extension (<paramref name="notifyAgent"/>, no
+    /// staff) queues the same command: the PC did not ask for it.
     /// </summary>
     public async Task<(Session Session, long Charged)> ExtendAsync(
         NpgsqlConnection c, NpgsqlTransaction tx, Guid sessionId, Guid userId, Guid pcId, int minutes, Guid? tariffId, SessionEffects effects,
-        StaffContext? staff = null)
+        StaffContext? staff = null, bool notifyAgent = false)
     {
         var now = clock.GetUtcNow();
         var s = await OwnedAsync(c, tx, sessionId, userId, pcId);
@@ -509,7 +510,7 @@ public sealed class SessionService(
         await SaveAsync(c, tx, s, now);
         var session = s.ToWire(now);
         effects.Sessions.Add(session);
-        if (staff is not null)
+        if (staff is not null || notifyAgent)
         {
             effects.Commands.Add((s.ClubId, s.PcId, NewCommand.ExtendSession(new ExtendSessionCommand(s.Id, minutes, Charge: false))));
         }

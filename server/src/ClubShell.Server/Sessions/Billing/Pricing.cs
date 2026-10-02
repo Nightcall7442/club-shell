@@ -85,6 +85,12 @@ public sealed class ClubPricing
     /// <summary><c>limits.guestDebtLimit</c> (tiyin): how far a guest's postpaid bill may run; null or 0 — no limit.</summary>
     public long? GuestDebtLimit { get; init; }
 
+    /// <summary>
+    /// <c>limits.autoExtendMinutes</c> (beyond the contract): when a prepaid session runs out, the tick extends it by this
+    /// many minutes from the player's balance, as the cashier's extend does, for as long as the balance pays; 0 — off.
+    /// </summary>
+    public int AutoExtendMinutes { get; init; }
+
     public static ClubPricing Parse(string timeZone, string? settingsJson)
     {
         var doc = string.IsNullOrEmpty(settingsJson) ? null : JsonSerializer.Deserialize<SettingsDoc>(settingsJson, JsonSerializerOptions.Web);
@@ -101,6 +107,7 @@ public sealed class ClubPricing
             MinorCurfew = doc?.Limits?.MinorCurfew ?? "22:00",
             GuestPostpaid = doc?.Limits?.GuestPostpaid ?? false,
             GuestDebtLimit = doc?.Limits?.GuestDebtLimit is > 0 and var limit ? limit : null,
+            AutoExtendMinutes = Math.Clamp(doc?.Limits?.AutoExtendMinutes ?? 0, 0, 720),
         };
     }
 
@@ -145,6 +152,7 @@ public sealed class ClubPricing
         public string? MinorCurfew { get; init; }
         public bool? GuestPostpaid { get; init; }
         public long? GuestDebtLimit { get; init; }
+        public int? AutoExtendMinutes { get; init; }
     }
 }
 

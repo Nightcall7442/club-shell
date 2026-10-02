@@ -215,6 +215,37 @@ function SeatPanel({
   // Opening a session debits the client's balance, so a new client (balance 0) must be topped up first, here.
   const member = members.find((m) => m.id === userId);
   const shortfall = member ? Math.max(0, price - member.balance.amount) : 0;
+
+  // Extending a running prepaid session: the price of each preset at its tariff, so a short balance shows the cash the
+  // client pays on top; one click takes it as a top-up of the shortfall and adds the time.
+  const [extendPrices, setExtendPrices] = useState<Record<number, number>>({});
+  const sessionTariff = seat.session?.isPrepaid ? seat.session.tariffId : null;
+  const sessionUser = seat.user?.id ?? null;
+  useEffect(() => {
+    if (!sessionTariff) {
+      setExtendPrices({});
+      return undefined;
+    }
+    let alive = true;
+    void Promise.all(
+      MINUTE_PRESETS.map((m) =>
+        clubApi
+          .quote({ tariffId: sessionTariff, pcId: seat.pc.id, minutes: m, userId: sessionUser })
+          .then((q) => [m, q.total.amount] as const)
+          .catch(() => null),
+      ),
+    ).then((rows) => {
+      if (alive) {
+        setExtendPrices(Object.fromEntries(rows.filter((r): r is readonly [number, number] => r !== null)));
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, [sessionTariff, sessionUser, seat.pc.id]);
+  const extendShortfall = (m: number): number =>
+    seat.user && extendPrices[m] !== undefined ? Math.max(0, extendPrices[m] - seat.user.balance.amount) : 0;
+
   const left = secondsLeft(seat.session);
   void tick;
 
@@ -262,20 +293,37 @@ function SeatPanel({
           <section className="flex flex-col gap-4">
             <Field label={t('Добавить время')}>
               <div className="grid grid-cols-4 gap-1.5">
-                {MINUTE_PRESETS.map((m) => (
-                  <Button
-                    key={m}
-                    disabled={busy !== null}
-                    onClick={() =>
-                      void run(`ext-${m}`, async () => {
-                        const r = await adminApi.extend({ pcId: seat.pc.id, minutes: m });
-                        return t('Добавлено {time} · списано {sum}', { time: minutesLabel(m), sum: money(r.charged) });
-                      })
-                    }
-                  >
-                    <span className="whitespace-nowrap">+{minutesLabel(m)}</span>
-                  </Button>
-                ))}
+                {MINUTE_PRESETS.map((m) => {
+                  const cash = extendShortfall(m);
+                  return (
+                    <Button
+                      key={m}
+                      disabled={busy !== null}
+                      className="!h-auto min-h-10 flex-col !gap-0 py-1.5"
+                      onClick={() =>
+                        void run(`ext-${m}`, async () => {
+                          if (cash > 0) {
+                            await adminApi.topUp({ userId: seat.user?.id ?? '', amount: cash, method: 'cash' });
+                          }
+                          const r = await adminApi.extend({ pcId: seat.pc.id, minutes: m });
+                          return cash > 0
+                            ? t('Принято {cash} · добавлено {time}', {
+                                cash: money({ amount: cash, currency: 'UZS' }),
+                                time: minutesLabel(m),
+                              })
+                            : t('Добавлено {time} · списано {sum}', { time: minutesLabel(m), sum: money(r.charged) });
+                        })
+                      }
+                    >
+                      <span className="whitespace-nowrap">+{minutesLabel(m)}</span>
+                      {cash > 0 && (
+                        <span className="whitespace-nowrap text-[0.65rem] font-normal text-muted">
+                          {t('доплата {sum}', { sum: money({ amount: cash, currency: 'UZS' }) })}
+                        </span>
+                      )}
+                    </Button>
+                  );
+                })}
               </div>
             </Field>
 

@@ -339,6 +339,25 @@ export default function ClubPage(): JSX.Element {
             </div>
             <div className="mt-5 flex flex-col gap-4 border-t border-line pt-4 md:max-w-lg">
               <Toggle
+                label={t('Автопродление сеанса')}
+                checked={(s.limits.autoExtendMinutes ?? 0) > 0}
+                onChange={(v) => st.set('limits', { ...s.limits, autoExtendMinutes: v ? 30 : 0 })}
+              />
+              <p className="text-xs text-muted">
+                {t('Когда оплаченное время кончается, а на балансе клиента хватает денег, сеанс продлевается сам.')}
+              </p>
+              {(s.limits.autoExtendMinutes ?? 0) > 0 && (
+                <Field label={t('Продлевать на')}>
+                  <NumberInput
+                    value={s.limits.autoExtendMinutes ?? 30}
+                    min={5}
+                    max={720}
+                    suffix={t('мин')}
+                    onChange={(n) => st.set('limits', { ...s.limits, autoExtendMinutes: Math.max(5, n) })}
+                  />
+                </Field>
+              )}
+              <Toggle
                 label={t('Постоплата для гостей')}
                 checked={s.limits.guestPostpaid ?? false}
                 onChange={(v) => st.set('limits', { ...s.limits, guestPostpaid: v })}
