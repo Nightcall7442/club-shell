@@ -6,6 +6,7 @@ import { NotificationCenter } from '@/components/layout/NotificationCenter';
 import { trackScreen } from '@/lib/analytics';
 import { press, tick } from '@/lib/sound';
 import { StatusBar, TopBar } from '@/screens/Desktop/HudBars';
+import { IdleLeavePrompt } from '@/screens/Desktop/LeaveButton';
 import { useThemeStore } from '@/store/theme';
 
 /**
@@ -101,6 +102,7 @@ export function AppShell(): JSX.Element {
         </motion.footer>
       </div>
       <NotificationCenter />
+      <IdleLeavePrompt />
     </div>
   );
 }

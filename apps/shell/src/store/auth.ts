@@ -30,6 +30,14 @@ export interface AuthCredentials {
   token?: string;
 }
 
+/** What the lock screen shows the player who just left: time played and what the session cost. */
+export interface LeaveReceipt {
+  secondsUsed: number;
+  cost: Money;
+  /** `Date.now()` when it was taken; the lock screen shows it for a few seconds. */
+  at: number;
+}
+
 export interface AuthState {
   user: User | null;
   mode: ConnectivityState;
@@ -40,6 +48,8 @@ export interface AuthState {
   ready: boolean;
   status: AsyncStatus;
   error: ShellError | null;
+  /** Set by `logout` when it ended a session; cleared on the next login or by `dismissReceipt`. */
+  receipt: LeaveReceipt | null;
 }
 
 export interface AuthActions {
@@ -55,6 +65,7 @@ export interface AuthActions {
   setBalance(balance: Money): void;
   onExpired(reason: AuthExpiredReason): void;
   clearError(): void;
+  dismissReceipt(): void;
   reset(): void;
 }
 
@@ -68,6 +79,7 @@ const initialState: AuthState = {
   ready: false,
   status: 'idle',
   error: null,
+  receipt: null,
 };
 
 export const useAuthStore = create<AuthStore>()(
@@ -91,6 +103,7 @@ export const useAuthStore = create<AuthStore>()(
           mode: res.mode,
           expiresAt: res.expiresAt,
           expiredReason: null,
+          receipt: null,
           ready: true,
           status: 'ready',
         });
@@ -110,14 +123,22 @@ export const useAuthStore = create<AuthStore>()(
 
     async logout(reason = 'user') {
       set({ status: 'loading', error: null });
+      let receipt: LeaveReceipt | null = null;
       try {
-        await api.auth.logout(reason);
+        const res = await api.auth.logout(reason);
+        if (res.sessionEnded && res.session) {
+          receipt = { secondsUsed: res.session.secondsUsed, cost: res.session.cost, at: Date.now() };
+        }
       } catch (e) {
         log.warn('auth.logout failed', asShellError(e));
       }
       track('auth.logout', { reason });
       useSessionStore.getState().reset();
-      set({ ...initialState, ready: true, status: 'ready' });
+      set({ ...initialState, ready: true, status: 'ready', receipt });
+    },
+
+    dismissReceipt() {
+      set({ receipt: null });
     },
 
     async refresh() {

@@ -1164,7 +1164,16 @@
     "lastMinute": "Last minute!",
     "overtime": "Overtime",
     "extendPostpaid": "No need to add time on postpaid: you play while the balance lasts and pay at the end.",
-    "due": "Due"
+    "due": "Due",
+    "leave": "End and leave",
+    "leaveTitle": "End the game and leave?",
+    "leaveConfirm": "End and leave",
+    "leaveNoSession": "You will be signed out of your account on this PC.",
+    "leavePostpaid": "You played {{duration}}. {{amount}} will be taken from your balance and you will be signed out.",
+    "leavePrepaid": "You played {{duration}}. Unused time goes back to your balance and you will be signed out.",
+    "idleTitle": "Are you still here?",
+    "idleBody": "Nobody has touched this PC for 10 minutes. In {{seconds}} s the game ends and the account closes.",
+    "idleStay": "I am here"
   },
   "settings": {
     "title": "Settings",

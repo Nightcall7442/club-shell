@@ -615,6 +615,36 @@ function LinkWarning(): JSX.Element | null {
   );
 }
 
+/** How long the lock screen shows what the visit that just ended cost. */
+const RECEIPT_MS = 15_000;
+
+/** "Сессия завершена · Вы играли 2 ч 05 мин · Списано 25 000 сум" for the player who just left, for a few seconds. */
+function LeaveReceiptNote(): JSX.Element | null {
+  const { t } = useTranslation();
+  const { locale } = useLocale();
+  const receipt = useAuthStore((s) => s.receipt);
+  const dismiss = useAuthStore((s) => s.dismissReceipt);
+  useEffect(() => {
+    if (!receipt) {
+      return;
+    }
+    const timer = window.setTimeout(dismiss, Math.max(0, receipt.at + RECEIPT_MS - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [receipt, dismiss]);
+  if (!receipt || Date.now() - receipt.at > RECEIPT_MS) {
+    return null;
+  }
+  return (
+    <div role="status" className="mb-4 rounded-md bg-success/10 px-4 py-3 text-base">
+      <p className="font-semibold text-success">{t('session.endedTitle')}</p>
+      <p className="tnum mt-1 text-text">
+        {t('session.endedPlayed', { duration: formatDurationSec(receipt.secondsUsed, { compact: true }) })}
+        {receipt.cost.amount > 0 && <> · {t('session.endedCharged', { amount: formatMoney(receipt.cost, locale) })}</>}
+      </p>
+    </div>
+  );
+}
+
 export default function LockScreen(): JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -775,6 +805,7 @@ export default function LockScreen(): JSX.Element {
                     {t('lock.sessionExpired')}
                   </p>
                 )}
+                <LeaveReceiptNote />
                 <Tabs
                   items={tabs}
                   value={tab}

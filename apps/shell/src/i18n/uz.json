@@ -1164,7 +1164,16 @@
     "lastMinute": "Oxirgi daqiqa!",
     "overtime": "Qo'shimcha vaqt",
     "extendPostpaid": "Keyin toʻlovda vaqt qoʻshish shart emas: balans yetguncha oʻynaysiz, toʻlov oxirida.",
-    "due": "Toʻlov"
+    "due": "Toʻlov",
+    "leave": "Tugatib chiqish",
+    "leaveTitle": "Oʻyinni tugatib chiqasizmi?",
+    "leaveConfirm": "Tugatib chiqish",
+    "leaveNoSession": "Shu kompyuterdagi akkauntingizdan chiqasiz.",
+    "leavePostpaid": "Siz {{duration}} oʻynadingiz. Balansdan {{amount}} yechiladi va akkauntdan chiqasiz.",
+    "leavePrepaid": "Siz {{duration}} oʻynadingiz. Ishlatilmagan vaqt balansga qaytadi va akkauntdan chiqasiz.",
+    "idleTitle": "Shu yerdamisiz?",
+    "idleBody": "10 daqiqa davomida kompyuterga hech kim tegmadi. {{seconds}} soniyadan keyin oʻyin tugaydi va akkaunt yopiladi.",
+    "idleStay": "Shu yerdaman"
   },
   "settings": {
     "title": "Sozlamalar",

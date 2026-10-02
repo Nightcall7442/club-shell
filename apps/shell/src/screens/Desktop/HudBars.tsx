@@ -4,7 +4,8 @@
  * - Top: club mark and PC, the section tabs (`LB` · tabs · `RB`), a link dot only while the link is down, the clock,
  *   one sound-and-language menu and lock.
  * - Bottom (status line): the player (→ profile), time left (→ add time), balance (→ wallet / top up), the dock of
- *   open programs in the middle (→ bring one to the front) and the controller prompts for what the buttons do here.
+ *   open programs in the middle (→ bring one to the front), the controller prompts for what the buttons do here and
+ *   "end and leave" at the right end.
  *
  * Every control is a `data-nav` button.
  */
@@ -23,6 +24,7 @@ import { useSession } from '@/hooks/useSession';
 import { formatMoney } from '@/lib/format';
 import { formatClock, serverNow } from '@/lib/time';
 import { NavBar } from '@/screens/Desktop/NavBar';
+import { LeaveButton } from '@/screens/Desktop/LeaveButton';
 import { RunningDock } from '@/screens/Desktop/RunningDock';
 import { PlusButton, SessionTimer } from '@/screens/Desktop/SessionTimer';
 import { useNotificationsStore } from '@/store/notifications';
@@ -405,14 +407,17 @@ export function StatusBar(): JSX.Element {
         <RunningDock />
       </div>
 
-      {/* Controller prompts only with a pad connected: a keyboard player already knows Enter and Esc. */}
-      {pad && (
-        <div aria-label={t('desktop.prompts.title')} className="col-start-3 flex items-center justify-end gap-6">
-          <Prompt glyph="A" label={t('desktop.prompts.select')} />
-          <Prompt glyph="B" label={t('desktop.prompts.back')} />
-          <Prompt glyph="LB RB" label={t('desktop.prompts.sections')} round={false} />
-        </div>
-      )}
+      <div className="col-start-3 flex items-center justify-end gap-6">
+        {/* Controller prompts only with a pad connected: a keyboard player already knows Enter and Esc. */}
+        {pad && (
+          <div aria-label={t('desktop.prompts.title')} className="flex items-center gap-6">
+            <Prompt glyph="A" label={t('desktop.prompts.select')} />
+            <Prompt glyph="B" label={t('desktop.prompts.back')} />
+            <Prompt glyph="LB RB" label={t('desktop.prompts.sections')} round={false} />
+          </div>
+        )}
+        <LeaveButton />
+      </div>
     </div>
   );
 }
