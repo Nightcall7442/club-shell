@@ -496,23 +496,12 @@ public sealed class SystemHandlers : IIpcHandlerGroup
         }
     }
 
-    /// <summary>Accepts <c>pbkdf2$…</c> (see <see cref="OfflineSessionStore.HashPassword"/>) and SHA-256 hex hashes.</summary>
-    private static bool VerifyPin(string hash, string pin)
-    {
-        if (hash.StartsWith("pbkdf2$", StringComparison.Ordinal))
-        {
-            return OfflineSessionStore.VerifyPassword(hash, pin);
-        }
-
-        if (hash.Length == 64 && hash.All(char.IsAsciiHexDigit))
-        {
-            byte[] expected = Convert.FromHexString(hash);
-            byte[] actual = SHA256.HashData(Encoding.UTF8.GetBytes(pin));
-            return CryptographicOperations.FixedTimeEquals(expected, actual);
-        }
-
-        return false;
-    }
+    /// <summary>
+    /// Accepts <c>pbkdf2$…</c> only (see <see cref="OfflineSessionStore.HashPassword"/>, written by <c>set-admin-pin.ps1</c>);
+    /// a bare SHA-256 of a short PIN is guessed offline in well under a second, so it fails closed.
+    /// </summary>
+    private static bool VerifyPin(string hash, string pin) =>
+        hash.StartsWith("pbkdf2$", StringComparison.Ordinal) && OfflineSessionStore.VerifyPassword(hash, pin);
 }
 
 /// <summary>

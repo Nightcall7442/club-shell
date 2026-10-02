@@ -904,6 +904,13 @@ export interface ShellFeatures {
   apps: boolean;
   /** Call admin. */
   callAdmin: boolean;
+  /** QR sign-in on the lock screen (off until the server can confirm a scanned code). */
+  qrLogin: boolean;
+  /**
+   * Button that opens the NVIDIA / AMD / Intel panel over the Shell (off by default: the panel pauses the kiosk guard
+   * and its settings stay for the next player).
+   */
+  gpuPanel: boolean;
 }
 
 /** Settings subset of `shell.json` exposed to the UI (IPC_PROTOCOL.md §6.21); persisted by the Agent. */

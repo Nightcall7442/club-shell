@@ -36,6 +36,7 @@ public sealed class ShellSettingsStore
     private readonly object _gate = new();
     private JsonObject? _document;
     private DateTime _documentWriteTimeUtc;
+    private bool _warnedPinInShellJson;
 
     /// <summary>Creates the store.</summary>
     public ShellSettingsStore(IOptionsMonitor<AgentSettings> settings, ILogger<ShellSettingsStore> logger)
@@ -78,15 +79,42 @@ public sealed class ShellSettingsStore
         }
     }
 
-    /// <summary><c>kiosk.adminPinHash</c> (PBKDF2 <c>pbkdf2$…</c> or SHA-256 hex), or <see langword="null"/> when no admin PIN is set.</summary>
+    /// <summary>The admin PIN file: <c>secureadmin-pin</c> (SYSTEM and Administrators only), written by <c>set-admin-pin.ps1</c>.</summary>
+    public string AdminPinPath => _settings.CurrentValue.ResolvePath(Path.Combine(ClubShellPaths.SecureDirName, "admin-pin"));
+
+    /// <summary>
+    /// The admin PIN hash (<c>pbkdf2$…</c>) from <see cref="AdminPinPath"/>, or <see langword="null"/> when no admin PIN is
+    /// set. <c>shell.json → kiosk.adminPinHash</c> is ignored: the kiosk account can read shell.json, and a short PIN
+    /// falls to an offline guess against its hash in seconds.
+    /// </summary>
     public string? AdminPinHash
     {
         get
         {
+            try
+            {
+                if (File.Exists(AdminPinPath))
+                {
+                    string hash = File.ReadAllText(AdminPinPath).Trim();
+                    return hash.Length > 0 ? hash : null;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning(ex, "Admin PIN file {Path} could not be read", AdminPinPath);
+                return null;
+            }
+
             lock (_gate)
             {
-                return GetString(Load()["kiosk"]?["adminPinHash"]);
+                if (GetString(Load()["kiosk"]?["adminPinHash"]) is not null && !_warnedPinInShellJson)
+                {
+                    _warnedPinInShellJson = true;
+                    _logger.LogWarning("shell.json kiosk.adminPinHash is ignored (players can read shell.json); set the PIN with set-admin-pin.ps1");
+                }
             }
+
+            return null;
         }
     }
 
@@ -276,7 +304,9 @@ public sealed class ShellSettingsStore
                 GetBool(features?["profile"], true),
                 GetBool(features?["topup"], false),
                 GetBool(features?["apps"], true),
-                GetBool(features?["callAdmin"], true)),
+                GetBool(features?["callAdmin"], true),
+                GetBool(features?["qrLogin"], false),
+                GetBool(features?["gpuPanel"], false)),
             MapClub(root["club"]));
     }
 

@@ -2176,6 +2176,9 @@ cmd('pc_gpu_panel_open', (args): null => {
     mockError('validation', 'vendor: must be nvidia, amd or intel', { field: 'vendor', reason: 'format' });
   }
   requirePlayer();
+  if (!SETTINGS.features.gpuPanel) {
+    mockError('forbidden', 'the club turned the graphics panel off');
+  }
   if (!PC_GPU_PANELS.some((p) => p.vendor === vendor)) {
     mockError('notFound', 'graphics panel not found');
   }

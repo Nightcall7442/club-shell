@@ -200,6 +200,16 @@ pub async fn pc_gpu_panel_open(
     if kiosk.is_locked() {
         return Err(ShellError::forbidden("the PC is locked"));
     }
+    // The club's switch (`features.gpuPanel`, off by default), checked here too and not only by the hidden button.
+    let settings: serde_json::Value = state
+        .agent
+        .request(clubshell_protocol::commands::names::settings::GET, &())
+        .await?;
+    if settings["features"]["gpuPanel"] != serde_json::Value::Bool(true) {
+        return Err(ShellError::forbidden(
+            "the club turned the graphics panel off",
+        ));
+    }
     let launch = blocking(move || Ok(gpu_panel::resolve_here(vendor)))
         .await?
         .ok_or_else(|| ShellError::not_found("graphics panel"))?;

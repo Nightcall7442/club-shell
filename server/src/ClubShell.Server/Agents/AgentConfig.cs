@@ -47,7 +47,7 @@ public sealed class SessionsOptions
 /// </summary>
 public static class AgentConfig
 {
-    private static readonly JsonElement Features = JsonSerializer.SerializeToElement(new Dictionary<string, bool>
+    private static readonly Dictionary<string, bool> ServedFeatures = new()
     {
         ["shop"] = false,
         ["chat"] = false,
@@ -57,7 +57,22 @@ public static class AgentConfig
         ["topup"] = false,
         ["apps"] = false,
         ["callAdmin"] = false,
-    });
+
+        // No route confirms a scanned code yet (D-18): the lock screen opens on the password tab.
+        ["qrLogin"] = false,
+    };
+
+    /// <summary>
+    /// <see cref="ServedFeatures"/> plus the owner's <c>features.gpuPanel</c> (off unless switched on): the vendor panel
+    /// pauses the kiosk guard and its driver settings stay for the next player, so the club decides.
+    /// </summary>
+    public static JsonElement FeaturesOf(string? settingsJson)
+    {
+        using var doc = JsonDocument.Parse(string.IsNullOrEmpty(settingsJson) ? "{}" : settingsJson);
+        var gpuPanel = doc.RootElement.TryGetProperty("features", out var f) && f.ValueKind == JsonValueKind.Object
+            && f.TryGetProperty("gpuPanel", out var g) && g.ValueKind == JsonValueKind.True;
+        return JsonSerializer.SerializeToElement(new Dictionary<string, bool>(ServedFeatures) { ["gpuPanel"] = gpuPanel });
+    }
 
     private static readonly JsonElement Games = JsonSerializer.SerializeToElement(new
     {
@@ -78,7 +93,7 @@ public static class AgentConfig
         Games: Games,
         Updates: new UpdatesConfigOverride(Enabled: false),
         Anticheat: Anticheat,
-        Shell: new ShellConfigOverride(Theme: "default", Features: Features, Club: club.Club),
+        Shell: new ShellConfigOverride(Theme: "default", Features: FeaturesOf(club.Settings), Club: club.Club),
         Themes: []);
 
     /// <summary>

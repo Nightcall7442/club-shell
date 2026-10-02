@@ -294,6 +294,8 @@ function defaults(): ClubConfig {
       topup: true,
       apps: true,
       callAdmin: true,
+      qrLogin: true,
+      gpuPanel: false,
     },
     zones: [
       { name: 'Standard', color: '#22C55E' },

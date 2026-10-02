@@ -336,6 +336,7 @@ export const UZ: Record<string, string> = {
   'Окна времени': 'Vaqt oraliqlari',
   Операций: 'Operatsiyalar',
   'Операций нет': 'Operatsiyalar yoʻq',
+  'Панель видеокарты (NVIDIA / AMD / Intel)': 'Videokarta paneli (NVIDIA / AMD / Intel)',
   Играет: 'Oʻynayapti',
   Набежало: 'Toʻplandi',
   'Постоплата: сумма спишется с баланса, когда сеанс закончится.':
@@ -954,6 +955,7 @@ export const EN: Record<string, string> = {
   'Окна времени': 'Time windows',
   Операций: 'Transactions',
   'Операций нет': 'No transactions',
+  'Панель видеокарты (NVIDIA / AMD / Intel)': 'Graphics panel (NVIDIA / AMD / Intel)',
   Играет: 'Playing',
   Набежало: 'Running bill',
   'Постоплата: сумма спишется с баланса, когда сеанс закончится.':

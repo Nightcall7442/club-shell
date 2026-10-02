@@ -628,6 +628,8 @@ export default function LockScreen(): JSX.Element {
   const club = useClub();
   const pcZone = useSettingsStore((s) => s.pcInfo?.pc.zone ?? '');
   const callAdminEnabled = useSettingsStore((s) => s.features.callAdmin);
+  // Off until the server can confirm a scanned code (D-18): a QR that can never sign in only costs the player time.
+  const qrLogin = useSettingsStore((s) => s.features.qrLogin);
   const animations = useThemeStore((s) => s.theme.animations);
   const playlist = useSettingsStore((s) => s.shellConfig?.ads.playlist);
   // The club's own art, the same the attract screen plays — stills only: a moving picture behind a code the player is
@@ -635,7 +637,7 @@ export default function LockScreen(): JSX.Element {
   const art = useMemo(() => (playlist ?? []).filter((i) => i.type === 'image'), [playlist]);
   const push = useNotificationsStore((s) => s.push);
   const pushError = useNotificationsStore((s) => s.pushError);
-  const [tab, setTab] = useState<LoginTab>('qr');
+  const [tab, setTab] = useState<LoginTab>(() => (useSettingsStore.getState().features.qrLogin ? 'qr' : 'password'));
   const [calling, setCalling] = useState(false);
   const card = useRef<HTMLDivElement>(null);
   const { idle } = useIdle();
@@ -678,13 +680,23 @@ export default function LockScreen(): JSX.Element {
     }
   }, [ready, isLocked, hasUser]);
 
+  // The settings arrive after the first render: follow the flag both ways while the player has not picked a tab.
+  const picked = useRef(false);
+  useEffect(() => {
+    if (!picked.current) {
+      setTab(qrLogin ? 'qr' : 'password');
+    } else if (!qrLogin) {
+      setTab((current) => (current === 'qr' ? 'password' : current));
+    }
+  }, [qrLogin]);
+
   const tabs = useMemo<TabItem<LoginTab>[]>(
     () => [
-      { key: 'qr', label: t('lock.methodQr'), icon: QrIcon },
+      ...(qrLogin ? [{ key: 'qr' as const, label: t('lock.methodQr'), icon: QrIcon }] : []),
       { key: 'password', label: t('lock.methodPassword'), icon: KeyIcon },
       { key: 'guest', label: t('lock.methodGuest'), icon: UserIcon },
     ],
-    [t],
+    [t, qrLogin],
   );
 
   const callAdmin = async (): Promise<void> => {
@@ -766,7 +778,10 @@ export default function LockScreen(): JSX.Element {
                 <Tabs
                   items={tabs}
                   value={tab}
-                  onChange={setTab}
+                  onChange={(next) => {
+                    picked.current = true;
+                    setTab(next);
+                  }}
                   label={t('lock.chooseMethod')}
                   size="lg"
                   idPrefix="lock"

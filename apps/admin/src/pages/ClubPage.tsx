@@ -19,6 +19,8 @@ const FEATURES: { key: keyof ShellFeatures; label: string }[] = [
   { key: 'topup', label: 'Пополнение' },
   { key: 'apps', label: 'Приложения' },
   { key: 'callAdmin', label: 'Вызов администратора' },
+  // Off by default: the panel pauses the kiosk guard while open, and its driver settings stay for the next player.
+  { key: 'gpuPanel', label: 'Панель видеокарты (NVIDIA / AMD / Intel)' },
 ];
 
 /** Kiosk tabs in their shell order; `Игры` is always there. */
@@ -189,7 +191,7 @@ export default function ClubPage(): JSX.Element {
                 <Toggle
                   key={f.key}
                   label={t(f.label)}
-                  checked={s.features[f.key]}
+                  checked={s.features[f.key] === true}
                   onChange={(v) => st.set('features', { ...s.features, [f.key]: v })}
                 />
               ))}

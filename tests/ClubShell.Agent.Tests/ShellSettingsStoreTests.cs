@@ -28,6 +28,22 @@ public sealed class ShellSettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void The_admin_pin_comes_from_the_secure_folder_and_never_from_shell_json()
+    {
+        // shell.json is readable by the kiosk account: a hash there is ignored.
+        File.WriteAllText(_store.FilePath, """{"kiosk":{"adminPinHash":"pbkdf2$1000$AAAA$BBBB"}}""");
+        Assert.Null(_store.AdminPinHash);
+
+        // What set-admin-pin.ps1 writes for 246810 (PowerShell's Rfc2898DeriveBytes, salt 01..10).
+        const string fromScript = "pbkdf2$600000$AQIDBAUGBwgJCgsMDQ4PEA==$1eCGxgfZmbn5ifpTtpK9AF9WFNcVurDyW7TgsTCZpvc=";
+        Directory.CreateDirectory(Path.GetDirectoryName(_store.AdminPinPath)!);
+        File.WriteAllText(_store.AdminPinPath, fromScript + "\r\n");
+        Assert.Equal(fromScript, _store.AdminPinHash);
+        Assert.True(ClubShell.Agent.Session.OfflineSessionStore.VerifyPassword(fromScript, "246810"));
+        Assert.False(ClubShell.Agent.Session.OfflineSessionStore.VerifyPassword(fromScript, "246811"));
+    }
+
+    [Fact]
     public void Server_club_block_is_persisted_and_exposed()
     {
         var club = new ShellClub(

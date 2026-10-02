@@ -918,6 +918,8 @@ public sealed record ProfileAchievementsResponse(IReadOnlyList<Achievement> Item
 /// <param name="Topup">Top-up.</param>
 /// <param name="Apps">Apps.</param>
 /// <param name="CallAdmin">Call admin.</param>
+/// <param name="QrLogin">QR sign-in on the lock screen (off until the server can confirm a scanned code).</param>
+/// <param name="GpuPanel">Button that opens the NVIDIA / AMD / Intel panel over the Shell (off by default: the panel pauses the kiosk guard and its settings stay for the next player).</param>
 public sealed record ShellFeatures(
     bool Shop,
     bool Chat,
@@ -926,7 +928,9 @@ public sealed record ShellFeatures(
     bool Profile,
     bool Topup,
     bool Apps,
-    bool CallAdmin);
+    bool CallAdmin,
+    bool QrLogin = false,
+    bool GpuPanel = false);
 
 /// <summary>Settings subset of <c>shell.json</c> exposed to the UI (IPC_PROTOCOL.md §6.21); persisted by the Agent.</summary>
 /// <param name="Locale">UI locale.</param>

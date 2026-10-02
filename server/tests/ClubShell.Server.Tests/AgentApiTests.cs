@@ -61,6 +61,18 @@ public sealed class AgentApiTests(ServerFixture server) : IClassFixture<ServerFi
         }
     }
 
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("""{"features":{"shop":true}}""", false)]
+    [InlineData("""{"features":{"gpuPanel":true,"shop":true}}""", true)]
+    public void The_graphics_panel_follows_the_owner_and_qr_login_stays_off(string? settings, bool gpuPanel)
+    {
+        var features = ClubShell.Server.Agents.AgentConfig.FeaturesOf(settings);
+        Assert.Equal(gpuPanel, features.GetProperty("gpuPanel").GetBoolean());
+        Assert.False(features.GetProperty("qrLogin").GetBoolean());
+        Assert.False(features.GetProperty("shop").GetBoolean()); // v1 still serves no shop, whatever the owner chose
+    }
+
     [Fact]
     public async Task A_pending_clone_renamed_in_windows_moves_to_that_seat()
     {
