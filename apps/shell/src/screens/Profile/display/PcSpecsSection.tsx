@@ -8,6 +8,7 @@ import type { DiskInfo, HardwareInfo, MonitorInfo, PcInfo } from '@clubshell/con
 import { useTranslation } from 'react-i18next';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { DotAmount } from '@/components/ui/DotAmount';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useLocale } from '@/hooks/useLocale';
@@ -214,7 +215,9 @@ function SpecsGrid({ hardware: hw, monitors }: SpecsGridProps): JSX.Element {
       ))}
 
       <SpecTile icon={<RamIcon />} label={t('pcDisplay.specs.ram')}>
-        <Main>{hw.ramMb > 0 ? formatMib(hw.ramMb, locale, t) : '—'}</Main>
+        <p className="mt-1 text-3xl leading-none">
+          <DotAmount value={hw.ramMb > 0 ? formatMib(hw.ramMb, locale, t) : '—'} />
+        </p>
       </SpecTile>
 
       <SpecTile icon={<MonitorIcon />} label={t('pcDisplay.specs.monitors')}>
@@ -251,12 +254,18 @@ function SpecsGrid({ hardware: hw, monitors }: SpecsGridProps): JSX.Element {
       </SpecTile>
 
       {hw.peripherals.length > 0 && (
-        <SpecTile icon={<GamepadIcon />} label={t('pcDisplay.specs.peripherals')}>
-          {hw.peripherals.map((p, i) => (
-            <p key={`${p.vendorId}:${p.productId}:${i}`} className="truncate" title={p.name}>
-              {p.name}
-            </p>
-          ))}
+        <SpecTile
+          icon={<GamepadIcon />}
+          label={t('pcDisplay.specs.peripherals')}
+          className="md:col-span-2 2xl:col-span-1"
+        >
+          <div className="grid gap-x-6 gap-y-0.5 sm:grid-cols-2">
+            {hw.peripherals.map((p, i) => (
+              <p key={`${p.vendorId}:${p.productId}:${i}`} className="truncate" title={p.name}>
+                {p.name}
+              </p>
+            ))}
+          </div>
         </SpecTile>
       )}
     </ul>
