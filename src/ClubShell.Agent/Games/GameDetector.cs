@@ -289,8 +289,9 @@ public sealed class GameDetector
     }
 
     /// <summary>
-    /// Steam copied onto the games disk (<c>G:\Steam</c>) has no registry entry: the usual folders of every local and
-    /// network drive are looked at, the answer kept for <see cref="SteamScanTtl"/>.
+    /// Steam copied onto another local disk (<c>D:\Steam</c>) has no registry entry: the usual folders of every local
+    /// drive are looked at, the answer kept for <see cref="SteamScanTtl"/>. Network drives are not: Steam cannot run from
+    /// one folder shared by several PCs (it writes there), so a club installs it on each PC.
     /// </summary>
     private string? ScannedSteamRoot()
     {
@@ -306,7 +307,7 @@ public sealed class GameDetector
         {
             try
             {
-                if (drive.DriveType is not (DriveType.Fixed or DriveType.Network) || !drive.IsReady)
+                if (drive.DriveType != DriveType.Fixed || !drive.IsReady)
                 {
                     continue;
                 }

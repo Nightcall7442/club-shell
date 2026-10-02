@@ -71,6 +71,26 @@ public sealed class SteamFolderAccess
         }
     }
 
+    /// <summary>Whether <paramref name="folder"/> is on a network share (a UNC path or a mapped network drive).</summary>
+    public static bool IsOnNetwork(DirectoryInfo folder)
+    {
+        ArgumentNullException.ThrowIfNull(folder);
+        string full = folder.FullName;
+        if (full.StartsWith(@"\\", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        try
+        {
+            return Path.GetPathRoot(full) is { Length: > 0 } root && new DriveInfo(root).DriveType == DriveType.Network;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>Whether BUILTIN\Users may modify <paramref name="folder"/> and everything in it.</summary>
     public static bool IsWritableByUsers(DirectoryInfo folder)
     {
@@ -143,6 +163,13 @@ public sealed class SteamFolderAccess
                 if (!IsSteamInstallation(folder))
                 {
                     _logger.LogWarning("{Folder} is not a Steam installation; its rights are left alone", path);
+                    continue;
+                }
+
+                if (IsOnNetwork(folder))
+                {
+                    // Its rights belong to the server, and one Steam folder cannot serve several PCs at once anyway.
+                    _logger.LogWarning("Steam at {Folder} is on a network drive: Steam must be installed on each PC's own disk", path);
                     continue;
                 }
 

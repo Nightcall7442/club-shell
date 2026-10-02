@@ -54,6 +54,13 @@ public sealed class SteamFolderAccessTests : IDisposable
         SteamFolderAccess.IsSteam(@"G:\Games\cstrike.exe").Should().BeFalse();
     }
 
+    [Fact]
+    public void A_network_folder_is_told_from_a_local_one()
+    {
+        SteamFolderAccess.IsOnNetwork(_steam).Should().BeFalse();
+        SteamFolderAccess.IsOnNetwork(new DirectoryInfo(@"\\nas01\games\Steam")).Should().BeTrue();
+    }
+
     public void Dispose() => _steam.Delete(recursive: true);
 
     private static void MakeSteam(DirectoryInfo folder)
