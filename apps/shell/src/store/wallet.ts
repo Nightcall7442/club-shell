@@ -16,8 +16,11 @@ import { subscribeWithSelector } from 'zustand/middleware';
 import { track } from '@/lib/analytics';
 import { log } from '@/lib/logger';
 import { api, toShellApiError, type ShellError } from '@/lib/tauri';
-import { syncServerTime } from '@/lib/time';
+import { serverNowMs, syncServerTime } from '@/lib/time';
 import { asShellError, type AsyncStatus } from './settings';
+
+/** History period; sent as `from`, so the server pages only that period. */
+export type WalletHistoryRange = 'all' | 'today' | 'week' | 'month';
 
 export interface WalletState {
   balance: Balance | null;
@@ -27,7 +30,10 @@ export interface WalletState {
   historyTotal: number;
   historyPage: number;
   historyType: TransactionType | null;
+  historyRange: WalletHistoryRange;
   historyStatus: AsyncStatus;
+  /** Why the last ledger page failed; shown in the history panel, never as a toast. */
+  historyError: ShellError | null;
   topupIntent: TopupIntent | null;
   status: AsyncStatus;
   error: ShellError | null;
@@ -38,9 +44,9 @@ export interface WalletActions {
   load(): Promise<void>;
   loadBalance(): Promise<Balance | null>;
   loadTariffs(zone?: string): Promise<Tariff[]>;
-  /** Ledger page (1-based); `type` filters by transaction kind. */
-  loadHistory(page?: number, type?: TransactionType | null): Promise<Transaction[]>;
-  /** Creates a top-up intent (`amount` ≥ 1 000 UZS); rethrows validation errors. */
+  /** Ledger page (1-based); `type` filters by transaction kind, `range` by period (default: the current one). */
+  loadHistory(page?: number, type?: TransactionType | null, range?: WalletHistoryRange): Promise<Transaction[]>;
+  /** Creates a top-up intent (`amount` ≥ 1 000 UZS); rethrows every error for the dialog to explain. */
   createTopup(amount: Money, provider: TopupProvider): Promise<TopupIntent>;
   clearTopup(): void;
   onUpdated(balance: Balance): void;
@@ -50,6 +56,35 @@ export interface WalletActions {
 export type WalletStore = WalletState & WalletActions;
 
 const HISTORY_PAGE_SIZE = 20;
+const DAY_MS = 86_400_000;
+
+/** Lower bound (epoch ms) of a period, `null` for `all`; `today` starts at local midnight. */
+export function rangeStart(range: WalletHistoryRange, now: number = serverNowMs()): number | null {
+  switch (range) {
+    case 'today': {
+      const d = new Date(now);
+      d.setHours(0, 0, 0, 0);
+      return d.getTime();
+    }
+    case 'week':
+      return now - 7 * DAY_MS;
+    case 'month':
+      return now - 30 * DAY_MS;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Errors after which the club can still take the money at the counter: the server has no payment provider (501), the
+ * club turned online top-up off (`policyDenied features.topup`), or the server or Agent cannot be reached.
+ */
+export function isTopupUnavailable(e: unknown): boolean {
+  const { code } = toShellApiError(e);
+  return (
+    code === 'notImplemented' || code === 'policyDenied' || code === 'serverUnavailable' || code === 'agentOffline'
+  );
+}
 
 const initialState: WalletState = {
   balance: null,
@@ -59,11 +94,16 @@ const initialState: WalletState = {
   historyTotal: 0,
   historyPage: 1,
   historyType: null,
+  historyRange: 'all',
   historyStatus: 'idle',
+  historyError: null,
   topupIntent: null,
   status: 'idle',
   error: null,
 };
+
+// Only the newest ledger request may write: a filter tapped twice quickly must not end on the older answer.
+let historySeq = 0;
 
 export const useWalletStore = create<WalletStore>()(
   subscribeWithSelector((set, get) => ({
@@ -113,10 +153,28 @@ export const useWalletStore = create<WalletStore>()(
       }
     },
 
-    async loadHistory(page = 1, type = null) {
-      set({ historyStatus: 'loading', historyPage: page, historyType: type });
+    async loadHistory(page = 1, type = null, range = get().historyRange) {
+      const seq = ++historySeq;
+      const start = rangeStart(range);
+      set((s) => ({
+        historyStatus: 'loading',
+        historyPage: page,
+        historyType: type,
+        historyRange: range,
+        historyError: null,
+        // A new filter starts from an empty list instead of showing the old one under the new tab.
+        history: page === 1 && (type !== s.historyType || range !== s.historyRange) ? [] : s.history,
+      }));
       try {
-        const res = await api.wallet.history({ page, pageSize: HISTORY_PAGE_SIZE, type });
+        const res = await api.wallet.history({
+          page,
+          pageSize: HISTORY_PAGE_SIZE,
+          type,
+          from: start === null ? null : new Date(start).toISOString(),
+        });
+        if (seq !== historySeq) {
+          return res.items;
+        }
         set((s) => ({
           history: page > 1 ? [...s.history, ...res.items] : res.items,
           historyTotal: res.total,
@@ -124,23 +182,21 @@ export const useWalletStore = create<WalletStore>()(
         }));
         return res.items;
       } catch (e) {
-        set({ historyStatus: 'error', error: asShellError(e) });
+        if (seq === historySeq) {
+          const error = asShellError(e);
+          log.warn('wallet.history failed', error);
+          set({ historyStatus: 'error', historyError: error });
+        }
         return [];
       }
     },
 
     async createTopup(amount, provider) {
-      set({ status: 'loading', error: null });
-      try {
-        const intent = await api.wallet.topupIntent(amount, provider);
-        set({ topupIntent: intent, status: 'ready' });
-        track('wallet.topupIntent', { provider, amount: amount.amount });
-        return intent;
-      } catch (e) {
-        const err = toShellApiError(e);
-        set({ status: 'error', error: err.toJSON() });
-        throw err;
-      }
+      // `status`/`error` belong to the balance load: a refused top-up must not blank the balance card.
+      const intent = await api.wallet.topupIntent(amount, provider);
+      set({ topupIntent: intent });
+      track('wallet.topupIntent', { provider, amount: amount.amount });
+      return intent;
     },
 
     clearTopup() {
@@ -153,12 +209,13 @@ export const useWalletStore = create<WalletStore>()(
         const settled = intent && s.balance && balance.amount.amount >= s.balance.amount.amount + intent.amount.amount;
         return { balance, topupIntent: settled ? { ...intent, status: 'paid' } : intent };
       });
-      if (get().history.length > 0) {
+      if (get().history.length > 0 || get().historyStatus !== 'idle') {
         void get().loadHistory(1, get().historyType);
       }
     },
 
     reset() {
+      historySeq += 1;
       set(initialState);
     },
   })),

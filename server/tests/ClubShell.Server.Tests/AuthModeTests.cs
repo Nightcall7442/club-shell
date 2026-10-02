@@ -140,7 +140,7 @@ public sealed class AuthModeTests(ServerFixture server) : IClassFixture<ServerFi
     public async Task User_mode_requires_a_live_player_token_of_this_pc_optional_user_does_not()
     {
         var (agent, player) = await Players.SignedInAsync(server);
-        var transactions = $"/api/v1/wallet/{player.Id}/transactions"; // user mode, still 501
+        var transactions = $"/api/v1/wallet/{player.Id}/topup-intent/{Guid.NewGuid()}"; // user mode, still 501
         using (var response = await agent.SendAsync(HttpMethod.Get, transactions))
         {
             Assert.Equal(501, (int)response.StatusCode);

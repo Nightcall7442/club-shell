@@ -207,7 +207,7 @@ public static class CounterEndpoints
             var bonus = Bonus(amount, tiers);
             var id = Guid.CreateVersion7(now);
             var balance = await Ledger.PostAsync(c, tx, userId, allowOverdraft: false, now,
-                new LedgerLine("topUp", amount, $"Пополнение на кассе ({method})", staff.ClubId, Method: method, StaffId: staff.StaffId, Id: id),
+                new LedgerLine("topUp", amount, TopUpDescription(method), staff.ClubId, Method: method, StaffId: staff.StaffId, Id: id),
                 new LedgerLine("bonus", bonus, "Бонус за пополнение", staff.ClubId, StaffId: staff.StaffId));
             var row = await c.QuerySingleAsync<(long BalanceAfter, string Description, DateTimeOffset CreatedAt)>(
                 "SELECT balance_after, description, created_at FROM ledger_entries WHERE id = @id", new { id }, tx);
@@ -245,6 +245,14 @@ public static class CounterEndpoints
         var pct = tiers.Where(t => amount >= t.MinAmount).OrderByDescending(t => t.MinAmount).Select(t => t.BonusPct).FirstOrDefault();
         return ((amount * pct) + 5_000) / 10_000 * 100;
     }
+
+    /// <summary>The top-up row's description, which the player also reads in the kiosk's wallet history: words, not the method code.</summary>
+    private static string TopUpDescription(string method) => method switch
+    {
+        "cash" => "Пополнение на кассе наличными",
+        "card" => "Пополнение на кассе картой",
+        _ => $"Пополнение на кассе через {char.ToUpperInvariant(method[0])}{method[1..]}",
+    };
 
     /// <summary>
     /// <c>adminCommand</c> (§6.4 step 4): queued, then its ack awaited up to <see cref="AgentOptions.AckWaitSec"/>; an offline PC

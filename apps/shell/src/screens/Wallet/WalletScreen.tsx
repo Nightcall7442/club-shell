@@ -20,6 +20,7 @@ export function WalletScreen(): JSX.Element {
   const status = useWalletStore((s) => s.status);
   const error = useWalletStore((s) => s.error);
   const load = useWalletStore((s) => s.load);
+  const loadBalance = useWalletStore((s) => s.loadBalance);
   const pushError = useNotificationsStore((s) => s.pushError);
   const [topUpOpen, setTopUpOpen] = useState(false);
   const topUpButton = useRef<HTMLButtonElement>(null);
@@ -29,6 +30,9 @@ export function WalletScreen(): JSX.Element {
   useEffect(() => {
     if (balance === null && status !== 'loading') {
       void load();
+    } else if (balance !== null) {
+      // A quiet re-read on entry: a push missed while the server was out of reach must not leave an old balance here.
+      void loadBalance();
     }
     // Only on mount: later balance changes arrive through `wallet.updated`.
     // eslint-disable-next-line react-hooks/exhaustive-deps

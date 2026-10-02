@@ -1,16 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { TransactionType, type Transaction, type TransactionType as TransactionTypeValue } from '@clubshell/contracts';
 import { Button } from '@/components/ui/Button';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Tabs, type TabItem } from '@/components/ui/Tabs';
 import { useLocale } from '@/hooks/useLocale';
 import { formatMoney, formatMoneySigned, formatRelativeDay, formatTime } from '@/lib/format';
-import { useNotificationsStore } from '@/store/notifications';
-import { selectHistoryHasMore, useWalletStore } from '@/store/wallet';
+import { describeError } from '@/store/notifications';
+import { selectHistoryHasMore, useWalletStore, type WalletHistoryRange } from '@/store/wallet';
 
-export type HistoryRange = 'all' | 'today' | 'week' | 'month';
 type TypeKey = TransactionTypeValue | 'all';
 
 /** Transaction type tabs in display order. */
@@ -23,26 +23,7 @@ export const HISTORY_TYPES: readonly TransactionTypeValue[] = [
   TransactionType.Adjustment,
 ];
 
-export const HISTORY_RANGES: readonly HistoryRange[] = ['all', 'today', 'week', 'month'];
-
-const DAY_MS = 86_400_000;
-
-/** Lower bound (epoch ms) of a range, `null` for `all`. */
-export function rangeStart(range: HistoryRange, now: number = Date.now()): number | null {
-  switch (range) {
-    case 'today': {
-      const d = new Date(now);
-      d.setHours(0, 0, 0, 0);
-      return d.getTime();
-    }
-    case 'week':
-      return now - 7 * DAY_MS;
-    case 'month':
-      return now - 30 * DAY_MS;
-    default:
-      return null;
-  }
-}
+export const HISTORY_RANGES: readonly WalletHistoryRange[] = ['all', 'today', 'week', 'month'];
 
 const ADJUSTMENT_ICON = (
   <svg
@@ -129,6 +110,21 @@ const ICONS: Record<TransactionTypeValue, JSX.Element> = {
   unknown: ADJUSTMENT_ICON,
 };
 
+const LEDGER_ICON = (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.6"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M6 3h12a1 1 0 0 1 1 1v16l-3-2-2 2-2-2-2 2-2-2-3 2V4a1 1 0 0 1 1-1z" />
+    <path d="M9 8h6M9 12h6" />
+  </svg>
+);
+
 const TONE: Record<TransactionTypeValue, string> = {
   topUp: 'bg-success/15 text-success',
   charge: 'bg-primary/15 text-primary',
@@ -139,10 +135,32 @@ const TONE: Record<TransactionTypeValue, string> = {
   unknown: 'bg-muted/15 text-muted',
 };
 
+/** Local calendar day of a timestamp, the history's group key. */
+function dayKey(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+/** Consecutive transactions of one local day (the list is newest first, so a day is one run). */
+export function groupByDay(items: readonly Transaction[]): { key: string; items: Transaction[] }[] {
+  const groups: { key: string; items: Transaction[] }[] = [];
+  for (const tx of items) {
+    const key = dayKey(tx.createdAt);
+    const last = groups[groups.length - 1];
+    if (last && last.key === key) {
+      last.items.push(tx);
+    } else {
+      groups.push({ key, items: [tx] });
+    }
+  }
+  return groups;
+}
+
 export interface TransactionRowProps {
   transaction: Transaction;
 }
 
+/** One ledger row: what (the server's description), the kind and the time, the signed amount and the balance after. */
 export function TransactionRow({ transaction: tx }: TransactionRowProps): JSX.Element {
   const { t } = useTranslation();
   const { locale } = useLocale();
@@ -163,8 +181,7 @@ export function TransactionRow({ transaction: tx }: TransactionRowProps): JSX.El
           {tx.description || t(`wallet.transaction.${tx.type}`)}
         </p>
         <p className="tnum text-sm text-muted">
-          {t(`wallet.transaction.${tx.type}`)} · {formatRelativeDay(tx.createdAt, locale)},{' '}
-          {formatTime(tx.createdAt, locale)}
+          {t(`wallet.transaction.${tx.type}`)} · {formatTime(tx.createdAt, locale)}
         </p>
       </div>
       <div className="shrink-0 text-right">
@@ -188,30 +205,27 @@ export interface HistoryProps {
   className?: string;
 }
 
-/** Paged ledger with type tabs (server filter) and a period filter, plus "load more". */
+/**
+ * The ledger: kind tabs and period chips (both server filters), days as sticky headings, "load more". Once every row of
+ * the filter is loaded the header sums what came in and went out. Errors stay in the panel with a retry, never a toast.
+ */
 export function History({ className }: HistoryProps): JSX.Element {
   const { t } = useTranslation();
+  const { locale } = useLocale();
   const history = useWalletStore((s) => s.history);
   const historyStatus = useWalletStore((s) => s.historyStatus);
   const historyPage = useWalletStore((s) => s.historyPage);
   const historyType = useWalletStore((s) => s.historyType);
-  const error = useWalletStore((s) => s.error);
+  const historyRange = useWalletStore((s) => s.historyRange);
+  const historyError = useWalletStore((s) => s.historyError);
   const hasMore = useWalletStore(selectHistoryHasMore);
   const loadHistory = useWalletStore((s) => s.loadHistory);
-  const pushError = useNotificationsStore((s) => s.pushError);
-  const [range, setRange] = useState<HistoryRange>('all');
 
+  // Every visit starts from the newest page of the filter the player left on.
   useEffect(() => {
-    if (historyStatus === 'idle') {
-      void loadHistory(1, null);
-    }
-  }, [historyStatus, loadHistory]);
-
-  useEffect(() => {
-    if (historyStatus === 'error' && error) {
-      pushError(error, t('wallet.history'));
-    }
-  }, [historyStatus, error, pushError, t]);
+    const s = useWalletStore.getState();
+    void s.loadHistory(1, s.historyType);
+  }, []);
 
   const typeTabs = useMemo<TabItem<TypeKey>[]>(
     () => [
@@ -221,20 +235,53 @@ export function History({ className }: HistoryProps): JSX.Element {
     [t],
   );
 
-  // ponytail: period is a client-side filter on the loaded pages; the store's loadHistory has no from/to. Move it
-  // server-side (WalletHistoryRequest.from/to) when ledgers grow past a few pages.
-  const visible = useMemo(() => {
-    const start = rangeStart(range);
-    return start === null ? history : history.filter((tx) => Date.parse(tx.createdAt) >= start);
-  }, [history, range]);
+  const groups = useMemo(() => groupByDay(history), [history]);
+
+  const totals = useMemo(() => {
+    if (hasMore || history.length === 0) {
+      return null;
+    }
+    const currency = history[0]?.amount.currency ?? 'UZS';
+    let income = 0;
+    let spent = 0;
+    for (const tx of history) {
+      if (tx.amount.amount > 0) {
+        income += tx.amount.amount;
+      } else {
+        spent -= tx.amount.amount;
+      }
+    }
+    return { income: { amount: income, currency }, spent: { amount: spent, currency } };
+  }, [history, hasMore]);
 
   const loading = historyStatus === 'loading';
+  const failed = historyStatus === 'error';
   const initialLoading = loading && historyPage === 1 && history.length === 0;
+  const filtered = historyType !== null || historyRange !== 'all';
+  const retry = (): void => void loadHistory(failed && history.length > 0 ? historyPage : 1, historyType);
 
   return (
     <section aria-label={t('wallet.history')} className={clsx('glass flex min-h-0 flex-col rounded-xl', className)}>
       <header className="flex flex-col gap-3 px-5 pt-5">
-        <h2 className="font-display text-2xl font-normal text-text tracking-tight">{t('wallet.history')}</h2>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <h2 className="font-display text-2xl font-normal tracking-tight text-text">{t('wallet.history')}</h2>
+          {totals && (
+            <dl className="tnum flex items-baseline gap-4 text-sm">
+              {totals.income.amount > 0 && (
+                <div className="flex items-baseline gap-1.5">
+                  <dt className="text-muted">{t('wallet.periodIn')}</dt>
+                  <dd className="font-semibold text-success">{formatMoney(totals.income, locale)}</dd>
+                </div>
+              )}
+              {totals.spent.amount > 0 && (
+                <div className="flex items-baseline gap-1.5">
+                  <dt className="text-muted">{t('wallet.periodOut')}</dt>
+                  <dd className="font-semibold text-text">{formatMoney(totals.spent, locale)}</dd>
+                </div>
+              )}
+            </dl>
+          )}
+        </div>
         <Tabs<TypeKey>
           items={typeTabs}
           value={historyType ?? 'all'}
@@ -250,11 +297,11 @@ export function History({ className }: HistoryProps): JSX.Element {
               key={r}
               type="button"
               data-nav="true"
-              aria-pressed={range === r}
-              onClick={() => setRange(r)}
+              aria-pressed={historyRange === r}
+              onClick={() => void loadHistory(1, historyType, r)}
               className={clsx(
                 'focus-ring h-9 rounded-full px-3 font-semibold transition-colors duration-[var(--dur-fast)]',
-                range === r ? 'bg-accent/20 text-accent' : 'text-muted hover:bg-text/10 hover:text-text',
+                historyRange === r ? 'bg-accent/20 text-accent' : 'text-muted hover:bg-text/10 hover:text-text',
               )}
             >
               {t(`wallet.range.${r}`)}
@@ -266,7 +313,8 @@ export function History({ className }: HistoryProps): JSX.Element {
       <div
         id="wallet-history-panel"
         role="tabpanel"
-        className="themed-scrollbar min-h-0 flex-1 overflow-y-auto px-5 py-3"
+        aria-busy={loading || undefined}
+        className="themed-scrollbar mt-3 min-h-0 flex-1 overflow-y-auto px-5 pb-3"
       >
         {initialLoading ? (
           <div className="flex flex-col gap-3 py-2">
@@ -278,35 +326,55 @@ export function History({ className }: HistoryProps): JSX.Element {
               </div>
             ))}
           </div>
-        ) : visible.length === 0 ? (
-          <div className="flex h-full min-h-[12rem] flex-col items-center justify-center gap-2 text-center">
-            <p className="text-lg font-semibold text-text">
-              {history.length === 0 ? t('wallet.noHistory') : t('common.noResults')}
-            </p>
-            {historyStatus === 'error' && (
-              <Button variant="secondary" onClick={() => void loadHistory(1, historyType)}>
+        ) : failed && history.length === 0 ? (
+          <EmptyState
+            icon={LEDGER_ICON}
+            title={t('wallet.historyError')}
+            hint={historyError ? describeError(historyError) : undefined}
+            action={
+              <Button variant="secondary" onClick={retry}>
                 {t('common.retry')}
               </Button>
-            )}
-          </div>
+            }
+            className="h-full min-h-[14rem]"
+          />
+        ) : history.length === 0 ? (
+          <EmptyState
+            icon={LEDGER_ICON}
+            title={filtered ? t('wallet.noFilteredHistory') : t('wallet.noHistory')}
+            hint={filtered ? undefined : t('wallet.noHistoryHint')}
+            className="h-full min-h-[14rem]"
+          />
         ) : (
-          <ul role="list">
-            {visible.map((tx) => (
-              <TransactionRow key={tx.id} transaction={tx} />
-            ))}
-          </ul>
+          groups.map((group) => (
+            <section key={group.key}>
+              <h3 className="hud-label sticky top-0 z-[1] bg-surface py-2">
+                {formatRelativeDay(group.items[0]?.createdAt ?? '', locale)}
+              </h3>
+              <ul role="list">
+                {group.items.map((tx) => (
+                  <TransactionRow key={tx.id} transaction={tx} />
+                ))}
+              </ul>
+            </section>
+          ))
         )}
       </div>
 
-      {hasMore && !initialLoading && (
-        <footer className="border-t border-text/10 px-5 py-3">
+      {(hasMore || (failed && history.length > 0)) && !initialLoading && (
+        <footer className="flex flex-col gap-2 border-t border-text/10 px-5 py-3">
+          {failed && history.length > 0 && (
+            <p className="text-center text-sm text-danger">
+              {historyError ? describeError(historyError) : t('wallet.historyError')}
+            </p>
+          )}
           <Button
             variant="secondary"
             block
             loading={loading}
-            onClick={() => void loadHistory(historyPage + 1, historyType)}
+            onClick={() => (failed ? retry() : void loadHistory(historyPage + 1, historyType))}
           >
-            {t('wallet.loadMore')}
+            {failed ? t('common.retry') : t('wallet.loadMore')}
           </Button>
         </footer>
       )}

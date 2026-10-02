@@ -20,7 +20,8 @@ public sealed class NotImplementedTests(ServerFixture server) : IClassFixture<Se
 
         // Exactly the operations of the slices done so far (S1: the eight agent operations; S2: 18 player operations; S3: five
         // catalog/update/PC operations; S4: 17 cashier operations; S5: 27 console operations), all 75 required by the contract,
-        // plus getBalance (S2) and reportAntiCheat (S3), which the server implements beyond it (DESIGN §1, §12.2 item 1).
+        // plus getBalance (S2), reportAntiCheat (S3) and getTransactions (the wallet page), which the server implements beyond
+        // it (DESIGN §1, §12.2 item 1).
         string[] s1 = ["register", "refresh", "heartbeat", "sendTelemetry", "getConfig", "getPolicies", "getCommands", "ackCommand"];
         string[] s2 =
         [
@@ -49,7 +50,7 @@ public sealed class NotImplementedTests(ServerFixture server) : IClassFixture<Se
         string[] required = [.. s1, .. s2, .. s3, .. s4, .. s5a, .. s5b];
         Assert.Equal(75, required.Length);
         Assert.Equal(75, Contract.Operations.Count(o => o.Operation.GetProperty("x-server-status").GetString() == "required"));
-        Assert.Equal(required.Append("getBalance").Append("reportAntiCheat").Order(), ContractStatus.Implemented.Order());
+        Assert.Equal(required.Append("getBalance").Append("reportAntiCheat").Append("getTransactions").Order(), ContractStatus.Implemented.Order());
         var owner = await Staff.LoginAsync(server, Staff.OwnerPin);
         Assert.All(required, id => Assert.Equal("required", Contract.Operations.Single(o => o.OperationId == id).Operation.GetProperty("x-server-status").GetString()));
 
@@ -73,7 +74,7 @@ public sealed class NotImplementedTests(ServerFixture server) : IClassFixture<Se
             Assert.False(response.Headers.Contains("Retry-After"), op.OperationId);
         }
 
-        Assert.Equal(25, pending.Count);
+        Assert.Equal(24, pending.Count);
     }
 
     /// <summary>Credentials of the operation's contract <c>security</c>: agent routes also carry the signed-in player's token, staff routes the owner's.</summary>
