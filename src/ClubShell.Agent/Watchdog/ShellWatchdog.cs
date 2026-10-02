@@ -266,10 +266,17 @@ public sealed class ShellWatchdog : BackgroundService
 
         switch (action.Kind)
         {
-            case RecoveryActionKind.SafeMode:
+            case RecoveryActionKind.SafeMode when _settings.CurrentValue.Shell.SafeModeExplorer:
                 _safeMode = true;
                 SetStatus(ShellState.SafeMode);
                 _ = await _launcher.LaunchExplorerAsync(cancellationToken).ConfigureAwait(false);
+                break;
+            case RecoveryActionKind.SafeMode:
+                // No desktop for the player: the kiosk stays sealed (empty screen) and the Shell is tried again after a
+                // pause long enough to leave the crash-loop window, so a passing fault heals by itself.
+                _pendingDelay = TimeSpan.FromSeconds(_settings.CurrentValue.Shell.SafeModeRetrySec);
+                SetStatus(ShellState.SafeMode);
+                _logger.LogCritical("Shell crash loop: the kiosk stays sealed, next Shell start in {Delay}", _pendingDelay);
                 break;
             case RecoveryActionKind.RestartAfter:
                 _pendingDelay = action.Delay;

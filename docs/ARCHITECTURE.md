@@ -115,9 +115,9 @@ Rules:
    session owned by the kiosk user with no live Shell process it launches one (`CreateProcessAsUser`,
    desktop `winsta0\default`, environment block of the user, working dir = Shell install dir).
 4. Crash loop guard: at most `shell.maxRestartsPerMinute` restarts; beyond that the watchdog enters safe
-   mode (`CrashRecovery`): `explorer.exe` is started in the kiosk session (`ShellLauncher.LaunchExplorerAsync`),
-   relaunches pause until the next logon, and the telemetry event `shellCrashLoop` is raised
-   (`SHELL_REPLACEMENT.md` §6).
+   mode (`CrashRecovery`): the kiosk stays sealed and the Shell is tried again after `shell.safeModeRetrySec`
+   (only with `shell.safeModeExplorer` is `explorer.exe` started in the kiosk session and relaunches pause
+   until the next logon), and the telemetry event `shellCrashLoop` is raised (`SHELL_REPLACEMENT.md` §6).
 5. Games run inside a Windows job object per session (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`) so a session
    end kills the whole tree.
 6. One interactive user session at a time is supported. Fast user switching is disabled by policy.

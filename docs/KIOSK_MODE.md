@@ -303,7 +303,7 @@ Owned by `ShellWatchdog` + `CrashRecovery` + `ShellLauncher` (`src/ClubShell.Age
 | Event | Detection | Action |
 |-------|-----------|--------|
 | Shell process exits | `ShellLauncher.WaitForExitAsync` | `CrashRecovery.Decide`: uptime < 10 s → restart after `shell.restartDelayMs`; else immediate restart |
-| ≥ `shell.maxRestartsPerMinute` crashes in 60 s | sliding window in `CrashRecovery` | **safe mode**: `ShellLauncher.LaunchExplorerAsync` drops `explorer.exe` into the kiosk session so the PC stays usable for an administrator, telemetry `shellCrashLoop`, relaunches paused until the session logs on again |
+| ≥ `shell.maxRestartsPerMinute` crashes in 60 s | sliding window in `CrashRecovery` | **safe mode**: the kiosk stays sealed (no desktop), telemetry `shellCrashLoop`, the Shell is tried again after `shell.safeModeRetrySec` (60 s). Only with `shell.safeModeExplorer = true` (technician PCs) `ShellLauncher.LaunchExplorerAsync` drops `explorer.exe` into the kiosk session and relaunches pause until the session logs on again: on a club PC a game or mod that kills the Shell five times would otherwise get a Windows desktop |
 | Shell alive but never connects the pipe | `ShellWatchdog.HealthTimeout` (60 s without `IShellConnectionState.IsConnected`) | Shell stopped (WM_CLOSE, then terminate) and relaunched |
 | Shell connected but silent | `PipeServer`: no `sys.ping` for `ipc.heartbeatIntervalSec × missedHeartbeatsBeforeKill` (15 s) | connection dropped, Shell terminated when `KillShellOnHeartbeatLoss` (default) → watchdog restarts |
 | Kiosk session logs off / disconnects | `SessionChangeWatcher` | watchdog waits (`WaitingForSession`); auto-logon brings the session back |

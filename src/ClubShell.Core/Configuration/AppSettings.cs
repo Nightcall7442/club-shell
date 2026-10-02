@@ -320,6 +320,17 @@ public sealed class ShellHostSettings
     /// <summary>Seconds to wait for <c>auth.hello</c> after launch.</summary>
     [Range(1, 600)]
     public int LaunchTimeoutSec { get; set; } = 30;
+
+    /// <summary>
+    /// After a crash loop (<see cref="MaxRestartsPerMinute"/>), start <c>explorer.exe</c> in the kiosk session instead of
+    /// retrying the Shell after <see cref="SafeModeRetrySec"/>. Off on club PCs: a game or mod that kills the Shell five
+    /// times would otherwise hand the player a Windows desktop.
+    /// </summary>
+    public bool SafeModeExplorer { get; set; }
+
+    /// <summary>Pause before the Shell is tried again after a crash loop (the screen stays empty meanwhile).</summary>
+    [Range(5, 3600)]
+    public int SafeModeRetrySec { get; set; } = 60;
 }
 
 /// <summary><c>agent.json → shell.kioskUser</c>.</summary>

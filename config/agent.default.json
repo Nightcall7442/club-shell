@@ -35,7 +35,9 @@
     "watchdogIntervalMs": 2000,
     "restartDelayMs": 1500,
     "maxRestartsPerMinute": 5,
-    "launchTimeoutSec": 30
+    "launchTimeoutSec": 30,
+    "safeModeExplorer": false,
+    "safeModeRetrySec": 60
   },
   "session": {
     "warningMinutes": [10, 5, 1],

@@ -225,7 +225,7 @@ Games differ only in the spec: `Env` from the launcher, `WorkingDir` from `Launc
 | Condition | `RecoveryAction` | Watchdog state |
 |-----------|------------------|----------------|
 | graceful stop (not used by the watchdog today: every exit is `graceful: false`) | `RestartImmediately` | `Restarting` |
-| crashes in the last 60 s ≥ `shell.maxRestartsPerMinute` (default 5) | `SafeMode` | `SafeMode`: `ShellLauncher.LaunchExplorerAsync` starts `%WINDIR%\explorer.exe` in the kiosk session; relaunches paused until a `Logon` / `ConsoleConnect` / `SessionCreate` / `Unlock` event resets the window |
+| crashes in the last 60 s ≥ `shell.maxRestartsPerMinute` (default 5) | `SafeMode` | `SafeMode`: the screen stays empty and the Shell is started again after `shell.safeModeRetrySec` (60 s), so a game or mod that kills the Shell never earns a desktop. With `shell.safeModeExplorer = true` (technician PCs): `ShellLauncher.LaunchExplorerAsync` starts `%WINDIR%\explorer.exe` in the kiosk session; relaunches paused until a `Logon` / `ConsoleConnect` / `SessionCreate` / `Unlock` event resets the window |
 | uptime < 10 s (`ShortRunThreshold`) | `RestartAfter(shell.restartDelayMs)` (default 1500 ms) | `Restarting` |
 | otherwise | `RestartImmediately` | `Restarting` |
 
