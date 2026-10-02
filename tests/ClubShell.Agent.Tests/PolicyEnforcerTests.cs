@@ -85,6 +85,21 @@ public sealed class PolicyEnforcerTests : IDisposable
     }
 
     [Fact]
+    public async Task ReapplyAll_WritesEverySectionAgain_ForARecreatedProfile()
+    {
+        using PolicyEnforcer enforcer = Enforcer(Module("usb"), Module("explorer"));
+        await enforcer.ReapplyAllAsync(CancellationToken.None);
+        _log.Should().BeEmpty("nothing was applied yet");
+
+        await enforcer.ApplyAsync(PolicyFactory.Create(), CancellationToken.None);
+        _log.Clear();
+        await enforcer.ReapplyAllAsync(CancellationToken.None);
+
+        _log.Should().Equal("apply:usb", "apply:explorer");
+        await _sink.Received(1).PublishAsync(Arg.Any<PolicyChanged>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task SecondApply_TouchesOnlyTheSectionsThatChanged()
     {
         IPolicyModule usb = Module("usb");
