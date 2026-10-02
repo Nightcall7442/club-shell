@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using ClubShell.Contracts.Commands;
 using ClubShell.Contracts.Errors;
 using ClubShell.Contracts.Pcs;
@@ -121,6 +123,20 @@ public sealed class PcRepository(NpgsqlDataSource db)
                 """,
                 new { id, machineName = request.MachineName, mac, ip = request.IpAddress, hardware, agentVersion = request.AgentVersion, now },
                 tx);
+
+            // A clone boots with the reference PC's Windows name and the owner renames it afterwards: while the PC still
+            // waits for approval and keeps its generated name, the new name moves it to that seat number (when free).
+            if (!known.Approved && known.Name == $"PC-{known.Number:D2}" && SeatNumberOf(request.MachineName) is { } wanted && wanted != known.Number)
+            {
+                await c.ExecuteAsync(
+                    """
+                    UPDATE pcs SET number = @wanted, name = @name
+                    WHERE id = @id AND NOT EXISTS (
+                        SELECT 1 FROM pcs o WHERE o.club_id = @clubId AND o.deleted_at IS NULL AND o.number = @wanted AND o.id <> @id)
+                    """,
+                    new { id, clubId, wanted, name = $"PC-{wanted:D2}" },
+                    tx);
+            }
         }
         else
         {
@@ -132,7 +148,15 @@ public sealed class PcRepository(NpgsqlDataSource db)
                 """,
                 new { clubId, mac, previous = request.PreviousPcId ?? Guid.Empty },
                 tx);
-            var number = seat?.Number ?? await c.ExecuteScalarAsync<int>(
+            // Clones of one image register in boot order; a Windows name such as "PC-17" keeps the seat number instead.
+            var named = seat is null ? SeatNumberOf(request.MachineName) : null;
+            if (named is { } wanted && await c.ExecuteScalarAsync<bool>(
+                    "SELECT EXISTS (SELECT 1 FROM pcs WHERE club_id = @clubId AND deleted_at IS NULL AND number = @wanted)", new { clubId, wanted }, tx))
+            {
+                named = null;
+            }
+
+            var number = seat?.Number ?? named ?? await c.ExecuteScalarAsync<int>(
                 "SELECT coalesce(max(number), 0) + 1 FROM pcs WHERE club_id = @clubId AND deleted_at IS NULL", new { clubId }, tx);
             var approved = autoApprove && seat is null;
             id = Guid.CreateVersion7(now);
@@ -330,4 +354,13 @@ public sealed class PcRepository(NpgsqlDataSource db)
 
     /// <summary>Array parameters bypass the Dapper handler: UTC and truncated to ms here (DESIGN §4).</summary>
     private static DateTime Utc(DateTimeOffset at) => new(at.UtcTicks - at.UtcTicks % TimeSpan.TicksPerMillisecond, DateTimeKind.Utc);
+
+    private static readonly Regex SeatName = new("^(?:PC|ПК)?[ _-]?0*([1-9][0-9]{0,2})$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+
+    /// <summary>The seat number a Windows name such as <c>PC-17</c>, <c>pc17</c>, <c>ПК-05</c> or <c>17</c> stands for.</summary>
+    public static int? SeatNumberOf(string machineName)
+    {
+        var match = SeatName.Match(machineName.Trim());
+        return match.Success ? int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture) : null;
+    }
 }

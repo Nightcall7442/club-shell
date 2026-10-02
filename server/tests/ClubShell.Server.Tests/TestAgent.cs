@@ -41,10 +41,10 @@ public sealed class TestAgent(ServerFixture server, JsonElement registration, st
     }
 
     /// <summary>A contract-valid <c>AgentRegisterRequest</c>.</summary>
-    public static string RegisterBody(string hwid, string mac, Guid? previousPcId = null) => JsonSerializer.Serialize(new
+    public static string RegisterBody(string hwid, string mac, Guid? previousPcId = null, string machineName = "CLUB-PC") => JsonSerializer.Serialize(new
     {
         hwid,
-        machineName = "CLUB-PC",
+        machineName,
         agentVersion = "1.4.2",
         hardware = new
         {

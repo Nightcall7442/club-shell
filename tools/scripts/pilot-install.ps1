@@ -118,6 +118,12 @@ Say 'ClubShell установлен.' Green
 
 # --- 4a. Reference PC for an image ------------------------------------------------------------------------------------
 if ($ForImage) {
+    # prepare-image.ps1 holds the full list (registration, offline store, logs, updates) and the update-key check.
+    $prepare = Join-Path $PSScriptRoot 'prepare-image.ps1'
+    if (Test-Path -LiteralPath $prepare) {
+        & $prepare
+        exit $LASTEXITCODE
+    }
     $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
     if ($svc -and $svc.Status -ne 'Stopped') { Stop-Service -Name $ServiceName -Force; $svc.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30)) }
     foreach ($rel in 'agent-identity.json', 'secure\agent.tokens', 'secure\hwid.fallback') {

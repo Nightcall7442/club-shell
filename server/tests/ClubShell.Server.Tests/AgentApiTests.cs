@@ -27,6 +27,71 @@ public sealed class AgentApiTests(ServerFixture server) : IClassFixture<ServerFi
     }
 
     [Theory]
+    [InlineData("PC-917", 917)]
+    [InlineData("pc918", 918)]
+    [InlineData("ПК-0919", 919)]
+    [InlineData(" 920 ", 920)]
+    [InlineData("CLUB-PC", null)]
+    [InlineData("DESKTOP-4F2K9QX", null)]
+    [InlineData("PC-0", null)]
+    [InlineData("PC-1000", null)]
+    public void A_windows_name_like_a_seat_gives_its_number(string machineName, int? number) =>
+        Assert.Equal(number, ClubShell.Server.Agents.PcRepository.SeatNumberOf(machineName));
+
+    [Fact]
+    public async Task A_clone_named_after_its_seat_registers_with_that_number_unless_it_is_taken()
+    {
+        // Clones of one image register in boot order; the Windows name the owner gave each PC keeps its seat.
+        var first = await TestAgent.RegisterAsync(server, TestAgent.RegisterBody(TestAgent.RandomHwid(), TestAgent.RandomMac(), machineName: "PC-937"));
+        var taken = await TestAgent.RegisterAsync(server, TestAgent.RegisterBody(TestAgent.RandomHwid(), TestAgent.RandomMac(), machineName: "pc937"));
+        await using var c = await server.Services.GetRequiredService<NpgsqlDataSource>().OpenConnectionAsync();
+        try
+        {
+            var a = (await first.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("pc");
+            var b = (await taken.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("pc");
+            Assert.Equal(("PC-937", 937), (a.GetProperty("name").GetString(), await c.QuerySingleAsync<int>("SELECT number FROM pcs WHERE id = @id", new { id = a.GetProperty("id").GetGuid() })));
+            Assert.NotEqual(937, await c.QuerySingleAsync<int>("SELECT number FROM pcs WHERE id = @id", new { id = b.GetProperty("id").GetGuid() }));
+        }
+        finally
+        {
+            // Out of the way of the other tests' "next free number".
+            await c.ExecuteAsync("UPDATE pcs SET deleted_at = now() WHERE number >= 937 AND deleted_at IS NULL");
+            first.Dispose();
+            taken.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task A_pending_clone_renamed_in_windows_moves_to_that_seat()
+    {
+        // A pending PC (here: the MAC of a live PC, so it waits even though the fixture auto-approves) keeps its generated
+        // name; registering again under the Windows name "PC-947" moves it to seat 947.
+        var mac = TestAgent.RandomMac();
+        var old = await TestAgent.CreateAsync(server, mac: mac);
+        var hwid = TestAgent.RandomHwid();
+        using (var pending = await TestAgent.RegisterAsync(server, TestAgent.RegisterBody(hwid, mac)))
+        {
+            await Contract.ReadErrorAsync(pending, 403, "forbidden", "pendingApproval");
+        }
+
+        await using var c = await server.Services.GetRequiredService<NpgsqlDataSource>().OpenConnectionAsync();
+        try
+        {
+            using (var renamed = await TestAgent.RegisterAsync(server, TestAgent.RegisterBody(hwid, mac, machineName: "PC-947")))
+            {
+                await Contract.ReadErrorAsync(renamed, 403, "forbidden", "pendingApproval");
+            }
+
+            Assert.Equal((947, "PC-947"), await c.QuerySingleAsync<(int, string)>("SELECT number, name FROM pcs WHERE hwid = @hwid AND deleted_at IS NULL", new { hwid }));
+            Assert.NotEqual(947, await c.QuerySingleAsync<int>("SELECT number FROM pcs WHERE id = @id", new { id = old.PcId }));
+        }
+        finally
+        {
+            await c.ExecuteAsync("UPDATE pcs SET deleted_at = now() WHERE number >= 937 AND deleted_at IS NULL");
+        }
+    }
+
+    [Theory]
     [InlineData("hwid")]
     [InlineData("macAddress")]
     [InlineData("hardware")]
