@@ -80,6 +80,10 @@ pub fn run() {
             kiosk::commands::kiosk_idle_reset,
             kiosk::commands::kiosk_i18n_bundle,
             kiosk::commands::kiosk_asset_url,
+            commands::display::display_list,
+            commands::display::display_set_refresh_rate,
+            commands::display::display_confirm,
+            commands::display::display_revert,
         ))
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -145,6 +149,7 @@ pub fn shutdown(app: &AppHandle) {
 fn cleanup(state: &AppState) {
     state.kiosk().shutdown();
     state.agent.shutdown();
+    commands::display::revert_pending();
 }
 
 /// Reload (F5, Ctrl+R, Ctrl+Shift+R), find, print, zoom and the developer tools are WebView2's own chords, and the

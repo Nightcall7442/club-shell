@@ -83,6 +83,7 @@ import type {
 } from '@clubshell/contracts';
 import { tariffPriceFor } from '@clubshell/contracts';
 import type { GamepadState, KioskState, ShellConfig } from '@/lib/tauri';
+import type { DisplayInfo } from '@/lib/tauri';
 import { builtinThemes, DEFAULT_THEME } from '@/theme/themes';
 import {
   ACHIEVEMENTS,
@@ -2067,6 +2068,114 @@ cmd(
   },
   { fast: true },
 );
+
+// ----- display (refresh rates, local to the Shell: src-tauri/src/commands/display.rs) ----------------------------------
+
+/** Rates each mock monitor offers at its resolution, by monitor index. */
+const MOCK_DISPLAY_RATES: Readonly<Record<number, readonly number[]>> = {
+  0: [60, 100, 120, 144, 165, 240],
+  1: [60, 75, 100, 120, 144],
+};
+/** Same 15 s as the Shell before an unconfirmed rate is undone. */
+const DISPLAY_CONFIRM_MS = 15_000;
+
+let displayPending: { id: number; device: string; previousHz: number; revertAt: string } | null = null;
+let displaySeq = 0;
+
+const displayDevice = (index: number): string => `\\\\.\\DISPLAY${index + 1}`;
+
+function displayInfo(index: number): DisplayInfo {
+  const m = MONITORS.find((x) => x.index === index);
+  if (!m) {
+    mockError('notFound', 'display not found', { name: 'display' });
+  }
+  const device = displayDevice(m.index);
+  return {
+    index: m.index,
+    device,
+    primary: m.primary,
+    width: m.width,
+    height: m.height,
+    hz: m.hz,
+    rates: [...(MOCK_DISPLAY_RATES[m.index] ?? [m.hz])],
+    pending:
+      displayPending?.device === device
+        ? { previousHz: displayPending.previousHz, revertAt: displayPending.revertAt }
+        : null,
+  };
+}
+
+function displayIndex(args: Record<string, unknown>): number {
+  const device = str(args, 'device') ?? '';
+  const m = MONITORS.find((x) => displayDevice(x.index) === device);
+  if (!m) {
+    mockError('notFound', 'display not found', { name: 'display' });
+  }
+  return m.index;
+}
+
+/** Sets the mock monitor's rate everywhere the UI reads it and fires `kiosk://monitorChanged` like the watcher. */
+function applyDisplayHz(index: number, hz: number): void {
+  for (const list of [MONITORS, mockState.kiosk.monitors]) {
+    const m = list.find((x) => x.index === index);
+    if (m) {
+      m.hz = hz;
+    }
+  }
+  emitMock('kiosk://monitorChanged', { monitors: clone(MONITORS), primaryIndex: 0, reason: 'resolution' });
+}
+
+cmd('display_list', (): DisplayInfo[] => MONITORS.map((m) => displayInfo(m.index)));
+
+cmd('display_set_refresh_rate', async (args): Promise<DisplayInfo> => {
+  const index = displayIndex(args);
+  const hz = num(args, 'hz') ?? 0;
+  const device = displayDevice(index);
+  const current = displayInfo(index);
+  if (displayPending && displayPending.device !== device) {
+    mockError('conflict', 'another display change waits for confirmation');
+  }
+  if (!current.rates.includes(hz)) {
+    mockError('validation', 'hz: not offered by this display', { field: 'hz', reason: 'not offered by this display' });
+  }
+  const previousHz = displayPending?.previousHz ?? current.hz;
+  if (hz !== current.hz) {
+    await delay(700); // the screen blanks for a moment on a real switch
+    applyDisplayHz(index, hz);
+  }
+  if (hz === previousHz) {
+    displayPending = null;
+  } else {
+    const id = ++displaySeq;
+    displayPending = { id, device, previousHz, revertAt: isoIn(DISPLAY_CONFIRM_MS / 1000) };
+    later(DISPLAY_CONFIRM_MS, () => {
+      if (displayPending?.id === id) {
+        displayPending = null;
+        applyDisplayHz(index, previousHz);
+      }
+    });
+  }
+  return displayInfo(index);
+});
+
+cmd('display_confirm', (args): DisplayInfo => {
+  const index = displayIndex(args);
+  if (displayPending?.device !== displayDevice(index)) {
+    mockError('notFound', 'pending display change not found', { name: 'pending display change' });
+  }
+  displayPending = null;
+  return displayInfo(index);
+});
+
+cmd('display_revert', (args): DisplayInfo => {
+  const index = displayIndex(args);
+  if (displayPending?.device === displayDevice(index)) {
+    const { previousHz } = displayPending;
+    displayPending = null;
+    applyDisplayHz(index, previousHz);
+  }
+  return displayInfo(index);
+});
 
 /** Every command name TAURI_COMMANDS.md §4.1 lists; `tests/unit/mock-coverage` compares against this. */
 export const MOCKED_COMMANDS: readonly string[] = Object.keys(registry);

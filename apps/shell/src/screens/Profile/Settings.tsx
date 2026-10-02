@@ -18,6 +18,8 @@ import { api, isTauri, toShellApiError } from '@/lib/tauri';
 import { secondsUntil } from '@/lib/time';
 import { describeError, useAuthStore, useNotificationsStore, useSettingsStore, useThemeStore } from '@/store';
 import { builtinThemes, loadTheme } from '@/theme/themes';
+import { MonitorSection } from './display/MonitorSection';
+import { PcSpecsSection } from './display/PcSpecsSection';
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Primitives local to the settings tab
@@ -817,6 +819,9 @@ export function Settings(): JSX.Element {
           />
         </SettingsSection>
       </div>
+
+      <MonitorSection />
+      <PcSpecsSection />
 
       <div className="grid gap-[var(--gap)] xl:grid-cols-2">
         <SettingsSection
