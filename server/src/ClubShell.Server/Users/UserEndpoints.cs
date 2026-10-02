@@ -104,7 +104,8 @@ public static partial class UserEndpoints
             throw ApiException.Validation("displayName", name.Length == 0 ? "min" : "max");
         }
 
-        if (request.AvatarUrl is { } url && !(Uri.TryCreate(url, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)))
+        // Beyond the contract (http/https only): a preset picture of the Shell, /avatars/<id>.svg, as well.
+        if (request.AvatarUrl is { } url && !AvatarUrls.IsValid(url))
         {
             throw ApiException.Validation("avatarUrl", "format");
         }
