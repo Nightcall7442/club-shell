@@ -884,11 +884,10 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
 
                 _pendingCreate = null;
             }
-            catch (ServerApiException ex)
+            catch (Exception ex) when (ex is ServerApiException or HttpRequestException or TimeoutException || (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
             {
-                // ponytail: an offline-created session that ends before the server is back is reported only through the
-                // outbox events (which will dead-letter with 404); upgrade: persist pending creates in their own table.
-                _logger.LogWarning("Offline session {SessionId} could not be replayed before ending: {Code}", _session!.Id, ex.Code);
+                // Kept as a finished offline session below and replayed (create + end) once the server is back.
+                _logger.LogWarning("Offline session {SessionId} could not be replayed before ending: {Message}", _session!.Id, ex.Message);
             }
         }
 
@@ -900,7 +899,8 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
             session.IsPrepaid ? Money.Zero with { Currency = session.Cost.Currency } : session.Cost,
             Money.Zero with { Currency = session.Cost.Currency });
         var result = local;
-        var wasPending = _pendingCreate is not null;
+        var pendingCreate = _pendingCreate;
+        var wasPending = pendingCreate is not null;
         var offline = wasPending || !settleWithServer;
         if (!offline)
         {
@@ -927,6 +927,12 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
         _timerPausedByLock = false;
         _state = SessionState.Idle;
         _logger.LogInformation("Session {SessionId} ended ({Reason}): used={SecondsUsed}s charged={Charged} refunded={Refunded} offline={Offline}", final.Id, reason, final.SecondsUsed, result.Charged, result.Refunded, offline);
+
+        if (wasPending && settleWithServer && pendingCreate is not null)
+        {
+            // Played while the server was unreachable and never seen by it: without this the play would be free.
+            await _store.QueueFinishedAsync(pendingCreate, new SessionEndReport(reason, final.SecondsUsed, now), cancellationToken).ConfigureAwait(false);
+        }
 
         await _store.ClearSessionAsync(cancellationToken).ConfigureAwait(false);
         var ended = SessionEvent.Ended(final.Id, now, reason);

@@ -19,6 +19,16 @@ namespace ClubShell.Agent.Session;
 /// <param name="IdempotencyKey">Key reused on every replay so the server never creates a duplicate.</param>
 public sealed record OfflineSessionCreate(SessionCreateRequest Request, Guid IdempotencyKey);
 
+/// <summary>
+/// An offline-created session that ended before the server ever saw it: its create call and its end report, replayed in
+/// that order by <see cref="OfflineSessionStore.FlushAsync"/> so the play is charged once the server is back.
+/// </summary>
+/// <param name="Id">Row id.</param>
+/// <param name="Create">The create call still owed (with <c>startedAt</c> and <c>clientSessionId</c>).</param>
+/// <param name="End">The end report (reason, seconds used, end time).</param>
+/// <param name="Attempts">Rejected replays so far.</param>
+public sealed record FinishedOfflineSession(long Id, OfflineSessionCreate Create, SessionEndReport End, int Attempts);
+
 /// <summary>Session row loaded from the store.</summary>
 /// <param name="Session">Persisted session (seconds as of <paramref name="UpdatedAt"/>).</param>
 /// <param name="UpdatedAt">Time of the last save; the restorer subtracts the gap from the remaining time.</param>
@@ -167,6 +177,14 @@ public sealed class OfflineSessionStore : IDisposable
                     userJson TEXT NOT NULL,
                     cachedAt TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS ix_users_userId ON users(userId);
+                CREATE TABLE IF NOT EXISTS finished(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    createJson TEXT NOT NULL,
+                    createKey TEXT NOT NULL,
+                    endJson TEXT NOT NULL,
+                    createdAt TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    lastError TEXT NULL);
                 """;
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             _initialized = true;
@@ -260,6 +278,59 @@ public sealed class OfflineSessionStore : IDisposable
         }
 
         return new StoredSession(session, updatedAt, pending);
+    }
+
+    /// <summary>Keeps an offline-created session that ended before the server saw it, for <see cref="FlushAsync"/>.</summary>
+    public async Task QueueFinishedAsync(OfflineSessionCreate create, SessionEndReport end, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(create);
+        ArgumentNullException.ThrowIfNull(end);
+        await InitializeAsync(cancellationToken).ConfigureAwait(false);
+        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+            using var command = connection.CreateCommand();
+            // Its queued events go: the server never knew the session, and the create + end replay carries what billing
+            // needs (start, end, seconds used); events posted to an ended session would only be rejected.
+            command.CommandText = """
+                INSERT INTO finished(createJson, createKey, endJson, createdAt) VALUES (@createJson, @createKey, @endJson, @createdAt);
+                DELETE FROM events WHERE sessionId = @sessionId;
+                """;
+            command.Parameters.AddWithValue("@sessionId", (create.Request.ClientSessionId ?? Guid.Empty).ToString("D"));
+            command.Parameters.AddWithValue("@createJson", JsonDefaults.Serialize(create.Request));
+            command.Parameters.AddWithValue("@createKey", create.IdempotencyKey.ToString("D"));
+            command.Parameters.AddWithValue("@endJson", JsonDefaults.Serialize(end));
+            command.Parameters.AddWithValue("@createdAt", Stamp(_clock.UtcNow));
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
+    /// <summary>Finished offline sessions still owed to the server (fewer than <see cref="MaxDeliveryAttempts"/> rejections), oldest first.</summary>
+    public async Task<IReadOnlyList<FinishedOfflineSession>> PendingFinishedAsync(CancellationToken cancellationToken)
+    {
+        await InitializeAsync(cancellationToken).ConfigureAwait(false);
+        using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT id, createJson, createKey, endJson, attempts FROM finished WHERE attempts < @max ORDER BY id;";
+        command.Parameters.AddWithValue("@max", MaxDeliveryAttempts);
+        var result = new List<FinishedOfflineSession>();
+        using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            var request = JsonDefaults.Deserialize<SessionCreateRequest>(reader.GetString(1));
+            var end = JsonDefaults.Deserialize<SessionEndReport>(reader.GetString(3));
+            if (request is not null && end is not null && Guid.TryParse(reader.GetString(2), out var key))
+            {
+                result.Add(new FinishedOfflineSession(reader.GetInt64(0), new OfflineSessionCreate(request, key), end, reader.GetInt32(4)));
+            }
+        }
+
+        return result;
     }
 
     /// <summary>Removes every persisted session row (called once a session is settled).</summary>
@@ -452,10 +523,11 @@ public sealed class OfflineSessionStore : IDisposable
         using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT
-                (SELECT COUNT(*) FROM events WHERE deadLetter = 0) + (SELECT COUNT(*) FROM reports),
-                (SELECT COUNT(*) FROM events WHERE deadLetter = 1),
-                (SELECT MIN(createdAt) FROM (SELECT createdAt FROM events WHERE deadLetter = 0 UNION ALL SELECT createdAt FROM reports));
+                (SELECT COUNT(*) FROM events WHERE deadLetter = 0) + (SELECT COUNT(*) FROM reports) + (SELECT COUNT(*) FROM finished WHERE attempts < @max),
+                (SELECT COUNT(*) FROM events WHERE deadLetter = 1) + (SELECT COUNT(*) FROM finished WHERE attempts >= @max),
+                (SELECT MIN(createdAt) FROM (SELECT createdAt FROM events WHERE deadLetter = 0 UNION ALL SELECT createdAt FROM reports UNION ALL SELECT createdAt FROM finished WHERE attempts < @max));
             """;
+        command.Parameters.AddWithValue("@max", MaxDeliveryAttempts);
         using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
@@ -547,11 +619,11 @@ public sealed class OfflineSessionStore : IDisposable
             return new OfflineFlushResult(0, 0, stats.Pending, null, null);
         }
 
-        var sent = 0;
         var deadLettered = 0;
         DateTimeOffset? from = null;
         DateTimeOffset? to = null;
-        var stopped = false;
+        // Finished offline sessions first: they are older than anything still queued for a session the server knows.
+        var (sent, stopped) = await ReplayFinishedAsync(server, cancellationToken).ConfigureAwait(false);
         while (!stopped)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -648,6 +720,55 @@ public sealed class OfflineSessionStore : IDisposable
         }
 
         return new OfflineFlushResult(sent, deadLettered, remaining, from, to);
+    }
+
+    /// <summary>
+    /// Replays every finished offline session as <c>POST /sessions</c> (same idempotency key, so a repeat after a lost
+    /// answer is the same session) and <c>POST /sessions/{id}/end</c>. Returns the number replayed and whether the round
+    /// stopped (server unreachable: backoff armed). A rejection counts one attempt and keeps the row for diagnostics.
+    /// </summary>
+    private async Task<(int Sent, bool Stopped)> ReplayFinishedAsync(IServerClient server, CancellationToken cancellationToken)
+    {
+        var sent = 0;
+        foreach (var item in await PendingFinishedAsync(cancellationToken).ConfigureAwait(false))
+        {
+            try
+            {
+                var created = await server.CreateSessionAsync(item.Create.Request, item.Create.IdempotencyKey, cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    await server.EndSessionAsync(created.Id, item.End, cancellationToken).ConfigureAwait(false);
+                }
+                catch (ServerApiException ex) when (ex.Code == ErrorCode.SessionNotActive)
+                {
+                    // An earlier round got this far before its answer was lost.
+                }
+
+                await UpdateByIdsAsync("DELETE FROM finished WHERE id IN ({0});", [item.Id], null, cancellationToken).ConfigureAwait(false);
+                sent++;
+                ResetBackoff();
+                _logger.LogInformation("Offline session {SessionId} replayed: {Seconds} s played, ended {EndedAt}", created.Id, item.End.SecondsUsed, item.End.EndedAt);
+            }
+            catch (ServerApiException ex) when (ex.IsRetryable || ex.IsAuthFailure)
+            {
+                _logger.LogWarning("Offline session replay paused: {Code} ({Message}); next attempt in {Backoff}", ex.Code, ex.Message, _backoff);
+                ArmBackoff();
+                return (sent, true);
+            }
+            catch (ServerApiException ex)
+            {
+                await UpdateByIdsAsync("UPDATE finished SET attempts = attempts + 1, lastError = @error WHERE id IN ({0});", [item.Id], $"{ex.Code}: {ex.Message}", cancellationToken).ConfigureAwait(false);
+                _logger.LogError("Offline session {SessionId} ({Seconds} s played) rejected by the server: {Code} ({Message}); attempt {Attempt} of {Max}", item.Create.Request.ClientSessionId, item.End.SecondsUsed, ex.Code, ex.Message, item.Attempts + 1, MaxDeliveryAttempts);
+            }
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested && (ex is HttpRequestException or OperationCanceledException or TimeoutException))
+            {
+                _logger.LogWarning(ex, "Offline session replay transport failure; next attempt in {Backoff}", _backoff);
+                ArmBackoff();
+                return (sent, true);
+            }
+        }
+
+        return (sent, false);
     }
 
     #endregion
