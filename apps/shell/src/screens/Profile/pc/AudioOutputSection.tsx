@@ -31,6 +31,7 @@ function OutputCard({ device, disabled, busy, onSelect }: OutputCardProps): JSX.
       type="button"
       role="radio"
       aria-checked={active}
+      aria-label={device.name}
       data-nav="true"
       disabled={disabled}
       title={device.name}
