@@ -274,13 +274,16 @@ public sealed class GameLaunchService : IDisposable
             job = CreateJob(pid);
             int durationMs = (int)_clock.GetElapsedTime(startedTs).TotalMilliseconds;
             var running = new RunningGame(game.Id, game.Title, pid, result.StartedAt, lease?.LeaseId, GameState.Running);
+
+            // Running goes out before the tracker's watcher starts: a launcher that hands over to the real game and exits
+            // at once (Counter-Strike 1.6's cstrike.exe) had its Exited published first, and the Shell then stayed on
+            // "running" for good, its "close game" answered notFound.
+            await PublishAsync(new GameStateChanged(game.Id, game.Title, GameState.Running, _clock.UtcNow, pid), cancellationToken).ConfigureAwait(false);
             await _tracker.TrackAsync(new GameLaunchRecord(game, effective, running, lease, injection, antiCheat, job, durationMs), cancellationToken).ConfigureAwait(false);
             string? injectionError = injection?.Error;
             job = null;
             injection = null;
             lease = null;
-
-            await PublishAsync(new GameStateChanged(game.Id, game.Title, GameState.Running, _clock.UtcNow, pid), cancellationToken).ConfigureAwait(false);
             await ReportAsync(game, effective, result, durationMs, antiCheat, injectionError, cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("{Title} running as pid {Pid} after {Duration} ms", game.Title, pid, durationMs);
             return result;

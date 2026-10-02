@@ -4,6 +4,7 @@ using ClubShell.Contracts.Ipc;
 using ClubShell.Contracts.Serialization;
 using ClubShell.Core.Abstractions;
 using ClubShell.Core.Configuration;
+using ClubShell.Core.Security;
 
 using Microsoft.Extensions.Options;
 
@@ -23,6 +24,7 @@ public sealed class PolicyStore : IDisposable
     private static readonly TimeSpan WatchDebounce = TimeSpan.FromMilliseconds(500);
 
     private readonly IServerClient _server;
+    private readonly ITokenStore? _tokens;
     private readonly IOptionsMonitor<AgentSettings> _settings;
     private readonly ILogger<PolicyStore> _logger;
     private readonly string? _cachePath;
@@ -47,9 +49,11 @@ public sealed class PolicyStore : IDisposable
         IOptionsMonitor<AgentSettings> settings,
         ILogger<PolicyStore> logger,
         string? cachePath = null,
-        string? shippedDefaultsPath = null)
+        string? shippedDefaultsPath = null,
+        ITokenStore? tokens = null)
     {
         _server = server;
+        _tokens = tokens;
         _settings = settings;
         _logger = logger;
         _cachePath = cachePath;
@@ -266,7 +270,9 @@ public sealed class PolicyStore : IDisposable
 
     private async Task<PcPolicy?> TryLoadFromServerAsync(bool force, CancellationToken cancellationToken)
     {
-        if (_settings.CurrentValue.PcId is not { } pcId)
+        // agent.json carries no pcId: the registration keeps it in the agent tokens (and agent-identity.json). Reading only
+        // settings.PcId meant the server policy was never fetched and the PC ran on its local copy for good.
+        if ((_settings.CurrentValue.PcId ?? _tokens?.Agent?.PcId) is not { } pcId)
         {
             _logger.LogDebug("PC not registered yet; policy served from the local copy");
             return null;

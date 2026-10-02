@@ -110,11 +110,16 @@ export function LoginForm({ onSuccess, className }: LoginFormProps): JSX.Element
   };
 
   return (
-    <form onSubmit={(e) => void submit(e)} noValidate className={clsx('flex flex-col gap-5', className)}>
+    <form
+      onSubmit={(e) => void submit(e)}
+      noValidate
+      autoComplete="off"
+      className={clsx('flex flex-col gap-5', className)}
+    >
       <Input
         name="username"
         size="lg"
-        autoComplete="username"
+        autoComplete="off"
         autoCapitalize="none"
         spellCheck={false}
         label={t('lock.username')}
@@ -129,7 +134,7 @@ export function LoginForm({ onSuccess, className }: LoginFormProps): JSX.Element
         name="password"
         size="lg"
         type={show ? 'text' : 'password'}
-        autoComplete="current-password"
+        autoComplete="new-password"
         label={t('lock.password')}
         placeholder={t('lock.passwordPlaceholder')}
         value={password}
