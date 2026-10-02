@@ -3,8 +3,8 @@
  *
  * - Top: club mark and PC, the section tabs (`LB` · tabs · `RB`), a link dot only while the link is down, the clock,
  *   one sound-and-language menu and lock.
- * - Bottom (status line): the player (→ profile), time left (→ add time), balance (→ wallet / top up) and the
- *   controller prompts for what the buttons do here.
+ * - Bottom (status line): the player (→ profile), time left (→ add time), balance (→ wallet / top up), the dock of
+ *   open programs in the middle (→ bring one to the front) and the controller prompts for what the buttons do here.
  *
  * Every control is a `data-nav` button.
  */
@@ -23,6 +23,7 @@ import { useSession } from '@/hooks/useSession';
 import { formatMoney } from '@/lib/format';
 import { formatClock, serverNow } from '@/lib/time';
 import { NavBar } from '@/screens/Desktop/NavBar';
+import { RunningDock } from '@/screens/Desktop/RunningDock';
 import { PlusButton, SessionTimer } from '@/screens/Desktop/SessionTimer';
 import { useNotificationsStore } from '@/store/notifications';
 import { selectFeatures, useSettingsStore } from '@/store/settings';
@@ -370,35 +371,43 @@ export function StatusBar(): JSX.Element {
   const role = isGuest ? t('desktop.guestBadge') : user?.role === 'vip' ? t('desktop.vipBadge') : null;
   const pad = useGamepadConnected();
 
+  // Three columns like the top bar, so the dock sits under the section tabs. The player's side has no `min-w-0`: its
+  // content is the column's minimum, so on a narrow screen the dock moves right instead of squeezing the name away.
   return (
-    <div className="flex h-full w-full items-center gap-2 border-t border-[color:var(--hairline)] bg-bg/90 px-[var(--gutter)]">
-      {user && (
-        <button
-          type="button"
-          data-nav="true"
-          aria-label={`${t('desktop.userMenu')}: ${user.displayName}`}
-          aria-current={onProfile ? 'page' : undefined}
-          disabled={!features.profile}
-          onClick={() => navigate('/profile')}
-          className={clsx(
-            'focus-ring flex h-12 min-w-0 items-center gap-2.5 rounded-md pl-1.5 pr-3 text-left transition-colors duration-[var(--dur-fast)] hover:bg-text/[0.04] disabled:cursor-default disabled:hover:bg-transparent',
-            onProfile && 'bg-text/[0.08]',
-          )}
-        >
-          <Avatar name={user.displayName} src={user.avatarUrl ?? null} size="sm" />
-          <span className="min-w-0 leading-tight">
-            <span className="block max-w-[12rem] truncate text-sm font-medium text-text">{user.displayName}</span>
-            {role && <span className="hud-label block truncate">{role}</span>}
-          </span>
-        </button>
-      )}
-      <span aria-hidden="true" className="mx-1 h-6 w-px bg-text/15" />
-      <SessionTimer compact />
-      {balance && <BalanceButton amount={balance} topUp={features.topup} />}
+    <div className="grid h-full w-full grid-cols-[1fr_auto_1fr] items-center gap-[var(--gap)] border-t border-[color:var(--hairline)] bg-bg/90 px-[var(--gutter)]">
+      <div className="col-start-1 flex items-center gap-2">
+        {user && (
+          <button
+            type="button"
+            data-nav="true"
+            aria-label={`${t('desktop.userMenu')}: ${user.displayName}`}
+            aria-current={onProfile ? 'page' : undefined}
+            disabled={!features.profile}
+            onClick={() => navigate('/profile')}
+            className={clsx(
+              'focus-ring flex h-12 min-w-0 items-center gap-2.5 rounded-md pl-1.5 pr-3 text-left transition-colors duration-[var(--dur-fast)] hover:bg-text/[0.04] disabled:cursor-default disabled:hover:bg-transparent',
+              onProfile && 'bg-text/[0.08]',
+            )}
+          >
+            <Avatar name={user.displayName} src={user.avatarUrl ?? null} size="sm" />
+            <span className="min-w-0 leading-tight">
+              <span className="block max-w-[12rem] truncate text-sm font-medium text-text">{user.displayName}</span>
+              {role && <span className="hud-label block truncate">{role}</span>}
+            </span>
+          </button>
+        )}
+        <span aria-hidden="true" className="mx-1 h-6 w-px bg-text/15" />
+        <SessionTimer compact />
+        {balance && <BalanceButton amount={balance} topUp={features.topup} />}
+      </div>
+
+      <div className="col-start-2">
+        <RunningDock />
+      </div>
 
       {/* Controller prompts only with a pad connected: a keyboard player already knows Enter and Esc. */}
       {pad && (
-        <div aria-label={t('desktop.prompts.title')} className="ml-auto flex items-center gap-6">
+        <div aria-label={t('desktop.prompts.title')} className="col-start-3 flex items-center justify-end gap-6">
           <Prompt glyph="A" label={t('desktop.prompts.select')} />
           <Prompt glyph="B" label={t('desktop.prompts.back')} />
           <Prompt glyph="LB RB" label={t('desktop.prompts.sections')} round={false} />

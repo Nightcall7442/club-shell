@@ -90,6 +90,8 @@ pub fn run() {
             commands::display::display_set_refresh_rate,
             commands::display::display_confirm,
             commands::display::display_revert,
+            kiosk::open_windows::kiosk_open_windows,
+            kiosk::open_windows::kiosk_focus_window,
         ))
         .setup(move |app| {
             let handle = app.handle().clone();

@@ -32,8 +32,8 @@ import type {
   User,
   UserStats,
 } from '@clubshell/contracts';
-import type { KioskMonitor, KioskState, ShellConfig } from '@/lib/tauri';
 import type { GpuPanelInfo, PcAudioOutputs, PcMouseSettings } from '@/lib/tauri';
+import type { KioskMonitor, KioskState, OpenWindow, ShellConfig } from '@/lib/tauri';
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Helpers
@@ -1442,3 +1442,20 @@ export const PC_AUDIO_OUTPUTS: PcAudioOutputs = {
 
 /** Panels found on the mock PC; the GPU itself comes from `HARDWARE` (NVIDIA). */
 export const PC_GPU_PANELS: GpuPanelInfo[] = [{ vendor: 'nvidia', name: 'NVIDIA Control Panel' }];
+/** Programs open in the session besides a running game (`kiosk_open_windows`; the handler adds the game's window). */
+export const OPEN_WINDOWS: OpenWindow[] = [
+  {
+    pid: 6120,
+    hwnd: 0x0003_04a2,
+    title: 'Discord',
+    exePath: 'C:\\Users\\kiosk\\AppData\\Local\\Discord\\app-1.0.9163\\Discord.exe',
+    icon: '/mock-art/app-discord.svg',
+  },
+  {
+    pid: 7344,
+    hwnd: 0x0005_1b30,
+    title: 'Twitch - Google Chrome',
+    exePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    icon: '/mock-art/app-chrome.svg',
+  },
+];

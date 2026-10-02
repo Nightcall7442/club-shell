@@ -327,6 +327,11 @@
       "select": "Select",
       "back": "Back",
       "sections": "Sections"
+    },
+    "dock": {
+      "label": "Open programs",
+      "switchFailed": "Couldn't switch",
+      "switchFailedBody": "The program isn't responding or has already closed. Try again."
     }
   },
   "games": {

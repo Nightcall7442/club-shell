@@ -480,6 +480,16 @@ export interface DisplayInfo {
   /** Selectable rates at the current resolution, ascending. */
   rates: number[];
   pending: DisplayPending | null;
+/** A program with an open window in the player's session (`kiosk_open_windows`), one per process. */
+export interface OpenWindow {
+  pid: number;
+  /** Raw HWND of its front-most window: what `kiosk_focus_window` raises. */
+  hwnd: number;
+  title: string;
+  /** Full path of the process image; empty when it cannot be read. */
+  exePath: string;
+  /** Exe icon as a `data:image/png` URL; `null` when the exe has none. */
+  icon: string | null;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -615,6 +625,9 @@ export const api = {
     idleReset: (): Promise<void> => invoke<null>('kiosk_idle_reset').then(() => undefined),
     i18nBundle: (locale: Locale): Promise<Record<string, string>> => invoke('kiosk_i18n_bundle', { locale }),
     assetUrl: (path: string): Promise<string> => invoke('kiosk_asset_url', { path }),
+    openWindows: (): Promise<OpenWindow[]> => invoke('kiosk_open_windows'),
+    /** Brings the program to the front (the Shell goes behind it); `false` when it would not come. */
+    focusWindow: (hwnd: number): Promise<boolean> => invoke('kiosk_focus_window', { hwnd }),
   },
   pc: {
     mouse: (): Promise<PcMouseSettings> => invoke('pc_mouse_get'),

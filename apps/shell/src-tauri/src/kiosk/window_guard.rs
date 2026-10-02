@@ -1,12 +1,13 @@
 //! Main-window guard: fullscreen borderless on the primary monitor, close prevention, foreground
-//! re-assertion on focus loss (honouring a process allowlist: the running game, `TabTip.exe`),
-//! a periodic sweep that minimizes stray windows of non-allowlisted processes, screen-capture
-//! affinity, and the `kiosk://focus` event (`TAURI_COMMANDS.md` §3.2). Dev mode turns the window into
-//! a normal resizable one and disables every guard.
+//! re-assertion on focus loss (honouring a process allowlist: the running game, `TabTip.exe`, a
+//! program the dock handed the foreground to), a periodic sweep that minimizes stray windows of
+//! non-allowlisted processes, screen-capture affinity, and the `kiosk://focus` event
+//! (`TAURI_COMMANDS.md` §3.2). Dev mode turns the window into a normal resizable one and disables
+//! every guard.
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
 
 use clubshell_winutil::window::{
@@ -34,7 +35,7 @@ pub const SWEEP_INTERVAL: Duration = Duration::from_secs(3);
 const REFOCUS_DELAY: Duration = Duration::from_millis(200);
 const DEV_WINDOW_SIZE: (f64, f64) = (1280.0, 800.0);
 /// Window classes never minimized: desktop/shell, our display watcher, the touch keyboard, system UI.
-const SKIP_CLASSES: [&str; 9] = [
+pub(crate) const SKIP_CLASSES: [&str; 9] = [
     "Shell_TrayWnd",
     "Shell_SecondaryTrayWnd",
     "Progman",
@@ -76,8 +77,8 @@ mod native {
         unsafe { IsIconic(hwnd_from_raw(hwnd)) }.as_bool()
     }
 
-    /// Executable name (`game.exe`) of `pid`, when accessible.
-    pub fn process_name(pid: u32) -> Option<String> {
+    /// Full image path (`C:\Games\game.exe`) of `pid`, when accessible.
+    pub fn process_path(pid: u32) -> Option<String> {
         // SAFETY: the handle is closed before returning; the buffer is writable and `len` holds its size.
         unsafe {
             let handle =
@@ -92,14 +93,7 @@ mod native {
             )
             .is_ok();
             let _ = CloseHandle(handle);
-            if !ok {
-                return None;
-            }
-            let path = String::from_utf16_lossy(&buf[..(len as usize).min(buf.len())]);
-            path.rsplit(['\\', '/'])
-                .next()
-                .filter(|s| !s.is_empty())
-                .map(str::to_owned)
+            ok.then(|| String::from_utf16_lossy(&buf[..(len as usize).min(buf.len())]))
         }
     }
 }
@@ -112,9 +106,23 @@ mod native {
         false
     }
 
-    pub fn process_name(_pid: u32) -> Option<String> {
+    pub fn process_path(_pid: u32) -> Option<String> {
         None
     }
+}
+
+/// Full image path of `pid`, when accessible (`None` off Windows).
+pub(crate) fn process_path(pid: u32) -> Option<String> {
+    native::process_path(pid)
+}
+
+/// Executable name (`game.exe`) of `pid`, when accessible.
+fn process_name(pid: u32) -> Option<String> {
+    let path = process_path(pid)?;
+    path.rsplit(['\\', '/'])
+        .next()
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
 }
 
 #[cfg(windows)]
@@ -151,6 +159,10 @@ pub struct WindowGuard {
     locked: AtomicBool,
     shutting_down: AtomicBool,
     allowed: RwLock<HashSet<u32>>,
+    /// Process the dock handed the foreground to, until the Shell is focused again.
+    hand_off: Mutex<Option<u32>>,
+    /// Run when the Shell takes the foreground back from a hand-off (the kiosk re-arms its guard).
+    on_return: OnceLock<Box<dyn Fn() + Send + Sync>>,
     refocus: Mutex<Option<JoinHandle<()>>>,
     sweep: Mutex<Option<JoinHandle<()>>>,
 }
@@ -179,6 +191,8 @@ impl WindowGuard {
             locked: AtomicBool::new(false),
             shutting_down: AtomicBool::new(false),
             allowed: RwLock::new(HashSet::new()),
+            hand_off: Mutex::new(None),
+            on_return: OnceLock::new(),
             refocus: Mutex::new(None),
             sweep: Mutex::new(None),
         });
@@ -332,6 +346,28 @@ impl WindowGuard {
         pid == self.own_pid || self.allowed.read().contains(&pid)
     }
 
+    /// Marks `pid` as the program the dock put in front (it must also be allowlisted); returns the
+    /// previous one. While set, the sweep also re-focuses the Shell when anything else takes over.
+    pub fn begin_hand_off(&self, pid: u32) -> Option<u32> {
+        self.hand_off.lock().replace(pid)
+    }
+
+    /// Clears the hand-off; returns the program it was for.
+    pub fn take_hand_off(&self) -> Option<u32> {
+        self.hand_off.lock().take()
+    }
+
+    pub fn is_handed_off(&self) -> bool {
+        self.hand_off.lock().is_some()
+    }
+
+    /// Sets what runs (on the async runtime) when the Shell is focused during a hand-off. Once.
+    pub fn on_return(&self, f: impl Fn() + Send + Sync + 'static) {
+        if self.on_return.set(Box::new(f)).is_err() {
+            tracing::warn!("hand-off return handler already set");
+        }
+    }
+
     /// `WDA_EXCLUDEFROMCAPTURE` on / off (remote-control capture must see the Shell: keep `false`).
     pub fn set_capture_excluded(&self, exclude: bool) -> CmdResult<()> {
         if self.hwnd == 0 {
@@ -387,7 +423,7 @@ impl WindowGuard {
         let foreground_process = if focused || pid == 0 {
             None
         } else {
-            native::process_name(pid)
+            process_name(pid)
         };
         tracing::debug!(has_focus = focused, pid, process = ?foreground_process, "focus changed");
         if let Err(e) = self.app.emit(
@@ -398,6 +434,14 @@ impl WindowGuard {
             },
         ) {
             tracing::warn!(error = %e, "cannot emit kiosk://focus");
+        }
+        if focused && self.is_handed_off() {
+            let me = Arc::clone(self);
+            tauri::async_runtime::spawn(async move {
+                if let Some(f) = me.on_return.get() {
+                    f();
+                }
+            });
         }
         if focused || !self.should_guard() || self.is_allowed_pid(pid) {
             return;
@@ -441,6 +485,11 @@ impl WindowGuard {
                 tick.tick().await;
                 let Some(guard) = weak.upgrade() else { break };
                 if guard.should_guard() {
+                    // During a hand-off the topmost guard is paused: should the program close or
+                    // something else take the foreground, nobody else brings the Shell back.
+                    if guard.is_handed_off() {
+                        guard.refocus_if_needed();
+                    }
                     guard.sweep_stray_windows();
                 }
             }
