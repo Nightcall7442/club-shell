@@ -221,6 +221,43 @@ after the Agent confirms, so all windows (overlay, secondary monitors) re-render
 | `kiosk_idle_reset` | `api.kiosk.idleReset(): Promise<void>` | `{}` | `null` | Marks activity (e.g. gamepad navigation) |
 | `kiosk_i18n_bundle` | `api.kiosk.i18nBundle(locale: Locale): Promise<Record<string, string>>` | `{ locale: Locale }` | flat key→string | Loads `locales\<locale>.json` overrides from ProgramData merged over embedded bundle |
 | `kiosk_asset_url` | `api.kiosk.assetUrl(path: string): Promise<string>` | `{ path: string }` | `string` | Converts a ProgramData-relative path (wallpaper, cached cover) to a `asset://` URL (`convertFileSrc`); `forbidden` for paths outside `themes\` / `cache\media\` |
+| `kiosk_open_windows` | `api.kiosk.openWindows(): Promise<OpenWindow[]>` | `{}` | `{ pid: number; hwnd: number; title: string; exePath: string; icon: string \| null }[]` | Programs open in the player's session for the status-bar dock (`kiosk/open_windows.rs`): taskbar-style top-level windows (visible, not cloaked, titled, unowned or `WS_EX_APPWINDOW`, no tool window) minus the Shell, Windows UI processes and the denied tools; one per process, front-most first, `icon` = exe icon as a 48 px PNG data URL (cached per exe). Empty off Windows |
+| `kiosk_focus_window` | `api.kiosk.focusWindow(hwnd: number): Promise<boolean>` | `{ hwnd: number }` | `boolean` | Restores and raises a window `kiosk_open_windows` lists and hands its process the foreground (`Kiosk::hand_off_foreground`: allowlisted, topmost guard paused outside game mode until the Shell is focused again or locked). `false` (Shell takes the screen back) when it would not come to the front; `notFound` when the window is gone; `forbidden` without a session or while locked |
+
+### 2.15 pc (local, player session)
+
+Player PC settings of Profile → Settings, run in the Shell process (`src-tauri/src/commands/pc/`). The setters need a
+signed-in player (`forbidden` otherwise). The kiosk profile is not reset between players, so the club's values found at
+Shell start are put back on `auth_logout`, `session.ended` and `auth.expired`; the first change writes them to
+`%LOCALAPPDATA%\ClubShell\pc-baseline.json`, so a Shell restart mid-session still restores them (and a reboot restores
+the output device at the next start). Mouse values are applied without `SPIF_UPDATEINIFILE` (never in the registry).
+
+| Command | TS signature | Args | Returns | Notes |
+|---------|--------------|------|---------|-------|
+| `pc_mouse_get` | `api.pc.mouse(): Promise<PcMouseSettings>` | `{}` | `{ speed: number; enhancePrecision: boolean; doubleClickMs: number }` | `SPI_GETMOUSESPEED`, `SPI_GETMOUSE`, `GetDoubleClickTime` |
+| `pc_mouse_set` | `api.pc.setMouse(patch: Partial<PcMouseSettings>): Promise<PcMouseSettings>` | `{ patch }` | same | `validation`: speed 1–20, doubleClickMs 200–900 |
+| `pc_audio_outputs` | `api.pc.audioOutputs(): Promise<PcAudioOutputs>` | `{}` | `{ devices: { id; name; kind: 'speakers' \| 'headphones' \| 'headset' \| 'digital' \| 'other'; isDefault }[]; canSwitch: boolean }` | Active render endpoints (Core Audio); `canSwitch: false` → shown read-only |
+| `pc_audio_set_output` | `api.pc.setAudioOutput(deviceId: string): Promise<PcAudioOutputs>` | `{ deviceId: string }` | same | Default endpoint for every role through `IPolicyConfig` (undocumented, what the Sound panel uses); `notFound` for an unknown device |
+| `pc_gpu_panels` | `api.pc.gpuPanels(): Promise<GpuPanelInfo[]>` | `{}` | `{ vendor: 'nvidia' \| 'amd' \| 'intel'; name: string }[]` | Panels installed for the kiosk user (Store package registered, or the classic exe); the UI matches them against `sys_hardware` GPUs |
+| `pc_gpu_panel_open` | `api.pc.openGpuPanel(vendor: GpuVendor): Promise<void>` | `{ vendor }` | `null` | Pauses the topmost/foreground guard (`Kiosk::begin_external_window`), opens the panel; the guard re-arms and the Shell comes back when the panel's window closes or is minimized. `notFound` when not installed, `forbidden` while locked |
+
+`sys_set_volume` also applies the level the Agent confirmed to the default endpoint in the player's session (the Agent
+runs in session 0, where Core Audio usually has no endpoint).
+
+### 2.16 display (local, no IPC)
+
+Refresh rates of the player's monitors (`src-tauri/src/commands/display.rs`, registered in `lib.rs` next to the kiosk
+commands, so not in `COMMAND_NAMES`). Every command returns `DisplayInfo`: `{ index: number; device: string; primary:
+boolean; width: number; height: number; hz: number; rates: number[]; pending: { previousHz: number; revertAt: string } |
+null }`. `device` is the GDI name (`\\.\DISPLAY1`); `rates` are the driver's non-interlaced rates at the current
+resolution and depth, ascending, without the NTSC twin one below a listed rate (59 next to 60).
+
+| Command | TS signature | Args | Returns | Notes |
+|---------|--------------|------|---------|-------|
+| `display_list` | `api.display.list(): Promise<DisplayInfo[]>` | `{}` | `DisplayInfo[]` | |
+| `display_set_refresh_rate` | `api.display.setRefreshRate(device: string, hz: number): Promise<DisplayInfo>` | `{ device: string; hz: number }` | `DisplayInfo` with `pending` | `CDS_TEST`, then applied for the session only. Reverted by the Shell 15 s later (and on exit) unless confirmed. `validation` for a rate not in `rates`, `notFound` for an unknown device, `conflict` while another display waits for confirmation. Picking `previousHz` again cancels the change. |
+| `display_confirm` | `api.display.confirm(device: string): Promise<DisplayInfo>` | `{ device: string }` | `DisplayInfo` | Keeps the rate and saves it to the user's display settings (`CDS_UPDATEREGISTRY \| CDS_NORESET`, never `CDS_GLOBAL`). `notFound` when nothing is pending (already reverted). |
+| `display_revert` | `api.display.revert(device: string): Promise<DisplayInfo>` | `{ device: string }` | `DisplayInfo` | Puts `previousHz` back now (falls back to the saved mode); no-op when nothing is pending. |
 
 ---
 
@@ -345,11 +382,11 @@ Rules:
 
 There is no generated `commands.json`: `src-tauri/build.rs` only runs `tauri_build::build()`. The registry is the
 `COMMAND_NAMES` constant in `apps/shell/src-tauri/src/commands/mod.rs` (the 66 proxy commands below, asserted by a
-unit test) plus the 15 `kiosk_*` commands registered from `kiosk/commands.rs` through the `invoke_handler!` macro in
-`lib.rs`:
+unit test) plus the 17 `kiosk_*` commands registered from `kiosk/commands.rs` and `kiosk/open_windows.rs` through the
+`invoke_handler!` macro in `lib.rs`, and after them the 6 `pc_*` commands of §2.15 (`commands/pc/`) and the display commands:
 
 ```json
-{ "protocol": 1, "commands": ["auth_login", "auth_logout", "auth_status", "auth_qr_start", "session_get", "session_start", "session_pause", "session_resume", "session_end", "session_extend", "session_lock", "session_unlock", "session_time_left", "games_list", "games_get", "games_launch", "games_kill", "games_running", "games_install_status", "apps_list", "apps_launch", "wallet_balance", "wallet_tariffs", "wallet_history", "wallet_topup_intent", "shop_products", "shop_order", "shop_order_status", "shop_orders", "chat_history", "chat_send", "chat_mark_read", "booking_seats", "booking_reserve", "booking_cancel", "tournaments_list", "tournaments_join", "tournaments_leaderboard", "profile_get", "profile_update", "profile_stats", "profile_achievements", "profile_loyalty", "profile_game_settings", "profile_game_settings_reset", "settings_get", "settings_set", "settings_get_theme", "settings_list_themes", "settings_get_shell_config", "policy_get", "policy_reload", "sys_pc_info", "sys_hardware", "sys_metrics", "sys_call_admin", "sys_reboot", "sys_shutdown", "sys_lock_screen", "sys_set_volume", "sys_set_locale", "sys_unlock_admin", "sys_ack_admin_message", "sys_log_client_error", "update_check", "update_apply", "kiosk_state", "kiosk_set_guard", "kiosk_set_fullscreen", "kiosk_show_overlay", "kiosk_monitors", "kiosk_move_to_monitor", "kiosk_virtual_keyboard", "kiosk_focus", "kiosk_exit", "kiosk_reload", "kiosk_open_devtools", "kiosk_gamepad_state", "kiosk_idle_reset", "kiosk_i18n_bundle", "kiosk_asset_url"],
+{ "protocol": 1, "commands": ["auth_login", "auth_logout", "auth_status", "auth_qr_start", "session_get", "session_start", "session_pause", "session_resume", "session_end", "session_extend", "session_lock", "session_unlock", "session_time_left", "games_list", "games_get", "games_launch", "games_kill", "games_running", "games_install_status", "apps_list", "apps_launch", "wallet_balance", "wallet_tariffs", "wallet_history", "wallet_topup_intent", "shop_products", "shop_order", "shop_order_status", "shop_orders", "chat_history", "chat_send", "chat_mark_read", "booking_seats", "booking_reserve", "booking_cancel", "tournaments_list", "tournaments_join", "tournaments_leaderboard", "profile_get", "profile_update", "profile_stats", "profile_achievements", "profile_loyalty", "profile_game_settings", "profile_game_settings_reset", "settings_get", "settings_set", "settings_get_theme", "settings_list_themes", "settings_get_shell_config", "policy_get", "policy_reload", "sys_pc_info", "sys_hardware", "sys_metrics", "sys_call_admin", "sys_reboot", "sys_shutdown", "sys_lock_screen", "sys_set_volume", "sys_set_locale", "sys_unlock_admin", "sys_ack_admin_message", "sys_log_client_error", "update_check", "update_apply", "kiosk_state", "kiosk_set_guard", "kiosk_set_fullscreen", "kiosk_show_overlay", "kiosk_monitors", "kiosk_move_to_monitor", "kiosk_virtual_keyboard", "kiosk_focus", "kiosk_exit", "kiosk_reload", "kiosk_open_devtools", "kiosk_gamepad_state", "kiosk_idle_reset", "kiosk_i18n_bundle", "kiosk_asset_url", "kiosk_open_windows", "kiosk_focus_window", "pc_mouse_get", "pc_mouse_set", "pc_audio_outputs", "pc_audio_set_output", "pc_gpu_panels", "pc_gpu_panel_open", "display_list", "display_set_refresh_rate", "display_confirm", "display_revert"],
   "events": ["agent://session.updated", "agent://session.warning", "agent://session.ended", "agent://wallet.updated", "agent://chat.message", "agent://notification.push", "agent://admin.message", "agent://admin.remoteControl", "agent://game.stateChanged", "agent://policy.changed", "agent://update.available", "agent://update.progress", "agent://update.ready", "agent://sys.metrics", "agent://sys.connectivity", "agent://shell.command", "agent://auth.expired", "agent://shop.orderUpdated", "kiosk://idle", "kiosk://gamepad", "kiosk://hotkey", "kiosk://monitorChanged", "kiosk://connectivity", "kiosk://themeChanged", "kiosk://localeChanged", "kiosk://focus", "kiosk://overlay"] }
 ```
 

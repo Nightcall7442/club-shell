@@ -21,6 +21,12 @@ export type QrPhase = 'loading' | 'pending' | 'scanned' | 'confirmed' | 'expired
 
 const QR_SIZE = 224;
 
+/**
+ * The code's drawn size: {@link QR_SIZE} on a 1080p screen, down to 192 px at 768 px high so the whole card fits
+ * without a scrollbar (still ~5 cm on a typical 1366×768 panel, well within a phone camera's reach).
+ */
+const QR_BOX = '[&>svg]:h-[clamp(176px,25vh,224px)] [&>svg]:w-[clamp(176px,25vh,224px)]';
+
 function reasonOf(e: unknown): string | null {
   const err = toShellApiError(e);
   const details =
@@ -147,16 +153,21 @@ export function QrLogin({ onSuccess, className }: QrLoginProps): JSX.Element {
   const stale = phase === 'expired' || phase === 'error';
 
   return (
-    <div className={clsx('flex flex-col items-center gap-5 text-center', className)}>
+    <div className={clsx('flex flex-col items-center gap-[clamp(0.75rem,1.9vh,1.25rem)] text-center', className)}>
       <p className="text-base text-muted">{t('lock.scanQr')}</p>
 
-      <div className="relative">
+      {/* Viewfinder brackets around the code: the one thing on the card to point a phone at. */}
+      <div className={clsx('relative', !stale && 'hud-brackets [--brk-inset:-12px] [--brk-size:24px]')}>
         {phase === 'loading' || !start ? (
-          <Skeleton variant="rect" width={QR_SIZE + 32} height={QR_SIZE + 32} className="rounded-xl" />
+          <Skeleton
+            variant="rect"
+            className="h-[calc(clamp(176px,25vh,224px)_+_2rem)] w-[calc(clamp(176px,25vh,224px)_+_2rem)] rounded-xl"
+          />
         ) : (
           <div
             className={clsx(
-              'rounded-xl bg-white p-4 transition-opacity duration-[var(--dur-base)]',
+              'rounded-xl bg-white p-4 shadow-[0_0_56px_-16px_rgb(var(--c-accent)/0.55)] transition-opacity duration-[var(--dur-base)]',
+              QR_BOX,
               stale && 'opacity-20',
             )}
           >

@@ -80,6 +80,18 @@ pub fn run() {
             kiosk::commands::kiosk_idle_reset,
             kiosk::commands::kiosk_i18n_bundle,
             kiosk::commands::kiosk_asset_url,
+            commands::pc::pc_mouse_get,
+            commands::pc::pc_mouse_set,
+            commands::pc::pc_audio_outputs,
+            commands::pc::pc_audio_set_output,
+            commands::pc::pc_gpu_panels,
+            commands::pc::pc_gpu_panel_open,
+            commands::display::display_list,
+            commands::display::display_set_refresh_rate,
+            commands::display::display_confirm,
+            commands::display::display_revert,
+            kiosk::open_windows::kiosk_open_windows,
+            kiosk::open_windows::kiosk_focus_window,
         ))
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -94,6 +106,7 @@ pub fn run() {
                 disable_browser_accelerators(&handle);
             }
             app.manage(kiosk);
+            commands::pc::spawn(&setup_state);
             tracing::info!(version = env!("CARGO_PKG_VERSION"), "shell started");
             Ok(())
         })
@@ -145,6 +158,7 @@ pub fn shutdown(app: &AppHandle) {
 fn cleanup(state: &AppState) {
     state.kiosk().shutdown();
     state.agent.shutdown();
+    commands::display::revert_pending();
 }
 
 /// Reload (F5, Ctrl+R, Ctrl+Shift+R), find, print, zoom and the developer tools are WebView2's own chords, and the

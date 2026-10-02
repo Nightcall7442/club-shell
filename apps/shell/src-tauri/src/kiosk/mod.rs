@@ -18,6 +18,7 @@ pub mod commands;
 pub mod idle_detector;
 pub mod keyboard_hook;
 pub mod multi_monitor;
+pub mod open_windows;
 pub mod overlay;
 pub mod taskbar;
 pub mod window_guard;
@@ -109,6 +110,8 @@ pub struct Kiosk {
     game_mode: AtomicBool,
     /// `kiosk_set_guard` state, applied whenever no game runs.
     guard_wanted: AtomicBool,
+    /// A club-approved window of another process is open (`begin_external_window`): the guard stays down.
+    external_window: AtomicBool,
     admin_mode: AtomicBool,
     shut: AtomicBool,
     tasks: Mutex<Vec<JoinHandle<()>>>,
@@ -182,6 +185,7 @@ impl Kiosk {
             locked: AtomicBool::new(false),
             game_mode: AtomicBool::new(false),
             guard_wanted: AtomicBool::new(!dev),
+            external_window: AtomicBool::new(false),
             admin_mode: AtomicBool::new(dev),
             shut: AtomicBool::new(false),
             tasks: Mutex::new(Vec::new()),
@@ -215,6 +219,15 @@ impl Kiosk {
             hotkey_rx,
         );
         kiosk.tasks.lock().push(consumer);
+        // The player is back in the Shell after the dock put a program in front of it.
+        {
+            let weak = Arc::downgrade(&kiosk);
+            kiosk.window.on_return(move || {
+                if let Some(kiosk) = weak.upgrade() {
+                    kiosk.end_hand_off();
+                }
+            });
+        }
         tracing::info!(
             dev,
             hooks = kiosk.keyboard.is_installed(),
@@ -313,10 +326,42 @@ impl Kiosk {
     /// `kiosk_set_guard`: topmost/foreground guard + stray-window sweep on/off (the caller checks the
     /// admin token / running game). Remembered and re-applied when a game exits.
     pub fn set_guard(&self, active: bool) {
+        // Supersedes a dock hand-off; the program stays allowlisted (harmless once re-armed).
+        let _ = self.window.take_hand_off();
         self.guard_wanted.store(active, Ordering::Release);
         let effective = active && !self.is_game_mode();
         self.alt_tab.set_enabled(effective);
         self.window.set_active(effective);
+    }
+
+    /// Dock: lets `pid` own the foreground, in front of the Shell, until the Shell is focused again
+    /// (HUD "back", the program closing) or locked. Outside game mode that means pausing the
+    /// topmost guard, which re-asserts the Shell regardless of the allowlist; the window guard keeps
+    /// minimizing every other stray window and re-focuses the Shell should anything else take over.
+    pub fn hand_off_foreground(&self, pid: u32) {
+        self.window.allow_foreground_pid(pid);
+        if self.dev || self.is_game_mode() || !self.guard_wanted.load(Ordering::Acquire) {
+            return; // the guard is already out of the way
+        }
+        match self.window.begin_hand_off(pid) {
+            None => self.alt_tab.set_enabled(false),
+            Some(previous) if previous != pid => self.window.disallow_foreground_pid(previous),
+            Some(_) => {}
+        }
+        tracing::info!(pid, "foreground handed off");
+    }
+
+    /// Ends a dock hand-off: the program loses its pass and the guard takes the screen back.
+    pub fn end_hand_off(&self) {
+        if let Some(pid) = self.window.take_hand_off() {
+            self.window.disallow_foreground_pid(pid);
+            self.alt_tab.set_enabled(
+                self.guard_wanted.load(Ordering::Acquire)
+                    && !self.is_game_mode()
+                    && !self.external_window.load(Ordering::Acquire),
+            );
+            tracing::info!(pid, "foreground back to the shell");
+        }
     }
 
     /// Applies an `ExplorerPolicy` on top of `shell.json` (chords, Alt+Tab / Win flags, taskbar).
@@ -391,6 +436,28 @@ impl Kiosk {
         tracing::info!(pid = child.id(), "virtual keyboard started");
         *slot = Some(child);
         Ok(())
+    }
+
+    /// A club-approved window of another process (the graphics-card panel, `commands::pc`) takes the screen: the
+    /// topmost/foreground guard and the stray-window sweep pause as in game mode; the keyboard policy stays.
+    pub fn begin_external_window(&self) {
+        tracing::info!("external window: foreground guard paused");
+        self.external_window.store(true, Ordering::Release);
+        self.alt_tab.set_enabled(false);
+        self.window.set_active(false);
+    }
+
+    /// The external window is gone: the guard comes back as `kiosk_set_guard` / game mode want it and, when armed,
+    /// puts the Shell back on top.
+    pub fn end_external_window(&self) {
+        self.external_window.store(false, Ordering::Release);
+        let guard = self.guard_wanted.load(Ordering::Acquire) && !self.is_game_mode();
+        self.alt_tab.set_enabled(guard);
+        self.window.set_active(guard);
+        if guard && !self.window.focus() {
+            tracing::debug!("shell window not in the foreground after an external window");
+        }
+        tracing::info!(guard, "external window closed");
     }
 
     /// `kiosk_exit`: tears everything down, optionally starts `explorer.exe`, exits the process.
@@ -508,6 +575,10 @@ impl KioskControl for Kiosk {
             return;
         }
         tracing::info!(locked, "kiosk lock");
+        if locked {
+            // A program the dock put in front must not stay usable over the lock screen.
+            self.end_hand_off();
+        }
         self.window.set_locked(locked);
         if !self.dev {
             self.keyboard.set_lock_all(locked);
@@ -531,6 +602,9 @@ impl KioskControl for Kiosk {
             return;
         }
         tracing::info!(on, "game mode");
+        // Game mode supersedes a dock hand-off: the guard is down for the game, and its exit clears
+        // the allowlist and re-arms everything.
+        let _ = self.window.take_hand_off();
         self.keyboard.set_game_mode(on);
         let guard = !on && self.guard_wanted.load(Ordering::Acquire);
         self.alt_tab.set_enabled(guard);

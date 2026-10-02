@@ -106,7 +106,7 @@ export function TournamentCard({
     <article
       className={clsx(
         'glass relative flex gap-4 rounded-xl p-3 transition-[box-shadow,transform] duration-[var(--dur-fast)]',
-        selected && 'shadow-[var(--shadow-glow)] ring-2 ring-primary',
+        selected && '[box-shadow:var(--shadow-glow)]',
       )}
       aria-current={selected ? 'true' : undefined}
     >

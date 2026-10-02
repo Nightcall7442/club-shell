@@ -1,7 +1,7 @@
 /**
- * Home hero: a full-width stage with the selected game's art under the HUD bar — title and Play / Close / Details
- * bottom left, a rail of recent covers bottom right that switches it (time left and balance are in
- * the status line, on every screen).
+ * Home hero: a full-width stage with the selected game's art under the HUD bar (its trailer fades in after a moment on
+ * the same game) — title and Play / Close / Details bottom left, a rail of recent covers bottom right that switches it
+ * (time left and balance are in the status line, on every screen).
  * Selection is the games-store `selectedId`, so the pick carries over to `/games`; the running game is always shown.
  */
 import type { Game } from '@clubshell/contracts';
@@ -11,6 +11,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { GameArtwork } from '@/components/media/GameArtwork';
+import { GameTrailer } from '@/components/media/GameTrailer';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
@@ -209,6 +210,7 @@ export function HomeHero(): JSX.Element {
                   className="rounded-none"
                   style={{ position: 'absolute', inset: 0, height: '100%', aspectRatio: 'auto' }}
                 />
+                <GameTrailer src={hero.videoUrl} poster={hero.heroUrl ?? hero.coverUrl} />
               </motion.div>
             )}
           </AnimatePresence>

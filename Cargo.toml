@@ -59,6 +59,9 @@ windows = { version = "0.58", features = [
   "Win32_System_ProcessStatus",
   "Win32_Media_Audio",
   "Win32_System_Com",
+  "Win32_Media_Audio_Endpoints",
+  "Win32_UI_Shell_PropertiesSystem",
+  "Win32_System_Registry",
 ] }
 
 tauri = { version = "2", features = ["tray-icon"] }

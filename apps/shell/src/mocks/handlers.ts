@@ -82,7 +82,16 @@ import type {
   WalletTariffsResponse,
 } from '@clubshell/contracts';
 import { tariffPriceFor } from '@clubshell/contracts';
-import type { GamepadState, KioskState, ShellConfig } from '@/lib/tauri';
+import type {
+  DisplayInfo,
+  GamepadState,
+  GpuPanelInfo,
+  KioskState,
+  OpenWindow,
+  PcAudioOutputs,
+  PcMouseSettings,
+  ShellConfig,
+} from '@/lib/tauri';
 import { builtinThemes, DEFAULT_THEME } from '@/theme/themes';
 import {
   ACHIEVEMENTS,
@@ -128,6 +137,10 @@ import {
   USER_ID,
   VIP_USER,
   uzs,
+  PC_AUDIO_OUTPUTS,
+  PC_GPU_PANELS,
+  PC_MOUSE,
+  OPEN_WINDOWS,
 } from './data';
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -540,12 +553,23 @@ function bootFromUrl(): void {
   }
 }
 
+/**
+ * `?topup=off`: online top-up off, as the central server sends it while it has no payment provider — the wallet then
+ * shows the counter's steps (`__clubshellMock.simulate.counterTopUp()` plays the cashier).
+ */
+function topupFromUrl(): void {
+  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('topup') === 'off') {
+    mockState.settings.features = { ...mockState.settings.features, topup: false };
+  }
+}
+
 function ensureStarted(): void {
   if (started) {
     return;
   }
   started = true;
   bootFromUrl();
+  topupFromUrl();
   setInterval(tick, 1000);
   setInterval(() => emitMock('agent://sys.metrics', metricsSample()), 5000);
   later(1500, () => emitMock('kiosk://connectivity', { agent: 'connected', attempts: 0, since: nowIso() }));
@@ -679,6 +703,12 @@ export const simulate = {
       changed: ['kiosk'],
       policy: clone(mockState.policy),
     });
+  },
+  /** A cashier's top-up at the counter (`adminTopUp`): the ledger row and the `wallet.updated` push. `sum` in UZS. */
+  counterTopUp(sum = 50_000): void {
+    if (mockState.user) {
+      pushTransaction('topUp', money(sum * 100), 'Пополнение на кассе наличными', null);
+    }
   },
 };
 
@@ -1174,6 +1204,8 @@ cmd('wallet_history', (args): WalletHistoryResponse => {
     const to = Date.parse(q.to);
     items = items.filter((t) => Date.parse(t.createdAt) < to);
   }
+  // Newest first, as the server pages the ledger (the seed rows are not stored in that order).
+  items.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   const page = Math.max(1, q.page ?? 1);
   const pageSize = Math.min(200, Math.max(1, q.pageSize ?? 20));
   return { items: clone(items.slice((page - 1) * pageSize, page * pageSize)), total: items.length, page, pageSize };
@@ -1181,6 +1213,10 @@ cmd('wallet_history', (args): WalletHistoryResponse => {
 
 cmd('wallet_topup_intent', (args): TopupIntent => {
   const user = requireUser();
+  // Like the Agent: no intent while the club's config turns online top-up off.
+  if (!mockState.settings.features.topup) {
+    mockError('policyDenied', 'Online top-up is off', { rule: 'features.topup' });
+  }
   const amount = obj<Money>(args, 'amount');
   const provider = str(args, 'provider') as TopupProvider | undefined;
   if (!amount || typeof amount.amount !== 'number') {
@@ -2064,6 +2100,222 @@ cmd(
       return `https://picsum.photos/seed/${seed}/600/900`;
     }
     mockError('forbidden', 'Path outside themes\\ or cache\\media\\', { reason: 'path' });
+  },
+  { fast: true },
+);
+
+// ----- pc (player PC settings) ----------------------------------------------------------------------------------------
+
+/** Mouse / audio output the mock "PC" currently has; logout and session end put the club's values back, as in Rust. */
+const pcMock = { mouse: clone(PC_MOUSE), audio: clone(PC_AUDIO_OUTPUTS) };
+
+function restorePcMock(): void {
+  pcMock.mouse = clone(PC_MOUSE);
+  pcMock.audio = clone(PC_AUDIO_OUTPUTS);
+}
+
+function requirePlayer(): void {
+  if (!mockState.user) {
+    mockError('forbidden', 'needs a signed-in player');
+  }
+}
+
+subscribeMock('agent://session.ended', restorePcMock);
+subscribeMock('agent://auth.expired', restorePcMock);
+const logoutWithoutRestore = registry['auth_logout'];
+if (logoutWithoutRestore) {
+  registry['auth_logout'] = (args) => {
+    restorePcMock();
+    return logoutWithoutRestore(args);
+  };
+}
+
+cmd('pc_mouse_get', (): PcMouseSettings => clone(pcMock.mouse), { fast: true });
+
+cmd('pc_mouse_set', (args): PcMouseSettings => {
+  const patch = obj<Partial<PcMouseSettings>>(args, 'patch') ?? {};
+  const { speed, enhancePrecision, doubleClickMs } = patch;
+  if (speed !== undefined && (!Number.isInteger(speed) || speed < 1 || speed > 20)) {
+    mockError('validation', 'speed: must be between 1 and 20', { field: 'speed', reason: 'must be between 1 and 20' });
+  }
+  if (doubleClickMs !== undefined && (!Number.isInteger(doubleClickMs) || doubleClickMs < 200 || doubleClickMs > 900)) {
+    mockError('validation', 'doubleClickMs: must be between 200 and 900', {
+      field: 'doubleClickMs',
+      reason: 'must be between 200 and 900',
+    });
+  }
+  requirePlayer();
+  pcMock.mouse = {
+    speed: speed ?? pcMock.mouse.speed,
+    enhancePrecision: enhancePrecision ?? pcMock.mouse.enhancePrecision,
+    doubleClickMs: doubleClickMs ?? pcMock.mouse.doubleClickMs,
+  };
+  return clone(pcMock.mouse);
+});
+
+cmd('pc_audio_outputs', (): PcAudioOutputs => clone(pcMock.audio));
+
+cmd('pc_audio_set_output', (args): PcAudioOutputs => {
+  const deviceId = (str(args, 'deviceId') ?? '').trim();
+  if (deviceId.length === 0) {
+    mockError('validation', 'deviceId: required', { field: 'deviceId', reason: 'required' });
+  }
+  requirePlayer();
+  if (!pcMock.audio.devices.some((d) => d.id === deviceId)) {
+    mockError('notFound', 'audio device not found');
+  }
+  pcMock.audio.devices = pcMock.audio.devices.map((d) => ({ ...d, isDefault: d.id === deviceId }));
+  return clone(pcMock.audio);
+});
+
+cmd('pc_gpu_panels', (): GpuPanelInfo[] => clone(PC_GPU_PANELS), { fast: true });
+
+cmd('pc_gpu_panel_open', (args): null => {
+  const vendor = str(args, 'vendor');
+  if (vendor !== 'nvidia' && vendor !== 'amd' && vendor !== 'intel') {
+    mockError('validation', 'vendor: must be nvidia, amd or intel', { field: 'vendor', reason: 'format' });
+  }
+  requirePlayer();
+  if (!PC_GPU_PANELS.some((p) => p.vendor === vendor)) {
+    mockError('notFound', 'graphics panel not found');
+  }
+  console.info(`[mock] pc_gpu_panel_open(${vendor}) — would open the vendor panel over the shell`);
+  return null;
+});
+
+// ----- display (refresh rates, local to the Shell: src-tauri/src/commands/display.rs) ----------------------------------
+
+/** Rates each mock monitor offers at its resolution, by monitor index. */
+const MOCK_DISPLAY_RATES: Readonly<Record<number, readonly number[]>> = {
+  0: [60, 100, 120, 144, 165, 240],
+  1: [60, 75, 100, 120, 144],
+};
+/** Same 15 s as the Shell before an unconfirmed rate is undone. */
+const DISPLAY_CONFIRM_MS = 15_000;
+
+let displayPending: { id: number; device: string; previousHz: number; revertAt: string } | null = null;
+let displaySeq = 0;
+
+const displayDevice = (index: number): string => `\\\\.\\DISPLAY${index + 1}`;
+
+function displayInfo(index: number): DisplayInfo {
+  const m = MONITORS.find((x) => x.index === index);
+  if (!m) {
+    mockError('notFound', 'display not found', { name: 'display' });
+  }
+  const device = displayDevice(m.index);
+  return {
+    index: m.index,
+    device,
+    primary: m.primary,
+    width: m.width,
+    height: m.height,
+    hz: m.hz,
+    rates: [...(MOCK_DISPLAY_RATES[m.index] ?? [m.hz])],
+    pending:
+      displayPending?.device === device
+        ? { previousHz: displayPending.previousHz, revertAt: displayPending.revertAt }
+        : null,
+  };
+}
+
+function displayIndex(args: Record<string, unknown>): number {
+  const device = str(args, 'device') ?? '';
+  const m = MONITORS.find((x) => displayDevice(x.index) === device);
+  if (!m) {
+    mockError('notFound', 'display not found', { name: 'display' });
+  }
+  return m.index;
+}
+
+/** Sets the mock monitor's rate everywhere the UI reads it and fires `kiosk://monitorChanged` like the watcher. */
+function applyDisplayHz(index: number, hz: number): void {
+  for (const list of [MONITORS, mockState.kiosk.monitors]) {
+    const m = list.find((x) => x.index === index);
+    if (m) {
+      m.hz = hz;
+    }
+  }
+  emitMock('kiosk://monitorChanged', { monitors: clone(MONITORS), primaryIndex: 0, reason: 'resolution' });
+}
+
+cmd('display_list', (): DisplayInfo[] => MONITORS.map((m) => displayInfo(m.index)));
+
+cmd('display_set_refresh_rate', async (args): Promise<DisplayInfo> => {
+  const index = displayIndex(args);
+  const hz = num(args, 'hz') ?? 0;
+  const device = displayDevice(index);
+  const current = displayInfo(index);
+  if (displayPending && displayPending.device !== device) {
+    mockError('conflict', 'another display change waits for confirmation');
+  }
+  if (!current.rates.includes(hz)) {
+    mockError('validation', 'hz: not offered by this display', { field: 'hz', reason: 'not offered by this display' });
+  }
+  const previousHz = displayPending?.previousHz ?? current.hz;
+  if (hz !== current.hz) {
+    await delay(700); // the screen blanks for a moment on a real switch
+    applyDisplayHz(index, hz);
+  }
+  if (hz === previousHz) {
+    displayPending = null;
+  } else {
+    const id = ++displaySeq;
+    displayPending = { id, device, previousHz, revertAt: isoIn(DISPLAY_CONFIRM_MS / 1000) };
+    later(DISPLAY_CONFIRM_MS, () => {
+      if (displayPending?.id === id) {
+        displayPending = null;
+        applyDisplayHz(index, previousHz);
+      }
+    });
+  }
+  return displayInfo(index);
+});
+
+cmd('display_confirm', (args): DisplayInfo => {
+  const index = displayIndex(args);
+  if (displayPending?.device !== displayDevice(index)) {
+    mockError('notFound', 'pending display change not found', { name: 'pending display change' });
+  }
+  displayPending = null;
+  return displayInfo(index);
+});
+
+cmd('display_revert', (args): DisplayInfo => {
+  const index = displayIndex(args);
+  if (displayPending?.device === displayDevice(index)) {
+    const { previousHz } = displayPending;
+    displayPending = null;
+    applyDisplayHz(index, previousHz);
+  }
+  return displayInfo(index);
+});
+
+// ----- open programs (status-bar dock) --------------------------------------------------------------------------------
+
+/** The fake programs plus a window per running game (its pid, an exe in its install folder), front-most first. */
+function openWindows(): OpenWindow[] {
+  const games = mockState.running
+    .filter((r) => r.state === 'running')
+    .map((r): OpenWindow => {
+      const dir = mockState.games.find((g) => g.id === r.gameId)?.installPath ?? 'D:\\Games';
+      return { pid: r.pid, hwnd: r.pid * 16, title: r.title, exePath: `${dir}\\game.exe`, icon: null };
+    });
+  return [...games, ...clone(OPEN_WINDOWS)];
+}
+
+cmd('kiosk_open_windows', (): OpenWindow[] => openWindows(), { fast: true });
+
+cmd(
+  'kiosk_focus_window',
+  (args): boolean => {
+    requireSession();
+    const target = openWindows().find((w) => w.hwnd === num(args, 'hwnd'));
+    if (!target) {
+      mockError('notFound', 'window not found', { name: 'window' });
+    }
+    console.info(`[mock] kiosk_focus_window(${target.title}) — the Shell would go behind it`);
+    return true;
   },
   { fast: true },
 );

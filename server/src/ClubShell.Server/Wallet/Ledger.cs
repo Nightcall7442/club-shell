@@ -108,3 +108,21 @@ public static class Ledger
         public DateTimeOffset UpdatedAt { get; init; }
     }
 }
+
+/// <summary>A <c>ledger_entries</c> row as the wire <c>Transaction</c> (the player's history and the client card at the counter).</summary>
+public sealed class TransactionRow
+{
+    public const string Columns = "id, user_id, type, amount, balance_after, description, created_at, ref";
+
+    public Guid Id { get; init; }
+    public Guid UserId { get; init; }
+    public string Type { get; init; } = "";
+    public long Amount { get; init; }
+    public long BalanceAfter { get; init; }
+    public string Description { get; init; } = "";
+    public DateTimeOffset CreatedAt { get; init; }
+    public string? Ref { get; init; }
+
+    public Transaction ToWire() => new(
+        Id, UserId, Enum.Parse<TransactionType>(Type, ignoreCase: true), Money.Uzs(Amount), Money.Uzs(BalanceAfter), Description, CreatedAt, Ref);
+}

@@ -140,8 +140,8 @@ export function CallAdminModal({
                 data-nav="true"
                 onClick={() => setCategory(c)}
                 className={clsx(
-                  'focus-ring glass rounded-lg px-4 py-3 text-left text-base font-semibold transition-colors duration-[var(--dur-fast)]',
-                  active ? 'border-glow bg-primary/15 text-text' : 'text-muted hover:bg-surface/80 hover:text-text',
+                  'focus-ring choice rounded-lg px-4 py-3 text-left text-base font-semibold',
+                  active ? 'choice-on' : 'text-muted hover:text-text',
                 )}
               >
                 {t(`support.category.${c}`)}

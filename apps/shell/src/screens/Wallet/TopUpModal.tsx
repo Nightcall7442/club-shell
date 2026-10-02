@@ -20,13 +20,15 @@ import { formatMoney } from '@/lib/format';
 import { isShellApiError } from '@/lib/tauri';
 import { mmss, secondsUntil } from '@/lib/time';
 import { useNotificationsStore } from '@/store/notifications';
-import { useWalletStore } from '@/store/wallet';
+import { selectFeature, useSettingsStore } from '@/store/settings';
+import { isTopupUnavailable, useWalletStore } from '@/store/wallet';
+import { CallAdminForTopUp, CashDeskSteps } from './CashDesk';
 
 export interface TopUpModalProps {
   open: boolean;
   onClose: () => void;
-  /** Called once the intent settles (after the success toast). */
-  onPaid?: (intent: TopupIntent) => void;
+  /** Called once the money arrives (after the success toast): an online payment or a top-up at the counter. */
+  onPaid?: (amount: Money) => void;
 }
 
 /** Quick amounts in UZS (major units). */
@@ -43,7 +45,8 @@ export const TOPUP_PROVIDERS: readonly TopupProviderValue[] = [
 const POLL_MS = 4000;
 const CLOSE_AFTER_PAID_MS = 2500;
 
-type Step = 'form' | 'pending' | 'paid' | 'expired';
+/** `desk`: online payment is unavailable, the counter takes the money (and the balance push settles the dialog). */
+type Step = 'form' | 'pending' | 'paid' | 'expired' | 'desk';
 
 /** Parses a user-typed UZS amount (digits, spaces, separators) to minor units; `null` when not a number. */
 export function parseUzsInput(text: string): number | null {
@@ -81,11 +84,15 @@ const CheckIcon = (): JSX.Element => (
 /**
  * Top-up flow: amount presets / custom amount + provider chips → `wallet.topupIntent` → QR (or "pay at the desk"
  * for cash) with an expiry countdown; settles from `agent://wallet.updated` (store marks the intent `paid`) or the
- * balance poll fallback, then closes itself.
+ * balance poll fallback, then closes itself. Without online payment (`features.topup` off, which the central server
+ * sends while it has no payment provider, or an intent refused as unavailable) it shows the counter's steps instead,
+ * and the counter's top-up arriving as `wallet.updated` settles it the same way. Never an error toast for that.
  */
 export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Element {
   const { t } = useTranslation();
   const { locale } = useLocale();
+  const onlineTopup = useSettingsStore(selectFeature('topup'));
+  const callAdmin = useSettingsStore(selectFeature('callAdmin'));
   const balance = useWalletStore((s) => s.balance);
   const storeIntent = useWalletStore((s) => s.topupIntent);
   const createTopup = useWalletStore((s) => s.createTopup);
@@ -100,9 +107,13 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
   const [provider, setProvider] = useState<TopupProviderValue>(TopupProvider.Payme);
   const [creating, setCreating] = useState(false);
   const [intent, setIntent] = useState<TopupIntent | null>(null);
+  const [paid, setPaid] = useState<Money | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
   const baseline = useRef<number | null>(null);
+  const deskBaseline = useRef<number | null>(null);
   const settled = useRef(false);
+  // One stable ref for the dialog's first focus: the first amount on the form, the call (or Close) at the counter. A
+  // ref swapped per step would re-run the dialog's focus effect, bouncing focus to the page behind it and back.
   const firstFocus = useRef<HTMLButtonElement>(null);
 
   const currency = balance?.currency ?? 'UZS';
@@ -118,38 +129,59 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
   // Reset when (re)opened.
   useEffect(() => {
     if (open) {
-      setStep('form');
+      setStep(onlineTopup ? 'form' : 'desk');
       setCustom('');
       setCreating(false);
       setIntent(null);
+      setPaid(null);
       baseline.current = null;
+      deskBaseline.current = useWalletStore.getState().balance?.amount.amount ?? null;
       settled.current = false;
     }
-  }, [open]);
+  }, [open, onlineTopup]);
 
   const finishPaid = useCallback(
-    (paid: TopupIntent) => {
+    (amount: Money) => {
       if (settled.current) {
         return;
       }
       settled.current = true;
+      setPaid(amount);
       setStep('paid');
       push({
         title: t('notifications.topUpSuccess'),
-        body: t('wallet.topUpSuccess', { amount: formatMoney(paid.amount, locale) }),
+        body: t('wallet.topUpSuccess', { amount: formatMoney(amount, locale) }),
         level: 'success',
       });
-      onPaid?.(paid);
+      onPaid?.(amount);
     },
     [push, t, locale, onPaid],
   );
 
+  const goDesk = (): void => {
+    deskBaseline.current = useWalletStore.getState().balance?.amount.amount ?? null;
+    setStep('desk');
+  };
+
   // Settlement via the store (`wallet.updated` raised the balance by the intent amount).
   useEffect(() => {
     if (step === 'pending' && intent && storeIntent?.id === intent.id && storeIntent.status === 'paid') {
-      finishPaid(storeIntent);
+      finishPaid(storeIntent.amount);
     }
   }, [step, intent, storeIntent, finishPaid]);
+
+  // At the counter any rise of the balance is the cashier's top-up (`wallet.updated`); a charge meanwhile lowers the mark.
+  useEffect(() => {
+    if (step !== 'desk' || !balance) {
+      return;
+    }
+    const before = deskBaseline.current;
+    if (before === null || balance.amount.amount < before) {
+      deskBaseline.current = balance.amount.amount;
+    } else if (balance.amount.amount > before) {
+      finishPaid({ amount: balance.amount.amount - before, currency: balance.amount.currency });
+    }
+  }, [step, balance, finishPaid]);
 
   // Countdown + balance poll while pending.
   useEffect(() => {
@@ -170,7 +202,7 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
       void (async () => {
         const b = await loadBalance();
         if (b && baseline.current !== null && b.amount.amount >= baseline.current + intent.amount.amount) {
-          finishPaid({ ...intent, status: 'paid' });
+          finishPaid(intent.amount);
         }
       })();
     }, POLL_MS);
@@ -209,7 +241,9 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
       setIntent(created);
       setStep('pending');
     } catch (e) {
-      if (isShellApiError(e) && e.code === 'validation') {
+      if (isTopupUnavailable(e)) {
+        goDesk();
+      } else if (isShellApiError(e) && e.code === 'validation') {
         push({
           title: t('wallet.topUpTitle'),
           body: t('wallet.minAmount', { amount: formatMoney({ amount: TOPUP_MIN_AMOUNT_MINOR, currency }, locale) }),
@@ -230,13 +264,25 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
     <Modal
       open={open}
       onClose={close}
-      title={t('wallet.topUpTitle')}
+      title={step === 'desk' ? t('wallet.deskTitle') : t('wallet.topUpTitle')}
       description={step === 'form' ? t('wallet.topUpHint') : undefined}
       size="md"
       initialFocusRef={firstFocus}
       closeOnBackdrop={step !== 'pending'}
       footer={
-        step === 'form' ? (
+        step === 'desk' ? (
+          <>
+            <Button
+              ref={callAdmin ? undefined : firstFocus}
+              variant="secondary"
+              size="lg"
+              onClick={onlineTopup ? () => setStep('form') : close}
+            >
+              {onlineTopup ? t('wallet.onlinePay') : t('common.close')}
+            </Button>
+            {callAdmin && <CallAdminForTopUp ref={firstFocus} />}
+          </>
+        ) : step === 'form' ? (
           <>
             <Button variant="secondary" size="lg" onClick={close}>
               {t('common.cancel')}
@@ -359,7 +405,7 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
             <p className="max-w-[28rem] text-lg text-text">{t('wallet.cashHint')}</p>
           ) : qrValue ? (
             <>
-              <div className="rounded-xl bg-white p-4 shadow-[var(--shadow-glow)]">
+              <div className="rounded-xl bg-white p-4 [box-shadow:var(--shadow-glow)]">
                 <QRCodeSVG
                   value={qrValue}
                   size={240}
@@ -406,7 +452,9 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
         </div>
       )}
 
-      {step === 'paid' && intent && (
+      {step === 'desk' && <CashDeskSteps />}
+
+      {step === 'paid' && paid && (
         <div className="flex flex-col items-center gap-3 py-4 text-center">
           <span
             className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-success text-bg anim-pop"
@@ -417,9 +465,7 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
             </span>
           </span>
           <p className="text-2xl font-bold text-text">{t('wallet.paid')}</p>
-          <p className="tnum text-lg text-success">
-            {t('wallet.topUpSuccess', { amount: formatMoney(intent.amount, locale) })}
-          </p>
+          <p className="tnum text-lg text-success">{t('wallet.topUpSuccess', { amount: formatMoney(paid, locale) })}</p>
           <p className="text-sm text-muted">{t('wallet.closeAfterPaid')}</p>
         </div>
       )}

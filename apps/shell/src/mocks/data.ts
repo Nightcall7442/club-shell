@@ -32,7 +32,15 @@ import type {
   User,
   UserStats,
 } from '@clubshell/contracts';
-import type { KioskMonitor, KioskState, ShellConfig } from '@/lib/tauri';
+import type {
+  GpuPanelInfo,
+  KioskMonitor,
+  KioskState,
+  OpenWindow,
+  PcAudioOutputs,
+  PcMouseSettings,
+  ShellConfig,
+} from '@/lib/tauri';
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Helpers
@@ -1406,5 +1414,56 @@ export const NOTIFICATIONS: Notification[] = [
     level: 'success',
     ttlSec: 10,
     action: { label: 'View', command: '/tournaments', args: null },
+  },
+];
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Player PC settings (`pc_*`): the club's values, what a session end puts back
+// ---------------------------------------------------------------------------------------------------------------------
+
+export const PC_MOUSE: PcMouseSettings = { speed: 10, enhancePrecision: true, doubleClickMs: 500 };
+
+export const PC_AUDIO_OUTPUTS: PcAudioOutputs = {
+  canSwitch: true,
+  devices: [
+    {
+      id: '{0.0.0.00000000}.{b3f8fa53-0004-438e-9003-51a46e139bfc}',
+      name: 'Динамики (Realtek(R) Audio)',
+      kind: 'speakers',
+      isDefault: true,
+    },
+    {
+      id: '{0.0.0.00000000}.{6a5f3c2e-1b7d-4c1a-9e55-0f2d7e4b9a10}',
+      name: 'Наушники (HyperX Cloud II)',
+      kind: 'headset',
+      isDefault: false,
+    },
+    {
+      id: '{0.0.0.00000000}.{9d2c41e8-73aa-4f0e-b6b1-2c8e5a7d3f42}',
+      name: 'LG ULTRAGEAR (NVIDIA High Definition Audio)',
+      kind: 'digital',
+      isDefault: false,
+    },
+  ],
+};
+
+/** Panels found on the mock PC; the GPU itself comes from `HARDWARE` (NVIDIA). */
+export const PC_GPU_PANELS: GpuPanelInfo[] = [{ vendor: 'nvidia', name: 'NVIDIA Control Panel' }];
+
+/** Programs open in the session besides a running game (`kiosk_open_windows`; the handler adds the game's window). */
+export const OPEN_WINDOWS: OpenWindow[] = [
+  {
+    pid: 6120,
+    hwnd: 0x0003_04a2,
+    title: 'Discord',
+    exePath: 'C:\\Users\\kiosk\\AppData\\Local\\Discord\\app-1.0.9163\\Discord.exe',
+    icon: '/mock-art/app-discord.svg',
+  },
+  {
+    pid: 7344,
+    hwnd: 0x0005_1b30,
+    title: 'Twitch - Google Chrome',
+    exePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    icon: '/mock-art/app-chrome.svg',
   },
 ];

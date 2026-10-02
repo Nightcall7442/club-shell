@@ -38,12 +38,18 @@ public sealed class UserTests(ServerFixture server) : LedgerCheckedTest(server),
         Assert.Equal(("Али", "uz", "https://cdn.example.uz/a.png"), (updated.GetProperty("displayName").GetString(), updated.GetProperty("locale").GetString(), updated.GetProperty("avatarUrl").GetString()));
         Assert.StartsWith("pbkdf2$", await Players.ScalarAsync<string>(Server, "SELECT unlock_pin_hash FROM users WHERE id = @Id", new { player.Id }), StringComparison.Ordinal);
 
+        // Beyond the contract: a preset picture of the Shell is a path, not a URL.
+        updated = await Players.ReadAsync(await agent.SendAsync(HttpMethod.Patch, path, """{"avatarUrl":"/avatars/wolf.svg"}"""), 200);
+        Assert.Equal("/avatars/wolf.svg", updated.GetProperty("avatarUrl").GetString());
+
         foreach (var (body, field, reason) in new[]
         {
             ("{}", "body", "required"),
             ("""{"displayName":"   "}""", "displayName", "min"),
             ($$"""{"displayName":"{{new string('x', 65)}}"}""", "displayName", "max"),
             ("""{"avatarUrl":"ftp://x/a.png"}""", "avatarUrl", "format"),
+            ("""{"avatarUrl":"/avatars/../secret.svg"}""", "avatarUrl", "format"),
+            ("""{"avatarUrl":"/other/wolf.svg"}""", "avatarUrl", "format"),
             ("""{"locale":"fr"}""", "locale", "enum"),
             ("""{"pin":"12a4"}""", "pin", "format"),
         })

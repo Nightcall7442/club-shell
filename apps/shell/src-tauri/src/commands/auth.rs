@@ -33,7 +33,8 @@ pub async fn auth_login(
 }
 
 /// `auth_logout` → `auth.logout`. `reason` ∈ `user` (default) | `idle` | `admin`. Clears the
-/// user/session caches (the admin unlock is PC-level and stays).
+/// user/session caches (the admin unlock is PC-level and stays) and puts the club's mouse / audio
+/// settings back whatever the Agent answers: the UI signs the player out either way.
 #[tauri::command]
 pub async fn auth_logout(
     state: State<'_, AppState>,
@@ -50,6 +51,7 @@ pub async fn auth_logout(
             ));
         }
     }
+    super::pc::restore_player_changes("logout");
     let resp: AuthLogoutResponse = state
         .agent
         .request(names::auth::LOGOUT, &AuthLogoutRequest { reason })

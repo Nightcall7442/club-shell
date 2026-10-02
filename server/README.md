@@ -14,7 +14,8 @@
 - S2: 18 операций игрока — `login`, `startQrLogin`, `getQrLoginStatus`, `guestLogin`, `logout`, `getUser`, `updateUser`,
   `getUserStats`, `getUserAchievements`, `getUserLoyalty`, `getCurrentSession`, `createSession`, `pauseSession`,
   `resumeSession`, `endSession`, `extendSession`, `postSessionEvents`, `getTariffs` — и сверх контракта
-  `GET /wallet/{userId}/balance` (`getBalance`) и `/users/{userId}/game-settings` (список → `{items:[]}`, `DELETE` → 204,
+  `GET /wallet/{userId}/balance` (`getBalance`), история кошелька `GET /wallet/{userId}/transactions` (`getTransactions`:
+  новые первыми, страницы по 50 до 200, фильтры `type`/`from`/`to`) и `/users/{userId}/game-settings` (список → `{items:[]}`, `DELETE` → 204,
   остальные game-settings → 501). Пуши `sessionUpdated`, `walletUpdated` (`userRevoked` — с кассой в S4: `logout`
   самого ПК его не шлёт).
 - S3: `getGames` (страницы до 1000, скрытые исключены, порядок владельца, ETag `"g<catalogVersion>-<hash>"` с
@@ -38,7 +39,8 @@
   (`adminGames`, сверх контракта `PATCH /admin/games/{id}`), здоровье ПК (`adminHealth`, тикеты, автообслуживание), контроль
   (`adminControl`, 7 флагов) и отчёты (`adminReports`). Воркеры `HealthWorker`, `ClubTickWorker` (автоматизация),
   `WebhookWorker` (защита от SSRF, 3 повтора), `MaintenanceWorker`.
-- Остальные 25 операций контракта отвечают `501` (кассиру на owner-only из них — сначала `403 ownerOnly`).
+- Остальные 24 операции контракта отвечают `501` (в том числе `topup-intent`: платёжного провайдера нет, игрок пополняет
+  счёт на кассе) (кассиру на owner-only из них — сначала `403 ownerOnly`).
 - Деньги (DESIGN §4.3, §5): единственная точка записи — `Wallet/Ledger.cs` (строка кошелька под `FOR UPDATE`,
   append-only `ledger_entries` с `balance_after`; `wallets.main_balance` — кеш суммы леджера). Цена — одна функция
   `Sessions/Billing/Pricing.cs`: день недели и праздники в зоне клуба, лучшая из скидок группы, уровня лояльности и
@@ -278,12 +280,14 @@ Playwright сам запускает `dotnet run` (Development, `Seed:Dev`, CORS
 - **Свои игры клуба** (сверх контракта) — владелец добавляет, меняет и удаляет игры в кассе («Игры» → «Добавить игру»):
   `POST /admin/games`, `PUT /admin/games/{id}`, `DELETE /admin/games/{id}`. Игра с `exe` — полный путь к `.exe` на ПК
   (`G:\…` или `\\сервер\…`), с лаунчером — его код игры (Steam — номер из ссылки магазина, обложка тогда берётся из Steam).
+  Ролик (`videoUrl`, необязательно) — прямая https-ссылка на файл `.mp4`/`.webm`: оболочка без звука крутит его за картинкой
+  игры, пока игрок на ней задержался, и не играет его, пока идёт игра.
   Всё, что владелец тронул (добавил, изменил, удалил, задал пути настроек), помечается `games.origin = 'club'`: файл при
   следующем старте такую игру не перезаписывает, не восстанавливает и не скрывает.
 - **Товары** — массив контрактных `Product`. Товар, который уже есть, остаётся таким, как его отредактировали в кассе
   (название, цена, остаток); товар, которого нет в файле, скрывается.
 - **Стартовый набор** лежит в образе: `seed/games.example.json` (15 популярных игр; у игр Steam обложки с CDN Steam, у остальных
-  обложек нет) и `seed/products.example.json` (12 товаров с демонстрационными ценами и остатками). Включить:
+  обложек нет; ролики — трейлеры со страниц игр в Steam и официальные ролики Riot, у Fortnite, Minecraft, Warzone и CS 1.6 их нет) и `seed/products.example.json` (12 товаров с демонстрационными ценами и остатками). Включить:
   `Catalog__GamesSeedPath=seed/games.example.json` и `Catalog__ProductsSeedPath=seed/products.example.json` (в compose —
   `CATALOG_GAMES_SEED` и `CATALOG_PRODUCTS_SEED` в `server/.env`). Свой список — положить файлы в `data/` (volume) и вернуть
   значения по умолчанию. `exePath` игр с лаунчером `exe` и обложки не-Steam игр владелец задаёт сам.

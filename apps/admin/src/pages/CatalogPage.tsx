@@ -72,6 +72,7 @@ interface GameForm {
   coverUrl: string;
   category: string[];
   description: string;
+  videoUrl: string;
 }
 
 const EMPTY_FORM: GameForm = {
@@ -83,7 +84,11 @@ const EMPTY_FORM: GameForm = {
   coverUrl: '',
   category: [],
   description: '',
+  videoUrl: '',
 };
+
+/** A trailer link the server takes (https only); whether it is a playable file shows in the preview. */
+const VIDEO_URL = /^https:\/\/\S+$/i;
 
 function formOf(g: AdminGame): GameForm {
   const steamCover = g.launcher === 'steam' && g.coverUrl === steamCoverUrl(g.launcherAppId ?? '');
@@ -97,6 +102,7 @@ function formOf(g: AdminGame): GameForm {
     coverUrl: steamCover ? '' : (g.coverUrl ?? ''),
     category: g.category,
     description: g.description ?? '',
+    videoUrl: g.videoUrl ?? '',
   };
 }
 
@@ -123,6 +129,8 @@ function problem(f: GameForm): string | null {
   }
   const cover = f.coverUrl.trim();
   if (cover && !/^https?:\/\/\S+$/i.test(cover)) return t('Обложка — ссылка на картинку (https://…)');
+  const video = f.videoUrl.trim();
+  if (video && !VIDEO_URL.test(video)) return t('Ролик — ссылка https://… на файл .mp4 или .webm');
   return null;
 }
 
@@ -137,6 +145,7 @@ function inputOf(f: GameForm): GameInput {
     coverUrl: f.coverUrl.trim() || null,
     category: f.category,
     description: f.description.trim() || null,
+    videoUrl: f.videoUrl.trim() || null,
   };
 }
 
@@ -161,6 +170,45 @@ function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; chi
     >
       {children}
     </button>
+  );
+}
+
+/** The trailer as the PCs play it (muted, looped); a link that is not a playable file says so before it is saved. */
+function TrailerPreview({ url }: { url: string }): JSX.Element {
+  const [src, setSrc] = useState(url);
+  const [broken, setBroken] = useState(false);
+
+  // A typed link settles first: no request per keystroke.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSrc(url);
+      setBroken(false);
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [url]);
+
+  return (
+    <div aria-live="polite">
+      {broken ? (
+        <span className="text-xs text-danger">
+          {t('Ролик не открывается: нужна прямая ссылка на файл .mp4 или .webm')}
+        </span>
+      ) : (
+        <video
+          key={src}
+          src={src}
+          muted
+          loop
+          autoPlay
+          playsInline
+          controls
+          preload="metadata"
+          aria-label={t('Ролик')}
+          onError={() => setBroken(true)}
+          className="aspect-video w-56 rounded-md border border-line bg-bg object-cover"
+        />
+      )}
+    </div>
   );
 }
 
@@ -268,6 +316,24 @@ function GameEditor({
           >
             <Input placeholder="https://…" value={form.coverUrl} onChange={(e) => set({ coverUrl: e.target.value })} />
           </Field>
+          <div className="flex flex-col gap-2">
+            <Field
+              label={t('Ролик (ссылка на .mp4/.webm)')}
+              hint={t(
+                'Необязательно. Прямая ссылка на сам файл: ролик без звука идёт за картинкой игры на ПК. Ссылка на YouTube не подойдёт.',
+              )}
+            >
+              <Input
+                inputMode="url"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="https://…/trailer.mp4"
+                value={form.videoUrl}
+                onChange={(e) => set({ videoUrl: e.target.value })}
+              />
+            </Field>
+            {VIDEO_URL.test(form.videoUrl.trim()) && <TrailerPreview url={form.videoUrl.trim()} />}
+          </div>
           <Field label={t('Категории')} hint={t('До {n}', { n: MAX_CATEGORIES })}>
             <div className="flex flex-wrap gap-1.5">
               {chips.map((c) => {

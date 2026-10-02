@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace ClubShell.Server.Tests;
 
 /// <summary>A fixture started on the example catalogs shipped in <c>config/</c> (DESIGN D-14; server/README.md, "Каталог игр и товаров").</summary>
@@ -38,6 +40,19 @@ public sealed class SeedExamplesTests(ExampleCatalogFixture server) : IClassFixt
         Assert.Contains(games, g => g.GetProperty("title").GetString() == "Counter-Strike 2" && g.GetProperty("coverUrl").GetString()!.StartsWith("https://", StringComparison.Ordinal));
         Assert.Contains(games, g => g.GetProperty("title").GetString() == "Minecraft" && g.GetProperty("launcher").GetString() == "exe");
         Assert.Contains(games, g => g.GetProperty("title").GetString() == "Counter-Strike 1.6" && g.GetProperty("exePath").GetString() == @"G:\Counter Strike 1.6 PRO\cstrike.exe");
+
+        // Trailers are https files (the shell's CSP plays https media only); a game without one keeps its art.
+        Assert.All(games, g => Assert.True(
+            !g.TryGetProperty("videoUrl", out var video) || video.ValueKind == JsonValueKind.Null || video.GetString()!.StartsWith("https://", StringComparison.Ordinal),
+            g.GetProperty("title").GetString()));
+        var cs2 = games.Single(g => g.GetProperty("title").GetString() == "Counter-Strike 2").GetProperty("videoUrl").GetString();
+        Assert.EndsWith(".mp4", cs2);
+
+        // The owner sees (and may change) the same trailer in the console.
+        var owner = await Staff.LoginAsync(server, "0000");
+        var console = await Staff.ExpectAsync(server, 200, HttpMethod.Get, "/games", owner);
+        Assert.Equal(cs2, console.GetProperty("items").EnumerateArray()
+            .Single(g => g.GetProperty("title").GetString() == "Counter-Strike 2").GetProperty("videoUrl").GetString());
     }
 
     [Fact]

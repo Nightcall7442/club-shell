@@ -22,6 +22,7 @@ import { formatDate, formatNumber } from '@/lib/format';
 import { api } from '@/lib/tauri';
 import { useAuthStore, useNotificationsStore, useSettingsStore, useThemeStore } from '@/store';
 import Achievements from './Achievements';
+import AvatarPicker from './AvatarPicker';
 import GameSettings from './GameSettings';
 import Loyalty, { displayLevel } from './Loyalty';
 import Settings, { nudgeRange } from './Settings';
@@ -128,7 +129,7 @@ interface HeaderStatProps {
 
 function HeaderStat({ label, value, accent = false }: HeaderStatProps): JSX.Element {
   return (
-    <div className="min-w-[7rem] rounded-lg bg-surface/40 px-4 py-3">
+    <div className="min-w-[7rem] rounded-lg bg-bg/50 px-4 py-3 shadow-[inset_0_0_0_1px_var(--hairline)]">
       <p className="hud-label">{label}</p>
       <DotAmount value={value} className={clsx('mt-1 text-2xl', accent ? 'text-accent' : 'text-text')} />
     </div>
@@ -153,6 +154,7 @@ export function ProfileHeader({ user, loyalty }: ProfileHeaderProps): JSX.Elemen
   const [name, setName] = useState(user.displayName);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [picking, setPicking] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const editRef = useRef<HTMLButtonElement>(null);
 
@@ -215,16 +217,41 @@ export function ProfileHeader({ user, loyalty }: ProfileHeaderProps): JSX.Elemen
   const isGuest = user.role === 'guest';
 
   return (
+    // The player card: lit from the avatar's corner, so the one panel about the player reads as theirs.
     <section
-      className="glass flex flex-wrap items-center gap-[var(--gap)] rounded-xl p-[var(--gap)]"
+      className="glass flex flex-wrap items-center gap-[var(--gap)] rounded-xl bg-[radial-gradient(70%_160%_at_0%_0%,rgb(var(--c-accent)/0.1),transparent_60%)] p-[var(--gap)]"
       aria-label={t('profile.title')}
     >
-      <Avatar
-        name={user.displayName}
-        src={user.avatarUrl}
-        size="xl"
-        ring={user.role === 'vip' || user.role === 'admin'}
-      />
+      {isGuest ? (
+        // A guest cannot edit the profile (the Agent refuses it): the picture stays the initials.
+        <Avatar name={user.displayName} src={user.avatarUrl} size="xl" />
+      ) : (
+        <>
+          {/* The avatar is the button that opens the picker: the player taps their own picture to change it. */}
+          <button
+            type="button"
+            data-nav="true"
+            aria-label={t('profile.avatarChange')}
+            title={t('profile.avatarChange')}
+            onClick={() => setPicking(true)}
+            className="focus-ring group relative shrink-0 rounded-full"
+          >
+            <Avatar
+              name={user.displayName}
+              src={user.avatarUrl}
+              size="xl"
+              ring={user.role === 'vip' || user.role === 'admin'}
+            />
+            <span
+              aria-hidden="true"
+              className="absolute bottom-0 right-0 inline-flex h-8 w-8 items-center justify-center rounded-full bg-primary text-on-primary shadow-lg transition-transform duration-[var(--dur-fast)] group-hover:scale-110 [&>svg]:h-4 [&>svg]:w-4"
+            >
+              <PencilIcon />
+            </span>
+          </button>
+          <AvatarPicker open={picking} onClose={() => setPicking(false)} current={user.avatarUrl} />
+        </>
+      )}
       <div className="min-w-0 flex-1">
         {editing ? (
           <form onSubmit={(e) => void submit(e)} className="flex flex-wrap items-end gap-3" noValidate>
