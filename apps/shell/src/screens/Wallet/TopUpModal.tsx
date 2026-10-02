@@ -92,6 +92,7 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
   const { t } = useTranslation();
   const { locale } = useLocale();
   const onlineTopup = useSettingsStore(selectFeature('topup'));
+  const callAdmin = useSettingsStore(selectFeature('callAdmin'));
   const balance = useWalletStore((s) => s.balance);
   const storeIntent = useWalletStore((s) => s.topupIntent);
   const createTopup = useWalletStore((s) => s.createTopup);
@@ -111,8 +112,9 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
   const baseline = useRef<number | null>(null);
   const deskBaseline = useRef<number | null>(null);
   const settled = useRef(false);
+  // One stable ref for the dialog's first focus: the first amount on the form, the call (or Close) at the counter. A
+  // ref swapped per step would re-run the dialog's focus effect, bouncing focus to the page behind it and back.
   const firstFocus = useRef<HTMLButtonElement>(null);
-  const deskFocus = useRef<HTMLButtonElement>(null);
 
   const currency = balance?.currency ?? 'UZS';
   const amountMinor = custom.trim().length > 0 ? parseUzsInput(custom) : preset !== null ? preset * 100 : null;
@@ -265,21 +267,20 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
       title={step === 'desk' ? t('wallet.deskTitle') : t('wallet.topUpTitle')}
       description={step === 'form' ? t('wallet.topUpHint') : undefined}
       size="md"
-      initialFocusRef={step === 'desk' ? deskFocus : firstFocus}
+      initialFocusRef={firstFocus}
       closeOnBackdrop={step !== 'pending'}
       footer={
         step === 'desk' ? (
           <>
-            {onlineTopup ? (
-              <Button variant="secondary" size="lg" onClick={() => setStep('form')}>
-                {t('wallet.onlinePay')}
-              </Button>
-            ) : (
-              <Button variant="secondary" size="lg" onClick={close}>
-                {t('common.close')}
-              </Button>
-            )}
-            <CallAdminForTopUp ref={deskFocus} />
+            <Button
+              ref={callAdmin ? undefined : firstFocus}
+              variant="secondary"
+              size="lg"
+              onClick={onlineTopup ? () => setStep('form') : close}
+            >
+              {onlineTopup ? t('wallet.onlinePay') : t('common.close')}
+            </Button>
+            {callAdmin && <CallAdminForTopUp ref={firstFocus} />}
           </>
         ) : step === 'form' ? (
           <>

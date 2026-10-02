@@ -418,7 +418,7 @@ export function Tariffs({ onInsufficientFunds, className }: TariffsProps): JSX.E
         {zone && <p className="hud-label">{t('wallet.zoneOfPc', { zone })}</p>}
       </div>
       {loading ? (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(clamp(15rem,17vw,20rem),1fr))] gap-[var(--gap)]">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(clamp(16.5rem,18vw,21rem),1fr))] gap-[var(--gap)]">
           {Array.from({ length: 3 }, (_, i) => (
             <Skeleton key={i} height="16rem" />
           ))}
@@ -428,7 +428,7 @@ export function Tariffs({ onInsufficientFunds, className }: TariffsProps): JSX.E
       ) : (
         <motion.ul
           role="list"
-          className="grid grid-cols-[repeat(auto-fill,minmax(clamp(15rem,17vw,20rem),1fr))] gap-[var(--gap)]"
+          className="grid grid-cols-[repeat(auto-fill,minmax(clamp(16.5rem,18vw,21rem),1fr))] gap-[var(--gap)]"
           initial={animations ? 'hidden' : false}
           animate="show"
           variants={{ hidden: {}, show: { transition: { staggerChildren: 0.05 } } }}

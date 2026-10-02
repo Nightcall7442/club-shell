@@ -7,6 +7,7 @@ import { forwardRef, useState } from 'react';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { Button, type ButtonProps } from '@/components/ui/Button';
+import { Spinner } from '@/components/ui/Spinner';
 import { track } from '@/lib/analytics';
 import { api } from '@/lib/tauri';
 import { useAuthStore } from '@/store/auth';
@@ -119,7 +120,7 @@ export function CashDeskSteps({ className }: CashDeskStepsProps): JSX.Element {
       </ol>
 
       <p className="flex items-center gap-2 text-sm text-muted" aria-live="polite">
-        <span className="anim-live-dot inline-block h-2 w-2 rounded-full bg-accent" aria-hidden="true" />
+        <Spinner size="sm" aria-hidden="true" />
         {t('wallet.deskWaiting')}
       </p>
     </div>

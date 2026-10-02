@@ -1191,6 +1191,8 @@ cmd('wallet_history', (args): WalletHistoryResponse => {
     const to = Date.parse(q.to);
     items = items.filter((t) => Date.parse(t.createdAt) < to);
   }
+  // Newest first, as the server pages the ledger (the seed rows are not stored in that order).
+  items.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   const page = Math.max(1, q.page ?? 1);
   const pageSize = Math.min(200, Math.max(1, q.pageSize ?? 20));
   return { items: clone(items.slice((page - 1) * pageSize, page * pageSize)), total: items.length, page, pageSize };
