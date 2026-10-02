@@ -129,7 +129,7 @@ interface HeaderStatProps {
 
 function HeaderStat({ label, value, accent = false }: HeaderStatProps): JSX.Element {
   return (
-    <div className="min-w-[7rem] rounded-lg bg-surface/40 px-4 py-3">
+    <div className="min-w-[7rem] rounded-lg bg-bg/50 px-4 py-3 shadow-[inset_0_0_0_1px_var(--hairline)]">
       <p className="hud-label">{label}</p>
       <DotAmount value={value} className={clsx('mt-1 text-2xl', accent ? 'text-accent' : 'text-text')} />
     </div>
@@ -217,8 +217,9 @@ export function ProfileHeader({ user, loyalty }: ProfileHeaderProps): JSX.Elemen
   const isGuest = user.role === 'guest';
 
   return (
+    // The player card: lit from the avatar's corner, so the one panel about the player reads as theirs.
     <section
-      className="glass flex flex-wrap items-center gap-[var(--gap)] rounded-xl p-[var(--gap)]"
+      className="glass flex flex-wrap items-center gap-[var(--gap)] rounded-xl bg-[radial-gradient(70%_160%_at_0%_0%,rgb(var(--c-accent)/0.1),transparent_60%)] p-[var(--gap)]"
       aria-label={t('profile.title')}
     >
       {isGuest ? (

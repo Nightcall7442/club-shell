@@ -331,7 +331,7 @@ export function MessageList({
               data-nav="true"
               onClick={() => scrollToBottom(true)}
               aria-label={t('chat.scrollToLatest')}
-              className="focus-ring pointer-events-auto flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-on-primary shadow-[var(--shadow-glow)]"
+              className="focus-ring pointer-events-auto flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-on-primary [box-shadow:var(--shadow-glow)]"
             >
               <ArrowDownIcon />
               {t('chat.newMessages')}

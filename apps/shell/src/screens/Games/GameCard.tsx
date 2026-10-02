@@ -118,7 +118,7 @@ export const GameCard = forwardRef<HTMLButtonElement, GameCardProps>(function Ga
         title={game.title}
         kind="cover"
         priority={priority}
-        className="rounded-lg transition-[filter] duration-[var(--dur-base)] group-hover:brightness-110"
+        className="cover-lift rounded-lg"
         overlay={
           <>
             {/* Dims and greys only the art under it: fading the whole tile also faded the "not installed" badge
@@ -141,7 +141,7 @@ export const GameCard = forwardRef<HTMLButtonElement, GameCardProps>(function Ga
                   e.stopPropagation();
                   onLaunch(game);
                 }}
-                className="absolute right-3 top-3 inline-flex h-12 w-12 scale-90 cursor-pointer items-center justify-center rounded-full bg-accent pl-0.5 text-on-accent opacity-0 transition-[opacity,transform] duration-[var(--dur-base)] ease-[var(--ease-out)] hover:!scale-110 group-hover:scale-100 group-hover:opacity-100 [&>svg]:h-5 [&>svg]:w-5"
+                className="absolute right-3 top-3 inline-flex h-12 w-12 scale-90 cursor-pointer items-center justify-center rounded-full bg-accent pl-0.5 text-on-accent opacity-0 shadow-[0_0_24px_-4px_rgb(var(--c-accent)/0.8)] transition-[opacity,transform] duration-[var(--dur-base)] ease-[var(--ease-out)] hover:!scale-110 group-hover:scale-100 group-hover:opacity-100 [&>svg]:h-5 [&>svg]:w-5"
               >
                 <PlayIcon />
               </span>
@@ -182,6 +182,17 @@ export const GameCard = forwardRef<HTMLButtonElement, GameCardProps>(function Ga
                 )}
               </span>
             </div>
+            {/* A hairline edge keeps dark covers from melting into the background; the selected and the running game
+                take the accent. */}
+            <div
+              aria-hidden="true"
+              className={clsx(
+                'pointer-events-none absolute inset-0 rounded-[inherit] transition-shadow duration-[var(--dur-base)]',
+                selected || running
+                  ? 'shadow-[inset_0_0_0_1px_rgb(var(--c-accent)/0.55)]'
+                  : 'shadow-[inset_0_0_0_1px_rgb(var(--c-text)/0.08)]',
+              )}
+            />
           </>
         }
       />

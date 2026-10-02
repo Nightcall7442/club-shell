@@ -185,7 +185,7 @@ export function Bracket({ bracket, meId, nameOf, className }: BracketProps): JSX
               className={clsx(
                 'focus-ring glass absolute flex flex-col divide-y divide-text/10 overflow-hidden rounded-xl',
                 decided ? 'border-primary/40' : 'border-text/10',
-                (mineA || mineB) && !decided && 'shadow-[var(--shadow-glow)]',
+                (mineA || mineB) && !decided && '[box-shadow:var(--shadow-glow)]',
               )}
             >
               <Player

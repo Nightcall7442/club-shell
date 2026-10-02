@@ -40,9 +40,11 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
       )}
       <div
         className={clsx(
-          'glass flex items-center gap-2 rounded-md px-3 transition-[box-shadow,border-color] duration-[var(--dur-fast)]',
-          'focus-within:border-primary/60 focus-within:shadow-[var(--shadow-glow)]',
-          hasError && 'border-danger/70 focus-within:border-danger focus-within:shadow-[var(--shadow-glow-danger)]',
+          'field flex items-center gap-2 rounded-md px-3 transition-[box-shadow,border-color] duration-[var(--dur-fast)]',
+          // `[box-shadow:…]`, not `shadow-[var(…)]`: Tailwind reads a bare var() there as a shadow colour, and the
+          // focus glow never rendered.
+          'focus-within:border-accent/60 focus-within:[box-shadow:var(--shadow-glow)]',
+          hasError && 'border-danger/70 focus-within:border-danger focus-within:[box-shadow:var(--shadow-glow-danger)]',
           disabled && 'opacity-50',
           SIZE[size],
         )}

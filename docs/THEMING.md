@@ -81,7 +81,7 @@ before the first `applyTheme`.
 |-------------|--------------|----------|
 | `radius` | `--radius: <n>px` | `rounded` = `var(--radius)`; `rounded-sm` ×0.5, `rounded-md` ×0.75, `rounded-lg` ×1, `rounded-xl` ×1.5, `rounded-2xl` ×2 |
 | `font` | `--font: "<family>"` (quotes stripped from the value) | `font-sans` = `['var(--font)', 'system-ui', 'Segoe UI', 'sans-serif']` |
-| `blur` | `--blur: <n>px`, `data-glass` when `> 0` | under `data-glass`, `.glass` uses `blur(var(--blur))` at 55 % surface opacity, `.glass-strong` `blur(calc(var(--blur) * 1.5))` at 90 %; otherwise both are opaque `surface` with a hairline border |
+| `blur` | `--blur: <n>px`, `data-glass` when `> 0` | under `data-glass`, `.glass` uses `blur(var(--blur))` at 55 % surface opacity, `.glass-strong` `blur(calc(var(--blur) * 1.5))` at 90 %; otherwise both are opaque `surface` with a hairline border and a faint top-down sheen (`--sheen`) |
 
 ### 2.3 Data attributes
 
@@ -95,8 +95,11 @@ spinning) and honours `prefers-reduced-motion` the same way.
 
 `tokens.css` also defines the fluid type scale (`--fs-base: clamp(16px, 0.9375vw, 24px)`, `--fs-xs` …
 `--fs-display`), layout (`--topbar-h`, `--statusbar-h`, `--gutter`, `--gap`, `--card-cover-w`), motion
-(`--dur-fast/base/slow`, easings) and elevation (`--hairline`, `--shadow-float` for popovers and modals only,
-`--shadow-glow`, which is now a plain 2 px focus ring). These are design
+(`--dur-fast/base/slow`, easings) and elevation (`--hairline`, `--hairline-hover` for the edge of a panel that is
+itself a control, `--sheen`, `--shadow-float` for popovers and modals, `--shadow-lift` for a library cover that is
+aimed at, `--shadow-glow` — the focus ring: 2 px of accent with a soft halo — and `--shadow-glow-inset` for rows
+inside a clipping container via `.focus-ring-inset`). In Tailwind classes write `[box-shadow:var(--shadow-glow)]`:
+`shadow-[var(--shadow-glow)]` is read as a shadow *colour* and renders nothing. These are design
 constants, not theme fields; a theme only influences them through the colour variables they reference.
 
 ---
@@ -163,8 +166,9 @@ accent. The game art carries the colour.
 
 The HUD layer is not themeable data but CSS in `tokens.css`, driven by the colour variables: `.hud-label`
 (mono caps), `.num-dot` and `<DotAmount>` (Doto digits, units in the UI face), `.hud-brackets` / `.hud-focus`
-(corner brackets), `.cut-corners` (the `cta` button), `.choice` (pick-one controls), `.page-aside` (side columns start level with
-the main column's first block) and `.tick-scale`. The faces are
+(corner brackets with a faint glow), `.cut-corners` (the `cta` button; glows when aimed at), `.choice` (pick-one
+controls), `.field` (the recessed well of a text field), `.cover-lift` (a cover rises when its tile is hovered or
+focused), `.page-aside` (side columns start level with the main column's first block) and `.tick-scale`. The faces are
 bundled (`@fontsource-variable/unbounded`, `jetbrains-mono`, `doto`), so they render offline.
 
 ### 4.2 `neon` — "Neon Night"

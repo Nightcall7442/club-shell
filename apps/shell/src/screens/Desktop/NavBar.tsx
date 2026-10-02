@@ -6,7 +6,7 @@
  */
 import { useCallback, useMemo } from 'react';
 import clsx from 'clsx';
-import { motion } from 'framer-motion';
+import { motion, type Transition } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import type { ShellFeatures } from '@clubshell/contracts';
@@ -101,8 +101,11 @@ export function NavBar({ className }: { className?: string }): JSX.Element {
                 aria-label={badge ? `${label}, ${t('chat.unread', { count: unread })}` : label}
                 className={({ isActive }) =>
                   clsx(
-                    'focus-ring relative flex h-11 items-center gap-1.5 rounded-sm px-[clamp(0.55rem,0.8vw,1rem)] font-display text-[0.72rem] uppercase tracking-[0.08em] transition-colors duration-[var(--dur-fast)]',
-                    isActive ? 'text-text' : 'text-muted hover:text-text',
+                    // Padding tightens towards 1366 px, where nine tabs otherwise cut the club name in the bar short.
+                    'focus-ring relative isolate flex h-11 items-center gap-1.5 rounded-sm px-[clamp(0.45rem,calc(1.6vw_-_13px),1rem)] font-display text-[0.72rem] uppercase tracking-[0.08em] transition-colors duration-[var(--dur-fast)]',
+                    isActive
+                      ? 'text-text [text-shadow:0_0_14px_rgb(var(--c-accent)/0.55)]'
+                      : 'text-muted after:absolute after:inset-x-[clamp(0.45rem,calc(1.6vw_-_13px),1rem)] after:-bottom-px after:h-px after:bg-text/0 after:transition-colors after:duration-[var(--dur-fast)] hover:text-text hover:after:bg-text/30',
                   )
                 }
               >
@@ -127,16 +130,28 @@ export function NavBar({ className }: { className?: string }): JSX.Element {
   );
 }
 
-/** Accent bar under the active tab; slides to the next tab instead of jumping. */
+/**
+ * Accent bar under the active tab, lit from below like a game menu's selected section; bar and light slide to the
+ * next tab together instead of jumping.
+ */
 function ActiveBar(): JSX.Element {
   const animations = useThemeStore(selectAnimationsEnabled);
+  const transition: Transition = animations ? { type: 'spring', stiffness: 520, damping: 44 } : { duration: 0 };
   return (
-    <motion.span
-      layoutId="nav-active-bar"
-      aria-hidden="true"
-      className="absolute inset-x-[clamp(0.55rem,0.8vw,1rem)] -bottom-px h-0.5 bg-accent"
-      transition={animations ? { type: 'spring', stiffness: 520, damping: 44 } : { duration: 0 }}
-    />
+    <>
+      <motion.span
+        layoutId="nav-active-light"
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(60%_90%_at_50%_100%,rgb(var(--c-accent)/0.16),transparent_75%)]"
+        transition={transition}
+      />
+      <motion.span
+        layoutId="nav-active-bar"
+        aria-hidden="true"
+        className="absolute inset-x-[clamp(0.45rem,calc(1.6vw_-_13px),1rem)] -bottom-px h-0.5 bg-accent shadow-[0_0_10px_1px_rgb(var(--c-accent)/0.65)]"
+        transition={transition}
+      />
+    </>
   );
 }
 
@@ -149,7 +164,7 @@ export function Keycap({ label, title, onClick }: { label: string; title: string
       aria-label={title}
       title={title}
       onClick={onClick}
-      className="focus-ring inline-flex h-7 min-w-[2.4rem] shrink-0 items-center justify-center rounded-md border border-text/20 px-2 font-mono text-[0.65rem] font-medium text-muted transition-colors duration-[var(--dur-fast)] hover:border-accent/60 hover:text-accent"
+      className="focus-ring inline-flex h-7 min-w-[2.4rem] shrink-0 items-center justify-center rounded-md border border-text/20 bg-text/[0.03] px-2 font-mono text-[0.65rem] font-medium text-muted shadow-[inset_0_-2px_0_rgb(var(--c-text)/0.08)] transition-colors duration-[var(--dur-fast)] hover:border-accent/60 hover:text-accent"
     >
       {label}
     </button>

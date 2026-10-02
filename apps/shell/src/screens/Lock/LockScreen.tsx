@@ -193,7 +193,7 @@ export function UnlockForm({ onSuccess, className }: UnlockFormProps): JSX.Eleme
       <Avatar name={name} src={user?.avatarUrl} size="xl" ring />
       <div>
         <h1 className="font-display text-3xl font-light leading-tight tracking-tight text-text">{name}</h1>
-        <p className="mt-1 text-base text-muted">{t('lock.lockedHint')}</p>
+        <p className="mt-1 text-balance text-base text-muted">{t('lock.lockedHint')}</p>
       </div>
       <div className="flex flex-wrap items-center justify-center gap-3">
         <Badge tone="accent" size="lg" dot>
@@ -268,11 +268,10 @@ function OptionCard({ selected, onSelect, title, hint, children, className }: Op
       aria-checked={selected}
       data-nav="true"
       onClick={onSelect}
+      // The shared pick-one look (`.choice`, as for minute presets just below): accent edge and fill when chosen.
       className={clsx(
-        'focus-ring flex flex-col items-start gap-1 rounded-lg border px-4 py-3 text-left transition-colors duration-[var(--dur-fast)]',
-        selected
-          ? 'border-primary bg-primary/15 text-text shadow-[var(--shadow-glow)]'
-          : 'border-text/10 bg-text/5 text-text hover:bg-text/10',
+        'focus-ring choice flex flex-col items-start gap-1 rounded-lg px-4 py-3 text-left',
+        selected && 'choice-on',
         className,
       )}
     >
@@ -740,7 +739,9 @@ export default function LockScreen(): JSX.Element {
             initial={{ opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration, ease: 'easeOut' }}
-            className="glass-strong themed-scrollbar max-h-full w-[min(92vw,34rem)] overflow-y-auto overflow-x-hidden rounded-xl p-8"
+            // Frosted over the club's art rather than a solid slab cut out of it; the accent line on top marks the
+            // one panel to look at.
+            className="glass-strong themed-scrollbar relative max-h-full w-[min(92vw,34rem)] overflow-y-auto overflow-x-hidden rounded-xl bg-surface/80 p-[clamp(1.25rem,3vh,2rem)] backdrop-blur-xl before:pointer-events-none before:absolute before:inset-x-8 before:top-0 before:h-px before:bg-[linear-gradient(90deg,transparent,rgb(var(--c-accent)/0.85),transparent)]"
           >
             {!ready ? (
               <div className="flex justify-center py-16">
@@ -750,11 +751,12 @@ export default function LockScreen(): JSX.Element {
               <UnlockForm />
             ) : (
               <>
-                <div className="mb-6 text-center">
+                {/* Spacing follows the screen height: at 1366×768 the QR card has to fit without a scrollbar. */}
+                <div className="mb-[clamp(0.875rem,2.2vh,1.5rem)] text-center">
                   <h1 className="font-display text-3xl font-light leading-tight tracking-tight text-text">
                     {t('lock.title')}
                   </h1>
-                  <p className="mt-1 text-base text-muted">{t('lock.subtitle')}</p>
+                  <p className="mt-1 text-balance text-base text-muted">{t('lock.subtitle')}</p>
                 </div>
                 {expiredReason && (
                   <p role="status" className="mb-4 rounded-md bg-accent/15 px-4 py-3 text-base text-accent">
@@ -768,7 +770,7 @@ export default function LockScreen(): JSX.Element {
                   label={t('lock.chooseMethod')}
                   size="lg"
                   idPrefix="lock"
-                  className="mb-6 w-full [&>button]:flex-1 [&>button]:justify-center"
+                  className="mb-[clamp(0.875rem,2.2vh,1.5rem)] w-full [&>button]:flex-1 [&>button]:justify-center"
                 />
                 <div role="tabpanel" id={`lock-panel-${tab}`} aria-labelledby={`lock-tab-${tab}`}>
                   {tab === 'qr' && <QrLogin />}

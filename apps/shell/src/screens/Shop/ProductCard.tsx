@@ -66,7 +66,7 @@ export const ProductCard = memo(function ProductCard({
     <motion.article
       layout={animations}
       className={clsx(
-        'glass group relative flex flex-col overflow-hidden rounded-lg transition-[box-shadow] duration-[var(--dur-fast)]',
+        'glass group relative flex flex-col overflow-hidden rounded-lg transition-[box-shadow,border-color] duration-[var(--dur-fast)] hover:border-[color:var(--hairline-hover)]',
         'focus-within:border-glow',
         !available && 'opacity-60',
         className,

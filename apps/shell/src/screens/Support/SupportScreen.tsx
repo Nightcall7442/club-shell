@@ -51,9 +51,10 @@ export function FaqAccordion({ items }: { items: FaqItem[] }): JSX.Element {
               aria-expanded={open}
               aria-controls={panelId}
               onClick={() => setOpenIndex(open ? null : i)}
+              // Inset ring: the item clips its corners, so an outer ring would be cut off.
               className={clsx(
-                'focus-ring flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition-colors duration-[var(--dur-fast)] hover:bg-surface/80',
-                open && 'text-primary',
+                'focus-ring focus-ring-inset flex w-full items-center justify-between gap-4 rounded-[inherit] px-5 py-4 text-left transition-colors duration-[var(--dur-fast)] hover:bg-text/[0.04]',
+                open && 'text-accent',
               )}
             >
               <span className="text-base font-semibold">{item.question}</span>
@@ -164,8 +165,8 @@ export function ReportProblemForm(): JSX.Element {
           }
         }}
         className={clsx(
-          'glass themed-scrollbar w-full resize-none rounded-md px-3 py-2 text-base text-text outline-none placeholder:text-muted/70',
-          'focus:border-primary/60 focus:shadow-[var(--shadow-glow)]',
+          'field themed-scrollbar w-full resize-none rounded-md px-3 py-2 text-base text-text outline-none placeholder:text-muted/70',
+          'focus:border-accent/60 focus:[box-shadow:var(--shadow-glow)]',
           error && 'border-danger/70',
         )}
       />
@@ -300,7 +301,7 @@ export default function SupportScreen(): JSX.Element {
 
           <section aria-label={t('support.rulesTitle')} className="glass flex flex-col gap-3 rounded-xl p-5">
             <h2 className="font-display text-xl font-normal text-text tracking-tight">{t('support.rulesTitle')}</h2>
-            <ol className="flex list-decimal flex-col gap-2 pl-6 text-base text-text marker:font-bold marker:text-primary">
+            <ol className="flex list-decimal flex-col gap-2 pl-6 text-base text-text marker:font-mono marker:text-accent">
               {rules.map((r, i) => (
                 <li key={`${i}-${r}`}>{r}</li>
               ))}

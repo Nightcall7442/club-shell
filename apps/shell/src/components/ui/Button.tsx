@@ -23,7 +23,9 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const VARIANT: Record<ButtonVariant, string> = {
   primary: 'bg-primary text-on-primary hover:bg-[rgb(var(--c-primary-hover))] active:bg-[rgb(var(--c-primary-active))]',
-  secondary: 'bg-text/[0.06] text-text hover:bg-text/10 active:bg-text/[0.14]',
+  // A hairline edge so a secondary action still reads as a button on a panel of nearly the same tone.
+  secondary:
+    'bg-text/[0.06] text-text shadow-[inset_0_0_0_1px_rgb(var(--c-text)/0.08)] hover:bg-text/10 active:bg-text/[0.14]',
   ghost: 'bg-transparent text-text hover:bg-text/[0.06] active:bg-text/10',
   danger: 'bg-danger text-white hover:bg-danger/90 active:bg-danger/80',
   cta: 'cut-corners hud-focus !rounded-none text-on-accent',
@@ -67,7 +69,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       aria-busy={loading || undefined}
       className={clsx(
         'focus-ring relative inline-flex select-none items-center justify-center whitespace-nowrap font-semibold leading-none',
-        'transition-[background-color,box-shadow,transform] duration-[var(--dur-fast)] ease-[var(--ease-out)] active:scale-[0.97] disabled:active:scale-100',
+        'transition-[background-color,box-shadow,transform,filter] duration-[var(--dur-fast)] ease-[var(--ease-out)] active:scale-[0.97] disabled:active:scale-100',
         'disabled:cursor-not-allowed disabled:opacity-40',
         VARIANT[variant],
         SIZE[size],

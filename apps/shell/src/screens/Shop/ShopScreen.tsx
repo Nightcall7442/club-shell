@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { ProductCategory, type ProductCategory as ProductCategoryValue } from '@clubshell/contracts';
 import { Button } from '@/components/ui/Button';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Tabs, type TabItem } from '@/components/ui/Tabs';
@@ -32,6 +33,21 @@ const SearchIcon = (): JSX.Element => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
     <circle cx="11" cy="11" r="7" />
     <path d="M20 20l-3.5-3.5" />
+  </svg>
+);
+
+const BagIcon = (): JSX.Element => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M5 8h14l-1 12H6L5 8z" />
+    <path d="M9 8V6a3 3 0 0 1 6 0v2" />
   </svg>
 );
 
@@ -156,18 +172,19 @@ export function ShopScreen(): JSX.Element {
               ))}
             </div>
           ) : products.length === 0 ? (
-            <div className="flex h-full min-h-[16rem] flex-col items-center justify-center gap-3 text-center">
-              <p className="text-xl font-semibold text-text">
-                {status === 'error' ? t('common.error') : search ? t('common.noResults') : t('shop.noProducts')}
-              </p>
-              {status === 'error' ? (
-                <Button variant="secondary" size="lg" onClick={() => void load(true)}>
-                  {t('common.retry')}
-                </Button>
-              ) : (
-                <p className="text-base text-muted">{t('common.tryAgain')}</p>
-              )}
-            </div>
+            <EmptyState
+              icon={status !== 'error' && search ? <SearchIcon /> : <BagIcon />}
+              title={status === 'error' ? t('common.error') : search ? t('common.noResults') : t('shop.noProducts')}
+              hint={status === 'error' ? undefined : t('common.tryAgain')}
+              action={
+                status === 'error' ? (
+                  <Button variant="secondary" size="lg" onClick={() => void load(true)}>
+                    {t('common.retry')}
+                  </Button>
+                ) : undefined
+              }
+              className="h-full min-h-[16rem]"
+            />
           ) : (
             <ul
               role="list"

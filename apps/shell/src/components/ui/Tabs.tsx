@@ -166,10 +166,15 @@ export function Tabs<K extends string = string>({
               SIZE[size],
               variant === 'pills' && 'rounded-md',
               variant === 'pills' &&
-                (active ? 'bg-text/10 text-text' : 'text-muted hover:bg-text/[0.05] hover:text-text'),
+                (active
+                  ? 'bg-text/10 text-text shadow-[inset_0_0_0_1px_rgb(var(--c-text)/0.08)]'
+                  : 'text-muted hover:bg-text/[0.05] hover:text-text'),
               variant === 'underline' && '-mb-px border-b-2 rounded-t-md',
+              // The accent, like the section bar of the top HUD: a white underline read as a stray border.
               variant === 'underline' &&
-                (active ? 'border-primary text-text' : 'border-transparent text-muted hover:text-text'),
+                (active
+                  ? 'border-accent text-text'
+                  : 'border-transparent text-muted hover:border-text/20 hover:text-text'),
               item.disabled && 'cursor-not-allowed opacity-40',
             )}
           >
