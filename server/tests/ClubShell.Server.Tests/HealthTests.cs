@@ -72,6 +72,12 @@ public sealed class HealthTests(LongClockServerFixture server) : IClassFixture<L
         ticket = Pc(await ExpectAsync(server, 200, HttpMethod.Get, "/health", cashier), hot.PcId).GetProperty("ticket");
         Assert.Equal((ticketId, "high", 95), (ticket.GetProperty("id").GetGuid(), ticket.GetProperty("severity").GetString(), ticket.GetProperty("params").GetProperty("temp").GetInt32()));
 
+        // The map's wrench: the worst open ticket per PC reaches the cash desk overview.
+        var marks = (await ExpectAsync(server, 200, HttpMethod.Get, "/overview", cashier)).GetProperty("repairs").EnumerateArray()
+            .ToDictionary(m => m.GetProperty("pcId").GetGuid(), m => m.GetProperty("severity").GetString());
+        Assert.Equal("high", marks[hot.PcId]);
+        Assert.True(marks.ContainsKey(worn.PcId));
+
         // autoMaintenance: the free PC is taken out of service, and resolving its ticket puts it back.
         await ExpectAsync(server, 200, HttpMethod.Patch, "/health/settings", owner, new { autoMaintenance = true });
         await worker.RunOnceAsync();
