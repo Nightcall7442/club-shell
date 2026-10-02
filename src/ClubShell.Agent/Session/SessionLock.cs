@@ -48,6 +48,7 @@ public sealed class SessionLock : IDisposable
     private readonly IOptionsMonitor<AgentSettings> _settings;
     private readonly ILogger<SessionLock> _logger;
     private readonly IIdleSignal? _idleSignal;
+    private readonly ITokenStore? _tokens;
     private readonly ConcurrentDictionary<Guid, string> _pinHashes = new();
     private readonly Queue<long> _failures = new();
     private readonly object _failuresGate = new();
@@ -62,7 +63,8 @@ public sealed class SessionLock : IDisposable
         IClock clock,
         IOptionsMonitor<AgentSettings> settings,
         ILogger<SessionLock> logger,
-        IIdleSignal? idleSignal = null)
+        IIdleSignal? idleSignal = null,
+        ITokenStore? tokens = null)
     {
         ArgumentNullException.ThrowIfNull(sessions);
         ArgumentNullException.ThrowIfNull(server);
@@ -79,6 +81,7 @@ public sealed class SessionLock : IDisposable
         _settings = settings;
         _logger = logger;
         _idleSignal = idleSignal;
+        _tokens = tokens;
         _sessions.Changed += OnSessionChanged;
         if (_idleSignal is not null)
         {
@@ -214,7 +217,8 @@ public sealed class SessionLock : IDisposable
 
     private async Task<bool> VerifyPasswordAsync(User user, string password, CancellationToken cancellationToken)
     {
-        if (_settings.CurrentValue.PcId is { } pcId)
+        // The PC id lives in the agent tokens (registration); agent.json has none.
+        if ((_settings.CurrentValue.PcId ?? _tokens?.Agent?.PcId) is { } pcId)
         {
             try
             {

@@ -7,6 +7,7 @@ using ClubShell.Contracts.Sessions;
 using ClubShell.Contracts.Wallet;
 using ClubShell.Core.Abstractions;
 using ClubShell.Core.Configuration;
+using ClubShell.Core.Security;
 using Microsoft.Extensions.Options;
 using PlaySession = ClubShell.Contracts.Sessions.Session;
 
@@ -49,6 +50,7 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
     private readonly IReadOnlyList<ISessionEventSink> _sinks;
     private readonly ILogger<SessionManager> _logger;
     private readonly SessionCleanup? _cleanup;
+    private readonly ITokenStore? _tokens;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly ConcurrentDictionary<Guid, Channel<SessionEvent>> _watchers = new();
 
@@ -75,7 +77,8 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
         IOptionsMonitor<AgentSettings> settings,
         IEnumerable<ISessionEventSink> sinks,
         ILogger<SessionManager> logger,
-        SessionCleanup? cleanup = null)
+        SessionCleanup? cleanup = null,
+        ITokenStore? tokens = null)
     {
         ArgumentNullException.ThrowIfNull(server);
         ArgumentNullException.ThrowIfNull(store);
@@ -92,6 +95,7 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
         _sinks = sinks.ToArray();
         _logger = logger;
         _cleanup = cleanup;
+        _tokens = tokens;
         _timer.Tick += OnTimerTick;
         _timer.Warning += OnTimerWarning;
         _timer.Expired += OnTimerExpired;
@@ -696,7 +700,8 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
 
     private async Task SyncCoreAsync(CancellationToken cancellationToken)
     {
-        var pcId = _settings.CurrentValue.PcId;
+        // The PC id lives in the agent tokens (registration); agent.json has none, so settings alone never synced.
+        var pcId = _settings.CurrentValue.PcId ?? _tokens?.Agent?.PcId;
         if (pcId is null)
         {
             return;
