@@ -84,12 +84,20 @@ async function signIn(page: Page, username: string, password: string): Promise<v
   await secret.press('Enter');
 }
 
-/** Tariff picker shown after login (no session yet) → "Start playing" → `/home`. */
+/** Tariff picker shown after a guest's login (no session yet) → "Start playing" → `/home`. */
 async function startSession(page: Page): Promise<void> {
   const picker = page.getByRole('dialog', { name: en('wallet.chooseTariff') });
   await expect(picker).toBeVisible();
   await picker.getByRole('button', { name: en('lock.startPlaying') }).click();
-  await expect(page).toHaveURL(/#\/home$/);
+  await playing(page);
+}
+
+/**
+ * A member with money on the balance (the mock's `demo`) plays at once: the cheapest tariff of the PC's zone starts
+ * without the picker, straight to `/home`.
+ */
+async function playing(page: Page, timeout?: number): Promise<void> {
+  await expect(page).toHaveURL(/#\/home$/, { timeout });
   await expect(sessionTimer(page)).toBeVisible();
 }
 
@@ -139,7 +147,7 @@ test.describe('lock screen', () => {
   test('correct credentials sign in and land on /home with the session timer', async ({ page }) => {
     await openLock(page);
     await signIn(page, DEMO_USER, DEMO_PASSWORD);
-    await startSession(page);
+    await playing(page);
 
     await expect(sessionTimer(page)).toHaveAttribute('aria-label', /\d{1,2}:\d{2}(:\d{2})?/);
     await expect(page.getByRole('button', { name: en('desktop.lock'), exact: true })).toBeVisible();
@@ -176,8 +184,8 @@ test.describe('lock screen', () => {
     await expect(page.getByText(en('lock.scanQr'))).toBeVisible();
     await expect(page.getByRole('img', { name: en('lock.qr') })).toBeVisible();
 
-    // The mock phone confirms a few seconds later; the shell signs in and asks for a tariff.
-    await expect(page.getByRole('dialog', { name: en('wallet.chooseTariff') })).toBeVisible({ timeout: 20_000 });
+    // The mock phone confirms a few seconds later; the shell signs the member in, who has money and plays at once.
+    await playing(page, 20_000);
   });
 
   test('QR tab renders an SVG QR code with a countdown', async ({ page }) => {
@@ -219,7 +227,7 @@ test.describe('lock screen', () => {
   test('locking from the top bar returns to /lock and unlocking restores the session', async ({ page }) => {
     await openLock(page);
     await signIn(page, DEMO_USER, DEMO_PASSWORD);
-    await startSession(page);
+    await playing(page);
 
     await page.getByRole('button', { name: en('desktop.lock'), exact: true }).click();
     await expect(page).toHaveURL(/#\/lock$/);
