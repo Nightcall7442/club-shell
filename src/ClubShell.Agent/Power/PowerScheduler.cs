@@ -49,6 +49,9 @@ public sealed class PowerScheduler : BackgroundService
     private DateOnly? _lastScheduledDate;
     private bool _deferralLogged;
 
+    /// <summary>Local time this scheduler started: a scheduled shutdown is due only if its moment came after it.</summary>
+    private readonly DateTime _startedLocal;
+
     /// <summary>Creates the scheduler.</summary>
     public PowerScheduler(PowerCommands commands, ISessionService sessions, IIdleMonitor idle, IPolicyEnforcer policies, IOptionsMonitor<AgentSettings> settings, IClock clock, ILogger<PowerScheduler> logger)
     {
@@ -66,6 +69,20 @@ public sealed class PowerScheduler : BackgroundService
         _settings = settings;
         _clock = clock;
         _logger = logger;
+        _startedLocal = clock.LocalNow.DateTime;
+    }
+
+    /// <summary>
+    /// Whether the daily shutdown at <paramref name="scheduled"/> is due at <paramref name="localNow"/>: its moment today
+    /// has passed by less than <see cref="ScheduledShutdownWindow"/>, it has not fired today, and it came while this agent
+    /// was running (<paramref name="runningSince"/>). The last condition is what keeps a PC switched on — or rebooted —
+    /// after 05:00 from turning itself off ~30 s after boot until the window closes: the fired date lives in memory only.
+    /// </summary>
+    public static bool IsScheduledShutdownDue(TimeOnly scheduled, DateTime localNow, DateTime runningSince, DateOnly? lastFired)
+    {
+        var today = DateOnly.FromDateTime(localNow);
+        var moment = today.ToDateTime(scheduled);
+        return localNow >= moment && localNow - moment < ScheduledShutdownWindow && lastFired != today && moment >= runningSince;
     }
 
     /// <summary>Local date on which the scheduled shutdown last fired.</summary>
@@ -109,9 +126,7 @@ public sealed class PowerScheduler : BackgroundService
         if (policy.ScheduledShutdown is { } scheduled)
         {
             var today = DateOnly.FromDateTime(localNow);
-            var time = TimeOnly.FromDateTime(localNow);
-            var due = time >= scheduled && time - scheduled < ScheduledShutdownWindow && _lastScheduledDate != today;
-            if (due)
+            if (IsScheduledShutdownDue(scheduled, localNow, _startedLocal, _lastScheduledDate))
             {
                 if (sessionOpen)
                 {
