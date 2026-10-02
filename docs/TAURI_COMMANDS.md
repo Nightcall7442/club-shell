@@ -241,6 +241,20 @@ the output device at the next start). Mouse values are applied without `SPIF_UPD
 
 `sys_set_volume` also applies the level the Agent confirmed to the default endpoint in the player's session (the Agent
 runs in session 0, where Core Audio usually has no endpoint).
+### 2.16 display (local, no IPC)
+
+Refresh rates of the player's monitors (`src-tauri/src/commands/display.rs`, registered in `lib.rs` next to the kiosk
+commands, so not in `COMMAND_NAMES`). Every command returns `DisplayInfo`: `{ index: number; device: string; primary:
+boolean; width: number; height: number; hz: number; rates: number[]; pending: { previousHz: number; revertAt: string } |
+null }`. `device` is the GDI name (`\\.\DISPLAY1`); `rates` are the driver's non-interlaced rates at the current
+resolution and depth, ascending, without the NTSC twin one below a listed rate (59 next to 60).
+
+| Command | TS signature | Args | Returns | Notes |
+|---------|--------------|------|---------|-------|
+| `display_list` | `api.display.list(): Promise<DisplayInfo[]>` | `{}` | `DisplayInfo[]` | |
+| `display_set_refresh_rate` | `api.display.setRefreshRate(device: string, hz: number): Promise<DisplayInfo>` | `{ device: string; hz: number }` | `DisplayInfo` with `pending` | `CDS_TEST`, then applied for the session only. Reverted by the Shell 15 s later (and on exit) unless confirmed. `validation` for a rate not in `rates`, `notFound` for an unknown device, `conflict` while another display waits for confirmation. Picking `previousHz` again cancels the change. |
+| `display_confirm` | `api.display.confirm(device: string): Promise<DisplayInfo>` | `{ device: string }` | `DisplayInfo` | Keeps the rate and saves it to the user's display settings (`CDS_UPDATEREGISTRY \| CDS_NORESET`, never `CDS_GLOBAL`). `notFound` when nothing is pending (already reverted). |
+| `display_revert` | `api.display.revert(device: string): Promise<DisplayInfo>` | `{ device: string }` | `DisplayInfo` | Puts `previousHz` back now (falls back to the saved mode); no-op when nothing is pending. |
 
 ---
 

@@ -86,6 +86,10 @@ pub fn run() {
             commands::pc::pc_audio_set_output,
             commands::pc::pc_gpu_panels,
             commands::pc::pc_gpu_panel_open,
+            commands::display::display_list,
+            commands::display::display_set_refresh_rate,
+            commands::display::display_confirm,
+            commands::display::display_revert,
         ))
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -152,6 +156,7 @@ pub fn shutdown(app: &AppHandle) {
 fn cleanup(state: &AppState) {
     state.kiosk().shutdown();
     state.agent.shutdown();
+    commands::display::revert_pending();
 }
 
 /// Reload (F5, Ctrl+R, Ctrl+Shift+R), find, print, zoom and the developer tools are WebView2's own chords, and the

@@ -459,6 +459,29 @@ export interface ShellConfig {
   devtools: boolean;
 }
 
+/** A refresh rate applied by `display_set_refresh_rate` that waits for `display_confirm`. */
+export interface DisplayPending {
+  /** Rate restored unless confirmed. */
+  previousHz: number;
+  /** ISO time the previous rate comes back on its own (local clock of this PC). */
+  revertAt: string;
+}
+
+/** One display with its refresh rates (`display_list`, `commands/display.rs`). */
+export interface DisplayInfo {
+  index: number;
+  /** GDI device name (`\\.\DISPLAY1`), the key of the other `display_*` commands. */
+  device: string;
+  primary: boolean;
+  width: number;
+  height: number;
+  /** Current refresh rate in Hz (0 when unknown). */
+  hz: number;
+  /** Selectable rates at the current resolution, ascending. */
+  rates: number[];
+  pending: DisplayPending | null;
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Typed command surface (one method per command in TAURI_COMMANDS.md §2)
 // ---------------------------------------------------------------------------------------------------------------------
@@ -601,6 +624,13 @@ export const api = {
     gpuPanels: (): Promise<GpuPanelInfo[]> => invoke('pc_gpu_panels'),
     openGpuPanel: (vendor: GpuVendor): Promise<void> =>
       invoke<null>('pc_gpu_panel_open', { vendor }).then(() => undefined),
+  display: {
+    list: (): Promise<DisplayInfo[]> => invoke('display_list'),
+    /** Mode switches blank the screen for a moment; the result carries the confirmation countdown. */
+    setRefreshRate: (device: string, hz: number): Promise<DisplayInfo> =>
+      invoke('display_set_refresh_rate', { device, hz }),
+    confirm: (device: string): Promise<DisplayInfo> => invoke('display_confirm', { device }),
+    revert: (device: string): Promise<DisplayInfo> => invoke('display_revert', { device }),
   },
 };
 

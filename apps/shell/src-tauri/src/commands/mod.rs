@@ -23,6 +23,7 @@
 pub mod apps;
 pub mod auth;
 pub mod chat;
+pub mod display;
 pub mod games;
 pub mod pc;
 pub mod session;
