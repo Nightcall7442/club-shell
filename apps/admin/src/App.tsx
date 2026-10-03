@@ -1,9 +1,11 @@
 /**
- * The console shell: PIN sign-in, then a top bar (club, clock, hall usage, shift, language, staff) and a sidebar of
- * sections the way Senet lays out its club console — the counter first, the owner's configuration below it. Cashiers
- * see the counter, shift, clients and stock; owners see everything. The section lives in the URL hash (`#/tariffs`).
+ * The console shell: PIN sign-in, then a top bar (club, clock, the shift chip, client search, hall usage, language,
+ * staff) and a sidebar of sections the way Senet lays out its club console — the counter first, the owner's
+ * configuration below it. Cashiers see the counter, shift, clients and stock; owners see everything. The section lives
+ * in the URL hash (`#/tariffs`, `#/clients/new`). Without an open shift the console asks to open one (`shift.tsx`);
+ * "/" jumps to the client search, whose rows top up a client from anywhere or show their PC on the map.
  */
-import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import {
   AdminError,
@@ -13,12 +15,16 @@ import {
   hasToken,
   setClubCode,
   setToken,
-  type Shift,
+  type ClientHit,
   type StaffMember,
 } from '@/api';
+import { GlobalSearch } from '@/clientSearch';
+import { isTyping, sheetOpen, showPc } from '@/desk';
 import { describe } from '@/errors';
 import { LANGS, dateLocale, setLang, t, useLang } from '@/i18n';
+import { TopUpSheet } from '@/paybox';
 import { useInstall } from '@/pwa';
+import { ShiftChip, ShiftProvider } from '@/shift';
 import { Button } from '@/ui';
 
 const MapPage = lazy(() => import('@/pages/MapPage'));
@@ -185,7 +191,8 @@ const GROUPS: { title: string; items: SectionDef[] }[] = [
 const ALL = GROUPS.flatMap((g) => g.items);
 
 function useHashSection(): [string, (id: string) => void] {
-  const read = (): string => window.location.hash.replace(/^#\/?/, '') || 'map';
+  // `#/clients/new` is the Клиенты section; the page reads the rest itself.
+  const read = (): string => window.location.hash.replace(/^#\/?/, '').split('/')[0] || 'map';
   const [id, setId] = useState(read);
   useEffect(() => {
     const on = (): void => setId(read());
@@ -199,7 +206,7 @@ function useHashSection(): [string, (id: string) => void] {
 // Sign-in
 // ---------------------------------------------------------------------------------------------------------------------
 
-function Login({ onDone }: { onDone: (staff: StaffMember, shift: Shift | null) => void }): JSX.Element {
+function Login({ onDone }: { onDone: (staff: StaffMember) => void }): JSX.Element {
   useLang();
   const [pin, setPin] = useState('');
   const [clubCode, setClubCodeState] = useState(getClubCode);
@@ -214,7 +221,7 @@ function Login({ onDone }: { onDone: (staff: StaffMember, shift: Shift | null) =
       const r = await clubApi.login(value, code || undefined);
       setClubCode(code);
       setToken(r.token);
-      onDone(r.staff, r.shift);
+      onDone(r.staff);
     } catch (e) {
       const needsCode = e instanceof AdminError && e.details?.['field'] === 'clubCode';
       setError(needsCode ? t('Введите код клуба') : describe(e));
@@ -352,22 +359,21 @@ function InstallButton({ className }: { className?: string }): JSX.Element | nul
 export function App(): JSX.Element {
   const lang = useLang();
   const [staff, setStaff] = useState<StaffMember | null>(null);
-  const [shift, setShift] = useState<Shift | null>(null);
   const [checking, setChecking] = useState(hasToken());
   const [section, go] = useHashSection();
   const [usage, setUsage] = useState<{ busy: number; total: number } | null>(null);
   const [now, setNow] = useState(new Date());
   // The club this console is signed in to (a server may hold several): its display name from the club settings.
   const [clubName, setClubName] = useState<string | null>(null);
+  // A client being topped up from the top-bar search (on any page, with or without a PC).
+  const [topUpFor, setTopUpFor] = useState<ClientHit | null>(null);
+  const search = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!hasToken()) return;
     clubApi
       .me()
-      .then((r) => {
-        setStaff(r.staff);
-        setShift(r.shift);
-      })
+      .then((r) => setStaff(r.staff))
       .catch(() => setToken(null))
       .finally(() => setChecking(false));
   }, []);
@@ -382,12 +388,31 @@ export function App(): JSX.Element {
     try {
       const o = await adminApi.overview();
       setUsage({ busy: o.club.total - o.club.free, total: o.club.total });
-      const me = await clubApi.me();
-      setShift(me.shift);
     } catch {
       // the pages show their own errors
     }
   }, []);
+
+  // "/" — the client search, from anywhere but a field being typed in or a sheet on top. The same key on the Russian
+  // layout types "." (`code` Slash), so the key counts, not the character.
+  useEffect(() => {
+    if (!staff) return undefined;
+    const on = (e: KeyboardEvent): void => {
+      const slash = e.key === '/' || (e.code === 'Slash' && !e.shiftKey);
+      if (!slash || isTyping(e) || sheetOpen() || e.ctrlKey || e.metaKey || e.altKey) return;
+      e.preventDefault();
+      search.current?.focus();
+    };
+    window.addEventListener('keydown', on);
+    return () => window.removeEventListener('keydown', on);
+  }, [staff]);
+
+  const signOut = (): void => {
+    // Revokes the token on the server (sent before it is dropped below); signing out does not wait for it.
+    void clubApi.logout().catch(() => undefined);
+    setToken(null);
+    setStaff(null);
+  };
 
   useEffect(() => {
     if (!staff) return;
@@ -409,15 +434,7 @@ export function App(): JSX.Element {
   }, [staff, refreshTop]);
 
   if (checking) return <div className="h-screen" />;
-  if (!staff)
-    return (
-      <Login
-        onDone={(s, sh) => {
-          setStaff(s);
-          setShift(sh);
-        }}
-      />
-    );
+  if (!staff) return <Login onDone={setStaff} />;
 
   const allowed = ALL.filter((s) => !s.ownerOnly || staff.role === 'owner');
   const current = allowed.find((s) => s.id === section) ?? allowed[0];
@@ -425,120 +442,116 @@ export function App(): JSX.Element {
   const locale = dateLocale();
 
   return (
-    <div className="grid h-screen grid-cols-[15rem_minmax(0,1fr)] grid-rows-[4rem_minmax(0,1fr)]">
-      {/* Brand cell (top left), like Senet's red block — here the club mark in the accent */}
-      <div className="flex items-center gap-3 border-b border-r border-line px-5">
-        <span aria-hidden="true" className="h-5 w-5 shrink-0 rotate-45 border border-accent/70" />
-        <div className="min-w-0 leading-tight">
-          <div className="truncate font-display text-sm tracking-tight">{clubName ?? 'ClubShell'}</div>
-          <div className="label">{staff.role === 'owner' ? t('Владелец') : t('Касса')}</div>
+    <ShiftProvider key={staff.id} staff={staff} onSignOut={signOut}>
+      <div className="grid h-screen grid-cols-[15rem_minmax(0,1fr)] grid-rows-[4rem_minmax(0,1fr)]">
+        {/* Brand cell (top left), like Senet's red block — here the club mark in the accent */}
+        <div className="flex items-center gap-3 border-b border-r border-line px-5">
+          <span aria-hidden="true" className="h-5 w-5 shrink-0 rotate-45 border border-accent/70" />
+          <div className="min-w-0 leading-tight">
+            <div className="truncate font-display text-sm tracking-tight">{clubName ?? 'ClubShell'}</div>
+            <div className="label">{staff.role === 'owner' ? t('Владелец') : t('Касса')}</div>
+          </div>
         </div>
-      </div>
 
-      {/* Top bar */}
-      <header className="flex min-w-0 items-center gap-4 border-b border-line px-6 xl:gap-6">
-        <div className="flex items-baseline gap-3">
-          <span className="num-dot text-2xl leading-none">
-            {now.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}
-          </span>
-          <span className="hidden whitespace-nowrap text-sm text-muted xl:inline">
-            {now.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' })}
-          </span>
-        </div>
-        <span className="h-8 w-px bg-line" />
-        <button
-          type="button"
-          onClick={() => go('shift')}
-          className="focus-ring flex min-w-0 items-center gap-2 whitespace-nowrap rounded-md px-2 py-1 text-sm hover:bg-white/[0.04]"
-        >
-          <span className={clsx('h-2 w-2 shrink-0 rounded-full', shift ? 'bg-success' : 'bg-danger')} />
-          {shift ? t('Смена открыта · {name}', { name: shift.staffName }) : t('Смена не открыта')}
-        </button>
-        <div className="ml-auto flex items-center gap-5">
-          {usage && (
-            <div className="flex items-baseline gap-3">
-              <span className="label hidden whitespace-nowrap xl:inline">{t('Загрузка зала')}</span>
-              <span className="num-dot text-2xl leading-none">
-                <span className="text-accent">{String(usage.busy).padStart(2, '0')}</span>
-                <span className="text-muted">/{String(usage.total).padStart(2, '0')}</span>
-              </span>
-            </div>
-          )}
+        {/* Top bar */}
+        <header className="flex min-w-0 items-center gap-4 border-b border-line px-6 xl:gap-6">
+          <div className="flex items-baseline gap-3">
+            <span className="num-dot text-2xl leading-none">
+              {now.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}
+            </span>
+            <span className="hidden whitespace-nowrap text-sm text-muted xl:inline">
+              {now.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' })}
+            </span>
+          </div>
           <span className="h-8 w-px bg-line" />
-          <div className="flex rounded-md border border-line p-0.5">
-            {LANGS.map((l) => (
-              <button
-                key={l}
-                type="button"
-                aria-pressed={l === lang}
-                onClick={() => setLang(l)}
-                className={clsx(
-                  'focus-ring h-7 rounded px-2 font-mono text-[0.68rem] uppercase tracking-[0.12em]',
-                  l === lang ? 'bg-accent/15 text-accent' : 'text-muted hover:text-text',
-                )}
-              >
-                {l}
-              </button>
-            ))}
-          </div>
-          <div className="text-right leading-tight">
-            <div className="text-sm">{staff.name}</div>
-            <button
-              type="button"
-              className="focus-ring label hover:text-text"
-              onClick={() => {
-                // Revokes the token on the server (sent before it is dropped below); signing out does not wait for it.
-                void clubApi.logout().catch(() => undefined);
-                setToken(null);
-                setStaff(null);
-              }}
-            >
-              {t('Выйти')}
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* Sidebar */}
-      <nav aria-label={t('Разделы')} className="flex flex-col gap-5 overflow-y-auto border-r border-line py-4">
-        {GROUPS.map((g) => {
-          const items = g.items.filter((s) => !s.ownerOnly || staff.role === 'owner');
-          if (items.length === 0) return null;
-          return (
-            <div key={g.title} className="flex flex-col">
-              <span className="label px-5 pb-2">{t(g.title)}</span>
-              {items.map((s) => {
-                const active = s.id === current?.id;
-                return (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => go(s.id)}
-                    aria-current={active ? 'page' : undefined}
-                    className={clsx(
-                      'focus-ring flex h-11 items-center gap-3 border-l-2 px-5 text-left text-sm transition-colors [&>svg]:h-5 [&>svg]:w-5 [&>svg]:shrink-0',
-                      active
-                        ? 'border-accent bg-accent/[0.08] text-text'
-                        : 'border-transparent text-muted hover:bg-white/[0.03] hover:text-text',
-                    )}
-                  >
-                    {s.icon}
-                    <span className="truncate">{t(s.title)}</span>
-                  </button>
-                );
-              })}
+          <ShiftChip onClick={() => go('shift')} />
+          <GlobalSearch
+            ref={search}
+            onTopUp={setTopUpFor}
+            onShowPc={(hit) => {
+              if (!hit.playing) return;
+              go('map');
+              showPc(hit.playing.pcId);
+            }}
+          />
+          <div className="ml-auto flex items-center gap-5">
+            {usage && (
+              <div className="flex items-baseline gap-3">
+                <span className="label hidden whitespace-nowrap xl:inline">{t('Загрузка зала')}</span>
+                <span className="num-dot text-2xl leading-none">
+                  <span className="text-accent">{String(usage.busy).padStart(2, '0')}</span>
+                  <span className="text-muted">/{String(usage.total).padStart(2, '0')}</span>
+                </span>
+              </div>
+            )}
+            <span className="h-8 w-px bg-line" />
+            <div className="flex rounded-md border border-line p-0.5">
+              {LANGS.map((l) => (
+                <button
+                  key={l}
+                  type="button"
+                  aria-pressed={l === lang}
+                  onClick={() => setLang(l)}
+                  className={clsx(
+                    'focus-ring h-7 rounded px-2 font-mono text-[0.68rem] uppercase tracking-[0.12em]',
+                    l === lang ? 'bg-accent/15 text-accent' : 'text-muted hover:text-text',
+                  )}
+                >
+                  {l}
+                </button>
+              ))}
             </div>
-          );
-        })}
-        <InstallButton className="mt-auto h-11 border-l-2 border-transparent px-5" />
-      </nav>
+            <div className="text-right leading-tight">
+              <div className="text-sm">{staff.name}</div>
+              <button type="button" className="focus-ring label hover:text-text" onClick={signOut}>
+                {t('Выйти')}
+              </button>
+            </div>
+          </div>
+        </header>
 
-      <main className="min-h-0 overflow-y-auto p-6">
-        <Suspense fallback={null}>
-          <Page key={`${current?.id}-${lang}`} isOwner={staff.role === 'owner'} />
-        </Suspense>
-      </main>
-    </div>
+        {/* Sidebar */}
+        <nav aria-label={t('Разделы')} className="flex flex-col gap-5 overflow-y-auto border-r border-line py-4">
+          {GROUPS.map((g) => {
+            const items = g.items.filter((s) => !s.ownerOnly || staff.role === 'owner');
+            if (items.length === 0) return null;
+            return (
+              <div key={g.title} className="flex flex-col">
+                <span className="label px-5 pb-2">{t(g.title)}</span>
+                {items.map((s) => {
+                  const active = s.id === current?.id;
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => go(s.id)}
+                      aria-current={active ? 'page' : undefined}
+                      className={clsx(
+                        'focus-ring flex h-11 items-center gap-3 border-l-2 px-5 text-left text-sm transition-colors [&>svg]:h-5 [&>svg]:w-5 [&>svg]:shrink-0',
+                        active
+                          ? 'border-accent bg-accent/[0.08] text-text'
+                          : 'border-transparent text-muted hover:bg-white/[0.03] hover:text-text',
+                      )}
+                    >
+                      {s.icon}
+                      <span className="truncate">{t(s.title)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })}
+          <InstallButton className="mt-auto h-11 border-l-2 border-transparent px-5" />
+        </nav>
+
+        <main className="min-h-0 overflow-y-auto p-6">
+          <Suspense fallback={null}>
+            <Page key={`${current?.id}-${lang}`} isOwner={staff.role === 'owner'} />
+          </Suspense>
+        </main>
+      </div>
+      {topUpFor && <TopUpSheet payee={topUpFor} onClose={() => setTopUpFor(null)} onDone={() => void refreshTop()} />}
+    </ShiftProvider>
   );
 }
 

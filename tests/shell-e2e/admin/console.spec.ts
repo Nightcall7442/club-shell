@@ -2,6 +2,8 @@
  * Admin console (`apps/admin`) end-to-end against a throwaway mock server started with `--reset` on :8091
  * (playwright.config.ts, project `admin`). Seeded staff: owner PIN `0000`, cashier PIN `1111`. Tests share one
  * database and run in file order, so each one sets up what it checks instead of relying on another's leftovers.
+ * Money needs an open cash shift and the console opens with a shift gate without one, so {@link signIn} opens a shift
+ * through the API first unless the test is about the gate itself.
  */
 import { createHash, createHmac } from 'node:crypto';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
@@ -12,7 +14,32 @@ const CASHIER_PIN = '1111';
 /** ADMIN_SERVER=real: the console runs against the central server (playwright.config.ts), not the mock. */
 const REAL = process.env['ADMIN_SERVER'] === 'real';
 
-async function signIn(page: Page, pin: string): Promise<void> {
+/** Opens a shift through the API when none is open, so the console's shift gate does not cover the page. */
+async function ensureShift(request: APIRequestContext): Promise<void> {
+  const headers = auth(await tokenFor(request, OWNER_PIN));
+  const state = (await (await request.get(`${API}/admin/shift`, { headers })).json()) as { shift: unknown };
+  if (state.shift) return;
+  const res = await request.post(`${API}/admin/shift/open`, { headers, data: { openingCash: 0 } });
+  expect(res.ok(), await res.text()).toBeTruthy();
+}
+
+/** Closes the open shift, if any, with exactly the cash it expects (so no shortfall is flagged). */
+async function closeShift(request: APIRequestContext): Promise<void> {
+  const headers = auth(await tokenFor(request, OWNER_PIN));
+  const state = (await (await request.get(`${API}/admin/shift`, { headers })).json()) as {
+    shift: { openingCash: number } | null;
+    x: { topUpCash: number } | null;
+  };
+  if (!state.shift) return;
+  const res = await request.post(`${API}/admin/shift/close`, {
+    headers,
+    data: { closingCash: state.shift.openingCash + (state.x?.topUpCash ?? 0) },
+  });
+  expect(res.ok(), await res.text()).toBeTruthy();
+}
+
+async function signIn(page: Page, pin: string, { shift = true }: { shift?: boolean } = {}): Promise<void> {
+  if (shift) await ensureShift(page.request);
   await page.goto('/');
   await page.evaluate(() => localStorage.clear());
   await page.reload();
@@ -87,8 +114,14 @@ test('the language switch translates the console and survives a reload', async (
 });
 
 test('a shift opens with starting cash and closes with the counted difference', async ({ page }) => {
-  await signIn(page, OWNER_PIN);
-  await page.goto('/#/shift');
+  await closeShift(page.request);
+  await signIn(page, OWNER_PIN, { shift: false });
+  // No shift: the console asks for one at once; the owner may put it off and open it on the Смена page.
+  const gate = page.getByRole('dialog', { name: 'Открыть смену' });
+  await expect(gate).toBeVisible();
+  await gate.getByRole('button', { name: 'Позже' }).click();
+  await expect(gate).toHaveCount(0);
+  await nav(page).getByRole('button', { name: 'Смена', exact: true }).click();
   await page.getByLabel('Наличные в кассе на начало').fill('100000');
   await page.getByRole('button', { name: 'Открыть смену' }).click();
   await expect(page.getByText('Смена открыта')).toBeVisible();
@@ -420,4 +453,127 @@ test('a client registered at the counter signs in on a PC with the issued passwo
   const second = (await issued.textContent()) ?? '';
   expect(await login({ kind: 'password', username, password: first })).toBe(401);
   expect(await login({ kind: 'password', username, password: second })).toBe(200);
+});
+
+test('a cashier without an open shift has to open one, with the float the last shift closed with', async ({
+  page,
+  request,
+}) => {
+  const headers = auth(await tokenFor(request, OWNER_PIN));
+  // The last closed shift counted 77 000 in the drawer.
+  await closeShift(request);
+  expect(
+    (await request.post(`${API}/admin/shift/open`, { headers, data: { openingCash: 7_700_000 } })).ok(),
+  ).toBeTruthy();
+  expect(
+    (await request.post(`${API}/admin/shift/close`, { headers, data: { closingCash: 7_700_000 } })).ok(),
+  ).toBeTruthy();
+
+  // Without a shift the counter takes no money.
+  const overview = (await (await request.get(`${API}/admin/overview`, { headers })).json()) as {
+    users: { id: string }[];
+  };
+  const refused = await request.post(`${API}/admin/wallet/topup`, {
+    headers,
+    data: { userId: overview.users[0]!.id, amount: 1_000_000, method: 'cash' },
+  });
+  expect(refused.status()).toBe(409);
+  expect(((await refused.json()) as { error: { details: { reason: string } } }).error.details.reason).toBe(
+    'shiftClosed',
+  );
+
+  await signIn(page, CASHIER_PIN, { shift: false });
+  const gate = page.getByRole('dialog', { name: 'Открыть смену' });
+  await expect(gate).toBeVisible();
+  // A cashier cannot put it off, only sign out.
+  await expect(gate.getByRole('button', { name: 'Позже' })).toHaveCount(0);
+  await expect(gate.getByRole('button', { name: 'Выйти' })).toBeVisible();
+  await expect(gate.getByLabel('Наличные в кассе на начало')).toHaveValue('77000');
+  await gate.getByRole('button', { name: 'Открыть смену' }).click();
+  await expect(gate).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Смена · Кассир Азиз/ })).toBeVisible();
+
+  const state = (await (await request.get(`${API}/admin/shift`, { headers })).json()) as {
+    shift: { staffName: string; openingCash: number } | null;
+  };
+  expect(state.shift?.staffName).toBe('Кассир Азиз');
+  expect(state.shift?.openingCash).toBe(7_700_000);
+});
+
+test('a typed amount topped up by card from the client search lands in the X-report as card', async ({
+  page,
+  request,
+}) => {
+  const headers = auth(await tokenFor(request, OWNER_PIN));
+  const username = `e2e-card-${Date.now()}`;
+  const created = await request.post(`${API}/admin/clients`, {
+    headers,
+    data: { username, displayName: 'E2E Карта' },
+  });
+  expect(created.ok()).toBeTruthy();
+  // A fresh shift: its X-report holds only this top-up.
+  await closeShift(request);
+  await signIn(page, CASHIER_PIN);
+
+  // "/" jumps to the client search; the row's "Пополнить" opens the pay box without any PC.
+  await expect(page.getByRole('heading', { name: 'Карта зала' })).toBeVisible();
+  await page.keyboard.press('/');
+  await expect(page.getByRole('combobox', { name: 'Поиск клиента' })).toBeFocused();
+  await page.keyboard.type(username);
+  await page.getByRole('option').filter({ hasText: username }).getByRole('button', { name: 'Пополнить' }).click();
+
+  const sheet = page.getByRole('dialog', { name: 'Пополнить · E2E Карта' });
+  const amount = sheet.getByLabel('Сумма');
+  await amount.fill('45000');
+  await expect(amount).toHaveValue('45 000');
+  // The method button is the confirmation.
+  await sheet.getByRole('button', { name: /^Карта/ }).click();
+  await expect(sheet.getByRole('status')).toContainText(/Баланс пополнен · 45\s000 сум · Карта/);
+
+  const x = (await (await request.get(`${API}/admin/shift`, { headers })).json()) as {
+    x: { topUpCash: number; topUpOther: number; topUpByMethod: Record<string, number> };
+  };
+  expect(x.x.topUpByMethod['card']).toBe(4_500_000);
+  expect(x.x.topUpByMethod['cash']).toBe(0);
+  expect(x.x.topUpCash).toBe(0);
+  expect(x.x.topUpOther).toBe(4_500_000);
+  // The top-bar chip counts it as cashless.
+  await expect(page.getByRole('button', { name: /безнал 45\s000/ })).toBeVisible();
+});
+
+test('a client is seated from the map: the pay box takes what the balance lacks, and ending asks first', async ({
+  page,
+  request,
+}) => {
+  const headers = auth(await tokenFor(request, OWNER_PIN));
+  const username = `e2e-seat-${Date.now()}`;
+  expect(
+    (await request.post(`${API}/admin/clients`, { headers, data: { username, displayName: 'E2E Посадка' } })).ok(),
+  ).toBeTruthy();
+  const overview = (await (await request.get(`${API}/admin/overview`, { headers })).json()) as {
+    seats: { pc: { id: string; number: number; status: string }; session: unknown }[];
+  };
+  const free = overview.seats.find((s) => s.pc.status === 'free' && !s.session)!;
+  await signIn(page, CASHIER_PIN);
+
+  // A PC by its number: digits, then Enter.
+  await expect(page.locator(`#seat-${free.pc.id}`)).toBeVisible();
+  await page.keyboard.type(String(free.pc.number));
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { name: /Посадить на/ })).toBeVisible();
+
+  await page.getByRole('combobox', { name: 'Кто' }).fill(username);
+  await page.getByRole('option').filter({ hasText: username }).click();
+  // A new client has nothing on the balance: the pay box holds the price and its button seats the client.
+  await page.getByRole('button', { name: /^Посадить · Наличные/ }).click();
+  await expect(page.getByText(/Сеанс открыт/)).toBeVisible();
+
+  await page.getByRole('button', { name: 'Завершить сеанс', exact: true }).click();
+  const confirm = page.getByRole('dialog', { name: /Завершить сеанс/ });
+  await expect(confirm.getByText('Неиспользованное время вернётся на баланс')).toBeVisible();
+  await confirm.getByRole('button', { name: 'Завершить сеанс', exact: true }).click();
+  await expect(confirm).toHaveCount(0);
+  // What the server returned stays in the panel after the PC frees up.
+  await expect(page.getByText(/Сеанс завершён/)).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Посадить на/ })).toBeVisible();
 });

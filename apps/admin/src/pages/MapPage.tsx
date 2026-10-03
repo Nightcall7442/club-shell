@@ -1,20 +1,44 @@
 /**
- * The counter ("Карта"): the hall map as strict numbered cells per zone with a status legend that counts, and the
- * selected seat on the right. Everything a cashier does at
- * the desk — open time, add time, end a session, top up a wallet, message or lock a PC — is one click from that panel.
+ * The counter ("Карта"): the hall map as numbered tiles per zone — PC number, who is on it, time left — under a header
+ * that counts the busy seats and filters the hall (free, ending soon, postpaid, repair, offline), and the selected seat
+ * on the right. Seating a client, extending, topping up and ending a session all happen in that panel; every money step
+ * ends in the pay box (`paybox.tsx`), whose payment-method button is also the confirmation. Ending a session asks
+ * first and then shows what the server refunded or charged. Keys: digits then Enter select a PC by number, F2 tops up
+ * the selected client, Esc closes the open sheet, then the panel.
  * Polls `/admin/overview` every 2 s (the real console would follow the server's WebSocket).
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
-import type { Session } from '@clubshell/contracts';
-import { adminApi, clubApi, type Member, type Overview, type PriceQuote, type Seat } from '@/api';
+import type { Money, Session } from '@clubshell/contracts';
+import {
+  adminApi,
+  clubApi,
+  type ClientHit,
+  type Member,
+  type Overview,
+  type PriceQuote,
+  type Seat,
+  type SeatUser,
+} from '@/api';
+import { ClientPicker, pcLabel } from '@/clientSearch';
+import { isTyping, onShowPc, sheetOpen } from '@/desk';
 import { describe } from '@/errors';
 import { t } from '@/i18n';
 import { duration, minutesLabel, money } from '@/format';
+import { PayBox, ShiftClosedNote, TopUpSheet, useShiftClosed, type Payee } from '@/paybox';
+import { useShift } from '@/shift';
+import { Button, Field, Kbd, Note, Sheet, inputCls } from '@/ui';
 
 const POLL_MS = 2000;
 const MINUTE_PRESETS = [30, 60, 120, 180];
-const TOPUP_PRESETS = [20_000, 50_000, 100_000, 200_000];
+/** Red pulse on a tile. */
+const WARN_SEC = 5 * 60;
+/** The "Заканчиваются" filter. */
+const ENDING_SEC = 10 * 60;
+/** Typed PC digits are forgotten after this pause. */
+const DIGITS_MS = 2500;
+
+type NoteState = { text: string; tone: 'ok' | 'err' } | null;
 
 const STATUS: Record<Seat['pc']['status'], { label: string; short: string; dot: string; cell: string }> = {
   free: { label: 'Свободен', short: 'своб.', dot: 'bg-success', cell: 'border-success/40 text-text' },
@@ -31,6 +55,39 @@ const STATUS: Record<Seat['pc']['status'], { label: string; short: string; dot: 
 };
 
 const LEGEND_ORDER: Seat['pc']['status'][] = ['free', 'busy', 'booked', 'locked', 'maintenance', 'offline'];
+
+/** Who is on the seat, for the tile's bottom bar. */
+type Kind = 'member' | 'guest' | 'postpaid' | 'free';
+
+const KIND_BAR: Record<Kind, string> = {
+  member: 'bg-accent',
+  guest: 'bg-warning',
+  postpaid: 'bg-fuchsia-400',
+  free: 'bg-transparent',
+};
+
+function kindOf(seat: Seat): Kind {
+  if (!seat.session) return 'free';
+  if (!seat.session.isPrepaid) return 'postpaid';
+  return seat.user?.role === 'guest' ? 'guest' : 'member';
+}
+
+type Filter = 'free' | 'ending' | 'postpaid' | 'repair' | 'offline';
+
+const FILTERS: { id: Filter; label: string; test: (s: Seat, repair: boolean) => boolean }[] = [
+  { id: 'free', label: 'Свободны', test: (s) => s.pc.status === 'free' && !s.session },
+  {
+    id: 'ending',
+    label: 'Заканчиваются ≤10 мин',
+    test: (s) => {
+      const left = secondsLeft(s.session);
+      return s.session !== null && s.session.isPrepaid && left >= 0 && left <= ENDING_SEC;
+    },
+  },
+  { id: 'postpaid', label: 'Постоплата', test: (s) => s.session !== null && !s.session.isPrepaid },
+  { id: 'repair', label: 'Ремонт', test: (s, repair) => repair || s.pc.status === 'maintenance' },
+  { id: 'offline', label: 'Офлайн', test: (s) => s.pc.status === 'offline' },
+];
 
 /** `1.0.15` → [1, 0, 15]; anything unparsable sorts first. */
 function versionParts(v: string | undefined): number[] {
@@ -60,154 +117,274 @@ function secondsLeft(s: Session | null): number {
   return s.endsAt ? Math.max(0, Math.round((Date.parse(s.endsAt) - Date.now()) / 1000)) : s.secondsLeft;
 }
 
+const uzs = (minor: number): Money => ({ amount: minor, currency: 'UZS' });
+
+function clock(iso: string): string {
+  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+/** A seat's client as the panel names them: guests are "Гость", not their technical account name. */
+function nameOf(user: SeatUser): string {
+  return user.role === 'guest' ? t('Гость') : user.displayName;
+}
+
+/** The sheet open over the map: one at a time. */
+type SheetState =
+  | { kind: 'topup'; payee: Payee; initial?: number; title?: string }
+  | { kind: 'extend' }
+  | { kind: 'end' }
+  | null;
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Pieces
 // ---------------------------------------------------------------------------------------------------------------------
 
-function Button({
-  children,
-  variant = 'secondary',
-  ...rest
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
-}): JSX.Element {
+function Wrench({ severity }: { severity: 'high' | 'medium' }): JSX.Element {
   return (
-    <button
-      type="button"
-      {...rest}
-      className={clsx(
-        'focus-ring inline-flex h-10 select-none items-center justify-center gap-2 whitespace-nowrap rounded-md px-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40',
-        variant === 'primary' && 'cut-corners rounded-none text-on-accent hover:brightness-110',
-        variant === 'secondary' && 'choice',
-        variant === 'ghost' && 'text-muted hover:bg-white/[0.06] hover:text-text',
-        variant === 'danger' && 'text-danger hover:bg-danger/10',
-        rest.className,
-      )}
+    <svg
+      viewBox="0 0 24 24"
+      aria-label={t('Нужен ремонт')}
+      className={clsx('h-3.5 w-3.5', severity === 'high' ? 'text-danger' : 'text-warning')}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
     >
-      {children}
-    </button>
+      <path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4 2.6-2.6z" />
+    </svg>
   );
 }
 
+function Lock(): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-label={t('Заблокирован')}
+      className="h-3.5 w-3.5 text-danger"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3" />
+    </svg>
+  );
+}
+
+/** Three lines: the PC number, who is on it, the time left (or the running bill of a postpaid session). */
 function SeatTile({
   seat,
   selected,
+  dimmed,
   onSelect,
-  tick,
   repair,
 }: {
   seat: Seat;
   selected: boolean;
+  dimmed: boolean;
   onSelect: () => void;
-  tick: number;
   /** Worst open repair ticket on this PC (from "Состояние ПК"). */
   repair?: 'high' | 'medium';
 }): JSX.Element {
-  void tick;
   const s = STATUS[seat.pc.status];
+  const kind = kindOf(seat);
   const left = secondsLeft(seat.session);
-  const warn = seat.session !== null && left >= 0 && left <= 5 * 60;
+  const warn = seat.session !== null && seat.session.isPrepaid && left >= 0 && left <= WARN_SEC;
   return (
     <button
       type="button"
+      id={`seat-${seat.pc.id}`}
       onClick={onSelect}
       aria-pressed={selected}
-      title={`${seat.pc.name} · ${t(s.label)}${seat.user ? ` · ${seat.user.displayName}` : ''}${repair ? ` · ${t('Нужен ремонт')}` : ''}`}
+      title={`${seat.pc.name} · ${t(s.label)}${seat.user ? ` · ${nameOf(seat.user)}` : ''}${repair ? ` · ${t('Нужен ремонт')}` : ''}`}
       className={clsx(
-        'focus-ring relative flex aspect-square flex-col items-center justify-center gap-1.5 rounded-md border bg-bg text-center transition-colors hover:bg-white/[0.04]',
+        'focus-ring relative flex h-[5.75rem] flex-col justify-between overflow-hidden rounded-md border bg-bg px-2.5 pb-2.5 pt-2 text-left transition-[background-color,opacity] hover:bg-white/[0.04]',
         s.cell,
         selected && 'ring-2 ring-accent ring-offset-2 ring-offset-surface',
+        dimmed && 'opacity-25',
       )}
     >
-      <span className="num-dot text-[1.6rem] leading-none">{String(seat.pc.number).padStart(2, '0')}</span>
+      <span className="flex items-start justify-between gap-1">
+        <span className="num-dot text-[1.6rem] leading-none">{String(seat.pc.number).padStart(2, '0')}</span>
+        <span className="flex items-center gap-1">
+          {seat.pc.status === 'locked' && <Lock />}
+          {repair && <Wrench severity={repair} />}
+        </span>
+      </span>
+      <span className="block truncate text-xs leading-tight text-text">{seat.user ? nameOf(seat.user) : ' '}</span>
       {seat.session ? (
-        <span className={clsx('tnum font-mono text-[0.68rem] leading-none', warn ? 'text-danger' : 'text-muted')}>
-          {left < 0 ? '∞' : duration(left)}
+        <span
+          className={clsx(
+            'tnum block truncate font-mono text-[0.7rem] leading-none',
+            warn ? 'font-semibold text-danger' : 'text-muted',
+          )}
+        >
+          {seat.session.isPrepaid ? duration(left) : `∞ ${money(seat.session.cost)}`}
         </span>
       ) : (
-        <span className="font-mono text-[0.62rem] uppercase leading-none tracking-[0.1em] text-muted">
+        <span className="block font-mono text-[0.62rem] uppercase leading-none tracking-[0.1em] text-muted">
           {t(s.short)}
         </span>
       )}
-      {warn && <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 animate-pulse rounded-full bg-danger" />}
-      {repair && (
-        <svg
-          viewBox="0 0 24 24"
-          aria-label={t('Нужен ремонт')}
-          className={clsx('absolute left-1.5 top-1.5 h-3 w-3', repair === 'high' ? 'text-danger' : 'text-warning')}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4 2.6-2.6z" />
-        </svg>
-      )}
+      <span
+        aria-hidden="true"
+        className={clsx('absolute inset-x-0 bottom-0 h-[3px]', warn ? 'animate-pulse bg-danger' : KIND_BAR[kind])}
+      />
     </button>
   );
 }
-
-function Field({ label, children }: { label: string; children: React.ReactNode }): JSX.Element {
-  return (
-    <label className="flex flex-col gap-1.5">
-      <span className="label">{label}</span>
-      {children}
-    </label>
-  );
-}
-
-const inputCls =
-  'focus-ring h-10 w-full rounded-md border border-line bg-bg px-3 text-sm text-text placeholder:text-muted';
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Seat panel
 // ---------------------------------------------------------------------------------------------------------------------
 
+/** The busy seat's client as the lookup knows them: phone tail and bonus (the overview has neither). */
+function useClientHit(user: SeatUser | null, username: string | undefined, version: number): ClientHit | null {
+  const [hit, setHit] = useState<ClientHit | null>(null);
+  const id = user?.id ?? null;
+  const guest = user?.role === 'guest';
+  const q = username ?? user?.displayName ?? '';
+  useEffect(() => {
+    setHit(null);
+    if (!id || guest) return undefined;
+    let alive = true;
+    adminApi
+      .lookupClients(q)
+      .then((r) => alive && setHit(r.items.find((x) => x.id === id) ?? null))
+      .catch(() => alive && setHit(null));
+    return () => {
+      alive = false;
+    };
+  }, [id, guest, q, version]);
+  return hit;
+}
+
+/** "К оплате N · на балансе M · доплата K". */
+function PaySummary({ price, balance }: { price: number; balance: number }): JSX.Element {
+  const shortfall = Math.max(0, price - balance);
+  return (
+    <dl className="grid grid-cols-3 divide-x divide-line overflow-hidden rounded-md border border-line bg-bg text-center">
+      <div className="flex flex-col gap-1.5 px-2 py-2.5">
+        <dt className="label">{t('К оплате')}</dt>
+        <dd className="tnum text-sm font-semibold leading-none">{money(uzs(price))}</dd>
+      </div>
+      <div className="flex flex-col gap-1.5 px-2 py-2.5">
+        <dt className="label">{t('На балансе')}</dt>
+        <dd className="tnum text-sm font-semibold leading-none">{money(uzs(balance))}</dd>
+      </div>
+      <div className="flex flex-col gap-1.5 px-2 py-2.5">
+        <dt className="label">{t('Доплата')}</dt>
+        <dd className={clsx('tnum text-sm font-semibold leading-none', shortfall > 0 ? 'text-warning' : 'text-muted')}>
+          {money(uzs(shortfall))}
+        </dd>
+      </div>
+    </dl>
+  );
+}
+
+/** Message, lock, reboot, shutdown: behind "Ещё ⋯" so the money actions stay on top. */
+function TechActions({
+  seat,
+  busy,
+  run,
+}: {
+  seat: Seat;
+  busy: boolean;
+  run: (key: string, fn: () => Promise<string>) => Promise<void>;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const [message, setMessage] = useState('');
+  const command = (kind: 'lock' | 'unlock' | 'reboot' | 'shutdown', done: string): void =>
+    void run(kind, async () => {
+      await adminApi.command(seat.pc.id, { kind });
+      return done;
+    });
+  return (
+    <section className="flex flex-col gap-2">
+      <Button variant="ghost" className="justify-between" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <span>{t('Ещё ⋯')}</span>
+        <span className="text-xs font-normal text-muted">{t('сообщение, блокировка, питание')}</span>
+      </Button>
+      {open && (
+        <div className="flex flex-col gap-2 rounded-md border border-line p-3">
+          <Field label={t('Сообщение на экран')}>
+            <div className="flex gap-1.5">
+              <input
+                className={inputCls}
+                value={message}
+                placeholder={t('Закрываемся через 20 минут')}
+                onChange={(e) => setMessage(e.target.value)}
+              />
+              <Button
+                disabled={busy || message.trim().length === 0}
+                onClick={() =>
+                  void run('msg', async () => {
+                    await adminApi.command(seat.pc.id, { kind: 'message', text: message.trim() });
+                    setMessage('');
+                    return t('Сообщение отправлено');
+                  })
+                }
+              >
+                {t('Отправить')}
+              </Button>
+            </div>
+          </Field>
+          <div className="grid grid-cols-2 gap-1.5">
+            <Button variant="ghost" disabled={busy} onClick={() => command('lock', t('ПК заблокирован'))}>
+              {t('Заблокировать')}
+            </Button>
+            <Button variant="ghost" disabled={busy} onClick={() => command('unlock', t('ПК разблокирован'))}>
+              {t('Разблокировать')}
+            </Button>
+            <Button variant="ghost" disabled={busy} onClick={() => command('reboot', t('ПК перезагружается'))}>
+              {t('Перезагрузить')}
+            </Button>
+            <Button variant="ghost" disabled={busy} onClick={() => command('shutdown', t('ПК выключается'))}>
+              {t('Выключить')}
+            </Button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function SeatPanel({
   seat,
   members,
   tariffs,
-  tick,
+  sheet,
+  setSheet,
   onDone,
 }: {
   seat: Seat;
   members: Member[];
   tariffs: Overview['tariffs'];
-  tick: number;
+  sheet: SheetState;
+  setSheet: (s: SheetState) => void;
   onDone: () => void;
 }): JSX.Element {
-  const zoneTariffs = useMemo(
-    () =>
-      tariffs.filter(
-        (t) => t.zones.length === 0 || t.zones.some((z) => z.toLowerCase() === seat.pc.zone.toLowerCase()),
-      ),
-    [tariffs, seat.pc.zone],
-  );
-  const [userId, setUserId] = useState('');
-  const [tariffId, setTariffId] = useState('');
-  const [minutes, setMinutes] = useState(60);
-  const [message, setMessage] = useState('');
+  const shift = useShift();
   const [busy, setBusy] = useState<string | null>(null);
-  const [note, setNote] = useState<{ text: string; tone: 'ok' | 'err' } | null>(null);
+  // Kept across the busy → free switch, so "Сеанс завершён · возврат …" stays readable after the PC frees up.
+  const [note, setNote] = useState<NoteState>(null);
+  const [version, setVersion] = useState(0);
+  useEffect(() => setNote(null), [seat.pc.id]);
 
-  useEffect(() => {
-    setNote(null);
-    setUserId('');
-    setMinutes(60);
-  }, [seat.pc.id]);
-  useEffect(() => {
-    if (!tariffId || !zoneTariffs.some((t) => t.id === tariffId)) {
-      setTariffId(zoneTariffs[0]?.id ?? '');
-    }
-  }, [zoneTariffs, tariffId]);
+  const done = (): void => {
+    onDone();
+    shift.refresh();
+    setVersion((v) => v + 1);
+  };
 
   const run = async (key: string, fn: () => Promise<string>): Promise<void> => {
     setBusy(key);
     setNote(null);
     try {
       setNote({ text: await fn(), tone: 'ok' });
-      onDone();
+      done();
     } catch (e) {
       setNote({ text: describe(e), tone: 'err' });
     } finally {
@@ -215,14 +392,435 @@ function SeatPanel({
     }
   };
 
+  const status = STATUS[seat.pc.status];
+  const header = (title: string, sub: React.ReactNode): JSX.Element => (
+    <header className="flex flex-col gap-1">
+      <span className="label flex items-center gap-2">
+        <span className={clsx('h-2 w-2 rounded-full', status.dot)} />
+        {seat.pc.zone} · {t(status.label)}
+      </span>
+      <h2 className="font-display text-2xl font-normal leading-tight tracking-tight">{title}</h2>
+      {sub}
+      {seat.pc.agentVersion && (
+        <span className="tnum font-mono text-xs text-muted">
+          {t('Агент {agent} · Оболочка {shell}', { agent: seat.pc.agentVersion, shell: seat.pc.shellVersion ?? '—' })}
+        </span>
+      )}
+    </header>
+  );
+
+  return (
+    <div className="flex h-full flex-col gap-5 overflow-y-auto pr-1">
+      {seat.session && seat.user ? (
+        <BusySeat
+          seat={seat}
+          session={seat.session}
+          user={seat.user}
+          username={members.find((m) => m.id === seat.user?.id)?.username}
+          tariffs={tariffs}
+          header={header}
+          note={note}
+          busy={busy}
+          run={run}
+          sheet={sheet}
+          setSheet={setSheet}
+          version={version}
+          onDone={done}
+          setNote={setNote}
+        />
+      ) : (
+        <FreeSeat
+          seat={seat}
+          tariffs={tariffs}
+          header={header}
+          note={note}
+          busy={busy}
+          run={run}
+          onDone={done}
+          setNote={setNote}
+        />
+      )}
+    </div>
+  );
+}
+
+interface PartProps {
+  seat: Seat;
+  tariffs: Overview['tariffs'];
+  header: (title: string, sub: React.ReactNode) => JSX.Element;
+  note: NoteState;
+  busy: string | null;
+  run: (key: string, fn: () => Promise<string>) => Promise<void>;
+  onDone: () => void;
+  setNote: (n: NoteState) => void;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Busy seat: time, money, then the tech actions; ending is last and asks first
+// ---------------------------------------------------------------------------------------------------------------------
+
+function BusySeat({
+  seat,
+  session,
+  user,
+  username,
+  tariffs,
+  header,
+  note,
+  busy,
+  run,
+  sheet,
+  setSheet,
+  version,
+  onDone,
+  setNote,
+}: PartProps & {
+  session: Session;
+  user: SeatUser;
+  username: string | undefined;
+  sheet: SheetState;
+  setSheet: (s: SheetState) => void;
+  version: number;
+}): JSX.Element {
+  const hit = useClientHit(user, username, version);
+  const left = secondsLeft(session);
+  const tariff = tariffs.find((x) => x.id === session.tariffId);
+  const payee: Payee = { id: user.id, displayName: nameOf(user), balance: user.balance, bonus: hit?.bonus ?? null };
+  const topUp = (): void => setSheet({ kind: 'topup', payee });
+  const latest = useRef(topUp);
+  latest.current = topUp;
+
+  // F2: top up the client of the selected seat (also from a field: F2 types nothing).
+  useEffect(() => {
+    const on = (e: KeyboardEvent): void => {
+      if (e.key !== 'F2' || sheetOpen()) return;
+      e.preventDefault();
+      latest.current();
+    };
+    window.addEventListener('keydown', on);
+    return () => window.removeEventListener('keydown', on);
+  }, []);
+
+  return (
+    <>
+      {header(
+        nameOf(user),
+        <span className="font-mono text-xs text-muted">
+          {[seat.pc.name, hit?.phoneTail ? `••${hit.phoneTail}` : null, hit ? `@${hit.username}` : null]
+            .filter(Boolean)
+            .join(' · ')}
+        </span>,
+      )}
+
+      <dl
+        className={clsx(
+          'grid divide-x divide-line overflow-hidden rounded-md border border-line bg-bg text-center',
+          session.isPrepaid ? 'grid-cols-2' : 'grid-cols-3',
+        )}
+      >
+        {session.isPrepaid ? (
+          <div className="flex flex-col gap-1.5 px-3 py-3">
+            <dt className="label">{t('Осталось')}</dt>
+            <dd className={clsx('num-dot text-3xl leading-none', left >= 0 && left <= WARN_SEC && 'text-danger')}>
+              {left < 0 ? '∞' : duration(left)}
+            </dd>
+          </div>
+        ) : (
+          // Postpaid is charged in one go when the session ends: the balance stays untouched until then, so the
+          // running bill is what the counter needs to see.
+          <>
+            <div className="flex flex-col gap-1.5 px-3 py-3">
+              <dt className="label">{t('Играет')}</dt>
+              <dd className="num-dot text-2xl leading-none">{duration(session.secondsUsed)}</dd>
+            </div>
+            <div className="flex flex-col gap-1.5 px-3 py-3">
+              <dt className="label">{t('Набежало')}</dt>
+              <dd className="tnum text-lg font-semibold leading-none">{money(session.cost)}</dd>
+            </div>
+          </>
+        )}
+        <div className="flex flex-col gap-1.5 px-3 py-3">
+          <dt className="label">{t('Баланс')}</dt>
+          <dd className="tnum text-lg font-semibold leading-none">{money(user.balance)}</dd>
+          {hit && hit.bonus.amount > 0 && (
+            <dd className="tnum text-xs text-muted">{t('+ бонусы {sum}', { sum: money(hit.bonus) })}</dd>
+          )}
+        </div>
+      </dl>
+      <p className="-mt-2 font-mono text-xs text-muted">
+        {[tariff?.name, t('с {time}', { time: clock(session.startedAt) })].filter(Boolean).join(' · ')}
+      </p>
+      {!session.isPrepaid && (
+        <p className="-mt-2 text-xs text-muted">{t('Постоплата: сумма спишется с баланса, когда сеанс закончится.')}</p>
+      )}
+
+      <Note note={note} />
+
+      <section className={clsx('grid gap-1.5', session.isPrepaid ? 'grid-cols-2' : 'grid-cols-1')}>
+        {session.isPrepaid && (
+          <Button
+            variant="primary"
+            className="h-12"
+            disabled={busy !== null}
+            onClick={() => setSheet({ kind: 'extend' })}
+          >
+            {t('Продлить')}
+          </Button>
+        )}
+        <Button className="h-12" disabled={busy !== null} onClick={topUp}>
+          {t('Пополнить')}
+          <Kbd>F2</Kbd>
+        </Button>
+      </section>
+
+      <TechActions seat={seat} busy={busy !== null} run={run} />
+
+      <section className="mt-auto flex flex-col gap-2 border-t border-dashed border-danger/30 pt-4">
+        <Button
+          variant="danger"
+          className="w-full border border-danger/40"
+          disabled={busy !== null}
+          onClick={() => setSheet({ kind: 'end' })}
+        >
+          {t('Завершить сеанс')}
+        </Button>
+      </section>
+
+      {sheet?.kind === 'extend' && session.isPrepaid && (
+        <ExtendSheet
+          seat={seat}
+          session={session}
+          user={user}
+          onClose={() => setSheet(null)}
+          onDone={(text) => {
+            setSheet(null);
+            setNote({ text, tone: 'ok' });
+            onDone();
+          }}
+        />
+      )}
+      {sheet?.kind === 'end' && (
+        <EndSheet
+          seat={seat}
+          session={session}
+          user={user}
+          onClose={() => setSheet(null)}
+          onDone={(text) => {
+            setSheet(null);
+            setNote({ text, tone: 'ok' });
+            onDone();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+/** Duration chips with their price, then one button when the balance pays, else the pay box for the shortfall. */
+function ExtendSheet({
+  seat,
+  session,
+  user,
+  onClose,
+  onDone,
+}: {
+  seat: Seat;
+  session: Session;
+  user: SeatUser;
+  onClose: () => void;
+  onDone: (text: string) => void;
+}): JSX.Element {
+  const closed = useShiftClosed();
+  const [minutes, setMinutes] = useState(60);
+  const [prices, setPrices] = useState<Record<number, number>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void Promise.all(
+      MINUTE_PRESETS.map((m) =>
+        clubApi
+          .quote({ tariffId: session.tariffId, pcId: seat.pc.id, minutes: m, userId: user.id })
+          .then((q) => [m, q.total.amount] as const)
+          .catch(() => null),
+      ),
+    ).then((rows) => {
+      if (alive) setPrices(Object.fromEntries(rows.filter((r): r is readonly [number, number] => r !== null)));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [session.tariffId, seat.pc.id, user.id]);
+
+  const price = prices[minutes];
+  const shortfall = price === undefined ? 0 : Math.max(0, price - user.balance.amount);
+
+  const extend = async (): Promise<string> => {
+    const r = await adminApi.extend({ pcId: seat.pc.id, minutes });
+    return t('Добавлено {time} · списано {sum}', { time: minutesLabel(minutes), sum: money(r.charged) });
+  };
+
+  return (
+    <Sheet title={t('Продлить · {name}', { name: nameOf(user) })} onClose={onClose}>
+      <div className="grid grid-cols-4 gap-1.5">
+        {MINUTE_PRESETS.map((m) => (
+          <Button
+            key={m}
+            className={clsx('!h-auto min-h-11 flex-col !gap-0 py-1.5', m === minutes && 'choice-on')}
+            aria-pressed={m === minutes}
+            onClick={() => setMinutes(m)}
+          >
+            <span>+{minutesLabel(m)}</span>
+            <span className="text-[0.65rem] font-normal text-muted">
+              {prices[m] === undefined ? '…' : money(uzs(prices[m]))}
+            </span>
+          </Button>
+        ))}
+      </div>
+      <PaySummary price={price ?? 0} balance={user.balance.amount} />
+      {shortfall > 0 ? (
+        <PayBox
+          initial={shortfall}
+          min={shortfall}
+          verb={t('Продлить')}
+          onPay={async (p) => {
+            // A refused top-up stays in the box; once the money is in, a refused extension is the sheet's to say
+            // (the next overview shows the new balance and offers the extension without a payment).
+            await adminApi.topUp({ userId: user.id, amount: p.amount, method: p.method });
+            try {
+              await extend();
+            } catch (e) {
+              setError(
+                t('Баланс пополнен на {sum}, но время не добавлено: {why}', {
+                  sum: money(uzs(p.amount)),
+                  why: describe(e),
+                }),
+              );
+              return;
+            }
+            onDone(t('Принято {cash} · добавлено {time}', { cash: money(uzs(p.amount)), time: minutesLabel(minutes) }));
+          }}
+        />
+      ) : (
+        <>
+          <ShiftClosedNote />
+          <Button
+            variant="primary"
+            className="h-11"
+            autoFocus
+            disabled={busy || closed || price === undefined}
+            onClick={() => {
+              setBusy(true);
+              setError(null);
+              extend()
+                .then(onDone)
+                .catch((e: unknown) => setError(describe(e)))
+                .finally(() => setBusy(false));
+            }}
+          >
+            {t('Продлить на {time}', { time: minutesLabel(minutes) })}
+            <Kbd>Enter</Kbd>
+          </Button>
+        </>
+      )}
+      <Note note={error ? { text: error, tone: 'err' } : null} />
+    </Sheet>
+  );
+}
+
+/** The confirmation of ending: what happens to the money, then what the server actually refunded or charged. */
+function EndSheet({
+  seat,
+  session,
+  user,
+  onClose,
+  onDone,
+}: {
+  seat: Seat;
+  session: Session;
+  user: SeatUser;
+  onClose: () => void;
+  onDone: (text: string) => void;
+}): JSX.Element {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const end = async (): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await adminApi.end({ pcId: seat.pc.id });
+      const parts = [t('Сеанс завершён')];
+      if (r.refunded && r.refunded.amount > 0) parts.push(t('возврат {sum} на баланс', { sum: money(r.refunded) }));
+      if (!session.isPrepaid && r.charged.amount > 0) parts.push(t('списано {sum}', { sum: money(r.charged) }));
+      onDone(parts.join(' · '));
+    } catch (e) {
+      setError(describe(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Sheet title={t('Завершить сеанс · {pc}', { pc: pcLabel(seat.pc.name) })} onClose={onClose}>
+      <p className="text-sm">
+        {nameOf(user)} ·{' '}
+        {session.isPrepaid
+          ? t('осталось {time}', { time: duration(secondsLeft(session)) })
+          : t('играет {time}', { time: duration(session.secondsUsed) })}
+      </p>
+      <p className="rounded-md bg-white/[0.04] px-3 py-2 text-sm text-text">
+        {session.isPrepaid
+          ? t('Неиспользованное время вернётся на баланс')
+          : t('К оплате {sum}, спишется с баланса', { sum: money(session.cost) })}
+      </p>
+      <Note note={error ? { text: error, tone: 'err' } : null} />
+      <div className="flex justify-end gap-2 border-t border-line pt-4">
+        <Button variant="ghost" autoFocus onClick={onClose}>
+          {t('Отмена')}
+        </Button>
+        <Button variant="danger" className="border border-danger/50" disabled={busy} onClick={() => void end()}>
+          {busy ? '…' : t('Завершить сеанс')}
+        </Button>
+      </div>
+    </Sheet>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Free seat: who, tariff, time, what it costs — then "Посадить", or the pay box for what the balance lacks
+// ---------------------------------------------------------------------------------------------------------------------
+
+function FreeSeat({ seat, tariffs, header, note, busy, run, onDone, setNote }: PartProps): JSX.Element {
+  const closed = useShiftClosed();
+  const zoneTariffs = useMemo(
+    () =>
+      tariffs.filter(
+        (tf) => tf.zones.length === 0 || tf.zones.some((z) => z.toLowerCase() === seat.pc.zone.toLowerCase()),
+      ),
+    [tariffs, seat.pc.zone],
+  );
+  const [who, setWho] = useState<ClientHit | null>(null);
+  const [tariffId, setTariffId] = useState('');
+  const [minutes, setMinutes] = useState(60);
+
+  useEffect(() => {
+    setWho(null);
+    setMinutes(60);
+  }, [seat.pc.id]);
+  useEffect(() => {
+    if (!tariffId || !zoneTariffs.some((tf) => tf.id === tariffId)) {
+      setTariffId(zoneTariffs[0]?.id ?? '');
+    }
+  }, [zoneTariffs, tariffId]);
+
   const tariff = zoneTariffs.find((x) => x.id === tariffId);
   // The server's quote: weekday / holiday price and the best discount (group, loyalty level, happy hour).
   const [priceQuote, setPriceQuote] = useState<PriceQuote | null>(null);
+  const userId = who?.id ?? null;
   useEffect(() => {
     if (!tariffId) return undefined;
     let alive = true;
     clubApi
-      .quote({ tariffId, pcId: seat.pc.id, minutes, userId: userId || null })
+      .quote({ tariffId, pcId: seat.pc.id, minutes, userId })
       .then((q) => alive && setPriceQuote(q))
       .catch(() => alive && setPriceQuote(null));
     return () => {
@@ -230,363 +828,110 @@ function SeatPanel({
     };
   }, [tariffId, minutes, userId, seat.pc.id]);
   const price = priceQuote?.total.amount ?? 0;
-  // Opening a session debits the client's balance, so a new client (balance 0) must be topped up first, here.
-  const member = members.find((m) => m.id === userId);
-  const shortfall = member ? Math.max(0, price - member.balance.amount) : 0;
+  // Opening a session debits the client's balance, so what it lacks is taken first, here, as a top-up.
+  const shortfall = who ? Math.max(0, price - who.balance.amount) : 0;
+  const blocked = seat.pc.status === 'maintenance';
+  const canSeat = who !== null && !!tariffId && priceQuote !== null && !blocked && busy === null;
 
-  // Extending a running prepaid session: the price of each preset at its tariff, so a short balance shows the cash the
-  // client pays on top; one click takes it as a top-up of the shortfall and adds the time.
-  const [extendPrices, setExtendPrices] = useState<Record<number, number>>({});
-  const sessionTariff = seat.session?.isPrepaid ? seat.session.tariffId : null;
-  const sessionUser = seat.user?.id ?? null;
-  useEffect(() => {
-    if (!sessionTariff) {
-      setExtendPrices({});
-      return undefined;
-    }
-    let alive = true;
-    void Promise.all(
-      MINUTE_PRESETS.map((m) =>
-        clubApi
-          .quote({ tariffId: sessionTariff, pcId: seat.pc.id, minutes: m, userId: sessionUser })
-          .then((q) => [m, q.total.amount] as const)
-          .catch(() => null),
-      ),
-    ).then((rows) => {
-      if (alive) {
-        setExtendPrices(Object.fromEntries(rows.filter((r): r is readonly [number, number] => r !== null)));
-      }
-    });
-    return () => {
-      alive = false;
-    };
-  }, [sessionTariff, sessionUser, seat.pc.id]);
-  const extendShortfall = (m: number): number =>
-    seat.user && extendPrices[m] !== undefined ? Math.max(0, extendPrices[m] - seat.user.balance.amount) : 0;
-
-  const left = secondsLeft(seat.session);
-  void tick;
+  const open = async (): Promise<string> => {
+    const r = await adminApi.openSession({ pcId: seat.pc.id, userId: who?.id ?? '', tariffId, minutes });
+    return t('Сеанс открыт · списано {sum}', { sum: money(r.charged) });
+  };
 
   return (
-    <div className="flex h-full flex-col gap-5 overflow-y-auto pr-1">
-      <header className="flex flex-col gap-1">
-        <span className="label flex items-center gap-2">
-          <span className={clsx('h-2 w-2 rounded-full', STATUS[seat.pc.status].dot)} />
-          {seat.pc.zone} · {t(STATUS[seat.pc.status].label)}
-        </span>
-        <h2 className="font-display text-2xl font-normal leading-tight tracking-tight">
-          {seat.user ? seat.user.displayName : seat.pc.name}
-        </h2>
-        {seat.user && <span className="font-mono text-xs text-muted">{seat.pc.name}</span>}
-        {seat.pc.agentVersion && (
-          <span className="tnum font-mono text-xs text-muted">
-            {t('Агент {agent} · Оболочка {shell}', { agent: seat.pc.agentVersion, shell: seat.pc.shellVersion ?? '—' })}
-          </span>
-        )}
-      </header>
+    <>
+      {header(t('Посадить на {pc}', { pc: pcLabel(seat.pc.name) }), null)}
+      <Note note={note} />
 
-      {seat.session && seat.user && (
-        <dl
-          className={clsx(
-            'grid divide-x divide-line overflow-hidden rounded-md border border-line bg-bg text-center',
-            seat.session.isPrepaid ? 'grid-cols-2' : 'grid-cols-3',
-          )}
-        >
-          {seat.session.isPrepaid ? (
-            <div className="flex flex-col gap-1.5 px-3 py-3">
-              <dt className="label">{t('Осталось')}</dt>
-              <dd className={clsx('num-dot text-2xl leading-none', left >= 0 && left <= 300 && 'text-danger')}>
-                {left < 0 ? '∞' : duration(left)}
-              </dd>
+      <section className="flex flex-col gap-4">
+        <ClientPicker label={t('Кто')} value={who} onChange={setWho} />
+        <Field label={t('Тариф')}>
+          <select className={inputCls} value={tariffId} onChange={(e) => setTariffId(e.target.value)}>
+            {zoneTariffs.map((tf) => (
+              <option key={tf.id} value={tf.id}>
+                {tf.name} · {money(tf.isPackage ? (tf.packagePrice ?? tf.pricePerHour) : tf.pricePerHour)}
+                {tf.isPackage ? '' : t(' / ч')}
+              </option>
+            ))}
+          </select>
+        </Field>
+        {!tariff?.isPackage && (
+          <div className="flex flex-col gap-1.5">
+            <span className="label">{t('Время')}</span>
+            <div className="grid grid-cols-4 gap-1.5">
+              {MINUTE_PRESETS.map((m) => (
+                <Button
+                  key={m}
+                  aria-pressed={m === minutes}
+                  className={clsx(m === minutes && 'choice-on')}
+                  onClick={() => setMinutes(m)}
+                >
+                  {minutesLabel(m)}
+                </Button>
+              ))}
             </div>
-          ) : (
-            // Postpaid is charged in one go when the session ends: the balance stays untouched until then, so the
-            // running bill is what the counter needs to see.
-            <>
-              <div className="flex flex-col gap-1.5 px-3 py-3">
-                <dt className="label">{t('Играет')}</dt>
-                <dd className="num-dot text-2xl leading-none">{duration(seat.session.secondsUsed)}</dd>
-              </div>
-              <div className="flex flex-col gap-1.5 px-3 py-3">
-                <dt className="label">{t('Набежало')}</dt>
-                <dd className="tnum text-lg font-semibold leading-none">{money(seat.session.cost)}</dd>
-              </div>
-            </>
-          )}
-          <div className="flex flex-col gap-1.5 px-3 py-3">
-            <dt className="label">{t('Баланс')}</dt>
-            <dd className="tnum text-lg font-semibold leading-none">{money(seat.user.balance)}</dd>
           </div>
-        </dl>
-      )}
-      {seat.session && seat.user && !seat.session.isPrepaid && (
-        <p className="text-xs text-muted">{t('Постоплата: сумма спишется с баланса, когда сеанс закончится.')}</p>
-      )}
+        )}
 
-      {note && (
-        <p
-          className={clsx(
-            'rounded-md px-3 py-2 text-sm',
-            note.tone === 'ok' ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger',
-          )}
-        >
-          {note.text}
-        </p>
-      )}
-
-      {seat.session && seat.user ? (
-        <>
-          <section className="flex flex-col gap-4">
-            <Field label={t('Добавить время')}>
-              <div className="grid grid-cols-4 gap-1.5">
-                {MINUTE_PRESETS.map((m) => {
-                  const cash = extendShortfall(m);
-                  return (
-                    <Button
-                      key={m}
-                      disabled={busy !== null}
-                      className="!h-auto min-h-10 flex-col !gap-0 py-1.5"
-                      onClick={() =>
-                        void run(`ext-${m}`, async () => {
-                          if (cash > 0) {
-                            await adminApi.topUp({ userId: seat.user?.id ?? '', amount: cash, method: 'cash' });
-                          }
-                          const r = await adminApi.extend({ pcId: seat.pc.id, minutes: m });
-                          return cash > 0
-                            ? t('Принято {cash} · добавлено {time}', {
-                                cash: money({ amount: cash, currency: 'UZS' }),
-                                time: minutesLabel(m),
-                              })
-                            : t('Добавлено {time} · списано {sum}', { time: minutesLabel(m), sum: money(r.charged) });
-                        })
-                      }
-                    >
-                      <span className="whitespace-nowrap">+{minutesLabel(m)}</span>
-                      {cash > 0 && (
-                        <span className="whitespace-nowrap text-[0.65rem] font-normal text-muted">
-                          {t('доплата {sum}', { sum: money({ amount: cash, currency: 'UZS' }) })}
-                        </span>
-                      )}
-                    </Button>
-                  );
-                })}
-              </div>
-            </Field>
-
-            <Field label={t('Пополнить баланс')}>
-              <div className="grid grid-cols-4 gap-1.5">
-                {TOPUP_PRESETS.map((a) => (
-                  <Button
-                    key={a}
-                    disabled={busy !== null}
-                    onClick={() =>
-                      void run(`top-${a}`, async () => {
-                        const r = await adminApi.topUp({ userId: seat.user?.id ?? '', amount: a * 100 });
-                        return t('Баланс пополнен · теперь {sum}', { sum: money(r.balance) });
-                      })
-                    }
-                  >
-                    {t('{n}к', { n: a / 1000 })}
-                  </Button>
-                ))}
-              </div>
-            </Field>
-          </section>
-
-          <section className="flex flex-col gap-2 border-t border-line pt-4">
-            <Button
-              variant="danger"
-              className="justify-start"
-              disabled={busy !== null}
-              onClick={() =>
-                void run('end', async () => {
-                  const r = await adminApi.end({ pcId: seat.pc.id });
-                  return r.refunded && r.refunded.amount > 0
-                    ? t('Сеанс завершён · возврат {sum}', { sum: money(r.refunded) })
-                    : t('Сеанс завершён');
-                })
-              }
-            >
-              {t('Завершить сеанс')}
-            </Button>
-            <div className="grid grid-cols-2 gap-1.5">
-              <Button
-                variant="ghost"
-                disabled={busy !== null}
-                onClick={() =>
-                  void run('lock', async () => {
-                    await adminApi.command(seat.pc.id, { kind: 'lock' });
-                    return t('ПК заблокирован');
-                  })
-                }
-              >
-                {t('Заблокировать')}
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={busy !== null}
-                onClick={() =>
-                  void run('unlock', async () => {
-                    await adminApi.command(seat.pc.id, { kind: 'unlock' });
-                    return t('ПК разблокирован');
-                  })
-                }
-              >
-                {t('Разблокировать')}
-              </Button>
-            </div>
-          </section>
-        </>
-      ) : (
-        <section className="flex flex-col gap-4">
-          <Field label={t('Клиент')}>
-            <select className={inputCls} value={userId} onChange={(e) => setUserId(e.target.value)}>
-              <option value="">{t('— выберите клиента —')}</option>
-              {members.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.displayName} · {money(m.balance)}
-                </option>
-              ))}
-            </select>
-          </Field>
-          {member && (
-            <Field label={t('Пополнить баланс')}>
-              <div className="grid grid-cols-4 gap-1.5">
-                {shortfall > 0 && (
-                  <Button
-                    className="col-span-4"
-                    variant="primary"
-                    disabled={busy !== null}
-                    onClick={() =>
-                      void run('top-shortfall', async () => {
-                        const r = await adminApi.topUp({ userId: member.id, amount: shortfall });
-                        return t('Баланс пополнен · теперь {sum}', { sum: money(r.balance) });
-                      })
-                    }
-                  >
-                    {t('Пополнить на {sum}', { sum: money({ amount: shortfall, currency: 'UZS' }) })}
-                  </Button>
-                )}
-                {TOPUP_PRESETS.map((a) => (
-                  <Button
-                    key={a}
-                    disabled={busy !== null}
-                    onClick={() =>
-                      void run(`top-${a}`, async () => {
-                        const r = await adminApi.topUp({ userId: member.id, amount: a * 100 });
-                        return t('Баланс пополнен · теперь {sum}', { sum: money(r.balance) });
-                      })
-                    }
-                  >
-                    {t('{n}к', { n: a / 1000 })}
-                  </Button>
-                ))}
-              </div>
-            </Field>
-          )}
-          <Field label={t('Тариф')}>
-            <select className={inputCls} value={tariffId} onChange={(e) => setTariffId(e.target.value)}>
-              {zoneTariffs.map((tf) => (
-                <option key={tf.id} value={tf.id}>
-                  {tf.name} · {money(tf.isPackage ? (tf.packagePrice ?? tf.pricePerHour) : tf.pricePerHour)}
-                  {tf.isPackage ? '' : t(' / ч')}
-                </option>
-              ))}
-            </select>
-          </Field>
-          {!tariff?.isPackage && (
-            <Field label={t('Время')}>
-              <div className="grid grid-cols-4 gap-1.5">
-                {MINUTE_PRESETS.map((m) => (
-                  <Button key={m} className={clsx(m === minutes && 'choice-on')} onClick={() => setMinutes(m)}>
-                    {minutesLabel(m)}
-                  </Button>
-                ))}
-              </div>
-            </Field>
-          )}
-          <div className="flex items-center justify-between gap-3 border-t border-line pt-4">
-            <span className="flex flex-col gap-1">
-              <span className="label">{t('К списанию')}</span>
-              <span className="tnum text-lg font-semibold text-text">{money({ amount: price, currency: 'UZS' })}</span>
-              {priceQuote && priceQuote.discountPct > 0 && (
-                <span className="text-xs text-success">
-                  −{priceQuote.discountPct}% · {priceQuote.discountReason}
-                </span>
-              )}
-              {priceQuote && priceQuote.dayPct !== 100 && (
-                <span className="text-xs text-muted">
-                  {t('Цена дня')}: {priceQuote.dayPct}%
-                </span>
-              )}
+        <div className="flex flex-col gap-1.5">
+          <PaySummary price={price} balance={who?.balance.amount ?? 0} />
+          {priceQuote && priceQuote.discountPct > 0 && (
+            <span className="text-xs text-success">
+              −{priceQuote.discountPct}% · {priceQuote.discountReason}
             </span>
+          )}
+          {priceQuote && priceQuote.dayPct !== 100 && (
+            <span className="text-xs text-muted">
+              {t('Цена дня')}: {priceQuote.dayPct}%
+            </span>
+          )}
+        </div>
+
+        {who && shortfall > 0 && !blocked ? (
+          <PayBox
+            initial={shortfall}
+            min={shortfall}
+            verb={t('Посадить')}
+            onPay={async (p) => {
+              // A refused top-up stays in the box. Once the money is in, a refused session is the panel's to say:
+              // the box gives way to "Посадить" over the new balance.
+              const r = await adminApi.topUp({ userId: who.id, amount: p.amount, method: p.method });
+              try {
+                setNote({ text: await open(), tone: 'ok' });
+              } catch (e) {
+                setWho({ ...who, balance: r.balance });
+                setNote({
+                  text: t('Баланс пополнен на {sum}, но сеанс не открыт: {why}', {
+                    sum: money(uzs(p.amount)),
+                    why: describe(e),
+                  }),
+                  tone: 'err',
+                });
+              }
+              onDone();
+            }}
+          />
+        ) : (
+          <>
+            {who && <ShiftClosedNote />}
             <Button
               variant="primary"
-              disabled={busy !== null || !userId || !tariffId || seat.pc.status === 'maintenance'}
-              onClick={() =>
-                void run('open', async () => {
-                  const r = await adminApi.openSession({ pcId: seat.pc.id, userId, tariffId, minutes });
-                  return t('Сеанс открыт · списано {sum}', { sum: money(r.charged) });
-                })
-              }
+              className="h-12"
+              disabled={!canSeat || closed}
+              onClick={() => void run('open', open)}
             >
-              {t('Открыть сеанс')}
+              {busy === 'open' ? '…' : t('Посадить')}
             </Button>
-          </div>
-        </section>
-      )}
-
-      <section className="mt-auto flex flex-col gap-2 border-t border-line pt-4">
-        <Field label={t('Сообщение на экран')}>
-          <div className="flex gap-1.5">
-            <input
-              className={inputCls}
-              value={message}
-              placeholder={t('Закрываемся через 20 минут')}
-              onChange={(e) => setMessage(e.target.value)}
-            />
-            <Button
-              disabled={busy !== null || message.trim().length === 0}
-              onClick={() =>
-                void run('msg', async () => {
-                  await adminApi.command(seat.pc.id, { kind: 'message', text: message.trim() });
-                  setMessage('');
-                  return t('Сообщение отправлено');
-                })
-              }
-            >
-              {t('Отправить')}
-            </Button>
-          </div>
-        </Field>
-        <div className="grid grid-cols-2 gap-1.5">
-          <Button
-            variant="ghost"
-            disabled={busy !== null}
-            onClick={() =>
-              void run('reboot', async () => {
-                await adminApi.command(seat.pc.id, { kind: 'reboot' });
-                return t('ПК перезагружается');
-              })
-            }
-          >
-            {t('Перезагрузить')}
-          </Button>
-          <Button
-            variant="ghost"
-            disabled={busy !== null}
-            onClick={() =>
-              void run('shutdown', async () => {
-                await adminApi.command(seat.pc.id, { kind: 'shutdown' });
-                return t('ПК выключается');
-              })
-            }
-          >
-            {t('Выключить')}
-          </Button>
-        </div>
+            {!who && <p className="-mt-2 text-xs text-muted">{t('Выберите клиента')}</p>}
+            {blocked && <p className="-mt-2 text-xs text-muted">{t('ПК на обслуживании')}</p>}
+          </>
+        )}
       </section>
-    </div>
+
+      <div className="mt-auto">
+        <TechActions seat={seat} busy={busy !== null} run={run} />
+      </div>
+    </>
   );
 }
 
@@ -596,57 +941,25 @@ function SeatPanel({
 
 function GuestDebts({
   debts,
-  onDone,
+  onCollect,
 }: {
   debts: NonNullable<Overview['guestDebts']>;
-  onDone: () => void;
+  /** Opens the pay box for exactly the debt: a top-up of it brings the guest's balance back to zero. */
+  onCollect: (d: NonNullable<Overview['guestDebts']>[number]) => void;
 }): JSX.Element {
-  const [busy, setBusy] = useState<string | null>(null);
-  const [note, setNote] = useState<{ text: string; tone: 'ok' | 'err' } | null>(null);
-
-  // A cash top-up of exactly the debt brings the guest's balance back to zero.
-  const collect = async (d: NonNullable<Overview['guestDebts']>[number]): Promise<void> => {
-    setBusy(d.userId);
-    setNote(null);
-    try {
-      await adminApi.topUp({ userId: d.userId, amount: d.debt.amount, method: 'cash' });
-      setNote({ text: t('Оплата принята · {name} · {sum}', { name: d.displayName, sum: money(d.debt) }), tone: 'ok' });
-      onDone();
-    } catch (e) {
-      setNote({ text: describe(e), tone: 'err' });
-    } finally {
-      setBusy(null);
-    }
-  };
-
   return (
     <section className="panel flex shrink-0 flex-col gap-2 p-4">
       <h2 className="label text-warning">{t('Долги гостей')}</h2>
-      {note && (
-        <p
-          className={clsx(
-            'rounded-md px-3 py-1.5 text-sm',
-            note.tone === 'ok' ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger',
-          )}
-        >
-          {note.text}
-        </p>
-      )}
       <ul className="flex flex-col divide-y divide-line">
         {debts.map((d) => (
           <li key={d.userId} className="flex items-center justify-between gap-3 py-2">
             <span className="flex min-w-0 flex-col">
               <span className="truncate text-sm text-text">{d.displayName}</span>
               <span className="font-mono text-xs text-muted">
-                {[
-                  d.pc,
-                  d.endedAt ? new Date(d.endedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null,
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
+                {[d.pc, d.endedAt ? clock(d.endedAt) : null].filter(Boolean).join(' · ')}
               </span>
             </span>
-            <Button variant="primary" disabled={busy !== null} onClick={() => void collect(d)}>
+            <Button variant="primary" onClick={() => onCollect(d)}>
               {t('Принять {sum}', { sum: money(d.debt) })}
             </Button>
           </li>
@@ -664,6 +977,9 @@ export function MapPage(): JSX.Element {
   const [data, setData] = useState<Overview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [filter, setFilter] = useState<Filter | null>(null);
+  const [sheet, setSheet] = useState<SheetState>(null);
+  const [digits, setDigits] = useState('');
   const [tick, setTick] = useState(0);
 
   const load = useCallback(async () => {
@@ -685,8 +1001,63 @@ export function MapPage(): JSX.Element {
     };
   }, [load]);
 
+  // "Показать ПК" from the top-bar search.
+  useEffect(
+    () =>
+      onShowPc((pcId) => {
+        setSelected(pcId);
+        setSheet(null);
+        window.setTimeout(() => document.getElementById(`seat-${pcId}`)?.scrollIntoView({ block: 'nearest' }), 0);
+      }),
+    [],
+  );
+
   const seats = data?.seats ?? [];
   const seat = seats.find((s) => s.pc.id === selected) ?? null;
+  // "Продлить" / "Завершить" belong to one session: another seat, or the session ending meanwhile, drops them.
+  const sessionId = seat?.session?.id ?? null;
+  useEffect(() => setSheet((s) => (s?.kind === 'extend' || s?.kind === 'end' ? null : s)), [selected, sessionId]);
+
+  // Keys: digits then Enter pick a PC by number; Esc closes the sheet, then the typed number, then the panel.
+  const keys = useRef({ seats, digits, sheet, selected });
+  keys.current = { seats, digits, sheet, selected };
+  useEffect(() => {
+    let timer = 0;
+    const on = (e: KeyboardEvent): void => {
+      const k = keys.current;
+      if (e.key === 'Escape') {
+        if (k.sheet) setSheet(null);
+        else if (k.digits) setDigits('');
+        // In a field the first Esc only leaves it; the next one closes the panel.
+        else if (isTyping(e) && e.target instanceof HTMLElement) e.target.blur();
+        else if (k.selected) setSelected(null);
+        return;
+      }
+      if (isTyping(e) || sheetOpen() || e.altKey || e.ctrlKey || e.metaKey) return;
+      if (/^\d$/.test(e.key)) {
+        setDigits((d) => (d + e.key).slice(-3));
+        window.clearTimeout(timer);
+        timer = window.setTimeout(() => setDigits(''), DIGITS_MS);
+      } else if (e.key === 'Enter' && k.digits) {
+        e.preventDefault();
+        const n = Number(k.digits);
+        const hit = k.seats.find((s) => s.pc.number === n);
+        if (hit) {
+          setSelected(hit.pc.id);
+          document.getElementById(`seat-${hit.pc.id}`)?.scrollIntoView({ block: 'nearest' });
+        }
+        setDigits('');
+      } else if (e.key === 'Backspace' && k.digits) {
+        setDigits((d) => d.slice(0, -1));
+      }
+    };
+    window.addEventListener('keydown', on);
+    return () => {
+      window.removeEventListener('keydown', on);
+      window.clearTimeout(timer);
+    };
+  }, []);
+
   const repairs = useMemo(
     () => new Map((data?.repairs ?? []).map((r) => [r.pcId, r.severity] as const)),
     [data?.repairs],
@@ -720,6 +1091,11 @@ export function MapPage(): JSX.Element {
     return c;
   }, [seats]);
   void tick;
+  // Recounted every second: "ending soon" moves with the clock.
+  const matches = (f: Filter, s: Seat): boolean =>
+    FILTERS.find((x) => x.id === f)?.test(s, repairs.has(s.pc.id)) ?? false;
+  const occupied = seats.filter((s) => s.session !== null).length;
+  const active = filter ? FILTERS.find((x) => x.id === filter) : undefined;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
@@ -732,10 +1108,46 @@ export function MapPage(): JSX.Element {
           })}
         </p>
       )}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_19rem] xl:grid-cols-[minmax(0,1fr)_24rem]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_21rem] xl:grid-cols-[minmax(0,1fr)_26rem]">
         <div className="flex min-h-0 flex-col gap-5">
           <div className="panel min-h-0 flex-1 overflow-y-auto p-5">
-            <h1 className="mb-5 font-display text-2xl font-light tracking-tight">{t('Карта зала')}</h1>
+            <header className="mb-5 flex flex-wrap items-center gap-x-5 gap-y-3">
+              <h1 className="font-display text-2xl font-light tracking-tight">{t('Карта зала')}</h1>
+              <span className="tnum font-mono text-sm text-muted">
+                {t('Занято {n}/{total}', { n: occupied, total: seats.length })}
+              </span>
+              <div role="group" aria-label={t('Фильтр')} className="flex flex-wrap gap-1.5">
+                {FILTERS.map((f) => {
+                  const n = seats.filter((s) => matches(f.id, s)).length;
+                  const on = filter === f.id;
+                  return (
+                    <button
+                      key={f.id}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => setFilter(on ? null : f.id)}
+                      className={clsx(
+                        'choice focus-ring inline-flex h-8 items-center gap-2 rounded-md px-2.5 text-xs font-medium',
+                        on && 'choice-on',
+                      )}
+                    >
+                      {t(f.label)}
+                      <span className={clsx('tnum font-mono', n > 0 ? 'text-text' : 'text-muted')}>{n}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <span className="ml-auto flex items-center gap-2 font-mono text-xs text-muted" aria-live="polite">
+                {digits ? (
+                  <>
+                    <span className="text-accent">{t('ПК {n}', { n: digits })}</span>
+                    <Kbd>Enter</Kbd>
+                  </>
+                ) : (
+                  t('номер ПК + Enter')
+                )}
+              </span>
+            </header>
             <div className="flex flex-col gap-6">
               {zones.map(([zone, list]) => (
                 <section key={zone} className="flex flex-col gap-2.5">
@@ -748,14 +1160,14 @@ export function MapPage(): JSX.Element {
                       })}
                     </span>
                   </h2>
-                  <div className="grid grid-cols-[repeat(auto-fill,minmax(4.5rem,1fr))] gap-2">
+                  <div className="grid grid-cols-[repeat(auto-fill,minmax(6.25rem,1fr))] gap-2">
                     {list.map((x) => (
                       <SeatTile
                         key={x.pc.id}
                         seat={x}
-                        tick={tick}
                         repair={repairs.get(x.pc.id)}
                         selected={x.pc.id === selected}
+                        dimmed={active !== undefined && !active.test(x, repairs.has(x.pc.id))}
                         onSelect={() => setSelected(x.pc.id)}
                       />
                     ))}
@@ -767,7 +1179,17 @@ export function MapPage(): JSX.Element {
           </div>
 
           {data?.guestDebts && data.guestDebts.length > 0 && (
-            <GuestDebts debts={data.guestDebts} onDone={() => void load()} />
+            <GuestDebts
+              debts={data.guestDebts}
+              onCollect={(d) =>
+                setSheet({
+                  kind: 'topup',
+                  payee: { id: d.userId, displayName: d.displayName, balance: { ...d.debt, amount: -d.debt.amount } },
+                  initial: d.debt.amount,
+                  title: t('Долг · {name}', { name: d.displayName }),
+                })
+              }
+            />
           )}
 
           {/* Legend that counts: every status, how many seats are in it right now */}
@@ -786,17 +1208,34 @@ export function MapPage(): JSX.Element {
 
         <aside className="panel min-h-0 p-5">
           {seat && data ? (
-            <SeatPanel seat={seat} members={data.users} tariffs={data.tariffs} tick={tick} onDone={() => void load()} />
+            <SeatPanel
+              seat={seat}
+              members={data.users}
+              tariffs={data.tariffs}
+              sheet={sheet}
+              setSheet={setSheet}
+              onDone={() => void load()}
+            />
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
               <p className="font-display text-lg tracking-tight">{t('Выберите место')}</p>
               <p className="max-w-[20rem] text-sm text-muted">
-                {t('Откройте время, пополните баланс, продлите или завершите сеанс, отправьте сообщение на экран.')}
+                {t('Посадите клиента, продлите, пополните или завершите сеанс. Номер ПК и Enter — выбрать место.')}
               </p>
             </div>
           )}
         </aside>
       </div>
+
+      {sheet?.kind === 'topup' && (
+        <TopUpSheet
+          payee={sheet.payee}
+          initial={sheet.initial}
+          title={sheet.title}
+          onClose={() => setSheet(null)}
+          onDone={() => void load()}
+        />
+      )}
     </div>
   );
 }

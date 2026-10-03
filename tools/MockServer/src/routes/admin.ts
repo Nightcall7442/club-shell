@@ -7,7 +7,9 @@
  * Auth is a static bearer token (`MOCK_ADMIN_TOKEN`, default `admin-dev-token`) rather than a staff login: the
  * real console authenticates against the operator's own server. These routes are exempt from the agent Bearer /
  * HMAC gate (`isExempt` in `index.ts`). The money routes honour `Idempotency-Key` ({@link idempotent}): the console
- * sends one per cashier action and reuses it when the cashier retries after a lost answer.
+ * sends one per cashier action and reuses it when the cashier retries after a lost answer. Taking money (a top-up,
+ * opening or extending a session) needs an open cash shift: 409 `conflict` / `shiftClosed` otherwise; ending a session
+ * only refunds to the balance and does not.
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { tariffPriceFor, type Money, type Session } from '@clubshell/contracts';
@@ -39,7 +41,17 @@ import {
 } from '../db.js';
 import { endSession } from './session.js';
 import { requireStaff, topUpWithBonus } from './club.js';
-import { club, clubHooks, inCurfew, isMinor, profileOf, quote, type StaffRecord } from '../club.js';
+import {
+  PAY_METHODS,
+  club,
+  clubHooks,
+  inCurfew,
+  isMinor,
+  openShift,
+  profileOf,
+  quote,
+  type StaffRecord,
+} from '../club.js';
 import { record } from '../control.js';
 import { openTicketMarks } from '../health.js';
 import { broadcast, pushToPc, pushToUser, sendCommand } from '../ws.js';
@@ -72,6 +84,11 @@ function userView(u: UserRecord): { id: string; displayName: string; username: s
   return { id: u.id, displayName: u.displayName, username: u.username, role: u.role, balance: u.balance };
 }
 
+/** Money is taken only in an open shift, so the X / Z reports account for every сум. */
+function requireShift(): void {
+  if (!openShift()) throw errors.conflict('shiftClosed');
+}
+
 /** The session the cashier is acting on, by session id or by seat. */
 function targetSession(b: Record<string, unknown>): SessionRecord {
   const sessionId = optStr(b, 'sessionId', 64);
@@ -100,6 +117,7 @@ export function adminRoutes(app: FastifyInstance): void {
   app.post('/admin/sessions', async (req, reply) => {
     const staff = requireAdmin(req);
     return idempotent(req, reply, async () => {
+      requireShift();
       const b = body(req);
       const pcId = str(b, 'pcId', 64);
       const userId = str(b, 'userId', 64);
@@ -170,6 +188,7 @@ export function adminRoutes(app: FastifyInstance): void {
   app.post('/admin/sessions/extend', async (req, reply) => {
     const staff = requireAdmin(req);
     return idempotent(req, reply, async () => {
+      requireShift();
       const b = body(req);
       const rec = targetSession(b);
       const minutes = int(b, 'minutes', 5, 1440);
@@ -226,14 +245,16 @@ export function adminRoutes(app: FastifyInstance): void {
     });
   });
 
-  /** Cash / card top-up at the counter. */
+  /** Top-up at the counter, booked under its payment method (`cash` when none is sent). */
   app.post('/admin/wallet/topup', async (req, reply) => {
     const staff = requireAdmin(req);
     return idempotent(req, reply, async () => {
+      requireShift();
       const b = body(req);
       const user = findUser(str(b, 'userId', 64));
       const amount = int(b, 'amount', 1, 100_000_000);
       const method = optStr(b, 'method', 16) ?? 'cash';
+      if (!(PAY_METHODS as readonly string[]).includes(method)) throw errors.validation('method', 'unknown');
       if (!user) throw errors.notFound('user');
       const { bonus } = topUpWithBonus(user, amount, method);
       record(staff, 'topUp', {
