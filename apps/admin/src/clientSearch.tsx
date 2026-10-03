@@ -3,7 +3,10 @@
  * debounced, the 8 best matches with the balance and the PC the client is on; an empty field lists the recent clients.
  * Two faces: {@link ClientPicker} — the "Кто" of the seat panel — and {@link GlobalSearch} in the top bar ("/"), whose
  * rows top up the client or show their PC. Arrows move, Enter picks, Esc closes; "+ Новый клиент" under the list opens
- * the registration on the Клиенты page.
+ * the registration on the Клиенты page (Enter reaches it only through the arrows).
+ *
+ * Enter acts only on the results of what is in the field: a card scanner or a fast cashier types and presses Enter
+ * before the debounced lookup answers, so such an Enter runs the lookup at once and picks the best match when it comes.
  */
 import { forwardRef, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import clsx from 'clsx';
@@ -21,22 +24,39 @@ export function pcLabel(pcName: string): string {
   return n ? t('ПК {n}', { n }) : pcName;
 }
 
+interface Lookup {
+  /** The trimmed field text. */
+  term: string;
+  items: ClientHit[];
+  /** True when `items` answer the current field (not an earlier text still on screen). */
+  fresh: boolean;
+  loading: boolean;
+  error: string | null;
+  /** Runs the waiting lookup now instead of after the debounce. */
+  flush: () => void;
+}
+
 /** The lookup for `q` while `enabled`, newest answer wins. */
-function useLookup(q: string, enabled: boolean): { items: ClientHit[]; loading: boolean; error: string | null } {
-  const [items, setItems] = useState<ClientHit[]>([]);
+function useLookup(q: string, enabled: boolean): Lookup {
+  const [result, setResult] = useState<{ items: ClientHit[]; q: string | null }>({ items: [], q: null });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const seq = useRef(0);
+  const run = useRef<(() => void) | null>(null);
+  const term = q.trim();
   useEffect(() => {
     if (!enabled) return undefined;
     const mine = ++seq.current;
     setLoading(true);
-    const timer = window.setTimeout(() => {
+    setError(null);
+    const go = (): void => {
+      window.clearTimeout(timer);
+      run.current = null;
       adminApi
-        .lookupClients(q.trim())
+        .lookupClients(term)
         .then((r) => {
           if (seq.current !== mine) return;
-          setItems(r.items);
+          setResult({ items: r.items, q: term });
           setError(null);
         })
         .catch((e: unknown) => {
@@ -45,10 +65,49 @@ function useLookup(q: string, enabled: boolean): { items: ClientHit[]; loading: 
         .finally(() => {
           if (seq.current === mine) setLoading(false);
         });
-    }, DEBOUNCE_MS);
-    return () => window.clearTimeout(timer);
-  }, [q, enabled]);
-  return { items, loading, error };
+    };
+    const timer = window.setTimeout(go, DEBOUNCE_MS);
+    run.current = go;
+    return () => {
+      window.clearTimeout(timer);
+      run.current = null;
+    };
+  }, [term, enabled]);
+  return {
+    term,
+    items: result.items,
+    fresh: result.q === term && !loading,
+    loading,
+    error,
+    flush: () => run.current?.(),
+  };
+}
+
+/**
+ * An Enter that came before the results of the field: held until they arrive, then `act` gets them. Returns the
+ * function the Enter calls with the results it saw and whether they were fresh.
+ */
+function useHeldEnter(lookup: Lookup, act: (items: ClientHit[]) => void): (enter: () => void) => void {
+  // The text the Enter was pressed for: typing on (or a failed lookup) drops it.
+  const [held, setHeld] = useState<string | null>(null);
+  const latest = useRef(act);
+  latest.current = act;
+  useEffect(() => {
+    if (held === null) return;
+    if (held !== lookup.term || lookup.error) setHeld(null);
+    else if (lookup.fresh) {
+      setHeld(null);
+      latest.current(lookup.items);
+    }
+  }, [held, lookup.term, lookup.error, lookup.fresh, lookup.items]);
+  return (enter) => {
+    if (lookup.fresh) {
+      enter();
+      return;
+    }
+    setHeld(lookup.term);
+    lookup.flush();
+  };
 }
 
 /** Name, login, phone tail, balance and the PC: one line of a result list. */
@@ -63,6 +122,11 @@ function HitLine({ hit, extra }: { hit: ClientHit; extra?: ReactNode }): JSX.Ele
           {hit.cardId && <span> · {hit.cardId}</span>}
         </span>
       </span>
+      {hit.blacklisted && (
+        <span className="shrink-0 rounded border border-danger/50 px-1.5 py-0.5 text-[0.65rem] font-semibold text-danger">
+          {t('Чёрный список')}
+        </span>
+      )}
       {hit.playing && (
         <span className="shrink-0 rounded border border-accent/50 px-1.5 py-0.5 font-mono text-[0.65rem] uppercase tracking-[0.08em] text-accent">
           {pcLabel(hit.playing.pcName)}
@@ -123,7 +187,8 @@ function HitList({
               role="option"
               aria-selected={i === active}
               aria-disabled={why !== null}
-              onMouseEnter={() => onHover(i)}
+              // move, not enter: a list that opens under a resting cursor picks nothing
+              onMouseMove={() => i !== active && onHover(i)}
               // mousedown keeps the focus in the field, so the list does not close before the click lands
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => why === null && onPick(hit)}
@@ -146,7 +211,7 @@ function HitList({
           id={`${id}-${items.length}`}
           role="option"
           aria-selected={active === items.length}
-          onMouseEnter={() => onHover(items.length)}
+          onMouseMove={() => active !== items.length && onHover(items.length)}
           onMouseDown={(e) => e.preventDefault()}
           onClick={onNewClient}
           className={clsx(
@@ -161,22 +226,43 @@ function HitList({
   );
 }
 
-/** Keyboard of a combobox over `count` results plus the "new client" row. */
-function useActive(count: number): [number, (i: number) => void, (e: KeyboardEvent) => boolean] {
+/**
+ * Keyboard of a combobox over `items` plus the "new client" row: every new result list starts at its best match.
+ * `onNew` — the cashier moved onto "+ Новый клиент" with the arrows (or the mouse), the only way Enter opens it.
+ */
+function useActive(items: ClientHit[]): {
+  active: number;
+  onNew: boolean;
+  hover: (i: number) => void;
+  move: (e: KeyboardEvent) => boolean;
+} {
+  const count = items.length;
   const [active, setActive] = useState(0);
-  useEffect(() => setActive(0), [count]);
+  const [moved, setMoved] = useState(false);
+  useEffect(() => {
+    setActive(0);
+    setMoved(false);
+  }, [items]);
   const move = (e: KeyboardEvent): boolean => {
     if (e.key === 'ArrowDown') {
       setActive((a) => Math.min(a + 1, count));
+      setMoved(true);
       return true;
     }
     if (e.key === 'ArrowUp') {
       setActive((a) => Math.max(a - 1, 0));
+      setMoved(true);
       return true;
     }
     return false;
   };
-  return [active, setActive, move];
+  const hover = (i: number): void => {
+    setActive(i);
+    setMoved(true);
+  };
+  const onNew = moved && active === count;
+  // What Enter acts on, and so what is highlighted: -1 — nothing (no results, and the new-client row not chosen).
+  return { active: onNew || active < count ? active : -1, onNew, hover, move };
 }
 
 /** Opens the Клиенты page with the registration panel (the existing flow, not a copy of it). */
@@ -201,17 +287,27 @@ export function ClientPicker({
   const input = useRef<HTMLInputElement>(null);
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
-  const { items, loading, error } = useLookup(q, open);
-  const [active, setActive, move] = useActive(items.length);
-  // Someone already at a PC cannot be seated on another one.
+  const lookup = useLookup(q, open);
+  const { items, loading, error } = lookup;
+  const { active, onNew, hover, move } = useActive(items);
+  // Someone already at a PC cannot be seated on another one; the club refuses a blacklisted client.
   const isDisabled = (hit: ClientHit): string | null =>
-    hit.playing ? t('Уже играет на {pc}', { pc: pcLabel(hit.playing.pcName) }) : null;
+    hit.blacklisted
+      ? t('Клиент в чёрном списке')
+      : hit.playing
+        ? t('Уже играет на {pc}', { pc: pcLabel(hit.playing.pcName) })
+        : null;
 
   const pick = (hit: ClientHit): void => {
     onChange(hit);
     setOpen(false);
     setQ('');
   };
+  // A held Enter picks the best match it was waiting for.
+  const enter = useHeldEnter(lookup, (fresh) => {
+    const hit = fresh[0];
+    if (hit && !isDisabled(hit)) pick(hit);
+  });
 
   if (value) {
     return (
@@ -247,7 +343,7 @@ export function ClientPicker({
         role="combobox"
         aria-expanded={open}
         aria-controls={`${id}-list`}
-        aria-activedescendant={open ? `${id}-list-${active}` : undefined}
+        aria-activedescendant={open && active >= 0 ? `${id}-list-${active}` : undefined}
         aria-autocomplete="list"
         autoComplete="off"
         className={inputCls}
@@ -269,9 +365,15 @@ export function ClientPicker({
             e.preventDefault();
           } else if (e.key === 'Enter' && open) {
             e.preventDefault();
-            const hit = items[active];
-            if (hit && !isDisabled(hit)) pick(hit);
-            else if (active === items.length) openNewClient();
+            if (e.repeat) return;
+            if (onNew) {
+              openNewClient();
+              return;
+            }
+            enter(() => {
+              const hit = items[active];
+              if (hit && !isDisabled(hit)) pick(hit);
+            });
           } else if (e.key === 'Escape' && open) {
             e.stopPropagation();
             setOpen(false);
@@ -286,7 +388,7 @@ export function ClientPicker({
           loading={loading}
           error={error}
           query={q}
-          onHover={setActive}
+          onHover={hover}
           onPick={pick}
           onNewClient={openNewClient}
           isDisabled={isDisabled}
@@ -311,17 +413,25 @@ export const GlobalSearch = forwardRef<
   const id = useId();
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
-  const { items, loading, error } = useLookup(q, open);
-  const [active, setActive, move] = useActive(items.length);
+  const lookup = useLookup(q, open);
+  const { items, loading, error } = lookup;
+  const { active, onNew, hover, move } = useActive(items);
 
   const done = (): void => {
     setOpen(false);
     setQ('');
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   };
+  const act = (hit: ClientHit | undefined, showPc: boolean): void => {
+    if (!hit) return;
+    if (showPc && hit.playing) onShowPc(hit);
+    else onTopUp(hit);
+    done();
+  };
+  const enter = useHeldEnter(lookup, (fresh) => act(fresh[0], false));
 
   return (
-    <div className="relative w-full max-w-[26rem]">
+    <div className="relative min-w-[10rem] max-w-[26rem] flex-1">
       <input
         ref={ref}
         type="search"
@@ -329,7 +439,7 @@ export const GlobalSearch = forwardRef<
         aria-label={t('Поиск клиента')}
         aria-expanded={open}
         aria-controls={`${id}-list`}
-        aria-activedescendant={open ? `${id}-list-${active}` : undefined}
+        aria-activedescendant={open && active >= 0 ? `${id}-list-${active}` : undefined}
         aria-autocomplete="list"
         autoComplete="off"
         className={clsx(inputCls, 'h-9 pr-9')}
@@ -347,15 +457,14 @@ export const GlobalSearch = forwardRef<
             setOpen(true);
           } else if (e.key === 'Enter') {
             e.preventDefault();
-            const hit = items[active];
-            if (hit) {
-              if (e.shiftKey && hit.playing) onShowPc(hit);
-              else onTopUp(hit);
-              done();
-            } else if (active === items.length) {
+            if (e.repeat) return;
+            if (onNew) {
               openNewClient();
               done();
+              return;
             }
+            const showPc = e.shiftKey;
+            enter(() => act(items[active], showPc));
           } else if (e.key === 'Escape') {
             e.stopPropagation();
             done();
@@ -372,7 +481,7 @@ export const GlobalSearch = forwardRef<
           error={error}
           query={q}
           wide
-          onHover={setActive}
+          onHover={hover}
           onPick={(hit) => {
             onTopUp(hit);
             done();

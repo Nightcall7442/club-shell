@@ -96,6 +96,72 @@ public sealed class ShiftGateTests(ServerFixture server) : LedgerCheckedTest(ser
         Assert.Equal("""{"cash":700000,"card":0,"payme":0,"click":0,"uzum":0,"other":300000}""", history[legacy]);
     }
 
+    [Fact]
+    public async Task Paying_with_open_or_extend_is_one_operation_and_a_refused_session_books_nothing()
+    {
+        var cashier = await LoginAsync(Server, CashierPin);
+        var agent = await TestAgent.CreateAsync(Server);
+        var other = await TestAgent.CreateAsync(Server);
+        var player = await Players.CreateAsync(Server, balance: 0);
+        var banned = await Players.CreateAsync(Server, balance: 0);
+        await Players.ProfileAsync(Server, banned, blacklisted: true);
+        await OpenShiftAsync(Server, cashier);
+        object Open(Guid pcId, Guid userId, object payment) => new { pcId, userId, tariffId = Players.Standard, minutes = 60, payment };
+
+        // 60 minutes cost 1 200 000: paid by card with the open, 30 more by Click with the extend; the balance ends at zero.
+        var opened = await ExpectAsync(Server, 201, HttpMethod.Post, "/sessions", cashier, Open(agent.PcId, player.Id, new { amount = 1_200_000, method = "card" }));
+        Assert.Equal((1_200_000L, 0L), (opened.GetProperty("charged").GetProperty("amount").GetInt64(), opened.GetProperty("balance").GetProperty("amount").GetInt64()));
+        var extended = await ExpectAsync(Server, 200, HttpMethod.Post, "/sessions/extend", cashier,
+            new { pcId = agent.PcId, minutes = 30, payment = new { amount = 600_000, method = "click" } });
+        Assert.Equal(0, extended.GetProperty("balance").GetProperty("amount").GetInt64());
+
+        // Refused after the money: the blacklist (403) and a payment short of the price (402) — and before it, a bad payment.
+        Assert.Equal("blacklisted", (await ExpectAsync(Server, 403, HttpMethod.Post, "/sessions", cashier,
+            Open(other.PcId, banned.Id, new { amount = 1_200_000, method = "cash" }))).GetProperty("error").GetProperty("details").GetProperty("rule").GetString());
+        var poor = await Players.CreateAsync(Server, balance: 0);
+        Contract.AssertError(await ExpectAsync(Server, 402, HttpMethod.Post, "/sessions", cashier, Open(other.PcId, poor.Id, new { amount = 100_000, method = "cash" })), "insufficientFunds");
+        foreach (var (payment, field, reason) in new (object, string, string)[]
+        {
+            (new { amount = 100_000 }, "payment.method", "required"),
+            (new { amount = 100_000, method = "visa" }, "payment.method", "enum"),
+            (new { amount = 0, method = "cash" }, "payment.amount", "min"),
+            (new { method = "cash" }, "payment.amount", "required"),
+        })
+        {
+            var details = (await ExpectAsync(Server, 400, HttpMethod.Post, "/sessions", cashier, Open(other.PcId, poor.Id, payment))).GetProperty("error").GetProperty("details");
+            Assert.Equal((field, reason), (details.GetProperty("field").GetString(), details.GetProperty("reason").GetString()));
+        }
+
+        foreach (var refused in new[] { banned.Id, poor.Id })
+        {
+            Assert.Equal((0, 0, 0L), (
+                await Players.ScalarAsync<int>(Server, "SELECT count(*)::int FROM ledger_entries WHERE user_id = @refused", new { refused }),
+                await Players.ScalarAsync<int>(Server, "SELECT count(*)::int FROM audit_entries WHERE user_id = @refused", new { refused }),
+                await Players.BalanceAsync(Server, refused)));
+        }
+
+        var split = (await ExpectAsync(Server, 200, HttpMethod.Get, "/shift", cashier)).GetProperty("x").GetProperty("topUpByMethod");
+        Assert.Equal((0L, 1_200_000L, 600_000L), (split.GetProperty("cash").GetInt64(), split.GetProperty("card").GetInt64(), split.GetProperty("click").GetInt64()));
+        await ExpectAsync(Server, 200, HttpMethod.Post, "/shift/close", cashier, new { closingCash = 0 }); // the other tests start without one
+    }
+
+    [Fact]
+    public async Task The_club_api_key_tops_up_without_a_shift()
+    {
+        var player = await Players.CreateAsync(Server, balance: 0);
+        var key = await ApiKeyAsync(Server);
+        try
+        {
+            Assert.Equal(JsonValueKind.Null, (await ExpectAsync(Server, 200, HttpMethod.Get, "/shift", key)).GetProperty("shift").ValueKind);
+            await ExpectAsync(Server, 200, HttpMethod.Post, "/wallet/topup", key, new { userId = player.Id, amount = 500_000, method = "payme" });
+            Assert.Equal(500_000, await Players.BalanceAsync(Server, player.Id));
+        }
+        finally
+        {
+            await ClearApiKeyAsync(Server);
+        }
+    }
+
     private static async Task<(int Status, JsonElement Body)> SendRawAsync(
         ServerFixture server, HttpMethod method, string path, string? token, object? body = null, Guid? key = null)
     {
@@ -132,11 +198,17 @@ public sealed class ClientLookupTests(ServerFixture server) : LedgerCheckedTest(
 
         var found = (await LookupAsync(cashier, "karim")).GetProperty("items");
         Assert.Equal(
-            """{"id":"%id","displayName":"Карим Валиев","username":"karim","phoneTail":"4521","balance":{"amount":0,"currency":"UZS"},"bonus":{"amount":0,"currency":"UZS"},"cardId":"CARD-77","playing":null}"""
+            """{"id":"%id","displayName":"Карим Валиев","username":"karim","phoneTail":"4521","balance":{"amount":0,"currency":"UZS"},"bonus":{"amount":0,"currency":"UZS"},"cardId":"CARD-77","playing":null,"blacklisted":false}"""
                 .Replace("%id", karim.ToString(), StringComparison.Ordinal),
             found[0].GetRawText());
         var plain = (await LookupAsync(cashier, "farrux")).GetProperty("items")[0];
         Assert.Equal((farrux, JsonValueKind.Null, JsonValueKind.Null), (plain.GetProperty("id").GetGuid(), plain.GetProperty("phoneTail").ValueKind, plain.GetProperty("cardId").ValueKind));
+
+        // A blacklisted client is listed, marked: the desk greys them out.
+        await Players.ExecuteAsync(Server,
+            "INSERT INTO client_profiles (club_id, user_id, blacklisted) SELECT id, @farrux, true FROM clubs ON CONFLICT (club_id, user_id) DO UPDATE SET blacklisted = true",
+            new { farrux });
+        Assert.True((await LookupAsync(cashier, "farrux")).GetProperty("items")[0].GetProperty("blacklisted").GetBoolean());
 
         // Never: a guest, a deleted client, a staff account — not even by the exact login.
         var guest = await Players.CreateAsync(Server, role: "guest");

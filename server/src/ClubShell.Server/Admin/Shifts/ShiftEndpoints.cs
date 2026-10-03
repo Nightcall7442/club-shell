@@ -117,12 +117,15 @@ public static class ShiftEndpoints
 
     /// <summary>
     /// The counter takes money (a top-up, a session opened or extended) only in an open shift, else <c>409 shiftClosed</c>.
-    /// A plain read, first in the action's transaction: <c>shifts</c> is locked last (§4.4), by <see cref="Wallet.Ledger"/>,
-    /// so an action racing the close still waits for it there and its rows get <c>shift_id NULL</c> (§4.3, <c>noShift</c>).
+    /// A plain read, first in the action's transaction: <c>shifts</c> is locked last (§4.4), by <see cref="Wallet.Ledger"/>.
+    /// A top-up racing the close is refused there too (its line is <c>ShiftRequired</c>); a charge racing it gets
+    /// <c>shift_id NULL</c> (§4.3, <c>noShift</c>). The club API key (an integration, no staff member, no drawer) is not gated:
+    /// its rows join the open shift when there is one.
     /// </summary>
-    public static async Task RequireOpenAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid clubId)
+    public static async Task RequireOpenAsync(NpgsqlConnection c, NpgsqlTransaction tx, StaffContext staff)
     {
-        if (!await c.ExecuteScalarAsync<bool>("SELECT EXISTS (SELECT 1 FROM shifts WHERE club_id = @clubId AND closed_at IS NULL)", new { clubId }, tx))
+        if (staff.StaffId is not null
+            && !await c.ExecuteScalarAsync<bool>("SELECT EXISTS (SELECT 1 FROM shifts WHERE club_id = @ClubId AND closed_at IS NULL)", new { staff.ClubId }, tx))
         {
             throw SessionService.Conflict("shiftClosed");
         }

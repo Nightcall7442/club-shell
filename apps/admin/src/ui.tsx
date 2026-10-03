@@ -3,6 +3,7 @@
  * and a money input. Every page is made of these, so a change here changes the whole console.
  */
 import {
+  forwardRef,
   useEffect,
   useRef,
   useState,
@@ -10,21 +11,20 @@ import {
   type InputHTMLAttributes,
   type ReactNode,
 } from 'react';
+import { createPortal } from 'react-dom';
 import clsx from 'clsx';
 import { t } from '@/i18n';
 
-export function Button({
-  children,
-  variant = 'secondary',
-  size = 'md',
-  className,
-  ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
-  size?: 'sm' | 'md';
-}): JSX.Element {
+export const Button = forwardRef<
+  HTMLButtonElement,
+  ButtonHTMLAttributes<HTMLButtonElement> & {
+    variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
+    size?: 'sm' | 'md';
+  }
+>(function Button({ children, variant = 'secondary', size = 'md', className, ...rest }, ref) {
   return (
     <button
+      ref={ref}
       type="button"
       {...rest}
       className={clsx(
@@ -40,7 +40,7 @@ export function Button({
       {children}
     </button>
   );
-}
+});
 
 export const inputCls =
   'focus-ring h-10 w-full rounded-md border border-line bg-bg px-3 text-sm text-text placeholder:text-muted disabled:opacity-50';
@@ -288,6 +288,9 @@ export function Note({ note }: { note: { text: string; tone: 'ok' | 'err' } | nu
   );
 }
 
+/** Sheets open now: the page behind them (`#root`) is inert until the last one closes. */
+let openSheets = 0;
+
 /**
  * A modal sheet over the console (a money action, a confirmation, the shift gate): dimmed backdrop, one panel, the title
  * as the dialog's name. Esc and × close it when `onClose` is given; the backdrop does not, so a stray click never drops
@@ -308,7 +311,18 @@ export function Sheet({
   useEffect(() => {
     if (panel.current && !panel.current.contains(document.activeElement)) panel.current.focus();
   }, []);
-  return (
+  // Modal for real: the page behind it takes neither Tab nor clicks while a sheet is open.
+  useEffect(() => {
+    const root = document.getElementById('root');
+    if (!root) return undefined;
+    openSheets += 1;
+    root.setAttribute('inert', '');
+    return () => {
+      openSheets -= 1;
+      if (openSheets === 0) root.removeAttribute('inert');
+    };
+  }, []);
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-6 pt-[12vh]">
       <div
         ref={panel}
@@ -341,7 +355,8 @@ export function Sheet({
         </header>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

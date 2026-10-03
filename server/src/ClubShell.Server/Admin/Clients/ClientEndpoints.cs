@@ -425,12 +425,13 @@ public static class ClientEndpoints
     private sealed class LookupRow
     {
         /// <summary>
-        /// The list's clients with this club's phone, the PC of the open session in this club (<c>sessions_open_user</c>: one at
-        /// most) and the last sign of life.
+        /// The list's clients with this club's phone and blacklist mark, the PC of the open session in this club
+        /// (<c>sessions_open_user</c>: one at most) and the last sign of life.
         /// </summary>
         public const string Select =
             """
             SELECT u.id, u.username, u.display_name, u.card_id, w.main_balance, coalesce(cp.phone, '') AS phone,
+                   coalesce(cp.blacklisted, false) AS blacklisted,
                    s.pc_id AS playing_pc_id, p.name AS playing_pc_name, greatest(u.last_seen_at, w.updated_at, u.created_at) AS active_at
             FROM users u
             JOIN wallets w ON w.user_id = u.id
@@ -446,6 +447,7 @@ public static class ClientEndpoints
         public string? CardId { get; init; }
         public long MainBalance { get; init; }
         public string Phone { get; init; } = "";
+        public bool Blacklisted { get; init; }
         public Guid? PlayingPcId { get; init; }
         public string? PlayingPcName { get; init; }
 
@@ -483,7 +485,7 @@ public static class ClientEndpoints
             var phone = PhoneDigits;
             return new AdminClientLookupItem(
                 Id, DisplayName, Username, phone.Length == 0 ? null : phone[^Math.Min(4, phone.Length)..], Money.Uzs(MainBalance), Money.Uzs(0), CardId,
-                PlayingPcId is { } pcId ? new AdminClientPlaying(pcId, PlayingPcName ?? "") : null);
+                PlayingPcId is { } pcId ? new AdminClientPlaying(pcId, PlayingPcName ?? "") : null, Blacklisted);
         }
     }
 }

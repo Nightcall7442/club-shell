@@ -11,16 +11,16 @@ export function money(m: Money | null | undefined): string {
   return t('{n} сум', { n: nf.format(Math.round(m.amount / 100)) });
 }
 
-/** Seconds → `1:26` (hours:minutes), `05:12` under an hour. */
+/** Seconds → `1:26:05` (hours:minutes:seconds), `05:12` under an hour. */
 export function duration(sec: number): string {
   if (sec < 0) {
     return '∞';
   }
+  // Always with seconds: "1:27:40", never "1:27", which reads as 1 min 27 s next to "58:02".
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
-  return h > 0
-    ? `${h}:${String(m).padStart(2, '0')}`
-    : `${String(m).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
+  const mmss = `${String(m).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
+  return h > 0 ? `${h}:${mmss}` : mmss;
 }
 
 export function minutesLabel(min: number): string {

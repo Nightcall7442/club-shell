@@ -91,9 +91,15 @@ public sealed record AdminHallPcList(IReadOnlyList<AdminHallPc> Items, IReadOnly
 /// <summary><c>clubCode</c> is beyond the contract: needed once the server holds more than one club (M0006).</summary>
 public sealed record AdminLoginRequest(string? Pin, string? ClubCode);
 
-public sealed record AdminOpenSessionRequest(Guid? PcId, Guid? UserId, Guid? TariffId, int? Minutes);
+/// <summary>
+/// Money the cashier takes with opening or extending (beyond the contract): topped up in the action's transaction, so a
+/// refused session leaves nothing booked.
+/// </summary>
+public sealed record AdminPayment(long? Amount, string? Method);
 
-public sealed record AdminSessionTarget(Guid? PcId, Guid? SessionId, int? Minutes, Guid? TariffId);
+public sealed record AdminOpenSessionRequest(Guid? PcId, Guid? UserId, Guid? TariffId, int? Minutes, AdminPayment? Payment = null);
+
+public sealed record AdminSessionTarget(Guid? PcId, Guid? SessionId, int? Minutes, Guid? TariffId, AdminPayment? Payment = null);
 
 public sealed record AdminTopUpRequest(Guid? UserId, long? Amount, string? Method);
 
@@ -119,10 +125,12 @@ public sealed record AdminClientList(IReadOnlyList<AdminClient> Items);
 
 /// <summary>
 /// A client in the counter's picker (<c>GET /admin/clients/lookup</c>, beyond the contract): <c>phoneTail</c> — the last 4
-/// digits of the club's phone (null — no phone), <c>playing</c> — the PC of the client's open session in this club.
+/// digits of the club's phone (null — no phone), <c>playing</c> — the PC of the client's open session in this club,
+/// <c>blacklisted</c> — the desk greys the client out (the club refuses them a session).
 /// </summary>
 public sealed record AdminClientLookupItem(
-    Guid Id, string DisplayName, string Username, string? PhoneTail, Money Balance, Money Bonus, string? CardId, AdminClientPlaying? Playing);
+    Guid Id, string DisplayName, string Username, string? PhoneTail, Money Balance, Money Bonus, string? CardId, AdminClientPlaying? Playing,
+    bool Blacklisted);
 
 public sealed record AdminClientPlaying(Guid PcId, string PcName);
 

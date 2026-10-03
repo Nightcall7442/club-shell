@@ -112,11 +112,21 @@ export class AdminError extends Error {
   }
 }
 
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
+/**
+ * A money request with no answer in this time is a lost answer (status 0): a dropped club link can otherwise hold a
+ * payment "in progress" for minutes. The money screens then offer the same payment again under the same key. Other
+ * requests wait as long as the browser does (a PC command waits up to 30 s for the PC's answer).
+ */
+const MONEY_TIMEOUT_MS = 20_000;
+
+async function call<T>(path: string, init?: RequestInit, timeoutMs?: number): Promise<T> {
   let res: Response;
+  const abort = new AbortController();
+  const timer = timeoutMs ? window.setTimeout(() => abort.abort(), timeoutMs) : 0;
   try {
     res = await fetch(`${BASE}${path}`, {
       ...init,
+      signal: abort.signal,
       headers: {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -125,6 +135,8 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     });
   } catch (e) {
     throw new AdminError('network', e instanceof Error ? e.message : 'Network error', null);
+  } finally {
+    window.clearTimeout(timer);
   }
   if (!res.ok) {
     const envelope = (await res.json().catch(() => null)) as ServerErrorEnvelope | null;
@@ -171,7 +183,7 @@ async function postMoney<T>(path: string, payload: unknown): Promise<T> {
   const key = pending && now - pending.at < RETRY_WINDOW_MS ? pending.key : newKey();
   pendingKeys.set(action, { key, at: now });
   try {
-    const r = await call<T>(path, { method: 'POST', body, headers: { 'Idempotency-Key': key } });
+    const r = await call<T>(path, { method: 'POST', body, headers: { 'Idempotency-Key': key } }, MONEY_TIMEOUT_MS);
     pendingKeys.delete(action);
     return r;
   } catch (e) {
@@ -210,14 +222,31 @@ export interface ClientHit {
   cardId: string | null;
   /** The PC the client is playing on right now. */
   playing: { pcId: string; pcName: string } | null;
+  /** In this club's blacklist: the club refuses them a session. */
+  blacklisted?: boolean;
+}
+
+/** Money taken with opening or extending: the server tops up and opens in one transaction (a refusal books nothing). */
+export interface SessionPayment {
+  amount: number;
+  method: PayMethod;
 }
 
 export const adminApi = {
   overview: (): Promise<Overview> => call<Overview>('/admin/overview'),
-  openSession: (input: { pcId: string; userId: string; tariffId: string; minutes: number }): Promise<SessionResult> =>
-    postMoney<SessionResult>('/admin/sessions', input),
-  extend: (input: { pcId: string; minutes: number; tariffId?: string }): Promise<SessionResult> =>
-    postMoney<SessionResult>('/admin/sessions/extend', input),
+  openSession: (input: {
+    pcId: string;
+    userId: string;
+    tariffId: string;
+    minutes: number;
+    payment?: SessionPayment;
+  }): Promise<SessionResult> => postMoney<SessionResult>('/admin/sessions', input),
+  extend: (input: {
+    pcId: string;
+    minutes: number;
+    tariffId?: string;
+    payment?: SessionPayment;
+  }): Promise<SessionResult> => postMoney<SessionResult>('/admin/sessions/extend', input),
   end: (input: { pcId: string }): Promise<SessionResult> => postMoney<SessionResult>('/admin/sessions/end', input),
   topUp: (input: {
     userId: string;

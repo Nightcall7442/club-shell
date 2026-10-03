@@ -209,27 +209,34 @@ function ShiftGate({
 export function ShiftChip({ onClick }: { onClick: () => void }): JSX.Element {
   const { loaded, shift, x } = useShift();
   const split = x ? cashSplit(x) : null;
+  const who = shift ? t('Смена · {name}', { name: shift.staffName }) : t('Смена не открыта');
+  const sums = split
+    ? `${t('нал {sum}', { sum: nf.format(Math.round(split.cash / 100)) })} · ${t('безнал {sum}', {
+        sum: nf.format(Math.round(split.cashless / 100)),
+      })}`
+    : null;
+  const full = sums ? `${who} · ${sums}` : who;
+  // The sums never shrink: the cashier checks the drawer against them. The name (also in the corner) shows on wide
+  // screens only; the full line is the button's name and tooltip everywhere.
   return (
     <button
       type="button"
       onClick={onClick}
-      className="focus-ring flex min-w-0 items-center gap-2 whitespace-nowrap rounded-md px-2 py-1 text-sm hover:bg-white/[0.04]"
+      aria-label={full}
+      title={full}
+      className="focus-ring flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-2 py-1 text-sm hover:bg-white/[0.04]"
     >
       <span
         className={clsx('h-2 w-2 shrink-0 rounded-full', shift ? 'bg-success' : loaded ? 'bg-danger' : 'bg-muted')}
       />
       {shift ? (
         <>
-          <span className="truncate">{t('Смена · {name}', { name: shift.staffName })}</span>
-          {split && (
-            <span className="tnum hidden truncate text-muted lg:inline">
-              · {t('нал {sum}', { sum: nf.format(Math.round(split.cash / 100)) })} ·{' '}
-              {t('безнал {sum}', { sum: nf.format(Math.round(split.cashless / 100)) })}
-            </span>
-          )}
+          <span className="2xl:hidden">{t('Смена')}</span>
+          <span className="hidden 2xl:inline">{who}</span>
+          {sums && <span className="tnum text-muted">· {sums}</span>}
         </>
       ) : (
-        t('Смена не открыта')
+        who
       )}
     </button>
   );

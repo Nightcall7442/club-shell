@@ -5,11 +5,15 @@
  * the {@link Payment}, shows the busy state and the server's refusal inline, and refreshes the shift totals after. A
  * split payment later becomes a list of payments without changing the callers. While no shift is open the buttons stay
  * in place, disabled, with the reason and a button that opens the shift.
+ *
+ * A lost answer (no response or 5xx) may still have booked the money: the box then freezes the amount and the method and
+ * offers only the same payment again, which `postMoney` sends under the same `Idempotency-Key` (the server replays the
+ * first result instead of booking twice). Cash typed in "Получено" below the amount refuses cash; a held Enter pays once.
  */
 import { useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import type { Money } from '@clubshell/contracts';
-import { adminApi, type PayMethod } from '@/api';
+import { AdminError, adminApi, type PayMethod } from '@/api';
 import { describe } from '@/errors';
 import { money } from '@/format';
 import { t } from '@/i18n';
@@ -26,8 +30,10 @@ export const PAY_METHODS: { id: PayMethod; label: string; hint: string; code: st
 ];
 
 const PRESETS = [20_000, 50_000, 100_000, 200_000];
-/** Whole сум a cashier can type: 999 999 999. */
+/** Whole сум a cashier can type: 999 999 999 (more than {@link MAX_AMOUNT} is shown as an error, not cut off). */
 const MAX_DIGITS = 9;
+/** The server's limit of one counter payment, minor units: 1 000 000 сум. */
+export const MAX_AMOUNT = 100_000_000;
 
 /** One payment as the cashier took it. Amounts are minor units (tiyin). */
 export interface Payment {
@@ -77,6 +83,7 @@ export function PayBox({
   min = 0,
   verb,
   autoFocus = true,
+  disabled,
   onPay,
 }: {
   /** Minor units the amount starts with (e.g. what a session lacks). */
@@ -86,6 +93,8 @@ export function PayBox({
   /** Prefix of the method buttons: "Посадить" → "Посадить · Наличные". */
   verb?: string;
   autoFocus?: boolean;
+  /** Why the box cannot take money yet (e.g. the price is being recounted); null or absent — it can. */
+  disabled?: string | null;
   /** Does what the money is for; a throw is shown inline under the buttons, a success spends the box. */
   onPay: (p: Payment) => Promise<void>;
 }): JSX.Element {
@@ -97,14 +106,17 @@ export function PayBox({
   const [spent, setSpent] = useState(false);
   const inFlight = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  // The payment whose answer was lost: only it may be sent again (same body, same key), nothing else.
+  const [unknown, setUnknown] = useState<Payment | null>(null);
   const amountRef = useRef<HTMLInputElement>(null);
   const alive = useRef(true);
-  useEffect(
-    () => () => {
+  // Set on every mount: StrictMode mounts twice, and a box left "dead" would never leave its busy state.
+  useEffect(() => {
+    alive.current = true;
+    return () => {
       alive.current = false;
-    },
-    [],
-  );
+    };
+  }, []);
   // A new shortfall (another tariff or duration) refills the field.
   useEffect(() => setDigits(sumDigits(initial)), [initial]);
 
@@ -112,19 +124,34 @@ export function PayBox({
   const receivedMinor = Number(received || '0') * 100;
   const closed = useShiftClosed();
   const tooLow = amount > 0 && amount < min;
-  const ready = amount > 0 && !tooLow && !closed && busy === null && !spent;
+  const tooHigh = amount > MAX_AMOUNT;
+  // Cash handed over below the amount: the cashier has not got the money yet.
+  const cashShort = receivedMinor > 0 && receivedMinor < amount;
+  const ready =
+    amount > 0 && !tooLow && !tooHigh && !closed && !disabled && busy === null && !spent && unknown === null;
 
-  const pay = async (method: PayMethod): Promise<void> => {
-    if (!ready || inFlight.current) return;
+  const send = async (p: Payment): Promise<void> => {
+    if (inFlight.current) return;
     inFlight.current = true;
-    setBusy(method);
+    setBusy(p.method);
     setError(null);
     try {
-      await onPay({ method, amount, received: method === 'cash' && receivedMinor > 0 ? receivedMinor : null });
-      if (alive.current) setSpent(true);
+      await onPay(p);
+      if (alive.current) {
+        setSpent(true);
+        setUnknown(null);
+      }
     } catch (e) {
       inFlight.current = false;
-      if (alive.current) setError(describe(e));
+      if (alive.current) {
+        const lost = e instanceof AdminError && (e.status === 0 || e.status >= 500);
+        setUnknown(lost ? p : null);
+        setError(
+          lost
+            ? t('Ответ сервера не пришёл: деньги могли пройти. Повторите этот же платёж — дважды он не проведётся.')
+            : describe(e),
+        );
+      }
     } finally {
       if (alive.current) setBusy(null);
       // The chip's cash / cashless, and a `shiftClosed` refusal brings the gate state up to date.
@@ -132,19 +159,26 @@ export function PayBox({
     }
   };
 
+  const pay = (method: PayMethod): void => {
+    if (!ready || (method === 'cash' && cashShort)) return;
+    void send({ method, amount, received: method === 'cash' && receivedMinor > 0 ? receivedMinor : null });
+  };
+  const frozen = busy !== null || unknown !== null;
+
   return (
     <div
       className="flex flex-col gap-3"
       onKeyDown={(e) => {
         if (e.key === 'Enter' && e.target instanceof HTMLInputElement) {
           e.preventDefault();
-          void pay('cash');
+          // A held Enter (auto-repeat) is not a second decision.
+          if (!e.repeat) pay('cash');
           return;
         }
         const m = e.altKey ? PAY_METHODS.find((x) => x.code === e.code) : undefined;
         if (m) {
           e.preventDefault();
-          void pay(m.id);
+          if (!e.repeat) pay(m.id);
         }
       }}
     >
@@ -157,7 +191,7 @@ export function PayBox({
             autoComplete="off"
             autoFocus={autoFocus}
             // read-only, not disabled, while paying: the focus stays here for the next Enter after a refusal
-            readOnly={busy !== null}
+            readOnly={frozen}
             className={clsx(inputCls, 'tnum h-12 pr-12 text-xl font-semibold')}
             value={groupDigits(digits)}
             placeholder="0"
@@ -173,7 +207,7 @@ export function PayBox({
           <Button
             key={p}
             size="sm"
-            disabled={busy !== null}
+            disabled={frozen}
             className={clsx(digits === String(p) && 'choice-on')}
             onClick={() => {
               setDigits(String(p));
@@ -185,6 +219,7 @@ export function PayBox({
         ))}
       </div>
       {tooLow && <p className="text-xs text-warning">{t('Не меньше {sum}', { sum: uzs(min) })}</p>}
+      {tooHigh && <p className="text-xs text-warning">{t('Не больше {sum}', { sum: uzs(MAX_AMOUNT) })}</p>}
 
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-3">
         <label className="flex flex-col gap-1.5">
@@ -192,7 +227,7 @@ export function PayBox({
           <input
             inputMode="numeric"
             autoComplete="off"
-            readOnly={busy !== null}
+            readOnly={frozen}
             className={clsx(inputCls, 'tnum h-9')}
             value={groupDigits(received)}
             placeholder={t('необязательно')}
@@ -211,23 +246,39 @@ export function PayBox({
       </div>
 
       <ShiftClosedNote />
+      {disabled && !closed && <p className="text-xs text-muted">{disabled}</p>}
 
-      <div className={clsx('grid gap-1.5', verb ? 'grid-cols-2' : 'grid-cols-4')}>
-        {PAY_METHODS.map((m, i) => (
-          <Button
-            key={m.id}
-            variant={i === 0 ? 'primary' : 'secondary'}
-            disabled={!ready}
-            title={m.hint}
-            className={clsx(i === 0 && (verb ? 'col-span-2' : 'col-span-4'), 'h-11')}
-            onClick={() => void pay(m.id)}
-          >
-            {busy === m.id ? '…' : verb ? `${verb} · ${t(m.label)}` : t(m.label)}
-            <Kbd>{m.hint}</Kbd>
-          </Button>
-        ))}
-      </div>
-      {error && <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>}
+      {unknown ? (
+        <Button variant="primary" className="h-11" disabled={busy !== null} onClick={() => void send(unknown)}>
+          {busy !== null
+            ? '…'
+            : t('Повторить · {sum} · {method}', {
+                sum: uzs(unknown.amount),
+                method: t(PAY_METHODS.find((m) => m.id === unknown.method)?.label ?? unknown.method),
+              })}
+        </Button>
+      ) : (
+        <div className={clsx('grid gap-1.5', verb ? 'grid-cols-2' : 'grid-cols-4')}>
+          {PAY_METHODS.map((m, i) => (
+            <Button
+              key={m.id}
+              variant={i === 0 ? 'primary' : 'secondary'}
+              disabled={!ready || (m.id === 'cash' && cashShort)}
+              title={m.hint}
+              className={clsx(i === 0 && (verb ? 'col-span-2' : 'col-span-4'), 'h-11')}
+              onClick={() => pay(m.id)}
+            >
+              {busy === m.id ? '…' : verb ? `${verb} · ${t(m.label)}` : t(m.label)}
+              <Kbd>{m.hint}</Kbd>
+            </Button>
+          ))}
+        </div>
+      )}
+      {error && (
+        <p role="alert" className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

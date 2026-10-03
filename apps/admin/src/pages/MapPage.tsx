@@ -654,6 +654,12 @@ function ExtendSheet({
 
   const price = prices[minutes];
   const shortfall = price === undefined ? 0 : Math.max(0, price - user.balance.amount);
+  // Enter extends once the prices are in: the button is off (and so unfocusable) until then.
+  const extendButton = useRef<HTMLButtonElement>(null);
+  const priced = price !== undefined;
+  useEffect(() => {
+    if (priced && shortfall === 0) extendButton.current?.focus();
+  }, [priced, shortfall]);
 
   const extend = async (): Promise<string> => {
     const r = await adminApi.extend({ pcId: seat.pc.id, minutes });
@@ -684,20 +690,8 @@ function ExtendSheet({
           min={shortfall}
           verb={t('Продлить')}
           onPay={async (p) => {
-            // A refused top-up stays in the box; once the money is in, a refused extension is the sheet's to say
-            // (the next overview shows the new balance and offers the extension without a payment).
-            await adminApi.topUp({ userId: user.id, amount: p.amount, method: p.method });
-            try {
-              await extend();
-            } catch (e) {
-              setError(
-                t('Баланс пополнен на {sum}, но время не добавлено: {why}', {
-                  sum: money(uzs(p.amount)),
-                  why: describe(e),
-                }),
-              );
-              return;
-            }
+            // One request: the server tops up and extends together, a refused extension books no money.
+            await adminApi.extend({ pcId: seat.pc.id, minutes, payment: { amount: p.amount, method: p.method } });
             onDone(t('Принято {cash} · добавлено {time}', { cash: money(uzs(p.amount)), time: minutesLabel(minutes) }));
           }}
         />
@@ -705,9 +699,9 @@ function ExtendSheet({
         <>
           <ShiftClosedNote />
           <Button
+            ref={extendButton}
             variant="primary"
             className="h-11"
-            autoFocus
             disabled={busy || closed || price === undefined}
             onClick={() => {
               setBusy(true);
@@ -813,25 +807,29 @@ function FreeSeat({ seat, tariffs, header, note, busy, run, onDone, setNote }: P
   }, [zoneTariffs, tariffId]);
 
   const tariff = zoneTariffs.find((x) => x.id === tariffId);
-  // The server's quote: weekday / holiday price and the best discount (group, loyalty level, happy hour).
-  const [priceQuote, setPriceQuote] = useState<PriceQuote | null>(null);
+  // The server's quote: weekday / holiday price and the best discount (group, loyalty level, happy hour). It is kept
+  // with what it priced, so money is never taken on the quote of the previous tariff, time or client.
   const userId = who?.id ?? null;
+  const quoteFor = `${seat.pc.id}|${tariffId}|${minutes}|${userId ?? ''}`;
+  const [quoted, setQuoted] = useState<{ key: string; q: PriceQuote | null } | null>(null);
   useEffect(() => {
     if (!tariffId) return undefined;
     let alive = true;
     clubApi
       .quote({ tariffId, pcId: seat.pc.id, minutes, userId })
-      .then((q) => alive && setPriceQuote(q))
-      .catch(() => alive && setPriceQuote(null));
+      .then((q) => alive && setQuoted({ key: quoteFor, q }))
+      .catch(() => alive && setQuoted({ key: quoteFor, q: null }));
     return () => {
       alive = false;
     };
-  }, [tariffId, minutes, userId, seat.pc.id]);
+  }, [tariffId, minutes, userId, seat.pc.id, quoteFor]);
+  const priceQuote = quoted?.q ?? null;
+  const quoteFresh = quoted?.key === quoteFor && priceQuote !== null;
   const price = priceQuote?.total.amount ?? 0;
   // Opening a session debits the client's balance, so what it lacks is taken first, here, as a top-up.
   const shortfall = who ? Math.max(0, price - who.balance.amount) : 0;
   const blocked = seat.pc.status === 'maintenance';
-  const canSeat = who !== null && !!tariffId && priceQuote !== null && !blocked && busy === null;
+  const canSeat = who !== null && !!tariffId && quoteFresh && !blocked && busy === null;
 
   const open = async (): Promise<string> => {
     const r = await adminApi.openSession({ pcId: seat.pc.id, userId: who?.id ?? '', tariffId, minutes });
@@ -892,22 +890,26 @@ function FreeSeat({ seat, tariffs, header, note, busy, run, onDone, setNote }: P
             initial={shortfall}
             min={shortfall}
             verb={t('Посадить')}
+            // Inline in the panel: no focus grab, or the PC number typed for the map would land in the amount.
+            autoFocus={false}
+            disabled={quoteFresh ? null : t('Считаем цену…')}
             onPay={async (p) => {
-              // A refused top-up stays in the box. Once the money is in, a refused session is the panel's to say:
-              // the box gives way to "Посадить" over the new balance.
-              const r = await adminApi.topUp({ userId: who.id, amount: p.amount, method: p.method });
-              try {
-                setNote({ text: await open(), tone: 'ok' });
-              } catch (e) {
-                setWho({ ...who, balance: r.balance });
-                setNote({
-                  text: t('Баланс пополнен на {sum}, но сеанс не открыт: {why}', {
-                    sum: money(uzs(p.amount)),
-                    why: describe(e),
-                  }),
-                  tone: 'err',
-                });
-              }
+              // One request: the server tops up and opens together, so a refused session (blacklist, curfew, a busy
+              // PC, a new price) books no money and the refusal stays in the box.
+              const r = await adminApi.openSession({
+                pcId: seat.pc.id,
+                userId: who.id,
+                tariffId,
+                minutes,
+                payment: { amount: p.amount, method: p.method },
+              });
+              setNote({
+                text: t('Сеанс открыт · принято {cash} · списано {sum}', {
+                  cash: money(uzs(p.amount)),
+                  sum: money(r.charged),
+                }),
+                tone: 'ok',
+              });
               onDone();
             }}
           />
@@ -1193,13 +1195,11 @@ export function MapPage(): JSX.Element {
           )}
 
           {/* Legend that counts: every status, how many seats are in it right now */}
-          <ul className="panel grid shrink-0 grid-cols-2 divide-x divide-line xl:grid-cols-6">
+          <ul className="panel flex shrink-0 flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
             {LEGEND_ORDER.map((k) => (
-              <li key={k} className="flex min-w-0 items-center justify-between gap-2 px-3 py-3 xl:gap-3 xl:px-4">
-                <span className="flex min-w-0 items-center gap-2.5 text-sm">
-                  <span className={clsx('h-3 w-3 shrink-0 rounded-[3px] border-2 bg-transparent', STATUS[k].cell)} />
-                  <span className="truncate">{t(STATUS[k].label)}</span>
-                </span>
+              <li key={k} className="flex items-center gap-2.5 whitespace-nowrap text-sm">
+                <span className={clsx('h-3 w-3 shrink-0 rounded-[3px] border-2 bg-transparent', STATUS[k].cell)} />
+                <span>{t(STATUS[k].label)}</span>
                 <span className="num-dot text-lg leading-none">{String(counts.get(k) ?? 0).padStart(2, '0')}</span>
               </li>
             ))}

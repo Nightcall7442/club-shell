@@ -9,7 +9,8 @@ namespace ClubShell.Server.Wallet;
 
 /// <summary>
 /// One ledger row to post: signed <paramref name="Amount"/> (tiyin), what it is for and the links reports read.
-/// <paramref name="Meta"/> carries the price quote of a charge (DESIGN §5.1).
+/// <paramref name="Meta"/> carries the price quote of a charge (DESIGN §5.1). <paramref name="ShiftRequired"/>: money the
+/// cashier takes, which must land in the open shift's X/Z (else <c>409 shiftClosed</c>, the whole operation refused).
 /// </summary>
 public sealed record LedgerLine(
     string Type,
@@ -21,7 +22,8 @@ public sealed record LedgerLine(
     string? Method = null,
     Guid? StaffId = null,
     object? Meta = null,
-    Guid? Id = null);
+    Guid? Id = null,
+    bool ShiftRequired = false);
 
 /// <summary>
 /// The only writer of money (DESIGN §4.3): inside the caller's transaction it locks the wallet row
@@ -32,7 +34,8 @@ public sealed record LedgerLine(
 /// row <c>overdraft</c>. Every row of a club gets its open shift (<c>shift_id</c>, taken <c>FOR SHARE</c> after the wallet —
 /// lock order §4.4; closing a shift takes it <c>FOR UPDATE</c>, so no row joins a shift after its Z report was summed). A
 /// row racing the close waits for it, no longer finds an open shift and gets <c>shift_id NULL</c>, like a row posted with
-/// no shift open: the S5 <c>noShift</c> flag must count those. Pushes go out after the commit, never from here.
+/// no shift open: the S5 <c>noShift</c> flag must count those — except a line marked <c>ShiftRequired</c> (a counter top-up),
+/// which is refused instead. Pushes go out after the commit, never from here.
 /// </summary>
 public static class Ledger
 {
@@ -49,6 +52,10 @@ public static class Ledger
         var clubId = lines.FirstOrDefault(l => l.ClubId is not null)?.ClubId;
         var shiftId = clubId is null ? null : await c.QuerySingleOrDefaultAsync<Guid?>(
             "SELECT id FROM shifts WHERE club_id = @clubId AND closed_at IS NULL FOR SHARE", new { clubId }, tx);
+        if (shiftId is null && lines.Any(l => l.ShiftRequired))
+        {
+            throw new ApiException(StatusCodes.Status409Conflict, ErrorCode.Conflict, "Conflict: shiftClosed", new { reason = "shiftClosed" });
+        }
 
         var balance = wallet.Balance;
         var spent = 0L;

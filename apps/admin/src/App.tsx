@@ -368,6 +368,8 @@ export function App(): JSX.Element {
   // A client being topped up from the top-bar search (on any page, with or without a PC).
   const [topUpFor, setTopUpFor] = useState<ClientHit | null>(null);
   const search = useRef<HTMLInputElement>(null);
+  // A sheet left open by whoever signed out does not greet the next one.
+  useEffect(() => setTopUpFor(null), [staff]);
 
   useEffect(() => {
     if (!hasToken()) return;
@@ -459,7 +461,7 @@ export function App(): JSX.Element {
             <span className="num-dot text-2xl leading-none">
               {now.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}
             </span>
-            <span className="hidden whitespace-nowrap text-sm text-muted xl:inline">
+            <span className="hidden whitespace-nowrap text-sm text-muted 2xl:inline">
               {now.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' })}
             </span>
           </div>
@@ -477,7 +479,7 @@ export function App(): JSX.Element {
           <div className="ml-auto flex items-center gap-5">
             {usage && (
               <div className="flex items-baseline gap-3">
-                <span className="label hidden whitespace-nowrap xl:inline">{t('Загрузка зала')}</span>
+                <span className="label hidden whitespace-nowrap 2xl:inline">{t('Загрузка зала')}</span>
                 <span className="num-dot text-2xl leading-none">
                   <span className="text-accent">{String(usage.busy).padStart(2, '0')}</span>
                   <span className="text-muted">/{String(usage.total).padStart(2, '0')}</span>

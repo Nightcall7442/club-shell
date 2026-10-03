@@ -133,26 +133,26 @@ function lookupView(u: UserRecord): Record<string, unknown> {
     username: u.username,
     phoneTail: phone ? phone.slice(-4) : null,
     balance: u.balance,
-    bonus: u.bonus,
+    // The server's lookup sends no bonus (v1, D-9).
+    bonus: uzs(0),
     cardId: u.cardId,
     playing: pc ? { pcId: pc.id, pcName: pc.name } : null,
+    blacklisted: profileOf(u.id).blacklisted,
   };
 }
 
 /**
- * How well `u` matches the search (0 — not at all): the exact card first, then a login or name that starts with it, a
- * word of the name that does, any substring of the name or login, and last a run of the phone's digits.
+ * How well `u` matches the search, as the server ranks it (−1 — not at all): 0 the exact card or login, 1 a login or a
+ * word of the name that starts with it, 2 any substring of the name or login, 3 a run of the phone's digits.
  */
-function lookupScore(u: UserRecord, q: string, digits: string | null): number {
+function lookupRank(u: UserRecord, q: string, digits: string | null): number {
   const name = u.displayName.toLowerCase();
   const login = u.username.toLowerCase();
-  if (u.cardId && u.cardId.toLowerCase() === q) return 100;
-  if (login === q) return 90;
-  if (login.startsWith(q) || name.startsWith(q)) return 70;
-  if (name.split(/\s+/).some((w) => w.startsWith(q))) return 60;
-  if (login.includes(q) || name.includes(q)) return 50;
-  if (digits && profileOf(u.id).phone.replace(/\D/g, '').includes(digits)) return 40;
-  return 0;
+  if (login === q || (u.cardId && u.cardId.toLowerCase() === q)) return 0;
+  if (login.startsWith(q) || name.startsWith(q) || name.includes(` ${q}`)) return 1;
+  if (login.includes(q) || name.includes(q)) return 2;
+  if (digits && profileOf(u.id).phone.replace(/\D/g, '').includes(digits)) return 3;
+  return -1;
 }
 
 function money(n: number): string {
@@ -470,25 +470,25 @@ export function clubRoutes(app: FastifyInstance): void {
     requireStaff(req);
     const q = (req.query.q ?? '').trim().toLowerCase();
     const pool = db.users.filter((u) => !u.transient && u.role !== 'admin' && u.role !== 'guest');
-    if (q.length < 2) {
-      const lastTx = new Map<string, string>();
-      for (const tx of db.transactions) {
-        if (tx.createdAt > (lastTx.get(tx.userId) ?? '')) lastTx.set(tx.userId, tx.createdAt);
-      }
-      const active = (u: UserRecord): string => {
-        const seen = u.lastSeenAt ?? u.createdAt;
-        const tx = lastTx.get(u.id) ?? '';
-        return tx > seen ? tx : seen;
-      };
-      const recent = [...pool].sort((a, b) => active(b).localeCompare(active(a)));
-      return { items: recent.slice(0, 8).map(lookupView) };
+    // The last sign of life (a sign-in or a wallet movement): the recent list, and the tie-break of equal matches.
+    const lastTx = new Map<string, string>();
+    for (const tx of db.transactions) {
+      if (tx.createdAt > (lastTx.get(tx.userId) ?? '')) lastTx.set(tx.userId, tx.createdAt);
     }
+    const active = (u: UserRecord): string => {
+      const seen = u.lastSeenAt ?? u.createdAt;
+      const tx = lastTx.get(u.id) ?? '';
+      return tx > seen ? tx : seen;
+    };
+    const byActivity = (a: UserRecord, b: UserRecord): number =>
+      active(b).localeCompare(active(a)) || a.id.localeCompare(b.id);
+    if (q.length < 2) return { items: [...pool].sort(byActivity).slice(0, 8).map(lookupView) };
     // Digits typed with phone punctuation only ("90 123-45-21") search the phone.
-    const digits = /^[\d\s+()-]+$/.test(q) ? q.replace(/\D/g, '') : null;
+    const digits = /\d/.test(q) && /^[\d\s+()-]+$/.test(q) ? q.replace(/\D/g, '') : null;
     const items = pool
-      .map((u) => ({ u, score: lookupScore(u, q, digits && digits.length >= 2 ? digits : null) }))
-      .filter((x) => x.score > 0)
-      .sort((a, b) => b.score - a.score || a.u.displayName.localeCompare(b.u.displayName))
+      .map((u) => ({ u, rank: lookupRank(u, q, digits) }))
+      .filter((x) => x.rank >= 0)
+      .sort((a, b) => a.rank - b.rank || byActivity(a.u, b.u))
       .slice(0, 8)
       .map((x) => lookupView(x.u));
     return { items };
