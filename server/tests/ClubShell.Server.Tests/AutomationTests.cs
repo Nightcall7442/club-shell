@@ -34,6 +34,7 @@ public sealed class AutomationTests(LongClockServerFixture server) : LedgerCheck
         });
         var agent = await TestAgent.CreateAsync(Server);
         var player = await Players.CreateAsync(Server);
+        await OpenShiftAsync(Server, owner);
 
         // Visit 1: sessionStarted locks the PC; visit 2: also the visitCount bonus.
         await ExpectAsync(Server, 201, HttpMethod.Post, "/sessions", owner, new { pcId = agent.PcId, userId = player.Id, tariffId = Players.Standard, minutes = 30 });

@@ -27,7 +27,12 @@ public static class AdminJson
 
 public sealed record AdminStaffMember(string Id, string Name, string Role, bool Active);
 
-public sealed record AdminShiftTotals(long TopUpCash, long TopUpOther, long Sessions, long Shop, long Refunds, long Bonuses, int Count);
+/// <summary>X/Z report; <c>topUpByMethod</c> (beyond the contract) splits the top-ups by payment method.</summary>
+public sealed record AdminShiftTotals(
+    long TopUpCash, long TopUpOther, long Sessions, long Shop, long Refunds, long Bonuses, int Count, AdminTopUpByMethod TopUpByMethod);
+
+/// <summary>Top-ups of a shift by <c>ledger_entries.method</c>; <c>other</c> — rows with no method.</summary>
+public sealed record AdminTopUpByMethod(long Cash, long Card, long Payme, long Click, long Uzum, long Other);
 
 public sealed record AdminShift(
     Guid Id, string StaffId, string StaffName, DateTimeOffset OpenedAt, DateTimeOffset? ClosedAt, long OpeningCash, long? ClosingCash, AdminShiftTotals? Totals);
@@ -111,6 +116,17 @@ public sealed record AdminClient(
     string Phone, int? BirthYear, string? CardId, long Spent, int Visits, int Level, string LevelName);
 
 public sealed record AdminClientList(IReadOnlyList<AdminClient> Items);
+
+/// <summary>
+/// A client in the counter's picker (<c>GET /admin/clients/lookup</c>, beyond the contract): <c>phoneTail</c> — the last 4
+/// digits of the club's phone (null — no phone), <c>playing</c> — the PC of the client's open session in this club.
+/// </summary>
+public sealed record AdminClientLookupItem(
+    Guid Id, string DisplayName, string Username, string? PhoneTail, Money Balance, Money Bonus, string? CardId, AdminClientPlaying? Playing);
+
+public sealed record AdminClientPlaying(Guid PcId, string PcName);
+
+public sealed record AdminClientLookupList(IReadOnlyList<AdminClientLookupItem> Items);
 
 public sealed record AdminClientResponse(AdminClient Client);
 

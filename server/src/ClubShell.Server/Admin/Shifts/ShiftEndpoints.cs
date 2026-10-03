@@ -15,10 +15,11 @@ namespace ClubShell.Server.Admin;
 /// Cash shifts (slice S4, DESIGN §4.3): at most one open per club (<c>shifts_open</c>), every ledger row gets the open
 /// shift's id (<see cref="Wallet.Ledger"/> takes it <c>FOR SHARE</c>, closing takes it <c>FOR UPDATE</c>, so no row joins the
 /// shift after its Z report; a row racing the close gets <c>shift_id NULL</c>, as with no shift open — S5 <c>noShift</c>
-/// counts those). X/Z report = sums by <c>shift_id</c> grouped by type and method; <c>expectedCash = openingCash + Σ topUp
-/// cash</c>. A shortfall over <c>settings.control.shortfallFrom</c> (default 500 000 tiyin) flags the <c>shiftClose</c>
-/// entry. Any staff member may close (not only who opened). Closing raises <c>shiftClosed</c>, and <c>suspicious</c> on a
-/// shortfall, for the webhooks (S5), in the close's transaction.
+/// counts those). The counter takes no money without an open shift (<see cref="RequireOpenAsync"/>). X/Z report = sums by
+/// <c>shift_id</c> grouped by type and method, top-ups also per method; <c>expectedCash = openingCash + Σ topUp cash</c>. A
+/// shortfall over <c>settings.control.shortfallFrom</c> (default 500 000 tiyin) flags the <c>shiftClose</c> entry. Any staff
+/// member may close (not only who opened). Closing raises <c>shiftClosed</c>, and <c>suspicious</c> on a shortfall, for the
+/// webhooks (S5), in the close's transaction.
 /// </summary>
 public static class ShiftEndpoints
 {
@@ -114,12 +115,32 @@ public static class ShiftEndpoints
         });
     }
 
-    /// <summary>X/Z report of a shift: its ledger rows by type and method (<c>topUp</c> cash vs other methods).</summary>
+    /// <summary>
+    /// The counter takes money (a top-up, a session opened or extended) only in an open shift, else <c>409 shiftClosed</c>.
+    /// A plain read, first in the action's transaction: <c>shifts</c> is locked last (§4.4), by <see cref="Wallet.Ledger"/>,
+    /// so an action racing the close still waits for it there and its rows get <c>shift_id NULL</c> (§4.3, <c>noShift</c>).
+    /// </summary>
+    public static async Task RequireOpenAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid clubId)
+    {
+        if (!await c.ExecuteScalarAsync<bool>("SELECT EXISTS (SELECT 1 FROM shifts WHERE club_id = @clubId AND closed_at IS NULL)", new { clubId }, tx))
+        {
+            throw SessionService.Conflict("shiftClosed");
+        }
+    }
+
+    /// <summary>
+    /// X/Z report of a shift: its ledger rows by type and method (<c>topUp</c> cash vs other methods, and each method on its
+    /// own; <c>method</c> is one of the five or NULL, M0002).
+    /// </summary>
     private static async Task<AdminShiftTotals> TotalsAsync(NpgsqlConnection c, NpgsqlTransaction? tx, Guid shiftId) =>
-        await c.QuerySingleAsync<AdminShiftTotals>(
+        (await c.QuerySingleAsync<TotalsRow>(
             """
-            SELECT coalesce(sum(amount) FILTER (WHERE type = 'topUp' AND method = 'cash'), 0)::bigint AS "TopUpCash",
-                   coalesce(sum(amount) FILTER (WHERE type = 'topUp' AND method IS DISTINCT FROM 'cash'), 0)::bigint AS "TopUpOther",
+            SELECT coalesce(sum(amount) FILTER (WHERE type = 'topUp' AND method = 'cash'), 0)::bigint AS "Cash",
+                   coalesce(sum(amount) FILTER (WHERE type = 'topUp' AND method = 'card'), 0)::bigint AS "Card",
+                   coalesce(sum(amount) FILTER (WHERE type = 'topUp' AND method = 'payme'), 0)::bigint AS "Payme",
+                   coalesce(sum(amount) FILTER (WHERE type = 'topUp' AND method = 'click'), 0)::bigint AS "Click",
+                   coalesce(sum(amount) FILTER (WHERE type = 'topUp' AND method = 'uzum'), 0)::bigint AS "Uzum",
+                   coalesce(sum(amount) FILTER (WHERE type = 'topUp' AND method IS NULL), 0)::bigint AS "Other",
                    coalesce(-sum(amount) FILTER (WHERE type = 'charge'), 0)::bigint AS "Sessions",
                    coalesce(-sum(amount) FILTER (WHERE type = 'purchase'), 0)::bigint AS "Shop",
                    coalesce(sum(amount) FILTER (WHERE type = 'refund'), 0)::bigint AS "Refunds",
@@ -128,7 +149,7 @@ public static class ShiftEndpoints
             FROM ledger_entries WHERE shift_id = @shiftId
             """,
             new { shiftId },
-            tx);
+            tx)).ToWire();
 
     public static string Principal(StaffContext staff) => "club:" + staff.ClubId.ToString("D", CultureInfo.InvariantCulture);
 
@@ -150,6 +171,31 @@ public static class ShiftEndpoints
 
         public AdminShift ToWire() => new(
             Id, StaffId?.ToString() ?? "apiKey", StaffName, OpenedAt, ClosedAt, OpeningCash, ClosingCash,
-            Totals is null ? null : JsonSerializer.Deserialize<AdminShiftTotals>(Totals, ServerJson.Options));
+            Totals is null ? null : Split(JsonSerializer.Deserialize<AdminShiftTotals>(Totals, ServerJson.Options)!));
+
+        /// <summary>
+        /// A Z report saved before the split by method: cash as it was, the rest as <c>other</c> (the counter sent no method
+        /// then, so it is all cash in practice).
+        /// </summary>
+        private static AdminShiftTotals Split(AdminShiftTotals z) =>
+            z.TopUpByMethod is null ? z with { TopUpByMethod = new(z.TopUpCash, 0, 0, 0, 0, z.TopUpOther) } : z;
+    }
+
+    private sealed class TotalsRow
+    {
+        public long Cash { get; init; }
+        public long Card { get; init; }
+        public long Payme { get; init; }
+        public long Click { get; init; }
+        public long Uzum { get; init; }
+        public long Other { get; init; }
+        public long Sessions { get; init; }
+        public long Shop { get; init; }
+        public long Refunds { get; init; }
+        public long Bonuses { get; init; }
+        public int Count { get; init; }
+
+        public AdminShiftTotals ToWire() => new(
+            Cash, Card + Payme + Click + Uzum + Other, Sessions, Shop, Refunds, Bonuses, Count, new(Cash, Card, Payme, Click, Uzum, Other));
     }
 }

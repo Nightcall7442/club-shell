@@ -73,6 +73,20 @@ public static class Staff
         return first;
     }
 
+    /// <summary>
+    /// The counter takes money only in an open shift (<c>409 shiftClosed</c>): opens one with an empty drawer, unless the club
+    /// has one open already (<c>409 shiftOpen</c>).
+    /// </summary>
+    public static async Task OpenShiftAsync(ServerFixture server, string token)
+    {
+        var (status, body) = await SendAsync(server, HttpMethod.Post, "/shift/open", token, new { openingCash = 0 });
+        if (status != 200)
+        {
+            Assert.True(status == 409, $"/shift/open: {status} {body}");
+            Contract.AssertError(body, "conflict", "shiftOpen");
+        }
+    }
+
     /// <summary>A fresh club API key <c>ck_…</c>: the owner rotates it (<c>adminRotateApiKey</c>).</summary>
     public static async Task<string> ApiKeyAsync(ServerFixture server) =>
         (await ExpectAsync(server, 200, HttpMethod.Post, "/club/api-key", await LoginAsync(server, OwnerPin), new { }))

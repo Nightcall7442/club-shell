@@ -75,6 +75,7 @@ public sealed class SettingsTests(ServerFixture server) : LedgerCheckedTest(serv
             webhooks = new[] { hook },
         });
         await ExpectAsync(Server, 200, HttpMethod.Post, "/promo/redeem", owner, new { userId = player.Id, code = "spring" });
+        await OpenShiftAsync(Server, owner);
         await ExpectAsync(Server, 200, HttpMethod.Post, "/wallet/topup", owner, new { userId = player.Id, amount = 2_000_000, method = "card" });
         await Players.ExecuteAsync(Server, "UPDATE webhooks SET last_status = 204, last_at = now()");
 

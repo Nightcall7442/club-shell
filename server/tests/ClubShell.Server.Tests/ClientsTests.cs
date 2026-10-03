@@ -240,6 +240,7 @@ public sealed class ClientsTests(ServerFixture server) : LedgerCheckedTest(serve
     public async Task Transactions_are_the_newest_hundred_and_an_unknown_client_has_none()
     {
         var cashier = await LoginAsync(Server, CashierPin);
+        await OpenShiftAsync(Server, cashier);
         var player = await Players.CreateAsync(Server, balance: 1_000_000);
         Server.Clock.Advance(TimeSpan.FromMilliseconds(5));
         await ExpectAsync(Server, 200, HttpMethod.Post, "/wallet/topup", cashier, new { userId = player.Id, amount = 500_000 });

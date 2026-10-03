@@ -24,10 +24,12 @@ namespace ClubShell.Server.Admin;
 /// The counter (slice S4): hall snapshot, sessions opened/extended/ended by the cashier, top-up with the tier bonus, PC
 /// commands and the price preview. Money goes through the kiosk's own <see cref="SessionService"/> (the §5.2 rules and
 /// the single <see cref="Pricing"/> function) and <see cref="Ledger"/>; each action and its <see cref="Audit"/> entry
-/// commit together, <c>Idempotency-Key</c> (optional) under principal <c>club:&lt;id&gt;</c>. Pushes and commands go out
-/// after the commit; <c>pcStatusChanged</c> is never sent (AsyncAPI notImplemented, the console polls, §6.5). Events for the
-/// webhooks (<c>sessionOpened</c>, <c>bigTopup</c>, <c>suspicious</c>) commit with the action; the automation of a top-up
-/// (<c>topupAtLeast</c>) and of an opened session runs after the commit (S5).
+/// commit together, <c>Idempotency-Key</c> (optional) under principal <c>club:&lt;id&gt;</c>. Money is taken only in an open
+/// shift: top-up, open and extend answer <c>409 shiftClosed</c> without one; ending a session needs none (it only gives back
+/// to the balance). Pushes and commands go out after the commit; <c>pcStatusChanged</c> is never sent (AsyncAPI
+/// notImplemented, the console polls, §6.5). Events for the webhooks (<c>sessionOpened</c>, <c>bigTopup</c>,
+/// <c>suspicious</c>) commit with the action; the automation of a top-up (<c>topupAtLeast</c>) and of an opened session runs
+/// after the commit (S5).
 /// </summary>
 public static class CounterEndpoints
 {
@@ -122,6 +124,7 @@ public static class CounterEndpoints
         var effects = new SessionEffects();
         var result = await store.ExecuteHttpAsync(context, ShiftEndpoints.Principal(staff), keyRequired: false, body, async (c, tx) =>
         {
+            await ShiftEndpoints.RequireOpenAsync(c, tx, staff.ClubId);
             var session = await sessions.CreateAsync(
                 c, tx, pc, new SessionCreateRequest(pc.Id, r.UserId!.Value, r.TariffId!.Value, minutes, true), replay: false, effects, staff);
             var (who, tariff, discount, balance) = await c.QuerySingleAsync<(string, string, int, long)>(
@@ -148,6 +151,7 @@ public static class CounterEndpoints
         var effects = new SessionEffects();
         var result = await store.ExecuteHttpAsync(context, ShiftEndpoints.Principal(staff), keyRequired: false, body, async (c, tx) =>
         {
+            await ShiftEndpoints.RequireOpenAsync(c, tx, staff.ClubId);
             var s = await TargetAsync(c, tx, staff, r);
             var (session, charged) = await sessions.ExtendAsync(c, tx, s.Id, s.UserId, s.PcId, minutes, r.TariffId, effects, staff);
             var balance = await c.ExecuteScalarAsync<long>("SELECT main_balance FROM wallets WHERE user_id = @UserId", new { s.UserId }, tx);
@@ -206,6 +210,7 @@ public static class CounterEndpoints
         Guid? topUp = null;
         var result = await store.ExecuteHttpAsync(context, ShiftEndpoints.Principal(staff), keyRequired: false, body, async (c, tx) =>
         {
+            await ShiftEndpoints.RequireOpenAsync(c, tx, staff.ClubId);
             var now = sessions.Clock.GetUtcNow();
             var userId = r.UserId!.Value;
             var who = await c.QuerySingleOrDefaultAsync<string>(

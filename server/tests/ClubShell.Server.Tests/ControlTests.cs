@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ClubShell.Server.Admin;
+using ClubShell.Server.Auth;
 using ClubShell.Server.Infrastructure;
 using ClubShell.Server.Wallet;
 using Microsoft.Extensions.DependencyInjection;
@@ -36,7 +37,7 @@ public sealed class ControlTests(ServerFixture server) : LedgerCheckedTest(serve
             pcs.Add(await TestAgent.CreateAsync(Server));
         }
 
-        await ExpectAsync(Server, 200, HttpMethod.Post, "/wallet/topup", cashier, new { userId = client.Id, amount = 1_000_000, method = "cash" }); // noShift
+        await NoShiftTopUpAsync(client, 1_000_000); // noShift
         await ExpectAsync(Server, 200, HttpMethod.Post, "/shift/open", cashier, new { openingCash = 0 });
         for (var i = 0; i < 3; i++)
         {
@@ -112,5 +113,22 @@ public sealed class ControlTests(ServerFixture server) : LedgerCheckedTest(serve
 
         using var refused = await Server.Http.SendAsync(Request(HttpMethod.Get, "/control", await LoginAsync(Server, CashierPin)));
         await Contract.ReadErrorAsync(refused, 403, "forbidden", "ownerOnly");
+    }
+
+    /// <summary>
+    /// The cashier's cash top-up with no shift open, its ledger row and journal entry as the counter wrote them before it
+    /// refused money without a shift (<c>409 shiftClosed</c>): what the database of an older server still holds.
+    /// </summary>
+    private async Task NoShiftTopUpAsync(TestPlayer client, long amount)
+    {
+        await using var c = await Server.Services.GetRequiredService<NpgsqlDataSource>().OpenConnectionAsync();
+        await using var tx = await c.BeginTransactionAsync();
+        var (clubId, networkId) = await Dapper.SqlMapper.QuerySingleAsync<(Guid, Guid)>(c, "SELECT id, network_id FROM clubs", transaction: tx);
+        var now = Server.Clock.GetUtcNow();
+        await Ledger.PostAsync(c, tx, client.Id, allowOverdraft: false, now,
+            new LedgerLine("topUp", amount, "Пополнение на кассе наличными", clubId, Method: "cash", StaffId: CashierId));
+        await Audit.WriteAsync(c, tx, new StaffContext(CashierId, "Кассир Азиз", "cashier", clubId, networkId), now, "topUp", client.Id, amount: amount,
+            detail: client.Username, meta: new { method = "cash", bonus = 0 });
+        await tx.CommitAsync();
     }
 }
