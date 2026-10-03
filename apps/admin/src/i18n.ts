@@ -1,7 +1,8 @@
 /**
  * Console copy in three languages. Russian is the source text and the key: `t('Касса')` returns the Uzbek or English
  * line from the tables below, or the Russian text itself when a line is missing (never an empty label).
- * `{name}` placeholders are filled from `vars`.
+ * `{name}` placeholders are filled from `vars`. A Russian word with two meanings carries its sense before a bar:
+ * `t('оплата|Карта')` is the bank card ("Karta", "Card"), `t('Карта')` the hall map; Russian shows the text after it.
  */
 import { useSyncExternalStore } from 'react';
 import { UZ, EN } from '@/i18n.tables';
@@ -43,7 +44,7 @@ export function useLang(): Lang {
 
 export function t(ru: string, vars?: Record<string, string | number>): string {
   const table = lang === 'uz' ? UZ : lang === 'en' ? EN : null;
-  let out = (table && table[ru]) || ru;
+  let out = (table && table[ru]) || ru.slice(ru.indexOf('|') + 1);
   if (vars) {
     for (const [k, v] of Object.entries(vars)) out = out.split(`{${k}}`).join(String(v));
   }

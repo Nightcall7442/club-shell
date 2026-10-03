@@ -1,6 +1,7 @@
 /**
  * Cash shift: open with the drawer float, watch the X-report while the shift runs, close with the counted cash and
- * get the Z-report. Below, the closed shifts. Polls `/admin/shift` every 5 s.
+ * get the Z-report; both split the top-ups by payment method when the server does. Below, the closed shifts. Polls
+ * `/admin/shift` every 5 s and tells the console's shift state (the top-bar chip, the money buttons) when it changes.
  */
 import { useCallback, useEffect, useState } from 'react';
 import clsx from 'clsx';
@@ -8,6 +9,8 @@ import { clubApi, type Shift, type ShiftTotals } from '@/api';
 import { describe } from '@/errors';
 import { dateLocale, t } from '@/i18n';
 import { money } from '@/format';
+import { PAY_METHODS } from '@/paybox';
+import { useShift } from '@/shift';
 import { Button, Field, MoneyInput, Note, PageHeader, Section, Table } from '@/ui';
 
 const POLL_MS = 5000;
@@ -89,6 +92,18 @@ function TotalsGrid({ x }: { x: ShiftTotals }): JSX.Element {
   );
 }
 
+/** Top-ups by payment method: what the drawer, the terminal and each wallet app should each add up to. */
+function MethodsGrid({ byMethod }: { byMethod: NonNullable<ShiftTotals['topUpByMethod']> }): JSX.Element {
+  return (
+    <StatGrid cols="grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
+      {PAY_METHODS.map((m) => (
+        <Stat key={m.id} label={t(m.label)} value={sum(byMethod[m.id])} unit={t('сум')} />
+      ))}
+      <Stat label={t('Другое')} value={sum(byMethod.other)} unit={t('сум')} />
+    </StatGrid>
+  );
+}
+
 function diffTone(d: number): 'ok' | 'err' | undefined {
   if (d === 0) return 'ok';
   return d > 0 ? 'ok' : 'err';
@@ -108,6 +123,7 @@ export default function ShiftPage(): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<NoteState>(null);
   const [zReport, setZReport] = useState<{ shift: Shift; expectedCash: number } | null>(null);
+  const desk = useShift();
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -134,6 +150,7 @@ export default function ShiftPage(): JSX.Element {
       await clubApi.openShift(opening);
       setZReport(null);
       setNote({ text: t('Смена открыта'), tone: 'ok' });
+      desk.refresh();
       await load();
     } catch (e) {
       setNote({ text: describe(e), tone: 'err' });
@@ -150,6 +167,7 @@ export default function ShiftPage(): JSX.Element {
       setZReport(r);
       setCounted(0);
       setNote({ text: t('Смена закрыта'), tone: 'ok' });
+      desk.refresh();
       await load();
     } catch (e) {
       setNote({ text: describe(e), tone: 'err' });
@@ -180,6 +198,7 @@ export default function ShiftPage(): JSX.Element {
           }
         >
           <TotalsGrid x={zReport.shift.totals} />
+          {zReport.shift.totals.topUpByMethod && <MethodsGrid byMethod={zReport.shift.totals.topUpByMethod} />}
           <StatGrid cols="grid-cols-1 md:grid-cols-3">
             <Stat label={t('Ожидалось в кассе')} value={sum(zReport.expectedCash)} unit={t('сум')} />
             <Stat label={t('Посчитано')} value={sum(zReport.shift.closingCash ?? 0)} unit={t('сум')} />
@@ -210,6 +229,7 @@ export default function ShiftPage(): JSX.Element {
         <>
           <Section title={t('X-отчёт')}>
             <TotalsGrid x={x} />
+            {x.topUpByMethod && <MethodsGrid byMethod={x.topUpByMethod} />}
           </Section>
 
           <Section title={t('Закрыть смену')}>

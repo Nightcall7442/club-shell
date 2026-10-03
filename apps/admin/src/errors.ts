@@ -1,4 +1,6 @@
+import type { Money } from '@clubshell/contracts';
 import { AdminError } from '@/api';
+import { money } from '@/format';
 import { t } from '@/i18n';
 
 const ERROR_COPY: Record<string, string> = {
@@ -18,6 +20,7 @@ const DETAIL_COPY: Record<string, string> = {
   minorCurfew: 'Несовершеннолетним нельзя играть в это время',
   shiftOpen: 'Смена уже открыта',
   noShift: 'Смена не открыта',
+  shiftClosed: 'Смена не открыта — откройте смену, чтобы принимать деньги',
   pcBusy: 'ПК занят',
   taken: 'Уже занято',
   digits4to8: 'PIN — от 4 до 8 цифр',
@@ -25,10 +28,22 @@ const DETAIL_COPY: Record<string, string> = {
   exhausted: 'Лимит использований исчерпан',
 };
 
+function isMoney(v: unknown): v is Money {
+  return typeof v === 'object' && v !== null && typeof (v as Money).amount === 'number';
+}
+
 /** Server error → one line for the cashier, in the console language. */
 export function describe(e: unknown): string {
   if (e instanceof AdminError) {
     const d = e.details ?? {};
+    // The server says how much was needed and how much the client has: the cashier sees the gap, not just "no money".
+    if (e.code === 'insufficientFunds' && isMoney(d['required']) && isMoney(d['available'])) {
+      return t('Не хватает {gap}: нужно {required}, на балансе {available}', {
+        gap: money({ ...d['required'], amount: Math.max(0, d['required'].amount - d['available'].amount) }),
+        required: money(d['required']),
+        available: money(d['available']),
+      });
+    }
     const detail = [d['rule'], d['reason'], d['state'], d['code']].find(
       (v): v is string => typeof v === 'string' && v in DETAIL_COPY,
     );

@@ -195,6 +195,23 @@ export interface SessionResult {
   refunded?: Money;
 }
 
+/** How the client paid at the counter; the server books the top-up under it and splits the X / Z reports by it. */
+export type PayMethod = 'cash' | 'card' | 'payme' | 'click' | 'uzum';
+
+/** One row of the counter's client search (`GET /admin/clients/lookup`): the 8 best matches, recent clients when empty. */
+export interface ClientHit {
+  id: string;
+  displayName: string;
+  username: string;
+  /** Last 4 digits of the phone; null when the client left none. */
+  phoneTail: string | null;
+  balance: Money;
+  bonus: Money;
+  cardId: string | null;
+  /** The PC the client is playing on right now. */
+  playing: { pcId: string; pcName: string } | null;
+}
+
 export const adminApi = {
   overview: (): Promise<Overview> => call<Overview>('/admin/overview'),
   openSession: (input: { pcId: string; userId: string; tariffId: string; minutes: number }): Promise<SessionResult> =>
@@ -205,7 +222,7 @@ export const adminApi = {
   topUp: (input: {
     userId: string;
     amount: number;
-    method?: string;
+    method: PayMethod;
   }): Promise<{
     balance: Money;
     transaction: Transaction;
@@ -215,6 +232,9 @@ export const adminApi = {
     input: { kind: 'message' | 'lock' | 'unlock' | 'reboot' | 'shutdown'; text?: string },
   ): Promise<{ ack: { ok: boolean; error?: { code: string; message: string } | null } }> =>
     post(`/admin/pcs/${pcId}/command`, input),
+  /** Name or login substring, any part of the phone digits, or the exact card; under 2 characters — recent clients. */
+  lookupClients: (q: string): Promise<{ items: ClientHit[] }> =>
+    call(`/admin/clients/lookup?q=${encodeURIComponent(q)}`),
 };
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -232,6 +252,8 @@ export interface StaffMember {
 export interface ShiftTotals {
   topUpCash: number;
   topUpOther: number;
+  /** Top-ups by payment method (absent from an older server, which has only cash / other). */
+  topUpByMethod?: Record<PayMethod | 'other', number>;
   sessions: number;
   shop: number;
   refunds: number;
