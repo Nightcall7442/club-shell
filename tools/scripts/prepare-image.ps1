@@ -88,4 +88,5 @@ foreach ($rel in 'pending-update', 'cache\updates', 'cache\saves', 'cache\player
 Write-Host "Готово: агент остановлен, удалено файлов и папок: $removed." -ForegroundColor Green
 Write-Host 'Если на этом ПК был открыт сеанс, закройте его в кассе.' -ForegroundColor Yellow
 Write-Host 'Теперь удалите этот ПК в кассе («Карта»), если он там появился.' -ForegroundColor Yellow
-Write-Host 'Снимайте образ сразу, НЕ перезагружая ПК.' -ForegroundColor Yellow
+Write-Host 'Дальше сразу, НЕ перезагружая ПК: sysprep /generalize /oobe /shutdown (образ для club-server)' -ForegroundColor Yellow
+Write-Host 'или снятие образа диска (клонирование).' -ForegroundColor Yellow
