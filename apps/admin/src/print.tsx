@@ -35,6 +35,7 @@ const PAPER_KEY: Record<PrintKind, string> = {
   report: 'clubshell.admin.paper.report',
 };
 const LANG_KEY = 'clubshell.admin.receiptLang';
+const AUTO_KEY = 'clubshell.admin.barAutoReceipt';
 
 function read(key: string): string | null {
   try {
@@ -61,6 +62,18 @@ export function paperOf(kind: PrintKind): Paper {
 
 export function setPaper(kind: PrintKind, paper: Paper): void {
   write(PAPER_KEY[kind], paper);
+}
+
+/**
+ * Whether the bar prints the slip right after a sale. Off by default: without Chrome's --kiosk-printing every print
+ * opens the print dialog, an extra step on each sale; the «Чек» button is always there.
+ */
+export function barAutoReceipt(): boolean {
+  return read(AUTO_KEY) === '1';
+}
+
+export function setBarAutoReceipt(on: boolean): void {
+  write(AUTO_KEY, on ? '1' : null);
 }
 
 /** The language slips are printed in: the setting, else the console's. */

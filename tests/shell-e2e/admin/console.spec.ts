@@ -1515,7 +1515,9 @@ test('the bar sells to a walk-in for cash: stock goes down, X, expected cash and
     'true',
   );
 
-  // The slip lists the goods and says it is not fiscal.
+  // The slip prints from «Чек» (printing right after a sale is a console setting, off by default); it lists the goods
+  // and says it is not fiscal.
+  await cart.getByRole('status').getByRole('button', { name: 'Чек', exact: true }).click();
   await expect.poll(() => printed(page)).toContain('Не является фискальным чеком');
   const slip = await printed(page);
   expect(slip).toContain(`${cola.title} ×2`);

@@ -47,7 +47,7 @@ import {
   useShiftClosed,
   type Payment,
 } from '@/paybox';
-import { Receipt, printDocument, type ReceiptData } from '@/print';
+import { Receipt, barAutoReceipt, printDocument, type ReceiptData } from '@/print';
 import { useShift } from '@/shift';
 import { Button, Kbd, Note, PageHeader, Sheet, inputCls } from '@/ui';
 
@@ -318,7 +318,7 @@ export default function BarPage(): JSX.Element {
     setNotice(null);
     clearBuyer();
     shift.refresh();
-    void printDocument(<Receipt r={receipt} />, 'receipt');
+    if (barAutoReceipt()) void printDocument(<Receipt r={receipt} />, 'receipt');
     window.setTimeout(() => searchRef.current?.focus(), 0);
   };
 

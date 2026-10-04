@@ -22,6 +22,8 @@ import {
   printDocument,
   setPaper,
   setReceiptLang,
+  barAutoReceipt,
+  setBarAutoReceipt,
   storedReceiptLang,
   type Paper,
   type PrintKind,
@@ -221,6 +223,7 @@ function PrintSettings(): JSX.Element {
   const [receipt, setReceipt] = useState<Paper>(() => paperOf('receipt'));
   const [report, setReport] = useState<Paper>(() => paperOf('report'));
   const [lang, setLangState] = useState<Lang | null>(storedReceiptLang);
+  const [auto, setAuto] = useState<boolean>(barAutoReceipt);
   const paperSelect = (kind: PrintKind, value: Paper, set: (p: Paper) => void, label: string): JSX.Element => (
     <Field label={label}>
       <select
@@ -242,7 +245,7 @@ function PrintSettings(): JSX.Element {
   );
   return (
     <Section title={t('Печать')}>
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {paperSelect('receipt', receipt, setReceipt, t('Бумага чеков'))}
         {paperSelect('report', report, setReport, t('Бумага отчётов X/Z'))}
         <Field label={t('Язык чеков')}>
@@ -261,6 +264,20 @@ function PrintSettings(): JSX.Element {
                 {LANG_NAME[l]}
               </option>
             ))}
+          </select>
+        </Field>
+        <Field label={t('Чек в баре')}>
+          <select
+            className={inputCls}
+            value={auto ? 'auto' : 'button'}
+            onChange={(e) => {
+              const on = e.target.value === 'auto';
+              setBarAutoReceipt(on);
+              setAuto(on);
+            }}
+          >
+            <option value="button">{t('По кнопке «Чек»')}</option>
+            <option value="auto">{t('Сразу после продажи')}</option>
           </select>
         </Field>
       </div>
