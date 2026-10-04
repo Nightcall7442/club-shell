@@ -12,7 +12,10 @@ function topBar(page: Page): Locator {
   return page.getByRole('banner');
 }
 
-/** The PC line under the club name (`PC-12 · Standard · RTX 4070 · 240 Гц`); caps come from CSS, hence `i`. */
+/**
+ * The PC line under the club name (`PC-12 · Standard · RTX 4070 · 240 Гц`); caps come from CSS, hence `i`. A no-break
+ * space keeps a unit on its number, and a RegExp accessible name is matched as is: `\s` before `Гц`.
+ */
 function pcBadge(page: Page): Locator {
   return topBar(page).getByRole('button', { name: /^PC-12 · /i });
 }
@@ -43,7 +46,7 @@ test('the home screen shows this PC and opens its full specs', async ({ page }) 
 for (const route of ['/home', '/games', '/wallet', '/profile']) {
   test(`the top bar keeps the PC, its vitals and the volume on ${route}`, async ({ page }) => {
     await page.goto(`/?mock=auth#${route}`);
-    await expect(pcBadge(page)).toHaveAccessibleName(/^PC-12 · Standard · RTX 4070 · 240 Гц$/i);
+    await expect(pcBadge(page)).toHaveAccessibleName(/^PC-12 · Standard · RTX 4070 · 240\sГц$/i);
     const vitals = topBar(page).getByRole('group', { name: 'Состояние ПК' });
     await expect(vitals).toContainText('ЦП');
     // A temperature, never the 0° a missing sensor reports.
@@ -90,5 +93,5 @@ test('a new refresh rate asks "keep these settings?" once, and the top bar follo
   await expect(confirm).toHaveCount(1);
   await confirm.getByRole('button', { name: 'Оставить', exact: true }).click();
   await expect(confirm).toHaveCount(0);
-  await expect(pcBadge(page)).toHaveAccessibleName(/· 144 Гц$/i);
+  await expect(pcBadge(page)).toHaveAccessibleName(/· 144\sГц$/i);
 });
