@@ -218,7 +218,7 @@ re-fetches them on demand). Until it lands, deploy theme files with the installe
 ## 6. Live switching
 
 ```
-ThemePicker (screens/Profile/Settings.tsx)
+ThemePicker (screens/Pc/ShellPrefs.tsx)
   └─ useThemeStore.setTheme(name)                       store/theme.ts
        ├─ load(name) → loadTheme(name)                   theme/themes.ts
        │     └─ api.settings.getTheme(name)              Tauri: settings_get_theme → themes\<name>.json
