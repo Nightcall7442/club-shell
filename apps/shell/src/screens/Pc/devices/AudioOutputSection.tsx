@@ -123,7 +123,7 @@ export function AudioOutputSection(): JSX.Element {
   return (
     <SettingsSection title={t('pcSettings.output')} description={t('pcSettings.outputHint')}>
       {outputs === null && loading && (
-        <div className="grid gap-2 sm:grid-cols-2" aria-busy="true">
+        <div className="grid gap-2" aria-busy="true">
           <Skeleton height={68} />
           <Skeleton height={68} />
         </div>
@@ -131,7 +131,8 @@ export function AudioOutputSection(): JSX.Element {
       {failed && <p className="text-sm text-muted">{t('pcSettings.unavailable')}</p>}
       {outputs !== null && devices.length === 0 && <p className="text-sm text-muted">{t('pcSettings.outputNone')}</p>}
       {devices.length > 0 && (
-        <div role="radiogroup" aria-label={t('pcSettings.output')} className="grid gap-2 sm:grid-cols-2">
+        // One column: the card shares the home block's row with two others, two would cut the device names.
+        <div role="radiogroup" aria-label={t('pcSettings.output')} className="grid gap-2">
           {devices.map((d) => (
             <OutputCard
               key={d.id}

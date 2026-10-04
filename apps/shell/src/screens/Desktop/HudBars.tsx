@@ -132,6 +132,8 @@ export function SystemMenu(): JSX.Element {
 
   const close = useCallback(() => setOpen(false), []);
   const silent = muted || volume === 0;
+  // The trigger shows the level, so its name says it too.
+  const level = silent ? t('settings.muted') : t('settings.volumeLevel', { level: volume });
 
   const choose = (next: Locale): void => {
     setOpen(false);
@@ -151,7 +153,7 @@ export function SystemMenu(): JSX.Element {
           variant="ghost"
           className="!gap-1.5 !px-2.5 text-muted hover:text-text"
           data-popover-trigger="true"
-          aria-label={t('desktop.soundAndLanguage')}
+          aria-label={`${t('desktop.soundAndLanguage')}, ${level}`}
           title={t('desktop.soundAndLanguage')}
           aria-haspopup="dialog"
           aria-expanded={open}

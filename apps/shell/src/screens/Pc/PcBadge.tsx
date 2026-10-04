@@ -35,19 +35,21 @@ export function PcBadge({ className }: { className?: string }): JSX.Element {
     gpu && gpuShortName(gpu.model),
     monitor && monitor.hz > 0 && formatUnit('hz', monitor.hz, locale, t),
   ].filter(Boolean);
+  const line = parts.join(' · ');
 
   return (
     <button
       type="button"
       data-nav="true"
-      title={t('desktop.pcBadge')}
+      // A crowded top bar cuts the line: the tooltip keeps it whole.
+      title={line ? `${line} — ${t('desktop.pcBadge')}` : t('desktop.pcBadge')}
       onClick={() => navigate('/home', { state: THIS_PC_STATE })}
       className={clsx(
         'focus-ring hud-label block max-w-full truncate rounded-sm text-left transition-colors duration-[var(--dur-fast)] hover:text-text',
         className,
       )}
     >
-      {parts.length > 0 ? parts.join(' · ') : t('common.loading')}
+      {line || t('common.loading')}
     </button>
   );
 }
