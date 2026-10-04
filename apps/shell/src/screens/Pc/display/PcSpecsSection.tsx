@@ -1,10 +1,11 @@
 /**
  * The full spec sheet of this PC, opened from "Мой компьютер" on Home ("Все характеристики"): `sys_hardware` (CPU, GPUs
  * with VRAM, RAM, disks, OS, network, peripherals) and the name, zone and seat from `sys_pc_info`, both from the
- * settings store, and "О программе" under them. Monitors come from the live kiosk state, so a refresh rate changed a
- * minute ago shows here too.
+ * settings store, and "О программе" under them. The inventory is asked again each time the sheet opens (free space,
+ * peripherals and the IP change while the Shell runs for days). Monitors come from the live kiosk state, so a refresh
+ * rate changed a minute ago shows here too.
  */
-import { useId, type ReactNode } from 'react';
+import { useEffect, useId, type ReactNode } from 'react';
 import type { DiskInfo, HardwareInfo, MonitorInfo, Pc } from '@clubshell/contracts';
 import { useTranslation } from 'react-i18next';
 import { Badge } from '@/components/ui/Badge';
@@ -352,14 +353,21 @@ export interface PcSpecsModalProps {
   onClose: () => void;
 }
 
-/** Every spec of this PC (retry when `sys_hardware` failed), then "О программе". */
+/** Every spec of this PC, re-read on each opening (retry when `sys_hardware` failed), then "О программе". */
 export function PcSpecsModal({ open, onClose }: PcSpecsModalProps): JSX.Element {
   const { t } = useTranslation();
   const pc = useSettingsStore((s) => s.pcInfo?.pc ?? null);
   const hardware = useSettingsStore((s) => s.hardware);
   const failed = useSettingsStore((s) => s.hardwareStatus === 'error');
+  const refreshHardware = useSettingsStore((s) => s.refreshHardware);
   const liveMonitors = useSettingsStore((s) => s.kiosk?.monitors);
   const monitors = liveMonitors && liveMonitors.length > 0 ? liveMonitors : (hardware?.monitors ?? []);
+
+  useEffect(() => {
+    if (open) {
+      void refreshHardware();
+    }
+  }, [open, refreshHardware]);
 
   return (
     <Modal

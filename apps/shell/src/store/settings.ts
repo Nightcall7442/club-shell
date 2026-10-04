@@ -1,7 +1,7 @@
 /**
  * Device-level slice: `ShellSettings` (+ feature toggles) persisted through `settings_set`, plus the read-only
  * system context the UI needs everywhere (`shell.json`, `PcInfo`, hardware inventory, live metrics, kiosk state,
- * policy). Loaded first by `bootstrapStores()`; never reset on logout.
+ * policy). Loaded first by `bootstrapStores()`; never reset on logout, except the live metrics (`clearMetrics`).
  */
 import type {
   GpuInfo,
@@ -22,6 +22,14 @@ import { log } from '@/lib/logger';
 import { api, isTauri, toShellApiError, type KioskState, type ShellConfig, type ShellError } from '@/lib/tauri';
 import { syncServerTime } from '@/lib/time';
 import { primaryGpu } from '@/screens/Pc/devices/gpuVendor';
+
+/**
+ * How often the Shell asks for a metrics sample while none arrives: the Agent's own sampling period
+ * (`telemetry.metricsIntervalSec`, 5 s by default).
+ */
+export const METRICS_POLL_MS = 5_000;
+/** A sample older than this (two missed periods) no longer passes for live. */
+const METRICS_STALE_MS = 2 * METRICS_POLL_MS;
 
 /** Lifecycle of an async store action. */
 export type AsyncStatus = 'idle' | 'loading' | 'ready' | 'error';
@@ -71,10 +79,12 @@ export interface SettingsState {
   features: ShellFeatures;
   shellConfig: ShellConfig | null;
   pcInfo: PcInfo | null;
-  /** `sys_hardware`, read once per app run (the PC does not change under a running Shell). */
+  /** `sys_hardware`: read once per app run for the top bar and Home, read again when the full spec sheet opens. */
   hardware: HardwareInfo | null;
   hardwareStatus: AsyncStatus;
   metrics: PcMetrics | null;
+  /** `Date.now()` when `metrics` arrived; 0 while there is none. */
+  metricsAt: number;
   kiosk: KioskState | null;
   policy: Policy | null;
   /** `true` once `settings_get` succeeded at least once. */
@@ -89,12 +99,25 @@ export interface SettingsActions {
   /** Loads shell.json, PcInfo (syncs the server clock), kiosk state and policy; each part fails independently. */
   loadSystem(): Promise<void>;
   /**
-   * One `sys_hardware` for the app's lifetime; calls while it runs share it, a failed one can be retried. The first
-   * call on a cold PC is a WMI scan of a few seconds, so nothing waits on it.
+   * One `sys_hardware` for the app's lifetime (the graphics card and monitors the top bar names do not change); calls
+   * while it runs share it, a failed one can be retried. The first call on a cold PC is a WMI scan of a few seconds, so
+   * nothing waits on it.
    */
   loadHardware(): Promise<void>;
-  /** One `sys_metrics` sample while none has arrived (`sys.metrics` events keep it fresh afterwards). */
+  /**
+   * `sys_hardware` again although it is known: free disk space, peripherals and the IP change while the Shell runs for
+   * days. The Agent answers from its own cache (rescanned hourly), so this is cheap; the known inventory stays on
+   * screen meanwhile and when the read fails.
+   */
+  refreshHardware(): Promise<void>;
+  /**
+   * One `sys_metrics` read while the latest sample is missing or stale. The Agent pushes `sys.metrics` only during a
+   * session (or with the metrics overlay on), so between sessions `AppShell` asks every {@link METRICS_POLL_MS}. A
+   * failed read drops a stale sample: an old reading must not pass for a live one.
+   */
   ensureMetrics(): Promise<void>;
+  /** Forgets the last sample on logout: it may carry the previous player's game (FPS). */
+  clearMetrics(): void;
   /** Asks `sys_pc_info` again while it is still unknown (the Agent link may have been down at boot). */
   ensurePcInfo(): Promise<void>;
   /** Optimistic patch persisted via `settings_set`; rolls back and rethrows on failure. */
@@ -124,6 +147,7 @@ const initialState: SettingsState = {
   hardware: null,
   hardwareStatus: 'idle',
   metrics: null,
+  metricsAt: 0,
   kiosk: null,
   policy: null,
   loaded: false,
@@ -191,18 +215,20 @@ export const useSettingsStore = create<SettingsStore>()(
     },
 
     loadHardware() {
-      if (get().hardware) {
-        return Promise.resolve();
-      }
+      return get().hardware ? Promise.resolve() : get().refreshHardware();
+    },
+
+    refreshHardware() {
       if (!hardwareLoad) {
-        set({ hardwareStatus: 'loading' });
+        // A known inventory stays as it is until the new one is in, and after a failed read.
+        set((s) => (s.hardware ? {} : { hardwareStatus: 'loading' }));
         hardwareLoad = api.system
           .hardware()
           .then(
             (hardware) => set({ hardware, hardwareStatus: 'ready' }),
             (e: unknown) => {
               log.warn('system.hardware failed', asShellError(e));
-              set({ hardwareStatus: 'error' });
+              set((s) => (s.hardware ? {} : { hardwareStatus: 'error' }));
             },
           )
           .finally(() => {
@@ -213,20 +239,30 @@ export const useSettingsStore = create<SettingsStore>()(
     },
 
     ensureMetrics() {
-      if (get().metrics) {
+      if (get().metrics && Date.now() - get().metricsAt < METRICS_STALE_MS) {
         return Promise.resolve();
       }
+      const asked = Date.now();
       metricsLoad ??= api.system
         .metrics()
         .then(
           // A `sys.metrics` event may have landed meanwhile: it is the newer sample.
-          (metrics) => set((s) => (s.metrics ? {} : { metrics })),
-          (e: unknown) => log.warn('system.metrics failed', asShellError(e)),
+          (metrics) => set((s) => (s.metricsAt > asked ? {} : { metrics, metricsAt: Date.now() })),
+          (e: unknown) => {
+            if (get().metrics) {
+              log.warn('system.metrics failed', asShellError(e));
+            }
+            set((s) => (s.metricsAt > asked ? {} : { metrics: null, metricsAt: 0 }));
+          },
         )
         .finally(() => {
           metricsLoad = null;
         });
       return metricsLoad;
+    },
+
+    clearMetrics() {
+      set({ metrics: null, metricsAt: 0 });
     },
 
     ensurePcInfo() {
@@ -308,7 +344,7 @@ export const useSettingsStore = create<SettingsStore>()(
     },
 
     setMetrics(metrics) {
-      set({ metrics });
+      set({ metrics, metricsAt: Date.now() });
     },
 
     setKiosk(kiosk) {

@@ -7,7 +7,7 @@ import { trackScreen } from '@/lib/analytics';
 import { press, tick } from '@/lib/sound';
 import { StatusBar, TopBar } from '@/screens/Desktop/HudBars';
 import { IdleLeavePrompt } from '@/screens/Desktop/LeaveButton';
-import { useSettingsStore } from '@/store/settings';
+import { METRICS_POLL_MS, useSettingsStore } from '@/store/settings';
 import { useThemeStore } from '@/store/theme';
 
 /**
@@ -37,12 +37,15 @@ export function AppShell(): JSX.Element {
   }, [location.pathname]);
 
   // The PC the top bar names on every screen (graphics card, vitals): asked once, kept for the app's lifetime. Each
-  // call is a no-op once its answer is in.
+  // call is a no-op once its answer is in. The vitals are asked again whenever no `sys.metrics` event keeps them fresh
+  // (no session open: the Agent does not push then).
   useEffect(() => {
     const { loadHardware, ensureMetrics, ensurePcInfo } = useSettingsStore.getState();
     void loadHardware();
     void ensureMetrics();
     void ensurePcInfo();
+    const id = window.setInterval(() => void ensureMetrics(), METRICS_POLL_MS);
+    return () => window.clearInterval(id);
   }, []);
 
   // UI sounds: one tick per `data-nav` element entered by pointer or keyboard, a press on activation.
