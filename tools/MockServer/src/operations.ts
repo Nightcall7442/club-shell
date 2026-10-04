@@ -19,6 +19,7 @@ import {
 } from './club.js';
 
 const TIME_ZONE = 'Asia/Tashkent';
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const OPERATION_KINDS = [
   'topUp',
@@ -53,6 +54,10 @@ export interface Operation {
   reasonCode: string | null;
   note: string | null;
   sessionId: string | null;
+  /** A seat or an extension sold a package (null for an entry that does not say, and for other kinds). */
+  package: boolean | null;
+  /** A cash move's own id (the № of its slip). */
+  movementId: string | null;
 }
 
 /** The journal entry as a feed row; null for what the feed does not show. */
@@ -87,7 +92,8 @@ function toOperation(e: AuditEntry): Operation | null {
     }
   } else if (kind === 'payout' || kind === 'cashOut') {
     drawer = -e.amount;
-  } else if (kind === 'cashIn') {
+  } else if (kind === 'cashIn' || kind === 'shiftOpen') {
+    // The opening float is the drawer's first money: a shift's rows add up to its expected cash.
     drawer = e.amount;
   }
   return {
@@ -112,6 +118,9 @@ function toOperation(e: AuditEntry): Operation | null {
     reasonCode: s('reasonCode'),
     note: s('note'),
     sessionId: s('sessionId'),
+    package:
+      (kind === 'sessionOpen' || kind === 'sessionExtend') && typeof m['package'] === 'boolean' ? m['package'] : null,
+    movementId: s('movementId'),
   };
 }
 
@@ -169,7 +178,8 @@ function today(): {
       byMethod[topUpMethod(tx.description)] += a;
       taken += a;
     } else if (tx.type === 'adjustment' && tx.description === PAYOUT_DESCRIPTION) payouts += -a;
-    else if (tx.type === 'charge') sessions += -a;
+    // Time sold net of what was given back, as the server counts it (charges − refunds).
+    else if (tx.type === 'charge' || tx.type === 'refund') sessions += -a;
     else if (tx.type === 'purchase') shop += -a;
   }
   return { date, from, byMethod, taken, payouts, sessions, shop };
@@ -188,8 +198,12 @@ export function operationsPage(
   next: string | null;
   today: ReturnType<typeof today>;
 } {
+  // The server's answers: digits only (`format`), then 1..200 (`min` / `max`); a shift id that is no UUID is `format`.
+  if (q.limit !== undefined && q.limit !== '' && !/^\d+$/.test(q.limit)) throw errors.validation('limit', 'format');
   const limit = q.limit === undefined || q.limit === '' ? 50 : Number(q.limit);
-  if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw errors.validation('limit', 'range');
+  if (limit < 1) throw errors.validation('limit', 'min');
+  if (limit > 200) throw errors.validation('limit', 'max');
+  if (q.shiftId && !UUID.test(q.shiftId)) throw errors.validation('shiftId', 'format');
   let kinds: Set<string> | null = null;
   if (q.kinds) {
     const list = q.kinds

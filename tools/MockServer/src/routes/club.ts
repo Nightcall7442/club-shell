@@ -363,11 +363,12 @@ export function clubRoutes(app: FastifyInstance): void {
    */
   app.post('/admin/shift/cash', async (req, reply) => {
     const me = requireStaff(req);
+    // Before the key check, as the server: the club API key is refused whatever it sends.
+    if (isApiKey(req)) throw errors.forbidden('staffOnly');
     return idempotent(
       req,
       reply,
       async () => {
-        if (isApiKey(req)) throw errors.forbidden('staffOnly');
         const b = body(req);
         const kind = enumOf(b, 'kind', ['in', 'out'] as const);
         const amount = int(b, 'amount', 1, 10_000_000_000);
@@ -470,6 +471,22 @@ export function clubRoutes(app: FastifyInstance): void {
       'stock',
       'webhooks',
     ] as const;
+    // The limits beyond the contract are read by every price and the cash desk: refused, as by the server, when of
+    // the wrong kind (debt limits whole tiyin ≥ 0, the two switches booleans; null or absent is fine).
+    if (isObject(b['limits'])) {
+      const limits = b['limits'];
+      for (const name of ['guestDebtLimit', 'memberDebtLimit']) {
+        const v = limits[name];
+        if (v === undefined || v === null) continue;
+        if (typeof v !== 'number' || !Number.isSafeInteger(v)) throw errors.validation(`limits.${name}`, 'format');
+        if (v < 0) throw errors.validation(`limits.${name}`, 'min');
+      }
+      for (const name of ['guestPostpaid', 'cashOutOwnerOnly']) {
+        const v = limits[name];
+        if (v !== undefined && v !== null && typeof v !== 'boolean')
+          throw errors.validation(`limits.${name}`, 'format');
+      }
+    }
     for (const k of keys) {
       if (k in b) (c as unknown as Record<string, unknown>)[k] = b[k];
     }

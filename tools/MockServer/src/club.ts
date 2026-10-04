@@ -556,7 +556,8 @@ export interface PriceQuote {
 /**
  * Price of `minutes` on `tariff` for `userId` in `zone` now: base × weekday/holiday percent, minus the best single
  * discount among client group, loyalty level and a happy hour (discounts do not stack — the club always knows the
- * worst case).
+ * worst case). Without `userId` it is a walk-in: no group, and the loyalty level of zero spend, as the server prices it —
+ * what a new guest account has, so a walk-in guest's seat costs exactly its quote (D-48).
  */
 export function quote(
   tariff: Tariff,
@@ -575,9 +576,15 @@ export function quote(
   if (userId) {
     const group = c.groups.find((g) => g.id === profileOf(userId).groupId);
     if (group && group.discountPct > 0) candidates.push({ pct: group.discountPct, reason: group.name });
-    const level = loyaltyOf(userId);
-    if (level.discountPct > 0) candidates.push({ pct: level.discountPct, reason: level.name });
   }
+  // A walk-in has spent nothing: only a level reached from 0 (the server's `LevelOf(0)`).
+  const level = userId
+    ? loyaltyOf(userId)
+    : [...c.loyalty]
+        .sort((a, b) => a.minSpent - b.minSpent)
+        .filter((l) => l.minSpent <= 0)
+        .at(-1);
+  if (level && level.discountPct > 0) candidates.push({ pct: level.discountPct, reason: level.name });
   const hh = activeHappyHour(zone, at);
   if (hh) candidates.push({ pct: hh.discountPct, reason: hh.name });
   const best = candidates.sort((a, b) => b.pct - a.pct)[0] ?? null;

@@ -278,6 +278,7 @@ function seat(o: {
       minutes: prepaid ? mins : 0,
       prepaid,
       tariff: tariff.name,
+      package: tariff.isPackage,
       discountPct: priced.discountPct,
       sessionId: id,
       quote: quoteMeta(priced),
@@ -294,7 +295,8 @@ function seat(o: {
       charged: cost,
       balance: user.balance,
       user: { id: user.id, displayName: user.displayName, role: user.role },
-      payment: paid ? { transaction: paid.transaction, bonus: uzs(paid.bonus) } : null,
+      // As the server: a key without a value is left out.
+      ...(paid ? { payment: { transaction: paid.transaction, bonus: uzs(paid.bonus) } } : {}),
     },
   };
 }
@@ -442,11 +444,12 @@ export function adminRoutes(app: FastifyInstance): void {
    */
   app.post('/admin/sessions/guest', async (req, reply) => {
     const staff = requireAdmin(req);
+    // Before the key check, as the server: the club API key is refused whatever it sends.
+    if (isApiKey(req)) throw errors.forbidden('staffOnly');
     return idempotent(
       req,
       reply,
       async () => {
-        if (isApiKey(req)) throw errors.forbidden('staffOnly');
         const b = body(req);
         const pcId = str(b, 'pcId', 64);
         const tariffId = str(b, 'tariffId', 64);
@@ -458,17 +461,18 @@ export function adminRoutes(app: FastifyInstance): void {
         if (prepaid && !payment) throw errors.validation('payment', 'required');
         if (!prepaid && payment) throw errors.validation('payment', 'postpaid');
         const pc = findPc(pcId);
-        const tariff = findTariff(tariffId);
         if (!pc) throw errors.notFound('pc');
-        if (!tariff) throw errors.notFound('tariff');
         requireShift();
-        checkSeat(pc, tariff, prepaid);
-        if (!prepaid && !club().limits.guestPostpaid) throw errors.policyDenied('postpaidNotAllowed');
+        const tariff = findTariff(tariffId);
+        if (!tariff) throw errors.notFound('tariff');
         const mins = tariff.isPackage ? (tariff.packageMinutes ?? minutes) : prepaid ? minutes : 0;
-        // A new guest is priced as a walk-in: no group, no loyalty level.
+        // A new guest is priced as a walk-in (no group, the loyalty level of zero spend). The price is checked before
+        // the seat, in the server's order: a wrong price on a busy PC is `priceChanged` there too.
         const priced = quote(tariff, prepaid ? mins : 60, null, pc.zone);
         if (payment && payment.amount !== priced.total.amount)
           throw errors.conflict('priceChanged', { total: priced.total });
+        checkSeat(pc, tariff, prepaid);
+        if (!prepaid && !club().limits.guestPostpaid) throw errors.policyDenied('postpaidNotAllowed');
         if (!prepaid) {
           const limit = club().limits.guestDebtLimit ?? 0;
           const first = quote(tariff, 1, null, pc.zone).total;
@@ -526,6 +530,7 @@ export function adminRoutes(app: FastifyInstance): void {
         meta: {
           minutes: mins,
           tariff: tariff.name,
+          package: tariff.isPackage,
           sessionId: rec.id,
           quote: quoteMeta(priced),
           ...(payment && paid
@@ -539,7 +544,7 @@ export function adminRoutes(app: FastifyInstance): void {
           session,
           charged: cost,
           balance: user.balance,
-          payment: paid ? { transaction: paid.transaction, bonus: uzs(paid.bonus) } : null,
+          ...(paid ? { payment: { transaction: paid.transaction, bonus: uzs(paid.bonus) } } : {}),
         },
       };
     });
@@ -583,8 +588,9 @@ export function adminRoutes(app: FastifyInstance): void {
           charged: result.charged,
           refunded: result.refunded,
           balance: user?.balance ?? zero(),
-          user: user ? { id: user.id, displayName: user.displayName, role: user.role } : null,
-          payable: user && guest ? uzs(payableOf(user)) : null,
+          ...(user ? { user: { id: user.id, displayName: user.displayName, role: user.role } } : {}),
+          // A walk-in guest's only, as the server: a member's end has no `payable` key.
+          ...(user && guest ? { payable: uzs(payableOf(user)) } : {}),
         },
       };
     });
@@ -633,11 +639,12 @@ export function adminRoutes(app: FastifyInstance): void {
    */
   app.post('/admin/wallet/payout', async (req, reply) => {
     const staff = requireAdmin(req);
+    // Before the key check, as the server: the club API key is refused whatever it sends.
+    if (isApiKey(req)) throw errors.forbidden('staffOnly');
     return idempotent(
       req,
       reply,
       async () => {
-        if (isApiKey(req)) throw errors.forbidden('staffOnly');
         const b = body(req);
         const user = findUser(str(b, 'userId', 64));
         const amount = int(b, 'amount', 1, 100_000_000);
@@ -655,7 +662,6 @@ export function adminRoutes(app: FastifyInstance): void {
         pushToUser(user.id, 'walletUpdated', balanceOf(user));
         record(staff, 'payout', {
           userId: user.id,
-          pcId: lastSessionOf(user.id)?.pcId ?? null,
           amount,
           detail: user.displayName,
           meta: { method: 'cash', transactionId: transaction.id },
