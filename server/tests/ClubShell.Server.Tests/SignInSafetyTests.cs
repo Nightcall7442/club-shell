@@ -10,7 +10,8 @@ namespace ClubShell.Server.Tests;
 /// Who is signed in on a PC (cash desk part 2, D-26..D-29): no sign-in onto a PC that holds another player's open session
 /// (<c>403 pcOccupied</c>; the player's own desk session still signs in); a desk open signs out anyone else signed in there
 /// (<c>userRevoked seatTaken</c> before the session push), and a sign-in racing it never keeps a token; a desk end signs the
-/// session's player out, whatever the role (<c>userRevoked sessionEnded</c> after the <c>endSession</c> command).
+/// session's player out, whatever the role (<c>userRevoked sessionEnded</c> after the <c>endSession</c> command), and a
+/// sign-in racing it never keeps a token answered with the ended session.
 /// </summary>
 public sealed class SignInSafetyTests(KestrelServerFixture server) : LedgerCheckedTest(server), IClassFixture<KestrelServerFixture>
 {
@@ -84,6 +85,31 @@ public sealed class SignInSafetyTests(KestrelServerFixture server) : LedgerCheck
         }
     }
 
+    /// <summary>
+    /// The desk end takes the PC's lock too: either the sign-in comes first and the end deletes its token, or the end comes
+    /// first and the sign-in finds no session (a plain sign-in on a free PC). Never a token kept with the session the end
+    /// was closing, which the kiosk would show running after the end.
+    /// </summary>
+    [Fact]
+    public async Task A_sign_in_racing_a_desk_end_never_keeps_the_ended_session()
+    {
+        var cashier = await LoginAsync(Server, CashierPin);
+        await OpenShiftAsync(Server, cashier);
+        for (var i = 0; i < 8; i++)
+        {
+            var agent = await TestAgent.CreateAsync(Server);
+            var member = await Players.CreateAsync(Server);
+            await ExpectAsync(Server, 201, HttpMethod.Post, "/sessions", cashier, new { pcId = agent.PcId, userId = member.Id, tariffId = Players.Standard, minutes = 60 });
+            var login = LoginSessionAsync(agent, member);
+            var end = ExpectAsync(Server, 200, HttpMethod.Post, "/sessions/end", cashier, new { pcId = agent.PcId });
+            await Task.WhenAll(login, end);
+            var (status, session) = await login;
+            Assert.Equal(200, status);
+            var kept = await Players.ScalarAsync<int>(Server, "SELECT count(*)::int FROM user_tokens WHERE pc_id = @PcId AND user_id = @Id", new { agent.PcId, member.Id });
+            Assert.True(kept == 0 || session is null, $"a token kept with the ended session {session}");
+        }
+    }
+
     [Fact]
     public async Task A_desk_end_signs_the_player_out_for_every_role()
     {
@@ -124,6 +150,20 @@ public sealed class SignInSafetyTests(KestrelServerFixture server) : LedgerCheck
     {
         using var response = await agent.PostAsync("/api/v1/auth/login", new { kind = "password", username = player.Username, password = Players.Password, pcId = agent.PcId, hwid = agent.Hwid });
         return (int)response.StatusCode;
+    }
+
+    /// <summary>A password sign-in: its status and the id of the session it answered with, if any.</summary>
+    private static async Task<(int Status, Guid? Session)> LoginSessionAsync(TestAgent agent, TestPlayer player)
+    {
+        using var response = await agent.PostAsync("/api/v1/auth/login", new { kind = "password", username = player.Username, password = Players.Password, pcId = agent.PcId, hwid = agent.Hwid });
+        if (!response.IsSuccessStatusCode)
+        {
+            return ((int)response.StatusCode, null);
+        }
+
+        var body = JsonElement.Parse(await response.Content.ReadAsStringAsync());
+        return ((int)response.StatusCode,
+            body.TryGetProperty("session", out var s) && s.ValueKind == JsonValueKind.Object ? s.GetProperty("id").GetGuid() : null);
     }
 
     private async Task<WsTestSocket> ConnectAsync(TestAgent agent)

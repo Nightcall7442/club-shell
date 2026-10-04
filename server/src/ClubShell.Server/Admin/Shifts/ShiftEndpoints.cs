@@ -272,6 +272,8 @@ public static class ShiftEndpoints
                     at = cursor?.At, before = cursor?.Id, take = take + 1,
                 })).ToList();
             items = [.. rows.Take(take).Select(row => row.ToWire())];
+            // Milliseconds are the stored precision (every clock value is written truncated, DapperSetup): rows of one
+            // millisecond tie on `at` and are told apart by the id.
             next = rows.Count > take ? Base64Url.EncodeToString(Encoding.UTF8.GetBytes($"{ServerJson.FormatTime(items[^1].At)}|{items[^1].Id}")) : null;
         }
 
@@ -521,7 +523,8 @@ public static class ShiftEndpoints
                 PcId is { } pcId && PcName is not null ? new AdminOperationPc(pcId, PcName) : null,
                 Text("tariff"), Number("minutes") is { } minutes ? (int)minutes : null, Flag("prepaid"), Amount,
                 kind is "sessionOpen" or "sessionExtend" ? Amount : kind == "sessionEnd" ? Number("charged") : null,
-                quote, paid, drawer, Text("reasonCode"), Text("note"), Uuid("sessionId"));
+                quote, paid, drawer, Text("reasonCode"), Text("note"), Uuid("sessionId"),
+                kind is "sessionOpen" or "sessionExtend" ? Flag("package") : null, Uuid("movementId"));
         }
     }
 }

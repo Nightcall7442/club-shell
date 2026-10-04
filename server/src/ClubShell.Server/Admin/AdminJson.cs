@@ -137,7 +137,7 @@ public sealed record AdminOperationPaid(long Amount, string Method, Guid? Transa
 public sealed record AdminOperation(
     Guid Id, DateTimeOffset At, string Kind, string StaffName, AdminOperationClient? Client, AdminOperationPc? Pc, string? Tariff, int? Minutes,
     bool? Prepaid, long Amount, long? Charged, AdminOperationQuote? Quote, AdminOperationPaid? Paid, long Drawer, string? ReasonCode, string? Note,
-    Guid? SessionId);
+    Guid? SessionId, bool? Package = null, Guid? MovementId = null);
 
 /// <summary>«Сегодня» of the feed: the club's local day so far, by method, in tiyin.</summary>
 public sealed record AdminToday(

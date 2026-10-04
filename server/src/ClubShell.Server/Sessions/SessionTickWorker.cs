@@ -87,6 +87,11 @@ public sealed class SessionTickWorker(
 
                     if (now >= endsAt.AddSeconds(options.GraceSec))
                     {
+                        if (!await SignOutLockAsync(c, tx, s))
+                        {
+                            continue;
+                        }
+
                         await EndAsync(c, tx, s, now, effects, signOut: true);
                     }
                     else if (s.State != "ending")
@@ -101,7 +106,8 @@ public sealed class SessionTickWorker(
                     // D-10: stop at the minute boundary where the next second would start a minute beyond balance + limit;
                     // a late tick still ends there, so only fully played minutes are charged and the limit holds.
                     var used = s.Used(now);
-                    if (Pricing.Frozen(s.PricePerHourSnapshot, used + 1, s.DayPct, s.DiscountPct) > s.MainBalance + limit)
+                    if (Pricing.Frozen(s.PricePerHourSnapshot, used + 1, s.DayPct, s.DiscountPct) > s.MainBalance + limit
+                        && await SignOutLockAsync(c, tx, s))
                     {
                         await EndAsync(c, tx, s, Max(now.AddSeconds((used / 60 * 60) - used), s.LastTransitionAt), effects, signOut: true);
                     }
@@ -152,6 +158,15 @@ public sealed class SessionTickWorker(
             await SessionService.SignOutAsync(c, tx, s.UserId, s.PcId, effects);
         }
     }
+
+    /// <summary>
+    /// A transient guest's end signs the guest out, so it is serialized with the PC's sign-ins like a desk end (D-27): the
+    /// PC's lock, taken without waiting (the tick already holds the session row; a desk end takes the PC lock first). False
+    /// while a sign-in, desk open or desk end of that PC is in progress: the session is left to the next tick, a second on.
+    /// A member's end signs nobody out and needs no lock.
+    /// </summary>
+    private static async Task<bool> SignOutLockAsync(NpgsqlConnection c, NpgsqlTransaction tx, TickRow s) =>
+        !s.Transient || await AdvisoryLocks.TryPcAsync(c, tx, s.PcId);
 
     /// <summary>Every <c>ResyncSec</c> each open session of a connected PC is pushed again (the agent resyncs its timer).</summary>
     private async Task ResyncAsync(SessionEffects pushed)

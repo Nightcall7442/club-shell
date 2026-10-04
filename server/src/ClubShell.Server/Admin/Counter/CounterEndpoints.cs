@@ -27,12 +27,12 @@ namespace ClubShell.Server.Admin;
 /// single <see cref="Pricing"/> function) and <see cref="Ledger"/>; each action and its <see cref="Audit"/> entry commit
 /// together, <c>Idempotency-Key</c> under principal <c>club:&lt;id&gt;</c> (optional, required on the routes beyond the
 /// contract). Money is taken only in an open shift: top-up, payout, open and extend answer <c>409 shiftClosed</c> without
-/// one; ending a session needs none (it only gives back to the balance). A desk open and a sign-in on the same PC are
-/// serialized (<see cref="AdvisoryLocks.PcAsync"/>); a desk open signs out anyone else signed in there, a desk end signs
-/// out the session's player (D-27..D-29). Pushes and commands go out after the commit; <c>pcStatusChanged</c> is never sent
-/// (AsyncAPI notImplemented, the console polls, §6.5). Events for the webhooks (<c>sessionOpened</c>, <c>bigTopup</c>,
-/// <c>suspicious</c>) commit with the action; the automation of a top-up (<c>topupAtLeast</c>) and of an opened session runs
-/// after the commit (S5).
+/// one; ending a session needs none (it only gives back to the balance). A desk open or end and a sign-in on the same PC
+/// are serialized (<see cref="AdvisoryLocks.PcAsync"/>); a desk open signs out anyone else signed in there, a desk end
+/// signs out the session's player (D-27..D-29). Pushes and commands go out after the commit; <c>pcStatusChanged</c> is
+/// never sent (AsyncAPI notImplemented, the console polls, §6.5). Events for the webhooks (<c>sessionOpened</c>,
+/// <c>bigTopup</c>, <c>suspicious</c>) commit with the action; the automation of a top-up (<c>topupAtLeast</c>) and of an
+/// opened session runs after the commit (S5).
 /// </summary>
 public static class CounterEndpoints
 {
@@ -287,7 +287,8 @@ public static class CounterEndpoints
 
         var row = await c.QuerySingleAsync<SeatRow>(
             """
-            SELECT u.display_name AS who, u.role, t.name AS tariff, s.discount_pct, s.day_pct, s.price_per_hour_snapshot, s.purchased_sec, w.main_balance AS balance
+            SELECT u.display_name AS who, u.role, t.name AS tariff, t.is_package, s.discount_pct, s.day_pct, s.price_per_hour_snapshot, s.purchased_sec,
+                   w.main_balance AS balance
             FROM sessions s JOIN users u ON u.id = s.user_id JOIN tariffs t ON t.id = s.tariff_id JOIN wallets w ON w.user_id = s.user_id
             WHERE s.id = @Id
             """,
@@ -296,8 +297,8 @@ public static class CounterEndpoints
         await Audit.WriteAsync(c, tx, staff, now, "sessionOpen", session.UserId, pc.Id, session.Cost.Amount, $"{row.Who} · {pc.Name} · {row.Tariff}",
             new
             {
-                minutes = row.PurchasedSec / 60, prepaid = session.IsPrepaid, tariff = row.Tariff, discountPct = row.DiscountPct, sessionId = session.Id, quote,
-                paidAmount = paid?.Amount, paidMethod = paid?.Method, transactionId = paid?.Id, guest = guest ? true : (bool?)null,
+                minutes = row.PurchasedSec / 60, prepaid = session.IsPrepaid, tariff = row.Tariff, package = row.IsPackage, discountPct = row.DiscountPct,
+                sessionId = session.Id, quote, paidAmount = paid?.Amount, paidMethod = paid?.Method, transactionId = paid?.Id, guest = guest ? true : (bool?)null,
             },
             shiftId);
         return AdminJson.ToElement(new AdminSessionResult(
@@ -365,14 +366,14 @@ public static class CounterEndpoints
             }
 
             var (session, charged) = await sessions.ExtendAsync(c, tx, s.Id, s.UserId, s.PcId, minutes, r.TariffId, effects, staff);
-            var (balance, tariff, purchased) = await c.QuerySingleAsync<(long, string, int)>(
-                "SELECT w.main_balance, t.name, s.purchased_sec FROM sessions s JOIN tariffs t ON t.id = s.tariff_id JOIN wallets w ON w.user_id = s.user_id WHERE s.id = @Id",
+            var (balance, tariff, package, purchased) = await c.QuerySingleAsync<(long, string, bool, int)>(
+                "SELECT w.main_balance, t.name, t.is_package, s.purchased_sec FROM sessions s JOIN tariffs t ON t.id = s.tariff_id JOIN wallets w ON w.user_id = s.user_id WHERE s.id = @Id",
                 new { s.Id }, tx);
             var bought = (purchased - s.PurchasedSec) / 60;
             await Audit.WriteAsync(c, tx, staff, now, "sessionExtend", s.UserId, s.PcId, charged, $"+{bought}",
                 new
                 {
-                    minutes = bought, tariff, sessionId = s.Id, quote = await QuoteOfAsync(c, tx, s.Id),
+                    minutes = bought, tariff, package, sessionId = s.Id, quote = await QuoteOfAsync(c, tx, s.Id),
                     paidAmount = paid?.Amount, paidMethod = paid?.Method, transactionId = paid?.Id,
                 });
             return new IdempotentResult(StatusCodes.Status200OK, AdminJson.ToElement(new AdminSessionResult(
@@ -389,7 +390,9 @@ public static class CounterEndpoints
     /// the session itself. The player is signed out of the PC whatever the role (D-28: otherwise the kiosk would start
     /// postpaid on a member's balance again, or let a guest's refund be played away), <c>userRevoked</c> after the command.
     /// The answer adds the balance after the settlement (negative — a debt to take, D-33), the player and, for a transient
-    /// guest, what may be paid out in cash now (D-37). Needs no shift: it only gives back to the balance.
+    /// guest, what may be paid out in cash now (D-37). Needs no shift: it only gives back to the balance. The PC's lock
+    /// comes first, as for a desk open (D-27): a sign-in of that player at the same instant waits for the end and then
+    /// finds no session to sign in to, instead of keeping a token next to the end's delete.
     /// </summary>
     private static async Task<IResult> EndAsync(HttpContext context, [FromBody] JsonElement body, IdempotencyStore store, SessionService sessions)
     {
@@ -399,6 +402,14 @@ public static class CounterEndpoints
         var result = await store.ExecuteHttpAsync(context, ShiftEndpoints.Principal(staff), keyRequired: false, body, async (c, tx) =>
         {
             var now = sessions.Clock.GetUtcNow();
+            // A session never changes its PC: read unlocked, the PC is locked before the session row (§4.4).
+            if ((r.SessionId is { } sessionId
+                    ? await c.QuerySingleOrDefaultAsync<Guid?>("SELECT pc_id FROM sessions WHERE id = @sessionId", new { sessionId }, tx)
+                    : r.PcId) is { } pcId)
+            {
+                await AdvisoryLocks.PcAsync(c, tx, pcId);
+            }
+
             var s = await TargetAsync(c, tx, staff, r);
             var (charged, refunded) = await sessions.SettleAsync(c, tx, s, now, SessionEndReason.Admin, effects);
             var session = effects.Sessions[^1];
@@ -676,8 +687,10 @@ public static class CounterEndpoints
     }
 
     /// <summary>
-    /// <c>adminQuote</c>: the single price function now, without charging. An unknown <c>userId</c> is priced as a walk-in
-    /// (the contract's 404 names only tariff and pc). Beyond the contract: <c>rule</c> — the tariff's own refusal now
+    /// <c>adminQuote</c>: the single price function now, without charging. Without a <c>userId</c>, or with an unknown one
+    /// (the contract's 404 names only tariff and pc), it is a walk-in: no group, and the loyalty level of zero spend — what
+    /// a new account has, so the quote is exactly what a walk-in guest's seat charges and must be paid (D-48; a level from
+    /// 0 with a discount applies to it as to any new player). Beyond the contract: <c>rule</c> — the tariff's own refusal now
     /// (<see cref="SessionService.TariffRule"/>: zone or time window; the buyer's rules are checked only on open) and
     /// <c>minutes</c> — what the price is for (a package's own minutes).
     /// </summary>
@@ -694,7 +707,7 @@ public static class CounterEndpoints
         var minutes = tariff.IsPackage ? tariff.PackageMinutes!.Value : Minutes(r.Minutes ?? throw ApiException.Validation("minutes", "required"));
         var buyer = r.UserId is { } userId ? await SessionService.BuyerAsync(c, null, club, userId) : null;
         var now = clock.GetUtcNow();
-        var q = Pricing.Compute(tariff, minutes, buyer?.GroupId, buyer?.LifetimeSpent, zone, now, club.Pricing);
+        var q = Pricing.Compute(tariff, minutes, buyer?.GroupId, buyer?.LifetimeSpent ?? 0, zone, now, club.Pricing);
         return AdminJson.Ok(new AdminPriceQuote(
             Money.Uzs(q.Base), q.DayPct, q.DiscountPct, q.DiscountReason, Money.Uzs(q.Total), SessionService.TariffRule(zone, tariff, club, now), minutes));
     }
@@ -736,6 +749,7 @@ public static class CounterEndpoints
         public string Who { get; init; } = "";
         public string Role { get; init; } = "";
         public string Tariff { get; init; } = "";
+        public bool IsPackage { get; init; }
         public int DiscountPct { get; init; }
         public int DayPct { get; init; }
         public long PricePerHourSnapshot { get; init; }

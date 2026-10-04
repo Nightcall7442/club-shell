@@ -59,6 +59,34 @@ public sealed class DeskGuestTests(ServerFixture server) : LedgerCheckedTest(ser
     }
 
     [Fact]
+    public async Task A_walk_in_quote_is_what_the_guest_seat_charges_when_the_first_loyalty_level_has_a_discount()
+    {
+        var cashier = await LoginAsync(Server, CashierPin);
+        await OpenShiftAsync(Server, cashier);
+        var agent = await TestAgent.CreateAsync(Server);
+
+        // The first level starts at 0 with 5 % off: a new guest account has it, so the walk-in quote the console pays
+        // exactly (D-48) must have it too — or every prepaid guest seat would be refused with priceChanged.
+        await Players.ExecuteAsync(Server,
+            """
+            UPDATE clubs SET settings = settings || '{"loyalty":[{"level":1,"name":"Новичок","minSpent":0,"discountPct":5},{"level":2,"name":"Игрок","minSpent":50000000,"discountPct":10}]}'::jsonb
+            """);
+        try
+        {
+            var quote = await ExpectAsync(Server, 200, HttpMethod.Post, "/quote", cashier, new { tariffId = Players.Standard, pcId = agent.PcId, minutes = 60 });
+            Assert.Equal((5, "Новичок", 1_140_000L), (quote.GetProperty("discountPct").GetInt32(), quote.GetProperty("discountReason").GetString(), Amount(quote.GetProperty("total"))));
+            var opened = await RawExpectAsync(Server, 201, HttpMethod.Post, "/sessions/guest", cashier,
+                new { pcId = agent.PcId, tariffId = Players.Standard, minutes = 60, payment = new { amount = 1_140_000, method = "cash" } }, Guid.NewGuid());
+            Assert.Equal((1_140_000L, 0L), (Amount(opened.GetProperty("charged")), Amount(opened.GetProperty("balance"))));
+            await ExpectAsync(Server, 200, HttpMethod.Post, "/sessions/end", cashier, new { pcId = agent.PcId });
+        }
+        finally
+        {
+            await Players.ExecuteAsync(Server, "UPDATE clubs SET settings = settings - 'loyalty'");
+        }
+    }
+
+    [Fact]
     public async Task The_guest_route_refuses_without_a_key_with_a_wrong_price_and_leaves_nothing()
     {
         var cashier = await LoginAsync(Server, CashierPin);

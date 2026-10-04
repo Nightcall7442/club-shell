@@ -25,10 +25,19 @@ public static class AdvisoryLocks
     public static long Key(string tag) => Encoding.ASCII.GetBytes(tag).Aggregate(0L, (key, b) => (key << 8) | b);
 
     /// <summary>
-    /// One PC's sign-ins and desk opens, one after another (D-27, §4.4): taken in the caller's transaction, released with it.
-    /// A sign-in then sees the session a desk open committed (and refuses with <c>pcOccupied</c>), and a desk open deletes the
-    /// token of a sign-in that committed before it — a token is never left on a PC whose session belongs to someone else.
+    /// One PC's sign-ins, desk opens and desk ends, one after another (D-27, §4.4): taken in the caller's transaction,
+    /// released with it, before any row lock. A sign-in then sees the session a desk open committed (and refuses with
+    /// <c>pcOccupied</c>) or a desk end ended (and issues no token for it), and a desk open or end deletes the token of a
+    /// sign-in that committed before it — a token is never left on a PC whose session belongs to someone else or is over.
     /// </summary>
     public static Task PcAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid pcId) =>
         c.ExecuteAsync("SELECT pg_advisory_xact_lock(hashtextextended('pc:' || @pcId::text, 0))", new { pcId }, tx);
+
+    /// <summary>
+    /// <see cref="PcAsync"/> without waiting, for the session tick, which already holds its sessions' rows: false when a
+    /// sign-in, desk open or desk end of the PC is in progress (waiting there could deadlock with a desk end, which takes
+    /// this lock before the session row), and the tick leaves that session to its next run.
+    /// </summary>
+    public static Task<bool> TryPcAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid pcId) =>
+        c.ExecuteScalarAsync<bool>("SELECT pg_try_advisory_xact_lock(hashtextextended('pc:' || @pcId::text, 0))", new { pcId }, tx);
 }

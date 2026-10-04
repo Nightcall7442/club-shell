@@ -12,8 +12,8 @@ namespace ClubShell.Server.Tests;
 /// The desk's operations feed (<c>GET /admin/shift/operations</c>, cash desk part 2, D-43): the shift's journal, newest first,
 /// one row per desk operation with the payment merged in (a paid seat is one row; its top-up stays in the journal for
 /// Control), the drawer effect of each row summing to the expected drawer; a cashier reads the open and the last closed
-/// shift, the owner any; a keyset cursor; «сегодня» is the club's local day by method. The clock moves a second between
-/// operations, so the order is the order they were made in.
+/// shift, the owner any; a keyset cursor (rows of one millisecond tie on the time and page by the id); «сегодня» is the
+/// club's local day by method. The clock moves a second between operations, so the order is the order they were made in.
 /// </summary>
 public sealed class OperationsFeedTests(LongClockServerFixture server) : LedgerCheckedTest(server), IClassFixture<LongClockServerFixture>
 {
@@ -37,7 +37,8 @@ public sealed class OperationsFeedTests(LongClockServerFixture server) : LedgerC
         Tick();
         await RawExpectAsync(Server, 200, HttpMethod.Post, "/wallet/topup", cashier, new { userId = debtor.Id, amount = 300_000, method = "cash", settleDebt = true });
         Tick();
-        await RawExpectAsync(Server, 200, HttpMethod.Post, "/shift/cash", cashier, new { kind = "in", amount = 50_000, reasonCode = "change" }, Guid.NewGuid());
+        var movementId = (await RawExpectAsync(Server, 200, HttpMethod.Post, "/shift/cash", cashier, new { kind = "in", amount = 50_000, reasonCode = "change" }, Guid.NewGuid()))
+            .GetProperty("movement").GetProperty("id").GetGuid();
         Tick();
         var guestId = (await DeskGuests.SeatAsync(Server, cashier, guestPc.PcId)).GetProperty("user").GetProperty("id").GetGuid();
         Tick();
@@ -61,10 +62,13 @@ public sealed class OperationsFeedTests(LongClockServerFixture server) : LedgerC
              seat.GetProperty("paid").GetProperty("transactionId").GetGuid(), seat.GetProperty("drawer").GetInt64()));
         Assert.Equal("""{"base":1200000,"dayPct":100,"discountPct":0}""", seat.GetProperty("quote").GetRawText());
         Assert.Equal(opened.GetProperty("session").GetProperty("id").GetGuid(), seat.GetProperty("sessionId").GetGuid());
+        Assert.False(seat.GetProperty("package").GetBoolean());
         Assert.Equal(("card", 0L, carded.Id), (items[5].GetProperty("paid").GetProperty("method").GetString(), items[5].GetProperty("drawer").GetInt64(),
             items[5].GetProperty("client").GetProperty("id").GetGuid()));
         Assert.Equal((300_000L, debtor.Id), (items[4].GetProperty("drawer").GetInt64(), items[4].GetProperty("client").GetProperty("id").GetGuid()));
         Assert.Equal((50_000L, "change", JsonValueKind.Null), (items[3].GetProperty("drawer").GetInt64(), items[3].GetProperty("reasonCode").GetString(), items[3].GetProperty("note").ValueKind));
+        // A reprinted cash slip carries the original's №: the movement's id, not the journal entry's.
+        Assert.Equal(movementId, items[3].GetProperty("movementId").GetGuid());
         Assert.Equal((payable, 0L, 0L), (items[1].GetProperty("amount").GetInt64(), items[1].GetProperty("charged").GetInt64(), items[1].GetProperty("drawer").GetInt64()));
         Assert.Equal((-payable, "guest"), (items[0].GetProperty("drawer").GetInt64(), items[0].GetProperty("client").GetProperty("role").GetString()));
         Assert.Equal(100_000, items[7].GetProperty("drawer").GetInt64());
@@ -138,6 +142,39 @@ public sealed class OperationsFeedTests(LongClockServerFixture server) : LedgerC
         Assert.Equal(3, pages);
         Assert.Equal([1_004L, 1_003, 1_002, 1_001, 1_000], (await RawExpectAsync(Server, 200, HttpMethod.Get, "/shift/operations?kinds=cashIn", cashier))
             .GetProperty("items").EnumerateArray().Select(i => i.GetProperty("amount").GetInt64()));
+    }
+
+    [Fact]
+    public async Task The_cursor_pages_through_rows_of_the_same_millisecond()
+    {
+        var cashier = await LoginAsync(Server, CashierPin);
+        await FreshShiftAsync(Server, cashier);
+        Tick();
+
+        // Three cash-ins 10 µs apart: times are stored to the millisecond, so the three tie and the id orders them.
+        for (var i = 0; i < 3; i++)
+        {
+            Server.Clock.Advance(TimeSpan.FromMicroseconds(10));
+            await RawExpectAsync(Server, 200, HttpMethod.Post, "/shift/cash", cashier, new { kind = "in", amount = 2_000 + i, reasonCode = "change" }, Guid.NewGuid());
+        }
+
+        Assert.Equal(1, await Players.ScalarAsync<int>(Server, "SELECT count(DISTINCT at)::int FROM audit_entries WHERE action = 'cashIn' AND amount BETWEEN 2000 AND 2002"));
+        var all = (await RawExpectAsync(Server, 200, HttpMethod.Get, "/shift/operations?kinds=cashIn", cashier)).GetProperty("items").EnumerateArray()
+            .Select(i => i.GetProperty("id").GetGuid()).ToList();
+        var paged = new List<Guid>();
+        string? next = null;
+        var pages = 0;
+        do
+        {
+            var page = await RawExpectAsync(Server, 200, HttpMethod.Get, "/shift/operations?kinds=cashIn&limit=1" + (next is null ? "" : "&before=" + next), cashier);
+            paged.AddRange(page.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("id").GetGuid()));
+            next = page.GetProperty("next").GetString();
+            pages++;
+        }
+        while (next is not null && pages < 10);
+
+        Assert.Equal(3, all.Count);
+        Assert.Equal(all, paged);
     }
 
     [Fact]
