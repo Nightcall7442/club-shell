@@ -1,20 +1,23 @@
 /**
- * Settings → "Мой компьютер": a read-only spec sheet of this PC from `sys_hardware` (CPU, GPUs with VRAM, RAM, disks,
- * OS, network, peripherals) plus its name, zone and seat from `sys_pc_info`. Monitors come from the live kiosk state,
- * so a refresh rate changed a minute ago shows here too.
+ * The full spec sheet of this PC, opened from "Мой компьютер" on Home ("Все характеристики"): `sys_hardware` (CPU, GPUs
+ * with VRAM, RAM, disks, OS, network, peripherals) and the name, zone and seat from `sys_pc_info`, both from the
+ * settings store, and "О программе" under them. The inventory is asked again each time the sheet opens (free space,
+ * peripherals and the IP change while the Shell runs for days). Monitors come from the live kiosk state, so a refresh
+ * rate changed a minute ago shows here too.
  */
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import type { DiskInfo, HardwareInfo, MonitorInfo, PcInfo } from '@clubshell/contracts';
+import { useEffect, useId, type ReactNode } from 'react';
+import type { DiskInfo, HardwareInfo, MonitorInfo, Pc } from '@clubshell/contracts';
 import { useTranslation } from 'react-i18next';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { DotAmount } from '@/components/ui/DotAmount';
+import { Modal } from '@/components/ui/Modal';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { useGamepadConnected } from '@/hooks/useGamepad';
 import { useLocale } from '@/hooks/useLocale';
-import { api } from '@/lib/tauri';
-import { useSettingsStore } from '@/store';
-import { SettingsSection } from '../Settings';
+import { isTauri } from '@/lib/tauri';
+import { useNotificationsStore, useSettingsStore } from '@/store';
 import { MonitorIcon } from './MonitorSection';
 import { cpuGhz, cpuName, formatGib, formatMib, formatUnit } from './specs';
 
@@ -28,7 +31,7 @@ const ICON_PROPS = {
   'aria-hidden': true,
 } as const;
 
-function CpuIcon(): JSX.Element {
+export function CpuIcon(): JSX.Element {
   return (
     <svg {...ICON_PROPS}>
       <rect x="6" y="6" width="12" height="12" rx="1.5" />
@@ -38,7 +41,7 @@ function CpuIcon(): JSX.Element {
   );
 }
 
-function GpuIcon(): JSX.Element {
+export function GpuIcon(): JSX.Element {
   return (
     <svg {...ICON_PROPS}>
       <rect x="2.5" y="6" width="19" height="11" rx="1.5" />
@@ -48,7 +51,7 @@ function GpuIcon(): JSX.Element {
   );
 }
 
-function RamIcon(): JSX.Element {
+export function RamIcon(): JSX.Element {
   return (
     <svg {...ICON_PROPS}>
       <path d="M3 7.5h18v8H3z" />
@@ -179,12 +182,12 @@ function SpecsSkeleton(): JSX.Element {
   );
 }
 
-interface SpecsGridProps {
+export interface SpecsGridProps {
   hardware: HardwareInfo;
   monitors: readonly MonitorInfo[];
 }
 
-function SpecsGrid({ hardware: hw, monitors }: SpecsGridProps): JSX.Element {
+export function SpecsGrid({ hardware: hw, monitors }: SpecsGridProps): JSX.Element {
   const { t } = useTranslation();
   const { locale } = useLocale();
   const ghz = cpuGhz(hw.cpu.model);
@@ -272,78 +275,119 @@ function SpecsGrid({ hardware: hw, monitors }: SpecsGridProps): JSX.Element {
   );
 }
 
-export function PcSpecsSection(): JSX.Element {
+/** Name, seat and zone of this PC as badges. */
+export function PcIdBadges({ pc }: { pc: Pc }): JSX.Element {
   const { t } = useTranslation();
-  const storedPc = useSettingsStore((s) => s.pcInfo);
-  const liveMonitors = useSettingsStore((s) => s.kiosk?.monitors);
-  const [pc, setPc] = useState<PcInfo | null>(storedPc);
-  const [hardware, setHardware] = useState<HardwareInfo | null>(null);
-  const [failed, setFailed] = useState(false);
-  const [generation, setGeneration] = useState(0);
-
-  useEffect(() => {
-    let active = true;
-    setFailed(false);
-    api.system.hardware().then(
-      (hw) => active && setHardware(hw),
-      () => active && setFailed(true),
-    );
-    return () => {
-      active = false;
-    };
-  }, [generation]);
-
-  useEffect(() => {
-    if (storedPc) {
-      setPc(storedPc);
-      return undefined;
-    }
-    let active = true;
-    api.system.pcInfo().then(
-      (info) => active && setPc(info),
-      () => undefined,
-    );
-    return () => {
-      active = false;
-    };
-  }, [storedPc]);
-
-  const retry = useCallback(() => setGeneration((g) => g + 1), []);
-  const monitors = liveMonitors && liveMonitors.length > 0 ? liveMonitors : (hardware?.monitors ?? []);
-
   return (
-    <SettingsSection title={t('pcDisplay.specs.title')} description={t('pcDisplay.specs.description')}>
-      {pc && (
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge tone="accent" size="lg" solid>
-            {pc.pc.name}
-          </Badge>
-          {pc.pc.number > 0 && (
-            <Badge tone="neutral" size="lg">
-              {t('pcDisplay.specs.seat', { number: pc.pc.number })}
-            </Badge>
-          )}
-          {pc.pc.zone && (
-            <Badge tone="neutral" size="lg">
-              {t('pcDisplay.specs.zone', { zone: pc.pc.zone })}
-            </Badge>
-          )}
-        </div>
+    <div className="flex flex-wrap items-center gap-2">
+      <Badge tone="accent" size="lg" solid>
+        {pc.name}
+      </Badge>
+      {pc.number > 0 && (
+        <Badge tone="neutral" size="lg">
+          {t('pcDisplay.specs.seat', { number: pc.number })}
+        </Badge>
       )}
-      {hardware ? (
-        <SpecsGrid hardware={hardware} monitors={monitors} />
-      ) : failed ? (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-muted">{t('pcDisplay.specs.unavailable')}</p>
-          <Button variant="secondary" size="md" onClick={retry}>
-            {t('common.retry')}
-          </Button>
-        </div>
-      ) : (
-        <SpecsSkeleton />
+      {pc.zone && (
+        <Badge tone="neutral" size="lg">
+          {t('pcDisplay.specs.zone', { zone: pc.zone })}
+        </Badge>
       )}
-    </SettingsSection>
+    </div>
   );
 }
 
-export default PcSpecsSection;
+/** "Характеристики пока недоступны" with a retry of `sys_hardware`. */
+export function SpecsUnavailable(): JSX.Element {
+  const { t } = useTranslation();
+  const loadHardware = useSettingsStore((s) => s.loadHardware);
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <p className="text-muted">{t('pcDisplay.specs.unavailable')}</p>
+      <Button variant="secondary" size="md" onClick={() => void loadHardware()}>
+        {t('common.retry')}
+      </Button>
+    </div>
+  );
+}
+
+/** "О программе": the Shell's version, the Agent link and the controller as they are right now. */
+function AboutBadges(): JSX.Element {
+  const { t } = useTranslation();
+  const id = useId();
+  const kiosk = useSettingsStore((s) => s.kiosk);
+  const agentConnected = useNotificationsStore((s) => s.agentConnected);
+  const pad = useGamepadConnected();
+  return (
+    <section aria-labelledby={id} className="flex flex-col gap-2">
+      <h3 id={id} className="hud-label">
+        {t('settings.about')}
+      </h3>
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge tone="neutral" size="lg">
+          {t('settings.version', { version: kiosk?.version ?? '—' })}
+        </Badge>
+        <Badge tone={agentConnected ? 'success' : 'danger'} size="lg" dot>
+          {agentConnected ? t('kiosk.agentConnected') : t('kiosk.agentDisconnected')}
+        </Badge>
+        <Badge tone={pad ? 'primary' : 'muted'} size="lg">
+          {pad ? t('settings.gamepadConnected') : t('settings.gamepadDisconnected')}
+        </Badge>
+        {kiosk?.dev && (
+          <Badge tone="accent" size="lg">
+            {t('kiosk.devMode')}
+          </Badge>
+        )}
+        {!isTauri() && (
+          <Badge tone="accent" size="lg">
+            {t('kiosk.mockMode')}
+          </Badge>
+        )}
+      </div>
+    </section>
+  );
+}
+
+export interface PcSpecsModalProps {
+  open: boolean;
+  onClose: () => void;
+}
+
+/** Every spec of this PC, re-read on each opening (retry when `sys_hardware` failed), then "О программе". */
+export function PcSpecsModal({ open, onClose }: PcSpecsModalProps): JSX.Element {
+  const { t } = useTranslation();
+  const pc = useSettingsStore((s) => s.pcInfo?.pc ?? null);
+  const hardware = useSettingsStore((s) => s.hardware);
+  const failed = useSettingsStore((s) => s.hardwareStatus === 'error');
+  const refreshHardware = useSettingsStore((s) => s.refreshHardware);
+  const liveMonitors = useSettingsStore((s) => s.kiosk?.monitors);
+  const monitors = liveMonitors && liveMonitors.length > 0 ? liveMonitors : (hardware?.monitors ?? []);
+
+  useEffect(() => {
+    if (open) {
+      void refreshHardware();
+    }
+  }, [open, refreshHardware]);
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={t('pcDisplay.specs.title')}
+      description={t('pcDisplay.specs.description')}
+      size="xl"
+    >
+      <div className="flex flex-col gap-[var(--gap)]">
+        {pc && <PcIdBadges pc={pc} />}
+        {hardware ? (
+          <SpecsGrid hardware={hardware} monitors={monitors} />
+        ) : failed ? (
+          <SpecsUnavailable />
+        ) : (
+          <SpecsSkeleton />
+        )}
+        <AboutBadges />
+      </div>
+    </Modal>
+  );
+}

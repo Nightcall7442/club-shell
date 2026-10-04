@@ -1,41 +1,52 @@
 /**
  * "Видеокарта": one button that opens the graphics-card vendor's own panel (NVIDIA Control Panel, AMD Software, Intel
  * Graphics Command Center) over the shell (`pc_gpu_panel_open`). The kiosk guard steps aside while the panel is open
- * and the shell comes back on top when it closes. Shown only when this PC has the panel for its card.
+ * and the shell comes back on top when it closes. Shown only when the club allows it (`features.gpuPanel`: the panel
+ * pauses the kiosk guard and keeps its settings) and this PC has the panel for its card.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { SettingsSection } from '@/components/settings/SettingsSection';
 import { Button } from '@/components/ui/Button';
-import { api } from '@/lib/tauri';
-import { useNotificationsStore } from '@/store';
-import { SettingsSection } from '../Settings';
+import { api, type GpuPanelInfo } from '@/lib/tauri';
+import { useNotificationsStore, useSettingsStore } from '@/store';
 import { pickGpuPanel, type GpuPanelChoice } from './gpuVendor';
 import { ExternalIcon, GpuIcon } from './icons';
 
-/** The panel to offer (`null`: none, or not known yet — see `ready`). */
-export function useGpuPanelChoice(): { choice: GpuPanelChoice | null; ready: boolean } {
-  const [state, setState] = useState<{ choice: GpuPanelChoice | null; ready: boolean }>({
-    choice: null,
-    ready: false,
-  });
+/**
+ * The panel to offer (`null`: none, or not known yet — see `ready`). The GPU list is the store's `sys_hardware`;
+ * `pc_gpu_panels` is only asked while `enabled` (the club's `features.gpuPanel`).
+ */
+export function useGpuPanelChoice(enabled: boolean): { choice: GpuPanelChoice | null; ready: boolean } {
+  const hardware = useSettingsStore((s) => s.hardware);
+  const hardwareFailed = useSettingsStore((s) => s.hardwareStatus === 'error');
+  const [panels, setPanels] = useState<GpuPanelInfo[] | null>(null);
+
   useEffect(() => {
+    if (!enabled) {
+      return undefined;
+    }
     let active = true;
-    void Promise.all([
-      api.pc.gpuPanels().catch(() => []),
-      api.system
-        .hardware()
-        .then((h) => h.gpu.map((g) => g.model))
-        .catch(() => null),
-    ]).then(([panels, models]) => {
-      if (active) {
-        setState({ choice: pickGpuPanel(models, panels), ready: true });
-      }
-    });
+    api.pc.gpuPanels().then(
+      (list) => active && setPanels(list),
+      () => active && setPanels([]),
+    );
     return () => {
       active = false;
     };
-  }, []);
-  return state;
+  }, [enabled]);
+
+  return useMemo(() => {
+    if (!enabled) {
+      return { choice: null, ready: true };
+    }
+    // Wait for the hardware list; when it failed (Agent offline), `pickGpuPanel` offers the first installed panel.
+    if (panels === null || (hardware === null && !hardwareFailed)) {
+      return { choice: null, ready: false };
+    }
+    const models = hardware ? hardware.gpu.map((g) => g.model) : null;
+    return { choice: pickGpuPanel(models, panels), ready: true };
+  }, [enabled, panels, hardware, hardwareFailed]);
 }
 
 export interface GpuPanelSectionProps {

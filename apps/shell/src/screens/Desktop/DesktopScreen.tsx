@@ -1,12 +1,13 @@
 /**
- * Home (`/home`): greeting and selected game (`HomeHero`), then one row of glanceable panels — free seats,
- * tournaments, recent staff chat — and the promo strip (ads playlist or tariffs) last.
+ * Home (`/home`): greeting and selected game (`HomeHero`), then this PC and its settings (`ThisPcSection`), one row of
+ * glanceable panels — free seats, tournaments, recent staff chat — and the promo strip (ads playlist or tariffs) last.
+ * The top bar's PC line lands here with `THIS_PC_STATE`: the PC block scrolls into view with its first control focused.
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import type { Tournament } from '@clubshell/contracts';
 import { useResolvedAsset } from '@/components/media/GameArtwork';
 import { Avatar } from '@/components/ui/Avatar';
@@ -22,6 +23,8 @@ import { log } from '@/lib/logger';
 import { api } from '@/lib/tauri';
 import { HomeHero } from '@/screens/Desktop/HomeHero';
 import { LaunchOverlay } from '@/screens/Games/LaunchOverlay';
+import { THIS_PC_ID, type HomeFocusState } from '@/screens/Pc/PcBadge';
+import { ThisPcSection } from '@/screens/Pc/ThisPcSection';
 import { isPendingMessage, selectActiveRoom, useChatStore } from '@/store/chat';
 import { useGamesStore } from '@/store/games';
 import { selectFeatures, useSettingsStore } from '@/store/settings';
@@ -402,11 +405,28 @@ export function RecentChat({ index }: { index: number }): JSX.Element {
 
 export default function DesktopScreen(): JSX.Element {
   const features = useSettingsStore(selectFeatures);
+  const animations = useThemeStore(selectAnimationsEnabled);
+  const location = useLocation();
+  const navigate = useNavigate();
   const panels = [features.booking, features.tournaments, features.chat].filter(Boolean).length;
+  const focusPc = (location.state as HomeFocusState | null)?.focus === THIS_PC_ID;
+
+  // Sent here by the top bar's PC line (or the profile's pointer): show the PC block and put focus in it, then drop
+  // the request so going back to Home later starts at the hero again.
+  useEffect(() => {
+    const section = focusPc ? document.getElementById(THIS_PC_ID) : null;
+    if (!section) {
+      return;
+    }
+    section.scrollIntoView({ block: 'start', behavior: animations ? 'smooth' : 'auto' });
+    section.querySelector<HTMLElement>('[data-nav]')?.focus({ preventScroll: true });
+    navigate('.', { replace: true, state: null });
+  }, [focusPc, animations, navigate]);
 
   return (
     <div className="flex w-full flex-col gap-[calc(var(--gap)*2)]">
       <HomeHero />
+      <ThisPcSection />
       {panels > 0 && (
         <div
           className={clsx(

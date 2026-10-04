@@ -1,7 +1,7 @@
 /**
- * Labelled range with −/+ buttons for the PC settings: the slider moves freely (mouse, arrows, gamepad left/right by
- * 5 steps) and the buttons give the single-step precision a pad lacks. The value is committed after a short pause so
- * dragging does not flood the native setter.
+ * Labelled range with −/+ buttons for the PC settings: the slider moves freely (mouse, arrows, gamepad left/right one
+ * position per press on these short scales) and the buttons give a pointer the single-step precision a drag lacks. The
+ * value is committed after a short pause so dragging does not flood the native setter.
  */
 import { useEffect, useId, useRef, useState } from 'react';
 import clsx from 'clsx';

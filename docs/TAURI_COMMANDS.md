@@ -226,11 +226,12 @@ after the Agent confirms, so all windows (overlay, secondary monitors) re-render
 
 ### 2.15 pc (local, player session)
 
-Player PC settings of Profile → Settings, run in the Shell process (`src-tauri/src/commands/pc/`). The setters need a
-signed-in player (`forbidden` otherwise). The kiosk profile is not reset between players, so the club's values found at
-Shell start are put back on `auth_logout`, `session.ended` and `auth.expired`; the first change writes them to
-`%LOCALAPPDATA%\ClubShell\pc-baseline.json`, so a Shell restart mid-session still restores them (and a reboot restores
-the output device at the next start). Mouse values are applied without `SPIF_UPDATEINIFILE` (never in the registry).
+Player PC settings of the "Компьютер и настройки" block on Home (`screens/Pc/`), run in the Shell process
+(`src-tauri/src/commands/pc/`). The setters need a signed-in player (`forbidden` otherwise). The kiosk profile is not
+reset between players, so the club's values found at Shell start are put back on `auth_logout`, `session.ended` and
+`auth.expired`; the first change writes them to `%LOCALAPPDATA%\ClubShell\pc-baseline.json`, so a Shell restart
+mid-session still restores them (and a reboot restores the output device at the next start). Mouse values are applied
+without `SPIF_UPDATEINIFILE` (never in the registry).
 
 | Command | TS signature | Args | Returns | Notes |
 |---------|--------------|------|---------|-------|

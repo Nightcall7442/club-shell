@@ -1,15 +1,15 @@
 /**
- * "Мышь" in Profile → Settings: pointer speed, "Enhance pointer precision" and double-click speed of this PC
+ * "Мышь" in the PC block on Home: pointer speed, "Enhance pointer precision" and double-click speed of this PC
  * (`pc_mouse_*`). Changes apply at once in the player's Windows session and go back to the club's values when the
  * session ends. A test pad judges clicks with the same double-click time Windows now uses.
  */
 import { useEffect, useId, useRef, useState, type MouseEvent } from 'react';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
+import { SettingsSection, Toggle } from '@/components/settings/SettingsSection';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { api, type PcMouseSettings } from '@/lib/tauri';
 import { useNotificationsStore } from '@/store';
-import { SettingsSection, Toggle } from '../Settings';
 import { FolderIcon } from './icons';
 import { DOUBLE_CLICK_POSITIONS, doubleClickMsAt, doubleClickPosition, judgeClick } from './pcFormat';
 import { StepSlider } from './StepSlider';

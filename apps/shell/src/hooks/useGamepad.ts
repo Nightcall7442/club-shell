@@ -1,13 +1,15 @@
 /**
  * Gamepad + keyboard spatial navigation. Navigable elements opt in with a `data-nav` attribute; focus moves to
  * the geometrically nearest candidate in the pressed direction (D-pad / left stick / arrow keys), `A` clicks
- * the focused element, `B`/`Escape` go back, `Start` opens the menu, `LB`/`RB` switch tabs.
+ * the focused element, `B`/`Escape` go back, `Start` opens the menu, `LB`/`RB` switch tabs. Left / right on a
+ * focused slider move the slider instead (`lib/range.ts`).
  *
  * Input sources: `kiosk://gamepad` (Rust) inside Tauri, the browser Gamepad API in the mock/dev build, and
  * `keydown` everywhere. All sources feed one module-level dispatcher that routes to the most recently mounted
  * *enabled* hook instance (so a Modal's instance shadows the screen underneath it).
  */
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore, type RefObject } from 'react';
+import { nudgeRange, rangeStepsPerPress } from '@/lib/range';
 import { events, isTauri, type GamepadButtonName } from '@/lib/tauri';
 
 export type NavDirection = 'up' | 'down' | 'left' | 'right';
@@ -209,6 +211,14 @@ function navigate(inst: Instance, dir: NavDirection): void {
   const next = from ? findNext(from, dir, candidates) : (candidates[0] ?? null);
   if (o.onNavigate?.(dir, next) === true) {
     return;
+  }
+  // A focused slider keeps left / right: the pad has no other way to move it.
+  if ((dir === 'left' || dir === 'right') && from instanceof HTMLInputElement && from.type === 'range') {
+    if (from === document.activeElement) {
+      const steps = rangeStepsPerPress(Number(from.min) || 0, Number(from.max) || 100, Number(from.step) || 1);
+      nudgeRange(from, dir === 'right' ? steps : -steps);
+      return;
+    }
   }
   if (next) {
     focusElement(next);

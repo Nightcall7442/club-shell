@@ -287,6 +287,8 @@
     "timeLeft": "Qoldi",
     "tariff": "Tarif",
     "pc": "Kompyuter",
+    "pcAndSettings": "Kompyuter va sozlamalar",
+    "pcBadge": "Kompyuter xususiyatlari va sozlamalarini ochish",
     "noSession": "Faol seans yo'q",
     "startSession": "Seansni boshlash",
     "clock": "Soat",
@@ -875,7 +877,9 @@
     "stats": "Statistika",
     "achievements": "Yutuqlar",
     "loyalty": "Sodiqlik",
-    "settings": "Sozlamalar",
+    "account": "Akkaunt",
+    "pcMoved": "Ovoz, sichqoncha, monitor va mavzu — bosh sahifada",
+    "openPcSettings": "Kompyuter sozlamalarini ochish",
     "displayName": "Ko'rsatiladigan ism",
     "username": "Login",
     "avatar": "Avatar",
@@ -1186,14 +1190,12 @@
   "settings": {
     "title": "Sozlamalar",
     "subtitle": "Til, mavzu va ovoz",
-    "language": "Til",
     "theme": "Mavzu",
     "volume": "Ovoz balandligi",
     "muted": "Ovozsiz",
     "idleTimeout": "Faolsizlikda bloklash",
     "idleTimeoutValue": "{{minutes}} daq",
     "idleNever": "Hech qachon",
-    "showMetrics": "Tizim ko'rsatkichlarini ko'rsatish",
     "uiSounds": "Interfeys tovushlari",
     "save": "Saqlash",
     "saved": "Sozlamalar saqlandi",
@@ -1230,7 +1232,6 @@
     "volumeLevel": "Ovoz {{level}}%",
     "system": "Tizim",
     "sound": "Ovoz",
-    "display": "Ekran",
     "accessibility": "Qulaylik",
     "reduceMotion": "Animatsiyalarni kamaytirish",
     "largeText": "Katta matn",
@@ -1445,6 +1446,7 @@
     "specs": {
       "title": "Mening kompyuterim",
       "description": "Ushbu kompyuter xususiyatlari",
+      "all": "Barcha xususiyatlar",
       "seat": "{{number}}-joy",
       "zone": "{{zone}} zonasi",
       "cpu": "Protsessor",
@@ -1477,6 +1479,16 @@
       "ip": "IP {{ip}}",
       "peripherals": "Periferiya",
       "unavailable": "Xususiyatlar hozircha mavjud emas"
+    },
+    "vitals": {
+      "title": "Kompyuter holati",
+      "cpu": "CPU",
+      "gpu": "GPU",
+      "ram": "RAM",
+      "fps": "FPS",
+      "temp": "{{value}}°",
+      "load": "{{value}}%",
+      "hot": "qizib ketgan"
     }
   }
 }

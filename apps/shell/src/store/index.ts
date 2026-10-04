@@ -403,9 +403,13 @@ export function isBootstrapped(): boolean {
   return bootPromise !== null;
 }
 
-/** Clears every user-scoped slice (logout / `auth.expired`). Settings and theme are device-level and stay. */
+/**
+ * Clears every user-scoped slice (logout / `auth.expired`). Settings and theme are device-level and stay, except the
+ * last metrics sample: it may show the previous player's game.
+ */
 export function resetStores(): void {
   useSessionStore.getState().reset();
+  useSettingsStore.getState().clearMetrics();
   useGamesStore.getState().reset();
   useWalletStore.getState().reset();
   useShopStore.getState().reset();

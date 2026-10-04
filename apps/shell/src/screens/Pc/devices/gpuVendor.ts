@@ -1,6 +1,7 @@
 /**
- * Which graphics-card panel the Settings screen offers: the vendor of the PC's GPU (`sys_hardware`) matched against the
- * panels installed for the kiosk user (`pc_gpu_panels`). Pure, so the e2e package unit-tests it without a browser.
+ * The PC's graphics cards by vendor: which one games run on, its short name for the top bar, and which vendor panel
+ * the "Видеокарта" card offers — the vendor of the PC's GPU (`sys_hardware`) matched against the panels installed for
+ * the kiosk user (`pc_gpu_panels`). Pure, so it is unit-tested without a browser.
  */
 import type { GpuPanelInfo, GpuVendor } from '@/lib/tauri';
 
@@ -16,6 +17,41 @@ const VENDOR_PATTERNS: Record<GpuVendor, RegExp> = {
 /** Vendor of a GPU model string (`NVIDIA GeForce RTX 4070`); `null` for virtual / unknown adapters. */
 export function gpuVendorOf(model: string): GpuVendor | null {
   return GPU_VENDOR_PRIORITY.find((vendor) => VENDOR_PATTERNS[vendor].test(model)) ?? null;
+}
+
+/** The card games run on: a discrete NVIDIA / AMD card before the Intel iGPU next to it, else the first adapter. */
+export function primaryGpu<T extends { model: string }>(gpus: readonly T[]): T | null {
+  for (const vendor of GPU_VENDOR_PRIORITY) {
+    const gpu = gpus.find((g) => gpuVendorOf(g.model) === vendor);
+    if (gpu) {
+      return gpu;
+    }
+  }
+  return gpus[0] ?? null;
+}
+
+/** The model number players know a card by (`RTX 4070`, `RX 7800 XT`, `GTX 1660 SUPER`, `Arc A770`). */
+const MODEL_RE = /\b(?:[GR]TX|RX|GT|MX)\s?[A-Z]?\d{3,4}[A-Z]?(?:\s(?:Ti|SUPER|XTX|XT|GRE))*\b|\bArc\s[AB]\d{3}\b/i;
+
+/**
+ * `NVIDIA GeForce RTX 4070` → `RTX 4070`, `AMD Radeon RX 7800 XT` → `RX 7800 XT`; a name without a model number only
+ * loses its vendor and trademarks (`Intel(R) UHD Graphics 770` → `UHD Graphics 770`).
+ */
+export function gpuShortName(model: string): string {
+  const clean = model
+    .replace(/\((R|TM|C)\)/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const hit = MODEL_RE.exec(clean);
+  if (hit) {
+    return hit[0];
+  }
+  return (
+    clean
+      .replace(/^(NVIDIA|AMD|ATI|Intel)\s+/i, '')
+      .replace(/\s+Series$/i, '')
+      .trim() || clean
+  );
 }
 
 /** The panel to offer, with the GPU model it belongs to. */
