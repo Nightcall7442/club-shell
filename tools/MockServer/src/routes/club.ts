@@ -35,15 +35,19 @@ import {
   now,
   obj,
   openSessionForUser,
+  optBool,
   optInt,
   optStr,
   publicPc,
+  settleStatus,
   str,
   uuid,
   uzs,
   type PcRecord,
+  type ProductRecord,
   type UserRecord,
 } from '../db.js';
+import { PRODUCT_CATEGORIES, liveProducts, productView, voidOf } from './bar.js';
 import {
   API_TOPUP,
   CASH_REASONS,
@@ -348,6 +352,7 @@ export function clubRoutes(app: FastifyInstance): void {
       emit(
         'shiftClosed',
         `${shift.staffName}: сеансы ${money(t.sessions)}, магазин ${money(t.shop)}, ` +
+          `бар нал. ${money(t.shopByMethod.cash)}, аннулировано ${t.shopVoidCount} на ${money(t.shopVoids)}, ` +
           `внесено ${money(t.cashIn)}, изъято ${money(t.cashOut)}, выдано гостям ${money(t.payouts)}, ` +
           `касса ${money(shift.closingCash)} (ожидалось ${money(expected)})`,
         { shiftId: shift.id },
@@ -796,7 +801,11 @@ export function clubRoutes(app: FastifyInstance): void {
     if (typeof b['x'] === 'number') pc.x = int(b, 'x', 0, 200);
     if (typeof b['y'] === 'number') pc.y = int(b, 'y', 0, 200);
     if (typeof b['device'] === 'string') club().devices[pc.id] = str(b, 'device', 16) as DeviceKind;
-    if (typeof b['maintenance'] === 'boolean') pc.status = b['maintenance'] ? 'maintenance' : 'free';
+    if (typeof b['maintenance'] === 'boolean') {
+      // Back from maintenance the status is derived again: a registered PC not heard from yet is offline.
+      pc.status = b['maintenance'] ? 'maintenance' : 'free';
+      if (!b['maintenance']) settleStatus(pc);
+    }
     markDirty();
     broadcast('pcStatusChanged', { pcId: pc.id, status: pc.status });
     return { pc: publicPc(pc) };
@@ -847,14 +856,65 @@ export function clubRoutes(app: FastifyInstance): void {
   // ------------------------------------------------------------------------------------------------ shop & stock
   app.get('/admin/products', async (req) => {
     requireStaff(req);
-    return { items: db.products, lowAt: club().stock.lowAt };
+    return { items: liveProducts().map(productView), lowAt: club().stock.lowAt };
   });
 
+  /**
+   * A product the owner adds at the desk (beyond the contract, D-58): `source` desk, so a seed file never archives it.
+   * `stockQty` null — not tracked; `inStock` defaults to true.
+   */
+  app.post('/admin/products', async (req, reply) => {
+    const me = requireStaff(req, 'owner');
+    const b = body(req);
+    const title = str(b, 'title', 80).trim();
+    if (!title) throw errors.validation('title', 'required');
+    const product: ProductRecord = {
+      id: uuid(),
+      title,
+      category: enumOf(b, 'category', PRODUCT_CATEGORIES),
+      price: uzs(int(b, 'price', 0, 1_000_000_000)),
+      imageUrl: '',
+      inStock: optBool(b, 'inStock') ?? true,
+      stockQty: optInt(b, 'stockQty', 0, 1_000_000),
+      tags: [],
+      source: 'desk',
+      deletedAt: null,
+      deletedBy: null,
+    };
+    db.products.push(product);
+    markDirty();
+    record(me, 'stockCreate', {
+      detail: product.title,
+      meta: { productId: product.id, price: product.price.amount, stockQty: product.stockQty ?? null },
+    });
+    return reply.code(201).send({ product: productView(product) });
+  });
+
+  /** Archives a product (a soft delete, D-58): gone from the lists, the lines of past sales keep its title and price. */
+  app.delete<{ Params: { id: string } }>('/admin/products/:id', async (req) => {
+    const me = requireStaff(req, 'owner');
+    const p = liveProducts().find((x) => x.id === req.params.id);
+    if (!p) throw errors.notFound('product');
+    p.deletedAt = now();
+    p.deletedBy = 'desk';
+    markDirty();
+    record(me, 'stockArchive', { detail: p.title, meta: { productId: p.id } });
+    return { ok: true };
+  });
+
+  /**
+   * Partial edit: only the keys sent change. A `stockQty` with `expectedStockQty` (beyond the contract, D-54) is refused
+   * when the quantity moved since the desk read it (409 `stockChanged {stockQty}`: the bar sold meanwhile).
+   */
   app.patch<{ Params: { id: string } }>('/admin/products/:id', async (req) => {
     const me = requireStaff(req, 'owner');
-    const p = db.products.find((x) => x.id === req.params.id);
+    const p = liveProducts().find((x) => x.id === req.params.id);
     if (!p) throw errors.notFound('product');
     const b = body(req);
+    if ('stockQty' in b && 'expectedStockQty' in b) {
+      const expected = optInt(b, 'expectedStockQty', 0, 1_000_000);
+      if ((p.stockQty ?? null) !== expected) throw errors.conflict('stockChanged', { stockQty: p.stockQty ?? null });
+    }
     const qtyBefore = p.stockQty;
     if (typeof b['title'] === 'string') p.title = str(b, 'title', 80);
     if (typeof b['price'] === 'number') p.price = uzs(int(b, 'price', 0, 1_000_000_000));
@@ -867,14 +927,14 @@ export function clubRoutes(app: FastifyInstance): void {
         meta: { productId: p.id, before: qtyBefore ?? null, after: p.stockQty ?? null },
       });
     }
-    return { product: p };
+    return { product: productView(p) };
   });
 
   /** Goods received: adds to the tracked quantity. */
   app.post<{ Params: { id: string } }>('/admin/products/:id/receive', async (req, reply) => {
     const me = requireStaff(req);
     return idempotent(req, reply, async () => {
-      const p = db.products.find((x) => x.id === req.params.id);
+      const p = liveProducts().find((x) => x.id === req.params.id);
       if (!p) throw errors.notFound('product');
       const qty = int(body(req), 'qty', 1, 100_000);
       p.stockQty = (p.stockQty ?? 0) + qty;
@@ -882,7 +942,7 @@ export function clubRoutes(app: FastifyInstance): void {
       markDirty();
       record(me, 'stockReceive', { detail: `${p.title} +${qty}`, meta: { productId: p.id, qty } });
       // A copy: a replay answers with the stock right after this delivery, not the live record.
-      return { status: 200, body: { product: { ...p } } };
+      return { status: 200, body: { product: productView({ ...p }) } };
     });
   });
 
@@ -1045,6 +1105,12 @@ export function clubRoutes(app: FastifyInstance): void {
       else if (tx.type === 'purchase') row.shop += -tx.amount.amount;
       else if (tx.type === 'topUp') row.topUps += tx.amount.amount;
     }
+    // The bar's method sales net of their voids (its balance sales are the `purchase` rows above), by day (D-57).
+    for (const s of db.shopSales) {
+      if (s.method === 'balance' || s.createdAt < sinceIso) continue;
+      const row = byDay.get(s.createdAt.slice(0, 10));
+      if (row) row.shop += s.kind === 'sale' ? s.total : -s.total;
+    }
     // Occupancy heat map: seat-hours per weekday × hour.
     const heat = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => 0));
     for (const s of db.sessions) {
@@ -1061,14 +1127,20 @@ export function clubRoutes(app: FastifyInstance): void {
       for (const gameId of Object.keys(perUser)) games.set(gameId, (games.get(gameId) ?? 0) + 1);
     }
     const products = new Map<string, { title: string; qty: number; amount: number }>();
+    const sold = (productId: string, title: string, qty: number, amount: number): void => {
+      const cur = products.get(productId) ?? { title, qty: 0, amount: 0 };
+      cur.qty += qty;
+      cur.amount += amount;
+      products.set(productId, cur);
+    };
     for (const o of db.orders) {
       if (o.createdAt < sinceIso) continue;
-      for (const line of o.items) {
-        const cur = products.get(line.productId) ?? { title: line.title, qty: 0, amount: 0 };
-        cur.qty += line.qty;
-        cur.amount += line.price.amount * line.qty;
-        products.set(line.productId, cur);
-      }
+      for (const line of o.items) sold(line.productId, line.title, line.qty, line.price.amount * line.qty);
+    }
+    // The bar's lines of sales that were not voided (the kiosk's orders above are the mock's own).
+    for (const s of db.shopSales) {
+      if (s.kind !== 'sale' || s.createdAt < sinceIso || voidOf(s.id)) continue;
+      for (const line of s.lines) sold(line.productId, line.title, line.qty, line.price * line.qty);
     }
     const rows = [...byDay.values()];
     return {

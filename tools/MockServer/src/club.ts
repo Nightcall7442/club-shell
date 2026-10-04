@@ -68,7 +68,19 @@ export interface ShiftTotals {
   payouts: number;
   /** Cash top-ups booked with the club API key: in `topUpCash`, but never in the drawer. */
   apiCash: number;
+  /**
+   * Bar sales of the shift by method, net of the voids booked in it (D-57); `balance` may be negative in a shift that
+   * voids an earlier shift's balance sale. Absent from a Z saved before cash desk part 3.
+   */
+  shopByMethod: Record<ShopMethod, number>;
+  /** What the shift's voids gave back, and how many there were. */
+  shopVoids: number;
+  shopVoidCount: number;
 }
+
+/** How a bar sale was paid: a counter method, or the client's balance. */
+export type ShopMethod = PayMethod | 'balance';
+export const SHOP_METHODS: readonly ShopMethod[] = ['cash', 'card', 'payme', 'click', 'uzum', 'balance'];
 
 /** Why cash went into or out of the drawer; the note is the cashier's own words (required for `other`). */
 export type CashReason = 'change' | 'collection' | 'expenses' | 'other';
@@ -234,10 +246,17 @@ export type AuditAction =
   | 'pcCommand'
   | 'clientPassword'
   | 'clientCard'
-  // Beyond the contract's enum (D-44): in the feed and the Z, not in /admin/control.
+  // Beyond the contract's enum (D-44, D-68): in the feed and the Z, not in /admin/control.
   | 'cashIn'
   | 'cashOut'
-  | 'payout';
+  | 'payout'
+  | 'shopSale'
+  | 'shopVoid'
+  | 'sessionMove'
+  | 'callAck'
+  | 'callResolve'
+  | 'stockCreate'
+  | 'stockArchive';
 
 export interface AuditEntry {
   id: string;
@@ -713,8 +732,12 @@ export const clubHooks = {
       });
     }
   },
-  stockChanged(title: string, qty: number): void {
-    if (qty <= club().stock.lowAt) emit('lowStock', `${title}: осталось ${qty}`, { title, qty });
+  /** A tracked quantity changed: `lowStock` once per downward crossing of the threshold (`before` unknown — any low). */
+  stockChanged(title: string, qty: number, before?: number | null): void {
+    const lowAt = club().stock.lowAt;
+    if (qty > lowAt) return;
+    if (before !== undefined && before !== null && before <= lowAt) return;
+    emit('lowStock', `${title}: осталось ${qty}`, { title, qty });
   },
 };
 
@@ -784,7 +807,11 @@ export const PAYOUT_DESCRIPTION = 'Выдано наличными на касс
 /** A cash top-up booked with the club API key says so in its description. */
 export const API_TOPUP = 'via the club API';
 
-/** Money movements since `from` — the X report of an open shift, the Z report when it closes (with its drawer moves). */
+/**
+ * Money movements since `from` — the X report of an open shift, the Z report when it closes (with its drawer moves).
+ * `shop` is the bar net of voids: the balance sales through their `purchase` rows, the method sales from the shift's
+ * own sales and voids (D-57).
+ */
 export function totalsSince(from: string, to: string = now(), shift: ShiftRecord | null = null): ShiftTotals {
   const t: ShiftTotals = {
     topUpCash: 0,
@@ -799,10 +826,23 @@ export function totalsSince(from: string, to: string = now(), shift: ShiftRecord
     cashOut: 0,
     payouts: 0,
     apiCash: 0,
+    shopByMethod: { cash: 0, card: 0, payme: 0, click: 0, uzum: 0, balance: 0 },
+    shopVoids: 0,
+    shopVoidCount: 0,
   };
   for (const m of shift?.cashMoves ?? []) {
     if (m.kind === 'in') t.cashIn += m.amount;
     else t.cashOut += m.amount;
+  }
+  for (const s of db.shopSales) {
+    if (shift ? s.shiftId !== shift.id : s.createdAt < from || s.createdAt > to) continue;
+    const signed = s.kind === 'sale' ? s.total : -s.total;
+    t.shopByMethod[s.method] += signed;
+    if (s.method !== 'balance') t.shop += signed;
+    if (s.kind === 'void') {
+      t.shopVoids += s.total;
+      t.shopVoidCount += 1;
+    }
   }
   for (const tx of db.transactions) {
     if (tx.createdAt < from || tx.createdAt > to) continue;
@@ -844,11 +884,11 @@ export function openShift(): ShiftRecord | null {
 }
 
 /**
- * Cash the drawer should hold (D-41): the float + the desk's cash top-ups (not the API's) + cash in − cash out − cash
- * given back to guests. Only the server computes it; the console shows it.
+ * Cash the drawer should hold (D-41, D-57): the float + the desk's cash top-ups (not the API's) + cash in − cash out −
+ * cash given back to guests + the bar's cash sales net of their voids. Only the server computes it; the console shows it.
  */
 export function expectedCashOf(openingCash: number, t: ShiftTotals): number {
-  return openingCash + (t.topUpCash - t.apiCash) + t.cashIn - t.cashOut - t.payouts;
+  return openingCash + (t.topUpCash - t.apiCash) + t.cashIn - t.cashOut - t.payouts + (t.shopByMethod?.cash ?? 0);
 }
 
 /** What the open shift's drawer should hold right now. */

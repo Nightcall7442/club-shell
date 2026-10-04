@@ -33,6 +33,7 @@ import {
   optStr,
   pcIdsForUser,
   resolveAgentToken,
+  settleStatus,
   str,
   uuid,
   type CommandRecord,
@@ -265,10 +266,11 @@ export function registerWs(app: FastifyInstance): void {
     conns.set(pc.id, conn);
     logEvent(pc.id, 'connect', null, { protocol: socket.protocol || null });
     console.log(`[ws] ${pc.name} connected`);
-    if (pc.status === 'offline') {
-      pc.status = 'free';
-      markDirty();
-    }
+    // A socket is a sign of life: a registered PC's status is derived again, the seeded hall's offline one comes back.
+    pc.seen = true;
+    if (pc.registered) settleStatus(pc);
+    else if (pc.status === 'offline') pc.status = 'free';
+    markDirty();
 
     socket.on('message', (data, isBinary) => {
       if (isBinary) return;

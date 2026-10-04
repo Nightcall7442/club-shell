@@ -28,6 +28,7 @@ import {
   type PcRecord,
 } from './db.js';
 import { adminRoutes } from './routes/admin.js';
+import { barRoutes } from './routes/bar.js';
 import { clubRoutes } from './routes/club.js';
 import { tickClub } from './club.js';
 import { tickHealth } from './health.js';
@@ -311,6 +312,7 @@ export async function buildApp(opts: Options): Promise<FastifyInstance> {
       authRoutes(api);
       adminRoutes(api);
       clubRoutes(api);
+      barRoutes(api);
       sessionRoutes(api);
       gamesRoutes(api);
       playerSettingsRoutes(api);
