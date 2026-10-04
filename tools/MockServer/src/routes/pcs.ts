@@ -65,14 +65,20 @@ const AC_ACTIONS = Object.values(AntiCheatAction);
 const CHANNELS = knownValues(UpdateChannel);
 const COMPONENTS = knownValues(UpdateComponent);
 
+/**
+ * The PC a registering Agent becomes: its own again (by hwid or `previousPcId`), else a free seeded PC of the demo hall,
+ * else a new PC pending the owner's approval (403 `pendingApproval`). `MOCK_AUTO_APPROVE_PCS=1` (the admin e2e tests,
+ * as the server's `Club:AutoApprovePcs`) makes every new Agent a new approved PC instead, never a seeded one.
+ */
 function assignPc(hwid: string, previousPcId: string | null, machineName: string): PcRecord {
   const byHwid = db.pcs.find((p) => p.hwid === hwid);
   if (byHwid) return byHwid;
   const previous = previousPcId ? db.pcs.find((p) => p.id === previousPcId) : undefined;
   if (previous && (previous.hwid === null || db.pcs.every((p) => p.hwid !== previous.hwid || p === previous)))
     return previous;
+  const autoApprove = process.env['MOCK_AUTO_APPROVE_PCS'] === '1';
   const free =
-    process.env['MOCK_STRICT_REGISTER'] === '1'
+    process.env['MOCK_STRICT_REGISTER'] === '1' || autoApprove
       ? undefined
       : db.pcs.find((p) => p.hwid === null && p.status !== 'maintenance' && !p.currentSessionId);
   if (free) return free;
@@ -97,6 +103,12 @@ function assignPc(hwid: string, previousPcId: string | null, machineName: string
     hardware: null,
     metrics: [],
   };
+  if (autoApprove) {
+    const approved: PcRecord = { ...pending, id: sid(`pc:${hwid}`), status: 'offline', registered: true };
+    db.pcs.push(approved);
+    markDirty();
+    return approved;
+  }
   if (!db.pcs.some((p) => p.id === pending.id)) db.pcs.push(pending);
   markDirty();
   throw new ApiError('forbidden', 'PC is pending admin approval', { reason: 'pendingApproval', pcId: pending.id });

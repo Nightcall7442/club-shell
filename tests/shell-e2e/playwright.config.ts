@@ -47,6 +47,9 @@ const mockAdminApi = {
     MOCK_SERVER_PORT: String(ADMIN_API_PORT),
     MOCK_PUBLIC_URL: `http://localhost:${ADMIN_API_PORT}`,
     MOCK_DB_FILE: join(tmpdir(), `clubshell-admin-e2e-${process.pid}.json`),
+    // Every registered Agent is a new approved PC, as with the server's Club__AutoApprovePcs below: the spec registers
+    // more PCs than the demo hall has free seats, and a seeded seat (booked, locked) would bring its own rules.
+    MOCK_AUTO_APPROVE_PCS: '1',
   },
   reuseExistingServer: false,
   timeout: 120_000,
