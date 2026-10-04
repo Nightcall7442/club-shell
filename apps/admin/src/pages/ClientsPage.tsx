@@ -3,6 +3,7 @@
  * profile, bind a club card, reset the sign-in password, redeem a promo code and see the latest wallet entries — or to
  * register a new client with a password and card, so they can sign in on a PC. A password the console generates is
  * shown to the cashier once. Blacklisting is the owner's call: the server answers 403 to a cashier and the panel says.
+ * `#/clients/new` (the counter's "+ Новый клиент") opens the registration straight away.
  */
 import { useCallback, useEffect, useState } from 'react';
 import clsx from 'clsx';
@@ -470,6 +471,19 @@ export default function ClientsPage(): JSX.Element {
       .settings()
       .then((s) => setGroups(s.groups))
       .catch(() => setGroups([]));
+  }, []);
+
+  // "+ Новый клиент" from the client search: open the registration, then drop the suffix so a reload does not.
+  useEffect(() => {
+    const check = (): void => {
+      if (!/^#\/?clients\/new$/.test(window.location.hash)) return;
+      setSelected('new');
+      setIssued(null);
+      window.history.replaceState(null, '', '#/clients');
+    };
+    check();
+    window.addEventListener('hashchange', check);
+    return () => window.removeEventListener('hashchange', check);
   }, []);
 
   const client = items.find((c) => c.id === selected) ?? null;

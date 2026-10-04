@@ -24,10 +24,12 @@ namespace ClubShell.Server.Admin;
 /// The counter (slice S4): hall snapshot, sessions opened/extended/ended by the cashier, top-up with the tier bonus, PC
 /// commands and the price preview. Money goes through the kiosk's own <see cref="SessionService"/> (the §5.2 rules and
 /// the single <see cref="Pricing"/> function) and <see cref="Ledger"/>; each action and its <see cref="Audit"/> entry
-/// commit together, <c>Idempotency-Key</c> (optional) under principal <c>club:&lt;id&gt;</c>. Pushes and commands go out
-/// after the commit; <c>pcStatusChanged</c> is never sent (AsyncAPI notImplemented, the console polls, §6.5). Events for the
-/// webhooks (<c>sessionOpened</c>, <c>bigTopup</c>, <c>suspicious</c>) commit with the action; the automation of a top-up
-/// (<c>topupAtLeast</c>) and of an opened session runs after the commit (S5).
+/// commit together, <c>Idempotency-Key</c> (optional) under principal <c>club:&lt;id&gt;</c>. Money is taken only in an open
+/// shift: top-up, open and extend answer <c>409 shiftClosed</c> without one; ending a session needs none (it only gives back
+/// to the balance). Pushes and commands go out after the commit; <c>pcStatusChanged</c> is never sent (AsyncAPI
+/// notImplemented, the console polls, §6.5). Events for the webhooks (<c>sessionOpened</c>, <c>bigTopup</c>,
+/// <c>suspicious</c>) commit with the action; the automation of a top-up (<c>topupAtLeast</c>) and of an opened session runs
+/// after the commit (S5).
 /// </summary>
 public static class CounterEndpoints
 {
@@ -111,17 +113,32 @@ public static class CounterEndpoints
             await ZonesAsync(c, staff.ClubId), repairs, debts));
     }
 
-    /// <summary><c>adminOpenSession</c> (§5.3): prepaid, priced by the club rules; <c>201 {session, charged, balance}</c>.</summary>
+    /// <summary>
+    /// <c>adminOpenSession</c> (§5.3): prepaid, priced by the club rules; <c>201 {session, charged, balance}</c>. With
+    /// <c>payment</c> (the desk's "Посадить · Наличные") the top-up is posted first in the same transaction, so a session the
+    /// rules refuse (blacklist, curfew, a busy PC, a changed price) leaves no money booked. The wallet is then locked before
+    /// the session row is inserted; only a kiosk sign-in of the same player at that instant can deadlock with it, and
+    /// Postgres refuses one of the two.
+    /// </summary>
     private static async Task<IResult> OpenAsync(
-        HttpContext context, [FromBody] JsonElement body, IdempotencyStore store, SessionService sessions, PcRepository pcs)
+        HttpContext context, [FromBody] JsonElement body, IdempotencyStore store, SessionService sessions, PcRepository pcs,
+        AutomationService automation, ILoggerFactory logs)
     {
         var staff = context.Features.GetRequiredFeature<StaffContext>();
         var r = Api.Read<AdminOpenSessionRequest>(body, "pcId", "userId", "tariffId", "minutes");
         var minutes = Minutes(r.Minutes!.Value);
+        var payment = PaymentOf(r.Payment);
         var pc = await LivePcAsync(pcs, staff, r.PcId!.Value);
         var effects = new SessionEffects();
+        TopUpPosted? paid = null;
         var result = await store.ExecuteHttpAsync(context, ShiftEndpoints.Principal(staff), keyRequired: false, body, async (c, tx) =>
         {
+            await ShiftEndpoints.RequireOpenAsync(c, tx, staff);
+            if (payment is { } pay)
+            {
+                paid = await PostTopUpAsync(c, tx, staff, effects, r.UserId!.Value, pay.Amount, pay.Method, sessions.Clock.GetUtcNow());
+            }
+
             var session = await sessions.CreateAsync(
                 c, tx, pc, new SessionCreateRequest(pc.Id, r.UserId!.Value, r.TariffId!.Value, minutes, true), replay: false, effects, staff);
             var (who, tariff, discount, balance) = await c.QuerySingleAsync<(string, string, int, long)>(
@@ -136,19 +153,32 @@ public static class CounterEndpoints
             return new IdempotentResult(StatusCodes.Status201Created, AdminJson.ToElement(new AdminSessionResult(session, session.Cost, Money.Uzs(balance))));
         });
         await sessions.PublishAsync(effects);
+        await AfterTopUpAsync(automation, logs, staff, paid);
         return result;
     }
 
-    /// <summary><c>adminExtend</c> (§5.6): the kiosk's extend, plus <c>extendSession {charge:false}</c> to the PC.</summary>
-    private static async Task<IResult> ExtendAsync(HttpContext context, [FromBody] JsonElement body, IdempotencyStore store, SessionService sessions)
+    /// <summary>
+    /// <c>adminExtend</c> (§5.6): the kiosk's extend, plus <c>extendSession {charge:false}</c> to the PC. With <c>payment</c> the
+    /// session's player is topped up in the same transaction, after the session row is locked (§4.4).
+    /// </summary>
+    private static async Task<IResult> ExtendAsync(
+        HttpContext context, [FromBody] JsonElement body, IdempotencyStore store, SessionService sessions, AutomationService automation, ILoggerFactory logs)
     {
         var staff = context.Features.GetRequiredFeature<StaffContext>();
         var r = Api.Read<AdminSessionTarget>(body, "minutes");
         var minutes = Minutes(r.Minutes!.Value);
+        var payment = PaymentOf(r.Payment);
         var effects = new SessionEffects();
+        TopUpPosted? paid = null;
         var result = await store.ExecuteHttpAsync(context, ShiftEndpoints.Principal(staff), keyRequired: false, body, async (c, tx) =>
         {
+            await ShiftEndpoints.RequireOpenAsync(c, tx, staff);
             var s = await TargetAsync(c, tx, staff, r);
+            if (payment is { } pay)
+            {
+                paid = await PostTopUpAsync(c, tx, staff, effects, s.UserId, pay.Amount, pay.Method, sessions.Clock.GetUtcNow());
+            }
+
             var (session, charged) = await sessions.ExtendAsync(c, tx, s.Id, s.UserId, s.PcId, minutes, r.TariffId, effects, staff);
             var balance = await c.ExecuteScalarAsync<long>("SELECT main_balance FROM wallets WHERE user_id = @UserId", new { s.UserId }, tx);
             await Audit.WriteAsync(c, tx, staff, sessions.Clock.GetUtcNow(), "sessionExtend", s.UserId, s.PcId, charged,
@@ -156,6 +186,7 @@ public static class CounterEndpoints
             return new IdempotentResult(StatusCodes.Status200OK, AdminJson.ToElement(new AdminSessionResult(session, Money.Uzs(charged), Money.Uzs(balance))));
         });
         await sessions.PublishAsync(effects);
+        await AfterTopUpAsync(automation, logs, staff, paid);
         return result;
     }
 
@@ -195,55 +226,86 @@ public static class CounterEndpoints
     {
         var staff = context.Features.GetRequiredFeature<StaffContext>();
         var r = Api.Read<AdminTopUpRequest>(body, "userId", "amount");
-        var amount = r.Amount!.Value is < 1 or > 100_000_000 ? throw ApiException.Validation("amount", r.Amount < 1 ? "min" : "max") : r.Amount.Value;
-        var method = r.Method ?? "cash";
-        if (!Methods.Contains(method, StringComparer.Ordinal))
-        {
-            throw ApiException.Validation("method", "enum");
-        }
-
+        var (amount, method) = Payment(r.Amount, r.Method ?? "cash", "");
         var effects = new SessionEffects();
-        Guid? topUp = null;
+        TopUpPosted? paid = null;
         var result = await store.ExecuteHttpAsync(context, ShiftEndpoints.Principal(staff), keyRequired: false, body, async (c, tx) =>
         {
-            var now = sessions.Clock.GetUtcNow();
-            var userId = r.UserId!.Value;
-            var who = await c.QuerySingleOrDefaultAsync<string>(
-                "SELECT display_name FROM users WHERE id = @userId AND network_id = @NetworkId AND deleted_at IS NULL", new { userId, staff.NetworkId }, tx)
-                ?? throw ApiException.NotFound("user");
-            var tiers = await c.ExecuteScalarAsync<string?>("SELECT (settings -> 'bonusTiers')::text FROM clubs WHERE id = @ClubId", new { staff.ClubId }, tx);
-            var bonus = Bonus(amount, tiers);
-            var id = Guid.CreateVersion7(now);
-            var balance = await Ledger.PostAsync(c, tx, userId, allowOverdraft: false, now,
-                new LedgerLine("topUp", amount, TopUpDescription(method), staff.ClubId, Method: method, StaffId: staff.StaffId, Id: id),
-                new LedgerLine("bonus", bonus, "Бонус за пополнение", staff.ClubId, StaffId: staff.StaffId));
-            var row = await c.QuerySingleAsync<(long BalanceAfter, string Description, DateTimeOffset CreatedAt)>(
-                "SELECT balance_after, description, created_at FROM ledger_entries WHERE id = @id", new { id }, tx);
-            await Audit.WriteAsync(c, tx, staff, now, "topUp", userId, amount: amount, detail: who, meta: new { method, bonus });
-            if (amount >= await ClubSettingsEndpoints.BigTopupAtAsync(c, tx, staff.ClubId))
-            {
-                await Webhooks.EnqueueAsync(c, tx, staff.ClubId, "bigTopup", now, $"{who}: {Webhooks.Sum(amount)}", new { userId, amount });
-            }
-
-            topUp = id;
-            effects.Wallets.Add(userId);
-            var transaction = new Transaction(id, userId, TransactionType.TopUp, Money.Uzs(amount), Money.Uzs(row.BalanceAfter), row.Description, row.CreatedAt);
-            return new IdempotentResult(StatusCodes.Status200OK, AdminJson.ToElement(new AdminTopUpResponse(Money.Uzs(balance), transaction, Money.Uzs(bonus))));
+            await ShiftEndpoints.RequireOpenAsync(c, tx, staff);
+            paid = await PostTopUpAsync(c, tx, staff, effects, r.UserId!.Value, amount, method, sessions.Clock.GetUtcNow());
+            return new IdempotentResult(StatusCodes.Status200OK, AdminJson.ToElement(new AdminTopUpResponse(Money.Uzs(paid.Balance), paid.Transaction, Money.Uzs(paid.Bonus))));
         });
         await sessions.PublishAsync(effects);
-        if (topUp is { } entryId)
+        await AfterTopUpAsync(automation, logs, staff, paid);
+        return result;
+    }
+
+    /// <summary>A posted counter top-up: its ledger row, the balance after it and the tier bonus.</summary>
+    private sealed record TopUpPosted(Guid Id, Guid UserId, long Amount, long Balance, long Bonus, Transaction Transaction);
+
+    /// <summary>
+    /// A counter top-up in the caller's transaction: the top-up and the tier bonus as one ledger operation (the top-up row
+    /// must join the open shift, <see cref="LedgerLine.ShiftRequired"/>, unless the club API key took it), its journal entry
+    /// and the <c>bigTopup</c> event.
+    /// </summary>
+    private static async Task<TopUpPosted> PostTopUpAsync(
+        NpgsqlConnection c, NpgsqlTransaction tx, StaffContext staff, SessionEffects effects, Guid userId, long amount, string method, DateTimeOffset now)
+    {
+        var who = await c.QuerySingleOrDefaultAsync<string>(
+            "SELECT display_name FROM users WHERE id = @userId AND network_id = @NetworkId AND deleted_at IS NULL", new { userId, staff.NetworkId }, tx)
+            ?? throw ApiException.NotFound("user");
+        var tiers = await c.ExecuteScalarAsync<string?>("SELECT (settings -> 'bonusTiers')::text FROM clubs WHERE id = @ClubId", new { staff.ClubId }, tx);
+        var bonus = Bonus(amount, tiers);
+        var id = Guid.CreateVersion7(now);
+        var balance = await Ledger.PostAsync(c, tx, userId, allowOverdraft: false, now,
+            new LedgerLine("topUp", amount, TopUpDescription(method), staff.ClubId, Method: method, StaffId: staff.StaffId, Id: id,
+                ShiftRequired: staff.StaffId is not null),
+            new LedgerLine("bonus", bonus, "Бонус за пополнение", staff.ClubId, StaffId: staff.StaffId));
+        var row = await c.QuerySingleAsync<(long BalanceAfter, string Description, DateTimeOffset CreatedAt)>(
+            "SELECT balance_after, description, created_at FROM ledger_entries WHERE id = @id", new { id }, tx);
+        await Audit.WriteAsync(c, tx, staff, now, "topUp", userId, amount: amount, detail: who, meta: new { method, bonus });
+        if (amount >= await ClubSettingsEndpoints.BigTopupAtAsync(c, tx, staff.ClubId))
         {
-            try
-            {
-                await automation.TopUpAsync(staff.ClubId, r.UserId!.Value, amount, entryId);
-            }
-            catch (NpgsqlException ex)
-            {
-                logs.CreateLogger(typeof(CounterEndpoints).FullName!).LogWarning(ex, "Automation after a top-up failed");
-            }
+            await Webhooks.EnqueueAsync(c, tx, staff.ClubId, "bigTopup", now, $"{who}: {Webhooks.Sum(amount)}", new { userId, amount });
         }
 
-        return result;
+        effects.Wallets.Add(userId);
+        var transaction = new Transaction(id, userId, TransactionType.TopUp, Money.Uzs(amount), Money.Uzs(row.BalanceAfter), row.Description, row.CreatedAt);
+        return new TopUpPosted(id, userId, amount, balance, bonus, transaction);
+    }
+
+    /// <summary>The automation of a committed top-up (<c>topupAtLeast</c>, S5); its failure never fails the top-up. Nothing on a replay.</summary>
+    private static async Task AfterTopUpAsync(AutomationService automation, ILoggerFactory logs, StaffContext staff, TopUpPosted? paid)
+    {
+        if (paid is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await automation.TopUpAsync(staff.ClubId, paid.UserId, paid.Amount, paid.Id);
+        }
+        catch (NpgsqlException ex)
+        {
+            logs.CreateLogger(typeof(CounterEndpoints).FullName!).LogWarning(ex, "Automation after a top-up failed");
+        }
+    }
+
+    /// <summary>The <c>payment</c> of an open or extend (its method required), else none.</summary>
+    private static (long Amount, string Method)? PaymentOf(AdminPayment? payment) =>
+        payment is null ? null : Payment(payment.Amount, payment.Method ?? throw ApiException.Validation("payment.method", "required"), "payment.");
+
+    /// <summary>Money the counter takes: 1 tiyin … 1 000 000 сум by one of <see cref="Methods"/>, else <c>400</c> naming the field.</summary>
+    private static (long Amount, string Method) Payment(long? amount, string method, string prefix)
+    {
+        var a = amount ?? throw ApiException.Validation(prefix + "amount", "required");
+        if (a is < 1 or > 100_000_000)
+        {
+            throw ApiException.Validation(prefix + "amount", a < 1 ? "min" : "max");
+        }
+
+        return Methods.Contains(method, StringComparer.Ordinal) ? (a, method) : throw ApiException.Validation(prefix + "method", "enum");
     }
 
     /// <summary>The bonus of <c>AdminBonusTier[]</c> <c>{minAmount, bonusPct}</c>: the highest tier reached, half-up to 100 tiyin.</summary>

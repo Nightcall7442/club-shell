@@ -223,6 +223,7 @@ public sealed class CounterTests(ServerFixture server) : LedgerCheckedTest(serve
     public async Task Open_session_checks_the_rules_in_order_and_answers_session_charged_balance()
     {
         var token = await LoginAsync(Server, CashierPin);
+        await OpenShiftAsync(Server, token);
         var agent = await TestAgent.CreateAsync(Server);
         var player = await Players.CreateAsync(Server, balance: 2_000_000);
         object Body(Guid? pc = null, Guid? user = null, Guid? tariff = null, int minutes = 60) =>
@@ -259,6 +260,7 @@ public sealed class CounterTests(ServerFixture server) : LedgerCheckedTest(serve
     public async Task Extend_and_end_reuse_the_kiosk_rules_and_refund_what_was_paid()
     {
         var token = await LoginAsync(Server, OwnerPin);
+        await OpenShiftAsync(Server, token);
         var agent = await TestAgent.CreateAsync(Server);
         var player = await Players.CreateAsync(Server, balance: 5_000_000);
         await ExpectAsync(Server, 201, HttpMethod.Post, "/sessions", token, new { pcId = agent.PcId, userId = player.Id, tariffId = Players.Standard, minutes = 60 });
@@ -302,6 +304,7 @@ public sealed class CounterTests(ServerFixture server) : LedgerCheckedTest(serve
     public async Task Open_extend_and_end_replay_by_key_without_a_second_effect()
     {
         var token = await LoginAsync(Server, CashierPin);
+        await OpenShiftAsync(Server, token);
         var agent = await TestAgent.CreateAsync(Server);
         var player = await Players.CreateAsync(Server, balance: 5_000_000);
         await ReplayedAsync(Server, 201, HttpMethod.Post, "/sessions", token, new { pcId = agent.PcId, userId = player.Id, tariffId = Players.Standard, minutes = 60 });
@@ -344,6 +347,7 @@ public sealed class CounterTests(ServerFixture server) : LedgerCheckedTest(serve
     public async Task Top_up_adds_the_tier_bonus_half_up_to_100_once_per_key()
     {
         var token = await LoginAsync(Server, CashierPin);
+        await OpenShiftAsync(Server, token);
         var player = await Players.CreateAsync(Server, balance: 0);
         var key = Guid.NewGuid();
         var body = new { userId = player.Id, amount = 5_001_000 };
@@ -413,6 +417,7 @@ public sealed class CounterTests(ServerFixture server) : LedgerCheckedTest(serve
     public async Task Overview_draws_seats_with_sessions_tariffs_members_and_zones()
     {
         var token = await LoginAsync(Server, CashierPin);
+        await OpenShiftAsync(Server, token);
         var agent = await TestAgent.CreateAsync(Server);
         var player = await Players.CreateAsync(Server);
         var hidden = await Players.CreateAsync(Server);
@@ -444,7 +449,6 @@ public sealed class ShiftTests(ServerFixture server) : LedgerCheckedTest(server)
         var cashier = await LoginAsync(Server, CashierPin);
         var player = await Players.CreateAsync(Server, balance: 0);
         var agent = await TestAgent.CreateAsync(Server);
-        await ExpectAsync(Server, 200, HttpMethod.Post, "/wallet/topup", cashier, new { userId = player.Id, amount = 1_000_000 }); // before the shift
         Contract.AssertError(await ExpectAsync(Server, 409, HttpMethod.Post, "/shift/close", cashier, new { closingCash = 0 }), "conflict", "noShift");
 
         var opened = (await ExpectAsync(Server, 200, HttpMethod.Post, "/shift/open", owner, new { openingCash = 100_000 })).GetProperty("shift");
@@ -473,6 +477,9 @@ public sealed class ShiftTests(ServerFixture server) : LedgerCheckedTest(server)
         Assert.Equal((JsonValueKind.Null, JsonValueKind.Null, opened.GetProperty("id").GetGuid()),
             (state.GetProperty("shift").ValueKind, state.GetProperty("x").ValueKind, state.GetProperty("history")[0].GetProperty("id").GetGuid()));
         Contract.AssertError(await ExpectAsync(Server, 409, HttpMethod.Post, "/shift/close", owner, new { closingCash = 0 }), "conflict", "noShift");
+
+        // Ending needs no shift: its refund, after the Z report, joins none.
+        await ExpectAsync(Server, 200, HttpMethod.Post, "/sessions/end", cashier, new { pcId = agent.PcId });
         Assert.Equal(1, await Players.ScalarAsync<int>(Server, "SELECT count(*)::int FROM ledger_entries WHERE user_id = @Id AND shift_id IS NULL", new { player.Id }));
     }
 }
@@ -497,6 +504,7 @@ public sealed class PcAdminTests(ApprovalServerFixture server) : IClassFixture<A
         var owner = await LoginAsync(server, OwnerPin);
         var agent = await ApprovedAgentAsync(owner);
         var player = await Players.CreateAsync(server);
+        await OpenShiftAsync(server, owner);
         await ExpectAsync(server, 201, HttpMethod.Post, "/sessions", owner, new { pcId = agent.PcId, userId = player.Id, tariffId = Players.Standard, minutes = 60 });
         Contract.AssertError(await ExpectAsync(server, 409, HttpMethod.Delete, $"/pcs/{agent.PcId}", owner), "conflict", "pcBusy");
 
@@ -626,6 +634,7 @@ public sealed class AdminCommandTests(ShortAckServerFixture server) : IClassFixt
     public async Task Cashier_extend_and_end_queue_extendSession_and_endSession()
     {
         var owner = await LoginAsync(server, OwnerPin);
+        await OpenShiftAsync(server, owner);
         var agent = await TestAgent.CreateAsync(server);
         var player = await Players.CreateAsync(server);
         var id = (await ExpectAsync(server, 201, HttpMethod.Post, "/sessions", owner, new { pcId = agent.PcId, userId = player.Id, tariffId = Players.Standard, minutes = 60 }))
@@ -684,6 +693,7 @@ public sealed class AgentHarnessS4Tests(KestrelServerFixture server) : IClassFix
         await Wait.UntilAsync(() => server.Services.GetRequiredService<AgentSocketHub>().IsConnected(pcId));
 
         var owner = await LoginAsync(server, OwnerPin);
+        await OpenShiftAsync(server, owner);
         var id = (await ExpectAsync(server, 201, HttpMethod.Post, "/sessions", owner, new { pcId, userId = player.Id, tariffId = Players.Standard, minutes = 60 }))
             .GetProperty("session").GetProperty("id").GetGuid();
         await Wait.UntilAsync(() => Pushed(pushes, id, 3600));

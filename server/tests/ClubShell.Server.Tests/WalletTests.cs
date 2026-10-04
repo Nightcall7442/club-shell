@@ -19,6 +19,7 @@ public sealed class WalletTests(ServerFixture server) : LedgerCheckedTest(server
     {
         var (agent, player) = await Players.SignedInAsync(Server, balance: 1_000_000);
         var cashier = await LoginAsync(Server, CashierPin);
+        await OpenShiftAsync(Server, cashier);
         Server.Clock.Advance(TimeSpan.FromSeconds(1));
         await ExpectAsync(Server, 200, HttpMethod.Post, "/wallet/topup", cashier, new { userId = player.Id, amount = 5_000_000, method = "cash" });
         Server.Clock.Advance(TimeSpan.FromSeconds(1));

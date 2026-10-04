@@ -27,6 +27,7 @@ import {
   markDirty,
   now,
   obj,
+  openSessionForUser,
   optInt,
   optStr,
   publicPc,
@@ -119,6 +120,39 @@ function cardOf(b: Record<string, unknown>, userId: string | null): string | nul
   if (card && db.users.some((u) => u.id !== userId && u.cardId?.toLowerCase() === card.toLowerCase()))
     throw errors.validation('cardId', 'taken');
   return card;
+}
+
+/** One row of the counter's client search (`GET /admin/clients/lookup`). */
+function lookupView(u: UserRecord): Record<string, unknown> {
+  const phone = profileOf(u.id).phone.replace(/\D/g, '');
+  const session = openSessionForUser(u.id);
+  const pc = session ? findPc(session.pcId) : undefined;
+  return {
+    id: u.id,
+    displayName: u.displayName,
+    username: u.username,
+    phoneTail: phone ? phone.slice(-4) : null,
+    balance: u.balance,
+    // The server's lookup sends no bonus (v1, D-9).
+    bonus: uzs(0),
+    cardId: u.cardId,
+    playing: pc ? { pcId: pc.id, pcName: pc.name } : null,
+    blacklisted: profileOf(u.id).blacklisted,
+  };
+}
+
+/**
+ * How well `u` matches the search, as the server ranks it (−1 — not at all): 0 the exact card or login, 1 a login or a
+ * word of the name that starts with it, 2 any substring of the name or login, 3 a run of the phone's digits.
+ */
+function lookupRank(u: UserRecord, q: string, digits: string | null): number {
+  const name = u.displayName.toLowerCase();
+  const login = u.username.toLowerCase();
+  if (login === q || (u.cardId && u.cardId.toLowerCase() === q)) return 0;
+  if (login.startsWith(q) || name.startsWith(q) || name.includes(` ${q}`)) return 1;
+  if (login.includes(q) || name.includes(q)) return 2;
+  if (digits && profileOf(u.id).phone.replace(/\D/g, '').includes(digits)) return 3;
+  return -1;
 }
 
 function money(n: number): string {
@@ -427,6 +461,39 @@ export function clubRoutes(app: FastifyInstance): void {
   });
 
   // ------------------------------------------------------------------------------------------------ clients
+  /**
+   * The counter's client search: at most 8, best first. `q` matches the name or login (any case), any run of the phone's
+   * digits ("4521" finds +998 90 123 45 21) or the exact card; under 2 characters — the clients active last. Guests
+   * and staff accounts are not clients.
+   */
+  app.get<{ Querystring: { q?: string } }>('/admin/clients/lookup', async (req) => {
+    requireStaff(req);
+    const q = (req.query.q ?? '').trim().toLowerCase();
+    const pool = db.users.filter((u) => !u.transient && u.role !== 'admin' && u.role !== 'guest');
+    // The last sign of life (a sign-in or a wallet movement): the recent list, and the tie-break of equal matches.
+    const lastTx = new Map<string, string>();
+    for (const tx of db.transactions) {
+      if (tx.createdAt > (lastTx.get(tx.userId) ?? '')) lastTx.set(tx.userId, tx.createdAt);
+    }
+    const active = (u: UserRecord): string => {
+      const seen = u.lastSeenAt ?? u.createdAt;
+      const tx = lastTx.get(u.id) ?? '';
+      return tx > seen ? tx : seen;
+    };
+    const byActivity = (a: UserRecord, b: UserRecord): number =>
+      active(b).localeCompare(active(a)) || a.id.localeCompare(b.id);
+    if (q.length < 2) return { items: [...pool].sort(byActivity).slice(0, 8).map(lookupView) };
+    // Digits typed with phone punctuation only ("90 123-45-21") search the phone.
+    const digits = /\d/.test(q) && /^[\d\s+()-]+$/.test(q) ? q.replace(/\D/g, '') : null;
+    const items = pool
+      .map((u) => ({ u, rank: lookupRank(u, q, digits) }))
+      .filter((x) => x.rank >= 0)
+      .sort((a, b) => a.rank - b.rank || byActivity(a.u, b.u))
+      .slice(0, 8)
+      .map((x) => lookupView(x.u));
+    return { items };
+  });
+
   app.get<{ Querystring: { q?: string } }>('/admin/clients', async (req) => {
     requireStaff(req);
     const q = (req.query.q ?? '').trim().toLowerCase();

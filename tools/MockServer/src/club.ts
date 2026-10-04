@@ -40,9 +40,15 @@ export interface StaffRecord {
   active: boolean;
 }
 
+/** Payment methods of a counter top-up; `other` is any top-up the console did not book under one of them. */
+export const PAY_METHODS = ['cash', 'card', 'payme', 'click', 'uzum'] as const;
+export type PayMethod = (typeof PAY_METHODS)[number];
+
 export interface ShiftTotals {
   topUpCash: number;
   topUpOther: number;
+  /** The same top-ups by method; they add up to `topUpCash + topUpOther`. */
+  topUpByMethod: Record<PayMethod | 'other', number>;
   sessions: number;
   shop: number;
   refunds: number;
@@ -679,18 +685,39 @@ export function tickClub(t: number): void {
 // Shifts
 // ---------------------------------------------------------------------------------------------------------------------
 
+/**
+ * The method a top-up was booked under, read from its description: the counter writes `(card)` and friends, the kiosk
+ * `via Payme`, the seed `in cash`.
+ */
+export function topUpMethod(description: string): PayMethod | 'other' {
+  if (/cash|налич/i.test(description)) return 'cash';
+  return PAY_METHODS.find((m) => new RegExp(`\\b${m}\\b`, 'i').test(description)) ?? 'other';
+}
+
 /** Money movements since `from` — the X report of an open shift, the Z report when it closes. */
 export function totalsSince(from: string, to: string = now()): ShiftTotals {
-  const t: ShiftTotals = { topUpCash: 0, topUpOther: 0, sessions: 0, shop: 0, refunds: 0, bonuses: 0, count: 0 };
+  const t: ShiftTotals = {
+    topUpCash: 0,
+    topUpOther: 0,
+    topUpByMethod: { cash: 0, card: 0, payme: 0, click: 0, uzum: 0, other: 0 },
+    sessions: 0,
+    shop: 0,
+    refunds: 0,
+    bonuses: 0,
+    count: 0,
+  };
   for (const tx of db.transactions) {
     if (tx.createdAt < from || tx.createdAt > to) continue;
     t.count += 1;
     const a = tx.amount.amount;
     switch (tx.type) {
-      case 'topUp':
-        if (/cash|налич/i.test(tx.description)) t.topUpCash += a;
+      case 'topUp': {
+        const method = topUpMethod(tx.description);
+        if (method === 'cash') t.topUpCash += a;
         else t.topUpOther += a;
+        t.topUpByMethod[method] += a;
         break;
+      }
       case 'charge':
         t.sessions += -a;
         break;

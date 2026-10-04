@@ -39,6 +39,7 @@ public sealed class GuestPostpaidTests(LongClockServerFixture server) : LedgerCh
             Assert.Equal(200_000, debt.GetProperty("debt").GetProperty("amount").GetInt64());
             Assert.False(string.IsNullOrEmpty(debt.GetProperty("pc").GetString()));
 
+            await OpenShiftAsync(Server, owner);
             await ExpectAsync(Server, 200, HttpMethod.Post, "/wallet/topup", owner, new { userId = guest.Id, amount = 200_000, method = "cash" });
             Assert.Equal(0, await Players.BalanceAsync(Server, guest.Id));
             Assert.DoesNotContain(await DebtsAsync(owner), d => d.GetProperty("userId").GetGuid() == guest.Id);

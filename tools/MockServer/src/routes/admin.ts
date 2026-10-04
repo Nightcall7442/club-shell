@@ -7,7 +7,10 @@
  * Auth is a static bearer token (`MOCK_ADMIN_TOKEN`, default `admin-dev-token`) rather than a staff login: the
  * real console authenticates against the operator's own server. These routes are exempt from the agent Bearer /
  * HMAC gate (`isExempt` in `index.ts`). The money routes honour `Idempotency-Key` ({@link idempotent}): the console
- * sends one per cashier action and reuses it when the cashier retries after a lost answer.
+ * sends one per cashier action and reuses it when the cashier retries after a lost answer. Taking money (a top-up,
+ * opening or extending a session) needs an open cash shift: 409 `conflict` / `shiftClosed` otherwise, checked after the
+ * body as the server does; ending a session only refunds to the balance and does not. Opening and extending take an
+ * optional `payment {amount, method}`: the top-up and the session in one step, every refusal checked before either.
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { tariffPriceFor, type Money, type Session } from '@clubshell/contracts';
@@ -24,6 +27,7 @@ import {
   findUser,
   idempotent,
   int,
+  isObject,
   now,
   openSessionForPc,
   openSessionForUser,
@@ -39,7 +43,19 @@ import {
 } from '../db.js';
 import { endSession } from './session.js';
 import { requireStaff, topUpWithBonus } from './club.js';
-import { club, clubHooks, inCurfew, isMinor, profileOf, quote, type StaffRecord } from '../club.js';
+import {
+  PAY_METHODS,
+  club,
+  clubHooks,
+  inCurfew,
+  isMinor,
+  openShift,
+  profileOf,
+  quote,
+  topupBonus,
+  type PayMethod,
+  type StaffRecord,
+} from '../club.js';
 import { record } from '../control.js';
 import { openTicketMarks } from '../health.js';
 import { broadcast, pushToPc, pushToUser, sendCommand } from '../ws.js';
@@ -70,6 +86,54 @@ function seatOf(pc: PcRecord): SeatView {
 
 function userView(u: UserRecord): { id: string; displayName: string; username: string; role: string; balance: Money } {
   return { id: u.id, displayName: u.displayName, username: u.username, role: u.role, balance: u.balance };
+}
+
+/** Money is taken only in an open shift, so the X / Z reports account for every сум. */
+function requireShift(): void {
+  if (!openShift()) throw errors.conflict('shiftClosed');
+}
+
+interface Payment {
+  amount: number;
+  method: PayMethod;
+}
+
+/** A counter payment's method, else 400 `enum` (the server's reason). */
+function payMethod(v: unknown, field: string): PayMethod {
+  if (typeof v !== 'string' || !(PAY_METHODS as readonly string[]).includes(v)) throw errors.validation(field, 'enum');
+  return v as PayMethod;
+}
+
+/** `payment` of an open or extend (method required), else none. */
+function paymentOf(b: Record<string, unknown>): Payment | null {
+  const p = b['payment'];
+  if (p === undefined || p === null) return null;
+  if (!isObject(p)) throw errors.validation('payment', 'type');
+  const amount = p['amount'];
+  if (amount === undefined || amount === null) throw errors.validation('payment.amount', 'required');
+  if (typeof amount !== 'number' || !Number.isInteger(amount)) throw errors.validation('payment.amount', 'type');
+  if (amount < 1) throw errors.validation('payment.amount', 'min');
+  if (amount > 100_000_000) throw errors.validation('payment.amount', 'max');
+  if (p['method'] === undefined || p['method'] === null) throw errors.validation('payment.method', 'required');
+  return { amount, method: payMethod(p['method'], 'payment.method') };
+}
+
+/**
+ * Funds for `cost` once `payment` (and its tier bonus) is in, else 402 before anything is booked; then books the
+ * payment as a counter top-up.
+ */
+function takePayment(staff: StaffRecord, user: UserRecord, payment: Payment | null, cost: Money): void {
+  const incoming = payment ? payment.amount + topupBonus(payment.amount) : 0;
+  if (user.balance.amount + incoming < cost.amount)
+    throw errors.insufficientFunds(cost, uzs(user.balance.amount + incoming));
+  if (!payment) return;
+  const { bonus } = topUpWithBonus(user, payment.amount, payment.method);
+  record(staff, 'topUp', {
+    userId: user.id,
+    amount: payment.amount,
+    detail: user.displayName,
+    meta: { method: payment.method, bonus },
+  });
 }
 
 /** The session the cashier is acting on, by session id or by seat. */
@@ -104,10 +168,12 @@ export function adminRoutes(app: FastifyInstance): void {
       const pcId = str(b, 'pcId', 64);
       const userId = str(b, 'userId', 64);
       const minutes = int(b, 'minutes', 5, 1440);
+      const payment = paymentOf(b);
       const pc = findPc(pcId);
       const user = findUser(userId);
       const tariff = findTariff(str(b, 'tariffId', 64));
       if (!pc) throw errors.notFound('pc');
+      requireShift();
       if (!user) throw errors.notFound('user');
       if (!tariff) throw errors.notFound('tariff');
       if (pc.status === 'maintenance') throw errors.policyDenied('pcMaintenance');
@@ -124,7 +190,7 @@ export function adminRoutes(app: FastifyInstance): void {
       const mins = tariff.isPackage ? (tariff.packageMinutes ?? minutes) : minutes;
       const priced = quote(tariff, mins, userId, pc.zone);
       const cost = priced.total;
-      if (user.balance.amount < cost.amount) throw errors.insufficientFunds(cost, user.balance);
+      takePayment(staff, user, payment, cost);
       const id = uuid();
       if (cost.amount > 0)
         applyTransaction(user, 'charge', uzs(-cost.amount), `Session ${mins} min · ${tariff.name} (staff)`, id);
@@ -171,15 +237,17 @@ export function adminRoutes(app: FastifyInstance): void {
     const staff = requireAdmin(req);
     return idempotent(req, reply, async () => {
       const b = body(req);
-      const rec = targetSession(b);
       const minutes = int(b, 'minutes', 5, 1440);
+      const payment = paymentOf(b);
+      requireShift();
+      const rec = targetSession(b);
       const tariff = findTariff(optStr(b, 'tariffId', 64) ?? rec.tariffId);
       const user = findUser(rec.userId);
       if (!tariff) throw errors.notFound('tariff');
       if (!user) throw errors.notFound('user');
       if (!rec.isPrepaid) throw errors.conflict('postpaidSession');
       const cost = quote(tariff, minutes, user.id, findPc(rec.pcId)?.zone ?? '').total;
-      if (user.balance.amount < cost.amount) throw errors.insufficientFunds(cost, user.balance);
+      takePayment(staff, user, payment, cost);
       if (cost.amount > 0)
         applyTransaction(
           user,
@@ -226,14 +294,15 @@ export function adminRoutes(app: FastifyInstance): void {
     });
   });
 
-  /** Cash / card top-up at the counter. */
+  /** Top-up at the counter, booked under its payment method (`cash` when none is sent). */
   app.post('/admin/wallet/topup', async (req, reply) => {
     const staff = requireAdmin(req);
     return idempotent(req, reply, async () => {
       const b = body(req);
       const user = findUser(str(b, 'userId', 64));
       const amount = int(b, 'amount', 1, 100_000_000);
-      const method = optStr(b, 'method', 16) ?? 'cash';
+      const method = payMethod(optStr(b, 'method', 16) ?? 'cash', 'method');
+      requireShift();
       if (!user) throw errors.notFound('user');
       const { bonus } = topUpWithBonus(user, amount, method);
       record(staff, 'topUp', {

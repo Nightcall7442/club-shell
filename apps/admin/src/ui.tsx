@@ -3,6 +3,7 @@
  * and a money input. Every page is made of these, so a change here changes the whole console.
  */
 import {
+  forwardRef,
   useEffect,
   useRef,
   useState,
@@ -10,21 +11,20 @@ import {
   type InputHTMLAttributes,
   type ReactNode,
 } from 'react';
+import { createPortal } from 'react-dom';
 import clsx from 'clsx';
 import { t } from '@/i18n';
 
-export function Button({
-  children,
-  variant = 'secondary',
-  size = 'md',
-  className,
-  ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
-  size?: 'sm' | 'md';
-}): JSX.Element {
+export const Button = forwardRef<
+  HTMLButtonElement,
+  ButtonHTMLAttributes<HTMLButtonElement> & {
+    variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
+    size?: 'sm' | 'md';
+  }
+>(function Button({ children, variant = 'secondary', size = 'md', className, ...rest }, ref) {
   return (
     <button
+      ref={ref}
       type="button"
       {...rest}
       className={clsx(
@@ -40,7 +40,7 @@ export function Button({
       {children}
     </button>
   );
-}
+});
 
 export const inputCls =
   'focus-ring h-10 w-full rounded-md border border-line bg-bg px-3 text-sm text-text placeholder:text-muted disabled:opacity-50';
@@ -285,6 +285,92 @@ export function Note({ note }: { note: { text: string; tone: 'ok' | 'err' } | nu
     >
       {note.text}
     </p>
+  );
+}
+
+/** Sheets open now: the page behind them (`#root`) is inert until the last one closes. */
+let openSheets = 0;
+
+/**
+ * A modal sheet over the console (a money action, a confirmation, the shift gate): dimmed backdrop, one panel, the title
+ * as the dialog's name. Esc and × close it when `onClose` is given; the backdrop does not, so a stray click never drops
+ * a typed amount. Focus goes to the first `autoFocus` field inside, else to the panel, so Esc works at once.
+ */
+export function Sheet({
+  title,
+  onClose,
+  children,
+  wide,
+}: {
+  title: string;
+  onClose?: () => void;
+  children: ReactNode;
+  wide?: boolean;
+}): JSX.Element {
+  const panel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (panel.current && !panel.current.contains(document.activeElement)) panel.current.focus();
+  }, []);
+  // Modal for real: the page behind it takes neither Tab nor clicks while a sheet is open.
+  useEffect(() => {
+    const root = document.getElementById('root');
+    if (!root) return undefined;
+    openSheets += 1;
+    root.setAttribute('inert', '');
+    return () => {
+      openSheets -= 1;
+      if (openSheets === 0) root.removeAttribute('inert');
+    };
+  }, []);
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-6 pt-[12vh]">
+      <div
+        ref={panel}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape' && onClose) {
+            // Handled here: the page's own Esc (close the seat panel) must not fire too.
+            e.stopPropagation();
+            onClose();
+          }
+        }}
+        className={clsx('panel flex w-full flex-col gap-4 p-5 outline-none', wide ? 'max-w-xl' : 'max-w-md')}
+      >
+        <header className="flex items-start justify-between gap-3">
+          <h2 className="font-display text-xl font-normal leading-tight tracking-tight">{title}</h2>
+          {onClose && (
+            <button
+              type="button"
+              aria-label={t('Закрыть')}
+              title="Esc"
+              onClick={onClose}
+              className="focus-ring -mr-1 -mt-1 h-8 w-8 shrink-0 rounded-md text-lg leading-none text-muted hover:bg-white/[0.06] hover:text-text"
+            >
+              ×
+            </button>
+          )}
+        </header>
+        {children}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/** A key hint on a button: `Enter`, `F2`, `Alt+2`. */
+export function Kbd({ children, className }: { children: ReactNode; className?: string }): JSX.Element {
+  return (
+    <kbd
+      className={clsx(
+        'rounded border border-white/20 px-1 font-mono text-[0.6rem] font-medium leading-[1.1rem] opacity-70',
+        className,
+      )}
+    >
+      {children}
+    </kbd>
   );
 }
 

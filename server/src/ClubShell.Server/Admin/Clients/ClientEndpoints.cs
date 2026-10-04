@@ -17,9 +17,10 @@ namespace ClubShell.Server.Admin;
 
 /// <summary>
 /// Clients at the counter (slice S5): search, registration, the card, the club profile, a new password and the wallet
-/// history. A client is a user of the staff member's network that is neither deleted nor a guest; the list also leaves out
-/// staff accounts (<c>role = admin</c>). Users and wallets are network-level (DESIGN §4.1), the profile (group, note, phone,
-/// birth year, blacklist) belongs to the club. Login name and card are unique case-insensitively (<c>users_username</c>,
+/// history; beyond the contract, the counter's picker (<c>GET /admin/clients/lookup</c>, cashier and owner). A client is a
+/// user of the staff member's network that is neither deleted nor a guest; the list also leaves out staff accounts
+/// (<c>role = admin</c>). Users and wallets are network-level (DESIGN §4.1), the profile (group, note, phone, birth year,
+/// blacklist) belongs to the club. Login name and card are unique case-insensitively (<c>users_username</c>,
 /// <c>users_card</c>); the name is stored lower-case. Passwords are PBKDF2 (<see cref="Passwords"/>), never logged or
 /// journaled. A new password revokes every player token of the client, blacklisting those on the club's PCs; both push
 /// <c>userRevoked</c> after the commit (D-21, §6.5). Only the owner changes <c>blacklisted</c> (<c>403 ownerOnly</c>,
@@ -36,6 +37,7 @@ public static class ClientEndpoints
     {
         var api = app.MapApiGroup("/api/v1/admin/clients").WithMetadata(new AuthRequirement(AuthMode.Staff));
         api.MapGet("", ListAsync);
+        api.MapGet("/lookup", LookupAsync);
         api.MapPost("", AddAsync);
         api.MapPatch("/{id}", UpdateAsync);
         api.MapPost("/{id}/card", CardAsync);
@@ -69,6 +71,38 @@ public static class ClientEndpoints
             .ToList();
         return AdminJson.Ok(new AdminClientList(items));
     }
+
+    /// <summary>
+    /// The counter's client picker (beyond the contract): at most 8 clients of the list's kind, best match first — the card
+    /// or the login exactly, then the login or a word of the name starting with <c>q</c>, then <c>q</c> inside either, then
+    /// inside the phone's digits ("4521" finds +998 90 123 45 21); within a rank, and for a <c>q</c> under 2 characters,
+    /// the most recently active first (a login at a PC, a wallet movement, registration). ponytail: matched in memory, as
+    /// <see cref="ListAsync"/> does.
+    /// </summary>
+    private static async Task<IResult> LookupAsync(HttpContext context, string? q, NpgsqlDataSource db)
+    {
+        var staff = context.Features.GetRequiredFeature<StaffContext>();
+        var term = (q ?? "").Trim();
+        var recent = term.Length < 2;
+        await using var c = await db.OpenConnectionAsync();
+        var rows = await c.QueryAsync<LookupRow>(
+            $"""
+            {LookupRow.Select}
+            ORDER BY active_at DESC, u.id
+            {(recent ? "LIMIT 8" : "")}
+            """,
+            new { staff.ClubId, staff.NetworkId });
+        var text = term.ToLowerInvariant();
+        var digits = QueryDigits(term);
+        var items = recent ? rows : rows.Select(r => (Row: r, Rank: r.Rank(text, digits))).Where(m => m.Rank >= 0).OrderBy(m => m.Rank).Select(m => m.Row);
+        return AdminJson.Ok(new AdminClientLookupList(items.Take(8).Select(r => r.ToWire()).ToList()));
+    }
+
+    /// <summary>The digits of a <c>q</c> that reads as a phone (digits, spaces, <c>+ - ( )</c>), else null.</summary>
+    private static string? QueryDigits(string term) =>
+        term.Any(char.IsAsciiDigit) && term.All(ch => char.IsAsciiDigit(ch) || ch is ' ' or '+' or '-' or '(' or ')')
+            ? string.Concat(term.Where(char.IsAsciiDigit))
+            : null;
 
     /// <summary>
     /// A member with zero balances and the club profile. No <c>password</c>: a random one nobody knows (only a reset gives
@@ -385,6 +419,73 @@ public static class ClientEndpoints
             return new AdminClient(
                 Id, Username, DisplayName, Role, Money.Uzs(MainBalance), Money.Uzs(0), GroupId, Note, Blacklisted, Phone, BirthYear, CardId,
                 LifetimeSpent, Visits, level?.Level ?? 1, level?.Name ?? "");
+        }
+    }
+
+    private sealed class LookupRow
+    {
+        /// <summary>
+        /// The list's clients with this club's phone and blacklist mark, the PC of the open session in this club
+        /// (<c>sessions_open_user</c>: one at most) and the last sign of life.
+        /// </summary>
+        public const string Select =
+            """
+            SELECT u.id, u.username, u.display_name, u.card_id, w.main_balance, coalesce(cp.phone, '') AS phone,
+                   coalesce(cp.blacklisted, false) AS blacklisted,
+                   s.pc_id AS playing_pc_id, p.name AS playing_pc_name, greatest(u.last_seen_at, w.updated_at, u.created_at) AS active_at
+            FROM users u
+            JOIN wallets w ON w.user_id = u.id
+            LEFT JOIN client_profiles cp ON cp.club_id = @ClubId AND cp.user_id = u.id
+            LEFT JOIN sessions s ON s.user_id = u.id AND s.club_id = @ClubId AND s.state <> 'ended'
+            LEFT JOIN pcs p ON p.id = s.pc_id
+            WHERE u.network_id = @NetworkId AND u.deleted_at IS NULL AND NOT u.transient AND u.role NOT IN ('guest', 'admin')
+            """;
+
+        public Guid Id { get; init; }
+        public string Username { get; init; } = "";
+        public string DisplayName { get; init; } = "";
+        public string? CardId { get; init; }
+        public long MainBalance { get; init; }
+        public string Phone { get; init; } = "";
+        public bool Blacklisted { get; init; }
+        public Guid? PlayingPcId { get; init; }
+        public string? PlayingPcName { get; init; }
+
+        private string PhoneDigits => string.Concat(Phone.Where(char.IsAsciiDigit));
+
+        /// <summary>
+        /// 0 — the card (any case) or the login is <paramref name="text"/>, 1 — the login or a word of the name starts with it,
+        /// 2 — it is inside either, 3 — <paramref name="digits"/> are inside the phone's; −1 — no match. <paramref name="text"/>
+        /// is lower-cased by the caller, the name and the login here (Cyrillic, see <see cref="ListAsync"/>).
+        /// </summary>
+        public int Rank(string text, string? digits)
+        {
+            var login = Username.ToLowerInvariant();
+            var name = DisplayName.ToLowerInvariant();
+            if (login == text || string.Equals(CardId, text, StringComparison.OrdinalIgnoreCase))
+            {
+                return 0;
+            }
+
+            if (login.StartsWith(text, StringComparison.Ordinal) || name.StartsWith(text, StringComparison.Ordinal) || name.Contains(" " + text, StringComparison.Ordinal))
+            {
+                return 1;
+            }
+
+            if (login.Contains(text, StringComparison.Ordinal) || name.Contains(text, StringComparison.Ordinal))
+            {
+                return 2;
+            }
+
+            return digits is not null && PhoneDigits.Contains(digits, StringComparison.Ordinal) ? 3 : -1;
+        }
+
+        public AdminClientLookupItem ToWire()
+        {
+            var phone = PhoneDigits;
+            return new AdminClientLookupItem(
+                Id, DisplayName, Username, phone.Length == 0 ? null : phone[^Math.Min(4, phone.Length)..], Money.Uzs(MainBalance), Money.Uzs(0), CardId,
+                PlayingPcId is { } pcId ? new AdminClientPlaying(pcId, PlayingPcName ?? "") : null, Blacklisted);
         }
     }
 }
