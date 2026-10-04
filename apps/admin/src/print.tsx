@@ -105,7 +105,11 @@ export async function printDocument(node: ReactNode, kind: PrintKind): Promise<v
     // React 18 renders asynchronously: flushSync puts the slip into the DOM now, in the receipt language.
     inLang(receiptLang(), () => flushSync(() => root.render(<div className="slip">{node}</div>)));
     await document.fonts?.ready;
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    // One frame for layout; a hidden or minimised console gets no frames, so a timer stands in for it.
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve());
+      window.setTimeout(resolve, 100);
+    });
     if (paper === 'a4') {
       style.textContent = '@page { size: A4; margin: 12mm; }';
     } else {

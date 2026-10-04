@@ -608,6 +608,10 @@ export function CashMoveSheet({
                 </Button>
               ))}
             </div>
+            {/* The button stays off until a reason is chosen: say why, once there is an amount to send. */}
+            {amount > 0 && reason === null && !frozen && (
+              <span className="text-xs text-warning">{t('Выберите причину')}</span>
+            )}
           </div>
           <Field
             label={t('Комментарий')}
