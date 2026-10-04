@@ -204,6 +204,36 @@ public sealed class SocketHubTests(KestrelServerFixture server) : IClassFixture<
     }
 
     [Fact]
+    public async Task A_command_queued_between_the_registration_and_the_backlog_read_goes_out_once()
+    {
+        var agent = await TestAgent.CreateAsync(server);
+        var dispatcher = server.Services.GetRequiredService<CommandDispatcher>();
+        var club = await ClubOfAsync(agent);
+        var connected = $"Agent {agent.PcId} connected over WebSocket";
+        ServerCommandEnvelope? raced = null;
+        Task? live = null;
+
+        // The hook runs after the socket is registered, before the backlog is read: the command commits there, so the
+        // backlog carries it, and its live send (the cashier's request) waits for the backlog and must not send it again.
+        server.Services.GetRequiredService<ILoggerFactory>().AddProvider(new LogHook(message =>
+        {
+            if (message == connected && raced is null)
+            {
+                raced = dispatcher.QueueAsync(null, club, agent.PcId, NewCommand.ReloadPolicy()).GetAwaiter().GetResult();
+                live = Task.Run(() => dispatcher.SendAsync(agent.PcId, raced));
+            }
+        }));
+
+        using var socket = await WsTestSocket.ConnectAsync(server, agent.AccessToken);
+        // The handshake may complete before the hook ran: the first frame comes after it.
+        var first = (await socket.ReceiveAsync()).GetProperty("id").GetGuid();
+        Assert.Equal(raced!.Id, first);
+        await live!;
+        var next = await dispatcher.EnqueueAsync(club, agent.PcId, NewCommand.Unlock());
+        Assert.Equal(next.Id, (await socket.ReceiveAsync()).GetProperty("id").GetGuid());
+    }
+
+    [Fact]
     public async Task Server_shutdown_closes_1001_without_waiting_for_the_host_timeout()
     {
         var own = new KestrelServerFixture();

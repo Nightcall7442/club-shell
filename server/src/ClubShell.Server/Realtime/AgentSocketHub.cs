@@ -77,7 +77,13 @@ public sealed class AgentSocketHub(
         try
         {
             await connection.Ready.Task.WaitAsync(connection.Lifetime.Token);
-            await DeliverAsync(connection, [command], connection.Lifetime.Token);
+            // Queued between this socket's registration and its backlog read: the backlog carried it already, and a
+            // second frame would run it twice on the PC (a reboot, a message).
+            if (!connection.Delivered.ContainsKey(command.Id))
+            {
+                await DeliverAsync(connection, [command], connection.Lifetime.Token);
+            }
+
             return true;
         }
         catch (Exception ex) when (ex is WebSocketException or ObjectDisposedException or OperationCanceledException)
@@ -169,7 +175,8 @@ public sealed class AgentSocketHub(
             }
             else
             {
-                // Registered before the backlog is read, so no command falls in between; live sends wait for Ready.
+                // Registered before the backlog is read, so no command falls in between; live sends wait for Ready and
+                // skip what the backlog already carried.
                 await DeliverAsync(connection, await commands.PendingAsync(agent.Pc.Id), lifetime.Token);
                 connection.Ready.TrySetResult();
 
