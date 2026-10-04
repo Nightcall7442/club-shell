@@ -1,7 +1,7 @@
 /**
  * Cash shift: open with the drawer float, watch the X-report while the shift runs, put cash into the drawer or take it
- * out, close with the counted cash and get the Z-report; both split the top-ups by payment method and show the drawer
- * line (float + desk cash + in − out − payouts = expected, the server's figure). X and Z print on the report paper; the
+ * out, close with the counted cash and get the Z-report; both split the top-ups and the bar by payment method (with the
+ * bar's voids) and show the drawer line (float + desk cash + bar cash + in − out − payouts = expected, the server's figure). X and Z print on the report paper; the
  * print settings of this console (paper per kind, the receipt language) are set here. Below, the shift's operations
  * (the owner may pick an older shift) and the closed shifts with who closed them and a reprint of their Z. Polls
  * `/admin/shift` every 5 s and tells the console's shift state (the top-bar chip, the money buttons) when it changes.
@@ -129,11 +129,38 @@ function MethodsGrid({ byMethod }: { byMethod: NonNullable<ShiftTotals['topUpByM
   );
 }
 
-/** Float + the desk's cash top-ups + cash in − cash out − payouts = what the drawer should hold. */
+/**
+ * The bar of the shift by method, net of its voids (D-57): the drawer's cash, each terminal and wallet app, what the
+ * balances paid, and how many sales were taken back for how much. Nothing from a server or a Z before cash desk part 3.
+ */
+function ShopGrid({ x }: { x: ShiftTotals }): JSX.Element | null {
+  const shop = x.shopByMethod;
+  if (!shop) return null;
+  return (
+    <div role="group" aria-label={t('Бар по способам оплаты')} className="flex flex-col gap-2">
+      <span className="label">{t('Бар по способам оплаты')}</span>
+      <StatGrid cols="grid-cols-2 md:grid-cols-4 xl:grid-cols-8">
+        {PAY_METHODS.map((m) => (
+          <Stat key={m.id} label={`${t('Бар')} · ${t(m.label)}`} value={sum(shop[m.id])} unit={t('сум')} />
+        ))}
+        <Stat label={t('Бар · с баланса')} value={sum(shop.balance)} unit={t('сум')} />
+        <Stat
+          label={t('Аннулировано: {n}', { n: x.shopVoidCount ?? 0 })}
+          value={sum(x.shopVoids ?? 0)}
+          unit={t('сум')}
+          tone={(x.shopVoidCount ?? 0) > 0 ? 'err' : undefined}
+        />
+      </StatGrid>
+    </div>
+  );
+}
+
+/** Float + the desk's cash top-ups + the bar's cash + cash in − cash out − payouts = what the drawer should hold. */
 function DrawerLine({ opening, x, expected }: { opening: number; x: ShiftTotals; expected: number }): JSX.Element {
   const rows: [string, string][] = [
     [t('На начало смены'), uzs(opening)],
     [t('+ наличные пополнения'), uzs(x.topUpCash - (x.apiCash ?? 0))],
+    ...(x.shopByMethod ? ([[t('+ наличные продажи бара'), uzs(x.shopByMethod.cash)]] as [string, string][]) : []),
     [t('+ внесения'), uzs(x.cashIn ?? 0)],
     [t('− изъятия'), uzs(x.cashOut ?? 0)],
     [t('− выдачи гостям'), uzs(x.payouts ?? 0)],
@@ -385,6 +412,7 @@ export default function ShiftPage({ isOwner = false }: { isOwner?: boolean }): J
         >
           <TotalsGrid x={zReport.shift.totals} />
           {zReport.shift.totals.topUpByMethod && <MethodsGrid byMethod={zReport.shift.totals.topUpByMethod} />}
+          <ShopGrid x={zReport.shift.totals} />
           <StatGrid cols="grid-cols-1 md:grid-cols-3">
             <Stat label={t('Ожидалось в кассе')} value={sum(zReport.expectedCash)} unit={t('сум')} />
             <Stat label={t('Посчитано')} value={sum(zReport.shift.closingCash ?? 0)} unit={t('сум')} />
@@ -423,6 +451,7 @@ export default function ShiftPage({ isOwner = false }: { isOwner?: boolean }): J
           >
             <TotalsGrid x={x} />
             {x.topUpByMethod && <MethodsGrid byMethod={x.topUpByMethod} />}
+            <ShopGrid x={x} />
           </Section>
 
           {desk.cashDesk2 && (

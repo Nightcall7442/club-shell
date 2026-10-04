@@ -14,12 +14,12 @@
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import type { ReactNode } from 'react';
-import type { PayMethod, Shift, ShiftTotals } from '@/api';
+import type { PayMethod, Shift, ShiftTotals, VoidReason } from '@/api';
 import { expectedOf } from '@/api';
 import { pcLabel } from '@/clientSearch';
 import { exactDigits, minutesLabel } from '@/format';
 import { currentLang, dateLocale, inLang, t, type Lang } from '@/i18n';
-import { PAY_METHOD_LABEL, REASON_LABEL, guestDisplayName } from '@/labels';
+import { PAY_METHOD_LABEL, REASON_LABEL, VOID_REASON_LABEL, guestDisplayName } from '@/labels';
 
 export type Paper = '80' | '58' | 'a4';
 export type PrintKind = 'receipt' | 'report';
@@ -206,7 +206,7 @@ export function guestSignIn(pc: string): string {
 // Receipt
 // ---------------------------------------------------------------------------------------------------------------------
 
-export type ReceiptKind = 'seat' | 'extend' | 'topup' | 'debt' | 'payout' | 'end';
+export type ReceiptKind = 'seat' | 'extend' | 'topup' | 'debt' | 'payout' | 'end' | 'sale' | 'saleVoid';
 
 /** What a receipt says; amounts are minor units. */
 export interface ReceiptData {
@@ -237,6 +237,12 @@ export interface ReceiptData {
   balance?: number | null;
   refunded?: number | null;
   charged?: number | null;
+  /** A bar sale or its void: the goods as sold, and how it was paid (`balance` — from the client's balance). */
+  lines?: { title: string; qty: number; price: number }[] | null;
+  method?: string | null;
+  /** A void's reason code and note. */
+  reason?: string | null;
+  note?: string | null;
   copy?: boolean;
 }
 
@@ -247,7 +253,22 @@ const RECEIPT_TITLE: Record<ReceiptKind, string> = {
   debt: 'Чек · оплата долга',
   payout: 'Выдача наличными',
   end: 'Завершение сеанса',
+  sale: 'Чек · бар',
+  saleVoid: 'Аннулирование · бар',
 };
+
+/** The goods of a bar slip: `Coca-Cola ×2   16 000 сум`, then the total. */
+function SaleLines({ r }: { r: ReceiptData }): JSX.Element {
+  return (
+    <>
+      <Rule />
+      {(r.lines ?? []).map((l, i) => (
+        <Row key={i} label={`${l.title} ×${l.qty}`} value={sum(l.price * l.qty)} />
+      ))}
+      {r.total != null && <Row label={t('Итого')} value={sum(r.total)} strong />}
+    </>
+  );
+}
 
 export function Receipt({ r }: { r: ReceiptData }): JSX.Element {
   const change = r.received != null && r.paid ? r.received - r.paid.amount : null;
@@ -288,6 +309,29 @@ export function Receipt({ r }: { r: ReceiptData }): JSX.Element {
           {r.tariff && <Row label={t('Тариф')} value={r.tariff} />}
           {r.charged != null && r.charged > 0 && <Row label={t('Списано')} value={sum(r.charged)} strong />}
           {r.refunded != null && r.refunded > 0 && <Row label={t('Возвращено на баланс')} value={sum(r.refunded)} />}
+        </>
+      )}
+      {r.kind === 'sale' && (
+        <>
+          <SaleLines r={r} />
+          {r.method === 'balance' && r.total != null && (
+            <Row label={t('Оплачено')} value={`${sum(r.total)} · ${t('с баланса')}`} strong />
+          )}
+        </>
+      )}
+      {r.kind === 'saleVoid' && (
+        <>
+          <SaleLines r={r} />
+          {r.reason && <Row label={t('Причина')} value={t(VOID_REASON_LABEL[r.reason as VoidReason] ?? r.reason)} />}
+          {r.note && <Row label={t('Комментарий')} value={r.note} />}
+          {r.total != null && (
+            <Row
+              label={r.method === 'balance' ? t('Возвращено на баланс') : t('Возвращено')}
+              value={r.method === 'balance' ? sum(r.total) : `${sum(r.total)} · ${methodLabel(r.method ?? 'cash')}`}
+              strong
+            />
+          )}
+          <div className="slip-sign">{t('Подпись')}</div>
         </>
       )}
       {r.paid && (
@@ -390,6 +434,8 @@ export function ShiftReport({ r }: { r: ShiftReportData }): JSX.Element {
   const x = r.x;
   const expected = r.expected ?? expectedOf(r.shift.openingCash, x);
   const byMethod = x.topUpByMethod;
+  // The bar by method (D-57); a Z saved before cash desk part 3 has none.
+  const shop = x.shopByMethod;
   const counted = r.type === 'Z' ? r.shift.closingCash : null;
   return (
     <>
@@ -418,6 +464,19 @@ export function ShiftReport({ r }: { r: ShiftReportData }): JSX.Element {
       )}
       {byMethod && byMethod.other > 0 && <Row label={t('Другое')} value={sum(byMethod.other)} />}
       {(x.apiCash ?? 0) > 0 && <Row label={t('Через API (нал.)')} value={sum(x.apiCash ?? 0)} />}
+      {shop && (
+        <>
+          <Rule />
+          <div className="slip-strong">{t('Бар')}</div>
+          {(['cash', 'card', 'payme', 'click', 'uzum'] as const).map((m) => (
+            <Row key={m} label={methodLabel(m)} value={sum(shop[m])} />
+          ))}
+          <Row label={t('С баланса')} value={sum(shop.balance)} />
+          {(x.shopVoidCount ?? 0) > 0 && (
+            <Row label={t('Аннулировано: {n}', { n: x.shopVoidCount ?? 0 })} value={sum(x.shopVoids ?? 0)} />
+          )}
+        </>
+      )}
       <Rule />
       <Row label={t('Сеансы')} value={sum(x.sessions)} />
       <Row label={t('Возвраты')} value={sum(x.refunds)} />
@@ -428,6 +487,7 @@ export function ShiftReport({ r }: { r: ShiftReportData }): JSX.Element {
       <div className="slip-strong">{t('Касса')}</div>
       <Row label={t('На начало смены')} value={sum(r.shift.openingCash)} />
       <Row label={t('+ наличные пополнения')} value={sum(x.topUpCash - (x.apiCash ?? 0))} />
+      {shop && <Row label={t('+ наличные продажи бара')} value={sum(shop.cash)} />}
       <Row label={t('+ внесения')} value={sum(x.cashIn ?? 0)} />
       <Row label={t('− изъятия')} value={sum(x.cashOut ?? 0)} />
       <Row label={t('− выдачи гостям')} value={sum(x.payouts ?? 0)} />

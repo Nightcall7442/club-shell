@@ -1,7 +1,8 @@
 /**
  * The console shell: PIN sign-in, then a top bar (club, clock, the shift chip with the drawer's «±» menu, client
- * search, hall usage, language, staff) and a sidebar of sections the way Senet lays out its club console — the counter
- * first, the owner's configuration below it. Cashiers see the counter, shift, clients and stock; owners see everything.
+ * search, the players' calls with their bell and sound (`calls.tsx`), hall usage, language, staff) and a sidebar of
+ * sections the way Senet lays out its club console — the counter (the map, the bar) first, the owner's configuration
+ * below it. Cashiers see the counter, shift, clients and stock; owners see everything.
  * The section lives in the URL hash (`#/tariffs`, `#/clients/new`). Without an open shift the console asks to open one
  * (`shift.tsx`); "/" jumps to the client search, whose rows top up a client from anywhere or show their PC on the map.
  * The club's name, limits and the signed-in staff member reach the pages through `ClubContext` (`club.ts`).
@@ -20,6 +21,7 @@ import {
   type ClubSettings,
   type StaffMember,
 } from '@/api';
+import { AudioUnlockChip, CallsBell, CallsRinger, setCalls } from '@/calls';
 import { ClubContext, type ClubState } from '@/club';
 import { GlobalSearch } from '@/clientSearch';
 import { isTyping, sheetOpen, showPc } from '@/desk';
@@ -34,6 +36,7 @@ import { Button } from '@/ui';
 const SETTINGS_POLL_MS = 60_000;
 
 const MapPage = lazy(() => import('@/pages/MapPage'));
+const BarPage = lazy(() => import('@/pages/BarPage'));
 const ShiftPage = lazy(() => import('@/pages/ShiftPage'));
 const ClientsPage = lazy(() => import('@/pages/ClientsPage'));
 const PricingPage = lazy(() => import('@/pages/PricingPage'));
@@ -83,6 +86,13 @@ const GROUPS: { title: string; items: SectionDef[] }[] = [
         ownerOnly: false,
         icon: svg('M3 4h7v7H3zM14 4h7v7h-7zM3 15h7v5H3zM14 15h7v5h-7z'),
         page: MapPage,
+      },
+      {
+        id: 'bar',
+        title: 'Бар',
+        ownerOnly: false,
+        icon: svg('M5 4h14l-1.5 7a5.5 5.5 0 0 1-11 0L5 4zM12 16.5V21M8 21h8M6 8h12'),
+        page: BarPage,
       },
       {
         id: 'shift',
@@ -388,6 +398,11 @@ export function App(): JSX.Element {
       .finally(() => setChecking(false));
   }, []);
 
+  // Whoever signs out takes the inbox with them: the next one starts from the next poll.
+  useEffect(() => {
+    if (!staff) setCalls(null);
+  }, [staff]);
+
   useEffect(() => {
     const out = (): void => setStaff(null);
     window.addEventListener('admin:signed-out', out);
@@ -398,6 +413,8 @@ export function App(): JSX.Element {
     try {
       const o = await adminApi.overview();
       setUsage({ busy: o.club.total - o.club.free, total: o.club.total });
+      // The players' calls ride on the same poll (the map's own poll refreshes them faster).
+      setCalls(o.calls);
     } catch {
       // the pages show their own errors
     }
@@ -506,6 +523,10 @@ export function App(): JSX.Element {
             }}
           />
           <div className="ml-auto flex items-center gap-5">
+            <div className="flex items-center gap-2">
+              <AudioUnlockChip />
+              <CallsBell />
+            </div>
             {usage && (
               <div className="flex items-baseline gap-3">
                 <span className="label hidden whitespace-nowrap 2xl:inline">{t('Загрузка зала')}</span>
@@ -582,6 +603,7 @@ export function App(): JSX.Element {
         </main>
       </div>
       {topUpFor && <TopUpSheet payee={topUpFor} onClose={() => setTopUpFor(null)} onDone={() => void refreshTop()} />}
+      <CallsRinger />
     </ShiftProvider>
   );
   return <ClubContext.Provider value={club}>{shell}</ClubContext.Provider>;
