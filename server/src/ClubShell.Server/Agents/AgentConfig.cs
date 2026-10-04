@@ -49,8 +49,10 @@ public sealed class SessionsOptions
 /// <c>AgentServerConfig</c> of a PC (DESIGN §5.9; port of club-server <c>AgentEndpoints.BuildConfig</c>). Every feature
 /// whose operations answer 501 is sent as an explicit <c>false</c>: an agent treats a missing flag as <c>true</c>
 /// (SHELL_CHANGES п. 4), and a feature left on would drive the agent into 501s and its circuit breaker — whatever the owner
-/// chose in <c>settings.features</c> (stored and shown to the console, OQ-10). <c>shell.club</c> comes from
-/// <c>clubs.settings</c> (S5): <c>branding</c> (the club's name when unset), the banners live today and <c>rulesText</c>.
+/// chose in <c>settings.features</c> (stored and shown to the console, OQ-10). The owner decides <c>gpuPanel</c> (off unless
+/// switched on) and, since cash desk part 3, <c>callAdmin</c> (on unless switched off, D-62: the route and the desk's inbox
+/// exist). <c>shell.club</c> comes from <c>clubs.settings</c> (S5): <c>branding</c> (the club's name when unset), the banners
+/// live today and <c>rulesText</c>.
 /// </summary>
 public static class AgentConfig
 {
@@ -63,22 +65,23 @@ public static class AgentConfig
         ["profile"] = true,
         ["topup"] = false,
         ["apps"] = false,
-        ["callAdmin"] = false,
 
         // No route confirms a scanned code yet (D-18): the lock screen opens on the password tab.
         ["qrLogin"] = false,
     };
 
     /// <summary>
-    /// <see cref="ServedFeatures"/> plus the owner's <c>features.gpuPanel</c> (off unless switched on): the vendor panel
-    /// pauses the kiosk guard and its driver settings stay for the next player, so the club decides.
+    /// <see cref="ServedFeatures"/> plus the owner's <c>features.gpuPanel</c> (off unless switched on: the vendor panel
+    /// pauses the kiosk guard and its driver settings stay for the next player, so the club decides) and
+    /// <c>features.callAdmin</c> (on unless switched off: the desk rings for it, D-62).
     /// </summary>
     public static JsonElement FeaturesOf(string? settingsJson)
     {
         using var doc = JsonDocument.Parse(string.IsNullOrEmpty(settingsJson) ? "{}" : settingsJson);
-        var gpuPanel = doc.RootElement.TryGetProperty("features", out var f) && f.ValueKind == JsonValueKind.Object
-            && f.TryGetProperty("gpuPanel", out var g) && g.ValueKind == JsonValueKind.True;
-        return JsonSerializer.SerializeToElement(new Dictionary<string, bool>(ServedFeatures) { ["gpuPanel"] = gpuPanel });
+        var features = doc.RootElement.TryGetProperty("features", out var f) && f.ValueKind == JsonValueKind.Object ? f : default;
+        var gpuPanel = features.ValueKind == JsonValueKind.Object && features.TryGetProperty("gpuPanel", out var g) && g.ValueKind == JsonValueKind.True;
+        var callAdmin = !(features.ValueKind == JsonValueKind.Object && features.TryGetProperty("callAdmin", out var a) && a.ValueKind == JsonValueKind.False);
+        return JsonSerializer.SerializeToElement(new Dictionary<string, bool>(ServedFeatures) { ["callAdmin"] = callAdmin, ["gpuPanel"] = gpuPanel });
     }
 
     private static readonly JsonElement Games = JsonSerializer.SerializeToElement(new

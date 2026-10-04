@@ -22,11 +22,13 @@ public sealed record Reports(
 /// <summary>
 /// The owner's reports (slice S5, <c>adminReports</c>), all in the club's local calendar (D-16): the period is the last
 /// <c>days</c> local days up to today, from local midnight (<c>days</c> not a number → 7, then into 1–90). <c>byDay</c> — one
-/// row per local date from the club's ledger: <c>sessions</c> = charges − refunds, <c>shop</c> = purchases, <c>topUps</c>;
-/// <c>totals</c> sums them, <c>sessionsCount</c> — sessions started in the period. <c>heat</c> — seat-hours by local weekday
-/// (0 = Sunday) and hour of the sessions started in the period (the mock's stepping by whole hours from the start).
-/// <c>topGames</c> — distinct players of successful launches in the period (<c>launch_reports</c>, up to 8); <c>topProducts</c>
-/// is empty in v1 (orders are notImplemented); <c>shifts</c> — opened in the period, newest first.
+/// row per local date from the club's ledger: <c>sessions</c> = charges − refunds, <c>shop</c> = purchases (bar sales from the
+/// balance net of their voids) plus the bar's method sales net of theirs (D-57), <c>topUps</c>; <c>totals</c> sums them,
+/// <c>sessionsCount</c> — sessions started in the period. <c>heat</c> — seat-hours by local weekday (0 = Sunday) and hour of
+/// the sessions started in the period (the mock's stepping by whole hours from the start). <c>topGames</c> — distinct
+/// players of successful launches in the period (<c>launch_reports</c>, up to 8); <c>topProducts</c> — the bar's products of
+/// the period by revenue, voided sales left out (up to 8; kiosk orders are notImplemented); <c>shifts</c> — opened in the
+/// period, newest first.
 /// </summary>
 public static class ReportsEndpoints
 {
@@ -57,11 +59,21 @@ public static class ReportsEndpoints
                 """,
                 new { staff.ClubId, timeZone, start, now }))
             .ToDictionary(m => DateOnly.FromDateTime(m.Day));
+
+        // The bar's money taken by a method (outside the ledger, D-52), net of voids, by the local day each row was made.
+        var bar = (await c.QueryAsync<(DateTime Day, long Net)>(
+                """
+                SELECT (created_at AT TIME ZONE @timeZone)::date AS day, sum(CASE WHEN kind = 'sale' THEN total ELSE -total END)::bigint
+                FROM shop_sales WHERE club_id = @ClubId AND method <> 'balance' AND created_at >= @start AND created_at <= @now
+                GROUP BY 1
+                """,
+                new { staff.ClubId, timeZone, start, now }))
+            .ToDictionary(m => DateOnly.FromDateTime(m.Day), m => m.Net);
         var byDay = Enumerable.Range(0, period).Select(i =>
         {
             var date = firstDay.AddDays(i);
             var m = money.GetValueOrDefault(date);
-            return new ReportsDay(date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), m.Sessions, m.Shop, m.TopUps);
+            return new ReportsDay(date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), m.Sessions, m.Shop + bar.GetValueOrDefault(date), m.TopUps);
         }).ToList();
 
         var sessions = (await c.QueryAsync<(DateTimeOffset StartedAt, DateTimeOffset? EndedAt)>(
@@ -89,7 +101,20 @@ public static class ReportsEndpoints
             """,
             new { staff.ClubId, start, now })).ToList();
 
+        // Bar sales of the period that were not voided, by product (its latest title), up to 8 by revenue (D-57).
+        var topProducts = (await c.QueryAsync<TopProduct>(
+            """
+            SELECT (array_agg(l.title ORDER BY s.created_at DESC))[1] AS title, sum(l.qty)::int AS qty, sum(l.qty * l.price)::bigint AS amount
+            FROM shop_sale_lines l JOIN shop_sales s ON s.id = l.sale_id
+            WHERE s.club_id = @ClubId AND s.kind = 'sale' AND s.created_at >= @start AND s.created_at <= @now
+              AND NOT EXISTS (SELECT 1 FROM shop_sales v WHERE v.void_of = s.id)
+            GROUP BY l.product_id
+            ORDER BY amount DESC, title
+            LIMIT 8
+            """,
+            new { staff.ClubId, start, now })).ToList();
+
         var totals = new ReportsTotals(byDay.Sum(d => d.Sessions), byDay.Sum(d => d.Shop), byDay.Sum(d => d.TopUps), sessions.Count);
-        return AdminJson.Ok(new Reports(period, totals, byDay, heat, topGames, [], await ShiftEndpoints.OpenedSinceAsync(c, staff.ClubId, start)));
+        return AdminJson.Ok(new Reports(period, totals, byDay, heat, topGames, topProducts, await ShiftEndpoints.OpenedSinceAsync(c, staff.ClubId, start)));
     }
 }

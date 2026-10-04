@@ -8,7 +8,7 @@ namespace ClubShell.Server.Tests;
 /// <summary>
 /// Coverage of slice S5 part B (DESIGN §10.a, §11): each of its ten operations got a contract-valid success response; and
 /// the server's final coverage — all 75 operations the contract requires, plus <c>getBalance</c>, <c>reportAntiCheat</c>,
-/// <c>getTransactions</c> and (beyond the contract) <c>PATCH /admin/games/{id}</c>.
+/// <c>getTransactions</c>, <c>callAdmin</c> (cash desk part 3) and (beyond the contract) <c>PATCH /admin/games/{id}</c>.
 /// </summary>
 public sealed class CoverageS5BTests(ServerFixture server) : LedgerCheckedTest(server), IClassFixture<ServerFixture>
 {
@@ -52,11 +52,11 @@ public sealed class CoverageS5BTests(ServerFixture server) : LedgerCheckedTest(s
     }
 
     [Fact]
-    public async Task All_required_operations_and_the_three_extras_are_implemented()
+    public async Task All_required_operations_and_the_four_extras_are_implemented()
     {
         var required = Contract.Operations.Where(o => o.Operation.GetProperty("x-server-status").GetString() == "required").Select(o => o.OperationId).ToList();
         Assert.Equal(75, required.Count);
-        Assert.Equal(required.Append("getBalance").Append("reportAntiCheat").Append("getTransactions").Order(), ContractStatus.Implemented.Order());
+        Assert.Equal(required.Append("getBalance").Append("reportAntiCheat").Append("getTransactions").Append("callAdmin").Order(), ContractStatus.Implemented.Order());
 
         // PATCH /admin/games/{id} is not in the contract: a client without the response validator.
         var owner = await LoginAsync(Server, OwnerPin);

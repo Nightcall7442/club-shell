@@ -271,7 +271,9 @@ public static class ControlEndpoints
 /// should not wait for the owner to open the page — a cash shortfall at close, a big cash-out of the drawer, and the early
 /// refund that makes a cashier's shift reach <c>earlyEndsPerShift</c> (exactly then, so one bad shift sends one event).
 /// Written in the action's own transaction, after its journal entry. The journal's <c>cashIn</c>, <c>cashOut</c> and
-/// <c>payout</c> are outside the contract's <c>AdminAuditAction</c> for now (D-44), so <c>adminControl</c> does not list them.
+/// <c>payout</c> are outside the contract's <c>AdminAuditAction</c> for now (D-44), so <c>adminControl</c> does not list them;
+/// nor the actions of cash desk part 3 (D-68: <c>shopSale</c>, <c>shopVoid</c>, <c>sessionMove</c>, <c>callAck</c>,
+/// <c>callResolve</c>, <c>stockCreate</c>, <c>stockArchive</c>), whose voids raise their own alert here.
 /// </summary>
 public static class ControlAlerts
 {
@@ -290,6 +292,30 @@ public static class ControlAlerts
         if (amount >= await ClubSettingsEndpoints.BigTopupAtAsync(c, tx, staff.ClubId))
         {
             await Webhooks.EnqueueAsync(c, tx, staff.ClubId, "suspicious", now, $"{staff.Name}: изъятие из кассы {Webhooks.Sum(amount)} ({reason})", new { staffId = staff.WireId, amount });
+        }
+    }
+
+    /// <summary>
+    /// A bar sale voided (D-56): <c>suspicious</c> when one void is at least <c>notifications.bigTopupAt</c>, and when this
+    /// cashier's voids in the shift reach <c>control.earlyEndsPerShift</c> — exactly then, as <see cref="SessionEndedAsync"/>
+    /// (the club's «reversals per shift» threshold). Counted from <c>shop_sales</c>, after the void row is written.
+    /// </summary>
+    public static async Task ShopVoidAsync(NpgsqlConnection c, NpgsqlTransaction tx, StaffContext staff, Guid shiftId, long total, DateTimeOffset now)
+    {
+        if (total >= await ClubSettingsEndpoints.BigTopupAtAsync(c, tx, staff.ClubId))
+        {
+            await Webhooks.EnqueueAsync(c, tx, staff.ClubId, "suspicious", now, $"{staff.Name}: аннулирована продажа бара на {Webhooks.Sum(total)}",
+                new { staffId = staff.WireId, amount = total });
+        }
+
+        var settings = await ClubSettingsEndpoints.ControlAsync(c, tx, staff.ClubId);
+        var count = await c.ExecuteScalarAsync<int>(
+            "SELECT count(*)::int FROM shop_sales WHERE kind = 'void' AND shift_id = @shiftId AND staff_id IS NOT DISTINCT FROM @StaffId",
+            new { shiftId, staff.StaffId }, tx);
+        if (count == settings.EarlyEndsPerShift)
+        {
+            await Webhooks.EnqueueAsync(c, tx, staff.ClubId, "suspicious", now, $"{staff.Name}: {count} аннулирования продаж бара за смену",
+                new { staffId = staff.WireId });
         }
     }
 

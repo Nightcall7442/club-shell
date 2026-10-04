@@ -8,7 +8,6 @@ import {
   AntiCheatAction,
   AntiCheatKind,
   AntiCheatSeverity,
-  CallAdminCategory,
   PcStatus,
   TELEMETRY_MAX_SAMPLES,
   UpdateChannel,
@@ -42,36 +41,44 @@ import {
   openSessionForPc,
   optObj,
   optStr,
+  optionalUser,
   publicPc,
   requireAgent,
+  settleStatus,
   sendCached,
   sid,
   str,
-  uuid,
   viewSession,
+  type CallRecord,
   type PcRecord,
   knownValues,
   type Known,
 } from '../db.js';
-import { pendingCommands, pushToPc, resolveAck } from '../ws.js';
+import { CALL_CATEGORIES, USER_REPORT, callMessage, callerOf, insertCall, queuePosition } from '../calls.js';
+import { pendingCommands, resolveAck } from '../ws.js';
 import { realTelemetry } from '../health.js';
 
 const PC_STATUSES = knownValues(PcStatus);
-const CALL_CATEGORIES = Object.values(CallAdminCategory);
 const AC_KINDS = knownValues(AntiCheatKind);
 const AC_SEVERITIES = Object.values(AntiCheatSeverity);
 const AC_ACTIONS = Object.values(AntiCheatAction);
 const CHANNELS = knownValues(UpdateChannel);
 const COMPONENTS = knownValues(UpdateComponent);
 
+/**
+ * The PC a registering Agent becomes: its own again (by hwid or `previousPcId`), else a free seeded PC of the demo hall,
+ * else a new PC pending the owner's approval (403 `pendingApproval`). `MOCK_AUTO_APPROVE_PCS=1` (the admin e2e tests,
+ * as the server's `Club:AutoApprovePcs`) makes every new Agent a new approved PC instead, never a seeded one.
+ */
 function assignPc(hwid: string, previousPcId: string | null, machineName: string): PcRecord {
   const byHwid = db.pcs.find((p) => p.hwid === hwid);
   if (byHwid) return byHwid;
   const previous = previousPcId ? db.pcs.find((p) => p.id === previousPcId) : undefined;
   if (previous && (previous.hwid === null || db.pcs.every((p) => p.hwid !== previous.hwid || p === previous)))
     return previous;
+  const autoApprove = process.env['MOCK_AUTO_APPROVE_PCS'] === '1';
   const free =
-    process.env['MOCK_STRICT_REGISTER'] === '1'
+    process.env['MOCK_STRICT_REGISTER'] === '1' || autoApprove
       ? undefined
       : db.pcs.find((p) => p.hwid === null && p.status !== 'maintenance' && !p.currentSessionId);
   if (free) return free;
@@ -96,9 +103,57 @@ function assignPc(hwid: string, previousPcId: string | null, machineName: string
     hardware: null,
     metrics: [],
   };
+  if (autoApprove) {
+    const approved: PcRecord = { ...pending, id: sid(`pc:${hwid}`), status: 'offline', registered: true };
+    db.pcs.push(approved);
+    markDirty();
+    return approved;
+  }
   if (!db.pcs.some((p) => p.id === pending.id)) db.pcs.push(pending);
   markDirty();
   throw new ApiError('forbidden', 'PC is pending admin approval', { reason: 'pendingApproval', pcId: pending.id });
+}
+
+/**
+ * The inbox call a telemetry event carries, as the server copies it: `callAdmin` (its data is the ticket the PC could not
+ * send: the category of the contract, a message of at most 500, a parsable `at`, this PC) or a «report a problem» text
+ * (`shellClientError` starting `[user report] `). Null — not a call; `invalid` — a call that is skipped.
+ */
+function callOfEvent(pc: PcRecord, e: Record<string, unknown>): Parameters<typeof insertCall>[0] | 'invalid' | null {
+  const data = isObject(e['data']) ? e['data'] : null;
+  if (e['kind'] === 'callAdmin') {
+    if (!data) return 'invalid';
+    const category = data['category'];
+    const at = typeof data['at'] === 'string' ? Date.parse(data['at']) : Number.NaN;
+    if (typeof category !== 'string' || !(CALL_CATEGORIES as readonly string[]).includes(category)) return 'invalid';
+    if (Number.isNaN(at) || data['pcId'] !== pc.id) return 'invalid';
+    // As the route: a message over 500 characters is not a valid call (the server skips it, it does not cut it).
+    if (typeof data['message'] === 'string' && data['message'].trim().length > 500) return 'invalid';
+    const userId = typeof data['userId'] === 'string' ? data['userId'] : null;
+    return {
+      pc,
+      userId: callerOf(pc.id, null, userId),
+      category: category as (typeof CALL_CATEGORIES)[number],
+      message: callMessage(data['message']),
+      source: 'telemetry',
+      at: new Date(at).toISOString(),
+    };
+  }
+  if (e['kind'] === 'shellClientError' && data && typeof data['message'] === 'string') {
+    if (!data['message'].startsWith(USER_REPORT)) return null;
+    const message = callMessage(data['message'].slice(USER_REPORT.length));
+    const at = typeof e['at'] === 'string' ? Date.parse(e['at']) : Number.NaN;
+    if (!message || Number.isNaN(at)) return 'invalid';
+    return {
+      pc,
+      userId: callerOf(pc.id, null, null),
+      category: 'problem',
+      message,
+      source: 'report',
+      at: new Date(at).toISOString(),
+    };
+  }
+  return null;
 }
 
 export function pcsRoutes(app: FastifyInstance): void {
@@ -120,7 +175,9 @@ export function pcsRoutes(app: FastifyInstance): void {
     pc.macAddress = macAddress;
     pc.hardware = hardware;
     pc.lastHeartbeatAt = now();
-    if (pc.status === 'offline') pc.status = 'free';
+    // As on the server: a registered PC is offline until its first heartbeat or socket (the seeded hall is not).
+    pc.registered = true;
+    settleStatus(pc);
     pc.signingSecret = randomBytes(32).toString('base64');
     const tokens = createAgentTokens(pc);
     markDirty();
@@ -162,9 +219,12 @@ export function pcsRoutes(app: FastifyInstance): void {
     pc.ipAddress = str(b, 'ipAddress', 64);
     int(b, 'policyVersion', 0);
     arr(b, 'runningGames', 64);
-    int(b, 'offlineQueue', 0);
+    // What a move onto this PC is checked against (D-59): an unsent offline session refuses it.
+    pc.offlineQueue = int(b, 'offlineQueue', 0);
+    pc.reportedSessionId = optStr(b, 'currentSessionId', 64);
     bool(b, 'shellConnected');
     pc.lastHeartbeatAt = now();
+    pc.seen = true;
     const session = openSessionForPc(pc.id);
     if (pc.status !== 'maintenance') {
       if (session) pc.status = session.state === 'locked' ? 'locked' : 'busy';
@@ -196,8 +256,12 @@ export function pcsRoutes(app: FastifyInstance): void {
     pc.metrics = [...pc.metrics, ...(samples as unknown as PcMetrics[])].slice(-TELEMETRY_MAX_SAMPLES);
     realTelemetry(pc, samples as unknown as PcMetrics[]);
     for (const e of events) {
-      if (isObject(e))
-        console.warn(`[telemetry] ${pc.name}: ${String(e['kind'])} ${JSON.stringify(e['data'] ?? null)}`);
+      if (!isObject(e)) continue;
+      console.warn(`[telemetry] ${pc.name}: ${String(e['kind'])} ${JSON.stringify(e['data'] ?? null)}`);
+      // Calls and problem reports reach the desk's inbox; an invalid one is skipped, the rest of the batch still counts.
+      const call = callOfEvent(pc, e);
+      if (call === 'invalid') console.warn(`[telemetry] ${pc.name}: invalid ${String(e['kind'])} skipped`);
+      else if (call) insertCall(call);
     }
     markDirty();
     return reply.code(204).send();
@@ -250,34 +314,29 @@ export function pcsRoutes(app: FastifyInstance): void {
     return publicPc(pc, pc.id === me.id);
   });
 
+  /**
+   * «Позвать администратора» (contract `callAdmin`, D-62): one call per (PC, `at`) — the agent sends the same `at` here and
+   * in its telemetry copy. The player is the signed-in user, else a body `userId` holding a sign-in on this PC, else the
+   * open session's player. 201 `{ticketId, createdAt, queuePosition}`; no other 4xx for a valid call (the agent would
+   * show it to the player).
+   */
   app.post('/support/call-admin', async (req, reply) => {
     const pc = requireAgent(req);
     return idempotent(req, reply, async () => {
       const b = body(req);
+      // The body first, then whose PC it is: the server's order.
       const pcId = str(b, 'pcId', 64);
-      if (pcId !== pc.id) throw errors.forbidden('pcMismatch');
       const category = oneOf(b, 'category', CALL_CATEGORIES);
-      const message = optStr(b, 'message', 500);
-      isoDate(b, 'at');
-      const ticket = { ticketId: uuid(), pcId, userId: optStr(b, 'userId', 64), category, message, createdAt: now() };
-      db.tickets.push(ticket);
-      if (db.tickets.length > 200) db.tickets.splice(0, db.tickets.length - 200);
-      markDirty();
-      console.log(`[support] ${pc.name} calls admin (${category}): ${message ?? ''}`);
-      const ack = setTimeout(() => {
-        pushToPc(pcId, 'notification', {
-          id: uuid(),
-          title: 'Support',
-          body: 'An administrator is on the way to your seat.',
-          level: 'info',
-          ttlSec: 10,
-          action: null,
-        });
-      }, 3000);
-      ack.unref();
+      const message = optStr(b, 'message', 10_000)?.trim() || null;
+      if (message && message.length > 500) throw errors.validation('message', 'max');
+      const at = isoDate(b, 'at');
+      if (pcId !== pc.id) throw errors.forbidden('pcMismatch');
+      const userId = callerOf(pc.id, optionalUser(req)?.id ?? null, optStr(b, 'userId', 64));
+      const stored = insertCall({ pc, userId, category, message: callMessage(message), source: 'direct', at });
+      const call = stored?.call as CallRecord;
       return {
         status: 201,
-        body: { ticketId: ticket.ticketId, createdAt: ticket.createdAt, queuePosition: db.tickets.length },
+        body: { ticketId: call.id, createdAt: call.receivedAt, queuePosition: queuePosition(call) },
       };
     });
   });

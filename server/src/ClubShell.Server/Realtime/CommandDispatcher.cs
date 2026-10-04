@@ -68,12 +68,13 @@ public sealed class CommandDispatcher(CommandRepository commands, AgentSocketHub
 
     /// <summary>
     /// Queues without sending, in <paramref name="tx"/> when given: the command commits with the caller's action and its
-    /// audit entry (DESIGN §3.7); after the commit the caller sends it with <see cref="SendAsync"/>.
+    /// audit entry (DESIGN §3.7); after the commit the caller sends it with <see cref="SendAsync"/>. <paramref name="ttl"/>
+    /// shortens the life of a command that is pointless later (the «Иду» message of an admin call: 2 min, D-63).
     /// </summary>
     public Task<ServerCommandEnvelope> QueueAsync(
-        NpgsqlTransaction? tx, Guid clubId, Guid pcId, NewCommand command, Guid? supersedes = null, Guid? issuedByStaffId = null) =>
+        NpgsqlTransaction? tx, Guid clubId, Guid pcId, NewCommand command, Guid? supersedes = null, Guid? issuedByStaffId = null, TimeSpan? ttl = null) =>
         Required.Contains(command.Type)
-            ? commands.EnqueueAsync(clubId, pcId, command.Type, command.Payload, supersedes, issuedByStaffId, TimeSpan.FromMinutes(options.CommandTtlMin), tx)
+            ? commands.EnqueueAsync(clubId, pcId, command.Type, command.Payload, supersedes, issuedByStaffId, ttl ?? TimeSpan.FromMinutes(options.CommandTtlMin), tx)
             : throw new ArgumentException($"Command {command.Type.ToWireName()} is notImplemented in the contract and is never sent", nameof(command));
 
     /// <summary>Sends a queued command at once when the PC is connected.</summary>

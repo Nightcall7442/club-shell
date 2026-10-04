@@ -55,7 +55,18 @@ const SEVERITY_RANK: Record<Severity, number> = { high: 0, medium: 1, low: 2 };
  * Journal actions beyond the contract's enum (D-44): the operations feed and the Z show them, `/admin/control` keeps to
  * the contract's actions, as the server does, until the contract lists them.
  */
-const BEYOND_CONTRACT: ReadonlySet<AuditAction> = new Set(['cashIn', 'cashOut', 'payout']);
+const BEYOND_CONTRACT: ReadonlySet<AuditAction> = new Set([
+  'cashIn',
+  'cashOut',
+  'payout',
+  'shopSale',
+  'shopVoid',
+  'sessionMove',
+  'callAck',
+  'callResolve',
+  'stockCreate',
+  'stockArchive',
+]);
 
 export function inContract(e: AuditEntry): boolean {
   return !BEYOND_CONTRACT.has(e.action);
@@ -225,6 +236,20 @@ function alertOn(e: AuditEntry): void {
   // A big cash-out is the same signal as a big cash top-up the other way.
   if (e.action === 'cashOut' && e.amount >= club().notifications.bigTopupAt) {
     emit('suspicious', `${e.staffName}: изъятие из кассы ${money(e.amount)}`, { entryId: e.id });
+    return;
+  }
+  // A bar void (D-56): a big one at once; a cashier's voids in a shift when they reach the club's «reversals per shift».
+  if (e.action === 'shopVoid') {
+    if (e.amount >= club().notifications.bigTopupAt) {
+      emit('suspicious', `${e.staffName}: аннулирована продажа бара на ${money(e.amount)}`, { entryId: e.id });
+      return;
+    }
+    const count = club().audit.filter(
+      (x) => x.action === 'shopVoid' && x.staffId === e.staffId && x.shiftId === e.shiftId,
+    ).length;
+    if (count === ctl.earlyEndsPerShift) {
+      emit('suspicious', `${e.staffName}: ${count} продажи бара аннулированы за смену`, { entryId: e.id });
+    }
     return;
   }
   if (e.action === 'shiftClose') {

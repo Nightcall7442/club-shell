@@ -12,6 +12,7 @@ using ClubShell.Server.Infrastructure;
 using ClubShell.Server.Realtime;
 using ClubShell.Server.Sessions;
 using ClubShell.Server.Sessions.Billing;
+using ClubShell.Server.Support;
 using ClubShell.Server.Wallet;
 using Dapper;
 using Microsoft.AspNetCore.Http.Features;
@@ -32,9 +33,11 @@ namespace ClubShell.Server.Admin;
 /// signs out the session's player (D-27..D-29). Pushes and commands go out after the commit; <c>pcStatusChanged</c> is
 /// never sent (AsyncAPI notImplemented, the console polls, §6.5). Events for the webhooks (<c>sessionOpened</c>,
 /// <c>bigTopup</c>, <c>suspicious</c>) commit with the action; the automation of a top-up (<c>topupAtLeast</c>) and of an
-/// opened session runs after the commit (S5).
+/// opened session runs after the commit (S5). Cash desk part 3 (beyond the contract): a session moved to another PC
+/// (<c>POST /sessions/move</c>, D-59..D-61) and one command to many PCs (<c>POST /pcs/commands</c>, D-65), in
+/// <c>CounterEndpoints.Move.cs</c> and <c>CounterEndpoints.Bulk.cs</c>; the overview carries the admin calls (D-63).
 /// </summary>
-public static class CounterEndpoints
+public static partial class CounterEndpoints
 {
     public static readonly string[] Operations =
         ["adminOverview", "adminOpenSession", "adminExtend", "adminEnd", "adminTopUp", "adminCommand", "adminQuote"];
@@ -53,9 +56,11 @@ public static class CounterEndpoints
         api.MapPost("/sessions/guest", GuestOpenAsync);
         api.MapPost("/sessions/extend", ExtendAsync);
         api.MapPost("/sessions/end", EndAsync);
+        api.MapPost("/sessions/move", MoveAsync);
         api.MapPost("/wallet/topup", TopUpAsync);
         api.MapPost("/wallet/payout", PayoutAsync);
         api.MapPost("/pcs/{pcId:guid}/command", CommandAsync);
+        api.MapPost("/pcs/commands", CommandsAsync);
         api.MapPost("/quote", QuoteAsync);
     }
 
@@ -145,7 +150,7 @@ public static class CounterEndpoints
             .Select(r => (object)new { pcId = r.PcId, severity = r.Severity }).ToList();
         return AdminJson.Ok(new AdminOverview(
             now, new AdminOccupancy(seats.Count(s => s.Pc.Status == Contracts.Pcs.PcStatus.Free), seats.Count), seats, tariffs, members,
-            await ZonesAsync(c, staff.ClubId), repairs, debts, refunds));
+            await ZonesAsync(c, staff.ClubId), repairs, debts, refunds, await AdminCalls.LiveAsync(c, staff.ClubId, now)));
     }
 
     /// <summary>
@@ -392,7 +397,9 @@ public static class CounterEndpoints
     /// The answer adds the balance after the settlement (negative — a debt to take, D-33), the player and, for a transient
     /// guest, what may be paid out in cash now (D-37). Needs no shift: it only gives back to the balance. The PC's lock
     /// comes first, as for a desk open (D-27): a sign-in of that player at the same instant waits for the end and then
-    /// finds no session to sign in to, instead of keeping a token next to the end's delete.
+    /// finds no session to sign in to, instead of keeping a token next to the end's delete. The session is read unlocked to
+    /// find its PC; the desk may have moved it to another PC since (D-61), so after the row lock its PC must still be the one
+    /// locked, else <c>409 conflict sessionMoved</c> (the desk refreshes and retries).
     /// </summary>
     private static async Task<IResult> EndAsync(HttpContext context, [FromBody] JsonElement body, IdempotencyStore store, SessionService sessions)
     {
@@ -402,33 +409,51 @@ public static class CounterEndpoints
         var result = await store.ExecuteHttpAsync(context, ShiftEndpoints.Principal(staff), keyRequired: false, body, async (c, tx) =>
         {
             var now = sessions.Clock.GetUtcNow();
-            // A session never changes its PC: read unlocked, the PC is locked before the session row (§4.4).
-            if ((r.SessionId is { } sessionId
-                    ? await c.QuerySingleOrDefaultAsync<Guid?>("SELECT pc_id FROM sessions WHERE id = @sessionId", new { sessionId }, tx)
-                    : r.PcId) is { } pcId)
+            // Read unlocked, the PC is locked before the session row (§4.4); a move holds both PCs' locks.
+            var locked = r.SessionId is { } sessionId
+                ? await c.QuerySingleOrDefaultAsync<Guid?>("SELECT pc_id FROM sessions WHERE id = @sessionId", new { sessionId }, tx)
+                : r.PcId;
+            if (locked is { } pcId)
             {
                 await AdvisoryLocks.PcAsync(c, tx, pcId);
             }
 
             var s = await TargetAsync(c, tx, staff, r);
-            var (charged, refunded) = await sessions.SettleAsync(c, tx, s, now, SessionEndReason.Admin, effects);
-            var session = effects.Sessions[^1];
-            effects.Sessions.RemoveAll(pushed => pushed.Id == s.Id);
-            effects.Commands.Add((s.ClubId, s.PcId, NewCommand.EndSession(new EndSessionCommand(s.Id, SessionEndReason.Admin))));
-            await SessionService.SignOutAsync(c, tx, s.UserId, s.PcId, effects);
-            var who = await c.QuerySingleAsync<(string DisplayName, string Role, bool Transient, long Balance)>(
-                "SELECT u.display_name, u.role, u.transient, w.main_balance FROM users u JOIN wallets w ON w.user_id = u.id WHERE u.id = @UserId",
-                new { s.UserId }, tx);
-            var sessionMinutes = (int)(now - s.StartedAt).TotalMinutes;
-            await Audit.WriteAsync(c, tx, staff, now, "sessionEnd", s.UserId, s.PcId, refunded, "",
-                new { sessionMinutes, sessionId = s.Id, charged, prepaid = s.IsPrepaid, guest = who.Transient ? true : (bool?)null });
-            await ControlAlerts.SessionEndedAsync(c, tx, staff, refunded, sessionMinutes, now);
-            return new IdempotentResult(StatusCodes.Status200OK, AdminJson.ToElement(new AdminSessionResult(
-                session, Money.Uzs(charged), Money.Uzs(who.Balance), Money.Uzs(refunded), new AdminSessionUser(s.UserId, who.DisplayName, who.Role),
-                Payable: who.Transient ? Money.Uzs(await PayableAsync(c, tx, s.UserId)) : null)));
+            if (locked is { } lockedPc && s.PcId != lockedPc)
+            {
+                throw SessionService.Conflict("sessionMoved");
+            }
+
+            return new IdempotentResult(StatusCodes.Status200OK, AdminJson.ToElement(await DeskEndCoreAsync(c, tx, staff, sessions, s, now, effects)));
         });
         await sessions.PublishAsync(effects);
         return result;
+    }
+
+    /// <summary>
+    /// The desk's end of a locked open session, in the caller's transaction (which holds the PC's lock): settled with reason
+    /// <c>admin</c>, <c>endSession</c> queued in <paramref name="effects"/> (no <c>sessionUpdated</c>), the player signed out
+    /// (D-28), the journal entry <c>sessionEnd</c> and the early-end alert. Shared by <c>adminEnd</c> and the bulk reboot or
+    /// shutdown of a busy PC (<c>includeBusy</c>, D-65).
+    /// </summary>
+    internal static async Task<AdminSessionResult> DeskEndCoreAsync(
+        NpgsqlConnection c, NpgsqlTransaction tx, StaffContext staff, SessionService sessions, SessionRow s, DateTimeOffset now, SessionEffects effects)
+    {
+        var (charged, refunded) = await sessions.SettleAsync(c, tx, s, now, SessionEndReason.Admin, effects);
+        var session = effects.Sessions[^1];
+        effects.Sessions.RemoveAll(pushed => pushed.Id == s.Id);
+        effects.Commands.Add((s.ClubId, s.PcId, NewCommand.EndSession(new EndSessionCommand(s.Id, SessionEndReason.Admin))));
+        await SessionService.SignOutAsync(c, tx, s.UserId, s.PcId, effects);
+        var who = await c.QuerySingleAsync<(string DisplayName, string Role, bool Transient, long Balance)>(
+            "SELECT u.display_name, u.role, u.transient, w.main_balance FROM users u JOIN wallets w ON w.user_id = u.id WHERE u.id = @UserId",
+            new { s.UserId }, tx);
+        var sessionMinutes = (int)(now - s.StartedAt).TotalMinutes;
+        await Audit.WriteAsync(c, tx, staff, now, "sessionEnd", s.UserId, s.PcId, refunded, "",
+            new { sessionMinutes, sessionId = s.Id, charged, prepaid = s.IsPrepaid, guest = who.Transient ? true : (bool?)null });
+        await ControlAlerts.SessionEndedAsync(c, tx, staff, refunded, sessionMinutes, now);
+        return new AdminSessionResult(
+            session, Money.Uzs(charged), Money.Uzs(who.Balance), Money.Uzs(refunded), new AdminSessionUser(s.UserId, who.DisplayName, who.Role),
+            Payable: who.Transient ? Money.Uzs(await PayableAsync(c, tx, s.UserId)) : null);
     }
 
     /// <summary>
@@ -604,12 +629,12 @@ public static class CounterEndpoints
         }
     }
 
-    /// <summary>The <c>payment</c> of an open or extend (its method required), else none.</summary>
-    private static (long Amount, string Method)? PaymentOf(AdminPayment? payment) =>
+    /// <summary>The <c>payment</c> of an open, extend or bar sale (its method required), else none.</summary>
+    internal static (long Amount, string Method)? PaymentOf(AdminPayment? payment) =>
         payment is null ? null : Payment(payment.Amount, payment.Method ?? throw ApiException.Validation("payment.method", "required"), "payment.");
 
     /// <summary>Money the counter takes: 1 tiyin … 1 000 000 сум by one of <see cref="Methods"/>, else <c>400</c> naming the field.</summary>
-    private static (long Amount, string Method) Payment(long? amount, string method, string prefix)
+    internal static (long Amount, string Method) Payment(long? amount, string method, string prefix)
     {
         var a = amount ?? throw ApiException.Validation(prefix + "amount", "required");
         if (a is < 1 or > 100_000_000)
@@ -653,16 +678,7 @@ public static class CounterEndpoints
             throw ApiException.Validation("text", "max");
         }
 
-        var text = string.IsNullOrWhiteSpace(r.Text) ? null : r.Text;
-        var command = r.Kind switch
-        {
-            "message" => NewCommand.Message(new MessageCommand(Guid.NewGuid(), "Администратор", text ?? throw ApiException.Validation("text", "required"), NotificationLevel.Info, RequiresAck: true)),
-            "lock" => NewCommand.Lock(new LockCommand("staff", text)),
-            "unlock" => NewCommand.Unlock(),
-            "reboot" => NewCommand.Reboot(new PowerCommand(5, false, text)),
-            "shutdown" => NewCommand.Shutdown(new PowerCommand(5, false, text)),
-            _ => throw ApiException.Validation("kind", "unknown"),
-        };
+        var command = BuildCommand(r.Kind, string.IsNullOrWhiteSpace(r.Text) ? null : r.Text, NotificationLevel.Info);
 
         // The command and its audit entry commit together (DESIGN §3.7); it goes to the PC after the commit.
         var online = hub.IsConnected(pc.Id);
@@ -685,6 +701,20 @@ public static class CounterEndpoints
               ?? new CommandAck(false, IpcError.Of(ErrorCode.Timeout, "No acknowledgement from the PC in time"));
         return AdminJson.Ok(new { ack });
     }
+
+    /// <summary>
+    /// The PC command of a desk <c>kind</c> (<c>adminCommand</c> and the bulk route): <c>message</c> needs a text (<c>400 text
+    /// required</c>), an unknown kind is <c>400 kind unknown</c>.
+    /// </summary>
+    internal static NewCommand BuildCommand(string? kind, string? text, NotificationLevel level) => kind switch
+    {
+        "message" => NewCommand.Message(new MessageCommand(Guid.NewGuid(), "Администратор", text ?? throw ApiException.Validation("text", "required"), level, RequiresAck: true)),
+        "lock" => NewCommand.Lock(new LockCommand("staff", text)),
+        "unlock" => NewCommand.Unlock(),
+        "reboot" => NewCommand.Reboot(new PowerCommand(5, false, text)),
+        "shutdown" => NewCommand.Shutdown(new PowerCommand(5, false, text)),
+        _ => throw ApiException.Validation("kind", "unknown"),
+    };
 
     /// <summary>
     /// <c>adminQuote</c>: the single price function now, without charging. Without a <c>userId</c>, or with an unknown one

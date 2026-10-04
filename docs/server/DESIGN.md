@@ -17,8 +17,8 @@
 - реализует все 75 операций с `x-server-status: required`: admin 44, agents 8, sessions 7, auth 5, users 5, games 3,
   pcs 1, updates 1, wallet 1;
 - реализует канал `/ws/agent` из AsyncAPI: все операции с `x-server-status: required` (§6);
-- на остальные 27 операций контракта отвечает `501`, кроме `getBalance`, `reportAntiCheat` и `getTransactions`, которые
-  реализуются сверх контракта (список ниже) — итого 24 × 501;
+- на остальные 27 операций контракта отвечает `501`, кроме `getBalance`, `reportAntiCheat`, `getTransactions` и
+  `callAdmin` (касса, часть 3), которые реализуются сверх контракта (список ниже) — итого 23 × 501;
 - является единственным авторитетом по деньгам, времени сеансов и статусу ПК.
 
 **Границы.**
@@ -30,7 +30,7 @@
 | PostgreSQL 18, один инстанс сервера | Горизонтальное масштабирование (§6.8) |
 | Биллинг сеансов, кошелёк, смены X/Z, контроль кассира, здоровье ПК, автоматизация, вебхуки | Удалённый рабочий стол, скриншоты, команда `update`, публикация обновлений |
 | Команды кассы `message`/`lock`/`unlock`/`reboot`/`shutdown` | `screenshot`, `remoteControl*`, `update`, `setPolicy` из кассы |
-| Каталог игр и товаров из seed-файлов (§12 D-14) | CRUD игр/товаров (в контракте его нет) |
+| Каталог игр и товаров из seed-файлов (§12 D-14); товары кассы (владелец заводит и убирает в архив, D-58), бар на кассе (D-52) | CRUD игр (в контракте его нет), заказы из киоска |
 
 **notImplemented → 501.** Каждая операция контракта с `x-server-status: notImplemented` (плюс
 `POST /admin/notifications/test`) замаплена и отвечает так:
@@ -48,8 +48,8 @@ Content-Type: application/json
 - Сначала проверяется аутентификация в режиме операции (agent/user/staff), затем сразу отдаётся 501. Тело не
   валидируется.
 - Таблица 501 строится при старте из `server/contracts/openapi.yaml` (порт `srv@1c68cc8:src/Club.Server/Api/ContractStatus.cs`).
-  Реализованные операции исключаются по их `operationId`; `getBalance`, `reportAntiCheat` и `getTransactions` стоят в
-  этом списке явно,
+  Реализованные операции исключаются по их `operationId`; `getBalance`, `reportAntiCheat`, `getTransactions` и
+  `callAdmin` стоят в этом списке явно,
   хотя в контракте они notImplemented. Тест «каждая notImplemented-операция отвечает 501, никогда 404» переносится
   из `srv@1c68cc8:tests/Club.Server.Tests/AgentApiTests.cs:209-234` и пропускает этот явный список.
 - Код ошибки — `notImplemented`, **не** `serverUnavailable`, как было в `srv@1c68cc8` (`ContractStatus.cs:54`), см.
@@ -475,7 +475,8 @@ X-Signature = lowercase hex( HMAC-SHA256( base64decode(signingSecret),
 
 Миграции: M0001 — ядро и агенты (S0/S1), M0002 — игроки, деньги и сеансы (S2), M0003 — каталог (S3), M0004 —
 касса (S4), M0005 — остальное admin (S5), M0006 — платформа, M0007 — игры клуба, M0008 — касса, часть 2 (движения
-наличных, кто закрыл смену, журнал по смене).
+наличных, кто закрыл смену, журнал по смене), M0009 — касса, часть 3 (продажи бара, товары кассы, вызовы администратора,
+пересаженные сеансы; один раз включает сохранённый `features.callAdmin = false`, D-62).
 
 | Таблица | Ключевые колонки | Ограничения / индексы | Миграция |
 |---|---|---|---|
@@ -497,7 +498,7 @@ X-Signature = lowercase hex( HMAC-SHA256( base64decode(signingSecret),
 | `ledger_entries` | id (= `Transaction.id`), op_id, user_id, network_id, club_id, type (`topUp\|charge\|refund\|bonus\|purchase\|adjustment`), amount bigint ≠0 со знаком, balance_after bigint, method NULL (`cash\|card\|payme\|click\|uzum`), description, ref NULL, session_id NULL, shift_id NULL, staff_id NULL, pc_id NULL, overdraft bool, meta jsonb (quote), created_at | индексы (user_id, created_at DESC), (club_id, created_at), (shift_id), (session_id); триггер append-only | M0002 |
 | `tariffs` | id, club_id, name, price_per_hour bigint, min_minutes, max_minutes NULL, zones text[], time_windows jsonb, is_package, package_minutes NULL, package_price NULL, created_at, updated_at, deleted_at NULL | CHECK пакет ⇒ оба поля; soft delete | M0002 |
 | `sessions` | id, club_id, pc_id, user_id, tariff_id, state (`active\|paused\|locked\|ending\|ended`), is_prepaid, origin (`kiosk\|cashier\|offline`), started_at, ended_at NULL, end_reason NULL, purchased_sec, used_before_sec, running_since NULL, paused_at NULL, ends_at NULL, last_transition_at, price_per_hour_snapshot bigint, day_pct, discount_pct, discount_reason NULL, charged_total, refunded_total, warnings_sent int[], created_by_staff_id NULL, client_session_id NULL, agent_reported jsonb NULL (secondsUsed/endedAt для аудита), created_at, updated_at | `UNIQUE(pc_id) WHERE state<>'ended'`; `UNIQUE(user_id) WHERE state<>'ended'`; `INDEX(ends_at) WHERE is_prepaid AND state IN ('active','locked','ending')`; FK (club_id,pc_id), (club_id,tariff_id) | M0002 |
-| `session_events` | id identity, session_id, club_id, source (`agent\|server\|staff`), type, at, received_at, data jsonb, applied bool | `UNIQUE(session_id,type,at) WHERE source='agent'`; append-only | M0002 |
+| `session_events` | id identity, session_id, club_id, source (`agent\|server\|staff`), type, at, received_at, data jsonb, applied bool | `UNIQUE(session_id,type,at) WHERE source='agent'`; `session_events_server (session_id, type) WHERE source <> 'agent'` (M0009: пересадка `staff`/`moved` с `data {fromPcId, toPcId, staffId, secondsUsed}` и `offlineTimeout`); append-only | M0002 |
 | `idempotency_keys` | principal, method, path, key uuid, request_hash bytea, status_code, response jsonb NULL, created_at | PK (principal, method, path, key); INDEX(created_at) | M0001 |
 | `games` | id, club_id, title, settings_paths text[] NULL, data jsonb (DTO `Game`), updated_at, deleted_at NULL | | M0003 |
 | `launch_reports` | id, club_id, pc_id, game_id, user_id NULL, session_id NULL, phase, started_at, data jsonb, created_at | `UNIQUE(session_id, phase, started_at)` | M0003 |
@@ -507,7 +508,10 @@ X-Signature = lowercase hex( HMAC-SHA256( base64decode(signingSecret),
 | `cash_movements` | id, club_id, shift_id, staff_id, staff_name, kind (`in\|out`), amount bigint > 0, reason_code (`change\|collection\|expenses\|other`), note NULL (1–200; для `other` ≥ 3), created_at | INDEX (shift_id, created_at); append-only (триггеры UPDATE/DELETE/TRUNCATE); без составного FK (club_id, shift_id): у `shifts` нет `UNIQUE(club_id, id)`, смену берёт эндпоинт из клуба сотрудника | M0008 |
 | `promo_codes` | id, club_id, code, kind (`bonus\|discountPct`), value, uses_left NULL, used, expires_at NULL, created_at, deleted_at NULL | `UNIQUE(club_id, upper(code)) WHERE deleted_at IS NULL` | M0005 |
 | `promo_redemptions` | promo_code_id, user_id, op_id, staff_id, redeemed_at | PK (promo_code_id, user_id) | M0005 |
-| `products` | id, club_id, title, category, price, image_url, in_stock, stock_qty NULL ≥0, tags text[], created_at, updated_at, deleted_at NULL | | M0005 |
+| `products` | id, club_id, title, category, price, image_url, in_stock, stock_qty NULL ≥0, tags text[], created_at, updated_at, deleted_at NULL; source (`seed\|desk`, M0009), deleted_by NULL (`seed\|desk`, M0009) | seed удаляет только `source='seed'` и возвращает только удалённое им самим (`deleted_by` `seed` или NULL, D-58) | M0005 |
+| `shop_sales` | id (продажа — `saleId` кассы; аннулирование — серверный), club_id, shift_id, staff_id, staff_name, kind (`sale\|void`), void_of NULL, user_id NULL, pc_id NULL, method (`cash\|card\|payme\|click\|uzum\|balance`), total bigint > 0, ledger_id NULL (строка `purchase` продажи с баланса и её отмены), reason_code NULL (`mistake\|returned\|defect\|other`), note NULL (1–200; для `other` ≥ 3), created_at | `shop_sales_one_void UNIQUE(void_of) WHERE void_of IS NOT NULL`; INDEX (shift_id, created_at), (club_id, created_at); FK (club_id, pc_id); CHECK void ⇔ void_of ⇔ reason_code, `balance` ⇒ user_id, `balance` ⇔ ledger_id; append-only | M0009 |
+| `shop_sale_lines` | sale_id, line (1–20), product_id, title, qty (1–99), price | PK (sale_id, line); INDEX (product_id); append-only (название и цена — на момент продажи) | M0009 |
+| `admin_calls` | id, club_id, pc_id, pc_name, pc_number, user_id NULL, user_name NULL, category (`help\|technical\|order\|other\|problem`), message NULL (1–2000), source (`direct\|telemetry\|report`), at (время кнопки по часам ПК), received_at, status (`open\|acked\|resolved`), repeat bool, acked_at/acked_by_staff_id/acked_by_name NULL, resolved_at/resolved_by_staff_id/resolved_by_name NULL | `UNIQUE(pc_id, at)` (вызов и его копия из телеметрии — один); `admin_calls_live (club_id, received_at DESC) WHERE status <> 'resolved'`; INDEX (pc_id, received_at DESC); FK (club_id, pc_id); изменяемая — статус меняется, каждое изменение в журнале | M0009 |
 | `automation_rules` | id text, club_id, name, enabled, trigger jsonb, action jsonb, fired int, last_fired_at NULL | PK (club_id, id) | M0005 |
 | `rule_firings` | club_id, rule_id, target_key, fired_at | PK (club_id, rule_id, target_key) | M0005 |
 | `webhooks` | id text, club_id, url, events text[], enabled, last_status NULL, last_at NULL | PK (club_id, id) | M0005 |
@@ -560,9 +564,19 @@ X-Signature = lowercase hex( HMAC-SHA256( base64decode(signingSecret),
   `expectedCash = opening_cash + (Σ topUp cash − apiCash) + cashIn − cashOut − payouts`, где `apiCash` — наличные
   пополнения ключом API клуба (`staff_id IS NULL`: метод по умолчанию `cash`, а в ящик они не попадали), `cashIn`/`cashOut`
   — `cash_movements` смены, `payouts` — выдачи гостям. Отдаётся в `GET /admin/shift` (`expectedCash`), в
-  `history[].expectedCash` (колонка `shifts.expected_cash`) и при закрытии.
+  `history[].expectedCash` (колонка `shifts.expected_cash`) и при закрытии. С кассой, часть 3 (D-57) к ней прибавляется
+  `shopByMethod.cash` — наличные продажи бара смены за вычетом их аннулирований.
 - **Выдача гостю наличными** (D-37): строка `adjustment` с отрицательной суммой и `method='cash'` (CHECK M0002 её
   допускает), `ShiftRequired`; в X/Z — `payouts`. Других строк `adjustment` с методом сервер не пишет.
+- **Бар** (касса, часть 3, D-52, D-56): продажа за деньги способом оплаты (наличные, карта, Payme, Click, Uzum) — только
+  строки `shop_sales`/`shop_sale_lines`, кошелёк и леджер не трогаются (как `cash_movements`: `ledger_entries.user_id`
+  обязателен). Продажа с баланса — строка `purchase` на −total (`ShiftRequired`, `ref` = `saleId`, `meta {saleId,
+  lines}`), в долг никогда (`allowOverdraft=false`, лимит долга клиента к товарам не применяется) и не дальше того, что ещё
+  спишет открытая постоплата (D-55). Её аннулирование — строка `purchase` на **+total** (никогда не `refund`: возвраты в
+  отчётах считаются временем, суммируются в `refunds` X/Z и поднимают сумму к выдаче гостю), она попадает в открытую
+  смену и уменьшает `lifetime_spent`. X/Z: `shop` = −Σ `purchase` смены + продажи способами − их аннулирования;
+  `shopByMethod {cash, card, payme, click, uzum, balance}` по `shop_sales.shift_id` (часть `balance` может быть
+  отрицательной в смене, аннулировавшей продажу прошлой смены), `shopVoids` и `shopVoidCount`.
 - **Провод:** `Transaction {id, userId, type, amount:Money, balanceAfter:Money, description, createdAt, ref}`
   (`cs/src/ClubShell.Contracts/Wallet/Transaction.cs`).
 - **Валюта:** только `UZS`; любая другая во входе → `400 validation reason=unsupported` (OPEN_QUESTIONS L63).
@@ -571,12 +585,17 @@ X-Signature = lowercase hex( HMAC-SHA256( base64decode(signingSecret),
 
 `READ COMMITTED`, явные блокировки строк, инварианты — уникальными индексами; `SERIALIZABLE` не используется.
 
-- **Порядок блокировок** (глобальный, против дедлоков; D-47 — как на самом деле): строка идемпотентности →
-  advisory-блокировка ПК (`pg_advisory_xact_lock(hashtextextended('pc:'||id, 0))`, только открытие и завершение сеанса
-  кассой и вход игрока, D-27; тик берёт её после строки сеанса и только `try`, без ожидания) → `sessions` (`FOR
-  UPDATE`, мутации) → `wallets` → `products` (по id) → `shifts` (`FOR SHARE`;
-  берёт `Ledger` сразу после кошелька) → `pcs FOR KEY SHARE` / вставка сеанса (открытие кассой с оплатой: `CreateAsync`
-  после пополнения) → `user_tokens`. `SET LOCAL lock_timeout = '10s'`.
+- **Порядок блокировок** (глобальный, против дедлоков; D-47 — как на самом деле, D-69 — с кассой, часть 3): строка
+  идемпотентности → advisory-блокировки ПК (`pg_advisory_xact_lock(hashtextextended('pc:'||id, 0))`: открытие и
+  завершение сеанса кассой и вход игрока — одна, D-27; пересадка — обоих ПК, массовая перезагрузка с `includeBusy` — занятых
+  ПК, **всегда по возрастанию id и до любой блокировки строки**; тик берёт её после строки сеанса и только `try`, без
+  ожидания) → `shop_sales` (аннулируемая продажа, `FOR UPDATE`) → `sessions` (`FOR UPDATE`, мутации) → `wallets` →
+  `products` (по id) → `shifts` (`FOR SHARE`; берёт `Ledger` сразу после кошелька; сильная — последней) → `pcs FOR KEY
+  SHARE` / вставка сеанса (открытие кассой с оплатой: `CreateAsync` после пополнения) → `user_tokens`. `SET LOCAL
+  lock_timeout = '10s'`. Продажа с баланса: кошелёк (`FOR UPDATE OF w`), товары, смена `FOR SHARE` (в `Ledger`); продажа
+  способом: товары, затем `LockOpenShiftAsync(strong:false)`, кошелька нет. Аннулирование наличной продажи: строка
+  продажи, товары, сильная блокировка смены — после неё ничего. Массовая команда: на каждый занятый ПК порядок завершения
+  кассой (сеанс, затем кошелёк и смена внутри `SettleAsync`), потом вставка `agent_commands`.
 - **Сильная блокировка смены.** Закрытие берёт `shifts FOR UPDATE`, изъятие наличных и выдача гостю — `FOR NO KEY
   UPDATE` (ждёт всех писателей с `FOR SHARE` и другое изъятие, но не мешает `KEY SHARE` проверкам FK, которые делают
   вставки журнала). Правило: транзакция со сильной блокировкой смены **после неё ничего не блокирует**; выдача и
@@ -590,7 +609,13 @@ X-Signature = lowercase hex( HMAC-SHA256( base64decode(signingSecret),
 - **Промокод** — один атомарный `UPDATE promo_codes SET uses_left=uses_left-1, used=used+1 WHERE … AND (uses_left IS
   NULL OR uses_left>0) AND (expires_at IS NULL OR expires_at>now()) RETURNING` + `INSERT promo_redemptions` (PK
   (promo, user) → `400 reason=exhausted` при повторе клиентом).
-- **Склад** — `UPDATE products SET stock_qty = coalesce(stock_qty,0) + $n …` атомарно, `CHECK stock_qty ≥ 0`.
+- **Склад** — `UPDATE products SET stock_qty = coalesce(stock_qty,0) + $n …` атомарно, `CHECK stock_qty ≥ 0`. Продажа
+  бара (D-54) — по одному условному `UPDATE … SET stock_qty = stock_qty − q WHERE … AND in_stock AND category <> 'time' AND
+  (stock_qty IS NULL OR stock_qty >= q)` на строку, по id товара; 0 строк — `409 outOfStock {productId, available}` и откат
+  всей корзины; `in_stock` продажа не пишет никогда. Два кассира, продающие последнюю единицу, — 201 и 409.
+- **Продажа бара один раз** — `saleId` кассы и есть первичный ключ `shop_sales`: повтор под новым ключом — `409 saleExists
+  {sale}` (гонка двух ключей решается PK в точке сохранения); одно аннулирование на продажу — `FOR UPDATE` строки продажи и
+  `shop_sales_one_void`.
 - **Денежные правила автоматизации** — `INSERT rule_firings … ON CONFLICT DO NOTHING` до зачисления; счёт визитов
   для `visitCount` не включает только что открытый сеанс (ошибка мока `mock/club.ts:439-441`).
 - **PATCH `/admin/club`** — `FOR UPDATE` строки `clubs` + проверка `settings_version`; redeem промокода и PATCH
@@ -725,6 +750,13 @@ endsAt      = ends_at | ended_at
    агент завершает локально, его `/end` получает `409 sessionNotActive` с `details.session` и считает это успехом.
    `sessionUpdated` для такого сеанса **не** шлётся: push дошёл бы до агента раньше команды, и тот закрыл бы сеанс
    с причиной `admin` («завершена администратором») вместо `timeUp`.
+8. **Пересаженный сеанс** (касса, часть 3, D-61): `/end` со старого ПК (сеанс касса пересадила с него — есть событие
+   `staff`/`moved` с `data.fromPcId` этого ПК) получает `409 sessionNotActive` с «видом завершения» в `details.session`
+   (тот же id, `pcId` — старый ПК, `state ended`, `endedAt` — момент пересадки, `cost 0`): агент 1.0.16 завершает локально
+   чисто (`ServerClient.cs:314-319`), ничего не рассчитывается. Сеанс, не пересаженный с этого ПК, — по-прежнему
+   `403 pcMismatch`. Завершение кассой перепроверяет ПК под блокировкой строки сеанса: сеанс, пересаженный между чтением и
+   блокировкой, — `409 conflict sessionMoved` (касса обновляет карту и повторяет). Строка `charge` постоплаты при
+   завершении несёт `pc_id` нового ПК: выручка по ПК и зоне уходит новому ПК.
 
 Ответ: `SessionEndResult {session, charged, refunded}`.
 
@@ -745,14 +777,18 @@ endsAt      = ends_at | ended_at
 
 - `session.graceSec` = `Sessions:GraceSec`, `session.heartbeatSec` = `Agents:HeartbeatSec`;
   `offline.maxOfflineMinutes` = `Sessions:MaxOfflineMinutes` (240).
-- `shell.features`: `shop`, `chat`, `booking`, `tournaments`, `topup`, `apps`, `callAdmin` = **false** явно;
-  `profile` = true. Старые агенты считают отсутствующий флаг равным true.
+- `shell.features`: `shop`, `chat`, `booking`, `tournaments`, `topup`, `apps` = **false** явно; `profile` = true.
+  Старые агенты считают отсутствующий флаг равным true. `gpuPanel` — выбор владельца (по умолчанию выключен);
+  `callAdmin` (касса, часть 3, D-62) — выбор владельца, **по умолчанию включён**: маршрут `/support/call-admin` и окно
+  вызовов в кассе есть. M0009 один раз превратил сохранённый `false` в `true` (тот `false` ни на что не влиял — сервер
+  всё равно слал `false` — и обычно был значением по умолчанию, которое консоль сохранила вместе со всем `features`).
 - `games.accountPool.enabled=false`, `games.cloudSave.enabled=false`, `updates.enabled=false`,
   `anticheat.reportViolations=true` (операция реализована, §11 S3).
 - `theme` ∈ {`default`, `neon`}, `themes: []`.
 - `shell.club` = {name, accent, logoUrl, wallpaperUrl, живые баннеры, rules}.
 
-Выбор фич владельца хранится и возвращается в `GET /admin/club` (OQ-10), но агенту уходит `false`.
+Выбор фич владельца хранится и возвращается в `GET /admin/club` (OQ-10), но агенту уходит `false` — кроме `gpuPanel` и
+`callAdmin`.
 
 Когда растут версии:
 
@@ -838,6 +874,13 @@ FOR UPDATE OF sessions SKIP LOCKED LIMIT 100
 Сеанс, закрытый тиком после `MaxOfflineMinutes` тишины (отметка `offlineTimeout`), переоткрывается в `ended_at`,
 если пачка несёт `ended@t` позже него: часы снова идут (или стоят на паузе, как было), события пачки применяются,
 `ended@t` рассчитывает заново (§5.7). Ответ: `204`.
+
+**Пересаженный сеанс** (касса, часть 3, D-61): поиск по `id` или по `client_session_id` — на этом ПК или на ПК, с которого
+сеанс пересадили. События старого ПК только записываются (`source='agent'`, `applied=false`, повтор пропускается) и
+получают `204` под ключом идемпотентности: `403` навсегда заклинил бы очередь агента (`OfflineSessionStore.cs:659-664`), а
+тик перестал бы судить этот ПК (непустой `offlineQueue`). Старое `ended` не закрывает сеанс на новом ПК. ПК, с которого
+сеанс не пересаживали, — по-прежнему `403 pcMismatch`. `/pause`, `/resume`, `/extend` старого ПК не меняются: пересадка
+удалила токен игрока там, и они получают `401 userToken`.
 
 ### 5.13 Разрешённые несоответствия (сводка)
 
@@ -958,9 +1001,9 @@ FOR UPDATE OF sessions SKIP LOCKED LIMIT 100
 
 | Push | Кому | Когда |
 |---|---|---|
-| `sessionUpdated` (`Session`) | ПК сеанса | любой переход, resync 30 с |
-| `walletUpdated` (`Balance`) | все ПК с валидным токеном пользователя | после commit денег |
-| `userRevoked {userId, reason}` | ПК пользователя | бан/blacklist, сброс пароля кассиром (OQ-24); касса, часть 2: `sessionEnded` — завершение кассой (любая роль) и конец времени временного гостя, после команды `endSession`; `seatTaken` — касса посадила на этот ПК другого, до push сеанса (§3.4); не `logout` |
+| `sessionUpdated` (`Session`) | ПК сеанса | любой переход, resync 30 с; касса, часть 3: после пересадки — сеанс новому ПК, затем старому ПК его «вид завершения» (`pcId` старого ПК, `state ended`, `cost 0`, D-61) |
+| `walletUpdated` (`Balance`) | все ПК с валидным токеном пользователя | после commit денег (и продажи бара с баланса, и её аннулирования) |
+| `userRevoked {userId, reason}` | ПК пользователя | бан/blacklist, сброс пароля кассиром (OQ-24); касса, часть 2: `sessionEnded` — завершение кассой (любая роль) и конец времени временного гостя, после команды `endSession`; `seatTaken` — касса посадила на этот ПК другого, до push сеанса (§3.4), и пересадила сюда сеанс (другой игрок нового ПК); касса, часть 3: `seatMoved` — сеанс игрока пересажен с этого ПК, после «вида завершения»; не `logout` |
 
 Это все три push с `x-server-status: required`. `notification`, `pcStatusChanged`, `chatMessage`, `orderUpdated`,
 `bookingUpdated`, `tournamentUpdated` в AsyncAPI — `notImplemented`: сервер v1 их **не** шлёт (мок шлёт
@@ -1028,7 +1071,10 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
 ```
 
 - `request_hash` сохраняется. Несовпадение только логируется: реплей `POST /sessions` законно приходит с
-  дополненным телом.
+  дополненным телом. **Исключение** (касса, часть 3, D-70): новые маршруты кассы — продажа бара и её аннулирование,
+  пересадка, массовая команда — вызывают `ExecuteHttpAsync(strictBody: true)`: известный ключ с другим телом —
+  `409 conflict reason=idempotencyKeyReused`, ничего не воспроизводится. Касса переиспользует висящий ключ для того же пути
+  и тела 2 минуты (`api.ts:207-216`); `saleId` в теле не даёт двум корзинам получить один ключ.
 - Длинные транзакции ограничены `SET LOCAL lock_timeout = '10s'` — это меньше 15-секундного тайм-аута агента.
 - Чистка: `MaintenanceWorker` раз в 10 мин удаляет строки старше `TtlHours`.
 
@@ -1110,7 +1156,7 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
 | `HealthWorker` | `CSHlth` | 30 с | Часовые корзины из `pc_metrics`; issues hot/trend/fpsDrop/unstable; тикеты (один на пару ПК+вид, эскалация, без повторного открытия 6 ч), `autoMaintenance`, вебхук `hardware`. **Без симуляции** (`mock/health.ts:386-452`) |
 | `ClubTickWorker` | `CSClub` | 60 с | Хеш набора живых баннеров → `config_version++` при изменении (OQ-21); автоматизация `minutesLeft` |
 | `WebhookWorker` | `CSHook` | 1 с | `webhook_outbox`: POST с таймаутом 5 с, 3 повтора с задержкой; перед отправкой отклоняет адреса loopback, private, link-local и metadata (OQ-11); обновляет `last_status`/`last_at` |
-| `MaintenanceWorker` | `CSMant` | 10 мин | Удаление ключей идемпотентности старше 24 ч, `pc_metrics` старше 8 д, `telemetry_events` старше 30 д, просроченных токенов (refresh, user, staff, qr); сверка кеша баланса с леджером (раз в сутки, `LogError` при расхождении) |
+| `MaintenanceWorker` | `CSMant` | 10 мин | Удаление ключей идемпотентности старше 24 ч, `pc_metrics` старше 8 д, `telemetry_events` старше 30 д, просроченных токенов (refresh, user, staff, qr); вызовы администратора: без ответа 12 ч — `resolved` («auto»), старше 30 д — удаление (касса, часть 3); сверка кеша баланса с леджером (раз в сутки, `LogError` при расхождении) |
 
 - **Сверка офлайн-событий** фонового воркера не требует: она синхронна в `POST /sessions/{id}/events` и
   `POST /sessions` (реплей). Хвосты закрывает `SessionTickWorker`.
@@ -1739,6 +1785,89 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
 - **Карта зала** (D-49): `seats[].signedIn` — у игрока сеанса есть живой токен этого ПК («ждёт входа», часы уже идут);
   `guestDebts[]` с `role` и долгами клиентов; новый `guestRefunds[] {userId, displayName, balance, payable, pc, endedAt}`.
 
+### Касса, часть 3 (после «Касса, часть 2»)
+
+- **Зачем:** бар на кассе, пересадка игрока на другой ПК, окно «Позвать администратора», команды нескольким ПК сразу.
+  Решения — D-52..D-70 (§12.1); всё за пределами контракта перечислено в §12.2 п. 16. Новый установщик не нужен: всё
+  работает с агентом и шеллом 1.0.16. Миграция M0009.
+- **Продажа** (D-52..D-55): `POST /admin/shop/sales` (только сотрудник — ключ API `403 staffOnly`; открытая смена — иначе
+  `409 shiftClosed`; `Idempotency-Key` обязателен со строгой проверкой тела, D-70) `{saleId, items: [{productId, qty 1..99}]
+  (1..20 разных товаров), total (1..100 000 000), userId?, pcId?, payment?: {method: cash|card|payme|click|uzum, amount ==
+  total}}`. `saleId` — UUID, который касса делает один раз на корзину, — первичный ключ продажи: занятый — `409 conflict
+  saleExists {sale}`, ничего нового не проводится. С `payment` — продажа способом: строки `shop_sales`/`shop_sale_lines`,
+  кошелёк не трогается, `userId` только называет покупателя (клиент или гость) в чеке и ленте и в `lifetime_spent` не идёт.
+  Без `payment` — с баланса `userId` (обязателен): строка `purchase` на −total; «можно потратить» = баланс, а при открытой
+  постоплате — баланс − max(0, `Frozen(снимок, used(now)+60 с)` − `charged_total`) (простое чтение без блокировки сеанса),
+  иначе `402 insufficientFunds {required, available}`. Порядок в транзакции: смена → `saleId` → кошелёк (`FOR UPDATE OF w`,
+  продажа с баланса) или чтение покупателя → строки товаров по id (условный `UPDATE`, D-54: `409 outOfStock {productId,
+  available}`, у `time` — `409 notSellable {productId}`) → сравнение с `total` (`409 priceChanged {total, prices[{productId,
+  price}]}`, деньги — `Money`) → деньги и строки → журнал `shopSale` (`amount` = total, `meta {saleId, method, lines,
+  balance}`) → `lowStock` при пересечении порога. Любой отказ откатывает всю корзину. Ответ `201 {sale {id, at, shiftId,
+  method, total, staffName, user|null, pc|null, lines[{productId, title, qty, price, amount}]}, balance: Money|null,
+  products: Product[], expectedCash}` (суммы продажи — тийины). После commit — `walletUpdated` у продажи с баланса.
+- **Аннулирование** (D-56): `POST /admin/shop/sales/{id}/void {reasonCode: mistake|returned|defect|other, note?}` (3–200
+  символов, для `other` обязательна; `Idempotency-Key` обязателен, строгий). Только целиком; строка продажи `FOR UPDATE`
+  (`404 sale`, второе — `409 alreadyVoided`); кассир — в течение 15 минут (`403 forbidden reason=voidWindow {minutes: 15}`),
+  владелец — когда угодно. Продажа способом — только в своей смене (`409 saleShiftClosed`), наличными — с сильной
+  блокировкой смены последней и не больше ящика (`409 cashShort {available}`). Продажа с баланса — в любой открытой смене:
+  строка `purchase` на +total в текущей смене. `defect` не возвращает на склад, остальные — `stock_qty + q` отслеживаемых
+  товаров (`in_stock` не трогается). Строка `shop_sales` вида `void` попадает в открытую смену. Журнал `shopVoid`;
+  `suspicious` — аннулирование не меньше `notifications.bigTopupAt` и в момент, когда аннулирования этого кассира в смене
+  достигают `control.earlyEndsPerShift`. Ответ `200 {void {id, at, saleId, saleAt, method, total, reasonCode, note,
+  staffName}, balance, products, expectedCash}`.
+- **Деньги смены** (D-57): X/Z — `shop` (бар за вычетом аннулирований), `shopByMethod`, `shopVoids`, `shopVoidCount` (старый
+  Z — нули); `expectedCash` += `shopByMethod.cash`; вебхук `shiftClosed` и Z добавляют «бар нал.» и «аннулировано N на M».
+  `today.shopByMethod {cash, card, payme, click, uzum}` — деньги бара способами за вычетом аннулирований, `today.taken`
+  включает их, `byMethod` — по-прежнему только пополнения, `shop` — все товары. Отчёты: `byDay[].shop` и `totals.shop` с
+  продажами способами, `topProducts` — до 8 товаров периода по выручке, аннулированные продажи не считаются.
+- **Лента** (D-68): виды `shopSale`, `shopVoid`, `sessionMove`; новые поля строки (необязательные, в конце): `saleId`,
+  `method`, `lines [{title, qty, price}]`, `voided` (продажа), `voidOfAt` (аннулирование), `fromPc {id, name}` (пересадка).
+  Продажа: `paid` — деньги способом, `charged` — с баланса; аннулирование: `paid` — отданные деньги способом; `drawer` —
+  +total наличной продажи, −total её аннулирования, 0 для баланса. Сумма `drawer` по смене = `expectedCash`.
+- **Товары кассы** (D-54, D-58): `POST /admin/products {title 1..80, category, price, stockQty?, inStock?}` (владелец, `201
+  {product}`, `source='desk'`, журнал `stockCreate`, ключ необязателен), `DELETE /admin/products/{id}` (владелец, мягкое
+  удаление с `deleted_by='desk'`, `{ok: true}`, журнал `stockArchive`). `PATCH` принимает `expectedStockQty` (вместе со
+  `stockQty`): количество успело измениться — `409 conflict stockChanged {stockQty}`. `ProductSeed` удаляет только свои
+  (`source='seed'`, `deleted_by='seed'`) и возвращает только удалённое им самим.
+- **Пересадка** (D-59..D-61): `POST /admin/sessions/move {fromPcId, sessionId?, toPcId, tariffId?}` (только сотрудник,
+  ключ обязателен, строгий). Блокировки обоих ПК по возрастанию id, затем строка сеанса: нет открытого сеанса на
+  `fromPcId` (или он уже ушёл) — `409 sessionMoved`, `ending` — `409 sessionEnding`. Целевой ПК: живой ПК клуба, не на
+  обслуживании (`403 policyDenied pcMaintenance`), не офлайн (`409 targetOffline`), свободен (`409 pcBusy {pcId}`; гонку с
+  созданием сеанса решает `sessions_open_pc`), и его агент не держит сеанса, неизвестного серверу (`409
+  targetHasLocalSession`: `offlineQueue > 0` или `currentSessionId`, которого нет ни в `sessions.id`, ни в
+  `client_session_id`). Тариф (D-60): предоплата оставляет тариф, если его зоны пускают в зону цели, иначе нужен почасовой
+  тариф зоны (`409 tariffZone {zone}`, неподходящий — `403 policyDenied tariffZone`, пакет — `400 tariffId package`);
+  постоплата сохраняет замороженную цену (`tariffId` — `400 postpaid`). Перенаправляется `sessions.pc_id`; купленное и
+  использованное время, часы, списания и предупреждения остаются, строк леджера нет; `locked` → `active`, `paused`
+  возобновляется (постоплата — с проверкой средств, `402`). Событие `staff`/`moved`, журнал `sessionMove`
+  (`detail` «PC-05 → PC-07»). Другие игроки целевого ПК выводятся (`seatTaken`), токен игрока на старом ПК удаляется. Ответ
+  `200 {session, from {pcId, name}, to {pcId, name}, tariffChanged, user, signedIn: false}`. После commit: `seatTaken`,
+  сеанс новому ПК, «вид завершения» старому, `userRevoked seatMoved`. Старый ПК: `/end` — §5.7 п. 8, `/events` — §5.12,
+  «Гость» на новом ПК входит в пересаженный сеанс временного гостя (`Guests.DeskGuestOfPcAsync`), тик судит по heartbeat
+  нового ПК.
+- **Вызов администратора** (D-62..D-64): `callAdmin` реализован (`201 {ticketId, createdAt, queuePosition}`; единственный
+  4xx для правильного тела — `403 pcMismatch`). Игрок — из токена, иначе `userId` тела, только если у него живой токен этого
+  ПК, иначе игрок открытого сеанса ПК. `admin_calls UNIQUE(pc_id, at)` сводит вызов и его копию из телеметрии в одну
+  строку. Телеметрия (`IngestTelemetryAsync`): `callAdmin` с правильной категорией, `at`, `pcId` этого ПК и сообщением до
+  500 символов, и `shellClientError` с «[user report] » (категория `problem`, текст обрезается до 500, не больше 5 на ПК в
+  час) — каждое под своей точкой сохранения, плохое пропускается с записью в лог, метрики пачки сохраняются; вызов из
+  телеметрии старше 30 минут сохраняется закрытым. Повтор после «Иду» (за 10 минут после ответа, который ещё не закрыт;
+  открытых нет) сохраняется `acked` с `repeat` и временем того ответа (повторы не продлевают 10 минут) и не звонит; после
+  «Закрыть» новый вызов звонит; отчёты о проблеме в этом правиле не участвуют. При открытом вызове — открытым в ту же
+  группу. `overview.calls` — открытые и принятые за 12 ч. `POST /admin/calls/{id}/ack {notify?}` принимает этот и более
+  ранние открытые вызовы ПК и, если ПК на связи, ставит `message` «Администратор идёт к вам» (`requiresAck:false`, живёт 2
+  минуты, язык игрока); `{call, notified}`: `false` — ПК не на связи, `null` — вызов уже был принят или закрыт (другой
+  кассой), ничего не отправлено. `POST /admin/calls/{id}/resolve` закрывает этот и более ранние. Журнал `callAck`,
+  `callResolve`.
+- **Массовые команды** (D-65): `POST /admin/pcs/commands {pcIds ≤100, kind: message|lock|unlock|reboot|shutdown, text?,
+  level?, includeBusy?, sessionIds?}` (ключ обязателен, строгий): одна транзакция, точка сохранения на каждый ПК, ответ
+  `{batchId, results[{pcId, pcName, outcome: done|queued|noAnswer|failed|skipped, skipped: sessionOpen|offline|notFound|null,
+  ack, ended}]}`. Офлайн-ПК пропускаются для `lock`, `reboot`, `shutdown`; занятый ПК для `reboot`/`shutdown` — без
+  `includeBusy`; с ним сеанс сначала завершается как «Завершить» (журнал, возврат, вывод гостя, `endSession` перед командой
+  питания). `sessionIds` (только с `includeBusy`, ≤100) — сеансы, которые показало подтверждение кассы: завершаются только
+  они, другой сеанс на выбранном ПК (игрок сел после подтверждения) — `skipped sessionOpen`. Каждому ПК — запись
+  `pcCommand` (`meta {kind, batchId}`). Повтор ключа отдаёт сохранённые результаты до ack (отправленные — `queued`).
+
 ### 11.1 Все 75 required-операций + WS → срезы
 
 | # | operationId | Метод и путь | Срез |
@@ -1845,7 +1974,7 @@ anticheat/report — S3; `PATCH /admin/games/{id}` (реализуется) и `
 | D-10 | Постоплата останавливается на границе минуты, когда следующая минута не по средствам (баланс + `PostpaidCreditLimit` = 0); не хватает на первую минуту — `402` |
 | D-11 | Офлайн-реплей принимается по одному токену агента при выполнении условий §5.11, с overdraft |
 | D-12 | Блокировка не останавливает оплату; grace 60 с бесплатно; сервер не завершает сеансы офлайн-ПК раньше 240 мин |
-| D-13 | `features.callAdmin=false`, как и shop/chat/booking/tournaments/topup/apps: у кассы нет окна тикетов; события `callAdmin` из телеметрии сохраняются |
+| D-13 | ~~`features.callAdmin=false`, как и shop/chat/booking/tournaments/topup/apps: у кассы нет окна тикетов; события `callAdmin` из телеметрии сохраняются~~ Заменено D-62 (касса, часть 3) |
 | D-14 | Каталог игр, товары и политика берутся из seed-JSON в `data/` (upsert по id при старте, bump версий): в контракте нет CRUD игр и товаров |
 | D-15 | Один промокод — один раз на клиента |
 | D-16 | Зона времени клуба `Asia/Tashkent` из конфига; вся календарная логика в местном времени |
@@ -1884,6 +2013,25 @@ anticheat/report — S3; `PATCH /admin/games/{id}` (реализуется) и `
 | D-49 | `seats[].signedIn`: игрок сеанса держит живой токен этого ПК («ждёт входа» — часы уже идут) |
 | D-50 | Возврат за неиспользованное время — только при завершении кассой (admin/error); «Выйти» гостя оставляет время неиспользованным (вопрос владельцу) |
 | D-51 | Чеки и отчёты печатает браузер (#print-root, `@page` по высоте, настройки бумаги на консоль); «Не является фискальным чеком»; сервер не участвует |
+| D-52 | Бар — один маршрут `POST /admin/shop/sales` (только сотрудник, открытая смена, ключ обязателен, строго). Продажа способом (`payment`, сумма = итог) — только `shop_sales` и строки, кошелёк не трогается, `userId` лишь называет покупателя; продажа с баланса — строка `purchase` на −total и `shop_sales` с `method='balance'`. Пополнения вместе с покупкой нет. `saleId` кассы — первичный ключ: повтор под новым ключом — `409 saleExists {sale}` |
+| D-53 | Товары — по цене прайса (без скидок, без правки цены на кассе); итог кассы ≠ серверу — `409 priceChanged {total, prices}`, ничего не проведено; одна оплата ≤ 100 000 000 тийин |
+| D-54 | Склад — условный `UPDATE` на строку по id товара (`stock_qty − q`, неотслеживаемые остаются NULL), 0 строк — `409 outOfStock {productId, available}` (0, если не в продаже), `time` — `409 notSellable`; продажа никогда не пишет `in_stock`; `lowStock` при пересечении порога; правка товара шлёт только изменённые ключи, `stockQty` — с `expectedStockQty` (`409 stockChanged {stockQty}`) |
+| D-55 | С баланса — никогда в долг; при открытой постоплате доступно баланс − max(0, `Frozen(снимок, used+60 с)` − `charged_total`) (чтение без блокировки), иначе `402 insufficientFunds {required, available}`; временный гость может тратить остаток, его сумма к выдаче уменьшается, аннулирование её возвращает |
+| D-56 | Аннулирование — только целиком, с причиной (`mistake\|returned\|defect\|other`, заметка 3–200 для `other`); кассир — 15 минут (`403 voidWindow {minutes}`), владелец — всегда; способом — только в своей смене (`409 saleShiftClosed`), наличные — не больше ящика (`409 cashShort`); с баланса — в любой открытой смене строкой `purchase` на +total (не `refund`); `defect` на склад не возвращает; одно на продажу (`409 alreadyVoided`); `suspicious` — от `bigTopupAt` и при достижении `earlyEndsPerShift` аннулирований кассира за смену |
+| D-57 | X/Z: `shop` = −Σ `purchase` + продажи способами − их аннулирования; `shopByMethod {cash, card, payme, click, uzum, balance}`, `shopVoids`, `shopVoidCount`; `expectedCash` += `shopByMethod.cash`; «Сегодня»: `shopByMethod` (способы), `taken` с деньгами бара, `byMethod` — только пополнения, `shop` — все товары; отчёты: `shop` с продажами способами, `topProducts` из строк неаннулированных продаж; старый Z — нули |
+| D-58 | Владелец заводит товар на кассе (`POST /admin/products`, `source='desk'`) и убирает в архив (`DELETE`, `deleted_by='desk'`); seed удаляет только свои товары и возвращает только удалённые им самим; кассиру переключатель «В наличии» не показывается |
+| D-59 | Пересадка — `POST /admin/sessions/move {fromPcId (обязателен), sessionId?, toPcId, tariffId?}`: блокировки обоих ПК по возрастанию id, перенаправление `sessions.pc_id`, без строк леджера, часы идут; `locked` → `active`, `paused` возобновляется (`402` для постоплаты без средств), `ending` — `409`; цель — живая, на связи, не на обслуживании, свободная, без неизвестного серверу сеанса агента (`409 targetHasLocalSession`) |
+| D-60 | Тариф при пересадке: предоплата оставляет свой, если он действует в зоне цели, иначе нужен почасовой тариф зоны (`409 tariffZone {zone}` без него, `403 tariffZone` с неподходящим) — только для будущих продлений, без пересчёта и возврата; постоплата — всегда своя замороженная цена (`400 tariffId postpaid`) |
+| D-61 | Старый ПК после пересадки: push «вида завершения» и `userRevoked seatMoved`; его `/end` — `409 sessionNotActive` с этим видом, его `/events` — `204` и только запись (`applied=false`); `/pause`, `/resume`, `/extend` — `401 userToken` (токен удалён); «Гость» на новом ПК входит в пересаженный сеанс временного гостя; завершение кассой перепроверяет ПК (`409 sessionMoved`) |
+| D-62 | `callAdmin` реализован (`201 {ticketId, createdAt, queuePosition}`, единственный 4xx — `403 pcMismatch`), `admin_calls UNIQUE(pc_id, at)` сводит вызов и его копию из телеметрии; копии из телеметрии и «[user report]» — с проверкой и под точкой сохранения; вызов из телеметрии старше 30 мин — закрыт; повтор за 10 мин после «Иду», пока вызов не закрыт, — `acked` с `repeat` и временем того «Иду» (повторы окно не продлевают); отчётов о проблеме — не больше 5 на ПК в час; `features.callAdmin` — выбор владельца, по умолчанию включён; M0009 один раз включает сохранённый `false`. Заменяет D-13 и отвечает на Q-6 |
+| D-63 | Окно вызовов: `overview.calls` — открытые и принятые за 12 ч; «Иду» (`ack`) принимает этот и более ранние открытые вызовы ПК и шлёт подключённому ПК `message` «Администратор идёт к вам» на 2 минуты (иначе `notified=false`; уже принятый или закрытый вызов — `notified=null`, ничего не отправлено); «Закрыть» (`resolve`); без ответа 12 ч — закрывает обслуживание, через 30 д — удаляет |
+| D-64 | Звук в кассе — Web Audio каждые 5 с, пока есть открытый не повторный вызов; разблокировка кликом входа по PIN; громкость и «без звука» — на консоль (сервер не участвует) |
+| D-65 | Массовые команды — `POST /admin/pcs/commands` (ключ обязателен, строго): точка сохранения на ПК, свой результат каждому; офлайн пропускается для `lock`/`reboot`/`shutdown`; занятый — для `reboot`/`shutdown` без `includeBusy`, с ним сеанс сначала завершается как «Завершить» (с `sessionIds` — только сеансы, показанные в подтверждении); запись `pcCommand {kind, batchId}`; повтор ключа — сохранённые результаты до ack |
+| D-66 | Выбор на карте (Ctrl/Shift/«Выбрать»), панель «Выбрано N», подтверждения со списком игроков — касса (сервер не участвует) |
+| D-67 | Раздел «Бар» кассы: сетка товаров, корзина, покупатель «Гость/Клиент», PayBox на продажу, снимок корзины на время неизвестного ответа — касса (сервер не участвует) |
+| D-68 | Новые действия журнала `shopSale`, `shopVoid`, `sessionMove`, `callAck`, `callResolve`, `stockCreate`, `stockArchive` — вне `AdminAuditAction`, пока контракт их не перечислит (`adminControl` их не показывает); новые виды ленты `shopSale`, `shopVoid`, `sessionMove`; массовое завершение пишет обычный `sessionEnd` |
+| D-69 | Порядок блокировок (§4.4) расширен: идемпотентность → advisory-блокировки ПК (пересадка — обоих, массовая с `includeBusy` — занятых, по возрастанию id, до любых строк) → `shop_sales` (аннулируемая продажа) → `sessions` → `wallets` → `products` (по id) → `shifts` (сильная — последней) → `pcs KEY SHARE` / вставка сеанса → `user_tokens` |
+| D-70 | Строгая идемпотентность для продажи, аннулирования, пересадки и массовых команд: известный ключ с другим телом — `409 idempotencyKeyReused`; остальные маршруты — как раньше (только лог) |
 
 ### 12.2 Изменения контракта (PR в club-contracts, ведёт лид, владелец не нужен)
 
@@ -1927,6 +2075,27 @@ anticheat/report — S3; `PATCH /admin/games/{id}` (реализуется) и `
     - `403 policyDenied` `postpaidNotAllowed | tariffZone | tariffTime` у `adminOpenSession`; `409 priceChanged {total}` у
       `adminExtend`;
     - AsyncAPI `pushUserRevoked`: причины `sessionEnded` и `seatTaken`.
+16. Касса, часть 3 (§11, «Касса, часть 3»):
+    - `callAdmin` → required (реализован: `201 {ticketId, createdAt, queuePosition}`; `admin_calls UNIQUE(pc_id, at)`
+      сводит вызов и его копию из телеметрии); `features.callAdmin` — выбор владельца, по умолчанию `true`;
+    - операции `POST /admin/shop/sales`, `POST /admin/shop/sales/{id}/void`, `POST /admin/sessions/move`,
+      `POST /admin/pcs/commands` (`Idempotency-Key` обязателен, строгая проверка тела), `POST /admin/products`,
+      `DELETE /admin/products/{id}`, `POST /admin/calls/{id}/ack`, `POST /admin/calls/{id}/resolve`;
+    - поле `expectedStockQty` в `adminUpdateProduct` и `409 conflict stockChanged {stockQty}`; поле `sessionIds` в
+      `POST /admin/pcs/commands` (с `includeBusy`; причина `400 sessionIds includeBusy`); `notified: null` в ответе
+      `POST /admin/calls/{id}/ack` (вызов уже был принят или закрыт);
+    - причины: `409 saleExists {sale}`, `outOfStock {productId, available}`, `notSellable {productId}`, `priceChanged
+      {total, prices}` у продажи; `alreadyVoided`, `saleShiftClosed`, `403 forbidden voidWindow {minutes}` у аннулирования;
+      `pcBusy {pcId}`, `targetOffline`, `targetHasLocalSession`, `sessionEnding`, `sessionMoved`, `tariffZone {zone}` у
+      пересадки; `409 sessionMoved` у `adminEnd`; `409 idempotencyKeyReused` у четырёх строгих маршрутов;
+    - лишние поля ответов: `AdminOverview.calls[] (AdminCall)`; `AdminShiftTotals.shopByMethod | shopVoids |
+      shopVoidCount`; `AdminToday.shopByMethod`; `AdminOperation.saleId | method | lines | voided | voidOfAt | fromPc`;
+      `Reports.topProducts` из продаж бара;
+    - `AdminAuditAction` + `shopSale`, `shopVoid`, `sessionMove`, `callAck`, `callResolve`, `stockCreate`, `stockArchive`
+      (`x-enum-added`; до этого `adminControl` их не показывает, D-68);
+    - AsyncAPI `pushUserRevoked`: причина `seatMoved`; `pushSessionUpdated` старому ПК с «видом завершения» пересаженного
+      сеанса; `endSession` (`/sessions/{id}/end`) — `409 sessionNotActive` для ПК, с которого сеанс пересадили, и
+      `postSessionEvents` — `204` (события только записываются) для него же.
 
 ### 12.3 Вопросы владельцу (только то, что без него не решить)
 
@@ -1937,7 +2106,7 @@ anticheat/report — S3; `PATCH /admin/games/{id}` (реализуется) и `
 | Q-3 | Защищаться ли в v1 от повтора неидемпотентных запросов (`ReplayMode=Reject`)? | D-4: нет, только лог |
 | Q-4 | Принимать ли офлайн-сеанс по одному токену агента (иначе сеансы, начатые при офлайн-входе, теряются)? | D-11: да |
 | Q-5 | Откуда берётся каталог игр: JSON вручную, библиотека club-server или редактор в кассе? | D-14: JSON |
-| Q-6 | Нужен ли в v1 «вызов администратора» (тогда нужно окно тикетов в кассе и required `/support/call-admin`)? | D-13: выключен |
+| Q-6 | ~~Нужен ли в v1 «вызов администратора» (тогда нужно окно тикетов в кассе и required `/support/call-admin`)?~~ **Отвечено: да, касса, часть 3 (D-62..D-64).** Включён при развёртывании; владелец выключает в «Клуб → Разделы для игроков» | D-62: включён |
 | Q-7 | ~~Где разворачиваем?~~ **Отвечено: Railway (D-23).** Открыто: домен кассы и API, тариф Railway (для бэкапов volume нужен Pro) | `*.up.railway.app` до выбора домена |
 | Q-8 | Связывать ли ПК с club-server (фаза 2): добавит ли владелец в club-server read-only эндпоинт и токен для списка машин? | v1: хранится только MAC |
 | Q-9 | Промокод — один раз на клиента? | D-15: да |

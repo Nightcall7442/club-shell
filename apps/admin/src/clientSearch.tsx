@@ -278,10 +278,15 @@ export function ClientPicker({
   value,
   onChange,
   label,
+  allowPlaying = false,
+  autoFocus = false,
 }: {
   value: ClientHit | null;
   onChange: (hit: ClientHit | null) => void;
   label: string;
+  /** A client playing on a PC may be picked (the bar sells to players; a seat does not seat them twice). */
+  allowPlaying?: boolean;
+  autoFocus?: boolean;
 }): JSX.Element {
   const id = useId();
   const input = useRef<HTMLInputElement>(null);
@@ -294,7 +299,7 @@ export function ClientPicker({
   const isDisabled = (hit: ClientHit): string | null =>
     hit.blacklisted
       ? t('Клиент в чёрном списке')
-      : hit.playing
+      : hit.playing && !allowPlaying
         ? t('Уже играет на {pc}', { pc: pcLabel(hit.playing.pcName) })
         : null;
 
@@ -346,6 +351,7 @@ export function ClientPicker({
         aria-activedescendant={open && active >= 0 ? `${id}-list-${active}` : undefined}
         aria-autocomplete="list"
         autoComplete="off"
+        autoFocus={autoFocus}
         className={inputCls}
         value={q}
         placeholder={t('Имя, логин, телефон или карта')}

@@ -21,8 +21,9 @@ namespace ClubShell.Server.Admin;
 /// shift after its Z report; a row racing the close gets <c>shift_id NULL</c>, as with no shift open — S5 <c>noShift</c>
 /// counts those). The counter takes no money without an open shift (<see cref="RequireOpenAsync"/>). X/Z report = sums by
 /// <c>shift_id</c> grouped by type and method, top-ups also per method, plus the drawer's movements and the guests' payouts
-/// (cash desk part 2); only the server computes <see cref="Expected"/> = opening + staff cash top-ups + cash in − cash out −
-/// payouts (cash top-ups of the club API key never were in the drawer). A shortfall over
+/// (cash desk part 2) and the bar's sales by method net of voids (cash desk part 3, <c>shop_sales</c>); only the server computes
+/// <see cref="Expected"/> = opening + staff cash top-ups + cash in − cash out − payouts + bar cash (cash top-ups of the club
+/// API key never were in the drawer). A shortfall over
 /// <c>settings.control.shortfallFrom</c> (default 500 000 tiyin) flags the <c>shiftClose</c> entry. Any staff member may
 /// close (not only who opened); the shift records who did. Closing raises <c>shiftClosed</c>, and <c>suspicious</c> on a
 /// shortfall, for the webhooks (S5), in the close's transaction. Beyond the contract: cash in and out of the drawer
@@ -42,7 +43,10 @@ public static class ShiftEndpoints
 
     /// <summary>The feed's kinds: journal actions, with <c>debtPaid</c> — a <c>topUp</c> that settled a debt.</summary>
     private static readonly string[] FeedKinds =
-        ["topUp", "debtPaid", "sessionOpen", "sessionExtend", "sessionEnd", "payout", "cashIn", "cashOut", "shiftOpen", "shiftClose", "promoRedeem"];
+    [
+        "topUp", "debtPaid", "sessionOpen", "sessionExtend", "sessionEnd", "payout", "cashIn", "cashOut", "shiftOpen", "shiftClose", "promoRedeem",
+        "shopSale", "shopVoid", "sessionMove",
+    ];
 
     public static void MapShiftEndpoints(this IEndpointRouteBuilder app)
     {
@@ -73,8 +77,12 @@ public static class ShiftEndpoints
     public static async Task<AdminShift?> OpenShiftAsync(NpgsqlConnection c, Guid clubId) =>
         (await c.QuerySingleOrDefaultAsync<ShiftRow>($"SELECT {ShiftRow.Columns} FROM shifts WHERE club_id = @clubId AND closed_at IS NULL", new { clubId }))?.ToWire();
 
-    /// <summary>The drawer the server expects (D-41): opening + staff cash top-ups + cash in − cash out − guest payouts.</summary>
-    public static long Expected(long openingCash, AdminShiftTotals t) => openingCash + (t.TopUpCash - t.ApiCash) + t.CashIn - t.CashOut - t.Payouts;
+    /// <summary>
+    /// The drawer the server expects (D-41, D-57): opening + staff cash top-ups + cash in − cash out − guest payouts + the bar's
+    /// cash sales net of their voids.
+    /// </summary>
+    public static long Expected(long openingCash, AdminShiftTotals t) =>
+        openingCash + (t.TopUpCash - t.ApiCash) + t.CashIn - t.CashOut - t.Payouts + (t.ShopByMethod?.Cash ?? 0);
 
     private static async Task<IResult> OpenAsync(HttpContext context, [FromBody] JsonElement body, IdempotencyStore store, TimeProvider clock)
     {
@@ -137,8 +145,10 @@ public static class ShiftEndpoints
                 meta: new { expected, counted, diff = counted - expected, shortfall }, shiftId: shift.Id);
             var moves = totals.CashIn + totals.CashOut + totals.Payouts == 0 ? ""
                 : $", внесено {Webhooks.Sum(totals.CashIn)} / изъято {Webhooks.Sum(totals.CashOut)} / выдано гостям {Webhooks.Sum(totals.Payouts)}";
+            var bar = (totals.ShopByMethod?.Cash ?? 0) == 0 ? "" : $" (бар нал. {Webhooks.Sum(totals.ShopByMethod!.Cash)})";
+            var voids = totals.ShopVoidCount == 0 ? "" : $", аннулировано {totals.ShopVoidCount} на {Webhooks.Sum(totals.ShopVoids)}";
             await Webhooks.EnqueueAsync(c, tx, staff.ClubId, "shiftClosed", now,
-                $"{shift.StaffName}: сеансы {Webhooks.Sum(totals.Sessions)}, магазин {Webhooks.Sum(totals.Shop)}{moves}, касса {Webhooks.Sum(counted)} (ожидалось {Webhooks.Sum(expected)})",
+                $"{shift.StaffName}: сеансы {Webhooks.Sum(totals.Sessions)}, магазин {Webhooks.Sum(totals.Shop)}{bar}{voids}{moves}, касса {Webhooks.Sum(counted)} (ожидалось {Webhooks.Sum(expected)})",
                 new { shiftId = shift.Id });
             await ControlAlerts.ShiftClosedAsync(c, tx, staff, shift.StaffName, counted - expected, now);
             var closed = await c.QuerySingleAsync<ShiftRow>($"SELECT {ShiftRow.Columns} FROM shifts WHERE id = @Id", new { shift.Id }, tx);
@@ -257,7 +267,9 @@ public static class ShiftEndpoints
             var rows = (await c.QueryAsync<OperationRow>(
                 $"""
                 SELECT a.id, a.at, a.action, a.staff_id, a.staff_name, a.user_id, a.pc_id, a.amount, a.meta::text AS meta,
-                       u.display_name AS user_name, u.role AS user_role, p.name AS pc_name
+                       u.display_name AS user_name, u.role AS user_role, p.name AS pc_name,
+                       CASE WHEN a.action = 'shopSale'
+                            THEN EXISTS (SELECT 1 FROM shop_sales v WHERE v.void_of = (a.meta ->> 'saleId')::uuid) END AS voided
                 FROM audit_entries a LEFT JOIN users u ON u.id = a.user_id LEFT JOIN pcs p ON p.id = a.pc_id
                 WHERE a.club_id = @ClubId AND a.shift_id = @Id AND a.action = ANY(@actions)
                   AND NOT (a.action = 'topUp' AND coalesce((a.meta ->> 'forSession')::boolean, false))
@@ -282,7 +294,11 @@ public static class ShiftEndpoints
             items, next, await TodayAsync(c, staff.ClubId, now)));
     }
 
-    /// <summary>«Сегодня» of the feed: the club's ledger since local midnight — top-ups by method, cash payouts, time (charges − refunds) and the shop.</summary>
+    /// <summary>
+    /// «Сегодня» of the feed: the club's ledger since local midnight — top-ups by method, cash payouts, time (charges − refunds)
+    /// and the shop — plus the bar's method money net of today's voids (D-57): in <c>shopByMethod</c>, in <c>taken</c> (so the
+    /// desk's «Сегодня принято» has the walk-in bar money) and in <c>shop</c> (all goods, from the balance too).
+    /// </summary>
     private static async Task<AdminToday> TodayAsync(NpgsqlConnection c, Guid clubId, DateTimeOffset now)
     {
         var timeZone = await c.ExecuteScalarAsync<string>("SELECT time_zone FROM clubs WHERE id = @clubId", new { clubId }) ?? "Asia/Tashkent";
@@ -302,10 +318,13 @@ public static class ShiftEndpoints
             FROM ledger_entries WHERE club_id = @clubId AND created_at >= @from AND created_at <= @now
             """,
             new { clubId, from, now });
+        var bar = await c.QuerySingleAsync<ShopRow>(
+            $"SELECT {ShopRow.Sums} FROM shop_sales WHERE club_id = @clubId AND created_at >= @from AND created_at <= @now", new { clubId, from, now });
         var byMethod = new AdminTopUpByMethod(t.Cash, t.Card, t.Payme, t.Click, t.Uzum, t.Other);
         return new AdminToday(
-            today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), from, byMethod, t.Cash + t.Card + t.Payme + t.Click + t.Uzum + t.Other, t.Payouts,
-            t.Sessions, t.Shop);
+            today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), from, byMethod,
+            t.Cash + t.Card + t.Payme + t.Click + t.Uzum + t.Other + bar.MethodNet, t.Payouts, t.Sessions, t.Shop + bar.MethodNet,
+            new AdminTodayShopByMethod(bar.Cash, bar.Card, bar.Payme, bar.Click, bar.Uzum));
     }
 
     /// <summary>A feed cursor: base64url of <c>at|id</c> (the last item of a page), else <c>400 before format</c>.</summary>
@@ -376,9 +395,11 @@ public static class ShiftEndpoints
     /// <summary>
     /// X/Z report of a shift: its ledger rows by type and method (<c>topUp</c> cash vs other methods, and each method on its
     /// own; <c>method</c> is one of the five or NULL, M0002), the cash top-ups of the club API key (<c>apiCash</c>, no staff
-    /// member), the guests' cash payouts (<c>adjustment</c> rows with <c>method = cash</c>) and the drawer's movements.
+    /// member), the guests' cash payouts (<c>adjustment</c> rows with <c>method = cash</c>), the drawer's movements and the bar
+    /// (D-57): its sales and voids made in the shift by method, <c>shop</c> = balance sales net of their voids (the
+    /// <c>purchase</c> rows) + method sales net of theirs.
     /// </summary>
-    private static async Task<AdminShiftTotals> TotalsAsync(NpgsqlConnection c, NpgsqlTransaction? tx, Guid shiftId) =>
+    internal static async Task<AdminShiftTotals> TotalsAsync(NpgsqlConnection c, NpgsqlTransaction? tx, Guid shiftId) =>
         (await c.QuerySingleAsync<TotalsRow>(
             """
             SELECT coalesce(sum(amount) FILTER (WHERE type = 'topUp' AND method = 'cash'), 0)::bigint AS "Cash",
@@ -399,7 +420,15 @@ public static class ShiftEndpoints
             FROM ledger_entries WHERE shift_id = @shiftId
             """,
             new { shiftId },
-            tx)).ToWire();
+            tx)).ToWire(await c.QuerySingleAsync<ShopRow>($"SELECT {ShopRow.Sums} FROM shop_sales WHERE shift_id = @shiftId", new { shiftId }, tx));
+
+    /// <summary>What the open shift's drawer should hold now (<see cref="Expected"/>), in the caller's transaction.</summary>
+    internal static async Task<long> ExpectedCashAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid clubId)
+    {
+        var open = await c.QuerySingleOrDefaultAsync<OpenShiftLock?>(
+            "SELECT id AS \"Id\", opening_cash AS \"OpeningCash\" FROM shifts WHERE club_id = @clubId AND closed_at IS NULL", new { clubId }, tx);
+        return open is null ? 0 : Expected(open.OpeningCash, await TotalsAsync(c, tx, open.Id));
+    }
 
     public static string Principal(StaffContext staff) => "club:" + staff.ClubId.ToString("D", CultureInfo.InvariantCulture);
 
@@ -428,10 +457,41 @@ public static class ShiftEndpoints
 
         /// <summary>
         /// A Z report saved before the split by method: cash as it was, the rest as <c>other</c> (the counter sent no method
-        /// then, so it is all cash in practice). One saved before cash desk part 2 reads its drawer fields as 0.
+        /// then, so it is all cash in practice). One saved before cash desk part 2 reads its drawer fields as 0, one saved
+        /// before part 3 its bar fields (the kiosk shop never sold, so there was no bar money).
         /// </summary>
-        private static AdminShiftTotals Split(AdminShiftTotals z) =>
-            z.TopUpByMethod is null ? z with { TopUpByMethod = new(z.TopUpCash, 0, 0, 0, 0, z.TopUpOther) } : z;
+        private static AdminShiftTotals Split(AdminShiftTotals z)
+        {
+            var split = z.TopUpByMethod is null ? z with { TopUpByMethod = new(z.TopUpCash, 0, 0, 0, 0, z.TopUpOther) } : z;
+            return split.ShopByMethod is null ? split with { ShopByMethod = new(0, 0, 0, 0, 0, 0) } : split;
+        }
+    }
+
+    /// <summary>The bar's rows (<c>shop_sales</c>) summed by method, a void counting against its method; the voids apart.</summary>
+    private sealed class ShopRow
+    {
+        public const string Sums = """
+            coalesce(sum(CASE WHEN kind = 'sale' THEN total ELSE -total END) FILTER (WHERE method = 'cash'), 0)::bigint AS "Cash",
+            coalesce(sum(CASE WHEN kind = 'sale' THEN total ELSE -total END) FILTER (WHERE method = 'card'), 0)::bigint AS "Card",
+            coalesce(sum(CASE WHEN kind = 'sale' THEN total ELSE -total END) FILTER (WHERE method = 'payme'), 0)::bigint AS "Payme",
+            coalesce(sum(CASE WHEN kind = 'sale' THEN total ELSE -total END) FILTER (WHERE method = 'click'), 0)::bigint AS "Click",
+            coalesce(sum(CASE WHEN kind = 'sale' THEN total ELSE -total END) FILTER (WHERE method = 'uzum'), 0)::bigint AS "Uzum",
+            coalesce(sum(CASE WHEN kind = 'sale' THEN total ELSE -total END) FILTER (WHERE method = 'balance'), 0)::bigint AS "Balance",
+            coalesce(sum(total) FILTER (WHERE kind = 'void'), 0)::bigint AS "Voids",
+            (count(*) FILTER (WHERE kind = 'void'))::int AS "VoidCount"
+            """;
+
+        public long Cash { get; init; }
+        public long Card { get; init; }
+        public long Payme { get; init; }
+        public long Click { get; init; }
+        public long Uzum { get; init; }
+        public long Balance { get; init; }
+        public long Voids { get; init; }
+        public int VoidCount { get; init; }
+
+        /// <summary>The bar's money taken by a method (not from a balance), net of voids.</summary>
+        public long MethodNet => Cash + Card + Payme + Click + Uzum;
     }
 
     private sealed class TotalsRow
@@ -452,9 +512,9 @@ public static class ShiftEndpoints
         public long CashOut { get; init; }
         public int Count { get; init; }
 
-        public AdminShiftTotals ToWire() => new(
-            Cash, Card + Payme + Click + Uzum + Other, Sessions, Shop, Refunds, Bonuses, Count, new(Cash, Card, Payme, Click, Uzum, Other),
-            CashIn, CashOut, Payouts, ApiCash);
+        public AdminShiftTotals ToWire(ShopRow bar) => new(
+            Cash, Card + Payme + Click + Uzum + Other, Sessions, Shop + bar.MethodNet, Refunds, Bonuses, Count, new(Cash, Card, Payme, Click, Uzum, Other),
+            CashIn, CashOut, Payouts, ApiCash, new(bar.Cash, bar.Card, bar.Payme, bar.Click, bar.Uzum, bar.Balance), bar.Voids, bar.VoidCount);
     }
 
     private sealed class TodayRow
@@ -486,7 +546,13 @@ public static class ShiftEndpoints
         public string? UserRole { get; init; }
         public string? PcName { get; init; }
 
-        /// <summary>The kind, the payment merged from the meta, and the signed effect on the drawer (staff cash only).</summary>
+        /// <summary>A bar sale voided since (null for other rows).</summary>
+        public bool? Voided { get; init; }
+
+        /// <summary>
+        /// The kind, the payment merged from the meta, and the signed effect on the drawer (staff cash only). A bar sale's
+        /// method money is <c>paid</c> and its balance money <c>charged</c>; a void's method money given back is <c>paid</c>.
+        /// </summary>
         public AdminOperation ToWire()
         {
             using var doc = JsonDocument.Parse(Meta);
@@ -497,12 +563,15 @@ public static class ShiftEndpoints
             Guid? Uuid(string key) => Text(key) is { } s && Guid.TryParse(s, out var g) ? g : null;
 
             var kind = Action == "topUp" && Flag("debt") == true ? "debtPaid" : Action;
+            var shop = kind is "shopSale" or "shopVoid";
+            var method = shop ? Text("method") : null;
             AdminOperationPaid? paid = kind switch
             {
                 "topUp" or "debtPaid" => new AdminOperationPaid(Amount, Text("method") ?? "cash", Uuid("transactionId")),
                 "sessionOpen" or "sessionExtend" when Number("paidAmount") is { } paidAmount =>
                     new AdminOperationPaid(paidAmount, Text("paidMethod") ?? "cash", Uuid("transactionId")),
                 "payout" => new AdminOperationPaid(Amount, "cash", Uuid("transactionId")),
+                "shopSale" or "shopVoid" when method is not (null or "balance") => new AdminOperationPaid(Amount, method, null),
                 _ => null,
             };
             var byStaff = StaffId is not null;
@@ -511,8 +580,20 @@ public static class ShiftEndpoints
                 "topUp" or "debtPaid" or "sessionOpen" or "sessionExtend" => byStaff && paid is { Method: "cash" } ? paid.Amount : 0,
                 "cashIn" or "shiftOpen" => Amount,
                 "cashOut" or "payout" => -Amount,
+                "shopSale" => method == "cash" ? Amount : 0,
+                "shopVoid" => method == "cash" ? -Amount : 0,
                 _ => 0,
             };
+            List<AdminOperationLine>? lines = null;
+            if (shop && meta.TryGetProperty("lines", out var array) && array.ValueKind == JsonValueKind.Array)
+            {
+                lines = [.. array.EnumerateArray().Where(l => l.ValueKind == JsonValueKind.Object).Select(l => new AdminOperationLine(
+                    l.TryGetProperty("title", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString()! : "",
+                    l.TryGetProperty("qty", out var q) && q.TryGetInt32(out var qty) ? qty : 0,
+                    l.TryGetProperty("price", out var p) && p.TryGetInt64(out var price) ? price : 0))];
+            }
+
+            AdminOperationPc? fromPc = kind == "sessionMove" && Uuid("fromPcId") is { } fromPcId ? new AdminOperationPc(fromPcId, Text("fromPc") ?? "") : null;
             AdminOperationQuote? quote = meta.TryGetProperty("quote", out var q) && q.ValueKind == JsonValueKind.Object
                 && q.TryGetProperty("base", out var b) && b.TryGetInt64(out var @base)
                 ? new AdminOperationQuote(@base, q.TryGetProperty("dayPct", out var d) ? d.GetInt32() : 100, q.TryGetProperty("discountPct", out var p) ? p.GetInt32() : 0)
@@ -522,9 +603,13 @@ public static class ShiftEndpoints
                 UserId is { } userId && UserName is not null ? new AdminOperationClient(userId, UserName, UserRole ?? "member") : null,
                 PcId is { } pcId && PcName is not null ? new AdminOperationPc(pcId, PcName) : null,
                 Text("tariff"), Number("minutes") is { } minutes ? (int)minutes : null, Flag("prepaid"), Amount,
-                kind is "sessionOpen" or "sessionExtend" ? Amount : kind == "sessionEnd" ? Number("charged") : null,
+                kind is "sessionOpen" or "sessionExtend" ? Amount : kind == "sessionEnd" ? Number("charged") : kind == "shopSale" && method == "balance" ? Amount : null,
                 quote, paid, drawer, Text("reasonCode"), Text("note"), Uuid("sessionId"),
-                kind is "sessionOpen" or "sessionExtend" ? Flag("package") : null, Uuid("movementId"));
+                kind is "sessionOpen" or "sessionExtend" ? Flag("package") : null, Uuid("movementId"),
+                shop ? Uuid("saleId") : null, method, lines, kind == "shopSale" ? Voided ?? false : null,
+                kind == "shopVoid" && Text("saleAt") is { } saleAt && DateTimeOffset.TryParse(saleAt, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var voidOfAt)
+                    ? voidOfAt.ToUniversalTime() : null,
+                fromPc);
         }
     }
 }

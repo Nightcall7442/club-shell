@@ -33,6 +33,9 @@ export const OPERATION_KINDS = [
   'shiftOpen',
   'shiftClose',
   'promoRedeem',
+  'shopSale',
+  'shopVoid',
+  'sessionMove',
 ] as const;
 export type OperationKind = (typeof OPERATION_KINDS)[number];
 
@@ -58,6 +61,16 @@ export interface Operation {
   package: boolean | null;
   /** A cash move's own id (the № of its slip). */
   movementId: string | null;
+  /** Cash desk part 3 (D-68): the bar sale (of a void: the sale it voided), how it was paid, its lines. */
+  saleId?: string | null;
+  method?: string | null;
+  lines?: { title: string; qty: number; price: number }[] | null;
+  /** A sale that was voided since. */
+  voided?: boolean | null;
+  /** A void: when the sale was. */
+  voidOfAt?: string | null;
+  /** A move: the PC the session came from (`pc` is where it went). */
+  fromPc?: { id: string; name: string } | null;
 }
 
 /** The journal entry as a feed row; null for what the feed does not show. */
@@ -96,6 +109,20 @@ function toOperation(e: AuditEntry): Operation | null {
     // The opening float is the drawer's first money: a shift's rows add up to its expected cash.
     drawer = e.amount;
   }
+  let charged: number | null =
+    kind === 'sessionOpen' || kind === 'sessionExtend' ? e.amount : kind === 'sessionEnd' ? n('charged') : null;
+  const sale = kind === 'shopSale' || kind === 'shopVoid' ? db.shopSales.find((x) => x.id === s('saleId')) : undefined;
+  const method = s('method');
+  if (kind === 'shopSale') {
+    // A method sale's money as a payment; a balance sale is what the balance paid.
+    if (method && method !== 'balance') paid = { amount: e.amount, method, transactionId: null };
+    else charged = e.amount;
+    if (method === 'cash') drawer = e.amount;
+  } else if (kind === 'shopVoid') {
+    if (method && method !== 'balance') paid = { amount: e.amount, method, transactionId: null };
+    if (method === 'cash') drawer = -e.amount;
+  }
+  const from = kind === 'sessionMove' ? findPc(s('fromPcId') ?? '') : undefined;
   return {
     id: e.id,
     at: e.at,
@@ -107,8 +134,7 @@ function toOperation(e: AuditEntry): Operation | null {
     minutes: n('minutes'),
     prepaid: typeof m['prepaid'] === 'boolean' ? m['prepaid'] : null,
     amount: e.amount,
-    charged:
-      kind === 'sessionOpen' || kind === 'sessionExtend' ? e.amount : kind === 'sessionEnd' ? n('charged') : null,
+    charged,
     quote:
       isObject(q) && typeof q['base'] === 'number'
         ? { base: q['base'], dayPct: Number(q['dayPct'] ?? 100), discountPct: Number(q['discountPct'] ?? 0) }
@@ -121,6 +147,18 @@ function toOperation(e: AuditEntry): Operation | null {
     package:
       (kind === 'sessionOpen' || kind === 'sessionExtend') && typeof m['package'] === 'boolean' ? m['package'] : null,
     movementId: s('movementId'),
+    ...(kind === 'shopSale' || kind === 'shopVoid'
+      ? {
+          saleId: s('saleId'),
+          method,
+          lines: sale ? sale.lines.map((l) => ({ title: l.title, qty: l.qty, price: l.price })) : null,
+          voided: kind === 'shopSale' ? db.shopSales.some((x) => x.kind === 'void' && x.voidOf === s('saleId')) : null,
+          voidOfAt: kind === 'shopVoid' ? s('saleAt') : null,
+        }
+      : {}),
+    ...(kind === 'sessionMove'
+      ? { fromPc: from ? { id: from.id, name: from.name } : { id: s('fromPcId') ?? '', name: s('fromPc') ?? '' } }
+      : {}),
   };
 }
 
@@ -152,7 +190,11 @@ function offsetMs(at: Date): number {
   return local - Math.floor(at.getTime() / 1000) * 1000;
 }
 
-/** Money of the club's local day so far, by method, minus the cash given back to guests in the headline. */
+/**
+ * Money of the club's local day so far, by method, minus the cash given back to guests in the headline. `byMethod` is
+ * top-ups only; the bar's method sales net of their voids are `shopByMethod` and in `taken`; `shop` is the goods sold
+ * both ways (D-57).
+ */
 function today(): {
   date: string;
   from: string;
@@ -161,6 +203,7 @@ function today(): {
   payouts: number;
   sessions: number;
   shop: number;
+  shopByMethod: Record<PayMethod, number>;
 } {
   const at = new Date();
   const offset = offsetMs(at);
@@ -182,7 +225,15 @@ function today(): {
     else if (tx.type === 'charge' || tx.type === 'refund') sessions += -a;
     else if (tx.type === 'purchase') shop += -a;
   }
-  return { date, from, byMethod, taken, payouts, sessions, shop };
+  const shopByMethod: Record<PayMethod, number> = { cash: 0, card: 0, payme: 0, click: 0, uzum: 0 };
+  for (const sale of db.shopSales) {
+    if (sale.createdAt < from || sale.method === 'balance') continue;
+    const signed = sale.kind === 'sale' ? sale.total : -sale.total;
+    shopByMethod[sale.method] += signed;
+    taken += signed;
+    shop += signed;
+  }
+  return { date, from, byMethod, taken, payouts, sessions, shop, shopByMethod };
 }
 
 /**

@@ -247,8 +247,8 @@ export function authRoutes(app: FastifyInstance): void {
 
   /**
    * «Гость» on the kiosk. A walk-in guest the desk seated on this PC is signed in to that seat (D-24, D-25), even with
-   * kiosk guest login off; any other open session of the PC refuses it (`pcOccupied`, before an account is made);
-   * otherwise a new guest, as before.
+   * kiosk guest login off — and so is any guest's session the desk moved onto this PC (D-61); any other open session of
+   * the PC refuses it (`pcOccupied`, before an account is made); otherwise a new guest, as before.
    */
   app.post('/auth/guest', async (req) => {
     const pc = requireAgent(req);
@@ -259,7 +259,8 @@ export function authRoutes(app: FastifyInstance): void {
     const open = openSessionForPc(pc.id);
     if (open) {
       const owner = findUser(open.userId);
-      if (open.origin === 'cashier' && open.createdByStaffId && owner?.transient) {
+      const deskSeated = (open.origin === 'cashier' && open.createdByStaffId) || (open.moves?.length ?? 0) > 0;
+      if (deskSeated && owner?.transient) {
         if (locale) owner.locale = locale;
         markDirty();
         return authResponse(owner, pc);

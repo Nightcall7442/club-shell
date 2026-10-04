@@ -65,7 +65,7 @@ public enum RefreshOutcome
 }
 
 /// <summary>PC registry, agent credentials, heartbeats, telemetry and agent events (DESIGN §3.2, §4.2).</summary>
-public sealed class PcRepository(NpgsqlDataSource db)
+public sealed class PcRepository(NpgsqlDataSource db, ILogger<PcRepository> logger)
 {
     private const string Columns = """
         id, club_id, number, name, zone, hwid, ip_address, approved, maintenance, signing_secret, credentials_version,
@@ -255,8 +255,10 @@ public sealed class PcRepository(NpgsqlDataSource db)
 
     /// <summary>
     /// Telemetry batch (DESIGN §4.2): samples to <c>pc_metrics</c> (a repeated sample time is kept once), diagnostic
-    /// events — <c>callAdmin</c> included, it is the only channel of an admin call in v1 — to <c>telemetry_events</c>,
-    /// inventory to <c>pcs.hardware</c>. One transaction, two array inserts.
+    /// events to <c>telemetry_events</c>, inventory to <c>pcs.hardware</c>. One transaction, two array inserts. The admin calls
+    /// among the events — <c>callAdmin</c> the agent could not deliver by the route, «[user report]» texts — are copied to the
+    /// desk's inbox (D-62, <see cref="Support.AdminCalls"/>), each checked first and under its own savepoint: a bad one is
+    /// skipped and logged, and the batch's samples and inventory still commit.
     /// </summary>
     public async Task IngestTelemetryAsync(PcRow pc, TelemetryBatch batch, DateTimeOffset now)
     {
@@ -286,6 +288,25 @@ public sealed class PcRepository(NpgsqlDataSource db)
         if (batch.Hardware is { } hardware)
         {
             await c.ExecuteAsync("UPDATE pcs SET hardware = @hardware::jsonb WHERE id = @id", new { id = pc.Id, hardware = ServerJson.Jsonb(JsonDefaults.Serialize(hardware)) }, tx);
+        }
+
+        foreach (var call in Support.AdminCalls.FromTelemetry(pc, batch.Events, logger))
+        {
+            await c.ExecuteAsync("SAVEPOINT admin_calls", transaction: tx);
+            try
+            {
+                if (await Support.AdminCalls.InsertAsync(c, tx, pc, call, now) is null)
+                {
+                    logger.LogWarning("PC {PcId}: a problem report over the hourly cap was dropped", pc.Id);
+                }
+
+                await c.ExecuteAsync("RELEASE SAVEPOINT admin_calls", transaction: tx);
+            }
+            catch (NpgsqlException ex)
+            {
+                await c.ExecuteAsync("ROLLBACK TO SAVEPOINT admin_calls", transaction: tx);
+                logger.LogWarning(ex, "PC {PcId}: an admin call from telemetry could not be stored", pc.Id);
+            }
         }
 
         await tx.CommitAsync();

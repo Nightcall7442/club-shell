@@ -30,13 +30,17 @@ internal static class Guests
 
     /// <summary>
     /// The guest whose session the desk opened on <paramref name="pcId"/> and that is still open: <c>origin = 'cashier'</c>,
-    /// a staff member opened it and the account is transient (D-25). A kiosk guest's session, or a member's, is not one.
+    /// a staff member opened it and the account is transient (D-25) — or a transient guest's session (a kiosk guest's too)
+    /// that the desk moved onto this PC (D-61: a <c>staff</c>/<c>moved</c> event), so «Гость» signs in there. A kiosk guest's
+    /// session where it was started, or a member's, is not one.
     /// </summary>
     public static Task<Guid?> DeskGuestOfPcAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid pcId) =>
         c.QuerySingleOrDefaultAsync<Guid?>(
             """
             SELECT s.user_id FROM sessions s JOIN users u ON u.id = s.user_id
-            WHERE s.pc_id = @pcId AND s.state <> 'ended' AND s.origin = 'cashier' AND s.created_by_staff_id IS NOT NULL AND u.transient
+            WHERE s.pc_id = @pcId AND s.state <> 'ended' AND u.transient
+              AND ((s.origin = 'cashier' AND s.created_by_staff_id IS NOT NULL)
+                   OR EXISTS (SELECT 1 FROM session_events e WHERE e.session_id = s.id AND e.source = 'staff' AND e.type = 'moved'))
             """,
             new { pcId },
             tx);

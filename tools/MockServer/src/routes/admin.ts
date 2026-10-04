@@ -20,13 +20,14 @@
  * refund given back in cash (`/admin/wallet/payout`), never more than the guest paid in cash and got back.
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import type { Money, Session, Tariff, Transaction } from '@clubshell/contracts';
+import type { CommandAck, Money, Session, Tariff, Transaction } from '@clubshell/contracts';
 import {
   ApiError,
   applyTransaction,
   balanceOf,
   body,
   db,
+  endedView,
   errors,
   findPc,
   findSession,
@@ -35,6 +36,7 @@ import {
   idempotent,
   int,
   isObject,
+  markDirty,
   now,
   openSessionForPc,
   openSessionForUser,
@@ -43,6 +45,7 @@ import {
   othersSignedInOn,
   publicPc,
   revokeUserTokens,
+  settleStatus,
   signedInOn,
   str,
   uuid,
@@ -77,7 +80,8 @@ import {
 } from '../club.js';
 import { record } from '../control.js';
 import { openTicketMarks } from '../health.js';
-import { broadcast, pushToPc, pushToUser, sendCommand } from '../ws.js';
+import { broadcast, isConnected, pendingCommands, pushToPc, pushToUser, sendCommand } from '../ws.js';
+import { callView, liveCalls, moveCalls } from '../calls.js';
 
 const STAFF_NAME = 'Администратор';
 
@@ -257,8 +261,7 @@ function seat(o: {
     purchases: prepaid ? [{ paid: cost.amount, sec: mins * 60, pkg: tariff.isPackage }] : [],
   };
   db.sessions.push(rec);
-  pc.status = 'busy';
-  pc.currentSessionId = id;
+  settleStatus(pc);
   // Whoever was signed in on this PC must not get this session under their name (D-29).
   for (const other of othersSignedInOn(pc.id, user.id)) {
     revokeUserTokens(other, pc.id);
@@ -266,7 +269,7 @@ function seat(o: {
   }
   const session = viewSession(rec);
   pushToPc(pc.id, 'sessionUpdated', session);
-  broadcast('pcStatusChanged', { pcId: pc.id, status: 'busy' });
+  broadcast('pcStatusChanged', { pcId: pc.id, status: pc.status });
   pushToUser(user.id, 'walletUpdated', balanceOf(user));
   clubHooks.sessionOpened(rec);
   record(staff, 'sessionOpen', {
@@ -393,6 +396,8 @@ export function adminRoutes(app: FastifyInstance): void {
       repairs: openTicketMarks(),
       guestDebts: debts,
       guestRefunds: refunds,
+      // Cash desk part 3: the players' calls the desk has not closed (D-63).
+      calls: liveCalls(),
     };
   });
 
@@ -553,34 +558,17 @@ export function adminRoutes(app: FastifyInstance): void {
   /**
    * Ends a session from the counter; unused prepaid time is refunded by `endSession`, postpaid charged. The player is
    * signed out of that PC whatever the role (D-28). The answer adds the settled balance (negative — a debt), whose it is
-   * and, for a walk-in guest, the cash that may go back now (`payable`).
+   * and, for a walk-in guest, the cash that may go back now (`payable`). A session that moved to another PC than the one
+   * named is refused (409 `sessionMoved`): the desk reads the map again.
    */
   app.post('/admin/sessions/end', async (req, reply) => {
     const staff = requireAdmin(req);
     return idempotent(req, reply, async () => {
       const b = body(req);
       const rec = targetSession(b);
-      const sessionMinutes = Math.floor((Date.now() - Date.parse(rec.startedAt)) / 60_000);
-      const result = endSession(rec, 'admin');
-      const user = findUser(rec.userId);
-      if (user) {
-        revokeUserTokens(user.id, rec.pcId);
-        pushToPc(rec.pcId, 'userRevoked', { userId: user.id, reason: 'sessionEnded' });
-      }
-      const guest = user?.transient ?? false;
-      record(staff, 'sessionEnd', {
-        userId: rec.userId,
-        pcId: rec.pcId,
-        amount: result.refunded?.amount ?? 0,
-        detail: `${user?.displayName ?? rec.userId} · ${findPc(rec.pcId)?.name ?? rec.pcId}`,
-        meta: {
-          sessionMinutes,
-          sessionId: rec.id,
-          charged: result.charged.amount,
-          prepaid: rec.isPrepaid,
-          guest,
-        },
-      });
+      const pcId = optStr(b, 'pcId', 64);
+      if (pcId && rec.pcId !== pcId) throw errors.conflict('sessionMoved');
+      const { result, user, guest } = deskEnd(staff, rec);
       return {
         status: 200,
         body: {
@@ -594,6 +582,129 @@ export function adminRoutes(app: FastifyInstance): void {
         },
       };
     });
+  });
+
+  /**
+   * Moves an open session to another PC (beyond the contract, D-59..D-61): time and money carry over, nothing is
+   * booked. `fromPcId` is the PC the desk sees it on — a retry after the move, or a stale map, is 409 `sessionMoved`.
+   * The target must be live, not in maintenance (403), not offline, free (`pcBusy`) and hold no session of its own the
+   * server does not know (`targetHasLocalSession`: an outbox not empty, or an unknown `currentSessionId` in its last
+   * heartbeat). Prepaid keeps its tariff while it is sold in the target's zone, else the desk names an hourly one sold
+   * there (409 `tariffZone {zone}`); postpaid keeps its price. Paused resumes, locked runs again. The target's other
+   * sign-ins go (`seatTaken`), the player's sign-in on the old PC goes; the old PC is told the session ended there (the
+   * «ended view») and `userRevoked {seatMoved}`.
+   */
+  app.post('/admin/sessions/move', async (req, reply) => {
+    const staff = requireAdmin(req);
+    if (isApiKey(req)) throw errors.forbidden('staffOnly');
+    return idempotent(
+      req,
+      reply,
+      async () => {
+        const b = body(req);
+        const fromPcId = uuidOf(b['fromPcId'], 'fromPcId', true) as string;
+        const toPcId = uuidOf(b['toPcId'], 'toPcId', true) as string;
+        if (fromPcId === toPcId) throw errors.validation('toPcId', 'same');
+        const sessionId = uuidOf(b['sessionId'], 'sessionId', false);
+        const tariffId = uuidOf(b['tariffId'], 'tariffId', false);
+        const from = findPc(fromPcId);
+        const to = findPc(toPcId);
+        if (!from || !to) throw errors.notFound('pc');
+        let rec: SessionRecord | undefined;
+        if (sessionId) {
+          rec = findSession(sessionId);
+          if (!rec) throw errors.notFound('session');
+        } else {
+          rec = openSessionForPc(from.id);
+        }
+        if (!rec || rec.pcId !== from.id || rec.state === 'ended' || rec.state === 'idle')
+          throw errors.conflict('sessionMoved');
+        if (rec.state === 'ending') throw errors.conflict('sessionEnding');
+        if (to.status === 'maintenance') throw errors.policyDenied('pcMaintenance');
+        if (to.status === 'offline') throw errors.conflict('targetOffline');
+        if (openSessionForPc(to.id)) throw errors.conflict('pcBusy', { pcId: to.id });
+        // As the server: a session the server knows by its id or by the PC's own id of it is not the PC's own.
+        const reported = to.reportedSessionId ?? null;
+        const known = (id: string): boolean =>
+          findSession(id) !== undefined || db.sessions.some((s) => s.clientSessionId === id);
+        if ((to.offlineQueue ?? 0) > 0 || (reported && !known(reported)))
+          throw errors.conflict('targetHasLocalSession');
+        const user = findUser(rec.userId);
+        if (!user) throw errors.notFound('user');
+        const current = findTariff(rec.tariffId);
+        const soldIn = (t: Tariff): boolean =>
+          t.zones.length === 0 || t.zones.some((z) => z.toLowerCase() === to.zone.toLowerCase());
+        let next = current;
+        if (tariffId) {
+          if (!rec.isPrepaid) throw errors.validation('tariffId', 'postpaid');
+          next = findTariff(tariffId);
+          if (!next) throw errors.notFound('tariff');
+          if (next.isPackage) throw errors.validation('tariffId', 'package');
+          // Its zones and its time windows, as the quote and the server judge it (403 tariffZone | tariffTime).
+          const rule = tariffRule(next, to.zone);
+          if (rule) throw errors.policyDenied(rule);
+        } else if (rec.isPrepaid && current && !soldIn(current)) {
+          throw errors.conflict('tariffZone', { zone: to.zone });
+        }
+        if (rec.state === 'paused' && !rec.isPrepaid && current) checkPostpaid(user, current, to.zone);
+
+        const at = now();
+        const tariffFrom = current?.name ?? null;
+        if (rec.state === 'paused') {
+          rec.runningSince = at;
+          rec.pausedAt = null;
+        }
+        if (rec.state === 'paused' || rec.state === 'locked') rec.state = 'active';
+        const tariffChanged = next !== undefined && next.id !== rec.tariffId;
+        if (next) rec.tariffId = next.id;
+        rec.pcId = to.id;
+        rec.moves = [...(rec.moves ?? []), { fromPcId: from.id, toPcId: to.id, at, staffId: staff.id }];
+        markDirty();
+        settleStatus(from);
+        settleStatus(to);
+        // Whoever was signed in on the target must not get this session under their name (D-29); the player signs in
+        // on the target, and the sign-in on the old PC goes.
+        for (const other of othersSignedInOn(to.id, user.id)) {
+          revokeUserTokens(other, to.id);
+          pushToPc(to.id, 'userRevoked', { userId: other, reason: 'seatTaken' });
+        }
+        revokeUserTokens(user.id, from.id);
+        const session = viewSession(rec);
+        pushToPc(to.id, 'sessionUpdated', session);
+        pushToPc(from.id, 'sessionUpdated', endedView(rec, from.id));
+        pushToPc(from.id, 'userRevoked', { userId: user.id, reason: 'seatMoved' });
+        broadcast('pcStatusChanged', { pcId: from.id, status: from.status });
+        broadcast('pcStatusChanged', { pcId: to.id, status: to.status });
+        record(staff, 'sessionMove', {
+          userId: user.id,
+          pcId: to.id,
+          detail: `${from.name} → ${to.name}`,
+          meta: {
+            sessionId: rec.id,
+            fromPcId: from.id,
+            fromPc: from.name,
+            toPcId: to.id,
+            toPc: to.name,
+            tariffFrom,
+            tariffTo: next?.name ?? null,
+            prepaid: rec.isPrepaid,
+            secondsLeft: session.secondsLeft,
+          },
+        });
+        return {
+          status: 200,
+          body: {
+            session,
+            from: { pcId: from.id, name: from.name },
+            to: { pcId: to.id, name: to.name },
+            tariffChanged,
+            user: { id: user.id, displayName: user.displayName, role: user.role },
+            signedIn: false,
+          },
+        };
+      },
+      { keyRequired: true, strictBody: true },
+    );
   });
 
   /**
@@ -706,4 +817,256 @@ export function adminRoutes(app: FastifyInstance): void {
         throw errors.validation('kind', 'unknown');
     }
   });
+
+  /**
+   * «Иду» (beyond the contract, D-63): this call and every older open call of its PC are answered. With `notify` (the
+   * default) a PC on its socket gets the `message` «Администратор идёт к вам» in the caller's language, for two minutes,
+   * no ack asked; an offline one is not told (`notified` false), so the next player never sees it. Answering an
+   * answered or closed call changes and sends nothing (`notified` null).
+   */
+  app.post<{ Params: { id: string } }>('/admin/calls/:id/ack', async (req) => {
+    const staff = requireAdmin(req);
+    const call = db.calls.find((c) => c.id === req.params.id);
+    if (!call) throw errors.notFound('call');
+    const b = isObject(req.body) ? req.body : {};
+    const notify = optBool(b, 'notify') ?? true;
+    // null — this request answered nothing (someone else did): not the same as «the PC is offline».
+    let notified: boolean | null = null;
+    if (call.status === 'open' && moveCalls(call, 'acked', staff.name)) {
+      notified = false;
+      record(staff, 'callAck', {
+        userId: call.userId,
+        pcId: call.pcId,
+        detail: call.pcName,
+        meta: { callId: call.id, category: call.category },
+      });
+      if (notify && isConnected(call.pcId)) {
+        const locale = (call.userId ? findUser(call.userId)?.locale : null) ?? 'ru';
+        void sendCommand(
+          call.pcId,
+          'message',
+          {
+            id: uuid(),
+            from: STAFF_NAME,
+            text: ON_THE_WAY[locale] ?? (ON_THE_WAY['ru'] as string),
+            level: 'info',
+            requiresAck: false,
+          },
+          { expiresInSec: 120, issuedBy: staff.name },
+        );
+        notified = true;
+      }
+    }
+    return { call: callView(call), notified };
+  });
+
+  /** «Закрыть»: this call and every older call of its PC not yet closed. */
+  app.post<{ Params: { id: string } }>('/admin/calls/:id/resolve', async (req) => {
+    const staff = requireAdmin(req);
+    const call = db.calls.find((c) => c.id === req.params.id);
+    if (!call) throw errors.notFound('call');
+    if (moveCalls(call, 'resolved', staff.name)) {
+      record(staff, 'callResolve', {
+        userId: call.userId,
+        pcId: call.pcId,
+        detail: call.pcName,
+        meta: { callId: call.id, category: call.category },
+      });
+    }
+    return { call: callView(call) };
+  });
+
+  /**
+   * One command to several PCs (beyond the contract, D-65), each PC on its own: offline PCs are skipped for lock, reboot
+   * and shutdown (a queued one would hit the next player); a busy PC is skipped for reboot and shutdown unless
+   * `includeBusy`, which ends its session through the desk end first (journal, refund, sign-out) — with `sessionIds`
+   * only the sessions the desk's confirm listed (another one is skipped `sessionOpen`). Every PC gets a
+   * `pcCommand` entry with the batch. Results per PC: done (acked), queued (not connected), noAnswer (no ack in time),
+   * failed, skipped (`sessionOpen` | `offline` | `notFound`). A replay answers the results as they were before the acks
+   * (sent commands read `queued`).
+   */
+  app.post('/admin/pcs/commands', async (req, reply) => {
+    const staff = requireAdmin(req);
+    return idempotent(
+      req,
+      reply,
+      async () => {
+        const b = body(req);
+        const raw = b['pcIds'];
+        if (!Array.isArray(raw) || raw.length === 0) throw errors.validation('pcIds', 'required');
+        if (raw.length > 100) throw errors.validation('pcIds', 'max');
+        const pcIds = raw.map((v, i) => uuidOf(v, `pcIds[${i}]`, true) as string);
+        if (new Set(pcIds).size !== pcIds.length) throw errors.validation('pcIds', 'duplicate');
+        const kind = b['kind'];
+        if (typeof kind !== 'string' || !(BULK_KINDS as readonly string[]).includes(kind))
+          throw errors.validation('kind', 'unknown');
+        const text = optStr(b, 'text', 10_000)?.trim() || null;
+        if (text && text.length > 500) throw errors.validation('text', 'max');
+        if (kind === 'message' && !text) throw errors.validation('text', 'required');
+        const level = b['level'] ?? 'info';
+        if (level !== 'info' && level !== 'warning') throw errors.validation('level', 'enum');
+        const includeBusy = optBool(b, 'includeBusy') ?? false;
+        if (includeBusy && kind !== 'reboot' && kind !== 'shutdown') throw errors.validation('includeBusy', 'kind');
+        // The sessions the desk's confirm listed: only those are ended (a player who sat down after it is skipped).
+        const rawSessions = b['sessionIds'];
+        let endable: Set<string> | null = null;
+        if (rawSessions !== undefined && rawSessions !== null) {
+          if (!Array.isArray(rawSessions)) throw errors.validation('sessionIds', 'format');
+          if (!includeBusy) throw errors.validation('sessionIds', 'includeBusy');
+          if (rawSessions.length > 100) throw errors.validation('sessionIds', 'max');
+          endable = new Set(rawSessions.map((v, i) => uuidOf(v, `sessionIds[${i}]`, true) as string));
+        }
+        const batchId = uuid();
+        const results: BulkResult[] = [];
+        const sent: { row: BulkResult; ack: Promise<CommandAck> }[] = [];
+        for (const pcId of pcIds) {
+          const pc = findPc(pcId);
+          if (!pc) {
+            results.push({ pcId, pcName: null, outcome: 'skipped', skipped: 'notFound', ack: null, ended: null });
+            continue;
+          }
+          const row: BulkResult = { pcId, pcName: pc.name, outcome: 'queued', skipped: null, ack: null, ended: null };
+          results.push(row);
+          const power = kind === 'reboot' || kind === 'shutdown';
+          if ((power || kind === 'lock') && pc.status === 'offline') {
+            row.outcome = 'skipped';
+            row.skipped = 'offline';
+            continue;
+          }
+          const open = openSessionForPc(pc.id);
+          if (power && open) {
+            if (!includeBusy || (endable && !endable.has(open.id))) {
+              row.outcome = 'skipped';
+              row.skipped = 'sessionOpen';
+              continue;
+            }
+            const { result, user } = deskEnd(staff, open);
+            row.ended = {
+              sessionId: open.id,
+              // As the server: never null (a session always has its player).
+              user: user
+                ? { id: user.id, displayName: user.displayName, role: user.role }
+                : { id: open.userId, displayName: '', role: 'member' },
+              charged: result.charged,
+              refunded: result.refunded,
+            };
+          }
+          const supersedes =
+            kind === 'unlock'
+              ? (pendingCommands(pc.id).find((c) => c.envelope.name === 'lock')?.envelope.id ?? null)
+              : null;
+          record(staff, 'pcCommand', { pcId: pc.id, detail: `${pc.name} · ${kind}`, meta: { kind, batchId } });
+          sent.push({ row, ack: sendBulk(pc.id, kind as BulkKind, text, level, supersedes) });
+        }
+        // What a replay answers: before the acks, every sent command still queued.
+        const stored = { batchId, results: results.map((r) => ({ ...r })) };
+        const acks = await Promise.all(sent.map((x) => x.ack));
+        sent.forEach(({ row }, i) => {
+          const a = acks[i] as CommandAck;
+          row.outcome = a.ok
+            ? 'done'
+            : a.error?.code === 'agentOffline'
+              ? 'queued'
+              : a.error?.code === 'timeout'
+                ? 'noAnswer'
+                : 'failed';
+          // A PC not connected answered nothing: the server sends no ack for it.
+          row.ack = row.outcome === 'queued' ? null : a;
+        });
+        return { status: 200, body: { batchId, results }, stored };
+      },
+      { keyRequired: true, strictBody: true },
+    );
+  });
+}
+
+const BULK_KINDS = ['message', 'lock', 'unlock', 'reboot', 'shutdown'] as const;
+type BulkKind = (typeof BULK_KINDS)[number];
+
+interface BulkResult {
+  pcId: string;
+  pcName: string | null;
+  outcome: 'done' | 'queued' | 'noAnswer' | 'failed' | 'skipped';
+  skipped: 'sessionOpen' | 'offline' | 'notFound' | null;
+  ack: CommandAck | null;
+  ended: {
+    sessionId: string;
+    user: { id: string; displayName: string; role: string };
+    charged: Money;
+    refunded: Money;
+  } | null;
+}
+
+/** «Администратор идёт к вам» in the player's language. */
+const ON_THE_WAY: Record<string, string> = {
+  ru: 'Администратор идёт к вам',
+  uz: 'Administrator yoningizga kelmoqda',
+  en: 'An administrator is on the way',
+};
+
+/** The command of a bulk action, built as the single-PC route builds it; their acks are awaited together. */
+function sendBulk(
+  pcId: string,
+  kind: BulkKind,
+  text: string | null,
+  level: 'info' | 'warning',
+  supersedes: string | null,
+): Promise<CommandAck> {
+  switch (kind) {
+    case 'message':
+      return sendCommand(pcId, 'message', { id: uuid(), from: STAFF_NAME, text: text ?? '', level, requiresAck: true });
+    case 'lock':
+      return sendCommand(pcId, 'lock', { reason: 'staff', message: text });
+    case 'unlock':
+      return sendCommand(pcId, 'unlock', null, { supersedes });
+    case 'reboot':
+      return sendCommand(pcId, 'reboot', { delaySec: 5, force: false, message: text });
+    case 'shutdown':
+      return sendCommand(pcId, 'shutdown', { delaySec: 5, force: false, message: text });
+  }
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A UUID field of a desk body: missing → `required` (when it must be there), not a UUID → `format`. */
+function uuidOf(v: unknown, field: string, required: boolean): string | null {
+  if (v === undefined || v === null || v === '') {
+    if (required) throw errors.validation(field, 'required');
+    return null;
+  }
+  if (typeof v !== 'string' || !UUID.test(v)) throw errors.validation(field, 'format');
+  return v.toLowerCase();
+}
+
+/**
+ * The desk end of a session (the body of `/admin/sessions/end`, shared with bulk power commands, D-65): settled with
+ * reason `admin` (unused prepaid time back to the balance, postpaid charged), the player signed out of the PC, the
+ * `sessionEnd` journal entry.
+ */
+function deskEnd(
+  staff: StaffRecord,
+  rec: SessionRecord,
+): { result: ReturnType<typeof endSession>; user: UserRecord | undefined; guest: boolean } {
+  const sessionMinutes = Math.floor((Date.now() - Date.parse(rec.startedAt)) / 60_000);
+  const result = endSession(rec, 'admin');
+  const user = findUser(rec.userId);
+  if (user) {
+    revokeUserTokens(user.id, rec.pcId);
+    pushToPc(rec.pcId, 'userRevoked', { userId: user.id, reason: 'sessionEnded' });
+  }
+  const guest = user?.transient ?? false;
+  record(staff, 'sessionEnd', {
+    userId: rec.userId,
+    pcId: rec.pcId,
+    amount: result.refunded?.amount ?? 0,
+    detail: `${user?.displayName ?? rec.userId} · ${findPc(rec.pcId)?.name ?? rec.pcId}`,
+    meta: {
+      sessionMinutes,
+      sessionId: rec.id,
+      charged: result.charged.amount,
+      prepaid: rec.isPrepaid,
+      guest,
+    },
+  });
+  return { result, user, guest };
 }

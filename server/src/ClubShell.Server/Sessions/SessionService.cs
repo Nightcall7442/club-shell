@@ -171,9 +171,16 @@ public sealed class SessionEffects
 
     /// <summary>
     /// Players signed out of a PC after the session pushes and commands (<c>sessionEnded</c>: a desk end, a guest's time-up,
-    /// D-28 — the agent then ends nothing more and drops the player, so the kiosk does not start anything on their balance).
+    /// D-28 — the agent then ends nothing more and drops the player, so the kiosk does not start anything on their balance;
+    /// <c>seatMoved</c>: the desk moved the session to another PC, D-61).
     /// </summary>
     public List<(Guid UserId, Guid PcId, string Reason)> RevokedAfter { get; } = [];
+
+    /// <summary>
+    /// Sessions the desk moved off a PC (D-61): the «ended view» (<see cref="SessionService.EndedView"/>, <c>pcId</c> = the old
+    /// PC) is pushed to the old PC right after the sessions, so its agent closes the session without charging anything.
+    /// </summary>
+    public List<Session> Departed { get; } = [];
 }
 
 /// <summary>The club facts every rule needs.</summary>
@@ -458,19 +465,129 @@ public sealed class SessionService(
                 throw NotActive(s.ToWire(now));
             }
 
-            var role = s.IsPrepaid ? "" : await c.ExecuteScalarAsync<string>("SELECT role FROM users WHERE id = @UserId", new { s.UserId }, tx) ?? "";
-            if (!s.IsPrepaid && PostpaidLimit(role, (await ClubAsync(c, tx, s.ClubId)).Pricing) is { } limit)
-            {
-                var balance = await c.ExecuteScalarAsync<long>("SELECT main_balance FROM wallets WHERE user_id = @UserId", new { s.UserId }, tx);
-                var next = Pricing.Frozen(s.PricePerHourSnapshot, s.UsedBeforeSec + 1, s.DayPct, s.DiscountPct);
-                if (next > balance + limit)
-                {
-                    throw InsufficientFunds(next, balance);
-                }
-            }
-
+            await EnsureResumableAsync(c, tx, s);
             s.Resume(now);
             return await CommitAsync(c, tx, s, now, new SessionEffects());
+        }
+    }
+
+    /// <summary>A paused postpaid session resumes only if its next second is affordable within balance + limit (else 402, as the tick would stop it).</summary>
+    private async Task EnsureResumableAsync(NpgsqlConnection c, NpgsqlTransaction tx, SessionRow s)
+    {
+        var role = s.IsPrepaid ? "" : await c.ExecuteScalarAsync<string>("SELECT role FROM users WHERE id = @UserId", new { s.UserId }, tx) ?? "";
+        if (!s.IsPrepaid && PostpaidLimit(role, (await ClubAsync(c, tx, s.ClubId)).Pricing) is { } limit)
+        {
+            var balance = await c.ExecuteScalarAsync<long>("SELECT main_balance FROM wallets WHERE user_id = @UserId", new { s.UserId }, tx);
+            var next = Pricing.Frozen(s.PricePerHourSnapshot, s.UsedBeforeSec + 1, s.DayPct, s.DiscountPct);
+            if (next > balance + limit)
+            {
+                throw InsufficientFunds(next, balance);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The desk moves a locked open session to <paramref name="target"/> (D-59, D-60), in the caller's transaction, which
+    /// holds both PCs' advisory locks: <c>sessions.pc_id</c> is re-pointed and nothing else of the money changes — bought and
+    /// used time, the running clock, the charges and the warnings are kept, no ledger row is written. A locked session runs
+    /// on as active, a paused one is resumed (a postpaid one only if its next second is affordable, else 402); the tariff
+    /// changes only when <paramref name="tariff"/> is given (future extends use it). A <c>staff</c>/<c>moved</c> event records
+    /// where it came from (the old PC's late calls and the guest sign-in read it, D-61). A session opened on the target in
+    /// the same instant (a kiosk create takes no PC lock) wins: <c>409 pcBusy</c>. Returns the session as it is now.
+    /// </summary>
+    public async Task<SessionRow> MoveAsync(
+        NpgsqlConnection c, NpgsqlTransaction tx, SessionRow s, PcRow target, TariffRow? tariff, DateTimeOffset now, StaffContext staff)
+    {
+        var from = s.PcId;
+        var used = s.Used(now);
+        if (s.State == "paused")
+        {
+            await EnsureResumableAsync(c, tx, s);
+            s.Resume(now);
+        }
+        else if (s.State == "locked")
+        {
+            s.State = "active";
+        }
+
+        s.LastTransitionAt = now;
+        if (tariff is not null)
+        {
+            s.TariffId = tariff.Id;
+        }
+
+        await c.ExecuteAsync("SAVEPOINT move_session", transaction: tx);
+        try
+        {
+            await c.ExecuteAsync(
+                """
+                UPDATE sessions SET pc_id = @pcId, state = @State, running_since = @RunningSince, paused_at = @PausedAt, ends_at = @EndsAt,
+                                    last_transition_at = @LastTransitionAt, tariff_id = @TariffId, updated_at = @now
+                WHERE id = @Id
+                """,
+                new { pcId = target.Id, s.State, s.RunningSince, s.PausedAt, s.EndsAt, s.LastTransitionAt, s.TariffId, now, s.Id }, tx);
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation && ex.ConstraintName == "sessions_open_pc")
+        {
+            await c.ExecuteAsync("ROLLBACK TO SAVEPOINT move_session", transaction: tx);
+            throw PcBusy(target.Id);
+        }
+
+        await c.ExecuteAsync(
+            """
+            INSERT INTO session_events (session_id, club_id, source, type, at, received_at, data, applied)
+            VALUES (@Id, @ClubId, 'staff', 'moved', @now, @now, @data::jsonb, true)
+            """,
+            new { s.Id, s.ClubId, now, data = JsonSerializer.Serialize(new { fromPcId = from, toPcId = target.Id, staffId = staff.WireId, secondsUsed = used }, ServerJson.Options) },
+            tx);
+        return (await LockAsync(c, tx, s.Id))!;
+    }
+
+    /// <summary><c>409 conflict pcBusy {pcId}</c>: the target PC holds an open session.</summary>
+    public static ApiException PcBusy(Guid pcId) =>
+        new(StatusCodes.Status409Conflict, ErrorCode.Conflict, "Conflict: pcBusy", new { reason = "pcBusy", pcId });
+
+    /// <summary>
+    /// When the desk moved session <paramref name="sessionId"/> off <paramref name="pcId"/> (its latest such move) and the
+    /// seconds used then, or null: the old PC's late <c>/end</c> and <c>/events</c> are answered from it (D-61).
+    /// </summary>
+    public static Task<(DateTimeOffset At, int SecondsUsed)?> MovedOffAsync(NpgsqlConnection c, NpgsqlTransaction? tx, Guid sessionId, Guid pcId) =>
+        c.QuerySingleOrDefaultAsync<(DateTimeOffset At, int SecondsUsed)?>(
+            """
+            SELECT at, coalesce((data ->> 'secondsUsed')::int, 0) FROM session_events
+            WHERE session_id = @sessionId AND source = 'staff' AND type = 'moved' AND data ->> 'fromPcId' = @pc
+            ORDER BY at DESC, id DESC LIMIT 1
+            """,
+            new { sessionId, pc = pcId.ToString("D", System.Globalization.CultureInfo.InvariantCulture) }, tx);
+
+    /// <summary>
+    /// The «ended view» of a moved session for its old PC (D-61): the same id, <c>pcId</c> = the old PC, <c>ended</c> at the
+    /// move with nothing charged — the agent closes its local session cleanly (a push, or the 409 of its own <c>/end</c>).
+    /// </summary>
+    public static Session EndedView(SessionRow s, Guid pcId, DateTimeOffset movedAt, int secondsUsed) => new(
+        s.Id, s.UserId, pcId, SessionState.Ended, s.StartedAt, movedAt, null, s.TariffId, 0, secondsUsed, Money.Uzs(0), s.IsPrepaid, s.WarningsSent);
+
+    /// <summary>
+    /// Events of the old PC of a moved session (D-61): recorded as the agent's (<c>applied = false</c>, a repeat skipped) and
+    /// never applied — an old <c>ended</c> must not close the session on its new PC.
+    /// </summary>
+    public async Task RecordUnappliedAsync(NpgsqlConnection c, NpgsqlTransaction tx, SessionRow s, IEnumerable<SessionEvent> events)
+    {
+        var now = clock.GetUtcNow();
+        foreach (var e in events)
+        {
+            await c.ExecuteAsync(
+                """
+                INSERT INTO session_events (session_id, club_id, source, type, at, received_at, data, applied)
+                VALUES (@Id, @ClubId, 'agent', @type, @at, @now, @data::jsonb, false)
+                ON CONFLICT (session_id, type, at) WHERE source = 'agent' DO NOTHING
+                """,
+                new
+                {
+                    s.Id, s.ClubId, type = JsonNamingPolicy.CamelCase.ConvertName(e.Type.ToString()), at = e.At.AddTicks(-(e.At.UtcTicks % TimeSpan.TicksPerMillisecond)),
+                    now, data = e.Data is { } d ? ServerJson.Jsonb(d.GetRawText()) : null,
+                },
+                tx);
         }
     }
 
@@ -541,7 +658,9 @@ public sealed class SessionService(
 
     /// <summary>
     /// <c>POST /sessions/{id}/end</c> (§5.7): settled at the server's now. The agent's <c>secondsUsed</c>/<c>endedAt</c>
-    /// are kept in <c>agent_reported</c> for audit only. An ended session is <c>409 sessionNotActive</c> + <c>details.session</c>.
+    /// are kept in <c>agent_reported</c> for audit only. An ended session is <c>409 sessionNotActive</c> + <c>details.session</c>;
+    /// so is a session the desk moved off the caller's PC (D-61), with its «ended view»: the old PC ends it cleanly and
+    /// nothing is settled.
     /// </summary>
     public async Task<SessionEndResult> EndAsync(Guid sessionId, Guid pcId, SessionEndReport report)
     {
@@ -555,7 +674,9 @@ public sealed class SessionService(
             var s = await LockAsync(c, tx, sessionId) ?? throw ApiException.NotFound("session");
             if (s.PcId != pcId)
             {
-                throw ApiException.Forbidden("pcMismatch", "The session belongs to another PC");
+                throw await MovedOffAsync(c, tx, s.Id, pcId) is { } moved
+                    ? NotActive(EndedView(s, pcId, moved.At, moved.SecondsUsed))
+                    : ApiException.Forbidden("pcMismatch", "The session belongs to another PC");
             }
 
             if (s.Ended)
@@ -736,8 +857,9 @@ public sealed class SessionService(
     }
 
     /// <summary>
-    /// Sends what a committed change produced, in this order: <c>userRevoked</c> of a seat taken, the sessions, the wallets,
-    /// the commands, <c>userRevoked</c> of a session ended. A failure here must not fail a request whose money is committed.
+    /// Sends what a committed change produced, in this order: <c>userRevoked</c> of a seat taken, the sessions, the ended
+    /// views of moved sessions to their old PCs, the wallets, the commands, <c>userRevoked</c> of a session ended or moved. A
+    /// failure here must not fail a request whose money is committed.
     /// </summary>
     public async Task PublishAsync(SessionEffects effects)
     {
@@ -751,6 +873,11 @@ public sealed class SessionService(
             foreach (var session in effects.Sessions.GroupBy(s => s.Id).Select(g => g.Last()))
             {
                 await pushes.SessionAsync(session);
+            }
+
+            foreach (var view in effects.Departed)
+            {
+                await pushes.SessionAsync(view);
             }
 
             foreach (var userId in effects.Wallets)

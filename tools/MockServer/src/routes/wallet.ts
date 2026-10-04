@@ -144,16 +144,8 @@ export function walletRoutes(app: FastifyInstance): void {
       };
       db.topupIntents.push(intent);
       if (db.topupIntents.length > 200) db.topupIntents.splice(0, db.topupIntents.length - 200);
-      if (provider === 'cash') {
-        db.tickets.push({
-          ticketId: uuid(),
-          pcId: pc.id,
-          userId: user.id,
-          category: 'other',
-          message: `Cash top-up ${amount.amount / 100} UZS`,
-          createdAt: now(),
-        });
-      }
+      // Cash is paid at the desk. The server puts nothing in the desk's call inbox for it (only `callAdmin` and the
+      // telemetry copies do), so neither does the mock: the inbox is the same on both.
       markDirty();
       return { status: 201, body: publicIntent(intent) };
     });

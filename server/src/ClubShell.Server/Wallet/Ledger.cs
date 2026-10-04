@@ -11,6 +11,8 @@ namespace ClubShell.Server.Wallet;
 /// One ledger row to post: signed <paramref name="Amount"/> (tiyin), what it is for and the links reports read.
 /// <paramref name="Meta"/> carries the price quote of a charge (DESIGN §5.1). <paramref name="ShiftRequired"/>: money the
 /// cashier takes, which must land in the open shift's X/Z (else <c>409 shiftClosed</c>, the whole operation refused).
+/// <paramref name="Ref"/>: <c>Transaction.ref</c> when the row is not a session's (a bar sale or its void, D-52); a session's
+/// row refers to its session.
 /// </summary>
 public sealed record LedgerLine(
     string Type,
@@ -23,7 +25,8 @@ public sealed record LedgerLine(
     Guid? StaffId = null,
     object? Meta = null,
     Guid? Id = null,
-    bool ShiftRequired = false);
+    bool ShiftRequired = false,
+    string? Ref = null);
 
 /// <summary>
 /// The only writer of money (DESIGN §4.3): inside the caller's transaction it locks the wallet row
@@ -82,7 +85,7 @@ public static class Ledger
                     id = line.Id ?? Guid.CreateVersion7(now), opId, userId, networkId = wallet.NetworkId, clubId = line.ClubId, type = line.Type,
                     shiftId = line.ClubId is null ? null : shiftId,
                     amount = line.Amount, balance, method = line.Method, description = line.Description,
-                    reference = line.SessionId?.ToString(), sessionId = line.SessionId, staffId = line.StaffId, pcId = line.PcId,
+                    reference = line.Ref ?? line.SessionId?.ToString(), sessionId = line.SessionId, staffId = line.StaffId, pcId = line.PcId,
                     overdraft = balance < 0 && line.Amount < 0,
                     meta = line.Meta is null ? null : JsonSerializer.Serialize(line.Meta, ServerJson.Options), now,
                 },

@@ -9,19 +9,31 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
-import { AdminError, clubApi, type Operation, type OperationKind, type OperationsPage, type Today } from '@/api';
+import {
+  AdminError,
+  adminApi,
+  clubApi,
+  type Operation,
+  type OperationKind,
+  type OperationsPage,
+  type SaleVoid,
+  type Today,
+  type VoidReason,
+} from '@/api';
 import { pcLabel } from '@/clientSearch';
 import { useClub } from '@/club';
-import { describe } from '@/errors';
+import { describe, isLostAnswer } from '@/errors';
 import { exactDigits, minutesLabel, moneyExact } from '@/format';
 import { dateLocale, t } from '@/i18n';
-import { OPERATION_LABEL, REASON_LABEL } from '@/labels';
-import { methodName } from '@/paybox';
+import { OPERATION_LABEL, REASON_LABEL, VOID_REASONS, VOID_REASON_LABEL } from '@/labels';
+import { methodName, useHeldKey } from '@/paybox';
 import { CashSlip, Receipt, printDocument, type ReceiptData } from '@/print';
 import { useShift } from '@/shift';
-import { Button } from '@/ui';
+import { Button, Field, Note, Sheet, inputCls } from '@/ui';
 
 const POLL_MS = 5000;
+/** A cashier takes a bar sale back within this many minutes of it; the owner later (D-56). */
+const VOID_WINDOW_MIN = 15;
 
 /** Kinds that have a slip to reprint. */
 const RECEIPT_KIND: Partial<Record<OperationKind, ReceiptData['kind']>> = {
@@ -31,13 +43,20 @@ const RECEIPT_KIND: Partial<Record<OperationKind, ReceiptData['kind']>> = {
   topUp: 'topup',
   debtPaid: 'debt',
   payout: 'payout',
+  shopSale: 'sale',
+  shopVoid: 'saleVoid',
 };
 
 /** The filters of the full feed (the Смена page): a set of kinds each. */
 export const FEED_FILTERS: { id: string; label: string; kinds: OperationKind[] }[] = [
   { id: 'all', label: 'Все', kinds: [] },
-  { id: 'money', label: 'Оплаты', kinds: ['topUp', 'debtPaid', 'sessionOpen', 'sessionExtend', 'promoRedeem'] },
-  { id: 'sessions', label: 'Сеансы', kinds: ['sessionOpen', 'sessionExtend', 'sessionEnd'] },
+  {
+    id: 'money',
+    label: 'Оплаты',
+    kinds: ['topUp', 'debtPaid', 'sessionOpen', 'sessionExtend', 'promoRedeem', 'shopSale'],
+  },
+  { id: 'sessions', label: 'Сеансы', kinds: ['sessionOpen', 'sessionExtend', 'sessionEnd', 'sessionMove'] },
+  { id: 'bar', label: 'Бар', kinds: ['shopSale', 'shopVoid'] },
   { id: 'drawer', label: 'Касса', kinds: ['cashIn', 'cashOut', 'payout', 'shiftOpen', 'shiftClose'] },
 ];
 
@@ -72,13 +91,31 @@ export function operationWhat(op: Operation): string {
     parts.push(t('на начало {sum}', { sum: moneyExact(op.amount) }));
   } else if (op.kind === 'shiftClose') {
     parts.push(t('посчитано {sum}', { sum: moneyExact(op.amount) }));
+  } else if (op.kind === 'shopSale' || op.kind === 'shopVoid') {
+    const lines = linesSummary(op.lines);
+    if (lines) parts.push(lines);
+    if (op.kind === 'shopVoid' && op.reasonCode)
+      parts.push(t(VOID_REASON_LABEL[op.reasonCode as VoidReason] ?? op.reasonCode));
+    if (op.kind === 'shopVoid' && op.note) parts.push(op.note);
+  } else if (op.kind === 'sessionMove') {
+    if (op.fromPc && op.pc) parts.push(`${pcLabel(op.fromPc.name)} → ${pcLabel(op.pc.name)}`);
   }
   return parts.join(' · ');
 }
 
+/** `Coca-Cola ×2, Lay's`: the goods of a bar row. */
+function linesSummary(lines: Operation['lines']): string {
+  return (lines ?? []).map((l) => (l.qty > 1 ? `${l.title} ×${l.qty}` : l.title)).join(', ');
+}
+
 /** How it was paid: the payment with its method, or what the balance paid. */
 function operationPaid(op: Operation): string | null {
+  if (op.kind === 'shopVoid')
+    return op.method === 'balance' || !op.method
+      ? t('на баланс {sum}', { sum: moneyExact(op.amount) })
+      : t('возврат {sum}', { sum: `${moneyExact(op.amount)} · ${methodName(op.method)}` });
   if (op.paid) return `${moneyExact(op.paid.amount)} · ${methodName(op.paid.method)}`;
+  if (op.kind === 'shopSale') return t('с баланса {sum}', { sum: moneyExact(op.charged ?? op.amount) });
   if ((op.kind === 'sessionOpen' || op.kind === 'sessionExtend') && (op.charged ?? op.amount) > 0)
     return t('с баланса {sum}', { sum: moneyExact(op.charged ?? op.amount) });
   if (op.kind === 'payout') return `${moneyExact(op.amount)} · ${methodName('cash')}`;
@@ -110,6 +147,33 @@ export function reprint(op: Operation, club: string | null): void {
   }
   const kind = RECEIPT_KIND[op.kind];
   if (!kind) return;
+  if (kind === 'sale' || kind === 'saleVoid') {
+    void printDocument(
+      <Receipt
+        r={{
+          kind,
+          at: op.at,
+          // The sale's own id is the № of its slip; a void's is the journal's.
+          ref: kind === 'sale' ? (op.saleId ?? op.id) : op.id,
+          club,
+          cashier: op.staffName,
+          client: op.client && op.client.role !== 'guest' ? op.client.displayName : null,
+          guest: !op.client || op.client.role === 'guest',
+          pc: op.pc?.name ?? null,
+          lines: op.lines ?? [],
+          method: op.method ?? null,
+          total: op.amount,
+          paid:
+            kind === 'sale' && op.method && op.method !== 'balance' ? { amount: op.amount, method: op.method } : null,
+          reason: op.reasonCode,
+          note: op.note,
+          copy: true,
+        }}
+      />,
+      'receipt',
+    );
+    return;
+  }
   const r: ReceiptData = {
     kind,
     at: op.at,
@@ -138,8 +202,11 @@ export function reprint(op: Operation, club: string | null): void {
 /** «Сегодня принято …»: the headline, opening to every method, the payouts and the sessions. */
 function TodayLine({ today }: { today: Today }): JSX.Element {
   const [open, setOpen] = useState(false);
-  const cash = today.byMethod.cash - today.payouts;
-  const cashless = today.taken - today.byMethod.cash;
+  // The bar's cash is cash taken too (D-57): `taken` holds both, `byMethod` only the top-ups.
+  const shopCash = today.shopByMethod?.cash ?? 0;
+  const shop = today.shopByMethod ? Object.values(today.shopByMethod).reduce((a, b) => a + b, 0) : 0;
+  const cash = today.byMethod.cash + shopCash - today.payouts;
+  const cashless = today.taken - today.byMethod.cash - shopCash;
   return (
     <div className="flex flex-col gap-1.5">
       <button
@@ -169,6 +236,12 @@ function TodayLine({ today }: { today: Today }): JSX.Element {
               <dd className="tnum">{exactDigits(today.byMethod.other)}</dd>
             </div>
           )}
+          {today.shopByMethod && (
+            <div className="flex justify-between gap-2">
+              <dt className="text-muted">{t('Бар')}</dt>
+              <dd className="tnum">{exactDigits(shop)}</dd>
+            </div>
+          )}
           <div className="flex justify-between gap-2">
             <dt className="text-muted">{t('Выдано гостям')}</dt>
             <dd className="tnum">{exactDigits(today.payouts)}</dd>
@@ -183,7 +256,16 @@ function TodayLine({ today }: { today: Today }): JSX.Element {
   );
 }
 
-function Row({ op, club }: { op: Operation; club: string | null }): JSX.Element {
+function Row({
+  op,
+  club,
+  onVoid,
+}: {
+  op: Operation;
+  club: string | null;
+  /** «Аннулировать…» of a bar sale this staff member may still take back. */
+  onVoid?: () => void;
+}): JSX.Element {
   const who = [
     op.client ? (op.client.role === 'guest' ? t('Гость') : op.client.displayName) : null,
     op.pc ? pcLabel(op.pc.name) : null,
@@ -197,6 +279,11 @@ function Row({ op, club }: { op: Operation; club: string | null }): JSX.Element 
       <div className="flex items-baseline justify-between gap-2">
         <span className="min-w-0 truncate text-sm">
           <span className="tnum mr-2 font-mono text-xs text-muted">{time(op.at)}</span>
+          {op.voided && (
+            <span className="mr-1.5 rounded border border-danger/50 px-1 py-px text-[0.65rem] font-semibold text-danger">
+              {t('аннулирован')}
+            </span>
+          )}
           {operationWhat(op)}
         </span>
         {op.drawer !== 0 && (
@@ -209,6 +296,15 @@ function Row({ op, club }: { op: Operation; club: string | null }): JSX.Element 
         <span className="min-w-0 truncate text-xs text-muted">
           {[who, paid, op.staffName].filter(Boolean).join(' · ')}
         </span>
+        {onVoid && (
+          <button
+            type="button"
+            onClick={onVoid}
+            className="focus-ring h-6 shrink-0 rounded px-1.5 text-xs font-semibold text-danger hover:bg-danger/10"
+          >
+            {t('Аннулировать…')}
+          </button>
+        )}
         {printable && (
           <button
             type="button"
@@ -242,8 +338,10 @@ export function OperationsFeed({
   className?: string;
   showToday?: boolean;
 }): JSX.Element | null {
-  const { version, cashDesk2 } = useShift();
+  const { version, cashDesk2, shift: openShift, refresh } = useShift();
   const club = useClub();
+  const owner = club.staff?.role === 'owner';
+  const [voiding, setVoiding] = useState<Operation | null>(null);
   // Every row seen since the shift / filter was picked, newest first: a poll adds the new ones on top, «Ещё» the older
   // ones below, so a row never falls out between two pages.
   const [items, setItems] = useState<Operation[]>([]);
@@ -337,7 +435,16 @@ export function OperationsFeed({
       {error && <p className="rounded-md bg-danger/10 px-3 py-1.5 text-xs text-danger">{error}</p>}
       <ol aria-label={t('Операции смены')} className="flex min-h-0 flex-col divide-y divide-line overflow-y-auto pr-1">
         {items.map((op) => (
-          <Row key={op.id} op={op} club={club.clubName} />
+          <Row
+            key={op.id}
+            op={op}
+            club={club.clubName}
+            onVoid={
+              voidable(op, { owner, openShiftId: openShift?.id ?? null, feedShiftId: page?.shift?.id ?? null })
+                ? () => setVoiding(op)
+                : undefined
+            }
+          />
         ))}
       </ol>
       {page && items.length === 0 && (
@@ -348,6 +455,170 @@ export function OperationsFeed({
           {loadingMore ? '…' : t('Ещё')}
         </Button>
       )}
+      {voiding && (
+        <VoidSheet
+          op={voiding}
+          onClose={() => setVoiding(null)}
+          onDone={() => {
+            refresh();
+            void load();
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+/**
+ * Whether «Аннулировать…» is offered (D-56; the server decides): a sale not yet taken back, in an open shift; cash and
+ * other method money only in the sale's own shift, a balance sale in any; a cashier within 15 minutes of it.
+ */
+function voidable(
+  op: Operation,
+  { owner, openShiftId, feedShiftId }: { owner: boolean; openShiftId: string | null; feedShiftId: string | null },
+): boolean {
+  if (op.kind !== 'shopSale' || op.voided || !op.saleId || !openShiftId) return false;
+  if (op.method !== 'balance' && feedShiftId !== openShiftId) return false;
+  return owner || Date.now() - Date.parse(op.at) <= VOID_WINDOW_MIN * 60_000;
+}
+
+/**
+ * Takes a bar sale back (D-56): a reason (a note for «Другое»), what happens to the goods and the money, then the slip
+ * to sign. The action holds one key until a definite answer: a lost one offers only the same void again.
+ */
+function VoidSheet({ op, onClose, onDone }: { op: Operation; onClose: () => void; onDone: () => void }): JSX.Element {
+  const club = useClub();
+  const [reason, setReason] = useState<VoidReason | null>(null);
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lost, setLost] = useState(false);
+  const [done, setDone] = useState<SaleVoid | null>(null);
+  const key = useHeldKey();
+  const trimmed = note.trim();
+  const noteOk = reason === 'other' ? trimmed.length >= 3 && trimmed.length <= 200 : trimmed.length <= 200;
+  const ready = reason !== null && noteOk && !busy;
+  const method = op.method ?? 'cash';
+  const back =
+    method === 'balance'
+      ? t('{sum} вернётся на баланс клиента', { sum: moneyExact(op.amount) })
+      : method === 'cash'
+        ? t('Выдайте {sum} наличными из кассы', { sum: moneyExact(op.amount) })
+        : t('Верните {sum} клиенту: {method}', { sum: moneyExact(op.amount), method: methodName(method) });
+
+  const submit = async (): Promise<void> => {
+    if (!ready || !reason || !op.saleId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await adminApi.shopVoid(
+        op.saleId,
+        { reasonCode: reason, ...(trimmed ? { note: trimmed } : {}) },
+        key.take(),
+      );
+      key.settle();
+      setLost(false);
+      setDone(r.void);
+      onDone();
+    } catch (e) {
+      key.settle(e);
+      setLost(isLostAnswer(e));
+      setError(
+        isLostAnswer(e)
+          ? t('Ответ сервера не пришёл: деньги могли пройти. Повторите это же действие — дважды оно не проведётся.')
+          : describe(e),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const slip = (v: SaleVoid): ReceiptData => ({
+    kind: 'saleVoid',
+    at: v.at,
+    ref: v.id,
+    club: club.clubName,
+    cashier: v.staffName,
+    client: op.client && op.client.role !== 'guest' ? op.client.displayName : null,
+    guest: !op.client || op.client.role === 'guest',
+    pc: op.pc?.name ?? null,
+    lines: op.lines ?? [],
+    method: v.method,
+    total: v.total,
+    reason: v.reasonCode,
+    note: v.note,
+  });
+
+  return (
+    <Sheet title={t('Аннулировать продажу')} onClose={onClose}>
+      <p className="text-sm">
+        {time(op.at)} · {linesSummary(op.lines) || t('Продажа бара')} · {moneyExact(op.amount)}
+      </p>
+      {done ? (
+        <>
+          <p role="status" className="rounded-md bg-success/10 px-3 py-2 text-sm text-success">
+            {t('Аннулировано · {sum}', { sum: moneyExact(done.total) })}
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <Button onClick={() => void printDocument(<Receipt r={slip(done)} />, 'receipt')}>{t('Печать')}</Button>
+            <Button variant="primary" autoFocus onClick={onClose}>
+              {t('Готово')}
+            </Button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="flex flex-col gap-1.5">
+            <span className="label">{t('Причина')}</span>
+            <div role="group" aria-label={t('Причина')} className="grid grid-cols-2 gap-1.5">
+              {VOID_REASONS.map((r) => (
+                <Button
+                  key={r}
+                  size="sm"
+                  aria-pressed={reason === r}
+                  disabled={busy || lost}
+                  className={clsx(reason === r && 'choice-on')}
+                  onClick={() => setReason(r)}
+                >
+                  {t(VOID_REASON_LABEL[r])}
+                </Button>
+              ))}
+            </div>
+          </div>
+          <Field
+            label={t('Комментарий')}
+            hint={reason === 'other' ? t('Обязателен для «Другое»: от 3 до 200 символов') : t('Необязательно')}
+          >
+            <input
+              className={inputCls}
+              value={note}
+              maxLength={200}
+              readOnly={busy || lost}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </Field>
+          <p className="rounded-md bg-white/[0.04] px-3 py-2 text-sm">
+            {back}
+            <span className="block text-xs text-muted">
+              {reason === 'defect' ? t('Брак не возвращается на склад') : t('Товар вернётся на склад')}
+            </span>
+          </p>
+          <Note note={error ? { text: error, tone: 'err' } : null} />
+          <div className="flex justify-end gap-2 border-t border-line pt-4">
+            <Button variant="ghost" onClick={onClose}>
+              {t('Отмена')}
+            </Button>
+            <Button
+              variant="danger"
+              className="border border-danger/50"
+              disabled={!ready}
+              onClick={() => void submit()}
+            >
+              {busy ? '…' : lost ? t('Повторить') : t('Аннулировать')}
+            </Button>
+          </div>
+        </>
+      )}
+    </Sheet>
   );
 }

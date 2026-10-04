@@ -19,7 +19,8 @@ const FEATURES: { key: keyof ShellFeatures; label: string }[] = [
   { key: 'profile', label: 'Профиль' },
   { key: 'topup', label: 'Пополнение' },
   { key: 'apps', label: 'Приложения' },
-  { key: 'callAdmin', label: 'Вызов администратора' },
+  // The kiosk's «Позвать администратора» button: its calls ring at the desk (the bell in the top bar).
+  { key: 'callAdmin', label: 'Вызов администратора (кнопка на ПК, звонок на кассе)' },
   // Off by default: the panel pauses the kiosk guard while open, and its driver settings stay for the next player.
   { key: 'gpuPanel', label: 'Панель видеокарты (NVIDIA / AMD / Intel)' },
 ];
