@@ -428,10 +428,10 @@ function PaySummary({ price, balance }: { price: number; balance: number }): JSX
 }
 
 /** A guest pays exactly the price, to the tiyin (D-48): no balance, no change left on a throwaway account. */
-function ExactSummary({ price }: { price: number }): JSX.Element {
+function ExactSummary({ price, label }: { price: number; label?: string }): JSX.Element {
   return (
     <div className="flex items-baseline justify-between rounded-md border border-line bg-bg px-3 py-2.5">
-      <span className="label">{t('К оплате')}</span>
+      <span className="label">{label ?? t('К оплате')}</span>
       <span className="tnum text-sm font-semibold">{moneyExact(price)}</span>
     </div>
   );
@@ -1193,7 +1193,7 @@ function SettleSheet({
         </>
       ) : payout ? (
         <>
-          <ExactSummary price={payable} />
+          <ExactSummary price={payable} label={t('К выдаче')} />
           {target.balance > payable && (
             <p className="text-xs text-muted">
               {t('Остальное ({sum}) оплачено картой или онлайн — наличными не выдаётся', {
@@ -1266,10 +1266,13 @@ function SettleSheet({
 function FreeSeat({ seat, tariffs, header, note, busy, run, onDone, setNote }: PartProps): JSX.Element {
   const closed = useShiftClosed();
   const club = useClub();
+  // A server before part 2 has neither the guest route nor postpaid from the desk: both switches stay away then.
+  const { cashDesk2 } = useShift();
   const zoneTariffs = useMemo(() => zoneTariffsOf(tariffs, seat.pc.zone), [tariffs, seat.pc.zone]);
   const hourly = useMemo(() => zoneTariffs.filter((tf) => !tf.isPackage), [zoneTariffs]);
   const packages = useMemo(() => zoneTariffs.filter((tf) => tf.isPackage), [zoneTariffs]);
-  const [guest, setGuest] = useState(false);
+  const [wantGuest, setGuest] = useState(false);
+  const guest = wantGuest && cashDesk2;
   const [guestName, setGuestName] = useState('');
   const [who, setWho] = useState<ClientHit | null>(null);
   const [wantPrepaid, setWantPrepaid] = useState(true);
@@ -1349,7 +1352,7 @@ function FreeSeat({ seat, tariffs, header, note, busy, run, onDone, setNote }: P
         ? t('Баланс и разрешённый долг не покрывают первую минуту')
         : t('Постоплата — только с баланса, а на нём нет даже на минуту')
       : null;
-  const prepaid = wantPrepaid || postpaidOff !== null;
+  const prepaid = wantPrepaid || postpaidOff !== null || !cashDesk2;
 
   const pkg = prepaid && pkgId ? packages.find((p) => p.id === pkgId) : undefined;
   const pkgQuote = pkg ? (pkgQuotes[pkgKey(pkg.id)] ?? null) : null;
@@ -1461,15 +1464,17 @@ function FreeSeat({ seat, tariffs, header, note, busy, run, onDone, setNote }: P
       <SeatNote note={note} />
 
       <section className="flex flex-col gap-4">
-        <Choice
-          label={t('Кто садится')}
-          value={guest ? 'guest' : 'client'}
-          options={[
-            { id: 'client', label: t('Клиент') },
-            { id: 'guest', label: t('Гость') },
-          ]}
-          onChange={(v) => setGuest(v === 'guest')}
-        />
+        {cashDesk2 && (
+          <Choice
+            label={t('Кто садится')}
+            value={guest ? 'guest' : 'client'}
+            options={[
+              { id: 'client', label: t('Клиент') },
+              { id: 'guest', label: t('Гость') },
+            ]}
+            onChange={(v) => setGuest(v === 'guest')}
+          />
+        )}
         {guest ? (
           <div className="flex flex-col gap-1.5">
             <label htmlFor={nameId} className="label">
@@ -1490,18 +1495,20 @@ function FreeSeat({ seat, tariffs, header, note, busy, run, onDone, setNote }: P
           <ClientPicker label={t('Кто')} value={who} onChange={setWho} />
         )}
 
-        <div className="flex flex-col gap-1.5">
-          <Choice
-            label={t('Оплата')}
-            value={prepaid ? 'pre' : 'post'}
-            options={[
-              { id: 'pre', label: t('Предоплата') },
-              { id: 'post', label: t('Постоплата'), disabled: postpaidOff },
-            ]}
-            onChange={(v) => setWantPrepaid(v === 'pre')}
-          />
-          {postpaidOff && (guest || who) && <p className="text-xs text-muted">{postpaidOff}</p>}
-        </div>
+        {cashDesk2 && (
+          <div className="flex flex-col gap-1.5">
+            <Choice
+              label={t('Оплата')}
+              value={prepaid ? 'pre' : 'post'}
+              options={[
+                { id: 'pre', label: t('Предоплата') },
+                { id: 'post', label: t('Постоплата'), disabled: postpaidOff },
+              ]}
+              onChange={(v) => setWantPrepaid(v === 'pre')}
+            />
+            {postpaidOff && (guest || who) && <p className="text-xs text-muted">{postpaidOff}</p>}
+          </div>
+        )}
 
         {hourly.length > 0 && (
           <Field label={t('Тариф')}>

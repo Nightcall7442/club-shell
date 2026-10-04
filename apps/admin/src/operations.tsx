@@ -239,7 +239,7 @@ export function OperationsFeed({
   className?: string;
   showToday?: boolean;
 }): JSX.Element | null {
-  const { version } = useShift();
+  const { version, cashDesk2 } = useShift();
   const club = useClub();
   // Every row seen since the shift / filter was picked, newest first: a poll adds the new ones on top, «Ещё» the older
   // ones below, so a row never falls out between two pages.
@@ -294,7 +294,7 @@ export function OperationsFeed({
     return () => window.clearInterval(id);
   }, [load]);
 
-  if (missing) return null;
+  if (missing || !cashDesk2) return null;
 
   const more = async (): Promise<void> => {
     if (!next) return;

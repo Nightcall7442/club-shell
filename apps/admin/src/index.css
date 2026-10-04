@@ -99,8 +99,8 @@
 }
 #print-root .slip-title {
   margin: 1mm 0;
+  font-size: 1.15em;
   font-weight: 700;
-  text-transform: uppercase;
 }
 #print-root .slip-rule {
   margin: 1.5mm 0;

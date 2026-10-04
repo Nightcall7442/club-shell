@@ -48,6 +48,11 @@ export interface ShiftState {
   lastClosingCash: number | null;
   /** Grows with every answer of `/admin/shift`: what depends on the shift's money refetches when it changes. */
   version: number;
+  /**
+   * False when the server predates cash desk part 2 (its operations feed answers 404): the console then hides the
+   * drawer's moves, the feed, walk-in guests and postpaid seats, which such a server would refuse or misread.
+   */
+  cashDesk2: boolean;
   refresh: () => void;
   /** Shows the "Открыть смену" sheet (from a money button that the closed shift blocks). */
   requestOpen: () => void;
@@ -62,6 +67,7 @@ const ShiftContext = createContext<ShiftState>({
   expectedCash: null,
   lastClosingCash: null,
   version: 0,
+  cashDesk2: true,
   refresh: () => undefined,
   requestOpen: () => undefined,
   requestCashMove: () => undefined,
@@ -172,6 +178,14 @@ export function ShiftProvider({
     return () => window.clearInterval(id);
   }, [refresh]);
 
+  // One probe at sign-in: a server without the operations feed has none of part 2 (a new console on an old server).
+  const [cashDesk2, setCashDesk2] = useState(true);
+  useEffect(() => {
+    clubApi.operations({ limit: 1 }).catch((e: unknown) => {
+      if (e instanceof AdminError && e.status === 404 && e.details?.['what'] !== 'shift') setCashDesk2(false);
+    });
+  }, []);
+
   const value = useMemo<ShiftState>(
     () => ({
       loaded,
@@ -180,11 +194,12 @@ export function ShiftProvider({
       expectedCash,
       lastClosingCash,
       version,
+      cashDesk2,
       refresh: () => void refresh(),
       requestOpen: () => setGate('asked'),
       requestCashMove: (kind) => setCashMove(kind),
     }),
-    [loaded, shift, x, expectedCash, lastClosingCash, version, refresh],
+    [loaded, shift, x, expectedCash, lastClosingCash, version, cashDesk2, refresh],
   );
 
   const owner = staff.role === 'owner';
@@ -338,7 +353,7 @@ export function ShiftChip({ onClick }: { onClick: () => void }): JSX.Element {
 
 /** «±»: cash into the drawer, cash out of it, the X report on paper. Only in an open shift. */
 export function CashMenu(): JSX.Element | null {
-  const { shift, requestCashMove } = useShift();
+  const { shift, requestCashMove, cashDesk2 } = useShift();
   const club = useClub();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -351,7 +366,7 @@ export function CashMenu(): JSX.Element | null {
     window.addEventListener('mousedown', close);
     return () => window.removeEventListener('mousedown', close);
   }, [open]);
-  if (!shift) return null;
+  if (!shift || !cashDesk2) return null;
   const item = (label: string, act: () => void): JSX.Element => (
     <button
       type="button"

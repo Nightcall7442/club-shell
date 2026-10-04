@@ -425,26 +425,28 @@ export default function ShiftPage({ isOwner = false }: { isOwner?: boolean }): J
             {x.topUpByMethod && <MethodsGrid byMethod={x.topUpByMethod} />}
           </Section>
 
-          <Section
-            title={t('Внесение / изъятие')}
-            actions={
-              <>
-                <Button size="sm" onClick={() => desk.requestCashMove('in')}>
-                  {t('Внесение')}
-                </Button>
-                <Button size="sm" onClick={() => desk.requestCashMove('out')}>
-                  {t('Изъятие')}
-                </Button>
-              </>
-            }
-          >
-            <OperationsFeed
-              placement="page"
-              shiftId={shift.id}
-              kinds={['cashIn', 'cashOut', 'payout']}
-              showToday={false}
-            />
-          </Section>
+          {desk.cashDesk2 && (
+            <Section
+              title={t('Внесение / изъятие')}
+              actions={
+                <>
+                  <Button size="sm" onClick={() => desk.requestCashMove('in')}>
+                    {t('Внесение')}
+                  </Button>
+                  <Button size="sm" onClick={() => desk.requestCashMove('out')}>
+                    {t('Изъятие')}
+                  </Button>
+                </>
+              }
+            >
+              <OperationsFeed
+                placement="page"
+                shiftId={shift.id}
+                kinds={['cashIn', 'cashOut', 'payout']}
+                showToday={false}
+              />
+            </Section>
+          )}
 
           <Section title={t('Закрыть смену')}>
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
@@ -478,7 +480,7 @@ export default function ShiftPage({ isOwner = false }: { isOwner?: boolean }): J
         </>
       )}
 
-      {feedId && (
+      {feedId && desk.cashDesk2 && (
         <Section
           title={t('Операции смены')}
           actions={

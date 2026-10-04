@@ -862,6 +862,7 @@ export const UZ: Record<string, string> = {
   'Обязателен для «Другое»: от 3 до 200 символов': '«Boshqa» uchun majburiy: 3 dan 200 belgigacha',
   Внести: 'Kiritish',
   Изъять: 'Olish',
+  'К выдаче': 'Berishga',
 };
 export const EN: Record<string, string> = {
   'Выручка за период': 'Revenue for the period',
@@ -1723,4 +1724,5 @@ export const EN: Record<string, string> = {
   'Обязателен для «Другое»: от 3 до 200 символов': 'Required for «Other»: 3 to 200 characters',
   Внести: 'Put in',
   Изъять: 'Take out',
+  'К выдаче': 'To pay out',
 };
