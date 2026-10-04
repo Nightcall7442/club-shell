@@ -1,16 +1,17 @@
 /**
- * The player's PC settings in Profile → Settings: mouse, output device, graphics-card panel. The helpers behind them are
- * plain functions tested without a browser; the screen itself runs in mock mode (demo PC: NVIDIA RTX 4070 with the
- * NVIDIA Control Panel, Realtek speakers + a HyperX headset + the monitor's HDMI).
+ * The player's PC settings in the "Компьютер и настройки" block on Home: mouse, output device, graphics-card panel.
+ * The helpers behind them are plain functions tested without a browser; the screen itself runs in mock mode (demo PC:
+ * NVIDIA RTX 4070 with the NVIDIA Control Panel, Realtek speakers + a HyperX headset + the monitor's HDMI). The rest of
+ * the block and the top bar are in this-pc.spec.ts.
  */
 import { expect, test } from '@playwright/test';
-import { gpuVendorOf, pickGpuPanel } from '../../apps/shell/src/screens/Profile/pc/gpuVendor';
+import { gpuVendorOf, pickGpuPanel } from '../../apps/shell/src/screens/Pc/devices/gpuVendor';
 import {
   doubleClickMsAt,
   doubleClickPosition,
   judgeClick,
   splitDeviceName,
-} from '../../apps/shell/src/screens/Profile/pc/pcFormat';
+} from '../../apps/shell/src/screens/Pc/devices/pcFormat';
 
 test.describe('pc settings helpers', () => {
   test('the GPU vendor is read from the model name', () => {
@@ -79,8 +80,8 @@ test.describe('pc settings helpers', () => {
   });
 });
 
-test('mouse, output device and graphics panel are set from Settings', async ({ page }) => {
-  await page.goto('/?mock=auth#/profile?tab=settings');
+test('mouse, output device and graphics panel are set from the home screen', async ({ page }) => {
+  await page.goto('/?mock=auth#/home');
 
   const mouse = page.getByRole('region', { name: 'Мышь' });
   const speed = mouse.getByRole('slider', { name: 'Скорость указателя' });
@@ -108,4 +109,18 @@ test('mouse, output device and graphics panel are set from Settings', async ({ p
   await expect(gpu.getByText('NVIDIA GeForce RTX 4070')).toBeVisible();
   await gpu.getByRole('button', { name: 'Открыть NVIDIA Control Panel' }).click();
   await expect(gpu.getByRole('button', { name: 'Открыть NVIDIA Control Panel' })).toBeEnabled();
+});
+
+test('the profile keeps the account; the PC settings point to Home', async ({ page }) => {
+  await page.goto('/?mock=auth#/profile?tab=settings');
+  await expect(page.getByRole('tab', { name: 'Аккаунт', exact: true })).toHaveAttribute('aria-selected', 'true');
+  const account = page.getByRole('region', { name: 'Аккаунт', exact: true });
+  await expect(account.getByRole('button', { name: 'Изменить PIN', exact: true })).toBeVisible();
+  await expect(account.getByRole('button', { name: 'Выйти', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Мышь' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Монитор', exact: true })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Открыть настройки ПК' }).click();
+  await expect(page).toHaveURL(/#\/home$/);
+  await expect(page.getByRole('region', { name: 'Мышь' })).toBeVisible();
 });
