@@ -27,6 +27,7 @@ import {
   type TopupIntentRecord,
   knownValues,
 } from '../db.js';
+import { insertCall } from '../calls.js';
 import { pushToUser } from '../ws.js';
 
 const PROVIDERS = knownValues(TopupProvider);
@@ -144,14 +145,15 @@ export function walletRoutes(app: FastifyInstance): void {
       };
       db.topupIntents.push(intent);
       if (db.topupIntents.length > 200) db.topupIntents.splice(0, db.topupIntents.length - 200);
+      // Cash is paid at the desk: the player's request reaches the desk's inbox as a call.
       if (provider === 'cash') {
-        db.tickets.push({
-          ticketId: uuid(),
-          pcId: pc.id,
+        insertCall({
+          pc,
           userId: user.id,
           category: 'other',
           message: `Cash top-up ${amount.amount / 100} UZS`,
-          createdAt: now(),
+          source: 'direct',
+          at: now(),
         });
       }
       markDirty();

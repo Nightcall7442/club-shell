@@ -2,7 +2,7 @@
  * Names the counter gives to codes the server sends (payment methods, cash reasons, the kinds of the operations feed),
  * as Russian source keys of `t()`: the screens, the feed and the printed slips share them.
  */
-import type { CashReason, OperationKind, PayMethod } from '@/api';
+import type { CallCategory, CashReason, OperationKind, PayMethod, VoidReason } from '@/api';
 import { t } from '@/i18n';
 
 export const PAY_METHOD_LABEL: Record<PayMethod, string> = {
@@ -35,6 +35,38 @@ export const OPERATION_LABEL: Record<OperationKind, string> = {
   shiftOpen: 'Открытие смены',
   shiftClose: 'Закрытие смены',
   promoRedeem: 'Промокод',
+  shopSale: 'Продажа бара',
+  shopVoid: 'Аннулирование',
+  sessionMove: 'Пересадка',
+};
+
+/** What a player called the desk about (`problem` — a «report a problem» text from the kiosk). */
+export const CALL_CATEGORY_LABEL: Record<CallCategory, string> = {
+  help: 'Помощь',
+  technical: 'Технический',
+  order: 'Заказ',
+  other: 'Другое',
+  problem: 'Проблема',
+};
+
+/** Why a bar sale was taken back (D-56). */
+export const VOID_REASON_LABEL: Record<VoidReason, string> = {
+  mistake: 'Ошибка кассира',
+  returned: 'Возврат товара',
+  defect: 'Брак',
+  other: 'Другое',
+};
+
+export const VOID_REASONS: VoidReason[] = ['mistake', 'returned', 'defect', 'other'];
+
+/** Product categories of the shop, in the order the bar shows them. */
+export const PRODUCT_CATEGORY_LABEL: Record<string, string> = {
+  drink: 'Напитки',
+  food: 'Еда',
+  snack: 'Снеки',
+  service: 'Услуги',
+  merch: 'Мерч',
+  time: 'Пакеты времени',
 };
 
 /**

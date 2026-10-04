@@ -35,6 +35,7 @@ import {
   uzs,
   knownValues,
 } from '../db.js';
+import { liveProducts, productView } from './bar.js';
 import { pushToUser } from '../ws.js';
 
 const CATEGORIES = knownValues(ProductCategory);
@@ -73,7 +74,9 @@ export function shopRoutes(app: FastifyInstance): void {
     requireAgent(req);
     const category = req.query.category;
     if (category && !(CATEGORIES as string[]).includes(category)) throw errors.validation('category', 'enum');
-    return sendCached(req, reply, { items: db.products.filter((p) => !category || p.category === category) });
+    // Archived products (the desk's «В архив») are gone from the kiosk too; the wire shape has no desk fields.
+    const items = liveProducts().filter((p) => !category || p.category === category);
+    return sendCached(req, reply, { items: items.map(productView) });
   });
 
   app.post('/shop/orders', async (req, reply) => {
@@ -91,7 +94,7 @@ export function shopRoutes(app: FastifyInstance): void {
         if (!isObject(line)) throw errors.validation(`items[${i}]`, 'format');
         const productId = str(line, 'productId', 64);
         const qty = int(line, 'qty', 1, ORDER_MAX_QTY);
-        const product = db.products.find((p) => p.id === productId);
+        const product = liveProducts().find((p) => p.id === productId);
         if (!product) throw errors.notFound('product');
         if (
           !product.inStock ||

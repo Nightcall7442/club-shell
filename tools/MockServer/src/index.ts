@@ -5,7 +5,7 @@
  *
  * Usage: `tsx src/index.ts [--port 8080] [--reset] [--latency <ms>] [--fail-rate <0..1>]`
  * Env:   MOCK_SERVER_PORT, MOCK_VERIFY_SIGNATURE=1 (enforce HMAC), MOCK_SKIP_SIGNATURE=1 (never check),
- *        MOCK_STRICT_REGISTER=1, MOCK_QR_AUTOCONFIRM_SEC, MOCK_GUEST_DISABLED=1, LOG_LEVEL
+ *        MOCK_STRICT_REGISTER=1, MOCK_AUTO_APPROVE_PCS=1, MOCK_QR_AUTOCONFIRM_SEC, MOCK_GUEST_DISABLED=1, LOG_LEVEL
  */
 import { existsSync, readFileSync } from 'node:fs';
 import cors from '@fastify/cors';
@@ -28,6 +28,7 @@ import {
   type PcRecord,
 } from './db.js';
 import { adminRoutes } from './routes/admin.js';
+import { barRoutes } from './routes/bar.js';
 import { clubRoutes } from './routes/club.js';
 import { tickClub } from './club.js';
 import { tickHealth } from './health.js';
@@ -311,6 +312,7 @@ export async function buildApp(opts: Options): Promise<FastifyInstance> {
       authRoutes(api);
       adminRoutes(api);
       clubRoutes(api);
+      barRoutes(api);
       sessionRoutes(api);
       gamesRoutes(api);
       playerSettingsRoutes(api);

@@ -8,6 +8,12 @@
  * settled there waits in «Расчёт с гостями и долги» under the map. Keys: digits then Enter select a PC by number, F2
  * tops up the selected client, Esc closes the open sheet, then the panel.
  *
+ * Cash desk part 3: Ctrl+click toggles a PC into a set, Shift+click adds a range, «Выбрать» (for touch) makes clicks
+ * toggle, Ctrl+A takes every PC shown; with two or more the panel sends one command to all of them with a result per PC
+ * (D-66). «Пересадить на другой ПК…» of a busy seat dims the PCs that cannot take the session and waits for a click on
+ * the target (or its number and Enter); the move asks first (D-59). A PC whose player called the desk wears an amber
+ * bell, and its panel answers the call («Иду»).
+ *
  * The shift's operations feed (`operations.tsx`) is a third column from 1800 px; below that it fills the right panel
  * while no seat is selected, and a «Место | Операции» switch brings it back over a selected seat.
  * Polls `/admin/overview` every 2 s (the real console would follow the server's WebSocket).
@@ -18,20 +24,25 @@ import type { Money, Session, Tariff } from '@clubshell/contracts';
 import {
   adminApi,
   clubApi,
+  type BulkResult,
   type ClientHit,
+  type CommandAck,
   type GuestDebt,
   type GuestRefund,
   type Member,
+  type MoveResponse,
   type Overview,
+  type PcCommandKind,
   type PriceQuote,
   type Seat,
   type SeatUser,
   type SessionResult,
 } from '@/api';
+import { CallGroupActions, CallMark, groupCalls, groupLine, setCalls, useCalls, type CallGroup } from '@/calls';
 import { ClientPicker, pcLabel } from '@/clientSearch';
 import { useClub } from '@/club';
-import { isTyping, onShowPc, sheetOpen } from '@/desk';
-import { changedAmount, describe, isLostAnswer } from '@/errors';
+import { isTyping, onShowPc, sheetOpen, showBar } from '@/desk';
+import { amountOf, changedAmount, describe, isLostAnswer, reasonOf } from '@/errors';
 import { t } from '@/i18n';
 import { duration, minutesLabel, money, moneyExact } from '@/format';
 import { guestDisplayName } from '@/labels';
@@ -70,7 +81,7 @@ const PANEL_KEY = 'clubshell.admin.map.panel';
 const IGNORED_MINUTES = 60;
 
 /** A result line in the seat panel; a money step adds its slip («Чек») and a walk-in guest how to sign in. */
-type NoteState = { text: string; tone: 'ok' | 'err'; receipt?: ReceiptData; hint?: string } | null;
+type NoteState = { text: string; tone: 'ok' | 'warn' | 'err'; receipt?: ReceiptData; hint?: string } | null;
 
 const STATUS: Record<Seat['pc']['status'], { label: string; short: string; dot: string; cell: string }> = {
   free: { label: 'Свободен', short: 'своб.', dot: 'bg-success', cell: 'border-success/40 text-text' },
@@ -201,6 +212,7 @@ type SheetState =
   | { kind: 'extend' }
   | { kind: 'end' }
   | { kind: 'settle'; target: SettleTarget }
+  | { kind: 'move'; fromPcId: string; toPcId: string }
   | null;
 
 /** The settle sheet an end calls for, from the server's answer; null when nothing is left to settle. */
@@ -261,19 +273,30 @@ function Lock(): JSX.Element {
 
 /**
  * Three lines: the PC number, who is on it, the time left (or the running bill of a postpaid session). A desk session
- * nobody has signed in to yet says «ждёт входа» instead of the name: its clock already runs (D-49).
+ * nobody has signed in to yet says «ждёт входа» instead of the name: its clock already runs (D-49). A PC whose player
+ * called the desk has an amber outline and a bell. In «Выбрать» mode a box shows whether the PC is in the set; while a
+ * move picks its target, a PC that cannot take the session is dimmed and does nothing.
  */
 function SeatTile({
   seat,
   selected,
+  checked,
   dimmed,
+  blocked,
+  call,
   onSelect,
   repair,
 }: {
   seat: Seat;
   selected: boolean;
+  /** null — no box (not in «Выбрать» mode). */
+  checked: boolean | null;
   dimmed: boolean;
-  onSelect: () => void;
+  /** Move pick mode: this PC cannot take the session. */
+  blocked?: boolean;
+  /** The players' calls of this PC. */
+  call?: CallGroup;
+  onSelect: (e: React.MouseEvent<HTMLButtonElement>) => void;
   /** Worst open repair ticket on this PC (from "Состояние ПК"). */
   repair?: 'high' | 'medium';
 }): JSX.Element {
@@ -287,18 +310,40 @@ function SeatTile({
       type="button"
       id={`seat-${seat.pc.id}`}
       onClick={onSelect}
-      aria-pressed={selected}
-      title={`${seat.pc.name} · ${t(s.label)}${seat.user ? ` · ${nameOf(seat.user)}` : ''}${waiting ? ` · ${t('ждёт входа')}` : ''}${repair ? ` · ${t('Нужен ремонт')}` : ''}`}
+      // Shift+click picks a range: no text selection on the way.
+      onMouseDown={(e) => {
+        if (e.shiftKey) e.preventDefault();
+      }}
+      aria-pressed={checked ?? selected}
+      aria-disabled={blocked || undefined}
+      title={`${seat.pc.name} · ${t(s.label)}${seat.user ? ` · ${nameOf(seat.user)}` : ''}${waiting ? ` · ${t('ждёт входа')}` : ''}${repair ? ` · ${t('Нужен ремонт')}` : ''}${call ? ` · ${t('Вызов администратора')}` : ''}`}
       className={clsx(
         'focus-ring relative flex h-[5.75rem] flex-col justify-between overflow-hidden rounded-md border bg-bg px-2.5 pb-2.5 pt-2 text-left transition-[background-color,opacity] hover:bg-white/[0.04]',
         s.cell,
         selected && 'ring-2 ring-accent ring-offset-2 ring-offset-surface',
-        dimmed && 'opacity-25',
+        checked && 'bg-accent/[0.08] ring-2 ring-accent/70',
+        call && 'outline outline-2 outline-offset-1 outline-warning',
+        (dimmed || blocked) && 'opacity-25',
+        blocked && 'cursor-not-allowed',
       )}
     >
       <span className="flex items-start justify-between gap-1">
-        <span className="num-dot text-[1.6rem] leading-none">{String(seat.pc.number).padStart(2, '0')}</span>
+        <span className="flex items-center gap-1.5">
+          {checked !== null && (
+            <span
+              aria-hidden="true"
+              className={clsx(
+                'flex h-3.5 w-3.5 items-center justify-center rounded-[3px] border text-[0.6rem] leading-none',
+                checked ? 'border-accent bg-accent text-on-accent' : 'border-muted/60',
+              )}
+            >
+              {checked ? '✓' : ''}
+            </span>
+          )}
+          <span className="num-dot text-[1.6rem] leading-none">{String(seat.pc.number).padStart(2, '0')}</span>
+        </span>
         <span className="flex items-center gap-1">
+          {call && <CallMark ringing={call.ringing} />}
           {seat.pc.status === 'locked' && <Lock />}
           {repair && <Wrench severity={repair} />}
         </span>
@@ -333,12 +378,14 @@ function SeatTile({
 /** The panel's result line, with «Чек» for a money step and the guest's way in after a walk-in seat. */
 function SeatNote({ note }: { note: NoteState }): JSX.Element | null {
   if (!note) return null;
-  if (!note.receipt && !note.hint) return <Note note={note} />;
   return (
     <div
+      role={note.tone === 'err' ? 'alert' : 'status'}
       className={clsx(
         'flex flex-col gap-2 rounded-md px-3 py-2 text-sm',
-        note.tone === 'ok' ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger',
+        note.tone === 'ok' && 'bg-success/10 text-success',
+        note.tone === 'warn' && 'bg-warning/10 text-warning',
+        note.tone === 'err' && 'bg-danger/10 text-danger',
       )}
     >
       <div className="flex items-start justify-between gap-3">
@@ -438,23 +485,177 @@ function ExactSummary({ price, label }: { price: number; label?: string }): JSX.
   );
 }
 
-/** Message, lock, reboot, shutdown: behind "Ещё ⋯" so the money actions stay on top. */
+/** What a PC did with a command, in words: never «done» when it was only queued or did not answer (D-66). */
+function ackNote(ack: CommandAck, done: string): NoteState {
+  if (ack.ok) return { text: done, tone: 'ok' };
+  if (ack.error?.code === 'agentOffline') return { text: t('ПК офлайн — команда в очереди до 10 мин'), tone: 'warn' };
+  if (ack.error?.code === 'timeout') return { text: t('Нет ответа от ПК за 30 с — команда в очереди'), tone: 'warn' };
+  return { text: t('Ошибка: {code}', { code: ack.error?.code ?? '—' }), tone: 'err' };
+}
+
+/** One PC's result of a bulk command (D-65), as the results list and the panel's note say it. */
+function outcomeText(r: BulkResult): string {
+  const parts: string[] = [];
+  const refunded = amountOf(r.ended?.refunded);
+  const charged = amountOf(r.ended?.charged);
+  if (r.ended) {
+    parts.push(
+      refunded && refunded > 0
+        ? t('сеанс завершён, возврат {sum}', { sum: moneyExact(refunded) })
+        : charged && charged > 0
+          ? t('сеанс завершён, списано {sum}', { sum: moneyExact(charged) })
+          : t('сеанс завершён'),
+    );
+  }
+  switch (r.outcome) {
+    case 'done':
+      parts.push(t('✓ выполнено'));
+      break;
+    case 'queued':
+      parts.push(t('в очереди до 10 мин'));
+      break;
+    case 'noAnswer':
+      parts.push(t('нет ответа за 30 с'));
+      break;
+    case 'failed':
+      parts.push(t('ошибка: {code}', { code: r.ack?.error?.code ?? '—' }));
+      break;
+    case 'skipped':
+      parts.push(
+        r.skipped === 'sessionOpen'
+          ? t('пропущен: идёт сеанс')
+          : r.skipped === 'offline'
+            ? t('пропущен: офлайн')
+            : t('пропущен: нет такого ПК'),
+      );
+      break;
+  }
+  return parts.join(' · ');
+}
+
+const POWER_LABEL: Record<'reboot' | 'shutdown', { verb: string; done: string }> = {
+  reboot: { verb: 'Перезагрузить', done: 'ПК перезагружается' },
+  shutdown: { verb: 'Выключить', done: 'ПК выключается' },
+};
+
+/** The players a power command or a lock would interrupt: PC, who, time left. */
+function BusyList({ seats }: { seats: Seat[] }): JSX.Element {
+  return (
+    <ul aria-label={t('Идут сеансы')} className="flex max-h-56 flex-col divide-y divide-line overflow-y-auto">
+      {seats.map((s) => (
+        <li key={s.pc.id} className="flex items-baseline justify-between gap-3 py-1.5 text-sm">
+          <span className="min-w-0 truncate">
+            <span className="font-mono text-xs text-muted">{pcLabel(s.pc.name)}</span> {s.user ? nameOf(s.user) : '—'}
+          </span>
+          <span className="tnum shrink-0 font-mono text-xs text-muted">
+            {s.session?.isPrepaid
+              ? t('осталось {time}', { time: duration(secondsLeft(s.session)) })
+              : s.session
+                ? t('играет {time}', { time: duration(s.session.secondsUsed) })
+                : ''}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * Asks before a command interrupts players (D-66): a reboot or shutdown ends their sessions first (unused prepaid time
+ * back to the balance), a lock closes the game while the clock runs. One busy PC may be moved instead.
+ */
+function PowerConfirm({
+  kind,
+  busy,
+  sending,
+  onConfirm,
+  onMove,
+  onClose,
+}: {
+  kind: 'lock' | 'reboot' | 'shutdown';
+  busy: Seat[];
+  sending: boolean;
+  onConfirm: () => void;
+  onMove?: (seat: Seat) => void;
+  onClose: () => void;
+}): JSX.Element {
+  const lock = kind === 'lock';
+  const verb = lock ? t('Заблокировать') : t(POWER_LABEL[kind].verb);
+  const one = busy.length === 1 ? busy[0] : undefined;
+  return (
+    <Sheet title={t('{verb} · идут сеансы: {n}', { verb, n: busy.length })} onClose={onClose}>
+      <BusyList seats={busy} />
+      <p className="rounded-md bg-white/[0.04] px-3 py-2 text-sm">
+        {lock ? t('Игра закроется, время идёт') : t('Сеанс будет завершён, неиспользованное время вернётся на баланс')}
+      </p>
+      <div className="flex flex-wrap justify-end gap-2 border-t border-line pt-4">
+        <Button variant="ghost" autoFocus onClick={onClose}>
+          {t('Отмена')}
+        </Button>
+        {one && onMove && !lock && <Button onClick={() => onMove(one)}>{t('Пересадить')}</Button>}
+        <Button variant="danger" className="border border-danger/50" disabled={sending} onClick={onConfirm}>
+          {sending ? '…' : verb}
+        </Button>
+      </div>
+    </Sheet>
+  );
+}
+
+/**
+ * Message, lock, reboot, shutdown: behind "Ещё ⋯" so the money actions stay on top. Each says what the PC did: an
+ * offline PC queues the command, a silent one did not answer. Reboot and shutdown go through the bulk route (D-66): of a
+ * busy PC they ask first and end the session at the desk (refund, journal) before the PC restarts.
+ */
 function TechActions({
   seat,
   busy,
   run,
+  onStartMove,
 }: {
   seat: Seat;
   busy: boolean;
   run: (key: string, fn: () => Promise<string | NoteState>) => Promise<void>;
+  onStartMove?: () => void;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState('');
-  const command = (kind: 'lock' | 'unlock' | 'reboot' | 'shutdown', done: string): void =>
+  const [confirm, setConfirm] = useState<'reboot' | 'shutdown' | null>(null);
+  const key = useHeldKey();
+  const lastKind = useRef<string | null>(null);
+  useEffect(() => {
+    key.reset();
+    lastKind.current = null;
+    setConfirm(null);
+  }, [seat.pc.id, key]);
+  const command = (kind: 'lock' | 'unlock', done: string): void =>
+    void run(kind, async () => ackNote((await adminApi.command(seat.pc.id, { kind })).ack, done));
+  const power = (kind: 'reboot' | 'shutdown', includeBusy: boolean): void => {
+    setConfirm(null);
+    // A key is held for one request: another kind (or another PC) is another request.
+    if (lastKind.current !== `${kind}|${includeBusy}`) key.reset();
+    lastKind.current = `${kind}|${includeBusy}`;
     void run(kind, async () => {
-      await adminApi.command(seat.pc.id, { kind });
-      return done;
+      try {
+        const r = await adminApi.pcCommands(
+          { pcIds: [seat.pc.id], kind, ...(includeBusy ? { includeBusy: true } : {}) },
+          key.take(),
+        );
+        key.settle();
+        const result = r.results[0];
+        if (!result) return { text: t('ПК не ответил'), tone: 'warn' };
+        const tone = result.outcome === 'failed' ? 'err' : result.outcome === 'done' ? 'ok' : 'warn';
+        const text = result.outcome === 'done' && !result.ended ? t(POWER_LABEL[kind].done) : outcomeText(result);
+        return { text, tone };
+      } catch (e) {
+        key.settle(e);
+        throw e;
+      }
     });
+  };
+  const ask = (kind: 'reboot' | 'shutdown'): void => {
+    if (seat.session) setConfirm(kind);
+    else power(kind, false);
+  };
   return (
     <section className="flex flex-col gap-2">
       <Button variant="ghost" className="justify-between" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
@@ -475,9 +676,9 @@ function TechActions({
                 disabled={busy || message.trim().length === 0}
                 onClick={() =>
                   void run('msg', async () => {
-                    await adminApi.command(seat.pc.id, { kind: 'message', text: message.trim() });
+                    const r = await adminApi.command(seat.pc.id, { kind: 'message', text: message.trim() });
                     setMessage('');
-                    return t('Сообщение отправлено');
+                    return ackNote(r.ack, t('Сообщение доставлено'));
                   })
                 }
               >
@@ -492,16 +693,397 @@ function TechActions({
             <Button variant="ghost" disabled={busy} onClick={() => command('unlock', t('ПК разблокирован'))}>
               {t('Разблокировать')}
             </Button>
-            <Button variant="ghost" disabled={busy} onClick={() => command('reboot', t('ПК перезагружается'))}>
+            <Button variant="ghost" disabled={busy} onClick={() => ask('reboot')}>
               {t('Перезагрузить')}
             </Button>
-            <Button variant="ghost" disabled={busy} onClick={() => command('shutdown', t('ПК выключается'))}>
+            <Button variant="ghost" disabled={busy} onClick={() => ask('shutdown')}>
               {t('Выключить')}
             </Button>
           </div>
         </div>
       )}
+      {confirm && (
+        <PowerConfirm
+          kind={confirm}
+          busy={[seat]}
+          sending={busy}
+          onConfirm={() => power(confirm, true)}
+          onMove={
+            onStartMove
+              ? () => {
+                  setConfirm(null);
+                  onStartMove();
+                }
+              : undefined
+          }
+          onClose={() => setConfirm(null)}
+        />
+      )}
     </section>
+  );
+}
+
+/** Ready-made texts of a message to several PCs. */
+const MESSAGE_PRESETS = ['Закрываемся через 20 минут', 'Подойдите, пожалуйста, к администратору', 'Пожалуйста, потише'];
+
+/**
+ * Two or more PCs picked on the map (D-66): one command to all of them, with a count of the PCs it will reach on each
+ * button and why the rest are left out (offline PCs get no lock or power command: the next player would). Busy PCs are
+ * listed before a lock or a power command; then every PC's result: done, queued (offline: up to 10 minutes), no answer,
+ * skipped and why, the session ended with its refund. «Повторить для неудачных» sends again only to the failed ones.
+ */
+function BulkPanel({
+  seats,
+  onDone,
+  onClear,
+  onStartMove,
+}: {
+  seats: Seat[];
+  onDone: () => void;
+  onClear: () => void;
+  onStartMove: (seat: Seat) => void;
+}): JSX.Element {
+  const shift = useShift();
+  const [text, setText] = useState('');
+  const [level, setLevel] = useState<'info' | 'warning'>('info');
+  const [sending, setSending] = useState<PcCommandKind | null>(null);
+  const [confirm, setConfirm] = useState<'lock' | 'reboot' | 'shutdown' | null>(null);
+  const [results, setResults] = useState<{ kind: PcCommandKind; includeBusy: boolean; list: BulkResult[] } | null>(
+    null,
+  );
+  const [error, setError] = useState<string | null>(null);
+  const key = useHeldKey();
+  const lastBody = useRef<string | null>(null);
+  const offline = seats.filter((s) => s.pc.status === 'offline');
+  const reachable = seats.filter((s) => s.pc.status !== 'offline');
+  const busy = reachable.filter((s) => s.session !== null);
+  const numbers = seats.map((s) => String(s.pc.number).padStart(2, '0'));
+  const names = new Map(seats.map((s) => [s.pc.id, s.pc.name]));
+
+  const send = async (kind: PcCommandKind, pcIds: string[], includeBusy: boolean): Promise<void> => {
+    const input = {
+      pcIds,
+      kind,
+      ...(kind === 'message' ? { text: text.trim(), level } : {}),
+      ...(includeBusy ? { includeBusy: true } : {}),
+    };
+    // The key belongs to one body: another command or another set of PCs is another request.
+    const body = JSON.stringify(input);
+    if (lastBody.current !== body) key.reset();
+    lastBody.current = body;
+    setSending(kind);
+    setConfirm(null);
+    setError(null);
+    try {
+      const r = await adminApi.pcCommands(input, key.take());
+      key.settle();
+      setResults({ kind, includeBusy, list: r.results });
+      onDone();
+      shift.refresh();
+    } catch (e) {
+      key.settle(e);
+      setError(
+        isLostAnswer(e)
+          ? t('Ответ сервера не пришёл: команда могла уйти. Повторите её — дважды она не отправится.')
+          : describe(e),
+      );
+    } finally {
+      setSending(null);
+    }
+  };
+
+  const act = (kind: PcCommandKind): void => {
+    if ((kind === 'lock' || kind === 'reboot' || kind === 'shutdown') && busy.length > 0) setConfirm(kind);
+    else
+      void send(
+        kind,
+        seats.map((s) => s.pc.id),
+        false,
+      );
+  };
+  const count = (n: number): string => (n === seats.length ? `(${n})` : t('({k} из {n})', { k: n, n: seats.length }));
+  const failed = results?.list.filter((r) => r.outcome === 'failed') ?? [];
+
+  return (
+    <div className="flex h-full flex-col gap-4 overflow-y-auto pr-1">
+      <header className="flex flex-col gap-1">
+        <span className="label">{t('Несколько ПК')}</span>
+        <h2 className="font-display text-2xl font-normal leading-tight tracking-tight">
+          {t('Выбрано {n}', { n: seats.length })}
+        </h2>
+        <span className="tnum font-mono text-xs text-muted">
+          {numbers.slice(0, 16).join(', ')}
+          {numbers.length > 16 ? '…' : ''}
+        </span>
+      </header>
+
+      <section className="flex flex-col gap-2">
+        <Field label={t('Сообщение на экран')}>
+          <input
+            className={inputCls}
+            value={text}
+            maxLength={500}
+            placeholder={t('Текст для игроков')}
+            onChange={(e) => setText(e.target.value)}
+          />
+        </Field>
+        <div className="flex flex-wrap gap-1.5">
+          {MESSAGE_PRESETS.map((m) => (
+            <Button key={m} size="sm" onClick={() => setText(t(m))}>
+              {t(m)}
+            </Button>
+          ))}
+        </div>
+        <Choice
+          label={t('Важность')}
+          value={level}
+          options={[
+            { id: 'info', label: t('Обычное') },
+            { id: 'warning', label: t('Важное') },
+          ]}
+          onChange={setLevel}
+        />
+        <Button
+          variant="primary"
+          disabled={sending !== null || text.trim().length === 0}
+          onClick={() => act('message')}
+        >
+          {sending === 'message' ? '…' : `${t('Сообщение')} ${count(seats.length)}`}
+        </Button>
+      </section>
+
+      <section className="grid grid-cols-2 gap-1.5">
+        <Button disabled={sending !== null || reachable.length === 0} onClick={() => act('lock')}>
+          {sending === 'lock' ? '…' : `${t('Заблокировать')} ${count(reachable.length)}`}
+        </Button>
+        <Button disabled={sending !== null} onClick={() => act('unlock')}>
+          {sending === 'unlock' ? '…' : `${t('Разблокировать')} ${count(seats.length)}`}
+        </Button>
+        <Button disabled={sending !== null || reachable.length === 0} onClick={() => act('reboot')}>
+          {sending === 'reboot' ? '…' : `${t('Перезагрузить')} ${count(reachable.length)}`}
+        </Button>
+        <Button disabled={sending !== null || reachable.length === 0} onClick={() => act('shutdown')}>
+          {sending === 'shutdown' ? '…' : `${t('Выключить')} ${count(reachable.length)}`}
+        </Button>
+      </section>
+      {offline.length > 0 && (
+        <p className="text-xs text-muted">
+          {t('Офлайн: {list} — блокировку и питание они не получат', {
+            list: offline.map((s) => String(s.pc.number).padStart(2, '0')).join(', '),
+          })}
+        </p>
+      )}
+      {busy.length > 0 && (
+        <p className="text-xs text-muted">
+          {t('Идут сеансы: {list} — перед блокировкой и питанием спросим', {
+            list: busy.map((s) => String(s.pc.number).padStart(2, '0')).join(', '),
+          })}
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
+          {error}
+        </p>
+      )}
+
+      {results && (
+        <section className="flex flex-col gap-2">
+          <h3 className="label text-text">{t('Результат по ПК')}</h3>
+          <ul aria-label={t('Результат по ПК')} className="flex flex-col divide-y divide-line">
+            {results.list.map((r) => (
+              <li key={r.pcId} data-pc-result={r.pcId} className="flex items-baseline gap-2 py-1.5 text-sm">
+                <span className="w-14 shrink-0 font-mono text-xs text-muted">
+                  {pcLabel(r.pcName ?? names.get(r.pcId) ?? '—')}
+                </span>
+                <span
+                  className={clsx(
+                    'min-w-0',
+                    r.outcome === 'done' && 'text-success',
+                    r.outcome === 'failed' && 'text-danger',
+                    (r.outcome === 'skipped' || r.outcome === 'noAnswer') && 'text-warning',
+                  )}
+                >
+                  {outcomeText(r)}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {failed.length > 0 && (
+            <Button
+              disabled={sending !== null}
+              onClick={() =>
+                void send(
+                  results.kind,
+                  failed.map((r) => r.pcId),
+                  results.includeBusy,
+                )
+              }
+            >
+              {t('Повторить для неудачных ({n})', { n: failed.length })}
+            </Button>
+          )}
+        </section>
+      )}
+
+      <Button variant="ghost" className="mt-auto" onClick={onClear}>
+        {t('Снять выбор')}
+        <Kbd>Esc</Kbd>
+      </Button>
+
+      {confirm && (
+        <PowerConfirm
+          kind={confirm}
+          busy={busy}
+          sending={sending !== null}
+          onConfirm={() =>
+            void send(
+              confirm,
+              seats.map((s) => s.pc.id),
+              confirm !== 'lock',
+            )
+          }
+          onMove={(s) => {
+            setConfirm(null);
+            onStartMove(s);
+          }}
+          onClose={() => setConfirm(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * «Пересадить» confirmed (D-59..D-61): from → to, the zones, the tariff kept or one to pick when the new zone does not
+ * sell it (prepaid; postpaid keeps its price), that the clock runs on and the game on the old PC closes, and how the
+ * player signs in there. One key is held until a definite answer: a lost one offers only the same move again.
+ */
+function MoveSheet({
+  from,
+  to,
+  tariffs,
+  onClose,
+  onMoved,
+}: {
+  from: Seat;
+  to: Seat;
+  tariffs: Tariff[];
+  onClose: () => void;
+  onMoved: (r: MoveResponse) => void;
+}): JSX.Element {
+  const session = from.session;
+  const user = from.user;
+  const current = tariffs.find((x) => x.id === session?.tariffId);
+  const sold = (tf: Tariff): boolean =>
+    tf.zones.length === 0 || tf.zones.some((z) => z.toLowerCase() === to.pc.zone.toLowerCase());
+  const choices = useMemo(
+    () => zoneTariffsOf(tariffs, to.pc.zone).filter((tf) => !tf.isPackage),
+    [tariffs, to.pc.zone],
+  );
+  const [needTariff, setNeedTariff] = useState(Boolean(session?.isPrepaid && current && !sold(current)));
+  const [tariffId, setTariffId] = useState(choices[0]?.id ?? '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lost, setLost] = useState(false);
+  const key = useHeldKey();
+  const guest = user?.role === 'guest';
+  if (!session || !user) {
+    return (
+      <Sheet title={t('Пересадить')} onClose={onClose}>
+        <p className="text-sm">{t('На ПК больше нет сеанса')}</p>
+      </Sheet>
+    );
+  }
+  const move = async (): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await adminApi.moveSession(
+        {
+          fromPcId: from.pc.id,
+          sessionId: session.id,
+          toPcId: to.pc.id,
+          ...(needTariff && tariffId ? { tariffId } : {}),
+        },
+        key.take(),
+      );
+      key.settle();
+      onMoved(r);
+    } catch (e) {
+      key.settle(e);
+      setLost(isLostAnswer(e));
+      if (reasonOf(e) === 'tariffZone' && !needTariff) {
+        // The map was older than the tariffs: pick one sold in the new zone. Another body, so another key.
+        setNeedTariff(true);
+        key.reset();
+      }
+      setError(
+        isLostAnswer(e)
+          ? t('Ответ сервера не пришёл: пересадка могла пройти. Повторите её — дважды она не пройдёт.')
+          : describe(e),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  const zoneChange = from.pc.zone.toLowerCase() !== to.pc.zone.toLowerCase();
+  return (
+    <Sheet
+      title={t('Пересадить · {from} → {to}', { from: pcLabel(from.pc.name), to: pcLabel(to.pc.name) })}
+      onClose={onClose}
+    >
+      <p className="text-sm">
+        {nameOf(user)} ·{' '}
+        {session.isPrepaid
+          ? t('осталось {time}', { time: duration(secondsLeft(session)) })
+          : t('играет {time}', { time: duration(session.secondsUsed) })}
+      </p>
+      {zoneChange && (
+        <p className="text-sm text-muted">{t('Зона: {from} → {to}', { from: from.pc.zone, to: to.pc.zone })}</p>
+      )}
+      {!session.isPrepaid ? (
+        <p className="text-sm text-muted">{t('Постоплата: цена минуты остаётся прежней')}</p>
+      ) : needTariff ? (
+        <Field label={t('Тариф на новом ПК')} hint={t('Нынешний тариф не продаётся в этой зоне')}>
+          <select
+            className={inputCls}
+            value={tariffId}
+            disabled={busy || lost}
+            onChange={(e) => {
+              setTariffId(e.target.value);
+              key.reset();
+            }}
+          >
+            {choices.map((tf) => (
+              <option key={tf.id} value={tf.id}>
+                {tf.name} · {money(tf.pricePerHour)}
+                {t(' / ч')}
+              </option>
+            ))}
+          </select>
+        </Field>
+      ) : (
+        current && <p className="text-sm text-muted">{t('Тариф остаётся: {name}', { name: current.name })}</p>
+      )}
+      <ul className="flex list-disc flex-col gap-1 rounded-md bg-white/[0.04] px-3 py-2 pl-7 text-sm">
+        <li>{t('Часы идут: время не останавливается, пока игрок пересаживается')}</li>
+        <li>{t('На {pc} игра закроется', { pc: pcLabel(from.pc.name) })}</li>
+        <li>
+          {guest
+            ? t('{pc}: гость входит кнопкой «Гость»', { pc: pcLabel(to.pc.name) })
+            : t('{pc}: игрок входит своим логином', { pc: pcLabel(to.pc.name) })}
+        </li>
+      </ul>
+      <Note note={error ? { text: error, tone: 'err' } : null} />
+      <div className="flex justify-end gap-2 border-t border-line pt-4">
+        <Button variant="ghost" onClick={onClose}>
+          {t('Отмена')}
+        </Button>
+        <Button variant="primary" autoFocus disabled={busy || (needTariff && !tariffId)} onClick={() => void move()}>
+          {busy ? '…' : lost ? t('Повторить') : t('Пересадить')}
+        </Button>
+      </div>
+    </Sheet>
   );
 }
 
@@ -512,6 +1094,8 @@ function SeatPanel({
   sheet,
   setSheet,
   onDone,
+  call,
+  onStartMove,
 }: {
   seat: Seat;
   members: Member[];
@@ -519,6 +1103,10 @@ function SeatPanel({
   sheet: SheetState;
   setSheet: (s: SheetState) => void;
   onDone: () => void;
+  /** The player's calls of this PC. */
+  call?: CallGroup;
+  /** «Пересадить на другой ПК…»: the map picks the target. */
+  onStartMove: () => void;
 }): JSX.Element {
   const shift = useShift();
   const [busy, setBusy] = useState<string | null>(null);
@@ -567,6 +1155,21 @@ function SeatPanel({
 
   return (
     <div className="flex h-full flex-col gap-5 overflow-y-auto pr-1">
+      {call && (
+        <section
+          aria-label={t('Вызов администратора')}
+          className={clsx(
+            'flex flex-col gap-2 rounded-md border px-3 py-2.5',
+            call.ringing ? 'border-danger/60 bg-danger/10' : 'border-warning/50 bg-warning/10',
+          )}
+        >
+          <p className={clsx('flex items-start gap-2 text-sm', call.ringing ? 'text-danger' : 'text-warning')}>
+            <CallMark ringing={call.ringing} />
+            <span>{groupLine(call)}</span>
+          </p>
+          <CallGroupActions group={call} compact />
+        </section>
+      )}
       {seat.session && seat.user ? (
         <BusySeat
           seat={seat}
@@ -583,6 +1186,7 @@ function SeatPanel({
           version={version}
           onDone={done}
           setNote={setNote}
+          onStartMove={onStartMove}
         />
       ) : (
         <FreeSeat
@@ -635,6 +1239,7 @@ function BusySeat({
   version,
   onDone,
   setNote,
+  onStartMove,
 }: PartProps & {
   session: Session;
   user: SeatUser;
@@ -642,6 +1247,7 @@ function BusySeat({
   sheet: SheetState;
   setSheet: (s: SheetState) => void;
   version: number;
+  onStartMove: () => void;
 }): JSX.Element {
   const shift = useShift();
   const hit = useClientHit(user, username, version);
@@ -759,7 +1365,23 @@ function BusySeat({
         </section>
       )}
 
-      <TechActions seat={seat} busy={busy !== null} run={run} />
+      <section className="grid grid-cols-2 gap-1.5">
+        <Button
+          disabled={busy !== null}
+          onClick={() => {
+            // The bar with this player and PC as the buyer.
+            showBar({ pcId: seat.pc.id, userId: user.id });
+            window.location.hash = '/bar';
+          }}
+        >
+          {t('Бар')}
+        </Button>
+        <Button disabled={busy !== null} onClick={onStartMove}>
+          {t('Пересадить на другой ПК…')}
+        </Button>
+      </section>
+
+      <TechActions seat={seat} busy={busy !== null} run={run} onStartMove={onStartMove} />
 
       <section className="mt-auto flex flex-col gap-2 border-t border-dashed border-danger/30 pt-4">
         <Button
@@ -1799,13 +2421,23 @@ export function MapPage(): JSX.Element {
   const [data, setData] = useState<Overview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  /** Two or more PCs picked for one command (D-66); empty — the single `selected` seat. */
+  const [multi, setMulti] = useState<Set<string>>(() => new Set());
+  /** «Выбрать»: clicks toggle PCs in and out of the set (for touch, where there is no Ctrl). */
+  const [selectMode, setSelectMode] = useState(false);
+  /** A session waiting for its new PC: the map picks the target. */
+  const [movePick, setMovePick] = useState<{ fromPcId: string } | null>(null);
+  /** «Пересажен на ПК 07 · ждёт входа», shown over the target's panel after a move. */
+  const [moved, setMoved] = useState<{ pcId: string; text: string } | null>(null);
   const [filter, setFilter] = useState<Filter | null>(null);
   const [sheet, setSheet] = useState<SheetState>(null);
   const [digits, setDigits] = useState('');
   const [tick, setTick] = useState(0);
   const [panel, setPanelState] = useState<'seat' | 'feed'>(readPanel);
+  const anchor = useRef<string | null>(null);
   const wide = useWide();
   const shift = useShift();
+  const calls = useCalls();
 
   const setPanel = (v: 'seat' | 'feed'): void => {
     setPanelState(v);
@@ -1819,7 +2451,10 @@ export function MapPage(): JSX.Element {
 
   const load = useCallback(async () => {
     try {
-      setData(await adminApi.overview());
+      const o = await adminApi.overview();
+      setData(o);
+      // The map polls faster than the top bar: the calls ring and stop sooner here.
+      setCalls(o.calls);
       setError(null);
     } catch (e) {
       setError(describe(e));
@@ -1836,11 +2471,12 @@ export function MapPage(): JSX.Element {
     };
   }, [load]);
 
-  // "Показать ПК" from the top-bar search.
+  // "Показать ПК" from the top-bar search and the calls.
   useEffect(
     () =>
       onShowPc((pcId) => {
         setSelected(pcId);
+        setMulti(new Set());
         setPanelState('seat');
         setSheet(null);
         window.setTimeout(() => document.getElementById(`seat-${pcId}`)?.scrollIntoView({ block: 'nearest' }), 0);
@@ -1854,23 +2490,124 @@ export function MapPage(): JSX.Element {
   // settle sheet belongs to the map and stays.
   const sessionId = seat?.session?.id ?? null;
   useEffect(() => setSheet((s) => (s?.kind === 'extend' || s?.kind === 'end' ? null : s)), [selected, sessionId]);
+  useEffect(() => {
+    if (moved && moved.pcId !== selected) setMoved(null);
+  }, [moved, selected]);
+  // The session ended (or moved elsewhere) while its target was being picked: nothing left to move.
+  useEffect(() => {
+    if (movePick && data && !data.seats.find((s) => s.pc.id === movePick.fromPcId)?.session) setMovePick(null);
+  }, [movePick, data]);
 
-  // Keys: digits then Enter pick a PC by number; Esc closes the sheet, then the typed number, then the panel.
-  const keys = useRef({ seats, digits, sheet, selected });
-  keys.current = { seats, digits, sheet, selected };
+  const repairs = useMemo(
+    () => new Map((data?.repairs ?? []).map((r) => [r.pcId, r.severity] as const)),
+    [data?.repairs],
+  );
+  const callsByPc = useMemo(() => new Map(groupCalls(calls ?? []).map((g) => [g.pcId, g] as const)), [calls]);
+  const zones = useMemo(() => {
+    const out = new Map<string, Seat[]>();
+    for (const s of seats) {
+      out.set(s.pc.zone, [...(out.get(s.pc.zone) ?? []), s]);
+    }
+    return [...out.entries()];
+  }, [seats]);
+  const active = filter ? FILTERS.find((x) => x.id === filter) : undefined;
+  void tick;
+  const shownIds = zones.flatMap(([, list]) =>
+    list.filter((x) => !active || active.test(x, repairs.has(x.pc.id))).map((x) => x.pc.id),
+  );
+
+  /** The set as it is: two or more go to the bulk panel, one is the selected seat, none clears both. */
+  const applySelection = (next: Set<string>): void => {
+    if (next.size >= 2) {
+      setMulti(next);
+      return;
+    }
+    setMulti(new Set());
+    const [only] = [...next];
+    pick(only ?? null);
+  };
+  const currentSet = (): Set<string> => {
+    const out = new Set(multi);
+    if (out.size === 0 && selected) out.add(selected);
+    return out;
+  };
+  const toggle = (pcId: string): void => {
+    const next = currentSet();
+    if (next.has(pcId)) next.delete(pcId);
+    else next.add(pcId);
+    anchor.current = pcId;
+    applySelection(next);
+  };
+  /** A target the move cannot take: busy, offline, in maintenance, or the PC it comes from. */
+  const notTarget = (x: Seat): boolean =>
+    movePick !== null &&
+    (x.pc.id === movePick.fromPcId || x.session !== null || x.pc.status === 'offline' || x.pc.status === 'maintenance');
+  const chooseTarget = (x: Seat): void => {
+    if (!movePick || notTarget(x)) return;
+    setSheet({ kind: 'move', fromPcId: movePick.fromPcId, toPcId: x.pc.id });
+  };
+  const onTile = (x: Seat, e: React.MouseEvent<HTMLButtonElement>): void => {
+    if (movePick) {
+      chooseTarget(x);
+      return;
+    }
+    if (e.shiftKey && anchor.current) {
+      const a = shownIds.indexOf(anchor.current);
+      const b = shownIds.indexOf(x.pc.id);
+      if (a >= 0 && b >= 0) {
+        const next = currentSet();
+        for (const id of shownIds.slice(Math.min(a, b), Math.max(a, b) + 1)) next.add(id);
+        applySelection(next);
+        return;
+      }
+    }
+    if (selectMode || e.ctrlKey || e.metaKey) {
+      toggle(x.pc.id);
+      return;
+    }
+    // A plain click: that one PC, whatever was picked before.
+    anchor.current = x.pc.id;
+    setMulti(new Set());
+    pick(x.pc.id);
+  };
+  const startMove = (from: Seat): void => {
+    setMulti(new Set());
+    setSelectMode(false);
+    setSheet(null);
+    pick(from.pc.id);
+    setMovePick({ fromPcId: from.pc.id });
+  };
+
+  // Keys: digits then Enter pick a PC by number (in «Выбрать» mode they toggle it, while a move waits they pick its
+  // target); Ctrl+A takes every PC shown; Esc closes the sheet, then the set, then the move, then the typed number,
+  // then the panel.
+  const keys = useRef({ seats, digits, sheet, selected, multi, selectMode, movePick, shownIds, toggle, chooseTarget });
+  keys.current = { seats, digits, sheet, selected, multi, selectMode, movePick, shownIds, toggle, chooseTarget };
   useEffect(() => {
     let timer = 0;
     const on = (e: KeyboardEvent): void => {
       const k = keys.current;
       if (e.key === 'Escape') {
         if (k.sheet) setSheet(null);
+        else if (k.multi.size > 0 || k.selectMode) {
+          setMulti(new Set());
+          setSelectMode(false);
+        } else if (k.movePick) setMovePick(null);
         else if (k.digits) setDigits('');
         // In a field the first Esc only leaves it; the next one closes the panel.
         else if (isTyping(e) && e.target instanceof HTMLElement) e.target.blur();
         else if (k.selected) setSelected(null);
         return;
       }
-      if (isTyping(e) || sheetOpen() || e.altKey || e.ctrlKey || e.metaKey) return;
+      if (isTyping(e) || sheetOpen()) return;
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.code === 'KeyA' || e.key.toLowerCase() === 'a')) {
+        if (k.movePick || k.shownIds.length === 0) return;
+        e.preventDefault();
+        const all = new Set(k.shownIds);
+        if (all.size >= 2) setMulti(all);
+        return;
+      }
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
       if (/^\d$/.test(e.key)) {
         setDigits((d) => (d + e.key).slice(-3));
         window.clearTimeout(timer);
@@ -1880,8 +2617,13 @@ export function MapPage(): JSX.Element {
         const n = Number(k.digits);
         const hit = k.seats.find((s) => s.pc.number === n);
         if (hit) {
-          setSelected(hit.pc.id);
-          setPanelState('seat');
+          if (k.movePick) k.chooseTarget(hit);
+          else if (k.selectMode) k.toggle(hit.pc.id);
+          else {
+            setSelected(hit.pc.id);
+            setMulti(new Set());
+            setPanelState('seat');
+          }
           document.getElementById(`seat-${hit.pc.id}`)?.scrollIntoView({ block: 'nearest' });
         }
         setDigits('');
@@ -1895,18 +2637,6 @@ export function MapPage(): JSX.Element {
       window.clearTimeout(timer);
     };
   }, []);
-
-  const repairs = useMemo(
-    () => new Map((data?.repairs ?? []).map((r) => [r.pcId, r.severity] as const)),
-    [data?.repairs],
-  );
-  const zones = useMemo(() => {
-    const out = new Map<string, Seat[]>();
-    for (const s of seats) {
-      out.set(s.pc.zone, [...(out.get(s.pc.zone) ?? []), s]);
-    }
-    return [...out.entries()];
-  }, [seats]);
 
   // PCs behind the newest version seen in the hall: the check list of a manual update round.
   const outdated = useMemo(() => {
@@ -1928,16 +2658,23 @@ export function MapPage(): JSX.Element {
     }
     return c;
   }, [seats]);
-  void tick;
   // Recounted every second: "ending soon" moves with the clock.
   const matches = (f: Filter, s: Seat): boolean =>
     FILTERS.find((x) => x.id === f)?.test(s, repairs.has(s.pc.id)) ?? false;
   const occupied = seats.filter((s) => s.session !== null).length;
-  const active = filter ? FILTERS.find((x) => x.id === filter) : undefined;
   const debts = data?.guestDebts ?? [];
   const allRefunds = data?.guestRefunds ?? [];
   const refunds = allRefunds.filter((r) => r.payable.amount > 0);
-  const showFeedInPanel = !wide && (!seat || panel === 'feed');
+  const bulk = multi.size >= 2 ? seats.filter((s) => multi.has(s.pc.id)) : [];
+  const showFeedInPanel = !wide && bulk.length === 0 && (!seat || panel === 'feed');
+  const moveFrom = movePick ? seats.find((s) => s.pc.id === movePick.fromPcId) : undefined;
+  const moveSheet =
+    sheet?.kind === 'move'
+      ? {
+          from: seats.find((s) => s.pc.id === sheet.fromPcId),
+          to: seats.find((s) => s.pc.id === sheet.toPcId),
+        }
+      : null;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
@@ -1949,6 +2686,22 @@ export function MapPage(): JSX.Element {
             list: outdated.names.join(', '),
           })}
         </p>
+      )}
+      {movePick && (
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-accent/50 bg-accent/10 px-3 py-2 text-sm"
+        >
+          <span>
+            {t('Пересадка с {pc}: нажмите свободный ПК на карте (или номер и Enter)', {
+              pc: moveFrom ? pcLabel(moveFrom.pc.name) : '—',
+            })}
+          </span>
+          <Button size="sm" variant="ghost" onClick={() => setMovePick(null)}>
+            {t('Отмена')}
+            <Kbd>Esc</Kbd>
+          </Button>
+        </div>
       )}
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_21rem] xl:grid-cols-[minmax(0,1fr)_26rem] min-[1800px]:grid-cols-[minmax(0,1fr)_26rem_22rem]">
         <div className="flex min-h-0 flex-col gap-5">
@@ -1979,8 +2732,26 @@ export function MapPage(): JSX.Element {
                   );
                 })}
               </div>
+              <button
+                type="button"
+                aria-pressed={selectMode}
+                disabled={movePick !== null}
+                title={t('Ctrl+клик, Shift+клик, Ctrl+A')}
+                onClick={() => {
+                  if (selectMode) setMulti(new Set());
+                  setSelectMode((v) => !v);
+                }}
+                className={clsx(
+                  'choice focus-ring inline-flex h-8 items-center gap-2 rounded-md px-2.5 text-xs font-medium disabled:opacity-40',
+                  selectMode && 'choice-on',
+                )}
+              >
+                {t('Выбрать')}
+              </button>
               <span className="ml-auto flex items-center gap-2 font-mono text-xs text-muted" aria-live="polite">
-                {digits ? (
+                {multi.size >= 2 ? (
+                  <span className="text-accent">{t('Выбрано {n}', { n: multi.size })}</span>
+                ) : digits ? (
                   <>
                     <span className="text-accent">{t('ПК {n}', { n: digits })}</span>
                     <Kbd>Enter</Kbd>
@@ -2008,9 +2779,16 @@ export function MapPage(): JSX.Element {
                         key={x.pc.id}
                         seat={x}
                         repair={repairs.get(x.pc.id)}
-                        selected={x.pc.id === selected}
+                        call={callsByPc.get(x.pc.id)}
+                        selected={multi.size === 0 && x.pc.id === selected}
+                        checked={
+                          selectMode || multi.size > 0
+                            ? multi.has(x.pc.id) || (multi.size === 0 && x.pc.id === selected)
+                            : null
+                        }
                         dimmed={active !== undefined && !active.test(x, repairs.has(x.pc.id))}
-                        onSelect={() => pick(x.pc.id)}
+                        blocked={notTarget(x)}
+                        onSelect={(e) => onTile(x, e)}
                       />
                     ))}
                   </div>
@@ -2042,7 +2820,7 @@ export function MapPage(): JSX.Element {
         </div>
 
         <aside className="panel flex min-h-0 flex-col gap-4 p-5">
-          {seat && !wide && (
+          {seat && !wide && bulk.length === 0 && (
             <Choice
               label={t('Панель')}
               value={panel}
@@ -2053,16 +2831,37 @@ export function MapPage(): JSX.Element {
               onChange={setPanel}
             />
           )}
-          {seat && data && !showFeedInPanel ? (
+          {bulk.length > 0 ? (
             <div className="min-h-0 flex-1">
-              <SeatPanel
-                seat={seat}
-                members={data.users}
-                tariffs={data.tariffs}
-                sheet={sheet}
-                setSheet={setSheet}
+              <BulkPanel
+                seats={bulk}
                 onDone={() => void load()}
+                onClear={() => {
+                  setMulti(new Set());
+                  setSelectMode(false);
+                }}
+                onStartMove={startMove}
               />
+            </div>
+          ) : seat && data && !showFeedInPanel ? (
+            <div className="flex min-h-0 flex-1 flex-col gap-3">
+              {moved && moved.pcId === seat.pc.id && (
+                <p role="status" className="rounded-md bg-success/10 px-3 py-2 text-sm text-success">
+                  {moved.text}
+                </p>
+              )}
+              <div className="min-h-0 flex-1">
+                <SeatPanel
+                  seat={seat}
+                  members={data.users}
+                  tariffs={data.tariffs}
+                  sheet={sheet}
+                  setSheet={setSheet}
+                  onDone={() => void load()}
+                  call={callsByPc.get(seat.pc.id)}
+                  onStartMove={() => startMove(seat)}
+                />
+              </div>
             </div>
           ) : showFeedInPanel ? (
             <>
@@ -2103,6 +2902,26 @@ export function MapPage(): JSX.Element {
           target={sheet.target}
           onClose={() => setSheet(null)}
           onDone={() => {
+            void load();
+            shift.refresh();
+          }}
+        />
+      )}
+      {moveSheet?.from && moveSheet.to && data && (
+        <MoveSheet
+          from={moveSheet.from}
+          to={moveSheet.to}
+          tariffs={data.tariffs}
+          onClose={() => setSheet(null)}
+          onMoved={(r) => {
+            setSheet(null);
+            setMovePick(null);
+            setMulti(new Set());
+            pick(r.to.pcId);
+            setMoved({
+              pcId: r.to.pcId,
+              text: `${t('Пересажен на {pc}', { pc: pcLabel(r.to.name) })} · ${t('ждёт входа')}`,
+            });
             void load();
             shift.refresh();
           }}

@@ -112,7 +112,10 @@ async function registerAgent(request: APIRequestContext, tag: string): Promise<A
   return { pcId, hwid, accessToken, signingSecret };
 }
 
-/** A request of the Agent on `pc` (bearer and signature), as the signed-in player when `userToken` is given. */
+/**
+ * A request of the Agent on `pc` (bearer and signature), as the signed-in player when `userToken` is given; `headers`
+ * adds an `Idempotency-Key` where the route needs one.
+ */
 async function agentCall(
   request: APIRequestContext,
   pc: AgentPc,
@@ -120,6 +123,7 @@ async function agentCall(
   path: string,
   data?: Record<string, unknown>,
   userToken?: string,
+  headers: Record<string, string> = {},
 ): Promise<APIResponse> {
   const body = data === undefined ? '' : JSON.stringify(data);
   const target = new URL(`${API}${path}`).pathname;
@@ -130,22 +134,57 @@ async function agentCall(
       ...(body ? { 'Content-Type': 'application/json' } : {}),
       ...(userToken ? { 'X-User-Token': userToken } : {}),
       ...signature(pc.signingSecret, method, target, body),
+      ...headers,
     },
     ...(body ? { data: body } : {}),
   });
 }
 
+/**
+ * The Agent's heartbeat (a full `HeartbeatRequest`): a registered PC is offline until its first one, on the server and
+ * on the mock. `currentSessionId` and `offlineQueue` are what a move onto the PC is checked against (D-59).
+ */
+async function heartbeat(
+  request: APIRequestContext,
+  pc: AgentPc,
+  { currentSessionId = null, offlineQueue = 0 }: { currentSessionId?: string | null; offlineQueue?: number } = {},
+): Promise<void> {
+  const res = await agentCall(request, pc, 'POST', `/agents/${pc.pcId}/heartbeat`, {
+    status: 'free',
+    currentSessionId,
+    agentVersion: '1.0.16',
+    shellVersion: '1.0.16',
+    uptimeSec: 600,
+    ipAddress: '10.0.0.10',
+    policyVersion: 0,
+    runningGames: [],
+    offlineQueue,
+    shellConnected: true,
+  });
+  expect(res.ok(), await res.text()).toBeTruthy();
+}
+
 interface OverviewSeat {
-  pc: { id: string; number: number; status: string };
+  pc: { id: string; name: string; number: number; status: string };
   session: { id: string; cost: { amount: number }; secondsLeft: number; isPrepaid: boolean } | null;
-  user: { id: string; displayName: string; role: string } | null;
+  user: { id: string; displayName: string; role: string; balance: { amount: number } } | null;
   signedIn?: boolean | null;
+}
+
+interface CallRow {
+  id: string;
+  pcId: string;
+  category: string;
+  message: string | null;
+  status: string;
+  repeat: boolean;
 }
 
 async function overview(request: APIRequestContext): Promise<{
   seats: OverviewSeat[];
   tariffs: { id: string; name: string; isPackage: boolean }[];
   guestDebts?: { userId: string; displayName: string; debt: { amount: number } }[];
+  calls?: CallRow[];
 }> {
   const headers = auth(await tokenFor(request, CASHIER_PIN));
   return (await request.get(`${API}/admin/overview`, { headers })).json();
@@ -159,7 +198,15 @@ async function seatOf(request: APIRequestContext, pcId: string): Promise<Overvie
 
 async function shiftState(request: APIRequestContext): Promise<{
   shift: { id: string; openingCash: number } | null;
-  x: { topUpByMethod: Record<string, number>; cashIn?: number; cashOut?: number; payouts?: number } | null;
+  x: {
+    topUpByMethod: Record<string, number>;
+    cashIn?: number;
+    cashOut?: number;
+    payouts?: number;
+    shop?: number;
+    shopByMethod?: Record<string, number>;
+    shopVoidCount?: number;
+  } | null;
   expectedCash?: number | null;
 }> {
   const headers = auth(await tokenFor(request, OWNER_PIN));
@@ -187,6 +234,188 @@ async function standardTariff(request: APIRequestContext): Promise<string> {
   expect(standard).toBeTruthy();
   return standard!.id;
 }
+
+interface ProductRow {
+  id: string;
+  title: string;
+  price: { amount: number };
+  stockQty?: number | null;
+  inStock: boolean;
+}
+
+async function products(request: APIRequestContext): Promise<ProductRow[]> {
+  const headers = auth(await tokenFor(request, CASHIER_PIN));
+  return ((await (await request.get(`${API}/admin/products`, { headers })).json()) as { items: ProductRow[] }).items;
+}
+
+async function productOf(request: APIRequestContext, id: string): Promise<ProductRow | undefined> {
+  return (await products(request)).find((p) => p.id === id);
+}
+
+/** A product of the test's own, added by the owner at the desk: tracked stock, a fixed price. */
+async function newProduct(
+  request: APIRequestContext,
+  tag: string,
+  { price = 500_000, stockQty = 10 }: { price?: number; stockQty?: number | null } = {},
+): Promise<ProductRow> {
+  const headers = auth(await tokenFor(request, OWNER_PIN));
+  const res = await request.post(`${API}/admin/products`, {
+    headers,
+    data: { title: `E2E ${tag} ${Date.now()}`, category: 'drink', price, stockQty },
+  });
+  expect(res.status(), await res.text()).toBe(201);
+  return ((await res.json()) as { product: ProductRow }).product;
+}
+
+/** A bar sale through the API (D-52): paid by `method` (cash by default), or from `userId`'s balance. */
+async function barSale(
+  request: APIRequestContext,
+  lines: { product: ProductRow; qty: number }[],
+  {
+    method = 'cash',
+    userId,
+    key,
+    saleId = randomUUID(),
+  }: { method?: string; userId?: string; key?: string; saleId?: string } = {},
+): Promise<APIResponse> {
+  const total = lines.reduce((sum, l) => sum + l.product.price.amount * l.qty, 0);
+  return moneyPost(
+    request,
+    '/admin/shop/sales',
+    {
+      saleId,
+      items: lines.map((l) => ({ productId: l.product.id, qty: l.qty })),
+      total,
+      ...(userId ? { userId } : {}),
+      ...(method === 'balance' ? {} : { payment: { method, amount: total } }),
+    },
+    key ? { key } : {},
+  );
+}
+
+/** Today's money of the feed (the club's local day). */
+async function today(request: APIRequestContext): Promise<{ taken: number }> {
+  const headers = auth(await tokenFor(request, CASHIER_PIN));
+  const feed = (await (await request.get(`${API}/admin/shift/operations?limit=1`, { headers })).json()) as {
+    today: { taken: number };
+  };
+  return feed.today;
+}
+
+interface OperationRow {
+  id: string;
+  kind: string;
+  drawer: number;
+  sessionId: string | null;
+  saleId?: string | null;
+  client: { id: string } | null;
+  lines?: { title: string; qty: number }[] | null;
+  voided?: boolean | null;
+}
+
+/** Every row of the open shift's feed (of `kinds`, a comma list), newest first. */
+async function shiftOperations(request: APIRequestContext, kinds?: string): Promise<OperationRow[]> {
+  const headers = auth(await tokenFor(request, CASHIER_PIN));
+  const out: OperationRow[] = [];
+  let before: string | null = null;
+  for (let i = 0; i < 50; i += 1) {
+    const qs = new URLSearchParams({ limit: '200' });
+    if (kinds) qs.set('kinds', kinds);
+    if (before) qs.set('before', before);
+    const feed = (await (await request.get(`${API}/admin/shift/operations?${qs}`, { headers })).json()) as {
+      items: OperationRow[];
+      next: string | null;
+    };
+    out.push(...feed.items);
+    if (!feed.next) break;
+    before = feed.next;
+  }
+  return out;
+}
+
+/** A client seated by the desk on `pc` for an hour, paid in cash: the session's id. */
+async function seatMember(request: APIRequestContext, pc: AgentPc, userId: string): Promise<string> {
+  const tariffId = await standardTariff(request);
+  const quote = (await (
+    await request.post(`${API}/admin/quote`, {
+      headers: auth(await tokenFor(request, CASHIER_PIN)),
+      data: { tariffId, pcId: pc.pcId, minutes: 60, userId },
+    })
+  ).json()) as { total: { amount: number } };
+  const open = await moneyPost(request, '/admin/sessions', {
+    pcId: pc.pcId,
+    userId,
+    tariffId,
+    minutes: 60,
+    payment: { amount: quote.total.amount, method: 'cash' },
+  });
+  expect(open.status(), await open.text()).toBe(201);
+  return ((await open.json()) as { session: { id: string } }).session.id;
+}
+
+/** Ends the open session of `pcId` at the desk, when there is one. */
+async function endAt(request: APIRequestContext, pcId: string): Promise<void> {
+  if (!(await seatOf(request, pcId)).session) return;
+  const res = await moneyPost(request, '/admin/sessions/end', { pcId });
+  expect(res.ok(), await res.text()).toBeTruthy();
+}
+
+/** A move through the API (D-59), with its own key. */
+async function moveSession(
+  request: APIRequestContext,
+  data: { fromPcId: string; toPcId: string; sessionId?: string; tariffId?: string },
+): Promise<APIResponse> {
+  return moneyPost(request, '/admin/sessions/move', data);
+}
+
+/** The reason of a refusal: `details.reason`, else `details.rule`. */
+async function reasonOf(res: APIResponse): Promise<string | undefined> {
+  const body = (await res.json()) as { error?: { details?: { reason?: string; rule?: string } } };
+  return body.error?.details?.reason ?? body.error?.details?.rule;
+}
+
+/**
+ * Replaces Web Audio with a counter: every oscillator the console starts is one beep in `window.__beeps`. The context
+ * reports itself running, as after the sign-in's key presses.
+ */
+async function stubAudio(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __beeps: number; AudioContext: unknown };
+    w.__beeps = 0;
+    const param = (): Record<string, unknown> => {
+      const p: Record<string, unknown> = { value: 0 };
+      for (const name of ['setValueAtTime', 'linearRampToValueAtTime', 'exponentialRampToValueAtTime'])
+        p[name] = () => p;
+      return p;
+    };
+    class FakeAudioContext {
+      state = 'running';
+      currentTime = 0;
+      destination = {};
+      onstatechange: (() => void) | null = null;
+      resume(): Promise<void> {
+        return Promise.resolve();
+      }
+      createGain(): Record<string, unknown> {
+        return { gain: param(), connect: () => undefined };
+      }
+      createOscillator(): Record<string, unknown> {
+        return {
+          type: 'sine',
+          frequency: param(),
+          connect: () => undefined,
+          start: () => {
+            w.__beeps += 1;
+          },
+          stop: () => undefined,
+        };
+      }
+    }
+    w.AudioContext = FakeAudioContext;
+  });
+}
+
+const beeps = (page: Page): Promise<number> => page.evaluate(() => (window as unknown as { __beeps: number }).__beeps);
 
 /** `2100000` minor units → a pattern for `21 000 сум` with any space the formatter uses. */
 function sumPattern(minor: number): RegExp {
@@ -1183,6 +1412,13 @@ test("the operations feed shows each desk operation once with who, what and how 
     note,
   });
   expect(moved.ok(), await moved.text()).toBeTruthy();
+  // A bar sale for cash and its void (cash desk part 3): one row each.
+  const drink = await newProduct(request, 'feed');
+  const sold = await barSale(request, [{ product: drink, qty: 1 }]);
+  expect(sold.status(), await sold.text()).toBe(201);
+  const saleId = ((await sold.json()) as { sale: { id: string } }).sale.id;
+  const voided = await moneyPost(request, `/admin/shop/sales/${saleId}/void`, { reasonCode: 'mistake' });
+  expect(voided.ok(), await voided.text()).toBeTruthy();
 
   await stubPrint(page);
   await signIn(page, CASHIER_PIN);
@@ -1198,6 +1434,14 @@ test("the operations feed shows each desk operation once with who, what and how 
   await expect(cardRow).toContainText('Пополнение');
   await expect(cardRow).toContainText('Карта');
   await expect(feed.getByRole('listitem').filter({ hasText: note })).toContainText('Размен');
+  const barRows = feed.getByRole('listitem').filter({ hasText: drink.title });
+  await expect(barRows.filter({ hasText: 'Продажа бара' })).toHaveCount(1);
+  await expect(barRows.filter({ hasText: 'Продажа бара' })).toContainText('аннулирован');
+  await expect(barRows.filter({ hasText: 'Аннулирование' })).toHaveCount(1);
+  // The feed's drawer column adds up to the cash the drawer should hold (DESIGN:1732).
+  const rows = await shiftOperations(request);
+  expect(rows.filter((r) => r.saleId === saleId)).toHaveLength(2);
+  expect(rows.reduce((sum, r) => sum + r.drawer, 0)).toBe((await shiftState(request)).expectedCash);
 
   // Today's money covers at least these two payments.
   const headline = (await feed.getByRole('button', { name: /Сегодня принято/ }).textContent()) ?? '';
@@ -1214,4 +1458,653 @@ test("the operations feed shows each desk operation once with who, what and how 
   await expect(page.locator('[data-feed="panel"]')).toBeVisible();
 
   expect((await moneyPost(request, '/admin/sessions/end', { pcId: pc.pcId })).ok()).toBeTruthy();
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Cash desk part 3: the bar, desk products, moving a session, the players' calls, commands to several PCs
+// ---------------------------------------------------------------------------------------------------------------------
+
+/** A seeded product by the start of its title, with at least `qty` on the shelf (the owner receives more if needed). */
+async function shelf(request: APIRequestContext, title: string, qty: number): Promise<ProductRow> {
+  const found = (await products(request)).find((p) => p.title.startsWith(title));
+  expect(found, title).toBeTruthy();
+  if (found!.stockQty != null && found!.stockQty < qty) {
+    const owner = auth(await tokenFor(request, OWNER_PIN));
+    const res = await request.post(`${API}/admin/products/${found!.id}/receive`, { headers: owner, data: { qty: 20 } });
+    expect(res.ok(), await res.text()).toBeTruthy();
+  }
+  return (await productOf(request, found!.id))!;
+}
+
+const cartOf = (page: Page) => page.getByRole('complementary', { name: 'Корзина' });
+const goods = (page: Page) => page.getByRole('list', { name: 'Товары' });
+
+test('the bar sells to a walk-in for cash: stock goes down, X, expected cash and «Сегодня принято» go up, the receipt lists the goods', async ({
+  page,
+  request,
+}) => {
+  await ensureShift(request);
+  const cola = await shelf(request, 'Coca-Cola', 3);
+  const lays = await shelf(request, "Lay's", 3);
+  const total = cola.price.amount * 2 + lays.price.amount;
+  const before = await shiftState(request);
+  const takenBefore = (await today(request)).taken;
+
+  await stubPrint(page);
+  await signIn(page, CASHIER_PIN);
+  await nav(page).getByRole('button', { name: 'Бар', exact: true }).click();
+  const cart = cartOf(page);
+  await goods(page)
+    .getByRole('button', { name: /^Coca-Cola/ })
+    .click();
+  await goods(page)
+    .getByRole('button', { name: /^Coca-Cola/ })
+    .click();
+  // Typing in the search after the first item takes no payment.
+  await page.getByPlaceholder('Поиск товара').fill("Lay's");
+  await goods(page)
+    .getByRole('button', { name: /^Lay's/ })
+    .click();
+  await expect(cart).toContainText(sumPattern(total));
+  await expect(cart.getByRole('status')).toHaveCount(0);
+  await cart.getByRole('button', { name: /^Продать · Наличные/ }).click();
+  await expect(cart.getByRole('status')).toContainText('Продано');
+  // The next walk-in starts at once: the buyer is «Гость» again.
+  await expect(cart.getByRole('group', { name: 'Покупатель' }).getByRole('button', { name: 'Гость' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+
+  // The slip lists the goods and says it is not fiscal.
+  await expect.poll(() => printed(page)).toContain('Не является фискальным чеком');
+  const slip = await printed(page);
+  expect(slip).toContain(`${cola.title} ×2`);
+  expect(slip).toContain(lays.title);
+
+  expect((await productOf(request, cola.id))?.stockQty).toBe((cola.stockQty ?? 0) - 2);
+  expect((await productOf(request, lays.id))?.stockQty).toBe((lays.stockQty ?? 0) - 1);
+  const after = await shiftState(request);
+  expect((after.x?.shopByMethod?.cash ?? 0) - (before.x?.shopByMethod?.cash ?? 0)).toBe(total);
+  expect((after.expectedCash ?? 0) - (before.expectedCash ?? 0)).toBe(total);
+  expect((await today(request)).taken - takenBefore).toBe(total);
+
+  // One «Продажа бара» row, and its cash is in the drawer.
+  expect((await shiftOperations(request, 'shopSale'))[0]?.drawer).toBe(total);
+  await nav(page).getByRole('button', { name: 'Карта', exact: true }).click();
+  const row = page.locator('[data-feed="column"]').getByRole('listitem').filter({ hasText: 'Продажа бара' }).first();
+  await expect(row).toContainText(`${cola.title} ×2`);
+});
+
+test("the bar charges a seated client's balance from the seat panel; a short balance pays the cart by card under the client's name", async ({
+  page,
+  request,
+}) => {
+  await ensureShift(request);
+  const pc = await registerAgent(request, 'bar-seat');
+  const member = await newClient(request, 'bar-member');
+  const topUp = await moneyPost(request, '/admin/wallet/topup', {
+    userId: member.id,
+    amount: 3_000_000,
+    method: 'cash',
+  });
+  expect(topUp.ok(), await topUp.text()).toBeTruthy();
+  await seatMember(request, pc, member.id);
+  const water = await shelf(request, 'Still water', 2);
+  const shirt = await shelf(request, 'Club T-shirt', 2);
+  const balance = async (): Promise<number> => (await seatOf(request, pc.pcId)).user?.balance.amount ?? 0;
+  const balanceBefore = await balance();
+  expect(balanceBefore).toBeGreaterThanOrEqual(water.price.amount);
+  expect(balanceBefore - water.price.amount).toBeLessThan(shirt.price.amount);
+
+  await stubPrint(page);
+  await signIn(page, CASHIER_PIN);
+  await page.locator(`#seat-${pc.pcId}`).click();
+  await page.locator('main').getByRole('button', { name: 'Бар', exact: true }).click();
+  const cart = cartOf(page);
+  // The seat's player is the buyer.
+  await expect(cart).toContainText(member.displayName);
+  await goods(page)
+    .getByRole('button', { name: /^Still water/ })
+    .click();
+  await cart.getByRole('button', { name: /^Списать с баланса/ }).click();
+  await expect(cart.getByRole('status')).toContainText('с баланса');
+  expect(await balance()).toBe(balanceBefore - water.price.amount);
+
+  // The same client with a cart the balance does not cover: paid by card, under their name, the balance untouched.
+  const x0 = await shiftState(request);
+  await cart.getByRole('group', { name: 'Покупатель' }).getByRole('button', { name: 'Клиент' }).click();
+  await cart.getByRole('combobox', { name: 'Клиент' }).fill(member.username);
+  await page.getByRole('option').filter({ hasText: member.username }).click();
+  await expect(cart).toContainText(member.displayName);
+  await goods(page)
+    .getByRole('button', { name: /^Club T-shirt/ })
+    .click();
+  await expect(cart).toContainText('Не хватает');
+  await cart.getByRole('button', { name: /^Продать · Карта/ }).click();
+  await expect(cart.getByRole('status')).toContainText('Продано');
+  expect(await balance()).toBe(balanceBefore - water.price.amount);
+  const x1 = await shiftState(request);
+  expect(x1.x?.topUpByMethod).toEqual(x0.x?.topUpByMethod);
+  expect((x1.x?.shopByMethod?.card ?? 0) - (x0.x?.shopByMethod?.card ?? 0)).toBe(shirt.price.amount);
+  expect((await shiftOperations(request, 'shopSale'))[0]?.client?.id).toBe(member.id);
+  await endAt(request, pc.pcId);
+});
+
+test('the bar refuses more than is in stock and a changed price, and books nothing; the same cart is booked once', async ({
+  page,
+  request,
+}) => {
+  await ensureShift(request);
+  const owner = auth(await tokenFor(request, OWNER_PIN));
+  const item = await newProduct(request, 'stock', { price: 500_000, stockQty: 5 });
+  const x0 = await shiftState(request);
+
+  await signIn(page, CASHIER_PIN);
+  await page.goto('/#/bar');
+  const tile = goods(page).getByRole('button', { name: new RegExp(`^${item.title}`) });
+  await tile.click();
+  await tile.click();
+  // The owner counts the shelf meanwhile: one left.
+  const counted = await request.patch(`${API}/admin/products/${item.id}`, { headers: owner, data: { stockQty: 1 } });
+  expect(counted.ok(), await counted.text()).toBeTruthy();
+  const cart = cartOf(page);
+  await cart.getByRole('button', { name: /^Продать · Наличные/ }).click();
+  await expect(cart.getByText(/осталось 1/).first()).toBeVisible();
+  await expect(cart.locator(`[data-line="${item.id}"] [data-qty]`)).toHaveText('1');
+  expect((await shiftState(request)).x?.shopByMethod?.cash ?? 0).toBe(x0.x?.shopByMethod?.cash ?? 0);
+  expect((await productOf(request, item.id))?.stockQty).toBe(1);
+
+  // A total the server does not price so books nothing.
+  const stale = await moneyPost(request, '/admin/shop/sales', {
+    saleId: randomUUID(),
+    items: [{ productId: item.id, qty: 1 }],
+    total: item.price.amount + 100,
+    payment: { method: 'cash', amount: item.price.amount + 100 },
+  });
+  expect(stale.status()).toBe(409);
+  expect(await reasonOf(stale)).toBe('priceChanged');
+
+  // One cart is booked once: its saleId under a new key is `saleExists`, its key with another body is refused.
+  const saleId = randomUUID();
+  const key = randomUUID();
+  const first = await barSale(request, [{ product: item, qty: 1 }], { saleId, key });
+  expect(first.status(), await first.text()).toBe(201);
+  const again = await barSale(request, [{ product: item, qty: 1 }], { saleId });
+  expect(again.status()).toBe(409);
+  expect(await reasonOf(again)).toBe('saleExists');
+  const reused = await barSale(request, [{ product: item, qty: 1 }], { key });
+  expect(reused.status()).toBe(409);
+  expect(await reasonOf(reused)).toBe('idempotencyKeyReused');
+  expect((await productOf(request, item.id))?.stockQty).toBe(0);
+});
+
+test('a bar sale is voided with a reason in its shift: stock and expected cash come back, a second void is refused', async ({
+  page,
+  request,
+}) => {
+  await ensureShift(request);
+  const item = await newProduct(request, 'void', { price: 600_000, stockQty: 5 });
+  const sold = await barSale(request, [{ product: item, qty: 2 }]);
+  expect(sold.status(), await sold.text()).toBe(201);
+  const saleId = ((await sold.json()) as { sale: { id: string } }).sale.id;
+  const before = await shiftState(request);
+
+  await stubPrint(page);
+  await signIn(page, CASHIER_PIN);
+  const row = page
+    .locator('[data-feed="column"]')
+    .getByRole('listitem')
+    .filter({ hasText: item.title })
+    .filter({ hasText: 'Продажа бара' });
+  await row.getByRole('button', { name: 'Аннулировать…' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Аннулировать продажу' });
+  await sheet.getByRole('button', { name: 'Ошибка кассира' }).click();
+  await sheet.getByRole('button', { name: 'Аннулировать', exact: true }).click();
+  await expect(sheet.getByRole('status')).toContainText('Аннулировано');
+  await sheet.getByRole('button', { name: 'Готово' }).click();
+  await expect(row).toContainText('аннулирован');
+  await expect(row.getByRole('button', { name: 'Аннулировать…' })).toHaveCount(0);
+
+  expect((await productOf(request, item.id))?.stockQty).toBe(5);
+  const after = await shiftState(request);
+  expect((before.expectedCash ?? 0) - (after.expectedCash ?? 0)).toBe(item.price.amount * 2);
+  expect((after.x?.shopVoidCount ?? 0) - (before.x?.shopVoidCount ?? 0)).toBe(1);
+  const second = await moneyPost(request, `/admin/shop/sales/${saleId}/void`, { reasonCode: 'mistake' });
+  expect(second.status()).toBe(409);
+  expect(await reasonOf(second)).toBe('alreadyVoided');
+});
+
+test('the owner adds a product at the desk and it sells at the bar; a price change keeps the stock; archived it is gone', async ({
+  page,
+  request,
+}) => {
+  await ensureShift(request);
+  await stubPrint(page);
+  // A cashier sees no «Новый товар».
+  await signIn(page, CASHIER_PIN);
+  await page.goto('/#/shop');
+  await expect(page.getByRole('heading', { name: 'Магазин и склад' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Новый товар' })).toHaveCount(0);
+
+  await signIn(page, OWNER_PIN);
+  await page.goto('/#/shop');
+  await page.getByRole('button', { name: 'Новый товар' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Новый товар' });
+  const title = `E2E чай ${Date.now()}`;
+  await sheet.getByLabel('Название').fill(title);
+  await sheet.getByLabel('Цена').fill('7000');
+  await sheet.getByLabel('Остаток').fill('4');
+  await sheet.getByRole('button', { name: 'Добавить' }).click();
+  await expect(page.getByText(`Товар добавлен · ${title}`)).toBeVisible();
+  const created = (await products(request)).find((p) => p.title === title);
+  expect(created?.price.amount).toBe(700_000);
+  expect(created?.stockQty).toBe(4);
+
+  // Sold at the bar.
+  await nav(page).getByRole('button', { name: 'Бар', exact: true }).click();
+  await goods(page)
+    .getByRole('button', { name: new RegExp(`^${title}`) })
+    .click();
+  await cartOf(page)
+    .getByRole('button', { name: /^Продать · Наличные/ })
+    .click();
+  await expect(cartOf(page).getByRole('status')).toContainText('Продано');
+  expect((await productOf(request, created!.id))?.stockQty).toBe(3);
+
+  // The bar sells one more while the owner edits the price: the save does not write the old quantity back.
+  await nav(page).getByRole('button', { name: 'Магазин и склад', exact: true }).click();
+  await page.getByRole('row').filter({ hasText: title }).click();
+  const panel = page.locator('section').filter({ has: page.getByRole('heading', { name: title }) });
+  await expect(panel.getByLabel('Остаток')).toHaveValue('3');
+  const sold = await barSale(request, [{ product: created!, qty: 1 }]);
+  expect(sold.status(), await sold.text()).toBe(201);
+  await panel.getByLabel('Цена').fill('8000');
+  await panel.getByRole('button', { name: 'Сохранить', exact: true }).click();
+  await expect(panel.getByText('Сохранено')).toBeVisible();
+  const repriced = await productOf(request, created!.id);
+  expect(repriced?.price.amount).toBe(800_000);
+  expect(repriced?.stockQty).toBe(2);
+
+  // Archived: gone from the list and from the bar.
+  await panel.getByRole('button', { name: 'В архив' }).click();
+  await page
+    .getByRole('dialog', { name: `В архив · ${title}` })
+    .getByRole('button', { name: 'В архив' })
+    .click();
+  await expect(page.getByRole('row').filter({ hasText: title })).toHaveCount(0);
+  expect(await productOf(request, created!.id)).toBeUndefined();
+  await nav(page).getByRole('button', { name: 'Бар', exact: true }).click();
+  await expect(goods(page).getByRole('button').first()).toBeVisible();
+  await expect(goods(page).getByRole('button', { name: new RegExp(`^${title}`) })).toHaveCount(0);
+});
+
+test('a session is moved to another PC with its time and money, and the old PC is told it ended', async ({
+  page,
+  request,
+}) => {
+  await ensureShift(request);
+  const a = await registerAgent(request, 'move-a');
+  const b = await registerAgent(request, 'move-b');
+  await heartbeat(request, b);
+  const member = await newClient(request, 'move');
+  const sessionId = await seatMember(request, a, member.id);
+  const before = await seatOf(request, a.pcId);
+  const t0 = Date.now();
+
+  await signIn(page, CASHIER_PIN);
+  await page.locator(`#seat-${a.pcId}`).click();
+  await page.getByRole('button', { name: 'Пересадить на другой ПК…' }).click();
+  await expect(page.getByText(/^Пересадка с .+: нажмите свободный ПК/)).toBeVisible();
+  await page.locator(`#seat-${b.pcId}`).click();
+  const sheet = page.getByRole('dialog', { name: /^Пересадить · / });
+  await expect(sheet).toContainText('Часы идут');
+  await sheet.getByRole('button', { name: 'Пересадить', exact: true }).click();
+  await expect(sheet).toHaveCount(0);
+  await expect(page.getByText(/^Пересажен на/)).toBeVisible();
+  await expect(page.locator(`#seat-${b.pcId}`)).toContainText('ждёт входа');
+
+  const onB = await seatOf(request, b.pcId);
+  const elapsed = Math.round((Date.now() - t0) / 1000);
+  expect(onB.session?.id).toBe(sessionId);
+  expect(onB.session?.cost.amount).toBe(before.session?.cost.amount);
+  expect(
+    Math.abs((onB.session?.secondsLeft ?? 0) - ((before.session?.secondsLeft ?? 0) - elapsed)),
+  ).toBeLessThanOrEqual(5);
+  expect(onB.signedIn).toBe(false);
+  expect((await seatOf(request, a.pcId)).session).toBeNull();
+
+  // The old PC: its own end is a clean «not active» with the session ended there; its events change nothing.
+  const end = await agentCall(request, a, 'POST', `/sessions/${sessionId}/end`, {
+    reason: 'user',
+    secondsUsed: 60,
+    endedAt: new Date().toISOString(),
+  });
+  expect(end.status()).toBe(409);
+  const ended = (await end.json()) as { error: { code: string; details: { session: { id: string; state: string } } } };
+  expect(ended.error.code).toBe('sessionNotActive');
+  expect(ended.error.details.session.state).toBe('ended');
+  const events = await agentCall(
+    request,
+    a,
+    'POST',
+    `/sessions/${sessionId}/events`,
+    { events: [{ sessionId, type: 'ended', at: new Date().toISOString(), data: { reason: 'user' } }] },
+    undefined,
+    { 'Idempotency-Key': randomUUID() },
+  );
+  expect(events.status(), await events.text()).toBe(204);
+  expect((await seatOf(request, b.pcId)).session?.id).toBe(sessionId);
+
+  // The player signs in on the new PC; the old one points elsewhere.
+  const login = (pc: AgentPc): Promise<APIResponse> =>
+    agentCall(request, pc, 'POST', '/auth/login', {
+      kind: 'password',
+      pcId: pc.pcId,
+      hwid: pc.hwid,
+      username: member.username,
+      password: member.password,
+    });
+  const onNew = await login(b);
+  expect(onNew.status(), await onNew.text()).toBe(200);
+  const onOld = await login(a);
+  expect(onOld.status()).toBe(409);
+  expect(await reasonOf(onOld)).toBe('activeSessionElsewhere');
+
+  // The feed tells the move.
+  expect((await shiftOperations(request, 'sessionMove')).some((r) => r.sessionId === sessionId)).toBe(true);
+  await expect(
+    page.locator('[data-feed="column"]').getByRole('listitem').filter({ hasText: 'Пересадка' }).first(),
+  ).toBeVisible();
+  await endAt(request, b.pcId);
+});
+
+test('a move to a busy, maintenance or still-playing PC is refused with the reason', async ({ page, request }) => {
+  await ensureShift(request);
+  const owner = auth(await tokenFor(request, OWNER_PIN));
+  const a = await registerAgent(request, 'mv-a');
+  const b = await registerAgent(request, 'mv-b');
+  const c = await registerAgent(request, 'mv-c');
+  await heartbeat(request, b);
+  await heartbeat(request, c);
+  const sessionId = await seatMember(request, a, (await newClient(request, 'mv-a')).id);
+  await seatMember(request, c, (await newClient(request, 'mv-c')).id);
+
+  const busy = await moveSession(request, { fromPcId: a.pcId, sessionId, toPcId: c.pcId });
+  expect(busy.status()).toBe(409);
+  expect(await reasonOf(busy)).toBe('pcBusy');
+
+  const maintenance = async (on: boolean): Promise<void> => {
+    const res = await request.patch(`${API}/admin/pcs/${b.pcId}`, { headers: owner, data: { maintenance: on } });
+    expect(res.ok(), await res.text()).toBeTruthy();
+  };
+  await maintenance(true);
+  const inService = await moveSession(request, { fromPcId: a.pcId, sessionId, toPcId: b.pcId });
+  expect(inService.status()).toBe(403);
+  expect(await reasonOf(inService)).toBe('pcMaintenance');
+
+  // Picking the target, the map dims the PCs that cannot take the session.
+  await signIn(page, CASHIER_PIN);
+  await page.locator(`#seat-${a.pcId}`).click();
+  await page.getByRole('button', { name: 'Пересадить на другой ПК…' }).click();
+  await expect(page.locator(`#seat-${b.pcId}`)).toHaveAttribute('aria-disabled', 'true');
+  await expect(page.locator(`#seat-${c.pcId}`)).toHaveAttribute('aria-disabled', 'true');
+  await page.keyboard.press('Escape');
+  await expect(page.getByText(/^Пересадка с/)).toHaveCount(0);
+
+  // A PC still holding a session of its own it has not sent.
+  await maintenance(false);
+  await heartbeat(request, b, { offlineQueue: 1 });
+  const local = await moveSession(request, { fromPcId: a.pcId, sessionId, toPcId: b.pcId });
+  expect(local.status()).toBe(409);
+  expect(await reasonOf(local)).toBe('targetHasLocalSession');
+
+  await heartbeat(request, b);
+  const moved = await moveSession(request, { fromPcId: a.pcId, sessionId, toPcId: b.pcId });
+  expect(moved.status(), await moved.text()).toBe(200);
+  // The map's old view (the session on A) moves nothing a second time.
+  const stale = await moveSession(request, { fromPcId: a.pcId, sessionId, toPcId: c.pcId });
+  expect(stale.status()).toBe(409);
+  expect(await reasonOf(stale)).toBe('sessionMoved');
+  await endAt(request, b.pcId);
+  await endAt(request, c.pcId);
+});
+
+test('a walk-in guest and a kiosk guest moved to another PC sign in there with «Гость»', async ({ request }) => {
+  await ensureShift(request);
+  const a = await registerAgent(request, 'g-a');
+  const b = await registerAgent(request, 'g-b');
+  const c = await registerAgent(request, 'g-c');
+  const d = await registerAgent(request, 'g-d');
+  await heartbeat(request, b);
+  await heartbeat(request, d);
+  const tariffId = await standardTariff(request);
+  const cashier = auth(await tokenFor(request, CASHIER_PIN));
+  const guestSession = async (res: APIResponse): Promise<string | undefined> =>
+    ((await res.json()) as { session: { id: string } | null }).session?.id;
+
+  // A walk-in guest the desk seated.
+  const quote = (await (
+    await request.post(`${API}/admin/quote`, { headers: cashier, data: { tariffId, pcId: a.pcId, minutes: 60 } })
+  ).json()) as { total: { amount: number } };
+  const seated = await moneyPost(request, '/admin/sessions/guest', {
+    pcId: a.pcId,
+    tariffId,
+    minutes: 60,
+    prepaid: true,
+    payment: { amount: quote.total.amount, method: 'cash' },
+  });
+  expect(seated.status(), await seated.text()).toBe(201);
+  const deskSession = ((await seated.json()) as { session: { id: string } }).session.id;
+  const movedDesk = await moveSession(request, { fromPcId: a.pcId, sessionId: deskSession, toPcId: b.pcId });
+  expect(movedDesk.status(), await movedDesk.text()).toBe(200);
+  const onB = await agentCall(request, b, 'POST', '/auth/guest', { pcId: b.pcId, hwid: b.hwid });
+  expect(onB.status(), await onB.text()).toBe(200);
+  expect(await guestSession(onB)).toBe(deskSession);
+
+  // A guest who signed in at the kiosk and bought time there.
+  const kiosk = await agentCall(request, c, 'POST', '/auth/guest', { pcId: c.pcId, hwid: c.hwid });
+  expect(kiosk.status(), await kiosk.text()).toBe(200);
+  const guest = (await kiosk.json()) as { accessToken: string; user: { id: string } };
+  const paid = await moneyPost(request, '/admin/wallet/topup', {
+    userId: guest.user.id,
+    amount: 5_000_000,
+    method: 'cash',
+  });
+  expect(paid.ok(), await paid.text()).toBeTruthy();
+  const own = await agentCall(
+    request,
+    c,
+    'POST',
+    '/sessions',
+    { pcId: c.pcId, userId: guest.user.id, tariffId, minutes: 60, prepaid: true },
+    guest.accessToken,
+    { 'Idempotency-Key': randomUUID() },
+  );
+  expect(own.status(), await own.text()).toBe(201);
+  const kioskSession = ((await own.json()) as { id: string }).id;
+  const movedKiosk = await moveSession(request, { fromPcId: c.pcId, sessionId: kioskSession, toPcId: d.pcId });
+  expect(movedKiosk.status(), await movedKiosk.text()).toBe(200);
+  const onD = await agentCall(request, d, 'POST', '/auth/guest', { pcId: d.pcId, hwid: d.hwid });
+  expect(onD.status(), await onD.text()).toBe(200);
+  expect(await guestSession(onD)).toBe(kioskSession);
+
+  await endAt(request, b.pcId);
+  await endAt(request, d.pcId);
+});
+
+test("a player's call rings at the desk until «Иду», and repeats do not ring again", async ({ page, request }) => {
+  const pc = await registerAgent(request, 'call');
+  const call = (at: string): Promise<APIResponse> =>
+    agentCall(
+      request,
+      pc,
+      'POST',
+      '/support/call-admin',
+      { pcId: pc.pcId, category: 'technical', message: 'E2E мышь не работает', at },
+      undefined,
+      { 'Idempotency-Key': randomUUID() },
+    );
+  await stubAudio(page);
+  await signIn(page, CASHIER_PIN);
+  await expect(page.getByRole('heading', { name: 'Карта зала' })).toBeVisible();
+
+  const first = await call(new Date().toISOString());
+  expect(first.status(), await first.text()).toBe(201);
+  expect(((await first.json()) as { queuePosition: number }).queuePosition).toBeGreaterThanOrEqual(1);
+  const bell = page.getByRole('button', { name: /^Вызовы \d+$/ });
+  await expect(bell).toBeVisible();
+  await expect(page.locator(`#seat-${pc.pcId} [aria-label="Вызов администратора"]`)).toBeVisible();
+  // It rings every 5 s while nobody answers.
+  await expect.poll(() => beeps(page), { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
+
+  await bell.click();
+  const row = page.getByRole('dialog', { name: 'Вызовы игроков' }).locator(`[data-call-pc="${pc.pcId}"]`);
+  await expect(row).toContainText('E2E мышь не работает');
+  await row.getByRole('button', { name: 'Иду' }).click();
+  // A registered PC has no socket here: the player is not told, and the inbox says so.
+  await expect(row).toContainText('ПК не на связи — игрок не получил сообщение');
+  const answered = await beeps(page);
+  await page.waitForTimeout(6_000);
+  expect(await beeps(page)).toBe(answered);
+
+  // Pressed again a second later: one more call of the same PC, shown, not ringing.
+  const at = new Date(Date.now() + 1000).toISOString();
+  expect((await call(at)).status()).toBe(201);
+  await expect(row).toContainText('×2');
+  const repeated = await beeps(page);
+  await page.waitForTimeout(6_000);
+  expect(await beeps(page)).toBeLessThanOrEqual(repeated + 1);
+  // The same press again (its telemetry copy, a replay) is still that one call.
+  expect((await call(at)).status()).toBe(201);
+  expect(((await overview(request)).calls ?? []).filter((c) => c.pcId === pc.pcId)).toHaveLength(2);
+
+  await row.getByRole('button', { name: 'Закрыть вызов' }).click();
+  await expect(page.getByRole('button', { name: /^Вызовы \d+$/ })).toHaveCount(0);
+});
+
+test('a call that came only through telemetry and a «report a problem» text reach the inbox; a bad event does not break telemetry', async ({
+  request,
+}) => {
+  const pc = await registerAgent(request, 'tele');
+  const now = Date.now();
+  const at = (ms: number): string => new Date(now - ms).toISOString();
+  const res = await agentCall(request, pc, 'POST', `/agents/${pc.pcId}/telemetry`, {
+    samples: [
+      {
+        cpuPct: 37,
+        gpuPct: 12,
+        ramUsedMb: 4096,
+        temps: { cpu: 55, gpu: 48 },
+        fps: null,
+        netMbps: { up: 1, down: 5 },
+        uptimeSec: 600,
+        at: at(0),
+      },
+    ],
+    events: [
+      {
+        kind: 'callAdmin',
+        at: at(3000),
+        data: { pcId: pc.pcId, userId: null, category: 'help', message: 'E2E телеметрия', at: at(3000) },
+      },
+      {
+        kind: 'shellClientError',
+        at: at(2000),
+        data: { level: 'warn', message: '[user report] мышь не работает', stack: null, route: '/support' },
+      },
+      { kind: 'callAdmin', at: at(1000), data: { pcId: pc.pcId, category: 'x', message: null, at: at(1000) } },
+    ],
+  });
+  expect(res.status(), await res.text()).toBe(204);
+
+  const calls = ((await overview(request)).calls ?? []).filter((c) => c.pcId === pc.pcId);
+  expect(calls.map((c) => c.category).sort()).toEqual(['help', 'problem']);
+  expect(calls.find((c) => c.category === 'problem')?.message).toBe('мышь не работает');
+  // The batch still counted: the PC's metrics are the sample.
+  const hall = (await (
+    await request.get(`${API}/admin/pcs`, { headers: auth(await tokenFor(request, OWNER_PIN)) })
+  ).json()) as { items: { id: string; metrics: { cpuPct: number } | null }[] };
+  expect(hall.items.find((p) => p.id === pc.pcId)?.metrics?.cpuPct).toBe(37);
+
+  // Closed, so the inbox of the next tests starts empty.
+  const headers = auth(await tokenFor(request, CASHIER_PIN));
+  for (const c of calls) {
+    const closed = await request.post(`${API}/admin/calls/${c.id}/resolve`, { headers, data: {} });
+    expect(closed.ok(), await closed.text()).toBeTruthy();
+  }
+  expect(((await overview(request)).calls ?? []).filter((c) => c.pcId === pc.pcId)).toHaveLength(0);
+});
+
+test('bulk actions report each PC: offline PCs are skipped for power, a busy PC is ended first after asking', async ({
+  page,
+  request,
+}) => {
+  await ensureShift(request);
+  const a = await registerAgent(request, 'bulk-a');
+  const b = await registerAgent(request, 'bulk-b');
+  const c = await registerAgent(request, 'bulk-c');
+  // A never heartbeats: it is offline.
+  await heartbeat(request, b);
+  await heartbeat(request, c);
+  const member = await newClient(request, 'bulk');
+  const sessionId = await seatMember(request, c, member.id);
+
+  await signIn(page, CASHIER_PIN);
+  for (const pc of [a, b, c]) await page.locator(`#seat-${pc.pcId}`).click({ modifiers: ['Control'] });
+  await expect(page.getByRole('heading', { name: 'Выбрано 3' })).toBeVisible();
+  const panel = page.locator('aside').filter({ has: page.getByRole('heading', { name: 'Выбрано 3' }) });
+  const result = (pc: AgentPc) =>
+    panel.getByRole('list', { name: 'Результат по ПК' }).locator(`[data-pc-result="${pc.pcId}"]`);
+
+  // A message reaches every PC, the offline one when it comes back.
+  await panel.getByLabel('Сообщение на экран').fill('E2E: закрываемся');
+  await panel.getByRole('button', { name: /^Сообщение \(3\)/ }).click();
+  for (const pc of [a, b, c]) await expect(result(pc)).toContainText('в очереди');
+
+  // A reboot asks first, naming the player it would interrupt.
+  await panel.getByRole('button', { name: /^Перезагрузить/ }).click();
+  const confirm = page.getByRole('dialog', { name: /^Перезагрузить/ });
+  await expect(confirm).toContainText(member.displayName);
+  await expect(confirm).toContainText('Сеанс будет завершён, неиспользованное время вернётся на баланс');
+  await confirm.getByRole('button', { name: 'Перезагрузить', exact: true }).click();
+  await expect(result(c)).toContainText('сеанс завершён');
+  await expect(result(c)).toContainText('в очереди');
+  await expect(result(a)).toContainText('пропущен: офлайн');
+  await expect(result(b)).toContainText('в очереди');
+  expect((await seatOf(request, c.pcId)).session).toBeNull();
+  expect((await shiftOperations(request, 'sessionEnd')).some((r) => r.sessionId === sessionId)).toBe(true);
+
+  // A plain click is one PC again.
+  await page.locator(`#seat-${b.pcId}`).click();
+  await expect(page.getByRole('heading', { name: 'Выбрано 3' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: /Посадить на/ })).toBeVisible();
+});
+
+test('a single PC command says when the PC is offline or busy instead of claiming success', async ({
+  page,
+  request,
+}) => {
+  await ensureShift(request);
+  const offline = await registerAgent(request, 'one-off');
+  const seated = await registerAgent(request, 'one-busy');
+  await heartbeat(request, seated);
+  const member = await newClient(request, 'one-busy');
+  await seatMember(request, seated, member.id);
+
+  await signIn(page, CASHIER_PIN);
+  await page.locator(`#seat-${offline.pcId}`).click();
+  await page.getByRole('button', { name: /^Ещё ⋯/ }).click();
+  await page.getByRole('button', { name: 'Заблокировать', exact: true }).click();
+  await expect(page.getByText(/офлайн — команда в очереди/)).toBeVisible();
+
+  // Rebooting a busy PC asks first and offers to move the player instead.
+  await page.locator(`#seat-${seated.pcId}`).click();
+  await page.getByRole('button', { name: /^Ещё ⋯/ }).click();
+  await page.getByRole('button', { name: 'Перезагрузить', exact: true }).click();
+  const confirm = page.getByRole('dialog', { name: /^Перезагрузить/ });
+  await expect(confirm).toContainText(member.displayName);
+  await expect(confirm.getByRole('button', { name: 'Пересадить' })).toBeVisible();
+  await confirm.getByRole('button', { name: 'Отмена' }).click();
+  expect((await seatOf(request, seated.pcId)).session).not.toBeNull();
+  await endAt(request, seated.pcId);
 });

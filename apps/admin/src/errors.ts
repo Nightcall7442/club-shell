@@ -37,7 +37,26 @@ const DETAIL_COPY: Record<string, string> = {
   staffOnly: 'Нужен вход кассира, ключ API не подходит',
   ownerOnly: 'Только владелец может это сделать',
   pcOccupied: 'На этом ПК идёт чужой сеанс',
+  // Cash desk part 3
+  outOfStock: 'Столько нет на складе',
+  notSellable: 'Этот товар не продаётся на кассе',
+  saleExists: 'Эта продажа уже проведена',
+  alreadyVoided: 'Продажа уже аннулирована',
+  saleShiftClosed: 'Продажа из закрытой смены — аннулировать её нельзя',
+  voidWindow: 'Кассир аннулирует продажу только в первые 15 минут — обратитесь к владельцу',
+  idempotencyKeyReused: 'Повтор с другими данными — начните действие заново',
+  stockChanged: 'Остаток изменился, пока вы редактировали',
+  sessionMoved: 'Сеанс уже не на этом ПК — карта обновлена',
+  sessionEnding: 'Сеанс завершается',
+  targetOffline: 'ПК не на связи',
+  targetHasLocalSession: 'На ПК ещё не отправлен свой сеанс — подождите минуту',
 };
+
+/** An amount the server sends as minor units or as a `Money`; null when neither. */
+export function amountOf(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  return isMoney(v) ? v.amount : null;
+}
 
 /** Validation refusals with a meaning of their own, keyed by `field:reason` (a bare reason would catch unrelated ones). */
 const VALIDATION_COPY: Record<string, string> = {
@@ -74,8 +93,11 @@ export function describe(e: unknown): string {
         return t('Долг изменился: {debt}', { debt: moneyExact(d['debt'].amount) });
       if (reason === 'payableChanged' && isMoney(d['payable']))
         return t('К выдаче теперь {payable}', { payable: moneyExact(d['payable'].amount) });
-      if (reason === 'priceChanged' && isMoney(d['total']))
-        return t('Цена изменилась: {total}', { total: moneyExact(d['total'].amount) });
+      if (reason === 'priceChanged' && amountOf(d['total']) !== null)
+        return t('Цена изменилась: {total}', { total: moneyExact(amountOf(d['total']) ?? 0) });
+      if (reason === 'outOfStock' && typeof d['available'] === 'number')
+        return d['available'] > 0 ? t('На складе осталось {n} шт', { n: d['available'] }) : t('Товар закончился');
+      if (reason === 'tariffZone') return t('Тариф не для зоны нового ПК — выберите другой');
     }
     if (e.code === 'validation') {
       const copy = VALIDATION_COPY[`${String(d['field'])}:${String(d['reason'])}`];
@@ -94,8 +116,15 @@ export function describe(e: unknown): string {
 /** A refusal's amount to take next time (`debtChanged {debt}`, `payableChanged {payable}`, `priceChanged {total}`). */
 export function changedAmount(e: unknown, reason: string, field: string): number | null {
   if (!(e instanceof AdminError) || e.code !== 'conflict' || e.details?.['reason'] !== reason) return null;
-  const m = e.details[field];
-  return isMoney(m) ? m.amount : null;
+  return amountOf(e.details[field]);
+}
+
+/** The `reason` of a refusal, when the server named one. */
+export function reasonOf(e: unknown): string | null {
+  if (!(e instanceof AdminError)) return null;
+  const d = e.details ?? {};
+  const r = d['reason'] ?? d['rule'];
+  return typeof r === 'string' ? r : null;
 }
 
 /** True for an answer that never came (no response or 5xx): the money may have been booked; retry under the same key. */

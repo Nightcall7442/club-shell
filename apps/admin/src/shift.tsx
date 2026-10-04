@@ -77,11 +77,17 @@ export function useShift(): ShiftState {
   return useContext(ShiftContext);
 }
 
-/** Cash and cashless top-ups of the shift; by method when the server splits them, else its old two totals. */
+/**
+ * Cash and cashless money of the shift: top-ups by method when the server splits them (else its old two totals), plus
+ * the bar's money by method (cash desk part 3).
+ */
 export function cashSplit(x: ShiftTotals): { cash: number; cashless: number } {
   const m = x.topUpByMethod;
-  if (!m) return { cash: x.topUpCash, cashless: x.topUpOther };
-  return { cash: m.cash, cashless: m.card + m.payme + m.click + m.uzum + m.other };
+  const s = x.shopByMethod;
+  const shopCash = s?.cash ?? 0;
+  const shopCashless = s ? s.card + s.payme + s.click + s.uzum : 0;
+  if (!m) return { cash: x.topUpCash + shopCash, cashless: x.topUpOther + shopCashless };
+  return { cash: m.cash + shopCash, cashless: m.card + m.payme + m.click + m.uzum + m.other + shopCashless };
 }
 
 /**

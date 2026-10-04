@@ -124,6 +124,32 @@ export interface Overview {
   guestDebts?: GuestDebt[];
   /** Walk-in guests with an unused refund on the account (beyond the contract). */
   guestRefunds?: GuestRefund[];
+  /**
+   * Players' calls the desk has not closed: open and answered ones of the last 12 hours, newest first (cash desk part 3).
+   * Absent from an older server: no inbox then.
+   */
+  calls?: Call[];
+}
+
+export type CallCategory = 'help' | 'technical' | 'order' | 'other' | 'problem';
+
+/** A player's call to the desk: the PC's «Позвать администратора», its telemetry copy, or a «report a problem» text. */
+export interface Call {
+  id: string;
+  pcId: string;
+  pcName: string;
+  pcNumber: number;
+  user: { id: string; displayName: string } | null;
+  category: CallCategory;
+  message: string | null;
+  source: 'direct' | 'telemetry' | 'report';
+  /** When the server got it. */
+  at: string;
+  status: 'open' | 'acked' | 'resolved';
+  /** Came within 10 minutes of an answered call of the same PC: shown, never rung again. */
+  repeat: boolean;
+  ackedBy: string | null;
+  ackedAt: string | null;
 }
 
 /** Error carrying the server's `ErrorCode` so screens can map `insufficientFunds` and friends to copy. */
@@ -207,7 +233,7 @@ const RETRY_WINDOW_MS = 2 * 60_000;
  * action again shortly after, the same key goes out, so the server replays the first result instead of charging twice;
  * a success, a refusal (4xx) or {@link RETRY_WINDOW_MS} ends the action, and the next identical request is a new one.
  */
-async function postMoney<T>(path: string, payload: unknown, held?: string): Promise<T> {
+async function postMoney<T>(path: string, payload: unknown, held?: string, timeoutMs = MONEY_TIMEOUT_MS): Promise<T> {
   const body = JSON.stringify(payload);
   const action = `${path} ${body}`;
   const now = Date.now();
@@ -215,7 +241,7 @@ async function postMoney<T>(path: string, payload: unknown, held?: string): Prom
   const key = pending && now - pending.at < RETRY_WINDOW_MS ? pending.key : (held ?? newKey());
   pendingKeys.set(action, { key, at: now });
   try {
-    const r = await call<T>(path, { method: 'POST', body, headers: { 'Idempotency-Key': key } }, MONEY_TIMEOUT_MS);
+    const r = await call<T>(path, { method: 'POST', body, headers: { 'Idempotency-Key': key } }, timeoutMs);
     pendingKeys.delete(action);
     return r;
   } catch (e) {
@@ -289,6 +315,128 @@ export interface SessionPayment {
   method: PayMethod;
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// Cash desk part 3 (beyond the contract): the bar, moves, bulk commands
+// ---------------------------------------------------------------------------------------------------------------------
+
+/** How a bar sale was paid: a counter method, or the buyer's balance (D-52). */
+export type SaleMethod = PayMethod | 'balance';
+
+/**
+ * A bar sale as the desk sends it (D-52): `saleId` is made once per cart and becomes the sale's id, so one cart is never
+ * booked twice; `total` is what the desk shows (409 `priceChanged` when the server's differs). With `payment` (exactly
+ * the total) a method sale — `userId` only names the buyer; without it a balance sale of `userId`.
+ */
+export interface SaleInput {
+  saleId: string;
+  items: { productId: string; qty: number }[];
+  total: number;
+  userId?: string;
+  pcId?: string;
+  payment?: { method: PayMethod; amount: number };
+}
+
+/** One line as sold: the title and the price of that moment (tiyin). */
+export interface SaleLine {
+  productId: string;
+  title: string;
+  qty: number;
+  price: number;
+  amount: number;
+}
+
+export interface Sale {
+  id: string;
+  at: string;
+  shiftId: string;
+  method: SaleMethod;
+  total: number;
+  staffName: string;
+  user: { id: string; displayName: string; role: string } | null;
+  pc: { id: string; name: string } | null;
+  lines: SaleLine[];
+}
+
+export interface SaleResponse {
+  sale: Sale;
+  /** The buyer's balance after a balance sale; null for a method sale. */
+  balance: Money | null;
+  /** Each line's product after the sale. */
+  products: Product[];
+  expectedCash: number;
+}
+
+/** Why a sale is taken back (D-56): a defect does not go back on the shelf; «other» needs a note. */
+export type VoidReason = 'mistake' | 'returned' | 'defect' | 'other';
+
+export interface SaleVoid {
+  id: string;
+  at: string;
+  saleId: string;
+  saleAt: string;
+  method: SaleMethod;
+  total: number;
+  reasonCode: VoidReason;
+  note: string | null;
+  staffName: string;
+}
+
+export interface SaleVoidResponse {
+  void: SaleVoid;
+  balance: Money | null;
+  products: Product[];
+  expectedCash: number;
+}
+
+/** The PC the desk sees the session on (`fromPcId`), the target, and an hourly tariff when the target's zone needs one. */
+export interface MoveInput {
+  fromPcId: string;
+  sessionId?: string;
+  toPcId: string;
+  tariffId?: string;
+}
+
+export interface MoveResponse {
+  session: Session;
+  from: { pcId: string; name: string };
+  to: { pcId: string; name: string };
+  tariffChanged: boolean;
+  user: { id: string; displayName: string; role: string };
+  /** False: the player signs in on the target. */
+  signedIn: boolean;
+}
+
+export type PcCommandKind = 'message' | 'lock' | 'unlock' | 'reboot' | 'shutdown';
+
+/** A PC's answer to a command; `agentOffline` — not connected (queued), `timeout` — no answer in time. */
+export interface CommandAck {
+  ok: boolean;
+  error?: { code: string; message: string } | null;
+}
+
+/** What one PC of a bulk command did (D-65). Amounts of `ended` are minor units, a `Money` from some servers. */
+export interface BulkResult {
+  pcId: string;
+  pcName: string | null;
+  outcome: 'done' | 'queued' | 'noAnswer' | 'failed' | 'skipped';
+  skipped: 'sessionOpen' | 'offline' | 'notFound' | null;
+  ack: CommandAck | null;
+  ended: {
+    sessionId: string;
+    user: { id: string; displayName: string; role: string } | null;
+    charged: Money | number | null;
+    refunded: Money | number | null;
+  } | null;
+}
+
+export interface BulkResponse {
+  batchId: string;
+  results: BulkResult[];
+}
+
+/** A bulk command may wait for every PC's answer (30 s) before it answers. */
+const BULK_TIMEOUT_MS = 45_000;
+
 export const adminApi = {
   overview: (): Promise<Overview> => call<Overview>('/admin/overview'),
   /**
@@ -345,14 +493,28 @@ export const adminApi = {
   /** Gives a walk-in guest's refund back in cash: `amount` must equal what is payable now (beyond the contract). */
   payout: (input: { userId: string; amount: number }, key: string): Promise<PayoutResult> =>
     postMoney('/admin/wallet/payout', { ...input, method: 'cash' }, key),
-  command: (
-    pcId: string,
-    input: { kind: 'message' | 'lock' | 'unlock' | 'reboot' | 'shutdown'; text?: string },
-  ): Promise<{ ack: { ok: boolean; error?: { code: string; message: string } | null } }> =>
+  command: (pcId: string, input: { kind: PcCommandKind; text?: string }): Promise<{ ack: CommandAck }> =>
     post(`/admin/pcs/${pcId}/command`, input),
   /** Name or login substring, any part of the phone digits, or the exact card; under 2 characters — recent clients. */
   lookupClients: (q: string): Promise<{ items: ClientHit[] }> =>
     call(`/admin/clients/lookup?q=${encodeURIComponent(q)}`),
+  /** A bar sale (D-52); the key is required and never goes out with another body (D-70). */
+  shopSale: (input: SaleInput, key: string): Promise<SaleResponse> => postMoney('/admin/shop/sales', input, key),
+  /** Takes a bar sale back with a reason (D-56). */
+  shopVoid: (id: string, input: { reasonCode: VoidReason; note?: string }, key: string): Promise<SaleVoidResponse> =>
+    postMoney(`/admin/shop/sales/${id}/void`, input, key),
+  /** «Пересадить»: the open session of `fromPcId` to `toPcId`, with its time and money (D-59). */
+  moveSession: (input: MoveInput, key: string): Promise<MoveResponse> => postMoney('/admin/sessions/move', input, key),
+  /** «Иду»: answers the call and the older open calls of its PC; `notified` — the player got «Администратор идёт к вам». */
+  callAck: (id: string, notify = true): Promise<{ call: Call; notified: boolean }> =>
+    post(`/admin/calls/${id}/ack`, { notify }),
+  /** «Закрыть»: closes the call and the older ones of its PC. */
+  callResolve: (id: string): Promise<{ call: Call }> => post(`/admin/calls/${id}/resolve`, {}),
+  /** One command to several PCs, a result per PC (D-65); `includeBusy` ends busy PCs' sessions before a reboot. */
+  pcCommands: (
+    input: { pcIds: string[]; kind: PcCommandKind; text?: string; level?: 'info' | 'warning'; includeBusy?: boolean },
+    key: string,
+  ): Promise<BulkResponse> => postMoney('/admin/pcs/commands', input, key, BULK_TIMEOUT_MS),
 };
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -384,6 +546,14 @@ export interface ShiftTotals {
   payouts?: number;
   /** Cash top-ups booked with the club API key: not in the drawer, so not in the expected cash. */
   apiCash?: number;
+  /**
+   * The bar by method, net of the voids booked in the shift (D-57); `balance` may be negative when the shift voids an
+   * earlier shift's balance sale. Absent from an older server and from a Z saved before cash desk part 3.
+   */
+  shopByMethod?: Record<SaleMethod, number>;
+  /** What the shift's voids gave back, and how many there were. */
+  shopVoids?: number;
+  shopVoidCount?: number;
 }
 export interface Shift {
   id: string;
@@ -400,9 +570,17 @@ export interface Shift {
   closedBy?: string | null;
 }
 
-/** Cash expected in the drawer of a shift, the server's formula (D-41); for old rows without the server's figure. */
+/** Cash expected in the drawer of a shift, the server's formula (D-41, D-57); for old rows without the server's figure. */
 export function expectedOf(openingCash: number, x: ShiftTotals): number {
-  return openingCash + x.topUpCash - (x.apiCash ?? 0) + (x.cashIn ?? 0) - (x.cashOut ?? 0) - (x.payouts ?? 0);
+  return (
+    openingCash +
+    x.topUpCash -
+    (x.apiCash ?? 0) +
+    (x.cashIn ?? 0) -
+    (x.cashOut ?? 0) -
+    (x.payouts ?? 0) +
+    (x.shopByMethod?.cash ?? 0)
+  );
 }
 
 export type CashMoveKind = 'in' | 'out';
@@ -429,7 +607,11 @@ export type OperationKind =
   | 'cashOut'
   | 'shiftOpen'
   | 'shiftClose'
-  | 'promoRedeem';
+  | 'promoRedeem'
+  // Cash desk part 3 (D-68)
+  | 'shopSale'
+  | 'shopVoid'
+  | 'sessionMove';
 
 /** One row of the shift's operations feed: a paid open is one row with its payment merged in (D-43). */
 export interface Operation {
@@ -455,9 +637,22 @@ export interface Operation {
   package?: boolean | null;
   /** A cash move's own id, the № of its slip (the entry's `id` is the journal's). */
   movementId?: string | null;
+  /** A bar sale (of a void: the sale it took back), how it was paid and its lines as sold (cash desk part 3). */
+  saleId?: string | null;
+  method?: SaleMethod | null;
+  lines?: { title: string; qty: number; price: number }[] | null;
+  /** A bar sale taken back since. */
+  voided?: boolean | null;
+  /** A void: when the sale was. */
+  voidOfAt?: string | null;
+  /** A move: the PC the session came from (`pc` is where it went). */
+  fromPc?: { id: string; name: string } | null;
 }
 
-/** Money taken today (the club's local day), by method; `taken − payouts` is the headline. */
+/**
+ * Money taken today (the club's local day): top-ups by method, and the bar's method sales net of voids (`shopByMethod`,
+ * absent from an older server); `taken` is both, `taken − payouts` the headline; `shop` the goods sold either way.
+ */
 export interface Today {
   date: string;
   from: string;
@@ -466,6 +661,7 @@ export interface Today {
   payouts: number;
   sessions: number;
   shop: number;
+  shopByMethod?: Record<PayMethod, number>;
 }
 
 export interface OperationsPage {
@@ -968,10 +1164,30 @@ export const clubApi = {
   deletePc: (id: string): Promise<unknown> => del(`/admin/pcs/${id}`),
 
   products: (): Promise<{ items: Product[]; lowAt: number }> => call('/admin/products'),
+  /**
+   * Only the keys that changed (D-54): a `stockQty` goes with the quantity the panel read (`expectedStockQty`), so a bar
+   * sale meanwhile is not overwritten (409 `stockChanged {stockQty}`).
+   */
   updateProduct: (
     id: string,
-    input: Partial<{ title: string; price: number; inStock: boolean; stockQty: number | null }>,
+    input: Partial<{
+      title: string;
+      price: number;
+      inStock: boolean;
+      stockQty: number | null;
+      expectedStockQty: number | null;
+    }>,
   ): Promise<unknown> => patch(`/admin/products/${id}`, input),
+  /** A product the owner adds at the desk (beyond the contract, D-58); `stockQty` null — not tracked. */
+  createProduct: (input: {
+    title: string;
+    category: string;
+    price: number;
+    stockQty: number | null;
+    inStock?: boolean;
+  }): Promise<{ product: Product }> => post('/admin/products', input),
+  /** Archives a product: gone from every list; past sales keep their lines. */
+  archiveProduct: (id: string): Promise<unknown> => del(`/admin/products/${id}`),
   receiveProduct: (id: string, qty: number): Promise<unknown> => postMoney(`/admin/products/${id}/receive`, { qty }),
 
   games: (): Promise<{ items: AdminGame[]; order: string[] }> => call('/admin/games'),

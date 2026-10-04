@@ -24,9 +24,11 @@ import {
   errors,
   findPc,
   findSession,
+  endedView,
   findTariff,
   findUser,
   idempotent,
+  movedOff,
   int,
   isObject,
   isoDate,
@@ -42,6 +44,7 @@ import {
   requireAgent,
   requireUser,
   revokeUserTokens,
+  settleStatus,
   str,
   uuid,
   uzs,
@@ -111,8 +114,7 @@ export function endSession(s: SessionRecord, reason: SessionEndReason, nowMs = D
   }
   const pc = findPc(s.pcId);
   if (pc) {
-    if (pc.status !== 'maintenance') pc.status = 'free';
-    pc.currentSessionId = null;
+    settleStatus(pc);
     broadcast('pcStatusChanged', { pcId: pc.id, status: pc.status });
   }
   record(s.id, 'ended', { reason });
@@ -241,8 +243,7 @@ export function sessionRoutes(app: FastifyInstance): void {
       };
       db.sessions.push(rec);
       if (db.sessions.length > 500) db.sessions.splice(0, db.sessions.length - 500);
-      targetPc.status = 'busy';
-      targetPc.currentSessionId = id;
+      settleStatus(targetPc);
       record(id, 'started');
       markDirty();
       const session = viewSession(rec);
@@ -286,10 +287,15 @@ export function sessionRoutes(app: FastifyInstance): void {
     return view;
   });
 
+  /**
+   * The PC ends its session. A session the desk moved off this PC (D-61) is not touched: 409 `sessionNotActive` with
+   * the «ended view» (state ended on this PC, nothing charged), which the agent takes as a clean end.
+   */
   app.post<{ Params: { id: string } }>('/sessions/:id/end', async (req) => {
     const pc = requireAgent(req);
     const s = findSession(req.params.id);
     if (!s) throw errors.notFound('session');
+    if (movedOff(s, pc.id)) throw errors.sessionNotActive(endedView(s, pc.id));
     if (s.pcId !== pc.id) throw errors.forbidden('pcMismatch');
     const b = body(req);
     const reason = oneOf(b, 'reason', END_REASONS);
@@ -330,10 +336,26 @@ export function sessionRoutes(app: FastifyInstance): void {
     });
   });
 
+  /**
+   * The PC's session events. The old PC of a moved session (D-61) gets 204 and changes nothing (an old `ended` never
+   * closes the moved session): a 403 would jam its outbox for good.
+   */
   app.post<{ Params: { id: string } }>('/sessions/:id/events', async (req, reply) => {
     const pc = requireAgent(req);
     const s = findSession(req.params.id);
     if (!s) throw errors.notFound('session');
+    if (movedOff(s, pc.id)) {
+      return idempotent(req, reply, async () => {
+        const events = arr(body(req), 'events', SESSION_EVENTS_MAX);
+        events.forEach((e, i) => {
+          if (!isObject(e)) throw errors.validation(`events[${i}]`, 'format');
+          oneOf(e, 'type', EVENT_TYPES);
+          isoDate(e, 'at');
+        });
+        console.log(`[sessions] ${pc.name}: ${events.length} event(s) of moved session ${s.id} recorded, not applied`);
+        return { status: 204, body: undefined };
+      });
+    }
     if (s.pcId !== pc.id) throw errors.forbidden('pcMismatch');
     return idempotent(req, reply, async () => {
       const events = arr(body(req), 'events', SESSION_EVENTS_MAX);

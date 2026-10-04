@@ -109,6 +109,78 @@ export interface PcRecord extends Pc {
   signingSecret: string | null;
   hardware: HardwareInfo | null;
   metrics: PcMetrics[];
+  /**
+   * Came through `/agents/register`: its status is derived as the server derives it ({@link settleStatus}) — offline
+   * until its first heartbeat or socket. The seeded demo hall has no Agent behind it and keeps its stored status.
+   */
+  registered?: boolean;
+  /** A registered PC has sent a heartbeat or opened its socket. */
+  seen?: boolean;
+  /** `offlineQueue` and `currentSessionId` of its last heartbeat (what a move onto it is checked against). */
+  offlineQueue?: number;
+  reportedSessionId?: string | null;
+}
+
+/** A product of the club's shop; the desk creates and archives its own (D-58). */
+export interface ProductRecord extends Product {
+  /** `seed` (the demo catalogue) or `desk` (created by the owner at the desk). */
+  source?: 'seed' | 'desk';
+  /** Archived (soft delete): gone from every list, kept for the lines of past sales. */
+  deletedAt?: string | null;
+  deletedBy?: 'seed' | 'desk' | null;
+}
+
+/** One line of a bar sale: title and price as sold. */
+export interface ShopSaleLine {
+  productId: string;
+  title: string;
+  qty: number;
+  price: number;
+}
+
+/**
+ * A bar sale or its void, append-only like the server's `shop_sales` (D-52, D-56). A method sale moves no wallet; a
+ * balance sale is a `purchase` row of −total (`ledgerId`), its void a +total `purchase` row.
+ */
+export interface ShopSaleRecord {
+  /** The desk's `saleId` for a sale; made here for a void. */
+  id: string;
+  kind: 'sale' | 'void';
+  voidOf: string | null;
+  shiftId: string;
+  staffId: string;
+  staffName: string;
+  userId: string | null;
+  pcId: string | null;
+  method: 'cash' | 'card' | 'payme' | 'click' | 'uzum' | 'balance';
+  total: number;
+  ledgerId: string | null;
+  reasonCode: 'mistake' | 'returned' | 'defect' | 'other' | null;
+  note: string | null;
+  createdAt: string;
+  lines: ShopSaleLine[];
+}
+
+/** A player's call to the desk (D-62): from the PC's button, the telemetry copy, or a «report a problem» text. */
+export interface CallRecord {
+  id: string;
+  pcId: string;
+  pcName: string;
+  pcNumber: number;
+  userId: string | null;
+  userName: string | null;
+  category: 'help' | 'technical' | 'order' | 'other' | 'problem';
+  message: string | null;
+  source: 'direct' | 'telemetry' | 'report';
+  /** The PC's own time of the call: one call per (pcId, at). */
+  at: string;
+  receivedAt: string;
+  status: 'open' | 'acked' | 'resolved';
+  repeat: boolean;
+  ackedAt: string | null;
+  ackedBy: string | null;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
 }
 
 export interface SessionRecord {
@@ -140,6 +212,8 @@ export interface SessionRecord {
    * the server does). Absent on older records: one purchase of everything then.
    */
   purchases?: Purchase[];
+  /** The desk moved it from PC to PC (D-59): the old PC's `/end` and `/events` then change nothing. */
+  moves?: { fromPcId: string; toPcId: string; at: string; staffId: string }[];
 }
 
 export interface Purchase {
@@ -224,19 +298,12 @@ export interface TournamentRecord extends Omit<Tournament, 'joined' | 'players'>
   leaderboardUpdatedAt: string;
 }
 
-export interface TicketRecord {
-  ticketId: string;
-  pcId: string;
-  userId: string | null;
-  category: string;
-  message: string | null;
-  createdAt: string;
-}
-
 export interface IdempotencyRecord {
   status: number;
   body: unknown;
   at: string;
+  /** sha256 of the request body, for the routes that refuse a key reused with another body (D-70). */
+  hash?: string;
 }
 
 export interface Db {
@@ -249,7 +316,7 @@ export interface Db {
   games: Game[];
   apps: App[];
   tariffs: Tariff[];
-  products: Product[];
+  products: ProductRecord[];
   orders: Order[];
   transactions: Transaction[];
   topupIntents: TopupIntentRecord[];
@@ -269,7 +336,10 @@ export interface Db {
   commands: CommandRecord[];
   accountPool: PoolAccount[];
   leases: LeaseRecord[];
-  tickets: TicketRecord[];
+  /** Players' calls to the desk (open, acked, resolved), oldest first. */
+  calls: CallRecord[];
+  /** Bar sales and their voids, oldest first. */
+  shopSales: ShopSaleRecord[];
   anticheatReports: JsonObject[];
   launchReports: JsonObject[];
   idempotency: Record<string, IdempotencyRecord>;
@@ -515,12 +585,15 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * method+path), otherwise runs `run` and stores its result. Errors are not stored, so a retry re-executes.
  * `keyRequired` (the money routes beyond the contract: a guest's seat, a payout, a cash move) refuses a request without
  * a key (400 `Idempotency-Key` / `required`) or with one that is not a UUID (`format`), as the server does.
+ * `strictBody` (the bar, a void, a move, bulk commands — D-70): a known key sent with another body is 409 `conflict` /
+ * `idempotencyKeyReused` and replays nothing. `run` may give a `stored` body for replays other than the one it answers
+ * (bulk commands replay their results before the acks).
  */
 export async function idempotent(
   req: FastifyRequest,
   reply: FastifyReply,
-  run: () => Promise<{ status: number; body: unknown }>,
-  options: { keyRequired?: boolean } = {},
+  run: () => Promise<{ status: number; body: unknown; stored?: unknown }>,
+  options: { keyRequired?: boolean; strictBody?: boolean } = {},
 ): Promise<unknown> {
   const header = req.headers['idempotency-key'];
   if (options.keyRequired) {
@@ -528,16 +601,24 @@ export async function idempotent(
     if (!UUID.test(header)) throw errors.validation('Idempotency-Key', 'format');
   }
   const key = typeof header === 'string' && header.length > 0 ? `${req.method} ${req.url} ${header}` : null;
+  const hash = sha256Hex(JSON.stringify(req.body ?? null));
   if (key) {
     const hit = db.idempotency[key];
     if (hit && Date.now() - Date.parse(hit.at) < 24 * 3600 * 1000) {
+      if (options.strictBody && hit.hash !== undefined && hit.hash !== hash)
+        throw errors.conflict('idempotencyKeyReused');
       reply.header('Idempotent-Replayed', 'true');
       return reply.code(hit.status).send(hit.body);
     }
   }
   const result = await run();
   if (key) {
-    db.idempotency[key] = { status: result.status, body: result.body, at: now() };
+    db.idempotency[key] = {
+      status: result.status,
+      body: result.stored === undefined ? result.body : result.stored,
+      at: now(),
+      hash,
+    };
     markDirty();
   }
   return reply.code(result.status).send(result.body);
@@ -573,6 +654,41 @@ export function openSessionForPc(pcId: string): SessionRecord | undefined {
 
 export function openSessionForUser(userId: string): SessionRecord | undefined {
   return db.sessions.find((s) => s.userId === userId && s.state !== 'ended' && s.state !== 'idle');
+}
+
+/**
+ * A PC's status after a change (a seat, an end, a heartbeat, back from maintenance), as the server derives it
+ * (PcRepository.Status): maintenance stays; a registered PC not heard from yet is offline whatever it holds; else locked
+ * or busy by its open session, else free. The seeded demo hall (no Agent behind it) is busy or free by its session.
+ */
+export function settleStatus(pc: PcRecord): PcRecord['status'] {
+  if (pc.status === 'maintenance') return pc.status;
+  const open = openSessionForPc(pc.id);
+  if (pc.registered && !pc.seen) pc.status = 'offline';
+  else if (open) pc.status = pc.registered && open.state === 'locked' ? 'locked' : 'busy';
+  else pc.status = 'free';
+  pc.currentSessionId = open?.id ?? null;
+  return pc.status;
+}
+
+/** True when the desk moved `s` off `pcId` (D-61): that PC's `/end` and `/events` then change nothing. */
+export function movedOff(s: SessionRecord, pcId: string): boolean {
+  return s.pcId !== pcId && (s.moves ?? []).some((m) => m.fromPcId === pcId);
+}
+
+/** What the PC a session was moved off is told (D-61): the same id, ended there at the move, nothing charged. */
+export function endedView(s: SessionRecord, pcId: string): Session {
+  const move = [...(s.moves ?? [])].reverse().find((m) => m.fromPcId === pcId);
+  const at = move?.at ?? now();
+  return {
+    ...viewSession(s),
+    pcId,
+    state: 'ended',
+    endsAt: at,
+    pausedAt: null,
+    secondsLeft: 0,
+    cost: uzs(0),
+  };
 }
 
 /** Public `User` view (strips credentials and internal fields). */
@@ -1726,7 +1842,8 @@ function seed(): Db {
     commands: [],
     accountPool: pool,
     leases: [],
-    tickets: [],
+    calls: [],
+    shopSales: [],
     anticheatReports: [],
     launchReports: [],
     idempotency: {},
@@ -1750,8 +1867,14 @@ function load(): Db {
     try {
       const parsed = JSON.parse(readFileSync(DB_FILE, 'utf8')) as Partial<Db>;
       if (parsed.seedVersion === SEED_VERSION) {
-        // Policy is always taken from the config file so edits there show up without --reset.
-        return { ...(parsed as Db), policy: seedPolicy() };
+        // Policy is always taken from the config file so edits there show up without --reset; stores from before cash
+        // desk part 3 gain the calls and the bar.
+        return {
+          ...(parsed as Db),
+          calls: parsed.calls ?? [],
+          shopSales: parsed.shopSales ?? [],
+          policy: seedPolicy(),
+        };
       }
       console.warn(`[db] ${DB_FILE} has seedVersion ${parsed.seedVersion}, expected ${SEED_VERSION}; reseeding`);
     } catch (err) {

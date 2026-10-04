@@ -1,16 +1,34 @@
 /**
  * Shop and stock: products with price, remaining quantity and availability; a row opens the edit panel with goods
- * receipt. Edits are owner-only on the server; a cashier sees the server's refusal. Low-stock threshold is a club setting.
+ * receipt. Edits are owner-only on the server; a cashier sees the server's refusal, and no «В наличии» switch. The owner
+ * adds a product here («Новый товар») and archives one («В архив»): the bar sells what is listed (cash desk part 3, D-58).
+ * A save sends only what changed: a new quantity goes with the one the panel read, so a bar sale meanwhile is never
+ * overwritten (409 `stockChanged`: the panel reloads and says so, D-54). Low-stock threshold is a club setting.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import type { Product } from '@clubshell/contracts';
 import { clubApi } from '@/api';
-import { describe } from '@/errors';
+import { describe, reasonOf } from '@/errors';
 import { t } from '@/i18n';
 import { money } from '@/format';
+import { PRODUCT_CATEGORY_LABEL } from '@/labels';
 import { useClubSettings } from '@/settings';
-import { Button, Field, MoneyInput, Note, NumberInput, PageHeader, SaveBar, Section, Table, Toggle } from '@/ui';
+import {
+  Button,
+  Field,
+  Input,
+  MoneyInput,
+  Note,
+  NumberInput,
+  PageHeader,
+  SaveBar,
+  Section,
+  Sheet,
+  Table,
+  Toggle,
+  inputCls,
+} from '@/ui';
 
 type Filter = 'all' | 'low' | 'out';
 type NoteState = { text: string; tone: 'ok' | 'err' } | null;
@@ -21,18 +39,37 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: 'out', label: 'Нет в наличии' },
 ];
 
-const CATEGORY: Record<string, string> = {
-  food: 'Еда',
-  drink: 'Напитки',
-  snack: 'Снеки',
-  service: 'Услуги',
-  merch: 'Мерч',
-  time: 'Пакеты времени',
-};
+const CATEGORIES = ['drink', 'food', 'snack', 'service', 'merch', 'time'] as const;
 
 const isLow = (p: Product, lowAt: number): boolean => p.stockQty != null && p.stockQty <= lowAt;
 
-function ProductPanel({ product, onChanged }: { product: Product; onChanged: () => Promise<void> }): JSX.Element {
+/** The keys of a save that changed, and with a new quantity the one the panel read (D-54). */
+function changesOf(
+  product: Product,
+  next: { price: number; stockQty: number | null; inStock: boolean },
+  owner: boolean,
+): Parameters<typeof clubApi.updateProduct>[1] {
+  const out: Parameters<typeof clubApi.updateProduct>[1] = {};
+  if (next.price !== product.price.amount) out.price = next.price;
+  if (next.stockQty !== (product.stockQty ?? null)) {
+    out.stockQty = next.stockQty;
+    out.expectedStockQty = product.stockQty ?? null;
+  }
+  if (owner && next.inStock !== product.inStock) out.inStock = next.inStock;
+  return out;
+}
+
+function ProductPanel({
+  product,
+  owner,
+  onChanged,
+  onArchived,
+}: {
+  product: Product;
+  owner: boolean;
+  onChanged: () => Promise<void>;
+  onArchived: () => void;
+}): JSX.Element {
   const [price, setPrice] = useState(product.price.amount);
   const [qty, setQty] = useState(product.stockQty ?? 0);
   const [tracked, setTracked] = useState(product.stockQty != null);
@@ -40,6 +77,7 @@ function ProductPanel({ product, onChanged }: { product: Product; onChanged: () 
   const [receive, setReceive] = useState(0);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<NoteState>(null);
+  const [archiving, setArchiving] = useState(false);
 
   useEffect(() => {
     setPrice(product.price.amount);
@@ -60,19 +98,37 @@ function ProductPanel({ product, onChanged }: { product: Product; onChanged: () 
       await onChanged();
       setNote({ text: ok, tone: 'ok' });
     } catch (e) {
-      setNote({ text: describe(e), tone: 'err' });
+      if (reasonOf(e) === 'stockChanged') {
+        // The bar sold meanwhile: the panel shows the quantity as it is now; the owner saves again on purpose.
+        await onChanged();
+        setNote({
+          text: t('Остаток изменился, пока вы редактировали (продажи бара) — проверьте и сохраните снова'),
+          tone: 'err',
+        });
+      } else {
+        setNote({ text: describe(e), tone: 'err' });
+      }
     } finally {
       setBusy(false);
     }
   };
 
   const stockQty = tracked ? Math.max(0, Math.round(qty)) : null;
-  const changed =
-    price !== product.price.amount || inStock !== product.inStock || stockQty !== (product.stockQty ?? null);
+  const changes = changesOf(product, { price, stockQty, inStock }, owner);
+  const changed = Object.keys(changes).length > 0;
 
   return (
     <div className="flex flex-col gap-5">
-      <Section title={product.title}>
+      <Section
+        title={product.title}
+        actions={
+          owner ? (
+            <Button variant="ghost" size="sm" disabled={busy} onClick={() => setArchiving(true)}>
+              {t('В архив')}
+            </Button>
+          ) : undefined
+        }
+      >
         <Field label={t('Цена')}>
           <MoneyInput value={price} onChange={setPrice} />
         </Field>
@@ -80,15 +136,13 @@ function ProductPanel({ product, onChanged }: { product: Product; onChanged: () 
           <NumberInput value={qty} min={0} suffix={t('шт')} disabled={!tracked} onChange={setQty} />
         </Field>
         <Toggle label={t('Не вести учёт')} checked={!tracked} onChange={(v) => setTracked(!v)} />
-        <Toggle label={t('В наличии')} checked={inStock} onChange={setInStock} />
+        {owner && <Toggle label={t('В наличии')} checked={inStock} onChange={setInStock} />}
         <Note note={note} />
         <Button
           variant="primary"
           className="self-end"
           disabled={busy || !changed}
-          onClick={() =>
-            void run(() => clubApi.updateProduct(product.id, { price, stockQty, inStock }), t('Сохранено'))
-          }
+          onClick={() => void run(() => clubApi.updateProduct(product.id, changes), t('Сохранено'))}
         >
           {t('Сохранить')}
         </Button>
@@ -115,7 +169,121 @@ function ProductPanel({ product, onChanged }: { product: Product; onChanged: () 
           </Button>
         </div>
       </Section>
+
+      {archiving && (
+        <Sheet title={t('В архив · {title}', { title: product.title })} onClose={() => setArchiving(false)}>
+          <p className="text-sm">
+            {t('Товар пропадёт из бара и из списка. Прошлые продажи сохранят его название и цену.')}
+          </p>
+          <Note note={note?.tone === 'err' ? note : null} />
+          <div className="flex justify-end gap-2 border-t border-line pt-4">
+            <Button variant="ghost" autoFocus onClick={() => setArchiving(false)}>
+              {t('Отмена')}
+            </Button>
+            <Button
+              variant="danger"
+              className="border border-danger/50"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                clubApi
+                  .archiveProduct(product.id)
+                  .then(() => {
+                    setArchiving(false);
+                    onArchived();
+                  })
+                  .catch((e: unknown) => setNote({ text: describe(e), tone: 'err' }))
+                  .finally(() => setBusy(false));
+              }}
+            >
+              {t('В архив')}
+            </Button>
+          </div>
+        </Sheet>
+      )}
     </div>
+  );
+}
+
+/** «Новый товар» (owner): a name, a category, a price, and a quantity when it is counted. */
+function NewProductSheet({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: (p: Product) => void;
+}): JSX.Element {
+  const [title, setTitle] = useState('');
+  const [category, setCategory] = useState<string>('drink');
+  const [price, setPrice] = useState(0);
+  const [tracked, setTracked] = useState(true);
+  const [qty, setQty] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const name = title.trim();
+  const ready = name.length > 0 && name.length <= 80 && !busy;
+  const create = async (): Promise<void> => {
+    if (!ready) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await clubApi.createProduct({
+        title: name,
+        category,
+        price,
+        stockQty: tracked ? Math.max(0, Math.round(qty)) : null,
+        inStock: true,
+      });
+      onCreated(r.product);
+    } catch (e) {
+      setError(describe(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Sheet title={t('Новый товар')} onClose={onClose}>
+      <div
+        className="flex flex-col gap-4"
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !(e.target instanceof HTMLButtonElement)) {
+            e.preventDefault();
+            if (!e.repeat) void create();
+          }
+        }}
+      >
+        <Field label={t('Название')}>
+          <Input value={title} maxLength={80} autoFocus onChange={(e) => setTitle(e.target.value)} />
+        </Field>
+        <Field label={t('Категория')}>
+          <select className={inputCls} value={category} onChange={(e) => setCategory(e.target.value)}>
+            {CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {t(PRODUCT_CATEGORY_LABEL[c] ?? c)}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label={t('Цена')}>
+          <MoneyInput value={price} onChange={setPrice} />
+        </Field>
+        <Toggle label={t('Не вести учёт')} checked={!tracked} onChange={(v) => setTracked(!v)} />
+        {tracked && (
+          <Field label={t('Остаток')}>
+            <NumberInput value={qty} min={0} suffix={t('шт')} onChange={setQty} />
+          </Field>
+        )}
+        <Note note={error ? { text: error, tone: 'err' } : null} />
+        <div className="flex justify-end gap-2 border-t border-line pt-4">
+          <Button variant="ghost" onClick={onClose}>
+            {t('Отмена')}
+          </Button>
+          <Button variant="primary" disabled={!ready} onClick={() => void create()}>
+            {busy ? '…' : t('Добавить')}
+          </Button>
+        </div>
+      </div>
+    </Sheet>
   );
 }
 
@@ -135,12 +303,13 @@ function ProductThumb({ url, title }: { url: string | null | undefined; title: s
   );
 }
 
-export default function ShopPage(): JSX.Element {
+export default function ShopPage({ isOwner = false }: { isOwner?: boolean }): JSX.Element {
   const [items, setItems] = useState<Product[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
   const [selected, setSelected] = useState<string | null>(null);
   const [rowNote, setRowNote] = useState<NoteState>(null);
+  const [creating, setCreating] = useState(false);
   const s = useClubSettings();
   const lowAt = s.draft?.stock.lowAt ?? 0;
 
@@ -178,7 +347,16 @@ export default function ShopPage(): JSX.Element {
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader title={t('Магазин и склад')} />
+      <PageHeader
+        title={t('Магазин и склад')}
+        actions={
+          isOwner ? (
+            <Button variant="primary" onClick={() => setCreating(true)}>
+              {t('Новый товар')}
+            </Button>
+          ) : undefined
+        }
+      />
       {error && <Note note={{ text: error, tone: 'err' }} />}
       {s.error && <Note note={{ text: s.error, tone: 'err' }} />}
       <Note note={rowNote} />
@@ -216,7 +394,9 @@ export default function ShopPage(): JSX.Element {
                 {
                   key: 'cat',
                   title: t('Категория'),
-                  render: (p) => <span className="text-muted">{t(CATEGORY[p.category] ?? p.category)}</span>,
+                  render: (p) => (
+                    <span className="text-muted">{t(PRODUCT_CATEGORY_LABEL[p.category] ?? p.category)}</span>
+                  ),
                 },
                 { key: 'price', title: t('Цена'), num: true, render: (p) => money(p.price) },
                 {
@@ -226,20 +406,27 @@ export default function ShopPage(): JSX.Element {
                   render: (p) =>
                     p.stockQty == null ? (
                       <span className="text-muted">{t('не учитывается')}</span>
+                    ) : p.stockQty === 0 ? (
+                      <span className="text-danger">{t('нет на складе')}</span>
                     ) : (
                       <span className={clsx(isLow(p, lowAt) && 'text-danger')}>{p.stockQty}</span>
                     ),
                 },
-                {
-                  key: 'stock',
-                  title: t('В наличии'),
-                  width: '7rem',
-                  render: (p) => (
-                    <span onClick={(e) => e.stopPropagation()}>
-                      <Toggle checked={p.inStock} onChange={(v) => void toggleStock(p, v)} />
-                    </span>
-                  ),
-                },
+                // The switch is the owner's (the server refuses a cashier's): a cashier sees no switch.
+                ...(isOwner
+                  ? [
+                      {
+                        key: 'stock',
+                        title: t('В наличии'),
+                        width: '7rem',
+                        render: (p: Product) => (
+                          <span onClick={(e) => e.stopPropagation()}>
+                            <Toggle checked={p.inStock} onChange={(v) => void toggleStock(p, v)} />
+                          </span>
+                        ),
+                      },
+                    ]
+                  : []),
               ]}
             />
           </Section>
@@ -264,8 +451,30 @@ export default function ShopPage(): JSX.Element {
           />
         </div>
 
-        {product && <ProductPanel product={product} onChanged={load} />}
+        {product && (
+          <ProductPanel
+            product={product}
+            owner={isOwner}
+            onChanged={load}
+            onArchived={() => {
+              setSelected(null);
+              setRowNote({ text: t('Товар в архиве'), tone: 'ok' });
+              void load();
+            }}
+          />
+        )}
       </div>
+
+      {creating && (
+        <NewProductSheet
+          onClose={() => setCreating(false)}
+          onCreated={(p) => {
+            setCreating(false);
+            setRowNote({ text: t('Товар добавлен · {title}', { title: p.title }), tone: 'ok' });
+            void load().then(() => setSelected(p.id));
+          }}
+        />
+      )}
     </div>
   );
 }
