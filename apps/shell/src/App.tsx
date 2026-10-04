@@ -16,7 +16,7 @@ import { useAgentEvent, useKioskEvent } from '@/hooks/useTauriEvent';
 import { trackScreen } from '@/lib/analytics';
 import { createAppRouter, isBareRoute, type WindowRole } from '@/router';
 import { AdsCarousel, type AdItem } from '@/screens/Idle/AdsCarousel';
-import { AdminPanel } from '@/screens/Profile/Settings';
+import { AdminPanel } from '@/screens/Admin/AdminPanel';
 import { useAuthStore } from '@/store/auth';
 import { useGamesStore } from '@/store/games';
 import { useSessionStore } from '@/store/session';

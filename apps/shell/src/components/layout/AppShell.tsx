@@ -7,14 +7,15 @@ import { trackScreen } from '@/lib/analytics';
 import { press, tick } from '@/lib/sound';
 import { StatusBar, TopBar } from '@/screens/Desktop/HudBars';
 import { IdleLeavePrompt } from '@/screens/Desktop/LeaveButton';
+import { useSettingsStore } from '@/store/settings';
 import { useThemeStore } from '@/store/theme';
 
 /**
- * Authenticated layout, framed like a game's pause menu: the TopBar (club, section tabs, clock, lock) floats over
- * the routed screen, which scrolls underneath it (top padding = bar height, so a screen may bleed under the bar with
- * a negative margin); the StatusBar (player, time left, balance, controller prompts) sits along the bottom; corner
- * brackets mark the edges of the screen. A short fade per pathname, overlays (toasts, banners, staff modal,
- * on-screen keyboard) on top and the themed Background behind everything. Never scrolls horizontally.
+ * Authenticated layout, framed like a game's pause menu: the TopBar (club and PC, section tabs, vitals, clock, sound,
+ * lock) floats over the routed screen, which scrolls underneath it (top padding = bar height, so a screen may bleed
+ * under the bar with a negative margin); the StatusBar (player, time left, balance, controller prompts) sits along the
+ * bottom; corner brackets mark the edges of the screen. A short fade per pathname, overlays (toasts, banners, staff
+ * modal, on-screen keyboard) on top and the themed Background behind everything. Never scrolls horizontally.
  */
 export function AppShell(): JSX.Element {
   const location = useLocation();
@@ -34,6 +35,15 @@ export function AppShell(): JSX.Element {
   useEffect(() => {
     trackScreen(location.pathname);
   }, [location.pathname]);
+
+  // The PC the top bar names on every screen (graphics card, vitals): asked once, kept for the app's lifetime. Each
+  // call is a no-op once its answer is in.
+  useEffect(() => {
+    const { loadHardware, ensureMetrics, ensurePcInfo } = useSettingsStore.getState();
+    void loadHardware();
+    void ensureMetrics();
+    void ensurePcInfo();
+  }, []);
 
   // UI sounds: one tick per `data-nav` element entered by pointer or keyboard, a press on activation.
   useEffect(() => {

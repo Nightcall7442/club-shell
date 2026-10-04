@@ -1,8 +1,9 @@
 /**
  * The two HUD bars that frame every authenticated screen, like a game's pause menu.
  *
- * - Top: club mark and PC, the section tabs (`LB` · tabs · `RB`), a link dot only while the link is down, the clock,
- *   one sound-and-language menu and lock.
+ * - Top: club mark and the PC line (name · zone · graphics card · Hz, → the PC block on Home), the section tabs
+ *   (`LB` · tabs · `RB`), a link dot only while the link is down, the PC's vitals (temperatures, FPS in a game), the
+ *   clock, one sound-and-language menu that shows the volume, and lock.
  * - Bottom (status line): the player (→ profile), time left (→ add time), balance (→ wallet / top up), the dock of
  *   open programs in the middle (→ bring one to the front), the controller prompts for what the buttons do here and
  *   "end and leave" at the right end.
@@ -23,10 +24,12 @@ import { useLocale } from '@/hooks/useLocale';
 import { useSession } from '@/hooks/useSession';
 import { formatMoney } from '@/lib/format';
 import { formatClock, serverNow } from '@/lib/time';
-import { NavBar } from '@/screens/Desktop/NavBar';
+import { NavBar, visibleNavItems } from '@/screens/Desktop/NavBar';
 import { LeaveButton } from '@/screens/Desktop/LeaveButton';
 import { RunningDock } from '@/screens/Desktop/RunningDock';
 import { PlusButton, SessionTimer } from '@/screens/Desktop/SessionTimer';
+import { PcBadge } from '@/screens/Pc/PcBadge';
+import { PcVitals } from '@/screens/Pc/PcVitals';
 import { useNotificationsStore } from '@/store/notifications';
 import { selectFeatures, useSettingsStore } from '@/store/settings';
 import { useWalletStore } from '@/store/wallet';
@@ -89,7 +92,7 @@ export function Clock({ format }: { format: string }): JSX.Element {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Sound and language (one menu: both are set once per visit, neither earns a permanent icon in the bar)
+// Sound and language (one menu: both are set once per visit; the trigger shows the volume, so a glance tells it)
 // ---------------------------------------------------------------------------------------------------------------------
 
 const VOLUME_COMMIT_MS = 150;
@@ -128,6 +131,7 @@ export function SystemMenu(): JSX.Element {
   };
 
   const close = useCallback(() => setOpen(false), []);
+  const silent = muted || volume === 0;
 
   const choose = (next: Locale): void => {
     setOpen(false);
@@ -145,16 +149,17 @@ export function SystemMenu(): JSX.Element {
       trigger={
         <Button
           variant="ghost"
-          iconOnly
-          className="h-9 w-9 text-muted hover:text-text"
+          className="!gap-1.5 !px-2.5 text-muted hover:text-text"
           data-popover-trigger="true"
           aria-label={t('desktop.soundAndLanguage')}
           title={t('desktop.soundAndLanguage')}
           aria-haspopup="dialog"
           aria-expanded={open}
-          icon={<IconVolume muted={muted || volume === 0} />}
+          icon={<IconVolume muted={silent} />}
           onClick={() => setOpen((v) => !v)}
-        />
+        >
+          {silent ? null : <span className="num-dot text-base leading-none">{volume}</span>}
+        </Button>
       }
     >
       <div className="flex flex-col gap-3">
@@ -302,7 +307,7 @@ export function TopBar(): JSX.Element {
   const { t } = useTranslation();
   const club = useClub();
   const navigate = useNavigate();
-  const pc = useSettingsStore((s) => s.pcInfo?.pc ?? null);
+  const features = useSettingsStore(selectFeatures);
   const showClock = useSettingsStore((s) => s.shellConfig?.ui.showClock ?? true);
   const clockFormat = useSettingsStore((s) => s.shellConfig?.ui.clockFormat ?? 'HH:mm');
   const pushError = useNotificationsStore((s) => s.pushError);
@@ -328,7 +333,7 @@ export function TopBar(): JSX.Element {
         <ClubMark className="h-6 w-6" />
         <div className="min-w-0 leading-tight">
           <div className="truncate font-display text-sm font-normal tracking-tight text-text">{club.name}</div>
-          <div className="hud-label mt-0.5 truncate">{pc ? `${pc.name} · ${pc.zone}` : t('common.loading')}</div>
+          <PcBadge className="mt-0.5" />
         </div>
       </div>
 
@@ -336,6 +341,8 @@ export function TopBar(): JSX.Element {
 
       <div className="flex items-center justify-end gap-2">
         <ConnectivityIndicator />
+        {/* Many section tabs leave the right side little room: the vitals keep one reading then. */}
+        <PcVitals compact={visibleNavItems(features).length > 6} />
         {showClock && <Clock format={clockFormat} />}
         <span aria-hidden="true" className="mx-2 h-6 w-px bg-text/15" />
         <SystemMenu />

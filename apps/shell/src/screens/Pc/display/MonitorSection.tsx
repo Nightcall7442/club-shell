@@ -1,11 +1,13 @@
 /**
- * Settings → Monitor: each display's resolution and refresh rate, the rates it supports as a pick-one row (the
- * highest flagged, and offered outright when the screen runs below it), and Windows' own "keep these settings?"
- * countdown after a switch. The Shell reverts an unconfirmed rate by itself, so the countdown here is only the face.
+ * "Монитор" in the PC block on Home: each display's resolution and refresh rate, the rates it supports as a pick-one
+ * row (the highest flagged, and offered outright when the screen runs below it), and Windows' own "keep these
+ * settings?" countdown after a switch. The Shell reverts an unconfirmed rate by itself, so the countdown here is only
+ * the face. Mounted once in the whole app: a second copy would ask "keep these settings?" twice.
  */
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
+import { SettingsSection } from '@/components/settings/SettingsSection';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { DotAmount } from '@/components/ui/DotAmount';
@@ -13,7 +15,6 @@ import { Modal } from '@/components/ui/Modal';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useLocale } from '@/hooks/useLocale';
 import type { DisplayInfo } from '@/lib/tauri';
-import { SettingsSection } from '../Settings';
 import { betterRate, formatUnit } from './specs';
 import { useDisplays } from './useDisplays';
 
@@ -263,7 +264,8 @@ export function MonitorSection(): JSX.Element {
     );
   } else {
     body = (
-      <div className={clsx('grid gap-3', displays.length > 1 && '2xl:grid-cols-2')}>
+      // One column even for two displays: the card shares the home block's row with two others.
+      <div className="grid gap-3">
         {displays.map((d) => (
           <DisplayCard
             key={d.device}

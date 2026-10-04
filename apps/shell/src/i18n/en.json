@@ -287,6 +287,8 @@
     "timeLeft": "Time left",
     "tariff": "Tariff",
     "pc": "PC",
+    "pcAndSettings": "Computer and settings",
+    "pcBadge": "Open this PC's specs and settings",
     "noSession": "No active session",
     "startSession": "Start session",
     "clock": "Clock",
@@ -875,7 +877,9 @@
     "stats": "Stats",
     "achievements": "Achievements",
     "loyalty": "Loyalty",
-    "settings": "Settings",
+    "account": "Account",
+    "pcMoved": "Sound, mouse, monitor and theme are on the Home screen",
+    "openPcSettings": "Open PC settings",
     "displayName": "Display name",
     "username": "Username",
     "avatar": "Avatar",
@@ -1186,14 +1190,12 @@
   "settings": {
     "title": "Settings",
     "subtitle": "Language, theme and sound",
-    "language": "Language",
     "theme": "Theme",
     "volume": "Volume",
     "muted": "Muted",
     "idleTimeout": "Lock after inactivity",
     "idleTimeoutValue": "{{minutes}} min",
     "idleNever": "Never",
-    "showMetrics": "Show system metrics",
     "uiSounds": "Interface sounds",
     "save": "Save",
     "saved": "Settings saved",
@@ -1230,7 +1232,6 @@
     "volumeLevel": "Volume {{level}}%",
     "system": "System",
     "sound": "Sound",
-    "display": "Display",
     "accessibility": "Accessibility",
     "reduceMotion": "Reduce motion",
     "largeText": "Large text",
@@ -1445,6 +1446,7 @@
     "specs": {
       "title": "My computer",
       "description": "This PC's specs",
+      "all": "All specs",
       "seat": "Seat {{number}}",
       "zone": "Zone {{zone}}",
       "cpu": "Processor",
@@ -1477,6 +1479,16 @@
       "ip": "IP {{ip}}",
       "peripherals": "Peripherals",
       "unavailable": "Specs are not available yet"
+    },
+    "vitals": {
+      "title": "PC vitals",
+      "cpu": "CPU",
+      "gpu": "GPU",
+      "ram": "RAM",
+      "fps": "FPS",
+      "temp": "{{value}}°",
+      "load": "{{value}}%",
+      "hot": "overheating"
     }
   }
 }

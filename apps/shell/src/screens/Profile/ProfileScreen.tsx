@@ -1,7 +1,8 @@
 /**
  * Profile screen: header (avatar, inline-editable display name, role, member since, loyalty level/points, balance)
- * and four tabs — Stats, Achievements, Loyalty, Settings. Stats/achievements/loyalty are fetched here once and
- * handed to the panels as props; the active tab is mirrored in `?tab=` so `/profile?tab=settings` deep-links.
+ * and five tabs — Stats, Achievements, Loyalty, Game settings, Account (key `settings`: PIN and logout; the PC's
+ * settings are on Home). Stats/achievements/loyalty are fetched here once and handed to the panels as props; the
+ * active tab is mirrored in `?tab=` so `/profile?tab=settings` deep-links.
  */
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import type { Achievement, Loyalty as LoyaltyInfo, User, UserRole, UserStats } from '@clubshell/contracts';
@@ -21,11 +22,11 @@ import { useLocale } from '@/hooks/useLocale';
 import { formatDate, formatNumber } from '@/lib/format';
 import { api } from '@/lib/tauri';
 import { useAuthStore, useNotificationsStore, useSettingsStore, useThemeStore } from '@/store';
+import Account from './Account';
 import Achievements from './Achievements';
 import AvatarPicker from './AvatarPicker';
 import GameSettings from './GameSettings';
 import Loyalty, { displayLevel } from './Loyalty';
-import Settings, { nudgeRange } from './Settings';
 import Stats from './Stats';
 
 export type ProfileTab = 'stats' | 'achievements' | 'loyalty' | 'games' | 'settings';
@@ -361,14 +362,6 @@ export function ProfileScreen(): JSX.Element {
       }
     },
     onTab: (dir) => stepTab(dir === 'next' ? 1 : -1),
-    onNavigate: (dir) => {
-      const el = document.activeElement;
-      if (el instanceof HTMLInputElement && el.type === 'range' && (dir === 'left' || dir === 'right')) {
-        nudgeRange(el, dir === 'right' ? 5 : -5);
-        return true;
-      }
-      return false;
-    },
   });
 
   // Initial focus lands on the active tab so keyboard/gamepad users have a starting point.
@@ -385,7 +378,7 @@ export function ProfileScreen(): JSX.Element {
     { key: 'achievements', label: t('profile.achievements') },
     { key: 'loyalty', label: t('profile.loyalty') },
     { key: 'games', label: t('profile.gameSettings.tab') },
-    { key: 'settings', label: t('profile.settings') },
+    { key: 'settings', label: t('profile.account') },
   ];
 
   const duration = animations ? 0.2 : 0;
@@ -402,7 +395,7 @@ export function ProfileScreen(): JSX.Element {
       panel = <GameSettings />;
       break;
     case 'settings':
-      panel = <Settings />;
+      panel = <Account />;
       break;
     default:
       panel = <Stats stats={data.stats} loading={data.loading} />;

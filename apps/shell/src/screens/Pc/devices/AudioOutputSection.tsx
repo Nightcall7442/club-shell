@@ -6,12 +6,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
+import { SettingsSection } from '@/components/settings/SettingsSection';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Spinner } from '@/components/ui/Spinner';
 import { api, type PcAudioOutput, type PcAudioOutputs } from '@/lib/tauri';
 import { useNotificationsStore, useSettingsStore } from '@/store';
-import { SettingsSection } from '../Settings';
 import { CheckIcon, OutputIcon, RefreshIcon } from './icons';
 import { splitDeviceName } from './pcFormat';
 

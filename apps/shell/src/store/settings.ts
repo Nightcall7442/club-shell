@@ -1,10 +1,13 @@
 /**
  * Device-level slice: `ShellSettings` (+ feature toggles) persisted through `settings_set`, plus the read-only
- * system context the UI needs everywhere (`shell.json`, `PcInfo`, live metrics, kiosk state, policy).
- * Loaded first by `bootstrapStores()`; never reset on logout.
+ * system context the UI needs everywhere (`shell.json`, `PcInfo`, hardware inventory, live metrics, kiosk state,
+ * policy). Loaded first by `bootstrapStores()`; never reset on logout.
  */
 import type {
+  GpuInfo,
+  HardwareInfo,
   Locale,
+  MonitorInfo,
   PcInfo,
   PcMetrics,
   Policy,
@@ -18,6 +21,7 @@ import { changeLocale, toLocale } from '@/i18n';
 import { log } from '@/lib/logger';
 import { api, isTauri, toShellApiError, type KioskState, type ShellConfig, type ShellError } from '@/lib/tauri';
 import { syncServerTime } from '@/lib/time';
+import { primaryGpu } from '@/screens/Pc/devices/gpuVendor';
 
 /** Lifecycle of an async store action. */
 export type AsyncStatus = 'idle' | 'loading' | 'ready' | 'error';
@@ -67,6 +71,9 @@ export interface SettingsState {
   features: ShellFeatures;
   shellConfig: ShellConfig | null;
   pcInfo: PcInfo | null;
+  /** `sys_hardware`, read once per app run (the PC does not change under a running Shell). */
+  hardware: HardwareInfo | null;
+  hardwareStatus: AsyncStatus;
   metrics: PcMetrics | null;
   kiosk: KioskState | null;
   policy: Policy | null;
@@ -81,6 +88,15 @@ export interface SettingsActions {
   load(): Promise<ShellSettings>;
   /** Loads shell.json, PcInfo (syncs the server clock), kiosk state and policy; each part fails independently. */
   loadSystem(): Promise<void>;
+  /**
+   * One `sys_hardware` for the app's lifetime; calls while it runs share it, a failed one can be retried. The first
+   * call on a cold PC is a WMI scan of a few seconds, so nothing waits on it.
+   */
+  loadHardware(): Promise<void>;
+  /** One `sys_metrics` sample while none has arrived (`sys.metrics` events keep it fresh afterwards). */
+  ensureMetrics(): Promise<void>;
+  /** Asks `sys_pc_info` again while it is still unknown (the Agent link may have been down at boot). */
+  ensurePcInfo(): Promise<void>;
   /** Optimistic patch persisted via `settings_set`; rolls back and rethrows on failure. */
   set(patch: SettingsSetRequest): Promise<ShellSettings>;
   setLocale(locale: Locale): Promise<void>;
@@ -105,6 +121,8 @@ const initialState: SettingsState = {
   features: DEFAULT_FEATURES,
   shellConfig: null,
   pcInfo: null,
+  hardware: null,
+  hardwareStatus: 'idle',
   metrics: null,
   kiosk: null,
   policy: null,
@@ -122,6 +140,11 @@ function normalize(s: ShellSettings): ShellSettings {
     features: { ...DEFAULT_FEATURES, ...s.features },
   };
 }
+
+// In-flight reads shared by concurrent callers (the top bar and the home block ask at the same moment).
+let hardwareLoad: Promise<void> | null = null;
+let metricsLoad: Promise<void> | null = null;
+let pcInfoLoad: Promise<void> | null = null;
 
 export const useSettingsStore = create<SettingsStore>()(
   subscribeWithSelector((set, get) => ({
@@ -165,6 +188,64 @@ export const useSettingsStore = create<SettingsStore>()(
       if (policy.status === 'fulfilled') {
         set({ policy: policy.value });
       }
+    },
+
+    loadHardware() {
+      if (get().hardware) {
+        return Promise.resolve();
+      }
+      if (!hardwareLoad) {
+        set({ hardwareStatus: 'loading' });
+        hardwareLoad = api.system
+          .hardware()
+          .then(
+            (hardware) => set({ hardware, hardwareStatus: 'ready' }),
+            (e: unknown) => {
+              log.warn('system.hardware failed', asShellError(e));
+              set({ hardwareStatus: 'error' });
+            },
+          )
+          .finally(() => {
+            hardwareLoad = null;
+          });
+      }
+      return hardwareLoad;
+    },
+
+    ensureMetrics() {
+      if (get().metrics) {
+        return Promise.resolve();
+      }
+      metricsLoad ??= api.system
+        .metrics()
+        .then(
+          // A `sys.metrics` event may have landed meanwhile: it is the newer sample.
+          (metrics) => set((s) => (s.metrics ? {} : { metrics })),
+          (e: unknown) => log.warn('system.metrics failed', asShellError(e)),
+        )
+        .finally(() => {
+          metricsLoad = null;
+        });
+      return metricsLoad;
+    },
+
+    ensurePcInfo() {
+      if (get().pcInfo) {
+        return Promise.resolve();
+      }
+      pcInfoLoad ??= api.system
+        .pcInfo()
+        .then(
+          (pcInfo) => {
+            syncServerTime(pcInfo.serverTime);
+            set({ pcInfo });
+          },
+          (e: unknown) => log.warn('system.pcInfo failed', asShellError(e)),
+        )
+        .finally(() => {
+          pcInfoLoad = null;
+        });
+      return pcInfoLoad;
     },
 
     async set(patch) {
@@ -263,3 +344,14 @@ export const selectFeature =
   (feature: keyof ShellFeatures) =>
   (s: SettingsStore): boolean =>
     s.features[feature];
+/**
+ * Selector: the primary display, live from the kiosk layer (a refresh rate switched a minute ago shows) and from the
+ * hardware inventory until the kiosk state is known.
+ */
+export const selectPrimaryMonitor = (s: SettingsStore): MonitorInfo | null => {
+  const live = s.kiosk?.monitors;
+  const monitors: readonly MonitorInfo[] = live && live.length > 0 ? live : (s.hardware?.monitors ?? []);
+  return monitors.find((m) => m.primary) ?? monitors[0] ?? null;
+};
+/** Selector: the graphics card games run on (a discrete card before the iGPU next to it). */
+export const selectPrimaryGpu = (s: SettingsStore): GpuInfo | null => primaryGpu(s.hardware?.gpu ?? []);
