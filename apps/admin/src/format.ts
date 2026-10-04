@@ -11,6 +11,23 @@ export function money(m: Money | null | undefined): string {
   return t('{n} сум', { n: nf.format(Math.round(m.amount / 100)) });
 }
 
+/**
+ * UZS to the tiyin: `45 000 сум`, or `45 000,50 сум` when the amount has a minor part. For amounts that must be taken
+ * exactly (a debt, a guest's price): a rounded figure would be refused by the server.
+ */
+export function moneyExact(minor: number): string {
+  return t('{n} сум', { n: exactDigits(minor) });
+}
+
+/** `4500050` → `45 000,50`; `4500000` → `45 000`. */
+export function exactDigits(minor: number): string {
+  const sign = minor < 0 ? '−' : '';
+  const abs = Math.abs(minor);
+  const whole = nf.format(Math.floor(abs / 100));
+  const frac = abs % 100;
+  return frac === 0 ? `${sign}${whole}` : `${sign}${whole},${String(frac).padStart(2, '0')}`;
+}
+
 /** Seconds → `1:26:05` (hours:minutes:seconds), `05:12` under an hour. */
 export function duration(sec: number): string {
   if (sec < 0) {

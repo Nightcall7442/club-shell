@@ -86,6 +86,10 @@ jobs:
       - name: Typecheck all packages
         run: pnpm typecheck
 
+      # t() falls back to Russian silently: every Russian string of the console must have its uz and en line.
+      - name: Admin console translations complete
+        run: pnpm --filter @clubshell/admin i18n:check
+
       - name: Build shell frontend (Vite)
         run: pnpm --filter @clubshell/shell build
 

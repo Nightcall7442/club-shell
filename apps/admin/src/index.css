@@ -43,3 +43,100 @@
       linear-gradient(-45deg, transparent var(--cut), var(--fill) 0) right bottom / 100% 51% no-repeat;
   }
 }
+
+/*
+ * Printed slips (`print.tsx`). On screen `#print-root` is laid out off-screen at the paper's width, so a slip can be
+ * measured for `@page` before it prints; in print it is the only thing on the page, black on white, whatever the theme.
+ * Rules are borders (a background would not print), figures are tabular, the type is mono and never thinner than 500,
+ * so a thermal head draws it clearly. 80 mm rolls print 72 mm wide, 58 mm rolls 48 mm.
+ */
+#print-root {
+  position: fixed;
+  top: 0;
+  left: -10000px;
+  pointer-events: none;
+}
+#print-root[data-paper='80'] {
+  width: 80mm;
+  padding: 2mm 4mm;
+}
+#print-root[data-paper='58'] {
+  width: 58mm;
+  padding: 2mm 5mm;
+}
+#print-root[data-paper='a4'] {
+  width: 186mm;
+}
+#print-root .slip {
+  font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+  font-size: 9pt;
+  font-weight: 500;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+  color: #000;
+}
+#print-root[data-paper='58'] .slip {
+  font-size: 8.5pt;
+}
+#print-root[data-paper='a4'] .slip {
+  font-size: 10pt;
+  max-width: 120mm;
+}
+#print-root .slip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 2mm;
+}
+#print-root .slip-value {
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+#print-root .slip-strong {
+  font-weight: 700;
+}
+#print-root .slip-center {
+  text-align: center;
+}
+#print-root .slip-title {
+  margin: 1mm 0;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+#print-root .slip-rule {
+  margin: 1.5mm 0;
+  border-top: 1px dashed #000;
+}
+#print-root .slip-note {
+  margin: 1.5mm 0 0;
+}
+#print-root .slip-sub {
+  padding-left: 3mm;
+}
+#print-root .slip-sign {
+  margin-top: 8mm;
+  border-top: 1px solid #000;
+  padding-top: 0.5mm;
+}
+
+@media print {
+  body > :not(#print-root) {
+    display: none !important;
+  }
+  :root {
+    color-scheme: light;
+  }
+  html,
+  body {
+    height: auto;
+    background: #fff !important;
+  }
+  #print-root {
+    position: static;
+    left: auto;
+    display: block;
+  }
+  #print-root * {
+    color: #000 !important;
+    background: transparent !important;
+  }
+}
