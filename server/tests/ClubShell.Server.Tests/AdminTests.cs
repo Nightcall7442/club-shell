@@ -277,7 +277,10 @@ public sealed class CounterTests(ServerFixture server) : LedgerCheckedTest(serve
         var ended = await ExpectAsync(Server, 200, HttpMethod.Post, "/sessions/end", token, new { pcId = agent.PcId });
         Assert.Equal(("ended", 0L, 1_200_000L), (ended.GetProperty("session").GetProperty("state").GetString(),
             ended.GetProperty("charged").GetProperty("amount").GetInt64(), ended.GetProperty("refunded").GetProperty("amount").GetInt64()));
-        Assert.False(ended.TryGetProperty("balance", out _));
+        // Beyond the contract (cash desk part 2): the balance after the settlement and the player; payable only for guests.
+        Assert.Equal(4_400_000, ended.GetProperty("balance").GetProperty("amount").GetInt64());
+        Assert.Equal((player.Id, "member"), (ended.GetProperty("user").GetProperty("id").GetGuid(), ended.GetProperty("user").GetProperty("role").GetString()));
+        Assert.False(ended.TryGetProperty("payable", out _));
         Assert.Equal(4_400_000, await Players.BalanceAsync(Server, player.Id));
         await ExpectAsync(Server, 404, HttpMethod.Post, "/sessions/end", token, new { pcId = agent.PcId });
 

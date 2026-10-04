@@ -60,6 +60,8 @@ public sealed class TariffTests(ServerFixture server) : LedgerCheckedTest(server
         Assert.NotEqual(etag2, await ETagAsync(agent));
         await ExpectAsync(Server, 200, HttpMethod.Post, "/sessions/end", cashier, new { pcId = agent.PcId });
 
+        // The desk end signed the player out of the PC (D-28).
+        await agent.LoginAsync(player);
         var (again, body) = await Players.StartAsync(agent, player, tariff: id, minutes: 60);
         Assert.Equal((404, "tariff"), (again, body.GetProperty("error").GetProperty("details").GetProperty("what").GetString()));
         foreach (var gone in new[] { id.ToString(), Guid.NewGuid().ToString(), "nope" })

@@ -140,6 +140,33 @@ public sealed class AgentHarnessS2Tests(LongClockServerFixture server) : LedgerC
         Assert.Equal(1, await Players.ScalarAsync<int>(Server, "SELECT count(*)::int FROM ledger_entries WHERE user_id = @Id AND type = 'charge'", new { player.Id }));
     }
 
+    /// <summary>
+    /// Cash desk part 2 needs no agent change: the real client's «Гость» (<c>guestLogin</c> with no name) signs in to the
+    /// walk-in guest's desk session and gets it; after the desk end the guest's token is gone (the agent drops the player
+    /// on <c>userRevoked</c>, here its next user call is <c>401 userToken</c>).
+    /// </summary>
+    [Fact]
+    public async Task A_desk_guest_signs_in_through_the_real_agent_client()
+    {
+        await using var agent = await AgentHarness.CreateAsync(Server);
+        var client = agent.Client;
+        var pcId = (await client.RegisterAsync(agent.RegisterRequest(), CancellationToken.None)).PcId;
+        var cashier = await Staff.LoginAsync(Server, Staff.CashierPin);
+        await Staff.OpenShiftAsync(Server, cashier);
+        var opened = await DeskGuests.SeatAsync(Server, cashier, pcId);
+        var guestId = opened.GetProperty("user").GetProperty("id").GetGuid();
+
+        var auth = await client.GuestLoginAsync(new GuestAuthRequest(pcId, agent.Hwid, null, Locale.Ru), CancellationToken.None);
+        Assert.Equal((guestId, UserRole.Guest), (auth.User.Id, auth.User.Role));
+        Assert.Equal(opened.GetProperty("session").GetProperty("id").GetGuid(), auth.Session!.Id);
+        Assert.Equal(auth.Session.Id, (await client.GetCurrentSessionAsync(pcId, CancellationToken.None))!.Id);
+        Assert.Equal(guestId, (await client.GetUserAsync(guestId, CancellationToken.None)).Id);
+
+        await Staff.ExpectAsync(Server, 200, HttpMethod.Post, "/sessions/end", cashier, new { pcId });
+        var error = await Assert.ThrowsAsync<ServerApiException>(() => client.GetUserAsync(guestId, CancellationToken.None));
+        Assert.Equal((ErrorCode.Unauthorized, "userToken"), (error.Code, error.Reason));
+    }
+
     private void Advance(AgentHarness agent, TimeSpan by)
     {
         Server.Clock.Advance(by);

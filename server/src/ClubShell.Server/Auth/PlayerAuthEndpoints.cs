@@ -17,7 +17,8 @@ namespace ClubShell.Server.Auth;
 /// <summary>
 /// Player sign-in on a PC (DESIGN §3.4, slice S2): <c>login</c> (password | card | token), <c>guestLogin</c>, the QR pair
 /// (<c>startQrLogin</c>/<c>getQrLoginStatus</c>, D-18: nothing confirms it in v1, so it goes pending → expired) and
-/// <c>logout</c>. Every sign-in displaces the previous player of the PC (<c>user_tokens UNIQUE(pc_id)</c>).
+/// <c>logout</c>. Every sign-in displaces the previous player of the PC (<c>user_tokens UNIQUE(pc_id)</c>), but none is let
+/// onto a PC that holds another player's open session (<c>403 pcOccupied</c>, D-26).
 /// </summary>
 public static class PlayerAuthEndpoints
 {
@@ -87,12 +88,15 @@ public static class PlayerAuthEndpoints
                 throw BadCredentials(MaxFailures);
         }
 
-        return TypedResults.Ok(await SignInAsync(c, tokens, clock, club, pc, userId, offlineHash));
+        return TypedResults.Ok(await SignInAsync(c, tokens, clock, club, pc, _ => Task.FromResult(userId), offlineHash));
     }
 
     /// <summary>
-    /// A temporary <c>guest</c> account (<c>guest-&lt;PC number&gt;-&lt;n&gt;</c>, zero wallet, <c>transient</c>) signed in at
-    /// once; <c>403 guestDisabled</c> when <c>Club:GuestLogin</c> is off. No <c>offlineHash</c>.
+    /// «Гость» on the kiosk. A guest seat the desk opened on this PC (D-25: <c>origin = cashier</c>, a staff member, a
+    /// transient account) is taken over: that guest is signed in and gets its session, even when <c>Club:GuestLogin</c> is
+    /// off. Any other open session of the PC is <c>403 pcOccupied</c> (D-26). Otherwise a temporary <c>guest</c> account
+    /// (<see cref="Guests"/>) signed in at once; <c>403 guestDisabled</c> when <c>Club:GuestLogin</c> is off. All of it runs
+    /// in the sign-in's transaction under the PC's lock, so a refused press creates no account. No <c>offlineHash</c>.
     /// </summary>
     private static async Task<IResult> GuestAsync(
         HttpContext context, [FromBody] JsonElement body, NpgsqlDataSource db, UserTokens tokens, ClubOptions options, TimeProvider clock)
@@ -104,38 +108,40 @@ public static class PlayerAuthEndpoints
             throw ApiException.Forbidden("pcMismatch", "pcId does not match the agent token");
         }
 
-        if (!options.GuestLogin)
-        {
-            throw ApiException.Forbidden("guestDisabled", "Guest login is disabled in this club");
-        }
-
         if (request.Locale == Locale.Unknown)
         {
             throw ApiException.Validation("locale", "enum");
         }
 
-        var name = request.DisplayName?.Trim() is { Length: > 0 } given ? given : $"Гость {pc.Number}";
-        if (name.Length > 64)
-        {
-            throw ApiException.Validation("displayName", "max");
-        }
-
+        var locale = request.Locale is { } l ? JsonNamingPolicy.CamelCase.ConvertName(l.ToString()) : "ru";
         await using var c = await db.OpenConnectionAsync();
         var club = await SessionService.ClubAsync(c, null, pc.ClubId);
-        var now = clock.GetUtcNow();
-        var id = Guid.CreateVersion7(now);
-        await c.ExecuteAsync(
-            """
-            INSERT INTO users (id, network_id, username, display_name, role, locale, transient, created_at, last_seen_at)
-            VALUES (@id, @network, @username, @name, 'guest', @locale, true, @now, @now);
-            INSERT INTO wallets (user_id, network_id, updated_at) VALUES (@id, @network, @now);
-            """,
-            new
+        return TypedResults.Ok(await SignInAsync(c, tokens, clock, club, pc, async tx =>
+        {
+            if (await Guests.DeskGuestOfPcAsync(c, tx, pc.Id) is { } deskGuest)
             {
-                id, network = club.NetworkId, username = $"guest-{pc.Number}-{Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(4))}", name, now,
-                locale = request.Locale is { } l ? JsonNamingPolicy.CamelCase.ConvertName(l.ToString()) : "ru",
-            });
-        return TypedResults.Ok(await SignInAsync(c, tokens, clock, club, pc, id, offlineHash: null));
+                await c.ExecuteAsync("UPDATE users SET locale = @locale WHERE id = @deskGuest", new { deskGuest, locale }, tx);
+                return deskGuest;
+            }
+
+            if (await SessionService.OpenOfPcAsync(c, pc.Id, tx) is not null)
+            {
+                throw PcOccupied();
+            }
+
+            if (!options.GuestLogin)
+            {
+                throw ApiException.Forbidden("guestDisabled", "Guest login is disabled in this club");
+            }
+
+            var name = request.DisplayName?.Trim() is { Length: > 0 } given ? given : $"Гость {pc.Number}";
+            if (name.Length > 64)
+            {
+                throw ApiException.Validation("displayName", "max");
+            }
+
+            return await Guests.CreateAsync(c, tx, club.NetworkId, pc.Number, name, locale, clock.GetUtcNow());
+        }, offlineHash: null));
     }
 
     /// <summary>
@@ -263,37 +269,52 @@ public static class PlayerAuthEndpoints
     }
 
     /// <summary>
-    /// The checks after the credentials (§3.4) and the token: <c>403 banned</c> (banned or blacklisted in this club),
-    /// <c>403 ageRestricted</c> (a minor in the curfew), <c>409 activeSessionElsewhere</c>; then the token of this PC and
-    /// the player's open session on this PC, if any. The refresh token is opaque and never accepted: players have none.
+    /// The checks after the credentials (§3.4) and the token, in one transaction under the PC's advisory lock (D-27): the
+    /// player (<paramref name="who"/>: known, or found or created by the guest press in this transaction), <c>403 banned</c>
+    /// (banned or blacklisted in this club), <c>403 ageRestricted</c> (a minor in the curfew), <c>409
+    /// activeSessionElsewhere</c>, <c>403 pcOccupied</c> when the PC holds another player's open session (D-26: otherwise the
+    /// session resync would unlock the desktop under the wrong name); then the token of this PC and the player's open session
+    /// on this PC, if any. The refresh token is opaque and never accepted: players have none.
     /// </summary>
     private static async Task<AuthResponse> SignInAsync(
-        NpgsqlConnection c, UserTokens tokens, TimeProvider clock, ClubInfo club, Agents.PcRow pc, Guid userId, string? offlineHash)
+        NpgsqlConnection c, UserTokens tokens, TimeProvider clock, ClubInfo club, Agents.PcRow pc, Func<NpgsqlTransaction, Task<Guid>> who,
+        string? offlineHash)
     {
         var now = clock.GetUtcNow();
-        var buyer = await SessionService.BuyerAsync(c, null, club, userId) ?? throw BadCredentials(MaxFailures);
-        if (buyer.Banned || buyer.Blacklisted)
-        {
-            throw ApiException.Forbidden("banned", "The account is banned");
-        }
-
-        if (club.Pricing.InCurfew(buyer.BirthYear, now))
-        {
-            throw ApiException.Forbidden("ageRestricted", "Minors may not play at this hour");
-        }
-
-        var open = await c.QuerySingleOrDefaultAsync<SessionRow>($"SELECT {SessionRow.Columns} FROM sessions WHERE user_id = @userId AND state <> 'ended'", new { userId });
-        if (open is not null && open.PcId != pc.Id)
-        {
-            var pcName = await c.ExecuteScalarAsync<string>("SELECT name FROM pcs WHERE id = @PcId", new { open.PcId });
-            throw new ApiException(StatusCodes.Status409Conflict, ErrorCode.Conflict, "The player has an open session on another PC",
-                new { reason = "activeSessionElsewhere", pcId = open.PcId, pcName });
-        }
-
+        Guid userId;
+        SessionRow? open;
         string token;
         DateTimeOffset expiresAt;
         await using (var tx = await c.BeginTransactionAsync())
         {
+            await c.ExecuteAsync("SET LOCAL lock_timeout = '10s'", transaction: tx);
+            await AdvisoryLocks.PcAsync(c, tx, pc.Id);
+            userId = await who(tx);
+            var buyer = await SessionService.BuyerAsync(c, tx, club, userId) ?? throw BadCredentials(MaxFailures);
+            if (buyer.Banned || buyer.Blacklisted)
+            {
+                throw ApiException.Forbidden("banned", "The account is banned");
+            }
+
+            if (club.Pricing.InCurfew(buyer.BirthYear, now))
+            {
+                throw ApiException.Forbidden("ageRestricted", "Minors may not play at this hour");
+            }
+
+            open = await c.QuerySingleOrDefaultAsync<SessionRow>(
+                $"SELECT {SessionRow.Columns} FROM sessions WHERE user_id = @userId AND state <> 'ended'", new { userId }, tx);
+            if (open is not null && open.PcId != pc.Id)
+            {
+                var pcName = await c.ExecuteScalarAsync<string>("SELECT name FROM pcs WHERE id = @PcId", new { open.PcId }, tx);
+                throw new ApiException(StatusCodes.Status409Conflict, ErrorCode.Conflict, "The player has an open session on another PC",
+                    new { reason = "activeSessionElsewhere", pcId = open.PcId, pcName });
+            }
+
+            if (await SessionService.OpenOfPcAsync(c, pc.Id, tx) is { } occupant && occupant.UserId != userId)
+            {
+                throw PcOccupied();
+            }
+
             (token, expiresAt) = await tokens.IssueAsync(c, tx, userId, pc.Id);
             await c.ExecuteAsync("UPDATE users SET last_seen_at = @now WHERE id = @userId", new { userId, now }, tx);
             await tx.CommitAsync();
@@ -305,6 +326,9 @@ public static class PlayerAuthEndpoints
 
     private static ApiException BadCredentials(int attemptsLeft) =>
         new(StatusCodes.Status401Unauthorized, ErrorCode.Unauthorized, "Wrong credentials", new { reason = "badCredentials", attemptsLeft });
+
+    /// <summary><c>403 forbidden reason=pcOccupied</c>: the PC holds another player's open session; the cashier ends it first.</summary>
+    private static ApiException PcOccupied() => ApiException.Forbidden("pcOccupied", "The PC holds another player's open session");
 
     private sealed class Credentials
     {

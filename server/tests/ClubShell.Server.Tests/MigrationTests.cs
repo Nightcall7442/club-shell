@@ -21,6 +21,21 @@ public sealed class MigrationTests(ServerFixture server) : IClassFixture<ServerF
         Assert.Equal(["VersionInfo"], await TablesAsync());
         runner.MigrateUp();
         Assert.Contains("agent_commands", await TablesAsync());
+        Assert.Contains("cash_movements", await TablesAsync());
+
+        // M0008 alone, down and up again: its columns and index go and come back.
+        runner.MigrateDown(2026100202);
+        Assert.DoesNotContain("cash_movements", await TablesAsync());
+        Assert.Equal(0, await ScalarAsync("SELECT count(*)::int FROM information_schema.columns WHERE table_name = 'shifts' AND column_name LIKE 'closed_by%'"));
+        runner.MigrateUp();
+        Assert.Equal(2, await ScalarAsync("SELECT count(*)::int FROM information_schema.columns WHERE table_name = 'shifts' AND column_name LIKE 'closed_by%'"));
+        Assert.Equal(1, await ScalarAsync("SELECT count(*)::int FROM pg_indexes WHERE indexname = 'audit_entries_shift'"));
+    }
+
+    private async Task<int> ScalarAsync(string sql)
+    {
+        await using var c = await server.Services.GetRequiredService<NpgsqlDataSource>().OpenConnectionAsync();
+        return await c.ExecuteScalarAsync<int>(sql);
     }
 
     /// <summary>Tables, views and sequences of the public schema: a Down must leave nothing but FluentMigrator's own table.</summary>

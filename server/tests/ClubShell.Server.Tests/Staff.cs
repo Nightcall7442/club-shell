@@ -87,6 +87,55 @@ public static class Staff
         }
     }
 
+    /// <summary>
+    /// A route beyond the contract, or a status the contract does not declare for the operation: a client without the
+    /// response validator. The status, the JSON body and whether the answer was <c>Idempotent-Replayed</c>.
+    /// </summary>
+    public static async Task<(int Status, JsonElement Body, bool Replayed)> RawAsync(
+        ServerFixture server, HttpMethod method, string path, string? token, object? body = null, Guid? key = null)
+    {
+        using var raw = server.CreateDefaultClient();
+        using var response = await raw.SendAsync(Request(method, path, token, body, key));
+        var text = await response.Content.ReadAsStringAsync();
+        return ((int)response.StatusCode, text.Length == 0 ? default : JsonElement.Parse(text), response.Headers.Contains("Idempotent-Replayed"));
+    }
+
+    /// <summary>Like <see cref="RawAsync"/>, asserting <paramref name="status"/>; an error body must still be the error envelope.</summary>
+    public static async Task<JsonElement> RawExpectAsync(
+        ServerFixture server, int status, HttpMethod method, string path, string? token, object? body = null, Guid? key = null)
+    {
+        var (actual, json, _) = await RawAsync(server, method, path, token, body, key);
+        Assert.True(status == actual, $"{method} {path}: expected {status}, got {actual}: {json}");
+        if (actual >= 400)
+        {
+            Contract.AssertMatches("ServerErrorEnvelope", json);
+        }
+
+        return json;
+    }
+
+    /// <summary>
+    /// A shift whose drawer is known: the open one (if any) is closed with exactly its expected cash, and a new one opened
+    /// with <paramref name="openingCash"/>; its id.
+    /// </summary>
+    public static async Task<Guid> FreshShiftAsync(ServerFixture server, string token, long openingCash = 0)
+    {
+        var state = await ExpectAsync(server, 200, HttpMethod.Get, "/shift", token);
+        if (state.GetProperty("shift").ValueKind != JsonValueKind.Null)
+        {
+            await ExpectAsync(server, 200, HttpMethod.Post, "/shift/close", token, new { closingCash = state.GetProperty("expectedCash").GetInt64() });
+        }
+
+        return (await ExpectAsync(server, 200, HttpMethod.Post, "/shift/open", token, new { openingCash })).GetProperty("shift").GetProperty("id").GetGuid();
+    }
+
+    /// <summary>What the open shift's drawer should hold now (<c>GET /admin/shift</c> <c>expectedCash</c>).</summary>
+    public static async Task<long> ExpectedCashAsync(ServerFixture server, string token) =>
+        (await ExpectAsync(server, 200, HttpMethod.Get, "/shift", token)).GetProperty("expectedCash").GetInt64();
+
+    /// <summary>The tiyin of a <c>Money</c> value.</summary>
+    public static long Amount(JsonElement money) => money.GetProperty("amount").GetInt64();
+
     /// <summary>A fresh club API key <c>ck_…</c>: the owner rotates it (<c>adminRotateApiKey</c>).</summary>
     public static async Task<string> ApiKeyAsync(ServerFixture server) =>
         (await ExpectAsync(server, 200, HttpMethod.Post, "/club/api-key", await LoginAsync(server, OwnerPin), new { }))

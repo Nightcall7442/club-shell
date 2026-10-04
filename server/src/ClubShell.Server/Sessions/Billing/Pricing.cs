@@ -86,6 +86,16 @@ public sealed class ClubPricing
     public long? GuestDebtLimit { get; init; }
 
     /// <summary>
+    /// <c>limits.memberDebtLimit</c> (tiyin, beyond the contract, D-31): how far a member's postpaid bill may run below zero;
+    /// null or 0 — the server's <c>Sessions:PostpaidCreditLimit</c> (0: no debt, the balance must cover every minute). Not
+    /// "no limit" as for guests: the console shows it as a toggle plus an amount.
+    /// </summary>
+    public long? MemberDebtLimit { get; init; }
+
+    /// <summary><c>limits.cashOutOwnerOnly</c> (beyond the contract, D-40): only the owner takes cash out of the drawer.</summary>
+    public bool CashOutOwnerOnly { get; init; }
+
+    /// <summary>
     /// <c>limits.autoExtendMinutes</c> (beyond the contract): when a prepaid session runs out, the tick extends it by this
     /// many minutes from the player's balance, as the cashier's extend does, for as long as the balance pays; 0 — off.
     /// </summary>
@@ -107,6 +117,8 @@ public sealed class ClubPricing
             MinorCurfew = doc?.Limits?.MinorCurfew ?? "22:00",
             GuestPostpaid = doc?.Limits?.GuestPostpaid ?? false,
             GuestDebtLimit = doc?.Limits?.GuestDebtLimit is > 0 and var limit ? limit : null,
+            MemberDebtLimit = doc?.Limits?.MemberDebtLimit is > 0 and var memberLimit ? memberLimit : null,
+            CashOutOwnerOnly = doc?.Limits?.CashOutOwnerOnly ?? false,
             AutoExtendMinutes = Math.Clamp(doc?.Limits?.AutoExtendMinutes ?? 0, 0, 720),
         };
     }
@@ -152,6 +164,8 @@ public sealed class ClubPricing
         public string? MinorCurfew { get; init; }
         public bool? GuestPostpaid { get; init; }
         public long? GuestDebtLimit { get; init; }
+        public long? MemberDebtLimit { get; init; }
+        public bool? CashOutOwnerOnly { get; init; }
         public int? AutoExtendMinutes { get; init; }
     }
 }
