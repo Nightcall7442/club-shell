@@ -17,6 +17,7 @@ import {
 import { describe } from '@/errors';
 import { dateLocale, t } from '@/i18n';
 import { money } from '@/format';
+import { REASON_LABEL } from '@/labels';
 import { useClubSettings } from '@/settings';
 import { Field, MoneyInput, Note, NumberInput, PageHeader, SaveBar, Section, Table } from '@/ui';
 
@@ -39,6 +40,10 @@ const ACTION_LABEL: Record<AuditAction, string> = {
   pcCommand: 'Команда ПК',
   clientPassword: 'Пароль клиента',
   clientCard: 'Карта клиента',
+  // Outside the contract's enum for now (D-44): the server does not list them here yet, the labels are ready.
+  cashIn: 'Внесение',
+  cashOut: 'Изъятие',
+  payout: 'Выдача гостю',
 };
 
 const SEVERITY_DOT: Record<Severity, string> = {
@@ -54,7 +59,16 @@ const SEVERITY_LABEL: Record<Severity, string> = {
 };
 
 /** Actions that move money: done with no shift open they are a signal of their own. */
-const MONEY: ReadonlySet<AuditAction> = new Set(['topUp', 'sessionOpen', 'sessionExtend', 'sessionEnd', 'promoRedeem']);
+const MONEY: ReadonlySet<AuditAction> = new Set([
+  'topUp',
+  'sessionOpen',
+  'sessionExtend',
+  'sessionEnd',
+  'promoRedeem',
+  'cashIn',
+  'cashOut',
+  'payout',
+]);
 
 function dateTime(iso: string): string {
   return new Date(iso).toLocaleString(dateLocale(), {
@@ -104,6 +118,13 @@ function journalDetail(e: AuditEntry): string {
     });
   }
   if (e.action === 'shiftOpen') return t('наличные на начало');
+  // A cash move names its reason by code (the server stores no localized text) and the cashier's note.
+  if (e.action === 'cashIn' || e.action === 'cashOut') {
+    const code = typeof e.meta['reasonCode'] === 'string' ? e.meta['reasonCode'] : '';
+    const note = typeof e.meta['note'] === 'string' ? e.meta['note'] : '';
+    return [code ? t(REASON_LABEL[code] ?? code) : '', note].filter(Boolean).join(' · ');
+  }
+  if (e.action === 'payout') return t('наличными · {name}', { name: e.detail });
   return e.detail;
 }
 

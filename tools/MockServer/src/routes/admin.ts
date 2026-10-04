@@ -7,13 +7,20 @@
  * Auth is a static bearer token (`MOCK_ADMIN_TOKEN`, default `admin-dev-token`) rather than a staff login: the
  * real console authenticates against the operator's own server. These routes are exempt from the agent Bearer /
  * HMAC gate (`isExempt` in `index.ts`). The money routes honour `Idempotency-Key` ({@link idempotent}): the console
- * sends one per cashier action and reuses it when the cashier retries after a lost answer. Taking money (a top-up,
- * opening or extending a session) needs an open cash shift: 409 `conflict` / `shiftClosed` otherwise, checked after the
- * body as the server does; ending a session only refunds to the balance and does not. Opening and extending take an
- * optional `payment {amount, method}`: the top-up and the session in one step, every refusal checked before either.
+ * sends one per cashier action and reuses it when the cashier retries after a lost answer; the routes beyond the
+ * contract (a walk-in guest's seat, a payout) require one. Taking money (a top-up, opening or extending a session)
+ * needs an open cash shift: 409 `conflict` / `shiftClosed` otherwise, checked after the body as the server does; ending
+ * a session only settles the balance and does not. Opening and extending take an optional `payment {amount, method}`:
+ * the top-up and the session in one step, every refusal checked before either, and the journal written last.
+ *
+ * Cash desk part 2, as on the server: a seat may be postpaid (`prepaid: false`; guests by `limits.guestPostpaid`,
+ * members while the balance and `limits.memberDebtLimit` cover the first minute); a walk-in guest is seated with
+ * `POST /admin/sessions/guest` and signs in with «Гость» on that PC; a desk open signs out anyone else on the PC
+ * (`seatTaken`), a desk end signs the player out (`sessionEnded`); a debt is taken exactly (`settleDebt`) and a guest's
+ * refund given back in cash (`/admin/wallet/payout`), never more than the guest paid in cash and got back.
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { tariffPriceFor, type Money, type Session } from '@clubshell/contracts';
+import type { Money, Session, Tariff, Transaction } from '@clubshell/contracts';
 import {
   ApiError,
   applyTransaction,
@@ -31,29 +38,41 @@ import {
   now,
   openSessionForPc,
   openSessionForUser,
+  optBool,
   optStr,
+  othersSignedInOn,
   publicPc,
+  revokeUserTokens,
+  signedInOn,
   str,
   uuid,
   uzs,
   viewSession,
+  addPurchase,
+  zero,
   type PcRecord,
   type SessionRecord,
   type UserRecord,
 } from '../db.js';
 import { endSession } from './session.js';
-import { requireStaff, topUpWithBonus } from './club.js';
+import { createGuest } from './auth.js';
+import { isApiKey, requireStaff, topUpWithBonus } from './club.js';
 import {
+  PAYOUT_DESCRIPTION,
   PAY_METHODS,
   club,
   clubHooks,
+  drawerNow,
   inCurfew,
   isMinor,
   openShift,
   profileOf,
   quote,
+  tariffRule,
+  topUpMethod,
   topupBonus,
   type PayMethod,
+  type PriceQuote,
   type StaffRecord,
 } from '../club.js';
 import { record } from '../control.js';
@@ -66,11 +85,12 @@ function requireAdmin(req: FastifyRequest): StaffRecord {
   return requireStaff(req);
 }
 
-/** One row of the hall map: the PC, who is on it and how much time is left. */
+/** One row of the hall map: the PC, who is on it, how much time is left, and whether that player has signed in. */
 interface SeatView {
   pc: ReturnType<typeof publicPc>;
   session: Session | null;
   user: { id: string; displayName: string; role: string; balance: Money } | null;
+  signedIn: boolean | null;
 }
 
 function seatOf(pc: PcRecord): SeatView {
@@ -81,6 +101,8 @@ function seatOf(pc: PcRecord): SeatView {
     pc: publicPc(pc),
     session,
     user: user ? { id: user.id, displayName: user.displayName, role: user.role, balance: user.balance } : null,
+    // A desk session nobody has signed in to yet: its clock already runs (D-49).
+    signedIn: rec ? signedInOn(rec.userId, pc.id) : null,
   };
 }
 
@@ -118,22 +140,33 @@ function paymentOf(b: Record<string, unknown>): Payment | null {
   return { amount, method: payMethod(p['method'], 'payment.method') };
 }
 
-/**
- * Funds for `cost` once `payment` (and its tier bonus) is in, else 402 before anything is booked; then books the
- * payment as a counter top-up.
- */
-function takePayment(staff: StaffRecord, user: UserRecord, payment: Payment | null, cost: Money): void {
-  const incoming = payment ? payment.amount + topupBonus(payment.amount) : 0;
+/** Funds for `cost` once `payment` (and the bonus it would earn) is in, else 402 before anything is booked. */
+function checkFunds(user: UserRecord, payment: Payment | null, cost: Money): void {
+  const debt = Math.max(0, -user.balance.amount);
+  const bonus = payment && !user.transient ? topupBonus(Math.max(0, payment.amount - debt)) : 0;
+  const incoming = payment ? payment.amount + bonus : 0;
   if (user.balance.amount + incoming < cost.amount)
     throw errors.insufficientFunds(cost, uzs(user.balance.amount + incoming));
-  if (!payment) return;
-  const { bonus } = topUpWithBonus(user, payment.amount, payment.method);
+}
+
+/**
+ * Books the payment of a seat or an extension as a counter top-up; its journal entry is `forSession` (the feed shows
+ * the session's row with the payment merged in, D-43).
+ */
+function bookPayment(
+  staff: StaffRecord,
+  user: UserRecord,
+  payment: Payment | null,
+): { transaction: Transaction; bonus: number } | null {
+  if (!payment) return null;
+  const { bonus, transaction } = topUpWithBonus(user, payment.amount, payment.method);
   record(staff, 'topUp', {
     userId: user.id,
     amount: payment.amount,
     detail: user.displayName,
-    meta: { method: payment.method, bonus },
+    meta: { method: payment.method, bonus, forSession: true, transactionId: transaction.id },
   });
+  return { transaction, bonus };
 }
 
 /** The session the cashier is acting on, by session id or by seat. */
@@ -144,11 +177,210 @@ function targetSession(b: Record<string, unknown>): SessionRecord {
   return rec;
 }
 
+/** `prepaid` of an open: true when absent. */
+function prepaidOf(b: Record<string, unknown>): boolean {
+  return optBool(b, 'prepaid') ?? true;
+}
+
+/**
+ * Postpaid's first minute must be affordable (the server's Rule 10): a guest within `limits.guestDebtLimit` (none — no
+ * limit), anyone else within the balance plus `limits.memberDebtLimit` (0 or absent — no debt).
+ */
+function checkPostpaid(user: UserRecord, tariff: Tariff, zone: string): void {
+  const limits = club().limits;
+  const guestLimit = limits.guestDebtLimit ?? 0;
+  const limit = user.role === 'guest' ? (guestLimit > 0 ? guestLimit : null) : Math.max(0, limits.memberDebtLimit ?? 0);
+  if (limit === null) return;
+  const first = quote(tariff, 1, user.role === 'guest' ? null : user.id, zone).total;
+  if (first.amount > user.balance.amount + limit) throw errors.insufficientFunds(first, user.balance);
+}
+
+/** What a seat of `tariff` is checked for before anything is booked: the PC, the tariff's zone and hours. */
+function checkSeat(pc: PcRecord, tariff: Tariff, prepaid: boolean): void {
+  if (pc.status === 'maintenance') throw errors.policyDenied('pcMaintenance');
+  const busy = openSessionForPc(pc.id);
+  if (busy)
+    throw new ApiError('sessionAlreadyActive', 'PC already has an open session', { sessionId: busy.id, pcId: pc.id });
+  const rule = tariffRule(tariff, pc.zone);
+  if (rule) throw errors.policyDenied(rule);
+  // A package is sold prepaid only (D-38); the kiosk already forces it.
+  if (!prepaid && tariff.isPackage) throw errors.validation('prepaid', 'package');
+}
+
+const quoteMeta = (q: PriceQuote): Record<string, number> => ({
+  base: q.base.amount,
+  dayPct: q.dayPct,
+  discountPct: q.discountPct,
+});
+
+/**
+ * Seats `user` on `pc` once every check passed: books the payment, charges the price (prepaid), signs out anyone else
+ * on the PC (`seatTaken`, before the session push), journals the seat with its payment and price.
+ */
+function seat(o: {
+  staff: StaffRecord;
+  pc: PcRecord;
+  user: UserRecord;
+  tariff: Tariff;
+  mins: number;
+  prepaid: boolean;
+  payment: Payment | null;
+  priced: PriceQuote;
+  guest: boolean;
+}): { status: number; body: unknown } {
+  const { staff, pc, user, tariff, mins, prepaid, payment, priced } = o;
+  const cost = prepaid ? priced.total : zero();
+  const paid = bookPayment(staff, user, payment);
+  const id = uuid();
+  if (cost.amount > 0)
+    applyTransaction(user, 'charge', uzs(-cost.amount), `Session ${mins} min · ${tariff.name} (staff)`, id);
+  const startedAt = now();
+  const rec: SessionRecord = {
+    id,
+    userId: user.id,
+    pcId: pc.id,
+    tariffId: tariff.id,
+    state: 'active',
+    startedAt,
+    isPrepaid: prepaid,
+    purchasedSec: prepaid ? mins * 60 : 0,
+    paidAmount: cost,
+    usedBeforeSec: 0,
+    runningSince: startedAt,
+    pausedAt: null,
+    endedAt: null,
+    endReason: null,
+    warningsSent: [],
+    lastPushAt: Date.now(),
+    origin: 'cashier',
+    createdByStaffId: staff.id,
+    purchases: prepaid ? [{ paid: cost.amount, sec: mins * 60, pkg: tariff.isPackage }] : [],
+  };
+  db.sessions.push(rec);
+  pc.status = 'busy';
+  pc.currentSessionId = id;
+  // Whoever was signed in on this PC must not get this session under their name (D-29).
+  for (const other of othersSignedInOn(pc.id, user.id)) {
+    revokeUserTokens(other, pc.id);
+    pushToPc(pc.id, 'userRevoked', { userId: other, reason: 'seatTaken' });
+  }
+  const session = viewSession(rec);
+  pushToPc(pc.id, 'sessionUpdated', session);
+  broadcast('pcStatusChanged', { pcId: pc.id, status: 'busy' });
+  pushToUser(user.id, 'walletUpdated', balanceOf(user));
+  clubHooks.sessionOpened(rec);
+  record(staff, 'sessionOpen', {
+    userId: user.id,
+    pcId: pc.id,
+    amount: cost.amount,
+    detail: `${user.displayName} · ${pc.name} · ${tariff.name}`,
+    meta: {
+      minutes: prepaid ? mins : 0,
+      prepaid,
+      tariff: tariff.name,
+      discountPct: priced.discountPct,
+      sessionId: id,
+      quote: quoteMeta(priced),
+      ...(payment && paid
+        ? { paidAmount: payment.amount, paidMethod: payment.method, transactionId: paid.transaction.id }
+        : {}),
+      ...(o.guest ? { guest: true } : {}),
+    },
+  });
+  return {
+    status: 201,
+    body: {
+      session,
+      charged: cost,
+      balance: user.balance,
+      user: { id: user.id, displayName: user.displayName, role: user.role },
+      payment: paid ? { transaction: paid.transaction, bonus: uzs(paid.bonus) } : null,
+    },
+  };
+}
+
+/**
+ * Cash that may go back to a walk-in guest now (D-37): no more than the balance, than what desk ends refunded, and than
+ * what the guest paid in cash — each less what was already given back. A card payer and bonus money get none.
+ */
+function payableOf(user: UserRecord): number {
+  let refunds = 0;
+  let cash = 0;
+  let payouts = 0;
+  for (const tx of db.transactions) {
+    if (tx.userId !== user.id) continue;
+    if (tx.type === 'refund') refunds += tx.amount.amount;
+    else if (tx.type === 'topUp' && topUpMethod(tx.description) === 'cash') cash += tx.amount.amount;
+    else if (tx.type === 'adjustment' && tx.description === PAYOUT_DESCRIPTION) payouts += -tx.amount.amount;
+  }
+  return Math.max(0, Math.min(user.balance.amount, refunds - payouts, cash - payouts));
+}
+
+/** The PC and the end of a player's last session in the club (for the settle list). */
+function lastSessionOf(userId: string): { pc: string | null; pcId: string | null; endedAt: string | null } | null {
+  let last: SessionRecord | undefined;
+  for (const s of db.sessions) {
+    if (s.userId === userId && (!last || s.startedAt > last.startedAt)) last = s;
+  }
+  if (!last) return null;
+  return { pc: findPc(last.pcId)?.name ?? null, pcId: last.pcId, endedAt: last.endedAt };
+}
+
+/** Newest end first, the ones still open (no end) on top, as the server orders them. */
+function byEnd(a: { endedAt: string | null }, b: { endedAt: string | null }): number {
+  if (a.endedAt === b.endedAt) return 0;
+  if (a.endedAt === null) return -1;
+  if (b.endedAt === null) return 1;
+  return b.endedAt.localeCompare(a.endedAt);
+}
+
 export function adminRoutes(app: FastifyInstance): void {
-  /** Hall map + tariffs + staff-visible users, i.e. everything the cashier screen renders. */
+  /**
+   * Hall map + tariffs + staff-visible users, i.e. everything the cashier screen renders; plus what is left to settle:
+   * negative balances of guests and members who played here (`guestDebts`), walk-in guests with money on the account
+   * and what of it may go back in cash (`guestRefunds`).
+   */
   app.get('/admin/overview', async (req) => {
     requireAdmin(req);
     const seats = db.pcs.map(seatOf);
+    const debts = db.users
+      .filter((u) => (u.role === 'guest' || !u.transient) && u.role !== 'admin' && u.balance.amount < 0)
+      .flatMap((u) => {
+        const last = lastSessionOf(u.id);
+        return last
+          ? [
+              {
+                userId: u.id,
+                displayName: u.displayName,
+                debt: uzs(-u.balance.amount),
+                pc: last.pc,
+                endedAt: last.endedAt,
+                role: u.role,
+              },
+            ]
+          : [];
+      })
+      .sort(byEnd)
+      .slice(0, 100);
+    const refunds = db.users
+      .filter((u) => u.transient && u.balance.amount > 0 && !openSessionForUser(u.id))
+      .flatMap((u) => {
+        const last = lastSessionOf(u.id);
+        return last
+          ? [
+              {
+                userId: u.id,
+                displayName: u.displayName,
+                balance: u.balance,
+                payable: uzs(payableOf(u)),
+                pc: last.pc,
+                endedAt: last.endedAt,
+              },
+            ]
+          : [];
+      })
+      .sort(byEnd)
+      .slice(0, 100);
     return {
       at: now(),
       club: { free: seats.filter((s) => s.pc.status === 'free').length, total: seats.length },
@@ -157,10 +389,16 @@ export function adminRoutes(app: FastifyInstance): void {
       users: db.users.filter((u) => !u.transient && u.role !== 'admin' && !profileOf(u.id).blacklisted).map(userView),
       zones: club().zones,
       repairs: openTicketMarks(),
+      guestDebts: debts,
+      guestRefunds: refunds,
     };
   });
 
-  /** Opens a session on a seat for an existing member (prepaid) — the "add time" of a cashier. */
+  /**
+   * Opens a session on a seat for an existing member — the "add time" of a cashier. Prepaid by default; `prepaid:
+   * false` is postpaid (no payment with it, no package). `minutes` stays required (the console sends 60 where it is
+   * ignored: a package, postpaid).
+   */
   app.post('/admin/sessions', async (req, reply) => {
     const staff = requireAdmin(req);
     return idempotent(req, reply, async () => {
@@ -168,7 +406,9 @@ export function adminRoutes(app: FastifyInstance): void {
       const pcId = str(b, 'pcId', 64);
       const userId = str(b, 'userId', 64);
       const minutes = int(b, 'minutes', 5, 1440);
+      const prepaid = prepaidOf(b);
       const payment = paymentOf(b);
+      if (!prepaid && payment) throw errors.validation('payment', 'postpaid');
       const pc = findPc(pcId);
       const user = findUser(userId);
       const tariff = findTariff(str(b, 'tariffId', 64));
@@ -176,9 +416,7 @@ export function adminRoutes(app: FastifyInstance): void {
       requireShift();
       if (!user) throw errors.notFound('user');
       if (!tariff) throw errors.notFound('tariff');
-      if (pc.status === 'maintenance') throw errors.policyDenied('pcMaintenance');
-      if (openSessionForPc(pcId))
-        throw new ApiError('sessionAlreadyActive', 'PC already has an open session', { pcId });
+      checkSeat(pc, tariff, prepaid);
       const mine = openSessionForUser(userId);
       if (mine)
         throw new ApiError('sessionAlreadyActive', 'User already has an open session', {
@@ -187,52 +425,66 @@ export function adminRoutes(app: FastifyInstance): void {
         });
       if (profileOf(userId).blacklisted) throw errors.policyDenied('blacklisted');
       if (isMinor(userId) && inCurfew()) throw errors.policyDenied('minorCurfew');
-      const mins = tariff.isPackage ? (tariff.packageMinutes ?? minutes) : minutes;
-      const priced = quote(tariff, mins, userId, pc.zone);
-      const cost = priced.total;
-      takePayment(staff, user, payment, cost);
-      const id = uuid();
-      if (cost.amount > 0)
-        applyTransaction(user, 'charge', uzs(-cost.amount), `Session ${mins} min · ${tariff.name} (staff)`, id);
-      const startedAt = now();
-      const rec: SessionRecord = {
-        id,
-        userId,
-        pcId,
-        tariffId: tariff.id,
-        state: 'active',
-        startedAt,
-        isPrepaid: true,
-        purchasedSec: mins * 60,
-        paidAmount: cost,
-        usedBeforeSec: 0,
-        runningSince: startedAt,
-        pausedAt: null,
-        endedAt: null,
-        endReason: null,
-        warningsSent: [],
-        lastPushAt: Date.now(),
-      };
-      db.sessions.push(rec);
-      pc.status = 'busy';
-      pc.currentSessionId = id;
-      const session = viewSession(rec);
-      pushToPc(pcId, 'sessionUpdated', session);
-      broadcast('pcStatusChanged', { pcId, status: 'busy' });
-      pushToUser(userId, 'walletUpdated', balanceOf(user));
-      clubHooks.sessionOpened(rec);
-      record(staff, 'sessionOpen', {
-        userId,
-        pcId,
-        amount: cost.amount,
-        detail: `${user.displayName} · ${pc.name} · ${tariff.name}`,
-        meta: { minutes: mins, discountPct: priced.discountPct, sessionId: id },
-      });
-      return { status: 201, body: { session, charged: cost, balance: user.balance } };
+      if (!prepaid && user.role === 'guest' && !club().limits.guestPostpaid)
+        throw errors.policyDenied('postpaidNotAllowed');
+      const mins = tariff.isPackage ? (tariff.packageMinutes ?? minutes) : prepaid ? minutes : 0;
+      const priced = quote(tariff, prepaid ? mins : 60, userId, pc.zone);
+      if (prepaid) checkFunds(user, payment, priced.total);
+      else checkPostpaid(user, tariff, pc.zone);
+      return seat({ staff, pc, user, tariff, mins, prepaid, payment, priced, guest: false });
     });
   });
 
-  /** Adds paid minutes to a running session (by seat or by session id). */
+  /**
+   * A walk-in guest's seat (beyond the contract, D-24): the transient guest account and its session in one step, the
+   * account made only after every check passed. Prepaid takes exactly the price now (409 `priceChanged {total}`, D-48),
+   * postpaid follows `limits.guestPostpaid` / `guestDebtLimit`. The guest presses «Гость» on that PC to sign in.
+   */
+  app.post('/admin/sessions/guest', async (req, reply) => {
+    const staff = requireAdmin(req);
+    return idempotent(
+      req,
+      reply,
+      async () => {
+        if (isApiKey(req)) throw errors.forbidden('staffOnly');
+        const b = body(req);
+        const pcId = str(b, 'pcId', 64);
+        const tariffId = str(b, 'tariffId', 64);
+        const minutes = int(b, 'minutes', 5, 1440);
+        const prepaid = prepaidOf(b);
+        const name = optStr(b, 'displayName', 200)?.trim() || null;
+        if (name && name.length > 32) throw errors.validation('displayName', 'max');
+        const payment = paymentOf(b);
+        if (prepaid && !payment) throw errors.validation('payment', 'required');
+        if (!prepaid && payment) throw errors.validation('payment', 'postpaid');
+        const pc = findPc(pcId);
+        const tariff = findTariff(tariffId);
+        if (!pc) throw errors.notFound('pc');
+        if (!tariff) throw errors.notFound('tariff');
+        requireShift();
+        checkSeat(pc, tariff, prepaid);
+        if (!prepaid && !club().limits.guestPostpaid) throw errors.policyDenied('postpaidNotAllowed');
+        const mins = tariff.isPackage ? (tariff.packageMinutes ?? minutes) : prepaid ? minutes : 0;
+        // A new guest is priced as a walk-in: no group, no loyalty level.
+        const priced = quote(tariff, prepaid ? mins : 60, null, pc.zone);
+        if (payment && payment.amount !== priced.total.amount)
+          throw errors.conflict('priceChanged', { total: priced.total });
+        if (!prepaid) {
+          const limit = club().limits.guestDebtLimit ?? 0;
+          const first = quote(tariff, 1, null, pc.zone).total;
+          if (limit > 0 && first.amount > limit) throw errors.insufficientFunds(first, zero());
+        }
+        const guest = createGuest(pc, name, null, true);
+        return seat({ staff, pc, user: guest, tariff, mins, prepaid, payment, priced, guest: true });
+      },
+      { keyRequired: true },
+    );
+  });
+
+  /**
+   * Adds paid minutes to a running session (by seat or by session id): the minutes sent on an hourly tariff, the
+   * package's own on a package (the server overrides `minutes`). A walk-in guest pays exactly the price.
+   */
   app.post('/admin/sessions/extend', async (req, reply) => {
     const staff = requireAdmin(req);
     return idempotent(req, reply, async () => {
@@ -243,20 +495,23 @@ export function adminRoutes(app: FastifyInstance): void {
       const rec = targetSession(b);
       const tariff = findTariff(optStr(b, 'tariffId', 64) ?? rec.tariffId);
       const user = findUser(rec.userId);
+      const pc = findPc(rec.pcId);
       if (!tariff) throw errors.notFound('tariff');
       if (!user) throw errors.notFound('user');
       if (!rec.isPrepaid) throw errors.conflict('postpaidSession');
-      const cost = quote(tariff, minutes, user.id, findPc(rec.pcId)?.zone ?? '').total;
-      takePayment(staff, user, payment, cost);
+      const rule = tariffRule(tariff, pc?.zone ?? '');
+      if (rule) throw errors.policyDenied(rule);
+      const mins = tariff.isPackage ? (tariff.packageMinutes ?? minutes) : minutes;
+      const priced = quote(tariff, mins, user.id, pc?.zone ?? '');
+      const cost = priced.total;
+      if (user.transient && payment && payment.amount !== cost.amount)
+        throw errors.conflict('priceChanged', { total: cost });
+      checkFunds(user, payment, cost);
+      const paid = bookPayment(staff, user, payment);
       if (cost.amount > 0)
-        applyTransaction(
-          user,
-          'charge',
-          uzs(-cost.amount),
-          `Extension +${minutes} min · ${tariff.name} (staff)`,
-          rec.id,
-        );
-      rec.purchasedSec += minutes * 60;
+        applyTransaction(user, 'charge', uzs(-cost.amount), `Extension +${mins} min · ${tariff.name} (staff)`, rec.id);
+      addPurchase(rec, { paid: cost.amount, sec: mins * 60, pkg: tariff.isPackage });
+      rec.purchasedSec += mins * 60;
       rec.paidAmount = uzs(rec.paidAmount.amount + cost.amount);
       rec.tariffId = tariff.id;
       rec.warningsSent = [];
@@ -267,14 +522,34 @@ export function adminRoutes(app: FastifyInstance): void {
         userId: user.id,
         pcId: rec.pcId,
         amount: cost.amount,
-        detail: `${user.displayName} · ${findPc(rec.pcId)?.name ?? rec.pcId} · +${minutes}`,
-        meta: { minutes, sessionId: rec.id },
+        detail: `${user.displayName} · ${pc?.name ?? rec.pcId} · +${mins}`,
+        meta: {
+          minutes: mins,
+          tariff: tariff.name,
+          sessionId: rec.id,
+          quote: quoteMeta(priced),
+          ...(payment && paid
+            ? { paidAmount: payment.amount, paidMethod: payment.method, transactionId: paid.transaction.id }
+            : {}),
+        },
       });
-      return { status: 200, body: { session, charged: cost, balance: user.balance } };
+      return {
+        status: 200,
+        body: {
+          session,
+          charged: cost,
+          balance: user.balance,
+          payment: paid ? { transaction: paid.transaction, bonus: uzs(paid.bonus) } : null,
+        },
+      };
     });
   });
 
-  /** Ends a session from the counter; unused prepaid time is refunded by `endSession`. */
+  /**
+   * Ends a session from the counter; unused prepaid time is refunded by `endSession`, postpaid charged. The player is
+   * signed out of that PC whatever the role (D-28). The answer adds the settled balance (negative — a debt), whose it is
+   * and, for a walk-in guest, the cash that may go back now (`payable`).
+   */
   app.post('/admin/sessions/end', async (req, reply) => {
     const staff = requireAdmin(req);
     return idempotent(req, reply, async () => {
@@ -283,36 +558,112 @@ export function adminRoutes(app: FastifyInstance): void {
       const sessionMinutes = Math.floor((Date.now() - Date.parse(rec.startedAt)) / 60_000);
       const result = endSession(rec, 'admin');
       const user = findUser(rec.userId);
+      if (user) {
+        revokeUserTokens(user.id, rec.pcId);
+        pushToPc(rec.pcId, 'userRevoked', { userId: user.id, reason: 'sessionEnded' });
+      }
+      const guest = user?.transient ?? false;
       record(staff, 'sessionEnd', {
         userId: rec.userId,
         pcId: rec.pcId,
         amount: result.refunded?.amount ?? 0,
         detail: `${user?.displayName ?? rec.userId} · ${findPc(rec.pcId)?.name ?? rec.pcId}`,
-        meta: { sessionMinutes, sessionId: rec.id },
+        meta: {
+          sessionMinutes,
+          sessionId: rec.id,
+          charged: result.charged.amount,
+          prepaid: rec.isPrepaid,
+          guest,
+        },
       });
-      return { status: 200, body: { session: result.session, charged: result.charged, refunded: result.refunded } };
+      return {
+        status: 200,
+        body: {
+          session: result.session,
+          charged: result.charged,
+          refunded: result.refunded,
+          balance: user?.balance ?? zero(),
+          user: user ? { id: user.id, displayName: user.displayName, role: user.role } : null,
+          payable: user && guest ? uzs(payableOf(user)) : null,
+        },
+      };
     });
   });
 
-  /** Top-up at the counter, booked under its payment method (`cash` when none is sent). */
+  /**
+   * Top-up at the counter, booked under its payment method (`cash` when none is sent). `settleDebt` takes a debt to the
+   * tiyin: the amount must be exactly the debt (409 `debtChanged {debt}`; `noDebt` when there is none), with no bonus.
+   */
   app.post('/admin/wallet/topup', async (req, reply) => {
     const staff = requireAdmin(req);
+    const viaApi = isApiKey(req);
     return idempotent(req, reply, async () => {
       const b = body(req);
       const user = findUser(str(b, 'userId', 64));
       const amount = int(b, 'amount', 1, 100_000_000);
       const method = payMethod(optStr(b, 'method', 16) ?? 'cash', 'method');
+      const settleDebt = optBool(b, 'settleDebt') ?? false;
       requireShift();
       if (!user) throw errors.notFound('user');
-      const { bonus } = topUpWithBonus(user, amount, method);
+      if (settleDebt) {
+        if (user.balance.amount >= 0) throw errors.conflict('noDebt');
+        if (amount !== -user.balance.amount) throw errors.conflict('debtChanged', { debt: uzs(-user.balance.amount) });
+      }
+      const { bonus, transaction } = topUpWithBonus(user, amount, method, { settleDebt, viaApi });
       record(staff, 'topUp', {
         userId: user.id,
         amount,
         detail: user.displayName,
-        meta: { method, bonus },
+        meta: {
+          method,
+          bonus,
+          transactionId: transaction.id,
+          ...(settleDebt ? { debt: true } : {}),
+          ...(viaApi ? { api: true } : {}),
+        },
       });
-      return { status: 200, body: { balance: user.balance, bonus: uzs(bonus) } };
+      return { status: 200, body: { balance: user.balance, transaction, bonus: uzs(bonus) } };
     });
+  });
+
+  /**
+   * Gives a walk-in guest's money back in cash (beyond the contract, D-37): exactly what is payable now (409
+   * `payableChanged {payable}`), never to a member (`notGuest`) or while the guest plays (`guestPlaying`), only from an
+   * open shift and a drawer that holds it (`cashShort {available}`). An `adjustment` row, counted as payouts in X/Z.
+   */
+  app.post('/admin/wallet/payout', async (req, reply) => {
+    const staff = requireAdmin(req);
+    return idempotent(
+      req,
+      reply,
+      async () => {
+        if (isApiKey(req)) throw errors.forbidden('staffOnly');
+        const b = body(req);
+        const user = findUser(str(b, 'userId', 64));
+        const amount = int(b, 'amount', 1, 100_000_000);
+        if ((optStr(b, 'method', 16) ?? 'cash') !== 'cash') throw errors.validation('method', 'enum');
+        if (!user) throw errors.notFound('user');
+        if (!user.transient || user.role !== 'guest') throw errors.conflict('notGuest');
+        if (openSessionForUser(user.id)) throw errors.conflict('guestPlaying');
+        const payable = payableOf(user);
+        if (payable <= 0 || amount !== payable) throw errors.conflict('payableChanged', { payable: uzs(payable) });
+        const shift = openShift();
+        if (!shift) throw errors.conflict('shiftClosed');
+        const available = drawerNow(shift);
+        if (available < amount) throw errors.conflict('cashShort', { available: uzs(available) });
+        const transaction = applyTransaction(user, 'adjustment', uzs(-amount), PAYOUT_DESCRIPTION, null);
+        pushToUser(user.id, 'walletUpdated', balanceOf(user));
+        record(staff, 'payout', {
+          userId: user.id,
+          pcId: lastSessionOf(user.id)?.pcId ?? null,
+          amount,
+          detail: user.displayName,
+          meta: { method: 'cash', transactionId: transaction.id },
+        });
+        return { status: 200, body: { balance: user.balance, payable: uzs(payableOf(user)), transaction } };
+      },
+      { keyRequired: true },
+    );
   });
 
   /** Staff message, lock/unlock and power commands — the existing `ServerCommand` set. */

@@ -1,7 +1,9 @@
 /**
  * User auth (SERVER_API.md §4.3) and users (§4.4): password/card/token/qr login, QR handshake with demo auto-confirm,
- * guests, logout, profile, stats, achievements, loyalty. Demo credentials: any seeded user with password `demo`
- * (admin also `admin`), cards `CARD-0001..0003`, one-time tokens `tok-alisher` / `tok-dilnoza`.
+ * guests (a walk-in guest the desk seated signs in to that seat with «Гость»), logout, profile, stats, achievements,
+ * loyalty. Every sign-in is refused on a PC holding someone else's open session (403 `pcOccupied`), as on the server.
+ * Demo credentials: any seeded user with password `demo` (admin also `admin`), cards `CARD-0001..0003`, one-time tokens
+ * `tok-alisher` / `tok-dilnoza`.
  */
 import { randomBytes } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
@@ -55,6 +57,16 @@ function offlineHash(user: UserRecord, password: string): string {
   return `$argon2id$v=19$m=65536,t=3,p=4$${salt}$${hash}`;
 }
 
+/**
+ * One rule for every sign-in (D-26): a PC holding an open session of another person refuses it (403 `pcOccupied`), so
+ * nobody unlocks someone else's time; the player's own session on this PC still signs in. `userId` null — a guest
+ * about to be created: checked before the account is.
+ */
+function assertPcFree(pc: PcRecord, userId: string | null): void {
+  const open = openSessionForPc(pc.id);
+  if (open && open.userId !== userId) throw errors.forbidden('pcOccupied');
+}
+
 /** Binds the user to the PC and builds the `AuthResponse`. */
 function authResponse(user: UserRecord, pc: PcRecord, extra: { offlineHash?: string | null } = {}): AuthResponse {
   if (user.flags.includes('banned')) throw errors.forbidden('banned');
@@ -65,6 +77,7 @@ function authResponse(user: UserRecord, pc: PcRecord, extra: { offlineHash?: str
       pcName: findPc(elsewhere.pcId)?.name ?? null,
     });
   }
+  assertPcFree(pc, user.id);
   const tokens = createUserToken(user, pc.id);
   const own = openSessionForPc(pc.id);
   return {
@@ -77,13 +90,23 @@ function authResponse(user: UserRecord, pc: PcRecord, extra: { offlineHash?: str
   };
 }
 
-function createGuest(pc: PcRecord, displayName: string | null, locale: UserRecord['locale'] | null): UserRecord {
-  if (process.env['MOCK_GUEST_DISABLED'] === '1') throw errors.forbidden('guestDisabled');
+/**
+ * A transient guest account. The kiosk's (`desk` false) obeys `MOCK_GUEST_DISABLED` (the club's `GuestLogin`); the
+ * desk's walk-in guest does not, and is named «Гость N» like the server's. The caller creates it only after every
+ * check of the action passed, so a refusal leaves no account behind.
+ */
+export function createGuest(
+  pc: PcRecord,
+  displayName: string | null,
+  locale: UserRecord['locale'] | null,
+  desk = false,
+): UserRecord {
+  if (!desk && process.env['MOCK_GUEST_DISABLED'] === '1') throw errors.forbidden('guestDisabled');
   db.guestCounter += 1;
   const guest: UserRecord = {
     id: uuid(),
     username: `guest-${pc.number}-${db.guestCounter}`,
-    displayName: displayName ?? `Guest ${pc.number}`,
+    displayName: displayName ?? (desk ? `Гость ${pc.number}` : `Guest ${pc.number}`),
     avatarUrl: null,
     role: 'guest',
     balance: zero(),
@@ -155,6 +178,7 @@ export function authRoutes(app: FastifyInstance): void {
         break;
       }
       case 'guest':
+        assertPcFree(pc, null);
         user = createGuest(pc, optStr(b, 'username', 32), null);
         break;
     }
@@ -221,12 +245,28 @@ export function authRoutes(app: FastifyInstance): void {
     return { ok: true, userId: user.id, status: 'confirmed' };
   });
 
+  /**
+   * «Гость» on the kiosk. A walk-in guest the desk seated on this PC is signed in to that seat (D-24, D-25), even with
+   * kiosk guest login off; any other open session of the PC refuses it (`pcOccupied`, before an account is made);
+   * otherwise a new guest, as before.
+   */
   app.post('/auth/guest', async (req) => {
     const pc = requireAgent(req);
     const b = body(req);
     if (str(b, 'pcId', 64) !== pc.id) throw errors.forbidden('pcMismatch');
     str(b, 'hwid', 128);
-    const guest = createGuest(pc, optStr(b, 'displayName', 32), optOneOf(b, 'locale', LOCALES));
+    const locale = optOneOf(b, 'locale', LOCALES);
+    const open = openSessionForPc(pc.id);
+    if (open) {
+      const owner = findUser(open.userId);
+      if (open.origin === 'cashier' && open.createdByStaffId && owner?.transient) {
+        if (locale) owner.locale = locale;
+        markDirty();
+        return authResponse(owner, pc);
+      }
+      throw errors.forbidden('pcOccupied');
+    }
+    const guest = createGuest(pc, optStr(b, 'displayName', 32), locale);
     return authResponse(guest, pc);
   });
 

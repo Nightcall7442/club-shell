@@ -132,6 +132,20 @@ export interface SessionRecord {
   endReason: SessionEndReason | null;
   warningsSent: number[];
   lastPushAt: number;
+  /** Who opened it: the counter (`cashier`, with the staff member) or the kiosk; absent on older records (kiosk). */
+  origin?: 'cashier' | 'kiosk';
+  createdByStaffId?: string | null;
+  /**
+   * What each purchase of time paid, oldest first: a refund walks them newest first, pro rata, packages excluded (as
+   * the server does). Absent on older records: one purchase of everything then.
+   */
+  purchases?: Purchase[];
+}
+
+export interface Purchase {
+  paid: number;
+  sec: number;
+  pkg: boolean;
 }
 
 export interface AgentTokenRecord {
@@ -376,6 +390,13 @@ export function bool(o: JsonObject, key: string): boolean {
   return v;
 }
 
+export function optBool(o: JsonObject, key: string): boolean | null {
+  const v = o[key];
+  if (v === undefined || v === null) return null;
+  if (typeof v !== 'boolean') throw errors.validation(key, 'format');
+  return v;
+}
+
 /** An enum's wire values without the read-side `unknown` sentinel, which the mock never accepts or stores. */
 export type Known<T extends string> = Exclude<T, 'unknown'>;
 
@@ -386,6 +407,14 @@ export function knownValues<T extends string>(e: Readonly<Record<string, T>>): K
 
 export function oneOf<T extends string>(o: JsonObject, key: string, values: readonly T[]): T {
   const v = o[key];
+  if (typeof v !== 'string' || !(values as readonly string[]).includes(v)) throw errors.validation(key, 'enum');
+  return v as T;
+}
+
+/** Like {@link oneOf}, but a missing value is `required` and a wrong one `enum` (the server's reasons). */
+export function enumOf<T extends string>(o: JsonObject, key: string, values: readonly T[]): T {
+  const v = o[key];
+  if (v === undefined || v === null || v === '') throw errors.validation(key, 'required');
   if (typeof v !== 'string' || !(values as readonly string[]).includes(v)) throw errors.validation(key, 'enum');
   return v as T;
 }
@@ -479,16 +508,25 @@ export function sendCached(req: FastifyRequest, reply: FastifyReply, payload: un
   return reply.send(payload);
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Replays the stored response when the request carries an `Idempotency-Key` seen in the last 24 h (scoped by
  * method+path), otherwise runs `run` and stores its result. Errors are not stored, so a retry re-executes.
+ * `keyRequired` (the money routes beyond the contract: a guest's seat, a payout, a cash move) refuses a request without
+ * a key (400 `Idempotency-Key` / `required`) or with one that is not a UUID (`format`), as the server does.
  */
 export async function idempotent(
   req: FastifyRequest,
   reply: FastifyReply,
   run: () => Promise<{ status: number; body: unknown }>,
+  options: { keyRequired?: boolean } = {},
 ): Promise<unknown> {
   const header = req.headers['idempotency-key'];
+  if (options.keyRequired) {
+    if (typeof header !== 'string' || header.length === 0) throw errors.validation('Idempotency-Key', 'required');
+    if (!UUID.test(header)) throw errors.validation('Idempotency-Key', 'format');
+  }
   const key = typeof header === 'string' && header.length > 0 ? `${req.method} ${req.url} ${header}` : null;
   if (key) {
     const hit = db.idempotency[key];
@@ -770,6 +808,38 @@ export function revokeUserTokens(userId: string, pcId?: string): void {
     if (rec.userId === userId && (pcId === undefined || rec.pcId === pcId)) delete db.userTokens[token];
   }
   markDirty();
+}
+
+/** True when `userId` holds a live sign-in on `pcId` (the seat's `signedIn`). */
+export function signedInOn(userId: string, pcId: string): boolean {
+  const t = Date.now();
+  return Object.values(db.userTokens).some(
+    (x) => x.userId === userId && x.pcId === pcId && Date.parse(x.expiresAt) > t,
+  );
+}
+
+/** Every user other than `userId` signed in on `pcId`. */
+export function othersSignedInOn(pcId: string, userId: string): string[] {
+  return [
+    ...new Set(
+      Object.values(db.userTokens)
+        .filter((x) => x.pcId === pcId && x.userId !== userId)
+        .map((x) => x.userId),
+    ),
+  ];
+}
+
+/** The purchases of a session for its refund: the record's own, or one purchase of everything on an older record. */
+export function purchasesOf(s: SessionRecord): Purchase[] {
+  if (s.purchases) return s.purchases;
+  return s.purchasedSec > 0
+    ? [{ paid: s.paidAmount.amount, sec: s.purchasedSec, pkg: findTariff(s.tariffId)?.isPackage ?? false }]
+    : [];
+}
+
+/** Records one more purchase of time on a session (before its totals grow). */
+export function addPurchase(s: SessionRecord, p: Purchase): void {
+  s.purchases = [...purchasesOf(s), p];
 }
 
 export function viewTournament(t: TournamentRecord, userId: string | null): Tournament {

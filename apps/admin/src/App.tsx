@@ -1,11 +1,12 @@
 /**
- * The console shell: PIN sign-in, then a top bar (club, clock, the shift chip, client search, hall usage, language,
- * staff) and a sidebar of sections the way Senet lays out its club console — the counter first, the owner's
- * configuration below it. Cashiers see the counter, shift, clients and stock; owners see everything. The section lives
- * in the URL hash (`#/tariffs`, `#/clients/new`). Without an open shift the console asks to open one (`shift.tsx`);
- * "/" jumps to the client search, whose rows top up a client from anywhere or show their PC on the map.
+ * The console shell: PIN sign-in, then a top bar (club, clock, the shift chip with the drawer's «±» menu, client
+ * search, hall usage, language, staff) and a sidebar of sections the way Senet lays out its club console — the counter
+ * first, the owner's configuration below it. Cashiers see the counter, shift, clients and stock; owners see everything.
+ * The section lives in the URL hash (`#/tariffs`, `#/clients/new`). Without an open shift the console asks to open one
+ * (`shift.tsx`); "/" jumps to the client search, whose rows top up a client from anywhere or show their PC on the map.
+ * The club's name, limits and the signed-in staff member reach the pages through `ClubContext` (`club.ts`).
  */
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import {
   AdminError,
@@ -16,16 +17,21 @@ import {
   setClubCode,
   setToken,
   type ClientHit,
+  type ClubSettings,
   type StaffMember,
 } from '@/api';
+import { ClubContext, type ClubState } from '@/club';
 import { GlobalSearch } from '@/clientSearch';
 import { isTyping, sheetOpen, showPc } from '@/desk';
 import { describe } from '@/errors';
 import { LANGS, dateLocale, setLang, t, useLang } from '@/i18n';
 import { TopUpSheet } from '@/paybox';
 import { useInstall } from '@/pwa';
-import { ShiftChip, ShiftProvider } from '@/shift';
+import { CashMenu, ShiftChip, ShiftProvider } from '@/shift';
 import { Button } from '@/ui';
+
+/** How often the counter re-reads the club settings (limits the owner may change meanwhile). */
+const SETTINGS_POLL_MS = 60_000;
 
 const MapPage = lazy(() => import('@/pages/MapPage'));
 const ShiftPage = lazy(() => import('@/pages/ShiftPage'));
@@ -363,8 +369,10 @@ export function App(): JSX.Element {
   const [section, go] = useHashSection();
   const [usage, setUsage] = useState<{ busy: number; total: number } | null>(null);
   const [now, setNow] = useState(new Date());
-  // The club this console is signed in to (a server may hold several): its display name from the club settings.
+  // The club this console is signed in to (a server may hold several): its display name and the limits the seat
+  // panel follows, from the club settings.
   const [clubName, setClubName] = useState<string | null>(null);
+  const [limits, setLimits] = useState<ClubSettings['limits'] | null>(null);
   // A client being topped up from the top-bar search (on any page, with or without a PC).
   const [topUpFor, setTopUpFor] = useState<ClientHit | null>(null);
   const search = useRef<HTMLInputElement>(null);
@@ -416,13 +424,31 @@ export function App(): JSX.Element {
     setStaff(null);
   };
 
-  useEffect(() => {
-    if (!staff) return;
+  const loadSettings = useCallback(() => {
     clubApi
       .settings()
-      .then((s) => setClubName(s.branding.clubName))
-      .catch(() => setClubName(null));
-  }, [staff]);
+      .then((s) => {
+        setClubName(s.branding.clubName);
+        setLimits(s.limits);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (!staff) {
+      setClubName(null);
+      setLimits(null);
+      return undefined;
+    }
+    loadSettings();
+    const id = setInterval(loadSettings, SETTINGS_POLL_MS);
+    return () => clearInterval(id);
+  }, [staff, loadSettings]);
+
+  const club = useMemo<ClubState>(
+    () => ({ clubName, limits, staff, reload: loadSettings }),
+    [clubName, limits, staff, loadSettings],
+  );
 
   useEffect(() => {
     if (!staff) return undefined;
@@ -443,7 +469,7 @@ export function App(): JSX.Element {
   const Page = current?.page ?? MapPage;
   const locale = dateLocale();
 
-  return (
+  const shell = (
     <ShiftProvider key={staff.id} staff={staff} onSignOut={signOut}>
       <div className="grid h-screen grid-cols-[15rem_minmax(0,1fr)] grid-rows-[4rem_minmax(0,1fr)]">
         {/* Brand cell (top left), like Senet's red block — here the club mark in the accent */}
@@ -466,7 +492,10 @@ export function App(): JSX.Element {
             </span>
           </div>
           <span className="h-8 w-px bg-line" />
-          <ShiftChip onClick={() => go('shift')} />
+          <div className="flex shrink-0 items-center gap-1">
+            <ShiftChip onClick={() => go('shift')} />
+            <CashMenu />
+          </div>
           <GlobalSearch
             ref={search}
             onTopUp={setTopUpFor}
@@ -555,6 +584,7 @@ export function App(): JSX.Element {
       {topUpFor && <TopUpSheet payee={topUpFor} onClose={() => setTopUpFor(null)} onDone={() => void refreshTop()} />}
     </ShiftProvider>
   );
+  return <ClubContext.Provider value={club}>{shell}</ClubContext.Provider>;
 }
 
 export default App;
