@@ -51,11 +51,24 @@ const MONEY_ACTIONS: ReadonlySet<AuditAction> = new Set([
 
 const SEVERITY_RANK: Record<Severity, number> = { high: 0, medium: 1, low: 2 };
 
+/**
+ * Journal actions beyond the contract's enum (D-44): the operations feed and the Z show them, `/admin/control` keeps to
+ * the contract's actions, as the server does, until the contract lists them.
+ */
+const BEYOND_CONTRACT: ReadonlySet<AuditAction> = new Set(['cashIn', 'cashOut', 'payout']);
+
+export function inContract(e: AuditEntry): boolean {
+  return !BEYOND_CONTRACT.has(e.action);
+}
+
 function money(minor: number): string {
   return `${new Intl.NumberFormat('ru-RU').format(Math.round(Math.abs(minor) / 100))} сум`;
 }
 
-/** Journals one staff action and raises the live alert when it completes a serious pattern. */
+/**
+ * Journals one staff action and raises the live alert when it completes a serious pattern. `shiftId` overrides the
+ * open shift (a shift being closed tags its own close).
+ */
 export function record(
   staff: StaffRecord,
   action: AuditAction,
@@ -65,6 +78,7 @@ export function record(
     amount?: number;
     detail?: string;
     meta?: AuditEntry['meta'];
+    shiftId?: string | null;
   } = {},
 ): AuditEntry {
   const c = club();
@@ -73,7 +87,7 @@ export function record(
     at: now(),
     staffId: staff.id,
     staffName: staff.name,
-    shiftId: openShift()?.id ?? null,
+    shiftId: fields.shiftId !== undefined ? fields.shiftId : (openShift()?.id ?? null),
     action,
     userId: fields.userId ?? null,
     pcId: fields.pcId ?? null,
@@ -208,6 +222,11 @@ export function summaries(entries: readonly AuditEntry[], flags: readonly Flag[]
 /** Live alert for the patterns that should not wait for the owner to open the page. */
 function alertOn(e: AuditEntry): void {
   const ctl = club().control;
+  // A big cash-out is the same signal as a big cash top-up the other way.
+  if (e.action === 'cashOut' && e.amount >= club().notifications.bigTopupAt) {
+    emit('suspicious', `${e.staffName}: изъятие из кассы ${money(e.amount)}`, { entryId: e.id });
+    return;
+  }
   if (e.action === 'shiftClose') {
     const diff = Number(e.meta['diff'] ?? 0);
     if (diff < -ctl.shortfallFrom) {
