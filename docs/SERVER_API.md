@@ -617,7 +617,8 @@ Example frames:
 
 Implements every endpoint and WS frame above with in-memory state seeded from `tools/MockServer/src/db.ts`
 (realistic club data; persisted to `tools/MockServer/.mock-db.json`, `--reset` reseeds), accepts any
-`X-Club-Key` (set `MOCK_STRICT_REGISTER=1` to require a pre-provisioned PC), logs but does not enforce HMAC
+`X-Club-Key` (set `MOCK_STRICT_REGISTER=1` to require a pre-provisioned PC, `MOCK_AUTO_APPROVE_PCS=1` to make every
+new Agent a new approved PC, as the server's `Club:AutoApprovePcs`), logs but does not enforce HMAC
 signatures by default (`MOCK_VERIFY_SIGNATURE=1` enforces, `MOCK_SKIP_SIGNATURE=1` never checks), and exposes
 mock-control endpoints for e2e tests: `POST /_mock/command` `{ pcId, type | name, payload, expiresInSec?,
 supersedes?, issuedBy? }` (also `POST /mock/pcs/{pcId}/command`) to inject a `ServerCommand` and await its ack,
