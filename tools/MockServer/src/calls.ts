@@ -2,9 +2,10 @@
  * Players' calls to the desk (cash desk part 3, D-62/D-63), as the server keeps them in `admin_calls`: from the PC's
  * «Позвать администратора» (`POST /support/call-admin`), from its telemetry copy when the call could not be sent (the
  * same `at`, so one call), and from a «report a problem» text (`shellClientError` starting `[user report] `, at most five
- * per PC an hour). A call of a PC whose last call was answered («Иду») in the last ten minutes, with none open, is kept
- * as answered (`repeat`): it shows in the inbox without ringing again. One older than 30 minutes when it arrives is kept
- * resolved. The desk's inbox (`overview.calls`) lists the open and answered ones of the last 12 hours.
+ * per PC an hour). A call of a PC with a call answered («Иду») in the last ten minutes and not closed yet, with none
+ * open, is kept as answered (`repeat`, with that answer's time): it shows in the inbox without ringing again. Problem
+ * reports take no part in that rule. A telemetry copy older than 30 minutes when it arrives is kept resolved. The desk's
+ * inbox (`overview.calls`) lists the open and answered ones of the last 12 hours.
  */
 import { db, findUser, markDirty, now, uuid, type CallRecord, type PcRecord } from './db.js';
 
@@ -100,13 +101,18 @@ export function insertCall(o: {
       return null;
     }
   }
-  const mine = db.calls.filter((c) => c.pcId === o.pc.id);
+  // As the server: problem reports neither keep a call open nor answer one. Only a call still answered counts — a
+  // closed one leaves nobody on the way — and a repeat carries the answer it repeats, so it never stretches the ten
+  // minutes.
+  const mine = db.calls.filter((c) => c.pcId === o.pc.id && c.category !== 'problem');
   const open = mine.some((c) => c.status === 'open');
-  const answered = mine.some((c) => c.ackedAt !== null && t - Date.parse(c.ackedAt) < REPEAT_AFTER_ACK_MS);
+  const last = mine
+    .filter((c) => c.status === 'acked' && c.ackedAt !== null && t - Date.parse(c.ackedAt) < REPEAT_AFTER_ACK_MS)
+    .sort((a, b) => (b.ackedAt as string).localeCompare(a.ackedAt as string))[0];
   const receivedAt = now();
-  const repeat = o.category !== 'problem' && !open && answered;
-  const stale = t - Date.parse(o.at) > STALE_MS;
-  const last = [...mine].reverse().find((c) => c.ackedAt !== null);
+  // Only a call that came through telemetry can be late enough to be stored closed (the server's rule).
+  const stale = o.source === 'telemetry' && t - Date.parse(o.at) > STALE_MS;
+  const repeat = !stale && o.category !== 'problem' && !open && last !== undefined;
   const user = o.userId ? findUser(o.userId) : undefined;
   const call: CallRecord = {
     id: uuid(),
@@ -123,7 +129,7 @@ export function insertCall(o: {
     status: stale ? 'resolved' : repeat ? 'acked' : 'open',
     repeat,
     // A repeat carries the answer it repeats: it never stretches the ten minutes.
-    ackedAt: repeat ? (last?.ackedAt ?? receivedAt) : null,
+    ackedAt: repeat ? (last?.ackedAt ?? null) : null,
     ackedBy: repeat ? (last?.ackedBy ?? null) : null,
     resolvedAt: stale ? receivedAt : null,
     resolvedBy: stale ? 'auto' : null,

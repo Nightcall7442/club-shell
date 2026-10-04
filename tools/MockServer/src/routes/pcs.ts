@@ -116,7 +116,7 @@ function assignPc(hwid: string, previousPcId: string | null, machineName: string
 
 /**
  * The inbox call a telemetry event carries, as the server copies it: `callAdmin` (its data is the ticket the PC could not
- * send: the category of the contract, the message cut to 500, a parsable `at`, this PC) or a «report a problem» text
+ * send: the category of the contract, a message of at most 500, a parsable `at`, this PC) or a «report a problem» text
  * (`shellClientError` starting `[user report] `). Null — not a call; `invalid` — a call that is skipped.
  */
 function callOfEvent(pc: PcRecord, e: Record<string, unknown>): Parameters<typeof insertCall>[0] | 'invalid' | null {
@@ -127,6 +127,8 @@ function callOfEvent(pc: PcRecord, e: Record<string, unknown>): Parameters<typeo
     const at = typeof data['at'] === 'string' ? Date.parse(data['at']) : Number.NaN;
     if (typeof category !== 'string' || !(CALL_CATEGORIES as readonly string[]).includes(category)) return 'invalid';
     if (Number.isNaN(at) || data['pcId'] !== pc.id) return 'invalid';
+    // As the route: a message over 500 characters is not a valid call (the server skips it, it does not cut it).
+    if (typeof data['message'] === 'string' && data['message'].trim().length > 500) return 'invalid';
     const userId = typeof data['userId'] === 'string' ? data['userId'] : null;
     return {
       pc,
@@ -322,11 +324,13 @@ export function pcsRoutes(app: FastifyInstance): void {
     const pc = requireAgent(req);
     return idempotent(req, reply, async () => {
       const b = body(req);
+      // The body first, then whose PC it is: the server's order.
       const pcId = str(b, 'pcId', 64);
-      if (pcId !== pc.id) throw errors.forbidden('pcMismatch');
       const category = oneOf(b, 'category', CALL_CATEGORIES);
-      const message = optStr(b, 'message', 500);
+      const message = optStr(b, 'message', 10_000)?.trim() || null;
+      if (message && message.length > 500) throw errors.validation('message', 'max');
       const at = isoDate(b, 'at');
+      if (pcId !== pc.id) throw errors.forbidden('pcMismatch');
       const userId = callerOf(pc.id, optionalUser(req)?.id ?? null, optStr(b, 'userId', 64));
       const stored = insertCall({ pc, userId, category, message: callMessage(message), source: 'direct', at });
       const call = stored?.call as CallRecord;

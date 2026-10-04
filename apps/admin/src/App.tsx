@@ -24,7 +24,7 @@ import {
 import { AudioUnlockChip, CallsBell, CallsRinger, setCalls } from '@/calls';
 import { ClubContext, type ClubState } from '@/club';
 import { GlobalSearch } from '@/clientSearch';
-import { isTyping, sheetOpen, showPc } from '@/desk';
+import { isTyping, sheetOpen, showPc, signedOut } from '@/desk';
 import { describe } from '@/errors';
 import { LANGS, dateLocale, setLang, t, useLang } from '@/i18n';
 import { TopUpSheet } from '@/paybox';
@@ -398,9 +398,12 @@ export function App(): JSX.Element {
       .finally(() => setChecking(false));
   }, []);
 
-  // Whoever signs out takes the inbox with them: the next one starts from the next poll.
+  // Whoever signs out takes the inbox, the bar's cart and buyer and any pending desk action with them: the next one
+  // starts from the next poll, with an empty cart.
   useEffect(() => {
-    if (!staff) setCalls(null);
+    if (staff) return;
+    setCalls(null);
+    signedOut();
   }, [staff]);
 
   useEffect(() => {
@@ -499,7 +502,7 @@ export function App(): JSX.Element {
         </div>
 
         {/* Top bar */}
-        <header className="flex min-w-0 items-center gap-4 border-b border-line px-6 xl:gap-6">
+        <header className="flex min-w-0 items-center gap-4 border-b border-line px-6 2xl:gap-6">
           <div className="flex items-baseline gap-3">
             <span className="num-dot text-2xl leading-none">
               {now.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}
@@ -522,13 +525,14 @@ export function App(): JSX.Element {
               showPc(hit.playing.pcId);
             }}
           />
-          <div className="ml-auto flex items-center gap-5">
+          {/* At 1366 the calls take the room of the hall load (the map says «Занято N/M»): it shows from 2xl. */}
+          <div className="ml-auto flex items-center gap-3 2xl:gap-5">
             <div className="flex items-center gap-2">
               <AudioUnlockChip />
               <CallsBell />
             </div>
             {usage && (
-              <div className="flex items-baseline gap-3">
+              <div className="hidden items-baseline gap-3 2xl:flex">
                 <span className="label hidden whitespace-nowrap 2xl:inline">{t('Загрузка зала')}</span>
                 <span className="num-dot text-2xl leading-none">
                   <span className="text-accent">{String(usage.busy).padStart(2, '0')}</span>

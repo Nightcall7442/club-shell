@@ -30,7 +30,9 @@ public static partial class CounterEndpoints
     /// queued. A busy PC is locked as it is (the clock runs, D-12), but reboot and shutdown skip it (<c>sessionOpen</c>) unless
     /// <c>includeBusy</c>: then its session is ended first exactly as the desk's «Завершить» ends it (the journal entry, the
     /// refund, the guest signed out, <c>endSession</c> queued before the power command), so the agent's own end before
-    /// powering off gets <c>409 sessionNotActive</c> and nothing is refunded twice. The busy PCs' advisory locks are taken in
+    /// powering off gets <c>409 sessionNotActive</c> and nothing is refunded twice. With <c>sessionIds</c> (what the desk's
+    /// confirm listed) only those sessions are ended: a player who sat down on a selected PC after the confirm is
+    /// <c>skipped sessionOpen</c>, never ended unseen. The busy PCs' advisory locks are taken in
     /// ascending id order before any row lock (§4.4). Each PC sent to gets a <c>pcCommand</c> journal entry (<c>meta {kind,
     /// batchId}</c>). After the commit the commands go out and the acks of the connected PCs are awaited together, up to
     /// <see cref="AgentOptions.AckWaitSec"/>: <c>done</c> (ok), <c>failed</c> (refused), <c>noAnswer</c>, <c>queued</c> (offline).
@@ -77,6 +79,13 @@ public static partial class CounterEndpoints
         }
 
         var includeBusy = r.IncludeBusy ?? false;
+        if (r.SessionIds is { } listed && (!includeBusy || listed.Count > 100))
+        {
+            throw ApiException.Validation("sessionIds", includeBusy ? "max" : "includeBusy");
+        }
+
+        // The sessions the desk's confirm listed: a player who sat down on a selected PC after it is not ended.
+        var endable = r.SessionIds?.ToHashSet();
         var hall = (await pcs.ListAsync(staff.ClubId)).ToDictionary(p => p.Id);
         var effects = new SessionEffects();
         var sent = new List<(int Index, Guid PcId, ServerCommandEnvelope? EndSession, ServerCommandEnvelope Command)>();
@@ -93,7 +102,8 @@ public static partial class CounterEndpoints
             if (power && includeBusy)
             {
                 var busy = await c.QueryAsync<Guid>(
-                    "SELECT pc_id FROM sessions WHERE pc_id = ANY(@ids) AND state <> 'ended'", new { ids = ids.Where(hall.ContainsKey).ToArray() }, tx);
+                    "SELECT pc_id FROM sessions WHERE pc_id = ANY(@ids) AND state <> 'ended' AND (@all OR id = ANY(@listed))",
+                    new { ids = ids.Where(hall.ContainsKey).ToArray(), all = endable is null, listed = endable?.ToArray() ?? [] }, tx);
                 foreach (var pcId in busy.Where(pcId => !Offline(hall[pcId])).Order())
                 {
                     await AdvisoryLocks.PcAsync(c, tx, pcId);
@@ -116,7 +126,7 @@ public static partial class CounterEndpoints
                 }
 
                 var open = power ? await SessionService.OpenOfPcAsync(c, id, tx) : null;
-                if (open is not null && !locked.Contains(id))
+                if (open is not null && (!locked.Contains(id) || endable?.Contains(open.Id) == false))
                 {
                     results.Add(new AdminBulkCommandResult(id, pc.Name, "skipped", "sessionOpen", null, null));
                     continue;

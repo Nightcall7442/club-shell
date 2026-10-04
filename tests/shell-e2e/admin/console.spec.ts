@@ -1933,6 +1933,8 @@ test('a walk-in guest and a kiosk guest moved to another PC sign in there with �
 });
 
 test("a player's call rings at the desk until «Иду», and repeats do not ring again", async ({ page, request }) => {
+  // Two beeps 5 s apart and two quiet windows longer than a ring, on top of the sign-in and the polls.
+  test.setTimeout(60_000);
   const pc = await registerAgent(request, 'call');
   const call = (at: string): Promise<APIResponse> =>
     agentCall(

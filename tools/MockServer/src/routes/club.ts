@@ -1127,8 +1127,10 @@ export function clubRoutes(app: FastifyInstance): void {
       for (const gameId of Object.keys(perUser)) games.set(gameId, (games.get(gameId) ?? 0) + 1);
     }
     const products = new Map<string, { title: string; qty: number; amount: number }>();
+    // Called oldest first: a renamed product goes by its latest sale's title, as the server names it.
     const sold = (productId: string, title: string, qty: number, amount: number): void => {
       const cur = products.get(productId) ?? { title, qty: 0, amount: 0 };
+      cur.title = title;
       cur.qty += qty;
       cur.amount += amount;
       products.set(productId, cur);

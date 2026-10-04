@@ -265,8 +265,10 @@ export function barRoutes(app: FastifyInstance): void {
           body: {
             sale: saleView(sale),
             balance: balanceSale && user ? user.balance : null,
-            // Copies: a replay answers with the stock right after this sale.
-            products: lines.map((l) => productView({ ...l.product })),
+            // Copies: a replay answers with the stock right after this sale; in the cart's order, as the server.
+            products: input.items.map((item) =>
+              productView({ ...(lines.find((l) => l.product.id === item.productId)?.product as ProductRecord) }),
+            ),
             expectedCash: drawerNow(shift),
           },
         };
@@ -288,13 +290,14 @@ export function barRoutes(app: FastifyInstance): void {
         if (reasonCode === 'other' && !note) throw errors.validation('note', 'required');
         if (note && note.length < 3 && reasonCode === 'other') throw errors.validation('note', 'min');
         if (note && note.length > 200) throw errors.validation('note', 'max');
+        // The open shift first, then the sale: the server's order.
+        const shift = openShift();
+        if (!shift) throw errors.conflict('shiftClosed');
         const sale = db.shopSales.find((s) => s.kind === 'sale' && s.id === req.params.id.toLowerCase());
         if (!sale) throw errors.notFound('sale');
         if (voidOf(sale.id)) throw errors.conflict('alreadyVoided');
         if (staff.role !== 'owner' && Date.now() - Date.parse(sale.createdAt) > VOID_WINDOW_MIN * 60_000)
           throw voidWindow();
-        const shift = openShift();
-        if (!shift) throw errors.conflict('shiftClosed');
         // Cash and other method money goes back only in the shift that took it; a balance sale in any open shift.
         if (sale.method !== 'balance' && sale.shiftId !== shift.id) throw errors.conflict('saleShiftClosed');
         if (sale.method === 'cash') {

@@ -11,9 +11,10 @@
  * map and back. A refusal is shown and fixed where it can be: too few left sets the line to what is left, a new price
  * reloads the prices, a short balance switches to paying by a method. After a sale the slip prints.
  *
- * Keys: the search is focused; Enter in it adds the first product found; arrows move between the products and Enter adds
- * one; «+», «−» and Delete change the last line; Esc clears the search, then the buyer. There is no pay hotkey: the pay
- * box's own keys work only inside it.
+ * Keys: the search is focused; Enter after a search adds the first product found (an empty search adds nothing); arrows
+ * move between the products and Enter adds one; «+», «−» and Delete change the last line; Esc clears the search, then
+ * the buyer. There is no pay hotkey, and the pay box shows none: its own keys work only inside it. While a sale is on its
+ * way the cart cannot change.
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
@@ -31,7 +32,7 @@ import {
 } from '@/api';
 import { ClientPicker, pcLabel } from '@/clientSearch';
 import { useClub } from '@/club';
-import { isTyping, onShowBar, sheetOpen } from '@/desk';
+import { isTyping, onShowBar, onSignedOut, sheetOpen } from '@/desk';
 import { amountOf, describe, isLostAnswer, reasonOf } from '@/errors';
 import { money, moneyExact } from '@/format';
 import { t } from '@/i18n';
@@ -95,6 +96,11 @@ interface Kept {
 
 let kept: Kept | null = null;
 
+// …but not a sign-out: the next staff member never gets the last one's cart, client or frozen sale.
+onSignedOut(() => {
+  kept = null;
+});
+
 const GUEST: Buyer = { kind: 'guest' };
 
 /** The buyer of a seat or a client found, with what their PC's session holds back. */
@@ -142,6 +148,8 @@ export default function BarPage(): JSX.Element {
   const [short, setShort] = useState<number | null>(null);
   const [payByMethod, setPayByMethod] = useState(false);
   const [busy, setBusy] = useState(false);
+  /** A method sale is on its way: the cart stays as it was sent until the answer. */
+  const [paying, setPaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [done, setDone] = useState<{ text: string; change: number | null; receipt: ReceiptData } | null>(null);
@@ -200,7 +208,9 @@ export default function BarPage(): JSX.Element {
         (q === '' || p.title.toLowerCase().includes(q)),
     );
   }, [products, category, search]);
-  const locked = frozen !== null || busy;
+  const locked = frozen !== null || busy || paying;
+  // A frozen sale shows what was sent, not what the cart became.
+  const cartLines = frozen?.items ?? lines;
 
   /** Most of one product the cart may hold: what is left (tracked), at most 99. */
   const capOf = (p: Product | undefined): number =>
@@ -361,6 +371,7 @@ export default function BarPage(): JSX.Element {
   const payMethod = async (p: Payment): Promise<void> => {
     const sent = snapshot('method');
     if (!sent) throw new Error(t('Корзина пуста'));
+    setPaying(true);
     try {
       const r = await send(sent, { method: p.method, amount: p.amount }, p.key);
       finish(r.sale, r, sent, p);
@@ -372,6 +383,8 @@ export default function BarPage(): JSX.Element {
       }
       refused(e, sent);
       throw e;
+    } finally {
+      setPaying(false);
     }
   };
 
@@ -456,7 +469,7 @@ export default function BarPage(): JSX.Element {
   const spendable = client ? Math.max(0, client.balance - (client.postpaid ?? 0)) : 0;
   const balanceCovers = client !== null && total > 0 && spendable >= total && short === null;
   const viaMethod = !client || !balanceCovers || payByMethod;
-  const empty = lines.length === 0;
+  const empty = cartLines.length === 0;
 
   return (
     <div className="grid h-full min-h-0 grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_24rem]">
@@ -493,7 +506,9 @@ export default function BarPage(): JSX.Element {
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
-                if (e.repeat) return;
+                // Only a search picks a product: an Enter in the empty field (out of habit, «Enter = cash») adds
+                // nothing and pays nothing.
+                if (e.repeat || search.trim() === '') return;
                 const first = shown.find(sellable);
                 if (first) add(first);
               } else if (e.key === 'ArrowDown') {
@@ -554,7 +569,7 @@ export default function BarPage(): JSX.Element {
             <Button
               variant="ghost"
               size="sm"
-              disabled={busy}
+              disabled={busy || paying}
               onClick={() => (frozen ? setConfirmReset(true) : resetCart())}
             >
               {t('Сбросить')}
@@ -578,7 +593,7 @@ export default function BarPage(): JSX.Element {
           <p className="text-sm text-muted">{t('Нажмите на товар, чтобы добавить его в корзину.')}</p>
         ) : (
           <ul aria-label={t('Позиции')} className="flex flex-col divide-y divide-line">
-            {lines.map((l) => {
+            {cartLines.map((l) => {
               const p = byId.get(l.productId);
               const title = p?.title ?? '…';
               return (
@@ -705,7 +720,11 @@ export default function BarPage(): JSX.Element {
           )}
         </div>
 
-        {notice && <p className="rounded-md bg-warning/10 px-3 py-2 text-sm text-warning">{notice}</p>}
+        {notice && (
+          <p role="status" className="rounded-md bg-warning/10 px-3 py-2 text-sm text-warning">
+            {notice}
+          </p>
+        )}
 
         {!empty && (clientMode ? client !== null : true) && (
           <section aria-label={t('Оплата')} className="flex flex-col gap-3">
@@ -749,6 +768,7 @@ export default function BarPage(): JSX.Element {
                 exact={frozen?.total ?? total}
                 verb={t('Продать')}
                 autoFocus={false}
+                hints={false}
                 disabled={total <= 0 ? t('Корзина пуста') : null}
                 onPay={payMethod}
               />

@@ -127,6 +127,7 @@ export function PayBox({
   exact,
   verb,
   autoFocus = true,
+  hints = true,
   disabled,
   onPay,
 }: {
@@ -139,6 +140,11 @@ export function PayBox({
   /** Prefix of the method buttons: "Посадить" → "Посадить · Наличные". */
   verb?: string;
   autoFocus?: boolean;
+  /**
+   * Show the keys (Enter — cash, Alt+2..5) on the method buttons. Off where the page's focus lives outside the box and
+   * those keys do something else there (the bar: Enter in its search adds a product).
+   */
+  hints?: boolean;
   /** Why the box cannot take money yet (e.g. the price is being recounted); null or absent — it can. */
   disabled?: string | null;
   /** Does what the money is for; a throw is shown inline under the buttons, a success spends the box. */
@@ -326,12 +332,12 @@ export function PayBox({
               key={m.id}
               variant={i === 0 ? 'primary' : 'secondary'}
               disabled={!ready || (m.id === 'cash' && cashShort)}
-              title={m.hint}
+              title={hints ? m.hint : undefined}
               className={clsx(i === 0 && (verb ? 'col-span-2' : 'col-span-4'), 'h-11')}
               onClick={() => pay(m.id)}
             >
               {busy === m.id ? '…' : verb ? `${verb} · ${t(m.label)}` : t(m.label)}
-              <Kbd>{m.hint}</Kbd>
+              {hints && <Kbd>{m.hint}</Kbd>}
             </Button>
           ))}
         </div>

@@ -24,6 +24,8 @@ import type { Money, Session, Tariff } from '@clubshell/contracts';
 import {
   adminApi,
   clubApi,
+  newKey,
+  type BulkInput,
   type BulkResult,
   type ClientHit,
   type CommandAck,
@@ -41,7 +43,7 @@ import {
 import { CallGroupActions, CallMark, groupCalls, groupLine, setCalls, useCalls, type CallGroup } from '@/calls';
 import { ClientPicker, pcLabel } from '@/clientSearch';
 import { useClub } from '@/club';
-import { isTyping, onShowPc, sheetOpen, showBar } from '@/desk';
+import { isTyping, onShowPc, onSignedOut, sheetOpen, showBar } from '@/desk';
 import { amountOf, changedAmount, describe, isLostAnswer, reasonOf } from '@/errors';
 import { t } from '@/i18n';
 import { duration, minutesLabel, money, moneyExact } from '@/format';
@@ -533,6 +535,21 @@ function outcomeText(r: BulkResult): string {
   return parts.join(' · ');
 }
 
+/**
+ * A button of a two-column row in the 26rem panel that may wrap: a long translation («Qayta yuklash (6 tadan 4)») goes
+ * to a second line instead of widening the panel.
+ */
+const WRAP = '!h-auto min-h-10 !whitespace-normal py-2 text-center leading-tight';
+
+/** The button of each bulk command (its «Повторить» after a lost answer says which). */
+const BULK_VERB: Record<PcCommandKind, string> = {
+  message: 'Сообщение',
+  lock: 'Заблокировать',
+  unlock: 'Разблокировать',
+  reboot: 'Перезагрузить',
+  shutdown: 'Выключить',
+};
+
 const POWER_LABEL: Record<'reboot' | 'shutdown', { verb: string; done: string }> = {
   reboot: { verb: 'Перезагрузить', done: 'ПК перезагружается' },
   shutdown: { verb: 'Выключить', done: 'ПК выключается' },
@@ -601,10 +618,25 @@ function PowerConfirm({
   );
 }
 
+/** A command sent with its `Idempotency-Key` whose answer never came: only it may go again, under that key (D-46). */
+interface LostCommand {
+  input: BulkInput;
+  key: string;
+}
+
+/**
+ * Power commands of one PC whose answer was lost, by PC. They outlive the seat panel — the session the command ended
+ * turns the seat free, which mounts another panel — so the retry is the request that went, never one rebuilt from the
+ * map as it is now (that would queue a second reboot under a new key). A sign-out drops them.
+ */
+const lostPower = new Map<string, LostCommand>();
+onSignedOut(() => lostPower.clear());
+
 /**
  * Message, lock, reboot, shutdown: behind "Ещё ⋯" so the money actions stay on top. Each says what the PC did: an
  * offline PC queues the command, a silent one did not answer. Reboot and shutdown go through the bulk route (D-66): of a
- * busy PC they ask first and end the session at the desk (refund, journal) before the PC restarts.
+ * busy PC they ask first and end the session the confirm showed at the desk (refund, journal) before the PC restarts.
+ * After a lost answer only «Повторить» of that same command is offered until a definite answer.
  */
 function TechActions({
   seat,
@@ -619,43 +651,63 @@ function TechActions({
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState('');
-  const [confirm, setConfirm] = useState<'reboot' | 'shutdown' | null>(null);
-  const key = useHeldKey();
-  const lastKind = useRef<string | null>(null);
+  /** The confirm with the seat as it was when it opened: its session is the one that may be ended. */
+  const [confirm, setConfirm] = useState<{ kind: 'reboot' | 'shutdown'; seat: Seat } | null>(null);
+  const [lost, setLost] = useState<LostCommand | null>(() => lostPower.get(seat.pc.id) ?? null);
+  const current = useRef(seat.pc.id);
+  current.current = seat.pc.id;
   useEffect(() => {
-    key.reset();
-    lastKind.current = null;
     setConfirm(null);
-  }, [seat.pc.id, key]);
+    setLost(lostPower.get(seat.pc.id) ?? null);
+  }, [seat.pc.id]);
   const command = (kind: 'lock' | 'unlock', done: string): void =>
     void run(kind, async () => ackNote((await adminApi.command(seat.pc.id, { kind })).ack, done));
-  const power = (kind: 'reboot' | 'shutdown', includeBusy: boolean): void => {
+  /** Sends `input` under `key`: a new command has a new key, a retry the one it first went with. */
+  const send = (input: BulkInput, key: string): void => {
     setConfirm(null);
-    // A key is held for one request: another kind (or another PC) is another request.
-    if (lastKind.current !== `${kind}|${includeBusy}`) key.reset();
-    lastKind.current = `${kind}|${includeBusy}`;
+    const pcId = input.pcIds[0] ?? seat.pc.id;
+    const kind = input.kind === 'shutdown' ? 'shutdown' : 'reboot';
+    const keep = (l: LostCommand | null): void => {
+      if (l) lostPower.set(pcId, l);
+      else lostPower.delete(pcId);
+      if (current.current === pcId) setLost(l);
+    };
     void run(kind, async () => {
       try {
-        const r = await adminApi.pcCommands(
-          { pcIds: [seat.pc.id], kind, ...(includeBusy ? { includeBusy: true } : {}) },
-          key.take(),
-        );
-        key.settle();
+        const r = await adminApi.pcCommands(input, key);
+        keep(null);
         const result = r.results[0];
         if (!result) return { text: t('ПК не ответил'), tone: 'warn' };
         const tone = result.outcome === 'failed' ? 'err' : result.outcome === 'done' ? 'ok' : 'warn';
         const text = result.outcome === 'done' && !result.ended ? t(POWER_LABEL[kind].done) : outcomeText(result);
         return { text, tone };
       } catch (e) {
-        key.settle(e);
-        throw e;
+        if (!isLostAnswer(e)) {
+          keep(null);
+          throw e;
+        }
+        keep({ input, key });
+        return {
+          text: t('Ответ сервера не пришёл: команда могла уйти. Повторите её — дважды она не отправится.'),
+          tone: 'err',
+        };
       }
     });
   };
+  const power = (kind: 'reboot' | 'shutdown', ending: Seat | null): void =>
+    send(
+      {
+        pcIds: [seat.pc.id],
+        kind,
+        ...(ending?.session ? { includeBusy: true, sessionIds: [ending.session.id] } : {}),
+      },
+      newKey(),
+    );
   const ask = (kind: 'reboot' | 'shutdown'): void => {
-    if (seat.session) setConfirm(kind);
-    else power(kind, false);
+    if (seat.session) setConfirm({ kind, seat });
+    else power(kind, null);
   };
+  const lostKind = lost?.input.kind === 'shutdown' ? 'shutdown' : 'reboot';
   return (
     <section className="flex flex-col gap-2">
       <Button variant="ghost" className="justify-between" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
@@ -693,21 +745,31 @@ function TechActions({
             <Button variant="ghost" disabled={busy} onClick={() => command('unlock', t('ПК разблокирован'))}>
               {t('Разблокировать')}
             </Button>
-            <Button variant="ghost" disabled={busy} onClick={() => ask('reboot')}>
+            <Button variant="ghost" disabled={busy || lost !== null} onClick={() => ask('reboot')}>
               {t('Перезагрузить')}
             </Button>
-            <Button variant="ghost" disabled={busy} onClick={() => ask('shutdown')}>
+            <Button variant="ghost" disabled={busy || lost !== null} onClick={() => ask('shutdown')}>
               {t('Выключить')}
             </Button>
           </div>
         </div>
       )}
+      {lost && (
+        <div className="flex flex-col gap-2 rounded-md border border-warning/50 p-3">
+          <p role="status" className="text-xs text-warning">
+            {t('Ответ сервера не пришёл: команда могла уйти. Повторите её — дважды она не отправится.')}
+          </p>
+          <Button disabled={busy} onClick={() => send(lost.input, lost.key)}>
+            {busy ? '…' : `${t('Повторить')} · ${t(POWER_LABEL[lostKind].verb)}`}
+          </Button>
+        </div>
+      )}
       {confirm && (
         <PowerConfirm
-          kind={confirm}
-          busy={[seat]}
+          kind={confirm.kind}
+          busy={[confirm.seat]}
           sending={busy}
-          onConfirm={() => power(confirm, true)}
+          onConfirm={() => power(confirm.kind, confirm.seat)}
           onMove={
             onStartMove
               ? () => {
@@ -729,8 +791,10 @@ const MESSAGE_PRESETS = ['Закрываемся через 20 минут', 'П�
 /**
  * Two or more PCs picked on the map (D-66): one command to all of them, with a count of the PCs it will reach on each
  * button and why the rest are left out (offline PCs get no lock or power command: the next player would). Busy PCs are
- * listed before a lock or a power command; then every PC's result: done, queued (offline: up to 10 minutes), no answer,
- * skipped and why, the session ended with its refund. «Повторить для неудачных» sends again only to the failed ones.
+ * listed before a lock or a power command, and a reboot or shutdown ends only the sessions that list showed; then every
+ * PC's result: done, queued (offline: up to 10 minutes), no answer, skipped and why, the session ended with its refund.
+ * «Повторить для неудачных» sends again only to the failed ones. After a lost answer the panel offers only «Повторить»
+ * of the request that went (its body and key), never one rebuilt from the map as it is now.
  */
 function BulkPanel({
   seats,
@@ -747,43 +811,35 @@ function BulkPanel({
   const [text, setText] = useState('');
   const [level, setLevel] = useState<'info' | 'warning'>('info');
   const [sending, setSending] = useState<PcCommandKind | null>(null);
-  const [confirm, setConfirm] = useState<'lock' | 'reboot' | 'shutdown' | null>(null);
-  const [results, setResults] = useState<{ kind: PcCommandKind; includeBusy: boolean; list: BulkResult[] } | null>(
-    null,
-  );
+  /** The confirm with the busy PCs as they were when it opened: only their sessions may be ended. */
+  const [confirm, setConfirm] = useState<{ kind: 'lock' | 'reboot' | 'shutdown'; busy: Seat[] } | null>(null);
+  const [results, setResults] = useState<{ input: BulkInput; list: BulkResult[] } | null>(null);
+  /** The command whose answer was lost: until a definite answer only it goes again, with its key and its body. */
+  const [lost, setLost] = useState<LostCommand | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const key = useHeldKey();
-  const lastBody = useRef<string | null>(null);
   const offline = seats.filter((s) => s.pc.status === 'offline');
   const reachable = seats.filter((s) => s.pc.status !== 'offline');
   const busy = reachable.filter((s) => s.session !== null);
   const numbers = seats.map((s) => String(s.pc.number).padStart(2, '0'));
   const names = new Map(seats.map((s) => [s.pc.id, s.pc.name]));
+  const held = sending !== null || lost !== null;
 
-  const send = async (kind: PcCommandKind, pcIds: string[], includeBusy: boolean): Promise<void> => {
-    const input = {
-      pcIds,
-      kind,
-      ...(kind === 'message' ? { text: text.trim(), level } : {}),
-      ...(includeBusy ? { includeBusy: true } : {}),
-    };
-    // The key belongs to one body: another command or another set of PCs is another request.
-    const body = JSON.stringify(input);
-    if (lastBody.current !== body) key.reset();
-    lastBody.current = body;
-    setSending(kind);
+  /** Sends `input` under `key`: a new command has a new key, a retry the one it first went with. */
+  const send = async (input: BulkInput, key: string): Promise<void> => {
+    setSending(input.kind);
     setConfirm(null);
     setError(null);
     try {
-      const r = await adminApi.pcCommands(input, key.take());
-      key.settle();
-      setResults({ kind, includeBusy, list: r.results });
+      const r = await adminApi.pcCommands(input, key);
+      setLost(null);
+      setResults({ input, list: r.results });
       onDone();
       shift.refresh();
     } catch (e) {
-      key.settle(e);
+      const unknown = isLostAnswer(e);
+      setLost(unknown ? { input, key } : null);
       setError(
-        isLostAnswer(e)
+        unknown
           ? t('Ответ сервера не пришёл: команда могла уйти. Повторите её — дважды она не отправится.')
           : describe(e),
       );
@@ -792,13 +848,25 @@ function BulkPanel({
     }
   };
 
+  /** A new command to `pcIds`; `ending` — the busy PCs the confirm listed, whose sessions end first (reboot, shutdown). */
+  const fresh = (kind: PcCommandKind, pcIds: string[], ending: Seat[] | null): void =>
+    void send(
+      {
+        pcIds,
+        kind,
+        ...(kind === 'message' ? { text: text.trim(), level } : {}),
+        ...(ending ? { includeBusy: true, sessionIds: ending.flatMap((s) => (s.session ? [s.session.id] : [])) } : {}),
+      },
+      newKey(),
+    );
+
   const act = (kind: PcCommandKind): void => {
-    if ((kind === 'lock' || kind === 'reboot' || kind === 'shutdown') && busy.length > 0) setConfirm(kind);
+    if ((kind === 'lock' || kind === 'reboot' || kind === 'shutdown') && busy.length > 0) setConfirm({ kind, busy });
     else
-      void send(
+      fresh(
         kind,
         seats.map((s) => s.pc.id),
-        false,
+        null,
       );
   };
   const count = (n: number): string => (n === seats.length ? `(${n})` : t('({k} из {n})', { k: n, n: seats.length }));
@@ -843,26 +911,22 @@ function BulkPanel({
           ]}
           onChange={setLevel}
         />
-        <Button
-          variant="primary"
-          disabled={sending !== null || text.trim().length === 0}
-          onClick={() => act('message')}
-        >
+        <Button variant="primary" disabled={held || text.trim().length === 0} onClick={() => act('message')}>
           {sending === 'message' ? '…' : `${t('Сообщение')} ${count(seats.length)}`}
         </Button>
       </section>
 
       <section className="grid grid-cols-2 gap-1.5">
-        <Button disabled={sending !== null || reachable.length === 0} onClick={() => act('lock')}>
+        <Button className={WRAP} disabled={held || reachable.length === 0} onClick={() => act('lock')}>
           {sending === 'lock' ? '…' : `${t('Заблокировать')} ${count(reachable.length)}`}
         </Button>
-        <Button disabled={sending !== null} onClick={() => act('unlock')}>
+        <Button className={WRAP} disabled={held} onClick={() => act('unlock')}>
           {sending === 'unlock' ? '…' : `${t('Разблокировать')} ${count(seats.length)}`}
         </Button>
-        <Button disabled={sending !== null || reachable.length === 0} onClick={() => act('reboot')}>
+        <Button className={WRAP} disabled={held || reachable.length === 0} onClick={() => act('reboot')}>
           {sending === 'reboot' ? '…' : `${t('Перезагрузить')} ${count(reachable.length)}`}
         </Button>
-        <Button disabled={sending !== null || reachable.length === 0} onClick={() => act('shutdown')}>
+        <Button className={WRAP} disabled={held || reachable.length === 0} onClick={() => act('shutdown')}>
           {sending === 'shutdown' ? '…' : `${t('Выключить')} ${count(reachable.length)}`}
         </Button>
       </section>
@@ -884,6 +948,11 @@ function BulkPanel({
         <p role="alert" className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
           {error}
         </p>
+      )}
+      {lost && (
+        <Button variant="primary" disabled={sending !== null} onClick={() => void send(lost.input, lost.key)}>
+          {sending !== null ? '…' : `${t('Повторить')} · ${t(BULK_VERB[lost.input.kind])} (${lost.input.pcIds.length})`}
+        </Button>
       )}
 
       {results && (
@@ -910,14 +979,9 @@ function BulkPanel({
           </ul>
           {failed.length > 0 && (
             <Button
-              disabled={sending !== null}
-              onClick={() =>
-                void send(
-                  results.kind,
-                  failed.map((r) => r.pcId),
-                  results.includeBusy,
-                )
-              }
+              disabled={held}
+              // The same command (its text, its sessions to end) to the failed PCs only: a new request.
+              onClick={() => void send({ ...results.input, pcIds: failed.map((r) => r.pcId) }, newKey())}
             >
               {t('Повторить для неудачных ({n})', { n: failed.length })}
             </Button>
@@ -932,14 +996,14 @@ function BulkPanel({
 
       {confirm && (
         <PowerConfirm
-          kind={confirm}
-          busy={busy}
+          kind={confirm.kind}
+          busy={confirm.busy}
           sending={sending !== null}
           onConfirm={() =>
-            void send(
-              confirm,
+            fresh(
+              confirm.kind,
               seats.map((s) => s.pc.id),
-              confirm !== 'lock',
+              confirm.kind === 'lock' ? null : confirm.busy,
             )
           }
           onMove={(s) => {
@@ -1365,7 +1429,8 @@ function BusySeat({
         </section>
       )}
 
-      <section className="grid grid-cols-2 gap-1.5">
+      {/* «Бар» as wide as its word, the move gets the rest: «Boshqa kompyuterga koʻchirish…» fits the 26rem panel. */}
+      <section className="grid grid-cols-[auto_minmax(0,1fr)] gap-1.5">
         <Button
           disabled={busy !== null}
           onClick={() => {
@@ -1376,7 +1441,7 @@ function BusySeat({
         >
           {t('Бар')}
         </Button>
-        <Button disabled={busy !== null} onClick={onStartMove}>
+        <Button className={WRAP} disabled={busy !== null} onClick={onStartMove}>
           {t('Пересадить на другой ПК…')}
         </Button>
       </section>
@@ -2589,13 +2654,14 @@ export function MapPage(): JSX.Element {
       const k = keys.current;
       if (e.key === 'Escape') {
         if (k.sheet) setSheet(null);
+        // In a field (the bulk message, the seat's message) the first Esc only leaves it; the next one clears the set
+        // or closes the panel, so a typed message and a picked set are never lost to one key.
+        else if (isTyping(e) && e.target instanceof HTMLElement) e.target.blur();
         else if (k.multi.size > 0 || k.selectMode) {
           setMulti(new Set());
           setSelectMode(false);
         } else if (k.movePick) setMovePick(null);
         else if (k.digits) setDigits('');
-        // In a field the first Esc only leaves it; the next one closes the panel.
-        else if (isTyping(e) && e.target instanceof HTMLElement) e.target.blur();
         else if (k.selected) setSelected(null);
         return;
       }

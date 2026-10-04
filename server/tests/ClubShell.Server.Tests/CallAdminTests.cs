@@ -215,6 +215,44 @@ public sealed class CallAdminTests(ServerFixture server) : IClassFixture<ServerF
     }
 
     [Fact]
+    public async Task A_call_after_the_answered_call_was_closed_rings_again()
+    {
+        var cashier = await LoginAsync(server, CashierPin);
+        var a = await TestAgent.CreateAsync(server);
+        var first = (await Calls.CallAsync(a, Calls.Body(a, server.Clock.GetUtcNow()))).GetProperty("ticketId").GetGuid();
+        await Calls.AckAsync(server, cashier, first);
+        server.Clock.Advance(TimeSpan.FromMinutes(3));
+        await RawExpectAsync(server, 200, HttpMethod.Post, $"/calls/{first}/resolve", cashier, new { });
+
+        // Closed: nobody is on the way any more, so a new press two minutes later rings and is nobody's yet.
+        server.Clock.Advance(TimeSpan.FromMinutes(2));
+        var fresh = (await Calls.CallAsync(a, Calls.Body(a, server.Clock.GetUtcNow()))).GetProperty("ticketId").GetGuid();
+        Assert.Equal("open false", await Calls.StatusAsync(server, fresh));
+        Assert.Equal(0, await Calls.CountAsync(server, a.PcId, $"id = '{fresh}' AND (acked_at IS NOT NULL OR acked_by_name IS NOT NULL)"));
+    }
+
+    [Fact]
+    public async Task Repeats_never_stretch_the_ten_minutes_after_the_ack()
+    {
+        var owner = await LoginAsync(server, OwnerPin);
+        var a = await TestAgent.CreateAsync(server);
+        var first = (await Calls.CallAsync(a, Calls.Body(a, server.Clock.GetUtcNow()))).GetProperty("ticketId").GetGuid();
+        await Calls.AckAsync(server, owner, first);
+
+        // A press 8 minutes after «Иду» is a repeat that carries that «Иду», not a new one.
+        server.Clock.Advance(TimeSpan.FromMinutes(8));
+        var repeat = (await Calls.CallAsync(a, Calls.Body(a, server.Clock.GetUtcNow()))).GetProperty("ticketId").GetGuid();
+        Assert.Equal("acked true", await Calls.StatusAsync(server, repeat));
+        Assert.True(await Players.ScalarAsync<bool>(server,
+            "SELECT r.acked_at = f.acked_at FROM admin_calls r, admin_calls f WHERE r.id = @repeat AND f.id = @first", new { repeat, first }));
+
+        // 16 minutes after «Иду»: the ten minutes are over whatever was pressed in between — it rings.
+        server.Clock.Advance(TimeSpan.FromMinutes(8));
+        var late = (await Calls.CallAsync(a, Calls.Body(a, server.Clock.GetUtcNow()))).GetProperty("ticketId").GetGuid();
+        Assert.Equal("open false", await Calls.StatusAsync(server, late));
+    }
+
+    [Fact]
     public async Task The_overview_lists_open_and_acked_calls_ack_covers_older_ones_and_resolve_hides_them()
     {
         var owner = await LoginAsync(server, OwnerPin);
@@ -241,7 +279,9 @@ public sealed class CallAdminTests(ServerFixture server) : IClassFixture<ServerF
             acked.GetProperty("notified").GetBoolean()));
         Assert.Equal(("acked false", "acked false", "open false"), (await Calls.StatusAsync(server, c1), await Calls.StatusAsync(server, c2), await Calls.StatusAsync(server, c3)));
         Assert.Equal(0, await Players.ScalarAsync<int>(server, "SELECT count(*)::int FROM agent_commands WHERE pc_id = @PcId", new { a.PcId }));
-        Assert.Equal("acked", (await Calls.AckAsync(server, owner, c1)).GetProperty("call").GetProperty("status").GetString());
+        var again = await Calls.AckAsync(server, owner, c1);
+        Assert.Equal(("acked", "Кассир Азиз", JsonValueKind.Null), (again.GetProperty("call").GetProperty("status").GetString(),
+            again.GetProperty("call").GetProperty("ackedBy").GetString(), again.GetProperty("notified").ValueKind));
         Assert.Equal(1, await Players.ScalarAsync<int>(server, "SELECT count(*)::int FROM audit_entries WHERE action = 'callAck' AND meta ->> 'callId' = @id", new { id = c2.ToString() }));
 
         // «Закрыть»: gone from the inbox on every console; again — the same answer.
@@ -308,8 +348,9 @@ public sealed class CallAdminPushTests(KestrelServerFixture server) : IClassFixt
             "SELECT extract(epoch FROM expires_at - created_at)::int FROM agent_commands WHERE pc_id = @PcId AND name = 'message'", new { a.PcId }));
         Assert.Equal("acked false", await Calls.StatusAsync(server, older));
 
-        // Again: nothing is sent; a call acked without notify sends nothing either.
-        Assert.False((await Calls.AckAsync(server, owner, newer)).GetProperty("notified").GetBoolean());
+        // Again (another console, a stale list): nothing is sent, and the answer says this request answered nothing — not that
+        // the PC is offline; a call acked without notify sends nothing either.
+        Assert.Equal(JsonValueKind.Null, (await Calls.AckAsync(server, owner, newer)).GetProperty("notified").ValueKind);
         server.Clock.Advance(TimeSpan.FromMinutes(11));
         var quiet = (await Calls.CallAsync(a, Calls.Body(a, server.Clock.GetUtcNow()))).GetProperty("ticketId").GetGuid();
         Assert.False((await Calls.AckAsync(server, owner, quiet, notify: false)).GetProperty("notified").GetBoolean());

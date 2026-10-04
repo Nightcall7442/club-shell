@@ -49,6 +49,24 @@ export function onShowBar(take: (request: { pcId: string; userId: string }) => v
   return () => window.removeEventListener(BAR_EVENT, run);
 }
 
+/**
+ * What the console keeps between pages belongs to whoever is signed in (the bar's cart and buyer, a power command
+ * waiting for its answer): the next staff member starts clean. Pages register what to drop when their module loads;
+ * the shell calls {@link signedOut} when nobody is signed in any more.
+ */
+const resets = new Set<() => void>();
+
+export function onSignedOut(reset: () => void): () => void {
+  resets.add(reset);
+  return () => resets.delete(reset);
+}
+
+export function signedOut(): void {
+  pending = null;
+  pendingBar = null;
+  resets.forEach((reset) => reset());
+}
+
 /** True when the key went to a field the cashier is typing in (hotkeys leave it alone). */
 export function isTyping(e: KeyboardEvent): boolean {
   const el = e.target;

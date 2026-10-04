@@ -214,6 +214,8 @@ export interface SessionRecord {
   purchases?: Purchase[];
   /** The desk moved it from PC to PC (D-59): the old PC's `/end` and `/events` then change nothing. */
   moves?: { fromPcId: string; toPcId: string; at: string; staffId: string }[];
+  /** The id the PC gave a session it opened offline (`POST /sessions` `clientSessionId`), as the server keeps it. */
+  clientSessionId?: string | null;
 }
 
 export interface Purchase {

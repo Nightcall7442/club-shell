@@ -429,6 +429,19 @@ export interface BulkResult {
   } | null;
 }
 
+/**
+ * One command to several PCs (D-65). `includeBusy` (reboot, shutdown) ends busy PCs' sessions first — only those in
+ * `sessionIds`, the ones the confirm listed: a player who sat down after it is left alone (`skipped sessionOpen`).
+ */
+export interface BulkInput {
+  pcIds: string[];
+  kind: PcCommandKind;
+  text?: string;
+  level?: 'info' | 'warning';
+  includeBusy?: boolean;
+  sessionIds?: string[];
+}
+
 export interface BulkResponse {
   batchId: string;
   results: BulkResult[];
@@ -505,16 +518,17 @@ export const adminApi = {
     postMoney(`/admin/shop/sales/${id}/void`, input, key),
   /** «Пересадить»: the open session of `fromPcId` to `toPcId`, with its time and money (D-59). */
   moveSession: (input: MoveInput, key: string): Promise<MoveResponse> => postMoney('/admin/sessions/move', input, key),
-  /** «Иду»: answers the call and the older open calls of its PC; `notified` — the player got «Администратор идёт к вам». */
-  callAck: (id: string, notify = true): Promise<{ call: Call; notified: boolean }> =>
+  /**
+   * «Иду»: answers the call and the older open calls of its PC; `notified` — the player got «Администратор идёт к вам»
+   * (false: the PC is not connected); null — someone had answered it already, nothing was sent.
+   */
+  callAck: (id: string, notify = true): Promise<{ call: Call; notified: boolean | null }> =>
     post(`/admin/calls/${id}/ack`, { notify }),
   /** «Закрыть»: closes the call and the older ones of its PC. */
   callResolve: (id: string): Promise<{ call: Call }> => post(`/admin/calls/${id}/resolve`, {}),
   /** One command to several PCs, a result per PC (D-65); `includeBusy` ends busy PCs' sessions before a reboot. */
-  pcCommands: (
-    input: { pcIds: string[]; kind: PcCommandKind; text?: string; level?: 'info' | 'warning'; includeBusy?: boolean },
-    key: string,
-  ): Promise<BulkResponse> => postMoney('/admin/pcs/commands', input, key, BULK_TIMEOUT_MS),
+  pcCommands: (input: BulkInput, key: string): Promise<BulkResponse> =>
+    postMoney('/admin/pcs/commands', input, key, BULK_TIMEOUT_MS),
 };
 
 // ---------------------------------------------------------------------------------------------------------------------

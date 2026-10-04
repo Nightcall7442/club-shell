@@ -623,8 +623,11 @@ export function adminRoutes(app: FastifyInstance): void {
         if (to.status === 'maintenance') throw errors.policyDenied('pcMaintenance');
         if (to.status === 'offline') throw errors.conflict('targetOffline');
         if (openSessionForPc(to.id)) throw errors.conflict('pcBusy', { pcId: to.id });
+        // As the server: a session the server knows by its id or by the PC's own id of it is not the PC's own.
         const reported = to.reportedSessionId ?? null;
-        if ((to.offlineQueue ?? 0) > 0 || (reported && !findSession(reported)))
+        const known = (id: string): boolean =>
+          findSession(id) !== undefined || db.sessions.some((s) => s.clientSessionId === id);
+        if ((to.offlineQueue ?? 0) > 0 || (reported && !known(reported)))
           throw errors.conflict('targetHasLocalSession');
         const user = findUser(rec.userId);
         if (!user) throw errors.notFound('user');
@@ -637,7 +640,9 @@ export function adminRoutes(app: FastifyInstance): void {
           next = findTariff(tariffId);
           if (!next) throw errors.notFound('tariff');
           if (next.isPackage) throw errors.validation('tariffId', 'package');
-          if (!soldIn(next)) throw errors.policyDenied('tariffZone');
+          // Its zones and its time windows, as the quote and the server judge it (403 tariffZone | tariffTime).
+          const rule = tariffRule(next, to.zone);
+          if (rule) throw errors.policyDenied(rule);
         } else if (rec.isPrepaid && current && !soldIn(current)) {
           throw errors.conflict('tariffZone', { zone: to.zone });
         }
@@ -817,7 +822,7 @@ export function adminRoutes(app: FastifyInstance): void {
    * «Иду» (beyond the contract, D-63): this call and every older open call of its PC are answered. With `notify` (the
    * default) a PC on its socket gets the `message` «Администратор идёт к вам» in the caller's language, for two minutes,
    * no ack asked; an offline one is not told (`notified` false), so the next player never sees it. Answering an
-   * answered or closed call changes and sends nothing.
+   * answered or closed call changes and sends nothing (`notified` null).
    */
   app.post<{ Params: { id: string } }>('/admin/calls/:id/ack', async (req) => {
     const staff = requireAdmin(req);
@@ -825,8 +830,10 @@ export function adminRoutes(app: FastifyInstance): void {
     if (!call) throw errors.notFound('call');
     const b = isObject(req.body) ? req.body : {};
     const notify = optBool(b, 'notify') ?? true;
-    let notified = false;
+    // null — this request answered nothing (someone else did): not the same as «the PC is offline».
+    let notified: boolean | null = null;
     if (call.status === 'open' && moveCalls(call, 'acked', staff.name)) {
+      notified = false;
       record(staff, 'callAck', {
         userId: call.userId,
         pcId: call.pcId,
@@ -872,7 +879,8 @@ export function adminRoutes(app: FastifyInstance): void {
   /**
    * One command to several PCs (beyond the contract, D-65), each PC on its own: offline PCs are skipped for lock, reboot
    * and shutdown (a queued one would hit the next player); a busy PC is skipped for reboot and shutdown unless
-   * `includeBusy`, which ends its session through the desk end first (journal, refund, sign-out). Every PC gets a
+   * `includeBusy`, which ends its session through the desk end first (journal, refund, sign-out) — with `sessionIds`
+   * only the sessions the desk's confirm listed (another one is skipped `sessionOpen`). Every PC gets a
    * `pcCommand` entry with the batch. Results per PC: done (acked), queued (not connected), noAnswer (no ack in time),
    * failed, skipped (`sessionOpen` | `offline` | `notFound`). A replay answers the results as they were before the acks
    * (sent commands read `queued`).
@@ -899,6 +907,15 @@ export function adminRoutes(app: FastifyInstance): void {
         if (level !== 'info' && level !== 'warning') throw errors.validation('level', 'enum');
         const includeBusy = optBool(b, 'includeBusy') ?? false;
         if (includeBusy && kind !== 'reboot' && kind !== 'shutdown') throw errors.validation('includeBusy', 'kind');
+        // The sessions the desk's confirm listed: only those are ended (a player who sat down after it is skipped).
+        const rawSessions = b['sessionIds'];
+        let endable: Set<string> | null = null;
+        if (rawSessions !== undefined && rawSessions !== null) {
+          if (!Array.isArray(rawSessions)) throw errors.validation('sessionIds', 'format');
+          if (!includeBusy) throw errors.validation('sessionIds', 'includeBusy');
+          if (rawSessions.length > 100) throw errors.validation('sessionIds', 'max');
+          endable = new Set(rawSessions.map((v, i) => uuidOf(v, `sessionIds[${i}]`, true) as string));
+        }
         const batchId = uuid();
         const results: BulkResult[] = [];
         const sent: { row: BulkResult; ack: Promise<CommandAck> }[] = [];
@@ -918,7 +935,7 @@ export function adminRoutes(app: FastifyInstance): void {
           }
           const open = openSessionForPc(pc.id);
           if (power && open) {
-            if (!includeBusy) {
+            if (!includeBusy || (endable && !endable.has(open.id))) {
               row.outcome = 'skipped';
               row.skipped = 'sessionOpen';
               continue;
@@ -926,7 +943,10 @@ export function adminRoutes(app: FastifyInstance): void {
             const { result, user } = deskEnd(staff, open);
             row.ended = {
               sessionId: open.id,
-              user: user ? { id: user.id, displayName: user.displayName, role: user.role } : null,
+              // As the server: never null (a session always has its player).
+              user: user
+                ? { id: user.id, displayName: user.displayName, role: user.role }
+                : { id: open.userId, displayName: '', role: 'member' },
               charged: result.charged,
               refunded: result.refunded,
             };
@@ -943,7 +963,6 @@ export function adminRoutes(app: FastifyInstance): void {
         const acks = await Promise.all(sent.map((x) => x.ack));
         sent.forEach(({ row }, i) => {
           const a = acks[i] as CommandAck;
-          row.ack = a;
           row.outcome = a.ok
             ? 'done'
             : a.error?.code === 'agentOffline'
@@ -951,6 +970,8 @@ export function adminRoutes(app: FastifyInstance): void {
               : a.error?.code === 'timeout'
                 ? 'noAnswer'
                 : 'failed';
+          // A PC not connected answered nothing: the server sends no ack for it.
+          row.ack = row.outcome === 'queued' ? null : a;
         });
         return { status: 200, body: { batchId, results }, stored };
       },
@@ -970,7 +991,7 @@ interface BulkResult {
   ack: CommandAck | null;
   ended: {
     sessionId: string;
-    user: { id: string; displayName: string; role: string } | null;
+    user: { id: string; displayName: string; role: string };
     charged: Money;
     refunded: Money;
   } | null;

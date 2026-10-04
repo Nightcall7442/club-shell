@@ -240,6 +240,7 @@ export function sessionRoutes(app: FastifyInstance): void {
         origin: 'kiosk',
         createdByStaffId: null,
         purchases: prepaid ? [{ paid: cost.amount, sec: mins * 60, pkg: tariff.isPackage }] : [],
+        clientSessionId,
       };
       db.sessions.push(rec);
       if (db.sessions.length > 500) db.sessions.splice(0, db.sessions.length - 500);

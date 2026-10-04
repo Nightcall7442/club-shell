@@ -77,8 +77,8 @@ public static class CallAdminEndpoints
     /// <summary>
     /// «Иду» (D-63): this call and every older open call of the same PC are acknowledged; with <c>notify</c> (default true)
     /// and only while the PC is connected, «Администратор идёт к вам» goes as a non-blocking <c>message</c> that expires in 2
-    /// minutes, in the caller's language (<c>notified</c>). An acknowledged or resolved call answers its state and sends
-    /// nothing again. Journal <c>callAck</c>.
+    /// minutes, in the caller's language (<c>notified</c>). An acknowledged or resolved call answers its state with
+    /// <c>notified</c> null (this request answered nothing: someone else did) and sends nothing again. Journal <c>callAck</c>.
     /// </summary>
     private static async Task<IResult> AckAsync(
         HttpContext context, string id, [FromBody] JsonElement body, NpgsqlDataSource db, CommandDispatcher dispatcher, AgentSocketHub hub, TimeProvider clock)
@@ -87,6 +87,7 @@ public static class CallAdminEndpoints
         var callId = Guid.TryParse(id, out var parsed) ? parsed : throw ApiException.NotFound("call");
         var notify = Api.Read<AdminCallAckRequest>(body).Notify ?? true;
         ServerCommandEnvelope? sent = null;
+        var answered = false;
         AdminCalls.CallRow call;
         await using (var c = await db.OpenConnectionAsync())
         await using (var tx = await c.BeginTransactionAsync())
@@ -95,6 +96,7 @@ public static class CallAdminEndpoints
             call = await AdminCalls.LockAsync(c, tx, staff.ClubId, callId);
             if (call.Status == "open")
             {
+                answered = true;
                 await c.ExecuteAsync(
                     """
                     UPDATE admin_calls SET status = 'acked', acked_at = @now, acked_by_staff_id = @StaffId, acked_by_name = @Name
@@ -123,7 +125,7 @@ public static class CallAdminEndpoints
             await dispatcher.SendAsync(call.PcId, sent);
         }
 
-        return AdminJson.Ok(new AdminCallAckResponse(call.ToWire(), sent is not null));
+        return AdminJson.Ok(new AdminCallAckResponse(call.ToWire(), answered ? sent is not null : null));
     }
 
     /// <summary>«Закрыть»: this call and every older open or acknowledged call of the same PC are resolved. Journal <c>callResolve</c>.</summary>
@@ -176,8 +178,9 @@ public static class CallAdminEndpoints
 /// The admin-call inbox (<c>admin_calls</c>, D-62): one row per call, from the route (<c>direct</c>), from telemetry when the
 /// route was not reached (<c>telemetry</c>) or a «report a problem» text (<c>report</c>, category <c>problem</c>).
 /// <c>UNIQUE(pc_id, at)</c> keeps a call and its telemetry copy as one (the agent sends the same <c>at</c> both ways). A call
-/// from a PC whose call was acknowledged in the last 10 minutes, with none open, is stored acknowledged with
-/// <c>repeat</c>, so the desk does not ring again; with an open call it joins the same group; a telemetry call older than 30
+/// from a PC whose call was acknowledged in the last 10 minutes and is not closed yet, with none open, is stored
+/// acknowledged with <c>repeat</c> and that acknowledgement's time, so the desk does not ring again and pressing again never
+/// stretches the ten minutes; with an open call it joins the same group; a telemetry call older than 30
 /// minutes is stored resolved; at most 5 problem reports per PC per hour are kept.
 /// </summary>
 public static class AdminCalls
@@ -238,10 +241,12 @@ public static class AdminCalls
         else if (!problem && !await c.ExecuteScalarAsync<bool>(
                      "SELECT EXISTS (SELECT 1 FROM admin_calls WHERE pc_id = @Id AND status = 'open' AND category <> 'problem')", new { pc.Id }, tx))
         {
+            // Only a call still answered counts: a closed one («Закрыть») leaves nobody on the way. A repeat carries the
+            // answer it repeats (its acked_at), so pressing again never stretches the ten minutes.
             acked = await c.QuerySingleOrDefaultAsync<(DateTimeOffset, Guid?, string?)?>(
                 """
                 SELECT acked_at, acked_by_staff_id, acked_by_name FROM admin_calls
-                WHERE pc_id = @Id AND category <> 'problem' AND acked_at > @since ORDER BY acked_at DESC LIMIT 1
+                WHERE pc_id = @Id AND category <> 'problem' AND status = 'acked' AND acked_at > @since ORDER BY acked_at DESC LIMIT 1
                 """,
                 new { pc.Id, since = now - RepeatWindow }, tx);
             if (acked is not null)
@@ -262,7 +267,7 @@ public static class AdminCalls
             new
             {
                 callId = Guid.CreateVersion7(now), pc.ClubId, pc.Id, pc.Name, pc.Number, userId, userName, candidate.Category, candidate.Message, candidate.Source,
-                at, now, status, repeat, ackedAt = acked is null ? (DateTimeOffset?)null : now, ackedBy = acked?.StaffId, ackedByName = acked?.Name,
+                at, now, status, repeat, ackedAt = acked?.At, ackedBy = acked?.StaffId, ackedByName = acked?.Name,
                 resolvedAt = status == "resolved" ? now : (DateTimeOffset?)null, resolvedBy = status == "resolved" ? "auto" : null,
             },
             tx)

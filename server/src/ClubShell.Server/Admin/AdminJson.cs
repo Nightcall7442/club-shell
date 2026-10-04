@@ -328,13 +328,20 @@ public sealed record AdminCall(
 
 public sealed record AdminCallAckRequest(bool? Notify);
 
-/// <summary><c>notified</c>: «Администратор идёт к вам» went to the connected PC.</summary>
-public sealed record AdminCallAckResponse(AdminCall Call, bool Notified);
+/// <summary>
+/// <c>notified</c>: «Администратор идёт к вам» went to the connected PC (true) or the PC was not connected (false); null when
+/// this request answered nothing — the call was already answered or closed (on another console), and nothing was sent again.
+/// </summary>
+public sealed record AdminCallAckResponse(AdminCall Call, bool? Notified);
 
 public sealed record AdminCallResponse(AdminCall Call);
 
-/// <summary>One command to many PCs (<c>POST /admin/pcs/commands</c>, D-65).</summary>
-public sealed record AdminBulkCommandRequest(IReadOnlyList<Guid>? PcIds, string? Kind, string? Text, string? Level, bool? IncludeBusy);
+/// <summary>
+/// One command to many PCs (<c>POST /admin/pcs/commands</c>, D-65). <c>sessionIds</c> (with <c>includeBusy</c>): the sessions
+/// the desk's confirm listed — only those are ended; another session open on a selected PC is <c>skipped sessionOpen</c>.
+/// </summary>
+public sealed record AdminBulkCommandRequest(
+    IReadOnlyList<Guid>? PcIds, string? Kind, string? Text, string? Level, bool? IncludeBusy, IReadOnlyList<Guid>? SessionIds);
 
 /// <summary>A session a bulk reboot or shutdown ended first (<c>includeBusy</c>), as the desk's «Завершить» would.</summary>
 public sealed record AdminBulkEnded(Guid SessionId, AdminSessionUser User, Money Charged, Money Refunded);

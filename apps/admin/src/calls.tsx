@@ -7,8 +7,9 @@
  *   its socket shows «Администратор идёт к вам»; an offline one is not told, and the list says so), shows the PC on the
  *   map, or closes the group. Sound, volume and desktop notifications of this console are set there.
  * - {@link CallsRinger}: a short Web Audio beep every 5 s while any call rings (open, not a repeat after «Иду», not a
- *   problem report — those chime once), the tab title flashing «(1) Вызов: ПК 05», an optional desktop notification.
- *   Answered or closed on any console, the ringing stops on the next poll everywhere.
+ *   problem report — those chime once), the tab title flashing «(1) Вызов: ПК 05», an optional desktop notification (a
+ *   click shows the PC on the map). Answered or closed on any console, the ringing stops and the notification closes on
+ *   the next poll everywhere.
  * - A browser plays sound only after a click or a key on the page: the PIN sign-in unlocks it; after a reload with a
  *   remembered sign-in, {@link AudioUnlockChip} says «Звук выключен — включить» until the first click or key.
  *
@@ -21,7 +22,7 @@ import { pcLabel } from '@/clientSearch';
 import { showPc } from '@/desk';
 import { describe } from '@/errors';
 import { t } from '@/i18n';
-import { CALL_CATEGORY_LABEL } from '@/labels';
+import { CALL_CATEGORY_LABEL, guestDisplayName } from '@/labels';
 import { Toggle } from '@/ui';
 
 const RING_EVERY_MS = 5000;
@@ -95,14 +96,21 @@ function apply(to: 'acked' | 'resolved', call: Call): void {
   });
 }
 
-/** «Иду»: the newest open call of the group, with the message to the PC. */
-export async function ackCall(call: Call): Promise<boolean> {
+/**
+ * «Иду»: the newest open call of the group, with the message to the PC. `notified` null — someone answered first (another
+ * console, a stale list): nothing went to the PC from here, and the group says who is on the way instead.
+ */
+export async function ackCall(call: Call): Promise<boolean | null> {
   const r = await adminApi.callAck(call.id, true);
-  moves.set(call.pcId, { to: 'acked', call: r.call, until: Date.now() + STALE_POLL_MS });
-  apply('acked', r.call);
-  answers.set(call.pcId, r.notified);
+  // Closed meanwhile on another console: the whole group goes.
+  const to = r.call.status === 'resolved' ? 'resolved' : 'acked';
+  moves.set(call.pcId, { to, call: r.call, until: Date.now() + STALE_POLL_MS });
+  apply(to, r.call);
+  const notified = r.notified ?? null;
+  if (notified === null) answers.delete(call.pcId);
+  else answers.set(call.pcId, notified);
   emit();
-  return r.notified;
+  return notified;
 }
 
 /** «Закрыть»: the newest call of the group, and so the whole group. */
@@ -143,6 +151,8 @@ export function groupCalls(calls: readonly Call[]): CallGroup[] {
     .map((list) => {
       const sorted = [...list].sort((a, b) => b.at.localeCompare(a.at));
       const newest = sorted[0] as Call;
+      // The server's «Гость 5» is said in the console's language, as everywhere else.
+      const player = sorted.find((c) => c.user)?.user?.displayName;
       return {
         pcId: newest.pcId,
         pcName: newest.pcName,
@@ -152,7 +162,7 @@ export function groupCalls(calls: readonly Call[]): CallGroup[] {
         open: sorted.find((c) => c.status === 'open') ?? null,
         ringing: sorted.some(ringsNow),
         repeat: sorted.some((c) => c.repeat),
-        player: sorted.find((c) => c.user)?.user?.displayName ?? null,
+        player: player ? guestDisplayName(player) : null,
         since: (sorted.at(-1) as Call).at,
       };
     })
@@ -304,6 +314,9 @@ function notificationsAllowed(): boolean {
   return typeof Notification !== 'undefined' && Notification.permission === 'granted';
 }
 
+/** The desktop notifications this console raised and has not closed yet, by call. */
+const desktop = new Map<string, Notification>();
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Ringer (mounted once in the console)
 // ---------------------------------------------------------------------------------------------------------------------
@@ -355,17 +368,34 @@ export function CallsRinger(): null {
     if (settings.notify && notificationsAllowed()) {
       for (const c of fresh.filter(ringsNow)) {
         try {
-          new Notification(t('Вызов: {pc}', { pc: pcLabel(c.pcName) }), {
+          const n = new Notification(t('Вызов: {pc}', { pc: pcLabel(c.pcName) }), {
             body: [t(CALL_CATEGORY_LABEL[c.category] ?? c.category), c.message].filter(Boolean).join(' · '),
             tag: c.id,
             requireInteraction: true,
           });
+          // A click brings the console up on the map with that PC.
+          n.onclick = () => {
+            window.focus();
+            window.location.hash = '/map';
+            showPc(c.pcId);
+            n.close();
+          };
+          desktop.set(c.id, n);
         } catch {
           // notifications blocked by the system
         }
       }
     }
   }, [calls, settings.muted, settings.notify, settings.volume]);
+
+  // Answered or closed on any console (or signed out): its desktop notification goes too.
+  useEffect(() => {
+    for (const [id, n] of desktop) {
+      if (calls?.some((c) => c.id === id && c.status === 'open')) continue;
+      n.close();
+      desktop.delete(id);
+    }
+  }, [calls]);
 
   return null;
 }
@@ -378,14 +408,37 @@ export function CallsRinger(): null {
 export function AudioUnlockChip(): JSX.Element | null {
   const state = useAudioState();
   if (state !== 'locked') return null;
+  const label = t('Звук выключен — включить');
+  // Below 2xl (a 1366 screen) the crossed-out speaker alone, the words in its name and tooltip: the full words would
+  // push the top bar off the screen.
   return (
     <button
       type="button"
       onClick={unlockAudio}
-      className="focus-ring h-8 shrink-0 whitespace-nowrap rounded-md border border-warning/50 px-2.5 text-xs font-semibold text-warning hover:bg-warning/10"
+      aria-label={label}
+      title={label}
+      className="focus-ring flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-warning/50 px-2 text-xs font-semibold text-warning hover:bg-warning/10 2xl:px-2.5"
     >
-      {t('Звук выключен — включить')}
+      <SpeakerOffIcon />
+      <span className="hidden 2xl:inline">{label}</span>
     </button>
+  );
+}
+
+function SpeakerOffIcon(): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      className="h-4 w-4 shrink-0"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M11 5 6 9H2v6h4l5 4V5zM23 9l-6 6M17 9l6 6" />
+    </svg>
   );
 }
 
@@ -512,8 +565,16 @@ export function CallsBell(): JSX.Element | null {
   const [open, setOpen] = useState(false);
   const [nowMs, setNowMs] = useState(Date.now());
   const box = useRef<HTMLDivElement>(null);
+  const bell = useRef<HTMLButtonElement>(null);
   const groups = useMemo(() => groupCalls(calls ?? []), [calls]);
   const ringing = groups.some((g) => g.ringing);
+  /** Esc closes the list and stays here: the page behind (the map's selection, the bar's search) never sees it. */
+  const onEscape = (e: React.KeyboardEvent): void => {
+    if (e.key !== 'Escape' || !open) return;
+    e.stopPropagation();
+    setOpen(false);
+    bell.current?.focus();
+  };
   useEffect(() => {
     if (!open) return undefined;
     const close = (e: MouseEvent): void => {
@@ -534,6 +595,7 @@ export function CallsBell(): JSX.Element | null {
   return (
     <div ref={box} className="relative">
       <button
+        ref={bell}
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -543,6 +605,7 @@ export function CallsBell(): JSX.Element | null {
           setNowMs(Date.now());
           setOpen((v) => !v);
         }}
+        onKeyDown={onEscape}
         className={clsx(
           'focus-ring flex h-8 items-center gap-1.5 whitespace-nowrap rounded-md border px-2.5 text-sm font-semibold',
           ringing
@@ -551,7 +614,8 @@ export function CallsBell(): JSX.Element | null {
         )}
       >
         <BellIcon />
-        <span className="hidden xl:inline">{t('Вызовы')}</span>
+        {/* The word only on a wide screen: at 1366 the top bar has no room for it (the name stays in aria-label). */}
+        <span className="hidden 2xl:inline">{t('Вызовы')}</span>
         <span className="tnum">{groups.length}</span>
       </button>
       {open && (
@@ -559,9 +623,7 @@ export function CallsBell(): JSX.Element | null {
           role="dialog"
           aria-label={t('Вызовы игроков')}
           className="panel absolute right-0 top-10 z-40 flex w-[min(30rem,calc(100vw-2rem))] flex-col gap-3 p-3 shadow-2xl shadow-black/60"
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') setOpen(false);
-          }}
+          onKeyDown={onEscape}
         >
           <ul
             aria-label={t('Вызовы игроков')}

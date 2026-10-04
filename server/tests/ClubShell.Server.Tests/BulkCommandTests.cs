@@ -73,9 +73,18 @@ public sealed class BulkCommandTests(ShortAckServerFixture server) : LedgerCheck
         Assert.Equal(("skipped", "sessionOpen"), (skipped.GetProperty("outcome").GetString(), skipped.GetProperty("skipped").GetString()));
         Assert.Equal($"active {busy.PcId}", await Seats.StateAsync(Server, id));
 
+        // The desk's confirm did not list this session (the player sat down after it opened): it is not ended unseen.
+        var unseen = (await RawExpectAsync(Server, 200, HttpMethod.Post, "/pcs/commands", owner,
+                new { pcIds = new[] { busy.PcId }, kind = "reboot", includeBusy = true, sessionIds = new[] { Guid.NewGuid() } }, Guid.NewGuid()))
+            .GetProperty("results")[0];
+        Assert.Equal(("skipped", "sessionOpen", JsonValueKind.Null), (unseen.GetProperty("outcome").GetString(), unseen.GetProperty("skipped").GetString(),
+            unseen.GetProperty("ended").ValueKind));
+        Assert.Equal($"active {busy.PcId}", await Seats.StateAsync(Server, id));
+
         Server.Clock.Advance(TimeSpan.FromMinutes(5));
         await Seats.BeatAsync(busy, id);
-        var result =(await RawExpectAsync(Server, 200, HttpMethod.Post, "/pcs/commands", owner, new { pcIds = new[] { busy.PcId }, kind = "shutdown", includeBusy = true }, Guid.NewGuid()))
+        var result = (await RawExpectAsync(Server, 200, HttpMethod.Post, "/pcs/commands", owner,
+                new { pcIds = new[] { busy.PcId }, kind = "shutdown", includeBusy = true, sessionIds = new[] { id } }, Guid.NewGuid()))
             .GetProperty("results")[0];
         Assert.Equal("queued", result.GetProperty("outcome").GetString());
         var ended = result.GetProperty("ended");
@@ -171,6 +180,7 @@ public sealed class BulkCommandTests(ShortAckServerFixture server) : LedgerCheck
             (new { pcIds = new[] { id }, kind = "message", text = new string('t', 501) }, "text", "max"),
             (new { pcIds = new[] { id }, kind = "message", text = "Привет", level = "loud" }, "level", "enum"),
             (new { pcIds = new[] { id }, kind = "lock", includeBusy = true }, "includeBusy", "kind"),
+            (new { pcIds = new[] { id }, kind = "reboot", sessionIds = new[] { Guid.NewGuid() } }, "sessionIds", "includeBusy"),
         })
         {
             Assert.Equal((field, reason), Bar.Details(await RawExpectAsync(Server, 400, HttpMethod.Post, "/pcs/commands", owner, body, Guid.NewGuid())));

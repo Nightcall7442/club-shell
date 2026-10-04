@@ -1851,18 +1851,22 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
   строку. Телеметрия (`IngestTelemetryAsync`): `callAdmin` с правильной категорией, `at`, `pcId` этого ПК и сообщением до
   500 символов, и `shellClientError` с «[user report] » (категория `problem`, текст обрезается до 500, не больше 5 на ПК в
   час) — каждое под своей точкой сохранения, плохое пропускается с записью в лог, метрики пачки сохраняются; вызов из
-  телеметрии старше 30 минут сохраняется закрытым. Повтор после «Иду» (за 10 минут, открытых нет) сохраняется `acked` с
-  `repeat` и не звонит; при открытом вызове — открытым в ту же группу. `overview.calls` — открытые и принятые за 12 ч.
-  `POST /admin/calls/{id}/ack {notify?}` принимает этот и более ранние открытые вызовы ПК и, если ПК на связи, ставит
-  `message` «Администратор идёт к вам» (`requiresAck:false`, живёт 2 минуты, язык игрока); `{call, notified}`.
-  `POST /admin/calls/{id}/resolve` закрывает этот и более ранние. Журнал `callAck`, `callResolve`.
+  телеметрии старше 30 минут сохраняется закрытым. Повтор после «Иду» (за 10 минут после ответа, который ещё не закрыт;
+  открытых нет) сохраняется `acked` с `repeat` и временем того ответа (повторы не продлевают 10 минут) и не звонит; после
+  «Закрыть» новый вызов звонит; отчёты о проблеме в этом правиле не участвуют. При открытом вызове — открытым в ту же
+  группу. `overview.calls` — открытые и принятые за 12 ч. `POST /admin/calls/{id}/ack {notify?}` принимает этот и более
+  ранние открытые вызовы ПК и, если ПК на связи, ставит `message` «Администратор идёт к вам» (`requiresAck:false`, живёт 2
+  минуты, язык игрока); `{call, notified}`: `false` — ПК не на связи, `null` — вызов уже был принят или закрыт (другой
+  кассой), ничего не отправлено. `POST /admin/calls/{id}/resolve` закрывает этот и более ранние. Журнал `callAck`,
+  `callResolve`.
 - **Массовые команды** (D-65): `POST /admin/pcs/commands {pcIds ≤100, kind: message|lock|unlock|reboot|shutdown, text?,
-  level?, includeBusy?}` (ключ обязателен, строгий): одна транзакция, точка сохранения на каждый ПК, ответ `{batchId,
-  results[{pcId, pcName, outcome: done|queued|noAnswer|failed|skipped, skipped: sessionOpen|offline|notFound|null, ack,
-  ended}]}`. Офлайн-ПК пропускаются для `lock`, `reboot`, `shutdown`; занятый ПК для `reboot`/`shutdown` — без
+  level?, includeBusy?, sessionIds?}` (ключ обязателен, строгий): одна транзакция, точка сохранения на каждый ПК, ответ
+  `{batchId, results[{pcId, pcName, outcome: done|queued|noAnswer|failed|skipped, skipped: sessionOpen|offline|notFound|null,
+  ack, ended}]}`. Офлайн-ПК пропускаются для `lock`, `reboot`, `shutdown`; занятый ПК для `reboot`/`shutdown` — без
   `includeBusy`; с ним сеанс сначала завершается как «Завершить» (журнал, возврат, вывод гостя, `endSession` перед командой
-  питания). Каждому ПК — запись `pcCommand` (`meta {kind, batchId}`). Повтор ключа отдаёт сохранённые результаты до ack
-  (отправленные — `queued`).
+  питания). `sessionIds` (только с `includeBusy`, ≤100) — сеансы, которые показало подтверждение кассы: завершаются только
+  они, другой сеанс на выбранном ПК (игрок сел после подтверждения) — `skipped sessionOpen`. Каждому ПК — запись
+  `pcCommand` (`meta {kind, batchId}`). Повтор ключа отдаёт сохранённые результаты до ack (отправленные — `queued`).
 
 ### 11.1 Все 75 required-операций + WS → срезы
 
@@ -2019,10 +2023,10 @@ anticheat/report — S3; `PATCH /admin/games/{id}` (реализуется) и `
 | D-59 | Пересадка — `POST /admin/sessions/move {fromPcId (обязателен), sessionId?, toPcId, tariffId?}`: блокировки обоих ПК по возрастанию id, перенаправление `sessions.pc_id`, без строк леджера, часы идут; `locked` → `active`, `paused` возобновляется (`402` для постоплаты без средств), `ending` — `409`; цель — живая, на связи, не на обслуживании, свободная, без неизвестного серверу сеанса агента (`409 targetHasLocalSession`) |
 | D-60 | Тариф при пересадке: предоплата оставляет свой, если он действует в зоне цели, иначе нужен почасовой тариф зоны (`409 tariffZone {zone}` без него, `403 tariffZone` с неподходящим) — только для будущих продлений, без пересчёта и возврата; постоплата — всегда своя замороженная цена (`400 tariffId postpaid`) |
 | D-61 | Старый ПК после пересадки: push «вида завершения» и `userRevoked seatMoved`; его `/end` — `409 sessionNotActive` с этим видом, его `/events` — `204` и только запись (`applied=false`); `/pause`, `/resume`, `/extend` — `401 userToken` (токен удалён); «Гость» на новом ПК входит в пересаженный сеанс временного гостя; завершение кассой перепроверяет ПК (`409 sessionMoved`) |
-| D-62 | `callAdmin` реализован (`201 {ticketId, createdAt, queuePosition}`, единственный 4xx — `403 pcMismatch`), `admin_calls UNIQUE(pc_id, at)` сводит вызов и его копию из телеметрии; копии из телеметрии и «[user report]» — с проверкой и под точкой сохранения; вызов из телеметрии старше 30 мин — закрыт; повтор за 10 мин после «Иду» — `acked` с `repeat`; отчётов о проблеме — не больше 5 на ПК в час; `features.callAdmin` — выбор владельца, по умолчанию включён; M0009 один раз включает сохранённый `false`. Заменяет D-13 и отвечает на Q-6 |
-| D-63 | Окно вызовов: `overview.calls` — открытые и принятые за 12 ч; «Иду» (`ack`) принимает этот и более ранние открытые вызовы ПК и шлёт подключённому ПК `message` «Администратор идёт к вам» на 2 минуты (иначе `notified=false`); «Закрыть» (`resolve`); без ответа 12 ч — закрывает обслуживание, через 30 д — удаляет |
+| D-62 | `callAdmin` реализован (`201 {ticketId, createdAt, queuePosition}`, единственный 4xx — `403 pcMismatch`), `admin_calls UNIQUE(pc_id, at)` сводит вызов и его копию из телеметрии; копии из телеметрии и «[user report]» — с проверкой и под точкой сохранения; вызов из телеметрии старше 30 мин — закрыт; повтор за 10 мин после «Иду», пока вызов не закрыт, — `acked` с `repeat` и временем того «Иду» (повторы окно не продлевают); отчётов о проблеме — не больше 5 на ПК в час; `features.callAdmin` — выбор владельца, по умолчанию включён; M0009 один раз включает сохранённый `false`. Заменяет D-13 и отвечает на Q-6 |
+| D-63 | Окно вызовов: `overview.calls` — открытые и принятые за 12 ч; «Иду» (`ack`) принимает этот и более ранние открытые вызовы ПК и шлёт подключённому ПК `message` «Администратор идёт к вам» на 2 минуты (иначе `notified=false`; уже принятый или закрытый вызов — `notified=null`, ничего не отправлено); «Закрыть» (`resolve`); без ответа 12 ч — закрывает обслуживание, через 30 д — удаляет |
 | D-64 | Звук в кассе — Web Audio каждые 5 с, пока есть открытый не повторный вызов; разблокировка кликом входа по PIN; громкость и «без звука» — на консоль (сервер не участвует) |
-| D-65 | Массовые команды — `POST /admin/pcs/commands` (ключ обязателен, строго): точка сохранения на ПК, свой результат каждому; офлайн пропускается для `lock`/`reboot`/`shutdown`; занятый — для `reboot`/`shutdown` без `includeBusy`, с ним сеанс сначала завершается как «Завершить»; запись `pcCommand {kind, batchId}`; повтор ключа — сохранённые результаты до ack |
+| D-65 | Массовые команды — `POST /admin/pcs/commands` (ключ обязателен, строго): точка сохранения на ПК, свой результат каждому; офлайн пропускается для `lock`/`reboot`/`shutdown`; занятый — для `reboot`/`shutdown` без `includeBusy`, с ним сеанс сначала завершается как «Завершить» (с `sessionIds` — только сеансы, показанные в подтверждении); запись `pcCommand {kind, batchId}`; повтор ключа — сохранённые результаты до ack |
 | D-66 | Выбор на карте (Ctrl/Shift/«Выбрать»), панель «Выбрано N», подтверждения со списком игроков — касса (сервер не участвует) |
 | D-67 | Раздел «Бар» кассы: сетка товаров, корзина, покупатель «Гость/Клиент», PayBox на продажу, снимок корзины на время неизвестного ответа — касса (сервер не участвует) |
 | D-68 | Новые действия журнала `shopSale`, `shopVoid`, `sessionMove`, `callAck`, `callResolve`, `stockCreate`, `stockArchive` — вне `AdminAuditAction`, пока контракт их не перечислит (`adminControl` их не показывает); новые виды ленты `shopSale`, `shopVoid`, `sessionMove`; массовое завершение пишет обычный `sessionEnd` |
@@ -2077,7 +2081,9 @@ anticheat/report — S3; `PATCH /admin/games/{id}` (реализуется) и `
     - операции `POST /admin/shop/sales`, `POST /admin/shop/sales/{id}/void`, `POST /admin/sessions/move`,
       `POST /admin/pcs/commands` (`Idempotency-Key` обязателен, строгая проверка тела), `POST /admin/products`,
       `DELETE /admin/products/{id}`, `POST /admin/calls/{id}/ack`, `POST /admin/calls/{id}/resolve`;
-    - поле `expectedStockQty` в `adminUpdateProduct` и `409 conflict stockChanged {stockQty}`;
+    - поле `expectedStockQty` в `adminUpdateProduct` и `409 conflict stockChanged {stockQty}`; поле `sessionIds` в
+      `POST /admin/pcs/commands` (с `includeBusy`; причина `400 sessionIds includeBusy`); `notified: null` в ответе
+      `POST /admin/calls/{id}/ack` (вызов уже был принят или закрыт);
     - причины: `409 saleExists {sale}`, `outOfStock {productId, available}`, `notSellable {productId}`, `priceChanged
       {total, prices}` у продажи; `alreadyVoided`, `saleShiftClosed`, `403 forbidden voidWindow {minutes}` у аннулирования;
       `pcBusy {pcId}`, `targetOffline`, `targetHasLocalSession`, `sessionEnding`, `sessionMoved`, `tariffZone {zone}` у
