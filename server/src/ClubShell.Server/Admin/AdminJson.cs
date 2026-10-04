@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ClubShell.Contracts.Commands;
 using ClubShell.Contracts.Pcs;
 using ClubShell.Contracts.Sessions;
 using ClubShell.Contracts.Wallet;
@@ -30,14 +31,23 @@ public sealed record AdminStaffMember(string Id, string Name, string Role, bool 
 /// <summary>
 /// X/Z report; beyond the contract: <c>topUpByMethod</c> splits the top-ups by payment method, <c>cashIn</c>/<c>cashOut</c>
 /// are the drawer's movements (<c>cash_movements</c>), <c>payouts</c> the cash given back to guests, <c>apiCash</c> the cash
-/// top-ups the club API key posted (never in the drawer). A Z saved before those fields reads them as 0.
+/// top-ups the club API key posted (never in the drawer); cash desk part 3 (D-57): <c>shop</c> is the bar net of voids,
+/// <c>shopByMethod</c> splits it (the balance part may be negative in a shift that voids an earlier shift's sale),
+/// <c>shopVoids</c>/<c>shopVoidCount</c> the voids made in the shift. A Z saved before those fields reads them as 0.
 /// </summary>
 public sealed record AdminShiftTotals(
     long TopUpCash, long TopUpOther, long Sessions, long Shop, long Refunds, long Bonuses, int Count, AdminTopUpByMethod TopUpByMethod,
-    long CashIn = 0, long CashOut = 0, long Payouts = 0, long ApiCash = 0);
+    long CashIn = 0, long CashOut = 0, long Payouts = 0, long ApiCash = 0, AdminShopByMethod? ShopByMethod = null, long ShopVoids = 0,
+    int ShopVoidCount = 0);
 
 /// <summary>Top-ups of a shift by <c>ledger_entries.method</c>; <c>other</c> — rows with no method.</summary>
 public sealed record AdminTopUpByMethod(long Cash, long Card, long Payme, long Click, long Uzum, long Other);
+
+/// <summary>Bar sales of a shift by how they were paid, net of the voids made in it (D-57), in tiyin.</summary>
+public sealed record AdminShopByMethod(long Cash, long Card, long Payme, long Click, long Uzum, long Balance);
+
+/// <summary>Bar money taken today by method, net of today's voids (<c>AdminToday.shopByMethod</c>, D-57).</summary>
+public sealed record AdminTodayShopByMethod(long Cash, long Card, long Payme, long Click, long Uzum);
 
 /// <summary><c>expectedCash</c> (the drawer the close expected; null while open) and <c>closedBy</c> are beyond the contract.</summary>
 public sealed record AdminShift(
@@ -66,9 +76,11 @@ public sealed record AdminSeat(Pc Pc, Session? Session, AdminSeatUser? User, boo
 
 public sealed record AdminOccupancy(int Free, int Total);
 
+/// <summary><c>calls</c> (beyond the contract, D-63): the admin calls open or acknowledged in the last 12 h, newest first.</summary>
 public sealed record AdminOverview(
     DateTimeOffset At, AdminOccupancy Club, IReadOnlyList<AdminSeat> Seats, IReadOnlyList<Tariff> Tariffs, IReadOnlyList<AdminMember> Users,
-    IReadOnlyList<AdminZone> Zones, IReadOnlyList<object> Repairs, IReadOnlyList<AdminGuestDebt> GuestDebts, IReadOnlyList<AdminGuestRefund> GuestRefunds);
+    IReadOnlyList<AdminZone> Zones, IReadOnlyList<object> Repairs, IReadOnlyList<AdminGuestDebt> GuestDebts, IReadOnlyList<AdminGuestRefund> GuestRefunds,
+    IReadOnlyList<AdminCall>? Calls = null);
 
 /// <summary>
 /// An unpaid postpaid bill (beyond the contract): a guest's (<c>limits.guestPostpaid</c>) or a member's
@@ -132,16 +144,26 @@ public sealed record AdminOperationPaid(long Amount, string Method, Guid? Transa
 
 /// <summary>
 /// One desk operation of the feed (beyond the contract, D-43): a journal entry with the payment merged in. Amounts in
-/// tiyin; <c>drawer</c> — its signed effect on the cash drawer.
+/// tiyin; <c>drawer</c> — its signed effect on the cash drawer. Cash desk part 3 (D-68): a bar sale (<c>shopSale</c>) and
+/// its void (<c>shopVoid</c>) carry <c>saleId</c>, <c>method</c>, <c>lines</c>, <c>voided</c> (a sale) and <c>voidOfAt</c> (a
+/// void: when the sale was made); a move (<c>sessionMove</c>) carries <c>fromPc</c>.
 /// </summary>
 public sealed record AdminOperation(
     Guid Id, DateTimeOffset At, string Kind, string StaffName, AdminOperationClient? Client, AdminOperationPc? Pc, string? Tariff, int? Minutes,
     bool? Prepaid, long Amount, long? Charged, AdminOperationQuote? Quote, AdminOperationPaid? Paid, long Drawer, string? ReasonCode, string? Note,
-    Guid? SessionId, bool? Package = null, Guid? MovementId = null);
+    Guid? SessionId, bool? Package = null, Guid? MovementId = null, Guid? SaleId = null, string? Method = null,
+    IReadOnlyList<AdminOperationLine>? Lines = null, bool? Voided = null, DateTimeOffset? VoidOfAt = null, AdminOperationPc? FromPc = null);
 
-/// <summary>«Сегодня» of the feed: the club's local day so far, by method, in tiyin.</summary>
+/// <summary>A line of a bar sale as the feed and its receipt show it.</summary>
+public sealed record AdminOperationLine(string Title, int Qty, long Price);
+
+/// <summary>
+/// «Сегодня» of the feed: the club's local day so far, by method, in tiyin. <c>shopByMethod</c> (D-57): the bar's method
+/// money net of voids; <c>taken</c> counts it with the top-ups, <c>byMethod</c> stays top-ups only, <c>shop</c> is all goods.
+/// </summary>
 public sealed record AdminToday(
-    string Date, DateTimeOffset From, AdminTopUpByMethod ByMethod, long Taken, long Payouts, long Sessions, long Shop);
+    string Date, DateTimeOffset From, AdminTopUpByMethod ByMethod, long Taken, long Payouts, long Sessions, long Shop,
+    AdminTodayShopByMethod? ShopByMethod = null);
 
 public sealed record AdminOperationsPage(AdminOperationsShift? Shift, IReadOnlyList<AdminOperation> Items, string? Next, AdminToday Today);
 
@@ -248,6 +270,79 @@ public sealed record AdminTariffInput(
     string? Name, long? PricePerHour, int? MinMinutes, int? MaxMinutes, IReadOnlyList<string>? Zones, JsonElement? TimeWindows, bool? IsPackage,
     int? PackageMinutes, long? PackagePrice);
 
-public sealed record AdminProductUpdateRequest(string? Title, long? Price, bool? InStock, int? StockQty);
+/// <summary><c>expectedStockQty</c> (beyond the contract, D-54): the quantity the panel showed; checked only with <c>stockQty</c>.</summary>
+public sealed record AdminProductUpdateRequest(string? Title, long? Price, bool? InStock, int? StockQty, int? ExpectedStockQty = null);
 
 public sealed record AdminProductReceiveRequest(int? Qty);
+
+// Cash desk part 3 (D-52..D-70), all beyond the contract.
+
+/// <summary>A product the owner adds at the desk (<c>POST /admin/products</c>, D-58).</summary>
+public sealed record AdminProductCreateRequest(string? Title, string? Category, long? Price, int? StockQty, bool? InStock);
+
+public sealed record AdminShopSaleItem(Guid? ProductId, int? Qty);
+
+/// <summary>A bar sale (<c>POST /admin/shop/sales</c>, D-52): <c>payment</c> — paid by a method; without it — from <c>userId</c>'s balance.</summary>
+public sealed record AdminShopSaleRequest(Guid? SaleId, IReadOnlyList<AdminShopSaleItem?>? Items, long? Total, Guid? UserId, Guid? PcId, AdminPayment? Payment);
+
+public sealed record AdminShopVoidRequest(string? ReasonCode, string? Note);
+
+/// <summary>A line of a bar sale: <c>price</c> per unit at the sale, <c>amount</c> = qty × price; tiyin.</summary>
+public sealed record AdminSaleLine(Guid ProductId, string Title, int Qty, long Price, long Amount);
+
+/// <summary>
+/// A bar sale: <c>method</c> <c>cash | card | payme | click | uzum | balance</c>, <c>total</c> in tiyin, <c>user</c> the buyer
+/// named (a member or a guest; null — a walk-in), <c>pc</c> the PC it was brought to.
+/// </summary>
+public sealed record AdminSale(
+    Guid Id, DateTimeOffset At, Guid ShiftId, string Method, long Total, string StaffName, AdminSessionUser? User, AdminOperationPc? Pc,
+    IReadOnlyList<AdminSaleLine> Lines);
+
+/// <summary><c>balance</c>: after a balance sale, else null; <c>products</c>: each line's product after the sale.</summary>
+public sealed record AdminSaleResponse(AdminSale Sale, Money? Balance, IReadOnlyList<Contracts.Shop.Product> Products, long ExpectedCash);
+
+public sealed record AdminSaleVoid(
+    Guid Id, DateTimeOffset At, Guid SaleId, DateTimeOffset SaleAt, string Method, long Total, string ReasonCode, string? Note, string StaffName);
+
+/// <summary><c>balance</c>: after a balance void, else null; <c>products</c>: the sale's products after the restock.</summary>
+public sealed record AdminSaleVoidResponse(AdminSaleVoid Void, Money? Balance, IReadOnlyList<Contracts.Shop.Product> Products, long ExpectedCash);
+
+/// <summary>A session moved to another PC (<c>POST /admin/sessions/move</c>, D-59).</summary>
+public sealed record AdminMoveRequest(Guid? FromPcId, Guid? SessionId, Guid? ToPcId, Guid? TariffId);
+
+public sealed record AdminMovePc(Guid PcId, string Name);
+
+/// <summary><c>signedIn</c> is always false: the player signs in on the target PC («ждёт входа»).</summary>
+public sealed record AdminMoveResponse(Session Session, AdminMovePc From, AdminMovePc To, bool TariffChanged, AdminSessionUser User, bool SignedIn);
+
+public sealed record AdminCallUser(Guid Id, string DisplayName);
+
+/// <summary>
+/// An admin call of the desk inbox (D-62, D-63): <c>category</c> <c>help | technical | order | other | problem</c> (a «report
+/// a problem» text), <c>source</c> <c>direct | telemetry | report</c>, <c>at</c> — when the server received it, <c>repeat</c> — a
+/// press shortly after «Иду», stored acknowledged (it does not ring again).
+/// </summary>
+public sealed record AdminCall(
+    Guid Id, Guid PcId, string PcName, int PcNumber, AdminCallUser? User, string Category, string? Message, string Source, DateTimeOffset At,
+    string Status, bool Repeat, string? AckedBy, DateTimeOffset? AckedAt);
+
+public sealed record AdminCallAckRequest(bool? Notify);
+
+/// <summary><c>notified</c>: «Администратор идёт к вам» went to the connected PC.</summary>
+public sealed record AdminCallAckResponse(AdminCall Call, bool Notified);
+
+public sealed record AdminCallResponse(AdminCall Call);
+
+/// <summary>One command to many PCs (<c>POST /admin/pcs/commands</c>, D-65).</summary>
+public sealed record AdminBulkCommandRequest(IReadOnlyList<Guid>? PcIds, string? Kind, string? Text, string? Level, bool? IncludeBusy);
+
+/// <summary>A session a bulk reboot or shutdown ended first (<c>includeBusy</c>), as the desk's «Завершить» would.</summary>
+public sealed record AdminBulkEnded(Guid SessionId, AdminSessionUser User, Money Charged, Money Refunded);
+
+/// <summary>
+/// <c>outcome</c> <c>done | queued | noAnswer | failed | skipped</c>; <c>skipped</c> <c>sessionOpen | offline | notFound</c>
+/// when not sent; <c>ack</c> the PC's answer (a failure carries the refusal).
+/// </summary>
+public sealed record AdminBulkCommandResult(Guid PcId, string? PcName, string Outcome, string? Skipped, CommandAck? Ack, AdminBulkEnded? Ended);
+
+public sealed record AdminBulkCommandResponse(Guid BatchId, IReadOnlyList<AdminBulkCommandResult> Results);

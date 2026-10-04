@@ -23,12 +23,14 @@ public sealed class ConfigTests(ServerFixture server) : IClassFixture<ServerFixt
         Assert.Equal("\"c1\"", response.Headers.ETag!.ToString());
 
         var features = config.GetProperty("shell").GetProperty("features");
-        foreach (var feature in new[] { "shop", "chat", "booking", "tournaments", "topup", "apps", "callAdmin" })
+        foreach (var feature in new[] { "shop", "chat", "booking", "tournaments", "topup", "apps" })
         {
             Assert.False(features.GetProperty(feature).GetBoolean(), feature);
         }
 
+        // Cash desk part 3 (D-62): the call-admin route and the desk's inbox exist, so the owner's switch decides, on by default.
         Assert.True(features.GetProperty("profile").GetBoolean());
+        Assert.True(features.GetProperty("callAdmin").GetBoolean());
         Assert.False(config.GetProperty("games").GetProperty("accountPool").GetProperty("enabled").GetBoolean());
         Assert.False(config.GetProperty("games").GetProperty("cloudSave").GetProperty("enabled").GetBoolean());
         Assert.False(config.GetProperty("updates").GetProperty("enabled").GetBoolean());
@@ -62,6 +64,14 @@ public sealed class ConfigTests(ServerFixture server) : IClassFixture<ServerFixt
         Assert.Equal(200, (int)fresh.StatusCode);
         Assert.Equal("\"c2\"", fresh.Headers.ETag!.ToString());
     }
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("""{"features":{"shop":true}}""", true)]
+    [InlineData("""{"features":{"callAdmin":true}}""", true)]
+    [InlineData("""{"features":{"callAdmin":false}}""", false)]
+    public void Served_callAdmin_follows_the_owner_setting_default_true(string? settings, bool callAdmin) =>
+        Assert.Equal(callAdmin, Agents.AgentConfig.FeaturesOf(settings).GetProperty("callAdmin").GetBoolean());
 
     [Fact]
     public async Task Policies_carry_the_seed_with_an_etag_and_a_reseed_bumps_the_version()
@@ -97,5 +107,38 @@ public sealed class ConfigTests(ServerFixture server) : IClassFixture<ServerFixt
         Assert.Equal(version + 1, next.GetProperty("version").GetInt32());
         Assert.Equal(600, next.GetProperty("kiosk").GetProperty("idleTimeoutSec").GetInt32());
         Assert.Equal($"\"p{version + 1}\"", reseeded.Headers.ETag!.ToString());
+    }
+}
+
+/// <summary>
+/// «Позвать администратора» follows the owner's switch (cash desk part 3, D-62): on by default — in the served config and in
+/// the console's default <c>features</c> — and off once the owner saves it off (a new config version reaches the PCs).
+/// </summary>
+public sealed class CallAdminConfigTests(ServerFixture server) : IClassFixture<ServerFixture>
+{
+    [Fact]
+    public async Task Served_callAdmin_follows_the_owner_switch()
+    {
+        var owner = await Staff.LoginAsync(server, Staff.OwnerPin);
+        var agent = await TestAgent.CreateAsync(server);
+        Assert.True((await Staff.ExpectAsync(server, 200, HttpMethod.Get, "/club", owner)).GetProperty("features").GetProperty("callAdmin").GetBoolean());
+        Assert.True(await CallAdminAsync(agent));
+
+        object Features(bool callAdmin) => new
+        {
+            features = new { shop = false, chat = false, booking = false, tournaments = false, profile = true, topup = false, apps = false, callAdmin, gpuPanel = false },
+        };
+        var version = await Players.ScalarAsync<int>(server, "SELECT config_version FROM clubs");
+        await Staff.ExpectAsync(server, 200, HttpMethod.Patch, "/club", owner, Features(false));
+        Assert.False(await CallAdminAsync(agent));
+        Assert.Equal(version + 1, await Players.ScalarAsync<int>(server, "SELECT config_version FROM clubs"));
+        await Staff.ExpectAsync(server, 200, HttpMethod.Patch, "/club", owner, Features(true));
+        Assert.True(await CallAdminAsync(agent));
+    }
+
+    private static async Task<bool> CallAdminAsync(TestAgent agent)
+    {
+        using var response = await agent.SendAsync(HttpMethod.Get, agent.Path("config"));
+        return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("shell").GetProperty("features").GetProperty("callAdmin").GetBoolean();
     }
 }

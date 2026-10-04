@@ -21,7 +21,8 @@ public sealed class MaintenanceOptions
 /// <summary>
 /// Housekeeping (DESIGN §8), every 10 minutes under <c>pg_advisory_lock(CSMant)</c>: expired idempotency keys, old
 /// metrics and telemetry events, expired or revoked tokens (agent refresh, player, staff, QR), finished webhook
-/// deliveries and old automation firings; once a day the ledger check — every wallet's cached balance against the sum of
+/// deliveries and old automation firings, admin calls left open for 12 h (resolved by «auto») and older than the telemetry
+/// retention (deleted); once a day the ledger check — every wallet's cached balance against the sum of
 /// its ledger rows (§4.3), an error in the log for each mismatch (the balance is never "fixed": corrections are
 /// <c>adjustment</c> rows). Tests call <see cref="RunOnceAsync"/>.
 /// </summary>
@@ -47,10 +48,15 @@ public sealed class MaintenanceWorker(NpgsqlDataSource db, MaintenanceOptions op
             DELETE FROM qr_logins WHERE expires_at < @tokens;
             DELETE FROM webhook_outbox WHERE sent_at < @outbox;
             DELETE FROM rule_firings WHERE fired_at < @outbox;
+            UPDATE admin_calls SET status = 'resolved', resolved_at = @now, resolved_by_name = 'auto' WHERE status <> 'resolved' AND received_at < @calls;
+            DELETE FROM admin_calls WHERE received_at < @events;
             """,
             new
             {
                 now,
+
+                // An admin call nobody answered in 12 h is closed (D-63); its row goes with the telemetry events.
+                calls = now - TimeSpan.FromHours(12),
 
                 // A day past expiry: until then the agent still gets "expired" rather than "invalid" for a token it holds.
                 tokens = now - TimeSpan.FromDays(1),

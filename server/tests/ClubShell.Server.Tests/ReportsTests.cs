@@ -12,7 +12,7 @@ namespace ClubShell.Server.Tests;
 /// The owner's reports (slice S5): days and hours in the club's zone (Asia/Tashkent, UTC+5) — a charge at 00:30 local
 /// counts for the local day although its UTC date is the day before; time revenue = charges − refunds; <c>days</c> 0 → 1,
 /// above 90 → 90, not a number → 7; <c>topGames</c> — distinct players of successful launches in the period;
-/// <c>topProducts</c> empty in v1.
+/// <c>topProducts</c> empty without bar sales (<see cref="BarReportsTests"/>).
 /// </summary>
 public sealed class ReportsTests(LongClockServerFixture server) : LedgerCheckedTest(server), IClassFixture<LongClockServerFixture>
 {
@@ -109,5 +109,40 @@ public sealed class ReportsTests(LongClockServerFixture server) : LedgerCheckedT
         await using var tx = await c.BeginTransactionAsync();
         await Ledger.PostAsync(c, tx, userId, allowOverdraft: false, at, line);
         await tx.CommitAsync();
+    }
+}
+
+/// <summary>
+/// The bar in the owner's reports (cash desk part 3, D-57): <c>byDay.shop</c> and <c>totals.shop</c> add the bar's method
+/// sales net of voids to the balance purchases, and <c>topProducts</c> ranks the period's sold products by revenue, voided
+/// sales left out.
+/// </summary>
+public sealed class BarReportsTests(ServerFixture server) : LedgerCheckedTest(server), IClassFixture<ServerFixture>
+{
+    [Fact]
+    public async Task TopProducts_from_sale_lines_net_of_voids()
+    {
+        var owner = await LoginAsync(Server, OwnerPin);
+        var cashier = await LoginAsync(Server, CashierPin);
+        await OpenShiftAsync(Server, cashier);
+        var cola = await Bar.ProductAsync(Server, owner, 800_000, null, title: "Cola top");
+        var chips = await Bar.ProductAsync(Server, owner, 1_000_000, null, title: "Chips top");
+        var tea = await Bar.ProductAsync(Server, owner, 300_000, null, title: "Tea top");
+        var player = await Players.CreateAsync(Server, balance: 5_000_000);
+        await Bar.SoldAsync(Server, cashier, Bar.Sale(Guid.NewGuid(), 2_600_000, "cash", null, null, (cola, 2), (chips, 1)));
+        await Bar.SoldAsync(Server, cashier, Bar.Sale(Guid.NewGuid(), 1_600_000, null, player.Id, null, (cola, 2)));
+        var voided = await Bar.CashAsync(Server, cashier, chips, 1_000_000, qty: 5, method: "card");
+        await Bar.VoidAsync(Server, cashier, voided);
+        await Bar.CashAsync(Server, cashier, tea, 300_000);
+
+        // The owner renames a product: its lines stay one row, under the latest title.
+        await ExpectAsync(Server, 200, HttpMethod.Patch, $"/products/{tea}", owner, new { title = "Green tea top" });
+        await Bar.CashAsync(Server, cashier, tea, 300_000);
+
+        var report = await ExpectAsync(Server, 200, HttpMethod.Get, "/reports?days=1", owner);
+        Assert.Equal([("Cola top", 4, 3_200_000L), ("Chips top", 1, 1_000_000L), ("Green tea top", 2, 600_000L)], report.GetProperty("topProducts").EnumerateArray()
+            .Select(p => (p.GetProperty("title").GetString(), p.GetProperty("qty").GetInt32(), p.GetProperty("amount").GetInt64())));
+        Assert.Equal(4_800_000, report.GetProperty("totals").GetProperty("shop").GetInt64());
+        Assert.Equal(4_800_000, report.GetProperty("byDay")[0].GetProperty("shop").GetInt64());
     }
 }

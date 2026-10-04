@@ -125,7 +125,9 @@ public static class SessionEndpoints
     /// <summary>
     /// <c>POST /sessions/{id}/events</c> (§5.12). The session is looked up by id or, for an offline session not yet
     /// replayed, by <c>clientSessionId</c> — before the key: an unknown one is 404 and the key is not stored, so the agent
-    /// sends the batch again after the replay.
+    /// sends the batch again after the replay. The events of a PC the desk moved the session off (D-61) are only recorded
+    /// (<c>applied = false</c>) and answered 204 under the key: a 403 would jam the old PC's outbox for good, and an old
+    /// <c>ended</c> must not close the session on its new PC.
     /// </summary>
     private static async Task<IResult> EventsAsync(
         HttpContext context, Guid id, [FromBody] JsonElement body, IdempotencyStore store, SessionService sessions, NpgsqlDataSource db)
@@ -133,16 +135,33 @@ public static class SessionEndpoints
         var agent = context.Features.GetRequiredFeature<AgentContext>();
         var events = ReadEvents(body);
         SessionRow? session;
+        var movedOff = false;
         await using (var c = await db.OpenConnectionAsync())
         {
             session = await c.QueryFirstOrDefaultAsync<SessionRow>(
-                $"SELECT {SessionRow.Columns} FROM sessions WHERE id = @id OR (pc_id = @pcId AND client_session_id = @id) ORDER BY id = @id DESC LIMIT 1",
-                new { id, pcId = agent.Pc.Id });
+                $"""
+                SELECT {SessionRow.Columns} FROM sessions
+                WHERE id = @id OR (client_session_id = @id AND (pc_id = @pcId OR EXISTS (
+                    SELECT 1 FROM session_events e
+                    WHERE e.session_id = sessions.id AND e.source = 'staff' AND e.type = 'moved' AND e.data ->> 'fromPcId' = @pc)))
+                ORDER BY id = @id DESC LIMIT 1
+                """,
+                new { id, pcId = agent.Pc.Id, pc = agent.Pc.Id.ToString("D", CultureInfo.InvariantCulture) });
+            movedOff = session is not null && session.PcId != agent.Pc.Id && await SessionService.MovedOffAsync(c, null, session.Id, agent.Pc.Id) is not null;
         }
 
         if (session is null)
         {
             throw ApiException.NotFound("session");
+        }
+
+        if (movedOff)
+        {
+            return await store.ExecuteHttpAsync(context, Principal(agent), keyRequired: true, body, async (c, tx) =>
+            {
+                await sessions.RecordUnappliedAsync(c, tx, session, events);
+                return new IdempotentResult(StatusCodes.Status204NoContent, null);
+            });
         }
 
         if (session.PcId != agent.Pc.Id)

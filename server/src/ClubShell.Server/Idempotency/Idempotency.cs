@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using ClubShell.Contracts.Errors;
 using ClubShell.Server.Infrastructure;
 using Dapper;
 using Npgsql;
@@ -19,7 +20,9 @@ public sealed record IdempotentResult(int Status, JsonElement? Body, bool Replay
 /// error / status ≥ 400 → ROLLBACK: errors are not stored, a repeat runs again
 /// </code>
 /// Key rows are scoped by <c>principal</c> (<c>pc:&lt;id&gt;</c> | <c>club:&lt;id&gt;</c>), method and path without query.
-/// A different request hash under the same key is only logged: an offline replay legitimately re-sends a fuller body.
+/// A different request hash under the same key is only logged: an offline replay legitimately re-sends a fuller body. The
+/// desk routes of cash desk part 3 (bar sale and void, session move, bulk commands) ask for <c>strictBody</c> (D-70): there
+/// a known key with another body is <c>409 conflict reason=idempotencyKeyReused</c> and nothing is replayed.
 /// </summary>
 public sealed class IdempotencyStore(NpgsqlDataSource db, ILogger<IdempotencyStore> logger)
 {
@@ -29,11 +32,21 @@ public sealed class IdempotencyStore(NpgsqlDataSource db, ILogger<IdempotencySto
     /// <summary>
     /// HTTP glue: the <c>Idempotency-Key</c> of the request (<c>400 validation</c> when <paramref name="keyRequired"/> and
     /// absent, or not a UUID — its version is not checked, the events key is a hash), the handler in the key's transaction,
-    /// and the answer — a replay with <c>Idempotent-Replayed: true</c>. <paramref name="body"/> is hashed for the log only.
+    /// and the answer — a replay with <c>Idempotent-Replayed: true</c>. <paramref name="body"/> is hashed: for the log, or
+    /// with <paramref name="strictBody"/> to refuse a reused key (D-70).
     /// </summary>
     public async Task<IResult> ExecuteHttpAsync(
         HttpContext context, string principal, bool keyRequired, JsonElement? body,
-        Func<NpgsqlConnection, NpgsqlTransaction, Task<IdempotentResult>> handler)
+        Func<NpgsqlConnection, NpgsqlTransaction, Task<IdempotentResult>> handler, bool strictBody = false) =>
+        ToHttp(await ExecuteHttpResultAsync(context, principal, keyRequired, body, handler, strictBody));
+
+    /// <summary>
+    /// <see cref="ExecuteHttpAsync"/> without the last step: the stored or fresh answer itself, for a route that still has
+    /// work after the commit (the bulk commands wait for the PCs' acks and answer more than they stored).
+    /// </summary>
+    public async Task<IdempotentResult> ExecuteHttpResultAsync(
+        HttpContext context, string principal, bool keyRequired, JsonElement? body,
+        Func<NpgsqlConnection, NpgsqlTransaction, Task<IdempotentResult>> handler, bool strictBody = false)
     {
         var raw = context.Request.Headers[KeyHeader].ToString();
         Guid? key = raw.Length == 0 ? null : Guid.TryParse(raw, out var parsed) ? parsed : throw ApiException.Validation(KeyHeader, "format");
@@ -43,20 +56,25 @@ public sealed class IdempotencyStore(NpgsqlDataSource db, ILogger<IdempotencySto
         }
 
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(body?.GetRawText() ?? ""));
-        var result = await ExecuteAsync(principal, context.Request.Method, context.Request.Path.Value ?? "", key, hash, handler, context.RequestAborted);
+        var result = await ExecuteAsync(principal, context.Request.Method, context.Request.Path.Value ?? "", key, hash, handler, context.RequestAborted, strictBody);
         if (result.Replayed)
         {
             context.Response.Headers[ReplayedHeader] = "true";
         }
 
-        return result.Body is { } stored
+        return result;
+    }
+
+    /// <summary>The HTTP answer of an <see cref="IdempotentResult"/>: its status and JSON body, or none.</summary>
+    public static IResult ToHttp(IdempotentResult result) =>
+        result.Body is { } stored
             ? Results.Content(stored.GetRawText(), "application/json; charset=utf-8", statusCode: result.Status)
             : Results.StatusCode(result.Status);
-    }
 
     /// <summary>
     /// Runs <paramref name="handler"/> in a READ COMMITTED transaction with <c>lock_timeout = 10s</c> (below the agent's
-    /// 15 s request timeout). Without a key the handler still gets the transaction, nothing is stored.
+    /// 15 s request timeout). Without a key the handler still gets the transaction, nothing is stored. With
+    /// <paramref name="strictBody"/> a stored key whose request hash differs is <c>409 idempotencyKeyReused</c>, not a replay.
     /// </summary>
     public async Task<IdempotentResult> ExecuteAsync(
         string principal,
@@ -65,7 +83,8 @@ public sealed class IdempotencyStore(NpgsqlDataSource db, ILogger<IdempotencySto
         Guid? key,
         byte[] requestHash,
         Func<NpgsqlConnection, NpgsqlTransaction, Task<IdempotentResult>> handler,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool strictBody = false)
     {
         await using var c = await db.OpenConnectionAsync(cancellationToken);
         await using var tx = await c.BeginTransactionAsync(cancellationToken);
@@ -91,6 +110,12 @@ public sealed class IdempotencyStore(NpgsqlDataSource db, ILogger<IdempotencySto
                 await tx.CommitAsync(cancellationToken);
                 if (!stored.RequestHash.AsSpan().SequenceEqual(requestHash))
                 {
+                    if (strictBody)
+                    {
+                        throw new ApiException(StatusCodes.Status409Conflict, ErrorCode.Conflict, "Conflict: idempotencyKeyReused",
+                            new { reason = "idempotencyKeyReused" });
+                    }
+
                     logger.LogInformation("Idempotency key {Key} of {Principal} replayed for {Method} {Path} with a different body", key, principal, method, path);
                 }
 

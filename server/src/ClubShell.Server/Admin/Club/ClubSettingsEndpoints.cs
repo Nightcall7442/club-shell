@@ -114,11 +114,12 @@ public static class ClubSettingsEndpoints
     {
         "branding" => new JsonObject { ["clubName"] = clubName, ["accent"] = "#9ADFFF", ["logoUrl"] = null, ["wallpaperUrl"] = null },
 
-        // What the agents get (§5.9): the owner's choice is stored, but these are the features v1 serves.
+        // What the agents get (§5.9): the owner's choice is stored, but these are the features v1 serves; callAdmin and
+        // gpuPanel follow the owner's switch (callAdmin on by default, D-62).
         "features" => new JsonObject
         {
             ["shop"] = false, ["chat"] = false, ["booking"] = false, ["tournaments"] = false, ["profile"] = true, ["topup"] = false, ["apps"] = false,
-            ["callAdmin"] = false, ["gpuPanel"] = false,
+            ["callAdmin"] = true, ["gpuPanel"] = false,
         },
         "pricing" => new JsonObject { ["weekdayPct"] = new JsonArray(100, 100, 100, 100, 100, 100, 100), ["holidays"] = new JsonArray(), ["holidayPct"] = 100 },
         "limits" => new JsonObject { ["minorAge"] = 18, ["minorCurfew"] = "22:00" },
