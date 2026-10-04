@@ -76,11 +76,13 @@ export function methodName(method: string): string {
 /**
  * One `Idempotency-Key` for a money action outside the pay box (a payout, a postpaid seat): {@link HeldKey.take} gives
  * the key held for the action or a new one, {@link HeldKey.settle} drops it after a definite answer (a success, a 4xx)
- * and keeps it after a lost one, so the retry replays instead of booking twice (D-46).
+ * and keeps it after a lost one, so the retry replays instead of booking twice (D-46). {@link HeldKey.reset} drops it
+ * when the action itself changes (another PC): a key never goes out with another body than the one it was taken for.
  */
 export interface HeldKey {
   take: () => string;
   settle: (error?: unknown) => void;
+  reset: () => void;
 }
 
 export function useHeldKey(): HeldKey {
@@ -90,6 +92,9 @@ export function useHeldKey(): HeldKey {
       take: () => (key.current ??= newKey()),
       settle: (error?: unknown) => {
         if (error === undefined || !isLostAnswer(error)) key.current = null;
+      },
+      reset: () => {
+        key.current = null;
       },
     }),
     [],

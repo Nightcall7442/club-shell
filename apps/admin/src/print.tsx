@@ -19,7 +19,7 @@ import { expectedOf } from '@/api';
 import { pcLabel } from '@/clientSearch';
 import { exactDigits, minutesLabel } from '@/format';
 import { currentLang, dateLocale, inLang, t, type Lang } from '@/i18n';
-import { PAY_METHOD_LABEL, REASON_LABEL } from '@/labels';
+import { PAY_METHOD_LABEL, REASON_LABEL, guestDisplayName } from '@/labels';
 
 export type Paper = '80' | '58' | 'a4';
 export type PrintKind = 'receipt' | 'report';
@@ -220,6 +220,7 @@ export interface ReceiptData {
   tariff?: string | null;
   /** Minutes bought; null with `pkg` (the package's own) or postpaid. */
   minutes?: number | null;
+  /** A package was sold; undefined on a copy of an entry that does not say (no refund rule is printed then). */
   pkg?: boolean;
   prepaid?: boolean;
   quote?: { base: number; dayPct: number; discountPct: number } | null;
@@ -299,7 +300,7 @@ export function Receipt({ r }: { r: ReceiptData }): JSX.Element {
       )}
       {!r.guest && r.balance != null && <Row label={t('Баланс')} value={sum(r.balance)} />}
       {r.guest && r.kind === 'seat' && r.pc && <p className="slip-note">{guestSignIn(pcLabel(r.pc))}</p>}
-      {timed && r.prepaid !== false && (
+      {timed && r.prepaid !== false && !(r.copy && r.pkg === undefined) && (
         <p className="slip-note">
           {r.pkg
             ? t('Время пакета не возвращается.')
@@ -445,7 +446,12 @@ export function ShiftReport({ r }: { r: ShiftReportData }): JSX.Element {
               />
               {(m.reasonCode || m.note || m.who) && (
                 <div className="slip-sub">
-                  {[m.reasonCode ? t(REASON_LABEL[m.reasonCode] ?? m.reasonCode) : null, m.note, m.who]
+                  {[
+                    m.reasonCode ? t(REASON_LABEL[m.reasonCode] ?? m.reasonCode) : null,
+                    m.note,
+                    // A payout's guest named «Гость N» by the server: said in the slip's language.
+                    m.kind === 'payout' && m.who ? guestDisplayName(m.who) : m.who,
+                  ]
                     .filter(Boolean)
                     .join(' · ')}
                 </div>

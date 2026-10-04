@@ -786,7 +786,7 @@ export const UZ: Record<string, string> = {
   гость: 'mehmon',
   клиент: 'mijoz',
   'Выдать {sum}': '{sum} berish',
-  'не выдаётся наличными': 'naqd qaytarilmaydi',
+  'Ещё гостей с остатком, который не выдаётся наличными: {n}': 'Qoldigʻi naqd qaytarilmaydigan yana mehmonlar: {n}',
   Панель: 'Panel',
   Место: 'Joy',
   'Выберите место: номер ПК и Enter. Ниже — операции смены.':
@@ -1648,7 +1648,7 @@ export const EN: Record<string, string> = {
   гость: 'guest',
   клиент: 'client',
   'Выдать {sum}': 'Pay out {sum}',
-  'не выдаётся наличными': 'not paid back in cash',
+  'Ещё гостей с остатком, который не выдаётся наличными: {n}': 'More guests whose rest is not paid back in cash: {n}',
   Панель: 'Panel',
   Место: 'Seat',
   'Выберите место: номер ПК и Enter. Ниже — операции смены.':

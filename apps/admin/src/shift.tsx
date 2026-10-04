@@ -84,10 +84,13 @@ export function cashSplit(x: ShiftTotals): { cash: number; cashless: number } {
   return { cash: m.cash, cashless: m.card + m.payme + m.click + m.uzum + m.other };
 }
 
-/** The X report of the open shift, fetched now (not the chip's last poll), with the drawer's moves; then printed. */
+/**
+ * The X report of the open shift, fetched now (not the chip's last poll), with the drawer's moves; then printed. Throws
+ * «Смена не открыта» when the shift was closed meanwhile (another console, the owner's phone).
+ */
 export async function printX(club: string | null): Promise<void> {
   const state = await clubApi.shift();
-  if (!state.shift || !state.x) return;
+  if (!state.shift || !state.x) throw new Error(t('Смена не открыта'));
   const moves = await drawerMoves(state.shift.id);
   await printDocument(
     <ShiftReport
@@ -152,6 +155,8 @@ export function ShiftProvider({
   // 'auto' — no shift at sign-in (blocking for a cashier); 'asked' — a money button asked for it (always closable).
   const [gate, setGate] = useState<'auto' | 'asked' | null>(null);
   const [cashMove, setCashMove] = useState<CashMoveKind | null>(null);
+  // A drawer move whose answer was lost outlives its sheet: reopened, the sheet offers only that move again (D-46).
+  const [pendingMove, setPendingMove] = useState<PendingMove | null>(null);
   const checked = useRef(false);
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -217,7 +222,13 @@ export function ShiftProvider({
         />
       )}
       {cashMove && (
-        <CashMoveSheet initialKind={cashMove} onClose={() => setCashMove(null)} onDone={() => void refresh()} />
+        <CashMoveSheet
+          initialKind={cashMove}
+          pending={pendingMove}
+          onPending={setPendingMove}
+          onClose={() => setCashMove(null)}
+          onDone={() => void refresh()}
+        />
       )}
     </ShiftContext.Provider>
   );
@@ -359,13 +370,22 @@ export function CashMenu(): JSX.Element | null {
   const [error, setError] = useState<string | null>(null);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!open) return undefined;
+    if (!open && !error) return undefined;
     const close = (e: MouseEvent): void => {
-      if (box.current && !box.current.contains(e.target as Node)) setOpen(false);
+      if (box.current && !box.current.contains(e.target as Node)) {
+        setOpen(false);
+        setError(null);
+      }
     };
     window.addEventListener('mousedown', close);
     return () => window.removeEventListener('mousedown', close);
-  }, [open]);
+  }, [open, error]);
+  // A failed «Печать X» says so for a while, then gets out of the way.
+  useEffect(() => {
+    if (!error) return undefined;
+    const id = window.setTimeout(() => setError(null), 8000);
+    return () => window.clearTimeout(id);
+  }, [error]);
   if (!shift || !cashDesk2) return null;
   const item = (label: string, act: () => void): JSX.Element => (
     <button
@@ -388,9 +408,15 @@ export function CashMenu(): JSX.Element | null {
         aria-expanded={open}
         aria-label={t('Внесение и изъятие')}
         title={t('Внесение и изъятие')}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          setError(null);
+          setOpen((v) => !v);
+        }}
         onKeyDown={(e) => {
-          if (e.key === 'Escape') setOpen(false);
+          if (e.key === 'Escape') {
+            setOpen(false);
+            setError(null);
+          }
         }}
         className="focus-ring h-8 w-8 rounded-md border border-line font-mono text-sm text-muted hover:bg-white/[0.06] hover:text-text"
       >
@@ -425,62 +451,83 @@ export function CashMenu(): JSX.Element | null {
   );
 }
 
+/** A drawer move as sent: its body and its `Idempotency-Key`. */
+export interface PendingMove {
+  kind: CashMoveKind;
+  key: string;
+  amount: number;
+  reason: CashReason;
+  note: string;
+}
+
+const LOST_MOVE = 'Ответ сервера не пришёл: деньги могли пройти. Повторите это же действие — дважды оно не проведётся.';
+
 /**
  * Cash into or out of the drawer: the kind, the amount, a reason (Размен / Инкассация / Хозрасходы / Другое, the last
- * with a note), then the slip to sign. The action holds one `Idempotency-Key` until a definite answer: a lost answer
- * freezes the sheet and offers only the same move again (D-46). A cash-out above the drawer is refused with what it
- * holds (`cashShort`); with `limits.cashOutOwnerOnly` only the owner takes cash out.
+ * with a note), then the slip to sign; Enter in the form sends it. The action holds one `Idempotency-Key` until a
+ * definite answer: a lost answer freezes the sheet and offers only the same move again (D-46), and the move is kept by
+ * the shift provider (`pending`), so closing and reopening the sheet cannot send it a second time under a new key. A
+ * cash-out above the drawer is refused with what it holds (`cashShort`); with `limits.cashOutOwnerOnly` only the owner
+ * takes cash out.
  */
 export function CashMoveSheet({
   initialKind,
+  pending,
+  onPending,
   onClose,
   onDone,
 }: {
   initialKind: CashMoveKind;
+  /** The move whose answer was lost: only it can be sent again. */
+  pending: PendingMove | null;
+  onPending: (move: PendingMove | null) => void;
   onClose: () => void;
   onDone: () => void;
 }): JSX.Element {
   const club = useClub();
-  const [kind, setKind] = useState<CashMoveKind>(initialKind);
-  const [amount, setAmount] = useState(0);
-  const [reason, setReason] = useState<CashReason | null>(null);
-  const [note, setNote] = useState('');
+  const [kind, setKind] = useState<CashMoveKind>(pending?.kind ?? initialKind);
+  const [amount, setAmount] = useState(pending?.amount ?? 0);
+  const [reason, setReason] = useState<CashReason | null>(pending?.reason ?? null);
+  const [note, setNote] = useState(pending?.note ?? '');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // The move whose answer was lost: its body and key are kept, only it can be sent again.
-  const [pending, setPending] = useState<{ key: string; amount: number; reason: CashReason; note: string } | null>(
-    null,
-  );
+  const [error, setError] = useState<string | null>(pending ? t(LOST_MOVE) : null);
   const [done, setDone] = useState<{ movement: CashMovement; expectedCash: number } | null>(null);
 
   const trimmed = note.trim();
   const noteOk = reason === 'other' ? trimmed.length >= 3 && trimmed.length <= 200 : trimmed.length <= 200;
-  const ready = amount > 0 && amount <= MAX_MOVE && reason !== null && noteOk && !busy;
+  const ready = amount > 0 && amount <= MAX_MOVE && reason !== null && noteOk && !busy && pending === null;
   const frozen = busy || pending !== null;
 
-  const send = async (p: { key: string; amount: number; reason: CashReason; note: string }): Promise<void> => {
+  const send = async (p: PendingMove): Promise<void> => {
     setBusy(true);
     setError(null);
     try {
       const r = await clubApi.cashMove(
-        { kind, amount: p.amount, reasonCode: p.reason, note: p.note.length > 0 ? p.note : null },
+        { kind: p.kind, amount: p.amount, reasonCode: p.reason, note: p.note.length > 0 ? p.note : null },
         p.key,
       );
-      setPending(null);
+      onPending(null);
       setDone(r);
       onDone();
     } catch (e) {
       const lost = isLostAnswer(e);
-      setPending(lost ? p : null);
+      onPending(lost ? p : null);
       setError(
         lost
-          ? t('Ответ сервера не пришёл: деньги могли пройти. Повторите это же действие — дважды оно не проведётся.')
+          ? t(LOST_MOVE)
           : e instanceof AdminError && e.code === 'forbidden' && e.details?.['reason'] === 'ownerOnly'
             ? t('Только владелец может изымать деньги из кассы')
             : describe(e),
       );
     } finally {
       setBusy(false);
+    }
+  };
+  const submit = (): void => {
+    if (pending) {
+      if (!busy) void send(pending);
+    } else if (ready && reason) {
+      void send({ kind, key: newKey(), amount, reason, note: trimmed });
     }
   };
 
@@ -519,7 +566,16 @@ export function CashMoveSheet({
           </div>
         </>
       ) : (
-        <>
+        <div
+          className="flex flex-col gap-4"
+          onKeyDown={(e) => {
+            // Enter anywhere in the form sends the move (a held Enter sends it once); the buttons keep their own.
+            if (e.key === 'Enter' && !(e.target instanceof HTMLButtonElement)) {
+              e.preventDefault();
+              if (!e.repeat) submit();
+            }
+          }}
+        >
           <div role="group" aria-label={t('Что делаем')} className="grid grid-cols-2 gap-1.5">
             {(['in', 'out'] as const).map((k) => (
               <Button
@@ -534,7 +590,7 @@ export function CashMoveSheet({
             ))}
           </div>
           <Field label={t('Сумма')}>
-            <MoneyInput value={amount} onChange={setAmount} disabled={frozen} />
+            <MoneyInput value={amount} onChange={setAmount} disabled={frozen} autoFocus={!frozen} />
           </Field>
           <div className="flex flex-col gap-1.5">
             <span className="label">{t('Причина')}</span>
@@ -575,18 +631,12 @@ export function CashMoveSheet({
                 {busy ? '…' : t('Повторить · {sum}', { sum: moneyExact(pending.amount) })}
               </Button>
             ) : (
-              <Button
-                variant="primary"
-                disabled={!ready}
-                onClick={() => {
-                  if (reason) void send({ key: newKey(), amount, reason, note: trimmed });
-                }}
-              >
+              <Button variant="primary" disabled={!ready} onClick={submit}>
                 {busy ? '…' : kind === 'in' ? t('Внести') : t('Изъять')}
               </Button>
             )}
           </div>
-        </>
+        </div>
       )}
     </Sheet>
   );

@@ -7,6 +7,7 @@
  * - every Russian string in `src` (a string literal or JSX text with Cyrillic letters: `t('…')` keys, and the labels
  *   kept in tables and passed to `t()` later) must have a line in both `UZ` and `EN` of `src/i18n.tables.ts`;
  * - every `{placeholder}` of a key must be in its translations, and no other;
+ * - a UZ or EN line must not be Russian (no Cyrillic letters): a line pasted untranslated fails too;
  * - a `t()` key must be a fixed string, not a template with `${…}`.
  * `src/platform` (the platform administration, Russian only) is not checked. A line marked `i18n-ignore` is skipped
  * (a language's own name in the language picker).
@@ -113,6 +114,8 @@ for (const [name, table] of [
       problems.push(`${name}: empty line for ${JSON.stringify(key)}`);
     else if (placeholders(key) !== placeholders(value))
       problems.push(`${name}: placeholders differ for ${JSON.stringify(key)}: ${JSON.stringify(value)}`);
+    else if (cyrillic.test(value))
+      problems.push(`${name}: untranslated (Cyrillic) line for ${JSON.stringify(key)}: ${JSON.stringify(value)}`);
   }
 }
 

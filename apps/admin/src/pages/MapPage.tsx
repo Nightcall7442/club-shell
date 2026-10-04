@@ -34,6 +34,7 @@ import { isTyping, onShowPc, sheetOpen } from '@/desk';
 import { changedAmount, describe, isLostAnswer } from '@/errors';
 import { t } from '@/i18n';
 import { duration, minutesLabel, money, moneyExact } from '@/format';
+import { guestDisplayName } from '@/labels';
 import { OperationsFeed } from '@/operations';
 import {
   PayBox,
@@ -675,7 +676,7 @@ function BusySeat({
         <span className="font-mono text-xs text-muted">
           {[
             seat.pc.name,
-            guest && user.displayName !== nameOf(user) ? user.displayName : null,
+            guest && guestDisplayName(user.displayName) !== nameOf(user) ? guestDisplayName(user.displayName) : null,
             hit?.phoneTail ? `••${hit.phoneTail}` : null,
             hit ? `@${hit.username}` : null,
           ]
@@ -1139,7 +1140,11 @@ function SettleSheet({
   const [done, setDone] = useState<{ text: string; receipt: ReceiptData } | null>(null);
   const key = useHeldKey();
   const payout = target.debt <= 0;
-  const name = target.guest && !target.displayName ? t('Гость') : target.displayName;
+  const name = target.guest
+    ? target.displayName
+      ? guestDisplayName(target.displayName)
+      : t('Гость')
+    : target.displayName;
   const base = {
     at: new Date().toISOString(),
     club: club.clubName,
@@ -1202,9 +1207,11 @@ function SettleSheet({
             </p>
           )}
           <ShiftClosedNote />
+          {/* The amount is exact and read-only: Enter on the focused button gives it out. */}
           <Button
             variant="primary"
             className="h-11"
+            autoFocus
             disabled={busy || closed || payable <= 0}
             onClick={() => void give()}
           >
@@ -1291,7 +1298,9 @@ function FreeSeat({ seat, tariffs, header, note, busy, run, onDone, setNote }: P
     setGuestName('');
     setPkgId(null);
     setWantPrepaid(true);
-  }, [seat.pc.id]);
+    // The panel stays mounted from PC to PC: a key held for this PC's seat must not go out with another PC's body.
+    openKey.reset();
+  }, [seat.pc.id, openKey]);
   useEffect(() => {
     if (!tariffId || !hourly.some((tf) => tf.id === tariffId)) {
       setTariffId(hourly[0]?.id ?? '');
@@ -1353,6 +1362,11 @@ function FreeSeat({ seat, tariffs, header, note, busy, run, onDone, setNote }: P
         : t('Постоплата — только с баланса, а на нём нет даже на минуту')
       : null;
   const prepaid = wantPrepaid || postpaidOff !== null || !cashDesk2;
+  // Forced back to prepaid (the client cannot afford a minute, a guest while guest postpaid is off): the choice follows,
+  // so the quote is of the minutes the chips sell, not the 60 a postpaid estimate asks for.
+  useEffect(() => {
+    if (postpaidOff !== null) setWantPrepaid(true);
+  }, [postpaidOff]);
 
   const pkg = prepaid && pkgId ? packages.find((p) => p.id === pkgId) : undefined;
   const pkgQuote = pkg ? (pkgQuotes[pkgKey(pkg.id)] ?? null) : null;
@@ -1670,13 +1684,20 @@ function FreeSeat({ seat, tariffs, header, note, busy, run, onDone, setNote }: P
 // «Расчёт с гостями и долги»: postpaid bills to take, guests' refunds to give back
 // ---------------------------------------------------------------------------------------------------------------------
 
+/**
+ * Only what the cashier can act on: debts to take and refunds with cash to give back (`refunds` holds those). Guests
+ * whose rest stays on the account (paid by card, nothing payable) are only counted (`kept`): nothing at the desk clears
+ * them, and the panel must not sit under the map for good.
+ */
 function SettleList({
   debts,
   refunds,
+  kept,
   onSettle,
 }: {
   debts: GuestDebt[];
   refunds: GuestRefund[];
+  kept: number;
   onSettle: (target: SettleTarget) => void;
 }): JSX.Element {
   const id = useId();
@@ -1694,7 +1715,7 @@ function SettleList({
             <li key={`debt-${d.userId}`} className="flex items-center justify-between gap-3 py-2">
               <span className="flex min-w-0 flex-col">
                 <span className="truncate text-sm text-text">
-                  {d.displayName}
+                  {guest ? guestDisplayName(d.displayName) : d.displayName}
                   <span className="ml-2 text-xs text-muted">{guest ? t('гость') : t('клиент')}</span>
                 </span>
                 <span className="font-mono text-xs text-muted">{where(d.pc, d.endedAt)}</span>
@@ -1722,36 +1743,34 @@ function SettleList({
           <li key={`refund-${r.userId}`} className="flex items-center justify-between gap-3 py-2">
             <span className="flex min-w-0 flex-col">
               <span className="truncate text-sm text-text">
-                {r.displayName}
+                {guestDisplayName(r.displayName)}
                 <span className="ml-2 text-xs text-muted">{t('гость')}</span>
               </span>
               <span className="font-mono text-xs text-muted">{where(r.pc, r.endedAt)}</span>
             </span>
-            {r.payable.amount > 0 ? (
-              <Button
-                onClick={() =>
-                  onSettle({
-                    userId: r.userId,
-                    displayName: r.displayName,
-                    guest: true,
-                    debt: 0,
-                    payable: r.payable.amount,
-                    balance: r.balance.amount,
-                    pc: r.pc,
-                  })
-                }
-              >
-                {t('Выдать {sum}', { sum: moneyExact(r.payable.amount) })}
-              </Button>
-            ) : (
-              <span className="text-right text-xs text-muted">
-                {moneyExact(r.balance.amount)}
-                <span className="block">{t('не выдаётся наличными')}</span>
-              </span>
-            )}
+            <Button
+              onClick={() =>
+                onSettle({
+                  userId: r.userId,
+                  displayName: r.displayName,
+                  guest: true,
+                  debt: 0,
+                  payable: r.payable.amount,
+                  balance: r.balance.amount,
+                  pc: r.pc,
+                })
+              }
+            >
+              {t('Выдать {sum}', { sum: moneyExact(r.payable.amount) })}
+            </Button>
           </li>
         ))}
       </ul>
+      {kept > 0 && (
+        <p className="text-xs text-muted">
+          {t('Ещё гостей с остатком, который не выдаётся наличными: {n}', { n: kept })}
+        </p>
+      )}
     </section>
   );
 }
@@ -1916,7 +1935,8 @@ export function MapPage(): JSX.Element {
   const occupied = seats.filter((s) => s.session !== null).length;
   const active = filter ? FILTERS.find((x) => x.id === filter) : undefined;
   const debts = data?.guestDebts ?? [];
-  const refunds = data?.guestRefunds ?? [];
+  const allRefunds = data?.guestRefunds ?? [];
+  const refunds = allRefunds.filter((r) => r.payable.amount > 0);
   const showFeedInPanel = !wide && (!seat || panel === 'feed');
 
   return (
@@ -2001,7 +2021,12 @@ export function MapPage(): JSX.Element {
           </div>
 
           {(debts.length > 0 || refunds.length > 0) && (
-            <SettleList debts={debts} refunds={refunds} onSettle={(target) => setSheet({ kind: 'settle', target })} />
+            <SettleList
+              debts={debts}
+              refunds={refunds}
+              kept={allRefunds.length - refunds.length}
+              onSettle={(target) => setSheet({ kind: 'settle', target })}
+            />
           )}
 
           {/* Legend that counts: every status, how many seats are in it right now */}

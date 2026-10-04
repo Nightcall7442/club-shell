@@ -201,19 +201,18 @@ const pendingKeys = new Map<string, { key: string; at: number }>();
 const RETRY_WINDOW_MS = 2 * 60_000;
 
 /**
- * POST of a money action with an `Idempotency-Key`. A sheet that holds its own key for the action (`key`) sends it as
- * is: the sheet keeps it frozen until a definite answer, however late the cashier retries (D-46). Without one, the key
- * is one per cashier action, reused when the cashier repeats the same action shortly after a lost answer (no response
- * or 5xx), so the server replays the first result instead of charging twice; a success, a refusal (4xx) or
- * {@link RETRY_WINDOW_MS} ends the action, and the next identical request is a new one.
+ * POST of a money action with an `Idempotency-Key`. A sheet that holds its own key for the action (`held`) keeps it
+ * frozen until a definite answer, however late the cashier retries (D-46). Either way the key of a lost answer (no
+ * response or 5xx) is also remembered by path + body: when the cashier closes the frozen sheet and enters the same
+ * action again shortly after, the same key goes out, so the server replays the first result instead of charging twice;
+ * a success, a refusal (4xx) or {@link RETRY_WINDOW_MS} ends the action, and the next identical request is a new one.
  */
 async function postMoney<T>(path: string, payload: unknown, held?: string): Promise<T> {
   const body = JSON.stringify(payload);
-  if (held) return call<T>(path, { method: 'POST', body, headers: { 'Idempotency-Key': held } }, MONEY_TIMEOUT_MS);
   const action = `${path} ${body}`;
   const now = Date.now();
   const pending = pendingKeys.get(action);
-  const key = pending && now - pending.at < RETRY_WINDOW_MS ? pending.key : newKey();
+  const key = pending && now - pending.at < RETRY_WINDOW_MS ? pending.key : (held ?? newKey());
   pendingKeys.set(action, { key, at: now });
   try {
     const r = await call<T>(path, { method: 'POST', body, headers: { 'Idempotency-Key': key } }, MONEY_TIMEOUT_MS);
@@ -452,6 +451,10 @@ export interface Operation {
   reasonCode: string | null;
   note: string | null;
   sessionId: string | null;
+  /** A seat or an extension sold a package (its time is not refunded); absent from an older server. */
+  package?: boolean | null;
+  /** A cash move's own id, the № of its slip (the entry's `id` is the journal's). */
+  movementId?: string | null;
 }
 
 /** Money taken today (the club's local day), by method; `taken − payouts` is the headline. */

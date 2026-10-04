@@ -693,8 +693,9 @@ test('a typed amount topped up by card from the client search lands in the X-rep
   expect(x.x.topUpByMethod['cash']).toBe(0);
   expect(x.x.topUpCash).toBe(0);
   expect(x.x.topUpOther).toBe(4_500_000);
-  // The top-bar chip counts it as cashless.
-  await expect(page.getByRole('button', { name: /безнал 45\s000/ })).toBeVisible();
+  // The top-bar chip counts it as cashless (its name starts with «Смена ·»: the feed's «Сегодня принято» headline says
+  // «безнал …» too, and at 1920 px it is on the map next to the chip).
+  await expect(page.getByRole('button', { name: /^Смена · .*безнал 45\s000/ })).toBeVisible();
 });
 
 test('a client is seated from the map: the pay box takes what the balance lacks, and ending asks first', async ({

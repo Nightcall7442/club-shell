@@ -74,10 +74,12 @@ export function MoneyInput({
   value,
   onChange,
   disabled,
+  autoFocus,
 }: {
   value: number;
   onChange: (minor: number) => void;
   disabled?: boolean;
+  autoFocus?: boolean;
 }): JSX.Element {
   const [text, setText] = useState(String(Math.round(value / 100)));
   useEffect(() => setText(String(Math.round(value / 100))), [value]);
@@ -85,6 +87,7 @@ export function MoneyInput({
     <div className="relative">
       <input
         inputMode="numeric"
+        autoFocus={autoFocus}
         disabled={disabled}
         className={clsx(inputCls, 'tnum pr-12')}
         value={text}

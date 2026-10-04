@@ -97,7 +97,8 @@ export function reprint(op: Operation, club: string | null): void {
           reasonCode: op.reasonCode ?? 'other',
           note: op.note,
           at: op.at,
-          ref: op.id,
+          // The original slip's № is the movement's id.
+          ref: op.movementId ?? op.id,
           club,
           staffName: op.staffName,
           copy: true,
@@ -120,6 +121,8 @@ export function reprint(op: Operation, club: string | null): void {
     pc: op.pc?.name ?? null,
     tariff: op.tariff,
     minutes: op.minutes,
+    // Unknown (an entry from before the flag): the slip then leaves out which refund rule applies.
+    pkg: op.package ?? undefined,
     prepaid: op.prepaid ?? undefined,
     quote: op.quote,
     total: kind === 'end' ? null : (op.charged ?? op.amount),
@@ -255,15 +258,22 @@ export function OperationsFeed({
   query.current = { shiftId, kinds, paged };
   // Answers of a previous shift / filter that arrive late are dropped.
   const generation = useRef(0);
+  // The shift the rows are of (undefined: none answered yet). Following the open shift, the next one (or none, after a
+  // close on another console) starts the list over instead of mixing its rows with the old shift's.
+  const shown = useRef<string | null | undefined>(undefined);
 
   const load = useCallback(async (): Promise<void> => {
     const gen = generation.current;
     try {
       const r = await clubApi.operations({ shiftId: query.current.shiftId, kinds: query.current.kinds });
       if (gen !== generation.current) return;
+      const shiftNow = r.shift?.id ?? null;
+      const other = shown.current !== undefined && shown.current !== shiftNow;
+      shown.current = shiftNow;
       setPage({ shift: r.shift, today: r.today });
-      setItems((list) => merge(r.items, list));
-      if (!query.current.paged) setNext(r.next);
+      setItems((list) => (other ? r.items : merge(r.items, list)));
+      if (other) setPaged(false);
+      if (other || !query.current.paged) setNext(r.next);
       setError(null);
     } catch (e) {
       if (gen !== generation.current) return;
@@ -276,6 +286,7 @@ export function OperationsFeed({
   // Another shift or filter: start over.
   useEffect(() => {
     generation.current += 1;
+    shown.current = undefined;
     setItems([]);
     setPage(null);
     setNext(null);
