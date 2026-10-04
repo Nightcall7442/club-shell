@@ -1,8 +1,10 @@
 /**
  * The vitals chip of the top bar, on every screen: CPU and GPU temperature (their load where the PC has no sensor) and
  * the frame rate while a game reports it, red from 85 °C. Read-only and silent (no live region: it changes every few
- * seconds). Nothing until the first sample. A crowded bar — below 2xl, or more than six section tabs — keeps one
- * reading (`leadVital`); the rest stay in the tooltip.
+ * seconds). Nothing until the first sample. Below 2xl the chip keeps one reading (`leadVital`), the rest stay in the
+ * tooltip. With more than six section tabs (`compact`) it keeps that one reading on wide screens too and leaves the
+ * bar below 2xl: at 1366 px it would squeeze the club name and the PC line out of the left column, and the readings
+ * are on Главная anyway.
  */
 import { useMemo } from 'react';
 import clsx from 'clsx';
@@ -34,7 +36,10 @@ export function PcVitals({ compact = false }: { compact?: boolean }): JSX.Elemen
       role="group"
       aria-label={t('pcDisplay.vitals.title')}
       title={vitals.map(reading).join(' · ')}
-      className="flex h-9 shrink-0 items-center gap-3 rounded-md px-2.5 shadow-[inset_0_0_0_1px_var(--hairline)]"
+      className={clsx(
+        'h-9 shrink-0 items-center gap-3 rounded-md px-2.5 shadow-[inset_0_0_0_1px_var(--hairline)]',
+        compact ? 'hidden 2xl:flex' : 'flex',
+      )}
     >
       {vitals.map((v) => (
         <span
