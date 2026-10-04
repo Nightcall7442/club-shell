@@ -16,7 +16,8 @@ namespace ClubShell.Server.Admin;
 /// <see cref="ClubTickWorker"/>, <c>pcIdleMinutes</c> from the <see cref="Agents.PcStatusWorker"/>. Every firing is its own
 /// transaction and starts with <c>INSERT rule_firings … ON CONFLICT DO NOTHING</c> on (rule, target): a rule fires once per
 /// session / top-up / idle stretch, across restarts, and a <c>bonus</c> is credited once (§4.4). Actions: <c>message</c> —
-/// command <c>message</c> from the club, no ack; <c>bonus</c> — ledger <c>bonus</c>; <c>lockPc</c> — <c>lock
+/// command <c>message</c> from the club, no ack; <c>bonus</c> — ledger <c>bonus</c> (never to a transient guest, D-36: the rule
+/// still counts as fired); <c>lockPc</c> — <c>lock
 /// {reason: staff}</c>; <c>shutdownPc</c> — <c>shutdown {delaySec: 30}</c>; <c>notifyOwner</c> — only the event. Each firing
 /// counts <c>fired</c>/<c>lastFiredAt</c> and raises <c>ruleFired</c> for the webhooks. Commands and the wallet push go out
 /// after the firing commits.
@@ -154,10 +155,10 @@ public sealed class AutomationService(NpgsqlDataSource db, CommandDispatcher com
                 return false;
             }
 
-            var (pcName, userName, clubName) = await c.QuerySingleAsync<(string?, string?, string)>(
+            var (pcName, userName, transient, clubName) = await c.QuerySingleAsync<(string?, string?, bool?, string)>(
                 """
                 SELECT (SELECT name FROM pcs WHERE id = @pcId AND club_id = @clubId), (SELECT display_name FROM users WHERE id = @userId),
-                       coalesce(nullif(settings -> 'branding' ->> 'clubName', ''), name)
+                       (SELECT transient FROM users WHERE id = @userId), coalesce(nullif(settings -> 'branding' ->> 'clubName', ''), name)
                 FROM clubs WHERE id = @clubId
                 """,
                 new { clubId, pcId, userId }, tx);
@@ -172,7 +173,8 @@ public sealed class AutomationService(NpgsqlDataSource db, CommandDispatcher com
                 case "shutdownPc" when pcName is not null:
                     command = NewCommand.Shutdown(new PowerCommand(30, false, rule.Name));
                     break;
-                case "bonus" when userName is not null && rule.Amount > 0:
+                // Guests never get bonus money (D-36): a throwaway account would carry it off as cash or play time.
+                case "bonus" when userName is not null && transient != true && rule.Amount > 0:
                     await Ledger.PostAsync(c, tx, userId!.Value, allowOverdraft: false, now, new LedgerLine("bonus", rule.Amount, $"Бонус: {rule.Name}", clubId));
                     credited = true;
                     break;

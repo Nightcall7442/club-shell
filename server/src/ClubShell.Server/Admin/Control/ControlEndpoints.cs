@@ -268,9 +268,10 @@ public static class ControlEndpoints
 
 /// <summary>
 /// The live side of cashier control (mock <c>control.ts alertOn</c>): the <c>suspicious</c> event for the patterns that
-/// should not wait for the owner to open the page — a cash shortfall at close, and the early refund that makes a cashier's
-/// shift reach <c>earlyEndsPerShift</c> (exactly then, so one bad shift sends one event). Written in the action's own
-/// transaction, after its journal entry.
+/// should not wait for the owner to open the page — a cash shortfall at close, a big cash-out of the drawer, and the early
+/// refund that makes a cashier's shift reach <c>earlyEndsPerShift</c> (exactly then, so one bad shift sends one event).
+/// Written in the action's own transaction, after its journal entry. The journal's <c>cashIn</c>, <c>cashOut</c> and
+/// <c>payout</c> are outside the contract's <c>AdminAuditAction</c> for now (D-44), so <c>adminControl</c> does not list them.
 /// </summary>
 public static class ControlAlerts
 {
@@ -280,6 +281,15 @@ public static class ControlAlerts
         if (diff < -settings.ShortfallFrom)
         {
             await Webhooks.EnqueueAsync(c, tx, staff.ClubId, "suspicious", now, $"{cashier}: недостача в кассе {Webhooks.Sum(diff)} при закрытии смены", new { staffId = staff.WireId });
+        }
+    }
+
+    /// <summary>A cash-out of at least <c>notifications.bigTopupAt</c> (D-40): the owner hears of it at once.</summary>
+    public static async Task CashOutAsync(NpgsqlConnection c, NpgsqlTransaction tx, StaffContext staff, long amount, string reason, DateTimeOffset now)
+    {
+        if (amount >= await ClubSettingsEndpoints.BigTopupAtAsync(c, tx, staff.ClubId))
+        {
+            await Webhooks.EnqueueAsync(c, tx, staff.ClubId, "suspicious", now, $"{staff.Name}: изъятие из кассы {Webhooks.Sum(amount)} ({reason})", new { staffId = staff.WireId, amount });
         }
     }
 

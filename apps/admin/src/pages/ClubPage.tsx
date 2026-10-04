@@ -1,6 +1,7 @@
 /**
  * "Экран игрока": what the kiosk shows to players — branding, the sections players can open, banners, the club rules
- * in three languages and the minor limits. On the right, a live miniature of the kiosk built from the draft.
+ * in three languages and the limits (minors, auto-extension, postpaid debts of guests and clients, who may take cash
+ * out of the drawer). On the right, a live miniature of the kiosk built from the draft.
  */
 import { useState } from 'react';
 import clsx from 'clsx';
@@ -120,6 +121,8 @@ function Preview({ s }: { s: ClubSettings }): JSX.Element {
 export default function ClubPage(): JSX.Element {
   const st = useClubSettings();
   const [rulesLang, setRulesLang] = useState<Lang>('ru');
+  // Members' debt is a toggle and an amount: the toggle stays on while the amount is being typed (0 would mean off).
+  const [debtOn, setDebtOn] = useState<boolean | null>(null);
   const s = st.draft;
 
   if (!s) {
@@ -131,6 +134,8 @@ export default function ClubPage(): JSX.Element {
     );
   }
 
+  const memberDebt = s.limits.memberDebtLimit ?? 0;
+  const memberDebtOn = debtOn ?? memberDebt > 0;
   const branding = (patch: Partial<ClubSettings['branding']>): void => st.set('branding', { ...s.branding, ...patch });
   const banner = (id: string, patch: Partial<Banner>): void =>
     st.set(
@@ -380,6 +385,42 @@ export default function ClubPage(): JSX.Element {
                   />
                 </Field>
               )}
+              {/* For members 0 means "no debt", unlike the guests' limit above: a toggle, then a required amount. */}
+              <Toggle
+                label={t('Разрешить клиентам долг на постоплате')}
+                checked={memberDebtOn}
+                onChange={(v) => {
+                  setDebtOn(v);
+                  st.set('limits', { ...s.limits, memberDebtLimit: v ? (memberDebt > 0 ? memberDebt : 5_000_000) : 0 });
+                }}
+              />
+              <p className="text-xs text-muted">
+                {t(
+                  'Без этого клиент на постоплате играет, пока хватает баланса. С ним — уходит в минус до суммы ниже и гасит долг на кассе.',
+                )}
+              </p>
+              {memberDebtOn && (
+                <Field
+                  label={t('Наибольший долг клиента')}
+                  hint={memberDebt > 0 ? undefined : t('Укажите сумму больше нуля, иначе долг останется выключен')}
+                >
+                  <NumberInput
+                    value={Math.round(memberDebt / 100)}
+                    min={1}
+                    max={10_000_000}
+                    suffix={t('сум')}
+                    onChange={(n) => st.set('limits', { ...s.limits, memberDebtLimit: Math.max(0, n) * 100 })}
+                  />
+                </Field>
+              )}
+              <Toggle
+                label={t('Изъятие из кассы — только владелец')}
+                checked={s.limits.cashOutOwnerOnly ?? false}
+                onChange={(v) => st.set('limits', { ...s.limits, cashOutOwnerOnly: v })}
+              />
+              <p className="text-xs text-muted">
+                {t('Кассир сможет только вносить деньги в кассу; изымать — владелец.')}
+              </p>
             </div>
           </Section>
         </div>
@@ -393,7 +434,10 @@ export default function ClubPage(): JSX.Element {
         dirty={st.dirty}
         saving={st.saving}
         onSave={() => void st.save()}
-        onReset={st.reset}
+        onReset={() => {
+          setDebtOn(null);
+          st.reset();
+        }}
         label={t('Есть несохранённые изменения')}
       />
     </div>

@@ -6,27 +6,35 @@
  * split payment later becomes a list of payments without changing the callers. While no shift is open the buttons stay
  * in place, disabled, with the reason and a button that opens the shift.
  *
- * A lost answer (no response or 5xx) may still have booked the money: the box then freezes the amount and the method and
- * offers only the same payment again, which `postMoney` sends under the same `Idempotency-Key` (the server replays the
- * first result instead of booking twice). Cash typed in "Получено" below the amount refuses cash; a held Enter pays once.
+ * `exact` takes an amount the server checks to the tiyin (a debt, a walk-in guest's price): it is shown read-only with
+ * its tiyin, without presets, and sent unchanged; "Получено" still gives the change.
+ *
+ * Every payment carries its own `Idempotency-Key` ({@link Payment.key}), taken when the cashier presses a method and
+ * kept until a definite answer. A lost answer (no response or 5xx) may still have booked the money: the box then freezes
+ * the amount and the method and offers only the same payment again, under the same key however late (the server replays
+ * the first result instead of booking twice, D-46). Cash typed in "Получено" below the amount refuses cash; a held
+ * Enter pays once.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import type { Money } from '@clubshell/contracts';
-import { AdminError, adminApi, type PayMethod } from '@/api';
-import { describe } from '@/errors';
-import { money } from '@/format';
+import { adminApi, newKey, type PayMethod } from '@/api';
+import { useClub } from '@/club';
+import { describe, isLostAnswer } from '@/errors';
+import { exactDigits, money, moneyExact } from '@/format';
 import { t } from '@/i18n';
+import { PAY_METHOD_LABEL } from '@/labels';
+import { Receipt, printDocument, type ReceiptData } from '@/print';
 import { useShift } from '@/shift';
 import { Button, Kbd, Sheet, inputCls } from '@/ui';
 
 /** Counter methods in button order; `code` is the Alt+digit hotkey (layout-independent `KeyboardEvent.code`). */
 export const PAY_METHODS: { id: PayMethod; label: string; hint: string; code: string }[] = [
-  { id: 'cash', label: 'Наличные', hint: 'Enter', code: 'Digit1' },
-  { id: 'card', label: 'оплата|Карта', hint: 'Alt+2', code: 'Digit2' },
-  { id: 'payme', label: 'Payme', hint: 'Alt+3', code: 'Digit3' },
-  { id: 'click', label: 'Click', hint: 'Alt+4', code: 'Digit4' },
-  { id: 'uzum', label: 'Uzum', hint: 'Alt+5', code: 'Digit5' },
+  { id: 'cash', label: PAY_METHOD_LABEL.cash, hint: 'Enter', code: 'Digit1' },
+  { id: 'card', label: PAY_METHOD_LABEL.card, hint: 'Alt+2', code: 'Digit2' },
+  { id: 'payme', label: PAY_METHOD_LABEL.payme, hint: 'Alt+3', code: 'Digit3' },
+  { id: 'click', label: PAY_METHOD_LABEL.click, hint: 'Alt+4', code: 'Digit4' },
+  { id: 'uzum', label: PAY_METHOD_LABEL.uzum, hint: 'Alt+5', code: 'Digit5' },
 ];
 
 const PRESETS = [20_000, 50_000, 100_000, 200_000];
@@ -41,6 +49,8 @@ export interface Payment {
   amount: number;
   /** Cash handed over, for the change; null when not typed or not cash. */
   received: number | null;
+  /** `Idempotency-Key` of this payment: the same on a retry after a lost answer, a new one for the next payment. */
+  key: string;
 }
 
 /** `45000` → `45 000`. */
@@ -56,6 +66,39 @@ function digitsOf(text: string): string {
 
 function sumDigits(minor: number): string {
   return minor > 0 ? String(Math.ceil(minor / 100)) : '';
+}
+
+/** The method's name in the console language. */
+export function methodName(method: string): string {
+  return t(PAY_METHOD_LABEL[method as PayMethod] ?? method);
+}
+
+/**
+ * One `Idempotency-Key` for a money action outside the pay box (a payout, a postpaid seat): {@link HeldKey.take} gives
+ * the key held for the action or a new one, {@link HeldKey.settle} drops it after a definite answer (a success, a 4xx)
+ * and keeps it after a lost one, so the retry replays instead of booking twice (D-46). {@link HeldKey.reset} drops it
+ * when the action itself changes (another PC): a key never goes out with another body than the one it was taken for.
+ */
+export interface HeldKey {
+  take: () => string;
+  settle: (error?: unknown) => void;
+  reset: () => void;
+}
+
+export function useHeldKey(): HeldKey {
+  const key = useRef<string | null>(null);
+  return useMemo(
+    () => ({
+      take: () => (key.current ??= newKey()),
+      settle: (error?: unknown) => {
+        if (error === undefined || !isLostAnswer(error)) key.current = null;
+      },
+      reset: () => {
+        key.current = null;
+      },
+    }),
+    [],
+  );
 }
 
 /** True once the console knows no shift is open: money buttons stay in place but are off. */
@@ -81,6 +124,7 @@ export function ShiftClosedNote(): JSX.Element | null {
 export function PayBox({
   initial = 0,
   min = 0,
+  exact,
   verb,
   autoFocus = true,
   disabled,
@@ -90,6 +134,8 @@ export function PayBox({
   initial?: number;
   /** The least the box takes (minor units); 0 — any positive amount. */
   min?: number;
+  /** Exactly this, to the tiyin, read-only: a debt or a guest's price the server checks exactly. */
+  exact?: number;
   /** Prefix of the method buttons: "Посадить" → "Посадить · Наличные". */
   verb?: string;
   autoFocus?: boolean;
@@ -120,10 +166,11 @@ export function PayBox({
   // A new shortfall (another tariff or duration) refills the field.
   useEffect(() => setDigits(sumDigits(initial)), [initial]);
 
-  const amount = Number(digits || '0') * 100;
+  const fixed = exact !== undefined;
+  const amount = fixed ? exact : Number(digits || '0') * 100;
   const receivedMinor = Number(received || '0') * 100;
   const closed = useShiftClosed();
-  const tooLow = amount > 0 && amount < min;
+  const tooLow = !fixed && amount > 0 && amount < min;
   const tooHigh = amount > MAX_AMOUNT;
   // Cash handed over below the amount: the cashier has not got the money yet.
   const cashShort = receivedMinor > 0 && receivedMinor < amount;
@@ -144,7 +191,7 @@ export function PayBox({
     } catch (e) {
       inFlight.current = false;
       if (alive.current) {
-        const lost = e instanceof AdminError && (e.status === 0 || e.status >= 500);
+        const lost = isLostAnswer(e);
         setUnknown(lost ? p : null);
         setError(
           lost
@@ -161,7 +208,12 @@ export function PayBox({
 
   const pay = (method: PayMethod): void => {
     if (!ready || (method === 'cash' && cashShort)) return;
-    void send({ method, amount, received: method === 'cash' && receivedMinor > 0 ? receivedMinor : null });
+    void send({
+      method,
+      amount,
+      received: method === 'cash' && receivedMinor > 0 ? receivedMinor : null,
+      key: newKey(),
+    });
   };
   const frozen = busy !== null || unknown !== null;
 
@@ -189,35 +241,42 @@ export function PayBox({
             ref={amountRef}
             inputMode="numeric"
             autoComplete="off"
-            autoFocus={autoFocus}
+            autoFocus={autoFocus && !fixed}
             // read-only, not disabled, while paying: the focus stays here for the next Enter after a refusal
-            readOnly={frozen}
-            className={clsx(inputCls, 'tnum h-12 pr-12 text-xl font-semibold')}
-            value={groupDigits(digits)}
+            readOnly={frozen || fixed}
+            aria-readonly={frozen || fixed}
+            className={clsx(inputCls, 'tnum h-12 pr-12 text-xl font-semibold', fixed && 'bg-white/[0.03]')}
+            value={fixed ? exactDigits(exact) : groupDigits(digits)}
             placeholder="0"
-            onChange={(e) => setDigits(digitsOf(e.target.value))}
+            onChange={(e) => {
+              if (!fixed) setDigits(digitsOf(e.target.value));
+            }}
           />
           <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted">
             {t('сум')}
           </span>
         </span>
       </label>
-      <div className="grid grid-cols-4 gap-1.5">
-        {PRESETS.map((p) => (
-          <Button
-            key={p}
-            size="sm"
-            disabled={frozen}
-            className={clsx(digits === String(p) && 'choice-on')}
-            onClick={() => {
-              setDigits(String(p));
-              amountRef.current?.focus();
-            }}
-          >
-            {groupDigits(String(p))}
-          </Button>
-        ))}
-      </div>
+      {fixed ? (
+        <p className="-mt-1 text-xs text-muted">{t('Ровно эта сумма, до тийина')}</p>
+      ) : (
+        <div className="grid grid-cols-4 gap-1.5">
+          {PRESETS.map((p) => (
+            <Button
+              key={p}
+              size="sm"
+              disabled={frozen}
+              className={clsx(digits === String(p) && 'choice-on')}
+              onClick={() => {
+                setDigits(String(p));
+                amountRef.current?.focus();
+              }}
+            >
+              {groupDigits(String(p))}
+            </Button>
+          ))}
+        </div>
+      )}
       {tooLow && <p className="text-xs text-warning">{t('Не меньше {sum}', { sum: uzs(min) })}</p>}
       {tooHigh && <p className="text-xs text-warning">{t('Не больше {sum}', { sum: uzs(MAX_AMOUNT) })}</p>}
 
@@ -227,6 +286,7 @@ export function PayBox({
           <input
             inputMode="numeric"
             autoComplete="off"
+            autoFocus={autoFocus && fixed}
             readOnly={frozen}
             className={clsx(inputCls, 'tnum h-9')}
             value={groupDigits(received)}
@@ -237,9 +297,11 @@ export function PayBox({
         <span className="tnum pb-2 text-sm" aria-live="polite">
           {receivedMinor > 0 && amount > 0 ? (
             receivedMinor >= amount ? (
-              <span className="text-success">{t('Сдача: {sum}', { sum: uzs(receivedMinor - amount) })}</span>
+              <span className="text-success">{t('Сдача: {sum}', { sum: moneyExact(receivedMinor - amount) })}</span>
             ) : (
-              <span className="text-warning">{t('Меньше суммы на {sum}', { sum: uzs(amount - receivedMinor) })}</span>
+              <span className="text-warning">
+                {t('Меньше суммы на {sum}', { sum: moneyExact(amount - receivedMinor) })}
+              </span>
             )
           ) : null}
         </span>
@@ -253,8 +315,8 @@ export function PayBox({
           {busy !== null
             ? '…'
             : t('Повторить · {sum} · {method}', {
-                sum: uzs(unknown.amount),
-                method: t(PAY_METHODS.find((m) => m.id === unknown.method)?.label ?? unknown.method),
+                sum: moneyExact(unknown.amount),
+                method: methodName(unknown.method),
               })}
         </Button>
       ) : (
@@ -291,9 +353,18 @@ export interface Payee {
   bonus?: Money | null;
 }
 
+/** «Чек»: prints the slip of the money just taken. */
+export function ReceiptButton({ receipt, className }: { receipt: ReceiptData; className?: string }): JSX.Element {
+  return (
+    <Button className={className} onClick={() => void printDocument(<Receipt r={receipt} />, 'receipt')}>
+      {t('Чек')}
+    </Button>
+  );
+}
+
 /**
  * Top-up of one client's balance as a sheet: the client, the pay box, then the new balance. Used by the seat panel
- * ("Пополнить", F2), the top-bar search and the guest debts (`initial` — the debt).
+ * ("Пополнить", F2) and the top-bar search; guests are never topped up (D-36), their debts go through the settle sheet.
  */
 export function TopUpSheet({
   payee,
@@ -308,10 +379,14 @@ export function TopUpSheet({
   onClose: () => void;
   onDone?: () => void;
 }): JSX.Element {
-  const [done, setDone] = useState<{ paid: number; method: PayMethod; balance: Money; change: number | null } | null>(
-    null,
-  );
-  const method = PAY_METHODS.find((m) => m.id === done?.method);
+  const club = useClub();
+  const [done, setDone] = useState<{
+    paid: number;
+    method: PayMethod;
+    balance: Money;
+    change: number | null;
+    receipt: ReceiptData;
+  } | null>(null);
   return (
     <Sheet title={title ?? t('Пополнить · {name}', { name: payee.displayName })} onClose={onClose}>
       <dl className="grid grid-cols-2 divide-x divide-line overflow-hidden rounded-md border border-line bg-bg text-center">
@@ -329,27 +404,43 @@ export function TopUpSheet({
           <p role="status" className="rounded-md bg-success/10 px-3 py-2 text-sm text-success">
             {t('Баланс пополнен · {sum} · {method} · теперь {balance}', {
               sum: uzs(done.paid),
-              method: method ? t(method.label) : done.method,
+              method: methodName(done.method),
               balance: money(done.balance),
             })}
             {done.change !== null && done.change > 0 && (
-              <span className="block font-semibold">{t('Сдача: {sum}', { sum: uzs(done.change) })}</span>
+              <span className="block font-semibold">{t('Сдача: {sum}', { sum: moneyExact(done.change) })}</span>
             )}
           </p>
-          <Button variant="primary" autoFocus onClick={onClose}>
-            {t('Готово')}
-          </Button>
+          <div className="grid grid-cols-2 gap-2">
+            <ReceiptButton receipt={done.receipt} />
+            <Button variant="primary" autoFocus onClick={onClose}>
+              {t('Готово')}
+            </Button>
+          </div>
         </>
       ) : (
         <PayBox
           initial={initial}
           onPay={async (p) => {
-            const r = await adminApi.topUp({ userId: payee.id, amount: p.amount, method: p.method });
+            const r = await adminApi.topUp({ userId: payee.id, amount: p.amount, method: p.method }, p.key);
             setDone({
               paid: p.amount,
               method: p.method,
               balance: r.balance,
               change: p.received !== null ? p.received - p.amount : null,
+              receipt: {
+                kind: 'topup',
+                at: r.transaction.createdAt,
+                ref: r.transaction.id,
+                club: club.clubName,
+                cashier: club.staff?.name ?? null,
+                client: payee.displayName,
+                guest: false,
+                pc: null,
+                paid: { amount: p.amount, method: p.method },
+                received: p.received,
+                balance: r.balance.amount,
+              },
             });
             onDone?.();
           }}

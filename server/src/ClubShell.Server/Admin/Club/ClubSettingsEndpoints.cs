@@ -318,6 +318,37 @@ public static class ClubSettingsEndpoints
                 }
             }
         }
+
+        // The limits beyond the contract's AdminLimits (stored as sent, read by every price and the cash desk): a value of the
+        // wrong kind would break ClubPricing.Parse for the whole club, so it is refused here.
+        if (body.TryGetProperty("limits", out var limits) && limits.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var name in new[] { "guestDebtLimit", "memberDebtLimit" })
+            {
+                if (!limits.TryGetProperty(name, out var v) || v.ValueKind == JsonValueKind.Null)
+                {
+                    continue;
+                }
+
+                if (v.ValueKind != JsonValueKind.Number || !v.TryGetInt64(out var amount))
+                {
+                    throw ApiException.Validation($"limits.{name}", "format");
+                }
+
+                if (amount < 0)
+                {
+                    throw ApiException.Validation($"limits.{name}", "min");
+                }
+            }
+
+            foreach (var name in new[] { "guestPostpaid", "cashOutOwnerOnly" })
+            {
+                if (limits.TryGetProperty(name, out var v) && v.ValueKind is not (JsonValueKind.True or JsonValueKind.False or JsonValueKind.Null))
+                {
+                    throw ApiException.Validation($"limits.{name}", "format");
+                }
+            }
+        }
     }
 
     /// <summary>

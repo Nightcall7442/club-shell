@@ -37,8 +37,11 @@ import {
   openSessionForUser,
   optInt,
   optStr,
+  purchasesOf,
+  addPurchase,
   requireAgent,
   requireUser,
+  revokeUserTokens,
   str,
   uuid,
   uzs,
@@ -63,6 +66,21 @@ function localClock(d: Date): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+/**
+ * What the unused seconds of a session are worth, as the server counts it: the purchases newest first, each pro rata
+ * to what it paid; a package's seconds use up the unused time but are never refunded.
+ */
+function refundable(s: SessionRecord, unusedSec: number): number {
+  let left = unusedSec;
+  let refund = 0;
+  for (const p of [...purchasesOf(s)].reverse()) {
+    const take = Math.min(left, p.sec);
+    if (!p.pkg && take > 0 && p.sec > 0) refund += Math.floor((p.paid * take) / p.sec);
+    left -= take;
+  }
+  return refund;
+}
+
 /** Ends a session, settles the wallet (postpaid charge / admin refund), frees the PC and pushes updates. */
 export function endSession(s: SessionRecord, reason: SessionEndReason, nowMs = Date.now()): SessionEndResult {
   const used = viewSession(s, nowMs).secondsUsed;
@@ -77,9 +95,11 @@ export function endSession(s: SessionRecord, reason: SessionEndReason, nowMs = D
   let charged = zero();
   let refunded = zero();
   if (s.isPrepaid) {
-    // Unused prepaid time is refunded only when the club ends the session (admin/error), never on user/idle/timeUp.
-    if ((reason === 'admin' || reason === 'error') && tariff && !tariff.isPackage && user) {
-      refunded = tariffPriceFor(tariff, Math.floor(Math.max(0, s.purchasedSec - used) / 60));
+    // Unused prepaid time is refunded only when the club ends the session (admin/error), never on user/idle/timeUp:
+    // pro rata to what was paid, floored to 100 tiyin and never more than paid (the server's rule).
+    if ((reason === 'admin' || reason === 'error') && user && s.purchasedSec > used) {
+      const amount = Math.floor(Math.min(s.paidAmount.amount, refundable(s, s.purchasedSec - used)) / 100) * 100;
+      refunded = uzs(Math.max(0, amount));
       if (refunded.amount > 0) applyTransaction(user, 'refund', refunded, 'Refund: unused session time', s.id);
     }
   } else if (tariff && user) {
@@ -110,6 +130,12 @@ export function tickSessions(nowMs: number): void {
     const view = viewSession(s, nowMs);
     if (s.isPrepaid && s.runningSince && view.secondsLeft <= 0) {
       endSession(s, 'timeUp', nowMs);
+      // A walk-in guest's account ends with its time: signed out of the PC, as the server's tick does (D-28).
+      const user = findUser(s.userId);
+      if (user?.transient) {
+        revokeUserTokens(user.id, s.pcId);
+        pushToPc(s.pcId, 'userRevoked', { userId: user.id, reason: 'sessionEnded' });
+      }
       continue;
     }
     if (nowMs - s.lastPushAt >= RECONCILE_PUSH_MS) {
@@ -209,6 +235,9 @@ export function sessionRoutes(app: FastifyInstance): void {
         endReason: null,
         warningsSent: [],
         lastPushAt: Date.now(),
+        origin: 'kiosk',
+        createdByStaffId: null,
+        purchases: prepaid ? [{ paid: cost.amount, sec: mins * 60, pkg: tariff.isPackage }] : [],
       };
       db.sessions.push(rec);
       if (db.sessions.length > 500) db.sessions.splice(0, db.sessions.length - 500);
@@ -287,6 +316,7 @@ export function sessionRoutes(app: FastifyInstance): void {
       if (user.balance.amount < cost.amount) throw errors.insufficientFunds(cost, user.balance);
       if (cost.amount > 0)
         applyTransaction(user, 'charge', uzs(-cost.amount), `Extension +${minutes} min · ${tariff.name}`, s.id);
+      addPurchase(s, { paid: cost.amount, sec: minutes * 60, pkg: tariff.isPackage });
       s.purchasedSec += minutes * 60;
       s.paidAmount = uzs(s.paidAmount.amount + cost.amount);
       s.tariffId = tariff.id;

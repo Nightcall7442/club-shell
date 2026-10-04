@@ -6,7 +6,13 @@
  * returns a Telegram field.
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { Weekday, type ShellFeatures, type Tariff, type TariffTimeWindow } from '@clubshell/contracts';
+import {
+  Weekday,
+  type ShellFeatures,
+  type Tariff,
+  type TariffTimeWindow,
+  type Transaction,
+} from '@clubshell/contracts';
 
 const WEEKDAYS = Object.values(Weekday) as Weekday[];
 import {
@@ -16,6 +22,7 @@ import {
   body,
   bool,
   db,
+  enumOf,
   errors,
   findGame,
   findPc,
@@ -38,26 +45,35 @@ import {
   type UserRecord,
 } from '../db.js';
 import {
+  API_TOPUP,
+  CASH_REASONS,
   CLUB_EVENTS,
   DEFAULT_CONTROL,
   club,
   clubHooks,
+  drawerNow,
   emit,
+  expectedCashOf,
   loyaltyOf,
   openShift,
   profileOf,
   quote,
+  shiftView,
   spentOf,
+  tariffRule,
   topupBonus,
   totalsSince,
   visitsOf,
   type AutomationRule,
+  type CashMove,
   type DeviceKind,
+  type ShiftRecord,
   type StaffRecord,
   type StaffRole,
 } from '../club.js';
 import { broadcast, pushToUser } from '../ws.js';
-import { flagsFor, record, summaries } from '../control.js';
+import { flagsFor, inContract, record, summaries } from '../control.js';
+import { operationsPage } from '../operations.js';
 import { addClub, network, networkReport } from '../network.js';
 import { DEFAULT_HEALTH, diagnose, health, updateTicket, type TicketStatus } from '../health.js';
 
@@ -66,6 +82,16 @@ const LEGACY_TOKEN = process.env['MOCK_ADMIN_TOKEN'] ?? 'admin-dev-token';
 function bearer(req: FastifyRequest): string {
   const authz = req.headers.authorization;
   return typeof authz === 'string' && authz.startsWith('Bearer ') ? authz.slice(7).trim() : '';
+}
+
+/**
+ * True when the request comes with the club's API key (an integration, not a person at the desk): the routes that need
+ * a cashier — a guest's seat, a payout, a cash move — refuse it with 403 `staffOnly`; its cash top-ups never reach the
+ * drawer (`apiCash`).
+ */
+export function isApiKey(req: FastifyRequest): boolean {
+  const token = bearer(req);
+  return token !== '' && token === club().apiKey;
 }
 
 /** The signed-in staff member; the legacy static token acts as the owner. `role` limits the route to owners. */
@@ -202,7 +228,8 @@ export function clubRoutes(app: FastifyInstance): void {
     const token = `st_${uuid().replace(/-/g, '')}`;
     c.staffTokens[token] = staff.id;
     markDirty();
-    return { token, staff: { id: staff.id, name: staff.name, role: staff.role }, shift: openShift() };
+    const shift = openShift();
+    return { token, staff: { id: staff.id, name: staff.name, role: staff.role }, shift: shift && shiftView(shift) };
   });
 
   /** Signs the staff member out: the token stops working at once. Always 200, so a repeated sign-out is harmless. */
@@ -218,7 +245,8 @@ export function clubRoutes(app: FastifyInstance): void {
 
   app.get('/admin/me', async (req) => {
     const s = requireStaff(req);
-    return { staff: { id: s.id, name: s.name, role: s.role }, shift: openShift() };
+    const shift = openShift();
+    return { staff: { id: s.id, name: s.name, role: s.role }, shift: shift && shiftView(shift) };
   });
 
   app.get('/admin/staff', async (req) => {
@@ -259,23 +287,26 @@ export function clubRoutes(app: FastifyInstance): void {
   });
 
   // ------------------------------------------------------------------------------------------------ shifts
+  /** The open shift with its X and the cash its drawer should hold now; the last 30 closed ones. */
   app.get('/admin/shift', async (req) => {
     requireStaff(req);
     const shift = openShift();
     return {
-      shift,
-      x: shift ? totalsSince(shift.openedAt) : null,
+      shift: shift && shiftView(shift),
+      x: shift ? totalsSince(shift.openedAt, now(), shift) : null,
       history: club()
         .shifts.filter((s) => s.closedAt !== null)
         .slice(-30)
-        .reverse(),
+        .reverse()
+        .map(shiftView),
+      expectedCash: shift ? drawerNow(shift) : null,
     };
   });
 
   app.post('/admin/shift/open', async (req) => {
     const me = requireStaff(req);
     if (openShift()) throw errors.conflict('shiftOpen');
-    const shift = {
+    const shift: ShiftRecord = {
       id: uuid(),
       staffId: me.id,
       staffName: me.name,
@@ -284,11 +315,14 @@ export function clubRoutes(app: FastifyInstance): void {
       openingCash: int(body(req), 'openingCash', 0, 10_000_000_000),
       closingCash: null,
       totals: null,
+      cashMoves: [],
+      expectedCash: null,
+      closedBy: null,
     };
     club().shifts.push(shift);
     markDirty();
     record(me, 'shiftOpen', { amount: shift.openingCash, detail: me.name, meta: { openingCash: shift.openingCash } });
-    return { shift };
+    return { shift: shiftView(shift) };
   });
 
   app.post('/admin/shift/close', async (req, reply) => {
@@ -298,25 +332,94 @@ export function clubRoutes(app: FastifyInstance): void {
       if (!shift) throw errors.conflict('noShift');
       shift.closedAt = now();
       shift.closingCash = int(body(req), 'closingCash', 0, 10_000_000_000);
-      shift.totals = totalsSince(shift.openedAt, shift.closedAt);
+      shift.totals = totalsSince(shift.openedAt, shift.closedAt, shift);
+      const expected = expectedCashOf(shift.openingCash, shift.totals);
+      shift.expectedCash = expected;
+      shift.closedBy = me.name;
       markDirty();
-      const expected = shift.openingCash + shift.totals.topUpCash;
       // The shift is already marked closed, so `record` sees no open shift: tag the entry with it explicitly.
-      const entry = record(me, 'shiftClose', {
+      record(me, 'shiftClose', {
         amount: shift.closingCash,
         detail: shift.staffName,
         meta: { expected, counted: shift.closingCash, diff: shift.closingCash - expected },
+        shiftId: shift.id,
       });
-      entry.shiftId = shift.id;
+      const t = shift.totals;
       emit(
         'shiftClosed',
-        `${shift.staffName}: сеансы ${money(shift.totals.sessions)}, магазин ${money(shift.totals.shop)}, ` +
+        `${shift.staffName}: сеансы ${money(t.sessions)}, магазин ${money(t.shop)}, ` +
+          `внесено ${money(t.cashIn)}, изъято ${money(t.cashOut)}, выдано гостям ${money(t.payouts)}, ` +
           `касса ${money(shift.closingCash)} (ожидалось ${money(expected)})`,
         { shiftId: shift.id },
       );
-      return { status: 200, body: { shift, expectedCash: expected } };
+      return { status: 200, body: { shift: shiftView(shift), expectedCash: expected } };
     });
   });
+
+  /**
+   * Cash into or out of the drawer (beyond the contract, D-40): a reason code and a note (required for `other`), cash
+   * only, in the open shift. A cash-out cannot take more than the drawer should hold (409 `cashShort {available}`);
+   * with `limits.cashOutOwnerOnly` only the owner takes cash out. The club API key is not a person at the desk.
+   */
+  app.post('/admin/shift/cash', async (req, reply) => {
+    const me = requireStaff(req);
+    // Before the key check, as the server: the club API key is refused whatever it sends.
+    if (isApiKey(req)) throw errors.forbidden('staffOnly');
+    return idempotent(
+      req,
+      reply,
+      async () => {
+        const b = body(req);
+        const kind = enumOf(b, 'kind', ['in', 'out'] as const);
+        const amount = int(b, 'amount', 1, 10_000_000_000);
+        const reasonCode = enumOf(b, 'reasonCode', CASH_REASONS);
+        const note = optStr(b, 'note', 10_000)?.trim() || null;
+        if (note && note.length > 200) throw errors.validation('note', 'max');
+        if (reasonCode === 'other' && !note) throw errors.validation('note', 'required');
+        if (reasonCode === 'other' && note && note.length < 3) throw errors.validation('note', 'min');
+        if (kind === 'out' && club().limits.cashOutOwnerOnly && me.role !== 'owner')
+          throw errors.forbidden('ownerOnly');
+        const shift = openShift();
+        if (!shift) throw errors.conflict('shiftClosed');
+        if (kind === 'out') {
+          const available = drawerNow(shift);
+          if (available < amount) throw errors.conflict('cashShort', { available: uzs(available) });
+        }
+        const move: CashMove = {
+          id: uuid(),
+          kind,
+          amount,
+          reasonCode,
+          note,
+          at: now(),
+          staffId: me.id,
+          staffName: me.name,
+        };
+        shift.cashMoves.push(move);
+        markDirty();
+        record(me, kind === 'in' ? 'cashIn' : 'cashOut', {
+          amount,
+          detail: note ?? reasonCode,
+          meta: { reasonCode, note, movementId: move.id },
+        });
+        const { staffId: _staff, ...movement } = move;
+        return { status: 200, body: { movement, expectedCash: drawerNow(shift) } };
+      },
+      { keyRequired: true },
+    );
+  });
+
+  /**
+   * The shift's operations feed (beyond the contract, D-43): its journal newest first, a paid seat as one row, and
+   * today's money of the club's local day. A cashier reads the open shift and the last closed one, the owner any.
+   */
+  app.get<{ Querystring: { shiftId?: string; before?: string; limit?: string; kinds?: string } }>(
+    '/admin/shift/operations',
+    async (req) => {
+      const me = requireStaff(req);
+      return operationsPage(me, req.query);
+    },
+  );
 
   // ------------------------------------------------------------------------------------------------ settings doc
   /** Everything the owner edits on the "Клуб" pages, minus secrets: the API key has its own owner-only route. */
@@ -368,6 +471,22 @@ export function clubRoutes(app: FastifyInstance): void {
       'stock',
       'webhooks',
     ] as const;
+    // The limits beyond the contract are read by every price and the cash desk: refused, as by the server, when of
+    // the wrong kind (debt limits whole tiyin ≥ 0, the two switches booleans; null or absent is fine).
+    if (isObject(b['limits'])) {
+      const limits = b['limits'];
+      for (const name of ['guestDebtLimit', 'memberDebtLimit']) {
+        const v = limits[name];
+        if (v === undefined || v === null) continue;
+        if (typeof v !== 'number' || !Number.isSafeInteger(v)) throw errors.validation(`limits.${name}`, 'format');
+        if (v < 0) throw errors.validation(`limits.${name}`, 'min');
+      }
+      for (const name of ['guestPostpaid', 'cashOutOwnerOnly']) {
+        const v = limits[name];
+        if (v !== undefined && v !== null && typeof v !== 'boolean')
+          throw errors.validation(`limits.${name}`, 'format');
+      }
+    }
     for (const k of keys) {
       if (k in b) (c as unknown as Record<string, unknown>)[k] = b[k];
     }
@@ -448,7 +567,10 @@ export function clubRoutes(app: FastifyInstance): void {
     return { ok: true };
   });
 
-  /** Price preview the cashier sees before opening time: base, weekday percent, the discount that applies. */
+  /**
+   * Price preview the cashier sees before opening time: base, weekday percent, the discount that applies, the minutes
+   * priced (a package's own) and the `rule` that stops selling it on this PC now (`tariffZone` | `tariffTime` | null).
+   */
   app.post('/admin/quote', async (req) => {
     requireStaff(req);
     const b = body(req);
@@ -457,7 +579,7 @@ export function clubRoutes(app: FastifyInstance): void {
     if (!tariff) throw errors.notFound('tariff');
     if (!pc) throw errors.notFound('pc');
     const minutes = tariff.isPackage ? (tariff.packageMinutes ?? 60) : int(b, 'minutes', 5, 1440);
-    return quote(tariff, minutes, optStr(b, 'userId', 64), pc.zone);
+    return { ...quote(tariff, minutes, optStr(b, 'userId', 64), pc.zone), rule: tariffRule(tariff, pc.zone), minutes };
   });
 
   // ------------------------------------------------------------------------------------------------ clients
@@ -862,7 +984,7 @@ export function clubRoutes(app: FastifyInstance): void {
     const days = Math.min(90, Math.max(1, Number.parseInt(req.query.days ?? '7', 10) || 7));
     const from = new Date(Date.now() - days * 86_400_000).toISOString();
     const c = club();
-    const inPeriod = c.audit.filter((e) => e.at >= from);
+    const inPeriod = c.audit.filter((e) => e.at >= from && inContract(e));
     const flags = flagsFor(inPeriod);
     const staffId = req.query.staffId;
     return {
@@ -966,19 +1088,35 @@ export function clubRoutes(app: FastifyInstance): void {
       topProducts: [...products.values()].sort((a, b) => b.amount - a.amount).slice(0, 8),
       shifts: club()
         .shifts.filter((s) => s.openedAt >= sinceIso)
-        .reverse(),
+        .reverse()
+        .map(shiftView),
     };
   });
 }
 
-/** Counter top-up with the tier bonus; shared by the old `/admin/wallet/topup` route. */
-export function topUpWithBonus(user: UserRecord, amount: number, method: string): { bonus: number } {
-  applyTransaction(user, 'topUp', uzs(amount), `Top-up at the counter (${method})`, null);
-  const bonus = topupBonus(amount);
+/**
+ * Counter top-up with the tier bonus; shared by `/admin/wallet/topup` and the seat routes. The bonus is paid only on
+ * new money — the part above a debt (D-35) — and never to a walk-in guest (D-36). `settleDebt` takes a debt: no bonus,
+ * no big-top-up event, no automation. A top-up with the club API key says so (it never reaches the drawer).
+ */
+export function topUpWithBonus(
+  user: UserRecord,
+  amount: number,
+  method: string,
+  options: { settleDebt?: boolean; viaApi?: boolean } = {},
+): { bonus: number; transaction: Transaction } {
+  const debt = Math.max(0, -user.balance.amount);
+  const description = options.viaApi
+    ? `Top-up ${API_TOPUP} (${method})`
+    : options.settleDebt
+      ? `Debt paid at the counter (${method})`
+      : `Top-up at the counter (${method})`;
+  const transaction = applyTransaction(user, 'topUp', uzs(amount), description, null);
+  const bonus = options.settleDebt || user.transient ? 0 : topupBonus(Math.max(0, amount - debt));
   if (bonus > 0) applyTransaction(user, 'bonus', uzs(bonus), 'Бонус за пополнение', null);
   pushToUser(user.id, 'walletUpdated', balanceOf(user));
-  clubHooks.topUp(user, amount);
-  return { bonus };
+  if (!options.settleDebt) clubHooks.topUp(user, amount);
+  return { bonus, transaction };
 }
 
 export type { ShellFeatures };

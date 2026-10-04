@@ -14,7 +14,7 @@ namespace ClubShell.Server.Sessions;
 /// The session tick (DESIGN §5.10, §8), every <see cref="SessionsOptions.TickMs"/> under <c>pg_advisory_lock(CSSess)</c>,
 /// for PCs with a fresh heartbeat and an empty agent outbox: a prepaid session becomes <c>ending</c> at <c>ends_at</c> and
 /// is ended with <c>timeUp</c> after <see cref="SessionsOptions.GraceSec"/> (grace is free); a postpaid one ends at the
-/// minute boundary where the next minute exceeds balance + <see cref="SessionsOptions.PostpaidCreditLimit"/> (D-10). Any
+/// minute boundary where the next minute exceeds balance + its limit (<see cref="SessionService.PostpaidLimit"/>, D-10). Any
 /// other PC is left to its agent (it is the authority then, §5.11) until <see cref="SessionsOptions.MaxOfflineMinutes"/>
 /// of silence. A server-side end queues <c>endSession</c> for the agent (§6.4). Every <see cref="SessionsOptions.ResyncSec"/> an open session is pushed to its PC again. Tests call
 /// <see cref="RunOnceAsync"/> with the fixture's clock; the hosted loop runs only with <c>Workers:Enabled</c>.
@@ -42,7 +42,7 @@ public sealed class SessionTickWorker(
             // ponytail: 100 per tick and all open postpaid re-read each second; page by ends_at/id if a club outgrows it.
             var open = (await c.QueryAsync<TickRow>(
                 """
-                SELECT s.*, p.last_heartbeat_at, w.main_balance, t.settled, u.role, cl.time_zone, cl.settings::text AS club_settings
+                SELECT s.*, p.last_heartbeat_at, w.main_balance, t.settled, u.role, u.transient, cl.time_zone, cl.settings::text AS club_settings
                 FROM sessions s JOIN pcs p ON p.id = s.pc_id JOIN wallets w ON w.user_id = s.user_id
                 JOIN users u ON u.id = s.user_id JOIN clubs cl ON cl.id = s.club_id
                 CROSS JOIN LATERAL (SELECT coalesce(p.last_heartbeat_at > @fresh AND coalesce((p.last_heartbeat->>'offlineQueue')::int, 0) = 0, false) AS settled) t
@@ -71,7 +71,7 @@ public sealed class SessionTickWorker(
                             VALUES (@Id, @ClubId, 'server', 'offlineTimeout', @lastContact, @now, jsonb_build_object('running', @Running), true)
                             """,
                             new { s.Id, s.ClubId, lastContact, now, s.Running }, tx);
-                        await EndAsync(c, tx, s, lastContact, effects);
+                        await EndAsync(c, tx, s, lastContact, effects, signOut: false);
                     }
 
                     continue;
@@ -87,7 +87,12 @@ public sealed class SessionTickWorker(
 
                     if (now >= endsAt.AddSeconds(options.GraceSec))
                     {
-                        await EndAsync(c, tx, s, now, effects);
+                        if (!await SignOutLockAsync(c, tx, s))
+                        {
+                            continue;
+                        }
+
+                        await EndAsync(c, tx, s, now, effects, signOut: true);
                     }
                     else if (s.State != "ending")
                     {
@@ -101,9 +106,10 @@ public sealed class SessionTickWorker(
                     // D-10: stop at the minute boundary where the next second would start a minute beyond balance + limit;
                     // a late tick still ends there, so only fully played minutes are charged and the limit holds.
                     var used = s.Used(now);
-                    if (Pricing.Frozen(s.PricePerHourSnapshot, used + 1, s.DayPct, s.DiscountPct) > s.MainBalance + limit)
+                    if (Pricing.Frozen(s.PricePerHourSnapshot, used + 1, s.DayPct, s.DiscountPct) > s.MainBalance + limit
+                        && await SignOutLockAsync(c, tx, s))
                     {
-                        await EndAsync(c, tx, s, Max(now.AddSeconds((used / 60 * 60) - used), s.LastTransitionAt), effects);
+                        await EndAsync(c, tx, s, Max(now.AddSeconds((used / 60 * 60) - used), s.LastTransitionAt), effects, signOut: true);
                     }
                 }
             }
@@ -138,14 +144,29 @@ public sealed class SessionTickWorker(
     /// <summary>
     /// Settles with <c>timeUp</c> and queues <c>endSession</c> (§5.7 step 7) — without the <c>sessionUpdated</c> push: the
     /// agent would take a pushed end first and close it as <c>admin</c>; the command carries the reason and its
-    /// <c>/end</c> reconciles through <c>409 details.session</c>.
+    /// <c>/end</c> reconciles through <c>409 details.session</c>. With <paramref name="signOut"/> (the time is up or the
+    /// postpaid limit reached, not a PC gone silent) a transient guest is also signed out of the PC (D-28): a throwaway
+    /// account has nothing more to play for there. A member whose prepaid time ran out stays signed in.
     /// </summary>
-    private async Task EndAsync(NpgsqlConnection c, NpgsqlTransaction tx, TickRow s, DateTimeOffset end, SessionEffects effects)
+    private async Task EndAsync(NpgsqlConnection c, NpgsqlTransaction tx, TickRow s, DateTimeOffset end, SessionEffects effects, bool signOut)
     {
         await sessions.SettleAsync(c, tx, s, end, SessionEndReason.TimeUp, effects);
         effects.Sessions.RemoveAll(pushed => pushed.Id == s.Id);
         effects.Commands.Add((s.ClubId, s.PcId, NewCommand.EndSession(new EndSessionCommand(s.Id, SessionEndReason.TimeUp))));
+        if (signOut && s.Transient)
+        {
+            await SessionService.SignOutAsync(c, tx, s.UserId, s.PcId, effects);
+        }
     }
+
+    /// <summary>
+    /// A transient guest's end signs the guest out, so it is serialized with the PC's sign-ins like a desk end (D-27): the
+    /// PC's lock, taken without waiting (the tick already holds the session row; a desk end takes the PC lock first). False
+    /// while a sign-in, desk open or desk end of that PC is in progress: the session is left to the next tick, a second on.
+    /// A member's end signs nobody out and needs no lock.
+    /// </summary>
+    private static async Task<bool> SignOutLockAsync(NpgsqlConnection c, NpgsqlTransaction tx, TickRow s) =>
+        !s.Transient || await AdvisoryLocks.TryPcAsync(c, tx, s.PcId);
 
     /// <summary>Every <c>ResyncSec</c> each open session of a connected PC is pushed again (the agent resyncs its timer).</summary>
     private async Task ResyncAsync(SessionEffects pushed)
@@ -215,6 +236,10 @@ public sealed class SessionTickWorker(
 
         /// <summary>The player's role and the club's zone and settings: a guest's postpaid limit is the club's (<c>limits.guestDebtLimit</c>).</summary>
         public string Role { get; init; } = "";
+
+        /// <summary>A temporary guest account: signed out when its session ends here (D-28).</summary>
+        public bool Transient { get; init; }
+
         public string TimeZone { get; init; } = "Asia/Tashkent";
         public string? ClubSettings { get; init; }
 

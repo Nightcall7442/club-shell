@@ -79,10 +79,36 @@ export interface Seat {
   };
   session: Session | null;
   user: SeatUser | null;
+  /**
+   * The session's player holds a live sign-in on this PC; false — a desk session nobody has signed in to yet (its clock
+   * already runs); null — no session (absent from an older server).
+   */
+  signedIn?: boolean | null;
 }
 
 export interface Member extends SeatUser {
   username: string;
+}
+
+/** A player left with a negative balance (a postpaid bill): an exact `settleDebt` top-up of `debt` clears it. */
+export interface GuestDebt {
+  userId: string;
+  displayName: string;
+  debt: Money;
+  pc: string | null;
+  endedAt: string | null;
+  /** `guest` | `member` | `vip`; absent from an older server, which lists guests only. */
+  role?: string;
+}
+
+/** A walk-in guest with money left on the account: `payable` of it may be given back in cash (`payout`). */
+export interface GuestRefund {
+  userId: string;
+  displayName: string;
+  balance: Money;
+  payable: Money;
+  pc: string | null;
+  endedAt: string | null;
 }
 
 export interface Overview {
@@ -94,8 +120,10 @@ export interface Overview {
   zones: Zone[];
   /** PCs with an open repair ticket and its worst severity. */
   repairs?: { pcId: string; severity: 'high' | 'medium' }[];
-  /** Guests left with a postpaid bill (`limits.guestPostpaid`); a top-up of `debt` clears one. */
-  guestDebts?: { userId: string; displayName: string; debt: Money; pc: string | null; endedAt: string | null }[];
+  /** Unpaid postpaid bills of guests and members («Расчёт с гостями и долги»). */
+  guestDebts?: GuestDebt[];
+  /** Walk-in guests with an unused refund on the account (beyond the contract). */
+  guestRefunds?: GuestRefund[];
 }
 
 /** Error carrying the server's `ErrorCode` so screens can map `insufficientFunds` and friends to copy. */
@@ -150,8 +178,11 @@ async function call<T>(path: string, init?: RequestInit, timeoutMs?: number): Pr
   return (await res.json()) as T;
 }
 
-/** A UUID for `Idempotency-Key`; `crypto.randomUUID` exists only on https/localhost, a LAN console may be plain http. */
-function newKey(): string {
+/**
+ * A UUID for `Idempotency-Key`; `crypto.randomUUID` exists only on https/localhost, a LAN console may be plain http.
+ * A money sheet takes one when the cashier starts an action and keeps it until a definite answer (D-46).
+ */
+export function newKey(): string {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
   const b = crypto.getRandomValues(new Uint8Array(16));
   b[6] = ((b[6] ?? 0) & 0x0f) | 0x40;
@@ -170,17 +201,18 @@ const pendingKeys = new Map<string, { key: string; at: number }>();
 const RETRY_WINDOW_MS = 2 * 60_000;
 
 /**
- * POST of a money action with an `Idempotency-Key`: one key per cashier action, reused when the cashier repeats the
- * same action shortly after a lost answer (no response or 5xx), so the server replays the first result instead of
- * charging twice. A success, a refusal (4xx) or {@link RETRY_WINDOW_MS} ends the action: the next identical request is
- * a new one.
+ * POST of a money action with an `Idempotency-Key`. A sheet that holds its own key for the action (`held`) keeps it
+ * frozen until a definite answer, however late the cashier retries (D-46). Either way the key of a lost answer (no
+ * response or 5xx) is also remembered by path + body: when the cashier closes the frozen sheet and enters the same
+ * action again shortly after, the same key goes out, so the server replays the first result instead of charging twice;
+ * a success, a refusal (4xx) or {@link RETRY_WINDOW_MS} ends the action, and the next identical request is a new one.
  */
-async function postMoney<T>(path: string, payload: unknown): Promise<T> {
+async function postMoney<T>(path: string, payload: unknown, held?: string): Promise<T> {
   const body = JSON.stringify(payload);
   const action = `${path} ${body}`;
   const now = Date.now();
   const pending = pendingKeys.get(action);
-  const key = pending && now - pending.at < RETRY_WINDOW_MS ? pending.key : newKey();
+  const key = pending && now - pending.at < RETRY_WINDOW_MS ? pending.key : (held ?? newKey());
   pendingKeys.set(action, { key, at: now });
   try {
     const r = await call<T>(path, { method: 'POST', body, headers: { 'Idempotency-Key': key } }, MONEY_TIMEOUT_MS);
@@ -200,11 +232,36 @@ const put = <T>(path: string, payload: unknown): Promise<T> =>
   call<T>(path, { method: 'PUT', body: JSON.stringify(payload) });
 const del = <T>(path: string): Promise<T> => call<T>(path, { method: 'DELETE' });
 
+/** The top-up booked with an open or extend (for the receipt); `bonus` is 0 for a guest. */
+export interface SessionPaid {
+  transaction: Transaction;
+  bonus: Money;
+}
+
 export interface SessionResult {
   session: Session;
   charged: Money;
+  /** After the action; after an end it is the settled balance (negative — a debt). */
   balance?: Money;
   refunded?: Money;
+  /** Whose session it is (absent from an older server). */
+  user?: { id: string; displayName: string; role: string };
+  payment?: SessionPaid | null;
+  /** End of a walk-in guest's session: the cash that may be given back now (D-37); null for members. */
+  payable?: Money | null;
+}
+
+export interface TopUpResult {
+  balance: Money;
+  transaction: Transaction;
+  bonus?: Money;
+}
+
+export interface PayoutResult {
+  balance: Money;
+  /** What is still payable after this payout (normally 0). */
+  payable: Money;
+  transaction: Transaction;
 }
 
 /** How the client paid at the counter; the server books the top-up under it and splits the X / Z reports by it. */
@@ -234,28 +291,60 @@ export interface SessionPayment {
 
 export const adminApi = {
   overview: (): Promise<Overview> => call<Overview>('/admin/overview'),
-  openSession: (input: {
-    pcId: string;
-    userId: string;
-    tariffId: string;
-    minutes: number;
-    payment?: SessionPayment;
-  }): Promise<SessionResult> => postMoney<SessionResult>('/admin/sessions', input),
-  extend: (input: {
-    pcId: string;
-    minutes: number;
-    tariffId?: string;
-    payment?: SessionPayment;
-  }): Promise<SessionResult> => postMoney<SessionResult>('/admin/sessions/extend', input),
+  /**
+   * A member's seat. `minutes` stays required by the contract: 60 for a package or postpaid, which the server ignores
+   * there. `prepaid: false` — postpaid (no payment with it).
+   */
+  openSession: (
+    input: {
+      pcId: string;
+      userId: string;
+      tariffId: string;
+      minutes: number;
+      prepaid?: boolean;
+      payment?: SessionPayment;
+    },
+    key?: string,
+  ): Promise<SessionResult> => postMoney<SessionResult>('/admin/sessions', input, key),
+  /**
+   * A walk-in guest's seat (beyond the contract): the server creates the guest account with the session; the guest
+   * presses «Гость» on that PC. Prepaid needs a payment of exactly the price; the key is required.
+   */
+  openGuestSession: (
+    input: {
+      pcId: string;
+      tariffId: string;
+      minutes: number;
+      prepaid: boolean;
+      displayName?: string;
+      payment?: SessionPayment;
+    },
+    key: string,
+  ): Promise<SessionResult> => postMoney<SessionResult>('/admin/sessions/guest', input, key),
+  extend: (
+    input: {
+      pcId: string;
+      minutes: number;
+      tariffId?: string;
+      payment?: SessionPayment;
+    },
+    key?: string,
+  ): Promise<SessionResult> => postMoney<SessionResult>('/admin/sessions/extend', input, key),
   end: (input: { pcId: string }): Promise<SessionResult> => postMoney<SessionResult>('/admin/sessions/end', input),
-  topUp: (input: {
-    userId: string;
-    amount: number;
-    method: PayMethod;
-  }): Promise<{
-    balance: Money;
-    transaction: Transaction;
-  }> => postMoney('/admin/wallet/topup', input),
+  topUp: (
+    input: {
+      userId: string;
+      amount: number;
+      method: PayMethod;
+    },
+    key?: string,
+  ): Promise<TopUpResult> => postMoney('/admin/wallet/topup', input, key),
+  /** Takes a debt to the tiyin: `amount` must equal the debt (409 `debtChanged {debt}` otherwise); no bonus. */
+  settle: (input: { userId: string; amount: number; method: PayMethod }, key: string): Promise<TopUpResult> =>
+    postMoney('/admin/wallet/topup', { ...input, settleDebt: true }, key),
+  /** Gives a walk-in guest's refund back in cash: `amount` must equal what is payable now (beyond the contract). */
+  payout: (input: { userId: string; amount: number }, key: string): Promise<PayoutResult> =>
+    postMoney('/admin/wallet/payout', { ...input, method: 'cash' }, key),
   command: (
     pcId: string,
     input: { kind: 'message' | 'lock' | 'unlock' | 'reboot' | 'shutdown'; text?: string },
@@ -288,6 +377,13 @@ export interface ShiftTotals {
   refunds: number;
   bonuses: number;
   count: number;
+  /** Cash put into / taken out of the drawer (beyond the contract; absent from an older server and old Z reports). */
+  cashIn?: number;
+  cashOut?: number;
+  /** Cash given back to walk-in guests. */
+  payouts?: number;
+  /** Cash top-ups booked with the club API key: not in the drawer, so not in the expected cash. */
+  apiCash?: number;
 }
 export interface Shift {
   id: string;
@@ -298,6 +394,85 @@ export interface Shift {
   openingCash: number;
   closingCash: number | null;
   totals: ShiftTotals | null;
+  /** What the drawer should have held at the close (the server's formula); null while open, absent from an older server. */
+  expectedCash?: number | null;
+  /** Who closed it. */
+  closedBy?: string | null;
+}
+
+/** Cash expected in the drawer of a shift, the server's formula (D-41); for old rows without the server's figure. */
+export function expectedOf(openingCash: number, x: ShiftTotals): number {
+  return openingCash + x.topUpCash - (x.apiCash ?? 0) + (x.cashIn ?? 0) - (x.cashOut ?? 0) - (x.payouts ?? 0);
+}
+
+export type CashMoveKind = 'in' | 'out';
+export type CashReason = 'change' | 'collection' | 'expenses' | 'other';
+
+export interface CashMovement {
+  id: string;
+  kind: CashMoveKind;
+  amount: number;
+  reasonCode: CashReason;
+  note: string | null;
+  at: string;
+  staffName: string;
+}
+
+export type OperationKind =
+  | 'topUp'
+  | 'debtPaid'
+  | 'sessionOpen'
+  | 'sessionExtend'
+  | 'sessionEnd'
+  | 'payout'
+  | 'cashIn'
+  | 'cashOut'
+  | 'shiftOpen'
+  | 'shiftClose'
+  | 'promoRedeem';
+
+/** One row of the shift's operations feed: a paid open is one row with its payment merged in (D-43). */
+export interface Operation {
+  id: string;
+  at: string;
+  kind: OperationKind;
+  staffName: string;
+  client: { id: string; displayName: string; role: string } | null;
+  pc: { id: string; name: string } | null;
+  tariff: string | null;
+  minutes: number | null;
+  prepaid: boolean | null;
+  amount: number;
+  charged: number | null;
+  quote: { base: number; dayPct: number; discountPct: number } | null;
+  paid: { amount: number; method: string; transactionId: string | null } | null;
+  /** Signed effect on the drawer (cash in +, cash out −). */
+  drawer: number;
+  reasonCode: string | null;
+  note: string | null;
+  sessionId: string | null;
+  /** A seat or an extension sold a package (its time is not refunded); absent from an older server. */
+  package?: boolean | null;
+  /** A cash move's own id, the № of its slip (the entry's `id` is the journal's). */
+  movementId?: string | null;
+}
+
+/** Money taken today (the club's local day), by method; `taken − payouts` is the headline. */
+export interface Today {
+  date: string;
+  from: string;
+  byMethod: Record<PayMethod | 'other', number>;
+  taken: number;
+  payouts: number;
+  sessions: number;
+  shop: number;
+}
+
+export interface OperationsPage {
+  shift: { id: string; staffName: string; openedAt: string; closedAt: string | null; closedBy: string | null } | null;
+  items: Operation[];
+  next: string | null;
+  today: Today;
 }
 
 export interface Zone {
@@ -404,6 +579,13 @@ export interface ClubSettings {
     minorCurfew: string;
     guestPostpaid?: boolean;
     guestDebtLimit?: number | null;
+    /**
+     * How far below zero a member's postpaid session may run (tiyin); 0 or absent — no member debt: a member plays
+     * postpaid only while the balance lasts (D-31).
+     */
+    memberDebtLimit?: number | null;
+    /** Only the owner takes cash out of the drawer (D-40). */
+    cashOutOwnerOnly?: boolean;
     /** Minutes the server extends a prepaid session by when it runs out and the balance pays; 0 — off. */
     autoExtendMinutes?: number;
   };
@@ -444,7 +626,11 @@ export type AuditAction =
   | 'stockEdit'
   | 'pcCommand'
   | 'clientPassword'
-  | 'clientCard';
+  | 'clientCard'
+  // Beyond the contract enum (D-44): the Control page has their labels, the server does not send them there yet.
+  | 'cashIn'
+  | 'cashOut'
+  | 'payout';
 
 export interface AuditEntry {
   id: string;
@@ -457,7 +643,8 @@ export interface AuditEntry {
   pcId: string | null;
   amount: number;
   detail: string;
-  meta: Record<string, string | number | boolean | null>;
+  /** Facts of the entry; a session's `quote` is an object. */
+  meta: Record<string, unknown>;
 }
 
 export type FlagKind = 'shortfall' | 'earlyEnds' | 'earlyEnd' | 'discount' | 'sameClient' | 'noShift' | 'bigCash';
@@ -665,6 +852,10 @@ export interface PriceQuote {
   discountPct: number;
   discountReason: string | null;
   total: Money;
+  /** Why the tariff cannot be sold on this PC now (its zone, its time window); null — it can (absent: older server). */
+  rule?: 'tariffZone' | 'tariffTime' | null;
+  /** Minutes priced: the package's own for a package. */
+  minutes?: number;
 }
 
 export interface Reports {
@@ -697,10 +888,29 @@ export const clubApi = {
   updateStaff: (id: string, input: Partial<{ name: string; active: boolean; pin: string }>): Promise<unknown> =>
     patch(`/admin/staff/${id}`, input),
 
-  shift: (): Promise<{ shift: Shift | null; x: ShiftTotals | null; history: Shift[] }> => call('/admin/shift'),
+  /** `expectedCash` — what the open shift's drawer should hold now (absent from an older server). */
+  shift: (): Promise<{ shift: Shift | null; x: ShiftTotals | null; history: Shift[]; expectedCash?: number | null }> =>
+    call('/admin/shift'),
   openShift: (openingCash: number): Promise<{ shift: Shift }> => post('/admin/shift/open', { openingCash }),
   closeShift: (closingCash: number): Promise<{ shift: Shift; expectedCash: number }> =>
     postMoney('/admin/shift/close', { closingCash }),
+  /** Cash put into or taken out of the drawer (beyond the contract); the key is required. */
+  cashMove: (
+    input: { kind: CashMoveKind; amount: number; reasonCode: CashReason; note?: string | null },
+    key: string,
+  ): Promise<{ movement: CashMovement; expectedCash: number }> => postMoney('/admin/shift/cash', input, key),
+  /** The shift's journal, newest first (the open shift by default), and today's money by method. */
+  operations: (
+    q: { shiftId?: string | null; before?: string | null; kinds?: OperationKind[]; limit?: number } = {},
+  ): Promise<OperationsPage> => {
+    const params = new URLSearchParams();
+    if (q.shiftId) params.set('shiftId', q.shiftId);
+    if (q.before) params.set('before', q.before);
+    if (q.kinds && q.kinds.length > 0) params.set('kinds', q.kinds.join(','));
+    if (q.limit) params.set('limit', String(q.limit));
+    const qs = params.toString();
+    return call(`/admin/shift/operations${qs ? `?${qs}` : ''}`);
+  },
 
   settings: (): Promise<ClubSettings> => call('/admin/club'),
   saveSettings: (partial: Partial<ClubSettings>): Promise<unknown> => patch('/admin/club', partial),

@@ -24,20 +24,29 @@ public sealed class PurchaseRulesTests(ServerFixture server) : LedgerCheckedTest
         AssertRule("pcMaintenance", status, body);
     }
 
+    /// <summary>
+    /// A sign-in onto a PC that holds another player's open session is refused (<c>403 pcOccupied</c>, D-26), so two players
+    /// meet on one PC only when the PC's offline log replays a session after the second one signed in: buying time is then
+    /// 409 with the open session.
+    /// </summary>
     [Fact]
     public async Task Open_session_of_the_pc_is_409_with_its_id()
     {
-        var (agent, first) = await Players.SignedInAsync(Server);
-        var (created, session) = await Players.StartAsync(agent, first);
-        Assert.Equal(201, created);
+        var (agent, second) = await Players.SignedInAsync(Server);
+        var token = agent.UserToken;
+        var first = await Players.CreateAsync(Server);
+        agent.UserToken = null;
+        var session = await Players.ReadAsync(await agent.PostAsync(
+            "/api/v1/sessions", OfflineReplayTests.Replay(agent, first, Guid.NewGuid(), Server.Clock.GetUtcNow().AddMinutes(-5)), Guid.NewGuid()), 201);
 
-        // Another player signs in on the same PC (displacing the first) and tries to buy time.
-        var second = await Players.CreateAsync(Server);
-        await agent.LoginAsync(second);
+        agent.UserToken = token;
         var (status, body) = await Players.StartAsync(agent, second);
         AssertError(409, "sessionAlreadyActive", status, body);
         Assert.Equal(session.GetProperty("id").GetGuid(), Details(body).GetProperty("sessionId").GetGuid());
         Assert.Equal(agent.PcId, Details(body).GetProperty("pcId").GetGuid());
+
+        using var login = await agent.PostAsync("/api/v1/auth/login", new { kind = "password", username = second.Username, password = Players.Password, pcId = agent.PcId, hwid = agent.Hwid });
+        await Contract.ReadErrorAsync(login, 403, "forbidden", "pcOccupied");
     }
 
     [Fact]

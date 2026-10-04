@@ -8,7 +8,14 @@
  * older document with defaults, so an existing `.mock-db.json` keeps working. The pricing and rule engines live here
  * too so the admin routes, the kiosk routes and the tick share one implementation.
  */
-import { tariffPriceFor, type Money, type ShellFeatures, type Tariff } from '@clubshell/contracts';
+import {
+  tariffIsValidFor,
+  tariffPriceFor,
+  weekdayFromJsDay,
+  type Money,
+  type ShellFeatures,
+  type Tariff,
+} from '@clubshell/contracts';
 import {
   applyTransaction,
   balanceOf,
@@ -54,6 +61,28 @@ export interface ShiftTotals {
   refunds: number;
   bonuses: number;
   count: number;
+  /** Cash put into / taken out of the drawer (`cashMoves`). */
+  cashIn: number;
+  cashOut: number;
+  /** Cash given back to walk-in guests (cash `adjustment` rows). */
+  payouts: number;
+  /** Cash top-ups booked with the club API key: in `topUpCash`, but never in the drawer. */
+  apiCash: number;
+}
+
+/** Why cash went into or out of the drawer; the note is the cashier's own words (required for `other`). */
+export type CashReason = 'change' | 'collection' | 'expenses' | 'other';
+export const CASH_REASONS: readonly CashReason[] = ['change', 'collection', 'expenses', 'other'];
+
+export interface CashMove {
+  id: string;
+  kind: 'in' | 'out';
+  amount: number;
+  reasonCode: CashReason;
+  note: string | null;
+  at: string;
+  staffId: string;
+  staffName: string;
 }
 
 export interface ShiftRecord {
@@ -65,6 +94,17 @@ export interface ShiftRecord {
   openingCash: number;
   closingCash: number | null;
   totals: ShiftTotals | null;
+  /** Append-only, like the server's `cash_movements`. */
+  cashMoves: CashMove[];
+  /** What the drawer should have held at the close; null while open. */
+  expectedCash: number | null;
+  closedBy: string | null;
+}
+
+/** A shift as the routes send it: the moves stay inside (the feed and the totals carry them). */
+export function shiftView(s: ShiftRecord): Omit<ShiftRecord, 'cashMoves'> {
+  const { cashMoves: _moves, ...rest } = s;
+  return rest;
 }
 
 export interface ClientGroup {
@@ -193,7 +233,11 @@ export type AuditAction =
   | 'stockEdit'
   | 'pcCommand'
   | 'clientPassword'
-  | 'clientCard';
+  | 'clientCard'
+  // Beyond the contract's enum (D-44): in the feed and the Z, not in /admin/control.
+  | 'cashIn'
+  | 'cashOut'
+  | 'payout';
 
 export interface AuditEntry {
   id: string;
@@ -209,8 +253,8 @@ export interface AuditEntry {
   amount: number;
   /** Short human-readable detail in Russian (the console translates the fixed parts). */
   detail: string;
-  /** Extra facts the rules read (e.g. `sessionMinutes`, `discountPct`, `method`). */
-  meta: Record<string, string | number | boolean | null>;
+  /** Extra facts the rules and the feed read (e.g. `sessionMinutes`, `discountPct`, `method`, a session's `quote`). */
+  meta: Record<string, string | number | boolean | null | Record<string, number>>;
 }
 
 /** Thresholds of the cashier-control rules, tuned by the owner. */
@@ -254,7 +298,19 @@ export interface ClubConfig {
   promoCodes: PromoCode[];
   happyHours: HappyHour[];
   loyalty: LoyaltyLevel[];
-  limits: { minorAge: number; minorCurfew: string };
+  /**
+   * `guestPostpaid` / `guestDebtLimit` (null or 0 — no limit) let guests play postpaid; `memberDebtLimit` (0 or absent —
+   * none) is how far a member's postpaid may go below zero; `cashOutOwnerOnly` keeps cash-outs to the owner.
+   */
+  limits: {
+    minorAge: number;
+    minorCurfew: string;
+    guestPostpaid?: boolean;
+    guestDebtLimit?: number | null;
+    memberDebtLimit?: number | null;
+    cashOutOwnerOnly?: boolean;
+    autoExtendMinutes?: number;
+  };
   catalog: { order: string[]; hidden: string[]; featured: string[] };
   banners: Banner[];
   rulesText: { ru: string; uz: string; en: string };
@@ -273,7 +329,7 @@ export interface ClubConfig {
   control: ControlSettings;
 }
 
-const CONFIG_VERSION = 4;
+const CONFIG_VERSION = 5;
 
 export const DEFAULT_CONTROL: ControlSettings = {
   earlyEndMinutes: 10,
@@ -399,10 +455,17 @@ export function club(): ClubConfig {
     store.club = {
       ...base,
       ...old,
-      // Sections added later keep the stored values and gain the new keys; v4 drops the Telegram settings.
+      // Sections added later keep the stored values and gain the new keys; v4 drops the Telegram settings, v5 gives
+      // every shift its drawer moves, expected cash and closer.
       notifications: { bigTopupAt: old.notifications?.bigTopupAt ?? base.notifications.bigTopupAt },
       control: { ...base.control, ...old.control },
       audit: old.audit ?? [],
+      shifts: (old.shifts ?? []).map((s) => ({
+        ...s,
+        cashMoves: s.cashMoves ?? [],
+        expectedCash: s.expectedCash ?? null,
+        closedBy: s.closedBy ?? null,
+      })),
       version: CONFIG_VERSION,
     };
     markDirty();
@@ -493,7 +556,8 @@ export interface PriceQuote {
 /**
  * Price of `minutes` on `tariff` for `userId` in `zone` now: base × weekday/holiday percent, minus the best single
  * discount among client group, loyalty level and a happy hour (discounts do not stack — the club always knows the
- * worst case).
+ * worst case). Without `userId` it is a walk-in: no group, and the loyalty level of zero spend, as the server prices it —
+ * what a new guest account has, so a walk-in guest's seat costs exactly its quote (D-48).
  */
 export function quote(
   tariff: Tariff,
@@ -512,15 +576,35 @@ export function quote(
   if (userId) {
     const group = c.groups.find((g) => g.id === profileOf(userId).groupId);
     if (group && group.discountPct > 0) candidates.push({ pct: group.discountPct, reason: group.name });
-    const level = loyaltyOf(userId);
-    if (level.discountPct > 0) candidates.push({ pct: level.discountPct, reason: level.name });
   }
+  // A walk-in has spent nothing: only a level reached from 0 (the server's `LevelOf(0)`).
+  const level = userId
+    ? loyaltyOf(userId)
+    : [...c.loyalty]
+        .sort((a, b) => a.minSpent - b.minSpent)
+        .filter((l) => l.minSpent <= 0)
+        .at(-1);
+  if (level && level.discountPct > 0) candidates.push({ pct: level.discountPct, reason: level.name });
   const hh = activeHappyHour(zone, at);
   if (hh) candidates.push({ pct: hh.discountPct, reason: hh.name });
   const best = candidates.sort((a, b) => b.pct - a.pct)[0] ?? null;
   const discountPct = best?.pct ?? 0;
   const total = Math.round((base.amount * dayPct * (100 - discountPct)) / 10000 / 100) * 100;
   return { base, dayPct, discountPct, discountReason: best?.reason ?? null, total: uzs(Math.max(0, total)) };
+}
+
+function localClock(d: Date): string {
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+/**
+ * Why `tariff` cannot be sold on a PC of `zone` now — its zones, its time windows (the mock's local clock; the server
+ * uses the club's time zone) — or null. The quote names it; opening and extending refuse with it (403 `policyDenied`).
+ */
+export function tariffRule(tariff: Tariff, zone: string, at = new Date()): 'tariffZone' | 'tariffTime' | null {
+  if (tariff.zones.length > 0 && !tariff.zones.some((z) => z.toLowerCase() === zone.toLowerCase())) return 'tariffZone';
+  if (!tariffIsValidFor(tariff, zone, weekdayFromJsDay(at.getDay()), localClock(at))) return 'tariffTime';
+  return null;
 }
 
 /** Bonus credited for a top-up of `amount` (minor units) by the tier table. */
@@ -575,7 +659,8 @@ async function run(rule: AutomationRule, target: { pcId?: string | null; user?: 
         });
       break;
     case 'bonus':
-      if (user) {
+      // A walk-in guest's throwaway account never gets bonus money (D-36); the rule's other actions still fire.
+      if (user && !user.transient) {
         applyTransaction(user, 'bonus', uzs(a.amount), `Бонус: ${rule.name}`, rule.id);
         pushToUser(user.id, 'walletUpdated', balanceOf(user));
       }
@@ -694,8 +779,13 @@ export function topUpMethod(description: string): PayMethod | 'other' {
   return PAY_METHODS.find((m) => new RegExp(`\\b${m}\\b`, 'i').test(description)) ?? 'other';
 }
 
-/** Money movements since `from` — the X report of an open shift, the Z report when it closes. */
-export function totalsSince(from: string, to: string = now()): ShiftTotals {
+/** Description of a cash payout to a walk-in guest (an `adjustment` row). */
+export const PAYOUT_DESCRIPTION = 'Выдано наличными на кассе';
+/** A cash top-up booked with the club API key says so in its description. */
+export const API_TOPUP = 'via the club API';
+
+/** Money movements since `from` — the X report of an open shift, the Z report when it closes (with its drawer moves). */
+export function totalsSince(from: string, to: string = now(), shift: ShiftRecord | null = null): ShiftTotals {
   const t: ShiftTotals = {
     topUpCash: 0,
     topUpOther: 0,
@@ -705,7 +795,15 @@ export function totalsSince(from: string, to: string = now()): ShiftTotals {
     refunds: 0,
     bonuses: 0,
     count: 0,
+    cashIn: 0,
+    cashOut: 0,
+    payouts: 0,
+    apiCash: 0,
   };
+  for (const m of shift?.cashMoves ?? []) {
+    if (m.kind === 'in') t.cashIn += m.amount;
+    else t.cashOut += m.amount;
+  }
   for (const tx of db.transactions) {
     if (tx.createdAt < from || tx.createdAt > to) continue;
     t.count += 1;
@@ -716,8 +814,12 @@ export function totalsSince(from: string, to: string = now()): ShiftTotals {
         if (method === 'cash') t.topUpCash += a;
         else t.topUpOther += a;
         t.topUpByMethod[method] += a;
+        if (method === 'cash' && tx.description.includes(API_TOPUP)) t.apiCash += a;
         break;
       }
+      case 'adjustment':
+        if (tx.description === PAYOUT_DESCRIPTION) t.payouts += -a;
+        break;
       case 'charge':
         t.sessions += -a;
         break;
@@ -739,4 +841,17 @@ export function totalsSince(from: string, to: string = now()): ShiftTotals {
 
 export function openShift(): ShiftRecord | null {
   return club().shifts.find((s) => s.closedAt === null) ?? null;
+}
+
+/**
+ * Cash the drawer should hold (D-41): the float + the desk's cash top-ups (not the API's) + cash in − cash out − cash
+ * given back to guests. Only the server computes it; the console shows it.
+ */
+export function expectedCashOf(openingCash: number, t: ShiftTotals): number {
+  return openingCash + (t.topUpCash - t.apiCash) + t.cashIn - t.cashOut - t.payouts;
+}
+
+/** What the open shift's drawer should hold right now. */
+export function drawerNow(shift: ShiftRecord): number {
+  return expectedCashOf(shift.openingCash, totalsSince(shift.openedAt, now(), shift));
 }

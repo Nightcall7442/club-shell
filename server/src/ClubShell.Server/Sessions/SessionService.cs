@@ -162,6 +162,18 @@ public sealed class SessionEffects
 
     /// <summary>Sessions opened (not replayed): the <c>sessionStarted</c>/<c>visitCount</c> automation runs after the commit (§5.3).</summary>
     public List<(Guid ClubId, Guid SessionId, Guid PcId, Guid UserId)> Opened { get; } = [];
+
+    /// <summary>
+    /// Players whose token of a PC the change deleted, told <c>userRevoked</c> before the session pushes (<c>seatTaken</c>: the
+    /// desk seated someone else there, D-29 — the agent must drop its player before it applies the new session).
+    /// </summary>
+    public List<(Guid UserId, Guid PcId, string Reason)> RevokedBefore { get; } = [];
+
+    /// <summary>
+    /// Players signed out of a PC after the session pushes and commands (<c>sessionEnded</c>: a desk end, a guest's time-up,
+    /// D-28 — the agent then ends nothing more and drops the player, so the kiosk does not start anything on their balance).
+    /// </summary>
+    public List<(Guid UserId, Guid PcId, string Reason)> RevokedAfter { get; } = [];
 }
 
 /// <summary>The club facts every rule needs.</summary>
@@ -195,9 +207,10 @@ public sealed class SessionService(
     /// <summary>
     /// How far below zero a postpaid session of <paramref name="role"/> may run (D-10): a guest by the club's
     /// <c>limits.guestDebtLimit</c> (null — no limit; guests are let in at all only with <c>limits.guestPostpaid</c>), anyone
-    /// else by <see cref="SessionsOptions.PostpaidCreditLimit"/>.
+    /// else by the club's <c>limits.memberDebtLimit</c> (D-31), or without one by <see cref="SessionsOptions.PostpaidCreditLimit"/>
+    /// (0 by default: a member plays postpaid only while the balance lasts).
     /// </summary>
-    public long? PostpaidLimit(string role, ClubPricing club) => role == "guest" ? club.GuestDebtLimit : options.PostpaidCreditLimit;
+    public long? PostpaidLimit(string role, ClubPricing club) => role == "guest" ? club.GuestDebtLimit : club.MemberDebtLimit ?? options.PostpaidCreditLimit;
 
     public static ApiException PolicyDenied(string rule) =>
         new(StatusCodes.Status403Forbidden, ErrorCode.PolicyDenied, $"Denied by club policy: {rule}", new { rule });
@@ -244,8 +257,8 @@ public sealed class SessionService(
             new { tariffId, clubId, withDeleted },
             tx);
 
-    public static Task<SessionRow?> OpenOfPcAsync(NpgsqlConnection c, Guid pcId) =>
-        c.QuerySingleOrDefaultAsync<SessionRow>($"SELECT {SessionRow.Columns} FROM sessions WHERE pc_id = @pcId AND state <> 'ended'", new { pcId });
+    public static Task<SessionRow?> OpenOfPcAsync(NpgsqlConnection c, Guid pcId, NpgsqlTransaction? tx = null) =>
+        c.QuerySingleOrDefaultAsync<SessionRow>($"SELECT {SessionRow.Columns} FROM sessions WHERE pc_id = @pcId AND state <> 'ended'", new { pcId }, tx);
 
     public static Task<SessionRow?> LockAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid sessionId) =>
         c.QuerySingleOrDefaultAsync<SessionRow>($"SELECT {SessionRow.Columns} FROM sessions WHERE id = @sessionId FOR UPDATE", new { sessionId }, tx);
@@ -281,6 +294,14 @@ public sealed class SessionService(
         var club = await ClubAsync(c, tx, pc.ClubId);
         var buyer = await BuyerAsync(c, tx, club, request.UserId) ?? throw ApiException.NotFound("user");
         var tariff = await TariffAsync(c, tx, club.Id, request.TariffId, withDeleted: replay) ?? throw ApiException.NotFound("tariff");
+
+        // A package is bought whole (D-38): the kiosk already forces prepaid for it, the desk is refused; a replay records
+        // what the agent let happen.
+        if (tariff.IsPackage && !request.Prepaid && !replay)
+        {
+            throw ApiException.Validation("prepaid", "package");
+        }
+
         var start = replay ? Min(request.StartedAt!.Value, now) : now;
         if (replay && now - start > TimeSpan.FromHours(options.MaxReplayHours))
         {
@@ -714,11 +735,19 @@ public sealed class SessionService(
         }
     }
 
-    /// <summary>Sends what a committed change produced; a failure here must not fail a request whose money is committed.</summary>
+    /// <summary>
+    /// Sends what a committed change produced, in this order: <c>userRevoked</c> of a seat taken, the sessions, the wallets,
+    /// the commands, <c>userRevoked</c> of a session ended. A failure here must not fail a request whose money is committed.
+    /// </summary>
     public async Task PublishAsync(SessionEffects effects)
     {
         try
         {
+            foreach (var (userId, pcId, reason) in effects.RevokedBefore)
+            {
+                await pushes.UserRevokedAsync(userId, reason, [pcId]);
+            }
+
             foreach (var session in effects.Sessions.GroupBy(s => s.Id).Select(g => g.Last()))
             {
                 await pushes.SessionAsync(session);
@@ -732,6 +761,11 @@ public sealed class SessionService(
             foreach (var (clubId, pcId, command) in effects.Commands)
             {
                 await commands.EnqueueAsync(clubId, pcId, command);
+            }
+
+            foreach (var (userId, pcId, reason) in effects.RevokedAfter)
+            {
+                await pushes.UserRevokedAsync(userId, reason, [pcId]);
             }
         }
         catch (Exception ex) when (ex is NpgsqlException or InvalidOperationException)
@@ -750,6 +784,16 @@ public sealed class SessionService(
                 logger.LogWarning(ex, "Automation after session {SessionId} opened failed", sessionId);
             }
         }
+    }
+
+    /// <summary>
+    /// Signs the player of an ended session out of its PC in the caller's transaction (D-28): the token goes, and
+    /// <c>userRevoked {reason: sessionEnded}</c> follows the commands after the commit (the agent drops only that player).
+    /// </summary>
+    public static async Task SignOutAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid userId, Guid pcId, SessionEffects effects)
+    {
+        await c.ExecuteAsync("DELETE FROM user_tokens WHERE user_id = @userId AND pc_id = @pcId", new { userId, pcId }, tx);
+        effects.RevokedAfter.Add((userId, pcId, "sessionEnded"));
     }
 
     public static async Task SaveAsync(NpgsqlConnection c, NpgsqlTransaction tx, SessionRow s, DateTimeOffset now) =>
@@ -853,16 +897,26 @@ public sealed class SessionService(
             throw PolicyDenied("minorCurfew");
         }
 
+        if (TariffRule(zone, tariff, club, at) is { } rule)
+        {
+            throw PolicyDenied(rule);
+        }
+    }
+
+    /// <summary>
+    /// Rules 6–7 of §5.2, the tariff's own: <c>tariffZone</c> when the PC's zone is not one of its zones, <c>tariffTime</c>
+    /// outside its windows at <paramref name="at"/> (club-local), else null. <c>adminQuote</c> names it, so the desk shows a
+    /// package card outside its window disabled (D-38); the buyer's rules are checked only on open.
+    /// </summary>
+    public static string? TariffRule(string zone, TariffRow tariff, ClubInfo club, DateTimeOffset at)
+    {
         if (tariff.Zones.Length > 0 && !tariff.Zones.Contains(zone, StringComparer.OrdinalIgnoreCase))
         {
-            throw PolicyDenied("tariffZone");
+            return "tariffZone";
         }
 
         var local = ClubTime.Local(at, club.Pricing.TimeZone);
-        if (!tariff.ToWire().IsValidFor(zone, local.DayOfWeek.ToWeekday(), TimeOnly.FromDateTime(local)))
-        {
-            throw PolicyDenied("tariffTime");
-        }
+        return tariff.ToWire().IsValidFor(zone, local.DayOfWeek.ToWeekday(), TimeOnly.FromDateTime(local)) ? null : "tariffTime";
     }
 
     /// <summary>Rule 8 of §5.2 for an hourly tariff at creation: <c>minMinutes..maxMinutes</c>.</summary>

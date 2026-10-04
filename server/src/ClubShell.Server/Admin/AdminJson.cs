@@ -27,21 +27,29 @@ public static class AdminJson
 
 public sealed record AdminStaffMember(string Id, string Name, string Role, bool Active);
 
-/// <summary>X/Z report; <c>topUpByMethod</c> (beyond the contract) splits the top-ups by payment method.</summary>
+/// <summary>
+/// X/Z report; beyond the contract: <c>topUpByMethod</c> splits the top-ups by payment method, <c>cashIn</c>/<c>cashOut</c>
+/// are the drawer's movements (<c>cash_movements</c>), <c>payouts</c> the cash given back to guests, <c>apiCash</c> the cash
+/// top-ups the club API key posted (never in the drawer). A Z saved before those fields reads them as 0.
+/// </summary>
 public sealed record AdminShiftTotals(
-    long TopUpCash, long TopUpOther, long Sessions, long Shop, long Refunds, long Bonuses, int Count, AdminTopUpByMethod TopUpByMethod);
+    long TopUpCash, long TopUpOther, long Sessions, long Shop, long Refunds, long Bonuses, int Count, AdminTopUpByMethod TopUpByMethod,
+    long CashIn = 0, long CashOut = 0, long Payouts = 0, long ApiCash = 0);
 
 /// <summary>Top-ups of a shift by <c>ledger_entries.method</c>; <c>other</c> — rows with no method.</summary>
 public sealed record AdminTopUpByMethod(long Cash, long Card, long Payme, long Click, long Uzum, long Other);
 
+/// <summary><c>expectedCash</c> (the drawer the close expected; null while open) and <c>closedBy</c> are beyond the contract.</summary>
 public sealed record AdminShift(
-    Guid Id, string StaffId, string StaffName, DateTimeOffset OpenedAt, DateTimeOffset? ClosedAt, long OpeningCash, long? ClosingCash, AdminShiftTotals? Totals);
+    Guid Id, string StaffId, string StaffName, DateTimeOffset OpenedAt, DateTimeOffset? ClosedAt, long OpeningCash, long? ClosingCash, AdminShiftTotals? Totals,
+    long? ExpectedCash = null, string? ClosedBy = null);
 
 public sealed record AdminLoginResponse(string Token, AdminStaffMember Staff, AdminShift? Shift);
 
 public sealed record AdminMeResponse(AdminStaffMember Staff, AdminShift? Shift);
 
-public sealed record AdminShiftState(AdminShift? Shift, AdminShiftTotals? X, IReadOnlyList<AdminShift> History);
+/// <summary><c>expectedCash</c> (beyond the contract): what the open shift's drawer should hold now; null with no shift.</summary>
+public sealed record AdminShiftState(AdminShift? Shift, AdminShiftTotals? X, IReadOnlyList<AdminShift> History, long? ExpectedCash);
 
 public sealed record AdminShiftResponse(AdminShift Shift);
 
@@ -53,30 +61,89 @@ public sealed record AdminSeatUser(Guid Id, string DisplayName, string Role, Mon
 
 public sealed record AdminMember(Guid Id, string DisplayName, string Role, Money Balance, string Username);
 
-public sealed record AdminSeat(Pc Pc, Session? Session, AdminSeatUser? User);
+/// <summary><c>signedIn</c> (beyond the contract, D-49): the session's player holds a live token on the PC; null — no session.</summary>
+public sealed record AdminSeat(Pc Pc, Session? Session, AdminSeatUser? User, bool? SignedIn = null);
 
 public sealed record AdminOccupancy(int Free, int Total);
 
 public sealed record AdminOverview(
     DateTimeOffset At, AdminOccupancy Club, IReadOnlyList<AdminSeat> Seats, IReadOnlyList<Tariff> Tariffs, IReadOnlyList<AdminMember> Users,
-    IReadOnlyList<AdminZone> Zones, IReadOnlyList<object> Repairs, IReadOnlyList<AdminGuestDebt> GuestDebts);
+    IReadOnlyList<AdminZone> Zones, IReadOnlyList<object> Repairs, IReadOnlyList<AdminGuestDebt> GuestDebts, IReadOnlyList<AdminGuestRefund> GuestRefunds);
 
 /// <summary>
-/// An unpaid postpaid bill of a guest (beyond the contract, <c>limits.guestPostpaid</c>): the guest account's negative
-/// balance, to be taken at the counter (a top-up of <c>debt</c> clears it). <c>pc</c>: the PC of the guest's last session.
+/// An unpaid postpaid bill (beyond the contract): a guest's (<c>limits.guestPostpaid</c>) or a member's
+/// (<c>limits.memberDebtLimit</c>) negative balance, to be taken at the counter (<c>adminTopUp {settleDebt}</c> of exactly
+/// <c>debt</c> clears it). <c>pc</c>: the PC of the player's last session in this club.
 /// </summary>
-public sealed record AdminGuestDebt(Guid UserId, string DisplayName, Money Debt, string? Pc, DateTimeOffset? EndedAt);
+public sealed record AdminGuestDebt(Guid UserId, string DisplayName, Money Debt, string? Pc, DateTimeOffset? EndedAt, string Role);
 
-/// <summary>Open/extend: <c>balance</c>; end: <c>refunded</c> — the other key is left out (optional, not nullable).</summary>
+/// <summary>
+/// A walk-in guest's money left on the throwaway account after the desk ended the session (beyond the contract, D-37):
+/// <c>balance</c>, and <c>payable</c> — the part the desk may give back in cash now (<c>POST /admin/wallet/payout</c>).
+/// </summary>
+public sealed record AdminGuestRefund(Guid UserId, string DisplayName, Money Balance, Money Payable, string? Pc, DateTimeOffset? EndedAt);
+
+/// <summary>The player of a desk action (beyond the contract): the receipt and the settle sheet name them.</summary>
+public sealed record AdminSessionUser(Guid Id, string DisplayName, string Role);
+
+/// <summary>The money taken with an open or extend (beyond the contract): the top-up row and its tier bonus, for the receipt.</summary>
+public sealed record AdminSessionPaid(Transaction Transaction, Money Bonus);
+
+/// <summary>
+/// Open: <c>balance</c>, <c>user</c>, <c>payment</c> (when paid); extend: <c>balance</c>, <c>payment</c> (when paid); end:
+/// <c>refunded</c>, <c>balance</c> (after the settlement; negative — a debt), <c>user</c> and <c>payable</c> (transient guests
+/// only: the cash payout allowed now). A key that does not apply is left out (optional, not nullable).
+/// </summary>
 public sealed record AdminSessionResult(
     Session Session,
     Money Charged,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Money? Balance = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Money? Refunded = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Money? Refunded = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] AdminSessionUser? User = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] AdminSessionPaid? Payment = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Money? Payable = null);
 
 public sealed record AdminTopUpResponse(Money Balance, Transaction Transaction, Money Bonus);
 
-public sealed record AdminPriceQuote(Money Base, int DayPct, int DiscountPct, string? DiscountReason, Money Total);
+/// <summary><c>payable</c>: what is still payable after this payout (normally 0).</summary>
+public sealed record AdminPayoutResponse(Money Balance, Money Payable, Transaction Transaction);
+
+/// <summary>
+/// <c>rule</c> (beyond the contract): the tariff's own refusal now (<c>tariffZone</c> | <c>tariffTime</c>), null when it can
+/// be sold; <c>minutes</c>: what the price is for (a package's own minutes).
+/// </summary>
+public sealed record AdminPriceQuote(Money Base, int DayPct, int DiscountPct, string? DiscountReason, Money Total, string? Rule, int Minutes);
+
+/// <summary>A drawer movement (<c>cash_movements</c>, beyond the contract); <c>amount</c> in tiyin.</summary>
+public sealed record AdminCashMovement(Guid Id, string Kind, long Amount, string ReasonCode, string? Note, DateTimeOffset At, string StaffName);
+
+public sealed record AdminCashMoveResponse(AdminCashMovement Movement, long ExpectedCash);
+
+/// <summary>The shift an operations page belongs to.</summary>
+public sealed record AdminOperationsShift(Guid Id, string StaffName, DateTimeOffset OpenedAt, DateTimeOffset? ClosedAt, string? ClosedBy);
+
+public sealed record AdminOperationClient(Guid Id, string DisplayName, string Role);
+
+public sealed record AdminOperationPc(Guid Id, string Name);
+
+public sealed record AdminOperationQuote(long Base, int DayPct, int DiscountPct);
+
+public sealed record AdminOperationPaid(long Amount, string Method, Guid? TransactionId);
+
+/// <summary>
+/// One desk operation of the feed (beyond the contract, D-43): a journal entry with the payment merged in. Amounts in
+/// tiyin; <c>drawer</c> — its signed effect on the cash drawer.
+/// </summary>
+public sealed record AdminOperation(
+    Guid Id, DateTimeOffset At, string Kind, string StaffName, AdminOperationClient? Client, AdminOperationPc? Pc, string? Tariff, int? Minutes,
+    bool? Prepaid, long Amount, long? Charged, AdminOperationQuote? Quote, AdminOperationPaid? Paid, long Drawer, string? ReasonCode, string? Note,
+    Guid? SessionId, bool? Package = null, Guid? MovementId = null);
+
+/// <summary>«Сегодня» of the feed: the club's local day so far, by method, in tiyin.</summary>
+public sealed record AdminToday(
+    string Date, DateTimeOffset From, AdminTopUpByMethod ByMethod, long Taken, long Payouts, long Sessions, long Shop);
+
+public sealed record AdminOperationsPage(AdminOperationsShift? Shift, IReadOnlyList<AdminOperation> Items, string? Next, AdminToday Today);
 
 public sealed record AdminPcResponse(Pc Pc);
 
@@ -97,11 +164,22 @@ public sealed record AdminLoginRequest(string? Pin, string? ClubCode);
 /// </summary>
 public sealed record AdminPayment(long? Amount, string? Method);
 
-public sealed record AdminOpenSessionRequest(Guid? PcId, Guid? UserId, Guid? TariffId, int? Minutes, AdminPayment? Payment = null);
+/// <summary><c>prepaid</c> (beyond the contract, D-30): false — postpaid from the desk; absent — prepaid, as before.</summary>
+public sealed record AdminOpenSessionRequest(Guid? PcId, Guid? UserId, Guid? TariffId, int? Minutes, AdminPayment? Payment = null, bool? Prepaid = null);
+
+/// <summary>A walk-in guest's seat (<c>POST /admin/sessions/guest</c>, beyond the contract, D-24).</summary>
+public sealed record AdminGuestSessionRequest(Guid? PcId, Guid? TariffId, int? Minutes, bool? Prepaid, string? DisplayName, AdminPayment? Payment);
 
 public sealed record AdminSessionTarget(Guid? PcId, Guid? SessionId, int? Minutes, Guid? TariffId, AdminPayment? Payment = null);
 
-public sealed record AdminTopUpRequest(Guid? UserId, long? Amount, string? Method);
+/// <summary><c>settleDebt</c> (beyond the contract, D-34): exactly the debt, no bonus.</summary>
+public sealed record AdminTopUpRequest(Guid? UserId, long? Amount, string? Method, bool? SettleDebt = null);
+
+/// <summary>A guest's cash payout (<c>POST /admin/wallet/payout</c>, beyond the contract, D-37).</summary>
+public sealed record AdminPayoutRequest(Guid? UserId, long? Amount, string? Method);
+
+/// <summary>Cash into or out of the drawer (<c>POST /admin/shift/cash</c>, beyond the contract, D-40).</summary>
+public sealed record AdminCashMoveRequest(string? Kind, long? Amount, string? ReasonCode, string? Note);
 
 public sealed record AdminPcCommandRequest(string? Kind, string? Text);
 
