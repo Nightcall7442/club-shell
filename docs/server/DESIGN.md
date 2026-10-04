@@ -375,7 +375,15 @@ X-Signature = lowercase hex( HMAC-SHA256( base64decode(signingSecret),
 - `403` при входе: `banned` — `users.banned` или `client_profiles.blacklisted`; `ageRestricted` — несовершеннолетний
   (`limits.minorAge`, `birth_year`) во время `limits.minorCurfew` по местному времени; `zoneNotAllowed` в v1 не
   отдаётся (модели «зона только для роли» нет); `pcMismatch` — `pcId` тела ≠ `sub`. `409 conflict
-  reason=activeSessionElsewhere {pcId, pcName}` — открытый сеанс пользователя на другом ПК.
+  reason=activeSessionElsewhere {pcId, pcName}` — открытый сеанс пользователя на другом ПК. `403 forbidden
+  reason=pcOccupied` (касса, часть 2, D-26) — на ПК открыт сеанс **другого** игрока: иначе resync сеанса раз в 30 с
+  разблокировал бы рабочий стол под чужим именем. Так отказывают все входы (пароль, карта, «Гость»).
+- Вход и открытие сеанса кассой на одном ПК идут по очереди: транзакция входа берёт `pg_advisory_xact_lock` ПК
+  (`AdvisoryLocks.PcAsync`, D-27), затем читает открытый сеанс ПК и только потом выдаёт токен.
+- «Гость» (`/auth/guest`) сначала смотрит открытый сеанс ПК: гость, которого посадила касса (`origin='cashier'`,
+  `created_by_staff_id`, `users.transient`, D-25), входит в **этот** сеанс, даже при `Club:GuestLogin=false`; любой другой
+  сеанс — `403 pcOccupied`; иначе — новый временный гость, как раньше (`403 guestDisabled`, если выключено). Всё в
+  транзакции входа, так что отказ не оставляет учётки.
 - Успешный вход отзывает прежний user-токен этого ПК и возвращает открытый сеанс этого пользователя на этом ПК.
 - `badCredentials`: `401` с `details.attemptsLeft`. Неудачи считаются по имени (`lower(username)` сети), известному
   или нет: `attemptsLeft` не выдаёт, какие логины существуют. Агент повторяет 401 после refresh с тем же `X-Trace-Id`
@@ -385,6 +393,10 @@ X-Signature = lowercase hex( HMAC-SHA256( base64decode(signingSecret),
 - Отзыв: смена пароля кассиром (OQ-24), блокировка или бан. Токены удаляются, агенту уходит push
   `userRevoked {userId, reason}`. `logout` токен этого ПК удаляет **без** push: агент считает `userRevoked`
   принудительным отзывом и показал бы после обычного выхода «срок входа истёк».
+- Касса, часть 2 (D-28, D-29): завершение сеанса кассой выводит его игрока с этого ПК при любой роли (токен
+  (user, pc) удаляется в той же транзакции, `userRevoked reason=sessionEnded` — после команды `endSession`); тик делает
+  то же для временного гостя, когда время вышло или кончился лимит постоплаты. Открытие сеанса кассой удаляет токен
+  **другого** игрока на этом ПК, `userRevoked reason=seatTaken` уходит до push сеанса.
 
 ### 3.5 Персонал, роли, ключ API
 
@@ -458,7 +470,8 @@ X-Signature = lowercase hex( HMAC-SHA256( base64decode(signingSecret),
 ### 4.2 Таблицы
 
 Миграции: M0001 — ядро и агенты (S0/S1), M0002 — игроки, деньги и сеансы (S2), M0003 — каталог (S3), M0004 —
-касса (S4), M0005 — остальное admin (S5).
+касса (S4), M0005 — остальное admin (S5), M0006 — платформа, M0007 — игры клуба, M0008 — касса, часть 2 (движения
+наличных, кто закрыл смену, журнал по смене).
 
 | Таблица | Ключевые колонки | Ограничения / индексы | Миграция |
 |---|---|---|---|
@@ -485,8 +498,9 @@ X-Signature = lowercase hex( HMAC-SHA256( base64decode(signingSecret),
 | `games` | id, club_id, title, settings_paths text[] NULL, data jsonb (DTO `Game`), updated_at, deleted_at NULL | | M0003 |
 | `launch_reports` | id, club_id, pc_id, game_id, user_id NULL, session_id NULL, phase, started_at, data jsonb, created_at | `UNIQUE(session_id, phase, started_at)` | M0003 |
 | `anticheat_reports` | id, club_id, pc_id, data jsonb, at | составной FK на pcs; пишут WS `anticheatViolation` (S1) и REST (S3) | M0001 |
-| `shifts` | id, club_id, staff_id, staff_name, opened_at, closed_at NULL, opening_cash, closing_cash NULL, expected_cash NULL, totals jsonb NULL | `UNIQUE(club_id) WHERE closed_at IS NULL` | M0004 |
-| `audit_entries` | id, club_id, at, staff_id, staff_name, shift_id NULL, action, user_id NULL, pc_id NULL, amount bigint, detail, meta jsonb | INDEX (club_id, at DESC), (club_id, staff_id, at DESC); append-only | M0004 |
+| `shifts` | id, club_id, staff_id, staff_name, opened_at, closed_at NULL, opening_cash, closing_cash NULL, expected_cash NULL, totals jsonb NULL; closed_by_staff_id NULL, closed_by_name NULL (M0008) | `UNIQUE(club_id) WHERE closed_at IS NULL` | M0004 |
+| `audit_entries` | id, club_id, at, staff_id, staff_name, shift_id NULL, action, user_id NULL, pc_id NULL, amount bigint, detail, meta jsonb | INDEX (club_id, at DESC), (club_id, staff_id, at DESC); `audit_entries_shift (shift_id, at DESC, id DESC) WHERE shift_id IS NOT NULL` (M0008, лента операций); append-only | M0004 |
+| `cash_movements` | id, club_id, shift_id, staff_id, staff_name, kind (`in\|out`), amount bigint > 0, reason_code (`change\|collection\|expenses\|other`), note NULL (1–200; для `other` ≥ 3), created_at | INDEX (shift_id, created_at); append-only (триггеры UPDATE/DELETE/TRUNCATE); без составного FK (club_id, shift_id): у `shifts` нет `UNIQUE(club_id, id)`, смену берёт эндпоинт из клуба сотрудника | M0008 |
 | `promo_codes` | id, club_id, code, kind (`bonus\|discountPct`), value, uses_left NULL, used, expires_at NULL, created_at, deleted_at NULL | `UNIQUE(club_id, upper(code)) WHERE deleted_at IS NULL` | M0005 |
 | `promo_redemptions` | promo_code_id, user_id, op_id, staff_id, redeemed_at | PK (promo_code_id, user_id) | M0005 |
 | `products` | id, club_id, title, category, price, image_url, in_stock, stock_qty NULL ≥0, tags text[], created_at, updated_at, deleted_at NULL | | M0005 |
@@ -537,8 +551,14 @@ X-Signature = lowercase hex( HMAC-SHA256( base64decode(signingSecret),
 - **Смена:** каждая строка получает `shift_id` открытой смены. Писатель берёт `SELECT id FROM shifts … FOR SHARE`,
   закрытие берёт `FOR UPDATE`, так что строка не попадёт в смену после подсчёта Z-отчёта. Строка, пришедшая во время
   закрытия, ждёт его и получает `shift_id NULL`, как строка без открытой смены (её учитывает флаг `noShift`, S5).
-- **X/Z-отчёт:** суммы по `shift_id` с группировкой по type/method. `expectedCash = opening_cash + Σ topUp` с
-  `method='cash'`. Регулярки по описанию, как в `mock/club.ts:689`, нет.
+- **X/Z-отчёт:** суммы по `shift_id` с группировкой по type/method. Регулярки по описанию, как в `mock/club.ts:689`,
+  нет. С кассой, часть 2 (D-41) ожидаемую наличность считает только сервер (`ShiftEndpoints.Expected`):
+  `expectedCash = opening_cash + (Σ topUp cash − apiCash) + cashIn − cashOut − payouts`, где `apiCash` — наличные
+  пополнения ключом API клуба (`staff_id IS NULL`: метод по умолчанию `cash`, а в ящик они не попадали), `cashIn`/`cashOut`
+  — `cash_movements` смены, `payouts` — выдачи гостям. Отдаётся в `GET /admin/shift` (`expectedCash`), в
+  `history[].expectedCash` (колонка `shifts.expected_cash`) и при закрытии.
+- **Выдача гостю наличными** (D-37): строка `adjustment` с отрицательной суммой и `method='cash'` (CHECK M0002 её
+  допускает), `ShiftRequired`; в X/Z — `payouts`. Других строк `adjustment` с методом сервер не пишет.
 - **Провод:** `Transaction {id, userId, type, amount:Money, balanceAfter:Money, description, createdAt, ref}`
   (`cs/src/ClubShell.Contracts/Wallet/Transaction.cs`).
 - **Валюта:** только `UZS`; любая другая во входе → `400 validation reason=unsupported` (OPEN_QUESTIONS L63).
@@ -547,8 +567,17 @@ X-Signature = lowercase hex( HMAC-SHA256( base64decode(signingSecret),
 
 `READ COMMITTED`, явные блокировки строк, инварианты — уникальными индексами; `SERIALIZABLE` не используется.
 
-- **Порядок блокировок** (глобальный, против дедлоков): строка идемпотентности → `sessions` → `wallets` →
-  `products` (по id) → `shifts` (`FOR SHARE`). `SET LOCAL lock_timeout = '10s'`.
+- **Порядок блокировок** (глобальный, против дедлоков; D-47 — как на самом деле): строка идемпотентности →
+  advisory-блокировка ПК (`pg_advisory_xact_lock(hashtextextended('pc:'||id, 0))`, только открытие сеанса кассой и
+  вход игрока, D-27) → `sessions` (`FOR UPDATE`, мутации) → `wallets` → `products` (по id) → `shifts` (`FOR SHARE`;
+  берёт `Ledger` сразу после кошелька) → `pcs FOR KEY SHARE` / вставка сеанса (открытие кассой с оплатой: `CreateAsync`
+  после пополнения) → `user_tokens`. `SET LOCAL lock_timeout = '10s'`.
+- **Сильная блокировка смены.** Закрытие берёт `shifts FOR UPDATE`, изъятие наличных и выдача гостю — `FOR NO KEY
+  UPDATE` (ждёт всех писателей с `FOR SHARE` и другое изъятие, но не мешает `KEY SHARE` проверкам FK, которые делают
+  вставки журнала). Правило: транзакция со сильной блокировкой смены **после неё ничего не блокирует**; выдача и
+  `settleDebt` берут её только после своего единственного кошелька, и никто не блокирует другой кошелёк после смены.
+  Открытие постоплаты берёт смену `FOR SHARE` последней (D-32): строк леджера у него нет, а без блокировки его запись
+  журнала могла бы проскочить закрытие и получить `shift_id NULL` (флаг `noShift` на 0 денег).
 - **Гонки создания сеанса** (киоск/касса/реплей, два ПК одного игрока) — частичные уникальные индексы
   `sessions_open_pc/user`; `unique_violation` → `409 sessionAlreadyActive`.
 - **Мутации сеанса** (pause/resume/extend/end/events/тик/касса) — `FOR UPDATE` на строке сеанса, затем проверка
@@ -926,7 +955,7 @@ FOR UPDATE OF sessions SKIP LOCKED LIMIT 100
 |---|---|---|
 | `sessionUpdated` (`Session`) | ПК сеанса | любой переход, resync 30 с |
 | `walletUpdated` (`Balance`) | все ПК с валидным токеном пользователя | после commit денег |
-| `userRevoked {userId, reason}` | ПК пользователя | бан/blacklist, сброс пароля кассиром (OQ-24); не `logout` (§3.4) — триггеры появятся в S4 |
+| `userRevoked {userId, reason}` | ПК пользователя | бан/blacklist, сброс пароля кассиром (OQ-24); касса, часть 2: `sessionEnded` — завершение кассой (любая роль) и конец времени временного гостя, после команды `endSession`; `seatTaken` — касса посадила на этот ПК другого, до push сеанса (§3.4); не `logout` |
 
 Это все три push с `x-server-status: required`. `notification`, `pcStatusChanged`, `chatMessage`, `orderUpdated`,
 `bookingUpdated`, `tournamentUpdated` в AsyncAPI — `notImplemented`: сервер v1 их **не** шлёт (мок шлёт
@@ -1651,6 +1680,55 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
   скрывается, `blacklisted` — касса делает такого клиента серым), сравнение в памяти по той же причине (`lower()` при
   локали C не сворачивает кириллицу). `playing` — открытый сеанс клиента в этом клубе.
 
+### Касса, часть 2 (после «Касса: смена и выбор клиента»)
+
+- **Зачем:** гость с улицы, постоплата с кассы, пакеты карточками, внесение и изъятие наличных, лента операций смены и
+  чеки. Решения — D-24..D-51 (§12.1); всё за пределами контракта перечислено в §12.2 п. 15. Агент и шелл не меняются.
+- **Гость с улицы** (D-24, D-48): `POST /admin/sessions/guest` (`adminOpenGuestSession`, `Idempotency-Key` обязателен;
+  ключ API клуба — `403 staffOnly`) `{pcId, tariffId, minutes, prepaid?, displayName? (1–32), payment?}` создаёт временного
+  гостя (`Auth/Guests.cs`, как киоск: `guest-<номер ПК>-<8 hex>`, имя по умолчанию «Гость N») и его сеанс в одной
+  транзакции: идемпотентность → блокировка ПК → смена → гость → точная цена (`409 priceChanged {total}`, если оплата ≠
+  цене сейчас) → пополнение без бонуса → `CreateAsync` (`origin='cashier'`). Предоплата требует `payment`, постоплата
+  его запрещает и подчиняется `limits.guestPostpaid`/`guestDebtLimit`. Любой отказ откатывает учётку: ни гостя, ни денег,
+  ни журнала. Кода входа нет — гость жмёт «Гость» на этом ПК (§3.4). Ответ `201 {session, charged, balance, user, payment}`.
+- **Постоплата с кассы** (D-30..D-32): необязательное `prepaid` (по умолчанию `true`) в `adminOpenSession`; `minutes`
+  остаётся обязательным (касса шлёт 60, сервер для постоплаты и пакета его игнорирует). `payment` с `prepaid:false` —
+  `400 field=payment reason=postpaid`; пакет с постоплатой — `400 field=prepaid reason=package` (кроме офлайн-реплея).
+  Клиент играет в минус только до `limits.memberDebtLimit` (тийины; нет или 0 — `Sessions:PostpaidCreditLimit`, то есть 0:
+  только пока хватает баланса); это же правило — у тика и `resume` (`SessionService.PostpaidLimit`). Открытие постоплаты
+  блокирует открытую смену `FOR SHARE` (нет — `409 shiftClosed`), и её id идёт в журнал.
+- **Ответы** (за пределами контракта, лишние ключи контракт допускает): открытие — `user {id, displayName, role}` и
+  `payment {transaction, bonus}` (если платили); продление — `payment`; завершение — `balance` после расчёта (минус — долг),
+  `user` и для временного гостя `payable` (сколько можно выдать наличными сейчас). Отсутствующее значение — ключ опущен.
+- **Долг** (D-33, D-34): `adminTopUp {settleDebt:true}` принимает ровно `−balance` в тийинах (`409 debtChanged {debt}`;
+  долга нет — `409 noDebt`): без бонуса, без `bigTopup`, без `topupAtLeast`; в журнале `topUp` с `meta.debt` (в ленте —
+  `debtPaid`). Обычное пополнение даёт бонус по порогам только с суммы сверх долга (D-35); временный гость бонусов не
+  получает ни по порогам, ни от правил автоматизации (D-36: правило срабатывает и считается, но не начисляет).
+- **Выдача гостю** (D-37, безопасное умолчание): `POST /admin/wallet/payout {userId, amount, method?:'cash'}`
+  (`Idempotency-Key` обязателен, только сотрудник): `payable = max(0, min(баланс, Σ refund − Σ выдач, Σ наличных topUp − Σ
+  выдач))` по леджеру гостя под блокировкой кошелька; сумма должна быть ровно `payable` (`409 payableChanged {payable}`).
+  Только временный гость (`409 notGuest`) без открытого сеанса (`409 guestPlaying`), в открытой смене, и ящик должен её
+  вмещать (`409 cashShort {available}`). Возврат за неиспользованное время по-прежнему только при завершении кассой
+  (D-50): «Выйти» на ПК оставляет время неиспользованным.
+- **Пакеты** (D-38, D-39): `adminQuote` отдаёт ещё `rule` (`tariffZone | tariffTime | null`, `SessionService.TariffRule`)
+  и `minutes` (у пакета — его минуты). Продление пакетом продаёт его минуты, в журнале — реально купленные минуты, цена и
+  оплата; продление почасовым тарифом переключает сеанс на него.
+- **Наличные** (D-40, D-41): `POST /admin/shift/cash {kind: in|out, amount 1…10 000 000 000, reasonCode: change|collection|
+  expenses|other, note?}` (`Idempotency-Key` обязателен; `note` 3–200 обязателен для `other`) — строка `cash_movements` и
+  журнал `cashIn`/`cashOut` в одной транзакции. Изъятие: смена `FOR NO KEY UPDATE`, не больше ожидаемого ящика (`409
+  cashShort {available}`), с `limits.cashOutOwnerOnly` — только владелец (`403 ownerOnly`), от `notifications.bigTopupAt` —
+  событие `suspicious`. Ответ `{movement, expectedCash}`. `AdminShiftTotals` получает `cashIn`, `cashOut`, `payouts`,
+  `apiCash` (старые Z читаются с нулями), `AdminShift` — `expectedCash` и `closedBy` (D-42).
+- **Лента операций** (D-43, D-44): `GET /admin/shift/operations?shiftId=&before=&limit=&kinds=` — журнал смены по индексу
+  `audit_entries_shift`, новые сверху, курсор `before` = base64url `at|id`, `limit` 1–200 (50). Оплаченное открытие или
+  продление — одна строка (`paid`, `quote`); его `topUp` с `meta.forSession` в ленте скрыт, но Control его читает.
+  `drawer` — знаковое влияние строки на ящик (наличные сотрудника), сумма по смене = `expectedCash`. Кассир читает открытую
+  и последнюю закрытую смену, владелец — любую (`403 ownerOnly`). `today` — местный день клуба по способам оплаты,
+  выдачи, время и магазин. `cashIn`, `cashOut`, `payout` — вне перечня `AdminAuditAction`, поэтому `adminControl` их пока
+  не показывает.
+- **Карта зала** (D-49): `seats[].signedIn` — у игрока сеанса есть живой токен этого ПК («ждёт входа», часы уже идут);
+  `guestDebts[]` с `role` и долгами клиентов; новый `guestRefunds[] {userId, displayName, balance, payable, pc, endedAt}`.
+
 ### 11.1 Все 75 required-операций + WS → срезы
 
 | # | operationId | Метод и путь | Срез |
@@ -1768,6 +1846,34 @@ anticheat/report — S3; `PATCH /admin/games/{id}` (реализуется) и `
 | D-21 | Сброс пароля клиента кассиром отзывает его токены (`userRevoked`) |
 | D-22 | Правила: скидки не суммируются (берётся максимум); комендантский час и blacklist проверяются во всех каналах |
 | D-23 | Прод на Railway, регион EU West: один сервис с volume `/app/data`, 1 реплика, Railway Postgres, IP клиента из `X-Real-IP`, MSI вне сервера (§S6). Почему EU West: ближе к Узбекистану у Railway региона нет. Почему облако: клубу не нужен свой сервер, владелец и касса работают откуда угодно, а общая сеть клубов (D-19, пока 501) ляжет туда же. Когда пропадает интернет клуба, ПК работают офлайн (§5.11), но кассир не может открыть новые сеансы. Локализация ПДн: с 27.03.2026 ст. 27¹ закона РУз «О персональных данных» разрешает хранение за рубежом при соблюдении условий. Строго локальными остались биометрия, генетические данные и данные абонентов связи; ClubShell их не хранит. Условия надзора уточнить у юриста |
+| D-24 | Гость с улицы — временная учётка (`role='guest'`, `transient`), её создаёт новый маршрут `POST /admin/sessions/guest` вместе с сеансом в одной транзакции; кода входа нет. Отдельный маршрут, а не необязательный `userId`: §9 контракта разрешает делать обязательное поле необязательным только в `/api/v2` |
+| D-25 | «Гость» на ПК входит в открытый сеанс, только если его открыла касса для временного гостя (`origin='cashier'`, `created_by_staff_id`, `transient`); работает и при `Club:GuestLogin=false` |
+| D-26 | Любой вход (пароль, карта, «Гость») на ПК с открытым сеансом другого игрока — `403 pcOccupied`; «Гость» проверяет это до создания учётки |
+| D-27 | Вход и открытие сеанса кассой на одном ПК сериализуются транзакционной advisory-блокировкой ПК (`AdvisoryLocks.PcAsync`) |
+| D-28 | Завершение кассой выводит игрока с ПК при любой роли (токен удаляется, `userRevoked sessionEnded` после `endSession`); тик — только временного гостя, когда время вышло или кончился лимит; клиент с кончившейся предоплатой остаётся входом (автостарт) |
+| D-29 | Открытие кассой удаляет токен другого игрока на ПК и шлёт `userRevoked seatTaken` до push сеанса |
+| D-30 | Постоплата с кассы для клиентов и гостей: необязательное `prepaid` (по умолчанию `true`); `minutes` остаётся обязательным и для постоплаты/пакета игнорируется |
+| D-31 | Долг клиента на постоплате ограничен `limits.memberDebtLimit` (тийины; нет или ≤ 0 — `Sessions:PostpaidCreditLimit` = 0, без долга); у гостей 0 по-прежнему значит «без лимита», поэтому в консоли это переключатель плюс сумма |
+| D-32 | Открытие постоплаты блокирует открытую смену `FOR SHARE` последней (нет — `409 shiftClosed`) и пишет её id в журнал; открыть любой сеанс без смены нельзя, завершить — можно |
+| D-33 | Счёт постоплаты берут после завершения отдельным листом карты (`settleDebt`) или выдают гостю возврат; неоплаченное ждёт в «Расчёт с гостями и долги», закрытие смены только предупреждает |
+| D-34 | `settleDebt`: ровно `−balance` в тийинах (`409 debtChanged {debt}`, `409 noDebt`), без бонуса, `bigTopup` и `topupAtLeast`; в журнале `topUp` с `meta.debt` |
+| D-35 | Бонус по порогам — только с суммы сверх долга: `Bonus(max(0, amount − debt))`, долг читается под блокировкой кошелька |
+| D-36 | Временный гость бонусных денег не получает: ни по порогам, ни от правила `bonus` (правило срабатывает, сообщения и прочее идут) |
+| D-37 | Выдача гостю наличными, безопасное умолчание: `payable = max(0, min(balance, Σ refund − Σ выдач, Σ наличных topUp − Σ выдач))`, сумма ровно `payable`; только временный гость без открытого сеанса, в открытой смене, ящик должен вмещать (`409 cashShort`); строка `adjustment`, `method='cash'`; клиентам выдач нет |
+| D-38 | Пакеты — только предоплата (`400 prepaid/package`, кроме офлайн-реплея); `adminQuote` отдаёт `rule` и `minutes` |
+| D-39 | Продление пакетного сеанса: «Ещё пакет» (тот же тариф, сервер ставит минуты пакета) или почасовой тариф зоны (явный `tariffId`) |
+| D-40 | Внесение и изъятие — отдельная append-only таблица `cash_movements` с кодом причины (`change\|collection\|expenses\|other`) и заметкой; изъятие — смена `FOR NO KEY UPDATE`, не больше ящика; `limits.cashOutOwnerOnly`; ключ API — `403 staffOnly`; крупное изъятие — `suspicious` |
+| D-41 | `expectedCash = opening + (наличные пополнения сотрудников) + cashIn − cashOut − payouts`; наличные ключа API (`apiCash`) в ящик не считаются; считает только сервер |
+| D-42 | Смена хранит, кто её закрыл (`closed_by_staff_id`, `closed_by_name`) |
+| D-43 | Лента операций — журнал смены (`audit_entries_shift`); оплаченное открытие — одна строка, его `topUp` помечен `forSession` и в ленте скрыт; кассир видит открытую и последнюю закрытую смену, владелец — любую; «сегодня» — местный день клуба |
+| D-44 | Действия журнала `cashIn`, `cashOut`, `payout` пока вне перечня контракта: `adminControl` их не показывает (§12.2 п. 15) |
+| D-45 | Лента в консоли — третьей колонкой только от 1800 CSS px, ниже — в пустом состоянии правой панели |
+| D-46 | Новые POST (`/admin/sessions/guest`, `/admin/shift/cash`, `/admin/wallet/payout`) без `Idempotency-Key` — `400`; консоль держит ключ на всё действие до определённого ответа |
+| D-47 | Порядок блокировок записан как есть (§4.4): идемпотентность → блокировка ПК → sessions → wallets → shifts → pcs/вставка сеанса → user_tokens; после сильной блокировки смены ничего не берётся |
+| D-48 | Предоплата гостя и его продление — ровно цена в момент операции (`409 priceChanged {total}`); клиент может заплатить больше, как раньше |
+| D-49 | `seats[].signedIn`: игрок сеанса держит живой токен этого ПК («ждёт входа» — часы уже идут) |
+| D-50 | Возврат за неиспользованное время — только при завершении кассой (admin/error); «Выйти» гостя оставляет время неиспользованным (вопрос владельцу) |
+| D-51 | Чеки и отчёты печатает браузер (#print-root, `@page` по высоте, настройки бумаги на консоль); «Не является фискальным чеком»; сервер не участвует |
 
 ### 12.2 Изменения контракта (PR в club-contracts, ведёт лид, владелец не нужен)
 
@@ -1797,13 +1903,27 @@ anticheat/report — S3; `PATCH /admin/games/{id}` (реализуется) и `
 14. Касса (§11, «Касса: смена и выбор клиента»): `409 conflict reason=shiftClosed` у `adminTopUp` (409 не объявлен вовсе),
     `adminOpenSession`, `adminExtend`; поле `payment` в `AdminOpenSessionRequest` и `adminExtend`; поле
     `AdminShiftTotals.topUpByMethod`; операция `GET /admin/clients/lookup`.
+15. Касса, часть 2 (§11, «Касса, часть 2»):
+    - `prepaid` в `AdminOpenSessionRequest`;
+    - операции `POST /admin/sessions/guest`, `POST /admin/wallet/payout`, `POST /admin/shift/cash`,
+      `GET /admin/shift/operations` (`Idempotency-Key` обязателен у трёх POST);
+    - `settleDebt` в `AdminTopUpRequest` и `409 noDebt | debtChanged {debt}`;
+    - лишние поля ответов: `AdminSessionResult.user | payment | payable` и `balance` у завершения; `AdminPriceQuote.rule |
+      minutes`; `AdminSeat.signedIn`; `AdminOverview.guestDebts[].role`, `guestRefunds[]`; `AdminShiftTotals.cashIn |
+      cashOut | payouts | apiCash`; `AdminShift.expectedCash | closedBy`; `AdminShiftState.expectedCash`;
+    - `AdminAuditAction` + `cashIn`, `cashOut`, `payout` (`x-enum-added`);
+    - `AdminLimits` + `guestPostpaid`, `guestDebtLimit`, `memberDebtLimit`, `cashOutOwnerOnly`;
+    - `403 forbidden reason=pcOccupied` у `login` и `guestLogin`;
+    - `403 policyDenied` `postpaidNotAllowed | tariffZone | tariffTime` у `adminOpenSession`; `409 priceChanged {total}` у
+      `adminExtend`;
+    - AsyncAPI `pushUserRevoked`: причины `sessionEnded` и `seatTaken`.
 
 ### 12.3 Вопросы владельцу (только то, что без него не решить)
 
 | ID | Вопрос | Умолчание до ответа |
 |---|---|---|
 | Q-1 | Нужен ли отдельный бонусный карман (бонусы не возвращаются и не выводятся, тратятся после основного)? | D-9: всё на основном |
-| Q-2 | Может ли постоплата уходить в минус, и насколько (кредитный лимит постоянного клиента)? | D-10: 0, остановка |
+| Q-2 | Может ли постоплата уходить в минус, и насколько (кредитный лимит постоянного клиента)? | D-10: 0, остановка. Касса, часть 2 (D-31): владелец включает долг в консоли — `limits.memberDebtLimit`; по умолчанию выключен |
 | Q-3 | Защищаться ли в v1 от повтора неидемпотентных запросов (`ReplayMode=Reject`)? | D-4: нет, только лог |
 | Q-4 | Принимать ли офлайн-сеанс по одному токену агента (иначе сеансы, начатые при офлайн-входе, теряются)? | D-11: да |
 | Q-5 | Откуда берётся каталог игр: JSON вручную, библиотека club-server или редактор в кассе? | D-14: JSON |
