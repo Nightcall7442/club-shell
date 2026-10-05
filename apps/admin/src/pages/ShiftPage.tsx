@@ -485,12 +485,7 @@ export default function ShiftPage({ isOwner = false }: { isOwner?: boolean }): J
                 </>
               }
             >
-              <OperationsFeed
-                placement="page"
-                shiftId={shift.id}
-                kinds={['cashIn', 'cashOut', 'payout']}
-                showToday={false}
-              />
+              <OperationsFeed placement="page" shiftId={shift.id} kinds={['cashIn', 'cashOut', 'payout']} />
             </Section>
           )}
 

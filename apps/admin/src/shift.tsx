@@ -30,7 +30,8 @@ import { money, moneyExact } from '@/format';
 import { t } from '@/i18n';
 import { REASONS, REASON_LABEL } from '@/labels';
 import { CashSlip, ShiftReport, printDocument, type ReportMove } from '@/print';
-import { Button, Field, MoneyInput, Note, Sheet, inputCls } from '@/ui';
+import { PlusMinusIcon } from '@/icons';
+import { Button, Field, MoneyInput, Note, Sheet, StatusDot, inputCls } from '@/ui';
 
 const POLL_MS = 30_000;
 const nf = new Intl.NumberFormat('ru-RU');
@@ -329,8 +330,9 @@ function ShiftGate({
 }
 
 /**
- * Top-bar chip: who runs the shift, the cash the drawer should hold and the cashless taken so far; a click goes to the
- * Смена page (the drawer's moves are the «±» button next to it).
+ * Header chip: a status dot, «Смена · {name}» and the mono word «открыта»; a click goes to the Смена page. Its name and
+ * tooltip are the full line with the cash the drawer should hold and the cashless taken so far (the KPI strip shows the
+ * figures; owner pages without the strip still have them on hover). A closed shift reads «Смена не открыта».
  */
 export function ShiftChip({ onClick }: { onClick: () => void }): JSX.Element {
   const { loaded, shift, x, expectedCash } = useShift();
@@ -342,34 +344,31 @@ export function ShiftChip({ onClick }: { onClick: () => void }): JSX.Element {
       })}`
     : null;
   const full = sums ? `${who} · ${sums}` : who;
-  // The sums never shrink: the cashier checks the drawer against them. The name (also in the corner) shows on wide
-  // screens only; the full line is the button's name and tooltip everywhere.
   return (
     <button
       type="button"
       onClick={onClick}
       aria-label={full}
       title={full}
-      className="focus-ring flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-2 py-1 text-sm hover:bg-white/[0.04]"
+      className="focus-ring -mx-2 flex h-9 min-w-0 shrink items-center gap-2.5 whitespace-nowrap rounded-md px-2 text-[13px] font-medium text-text hover:bg-text/[0.04]"
     >
-      <span
-        className={clsx('h-2 w-2 shrink-0 rounded-full', shift ? 'bg-success' : loaded ? 'bg-danger' : 'bg-muted')}
-      />
-      {shift ? (
-        <>
-          <span className="2xl:hidden">{t('Смена')}</span>
-          <span className="hidden 2xl:inline">{who}</span>
-          {sums && <span className="tnum text-muted">· {sums}</span>}
-        </>
-      ) : (
-        who
+      <StatusDot tone={shift ? 'ok' : loaded ? 'danger' : 'muted'} />
+      <span className="truncate">{who}</span>
+      {shift && (
+        <span aria-hidden="true" className="label-sm hidden min-[1280px]:inline">
+          {t('открыта')}
+        </span>
       )}
     </button>
   );
 }
 
-/** «±»: cash into the drawer, cash out of it, the X report on paper. Only in an open shift. */
-export function CashMenu(): JSX.Element | null {
+/**
+ * Cash into the drawer, cash out of it, the X report on paper; only in an open shift. `kpi` — the 44 px tool button of
+ * the «В кассе» card (icon and words, the icon alone below 1400 px); `compact` — the «±» of the header on the owner's
+ * setup pages. Either way it is named «Внесение и изъятие» and opens the same menu.
+ */
+export function CashMenu({ variant = 'compact' }: { variant?: 'kpi' | 'compact' }): JSX.Element | null {
   const { shift, requestCashMove, cashDesk2 } = useShift();
   const club = useClub();
   const [open, setOpen] = useState(false);
@@ -397,7 +396,7 @@ export function CashMenu(): JSX.Element | null {
     <button
       type="button"
       role="menuitem"
-      className="focus-ring flex h-9 w-full items-center px-3 text-left text-sm hover:bg-white/[0.06]"
+      className="focus-ring-inset flex h-11 w-full items-center px-4 text-left text-sm text-text hover:bg-accent/[0.06]"
       onClick={() => {
         setOpen(false);
         act();
@@ -406,6 +405,9 @@ export function CashMenu(): JSX.Element | null {
       {label}
     </button>
   );
+  const kpi = variant === 'kpi';
+  // Under the button, kept inside the screen: the KPI card's popover opens to the left of its right edge.
+  const below = kpi ? 'right-0 top-[calc(100%+8px)]' : 'left-0 top-[calc(100%+8px)]';
   return (
     <div ref={box} className="relative">
       <button
@@ -424,15 +426,27 @@ export function CashMenu(): JSX.Element | null {
             setError(null);
           }
         }}
-        className="focus-ring h-8 w-8 rounded-md border border-line font-mono text-sm text-muted hover:bg-white/[0.06] hover:text-text"
+        className={clsx(
+          'btn-utility focus-ring inline-flex items-center justify-center rounded-md',
+          kpi
+            ? 'h-11 gap-2 whitespace-nowrap px-3 text-[13px] font-medium min-[1400px]:px-3.5'
+            : 'h-9 w-9 font-mono text-sm text-dim',
+        )}
       >
-        ±
+        {kpi ? (
+          <>
+            <PlusMinusIcon size={16} strokeWidth={1.7} />
+            <span className="hidden min-[1400px]:inline">{t('Внесение и изъятие')}</span>
+          </>
+        ) : (
+          '±'
+        )}
       </button>
       {open && (
         <div
           role="menu"
           aria-label={t('Касса')}
-          className="panel absolute left-0 top-10 z-40 flex w-48 flex-col overflow-hidden py-1 shadow-xl"
+          className={clsx('panel-solid anim-rise absolute z-40 flex w-52 flex-col overflow-hidden py-1', below)}
           onKeyDown={(e) => {
             if (e.key === 'Escape') setOpen(false);
           }}
@@ -446,12 +460,9 @@ export function CashMenu(): JSX.Element | null {
         </div>
       )}
       {error && (
-        <p
-          role="alert"
-          className="absolute left-0 top-10 z-40 w-64 rounded-md bg-danger/10 px-3 py-2 text-xs text-danger"
-        >
+        <Note role="alert" tone="err" className={clsx('absolute z-40 w-64 text-xs', below)}>
           {error}
-        </p>
+        </Note>
       )}
     </div>
   );

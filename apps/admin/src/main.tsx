@@ -8,6 +8,15 @@ import '@fontsource-variable/doto';
 import { App } from '@/App';
 import '@/index.css';
 
+// Lite mode for a weak counter PC: no blur behind the glass panels (index.css `html[data-lite]`). Set once per console
+// with localStorage `clubshell.admin.lite` = `1`; read once at start.
+try {
+  const lite = localStorage.getItem('clubshell.admin.lite');
+  if (lite && lite !== '0') document.documentElement.setAttribute('data-lite', '');
+} catch {
+  // storage blocked: the full look
+}
+
 const container = document.getElementById('root');
 if (!container) {
   throw new Error('#root missing');

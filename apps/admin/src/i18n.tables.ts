@@ -1047,6 +1047,42 @@ export const UZ: Record<string, string> = {
   '— очистить поиск': '— qidiruvni tozalash',
   '— последняя позиция': '— oxirgi pozitsiya',
   '✓ выполнено': '✓ bajarildi',
+  // Cash desk F «Командный центр»: the frame (rail, header, KPI strip) and the words the page packages share
+  'Касса · {n} ПК': 'Kassa · {n} ta kompyuter',
+  'Владелец · {n} ПК': 'Egasi · {n} ta kompyuter',
+  'Сводка смены': 'Smena xulosasi',
+  Занято: 'Band',
+  '{n} свободно': '{n} ta boʻsh',
+  '{busy} занято, {free} свободно, {off} недоступно': '{busy} band, {free} boʻsh, {off} ishlamaydi',
+  'Сегодня принято': 'Bugun qabul qilindi',
+  'В кассе': 'Kassada',
+  'безнал {sum} сум': 'naqdsiz {sum} soʻm',
+  'Нет вызовов': 'Chaqiruv yoʻq',
+  'зовёт администратора': 'administratorni chaqirmoqda',
+  Журнал: 'Jurnal',
+  отмена: 'bekor qilish',
+  'Сумма пополнения': 'Toʻldirish summasi',
+  'Ввод с клавиатуры': 'Klaviaturadan kiritish',
+  'Баланс станет': 'Balans boʻladi',
+  'Быстрые суммы': 'Tezkor summalar',
+  'только подставляют сумму в поле': 'faqat summani maydonga qoʻyadi',
+  'Провести оплату': 'Toʻlovni oʻtkazish',
+  'кнопка способа сразу проводит платёж': 'usul tugmasi toʻlovni darhol oʻtkazadi',
+  'Не хватает': 'Yetmaydi',
+  'сдача {sum}': 'qaytim {sum}',
+  Заканчиваются: 'Tugayapti',
+  'В игре': 'Oʻyinda',
+  Начислено: 'Hisoblandi',
+  'Зовёт админа': 'Adminni chaqirmoqda',
+  Сервис: 'Servis',
+  // --- F:A map ---
+  // --- end F:A ---
+  // --- F:B bar, shop, clients ---
+  // --- end F:B ---
+  // --- F:C shift, feed, health ---
+  // --- end F:C ---
+  // --- F:D owner pages ---
+  // --- end F:D ---
 };
 export const EN: Record<string, string> = {
   'Выручка за период': 'Revenue for the period',
@@ -2092,4 +2128,40 @@ export const EN: Record<string, string> = {
   '— очистить поиск': '— clear the search',
   '— последняя позиция': '— the last item',
   '✓ выполнено': '✓ done',
+  // Cash desk F «Командный центр»: the frame (rail, header, KPI strip) and the words the page packages share
+  'Касса · {n} ПК': 'Cash desk · {n} PCs',
+  'Владелец · {n} ПК': 'Owner · {n} PCs',
+  'Сводка смены': 'Shift summary',
+  Занято: 'Busy',
+  '{n} свободно': '{n} free',
+  '{busy} занято, {free} свободно, {off} недоступно': '{busy} busy, {free} free, {off} unavailable',
+  'Сегодня принято': 'Taken today',
+  'В кассе': 'In the drawer',
+  'безнал {sum} сум': 'cashless {sum} sum',
+  'Нет вызовов': 'No calls',
+  'зовёт администратора': 'calls the admin',
+  Журнал: 'Log',
+  отмена: 'cancel',
+  'Сумма пополнения': 'Top-up amount',
+  'Ввод с клавиатуры': 'Type on the keyboard',
+  'Баланс станет': 'Balance after',
+  'Быстрые суммы': 'Quick amounts',
+  'только подставляют сумму в поле': 'only fill in the amount',
+  'Провести оплату': 'Take the payment',
+  'кнопка способа сразу проводит платёж': 'a method button takes the payment at once',
+  'Не хватает': 'Short by',
+  'сдача {sum}': 'change {sum}',
+  Заканчиваются: 'Running low',
+  'В игре': 'In game',
+  Начислено: 'Charged',
+  'Зовёт админа': 'Calls the admin',
+  Сервис: 'Service',
+  // --- F:A map ---
+  // --- end F:A ---
+  // --- F:B bar, shop, clients ---
+  // --- end F:B ---
+  // --- F:C shift, feed, health ---
+  // --- end F:C ---
+  // --- F:D owner pages ---
+  // --- end F:D ---
 };

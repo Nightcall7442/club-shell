@@ -3,9 +3,10 @@
  * calls of the last 12 hours); the top bar's poll and the map's put it here ({@link setCalls}), and every screen reads
  * it ({@link useCalls}). Calls of one PC are one group: «ПК 05 · Иван · Технический · 2 мин назад · ×3 (снова)».
  *
- * - {@link CallsBell}: «Вызовы N» in the top bar, red and pulsing while a call is open; its list answers «Иду» (the PC on
- *   its socket shows «Администратор идёт к вам»; an offline one is not told, and the list says so), shows the PC on the
- *   map, or closes the group. Sound, volume and desktop notifications of this console are set there.
+ * - {@link CallsBell}: «Вызовы N» — the chevron of the KPI strip's amber «Вызовы» card (counter pages) or a bell in the
+ *   header (the owner's setup pages), glowing amber while a call rings; its list answers «Иду» (the PC on its socket
+ *   shows «Администратор идёт к вам»; an offline one is not told, and the list says so), shows the PC on the map, or
+ *   closes the group. Sound, volume and desktop notifications of this console are set there.
  * - {@link CallsRinger}: a short Web Audio beep every 5 s while any call rings (open, not a repeat after «Иду», not a
  *   problem report — those chime once), the tab title flashing «(1) Вызов: ПК 05», an optional desktop notification (a
  *   click shows the PC on the map). Answered or closed on any console, the ringing stops and the notification closes on
@@ -23,7 +24,8 @@ import { showPc } from '@/desk';
 import { describe } from '@/errors';
 import { t } from '@/i18n';
 import { CALL_CATEGORY_LABEL, guestDisplayName } from '@/labels';
-import { Toggle } from '@/ui';
+import { BellIcon, ChevronRightIcon, SpeakerOffIcon } from '@/icons';
+import { Button, Toggle } from '@/ui';
 
 const RING_EVERY_MS = 5000;
 const FLASH_EVERY_MS = 1000;
@@ -404,76 +406,51 @@ export function CallsRinger(): null {
 // The chip and the bell
 // ---------------------------------------------------------------------------------------------------------------------
 
-/** «Звук выключен — включить»: the browser has not allowed sound yet (after a reload with a remembered sign-in). */
-export function AudioUnlockChip(): JSX.Element | null {
+/**
+ * «Звук выключен — включить»: the browser has not allowed sound yet (after a reload with a remembered sign-in). `kpi` —
+ * a small ghost button in the «Вызовы» card (the crossed-out speaker alone); `header` — beside the compact bell on the
+ * owner's setup pages (the words from 1700 px). The words are always its name and tooltip.
+ */
+export function AudioUnlockChip({ variant = 'header' }: { variant?: 'kpi' | 'header' }): JSX.Element | null {
   const state = useAudioState();
   if (state !== 'locked') return null;
   const label = t('Звук выключен — включить');
-  // Below 2xl (a 1366 screen) the crossed-out speaker alone, the words in its name and tooltip: the full words would
-  // push the top bar off the screen.
   return (
     <button
       type="button"
       onClick={unlockAudio}
       aria-label={label}
       title={label}
-      className="focus-ring flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-warning/50 px-2 text-xs font-semibold text-warning hover:bg-warning/10 2xl:px-2.5"
+      className={clsx(
+        'focus-ring flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md text-xs font-medium text-warning',
+        variant === 'kpi'
+          ? 'h-7 px-2 hover:bg-warning/[0.08]'
+          : 'h-9 border border-warning/40 bg-warning/[0.08] px-2.5 hover:bg-warning/[0.14]',
+      )}
     >
-      <SpeakerOffIcon />
-      <span className="hidden 2xl:inline">{label}</span>
+      <SpeakerOffIcon size={16} />
+      {/* In the «Вызовы» card the speaker alone: the card's words come first. */}
+      {variant === 'header' && <span className="hidden min-[1700px]:inline">{label}</span>}
     </button>
   );
 }
 
-function SpeakerOffIcon(): JSX.Element {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-      className="h-4 w-4 shrink-0"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M11 5 6 9H2v6h4l5 4V5zM23 9l-6 6M17 9l6 6" />
-    </svg>
-  );
-}
-
-function BellIcon({ className }: { className?: string }): JSX.Element {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-      className={clsx('h-4 w-4', className)}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0" />
-    </svg>
-  );
-}
-
-/** The amber bell of a calling PC (its map tile, its panel). */
+/** The amber bell of a calling PC (its map tile, its panel); glowing while the call rings. */
 export function CallMark({ ringing }: { ringing: boolean }): JSX.Element {
   return (
     <svg
       viewBox="0 0 24 24"
       role="img"
       aria-label={t('Вызов администратора')}
-      className={clsx('h-3.5 w-3.5 text-warning', ringing && 'animate-pulse')}
+      className={clsx('h-3.5 w-3.5 text-warning', ringing && '[filter:drop-shadow(0_0_4px_rgb(var(--c-warning)/0.9))]')}
       fill="none"
       stroke="currentColor"
       strokeWidth="2.2"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0" />
+      <path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z" />
+      <path d="M10 20.5a2 2 0 0 0 4 0" />
     </svg>
   );
 }
@@ -504,39 +481,23 @@ export function CallGroupActions({
         setBusy(null);
       });
   };
-  const size = compact ? 'h-7 px-2 text-xs' : 'h-8 px-2.5 text-xs';
+  const size = compact ? 'xs' : 'sm';
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex flex-wrap items-center gap-1.5">
         {group.open && (
-          <button
-            type="button"
-            disabled={busy !== null}
-            onClick={() => act('ack')}
-            className={clsx(
-              'focus-ring rounded-md bg-warning font-semibold text-on-accent hover:brightness-110 disabled:opacity-40',
-              size,
-            )}
-          >
+          <Button variant="warn" size={size} disabled={busy !== null} onClick={() => act('ack')}>
             {busy === 'ack' ? '…' : t('Иду')}
-          </button>
+          </Button>
         )}
         {onShowPc && (
-          <button type="button" onClick={onShowPc} className={clsx('focus-ring choice rounded-md font-semibold', size)}>
+          <Button variant="secondary" size={size} onClick={onShowPc}>
             {t('Показать ПК')}
-          </button>
+          </Button>
         )}
-        <button
-          type="button"
-          disabled={busy !== null}
-          onClick={() => act('resolve')}
-          className={clsx(
-            'focus-ring rounded-md font-semibold text-muted hover:bg-white/[0.06] hover:text-text disabled:opacity-40',
-            size,
-          )}
-        >
+        <Button variant="ghost" size={size} disabled={busy !== null} onClick={() => act('resolve')}>
           {busy === 'resolve' ? '…' : t('Закрыть вызов')}
-        </button>
+        </Button>
       </div>
       {!group.open && group.newest.ackedBy && (
         <span className="text-xs text-muted">
@@ -550,7 +511,7 @@ export function CallGroupActions({
         </span>
       )}
       {error && (
-        <span role="alert" className="text-xs text-danger">
+        <span role="alert" className="text-xs text-danger-ink">
           {error}
         </span>
       )}
@@ -558,8 +519,12 @@ export function CallGroupActions({
   );
 }
 
-/** «Вызовы N» in the top bar: the inbox by PC, sound and notification settings of this console. */
-export function CallsBell(): JSX.Element | null {
+/**
+ * «Вызовы N»: the inbox by PC, sound and notification settings of this console; nothing while nobody calls. `kpi` — the
+ * 44 px amber chevron of the «Вызовы» card on the counter pages; `compact` — a bell with the count in the header of the
+ * owner's setup pages. Either way it is named «Вызовы N» and opens the «Вызовы игроков» list.
+ */
+export function CallsBell({ variant = 'compact' }: { variant?: 'kpi' | 'compact' }): JSX.Element | null {
   const calls = useCalls();
   const settings = useSound();
   const [open, setOpen] = useState(false);
@@ -607,31 +572,35 @@ export function CallsBell(): JSX.Element | null {
         }}
         onKeyDown={onEscape}
         className={clsx(
-          'focus-ring flex h-8 items-center gap-1.5 whitespace-nowrap rounded-md border px-2.5 text-sm font-semibold',
-          ringing
-            ? 'animate-pulse border-danger bg-danger/20 text-danger'
-            : 'border-warning/50 text-warning hover:bg-warning/10',
+          'btn-warn focus-ring flex shrink-0 items-center justify-center rounded-md',
+          variant === 'kpi' ? 'h-11 w-11' : 'h-9 gap-1.5 whitespace-nowrap px-2.5 text-[13px] font-semibold',
+          // In the KPI card the card itself glows.
+          ringing && variant === 'compact' && 'motion-safe:anim-warn-glow',
         )}
       >
-        <BellIcon />
-        {/* The word only on a wide screen: at 1366 the top bar has no room for it (the name stays in aria-label). */}
-        <span className="hidden 2xl:inline">{t('Вызовы')}</span>
-        <span className="tnum">{groups.length}</span>
+        {variant === 'kpi' ? (
+          <ChevronRightIcon size={18} strokeWidth={1.8} />
+        ) : (
+          <>
+            <BellIcon size={16} strong />
+            <span className="tnum">{groups.length}</span>
+          </>
+        )}
       </button>
       {open && (
         <div
           role="dialog"
           aria-label={t('Вызовы игроков')}
-          className="panel absolute right-0 top-10 z-40 flex w-[min(30rem,calc(100vw-2rem))] flex-col gap-3 p-3 shadow-2xl shadow-black/60"
+          className="panel-solid anim-rise absolute right-0 top-[calc(100%+8px)] z-40 flex w-[min(30rem,calc(100vw-2rem))] flex-col gap-3 p-4"
           onKeyDown={onEscape}
         >
           <ul
             aria-label={t('Вызовы игроков')}
-            className="flex max-h-[24rem] flex-col divide-y divide-line overflow-y-auto"
+            className="thin-scrollbar flex max-h-[24rem] flex-col divide-y divide-line overflow-y-auto"
           >
             {groups.map((g) => (
               <li key={g.pcId} data-call-pc={g.pcId} className="flex flex-col gap-2 py-2.5">
-                <span className={clsx('text-sm', g.ringing ? 'font-semibold text-danger' : 'text-text')}>
+                <span className={clsx('text-sm', g.ringing ? 'font-semibold text-warning' : 'text-text')}>
                   {groupLine(g, nowMs)}
                 </span>
                 <CallGroupActions
@@ -668,11 +637,11 @@ function SoundSettingsRow({ settings }: { settings: SoundSettings }): JSX.Elemen
           disabled={settings.muted}
           value={Math.round(settings.volume * 100)}
           onChange={(e) => setSound({ volume: Number(e.target.value) / 100 })}
-          className="min-w-0 flex-1 accent-[#9ADFFF] disabled:opacity-40"
+          className="min-w-0 flex-1 disabled:opacity-40"
         />
         <button
           type="button"
-          className="focus-ring choice h-7 rounded-md px-2 text-xs font-semibold"
+          className="focus-ring choice h-7 rounded-md px-2.5 text-xs font-semibold"
           disabled={settings.muted}
           onClick={() => {
             unlockAudio();

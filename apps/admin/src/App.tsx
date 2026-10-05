@@ -1,11 +1,14 @@
 /**
- * The console shell: PIN sign-in, then a top bar (club, clock, the shift chip with the drawer's «±» menu, client
- * search, the players' calls with their bell and sound (`calls.tsx`), hall usage, language, staff) and a sidebar of
- * sections the way Senet lays out its club console — the counter (the map, the bar) first, the owner's configuration
- * below it. Cashiers see the counter, shift, clients and stock; owners see everything.
+ * The console shell, variant F «Командный центр»: PIN sign-in, then the club's dimmed wallpaper behind everything, an
+ * 88 px rail of sections on the left (the counter first, the owner's configuration and business below it; the staff
+ * member and «Выйти» at its foot), and on the right a 44 px header (club, clock, the shift chip, client search,
+ * language), the KPI strip on the counter pages (`kpi.tsx`: occupancy, today's money, the drawer with its «Внесение и
+ * изъятие» menu, the players' calls with their bell and sound) and the page. Cashiers see the counter, shift, clients
+ * and stock; owners see everything; on the owner's setup pages (no strip) the drawer's «±» and the bell sit in the
+ * header beside the chip.
  * The section lives in the URL hash (`#/tariffs`, `#/clients/new`). Without an open shift the console asks to open one
  * (`shift.tsx`); "/" jumps to the client search, whose rows top up a client from anywhere or show their PC on the map.
- * The club's name, limits and the signed-in staff member reach the pages through `ClubContext` (`club.ts`).
+ * The club's name, limits, wallpaper and the signed-in staff member reach the pages through `ClubContext` (`club.ts`).
  */
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
@@ -21,16 +24,39 @@ import {
   type ClubSettings,
   type StaffMember,
 } from '@/api';
+import { Wallpaper } from '@/art';
 import { AudioUnlockChip, CallsBell, CallsRinger, setCalls } from '@/calls';
 import { ClubContext, type ClubState } from '@/club';
 import { GlobalSearch } from '@/clientSearch';
 import { isTyping, sheetOpen, showPc, signedOut } from '@/desk';
 import { describe } from '@/errors';
 import { LANGS, dateLocale, setLang, t, useLang } from '@/i18n';
+import {
+  BoltIcon,
+  BoxIcon,
+  ChartIcon,
+  ClockIcon,
+  CupIcon,
+  DownloadIcon,
+  GamepadIcon,
+  LogoMark,
+  LogoutIcon,
+  MapIcon,
+  MonitorIcon,
+  NetworkIcon,
+  PersonIcon,
+  PulseIcon,
+  ScreenIcon,
+  ShieldIcon,
+  TagIcon,
+  UsersIcon,
+  pathIcon,
+} from '@/icons';
+import { KpiStrip, type HallCounts } from '@/kpi';
 import { TopUpSheet } from '@/paybox';
 import { useInstall } from '@/pwa';
 import { CashMenu, ShiftChip, ShiftProvider } from '@/shift';
-import { Button } from '@/ui';
+import { Button, inputCls } from '@/ui';
 
 /** How often the counter re-reads the club settings (limits the owner may change meanwhile). */
 const SETTINGS_POLL_MS = 60_000;
@@ -61,116 +87,34 @@ interface SectionDef {
   page: React.LazyExoticComponent<(props: { isOwner?: boolean }) => JSX.Element>;
 }
 
-const svg = (d: string): JSX.Element => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth={1.6}
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    aria-hidden="true"
-  >
-    <path d={d} />
-  </svg>
-);
+const BellRuleIcon = pathIcon('M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0', 'BellRuleIcon');
 
-/** Grouped like the work: the counter, then the club's setup, then the business. */
+/** Grouped like the work: the counter, then the club's setup, then the business. The first group is «Касса». */
 const GROUPS: { title: string; items: SectionDef[] }[] = [
   {
     title: 'Касса',
     items: [
-      {
-        id: 'map',
-        title: 'Карта',
-        ownerOnly: false,
-        icon: svg('M3 4h7v7H3zM14 4h7v7h-7zM3 15h7v5H3zM14 15h7v5h-7z'),
-        page: MapPage,
-      },
-      {
-        id: 'bar',
-        title: 'Бар',
-        ownerOnly: false,
-        icon: svg('M5 4h14l-1.5 7a5.5 5.5 0 0 1-11 0L5 4zM12 16.5V21M8 21h8M6 8h12'),
-        page: BarPage,
-      },
-      {
-        id: 'shift',
-        title: 'Смена',
-        ownerOnly: false,
-        icon: svg('M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z'),
-        page: ShiftPage,
-      },
-      {
-        id: 'clients',
-        title: 'Клиенты',
-        ownerOnly: false,
-        icon: svg(
-          'M16 20v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 20v-1a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8',
-        ),
-        page: ClientsPage,
-      },
-      {
-        id: 'shop',
-        title: 'Магазин и склад',
-        ownerOnly: false,
-        icon: svg('M4 7h16l-1.2 11a2 2 0 0 1-2 1.8H7.2a2 2 0 0 1-2-1.8L4 7zM8 10V6a4 4 0 0 1 8 0v4'),
-        page: ShopPage,
-      },
-      {
-        id: 'health',
-        title: 'Состояние ПК',
-        ownerOnly: false,
-        icon: svg('M3 12h4l3-8 4 16 3-8h4'),
-        page: HealthPage,
-      },
+      { id: 'map', title: 'Карта', ownerOnly: false, icon: <MapIcon />, page: MapPage },
+      { id: 'bar', title: 'Бар', ownerOnly: false, icon: <CupIcon />, page: BarPage },
+      { id: 'shift', title: 'Смена', ownerOnly: false, icon: <ClockIcon />, page: ShiftPage },
+      { id: 'clients', title: 'Клиенты', ownerOnly: false, icon: <UsersIcon />, page: ClientsPage },
+      { id: 'shop', title: 'Магазин и склад', ownerOnly: false, icon: <BoxIcon />, page: ShopPage },
+      { id: 'health', title: 'Состояние ПК', ownerOnly: false, icon: <PulseIcon />, page: HealthPage },
     ],
   },
   {
     title: 'Настройка клуба',
     items: [
-      {
-        id: 'pricing',
-        title: 'Тарифы и цены',
-        ownerOnly: true,
-        icon: svg('M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8zM7.5 7.5h.01'),
-        page: PricingPage,
-      },
-      {
-        id: 'hall',
-        title: 'Зал и устройства',
-        ownerOnly: true,
-        icon: svg('M3 5h18v11H3zM8 20h8M12 16v4'),
-        page: HallPage,
-      },
-      {
-        id: 'catalog',
-        title: 'Игры',
-        ownerOnly: true,
-        icon: svg(
-          'M6 8h12a4 4 0 0 1 4 4v3a3 3 0 0 1-5.4 1.8L15 15H9l-1.6 1.8A3 3 0 0 1 2 15v-3a4 4 0 0 1 4-4zM7 11v3M5.5 12.5h3',
-        ),
-        page: CatalogPage,
-      },
-      {
-        id: 'club',
-        title: 'Экран игрока',
-        ownerOnly: true,
-        icon: svg('M12 3a9 9 0 1 0 9 9M12 3v9l6-6'),
-        page: ClubPage,
-      },
-      {
-        id: 'automation',
-        title: 'Автоматизация',
-        ownerOnly: true,
-        icon: svg('M13 2 3 14h9l-1 8 10-12h-9l1-8z'),
-        page: AutomationPage,
-      },
+      { id: 'pricing', title: 'Тарифы и цены', ownerOnly: true, icon: <TagIcon />, page: PricingPage },
+      { id: 'hall', title: 'Зал и устройства', ownerOnly: true, icon: <MonitorIcon />, page: HallPage },
+      { id: 'catalog', title: 'Игры', ownerOnly: true, icon: <GamepadIcon />, page: CatalogPage },
+      { id: 'club', title: 'Экран игрока', ownerOnly: true, icon: <ScreenIcon />, page: ClubPage },
+      { id: 'automation', title: 'Автоматизация', ownerOnly: true, icon: <BoltIcon />, page: AutomationPage },
       {
         id: 'integrations',
         title: 'Уведомления и API',
         ownerOnly: true,
-        icon: svg('M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0'),
+        icon: <BellRuleIcon />,
         page: IntegrationsPage,
       },
     ],
@@ -178,33 +122,17 @@ const GROUPS: { title: string; items: SectionDef[] }[] = [
   {
     title: 'Бизнес',
     items: [
-      {
-        id: 'network',
-        title: 'Сеть клубов',
-        ownerOnly: true,
-        icon: svg('M12 3v6M5 21v-6h14v6M12 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM5 15v-3h14v3'),
-        page: NetworkPage,
-      },
-      { id: 'reports', title: 'Отчёты', ownerOnly: true, icon: svg('M3 3v18h18M7 15l4-4 3 3 5-6'), page: ReportsPage },
-      {
-        id: 'control',
-        title: 'Контроль',
-        ownerOnly: true,
-        icon: svg('M12 3 4 6v6c0 5 3.4 8.5 8 9 4.6-.5 8-4 8-9V6l-8-3zM9 12l2 2 4-4'),
-        page: ControlPage,
-      },
-      {
-        id: 'staff',
-        title: 'Персонал',
-        ownerOnly: true,
-        icon: svg('M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0'),
-        page: StaffPage,
-      },
+      { id: 'network', title: 'Сеть клубов', ownerOnly: true, icon: <NetworkIcon />, page: NetworkPage },
+      { id: 'reports', title: 'Отчёты', ownerOnly: true, icon: <ChartIcon />, page: ReportsPage },
+      { id: 'control', title: 'Контроль', ownerOnly: true, icon: <ShieldIcon />, page: ControlPage },
+      { id: 'staff', title: 'Персонал', ownerOnly: true, icon: <PersonIcon />, page: StaffPage },
     ],
   },
 ];
 
 const ALL = GROUPS.flatMap((g) => g.items);
+/** The counter's pages: these get the KPI strip. */
+const COUNTER = new Set((GROUPS[0]?.items ?? []).map((s) => s.id));
 
 function useHashSection(): [string, (id: string) => void] {
   // `#/clients/new` is the Клиенты section; the page reads the rest itself.
@@ -216,6 +144,12 @@ function useHashSection(): [string, (id: string) => void] {
     return () => window.removeEventListener('hashchange', on);
   }, []);
   return [id, (next) => (window.location.hash = `/${next}`)];
+}
+
+/** «Кассир Азиз» → «АЗ»: the first two letters of the last word, for the rail's avatar. */
+function initials(name: string): string {
+  const last = name.trim().split(/\s+/).at(-1) ?? '';
+  return last.slice(0, 2).toUpperCase() || '·';
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -265,17 +199,23 @@ function Login({ onDone }: { onDone: (staff: StaffMember) => void }): JSX.Elemen
     return () => window.removeEventListener('keydown', on);
   });
 
+  const key = 'focus-ring choice h-14 rounded-md font-display text-[22px] font-medium leading-none';
   return (
-    <div className="flex h-screen items-center justify-center p-6">
-      <div className="panel flex w-[22rem] flex-col items-center gap-6 p-8">
+    <div className="relative isolate flex h-screen items-center justify-center overflow-y-auto p-6">
+      {/* Before sign-in the club is not known yet: the console's own wallpaper, let through a little more. */}
+      <Wallpaper url={null} strong />
+      <div className="panel-solid edge-top relative flex w-[360px] max-w-full flex-col items-center gap-6 rounded-xl px-8 pb-7 pt-8">
         <div className="flex items-center gap-3">
-          <span aria-hidden="true" className="h-6 w-6 rotate-45 border border-accent/70" />
-          <span className="font-display text-lg tracking-tight">ClubShell</span>
+          <LogoMark size={30} />
+          <span className="font-display text-lg font-medium tracking-[-0.01em] text-hi">ClubShell</span>
         </div>
-        <label className="flex w-full flex-col gap-1">
-          <span className="label">{t('Код клуба')}</span>
+        <label className="flex w-full flex-col gap-2">
+          <span className="label-sm">{t('Код клуба')}</span>
           <input
-            className="focus-ring h-10 rounded-md border border-line bg-transparent px-3 text-center font-mono uppercase tracking-widest placeholder:font-sans placeholder:normal-case placeholder:tracking-normal"
+            className={clsx(
+              inputCls,
+              'text-center font-mono uppercase tracking-widest placeholder:font-sans placeholder:normal-case placeholder:tracking-normal',
+            )}
             value={clubCode}
             maxLength={12}
             autoComplete="off"
@@ -287,15 +227,17 @@ function Login({ onDone }: { onDone: (staff: StaffMember) => void }): JSX.Elemen
             }}
           />
         </label>
-        <div className="flex flex-col items-center gap-2">
-          <span className="label">{t('Введите PIN')}</span>
-          <div className="flex h-10 items-center gap-2" aria-live="polite">
+        <div className="flex flex-col items-center gap-3">
+          <span className="label-sm">{t('Введите PIN')}</span>
+          <div className="flex h-6 items-center gap-3" aria-live="polite">
             {Array.from({ length: Math.max(4, pin.length) }, (_, i) => (
               <span
                 key={i}
                 className={clsx(
-                  'h-3 w-3 rounded-full border',
-                  i < pin.length ? 'border-accent bg-accent' : 'border-line',
+                  'h-2.5 w-2.5 rounded-full border transition-colors',
+                  i < pin.length
+                    ? 'border-accent bg-accent shadow-[0_0_10px_rgb(var(--c-accent)/0.8)]'
+                    : 'border-muted/70',
                 )}
               />
             ))}
@@ -303,67 +245,71 @@ function Login({ onDone }: { onDone: (staff: StaffMember) => void }): JSX.Elemen
         </div>
         <div className="grid w-full grid-cols-3 gap-2">
           {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((d) => (
-            <button
-              key={d}
-              type="button"
-              className="focus-ring choice num-dot h-14 rounded-md text-2xl"
-              onClick={() => press(d)}
-            >
+            <button key={d} type="button" className={key} onClick={() => press(d)}>
               {d}
             </button>
           ))}
-          <button
-            type="button"
-            className="focus-ring h-14 rounded-md text-sm text-muted hover:text-text"
-            onClick={() => setPin('')}
-          >
+          <button type="button" className="btn-ghost focus-ring h-14 rounded-md text-[13px]" onClick={() => setPin('')}>
             {t('Сброс')}
           </button>
-          <button
-            type="button"
-            className="focus-ring choice num-dot h-14 rounded-md text-2xl"
-            onClick={() => press('0')}
-          >
+          <button type="button" className={key} onClick={() => press('0')}>
             0
           </button>
           <button
             type="button"
-            className="focus-ring h-14 rounded-md text-sm text-muted hover:text-text"
+            className="btn-ghost focus-ring h-14 rounded-md text-lg"
             aria-label={t('Стереть')}
             onClick={() => setPin((p) => p.slice(0, -1))}
           >
             ⌫
           </button>
         </div>
-        <Button variant="primary" className="w-full" disabled={pin.length < 4 || busy} onClick={() => void submit(pin)}>
+        <Button
+          variant="primary"
+          size="lg"
+          className="w-full"
+          disabled={pin.length < 4 || busy}
+          onClick={() => void submit(pin)}
+        >
           {t('Войти')}
         </Button>
-        {error && <p className="text-center text-sm text-danger">{error}</p>}
+        {error && <p className="text-center text-sm font-medium text-danger-ink">{error}</p>}
         {/* The demo PINs exist only on the mock and the dev seed; a production build talks to a real club. */}
         {import.meta.env.DEV && (
           <p className="text-center text-xs text-muted">{t('Демо: владелец 0000, кассир 1111')}</p>
         )}
-        <InstallButton className="h-9 justify-center rounded-md px-3" />
+        <InstallButton variant="login" />
       </div>
     </div>
   );
 }
 
-/** The browser's install offer as the console's own button; nothing when there is none (installed, or no such browser). */
-function InstallButton({ className }: { className?: string }): JSX.Element | null {
+/**
+ * The browser's install offer as the console's own button; nothing when there is none (installed, or no such browser).
+ * `rail` — an icon item at the foot of the rail; `login` — a quiet line under the PIN pad.
+ */
+function InstallButton({ variant }: { variant: 'rail' | 'login' }): JSX.Element | null {
   const { canInstall, install } = useInstall();
   if (!canInstall) return null;
-  return (
+  const label = t('Установить приложение');
+  return variant === 'rail' ? (
     <button
       type="button"
       onClick={() => void install()}
-      className={clsx(
-        'focus-ring flex items-center gap-3 text-left text-sm text-muted transition-colors hover:bg-white/[0.03] hover:text-text [&>svg]:h-5 [&>svg]:w-5 [&>svg]:shrink-0',
-        className,
-      )}
+      aria-label={label}
+      title={label}
+      className="focus-ring flex h-10 w-10 items-center justify-center rounded-md text-muted transition-colors hover:bg-text/[0.04] hover:text-text"
     >
-      {svg('M12 4v11m0 0-4-4m4 4 4-4M5 19h14')}
-      {t('Установить приложение')}
+      <DownloadIcon size={18} />
+    </button>
+  ) : (
+    <button
+      type="button"
+      onClick={() => void install()}
+      className="btn-ghost focus-ring flex h-9 items-center justify-center gap-2 rounded-md px-3 text-[13px]"
+    >
+      <DownloadIcon size={18} />
+      {label}
     </button>
   );
 }
@@ -372,18 +318,24 @@ function InstallButton({ className }: { className?: string }): JSX.Element | nul
 // Shell
 // ---------------------------------------------------------------------------------------------------------------------
 
+/** A 1×28 hairline between the header's blocks. */
+function Separator(): JSX.Element {
+  return <span aria-hidden="true" className="h-7 w-px shrink-0 bg-accent/[0.12]" />;
+}
+
 export function App(): JSX.Element {
   const lang = useLang();
   const [staff, setStaff] = useState<StaffMember | null>(null);
   const [checking, setChecking] = useState(hasToken());
   const [section, go] = useHashSection();
-  const [usage, setUsage] = useState<{ busy: number; total: number } | null>(null);
+  const [hall, setHall] = useState<HallCounts | null>(null);
   const [now, setNow] = useState(new Date());
-  // The club this console is signed in to (a server may hold several): its display name and the limits the seat
-  // panel follows, from the club settings.
+  // The club this console is signed in to (a server may hold several): its display name, the limits the seat panel
+  // follows and the wallpaper behind the console, from the club settings.
   const [clubName, setClubName] = useState<string | null>(null);
   const [limits, setLimits] = useState<ClubSettings['limits'] | null>(null);
-  // A client being topped up from the top-bar search (on any page, with or without a PC).
+  const [wallpaperUrl, setWallpaperUrl] = useState<string | null>(null);
+  // A client being topped up from the header's search (on any page, with or without a PC).
   const [topUpFor, setTopUpFor] = useState<ClientHit | null>(null);
   const search = useRef<HTMLInputElement>(null);
   // A sheet left open by whoever signed out does not greet the next one.
@@ -415,7 +367,8 @@ export function App(): JSX.Element {
   const refreshTop = useCallback(async () => {
     try {
       const o = await adminApi.overview();
-      setUsage({ busy: o.club.total - o.club.free, total: o.club.total });
+      // Occupied: seats with a session (an offline, locked or serviced PC without one is not).
+      setHall({ occupied: o.seats.filter((s) => s.session).length, free: o.club.free, total: o.club.total });
       // The players' calls ride on the same poll (the map's own poll refreshes them faster).
       setCalls(o.calls);
     } catch {
@@ -450,6 +403,7 @@ export function App(): JSX.Element {
       .then((s) => {
         setClubName(s.branding.clubName);
         setLimits(s.limits);
+        setWallpaperUrl(s.branding.wallpaperUrl || null);
       })
       .catch(() => undefined);
   }, []);
@@ -458,6 +412,8 @@ export function App(): JSX.Element {
     if (!staff) {
       setClubName(null);
       setLimits(null);
+      setWallpaperUrl(null);
+      setHall(null);
       return undefined;
     }
     loadSettings();
@@ -466,8 +422,8 @@ export function App(): JSX.Element {
   }, [staff, loadSettings]);
 
   const club = useMemo<ClubState>(
-    () => ({ clubName, limits, staff, reload: loadSettings }),
-    [clubName, limits, staff, loadSettings],
+    () => ({ clubName, limits, wallpaperUrl, staff, reload: loadSettings }),
+    [clubName, limits, wallpaperUrl, staff, loadSettings],
   );
 
   useEffect(() => {
@@ -484,127 +440,181 @@ export function App(): JSX.Element {
   if (checking) return <div className="h-screen" />;
   if (!staff) return <Login onDone={setStaff} />;
 
-  const allowed = ALL.filter((s) => !s.ownerOnly || staff.role === 'owner');
+  const owner = staff.role === 'owner';
+  const allowed = ALL.filter((s) => !s.ownerOnly || owner);
   const current = allowed.find((s) => s.id === section) ?? allowed[0];
   const Page = current?.page ?? MapPage;
+  const counter = current ? COUNTER.has(current.id) : true;
   const locale = dateLocale();
 
   const shell = (
     <ShiftProvider key={staff.id} staff={staff} onSignOut={signOut}>
-      <div className="grid h-screen grid-cols-[15rem_minmax(0,1fr)] grid-rows-[4rem_minmax(0,1fr)]">
-        {/* Brand cell (top left), like Senet's red block — here the club mark in the accent */}
-        <div className="flex items-center gap-3 border-b border-r border-line px-5">
-          <span aria-hidden="true" className="h-5 w-5 shrink-0 rotate-45 border border-accent/70" />
-          <div className="min-w-0 leading-tight">
-            <div className="truncate font-display text-sm tracking-tight">{clubName ?? 'ClubShell'}</div>
-            <div className="label">{staff.role === 'owner' ? t('Владелец') : t('Касса')}</div>
-          </div>
-        </div>
-
-        {/* Top bar */}
-        <header className="flex min-w-0 items-center gap-4 border-b border-line px-6 2xl:gap-6">
-          <div className="flex items-baseline gap-3">
-            <span className="num-dot text-2xl leading-none">
-              {now.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}
-            </span>
-            <span className="hidden whitespace-nowrap text-sm text-muted 2xl:inline">
-              {now.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' })}
-            </span>
-          </div>
-          <span className="h-8 w-px bg-line" />
-          <div className="flex shrink-0 items-center gap-1">
-            <ShiftChip onClick={() => go('shift')} />
-            <CashMenu />
-          </div>
-          <GlobalSearch
-            ref={search}
-            onTopUp={setTopUpFor}
-            onShowPc={(hit) => {
-              if (!hit.playing) return;
-              go('map');
-              showPc(hit.playing.pcId);
-            }}
-          />
-          {/* At 1366 the calls take the room of the hall load (the map says «Занято N/M»): it shows from 2xl. */}
-          <div className="ml-auto flex items-center gap-3 2xl:gap-5">
-            <div className="flex items-center gap-2">
-              <AudioUnlockChip />
-              <CallsBell />
+      <div className="relative isolate h-screen overflow-hidden">
+        <Wallpaper url={wallpaperUrl} />
+        <div className="relative grid h-full grid-cols-[88px_minmax(0,1fr)]">
+          {/* Rail: the logo, the sections, then who is signed in and «Выйти». */}
+          <aside className="glass-rail relative z-30 flex min-h-0 flex-col pb-4 pt-5">
+            <div className="mb-3 flex shrink-0 justify-center">
+              <LogoMark size={30} />
             </div>
-            {usage && (
-              <div className="hidden items-baseline gap-3 2xl:flex">
-                <span className="label hidden whitespace-nowrap 2xl:inline">{t('Загрузка зала')}</span>
-                <span className="num-dot text-2xl leading-none">
-                  <span className="text-accent">{String(usage.busy).padStart(2, '0')}</span>
-                  <span className="text-muted">/{String(usage.total).padStart(2, '0')}</span>
+            <nav
+              aria-label={t('Разделы')}
+              className="fade-y no-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto py-3"
+            >
+              {GROUPS.map((g, gi) => {
+                const items = g.items.filter((s) => !s.ownerOnly || owner);
+                if (items.length === 0) return null;
+                return (
+                  <div key={g.title} className={clsx('flex flex-col', gi > 0 && 'mt-2')}>
+                    <span className="px-1.5 pb-1.5 pt-1 text-center font-mono text-[9px] font-medium uppercase leading-[11px] tracking-[0.14em] text-muted/80">
+                      {t(g.title)}
+                    </span>
+                    {items.map((s) => {
+                      const active = s.id === current?.id;
+                      return (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() => go(s.id)}
+                          aria-current={active ? 'page' : undefined}
+                          className={clsx(
+                            'focus-ring-inset relative flex w-full shrink-0 flex-col items-center gap-[7px] px-0.5 py-3 text-center outline-none transition-colors',
+                            active
+                              ? 'bg-[linear-gradient(90deg,rgb(var(--c-accent)/0.13),rgb(var(--c-accent)/0))] text-hi'
+                              : 'text-muted hover:bg-text/[0.03] hover:text-text',
+                          )}
+                        >
+                          {active && (
+                            <span
+                              aria-hidden="true"
+                              className="absolute bottom-2.5 left-0 top-2.5 w-0.5 bg-accent shadow-[0_0_10px_rgb(var(--c-accent)/0.8)]"
+                            />
+                          )}
+                          <span aria-hidden="true" className={clsx('flex', active && 'text-accent')}>
+                            {s.icon}
+                          </span>
+                          <span
+                            className={clsx(
+                              // Long words hyphenate in the console's language («Автомати-зация»), never spill out.
+                              'hyphens-auto text-[10.5px] leading-[13px] [overflow-wrap:anywhere]',
+                              active ? 'font-semibold' : 'font-medium',
+                            )}
+                          >
+                            {t(s.title)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </nav>
+            <div className="flex shrink-0 flex-col items-center gap-2 px-1.5 pt-3">
+              <InstallButton variant="rail" />
+              <span
+                aria-hidden="true"
+                className="flex h-9 w-9 items-center justify-center rounded-full border border-accent/[0.22] bg-accent/[0.08] font-display text-xs font-semibold text-text"
+              >
+                {initials(staff.name)}
+              </span>
+              <span className="line-clamp-2 text-center text-[10.5px] font-medium leading-[13px] text-text [overflow-wrap:anywhere]">
+                {staff.name}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={signOut}
+              className="focus-ring-inset mx-2.5 mt-3 flex shrink-0 flex-col items-center gap-1.5 border-t border-accent/[0.08] px-1 pt-2.5 text-muted transition-colors hover:text-text"
+            >
+              <LogoutIcon size={18} />
+              <span className="text-[10.5px] font-medium leading-[13px]">{t('Выйти')}</span>
+            </button>
+          </aside>
+
+          <div
+            className={clsx(
+              'grid min-h-0 min-w-0 gap-3.5 px-6 pb-4 pt-[18px]',
+              counter ? 'grid-rows-[auto_auto_minmax(0,1fr)]' : 'grid-rows-[auto_minmax(0,1fr)]',
+            )}
+          >
+            <header className="relative z-30 flex h-11 min-w-0 items-center gap-[18px]">
+              <div className="flex min-w-0 max-w-[240px] shrink flex-col gap-1.5">
+                <span className="truncate font-display text-[15px] font-medium leading-none tracking-[-0.01em] text-text">
+                  {clubName ?? 'ClubShell'}
+                </span>
+                <span className="label-sm whitespace-nowrap">
+                  {hall
+                    ? t(owner ? 'Владелец · {n} ПК' : 'Касса · {n} ПК', { n: hall.total })
+                    : owner
+                      ? t('Владелец')
+                      : t('Касса')}
                 </span>
               </div>
-            )}
-            <span className="h-8 w-px bg-line" />
-            <div className="flex rounded-md border border-line p-0.5">
-              {LANGS.map((l) => (
-                <button
-                  key={l}
-                  type="button"
-                  aria-pressed={l === lang}
-                  onClick={() => setLang(l)}
+              <Separator />
+              <div className="flex shrink-0 items-baseline gap-3">
+                <span className="num-dot text-[26px] leading-none tracking-[0.02em] text-text">
+                  {now.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}
+                </span>
+                <span
                   className={clsx(
-                    'focus-ring h-7 rounded px-2 font-mono text-[0.68rem] uppercase tracking-[0.12em]',
-                    l === lang ? 'bg-accent/15 text-accent' : 'text-muted hover:text-text',
+                    'hidden whitespace-nowrap text-[13px] leading-4 text-dim',
+                    // The setup pages hold the drawer's «±» and the bell in the header too: the date needs more room.
+                    counter ? 'min-[1400px]:inline' : 'min-[1700px]:inline',
                   )}
                 >
-                  {l}
-                </button>
-              ))}
-            </div>
-            <div className="text-right leading-tight">
-              <div className="text-sm">{staff.name}</div>
-              <button type="button" className="focus-ring label hover:text-text" onClick={signOut}>
-                {t('Выйти')}
-              </button>
-            </div>
-          </div>
-        </header>
-
-        {/* Sidebar */}
-        <nav aria-label={t('Разделы')} className="flex flex-col gap-5 overflow-y-auto border-r border-line py-4">
-          {GROUPS.map((g) => {
-            const items = g.items.filter((s) => !s.ownerOnly || staff.role === 'owner');
-            if (items.length === 0) return null;
-            return (
-              <div key={g.title} className="flex flex-col">
-                <span className="label px-5 pb-2">{t(g.title)}</span>
-                {items.map((s) => {
-                  const active = s.id === current?.id;
-                  return (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() => go(s.id)}
-                      aria-current={active ? 'page' : undefined}
-                      className={clsx(
-                        'focus-ring flex h-11 items-center gap-3 border-l-2 px-5 text-left text-sm transition-colors [&>svg]:h-5 [&>svg]:w-5 [&>svg]:shrink-0',
-                        active
-                          ? 'border-accent bg-accent/[0.08] text-text'
-                          : 'border-transparent text-muted hover:bg-white/[0.03] hover:text-text',
-                      )}
-                    >
-                      {s.icon}
-                      <span className="truncate">{t(s.title)}</span>
-                    </button>
-                  );
-                })}
+                  {now.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' })}
+                </span>
               </div>
-            );
-          })}
-          <InstallButton className="mt-auto h-11 border-l-2 border-transparent px-5" />
-        </nav>
+              <Separator />
+              <ShiftChip onClick={() => go('shift')} />
+              {!counter && (
+                // The setup pages have no strip: the drawer's «±» and the bell sit by the chip (one of each per page).
+                <div className="flex shrink-0 items-center gap-2">
+                  <CashMenu variant="compact" />
+                  <AudioUnlockChip variant="header" />
+                  <CallsBell variant="compact" />
+                </div>
+              )}
+              <div className="min-w-0 flex-1" />
+              <GlobalSearch
+                ref={search}
+                compact={!counter}
+                onTopUp={setTopUpFor}
+                onShowPc={(hit) => {
+                  if (!hit.playing) return;
+                  go('map');
+                  showPc(hit.playing.pcId);
+                }}
+              />
+              <div className="flex h-10 shrink-0 items-center gap-0.5 rounded-md border border-line bg-surface/50 p-1">
+                {LANGS.map((l) => (
+                  <button
+                    key={l}
+                    type="button"
+                    aria-pressed={l === lang}
+                    onClick={() => setLang(l)}
+                    className={clsx(
+                      'focus-ring h-[30px] rounded-seg px-[9px] font-mono text-[10.5px] uppercase leading-none tracking-[0.08em]',
+                      l === lang
+                        ? 'bg-accent/[0.12] font-semibold text-accent'
+                        : 'font-medium text-muted hover:text-text',
+                    )}
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
+            </header>
 
-        <main className="min-h-0 overflow-y-auto p-6">
-          <Suspense fallback={null}>
-            <Page key={`${current?.id}-${lang}`} isOwner={staff.role === 'owner'} />
-          </Suspense>
-        </main>
+            {counter && <KpiStrip hall={hall} />}
+
+            <main className="thin-scrollbar -mx-2 -mb-2 min-h-0 overflow-y-auto px-2 pb-2">
+              <Suspense fallback={null}>
+                <Page key={`${current?.id}-${lang}`} isOwner={owner} />
+              </Suspense>
+            </main>
+          </div>
+        </div>
       </div>
       {topUpFor && <TopUpSheet payee={topUpFor} onClose={() => setTopUpFor(null)} onDone={() => void refreshTop()} />}
       <CallsRinger />

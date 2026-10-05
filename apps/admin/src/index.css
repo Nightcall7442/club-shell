@@ -2,45 +2,546 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Variant F «Командный центр»: the kiosk shell's Obsidian HUD (apps/shell/src/theme/tokens.css) over the club's dimmed
+ * wallpaper. Colours are "R G B" triplets (Tailwind: `bg-accent/10` → rgb(var(--c-accent) / 0.1)); one ice-blue accent,
+ * amber only where the cashier must act, red only for ending a session, a blocked PC and a refusal, green only for the
+ * "open / online" dot. Glass panels blur the static wallpaper; tiles never blur. Lite mode (`html[data-lite]`, or the
+ * system's reduced transparency) drops every blur for weak counter PCs.
+ */
 @layer base {
   :root {
+    --c-bg: 7 9 12;
+    --c-surface: 13 17 23;
+    --c-art: 10 13 18;
+    --c-accent: 154 223 255;
+    --c-accent-hi: 196 236 255;
+    --c-on-accent: 3 16 24;
+    --c-primary: 244 244 245;
+    --c-on-primary: 9 9 11;
+    --c-text: 232 241 246;
+    --c-hi: 244 248 250;
+    --c-soft: 195 205 213;
+    --c-dim: 169 180 190;
+    --c-artlabel: 142 155 167;
+    --c-muted: 125 138 150;
+    --c-danger: 239 68 68;
+    --c-danger-ink: 240 98 98;
+    --c-warning: 245 165 36;
+    --c-success: 34 197 94;
+
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --dur-fast: 120ms;
+    --dur-base: 200ms;
+    --dur-slow: 400ms;
+
+    --sheen: linear-gradient(180deg, rgb(var(--c-text) / 0.035) 0%, rgb(var(--c-text) / 0) 42%);
+    --shadow-float: 0 24px 64px -24px rgb(0 0 0 / 0.8);
+    --shadow-panel: 0 24px 64px -32px rgb(0 0 0 / 0.85);
+    --shadow-sheet: 0 24px 64px -24px rgb(0 0 0 / 0.8), 0 40px 120px -40px rgb(0 0 0 / 0.9);
+    --shadow-glow: 0 0 0 2px rgb(var(--c-accent) / 0.95), 0 0 22px -4px rgb(var(--c-accent) / 0.6);
+    --shadow-glow-inset: inset 0 0 0 2px rgb(var(--c-accent) / 0.95);
+    --shadow-glow-danger: 0 0 0 2px rgb(var(--c-danger) / 0.9), 0 0 22px -4px rgb(var(--c-danger) / 0.55);
+    --glow-accent: drop-shadow(0 0 14px rgb(var(--c-accent) / 0.45));
+    --glass-blur: blur(20px) saturate(1.15);
+
     color-scheme: dark;
   }
   body {
     @apply bg-bg font-sans text-text antialiased;
   }
+  ::selection {
+    background: rgb(var(--c-accent) / 0.3);
+  }
+  input[type='range'] {
+    accent-color: rgb(var(--c-accent));
+  }
 }
 
-/* Same material as the kiosk shell (Obsidian): flat panels, hairlines, one ice-blue accent, mono labels, dot digits. */
 @layer components {
-  .panel {
-    @apply rounded-xl border border-line bg-surface;
+  /* ---- Surfaces ---- */
+
+  /* The page's panel: glass over the wallpaper. `.panel` is the old name (pages restyle without a code change). */
+  .panel,
+  .glass-panel {
+    border-radius: 10px;
+    border: 1px solid rgb(var(--c-accent) / 0.1);
+    background-color: rgb(var(--c-surface) / 0.56);
+    background-image: var(--sheen);
+    box-shadow:
+      inset 0 1px 0 rgb(var(--c-text) / 0.05),
+      var(--shadow-panel);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
   }
+  .glass-rail {
+    background-color: rgb(var(--c-bg) / 0.55);
+    border-right: 1px solid rgb(var(--c-accent) / 0.08);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+  }
+  .glass-kpi {
+    border-radius: 10px;
+    border: 1px solid rgb(var(--c-accent) / 0.1);
+    background-color: rgb(var(--c-surface) / 0.6);
+    background-image: var(--sheen);
+    box-shadow: inset 0 1px 0 rgb(var(--c-text) / 0.05);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
+  }
+  /* Lists and feeds beside the main panel. */
+  .glass-side {
+    border-radius: 10px;
+    border: 1px solid rgb(var(--c-accent) / 0.1);
+    background-color: rgb(9 12 16 / 0.62);
+    background-image: var(--sheen);
+    box-shadow: inset 0 1px 0 rgb(var(--c-text) / 0.05);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
+  }
+  /* The focused object (seat card, cart, client card) and every popover: near-opaque, lifted. */
+  .panel-solid {
+    border-radius: 10px;
+    border: 1px solid rgb(var(--c-accent) / 0.16);
+    background-color: rgb(var(--c-art) / 0.9);
+    box-shadow:
+      inset 0 1px 0 rgb(var(--c-text) / 0.06),
+      var(--shadow-float);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
+  }
+  .glass-field {
+    border-radius: 10px;
+    border: 1px solid rgb(var(--c-accent) / 0.12);
+    background-color: rgb(var(--c-surface) / 0.6);
+    -webkit-backdrop-filter: blur(16px);
+    backdrop-filter: blur(16px);
+  }
+  .sheet {
+    border-radius: 12px;
+    border: 1px solid rgb(var(--c-text) / 0.1);
+    background-color: rgb(var(--c-surface) / 0.95);
+    background-image: var(--sheen);
+    box-shadow: var(--shadow-sheet);
+    -webkit-backdrop-filter: blur(24px);
+    backdrop-filter: blur(24px);
+  }
+  /* Inset box inside a panel or a sheet (stat pairs, readouts). */
+  .well {
+    border-radius: 10px;
+    border: 1px solid rgb(var(--c-accent) / 0.1);
+    background-color: rgb(var(--c-bg) / 0.42);
+  }
+  /* The accent hairline on top of the one primary surface of a screen. */
+  .edge-top {
+    position: relative;
+  }
+  .edge-top::before {
+    content: '';
+    position: absolute;
+    left: 40px;
+    right: 40px;
+    top: -1px;
+    height: 1px;
+    pointer-events: none;
+    background: linear-gradient(
+      90deg,
+      rgb(var(--c-accent) / 0) 0%,
+      rgb(var(--c-accent) / 0.42) 50%,
+      rgb(var(--c-accent) / 0) 100%
+    );
+  }
+
+  /* `Section`'s body: a component class, so a page's `bodyClassName="p-2"` (a table) wins over it. */
+  .section-body {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 20px;
+  }
+  .section-body-headed {
+    padding-top: 12px;
+  }
+
+  /*
+   * KPI cards (`KpiCard`, the strip in `kpi.tsx`): 92 high; on a short screen (≤ 840 px, a 1366×768 counter) 68 high,
+   * the sub line moving up beside the value.
+   */
+  .kpi-card {
+    height: 92px;
+    padding: 14px 16px 14px 18px;
+  }
+  .kpi-attention {
+    border: 1px solid rgb(var(--c-warning) / 0.38);
+    background: linear-gradient(90deg, rgb(var(--c-warning) / 0.12) 0%, rgb(var(--c-warning) / 0.02) 70%),
+      rgb(var(--c-surface) / 0.6);
+    box-shadow: inset 0 1px 0 rgb(var(--c-text) / 0.04);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
+  }
+  .kpi-attention.kpi-card {
+    padding-left: 20px;
+  }
+  @media (max-height: 840px) {
+    .kpi-card {
+      height: 68px;
+      padding-top: 10px;
+      padding-bottom: 10px;
+    }
+    .kpi-card .kpi-body {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      grid-template-areas:
+        'label label'
+        'value sub';
+      align-items: baseline;
+      align-content: space-between;
+      column-gap: 12px;
+    }
+    .kpi-card .kpi-label {
+      grid-area: label;
+    }
+    .kpi-card .kpi-value {
+      grid-area: value;
+    }
+    .kpi-card .kpi-sub {
+      grid-area: sub;
+    }
+    .kpi-card .kpi-big {
+      font-size: 28px;
+    }
+    .kpi-card .kpi-money {
+      font-size: 24px;
+    }
+  }
+
+  /* ---- Type ---- */
+
+  /* Telemetry label: mono caps; the DOM text stays sentence case (i18n keys, E2E text matches). */
   .label {
-    @apply font-mono text-[0.68rem] font-medium uppercase tracking-[0.14em] text-muted;
+    font-family: theme('fontFamily.mono');
+    font-size: 10px;
+    line-height: 1.2;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: rgb(var(--c-muted));
   }
+  .label-sm {
+    font-family: theme('fontFamily.mono');
+    font-size: 9.5px;
+    line-height: 1.2;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: rgb(var(--c-muted));
+  }
+  /* Dot-matrix numerals for live readouts only (Doto has no Cyrillic: «сум» falls through to the mono face). */
   .num-dot {
-    @apply font-dot font-black;
+    font-family: theme('fontFamily.dot');
+    font-weight: 900;
     font-variant-numeric: tabular-nums;
   }
   .tnum {
     font-variant-numeric: tabular-nums;
   }
+
+  /* ---- Focus and HUD marks ---- */
+
+  .focus-ring {
+    outline: none;
+    transition:
+      box-shadow var(--dur-fast) var(--ease-out),
+      border-color var(--dur-fast) var(--ease-out),
+      background-color var(--dur-fast) var(--ease-out),
+      color var(--dur-fast) var(--ease-out);
+  }
   .focus-ring:focus-visible {
-    @apply outline-none ring-[1.5px] ring-accent;
+    outline: none;
+    box-shadow: var(--shadow-glow);
   }
-  .choice {
-    @apply border border-line bg-white/[0.03] text-text hover:bg-white/[0.06];
+  .focus-ring-danger:focus-visible {
+    box-shadow: var(--shadow-glow-danger);
   }
-  .choice-on {
-    @apply border-accent/70 bg-accent/10;
+  /* Rows that fill a clipping container: an outer ring would be cut off. */
+  .focus-ring-inset:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-glow-inset);
   }
+
+  /*
+   * Corner brackets, the target-lock mark. `.hud-brackets` always shows them; `.hud-focus` on keyboard focus and on
+   * `data-selected="true"` (never `aria-pressed`: «Выбрать» reuses it for checked tiles), closing in from inside. The
+   * host must be positioned and not clip (the art of a tile lives in an inner clipped layer).
+   */
+  .hud-brackets::after,
+  .hud-focus::after {
+    --brk: rgb(var(--c-accent));
+    --l: var(--brk-size, 14px);
+    content: '';
+    position: absolute;
+    inset: var(--brk-inset, -6px);
+    z-index: 5;
+    pointer-events: none;
+    background:
+      linear-gradient(var(--brk), var(--brk)) left top / var(--l) 1px no-repeat,
+      linear-gradient(var(--brk), var(--brk)) left top / 1px var(--l) no-repeat,
+      linear-gradient(var(--brk), var(--brk)) right top / var(--l) 1px no-repeat,
+      linear-gradient(var(--brk), var(--brk)) right top / 1px var(--l) no-repeat,
+      linear-gradient(var(--brk), var(--brk)) left bottom / var(--l) 1px no-repeat,
+      linear-gradient(var(--brk), var(--brk)) left bottom / 1px var(--l) no-repeat,
+      linear-gradient(var(--brk), var(--brk)) right bottom / var(--l) 1px no-repeat,
+      linear-gradient(var(--brk), var(--brk)) right bottom / 1px var(--l) no-repeat;
+    filter: drop-shadow(0 0 3px rgb(var(--c-accent) / 0.7));
+    transition:
+      inset var(--dur-slow) var(--ease-out),
+      opacity var(--dur-base) var(--ease-out);
+  }
+  .hud-focus::after {
+    inset: 8px;
+    opacity: 0;
+  }
+  .hud-focus:focus-visible::after,
+  .hud-focus[data-selected='true']::after {
+    inset: var(--brk-inset, -6px);
+    opacity: 1;
+  }
+
+  /*
+   * The main action: accent fill with the shell's two cut corners (top left, bottom right), drawn by gradients so the
+   * focus mark is not clipped. Hover and focus glow with a drop shadow that follows the cut shape; keyboard focus adds
+   * an outline (a box-shadow ring would draw a rectangle under the cut).
+   */
   .cut-corners {
-    --cut: 9px;
-    --fill: theme('colors.accent');
+    --cut: 11px;
+    --fill: rgb(var(--c-accent));
     background:
       linear-gradient(135deg, transparent var(--cut), var(--fill) 0) left top / 100% 51% no-repeat,
       linear-gradient(-45deg, transparent var(--cut), var(--fill) 0) right bottom / 100% 51% no-repeat;
+    transition: filter var(--dur-fast) var(--ease-out);
+  }
+  .cut-corners:hover:not(:disabled) {
+    --fill: rgb(var(--c-accent) / 0.85);
+    filter: var(--glow-accent);
+  }
+  .cut-corners:focus-visible {
+    filter: var(--glow-accent);
+    outline: 2px solid rgb(var(--c-accent) / 0.95);
+    outline-offset: 3px;
+    box-shadow: none;
+  }
+  .cut-corners:disabled {
+    filter: none;
+  }
+
+  /* ---- Buttons (ui.tsx `Button`); component classes, so `choice-on` and page utilities still win ---- */
+
+  .btn-secondary {
+    border: 1px solid rgb(var(--c-accent) / 0.2);
+    background-color: rgb(var(--c-accent) / 0.06);
+    color: rgb(var(--c-text));
+  }
+  .btn-secondary:hover:not(:disabled) {
+    border-color: rgb(var(--c-accent) / 0.3);
+    background-color: rgb(var(--c-accent) / 0.1);
+  }
+  .btn-tertiary {
+    border: 1px solid rgb(var(--c-accent) / 0.1);
+    background-color: rgb(var(--c-text) / 0.02);
+    color: rgb(214 222 228);
+  }
+  .btn-tertiary:hover:not(:disabled) {
+    border-color: rgb(var(--c-accent) / 0.26);
+    color: rgb(var(--c-text));
+  }
+  .btn-utility {
+    border: 1px solid rgb(var(--c-accent) / 0.18);
+    background-color: rgb(var(--c-accent) / 0.05);
+    color: rgb(var(--c-text));
+  }
+  .btn-utility:hover:not(:disabled) {
+    border-color: rgb(var(--c-accent) / 0.3);
+    background-color: rgb(var(--c-accent) / 0.09);
+  }
+  .btn-ghost {
+    color: rgb(var(--c-soft));
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background-color: rgb(var(--c-text) / 0.04);
+    color: rgb(var(--c-text));
+  }
+  .btn-danger {
+    border: 1px solid rgb(var(--c-danger) / 0.32);
+    background-color: rgb(var(--c-danger) / 0.06);
+    color: rgb(var(--c-danger-ink));
+  }
+  .btn-danger:hover:not(:disabled) {
+    border-color: rgb(var(--c-danger) / 0.5);
+    background-color: rgb(var(--c-danger) / 0.12);
+  }
+  .btn-warn {
+    border: 1px solid rgb(var(--c-warning) / 0.4);
+    background-color: rgb(var(--c-warning) / 0.08);
+    color: rgb(var(--c-warning));
+  }
+  .btn-warn:hover:not(:disabled) {
+    background-color: rgb(var(--c-warning) / 0.14);
+  }
+
+  /* ---- Choices ---- */
+
+  /* One language for every "pick one of these": quiet at rest, an accent edge and a faint accent fill when chosen. */
+  .choice {
+    border: 1px solid rgb(var(--c-accent) / 0.12);
+    background-color: rgb(var(--c-accent) / 0.03);
+    color: rgb(var(--c-text));
+    transition:
+      background-color var(--dur-fast) var(--ease-out),
+      border-color var(--dur-fast) var(--ease-out),
+      box-shadow var(--dur-fast) var(--ease-out),
+      color var(--dur-fast) var(--ease-out);
+  }
+  .choice:hover:not(:disabled) {
+    border-color: rgb(var(--c-accent) / 0.26);
+    background-color: rgb(var(--c-accent) / 0.06);
+  }
+  .choice-on,
+  .choice-on:hover:not(:disabled) {
+    border-color: rgb(var(--c-accent) / 0.7);
+    background-color: rgb(var(--c-accent) / 0.1);
+    box-shadow: inset 0 0 20px -8px rgb(var(--c-accent) / 0.45);
+    color: rgb(var(--c-text));
+  }
+
+  /* ---- Backgrounds, art and utilities ---- */
+
+  /* Blueprint grid, fading out towards the edges. */
+  .hud-grid {
+    background-image: linear-gradient(rgb(var(--c-accent) / 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(var(--c-accent) / 0.035) 1px, transparent 1px);
+    background-size: 48px 48px;
+    -webkit-mask-image: radial-gradient(ellipse 80% 70% at 60% 40%, #000 20%, transparent 85%);
+    mask-image: radial-gradient(ellipse 80% 70% at 60% 40%, #000 20%, transparent 85%);
+  }
+  /* Tick scale (instrument dial) as a progress bar in currentColor: set --value 0..1 on the element. */
+  .tick-scale {
+    height: 8px;
+    background: repeating-linear-gradient(90deg, currentColor 0 1px, transparent 1px 5%);
+    -webkit-mask-image: linear-gradient(90deg, #000 calc(var(--value, 0) * 100%), rgb(0 0 0 / 0.18) 0);
+    mask-image: linear-gradient(90deg, #000 calc(var(--value, 0) * 100%), rgb(0 0 0 / 0.18) 0);
+  }
+  /* Cover art fading in from the left, under the text of a tile. */
+  .art-mask {
+    -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 52%);
+    mask-image: linear-gradient(90deg, transparent 0%, #000 52%);
+  }
+  /* Behind a sheet: the console blurred and dimmed, a faint accent haze in the middle. */
+  .scrim {
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(420px 520px at 50% 50%, rgb(var(--c-accent) / 0.05), transparent 70%),
+      radial-gradient(700px 700px at 50% 50%, transparent 45%, rgb(0 0 0 / 0.4) 100%), rgb(4 6 9 / 0.6);
+    -webkit-backdrop-filter: blur(6px) saturate(0.8);
+    backdrop-filter: blur(6px) saturate(0.8);
+  }
+  .thin-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--c-muted) / 0.35) transparent;
+  }
+  .thin-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .thin-scrollbar::-webkit-scrollbar-thumb {
+    background: rgb(var(--c-muted) / 0.35);
+    border-radius: 999px;
+  }
+  .thin-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  /* A list that scrolls under fade masks at both ends (the rail on a short screen). */
+  .fade-y {
+    -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+    mask-image: linear-gradient(180deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+  }
+
+  /* ---- Motion ---- */
+
+  .anim-fade {
+    animation: f-fade var(--dur-base) var(--ease-out) both;
+  }
+  .anim-rise {
+    animation: f-rise var(--dur-base) var(--ease-out) both;
+  }
+  /* Amber glow of a ringing call (motion-safe only; the colour alone already says it rings). */
+  .anim-warn-glow {
+    animation: f-warn-glow 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes f-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes f-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+@keyframes f-warn-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(var(--c-warning) / 0);
+  }
+  50% {
+    box-shadow: 0 0 22px -4px rgb(var(--c-warning) / 0.55);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .anim-fade,
+  .anim-rise,
+  .anim-warn-glow {
+    animation: none;
+  }
+}
+
+/* Lite mode: no blur anywhere, near-opaque panels (weak counter PCs; the system's reduced transparency). */
+html[data-lite]
+  :is(.panel, .glass-panel, .glass-rail, .glass-kpi, .glass-side, .panel-solid, .glass-field, .sheet, .scrim) {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html[data-lite] :is(.panel, .glass-panel, .glass-kpi, .glass-field) {
+  background-color: rgb(var(--c-surface) / 0.92);
+}
+html[data-lite] .glass-side {
+  background-color: rgb(9 12 16 / 0.92);
+}
+html[data-lite] .glass-rail {
+  background-color: rgb(var(--c-bg) / 0.92);
+}
+@media (prefers-reduced-transparency: reduce) {
+  :is(.panel, .glass-panel, .glass-rail, .glass-kpi, .glass-side, .panel-solid, .glass-field, .sheet, .scrim) {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  :is(.panel, .glass-panel, .glass-kpi, .glass-field) {
+    background-color: rgb(var(--c-surface) / 0.92);
+  }
+  .glass-side {
+    background-color: rgb(9 12 16 / 0.92);
+  }
+  .glass-rail {
+    background-color: rgb(var(--c-bg) / 0.92);
   }
 }
 

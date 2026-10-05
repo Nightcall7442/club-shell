@@ -1,8 +1,8 @@
 /**
  * The shift's operations as the counter did them (D-43), newest first: who, for whom and on which PC, what (a seat, a
  * top-up, a cash move…), how it was paid and what it did to the drawer, with a ⎙ that reprints the slip as a «Копия».
- * A paid seat is one row with its payment merged in (the server leaves the session's top-up out). Above the rows,
- * today's money (the club's local day) by method, minus the cash given back to guests.
+ * A paid seat is one row with its payment merged in (the server leaves the session's top-up out). Today's money by
+ * method is the KPI strip's «Сегодня принято» (`kpi.tsx`).
  *
  * Polls `GET /admin/shift/operations` every 5 s while the page is visible and refetches when the shift's money changes
  * ({@link useShift}`.version`); «Ещё» pages back with the server's cursor. A server without the route (404) hides it.
@@ -17,7 +17,6 @@ import {
   type OperationKind,
   type OperationsPage,
   type SaleVoid,
-  type Today,
   type VoidReason,
 } from '@/api';
 import { pcLabel } from '@/clientSearch';
@@ -199,63 +198,6 @@ export function reprint(op: Operation, club: string | null): void {
   void printDocument(<Receipt r={r} />, 'receipt');
 }
 
-/** «Сегодня принято …»: the headline, opening to every method, the payouts and the sessions. */
-function TodayLine({ today }: { today: Today }): JSX.Element {
-  const [open, setOpen] = useState(false);
-  // The bar's cash is cash taken too (D-57): `taken` holds both, `byMethod` only the top-ups.
-  const shopCash = today.shopByMethod?.cash ?? 0;
-  const shop = today.shopByMethod ? Object.values(today.shopByMethod).reduce((a, b) => a + b, 0) : 0;
-  const cash = today.byMethod.cash + shopCash - today.payouts;
-  const cashless = today.taken - today.byMethod.cash - shopCash;
-  return (
-    <div className="flex flex-col gap-1.5">
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        className="focus-ring flex flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-md text-left text-sm hover:text-text"
-      >
-        <span className="text-text">
-          {t('Сегодня принято {sum}', { sum: moneyExact(today.taken - today.payouts) })}
-        </span>
-        <span className="tnum text-xs text-muted">
-          {t('нал {sum}', { sum: exactDigits(cash) })} · {t('безнал {sum}', { sum: exactDigits(cashless) })}
-        </span>
-      </button>
-      {open && (
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-md border border-line bg-bg px-3 py-2 text-xs">
-          {(['cash', 'card', 'payme', 'click', 'uzum'] as const).map((m) => (
-            <div key={m} className="flex justify-between gap-2">
-              <dt className="text-muted">{methodName(m)}</dt>
-              <dd className="tnum">{exactDigits(today.byMethod[m])}</dd>
-            </div>
-          ))}
-          {today.byMethod.other > 0 && (
-            <div className="flex justify-between gap-2">
-              <dt className="text-muted">{t('Другое')}</dt>
-              <dd className="tnum">{exactDigits(today.byMethod.other)}</dd>
-            </div>
-          )}
-          {today.shopByMethod && (
-            <div className="flex justify-between gap-2">
-              <dt className="text-muted">{t('Бар')}</dt>
-              <dd className="tnum">{exactDigits(shop)}</dd>
-            </div>
-          )}
-          <div className="flex justify-between gap-2">
-            <dt className="text-muted">{t('Выдано гостям')}</dt>
-            <dd className="tnum">{exactDigits(today.payouts)}</dd>
-          </div>
-          <div className="flex justify-between gap-2">
-            <dt className="text-muted">{t('Сеансы')}</dt>
-            <dd className="tnum">{exactDigits(today.sessions)}</dd>
-          </div>
-        </dl>
-      )}
-    </div>
-  );
-}
-
 function Row({
   op,
   club,
@@ -330,13 +272,11 @@ export function OperationsFeed({
   kinds,
   placement,
   className,
-  showToday = true,
 }: {
   shiftId?: string | null;
   kinds?: OperationKind[];
   placement: 'column' | 'panel' | 'page';
   className?: string;
-  showToday?: boolean;
 }): JSX.Element | null {
   const { version, cashDesk2, shift: openShift, refresh } = useShift();
   const club = useClub();
@@ -430,7 +370,6 @@ export function OperationsFeed({
     >
       <header className="flex flex-col gap-2">
         <h2 className="label text-text">{t('Операции смены')}</h2>
-        {showToday && page?.today && <TodayLine today={page.today} />}
       </header>
       {error && <p className="rounded-md bg-danger/10 px-3 py-1.5 text-xs text-danger">{error}</p>}
       <ol aria-label={t('Операции смены')} className="flex min-h-0 flex-col divide-y divide-line overflow-y-auto pr-1">
