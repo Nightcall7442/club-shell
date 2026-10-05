@@ -188,9 +188,11 @@ export default function StaffPage(): JSX.Element {
           </Field>
           <div className="flex flex-col gap-2">
             <span className="label-sm">{t('Роль')}</span>
+            {/* The segmented tray's look, 44 high like the inputs beside it (so the captions line up). */}
             <div
-              className="inline-flex min-h-11 items-center gap-0.5 rounded-md border border-line bg-surface/50 p-1"
+              className="inline-flex h-11 items-center gap-0.5 rounded-md border border-line bg-surface/50 p-1"
               role="radiogroup"
+              aria-label={t('Роль')}
             >
               {ROLES.map((r) => (
                 <button
@@ -200,7 +202,7 @@ export default function StaffPage(): JSX.Element {
                   aria-checked={role === r.id}
                   onClick={() => setRole(r.id)}
                   className={clsx(
-                    'focus-ring inline-flex h-9 items-center justify-center whitespace-nowrap rounded-seg px-3.5 text-[13px]',
+                    'focus-ring inline-flex h-[34px] items-center justify-center whitespace-nowrap rounded-seg px-3.5 text-[13px]',
                     role === r.id
                       ? 'bg-accent/[0.12] font-semibold text-accent'
                       : 'font-medium text-dim hover:text-text',

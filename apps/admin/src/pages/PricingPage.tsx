@@ -662,6 +662,8 @@ function BonusTab({ s, set }: { s: ClubSettings; set: ClubSettingsState['set'] }
     <div className="grid grid-cols-1 items-start gap-5 2xl:grid-cols-[28rem_minmax(0,1fr)]">
       <Section
         title={t('Бонус за пополнение')}
+        // Two inputs a row: alone on the page it stays a form's width instead of stretching the sum over 1000 px.
+        className="max-w-2xl 2xl:max-w-none"
         bodyClassName="p-2"
         actions={
           <Button
