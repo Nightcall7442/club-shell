@@ -1083,6 +1083,8 @@ export const UZ: Record<string, string> = {
   'Идёт продажа': 'Sotuv amalga oshirilmoqda',
   // --- end F:B ---
   // --- F:C shift, feed, health ---
+  'Итоги смены': 'Smena yakunlari',
+  'Пополнения по способам оплаты': 'Toʻlov usullari boʻyicha toʻldirishlar',
   // --- end F:C ---
   // --- F:D owner pages ---
   // --- end F:D ---
@@ -2167,6 +2169,8 @@ export const EN: Record<string, string> = {
   'Идёт продажа': 'Sale in progress',
   // --- end F:B ---
   // --- F:C shift, feed, health ---
+  'Итоги смены': 'Shift totals',
+  'Пополнения по способам оплаты': 'Top-ups by payment method',
   // --- end F:C ---
   // --- F:D owner pages ---
   // --- end F:D ---

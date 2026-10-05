@@ -3,8 +3,11 @@
  * it did last week, losing frames, dropping off the network — with take-into-work / resolved, and every PC ranked by
  * health with its temperatures against its own usual and the last 24 hours. Owners also tune the thresholds and can let
  * the club take a PC with a serious problem out of service automatically.
+ *
+ * Variant F: no red here. A serious problem, a temperature at its limit, a low health score and the part of a day's
+ * curve above the limit are amber; the rest is the accent (sparklines, the score's tick scale) or muted.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useState, type CSSProperties } from 'react';
 import clsx from 'clsx';
 import {
   clubApi,
@@ -18,7 +21,8 @@ import {
 } from '@/api';
 import { describe } from '@/errors';
 import { dateLocale, t } from '@/i18n';
-import { Button, Field, Note, NumberInput, PageHeader, Section, Table, Toggle } from '@/ui';
+import { CheckIcon } from '@/icons';
+import { Badge, Button, Field, Note, NumberInput, PageHeader, Section, StatusDot, Table, Toggle } from '@/ui';
 
 const REFRESH_MS = 30_000;
 
@@ -61,17 +65,18 @@ function dateTime(iso: string): string {
   });
 }
 
+/** Severity of a problem: amber when it is serious (act now), muted otherwise; never red. */
 function Dot({ severity }: { severity: 'high' | 'medium' }): JSX.Element {
-  return (
-    <span
-      aria-hidden="true"
-      className={clsx('inline-block h-2 w-2 shrink-0 rounded-full', severity === 'high' ? 'bg-danger' : 'bg-warning')}
-    />
-  );
+  return <StatusDot tone={severity === 'high' ? 'warn' : 'muted'} />;
 }
 
-/** 24 hourly values as a hairline; gaps where there was no data. */
+/**
+ * 24 hourly values as an accent hairline over the dashed limit; the part above the limit is amber. Gaps where there was
+ * no data.
+ */
 function Spark({ values, warnAt }: { values: (number | null)[]; warnAt: number }): JSX.Element {
+  // React's ids carry colons; an SVG `url(#…)` reference is safer without them.
+  const clip = `spark-${useId().replace(/:/g, '')}`;
   const nums = values.filter((v): v is number => v !== null);
   if (nums.length < 2) return <span className="text-muted">—</span>;
   const min = Math.min(...nums, warnAt - 30);
@@ -85,32 +90,59 @@ function Spark({ values, warnAt }: { values: (number | null)[]; warnAt: number }
     if (v === null) return;
     d += `${d === '' || values[i - 1] === null ? 'M' : 'L'}${x(i).toFixed(1)} ${y(v).toFixed(1)} `;
   });
+  const limit = y(warnAt);
   const hot = nums.some((v) => v >= warnAt);
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="h-6 w-24" aria-hidden="true">
-      <line x1="0" x2={w} y1={y(warnAt)} y2={y(warnAt)} className="stroke-danger/40" strokeDasharray="2 3" />
-      <path d={d} fill="none" strokeWidth="1.5" className={hot ? 'stroke-danger' : 'stroke-accent'} />
+    <svg viewBox={`0 0 ${w} ${h}`} className="h-6 w-24 overflow-visible" aria-hidden="true">
+      <line x1="0" x2={w} y1={limit} y2={limit} className="stroke-warning/40" strokeDasharray="2 3" />
+      <path d={d} fill="none" strokeWidth="1.5" strokeLinejoin="round" className="stroke-accent" />
+      {hot && (
+        <>
+          <clipPath id={clip}>
+            <rect x="0" y={-2} width={w} height={limit + 2} />
+          </clipPath>
+          <path
+            d={d}
+            fill="none"
+            strokeWidth="1.5"
+            strokeLinejoin="round"
+            clipPath={`url(#${clip})`}
+            className="stroke-warning"
+          />
+        </>
+      )}
     </svg>
   );
 }
 
+/** Health 0–100 as the instrument tick scale (accent; amber below 60) and the figure. */
 function ScoreBar({ score }: { score: number }): JSX.Element {
-  const tone = score >= 85 ? 'bg-success' : score >= 60 ? 'bg-warning' : 'bg-danger';
   return (
-    <span className="flex items-center gap-2">
-      <span className="h-1.5 w-16 overflow-hidden rounded-full bg-line">
-        <span className={clsx('block h-full', tone)} style={{ width: `${score}%` }} />
+    <span className="flex items-center gap-2.5">
+      <span
+        aria-hidden="true"
+        className={clsx('tick-scale w-16 shrink-0', score < 60 ? 'text-warning' : 'text-accent')}
+        style={{ '--value': Math.max(0, Math.min(100, score)) / 100 } as CSSProperties}
+      />
+      <span className={clsx('tnum w-7 text-right font-mono text-[12.5px]', score < 60 && 'font-semibold text-warning')}>
+        {score}
       </span>
-      <span className="tnum w-7 text-right">{score}</span>
     </span>
   );
 }
 
+/** Now against the PC's own usual: amber at the limit, a fainter amber within 5 °C of it. */
 function Temp({ now, usual, limit }: { now: number | null; usual: number | null; limit: number }): JSX.Element {
   if (now === null) return <span className="text-muted">—</span>;
   return (
-    <span className="tnum">
-      <span className={clsx(now >= limit ? 'text-danger' : now >= limit - 5 ? 'text-warning' : '')}>{now}°</span>
+    <span className="tnum font-mono text-[12.5px]">
+      <span
+        className={clsx(
+          now >= limit ? 'font-semibold text-warning' : now >= limit - 5 ? 'text-warning/75' : 'text-text',
+        )}
+      >
+        {now}°
+      </span>
       {usual !== null && <span className="text-muted"> / {usual}°</span>}
     </span>
   );
@@ -128,14 +160,18 @@ function TicketRow({ ticket, onChange }: { ticket: HealthTicket; onChange: () =>
     }
   };
   return (
-    <li className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3 first:pt-0 last:pb-0">
+    <li className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-accent/[0.07] py-3 first:border-t-0 first:pt-1 last:pb-0">
       <Dot severity={ticket.severity} />
-      <span className="num-dot w-14 text-lg leading-none">{ticket.pcName.replace(/^PC-/, '')}</span>
+      {/* The PC's number as on its tile. */}
+      <span className="tnum w-10 shrink-0 font-display text-xl font-medium leading-none tracking-[-0.01em] text-hi">
+        {ticket.pcName.replace(/^PC-/, '')}
+      </span>
       <div className="min-w-0 flex-1">
-        <p className="text-sm">{issueText(ticket.kind, ticket.params)}</p>
-        <p className="mt-0.5 text-xs text-muted">
-          <span className="tnum">{dateTime(ticket.openedAt)}</span> · {t(STATUS_LABEL[ticket.status])}
-          {ticket.autoMaintenance && ` · ${t('выведен в сервис автоматически')}`}
+        <p className="text-[13px] font-medium leading-5 text-text">{issueText(ticket.kind, ticket.params)}</p>
+        <p className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted">
+          <span className="tnum font-mono text-[11px]">{dateTime(ticket.openedAt)}</span>
+          <Badge tone={ticket.status === 'inWork' ? 'accent' : 'muted'}>{t(STATUS_LABEL[ticket.status])}</Badge>
+          {ticket.autoMaintenance && <span>{t('выведен в сервис автоматически')}</span>}
         </p>
       </div>
       <div className="flex gap-2">
@@ -144,7 +180,8 @@ function TicketRow({ ticket, onChange }: { ticket: HealthTicket; onChange: () =>
             {t('Взять в работу')}
           </Button>
         )}
-        <Button size="sm" variant="ghost" disabled={busy} onClick={() => void move('resolved')}>
+        <Button size="sm" variant="tertiary" disabled={busy} onClick={() => void move('resolved')}>
+          <CheckIcon size={15} />
           {t('Решено')}
         </Button>
       </div>
@@ -180,7 +217,8 @@ function Thresholds({ initial, onSaved }: { initial: HealthSettings; onSaved: ()
             {saving ? t('Сохраняем…') : t('Сохранить')}
           </Button>
         ) : saved ? (
-          <span role="status" className="text-sm text-success">
+          <span role="status" className="flex items-center gap-2 text-[13px] font-medium text-dim">
+            <StatusDot tone="ok" />
             {t('Сохранено')}
           </span>
         ) : undefined
@@ -243,14 +281,17 @@ export default function HealthPage({ isOwner }: { isOwner?: boolean }): JSX.Elem
       <PageHeader title={t('Состояние ПК')} />
       <Note note={note} />
 
-      <Section title={open.length ? t('Нужен ремонт · {n}', { n: open.length }) : t('Нужен ремонт')}>
+      <Section
+        className="edge-top"
+        title={open.length ? t('Нужен ремонт · {n}', { n: open.length }) : t('Нужен ремонт')}
+      >
         {open.length === 0 ? (
-          <p className="flex items-center gap-2 text-sm text-success">
-            <span aria-hidden="true" className="h-2 w-2 rounded-full bg-success" />
+          <p className="flex items-center gap-2.5 text-[13px] font-medium text-soft">
+            <StatusDot tone="ok" />
             {t('Все ПК в порядке')}
           </p>
         ) : (
-          <ul aria-label={t('Заявки на ремонт')} className="flex flex-col divide-y divide-line/60">
+          <ul aria-label={t('Заявки на ремонт')} className="flex flex-col">
             {open.map((x) => (
               <TicketRow key={x.id} ticket={x} onChange={load} />
             ))}
@@ -264,12 +305,17 @@ export default function HealthPage({ isOwner }: { isOwner?: boolean }): JSX.Elem
           rowKey={(p) => p.id}
           empty={t('Нет данных')}
           columns={[
-            { key: 'pc', title: t('ПК'), width: '6rem', render: (p) => <span className="font-medium">{p.name}</span> },
+            {
+              key: 'pc',
+              title: t('ПК'),
+              width: '6rem',
+              render: (p) => <span className="font-medium text-text">{p.name}</span>,
+            },
             {
               key: 'zone',
               title: t('Зона'),
               width: '7rem',
-              render: (p) => <span className="text-muted">{p.zone}</span>,
+              render: (p) => <span className="text-dim">{p.zone}</span>,
             },
             { key: 'score', title: t('Здоровье'), width: '8rem', render: (p) => <ScoreBar score={p.score} /> },
             {
@@ -301,7 +347,7 @@ export default function HealthPage({ isOwner }: { isOwner?: boolean }): JSX.Elem
                 ) : (
                   <ul className="flex flex-col gap-1">
                     {p.issues.map((i: HealthIssue) => (
-                      <li key={i.kind} className="flex items-center gap-2">
+                      <li key={i.kind} className="flex items-center gap-2.5 leading-5">
                         <Dot severity={i.severity} />
                         <span>{issueText(i.kind, i.params)}</span>
                       </li>

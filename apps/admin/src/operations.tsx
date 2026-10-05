@@ -4,6 +4,11 @@
  * A paid seat is one row with its payment merged in (the server leaves the session's top-up out). Today's money by
  * method is the KPI strip's «Сегодня принято» (`kpi.tsx`).
  *
+ * Variant F: a row is time | what and who | the drawer's amount (mono; money is never coloured by its sign: «+» in the
+ * text colour, «−» dimmed, «∞» for a postpaid seat). The row's ⎙ and «Аннулировать…» are small icon buttons that show on
+ * hover or focus (always on a touch screen). On the map the feed heads itself «Операции смены» with a «Журнал ›» link to
+ * the Смена page; on the Смена page its section does.
+ *
  * Polls `GET /admin/shift/operations` every 5 s while the page is visible and refetches when the shift's money changes
  * ({@link useShift}`.version`); «Ещё» pages back with the server's cursor. A server without the route (404) hides it.
  */
@@ -24,11 +29,15 @@ import { useClub } from '@/club';
 import { describe, isLostAnswer } from '@/errors';
 import { exactDigits, minutesLabel, moneyExact } from '@/format';
 import { dateLocale, t } from '@/i18n';
+import { ChevronRightIcon, PrintIcon, pathIcon } from '@/icons';
 import { OPERATION_LABEL, REASON_LABEL, VOID_REASONS, VOID_REASON_LABEL } from '@/labels';
 import { methodName, useHeldKey } from '@/paybox';
 import { CashSlip, Receipt, printDocument, type ReceiptData } from '@/print';
-import { useShift } from '@/shift';
-import { Button, Field, Note, Sheet, inputCls } from '@/ui';
+import { ChoiceButton, useShift } from '@/shift';
+import { Button, EmptyState, Field, Note, PanelHeader, Sheet, inputCls } from '@/ui';
+
+/** «Аннулировать…» of a row: an arrow turning back (the shared set has no undo mark). */
+const UndoIcon = pathIcon('M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11', 'UndoIcon');
 
 const POLL_MS = 5000;
 /** A cashier takes a bar sale back within this many minutes of it; the owner later (D-56). */
@@ -198,15 +207,41 @@ export function reprint(op: Operation, club: string | null): void {
   void printDocument(<Receipt r={r} />, 'receipt');
 }
 
+/**
+ * What the row did to the drawer: «+» in the text colour, «−» dimmed (a real minus), a sale taken back since struck
+ * through, «∞» a postpaid seat (nothing paid yet); nothing when the drawer did not move.
+ */
+function DrawerAmount({ op }: { op: Operation }): JSX.Element | null {
+  if (op.drawer === 0) {
+    return op.kind === 'sessionOpen' && op.prepaid === false ? (
+      <span title={t('Постоплата')} className="font-medium text-muted">
+        ∞
+      </span>
+    ) : null;
+  }
+  return (
+    <span className={clsx(op.voided ? 'text-muted line-through' : op.drawer > 0 ? 'text-text' : 'text-dim')}>
+      {signedSum(op.drawer)}
+    </span>
+  );
+}
+
+/** A row's 24 px icon action: on hover or focus of the row (always on a touch screen). */
+const ROW_ACTION =
+  'focus-ring inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-sm text-muted hover:bg-text/[0.06] hover:text-text';
+
 function Row({
   op,
   club,
   onVoid,
+  roomy,
 }: {
   op: Operation;
   club: string | null;
   /** «Аннулировать…» of a bar sale this staff member may still take back. */
   onVoid?: () => void;
+  /** The Смена page: a little more air and type than the map's column. */
+  roomy: boolean;
 }): JSX.Element {
   const who = [
     op.client ? (op.client.role === 'guest' ? t('Гость') : op.client.displayName) : null,
@@ -217,48 +252,81 @@ function Row({
   const paid = operationPaid(op);
   const printable = op.kind === 'cashIn' || op.kind === 'cashOut' || RECEIPT_KIND[op.kind] !== undefined;
   return (
-    <li className="flex flex-col gap-0.5 py-2">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="min-w-0 truncate text-sm">
-          <span className="tnum mr-2 font-mono text-xs text-muted">{time(op.at)}</span>
+    <li
+      className={clsx(
+        'group/row grid items-start gap-x-2.5 border-t border-accent/[0.07]',
+        roomy ? 'grid-cols-[44px_minmax(0,1fr)_auto] py-2' : 'grid-cols-[38px_minmax(0,1fr)_auto] py-[5px]',
+      )}
+    >
+      <span
+        className={clsx(
+          'tnum font-mono font-medium text-muted',
+          roomy ? 'text-[11px] leading-[18px]' : 'text-[10.5px] leading-[15px]',
+        )}
+      >
+        {time(op.at)}
+      </span>
+      <span className="min-w-0">
+        <span
+          className={clsx(
+            'flex min-w-0 items-center gap-1.5 font-medium text-text',
+            roomy ? 'text-[13px] leading-[18px]' : 'text-xs leading-[15px]',
+          )}
+        >
           {op.voided && (
-            <span className="mr-1.5 rounded border border-danger/50 px-1 py-px text-[0.65rem] font-semibold text-danger">
+            <span className="inline-flex h-4 shrink-0 items-center rounded-sm border border-danger/40 bg-danger/[0.06] px-1.5 font-mono text-[8.5px] font-semibold uppercase leading-none tracking-[0.12em] text-danger-ink">
               {t('аннулирован')}
             </span>
           )}
-          {operationWhat(op)}
+          <span className="truncate">{operationWhat(op)}</span>
         </span>
-        {op.drawer !== 0 && (
-          <span className={clsx('tnum shrink-0 font-mono text-xs', op.drawer > 0 ? 'text-success' : 'text-danger')}>
-            {signedSum(op.drawer)}
-          </span>
-        )}
-      </div>
-      <div className="flex items-center justify-between gap-2">
-        <span className="min-w-0 truncate text-xs text-muted">
+        <span
+          className={clsx('block truncate text-muted', roomy ? 'text-xs leading-4' : 'text-[10.5px] leading-[14px]')}
+        >
           {[who, paid, op.staffName].filter(Boolean).join(' · ')}
         </span>
-        {onVoid && (
-          <button
-            type="button"
-            onClick={onVoid}
-            className="focus-ring h-6 shrink-0 rounded px-1.5 text-xs font-semibold text-danger hover:bg-danger/10"
+      </span>
+      <span className="flex flex-col items-end">
+        <span
+          className={clsx(
+            'tnum whitespace-nowrap font-mono font-semibold',
+            roomy ? 'h-[18px] text-[12.5px] leading-[18px]' : 'h-[15px] text-[11.5px] leading-[15px]',
+          )}
+        >
+          <DrawerAmount op={op} />
+        </span>
+        {(onVoid || printable) && (
+          <span
+            className={clsx(
+              '-mr-1 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-focus-within/row:opacity-100 group-hover/row:opacity-100 [@media(hover:none)]:opacity-100',
+              roomy ? 'h-4 [&>button]:-my-1' : 'h-[14px] [&>button]:-my-[5px]',
+            )}
           >
-            {t('Аннулировать…')}
-          </button>
+            {onVoid && (
+              <button
+                type="button"
+                aria-label={t('Аннулировать…')}
+                title={t('Аннулировать…')}
+                onClick={onVoid}
+                className={clsx(ROW_ACTION, 'hover:!bg-danger/10 hover:!text-danger-ink')}
+              >
+                <UndoIcon size={14} />
+              </button>
+            )}
+            {printable && (
+              <button
+                type="button"
+                aria-label={t('Печать копии')}
+                title={t('Печать копии')}
+                onClick={() => reprint(op, club)}
+                className={ROW_ACTION}
+              >
+                <PrintIcon size={14} />
+              </button>
+            )}
+          </span>
         )}
-        {printable && (
-          <button
-            type="button"
-            aria-label={t('Печать копии')}
-            title={t('Печать копии')}
-            onClick={() => reprint(op, club)}
-            className="focus-ring h-6 w-6 shrink-0 rounded text-sm leading-none text-muted hover:bg-white/[0.06] hover:text-text"
-          >
-            ⎙
-          </button>
-        )}
-      </div>
+      </span>
     </li>
   );
 }
@@ -266,16 +334,20 @@ function Row({
 /**
  * The feed. `shiftId` — another shift than the open one (the owner's pick on the Смена page); `kinds` — a filter;
  * `placement` tells the map's column from the panel and the page (a data attribute, for the layout and the tests).
+ * The column and the panel head themselves («Операции смены», «Журнал ›») unless `headless` (the container already
+ * says it, e.g. a fold button of the same name); the page's section heads it.
  */
 export function OperationsFeed({
   shiftId = null,
   kinds,
   placement,
+  headless = false,
   className,
 }: {
   shiftId?: string | null;
   kinds?: OperationKind[];
   placement: 'column' | 'panel' | 'page';
+  headless?: boolean;
   className?: string;
 }): JSX.Element | null {
   const { version, cashDesk2, shift: openShift, refresh } = useShift();
@@ -362,22 +434,43 @@ export function OperationsFeed({
     }
   };
 
+  const roomy = placement === 'page';
   return (
     <section
       aria-label={t('Операции')}
       data-feed={placement}
-      className={clsx('flex min-h-0 flex-col gap-3', className)}
+      className={clsx('flex min-h-0 flex-col gap-2', className)}
     >
-      <header className="flex flex-col gap-2">
-        <h2 className="label text-text">{t('Операции смены')}</h2>
-      </header>
-      {error && <p className="rounded-md bg-danger/10 px-3 py-1.5 text-xs text-danger">{error}</p>}
-      <ol aria-label={t('Операции смены')} className="flex min-h-0 flex-col divide-y divide-line overflow-y-auto pr-1">
+      {!roomy && !headless && (
+        <PanelHeader
+          size="side"
+          title={t('Операции смены')}
+          aside={
+            <a
+              href="#/shift"
+              className="focus-ring label-sm -mr-1 flex h-6 items-center gap-1 rounded-sm px-1 tracking-[0.14em] hover:text-text"
+            >
+              {t('Журнал')}
+              <ChevronRightIcon size={12} strokeWidth={1.8} />
+            </a>
+          }
+        />
+      )}
+      {error && (
+        <Note tone="err" className="text-xs">
+          {error}
+        </Note>
+      )}
+      <ol
+        aria-label={t('Операции смены')}
+        className="thin-scrollbar -mr-1.5 flex min-h-0 flex-col overflow-y-auto pr-1.5"
+      >
         {items.map((op) => (
           <Row
             key={op.id}
             op={op}
             club={club.clubName}
+            roomy={roomy}
             onVoid={
               voidable(op, { owner, openShiftId: openShift?.id ?? null, feedShiftId: page?.shift?.id ?? null })
                 ? () => setVoiding(op)
@@ -387,10 +480,14 @@ export function OperationsFeed({
         ))}
       </ol>
       {page && items.length === 0 && (
-        <p className="text-sm text-muted">{page.shift ? t('Операций пока нет') : t('Смена не открыта')}</p>
+        <EmptyState
+          compact
+          title={page.shift ? t('Операций пока нет') : t('Смена не открыта')}
+          className="border-t border-accent/[0.07]"
+        />
       )}
       {next && (
-        <Button variant="ghost" size="sm" disabled={loadingMore} onClick={() => void more()}>
+        <Button variant="ghost" size="sm" className="self-center" disabled={loadingMore} onClick={() => void more()}>
           {loadingMore ? '…' : t('Ещё')}
         </Button>
       )}
@@ -490,14 +587,23 @@ function VoidSheet({ op, onClose, onDone }: { op: Operation; onClose: () => void
 
   return (
     <Sheet title={t('Аннулировать продажу')} onClose={onClose}>
-      <p className="text-sm">
-        {time(op.at)} · {linesSummary(op.lines) || t('Продажа бара')} · {moneyExact(op.amount)}
-      </p>
+      {/* The sale being taken back: when, what, how much. */}
+      <div className="well flex items-center justify-between gap-4 px-3.5 py-3">
+        <span className="min-w-0">
+          <span className="label-sm tnum block">{time(op.at)}</span>
+          <span className="mt-1.5 block truncate text-[13px] font-medium leading-5 text-text">
+            {linesSummary(op.lines) || t('Продажа бара')}
+          </span>
+        </span>
+        <span className="tnum shrink-0 whitespace-nowrap font-mono text-[15px] font-semibold text-hi">
+          {moneyExact(op.amount)}
+        </span>
+      </div>
       {done ? (
         <>
-          <p role="status" className="rounded-md bg-success/10 px-3 py-2 text-sm text-success">
+          <Note role="status" tone="ok">
             {t('Аннулировано · {sum}', { sum: moneyExact(done.total) })}
-          </p>
+          </Note>
           <div className="grid grid-cols-2 gap-2">
             <Button onClick={() => void printDocument(<Receipt r={slip(done)} />, 'receipt')}>{t('Печать')}</Button>
             <Button variant="primary" autoFocus onClick={onClose}>
@@ -507,20 +613,13 @@ function VoidSheet({ op, onClose, onDone }: { op: Operation; onClose: () => void
         </>
       ) : (
         <>
-          <div className="flex flex-col gap-1.5">
-            <span className="label">{t('Причина')}</span>
-            <div role="group" aria-label={t('Причина')} className="grid grid-cols-2 gap-1.5">
+          <div className="flex flex-col gap-2">
+            <span className="label-sm">{t('Причина')}</span>
+            <div role="group" aria-label={t('Причина')} className="grid grid-cols-2 gap-2">
               {VOID_REASONS.map((r) => (
-                <Button
-                  key={r}
-                  size="sm"
-                  aria-pressed={reason === r}
-                  disabled={busy || lost}
-                  className={clsx(reason === r && 'choice-on')}
-                  onClick={() => setReason(r)}
-                >
+                <ChoiceButton key={r} on={reason === r} disabled={busy || lost} onClick={() => setReason(r)}>
                   {t(VOID_REASON_LABEL[r])}
-                </Button>
+                </ChoiceButton>
               ))}
             </div>
           </div>
@@ -536,23 +635,19 @@ function VoidSheet({ op, onClose, onDone }: { op: Operation; onClose: () => void
               onChange={(e) => setNote(e.target.value)}
             />
           </Field>
-          <p className="rounded-md bg-white/[0.04] px-3 py-2 text-sm">
+          {/* Where the money and the goods go. */}
+          <p className="well px-3.5 py-3 text-[13px] font-medium leading-5 text-text">
             {back}
-            <span className="block text-xs text-muted">
+            <span className="mt-0.5 block text-xs font-normal text-muted">
               {reason === 'defect' ? t('Брак не возвращается на склад') : t('Товар вернётся на склад')}
             </span>
           </p>
           <Note note={error ? { text: error, tone: 'err' } : null} />
-          <div className="flex justify-end gap-2 border-t border-line pt-4">
+          <div className="flex justify-end gap-2 border-t border-accent/[0.08] pt-4">
             <Button variant="ghost" onClick={onClose}>
               {t('Отмена')}
             </Button>
-            <Button
-              variant="danger"
-              className="border border-danger/50"
-              disabled={!ready}
-              onClick={() => void submit()}
-            >
+            <Button variant="danger" disabled={!ready} onClick={() => void submit()}>
               {busy ? '…' : lost ? t('Повторить') : t('Аннулировать')}
             </Button>
           </div>
