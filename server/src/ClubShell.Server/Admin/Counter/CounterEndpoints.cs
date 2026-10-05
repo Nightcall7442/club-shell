@@ -89,11 +89,36 @@ public static partial class CounterEndpoints
             WHERE s.club_id = @ClubId AND s.state <> 'ended' AND t.expires_at > @now
             """,
             new { staff.ClubId, now })).ToHashSet();
-        var seats = hall.Select(pc => new AdminSeat(
-            pc.ToPc(pc.Status(hub.IsConnected(pc.Id), now, TimeSpan.FromSeconds(agents.OfflineAfterSec)), withHwid: false),
-            open.TryGetValue(pc.Id, out var s) ? s.ToWire(now) : null,
-            s is not null && players.TryGetValue(s.UserId, out var user) ? user : null,
-            s is null ? null : signedIn.Contains(pc.Id))).ToList();
+        // D-71: the game the agent reports for the open session (its newest running game, from the last heartbeat, tied to
+        // the session by `currentSessionId` — the server's id or the PC's own offline one), shown only on a busy or locked PC.
+        var games = (await c.QueryAsync<(Guid PcId, Guid Id, string Title, string? CoverUrl, string? HeroUrl)>(
+            """
+            SELECT p.id, g.id, g.title, nullif(g.data ->> 'coverUrl', ''), nullif(g.data ->> 'heroUrl', '')
+            FROM pcs p
+            JOIN sessions s ON s.pc_id = p.id AND s.state <> 'ended'
+            CROSS JOIN LATERAL (
+                SELECT (r ->> 'gameId')::uuid AS game_id
+                FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p.last_heartbeat -> 'runningGames') = 'array'
+                                               THEN p.last_heartbeat -> 'runningGames' ELSE '[]'::jsonb END) r
+                ORDER BY (r ->> 'startedAt')::timestamptz DESC
+                LIMIT 1) run
+            JOIN games g ON g.id = run.game_id AND g.club_id = p.club_id
+            WHERE p.club_id = @ClubId AND p.deleted_at IS NULL
+              AND (p.last_heartbeat ->> 'currentSessionId')::uuid IN (s.id, s.client_session_id)
+            """,
+            new { staff.ClubId }))
+            .ToDictionary(g => g.PcId, g => new AdminSeatGame(g.Id, g.Title, g.CoverUrl, g.HeroUrl));
+        var seats = hall.Select(pc =>
+        {
+            var status = pc.Status(hub.IsConnected(pc.Id), now, TimeSpan.FromSeconds(agents.OfflineAfterSec));
+            var s = open.GetValueOrDefault(pc.Id);
+            return new AdminSeat(
+                pc.ToPc(status, withHwid: false),
+                s?.ToWire(now),
+                s is not null && players.TryGetValue(s.UserId, out var user) ? user : null,
+                s is null ? null : signedIn.Contains(pc.Id),
+                s is not null && status is Contracts.Pcs.PcStatus.Busy or Contracts.Pcs.PcStatus.Locked ? games.GetValueOrDefault(pc.Id) : null);
+        }).ToList();
         var tariffs = (await c.QueryAsync<TariffRow>(
             $"SELECT {TariffRow.Columns} FROM tariffs WHERE club_id = @ClubId AND deleted_at IS NULL ORDER BY created_at, id", new { staff.ClubId }))
             .Select(t => t.ToWire()).ToList();

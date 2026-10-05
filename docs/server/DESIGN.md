@@ -1784,6 +1784,11 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
   не показывает.
 - **Карта зала** (D-49): `seats[].signedIn` — у игрока сеанса есть живой токен этого ПК («ждёт входа», часы уже идут);
   `guestDebts[]` с `role` и долгами клиентов; новый `guestRefunds[] {userId, displayName, balance, payable, pc, endedAt}`.
+- **Игра на месте** (D-71, касса F «Командный центр»): `seats[].game {id, title, coverUrl, heroUrl} | null` — самая
+  поздняя по `startedAt` игра из `runningGames` последнего heartbeat ПК (`pcs.last_heartbeat`), если его
+  `currentSessionId` — открытый сеанс этого ПК (`id` или `client_session_id`) и ПК занят или заблокирован; игра — из
+  каталога этого клуба, пустой `coverUrl` — `null`. Один дополнительный SELECT на опрос (индекс `sessions_open_pc` и
+  PK игр), без миграции и нового агента; игра появляется и пропадает с опозданием до одного heartbeat (30 с).
 
 ### Касса, часть 3 (после «Касса, часть 2»)
 
@@ -2032,6 +2037,7 @@ anticheat/report — S3; `PATCH /admin/games/{id}` (реализуется) и `
 | D-68 | Новые действия журнала `shopSale`, `shopVoid`, `sessionMove`, `callAck`, `callResolve`, `stockCreate`, `stockArchive` — вне `AdminAuditAction`, пока контракт их не перечислит (`adminControl` их не показывает); новые виды ленты `shopSale`, `shopVoid`, `sessionMove`; массовое завершение пишет обычный `sessionEnd` |
 | D-69 | Порядок блокировок (§4.4) расширен: идемпотентность → advisory-блокировки ПК (пересадка — обоих, массовая с `includeBusy` — занятых, по возрастанию id, до любых строк) → `shop_sales` (аннулируемая продажа) → `sessions` → `wallets` → `products` (по id) → `shifts` (сильная — последней) → `pcs KEY SHARE` / вставка сеанса → `user_tokens` |
 | D-70 | Строгая идемпотентность для продажи, аннулирования, пересадки и массовых команд: известный ключ с другим телом — `409 idempotencyKeyReused`; остальные маршруты — как раньше (только лог) |
+| D-71 | `seats[].game` в `GET /admin/overview` — из heartbeat агента (`runningGames`, самая поздняя по `startedAt`), привязка к сеансу по `currentSessionId` (без сравнения часов ПК и сервера); только занятый или заблокированный ПК; игра из каталога клуба (снятая с каталога во время игры ещё показывается); `launch_reports` не используется (без отчёта о выходе игра «зависла» бы до конца сеанса) |
 
 ### 12.2 Изменения контракта (PR в club-contracts, ведёт лид, владелец не нужен)
 
@@ -2096,6 +2102,8 @@ anticheat/report — S3; `PATCH /admin/games/{id}` (реализуется) и `
     - AsyncAPI `pushUserRevoked`: причина `seatMoved`; `pushSessionUpdated` старому ПК с «видом завершения» пересаженного
       сеанса; `endSession` (`/sessions/{id}/end`) — `409 sessionNotActive` для ПК, с которого сеанс пересадили, и
       `postSessionEvents` — `204` (события только записываются) для него же.
+17. Касса F «Командный центр» (D-71): лишнее поле ответа `AdminSeat.game {id, title, coverUrl, heroUrl} | null`
+    (`AdminSeat` в вендоренном контракте без `additionalProperties: false`, поэтому `openapi.yaml` не меняется).
 
 ### 12.3 Вопросы владельцу (только то, что без него не решить)
 

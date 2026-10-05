@@ -119,6 +119,15 @@ export interface PcRecord extends Pc {
   /** `offlineQueue` and `currentSessionId` of its last heartbeat (what a move onto it is checked against). */
   offlineQueue?: number;
   reportedSessionId?: string | null;
+  /** `runningGames` of its last heartbeat: the game the hall map shows on the seat (D-71). */
+  runningGames?: RunningGame[];
+}
+
+/** A game the Agent reports running (`HeartbeatRequest.runningGames[]`). */
+export interface RunningGame {
+  gameId: string;
+  pid: number;
+  startedAt: string;
 }
 
 /** A product of the club's shop; the desk creates and archives its own (D-58). */

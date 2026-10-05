@@ -142,12 +142,21 @@ async function agentCall(
 
 /**
  * The Agent's heartbeat (a full `HeartbeatRequest`): a registered PC is offline until its first one, on the server and
- * on the mock. `currentSessionId` and `offlineQueue` are what a move onto the PC is checked against (D-59).
+ * on the mock. `currentSessionId` and `offlineQueue` are what a move onto the PC is checked against (D-59);
+ * `runningGames` with `currentSessionId` is the game the map shows on the seat (D-71).
  */
 async function heartbeat(
   request: APIRequestContext,
   pc: AgentPc,
-  { currentSessionId = null, offlineQueue = 0 }: { currentSessionId?: string | null; offlineQueue?: number } = {},
+  {
+    currentSessionId = null,
+    offlineQueue = 0,
+    runningGames = [],
+  }: {
+    currentSessionId?: string | null;
+    offlineQueue?: number;
+    runningGames?: { gameId: string; pid: number; startedAt: string }[];
+  } = {},
 ): Promise<void> {
   const res = await agentCall(request, pc, 'POST', `/agents/${pc.pcId}/heartbeat`, {
     status: 'free',
@@ -157,7 +166,7 @@ async function heartbeat(
     uptimeSec: 600,
     ipAddress: '10.0.0.10',
     policyVersion: 0,
-    runningGames: [],
+    runningGames,
     offlineQueue,
     shellConnected: true,
   });
@@ -169,6 +178,7 @@ interface OverviewSeat {
   session: { id: string; cost: { amount: number }; secondsLeft: number; isPrepaid: boolean } | null;
   user: { id: string; displayName: string; role: string; balance: { amount: number } } | null;
   signedIn?: boolean | null;
+  game?: { id: string; title: string; coverUrl: string | null; heroUrl: string | null } | null;
 }
 
 interface CallRow {
@@ -1422,7 +1432,7 @@ test("the operations feed shows each desk operation once with who, what and how 
 
   await stubPrint(page);
   await signIn(page, CASHIER_PIN);
-  // 1920 px: the feed is a column of its own.
+  // 1920 px: the feed is a column of its own; today's money is the «Сегодня принято» tile of the KPI strip above it.
   const feed = page.locator('[data-feed="column"]');
   await expect(feed).toBeVisible();
   const seatRow = feed.getByRole('listitem').filter({ hasText: seated.displayName });
@@ -1443,8 +1453,8 @@ test("the operations feed shows each desk operation once with who, what and how 
   expect(rows.filter((r) => r.saleId === saleId)).toHaveLength(2);
   expect(rows.reduce((sum, r) => sum + r.drawer, 0)).toBe((await shiftState(request)).expectedCash);
 
-  // Today's money covers at least these two payments.
-  const headline = (await feed.getByRole('button', { name: /Сегодня принято/ }).textContent()) ?? '';
+  // Today's money (the KPI tile, which opens the split by method) covers at least these two payments.
+  const headline = (await page.getByRole('button', { name: /^Сегодня принято/ }).textContent()) ?? '';
   const taken = Number(/Сегодня принято ([\d\s]+)/.exec(headline)?.[1]?.replace(/\s/g, '') ?? '0');
   expect(taken * 100).toBeGreaterThanOrEqual(quote.total.amount + 4_500_000);
 
@@ -2111,4 +2121,38 @@ test('a single PC command says when the PC is offline or busy instead of claimin
   await confirm.getByRole('button', { name: 'Отмена' }).click();
   expect((await seatOf(request, seated.pcId)).session).not.toBeNull();
   await endAt(request, seated.pcId);
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Cash desk F («Командный центр»): the game on a busy seat
+// ---------------------------------------------------------------------------------------------------------------------
+
+test('a busy seat shows the game its PC reports', async ({ page, request }) => {
+  await ensureShift(request);
+  const pc = await registerAgent(request, 'game');
+  await heartbeat(request, pc);
+  const member = await newClient(request, 'game');
+  const sessionId = await seatMember(request, pc, member.id);
+  // «Counter-Strike 2» is in the mock's catalog and in games.e2e.json (the real server's seed).
+  const games = (await (
+    await request.get(`${API}/admin/games`, { headers: auth(await tokenFor(request, OWNER_PIN)) })
+  ).json()) as { items: { id: string; title: string }[] };
+  const cs2 = games.items.find((g) => g.title === 'Counter-Strike 2');
+  expect(cs2, 'Counter-Strike 2 in the catalog').toBeTruthy();
+  await heartbeat(request, pc, {
+    currentSessionId: sessionId,
+    runningGames: [{ gameId: cs2!.id, pid: 4242, startedAt: new Date().toISOString() }],
+  });
+  expect((await seatOf(request, pc.pcId)).game?.title).toBe('Counter-Strike 2');
+
+  // The tile names the game, with its cover art or without (a catalog game may have none).
+  await signIn(page, CASHIER_PIN);
+  const tile = page.locator(`#seat-${pc.pcId}`);
+  await expect(tile).toContainText('Counter-Strike 2');
+
+  // The game closed: the next heartbeat lists none, and the tile forgets it.
+  await heartbeat(request, pc, { currentSessionId: sessionId, runningGames: [] });
+  expect((await seatOf(request, pc.pcId)).game ?? null).toBeNull();
+  await expect(tile).not.toContainText('Counter-Strike 2');
+  await endAt(request, pc.pcId);
 });

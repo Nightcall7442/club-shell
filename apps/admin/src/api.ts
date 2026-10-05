@@ -84,6 +84,20 @@ export interface Seat {
    * already runs); null — no session (absent from an older server).
    */
   signedIn?: boolean | null;
+  /**
+   * The game the PC's agent reports running for this session (D-71, from its heartbeat, up to 30 s late): its catalog
+   * title and art (an empty cover is null). null — none, no session, or the PC is not busy or locked; absent from an
+   * older server — the map shows no game.
+   */
+  game?: SeatGame | null;
+}
+
+/** A running game on a seat (`Seat.game`). */
+export interface SeatGame {
+  id: string;
+  title: string;
+  coverUrl: string | null;
+  heroUrl: string | null;
 }
 
 export interface Member extends SeatUser {

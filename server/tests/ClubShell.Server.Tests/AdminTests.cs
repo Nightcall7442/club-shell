@@ -430,6 +430,8 @@ public sealed class CounterTests(ServerFixture server) : LedgerCheckedTest(serve
         var overview = await ExpectAsync(Server, 200, HttpMethod.Get, "/overview", token);
         var seat = overview.GetProperty("seats").EnumerateArray().Single(s => s.GetProperty("pc").GetProperty("id").GetGuid() == agent.PcId);
         Assert.Equal((player.Id, player.Id), (seat.GetProperty("session").GetProperty("userId").GetGuid(), seat.GetProperty("user").GetProperty("id").GetGuid()));
+        // D-71: the key is always there; this PC reports no game (it never sent a heartbeat).
+        Assert.Equal(JsonValueKind.Null, seat.GetProperty("game").ValueKind);
         var users = overview.GetProperty("users").EnumerateArray().Select(u => u.GetProperty("id").GetGuid()).ToList();
         Assert.Contains(player.Id, users);
         Assert.DoesNotContain(hidden.Id, users);
