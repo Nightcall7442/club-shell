@@ -14,13 +14,17 @@
  * the target (or its number and Enter); the move asks first (D-59). A PC whose player called the desk wears an amber
  * bell, and its panel answers the call («Иду»).
  *
- * The shift's operations feed (`operations.tsx`) is a third column from 1800 px; below that it fills the right panel
- * while no seat is selected, and a «Место | Операции» switch brings it back over a selected seat.
+ * Variant F «Командный центр»: the hall is the glass panel with the accent edge, its tiles carry the running game's
+ * cover (`seat.game`, D-71) or a finished no-art look, amber marks what needs the cashier (ending within 10 minutes, a
+ * call), the selected tile wears the corner brackets; the seat is a solid card with the game's hero over the readouts.
+ *
+ * The shift's operations feed (`operations.tsx`) is a third column from 1800 px; below that it sits under the seat card
+ * (or under «Выберите место»), and folds to a bar while the right column holds a tall form (seating, several PCs).
  * Polls `/admin/overview` every 2 s (the real console would follow the server's WebSocket).
  */
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import clsx from 'clsx';
-import type { Money, Session, Tariff } from '@clubshell/contracts';
+import type { Session, Tariff } from '@clubshell/contracts';
 import {
   adminApi,
   clubApi,
@@ -40,17 +44,33 @@ import {
   type SeatUser,
   type SessionResult,
 } from '@/api';
+import { DEFAULT_WALLPAPER, GameArt } from '@/art';
 import { CallGroupActions, CallMark, groupCalls, groupLine, setCalls, useCalls, type CallGroup } from '@/calls';
 import { ClientPicker, pcLabel } from '@/clientSearch';
 import { useClub } from '@/club';
 import { isTyping, onShowPc, onSignedOut, sheetOpen, showBar } from '@/desk';
 import { amountOf, changedAmount, describe, isLostAnswer, reasonOf } from '@/errors';
 import { t } from '@/i18n';
-import { duration, minutesLabel, money, moneyExact } from '@/format';
+import { duration, exactDigits, minutesLabel, money, moneyExact, moneyParts } from '@/format';
+import {
+  AlertTriangleIcon,
+  CalendarIcon,
+  CheckIcon,
+  CheckSquareIcon,
+  ChevronDownIcon,
+  MonitorIcon,
+  PowerIcon,
+  SignInIcon,
+  StopSquareIcon,
+  SwapIcon,
+  TimerIcon,
+  WrenchIcon,
+} from '@/icons';
 import { guestDisplayName } from '@/labels';
 import { OperationsFeed } from '@/operations';
 import {
   PayBox,
+  PayFooter,
   ReceiptButton,
   ShiftClosedNote,
   TopUpSheet,
@@ -59,22 +79,24 @@ import {
   useShiftClosed,
   type Payee,
   type Payment,
+  type TopUpContext,
 } from '@/paybox';
 import { guestSignIn, type ReceiptData } from '@/print';
 import { useShift } from '@/shift';
-import { Button, Field, Kbd, Note, Sheet, inputCls } from '@/ui';
+import { Badge, Banner, Button, Chip, EmptyState, Field, Kbd, Note, Segmented, Sheet, inputCls } from '@/ui';
 
 const POLL_MS = 2000;
 const MINUTE_PRESETS = [30, 60, 120, 180];
-/** Red pulse on a tile. */
-const WARN_SEC = 5 * 60;
-/** The "Заканчиваются" filter. */
+/**
+ * The "Заканчиваются" filter, and the amber of a tile and of the seat's clock: the chip counts exactly the amber tiles
+ * (owner's decision; the red pulse at 5 minutes is gone).
+ */
 const ENDING_SEC = 10 * 60;
 /** Typed PC digits are forgotten after this pause. */
 const DIGITS_MS = 2500;
-/** The operations feed gets a column of its own from this width (D-45); below it shares the right panel. */
+/** The operations feed gets a column of its own from this width (D-45); below it sits under the seat card. */
 const WIDE_QUERY = '(min-width: 1800px)';
-/** Which face the right panel shows over a selected seat below 1800 px. */
+/** Below 1800 px, whether the feed is unfolded under a tall form (seating, several PCs): 'feed' — unfolded. */
 const PANEL_KEY = 'clubshell.admin.map.panel';
 /**
  * `minutes` is required by the contract even where the server ignores it (a package, postpaid): the console sends
@@ -85,45 +107,27 @@ const IGNORED_MINUTES = 60;
 /** A result line in the seat panel; a money step adds its slip («Чек») and a walk-in guest how to sign in. */
 type NoteState = { text: string; tone: 'ok' | 'warn' | 'err'; receipt?: ReceiptData; hint?: string } | null;
 
-const STATUS: Record<Seat['pc']['status'], { label: string; short: string; dot: string; cell: string }> = {
-  free: { label: 'Свободен', short: 'своб.', dot: 'bg-success', cell: 'border-success/40 text-text' },
-  busy: { label: 'Занят', short: 'занят', dot: 'bg-accent', cell: 'border-accent/60 bg-accent/[0.06] text-accent' },
-  locked: { label: 'Заблокирован', short: 'блок', dot: 'bg-danger', cell: 'border-danger/60 text-danger' },
-  maintenance: {
-    label: 'Обслуживание',
-    short: 'сервис',
-    dot: 'bg-fuchsia-400',
-    cell: 'border-fuchsia-400/50 text-fuchsia-300',
-  },
-  booked: { label: 'Бронь', short: 'бронь', dot: 'bg-amber-300', cell: 'border-amber-300/50 text-amber-200' },
-  offline: { label: 'Офлайн', short: 'офлайн', dot: 'bg-muted/40', cell: 'border-line text-muted/50' },
+/**
+ * A PC status in words: `label` for the tile's title and the seat card, `word` for the tile's bottom line (free,
+ * service, offline, locked, booked) and the card's status pill.
+ */
+const STATUS: Record<Seat['pc']['status'], { label: string; word: string }> = {
+  free: { label: 'Свободен', word: 'Свободен' },
+  busy: { label: 'Занят', word: 'Занят' },
+  locked: { label: 'Заблокирован', word: 'Заблокирован' },
+  maintenance: { label: 'Обслуживание', word: 'Сервис' },
+  booked: { label: 'Бронь', word: 'Бронь' },
+  offline: { label: 'Офлайн', word: 'Офлайн' },
 };
-
-const LEGEND_ORDER: Seat['pc']['status'][] = ['free', 'busy', 'booked', 'locked', 'maintenance', 'offline'];
-
-/** Who is on the seat, for the tile's bottom bar. */
-type Kind = 'member' | 'guest' | 'postpaid' | 'free';
-
-const KIND_BAR: Record<Kind, string> = {
-  member: 'bg-accent',
-  guest: 'bg-warning',
-  postpaid: 'bg-fuchsia-400',
-  free: 'bg-transparent',
-};
-
-function kindOf(seat: Seat): Kind {
-  if (!seat.session) return 'free';
-  if (!seat.session.isPrepaid) return 'postpaid';
-  return seat.user?.role === 'guest' ? 'guest' : 'member';
-}
 
 type Filter = 'free' | 'ending' | 'postpaid' | 'repair' | 'offline';
 
-const FILTERS: { id: Filter; label: string; test: (s: Seat, repair: boolean) => boolean }[] = [
+const FILTERS: { id: Filter; label: string; title?: string; test: (s: Seat, repair: boolean) => boolean }[] = [
   { id: 'free', label: 'Свободны', test: (s) => s.pc.status === 'free' && !s.session },
   {
     id: 'ending',
-    label: 'Заканчиваются ≤10 мин',
+    label: 'Заканчиваются',
+    title: 'Заканчиваются ≤10 мин',
     test: (s) => {
       const left = secondsLeft(s.session);
       return s.session !== null && s.session.isPrepaid && left >= 0 && left <= ENDING_SEC;
@@ -161,8 +165,6 @@ function secondsLeft(s: Session | null): number {
   }
   return s.endsAt ? Math.max(0, Math.round((Date.parse(s.endsAt) - Date.now()) / 1000)) : s.secondsLeft;
 }
-
-const uzs = (minor: number): Money => ({ amount: minor, currency: 'UZS' });
 
 function clock(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -210,7 +212,7 @@ interface SettleTarget {
 
 /** The sheet open over the map: one at a time. */
 type SheetState =
-  | { kind: 'topup'; payee: Payee; initial?: number; title?: string }
+  | { kind: 'topup'; payee: Payee; initial?: number; title?: string; context?: TopUpContext }
   | { kind: 'extend' }
   | { kind: 'end' }
   | { kind: 'settle'; target: SettleTarget }
@@ -239,19 +241,21 @@ function settleOf(r: SessionResult, seat: Seat, user: SeatUser): SettleTarget | 
 // Pieces
 // ---------------------------------------------------------------------------------------------------------------------
 
-function Wrench({ severity }: { severity: 'high' | 'medium' }): JSX.Element {
+function Wrench({ severity, size = 14 }: { severity: 'high' | 'medium'; size?: number }): JSX.Element {
   return (
     <svg
       viewBox="0 0 24 24"
       aria-label={t('Нужен ремонт')}
-      className={clsx('h-3.5 w-3.5', severity === 'high' ? 'text-danger' : 'text-warning')}
+      width={size}
+      height={size}
+      className={clsx('shrink-0', severity === 'high' ? 'text-warning' : 'text-muted')}
       fill="none"
       stroke="currentColor"
-      strokeWidth="2.2"
+      strokeWidth="1.9"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      <path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4 2.6-2.6z" />
+      <path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3.5 17.5a1.8 1.8 0 0 0 2.5 2.5l5.8-5.8a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.3-.6-.6-2.3z" />
     </svg>
   );
 }
@@ -261,26 +265,59 @@ function Lock(): JSX.Element {
     <svg
       viewBox="0 0 24 24"
       aria-label={t('Заблокирован')}
-      className="h-3.5 w-3.5 text-danger"
+      width={15}
+      height={15}
+      className="shrink-0 text-danger"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2.2"
+      strokeWidth="1.8"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      <path d="M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3" />
+      <rect x="5" y="11" width="14" height="9" rx="2" />
+      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
     </svg>
   );
 }
 
+/** `7` → `07`: PC numbers on the map. */
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+/** Text over a picture: the shadows that keep it legible (spec §6.4). */
+const SHADOW_NUM = '[text-shadow:0_1px_3px_rgb(0_0_0/0.6)]';
+const SHADOW_NAME = '[text-shadow:0_1px_2px_rgb(0_0_0/0.8)]';
+const SHADOW_SUB = '[text-shadow:0_0_6px_rgb(0_0_0/0.95),0_1px_2px_rgb(0_0_0/0.9)]';
+const SHADOW_READOUT = '[text-shadow:0_0_8px_rgb(0_0_0/0.9),0_1px_3px_rgb(0_0_0/0.85)]';
+
+/** Tile surfaces per state (spec §6.4): tiles never blur, they are drawn over the glass. */
+const TILE_BG = {
+  free: 'linear-gradient(180deg, rgb(var(--c-text) / 0.022) 0%, rgb(var(--c-text) / 0) 50%), rgb(8 11 15 / 0.4)',
+  art: 'rgb(var(--c-art))',
+  plain: 'linear-gradient(180deg, rgb(var(--c-accent) / 0.06) 0%, rgb(var(--c-accent) / 0) 70%), rgb(var(--c-art))',
+  waiting:
+    'repeating-linear-gradient(135deg, rgb(var(--c-accent) / 0.05) 0 1px, rgb(var(--c-accent) / 0) 1px 8px), rgb(10 13 18 / 0.82)',
+  booked: 'linear-gradient(180deg, rgb(var(--c-accent) / 0.045) 0%, rgb(var(--c-accent) / 0) 60%), rgb(8 11 15 / 0.5)',
+  locked: 'linear-gradient(180deg, rgb(var(--c-danger) / 0.06) 0%, rgb(var(--c-danger) / 0) 60%), rgb(8 11 15 / 0.55)',
+  offline: 'rgb(7 9 12 / 0.35)',
+  call: 'linear-gradient(180deg, rgb(var(--c-warning) / 0.09) 0%, rgb(var(--c-warning) / 0.02) 100%), rgb(8 11 15 / 0.6)',
+} as const;
+
 /**
- * Three lines: the PC number, who is on it, the time left (or the running bill of a postpaid session). A desk session
- * nobody has signed in to yet says «ждёт входа» instead of the name: its clock already runs (D-49). A PC whose player
- * called the desk has an amber outline and a bell. In «Выбрать» mode a box shows whether the PC is in the set; while a
- * move picks its target, a PC that cannot take the session is dimmed and does nothing.
+ * Three lines: the PC number with its marks, who is on it and what they play, the time left (or the running bill of a
+ * postpaid session). A busy seat shows its game's cover behind the text when the PC reports one (`seat.game`), else
+ * the tariff; a desk session nobody has signed in to yet says «ждёт входа»: its clock already runs (D-49). Amber means
+ * the cashier is needed: 10 minutes or less left, a player's call. The selected PC wears the corner brackets; in
+ * «Выбрать» mode a box shows whether the PC is in the set; while a move picks its target, a PC that cannot take the
+ * session is dimmed and does nothing.
+ *
+ * The button itself is not clipped (the brackets sit outside it); the picture and the progress line live in an inner
+ * clipped layer.
  */
 function SeatTile({
   seat,
+  tariff,
   selected,
   checked,
   dimmed,
@@ -290,6 +327,8 @@ function SeatTile({
   repair,
 }: {
   seat: Seat;
+  /** The session's tariff name: the tile's second line when the PC reports no game. */
+  tariff?: string;
   selected: boolean;
   /** null — no box (not in «Выбрать» mode). */
   checked: boolean | null;
@@ -303,10 +342,69 @@ function SeatTile({
   repair?: 'high' | 'medium';
 }): JSX.Element {
   const s = STATUS[seat.pc.status];
-  const kind = kindOf(seat);
-  const left = secondsLeft(seat.session);
-  const warn = seat.session !== null && seat.session.isPrepaid && left >= 0 && left <= WARN_SEC;
-  const waiting = seat.session !== null && seat.signedIn === false;
+  const status = seat.pc.status;
+  const session = seat.session;
+  const left = secondsLeft(session);
+  const prepaid = session?.isPrepaid ?? false;
+  const ending = session !== null && prepaid && left >= 0 && left <= ENDING_SEC;
+  const waiting = session !== null && seat.signedIn === false;
+  const game = session ? (seat.game ?? null) : null;
+  const cover = game?.coverUrl ?? null;
+  const art = cover !== null;
+  // The surface: a call wins (amber), then the picture, then what the PC is doing.
+  const surface: keyof typeof TILE_BG = call
+    ? 'call'
+    : art
+      ? 'art'
+      : session
+        ? waiting
+          ? 'waiting'
+          : 'plain'
+        : status === 'locked'
+          ? 'locked'
+          : status === 'booked'
+            ? 'booked'
+            : status === 'offline'
+              ? 'offline'
+              : status === 'busy'
+                ? 'plain'
+                : 'free';
+  const background = checked
+    ? `linear-gradient(rgb(var(--c-accent) / 0.08), rgb(var(--c-accent) / 0.08)), ${TILE_BG[surface]}`
+    : TILE_BG[surface];
+  // How far the prepaid time has run: the line under the tile.
+  const fraction =
+    session && prepaid && left >= 0 ? Math.min(1, Math.max(0, left / Math.max(1, left + session.secondsUsed))) : null;
+  const bar =
+    fraction !== null ? (
+      <span className={clsx('absolute inset-x-0 bottom-0 h-0.5', ending ? 'bg-warning/[0.18]' : 'bg-accent/[0.12]')}>
+        <span
+          className={clsx(
+            'block h-full',
+            ending
+              ? 'bg-warning shadow-[0_0_8px_rgb(var(--c-warning)/0.9)]'
+              : 'bg-accent opacity-85 shadow-[0_0_8px_rgb(var(--c-accent)/0.7)]',
+          )}
+          style={{ width: `${Math.round(fraction * 1000) / 10}%` }}
+        />
+      </span>
+    ) : null;
+  // The second line under the name: the call, the sign-in still awaited, the game, else postpaid or the tariff.
+  const sub: { text: string; tone: 'warn' | 'accent' | 'plain' }[] = [];
+  if (call) sub.push({ text: t('Зовёт админа'), tone: 'warn' });
+  if (waiting) sub.push({ text: t('ждёт входа'), tone: 'accent' });
+  if (game) sub.push({ text: game.title, tone: 'plain' });
+  else if (session && !waiting && !call && (!prepaid || tariff))
+    sub.push({ text: prepaid ? (tariff ?? '') : t('Постоплата'), tone: 'plain' });
+  const numberTone =
+    status === 'offline' && !session
+      ? 'text-text/[0.34]'
+      : status === 'locked' && !session
+        ? 'text-text/[0.55]'
+        : session || call
+          ? 'text-white'
+          : 'text-text/[0.88]';
+  const style: CSSProperties = { background };
   return (
     <button
       type="button"
@@ -318,61 +416,169 @@ function SeatTile({
       }}
       aria-pressed={checked ?? selected}
       aria-disabled={blocked || undefined}
+      data-selected={selected || undefined}
       title={`${seat.pc.name} · ${t(s.label)}${seat.user ? ` · ${nameOf(seat.user)}` : ''}${waiting ? ` · ${t('ждёт входа')}` : ''}${repair ? ` · ${t('Нужен ремонт')}` : ''}${call ? ` · ${t('Вызов администратора')}` : ''}`}
+      style={style}
       className={clsx(
-        'focus-ring relative flex h-[5.75rem] flex-col justify-between overflow-hidden rounded-md border bg-bg px-2.5 pb-2.5 pt-2 text-left transition-[background-color,opacity] hover:bg-white/[0.04]',
-        s.cell,
-        selected && 'ring-2 ring-accent ring-offset-2 ring-offset-surface',
-        checked && 'bg-accent/[0.08] ring-2 ring-accent/70',
-        call && 'outline outline-2 outline-offset-1 outline-warning',
+        'focus-ring hud-focus group relative flex h-28 min-w-0 flex-col justify-between rounded-md border pb-[13px] pl-3.5 pr-3 pt-3 text-left transition-[border-color,box-shadow,opacity] duration-200',
+        // Border and glow: amber when the cashier is needed, the accent when selected, else the state's hairline.
+        call
+          ? 'border-warning/[0.45] shadow-[0_0_22px_-8px_rgb(var(--c-warning)/0.45)]'
+          : ending
+            ? 'border-warning/[0.55] shadow-warn'
+            : selected
+              ? 'border-accent/80 shadow-sel'
+              : checked
+                ? 'border-accent/70 shadow-[inset_0_0_0_1px_rgb(var(--c-accent)/0.7)]'
+                : surface === 'locked'
+                  ? 'border-danger/30 hover:border-danger/50'
+                  : surface === 'offline'
+                    ? 'border-dashed border-accent/[0.12] hover:border-accent/[0.26]'
+                    : surface === 'free'
+                      ? 'border-accent/[0.07] hover:border-accent/[0.26]'
+                      : surface === 'waiting'
+                        ? 'border-accent/20 hover:border-accent/[0.26]'
+                        : surface === 'booked'
+                          ? 'border-accent/[0.14] hover:border-accent/[0.26]'
+                          : 'border-accent/[0.16] hover:border-accent/[0.26]',
         (dimmed || blocked) && 'opacity-25',
         blocked && 'cursor-not-allowed',
       )}
     >
-      <span className="flex items-start justify-between gap-1">
-        <span className="flex items-center gap-1.5">
+      {art ? (
+        <GameArt src={cover} variant="tile" zoom>
+          {bar}
+        </GameArt>
+      ) : (
+        bar && (
+          <span aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit]">
+            {bar}
+          </span>
+        )
+      )}
+
+      <span className="relative flex h-[22px] items-center justify-between gap-1.5">
+        <span
+          className={clsx(
+            'font-display text-xl font-medium leading-none tracking-[-0.01em]',
+            numberTone,
+            art && SHADOW_NUM,
+          )}
+        >
+          {pad2(seat.pc.number)}
+        </span>
+        <span className="flex min-w-0 items-center gap-1">
+          {call && (
+            <span
+              className={clsx(
+                'flex h-[22px] w-[22px] items-center justify-center rounded-full bg-warning/[0.16] shadow-[0_0_0_4px_rgb(var(--c-warning)/0.07)] [&>svg]:h-3 [&>svg]:w-3',
+                call.ringing && 'anim-warn-glow',
+              )}
+            >
+              <CallMark ringing={call.ringing} />
+            </span>
+          )}
+          {ending && !call && (
+            <span
+              role="img"
+              aria-label={t('Заканчивается')}
+              className="flex h-[22px] w-[22px] items-center justify-center rounded-[6px] border border-warning/50 bg-bg/[0.62]"
+            >
+              <AlertTriangleIcon size={13} strong className="text-warning" />
+            </span>
+          )}
+          {session && !prepaid && (
+            <span
+              title={t('Постоплата')}
+              className="inline-flex h-5 items-center rounded-sm border border-accent/[0.28] bg-bg/60 px-1.5 text-sm font-medium leading-none text-accent"
+            >
+              ∞
+            </span>
+          )}
+          {waiting && !call && <SignInIcon size={15} className="text-accent" />}
+          {status === 'locked' && <Lock />}
+          {repair && <Wrench severity={repair} size={13} />}
+          {status === 'offline' && !session && <PowerIcon size={14} className="text-muted" />}
+          {status === 'booked' && !session && <CalendarIcon size={14} className="text-accent" />}
           {checked !== null && (
             <span
               aria-hidden="true"
               className={clsx(
-                'flex h-3.5 w-3.5 items-center justify-center rounded-[3px] border text-[0.6rem] leading-none',
-                checked ? 'border-accent bg-accent text-on-accent' : 'border-muted/60',
+                'flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] border',
+                checked ? 'border-accent bg-accent text-on-accent' : 'border-muted/60 bg-bg/40',
               )}
             >
-              {checked ? '✓' : ''}
+              {checked && <CheckIcon size={12} strokeWidth={2.4} />}
             </span>
           )}
-          <span className="num-dot text-[1.6rem] leading-none">{String(seat.pc.number).padStart(2, '0')}</span>
-        </span>
-        <span className="flex items-center gap-1">
-          {call && <CallMark ringing={call.ringing} />}
-          {seat.pc.status === 'locked' && <Lock />}
-          {repair && <Wrench severity={repair} />}
         </span>
       </span>
-      {waiting ? (
-        <span className="block truncate text-xs leading-tight text-warning">{t('ждёт входа')}</span>
-      ) : (
-        <span className="block truncate text-xs leading-tight text-text">{seat.user ? nameOf(seat.user) : ' '}</span>
+
+      {(session || call) && (
+        <span className="relative block min-w-0">
+          {session && seat.user && (
+            <span
+              className={clsx('block truncate text-[12.5px] font-semibold leading-4 text-white', art && SHADOW_NAME)}
+            >
+              {nameOf(seat.user)}
+            </span>
+          )}
+          {sub.length > 0 && (
+            <span
+              className={clsx(
+                'mt-0.5 block truncate font-mono text-[9px] font-medium uppercase leading-3 tracking-[0.06em] text-[#D3DBE1]',
+                art && SHADOW_SUB,
+              )}
+            >
+              {sub.map((x, i) => (
+                <span
+                  key={i}
+                  className={clsx(
+                    x.tone === 'warn' && 'font-semibold tracking-[0.12em] text-warning',
+                    x.tone === 'accent' && 'tracking-[0.08em] text-accent',
+                  )}
+                >
+                  {i > 0 ? ' · ' : ''}
+                  {x.text}
+                </span>
+              ))}
+            </span>
+          )}
+        </span>
       )}
-      {seat.session ? (
+
+      {session ? (
+        prepaid || left < 0 ? (
+          <span
+            className={clsx(
+              'num-dot relative text-base leading-none tracking-[0.02em]',
+              ending ? 'text-warning' : waiting && !art ? 'text-text/[0.86]' : 'text-white',
+              art && SHADOW_READOUT,
+            )}
+          >
+            {duration(left)}
+          </span>
+        ) : (
+          <span className="relative flex items-baseline gap-1 whitespace-nowrap">
+            <span className={clsx('num-dot text-[15px] leading-none text-white', art && SHADOW_READOUT)}>
+              {moneyParts(session.cost.amount).num}
+            </span>
+            <span className="text-[10.5px] font-medium leading-none text-soft">{t('сум')}</span>
+          </span>
+        )
+      ) : (
         <span
           className={clsx(
-            'tnum block truncate font-mono text-[0.7rem] leading-none',
-            warn ? 'font-semibold text-danger' : 'text-muted',
+            'relative flex items-center gap-1.5 font-mono text-[10px] uppercase leading-none',
+            status === 'locked'
+              ? 'font-semibold tracking-[0.12em] text-danger'
+              : 'font-medium tracking-[0.14em] text-muted',
           )}
         >
-          {seat.session.isPrepaid ? duration(left) : `∞ ${money(seat.session.cost)}`}
-        </span>
-      ) : (
-        <span className="block font-mono text-[0.62rem] uppercase leading-none tracking-[0.1em] text-muted">
-          {t(s.short)}
+          {status === 'maintenance' && <WrenchIcon size={12} />}
+          {t(s.word)}
         </span>
       )}
-      <span
-        aria-hidden="true"
-        className={clsx('absolute inset-x-0 bottom-0 h-[3px]', warn ? 'animate-pulse bg-danger' : KIND_BAR[kind])}
-      />
     </button>
   );
 }
@@ -381,50 +587,83 @@ function SeatTile({
 function SeatNote({ note }: { note: NoteState }): JSX.Element | null {
   if (!note) return null;
   return (
-    <div
-      role={note.tone === 'err' ? 'alert' : 'status'}
-      className={clsx(
-        'flex flex-col gap-2 rounded-md px-3 py-2 text-sm',
-        note.tone === 'ok' && 'bg-success/10 text-success',
-        note.tone === 'warn' && 'bg-warning/10 text-warning',
-        note.tone === 'err' && 'bg-danger/10 text-danger',
-      )}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <p>{note.text}</p>
-        {note.receipt && <ReceiptButton receipt={note.receipt} className="h-8 shrink-0 px-2.5 text-xs" />}
-      </div>
-      {note.hint && <p className="text-xs text-text">{note.hint}</p>}
-    </div>
+    <Note tone={note.tone} role={note.tone === 'err' ? 'alert' : 'status'}>
+      <span className="flex items-start justify-between gap-3">
+        <span className="min-w-0">{note.text}</span>
+        {note.receipt && <ReceiptButton receipt={note.receipt} size="xs" className="-my-0.5 shrink-0" />}
+      </span>
+      {note.hint && <span className="mt-1.5 block text-xs font-normal text-dim">{note.hint}</span>}
+    </Note>
   );
 }
 
-/** Two or more buttons of which one is on: who sits (client / guest), how they pay (prepaid / postpaid). */
-function Choice<T extends string>({
-  label,
-  value,
-  options,
-  onChange,
+/**
+ * The seat card's band (spec §6.7): the game's hero (or its cover) under the scrims and the accent edge, else the club's
+ * wallpaper faint over the blueprint grid; a mono caption and a status pill on top, the title (a name, «Посадить на
+ * ПК 05») and a meta line under it. `children` sit at the band's bottom (the readouts over a picture).
+ */
+function SeatStrip({
+  art,
+  height,
+  caption,
+  pill,
+  title,
+  meta,
+  children,
 }: {
-  label: string;
-  value: T;
-  options: { id: T; label: string; disabled?: string | null }[];
-  onChange: (v: T) => void;
+  art: string | null;
+  height: number;
+  caption: string;
+  pill?: ReactNode;
+  title: string;
+  meta?: ReactNode;
+  children?: ReactNode;
 }): JSX.Element {
+  const club = useClub();
+  const wallpaper = club.wallpaperUrl || DEFAULT_WALLPAPER;
   return (
-    <div role="group" aria-label={label} className="grid grid-cols-2 gap-1.5">
-      {options.map((o) => (
-        <Button
-          key={o.id}
-          aria-pressed={value === o.id}
-          disabled={Boolean(o.disabled)}
-          title={o.disabled ?? undefined}
-          className={clsx(value === o.id && 'choice-on')}
-          onClick={() => onChange(o.id)}
+    <div className="relative shrink-0 overflow-hidden" style={{ height }}>
+      <GameArt
+        src={art}
+        variant="strip"
+        edge
+        fallback={
+          <span className="absolute inset-0 bg-art">
+            <span
+              className="absolute inset-0 bg-cover bg-[50%_40%] opacity-[0.35] [filter:blur(1.5px)_saturate(0.7)]"
+              style={{ backgroundImage: `url(${JSON.stringify(wallpaper)})` }}
+            />
+            <span className="hud-grid absolute inset-0 opacity-60" />
+            <span
+              className="absolute inset-0"
+              style={{
+                background:
+                  'linear-gradient(90deg, rgb(7 9 12 / 0.75) 0%, rgb(7 9 12 / 0.2) 70%), linear-gradient(180deg, rgb(10 13 18 / 0) 35%, rgb(var(--c-art)) 100%)',
+              }}
+            />
+          </span>
+        }
+      />
+      <div className="relative flex h-full flex-col px-4 pt-3.5">
+        <div className="flex h-5 items-center justify-between gap-3">
+          <span className="label-sm min-w-0 truncate text-text/90">{caption}</span>
+          {pill}
+        </div>
+        <h2
+          className={clsx(
+            'truncate font-display text-[26px] font-medium leading-[1.1] tracking-[-0.02em] text-white [text-shadow:0_2px_12px_rgb(0_0_0/0.6)]',
+            art ? 'mt-6' : 'mt-2.5',
+          )}
         >
-          {o.label}
-        </Button>
-      ))}
+          {title}
+        </h2>
+        {meta && (
+          <p className="mt-[7px] truncate text-xs leading-none text-text/80 [text-shadow:0_1px_3px_rgb(0_0_0/0.8)]">
+            {meta}
+          </p>
+        )}
+        {children}
+      </div>
     </div>
   );
 }
@@ -454,25 +693,47 @@ function useClientHit(user: SeatUser | null, username: string | undefined, versi
   return hit;
 }
 
-/** "К оплате N · на балансе M · доплата K". */
+/**
+ * One line of a money well: a mono label, the sum as a Doto readout with «сум». `exact` keeps the tiyin (a guest's
+ * price, a debt); `tone` colours the figure (`warn` what is still to pay, `muted` a zero).
+ */
+function SumRow({
+  label,
+  minor,
+  exact,
+  tone,
+}: {
+  label: string;
+  minor: number;
+  exact?: boolean;
+  tone?: 'warn' | 'muted';
+}): JSX.Element {
+  return (
+    <div className="flex min-h-10 items-center justify-between gap-3 px-3.5 py-2">
+      <dt className="label-sm">{label}</dt>
+      <dd className="flex items-baseline gap-1.5 whitespace-nowrap">
+        <span
+          className={clsx(
+            'num-dot text-xl leading-none',
+            tone === 'warn' ? 'text-warning' : tone === 'muted' ? 'text-muted' : 'text-hi',
+          )}
+        >
+          {exact ? exactDigits(minor) : moneyParts(minor).num}
+        </span>
+        <span className="text-[11.5px] font-medium leading-none text-muted">{t('сум')}</span>
+      </dd>
+    </div>
+  );
+}
+
+/** "К оплате N · на балансе M · доплата K": the wells of a seat or an extension, one per line. */
 function PaySummary({ price, balance }: { price: number; balance: number }): JSX.Element {
   const shortfall = Math.max(0, price - balance);
   return (
-    <dl className="grid grid-cols-3 divide-x divide-line overflow-hidden rounded-md border border-line bg-bg text-center">
-      <div className="flex flex-col gap-1.5 px-2 py-2.5">
-        <dt className="label">{t('К оплате')}</dt>
-        <dd className="tnum text-sm font-semibold leading-none">{money(uzs(price))}</dd>
-      </div>
-      <div className="flex flex-col gap-1.5 px-2 py-2.5">
-        <dt className="label">{t('На балансе')}</dt>
-        <dd className="tnum text-sm font-semibold leading-none">{money(uzs(balance))}</dd>
-      </div>
-      <div className="flex flex-col gap-1.5 px-2 py-2.5">
-        <dt className="label">{t('Доплата')}</dt>
-        <dd className={clsx('tnum text-sm font-semibold leading-none', shortfall > 0 ? 'text-warning' : 'text-muted')}>
-          {money(uzs(shortfall))}
-        </dd>
-      </div>
+    <dl className="well flex flex-col divide-y divide-accent/[0.07]">
+      <SumRow label={t('К оплате')} minor={price} />
+      <SumRow label={t('На балансе')} minor={balance} />
+      <SumRow label={t('Доплата')} minor={shortfall} tone={shortfall > 0 ? 'warn' : 'muted'} />
     </dl>
   );
 }
@@ -480,10 +741,9 @@ function PaySummary({ price, balance }: { price: number; balance: number }): JSX
 /** A guest pays exactly the price, to the tiyin (D-48): no balance, no change left on a throwaway account. */
 function ExactSummary({ price, label }: { price: number; label?: string }): JSX.Element {
   return (
-    <div className="flex items-baseline justify-between rounded-md border border-line bg-bg px-3 py-2.5">
-      <span className="label">{label ?? t('К оплате')}</span>
-      <span className="tnum text-sm font-semibold">{moneyExact(price)}</span>
-    </div>
+    <dl className="well">
+      <SumRow label={label ?? t('К оплате')} minor={price} exact />
+    </dl>
   );
 }
 
@@ -536,10 +796,10 @@ function outcomeText(r: BulkResult): string {
 }
 
 /**
- * A button of a two-column row in the 26rem panel that may wrap: a long translation («Qayta yuklash (6 tadan 4)») goes
- * to a second line instead of widening the panel.
+ * A button of a row in the 360–400 px card that may wrap: a long translation («Qayta yuklash (6 tadan 4)») goes to a
+ * second line instead of widening the card.
  */
-const WRAP = '!h-auto min-h-10 !whitespace-normal py-2 text-center leading-tight';
+const WRAP = '!h-auto min-h-11 !whitespace-normal py-1.5 text-center leading-tight';
 
 /** The button of each bulk command (its «Повторить» after a lost answer says which). */
 const BULK_VERB: Record<PcCommandKind, string> = {
@@ -558,13 +818,19 @@ const POWER_LABEL: Record<'reboot' | 'shutdown', { verb: string; done: string }>
 /** The players a power command or a lock would interrupt: PC, who, time left. */
 function BusyList({ seats }: { seats: Seat[] }): JSX.Element {
   return (
-    <ul aria-label={t('Идут сеансы')} className="flex max-h-56 flex-col divide-y divide-line overflow-y-auto">
+    <ul
+      aria-label={t('Идут сеансы')}
+      className="well thin-scrollbar flex max-h-56 flex-col divide-y divide-accent/[0.07] overflow-y-auto px-3.5"
+    >
       {seats.map((s) => (
-        <li key={s.pc.id} className="flex items-baseline justify-between gap-3 py-1.5 text-sm">
-          <span className="min-w-0 truncate">
-            <span className="font-mono text-xs text-muted">{pcLabel(s.pc.name)}</span> {s.user ? nameOf(s.user) : '—'}
+        <li key={s.pc.id} className="flex min-h-10 items-center justify-between gap-3 py-2 text-[13px]">
+          <span className="min-w-0 truncate font-medium text-text">
+            <span className="mr-2 font-mono text-[11px] font-medium uppercase tracking-[0.08em] text-muted">
+              {pcLabel(s.pc.name)}
+            </span>
+            {s.user ? nameOf(s.user) : '—'}
           </span>
-          <span className="tnum shrink-0 font-mono text-xs text-muted">
+          <span className="tnum shrink-0 font-mono text-[11.5px] text-dim">
             {s.session?.isPrepaid
               ? t('осталось {time}', { time: duration(secondsLeft(s.session)) })
               : s.session
@@ -600,20 +866,30 @@ function PowerConfirm({
   const verb = lock ? t('Заблокировать') : t(POWER_LABEL[kind].verb);
   const one = busy.length === 1 ? busy[0] : undefined;
   return (
-    <Sheet title={t('{verb} · идут сеансы: {n}', { verb, n: busy.length })} onClose={onClose}>
+    <Sheet
+      title={t('{verb} · идут сеансы: {n}', { verb, n: busy.length })}
+      onClose={onClose}
+      footer={
+        <div className="ml-auto flex flex-wrap justify-end gap-2">
+          <Button variant="ghost" autoFocus onClick={onClose}>
+            {t('Отмена')}
+          </Button>
+          {one && onMove && !lock && (
+            <Button variant="secondary" onClick={() => onMove(one)}>
+              <SwapIcon size={15} />
+              {t('Пересадить')}
+            </Button>
+          )}
+          <Button variant="danger" disabled={sending} onClick={onConfirm}>
+            {sending ? '…' : verb}
+          </Button>
+        </div>
+      }
+    >
       <BusyList seats={busy} />
-      <p className="rounded-md bg-white/[0.04] px-3 py-2 text-sm">
+      <Note tone="warn">
         {lock ? t('Игра закроется, время идёт') : t('Сеанс будет завершён, неиспользованное время вернётся на баланс')}
-      </p>
-      <div className="flex flex-wrap justify-end gap-2 border-t border-line pt-4">
-        <Button variant="ghost" autoFocus onClick={onClose}>
-          {t('Отмена')}
-        </Button>
-        {one && onMove && !lock && <Button onClick={() => onMove(one)}>{t('Пересадить')}</Button>}
-        <Button variant="danger" className="border border-danger/50" disabled={sending} onClick={onConfirm}>
-          {sending ? '…' : verb}
-        </Button>
-      </div>
+      </Note>
     </Sheet>
   );
 }
@@ -637,19 +913,23 @@ onSignedOut(() => lostPower.clear());
  * offline PC queues the command, a silent one did not answer. Reboot and shutdown go through the bulk route (D-66): of a
  * busy PC they ask first and end the session the confirm showed at the desk (refund, journal) before the PC restarts.
  * After a lost answer only «Повторить» of that same command is offered until a definite answer.
+ *
+ * The «Ещё ⋯» button that opens it is the card's (`open`): a 64 px tool beside «Бар» on a busy seat, a full row on a
+ * free one ({@link MoreButton}).
  */
 function TechActions({
   seat,
   busy,
   run,
   onStartMove,
+  open,
 }: {
   seat: Seat;
   busy: boolean;
   run: (key: string, fn: () => Promise<string | NoteState>) => Promise<void>;
   onStartMove?: () => void;
-}): JSX.Element {
-  const [open, setOpen] = useState(false);
+  open: boolean;
+}): JSX.Element | null {
   const [message, setMessage] = useState('');
   /** The confirm with the seat as it was when it opened: its session is the one that may be ended. */
   const [confirm, setConfirm] = useState<{ kind: 'reboot' | 'shutdown'; seat: Seat } | null>(null);
@@ -708,16 +988,21 @@ function TechActions({
     else power(kind, null);
   };
   const lostKind = lost?.input.kind === 'shutdown' ? 'shutdown' : 'reboot';
+  if (!open && !lost && !confirm) return null;
   return (
     <section className="flex flex-col gap-2">
-      <Button variant="ghost" className="justify-between" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        <span>{t('Ещё ⋯')}</span>
-        <span className="text-xs font-normal text-muted">{t('сообщение, блокировка, питание')}</span>
-      </Button>
       {open && (
-        <div className="flex flex-col gap-2 rounded-md border border-line p-3">
+        <div className="well flex flex-col gap-3 p-3">
+          {seat.pc.agentVersion && (
+            <span className="label-sm tnum">
+              {t('Агент {agent} · Оболочка {shell}', {
+                agent: seat.pc.agentVersion,
+                shell: seat.pc.shellVersion ?? '—',
+              })}
+            </span>
+          )}
           <Field label={t('Сообщение на экран')}>
-            <div className="flex gap-1.5">
+            <div className="flex gap-2">
               <input
                 className={inputCls}
                 value={message}
@@ -725,6 +1010,7 @@ function TechActions({
                 onChange={(e) => setMessage(e.target.value)}
               />
               <Button
+                variant="secondary"
                 disabled={busy || message.trim().length === 0}
                 onClick={() =>
                   void run('msg', async () => {
@@ -738,28 +1024,43 @@ function TechActions({
               </Button>
             </div>
           </Field>
-          <div className="grid grid-cols-2 gap-1.5">
-            <Button variant="ghost" disabled={busy} onClick={() => command('lock', t('ПК заблокирован'))}>
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant="tertiary"
+              className={WRAP}
+              disabled={busy}
+              onClick={() => command('lock', t('ПК заблокирован'))}
+            >
               {t('Заблокировать')}
             </Button>
-            <Button variant="ghost" disabled={busy} onClick={() => command('unlock', t('ПК разблокирован'))}>
+            <Button
+              variant="tertiary"
+              className={WRAP}
+              disabled={busy}
+              onClick={() => command('unlock', t('ПК разблокирован'))}
+            >
               {t('Разблокировать')}
             </Button>
-            <Button variant="ghost" disabled={busy || lost !== null} onClick={() => ask('reboot')}>
+            <Button variant="tertiary" className={WRAP} disabled={busy || lost !== null} onClick={() => ask('reboot')}>
               {t('Перезагрузить')}
             </Button>
-            <Button variant="ghost" disabled={busy || lost !== null} onClick={() => ask('shutdown')}>
+            <Button
+              variant="tertiary"
+              className={WRAP}
+              disabled={busy || lost !== null}
+              onClick={() => ask('shutdown')}
+            >
               {t('Выключить')}
             </Button>
           </div>
         </div>
       )}
       {lost && (
-        <div className="flex flex-col gap-2 rounded-md border border-warning/50 p-3">
-          <p role="status" className="text-xs text-warning">
+        <div className="flex flex-col gap-2">
+          <Note tone="warn" role="status">
             {t('Ответ сервера не пришёл: команда могла уйти. Повторите её — дважды она не отправится.')}
-          </p>
-          <Button disabled={busy} onClick={() => send(lost.input, lost.key)}>
+          </Note>
+          <Button variant="secondary" disabled={busy} onClick={() => send(lost.input, lost.key)}>
             {busy ? '…' : `${t('Повторить')} · ${t(POWER_LABEL[lostKind].verb)}`}
           </Button>
         </div>
@@ -782,6 +1083,45 @@ function TechActions({
         />
       )}
     </section>
+  );
+}
+
+/**
+ * «Ещё ⋯», the toggle of {@link TechActions}: `compact` is the 64 px tool of the busy seat's row (what it holds in its
+ * tooltip), else a full row with the list on the right. Its name always starts with «Ещё ⋯».
+ */
+function MoreButton({
+  open,
+  onToggle,
+  compact,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  compact?: boolean;
+}): JSX.Element {
+  return compact ? (
+    <Button
+      variant="tertiary"
+      className={clsx('min-w-16 shrink-0 px-2.5', open && 'choice-on')}
+      aria-expanded={open}
+      title={t('сообщение, блокировка, питание')}
+      onClick={onToggle}
+    >
+      {t('Ещё ⋯')}
+    </Button>
+  ) : (
+    <Button
+      variant="tertiary"
+      className={clsx('w-full justify-between', open && 'choice-on')}
+      aria-expanded={open}
+      onClick={onToggle}
+    >
+      <span>{t('Ещё ⋯')}</span>
+      <span className="flex items-center gap-2 text-xs font-normal text-muted">
+        {t('сообщение, блокировка, питание')}
+        <ChevronDownIcon size={15} className={clsx('transition-transform duration-200', open && 'rotate-180')} />
+      </span>
+    </Button>
   );
 }
 
@@ -873,126 +1213,160 @@ function BulkPanel({
   const failed = results?.list.filter((r) => r.outcome === 'failed') ?? [];
 
   return (
-    <div className="flex h-full flex-col gap-4 overflow-y-auto pr-1">
-      <header className="flex flex-col gap-1">
-        <span className="label">{t('Несколько ПК')}</span>
-        <h2 className="font-display text-2xl font-normal leading-tight tracking-tight">
-          {t('Выбрано {n}', { n: seats.length })}
-        </h2>
-        <span className="tnum font-mono text-xs text-muted">
-          {numbers.slice(0, 16).join(', ')}
-          {numbers.length > 16 ? '…' : ''}
-        </span>
-      </header>
+    <div className="panel-solid flex flex-col overflow-hidden">
+      <SeatStrip
+        art={null}
+        height={104}
+        caption={t('Несколько ПК')}
+        title={t('Выбрано {n}', { n: seats.length })}
+        meta={
+          <span className="tnum font-mono">
+            {numbers.slice(0, 16).join(', ')}
+            {numbers.length > 16 ? '…' : ''}
+          </span>
+        }
+      />
 
-      <section className="flex flex-col gap-2">
-        <Field label={t('Сообщение на экран')}>
-          <input
-            className={inputCls}
-            value={text}
-            maxLength={500}
-            placeholder={t('Текст для игроков')}
-            onChange={(e) => setText(e.target.value)}
-          />
-        </Field>
-        <div className="flex flex-wrap gap-1.5">
-          {MESSAGE_PRESETS.map((m) => (
-            <Button key={m} size="sm" onClick={() => setText(t(m))}>
-              {t(m)}
-            </Button>
-          ))}
-        </div>
-        <Choice
-          label={t('Важность')}
-          value={level}
-          options={[
-            { id: 'info', label: t('Обычное') },
-            { id: 'warning', label: t('Важное') },
-          ]}
-          onChange={setLevel}
-        />
-        <Button variant="primary" disabled={held || text.trim().length === 0} onClick={() => act('message')}>
-          {sending === 'message' ? '…' : `${t('Сообщение')} ${count(seats.length)}`}
-        </Button>
-      </section>
-
-      <section className="grid grid-cols-2 gap-1.5">
-        <Button className={WRAP} disabled={held || reachable.length === 0} onClick={() => act('lock')}>
-          {sending === 'lock' ? '…' : `${t('Заблокировать')} ${count(reachable.length)}`}
-        </Button>
-        <Button className={WRAP} disabled={held} onClick={() => act('unlock')}>
-          {sending === 'unlock' ? '…' : `${t('Разблокировать')} ${count(seats.length)}`}
-        </Button>
-        <Button className={WRAP} disabled={held || reachable.length === 0} onClick={() => act('reboot')}>
-          {sending === 'reboot' ? '…' : `${t('Перезагрузить')} ${count(reachable.length)}`}
-        </Button>
-        <Button className={WRAP} disabled={held || reachable.length === 0} onClick={() => act('shutdown')}>
-          {sending === 'shutdown' ? '…' : `${t('Выключить')} ${count(reachable.length)}`}
-        </Button>
-      </section>
-      {offline.length > 0 && (
-        <p className="text-xs text-muted">
-          {t('Офлайн: {list} — блокировку и питание они не получат', {
-            list: offline.map((s) => String(s.pc.number).padStart(2, '0')).join(', '),
-          })}
-        </p>
-      )}
-      {busy.length > 0 && (
-        <p className="text-xs text-muted">
-          {t('Идут сеансы: {list} — перед блокировкой и питанием спросим', {
-            list: busy.map((s) => String(s.pc.number).padStart(2, '0')).join(', '),
-          })}
-        </p>
-      )}
-      {error && (
-        <p role="alert" className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
-          {error}
-        </p>
-      )}
-      {lost && (
-        <Button variant="primary" disabled={sending !== null} onClick={() => void send(lost.input, lost.key)}>
-          {sending !== null ? '…' : `${t('Повторить')} · ${t(BULK_VERB[lost.input.kind])} (${lost.input.pcIds.length})`}
-        </Button>
-      )}
-
-      {results && (
-        <section className="flex flex-col gap-2">
-          <h3 className="label text-text">{t('Результат по ПК')}</h3>
-          <ul aria-label={t('Результат по ПК')} className="flex flex-col divide-y divide-line">
-            {results.list.map((r) => (
-              <li key={r.pcId} data-pc-result={r.pcId} className="flex items-baseline gap-2 py-1.5 text-sm">
-                <span className="w-14 shrink-0 font-mono text-xs text-muted">
-                  {pcLabel(r.pcName ?? names.get(r.pcId) ?? '—')}
-                </span>
-                <span
-                  className={clsx(
-                    'min-w-0',
-                    r.outcome === 'done' && 'text-success',
-                    r.outcome === 'failed' && 'text-danger',
-                    (r.outcome === 'skipped' || r.outcome === 'noAnswer') && 'text-warning',
-                  )}
-                >
-                  {outcomeText(r)}
-                </span>
-              </li>
+      <div className="flex flex-col gap-4 px-4 pb-4 pt-3.5">
+        <section className="flex flex-col gap-2.5">
+          <Field label={t('Сообщение на экран')}>
+            <input
+              className={inputCls}
+              value={text}
+              maxLength={500}
+              placeholder={t('Текст для игроков')}
+              onChange={(e) => setText(e.target.value)}
+            />
+          </Field>
+          <div className="flex flex-wrap gap-1.5">
+            {MESSAGE_PRESETS.map((m) => (
+              <Button
+                key={m}
+                size="sm"
+                variant="tertiary"
+                className="!h-auto min-h-9 !whitespace-normal py-1.5 text-left leading-tight"
+                onClick={() => setText(t(m))}
+              >
+                {t(m)}
+              </Button>
             ))}
-          </ul>
-          {failed.length > 0 && (
-            <Button
-              disabled={held}
-              // The same command (its text, its sessions to end) to the failed PCs only: a new request.
-              onClick={() => void send({ ...results.input, pcIds: failed.map((r) => r.pcId) }, newKey())}
-            >
-              {t('Повторить для неудачных ({n})', { n: failed.length })}
-            </Button>
-          )}
+          </div>
+          <Segmented
+            label={t('Важность')}
+            value={level}
+            options={[
+              { id: 'info', label: t('Обычное') },
+              { id: 'warning', label: t('Важное') },
+            ]}
+            onChange={setLevel}
+          />
+          <Button variant="primary" disabled={held || text.trim().length === 0} onClick={() => act('message')}>
+            {sending === 'message' ? '…' : `${t('Сообщение')} ${count(seats.length)}`}
+          </Button>
         </section>
-      )}
 
-      <Button variant="ghost" className="mt-auto" onClick={onClear}>
-        {t('Снять выбор')}
-        <Kbd>Esc</Kbd>
-      </Button>
+        <section className="grid grid-cols-2 gap-2">
+          <Button
+            variant="tertiary"
+            className={WRAP}
+            disabled={held || reachable.length === 0}
+            onClick={() => act('lock')}
+          >
+            {sending === 'lock' ? '…' : `${t('Заблокировать')} ${count(reachable.length)}`}
+          </Button>
+          <Button variant="tertiary" className={WRAP} disabled={held} onClick={() => act('unlock')}>
+            {sending === 'unlock' ? '…' : `${t('Разблокировать')} ${count(seats.length)}`}
+          </Button>
+          <Button
+            variant="tertiary"
+            className={WRAP}
+            disabled={held || reachable.length === 0}
+            onClick={() => act('reboot')}
+          >
+            {sending === 'reboot' ? '…' : `${t('Перезагрузить')} ${count(reachable.length)}`}
+          </Button>
+          <Button
+            variant="tertiary"
+            className={WRAP}
+            disabled={held || reachable.length === 0}
+            onClick={() => act('shutdown')}
+          >
+            {sending === 'shutdown' ? '…' : `${t('Выключить')} ${count(reachable.length)}`}
+          </Button>
+        </section>
+        {offline.length > 0 && (
+          <p className="text-xs leading-5 text-muted">
+            {t('Офлайн: {list} — блокировку и питание они не получат', {
+              list: offline.map((s) => pad2(s.pc.number)).join(', '),
+            })}
+          </p>
+        )}
+        {busy.length > 0 && (
+          <p className="text-xs leading-5 text-muted">
+            {t('Идут сеансы: {list} — перед блокировкой и питанием спросим', {
+              list: busy.map((s) => pad2(s.pc.number)).join(', '),
+            })}
+          </p>
+        )}
+        {error && (
+          <Note tone="err" role="alert">
+            {error}
+          </Note>
+        )}
+        {lost && (
+          <Button variant="primary" disabled={sending !== null} onClick={() => void send(lost.input, lost.key)}>
+            {sending !== null
+              ? '…'
+              : `${t('Повторить')} · ${t(BULK_VERB[lost.input.kind])} (${lost.input.pcIds.length})`}
+          </Button>
+        )}
+
+        {results && (
+          <section className="flex flex-col gap-2">
+            <h3 className="label text-text">{t('Результат по ПК')}</h3>
+            <ul aria-label={t('Результат по ПК')} className="well flex flex-col divide-y divide-accent/[0.07] px-3.5">
+              {results.list.map((r) => (
+                <li
+                  key={r.pcId}
+                  data-pc-result={r.pcId}
+                  className="flex min-h-9 items-baseline gap-3 py-2 text-[13px] leading-5"
+                >
+                  <span className="w-14 shrink-0 font-mono text-[11px] uppercase tracking-[0.08em] text-muted">
+                    {pcLabel(r.pcName ?? names.get(r.pcId) ?? '—')}
+                  </span>
+                  <span
+                    className={clsx(
+                      'min-w-0',
+                      r.outcome === 'done' && 'text-accent',
+                      r.outcome === 'queued' && 'text-text',
+                      r.outcome === 'failed' && 'text-danger-ink',
+                      (r.outcome === 'skipped' || r.outcome === 'noAnswer') && 'text-warning',
+                    )}
+                  >
+                    {outcomeText(r)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {failed.length > 0 && (
+              <Button
+                variant="secondary"
+                disabled={held}
+                // The same command (its text, its sessions to end) to the failed PCs only: a new request.
+                onClick={() => void send({ ...results.input, pcIds: failed.map((r) => r.pcId) }, newKey())}
+              >
+                {t('Повторить для неудачных ({n})', { n: failed.length })}
+              </Button>
+            )}
+          </section>
+        )}
+
+        <div aria-hidden="true" className="h-px bg-accent/[0.08]" />
+        <Button variant="ghost" onClick={onClear}>
+          {t('Снять выбор')}
+          <Kbd>Esc</Kbd>
+        </Button>
+      </div>
 
       {confirm && (
         <PowerConfirm
@@ -1094,19 +1468,30 @@ function MoveSheet({
   return (
     <Sheet
       title={t('Пересадить · {from} → {to}', { from: pcLabel(from.pc.name), to: pcLabel(to.pc.name) })}
+      caption={zoneChange ? t('Зона: {from} → {to}', { from: from.pc.zone, to: to.pc.zone }) : from.pc.zone}
       onClose={onClose}
+      footer={
+        <div className="ml-auto flex gap-2">
+          <Button variant="ghost" onClick={onClose}>
+            {t('Отмена')}
+          </Button>
+          <Button variant="primary" autoFocus disabled={busy || (needTariff && !tariffId)} onClick={() => void move()}>
+            <SwapIcon size={16} strong />
+            {busy ? '…' : lost ? t('Повторить') : t('Пересадить')}
+          </Button>
+        </div>
+      }
     >
-      <p className="text-sm">
-        {nameOf(user)} ·{' '}
-        {session.isPrepaid
-          ? t('осталось {time}', { time: duration(secondsLeft(session)) })
-          : t('играет {time}', { time: duration(session.secondsUsed) })}
+      <p className="flex items-baseline justify-between gap-3 text-sm">
+        <span className="min-w-0 truncate font-medium text-hi">{nameOf(user)}</span>
+        <span className="tnum shrink-0 font-mono text-[12px] text-dim">
+          {session.isPrepaid
+            ? t('осталось {time}', { time: duration(secondsLeft(session)) })
+            : t('играет {time}', { time: duration(session.secondsUsed) })}
+        </span>
       </p>
-      {zoneChange && (
-        <p className="text-sm text-muted">{t('Зона: {from} → {to}', { from: from.pc.zone, to: to.pc.zone })}</p>
-      )}
       {!session.isPrepaid ? (
-        <p className="text-sm text-muted">{t('Постоплата: цена минуты остаётся прежней')}</p>
+        <p className="text-[13px] text-dim">{t('Постоплата: цена минуты остаётся прежней')}</p>
       ) : needTariff ? (
         <Field label={t('Тариф на новом ПК')} hint={t('Нынешний тариф не продаётся в этой зоне')}>
           <select
@@ -1127,26 +1512,25 @@ function MoveSheet({
           </select>
         </Field>
       ) : (
-        current && <p className="text-sm text-muted">{t('Тариф остаётся: {name}', { name: current.name })}</p>
+        current && <p className="text-[13px] text-dim">{t('Тариф остаётся: {name}', { name: current.name })}</p>
       )}
-      <ul className="flex list-disc flex-col gap-1 rounded-md bg-white/[0.04] px-3 py-2 pl-7 text-sm">
-        <li>{t('Часы идут: время не останавливается, пока игрок пересаживается')}</li>
-        <li>{t('На {pc} игра закроется', { pc: pcLabel(from.pc.name) })}</li>
-        <li>
+      <ul className="well flex flex-col gap-2 px-3.5 py-3 text-[13px] leading-5 text-text">
+        <li className="flex gap-2.5">
+          <TimerIcon size={16} className="mt-0.5 text-warning" />
+          {t('Часы идут: время не останавливается, пока игрок пересаживается')}
+        </li>
+        <li className="flex gap-2.5">
+          <PowerIcon size={16} className="mt-0.5 text-muted" />
+          {t('На {pc} игра закроется', { pc: pcLabel(from.pc.name) })}
+        </li>
+        <li className="flex gap-2.5">
+          <SignInIcon size={16} className="mt-0.5 text-accent" />
           {guest
             ? t('{pc}: гость входит кнопкой «Гость»', { pc: pcLabel(to.pc.name) })
             : t('{pc}: игрок входит своим логином', { pc: pcLabel(to.pc.name) })}
         </li>
       </ul>
       <Note note={error ? { text: error, tone: 'err' } : null} />
-      <div className="flex justify-end gap-2 border-t border-line pt-4">
-        <Button variant="ghost" onClick={onClose}>
-          {t('Отмена')}
-        </Button>
-        <Button variant="primary" autoFocus disabled={busy || (needTariff && !tariffId)} onClick={() => void move()}>
-          {busy ? '…' : lost ? t('Повторить') : t('Пересадить')}
-        </Button>
-      </div>
     </Sheet>
   );
 }
@@ -1200,78 +1584,77 @@ function SeatPanel({
     }
   };
 
-  const status = STATUS[seat.pc.status];
-  const header = (title: string, sub: React.ReactNode): JSX.Element => (
-    <header className="flex flex-col gap-1">
-      <span className="label flex items-center gap-2">
-        <span className={clsx('h-2 w-2 rounded-full', status.dot)} />
-        {seat.pc.zone} · {t(status.label)}
-      </span>
-      <h2 className="font-display text-2xl font-normal leading-tight tracking-tight">{title}</h2>
-      {sub}
-      {seat.pc.agentVersion && (
-        <span className="tnum font-mono text-xs text-muted">
-          {t('Агент {agent} · Оболочка {shell}', { agent: seat.pc.agentVersion, shell: seat.pc.shellVersion ?? '—' })}
+  // The player's call heads the card's body: amber, glowing while it rings, with «Иду» / «Закрыть вызов».
+  const banner = call ? (
+    <section
+      aria-label={t('Вызов администратора')}
+      className={clsx(
+        'relative flex flex-col gap-2.5 overflow-hidden rounded-md border border-warning/40 bg-warning/[0.08] py-2.5 pl-4 pr-3',
+        call.ringing && 'anim-warn-glow',
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className="absolute bottom-2 left-0 top-2 w-0.5 rounded-full bg-warning shadow-[0_0_10px_rgb(var(--c-warning)/0.8)]"
+      />
+      <p className="flex items-start gap-2 text-[13px] font-medium leading-5 text-text">
+        <span className="mt-[3px] text-warning">
+          <CallMark ringing={call.ringing} />
         </span>
-      )}
-    </header>
-  );
+        <span>{groupLine(call)}</span>
+      </p>
+      <CallGroupActions group={call} compact />
+    </section>
+  ) : null;
 
-  return (
-    <div className="flex h-full flex-col gap-5 overflow-y-auto pr-1">
-      {call && (
-        <section
-          aria-label={t('Вызов администратора')}
-          className={clsx(
-            'flex flex-col gap-2 rounded-md border px-3 py-2.5',
-            call.ringing ? 'border-danger/60 bg-danger/10' : 'border-warning/50 bg-warning/10',
-          )}
-        >
-          <p className={clsx('flex items-start gap-2 text-sm', call.ringing ? 'text-danger' : 'text-warning')}>
-            <CallMark ringing={call.ringing} />
-            <span>{groupLine(call)}</span>
-          </p>
-          <CallGroupActions group={call} compact />
-        </section>
-      )}
-      {seat.session && seat.user ? (
-        <BusySeat
-          seat={seat}
-          session={seat.session}
-          user={seat.user}
-          username={members.find((m) => m.id === seat.user?.id)?.username}
-          tariffs={tariffs}
-          header={header}
-          note={note}
-          busy={busy}
-          run={run}
-          sheet={sheet}
-          setSheet={setSheet}
-          version={version}
-          onDone={done}
-          setNote={setNote}
-          onStartMove={onStartMove}
-        />
-      ) : (
-        <FreeSeat
-          seat={seat}
-          tariffs={tariffs}
-          header={header}
-          note={note}
-          busy={busy}
-          run={run}
-          onDone={done}
-          setNote={setNote}
-        />
-      )}
-    </div>
+  return seat.session && seat.user ? (
+    <BusySeat
+      seat={seat}
+      session={seat.session}
+      user={seat.user}
+      username={members.find((m) => m.id === seat.user?.id)?.username}
+      tariffs={tariffs}
+      banner={banner}
+      note={note}
+      busy={busy}
+      run={run}
+      sheet={sheet}
+      setSheet={setSheet}
+      version={version}
+      onDone={done}
+      setNote={setNote}
+      onStartMove={onStartMove}
+    />
+  ) : (
+    <FreeSeat
+      seat={seat}
+      tariffs={tariffs}
+      banner={banner}
+      note={note}
+      busy={busy}
+      run={run}
+      onDone={done}
+      setNote={setNote}
+    />
   );
+}
+
+/** The status pill of the seat card's band: «В игре» while a signed-in player plays, else what the PC is. */
+function StatusPill({ seat }: { seat: Seat }): JSX.Element | null {
+  const status = seat.pc.status;
+  if (status === 'locked') return <Badge tone="danger">{t(STATUS.locked.word)}</Badge>;
+  if (status === 'offline') return <Badge tone="muted">{t(STATUS.offline.word)}</Badge>;
+  if (status === 'maintenance') return <Badge tone="muted">{t(STATUS.maintenance.word)}</Badge>;
+  if (seat.session) return seat.signedIn === false ? null : <Badge tone="live">{t('В игре')}</Badge>;
+  if (status === 'booked') return <Badge tone="accent">{t(STATUS.booked.word)}</Badge>;
+  return <Badge tone="muted">{t(STATUS[status].word)}</Badge>;
 }
 
 interface PartProps {
   seat: Seat;
   tariffs: Overview['tariffs'];
-  header: (title: string, sub: React.ReactNode) => JSX.Element;
+  /** The player's call (the amber section) at the top of the card's body; null — none. */
+  banner: ReactNode;
   note: NoteState;
   busy: string | null;
   run: (key: string, fn: () => Promise<string | NoteState>) => Promise<void>;
@@ -1294,7 +1677,7 @@ function BusySeat({
   user,
   username,
   tariffs,
-  header,
+  banner,
   note,
   busy,
   run,
@@ -1315,13 +1698,34 @@ function BusySeat({
 }): JSX.Element {
   const shift = useShift();
   const hit = useClientHit(user, username, version);
+  const [techOpen, setTechOpen] = useState(false);
   const left = secondsLeft(session);
   const tariff = tariffs.find((x) => x.id === session.tariffId);
   // A walk-in guest's account is throwaway: no top-ups and no bonus money on it (D-36), only the exact price.
   const guest = user.role === 'guest';
+  const game = seat.game ?? null;
+  const art = game ? (game.heroUrl ?? game.coverUrl) : null;
+  const ending = session.isPrepaid && left >= 0 && left <= ENDING_SEC;
+  // «ПК 02 · STANDARD · С 12:27»: the zone, and the tariff when it is not named like the zone.
+  const where = [
+    pcLabel(seat.pc.name),
+    seat.pc.zone,
+    tariff && tariff.name.toLowerCase() !== seat.pc.zone.toLowerCase() ? tariff.name : null,
+  ].filter(Boolean);
+  const meta = [
+    hit ? `@${hit.username}` : null,
+    hit?.phoneTail ? `••${hit.phoneTail}` : null,
+    guest && guestDisplayName(user.displayName) !== nameOf(user) ? guestDisplayName(user.displayName) : null,
+  ].filter(Boolean);
   const payee: Payee = { id: user.id, displayName: nameOf(user), balance: user.balance, bonus: hit?.bonus ?? null };
+  // The top-up sheet carries the seat (its hero is the game's art; without art, the plain header with this caption).
+  const context: TopUpContext = {
+    caption: [...where, game?.title ?? null].filter(Boolean).join(' · '),
+    art,
+    sub: meta.join(' · ') || undefined,
+  };
   const topUp = (): void => {
-    if (!guest) setSheet({ kind: 'topup', payee });
+    if (!guest) setSheet({ kind: 'topup', payee, context });
   };
   const latest = useRef(topUp);
   latest.current = topUp;
@@ -1339,125 +1743,162 @@ function BusySeat({
 
   const actions = [session.isPrepaid, !guest].filter(Boolean).length;
 
-  return (
-    <>
-      {header(
-        nameOf(user),
-        <span className="font-mono text-xs text-muted">
-          {[
-            seat.pc.name,
-            guest && guestDisplayName(user.displayName) !== nameOf(user) ? guestDisplayName(user.displayName) : null,
-            hit?.phoneTail ? `••${hit.phoneTail}` : null,
-            hit ? `@${hit.username}` : null,
-          ]
-            .filter(Boolean)
-            .join(' · ')}
-        </span>,
-      )}
-      {seat.signedIn === false && (
-        <p className="-mt-2 rounded-md bg-warning/10 px-3 py-1.5 text-xs text-warning">
-          {t('ждёт входа')} · {t('на ПК ещё никто не вошёл, а время уже идёт')}
-        </p>
-      )}
-
-      <dl
-        className={clsx(
-          'grid divide-x divide-line overflow-hidden rounded-md border border-line bg-bg text-center',
-          session.isPrepaid ? 'grid-cols-2' : 'grid-cols-3',
-        )}
-      >
+  // Over a picture the readouts sit at the band's bottom (spec §6.7); without one they follow the band.
+  const readouts = (
+    <dl className={clsx('grid grid-cols-2', art ? 'absolute inset-x-4 bottom-3 h-[50px]' : 'well px-3.5 py-3')}>
+      <div className="flex min-w-0 flex-col justify-between gap-2 border-r border-accent/[0.14] pr-3.5">
         {session.isPrepaid ? (
-          <div className="flex flex-col gap-1.5 px-3 py-3">
-            <dt className="label">{t('Осталось')}</dt>
-            <dd className={clsx('num-dot text-3xl leading-none', left >= 0 && left <= WARN_SEC && 'text-danger')}>
+          <>
+            <dt className={clsx('label-sm', art && 'text-artlabel')}>{t('Осталось')}</dt>
+            <dd
+              className={clsx(
+                'num-dot truncate text-[30px] leading-none tracking-[0.02em]',
+                ending ? 'text-warning' : art ? 'text-white' : 'text-hi',
+              )}
+            >
               {left < 0 ? '∞' : duration(left)}
             </dd>
-          </div>
+          </>
         ) : (
           // Postpaid is charged in one go when the session ends: the balance stays untouched until then, so the
-          // running bill is what the counter needs to see.
+          // running bill is what the counter needs to see, with the time played.
           <>
-            <div className="flex flex-col gap-1.5 px-3 py-3">
-              <dt className="label">{t('Играет')}</dt>
-              <dd className="num-dot text-2xl leading-none">{duration(session.secondsUsed)}</dd>
-            </div>
-            <div className="flex flex-col gap-1.5 px-3 py-3">
-              <dt className="label">{t('Набежало')}</dt>
-              <dd className="tnum text-lg font-semibold leading-none">{money(session.cost)}</dd>
-            </div>
+            <dt className={clsx('label-sm flex items-center justify-between gap-2', art && 'text-artlabel')}>
+              {t('Начислено')}
+              <span className="tnum font-mono normal-case tracking-normal text-accent">
+                ∞ {duration(session.secondsUsed)}
+              </span>
+            </dt>
+            <dd className="flex min-w-0 items-baseline gap-1.5 whitespace-nowrap">
+              <span className={clsx('num-dot truncate text-[26px] leading-none', art ? 'text-white' : 'text-hi')}>
+                {moneyParts(session.cost.amount).num}
+              </span>
+              <span className={clsx('text-[11.5px] font-medium', art ? 'text-artlabel' : 'text-muted')}>
+                {t('сум')}
+              </span>
+            </dd>
           </>
         )}
-        <div className="flex flex-col gap-1.5 px-3 py-3">
-          <dt className="label">{t('Баланс')}</dt>
-          <dd className="tnum text-lg font-semibold leading-none">{money(user.balance)}</dd>
+      </div>
+      <div className="flex min-w-0 flex-col justify-between gap-2 pl-4">
+        <dt className={clsx('label-sm flex items-baseline justify-between gap-2', art && 'text-artlabel')}>
+          {t('Баланс')}
           {hit && hit.bonus.amount > 0 && (
-            <dd className="tnum text-xs text-muted">{t('+ бонусы {sum}', { sum: money(hit.bonus) })}</dd>
+            <span className="tnum truncate font-sans text-[11px] font-medium normal-case tracking-normal text-accent">
+              {t('+ бонусы {sum}', { sum: money(hit.bonus) })}
+            </span>
           )}
-        </div>
-      </dl>
-      <p className="-mt-2 font-mono text-xs text-muted">
-        {[tariff?.name, t('с {time}', { time: clock(session.startedAt) })].filter(Boolean).join(' · ')}
-      </p>
-      {!session.isPrepaid && (
-        <p className="-mt-2 text-xs text-muted">
-          {guest
-            ? t('Постоплата: гость платит на кассе, когда сеанс закончится.')
-            : t('Постоплата: сумма спишется с баланса, когда сеанс закончится.')}
-        </p>
+        </dt>
+        <dd className="flex min-w-0 items-baseline gap-[5px] whitespace-nowrap">
+          <span className={clsx('num-dot truncate text-[22px] leading-none', art ? 'text-white' : 'text-hi')}>
+            {moneyParts(user.balance.amount).num}
+          </span>
+          <span className={clsx('text-[11.5px] font-medium', art ? 'text-artlabel' : 'text-muted')}>{t('сум')}</span>
+        </dd>
+      </div>
+    </dl>
+  );
+
+  return (
+    <div className="panel-solid flex flex-col overflow-hidden">
+      <SeatStrip
+        art={art}
+        height={art ? 192 : 120}
+        caption={[...where, t('с {time}', { time: clock(session.startedAt) })].join(' · ')}
+        pill={<StatusPill seat={seat} />}
+        title={nameOf(user)}
+        meta={
+          meta.length > 0 || game ? (
+            <>
+              {meta.join(' · ')}
+              {meta.length > 0 && game ? ' · ' : ''}
+              {game && <span className="font-medium text-white">{game.title}</span>}
+            </>
+          ) : undefined
+        }
+      >
+        {art && readouts}
+      </SeatStrip>
+      {ending && (
+        <span aria-hidden="true" className="h-0.5 shrink-0 bg-warning shadow-[0_0_8px_rgb(var(--c-warning)/0.9)]" />
       )}
 
-      <SeatNote note={note} />
+      <div className="flex flex-col gap-3 px-4 pb-4 pt-3.5">
+        {banner}
+        {seat.signedIn === false && (
+          <Note tone="warn">
+            {t('ждёт входа')} · {t('на ПК ещё никто не вошёл, а время уже идёт')}
+          </Note>
+        )}
+        {!art && readouts}
+        {!session.isPrepaid && (
+          <p className="text-xs leading-5 text-muted">
+            {guest
+              ? t('Постоплата: гость платит на кассе, когда сеанс закончится.')
+              : t('Постоплата: сумма спишется с баланса, когда сеанс закончится.')}
+          </p>
+        )}
 
-      {actions > 0 && (
-        <section className={clsx('grid gap-1.5', actions === 2 ? 'grid-cols-2' : 'grid-cols-1')}>
-          {session.isPrepaid && (
+        <SeatNote note={note} />
+
+        <div className="flex flex-col gap-2">
+          {actions > 0 && (
+            <div className={clsx('grid gap-2', actions === 2 ? 'grid-cols-2' : 'grid-cols-1')}>
+              {session.isPrepaid && (
+                <Button
+                  variant="primary"
+                  size="lg"
+                  disabled={busy !== null}
+                  onClick={() => setSheet({ kind: 'extend' })}
+                >
+                  <TimerIcon size={17} strong />
+                  {t('Продлить')}
+                </Button>
+              )}
+              {!guest && (
+                <Button variant="secondary" size="lg" disabled={busy !== null} onClick={topUp}>
+                  {t('Пополнить')}
+                  <Kbd>F2</Kbd>
+                </Button>
+              )}
+            </div>
+          )}
+
+          {/* The move gets the room, «Бар» and «Ещё ⋯» are as wide as their words: «Boshqa kompyuterga koʻchirish…» wraps. */}
+          <div className="flex gap-2">
             <Button
-              variant="primary"
-              className="h-12"
+              variant="tertiary"
+              className={clsx(WRAP, 'min-w-0 flex-1 px-2.5')}
               disabled={busy !== null}
-              onClick={() => setSheet({ kind: 'extend' })}
+              onClick={onStartMove}
             >
-              {t('Продлить')}
+              <SwapIcon size={15} />
+              {t('Пересадить на другой ПК…')}
             </Button>
-          )}
-          {!guest && (
-            <Button className="h-12" disabled={busy !== null} onClick={topUp}>
-              {t('Пополнить')}
-              <Kbd>F2</Kbd>
+            <Button
+              variant="tertiary"
+              className="min-w-[58px] shrink-0 px-2.5"
+              disabled={busy !== null}
+              onClick={() => {
+                // The bar with this player and PC as the buyer.
+                showBar({ pcId: seat.pc.id, userId: user.id });
+                window.location.hash = '/bar';
+              }}
+            >
+              {t('Бар')}
             </Button>
-          )}
-        </section>
-      )}
+            <MoreButton compact open={techOpen} onToggle={() => setTechOpen((v) => !v)} />
+          </div>
+        </div>
 
-      {/* «Бар» as wide as its word, the move gets the rest: «Boshqa kompyuterga koʻchirish…» fits the 26rem panel. */}
-      <section className="grid grid-cols-[auto_minmax(0,1fr)] gap-1.5">
-        <Button
-          disabled={busy !== null}
-          onClick={() => {
-            // The bar with this player and PC as the buyer.
-            showBar({ pcId: seat.pc.id, userId: user.id });
-            window.location.hash = '/bar';
-          }}
-        >
-          {t('Бар')}
-        </Button>
-        <Button className={WRAP} disabled={busy !== null} onClick={onStartMove}>
-          {t('Пересадить на другой ПК…')}
-        </Button>
-      </section>
+        <TechActions seat={seat} busy={busy !== null} run={run} onStartMove={onStartMove} open={techOpen} />
 
-      <TechActions seat={seat} busy={busy !== null} run={run} onStartMove={onStartMove} />
-
-      <section className="mt-auto flex flex-col gap-2 border-t border-dashed border-danger/30 pt-4">
-        <Button
-          variant="danger"
-          className="w-full border border-danger/40"
-          disabled={busy !== null}
-          onClick={() => setSheet({ kind: 'end' })}
-        >
+        <div aria-hidden="true" className="h-px bg-accent/[0.08]" />
+        <Button variant="danger" className="w-full" disabled={busy !== null} onClick={() => setSheet({ kind: 'end' })}>
+          <StopSquareIcon size={14} strong />
           {t('Завершить сеанс')}
         </Button>
-      </section>
+      </div>
 
       {sheet?.kind === 'extend' && session.isPrepaid && (
         <ExtendSheet
@@ -1489,7 +1930,7 @@ function BusySeat({
           }}
         />
       )}
-    </>
+    </div>
   );
 }
 
@@ -1614,19 +2055,32 @@ function ExtendSheet({
   };
 
   return (
-    <Sheet title={t('Продлить · {name}', { name: nameOf(user) })} onClose={onClose}>
+    <Sheet
+      title={t('Продлить · {name}', { name: nameOf(user) })}
+      caption={[pcLabel(seat.pc.name), current?.name].filter(Boolean).join(' · ')}
+      onClose={onClose}
+      footer={<PayFooter />}
+    >
       {current?.isPackage && (
-        <Button
-          className={clsx('!h-auto min-h-11 justify-between py-2', choice.pkg && 'choice-on')}
+        <button
+          type="button"
+          className={clsx(
+            'choice focus-ring flex min-h-14 items-center justify-between gap-3 rounded-md px-4 py-2 text-left',
+            choice.pkg && 'choice-on',
+          )}
           aria-pressed={choice.pkg}
           onClick={() => setChoice({ pkg: true })}
         >
-          <span>{t('Ещё пакет · {name}', { name: current.name })}</span>
-          <span className="text-xs font-normal text-muted">{pkgQuote ? money(pkgQuote.total) : '…'}</span>
-        </Button>
+          <span className="min-w-0 truncate text-sm font-semibold">
+            {t('Ещё пакет · {name}', { name: current.name })}
+          </span>
+          <span className="tnum shrink-0 font-mono text-[12.5px] text-dim">
+            {pkgQuote ? money(pkgQuote.total) : '…'}
+          </span>
+        </button>
       )}
       {hourly.length > 0 && (
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-2">
           {(current?.isPackage || hourly.length > 1) && (
             <Field label={t('Почасовой тариф')}>
               <select
@@ -1645,28 +2099,32 @@ function ExtendSheet({
               </select>
             </Field>
           )}
-          <div className="grid grid-cols-4 gap-1.5">
+          <div className="grid grid-cols-4 gap-2">
             {MINUTE_PRESETS.map((m) => {
               const on = !choice.pkg && m === choice.minutes;
               return (
-                <Button
+                <button
+                  type="button"
                   key={m}
-                  className={clsx('!h-auto min-h-11 flex-col !gap-0 py-1.5', on && 'choice-on')}
+                  className={clsx(
+                    'choice focus-ring tnum flex h-14 flex-col items-center justify-center gap-1.5 rounded-md px-1',
+                    on && 'choice-on',
+                  )}
                   aria-pressed={on}
                   onClick={() => setChoice({ pkg: false, tariffId: hourlyId, minutes: m })}
                 >
-                  <span>+{minutesLabel(m)}</span>
-                  <span className="text-[0.65rem] font-normal text-muted">
+                  <span className="text-[13.5px] font-semibold leading-none">+{minutesLabel(m)}</span>
+                  <span className="font-mono text-[10.5px] leading-none text-muted">
                     {prices[m] === undefined ? '…' : money(prices[m].total)}
                   </span>
-                </Button>
+                </button>
               );
             })}
           </div>
         </div>
       )}
       {guest ? <ExactSummary price={price ?? 0} /> : <PaySummary price={price ?? 0} balance={user.balance.amount} />}
-      {blocked && <p className="text-xs text-warning">{blocked}</p>}
+      {blocked && <p className="text-xs font-medium text-warning">{blocked}</p>}
       {guest || shortfall > 0 ? (
         <PayBox
           key={`${choice.pkg ? 'pkg' : `${hourlyId}|${choice.minutes}`}`}
@@ -1699,7 +2157,7 @@ function ExtendSheet({
           <Button
             ref={extendButton}
             variant="primary"
-            className="h-11"
+            size="xl"
             disabled={busy || closed || price === undefined || blocked !== null}
             onClick={() => {
               setBusy(true);
@@ -1710,8 +2168,11 @@ function ExtendSheet({
                 .finally(() => setBusy(false));
             }}
           >
-            {t('Продлить на {time}', { time: minutesLabel(bought) })}
-            <Kbd>Enter</Kbd>
+            <TimerIcon size={20} strong />
+            <span className="mr-auto">{t('Продлить на {time}', { time: minutesLabel(bought) })}</span>
+            <Kbd onPrimary className="h-6 px-2 text-[10.5px]">
+              Enter
+            </Kbd>
           </Button>
         </>
       )}
@@ -1776,23 +2237,31 @@ function EndSheet({
         ? t('Остаток времени выдаётся наличными только при завершении на кассе')
         : t('Неиспользованное время вернётся на баланс');
   return (
-    <Sheet title={t('Завершить сеанс · {pc}', { pc: pcLabel(seat.pc.name) })} onClose={onClose}>
-      <p className="text-sm">
-        {nameOf(user)} ·{' '}
-        {session.isPrepaid
-          ? t('осталось {time}', { time: duration(secondsLeft(session)) })
-          : t('играет {time}', { time: duration(session.secondsUsed) })}
+    <Sheet
+      title={t('Завершить сеанс · {pc}', { pc: pcLabel(seat.pc.name) })}
+      caption={seat.pc.zone}
+      onClose={onClose}
+      footer={
+        <div className="ml-auto flex gap-2">
+          <Button variant="ghost" autoFocus onClick={onClose}>
+            {t('Отмена')}
+          </Button>
+          <Button variant="danger" disabled={busy} onClick={() => void end()}>
+            {busy ? '…' : t('Завершить сеанс')}
+          </Button>
+        </div>
+      }
+    >
+      <p className="flex items-baseline justify-between gap-3 text-sm">
+        <span className="min-w-0 truncate font-medium text-hi">{nameOf(user)}</span>
+        <span className="tnum shrink-0 font-mono text-[12px] text-dim">
+          {session.isPrepaid
+            ? t('осталось {time}', { time: duration(secondsLeft(session)) })
+            : t('играет {time}', { time: duration(session.secondsUsed) })}
+        </span>
       </p>
-      <p className="rounded-md bg-white/[0.04] px-3 py-2 text-sm text-text">{copy}</p>
+      <p className="well px-3.5 py-3 text-[13px] leading-5 text-text">{copy}</p>
       <Note note={error ? { text: error, tone: 'err' } : null} />
-      <div className="flex justify-end gap-2 border-t border-line pt-4">
-        <Button variant="ghost" autoFocus onClick={onClose}>
-          {t('Отмена')}
-        </Button>
-        <Button variant="danger" className="border border-danger/50" disabled={busy} onClick={() => void end()}>
-          {busy ? '…' : t('Завершить сеанс')}
-        </Button>
-      </div>
     </Sheet>
   );
 }
@@ -1870,12 +2339,17 @@ function SettleSheet({
   };
 
   return (
-    <Sheet title={payout ? t('Выдать наличными · {name}', { name }) : t('Долг · {name}', { name })} onClose={onClose}>
+    <Sheet
+      title={payout ? t('Выдать наличными · {name}', { name }) : t('Долг · {name}', { name })}
+      caption={target.pc ? pcLabel(target.pc) : undefined}
+      onClose={onClose}
+      footer={<PayFooter />}
+    >
       {done ? (
         <>
-          <p role="status" className="rounded-md bg-success/10 px-3 py-2 text-sm text-success">
+          <Note tone="ok" role="status">
             {done.text}
-          </p>
+          </Note>
           <div className="grid grid-cols-2 gap-2">
             <ReceiptButton receipt={done.receipt} />
             <Button variant="primary" autoFocus onClick={onClose}>
@@ -1887,7 +2361,7 @@ function SettleSheet({
         <>
           <ExactSummary price={payable} label={t('К выдаче')} />
           {target.balance > payable && (
-            <p className="text-xs text-muted">
+            <p className="text-xs leading-5 text-muted">
               {t('Остальное ({sum}) оплачено картой или онлайн — наличными не выдаётся', {
                 sum: moneyExact(target.balance - payable),
               })}
@@ -1897,7 +2371,7 @@ function SettleSheet({
           {/* The amount is exact and read-only: Enter on the focused button gives it out. */}
           <Button
             variant="primary"
-            className="h-11"
+            size="xl"
             autoFocus
             disabled={busy || closed || payable <= 0}
             onClick={() => void give()}
@@ -1909,9 +2383,9 @@ function SettleSheet({
                 : t('Выдать {sum} наличными', { sum: moneyExact(payable) })}
           </Button>
           {error && (
-            <p role="alert" className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
+            <Note tone="err" role="alert">
               {error}
-            </p>
+            </Note>
           )}
         </>
       ) : (
@@ -1957,7 +2431,8 @@ function SettleSheet({
 // Free seat: who (a client or a walk-in guest), how they pay, the tariff or a package — then "Посадить", or the pay box
 // ---------------------------------------------------------------------------------------------------------------------
 
-function FreeSeat({ seat, tariffs, header, note, busy, run, onDone, setNote }: PartProps): JSX.Element {
+function FreeSeat({ seat, tariffs, banner, note, busy, run, onDone, setNote }: PartProps): JSX.Element {
+  const [techOpen, setTechOpen] = useState(false);
   const closed = useShiftClosed();
   const club = useClub();
   // A server before part 2 has neither the guest route nor postpaid from the desk: both switches stay away then.
@@ -2138,7 +2613,7 @@ function FreeSeat({ seat, tariffs, header, note, busy, run, onDone, setNote }: P
   const seatButton = (label: string): JSX.Element => (
     <Button
       variant="primary"
-      className="h-12"
+      size="lg"
       disabled={!canSeat || closed}
       onClick={() =>
         void run('open', async () => {
@@ -2160,13 +2635,21 @@ function FreeSeat({ seat, tariffs, header, note, busy, run, onDone, setNote }: P
   );
 
   return (
-    <>
-      {header(t('Посадить на {pc}', { pc: pcLabel(seat.pc.name) }), null)}
-      <SeatNote note={note} />
+    <div className="panel-solid flex flex-col overflow-hidden">
+      <SeatStrip
+        art={null}
+        height={96}
+        caption={[pcLabel(seat.pc.name), seat.pc.zone].join(' · ')}
+        pill={<StatusPill seat={seat} />}
+        title={t('Посадить на {pc}', { pc: pcLabel(seat.pc.name) })}
+      />
 
-      <section className="flex flex-col gap-4">
+      <div className="flex flex-col gap-4 px-4 pb-4 pt-3.5">
+        {banner}
+        <SeatNote note={note} />
+
         {cashDesk2 && (
-          <Choice
+          <Segmented
             label={t('Кто садится')}
             value={guest ? 'guest' : 'client'}
             options={[
@@ -2177,8 +2660,8 @@ function FreeSeat({ seat, tariffs, header, note, busy, run, onDone, setNote }: P
           />
         )}
         {guest ? (
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor={nameId} className="label">
+          <div className="group/field flex flex-col gap-2">
+            <label htmlFor={nameId} className="label-sm transition-colors group-focus-within/field:text-text">
               {t('Имя')}
             </label>
             <input
@@ -2190,7 +2673,9 @@ function FreeSeat({ seat, tariffs, header, note, busy, run, onDone, setNote }: P
               placeholder={t('Гость {n}', { n: seat.pc.number })}
               onChange={(e) => setGuestName(e.target.value)}
             />
-            <span className="text-xs text-muted">{t('Необязательно. Гость входит кнопкой «Гость» на этом ПК.')}</span>
+            <span className="text-[11.5px] leading-4 text-muted">
+              {t('Необязательно. Гость входит кнопкой «Гость» на этом ПК.')}
+            </span>
           </div>
         ) : (
           <ClientPicker label={t('Кто')} value={who} onChange={setWho} />
@@ -2198,7 +2683,7 @@ function FreeSeat({ seat, tariffs, header, note, busy, run, onDone, setNote }: P
 
         {cashDesk2 && (
           <div className="flex flex-col gap-1.5">
-            <Choice
+            <Segmented
               label={t('Оплата')}
               value={prepaid ? 'pre' : 'post'}
               options={[
@@ -2207,7 +2692,7 @@ function FreeSeat({ seat, tariffs, header, note, busy, run, onDone, setNote }: P
               ]}
               onChange={(v) => setWantPrepaid(v === 'pre')}
             />
-            {postpaidOff && (guest || who) && <p className="text-xs text-muted">{postpaidOff}</p>}
+            {postpaidOff && (guest || who) && <p className="text-xs leading-5 text-muted">{postpaidOff}</p>}
           </div>
         )}
 
@@ -2231,32 +2716,36 @@ function FreeSeat({ seat, tariffs, header, note, busy, run, onDone, setNote }: P
           </Field>
         )}
         {prepaid && (
-          <div className="flex flex-col gap-1.5">
-            <span className="label">{t('Время')}</span>
-            <div className="grid grid-cols-4 gap-1.5">
+          <div className="flex flex-col gap-2">
+            <span className="label-sm">{t('Время')}</span>
+            <div className="grid grid-cols-4 gap-2">
               {MINUTE_PRESETS.map((m) => {
                 const on = !pkg && m === minutes;
                 return (
-                  <Button
+                  <button
+                    type="button"
                     key={m}
                     aria-pressed={on}
-                    className={clsx(on && 'choice-on')}
+                    className={clsx(
+                      'choice focus-ring tnum h-11 rounded-md px-1 text-[13.5px] font-semibold',
+                      on && 'choice-on',
+                    )}
                     onClick={() => {
                       setMinutes(m);
                       setPkgId(null);
                     }}
                   >
                     {minutesLabel(m)}
-                  </Button>
+                  </button>
                 );
               })}
             </div>
           </div>
         )}
         {prepaid && packages.length > 0 && (
-          <div className="flex flex-col gap-1.5">
-            <span className="label">{t('Пакеты')}</span>
-            <div className="grid grid-cols-2 gap-1.5">
+          <div className="flex flex-col gap-2">
+            <span className="label-sm">{t('Пакеты')}</span>
+            <div className="grid grid-cols-2 gap-2">
               {packages.map((p) => {
                 const q = pkgQuotes[pkgKey(p.id)];
                 const rule = q?.rule ?? null;
@@ -2271,26 +2760,28 @@ function FreeSeat({ seat, tariffs, header, note, busy, run, onDone, setNote }: P
                     title={rule ? describeRule(rule) : undefined}
                     onClick={() => setPkgId(on ? null : p.id)}
                     className={clsx(
-                      'choice focus-ring flex flex-col items-start gap-0.5 rounded-md px-3 py-2 text-left text-sm disabled:cursor-not-allowed disabled:opacity-40',
+                      'choice focus-ring flex min-h-[72px] flex-col items-start justify-between gap-1 rounded-md px-3 py-2.5 text-left disabled:cursor-not-allowed disabled:opacity-40',
                       on && 'choice-on',
                     )}
                   >
-                    <span className="w-full truncate font-semibold">{p.name}</span>
-                    <span className="tnum text-xs text-muted">
+                    <span className="w-full truncate text-[13px] font-semibold leading-4">{p.name}</span>
+                    <span className="tnum font-mono text-[10.5px] leading-4 text-muted">
                       {minutesLabel(p.packageMinutes ?? q?.minutes ?? 0)}
                       {win ? ` · ${win}` : ''}
                     </span>
-                    <span className="tnum text-xs">
+                    <span className="tnum font-mono text-[12px] font-semibold leading-4 text-text">
                       {q ? (
                         <>
-                          {q.base.amount !== q.total.amount && <s className="mr-1.5 text-muted">{money(q.base)}</s>}
+                          {q.base.amount !== q.total.amount && (
+                            <s className="mr-1.5 font-medium text-muted">{money(q.base)}</s>
+                          )}
                           {money(q.total)}
                         </>
                       ) : (
                         '…'
                       )}
                     </span>
-                    {rule && <span className="text-[0.65rem] text-warning">{describeRule(rule)}</span>}
+                    {rule && <span className="text-[11px] leading-4 text-warning">{describeRule(rule)}</span>}
                   </button>
                 );
               })}
@@ -2300,7 +2791,7 @@ function FreeSeat({ seat, tariffs, header, note, busy, run, onDone, setNote }: P
 
         <div className="flex flex-col gap-1.5">
           {!prepaid ? (
-            <p className="rounded-md border border-line bg-bg px-3 py-2.5 text-sm">
+            <p className="well px-3.5 py-3 text-[13px] leading-5 text-text">
               {hourlyQuote ? t('≈ {sum} / ч · оплата в конце', { sum: money(hourlyQuote.total) }) : t('Считаем цену…')}
             </p>
           ) : guest ? (
@@ -2309,7 +2800,7 @@ function FreeSeat({ seat, tariffs, header, note, busy, run, onDone, setNote }: P
             <PaySummary price={price} balance={who?.balance.amount ?? 0} />
           )}
           {priceQuote && priceQuote.discountPct > 0 && (
-            <span className="text-xs text-success">
+            <span className="text-xs font-medium text-accent">
               −{priceQuote.discountPct}% · {priceQuote.discountReason}
             </span>
           )}
@@ -2318,7 +2809,7 @@ function FreeSeat({ seat, tariffs, header, note, busy, run, onDone, setNote }: P
               {t('Цена дня')}: {priceQuote.dayPct}%
             </span>
           )}
-          {blockedRule && <span className="text-xs text-warning">{blockedRule}</span>}
+          {blockedRule && <span className="text-xs font-medium text-warning">{blockedRule}</span>}
         </div>
 
         {prepaid && guest && !blocked ? (
@@ -2351,19 +2842,19 @@ function FreeSeat({ seat, tariffs, header, note, busy, run, onDone, setNote }: P
             }}
           />
         ) : (
-          <>
+          <div className="flex flex-col gap-2">
             {someone && <ShiftClosedNote />}
             {seatButton(prepaid ? t('Посадить') : t('Посадить · постоплата'))}
-            {!someone && <p className="-mt-2 text-xs text-muted">{t('Выберите клиента')}</p>}
-            {blocked && <p className="-mt-2 text-xs text-muted">{t('ПК на обслуживании')}</p>}
-          </>
+            {!someone && <p className="text-xs text-muted">{t('Выберите клиента')}</p>}
+            {blocked && <p className="text-xs text-muted">{t('ПК на обслуживании')}</p>}
+          </div>
         )}
-      </section>
 
-      <div className="mt-auto">
-        <TechActions seat={seat} busy={busy !== null} run={run} />
+        <div aria-hidden="true" className="h-px bg-accent/[0.08]" />
+        <MoreButton open={techOpen} onToggle={() => setTechOpen((v) => !v)} />
+        <TechActions seat={seat} busy={busy !== null} run={run} open={techOpen} />
       </div>
-    </>
+    </div>
   );
 }
 
@@ -2391,21 +2882,24 @@ function SettleList({
   const where = (pc: string | null, endedAt: string | null): string =>
     [pc ? pcLabel(pc) : null, endedAt ? clock(endedAt) : null].filter(Boolean).join(' · ');
   return (
-    <section aria-labelledby={id} className="panel flex shrink-0 flex-col gap-2 p-4">
-      <h2 id={id} className="label text-warning">
+    <section aria-labelledby={id} className="glass-side flex shrink-0 flex-col gap-2 px-5 pb-2 pt-3.5">
+      <h2 id={id} className="label flex items-center gap-2 text-warning">
+        <AlertTriangleIcon size={13} strong />
         {t('Расчёт с гостями и долги')}
       </h2>
-      <ul className="flex max-h-56 flex-col divide-y divide-line overflow-y-auto">
+      <ul className="thin-scrollbar flex max-h-56 flex-col divide-y divide-accent/[0.07] overflow-y-auto">
         {debts.map((d) => {
           const guest = d.role === undefined || d.role === 'guest';
           return (
-            <li key={`debt-${d.userId}`} className="flex items-center justify-between gap-3 py-2">
-              <span className="flex min-w-0 flex-col">
-                <span className="truncate text-sm text-text">
-                  {guest ? guestDisplayName(d.displayName) : d.displayName}
-                  <span className="ml-2 text-xs text-muted">{guest ? t('гость') : t('клиент')}</span>
+            <li key={`debt-${d.userId}`} className="flex min-h-14 items-center justify-between gap-3 py-2">
+              <span className="flex min-w-0 flex-col gap-1">
+                <span className="flex min-w-0 items-center gap-2 text-[13px] font-medium text-text">
+                  <span className="truncate">{guest ? guestDisplayName(d.displayName) : d.displayName}</span>
+                  <Badge tone="muted">{guest ? t('гость') : t('клиент')}</Badge>
                 </span>
-                <span className="font-mono text-xs text-muted">{where(d.pc, d.endedAt)}</span>
+                <span className="tnum font-mono text-[11px] uppercase tracking-[0.08em] text-muted">
+                  {where(d.pc, d.endedAt)}
+                </span>
               </span>
               <Button
                 variant="primary"
@@ -2427,15 +2921,18 @@ function SettleList({
           );
         })}
         {refunds.map((r) => (
-          <li key={`refund-${r.userId}`} className="flex items-center justify-between gap-3 py-2">
-            <span className="flex min-w-0 flex-col">
-              <span className="truncate text-sm text-text">
-                {guestDisplayName(r.displayName)}
-                <span className="ml-2 text-xs text-muted">{t('гость')}</span>
+          <li key={`refund-${r.userId}`} className="flex min-h-14 items-center justify-between gap-3 py-2">
+            <span className="flex min-w-0 flex-col gap-1">
+              <span className="flex min-w-0 items-center gap-2 text-[13px] font-medium text-text">
+                <span className="truncate">{guestDisplayName(r.displayName)}</span>
+                <Badge tone="muted">{t('гость')}</Badge>
               </span>
-              <span className="font-mono text-xs text-muted">{where(r.pc, r.endedAt)}</span>
+              <span className="tnum font-mono text-[11px] uppercase tracking-[0.08em] text-muted">
+                {where(r.pc, r.endedAt)}
+              </span>
             </span>
             <Button
+              variant="secondary"
               onClick={() =>
                 onSettle({
                   userId: r.userId,
@@ -2454,7 +2951,7 @@ function SettleList({
         ))}
       </ul>
       {kept > 0 && (
-        <p className="text-xs text-muted">
+        <p className="pb-2 text-xs text-muted">
           {t('Ещё гостей с остатком, который не выдаётся наличными: {n}', { n: kept })}
         </p>
       )}
@@ -2717,13 +3214,6 @@ export function MapPage(): JSX.Element {
     };
   }, [seats]);
 
-  const counts = useMemo(() => {
-    const c = new Map<Seat['pc']['status'], number>();
-    for (const x of seats) {
-      c.set(x.pc.status, (c.get(x.pc.status) ?? 0) + 1);
-    }
-    return c;
-  }, [seats]);
   // Recounted every second: "ending soon" moves with the clock.
   const matches = (f: Filter, s: Seat): boolean =>
     FILTERS.find((x) => x.id === f)?.test(s, repairs.has(s.pc.id)) ?? false;
@@ -2732,7 +3222,10 @@ export function MapPage(): JSX.Element {
   const allRefunds = data?.guestRefunds ?? [];
   const refunds = allRefunds.filter((r) => r.payable.amount > 0);
   const bulk = multi.size >= 2 ? seats.filter((s) => multi.has(s.pc.id)) : [];
-  const showFeedInPanel = !wide && bulk.length === 0 && (!seat || panel === 'feed');
+  // Below 1800 px the right column stacks the seat over the feed; a tall form (seating, several PCs) folds the feed to a
+  // bar unless the cashier unfolded it.
+  const tall = bulk.length > 0 || (seat !== null && !(seat.session && seat.user));
+  const folded = !wide && tall && panel !== 'feed';
   const moveFrom = movePick ? seats.find((s) => s.pc.id === movePick.fromPcId) : undefined;
   const moveSheet =
     sheet?.kind === 'move'
@@ -2741,24 +3234,74 @@ export function MapPage(): JSX.Element {
           to: seats.find((s) => s.pc.id === sheet.toPcId),
         }
       : null;
+  const tariffName = (id: string | undefined): string | undefined => data?.tariffs.find((x) => x.id === id)?.name;
+  // «Занято 6 из 24» with the busy count lit, in any language's word order.
+  const [busyBefore, busyAfter = ''] = t('Занято {n} из {total}', { n: '\u0000', total: seats.length }).split('\u0000');
+
+  const seatRegion =
+    bulk.length > 0 ? (
+      <BulkPanel
+        seats={bulk}
+        onDone={() => void load()}
+        onClear={() => {
+          setMulti(new Set());
+          setSelectMode(false);
+        }}
+        onStartMove={startMove}
+      />
+    ) : seat && data ? (
+      <>
+        {moved && moved.pcId === seat.pc.id && (
+          <Note tone="ok" role="status">
+            {moved.text}
+          </Note>
+        )}
+        <SeatPanel
+          seat={seat}
+          members={data.users}
+          tariffs={data.tariffs}
+          sheet={sheet}
+          setSheet={setSheet}
+          onDone={() => void load()}
+          call={callsByPc.get(seat.pc.id)}
+          onStartMove={() => startMove(seat)}
+        />
+      </>
+    ) : (
+      <div className={clsx('glass-side flex flex-col items-center justify-center px-6 py-9', wide && 'flex-1')}>
+        <EmptyState
+          icon={<MonitorIcon size={22} />}
+          title={t('Выберите место')}
+          text={t('Посадите клиента, продлите, пополните или завершите сеанс. Номер ПК и Enter — выбрать место.')}
+          hint={
+            <>
+              {t('номер ПК')}
+              <Kbd className="text-text">Enter</Kbd>
+            </>
+          }
+        />
+      </div>
+    );
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
-      {error && <p className="rounded-md bg-danger/10 px-3 py-1.5 text-sm text-danger">{error}</p>}
+      {error && <Note tone="err">{error}</Note>}
       {outdated.names.length > 0 && (
-        <p className="rounded-md bg-warning/10 px-3 py-1.5 text-sm text-warning">
+        <Banner>
           {t('На старой версии ({newest} есть): {list}', {
             newest: outdated.newest ?? '',
             list: outdated.names.join(', '),
           })}
-        </p>
+        </Banner>
       )}
       {movePick && (
+        // The move's HUD bar: what the map waits for, and the way out.
         <div
           role="status"
-          className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-accent/50 bg-accent/10 px-3 py-2 text-sm"
+          className="panel-solid edge-top flex min-h-12 shrink-0 items-center gap-3 py-1.5 pl-4 pr-2 text-[13px] font-medium text-text"
         >
-          <span>
+          <SwapIcon size={16} className="text-accent" />
+          <span className="min-w-0 flex-1">
             {t('Пересадка с {pc}: нажмите свободный ПК на карте (или номер и Enter)', {
               pc: moveFrom ? pcLabel(moveFrom.pc.name) : '—',
             })}
@@ -2769,97 +3312,116 @@ export function MapPage(): JSX.Element {
           </Button>
         </div>
       )}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_21rem] xl:grid-cols-[minmax(0,1fr)_26rem] min-[1800px]:grid-cols-[minmax(0,1fr)_26rem_22rem]">
-        <div className="flex min-h-0 flex-col gap-5">
-          <div className="panel min-h-0 flex-1 overflow-y-auto p-5">
-            <header className="mb-5 flex flex-wrap items-center gap-x-5 gap-y-3">
-              <h1 className="font-display text-2xl font-light tracking-tight">{t('Карта зала')}</h1>
-              <span className="tnum font-mono text-sm text-muted">
-                {t('Занято {n}/{total}', { n: occupied, total: seats.length })}
-              </span>
-              <div role="group" aria-label={t('Фильтр')} className="flex flex-wrap gap-1.5">
-                {FILTERS.map((f) => {
-                  const n = seats.filter((s) => matches(f.id, s)).length;
-                  const on = filter === f.id;
-                  return (
-                    <button
-                      key={f.id}
-                      type="button"
-                      aria-pressed={on}
-                      onClick={() => setFilter(on ? null : f.id)}
-                      className={clsx(
-                        'choice focus-ring inline-flex h-8 items-center gap-2 rounded-md px-2.5 text-xs font-medium',
-                        on && 'choice-on',
-                      )}
-                    >
-                      {t(f.label)}
-                      <span className={clsx('tnum font-mono', n > 0 ? 'text-text' : 'text-muted')}>{n}</span>
-                    </button>
-                  );
-                })}
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px] min-[1800px]:grid-cols-[minmax(0,1fr)_400px_360px]">
+        <div className="flex min-h-0 flex-col gap-4">
+          <div className="glass-panel edge-top flex min-h-0 flex-1 flex-col px-5 pb-2 pt-[18px]">
+            <header className="flex min-h-7 shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-1">
+              <div className="flex min-w-0 items-baseline gap-4">
+                <h1 className="whitespace-nowrap font-display text-xl font-medium leading-7 tracking-[-0.01em] text-hi">
+                  {t('Карта зала')}
+                </h1>
+                <span className="label tnum whitespace-nowrap text-[10.5px] tracking-[0.14em]">
+                  {busyBefore}
+                  <span className="text-text">{occupied}</span>
+                  {busyAfter}
+                </span>
               </div>
-              <button
-                type="button"
-                aria-pressed={selectMode}
-                disabled={movePick !== null}
-                title={t('Ctrl+клик, Shift+клик, Ctrl+A')}
-                onClick={() => {
-                  if (selectMode) setMulti(new Set());
-                  setSelectMode((v) => !v);
-                }}
-                className={clsx(
-                  'choice focus-ring inline-flex h-8 items-center gap-2 rounded-md px-2.5 text-xs font-medium disabled:opacity-40',
-                  selectMode && 'choice-on',
-                )}
-              >
-                {t('Выбрать')}
-              </button>
-              <span className="ml-auto flex items-center gap-2 font-mono text-xs text-muted" aria-live="polite">
+              <span className="label flex items-center gap-2 whitespace-nowrap" aria-live="polite">
                 {multi.size >= 2 ? (
                   <span className="text-accent">{t('Выбрано {n}', { n: multi.size })}</span>
                 ) : digits ? (
                   <>
                     <span className="text-accent">{t('ПК {n}', { n: digits })}</span>
-                    <Kbd>Enter</Kbd>
+                    <Kbd className="text-text">Enter</Kbd>
                   </>
                 ) : (
-                  t('номер ПК + Enter')
+                  <>
+                    {t('номер ПК')}
+                    <Kbd className="text-text">Enter</Kbd>
+                  </>
                 )}
               </span>
             </header>
-            <div className="flex flex-col gap-6">
-              {zones.map(([zone, list]) => (
-                <section key={zone} className="flex flex-col gap-2.5">
-                  <h2 className="flex items-baseline justify-between gap-2 border-b border-line pb-2">
-                    <span className="label text-text">{zone}</span>
-                    <span className="tnum font-mono text-xs text-muted">
-                      {t('{free}/{total} свободно', {
-                        free: list.filter((x) => x.pc.status === 'free').length,
-                        total: list.length,
-                      })}
-                    </span>
-                  </h2>
-                  <div className="grid grid-cols-[repeat(auto-fill,minmax(6.25rem,1fr))] gap-2">
-                    {list.map((x) => (
-                      <SeatTile
-                        key={x.pc.id}
-                        seat={x}
-                        repair={repairs.get(x.pc.id)}
-                        call={callsByPc.get(x.pc.id)}
-                        selected={multi.size === 0 && x.pc.id === selected}
-                        checked={
-                          selectMode || multi.size > 0
-                            ? multi.has(x.pc.id) || (multi.size === 0 && x.pc.id === selected)
-                            : null
-                        }
-                        dimmed={active !== undefined && !active.test(x, repairs.has(x.pc.id))}
-                        blocked={notTarget(x)}
-                        onSelect={(e) => onTile(x, e)}
+            <div className="-ml-3 mt-3 flex shrink-0 flex-wrap items-center gap-1">
+              <div role="group" aria-label={t('Фильтр')} className="flex flex-wrap items-center gap-1">
+                {FILTERS.map((f) => {
+                  const n = seats.filter((s) => matches(f.id, s)).length;
+                  const on = filter === f.id;
+                  return (
+                    <Chip
+                      key={f.id}
+                      pressed={on}
+                      tone={f.id === 'ending' && n > 0 ? 'attention' : 'default'}
+                      count={n}
+                      title={f.title ? t(f.title) : undefined}
+                      onClick={() => setFilter(on ? null : f.id)}
+                    >
+                      {t(f.label)}
+                    </Chip>
+                  );
+                })}
+              </div>
+              <span className="min-w-2 flex-1" />
+              <Chip
+                tone="outlined"
+                pressed={selectMode}
+                disabled={movePick !== null}
+                title={t('Ctrl+клик, Shift+клик, Ctrl+A')}
+                icon={<CheckSquareIcon size={15} strokeWidth={1.7} />}
+                onClick={() => {
+                  if (selectMode) setMulti(new Set());
+                  setSelectMode((v) => !v);
+                }}
+              >
+                {t('Выбрать')}
+              </Chip>
+            </div>
+            {/* The tiles scroll inside the panel, with room around them for the selected tile's brackets and glow. */}
+            <div className="thin-scrollbar -mx-3 mt-1 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-3 pb-[18px] pt-[18px]">
+              {zones.map(([zone, list]) => {
+                const numbers = list.map((x) => x.pc.number);
+                const lo = Math.min(...numbers);
+                const hi = Math.max(...numbers);
+                return (
+                  <section key={zone} className="flex flex-col gap-2.5">
+                    <h2 className="flex h-4 items-center gap-3">
+                      <span className="font-mono text-[10.5px] font-semibold uppercase leading-none tracking-[0.2em] text-text">
+                        {zone}
+                      </span>
+                      <span className="tnum font-mono text-[10px] font-medium leading-none tracking-[0.1em] text-muted">
+                        {lo === hi ? pad2(lo) : `${pad2(lo)}–${pad2(hi)}`}
+                      </span>
+                      <span
+                        aria-hidden="true"
+                        className="h-px min-w-4 flex-1 bg-[linear-gradient(90deg,rgb(var(--c-accent)/0.18),rgb(var(--c-accent)/0.04))]"
                       />
-                    ))}
-                  </div>
-                </section>
-              ))}
+                      <span className="label tnum whitespace-nowrap tracking-[0.14em]">
+                        {t('{n} свободно', { n: list.filter((x) => x.pc.status === 'free').length })}
+                      </span>
+                    </h2>
+                    <div className="grid grid-cols-[repeat(auto-fill,minmax(136px,1fr))] gap-2.5">
+                      {list.map((x) => (
+                        <SeatTile
+                          key={x.pc.id}
+                          seat={x}
+                          tariff={tariffName(x.session?.tariffId)}
+                          repair={repairs.get(x.pc.id)}
+                          call={callsByPc.get(x.pc.id)}
+                          selected={multi.size === 0 && x.pc.id === selected}
+                          checked={
+                            selectMode || multi.size > 0
+                              ? multi.has(x.pc.id) || (multi.size === 0 && x.pc.id === selected)
+                              : null
+                          }
+                          dimmed={active !== undefined && !active.test(x, repairs.has(x.pc.id))}
+                          blocked={notTarget(x)}
+                          onSelect={(e) => onTile(x, e)}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
               {seats.length === 0 && !error && <p className="text-sm text-muted">{t('Нет данных о ПК')}</p>}
             </div>
           </div>
@@ -2872,83 +3434,49 @@ export function MapPage(): JSX.Element {
               onSettle={(target) => setSheet({ kind: 'settle', target })}
             />
           )}
-
-          {/* Legend that counts: every status, how many seats are in it right now */}
-          <ul className="panel flex shrink-0 flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
-            {LEGEND_ORDER.map((k) => (
-              <li key={k} className="flex items-center gap-2.5 whitespace-nowrap text-sm">
-                <span className={clsx('h-3 w-3 shrink-0 rounded-[3px] border-2 bg-transparent', STATUS[k].cell)} />
-                <span>{t(STATUS[k].label)}</span>
-                <span className="num-dot text-lg leading-none">{String(counts.get(k) ?? 0).padStart(2, '0')}</span>
-              </li>
-            ))}
-          </ul>
         </div>
 
-        <aside className="panel flex min-h-0 flex-col gap-4 p-5">
-          {seat && !wide && bulk.length === 0 && (
-            <Choice
-              label={t('Панель')}
-              value={panel}
-              options={[
-                { id: 'seat', label: t('Место') },
-                { id: 'feed', label: t('Операции') },
-              ]}
-              onChange={setPanel}
-            />
-          )}
-          {bulk.length > 0 ? (
-            <div className="min-h-0 flex-1">
-              <BulkPanel
-                seats={bulk}
-                onDone={() => void load()}
-                onClear={() => {
-                  setMulti(new Set());
-                  setSelectMode(false);
-                }}
-                onStartMove={startMove}
-              />
-            </div>
-          ) : seat && data && !showFeedInPanel ? (
-            <div className="flex min-h-0 flex-1 flex-col gap-3">
-              {moved && moved.pcId === seat.pc.id && (
-                <p role="status" className="rounded-md bg-success/10 px-3 py-2 text-sm text-success">
-                  {moved.text}
-                </p>
-              )}
-              <div className="min-h-0 flex-1">
-                <SeatPanel
-                  seat={seat}
-                  members={data.users}
-                  tariffs={data.tariffs}
-                  sheet={sheet}
-                  setSheet={setSheet}
-                  onDone={() => void load()}
-                  call={callsByPc.get(seat.pc.id)}
-                  onStartMove={() => startMove(seat)}
-                />
+        <aside className="flex min-h-0 flex-col gap-3">
+          <div
+            className={clsx(
+              'thin-scrollbar flex min-h-0 flex-col gap-3 overflow-y-auto',
+              wide || folded ? 'flex-1' : 'flex-[0_1_auto]',
+            )}
+          >
+            {seatRegion}
+          </div>
+          {!wide &&
+            (folded ? (
+              <button
+                type="button"
+                aria-expanded={false}
+                onClick={() => setPanel('feed')}
+                className="glass-side focus-ring flex h-11 shrink-0 items-center justify-between gap-3 px-4 text-left hover:border-accent/[0.26]"
+              >
+                <span className="font-display text-[13px] font-medium text-hi">{t('Операции смены')}</span>
+                <ChevronDownIcon size={16} className="rotate-180 text-muted" />
+              </button>
+            ) : (
+              <div className="glass-side flex min-h-[180px] flex-1 flex-col px-4 pt-3.5">
+                {tall && (
+                  <button
+                    type="button"
+                    aria-expanded
+                    aria-label={t('Операции смены')}
+                    onClick={() => setPanel('seat')}
+                    className="focus-ring-inset -mx-4 -mt-3.5 mb-1.5 flex h-6 shrink-0 items-center justify-center rounded-t-md text-muted hover:text-text"
+                  >
+                    <ChevronDownIcon size={16} />
+                  </button>
+                )}
+                <OperationsFeed placement="panel" className="min-h-0 flex-1" />
               </div>
-            </div>
-          ) : showFeedInPanel ? (
-            <>
-              {!seat && (
-                <p className="text-sm text-muted">{t('Выберите место: номер ПК и Enter. Ниже — операции смены.')}</p>
-              )}
-              <OperationsFeed placement="panel" className="flex-1" />
-            </>
-          ) : (
-            <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-              <p className="font-display text-lg tracking-tight">{t('Выберите место')}</p>
-              <p className="max-w-[20rem] text-sm text-muted">
-                {t('Посадите клиента, продлите, пополните или завершите сеанс. Номер ПК и Enter — выбрать место.')}
-              </p>
-            </div>
-          )}
+            ))}
         </aside>
 
         {wide && (
-          <aside className="panel flex min-h-0 flex-col p-5">
-            <OperationsFeed placement="column" className="flex-1" />
+          <aside className="glass-side flex min-h-0 flex-col px-4 pt-3.5">
+            <OperationsFeed placement="column" className="min-h-0 flex-1" />
           </aside>
         )}
       </div>
@@ -2958,6 +3486,7 @@ export function MapPage(): JSX.Element {
           payee={sheet.payee}
           initial={sheet.initial}
           title={sheet.title}
+          context={sheet.context}
           onClose={() => setSheet(null)}
           onDone={() => void load()}
         />

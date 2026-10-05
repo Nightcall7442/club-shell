@@ -14,19 +14,25 @@
  * the amount and the method and offers only the same payment again, under the same key however late (the server replays
  * the first result instead of booking twice, D-46). Cash typed in "Получено" below the amount refuses cash; a held
  * Enter pays once.
+ *
+ * Variant F (spec §7): the amount is the big Unbounded field with the focus glow (and, for a top-up, «Баланс станет»),
+ * the presets only fill it, the cash handed over leads to the change box («Сдача», amber «Не хватает»), cash is the XL
+ * cut-corner button that sums it up, the other methods are two-line buttons with their hotkey.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import type { Money } from '@clubshell/contracts';
 import { adminApi, newKey, type PayMethod } from '@/api';
+import { GameArt } from '@/art';
 import { useClub } from '@/club';
 import { describe, isLostAnswer } from '@/errors';
-import { exactDigits, money, moneyExact } from '@/format';
+import { exactDigits, money, moneyExact, moneyParts } from '@/format';
 import { t } from '@/i18n';
+import { ArrowRightIcon, CashIcon } from '@/icons';
 import { PAY_METHOD_LABEL } from '@/labels';
 import { Receipt, printDocument, type ReceiptData } from '@/print';
 import { useShift } from '@/shift';
-import { Button, Kbd, Sheet, inputCls } from '@/ui';
+import { Button, Kbd, Note, Sheet, StatusDot, type ButtonSize } from '@/ui';
 
 /** Counter methods in button order; `code` is the Alt+digit hotkey (layout-independent `KeyboardEvent.code`). */
 export const PAY_METHODS: { id: PayMethod; label: string; hint: string; code: string }[] = [
@@ -112,12 +118,45 @@ export function ShiftClosedNote(): JSX.Element | null {
   const shift = useShift();
   if (!shift.loaded || shift.shift) return null;
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md bg-warning/10 px-3 py-2 text-sm text-warning">
-      <span>{t('Смена не открыта')}</span>
-      <Button size="sm" variant="secondary" onClick={shift.requestOpen}>
-        {t('Открыть смену')}
-      </Button>
-    </div>
+    <Note tone="warn">
+      <span className="flex items-center justify-between gap-3">
+        <span>{t('Смена не открыта')}</span>
+        <Button size="sm" variant="secondary" className="-my-1" onClick={shift.requestOpen}>
+          {t('Открыть смену')}
+        </Button>
+      </span>
+    </Note>
+  );
+}
+
+/** The label row over a step of the box: a mono caption (`text` while it is the step to do), a hint on the right. */
+function StepLabel({
+  label,
+  hint,
+  mono,
+  active,
+  htmlFor,
+}: {
+  label: string;
+  hint?: string;
+  /** The hint as a mono caption («ввод с клавиатуры») rather than a line of text. */
+  mono?: boolean;
+  active?: boolean;
+  /** The field the caption names (the amount): a `<label>`, so the hint stays out of the field's name. */
+  htmlFor?: string;
+}): JSX.Element {
+  const Caption = htmlFor ? 'label' : 'span';
+  return (
+    <span className="flex min-h-3 items-baseline justify-between gap-3">
+      <Caption htmlFor={htmlFor} className={clsx('label-sm shrink-0', active && 'text-text')}>
+        {label}
+      </Caption>
+      {hint && (
+        <span className={clsx('min-w-0 truncate', mono ? 'label-sm' : 'text-[11px] leading-none text-muted')}>
+          {hint}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -129,6 +168,8 @@ export function PayBox({
   autoFocus = true,
   hints = true,
   disabled,
+  amountLabel,
+  balanceBefore,
   onPay,
 }: {
   /** Minor units the amount starts with (e.g. what a session lacks). */
@@ -147,9 +188,18 @@ export function PayBox({
   hints?: boolean;
   /** Why the box cannot take money yet (e.g. the price is being recounted); null or absent — it can. */
   disabled?: string | null;
+  /**
+   * The amount field's caption (default «Сумма»); a top-up says «Сумма пополнения» (the field is still found by
+   * «Сумма»).
+   */
+  amountLabel?: string;
+  /** The payee's balance now (minor units): the field shows what it becomes with the typed amount. */
+  balanceBefore?: number;
   /** Does what the money is for; a throw is shown inline under the buttons, a success spends the box. */
   onPay: (p: Payment) => Promise<void>;
 }): JSX.Element {
+  const amountId = useId();
+  const receivedId = useId();
   const shift = useShift();
   const [digits, setDigits] = useState(sumDigits(initial));
   const [received, setReceived] = useState('');
@@ -223,9 +273,19 @@ export function PayBox({
   };
   const frozen = busy !== null || unknown !== null;
 
+  // The change box: what goes back to the client (accent) or what is still missing (amber); nothing typed — a dash.
+  const change = receivedMinor > 0 && amount > 0 ? receivedMinor - amount : null;
+  const after = balanceBefore !== undefined && !fixed ? moneyParts(balanceBefore + amount) : null;
+  const cashSummary =
+    amount > 0
+      ? [moneyExact(amount), change !== null && change > 0 ? t('сдача {sum}', { sum: exactDigits(change) }) : null]
+          .filter(Boolean)
+          .join(' · ')
+      : '';
+
   return (
     <div
-      className="flex flex-col gap-3"
+      className="flex flex-col"
       onKeyDown={(e) => {
         if (e.key === 'Enter' && e.target instanceof HTMLInputElement) {
           e.preventDefault();
@@ -240,10 +300,24 @@ export function PayBox({
         }
       }}
     >
-      <label className="flex flex-col gap-1.5">
-        <span className="label">{t('Сумма')}</span>
-        <span className="relative">
+      <StepLabel
+        htmlFor={amountId}
+        label={amountLabel ?? t('Сумма')}
+        hint={fixed ? t('Ровно эта сумма, до тийина') : t('Ввод с клавиатуры')}
+        mono
+        active={!fixed}
+      />
+      <div
+        className={clsx(
+          'mt-2 flex h-[76px] items-center gap-4 rounded-md border pl-5 pr-[18px] transition-shadow duration-200',
+          fixed
+            ? 'border-accent/[0.12] bg-text/[0.03]'
+            : 'border-transparent bg-bg/[0.62] focus-within:shadow-glow [&:not(:focus-within)]:border-accent/[0.16]',
+        )}
+      >
+        <span className="flex min-w-0 flex-1 items-baseline gap-2.5">
           <input
+            id={amountId}
             ref={amountRef}
             inputMode="numeric"
             autoComplete="off"
@@ -251,73 +325,132 @@ export function PayBox({
             // read-only, not disabled, while paying: the focus stays here for the next Enter after a refusal
             readOnly={frozen || fixed}
             aria-readonly={frozen || fixed}
-            className={clsx(inputCls, 'tnum h-12 pr-12 text-xl font-semibold', fixed && 'bg-white/[0.03]')}
+            className="tnum min-w-[1ch] max-w-full flex-[0_1_auto] bg-transparent font-display text-[36px] font-medium leading-none tracking-[-0.02em] text-hi caret-accent outline-none [field-sizing:content] placeholder:text-muted/60"
             value={fixed ? exactDigits(exact) : groupDigits(digits)}
             placeholder="0"
             onChange={(e) => {
               if (!fixed) setDigits(digitsOf(e.target.value));
             }}
           />
-          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted">
-            {t('сум')}
+          <span className="shrink-0 text-base font-medium leading-none text-muted">{t('сум')}</span>
+        </span>
+        {after && (
+          <span className="flex shrink-0 flex-col items-end gap-[7px]">
+            <span className="label-sm text-[9px]">{t('Баланс станет')}</span>
+            <span className="flex items-baseline gap-1 whitespace-nowrap">
+              <span className="num-dot text-base leading-none text-text">{after.num}</span>
+              <span className="text-[10.5px] font-medium leading-none text-muted">{after.unit}</span>
+            </span>
           </span>
-        </span>
-      </label>
-      {fixed ? (
-        <p className="-mt-1 text-xs text-muted">{t('Ровно эта сумма, до тийина')}</p>
-      ) : (
-        <div className="grid grid-cols-4 gap-1.5">
-          {PRESETS.map((p) => (
-            <Button
-              key={p}
-              size="sm"
-              disabled={frozen}
-              className={clsx(digits === String(p) && 'choice-on')}
-              onClick={() => {
-                setDigits(String(p));
-                amountRef.current?.focus();
-              }}
-            >
-              {groupDigits(String(p))}
-            </Button>
-          ))}
-        </div>
+        )}
+      </div>
+      {tooLow && <p className="mt-2 text-xs font-medium text-warning">{t('Не меньше {sum}', { sum: uzs(min) })}</p>}
+      {tooHigh && (
+        <p className="mt-2 text-xs font-medium text-warning">{t('Не больше {sum}', { sum: uzs(MAX_AMOUNT) })}</p>
       )}
-      {tooLow && <p className="text-xs text-warning">{t('Не меньше {sum}', { sum: uzs(min) })}</p>}
-      {tooHigh && <p className="text-xs text-warning">{t('Не больше {sum}', { sum: uzs(MAX_AMOUNT) })}</p>}
 
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-3">
-        <label className="flex flex-col gap-1.5">
-          <span className="label">{t('Получено наличными')}</span>
-          <input
-            inputMode="numeric"
-            autoComplete="off"
-            autoFocus={autoFocus && fixed}
-            readOnly={frozen}
-            className={clsx(inputCls, 'tnum h-9')}
-            value={groupDigits(received)}
-            placeholder={t('необязательно')}
-            onChange={(e) => setReceived(digitsOf(e.target.value))}
-          />
-        </label>
-        <span className="tnum pb-2 text-sm" aria-live="polite">
-          {receivedMinor > 0 && amount > 0 ? (
-            receivedMinor >= amount ? (
-              <span className="text-success">{t('Сдача: {sum}', { sum: moneyExact(receivedMinor - amount) })}</span>
-            ) : (
-              <span className="text-warning">
-                {t('Меньше суммы на {sum}', { sum: moneyExact(amount - receivedMinor) })}
-              </span>
-            )
-          ) : null}
+      {!fixed && (
+        <>
+          <div className="mt-3.5">
+            <StepLabel label={t('Быстрые суммы')} hint={t('только подставляют сумму в поле')} />
+          </div>
+          <div className="mt-2 grid grid-cols-4 gap-2">
+            {PRESETS.map((p) => (
+              <button
+                type="button"
+                key={p}
+                disabled={frozen}
+                className={clsx(
+                  'choice focus-ring tnum h-11 rounded-md px-1 text-[13.5px] font-semibold disabled:cursor-not-allowed disabled:opacity-40',
+                  digits === String(p) && 'choice-on',
+                )}
+                onClick={() => {
+                  setDigits(String(p));
+                  amountRef.current?.focus();
+                }}
+              >
+                {groupDigits(String(p))}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      <div className="mt-[18px] grid grid-cols-[minmax(0,1fr)_20px_minmax(0,1fr)] items-end gap-2.5">
+        <div className="flex min-w-0 flex-col gap-2">
+          <StepLabel htmlFor={receivedId} label={t('Получено наличными')} />
+          <span className="relative block">
+            <input
+              id={receivedId}
+              inputMode="numeric"
+              autoComplete="off"
+              autoFocus={autoFocus && fixed}
+              readOnly={frozen}
+              className="focus-ring tnum h-[52px] w-full rounded-md border border-accent/[0.16] bg-bg/50 pl-4 pr-11 font-display text-xl font-medium tracking-[-0.01em] text-hi caret-accent placeholder:font-sans placeholder:text-[13px] placeholder:font-normal placeholder:tracking-normal placeholder:text-muted hover:border-accent/[0.26] focus-visible:border-transparent"
+              value={groupDigits(received)}
+              placeholder={t('необязательно')}
+              onChange={(e) => setReceived(digitsOf(e.target.value))}
+            />
+            <span className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-[13px] font-medium text-muted">
+              {t('сум')}
+            </span>
+          </span>
+        </div>
+        <span aria-hidden="true" className="flex h-[52px] items-center justify-center text-muted">
+          <ArrowRightIcon size={18} />
         </span>
+        <div className="flex min-w-0 flex-col gap-2" aria-live="polite">
+          <span
+            className={clsx(
+              'label-sm min-h-3',
+              change === null ? '' : change >= 0 ? 'font-semibold text-accent' : 'font-semibold text-warning',
+            )}
+          >
+            {change !== null && change < 0 ? t('Не хватает') : t('Сдача')}
+          </span>
+          <span
+            className={clsx(
+              'flex h-[52px] items-center justify-between gap-2 rounded-md border px-4',
+              change === null
+                ? 'border-accent/10 bg-bg/30'
+                : change >= 0
+                  ? 'border-accent/[0.34] bg-[linear-gradient(180deg,rgb(var(--c-accent)/0.12),rgb(var(--c-accent)/0.05))]'
+                  : 'border-warning/40 bg-warning/[0.08]',
+            )}
+          >
+            <span
+              className={clsx(
+                'tnum min-w-0 truncate font-display text-[22px] font-medium leading-none tracking-[-0.01em]',
+                change === null ? 'text-muted' : change >= 0 ? 'text-white' : 'text-warning',
+              )}
+            >
+              {change === null ? '—' : exactDigits(Math.abs(change))}
+            </span>
+            {change !== null && (
+              <span className="shrink-0 text-[13px] font-medium leading-none text-dim">{t('сум')}</span>
+            )}
+          </span>
+        </div>
       </div>
 
-      <ShiftClosedNote />
-      {disabled && !closed && <p className="text-xs text-muted">{disabled}</p>}
+      {(closed || (disabled && !closed)) && (
+        <div className="mt-3.5 flex flex-col gap-2">
+          <ShiftClosedNote />
+          {disabled && !closed && <p className="text-xs text-muted">{disabled}</p>}
+        </div>
+      )}
 
+      <div className="mt-5">
+        <StepLabel label={t('Провести оплату')} hint={t('кнопка способа сразу проводит платёж')} active />
+      </div>
       {unknown ? (
-        <Button variant="primary" className="h-11" disabled={busy !== null} onClick={() => void send(unknown)}>
+        <Button
+          variant="primary"
+          size="xl"
+          className="mt-2"
+          disabled={busy !== null}
+          onClick={() => void send(unknown)}
+        >
           {busy !== null
             ? '…'
             : t('Повторить · {sum} · {method}', {
@@ -326,26 +459,72 @@ export function PayBox({
               })}
         </Button>
       ) : (
-        <div className={clsx('grid gap-1.5', verb ? 'grid-cols-2' : 'grid-cols-4')}>
-          {PAY_METHODS.map((m, i) => (
-            <Button
-              key={m.id}
-              variant={i === 0 ? 'primary' : 'secondary'}
-              disabled={!ready || (m.id === 'cash' && cashShort)}
-              title={hints ? m.hint : undefined}
-              className={clsx(i === 0 && (verb ? 'col-span-2' : 'col-span-4'), 'h-11')}
-              onClick={() => pay(m.id)}
-            >
-              {busy === m.id ? '…' : verb ? `${verb} · ${t(m.label)}` : t(m.label)}
-              {hints && <Kbd>{m.hint}</Kbd>}
-            </Button>
-          ))}
-        </div>
+        <>
+          <Button
+            variant="primary"
+            size="xl"
+            disabled={!ready || cashShort}
+            title={hints ? PAY_METHODS[0]?.hint : undefined}
+            className="mt-2 w-full"
+            onClick={() => pay('cash')}
+          >
+            <CashIcon size={20} strong />
+            <span className="shrink-0">
+              {busy === 'cash' ? '…' : verb ? `${verb} · ${t(PAY_METHOD_LABEL.cash)}` : t(PAY_METHOD_LABEL.cash)}
+            </span>
+            {/* The sum and the change, when they fit beside the label: a summary that does not fit wraps out of sight. */}
+            <span className="flex h-5 min-w-0 flex-1 flex-wrap items-center justify-end overflow-hidden">
+              <span aria-hidden="true" className="h-5 w-0" />
+              {busy === null && cashSummary && (
+                <span className="h-5 whitespace-nowrap text-[12.5px] font-medium leading-5 opacity-[0.72]">
+                  {cashSummary}
+                </span>
+              )}
+            </span>
+            {hints && (
+              <Kbd onPrimary className="h-6 px-2 text-[10.5px]">
+                {PAY_METHODS[0]?.hint}
+              </Kbd>
+            )}
+          </Button>
+          <div className="mt-2 grid grid-cols-4 gap-2">
+            {PAY_METHODS.slice(1).map((m) => (
+              <button
+                type="button"
+                key={m.id}
+                disabled={!ready}
+                title={hints ? m.hint : undefined}
+                onClick={() => pay(m.id)}
+                className={clsx(
+                  'focus-ring flex flex-col items-center justify-center gap-[7px] rounded-md border border-accent/[0.14] bg-accent/[0.04] px-1 text-text hover:border-accent/[0.3] hover:bg-accent/[0.08] disabled:cursor-not-allowed disabled:opacity-40',
+                  hints ? 'h-14' : 'h-11',
+                )}
+              >
+                <span className="max-w-full truncate text-[13.5px] font-semibold leading-none">
+                  {busy === m.id ? (
+                    '…'
+                  ) : (
+                    <>
+                      {/* The name says the verb too («Посадить · Карта»): the four buttons show the method only. */}
+                      {verb && <span className="sr-only">{`${verb} · `}</span>}
+                      {t(m.label)}
+                    </>
+                  )}
+                </span>
+                {hints && (
+                  <span className="font-mono text-[9.5px] font-medium uppercase leading-none tracking-[0.1em] text-muted">
+                    {m.hint}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </>
       )}
       {error && (
-        <p role="alert" className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
+        <Note tone="err" role="alert" className="mt-3">
           {error}
-        </p>
+        </Note>
       )}
     </div>
   );
@@ -360,28 +539,106 @@ export interface Payee {
 }
 
 /** «Чек»: prints the slip of the money just taken. */
-export function ReceiptButton({ receipt, className }: { receipt: ReceiptData; className?: string }): JSX.Element {
+export function ReceiptButton({
+  receipt,
+  className,
+  size,
+}: {
+  receipt: ReceiptData;
+  className?: string;
+  size?: ButtonSize;
+}): JSX.Element {
   return (
-    <Button className={className} onClick={() => void printDocument(<Receipt r={receipt} />, 'receipt')}>
+    <Button size={size} className={className} onClick={() => void printDocument(<Receipt r={receipt} />, 'receipt')}>
       {t('Чек')}
     </Button>
   );
 }
 
 /**
+ * The footer of a money sheet (spec §7.9): whose shift takes the money (the green dot), and «Esc отмена». It never says
+ * «Смена открыта» (that line belongs to the shift page alone); without a shift it leaves the left side to the box's own
+ * note.
+ */
+export function PayFooter(): JSX.Element {
+  const { shift } = useShift();
+  return (
+    <>
+      <span className="flex min-w-0 items-center gap-[9px] font-medium">
+        {shift && (
+          <>
+            <StatusDot tone="ok" />
+            <span className="truncate">{t('Смена · {name}', { name: shift.staffName })}</span>
+          </>
+        )}
+      </span>
+      <span className="flex shrink-0 items-center gap-2 text-xs text-muted">
+        <Kbd className="h-[22px] px-[7px] text-text">Esc</Kbd>
+        {t('отмена')}
+      </span>
+    </>
+  );
+}
+
+/**
+ * Where a top-up happens, for the sheet's header: from a seat it is the PC, its zone and the game being played, with the
+ * game's art as a 150 px hero (spec §7); from the client search there is none and the header is plain.
+ */
+export interface TopUpContext {
+  /** Mono line over the title: «ПК 02 · STANDARD · COUNTER-STRIKE 2». */
+  caption?: string;
+  /** The hero picture (the game's hero or cover); none — the plain header with the caption. */
+  art?: string | null;
+  /** Under the title over the hero: «@dilnoza · ••4521». */
+  sub?: string;
+}
+
+/** The sheet's hero: the game's art under its scrims, the caption, the title with a dim «·», the client's handle. */
+function TopUpHero({ title, context }: { title: string; context: TopUpContext }): JSX.Element {
+  const cut = title.indexOf(' · ');
+  return (
+    <div className="relative h-[150px] shrink-0 overflow-hidden">
+      <GameArt src={context.art} variant="hero" edge />
+      <div className="absolute left-6 right-[62px] top-3.5 flex h-9 items-center">
+        {context.caption && <span className="label-sm truncate text-text/[0.86]">{context.caption}</span>}
+      </div>
+      <div className="absolute inset-x-6 bottom-3.5">
+        <h2 className="truncate font-display text-[26px] font-medium leading-[1.1] tracking-[-0.02em] text-white [text-shadow:0_2px_12px_rgb(0_0_0/0.6)]">
+          {cut > 0 ? (
+            <>
+              {title.slice(0, cut)} <span className="text-artlabel">·</span> {title.slice(cut + 3)}
+            </>
+          ) : (
+            title
+          )}
+        </h2>
+        {context.sub && (
+          <p className="mt-2 truncate text-xs leading-none text-text/80 [text-shadow:0_1px_3px_rgb(0_0_0/0.8)]">
+            {context.sub}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
  * Top-up of one client's balance as a sheet: the client, the pay box, then the new balance. Used by the seat panel
- * ("Пополнить", F2) and the top-bar search; guests are never topped up (D-36), their debts go through the settle sheet.
+ * ("Пополнить", F2; with the seat as `context`, so the game's art heads it) and the top-bar search; guests are never
+ * topped up (D-36), their debts go through the settle sheet.
  */
 export function TopUpSheet({
   payee,
   initial,
   title,
+  context,
   onClose,
   onDone,
 }: {
   payee: Payee;
   initial?: number;
   title?: string;
+  context?: TopUpContext;
   onClose: () => void;
   onDone?: () => void;
 }): JSX.Element {
@@ -393,30 +650,51 @@ export function TopUpSheet({
     change: number | null;
     receipt: ReceiptData;
   } | null>(null);
+  const heading = title ?? t('Пополнить · {name}', { name: payee.displayName });
+  const balance = moneyParts((done?.balance ?? payee.balance).amount);
+  const bonus = payee.bonus ? moneyParts(payee.bonus.amount) : null;
   return (
-    <Sheet title={title ?? t('Пополнить · {name}', { name: payee.displayName })} onClose={onClose}>
-      <dl className="grid grid-cols-2 divide-x divide-line overflow-hidden rounded-md border border-line bg-bg text-center">
-        <div className="flex flex-col gap-1.5 px-3 py-2.5">
-          <dt className="label">{t('Баланс')}</dt>
-          <dd className="tnum font-semibold leading-none">{money(done?.balance ?? payee.balance)}</dd>
+    <Sheet
+      title={heading}
+      onClose={onClose}
+      caption={context?.art ? undefined : context?.caption}
+      hero={context?.art ? <TopUpHero title={heading} context={context} /> : undefined}
+      footer={<PayFooter />}
+    >
+      <dl className="grid grid-cols-2 gap-2">
+        <div className="well flex h-[60px] flex-col justify-between px-3.5 py-3">
+          <dt className="label-sm">{t('Баланс')}</dt>
+          <dd className="flex items-baseline gap-[5px] whitespace-nowrap">
+            <span className="num-dot text-xl leading-none text-hi">{balance.num}</span>
+            <span className="text-[11.5px] font-medium leading-none text-muted">{balance.unit}</span>
+          </dd>
         </div>
-        <div className="flex flex-col gap-1.5 px-3 py-2.5">
-          <dt className="label">{t('Бонусы')}</dt>
-          <dd className="tnum font-semibold leading-none">{payee.bonus ? money(payee.bonus) : '—'}</dd>
+        <div className="well flex h-[60px] flex-col justify-between px-3.5 py-3">
+          <dt className="label-sm">{t('Бонусы')}</dt>
+          <dd className="flex items-baseline gap-[5px] whitespace-nowrap">
+            {bonus ? (
+              <>
+                <span className="num-dot text-xl leading-none text-accent">{bonus.num}</span>
+                <span className="text-[11.5px] font-medium leading-none text-muted">{bonus.unit}</span>
+              </>
+            ) : (
+              <span className="num-dot text-xl leading-none text-muted">—</span>
+            )}
+          </dd>
         </div>
       </dl>
       {done ? (
         <>
-          <p role="status" className="rounded-md bg-success/10 px-3 py-2 text-sm text-success">
+          <Note tone="ok" role="status">
             {t('Баланс пополнен · {sum} · {method} · теперь {balance}', {
               sum: uzs(done.paid),
               method: methodName(done.method),
               balance: money(done.balance),
             })}
             {done.change !== null && done.change > 0 && (
-              <span className="block font-semibold">{t('Сдача: {sum}', { sum: moneyExact(done.change) })}</span>
+              <span className="mt-1 block font-semibold">{t('Сдача: {sum}', { sum: moneyExact(done.change) })}</span>
             )}
-          </p>
+          </Note>
           <div className="grid grid-cols-2 gap-2">
             <ReceiptButton receipt={done.receipt} />
             <Button variant="primary" autoFocus onClick={onClose}>
@@ -427,6 +705,8 @@ export function TopUpSheet({
       ) : (
         <PayBox
           initial={initial}
+          amountLabel={t('Сумма пополнения')}
+          balanceBefore={payee.balance.amount}
           onPay={async (p) => {
             const r = await adminApi.topUp({ userId: payee.id, amount: p.amount, method: p.method }, p.key);
             setDone({

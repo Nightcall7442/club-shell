@@ -1076,6 +1076,8 @@ export const UZ: Record<string, string> = {
   'Зовёт админа': 'Adminni chaqirmoqda',
   Сервис: 'Servis',
   // --- F:A map ---
+  'Занято {n} из {total}': 'Band: {total} tadan {n}',
+  'номер ПК': 'kompyuter raqami',
   // --- end F:A ---
   // --- F:B bar, shop, clients ---
   // --- end F:B ---
@@ -2157,6 +2159,8 @@ export const EN: Record<string, string> = {
   'Зовёт админа': 'Calls the admin',
   Сервис: 'Service',
   // --- F:A map ---
+  'Занято {n} из {total}': 'Busy {n} of {total}',
+  'номер ПК': 'PC number',
   // --- end F:A ---
   // --- F:B bar, shop, clients ---
   // --- end F:B ---
