@@ -66,12 +66,21 @@ public sealed class TestAgent(ServerFixture server, JsonElement registration, st
 
     public static string RandomMac() => string.Join(':', RandomNumberGenerator.GetBytes(6).Select(b => b.ToString("X2", CultureInfo.InvariantCulture)));
 
-    /// <summary>A contract-valid <c>HeartbeatRequest</c>.</summary>
-    /// <summary>A heartbeat body; <paramref name="offlineQueue"/> is the agent's outbox size (events it has not flushed yet).</summary>
-    public static string Heartbeat(int offlineQueue = 0) => $$"""
-        {"status":"free","agentVersion":"1.4.2","shellVersion":"1.4.2","uptimeSec":3600,"ipAddress":"10.0.0.12",
-         "policyVersion":0,"runningGames":[],"offlineQueue":{{offlineQueue}},"shellConnected":true}
-        """;
+    /// <summary>
+    /// A contract-valid <c>HeartbeatRequest</c> body: <paramref name="offlineQueue"/> is the agent's outbox size (events it has
+    /// not flushed yet), <paramref name="currentSessionId"/> its open session (the key is left out when null) and
+    /// <paramref name="runningGames"/> the games it tracks, as <c>(gameId, startedAt)</c>.
+    /// </summary>
+    public static string Heartbeat(
+        int offlineQueue = 0, Guid? currentSessionId = null, IEnumerable<(Guid GameId, DateTimeOffset StartedAt)>? runningGames = null)
+    {
+        var session = currentSessionId is { } id ? $"\"currentSessionId\":\"{id}\"," : "";
+        var games = string.Join(',', (runningGames ?? []).Select((g, i) => JsonSerializer.Serialize(new { gameId = g.GameId, pid = 1000 + i, startedAt = g.StartedAt })));
+        return $$"""
+            {"status":"free",{{session}}"agentVersion":"1.4.2","shellVersion":"1.4.2","uptimeSec":3600,"ipAddress":"10.0.0.12",
+             "policyVersion":0,"runningGames":[{{games}}],"offlineQueue":{{offlineQueue}},"shellConnected":true}
+            """;
+    }
 
     /// <summary>
     /// A signed request. <paramref name="signedTarget"/>/<paramref name="signedBody"/> sign something other than what is
@@ -126,7 +135,9 @@ public sealed class TestAgent(ServerFixture server, JsonElement registration, st
         return body;
     }
 
-    public Task<HttpResponseMessage> HeartbeatAsync(int offlineQueue = 0) => SendAsync(HttpMethod.Post, Path("heartbeat"), Heartbeat(offlineQueue));
+    public Task<HttpResponseMessage> HeartbeatAsync(
+        int offlineQueue = 0, Guid? currentSessionId = null, IEnumerable<(Guid GameId, DateTimeOffset StartedAt)>? runningGames = null) =>
+        SendAsync(HttpMethod.Post, Path("heartbeat"), Heartbeat(offlineQueue, currentSessionId, runningGames));
 
     /// <summary><c>/api/v1/agents/{pcId}/…</c> of this PC.</summary>
     public string Path(string rest) => $"/api/v1/agents/{PcId}/{rest}";

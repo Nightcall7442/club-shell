@@ -3,14 +3,13 @@
  * weekday × hour, top games and products, and the shifts of the period.
  */
 import { useEffect, useState } from 'react';
-import clsx from 'clsx';
 import { clubApi, type Reports } from '@/api';
 import { describe } from '@/errors';
 import { dateLocale, t } from '@/i18n';
 import { money } from '@/format';
-import { Note, PageHeader, Section, Table } from '@/ui';
+import { KpiCard, Note, PageHeader, Section, Sum, Table } from '@/ui';
+import { OwnerPage, PeriodChips } from './ownerKit';
 
-const PERIODS = [7, 30, 90] as const;
 const nf = new Intl.NumberFormat('ru-RU');
 const sum = (minor: number): string => nf.format(Math.round(minor / 100));
 const uzs = (minor: number | null | undefined): string =>
@@ -26,18 +25,6 @@ const WEEK: { label: string; idx: number }[] = [
   { label: 'Сб', idx: 6 },
   { label: 'Вс', idx: 0 },
 ];
-
-function Stat({ label, value, unit }: { label: string; value: string; unit?: string }): JSX.Element {
-  return (
-    <div className="flex min-w-0 flex-col gap-2 bg-surface px-5 py-4">
-      <span className="label truncate">{label}</span>
-      <span className="flex items-baseline gap-1.5">
-        <span className="num-dot text-[1.9rem] leading-none">{value}</span>
-        {unit && <span className="text-xs text-muted">{unit}</span>}
-      </span>
-    </div>
-  );
-}
 
 function shortDate(iso: string): string {
   const [, m, d] = iso.split('-');
@@ -60,49 +47,52 @@ function RevenueChart({ rows }: { rows: Reports['byDay'] }): JSX.Element {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex gap-3">
-        <div className="flex h-56 w-20 shrink-0 flex-col justify-between text-right">
-          <span className="tnum text-xs text-muted">{sum(max)}</span>
-          <span className="tnum text-xs text-muted">{sum(max / 2)}</span>
-          <span className="tnum text-xs text-muted">0</span>
+        <div className="flex h-56 w-20 shrink-0 flex-col justify-between text-right font-mono text-[10.5px] text-muted">
+          <span className="tnum -translate-y-1/2">{sum(max)}</span>
+          <span className="tnum">{sum(max / 2)}</span>
+          <span className="tnum translate-y-1/2">0</span>
         </div>
-        <div className="relative flex h-56 min-w-0 flex-1 items-end gap-[2px] border-b border-l border-line">
-          <div className="pointer-events-none absolute inset-x-0 top-0 border-t border-dashed border-line" />
-          <div className="pointer-events-none absolute inset-x-0 top-1/2 border-t border-dashed border-line" />
+        <div className="relative flex h-56 min-w-0 flex-1 items-end gap-[3px] border-b border-l border-accent/[0.16]">
+          <div className="pointer-events-none absolute inset-x-0 top-0 border-t border-dashed border-accent/[0.08]" />
+          <div className="pointer-events-none absolute inset-x-0 top-1/2 border-t border-dashed border-accent/[0.08]" />
           {rows.map((r) => (
             <div
               key={r.date}
               title={`${shortDate(r.date)} · ${t('Сеансы')} ${uzs(r.sessions)} · ${t('Магазин')} ${uzs(r.shop)}`}
               className="flex h-full min-w-0 flex-1 flex-col justify-end"
             >
-              <div className="bg-success" style={{ height: `${(r.shop / max) * 100}%` }} />
-              <div className="bg-accent" style={{ height: `${(r.sessions / max) * 100}%` }} />
+              <div className="rounded-t-[2px] bg-dim/40" style={{ height: `${(r.shop / max) * 100}%` }} />
+              <div
+                className="bg-accent/85 shadow-[0_0_10px_-2px_rgb(var(--c-accent)/0.5)]"
+                style={{ height: `${(r.sessions / max) * 100}%` }}
+              />
             </div>
           ))}
         </div>
       </div>
       <div className="flex gap-3">
         <div className="w-20 shrink-0" />
-        <div className="flex min-w-0 flex-1 gap-[2px]">
+        <div className="flex min-w-0 flex-1 gap-[3px]">
           {rows.map((r, i) => (
             <span
               key={r.date}
-              className="tnum min-w-0 flex-1 overflow-visible whitespace-nowrap text-[0.65rem] text-muted"
+              className="tnum min-w-0 flex-1 overflow-visible whitespace-nowrap font-mono text-[10px] text-muted"
             >
               {i % every === 0 ? shortDate(r.date) : ''}
             </span>
           ))}
         </div>
       </div>
-      <div className="flex gap-5 pl-[5.75rem] text-xs text-muted">
+      <div className="flex items-center gap-5 pl-[5.75rem] text-xs text-dim">
         <span className="flex items-center gap-2">
-          <span className="h-2.5 w-2.5 bg-accent" />
+          <span className="h-2.5 w-2.5 rounded-[2px] bg-accent shadow-[0_0_6px_rgb(var(--c-accent)/0.6)]" />
           {t('Сеансы')}
         </span>
         <span className="flex items-center gap-2">
-          <span className="h-2.5 w-2.5 bg-success" />
+          <span className="h-2.5 w-2.5 rounded-[2px] bg-dim/40" />
           {t('Магазин')}
         </span>
-        <span className="ml-auto">{t('сум в день')}</span>
+        <span className="label-sm ml-auto">{t('сум в день')}</span>
       </div>
     </div>
   );
@@ -123,9 +113,10 @@ function HeatMap({ heat }: { heat: number[][] }): JSX.Element {
                 <div
                   key={h}
                   title={`${t(d.label)} ${String(h).padStart(2, '0')}:00 · ${v}`}
-                  className="h-7 rounded-[3px] border border-line"
+                  className="h-7 rounded-[3px] bg-text/[0.035]"
                   style={{
-                    backgroundColor: v > 0 ? `rgba(154,223,255,${(0.12 + (v / max) * 0.88).toFixed(3)})` : undefined,
+                    backgroundColor:
+                      v > 0 ? `rgb(var(--c-accent) / ${(0.12 + (v / max) * 0.88).toFixed(3)})` : undefined,
                   }}
                 />
               );
@@ -134,15 +125,15 @@ function HeatMap({ heat }: { heat: number[][] }): JSX.Element {
         ))}
         <span />
         {Array.from({ length: 24 }, (_, h) => (
-          <span key={h} className="tnum text-[0.65rem] text-muted">
+          <span key={h} className="tnum font-mono text-[10px] text-muted">
             {h % 3 === 0 ? String(h).padStart(2, '0') : ''}
           </span>
         ))}
       </div>
-      <div className="flex items-center justify-end gap-2 text-xs text-muted">
+      <div className="flex items-center justify-end gap-2 font-mono text-[10.5px] text-muted">
         <span className="tnum">0</span>
         {[0.12, 0.34, 0.56, 0.78, 1].map((o) => (
-          <span key={o} className="h-3 w-5 rounded-[2px]" style={{ backgroundColor: `rgba(154,223,255,${o})` }} />
+          <span key={o} className="h-3 w-5 rounded-[2px]" style={{ backgroundColor: `rgb(var(--c-accent) / ${o})` }} />
         ))}
         <span className="tnum">{t('{n} место-ч', { n: max })}</span>
       </div>
@@ -171,34 +162,17 @@ export default function ReportsPage(): JSX.Element {
   }, [days]);
 
   return (
-    <div className="flex flex-col gap-5">
-      <PageHeader
-        title={t('Отчёты')}
-        actions={PERIODS.map((p) => (
-          <button
-            key={p}
-            type="button"
-            aria-pressed={days === p}
-            onClick={() => setDays(p)}
-            className={clsx(
-              'focus-ring h-10 rounded-md px-3.5 text-sm font-semibold transition-colors',
-              'choice',
-              days === p && 'choice-on',
-            )}
-          >
-            {t('{n} дней', { n: p })}
-          </button>
-        ))}
-      />
+    <OwnerPage>
+      <PageHeader title={t('Отчёты')} caption={t('Бизнес')} actions={<PeriodChips value={days} onChange={setDays} />} />
       <Note note={note} />
 
       {data && (
         <>
-          <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line xl:grid-cols-4">
-            <Stat label={t('Выручка сеансов')} value={sum(data.totals.sessions)} unit={t('сум')} />
-            <Stat label={t('Магазин')} value={sum(data.totals.shop)} unit={t('сум')} />
-            <Stat label={t('Пополнения')} value={sum(data.totals.topUps)} unit={t('сум')} />
-            <Stat label={t('Сеансов')} value={nf.format(data.totals.sessionsCount)} />
+          <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+            <KpiCard compact label={t('Выручка сеансов')} value={sum(data.totals.sessions)} unit={t('сум')} />
+            <KpiCard compact label={t('Магазин')} value={sum(data.totals.shop)} unit={t('сум')} />
+            <KpiCard compact label={t('Пополнения')} value={sum(data.totals.topUps)} unit={t('сум')} />
+            <KpiCard compact label={t('Сеансов')} value={nf.format(data.totals.sessionsCount)} />
           </div>
 
           <Section title={t('Выручка по дням')}>
@@ -216,7 +190,7 @@ export default function ReportsPage(): JSX.Element {
                 rowKey={(g) => g.id}
                 empty={t('Нет данных')}
                 columns={[
-                  { key: 'title', title: t('Игра'), render: (g) => g.title },
+                  { key: 'title', title: t('Игра'), render: (g) => <span className="font-medium">{g.title}</span> },
                   { key: 'players', title: t('Игроков'), num: true, width: '8rem', render: (g) => g.players },
                 ]}
               />
@@ -227,9 +201,15 @@ export default function ReportsPage(): JSX.Element {
                 rowKey={(p) => p.title}
                 empty={t('Нет данных')}
                 columns={[
-                  { key: 'title', title: t('Товар'), render: (p) => p.title },
+                  { key: 'title', title: t('Товар'), render: (p) => <span className="font-medium">{p.title}</span> },
                   { key: 'qty', title: t('Кол-во'), num: true, width: '6rem', render: (p) => p.qty },
-                  { key: 'amount', title: t('Сумма'), num: true, width: '9rem', render: (p) => uzs(p.amount) },
+                  {
+                    key: 'amount',
+                    title: t('Сумма'),
+                    num: true,
+                    width: '9rem',
+                    render: (p) => <Sum minor={p.amount} />,
+                  },
                 ]}
               />
             </Section>
@@ -241,24 +221,24 @@ export default function ReportsPage(): JSX.Element {
               rowKey={(s) => s.id}
               empty={t('Смен за период нет')}
               columns={[
-                { key: 'who', title: t('Кассир'), render: (s) => s.staffName },
+                { key: 'who', title: t('Кассир'), render: (s) => <span className="font-medium">{s.staffName}</span> },
                 {
                   key: 'period',
                   title: t('Период'),
                   render: (s) => (
-                    <span className="tnum">
+                    <span className="tnum text-dim">
                       {dateTime(s.openedAt)} — {s.closedAt ? dateTime(s.closedAt) : t('открыта')}
                     </span>
                   ),
                 },
-                { key: 'sessions', title: t('Сеансы'), num: true, render: (s) => uzs(s.totals?.sessions) },
-                { key: 'shop', title: t('Магазин'), num: true, render: (s) => uzs(s.totals?.shop) },
-                { key: 'cash', title: t('Наличные'), num: true, render: (s) => uzs(s.closingCash) },
+                { key: 'sessions', title: t('Сеансы'), num: true, render: (s) => <Sum minor={s.totals?.sessions} /> },
+                { key: 'shop', title: t('Магазин'), num: true, render: (s) => <Sum minor={s.totals?.shop} /> },
+                { key: 'cash', title: t('Наличные'), num: true, render: (s) => <Sum minor={s.closingCash} /> },
               ]}
             />
           </Section>
         </>
       )}
-    </div>
+    </OwnerPage>
   );
 }

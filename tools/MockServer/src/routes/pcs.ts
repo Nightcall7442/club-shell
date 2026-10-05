@@ -218,7 +218,11 @@ export function pcsRoutes(app: FastifyInstance): void {
     int(b, 'uptimeSec', 0);
     pc.ipAddress = str(b, 'ipAddress', 64);
     int(b, 'policyVersion', 0);
-    arr(b, 'runningGames', 64);
+    // Kept for the hall map (D-71): the game on the seat. Each entry must be whole, as the server's contract types it.
+    pc.runningGames = arr(b, 'runningGames', 64).map((g, i) => {
+      if (!isObject(g)) throw errors.validation(`runningGames[${i}]`, 'format');
+      return { gameId: str(g, 'gameId', 64), pid: int(g, 'pid', 0), startedAt: isoDate(g, 'startedAt') };
+    });
     // What a move onto this PC is checked against (D-59): an unsent offline session refuses it.
     pc.offlineQueue = int(b, 'offlineQueue', 0);
     pc.reportedSessionId = optStr(b, 'currentSessionId', 64);

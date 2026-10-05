@@ -5,6 +5,11 @@
  * print settings of this console (paper per kind, the receipt language) are set here. Below, the shift's operations
  * (the owner may pick an older shift) and the closed shifts with who closed them and a reprint of their Z. Polls
  * `/admin/shift` every 5 s and tells the console's shift state (the top-bar chip, the money buttons) when it changes.
+ *
+ * Variant F: the X / Z report as groups of compact KPI cards (Doto figures, zeros quiet, voids and any difference
+ * amber); below, the shift's operations beside a 400 px column with the drawer card (close: the float and the expected
+ * cash, how it adds up, the counted cash and the difference; or open) and the cash moves; then the history and the
+ * print settings.
  */
 import { useCallback, useEffect, useState } from 'react';
 import clsx from 'clsx';
@@ -13,6 +18,7 @@ import { useClub } from '@/club';
 import { describe } from '@/errors';
 import { LANGS, dateLocale, t, type Lang } from '@/i18n';
 import { money, moneyExact } from '@/format';
+import { PrintIcon } from '@/icons';
 import { FEED_FILTERS, OperationsFeed } from '@/operations';
 import { PAY_METHODS } from '@/paybox';
 import {
@@ -29,7 +35,7 @@ import {
   type PrintKind,
 } from '@/print';
 import { drawerMoves, printX, useShift } from '@/shift';
-import { Button, Field, MoneyInput, Note, PageHeader, Section, Table, inputCls } from '@/ui';
+import { Button, Chip, Field, KpiCard, MoneyInput, Note, PageHeader, Section, Sum, Table, Well, inputCls } from '@/ui';
 
 const POLL_MS = 5000;
 /** The unpaid bills the close form warns about are read this often (the overview is heavier than the shift). */
@@ -59,7 +65,12 @@ function time(iso: string): string {
   return new Date(iso).toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' });
 }
 
-/** One stat cell: mono label, dot-matrix figure, small unit; the label names the cell for assistive tech. */
+/**
+ * One stat of the X / Z report: a compact KPI card (mono label, Doto 26 figure, «сум»), a `group` named by its label (the
+ * report's figures are found that way). A zero is quiet and bare (no «сум» brighter than its «0»), so the figures that
+ * moved stand out; `warn` is amber (a drawer difference). The cards sit inside the report's glass panel, which already
+ * blurs the wallpaper: they add no blur of their own.
+ */
 function Stat({
   label,
   value,
@@ -69,118 +80,175 @@ function Stat({
   label: string;
   value: string;
   unit?: string;
-  tone?: 'ok' | 'err';
+  tone?: 'warn';
 }): JSX.Element {
   return (
-    <div role="group" aria-label={label} className="flex min-w-0 flex-col justify-between gap-2 bg-surface px-5 py-4">
-      <span className="label">{label}</span>
-      <span className="flex items-baseline gap-1.5">
-        <span
-          className={clsx(
-            'num-dot text-[1.7rem] leading-none',
-            tone === 'ok' && 'text-success',
-            tone === 'err' && 'text-danger',
-          )}
-        >
-          {value}
+    <KpiCard
+      compact
+      groupLabel={label}
+      label={label}
+      value={value}
+      unit={value === '0' ? undefined : unit}
+      tone={value === '0' && tone !== 'warn' ? 'quiet' : 'default'}
+      valueClassName={tone === 'warn' ? '!text-warning' : undefined}
+      className="[-webkit-backdrop-filter:none] [backdrop-filter:none]"
+    />
+  );
+}
+
+/**
+ * A group of the report: a mono head on a fading rule (as the hall's zones), then its cards, six to a row on a wide
+ * screen; `foot` is a muted line under them (the methods that took nothing, the bar's voids).
+ */
+function StatGroup({
+  label,
+  aside,
+  foot,
+  children,
+}: {
+  label: string;
+  aside?: React.ReactNode;
+  foot?: React.ReactNode;
+  children?: React.ReactNode;
+}): JSX.Element {
+  return (
+    <div role="group" aria-label={label} className="flex flex-col gap-2.5">
+      <div className="flex h-4 items-center gap-3">
+        <span className="font-mono text-[10.5px] font-semibold uppercase leading-none tracking-[0.2em] text-text">
+          {label}
         </span>
-        {unit && <span className="text-xs text-muted">{unit}</span>}
-      </span>
+        <span aria-hidden="true" className="h-px min-w-6 flex-1 bg-gradient-to-r from-accent/[0.18] to-accent/[0.04]" />
+        {aside && <span className="label tracking-[0.14em]">{aside}</span>}
+      </div>
+      {children && <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-6">{children}</div>}
+      {foot && <p className="text-xs leading-5 text-muted">{foot}</p>}
     </div>
   );
 }
 
-function StatGrid({ children, cols }: { children: React.ReactNode; cols: string }): JSX.Element {
-  return (
-    <div className={clsx('grid gap-px overflow-hidden rounded-xl border border-line bg-line', cols)}>{children}</div>
-  );
+/** «Карта · Payme · Click — 0 сум»: the methods of a group that took nothing, as one muted line instead of cards. */
+function zeroLine(labels: string[]): string | null {
+  return labels.length > 0 ? `${labels.join(' · ')} — 0 ${t('сум')}` : null;
 }
 
+/** The shift's money and the drawer's own moves (cash in, cash out, payouts, API cash) with the count of operations. */
 function TotalsGrid({ x }: { x: ShiftTotals }): JSX.Element {
-  const cells: [string, number][] = [
+  const money: [string, number][] = [
     [t('Пополнения наличными'), x.topUpCash],
     [t('Пополнения картой/онлайн'), x.topUpOther],
     [t('Сеансы'), x.sessions],
     [t('Магазин'), x.shop],
     [t('Возвраты'), x.refunds],
     [t('Бонусы'), x.bonuses],
+  ];
+  const drawer: [string, number][] = [
     [t('Внесения'), x.cashIn ?? 0],
     [t('Изъятия'), x.cashOut ?? 0],
     [t('Выдачи гостям'), x.payouts ?? 0],
     [t('Через API (нал.)'), x.apiCash ?? 0],
   ];
   return (
-    <StatGrid cols="grid-cols-2 md:grid-cols-4 xl:grid-cols-6">
-      {cells.map(([label, v]) => (
-        <Stat key={label} label={label} value={sum(v)} unit={t('сум')} />
-      ))}
-      <Stat label={t('Операций')} value={String(x.count)} />
-    </StatGrid>
+    <>
+      <StatGroup label={t('Итоги смены')}>
+        {money.map(([label, v]) => (
+          <Stat key={label} label={label} value={sum(v)} unit={t('сум')} />
+        ))}
+      </StatGroup>
+      <StatGroup label={t('Касса')}>
+        {drawer.map(([label, v]) => (
+          <Stat key={label} label={label} value={sum(v)} unit={t('сум')} />
+        ))}
+        <Stat label={t('Операций')} value={String(x.count)} />
+      </StatGroup>
+    </>
   );
 }
 
-/** Top-ups by payment method: what the drawer, the terminal and each wallet app should each add up to. */
+/**
+ * Top-ups by payment method: what the drawer, the terminal and each wallet app should each add up to. A method that
+ * took nothing is a name in the muted line under the cards.
+ */
 function MethodsGrid({ byMethod }: { byMethod: NonNullable<ShiftTotals['topUpByMethod']> }): JSX.Element {
+  const all = [
+    ...PAY_METHODS.map((m) => ({ id: m.id, label: t(m.label) })),
+    { id: 'other' as const, label: t('Другое') },
+  ];
+  const moved = all.filter((m) => byMethod[m.id] !== 0);
   return (
-    <StatGrid cols="grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
-      {PAY_METHODS.map((m) => (
-        <Stat key={m.id} label={t(m.label)} value={sum(byMethod[m.id])} unit={t('сум')} />
-      ))}
-      <Stat label={t('Другое')} value={sum(byMethod.other)} unit={t('сум')} />
-    </StatGrid>
+    <StatGroup
+      label={t('Пополнения по способам оплаты')}
+      foot={zeroLine(all.filter((m) => byMethod[m.id] === 0).map((m) => m.label))}
+    >
+      {moved.length > 0 &&
+        moved.map((m) => <Stat key={m.id} label={m.label} value={sum(byMethod[m.id])} unit={t('сум')} />)}
+    </StatGroup>
   );
 }
 
 /**
  * The bar of the shift by method, net of its voids (D-57): the drawer's cash, each terminal and wallet app, what the
- * balances paid, and how many sales were taken back for how much. Nothing from a server or a Z before cash desk part 3.
+ * balances paid, and how many sales were taken back for how much (amber once there is one). Nothing from a server or a
+ * Z before cash desk part 3.
  */
 function ShopGrid({ x }: { x: ShiftTotals }): JSX.Element | null {
   const shop = x.shopByMethod;
   if (!shop) return null;
+  const all = [
+    ...PAY_METHODS.map((m) => ({ id: m.id, label: `${t('Бар')} · ${t(m.label)}`, short: t(m.label) })),
+    { id: 'balance' as const, label: t('Бар · с баланса'), short: t('с баланса') },
+  ];
+  const moved = all.filter((m) => shop[m.id] !== 0);
+  const zero = zeroLine(all.filter((m) => shop[m.id] === 0).map((m) => m.short));
+  const voids = x.shopVoidCount ?? 0;
   return (
-    <div role="group" aria-label={t('Бар по способам оплаты')} className="flex flex-col gap-2">
-      <span className="label">{t('Бар по способам оплаты')}</span>
-      <StatGrid cols="grid-cols-2 md:grid-cols-4 xl:grid-cols-8">
-        {PAY_METHODS.map((m) => (
-          <Stat key={m.id} label={`${t('Бар')} · ${t(m.label)}`} value={sum(shop[m.id])} unit={t('сум')} />
-        ))}
-        <Stat label={t('Бар · с баланса')} value={sum(shop.balance)} unit={t('сум')} />
-        <Stat
-          label={t('Аннулировано: {n}', { n: x.shopVoidCount ?? 0 })}
-          value={sum(x.shopVoids ?? 0)}
-          unit={t('сум')}
-          tone={(x.shopVoidCount ?? 0) > 0 ? 'err' : undefined}
-        />
-      </StatGrid>
-    </div>
+    <StatGroup
+      label={t('Бар по способам оплаты')}
+      foot={
+        <>
+          {zero && (
+            <>
+              {zero}
+              <br />
+            </>
+          )}
+          {/* The voids under the cards (the group stays one row); amber once there is one. */}
+          <span className={clsx(voids > 0 && 'text-warning')}>
+            {t('Аннулировано: {n}', { n: voids })} · {sum(x.shopVoids ?? 0)} {t('сум')}
+          </span>
+        </>
+      }
+    >
+      {moved.length > 0 &&
+        moved.map((m) => <Stat key={m.id} label={m.label} value={sum(shop[m.id])} unit={t('сум')} />)}
+    </StatGroup>
   );
 }
 
 /** Float + the desk's cash top-ups + the bar's cash + cash in − cash out − payouts = what the drawer should hold. */
 function DrawerLine({ opening, x, expected }: { opening: number; x: ShiftTotals; expected: number }): JSX.Element {
-  const rows: [string, string][] = [
-    [t('На начало смены'), uzs(opening)],
-    [t('+ наличные пополнения'), uzs(x.topUpCash - (x.apiCash ?? 0))],
-    ...(x.shopByMethod ? ([[t('+ наличные продажи бара'), uzs(x.shopByMethod.cash)]] as [string, string][]) : []),
-    [t('+ внесения'), uzs(x.cashIn ?? 0)],
-    [t('− изъятия'), uzs(x.cashOut ?? 0)],
-    [t('− выдачи гостям'), uzs(x.payouts ?? 0)],
+  const rows: [string, number][] = [
+    [t('На начало смены'), opening],
+    [t('+ наличные пополнения'), x.topUpCash - (x.apiCash ?? 0)],
+    ...(x.shopByMethod ? ([[t('+ наличные продажи бара'), x.shopByMethod.cash]] as [string, number][]) : []),
+    [t('+ внесения'), x.cashIn ?? 0],
+    [t('− изъятия'), x.cashOut ?? 0],
+    [t('− выдачи гостям'), x.payouts ?? 0],
   ];
   return (
-    <dl
-      aria-label={t('Наличные в кассе')}
-      className="flex flex-col gap-1 rounded-md border border-line bg-bg px-4 py-3 text-sm"
-    >
+    <dl aria-label={t('Наличные в кассе')} className="well flex flex-col gap-1.5 px-3.5 py-3 text-[13px] leading-5">
       {rows.map(([label, v]) => (
         <div key={label} className="flex justify-between gap-3">
-          <dt className="text-muted">{label}</dt>
-          <dd className="tnum">{v}</dd>
+          <dt className="min-w-0 text-dim">{label}</dt>
+          <dd className="tnum shrink-0 whitespace-nowrap font-mono text-[12.5px] text-text">
+            <Sum minor={v} />
+          </dd>
         </div>
       ))}
-      <div className="flex justify-between gap-3 border-t border-line pt-1 font-semibold">
+      <div className="mt-0.5 flex justify-between gap-3 border-t border-accent/[0.08] pt-2 font-semibold text-hi">
         <dt>{t('= ожидается')}</dt>
-        <dd className="tnum">{uzs(expected)}</dd>
+        <dd className="tnum whitespace-nowrap font-mono text-[12.5px]">
+          <Sum minor={expected} />
+        </dd>
       </div>
       {(x.apiCash ?? 0) > 0 && (
         <p className="pt-1 text-xs text-muted">
@@ -191,9 +259,9 @@ function DrawerLine({ opening, x, expected }: { opening: number; x: ShiftTotals;
   );
 }
 
-function diffTone(d: number): 'ok' | 'err' | undefined {
-  if (d === 0) return 'ok';
-  return d > 0 ? 'ok' : 'err';
+/** A difference of the drawer: none reads plainly, any other amber (short or over, the sign says which). */
+function diffTone(d: number): 'warn' | undefined {
+  return d === 0 ? undefined : 'warn';
 }
 
 function signed(minor: number): string {
@@ -405,6 +473,12 @@ export default function ShiftPage({ isOwner = false }: { isOwner?: boolean }): J
     ? t('Смена · {name} с {time}', { name: shift.staffName, time: time(shift.openedAt) })
     : t('Смена');
 
+  const hasFeed = Boolean(feedId && desk.cashDesk2);
+  const hasMoves = Boolean(shift && x && desk.cashDesk2);
+  // The drawer card: close the open shift, or open one; nothing until the first answer.
+  const drawerCard = shift && x ? 'close' : loaded && !shift ? 'open' : null;
+  const twoColumns = hasFeed && (hasMoves || drawerCard !== null);
+
   return (
     <div className="flex flex-col gap-5">
       <PageHeader title={title} />
@@ -416,9 +490,11 @@ export default function ShiftPage({ isOwner = false }: { isOwner?: boolean }): J
           actions={
             <>
               <Button
+                variant="utility"
                 size="sm"
                 onClick={() => print(() => printZ(zReport.shift, zReport.expectedCash, club.clubName, false))}
               >
+                <PrintIcon size={16} />
                 {t('Печать Z')}
               </Button>
               <Button variant="ghost" size="sm" onClick={() => setZReport(null)}>
@@ -426,11 +502,9 @@ export default function ShiftPage({ isOwner = false }: { isOwner?: boolean }): J
               </Button>
             </>
           }
+          bodyClassName="gap-5"
         >
-          <TotalsGrid x={zReport.shift.totals} />
-          {zReport.shift.totals.topUpByMethod && <MethodsGrid byMethod={zReport.shift.totals.topUpByMethod} />}
-          <ShopGrid x={zReport.shift.totals} />
-          <StatGrid cols="grid-cols-1 md:grid-cols-3">
+          <StatGroup label={t('Наличные в кассе')}>
             <Stat label={t('Ожидалось в кассе')} value={sum(zReport.expectedCash)} unit={t('сум')} />
             <Stat label={t('Посчитано')} value={sum(zReport.shift.closingCash ?? 0)} unit={t('сум')} />
             <Stat
@@ -439,128 +513,156 @@ export default function ShiftPage({ isOwner = false }: { isOwner?: boolean }): J
               unit={t('сум')}
               tone={diffTone((zReport.shift.closingCash ?? 0) - zReport.expectedCash)}
             />
-          </StatGrid>
-        </Section>
-      )}
-
-      {loaded && !shift && (
-        <Section title={t('Открыть смену')}>
-          <div className="flex flex-wrap items-end gap-3">
-            <Field label={t('Наличные в кассе на начало')} className="w-64">
-              <MoneyInput value={opening} onChange={setOpening} disabled={busy} />
-            </Field>
-            <Button variant="primary" disabled={busy} onClick={() => void open()}>
-              {t('Открыть смену')}
-            </Button>
-          </div>
+          </StatGroup>
+          <TotalsGrid x={zReport.shift.totals} />
+          {zReport.shift.totals.topUpByMethod && <MethodsGrid byMethod={zReport.shift.totals.topUpByMethod} />}
+          <ShopGrid x={zReport.shift.totals} />
         </Section>
       )}
 
       {shift && x && (
-        <>
-          <Section
-            title={t('X-отчёт')}
-            actions={
-              <Button size="sm" onClick={() => print(() => printX(club.clubName))}>
-                {t('Печать X')}
-              </Button>
-            }
-          >
-            <TotalsGrid x={x} />
-            {x.topUpByMethod && <MethodsGrid byMethod={x.topUpByMethod} />}
-            <ShopGrid x={x} />
-          </Section>
+        <Section
+          title={t('X-отчёт')}
+          actions={
+            <Button variant="utility" size="sm" onClick={() => print(() => printX(club.clubName))}>
+              <PrintIcon size={16} />
+              {t('Печать X')}
+            </Button>
+          }
+          bodyClassName="gap-5"
+        >
+          <TotalsGrid x={x} />
+          {x.topUpByMethod && <MethodsGrid byMethod={x.topUpByMethod} />}
+          <ShopGrid x={x} />
+        </Section>
+      )}
 
-          {desk.cashDesk2 && (
+      {(hasFeed || hasMoves || drawerCard) && (
+        <div
+          className={clsx(
+            'grid items-start gap-4',
+            // Two columns: the feed's panel runs as tall as the drawer column beside it (no hole under a short feed).
+            twoColumns && 'xl:grid-cols-[minmax(0,1fr)_400px] xl:items-stretch',
+            // An older server has no feed: the drawer card keeps its column's width instead of the page's.
+            !hasFeed && 'max-w-[480px]',
+          )}
+        >
+          {hasFeed && (
             <Section
-              title={t('Внесение / изъятие')}
+              title={t('Операции смены')}
+              className={clsx(twoColumns && 'xl:h-full')}
               actions={
-                <>
-                  <Button size="sm" onClick={() => desk.requestCashMove('in')}>
-                    {t('Внесение')}
-                  </Button>
-                  <Button size="sm" onClick={() => desk.requestCashMove('out')}>
-                    {t('Изъятие')}
-                  </Button>
-                </>
+                feedChoices.length > 1 ? (
+                  <select
+                    aria-label={t('Смена')}
+                    className={clsx(inputCls, '!h-9 w-60 !text-[13px]')}
+                    value={feedId}
+                    onChange={(e) => setFeedShift(e.target.value)}
+                  >
+                    {feedChoices.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : undefined
               }
+              bodyClassName="min-h-0 flex-1 gap-3"
             >
-              <OperationsFeed
-                placement="page"
-                shiftId={shift.id}
-                kinds={['cashIn', 'cashOut', 'payout']}
-                showToday={false}
-              />
+              <div role="group" aria-label={t('Фильтр')} className="-ml-3 flex flex-wrap gap-1">
+                {FEED_FILTERS.map((f) => (
+                  <Chip key={f.id} pressed={feedFilter === f.id} onClick={() => setFeedFilter(f.id)}>
+                    {t(f.label)}
+                  </Chip>
+                ))}
+              </div>
+              {/* Beside the drawer column the feed fills what is left of its panel (and scrolls); alone it is capped. */}
+              <div className={clsx('flex min-h-0 flex-1 flex-col', twoColumns && 'xl:relative xl:min-h-[24rem]')}>
+                <OperationsFeed
+                  placement="page"
+                  shiftId={feedId}
+                  kinds={feedKinds}
+                  className={clsx('max-h-[32rem]', twoColumns && 'xl:absolute xl:inset-0 xl:max-h-none')}
+                />
+              </div>
             </Section>
           )}
 
-          <Section title={t('Закрыть смену')}>
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
-              <StatGrid cols="grid-cols-1 md:grid-cols-3">
-                <Stat label={t('На начало смены')} value={sum(shift.openingCash)} unit={t('сум')} />
-                <Stat label={t('Ожидается в кассе')} value={sum(expected)} unit={t('сум')} />
-                <Stat label={t('Расхождение')} value={signed(diff)} unit={t('сум')} tone={diffTone(diff)} />
-              </StatGrid>
-              <DrawerLine opening={shift.openingCash} x={x} expected={expected} />
-            </div>
-            {debts.length > 0 && (
-              <p className="rounded-md bg-warning/10 px-3 py-2 text-sm text-warning">
-                {t(
-                  'Не оплачено долгов: {n} на {sum}. Смену можно закрыть — они останутся в «Расчёт с гостями и долги».',
-                  {
-                    n: debts.length,
-                    sum: moneyExact(debtTotal),
-                  },
-                )}
-              </p>
-            )}
-            <div className="flex flex-wrap items-end gap-3">
-              <Field label={t('Посчитано в кассе')} className="w-64">
-                <MoneyInput value={counted} onChange={setCounted} disabled={busy} />
-              </Field>
-              <Button variant="primary" disabled={busy} onClick={() => void close()}>
-                {t('Закрыть смену')}
-              </Button>
-            </div>
-          </Section>
-        </>
-      )}
+          {(hasMoves || drawerCard) && (
+            <div className="flex min-w-0 flex-col gap-4">
+              {drawerCard === 'close' && shift && x && (
+                <Section title={t('Закрыть смену')} variant="solid" className="edge-top">
+                  <div className="grid grid-cols-2 gap-2">
+                    <Well
+                      groupLabel={t('На начало смены')}
+                      label={t('На начало смены')}
+                      value={sum(shift.openingCash)}
+                      unit={t('сум')}
+                    />
+                    <Well
+                      groupLabel={t('Ожидается в кассе')}
+                      label={t('Ожидается в кассе')}
+                      value={sum(expected)}
+                      unit={t('сум')}
+                    />
+                  </div>
+                  <DrawerLine opening={shift.openingCash} x={x} expected={expected} />
+                  {debts.length > 0 && (
+                    <Note tone="warn">
+                      {t(
+                        'Не оплачено долгов: {n} на {sum}. Смену можно закрыть — они останутся в «Расчёт с гостями и долги».',
+                        {
+                          n: debts.length,
+                          sum: moneyExact(debtTotal),
+                        },
+                      )}
+                    </Note>
+                  )}
+                  <Field label={t('Посчитано в кассе')}>
+                    <MoneyInput value={counted} onChange={setCounted} disabled={busy} />
+                  </Field>
+                  <Well
+                    groupLabel={t('Расхождение')}
+                    label={t('Расхождение')}
+                    value={signed(diff)}
+                    unit={t('сум')}
+                    size={26}
+                    tone={diffTone(diff)}
+                  />
+                  <Button variant="primary" size="lg" className="w-full" disabled={busy} onClick={() => void close()}>
+                    {t('Закрыть смену')}
+                  </Button>
+                </Section>
+              )}
 
-      {feedId && desk.cashDesk2 && (
-        <Section
-          title={t('Операции смены')}
-          actions={
-            feedChoices.length > 1 ? (
-              <select
-                aria-label={t('Смена')}
-                className={clsx(inputCls, 'h-8 w-56 text-xs')}
-                value={feedId}
-                onChange={(e) => setFeedShift(e.target.value)}
-              >
-                {feedChoices.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
-            ) : undefined
-          }
-        >
-          <div role="group" aria-label={t('Фильтр')} className="flex flex-wrap gap-1.5">
-            {FEED_FILTERS.map((f) => (
-              <Button
-                key={f.id}
-                size="sm"
-                aria-pressed={feedFilter === f.id}
-                className={clsx(feedFilter === f.id && 'choice-on')}
-                onClick={() => setFeedFilter(f.id)}
-              >
-                {t(f.label)}
-              </Button>
-            ))}
-          </div>
-          <OperationsFeed placement="page" shiftId={feedId} kinds={feedKinds} className="max-h-[32rem]" />
-        </Section>
+              {drawerCard === 'open' && (
+                <Section title={t('Открыть смену')} variant="solid" className="edge-top">
+                  <Field label={t('Наличные в кассе на начало')}>
+                    <MoneyInput value={opening} onChange={setOpening} disabled={busy} />
+                  </Field>
+                  <Button variant="primary" size="lg" className="w-full" disabled={busy} onClick={() => void open()}>
+                    {t('Открыть смену')}
+                  </Button>
+                </Section>
+              )}
+
+              {hasMoves && shift && (
+                <Section title={t('Внесение / изъятие')} variant="side" bodyClassName="gap-3">
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button onClick={() => desk.requestCashMove('in')}>{t('Внесение')}</Button>
+                    <Button onClick={() => desk.requestCashMove('out')}>{t('Изъятие')}</Button>
+                  </div>
+                  <OperationsFeed
+                    placement="page"
+                    shiftId={shift.id}
+                    kinds={['cashIn', 'cashOut', 'payout']}
+                    className="max-h-[20rem]"
+                  />
+                </Section>
+              )}
+            </div>
+          )}
+        </div>
       )}
 
       <Section title={t('История смен')} bodyClassName="p-2">
@@ -569,17 +671,25 @@ export default function ShiftPage({ isOwner = false }: { isOwner?: boolean }): J
           rowKey={(s) => s.id}
           empty={t('Закрытых смен пока нет')}
           columns={[
-            { key: 'who', title: t('Кассир'), render: (s) => s.staffName },
-            { key: 'open', title: t('Открыта'), render: (s) => <span className="tnum">{dateTime(s.openedAt)}</span> },
+            { key: 'who', title: t('Кассир'), render: (s) => <span className="font-medium">{s.staffName}</span> },
+            {
+              key: 'open',
+              title: t('Открыта'),
+              render: (s) => <span className="tnum font-mono text-xs text-dim">{dateTime(s.openedAt)}</span>,
+            },
             {
               key: 'close',
               title: t('Закрыта'),
-              render: (s) => <span className="tnum">{dateTime(s.closedAt)}</span>,
+              render: (s) => <span className="tnum font-mono text-xs text-dim">{dateTime(s.closedAt)}</span>,
             },
-            { key: 'closer', title: t('Закрыл'), render: (s) => s.closedBy ?? '—' },
-            { key: 'sessions', title: t('Сеансы'), num: true, render: (s) => uzs(s.totals?.sessions) },
-            { key: 'shop', title: t('Магазин'), num: true, render: (s) => uzs(s.totals?.shop) },
-            { key: 'cash', title: t('Наличные в кассе'), num: true, render: (s) => uzs(s.closingCash) },
+            {
+              key: 'closer',
+              title: t('Закрыл'),
+              render: (s) => <span className="text-dim">{s.closedBy ?? '—'}</span>,
+            },
+            { key: 'sessions', title: t('Сеансы'), num: true, render: (s) => <Sum minor={s.totals?.sessions} /> },
+            { key: 'shop', title: t('Магазин'), num: true, render: (s) => <Sum minor={s.totals?.shop} /> },
+            { key: 'cash', title: t('Наличные в кассе'), num: true, render: (s) => <Sum minor={s.closingCash} /> },
             {
               key: 'diff',
               title: t('Расхождение'),
@@ -589,8 +699,8 @@ export default function ShiftPage({ isOwner = false }: { isOwner?: boolean }): J
                 if (s.closingCash === null || want === null) return '—';
                 const d = s.closingCash - want;
                 return (
-                  <span className={d < 0 ? 'text-danger' : d > 0 ? 'text-success' : 'text-muted'}>
-                    {`${signed(d)} ${t('сум')}`}
+                  <span className={clsx('whitespace-nowrap', d !== 0 ? 'font-semibold text-warning' : 'text-muted')}>
+                    {signed(d)} <span className="font-sans font-medium text-muted">{t('сум')}</span>
                   </span>
                 );
               },
@@ -605,10 +715,10 @@ export default function ShiftPage({ isOwner = false }: { isOwner?: boolean }): J
                     type="button"
                     aria-label={t('Печать копии Z')}
                     title={t('Печать копии Z')}
-                    className="focus-ring h-7 w-7 rounded text-muted hover:bg-white/[0.06] hover:text-text"
+                    className="focus-ring inline-flex h-7 w-7 items-center justify-center rounded-sm text-muted hover:bg-text/[0.06] hover:text-text"
                     onClick={() => print(() => printZ(s, expectedOfClosed(s), club.clubName, true))}
                   >
-                    ⎙
+                    <PrintIcon size={15} />
                   </button>
                 ) : null,
             },

@@ -29,6 +29,7 @@ import {
   db,
   endedView,
   errors,
+  findGame,
   findPc,
   findSession,
   findTariff,
@@ -95,6 +96,45 @@ interface SeatView {
   session: Session | null;
   user: { id: string; displayName: string; role: string; balance: Money } | null;
   signedIn: boolean | null;
+  game: SeatGame | null;
+}
+
+/** The game on a busy seat (D-71): the catalog title and art; an empty cover is null. */
+interface SeatGame {
+  id: string;
+  title: string;
+  coverUrl: string | null;
+  heroUrl: string | null;
+}
+
+function seatGame(id: string | undefined): SeatGame | null {
+  const g = id ? findGame(id) : undefined;
+  return g ? { id: g.id, title: g.title, coverUrl: g.coverUrl || null, heroUrl: g.heroUrl || null } : null;
+}
+
+/**
+ * What the seat shows as being played (D-71), as the server derives it: only on a busy or locked PC, the newest game its
+ * Agent reports in the last heartbeat for this very session (its id, or the PC's own id of an offline session).
+ *
+ * Mock only: the seeded demo hall has no Agent, so its desk sessions get a demo game picked from the catalog by the
+ * session id (stable across polls) once their player has signed in (nobody plays before that: «ждёт входа»), and the
+ * dev desk looks like the F design. The real server never invents one; an E2E test that seats a seeded (agentless) PC,
+ * signs its player in and expects no game would see this demo game.
+ */
+function gameOf(pc: PcRecord, rec: SessionRecord | undefined): SeatGame | null {
+  if (!rec || (pc.status !== 'busy' && pc.status !== 'locked')) return null;
+  if (!pc.registered) {
+    if (!signedInOn(rec.userId, pc.id)) return null;
+    const art = db.games.filter((g) => g.coverUrl.includes('/mock-art/'));
+    if (art.length === 0) return null;
+    let hash = 0;
+    for (const ch of rec.id) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+    return seatGame(art[hash % art.length]?.id);
+  }
+  if (!pc.reportedSessionId || (pc.reportedSessionId !== rec.id && pc.reportedSessionId !== rec.clientSessionId))
+    return null;
+  const newest = [...(pc.runningGames ?? [])].sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))[0];
+  return seatGame(newest?.gameId);
 }
 
 function seatOf(pc: PcRecord): SeatView {
@@ -107,6 +147,7 @@ function seatOf(pc: PcRecord): SeatView {
     user: user ? { id: user.id, displayName: user.displayName, role: user.role, balance: user.balance } : null,
     // A desk session nobody has signed in to yet: its clock already runs (D-49).
     signedIn: rec ? signedInOn(rec.userId, pc.id) : null,
+    game: gameOf(pc, rec),
   };
 }
 

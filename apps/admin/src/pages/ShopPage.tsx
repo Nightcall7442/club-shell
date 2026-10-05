@@ -9,13 +9,17 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import type { Product } from '@clubshell/contracts';
 import { clubApi } from '@/api';
+import { GameArt } from '@/art';
 import { describe, reasonOf } from '@/errors';
 import { t } from '@/i18n';
-import { money } from '@/format';
+import { money, moneyParts } from '@/format';
+import { ChevronDownIcon } from '@/icons';
 import { PRODUCT_CATEGORY_LABEL } from '@/labels';
 import { useClubSettings } from '@/settings';
 import {
+  Badge,
   Button,
+  Chip,
   Field,
   Input,
   MoneyInput,
@@ -25,6 +29,7 @@ import {
   SaveBar,
   Section,
   Sheet,
+  Sum,
   Table,
   Toggle,
   inputCls,
@@ -42,6 +47,13 @@ const FILTERS: { id: Filter; label: string }[] = [
 const CATEGORIES = ['drink', 'food', 'snack', 'service', 'merch', 'time'] as const;
 
 const isLow = (p: Product, lowAt: number): boolean => p.stockQty != null && p.stockQty <= lowAt;
+
+/** The rows each filter keeps. */
+const FILTER_KEEPS: Record<Filter, (p: Product, lowAt: number) => boolean> = {
+  all: () => true,
+  low: (p, lowAt) => isLow(p, lowAt) && p.inStock,
+  out: (p) => !p.inStock || p.stockQty === 0,
+};
 
 /** The keys of a save that changed, and with a new quantity the one the panel read (D-54). */
 function changesOf(
@@ -118,25 +130,46 @@ function ProductPanel({
   const changed = Object.keys(changes).length > 0;
 
   return (
-    <div className="flex flex-col gap-5">
-      <Section
-        title={product.title}
-        actions={
-          owner ? (
-            <Button variant="ghost" size="sm" disabled={busy} onClick={() => setArchiving(true)}>
-              {t('В архив')}
-            </Button>
-          ) : undefined
-        }
-      >
-        <Field label={t('Цена')}>
-          <MoneyInput value={price} onChange={setPrice} />
-        </Field>
-        <Field label={t('Остаток')}>
-          <NumberInput value={qty} min={0} suffix={t('шт')} disabled={!tracked} onChange={setQty} />
-        </Field>
-        <Toggle label={t('Не вести учёт')} checked={!tracked} onChange={(v) => setTracked(!v)} />
-        {owner && <Toggle label={t('В наличии')} checked={inStock} onChange={setInStock} />}
+    // The focused product, solid: its picture behind the title, the edit form, then goods receipt. Still a `<section>`
+    // whose heading is the product's title (pages and tests find it that way).
+    <section className="panel-solid flex min-w-0 flex-col overflow-hidden">
+      <div className="relative h-28 shrink-0">
+        <GameArt
+          src={product.imageUrl}
+          variant="product"
+          edge
+          fallback={<span className="hud-grid absolute inset-0" />}
+        />
+        <div className="relative flex h-full flex-col justify-between gap-2 px-4 pb-3 pt-3.5">
+          <div className="flex min-h-7 items-start justify-between gap-3">
+            <span className="label-sm pt-1 text-text/80">
+              {t(PRODUCT_CATEGORY_LABEL[product.category] ?? product.category)} · {money(product.price)}
+            </span>
+            {owner && (
+              <Button variant="tertiary" size="xs" disabled={busy} onClick={() => setArchiving(true)}>
+                {t('В архив')}
+              </Button>
+            )}
+          </div>
+          <h2 className="line-clamp-2 break-words font-display text-[22px] font-medium leading-7 tracking-[-0.01em] text-white [text-shadow:0_2px_12px_rgb(0_0_0/0.6)]">
+            {product.title}
+          </h2>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-4 px-4 pb-5 pt-4">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={t('Цена')}>
+            <MoneyInput compact value={price} onChange={setPrice} />
+          </Field>
+          <Field label={t('Остаток')}>
+            <NumberInput value={qty} min={0} suffix={t('шт')} disabled={!tracked} onChange={setQty} />
+          </Field>
+        </div>
+        <div className="flex flex-col gap-3">
+          <Toggle label={t('Не вести учёт')} checked={!tracked} onChange={(v) => setTracked(!v)} />
+          {owner && <Toggle label={t('В наличии')} checked={inStock} onChange={setInStock} />}
+        </div>
         <Note note={note} />
         <Button
           variant="primary"
@@ -146,62 +179,68 @@ function ProductPanel({
         >
           {t('Сохранить')}
         </Button>
-      </Section>
 
-      <Section title={t('Приход товара')}>
-        <div className="flex items-end gap-2">
-          <Field label={t('Количество')} className="flex-1">
-            <NumberInput value={receive} min={1} suffix={t('шт')} onChange={setReceive} />
-          </Field>
-          <Button
-            disabled={busy || receive < 1}
-            onClick={() =>
-              void run(
-                async () => {
-                  await clubApi.receiveProduct(product.id, Math.round(receive));
-                  setReceive(0);
-                },
-                t('Принято {n} шт', { n: Math.round(receive) }),
-              )
-            }
-          >
-            {t('Принять')}
-          </Button>
+        <div className="flex flex-col gap-3 border-t border-accent/[0.08] pt-4">
+          <span className="label text-text">{t('Приход товара')}</span>
+          <div className="flex items-end gap-2">
+            <Field label={t('Количество')} className="flex-1">
+              <NumberInput value={receive} min={1} suffix={t('шт')} onChange={setReceive} />
+            </Field>
+            <Button
+              disabled={busy || receive < 1}
+              onClick={() =>
+                void run(
+                  async () => {
+                    await clubApi.receiveProduct(product.id, Math.round(receive));
+                    setReceive(0);
+                  },
+                  t('Принято {n} шт', { n: Math.round(receive) }),
+                )
+              }
+            >
+              {t('Принять')}
+            </Button>
+          </div>
         </div>
-      </Section>
+      </div>
 
       {archiving && (
-        <Sheet title={t('В архив · {title}', { title: product.title })} onClose={() => setArchiving(false)}>
-          <p className="text-sm">
+        <Sheet
+          title={t('В архив · {title}', { title: product.title })}
+          caption={t('Магазин и склад')}
+          onClose={() => setArchiving(false)}
+          footer={
+            <div className="ml-auto flex gap-2">
+              <Button variant="ghost" autoFocus onClick={() => setArchiving(false)}>
+                {t('Отмена')}
+              </Button>
+              <Button
+                variant="danger"
+                disabled={busy}
+                onClick={() => {
+                  setBusy(true);
+                  clubApi
+                    .archiveProduct(product.id)
+                    .then(() => {
+                      setArchiving(false);
+                      onArchived();
+                    })
+                    .catch((e: unknown) => setNote({ text: describe(e), tone: 'err' }))
+                    .finally(() => setBusy(false));
+                }}
+              >
+                {t('В архив')}
+              </Button>
+            </div>
+          }
+        >
+          <p className="text-sm leading-6 text-soft">
             {t('Товар пропадёт из бара и из списка. Прошлые продажи сохранят его название и цену.')}
           </p>
           <Note note={note?.tone === 'err' ? note : null} />
-          <div className="flex justify-end gap-2 border-t border-line pt-4">
-            <Button variant="ghost" autoFocus onClick={() => setArchiving(false)}>
-              {t('Отмена')}
-            </Button>
-            <Button
-              variant="danger"
-              className="border border-danger/50"
-              disabled={busy}
-              onClick={() => {
-                setBusy(true);
-                clubApi
-                  .archiveProduct(product.id)
-                  .then(() => {
-                    setArchiving(false);
-                    onArchived();
-                  })
-                  .catch((e: unknown) => setNote({ text: describe(e), tone: 'err' }))
-                  .finally(() => setBusy(false));
-              }}
-            >
-              {t('В архив')}
-            </Button>
-          </div>
         </Sheet>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -242,7 +281,21 @@ function NewProductSheet({
     }
   };
   return (
-    <Sheet title={t('Новый товар')} onClose={onClose}>
+    <Sheet
+      title={t('Новый товар')}
+      caption={t('Магазин и склад')}
+      onClose={onClose}
+      footer={
+        <div className="ml-auto flex gap-2">
+          <Button variant="ghost" onClick={onClose}>
+            {t('Отмена')}
+          </Button>
+          <Button variant="primary" disabled={!ready} onClick={() => void create()}>
+            {busy ? '…' : t('Добавить')}
+          </Button>
+        </div>
+      }
+    >
       <div
         className="flex flex-col gap-4"
         onKeyDown={(e) => {
@@ -255,47 +308,63 @@ function NewProductSheet({
         <Field label={t('Название')}>
           <Input value={title} maxLength={80} autoFocus onChange={(e) => setTitle(e.target.value)} />
         </Field>
-        <Field label={t('Категория')}>
-          <select className={inputCls} value={category} onChange={(e) => setCategory(e.target.value)}>
-            {CATEGORIES.map((c) => (
-              <option key={c} value={c}>
-                {t(PRODUCT_CATEGORY_LABEL[c] ?? c)}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label={t('Цена')}>
-          <MoneyInput value={price} onChange={setPrice} />
-        </Field>
-        <Toggle label={t('Не вести учёт')} checked={!tracked} onChange={(v) => setTracked(!v)} />
-        {tracked && (
-          <Field label={t('Остаток')}>
-            <NumberInput value={qty} min={0} suffix={t('шт')} onChange={setQty} />
+        <div className="grid grid-cols-2 gap-4">
+          <Field label={t('Категория')}>
+            <span className="relative block">
+              <select
+                className={clsx(inputCls, 'appearance-none pr-10')}
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+              >
+                {CATEGORIES.map((c) => (
+                  <option key={c} value={c}>
+                    {t(PRODUCT_CATEGORY_LABEL[c] ?? c)}
+                  </option>
+                ))}
+              </select>
+              <ChevronDownIcon
+                size={16}
+                className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-muted"
+              />
+            </span>
           </Field>
-        )}
-        <Note note={error ? { text: error, tone: 'err' } : null} />
-        <div className="flex justify-end gap-2 border-t border-line pt-4">
-          <Button variant="ghost" onClick={onClose}>
-            {t('Отмена')}
-          </Button>
-          <Button variant="primary" disabled={!ready} onClick={() => void create()}>
-            {busy ? '…' : t('Добавить')}
-          </Button>
+          <Field label={t('Цена')}>
+            <MoneyInput compact value={price} onChange={setPrice} />
+          </Field>
         </div>
+        <div className="grid min-h-[72px] grid-cols-2 items-end gap-4">
+          <div className="flex h-11 items-center">
+            <Toggle label={t('Не вести учёт')} checked={!tracked} onChange={(v) => setTracked(!v)} />
+          </div>
+          {tracked && (
+            <Field label={t('Остаток')}>
+              <NumberInput value={qty} min={0} suffix={t('шт')} onChange={setQty} />
+            </Field>
+          )}
+        </div>
+        <Note note={error ? { text: error, tone: 'err' } : null} />
       </div>
     </Sheet>
   );
 }
 
-/** Product photo; the first letter of the name when there is none or it fails to load. */
+/** Product photo, 40 px; the first letter of the name when there is none or it fails to load. */
 function ProductThumb({ url, title }: { url: string | null | undefined; title: string }): JSX.Element {
   const [failed, setFailed] = useState(false);
   return (
-    <span className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-md border border-line bg-bg">
+    <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-chip border border-accent/[0.12] bg-art">
       {url && !failed ? (
-        <img src={url} alt="" loading="lazy" onError={() => setFailed(true)} className="h-full w-full object-cover" />
+        <img
+          src={url}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          referrerPolicy="no-referrer"
+          onError={() => setFailed(true)}
+          className="h-full w-full object-cover"
+        />
       ) : (
-        <span aria-hidden="true" className="font-display text-sm text-muted">
+        <span aria-hidden="true" className="font-display text-sm font-medium text-muted">
           {title.trim().charAt(0).toUpperCase()}
         </span>
       )}
@@ -326,13 +395,8 @@ export default function ShopPage({ isOwner = false }: { isOwner?: boolean }): JS
     void load();
   }, [load]);
 
-  const rows = useMemo(
-    () =>
-      items.filter((p) =>
-        filter === 'low' ? isLow(p, lowAt) && p.inStock : filter === 'out' ? !p.inStock || p.stockQty === 0 : true,
-      ),
-    [items, filter, lowAt],
-  );
+  const rows = useMemo(() => items.filter((p) => FILTER_KEEPS[filter](p, lowAt)), [items, filter, lowAt]);
+  const countOf = (f: Filter): number => items.filter((p) => FILTER_KEEPS[f](p, lowAt)).length;
   const product = items.find((p) => p.id === selected) ?? null;
 
   const toggleStock = async (p: Product, v: boolean): Promise<void> => {
@@ -346,7 +410,7 @@ export default function ShopPage({ isOwner = false }: { isOwner?: boolean }): JS
   };
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-4">
       <PageHeader
         title={t('Магазин и склад')}
         actions={
@@ -361,21 +425,29 @@ export default function ShopPage({ isOwner = false }: { isOwner?: boolean }): JS
       {s.error && <Note note={{ text: s.error, tone: 'err' }} />}
       <Note note={rowNote} />
 
-      <div className={clsx('grid grid-cols-1 items-start gap-5', product && 'lg:grid-cols-[minmax(0,1fr)_24rem]')}>
-        <div className="flex flex-col gap-5">
+      <div className={clsx('grid grid-cols-1 items-start gap-4', product && 'lg:grid-cols-[minmax(0,1fr)_400px]')}>
+        <div className="flex min-w-0 flex-col gap-4">
           <Section
             title={t('Товары')}
-            actions={FILTERS.map((f) => (
-              <Button
-                key={f.id}
-                size="sm"
-                className={clsx(filter === f.id && 'choice-on')}
-                onClick={() => setFilter(f.id)}
-              >
-                {t(f.label)}
-              </Button>
-            ))}
-            bodyClassName="p-2"
+            actions={
+              <div className="-mr-2 flex flex-wrap gap-1">
+                {FILTERS.map((f) => {
+                  const n = countOf(f.id);
+                  return (
+                    <Chip
+                      key={f.id}
+                      pressed={filter === f.id}
+                      tone={f.id === 'low' && n > 0 ? 'attention' : 'default'}
+                      count={n}
+                      onClick={() => setFilter(f.id)}
+                    >
+                      {t(f.label)}
+                    </Chip>
+                  );
+                })}
+              </div>
+            }
+            bodyClassName="px-2 pb-2 pt-1"
           >
             <Table
               rows={rows}
@@ -390,26 +462,32 @@ export default function ShopPage({ isOwner = false }: { isOwner?: boolean }): JS
                   width: '4rem',
                   render: (p) => <ProductThumb url={p.imageUrl} title={p.title} />,
                 },
-                { key: 'title', title: t('Название'), render: (p) => <span className="font-medium">{p.title}</span> },
+                {
+                  key: 'title',
+                  title: t('Название'),
+                  render: (p) => <span className="font-medium text-text">{p.title}</span>,
+                },
                 {
                   key: 'cat',
                   title: t('Категория'),
                   render: (p) => (
-                    <span className="text-muted">{t(PRODUCT_CATEGORY_LABEL[p.category] ?? p.category)}</span>
+                    <span className="text-dim">{t(PRODUCT_CATEGORY_LABEL[p.category] ?? p.category)}</span>
                   ),
                 },
-                { key: 'price', title: t('Цена'), num: true, render: (p) => money(p.price) },
+                { key: 'price', title: t('Цена'), num: true, render: (p) => <Sum minor={p.price.amount} /> },
                 {
                   key: 'qty',
                   title: t('Остаток'),
                   num: true,
                   render: (p) =>
                     p.stockQty == null ? (
-                      <span className="text-muted">{t('не учитывается')}</span>
+                      <span className="font-sans text-muted">{t('не учитывается')}</span>
                     ) : p.stockQty === 0 ? (
-                      <span className="text-danger">{t('нет на складе')}</span>
+                      <Badge tone="danger">{t('нет на складе')}</Badge>
+                    ) : isLow(p, lowAt) ? (
+                      <Badge tone="warn">{t('осталось {n}', { n: p.stockQty })}</Badge>
                     ) : (
-                      <span className={clsx(isLow(p, lowAt) && 'text-danger')}>{p.stockQty}</span>
+                      <span>{p.stockQty}</span>
                     ),
                 },
                 // The switch is the owner's (the server refuses a cashier's): a cashier sees no switch.

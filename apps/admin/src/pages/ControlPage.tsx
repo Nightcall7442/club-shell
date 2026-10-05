@@ -17,11 +17,11 @@ import {
 import { describe } from '@/errors';
 import { dateLocale, t } from '@/i18n';
 import { money } from '@/format';
+import { CheckIcon } from '@/icons';
 import { REASON_LABEL } from '@/labels';
 import { useClubSettings } from '@/settings';
-import { Field, MoneyInput, Note, NumberInput, PageHeader, SaveBar, Section, Table } from '@/ui';
-
-const PERIODS = [7, 30, 90] as const;
+import { Badge, Button, Field, MoneyInput, Note, NumberInput, PageHeader, SaveBar, Section, Sum, Table } from '@/ui';
+import { OwnerPage, PeriodChips } from './ownerKit';
 
 const uzs = (minor: number): string => money({ amount: minor, currency: 'UZS' });
 
@@ -46,9 +46,13 @@ const ACTION_LABEL: Record<AuditAction, string> = {
   payout: 'Выдача гостю',
 };
 
+/**
+ * A signal is something for the owner to look into, so it is amber (F keeps red for a refusal, a blocked PC and ending
+ * a session): serious glows, worth attention is a plain amber dot, for info is muted.
+ */
 const SEVERITY_DOT: Record<Severity, string> = {
-  high: 'bg-danger',
-  medium: 'bg-warning',
+  high: 'bg-warning shadow-[0_0_0_3px_rgb(var(--c-warning)/0.14),0_0_10px_rgb(var(--c-warning)/0.5)]',
+  medium: 'bg-warning/60',
   low: 'bg-muted',
 };
 
@@ -130,13 +134,22 @@ function journalDetail(e: AuditEntry): string {
 
 function Dot({ severity }: { severity: Severity }): JSX.Element {
   return (
-    <span aria-hidden="true" className={clsx('inline-block h-2 w-2 shrink-0 rounded-full', SEVERITY_DOT[severity])} />
+    <span
+      aria-hidden="true"
+      className={clsx('inline-block h-[7px] w-[7px] shrink-0 rounded-full', SEVERITY_DOT[severity])}
+    />
   );
 }
 
 function FlagCounts({ flags }: { flags: Record<Severity, number> }): JSX.Element {
   const total = flags.high + flags.medium + flags.low;
-  if (total === 0) return <span className="text-success">{t('Чисто')}</span>;
+  if (total === 0)
+    return (
+      <span className="inline-flex items-center gap-1.5 font-sans text-[13px] text-dim">
+        <CheckIcon size={14} strokeWidth={2} className="text-accent" />
+        {t('Чисто')}
+      </span>
+    );
   return (
     <span className="flex items-center justify-end gap-3">
       {(['high', 'medium', 'low'] as const).map((s) =>
@@ -159,7 +172,7 @@ function Thresholds(): JSX.Element | null {
   return (
     <>
       <Section title={t('Пороги')}>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2 xl:grid-cols-3">
           <Field label={t('Раннее закрытие — в первые, мин')}>
             <NumberInput value={c.earlyEndMinutes} min={1} max={120} onChange={(v) => set({ earlyEndMinutes: v })} />
           </Field>
@@ -173,10 +186,10 @@ function Thresholds(): JSX.Element | null {
             <NumberInput value={c.sameClientTopups} min={2} max={50} onChange={(v) => set({ sameClientTopups: v })} />
           </Field>
           <Field label={t('Недостача в кассе — тревога от')}>
-            <MoneyInput value={c.shortfallFrom} onChange={(v) => set({ shortfallFrom: v })} />
+            <MoneyInput compact value={c.shortfallFrom} onChange={(v) => set({ shortfallFrom: v })} />
           </Field>
         </div>
-        <p className="mt-4 text-sm text-muted">
+        <p className="text-[12.5px] text-dim">
           {t('Серьёзные сигналы сразу уходят на вебхуки, подписанные на событие suspicious.')}
         </p>
       </Section>
@@ -215,23 +228,11 @@ export default function ControlPage(): JSX.Element {
   const who = staffId ? data?.staff.find((s) => s.staffId === staffId)?.staffName : null;
 
   return (
-    <div className="flex flex-col gap-5">
+    <OwnerPage>
       <PageHeader
         title={t('Контроль кассиров')}
-        actions={PERIODS.map((p) => (
-          <button
-            key={p}
-            type="button"
-            aria-pressed={days === p}
-            onClick={() => setDays(p)}
-            className={clsx(
-              'focus-ring choice h-10 rounded-md px-3.5 text-sm font-semibold transition-colors',
-              days === p && 'choice-on',
-            )}
-          >
-            {t('{n} дней', { n: p })}
-          </button>
-        ))}
+        caption={t('Бизнес')}
+        actions={<PeriodChips value={days} onChange={setDays} />}
       />
       <Note note={note} />
 
@@ -248,18 +249,20 @@ export default function ControlPage(): JSX.Element {
                 {
                   key: 'who',
                   title: t('Сотрудник'),
-                  render: (s) => <span className="font-medium">{s.staffName}</span>,
+                  render: (s) => <span className="font-medium text-hi">{s.staffName}</span>,
                 },
                 { key: 'ops', title: t('Операций'), num: true, render: (s) => s.operations },
-                { key: 'topups', title: t('Пополнения'), num: true, render: (s) => uzs(s.topUps) },
-                { key: 'refunds', title: t('Возвраты'), num: true, render: (s) => uzs(s.refunds) },
+                { key: 'topups', title: t('Пополнения'), num: true, render: (s) => <Sum minor={s.topUps} /> },
+                { key: 'refunds', title: t('Возвраты'), num: true, render: (s) => <Sum minor={s.refunds} /> },
                 { key: 'early', title: t('Ранние закрытия'), num: true, render: (s) => s.earlyEnds },
                 { key: 'disc', title: t('Скидки'), num: true, render: (s) => s.discounts },
                 {
                   key: 'short',
                   title: t('Недостача'),
                   num: true,
-                  render: (s) => <span className={clsx(s.shortfall > 0 && 'text-danger')}>{uzs(s.shortfall)}</span>,
+                  render: (s) => (
+                    <Sum minor={s.shortfall} className={clsx(s.shortfall > 0 && 'font-semibold text-warning')} />
+                  ),
                 },
                 { key: 'flags', title: t('Сигналы'), num: true, render: (s) => <FlagCounts flags={s.flags} /> },
               ]}
@@ -270,35 +273,34 @@ export default function ControlPage(): JSX.Element {
             title={who ? t('Сигналы · {name}', { name: who }) : t('Сигналы')}
             actions={
               staffId ? (
-                <button
-                  type="button"
-                  className="focus-ring rounded px-2 py-1 text-sm text-muted hover:text-text"
-                  onClick={() => setStaffId(null)}
-                >
+                <Button variant="ghost" size="sm" onClick={() => setStaffId(null)}>
                   {t('Все сотрудники')}
-                </button>
+                </Button>
               ) : undefined
             }
           >
             {data.flags.length === 0 ? (
-              <p className="flex items-center gap-2 text-sm text-success">
-                <span aria-hidden="true" className="h-2 w-2 rounded-full bg-success" />
+              <p className="flex items-center gap-2 text-[13px] text-dim">
+                <CheckIcon size={15} strokeWidth={2} className="text-accent" />
                 {t('Подозрительного не найдено')}
               </p>
             ) : (
-              <ul className="flex flex-col divide-y divide-line/60">
+              <ul className="flex flex-col divide-y divide-accent/[0.07]">
                 {data.flags.map((f) => (
                   <li key={f.id} className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
-                    <span className="mt-1.5">
+                    <span className="mt-[7px]">
                       <Dot severity={f.severity} />
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm">{flagText(f)}</p>
-                      <p className="mt-0.5 text-xs text-muted">
-                        <span className="tnum">{dateTime(f.at)}</span> · {f.staffName} · {t(SEVERITY_LABEL[f.severity])}
+                      <p className="text-[13px] font-medium text-text">{flagText(f)}</p>
+                      <p className="mt-1 text-xs text-muted">
+                        <span className="tnum font-mono text-[11px]">{dateTime(f.at)}</span> · {f.staffName} ·{' '}
+                        {t(SEVERITY_LABEL[f.severity])}
                       </p>
                     </div>
-                    {f.amount > 0 && <span className="tnum shrink-0 text-sm">{uzs(f.amount)}</span>}
+                    {f.amount > 0 && (
+                      <Sum minor={f.amount} className="tnum shrink-0 font-mono text-[12.5px] font-semibold text-text" />
+                    )}
                   </li>
                 ))}
               </ul>
@@ -315,7 +317,7 @@ export default function ControlPage(): JSX.Element {
                   key: 'at',
                   title: t('Время'),
                   width: '9rem',
-                  render: (e) => <span className="tnum">{dateTime(e.at)}</span>,
+                  render: (e) => <span className="tnum font-mono text-xs text-dim">{dateTime(e.at)}</span>,
                 },
                 { key: 'who', title: t('Сотрудник'), width: '11rem', render: (e) => e.staffName },
                 {
@@ -323,13 +325,9 @@ export default function ControlPage(): JSX.Element {
                   title: t('Действие'),
                   render: (e) => (
                     <span className="flex flex-wrap items-center gap-2">
-                      <span>{t(ACTION_LABEL[e.action])}</span>
-                      <span className="text-muted">{journalDetail(e)}</span>
-                      {MONEY.has(e.action) && e.shiftId === null && (
-                        <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[0.7rem] text-warning">
-                          {t('без смены')}
-                        </span>
-                      )}
+                      <span className="font-medium">{t(ACTION_LABEL[e.action])}</span>
+                      <span className="text-dim">{journalDetail(e)}</span>
+                      {MONEY.has(e.action) && e.shiftId === null && <Badge tone="warn">{t('без смены')}</Badge>}
                     </span>
                   ),
                 },
@@ -338,7 +336,7 @@ export default function ControlPage(): JSX.Element {
                   title: t('Сумма'),
                   num: true,
                   width: '9rem',
-                  render: (e) => (e.amount > 0 ? uzs(e.amount) : '—'),
+                  render: (e) => (e.amount > 0 ? <Sum minor={e.amount} /> : '—'),
                 },
               ]}
             />
@@ -347,6 +345,6 @@ export default function ControlPage(): JSX.Element {
       )}
 
       <Thresholds />
-    </div>
+    </OwnerPage>
   );
 }

@@ -14,7 +14,8 @@ import { adminApi, type ClientHit } from '@/api';
 import { describe } from '@/errors';
 import { money } from '@/format';
 import { t } from '@/i18n';
-import { Kbd, inputCls } from '@/ui';
+import { CloseIcon, SearchIcon } from '@/icons';
+import { Badge, Kbd, inputCls } from '@/ui';
 
 const DEBOUNCE_MS = 200;
 
@@ -115,24 +116,16 @@ function HitLine({ hit, extra }: { hit: ClientHit; extra?: ReactNode }): JSX.Ele
   return (
     <span className="flex min-w-0 flex-1 items-center gap-3">
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-sm font-medium text-text">{hit.displayName}</span>
-        <span className="truncate font-mono text-[0.7rem] text-muted">
+        <span className="truncate text-[13px] font-medium leading-[18px] text-text">{hit.displayName}</span>
+        <span className="truncate font-mono text-[11px] leading-4 text-muted">
           @{hit.username}
           {hit.phoneTail && <span className="tnum"> · ••{hit.phoneTail}</span>}
           {hit.cardId && <span> · {hit.cardId}</span>}
         </span>
       </span>
-      {hit.blacklisted && (
-        <span className="shrink-0 rounded border border-danger/50 px-1.5 py-0.5 text-[0.65rem] font-semibold text-danger">
-          {t('Чёрный список')}
-        </span>
-      )}
-      {hit.playing && (
-        <span className="shrink-0 rounded border border-accent/50 px-1.5 py-0.5 font-mono text-[0.65rem] uppercase tracking-[0.08em] text-accent">
-          {pcLabel(hit.playing.pcName)}
-        </span>
-      )}
-      <span className="tnum shrink-0 text-sm font-semibold">{money(hit.balance)}</span>
+      {hit.blacklisted && <Badge tone="danger">{t('Чёрный список')}</Badge>}
+      {hit.playing && <Badge tone="accent">{pcLabel(hit.playing.pcName)}</Badge>}
+      <span className="tnum shrink-0 font-mono text-[12.5px] font-semibold text-text">{money(hit.balance)}</span>
       {extra}
     </span>
   );
@@ -172,12 +165,19 @@ function HitList({
   return (
     <div
       className={clsx(
-        'panel absolute left-0 top-full z-40 mt-1 overflow-hidden shadow-2xl shadow-black/60',
-        wide ? 'w-[min(36rem,calc(100vw-2rem))]' : 'right-0',
+        'panel-solid anim-rise absolute top-full z-40 mt-2 overflow-hidden',
+        wide ? 'right-0 w-[min(36rem,calc(100vw-2rem))]' : 'left-0 right-0',
       )}
     >
-      {query.trim().length < 2 && items.length > 0 && <p className="label px-3 pb-1 pt-2.5">{t('Недавние клиенты')}</p>}
-      <ul id={id} role="listbox" aria-label={t('Клиенты')} className="max-h-[22rem] overflow-y-auto py-1">
+      {query.trim().length < 2 && items.length > 0 && (
+        <p className="label-sm px-3.5 pb-1 pt-3">{t('Недавние клиенты')}</p>
+      )}
+      <ul
+        id={id}
+        role="listbox"
+        aria-label={t('Клиенты')}
+        className="thin-scrollbar max-h-[22rem] overflow-y-auto py-1"
+      >
         {items.map((hit, i) => {
           const why = isDisabled?.(hit) ?? null;
           return (
@@ -193,8 +193,8 @@ function HitList({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => why === null && onPick(hit)}
               className={clsx(
-                'flex cursor-pointer items-center gap-2 px-3 py-2',
-                i === active && 'bg-accent/[0.08]',
+                'flex min-h-11 cursor-pointer items-center gap-2 px-3.5 py-1.5',
+                i === active && 'bg-accent/[0.08] shadow-[inset_2px_0_0_rgb(var(--c-accent))]',
                 why !== null && 'cursor-not-allowed opacity-50',
               )}
             >
@@ -203,7 +203,7 @@ function HitList({
           );
         })}
         {items.length === 0 && (
-          <li className="px-3 py-3 text-sm text-muted">
+          <li className="px-3.5 py-3 text-[13px] text-muted">
             {error ?? (loading ? t('Ищем…') : query.trim() ? t('Никого не нашли') : t('Клиентов нет'))}
           </li>
         )}
@@ -215,8 +215,8 @@ function HitList({
           onMouseDown={(e) => e.preventDefault()}
           onClick={onNewClient}
           className={clsx(
-            'mt-1 flex cursor-pointer items-center gap-2 border-t border-line px-3 py-2.5 text-sm text-accent',
-            active === items.length && 'bg-accent/[0.08]',
+            'mt-1 flex min-h-11 cursor-pointer items-center gap-2 border-t border-line px-3.5 text-[13px] font-medium text-accent',
+            active === items.length && 'bg-accent/[0.08] shadow-[inset_2px_0_0_rgb(var(--c-accent))]',
           )}
         >
           {t('+ Новый клиент')}
@@ -316,21 +316,21 @@ export function ClientPicker({
 
   if (value) {
     return (
-      <div className="flex flex-col gap-1.5">
-        <span className="label">{label}</span>
-        <div className="flex items-center gap-2 rounded-md border border-accent/40 bg-accent/[0.05] px-3 py-2">
+      <div className="flex flex-col gap-2">
+        <span className="label-sm">{label}</span>
+        <div className="flex min-h-11 items-center gap-2 rounded-md border border-accent/40 bg-accent/[0.05] py-1.5 pl-3.5 pr-1.5">
           <HitLine hit={value} />
           <button
             type="button"
             aria-label={t('Сменить клиента')}
             title={t('Сменить клиента')}
-            className="focus-ring h-7 w-7 shrink-0 rounded-md text-muted hover:bg-white/[0.06] hover:text-text"
+            className="focus-ring inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted hover:bg-text/[0.06] hover:text-text"
             onClick={() => {
               onChange(null);
               window.setTimeout(() => input.current?.focus(), 0);
             }}
           >
-            ×
+            <CloseIcon size={14} />
           </button>
         </div>
       </div>
@@ -338,8 +338,8 @@ export function ClientPicker({
   }
 
   return (
-    <div className="relative flex flex-col gap-1.5">
-      <label htmlFor={`${id}-input`} className="label">
+    <div className="relative flex flex-col gap-2">
+      <label htmlFor={`${id}-input`} className="label-sm">
         {label}
       </label>
       <input
@@ -414,8 +414,13 @@ export function ClientPicker({
 
 export const GlobalSearch = forwardRef<
   HTMLInputElement,
-  { onTopUp: (hit: ClientHit) => void; onShowPc: (hit: ClientHit) => void }
->(function GlobalSearch({ onTopUp, onShowPc }, ref) {
+  {
+    onTopUp: (hit: ClientHit) => void;
+    onShowPc: (hit: ClientHit) => void;
+    /** 260 px at any width (the header holds more tools on the owner's setup pages); else 336 px from 1400 px. */
+    compact?: boolean;
+  }
+>(function GlobalSearch({ onTopUp, onShowPc, compact }, ref) {
   const id = useId();
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
@@ -437,7 +442,12 @@ export const GlobalSearch = forwardRef<
   const enter = useHeldEnter(lookup, (fresh) => act(fresh[0], false));
 
   return (
-    <div className="relative min-w-[10rem] max-w-[26rem] flex-1">
+    <div className={clsx('relative w-[260px] min-w-[10rem] shrink', !compact && 'min-[1400px]:w-[336px]')}>
+      <SearchIcon
+        size={16}
+        strokeWidth={1.7}
+        className="pointer-events-none absolute left-3.5 top-1/2 z-10 -translate-y-1/2 text-muted"
+      />
       <input
         ref={ref}
         type="search"
@@ -448,7 +458,7 @@ export const GlobalSearch = forwardRef<
         aria-activedescendant={open && active >= 0 ? `${id}-list-${active}` : undefined}
         aria-autocomplete="list"
         autoComplete="off"
-        className={clsx(inputCls, 'h-9 pr-9')}
+        className="glass-field focus-ring h-10 w-full pl-10 pr-10 text-[13px] text-text placeholder:text-muted hover:border-accent/[0.26] focus-visible:border-transparent [&::-webkit-search-cancel-button]:hidden"
         value={q}
         placeholder={t('Клиент: имя, телефон, карта')}
         onFocus={() => setOpen(true)}
@@ -477,7 +487,9 @@ export const GlobalSearch = forwardRef<
           }
         }}
       />
-      <Kbd className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted">/</Kbd>
+      <Kbd className="pointer-events-none absolute right-2 top-1/2 z-10 h-6 w-6 -translate-y-1/2 justify-center rounded px-0 text-[11px] text-text">
+        /
+      </Kbd>
       {open && (
         <HitList
           id={`${id}-list`}
@@ -500,7 +512,7 @@ export const GlobalSearch = forwardRef<
             <span className="flex shrink-0 gap-1">
               <button
                 type="button"
-                className="focus-ring choice inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-semibold"
+                className="btn-secondary focus-ring inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-semibold"
                 onClick={(e) => {
                   e.stopPropagation();
                   onTopUp(hit);
@@ -513,7 +525,7 @@ export const GlobalSearch = forwardRef<
               {hit.playing && (
                 <button
                   type="button"
-                  className="focus-ring inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-semibold text-muted hover:bg-white/[0.06] hover:text-text"
+                  className="btn-ghost focus-ring inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-semibold"
                   onClick={(e) => {
                     e.stopPropagation();
                     onShowPc(hit);

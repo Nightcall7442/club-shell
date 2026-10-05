@@ -9,7 +9,21 @@ import type { ShellFeatures } from '@clubshell/contracts';
 import type { Banner, ClubSettings } from '@/api';
 import { t, type Lang } from '@/i18n';
 import { useClubSettings } from '@/settings';
-import { Button, Field, Input, NumberInput, PageHeader, SaveBar, Section, Table, Toggle, inputCls } from '@/ui';
+import {
+  Button,
+  Field,
+  Input,
+  Note,
+  NumberInput,
+  PageHeader,
+  SaveBar,
+  Section,
+  Segmented,
+  Table,
+  Toggle,
+  inputCls,
+} from '@/ui';
+import { OwnerPage } from './ownerKit';
 
 const FEATURES: { key: keyof ShellFeatures; label: string }[] = [
   { key: 'shop', label: 'Магазин' },
@@ -51,12 +65,12 @@ function Preview({ s }: { s: ClubSettings }): JSX.Element {
   const banner = s.banners.find((b) => b.enabled && b.imageUrl.trim());
   return (
     <div
-      className="relative aspect-[16/10] overflow-hidden rounded-md border border-line bg-bg bg-cover bg-center"
+      className="relative aspect-[16/10] overflow-hidden rounded-md border border-line-strong bg-bg bg-cover bg-center shadow-float"
       style={wallpaper ? { backgroundImage: `url("${wallpaper}")` } : undefined}
     >
       <div className="absolute inset-0 bg-gradient-to-b from-bg/70 via-bg/40 to-bg/90" />
       <div className="relative flex h-full flex-col">
-        <div className="border-b border-white/10 bg-bg/70 px-3">
+        <div className="border-b border-line bg-bg/70 px-3">
           <div className="flex items-center justify-between gap-3 pt-2">
             <div className="flex min-w-0 items-center gap-1.5">
               {s.branding.logoUrl?.trim() ? (
@@ -64,16 +78,17 @@ function Preview({ s }: { s: ClubSettings }): JSX.Element {
               ) : (
                 <span className="h-3 w-3 shrink-0 rounded-sm" style={{ background: accent }} />
               )}
-              <span className="truncate font-display text-[0.62rem] font-medium">{s.branding.clubName || '—'}</span>
+              <span className="truncate font-display text-[10px] font-medium">{s.branding.clubName || '—'}</span>
             </div>
-            <span className="tnum shrink-0 font-mono text-[0.55rem] text-muted">{t('{n} сум', { n: '45 000' })}</span>
+            <span className="tnum shrink-0 font-mono text-[9px] text-muted">{t('{n} сум', { n: '45 000' })}</span>
           </div>
-          <nav className="flex flex-wrap gap-x-3">
+          {/* The kiosk's tab row, drawn: a picture of the kiosk, not a navigation of this console. */}
+          <div className="flex flex-wrap gap-x-3">
             {tabs.map((x, i) => (
               <span
                 key={x.label}
                 className={clsx(
-                  'whitespace-nowrap border-b-2 py-1.5 text-[0.58rem]',
+                  'whitespace-nowrap border-b-2 py-1.5 text-[9.5px]',
                   i === 0 ? 'text-text' : 'border-transparent text-muted',
                 )}
                 style={i === 0 ? { borderColor: accent } : undefined}
@@ -81,25 +96,25 @@ function Preview({ s }: { s: ClubSettings }): JSX.Element {
                 {t(x.label)}
               </span>
             ))}
-          </nav>
+          </div>
         </div>
         <div className="flex flex-1 flex-col justify-end gap-2 p-3">
           {banner && (
             <div
-              className="h-10 w-2/3 rounded-sm border border-white/10 bg-cover bg-center"
+              className="h-10 w-2/3 rounded-sm border border-line bg-cover bg-center"
               style={{ backgroundImage: `url("${banner.imageUrl}")` }}
             />
           )}
-          <span className="font-display text-sm font-light leading-tight">Counter-Strike 2</span>
+          <span className="font-display text-sm font-medium leading-tight">Counter-Strike 2</span>
           <div className="flex items-center gap-1.5">
             <span
-              className="cut-corners px-3 py-1 text-[0.55rem] font-semibold text-on-accent"
+              className="cut-corners px-3 py-1 text-[9px] font-semibold text-on-accent"
               style={{ ['--fill' as string]: accent }}
             >
               {t('Играть')}
             </span>
             {s.features.callAdmin && (
-              <span className="rounded-sm border border-white/15 px-2 py-1 text-[0.55rem] text-muted">
+              <span className="rounded-sm border border-text/[0.12] px-2 py-1 text-[9px] text-muted">
                 {t('Вызов администратора')}
               </span>
             )}
@@ -108,7 +123,7 @@ function Preview({ s }: { s: ClubSettings }): JSX.Element {
             {[0, 1, 2, 3, 4].map((i) => (
               <span
                 key={i}
-                className={clsx('aspect-[3/4] rounded-sm border bg-white/[0.04]', i === 0 ? '' : 'border-white/10')}
+                className={clsx('aspect-[3/4] rounded-sm border bg-text/[0.04]', i === 0 ? '' : 'border-line')}
                 style={i === 0 ? { borderColor: accent } : undefined}
               />
             ))}
@@ -128,10 +143,10 @@ export default function ClubPage(): JSX.Element {
 
   if (!s) {
     return (
-      <div className="flex flex-col gap-5">
-        <PageHeader title={t('Экран игрока')} />
-        {st.error && <p className="text-sm text-danger">{st.error}</p>}
-      </div>
+      <OwnerPage>
+        <PageHeader title={t('Экран игрока')} caption={t('Настройка клуба')} />
+        {st.error && <Note tone="err">{st.error}</Note>}
+      </OwnerPage>
     );
   }
 
@@ -146,14 +161,14 @@ export default function ClubPage(): JSX.Element {
   const accentValid = HEX.test(s.branding.accent);
 
   return (
-    <div className="flex flex-col gap-5">
-      <PageHeader title={t('Экран игрока')} />
-      {st.error && <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{st.error}</p>}
+    <OwnerPage>
+      <PageHeader title={t('Экран игрока')} caption={t('Настройка клуба')} />
+      {st.error && <Note tone="err">{st.error}</Note>}
 
-      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_28rem]">
+      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_400px]">
         <div className="flex min-w-0 flex-col gap-5">
           <Section title={t('Бренд')}>
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-x-5 gap-y-4 md:grid-cols-2">
               <Field label={t('Название клуба')}>
                 <Input value={s.branding.clubName} onChange={(e) => branding({ clubName: e.target.value })} />
               </Field>
@@ -164,13 +179,13 @@ export default function ClubPage(): JSX.Element {
                     aria-label={t('Акцентный цвет')}
                     value={accentValid ? s.branding.accent : '#9ADFFF'}
                     onChange={(e) => branding({ accent: e.target.value.toUpperCase() })}
-                    className="focus-ring h-10 w-12 shrink-0 cursor-pointer rounded-md border border-line bg-bg p-1"
+                    className="focus-ring h-11 w-12 shrink-0 cursor-pointer rounded-md border border-accent/[0.16] bg-bg/50 p-1 hover:border-accent/[0.26]"
                   />
                   <Input
                     value={s.branding.accent}
                     maxLength={7}
                     onChange={(e) => branding({ accent: e.target.value })}
-                    className={clsx('font-mono uppercase', !accentValid && 'border-danger/60')}
+                    className={clsx('font-mono uppercase', !accentValid && 'border-warning/60')}
                   />
                 </div>
               </Field>
@@ -192,7 +207,7 @@ export default function ClubPage(): JSX.Element {
           </Section>
 
           <Section title={t('Разделы для игроков')}>
-            <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 2xl:grid-cols-4">
+            <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
               {FEATURES.map((f) => (
                 <Toggle
                   key={f.key}
@@ -281,7 +296,7 @@ export default function ClubPage(): JSX.Element {
                   width: '6.5rem',
                   render: (b) => (
                     <Button
-                      variant="danger"
+                      variant="tertiary"
                       size="sm"
                       onClick={() =>
                         st.set(
@@ -301,19 +316,17 @@ export default function ClubPage(): JSX.Element {
           <Section
             title={t('Правила клуба')}
             actions={
-              <div className="flex gap-1.5">
-                {RULE_LANGS.map((l) => (
-                  <Button
-                    key={l.key}
-                    size="sm"
-                    aria-pressed={rulesLang === l.key}
-                    className={clsx('w-11 font-mono', rulesLang === l.key && 'choice-on')}
-                    onClick={() => setRulesLang(l.key)}
-                  >
-                    {l.label}
-                  </Button>
-                ))}
-              </div>
+              <Segmented
+                size="md"
+                full={false}
+                label={t('Язык правил')}
+                value={rulesLang}
+                onChange={setRulesLang}
+                options={RULE_LANGS.map((l) => ({
+                  id: l.key,
+                  label: <span className="font-mono text-[10.5px] uppercase tracking-[0.08em]">{l.label}</span>,
+                }))}
+              />
             }
           >
             <textarea
@@ -326,7 +339,7 @@ export default function ClubPage(): JSX.Element {
           </Section>
 
           <Section title={t('Ограничения')}>
-            <div className="grid gap-4 sm:grid-cols-2 md:max-w-lg">
+            <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2 md:max-w-xl">
               <Field label={t('Несовершеннолетние — младше')}>
                 <NumberInput
                   value={s.limits.minorAge}
@@ -345,13 +358,13 @@ export default function ClubPage(): JSX.Element {
                 />
               </Field>
             </div>
-            <div className="mt-5 flex flex-col gap-4 border-t border-line pt-4 md:max-w-lg">
+            <div className="mt-1 flex flex-col gap-3 border-t border-accent/[0.08] pt-5 md:max-w-xl">
               <Toggle
                 label={t('Автопродление сеанса')}
                 checked={(s.limits.autoExtendMinutes ?? 0) > 0}
                 onChange={(v) => st.set('limits', { ...s.limits, autoExtendMinutes: v ? 30 : 0 })}
               />
-              <p className="text-xs text-muted">
+              <p className="-mt-1 pl-14 text-[11.5px] leading-4 text-muted">
                 {t('Когда оплаченное время кончается, а на балансе клиента хватает денег, сеанс продлевается сам.')}
               </p>
               {(s.limits.autoExtendMinutes ?? 0) > 0 && (
@@ -370,7 +383,7 @@ export default function ClubPage(): JSX.Element {
                 checked={s.limits.guestPostpaid ?? false}
                 onChange={(v) => st.set('limits', { ...s.limits, guestPostpaid: v })}
               />
-              <p className="text-xs text-muted">
+              <p className="-mt-1 pl-14 text-[11.5px] leading-4 text-muted">
                 {t(
                   'Гость играет без предоплаты и платит на кассе после сеанса. Неоплаченные счета видны на карте зала.',
                 )}
@@ -395,7 +408,7 @@ export default function ClubPage(): JSX.Element {
                   st.set('limits', { ...s.limits, memberDebtLimit: v ? (memberDebt > 0 ? memberDebt : 5_000_000) : 0 });
                 }}
               />
-              <p className="text-xs text-muted">
+              <p className="-mt-1 pl-14 text-[11.5px] leading-4 text-muted">
                 {t(
                   'Без этого клиент на постоплате играет, пока хватает баланса. С ним — уходит в минус до суммы ниже и гасит долг на кассе.',
                 )}
@@ -419,14 +432,14 @@ export default function ClubPage(): JSX.Element {
                 checked={s.limits.cashOutOwnerOnly ?? false}
                 onChange={(v) => st.set('limits', { ...s.limits, cashOutOwnerOnly: v })}
               />
-              <p className="text-xs text-muted">
+              <p className="-mt-1 pl-14 text-[11.5px] leading-4 text-muted">
                 {t('Кассир сможет только вносить деньги в кассу; изымать — владелец.')}
               </p>
             </div>
           </Section>
         </div>
 
-        <Section title={t('Предпросмотр')} className="xl:sticky xl:top-5">
+        <Section variant="side" title={t('Предпросмотр')} className="xl:sticky xl:top-0">
           <Preview s={s} />
         </Section>
       </div>
@@ -441,6 +454,6 @@ export default function ClubPage(): JSX.Element {
         }}
         label={t('Есть несохранённые изменения')}
       />
-    </div>
+    </OwnerPage>
   );
 }

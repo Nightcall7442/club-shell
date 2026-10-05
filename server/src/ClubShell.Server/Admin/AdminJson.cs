@@ -71,8 +71,15 @@ public sealed record AdminSeatUser(Guid Id, string DisplayName, string Role, Mon
 
 public sealed record AdminMember(Guid Id, string DisplayName, string Role, Money Balance, string Username);
 
-/// <summary><c>signedIn</c> (beyond the contract, D-49): the session's player holds a live token on the PC; null — no session.</summary>
-public sealed record AdminSeat(Pc Pc, Session? Session, AdminSeatUser? User, bool? SignedIn = null);
+/// <summary>
+/// <c>signedIn</c> (beyond the contract, D-49): the session's player holds a live token on the PC; null — no session.
+/// <c>game</c> (beyond the contract, D-71): the game the PC's agent reports running for this session, from its last
+/// heartbeat; null — none, no session, or the PC is not busy or locked.
+/// </summary>
+public sealed record AdminSeat(Pc Pc, Session? Session, AdminSeatUser? User, bool? SignedIn = null, AdminSeatGame? Game = null);
+
+/// <summary>A running game on the map (D-71): the catalog title and art; an empty <c>coverUrl</c> is null.</summary>
+public sealed record AdminSeatGame(Guid Id, string Title, string? CoverUrl, string? HeroUrl);
 
 public sealed record AdminOccupancy(int Free, int Total);
 

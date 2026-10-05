@@ -12,6 +12,15 @@ export function money(m: Money | null | undefined): string {
 }
 
 /**
+ * UZS in minor units split for a HUD readout: the grouped whole сум (`45 000`, a real minus `−4 000`) and the unit, so the
+ * digits can be Doto and «сум» Inter.
+ */
+export function moneyParts(minor: number): { num: string; unit: string } {
+  const whole = Math.round(minor / 100);
+  return { num: `${whole < 0 ? '−' : ''}${nf.format(Math.abs(whole))}`, unit: t('сум') };
+}
+
+/**
  * UZS to the tiyin: `45 000 сум`, or `45 000,50 сум` when the amount has a minor part. For amounts that must be taken
  * exactly (a debt, a guest's price): a rounded figure would be refused by the server.
  */

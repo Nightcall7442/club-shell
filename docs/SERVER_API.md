@@ -623,6 +623,7 @@ signatures by default (`MOCK_VERIFY_SIGNATURE=1` enforces, `MOCK_SKIP_SIGNATURE=
 mock-control endpoints for e2e tests: `POST /_mock/command` `{ pcId, type | name, payload, expiresInSec?,
 supersedes?, issuedBy? }` (also `POST /mock/pcs/{pcId}/command`) to inject a `ServerCommand` and await its ack,
 `POST /_mock/push` `{ name, payload, pcId? | userId? }` for pushes, `POST /mock/qr/{token}/confirm`,
+`POST /mock/pcs/{pcId}/sign-in` (the player of the PC's open session signs in there, for the agentless seeded hall),
 `GET /mock/events`, `GET /mock/connections`, `GET /mock/commands`, `POST /mock/reset-tokens`, `PUT /mock/upload/{id}`
 and `GET /health`. Other knobs: `MOCK_SERVER_PORT` (default 8080), `--latency <ms>`, `--fail-rate <0..1>`,
 `MOCK_QR_AUTOCONFIRM_SEC`, `MOCK_GUEST_DISABLED=1`. Listens on `http://localhost:8080` (`ws://localhost:8080/ws/agent`).
