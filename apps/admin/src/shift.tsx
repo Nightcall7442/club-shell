@@ -10,7 +10,17 @@
  * The «±» menu next to the chip puts cash into the drawer or takes it out ({@link CashMoveSheet}: amount, reason, note,
  * then the slip) and prints the X report from figures fetched at that moment.
  */
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+} from 'react';
 import clsx from 'clsx';
 import {
   AdminError,
@@ -30,8 +40,8 @@ import { money, moneyExact } from '@/format';
 import { t } from '@/i18n';
 import { REASONS, REASON_LABEL } from '@/labels';
 import { CashSlip, ShiftReport, printDocument, type ReportMove } from '@/print';
-import { PlusMinusIcon } from '@/icons';
-import { Button, Field, MoneyInput, Note, Sheet, StatusDot, inputCls } from '@/ui';
+import { LogoutIcon, PlusMinusIcon } from '@/icons';
+import { Button, Field, Kbd, MoneyInput, Note, Sheet, StatusDot, inputCls } from '@/ui';
 
 const POLL_MS = 30_000;
 const nf = new Intl.NumberFormat('ru-RU');
@@ -283,7 +293,7 @@ function ShiftGate({
 
   return (
     <Sheet title={t('Открыть смену')} onClose={onLater}>
-      <p className="text-sm text-muted">
+      <p className="text-[13px] leading-5 text-dim">
         {t('Деньги принимаются только в открытую смену. Кассир: {name}.', { name: staffName })}
       </p>
       <div
@@ -310,9 +320,10 @@ function ShiftGate({
         </Field>
       </div>
       <Note note={error ? { text: error, tone: 'err' } : null} />
-      <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line pt-4">
+      <div className="flex flex-wrap items-center justify-end gap-2 border-t border-accent/[0.08] pt-4">
         {onSignOut && (
           <Button variant="ghost" className="mr-auto" onClick={onSignOut}>
+            <LogoutIcon size={16} />
             {t('Выйти')}
           </Button>
         )}
@@ -321,11 +332,27 @@ function ShiftGate({
             {laterLabel}
           </Button>
         )}
-        <Button variant="primary" disabled={busy} onClick={() => void open()}>
+        <Button variant="primary" size="lg" disabled={busy} onClick={() => void open()}>
           {t('Открыть смену')}
+          <Kbd onPrimary>Enter</Kbd>
         </Button>
       </div>
     </Sheet>
+  );
+}
+
+/**
+ * One of a few answers in a money sheet (a reason for a drawer move or a void): a 44 px choice button, `aria-pressed`,
+ * the accent edge and tint when chosen.
+ */
+export function ChoiceButton({ on, className, ...rest }: ComponentProps<typeof Button> & { on: boolean }): JSX.Element {
+  return (
+    <Button
+      variant="tertiary"
+      aria-pressed={on}
+      {...rest}
+      className={clsx('choice font-semibold', on && 'choice-on', className)}
+    />
   );
 }
 
@@ -568,13 +595,15 @@ export function CashMoveSheet({
     <Sheet title={title} onClose={onClose}>
       {done ? (
         <>
-          <p role="status" className="rounded-md bg-success/10 px-3 py-2 text-sm text-success">
+          <Note role="status" tone="ok">
             {t(done.movement.kind === 'in' ? 'Внесено {sum} · {reason}' : 'Изъято {sum} · {reason}', {
               sum: moneyExact(done.movement.amount),
               reason: t(REASON_LABEL[done.movement.reasonCode] ?? done.movement.reasonCode),
             })}
-            <span className="block">{t('В кассе теперь {sum}', { sum: moneyExact(done.expectedCash) })}</span>
-          </p>
+            <span className="mt-0.5 block font-normal text-dim">
+              {t('В кассе теперь {sum}', { sum: moneyExact(done.expectedCash) })}
+            </span>
+          </Note>
           <div className="grid grid-cols-2 gap-2">
             <Button onClick={() => void printDocument(slip(done.movement), 'receipt')}>{t('Печать')}</Button>
             <Button variant="primary" autoFocus onClick={onClose}>
@@ -584,7 +613,7 @@ export function CashMoveSheet({
         </>
       ) : (
         <div
-          className="flex flex-col gap-4"
+          className="flex flex-col gap-[18px]"
           onKeyDown={(e) => {
             // Enter anywhere in the form sends the move (a held Enter sends it once); the buttons keep their own.
             if (e.key === 'Enter' && !(e.target instanceof HTMLButtonElement)) {
@@ -593,41 +622,43 @@ export function CashMoveSheet({
             }
           }}
         >
-          <div role="group" aria-label={t('Что делаем')} className="grid grid-cols-2 gap-1.5">
+          {/* In or out: a segmented tray, as the seat's «Кто садится». */}
+          <div
+            role="group"
+            aria-label={t('Что делаем')}
+            className="grid min-h-11 grid-cols-2 gap-0.5 rounded-md border border-line bg-surface/50 p-1"
+          >
             {(['in', 'out'] as const).map((k) => (
-              <Button
+              <button
                 key={k}
+                type="button"
                 aria-pressed={kind === k}
                 disabled={frozen}
-                className={clsx(kind === k && 'choice-on')}
                 onClick={() => setKind(k)}
+                className={clsx(
+                  'focus-ring inline-flex h-9 items-center justify-center rounded-seg px-3 text-[13px] disabled:cursor-not-allowed disabled:opacity-40',
+                  kind === k ? 'bg-accent/[0.12] font-semibold text-accent' : 'font-medium text-dim hover:text-text',
+                )}
               >
                 {k === 'in' ? t('Внесение') : t('Изъятие')}
-              </Button>
+              </button>
             ))}
           </div>
           <Field label={t('Сумма')}>
             <MoneyInput value={amount} onChange={setAmount} disabled={frozen} autoFocus={!frozen} />
           </Field>
-          <div className="flex flex-col gap-1.5">
-            <span className="label">{t('Причина')}</span>
-            <div role="group" aria-label={t('Причина')} className="grid grid-cols-2 gap-1.5">
+          <div className="flex flex-col gap-2">
+            <span className="label-sm">{t('Причина')}</span>
+            <div role="group" aria-label={t('Причина')} className="grid grid-cols-2 gap-2">
               {REASONS.map((r) => (
-                <Button
-                  key={r}
-                  size="sm"
-                  aria-pressed={reason === r}
-                  disabled={frozen}
-                  className={clsx(reason === r && 'choice-on')}
-                  onClick={() => setReason(r)}
-                >
+                <ChoiceButton key={r} on={reason === r} disabled={frozen} onClick={() => setReason(r)}>
                   {t(REASON_LABEL[r] as string)}
-                </Button>
+                </ChoiceButton>
               ))}
             </div>
             {/* The button stays off until a reason is chosen: say why, once there is an amount to send. */}
             {amount > 0 && reason === null && !frozen && (
-              <span className="text-xs text-warning">{t('Выберите причину')}</span>
+              <span className="text-xs font-medium text-warning">{t('Выберите причину')}</span>
             )}
           </div>
           <Field
@@ -643,17 +674,18 @@ export function CashMoveSheet({
             />
           </Field>
           <Note note={error ? { text: error, tone: 'err' } : null} />
-          <div className="flex justify-end gap-2 border-t border-line pt-4">
+          <div className="flex items-center justify-end gap-2 border-t border-accent/[0.08] pt-4">
             <Button variant="ghost" onClick={onClose}>
               {t('Отмена')}
             </Button>
             {pending ? (
-              <Button variant="primary" disabled={busy} onClick={() => void send(pending)}>
+              <Button variant="primary" size="lg" disabled={busy} onClick={() => void send(pending)}>
                 {busy ? '…' : t('Повторить · {sum}', { sum: moneyExact(pending.amount) })}
               </Button>
             ) : (
-              <Button variant="primary" disabled={!ready} onClick={submit}>
+              <Button variant="primary" size="lg" disabled={!ready} onClick={submit}>
                 {busy ? '…' : kind === 'in' ? t('Внести') : t('Изъять')}
+                {!busy && <Kbd onPrimary>Enter</Kbd>}
               </Button>
             )}
           </div>
