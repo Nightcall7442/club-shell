@@ -7,8 +7,10 @@ import clsx from 'clsx';
 import { clubApi, type AdminGame, type ClubSettings, type GameInput } from '@/api';
 import { describe } from '@/errors';
 import { t } from '@/i18n';
+import { CheckIcon, ChevronDownIcon, GamepadIcon, SearchIcon } from '@/icons';
 import { useClubSettings } from '@/settings';
-import { Button, Field, Input, inputCls, Note, PageHeader, SaveBar, Section, Table, Toggle } from '@/ui';
+import { Button, Chip, Field, Input, inputCls, Note, PageHeader, SaveBar, Section, Table, Toggle } from '@/ui';
+import { FieldGroup, OwnerPage } from './ownerKit';
 
 const LAUNCHER: Record<string, string> = {
   steam: 'Steam',
@@ -150,26 +152,39 @@ function inputOf(f: GameForm): GameInput {
 }
 
 function Arrow({ up }: { up: boolean }): JSX.Element {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-4 w-4">
-      <path d={up ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6'} strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
+  return <ChevronDownIcon size={16} className={clsx(up && 'rotate-180')} />;
 }
 
-function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }): JSX.Element {
+/**
+ * A game's cover as the catalogue shows it: the picture plain (no art scrims, unlike `GameArt`, which is made for text
+ * on top), on the art surface; with no link, or a link that does not load, the blueprint grid and a gamepad.
+ */
+function Cover({ src, className }: { src: string | null | undefined; className?: string }): JSX.Element {
+  const [failed, setFailed] = useState<string | null>(null);
+  const shown = src && failed !== src ? src : null;
   return (
-    <button
-      type="button"
-      aria-pressed={on}
-      onClick={onClick}
-      className={clsx(
-        'choice focus-ring inline-flex h-8 items-center justify-center whitespace-nowrap rounded-md px-2.5 text-xs font-medium transition-colors',
-        on && 'choice-on',
-      )}
+    <span
+      aria-hidden="true"
+      className={clsx('relative block shrink-0 overflow-hidden border border-line bg-art', className)}
     >
-      {children}
-    </button>
+      {shown ? (
+        <img
+          key={shown}
+          src={shown}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          referrerPolicy="no-referrer"
+          onError={() => setFailed(shown)}
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        <span className="absolute inset-0 flex items-center justify-center text-muted/70">
+          <span className="hud-grid absolute inset-0" />
+          <GamepadIcon size={16} className="relative" />
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -190,7 +205,7 @@ function TrailerPreview({ url }: { url: string }): JSX.Element {
   return (
     <div aria-live="polite">
       {broken ? (
-        <span className="text-xs text-danger">
+        <span className="text-xs font-medium text-warning">
           {t('Ролик не открывается: нужна прямая ссылка на файл .mp4 или .webm')}
         </span>
       ) : (
@@ -205,7 +220,7 @@ function TrailerPreview({ url }: { url: string }): JSX.Element {
           preload="metadata"
           aria-label={t('Ролик')}
           onError={() => setBroken(true)}
-          className="aspect-video w-56 rounded-md border border-line bg-bg object-cover"
+          className="aspect-video w-56 rounded-md border border-line bg-art object-cover"
         />
       )}
     </div>
@@ -256,9 +271,9 @@ function GameEditor({
     run(() => (game ? clubApi.saveGame(game.id, inputOf(form)) : clubApi.addGame(inputOf(form))));
 
   return (
-    <Section title={game ? t('Игра · {title}', { title: game.title }) : t('Новая игра')}>
-      <div className="grid grid-cols-1 gap-5 md:grid-cols-[minmax(0,1fr)_7.5rem]">
-        <div className="flex flex-col gap-4">
+    <Section variant="solid" title={game ? t('Игра · {title}', { title: game.title }) : t('Новая игра')}>
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-[minmax(0,1fr)_8.5rem]">
+        <div className="grid grid-cols-1 items-start gap-x-5 gap-y-4 lg:grid-cols-2">
           <Field label={t('Название')}>
             <Input value={form.title} maxLength={100} onChange={(e) => set({ title: e.target.value })} />
           </Field>
@@ -334,14 +349,15 @@ function GameEditor({
             </Field>
             {VIDEO_URL.test(form.videoUrl.trim()) && <TrailerPreview url={form.videoUrl.trim()} />}
           </div>
-          <Field label={t('Категории')} hint={t('До {n}', { n: MAX_CATEGORIES })}>
+          <FieldGroup label={t('Категории')} hint={t('До {n}', { n: MAX_CATEGORIES })} className="lg:col-span-2">
             <div className="flex flex-wrap gap-1.5">
               {chips.map((c) => {
                 const on = form.category.includes(c.key);
                 return (
                   <Chip
                     key={c.key}
-                    on={on}
+                    tone="outlined"
+                    pressed={on}
                     onClick={() =>
                       set({
                         category: on
@@ -357,35 +373,25 @@ function GameEditor({
                 );
               })}
             </div>
-          </Field>
-          <Field label={t('Описание')} hint={t('Необязательно')}>
+          </FieldGroup>
+          <Field label={t('Описание')} hint={t('Необязательно')} className="lg:col-span-2">
             <textarea
-              className="focus-ring h-20 w-full rounded-md border border-line bg-bg p-3 text-sm"
+              className={clsx(inputCls, 'h-auto min-h-20 resize-y py-2.5 leading-relaxed')}
               maxLength={1000}
               value={form.description}
               onChange={(e) => set({ description: e.target.value })}
             />
           </Field>
         </div>
-        <div className="flex flex-col gap-1.5">
-          <span className="label">{t('Обложка')}</span>
-          <span className="block aspect-[2/3] w-full overflow-hidden rounded-md border border-line bg-bg">
-            {cover && (
-              <img
-                key={cover}
-                src={cover}
-                alt=""
-                onError={(e) => (e.currentTarget.style.visibility = 'hidden')}
-                className="h-full w-full object-cover"
-              />
-            )}
-          </span>
+        <div className="flex flex-col gap-2">
+          <span className="label-sm">{t('Обложка')}</span>
+          <Cover src={cover || null} className="aspect-[2/3] w-full rounded-md" />
         </div>
       </div>
 
       {error && <Note note={{ text: error, tone: 'err' }} />}
 
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-4">
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-accent/[0.08] pt-4">
         {game &&
           (confirmDelete ? (
             <span className="flex items-center gap-1">
@@ -408,7 +414,7 @@ function GameEditor({
             </Button>
           ))}
         <span className="ml-auto flex items-center gap-3">
-          {issue && <span className="text-sm text-muted">{issue}</span>}
+          {issue && <span className="text-xs text-dim">{issue}</span>}
           <Button variant="ghost" disabled={busy} onClick={onCancel}>
             {t('Закрыть')}
           </Button>
@@ -492,18 +498,25 @@ export default function CatalogPage(): JSX.Element {
   };
 
   return (
-    <div className="flex flex-col gap-5">
+    <OwnerPage>
       <PageHeader
         title={t('Каталог игр')}
+        caption={t('Настройка клуба')}
         actions={
           <div className="flex items-center gap-2">
-            <Input
-              type="search"
-              className="w-64"
-              placeholder={t('Поиск')}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
+            <span className="relative">
+              <SearchIcon
+                size={16}
+                className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted"
+              />
+              <Input
+                type="search"
+                className="w-72 pl-10"
+                placeholder={t('Поиск')}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </span>
             <Button variant="primary" onClick={() => openGame('new')}>
               {t('Добавить игру')}
             </Button>
@@ -527,6 +540,7 @@ export default function CatalogPage(): JSX.Element {
 
       {editing && (
         <Section
+          variant="solid"
           title={t('Настройки игрока · {title}', { title: byId.get(editing.id)?.title ?? '' })}
           actions={
             <div className="flex gap-2">
@@ -539,14 +553,14 @@ export default function CatalogPage(): JSX.Element {
             </div>
           }
         >
-          <p className="mb-3 text-sm text-muted">
+          <p className="max-w-[880px] text-[13px] leading-5 text-dim">
             {t(
               'Файлы и папки, где игра хранит бинды, чувствительность и графику игрока. Агент сохраняет их после игры и возвращает игроку на любом ПК. По одному пути в строке; можно {installPath}, %LOCALAPPDATA%, %APPDATA%, %USERPROFILE%.',
             )}
           </p>
           <textarea
             aria-label={t('Пути к настройкам игрока')}
-            className="focus-ring h-32 w-full rounded-md border border-line bg-bg p-3 font-mono text-sm"
+            className={clsx(inputCls, 'h-auto min-h-32 resize-y py-2.5 font-mono leading-relaxed')}
             value={editing.text}
             onChange={(e) => setEditing({ ...editing, text: e.target.value })}
           />
@@ -570,20 +584,7 @@ export default function CatalogPage(): JSX.Element {
               key: 'cover',
               title: t('Обложка'),
               width: '4rem',
-              render: (g) =>
-                g.coverUrl ? (
-                  <span className="block h-12 w-8 overflow-hidden rounded-[4px] border border-line bg-bg">
-                    <img
-                      src={g.coverUrl}
-                      alt=""
-                      loading="lazy"
-                      onError={(e) => (e.currentTarget.style.visibility = 'hidden')}
-                      className="h-full w-full object-cover"
-                    />
-                  </span>
-                ) : (
-                  <span className="block h-12 w-8 rounded-[4px] border border-line bg-bg" />
-                ),
+              render: (g) => <Cover src={g.coverUrl} className="h-12 w-8 rounded-[6px]" />,
             },
             {
               key: 'title',
@@ -592,28 +593,33 @@ export default function CatalogPage(): JSX.Element {
                 <button
                   type="button"
                   className={clsx(
-                    'focus-ring rounded px-1 py-0.5 text-left font-medium hover:bg-white/[0.04]',
-                    catalog.hidden.includes(g.id) && 'text-muted',
+                    'focus-ring -mx-1.5 rounded-md px-1.5 py-1 text-left font-medium hover:bg-text/[0.04]',
+                    catalog.hidden.includes(g.id) ? 'text-muted' : 'text-hi',
                   )}
                   title={t('Изменить')}
                   onClick={() => openGame(g.id)}
                 >
                   {g.title}
-                  {g.exePath && <span className="block font-mono text-xs font-normal text-muted">{g.exePath}</span>}
+                  {g.exePath && (
+                    <span className="mt-0.5 block font-mono text-[11.5px] font-normal text-muted">{g.exePath}</span>
+                  )}
                 </button>
               ),
             },
             {
               key: 'launcher',
               title: t('Лаунчер'),
-              render: (g) => <span className="text-muted">{t(LAUNCHER[g.launcher] ?? g.launcher)}</span>,
+              render: (g) => <span className="text-dim">{t(LAUNCHER[g.launcher] ?? g.launcher)}</span>,
             },
             {
               key: 'installed',
               title: t('Установлена'),
               render: (g) =>
                 g.installed ? (
-                  <span className="text-success">{t('Да')}</span>
+                  <span className="inline-flex items-center gap-1.5 text-text">
+                    <CheckIcon size={15} strokeWidth={2} className="text-accent" />
+                    {t('Да')}
+                  </span>
                 ) : (
                   <span className="text-muted">{t('Нет')}</span>
                 ),
@@ -624,14 +630,17 @@ export default function CatalogPage(): JSX.Element {
               render: (g) => (
                 <button
                   type="button"
-                  className="focus-ring rounded px-1.5 py-0.5 text-sm hover:bg-white/[0.04]"
+                  className="focus-ring -mx-2 inline-flex h-9 items-center gap-1.5 rounded-md px-2 text-[13px] font-medium hover:bg-text/[0.04]"
                   onClick={() => {
                     setGameEdit(null);
                     setEditing({ id: g.id, text: g.settingsPaths.join('\n') });
                   }}
                 >
                   {g.settingsPaths.length > 0 ? (
-                    <span className="text-success">{t('Переносятся')}</span>
+                    <>
+                      <CheckIcon size={15} strokeWidth={2} className="text-accent" />
+                      <span className="text-accent">{t('Переносятся')}</span>
+                    </>
                   ) : (
                     <span className="text-muted">{t('Не заданы')}</span>
                   )}
@@ -663,7 +672,7 @@ export default function CatalogPage(): JSX.Element {
             {
               key: 'order',
               title: t('Порядок'),
-              width: '6rem',
+              width: '6.5rem',
               render: (g) => {
                 const i = order.indexOf(g.id);
                 return (
@@ -671,6 +680,7 @@ export default function CatalogPage(): JSX.Element {
                     <Button
                       variant="ghost"
                       size="sm"
+                      className="w-9 !px-0"
                       aria-label={t('Выше')}
                       disabled={!s.draft || i <= 0}
                       onClick={() => move(g.id, -1)}
@@ -680,6 +690,7 @@ export default function CatalogPage(): JSX.Element {
                     <Button
                       variant="ghost"
                       size="sm"
+                      className="w-9 !px-0"
                       aria-label={t('Ниже')}
                       disabled={!s.draft || i >= order.length - 1}
                       onClick={() => move(g.id, 1)}
@@ -711,6 +722,6 @@ export default function CatalogPage(): JSX.Element {
         onReset={s.reset}
         onSave={() => void s.save()}
       />
-    </div>
+    </OwnerPage>
   );
 }

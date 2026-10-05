@@ -7,8 +7,26 @@ import clsx from 'clsx';
 import { clubApi, type DeviceKind, type HallPc, type Zone } from '@/api';
 import { describe } from '@/errors';
 import { t } from '@/i18n';
+import { WrenchIcon } from '@/icons';
 import { useClubSettings } from '@/settings';
-import { Button, Field, Input, Note, NumberInput, PageHeader, SaveBar, Section, Toggle } from '@/ui';
+import {
+  Badge,
+  Button,
+  Chip,
+  Field,
+  Input,
+  Kbd,
+  Note,
+  NumberInput,
+  PageHeader,
+  PanelHeader,
+  SaveBar,
+  Section,
+  Segmented,
+  Toggle,
+  Well,
+} from '@/ui';
+import { FieldGroup, OwnerPage } from './ownerKit';
 
 const MIN_COLS = 16;
 const MIN_ROWS = 10;
@@ -21,13 +39,18 @@ const DEVICES: { id: DeviceKind; label: string }[] = [
   { id: 'other', label: 'Другое' },
 ];
 
+/**
+ * The status mark in a device's corner, in F's colours: green only for "on and free" (the online dot), the accent for
+ * a session, red for a blocked PC, the accent ring for a booking; maintenance is a muted wrench (below), offline a
+ * faint dot.
+ */
 const STATUS_DOT: Record<HallPc['status'], string> = {
-  free: 'bg-success',
-  busy: 'bg-accent',
+  free: 'bg-success shadow-[0_0_6px_rgb(var(--c-success)/0.55)]',
+  busy: 'bg-accent shadow-[0_0_6px_rgb(var(--c-accent)/0.8)]',
   locked: 'bg-danger',
-  maintenance: 'bg-fuchsia-400',
-  booked: 'bg-amber-300',
-  offline: 'bg-muted/40',
+  maintenance: '',
+  booked: 'border border-accent',
+  offline: 'bg-text/[0.18]',
 };
 
 type NoteState = { text: string; tone: 'ok' | 'err' } | null;
@@ -51,34 +74,31 @@ function DeviceGlyph({ kind }: { kind: DeviceKind }): JSX.Element | null {
   return null;
 }
 
-function Choice<T extends string>({
-  options,
+/** One zone of several: outlined chips that wrap (a club may have more zones than a segmented tray holds). */
+function ZonePick({
+  zones,
   value,
   onChange,
-  cols,
 }: {
-  options: { id: T; label: string }[];
-  value: T;
-  onChange: (v: T) => void;
-  cols: number;
+  zones: { name: string }[];
+  value: string;
+  onChange: (zone: string) => void;
 }): JSX.Element {
   return (
-    <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
-      {options.map((o) => (
-        <Button key={o.id} size="sm" className={clsx(o.id === value && 'choice-on')} onClick={() => onChange(o.id)}>
-          {o.label}
-        </Button>
+    <div className="flex flex-wrap gap-1.5">
+      {zones.map((z) => (
+        <Chip key={z.name} tone="outlined" pressed={z.name === value} onClick={() => onChange(z.name)}>
+          {z.name}
+        </Chip>
       ))}
     </div>
   );
 }
 
-function Stat({ label, value, warn }: { label: string; value: string; warn?: boolean }): JSX.Element {
+/** The device type: ПК / Консоль / VR / Другое as one segmented tray. */
+function DevicePick({ value, onChange }: { value: DeviceKind; onChange: (d: DeviceKind) => void }): JSX.Element {
   return (
-    <div className="flex items-center justify-between border-b border-line/60 py-1.5 last:border-b-0">
-      <span className="label">{label}</span>
-      <span className={clsx('tnum font-mono text-sm', warn ? 'text-danger' : 'text-text')}>{value}</span>
-    </div>
+    <Segmented value={value} onChange={onChange} options={DEVICES.map((d) => ({ id: d.id, label: t(d.label) }))} />
   );
 }
 
@@ -139,33 +159,25 @@ function DevicePanel({
   const hot = (cpuT ?? 0) > HOT_TEMP || (gpuT ?? 0) > HOT_TEMP;
 
   return (
-    <Section title={pc.name}>
-      <Field label={t('Название')}>
-        <Input value={name} maxLength={32} onChange={(e) => setName(e.target.value)} />
-      </Field>
-      <Field label={t('Номер')}>
-        <NumberInput value={number} min={1} max={9999} onChange={setNumber} />
-      </Field>
-      <Field label={t('Зона')}>
+    <Section variant="solid" title={pc.name}>
+      <div className="grid grid-cols-[minmax(0,1fr)_7rem] gap-4">
+        <Field label={t('Название')}>
+          <Input value={name} maxLength={32} onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <Field label={t('Номер')}>
+          <NumberInput value={number} min={1} max={9999} onChange={setNumber} />
+        </Field>
+      </div>
+      <FieldGroup label={t('Зона')}>
         {zoneOptions.length > 0 ? (
-          <Choice
-            cols={3}
-            value={zone}
-            onChange={setZone}
-            options={zoneOptions.map((z) => ({ id: z.name, label: z.name }))}
-          />
+          <ZonePick zones={zoneOptions} value={zone} onChange={setZone} />
         ) : (
-          <p className="text-sm text-muted">{t('Зон пока нет: добавьте зону в блоке «Зоны» ниже и сохраните.')}</p>
+          <p className="text-[13px] text-muted">{t('Зон пока нет: добавьте зону в блоке «Зоны» ниже и сохраните.')}</p>
         )}
-      </Field>
-      <Field label={t('Тип устройства')}>
-        <Choice
-          cols={4}
-          value={device}
-          onChange={setDevice}
-          options={DEVICES.map((d) => ({ ...d, label: t(d.label) }))}
-        />
-      </Field>
+      </FieldGroup>
+      <FieldGroup label={t('Тип устройства')}>
+        <DevicePick value={device} onChange={setDevice} />
+      </FieldGroup>
       <Toggle
         label={t('Обслуживание')}
         checked={pc.status === 'maintenance'}
@@ -179,19 +191,39 @@ function DevicePanel({
       />
 
       {m && (
-        <div className="flex flex-col rounded-md border border-line bg-bg px-3 py-1.5">
-          <Stat label={t('CPU')} value={`${Math.round(m.cpuPct)} %`} />
-          <Stat label={t('GPU')} value={`${Math.round(m.gpuPct)} %`} />
-          {cpuT !== null && <Stat label={t('Темп. CPU')} value={`${Math.round(cpuT)} °C`} warn={cpuT > HOT_TEMP} />}
-          {gpuT !== null && <Stat label={t('Темп. GPU')} value={`${Math.round(gpuT)} °C`} warn={gpuT > HOT_TEMP} />}
-          {m.fps != null && <Stat label={t('FPS')} value={String(Math.round(m.fps))} />}
-          {hot && <span className="py-1.5 text-xs text-danger">{t('Перегрев')}</span>}
+        <div className="flex flex-col gap-2">
+          <div className="grid grid-cols-2 gap-2">
+            <Well label={t('CPU')} value={Math.round(m.cpuPct)} unit="%" />
+            <Well label={t('GPU')} value={Math.round(m.gpuPct)} unit="%" />
+            {cpuT !== null && (
+              <Well
+                label={t('Темп. CPU')}
+                value={Math.round(cpuT)}
+                unit="°C"
+                tone={cpuT > HOT_TEMP ? 'warn' : undefined}
+              />
+            )}
+            {gpuT !== null && (
+              <Well
+                label={t('Темп. GPU')}
+                value={Math.round(gpuT)}
+                unit="°C"
+                tone={gpuT > HOT_TEMP ? 'warn' : undefined}
+              />
+            )}
+            {m.fps != null && <Well label={t('FPS')} value={Math.round(m.fps)} />}
+          </div>
+          {hot && (
+            <Badge tone="warn" className="self-start">
+              {t('Перегрев')}
+            </Badge>
+          )}
         </div>
       )}
 
       <Note note={note} />
 
-      <div className="flex items-center justify-between gap-2 border-t border-line pt-4">
+      <div className="flex items-center justify-between gap-2 border-t border-accent/[0.08] pt-4">
         {confirm ? (
           <div className="flex items-center gap-1.5">
             <Button
@@ -275,20 +307,15 @@ function AddDevice({
 
   return (
     <Section title={t('Добавить устройство')}>
-      <Field label={t('Зона')}>
-        <Choice cols={3} value={zone} onChange={setZone} options={zones.map((z) => ({ id: z.name, label: z.name }))} />
-      </Field>
+      <FieldGroup label={t('Зона')}>
+        <ZonePick zones={zones} value={zone} onChange={setZone} />
+      </FieldGroup>
       <Field label={t('Номер')}>
         <NumberInput value={number} min={1} max={9999} onChange={setNumber} />
       </Field>
-      <Field label={t('Тип устройства')}>
-        <Choice
-          cols={4}
-          value={device}
-          onChange={setDevice}
-          options={DEVICES.map((d) => ({ ...d, label: t(d.label) }))}
-        />
-      </Field>
+      <FieldGroup label={t('Тип устройства')}>
+        <DevicePick value={device} onChange={setDevice} />
+      </FieldGroup>
       <Note note={note} />
       <Button
         variant="primary"
@@ -312,6 +339,7 @@ function ZonesEditor({ onSaved }: { onSaved: () => Promise<void> }): JSX.Element
   return (
     <>
       <Section
+        variant="side"
         title={t('Зоны')}
         actions={
           <Button
@@ -331,7 +359,7 @@ function ZonesEditor({ onSaved }: { onSaved: () => Promise<void> }): JSX.Element
                 aria-label={t('Цвет')}
                 value={z.color}
                 onChange={(e) => setZones(zones.map((x, j) => (j === i ? { ...x, color: e.target.value } : x)))}
-                className="focus-ring h-10 w-10 shrink-0 cursor-pointer rounded-md border border-line bg-bg p-1"
+                className="focus-ring h-11 w-11 shrink-0 cursor-pointer rounded-md border border-accent/[0.16] bg-bg/50 p-1 hover:border-accent/[0.26]"
               />
               <Input
                 value={z.name}
@@ -442,7 +470,7 @@ export default function HallPage(): JSX.Element {
       const p = at.get(`${x}:${y}`);
       const on = p !== undefined && p.id === selected;
       cells.push(
-        <div key={`${x}:${y}`} className="relative aspect-square border-b border-r border-line/40">
+        <div key={`${x}:${y}`} className="relative aspect-square border-b border-r border-accent/[0.06]">
           {p ? (
             <button
               type="button"
@@ -450,15 +478,21 @@ export default function HallPage(): JSX.Element {
               onClick={() => setSelected(on ? null : p.id)}
               aria-pressed={on}
               title={`${p.name} · ${p.zone}`}
-              style={{ borderColor: colorOf.get(p.zone) ?? undefined }}
+              data-selected={on}
+              // The zone's own colour (the owner's data) frames the device; the selection adds the target brackets.
+              style={{ borderColor: on ? undefined : (colorOf.get(p.zone) ?? undefined) }}
               className={clsx(
-                'absolute inset-[3px] flex items-center justify-center rounded-md border-2 border-line bg-bg transition-colors hover:bg-white/[0.04]',
-                on && 'ring-2 ring-accent ring-offset-2 ring-offset-surface',
-                p.status === 'offline' && 'text-muted/60',
+                'hud-focus absolute inset-[3px] flex items-center justify-center rounded-[7px] border bg-bg/70 font-display text-[15px] font-medium leading-none tracking-[-0.01em] transition-colors [--brk-inset:-5px] [--brk-size:10px] hover:bg-text/[0.05]',
+                on ? 'z-10 border-accent/80 bg-accent/[0.08] text-hi shadow-sel' : 'border-line',
+                p.status === 'offline' ? 'text-text/[0.34]' : !on && 'text-text/[0.88]',
               )}
             >
-              <span className="num-dot text-lg leading-none">{String(p.number).padStart(2, '0')}</span>
-              <span className={clsx('absolute right-1 top-1 h-1.5 w-1.5 rounded-full', STATUS_DOT[p.status])} />
+              <span className="tnum">{String(p.number).padStart(2, '0')}</span>
+              {p.status === 'maintenance' ? (
+                <WrenchIcon size={10} strokeWidth={2} className="absolute right-1 top-1 text-muted" />
+              ) : (
+                <span className={clsx('absolute right-1 top-1 h-1.5 w-1.5 rounded-full', STATUS_DOT[p.status])} />
+              )}
               {p.device !== 'pc' && (
                 <span className="absolute bottom-0.5 left-1 text-muted">
                   <DeviceGlyph kind={p.device} />
@@ -480,30 +514,52 @@ export default function HallPage(): JSX.Element {
   }
 
   return (
-    <div className="flex flex-col gap-5">
-      <PageHeader title={t('Зал и устройства')} />
+    <OwnerPage>
+      <PageHeader title={t('Зал и устройства')} caption={t('Настройка клуба')} />
       {error && <Note note={{ text: error, tone: 'err' }} />}
-      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_24rem]">
+      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_400px]">
         <div
           tabIndex={0}
           onKeyDown={onKey}
           aria-label={t('Схема зала')}
-          className="focus-ring panel overflow-x-auto p-5 outline-none"
+          className="focus-ring glass-panel flex min-w-0 flex-col gap-4 px-5 pb-5 pt-[18px] outline-none"
         >
-          <div
-            className="grid border-l border-t border-line/40"
-            style={{
-              gridTemplateColumns: `repeat(${cols}, minmax(2.75rem, 1fr))`,
-            }}
-          >
-            {cells}
+          <PanelHeader
+            title={t('Схема зала')}
+            aside={
+              pc ? (
+                <span className="flex items-center gap-2">
+                  <Kbd>← ↑ ↓ →</Kbd>
+                  <span className="label-sm">{t('сдвинуть')}</span>
+                  <Kbd className="ml-2">Esc</Kbd>
+                  <span className="label-sm">{t('снять выбор')}</span>
+                </span>
+              ) : (
+                <span className="label-sm">{t('Нажмите устройство, чтобы изменить его')}</span>
+              )
+            }
+          />
+          {/* Padded so the selection's brackets, just outside the device, are not clipped by the scroller. */}
+          <div className="thin-scrollbar -m-1.5 overflow-x-auto p-1.5">
+            <div
+              className="grid border-l border-t border-accent/[0.06]"
+              style={{
+                gridTemplateColumns: `repeat(${cols}, minmax(2.75rem, 1fr))`,
+              }}
+            >
+              {cells}
+            </div>
           </div>
-          <ul className="mt-4 flex flex-wrap gap-x-5 gap-y-2">
+          <ul className="flex flex-wrap gap-x-6 gap-y-2">
             {zones.map((z) => (
-              <li key={z.name} className="flex items-center gap-2 text-sm">
-                <span className="h-3 w-3 rounded-[3px] border-2" style={{ borderColor: z.color }} />
-                {z.name}
-                <span className="tnum font-mono text-xs text-muted">{pcs.filter((p) => p.zone === z.name).length}</span>
+              <li key={z.name} className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-[3px] border-2" style={{ borderColor: z.color }} />
+                <span className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.2em] text-text">
+                  {z.name}
+                </span>
+                <span className="tnum font-mono text-[10px] tracking-[0.1em] text-muted">
+                  {pcs.filter((p) => p.zone === z.name).length}
+                </span>
               </li>
             ))}
           </ul>
@@ -535,6 +591,6 @@ export default function HallPage(): JSX.Element {
           <ZonesEditor onSaved={load} />
         </aside>
       </div>
-    </div>
+    </OwnerPage>
   );
 }

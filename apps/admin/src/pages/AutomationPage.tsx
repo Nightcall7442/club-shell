@@ -7,8 +7,23 @@ import clsx from 'clsx';
 import type { AutomationRule, RuleAction, RuleTrigger } from '@/api';
 import { dateLocale, t } from '@/i18n';
 import { money } from '@/format';
+import { BoltIcon } from '@/icons';
 import { useClubSettings } from '@/settings';
-import { Button, Field, Input, MoneyInput, NumberInput, PageHeader, SaveBar, Section, Toggle, inputCls } from '@/ui';
+import {
+  Button,
+  EmptyState,
+  Field,
+  Input,
+  MoneyInput,
+  Note,
+  NumberInput,
+  PageHeader,
+  SaveBar,
+  Section,
+  Toggle,
+  inputCls,
+} from '@/ui';
+import { FieldGroup, OwnerPage } from './ownerKit';
 
 type TriggerKind = RuleTrigger['kind'];
 type ActionKind = RuleAction['kind'];
@@ -189,15 +204,21 @@ function RuleCard({
   return (
     <article
       className={clsx(
-        'panel flex flex-wrap items-center gap-x-6 gap-y-3 px-5 py-4',
+        'panel-solid relative flex flex-wrap items-center gap-x-6 gap-y-3 py-4 pl-5 pr-4',
         selected && 'border-accent/60',
         !rule.enabled && 'opacity-60',
       )}
     >
+      {selected && (
+        <span
+          aria-hidden="true"
+          className="absolute bottom-3 left-0 top-3 w-0.5 bg-accent shadow-[0_0_10px_rgb(var(--c-accent)/0.8)]"
+        />
+      )}
       <Toggle checked={rule.enabled} onChange={onToggle} />
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <h3 className="truncate text-sm font-semibold">{rule.name}</h3>
-        <p className="text-sm leading-relaxed text-muted">
+        <h3 className="truncate text-sm font-semibold text-hi">{rule.name}</h3>
+        <p className="text-[13px] leading-relaxed text-dim">
           <span className="label mr-1.5">{t('Если')}</span>
           <span className="text-text">{triggerText(rule.trigger)}</span>
           <span className="mx-2 text-accent">→</span>
@@ -205,9 +226,13 @@ function RuleCard({
           <span className="text-text">{actionText(rule.action)}</span>
         </p>
       </div>
-      <div className="flex flex-col items-end gap-1 text-right">
-        <span className="tnum text-sm">{t('Сработало: {n}', { n: rule.fired })}</span>
-        <span className="tnum font-mono text-xs text-muted">{rule.lastFiredAt ? dateTime(rule.lastFiredAt) : '—'}</span>
+      <div className="flex flex-col items-end gap-1.5 text-right">
+        <span className="tnum font-mono text-[12.5px] font-medium text-text">
+          {t('Сработало: {n}', { n: rule.fired })}
+        </span>
+        <span className="tnum font-mono text-[11px] text-muted">
+          {rule.lastFiredAt ? dateTime(rule.lastFiredAt) : '—'}
+        </span>
       </div>
       <div className="flex gap-1">
         <Button variant="ghost" size="sm" onClick={onEdit}>
@@ -253,8 +278,9 @@ function Editor({
 
   return (
     <Section
+      variant="solid"
       title={d.id ? t('Правило') : t('Новое правило')}
-      className="xl:sticky xl:top-5"
+      className="xl:sticky xl:top-0"
       actions={
         <Button variant="ghost" size="sm" onClick={onClose}>
           {t('Закрыть')}
@@ -262,8 +288,8 @@ function Editor({
       }
     >
       {!d.id && (
-        <Field label={t('Шаблоны')}>
-          <div className="grid grid-cols-2 gap-1.5">
+        <FieldGroup label={t('Шаблоны')}>
+          <div className="grid grid-cols-2 gap-2">
             {TEMPLATES.map((tpl) => (
               <button
                 key={tpl.label}
@@ -273,7 +299,7 @@ function Editor({
                   setTried(false);
                 }}
                 className={clsx(
-                  'choice focus-ring rounded-md px-3 py-2 text-left text-xs leading-snug',
+                  'choice focus-ring min-h-11 rounded-md px-3 py-2 text-left text-xs font-medium leading-snug',
                   d.name === t(tpl.draft.name) && 'choice-on',
                 )}
               >
@@ -281,14 +307,14 @@ function Editor({
               </button>
             ))}
           </div>
-        </Field>
+        </FieldGroup>
       )}
 
       <Field label={t('Название')}>
         <Input value={d.name} onChange={(e) => up({ name: e.target.value })} />
       </Field>
 
-      <Field label={t('Если')}>
+      <FieldGroup label={t('Если')}>
         <div className="flex flex-col gap-1.5">
           {TRIGGERS.map((x) => (
             <button
@@ -297,7 +323,7 @@ function Editor({
               aria-pressed={d.trigger === x.kind}
               onClick={() => pickTrigger(x.kind)}
               className={clsx(
-                'choice focus-ring h-9 rounded-md px-3 text-left text-sm',
+                'choice focus-ring h-10 rounded-md px-3.5 text-left text-[13px]',
                 d.trigger === x.kind && 'choice-on',
               )}
             >
@@ -305,11 +331,11 @@ function Editor({
             </button>
           ))}
         </div>
-      </Field>
+      </FieldGroup>
 
       {d.trigger === 'topupAtLeast' && (
         <Field label={t('Сумма пополнения от')}>
-          <MoneyInput value={d.value} onChange={(v) => up({ value: v })} />
+          <MoneyInput compact value={d.value} onChange={(v) => up({ value: v })} />
         </Field>
       )}
       {(d.trigger === 'minutesLeft' || d.trigger === 'pcIdleMinutes') && (
@@ -323,7 +349,7 @@ function Editor({
         </Field>
       )}
 
-      <Field label={t('То')}>
+      <FieldGroup label={t('То')}>
         <div className="flex flex-col gap-1.5">
           {ACTIONS.map((x) => (
             <button
@@ -332,7 +358,7 @@ function Editor({
               aria-pressed={d.action === x.kind}
               onClick={() => up({ action: x.kind })}
               className={clsx(
-                'choice focus-ring h-9 rounded-md px-3 text-left text-sm',
+                'choice focus-ring h-10 rounded-md px-3.5 text-left text-[13px]',
                 d.action === x.kind && 'choice-on',
               )}
             >
@@ -340,7 +366,7 @@ function Editor({
             </button>
           ))}
         </div>
-      </Field>
+      </FieldGroup>
 
       {(d.action === 'message' || d.action === 'notifyOwner') && (
         <Field label={t('Текст')}>
@@ -354,13 +380,13 @@ function Editor({
       )}
       {d.action === 'bonus' && (
         <Field label={t('Сумма бонуса')}>
-          <MoneyInput value={d.amount} onChange={(v) => up({ amount: v })} />
+          <MoneyInput compact value={d.amount} onChange={(v) => up({ amount: v })} />
         </Field>
       )}
 
-      {tried && err && <p className="text-sm text-danger">{err}</p>}
+      {tried && err && <p className="text-xs font-medium text-warning">{err}</p>}
 
-      <div className="flex justify-end border-t border-line pt-4">
+      <div className="flex justify-end border-t border-accent/[0.08] pt-4">
         <Button
           variant="primary"
           onClick={() => {
@@ -405,9 +431,10 @@ export default function AutomationPage(): JSX.Element {
   };
 
   return (
-    <div className="flex flex-col gap-5">
+    <OwnerPage>
       <PageHeader
         title={t('Автоматизация')}
+        caption={t('Настройка клуба')}
         actions={
           st.draft && (
             <Button onClick={() => open(EMPTY)} disabled={editing !== null && editing.id === null}>
@@ -416,11 +443,11 @@ export default function AutomationPage(): JSX.Element {
           )
         }
       />
-      {st.error && <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{st.error}</p>}
+      {st.error && <Note tone="err">{st.error}</Note>}
 
       {st.draft && (
-        <div className={clsx('grid items-start gap-5', editing && 'xl:grid-cols-[minmax(0,1fr)_26rem]')}>
-          <div className="flex min-w-0 flex-col gap-2">
+        <div className={clsx('grid items-start gap-5', editing && 'xl:grid-cols-[minmax(0,1fr)_400px]')}>
+          <div className="flex min-w-0 flex-col gap-2.5">
             {rules.map((r) => (
               <RuleCard
                 key={r.id}
@@ -443,7 +470,9 @@ export default function AutomationPage(): JSX.Element {
               />
             ))}
             {rules.length === 0 && (
-              <p className="panel px-5 py-10 text-center text-sm text-muted">{t('Правил пока нет')}</p>
+              <div className="glass-panel px-5 py-12">
+                <EmptyState icon={<BoltIcon size={22} />} title={t('Правил пока нет')} />
+              </div>
             )}
           </div>
           {editing && <Editor key={editorKey} initial={editing} onApply={apply} onClose={() => setEditing(null)} />}
@@ -460,6 +489,6 @@ export default function AutomationPage(): JSX.Element {
         }}
         label={t('Есть несохранённые изменения')}
       />
-    </div>
+    </OwnerPage>
   );
 }
