@@ -1014,7 +1014,9 @@ export function KpiCard({
       role={groupLabel ? 'group' : undefined}
       aria-label={groupLabel}
       className={clsx(
-        'relative flex min-w-0 items-center justify-between gap-3 overflow-hidden rounded-md',
+        // No overflow-hidden: an `aside` may open a popover below the card (the «Вызовы игроков» list); the body
+        // truncates its own lines.
+        'relative flex min-w-0 items-center justify-between gap-3 rounded-md',
         compact ? 'h-20 px-4 py-3' : 'kpi-card',
         tone === 'attention' ? 'kpi-attention' : 'glass-kpi',
         className,
