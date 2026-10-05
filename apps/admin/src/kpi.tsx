@@ -29,6 +29,8 @@ export interface HallCounts {
   occupied: number;
   free: number;
   total: number;
+  /** How many zones the hall has (the header's «Касса · 24 ПК · 3 зоны»). */
+  zones: number;
 }
 
 /**
@@ -108,7 +110,7 @@ function OccupancyCard({ hall }: { hall: HallCounts | null }): JSX.Element {
                 free: hall.free,
                 off: unavailable,
               })}
-              className="max-[1399px]:hidden"
+              className="max-[1399px]:[&>span]:h-3.5"
             />
             <span className="label whitespace-nowrap tracking-[0.14em]">{t('{n} свободно', { n: hall.free })}</span>
           </span>

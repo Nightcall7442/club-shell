@@ -409,7 +409,7 @@ function GameEditor({
               </Button>
             </span>
           ) : (
-            <Button variant="danger" disabled={busy} onClick={() => setConfirmDelete(true)}>
+            <Button variant="tertiary" disabled={busy} onClick={() => setConfirmDelete(true)}>
               {t('Удалить')}
             </Button>
           ))}

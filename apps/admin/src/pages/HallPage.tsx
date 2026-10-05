@@ -19,7 +19,6 @@ import {
   Note,
   NumberInput,
   PageHeader,
-  PanelHeader,
   SaveBar,
   Section,
   Segmented,
@@ -40,12 +39,12 @@ const DEVICES: { id: DeviceKind; label: string }[] = [
 ];
 
 /**
- * The status mark in a device's corner, in F's colours: green only for "on and free" (the online dot), the accent for
- * a session, red for a blocked PC, the accent ring for a booking; maintenance is a muted wrench (below), offline a
- * faint dot.
+ * The status mark in a device's corner, in F's colours: the faint accent of a free tick for "on and free", the lit
+ * accent for a session, red for a blocked PC, the accent ring for a booking; maintenance is a muted wrench (below),
+ * offline a faint grey dot. (Green and amber mean "online" and "act now" elsewhere, so the editor uses neither.)
  */
 const STATUS_DOT: Record<HallPc['status'], string> = {
-  free: 'bg-success shadow-[0_0_6px_rgb(var(--c-success)/0.55)]',
+  free: 'bg-accent/[0.22]',
   busy: 'bg-accent shadow-[0_0_6px_rgb(var(--c-accent)/0.8)]',
   locked: 'bg-danger',
   maintenance: '',
@@ -244,7 +243,7 @@ function DevicePanel({
             </Button>
           </div>
         ) : (
-          <Button variant="danger" size="sm" disabled={busy} onClick={() => setConfirm(true)}>
+          <Button variant="tertiary" size="sm" disabled={busy} onClick={() => setConfirm(true)}>
             {t('Удалить')}
           </Button>
         )}
@@ -335,6 +334,8 @@ function ZonesEditor({ onSaved }: { onSaved: () => Promise<void> }): JSX.Element
   const setZones = (next: Zone[]): void => s.set('zones', next);
   const names = zones.map((z) => z.name.trim());
   const invalid = names.some((n) => n.length === 0) || new Set(names).size !== names.length;
+  // The zone whose «Удалить» was pressed: its row asks once (danger «Удалить», «Отмена») before the draft drops it.
+  const [asking, setAsking] = useState<number | null>(null);
 
   return (
     <>
@@ -361,19 +362,36 @@ function ZonesEditor({ onSaved }: { onSaved: () => Promise<void> }): JSX.Element
                 onChange={(e) => setZones(zones.map((x, j) => (j === i ? { ...x, color: e.target.value } : x)))}
                 className="focus-ring h-11 w-11 shrink-0 cursor-pointer rounded-md border border-accent/[0.16] bg-bg/50 p-1 hover:border-accent/[0.26]"
               />
-              <Input
-                value={z.name}
-                maxLength={32}
-                onChange={(e) => setZones(zones.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
-              />
-              <Button
-                variant="danger"
-                size="sm"
-                aria-label={t('Удалить')}
-                onClick={() => setZones(zones.filter((_, j) => j !== i))}
-              >
-                {t('Удалить')}
-              </Button>
+              {asking === i ? (
+                <>
+                  <span className="min-w-0 flex-1 truncate text-sm text-muted">
+                    {t('Удалить {name}?', { name: z.name })}
+                  </span>
+                  <Button
+                    variant="danger"
+                    onClick={() => {
+                      setZones(zones.filter((_, j) => j !== i));
+                      setAsking(null);
+                    }}
+                  >
+                    {t('Удалить')}
+                  </Button>
+                  <Button variant="ghost" onClick={() => setAsking(null)}>
+                    {t('Отмена')}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Input
+                    value={z.name}
+                    maxLength={32}
+                    onChange={(e) => setZones(zones.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
+                  />
+                  <Button variant="tertiary" aria-label={t('Удалить')} onClick={() => setAsking(i)}>
+                    {t('Удалить')}
+                  </Button>
+                </>
+              )}
             </li>
           ))}
         </ul>
@@ -479,14 +497,21 @@ export default function HallPage(): JSX.Element {
               aria-pressed={on}
               title={`${p.name} · ${p.zone}`}
               data-selected={on}
-              // The zone's own colour (the owner's data) frames the device; the selection adds the target brackets.
-              style={{ borderColor: on ? undefined : (colorOf.get(p.zone) ?? undefined) }}
+              // F's hairline frames the device; the selection adds the target brackets. The zone's own colour (the
+              // owner's data) is only the small bar inside its left edge, never a border.
               className={clsx(
                 'hud-focus absolute inset-[3px] flex items-center justify-center rounded-[7px] border bg-bg/70 font-display text-[15px] font-medium leading-none tracking-[-0.01em] transition-colors [--brk-inset:-5px] [--brk-size:10px] hover:bg-text/[0.05]',
-                on ? 'z-10 border-accent/80 bg-accent/[0.08] text-hi shadow-sel' : 'border-line',
+                on ? 'z-10 border-accent/80 bg-accent/[0.08] text-hi shadow-sel' : 'border-accent/[0.16]',
                 p.status === 'offline' ? 'text-text/[0.34]' : !on && 'text-text/[0.88]',
               )}
             >
+              {colorOf.get(p.zone) && (
+                <span
+                  aria-hidden="true"
+                  className="absolute bottom-3 left-0 top-3 w-[3px] rounded-r-[2px] opacity-70"
+                  style={{ background: colorOf.get(p.zone) }}
+                />
+              )}
               <span className="tnum">{String(p.number).padStart(2, '0')}</span>
               {p.status === 'maintenance' ? (
                 <WrenchIcon size={10} strokeWidth={2} className="absolute right-1 top-1 text-muted" />
@@ -524,21 +549,20 @@ export default function HallPage(): JSX.Element {
           aria-label={t('Схема зала')}
           className="focus-ring glass-panel flex min-w-0 flex-col gap-4 px-5 pb-5 pt-[18px] outline-none"
         >
-          <PanelHeader
-            title={t('Схема зала')}
-            aside={
-              pc ? (
-                <span className="flex items-center gap-2">
-                  <Kbd>← ↑ ↓ →</Kbd>
-                  <span className="label-sm">{t('сдвинуть')}</span>
-                  <Kbd className="ml-2">Esc</Kbd>
-                  <span className="label-sm">{t('снять выбор')}</span>
-                </span>
-              ) : (
-                <span className="label-sm">{t('Нажмите устройство, чтобы изменить его')}</span>
-              )
-            }
-          />
+          {/* A mono section title like the panels beside it (every page under a PageHeader heads its panels so). */}
+          <header className="flex min-h-7 flex-wrap items-center justify-between gap-x-3 gap-y-1">
+            <h2 className="label text-text">{t('Схема зала')}</h2>
+            {pc ? (
+              <span className="flex items-center gap-2">
+                <Kbd>← ↑ ↓ →</Kbd>
+                <span className="label-sm">{t('сдвинуть')}</span>
+                <Kbd className="ml-2">Esc</Kbd>
+                <span className="label-sm">{t('снять выбор')}</span>
+              </span>
+            ) : (
+              <span className="label-sm">{t('Нажмите устройство, чтобы изменить его')}</span>
+            )}
+          </header>
           {/* Padded so the selection's brackets, just outside the device, are not clipped by the scroller. */}
           <div className="thin-scrollbar -m-1.5 overflow-x-auto p-1.5">
             <div
@@ -553,7 +577,7 @@ export default function HallPage(): JSX.Element {
           <ul className="flex flex-wrap gap-x-6 gap-y-2">
             {zones.map((z) => (
               <li key={z.name} className="flex items-center gap-2">
-                <span className="h-2.5 w-2.5 rounded-[3px] border-2" style={{ borderColor: z.color }} />
+                <span className="h-2 w-2 rounded-[2px]" style={{ background: z.color }} />
                 <span className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.2em] text-text">
                   {z.name}
                 </span>

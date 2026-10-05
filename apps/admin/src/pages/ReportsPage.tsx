@@ -7,7 +7,7 @@ import { clubApi, type Reports } from '@/api';
 import { describe } from '@/errors';
 import { dateLocale, t } from '@/i18n';
 import { money } from '@/format';
-import { KpiCard, Note, PageHeader, Section, Table } from '@/ui';
+import { KpiCard, Note, PageHeader, Section, Sum, Table } from '@/ui';
 import { OwnerPage, PeriodChips } from './ownerKit';
 
 const nf = new Intl.NumberFormat('ru-RU');
@@ -203,7 +203,13 @@ export default function ReportsPage(): JSX.Element {
                 columns={[
                   { key: 'title', title: t('Товар'), render: (p) => <span className="font-medium">{p.title}</span> },
                   { key: 'qty', title: t('Кол-во'), num: true, width: '6rem', render: (p) => p.qty },
-                  { key: 'amount', title: t('Сумма'), num: true, width: '9rem', render: (p) => uzs(p.amount) },
+                  {
+                    key: 'amount',
+                    title: t('Сумма'),
+                    num: true,
+                    width: '9rem',
+                    render: (p) => <Sum minor={p.amount} />,
+                  },
                 ]}
               />
             </Section>
@@ -225,9 +231,9 @@ export default function ReportsPage(): JSX.Element {
                     </span>
                   ),
                 },
-                { key: 'sessions', title: t('Сеансы'), num: true, render: (s) => uzs(s.totals?.sessions) },
-                { key: 'shop', title: t('Магазин'), num: true, render: (s) => uzs(s.totals?.shop) },
-                { key: 'cash', title: t('Наличные'), num: true, render: (s) => uzs(s.closingCash) },
+                { key: 'sessions', title: t('Сеансы'), num: true, render: (s) => <Sum minor={s.totals?.sessions} /> },
+                { key: 'shop', title: t('Магазин'), num: true, render: (s) => <Sum minor={s.totals?.shop} /> },
+                { key: 'cash', title: t('Наличные'), num: true, render: (s) => <Sum minor={s.closingCash} /> },
               ]}
             />
           </Section>

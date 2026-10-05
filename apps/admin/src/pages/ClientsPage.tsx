@@ -26,6 +26,7 @@ import {
   Note,
   PageHeader,
   Section,
+  Sum,
   Table,
   Toggle,
   Well,
@@ -65,16 +66,6 @@ function IssuedPassword({ password }: { password: string }): JSX.Element {
 function yearOf(text: string): number | null {
   const n = Number(text);
   return text.trim() && Number.isInteger(n) ? n : null;
-}
-
-/** Money in a table cell or a list: mono digits, «сум» in Inter, muted. */
-function Sum({ minor }: { minor: number }): JSX.Element {
-  const { num, unit } = moneyParts(minor);
-  return (
-    <span className="whitespace-nowrap">
-      {num} <span className="font-sans font-medium text-muted">{unit}</span>
-    </span>
-  );
 }
 
 /** Up to two initials of a name. */

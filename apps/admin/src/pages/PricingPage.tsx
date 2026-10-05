@@ -180,7 +180,8 @@ function windowLabel(w: TariffTimeWindow): string {
   return `${days.length === 7 || days.length === 0 ? t('Ежедневно') : days.join(' ')} ${w.from}–${w.to}`;
 }
 
-function TariffsTab({ zones }: { zones: string[] }): JSX.Element {
+/** `pending` — the settings' save bar is on screen (its primary is the page's one then). */
+function TariffsTab({ zones, pending }: { zones: string[]; pending: boolean }): JSX.Element {
   const [items, setItems] = useState<Tariff[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | 'new' | null>(null);
@@ -253,7 +254,8 @@ function TariffsTab({ zones }: { zones: string[] }): JSX.Element {
       <Section
         title={t('Тарифы')}
         actions={
-          <Button size="sm" onClick={() => open(null)}>
+          // The page's create action is the primary, unless the editor's «Сохранить» or the save bar's is on screen.
+          <Button size="sm" variant={pending || editing ? 'secondary' : 'primary'} onClick={() => open(null)}>
             {t('Новый тариф')}
           </Button>
         }
@@ -434,7 +436,7 @@ function TariffsTab({ zones }: { zones: string[] }): JSX.Element {
                   </Button>
                 </span>
               ) : (
-                <Button variant="danger" onClick={() => setConfirmDelete(true)}>
+                <Button variant="tertiary" onClick={() => setConfirmDelete(true)}>
                   {t('Удалить')}
                 </Button>
               ))}
@@ -1077,7 +1079,7 @@ export default function PricingPage(): JSX.Element {
 
       {settings.error && <Note note={{ text: settings.error, tone: 'err' }} />}
 
-      {tab === 'tariffs' && <TariffsTab zones={(s?.zones ?? []).map((z) => z.name)} />}
+      {tab === 'tariffs' && <TariffsTab zones={(s?.zones ?? []).map((z) => z.name)} pending={settings.dirty} />}
       {s && tab === 'days' && <DaysTab s={s} tariffs={tariffs} set={settings.set} />}
       {s && tab === 'groups' && <GroupsTab s={s} set={settings.set} />}
       {s && tab === 'bonus' && <BonusTab s={s} set={settings.set} />}

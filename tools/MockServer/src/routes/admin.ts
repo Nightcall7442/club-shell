@@ -117,12 +117,14 @@ function seatGame(id: string | undefined): SeatGame | null {
  * Agent reports in the last heartbeat for this very session (its id, or the PC's own id of an offline session).
  *
  * Mock only: the seeded demo hall has no Agent, so its desk sessions get a demo game picked from the catalog by the
- * session id (stable across polls), and the dev desk looks like the F design. The real server never invents one; an E2E
- * test that seats a seeded (agentless) PC and expects no game would see this demo game.
+ * session id (stable across polls) once their player has signed in (nobody plays before that: «ждёт входа»), and the
+ * dev desk looks like the F design. The real server never invents one; an E2E test that seats a seeded (agentless) PC,
+ * signs its player in and expects no game would see this demo game.
  */
 function gameOf(pc: PcRecord, rec: SessionRecord | undefined): SeatGame | null {
   if (!rec || (pc.status !== 'busy' && pc.status !== 'locked')) return null;
   if (!pc.registered) {
+    if (!signedInOn(rec.userId, pc.id)) return null;
     const art = db.games.filter((g) => g.coverUrl.includes('/mock-art/'));
     if (art.length === 0) return null;
     let hash = 0;

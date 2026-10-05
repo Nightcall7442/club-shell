@@ -246,6 +246,20 @@ export function authRoutes(app: FastifyInstance): void {
   });
 
   /**
+   * Mock only (dev renders of the desk): the player of the PC's open session signs in there, as on the kiosk. The seeded
+   * hall has no Agents, so this is how its seats leave «ждёт входа» and show what is played.
+   */
+  app.post<{ Params: { pcId: string } }>('/mock/pcs/:pcId/sign-in', async (req) => {
+    const pc = findPc(req.params.pcId);
+    if (!pc) throw errors.notFound('pc');
+    const rec = openSessionForPc(pc.id);
+    const user = rec ? findUser(rec.userId) : undefined;
+    if (!user) throw errors.conflict('noSession');
+    createUserToken(user, pc.id);
+    return { ok: true, userId: user.id };
+  });
+
+  /**
    * «Гость» on the kiosk. A walk-in guest the desk seated on this PC is signed in to that seat (D-24, D-25), even with
    * kiosk guest login off — and so is any guest's session the desk moved onto this PC (D-61); any other open session of
    * the PC refuses it (`pcOccupied`, before an account is made); otherwise a new guest, as before.

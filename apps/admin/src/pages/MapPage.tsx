@@ -18,8 +18,9 @@
  * cover (`seat.game`, D-71) or a finished no-art look, amber marks what needs the cashier (ending within 10 minutes, a
  * call), the selected tile wears the corner brackets; the seat is a solid card with the game's hero over the readouts.
  *
- * The shift's operations feed (`operations.tsx`) is a third column from 1800 px; below that it sits under the seat card
- * (or under «Выберите место»), and folds to a bar while the right column holds a tall form (seating, several PCs).
+ * The shift's operations feed (`operations.tsx`) sits under the seat card (or under «Выберите место») in the right
+ * column. From 1800 px it is always open there (the «column» placement, D-45); below that it is the «panel» and folds to
+ * a bar while the right column holds a tall form (seating, several PCs).
  * Polls `/admin/overview` every 2 s (the real console would follow the server's WebSocket).
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
@@ -83,7 +84,7 @@ import {
 } from '@/paybox';
 import { guestSignIn, type ReceiptData } from '@/print';
 import { useShift } from '@/shift';
-import { Badge, Banner, Button, Chip, EmptyState, Field, Kbd, Note, Segmented, Sheet, inputCls } from '@/ui';
+import { Badge, Button, Chip, EmptyState, Field, Kbd, Note, Segmented, Sheet, inputCls } from '@/ui';
 
 const POLL_MS = 2000;
 const MINUTE_PRESETS = [30, 60, 120, 180];
@@ -94,7 +95,7 @@ const MINUTE_PRESETS = [30, 60, 120, 180];
 const ENDING_SEC = 10 * 60;
 /** Typed PC digits are forgotten after this pause. */
 const DIGITS_MS = 2500;
-/** The operations feed gets a column of its own from this width (D-45); below it sits under the seat card. */
+/** From this width the operations feed under the seat card never folds (D-45, its «column» placement). */
 const WIDE_QUERY = '(min-width: 1800px)';
 /**
  * A screen as short as 1366×768 (the KPI strip is compact there too): a busy seat's card needs the whole column, so the
@@ -291,6 +292,11 @@ function pad2(n: number): string {
   return String(n).padStart(2, '0');
 }
 
+/** A seat's clock on the map: `4:12` under an hour, as the amber tile reads in F (`duration` keeps `04:12` elsewhere). */
+function clockLeft(sec: number): string {
+  return duration(sec).replace(/^0(\d:)/, '$1');
+}
+
 /** Text over a picture: the shadows that keep it legible (spec §6.4). */
 const SHADOW_NUM = '[text-shadow:0_1px_3px_rgb(0_0_0/0.6)]';
 const SHADOW_NAME = '[text-shadow:0_1px_2px_rgb(0_0_0/0.8)]';
@@ -356,7 +362,8 @@ function SeatTile({
   const waiting = session !== null && seat.signedIn === false;
   const game = session ? (seat.game ?? null) : null;
   const cover = game?.coverUrl ?? null;
-  const art = cover !== null;
+  // Nobody signed in yet: the hatched waiting surface, never a cover (F's tile 06).
+  const art = cover !== null && !waiting;
   // The surface: a call wins (amber), then the picture, then what the PC is doing.
   const surface: keyof typeof TILE_BG = call
     ? 'call'
@@ -395,11 +402,12 @@ function SeatTile({
         />
       </span>
     ) : null;
-  // The second line under the name: the call, the sign-in still awaited, the game, else postpaid or the tariff.
-  const sub: { text: string; tone: 'warn' | 'accent' | 'plain' }[] = [];
+  // The second line under the name: the call, the sign-in still awaited, the game, else postpaid or the tariff. While
+  // nobody has signed in the game stays only for a screen reader (the line has no room for both).
+  const sub: { text: string; tone: 'warn' | 'accent' | 'plain' | 'hidden' }[] = [];
   if (call) sub.push({ text: t('Зовёт админа'), tone: 'warn' });
   if (waiting) sub.push({ text: t('ждёт входа'), tone: 'accent' });
-  if (game) sub.push({ text: game.title, tone: 'plain' });
+  if (game) sub.push({ text: game.title, tone: waiting ? 'hidden' : 'plain' });
   else if (session && !waiting && !call && (!prepaid || tariff))
     sub.push({ text: prepaid ? (tariff ?? '') : t('Постоплата'), tone: 'plain' });
   const numberTone =
@@ -501,11 +509,16 @@ function SeatTile({
               ∞
             </span>
           )}
-          {waiting && !call && <SignInIcon size={15} className="text-accent" />}
-          {status === 'locked' && <Lock />}
-          {repair && <Wrench severity={repair} size={13} />}
-          {status === 'offline' && !session && <PowerIcon size={14} className="text-muted" />}
-          {status === 'booked' && !session && <CalendarIcon size={14} className="text-accent" />}
+          {/* In «Выбрать» mode only the marks that need the cashier stay beside the box; the title lists the rest. */}
+          {checked === null && (
+            <>
+              {waiting && !call && <SignInIcon size={15} className="text-accent" />}
+              {status === 'locked' && <Lock />}
+              {repair && <Wrench severity={repair} size={13} />}
+              {status === 'offline' && !session && <PowerIcon size={14} className="text-muted" />}
+              {status === 'booked' && !session && <CalendarIcon size={14} className="text-accent" />}
+            </>
+          )}
           {checked !== null && (
             <span
               aria-hidden="true"
@@ -542,6 +555,7 @@ function SeatTile({
                   className={clsx(
                     x.tone === 'warn' && 'font-semibold tracking-[0.12em] text-warning',
                     x.tone === 'accent' && 'tracking-[0.08em] text-accent',
+                    x.tone === 'hidden' && 'sr-only',
                   )}
                 >
                   {i > 0 ? ' · ' : ''}
@@ -563,7 +577,7 @@ function SeatTile({
               art && SHADOW_READOUT,
             )}
           >
-            {duration(left)}
+            {clockLeft(left)}
           </span>
         ) : (
           <span className="relative flex items-baseline gap-1 whitespace-nowrap">
@@ -1275,18 +1289,18 @@ function BulkPanel({
         <section className="grid grid-cols-2 gap-2">
           <Button
             variant="tertiary"
-            className={WRAP}
+            className={clsx(WRAP, '!px-2.5')}
             disabled={held || reachable.length === 0}
             onClick={() => act('lock')}
           >
             {sending === 'lock' ? '…' : `${t('Заблокировать')} ${count(reachable.length)}`}
           </Button>
-          <Button variant="tertiary" className={WRAP} disabled={held} onClick={() => act('unlock')}>
+          <Button variant="tertiary" className={clsx(WRAP, '!px-2.5')} disabled={held} onClick={() => act('unlock')}>
             {sending === 'unlock' ? '…' : `${t('Разблокировать')} ${count(seats.length)}`}
           </Button>
           <Button
             variant="tertiary"
-            className={WRAP}
+            className={clsx(WRAP, '!px-2.5')}
             disabled={held || reachable.length === 0}
             onClick={() => act('reboot')}
           >
@@ -1294,7 +1308,7 @@ function BulkPanel({
           </Button>
           <Button
             variant="tertiary"
-            className={WRAP}
+            className={clsx(WRAP, '!px-2.5')}
             disabled={held || reachable.length === 0}
             onClick={() => act('shutdown')}
           >
@@ -1646,13 +1660,21 @@ function SeatPanel({
   );
 }
 
-/** The status pill of the seat card's band: «В игре» while a signed-in player plays, else what the PC is. */
+/**
+ * The status pill of the seat card's band: «В игре» while a signed-in player plays, «Ждёт входа» while nobody has
+ * signed in yet, else what the PC is.
+ */
 function StatusPill({ seat }: { seat: Seat }): JSX.Element | null {
   const status = seat.pc.status;
   if (status === 'locked') return <Badge tone="danger">{t(STATUS.locked.word)}</Badge>;
   if (status === 'offline') return <Badge tone="muted">{t(STATUS.offline.word)}</Badge>;
   if (status === 'maintenance') return <Badge tone="muted">{t(STATUS.maintenance.word)}</Badge>;
-  if (seat.session) return seat.signedIn === false ? null : <Badge tone="live">{t('В игре')}</Badge>;
+  if (seat.session)
+    return seat.signedIn === false ? (
+      <Badge tone="accent">{t('ждёт входа')}</Badge>
+    ) : (
+      <Badge tone="live">{t('В игре')}</Badge>
+    );
   if (status === 'booked') return <Badge tone="accent">{t(STATUS.booked.word)}</Badge>;
   return <Badge tone="muted">{t(STATUS[status].word)}</Badge>;
 }
@@ -1763,7 +1785,7 @@ function BusySeat({
                 ending ? 'text-warning' : art ? 'text-white' : 'text-hi',
               )}
             >
-              {left < 0 ? '∞' : duration(left)}
+              {left < 0 ? '∞' : clockLeft(left)}
             </dd>
           </>
         ) : (
@@ -1833,8 +1855,8 @@ function BusySeat({
       <div className="flex flex-col gap-3 px-4 pb-4 pt-3.5">
         {banner}
         {seat.signedIn === false && (
-          <Note tone="warn">
-            {t('ждёт входа')} · {t('на ПК ещё никто не вошёл, а время уже идёт')}
+          <Note tone="warn" className="text-[12.5px]">
+            {t('на ПК ещё никто не вошёл, а время уже идёт')}
           </Note>
         )}
         {!art && readouts}
@@ -3246,6 +3268,14 @@ export function MapPage(): JSX.Element {
   const tariffName = (id: string | undefined): string | undefined => data?.tariffs.find((x) => x.id === id)?.name;
   // «Занято 6 из 24» with the busy count lit, in any language's word order.
   const [busyBefore, busyAfter = ''] = t('Занято {n} из {total}', { n: '\u0000', total: seats.length }).split('\u0000');
+  // PCs on an older agent: a quiet line in the hall's header (nothing the cashier acts on, so no amber block).
+  const outdatedText =
+    outdated.names.length > 0
+      ? t('На старой версии ({newest} есть): {list}', {
+          newest: outdated.newest ?? '',
+          list: outdated.names.join(', '),
+        })
+      : null;
 
   const seatRegion =
     bulk.length > 0 ? (
@@ -3277,7 +3307,7 @@ export function MapPage(): JSX.Element {
         />
       </>
     ) : (
-      <div className={clsx('glass-side flex flex-col items-center justify-center px-6 py-9', wide && 'flex-1')}>
+      <div className="glass-side flex flex-col items-center justify-center px-6 py-9">
         <EmptyState
           icon={<MonitorIcon size={22} />}
           title={t('Выберите место')}
@@ -3295,14 +3325,6 @@ export function MapPage(): JSX.Element {
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
       {error && <Note tone="err">{error}</Note>}
-      {outdated.names.length > 0 && (
-        <Banner>
-          {t('На старой версии ({newest} есть): {list}', {
-            newest: outdated.newest ?? '',
-            list: outdated.names.join(', '),
-          })}
-        </Banner>
-      )}
       {movePick && (
         // The move's HUD bar: what the map waits for, and the way out.
         <div
@@ -3321,7 +3343,7 @@ export function MapPage(): JSX.Element {
           </Button>
         </div>
       )}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px] min-[1800px]:grid-cols-[minmax(0,1fr)_400px_360px]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px] min-[1800px]:grid-cols-[minmax(0,1fr)_400px]">
         <div className="flex min-h-0 flex-col gap-4">
           <div className="glass-panel edge-top flex min-h-0 flex-1 flex-col px-5 pb-2 pt-[18px]">
             <header className="flex min-h-7 shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-1">
@@ -3335,6 +3357,15 @@ export function MapPage(): JSX.Element {
                   {busyAfter}
                 </span>
               </div>
+              {outdatedText && (
+                <span
+                  title={outdatedText}
+                  className="flex min-w-0 flex-1 items-center justify-center gap-1.5 text-xs text-muted"
+                >
+                  <AlertTriangleIcon size={12} className="shrink-0 text-warning" />
+                  <span className="truncate">{outdatedText}</span>
+                </span>
+              )}
               <span className="label flex items-center gap-2 whitespace-nowrap" aria-live="polite">
                 {multi.size >= 2 ? (
                   <span className="text-accent">{t('Выбрано {n}', { n: multi.size })}</span>
@@ -3385,8 +3416,11 @@ export function MapPage(): JSX.Element {
                 {t('Выбрать')}
               </Chip>
             </div>
-            {/* The tiles scroll inside the panel, with room around them for the selected tile's brackets and glow. */}
-            <div className="thin-scrollbar -mx-3 mt-1 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-3 pb-[18px] pt-[18px]">
+            {/*
+              The tiles scroll inside the panel, with room around them for the selected tile's brackets and glow; the
+              bottom edge fades (only the bottom: a top fade would dim the brackets of a selected first-row tile).
+            */}
+            <div className="thin-scrollbar -mx-3 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-3 pb-[18px] pt-[18px] [mask-image:linear-gradient(180deg,#000_calc(100%-18px),transparent)]">
               {zones.map(([zone, list]) => {
                 const numbers = list.map((x) => x.pc.number);
                 const lo = Math.min(...numbers);
@@ -3408,7 +3442,8 @@ export function MapPage(): JSX.Element {
                         {t('{n} свободно', { n: list.filter((x) => x.pc.status === 'free').length })}
                       </span>
                     </h2>
-                    <div className="grid grid-cols-[repeat(auto-fill,minmax(136px,1fr))] gap-2.5">
+                    {/* Six to a row from 1366 to 1920 (F's rhythm): narrower tiles on the small screen, wider on the big. */}
+                    <div className="grid grid-cols-[repeat(auto-fill,minmax(122px,1fr))] gap-2.5 min-[1400px]:grid-cols-[repeat(auto-fill,minmax(136px,1fr))] min-[1800px]:grid-cols-[repeat(auto-fill,minmax(196px,1fr))]">
                       {list.map((x) => (
                         <SeatTile
                           key={x.pc.id}
@@ -3449,45 +3484,43 @@ export function MapPage(): JSX.Element {
           <div
             className={clsx(
               'thin-scrollbar flex min-h-0 flex-col gap-3 overflow-y-auto',
-              wide || folded ? 'flex-1' : 'flex-[0_1_auto]',
+              folded ? 'flex-1' : 'flex-[0_1_auto]',
             )}
           >
             {seatRegion}
           </div>
-          {!wide &&
-            (folded ? (
-              <button
-                type="button"
-                aria-expanded={false}
-                onClick={() => setPanel('feed')}
-                className="glass-side focus-ring flex h-11 shrink-0 items-center justify-between gap-3 px-4 text-left hover:border-accent/[0.26]"
-              >
-                <span className="font-display text-[13px] font-medium text-hi">{t('Операции смены')}</span>
-                <ChevronDownIcon size={16} className="rotate-180 text-muted" />
-              </button>
-            ) : (
-              <div className="glass-side flex min-h-[180px] flex-1 flex-col px-4 pt-3.5">
-                {tall && (
-                  <button
-                    type="button"
-                    aria-expanded
-                    aria-label={t('Операции смены')}
-                    onClick={() => setPanel('seat')}
-                    className="focus-ring-inset -mx-4 -mt-3.5 mb-1.5 flex h-6 shrink-0 items-center justify-center rounded-t-md text-muted hover:text-text"
-                  >
-                    <ChevronDownIcon size={16} />
-                  </button>
-                )}
-                <OperationsFeed placement="panel" className="min-h-0 flex-1" />
-              </div>
-            ))}
+          {wide ? (
+            // 1800 px and wider: the feed under the seat card never folds (F's right column, spec §6.1).
+            <div className="glass-side flex min-h-[280px] flex-1 flex-col px-4 pb-2 pt-3.5">
+              <OperationsFeed placement="column" className="min-h-0 flex-1" />
+            </div>
+          ) : folded ? (
+            <button
+              type="button"
+              aria-expanded={false}
+              onClick={() => setPanel('feed')}
+              className="glass-side focus-ring flex h-11 shrink-0 items-center justify-between gap-3 px-4 text-left hover:border-accent/[0.26]"
+            >
+              <span className="font-display text-[13px] font-medium text-hi">{t('Операции смены')}</span>
+              <ChevronDownIcon size={16} className="rotate-180 text-muted" />
+            </button>
+          ) : (
+            <div className="glass-side flex min-h-[180px] flex-1 flex-col px-4 pb-2 pt-3.5">
+              {tall && (
+                <button
+                  type="button"
+                  aria-expanded
+                  aria-label={t('Операции смены')}
+                  onClick={() => setPanel('seat')}
+                  className="focus-ring-inset -mx-4 -mt-3.5 mb-1.5 flex h-6 shrink-0 items-center justify-center rounded-t-md text-muted hover:text-text"
+                >
+                  <ChevronDownIcon size={16} />
+                </button>
+              )}
+              <OperationsFeed placement="panel" className="min-h-0 flex-1" />
+            </div>
+          )}
         </aside>
-
-        {wide && (
-          <aside className="glass-side flex min-h-0 flex-col px-4 pt-3.5">
-            <OperationsFeed placement="column" className="min-h-0 flex-1" />
-          </aside>
-        )}
       </div>
 
       {sheet?.kind === 'topup' && (

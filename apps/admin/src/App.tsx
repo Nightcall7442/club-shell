@@ -10,7 +10,17 @@
  * (`shift.tsx`); "/" jumps to the client search, whose rows top up a client from anywhere or show their PC on the map.
  * The club's name, limits, wallpaper and the signed-in staff member reach the pages through `ClubContext` (`club.ts`).
  */
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import clsx from 'clsx';
 import {
   AdminError,
@@ -30,7 +40,7 @@ import { ClubContext, type ClubState } from '@/club';
 import { GlobalSearch } from '@/clientSearch';
 import { isTyping, sheetOpen, showPc, signedOut } from '@/desk';
 import { describe } from '@/errors';
-import { LANGS, dateLocale, setLang, t, useLang } from '@/i18n';
+import { LANGS, currentLang, dateLocale, setLang, t, useLang } from '@/i18n';
 import {
   BoltIcon,
   BoxIcon,
@@ -57,6 +67,16 @@ import { TopUpSheet } from '@/paybox';
 import { useInstall } from '@/pwa';
 import { CashMenu, ShiftChip, ShiftProvider } from '@/shift';
 import { Button, inputCls } from '@/ui';
+
+/** «3 зоны»: the hall's zone count in the header's caption, with the word's plural form of the console language. */
+function zonesWord(n: number): string {
+  if (currentLang() !== 'ru') return t(n === 1 ? '{n} зона' : '{n} зоны', { n });
+  const m10 = n % 10;
+  const m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return t('{n} зона', { n });
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return t('{n} зоны', { n });
+  return t('{n} зон', { n });
+}
 
 /** How often the counter re-reads the club settings (limits the owner may change meanwhile). */
 const SETTINGS_POLL_MS = 60_000;
@@ -338,6 +358,20 @@ export function App(): JSX.Element {
   // A client being topped up from the header's search (on any page, with or without a PC).
   const [topUpFor, setTopUpFor] = useState<ClientHit | null>(null);
   const search = useRef<HTMLInputElement>(null);
+  // The rail scrolls on a short screen (the owner has 16 sections): the active one is always brought into view.
+  const railNav = useRef<HTMLElement>(null);
+  const railActive = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    const nav = railNav.current;
+    const item = railActive.current;
+    if (!nav || !item) return;
+    const n = nav.getBoundingClientRect();
+    const b = item.getBoundingClientRect();
+    // Clear of the rail's faded edges.
+    const pad = 12;
+    if (b.top < n.top + pad) nav.scrollTop -= n.top + pad - b.top;
+    else if (b.bottom > n.bottom - pad) nav.scrollTop += b.bottom - (n.bottom - pad);
+  }, [section, staff]);
   // A sheet left open by whoever signed out does not greet the next one.
   useEffect(() => setTopUpFor(null), [staff]);
 
@@ -368,7 +402,12 @@ export function App(): JSX.Element {
     try {
       const o = await adminApi.overview();
       // Occupied: seats with a session (an offline, locked or serviced PC without one is not).
-      setHall({ occupied: o.seats.filter((s) => s.session).length, free: o.club.free, total: o.club.total });
+      setHall({
+        occupied: o.seats.filter((s) => s.session).length,
+        free: o.club.free,
+        total: o.club.total,
+        zones: new Set(o.seats.map((s) => s.pc.zone)).size,
+      });
       // The players' calls ride on the same poll (the map's own poll refreshes them faster).
       setCalls(o.calls);
     } catch {
@@ -458,15 +497,21 @@ export function App(): JSX.Element {
               <LogoMark size={30} />
             </div>
             <nav
+              ref={railNav}
               aria-label={t('Разделы')}
-              className="fade-y no-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto py-3"
+              className="no-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto py-2 [mask-image:linear-gradient(180deg,transparent_0,#000_8px,#000_calc(100%-8px),transparent_100%)]"
             >
               {GROUPS.map((g, gi) => {
                 const items = g.items.filter((s) => !s.ownerOnly || owner);
                 if (items.length === 0) return null;
                 return (
                   <div key={g.title} className={clsx('flex flex-col', gi > 0 && 'mt-2')}>
-                    <span className="px-1.5 pb-1.5 pt-1 text-center font-mono text-[9px] font-medium uppercase leading-[11px] tracking-[0.14em] text-muted/80">
+                    <span
+                      className={clsx(
+                        'px-1.5 text-center font-mono text-[9px] font-medium uppercase leading-[11px] tracking-[0.14em] text-muted',
+                        owner ? 'pb-1 pt-0.5' : 'pb-1.5 pt-1',
+                      )}
+                    >
                       {t(g.title)}
                     </span>
                     {items.map((s) => {
@@ -474,11 +519,14 @@ export function App(): JSX.Element {
                       return (
                         <button
                           key={s.id}
+                          ref={active ? railActive : undefined}
                           type="button"
                           onClick={() => go(s.id)}
                           aria-current={active ? 'page' : undefined}
                           className={clsx(
-                            'focus-ring-inset relative flex w-full shrink-0 flex-col items-center gap-[7px] px-0.5 py-3 text-center outline-none transition-colors',
+                            'focus-ring-inset relative flex w-full shrink-0 flex-col items-center px-0.5 text-center outline-none transition-colors',
+                            // The owner's sixteen sections sit tighter than the cashier's six.
+                            owner ? 'gap-1 py-2' : 'gap-[7px] py-3',
                             active
                               ? 'bg-[linear-gradient(90deg,rgb(var(--c-accent)/0.13),rgb(var(--c-accent)/0))] text-hi'
                               : 'text-muted hover:bg-text/[0.03] hover:text-text',
@@ -509,6 +557,7 @@ export function App(): JSX.Element {
                 );
               })}
             </nav>
+            <span aria-hidden="true" className="mx-2.5 h-px shrink-0 bg-accent/[0.08]" />
             <div className="flex shrink-0 flex-col items-center gap-2 px-1.5 pt-3">
               <InstallButton variant="rail" />
               <span
@@ -544,7 +593,7 @@ export function App(): JSX.Element {
                 </span>
                 <span className="label-sm whitespace-nowrap">
                   {hall
-                    ? t(owner ? 'Владелец · {n} ПК' : 'Касса · {n} ПК', { n: hall.total })
+                    ? `${t(owner ? 'Владелец · {n} ПК' : 'Касса · {n} ПК', { n: hall.total })}${hall.zones > 0 ? ` · ${zonesWord(hall.zones)}` : ''}`
                     : owner
                       ? t('Владелец')
                       : t('Касса')}

@@ -188,7 +188,11 @@ function dateTime(iso: string): string {
   });
 }
 
-function RuleCard({
+/**
+ * One rule: a hairline row of the «Правила» panel. The rule being edited wears the inset accent bar; an off rule mutes
+ * its name and sentence, not its switch or its buttons. «Удалить» asks once before it drops the rule from the draft.
+ */
+function RuleRow({
   rule,
   selected,
   onToggle,
@@ -201,12 +205,13 @@ function RuleCard({
   onEdit: () => void;
   onDelete: () => void;
 }): JSX.Element {
+  const [confirm, setConfirm] = useState(false);
+  const off = !rule.enabled;
   return (
-    <article
+    <li
       className={clsx(
-        'panel-solid relative flex flex-wrap items-center gap-x-6 gap-y-3 py-4 pl-5 pr-4',
-        selected && 'border-accent/60',
-        !rule.enabled && 'opacity-60',
+        'relative -mx-5 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-line/70 px-5 py-4 first:border-t-0',
+        selected && 'bg-accent/[0.05]',
       )}
     >
       {selected && (
@@ -217,13 +222,13 @@ function RuleCard({
       )}
       <Toggle checked={rule.enabled} onChange={onToggle} />
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <h3 className="truncate text-sm font-semibold text-hi">{rule.name}</h3>
+        <h3 className={clsx('truncate text-sm font-semibold', off ? 'text-muted' : 'text-hi')}>{rule.name}</h3>
         <p className="text-[13px] leading-relaxed text-dim">
           <span className="label mr-1.5">{t('Если')}</span>
-          <span className="text-text">{triggerText(rule.trigger)}</span>
-          <span className="mx-2 text-accent">→</span>
+          <span className={off ? 'text-muted' : 'text-text'}>{triggerText(rule.trigger)}</span>
+          <span className={clsx('mx-2', off ? 'text-muted' : 'text-accent')}>→</span>
           <span className="label mr-1.5">{t('то')}</span>
-          <span className="text-text">{actionText(rule.action)}</span>
+          <span className={off ? 'text-muted' : 'text-text'}>{actionText(rule.action)}</span>
         </p>
       </div>
       <div className="flex flex-col items-end gap-1.5 text-right">
@@ -234,15 +239,27 @@ function RuleCard({
           {rule.lastFiredAt ? dateTime(rule.lastFiredAt) : '—'}
         </span>
       </div>
-      <div className="flex gap-1">
-        <Button variant="ghost" size="sm" onClick={onEdit}>
-          {t('Изменить')}
-        </Button>
-        <Button variant="danger" size="sm" onClick={onDelete}>
-          {t('Удалить')}
-        </Button>
-      </div>
-    </article>
+      {confirm ? (
+        <span className="flex items-center gap-1">
+          <span className="mr-1 text-sm text-muted">{t('Удалить?')}</span>
+          <Button variant="danger" size="sm" onClick={onDelete}>
+            {t('Удалить')}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setConfirm(false)}>
+            {t('Отмена')}
+          </Button>
+        </span>
+      ) : (
+        <div className="flex gap-1">
+          <Button variant="ghost" size="sm" onClick={onEdit}>
+            {t('Изменить')}
+          </Button>
+          <Button variant="tertiary" size="sm" onClick={() => setConfirm(true)}>
+            {t('Удалить')}
+          </Button>
+        </div>
+      )}
+    </li>
   );
 }
 
@@ -437,7 +454,12 @@ export default function AutomationPage(): JSX.Element {
         caption={t('Настройка клуба')}
         actions={
           st.draft && (
-            <Button onClick={() => open(EMPTY)} disabled={editing !== null && editing.id === null}>
+            // The page's create action is the primary, unless the save bar's is on screen.
+            <Button
+              variant={st.dirty ? 'secondary' : 'primary'}
+              onClick={() => open(EMPTY)}
+              disabled={editing !== null && editing.id === null}
+            >
               {t('Новое правило')}
             </Button>
           )
@@ -447,28 +469,34 @@ export default function AutomationPage(): JSX.Element {
 
       {st.draft && (
         <div className={clsx('grid items-start gap-5', editing && 'xl:grid-cols-[minmax(0,1fr)_400px]')}>
-          <div className="flex min-w-0 flex-col gap-2.5">
-            {rules.map((r) => (
-              <RuleCard
-                key={r.id}
-                rule={r}
-                selected={editing?.id === r.id}
-                onToggle={(v) =>
-                  st.set(
-                    'automation',
-                    rules.map((x) => (x.id === r.id ? { ...x, enabled: v } : x)),
-                  )
-                }
-                onEdit={() => open(toDraft(r))}
-                onDelete={() => {
-                  st.set(
-                    'automation',
-                    rules.filter((x) => x.id !== r.id),
-                  );
-                  if (editing?.id === r.id) setEditing(null);
-                }}
-              />
-            ))}
+          <div className="flex min-w-0 flex-col">
+            {rules.length > 0 && (
+              <Section title={t('Правила')} bodyClassName="gap-0 pb-1 pt-0">
+                <ul className="flex flex-col">
+                  {rules.map((r) => (
+                    <RuleRow
+                      key={r.id}
+                      rule={r}
+                      selected={editing?.id === r.id}
+                      onToggle={(v) =>
+                        st.set(
+                          'automation',
+                          rules.map((x) => (x.id === r.id ? { ...x, enabled: v } : x)),
+                        )
+                      }
+                      onEdit={() => open(toDraft(r))}
+                      onDelete={() => {
+                        st.set(
+                          'automation',
+                          rules.filter((x) => x.id !== r.id),
+                        );
+                        if (editing?.id === r.id) setEditing(null);
+                      }}
+                    />
+                  ))}
+                </ul>
+              </Section>
+            )}
             {rules.length === 0 && (
               <div className="glass-panel px-5 py-12">
                 <EmptyState icon={<BoltIcon size={22} />} title={t('Правил пока нет')} />

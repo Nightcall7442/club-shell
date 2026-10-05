@@ -170,6 +170,7 @@ export function PayBox({
   disabled,
   amountLabel,
   balanceBefore,
+  totalShown,
   onPay,
 }: {
   /** Minor units the amount starts with (e.g. what a session lacks). */
@@ -195,6 +196,11 @@ export function PayBox({
   amountLabel?: string;
   /** The payee's balance now (minor units): the field shows what it becomes with the typed amount. */
   balanceBefore?: number;
+  /**
+   * The host already shows the `exact` amount (the bar's «Итого»): the box leaves out its own read-only «Сумма» line and
+   * starts at «Получено наличными».
+   */
+  totalShown?: boolean;
   /** Does what the money is for; a throw is shown inline under the buttons, a success spends the box. */
   onPay: (p: Payment) => Promise<void>;
 }): JSX.Element {
@@ -300,56 +306,60 @@ export function PayBox({
         }
       }}
     >
-      <StepLabel
-        htmlFor={amountId}
-        label={amountLabel ?? t('Сумма')}
-        hint={fixed ? t('Ровно эта сумма, до тийина') : t('Ввод с клавиатуры')}
-        mono
-        active={!fixed}
-      />
+      {!(fixed && totalShown) && (
+        <StepLabel
+          htmlFor={amountId}
+          label={amountLabel ?? t('Сумма')}
+          hint={fixed ? t('Ровно эта сумма, до тийина') : t('Ввод с клавиатуры')}
+          mono
+          active={!fixed}
+        />
+      )}
       {/* A typed amount is the hero field; an exact one (a debt, a guest's price, a cart) is a read-only 52 px line. */}
-      <div
-        className={clsx(
-          'mt-2 flex items-center gap-4 rounded-md border transition-shadow duration-200',
-          fixed
-            ? 'h-[52px] border-accent/[0.12] bg-text/[0.03] pl-4 pr-4'
-            : 'h-[76px] border-transparent bg-bg/[0.62] pl-5 pr-[18px] focus-within:shadow-glow [&:not(:focus-within)]:border-accent/[0.16]',
-        )}
-      >
-        <span className={clsx('flex min-w-0 flex-1 items-baseline', fixed ? 'gap-2' : 'gap-2.5')}>
-          <input
-            id={amountId}
-            ref={amountRef}
-            inputMode="numeric"
-            autoComplete="off"
-            autoFocus={autoFocus && !fixed}
-            // read-only, not disabled, while paying: the focus stays here for the next Enter after a refusal
-            readOnly={frozen || fixed}
-            aria-readonly={frozen || fixed}
-            className={clsx(
-              'tnum min-w-[1ch] max-w-full flex-[0_1_auto] bg-transparent font-display font-medium leading-none text-hi caret-accent outline-none [field-sizing:content] placeholder:text-muted/60',
-              fixed ? 'text-[22px] tracking-[-0.01em]' : 'text-[36px] tracking-[-0.02em]',
-            )}
-            value={fixed ? exactDigits(exact) : groupDigits(digits)}
-            placeholder="0"
-            onChange={(e) => {
-              if (!fixed) setDigits(digitsOf(e.target.value));
-            }}
-          />
-          <span className={clsx('shrink-0 font-medium leading-none text-muted', fixed ? 'text-[13px]' : 'text-base')}>
-            {t('сум')}
-          </span>
-        </span>
-        {after && (
-          <span className="flex shrink-0 flex-col items-end gap-[7px]">
-            <span className="label-sm text-[9px]">{t('Баланс станет')}</span>
-            <span className="flex items-baseline gap-1 whitespace-nowrap">
-              <span className="num-dot text-base leading-none text-text">{after.num}</span>
-              <span className="text-[10.5px] font-medium leading-none text-muted">{after.unit}</span>
+      {!(fixed && totalShown) && (
+        <div
+          className={clsx(
+            'mt-2 flex items-center gap-4 rounded-md border transition-shadow duration-200',
+            fixed
+              ? 'h-[52px] border-accent/[0.12] bg-text/[0.03] pl-4 pr-4'
+              : 'h-[76px] border-transparent bg-bg/[0.62] pl-5 pr-[18px] focus-within:shadow-glow [&:not(:focus-within)]:border-accent/[0.16]',
+          )}
+        >
+          <span className={clsx('flex min-w-0 flex-1 items-baseline', fixed ? 'gap-2' : 'gap-2.5')}>
+            <input
+              id={amountId}
+              ref={amountRef}
+              inputMode="numeric"
+              autoComplete="off"
+              autoFocus={autoFocus && !fixed}
+              // read-only, not disabled, while paying: the focus stays here for the next Enter after a refusal
+              readOnly={frozen || fixed}
+              aria-readonly={frozen || fixed}
+              className={clsx(
+                'tnum min-w-[1ch] max-w-full flex-[0_1_auto] bg-transparent font-display font-medium leading-none text-hi caret-accent outline-none [field-sizing:content] placeholder:text-muted/60',
+                fixed ? 'text-[22px] tracking-[-0.01em]' : 'text-[36px] tracking-[-0.02em]',
+              )}
+              value={fixed ? exactDigits(exact) : groupDigits(digits)}
+              placeholder="0"
+              onChange={(e) => {
+                if (!fixed) setDigits(digitsOf(e.target.value));
+              }}
+            />
+            <span className={clsx('shrink-0 font-medium leading-none text-muted', fixed ? 'text-[13px]' : 'text-base')}>
+              {t('сум')}
             </span>
           </span>
-        )}
-      </div>
+          {after && (
+            <span className="flex shrink-0 flex-col items-end gap-[7px]">
+              <span className="label-sm text-[9px]">{t('Баланс станет')}</span>
+              <span className="flex items-baseline gap-1 whitespace-nowrap">
+                <span className="num-dot text-base leading-none text-text">{after.num}</span>
+                <span className="text-[10.5px] font-medium leading-none text-muted">{after.unit}</span>
+              </span>
+            </span>
+          )}
+        </div>
+      )}
       {tooLow && <p className="mt-2 text-xs font-medium text-warning">{t('Не меньше {sum}', { sum: uzs(min) })}</p>}
       {tooHigh && (
         <p className="mt-2 text-xs font-medium text-warning">{t('Не больше {sum}', { sum: uzs(MAX_AMOUNT) })}</p>
@@ -382,7 +392,12 @@ export function PayBox({
         </>
       )}
 
-      <div className="mt-[18px] grid grid-cols-[minmax(0,1fr)_20px_minmax(0,1fr)] items-end gap-2.5">
+      <div
+        className={clsx(
+          'grid grid-cols-[minmax(0,1fr)_20px_minmax(0,1fr)] items-end gap-2.5',
+          !(fixed && totalShown) && 'mt-[18px]',
+        )}
+      >
         <div className="flex min-w-0 flex-col gap-2">
           <StepLabel htmlFor={receivedId} label={t('Получено наличными')} />
           <span className="relative block">
@@ -603,7 +618,7 @@ export interface TopUpContext {
 function TopUpHero({ title, context }: { title: string; context: TopUpContext }): JSX.Element {
   const cut = title.indexOf(' · ');
   return (
-    <div className="relative h-[150px] shrink-0 overflow-hidden">
+    <div className="relative h-[150px] shrink-0 overflow-hidden [@media(max-height:840px)]:h-[112px]">
       <GameArt src={context.art} variant="hero" edge />
       <div className="absolute left-6 right-[62px] top-3.5 flex h-9 items-center">
         {context.caption && <span className="label-sm truncate text-text/[0.86]">{context.caption}</span>}
@@ -680,7 +695,15 @@ export function TopUpSheet({
           <dd className="flex items-baseline gap-[5px] whitespace-nowrap">
             {bonus ? (
               <>
-                <span className="num-dot text-xl leading-none text-accent">{bonus.num}</span>
+                {/* The accent only for a real bonus: an empty «0» does not draw the eye. */}
+                <span
+                  className={clsx(
+                    'num-dot text-xl leading-none',
+                    (payee.bonus?.amount ?? 0) > 0 ? 'text-accent' : 'text-hi',
+                  )}
+                >
+                  {bonus.num}
+                </span>
                 <span className="text-[11.5px] font-medium leading-none text-muted">{bonus.unit}</span>
               </>
             ) : (

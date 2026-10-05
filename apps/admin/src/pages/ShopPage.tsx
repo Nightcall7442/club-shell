@@ -29,6 +29,7 @@ import {
   SaveBar,
   Section,
   Sheet,
+  Sum,
   Table,
   Toggle,
   inputCls,
@@ -53,16 +54,6 @@ const FILTER_KEEPS: Record<Filter, (p: Product, lowAt: number) => boolean> = {
   low: (p, lowAt) => isLow(p, lowAt) && p.inStock,
   out: (p) => !p.inStock || p.stockQty === 0,
 };
-
-/** Money in a table cell: mono digits, «сум» in Inter, muted. */
-function Sum({ minor }: { minor: number }): JSX.Element {
-  const { num, unit } = moneyParts(minor);
-  return (
-    <span className="whitespace-nowrap">
-      {num} <span className="font-sans font-medium text-muted">{unit}</span>
-    </span>
-  );
-}
 
 /** The keys of a save that changed, and with a new quantity the one the panel read (D-54). */
 function changesOf(

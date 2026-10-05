@@ -1092,6 +1092,12 @@ export const UZ: Record<string, string> = {
   'снять выбор': 'tanlovni bekor qilish',
   'Нажмите устройство, чтобы изменить его': 'Oʻzgartirish uchun qurilmani bosing',
   // --- end F:D ---
+  // --- F polish ---
+  '{n} зона': '{n} ta zona',
+  '{n} зоны': '{n} ta zona',
+  '{n} зон': '{n} ta zona',
+  Правила: 'Qoidalar',
+  // --- end F polish ---
 };
 export const EN: Record<string, string> = {
   'Выручка за период': 'Revenue for the period',
@@ -2182,4 +2188,10 @@ export const EN: Record<string, string> = {
   'снять выбор': 'deselect',
   'Нажмите устройство, чтобы изменить его': 'Click a device to edit it',
   // --- end F:D ---
+  // --- F polish ---
+  '{n} зона': '{n} zone',
+  '{n} зоны': '{n} zones',
+  '{n} зон': '{n} zones',
+  Правила: 'Rules',
+  // --- end F polish ---
 };

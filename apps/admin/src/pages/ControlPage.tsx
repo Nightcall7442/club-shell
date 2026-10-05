@@ -20,7 +20,7 @@ import { money } from '@/format';
 import { CheckIcon } from '@/icons';
 import { REASON_LABEL } from '@/labels';
 import { useClubSettings } from '@/settings';
-import { Badge, Button, Field, MoneyInput, Note, NumberInput, PageHeader, SaveBar, Section, Table } from '@/ui';
+import { Badge, Button, Field, MoneyInput, Note, NumberInput, PageHeader, SaveBar, Section, Sum, Table } from '@/ui';
 import { OwnerPage, PeriodChips } from './ownerKit';
 
 const uzs = (minor: number): string => money({ amount: minor, currency: 'UZS' });
@@ -252,8 +252,8 @@ export default function ControlPage(): JSX.Element {
                   render: (s) => <span className="font-medium text-hi">{s.staffName}</span>,
                 },
                 { key: 'ops', title: t('Операций'), num: true, render: (s) => s.operations },
-                { key: 'topups', title: t('Пополнения'), num: true, render: (s) => uzs(s.topUps) },
-                { key: 'refunds', title: t('Возвраты'), num: true, render: (s) => uzs(s.refunds) },
+                { key: 'topups', title: t('Пополнения'), num: true, render: (s) => <Sum minor={s.topUps} /> },
+                { key: 'refunds', title: t('Возвраты'), num: true, render: (s) => <Sum minor={s.refunds} /> },
                 { key: 'early', title: t('Ранние закрытия'), num: true, render: (s) => s.earlyEnds },
                 { key: 'disc', title: t('Скидки'), num: true, render: (s) => s.discounts },
                 {
@@ -261,7 +261,7 @@ export default function ControlPage(): JSX.Element {
                   title: t('Недостача'),
                   num: true,
                   render: (s) => (
-                    <span className={clsx(s.shortfall > 0 && 'font-semibold text-warning')}>{uzs(s.shortfall)}</span>
+                    <Sum minor={s.shortfall} className={clsx(s.shortfall > 0 && 'font-semibold text-warning')} />
                   ),
                 },
                 { key: 'flags', title: t('Сигналы'), num: true, render: (s) => <FlagCounts flags={s.flags} /> },
@@ -299,9 +299,7 @@ export default function ControlPage(): JSX.Element {
                       </p>
                     </div>
                     {f.amount > 0 && (
-                      <span className="tnum shrink-0 font-mono text-[12.5px] font-semibold text-text">
-                        {uzs(f.amount)}
-                      </span>
+                      <Sum minor={f.amount} className="tnum shrink-0 font-mono text-[12.5px] font-semibold text-text" />
                     )}
                   </li>
                 ))}
@@ -338,7 +336,7 @@ export default function ControlPage(): JSX.Element {
                   title: t('Сумма'),
                   num: true,
                   width: '9rem',
-                  render: (e) => (e.amount > 0 ? uzs(e.amount) : '—'),
+                  render: (e) => (e.amount > 0 ? <Sum minor={e.amount} /> : '—'),
                 },
               ]}
             />

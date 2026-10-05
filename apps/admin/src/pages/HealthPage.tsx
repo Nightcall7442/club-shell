@@ -309,7 +309,15 @@ export default function HealthPage({ isOwner }: { isOwner?: boolean }): JSX.Elem
               key: 'pc',
               title: t('ПК'),
               width: '6rem',
-              render: (p) => <span className="font-medium text-text">{p.name}</span>,
+              // The PC's number as on its tile and in «Нужен ремонт» above; the full name on hover.
+              render: (p) => (
+                <span
+                  title={p.name}
+                  className="tnum font-display text-[15px] font-medium leading-none tracking-[-0.01em] text-hi"
+                >
+                  {p.name.replace(/^PC-/, '')}
+                </span>
+              ),
             },
             {
               key: 'zone',

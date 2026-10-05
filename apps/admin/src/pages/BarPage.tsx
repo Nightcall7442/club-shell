@@ -713,7 +713,7 @@ export default function BarPage(): JSX.Element {
           />
         </div>
 
-        <div className="thin-scrollbar flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4 [@media(max-height:840px)]:gap-3">
+        <div className="thin-scrollbar fade-y flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4 [@media(max-height:840px)]:gap-3">
           {done && (
             <Note tone="ok" role="status">
               <span className="flex items-center justify-between gap-3">
@@ -921,6 +921,7 @@ export default function BarPage(): JSX.Element {
                   verb={t('Продать')}
                   autoFocus={false}
                   hints={false}
+                  totalShown
                   disabled={total <= 0 ? t('Корзина пуста') : null}
                   onPay={payMethod}
                 />
@@ -944,8 +945,8 @@ export default function BarPage(): JSX.Element {
           )}
         </div>
 
-        {/* The keys legend gives its room to the pay box on a short counter screen (1366×768). */}
-        <footer className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-accent/[0.08] px-4 py-3 text-[11.5px] leading-5 text-muted [@media(max-height:840px)]:hidden">
+        {/* The keys legend gives its room to the pay box up to a 960 px tall screen (1440×900 and 1366×768). */}
+        <footer className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-accent/[0.08] px-4 py-3 text-[11.5px] leading-5 text-muted [@media(max-height:960px)]:hidden">
           <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
             <Kbd>+</Kbd> <Kbd>−</Kbd> <Kbd>Del</Kbd> {t('— последняя позиция')}
           </span>

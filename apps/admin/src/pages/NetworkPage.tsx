@@ -15,8 +15,8 @@ const nf = new Intl.NumberFormat('ru-RU');
 const sum = (minor: number): string => nf.format(Math.round(minor / 100));
 
 /**
- * Revenue per day as thin bars, scaled to the busiest club of the network so clubs compare at a glance: one accent
- * series, today (the last bar) at full strength.
+ * Revenue per day as thin bars, scaled to the busiest club of the network so clubs compare at a glance: past days
+ * in `dim` at 40 %, today (the last bar) the one accent bar (spec §9).
  */
 function Bars({ values, max }: { values: number[]; max: number }): JSX.Element {
   return (
@@ -26,7 +26,7 @@ function Bars({ values, max }: { values: number[]; max: number }): JSX.Element {
           key={i}
           className={clsx(
             'min-w-0 flex-1 rounded-t-[1px]',
-            i === values.length - 1 ? 'bg-accent shadow-[0_0_8px_rgb(var(--c-accent)/0.5)]' : 'bg-accent/45',
+            i === values.length - 1 ? 'bg-accent shadow-[0_0_8px_rgb(var(--c-accent)/0.5)]' : 'bg-dim/40',
           )}
           style={{ height: `${Math.max(2, (v / Math.max(1, max)) * 100)}%` }}
         />

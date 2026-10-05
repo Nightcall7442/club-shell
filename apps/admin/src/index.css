@@ -164,8 +164,8 @@
   }
 
   /*
-   * KPI cards (`KpiCard`, the strip in `kpi.tsx`): 92 high; on a short screen (≤ 840 px, a 1366×768 counter) 68 high,
-   * the sub line moving up beside the value.
+   * KPI cards (`KpiCard`, the strip in `kpi.tsx`): 92 high; on a short screen (≤ 840 px, a 1366×768 counter) 68 high
+   * with F's stacked anatomy kept (label, value, sub), each a size smaller.
    */
   .kpi-card {
     height: 92px;
@@ -185,33 +185,19 @@
   @media (max-height: 840px) {
     .kpi-card {
       height: 68px;
-      padding-top: 10px;
-      padding-bottom: 10px;
+      padding: 8px 14px 8px 16px;
     }
-    .kpi-card .kpi-body {
-      display: grid;
-      grid-template-columns: auto minmax(0, 1fr);
-      grid-template-areas:
-        'label label'
-        'value sub';
-      align-items: baseline;
-      align-content: space-between;
-      column-gap: 12px;
-    }
-    .kpi-card .kpi-label {
-      grid-area: label;
-    }
-    .kpi-card .kpi-value {
-      grid-area: value;
-    }
-    .kpi-card .kpi-sub {
-      grid-area: sub;
+    .kpi-attention.kpi-card {
+      padding-left: 18px;
     }
     .kpi-card .kpi-big {
-      font-size: 28px;
+      font-size: 26px;
     }
     .kpi-card .kpi-money {
-      font-size: 24px;
+      font-size: 22px;
+    }
+    .kpi-card .kpi-sub {
+      font-size: 11px;
     }
   }
 

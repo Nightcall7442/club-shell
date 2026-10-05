@@ -131,6 +131,22 @@ function operationPaid(op: Operation): string | null {
   return null;
 }
 
+/**
+ * The map's narrow feed: the row's right column already shows what the drawer took, so a payment of exactly that says
+ * only its method (F: «Coca-Cola ×2, Lay's · Наличные»); anything else reads as on the Смена page.
+ */
+function operationPaidBrief(op: Operation): string | null {
+  const drawer = Math.abs(op.drawer);
+  if (drawer > 0) {
+    if (op.paid && op.paid.amount === drawer) return methodName(op.paid.method);
+    if (op.kind === 'shopVoid' && op.method && op.method !== 'balance' && op.amount === drawer)
+      return methodName(op.method);
+    if (op.kind === 'payout' && op.amount === drawer) return methodName('cash');
+    if ((op.kind === 'cashIn' || op.kind === 'cashOut') && op.amount === drawer) return null;
+  }
+  return operationPaid(op);
+}
+
 /** Reprints the operation's slip, marked «Копия». */
 export function reprint(op: Operation, club: string | null): void {
   if (op.kind === 'cashIn' || op.kind === 'cashOut') {
@@ -235,6 +251,7 @@ function Row({
   club,
   onVoid,
   roomy,
+  shiftStaff,
 }: {
   op: Operation;
   club: string | null;
@@ -242,6 +259,8 @@ function Row({
   onVoid?: () => void;
   /** The Смена page: a little more air and type than the map's column. */
   roomy: boolean;
+  /** Who runs the open shift: the map's feed leaves that name out of the row (every row would repeat it). */
+  shiftStaff: string | null;
 }): JSX.Element {
   const who = [
     op.client ? (op.client.role === 'guest' ? t('Гость') : op.client.displayName) : null,
@@ -249,13 +268,15 @@ function Row({
   ]
     .filter(Boolean)
     .join(' · ');
-  const paid = operationPaid(op);
+  const paid = roomy ? operationPaid(op) : operationPaidBrief(op);
+  const staff = roomy || op.staffName !== shiftStaff ? op.staffName : null;
   const printable = op.kind === 'cashIn' || op.kind === 'cashOut' || RECEIPT_KIND[op.kind] !== undefined;
+  const sub = [who, paid, staff].filter(Boolean).join(' · ');
   return (
     <li
       className={clsx(
         'group/row grid items-start gap-x-2.5 border-t border-accent/[0.07]',
-        roomy ? 'grid-cols-[44px_minmax(0,1fr)_auto] py-2' : 'grid-cols-[38px_minmax(0,1fr)_auto] py-[5px]',
+        roomy ? 'grid-cols-[44px_minmax(0,1fr)_auto] py-2' : 'grid-cols-[38px_minmax(0,1fr)_auto] py-[3px]',
       )}
     >
       <span
@@ -280,11 +301,13 @@ function Row({
           )}
           <span className="truncate">{operationWhat(op)}</span>
         </span>
-        <span
-          className={clsx('block truncate text-muted', roomy ? 'text-xs leading-4' : 'text-[10.5px] leading-[14px]')}
-        >
-          {[who, paid, op.staffName].filter(Boolean).join(' · ')}
-        </span>
+        {sub && (
+          <span
+            className={clsx('block truncate text-muted', roomy ? 'text-xs leading-4' : 'text-[10.5px] leading-[14px]')}
+          >
+            {sub}
+          </span>
+        )}
       </span>
       <span className="flex flex-col items-end">
         <span
@@ -463,7 +486,11 @@ export function OperationsFeed({
       )}
       <ol
         aria-label={t('Операции смены')}
-        className="thin-scrollbar -mr-1.5 flex min-h-0 flex-col overflow-y-auto pr-1.5"
+        className={clsx(
+          'thin-scrollbar -mr-1.5 flex min-h-0 flex-col overflow-y-auto pr-1.5',
+          // The map's feed ends in a fade, not a row cut in half (the Смена page lists it all).
+          !roomy && '[mask-image:linear-gradient(180deg,#000_calc(100%-18px),transparent)]',
+        )}
       >
         {items.map((op) => (
           <Row
@@ -471,6 +498,7 @@ export function OperationsFeed({
             op={op}
             club={club.clubName}
             roomy={roomy}
+            shiftStaff={openShift?.staffName ?? null}
             onVoid={
               voidable(op, { owner, openShiftId: openShift?.id ?? null, feedShiftId: page?.shift?.id ?? null })
                 ? () => setVoiding(op)
@@ -486,11 +514,23 @@ export function OperationsFeed({
           className="border-t border-accent/[0.07]"
         />
       )}
-      {next && (
-        <Button variant="ghost" size="sm" className="self-center" disabled={loadingMore} onClick={() => void more()}>
-          {loadingMore ? '…' : t('Ещё')}
-        </Button>
-      )}
+      {next &&
+        (roomy ? (
+          <Button variant="ghost" size="sm" className="self-center" disabled={loadingMore} onClick={() => void more()}>
+            {loadingMore ? '…' : t('Ещё')}
+          </Button>
+        ) : (
+          // The map's feed: a mono caption under the fade («ЕЩЁ»), not a full button row.
+          <Button
+            variant="ghost"
+            size="xs"
+            className="mb-1 shrink-0 self-center font-mono !text-[9.5px] uppercase tracking-[0.14em] text-muted"
+            disabled={loadingMore}
+            onClick={() => void more()}
+          >
+            {loadingMore ? '…' : t('Ещё')}
+          </Button>
+        ))}
       {voiding && (
         <VoidSheet
           op={voiding}

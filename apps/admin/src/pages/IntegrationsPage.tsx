@@ -217,7 +217,7 @@ export default function IntegrationsPage(): JSX.Element {
                 width: '6.5rem',
                 render: (h) => (
                   <Button
-                    variant="danger"
+                    variant="tertiary"
                     size="sm"
                     onClick={() =>
                       st.set(

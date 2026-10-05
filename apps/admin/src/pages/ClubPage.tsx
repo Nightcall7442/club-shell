@@ -70,7 +70,7 @@ function Preview({ s }: { s: ClubSettings }): JSX.Element {
     >
       <div className="absolute inset-0 bg-gradient-to-b from-bg/70 via-bg/40 to-bg/90" />
       <div className="relative flex h-full flex-col">
-        <div className="border-b border-white/10 bg-bg/70 px-3">
+        <div className="border-b border-line bg-bg/70 px-3">
           <div className="flex items-center justify-between gap-3 pt-2">
             <div className="flex min-w-0 items-center gap-1.5">
               {s.branding.logoUrl?.trim() ? (
@@ -78,9 +78,9 @@ function Preview({ s }: { s: ClubSettings }): JSX.Element {
               ) : (
                 <span className="h-3 w-3 shrink-0 rounded-sm" style={{ background: accent }} />
               )}
-              <span className="truncate font-display text-[0.62rem] font-medium">{s.branding.clubName || '—'}</span>
+              <span className="truncate font-display text-[10px] font-medium">{s.branding.clubName || '—'}</span>
             </div>
-            <span className="tnum shrink-0 font-mono text-[0.55rem] text-muted">{t('{n} сум', { n: '45 000' })}</span>
+            <span className="tnum shrink-0 font-mono text-[9px] text-muted">{t('{n} сум', { n: '45 000' })}</span>
           </div>
           {/* The kiosk's tab row, drawn: a picture of the kiosk, not a navigation of this console. */}
           <div className="flex flex-wrap gap-x-3">
@@ -88,7 +88,7 @@ function Preview({ s }: { s: ClubSettings }): JSX.Element {
               <span
                 key={x.label}
                 className={clsx(
-                  'whitespace-nowrap border-b-2 py-1.5 text-[0.58rem]',
+                  'whitespace-nowrap border-b-2 py-1.5 text-[9.5px]',
                   i === 0 ? 'text-text' : 'border-transparent text-muted',
                 )}
                 style={i === 0 ? { borderColor: accent } : undefined}
@@ -101,20 +101,20 @@ function Preview({ s }: { s: ClubSettings }): JSX.Element {
         <div className="flex flex-1 flex-col justify-end gap-2 p-3">
           {banner && (
             <div
-              className="h-10 w-2/3 rounded-sm border border-white/10 bg-cover bg-center"
+              className="h-10 w-2/3 rounded-sm border border-line bg-cover bg-center"
               style={{ backgroundImage: `url("${banner.imageUrl}")` }}
             />
           )}
           <span className="font-display text-sm font-medium leading-tight">Counter-Strike 2</span>
           <div className="flex items-center gap-1.5">
             <span
-              className="cut-corners px-3 py-1 text-[0.55rem] font-semibold text-on-accent"
+              className="cut-corners px-3 py-1 text-[9px] font-semibold text-on-accent"
               style={{ ['--fill' as string]: accent }}
             >
               {t('Играть')}
             </span>
             {s.features.callAdmin && (
-              <span className="rounded-sm border border-white/15 px-2 py-1 text-[0.55rem] text-muted">
+              <span className="rounded-sm border border-text/[0.12] px-2 py-1 text-[9px] text-muted">
                 {t('Вызов администратора')}
               </span>
             )}
@@ -123,7 +123,7 @@ function Preview({ s }: { s: ClubSettings }): JSX.Element {
             {[0, 1, 2, 3, 4].map((i) => (
               <span
                 key={i}
-                className={clsx('aspect-[3/4] rounded-sm border bg-white/[0.04]', i === 0 ? '' : 'border-white/10')}
+                className={clsx('aspect-[3/4] rounded-sm border bg-text/[0.04]', i === 0 ? '' : 'border-line')}
                 style={i === 0 ? { borderColor: accent } : undefined}
               />
             ))}
@@ -296,7 +296,7 @@ export default function ClubPage(): JSX.Element {
                   width: '6.5rem',
                   render: (b) => (
                     <Button
-                      variant="danger"
+                      variant="tertiary"
                       size="sm"
                       onClick={() =>
                         st.set(

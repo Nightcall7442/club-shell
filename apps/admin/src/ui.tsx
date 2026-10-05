@@ -16,7 +16,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import clsx from 'clsx';
-import { moneyParts } from '@/format';
+import { exactDigits, moneyParts } from '@/format';
 import { t } from '@/i18n';
 import { AlertTriangleIcon, CloseIcon } from '@/icons';
 
@@ -64,7 +64,10 @@ export const Button = forwardRef<
       type="button"
       {...rest}
       className={clsx(
-        'focus-ring inline-flex select-none items-center justify-center gap-2 whitespace-nowrap rounded-md disabled:cursor-not-allowed disabled:opacity-40',
+        // `font-sans`: a button in a `num` table cell does not take the cell's mono.
+        'focus-ring inline-flex select-none items-center justify-center gap-2 whitespace-nowrap rounded-md font-sans disabled:cursor-not-allowed',
+        // A primary not ready yet keeps its cut-corner shape on a neutral fill (no washed-out accent slab); the rest fade.
+        variant === 'primary' ? 'disabled:text-muted disabled:[--fill:rgb(var(--c-text)/0.06)]' : 'disabled:opacity-40',
         BUTTON_SIZE[size],
         BUTTON_VARIANT[variant],
         variant === 'primary' && size === 'xl' && '[--cut:12px]',
@@ -375,6 +378,28 @@ export function Section({
   );
 }
 
+/**
+ * Money in a table cell or a list (spec §8.8): the digits in the cell's face (mono in a `num` column), «сум» in Inter,
+ * muted. `exact` keeps the tiyin (`45 000,50`); null or undefined reads «—».
+ */
+export function Sum({
+  minor,
+  exact,
+  className,
+}: {
+  minor: number | null | undefined;
+  exact?: boolean;
+  className?: string;
+}): JSX.Element {
+  if (minor === null || minor === undefined) return <span className={className}>—</span>;
+  return (
+    <span className={clsx('whitespace-nowrap', className)}>
+      {exact ? exactDigits(minor) : moneyParts(minor).num}{' '}
+      <span className="font-sans font-medium text-muted">{t('сум')}</span>
+    </span>
+  );
+}
+
 /** Strict data table: mono header row, hairline rows, right-aligned numeric columns via `num`. */
 export function Table<T>({
   rows,
@@ -393,48 +418,52 @@ export function Table<T>({
 }): JSX.Element {
   return (
     <div className="thin-scrollbar overflow-x-auto">
-      <table className="w-full border-collapse text-[13px]">
-        <thead>
-          <tr className="h-9 border-b border-line">
-            {columns.map((c) => (
-              <th
-                key={c.key}
-                style={{ width: c.width }}
-                className={clsx('label-sm px-3 py-2 font-medium', c.num ? 'text-right' : 'text-left')}
-              >
-                {c.title}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => {
-            const k = rowKey(r);
-            const selected = selectedKey === k;
-            return (
-              <tr
-                key={k}
-                onClick={onRowClick ? () => onRowClick(r) : undefined}
-                className={clsx(
-                  'h-11 border-t border-line/70 first:border-t-0',
-                  onRowClick && 'cursor-pointer hover:bg-text/[0.03]',
-                  selected && 'bg-accent/[0.07] shadow-[inset_2px_0_0_rgb(var(--c-accent))]',
-                )}
-              >
-                {columns.map((c) => (
-                  <td
-                    key={c.key}
-                    className={clsx('px-3 py-2.5 align-middle', c.num && 'tnum text-right font-mono text-[12.5px]')}
-                  >
-                    {c.render(r)}
-                  </td>
-                ))}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      {rows.length === 0 && <p className="px-3 py-8 text-center text-sm text-muted">{empty ?? '—'}</p>}
+      {rows.length === 0 ? (
+        // Nothing to list: the F empty state (mono caption), not a lone header row over a grey line.
+        <EmptyState compact title={empty ?? '—'} />
+      ) : (
+        <table className="w-full border-collapse text-[13px]">
+          <thead>
+            <tr className="h-9 border-b border-line">
+              {columns.map((c) => (
+                <th
+                  key={c.key}
+                  style={{ width: c.width }}
+                  className={clsx('label-sm px-3 py-2 font-medium', c.num ? 'text-right' : 'text-left')}
+                >
+                  {c.title}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const k = rowKey(r);
+              const selected = selectedKey === k;
+              return (
+                <tr
+                  key={k}
+                  onClick={onRowClick ? () => onRowClick(r) : undefined}
+                  className={clsx(
+                    'h-11 border-t border-line/70 first:border-t-0',
+                    onRowClick && 'cursor-pointer hover:bg-text/[0.03]',
+                    selected && 'bg-accent/[0.07] shadow-[inset_2px_0_0_rgb(var(--c-accent))]',
+                  )}
+                >
+                  {columns.map((c) => (
+                    <td
+                      key={c.key}
+                      className={clsx('px-3 py-2.5 align-middle', c.num && 'tnum text-right font-mono text-[12.5px]')}
+                    >
+                      {c.render(r)}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }
@@ -590,7 +619,8 @@ export function Sheet({
   return createPortal(
     <div className="thin-scrollbar fixed inset-0 z-50 overflow-y-auto">
       <div aria-hidden="true" className="scrim anim-fade" />
-      <div className="relative flex min-h-full items-center justify-center p-6">
+      {/* A short counter screen (1366×768): less margin and air, so a pay sheet fits without scrolling. */}
+      <div className="relative flex min-h-full items-center justify-center p-6 [@media(max-height:840px)]:p-3">
         <div
           ref={panel}
           role="dialog"
@@ -623,9 +653,11 @@ export function Sheet({
               {onClose && <SheetClose onClose={onClose} className="-mr-1" />}
             </header>
           )}
-          <div className="flex flex-col gap-4 px-6 pb-[22px] pt-[18px]">{children}</div>
+          <div className="flex flex-col gap-4 px-6 pb-[22px] pt-[18px] [@media(max-height:840px)]:gap-3 [@media(max-height:840px)]:pb-4 [@media(max-height:840px)]:pt-3.5">
+            {children}
+          </div>
           {footer && (
-            <footer className="mx-6 flex min-h-14 items-center justify-between gap-3 border-t border-accent/[0.08] py-4 text-[12.5px] text-dim">
+            <footer className="mx-6 flex min-h-14 items-center justify-between gap-3 border-t border-accent/[0.08] py-4 text-[12.5px] text-dim [@media(max-height:840px)]:min-h-11 [@media(max-height:840px)]:py-2.5">
               {footer}
             </footer>
           )}
@@ -1205,8 +1237,15 @@ export function EmptyState({
           {icon}
         </span>
       )}
-      <p className={clsx('font-display text-base font-medium leading-[22px] text-hi', icon && 'mt-4')}>{title}</p>
-      {text && <p className="mt-1.5 text-[13px] leading-5 text-dim">{text}</p>}
+      <p
+        className={clsx(
+          'font-display text-base font-medium leading-[22px] text-hi [text-wrap:balance]',
+          icon && 'mt-4',
+        )}
+      >
+        {title}
+      </p>
+      {text && <p className="mt-1.5 text-[13px] leading-5 text-dim [text-wrap:balance]">{text}</p>}
       {hint && <div className="label mt-3 flex items-center gap-2">{hint}</div>}
     </div>
   );
