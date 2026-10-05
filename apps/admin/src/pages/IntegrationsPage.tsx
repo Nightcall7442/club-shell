@@ -9,7 +9,21 @@ import { clubApi, type ClubEvent, type Webhook } from '@/api';
 import { describe } from '@/errors';
 import { dateLocale, t } from '@/i18n';
 import { useClubSettings } from '@/settings';
-import { Button, Field, Input, MoneyInput, Note, PageHeader, SaveBar, Section, Table, Toggle } from '@/ui';
+import {
+  Button,
+  Chip,
+  Field,
+  Input,
+  MoneyInput,
+  Note,
+  PageHeader,
+  SaveBar,
+  Section,
+  StatusDot,
+  Table,
+  Toggle,
+} from '@/ui';
+import { FieldGroup, OwnerPage } from './ownerKit';
 
 type NoteState = { text: string; tone: 'ok' | 'err' } | null;
 
@@ -34,25 +48,31 @@ function dateTime(iso: string): string {
   });
 }
 
+/**
+ * An event code as integrations see it (`shiftClosed`, camel case: not uppercased), its name in the tooltip: a quiet mono
+ * tag in a webhook's row, an outlined chip (`aria-pressed`) when picking events for a new one.
+ */
 function EventChip({ ev, on, onClick }: { ev: ClubEvent; on?: boolean; onClick?: () => void }): JSX.Element {
-  const cls = 'rounded border px-1.5 py-0.5 font-mono text-[0.68rem] leading-none';
   if (!onClick) {
     return (
-      <span title={t(EVENT_LABEL[ev])} className={clsx(cls, 'border-line bg-white/[0.03] text-muted')}>
+      <span
+        title={t(EVENT_LABEL[ev])}
+        className="inline-flex h-5 items-center rounded-sm border border-text/[0.12] bg-bg/40 px-1.5 font-mono text-[10.5px] leading-none text-soft"
+      >
         {ev}
       </span>
     );
   }
   return (
-    <button
-      type="button"
+    <Chip
+      tone="outlined"
+      pressed={Boolean(on)}
       title={t(EVENT_LABEL[ev])}
-      aria-pressed={on}
       onClick={onClick}
-      className={clsx(cls, 'choice focus-ring h-8 px-2.5', on ? 'choice-on text-text' : 'text-muted')}
+      className="font-mono text-xs"
     >
       {ev}
-    </button>
+    </Chip>
   );
 }
 
@@ -77,10 +97,10 @@ export default function IntegrationsPage(): JSX.Element {
 
   if (!s) {
     return (
-      <div className="flex flex-col gap-5">
-        <PageHeader title={t('Уведомления и API')} />
-        {st.error && <p className="text-sm text-danger">{st.error}</p>}
-      </div>
+      <OwnerPage>
+        <PageHeader title={t('Уведомления и API')} caption={t('Настройка клуба')} />
+        {st.error && <Note tone="err">{st.error}</Note>}
+      </OwnerPage>
     );
   }
 
@@ -136,9 +156,9 @@ export default function IntegrationsPage(): JSX.Element {
   };
 
   return (
-    <div className="flex flex-col gap-5">
-      <PageHeader title={t('Уведомления и API')} />
-      {st.error && <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{st.error}</p>}
+    <OwnerPage>
+      <PageHeader title={t('Уведомления и API')} caption={t('Настройка клуба')} />
+      {st.error && <Note tone="err">{st.error}</Note>}
 
       <Section title={t('Вебхуки')} bodyClassName="p-0 gap-0">
         <div className="p-2">
@@ -150,7 +170,7 @@ export default function IntegrationsPage(): JSX.Element {
               {
                 key: 'url',
                 title: t('Адрес'),
-                render: (h) => <span className="break-all font-mono text-xs">{h.url}</span>,
+                render: (h) => <span className="break-all font-mono text-xs text-text">{h.url}</span>,
               },
               {
                 key: 'events',
@@ -178,15 +198,16 @@ export default function IntegrationsPage(): JSX.Element {
                     <span className="text-muted">—</span>
                   ) : (
                     <span className="flex items-center gap-2">
+                      <StatusDot tone={h.lastStatus >= 200 && h.lastStatus < 300 ? 'ok' : 'danger'} />
                       <span
                         className={clsx(
-                          'tnum font-mono text-xs',
-                          h.lastStatus >= 200 && h.lastStatus < 300 ? 'text-success' : 'text-danger',
+                          'tnum font-mono text-xs font-medium',
+                          h.lastStatus >= 200 && h.lastStatus < 300 ? 'text-text' : 'text-danger-ink',
                         )}
                       >
                         {h.lastStatus === 0 ? t('нет связи') : h.lastStatus}
                       </span>
-                      {h.lastAt && <span className="tnum text-xs text-muted">{dateTime(h.lastAt)}</span>}
+                      {h.lastAt && <span className="tnum font-mono text-[11px] text-muted">{dateTime(h.lastAt)}</span>}
                     </span>
                   ),
               },
@@ -212,7 +233,7 @@ export default function IntegrationsPage(): JSX.Element {
             ]}
           />
         </div>
-        <div className="flex flex-col gap-3 border-t border-line p-5">
+        <div className="flex flex-col gap-4 border-t border-accent/[0.08] p-5">
           <div className="flex flex-wrap items-end gap-3">
             <Field label={t('Новый вебхук')} className="min-w-[18rem] flex-1">
               <Input
@@ -225,22 +246,25 @@ export default function IntegrationsPage(): JSX.Element {
             </Field>
             <Button onClick={addHook}>{t('Добавить')}</Button>
           </div>
-          <div className="flex flex-wrap gap-1.5">
-            {ALL_EVENTS.map((ev) => (
-              <EventChip
-                key={ev}
-                ev={ev}
-                on={hookEvents.includes(ev)}
-                onClick={() => setHookEvents((xs) => (xs.includes(ev) ? xs.filter((x) => x !== ev) : [...xs, ev]))}
-              />
-            ))}
-          </div>
-          {hookError && <p className="text-sm text-danger">{hookError}</p>}
+          <FieldGroup label={t('События')}>
+            <div className="flex flex-wrap gap-1.5">
+              {ALL_EVENTS.map((ev) => (
+                <EventChip
+                  key={ev}
+                  ev={ev}
+                  on={hookEvents.includes(ev)}
+                  onClick={() => setHookEvents((xs) => (xs.includes(ev) ? xs.filter((x) => x !== ev) : [...xs, ev]))}
+                />
+              ))}
+            </div>
+          </FieldGroup>
+          {hookError && <p className="text-xs font-medium text-warning">{hookError}</p>}
         </div>
         {s.notifications && (
-          <div className="border-t border-line p-5">
+          <div className="border-t border-accent/[0.08] p-5">
             <Field label={t('Крупное пополнение — от')} className="max-w-xs">
               <MoneyInput
+                compact
                 value={s.notifications.bigTopupAt}
                 onChange={(v) => st.set('notifications', { bigTopupAt: v })}
               />
@@ -279,7 +303,7 @@ export default function IntegrationsPage(): JSX.Element {
             )}
           </div>
         </Field>
-        <pre className="overflow-x-auto rounded-md border border-line bg-bg px-3 py-2.5 font-mono text-xs leading-relaxed text-muted">
+        <pre className="well thin-scrollbar overflow-x-auto px-3.5 py-3 font-mono text-xs leading-relaxed text-muted">
           {'curl -H "Authorization: Bearer '}
           <span className="text-text">{'<key>'}</span>
           {'" http://<server>/api/v1/admin/reports?days=7'}
@@ -293,6 +317,6 @@ export default function IntegrationsPage(): JSX.Element {
         onReset={st.reset}
         label={t('Есть несохранённые изменения')}
       />
-    </div>
+    </OwnerPage>
   );
 }

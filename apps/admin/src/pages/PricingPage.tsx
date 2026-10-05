@@ -19,9 +19,11 @@ import {
 import { describe } from '@/errors';
 import { money } from '@/format';
 import { dateLocale, t } from '@/i18n';
+import { CloseIcon } from '@/icons';
 import { useClubSettings, type ClubSettingsState } from '@/settings';
 import {
   Button,
+  Chip,
   Field,
   Input,
   MoneyInput,
@@ -30,9 +32,12 @@ import {
   PageHeader,
   SaveBar,
   Section,
+  Segmented,
   Table,
+  Tabs,
   inputCls,
 } from '@/ui';
+import { FieldGroup, OwnerPage } from './ownerKit';
 
 type Tab = 'tariffs' | 'days' | 'groups' | 'bonus' | 'happy' | 'loyalty';
 
@@ -58,32 +63,47 @@ const DAYS: { label: string; key: TariffTimeWindow['days'][number]; idx: number 
 
 type NoteState = { text: string; tone: 'ok' | 'err' } | null;
 
+/** A native colour picker as a 44 px swatch well. */
+const COLOR_INPUT =
+  'focus-ring h-11 w-12 shrink-0 cursor-pointer rounded-md border border-accent/[0.16] bg-bg/50 p-1 hover:border-accent/[0.26]';
+
 const uid = (): string => Math.random().toString(36).slice(2, 10);
 
-function Chip({
+/** A toggle of a set (a weekday, a zone): an outlined chip, `aria-pressed`. `fill` stretches it over its grid cell. */
+function Pick({
   on,
   onClick,
   children,
-  small,
+  fill,
 }: {
   on: boolean;
   onClick: () => void;
   children: React.ReactNode;
-  small?: boolean;
+  fill?: boolean;
 }): JSX.Element {
   return (
-    <button
-      type="button"
-      aria-pressed={on}
-      onClick={onClick}
-      className={clsx(
-        'choice focus-ring inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md font-medium transition-colors',
-        small ? 'h-8 min-w-8 px-2 text-xs' : 'h-10 px-3 text-sm',
-        on && 'choice-on',
-      )}
-    >
+    <Chip tone="outlined" pressed={on} onClick={onClick} className={clsx(fill && 'justify-center !px-0')}>
       {children}
-    </button>
+    </Chip>
+  );
+}
+
+/** The seven weekday toggles of a time window or a happy hour, Monday first. */
+function WeekdayPicks({
+  on,
+  onToggle,
+}: {
+  on: (d: (typeof DAYS)[number]) => boolean;
+  onToggle: (d: (typeof DAYS)[number]) => void;
+}): JSX.Element {
+  return (
+    <div className="grid grid-cols-7 gap-1">
+      {DAYS.map((d) => (
+        <Pick key={d.key} fill on={on(d)} onClick={() => onToggle(d)}>
+          {t(d.label)}
+        </Pick>
+      ))}
+    </div>
   );
 }
 
@@ -229,7 +249,7 @@ function TariffsTab({ zones }: { zones: string[] }): JSX.Element {
     (form.isPackage ? form.packageMinutes >= 5 && form.packagePrice > 0 : form.pricePerHour > 0);
 
   return (
-    <div className={clsx('grid grid-cols-1 items-start gap-5', editing && 'lg:grid-cols-[minmax(0,1fr)_24rem]')}>
+    <div className={clsx('grid grid-cols-1 items-start gap-5', editing && 'lg:grid-cols-[minmax(0,1fr)_400px]')}>
       <Section
         title={t('Тарифы')}
         actions={
@@ -247,8 +267,12 @@ function TariffsTab({ zones }: { zones: string[] }): JSX.Element {
           onRowClick={open}
           empty={t('Тарифов нет')}
           columns={[
-            { key: 'name', title: t('Название'), render: (x) => <span className="font-medium">{x.name}</span> },
-            { key: 'kind', title: t('Тип'), render: (x) => (x.isPackage ? t('Пакет') : t('Почасовой')) },
+            { key: 'name', title: t('Название'), render: (x) => <span className="font-medium text-hi">{x.name}</span> },
+            {
+              key: 'kind',
+              title: t('Тип'),
+              render: (x) => <span className="text-dim">{x.isPackage ? t('Пакет') : t('Почасовой')}</span>,
+            },
             {
               key: 'price',
               title: t('Цена'),
@@ -268,7 +292,7 @@ function TariffsTab({ zones }: { zones: string[] }): JSX.Element {
               title: t('Окна времени'),
               render: (x) =>
                 x.timeWindows.length ? (
-                  <span className="tnum">{x.timeWindows.map(windowLabel).join('; ')}</span>
+                  <span className="tnum text-dim">{x.timeWindows.map(windowLabel).join('; ')}</span>
                 ) : (
                   <span className="text-muted">{t('Всегда')}</span>
                 ),
@@ -284,22 +308,22 @@ function TariffsTab({ zones }: { zones: string[] }): JSX.Element {
       </Section>
 
       {editing && (
-        <Section title={editing === 'new' ? t('Новый тариф') : t('Тариф')}>
+        <Section variant="solid" title={editing === 'new' ? t('Новый тариф') : t('Тариф')}>
           <Field label={t('Название')}>
             <Input value={form.name} onChange={(e) => patch({ name: e.target.value })} />
           </Field>
-          <Field label={t('Тип')}>
-            <div className="grid grid-cols-2 gap-1.5">
-              <Chip on={!form.isPackage} onClick={() => patch({ isPackage: false })}>
-                {t('Почасовой')}
-              </Chip>
-              <Chip on={form.isPackage} onClick={() => patch({ isPackage: true })}>
-                {t('Пакет')}
-              </Chip>
-            </div>
-          </Field>
+          <FieldGroup label={t('Тип')}>
+            <Segmented
+              value={form.isPackage ? 'package' : 'hourly'}
+              onChange={(v) => patch({ isPackage: v === 'package' })}
+              options={[
+                { id: 'hourly', label: t('Почасовой') },
+                { id: 'package', label: t('Пакет') },
+              ]}
+            />
+          </FieldGroup>
           {form.isPackage ? (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-4">
               <Field label={t('Минут в пакете')}>
                 <NumberInput
                   value={form.packageMinutes}
@@ -309,7 +333,7 @@ function TariffsTab({ zones }: { zones: string[] }): JSX.Element {
                 />
               </Field>
               <Field label={t('Цена пакета')}>
-                <MoneyInput value={form.packagePrice} onChange={(n) => patch({ packagePrice: n })} />
+                <MoneyInput compact value={form.packagePrice} onChange={(n) => patch({ packagePrice: n })} />
               </Field>
             </div>
           ) : (
@@ -317,7 +341,7 @@ function TariffsTab({ zones }: { zones: string[] }): JSX.Element {
               <MoneyInput value={form.pricePerHour} onChange={(n) => patch({ pricePerHour: n })} />
             </Field>
           )}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-4">
             <Field label={t('Минимум')}>
               <NumberInput
                 value={form.minMinutes}
@@ -335,20 +359,20 @@ function TariffsTab({ zones }: { zones: string[] }): JSX.Element {
               />
             </Field>
           </div>
-          <Field label={t('Зоны')} hint={t('Ничего не выбрано — все зоны')}>
+          <FieldGroup label={t('Зоны')} hint={t('Ничего не выбрано — все зоны')}>
             <div className="flex flex-wrap gap-1.5">
               {zones.map((z) => (
-                <Chip key={z} small on={form.zones.includes(z)} onClick={() => patch({ zones: toggle(form.zones, z) })}>
+                <Pick key={z} on={form.zones.includes(z)} onClick={() => patch({ zones: toggle(form.zones, z) })}>
                   {z}
-                </Chip>
+                </Pick>
               ))}
             </div>
-          </Field>
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <span className="label">{t('Окна времени')}</span>
+          </FieldGroup>
+          <FieldGroup
+            label={t('Окна времени')}
+            aside={
               <Button
-                size="sm"
+                size="xs"
                 variant="ghost"
                 onClick={() =>
                   patch({
@@ -358,22 +382,15 @@ function TariffsTab({ zones }: { zones: string[] }): JSX.Element {
               >
                 {t('Добавить')}
               </Button>
-            </div>
-            {form.timeWindows.length === 0 && <p className="text-sm text-muted">{t('Всегда')}</p>}
+            }
+          >
+            {form.timeWindows.length === 0 && <p className="text-[13px] text-muted">{t('Всегда')}</p>}
             {form.timeWindows.map((w, i) => (
-              <div key={i} className="flex flex-col gap-2 rounded-md border border-line bg-bg p-3">
-                <div className="grid grid-cols-7 gap-1">
-                  {DAYS.map((d) => (
-                    <Chip
-                      key={d.key}
-                      small
-                      on={w.days.includes(d.key)}
-                      onClick={() => patchWindow(i, { days: toggle(w.days, d.key) })}
-                    >
-                      {t(d.label)}
-                    </Chip>
-                  ))}
-                </div>
+              <div key={i} className="well flex flex-col gap-2.5 p-3">
+                <WeekdayPicks
+                  on={(d) => w.days.includes(d.key)}
+                  onToggle={(d) => patchWindow(i, { days: toggle(w.days, d.key) })}
+                />
                 <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto] items-center gap-2">
                   <input
                     type="time"
@@ -390,22 +407,21 @@ function TariffsTab({ zones }: { zones: string[] }): JSX.Element {
                   />
                   <Button
                     variant="ghost"
-                    size="sm"
-                    className="w-8 px-0 text-base"
+                    className="w-11 !px-0"
                     aria-label={t('Удалить')}
                     title={t('Удалить')}
                     onClick={() => patch({ timeWindows: form.timeWindows.filter((_, j) => j !== i) })}
                   >
-                    ×
+                    <CloseIcon size={16} />
                   </Button>
                 </div>
               </div>
             ))}
-          </div>
+          </FieldGroup>
 
           <Note note={note} />
 
-          <div className="flex items-center justify-between gap-2 border-t border-line pt-4">
+          <div className="flex items-center justify-between gap-2 border-t border-accent/[0.08] pt-4">
             {editing !== 'new' &&
               (confirmDelete ? (
                 <span className="flex items-center gap-1">
@@ -469,7 +485,7 @@ function DaysTab({
   const holidays = [...p.holidays].sort();
 
   return (
-    <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_24rem]">
+    <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_400px]">
       <Section title={t('Цены по дням недели')}>
         <div className="grid grid-cols-7 gap-2">
           {DAYS.map((d) => (
@@ -485,12 +501,14 @@ function DaysTab({
           ))}
         </div>
         {sample && (
-          <p className="tnum border-t border-line pt-4 text-sm text-muted">
+          <p className="tnum border-t border-accent/[0.08] pt-4 text-[13px] text-dim">
             {sample.isPackage
               ? t('{name} в пятницу', { name: sample.name })
               : t('{name} 1 ч в пятницу', { name: sample.name })}
             {' = '}
-            <span className="font-semibold text-text">{money({ amount: samplePrice, currency: 'UZS' })}</span>
+            <span className="font-mono text-[13px] font-semibold text-hi">
+              {money({ amount: samplePrice, currency: 'UZS' })}
+            </span>
           </p>
         )}
       </Section>
@@ -523,12 +541,12 @@ function DaysTab({
           </Button>
         </div>
         {holidays.length === 0 ? (
-          <p className="text-sm text-muted">{t('Праздников нет')}</p>
+          <p className="text-[13px] text-muted">{t('Праздников нет')}</p>
         ) : (
-          <ul className="flex flex-col divide-y divide-line/60 border-y border-line/60">
+          <ul className="flex flex-col divide-y divide-accent/[0.07] border-y border-accent/[0.07]">
             {holidays.map((h) => (
-              <li key={h} className="flex items-center justify-between py-1.5">
-                <span className="tnum text-sm">
+              <li key={h} className="flex min-h-11 items-center justify-between py-1">
+                <span className="tnum text-[13px]">
                   {new Date(`${h}T00:00:00`).toLocaleDateString(dateLocale(), {
                     day: 'numeric',
                     month: 'long',
@@ -582,7 +600,7 @@ function GroupsTab({ s, set }: { s: ClubSettings; set: ClubSettingsState['set'] 
                 aria-label={t('Цвет')}
                 value={g.color}
                 onChange={(e) => edit(g.id, { color: e.target.value })}
-                className="focus-ring h-10 w-12 cursor-pointer rounded-md border border-line bg-bg p-1"
+                className={COLOR_INPUT}
               />
             ),
           },
@@ -668,7 +686,9 @@ function BonusTab({ s, set }: { s: ClubSettings; set: ClubSettingsState['set'] }
             {
               key: 'min',
               title: t('От суммы'),
-              render: (r) => <MoneyInput value={r.tier.minAmount} onChange={(n) => editTier(r.i, { minAmount: n })} />,
+              render: (r) => (
+                <MoneyInput compact value={r.tier.minAmount} onChange={(n) => editTier(r.i, { minAmount: n })} />
+              ),
             },
             {
               key: 'pct',
@@ -748,18 +768,16 @@ function BonusTab({ s, set }: { s: ClubSettings; set: ClubSettingsState['set'] }
               title: t('Тип'),
               width: '13rem',
               render: (r) => (
-                <div className="grid grid-cols-2 gap-1">
-                  <Chip small on={r.promo.kind === 'bonus'} onClick={() => editPromo(r.i, { kind: 'bonus', value: 0 })}>
-                    {t('Бонус')}
-                  </Chip>
-                  <Chip
-                    small
-                    on={r.promo.kind === 'discountPct'}
-                    onClick={() => editPromo(r.i, { kind: 'discountPct', value: 10 })}
-                  >
-                    {t('Скидка %')}
-                  </Chip>
-                </div>
+                <Segmented
+                  size="md"
+                  label={t('Тип')}
+                  value={r.promo.kind}
+                  onChange={(kind) => editPromo(r.i, { kind, value: kind === 'bonus' ? 0 : 10 })}
+                  options={[
+                    { id: 'bonus', label: t('Бонус') },
+                    { id: 'discountPct', label: t('Скидка %') },
+                  ]}
+                />
               ),
             },
             {
@@ -768,7 +786,7 @@ function BonusTab({ s, set }: { s: ClubSettings; set: ClubSettingsState['set'] }
               width: '10rem',
               render: (r) =>
                 r.promo.kind === 'bonus' ? (
-                  <MoneyInput value={r.promo.value} onChange={(n) => editPromo(r.i, { value: n })} />
+                  <MoneyInput compact value={r.promo.value} onChange={(n) => editPromo(r.i, { value: n })} />
                 ) : (
                   <NumberInput
                     value={r.promo.value}
@@ -887,18 +905,10 @@ function HappyTab({ s, set }: { s: ClubSettings; set: ClubSettingsState['set'] }
             title: t('Дни'),
             width: '19rem',
             render: (h) => (
-              <div className="grid grid-cols-7 gap-1">
-                {DAYS.map((d) => (
-                  <Chip
-                    key={d.key}
-                    small
-                    on={h.days.includes(d.idx)}
-                    onClick={() => edit(h.id, { days: toggle(h.days, d.idx).sort() })}
-                  >
-                    {t(d.label)}
-                  </Chip>
-                ))}
-              </div>
+              <WeekdayPicks
+                on={(d) => h.days.includes(d.idx)}
+                onToggle={(d) => edit(h.id, { days: toggle(h.days, d.idx).sort() })}
+              />
             ),
           },
           {
@@ -942,18 +952,17 @@ function HappyTab({ s, set }: { s: ClubSettings; set: ClubSettingsState['set'] }
             title: t('Зоны'),
             render: (h) => (
               <div className="flex flex-wrap gap-1">
-                <Chip small on={h.zones.length === 0} onClick={() => edit(h.id, { zones: [] })}>
+                <Pick on={h.zones.length === 0} onClick={() => edit(h.id, { zones: [] })}>
                   {t('Все')}
-                </Chip>
+                </Pick>
                 {s.zones.map((z) => (
-                  <Chip
+                  <Pick
                     key={z.name}
-                    small
                     on={h.zones.includes(z.name)}
                     onClick={() => edit(h.id, { zones: toggle(h.zones, z.name) })}
                   >
                     {z.name}
-                  </Chip>
+                  </Pick>
                 ))}
               </div>
             ),
@@ -996,7 +1005,11 @@ function LoyaltyTab({ s, set }: { s: ClubSettings; set: ClubSettingsState['set']
             key: 'level',
             title: t('Уровень'),
             width: '6rem',
-            render: (l) => <span className="num-dot text-xl leading-none">{String(l.level).padStart(2, '0')}</span>,
+            render: (l) => (
+              <span className="tnum font-display text-base font-medium leading-none tracking-[-0.01em] text-hi">
+                {String(l.level).padStart(2, '0')}
+              </span>
+            ),
           },
           {
             key: 'name',
@@ -1007,7 +1020,7 @@ function LoyaltyTab({ s, set }: { s: ClubSettings; set: ClubSettingsState['set']
             key: 'min',
             title: t('Потрачено от'),
             width: '14rem',
-            render: (l) => <MoneyInput value={l.minSpent} onChange={(n) => edit(l.level, { minSpent: n })} />,
+            render: (l) => <MoneyInput compact value={l.minSpent} onChange={(n) => edit(l.level, { minSpent: n })} />,
           },
           {
             key: 'pct',
@@ -1049,16 +1062,16 @@ export default function PricingPage(): JSX.Element {
   const s = settings.draft;
 
   return (
-    <div className="flex flex-col gap-5">
-      <PageHeader title={t('Тарифы и цены')} />
+    <OwnerPage>
+      <PageHeader title={t('Тарифы и цены')} caption={t('Настройка клуба')} />
 
-      <nav className="flex flex-wrap gap-1.5">
-        {TABS.map((x) => (
-          <Chip key={x.id} on={tab === x.id} onClick={() => setTab(x.id)}>
-            {t(x.title)}
-          </Chip>
-        ))}
-      </nav>
+      {/* Page tabs, not a second navigation landmark: the rail is the console's one `<nav>`. */}
+      <Tabs
+        label={t('Тарифы и цены')}
+        value={tab}
+        onChange={setTab}
+        tabs={TABS.map((x) => ({ id: x.id, label: t(x.title) }))}
+      />
 
       {settings.error && <Note note={{ text: settings.error, tone: 'err' }} />}
 
@@ -1076,6 +1089,6 @@ export default function PricingPage(): JSX.Element {
         onReset={settings.reset}
         label={t('Есть несохранённые изменения')}
       />
-    </div>
+    </OwnerPage>
   );
 }

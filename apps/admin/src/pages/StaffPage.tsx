@@ -6,7 +6,8 @@ import clsx from 'clsx';
 import { clubApi, type StaffMember, type StaffRole } from '@/api';
 import { describe } from '@/errors';
 import { t } from '@/i18n';
-import { Button, Field, Input, Note, PageHeader, Section, Table, Toggle } from '@/ui';
+import { Badge, Button, Field, Input, Note, PageHeader, Section, Table, Toggle } from '@/ui';
+import { OwnerPage } from './ownerKit';
 
 type NoteState = { text: string; tone: 'ok' | 'err' } | null;
 
@@ -44,7 +45,7 @@ function PinForm({
         aria-label={t('Новый PIN')}
         value={pin}
         onChange={(e) => setPin(digits(e.target.value))}
-        className="tnum h-8 w-32 text-xs"
+        className="tnum h-9 w-36 text-[13px]"
       />
       <Button type="submit" size="sm" disabled={busy || !pinOk(pin)}>
         {t('Сохранить')}
@@ -93,8 +94,8 @@ export default function StaffPage(): JSX.Element {
   const canAdd = name.trim().length > 0 && pinOk(pin) && !busy;
 
   return (
-    <div className="flex flex-col gap-5">
-      <PageHeader title={t('Сотрудники')} />
+    <OwnerPage>
+      <PageHeader title={t('Сотрудники')} caption={t('Бизнес')} />
       <Note note={note} />
 
       <Section title={t('Сотрудники')} bodyClassName="p-2">
@@ -106,13 +107,17 @@ export default function StaffPage(): JSX.Element {
             {
               key: 'name',
               title: t('Имя'),
-              render: (s) => <span className={clsx(!s.active && 'text-muted')}>{s.name}</span>,
+              render: (s) => <span className={clsx('font-medium', s.active ? 'text-hi' : 'text-muted')}>{s.name}</span>,
             },
             {
               key: 'role',
               title: t('Роль'),
               width: '10rem',
-              render: (s) => <span className="label">{s.role === 'owner' ? t('Владелец') : t('Кассир')}</span>,
+              render: (s) => (
+                <Badge tone={s.role === 'owner' ? 'accent' : 'muted'}>
+                  {s.role === 'owner' ? t('Владелец') : t('Кассир')}
+                </Badge>
+              ),
             },
             {
               key: 'active',
@@ -164,7 +169,7 @@ export default function StaffPage(): JSX.Element {
 
       <Section title={t('Добавить сотрудника')}>
         <form
-          className="grid grid-cols-1 items-end gap-5 md:grid-cols-[minmax(0,1fr)_auto_12rem_auto]"
+          className="grid grid-cols-1 items-end gap-x-5 gap-y-4 md:grid-cols-[minmax(0,1fr)_auto_12rem_auto]"
           onSubmit={(e) => {
             e.preventDefault();
             if (!canAdd) return;
@@ -181,9 +186,12 @@ export default function StaffPage(): JSX.Element {
           <Field label={t('Имя')}>
             <Input value={name} maxLength={64} onChange={(e) => setName(e.target.value)} />
           </Field>
-          <div className="flex flex-col gap-1.5">
-            <span className="label">{t('Роль')}</span>
-            <div className="flex gap-1.5" role="radiogroup">
+          <div className="flex flex-col gap-2">
+            <span className="label-sm">{t('Роль')}</span>
+            <div
+              className="inline-flex min-h-11 items-center gap-0.5 rounded-md border border-line bg-surface/50 p-1"
+              role="radiogroup"
+            >
               {ROLES.map((r) => (
                 <button
                   key={r.id}
@@ -192,8 +200,10 @@ export default function StaffPage(): JSX.Element {
                   aria-checked={role === r.id}
                   onClick={() => setRole(r.id)}
                   className={clsx(
-                    'focus-ring choice h-10 rounded-md px-3.5 text-sm font-semibold',
-                    role === r.id && 'choice-on',
+                    'focus-ring inline-flex h-9 items-center justify-center whitespace-nowrap rounded-seg px-3.5 text-[13px]',
+                    role === r.id
+                      ? 'bg-accent/[0.12] font-semibold text-accent'
+                      : 'font-medium text-dim hover:text-text',
                   )}
                 >
                   {t(r.label)}
@@ -215,6 +225,6 @@ export default function StaffPage(): JSX.Element {
           </Button>
         </form>
       </Section>
-    </div>
+    </OwnerPage>
   );
 }

@@ -8,32 +8,26 @@ import clsx from 'clsx';
 import { clubApi, type NetworkClubReport, type NetworkReport } from '@/api';
 import { describe } from '@/errors';
 import { dateLocale, t } from '@/i18n';
-import { Button, Field, Input, Note, NumberInput, PageHeader, Section } from '@/ui';
+import { Badge, Button, Field, Input, KpiCard, Note, NumberInput, PageHeader, Section } from '@/ui';
+import { OwnerPage, PeriodChips } from './ownerKit';
 
-const PERIODS = [7, 30, 90] as const;
 const nf = new Intl.NumberFormat('ru-RU');
 const sum = (minor: number): string => nf.format(Math.round(minor / 100));
 
-function Stat({ label, value, unit }: { label: string; value: string; unit?: string }): JSX.Element {
-  return (
-    <div className="flex min-w-0 flex-col gap-2 bg-surface px-5 py-4">
-      <span className="label truncate">{label}</span>
-      <span className="flex items-baseline gap-1.5">
-        <span className="num-dot text-[1.9rem] leading-none">{value}</span>
-        {unit && <span className="text-xs text-muted">{unit}</span>}
-      </span>
-    </div>
-  );
-}
-
-/** Revenue per day as thin bars, scaled to the busiest club of the network so clubs compare at a glance. */
+/**
+ * Revenue per day as thin bars, scaled to the busiest club of the network so clubs compare at a glance: one accent
+ * series, today (the last bar) at full strength.
+ */
 function Bars({ values, max }: { values: number[]; max: number }): JSX.Element {
   return (
     <div className="flex h-10 items-end gap-[2px]" aria-hidden="true">
       {values.map((v, i) => (
         <span
           key={i}
-          className="min-w-0 flex-1 bg-accent/70"
+          className={clsx(
+            'min-w-0 flex-1 rounded-t-[1px]',
+            i === values.length - 1 ? 'bg-accent shadow-[0_0_8px_rgb(var(--c-accent)/0.5)]' : 'bg-accent/45',
+          )}
           style={{ height: `${Math.max(2, (v / Math.max(1, max)) * 100)}%` }}
         />
       ))}
@@ -41,21 +35,24 @@ function Bars({ values, max }: { values: number[]; max: number }): JSX.Element {
   );
 }
 
-/** Today's load by hour, 0–100 %. */
+/** Today's load by hour, 0–100 %: the hours gone in `dim`, this hour in the accent, the rest a hairline. */
 function Hours({ values }: { values: number[] }): JSX.Element {
   const now = new Date().getHours();
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1.5">
       <div className="flex h-8 items-end gap-[2px]" aria-hidden="true">
         {values.map((v, h) => (
           <span
             key={h}
-            className={clsx('min-w-0 flex-1', h === now ? 'bg-accent' : h > now ? 'bg-line' : 'bg-text/30')}
+            className={clsx(
+              'min-w-0 flex-1 rounded-t-[1px]',
+              h === now ? 'bg-accent shadow-[0_0_8px_rgb(var(--c-accent)/0.6)]' : h > now ? 'bg-line' : 'bg-dim/40',
+            )}
             style={{ height: `${h > now ? 6 : Math.max(4, v)}%` }}
           />
         ))}
       </div>
-      <div className="flex justify-between font-mono text-[0.6rem] text-muted">
+      <div className="flex justify-between font-mono text-[9.5px] tracking-[0.1em] text-muted">
         <span>00</span>
         <span>12</span>
         <span>23</span>
@@ -67,59 +64,64 @@ function Hours({ values }: { values: number[] }): JSX.Element {
 function ClubCard({ c, maxDay }: { c: NetworkClubReport; maxDay: number }): JSX.Element {
   const load = c.pcs ? Math.round((c.busyNow / c.pcs) * 100) : 0;
   return (
-    <article className="panel flex flex-col gap-4 p-5" aria-label={c.name}>
+    <article
+      className={clsx('glass-panel flex flex-col gap-4 px-5 pb-4 pt-[18px]', c.local && 'border-accent/[0.22]')}
+      aria-label={c.name}
+    >
       <header className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="truncate font-display text-lg tracking-tight">{c.name}</h2>
-          <p className="truncate text-sm text-muted">
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <h2 className="truncate font-display text-[17px] font-medium leading-6 tracking-[-0.01em] text-hi">
+            {c.name}
+          </h2>
+          <p className="truncate text-xs text-dim">
             {c.city}
             {c.address ? ` · ${c.address}` : ''}
           </p>
         </div>
-        <span className="flex shrink-0 items-center gap-2">
-          {c.local && <span className="rounded bg-accent/15 px-2 py-0.5 text-xs text-accent">{t('этот сервер')}</span>}
-          {c.simulated && <span className="rounded bg-white/[0.06] px-2 py-0.5 text-xs text-muted">{t('демо')}</span>}
+        <span className="flex shrink-0 items-center gap-2 pt-0.5">
+          {c.local && <Badge tone="accent">{t('этот сервер')}</Badge>}
+          {c.simulated && <Badge tone="muted">{t('демо')}</Badge>}
         </span>
       </header>
 
       <div className="flex items-baseline justify-between gap-3">
-        <span className="flex items-baseline gap-2">
-          <span className="num-dot text-3xl leading-none">
-            <span className="text-accent">{String(c.busyNow).padStart(2, '0')}</span>
-            <span className="text-muted">/{String(c.pcs).padStart(2, '0')}</span>
+        <span className="flex items-baseline gap-2.5">
+          <span className="num-dot leading-none">
+            <span className="text-[30px] text-hi">{String(c.busyNow).padStart(2, '0')}</span>
+            <span className="text-lg text-muted">/{String(c.pcs).padStart(2, '0')}</span>
           </span>
-          <span className="text-sm text-muted">{t('играют сейчас')}</span>
+          <span className="text-[13px] text-dim">{t('играют сейчас')}</span>
         </span>
-        <span className="tnum text-sm text-muted">{load}%</span>
+        <span className="tnum font-mono text-xs text-muted">{load}%</span>
       </div>
       <Hours values={c.hourly} />
 
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-        <dt className="text-muted">{t('Выручка сегодня')}</dt>
-        <dd className="tnum text-right">
-          {sum(c.revenueToday)} {t('сум')}
+      <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-2 border-t border-accent/[0.07] pt-3 text-[13px]">
+        <dt className="text-dim">{t('Выручка сегодня')}</dt>
+        <dd className="tnum text-right font-mono text-[12.5px] font-medium text-text">
+          {sum(c.revenueToday)} <span className="font-sans text-muted">{t('сум')}</span>
         </dd>
-        <dt className="text-muted">{t('Выручка за период')}</dt>
-        <dd className="tnum text-right">
-          {sum(c.revenue)} {t('сум')}
+        <dt className="text-dim">{t('Выручка за период')}</dt>
+        <dd className="tnum text-right font-mono text-[12.5px] font-medium text-text">
+          {sum(c.revenue)} <span className="font-sans text-muted">{t('сум')}</span>
         </dd>
-        <dt className="text-muted">{t('Сеансов')}</dt>
-        <dd className="tnum text-right">{nf.format(c.sessions)}</dd>
-        <dt className="text-muted">{t('Средний чек')}</dt>
-        <dd className="tnum text-right">
-          {sum(c.avgCheck)} {t('сум')}
+        <dt className="text-dim">{t('Сеансов')}</dt>
+        <dd className="tnum text-right font-mono text-[12.5px] font-medium text-text">{nf.format(c.sessions)}</dd>
+        <dt className="text-dim">{t('Средний чек')}</dt>
+        <dd className="tnum text-right font-mono text-[12.5px] font-medium text-text">
+          {sum(c.avgCheck)} <span className="font-sans text-muted">{t('сум')}</span>
         </dd>
       </dl>
       <Bars values={c.byDay} max={maxDay} />
 
-      <footer className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-3 text-sm">
-        <span className={clsx(c.repairs > 0 ? 'text-warning' : 'text-muted')}>
+      <footer className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-accent/[0.08] pt-3 text-[12.5px]">
+        <span className={clsx(c.repairs > 0 ? 'font-medium text-warning' : 'text-muted')}>
           {t('Ремонт: {n}', { n: c.repairs })}
         </span>
-        <span className={clsx(c.signals > 0 ? 'text-danger' : 'text-muted')}>
+        <span className={clsx(c.signals > 0 ? 'font-medium text-warning' : 'text-muted')}>
           {t('Сигналы: {n}', { n: c.signals })}
         </span>
-        <span className="ml-auto text-muted">
+        <span className="ml-auto text-dim">
           {c.shift
             ? t('Смена · {name} с {time}', {
                 name: c.shift.staffName,
@@ -170,7 +172,7 @@ function AddClub({ onAdded }: { onAdded: () => void }): JSX.Element {
           <NumberInput value={pcs} min={1} max={1000} onChange={setPcs} />
         </Field>
       </div>
-      <div className="mt-4 flex items-center gap-4">
+      <div className="flex items-center gap-4">
         <Button variant="primary" disabled={busy || !name.trim() || !city.trim()} onClick={() => void add()}>
           {t('Добавить')}
         </Button>
@@ -204,54 +206,51 @@ export default function NetworkPage(): JSX.Element {
   const maxDay = Math.max(1, ...(data?.clubs ?? []).flatMap((c) => c.byDay));
 
   return (
-    <div className="flex flex-col gap-5">
+    <OwnerPage>
       <PageHeader
         title={data ? t('Сеть клубов · {name}', { name: data.name }) : t('Сеть клубов')}
-        actions={PERIODS.map((p) => (
-          <button
-            key={p}
-            type="button"
-            aria-pressed={days === p}
-            onClick={() => setDays(p)}
-            className={clsx(
-              'focus-ring choice h-10 rounded-md px-3.5 text-sm font-semibold transition-colors',
-              days === p && 'choice-on',
-            )}
-          >
-            {t('{n} дней', { n: p })}
-          </button>
-        ))}
+        caption={t('Бизнес')}
+        actions={<PeriodChips value={days} onChange={setDays} />}
       />
       <Note note={note} />
 
       {data && (
         <>
-          <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line xl:grid-cols-5">
-            <Stat label={t('Клубов')} value={String(data.totals.clubs)} />
-            <Stat label={t('Играют сейчас')} value={`${data.totals.busyNow}/${data.totals.pcs}`} />
-            <Stat label={t('Выручка сегодня')} value={sum(data.totals.revenueToday)} unit={t('сум')} />
-            <Stat label={t('Выручка за период')} value={sum(data.totals.revenue)} unit={t('сум')} />
-            <Stat label={t('Сеансов')} value={nf.format(data.totals.sessions)} />
+          <div className="grid grid-cols-2 gap-3 xl:grid-cols-5">
+            <KpiCard compact label={t('Клубов')} value={String(data.totals.clubs)} />
+            <KpiCard
+              compact
+              label={t('Играют сейчас')}
+              value={
+                <>
+                  {data.totals.busyNow}
+                  <span className="text-lg text-muted">/{data.totals.pcs}</span>
+                </>
+              }
+            />
+            <KpiCard compact label={t('Выручка сегодня')} value={sum(data.totals.revenueToday)} unit={t('сум')} />
+            <KpiCard compact label={t('Выручка за период')} value={sum(data.totals.revenue)} unit={t('сум')} />
+            <KpiCard compact label={t('Сеансов')} value={nf.format(data.totals.sessions)} />
           </div>
 
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 2xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
             {data.clubs.map((c) => (
               <ClubCard key={c.id} c={c} maxDay={maxDay} />
             ))}
           </div>
 
           <Section title={t('Игроки сети')}>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-              <p className="text-sm">
-                <span className="num-dot mr-2 text-2xl">{data.players.total}</span>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <p className="well flex items-baseline gap-3 px-4 py-3.5 text-[13px] text-dim">
+                <span className="num-dot shrink-0 text-[26px] leading-none text-hi">{data.players.total}</span>
                 {t('игроков с аккаунтом')}
               </p>
-              <p className="text-sm">
-                <span className="num-dot mr-2 text-2xl">{data.players.multiClub}</span>
+              <p className="well flex items-baseline gap-3 px-4 py-3.5 text-[13px] text-dim">
+                <span className="num-dot shrink-0 text-[26px] leading-none text-hi">{data.players.multiClub}</span>
                 {t('играли в нескольких клубах')}
               </p>
-              <p className="text-sm">
-                <span className="num-dot mr-2 text-2xl">{sum(data.players.balance)}</span>
+              <p className="well flex items-baseline gap-3 px-4 py-3.5 text-[13px] text-dim">
+                <span className="num-dot shrink-0 text-[26px] leading-none text-hi">{sum(data.players.balance)}</span>
                 {t('сум на балансах — один баланс работает в любом клубе сети')}
               </p>
             </div>
@@ -260,6 +259,6 @@ export default function NetworkPage(): JSX.Element {
       )}
 
       <AddClub onAdded={load} />
-    </div>
+    </OwnerPage>
   );
 }

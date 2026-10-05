@@ -1082,6 +1082,10 @@ export const UZ: Record<string, string> = {
   // --- F:C shift, feed, health ---
   // --- end F:C ---
   // --- F:D owner pages ---
+  'Язык правил': 'Qoidalar tili',
+  сдвинуть: 'surish',
+  'снять выбор': 'tanlovni bekor qilish',
+  'Нажмите устройство, чтобы изменить его': 'Oʻzgartirish uchun qurilmani bosing',
   // --- end F:D ---
 };
 export const EN: Record<string, string> = {
@@ -2163,5 +2167,9 @@ export const EN: Record<string, string> = {
   // --- F:C shift, feed, health ---
   // --- end F:C ---
   // --- F:D owner pages ---
+  'Язык правил': 'Rules language',
+  сдвинуть: 'move',
+  'снять выбор': 'deselect',
+  'Нажмите устройство, чтобы изменить его': 'Click a device to edit it',
   // --- end F:D ---
 };
