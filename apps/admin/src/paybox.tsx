@@ -307,15 +307,16 @@ export function PayBox({
         mono
         active={!fixed}
       />
+      {/* A typed amount is the hero field; an exact one (a debt, a guest's price, a cart) is a read-only 52 px line. */}
       <div
         className={clsx(
-          'mt-2 flex h-[76px] items-center gap-4 rounded-md border pl-5 pr-[18px] transition-shadow duration-200',
+          'mt-2 flex items-center gap-4 rounded-md border transition-shadow duration-200',
           fixed
-            ? 'border-accent/[0.12] bg-text/[0.03]'
-            : 'border-transparent bg-bg/[0.62] focus-within:shadow-glow [&:not(:focus-within)]:border-accent/[0.16]',
+            ? 'h-[52px] border-accent/[0.12] bg-text/[0.03] pl-4 pr-4'
+            : 'h-[76px] border-transparent bg-bg/[0.62] pl-5 pr-[18px] focus-within:shadow-glow [&:not(:focus-within)]:border-accent/[0.16]',
         )}
       >
-        <span className="flex min-w-0 flex-1 items-baseline gap-2.5">
+        <span className={clsx('flex min-w-0 flex-1 items-baseline', fixed ? 'gap-2' : 'gap-2.5')}>
           <input
             id={amountId}
             ref={amountRef}
@@ -325,14 +326,19 @@ export function PayBox({
             // read-only, not disabled, while paying: the focus stays here for the next Enter after a refusal
             readOnly={frozen || fixed}
             aria-readonly={frozen || fixed}
-            className="tnum min-w-[1ch] max-w-full flex-[0_1_auto] bg-transparent font-display text-[36px] font-medium leading-none tracking-[-0.02em] text-hi caret-accent outline-none [field-sizing:content] placeholder:text-muted/60"
+            className={clsx(
+              'tnum min-w-[1ch] max-w-full flex-[0_1_auto] bg-transparent font-display font-medium leading-none text-hi caret-accent outline-none [field-sizing:content] placeholder:text-muted/60',
+              fixed ? 'text-[22px] tracking-[-0.01em]' : 'text-[36px] tracking-[-0.02em]',
+            )}
             value={fixed ? exactDigits(exact) : groupDigits(digits)}
             placeholder="0"
             onChange={(e) => {
               if (!fixed) setDigits(digitsOf(e.target.value));
             }}
           />
-          <span className="shrink-0 text-base font-medium leading-none text-muted">{t('сум')}</span>
+          <span className={clsx('shrink-0 font-medium leading-none text-muted', fixed ? 'text-[13px]' : 'text-base')}>
+            {t('сум')}
+          </span>
         </span>
         {after && (
           <span className="flex shrink-0 flex-col items-end gap-[7px]">

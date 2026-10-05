@@ -96,6 +96,11 @@ const ENDING_SEC = 10 * 60;
 const DIGITS_MS = 2500;
 /** The operations feed gets a column of its own from this width (D-45); below it sits under the seat card. */
 const WIDE_QUERY = '(min-width: 1800px)';
+/**
+ * A screen as short as 1366×768 (the KPI strip is compact there too): a busy seat's card needs the whole column, so the
+ * feed under it folds to its bar like under the seating form.
+ */
+const SHORT_QUERY = '(max-height: 840px)';
 /** Below 1800 px, whether the feed is unfolded under a tall form (seating, several PCs): 'feed' — unfolded. */
 const PANEL_KEY = 'clubshell.admin.map.panel';
 /**
@@ -185,15 +190,16 @@ function firstMinute(q: PriceQuote, minutes: number): number {
   return Math.ceil(q.total.amount / Math.max(1, minutes) / 100) * 100;
 }
 
-function useWide(): boolean {
-  const [wide, setWide] = useState(() => window.matchMedia(WIDE_QUERY).matches);
+function useMedia(query: string): boolean {
+  const [hit, setHit] = useState(() => window.matchMedia(query).matches);
   useEffect(() => {
-    const m = window.matchMedia(WIDE_QUERY);
-    const on = (): void => setWide(m.matches);
+    const m = window.matchMedia(query);
+    const on = (): void => setHit(m.matches);
+    on();
     m.addEventListener('change', on);
     return () => m.removeEventListener('change', on);
-  }, []);
-  return wide;
+  }, [query]);
+  return hit;
 }
 
 /** What is left to settle after an end, at the map: a debt to take or a guest's refund to give back in cash. */
@@ -548,7 +554,8 @@ function SeatTile({
       )}
 
       {session ? (
-        prepaid || left < 0 ? (
+        // Postpaid has no time left (`secondsLeft` −1): its running bill, the ∞ mark is the badge above.
+        prepaid ? (
           <span
             className={clsx(
               'num-dot relative text-base leading-none tracking-[0.02em]',
@@ -1102,7 +1109,7 @@ function MoreButton({
   return compact ? (
     <Button
       variant="tertiary"
-      className={clsx('min-w-16 shrink-0 px-2.5', open && 'choice-on')}
+      className={clsx('shrink-0 !px-1.5 !text-[12.5px]', open && 'choice-on')}
       aria-expanded={open}
       title={t('сообщение, блокировка, питание')}
       onClick={onToggle}
@@ -1864,11 +1871,12 @@ function BusySeat({
             </div>
           )}
 
-          {/* The move gets the room, «Бар» and «Ещё ⋯» are as wide as their words: «Boshqa kompyuterga koʻchirish…» wraps. */}
+          {/* The move gets the room, «Бар» and «Ещё ⋯» are as wide as their words (12.5 px, so the Russian line fits the
+              360 px column); «Boshqa kompyuterga koʻchirish…» wraps. */}
           <div className="flex gap-2">
             <Button
               variant="tertiary"
-              className={clsx(WRAP, 'min-w-0 flex-1 px-2.5')}
+              className={clsx(WRAP, 'min-w-0 flex-1 !gap-1.5 !px-2 !text-[12.5px]')}
               disabled={busy !== null}
               onClick={onStartMove}
             >
@@ -1877,7 +1885,7 @@ function BusySeat({
             </Button>
             <Button
               variant="tertiary"
-              className="min-w-[58px] shrink-0 px-2.5"
+              className="shrink-0 !px-2 !text-[12.5px]"
               disabled={busy !== null}
               onClick={() => {
                 // The bar with this player and PC as the buyer.
@@ -2997,7 +3005,8 @@ export function MapPage(): JSX.Element {
   const [tick, setTick] = useState(0);
   const [panel, setPanelState] = useState<'seat' | 'feed'>(readPanel);
   const anchor = useRef<string | null>(null);
-  const wide = useWide();
+  const wide = useMedia(WIDE_QUERY);
+  const short = useMedia(SHORT_QUERY);
   const shift = useShift();
   const calls = useCalls();
 
@@ -3223,8 +3232,8 @@ export function MapPage(): JSX.Element {
   const refunds = allRefunds.filter((r) => r.payable.amount > 0);
   const bulk = multi.size >= 2 ? seats.filter((s) => multi.has(s.pc.id)) : [];
   // Below 1800 px the right column stacks the seat over the feed; a tall form (seating, several PCs) folds the feed to a
-  // bar unless the cashier unfolded it.
-  const tall = bulk.length > 0 || (seat !== null && !(seat.session && seat.user));
+  // bar unless the cashier unfolded it, and so does any seat card on a short screen.
+  const tall = bulk.length > 0 || (seat !== null && (short || !(seat.session && seat.user)));
   const folded = !wide && tall && panel !== 'feed';
   const moveFrom = movePick ? seats.find((s) => s.pc.id === movePick.fromPcId) : undefined;
   const moveSheet =
