@@ -30,12 +30,14 @@ import {
   type SaleResponse,
   type Sale,
 } from '@/api';
+import { GameArt } from '@/art';
 import { ClientPicker, pcLabel } from '@/clientSearch';
 import { useClub } from '@/club';
 import { isTyping, onShowBar, onSignedOut, sheetOpen } from '@/desk';
 import { amountOf, describe, isLostAnswer, reasonOf } from '@/errors';
-import { money, moneyExact } from '@/format';
+import { exactDigits, money, moneyExact } from '@/format';
 import { t } from '@/i18n';
+import { CloseIcon, CupIcon, SearchIcon } from '@/icons';
 import { PRODUCT_CATEGORY_LABEL } from '@/labels';
 import {
   PayBox,
@@ -49,7 +51,7 @@ import {
 } from '@/paybox';
 import { Receipt, barAutoReceipt, printDocument, type ReceiptData } from '@/print';
 import { useShift } from '@/shift';
-import { Button, Kbd, Note, PageHeader, Sheet, inputCls } from '@/ui';
+import { Badge, Button, Chip, EmptyState, Kbd, Note, PanelHeader, Segmented, Sheet, inputCls } from '@/ui';
 
 /** Most lines in one sale, most units of one line (the server's limits). */
 const MAX_LINES = 20;
@@ -103,6 +105,10 @@ onSignedOut(() => {
 
 const GUEST: Buyer = { kind: 'guest' };
 
+/** A cart line's − / + (32 px, quiet). */
+const STEPPER =
+  'focus-ring btn-tertiary inline-flex h-8 w-8 items-center justify-center rounded-md text-sm font-medium leading-none disabled:cursor-not-allowed disabled:opacity-40';
+
 /** The buyer of a seat or a client found, with what their PC's session holds back. */
 async function buyerOf(id: string, fallback: ClientHit | null): Promise<Buyer | null> {
   const o = await adminApi.overview();
@@ -128,6 +134,123 @@ function sellable(p: Product): boolean {
 
 function linesOf(sale: Sale): ReceiptData['lines'] {
   return sale.lines.map((l) => ({ title: l.title, qty: l.qty, price: l.price }));
+}
+
+/**
+ * An exact sum as a HUD readout: Doto digits to the tiyin (`26 000`, `26 000,50`), «сум» in Inter beside them. The
+ * digits come right after whatever precedes the readout, with no space, so a line reads «Итого26 000 сум» as text.
+ */
+function DotoSum({
+  minor,
+  size,
+  className,
+  unitClassName,
+}: {
+  minor: number;
+  size: number;
+  className?: string;
+  unitClassName?: string;
+}): JSX.Element {
+  return (
+    <span className={clsx('inline-flex items-baseline gap-[0.3em] whitespace-nowrap', className)}>
+      <span className="num-dot leading-none" style={{ fontSize: size }}>
+        {exactDigits(minor)}
+      </span>{' '}
+      <span
+        className={clsx('font-sans font-medium leading-none', unitClassName ?? 'text-muted')}
+        style={{ fontSize: Math.max(10.5, Math.round(size * 0.46 * 2) / 2) }}
+      >
+        {t('сум')}
+      </span>
+    </span>
+  );
+}
+
+/** Up to two initials of a name, for an avatar. */
+function initialsOf(name: string): string {
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w.charAt(0).toUpperCase())
+    .join('');
+}
+
+/**
+ * One product of the grid (spec §9): its picture on the right fading in under scrims (a monogram when there is none),
+ * the name, what is left in mono caps (amber when low, red «нет на складе» and dimmed when none), the price in Doto. In
+ * the cart: an accent edge and «×2». The accessible name is «{title} · {price}» (the E2E finds a tile by its start), and
+ * the name is the first text inside.
+ */
+function ProductTile({
+  product: p,
+  inCart,
+  sellable: can,
+  low,
+  disabled,
+  onAdd,
+}: {
+  product: Product;
+  inCart: number;
+  sellable: boolean;
+  low: boolean;
+  disabled: boolean;
+  onAdd: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      data-product={p.id}
+      disabled={disabled}
+      aria-label={`${p.title} · ${money(p.price)}`}
+      onClick={onAdd}
+      className={clsx(
+        'focus-ring group relative flex h-[120px] w-full flex-col justify-between rounded-md border bg-art pb-[13px] pl-3.5 pr-3 pt-3 text-left disabled:cursor-not-allowed',
+        inCart > 0
+          ? 'border-accent/50 shadow-[inset_0_0_22px_-10px_rgb(var(--c-accent)/0.55)]'
+          : 'border-accent/[0.14] enabled:hover:border-accent/[0.26]',
+        !can ? 'opacity-45' : 'disabled:opacity-50',
+      )}
+    >
+      <GameArt
+        src={p.imageUrl}
+        variant="product"
+        zoom={!disabled}
+        fallback={
+          <span className="absolute inset-0 bg-[linear-gradient(180deg,rgb(var(--c-accent)/0.06),rgb(var(--c-accent)/0)_70%)]">
+            <span className="absolute -right-1 top-1/2 -translate-y-1/2 font-display text-[64px] font-medium leading-none text-accent/[0.09]">
+              {p.title.trim().charAt(0).toUpperCase()}
+            </span>
+          </span>
+        }
+      />
+      <span className="relative flex items-start justify-between gap-2">
+        <span className="line-clamp-2 text-[13px] font-semibold leading-4 text-white [text-shadow:0_1px_2px_rgb(0_0_0/0.8)]">
+          {p.title}
+        </span>
+        {inCart > 0 && (
+          <Badge tone="accent" className="bg-bg/60 text-[10px]">
+            ×{inCart}
+          </Badge>
+        )}
+      </span>
+      <span className="relative flex flex-col items-start gap-1.5">
+        {!can ? (
+          <span className="label-sm font-semibold text-danger-ink">{t('нет на складе')}</span>
+        ) : p.stockQty != null ? (
+          <span className={clsx('label-sm', low ? 'font-semibold text-warning' : 'text-artlabel')}>
+            {t('осталось {n}', { n: p.stockQty })}
+          </span>
+        ) : null}
+        <DotoSum
+          minor={p.price.amount}
+          size={16}
+          className="text-white [text-shadow:0_0_8px_rgb(0_0_0/0.9),0_1px_3px_rgb(0_0_0/0.85)]"
+          unitClassName="text-artlabel"
+        />
+      </span>
+    </button>
+  );
 }
 
 export default function BarPage(): JSX.Element {
@@ -470,353 +593,394 @@ export default function BarPage(): JSX.Element {
   const balanceCovers = client !== null && total > 0 && spendable >= total && short === null;
   const viaMethod = !client || !balanceCovers || payByMethod;
   const empty = cartLines.length === 0;
+  const onSale = products.filter((p) => p.category !== 'time');
+  const countOf = (c: string | null): number =>
+    c === null ? onSale.length : onSale.filter((p) => p.category === c).length;
+  const inCart = new Map(cartLines.map((l) => [l.productId, l.qty]));
+  const units = cartLines.reduce((n, l) => n + l.qty, 0);
+  // Why the buyer cannot change now (the segments' tooltip): a frozen sale, or one on its way.
+  const buyerLocked = frozen
+    ? t('Корзина заморожена, пока не ясно, прошла ли продажа. Повторите её — дважды она не проведётся.')
+    : locked
+      ? t('Идёт продажа')
+      : null;
 
   return (
-    <div className="grid h-full min-h-0 grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_24rem]">
-      <div className="flex min-h-0 flex-col gap-4">
-        <PageHeader title={t('Бар')} />
-        {loadError && <Note note={{ text: loadError, tone: 'err' }} />}
-        <div className="flex flex-wrap items-center gap-2">
-          <div role="group" aria-label={t('Категории')} className="flex flex-wrap gap-1.5">
-            {[null, ...CATEGORIES].map((c) => (
-              <Button
-                key={c ?? 'all'}
-                size="sm"
-                aria-pressed={category === c}
-                className={clsx(category === c && 'choice-on')}
-                onClick={() => setCategory(c)}
-              >
-                {c === null ? t('Все') : t(PRODUCT_CATEGORY_LABEL[c] ?? c)}
-              </Button>
-            ))}
+    <div className="grid h-full min-h-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_400px]">
+      {/* The shelf: the page's primary surface, like the hall on the map. */}
+      <div className="glass-panel edge-top flex min-h-0 flex-col px-5 pb-5 pt-[18px]">
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+          <PanelHeader title={t('Бар')} level={1} />
+          <div className="relative w-[300px] max-w-full">
+            <label htmlFor={searchId} className="sr-only">
+              {t('Поиск товара')}
+            </label>
+            <SearchIcon
+              size={16}
+              className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted"
+            />
+            <input
+              id={searchId}
+              ref={searchRef}
+              type="search"
+              autoFocus
+              autoComplete="off"
+              className={clsx(inputCls, 'pl-10')}
+              placeholder={t('Поиск товара')}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  // Only a search picks a product: an Enter in the empty field (out of habit, «Enter = cash») adds
+                  // nothing and pays nothing.
+                  if (e.repeat || search.trim() === '') return;
+                  const first = shown.find(sellable);
+                  if (first) add(first);
+                } else if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  gridRef.current?.querySelector<HTMLButtonElement>('button[data-product]:not(:disabled)')?.focus();
+                }
+              }}
+            />
           </div>
-          <label htmlFor={searchId} className="sr-only">
-            {t('Поиск товара')}
-          </label>
-          <input
-            id={searchId}
-            ref={searchRef}
-            type="search"
-            autoFocus
-            autoComplete="off"
-            className={clsx(inputCls, 'ml-auto h-9 w-64')}
-            placeholder={t('Поиск товара')}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                // Only a search picks a product: an Enter in the empty field (out of habit, «Enter = cash») adds
-                // nothing and pays nothing.
-                if (e.repeat || search.trim() === '') return;
-                const first = shown.find(sellable);
-                if (first) add(first);
-              } else if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                gridRef.current?.querySelector<HTMLButtonElement>('button[data-product]:not(:disabled)')?.focus();
-              }
-            }}
-          />
+        </div>
+        {loadError && <Note note={{ text: loadError, tone: 'err' }} className="mt-3" />}
+        <div role="group" aria-label={t('Категории')} className="-ml-3 mt-3 flex flex-wrap gap-1">
+          {[null, ...CATEGORIES].map((c) => (
+            <Chip key={c ?? 'all'} pressed={category === c} count={countOf(c)} onClick={() => setCategory(c)}>
+              {c === null ? t('Все') : t(PRODUCT_CATEGORY_LABEL[c] ?? c)}
+            </Chip>
+          ))}
         </div>
         <ul
           ref={gridRef}
           aria-label={t('Товары')}
           onKeyDown={moveFocus}
-          className="grid min-h-0 grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] content-start gap-2 overflow-y-auto pr-1"
+          className="thin-scrollbar -mx-1.5 mt-2.5 grid min-h-0 flex-1 grid-cols-[repeat(auto-fill,minmax(168px,1fr))] content-start gap-2.5 overflow-y-auto p-1.5"
         >
           {shown.map((p) => {
             const can = sellable(p);
-            const low = p.stockQty != null && p.stockQty <= lowAt;
             return (
               <li key={p.id}>
-                <button
-                  type="button"
-                  data-product={p.id}
+                <ProductTile
+                  product={p}
+                  inCart={inCart.get(p.id) ?? 0}
+                  sellable={can}
+                  low={p.stockQty != null && p.stockQty <= lowAt}
                   disabled={!can || locked}
-                  aria-label={`${p.title} · ${money(p.price)}`}
-                  onClick={() => add(p)}
-                  className="focus-ring choice flex h-[5.5rem] w-full flex-col justify-between rounded-md px-3 py-2 text-left disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <span className="line-clamp-2 text-sm font-medium leading-tight">{p.title}</span>
-                  <span className="flex items-baseline justify-between gap-2">
-                    <span className="tnum text-sm font-semibold">{money(p.price)}</span>
-                    {!can ? (
-                      <span className="text-xs text-danger">{t('нет')}</span>
-                    ) : p.stockQty != null ? (
-                      <span className={clsx('tnum text-xs', low ? 'text-warning' : 'text-muted')}>
-                        {t('осталось {n}', { n: p.stockQty })}
-                      </span>
-                    ) : null}
-                  </span>
-                </button>
+                  onAdd={() => add(p)}
+                />
               </li>
             );
           })}
           {shown.length === 0 && !loadError && (
-            <li className="col-span-full py-8 text-center text-sm text-muted">
-              {products.length === 0
-                ? t('Товаров нет — владелец добавит их в «Магазин и склад»')
-                : t('Ничего не нашли')}
+            <li className="col-span-full py-10">
+              <EmptyState
+                icon={<SearchIcon size={22} />}
+                title={
+                  products.length === 0
+                    ? t('Товаров нет — владелец добавит их в «Магазин и склад»')
+                    : t('Ничего не нашли')
+                }
+              />
             </li>
           )}
         </ul>
       </div>
 
-      <aside aria-label={t('Корзина')} className="panel flex min-h-0 flex-col gap-4 overflow-y-auto p-5">
-        <header className="flex items-center justify-between gap-2">
-          <h2 className="label text-text">{t('Корзина')}</h2>
-          {!empty && (
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={busy || paying}
-              onClick={() => (frozen ? setConfirmReset(true) : resetCart())}
-            >
-              {t('Сбросить')}
-            </Button>
+      {/* The cart: the focused object, solid. */}
+      <aside aria-label={t('Корзина')} className="panel-solid flex min-h-0 flex-col overflow-hidden">
+        <div className="flex min-h-[60px] shrink-0 items-center px-4">
+          <PanelHeader
+            size="side"
+            className="w-full"
+            title={t('Корзина')}
+            caption={empty ? undefined : `${units} ${t('шт')}`}
+            aside={
+              !empty && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="-mr-2"
+                  disabled={busy || paying}
+                  onClick={() => (frozen ? setConfirmReset(true) : resetCart())}
+                >
+                  {t('Сбросить')}
+                </Button>
+              )
+            }
+          />
+        </div>
+
+        <div className="thin-scrollbar flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4 [@media(max-height:840px)]:gap-3">
+          {done && (
+            <Note tone="ok" role="status">
+              <span className="flex items-center justify-between gap-3">
+                <span>{done.text}</span>
+                <ReceiptButton receipt={done.receipt} className="!h-8 shrink-0 !px-3 !text-xs" />
+              </span>
+              {done.change !== null && done.change > 0 && (
+                <span className="mt-1 block font-semibold text-hi">
+                  {t('Сдача: {sum}', { sum: moneyExact(done.change) })}
+                </span>
+              )}
+            </Note>
           )}
-        </header>
 
-        {done && (
-          <div role="status" className="flex flex-col gap-2 rounded-md bg-success/10 px-3 py-2 text-sm text-success">
-            <div className="flex items-start justify-between gap-3">
-              <p>{done.text}</p>
-              <ReceiptButton receipt={done.receipt} className="h-8 shrink-0 px-2.5 text-xs" />
-            </div>
-            {done.change !== null && done.change > 0 && (
-              <p className="font-semibold">{t('Сдача: {sum}', { sum: moneyExact(done.change) })}</p>
-            )}
-          </div>
-        )}
-
-        {empty ? (
-          <p className="text-sm text-muted">{t('Нажмите на товар, чтобы добавить его в корзину.')}</p>
-        ) : (
-          <ul aria-label={t('Позиции')} className="flex flex-col divide-y divide-line">
-            {cartLines.map((l) => {
-              const p = byId.get(l.productId);
-              const title = p?.title ?? '…';
-              return (
-                <li key={l.productId} data-line={l.productId} className="flex items-center gap-2 py-2">
-                  <span className="min-w-0 flex-1 truncate text-sm">{title}</span>
-                  <span className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      aria-label={t('Меньше: {title}', { title })}
-                      disabled={locked}
-                      onClick={() => setQty(l.productId, l.qty - 1)}
-                      className="focus-ring choice h-7 w-7 rounded-md text-sm disabled:opacity-40"
-                    >
-                      −
-                    </button>
-                    <span data-qty className="tnum w-6 text-center text-sm font-semibold">
-                      {l.qty}
+          {empty ? (
+            <EmptyState
+              className="py-6"
+              icon={<CupIcon size={22} />}
+              title={t('Корзина пуста')}
+              text={t('Нажмите на товар, чтобы добавить его в корзину.')}
+            />
+          ) : (
+            <ul aria-label={t('Позиции')} className="-mt-1 flex flex-col">
+              {cartLines.map((l) => {
+                const p = byId.get(l.productId);
+                const title = p?.title ?? '…';
+                return (
+                  <li
+                    key={l.productId}
+                    data-line={l.productId}
+                    className="flex min-h-12 items-center gap-2 border-t border-accent/[0.07] py-1.5 first:border-t-0"
+                  >
+                    <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-text">{title}</span>
+                    <span className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        aria-label={t('Меньше: {title}', { title })}
+                        disabled={locked}
+                        onClick={() => setQty(l.productId, l.qty - 1)}
+                        className={STEPPER}
+                      >
+                        −
+                      </button>
+                      <span
+                        data-qty
+                        className="tnum w-7 text-center font-mono text-[13px] font-semibold leading-none text-hi"
+                      >
+                        {l.qty}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={t('Больше: {title}', { title })}
+                        disabled={locked || l.qty >= capOf(p)}
+                        onClick={() => setQty(l.productId, l.qty + 1)}
+                        className={STEPPER}
+                      >
+                        +
+                      </button>
+                    </span>
+                    <span className="tnum w-[96px] whitespace-nowrap text-right font-mono text-[12.5px] font-semibold text-text">
+                      {exactDigits((p?.price.amount ?? 0) * l.qty)}{' '}
+                      <span className="font-sans font-medium text-muted">{t('сум')}</span>
                     </span>
                     <button
                       type="button"
-                      aria-label={t('Больше: {title}', { title })}
-                      disabled={locked || l.qty >= capOf(p)}
-                      onClick={() => setQty(l.productId, l.qty + 1)}
-                      className="focus-ring choice h-7 w-7 rounded-md text-sm disabled:opacity-40"
+                      aria-label={t('Убрать: {title}', { title })}
+                      disabled={locked}
+                      onClick={() => setQty(l.productId, 0)}
+                      className="focus-ring btn-ghost -mr-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted disabled:cursor-not-allowed disabled:opacity-40"
                     >
-                      +
+                      <CloseIcon size={13} />
                     </button>
-                  </span>
-                  <span className="tnum w-24 text-right text-sm">{moneyExact((p?.price.amount ?? 0) * l.qty)}</span>
-                  <button
-                    type="button"
-                    aria-label={t('Убрать: {title}', { title })}
-                    disabled={locked}
-                    onClick={() => setQty(l.productId, 0)}
-                    className="focus-ring h-7 w-7 rounded-md text-muted hover:bg-white/[0.06] hover:text-text disabled:opacity-40"
-                  >
-                    ×
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-
-        {!empty && (
-          <div className="flex items-baseline justify-between border-t border-line pt-3">
-            <span className="label">{t('Итого')}</span>
-            <span className="tnum text-xl font-semibold">{moneyExact(frozen?.total ?? total)}</span>
-          </div>
-        )}
-
-        <div className="flex flex-col gap-2">
-          <div role="group" aria-label={t('Покупатель')} className="grid grid-cols-2 gap-1.5">
-            {(['guest', 'client'] as const).map((k) => {
-              const on = k === 'client' ? clientMode : !clientMode;
-              return (
-                <Button
-                  key={k}
-                  aria-pressed={on}
-                  disabled={locked}
-                  className={clsx(on && 'choice-on')}
-                  onClick={() => {
-                    if (k === 'guest') clearBuyer();
-                    else setClientMode(true);
-                  }}
-                >
-                  {k === 'guest' ? t('Гость') : t('Клиент')}
-                </Button>
-              );
-            })}
-          </div>
-          {clientMode && !client && (
-            <ClientPicker
-              label={t('Клиент')}
-              value={null}
-              allowPlaying
-              autoFocus
-              onChange={(hit) => {
-                if (!hit) return;
-                buyerOf(hit.id, hit)
-                  .then((b) => {
-                    if (b) setBuyer(b);
-                  })
-                  .catch((e: unknown) => setError(describe(e)));
-              }}
-            />
+                  </li>
+                );
+              })}
+            </ul>
           )}
-          {client && (
-            <div className="flex items-center gap-2 rounded-md border border-accent/40 bg-accent/[0.05] px-3 py-2">
-              <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-sm font-medium">
-                  {client.role === 'guest' ? t('Гость') : client.displayName}
-                </span>
-                <span className="tnum font-mono text-[0.7rem] text-muted">
-                  {[
-                    t('баланс {sum}', { sum: moneyExact(client.balance) }),
-                    client.pcName ? pcLabel(client.pcName) : null,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </span>
-              </span>
-              <button
-                type="button"
-                aria-label={t('Сменить клиента')}
-                title={t('Сменить клиента')}
-                disabled={locked}
-                className="focus-ring h-7 w-7 shrink-0 rounded-md text-muted hover:bg-white/[0.06] hover:text-text disabled:opacity-40"
-                onClick={() => {
-                  setBuyer(GUEST);
-                  setShort(null);
-                  setPayByMethod(false);
-                  balanceKey.reset();
-                }}
-              >
-                ×
-              </button>
+
+          {!empty && (
+            <div className="flex items-end justify-between gap-3 border-t border-accent/[0.08] pt-3.5">
+              <span className="label pb-1">{t('Итого')}</span>
+              <DotoSum minor={frozen?.total ?? total} size={30} className="text-hi" unitClassName="text-muted" />
             </div>
           )}
-          {client?.postpaid != null && (
-            <p className="rounded-md bg-warning/10 px-3 py-1.5 text-xs text-warning">
-              {t('Идёт постоплата: покупка с баланса сократит время игры')}
+
+          <div className="flex flex-col gap-2.5 border-t border-accent/[0.08] pt-4">
+            <span className="label-sm">{t('Покупатель')}</span>
+            <Segmented
+              label={t('Покупатель')}
+              value={clientMode ? 'client' : 'guest'}
+              options={[
+                { id: 'guest', label: t('Гость'), disabled: buyerLocked },
+                { id: 'client', label: t('Клиент'), disabled: buyerLocked },
+              ]}
+              onChange={(k) => {
+                if (k === 'guest') clearBuyer();
+                else setClientMode(true);
+              }}
+            />
+            {clientMode && !client && (
+              <ClientPicker
+                label={t('Клиент')}
+                value={null}
+                allowPlaying
+                autoFocus
+                onChange={(hit) => {
+                  if (!hit) return;
+                  buyerOf(hit.id, hit)
+                    .then((b) => {
+                      if (b) setBuyer(b);
+                    })
+                    .catch((e: unknown) => setError(describe(e)));
+                }}
+              />
+            )}
+            {client && (
+              <div className="flex min-h-14 items-center gap-3 rounded-md border border-accent/40 bg-accent/[0.05] py-2 pl-3 pr-1.5">
+                <span
+                  aria-hidden="true"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-accent/[0.22] bg-accent/[0.08] font-display text-[11px] font-semibold text-hi"
+                >
+                  {initialsOf(client.role === 'guest' ? t('Гость') : client.displayName)}
+                </span>
+                <span className="flex min-w-0 flex-1 flex-col gap-1">
+                  <span className="truncate text-[13px] font-semibold leading-4 text-hi">
+                    {client.role === 'guest' ? t('Гость') : client.displayName}
+                  </span>
+                  <span className="tnum truncate font-mono text-[11px] leading-4 text-muted">
+                    {[
+                      t('баланс {sum}', { sum: moneyExact(client.balance) }),
+                      client.pcName ? pcLabel(client.pcName) : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  aria-label={t('Сменить клиента')}
+                  title={t('Сменить клиента')}
+                  disabled={locked}
+                  className="focus-ring btn-ghost inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  onClick={() => {
+                    setBuyer(GUEST);
+                    setShort(null);
+                    setPayByMethod(false);
+                    balanceKey.reset();
+                  }}
+                >
+                  <CloseIcon size={14} />
+                </button>
+              </div>
+            )}
+            {client?.postpaid != null && (
+              <Note tone="warn">{t('Идёт постоплата: покупка с баланса сократит время игры')}</Note>
+            )}
+          </div>
+
+          {notice && (
+            <Note tone="warn" role="status">
+              {notice}
+            </Note>
+          )}
+
+          {!empty && (clientMode ? client !== null : true) && (
+            <section aria-label={t('Оплата')} className="flex flex-col gap-3 border-t border-accent/[0.08] pt-4">
+              {client && (!viaMethod || frozen?.via === 'balance') && (
+                <>
+                  <ShiftClosedNote />
+                  <Button
+                    variant="primary"
+                    size="lg"
+                    disabled={busy || closed || (frozen !== null && frozen.via !== 'balance')}
+                    onClick={() => void payBalance()}
+                  >
+                    {busy
+                      ? '…'
+                      : frozen
+                        ? t('Повторить списание · {sum}', { sum: moneyExact(frozen.total) })
+                        : t('Списать с баланса · {sum}', { sum: moneyExact(total) })}
+                  </Button>
+                  {!frozen && (
+                    <Button variant="ghost" size="sm" onClick={() => setPayByMethod(true)}>
+                      {t('Оплатить деньгами')}
+                    </Button>
+                  )}
+                </>
+              )}
+              {client && viaMethod && !payByMethod && (
+                <p className="text-xs font-medium leading-5 text-warning">
+                  {short !== null
+                    ? t('На балансе доступно {sum} — оплата деньгами', { sum: moneyExact(short) })
+                    : t('Не хватает {sum} на балансе', { sum: moneyExact(Math.max(0, total - spendable)) })}
+                </p>
+              )}
+              {client && payByMethod && short !== null && (
+                <p className="text-xs font-medium leading-5 text-warning">
+                  {t('На балансе доступно {sum} — оплата деньгами', { sum: moneyExact(short) })}
+                </p>
+              )}
+              {viaMethod && frozen?.via !== 'balance' && (
+                <PayBox
+                  key={saleId ?? 'none'}
+                  exact={frozen?.total ?? total}
+                  verb={t('Продать')}
+                  autoFocus={false}
+                  hints={false}
+                  disabled={total <= 0 ? t('Корзина пуста') : null}
+                  onPay={payMethod}
+                />
+              )}
+              {client && client.role !== 'guest' && viaMethod && !frozen && (
+                <Button variant="ghost" size="sm" onClick={() => setTopUp(true)}>
+                  {t('Пополнить баланс')}
+                </Button>
+              )}
+              {error && (
+                <Note tone="err" role="alert">
+                  {error}
+                </Note>
+              )}
+            </section>
+          )}
+          {frozen && (
+            <p className="text-xs leading-5 text-muted">
+              {t('Корзина заморожена, пока не ясно, прошла ли продажа. Повторите её — дважды она не проведётся.')}
             </p>
           )}
         </div>
 
-        {notice && (
-          <p role="status" className="rounded-md bg-warning/10 px-3 py-2 text-sm text-warning">
-            {notice}
-          </p>
-        )}
-
-        {!empty && (clientMode ? client !== null : true) && (
-          <section aria-label={t('Оплата')} className="flex flex-col gap-3">
-            {client && (!viaMethod || frozen?.via === 'balance') && (
-              <>
-                <ShiftClosedNote />
-                <Button
-                  variant="primary"
-                  className="h-11"
-                  disabled={busy || closed || (frozen !== null && frozen.via !== 'balance')}
-                  onClick={() => void payBalance()}
-                >
-                  {busy
-                    ? '…'
-                    : frozen
-                      ? t('Повторить списание · {sum}', { sum: moneyExact(frozen.total) })
-                      : t('Списать с баланса · {sum}', { sum: moneyExact(total) })}
-                </Button>
-                {!frozen && (
-                  <Button variant="ghost" size="sm" onClick={() => setPayByMethod(true)}>
-                    {t('Оплатить деньгами')}
-                  </Button>
-                )}
-              </>
-            )}
-            {client && viaMethod && !payByMethod && (
-              <p className="text-sm text-warning">
-                {short !== null
-                  ? t('На балансе доступно {sum} — оплата деньгами', { sum: moneyExact(short) })
-                  : t('Не хватает {sum} на балансе', { sum: moneyExact(Math.max(0, total - spendable)) })}
-              </p>
-            )}
-            {client && payByMethod && short !== null && (
-              <p className="text-sm text-warning">
-                {t('На балансе доступно {sum} — оплата деньгами', { sum: moneyExact(short) })}
-              </p>
-            )}
-            {viaMethod && frozen?.via !== 'balance' && (
-              <PayBox
-                key={saleId ?? 'none'}
-                exact={frozen?.total ?? total}
-                verb={t('Продать')}
-                autoFocus={false}
-                hints={false}
-                disabled={total <= 0 ? t('Корзина пуста') : null}
-                onPay={payMethod}
-              />
-            )}
-            {client && client.role !== 'guest' && viaMethod && !frozen && (
-              <Button variant="ghost" size="sm" onClick={() => setTopUp(true)}>
-                {t('Пополнить баланс')}
-              </Button>
-            )}
-            {error && (
-              <p role="alert" className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
-                {error}
-              </p>
-            )}
-          </section>
-        )}
-        {frozen && (
-          <p className="text-xs text-muted">
-            {t('Корзина заморожена, пока не ясно, прошла ли продажа. Повторите её — дважды она не проведётся.')}
-          </p>
-        )}
-        <p className="mt-auto text-xs text-muted">
-          <Kbd>+</Kbd> <Kbd>−</Kbd> <Kbd>Del</Kbd> {t('— последняя позиция')} · <Kbd>Esc</Kbd> {t('— очистить поиск')}
-        </p>
+        {/* The keys legend gives its room to the pay box on a short counter screen (1366×768). */}
+        <footer className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-accent/[0.08] px-4 py-3 text-[11.5px] leading-5 text-muted [@media(max-height:840px)]:hidden">
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+            <Kbd>+</Kbd> <Kbd>−</Kbd> <Kbd>Del</Kbd> {t('— последняя позиция')}
+          </span>
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+            <Kbd>Esc</Kbd> {t('— очистить поиск')}
+          </span>
+        </footer>
       </aside>
 
       {confirmReset && (
-        <Sheet title={t('Сбросить корзину?')} onClose={() => setConfirmReset(false)}>
-          <p className="text-sm">
+        <Sheet
+          title={t('Сбросить корзину?')}
+          onClose={() => setConfirmReset(false)}
+          footer={
+            <div className="ml-auto flex gap-2">
+              <Button variant="ghost" autoFocus onClick={() => setConfirmReset(false)}>
+                {t('Отмена')}
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => {
+                  setConfirmReset(false);
+                  resetCart();
+                }}
+              >
+                {t('Сбросить')}
+              </Button>
+            </div>
+          }
+        >
+          <Note tone="warn">
             {t(
               'Ответ на эту продажу не пришёл: она может уже быть в ленте операций. Проверьте ленту перед тем, как продать снова.',
             )}
-          </p>
-          <div className="flex justify-end gap-2 border-t border-line pt-4">
-            <Button variant="ghost" autoFocus onClick={() => setConfirmReset(false)}>
-              {t('Отмена')}
-            </Button>
-            <Button
-              variant="danger"
-              className="border border-danger/50"
-              onClick={() => {
-                setConfirmReset(false);
-                resetCart();
-              }}
-            >
-              {t('Сбросить')}
-            </Button>
-          </div>
+          </Note>
         </Sheet>
       )}
       {topUp && client && (

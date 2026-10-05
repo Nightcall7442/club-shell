@@ -1,18 +1,36 @@
 /**
- * Clients (cashier + owner): search, the client list with group, loyalty level and money, and a side panel to edit a
- * profile, bind a club card, reset the sign-in password, redeem a promo code and see the latest wallet entries — or to
- * register a new client with a password and card, so they can sign in on a PC. A password the console generates is
- * shown to the cashier once. Blacklisting is the owner's call: the server answers 403 to a cashier and the panel says.
- * `#/clients/new` (the counter's "+ Новый клиент") opens the registration straight away.
+ * Clients (cashier + owner): search, the client list with group, loyalty level and money, and a side card (variant F:
+ * the client's head on the blueprint grid, balance / bonus / visits / spent wells) to top up the balance (the same
+ * «Пополнить» sheet as the search's), edit a profile, bind a club card, reset the sign-in password, redeem a promo code
+ * and see the latest wallet entries — or to register a new client with a password and card, so they can sign in on a
+ * PC. A password the console generates is shown to the cashier once. Blacklisting is the owner's call: the server
+ * answers 403 to a cashier and the panel says. `#/clients/new` (the counter's "+ Новый клиент") opens the registration
+ * straight away.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import type { Transaction } from '@clubshell/contracts';
 import { clubApi, type Client, type ClientGroup } from '@/api';
 import { describe } from '@/errors';
-import { money } from '@/format';
+import { money, moneyParts } from '@/format';
 import { dateLocale, t } from '@/i18n';
-import { Button, Field, Input, Note, PageHeader, Section, Table, Toggle, inputCls } from '@/ui';
+import { PersonIcon, SearchIcon, UsersIcon } from '@/icons';
+import { TopUpSheet } from '@/paybox';
+import {
+  Badge,
+  Button,
+  Chip,
+  EmptyState,
+  Field,
+  Input,
+  Note,
+  PageHeader,
+  Section,
+  Table,
+  Toggle,
+  Well,
+  inputCls,
+} from '@/ui';
 
 type NoteState = { text: string; tone: 'ok' | 'err' } | null;
 
@@ -27,13 +45,20 @@ function tempPassword(): string {
   );
 }
 
-/** A generated password, shown once for the cashier to pass on to the client. */
+/**
+ * A generated password, shown once for the cashier to pass on to the client: a status note whose one `.font-mono` child
+ * is the password (the E2E reads it there).
+ */
 function IssuedPassword({ password }: { password: string }): JSX.Element {
   return (
-    <div role="status" className="flex flex-col gap-1 rounded-md bg-success/10 px-3 py-2 text-sm text-success">
-      <span>{t('Временный пароль — сообщите клиенту, он показывается один раз')}</span>
-      <span className="font-mono text-lg tracking-[0.12em] text-text">{password}</span>
-    </div>
+    <Note tone="ok" role="status">
+      <span className="block text-[12.5px] leading-5 text-soft">
+        {t('Временный пароль — сообщите клиенту, он показывается один раз')}
+      </span>
+      <span className="mt-1.5 block font-mono text-xl font-semibold leading-7 tracking-[0.12em] text-hi">
+        {password}
+      </span>
+    </Note>
   );
 }
 
@@ -42,11 +67,36 @@ function yearOf(text: string): number | null {
   return text.trim() && Number.isInteger(n) ? n : null;
 }
 
+/** Money in a table cell or a list: mono digits, «сум» in Inter, muted. */
+function Sum({ minor }: { minor: number }): JSX.Element {
+  const { num, unit } = moneyParts(minor);
+  return (
+    <span className="whitespace-nowrap">
+      {num} <span className="font-sans font-medium text-muted">{unit}</span>
+    </span>
+  );
+}
+
+/** Up to two initials of a name. */
+function initialsOf(name: string): string {
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w.charAt(0).toUpperCase())
+    .join('');
+}
+
+/** The group's colour (from the club's data) as a dot. */
+function ColorDot({ color }: { color: string }): JSX.Element {
+  return <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />;
+}
+
 function GroupDot({ group }: { group: ClientGroup | undefined }): JSX.Element {
   return (
     <span className="flex items-center gap-2">
-      {group && <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: group.color }} />}
-      {group ? group.name : <span className="text-muted">—</span>}
+      {group && <ColorDot color={group.color} />}
+      {group ? <span className="text-soft">{group.name}</span> : <span className="text-muted">—</span>}
     </span>
   );
 }
@@ -61,25 +111,80 @@ function GroupChoice({
   onChange: (id: string | null) => void;
 }): JSX.Element {
   const chip = (id: string | null, label: string, color?: string): JSX.Element => (
-    <button
+    <Chip
       key={id ?? 'none'}
-      type="button"
-      aria-pressed={value === id}
+      tone="outlined"
+      pressed={value === id}
+      icon={color ? <ColorDot color={color} /> : undefined}
       onClick={() => onChange(id)}
-      className={clsx(
-        'choice focus-ring inline-flex h-8 items-center gap-2 rounded-md px-2.5 text-xs font-medium',
-        value === id && 'choice-on',
-      )}
     >
-      {color && <span className="h-2 w-2 rounded-full" style={{ background: color }} />}
       {label}
-    </button>
+    </Chip>
   );
   return (
     <div className="flex flex-wrap gap-1.5">
       {chip(null, t('Без группы'))}
       {groups.map((g) => chip(g.id, g.name, g.color))}
     </div>
+  );
+}
+
+/**
+ * The card's head (spec §9, «Клиенты»): 96 px on the blueprint grid with the accent hairline on top, the avatar and the
+ * name over its foot.
+ */
+function CardBand({ children }: { children: ReactNode }): JSX.Element {
+  return (
+    <div className="relative flex h-24 shrink-0 items-end overflow-hidden px-4 pb-3.5">
+      <span aria-hidden="true" className="hud-grid absolute inset-0" />
+      <span
+        aria-hidden="true"
+        className="absolute inset-0"
+        style={{
+          background:
+            'radial-gradient(360px 140px at 85% 0%, rgb(var(--c-accent) / 0.1), transparent 70%), linear-gradient(180deg, rgb(var(--c-art) / 0) 35%, rgb(var(--c-art) / 0.85) 100%)',
+        }}
+      />
+      <span
+        aria-hidden="true"
+        className="absolute inset-x-0 top-0 h-px"
+        style={{
+          background:
+            'linear-gradient(90deg, rgb(var(--c-accent) / 0) 0%, rgb(var(--c-accent) / 0.7) 50%, rgb(var(--c-accent) / 0) 100%)',
+        }}
+      />
+      <div className="relative flex min-w-0 items-center gap-3.5">{children}</div>
+    </div>
+  );
+}
+
+/** 48 px round avatar: initials in Unbounded, or an icon. */
+function Avatar({ children }: { children: ReactNode }): JSX.Element {
+  return (
+    <span
+      aria-hidden="true"
+      className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-accent/[0.22] bg-accent/[0.08] font-display text-base font-semibold text-hi"
+    >
+      {children}
+    </span>
+  );
+}
+
+/** A block of the card under a hairline, with a mono caption. */
+function CardBlock({
+  label,
+  children,
+  className,
+}: {
+  label?: string;
+  children: ReactNode;
+  className?: string;
+}): JSX.Element {
+  return (
+    <section className={clsx('flex flex-col gap-3 border-t border-accent/[0.08] pt-4', className)}>
+      {label && <span className="label text-text">{label}</span>}
+      {children}
+    </section>
   );
 }
 
@@ -93,12 +198,15 @@ function ClientPanel({
   issuedPassword,
   onSaved,
   onPasswordIssued,
+  onToppedUp,
 }: {
   client: Client;
   groups: ClientGroup[];
   issuedPassword: string | null;
   onSaved: (c: Client) => void;
   onPasswordIssued: (password: string) => void;
+  /** A top-up went through: the list reloads the balance. */
+  onToppedUp: () => void;
 }): JSX.Element {
   const [name, setName] = useState(client.displayName);
   const [phone, setPhone] = useState(client.phone);
@@ -113,6 +221,7 @@ function ClientPanel({
   const [promo, setPromo] = useState('');
   const [promoNote, setPromoNote] = useState<NoteState>(null);
   const [txs, setTxs] = useState<Transaction[]>([]);
+  const [topUp, setTopUp] = useState(false);
 
   const loadTxs = useCallback(async () => {
     try {
@@ -206,130 +315,179 @@ function ClientPanel({
     }
   };
 
+  const group = groups.find((g) => g.id === client.groupId);
+  const tail = client.phone.replace(/\D/g, '').slice(-4);
+  const balance = moneyParts(client.balance.amount);
+  const bonus = moneyParts(client.bonus.amount);
+  const spent = moneyParts(client.spent);
+
   return (
-    <div className="flex flex-col gap-5">
-      <header className="flex flex-col gap-1">
-        <span className="label">
-          {client.levelName} · {t('уровень {n}', { n: client.level })}
-        </span>
-        <h2 className="font-display text-2xl font-normal leading-tight tracking-tight">{client.displayName}</h2>
-        <span className="font-mono text-xs text-muted">@{client.username}</span>
-      </header>
-
-      <dl className="grid grid-cols-2 divide-x divide-line overflow-hidden rounded-md border border-line bg-bg text-center">
-        <div className="flex flex-col gap-1.5 px-3 py-3">
-          <dt className="label">{t('Баланс')}</dt>
-          <dd className="tnum text-lg font-semibold leading-none">{money(client.balance)}</dd>
+    <div className="flex flex-col">
+      <CardBand>
+        <Avatar>{initialsOf(client.displayName)}</Avatar>
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <h2 className="truncate font-display text-[22px] font-medium leading-7 tracking-[-0.01em] text-hi">
+            {client.displayName}
+          </h2>
+          <span className="truncate font-mono text-xs leading-4 text-dim">
+            @{client.username}
+            {tail && ` · ••${tail}`}
+          </span>
         </div>
-        <div className="flex flex-col gap-1.5 px-3 py-3">
-          <dt className="label">{t('Бонусы')}</dt>
-          <dd className="tnum text-lg font-semibold leading-none">{money(client.bonus)}</dd>
+      </CardBand>
+
+      <div className="flex flex-col gap-4 px-4 pb-5 pt-3.5">
+        <div className="flex flex-wrap gap-1.5">
+          <Badge tone="accent">
+            {client.levelName} · {t('уровень {n}', { n: client.level })}
+          </Badge>
+          {group && (
+            <Badge tone="neutral">
+              <ColorDot color={group.color} />
+              {group.name}
+            </Badge>
+          )}
+          {client.blacklisted && <Badge tone="danger">{t('Чёрный список')}</Badge>}
         </div>
-      </dl>
 
-      <section className="flex flex-col gap-4">
-        <Field label={t('Имя')}>
-          <Input value={name} onChange={(e) => setName(e.target.value)} />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label={t('Телефон')}>
-            <Input value={phone} inputMode="tel" onChange={(e) => setPhone(e.target.value)} />
-          </Field>
-          <Field label={t('Год рождения')}>
-            <Input
-              value={birth}
-              inputMode="numeric"
-              className="tnum"
-              maxLength={4}
-              onChange={(e) => setBirth(e.target.value.replace(/\D/g, ''))}
-            />
-          </Field>
+        <div className="grid grid-cols-2 gap-2">
+          <Well label={t('Баланс')} value={balance.num} unit={balance.unit} size={22} />
+          <Well label={t('Бонусы')} value={bonus.num} unit={bonus.unit} size={22} tone="accent" />
+          <Well label={t('Визиты')} value={nf.format(client.visits)} size={18} />
+          <Well label={t('Потрачено')} value={spent.num} unit={spent.unit} size={18} />
         </div>
-        <div className="flex flex-col gap-1.5">
-          <span className="label">{t('Группа')}</span>
-          <GroupChoice groups={groups} value={groupId} onChange={setGroupId} />
-        </div>
-        <Field label={t('Заметка')}>
-          <textarea
-            rows={3}
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            className={clsx(inputCls, 'h-auto resize-y py-2')}
-          />
-        </Field>
-        <Toggle checked={blacklisted} onChange={setBlacklisted} label={t('Чёрный список')} />
-        <Note note={result} />
-        <Button variant="primary" disabled={busy || !name.trim()} onClick={() => void save()}>
-          {t('Сохранить')}
-        </Button>
-      </section>
 
-      <section className="flex flex-col gap-3 border-t border-line pt-4">
-        <span className="label">{t('Вход на ПК')}</span>
-        <Field label={t('Номер карты')}>
-          <div className="flex gap-1.5">
-            <Input value={card} className="font-mono" onChange={(e) => setCard(e.target.value)} />
-            <Button disabled={busy || card.trim() === (client.cardId ?? '')} onClick={() => void bindCard()}>
-              {card.trim() ? t('Привязать карту') : t('Отвязать карту')}
-            </Button>
-          </div>
-        </Field>
-        <Note note={loginNote} />
-        {issuedPassword && <IssuedPassword password={issuedPassword} />}
-        <Button disabled={busy} onClick={() => void resetPassword()}>
-          {t('Сбросить пароль')}
-        </Button>
-      </section>
-
-      <section className="flex flex-col gap-2 border-t border-line pt-4">
-        <Field label={t('Промокод')}>
-          <div className="flex gap-1.5">
-            <Input
-              value={promo}
-              className="font-mono uppercase"
-              onChange={(e) => setPromo(e.target.value.toUpperCase())}
-            />
-            <Button disabled={busy || !promo.trim()} onClick={() => void redeem()}>
-              {t('Применить')}
-            </Button>
-          </div>
-        </Field>
-        <Note note={promoNote} />
-      </section>
-
-      <section className="flex flex-col gap-2 border-t border-line pt-4">
-        <span className="label">{t('Последние операции')}</span>
-        {txs.length === 0 ? (
-          <p className="text-sm text-muted">{t('Операций нет')}</p>
-        ) : (
-          <ul className="flex flex-col divide-y divide-line/60">
-            {txs.map((x) => (
-              <li key={x.id} className="flex items-baseline justify-between gap-3 py-2">
-                <span className="flex min-w-0 flex-col">
-                  <span className="truncate text-sm">{x.description}</span>
-                  <span className="tnum font-mono text-[0.68rem] text-muted">
-                    {new Date(x.createdAt).toLocaleString(dateLocale(), {
-                      day: '2-digit',
-                      month: '2-digit',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </span>
-                </span>
-                <span
-                  className={clsx(
-                    'tnum shrink-0 text-sm font-semibold',
-                    x.amount.amount < 0 ? 'text-text' : 'text-success',
-                  )}
-                >
-                  {x.amount.amount > 0 ? '+' : x.amount.amount < 0 ? '−' : ''}
-                  {money({ ...x.amount, amount: Math.abs(x.amount.amount) })}
-                </span>
-              </li>
-            ))}
-          </ul>
+        {/* Guests are never topped up (D-36): their debts go through the map's settle sheet. */}
+        {client.role !== 'guest' && (
+          <Button variant="primary" size="lg" className="w-full" onClick={() => setTopUp(true)}>
+            {t('Пополнить')}
+          </Button>
         )}
-      </section>
+
+        <CardBlock className="gap-4">
+          <Field label={t('Имя')}>
+            <Input value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={t('Телефон')}>
+              <Input value={phone} inputMode="tel" onChange={(e) => setPhone(e.target.value)} />
+            </Field>
+            <Field label={t('Год рождения')}>
+              <Input
+                value={birth}
+                inputMode="numeric"
+                className="tnum"
+                maxLength={4}
+                onChange={(e) => setBirth(e.target.value.replace(/\D/g, ''))}
+              />
+            </Field>
+          </div>
+          <div className="flex flex-col gap-2">
+            <span className="label-sm">{t('Группа')}</span>
+            <GroupChoice groups={groups} value={groupId} onChange={setGroupId} />
+          </div>
+          <Field label={t('Заметка')}>
+            <textarea
+              rows={3}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              className={clsx(inputCls, 'h-auto min-h-[88px] resize-y py-2.5 leading-5')}
+            />
+          </Field>
+          <Toggle checked={blacklisted} onChange={setBlacklisted} label={t('Чёрный список')} />
+          <Note note={result} />
+          <Button className="self-end" disabled={busy || !name.trim()} onClick={() => void save()}>
+            {t('Сохранить')}
+          </Button>
+        </CardBlock>
+
+        <CardBlock label={t('Вход на ПК')}>
+          <Field label={t('Номер карты')}>
+            <div className="flex gap-2">
+              <Input value={card} className="font-mono" onChange={(e) => setCard(e.target.value)} />
+              <Button
+                className="shrink-0"
+                disabled={busy || card.trim() === (client.cardId ?? '')}
+                onClick={() => void bindCard()}
+              >
+                {card.trim() ? t('Привязать карту') : t('Отвязать карту')}
+              </Button>
+            </div>
+          </Field>
+          <Note note={loginNote} />
+          {issuedPassword && <IssuedPassword password={issuedPassword} />}
+          <Button variant="tertiary" className="self-start" disabled={busy} onClick={() => void resetPassword()}>
+            {t('Сбросить пароль')}
+          </Button>
+        </CardBlock>
+
+        <CardBlock>
+          <Field label={t('Промокод')}>
+            <div className="flex gap-2">
+              <Input
+                value={promo}
+                className="font-mono uppercase"
+                onChange={(e) => setPromo(e.target.value.toUpperCase())}
+              />
+              <Button className="shrink-0" disabled={busy || !promo.trim()} onClick={() => void redeem()}>
+                {t('Применить')}
+              </Button>
+            </div>
+          </Field>
+          <Note note={promoNote} />
+        </CardBlock>
+
+        <CardBlock label={t('Последние операции')} className="gap-1.5">
+          {txs.length === 0 ? (
+            <p className="text-[13px] text-muted">{t('Операций нет')}</p>
+          ) : (
+            <ul className="flex flex-col">
+              {txs.map((x) => {
+                const sum = moneyParts(Math.abs(x.amount.amount));
+                return (
+                  <li
+                    key={x.id}
+                    className="flex items-baseline justify-between gap-3 border-t border-accent/[0.07] py-2 first:border-t-0"
+                  >
+                    <span className="flex min-w-0 flex-col gap-0.5">
+                      <span className="truncate text-[12.5px] font-medium leading-4 text-text">{x.description}</span>
+                      <span className="tnum font-mono text-[10.5px] leading-4 text-muted">
+                        {new Date(x.createdAt).toLocaleString(dateLocale(), {
+                          day: '2-digit',
+                          month: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                    </span>
+                    {/* Money is never coloured by sign: «+» in the body colour, a real «−» dimmed. */}
+                    <span
+                      className={clsx(
+                        'tnum shrink-0 whitespace-nowrap font-mono text-[12px] font-semibold',
+                        x.amount.amount < 0 ? 'text-dim' : 'text-text',
+                      )}
+                    >
+                      {x.amount.amount > 0 ? '+' : x.amount.amount < 0 ? '−' : ''}
+                      {sum.num} <span className="font-sans font-medium text-muted">{sum.unit}</span>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </CardBlock>
+      </div>
+
+      {topUp && (
+        <TopUpSheet
+          payee={{ id: client.id, displayName: client.displayName, balance: client.balance, bonus: client.bonus }}
+          onClose={() => setTopUp(false)}
+          onDone={() => {
+            onToppedUp();
+            void loadTxs();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -377,20 +535,27 @@ function NewClientPanel({
   };
 
   return (
-    <div className="flex flex-col gap-5">
-      <h2 className="font-display text-2xl font-normal leading-tight tracking-tight">{t('Новый клиент')}</h2>
-      <section className="flex flex-col gap-4">
-        <Field label={t('Имя')}>
-          <Input value={name} autoFocus onChange={(e) => setName(e.target.value)} />
-        </Field>
-        <Field label={t('Логин')}>
-          <Input
-            value={login}
-            className="font-mono"
-            onChange={(e) => setLogin(e.target.value.toLowerCase().replace(/\s/g, ''))}
-          />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
+    <div className="flex flex-col">
+      <CardBand>
+        <Avatar>
+          <PersonIcon size={20} className="text-accent" />
+        </Avatar>
+        <h2 className="truncate font-display text-[22px] font-medium leading-7 tracking-[-0.01em] text-hi">
+          {t('Новый клиент')}
+        </h2>
+      </CardBand>
+      <section className="flex flex-col gap-4 px-4 pb-5 pt-4">
+        <div className="grid grid-cols-2 items-start gap-x-3 gap-y-4">
+          <Field label={t('Имя')}>
+            <Input value={name} autoFocus onChange={(e) => setName(e.target.value)} />
+          </Field>
+          <Field label={t('Логин')}>
+            <Input
+              value={login}
+              className="font-mono"
+              onChange={(e) => setLogin(e.target.value.toLowerCase().replace(/\s/g, ''))}
+            />
+          </Field>
           <Field label={t('Пароль')} hint={t('Не короче 4 символов. Пусто — выдадим временный')}>
             <Input
               type="password"
@@ -402,8 +567,6 @@ function NewClientPanel({
           <Field label={t('Номер карты')}>
             <Input value={card} className="font-mono" onChange={(e) => setCard(e.target.value)} />
           </Field>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
           <Field label={t('Телефон')}>
             <Input value={phone} inputMode="tel" onChange={(e) => setPhone(e.target.value)} />
           </Field>
@@ -417,12 +580,12 @@ function NewClientPanel({
             />
           </Field>
         </div>
-        <div className="flex flex-col gap-1.5">
-          <span className="label">{t('Группа')}</span>
+        <div className="flex flex-col gap-2">
+          <span className="label-sm">{t('Группа')}</span>
           <GroupChoice groups={groups} value={groupId} onChange={setGroupId} />
         </div>
         <Note note={result} />
-        <div className="flex justify-end gap-2 border-t border-line pt-4">
+        <div className="flex justify-end gap-2 border-t border-accent/[0.08] pt-4">
           <Button variant="ghost" onClick={onCancel}>
             {t('Отменить')}
           </Button>
@@ -491,18 +654,24 @@ export default function ClientsPage(): JSX.Element {
   const replace = (c: Client): void => setItems((list) => list.map((x) => (x.id === c.id ? c : x)));
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-4">
       <PageHeader
         title={t('Клиенты')}
         actions={
           <>
-            <Input
-              type="search"
-              className="w-72"
-              value={q}
-              placeholder={t('Имя, логин или телефон')}
-              onChange={(e) => setQ(e.target.value)}
-            />
+            <div className="relative w-72 max-w-full">
+              <SearchIcon
+                size={16}
+                className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted"
+              />
+              <Input
+                type="search"
+                className="pl-10"
+                value={q}
+                placeholder={t('Имя, логин или телефон')}
+                onChange={(e) => setQ(e.target.value)}
+              />
+            </div>
             <Button variant="primary" onClick={() => select('new')}>
               {t('Новый клиент')}
             </Button>
@@ -512,7 +681,7 @@ export default function ClientsPage(): JSX.Element {
 
       {error && <Note note={{ text: error, tone: 'err' }} />}
 
-      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_24rem]">
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_400px]">
         <Section bodyClassName="p-2">
           <Table
             rows={items}
@@ -526,12 +695,8 @@ export default function ClientsPage(): JSX.Element {
                 title: t('Имя'),
                 render: (c) => (
                   <span className="flex items-center gap-2">
-                    <span className={clsx('font-medium', c.blacklisted && 'text-danger')}>{c.displayName}</span>
-                    {c.blacklisted && (
-                      <span className="rounded border border-danger/50 px-1.5 py-0.5 font-mono text-[0.62rem] uppercase tracking-[0.1em] text-danger">
-                        {t('ЧС')}
-                      </span>
-                    )}
+                    <span className="font-medium text-text">{c.displayName}</span>
+                    {c.blacklisted && <Badge tone="danger">{t('ЧС')}</Badge>}
                   </span>
                 ),
               },
@@ -544,23 +709,18 @@ export default function ClientsPage(): JSX.Element {
                 key: 'phone',
                 title: t('Телефон'),
                 render: (c) =>
-                  c.phone ? <span className="tnum">{c.phone}</span> : <span className="text-muted">—</span>,
+                  c.phone ? <span className="tnum text-dim">{c.phone}</span> : <span className="text-muted">—</span>,
               },
               { key: 'group', title: t('Группа'), render: (c) => <GroupDot group={groupOf(c.groupId)} /> },
-              { key: 'level', title: t('Уровень'), render: (c) => c.levelName },
-              { key: 'balance', title: t('Баланс'), num: true, render: (c) => money(c.balance) },
+              { key: 'level', title: t('Уровень'), render: (c) => <span className="text-dim">{c.levelName}</span> },
+              { key: 'balance', title: t('Баланс'), num: true, render: (c) => <Sum minor={c.balance.amount} /> },
               { key: 'visits', title: t('Визиты'), num: true, render: (c) => nf.format(c.visits) },
-              {
-                key: 'spent',
-                title: t('Потрачено'),
-                num: true,
-                render: (c) => money({ amount: c.spent, currency: 'UZS' }),
-              },
+              { key: 'spent', title: t('Потрачено'), num: true, render: (c) => <Sum minor={c.spent} /> },
             ]}
           />
         </Section>
 
-        <aside className="panel p-5">
+        <aside className="panel-solid min-w-0 overflow-hidden">
           {selected === 'new' ? (
             <NewClientPanel
               groups={groups}
@@ -578,9 +738,10 @@ export default function ClientsPage(): JSX.Element {
               issuedPassword={issued?.id === client.id ? issued.password : null}
               onSaved={replace}
               onPasswordIssued={(password) => setIssued({ id: client.id, password })}
+              onToppedUp={() => void load(q.trim())}
             />
           ) : (
-            <p className="py-10 text-center text-sm text-muted">{t('Выберите клиента')}</p>
+            <EmptyState className="px-6 py-14" icon={<UsersIcon size={22} />} title={t('Выберите клиента')} />
           )}
         </aside>
       </div>

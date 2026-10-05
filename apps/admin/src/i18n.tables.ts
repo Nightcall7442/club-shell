@@ -1080,6 +1080,7 @@ export const UZ: Record<string, string> = {
   'номер ПК': 'kompyuter raqami',
   // --- end F:A ---
   // --- F:B bar, shop, clients ---
+  'Идёт продажа': 'Sotuv amalga oshirilmoqda',
   // --- end F:B ---
   // --- F:C shift, feed, health ---
   // --- end F:C ---
@@ -2163,6 +2164,7 @@ export const EN: Record<string, string> = {
   'номер ПК': 'PC number',
   // --- end F:A ---
   // --- F:B bar, shop, clients ---
+  'Идёт продажа': 'Sale in progress',
   // --- end F:B ---
   // --- F:C shift, feed, health ---
   // --- end F:C ---
