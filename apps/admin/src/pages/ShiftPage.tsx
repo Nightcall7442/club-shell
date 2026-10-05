@@ -501,6 +501,8 @@ export default function ShiftPage({ isOwner = false }: { isOwner?: boolean }): J
           className={clsx(
             'grid items-start gap-4',
             hasFeed && (hasMoves || drawerCard) && 'xl:grid-cols-[minmax(0,1fr)_400px]',
+            // An older server has no feed: the drawer card keeps its column's width instead of the page's.
+            !hasFeed && 'max-w-[480px]',
           )}
         >
           {hasFeed && (
