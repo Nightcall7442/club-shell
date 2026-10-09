@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Text;
 using ClubShell.Server.Auth;
 using ClubShell.Server.Infrastructure;
+using ClubShell.Server.Sessions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
@@ -17,7 +19,7 @@ namespace ClubShell.Server.Tests;
 
 /// <summary>
 /// Error reporting (D-72): what reaches Sentry and what never does. The rules in isolation, then the bytes the real
-/// server hands to the Sentry transport for an unhandled error.
+/// server hands to the Sentry transport.
 /// </summary>
 public sealed partial class ErrorReportingTests
 {
@@ -69,17 +71,63 @@ public sealed partial class ErrorReportingTests
         Assert.Equal(reported, ErrorReporting.Reported(category, level, withException ? new InvalidOperationException() : null));
     }
 
+    private const string Dsn = "https://0123456789abcdef0123456789abcdef@sentry.invalid/0";
+
+    /// <summary>
+    /// The SDK throws inside <c>builder.Build()</c> on a DSN or a <c>Sentry:*</c> value it cannot take, which would stop the
+    /// server; such settings only leave Sentry off. (SENTRY_DSN is cleared for this suite by <see cref="SentryFreeSuite"/>.)
+    /// </summary>
     [Theory]
-    [InlineData(null, false)]
-    [InlineData("", false)]
-    [InlineData("https://key@o0.ingest.sentry.io/0", true)]
-    public void Sentry_is_wired_only_with_a_DSN(string? dsn, bool configured)
+    [InlineData(null, null, null, false)]
+    [InlineData("", null, null, false)]
+    [InlineData(" ", null, null, false)]
+    [InlineData(Dsn, null, null, true)]
+    [InlineData(" " + Dsn + " ", null, null, true)]
+    [InlineData("\"" + Dsn + "\"", null, null, false)]
+    [InlineData("0123456789abcdef0123456789abcdef", null, null, false)]
+    [InlineData("https://sentry.invalid/0", null, null, false)]
+    [InlineData(Dsn + "/", null, null, false)]
+    [InlineData(Dsn, "SampleRate", "0", false)]
+    [InlineData(Dsn, "TracesSampleRate", "100", false)]
+    [InlineData(Dsn, "TracesSampleRate", "1.0", true)]
+    public void Sentry_is_wired_only_with_settings_the_SDK_accepts(string? dsn, string? option, string? value, bool configured)
     {
         var settings = new Dictionary<string, string?> { ["Sentry:Dsn"] = dsn };
+        if (option is not null)
+        {
+            settings[$"Sentry:{option}"] = value;
+        }
+
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
-        // Every other fixture of this suite starts without a DSN: Sentry 6 throws at startup when it is wired without one.
-        var fromEnvironment = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SENTRY_DSN"));
-        Assert.Equal(configured || fromEnvironment, ErrorReporting.IsConfigured(configuration));
+        Assert.Equal(configured, ErrorReporting.IsConfigured(configuration));
+    }
+
+    [Fact]
+    public void Configure_wins_over_the_configuration_on_privacy_and_installs_the_sampler()
+    {
+        var o = new SentryAspNetCoreOptions { SendDefaultPii = true, MaxRequestBodySize = RequestSize.Always, EnableLogs = true };
+
+        ErrorReporting.Configure(o);
+
+        Assert.False(o.SendDefaultPii);
+        Assert.Equal(RequestSize.None, o.MaxRequestBodySize);
+        Assert.False(o.EnableLogs);
+        Assert.Equal(LogLevel.Warning, o.MinimumEventLevel);
+        double? Rate(string method, string path) => o.TracesSampler!(new TransactionSamplingContext(
+            new TransactionContext("test", "http.server"),
+            new Dictionary<string, object?> { ["__HttpMethod"] = method, ["__HttpPath"] = path }));
+        Assert.Equal(0, Rate("GET", "/ws/agent"));
+        Assert.Equal(0, Rate("POST", "/api/v1/agents/0b0c4c2e-0000-4000-8000-000000000000/heartbeat"));
+        Assert.Equal(ErrorReporting.WriteSampleRate, Rate("POST", "/api/v1/admin/wallet/topup"));
+    }
+
+    [Theory]
+    [InlineData("33b9afa5f4ed341a8d3620b7965322dac280e62a", "clubshell-server@33b9afa5f4ed")]
+    [InlineData("33b9afa5f4e", null)]
+    [InlineData(null, null)]
+    public void The_release_is_the_deployed_commit(string? sha, string? release)
+    {
+        Assert.Equal(release, ErrorReporting.ReleaseFor(sha));
     }
 
     [Theory]
@@ -93,44 +141,138 @@ public sealed partial class ErrorReportingTests
     {
         Assert.Equal(rate, ErrorReporting.SampleRate(method, path));
     }
+
+    [Fact]
+    public void A_repeated_error_is_sent_once_an_hour_and_the_next_one_says_how_many_were_dropped()
+    {
+        var clock = new FakeClock();
+        var throttle = new RepeatThrottle(clock);
+        SentryEvent Tick() => new(new InvalidOperationException("db down"))
+        {
+            Logger = "ClubShell.Server.Sessions.SessionTickWorker",
+            Message = new SentryMessage { Message = "Session tick failed" },
+        };
+
+        Assert.True(throttle.Admit(Tick()));
+        Assert.False(throttle.Admit(Tick()));
+        clock.Advance(RepeatThrottle.Window - TimeSpan.FromSeconds(1));
+        Assert.False(throttle.Admit(Tick()));
+
+        clock.Advance(TimeSpan.FromSeconds(1));
+        var next = Tick();
+        Assert.True(throttle.Admit(next));
+        Assert.Equal(2, next.Extra["repeatsDropped"]);
+        Assert.False(throttle.Admit(Tick()));
+    }
+
+    [Fact]
+    public void Other_kinds_pass_the_throttle_at_once()
+    {
+        var throttle = new RepeatThrottle(new FakeClock());
+        SentryEvent Of(Exception exception, string template) => new(exception) { Logger = "ClubShell.Server.X", Message = new SentryMessage { Message = template } };
+
+        Assert.True(throttle.Admit(Of(new InvalidOperationException(), "Session tick failed")));
+        Assert.True(throttle.Admit(Of(new InvalidOperationException(), "Health pass failed")));
+        Assert.True(throttle.Admit(Of(new ArgumentException(), "Session tick failed")));
+        // The same type and template thrown from two places of this server's code: two bugs.
+        Assert.True(throttle.Admit(Of(Thrown(ThrowHere), "Unhandled error")));
+        Assert.True(throttle.Admit(Of(Thrown(ThrowThere), "Unhandled error")));
+        Assert.False(throttle.Admit(Of(Thrown(ThrowHere), "Unhandled error")));
+    }
+
+    private static void ThrowHere() => throw new InvalidOperationException("here");
+
+    private static void ThrowThere() => throw new InvalidOperationException("there");
+
+    private static Exception Thrown(Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception ex)
+        {
+            return ex;
+        }
+
+        throw new InvalidOperationException("did not throw");
+    }
 }
 
 /// <summary>
-/// The real server with a DSN and an in-memory transport. Alone in its collection: the Sentry SDK is process-wide, and a
-/// fixture starting without a DSN would swap it out mid-test.
+/// The real server with a DSN, production's client-IP header, configuration that tries to turn on the user, request bodies
+/// and Sentry Logs, every positive trace sample forced to 1, and an in-memory transport.
 /// </summary>
 [Collection(nameof(SentryCollection))]
 public sealed class ErrorReportingServerTests(ErrorReportingTests.SentryServer server) : IClassFixture<ErrorReportingTests.SentryServer>
 {
     [Fact]
-    public async Task An_unhandled_error_reaches_Sentry_without_tokens_keys_pins_or_addresses()
+    public async Task Errors_and_traces_reach_Sentry_without_tokens_keys_pins_bodies_or_addresses()
     {
-        // A PIN logged by the staff tokens must not ride along, not even as a breadcrumb.
-        server.Services.GetRequiredService<ILogger<StaffTokens>>().LogError("Owner created with PIN {Pin}", "PIN-4821");
+        // The PIN logs of the staff tokens and a warning without an exception must not ride along, not even as breadcrumbs.
+        server.Services.GetRequiredService<ILogger<StaffTokens>>().LogWarning("No staff yet: owner created with PIN {Pin}", "PIN-4821");
+        server.Services.GetRequiredService<ILogger<AgentAuthMiddleware>>().LogWarning("Request signature rejected {Marker}", "SIGNATURE-MARKER");
+        // A failed worker pass is an event, once an hour however often it repeats.
+        for (var tick = 0; tick < 3; tick++)
+        {
+            server.Services.GetRequiredService<ILogger<SessionTickWorker>>().LogWarning(new InvalidOperationException("tick-for-sentry"), "Session tick failed");
+        }
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, "/test/boom?token=QUERY-TOKEN&q=%2B998901234567");
+        var client = server.CreateClient();
+        using (var health = await client.GetAsync("/health"))
+        {
+            Assert.True(health.IsSuccessStatusCode);
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/test/boom?token=QUERY-TOKEN&q=%2B998901234567")
+        {
+            Content = new StringContent("{\"pin\":\"BODY-PIN-7777\"}", Encoding.UTF8, "application/json"),
+        };
         request.Headers.TryAddWithoutValidation("Authorization", "Bearer AUTH-TOKEN");
         request.Headers.TryAddWithoutValidation("X-Club-Key", "CLUB-KEY");
         request.Headers.TryAddWithoutValidation("Cookie", "s=COOKIE-VALUE");
         request.Headers.TryAddWithoutValidation("X-Real-IP", "203.0.113.9");
         request.Headers.TryAddWithoutValidation("User-Agent", "sentry-test-agent");
-        using var response = await server.CreateClient().SendAsync(request);
+        using var response = await client.SendAsync(request);
         Assert.Equal(500, (int)response.StatusCode);
 
-        var sent = await server.Transport.WaitForAsync("boom-for-sentry");
+        await SentrySdk.FlushAsync(TimeSpan.FromSeconds(10));
+        var sent = await server.Transport.WaitForAsync("boom-for-sentry", "tick-for-sentry", "\"type\":\"transaction\"");
 
         Assert.Contains("Unhandled error", sent);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(sent, "\"value\":\"tick-for-sentry\""));
         Assert.Contains("sentry-test-agent", sent);
         Assert.Contains("/test/boom", sent);
-        foreach (var secret in new[] { "QUERY-TOKEN", "998901234567", "AUTH-TOKEN", "CLUB-KEY", "COOKIE-VALUE", "203.0.113.9", "PIN-4821" })
+        Assert.DoesNotContain("\"type\":\"log\"", sent);
+        Assert.DoesNotContain("GET /health", sent);
+        foreach (var secret in new[]
+                 {
+                     "QUERY-TOKEN", "998901234567", "AUTH-TOKEN", "CLUB-KEY", "COOKIE-VALUE", "203.0.113.9", "PIN-4821", "BODY-PIN-7777",
+                     "SIGNATURE-MARKER",
+                 })
         {
             Assert.DoesNotContain(secret, sent);
         }
     }
 }
 
+/// <summary>
+/// Keeps the process-wide Sentry hub and its global exception handlers away from the parallel fixtures: only this
+/// collection starts a server with a DSN.
+/// </summary>
 [CollectionDefinition(nameof(SentryCollection), DisableParallelization = true)]
 public sealed class SentryCollection;
+
+/// <summary>A DSN in the shell that runs the tests would turn every fixture into a real Sentry client.</summary>
+internal static class SentryFreeSuite
+{
+    [ModuleInitializer]
+    internal static void ClearDsn()
+    {
+        Environment.SetEnvironmentVariable("SENTRY_DSN", null);
+        Environment.SetEnvironmentVariable("Sentry__Dsn", null);
+    }
+}
 
 public sealed partial class ErrorReportingTests
 {
@@ -139,7 +281,11 @@ public sealed partial class ErrorReportingTests
     {
         public SentryServer()
         {
-            Settings["Sentry:Dsn"] = "https://0123456789abcdef0123456789abcdef@o0.ingest.sentry.io/0";
+            Settings["Sentry:Dsn"] = Dsn;
+            Settings["Proxy:ClientIpHeader"] = "X-Real-IP";
+            Settings["Sentry:SendDefaultPii"] = "true";
+            Settings["Sentry:MaxRequestBodySize"] = "Always";
+            Settings["Sentry:EnableLogs"] = "true";
         }
 
         public MemoryTransport Transport { get; } = new();
@@ -149,7 +295,12 @@ public sealed partial class ErrorReportingTests
             base.ConfigureWebHost(builder);
             builder.ConfigureTestServices(services =>
             {
-                services.PostConfigure<SentryAspNetCoreOptions>(o => o.Transport = Transport);
+                services.PostConfigure<SentryAspNetCoreOptions>(o =>
+                {
+                    o.Transport = Transport;
+                    var sampler = o.TracesSampler!;
+                    o.TracesSampler = c => sampler(c) > 0 ? 1.0 : 0.0;
+                });
                 services.AddTransient<IStartupFilter, ThrowingRoute>();
             });
         }
@@ -179,20 +330,21 @@ public sealed partial class ErrorReportingTests
             _sent.Enqueue(Encoding.UTF8.GetString(stream.ToArray()));
         }
 
-        /// <summary>Everything sent so far, once an envelope containing <paramref name="marker"/> has arrived.</summary>
-        public async Task<string> WaitForAsync(string marker)
+        /// <summary>Everything sent so far, once every one of <paramref name="markers"/> has arrived.</summary>
+        public async Task<string> WaitForAsync(params string[] markers)
         {
             for (var attempt = 0; attempt < 100; attempt++)
             {
-                if (_sent.Any(e => e.Contains(marker, StringComparison.Ordinal)))
+                var sent = string.Join('\n', _sent);
+                if (markers.All(m => sent.Contains(m, StringComparison.Ordinal)))
                 {
-                    return string.Join('\n', _sent);
+                    return sent;
                 }
 
                 await Task.Delay(100);
             }
 
-            throw new TimeoutException($"No envelope with {marker}; sent: {string.Join('\n', _sent)}");
+            throw new TimeoutException($"Not all of {string.Join(", ", markers)} were sent; sent: {string.Join('\n', _sent)}");
         }
     }
 }

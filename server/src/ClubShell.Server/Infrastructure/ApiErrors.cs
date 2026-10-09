@@ -110,6 +110,10 @@ public sealed class ApiErrorMiddleware(RequestDelegate next, ILogger<ApiErrorMid
             context.Response.Headers.RetryAfter = "5";
             await ApiErrorWriter.WriteAsync(context, StatusCodes.Status503ServiceUnavailable, ErrorCode.ServerUnavailable, "Database unavailable", new { reason = "database" });
         }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            // The client is gone (a console closed while the server waited for a PC's ack): nothing to answer or report.
+        }
         catch (Exception ex) when (!context.Response.HasStarted && !context.RequestAborted.IsCancellationRequested)
         {
             logger.LogError(ex, "Unhandled error");
