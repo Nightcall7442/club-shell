@@ -24,6 +24,13 @@ if (builder.Configuration["PORT"] is { Length: > 0 } port)
     builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 }
 
+// Error reporting (D-72): only with a DSN (Sentry 6 refuses to start without one); what is sent and what is scrubbed —
+// ErrorReporting.
+if (ErrorReporting.IsConfigured(builder.Configuration))
+{
+    builder.WebHost.UseSentry(ErrorReporting.Configure);
+}
+
 var connectionString = builder.Configuration.GetConnectionString("Club")
     ?? throw new InvalidOperationException("ConnectionStrings:Club is not configured");
 var authOptions = builder.Configuration.GetSection("Auth").Get<AuthOptions>() ?? new AuthOptions();

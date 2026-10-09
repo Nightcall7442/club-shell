@@ -12,6 +12,8 @@
     <PackageReference Include="JsonSchema.Net" />
     <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
     <PackageReference Include="Npgsql" />
+    <!-- Error reporting (D-72): off without Sentry:Dsn. -->
+    <PackageReference Include="Sentry.AspNetCore" />
     <PackageReference Include="YamlDotNet" />
   </ItemGroup>
 
