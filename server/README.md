@@ -198,6 +198,11 @@ Directory — корень репозитория, config path `/server/railway.
    - `Proxy__ClientIpHeader=X-Real-IP`
    - `Club__EnrollmentKey=<случайная строка>`, `Club__OwnerPin=<PIN владельца>`, `Club__TimeZone=<зона клуба>`
    - `Cors__AllowedOrigins__0=<origin кассы>`
+   - `Sentry__Dsn=<DSN проекта Sentry>` — по желанию: без неё сервер работает как раньше, ошибки не отправляются. Репозиторий
+     открытый, поэтому DSN только в переменной, не в `appsettings.json`; вставлять без кавычек. Ошибка в DSN не роняет
+     сервер: он стартует без Sentry и пишет в лог «Sentry is off: …». Что уходит в Sentry и что вычищается — D-72.
+     Бесплатный план Sentry — 5 000 ошибок в месяц: сервер шлёт одну ошибку каждого вида в час, а в настройках проекта
+     Sentry стоит проверить, что включена Spike Protection.
 5. Проверить, что край Railway перезаписывает присланный клиентом `X-Real-IP` (от этого зависит лимит неверных PIN): запрос
    с поддельным `X-Real-IP` должен считаться по реальному адресу. **Не проверено.**
 6. Домен: сертификат Railway на `*.up.railway.app` или CNAME домена клуба; `https://<домен>/health` → 200.
@@ -246,8 +251,9 @@ Playwright сам запускает `dotnet run` (Development, `Seed:Dev`, CORS
 `OwnerPin` / `OfflineLogin` / `GuestLogin`, `Realtime:PingSec` / `PongTimeoutSec` / `MaxFrameBytes`, `Agents:HeartbeatSec` /
 `OfflineAfterSec` / `CommandTtlMin` / `AckWaitSec`, `RateLimit:PinAttempts` / `PinWindowSec`, `Cors:AllowedOrigins`, `Sessions:GraceSec` /
 `MaxOfflineMinutes` (уходят в конфиг агента) / `TickMs` / `ResyncSec` / `PostpaidCreditLimit` (тиёны; `null` — без
-лимита), `Catalog:PolicySeedPath` / `GamesSeedPath`, `Workers:Enabled`, `Seed:Dev`, `Proxy:Trusted` / `ClientIpHeader`, переменная
-окружения `PORT`.
+лимита), `Catalog:PolicySeedPath` / `GamesSeedPath`, `Workers:Enabled`, `Seed:Dev`, `Proxy:Trusted` / `ClientIpHeader`, `Sentry:Dsn`
+(и остальные ключи `Sentry:*` SDK, кроме приватности и Sentry Logs — их задаёт код; без DSN Sentry не подключается),
+переменная окружения `PORT`.
 
 Скидки и календарь цены (`pricing`, `groups`, `happyHours`, `loyalty`, `limits`) читаются из `clubs.settings` — документа
 `AdminClubSettings`, который пишет `PATCH /admin/club` (S5). Пока ключа нет, правила нет: каждый день 100 %, без скидок,
