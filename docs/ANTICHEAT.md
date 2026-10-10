@@ -223,7 +223,11 @@ the failed check still lands in the launch report and the server report (`Action
 Between steps 2 and 3, `GameLaunchService.NetworkPathCheck` refuses a game that has an anti-cheat
 (`EffectiveAntiCheat`, so an untagged Riot game counts as Vanguard) when its install directory or its exe is on the
 network: a UNC path (`\\server\share\…`, `\\?\UNC\…`) or a drive whose `DriveInfo.DriveType` is `Network`, such as
-the SMB games share's letter (docs/DISKLESS.md). Several anti-cheats refuse to start from a network path. The error
+the SMB games share's letter (docs/DISKLESS.md). A local folder linked to the share (`mklink /D C:\Games\VALORANT
+\\nas\games\VALORANT`, so that a launcher takes the library) counts too: the folders of the path are read from the
+root down, and the first symbolic link or junction is followed to its target (its own reparse point is read, never
+the share behind it), up to 8 links in a chain; a folder that cannot be read counts as local. Several anti-cheats
+refuse to start from a network path. The error
 is `antiCheatBlocked` with `details: { kind, reason: "networkPath" }`, the launch report carries the same failed
 check, and the warning in the Agent log names both paths. The refusal does not depend on `blockOnViolation`: it is
 about where the library is installed, not about the PC. The anti-cheat gate is not called and no `AntiCheatReport`
