@@ -5,6 +5,8 @@ using ClubShell.Agent.Session;
 using ClubShell.Contracts.Commands;
 using ClubShell.Contracts.Errors;
 using ClubShell.Contracts.Games;
+using ClubShell.Contracts.Ipc;
+using ClubShell.Contracts.Serialization;
 using ClubShell.Core.Abstractions;
 using ClubShell.Core.Configuration;
 using ClubShell.Core.Security;
@@ -14,7 +16,8 @@ namespace ClubShell.Agent.Tests;
 
 // ---------------------------------------------------------------------------------------------
 // Agent <-> server link: live-socket token refresh, power-command acks across restarts, launch-report
-// outbox, telemetry batch rejection, Riot -> Vanguard launch gate.
+// outbox, telemetry batch rejection, Riot -> Vanguard launch gate,
+// anti-cheat games refused on a network path.
 // ---------------------------------------------------------------------------------------------
 
 public sealed class ServerLinkTests : IDisposable
@@ -212,4 +215,68 @@ public sealed class ServerLinkTests : IDisposable
         GameLaunchService.EffectiveAntiCheat(TestSupport.Game("VALORANT", LauncherType.Riot) with { AntiCheat = AntiCheatKind.Eac }).Should().Be(AntiCheatKind.Eac);
         GameLaunchService.EffectiveAntiCheat(TestSupport.Game("Dota 2", LauncherType.Steam)).Should().Be(AntiCheatKind.None);
     }
+
+    // ---- network-path anti-cheat gate ---------------------------------------------------------
+
+    [Theory]
+    [InlineData(@"\\nas\games\Apex Legends", null)]
+    [InlineData(@"//nas/games/Apex Legends", null)]
+    [InlineData(@"\\?\UNC\nas\games\Apex Legends", null)]
+    [InlineData(@"G:\Apex Legends", null)]
+    [InlineData(null, @"\\nas\games\Apex Legends\r5apex.exe")]
+    [InlineData(@"D:\Games\Apex Legends", @"G:\Apex Legends\r5apex.exe")]
+    public void Anticheat_game_on_a_network_path_is_refused(string? installPath, string? exePath)
+    {
+        Game game = TestSupport.Game("Apex Legends", LauncherType.Ea, exePath: exePath, installPath: installPath) with { AntiCheat = AntiCheatKind.Eac };
+
+        GameLaunchService.NetworkPathCheck(game, Drives).Should().Be(new AntiCheatCheckResult(AntiCheatKind.Eac, false, "networkPath"));
+    }
+
+    [Theory]
+    [InlineData(@"D:\Games\Apex Legends", null)]
+    [InlineData(@"D:\Games\Apex Legends", "r5apex.exe")]
+    [InlineData(@"\\?\D:\Games\Apex Legends", null)]
+    [InlineData(null, @"D:\Games\Apex Legends\r5apex.exe")]
+    [InlineData(null, "r5apex.exe")]
+    [InlineData(null, null)]
+    public void Anticheat_game_on_a_local_disk_or_with_no_known_path_is_allowed(string? installPath, string? exePath)
+    {
+        Game game = TestSupport.Game("Apex Legends", LauncherType.Ea, exePath: exePath, installPath: installPath) with { AntiCheat = AntiCheatKind.Eac };
+
+        GameLaunchService.NetworkPathCheck(game, Drives).Should().BeNull();
+    }
+
+    [Fact]
+    public void Anticheat_game_on_the_system_drive_is_allowed_by_the_real_drive_lookup()
+    {
+        string systemRoot = Path.GetPathRoot(Environment.SystemDirectory)!;
+        Game game = TestSupport.Game("Apex Legends", LauncherType.Ea, installPath: Path.Combine(systemRoot, "Games", "Apex Legends")) with { AntiCheat = AntiCheatKind.Eac };
+
+        GameLaunchService.NetworkPathCheck(game).Should().BeNull();
+        GameLaunchService.NetworkPathCheck(game with { InstallPath = @"\\nas\games\Apex Legends" }).Should().NotBeNull();
+    }
+
+    [Fact]
+    public void Game_without_an_anticheat_on_a_network_path_is_allowed()
+    {
+        Game game = TestSupport.Game("Dota 2", LauncherType.Steam, installPath: @"\\nas\games\steamapps\common\dota 2 beta");
+
+        GameLaunchService.NetworkPathCheck(game, Drives).Should().BeNull();
+        GameLaunchService.NetworkPathCheck(game with { InstallPath = @"G:\steamapps\common\dota 2 beta" }, Drives).Should().BeNull();
+    }
+
+    [Fact]
+    public void Riot_game_without_an_anticheat_tag_on_a_network_path_is_refused_as_Vanguard()
+    {
+        Game game = TestSupport.Game("VALORANT", LauncherType.Riot, installPath: @"\\nas\games\Riot Games\VALORANT");
+
+        AntiCheatCheckResult? failed = GameLaunchService.NetworkPathCheck(game, Drives);
+
+        failed.Should().Be(new AntiCheatCheckResult(AntiCheatKind.Vanguard, false, GameLaunchService.NetworkPathReason));
+        JsonDefaults.Serialize(IpcError.AntiCheatBlocked(failed!.Kind, failed.Reason!)).Should().Be(
+            "{\"code\":\"antiCheatBlocked\",\"message\":\"Anti-cheat check failed: networkPath\",\"details\":{\"kind\":\"vanguard\",\"reason\":\"networkPath\"}}");
+    }
+
+    /// <summary>Drive table for the network-path gate: <c>G:</c> is a mapped share, every other letter a local disk.</summary>
+    private static DriveType Drives(string root) => root == @"G:\" ? DriveType.Network : DriveType.Fixed;
 }
