@@ -259,6 +259,8 @@ if this user has an open session on this `pcId` (e.g. after Agent restart). Serv
 `pbkdf2$<iterations>$<salt base64>$<hash base64>` (`OfflineSessionStore.HashPassword` / `VerifyPassword`);
 any other encoding (e.g. an Argon2id PHC string) is stored but fails closed at offline login.
 Errors: `401 unauthorized` (bad credentials; `details.attemptsLeft`), `403 forbidden` (`banned`, `zoneNotAllowed`, `ageRestricted`), `409 conflict` (active session elsewhere; `details: { pcId, pcName }`), `429`.
+Failures are counted per username for `password` and per PC for `card` (a card number can be typed and guessed):
+5 within 15 min answer `attemptsLeft: 0`, even for the right password or a bound card, until the window passes.
 
 #### `POST /auth/qr/start` — auth: agent
 

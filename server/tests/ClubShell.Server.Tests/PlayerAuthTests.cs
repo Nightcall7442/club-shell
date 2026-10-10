@@ -62,6 +62,55 @@ public sealed class PlayerAuthTests(LongClockServerFixture server) : LedgerCheck
         await Contract.ReadErrorAsync(unknown, 401, "unauthorized", "badCredentials");
     }
 
+    /// <summary>
+    /// D-75: card numbers are printed and often sequential, and the kiosk takes typed ones, so wrong cards are counted per
+    /// PC like a password per name; 5 in 15 min refuse even a bound card there, while other PCs and passwords still work.
+    /// </summary>
+    [Fact]
+    public async Task Wrong_cards_are_counted_per_pc_and_five_lock_card_login_on_that_pc_for_15_minutes()
+    {
+        var agent = await TestAgent.CreateAsync(Server);
+        var card = "CARD-" + Guid.NewGuid().ToString("N")[..8];
+        var player = await Players.CreateAsync(Server, card: card);
+        var trace = Guid.NewGuid();
+        Assert.Equal(4, await CardFailAsync(agent, "0012345679", trace));
+        Assert.Equal(4, await CardFailAsync(agent, "0012345679", trace)); // the agent's retry after a refresh
+        for (var left = 3; left >= 0; left--)
+        {
+            Assert.Equal(left, await CardFailAsync(agent, $"001234568{left}", Guid.NewGuid()));
+        }
+
+        Assert.Equal(0, await CardFailAsync(agent, card, Guid.NewGuid())); // locked: even a bound card
+
+        var other = await TestAgent.CreateAsync(Server);
+        Assert.Equal(4, await CardFailAsync(other, "0012345679", Guid.NewGuid()));
+        await agent.LoginAsync(player);
+
+        Server.Clock.Advance(PlayerAuthWindow);
+        using var response = await agent.PostAsync("/api/v1/auth/login", new { kind = "card", cardId = card, pcId = agent.PcId, hwid = agent.Hwid });
+        Assert.Equal(player.Id, (await Players.ReadAsync(response, 200)).GetProperty("user").GetProperty("id").GetGuid());
+    }
+
+    /// <summary>A bound card does not clear the PC's count: holding a card of one's own must not buy four more guesses.</summary>
+    [Fact]
+    public async Task A_bound_card_does_not_reset_the_count_of_the_pc()
+    {
+        var agent = await TestAgent.CreateAsync(Server);
+        var card = "CARD-" + Guid.NewGuid().ToString("N")[..8];
+        await Players.CreateAsync(Server, card: card);
+        for (var left = 4; left >= 1; left--)
+        {
+            Assert.Equal(left, await CardFailAsync(agent, $"guess-{left}", Guid.NewGuid()));
+        }
+
+        using (var response = await agent.PostAsync("/api/v1/auth/login", new { kind = "card", cardId = card, pcId = agent.PcId, hwid = agent.Hwid }))
+        {
+            await Players.ReadAsync(response, 200);
+        }
+
+        Assert.Equal(0, await CardFailAsync(agent, "guess-0", Guid.NewGuid()));
+    }
+
     [Fact]
     public async Task A_failure_counts_once_per_trace_id_and_five_lock_the_account_for_15_minutes()
     {
@@ -283,6 +332,16 @@ public sealed class PlayerAuthTests(LongClockServerFixture server) : LedgerCheck
     {
         using var request = agent.Request(HttpMethod.Post, "/api/v1/auth/login",
             JsonSerializer.Serialize(new { kind = "password", username = player.Username, password, pcId = agent.PcId, hwid = agent.Hwid }));
+        request.Headers.Add(ApiErrorWriter.TraceHeader, trace.ToString());
+        using var response = await Server.Http.SendAsync(request);
+        var body = await Contract.ReadErrorAsync(response, 401, "unauthorized", "badCredentials");
+        return Details(body).GetProperty("attemptsLeft").GetInt32();
+    }
+
+    private async Task<int> CardFailAsync(TestAgent agent, string cardId, Guid trace)
+    {
+        using var request = agent.Request(HttpMethod.Post, "/api/v1/auth/login",
+            JsonSerializer.Serialize(new { kind = "card", cardId, pcId = agent.PcId, hwid = agent.Hwid }));
         request.Headers.Add(ApiErrorWriter.TraceHeader, trace.ToString());
         using var response = await Server.Http.SendAsync(request);
         var body = await Contract.ReadErrorAsync(response, 401, "unauthorized", "badCredentials");
