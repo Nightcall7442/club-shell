@@ -1,6 +1,7 @@
 /**
  * Hall map editor (owner): devices on a square grid at their (x, y), selected device on the right (with its live load,
- * games disk and hardware as its Agent reports them), zones below the add form when nothing is selected. Click a device to select it, click an empty cell or use the arrow keys to move it.
+ * games disk and hardware as its Agent reports them), zones below the add form when nothing is selected. Click a device
+ * to select it, click an empty cell or use the arrow keys to move it.
  */
 import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import clsx from 'clsx';

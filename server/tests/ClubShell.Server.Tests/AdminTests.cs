@@ -573,12 +573,15 @@ public sealed class PcAdminTests(ApprovalServerFixture server) : IClassFixture<A
 
         var since = new DateTimeOffset(2026, 10, 10, 7, 40, 0, TimeSpan.Zero);
         await Players.ReadAsync(await agent.HeartbeatAsync(gamesVolume: new { owner = "agent", mounted = true, driveLetter = "G", since }), 200);
-        Assert.All(await VolumesAsync(), v => Assert.Equal(("agent", true, "G", since),
-            (v.GetProperty("owner").GetString(), v.GetProperty("mounted").GetBoolean(), v.GetProperty("driveLetter").GetString(), v.GetProperty("since").GetDateTimeOffset())));
+        Assert.All(await VolumesAsync(), v => Assert.Equal(
+            ("agent", true, "G", since),
+            (v.GetProperty("owner").GetString(), v.GetProperty("mounted").GetBoolean(), v.GetProperty("driveLetter").GetString(),
+             v.GetProperty("since").GetDateTimeOffset())));
 
         // ClubDisklessHelper mounts it: the agent cannot tell whether it is mounted, and the field is left out as it sent it.
         await Players.ReadAsync(await agent.HeartbeatAsync(gamesVolume: new { owner = "disklessHelper", mounted = (bool?)null }), 200);
-        Assert.All(await VolumesAsync(), v => Assert.Equal(("disklessHelper", false), (v.GetProperty("owner").GetString(), v.TryGetProperty("mounted", out _))));
+        Assert.All(await VolumesAsync(), v =>
+            Assert.Equal(("disklessHelper", false), (v.GetProperty("owner").GetString(), v.TryGetProperty("mounted", out _))));
     }
 
     /// <summary>A new PC waits for approval (D-7), the owner approves it with <c>maintenance:false</c>, the agent registers again.</summary>

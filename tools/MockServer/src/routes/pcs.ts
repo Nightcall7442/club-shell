@@ -171,7 +171,7 @@ function gamesVolumeOf(b: JsonObject): HeartbeatGamesVolume | null {
   const mounted = optBool(v, 'mounted');
   const driveLetter = optStr(v, 'driveLetter', 1);
   const since = optStr(v, 'since', 64);
-  if (since !== null && Number.isNaN(Date.parse(since))) throw errors.validation('gamesVolume.since', 'format');
+  if (since !== null && Number.isNaN(Date.parse(since))) throw errors.validation('since', 'format');
   return {
     owner: oneOf(v, 'owner', VOLUME_OWNERS),
     ...(mounted !== null ? { mounted } : {}),

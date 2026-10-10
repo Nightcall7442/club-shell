@@ -12,8 +12,8 @@ namespace ClubShell.Server.Admin;
 
 /// <summary>
 /// PC health at the counter (slice S5): <c>adminHealth</c> — every live PC of the club with its <see cref="HealthDiagnosis"/>,
-/// open ticket and games volume (D-73), the thresholds and the last 100 tickets; <c>adminUpdateTicket</c> — staff move a repair ticket
-/// (journal <c>pcCommand</c>, <c>meta.kind = repair</c>); resolving the last unresolved ticket that took its PC out of service
+/// open ticket and games volume (D-73), the thresholds and the last 100 tickets; <c>adminUpdateTicket</c> — staff move a
+/// repair ticket (journal <c>pcCommand</c>, <c>meta.kind = repair</c>); resolving the last unresolved ticket that took its PC out of service
 /// puts the PC back (<c>maintenance = false</c>); <c>adminSaveHealthSettings</c> — the owner's thresholds, clamped
 /// (<c>x-clamp</c>). Tickets are opened, escalated and acted on by the <see cref="HealthWorker"/>.
 /// </summary>
