@@ -116,6 +116,124 @@ public sealed class GamesTests(CatalogServerFixture server) : IClassFixture<Cata
     }
 }
 
+/// <summary>
+/// A fixture with one game of each anti-cheat case of D-74: none, tagged Vanguard by the catalog, a Riot game the catalog
+/// did not tag (the agent's gate treats it as Vanguard) and a Riot game tagged with another anti-cheat.
+/// </summary>
+public sealed class VanguardCatalogFixture : ServerFixture
+{
+    public static readonly Guid Plain = DevSeed.Sid("game:vg-plain");
+    public static readonly Guid Tagged = DevSeed.Sid("game:vg-tagged");
+    public static readonly Guid RiotUntagged = DevSeed.Sid("game:vg-riot");
+    public static readonly Guid RiotEac = DevSeed.Sid("game:vg-riot-eac");
+
+    public VanguardCatalogFixture()
+    {
+        Directory.CreateDirectory(DataDir);
+        var path = Path.Combine(DataDir, "games.json");
+        static Game Make(Guid id, string title, LauncherType launcher, AntiCheatKind antiCheat) => new(
+            id, title, launcher, "1", null, null, null, false, ["shooter"], [], "https://cdn.example/cover.jpg",
+            null, null, "", 0, 0, null, false, antiCheat, null, 1.5, null, null);
+        File.WriteAllText(path, JsonSerializer.Serialize(new[]
+        {
+            Make(Plain, "Counter-Strike 2", LauncherType.Steam, AntiCheatKind.None),
+            Make(Tagged, "Tagged Vanguard", LauncherType.Steam, AntiCheatKind.Vanguard),
+            Make(RiotUntagged, "League of Legends", LauncherType.Riot, AntiCheatKind.None),
+            Make(RiotEac, "Riot with EAC", LauncherType.Riot, AntiCheatKind.Eac),
+        }, ServerJson.Options));
+        Settings["Catalog:GamesSeedPath"] = path;
+    }
+}
+
+/// <summary>
+/// <c>getGames</c> on a PC without Vanguard (D-74): when the PC's last heartbeat says vgk is missing or not loaded, the games
+/// whose effective anti-cheat is Vanguard are left out; a heartbeat that does not say (an older agent, unknown fields) or a
+/// loaded vgk hides nothing; the ETag follows the visible set.
+/// </summary>
+public sealed class VanguardGamesTests(VanguardCatalogFixture server) : IClassFixture<VanguardCatalogFixture>
+{
+    private static readonly Guid[] All =
+        [VanguardCatalogFixture.Plain, VanguardCatalogFixture.Tagged, VanguardCatalogFixture.RiotUntagged, VanguardCatalogFixture.RiotEac];
+
+    private static readonly Guid[] WithoutVanguard = [VanguardCatalogFixture.Plain, VanguardCatalogFixture.RiotEac];
+
+    [Fact]
+    public async Task Vanguard_games_are_hidden_when_the_heartbeat_reports_vgk_missing_or_not_loaded()
+    {
+        foreach (var antiCheat in new object[]
+        {
+            new { vanguardInstalled = false, vanguardLoaded = false, secureBoot = true, tpm = true },
+            new { vanguardInstalled = true, vanguardLoaded = false, secureBoot = true, tpm = true },
+            new { vanguardInstalled = (bool?)null, vanguardLoaded = false },
+        })
+        {
+            var agent = await TestAgent.CreateAsync(server);
+            await Players.ReadAsync(await agent.HeartbeatAsync(antiCheat: antiCheat), 200);
+            Assert.Equal(Sorted(WithoutVanguard), await ListedAsync(agent));
+
+            // By id a hidden game is still served, as a game the owner hid (the agent's fallback for a game it knows).
+            await Players.ReadAsync(await agent.SendAsync(HttpMethod.Get, $"/api/v1/games/{VanguardCatalogFixture.Tagged}"), 200);
+        }
+    }
+
+    [Fact]
+    public async Task Every_game_is_listed_when_vgk_is_loaded_or_the_heartbeat_does_not_say()
+    {
+        var agent = await TestAgent.CreateAsync(server);
+        Assert.Equal(Sorted(All), await ListedAsync(agent)); // no heartbeat yet
+        foreach (var antiCheat in new object?[]
+        {
+            null, // an agent without antiCheat in its heartbeat
+            new { vanguardInstalled = (bool?)null, vanguardLoaded = (bool?)null, secureBoot = false, tpm = false },
+            new { vanguardInstalled = true, vanguardLoaded = true, secureBoot = true, tpm = true },
+        })
+        {
+            await Players.ReadAsync(await agent.HeartbeatAsync(antiCheat: antiCheat), 200);
+            Assert.Equal(Sorted(All), await ListedAsync(agent));
+        }
+    }
+
+    [Fact]
+    public async Task The_ETag_changes_with_the_visible_set()
+    {
+        var agent = await TestAgent.CreateAsync(server);
+        await Players.ReadAsync(await agent.HeartbeatAsync(antiCheat: new { vanguardInstalled = true, vanguardLoaded = true }), 200);
+        var full = await ETagAsync(agent);
+
+        // A PC that reports no anti-cheat state gets the same ETag for the same list: the hash only grows when games are hidden.
+        Assert.Equal(304, await GamesTests.StatusWithETagAsync(await TestAgent.CreateAsync(server), full));
+
+        // vgk no longer loaded: the cached full list is not confirmed, and the shorter one has an ETag of its own.
+        await Players.ReadAsync(await agent.HeartbeatAsync(antiCheat: new { vanguardInstalled = true, vanguardLoaded = false }), 200);
+        Assert.Equal(200, await GamesTests.StatusWithETagAsync(agent, full));
+        var reduced = await ETagAsync(agent);
+        Assert.NotEqual(full, reduced);
+        Assert.Equal(304, await GamesTests.StatusWithETagAsync(agent, reduced));
+
+        // Loaded again after a reboot: the full list is back under its old ETag.
+        await Players.ReadAsync(await agent.HeartbeatAsync(antiCheat: new { vanguardInstalled = true, vanguardLoaded = true }), 200);
+        Assert.Equal(200, await GamesTests.StatusWithETagAsync(agent, reduced));
+        Assert.Equal(304, await GamesTests.StatusWithETagAsync(agent, full));
+    }
+
+    private static Guid[] Sorted(IEnumerable<Guid> ids) => [.. ids.Order()];
+
+    private static async Task<Guid[]> ListedAsync(TestAgent agent)
+    {
+        var body = await Players.ReadAsync(await agent.SendAsync(HttpMethod.Get, "/api/v1/games"), 200);
+        var ids = body.GetProperty("items").EnumerateArray().Select(g => g.GetProperty("id").GetGuid()).ToList();
+        Assert.Equal(ids.Count, body.GetProperty("total").GetInt32());
+        return Sorted(ids);
+    }
+
+    private static async Task<string> ETagAsync(TestAgent agent)
+    {
+        using var response = await agent.SendAsync(HttpMethod.Get, "/api/v1/games?page=1&pageSize=500");
+        Assert.Equal(200, (int)response.StatusCode);
+        return response.Headers.ETag!.ToString();
+    }
+}
+
 /// <summary><c>sendLaunchReport</c> (S3): a report repeated from the agent's offline queue is stored once; <c>lastPlayedAt</c> is the player's newest successful launch.</summary>
 public sealed class LaunchReportTests(CatalogServerFixture server) : IClassFixture<CatalogServerFixture>
 {

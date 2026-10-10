@@ -338,6 +338,12 @@ Operator flow:
 
 Vanguard is therefore best pre-installed on the club image so the reboot happens once, during provisioning.
 
+The central server (`server/`, D-74 in docs/server/DESIGN.md) spares the player that error: while a PC's last heartbeat
+says `vgk` is not installed or not loaded (`antiCheat.vanguardInstalled` / `vanguardLoaded` = `false`), `GET /games`
+leaves out every game whose effective anti-cheat is Vanguard (tagged `vanguard`, or a Riot game the catalogue did not
+tag), so their tiles are not shown on that PC. After the reboot the Agent's first heartbeat reports the loaded driver and
+refreshes the catalogue, and the games are back. A heartbeat without `antiCheat` (an older Agent) hides nothing.
+
 ---
 
 ## 9. Known limitations

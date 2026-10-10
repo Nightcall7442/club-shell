@@ -327,7 +327,7 @@ Request `{ events: SessionEvent[] }` (≤ 100; used for offline replay and for `
 
 ### 4.6 Games
 
-#### `GET /games` — auth: agent, ETag — query `zone?`, `page?`, `pageSize?` (default all, max 1000) → `{ items: Game[], total, page, pageSize, catalogVersion: string }`. Server omits local-only fields (`installed`, `installPath`, `lastPlayedAt` requires `X-User-Token`); Agent fills them from its scan.
+#### `GET /games` — auth: agent, ETag — query `zone?`, `page?`, `pageSize?` (default all, max 1000) → `{ items: Game[], total, page, pageSize, catalogVersion: string }`. Server omits local-only fields (`installed`, `installPath`, `lastPlayedAt` requires `X-User-Token`); Agent fills them from its scan. The central server also leaves out the games whose effective anti-cheat is Vanguard (`antiCheat: vanguard`, or a Riot game with none) while the PC's last heartbeat reports `antiCheat.vanguardInstalled` or `vanguardLoaded` as `false`; the ETag differs for that shorter list.
 #### `GET /games/{id}` → `Game`. Errors: `404`.
 
 #### `GET /games/{id}/accounts/lease` — auth: user

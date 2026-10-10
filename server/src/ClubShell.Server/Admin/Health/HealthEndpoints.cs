@@ -11,9 +11,9 @@ using Npgsql;
 namespace ClubShell.Server.Admin;
 
 /// <summary>
-/// PC health at the counter (slice S5): <c>adminHealth</c> — every live PC of the club with its <see cref="HealthDiagnosis"/>
-/// and open ticket, the thresholds and the last 100 tickets; <c>adminUpdateTicket</c> — staff move a repair ticket
-/// (journal <c>pcCommand</c>, <c>meta.kind = repair</c>); resolving the last unresolved ticket that took its PC out of service
+/// PC health at the counter (slice S5): <c>adminHealth</c> — every live PC of the club with its <see cref="HealthDiagnosis"/>,
+/// open ticket and games volume (D-73), the thresholds and the last 100 tickets; <c>adminUpdateTicket</c> — staff move a
+/// repair ticket (journal <c>pcCommand</c>, <c>meta.kind = repair</c>); resolving the last unresolved ticket that took its PC out of service
 /// puts the PC back (<c>maintenance = false</c>); <c>adminSaveHealthSettings</c> — the owner's thresholds, clamped
 /// (<c>x-clamp</c>). Tickets are opened, escalated and acted on by the <see cref="HealthWorker"/>.
 /// </summary>
@@ -47,10 +47,19 @@ public static class HealthEndpoints
         var tickets = (await c.QueryAsync<TicketRow>(
                 $"SELECT {TicketRow.Columns} FROM health_tickets WHERE club_id = @ClubId ORDER BY created_at DESC, id DESC LIMIT 100", new { staff.ClubId }))
             .Select(t => t.ToWire()).ToList();
+        var volumes = (await c.QueryAsync<(Guid Id, string GamesVolume)>(
+                """
+                SELECT id, (last_heartbeat -> 'gamesVolume')::text FROM pcs
+                WHERE club_id = @ClubId AND deleted_at IS NULL AND last_heartbeat -> 'gamesVolume' IS NOT NULL
+                """,
+                new { staff.ClubId }))
+            .ToDictionary(v => v.Id, v => JsonElement.Parse(v.GamesVolume));
         var items = hall.Select(h =>
         {
             var d = diagnoses[h.Pc.Id];
-            return new PcHealth(h.Pc.Id, h.Pc.Name, h.Pc.Zone, h.Status, d.Score, d.Live, d.Baseline, d.Hourly, d.Issues, open.GetValueOrDefault(h.Pc.Id));
+            return new PcHealth(
+                h.Pc.Id, h.Pc.Name, h.Pc.Zone, h.Status, d.Score, d.Live, d.Baseline, d.Hourly, d.Issues, open.GetValueOrDefault(h.Pc.Id),
+                volumes.TryGetValue(h.Pc.Id, out var volume) ? volume : null);
         }).ToList();
         return AdminJson.Ok(new HealthReport(settings, items, tickets));
     }

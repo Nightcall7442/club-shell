@@ -1098,6 +1098,27 @@ export const UZ: Record<string, string> = {
   '{n} зон': '{n} ta zona',
   Правила: 'Qoidalar',
   // --- end F polish ---
+  // --- games disk and hardware (D-73) ---
+  'Игровой диск': 'Oʻyin diski',
+  'подключён с {time}': '{time} dan beri ulangan',
+  подключён: 'ulangan',
+  'не подключён с {time}': '{time} dan beri uzilgan',
+  'не подключён': 'ulanmagan',
+  'подключает ClubDiskless': 'ClubDiskless ulaydi',
+  Железо: 'Apparat qismi',
+  Процессор: 'Protsessor',
+  Видеокарта: 'Videokarta',
+  Память: 'Operativ xotira',
+  Диски: 'Disklar',
+  Мониторы: 'Monitorlar',
+  Система: 'Tizim',
+  'ядер: {cores}, потоков: {threads}': 'yadrolar: {cores}, oqimlar: {threads}',
+  '{n} ГБ': '{n} GB',
+  'свободно {n} ГБ': 'boʻsh {n} GB',
+  '{n} Гц': '{n} Gs',
+  сетевой: 'tarmoq',
+  'Нет данных — агент на этом ПК ещё не подключался': 'Maʼlumot yoʻq — bu kompyuterdagi agent hali ulanmagan',
+  // --- end games disk and hardware ---
 };
 export const EN: Record<string, string> = {
   'Выручка за период': 'Revenue for the period',
@@ -2194,4 +2215,25 @@ export const EN: Record<string, string> = {
   '{n} зон': '{n} zones',
   Правила: 'Rules',
   // --- end F polish ---
+  // --- games disk and hardware (D-73) ---
+  'Игровой диск': 'Games disk',
+  'подключён с {time}': 'connected since {time}',
+  подключён: 'connected',
+  'не подключён с {time}': 'disconnected since {time}',
+  'не подключён': 'not connected',
+  'подключает ClubDiskless': 'mounted by ClubDiskless',
+  Железо: 'Hardware',
+  Процессор: 'CPU',
+  Видеокарта: 'Graphics card',
+  Память: 'Memory',
+  Диски: 'Disks',
+  Мониторы: 'Monitors',
+  Система: 'System',
+  'ядер: {cores}, потоков: {threads}': 'cores: {cores}, threads: {threads}',
+  '{n} ГБ': '{n} GB',
+  'свободно {n} ГБ': '{n} GB free',
+  '{n} Гц': '{n} Hz',
+  сетевой: 'network',
+  'Нет данных — агент на этом ПК ещё не подключался': 'No data yet — the Agent on this PC has not connected',
+  // --- end games disk and hardware ---
 };

@@ -1,10 +1,12 @@
 /**
- * Hall map editor (owner): devices on a square grid at their (x, y), selected device on the right, zones below the
- * add form when nothing is selected. Click a device to select it, click an empty cell or use the arrow keys to move it.
+ * Hall map editor (owner): devices on a square grid at their (x, y), selected device on the right (with its live load,
+ * games disk and hardware as its Agent reports them), zones below the add form when nothing is selected. Click a device
+ * to select it, click an empty cell or use the arrow keys to move it.
  */
 import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import clsx from 'clsx';
 import { clubApi, type DeviceKind, type HallPc, type Zone } from '@/api';
+import { GamesDisk, HardwareList, gamesDisk } from '@/device';
 import { describe } from '@/errors';
 import { t } from '@/i18n';
 import { WrenchIcon } from '@/icons';
@@ -218,6 +220,23 @@ function DevicePanel({
             </Badge>
           )}
         </div>
+      )}
+
+      {gamesDisk(pc.gamesVolume, pc.status) && (
+        <FieldGroup label={t('Игровой диск')}>
+          <GamesDisk volume={pc.gamesVolume} status={pc.status} />
+        </FieldGroup>
+      )}
+
+      {/* Only a PC runs an Agent; a console or a VR seat has no inventory to wait for. */}
+      {(pc.hardware || pc.device === 'pc') && (
+        <FieldGroup label={t('Железо')}>
+          {pc.hardware ? (
+            <HardwareList hardware={pc.hardware} />
+          ) : (
+            <p className="text-[13px] text-muted">{t('Нет данных — агент на этом ПК ещё не подключался')}</p>
+          )}
+        </FieldGroup>
       )}
 
       <Note note={note} />

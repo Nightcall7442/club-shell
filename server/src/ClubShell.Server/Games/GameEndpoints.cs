@@ -16,8 +16,9 @@ using Npgsql;
 namespace ClubShell.Server.Games;
 
 /// <summary>
-/// Games catalog (slice S3, DESIGN §4.2, §7.3): <c>getGames</c> (owner's order first, hidden left out, ETag
-/// <c>"g&lt;catalog_version&gt;-&lt;hash(page, zone, player's lastPlayedAt)&gt;"</c>, pages up to 1000), <c>getGame</c> and
+/// Games catalog (slice S3, DESIGN §4.2, §7.3): <c>getGames</c> (owner's order first, hidden left out, Vanguard games left
+/// out on a PC whose last heartbeat says Vanguard cannot run (D-74), ETag
+/// <c>"g&lt;catalog_version&gt;-&lt;hash(page, zone, player's lastPlayedAt, no Vanguard)&gt;"</c>, pages up to 1000), <c>getGame</c> and
 /// <c>sendLaunchReport</c>. <c>X-User-Token</c> only fills <c>lastPlayedAt</c> — the newest successful launch of the
 /// player — and an invalid one is ignored. <c>settingsPaths</c> never leaves the server.
 /// ponytail: <c>zone</c> is echoed into the ETag but filters nothing (no per-zone catalog in the club settings yet), as the mock.
@@ -41,16 +42,29 @@ public static class GameEndpoints
         var pc = context.Features.GetRequiredFeature<AgentContext>().Pc;
         var userId = context.Features.Get<UserContext>()?.UserId;
         await using var c = await db.OpenConnectionAsync();
-        var (version, catalog) = await c.QuerySingleAsync<(int, string?)>(
-            "SELECT catalog_version, (settings -> 'catalog')::text FROM clubs WHERE id = @ClubId", new { pc.ClubId });
+
+        // The PC's last heartbeat says Vanguard cannot run (vgk missing or not loaded): Riot games would only fail at launch
+        // with antiCheatBlocked (D-74). No antiCheat in it (an older agent, no heartbeat yet) or a field the agent could not
+        // read (null, left out) hides nothing.
+        var (version, catalog, noVanguard) = await c.QuerySingleAsync<(int, string?, bool)>(
+            """
+            SELECT catalog_version, (settings -> 'catalog')::text,
+                   coalesce((SELECT (p.last_heartbeat -> 'antiCheat' -> 'vanguardInstalled') = 'false'::jsonb
+                                    OR (p.last_heartbeat -> 'antiCheat' -> 'vanguardLoaded') = 'false'::jsonb
+                             FROM pcs p WHERE p.id = @PcId), false)
+            FROM clubs WHERE id = @ClubId
+            """,
+            new { pc.ClubId, PcId = pc.Id });
         var played = await LastPlayedAsync(c, userId, null);
 
         // No page and no pageSize: the whole catalog at once; only page: pages of 1000 (mock paginate(…, 1000)). The applied
-        // page is part of the ETag: every page is its own representation.
+        // page is part of the ETag: every page is its own representation, and so is the set without the Vanguard games
+        // (left out of the hash otherwise, so the ETags of every other PC stay as they were).
         var whole = page is null && pageSize is null;
         var (p, size) = whole ? (1, 0) : Paging.Normalize(page, pageSize ?? "1000", MaxPageSize);
         var view = whole ? "all" : $"{p}x{size}";
-        var tag = $"g{version}-{Hash($"{view}|{zone}|{string.Join(',', played.OrderBy(g => g.Key).Select(g => $"{g.Key:N}={g.Value.ToUnixTimeMilliseconds()}"))}")}";
+        var lastPlayed = string.Join(',', played.OrderBy(g => g.Key).Select(g => $"{g.Key:N}={g.Value.ToUnixTimeMilliseconds()}"));
+        var tag = $"g{version}-{Hash($"{view}|{zone}|{lastPlayed}{(noVanguard ? "|noVanguard" : "")}")}";
         if (AgentEndpoints.NotModified(context, tag))
         {
             return Results.StatusCode(StatusCodes.Status304NotModified);
@@ -62,6 +76,7 @@ public static class GameEndpoints
         var all = (await c.QueryAsync<(Guid Id, string Data)>("SELECT id, data::text FROM games WHERE club_id = @ClubId AND deleted_at IS NULL", new { pc.ClubId }))
             .Where(g => !hidden.Contains(g.Id))
             .Select(g => JsonDefaults.Deserialize<Game>(g.Data)! with { LastPlayedAt = played.TryGetValue(g.Id, out var at) ? at : null })
+            .Where(g => !noVanguard || EffectiveAntiCheat(g) != AntiCheatKind.Vanguard)
             .OrderBy(g => Array.IndexOf(order, g.Id) is var i and >= 0 ? i : int.MaxValue)
             .ThenBy(g => g.Title, StringComparer.Ordinal)
             .ThenBy(g => g.Id)
@@ -156,6 +171,13 @@ public static class GameEndpoints
             new { userId, gameId });
         return rows.ToDictionary(r => r.GameId, r => r.At);
     }
+
+    /// <summary>
+    /// The anti-cheat the agent's launch gate checks for <paramref name="game"/> — the agent's
+    /// <c>GameLaunchService.EffectiveAntiCheat</c>: the catalog's, except that a Riot game it did not tag is Vanguard.
+    /// </summary>
+    private static AntiCheatKind EffectiveAntiCheat(Game game) =>
+        game.AntiCheat == AntiCheatKind.None && game.Launcher == LauncherType.Riot ? AntiCheatKind.Vanguard : game.AntiCheat;
 
     private static string Hash(string text) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)))[..12];
 

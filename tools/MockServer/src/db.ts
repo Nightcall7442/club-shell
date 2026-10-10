@@ -21,6 +21,7 @@ import {
   type ErrorCode,
   type Game,
   type HardwareInfo,
+  type HeartbeatGamesVolume,
   type JsonObject,
   type LauncherType,
   type LeaderboardEntry,
@@ -121,6 +122,8 @@ export interface PcRecord extends Pc {
   reportedSessionId?: string | null;
   /** `runningGames` of its last heartbeat: the game the hall map shows on the seat (D-71). */
   runningGames?: RunningGame[];
+  /** `gamesVolume` of its last heartbeat: the games disk «Состояние ПК» and the hall editor show (D-73). */
+  gamesVolume?: HeartbeatGamesVolume | null;
 }
 
 /** A game the Agent reports running (`HeartbeatRequest.runningGames[]`). */
