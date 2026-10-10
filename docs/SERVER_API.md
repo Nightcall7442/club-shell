@@ -214,6 +214,10 @@ Response `204`. A `4xx` other than `401`/`408`/`429` drops the batch (the server
 other failure (including `501`) the Agent keeps the batch and backs off exponentially from `uploadIntervalSec` up to
 15 min.
 
+There is no separate inventory endpoint (the `POST /pcs/{pcId}/inventory` once proposed is not needed): the full
+`HardwareInfo` goes with registration (`AgentRegisterRequest.hardware`), with the first telemetry batch after every
+Agent start, and with the batch after a rescan that finds a change, which also sends a `hardwareChanged` event (§6).
+
 #### `GET /agents/{pcId}/config` — auth: agent, ETag
 
 Response `AgentServerConfig` — server-side overrides merged over `agent.json` by the Agent (server wins for keys present):

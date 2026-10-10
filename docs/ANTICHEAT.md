@@ -173,6 +173,7 @@ Shell (React)          Shell (Rust)        Agent: GameHandlers → GameLaunchSer
   │ games_launch ─────▶ │ games.launch ───▶ │ LaunchAsync(LaunchRequest)                            │
   │                     │                   │  1. session active?  (sessionNotActive)               │
   │                     │                   │  2. PolicyDenies?    (policyDenied processAllowlist)  │
+  │                     │                   │  2a. NetworkPathCheck (antiCheatBlocked networkPath)  │
   │                     │                   │  3. CheckAntiCheatAsync(game)                         │
   │                     │                   │     game.AntiCheat == none → OK, gate NOT called      │
   │                     │                   │     else IAntiCheatGate.CheckForLaunchAsync ─────────▶│ kinds = policy.required ∪ {game.AntiCheat}
@@ -220,7 +221,7 @@ the failed check still lands in the launch report and the server report (`Action
 
 ### 5.1 Games on a network path
 
-Between steps 2 and 3, `GameLaunchService.NetworkPathCheck` refuses a game that has an anti-cheat
+At step 2a, between steps 2 and 3, `GameLaunchService.NetworkPathCheck` refuses a game that has an anti-cheat
 (`EffectiveAntiCheat`, so an untagged Riot game counts as Vanguard) when its install directory or its exe is on the
 network: a UNC path (`\\server\share\…`, `\\?\UNC\…`) or a drive whose `DriveInfo.DriveType` is `Network`, such as
 the SMB games share's letter (docs/DISKLESS.md). A local folder linked to the share (`mklink /D C:\Games\VALORANT

@@ -389,7 +389,7 @@ tools/scripts/         build · dev · package · sign · publish · setup-dev-v
 
 ## Участие
 
-- Провод агент ⇄ сервер меняется сначала в схеме [club-contracts](https://github.com/deepunites/club-contracts): копия обновляется `server/scripts/sync-contracts.ps1` (коммит — в `server/contracts/REF`, CI сверяет копию с ним), затем DTO в `src/ClubShell.Contracts` правятся вручную (генерации C#-DTO из схемы, NSwag, пока нет). IPC и прочие контракты меняются только в `src/ClubShell.Contracts`. Зеркала TS/Rust регенерируются `gen-contracts-*.ps1`, CI проверяет дрейф
+- Провод агент ⇄ сервер меняется сначала в схеме [club-contracts](https://github.com/deepunites/club-contracts): копия обновляется `server/scripts/sync-contracts.ps1` (коммит — в `server/contracts/REF`; CI сверяет копию с club-contracts на этом коммите, а пока он там не опубликован — пропускает шаг с предупреждением), затем DTO в `src/ClubShell.Contracts` правятся вручную (генерации C#-DTO из схемы, NSwag, пока нет). IPC и прочие контракты меняются только в `src/ClubShell.Contracts`. Зеркала TS/Rust регенерируются `gen-contracts-*.ps1`, CI проверяет дрейф
 - C#: file-scoped namespaces, nullable, `TreatWarningsAsErrors`, `AnalysisLevel=latest-recommended`
 - Rust: `cargo fmt`, `cargo lint`; `unsafe` только в `crates/winutil` и `src-tauri/src/kiosk`
 - TypeScript: `strict`, Prettier, типы из `@clubshell/contracts`
