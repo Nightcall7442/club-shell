@@ -280,7 +280,7 @@ public sealed class TelemetryReporter : BackgroundService
     {
         try
         {
-            // GetAsync: a scan that registration has just made is reused rather than repeated.
+            // GetAsync: a scan that registration has just made, or is making, is reused rather than repeated.
             _inventory.Started(await _hardware.GetAsync(cancellationToken).ConfigureAwait(false));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
