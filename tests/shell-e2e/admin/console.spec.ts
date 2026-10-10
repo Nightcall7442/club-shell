@@ -2206,6 +2206,42 @@ test('«Состояние ПК» shows the games disk a PC reports, and the hal
   await expect(row).toContainText(/(?<!не )подключён с \d{2}:\d{2}/);
 });
 
+test('the hall editor shows the hardware the selected PC reported', async ({ page, request }) => {
+  test.skip(
+    REAL,
+    "The server's dev seed puts its seats at pixel positions (x up to 660): the hall grid is hundreds of cells wide and " +
+      'too slow to drive. The hardware in GET /admin/pcs is checked on the server by the games-disk test above.',
+  );
+  const pc = await registerAgent(request, 'hw');
+  const owner = auth(await tokenFor(request, OWNER_PIN));
+  const hall = (await (await request.get(`${API}/admin/pcs`, { headers: owner })).json()) as {
+    items: { id: string; name: string; x: number; y: number }[];
+  };
+  const mine = hall.items.find((p) => p.id === pc.pcId);
+  expect(mine, 'the PC in the hall list').toBeTruthy();
+  // A cell of its own: a PC registers onto the first cell unless the owner set up its seat, and a cell shows one device.
+  const taken = new Set(hall.items.map((p) => `${p.x}:${p.y}`));
+  let x = 0;
+  let y = 0;
+  while (taken.has(`${x}:${y}`)) {
+    x = (x + 1) % 10;
+    y += x === 0 ? 1 : 0;
+  }
+  const placed = await request.patch(`${API}/admin/pcs/${pc.pcId}`, { headers: owner, data: { x, y } });
+  expect(placed.ok(), await placed.text()).toBeTruthy();
+
+  await signIn(page, OWNER_PIN);
+  await page.goto('/#/hall');
+  await page.locator(`button[title^="${mine!.name} · "]`).click();
+  // The selected device's panel, with what registerAgent sent at registration under «Железо».
+  const panel = page.locator('section').filter({ has: page.getByText('Железо', { exact: true }) });
+  await expect(panel.locator('h2').first()).toHaveText(mine!.name);
+  await expect(panel).toContainText('E2E CPU');
+  await expect(panel).toContainText('ядер: 4, потоков: 8');
+  await expect(panel).toContainText('8 ГБ');
+  await expect(panel).toContainText('10.0.22631');
+});
+
 test('a PC without a loaded Vanguard is not offered the games it could not start (D-74)', async ({ request }) => {
   const pc = await registerAgent(request, 'vgk');
   const listed = async (): Promise<{ id: string; launcher: string; antiCheat: string }[]> => {
