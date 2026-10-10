@@ -48,6 +48,7 @@ import {
   type UserRecord,
 } from '../db.js';
 import { PRODUCT_CATEGORIES, liveProducts, productView, voidOf } from './bar.js';
+import { gamesVolumeOf, hardwareOf } from '../devices.js';
 import {
   API_TOPUP,
   CASH_REASONS,
@@ -783,8 +784,9 @@ export function clubRoutes(app: FastifyInstance): void {
         x: p.x,
         y: p.y,
         device: c.devices[p.id] ?? 'pc',
-        hardware: p.hardware,
+        hardware: hardwareOf(p),
         metrics: p.metrics.at(-1) ?? null,
+        gamesVolume: gamesVolumeOf(p),
       })),
       zones: c.zones,
     };
@@ -998,6 +1000,7 @@ export function clubRoutes(app: FastifyInstance): void {
         status: pc.status,
         ...diagnose(pc, t),
         ticket: hs.tickets.find((x) => x.pcId === pc.id && x.status !== 'resolved') ?? null,
+        gamesVolume: gamesVolumeOf(pc),
       })),
       tickets: hs.tickets.slice(0, 100),
     };

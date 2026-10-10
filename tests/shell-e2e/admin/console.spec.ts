@@ -143,7 +143,8 @@ async function agentCall(
 /**
  * The Agent's heartbeat (a full `HeartbeatRequest`): a registered PC is offline until its first one, on the server and
  * on the mock. `currentSessionId` and `offlineQueue` are what a move onto the PC is checked against (D-59);
- * `runningGames` with `currentSessionId` is the game the map shows on the seat (D-71).
+ * `runningGames` with `currentSessionId` is the game the map shows on the seat (D-71); `gamesVolume` the games disk
+ * «Состояние ПК» shows (D-73), left out when not given (an older Agent).
  */
 async function heartbeat(
   request: APIRequestContext,
@@ -152,10 +153,12 @@ async function heartbeat(
     currentSessionId = null,
     offlineQueue = 0,
     runningGames = [],
+    gamesVolume,
   }: {
     currentSessionId?: string | null;
     offlineQueue?: number;
     runningGames?: { gameId: string; pid: number; startedAt: string }[];
+    gamesVolume?: { owner: string; mounted?: boolean | null; driveLetter?: string | null; since?: string | null };
   } = {},
 ): Promise<void> {
   const res = await agentCall(request, pc, 'POST', `/agents/${pc.pcId}/heartbeat`, {
@@ -169,6 +172,7 @@ async function heartbeat(
     runningGames,
     offlineQueue,
     shellConnected: true,
+    ...(gamesVolume ? { gamesVolume } : {}),
   });
   expect(res.ok(), await res.text()).toBeTruthy();
 }
@@ -2155,4 +2159,45 @@ test('a busy seat shows the game its PC reports', async ({ page, request }) => {
   expect((await seatOf(request, pc.pcId)).game ?? null).toBeNull();
   await expect(tile).not.toContainText('Counter-Strike 2');
   await endAt(request, pc.pcId);
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The machine: games disk and hardware (D-73)
+// ---------------------------------------------------------------------------------------------------------------------
+
+test('«Состояние ПК» shows the games disk a PC reports, and the hall list carries its hardware', async ({
+  page,
+  request,
+}) => {
+  const pc = await registerAgent(request, 'disk');
+  await heartbeat(request, pc, {
+    gamesVolume: { owner: 'agent', mounted: false, driveLetter: 'G', since: new Date().toISOString() },
+  });
+  const hall = (await (
+    await request.get(`${API}/admin/pcs`, { headers: auth(await tokenFor(request, OWNER_PIN)) })
+  ).json()) as {
+    items: {
+      id: string;
+      name: string;
+      gamesVolume?: { mounted?: boolean } | null;
+      hardware: { cpu: { model: string } } | null;
+    }[];
+  };
+  const mine = hall.items.find((p) => p.id === pc.pcId);
+  expect(mine, 'the PC in the hall list').toBeTruthy();
+  expect(mine!.gamesVolume?.mounted).toBe(false);
+  // What registerAgent sent at registration.
+  expect(mine!.hardware?.cpu.model).toBe('E2E CPU');
+
+  await signIn(page, CASHIER_PIN);
+  await page.goto('/#/health');
+  const row = page.locator('tbody tr').filter({ has: page.locator(`[title="${mine!.name}"]`) });
+  await expect(row).toContainText(/не подключён с \d{2}:\d{2}/);
+
+  // Back: the next heartbeat says it is connected again.
+  await heartbeat(request, pc, {
+    gamesVolume: { owner: 'agent', mounted: true, driveLetter: 'G', since: new Date().toISOString() },
+  });
+  await page.reload();
+  await expect(row).toContainText(/(?<!не )подключён с \d{2}:\d{2}/);
 });
