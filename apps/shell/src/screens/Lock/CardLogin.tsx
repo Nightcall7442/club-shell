@@ -37,10 +37,18 @@ function maskCard(id: string): string {
   return id.length > 4 ? `•••• ${id.slice(-4)}` : '••••';
 }
 
-/** As for a password, except that a card no account holds reads "not recognised" rather than a wrong login. */
+/**
+ * As for a password, except that a card no account holds reads "not recognised" rather than a wrong login, and the
+ * server's lockout of this PC's card sign-in (`attemptsLeft: 0` after 5 wrong cards in 15 minutes) reads "wait".
+ */
 function cardErrorMessage(e: unknown, t: TFunction): string {
   const err = toShellApiError(e);
-  return err.code === 'unauthorized' ? t('lock.cardUnknown') : loginErrorMessage(err, t);
+  if (err.code !== 'unauthorized') {
+    return loginErrorMessage(err, t);
+  }
+  const details =
+    typeof err.details === 'object' && err.details !== null ? (err.details as Record<string, unknown>) : {};
+  return details['attemptsLeft'] === 0 ? t('lock.tooManyAttempts') : t('lock.cardUnknown');
 }
 
 const ContactlessIcon = (

@@ -262,6 +262,31 @@ test.describe('lock screen', () => {
     await playing(page);
   });
 
+  test('five wrong cards stop card sign-in on this PC for a while', async ({ page }) => {
+    await openLock(page);
+    await page.getByRole('tab', { name: en('lock.methodCard') }).click();
+    const card = field(page, en('lock.cardNumber'));
+    const wrongCard = async (cardId: string): Promise<void> => {
+      await card.fill(cardId);
+      await card.press('Enter');
+      await expect(card).toHaveValue('');
+    };
+    for (let i = 0; i < 4; i++) {
+      await wrongCard(`00123456${70 + i}`);
+    }
+    await expect(page.getByRole('alert').filter({ hasText: en('lock.cardUnknown') })).toBeVisible();
+
+    // The fifth uses up the attempts: the player is told to wait rather than "not found"…
+    await wrongCard('0012345674');
+    const wait = page.getByRole('alert').filter({ hasText: en('lock.tooManyAttempts') });
+    await expect(wait).toBeVisible();
+    // …and from then on every card is refused, even the bound one.
+    await wrongCard(DEMO_CARD);
+    await expect(wait).toBeVisible();
+    await expect(page).toHaveURL(/#\/lock$/);
+    await expect(sessionTimer(page)).toHaveCount(0);
+  });
+
   test('a reader on the Russian layout still sends Latin letters', async ({ page }) => {
     await openLock(page);
     await page.getByRole('tab', { name: en('lock.methodCard') }).click();

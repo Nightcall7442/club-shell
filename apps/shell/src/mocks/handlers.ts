@@ -268,6 +268,8 @@ interface MockState {
   adminToken: { token: string; expiresAt: number } | null;
   lastCallAdminAt: number;
   adminAttempts: number[];
+  /** Times of this PC's wrong cards in the last 15 minutes (D-75). */
+  cardFailures: number[];
   idempotency: Map<string, unknown>;
   kiosk: KioskState;
   updateReady: boolean;
@@ -304,6 +306,7 @@ function freshState(): MockState {
     adminToken: null,
     lastCallAdminAt: 0,
     adminAttempts: [],
+    cardFailures: [],
     idempotency: new Map(),
     kiosk: clone(KIOSK_STATE),
     updateReady: false,
@@ -777,10 +780,20 @@ cmd('auth_login', (args): AuthLoginResponse => {
       if (cardId.length === 0) {
         mockError('validation', 'cardId is required', { field: 'cardId', reason: 'required' });
       }
-      // As the server: an unknown card is a wrong credential, and the error never repeats the number.
+      // As the server (D-75): an unknown card is a wrong credential, counted on this PC, and the error never repeats the
+      // number; 5 in 15 minutes refuse even a bound card until the oldest one is out of the window.
+      const now = Date.now();
+      mockState.cardFailures = mockState.cardFailures.filter((t) => now - t < 15 * 60_000);
+      if (mockState.cardFailures.length >= 5) {
+        mockError('unauthorized', 'Wrong credentials', { reason: 'badCredentials', attemptsLeft: 0 });
+      }
       const holder = MOCK_CARDS[cardId];
       if (holder === undefined) {
-        mockError('unauthorized', 'Wrong credentials', { reason: 'badCredentials', attemptsLeft: 5 });
+        mockState.cardFailures.push(now);
+        mockError('unauthorized', 'Wrong credentials', {
+          reason: 'badCredentials',
+          attemptsLeft: 5 - mockState.cardFailures.length,
+        });
       }
       user = holder === 'vip' ? VIP_USER : USER;
       break;
