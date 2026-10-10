@@ -19,6 +19,7 @@ import { useIdle } from '@/hooks/useIdle';
 import { useLocale } from '@/hooks/useLocale';
 import { useSession } from '@/hooks/useSession';
 import { trackScreen } from '@/lib/analytics';
+import { onCardRead } from '@/lib/cardReader';
 import { formatDurationSec, formatMoney } from '@/lib/format';
 import { api, toShellApiError } from '@/lib/tauri';
 import { formatClock } from '@/lib/time';
@@ -530,7 +531,8 @@ export function StartSessionModal({ open, onStarted, onLogout }: StartSessionMod
 
 /**
  * QR first: signing in from the phone needs no keyboard and keeps the password off a shared screen. Card sign-in has
- * no club switch: every club can bind cards at the cash desk.
+ * no club switch: every club can bind cards at the cash desk. A card tapped on any tab, or on the attract screen,
+ * opens the card tab and signs in with it (`onCardRead`).
  */
 type LoginTab = 'qr' | 'password' | 'card' | 'guest';
 
@@ -738,6 +740,20 @@ export default function LockScreen(): JSX.Element {
     }
   }, [qrLogin]);
 
+  // A reader's card from whatever was showing — another tab, or the attract screen this one replaced — goes to the card
+  // tab, which signs in with it; the number is not lost and the player does not tap twice.
+  const [tapped, setTapped] = useState<{ cardId: string } | null>(null);
+  useEffect(() => {
+    if (!ready || isLocked || hasUser) {
+      return undefined;
+    }
+    return onCardRead((cardId) => {
+      picked.current = true;
+      setTab('card');
+      setTapped({ cardId });
+    });
+  }, [ready, isLocked, hasUser]);
+
   const tabs = useMemo<TabItem<LoginTab>[]>(
     () => [
       ...(qrLogin ? [{ key: 'qr' as const, label: t('lock.methodQr'), icon: QrIcon }] : []),
@@ -830,6 +846,8 @@ export default function LockScreen(): JSX.Element {
                   value={tab}
                   onChange={(next) => {
                     picked.current = true;
+                    // A tapped card is tried once: back on the card tab later, it is not sent again.
+                    setTapped(null);
                     setTab(next);
                   }}
                   label={t('lock.chooseMethod')}
@@ -841,7 +859,7 @@ export default function LockScreen(): JSX.Element {
                 <div role="tabpanel" id={`lock-panel-${tab}`} aria-labelledby={`lock-tab-${tab}`}>
                   {tab === 'qr' && <QrLogin />}
                   {tab === 'password' && <LoginForm />}
-                  {tab === 'card' && <CardLogin />}
+                  {tab === 'card' && <CardLogin tapped={tapped} />}
                   {tab === 'guest' && <GuestLogin />}
                 </div>
               </>

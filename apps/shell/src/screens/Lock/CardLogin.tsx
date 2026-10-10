@@ -6,6 +6,7 @@ import type { AuthLoginResponse } from '@clubshell/contracts';
 import { ClubMark } from '@/components/brand/ClubMark';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { CARD_KEY, CARD_MAX, readerKey } from '@/lib/cardReader';
 import { insertText } from '@/lib/insertText';
 import { isTauri, toShellApiError } from '@/lib/tauri';
 import { useAuthStore } from '@/store/auth';
@@ -14,22 +15,8 @@ import { loginErrorMessage } from './LoginForm';
 export interface CardLoginProps {
   onSuccess?: (res: AuthLoginResponse) => void;
   className?: string;
-}
-
-/** The longest card the cash desk can bind (`users.card_id`). */
-const CARD_MAX = 64;
-
-/** A key that can be part of a card number: readers type digits, some hex or a dashed id such as `CARD-0001`. */
-const CARD_KEY = /^[\p{L}\p{N}-]$/u;
-
-/**
- * The character a key types on a Latin layout. A USB reader sends key codes, so under the Russian layout the letters
- * of a hex card id would arrive as Cyrillic (`0A1B` → `0Ф1И`) and match no card; digits are the same on every layout.
- * Cards are compared without regard to case.
- */
-function readerKey(e: { key: string; code: string }): string {
-  const latin = /^Key([A-Z])$/.exec(e.code)?.[1];
-  return latin !== undefined && /^\p{L}$/u.test(e.key) && !/^[a-z]$/i.test(e.key) ? latin : e.key;
+  /** A card the lock screen read while another method was showing (`onCardRead`): signed in with as it arrives. */
+  tapped?: { cardId: string } | null;
 }
 
 /** `•••• 4567`: only the last four characters ever show, and none of an entry that short. */
@@ -72,7 +59,7 @@ const ContactlessIcon = (
  * after choosing the tab still counts. Typing by hand works the same. The number is a password field, shows only its
  * last four characters on the card face, is cleared after every attempt and never goes to the log or analytics.
  */
-export function CardLogin({ onSuccess, className }: CardLoginProps): JSX.Element {
+export function CardLogin({ onSuccess, className, tapped = null }: CardLoginProps): JSX.Element {
   const { t } = useTranslation();
   const login = useAuthStore((s) => s.login);
   const field = useRef<HTMLInputElement>(null);
@@ -110,17 +97,7 @@ export function CardLogin({ onSuccess, className }: CardLoginProps): JSX.Element
     }
   };
 
-  const submit = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
-    e.preventDefault();
-    if (busy) {
-      return;
-    }
-    const id = cardId.trim();
-    if (id.length === 0) {
-      setError(t('lock.cardRequired'));
-      setCardId('');
-      return;
-    }
+  const signIn = async (id: string): Promise<void> => {
     setError(null);
     setBusy(true);
     try {
@@ -133,6 +110,33 @@ export function CardLogin({ onSuccess, className }: CardLoginProps): JSX.Element
       setCardId('');
       setBusy(false);
     }
+  };
+
+  // Each tap is a new object, so the same card tapped twice is tried twice; one tap is tried once, even when Strict
+  // Mode runs the effect again. The card face shows it masked while it is checked, as a card read here would.
+  const signInRef = useRef(signIn);
+  signInRef.current = signIn;
+  const tried = useRef<object | null>(null);
+  useEffect(() => {
+    if (tapped && tried.current !== tapped) {
+      tried.current = tapped;
+      setCardId(tapped.cardId);
+      void signInRef.current(tapped.cardId);
+    }
+  }, [tapped]);
+
+  const submit = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
+    e.preventDefault();
+    if (busy) {
+      return;
+    }
+    const id = cardId.trim();
+    if (id.length === 0) {
+      setError(t('lock.cardRequired'));
+      setCardId('');
+      return;
+    }
+    await signIn(id);
   };
 
   const masked = cardId.trim().length > 0 ? maskCard(cardId.trim()) : null;

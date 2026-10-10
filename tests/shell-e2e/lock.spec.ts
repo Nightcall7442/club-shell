@@ -77,6 +77,19 @@ async function signIn(page: Page, username: string, password: string): Promise<v
   await secret.press('Enter');
 }
 
+/**
+ * A USB reader's tap: the card's keys and its Enter in one go, as `keydown`s on whatever has the focus. Dispatched from
+ * the page, so they come as close together as a reader's whatever the load of the test machine.
+ */
+async function tapCard(page: Page, cardId: string): Promise<void> {
+  await page.evaluate((id) => {
+    const target = document.activeElement ?? document.body;
+    for (const key of [...id, 'Enter']) {
+      target.dispatchEvent(new KeyboardEvent('keydown', { key, code: '', bubbles: true, cancelable: true }));
+    }
+  }, cardId);
+}
+
 /** Tariff picker shown after a guest's login (no session yet) → "Start playing" → `/home`. */
 async function startSession(page: Page): Promise<void> {
   const picker = page.getByRole('dialog', { name: en('wallet.chooseTariff') });
@@ -285,6 +298,27 @@ test.describe('lock screen', () => {
     await expect(wait).toBeVisible();
     await expect(page).toHaveURL(/#\/lock$/);
     await expect(sessionTimer(page)).toHaveCount(0);
+  });
+
+  test('a card tapped on another tab opens the card tab and signs in', async ({ page }) => {
+    await openLock(page);
+    // The screen opens on QR or password, its tab focused: no card field to type into.
+    const current = page.getByRole('tab', { selected: true });
+    await expect(current).not.toHaveAccessibleName(en('lock.methodCard'));
+    await current.focus();
+    await tapCard(page, DEMO_CARD);
+    await playing(page);
+  });
+
+  test('a card tapped on the attract screen wakes it and signs in', async ({ page }) => {
+    await openLock(page);
+    await page.evaluate(() => {
+      window.location.hash = '#/idle';
+    });
+    await expect(page.getByText(en('idle.touchToStart'))).toBeVisible();
+    // The first key wakes the screen; the rest of the card and its Enter arrive before the lock screen is up.
+    await tapCard(page, DEMO_CARD);
+    await playing(page);
   });
 
   test('a reader on the Russian layout still sends Latin letters', async ({ page }) => {
