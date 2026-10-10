@@ -252,6 +252,13 @@ export function pcsRoutes(app: FastifyInstance): void {
     pc.reportedSessionId = optStr(b, 'currentSessionId', 64);
     bool(b, 'shellConnected');
     pc.gamesVolume = gamesVolumeOf(b);
+    const antiCheat = optObj(b, 'antiCheat');
+    pc.antiCheat = antiCheat
+      ? {
+          vanguardInstalled: optBool(antiCheat, 'vanguardInstalled'),
+          vanguardLoaded: optBool(antiCheat, 'vanguardLoaded'),
+        }
+      : null;
     pc.lastHeartbeatAt = now();
     pc.seen = true;
     const session = openSessionForPc(pc.id);

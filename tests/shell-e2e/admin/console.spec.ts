@@ -144,7 +144,8 @@ async function agentCall(
  * The Agent's heartbeat (a full `HeartbeatRequest`): a registered PC is offline until its first one, on the server and
  * on the mock. `currentSessionId` and `offlineQueue` are what a move onto the PC is checked against (D-59);
  * `runningGames` with `currentSessionId` is the game the map shows on the seat (D-71); `gamesVolume` the games disk
- * «Состояние ПК» shows (D-73), left out when not given (an older Agent).
+ * «Состояние ПК» shows (D-73) and `antiCheat` the Vanguard state `GET /games` follows (D-74), left out when not given
+ * (an older Agent).
  */
 async function heartbeat(
   request: APIRequestContext,
@@ -154,11 +155,13 @@ async function heartbeat(
     offlineQueue = 0,
     runningGames = [],
     gamesVolume,
+    antiCheat,
   }: {
     currentSessionId?: string | null;
     offlineQueue?: number;
     runningGames?: { gameId: string; pid: number; startedAt: string }[];
     gamesVolume?: { owner: string; mounted?: boolean | null; driveLetter?: string | null; since?: string | null };
+    antiCheat?: { vanguardInstalled?: boolean | null; vanguardLoaded?: boolean | null };
   } = {},
 ): Promise<void> {
   const res = await agentCall(request, pc, 'POST', `/agents/${pc.pcId}/heartbeat`, {
@@ -173,6 +176,7 @@ async function heartbeat(
     offlineQueue,
     shellConnected: true,
     ...(gamesVolume ? { gamesVolume } : {}),
+    ...(antiCheat ? { antiCheat } : {}),
   });
   expect(res.ok(), await res.text()).toBeTruthy();
 }
@@ -2200,4 +2204,26 @@ test('«Состояние ПК» shows the games disk a PC reports, and the hal
   });
   await page.reload();
   await expect(row).toContainText(/(?<!не )подключён с \d{2}:\d{2}/);
+});
+
+test('a PC without a loaded Vanguard is not offered the games it could not start (D-74)', async ({ request }) => {
+  const pc = await registerAgent(request, 'vgk');
+  const listed = async (): Promise<{ id: string; launcher: string; antiCheat: string }[]> => {
+    const res = await agentCall(request, pc, 'GET', '/games');
+    expect(res.ok(), await res.text()).toBeTruthy();
+    return ((await res.json()) as { items: { id: string; launcher: string; antiCheat: string }[] }).items;
+  };
+  await heartbeat(request, pc, { antiCheat: { vanguardInstalled: true, vanguardLoaded: true } });
+  const all = await listed();
+
+  // Installed but not loaded until a reboot. The seed policy requires Vanguard for every game with an anti-cheat, so
+  // only the games without one (and not Riot's, which the Agent treats as Vanguard) are left.
+  await heartbeat(request, pc, { antiCheat: { vanguardInstalled: true, vanguardLoaded: false } });
+  expect((await listed()).map((g) => g.id)).toEqual(
+    all.filter((g) => g.antiCheat === 'none' && g.launcher !== 'riot').map((g) => g.id),
+  );
+
+  // Loaded after the reboot: the whole catalog again.
+  await heartbeat(request, pc, { antiCheat: { vanguardInstalled: true, vanguardLoaded: true } });
+  expect((await listed()).map((g) => g.id)).toEqual(all.map((g) => g.id));
 });
