@@ -1,7 +1,13 @@
 # ClubShell — Central Server API v1 (consumed by the Agent)
 
-Status: normative for the client. The server team implements this surface; `tools/MockServer` implements
-it for development. Types referenced by name are defined in `IPC_PROTOCOL.md` §6 and are byte-compatible.
+Status: descriptive — the server API as the agent uses it. The source of truth for the wire is the schema in
+[`deepunites/club-contracts`](https://github.com/deepunites/club-contracts) (OpenAPI 3.1 + AsyncAPI), vendored in
+`server/contracts` at the commit in `server/contracts/REF` with a CI drift check (`ARCHITECTURE.md` §1.2); where this
+document differs from the schema, the schema wins and this document must be fixed. `server/` implements the schema
+(its tests check every response against it); `tools/MockServer` implements it for development. Types referenced by
+name are the C# DTOs of `ClubShell.Contracts`, shared with the pipe (`IPC_PROTOCOL.md` §6) and byte-compatible
+across both. They follow the schema but are still kept in step by hand: generating them from the schema (NSwag) is an
+open item.
 
 Реализация сервера — [`docs/server/DESIGN.md`](server/DESIGN.md); запуск, конфигурация и развёртывание — [`server/README.md`](../server/README.md).
 
