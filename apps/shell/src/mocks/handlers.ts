@@ -110,6 +110,7 @@ import {
   METRICS,
   DEMO_CLUB,
   MOCK_ADMIN_PIN,
+  MOCK_CARDS,
   MOCK_CREDENTIALS,
   MOCK_USER_PIN,
   MONITORS,
@@ -771,12 +772,19 @@ cmd('auth_login', (args): AuthLoginResponse => {
       user = USER;
       break;
     }
-    case 'card':
-      if (!req.cardId) {
+    case 'card': {
+      const cardId = (req.cardId ?? '').trim().toLowerCase();
+      if (cardId.length === 0) {
         mockError('validation', 'cardId is required', { field: 'cardId', reason: 'required' });
       }
-      user = req.cardId.endsWith('9') ? VIP_USER : USER;
+      // As the server: an unknown card is a wrong credential, and the error never repeats the number.
+      const holder = MOCK_CARDS[cardId];
+      if (holder === undefined) {
+        mockError('unauthorized', 'Wrong credentials', { reason: 'badCredentials', attemptsLeft: 5 });
+      }
+      user = holder === 'vip' ? VIP_USER : USER;
       break;
+    }
     case 'token':
       if (!req.token) {
         mockError('validation', 'token is required', { field: 'token', reason: 'required' });
