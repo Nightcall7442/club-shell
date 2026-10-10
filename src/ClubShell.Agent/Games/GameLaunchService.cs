@@ -51,6 +51,14 @@ public interface IGameEventSink
 [SupportedOSPlatform("windows")]
 public sealed class GameLaunchService : IDisposable
 {
+    /// <summary>
+    /// <c>antiCheatBlocked.details.reason</c> and the launch report's <see cref="AntiCheatCheckResult.Reason"/> when a game
+    /// with an anti-cheat would start from a network path. The contract keeps the set of reasons open (any string,
+    /// <c>AntiCheatChecks</c> in server/contracts/openapi.yaml), so this agent-only value stays out of
+    /// <see cref="AntiCheatChecks"/> and its generated TypeScript and Rust mirrors.
+    /// </summary>
+    public const string NetworkPathReason = "networkPath";
+
     private const int MaxExtraArgsLength = 512;
     private static readonly TimeSpan LaunchGrace = TimeSpan.FromSeconds(15);
 
@@ -216,6 +224,20 @@ public sealed class GameLaunchService : IDisposable
             if (PolicyDenies(game, out string rule))
             {
                 throw IpcError.PolicyDenied(rule, "exePath").ToException();
+            }
+
+            // Not subject to blockOnViolation: where the game is installed is the library's layout, not a finding about
+            // this PC, and an anti-cheat that refuses a network path does so whatever the policy says.
+            if (NetworkPathCheck(game) is { } onNetwork)
+            {
+                antiCheat = onNetwork;
+                _logger.LogWarning(
+                    "{Title} ({Kind}) is on a network path (install {InstallPath}, exe {ExePath}); games with an anti-cheat must be on a local disk",
+                    game.Title,
+                    onNetwork.Kind,
+                    game.InstallPath,
+                    game.ExePath);
+                throw IpcError.AntiCheatBlocked(onNetwork.Kind, NetworkPathReason).ToException();
             }
 
             antiCheat = await CheckAntiCheatAsync(game, token).ConfigureAwait(false);
@@ -481,6 +503,66 @@ public sealed class GameLaunchService : IDisposable
     {
         ArgumentNullException.ThrowIfNull(game);
         return game.AntiCheat == AntiCheatKind.None && game.Launcher == LauncherType.Riot ? AntiCheatKind.Vanguard : game.AntiCheat;
+    }
+
+    /// <summary>
+    /// The failed check (<see cref="NetworkPathReason"/>) when <paramref name="game"/> has an anti-cheat
+    /// (<see cref="EffectiveAntiCheat"/>) and its install directory or exe is on the network (<see cref="IsNetworkPath"/>):
+    /// several anti-cheats refuse to start from a network path, so such games belong on a local disk and the SMB games
+    /// share holds the rest of the library (docs/DISKLESS.md). <see langword="null"/> when the launch may go on.
+    /// </summary>
+    /// <param name="game">Game about to launch, with its detected install path.</param>
+    /// <param name="driveType">Drive type by drive root (<c>G:\</c>); <see cref="DriveInfo.DriveType"/> when omitted.</param>
+    public static AntiCheatCheckResult? NetworkPathCheck(Game game, Func<string, DriveType>? driveType = null)
+    {
+        ArgumentNullException.ThrowIfNull(game);
+        AntiCheatKind kind = EffectiveAntiCheat(game);
+        if (kind == AntiCheatKind.None)
+        {
+            return null;
+        }
+
+        // A launcher game (Steam, Riot, Epic...) usually has no exe before its launcher starts it, so the install
+        // directory is what is known; a relative exe lies inside it. With neither path known there is nothing to judge
+        // and the launch goes on (fail open): the launcher alone decides where the game runs from.
+        driveType ??= root => new DriveInfo(root).DriveType;
+        return IsNetworkPath(game.InstallPath, driveType) || IsNetworkPath(game.ExePath, driveType)
+            ? new AntiCheatCheckResult(kind, false, NetworkPathReason)
+            : null;
+    }
+
+    /// <summary>
+    /// <see langword="true"/> for a UNC path (<c>\\server\share\...</c>, <c>\\?\UNC\server\share\...</c>) or a path on a
+    /// drive whose type is <see cref="DriveType.Network"/> (a mapped share, such as the games share's drive letter).
+    /// Relative and empty paths are not on the network.
+    /// </summary>
+    /// <param name="path">Path to classify.</param>
+    /// <param name="driveType">Drive type by drive root (<c>G:\</c>).</param>
+    public static bool IsNetworkPath(string? path, Func<string, DriveType> driveType)
+    {
+        ArgumentNullException.ThrowIfNull(driveType);
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        string normalized = path.Trim().Replace('/', '\\');
+        if (normalized.StartsWith(@"\\?\", StringComparison.Ordinal) || normalized.StartsWith(@"\\.\", StringComparison.Ordinal))
+        {
+            // A device path: \\?\UNC\server\share is a share, \\?\C:\ a drive, \\?\Volume{...}\ a local volume.
+            normalized = normalized[4..];
+            if (normalized.StartsWith(@"UNC\", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        else if (normalized.StartsWith(@"\\", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return normalized.Length >= 2 && normalized[1] == ':' && char.IsAsciiLetter(normalized[0])
+            && driveType(normalized[0] + @":\") == DriveType.Network;
     }
 
     /// <summary>Strips control characters and caps the length of caller-supplied arguments.</summary>

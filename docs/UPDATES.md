@@ -90,6 +90,11 @@ package to `stable`. Both channels are independent manifests on the server; a PC
 back to `stable` keeps its version (downgrade protection) until `stable` overtakes it, unless the server
 marks the stable manifest `mandatory` (server-side rollback).
 
+A channel name this agent does not know (a newer server's, read as `unknown`) skips the check: no manifest is
+requested (never `updates/unknown/manifest`), nothing is offered and `LatestAgent` / `LatestShell` are cleared,
+with a warning in the log. The agent does not fall back to `stable`, which could install packages from a channel
+the club did not choose. A server `update` command that carries its manifest still stages and applies it.
+
 ### 2.2 Server endpoint
 
 `GET /api/v1/updates/{channel}/manifest?component=agent|shell&current=<semver>&arch=x64` — auth:

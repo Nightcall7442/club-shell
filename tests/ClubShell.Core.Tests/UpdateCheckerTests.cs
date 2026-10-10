@@ -394,6 +394,34 @@ public sealed class UpdateCheckerTests
     }
 
     [Fact]
+    public async Task Unknown_channel_skips_the_check_and_never_requests_a_manifest()
+    {
+        ServerReturns(UpdateComponent.Agent, Manifest("1.5.0"));
+        await _checker.CheckOnceAsync(CancellationToken.None);
+        _checker.LatestAgent.Should().NotBeNull("found on stable before the channel changed");
+        DateTimeOffset? lastCheck = _checker.LastCheckAt;
+        _server.ClearReceivedCalls();
+        _clock.Advance(TimeSpan.FromHours(1));
+
+        // A channel name from a newer server, through the policy...
+        _checker.Policy = SamplePolicy(new UpdatesPolicy(UpdateChannel.Unknown, true));
+        var response = await _checker.CheckOnceAsync(CancellationToken.None);
+
+        response.Should().Be(new UpdateCheckResponse(new ComponentVersions(AgentVersion, AgentVersion), null, null));
+        _checker.LatestAgent.Should().BeNull("nothing is offered on a channel this agent does not know");
+        _checker.LatestShell.Should().BeNull();
+        _checker.LastCheckAt.Should().Be(lastCheck, "no check was made");
+        _events.Should().ContainSingle("only the stable check raised Available");
+
+        // ...or through the agent settings.
+        _checker.Policy = null;
+        _settings.Updates.Channel = UpdateChannel.Unknown;
+        (await _checker.CheckOnceAsync(CancellationToken.None)).Agent.Should().BeNull();
+
+        await _server.DidNotReceiveWithAnyArgs().GetUpdateManifestAsync(default, default, default!, default);
+    }
+
+    [Fact]
     public async Task Current_versions_are_sent_per_component()
     {
         _checker.Current = new ComponentVersions("1.4.2", "1.3.9");

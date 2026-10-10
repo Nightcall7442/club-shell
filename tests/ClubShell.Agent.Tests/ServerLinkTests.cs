@@ -5,6 +5,9 @@ using ClubShell.Agent.Session;
 using ClubShell.Contracts.Commands;
 using ClubShell.Contracts.Errors;
 using ClubShell.Contracts.Games;
+using ClubShell.Contracts.Ipc;
+using ClubShell.Contracts.Pcs;
+using ClubShell.Contracts.Serialization;
 using ClubShell.Core.Abstractions;
 using ClubShell.Core.Configuration;
 using ClubShell.Core.Security;
@@ -14,7 +17,8 @@ namespace ClubShell.Agent.Tests;
 
 // ---------------------------------------------------------------------------------------------
 // Agent <-> server link: live-socket token refresh, power-command acks across restarts, launch-report
-// outbox, telemetry batch rejection, Riot -> Vanguard launch gate.
+// outbox, telemetry batch rejection, hardware inventory at start, Riot -> Vanguard launch gate,
+// anti-cheat games refused on a network path.
 // ---------------------------------------------------------------------------------------------
 
 public sealed class ServerLinkTests : IDisposable
@@ -212,4 +216,137 @@ public sealed class ServerLinkTests : IDisposable
         GameLaunchService.EffectiveAntiCheat(TestSupport.Game("VALORANT", LauncherType.Riot) with { AntiCheat = AntiCheatKind.Eac }).Should().Be(AntiCheatKind.Eac);
         GameLaunchService.EffectiveAntiCheat(TestSupport.Game("Dota 2", LauncherType.Steam)).Should().Be(AntiCheatKind.None);
     }
+
+    // ---- network-path anti-cheat gate ---------------------------------------------------------
+
+    [Theory]
+    [InlineData(@"\\nas\games\Apex Legends", null)]
+    [InlineData(@"//nas/games/Apex Legends", null)]
+    [InlineData(@"\\?\UNC\nas\games\Apex Legends", null)]
+    [InlineData(@"G:\Apex Legends", null)]
+    [InlineData(null, @"\\nas\games\Apex Legends\r5apex.exe")]
+    [InlineData(@"D:\Games\Apex Legends", @"G:\Apex Legends\r5apex.exe")]
+    public void Anticheat_game_on_a_network_path_is_refused(string? installPath, string? exePath)
+    {
+        Game game = TestSupport.Game("Apex Legends", LauncherType.Ea, exePath: exePath, installPath: installPath) with { AntiCheat = AntiCheatKind.Eac };
+
+        GameLaunchService.NetworkPathCheck(game, Drives).Should().Be(new AntiCheatCheckResult(AntiCheatKind.Eac, false, "networkPath"));
+    }
+
+    [Theory]
+    [InlineData(@"D:\Games\Apex Legends", null)]
+    [InlineData(@"D:\Games\Apex Legends", "r5apex.exe")]
+    [InlineData(@"\\?\D:\Games\Apex Legends", null)]
+    [InlineData(null, @"D:\Games\Apex Legends\r5apex.exe")]
+    [InlineData(null, "r5apex.exe")]
+    [InlineData(null, null)]
+    public void Anticheat_game_on_a_local_disk_or_with_no_known_path_is_allowed(string? installPath, string? exePath)
+    {
+        Game game = TestSupport.Game("Apex Legends", LauncherType.Ea, exePath: exePath, installPath: installPath) with { AntiCheat = AntiCheatKind.Eac };
+
+        GameLaunchService.NetworkPathCheck(game, Drives).Should().BeNull();
+    }
+
+    [Fact]
+    public void Anticheat_game_on_the_system_drive_is_allowed_by_the_real_drive_lookup()
+    {
+        string systemRoot = Path.GetPathRoot(Environment.SystemDirectory)!;
+        Game game = TestSupport.Game("Apex Legends", LauncherType.Ea, installPath: Path.Combine(systemRoot, "Games", "Apex Legends")) with { AntiCheat = AntiCheatKind.Eac };
+
+        GameLaunchService.NetworkPathCheck(game).Should().BeNull();
+        GameLaunchService.NetworkPathCheck(game with { InstallPath = @"\\nas\games\Apex Legends" }).Should().NotBeNull();
+    }
+
+    [Fact]
+    public void Game_without_an_anticheat_on_a_network_path_is_allowed()
+    {
+        Game game = TestSupport.Game("Dota 2", LauncherType.Steam, installPath: @"\\nas\games\steamapps\common\dota 2 beta");
+
+        GameLaunchService.NetworkPathCheck(game, Drives).Should().BeNull();
+        GameLaunchService.NetworkPathCheck(game with { InstallPath = @"G:\steamapps\common\dota 2 beta" }, Drives).Should().BeNull();
+    }
+
+    [Fact]
+    public void Riot_game_without_an_anticheat_tag_on_a_network_path_is_refused_as_Vanguard()
+    {
+        Game game = TestSupport.Game("VALORANT", LauncherType.Riot, installPath: @"\\nas\games\Riot Games\VALORANT");
+
+        AntiCheatCheckResult? failed = GameLaunchService.NetworkPathCheck(game, Drives);
+
+        failed.Should().Be(new AntiCheatCheckResult(AntiCheatKind.Vanguard, false, GameLaunchService.NetworkPathReason));
+        JsonDefaults.Serialize(IpcError.AntiCheatBlocked(failed!.Kind, failed.Reason!)).Should().Be(
+            "{\"code\":\"antiCheatBlocked\",\"message\":\"Anti-cheat check failed: networkPath\",\"details\":{\"kind\":\"vanguard\",\"reason\":\"networkPath\"}}");
+    }
+
+    /// <summary>Drive table for the network-path gate: <c>G:</c> is a mapped share, every other letter a local disk.</summary>
+    private static DriveType Drives(string root) => root == @"G:\" ? DriveType.Network : DriveType.Fixed;
+
+    // ---- hardware inventory in telemetry ------------------------------------------------------
+
+    [Fact]
+    public void Inventory_taken_at_start_goes_with_the_first_batch_and_an_unchanged_rescan_does_not_send_it_again()
+    {
+        HardwareInfo atStart = Hardware(ramMb: 16384);
+        var inventory = new TelemetryHardware(baseline: null);
+
+        inventory.Started(atStart);
+        inventory.Pending.Should().BeSameAs(atStart, "the first batch after a start carries the full inventory");
+        inventory.Delivered();
+
+        // The first rescan (telemetry.hardwareRescanSec later) finds the same hardware, free space aside.
+        HardwareInfo rescan = Hardware(ramMb: 16384, freeGb: 120);
+        inventory.Rescanned(rescan).Should().BeEmpty();
+        inventory.Pending.Should().BeNull("the server already has this inventory");
+
+        HardwareInfo upgraded = Hardware(ramMb: 32768);
+        inventory.Rescanned(upgraded).Should().Equal("ramMb");
+        inventory.Pending.Should().BeSameAs(upgraded);
+    }
+
+    [Fact]
+    public void Inventory_taken_at_start_is_sent_even_when_an_earlier_scan_set_the_baseline()
+    {
+        HardwareInfo scanned = Hardware(ramMb: 16384);
+        var inventory = new TelemetryHardware(baseline: scanned);
+
+        inventory.Started(scanned);
+
+        inventory.Pending.Should().BeSameAs(scanned);
+    }
+
+    [Fact]
+    public void Inventory_stays_pending_until_a_batch_delivers_it()
+    {
+        var inventory = new TelemetryHardware();
+        HardwareInfo atStart = Hardware(ramMb: 16384);
+
+        inventory.Started(atStart);
+        inventory.Rescanned(Hardware(ramMb: 16384)).Should().BeEmpty();
+
+        inventory.Pending.Should().BeSameAs(atStart, "an upload failed meanwhile: the start inventory still has to go");
+        inventory.Delivered();
+        inventory.Pending.Should().BeNull();
+    }
+
+    [Fact]
+    public void Without_an_inventory_at_start_the_first_rescan_sends_it_in_full()
+    {
+        var inventory = new TelemetryHardware();
+        HardwareInfo first = Hardware(ramMb: 16384);
+
+        inventory.Rescanned(first).Should().BeEmpty("there is nothing to compare with");
+
+        inventory.Pending.Should().BeSameAs(first);
+        inventory.Baseline.Should().BeSameAs(first);
+    }
+
+    private static HardwareInfo Hardware(int ramMb, double freeGb = 200) => new(
+        new CpuInfo("AMD Ryzen 5 5600", 6, 12),
+        [new GpuInfo("NVIDIA GeForce RTX 3060", 12288, "560.94")],
+        ramMb,
+        [new DiskInfo(@"C:\", 476.9, freeGb, DiskType.Nvme)],
+        [new MonitorInfo(0, 1920, 1080, 165, true)],
+        new NetworkInfo("00-11-22-33-44-55", "192.168.1.21", "Ethernet"),
+        new OsInfo("Windows 11 Pro", "26100.2033"),
+        []);
 }

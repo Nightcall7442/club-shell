@@ -127,11 +127,23 @@ public sealed class UpdateChecker
 
     /// <summary>
     /// Fetches the manifests of both components, raises <see cref="Available"/> for applicable ones and returns the
-    /// <c>update.check</c> response. Server failures (offline) are logged and yield <see langword="null"/> manifests.
+    /// <c>update.check</c> response. Server failures (offline) are logged and yield <see langword="null"/> manifests,
+    /// and so does a <see cref="Channel"/> this agent does not know (no manifest is requested then).
     /// </summary>
     public async Task<UpdateCheckResponse> CheckOnceAsync(CancellationToken cancellationToken)
     {
         var current = Current;
+        if (Channel == UpdateChannel.Unknown)
+        {
+            // A channel name from a newer server: asking for updates/unknown/manifest can only fail, and falling back to
+            // stable could install packages from a channel the club did not choose. Nothing is offered until the channel
+            // is one this agent knows; an `update` command that carries its manifest still works.
+            _logger.LogWarning("Update channel is unknown to this agent; update check skipped");
+            LatestAgent = null;
+            LatestShell = null;
+            return new UpdateCheckResponse(current, null, null);
+        }
+
         var agent = await CheckComponentAsync(UpdateComponent.Agent, current.Agent, current.Agent, cancellationToken).ConfigureAwait(false);
         var shell = await CheckComponentAsync(UpdateComponent.Shell, current.Shell, current.Agent, cancellationToken).ConfigureAwait(false);
         LastCheckAt = _clock.UtcNow;

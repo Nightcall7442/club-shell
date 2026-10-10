@@ -200,7 +200,7 @@ Request
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
 | `samples` | `PcMetrics[]` | yes | ≤ 120 per batch |
-| `hardware` | `HardwareInfo` | no | when changed / every `hardwareRescanSec` |
+| `hardware` | `HardwareInfo` | no | full inventory in the first batch after every Agent start, then only when a rescan (every `hardwareRescanSec`) finds a change |
 | `events` | `{ kind: string, at: datetime, data: object }[]` | yes | agent diagnostics: `shellCrash`, `shellCrashLoop`, `policyApplyFailed`, `updateFailed`, `pipeError`, `launcherError`, `deadletter`; the Agent sends ≤ 100 per batch (the rest go in the next ones) |
 | `logsTail` | string[] | no | last ≤ 50 Warning+ log lines when `events` non-empty |
 

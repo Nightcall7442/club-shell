@@ -156,6 +156,11 @@ debugging → HVCI, and the first failure wins.
 | `vmDetected` | reserved | `critical` |
 | `debuggerAttached` | reserved | `critical` |
 
+One more launch reason comes from `GameLaunchService` itself rather than a checker: `networkPath`
+(`GameLaunchService.NetworkPathReason`, section 5.1). It is not in `AntiCheatChecks`, has no severity and is not sent
+as an `AntiCheatReport`; it appears in `antiCheatBlocked.details.reason` and in the launch report's
+`antiCheat.reason`, which the contract leaves open to any string.
+
 Severity only matters at runtime: a `critical` runtime finding additionally locks the session (section 6).
 At launch every failure is handled the same way.
 
@@ -212,6 +217,22 @@ are only enforced for games that declare an anti-cheat. A club that wants Secure
 
 When `blockOnViolation` is `false`, the gate returns the results, `GameLaunchService` proceeds with the launch and
 the failed check still lands in the launch report and the server report (`ActionTaken = none`).
+
+### 5.1 Games on a network path
+
+Between steps 2 and 3, `GameLaunchService.NetworkPathCheck` refuses a game that has an anti-cheat
+(`EffectiveAntiCheat`, so an untagged Riot game counts as Vanguard) when its install directory or its exe is on the
+network: a UNC path (`\\server\share\…`, `\\?\UNC\…`) or a drive whose `DriveInfo.DriveType` is `Network`, such as
+the SMB games share's letter (docs/DISKLESS.md). Several anti-cheats refuse to start from a network path. The error
+is `antiCheatBlocked` with `details: { kind, reason: "networkPath" }`, the launch report carries the same failed
+check, and the warning in the Agent log names both paths. The refusal does not depend on `blockOnViolation`: it is
+about where the library is installed, not about the PC. The anti-cheat gate is not called and no `AntiCheatReport`
+is sent.
+
+A launcher game (Steam, Riot, Epic…) usually has no exe until its launcher starts it, so the install directory is
+the evidence; a relative exe lies inside it. A game with neither path known is let through (fail open). An iSCSI
+volume from ClubDisklessHelper is a local disk to Windows and passes. Games without an anti-cheat may stay on the
+share.
 
 ---
 
@@ -293,6 +314,7 @@ the localized reason from `games.antiCheatReason.<reason>` (`apps/shell/src/i18n
 | `tpmOff` | TPM is off |
 | `testSigningOn` | Test signing mode is on |
 | `hvciOff`, `blockedProcess`, `injectedModule`, `vmDetected`, `debuggerAttached` | translated, reserved |
+| `networkPath` | not translated yet: the player sees the base message only |
 
 The base message (`errors.antiCheatBlocked`) tells the player to call an administrator; the overlay offers the
 `callAdmin` action. A runtime kill surfaces as `game.stateChanged{killed}`; a runtime lock surfaces as the normal
