@@ -1,6 +1,7 @@
 /**
- * Entry point. Boot order: global error handlers → kiosk input guards → i18n (default locale) → stores
- * (settings → theme + locale + system → listeners → auth/session → catalogue) → theme applied → `<App/>`.
+ * Entry point. Boot order: global error handlers → kiosk input guards → card reader (main window) → i18n (default
+ * locale) → stores (settings → theme + locale + system → listeners → auth/session → catalogue) → theme applied →
+ * `<App/>`.
  *
  * The same bundle serves three webviews, told apart by the hash: the main window, the transparent always-on-top
  * `#/overlay` window and the secondary-monitor `#/ads` windows. The latter two only need settings, theme and
@@ -16,11 +17,12 @@ import '@fontsource-variable/jetbrains-mono';
 import '@fontsource-variable/doto';
 import './index.css';
 import i18n, { initI18n } from '@/i18n';
+import { installCardReader } from '@/lib/cardReader';
 import { installGlobalErrorHandlers, log } from '@/lib/logger';
 import { api, events, isTauri } from '@/lib/tauri';
 import { App } from '@/App';
 import { getWindowRole, type WindowRole } from '@/router';
-import { bootstrapStores, DEFAULT_SETTINGS, useSettingsStore, useThemeStore } from '@/store';
+import { bootstrapStores, DEFAULT_SETTINGS, useAuthStore, useSettingsStore, useThemeStore } from '@/store';
 import { applyTheme, currentTheme } from '@/theme/themes';
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -222,6 +224,10 @@ async function boot(role: WindowRole): Promise<void> {
   }
   installGlobalErrorHandlers();
   installKioskGuards();
+  if (role === 'main') {
+    // From boot on, so the card a player taps on the attract screen still signs in on the lock screen it wakes.
+    installCardReader(() => useAuthStore.getState().user === null);
+  }
   document.documentElement.dataset['window'] = role;
   if (role === 'overlay') {
     // The native overlay window is transparent; only what the route draws may be visible.

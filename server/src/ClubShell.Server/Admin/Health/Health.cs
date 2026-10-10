@@ -210,10 +210,13 @@ public sealed class TicketRow
         new(Id, PcId, PcName, Kind, Severity, JsonElement.Parse(Params), Status, CreatedAt, UpdatedAt, ResolvedAt, Note, PutMaintenance);
 }
 
-/// <summary><c>AdminPcHealth</c>.</summary>
+/// <summary>
+/// <c>AdminPcHealth</c>; <c>gamesVolume</c> (beyond the contract, D-73) as in <see cref="AdminHallPc"/>: the last
+/// heartbeat's, null when the PC never reported one.
+/// </summary>
 public sealed record PcHealth(
     Guid Id, string Name, string Zone, PcStatus Status, int Score, HealthReading Live, HealthReading Baseline, HealthHourly Hourly,
-    IReadOnlyList<HealthIssue> Issues, HealthTicket? Ticket);
+    IReadOnlyList<HealthIssue> Issues, HealthTicket? Ticket, JsonElement? GamesVolume);
 
 public sealed record HealthReport(HealthSettings Settings, IReadOnlyList<PcHealth> Pcs, IReadOnlyList<HealthTicket> Tickets);
 

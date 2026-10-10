@@ -29,7 +29,7 @@
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18-4169e1?logo=postgresql&logoColor=white)
 ![Serilog](https://img.shields.io/badge/Serilog-4-cc0000)
 
-![xUnit](https://img.shields.io/badge/xUnit-715_проверок-5c2d91?logo=dotnet&logoColor=white)
+![xUnit](https://img.shields.io/badge/xUnit-1000%2B_проверок-5c2d91?logo=dotnet&logoColor=white)
 ![Playwright](https://img.shields.io/badge/Playwright-e2e-2ead33?logo=playwright&logoColor=white)
 ![Fastify](https://img.shields.io/badge/Fastify-mock--сервер-000000?logo=fastify&logoColor=white)
 ![WiX](https://img.shields.io/badge/WiX-v5_MSI-c41e3a?logo=windows&logoColor=white)
@@ -174,18 +174,18 @@ ClubShell закрывает контур на самом ПК: **оболочк
 - **Персонал:** сотрудники, роли и PIN-коды
 - **Сеть клубов:** все клубы владельца рядом — кто играет сейчас, загрузка по часам, выручка за день и период, сеансы, средний чек, ремонт, сигналы, кто на смене; итоги по сети; один аккаунт и один баланс игрока работают в любом клубе; добавление клуба (в демо два соседних клуба симулируются)
 - **Контроль кассиров:** журнал всех действий персонала и сигналы кражи — недостача при закрытии смены, сеансы, закрытые с возвратом сразу после открытия, крупные скидки «своим», частые пополнения одному клиенту, операции без открытой смены; пороги настраиваются, серьёзное сразу уходит на вебхуки
-- Работает против mock-сервера (`/api/v1/admin/*`); кассовые операции центральный сервер получает в срезах S4–S5
+- Работает против центрального сервера (`/api/v1/admin/*`, срезы S4–S5); mock-сервер остаётся для разработки и e2e
 
 **Центральный сервер (`server/`)** — бэкенд агента и кассы по контракту [club-contracts](https://github.com/deepunites/club-contracts), в продакшене заменяет mock
 
 - .NET 10, ASP.NET Core minimal API, PostgreSQL 18 (Dapper, FluentMigrator) — стек и соглашения club-server; DTO агента берутся из `ClubShell.Contracts`, JSON байт-в-байт с агентом
 - Готово: **S0** — каркас, миграции, JWT RS256, HMAC-подпись запросов, идемпотентность, конверт ошибок, `501` на каждую ещё не реализованную операцию контракта (никогда `404`); **S1** — 8 операций агента (регистрация с одобрением владельца, одноразовый refresh, heartbeat, телеметрия, конфиг и политики с ETag, очередь команд) и WebSocket `/ws/agent` (одно соединение на ПК, повторная доставка, ack по WS и REST); **S2** — вход игрока (пароль, карта, гость), профиль, сеансы и биллинг (одна функция цены, возврат пропорционально оплаченному, пауза, продление, офлайн-сеансы с досылкой событий, таймер окончания), кошелёк на журнале проводок
-- Дальше: S3 игры, обновления · S4–S5 касса · S6 Docker и деплой на Railway (EU West) — план и решения в [DESIGN.md](docs/server/DESIGN.md)
+- Тоже готово: **S3** — игры, обновления, ПК · **S4–S5** — касса · **S6** — Docker-образ, compose, деплой на Railway (EU West) и smoke в CI — состояние в [server/README.md](server/README.md), план и решения в [DESIGN.md](docs/server/DESIGN.md)
 - Каждый ответ в тестах проверяется по схеме контракта; тесты гоняют настоящий `ServerClient` и `RealtimeClient` агента против сервера на временной базе PostgreSQL
 
 **Платформа**
 
-- Контракты (DTO, IPC, серверный API) канонически описаны на C#; зеркала для TypeScript и Rust генерируются
+- Провод агент ⇄ сервер задаёт схема [club-contracts](https://github.com/deepunites/club-contracts) (OpenAPI 3.1 + AsyncAPI, копия в `server/contracts`); DTO на C# (`ClubShell.Contracts`) следуют схеме, IPC описан там же; зеркала для TypeScript и Rust генерируются
 - Именованный канал `\\.\pipe\clubshell-agent` с ACL, токеном оболочки и проверкой процесса-клиента
 - HMAC-SHA256 подпись запросов к серверу, DPAPI для секретов, никаких входящих портов на ПК
 - Mock-сервер на Fastify: весь REST + WebSocket, чтобы разрабатывать и показывать без бэкенда
@@ -267,7 +267,7 @@ VITE_MOCK=1 pnpm --filter @clubshell/shell dev   # → http://localhost:1420
 |---|---|
 | Пароль | `demo` / `1234` (обычный), `vip` / `1234` (VIP), `player` / `player` |
 | Гость | любое имя |
-| Карта | любой номер; номера на `9` входят как VIP |
+| Карта (вкладка «Карта»: ввести номер и Enter, как это делает USB-считыватель) | `CARD-0001` (обычный), `CARD-0002` (VIP); другой номер → «Карта не найдена». С `pnpm mock` и с сервером в dev-режиме — `CARD-0001`…`CARD-0003` (alisher, dilnoza, bekzod) |
 | QR | mock подтверждает вход сам через несколько секунд |
 | PIN разблокировки сеанса | `1234` |
 | PIN администратора (горячая клавиша `Ctrl+Alt+Shift+F12`) | `0000` |
@@ -306,14 +306,16 @@ Copy-Item .env.example .env
 
 | Что | Сколько |
 |---|---|
-| xUnit | 715 проверок: агент и библиотеки — 506 в 4 проектах (Contracts 91, Core 185, Windows 79, Agent 151), включая сквозной тест именованного канала; сервер — 209 на временной базе PostgreSQL 18, каждый ответ сверяется со схемой контракта |
-| Компиляция .NET | 10 проектов (агент net8.0, сервер net10.0) на SDK 10, NetAnalyzers, `/warnaserror`, 0 предупреждений |
+| xUnit | 5 наборов, больше 1000 проверок: агент и библиотеки — Contracts, Core, Windows, Agent (`ci.yml`), включая сквозной тест именованного канала; сервер — на временной базе PostgreSQL 18 (`server.yml`), каждый ответ сверяется со схемой контракта. Точные числа — в отчётах последнего прогона CI (артефакты `dotnet-test-results`, `server-test-results`) |
+| Компиляция .NET | `ClubShell.sln` (агент, net8.0) и `server/ClubShell.Server.sln` (сервер, net10.0) на SDK 10, NetAnalyzers, `/warnaserror` — в CI |
+| Rust | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test` (`ci.yml`) |
 | TypeScript | `tsc --noEmit` во всех пакетах, `vite build` без предупреждений о размере чанков |
-| Интерфейс | 12 разделов, прогон в mock-режиме на 1600×900 / 1920×1080; Playwright e2e — 37 проверок: киоск 23 (вход, каталог, HUD в игре, оформление клуба, настройки игр игрока), админка 14 (PIN и роли, язык, смена, расчёт цены, экран игрока, контроль кассиров, состояние ПК, пути настроек игр, сеть клубов, Idempotency-Key денежных операций, ключ API и выход, регистрация клиента с паролем и картой) |
-| Локализация | 1202 ключа, идентичные наборы в `en` / `ru` / `uz` |
-| Протоколы | 65 IPC-запросов, 18 событий, 19 серверных команд, 82 Tauri-команды — покрыты обработчиками и документацией |
+| Интерфейс | 12 разделов, прогон в mock-режиме на 1600×900 / 1920×1080; Playwright e2e: киоск (вход, каталог, HUD в игре, оформление клуба, настройки игр игрока, этот ПК, настройки ПК) и админка (в том числе PIN и роли, язык, смена, расчёт цены, экран игрока, контроль кассиров, состояние ПК, пути настроек игр, сеть клубов, Idempotency-Key денежных операций, ключ API и выход, регистрация клиента с паролем и картой); в CI оба в mock-режиме, админка ещё и против настоящего сервера (`server.yml`) |
+| Локализация | киоск — идентичные наборы ключей в `en` / `ru` / `uz`; админка — у каждой русской строки есть `uz` и `en`, это проверяет CI (`i18n:check`) |
+| Протоколы | IPC-запросы и события, серверные команды, Tauri-команды — покрыты обработчиками и документацией |
+| Сборка | `tauri build` (MSI/NSIS оболочки) и установщик агента WiX (`ClubShell.msi` + `ClubShellSetup.exe`, без подписи, артефакт `agent-installer-unsigned`) — в CI на каждый push в main; в PR установщик собирается с заглушкой вместо оболочки |
 
-Что **не** собиралось на машине автора: WiX и `tauri build`. Первую сборку этих частей выполняет CI; список известных долгов — в [docs/ROADMAP.md](docs/ROADMAP.md).
+Подписанный выпуск собирает `release.yml` (по тегу или вручную); список известных долгов — в [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
 
@@ -329,7 +331,7 @@ crates/winutil/        Rust Win32: хуки, pipe, окна, мониторы, �
 docs/                  спецификации и руководства (16 документов; дизайн сервера — docs/server/)
 installer/wix/         WiX v5: ClubShell.msi + ClubShellSetup.exe (Burn)
 packages/contracts-ts/ TypeScript-зеркало контрактов
-src/ClubShell.Contracts/  канонические DTO, IPC, серверный API (C#)
+src/ClubShell.Contracts/  DTO на C#: IPC (канон) и серверный API (по схеме club-contracts)
 src/ClubShell.Core/       абстракции, конфиг, HTTP/WS-клиенты, безопасность, обновления
 src/ClubShell.Windows/    Win32-слой: P/Invoke, хуки, WMI, WTS, реестр, процессы, пользователи
 src/ClubShell.Agent/      служба ClubShellAgent + Install/*.ps1
@@ -338,7 +340,7 @@ tests/                 xUnit, cargo integration (shell-rs), Playwright (shell-e2
 tools/ContractsGen/    генератор зеркал контрактов
 tools/MockServer/      mock центрального сервера (Fastify + ws)
 tools/scripts/         build · dev · package · sign · publish · setup-dev-vm
-.github/workflows/     ci.yml, server.yml, release.yml
+.github/workflows/     ci.yml, server.yml, release.yml, db-backup.yml
 ```
 
 ---
@@ -387,7 +389,7 @@ tools/scripts/         build · dev · package · sign · publish · setup-dev-v
 
 ## Участие
 
-- Контракты меняются только в `src/ClubShell.Contracts`; зеркала регенерируются `gen-contracts-*.ps1`, CI проверяет дрейф
+- Провод агент ⇄ сервер меняется сначала в схеме [club-contracts](https://github.com/deepunites/club-contracts): копия обновляется `server/scripts/sync-contracts.ps1` (коммит — в `server/contracts/REF`; CI сверяет копию с club-contracts на этом коммите, а пока он там не опубликован — пропускает шаг с предупреждением), затем DTO в `src/ClubShell.Contracts` правятся вручную (генерации C#-DTO из схемы, NSwag, пока нет). IPC и прочие контракты меняются только в `src/ClubShell.Contracts`. Зеркала TS/Rust регенерируются `gen-contracts-*.ps1`, CI проверяет дрейф
 - C#: file-scoped namespaces, nullable, `TreatWarningsAsErrors`, `AnalysisLevel=latest-recommended`
 - Rust: `cargo fmt`, `cargo lint`; `unsafe` только в `crates/winutil` и `src-tauri/src/kiosk`
 - TypeScript: `strict`, Prettier, типы из `@clubshell/contracts`
@@ -404,10 +406,10 @@ tools/scripts/         build · dev · package · sign · publish · setup-dev-v
 
 **ClubShell** is client software for gaming clubs / internet cafés (Uzbekistan / CIS; UI in Russian, Uzbek and English; prices in UZS). Each gaming PC runs a **.NET 8 Windows service** (`ClubShellAgent`, session 0: sessions and billing timers, game launching via Steam / Epic / Battle.net / Riot / EA / Ubisoft with an account pool, server policies, anti-cheat checks, updates, telemetry, remote admin) and a **Tauri 2 + React kiosk shell** that replaces `explorer.exe` for the local kiosk user. The shell ships the "Obsidian" theme (a minimal layout with a restrained HUD layer: corner-bracket focus, mono telemetry labels, dot-matrix time and money, one ice-blue accent — the game art carries the colour), a pause-menu HUD frame (section tabs between LB/RB on top, a status line with time, balance and controller prompts at the bottom), a calm home with the selected game, a poster-wall catalogue and an in-game HUD (`Ctrl+Shift+H`: time, balance, +30 min, call admin) over the running game. They talk over the named pipe `\\.\pipe\clubshell-agent`; the agent talks to the club server over REST + WebSocket with HMAC-signed requests. Offline mode keeps the timer and queues events in SQLite.
 
-The **central server** (`server/`, .NET 10 + PostgreSQL 18, target host Railway) implements the [club-contracts](https://github.com/deepunites/club-contracts) API in slices: S0 (skeleton, JWT/HMAC, idempotency, `501` for every operation not implemented yet), S1 (agent registration with owner approval, heartbeat, config/policies, command queue, `/ws/agent`) and S2 (player login, sessions and billing, wallet ledger, offline session replay) are done; games, the cashier API and deployment follow ([design](docs/server/DESIGN.md)).
+The **central server** (`server/`, .NET 10 + PostgreSQL 18, hosted on Railway) implements the [club-contracts](https://github.com/deepunites/club-contracts) API (OpenAPI 3.1 + AsyncAPI, the wire's source of truth, vendored in `server/contracts`) in slices S0–S6, all done: S0 (skeleton, JWT/HMAC, idempotency, `501` for every operation not implemented yet), S1 (agent registration with owner approval, heartbeat, config/policies, command queue, `/ws/agent`), S2 (player login, sessions and billing, wallet ledger, offline session replay), S3 (games, updates, PCs), S4–S5 (cashier API) and S6 (Docker image, Railway deployment, smoke test in CI) ([state](server/README.md), [design](docs/server/DESIGN.md)).
 
 The **admin console** (`apps/admin`, `pnpm admin` → http://localhost:1421; owner PIN `0000`, cashier `1111`) lets each club owner configure their own club without a developer: counter and hall map, shifts with X reports and cash count on close, clients (groups, loyalty tiers, blacklist, minor curfew), pricing (weekday/holiday rates, happy hours, top-up bonuses, promo codes — the single best discount applies), a grid hall editor, stock, game catalogue order and visibility, the player screen (branding, sections, banners, rules with live preview), “if → then” automation rules, webhooks, reports with an hourly heat map, staff roles, a club-network view (every club side by side, one player balance for all), PC health (repair tickets from telemetry: overheating, running hotter than its own last week, FPS drop, network drop-outs) and cashier control (an activity log plus theft signals: cash short at close, quick refunds, big discounts, repeated top-ups, money taken with no shift open). UI in Russian, Uzbek and English.
 
-Try the UI in a browser: `pnpm install && pnpm mock` then `VITE_MOCK=1 pnpm --filter @clubshell/shell dev` → http://localhost:1420 (login `demo` / `1234`). Full Windows dev loop: `tools/scripts/dev.ps1`. Verified here: all 10 .NET projects compile with `/warnaserror`, 715 xUnit tests pass (server tests on PostgreSQL 18), `tsc` and `vite build` are clean, 37 Playwright e2e checks cover the kiosk and the admin console; WiX and `tauri build` are left to CI.
+Try the UI in a browser: `pnpm install && pnpm mock` then `VITE_MOCK=1 pnpm --filter @clubshell/shell dev` → http://localhost:1420 (login `demo` / `1234`). Full Windows dev loop: `tools/scripts/dev.ps1`. CI (`ci.yml`, `server.yml`) builds both .NET solutions with `/warnaserror` and runs 5 xUnit suites with more than 1000 tests (server tests on PostgreSQL 18), cargo fmt/clippy/test, `tsc`, `vite build`, the generated-mirror drift check and the Playwright e2e for the kiosk and the admin console (the admin console also against the real server); every push to main also runs `tauri build` and builds the unsigned agent installer (WiX MSI + bundle).
 
 </details>

@@ -90,6 +90,11 @@ package to `stable`. Both channels are independent manifests on the server; a PC
 back to `stable` keeps its version (downgrade protection) until `stable` overtakes it, unless the server
 marks the stable manifest `mandatory` (server-side rollback).
 
+A channel name this agent does not know (a newer server's, read as `unknown`) skips the check: no manifest is
+requested (never `updates/unknown/manifest`), nothing is offered and `LatestAgent` / `LatestShell` are cleared,
+with a warning in the log. The agent does not fall back to `stable`, which could install packages from a channel
+the club did not choose. A server `update` command that carries its manifest still stages and applies it.
+
 ### 2.2 Server endpoint
 
 `GET /api/v1/updates/{channel}/manifest?component=agent|shell&current=<semver>&arch=x64` — auth:
@@ -347,9 +352,10 @@ WiX MSI/bundle → `package.ps1` → `sign.ps1 -ManifestPath` with the `UPDATE_M
 release with the installers, `manifest.json` and `SHA256SUMS.txt` → `publish.ps1` (S3 with `AWS_*` secrets and
 `UPDATE_S3_BUCKET`, or HTTP with `CLUBSHELL_PUBLISH_TOKEN` / `UPDATE_BASE_URL`) in the `production` environment,
 for `stable` tags and every manual dispatch. Promotion of a soaked `beta` build to `stable` is a manual
-dispatch of the same version with `channel = stable`. See `ci.yml` for the per-PR build/test matrix (no
-dotnet/cargo build was executed in the authoring environment; the first CI run is expected to surface compile
-errors — `ROADMAP.md`, technical debt).
+dispatch of the same version with `channel = stable`. See `ci.yml` for the per-PR build/test matrix; its job
+`installer` runs `package.ps1` without any secret (nothing signed, version `0.0.0-ci.<run>`), so an installer
+regression shows up there before a release: on every push to main it packs the freshly built shell and keeps the
+MSI and bundle as the artifact `agent-installer-unsigned`.
 
 Versioning: the Agent version comes from `Directory.Build.props` (`ClubShellVersion.Current` reads the
 assembly informational version), the Shell from `tauri.conf.json → version` as merged with the build

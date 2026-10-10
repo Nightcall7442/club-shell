@@ -80,7 +80,8 @@ How the SMB share behaves:
 * **Anti-cheat caveat.** Games on a network share are a poor fit for kernel anti-cheats: some refuse to start from a
   network path or a mapped network drive. Keep games with Vanguard, FACEIT, EAC or BattlEye on a local disk, or use
   ClubDisklessHelper (its iSCSI volume is a local disk to Windows; bench step 8 below), and put only the rest of the
-  library on the share.
+  library on the share. The Agent enforces this: it refuses to launch a game with an anti-cheat from a UNC path or a
+  network drive (`antiCheatBlocked`, reason `networkPath`; docs/ANTICHEAT.md §5.1).
 
 ## Installing with ClubShell.msi
 

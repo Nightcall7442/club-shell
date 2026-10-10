@@ -156,6 +156,11 @@ debugging → HVCI, and the first failure wins.
 | `vmDetected` | reserved | `critical` |
 | `debuggerAttached` | reserved | `critical` |
 
+One more launch reason comes from `GameLaunchService` itself rather than a checker: `networkPath`
+(`GameLaunchService.NetworkPathReason`, section 5.1). It is not in `AntiCheatChecks`, has no severity and is not sent
+as an `AntiCheatReport`; it appears in `antiCheatBlocked.details.reason` and in the launch report's
+`antiCheat.reason`, which the contract leaves open to any string.
+
 Severity only matters at runtime: a `critical` runtime finding additionally locks the session (section 6).
 At launch every failure is handled the same way.
 
@@ -168,6 +173,7 @@ Shell (React)          Shell (Rust)        Agent: GameHandlers → GameLaunchSer
   │ games_launch ─────▶ │ games.launch ───▶ │ LaunchAsync(LaunchRequest)                            │
   │                     │                   │  1. session active?  (sessionNotActive)               │
   │                     │                   │  2. PolicyDenies?    (policyDenied processAllowlist)  │
+  │                     │                   │  2a. NetworkPathCheck (antiCheatBlocked networkPath)  │
   │                     │                   │  3. CheckAntiCheatAsync(game)                         │
   │                     │                   │     game.AntiCheat == none → OK, gate NOT called      │
   │                     │                   │     else IAntiCheatGate.CheckForLaunchAsync ─────────▶│ kinds = policy.required ∪ {game.AntiCheat}
@@ -212,6 +218,26 @@ are only enforced for games that declare an anti-cheat. A club that wants Secure
 
 When `blockOnViolation` is `false`, the gate returns the results, `GameLaunchService` proceeds with the launch and
 the failed check still lands in the launch report and the server report (`ActionTaken = none`).
+
+### 5.1 Games on a network path
+
+At step 2a, between steps 2 and 3, `GameLaunchService.NetworkPathCheck` refuses a game that has an anti-cheat
+(`EffectiveAntiCheat`, so an untagged Riot game counts as Vanguard) when its install directory or its exe is on the
+network: a UNC path (`\\server\share\…`, `\\?\UNC\…`) or a drive whose `DriveInfo.DriveType` is `Network`, such as
+the SMB games share's letter (docs/DISKLESS.md). A local folder linked to the share (`mklink /D C:\Games\VALORANT
+\\nas\games\VALORANT`, so that a launcher takes the library) counts too: the folders of the path are read from the
+root down, and the first symbolic link or junction is followed to its target (its own reparse point is read, never
+the share behind it), up to 8 links in a chain; a folder that cannot be read counts as local. Several anti-cheats
+refuse to start from a network path. The error
+is `antiCheatBlocked` with `details: { kind, reason: "networkPath" }`, the launch report carries the same failed
+check, and the warning in the Agent log names both paths. The refusal does not depend on `blockOnViolation`: it is
+about where the library is installed, not about the PC. The anti-cheat gate is not called and no `AntiCheatReport`
+is sent.
+
+A launcher game (Steam, Riot, Epic…) usually has no exe until its launcher starts it, so the install directory is
+the evidence; a relative exe lies inside it. A game with neither path known is let through (fail open). An iSCSI
+volume from ClubDisklessHelper is a local disk to Windows and passes. Games without an anti-cheat may stay on the
+share.
 
 ---
 
@@ -293,6 +319,7 @@ the localized reason from `games.antiCheatReason.<reason>` (`apps/shell/src/i18n
 | `tpmOff` | TPM is off |
 | `testSigningOn` | Test signing mode is on |
 | `hvciOff`, `blockedProcess`, `injectedModule`, `vmDetected`, `debuggerAttached` | translated, reserved |
+| `networkPath` | The game is installed on a network drive |
 
 The base message (`errors.antiCheatBlocked`) tells the player to call an administrator; the overlay offers the
 `callAdmin` action. A runtime kill surfaces as `game.stateChanged{killed}`; a runtime lock surfaces as the normal
@@ -315,6 +342,15 @@ Operator flow:
    `secureBootOff` / `tpmOff`.
 
 Vanguard is therefore best pre-installed on the club image so the reboot happens once, during provisioning.
+
+The central server (`server/`, D-74 in docs/server/DESIGN.md) spares the player that error: while a PC's last heartbeat
+says `vgk` is not installed or not loaded (`antiCheat.vanguardInstalled` / `vanguardLoaded` = `false`), `GET /games`
+leaves out every game whose effective anti-cheat is Vanguard (tagged `vanguard`, or a Riot game the catalogue did not
+tag), so their tiles are not shown on that PC. When the club's policy lists `vanguard` in `anticheat.required` and
+`blockOnViolation` is on (the seed `config/policies.example.json` does), the launch gate (section 5) checks Vanguard
+for every game with an anti-cheat, so the server leaves out all of those games on that PC, EAC, BattlEye and FACEIT
+ones included. After the reboot the Agent's first heartbeat reports the loaded driver and
+refreshes the catalogue, and the games are back. A heartbeat without `antiCheat` (an older Agent) hides nothing.
 
 ---
 

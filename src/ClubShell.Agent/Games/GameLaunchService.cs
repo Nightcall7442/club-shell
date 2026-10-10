@@ -51,7 +51,18 @@ public interface IGameEventSink
 [SupportedOSPlatform("windows")]
 public sealed class GameLaunchService : IDisposable
 {
+    /// <summary>
+    /// <c>antiCheatBlocked.details.reason</c> and the launch report's <see cref="AntiCheatCheckResult.Reason"/> when a game
+    /// with an anti-cheat would start from a network path. The contract keeps the set of reasons open (any string,
+    /// <c>AntiCheatChecks</c> in server/contracts/openapi.yaml), so this agent-only value stays out of
+    /// <see cref="AntiCheatChecks"/> and its generated TypeScript and Rust mirrors.
+    /// </summary>
+    public const string NetworkPathReason = "networkPath";
+
     private const int MaxExtraArgsLength = 512;
+
+    /// <summary>Links followed by <see cref="IsOnNetwork"/> in one chain: more is a loop or a layout no club uses.</summary>
+    private const int MaxLinkHops = 8;
     private static readonly TimeSpan LaunchGrace = TimeSpan.FromSeconds(15);
 
     /// <summary>How long a "cancel launch" waits for the cancelled launch to unwind before it closes what it started.</summary>
@@ -216,6 +227,20 @@ public sealed class GameLaunchService : IDisposable
             if (PolicyDenies(game, out string rule))
             {
                 throw IpcError.PolicyDenied(rule, "exePath").ToException();
+            }
+
+            // Not subject to blockOnViolation: where the game is installed is the library's layout, not a finding about
+            // this PC, and an anti-cheat that refuses a network path does so whatever the policy says.
+            if (NetworkPathCheck(game) is { } onNetwork)
+            {
+                antiCheat = onNetwork;
+                _logger.LogWarning(
+                    "{Title} ({Kind}) is on a network path (install {InstallPath}, exe {ExePath}); games with an anti-cheat must be on a local disk",
+                    game.Title,
+                    onNetwork.Kind,
+                    game.InstallPath,
+                    game.ExePath);
+                throw IpcError.AntiCheatBlocked(onNetwork.Kind, NetworkPathReason).ToException();
             }
 
             antiCheat = await CheckAntiCheatAsync(game, token).ConfigureAwait(false);
@@ -481,6 +506,153 @@ public sealed class GameLaunchService : IDisposable
     {
         ArgumentNullException.ThrowIfNull(game);
         return game.AntiCheat == AntiCheatKind.None && game.Launcher == LauncherType.Riot ? AntiCheatKind.Vanguard : game.AntiCheat;
+    }
+
+    /// <summary>
+    /// The failed check (<see cref="NetworkPathReason"/>) when <paramref name="game"/> has an anti-cheat
+    /// (<see cref="EffectiveAntiCheat"/>) and its install directory or exe is on the network, directly or through a link
+    /// (<see cref="IsOnNetwork"/>):
+    /// several anti-cheats refuse to start from a network path, so such games belong on a local disk and the SMB games
+    /// share holds the rest of the library (docs/DISKLESS.md). <see langword="null"/> when the launch may go on.
+    /// </summary>
+    /// <param name="game">Game about to launch, with its detected install path.</param>
+    /// <param name="driveType">Drive type by drive root (<c>G:\</c>); <see cref="DriveInfo.DriveType"/> when omitted.</param>
+    /// <param name="linkTarget">
+    /// Immediate target of a symbolic link or junction, <see langword="null"/> for anything else
+    /// (<see cref="FileSystemInfo.LinkTarget"/> when omitted); see <see cref="IsOnNetwork"/>.
+    /// </param>
+    public static AntiCheatCheckResult? NetworkPathCheck(Game game, Func<string, DriveType>? driveType = null, Func<string, string?>? linkTarget = null)
+    {
+        ArgumentNullException.ThrowIfNull(game);
+        AntiCheatKind kind = EffectiveAntiCheat(game);
+        if (kind == AntiCheatKind.None)
+        {
+            return null;
+        }
+
+        // A launcher game (Steam, Riot, Epic...) usually has no exe before its launcher starts it, so the install
+        // directory is what is known; a relative exe lies inside it. With neither path known there is nothing to judge
+        // and the launch goes on (fail open): the launcher alone decides where the game runs from.
+        driveType ??= root => new DriveInfo(root).DriveType;
+        linkTarget ??= LinkTargetOf;
+        return IsOnNetwork(game.InstallPath, driveType, linkTarget) || IsOnNetwork(game.ExePath, driveType, linkTarget)
+            ? new AntiCheatCheckResult(kind, false, NetworkPathReason)
+            : null;
+    }
+
+    /// <summary>
+    /// <see cref="IsNetworkPath"/> of <paramref name="path"/> or of where the links on it lead: a club may link a local
+    /// folder to the share (<c>mklink /D C:\Games\VALORANT \\nas\games\VALORANT</c>) so that a launcher takes the library,
+    /// and Windows follows such a link to the share. The directories are looked at from the root down and only up to the
+    /// first link, whose own target is read, never the share behind it; up to <see cref="MaxLinkHops"/> links in a chain
+    /// are followed. A path that cannot be read counts as local (fail open: a local game is never refused for it).
+    /// </summary>
+    /// <param name="path">Path to classify.</param>
+    /// <param name="driveType">Drive type by drive root (<c>G:\</c>).</param>
+    /// <param name="linkTarget">Immediate target of a symbolic link or junction, <see langword="null"/> for anything else.</param>
+    public static bool IsOnNetwork(string? path, Func<string, DriveType> driveType, Func<string, string?> linkTarget)
+    {
+        ArgumentNullException.ThrowIfNull(linkTarget);
+        for (int hops = 0; ; hops++)
+        {
+            if (IsNetworkPath(path, driveType))
+            {
+                return true;
+            }
+
+            if (hops == MaxLinkHops || string.IsNullOrWhiteSpace(path))
+            {
+                return false;
+            }
+
+            try
+            {
+                path = ThroughFirstLink(path.Trim().Replace('/', '\\'), linkTarget);
+            }
+            catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException)
+            {
+                return false;
+            }
+
+            if (path is null)
+            {
+                return false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// <paramref name="path"/> with its first link, from the root down, replaced by that link's target; <see langword="null"/>
+    /// when it has none (or is not a full path).
+    /// </summary>
+    private static string? ThroughFirstLink(string path, Func<string, string?> linkTarget)
+    {
+        if (!Path.IsPathFullyQualified(path))
+        {
+            return null;
+        }
+
+        string current = Path.GetPathRoot(path)!;
+        string[] parts = path[current.Length..].Split('\\', StringSplitOptions.RemoveEmptyEntries);
+        for (int i = 0; i < parts.Length; i++)
+        {
+            current = Path.Join(current, parts[i]);
+            if (linkTarget(current) is { Length: > 0 } target)
+            {
+                // A relative target is relative to the directory holding the link.
+                string resolved = Path.IsPathFullyQualified(target) ? target : Path.GetFullPath(Path.Join(Path.GetDirectoryName(current), target));
+                return i == parts.Length - 1 ? resolved : Path.Join(resolved, string.Join('\\', parts[(i + 1)..]));
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The link's immediate target; <see langword="null"/> for a plain file or directory, a missing one or an error.</summary>
+    private static string? LinkTargetOf(string path)
+    {
+        try
+        {
+            return new DirectoryInfo(path).LinkTarget;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// <see langword="true"/> for a UNC path (<c>\\server\share\...</c>, <c>\\?\UNC\server\share\...</c>) or a path on a
+    /// drive whose type is <see cref="DriveType.Network"/> (a mapped share, such as the games share's drive letter).
+    /// Relative and empty paths are not on the network.
+    /// </summary>
+    /// <param name="path">Path to classify.</param>
+    /// <param name="driveType">Drive type by drive root (<c>G:\</c>).</param>
+    public static bool IsNetworkPath(string? path, Func<string, DriveType> driveType)
+    {
+        ArgumentNullException.ThrowIfNull(driveType);
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        string normalized = path.Trim().Replace('/', '\\');
+        if (normalized.StartsWith(@"\\?\", StringComparison.Ordinal) || normalized.StartsWith(@"\\.\", StringComparison.Ordinal))
+        {
+            // A device path: \\?\UNC\server\share is a share, \\?\C:\ a drive, \\?\Volume{...}\ a local volume.
+            normalized = normalized[4..];
+            if (normalized.StartsWith(@"UNC\", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        else if (normalized.StartsWith(@"\\", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return normalized.Length >= 2 && normalized[1] == ':' && char.IsAsciiLetter(normalized[0])
+            && driveType(normalized[0] + @":\") == DriveType.Network;
     }
 
     /// <summary>Strips control characters and caps the length of caller-supplied arguments.</summary>

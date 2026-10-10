@@ -19,6 +19,7 @@ import { useIdle } from '@/hooks/useIdle';
 import { useLocale } from '@/hooks/useLocale';
 import { useSession } from '@/hooks/useSession';
 import { trackScreen } from '@/lib/analytics';
+import { onCardRead } from '@/lib/cardReader';
 import { formatDurationSec, formatMoney } from '@/lib/format';
 import { api, toShellApiError } from '@/lib/tauri';
 import { formatClock } from '@/lib/time';
@@ -33,6 +34,7 @@ import { AdsCarousel } from '@/screens/Idle/AdsCarousel';
 import { describeWindow } from '@/screens/Idle/PriceList';
 import { ClubMark } from '@/components/brand/ClubMark';
 import { useClub } from '@/hooks/useClub';
+import { CardLogin } from './CardLogin';
 import { GuestLogin } from './GuestLogin';
 import { LoginForm, loginErrorMessage } from './LoginForm';
 import { QrLogin } from './QrLogin';
@@ -527,8 +529,12 @@ export function StartSessionModal({ open, onStarted, onLogout }: StartSessionMod
 // Screen
 // ---------------------------------------------------------------------------------------------------------------------
 
-/** QR first: signing in from the phone needs no keyboard and keeps the password off a shared screen. */
-type LoginTab = 'qr' | 'password' | 'guest';
+/**
+ * QR first: signing in from the phone needs no keyboard and keeps the password off a shared screen. Card sign-in has
+ * no club switch: every club can bind cards at the cash desk. A card tapped on any tab, or on the attract screen,
+ * opens the card tab and signs in with it (`onCardRead`).
+ */
+type LoginTab = 'qr' | 'password' | 'card' | 'guest';
 
 const KeyIcon = (
   <svg
@@ -558,6 +564,20 @@ const QrIcon = (
     <rect x="14" y="3" width="7" height="7" rx="1" />
     <rect x="3" y="14" width="7" height="7" rx="1" />
     <path d="M14 14h3v3h-3zM20 14v.01M20 20h-6M20 17v3" />
+  </svg>
+);
+const CardIcon = (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <rect x="2" y="5" width="20" height="14" rx="2" />
+    <path d="M2 10h20M6 15h4" />
   </svg>
 );
 const UserIcon = (
@@ -720,10 +740,25 @@ export default function LockScreen(): JSX.Element {
     }
   }, [qrLogin]);
 
+  // A reader's card from whatever was showing — another tab, or the attract screen this one replaced — goes to the card
+  // tab, which signs in with it; the number is not lost and the player does not tap twice.
+  const [tapped, setTapped] = useState<{ cardId: string } | null>(null);
+  useEffect(() => {
+    if (!ready || isLocked || hasUser) {
+      return undefined;
+    }
+    return onCardRead((cardId) => {
+      picked.current = true;
+      setTab('card');
+      setTapped({ cardId });
+    });
+  }, [ready, isLocked, hasUser]);
+
   const tabs = useMemo<TabItem<LoginTab>[]>(
     () => [
       ...(qrLogin ? [{ key: 'qr' as const, label: t('lock.methodQr'), icon: QrIcon }] : []),
       { key: 'password', label: t('lock.methodPassword'), icon: KeyIcon },
+      { key: 'card', label: t('lock.methodCard'), icon: CardIcon },
       { key: 'guest', label: t('lock.methodGuest'), icon: UserIcon },
     ],
     [t, qrLogin],
@@ -811,16 +846,20 @@ export default function LockScreen(): JSX.Element {
                   value={tab}
                   onChange={(next) => {
                     picked.current = true;
+                    // A tapped card is tried once: back on the card tab later, it is not sent again.
+                    setTapped(null);
                     setTab(next);
                   }}
                   label={t('lock.chooseMethod')}
                   size="lg"
                   idPrefix="lock"
-                  className="mb-[clamp(0.875rem,2.2vh,1.5rem)] w-full [&>button]:flex-1 [&>button]:justify-center"
+                  // Tighter sides than a lone tab strip: four methods ("Password", "Mehmon") have to fit the card.
+                  className="mb-[clamp(0.875rem,2.2vh,1.5rem)] w-full [&>button]:flex-1 [&>button]:justify-center [&>button]:px-3"
                 />
                 <div role="tabpanel" id={`lock-panel-${tab}`} aria-labelledby={`lock-tab-${tab}`}>
                   {tab === 'qr' && <QrLogin />}
                   {tab === 'password' && <LoginForm />}
+                  {tab === 'card' && <CardLogin tapped={tapped} />}
                   {tab === 'guest' && <GuestLogin />}
                 </div>
               </>

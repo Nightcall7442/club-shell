@@ -176,10 +176,15 @@ public sealed record AdminOperationsPage(AdminOperationsShift? Shift, IReadOnlyL
 
 public sealed record AdminPcResponse(Pc Pc);
 
-/// <summary><c>AdminHallPc</c>: the <c>Pc</c> fields flat plus the map's.</summary>
+/// <summary>
+/// <c>AdminHallPc</c>: the <c>Pc</c> fields flat plus the map's. <c>gamesVolume</c> (beyond the contract, D-73): the
+/// <c>gamesVolume</c> of the PC's last heartbeat as the agent sent it (<c>HeartbeatGamesVolume</c>, its null fields left
+/// out); null — the PC never reported one (no heartbeat yet, or an older agent).
+/// </summary>
 public sealed record AdminHallPc(
     Guid Id, string Name, string Zone, int Number, string? Hwid, string IpAddress, PcStatus Status, Guid? CurrentSessionId,
-    string AgentVersion, string ShellVersion, DateTimeOffset LastHeartbeatAt, int X, int Y, string Device, JsonElement? Hardware, JsonElement? Metrics);
+    string AgentVersion, string ShellVersion, DateTimeOffset LastHeartbeatAt, int X, int Y, string Device, JsonElement? Hardware, JsonElement? Metrics,
+    JsonElement? GamesVolume);
 
 public sealed record AdminHallPcList(IReadOnlyList<AdminHallPc> Items, IReadOnlyList<AdminZone> Zones);
 

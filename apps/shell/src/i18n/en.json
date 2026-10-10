@@ -199,6 +199,11 @@
     "qrConfirmed": "Signed in",
     "card": "Club card",
     "cardHint": "Tap your card on the reader",
+    "cardNumber": "Card number",
+    "cardPlaceholder": "Tap your card",
+    "cardRequired": "Tap your card first",
+    "cardUnknown": "Card not recognised. Please contact staff",
+    "cardDemoHint": "Demo card: CARD-0001",
     "pcInfo": "PC info",
     "pc": "PC",
     "zone": "Zone",
@@ -468,7 +473,8 @@
       "blockedProcess": "A blocked program is running",
       "injectedModule": "A foreign module was detected",
       "vmDetected": "Virtual machine detected",
-      "debuggerAttached": "A debugger is attached"
+      "debuggerAttached": "A debugger is attached",
+      "networkPath": "The game is installed on a network drive"
     },
     "specOk": "Meets requirements",
     "specWarn": "Below minimum",

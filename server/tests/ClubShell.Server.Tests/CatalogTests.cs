@@ -2,6 +2,8 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using ClubShell.Contracts.Commands;
 using ClubShell.Contracts.Games;
+using ClubShell.Contracts.Pcs;
+using ClubShell.Contracts.Serialization;
 using ClubShell.Server.Infrastructure;
 
 namespace ClubShell.Server.Tests;
@@ -113,6 +115,161 @@ public sealed class GamesTests(CatalogServerFixture server) : IClassFixture<Cata
         request.Headers.TryAddWithoutValidation("If-None-Match", etag);
         using var response = await agent.Server.Http.SendAsync(request);
         return (int)response.StatusCode;
+    }
+}
+
+/// <summary>
+/// A fixture with one game of each anti-cheat case of D-74: none, tagged Vanguard by the catalog, a Riot game the catalog
+/// did not tag (the agent's gate treats it as Vanguard) and a Riot game tagged with another anti-cheat. The club's policy
+/// is the seed's, which requires Vanguard for every game with an anti-cheat (<c>anticheat.required</c>).
+/// </summary>
+public class VanguardCatalogFixture : ServerFixture
+{
+    public static readonly Guid Plain = DevSeed.Sid("game:vg-plain");
+    public static readonly Guid Tagged = DevSeed.Sid("game:vg-tagged");
+    public static readonly Guid RiotUntagged = DevSeed.Sid("game:vg-riot");
+    public static readonly Guid RiotEac = DevSeed.Sid("game:vg-riot-eac");
+
+    public VanguardCatalogFixture()
+    {
+        Directory.CreateDirectory(DataDir);
+        var path = Path.Combine(DataDir, "games.json");
+        static Game Make(Guid id, string title, LauncherType launcher, AntiCheatKind antiCheat) => new(
+            id, title, launcher, "1", null, null, null, false, ["shooter"], [], "https://cdn.example/cover.jpg",
+            null, null, "", 0, 0, null, false, antiCheat, null, 1.5, null, null);
+        File.WriteAllText(path, JsonSerializer.Serialize(new[]
+        {
+            Make(Plain, "Counter-Strike 2", LauncherType.Steam, AntiCheatKind.None),
+            Make(Tagged, "Tagged Vanguard", LauncherType.Steam, AntiCheatKind.Vanguard),
+            Make(RiotUntagged, "League of Legends", LauncherType.Riot, AntiCheatKind.None),
+            Make(RiotEac, "Riot with EAC", LauncherType.Riot, AntiCheatKind.Eac),
+        }, ServerJson.Options));
+        Settings["Catalog:GamesSeedPath"] = path;
+    }
+}
+
+/// <summary>
+/// <c>getGames</c> on a PC without Vanguard (D-74): when the PC's last heartbeat says vgk is missing or not loaded, the games
+/// the agent's gate would refuse there are left out — under the seed's policy, which requires Vanguard for every game with
+/// an anti-cheat, all of those, the EAC game too; a heartbeat that does not say (an older agent, unknown fields) or a loaded
+/// vgk hides nothing; the ETag follows the visible set.
+/// </summary>
+public sealed class VanguardGamesTests(VanguardCatalogFixture server) : IClassFixture<VanguardCatalogFixture>
+{
+    private static readonly Guid[] All =
+        [VanguardCatalogFixture.Plain, VanguardCatalogFixture.Tagged, VanguardCatalogFixture.RiotUntagged, VanguardCatalogFixture.RiotEac];
+
+    private static readonly Guid[] WithoutVanguard = [VanguardCatalogFixture.Plain];
+
+    [Fact]
+    public async Task Games_that_need_Vanguard_are_hidden_when_the_heartbeat_reports_vgk_missing_or_not_loaded()
+    {
+        foreach (var antiCheat in new object[]
+        {
+            new { vanguardInstalled = false, vanguardLoaded = false, secureBoot = true, tpm = true },
+            new { vanguardInstalled = true, vanguardLoaded = false, secureBoot = true, tpm = true },
+            new { vanguardInstalled = (bool?)null, vanguardLoaded = false },
+        })
+        {
+            var agent = await TestAgent.CreateAsync(server);
+            await Players.ReadAsync(await agent.HeartbeatAsync(antiCheat: antiCheat), 200);
+            Assert.Equal(Sorted(WithoutVanguard), await ListedAsync(agent));
+
+            // By id a hidden game is still served, as a game the owner hid (the agent's fallback for a game it knows).
+            await Players.ReadAsync(await agent.SendAsync(HttpMethod.Get, $"/api/v1/games/{VanguardCatalogFixture.Tagged}"), 200);
+        }
+    }
+
+    [Fact]
+    public async Task Every_game_is_listed_when_vgk_is_loaded_or_the_heartbeat_does_not_say()
+    {
+        var agent = await TestAgent.CreateAsync(server);
+        Assert.Equal(Sorted(All), await ListedAsync(agent)); // no heartbeat yet
+        foreach (var antiCheat in new object?[]
+        {
+            null, // an agent without antiCheat in its heartbeat
+            new { vanguardInstalled = (bool?)null, vanguardLoaded = (bool?)null, secureBoot = false, tpm = false },
+            new { vanguardInstalled = true, vanguardLoaded = true, secureBoot = true, tpm = true },
+        })
+        {
+            await Players.ReadAsync(await agent.HeartbeatAsync(antiCheat: antiCheat), 200);
+            Assert.Equal(Sorted(All), await ListedAsync(agent));
+        }
+    }
+
+    [Fact]
+    public async Task The_ETag_changes_with_the_visible_set()
+    {
+        var agent = await TestAgent.CreateAsync(server);
+        await Players.ReadAsync(await agent.HeartbeatAsync(antiCheat: new { vanguardInstalled = true, vanguardLoaded = true }), 200);
+        var full = await ETagAsync(agent);
+
+        // A PC that reports no anti-cheat state gets the same ETag for the same list: the hash only grows when games are hidden.
+        Assert.Equal(304, await GamesTests.StatusWithETagAsync(await TestAgent.CreateAsync(server), full));
+
+        // vgk no longer loaded: the cached full list is not confirmed, and the shorter one has an ETag of its own.
+        await Players.ReadAsync(await agent.HeartbeatAsync(antiCheat: new { vanguardInstalled = true, vanguardLoaded = false }), 200);
+        Assert.Equal(200, await GamesTests.StatusWithETagAsync(agent, full));
+        var reduced = await ETagAsync(agent);
+        Assert.NotEqual(full, reduced);
+        Assert.Equal(304, await GamesTests.StatusWithETagAsync(agent, reduced));
+
+        // Loaded again after a reboot: the full list is back under its old ETag.
+        await Players.ReadAsync(await agent.HeartbeatAsync(antiCheat: new { vanguardInstalled = true, vanguardLoaded = true }), 200);
+        Assert.Equal(200, await GamesTests.StatusWithETagAsync(agent, reduced));
+        Assert.Equal(304, await GamesTests.StatusWithETagAsync(agent, full));
+    }
+
+    internal static Guid[] Sorted(IEnumerable<Guid> ids) => [.. ids.Order()];
+
+    internal static async Task<Guid[]> ListedAsync(TestAgent agent)
+    {
+        var body = await Players.ReadAsync(await agent.SendAsync(HttpMethod.Get, "/api/v1/games"), 200);
+        var ids = body.GetProperty("items").EnumerateArray().Select(g => g.GetProperty("id").GetGuid()).ToList();
+        Assert.Equal(ids.Count, body.GetProperty("total").GetInt32());
+        return Sorted(ids);
+    }
+
+    private static async Task<string> ETagAsync(TestAgent agent)
+    {
+        using var response = await agent.SendAsync(HttpMethod.Get, "/api/v1/games?page=1&pageSize=500");
+        Assert.Equal(200, (int)response.StatusCode);
+        return response.Headers.ETag!.ToString();
+    }
+}
+
+/// <summary>The games of <see cref="VanguardCatalogFixture"/> under a policy that requires EAC only.</summary>
+public sealed class VanguardOptionalCatalogFixture : VanguardCatalogFixture
+{
+    public VanguardOptionalCatalogFixture()
+    {
+        var seed = JsonDefaults.Deserialize<Policy>(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "seed", "policies.example.json")))!;
+        var path = Path.Combine(DataDir, "policy.json");
+        File.WriteAllText(path, JsonDefaults.Serialize(seed with { Anticheat = new AntiCheatPolicy([AntiCheatKind.Eac], BlockOnViolation: true) }));
+        Settings["Catalog:PolicySeedPath"] = path;
+    }
+}
+
+/// <summary>
+/// D-74 follows the club's policy: without Vanguard in <c>anticheat.required</c>, or with <c>blockOnViolation</c> off, the
+/// agent's gate lets a game of another anti-cheat start on a PC without vgk, so only the Vanguard games are hidden there.
+/// </summary>
+public sealed class VanguardOptionalGamesTests(VanguardOptionalCatalogFixture server) : IClassFixture<VanguardOptionalCatalogFixture>
+{
+    [Fact]
+    public async Task Only_Vanguard_games_are_hidden_when_the_policy_does_not_make_every_launch_need_Vanguard()
+    {
+        var agent = await TestAgent.CreateAsync(server);
+        await Players.ReadAsync(await agent.HeartbeatAsync(antiCheat: new { vanguardInstalled = true, vanguardLoaded = false }), 200);
+        Guid[] startable = VanguardGamesTests.Sorted([VanguardCatalogFixture.Plain, VanguardCatalogFixture.RiotEac]);
+        Assert.Equal(startable, await VanguardGamesTests.ListedAsync(agent));
+
+        // Vanguard required, but a violation only reported, not blocked: the EAC game still starts.
+        await Players.ScalarAsync<int>(server, """
+            UPDATE clubs SET policy = jsonb_set(jsonb_set(policy, '{anticheat,required}', '["vanguard"]'), '{anticheat,blockOnViolation}', 'false')
+            RETURNING 1
+            """);
+        Assert.Equal(startable, await VanguardGamesTests.ListedAsync(agent));
     }
 }
 

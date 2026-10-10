@@ -15,7 +15,8 @@ using Npgsql;
 namespace ClubShell.Server.Admin;
 
 /// <summary>
-/// The hall editor (slice S4, DESIGN §9): <c>adminPcs</c> (seats with map position, device, hardware and last telemetry),
+/// The hall editor (slice S4, DESIGN §9): <c>adminPcs</c> (seats with map position, device, hardware, last telemetry and the
+/// last heartbeat's games volume, D-73),
 /// and for the owner <c>adminAddPc</c> (a seat without a PC yet: approved, <c>offline</c>, no HWID), <c>adminUpdatePc</c>
 /// (partial; <c>maintenance:false</c> is also how a PC waiting for approval is approved, D-7) and <c>adminDeletePc</c> (soft
 /// delete: the agent's tokens answer <c>401 revoked</c>, its socket closes 4401; <c>409 pcBusy</c> during a session). A
@@ -44,10 +45,11 @@ public static class PcAdminEndpoints
         var staff = context.Features.GetRequiredFeature<StaffContext>();
         var now = clock.GetUtcNow();
         await using var c = await db.OpenConnectionAsync();
-        var map = (await c.QueryAsync<(Guid Id, int X, int Y, string DeviceKind, string? Hardware, string? Metrics)>(
+        var map = (await c.QueryAsync<(Guid Id, int X, int Y, string DeviceKind, string? Hardware, string? Metrics, string? GamesVolume)>(
             """
             SELECT p.id, p.x, p.y, p.device_kind, p.hardware::text,
-                   (SELECT m.data::text FROM pc_metrics m WHERE m.pc_id = p.id ORDER BY m.at DESC LIMIT 1)
+                   (SELECT m.data::text FROM pc_metrics m WHERE m.pc_id = p.id ORDER BY m.at DESC LIMIT 1),
+                   (p.last_heartbeat -> 'gamesVolume')::text
             FROM pcs p WHERE p.club_id = @ClubId AND p.deleted_at IS NULL
             """,
             new { staff.ClubId })).ToDictionary(m => m.Id);
@@ -56,11 +58,12 @@ public static class PcAdminEndpoints
             var wire = pc.ToPc(pc.Status(hub.IsConnected(pc.Id), now, TimeSpan.FromSeconds(agents.OfflineAfterSec)), withHwid: false);
 
             // A PC registered between the two reads is drawn with the column defaults of a new seat.
-            var m = map.TryGetValue(pc.Id, out var row) ? row : (pc.Id, 0, 0, "pc", null, null);
+            var m = map.TryGetValue(pc.Id, out var row) ? row : (pc.Id, 0, 0, "pc", null, null, null);
             return new AdminHallPc(
                 wire.Id, wire.Name, wire.Zone, wire.Number, wire.Hwid, wire.IpAddress, wire.Status, wire.CurrentSessionId, wire.AgentVersion,
                 wire.ShellVersion, wire.LastHeartbeatAt, m.X, m.Y, m.DeviceKind,
-                m.Hardware is null ? null : JsonElement.Parse(m.Hardware), m.Metrics is null ? null : JsonElement.Parse(m.Metrics));
+                m.Hardware is null ? null : JsonElement.Parse(m.Hardware), m.Metrics is null ? null : JsonElement.Parse(m.Metrics),
+                m.GamesVolume is null ? null : JsonElement.Parse(m.GamesVolume));
         }).ToList();
         return AdminJson.Ok(new AdminHallPcList(items, await CounterEndpoints.ZonesAsync(c, staff.ClubId)));
     }

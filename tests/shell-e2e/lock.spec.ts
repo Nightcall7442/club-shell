@@ -1,7 +1,7 @@
 /**
  * Lock screen (`/#/lock`) end-to-end tests against the Vite dev server in mock mode (`VITE_MOCK=1`,
  * started by playwright.config.ts). Copy is asserted through the shipped i18n bundles so a wording change
- * updates the tests for free. Mock accounts: `demo` / `1234`, user PIN `1234` (apps/shell/src/mocks).
+ * updates the tests for free. Mock accounts: `demo` / `1234`, user PIN `1234`, club card `CARD-0001` (apps/shell/src/mocks).
  */
 import { readFileSync } from 'node:fs';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -35,6 +35,8 @@ const ru = translator(loadStrings('ru'));
 const DEMO_USER = 'demo';
 const DEMO_PASSWORD = '1234';
 const USER_PIN = '1234';
+/** Bound to `demo` in the mock; any other number is an unknown card. */
+const DEMO_CARD = 'CARD-0001';
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -75,6 +77,19 @@ async function signIn(page: Page, username: string, password: string): Promise<v
   await secret.press('Enter');
 }
 
+/**
+ * A USB reader's tap: the card's keys and its Enter in one go, as `keydown`s on whatever has the focus. Dispatched from
+ * the page, so they come as close together as a reader's whatever the load of the test machine.
+ */
+async function tapCard(page: Page, cardId: string): Promise<void> {
+  await page.evaluate((id) => {
+    const target = document.activeElement ?? document.body;
+    for (const key of [...id, 'Enter']) {
+      target.dispatchEvent(new KeyboardEvent('keydown', { key, code: '', bubbles: true, cancelable: true }));
+    }
+  }, cardId);
+}
+
 /** Tariff picker shown after a guest's login (no session yet) → "Start playing" → `/home`. */
 async function startSession(page: Page): Promise<void> {
   const picker = page.getByRole('dialog', { name: en('wallet.chooseTariff') });
@@ -99,8 +114,8 @@ test.describe('lock screen', () => {
     await expect(page.getByText(en('lock.subtitle'))).toBeVisible();
     const tabs = page.getByRole('tablist', { name: en('lock.chooseMethod') });
     await expect(tabs).toBeVisible();
-    await expect(tabs.getByRole('tab')).toHaveCount(3);
-    for (const key of ['lock.methodQr', 'lock.methodPassword', 'lock.methodGuest']) {
+    await expect(tabs.getByRole('tab')).toHaveCount(4);
+    for (const key of ['lock.methodQr', 'lock.methodPassword', 'lock.methodCard', 'lock.methodGuest']) {
       await expect(tabs.getByRole('tab', { name: en(key) })).toBeVisible();
     }
     // QR is the default: no keyboard needed and no password typed on a shared screen.
@@ -212,6 +227,119 @@ test.describe('lock screen', () => {
     await expect(
       page.getByRole('button', { name: new RegExp(`^${escapeRegExp(en('desktop.userMenu'))}: Playwright`) }),
     ).toBeVisible();
+  });
+
+  test('card sign-in: a reader types the number and presses Enter', async ({ page }) => {
+    await openLock(page);
+    const tab = page.getByRole('tab', { name: en('lock.methodCard') });
+    await tab.click();
+    await expect(page.getByText(en('lock.cardHint'))).toBeVisible();
+    const card = field(page, en('lock.cardNumber'));
+    await expect(card).toHaveAttribute('type', 'password');
+
+    // A USB reader is a keyboard: the focus is still on the tab just clicked, and the keys land in the card field.
+    await expect(tab).toBeFocused();
+    await page.keyboard.type(DEMO_CARD, { delay: 5 });
+    await expect(card).toBeFocused();
+    await expect(card).toHaveValue(DEMO_CARD);
+    // Only the last four characters show on the card face.
+    await expect(page.getByText('•••• 0001', { exact: true })).toBeVisible();
+    await expect(page.getByText(DEMO_CARD, { exact: true })).toHaveCount(0);
+
+    await page.keyboard.press('Enter');
+    await playing(page);
+  });
+
+  test('unknown card shows a localized error and the field is cleared', async ({ page }) => {
+    await openLock(page);
+    await page.getByRole('tab', { name: en('lock.methodCard') }).click();
+    const card = field(page, en('lock.cardNumber'));
+
+    // Nothing read yet.
+    await page.getByRole('button', { name: en('lock.login'), exact: true }).click();
+    await expect(page.getByRole('alert').filter({ hasText: en('lock.cardRequired') })).toBeVisible();
+
+    // Typed by hand this time.
+    await card.pressSequentially('CARD-9999');
+    await card.press('Enter');
+    await expect(page.getByRole('alert').filter({ hasText: en('lock.cardUnknown') })).toBeVisible();
+    await expect(page).toHaveURL(/#\/lock$/);
+    await expect(card).toHaveValue('');
+    await expect(page.getByText('•••• 9999')).toHaveCount(0);
+    await expect(sessionTimer(page)).toHaveCount(0);
+
+    // The field kept the focus: the next card goes straight in.
+    await expect(card).toBeFocused();
+    await page.keyboard.type(DEMO_CARD);
+    await page.keyboard.press('Enter');
+    await playing(page);
+  });
+
+  test('five wrong cards stop card sign-in on this PC for a while', async ({ page }) => {
+    await openLock(page);
+    await page.getByRole('tab', { name: en('lock.methodCard') }).click();
+    const card = field(page, en('lock.cardNumber'));
+    const wrongCard = async (cardId: string): Promise<void> => {
+      await card.fill(cardId);
+      await card.press('Enter');
+      await expect(card).toHaveValue('');
+    };
+    for (let i = 0; i < 4; i++) {
+      await wrongCard(`00123456${70 + i}`);
+    }
+    await expect(page.getByRole('alert').filter({ hasText: en('lock.cardUnknown') })).toBeVisible();
+
+    // The fifth uses up the attempts: the player is told to wait rather than "not found"…
+    await wrongCard('0012345674');
+    const wait = page.getByRole('alert').filter({ hasText: en('lock.tooManyAttempts') });
+    await expect(wait).toBeVisible();
+    // …and from then on every card is refused, even the bound one.
+    await wrongCard(DEMO_CARD);
+    await expect(wait).toBeVisible();
+    await expect(page).toHaveURL(/#\/lock$/);
+    await expect(sessionTimer(page)).toHaveCount(0);
+  });
+
+  test('a card tapped on another tab opens the card tab and signs in', async ({ page }) => {
+    await openLock(page);
+    // The screen opens on QR or password, its tab focused: no card field to type into.
+    const current = page.getByRole('tab', { selected: true });
+    await expect(current).not.toHaveAccessibleName(en('lock.methodCard'));
+    await current.focus();
+    await tapCard(page, DEMO_CARD);
+    await playing(page);
+  });
+
+  test('a card tapped on the attract screen wakes it and signs in', async ({ page }) => {
+    await openLock(page);
+    await page.evaluate(() => {
+      window.location.hash = '#/idle';
+    });
+    await expect(page.getByText(en('idle.touchToStart'))).toBeVisible();
+    // The first key wakes the screen; the rest of the card and its Enter arrive before the lock screen is up.
+    await tapCard(page, DEMO_CARD);
+    await playing(page);
+  });
+
+  test('a reader on the Russian layout still sends Latin letters', async ({ page }) => {
+    await openLock(page);
+    await page.getByRole('tab', { name: en('lock.methodCard') }).click();
+    const card = field(page, en('lock.cardNumber'));
+    await card.focus();
+
+    // Same keys, Cyrillic characters: what a reader types for "CARD" while the Russian layout is on.
+    for (const [key, code] of [
+      ['С', 'KeyC'],
+      ['Ф', 'KeyA'],
+      ['К', 'KeyR'],
+      ['В', 'KeyD'],
+    ]) {
+      await card.dispatchEvent('keydown', { key, code, bubbles: true, cancelable: true });
+    }
+    await page.keyboard.type('-0001');
+    await expect(card).toHaveValue(DEMO_CARD);
+    await card.press('Enter');
+    await playing(page);
   });
 
   test('locking from the top bar returns to /lock and unlocking restores the session', async ({ page }) => {
