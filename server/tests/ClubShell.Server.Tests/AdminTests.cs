@@ -491,7 +491,8 @@ public sealed class ShiftTests(ServerFixture server) : LedgerCheckedTest(server)
 
 /// <summary>
 /// The hall editor (DESIGN §9, S4): approval of a waiting PC through <c>maintenance:false</c>, <c>409 pcBusy</c> and
-/// <c>401 revoked</c> after delete, seats added and moved, <c>config_version</c> + <c>refreshConfig</c> on a rename.
+/// <c>401 revoked</c> after delete, seats added and moved, <c>config_version</c> + <c>refreshConfig</c> on a rename, the last
+/// heartbeat's games volume in the hall and health lists (D-73).
 /// </summary>
 public sealed class PcAdminTests(ApprovalServerFixture server) : IClassFixture<ApprovalServerFixture>
 {
@@ -549,6 +550,35 @@ public sealed class PcAdminTests(ApprovalServerFixture server) : IClassFixture<A
         var command = (await Players.ReadAsync(await agent.SendAsync(HttpMethod.Get, agent.Path("commands")), 200)).GetProperty("items")[0];
         Assert.Equal(("refreshConfig", true), (command.GetProperty("name").GetString(), command.GetProperty("payload").GetProperty("config").GetBoolean()));
         await ExpectAsync(server, 404, HttpMethod.Patch, $"/pcs/{Guid.NewGuid()}", owner, new { name = "X" });
+    }
+
+    [Fact]
+    public async Task The_hall_and_health_carry_the_games_volume_of_the_last_heartbeat()
+    {
+        var owner = await LoginAsync(server, OwnerPin);
+        var cashier = await LoginAsync(server, CashierPin);
+        var agent = await ApprovedAgentAsync(owner);
+        async Task<JsonElement[]> VolumesAsync() =>
+        [
+            (await ExpectAsync(server, 200, HttpMethod.Get, "/pcs", cashier)).GetProperty("items").EnumerateArray()
+                .Single(p => p.GetProperty("id").GetGuid() == agent.PcId).GetProperty("gamesVolume"),
+            (await ExpectAsync(server, 200, HttpMethod.Get, "/health", cashier)).GetProperty("pcs").EnumerateArray()
+                .Single(p => p.GetProperty("id").GetGuid() == agent.PcId).GetProperty("gamesVolume"),
+        ];
+
+        // Never reported (no heartbeat yet), then an agent that sends no gamesVolume: null, so the desk shows nothing.
+        Assert.All(await VolumesAsync(), v => Assert.Equal(JsonValueKind.Null, v.ValueKind));
+        await Players.ReadAsync(await agent.HeartbeatAsync(), 200);
+        Assert.All(await VolumesAsync(), v => Assert.Equal(JsonValueKind.Null, v.ValueKind));
+
+        var since = new DateTimeOffset(2026, 10, 10, 7, 40, 0, TimeSpan.Zero);
+        await Players.ReadAsync(await agent.HeartbeatAsync(gamesVolume: new { owner = "agent", mounted = true, driveLetter = "G", since }), 200);
+        Assert.All(await VolumesAsync(), v => Assert.Equal(("agent", true, "G", since),
+            (v.GetProperty("owner").GetString(), v.GetProperty("mounted").GetBoolean(), v.GetProperty("driveLetter").GetString(), v.GetProperty("since").GetDateTimeOffset())));
+
+        // ClubDisklessHelper mounts it: the agent cannot tell whether it is mounted, and the field is left out as it sent it.
+        await Players.ReadAsync(await agent.HeartbeatAsync(gamesVolume: new { owner = "disklessHelper", mounted = (bool?)null }), 200);
+        Assert.All(await VolumesAsync(), v => Assert.Equal(("disklessHelper", false), (v.GetProperty("owner").GetString(), v.TryGetProperty("mounted", out _))));
     }
 
     /// <summary>A new PC waits for approval (D-7), the owner approves it with <c>maintenance:false</c>, the agent registers again.</summary>
