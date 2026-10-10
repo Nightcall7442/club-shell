@@ -314,7 +314,7 @@ the localized reason from `games.antiCheatReason.<reason>` (`apps/shell/src/i18n
 | `tpmOff` | TPM is off |
 | `testSigningOn` | Test signing mode is on |
 | `hvciOff`, `blockedProcess`, `injectedModule`, `vmDetected`, `debuggerAttached` | translated, reserved |
-| `networkPath` | not translated yet: the player sees the base message only |
+| `networkPath` | The game is installed on a network drive |
 
 The base message (`errors.antiCheatBlocked`) tells the player to call an administrator; the overlay offers the
 `callAdmin` action. A runtime kill surfaces as `game.stateChanged{killed}`; a runtime lock surfaces as the normal

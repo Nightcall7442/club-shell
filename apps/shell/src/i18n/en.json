@@ -473,7 +473,8 @@
       "blockedProcess": "A blocked program is running",
       "injectedModule": "A foreign module was detected",
       "vmDetected": "Virtual machine detected",
-      "debuggerAttached": "A debugger is attached"
+      "debuggerAttached": "A debugger is attached",
+      "networkPath": "The game is installed on a network drive"
     },
     "specOk": "Meets requirements",
     "specWarn": "Below minimum",
