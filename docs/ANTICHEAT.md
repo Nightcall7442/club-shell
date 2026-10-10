@@ -341,7 +341,10 @@ Vanguard is therefore best pre-installed on the club image so the reboot happens
 The central server (`server/`, D-74 in docs/server/DESIGN.md) spares the player that error: while a PC's last heartbeat
 says `vgk` is not installed or not loaded (`antiCheat.vanguardInstalled` / `vanguardLoaded` = `false`), `GET /games`
 leaves out every game whose effective anti-cheat is Vanguard (tagged `vanguard`, or a Riot game the catalogue did not
-tag), so their tiles are not shown on that PC. After the reboot the Agent's first heartbeat reports the loaded driver and
+tag), so their tiles are not shown on that PC. When the club's policy lists `vanguard` in `anticheat.required` and
+`blockOnViolation` is on (the seed `config/policies.example.json` does), the launch gate (section 5) checks Vanguard
+for every game with an anti-cheat, so the server leaves out all of those games on that PC, EAC, BattlEye and FACEIT
+ones included. After the reboot the Agent's first heartbeat reports the loaded driver and
 refreshes the catalogue, and the games are back. A heartbeat without `antiCheat` (an older Agent) hides nothing.
 
 ---
