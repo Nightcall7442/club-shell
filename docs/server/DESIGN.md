@@ -1123,7 +1123,7 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
 - **ETag** (RFC 9110, в кавычках):
   - `policies`: `"p<policy_version>"`;
   - `config`: `"c<config_version>"`, агент `If-None-Match` не шлёт, всегда 200;
-  - `games`: `"g<catalog_version>-<hash(zone, lastPlayed пользователя)>"`;
+  - `games`: `"g<catalog_version>-<hash(zone, lastPlayed пользователя, «без Vanguard» — D-74)>"`;
   - `tariffs`: хеш `items`, но `/tariffs` **всегда отвечает 200** и игнорирует `If-None-Match` (OQ L87).
 
 ### 7.4 Пагинация
@@ -1873,6 +1873,32 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
   они, другой сеанс на выбранном ПК (игрок сел после подтверждения) — `skipped sessionOpen`. Каждому ПК — запись
   `pcCommand` (`meta {kind, batchId}`). Повтор ключа отдаёт сохранённые результаты до ack (отправленные — `queued`).
 
+### SHELL_CHANGES: игровой диск, железо, Riot без Vanguard (после «Касса, часть 3»)
+
+- **Зачем:** п. 9, 21 и 14 SHELL_CHANGES — агенты (с 10da203) уже шлют `gamesVolume` и `antiCheat` в heartbeat, а
+  железо — при регистрации и смене, но сервер и касса их не показывали; Riot-игра на ПК без загруженного Vanguard падала
+  только при запуске (`antiCheatBlocked`). Только деплой сервера и кассы: без миграции, нового агента и изменения
+  `openapi.yaml`.
+- **Игровой диск** (D-73): `GET /admin/pcs` (`items[]`) и `GET /admin/health` (`pcs[]`) несут `gamesVolume` —
+  `pcs.last_heartbeat -> 'gamesVolume'` как прислал агент (`{owner, mounted?, driveLetter?, since?}`, null-поля опущены);
+  `null` — не присылал (нет heartbeat или старый агент). Каждый heartbeat перезаписывает его целиком. Касса: «Состояние ПК» —
+  столбец «Игровой диск» (только если хоть один ПК что-то сообщает), «Зал и устройства» — строка у выбранного ПК:
+  «подключён с 12:40» (зелёная точка), «не подключён с …» (янтарная), `disklessHelper` — «подключает ClubDiskless»;
+  `owner: none`, выключенный ПК и `null` — ничего.
+- **Железо** (D-73): «Зал и устройства» показывает у выбранного ПК `hardware` из `GET /admin/pcs` (процессор, видеокарты,
+  память, диски, мониторы, Windows); у места без агента — «Нет данных», у консоли и VR без данных — ничего.
+- **Riot без Vanguard** (D-74): `GET /games` читает `antiCheat` последнего heartbeat этого ПК; если `vanguardInstalled`
+  или `vanguardLoaded` — `false`, из списка выпадают игры с эффективным античитом Vanguard (как
+  `GameLaunchService.EffectiveAntiCheat` агента: `antiCheat = vanguard` или `launcher = riot` при `antiCheat = none`).
+  Нет `antiCheat`, поле `null` или опущено — не скрывается ничего. Хеш ETag получает `|noVanguard` только для
+  укороченного списка, так что ETag остальных ПК не меняется, а ПК без Vanguard не получит `304` на полный список.
+  Агент перечитывает каталог на первом heartbeat после старта и при смене `catalogVersion`: после перезагрузки (когда `vgk`
+  загрузился) игры возвращаются; если `vgk` выгрузят посреди работы, список обновится при следующем обновлении каталога, а
+  до того запуск остановит проверка агента, как раньше. `GET /games/{id}` скрытую игру отдаёт (как скрытую владельцем).
+- **Тесты:** `VanguardGamesTests` (скрыто при `vgk` нет / не загружен, видно при загруженном и без данных, ETag),
+  `PcAdminTests.The_hall_and_health_carry_the_games_volume_of_the_last_heartbeat`; E2E кассы — строка «Игровой диск» в
+  «Состояние ПК» и `hardware` в `GET /admin/pcs`.
+
 ### 11.1 Все 75 required-операций + WS → срезы
 
 | # | operationId | Метод и путь | Срез |
@@ -2039,6 +2065,8 @@ anticheat/report — S3; `PATCH /admin/games/{id}` (реализуется) и `
 | D-70 | Строгая идемпотентность для продажи, аннулирования, пересадки и массовых команд: известный ключ с другим телом — `409 idempotencyKeyReused`; остальные маршруты — как раньше (только лог) |
 | D-71 | `seats[].game` в `GET /admin/overview` — из heartbeat агента (`runningGames`, самая поздняя по `startedAt`), привязка к сеансу по `currentSessionId` (без сравнения часов ПК и сервера); только занятый или заблокированный ПК; игра из каталога клуба (снятая с каталога во время игры ещё показывается); `launch_reports` не используется (без отчёта о выходе игра «зависла» бы до конца сеанса) |
 | D-72 | Ошибки сервера — в Sentry (`Sentry.AspNetCore`, `ErrorReporting.cs`), только если задан `Sentry:Dsn` (`Sentry__Dsn`) или `SENTRY_DSN` и SDK примет его и значения `Sentry:*`: Sentry 6 бросает исключение внутри `builder.Build()` и без DSN, и на опечатку в DSN или недопустимое значение (`SampleRate=0`, `TracesSampleRate=100`) — сервер не стартовал бы; вместо этого Sentry выключается с одной строкой в stderr без DSN. Событие — каждый лог `Error`/`Critical` и `Warning` этого сервера с исключением (упавшие проходы воркеров); фреймворк и библиотеки — только от `Error` (их информационные логи несут URL с query); оборванный клиентом запрос — не ошибка. Повторы: одно событие одного вида в час (логгер, шаблон, тип исключения, место в коде сервера, SQLSTATE), следующее несёт `repeatsDropped` — упавшая база или воркер раз в секунду иначе съедят месячную квоту бесплатного плана (5 000) за полчаса. Наружу не уходит: заголовки, кроме `Accept`, `Content-Length`, `Content-Type`, `Idempotency-Key`, `User-Agent`, `X-Trace-Id`; query (`?token=` сокета агента, поиск клиента); тело; cookies; IP; пользователь; Sentry Logs (`SendDefaultPii`, тело и `EnableLogs` задаются кодом после конфигурации); логи `StaffTokens` и `PlatformLog` (PIN). Трассировка: 2 % чтений и 20 % записей кассы и игрока, ноль для `/health`, `/ws/agent` и `/api/v1/agents`. Релиз — `clubshell-server@<RAILWAY_GIT_COMMIT_SHA[..12]>` |
+| D-73 | Игровой диск и железо в кассе: `gamesVolume` из последнего heartbeat в `GET /admin/pcs` и `GET /admin/health` — сырой объект агента (null-поля опущены, `null` — не присылал), касса решает, что показать (выключенный ПК и `owner: none` — ничего); железо — `pcs.hardware` как есть. В `GET /admin/overview` не добавлено: карта зала их не показывает |
+| D-74 | `GET /games` скрывает игры с эффективным античитом Vanguard (`vanguard` или Riot без тега — как агент), пока последний heartbeat ПК говорит `vanguardInstalled = false` или `vanguardLoaded = false`; без `antiCheat` или с `null` — ничего; Secure Boot и TPM не учитываются (их проверяет агент при запуске); ETag укороченного списка свой, у полного — прежний; `GET /games/{id}` не скрывает |
 
 ### 12.2 Изменения контракта (PR в club-contracts, ведёт лид, владелец не нужен)
 
@@ -2105,6 +2133,9 @@ anticheat/report — S3; `PATCH /admin/games/{id}` (реализуется) и `
       `postSessionEvents` — `204` (события только записываются) для него же.
 17. Касса F «Командный центр» (D-71): лишнее поле ответа `AdminSeat.game {id, title, coverUrl, heroUrl} | null`
     (`AdminSeat` в вендоренном контракте без `additionalProperties: false`, поэтому `openapi.yaml` не меняется).
+18. Игровой диск (D-73): лишнее поле ответа `gamesVolume` (`HeartbeatGamesVolume | null`) в `AdminHallPc` и
+    `AdminPcHealth` (обе схемы без `additionalProperties: false`, `openapi.yaml` не меняется); `GET /games` без
+    Vanguard-игр (D-74) — поведение, схема ответа та же.
 
 ### 12.3 Вопросы владельцу (только то, что без него не решить)
 
