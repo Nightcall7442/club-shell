@@ -527,7 +527,10 @@ test('the console sends one browser id with every PIN, keeps it across sign-outs
       'Слишком много неверных PIN с новых устройств. Войдите с компьютера, где уже входили, или повторите через 2 ч',
     ),
   ).toBeVisible();
-  expect(sent).toEqual([kept, kept, kept]);
+  lockout = { retryAfterSec: 80_000, scope: 'trusted' };
+  await enterPin();
+  await expect(page.getByText('Слишком много неверных PIN в клубе. Повторите через 23 ч')).toBeVisible();
+  expect(sent).toEqual([kept, kept, kept, kept]);
 });
 
 test('a new PIN ends the other sessions of its member and keeps the one that changed it', async ({ request }) => {

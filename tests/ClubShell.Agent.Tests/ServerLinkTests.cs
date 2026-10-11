@@ -11,7 +11,11 @@ using ClubShell.Contracts.Serialization;
 using ClubShell.Core.Abstractions;
 using ClubShell.Core.Configuration;
 using ClubShell.Core.Http;
+using ClubShell.Core.Realtime;
 using ClubShell.Core.Security;
+using ClubShell.Windows.Hardware;
+using ClubShell.Windows.Network;
+using ClubShell.Windows.Storage;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ClubShell.Agent.Tests;
@@ -160,6 +164,60 @@ public sealed class ServerLinkTests : IDisposable
 
         await server.Received(1).RefreshAsync(Arg.Any<CancellationToken>());
         registered.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task The_agent_service_starts_with_an_expired_access_token_by_refreshing_it_not_by_registering()
+    {
+        // The same through ServerConnection, the service that runs it: the behaviour change of Agent 1.0.18 (D-78).
+        var current = new AgentTokens(Guid.NewGuid(), "old", "refresh", "c2VjcmV0", T0.AddHours(-8));
+        var tokens = Substitute.For<ITokenStore>();
+        tokens.Agent.Returns(_ => current);
+        var server = Substitute.For<IServerClient>();
+        server.ServerNow.Returns(_ => _time.GetUtcNow());
+        var refreshed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        server.RefreshAsync(Arg.Any<CancellationToken>()).Returns(_ =>
+        {
+            current = current with { AccessToken = "new", ExpiresAt = T0.AddHours(1) };
+            refreshed.TrySetResult();
+            return Task.FromResult(new AgentRefreshResponse("new", "refresh-2", T0.AddHours(1)));
+        });
+
+        // Nothing listens on the socket's port: after the refresh the service waits out a reconnect backoff on the test clock.
+        var settings = new AgentSettings();
+        settings.Paths.ProgramData = _dir.Root;
+        settings.Server.WsUrl = "ws://127.0.0.1:9/ws/agent";
+        var monitor = TestSupport.Monitor(settings);
+        var clock = new SystemClock(_time);
+        var wmi = new WmiQueries();
+        using var network = new NetworkProbe();
+        using var connection = new ServerConnection(
+            server,
+            tokens,
+            new RealtimeClient(tokens, monitor, clock, NullLogger<RealtimeClient>.Instance),
+            new HardwareInventory(wmi, new Disks(wmi), network),
+            new Hwid(Substitute.For<IHardwareIdSource>(), Path.Combine(_dir.Root, "hwid.fallback")),
+            network,
+            clock,
+            monitor,
+            Substitute.For<IServerCommandSink>(),
+            Substitute.For<IServerPushSink>(),
+            Substitute.For<IConnectivityEventSink>(),
+            Substitute.For<IOfflineQueueDepth>(),
+            NullLogger<ServerConnection>.Instance,
+            NullLogger<Reconnector>.Instance);
+
+        await connection.StartAsync(CancellationToken.None);
+        try
+        {
+            await refreshed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally
+        {
+            await connection.StopAsync(CancellationToken.None);
+        }
+
+        await server.DidNotReceive().RegisterAsync(Arg.Any<AgentRegisterRequest>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

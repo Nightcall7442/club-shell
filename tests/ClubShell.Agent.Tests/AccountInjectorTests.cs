@@ -1,5 +1,11 @@
+using System.Security.Cryptography;
+using System.Text;
 using ClubShell.Agent.Games.Accounts;
 using ClubShell.Contracts.Games;
+using ClubShell.Core.Abstractions;
+using ClubShell.Core.Configuration;
+using ClubShell.Core.Security;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Win32;
 
 namespace ClubShell.Agent.Tests;
@@ -36,6 +42,34 @@ public sealed class AccountInjectorTests
         string? args = AccountInjector.CredentialArgs(LauncherType.Epic, "pool01", "c0de", AccountInjector.ExchangeCodeAuthType, sessionInjected: false, allowPasswordOnCommandLine: false);
 
         args.Should().Be("-AUTH_LOGIN=unused -AUTH_PASSWORD=c0de -AUTH_TYPE=exchangecode");
+    }
+
+    [Fact]
+    public async Task A_lease_is_described_for_the_log_without_its_account_login()
+    {
+        // The Agent log is readable by the kiosk user: a lease goes there by its id, never by the pooled account's login.
+        byte[] key = Signing.DeriveAccountPoolKey(Encoding.ASCII.GetBytes("secret"));
+        byte[] nonce = RandomNumberGenerator.GetBytes(12);
+        byte[] plain = Encoding.UTF8.GetBytes(Password);
+        byte[] cipher = new byte[plain.Length];
+        byte[] tag = new byte[16];
+        using (var aes = new AesGcm(key, 16))
+        {
+            aes.Encrypt(nonce, plain, cipher, tag);
+        }
+
+        var server = Substitute.For<IServerClient>();
+        Game game = TestSupport.Game("Dota 2", LauncherType.Steam);
+        server.LeaseAccountAsync(game.Id, Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(new AccountLease(
+            Guid.NewGuid(), LauncherType.Steam, "pool_login_07", Convert.ToBase64String([.. nonce, .. cipher, .. tag]), null, DateTimeOffset.UtcNow.AddHours(2))));
+        var tokens = Substitute.For<ITokenStore>();
+        tokens.Agent.Returns(new AgentTokens(Guid.NewGuid(), "access", "refresh", "c2VjcmV0", DateTimeOffset.UtcNow.AddHours(1)));
+        await using var pool = new AccountPool(server, tokens, TestSupport.Monitor(new AgentSettings()), SystemClock.Instance, NullLogger<AccountPool>.Instance);
+
+        ActiveLease lease = await pool.LeaseAsync(game, Guid.NewGuid(), null, CancellationToken.None);
+
+        lease.Username.Should().Be("pool_login_07");
+        lease.ToString().Should().Contain(lease.LeaseId.ToString()).And.NotContain("pool_login_07").And.NotContain(Password);
     }
 
     [Fact]
