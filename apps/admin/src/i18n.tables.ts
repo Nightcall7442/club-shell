@@ -1119,6 +1119,14 @@ export const UZ: Record<string, string> = {
   сетевой: 'tarmoq',
   'Нет данных — агент на этом ПК ещё не подключался': 'Maʼlumot yoʻq — bu kompyuterdagi agent hali ulanmagan',
   // --- end games disk and hardware ---
+  // --- staff PIN lockout (D-76) ---
+  'Слишком много неверных PIN. Повторите через {wait}': 'Notoʻgʻri PIN juda koʻp. {wait} oʻtgach qayta urinib koʻring',
+  'Слишком много неверных PIN с новых устройств. Войдите с компьютера, где уже входили, или повторите через {wait}':
+    'Yangi qurilmalardan notoʻgʻri PIN juda koʻp. Avval kirilgan kompyuterdan kiring yoki {wait} oʻtgach qayta urinib koʻring',
+  'Слишком много неверных PIN в клубе. Повторите через {wait}':
+    'Klubda notoʻgʻri PIN juda koʻp. {wait} oʻtgach qayta urinib koʻring',
+  'Слишком много неверных PIN. Повторите позже': 'Notoʻgʻri PIN juda koʻp. Keyinroq qayta urinib koʻring',
+  // --- end staff PIN lockout ---
 };
 export const EN: Record<string, string> = {
   'Выручка за период': 'Revenue for the period',
@@ -2236,4 +2244,11 @@ export const EN: Record<string, string> = {
   сетевой: 'network',
   'Нет данных — агент на этом ПК ещё не подключался': 'No data yet — the Agent on this PC has not connected',
   // --- end games disk and hardware ---
+  // --- staff PIN lockout (D-76) ---
+  'Слишком много неверных PIN. Повторите через {wait}': 'Too many wrong PINs. Try again in {wait}',
+  'Слишком много неверных PIN с новых устройств. Войдите с компьютера, где уже входили, или повторите через {wait}':
+    'Too many wrong PINs from new devices. Sign in from a computer that has signed in before, or try again in {wait}',
+  'Слишком много неверных PIN в клубе. Повторите через {wait}': 'Too many wrong PINs at this club. Try again in {wait}',
+  'Слишком много неверных PIN. Повторите позже': 'Too many wrong PINs. Try again later',
+  // --- end staff PIN lockout ---
 };

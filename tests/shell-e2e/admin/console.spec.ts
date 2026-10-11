@@ -484,6 +484,52 @@ test('a wrong PIN is refused with a clear message', async ({ page }) => {
   await expect(page.getByText('Неверный PIN или сессия истекла')).toBeVisible();
 });
 
+test('the console sends one browser id with every PIN, keeps it across sign-outs and explains a PIN lockout', async ({
+  page,
+}) => {
+  const sent: string[] = [];
+  let lockout: { retryAfterSec: number; scope: string } | null = null;
+  await page.route('**/admin/login', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    sent.push((route.request().postDataJSON() as { deviceId?: string }).deviceId ?? '');
+    if (!lockout) return route.continue();
+    // A server whose wrong-PIN limit is full (D-76) answers 429 to the right PIN too; the real answer lends its CORS headers.
+    const response = await route.fetch();
+    return route.fulfill({
+      response,
+      status: 429,
+      headers: { ...response.headers(), 'retry-after': String(lockout.retryAfterSec) },
+      body: JSON.stringify({ error: { code: 'rateLimited', message: 'Too many wrong PINs', details: lockout } }),
+    });
+  });
+
+  await signIn(page, OWNER_PIN);
+  await expect(nav(page).getByText('Касса', { exact: true })).toBeVisible();
+  const kept = await page.evaluate(() => localStorage.getItem('clubshell.admin.device'));
+  expect(kept).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  expect(sent).toEqual([kept]);
+
+  await page.getByRole('button', { name: 'Выйти' }).click();
+  await expect(page.getByText('Введите PIN')).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('clubshell.admin.device'))).toBe(kept);
+
+  const enterPin = async (): Promise<void> => {
+    for (const d of OWNER_PIN) await page.keyboard.press(d);
+    await page.keyboard.press('Enter');
+  };
+  lockout = { retryAfterSec: 840, scope: 'source' };
+  await enterPin();
+  await expect(page.getByText('Слишком много неверных PIN. Повторите через 14 мин')).toBeVisible();
+  lockout = { retryAfterSec: 7_000, scope: 'club' };
+  await enterPin();
+  await expect(
+    page.getByText(
+      'Слишком много неверных PIN с новых устройств. Войдите с компьютера, где уже входили, или повторите через 2 ч',
+    ),
+  ).toBeVisible();
+  expect(sent).toEqual([kept, kept, kept]);
+});
+
 test('the owner sees every section', async ({ page }) => {
   await signIn(page, OWNER_PIN);
   for (const label of ['Касса', 'Настройка клуба', 'Бизнес', 'Тарифы и цены', 'Отчёты', 'Персонал']) {

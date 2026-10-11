@@ -225,6 +225,8 @@ function bumpCatalog(): void {
 
 export function clubRoutes(app: FastifyInstance): void {
   // ------------------------------------------------------------------------------------------------ staff & auth
+  // `clubCode` and `deviceId` (the console's browser id, D-76) are accepted and ignored: the mock holds one club and has no
+  // wrong-PIN limit, so it never answers 429.
   app.post('/admin/login', async (req) => {
     const pin = str(body(req), 'pin', 12);
     const c = club();
