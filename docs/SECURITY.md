@@ -111,12 +111,12 @@ sealed, signed binary (`SignatureVerified` mode on production builds).
 | Control | Implementation |
 |---------|----------------|
 | TLS | `RetryPolicy` builds the `SocketsHttpHandler`; certificate chain must validate; optional SPKI pinning: `server.tlsPinSha256[]` = base64 SHA-256 of the SubjectPublicKeyInfo (`RetryPolicy.ComputeSpkiPin`); the `ClubShell:Dev` relaxation only exists in dev configuration |
-| Identity | `POST /agents/register` with `X-Club-Key` (`server.clubApiKey`) + HWID (`Hwid`, SHA-256 over SMBIOS UUID / disk serial / MAC from `HardwareInventory`, persistent fallback when fewer than `Hwid.MinComponents`) → `accessToken` (RS256 JWT ≈ 1 h), `refreshToken` (30 d, single-use rotation), `signingSecret` (32-byte base64) |
+| Identity | `POST /agents/register` with `X-Club-Key` (`server.clubApiKey`) + HWID (`Hwid`, SHA-256 over SMBIOS UUID / disk serial / MAC from `HardwareInventory`, persistent fallback when fewer than `Hwid.MinComponents`) → `accessToken` (RS256 JWT ≈ 1 h), `refreshToken` (30 d, single-use rotation), `signingSecret` (32-byte base64). The key and the HWID only name the PC: a player can read both (`agent.json`, the HWID is a hardware fact). An Agent that holds tokens signs its re-registration with the stored `signingSecret` like any agent request, and the server keeps the secret when the proof holds (D-78). With `Agents:RegisterProof=enforce` the server gives an approved PC new credentials without that proof only inside the owner's re-enroll window (`maintenance:true`, PC offline); the default `audit` re-issues and logs a warning |
 | Every request | `Authorization: Bearer <accessToken>` + `X-Timestamp` + `X-Signature` (`ServerClient` auth section, `server.signingEnabled` default true) |
 | Signature | `Signing.Sign(secret, unixSeconds, method, pathAndQuery, bodySha256Hex)` = lowercase hex `HMAC-SHA256(secret, ts + METHOD + PATH + BODY_HASH)`; `BODY_HASH` = SHA-256 of the raw body, `Signing.EmptyBodySha256` for none; `PATH` includes the query and the `/api/v1` prefix exactly as sent |
-| Clock skew | server accepts ±300 s (`server.clockSkewToleranceSec`, `Signing.DefaultSkew`); the Agent signs with `ServerClient.ServerNow` = local clock + offset learned from `serverTime` in register/refresh responses; a `401 unauthorized{reason: clockSkew}` with `X-Server-Time` corrects the offset and retries **once** |
+| Clock skew | server accepts ±300 s (`server.clockSkewToleranceSec`, `Signing.DefaultSkew`); the Agent signs with `ServerClient.ServerNow` = local clock + offset learned from `serverTime` in register/heartbeat responses and from `X-Server-Time` of every register/refresh answer, errors included (so a re-registration after a rejected refresh is in the window); a `401 unauthorized{reason: clockSkew}` with `X-Server-Time` corrects the offset and retries **once** |
 | Replay | server-side uniqueness of (`pcId`, `X-Timestamp`, `X-Signature`); the Agent additionally sends `Idempotency-Key` on creating POSTs so retries are safe |
-| Expiry | `401{reason: expired}` → `POST /agents/refresh` once (rotates the refresh token; a new `signingSecret` replaces the old one); refresh failure → re-register |
+| Expiry | `401{reason: expired}` → `POST /agents/refresh` once (rotates the refresh token; a new `signingSecret` replaces the old one); a refresh the server rejects (401/403) → re-register, signed with the stored secret; a transport error never re-registers. At start an expiring access token is refreshed, not re-registered (`AgentCredentials`, D-78) |
 | User scope | `X-User-Token` for user endpoints; the server checks the user is bound to this `pcId` |
 | WebSocket | `wss://…/ws/agent` with `Authorization: Bearer <accessToken>` (never in the URL), subprotocol `clubshell.v1`; reconnect with backoff; commands are acked, never executed without a valid envelope |
 | Tracing | `X-Trace-Id` propagates the IPC envelope id; `User-Agent` / `X-Agent-Version` / `X-Shell-Version` for `426 versionMismatch` |
@@ -188,17 +188,18 @@ Input validation at the boundaries:
 
 - Serilog compact JSON (`LoggingSetup`), one line per event, daily rolling, `logging.retainDays` retention, size cap
   `logging.maxFileMb`. Windows Event Log sink for Fatal / self-log.
-- Never logged: passwords, tokens, signing secrets, pool secrets, shell token value, PIN, card ids. Logged:
-  usernames, pcId, session ids, game titles, pids, exe paths, policy notes.
+- Never logged: passwords, tokens, signing secrets, pool secrets, shell token value, PIN, card ids, the logins of pooled
+  game accounts (a lease is logged by its id), the full HWID (only its first 8 characters: with the club key it names
+  the PC to the server, D-78). Logged: player usernames, pcId, session ids, game titles, pids, exe paths, policy notes.
 - Pipe frames are hex-dumped only at `Verbose` (first 256 bytes) and `Verbose` is never a production level.
 - The Shell (`tracing` JSON) forwards `console.error` through `sys_log_client_error`, rate-limited on the Agent.
 - Crash reports (`CrashRecovery`) include the last 50 Shell log lines — those are subject to the same redaction
   rules because they are the Shell's own log.
 - `logs\` grants BUILTIN\Users Modify (the MSI: `installer/wix/Components.wxs`, `DataLogsFolder`; `install.ps1`:
   `(OI)(CI)M`), and Modify includes Read: a player can write noise into the Shell log **and read the Agent log**. Treat
-  Shell logs as untrusted and the Agent log as player-readable: nothing a player could misuse belongs in it. Known
-  leftovers for the next agent build: the hardware id at start (`AgentWorker`, the identity of the PC towards the
-  server) and the club's game-account login names (`AccountInjector`); the Agent log tail also goes out with telemetry.
+  Shell logs as untrusted and the Agent log as player-readable: nothing a player could misuse belongs in it; the Agent
+  log tail also goes out with telemetry. Agent 1.0.18 took out the last leftovers, the full hardware id at start and
+  the club's game-account login names (D-78).
 - The central server never logs a staff PIN: a wrong PIN logs only the address, and a generated owner PIN goes to a
   0600 file in the server's data directory while the log names only the file (server DESIGN D-77).
 
@@ -309,6 +310,8 @@ Shell
 Server side (out of scope of this repo, but required for the controls above to mean anything)
 
 - [ ] Replay detection on (`pcId`, `X-Timestamp`, `X-Signature`), skew window ≤ 300 s, refresh-token single use.
+- [ ] `Agents:RegisterProof=enforce` once every approved PC runs Agent 1.0.18 or later and the server log shows no
+  "without a valid proof" warnings (D-78); reinstalls then go through the owner's maintenance window.
 - [ ] Account-pool secrets encrypted per agent (`HKDF(signingSecret)`), rotated when a lease is released with `launchFailed` repeatedly.
 - [ ] Update manifests signed offline; the signing key never on the API host.
 - [ ] `POST /anticheat/report` and `shellCrashLoop` telemetry alerting in the admin panel.

@@ -230,7 +230,7 @@ public sealed class AgentWorker : BackgroundService
         try
         {
             string hwid = await _hwid.GetAsync(cancellationToken).ConfigureAwait(false);
-            _logger.LogInformation("Hardware id {Hwid}", hwid);
+            _logger.LogInformation("Hardware id starts with {HwidPrefix}", Hwid.LogPrefix(hwid));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

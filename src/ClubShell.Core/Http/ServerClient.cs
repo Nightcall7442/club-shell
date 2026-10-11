@@ -49,7 +49,7 @@ public static class ClubShellVersion
 /// HMAC request signing (SERVER_API.md §2.2), single-flight token refresh on <c>401</c>, one automatic retry after a
 /// <c>clockSkew</c> rejection using <c>X-Server-Time</c>, <c>Idempotency-Key</c> on creating POSTs, ETag conditional GETs,
 /// and error-envelope parsing into <see cref="ServerApiException"/>. Register/login responses are stored in the
-/// <see cref="ITokenStore"/> automatically.
+/// <see cref="ITokenStore"/> automatically; a re-registration is signed with the stored secret (D-78).
 /// </summary>
 public sealed class ServerClient : IServerClient, IDisposable
 {
@@ -759,7 +759,19 @@ public sealed class ServerClient : IServerClient, IDisposable
             var server = _settings.CurrentValue.Server;
             var uri = Endpoints.BuildUri(server.BaseUrl, path);
             var (response, accessToken) = await SendOnceAsync(method, uri, body, auth, idempotencyKey, etag, server, traceId, cancellationToken).ConfigureAwait(false);
-            if (response.StatusCode != HttpStatusCode.Unauthorized || auth is AuthMode.None or AuthMode.Club)
+            if (auth is AuthMode.None or AuthMode.Club)
+            {
+                // Refresh and register: every answer, an error too, carries X-Server-Time. A registration that follows a
+                // rejected refresh then signs its proof by the server's clock, even on a PC whose clock is off (D-78).
+                if (TryReadServerTime(response, out var answeredAt))
+                {
+                    ApplyServerTime(answeredAt);
+                }
+
+                return response;
+            }
+
+            if (response.StatusCode != HttpStatusCode.Unauthorized)
             {
                 return response;
             }
@@ -871,6 +883,14 @@ public sealed class ServerClient : IServerClient, IDisposable
                 }
 
                 request.Headers.Add(ClubKeyHeader, server.ClubApiKey);
+
+                // A PC that holds credentials proves it on re-registration: signed with its current secret, so the club
+                // key and the HWID alone do not get a PC's credentials (D-78). A secret that cannot be read signs nothing.
+                if (server.SigningEnabled && _tokens.Agent is { } held && StoredSecret(held) is { } secret)
+                {
+                    request.Options.Set(RequestSigningHandler.SignerOption, new RequestSigner(secret, () => ServerNow));
+                }
+
                 return null;
 
             default:
@@ -888,6 +908,19 @@ public sealed class ServerClient : IServerClient, IDisposable
                 }
 
                 return tokens.AccessToken;
+        }
+    }
+
+    private byte[]? StoredSecret(AgentTokens tokens)
+    {
+        try
+        {
+            return tokens.DecodeSigningSecret();
+        }
+        catch (Exception ex) when (ex is FormatException or ArgumentException)
+        {
+            _logger.LogWarning("The stored signing secret cannot be decoded; registering without proof");
+            return null;
         }
     }
 

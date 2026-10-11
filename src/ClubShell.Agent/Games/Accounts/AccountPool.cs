@@ -70,8 +70,8 @@ public sealed class ActiveLease
     /// <summary><see langword="true"/> when the lease expires within <paramref name="leeway"/> of <paramref name="now"/>.</summary>
     public bool IsExpired(DateTimeOffset now, TimeSpan? leeway = null) => now + (leeway ?? TimeSpan.Zero) >= ExpiresAt;
 
-    /// <summary>Redacted description (no secret).</summary>
-    public override string ToString() => $"lease {LeaseId} ({Launcher} account {Username}, expires {ExpiresAt:O})";
+    /// <summary>Redacted description for the log, which the kiosk user can read: no secret and no account login.</summary>
+    public override string ToString() => $"lease {LeaseId} ({Launcher}, expires {ExpiresAt:O})";
 }
 
 /// <summary>

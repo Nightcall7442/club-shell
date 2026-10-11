@@ -8,7 +8,8 @@ namespace ClubShell.Server.Auth;
 /// <summary>
 /// Authentication by the endpoint's <see cref="AuthRequirement"/> (DESIGN §3.1), before the handler and before the
 /// 501 of unimplemented operations. Agent mode: RS256 JWT, PC not deleted and <c>cv</c> current, HMAC signature
-/// (§3.3); repeats of a signature tuple are only logged (D-4). Port of club-server <c>AgentAuthMiddleware</c>.
+/// (§3.3); repeats of a signature tuple are only logged (D-4). Club mode (registration): the club key, and the
+/// signature of a re-registration read as <see cref="SignedRequest"/> (D-78). Port of club-server <c>AgentAuthMiddleware</c>.
 /// <para>
 /// User mode: <c>X-User-Token</c> must be a live player token bound to the PC of the agent token, else
 /// <c>401 userToken</c> with <c>problem</c> (<see cref="UserTokens.ValidateAsync"/>). Agent-optional-user mode validates
@@ -61,6 +62,14 @@ public sealed class AgentAuthMiddleware(
                 }
 
                 context.Features.Set(new ClubContext(club.Id));
+
+                // A re-registration signed with the PC's secret proves it holds it (D-78). Which secret only the HWID in
+                // the body tells, so the proof is read here and checked by PcRepository.RegisterAsync.
+                if (context.Request.Headers.ContainsKey(RequestSignature.SignatureHeader))
+                {
+                    context.Features.Set(await RequestSignature.ReadAsync(context));
+                }
+
                 break;
             case AuthMode.Agent or AuthMode.AgentOptionalUser or AuthMode.User:
                 var agent = await AuthenticateAgentAsync(context);

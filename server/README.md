@@ -61,6 +61,15 @@
   владелец его не одобрит (`PATCH /admin/pcs/{pcId} {maintenance:false}`). `Club:AutoApprovePcs=true` — только для dev
   и тестов.
   Неизвестный HWID с MAC живого ПК клуба (замена диска) создаёт ПК в ожидании с номером и именем старого места.
+- Перерегистрация одобренного ПК (D-78): агент 1.0.18 подписывает её прежним `signingSecret`, и тогда секрет сохраняется.
+  `Agents:RegisterProof`: `audit` (по умолчанию) — без подписи как раньше, плюс Warning «re-registered without a valid
+  proof»; `enforce` — без подписи `403 pendingApproval` и ничего не меняется, кроме окна владельца (`maintenance:true`,
+  `Agents:ReenrollWindowMin` = 60 мин, только офлайн-ПК); `off` — подпись не смотрится. Переход: сервер с `audit` → агент
+  1.0.18 на пилотном ПК (после ночи в его журнале «Stored agent tokens refreshed», в логе сервера по нему ни «registered», ни
+  предупреждения) → 1.0.18 на всех ПК → когда все одобренные ПК на 1.0.18+ и предупреждений нет несколько дней,
+  `Agents__RegisterProof=enforce` и перезапуск (откат — снова `audit`, данные не меняются). Пока хоть один ПК на старом агенте,
+  `enforce` не включать: тот ждал бы окна владельца после каждого включения. Переустановка ПК при `enforce` —
+  `docs/server/PILOT.md` §3.
 - Refresh-токен одноразовый; повтор использованного отзывает все токены ПК (`401 reused`), WS закрывается `4401`.
 - Политика ПК берётся из `data/policy.json`, а если его нет — из `config/policies.example.json` (копируется в
   `seed/`). Изменённый seed при старте поднимает `policyVersion`.
@@ -274,8 +283,8 @@ Playwright сам запускает `dotnet run` (Development, `Seed:Dev`, CORS
 `AgentTokenMinutes` / `RefreshTokenDays` / `SignatureWindowSec` / `UserTokenHours` / `PepperPath` / `OwnerPinPath` /
 `StaffTokenSlidingHours` / `StaffTokenAbsoluteDays`, `Club:Name` / `TimeZone` / `EnrollmentKey` / `PreviousEnrollmentKey` / `AutoApprovePcs` /
 `OwnerPin` / `OfflineLogin` / `GuestLogin`, `Realtime:PingSec` / `PongTimeoutSec` / `MaxFrameBytes`, `Agents:HeartbeatSec` /
-`OfflineAfterSec` / `CommandTtlMin` / `AckWaitSec`, `RateLimit:PinAttempts` / `PinWindowSec` / `PinClubAttempts` / `PinClubWindowSec` /
-`PinTrustedAttempts` / `PinDeviceTrustDays`, `Cors:AllowedOrigins`, `Sessions:GraceSec` /
+`OfflineAfterSec` / `CommandTtlMin` / `AckWaitSec` / `RegisterProof` / `ReenrollWindowMin`, `RateLimit:PinAttempts` / `PinWindowSec` /
+`PinClubAttempts` / `PinClubWindowSec` / `PinTrustedAttempts` / `PinDeviceTrustDays`, `Cors:AllowedOrigins`, `Sessions:GraceSec` /
 `MaxOfflineMinutes` (уходят в конфиг агента) / `TickMs` / `ResyncSec` / `PostpaidCreditLimit` (тиёны; `null` — без
 лимита), `Catalog:PolicySeedPath` / `GamesSeedPath`, `Workers:Enabled`, `Seed:Dev`, `Proxy:Trusted` / `ClientIpHeader`, `Sentry:Dsn`
 (и остальные ключи `Sentry:*` SDK, кроме приватности и Sentry Logs — их задаёт код; без DSN Sentry не подключается),

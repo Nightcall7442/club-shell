@@ -41,13 +41,21 @@ public sealed class MigrationTests(ServerFixture server) : IClassFixture<ServerF
         Assert.Equal(2, await ScalarAsync("SELECT count(*)::int FROM information_schema.columns WHERE table_name = 'products' AND column_name IN ('source', 'deleted_by')"));
         Assert.Equal(1, await ScalarAsync("SELECT count(*)::int FROM pg_indexes WHERE indexname = 'session_events_server'"));
 
-        // M0010 alone: the staff PIN failures and the trusted browsers go and come back (D-76).
+        // M0010 (and M0011 above it): the staff PIN failures and the trusted browsers go and come back (D-76).
         string[] login = ["staff_devices", "staff_login_failures"];
         runner.MigrateDown(2026100501);
         Assert.Empty((await TablesAsync()).Intersect(login));
         runner.MigrateUp();
         Assert.Equal(login, (await TablesAsync()).Intersect(login).Order());
         Assert.Equal(2, await ScalarAsync("SELECT count(*)::int FROM pg_indexes WHERE indexname IN ('staff_login_failures_source', 'staff_login_failures_club')"));
+
+        // M0011 alone: the re-enroll window of the re-registration proof (D-78) goes and comes back; M0010 stays.
+        const string reenroll = "SELECT count(*)::int FROM information_schema.columns WHERE table_name = 'pcs' AND column_name = 'reenroll_until'";
+        runner.MigrateDown(2026101201);
+        Assert.Equal(0, await ScalarAsync(reenroll));
+        Assert.Equal(login, (await TablesAsync()).Intersect(login).Order());
+        runner.MigrateUp();
+        Assert.Equal(1, await ScalarAsync(reenroll));
     }
 
     /// <summary>

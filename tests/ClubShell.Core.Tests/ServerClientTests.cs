@@ -26,7 +26,7 @@ namespace ClubShell.Core.Tests;
 /// <summary>
 /// <see cref="ServerClient"/> against a capturing <see cref="HttpMessageHandler"/>: request signing (SERVER_API.md §2.2),
 /// error envelopes (§3), single-flight token refresh, clock-skew correction, <c>204</c>/<c>304</c> handling,
-/// idempotency keys, route formatting and the retry classifier.
+/// idempotency keys, route formatting, the retry classifier and the re-registration proof (D-78).
 /// </summary>
 public sealed class ServerClientTests : IDisposable
 {
@@ -443,6 +443,79 @@ public sealed class ServerClientTests : IDisposable
 
     #endregion
 
+    #region Re-registration proof (D-78)
+
+    [Fact]
+    public async Task Registration_with_stored_tokens_is_signed_with_the_stored_secret()
+    {
+        await RegisterAsync();
+        _settings.Server.ClubApiKey = "club-key";
+        _handler.Responder = _ => Pending();
+
+        await RegisterRefusedAsync();
+
+        var request = _handler.Requests.Should().ContainSingle().Subject;
+        request.Header("X-Club-Key").Should().Be("club-key");
+        request.Header("Authorization").Should().BeNull("registration is club mode, never Bearer");
+        request.Header(Signing.TimestampHeader).Should().Be(Unix(UnixNow));
+        request.Header(Signing.SignatureHeader).Should().Be(Signing.Sign(Secret, UnixNow, "POST", "/api/v1/agents/register", Signing.Sha256Hex(request.Body!)));
+    }
+
+    [Fact]
+    public async Task Registration_without_stored_tokens_or_with_an_unreadable_secret_is_unsigned()
+    {
+        _settings.Server.ClubApiKey = "club-key";
+        _handler.Responder = _ => Pending();
+        await RegisterRefusedAsync();
+        await _tokens.SetAgentAsync(new AgentTokens(PcId, "access-1", "refresh-1", "not base64!", _clock.UtcNow.AddHours(1)), CancellationToken.None);
+        await RegisterRefusedAsync();
+
+        _handler.Requests.Should().HaveCount(2).And.OnlyContain(r =>
+            r.Header("X-Club-Key") == "club-key" && r.Header(Signing.TimestampHeader) == null && r.Header(Signing.SignatureHeader) == null);
+    }
+
+    [Fact]
+    public async Task Refresh_answers_set_the_server_clock_so_the_registration_proof_is_in_the_window()
+    {
+        // The PC clock runs ahead of the server's. Every refresh answer, the rejected one too, carries X-Server-Time.
+        await RegisterAsync();
+        _settings.Server.ClubApiKey = "club-key";
+        var serverTime = _clock.UtcNow.AddHours(-1);
+        var refreshJson = JsonDefaults.Serialize(new AgentRefreshResponse("access-2", "refresh-2", _clock.UtcNow.AddHours(1)));
+        _handler.Responder = request =>
+        {
+            var response = !IsRefresh(request) ? Pending()
+                : request.Body is { } body && JsonDefaults.Deserialize<AgentRefreshRequest>(body)!.RefreshToken == "refresh-1" ? Json(HttpStatusCode.OK, refreshJson)
+                : Json(HttpStatusCode.Unauthorized, ErrorBody(ErrorCode.Unauthorized, "Refresh token already used", "reused", "t-reused"));
+            response.Headers.Add(Signing.ServerTimeHeader, JsonDefaults.Serialize(serverTime).Trim('"'));
+            return response;
+        };
+
+        await _client.RefreshAsync(CancellationToken.None);
+        _client.ServerTimeOffset.Should().Be(TimeSpan.FromHours(-1));
+
+        serverTime = _clock.UtcNow.AddHours(-2);
+        Func<Task> refresh = () => _client.RefreshAsync(CancellationToken.None);
+        (await refresh.Should().ThrowAsync<ServerApiException>()).Which.Reason.Should().Be("reused");
+        _client.ServerTimeOffset.Should().Be(TimeSpan.FromHours(-2));
+
+        await RegisterRefusedAsync();
+        var register = _handler.Requests[2];
+        var signedAt = serverTime.ToUnixTimeSeconds();
+        register.Header(Signing.TimestampHeader).Should().Be(Unix(signedAt));
+        register.Header(Signing.SignatureHeader).Should().Be(Signing.Sign(Secret, signedAt, "POST", "/api/v1/agents/register", Signing.Sha256Hex(register.Body!)));
+    }
+
+    [Fact]
+    public void A_hardware_id_is_logged_by_its_first_8_characters_only()
+    {
+        var hwid = Hwid.Compute(HardwareComponents);
+        Hwid.LogPrefix(hwid).Should().Be(hwid[..8]);
+        Hwid.LogPrefix("abc").Should().Be("abc");
+    }
+
+    #endregion
+
     #region Response shapes
 
     [Fact]
@@ -744,6 +817,19 @@ public sealed class ServerClientTests : IDisposable
     private static HttpResponseMessage Json(HttpStatusCode status, string body) => FakeHttpHandler.Json(status, body);
 
     private static HttpResponseMessage Ok<T>(T value) => FakeHttpHandler.Json(HttpStatusCode.OK, JsonDefaults.Serialize(value));
+
+    private static HttpResponseMessage Pending() =>
+        Json(HttpStatusCode.Forbidden, ErrorBody(ErrorCode.Forbidden, "PC is waiting for approval", "pendingApproval", "t-pending"));
+
+    /// <summary>A registration the server answers with <c>403 pendingApproval</c> (the request is what the tests look at).</summary>
+    private async Task RegisterRefusedAsync()
+    {
+        var hardware = new HardwareInfo(
+            new CpuInfo("Ryzen 5 5600", 6, 12), [], 16384, [], [], new NetworkInfo("aa:bb:cc:dd:ee:ff", "10.0.1.12", "Ethernet"), new OsInfo("10.0.22631", "22631"), []);
+        Func<Task> act = () => _client.RegisterAsync(
+            new AgentRegisterRequest(Hwid.Compute(HardwareComponents), "CLUB-PC", "1.0.18", hardware, "10.0.1.12", "aa:bb:cc:dd:ee:ff", null), CancellationToken.None);
+        (await act.Should().ThrowAsync<ServerApiException>()).Which.Reason.Should().Be("pendingApproval");
+    }
 
     private static string ErrorBody(ErrorCode code, string message, string? reason, string traceId) =>
         JsonDefaults.Serialize(new ServerErrorEnvelope(new ServerError(code, message, reason is null ? null : JsonDefaults.ToElement(new ReasonDetails(reason)), traceId)));
