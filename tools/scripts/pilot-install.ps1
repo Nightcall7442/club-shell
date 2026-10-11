@@ -59,6 +59,10 @@ function Get-RegistrationState([string[]] $lines) {
             'Reusing stored agent tokens*' {
                 $state = [pscustomobject]@{ Kind = 'reused'; Detail = "id $($e.PcId)" }
             }
+            'Stored agent tokens refreshed*' {
+                # Agents from 1.0.18 refresh expired tokens at start instead of registering again (D-78).
+                $state = [pscustomobject]@{ Kind = 'reused'; Detail = "id $($e.PcId)" }
+            }
             'Registration attempt*failed*' {
                 $x = [string] $e.'@x'
                 $kind = if ($x -match 'waiting for approval|pendingApproval') { 'waiting' }

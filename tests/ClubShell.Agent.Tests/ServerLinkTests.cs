@@ -10,13 +10,15 @@ using ClubShell.Contracts.Pcs;
 using ClubShell.Contracts.Serialization;
 using ClubShell.Core.Abstractions;
 using ClubShell.Core.Configuration;
+using ClubShell.Core.Http;
 using ClubShell.Core.Security;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ClubShell.Agent.Tests;
 
 // ---------------------------------------------------------------------------------------------
-// Agent <-> server link: live-socket token refresh, power-command acks across restarts, launch-report
+// Agent <-> server link: live-socket token refresh, start-up credentials (refresh first, register only
+// when the refresh is rejected, D-78), power-command acks across restarts, launch-report
 // outbox, telemetry batch rejection, hardware inventory at start, Riot -> Vanguard launch gate,
 // anti-cheat games refused on a network path.
 // ---------------------------------------------------------------------------------------------
@@ -141,6 +143,76 @@ public sealed class ServerLinkTests : IDisposable
         _time.Advance(TimeSpan.FromSeconds(1));
         await run.WaitAsync(TimeSpan.FromSeconds(10));
         refreshed.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task A_start_with_an_expired_access_token_refreshes_and_does_not_register()
+    {
+        // The PC was off overnight: before D-78 it registered again every morning.
+        var (server, tokens) = Stored(new AgentTokens(Guid.NewGuid(), "old", "refresh", "c2VjcmV0", T0.AddHours(-8)));
+        var registered = 0;
+
+        await EnsureCredentialsAsync(server, tokens, _ =>
+        {
+            registered++;
+            return Task.CompletedTask;
+        });
+
+        await server.Received(1).RefreshAsync(Arg.Any<CancellationToken>());
+        registered.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task A_rejected_refresh_leads_to_a_registration_that_is_retried_without_refreshing_again()
+    {
+        // Reused (a refresh answer was lost), expired (off for over 30 days) or revoked: the registration proves the secret.
+        var (server, tokens) = Stored(new AgentTokens(Guid.NewGuid(), "old", "refresh", "c2VjcmV0", T0.AddHours(-8)));
+        server.RefreshAsync(Arg.Any<CancellationToken>()).Returns(_ => Task.FromException<AgentRefreshResponse>(
+            new ServerApiException(ErrorCode.Unauthorized, HttpStatusCode.Unauthorized, null, null, "Refresh token already used")));
+        var attempts = 0;
+
+        await EnsureCredentialsAsync(server, tokens, _ => ++attempts == 1 ? Task.FromException(Pending()) : Task.CompletedTask);
+
+        attempts.Should().Be(2);
+        await server.Received(1).RefreshAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task An_unreachable_server_keeps_the_refresh_retrying_and_never_registers()
+    {
+        // However long the PC was offline, a transport error is not a reason to register.
+        var (server, tokens) = Stored(new AgentTokens(Guid.NewGuid(), "old", "refresh", "c2VjcmV0", T0.AddDays(-3)));
+        var refreshes = 0;
+        server.RefreshAsync(Arg.Any<CancellationToken>()).Returns(_ => ++refreshes < 5
+            ? Task.FromException<AgentRefreshResponse>(new ServerApiException(ErrorCode.ServerUnavailable, HttpStatusCode.ServiceUnavailable, null, null, "connection refused"))
+            : Task.FromResult(new AgentRefreshResponse("new", "refresh-2", T0.AddHours(1))));
+        var registered = 0;
+
+        await EnsureCredentialsAsync(server, tokens, _ =>
+        {
+            registered++;
+            return Task.CompletedTask;
+        });
+
+        refreshes.Should().Be(5);
+        registered.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Without_tokens_the_pc_registers_and_a_403_keeps_the_register_backoff()
+    {
+        var (server, tokens) = Stored(null);
+        var attempts = new List<DateTimeOffset>();
+
+        await EnsureCredentialsAsync(server, tokens, _ =>
+        {
+            attempts.Add(_time.GetUtcNow());
+            return attempts.Count < 3 ? Task.FromException(Pending()) : Task.CompletedTask;
+        });
+
+        attempts.Should().HaveCount(3);
+        attempts.Zip(attempts.Skip(1), (a, b) => b - a).Should().OnlyContain(gap => gap >= AgentCredentials.RetryMin && gap <= AgentCredentials.RetryMax);
+        await server.DidNotReceive().RefreshAsync(Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -380,6 +452,36 @@ public sealed class ServerLinkTests : IDisposable
 
         inventory.Pending.Should().BeSameAs(first);
         inventory.Baseline.Should().BeSameAs(first);
+    }
+
+    private static ServerApiException Pending() =>
+        new(ErrorCode.Forbidden, HttpStatusCode.Forbidden, null, null, "PC is waiting for approval");
+
+    /// <summary>A server client whose clock is the test's and a token store holding <paramref name="agent"/>.</summary>
+    private (IServerClient Server, ITokenStore Tokens) Stored(AgentTokens? agent)
+    {
+        var server = Substitute.For<IServerClient>();
+        server.ServerNow.Returns(_ => _time.GetUtcNow());
+        var tokens = Substitute.For<ITokenStore>();
+        tokens.Agent.Returns(agent);
+        return (server, tokens);
+    }
+
+    /// <summary>Runs the start-up credentials path to its end; each backoff wait passes as soon as it is armed.</summary>
+    private async Task EnsureCredentialsAsync(IServerClient server, ITokenStore tokens, Func<CancellationToken, Task> register)
+    {
+        Task run = AgentCredentials.EnsureAsync(server, tokens, register, new SystemClock(_time), TimeSpan.FromMinutes(2), NullLogger.Instance, CancellationToken.None);
+        for (var i = 0; i < 50 && !run.IsCompleted; i++)
+        {
+            while (!run.IsCompleted && _time.ActiveTimers == 0)
+            {
+                await Task.Delay(1);
+            }
+
+            _time.Advance(AgentCredentials.RetryMax);
+        }
+
+        await run.WaitAsync(TimeSpan.FromSeconds(10));
     }
 
     private static HardwareInfo Hardware(int ramMb, double freeGb = 200) => new(
