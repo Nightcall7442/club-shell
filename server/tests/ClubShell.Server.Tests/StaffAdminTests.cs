@@ -1,12 +1,15 @@
 using System.Text.Json;
+using Dapper;
+using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 using static ClubShell.Server.Tests.Staff;
 
 namespace ClubShell.Server.Tests;
 
 /// <summary>
 /// The owner's staff editor (slice S5, DESIGN §3.5): owner only (<c>ck_</c> too), PIN 4–8 digits and unique on create and
-/// change, a new PIN signs the member out elsewhere (D-77), nobody disables themselves, disabling revokes the member's tokens
-/// for good.
+/// change, a new PIN signs the member out elsewhere (D-77; a sign-in with the old PIN racing the change too), nobody disables
+/// themselves, disabling revokes the member's tokens for good.
 /// </summary>
 public sealed class StaffAdminTests(ServerFixture server) : IClassFixture<ServerFixture>
 {
@@ -97,6 +100,40 @@ public sealed class StaffAdminTests(ServerFixture server) : IClassFixture<Server
 
         // Only the member's own tokens: the first owner's session is untouched.
         await ExpectAsync(server, 200, HttpMethod.Get, "/me", owner);
+    }
+
+    [Fact]
+    public async Task A_sign_in_with_the_old_pin_racing_the_change_keeps_no_token()
+    {
+        // The change goes through the API key, whose check does not touch staff_tokens, which the test holds below.
+        var key = await ApiKeyAsync(server);
+        try
+        {
+            var id = (await ExpectAsync(server, 200, HttpMethod.Post, "/staff", key, new { name = "Гонка PIN", role = "cashier", pin = "60221" })).GetProperty("id").GetString();
+
+            // The sign-in has matched the old PIN and waits to store its token when the change starts: one must wait for the
+            // other, so that the change revokes the token or the sign-in reads the new PIN (D-77).
+            string token;
+            await using (var hold = await server.Services.GetRequiredService<NpgsqlDataSource>().OpenConnectionAsync())
+            await using (var tx = await hold.BeginTransactionAsync())
+            {
+                await hold.ExecuteAsync("LOCK TABLE staff_tokens IN EXCLUSIVE MODE", transaction: tx);
+                var signIn = LoginAsync(server, "60221");
+                await LockWaitsAsync(1);
+                var change = ExpectAsync(server, 200, HttpMethod.Patch, $"/staff/{id}", key, new { pin = "60222" });
+                await LockWaitsAsync(2);
+                await tx.CommitAsync();
+                token = await signIn;
+                await change;
+            }
+
+            using var response = await server.Http.SendAsync(Request(HttpMethod.Get, "/me", token));
+            await Contract.ReadErrorAsync(response, 401, "unauthorized", "invalid");
+        }
+        finally
+        {
+            await ClearApiKeyAsync(server);
+        }
     }
 
     [Fact]
@@ -226,6 +263,22 @@ public sealed class StaffAdminTests(ServerFixture server) : IClassFixture<Server
     }
 
     private Task<bool> ActiveAsync(Guid id) => Players.ScalarAsync<bool>(server, "SELECT active FROM staff WHERE id = @id", new { id });
+
+    /// <summary>Until <paramref name="count"/> statements of the fixture's database wait on a lock.</summary>
+    private async Task LockWaitsAsync(int count)
+    {
+        for (var i = 0; i < 200; i++)
+        {
+            if (await Players.ScalarAsync<int>(server, "SELECT count(*)::int FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'") >= count)
+            {
+                return;
+            }
+
+            await Task.Delay(25);
+        }
+
+        Assert.Fail($"{count} statements never waited on a lock");
+    }
 
     private const string StaffTokensName = Auth.StaffTokens.ApiKeyName;
 

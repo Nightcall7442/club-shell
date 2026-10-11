@@ -86,10 +86,14 @@ public sealed class StaffTokens(NpgsqlDataSource db, AuthOptions options, TimePr
         await using var tx = await c.BeginTransactionAsync();
         await StaffLoginGuard.LockAsync(c, tx, clubId);
         await guard.CheckAsync(c, tx, source, now);
+
+        // FOR SHARE: a new PIN or a deactivation (which lock the row to update it) waits for this sign-in and then revokes its
+        // token, or this sign-in waits for them and reads the new row; a plain read could still match the old PIN and store a
+        // token after the revocation ran (D-77).
         var staff = clubId == Guid.Empty
             ? null
             : await c.QuerySingleOrDefaultAsync<StaffRow>(
-                $"{StaffRow.Select} WHERE s.club_id = @clubId AND s.pin_hmac = @hmac AND s.active AND NOT cl.disabled",
+                $"{StaffRow.Select} WHERE s.club_id = @clubId AND s.pin_hmac = @hmac AND s.active AND NOT cl.disabled FOR SHARE OF s",
                 new { clubId, hmac = PinHmac(pin) }, tx);
         if (staff is null)
         {
