@@ -288,6 +288,12 @@ export function clubRoutes(app: FastifyInstance): void {
       const pin = str(b, 'pin', 12);
       if (!/^\d{4,8}$/.test(pin)) throw errors.validation('pin', 'digits4to8');
       s.pin = pin;
+      // As the server (D-77): the member's other sessions end; whoever changed their own PIN keeps this one.
+      const c = club();
+      const own = bearer(req);
+      for (const [token, id] of Object.entries(c.staffTokens)) {
+        if (id === s.id && token !== own) delete c.staffTokens[token];
+      }
     }
     markDirty();
     return { ok: true };

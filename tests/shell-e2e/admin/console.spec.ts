@@ -530,6 +530,42 @@ test('the console sends one browser id with every PIN, keeps it across sign-outs
   expect(sent).toEqual([kept, kept, kept]);
 });
 
+test('a new PIN ends the other sessions of its member and keeps the one that changed it', async ({ request }) => {
+  // D-77, the mock as the server: a console that went on with another session of that member would get 401.
+  const owner = await tokenFor(request, OWNER_PIN);
+  const newPin = (): string => String(10_000_000 + (randomBytes(4).readUInt32BE() % 90_000_000));
+  const me = async (token: string): Promise<number> =>
+    (await request.get(`${API}/admin/me`, { headers: auth(token) })).status();
+  const add = async (name: string, role: string, pin: string): Promise<string> => {
+    const res = await request.post(`${API}/admin/staff`, { headers: auth(owner), data: { name, role, pin } });
+    expect(res.ok(), await res.text()).toBeTruthy();
+    return ((await res.json()) as { id: string }).id;
+  };
+  const setPin = async (token: string, id: string, pin: string): Promise<void> => {
+    const res = await request.patch(`${API}/admin/staff/${id}`, { headers: auth(token), data: { pin } });
+    expect(res.ok(), await res.text()).toBeTruthy();
+  };
+
+  // The owner gives a cashier a new PIN: every session of the old one ends.
+  const cashierPin = newPin();
+  const cashier = await add('E2E смена PIN кассира', 'cashier', cashierPin);
+  const sessions = [await tokenFor(request, cashierPin), await tokenFor(request, cashierPin)];
+  const next = newPin();
+  await setPin(owner, cashier, next);
+  for (const token of sessions) expect(await me(token)).toBe(401);
+  expect(await me(await tokenFor(request, next))).toBe(200);
+
+  // An owner who changes their own PIN stays in that session; their other one ends, other members' do not.
+  const ownerPin = newPin();
+  const second = await add('E2E смена своего PIN', 'owner', ownerPin);
+  const here = await tokenFor(request, ownerPin);
+  const there = await tokenFor(request, ownerPin);
+  await setPin(here, second, newPin());
+  expect(await me(here)).toBe(200);
+  expect(await me(there)).toBe(401);
+  expect(await me(owner)).toBe(200);
+});
+
 test('the owner sees every section', async ({ page }) => {
   await signIn(page, OWNER_PIN);
   for (const label of ['Касса', 'Настройка клуба', 'Бизнес', 'Тарифы и цены', 'Отчёты', 'Персонал']) {
