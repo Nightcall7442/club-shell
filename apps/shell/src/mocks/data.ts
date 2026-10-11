@@ -1389,7 +1389,7 @@ export const POLICY: Policy = {
   },
   power: { idleShutdownMin: 90, scheduledShutdown: '05:00' },
   updates: { channel: 'stable', autoInstall: true },
-  anticheat: { required: ['eac', 'vanguard'], blockOnViolation: true },
+  anticheat: { required: [], blockOnViolation: true },
   kiosk: { idleTimeoutSec: 300, adsIntervalSec: 900, allowVirtualKeyboard: true },
 };
 

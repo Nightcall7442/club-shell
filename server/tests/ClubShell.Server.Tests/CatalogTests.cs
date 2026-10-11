@@ -121,7 +121,8 @@ public sealed class GamesTests(CatalogServerFixture server) : IClassFixture<Cata
 /// <summary>
 /// A fixture with one game of each anti-cheat case of D-74: none, tagged Vanguard by the catalog, a Riot game the catalog
 /// did not tag (the agent's gate treats it as Vanguard) and a Riot game tagged with another anti-cheat. The club's policy
-/// is the seed's, which requires Vanguard for every game with an anti-cheat (<c>anticheat.required</c>).
+/// is the seed's, which requires no anti-cheat for every launch (<c>anticheat.required</c> is empty, Q-16): each game checks
+/// only its own.
 /// </summary>
 public class VanguardCatalogFixture : ServerFixture
 {
@@ -148,13 +149,28 @@ public class VanguardCatalogFixture : ServerFixture
     }
 }
 
+/// <summary>The games of <see cref="VanguardCatalogFixture"/> under a club policy that requires EAC and Vanguard for every launch.</summary>
+public sealed class VanguardRequiredCatalogFixture : VanguardCatalogFixture
+{
+    public VanguardRequiredCatalogFixture()
+    {
+        var seed = JsonDefaults.Deserialize<Policy>(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "seed", "policies.example.json")))!;
+        var path = Path.Combine(DataDir, "policy.json");
+        File.WriteAllText(path, JsonDefaults.Serialize(seed with
+        {
+            Anticheat = new AntiCheatPolicy([AntiCheatKind.Eac, AntiCheatKind.Vanguard], BlockOnViolation: true),
+        }));
+        Settings["Catalog:PolicySeedPath"] = path;
+    }
+}
+
 /// <summary>
 /// <c>getGames</c> on a PC without Vanguard (D-74): when the PC's last heartbeat says vgk is missing or not loaded, the games
-/// the agent's gate would refuse there are left out — under the seed's policy, which requires Vanguard for every game with
-/// an anti-cheat, all of those, the EAC game too; a heartbeat that does not say (an older agent, unknown fields) or a loaded
+/// the agent's gate would refuse there are left out — under a policy that requires Vanguard for every game with an
+/// anti-cheat, all of those, the EAC game too; a heartbeat that does not say (an older agent, unknown fields) or a loaded
 /// vgk hides nothing; the ETag follows the visible set.
 /// </summary>
-public sealed class VanguardGamesTests(VanguardCatalogFixture server) : IClassFixture<VanguardCatalogFixture>
+public sealed class VanguardGamesTests(VanguardRequiredCatalogFixture server) : IClassFixture<VanguardRequiredCatalogFixture>
 {
     private static readonly Guid[] All =
         [VanguardCatalogFixture.Plain, VanguardCatalogFixture.Tagged, VanguardCatalogFixture.RiotUntagged, VanguardCatalogFixture.RiotEac];
@@ -238,27 +254,18 @@ public sealed class VanguardGamesTests(VanguardCatalogFixture server) : IClassFi
     }
 }
 
-/// <summary>The games of <see cref="VanguardCatalogFixture"/> under a policy that requires EAC only.</summary>
-public sealed class VanguardOptionalCatalogFixture : VanguardCatalogFixture
-{
-    public VanguardOptionalCatalogFixture()
-    {
-        var seed = JsonDefaults.Deserialize<Policy>(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "seed", "policies.example.json")))!;
-        var path = Path.Combine(DataDir, "policy.json");
-        File.WriteAllText(path, JsonDefaults.Serialize(seed with { Anticheat = new AntiCheatPolicy([AntiCheatKind.Eac], BlockOnViolation: true) }));
-        Settings["Catalog:PolicySeedPath"] = path;
-    }
-}
-
 /// <summary>
-/// D-74 follows the club's policy: without Vanguard in <c>anticheat.required</c>, or with <c>blockOnViolation</c> off, the
-/// agent's gate lets a game of another anti-cheat start on a PC without vgk, so only the Vanguard games are hidden there.
+/// D-74 follows the club's policy: without Vanguard in <c>anticheat.required</c> (the seed's, Q-16), or with
+/// <c>blockOnViolation</c> off, the agent's gate lets a game of another anti-cheat start on a PC without vgk, so only the
+/// Vanguard games are hidden there.
 /// </summary>
-public sealed class VanguardOptionalGamesTests(VanguardOptionalCatalogFixture server) : IClassFixture<VanguardOptionalCatalogFixture>
+public sealed class VanguardOptionalGamesTests(VanguardCatalogFixture server) : IClassFixture<VanguardCatalogFixture>
 {
     [Fact]
     public async Task Only_Vanguard_games_are_hidden_when_the_policy_does_not_make_every_launch_need_Vanguard()
     {
+        var seed = JsonDefaults.Deserialize<Policy>(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "seed", "policies.example.json")))!;
+        Assert.Empty(seed.Anticheat.Required);
         var agent = await TestAgent.CreateAsync(server);
         await Players.ReadAsync(await agent.HeartbeatAsync(antiCheat: new { vanguardInstalled = true, vanguardLoaded = false }), 200);
         Guid[] startable = VanguardGamesTests.Sorted([VanguardCatalogFixture.Plain, VanguardCatalogFixture.RiotEac]);
