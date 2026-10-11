@@ -47,7 +47,7 @@ const LAUNCHERS = knownValues(LauncherType);
 /**
  * As the server (D-74): whether a PC whose last heartbeat says vgk is missing or not loaded cannot start `game` — a
  * Vanguard game (tagged so, or a Riot game with no tag, as the Agent's gate reads it) never, and any other game with an
- * anti-cheat when the policy requires Vanguard for every launch and blocks on a violation (the seed does).
+ * anti-cheat when the policy requires Vanguard for every launch and blocks on a violation (the seed no longer does, Q-16).
  */
 function needsVanguard(game: Game): boolean {
   const kind =

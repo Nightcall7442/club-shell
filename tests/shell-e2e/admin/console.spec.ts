@@ -2252,12 +2252,14 @@ test('a PC without a loaded Vanguard is not offered the games it could not start
   await heartbeat(request, pc, { antiCheat: { vanguardInstalled: true, vanguardLoaded: true } });
   const all = await listed();
 
-  // Installed but not loaded until a reboot. The seed policy requires Vanguard for every game with an anti-cheat, so
-  // only the games without one (and not Riot's, which the Agent treats as Vanguard) are left.
+  // Installed but not loaded until a reboot. The seed policy requires no anti-cheat for every launch (Q-16), so only the
+  // games whose own anti-cheat is Vanguard are left out: tagged `vanguard`, or Riot's untagged ones, which the Agent treats
+  // as Vanguard.
   await heartbeat(request, pc, { antiCheat: { vanguardInstalled: true, vanguardLoaded: false } });
-  expect((await listed()).map((g) => g.id)).toEqual(
-    all.filter((g) => g.antiCheat === 'none' && g.launcher !== 'riot').map((g) => g.id),
-  );
+  const needsVanguard = (g: { launcher: string; antiCheat: string }): boolean =>
+    g.antiCheat === 'vanguard' || (g.launcher === 'riot' && g.antiCheat === 'none');
+  expect(all.some(needsVanguard)).toBeTruthy();
+  expect((await listed()).map((g) => g.id)).toEqual(all.filter((g) => !needsVanguard(g)).map((g) => g.id));
 
   // Loaded after the reboot: the whole catalog again.
   await heartbeat(request, pc, { antiCheat: { vanguardInstalled: true, vanguardLoaded: true } });
