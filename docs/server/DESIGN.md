@@ -231,6 +231,8 @@ server/
 | `Agents:OfflineAfterSec` | `90` | Нет WS и heartbeat старше этого → `offline` |
 | `Agents:CommandTtlMin` | `10` | `expiresAt` для lock/unlock/reboot/shutdown/message |
 | `Agents:AckWaitSec` | `30` | Ожидание ack в `adminCommand` |
+| `Agents:RegisterProof` | `audit` | `off` \| `audit` \| `enforce`: чем одобренный ПК доказывает перерегистрацию (§3.2, D-78). Агенту не передаётся |
+| `Agents:ReenrollWindowMin` | `60` | Сколько минут после `maintenance:true` владельца офлайн-ПК может перерегистрироваться без доказательства (D-78) |
 | `Sessions:TickMs` | `1000` | |
 | `Sessions:GraceSec` | `60` | → `AgentServerConfig.session.graceSec` |
 | `Sessions:MaxOfflineMinutes` | `240` | |
@@ -286,9 +288,24 @@ server/
 
 1. `X-Club-Key` сравнивается в постоянном времени: SHA-256 обоих значений, затем `FixedTimeEquals`
    (`srv/TokenService.cs:141`). Проверяются `EnrollmentKey` и `PreviousEnrollmentKey` — это льготный период ротации:
-   агенты перерегистрируются каждое утро.
+   агенты до 1.0.18 перерегистрируются каждое утро.
 2. HWID уже известен в этом клубе → тот же `pcId`, новые токены, новый `signingSecret` (32 байта),
    `credentials_version += 1`, старые refresh-токены удаляются. Статус, одобрение и открытый сеанс не меняются.
+   Ключ клуба и HWID только называют ПК: оба доступны игроку за ПК (`agent.json` читают все пользователи, HWID — хеш
+   аппаратных данных, до 1.0.18 он ещё и писался в журнал агента целиком). Поэтому одобренный ПК, которому
+   секрет уже выдан, получает новые данные, лишь доказав, что держит этот секрет (D-78, `Agents:RegisterProof`):
+   - доказательство — подпись регистрации текущим `signingSecret` по §3.3 (`X-Timestamp`, `X-Signature` над
+     `/api/v1/agents/register` и телом; окно ±`SignatureWindowSec`; повтор кортежа не засчитывается). Секрет зависит от HWID
+     в теле, поэтому middleware только читает подпись, а проверяет её `PcRepository.RegisterAsync`;
+   - доказательство верно → всё как выше, но секрет **сохраняется**: потерянный ответ агент повторит с тем же доказательством;
+   - доказательства нет или оно неверно: `audit` (по умолчанию) — как выше и Warning в логе; `enforce` — ничего не
+     пишется (инвентарь, версия агента, `cv`, refresh-токены, сокет как были), ответ `403 forbidden pendingApproval` с
+     `pcId`. Исключение — окно владельца: `PATCH /admin/pcs/{pcId} {maintenance:true}` ставит `pcs.reenroll_until = now +
+     Agents:ReenrollWindowMin`, и пока оно открыто, офлайн-ПК (нет сокета и heartbeat старше `OfflineAfterSec`, как в
+     §6.6) получает новые данные. Любые новые данные и `maintenance:false` окно закрывают; авто-обслуживание здоровья
+     (§8) его не открывает. Порядок для владельца при переустановке или переливке образа — `docs/server/PILOT.md` §3;
+   - `off` — как выше, подпись не смотрится;
+   - первые данные после одобрения (секрета ещё нет, D-7) доказательства не требуют.
 3. HWID неизвестен:
    - сначала ищется живой ПК клуба с тем же нормализованным MAC (при нескольких предпочитается `previousPcId`);
      если он есть, сервер предлагает место этого ПК (pre-fill: номер, имя, зона, координаты). Условие «`hwid IS
@@ -316,6 +333,10 @@ server/
 - Несовпадение `hwid` → `401 revoked`.
 - `signingSecret` в v1 при refresh не ротируется: поле опционально, агент поддерживает ротацию атомарно
   (`ServerClient.cs:913-927`).
+- Агент с 1.0.18 (D-78, `AgentCredentials`): при старте с истекающим access-токеном сначала refresh; регистрация — только
+  если refresh отвергнут (401/403: `expired`, `reused`, `revoked`), и она подписана сохранённым секретом. Сетевая ошибка
+  или 5xx — повтор refresh с backoff 3…60 с, без регистрации. `X-Server-Time` каждого ответа refresh и register задаёт
+  смещение часов агента: подпись регистрации попадает в окно и на ПК с неверными часами.
 
 **Ключ JWT:**
 
@@ -442,7 +463,9 @@ X-Signature = lowercase hex( HMAC-SHA256( base64decode(signingSecret),
   действие. Мок пишет его до валидации (`mock/routes/admin.ts:258`). Лимита в 5000 записей нет.
 - **Деньги** — в `ledger_entries` (append-only, §4.3).
 - **События безопасности** пишутся в структурированный лог, без таблицы: регистрация, pendingApproval,
-  refresh-reuse, несовпадение подписи, replay, неверный PIN.
+  refresh-reuse, несовпадение подписи, replay, неверный PIN. Перерегистрация без доказательства (D-78) — Warning: отказ
+  (`enforce`), выдача без доказательства (`audit`) или в окне владельца, с `pcId`, IP, `X-Agent-Version` и причиной
+  `none | mismatch | clockSkew | replay`; заголовки подписи не пишутся.
 
 ### 3.8 CORS кассы (`cc/openapi` info §11)
 
@@ -487,7 +510,7 @@ X-Signature = lowercase hex( HMAC-SHA256( base64decode(signingSecret),
 |---|---|---|---|
 | `networks` | id, name, created_at | | M0001 |
 | `clubs` | id, network_id, name, city, address, time_zone (default `Asia/Tashkent`), currency (`UZS`), enrollment_key_hash bytea, prev_enrollment_key_hash bytea NULL, api_key text NULL, settings jsonb (AdminClubSettings без `promoCodes`/`automation`/`webhooks`, `apiKey`, `events`), health_settings jsonb (`AdminHealthSettings` — в AdminClubSettings его нет), settings_version int, config_version int, catalog_version int, policy jsonb, policy_version int, disabled bool, created_at, updated_at | CHECK currency='UZS' | M0001 |
-| `pcs` | id, club_id, number, name, zone, x, y, device_kind (`pc\|console\|vr\|other`), hwid NULL, mac_address NULL (нормализованный lower-case с двоеточиями), machine_name, ip_address, approved bool, maintenance bool, credentials_version int, signing_secret bytea, agent_version, shell_version, last_heartbeat_at NULL, last_heartbeat jsonb NULL (runningGames, offlineQueue, shellConnected, …), hardware jsonb NULL, created_at, updated_at, deleted_at NULL | `UNIQUE(club_id,id)`; `UNIQUE(club_id,number) WHERE deleted_at IS NULL AND approved` (место держит только одобренный ПК: ожидающий одобрения может нести предзаполненное место заменяемого ПК, §3.2/§9, такой ПК всегда создаётся pending; одобрение на занятое место → 409); `UNIQUE(hwid) WHERE hwid IS NOT NULL AND deleted_at IS NULL` (HWID уникален в пределах всей сети, иначе 409); `number BETWEEN 1 AND 9999` | M0001 |
+| `pcs` | id, club_id, number, name, zone, x, y, device_kind (`pc\|console\|vr\|other`), hwid NULL, mac_address NULL (нормализованный lower-case с двоеточиями), machine_name, ip_address, approved bool, maintenance bool, credentials_version int, signing_secret bytea, agent_version, shell_version, last_heartbeat_at NULL, last_heartbeat jsonb NULL (runningGames, offlineQueue, shellConnected, …), hardware jsonb NULL, created_at, updated_at, deleted_at NULL, reenroll_until NULL (M0011, окно перерегистрации, D-78) | `UNIQUE(club_id,id)`; `UNIQUE(club_id,number) WHERE deleted_at IS NULL AND approved` (место держит только одобренный ПК: ожидающий одобрения может нести предзаполненное место заменяемого ПК, §3.2/§9, такой ПК всегда создаётся pending; одобрение на занятое место → 409); `UNIQUE(hwid) WHERE hwid IS NOT NULL AND deleted_at IS NULL` (HWID уникален в пределах всей сети, иначе 409); `number BETWEEN 1 AND 9999` | M0001 |
 | `agent_refresh_tokens` | token_hash bytea PK, pc_id FK ON DELETE CASCADE, cv int, expires_at, used_at NULL, created_at | | M0001 |
 | `agent_commands` | id (`uuidv7()` PostgreSQL 18: монотонен внутри миллисекунды, так что «от старых к новым» = `ORDER BY created_at, id` сохраняет порядок постановки), club_id, pc_id, name, payload jsonb NULL, issued_by_staff_id NULL, supersedes uuid NULL, created_at, expires_at NULL, delivered_at NULL, acked_at NULL, ack jsonb NULL, superseded_at NULL | `INDEX (pc_id, created_at) WHERE acked_at IS NULL AND superseded_at IS NULL` | M0001 |
 | `pc_metrics` | pc_id, at, data jsonb | PK (pc_id, at); чистка по `Telemetry:RetentionDays` | M0001 |
@@ -1264,6 +1287,7 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
 | S2 | login (пароль, карта, гость) → balance → tariffs → createSession → current (`secondsLeft`) → pause/resume → extend → end; offline replay (`startedAt`, `clientSessionId`) + events batch с тем же ключом; неверный пароль считается один раз |
 | S3 | games (страницы по 500, 304), getGame, launch-report (повтор → без дубля), getPc, manifest → 204 |
 | S4 | касса открывает сеанс → агент видит `sessionUpdated`; команда `message` → ack и второй ack с `ackedAt` |
+| D-78 | старт после истечения access → refresh без регистрации; потерянный ответ refresh → `reused` → подписанная регистрация в `enforce`, секрет тот же, и с часами ПК на 2 ч вперёд (`X-Server-Time` ответа refresh); без сохранённых токенов в `audit` регистрация как раньше; отказ без доказательства не трогает живой сокет ПК |
 
 Для гонок используются параллельные запросы: двойной `createSession` → ровно один 201 и один 409; двойной ключ
 идемпотентности → один эффект.
@@ -2077,6 +2101,7 @@ anticheat/report — S3; `PATCH /admin/games/{id}` (реализуется) и `
 | D-73 | Игровой диск и железо в кассе: `gamesVolume` из последнего heartbeat в `GET /admin/pcs` и `GET /admin/health` — сырой объект агента (null-поля опущены, `null` — не присылал), касса решает, что показать (выключенный ПК и `owner: none` — ничего); железо — `pcs.hardware` как есть. В `GET /admin/overview` не добавлено: карта зала их не показывает |
 | D-74 | `GET /games` скрывает игры, которые ПК без Vanguard не запустит, пока последний heartbeat ПК говорит `vanguardInstalled = false` или `vanguardLoaded = false`: с эффективным античитом Vanguard (`vanguard` или Riot без тега — как агент), а если политика клуба требует `vanguard` в `anticheat.required` при включённом `blockOnViolation` (seed так больше не делает, Q-16) — все игры с античитом, как откажет гейт агента; без `antiCheat` или с `null` — ничего; Secure Boot и TPM не учитываются (их проверяет агент при запуске); ETag укороченного списка свой, у полного — прежний; `GET /games/{id}` не скрывает |
 | D-75 | Неверные карты при входе считаются по ПК (`card:<pcId>` в `login_failures`, те же 5 за 15 мин и повтор trace-id, что у пароля): 5 — `401 badCredentials attemptsLeft=0` до конца окна, даже для привязанной карты; верная карта счётчик не сбрасывает; другие ПК и пароль не затронуты. Киоск при `attemptsLeft=0` пишет «Слишком много попыток» |
+| D-78 | Ключ клуба и HWID только называют ПК: перерегистрация одобренного ПК, которому выдан секрет, доказывается подписью текущим `signingSecret` (§3.2, §3.3), и с доказательством секрет сохраняется. `Agents:RegisterProof`: `audit` (по умолчанию) — без доказательства как раньше плюс Warning; `enforce` — без доказательства ничего не пишется и ответ `403 pendingApproval`, кроме окна владельца (`maintenance:true` → `pcs.reenroll_until`, `Agents:ReenrollWindowMin` = 60 мин, только офлайн-ПК, закрывается новыми данными и `maintenance:false`); `off` — как до D-78. Агент 1.0.18: при старте refresh, регистрация только при отвергнутом refresh (не при сетевой ошибке) и подписанная сохранённым секретом, `X-Server-Time` ответов refresh задаёт его часы; HWID в журнале — 8 первых символов, логины игровых аккаунтов в журнал не пишутся (журнал читает игрок). `enforce` — когда все одобренные ПК на 1.0.18+ и в логе N дней нет Warning «without a valid proof»; ПК со старым агентом при `enforce` после каждого включения ждал бы окна владельца |
 
 ### 12.2 Изменения контракта (PR в club-contracts, ведёт лид, владелец не нужен)
 
@@ -2146,6 +2171,10 @@ anticheat/report — S3; `PATCH /admin/games/{id}` (реализуется) и `
 18. Игровой диск (D-73): лишнее поле ответа `gamesVolume` (`HeartbeatGamesVolume | null`) в `AdminHallPc` и
     `AdminPcHealth` (обе схемы без `additionalProperties: false`, `openapi.yaml` не меняется); `GET /games` без
     Vanguard-игр (D-74) — поведение, схема ответа та же.
+19. Доказательство перерегистрации (D-78), только текст описаний, схемы и REF не меняются: `register` может нести уже
+    определённые `X-Timestamp`/`X-Signature` (подпись текущим секретом ПК); с верным доказательством ответ несёт прежний
+    `signingSecret`; `403 pendingApproval` получает и одобренный ПК, чья перерегистрация не доказана; фраза описания
+    `register` о повторной регистрации «каждое утро» верна только для агентов до 1.0.18.
 
 ### 12.3 Вопросы владельцу (только то, что без него не решить)
 
