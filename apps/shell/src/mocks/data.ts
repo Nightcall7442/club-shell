@@ -213,6 +213,12 @@ export const GUEST_TEMPLATE: Omit<User, 'id' | 'displayName' | 'username' | 'cre
 /** Accepted password logins in the mock (`username → password`). */
 export const MOCK_CREDENTIALS: Readonly<Record<string, string>> = { demo: '1234', vip: '1234', player: 'player' };
 
+/**
+ * Bound club cards in the mock (`card id, lower case → username`), the same ids the mock server and the server's dev
+ * seed hand out; any other card is unknown, as on the server.
+ */
+export const MOCK_CARDS: Readonly<Record<string, string>> = { 'card-0001': 'demo', 'card-0002': 'vip' };
+
 /** Accepted PINs for `session_unlock` / admin unlock. */
 export const MOCK_USER_PIN = '1234';
 export const MOCK_ADMIN_PIN = '0000';
@@ -1383,7 +1389,7 @@ export const POLICY: Policy = {
   },
   power: { idleShutdownMin: 90, scheduledShutdown: '05:00' },
   updates: { channel: 'stable', autoInstall: true },
-  anticheat: { required: ['eac', 'vanguard'], blockOnViolation: true },
+  anticheat: { required: [], blockOnViolation: true },
   kiosk: { idleTimeoutSec: 300, adsIntervalSec: 900, allowVirtualKeyboard: true },
 };
 

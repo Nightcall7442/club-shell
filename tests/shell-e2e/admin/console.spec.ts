@@ -143,7 +143,9 @@ async function agentCall(
 /**
  * The Agent's heartbeat (a full `HeartbeatRequest`): a registered PC is offline until its first one, on the server and
  * on the mock. `currentSessionId` and `offlineQueue` are what a move onto the PC is checked against (D-59);
- * `runningGames` with `currentSessionId` is the game the map shows on the seat (D-71).
+ * `runningGames` with `currentSessionId` is the game the map shows on the seat (D-71); `gamesVolume` the games disk
+ * «Состояние ПК» shows (D-73) and `antiCheat` the Vanguard state `GET /games` follows (D-74), left out when not given
+ * (an older Agent).
  */
 async function heartbeat(
   request: APIRequestContext,
@@ -152,10 +154,14 @@ async function heartbeat(
     currentSessionId = null,
     offlineQueue = 0,
     runningGames = [],
+    gamesVolume,
+    antiCheat,
   }: {
     currentSessionId?: string | null;
     offlineQueue?: number;
     runningGames?: { gameId: string; pid: number; startedAt: string }[];
+    gamesVolume?: { owner: string; mounted?: boolean | null; driveLetter?: string | null; since?: string | null };
+    antiCheat?: { vanguardInstalled?: boolean | null; vanguardLoaded?: boolean | null };
   } = {},
 ): Promise<void> {
   const res = await agentCall(request, pc, 'POST', `/agents/${pc.pcId}/heartbeat`, {
@@ -169,6 +175,8 @@ async function heartbeat(
     runningGames,
     offlineQueue,
     shellConnected: true,
+    ...(gamesVolume ? { gamesVolume } : {}),
+    ...(antiCheat ? { antiCheat } : {}),
   });
   expect(res.ok(), await res.text()).toBeTruthy();
 }
@@ -2155,4 +2163,103 @@ test('a busy seat shows the game its PC reports', async ({ page, request }) => {
   expect((await seatOf(request, pc.pcId)).game ?? null).toBeNull();
   await expect(tile).not.toContainText('Counter-Strike 2');
   await endAt(request, pc.pcId);
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The machine: games disk and hardware (D-73)
+// ---------------------------------------------------------------------------------------------------------------------
+
+test('«Состояние ПК» shows the games disk a PC reports, and the hall list carries its hardware', async ({
+  page,
+  request,
+}) => {
+  const pc = await registerAgent(request, 'disk');
+  await heartbeat(request, pc, {
+    gamesVolume: { owner: 'agent', mounted: false, driveLetter: 'G', since: new Date().toISOString() },
+  });
+  const hall = (await (
+    await request.get(`${API}/admin/pcs`, { headers: auth(await tokenFor(request, OWNER_PIN)) })
+  ).json()) as {
+    items: {
+      id: string;
+      name: string;
+      gamesVolume?: { mounted?: boolean } | null;
+      hardware: { cpu: { model: string } } | null;
+    }[];
+  };
+  const mine = hall.items.find((p) => p.id === pc.pcId);
+  expect(mine, 'the PC in the hall list').toBeTruthy();
+  expect(mine!.gamesVolume?.mounted).toBe(false);
+  // What registerAgent sent at registration.
+  expect(mine!.hardware?.cpu.model).toBe('E2E CPU');
+
+  await signIn(page, CASHIER_PIN);
+  await page.goto('/#/health');
+  const row = page.locator('tbody tr').filter({ has: page.locator(`[title="${mine!.name}"]`) });
+  await expect(row).toContainText(/не подключён с \d{2}:\d{2}/);
+
+  // Back: the next heartbeat says it is connected again.
+  await heartbeat(request, pc, {
+    gamesVolume: { owner: 'agent', mounted: true, driveLetter: 'G', since: new Date().toISOString() },
+  });
+  await page.reload();
+  await expect(row).toContainText(/(?<!не )подключён с \d{2}:\d{2}/);
+});
+
+test('the hall editor shows the hardware the selected PC reported', async ({ page, request }) => {
+  test.skip(
+    REAL,
+    "The server's dev seed puts its seats at pixel positions (x up to 660): the hall grid is hundreds of cells wide and " +
+      'too slow to drive. The hardware in GET /admin/pcs is checked on the server by the games-disk test above.',
+  );
+  const pc = await registerAgent(request, 'hw');
+  const owner = auth(await tokenFor(request, OWNER_PIN));
+  const hall = (await (await request.get(`${API}/admin/pcs`, { headers: owner })).json()) as {
+    items: { id: string; name: string; x: number; y: number }[];
+  };
+  const mine = hall.items.find((p) => p.id === pc.pcId);
+  expect(mine, 'the PC in the hall list').toBeTruthy();
+  // A cell of its own: a PC registers onto the first cell unless the owner set up its seat, and a cell shows one device.
+  const taken = new Set(hall.items.map((p) => `${p.x}:${p.y}`));
+  let x = 0;
+  let y = 0;
+  while (taken.has(`${x}:${y}`)) {
+    x = (x + 1) % 10;
+    y += x === 0 ? 1 : 0;
+  }
+  const placed = await request.patch(`${API}/admin/pcs/${pc.pcId}`, { headers: owner, data: { x, y } });
+  expect(placed.ok(), await placed.text()).toBeTruthy();
+
+  await signIn(page, OWNER_PIN);
+  await page.goto('/#/hall');
+  await page.locator(`button[title^="${mine!.name} · "]`).click();
+  // The selected device's panel, with what registerAgent sent at registration under «Железо».
+  const panel = page.locator('section').filter({ has: page.getByText('Железо', { exact: true }) });
+  await expect(panel.locator('h2').first()).toHaveText(mine!.name);
+  await expect(panel).toContainText('E2E CPU');
+  await expect(panel).toContainText('ядер: 4, потоков: 8');
+  await expect(panel).toContainText('8 ГБ');
+  await expect(panel).toContainText('10.0.22631');
+});
+
+test('a PC without a loaded Vanguard is not offered the games it could not start (D-74)', async ({ request }) => {
+  const pc = await registerAgent(request, 'vgk');
+  const listed = async (): Promise<{ id: string; launcher: string; antiCheat: string }[]> => {
+    const res = await agentCall(request, pc, 'GET', '/games');
+    expect(res.ok(), await res.text()).toBeTruthy();
+    return ((await res.json()) as { items: { id: string; launcher: string; antiCheat: string }[] }).items;
+  };
+  await heartbeat(request, pc, { antiCheat: { vanguardInstalled: true, vanguardLoaded: true } });
+  const all = await listed();
+
+  // Installed but not loaded until a reboot. The seed policy requires Vanguard for every game with an anti-cheat, so
+  // only the games without one (and not Riot's, which the Agent treats as Vanguard) are left.
+  await heartbeat(request, pc, { antiCheat: { vanguardInstalled: true, vanguardLoaded: false } });
+  expect((await listed()).map((g) => g.id)).toEqual(
+    all.filter((g) => g.antiCheat === 'none' && g.launcher !== 'riot').map((g) => g.id),
+  );
+
+  // Loaded after the reboot: the whole catalog again.
+  await heartbeat(request, pc, { antiCheat: { vanguardInstalled: true, vanguardLoaded: true } });
+  expect((await listed()).map((g) => g.id)).toEqual(all.map((g) => g.id));
 });

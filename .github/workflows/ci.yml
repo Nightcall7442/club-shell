@@ -8,6 +8,9 @@
 #   contracts-drift windows  gen-contracts-ts.ps1 -Check / gen-contracts-rs.ps1 -Check (generated mirrors up to date?)
 #   e2e             ubuntu   Playwright against the Vite dev server in mock mode (VITE_MOCK=1)
 #   tauri-build     windows  full `tauri build` bundle, push to main / release/** only
+#   installer       windows  agent MSI + ClubShellSetup.exe through package.ps1, unsigned, no secrets; push: packs
+#                            tauri-build's shell exe -> agent-installer-unsigned artifact; pull request: placeholder
+#                            shell exe, compile check only (nothing uploaded)
 #
 # Toolchain versions come from the repository: packageManager (package.json), global.json, rust-toolchain.toml.
 
@@ -342,3 +345,78 @@ jobs:
             target/x86_64-pc-windows-msvc/release/clubshell-shell.exe
           if-no-files-found: error
           retention-days: 14
+
+  # The agent installer (installer/wix) is not in ClubShell.sln; without this job only a hand-baked pilot MSI would
+  # show a broken .wxs, service install or bundle. Same path as the pilot bake: tools/scripts/package.ps1.
+  installer:
+    name: Agent installer (WiX MSI + bundle, unsigned)
+    needs: [changes, tauri-build]
+    # Push: packs the clubshell-shell.exe tauri-build just built. Pull request: tauri-build is skipped, so the
+    # installer is built around a placeholder shell exe and nothing is uploaded. !cancelled() is needed to run at all
+    # after a skipped need; on push a failed or skipped tauri-build leaves nothing to pack, so the job is skipped.
+    if: >-
+      !cancelled() && needs.changes.outputs.code == 'true' &&
+      (needs.tauri-build.result == 'success' ||
+      (github.event_name == 'pull_request' && needs.tauri-build.result == 'skipped'))
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      # 0.0.0 marks a CI build (the MSI drops the suffix); MajorUpgrade refuses it over any installed release.
+      INSTALLER_VERSION: 0.0.0-ci.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET SDK (global.json)
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # The artifact root is target/x86_64-pc-windows-msvc/release (bundle/msi, bundle/nsis, clubshell-shell.exe):
+      # where package.ps1 looks for the Tauri bundle and, next to bundle/, the shell exe.
+      - name: Download shell bundle (tauri-build)
+        if: github.event_name == 'push'
+        uses: actions/download-artifact@v4
+        with:
+          name: clubshell-shell-bundle
+          path: target/x86_64-pc-windows-msvc/release
+
+      - name: Placeholder shell bundle (pull request)
+        if: github.event_name != 'push'
+        run: |
+          $release = 'target/x86_64-pc-windows-msvc/release'
+          New-Item -ItemType Directory -Force -Path "$release/bundle/msi" | Out-Null
+          Set-Content -LiteralPath "$release/clubshell-shell.exe" -Value 'placeholder: pull requests do not run tauri build'
+          Set-Content -LiteralPath "$release/bundle/msi/placeholder.msi" -Value 'placeholder'
+
+      # Agent publish, WiX MSI, the bundle chaining it, release layout, unsigned manifest.json. No secret reaches this
+      # job: with CODESIGN_PFX_PATH empty nothing is Authenticode-signed, and the update manifest key is only used by
+      # sign.ps1 -ManifestPath, which is not run here.
+      - name: Package (Agent publish, WiX MSI + bundle, unsigned)
+        env:
+          CODESIGN_PFX_PATH: ''
+        run: ./tools/scripts/package.ps1 -Version $env:INSTALLER_VERSION -NoZip
+
+      - name: Upload agent installer
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-installer-unsigned
+          path: |
+            artifacts/release/${{ env.INSTALLER_VERSION }}/ClubShell-${{ env.INSTALLER_VERSION }}.msi
+            artifacts/release/${{ env.INSTALLER_VERSION }}/ClubShellSetup-${{ env.INSTALLER_VERSION }}.exe
+          if-no-files-found: error
+          retention-days: 7
+
+      # DisklessHelper.wxs is compiled only with DisklessHelperDir, which no pilot build passes. Compile it once
+      # against a placeholder helper exe; not uploaded. Own intermediate folder: WiX's up-to-date check looks at file
+      # times only and would hand back the MSI built above without the feature.
+      - name: Compile the optional DisklessHelper feature (placeholder helper)
+        run: |
+          $helper = Join-Path $env:RUNNER_TEMP 'diskless-helper'
+          New-Item -ItemType Directory -Force -Path $helper | Out-Null
+          Set-Content -LiteralPath (Join-Path $helper 'ClubDisklessHelper.exe') -Value 'placeholder'
+          dotnet build installer/wix/ClubShell.Installer.wixproj -c Release -p:BuildBundle=false `
+            -o (Join-Path $env:RUNNER_TEMP 'diskless-check') '-p:IntermediateOutputPath=obj\DisklessCheck\' `
+            "-p:AgentPublishDir=$(Join-Path $env:GITHUB_WORKSPACE 'artifacts\publish\agent')" `
+            "-p:ShellBundleDir=$(Join-Path $env:GITHUB_WORKSPACE 'target\x86_64-pc-windows-msvc\release')" `
+            "-p:DisklessHelperDir=$helper" "-p:Version=$env:INSTALLER_VERSION" -nologo

@@ -199,6 +199,11 @@
     "qrConfirmed": "Tizimga kirildi",
     "card": "Klub kartasi",
     "cardHint": "Kartani o'qish qurilmasiga tekkizing",
+    "cardNumber": "Karta raqami",
+    "cardPlaceholder": "Kartani tekkizing",
+    "cardRequired": "Avval kartani tekkizing",
+    "cardUnknown": "Karta topilmadi. Xodimlarga murojaat qiling",
+    "cardDemoHint": "Demo karta: CARD-0001",
     "pcInfo": "Kompyuter haqida",
     "pc": "Kompyuter",
     "zone": "Zona",
@@ -468,7 +473,8 @@
       "blockedProcess": "Taqiqlangan dastur ishlamoqda",
       "injectedModule": "Begona modul aniqlandi",
       "vmDetected": "Virtual mashina aniqlandi",
-      "debuggerAttached": "Debugger ulangan"
+      "debuggerAttached": "Debugger ulangan",
+      "networkPath": "O'yin tarmoq diskiga o'rnatilgan"
     },
     "specOk": "Talablarga mos",
     "specWarn": "Minimal talabdan past",

@@ -86,9 +86,10 @@ public interface ISysMetricsSink
 /// Samples <see cref="PcMetrics"/> every <c>telemetry.metricsIntervalSec</c> into a ring buffer, pushes each sample to
 /// the Shell overlay via <see cref="ISysMetricsSink"/>, and uploads a <see cref="TelemetryBatch"/> to
 /// <c>POST /agents/{pcId}/telemetry</c> every <c>telemetry.uploadIntervalSec</c> (or sooner when 50 diagnostic events
-/// have queued). A hardware rescan every <c>telemetry.hardwareRescanSec</c> attaches the inventory to the next batch and
-/// emits an <see cref="AgentEventType.HardwareChanged"/> event when it changed. A batch carries at most
-/// <see cref="MaxBatchEvents"/> events (the rest go in the next ones). A batch the server rejects with a 4xx other than
+/// have queued). The full hardware inventory taken at start goes with the first batch; a rescan every
+/// <c>telemetry.hardwareRescanSec</c> attaches the inventory to the next batch and emits an
+/// <see cref="AgentEventType.HardwareChanged"/> event only when it changed (<see cref="TelemetryHardware"/>). A batch
+/// carries at most <see cref="MaxBatchEvents"/> events (the rest go in the next ones). A batch the server rejects with a 4xx other than
 /// 401/408/429 is dropped; after any other failure the upload backs off exponentially (upload interval → 15 min) and
 /// the oldest samples/events are dropped past their caps.
 /// </summary>
@@ -115,8 +116,7 @@ public sealed class TelemetryReporter : BackgroundService
 
     private readonly Queue<PcMetrics> _samples = new();
     private readonly List<TelemetryEvent> _pendingEvents = new();
-    private HardwareInfo? _previousHardware;
-    private HardwareInfo? _pendingHardware;
+    private TelemetryHardware _inventory = new();
     private int _logTailRequested;
     private int _uploadFailures;
     private DateTimeOffset _nextUploadAt;
@@ -164,9 +164,18 @@ public sealed class TelemetryReporter : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _counters.Warmup();
-        _previousHardware = _hardware.Current;
+        _inventory = new TelemetryHardware(_hardware.Current);
         var lastUpload = _clock.UtcNow;
         var lastRescan = _clock.UtcNow;
+
+        // The full inventory right after start, so the first batch after a boot or restart carries it rather than the
+        // first rescan up to telemetry.hardwareRescanSec (1 h) later. Taken after yielding: the scan (WMI, a few
+        // seconds) never holds up the host's start.
+        await Task.Yield();
+        if (_settings.CurrentValue.Telemetry.Enabled)
+        {
+            await TakeInventoryAtStartAsync(stoppingToken).ConfigureAwait(false);
+        }
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -267,28 +276,30 @@ public sealed class TelemetryReporter : BackgroundService
         }
     }
 
+    private async Task TakeInventoryAtStartAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            // GetAsync: a scan that registration has just made, or is making, is reused rather than repeated.
+            _inventory.Started(await _hardware.GetAsync(cancellationToken).ConfigureAwait(false));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Hardware inventory at start failed; it goes with the first rescan");
+        }
+    }
+
     private async Task RescanHardwareAsync(DateTimeOffset now, CancellationToken cancellationToken)
     {
         try
         {
             var current = await _hardware.RefreshAsync(cancellationToken).ConfigureAwait(false);
-            if (_previousHardware is { } previous)
+            var diff = _inventory.Rescanned(current);
+            if (diff.Count > 0)
             {
-                var diff = HardwareInventory.Diff(previous, current);
-                if (diff.Count > 0)
-                {
-                    _logger.LogInformation("Hardware changed: {Sections}", string.Join(", ", diff));
-                    _pendingHardware = current;
-                    _realtime.TrySendEvent(AgentEvent.Of(AgentEventType.HardwareChanged, now, new HardwareChangedEvent(current, diff)));
-                }
+                _logger.LogInformation("Hardware changed: {Sections}", string.Join(", ", diff));
+                _realtime.TrySendEvent(AgentEvent.Of(AgentEventType.HardwareChanged, now, new HardwareChangedEvent(current, diff)));
             }
-            else
-            {
-                // No baseline yet: attach the first full inventory so the server has it.
-                _pendingHardware = current;
-            }
-
-            _previousHardware = current;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -303,7 +314,7 @@ public sealed class TelemetryReporter : BackgroundService
             return false;
         }
 
-        if (_samples.Count == 0 && _pendingEvents.Count == 0 && _pendingHardware is null)
+        if (_samples.Count == 0 && _pendingEvents.Count == 0 && _inventory.Pending is null)
         {
             return true;
         }
@@ -312,7 +323,7 @@ public sealed class TelemetryReporter : BackgroundService
         var samples = _samples.ToArray();
         var includeLogs = events.Length > 0 || Interlocked.Exchange(ref _logTailRequested, 0) == 1;
         var logs = includeLogs ? ReadLogTail() : null;
-        var batch = new TelemetryBatch(samples, events, _pendingHardware, logs);
+        var batch = new TelemetryBatch(samples, events, _inventory.Pending, logs);
 
         try
         {
@@ -337,7 +348,7 @@ public sealed class TelemetryReporter : BackgroundService
 
         _samples.Clear();
         _pendingEvents.RemoveRange(0, events.Length);
-        _pendingHardware = null;
+        _inventory.Delivered();
         return true;
     }
 
@@ -394,4 +405,61 @@ public sealed class TelemetryReporter : BackgroundService
             return null;
         }
     }
+}
+
+/// <summary>
+/// Which hardware inventory goes with the telemetry batches: the full one taken at start, whatever was seen before (so
+/// every Agent start sends one), then a rescan only when it differs from the last inventory seen, the baseline. A
+/// rescan before any baseline is sent in full.
+/// </summary>
+[SupportedOSPlatform("windows")]
+public sealed class TelemetryHardware
+{
+    /// <summary>Creates the state.</summary>
+    /// <param name="baseline">An inventory already scanned (<see cref="HardwareInventory.Current"/>), when any.</param>
+    public TelemetryHardware(HardwareInfo? baseline = null) => Baseline = baseline;
+
+    /// <summary>Last inventory seen; rescans are compared with it.</summary>
+    public HardwareInfo? Baseline { get; private set; }
+
+    /// <summary>Inventory the next batch carries, or <see langword="null"/>.</summary>
+    public HardwareInfo? Pending { get; private set; }
+
+    /// <summary>The inventory taken at start: the next batch carries it, and it becomes the baseline.</summary>
+    public void Started(HardwareInfo current)
+    {
+        ArgumentNullException.ThrowIfNull(current);
+        Baseline = current;
+        Pending = current;
+    }
+
+    /// <summary>
+    /// A periodic rescan, which becomes the baseline. The next batch carries it when it differs from the previous
+    /// baseline, or when there was none. Returns the changed sections (<see cref="HardwareInventory.Diff"/>); empty when
+    /// nothing changed or there was no baseline to compare with.
+    /// </summary>
+    public IReadOnlyList<string> Rescanned(HardwareInfo current)
+    {
+        ArgumentNullException.ThrowIfNull(current);
+        IReadOnlyList<string> diff = Array.Empty<string>();
+        if (Baseline is { } previous)
+        {
+            diff = HardwareInventory.Diff(previous, current);
+            if (diff.Count > 0)
+            {
+                Pending = current;
+            }
+        }
+        else
+        {
+            // No baseline yet: attach the first full inventory so the server has it.
+            Pending = current;
+        }
+
+        Baseline = current;
+        return diff;
+    }
+
+    /// <summary>The batch carrying <see cref="Pending"/> was delivered (or rejected for good): nothing is pending any more.</summary>
+    public void Delivered() => Pending = null;
 }

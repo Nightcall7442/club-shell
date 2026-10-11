@@ -110,6 +110,7 @@ import {
   METRICS,
   DEMO_CLUB,
   MOCK_ADMIN_PIN,
+  MOCK_CARDS,
   MOCK_CREDENTIALS,
   MOCK_USER_PIN,
   MONITORS,
@@ -267,6 +268,8 @@ interface MockState {
   adminToken: { token: string; expiresAt: number } | null;
   lastCallAdminAt: number;
   adminAttempts: number[];
+  /** Times of this PC's wrong cards in the last 15 minutes (D-75). */
+  cardFailures: number[];
   idempotency: Map<string, unknown>;
   kiosk: KioskState;
   updateReady: boolean;
@@ -303,6 +306,7 @@ function freshState(): MockState {
     adminToken: null,
     lastCallAdminAt: 0,
     adminAttempts: [],
+    cardFailures: [],
     idempotency: new Map(),
     kiosk: clone(KIOSK_STATE),
     updateReady: false,
@@ -771,12 +775,29 @@ cmd('auth_login', (args): AuthLoginResponse => {
       user = USER;
       break;
     }
-    case 'card':
-      if (!req.cardId) {
+    case 'card': {
+      const cardId = (req.cardId ?? '').trim().toLowerCase();
+      if (cardId.length === 0) {
         mockError('validation', 'cardId is required', { field: 'cardId', reason: 'required' });
       }
-      user = req.cardId.endsWith('9') ? VIP_USER : USER;
+      // As the server (D-75): an unknown card is a wrong credential, counted on this PC, and the error never repeats the
+      // number; 5 in 15 minutes refuse even a bound card until the oldest one is out of the window.
+      const now = Date.now();
+      mockState.cardFailures = mockState.cardFailures.filter((t) => now - t < 15 * 60_000);
+      if (mockState.cardFailures.length >= 5) {
+        mockError('unauthorized', 'Wrong credentials', { reason: 'badCredentials', attemptsLeft: 0 });
+      }
+      const holder = MOCK_CARDS[cardId];
+      if (holder === undefined) {
+        mockState.cardFailures.push(now);
+        mockError('unauthorized', 'Wrong credentials', {
+          reason: 'badCredentials',
+          attemptsLeft: 5 - mockState.cardFailures.length,
+        });
+      }
+      user = holder === 'vip' ? VIP_USER : USER;
       break;
+    }
     case 'token':
       if (!req.token) {
         mockError('validation', 'token is required', { field: 'token', reason: 'required' });

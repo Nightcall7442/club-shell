@@ -1,11 +1,13 @@
 /**
  * PC health ("Состояние ПК"): repair tickets the server opened from telemetry — a PC running hot, heating up more than
  * it did last week, losing frames, dropping off the network — with take-into-work / resolved, and every PC ranked by
- * health with its temperatures against its own usual and the last 24 hours. Owners also tune the thresholds and can let
- * the club take a PC with a serious problem out of service automatically.
+ * health with its temperatures against its own usual and the last 24 hours, and its games disk when the club's PCs
+ * report one (D-73). Owners also tune the thresholds and can let the club take a PC with a serious problem out of
+ * service automatically.
  *
- * Variant F: no red here. A serious problem, a temperature at its limit, a low health score and the part of a day's
- * curve above the limit are amber; the rest is the accent (sparklines, the score's tick scale) or muted.
+ * Variant F: no red here. A serious problem, a temperature at its limit, a low health score, the part of a day's curve
+ * above the limit and a dropped games disk are amber; the rest is the accent (sparklines, the score's tick scale) or
+ * muted, and a connected games disk has the green "online" dot.
  */
 import { useCallback, useEffect, useId, useState, type CSSProperties } from 'react';
 import clsx from 'clsx';
@@ -19,6 +21,7 @@ import {
   type PcHealth,
   type TicketStatus,
 } from '@/api';
+import { GamesDisk, gamesDisk } from '@/device';
 import { describe } from '@/errors';
 import { dateLocale, t } from '@/i18n';
 import { CheckIcon } from '@/icons';
@@ -275,6 +278,8 @@ export default function HealthPage({ isOwner }: { isOwner?: boolean }): JSX.Elem
   const open = (data?.tickets ?? []).filter((x) => x.status !== 'resolved');
   const pcs = [...(data?.pcs ?? [])].sort((a, b) => a.score - b.score || a.name.localeCompare(b.name));
   const settings = data?.settings;
+  // A club whose PCs keep their games on their own disks has nothing to show in a games disk column.
+  const disks = pcs.some((p) => gamesDisk(p.gamesVolume, p.status) !== null);
 
   return (
     <div className="flex flex-col gap-5">
@@ -346,6 +351,20 @@ export default function HealthPage({ isOwner }: { isOwner?: boolean }): JSX.Elem
               title: t('GPU за сутки'),
               render: (p) => <Spark values={p.hourly.gpu} warnAt={settings?.gpuHotC ?? 85} />,
             },
+            ...(disks
+              ? [
+                  {
+                    key: 'disk',
+                    title: t('Игровой диск'),
+                    render: (p: PcHealth) =>
+                      gamesDisk(p.gamesVolume, p.status) ? (
+                        <GamesDisk volume={p.gamesVolume} status={p.status} />
+                      ) : (
+                        <span className="text-muted">—</span>
+                      ),
+                  },
+                ]
+              : []),
             {
               key: 'issues',
               title: t('Проблемы'),

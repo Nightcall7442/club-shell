@@ -8,6 +8,7 @@ import {
   AntiCheatAction,
   AntiCheatKind,
   AntiCheatSeverity,
+  GamesVolumeOwner,
   PcStatus,
   TELEMETRY_MAX_SAMPLES,
   UpdateChannel,
@@ -15,7 +16,9 @@ import {
   isIpcError,
   type AgentRegisterResponse,
   type HardwareInfo,
+  type HeartbeatGamesVolume,
   type HeartbeatResponse,
+  type JsonObject,
   type PcMetrics,
   type UpdateManifest,
 } from '@clubshell/contracts';
@@ -39,6 +42,7 @@ import {
   obj,
   oneOf,
   openSessionForPc,
+  optBool,
   optObj,
   optStr,
   optionalUser,
@@ -59,6 +63,7 @@ import { pendingCommands, resolveAck } from '../ws.js';
 import { realTelemetry } from '../health.js';
 
 const PC_STATUSES = knownValues(PcStatus);
+const VOLUME_OWNERS = Object.values(GamesVolumeOwner);
 const AC_KINDS = knownValues(AntiCheatKind);
 const AC_SEVERITIES = Object.values(AntiCheatSeverity);
 const AC_ACTIONS = Object.values(AntiCheatAction);
@@ -156,6 +161,25 @@ function callOfEvent(pc: PcRecord, e: Record<string, unknown>): Parameters<typeo
   return null;
 }
 
+/**
+ * A heartbeat's `gamesVolume` as the server keeps it (D-73): null when the Agent sent none (an older one), its null fields
+ * left out; a bad one is refused as the server's binder would.
+ */
+function gamesVolumeOf(b: JsonObject): HeartbeatGamesVolume | null {
+  const v = optObj(b, 'gamesVolume');
+  if (!v) return null;
+  const mounted = optBool(v, 'mounted');
+  const driveLetter = optStr(v, 'driveLetter', 1);
+  const since = optStr(v, 'since', 64);
+  if (since !== null && Number.isNaN(Date.parse(since))) throw errors.validation('since', 'format');
+  return {
+    owner: oneOf(v, 'owner', VOLUME_OWNERS),
+    ...(mounted !== null ? { mounted } : {}),
+    ...(driveLetter !== null ? { driveLetter } : {}),
+    ...(since !== null ? { since: new Date(since).toISOString() } : {}),
+  };
+}
+
 export function pcsRoutes(app: FastifyInstance): void {
   app.post('/agents/register', async (req): Promise<AgentRegisterResponse> => {
     const clubKey = req.headers['x-club-key'];
@@ -227,6 +251,14 @@ export function pcsRoutes(app: FastifyInstance): void {
     pc.offlineQueue = int(b, 'offlineQueue', 0);
     pc.reportedSessionId = optStr(b, 'currentSessionId', 64);
     bool(b, 'shellConnected');
+    pc.gamesVolume = gamesVolumeOf(b);
+    const antiCheat = optObj(b, 'antiCheat');
+    pc.antiCheat = antiCheat
+      ? {
+          vanguardInstalled: optBool(antiCheat, 'vanguardInstalled'),
+          vanguardLoaded: optBool(antiCheat, 'vanguardLoaded'),
+        }
+      : null;
     pc.lastHeartbeatAt = now();
     pc.seen = true;
     const session = openSessionForPc(pc.id);

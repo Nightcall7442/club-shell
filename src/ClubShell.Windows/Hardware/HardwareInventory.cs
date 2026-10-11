@@ -65,16 +65,27 @@ public sealed class HardwareInventory : IHardwareIdSource, IDisposable
     /// <summary>Last built inventory, or <see langword="null"/> before the first scan.</summary>
     public HardwareInfo? Current => Volatile.Read(ref _cached);
 
-    /// <summary>Returns the cached inventory, rescanning when it is older than <see cref="CacheTtl"/>.</summary>
+    /// <summary>
+    /// Returns the cached inventory, rescanning when it is older than <see cref="CacheTtl"/>. Callers that miss the cache
+    /// together (registration and the telemetry start on a first boot) share one scan: the one that waited for the other's
+    /// takes its result.
+    /// </summary>
     public async Task<HardwareInfo> GetAsync(CancellationToken cancellationToken)
     {
-        HardwareInfo? cached = Current;
-        if (cached is not null && _clock.GetElapsedTime(Volatile.Read(ref _cachedAt)) < CacheTtl)
+        if (Fresh() is { } cached)
         {
             return cached;
         }
 
-        return await RefreshAsync(cancellationToken).ConfigureAwait(false);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return Fresh() ?? await ScanAndCacheAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     /// <summary>Rescans unconditionally and updates the cache.</summary>
@@ -83,16 +94,29 @@ public sealed class HardwareInventory : IHardwareIdSource, IDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            HardwareInfo info = await ScanAsync(cancellationToken).ConfigureAwait(false);
-            Volatile.Write(ref _cachedAt, _clock.GetTimestamp());
-            Volatile.Write(ref _cached, info);
-            _logger.LogInformation("Hardware inventory: {Cpu}, {GpuCount} GPU(s), {RamMb} MiB, {DiskCount} disk(s), {MonitorCount} monitor(s)", info.Cpu.Model, info.Gpu.Count, info.RamMb, info.Disks.Count, info.Monitors.Count);
-            return info;
+            return await ScanAndCacheAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             _gate.Release();
         }
+    }
+
+    /// <summary>The cached inventory while younger than <see cref="CacheTtl"/>.</summary>
+    private HardwareInfo? Fresh()
+    {
+        HardwareInfo? cached = Current;
+        return cached is not null && _clock.GetElapsedTime(Volatile.Read(ref _cachedAt)) < CacheTtl ? cached : null;
+    }
+
+    /// <summary>Scans and caches; the caller holds <c>_gate</c>.</summary>
+    private async Task<HardwareInfo> ScanAndCacheAsync(CancellationToken cancellationToken)
+    {
+        HardwareInfo info = await ScanAsync(cancellationToken).ConfigureAwait(false);
+        Volatile.Write(ref _cachedAt, _clock.GetTimestamp());
+        Volatile.Write(ref _cached, info);
+        _logger.LogInformation("Hardware inventory: {Cpu}, {GpuCount} GPU(s), {RamMb} MiB, {DiskCount} disk(s), {MonitorCount} monitor(s)", info.Cpu.Model, info.Gpu.Count, info.RamMb, info.Disks.Count, info.Monitors.Count);
+        return info;
     }
 
     /// <summary>

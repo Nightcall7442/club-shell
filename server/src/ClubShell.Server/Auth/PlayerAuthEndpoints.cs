@@ -42,7 +42,8 @@ public static class PlayerAuthEndpoints
     }
 
     /// <summary>
-    /// <c>kind</c>: <c>password</c> (username, any case) or <c>card</c> (<c>card_id</c>, any case); <c>token</c> has no
+    /// <c>kind</c>: <c>password</c> (username, any case) or <c>card</c> (<c>card_id</c>, any case, wrong cards counted per
+    /// PC); <c>token</c> has no
     /// issuer in the contract, so it is always <c>401 badCredentials</c>; <c>qr</c>/<c>guest</c> have their own operations
     /// (<c>400 kind enum</c>). <c>offlineHash</c> is derived anew from the presented password (the agent's PBKDF2 format)
     /// for password logins when <c>Club:OfflineLogin</c>; the stored hash never leaves the server.
@@ -78,9 +79,7 @@ public static class PlayerAuthEndpoints
                 offlineHash = options.OfflineLogin ? Passwords.Hash(request.Password) : null;
                 break;
             case AuthKind.Card when !string.IsNullOrWhiteSpace(request.CardId):
-                userId = await c.QuerySingleOrDefaultAsync<Guid?>(
-                    "SELECT id FROM users WHERE network_id = @network AND lower(card_id) = lower(@card) AND deleted_at IS NULL",
-                    new { network = club.NetworkId, card = request.CardId.Trim() }) ?? throw BadCredentials(MaxFailures);
+                userId = await CheckCardAsync(c, club.NetworkId, pc.Id, request.CardId.Trim(), Guid.Parse(ApiErrorWriter.TraceId(context)), clock.GetUtcNow());
                 break;
             case AuthKind.Card:
                 throw ApiException.Validation("cardId", "required");
@@ -230,13 +229,45 @@ public static class PlayerAuthEndpoints
     /// after a refresh with the same <c>X-Trace-Id</c> (N2): that first repeat is free, every further one counts. Attempts
     /// on one name are serialized (transaction advisory lock), so parallel guesses cannot all pass the count.
     /// </summary>
-    private static async Task<Guid> CheckPasswordAsync(NpgsqlConnection c, Guid network, string username, string password, Guid traceId, DateTimeOffset now)
+    private static Task<Guid> CheckPasswordAsync(NpgsqlConnection c, Guid network, string username, string password, Guid traceId, DateTimeOffset now) =>
+        CountFailuresAsync(c, network, username.ToLowerInvariant()[..Math.Min(username.Length, 64)], traceId, now, forgetOnSuccess: true, async tx =>
+        {
+            var user = await c.QuerySingleOrDefaultAsync<Credentials>(
+                """
+                SELECT id, password_hash FROM users
+                WHERE network_id = @network AND lower(username) = lower(@username) AND deleted_at IS NULL AND NOT transient
+                """,
+                new { network, username }, tx);
+            return Passwords.Verify(user?.PasswordHash, password) && user is not null ? user.Id : null;
+        });
+
+    /// <summary>
+    /// Card check with a lockout per PC (D-75): card numbers are printed on the cards and often run in sequence, and the
+    /// kiosk takes any keyboard, so wrong cards are counted like wrong passwords, under the key <c>card:&lt;pcId&gt;</c>
+    /// (41 characters: no username, at most 32, can take that form). 5 in 15 min refuse even a bound card on that PC with
+    /// <c>attemptsLeft = 0</c> until the window passes; other PCs, and passwords on this one, are not affected. A right
+    /// card does not clear the count: a guesser holding a card of their own could otherwise start over after every four.
+    /// </summary>
+    private static Task<Guid> CheckCardAsync(NpgsqlConnection c, Guid network, Guid pcId, string cardId, Guid traceId, DateTimeOffset now) =>
+        CountFailuresAsync(c, network, $"card:{pcId}", traceId, now, forgetOnSuccess: false, tx =>
+            c.QuerySingleOrDefaultAsync<Guid?>(
+                "SELECT id FROM users WHERE network_id = @network AND lower(card_id) = lower(@cardId) AND deleted_at IS NULL",
+                new { network, cardId }, tx));
+
+    /// <summary>
+    /// The failure count of <paramref name="key"/> in <c>login_failures</c> around <paramref name="check"/>: refused with
+    /// <c>attemptsLeft = 0</c> at <see cref="MaxFailures"/> within <see cref="FailureWindow"/>, a miss recorded once per
+    /// trace (the agent's first repeat is free), a match returned (and the count dropped when
+    /// <paramref name="forgetOnSuccess"/>). Serialized per key by a transaction advisory lock.
+    /// </summary>
+    private static async Task<Guid> CountFailuresAsync(
+        NpgsqlConnection c, Guid network, string key, Guid traceId, DateTimeOffset now, bool forgetOnSuccess, Func<NpgsqlTransaction, Task<Guid?>> check)
     {
         const string Count = """
             SELECT coalesce(sum(greatest(attempts - 1, 1)), 0)::int FROM login_failures
             WHERE network_id = @network AND username = @name AND at > @since
             """;
-        var args = new { network, name = username.ToLowerInvariant()[..Math.Min(username.Length, 64)], since = now - FailureWindow, traceId, now };
+        var args = new { network, name = key, since = now - FailureWindow, traceId, now };
         await using var tx = await c.BeginTransactionAsync();
         await c.ExecuteAsync("SELECT pg_advisory_xact_lock(hashtextextended(@network::text || '/' || @name, 0))", args, tx);
         if (await c.ExecuteScalarAsync<int>(Count, args, tx) >= MaxFailures)
@@ -244,17 +275,15 @@ public static class PlayerAuthEndpoints
             throw BadCredentials(0);
         }
 
-        var user = await c.QuerySingleOrDefaultAsync<Credentials>(
-            """
-            SELECT id, password_hash FROM users
-            WHERE network_id = @network AND lower(username) = lower(@username) AND deleted_at IS NULL AND NOT transient
-            """,
-            new { network, username }, tx);
-        if (Passwords.Verify(user?.PasswordHash, password) && user is not null)
+        if (await check(tx) is { } userId)
         {
-            await c.ExecuteAsync("DELETE FROM login_failures WHERE network_id = @network AND username = @name", args, tx);
+            if (forgetOnSuccess)
+            {
+                await c.ExecuteAsync("DELETE FROM login_failures WHERE network_id = @network AND username = @name", args, tx);
+            }
+
             await tx.CommitAsync();
-            return user.Id;
+            return userId;
         }
 
         await c.ExecuteAsync(

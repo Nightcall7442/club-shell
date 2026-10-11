@@ -1,7 +1,13 @@
 # ClubShell — Central Server API v1 (consumed by the Agent)
 
-Status: normative for the client. The server team implements this surface; `tools/MockServer` implements
-it for development. Types referenced by name are defined in `IPC_PROTOCOL.md` §6 and are byte-compatible.
+Status: descriptive — the server API as the agent uses it. The source of truth for the wire is the schema in
+[`deepunites/club-contracts`](https://github.com/deepunites/club-contracts) (OpenAPI 3.1 + AsyncAPI), vendored in
+`server/contracts` at the commit in `server/contracts/REF` with a CI drift check (`ARCHITECTURE.md` §1.2); where this
+document differs from the schema, the schema wins and this document must be fixed. `server/` implements the schema
+(its tests check every response against it); `tools/MockServer` implements it for development. Types referenced by
+name are the C# DTOs of `ClubShell.Contracts`, shared with the pipe (`IPC_PROTOCOL.md` §6) and byte-compatible
+across both. They follow the schema but are still kept in step by hand: generating them from the schema (NSwag) is an
+open item.
 
 Реализация сервера — [`docs/server/DESIGN.md`](server/DESIGN.md); запуск, конфигурация и развёртывание — [`server/README.md`](../server/README.md).
 
@@ -200,13 +206,17 @@ Request
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
 | `samples` | `PcMetrics[]` | yes | ≤ 120 per batch |
-| `hardware` | `HardwareInfo` | no | when changed / every `hardwareRescanSec` |
+| `hardware` | `HardwareInfo` | no | full inventory in the first batch after every Agent start, then only when a rescan (every `hardwareRescanSec`) finds a change |
 | `events` | `{ kind: string, at: datetime, data: object }[]` | yes | agent diagnostics: `shellCrash`, `shellCrashLoop`, `policyApplyFailed`, `updateFailed`, `pipeError`, `launcherError`, `deadletter`; the Agent sends ≤ 100 per batch (the rest go in the next ones) |
 | `logsTail` | string[] | no | last ≤ 50 Warning+ log lines when `events` non-empty |
 
 Response `204`. A `4xx` other than `401`/`408`/`429` drops the batch (the server rejected its content); after any
 other failure (including `501`) the Agent keeps the batch and backs off exponentially from `uploadIntervalSec` up to
 15 min.
+
+There is no separate inventory endpoint (the `POST /pcs/{pcId}/inventory` once proposed is not needed): the full
+`HardwareInfo` goes with registration (`AgentRegisterRequest.hardware`), with the first telemetry batch after every
+Agent start, and with the batch after a rescan that finds a change, which also sends a `hardwareChanged` event (§6).
 
 #### `GET /agents/{pcId}/config` — auth: agent, ETag
 
@@ -253,6 +263,8 @@ if this user has an open session on this `pcId` (e.g. after Agent restart). Serv
 `pbkdf2$<iterations>$<salt base64>$<hash base64>` (`OfflineSessionStore.HashPassword` / `VerifyPassword`);
 any other encoding (e.g. an Argon2id PHC string) is stored but fails closed at offline login.
 Errors: `401 unauthorized` (bad credentials; `details.attemptsLeft`), `403 forbidden` (`banned`, `zoneNotAllowed`, `ageRestricted`), `409 conflict` (active session elsewhere; `details: { pcId, pcName }`), `429`.
+Failures are counted per username for `password` and per PC for `card` (a card number can be typed and guessed):
+5 within 15 min answer `attemptsLeft: 0`, even for the right password or a bound card, until the window passes.
 
 #### `POST /auth/qr/start` — auth: agent
 
@@ -327,7 +339,7 @@ Request `{ events: SessionEvent[] }` (≤ 100; used for offline replay and for `
 
 ### 4.6 Games
 
-#### `GET /games` — auth: agent, ETag — query `zone?`, `page?`, `pageSize?` (default all, max 1000) → `{ items: Game[], total, page, pageSize, catalogVersion: string }`. Server omits local-only fields (`installed`, `installPath`, `lastPlayedAt` requires `X-User-Token`); Agent fills them from its scan.
+#### `GET /games` — auth: agent, ETag — query `zone?`, `page?`, `pageSize?` (default all, max 1000) → `{ items: Game[], total, page, pageSize, catalogVersion: string }`. Server omits local-only fields (`installed`, `installPath`, `lastPlayedAt` requires `X-User-Token`); Agent fills them from its scan. The central server also leaves out the games whose effective anti-cheat is Vanguard (`antiCheat: vanguard`, or a Riot game with none) while the PC's last heartbeat reports `antiCheat.vanguardInstalled` or `vanguardLoaded` as `false` — and every game with an anti-cheat when the club's policy lists `vanguard` in `anticheat.required` and `blockOnViolation` is on, since the Agent's gate would refuse those too; the ETag differs for that shorter list.
 #### `GET /games/{id}` → `Game`. Errors: `404`.
 
 #### `GET /games/{id}/accounts/lease` — auth: user

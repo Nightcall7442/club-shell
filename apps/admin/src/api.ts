@@ -4,6 +4,8 @@
  * A real deployment points `VITE_ADMIN_API` at the operator's own server.
  */
 import type {
+  HardwareInfo,
+  HeartbeatGamesVolume,
   Money,
   PcStatus,
   Product,
@@ -945,6 +947,8 @@ export interface PcHealth {
   hourly: { cpu: (number | null)[]; gpu: (number | null)[]; fps: (number | null)[] };
   issues: HealthIssue[];
   ticket: HealthTicket | null;
+  /** The games disk of the PC's last heartbeat (D-73); null — never reported; absent from an older server. */
+  gamesVolume?: HeartbeatGamesVolume | null;
 }
 
 export interface HealthReport {
@@ -1023,7 +1027,8 @@ export interface HallPc {
   x: number;
   y: number;
   device: DeviceKind;
-  hardware: Record<string, unknown> | null;
+  /** What the Agent reported at registration and on every change since; null — no Agent has run on this seat. */
+  hardware: HardwareInfo | null;
   metrics: {
     cpuPct: number;
     gpuPct: number;
@@ -1031,6 +1036,8 @@ export interface HallPc {
     temps: { cpu?: number | null; gpu?: number | null };
     fps?: number | null;
   } | null;
+  /** The games disk of the PC's last heartbeat (D-73); null — never reported; absent from an older server. */
+  gamesVolume?: HeartbeatGamesVolume | null;
 }
 
 export interface AdminGame {

@@ -47,6 +47,9 @@ const QR_TTL_SEC = 120;
 const QR_SCANNED_AFTER_MS = 4_000;
 const qrAutoConfirmMs = Number.parseInt(process.env['MOCK_QR_AUTOCONFIRM_SEC'] ?? '8', 10) * 1000;
 const failedAttempts = new Map<string, number>();
+/** Times of wrong cards per PC (D-75): a card number can be typed and guessed, so it is counted like a password. */
+const cardFailures = new Map<string, number[]>();
+const CARD_WINDOW_MS = 15 * 60_000;
 
 /** Argon2id-shaped PHC string so the Agent can store it; not a real Argon2 hash (mock). */
 function offlineHash(user: UserRecord, password: string): string {
@@ -161,8 +164,16 @@ export function authRoutes(app: FastifyInstance): void {
       }
       case 'card': {
         const cardId = str(b, 'cardId', 64);
+        // As the server: 5 wrong cards on this PC in 15 min refuse even a bound one until the window passes.
+        const at = Date.now();
+        const failures = (cardFailures.get(pc.id) ?? []).filter((t) => at - t < CARD_WINDOW_MS);
+        if (failures.length >= 5) throw errors.unauthorized('badCredentials', { attemptsLeft: 0 });
         user = db.users.find((u) => u.cardId !== null && u.cardId.toLowerCase() === cardId.toLowerCase());
-        if (!user) throw errors.unauthorized('badCredentials', { attemptsLeft: 5 });
+        if (!user) {
+          failures.push(at);
+          cardFailures.set(pc.id, failures);
+          throw errors.unauthorized('badCredentials', { attemptsLeft: 5 - failures.length });
+        }
         break;
       }
       case 'token': {

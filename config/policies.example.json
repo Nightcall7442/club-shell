@@ -90,7 +90,7 @@
     "autoInstall": true
   },
   "anticheat": {
-    "required": ["eac", "vanguard"],
+    "required": [],
     "blockOnViolation": true
   },
   "kiosk": {

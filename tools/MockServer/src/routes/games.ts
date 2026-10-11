@@ -6,6 +6,7 @@
 import type { FastifyInstance } from 'fastify';
 import {
   AccountLeaseReleaseReason,
+  AntiCheatKind,
   LaunchReportPhase,
   LauncherType,
   type AccountLease,
@@ -43,6 +44,23 @@ const RELEASE_REASONS = Object.values(AccountLeaseReleaseReason);
 const PHASES = Object.values(LaunchReportPhase);
 const LAUNCHERS = knownValues(LauncherType);
 
+/**
+ * As the server (D-74): whether a PC whose last heartbeat says vgk is missing or not loaded cannot start `game` — a
+ * Vanguard game (tagged so, or a Riot game with no tag, as the Agent's gate reads it) never, and any other game with an
+ * anti-cheat when the policy requires Vanguard for every launch and blocks on a violation (the seed does).
+ */
+function needsVanguard(game: Game): boolean {
+  const kind =
+    game.antiCheat === AntiCheatKind.None && game.launcher === LauncherType.Riot
+      ? AntiCheatKind.Vanguard
+      : game.antiCheat;
+  const { required, blockOnViolation } = db.policy.anticheat;
+  return (
+    kind === AntiCheatKind.Vanguard ||
+    (kind !== AntiCheatKind.None && required.includes(AntiCheatKind.Vanguard) && blockOnViolation !== false)
+  );
+}
+
 function withLastPlayed(game: Game, userId: string | null): Game {
   return { ...game, lastPlayedAt: userId ? (db.lastPlayed[userId]?.[game.id] ?? null) : null };
 }
@@ -59,8 +77,11 @@ function findLease(gameId: string, leaseId: string): LeaseRecord | undefined {
 
 export function gamesRoutes(app: FastifyInstance): void {
   app.get<{ Querystring: { zone?: string; page?: string; pageSize?: string } }>('/games', async (req, reply) => {
-    requireAgent(req);
+    const pc = requireAgent(req);
     const userId = optionalUser(req)?.id ?? null;
+    // No antiCheat in the last heartbeat (an older Agent) or a field it could not read hides nothing (D-74); the ETag is
+    // the hash of the list, so the shorter one has its own.
+    const noVanguard = pc.antiCheat?.vanguardInstalled === false || pc.antiCheat?.vanguardLoaded === false;
     // The club's catalogue settings: hidden games are left out, the owner's order comes first.
     const { hidden, order } = club().catalog;
     const rank = (id: string): number => {
@@ -68,7 +89,7 @@ export function gamesRoutes(app: FastifyInstance): void {
       return i < 0 ? Number.MAX_SAFE_INTEGER : i;
     };
     const all = db.games
-      .filter((g) => !hidden.includes(g.id))
+      .filter((g) => !hidden.includes(g.id) && !(noVanguard && needsVanguard(g)))
       .sort((a, b) => rank(a.id) - rank(b.id))
       .map((g) => withLastPlayed(g, userId));
     const paged =

@@ -68,17 +68,21 @@ public sealed class TestAgent(ServerFixture server, JsonElement registration, st
 
     /// <summary>
     /// A contract-valid <c>HeartbeatRequest</c> body: <paramref name="offlineQueue"/> is the agent's outbox size (events it has
-    /// not flushed yet), <paramref name="currentSessionId"/> its open session (the key is left out when null) and
-    /// <paramref name="runningGames"/> the games it tracks, as <c>(gameId, startedAt)</c>.
+    /// not flushed yet), <paramref name="currentSessionId"/> its open session (the key is left out when null),
+    /// <paramref name="runningGames"/> the games it tracks, as <c>(gameId, startedAt)</c>, and <paramref name="gamesVolume"/>
+    /// and <paramref name="antiCheat"/> the optional objects of newer agents, serialized as given (left out when null).
     /// </summary>
     public static string Heartbeat(
-        int offlineQueue = 0, Guid? currentSessionId = null, IEnumerable<(Guid GameId, DateTimeOffset StartedAt)>? runningGames = null)
+        int offlineQueue = 0, Guid? currentSessionId = null, IEnumerable<(Guid GameId, DateTimeOffset StartedAt)>? runningGames = null,
+        object? gamesVolume = null, object? antiCheat = null)
     {
         var session = currentSessionId is { } id ? $"\"currentSessionId\":\"{id}\"," : "";
         var games = string.Join(',', (runningGames ?? []).Select((g, i) => JsonSerializer.Serialize(new { gameId = g.GameId, pid = 1000 + i, startedAt = g.StartedAt })));
+        var volume = gamesVolume is null ? "" : $",\"gamesVolume\":{JsonSerializer.Serialize(gamesVolume)}";
+        var vanguard = antiCheat is null ? "" : $",\"antiCheat\":{JsonSerializer.Serialize(antiCheat)}";
         return $$"""
             {"status":"free",{{session}}"agentVersion":"1.4.2","shellVersion":"1.4.2","uptimeSec":3600,"ipAddress":"10.0.0.12",
-             "policyVersion":0,"runningGames":[{{games}}],"offlineQueue":{{offlineQueue}},"shellConnected":true}
+             "policyVersion":0,"runningGames":[{{games}}],"offlineQueue":{{offlineQueue}},"shellConnected":true{{volume}}{{vanguard}}}
             """;
     }
 
@@ -136,8 +140,9 @@ public sealed class TestAgent(ServerFixture server, JsonElement registration, st
     }
 
     public Task<HttpResponseMessage> HeartbeatAsync(
-        int offlineQueue = 0, Guid? currentSessionId = null, IEnumerable<(Guid GameId, DateTimeOffset StartedAt)>? runningGames = null) =>
-        SendAsync(HttpMethod.Post, Path("heartbeat"), Heartbeat(offlineQueue, currentSessionId, runningGames));
+        int offlineQueue = 0, Guid? currentSessionId = null, IEnumerable<(Guid GameId, DateTimeOffset StartedAt)>? runningGames = null,
+        object? gamesVolume = null, object? antiCheat = null) =>
+        SendAsync(HttpMethod.Post, Path("heartbeat"), Heartbeat(offlineQueue, currentSessionId, runningGames, gamesVolume, antiCheat));
 
     /// <summary><c>/api/v1/agents/{pcId}/…</c> of this PC.</summary>
     public string Path(string rest) => $"/api/v1/agents/{PcId}/{rest}";

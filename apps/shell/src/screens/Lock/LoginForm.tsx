@@ -14,7 +14,7 @@ export interface LoginFormProps {
   className?: string;
 }
 
-/** Human message for a failed password / PIN check; anything unexpected falls back to `describeError`. */
+/** Human message for a failed password / PIN / card check; anything unexpected falls back to `describeError`. */
 export function loginErrorMessage(e: unknown, t: TFunction): string {
   const err = toShellApiError(e);
   const details = (typeof err.details === 'object' && err.details !== null ? err.details : {}) as Record<
@@ -43,6 +43,9 @@ export function loginErrorMessage(e: unknown, t: TFunction): string {
       }
       if (details['field'] === 'pin') {
         return t('lock.pinRequired');
+      }
+      if (details['field'] === 'cardId') {
+        return t('lock.cardRequired');
       }
       return describeError(err);
     default:
