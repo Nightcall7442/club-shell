@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
+using ClubShell.Server.Admin;
 using ClubShell.Server.Infrastructure;
 using Dapper;
 using Npgsql;
@@ -16,7 +17,7 @@ namespace ClubShell.Server.Auth;
 /// <see cref="AuthOptions.PepperPath"/>, created on first start; without it every PIN is lost. A token is 32 random bytes
 /// (<c>st_</c> + base64url), only its SHA-256 is stored; it lives <see cref="AuthOptions.StaffTokenSlidingHours"/> since its
 /// last use and at most <see cref="AuthOptions.StaffTokenAbsoluteDays"/>, and dies with logout or the staff member's
-/// deactivation (checked on every request). <c>ck_…</c> is the owner (synthetic "API key"), compared in
+/// deactivation or a new PIN (checked on every request). <c>ck_…</c> is the owner (synthetic "API key"), compared in
 /// constant time with <c>clubs.api_key_hash</c> and never revoked by logout. Wrong PINs are limited by
 /// <see cref="StaffLoginGuard"/>.
 /// </summary>
@@ -165,30 +166,121 @@ public sealed class StaffTokens(NpgsqlDataSource db, AuthOptions options, TimePr
     }
 
     /// <summary>
-    /// First start with an empty <c>staff</c> table: the owner is created with <paramref name="ownerPin"/> (<c>Club:OwnerPin</c>),
-    /// or with a generated 6-digit PIN written to the log once.
+    /// Revokes every live token of <paramref name="staffId"/> but <paramref name="keep"/> (the caller's own, when members change
+    /// their own PIN), in the caller's transaction: a new PIN signs out whoever learned the old one (D-77).
+    /// </summary>
+    public static Task RevokeOthersAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid staffId, string? keep, DateTimeOffset now) =>
+        c.ExecuteAsync(
+            "UPDATE staff_tokens SET revoked_at = @now WHERE staff_id = @staffId AND revoked_at IS NULL AND token_hash <> @keep",
+            new { staffId, now, keep = Hash(keep ?? "") },
+            tx);
+
+    /// <summary>
+    /// The first owner, on every start (D-77). With an empty <c>staff</c> table the owner of the first club is created with
+    /// <paramref name="ownerPin"/> (<c>Club:OwnerPin</c>), which must be 4–8 digits like any staff PIN — else the start fails
+    /// naming the setting, never the value; or, without it, with a random 6-digit PIN written to
+    /// <see cref="AuthOptions.OwnerPinPath"/> first (the data volume already holds the pepper, which with a database dump
+    /// opens every PIN anyway). Only the path is logged: the log reaches the hosting dashboard, chats and screenshots. No path,
+    /// or a file that cannot be written, fails the start with nobody created. Once staff exists, every start reminds without
+    /// the PIN: the generated PIN still in use (its file goes once it is not), a <c>Club:OwnerPin</c> left in the settings.
     /// </summary>
     public async Task EnsureOwnerAsync(string? ownerPin)
     {
         await using var c = await db.OpenConnectionAsync();
         if (await c.ExecuteScalarAsync<bool>("SELECT EXISTS (SELECT 1 FROM staff)"))
         {
+            await RemindAsync(c, ownerPin);
             return;
         }
 
-        var pin = string.IsNullOrEmpty(ownerPin) ? RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6", CultureInfo.InvariantCulture) : ownerPin;
-        await c.ExecuteAsync(
+        if (!string.IsNullOrEmpty(ownerPin))
+        {
+            if (!StaffAdminEndpoints.IsPin(ownerPin))
+            {
+                throw new InvalidOperationException("Club:OwnerPin must be 4 to 8 digits (0-9); the owner was not created");
+            }
+
+            await InsertOwnerAsync(c, ownerPin);
+            logger.LogInformation("No staff yet: owner created with the PIN of Club:OwnerPin; change it in the console, then remove the setting");
+            return;
+        }
+
+        var path = options.OwnerPinPath;
+        if (path.Length == 0)
+        {
+            throw new InvalidOperationException("No staff yet: set Club:OwnerPin, or Auth:OwnerPinPath for a generated PIN; the owner was not created");
+        }
+
+        var pin = RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6", CultureInfo.InvariantCulture);
+        WriteSecret(path, pin + "\n");
+        try
+        {
+            if (await InsertOwnerAsync(c, pin) == 0)
+            {
+                File.Delete(path);
+                return;
+            }
+        }
+        catch
+        {
+            File.Delete(path);
+            throw;
+        }
+
+        logger.LogWarning("No staff yet: owner created with a generated PIN, written to {Path} (readable by the server's user only); sign in with it and change it in the console", path);
+    }
+
+    private Task<int> InsertOwnerAsync(NpgsqlConnection c, string pin) =>
+        c.ExecuteAsync(
             """
             INSERT INTO staff (id, network_id, club_id, name, role, pin_hmac)
             SELECT @id, network_id, id, 'Владелец', 'owner', @hmac FROM clubs ORDER BY created_at, id LIMIT 1
             ON CONFLICT DO NOTHING
             """,
             new { id = Guid.CreateVersion7(clock.GetUtcNow()), hmac = PinHmac(pin) });
-        if (string.IsNullOrEmpty(ownerPin))
+
+    /// <summary>The reminders of a start with staff; never the PIN, and nothing here stops the start.</summary>
+    private async Task RemindAsync(NpgsqlConnection c, string? ownerPin)
+    {
+        var path = options.OwnerPinPath;
+        if (path.Length > 0 && File.Exists(path))
         {
-            logger.LogWarning("No staff yet: owner created with PIN {Pin}; change it in the console", pin);
+            try
+            {
+                if (await InUseAsync(c, (await File.ReadAllTextAsync(path)).Trim(), ownersOnly: false))
+                {
+                    logger.LogWarning("The owner still signs in with the generated PIN in {Path}: change it in the console; the file goes at the next start after that", path);
+                }
+                else
+                {
+                    File.Delete(path);
+                    logger.LogInformation("The generated owner PIN in {Path} is no longer used: file removed", path);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                logger.LogWarning("The generated owner PIN file {Path} could not be checked or removed: {Error}", path, ex.Message);
+            }
+        }
+
+        if (!string.IsNullOrEmpty(ownerPin))
+        {
+            if (await InUseAsync(c, ownerPin, ownersOnly: true))
+            {
+                logger.LogWarning("Club:OwnerPin is still the PIN of an active owner: change that PIN in the console, then remove the setting (Railway: Club__OwnerPin)");
+            }
+            else
+            {
+                logger.LogInformation("Club:OwnerPin is not used once the club has staff: remove the setting (Railway: Club__OwnerPin)");
+            }
         }
     }
+
+    /// <summary>An active member (an owner, with <paramref name="ownersOnly"/>) signs in with <paramref name="pin"/>.</summary>
+    private Task<bool> InUseAsync(NpgsqlConnection c, string pin, bool ownersOnly) =>
+        c.ExecuteScalarAsync<bool>(
+            "SELECT EXISTS (SELECT 1 FROM staff WHERE pin_hmac = @hmac AND active AND (NOT @ownersOnly OR role = 'owner'))",
+            new { hmac = PinHmac(pin), ownersOnly });
 
     /// <summary>
     /// The club API key (<c>adminApiKey</c>): the current <c>ck_&lt;32 hex&gt;</c>, created on first read (a fresh club has
@@ -240,6 +332,30 @@ public sealed class StaffTokens(NpgsqlDataSource db, AuthOptions options, TimePr
     }
 
     private static byte[] Hash(string token) => SHA256.HashData(Encoding.UTF8.GetBytes(token));
+
+    /// <summary>
+    /// <paramref name="text"/> as the whole of <paramref name="path"/>: created 0600 on Unix in one step (never readable by
+    /// others, not even for a moment) under a temporary name and renamed into place, so a crash leaves no half-written file.
+    /// </summary>
+    private static void WriteSecret(string path, string text)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        var temp = path + ".tmp";
+        File.Delete(temp);
+        var file = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write };
+        if (!OperatingSystem.IsWindows())
+        {
+            file.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        }
+
+        using (var stream = new FileStream(temp, file))
+        {
+            stream.Write(Encoding.ASCII.GetBytes(text));
+            stream.Flush(flushToDisk: true);
+        }
+
+        File.Move(temp, path, overwrite: true);
+    }
 
     /// <summary>32 random bytes created once (0600 on Unix), never over a file another process just wrote.</summary>
     private static byte[] LoadOrCreatePepper(string path)

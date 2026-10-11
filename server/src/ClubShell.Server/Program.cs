@@ -36,6 +36,7 @@ var connectionString = builder.Configuration.GetConnectionString("Club")
 var authOptions = builder.Configuration.GetSection("Auth").Get<AuthOptions>() ?? new AuthOptions();
 authOptions.SigningKeyPath = Path.Combine(builder.Environment.ContentRootPath, authOptions.SigningKeyPath);
 authOptions.PepperPath = Path.Combine(builder.Environment.ContentRootPath, authOptions.PepperPath);
+authOptions.OwnerPinPath = string.IsNullOrEmpty(authOptions.OwnerPinPath) ? "" : Path.Combine(builder.Environment.ContentRootPath, authOptions.OwnerPinPath);
 authOptions.PinAttempts = builder.Configuration.GetValue("RateLimit:PinAttempts", authOptions.PinAttempts);
 authOptions.PinWindowSec = builder.Configuration.GetValue("RateLimit:PinWindowSec", authOptions.PinWindowSec);
 authOptions.PinClubAttempts = builder.Configuration.GetValue("RateLimit:PinClubAttempts", authOptions.PinClubAttempts);
@@ -142,7 +143,8 @@ if (builder.Configuration.GetValue("Seed:Dev", false))
         seats: builder.Configuration.GetValue("Seed:DevPcs", false));
 }
 
-// After the dev seed: its staff fills the table, so no owner PIN is generated in Development.
+// After the dev seed: its staff fills the table, so no owner PIN is generated in Development. A Club:OwnerPin that is not
+// 4–8 digits, or a generated PIN that cannot be written, stops the start here (D-77).
 await staffTokens.EnsureOwnerAsync(builder.Configuration["Club:OwnerPin"]);
 
 if (proxyOptions.ClientIpHeader.Length > 0)

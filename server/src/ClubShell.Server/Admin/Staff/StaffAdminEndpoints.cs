@@ -16,9 +16,11 @@ namespace ClubShell.Server.Admin;
 /// PIN is 4–8 ASCII digits and unique in the network (<c>staff_network_id_pin_hmac_key</c> on its peppered HMAC) — taken is
 /// <c>400 pin taken</c> on create and on change alike (§3.5; the contract's open question on PATCH). Disabling takes effect
 /// at once: every token of the member is revoked with it (a later re-enable does not revive them), and the token check
-/// reads <c>staff.active</c> on each request anyway. Nobody disables themselves (<c>400 active self</c>) and the club keeps
-/// one active owner at least (<c>400 active lastOwner</c>, decided under a lock on the active owners — the <c>ck_</c> key
-/// has no member to match "self", and two owners can disable each other at once).
+/// reads <c>staff.active</c> on each request anyway. A new PIN revokes the member's other tokens (D-77): whoever learned the
+/// old PIN is signed out too; members who change their own PIN keep the session they did it from. Nobody disables
+/// themselves (<c>400 active self</c>) and the club keeps one active owner at least (<c>400 active lastOwner</c>, decided
+/// under a lock on the active owners — the <c>ck_</c> key has no member to match "self", and two owners can disable each
+/// other at once).
 /// </summary>
 public static partial class StaffAdminEndpoints
 {
@@ -113,6 +115,10 @@ public static partial class StaffAdminEndpoints
         {
             await c.ExecuteAsync("UPDATE staff_tokens SET revoked_at = @now WHERE staff_id = @staffId AND revoked_at IS NULL", new { staffId, now }, tx);
         }
+        else if (hmac is not null)
+        {
+            await StaffTokens.RevokeOthersAsync(c, tx, staffId, AgentAuthMiddleware.BearerToken(context), now);
+        }
 
         // The PIN itself never reaches the journal: only that it changed.
         await Audit.WriteAsync(c, tx, staff, now, "staffUpdate", detail: name ?? before.Name,
@@ -122,7 +128,10 @@ public static partial class StaffAdminEndpoints
     }
 
     /// <summary>4–8 ASCII digits (<c>\d</c> would take any Unicode digit), else <c>400 pin digits4to8</c>.</summary>
-    internal static string Pin(string pin) => PinPattern().IsMatch(pin) ? pin : throw ApiException.Validation("pin", "digits4to8");
+    internal static string Pin(string pin) => IsPin(pin) ? pin : throw ApiException.Validation("pin", "digits4to8");
+
+    /// <summary>The staff PIN rule: 4–8 ASCII digits (also for <c>Club:OwnerPin</c>, D-77).</summary>
+    internal static bool IsPin(string pin) => PinPattern().IsMatch(pin);
 
     /// <summary>A PIN another member of the network holds is <c>400 pin taken</c>.</summary>
     internal static async Task PinWriteAsync(NpgsqlConnection c, NpgsqlTransaction tx, Func<Task<int>> write)

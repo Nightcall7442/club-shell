@@ -31,6 +31,12 @@ public sealed class AuthOptions
     /// <summary>32-byte HMAC key of staff PINs (DESIGN §3.5), created on first start; relative paths resolve against the content root.</summary>
     public string PepperPath { get; set; } = "data/pin-pepper.key";
 
+    /// <summary>
+    /// Where a generated owner PIN is written on the first start (D-77): readable only by the server's user, never logged;
+    /// relative paths resolve against the content root. Empty: no file, so <c>Club:OwnerPin</c> is required then.
+    /// </summary>
+    public string OwnerPinPath { get; set; } = "data/owner-pin.txt";
+
     /// <summary>A staff token dies this long after its last use…</summary>
     public int StaffTokenSlidingHours { get; set; } = 12;
 
