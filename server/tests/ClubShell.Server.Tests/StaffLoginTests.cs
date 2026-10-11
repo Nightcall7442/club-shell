@@ -169,6 +169,44 @@ public sealed class StaffLoginTests(StaffLoginFixture server) : IClassFixture<St
     }
 
     [Fact]
+    public async Task A_browser_is_no_longer_trusted_once_its_member_is_disabled_or_gets_a_new_pin()
+    {
+        await ResetAsync();
+        var desk = NewDevice();
+        var owner = await TokenAsync(OwnerPin, "198.51.100.70", desk);
+        var fired = await AddCashierAsync(owner, "Уволенный кассир", "7301");
+        var leaked = await AddCashierAsync(owner, "Кассир с утёкшим PIN", "7302");
+        var home = NewDevice();
+        var thief = NewDevice();
+        Assert.Equal("200", await OutcomeAsync("7301", "203.0.113.90", home));
+        Assert.Equal("200", await OutcomeAsync("7302", "203.0.113.91", thief));
+
+        // The owner disables one and gives the other a new PIN: their browsers guess with the outsiders now, not in the budget
+        // of the desks, and the desk the owner signed in from is still trusted.
+        await ExpectAsync(server, 200, HttpMethod.Patch, $"/staff/{fired}", owner, new { active = false });
+        await ExpectAsync(server, 200, HttpMethod.Patch, $"/staff/{leaked}", owner, new { pin = "73021" });
+        Assert.Equal("401", await OutcomeAsync(WrongPin, "203.0.113.90", home));
+        Assert.Equal("401", await OutcomeAsync(WrongPin, "203.0.113.91", thief));
+        Assert.Equal("401", await OutcomeAsync(WrongPin, "198.51.100.70", desk));
+        Assert.Equal("net:203.0.113.90 net:203.0.113.91 trusted", await Players.ScalarAsync<string>(server,
+            "SELECT string_agg(CASE WHEN trusted THEN 'trusted' ELSE source END, ' ' ORDER BY trusted, source) FROM staff_login_failures"));
+
+        // The platform's reset of a forgotten owner PIN forgets the owner's browsers too.
+        using var client = server.CreateDefaultClient();
+        using var reset = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/platform/clubs/{await ClubIdAsync()}/owners/{await StaffIdAsync(owner)}/pin")
+        {
+            Content = JsonBody(new { pin = OwnerPin }),
+        };
+        reset.Headers.Authorization = new AuthenticationHeaderValue("Bearer", StaffLoginFixture.PlatformKey);
+        using (var response = await client.SendAsync(reset))
+        {
+            await Players.ReadAsync(response, 200);
+        }
+
+        Assert.Equal(0, await Players.ScalarAsync<int>(server, "SELECT count(*)::int FROM staff_devices"));
+    }
+
+    [Fact]
     public async Task A_club_limit_kept_full_alerts_once_per_window()
     {
         await ResetAsync();
@@ -355,6 +393,21 @@ public sealed class StaffLoginTests(StaffLoginFixture server) : IClassFixture<St
     private Task<int> AlertsAsync() => Players.ScalarAsync<int>(server, "SELECT count(*)::int FROM webhook_outbox WHERE event = 'suspicious'");
 
     private static string NewDevice() => Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
+
+    /// <summary>The token of a sign-in that must succeed.</summary>
+    private async Task<string> TokenAsync(string pin, string ip, string device)
+    {
+        var (status, body) = await AttemptAsync(pin, ip, device);
+        Assert.True(status == 200, $"sign-in: {status} {body}");
+        return body.GetProperty("token").GetString()!;
+    }
+
+    /// <summary>A new cashier of the bootstrap club; their id.</summary>
+    private async Task<string> AddCashierAsync(string owner, string name, string pin) =>
+        (await ExpectAsync(server, 200, HttpMethod.Post, "/staff", owner, new { name, role = "cashier", pin })).GetProperty("id").GetString()!;
+
+    private async Task<string> StaffIdAsync(string token) =>
+        (await ExpectAsync(server, 200, HttpMethod.Get, "/me", token)).GetProperty("staff").GetProperty("id").GetString()!;
 
     /// <summary><see cref="AttemptAsync"/> in short: <c>200</c>, <c>401</c> (invalidPin) or <c>429 &lt;scope&gt;</c>.</summary>
     private async Task<string> OutcomeAsync(string pin, string ip, object? device = null, string? code = null, WebApplicationFactory<Program>? client = null)

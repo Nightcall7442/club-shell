@@ -17,10 +17,10 @@ namespace ClubShell.Server.Admin;
 /// <c>400 pin taken</c> on create and on change alike (§3.5; the contract's open question on PATCH). Disabling takes effect
 /// at once: every token of the member is revoked with it (a later re-enable does not revive them), and the token check
 /// reads <c>staff.active</c> on each request anyway. A new PIN revokes the member's other tokens (D-77): whoever learned the
-/// old PIN is signed out too; members who change their own PIN keep the session they did it from. Nobody disables
-/// themselves (<c>400 active self</c>) and the club keeps one active owner at least (<c>400 active lastOwner</c>, decided
-/// under a lock on the active owners — the <c>ck_</c> key has no member to match "self", and two owners can disable each
-/// other at once).
+/// old PIN is signed out too; members who change their own PIN keep the session they did it from. Either also ends the club's
+/// trust in the browsers the member signed in from last (D-76). Nobody disables themselves (<c>400 active self</c>) and the
+/// club keeps one active owner at least (<c>400 active lastOwner</c>, decided under a lock on the active owners — the
+/// <c>ck_</c> key has no member to match "self", and two owners can disable each other at once).
 /// </summary>
 public static partial class StaffAdminEndpoints
 {
@@ -118,6 +118,11 @@ public static partial class StaffAdminEndpoints
         else if (hmac is not null)
         {
             await StaffTokens.RevokeOthersAsync(c, tx, staffId, AgentAuthMiddleware.BearerToken(context), now);
+        }
+
+        if ((r.Active == false && before.Active) || hmac is not null)
+        {
+            await StaffLoginGuard.ForgetAsync(c, tx, staff.ClubId, staffId);
         }
 
         // The PIN itself never reaches the journal: only that it changed.

@@ -28,7 +28,8 @@ namespace ClubShell.Server.Auth;
 /// <c>scope</c> and <c>Retry-After</c> until enough failures leave the window. A refusal is not recorded, and a right PIN
 /// clears nothing: a guesser holding a PIN of their own could otherwise start over (as with cards, D-75). A browser is
 /// trusted by a club for <see cref="AuthOptions.PinDeviceTrustDays"/> after its last sign-in there with its
-/// <c>deviceId</c> (random bytes the console keeps); only the SHA-256 of the id is stored. An unknown club code or a disabled
+/// <c>deviceId</c> (random bytes the console keeps), until the member of that sign-in is disabled or gets a new PIN
+/// (<see cref="ForgetAsync"/>); only the SHA-256 of the id is stored. An unknown club code or a disabled
 /// club is counted in the <see cref="Guid.Empty"/> bucket under the first limit only. The first trip of a club-wide limit in
 /// a window enqueues the club's <c>suspicious</c> webhook and logs an error, which reaches Sentry (club and counts only:
 /// never a PIN or an address, which stay in the <see cref="StaffTokens"/> log).
@@ -130,6 +131,15 @@ public sealed partial class StaffLoginGuard(AuthOptions options, ILogger<StaffLo
                 ON CONFLICT (club_id, device_hash) DO UPDATE SET last_staff_id = excluded.last_staff_id, last_login_at = excluded.last_login_at
                 """,
                 new { source.ClubId, source.DeviceHash, staffId, now }, tx);
+
+    /// <summary>
+    /// The browsers whose last sign-in in the club was <paramref name="staffId"/>'s are no longer trusted, in the caller's
+    /// transaction: run when the member is disabled or gets a new PIN, so a fired cashier, or whoever signed in with a PIN that
+    /// leaked, guesses in the outsiders' budget and cannot spend the desks' one. A desk they shared is trusted again at its
+    /// next sign-in.
+    /// </summary>
+    public static Task ForgetAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid clubId, Guid staffId) =>
+        c.ExecuteAsync("DELETE FROM staff_devices WHERE club_id = @clubId AND last_staff_id = @staffId", new { clubId, staffId }, tx);
 
     /// <summary>
     /// When the bucket holds <paramref name="limit"/> failures since <paramref name="since"/>: the time of the limit-th newest,
