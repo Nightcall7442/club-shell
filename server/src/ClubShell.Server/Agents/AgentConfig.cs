@@ -18,6 +18,31 @@ public sealed class AgentOptions
 
     /// <summary>How long <c>adminCommand</c> waits for the agent's ack before answering <c>timeout</c> (§6.4 step 4).</summary>
     public int AckWaitSec { get; set; } = 30;
+
+    /// <summary>
+    /// What a re-registration of an approved PC needs besides the club key and the HWID (D-78): a signature with the PC's
+    /// current signing secret. Not sent to the agent.
+    /// </summary>
+    public RegisterProofMode RegisterProof { get; set; } = RegisterProofMode.Audit;
+
+    /// <summary>How long the owner's <c>maintenance:true</c> lets an offline PC re-enroll without proof (D-78).</summary>
+    public int ReenrollWindowMin { get; set; } = 60;
+}
+
+/// <summary><c>Agents:RegisterProof</c> (D-78).</summary>
+public enum RegisterProofMode
+{
+    /// <summary>The proof is not looked at: credentials are re-issued on the club key and the HWID alone.</summary>
+    Off,
+
+    /// <summary>As <see cref="Off"/>, but a re-registration without a valid proof is logged as a warning.</summary>
+    Audit,
+
+    /// <summary>
+    /// Without a valid proof nothing is written and the agent gets <c>403 pendingApproval</c>, unless the owner opened the
+    /// re-enroll window (<c>maintenance:true</c>) and the PC is offline.
+    /// </summary>
+    Enforce,
 }
 
 /// <summary><c>Sessions:*</c> (DESIGN §2.5): the agent config carries grace and the offline budget; the rest is billing (§5.10).</summary>

@@ -9,7 +9,8 @@ namespace ClubShell.Server.Auth;
 /// <summary>
 /// Agent request signature (DESIGN §3.3, contract base.yaml §3):
 /// <c>lowercase hex(HMAC-SHA256(secret, X-Timestamp + METHOD + raw request-target + hex(SHA256(body))))</c>.
-/// Mandatory for agent and user modes; there is no log-only mode.
+/// Mandatory for agent and user modes; there is no log-only mode. A re-registration may carry one as proof of the PC's
+/// signing secret (D-78): <see cref="ReadAsync"/> runs in the middleware, <see cref="Check"/> once the HWID names the PC.
 /// </summary>
 public static class RequestSignature
 {
@@ -25,36 +26,57 @@ public static class RequestSignature
     /// </summary>
     public static async Task<(string Timestamp, string Signature)> VerifyAsync(HttpContext context, byte[] secret, TimeSpan window, DateTimeOffset now)
     {
-        var timestamp = context.Request.Headers[TimestampHeader].ToString();
-        var signature = context.Request.Headers[SignatureHeader].ToString();
-        if (timestamp.Length == 0 || signature.Length == 0)
+        var signed = await ReadAsync(context);
+        return Check(signed, secret, window, now) switch
         {
-            throw ApiException.Unauthorized("signature", "Missing request signature", "missing");
+            SignatureCheck.Ok => (signed.Timestamp, signed.Signature),
+            SignatureCheck.Missing => throw ApiException.Unauthorized("signature", "Missing request signature", "missing"),
+            SignatureCheck.Malformed => throw ApiException.Unauthorized("signature", "Malformed X-Timestamp", "mismatch"),
+
+            // X-Server-Time is on every response (ApiErrorMiddleware): the agent learns its offset and retries once.
+            SignatureCheck.ClockSkew => throw ApiException.Unauthorized("clockSkew", "Request timestamp outside the allowed window"),
+            _ => throw ApiException.Unauthorized("signature", "Request signature mismatch", "mismatch"),
+        };
+    }
+
+    /// <summary>
+    /// The signature headers, method, raw request-target and SHA-256 of the body. The body is buffered and rewound for the
+    /// endpoint.
+    /// </summary>
+    public static async Task<SignedRequest> ReadAsync(HttpContext context)
+    {
+        context.Request.EnableBuffering();
+        var bodyHash = Convert.ToHexStringLower(await SHA256.HashDataAsync(context.Request.Body, context.RequestAborted));
+        context.Request.Body.Position = 0;
+        return new SignedRequest(
+            context.Request.Headers[TimestampHeader].ToString(),
+            context.Request.Headers[SignatureHeader].ToString(),
+            context.Request.Method,
+            RawTarget(context),
+            bodyHash);
+    }
+
+    /// <summary>Checks <paramref name="request"/> against <paramref name="secret"/> within ±<paramref name="window"/> of <paramref name="now"/>.</summary>
+    public static SignatureCheck Check(SignedRequest request, ReadOnlySpan<byte> secret, TimeSpan window, DateTimeOffset now)
+    {
+        if (request.Timestamp.Length == 0 || request.Signature.Length == 0)
+        {
+            return SignatureCheck.Missing;
         }
 
-        if (!long.TryParse(timestamp, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds))
+        if (!long.TryParse(request.Timestamp, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds))
         {
-            throw ApiException.Unauthorized("signature", "Malformed X-Timestamp", "mismatch");
+            return SignatureCheck.Malformed;
         }
 
         if (Math.Abs(now.ToUnixTimeSeconds() - seconds) > window.TotalSeconds)
         {
-            // X-Server-Time is on every response (ApiErrorMiddleware): the agent learns its offset and retries once.
-            throw ApiException.Unauthorized("clockSkew", "Request timestamp outside the allowed window");
+            return SignatureCheck.ClockSkew;
         }
 
-        context.Request.EnableBuffering();
-        var bodyHash = Convert.ToHexStringLower(await SHA256.HashDataAsync(context.Request.Body, context.RequestAborted));
-        context.Request.Body.Position = 0;
-
-        var expected = Convert.FromHexString(Compute(secret, timestamp, context.Request.Method, RawTarget(context), bodyHash));
-        var actual = signature.Length == 64 && IsHex(signature) ? Convert.FromHexString(signature) : [];
-        if (!CryptographicOperations.FixedTimeEquals(expected, actual))
-        {
-            throw ApiException.Unauthorized("signature", "Request signature mismatch", "mismatch");
-        }
-
-        return (timestamp, signature);
+        var expected = Convert.FromHexString(Compute(secret, request.Timestamp, request.Method, request.Target, request.BodySha256));
+        var actual = request.Signature.Length == 64 && IsHex(request.Signature) ? Convert.FromHexString(request.Signature) : [];
+        return CryptographicOperations.FixedTimeEquals(expected, actual) ? SignatureCheck.Ok : SignatureCheck.Mismatch;
     }
 
     /// <summary>
@@ -79,4 +101,25 @@ public static class RequestSignature
     }
 
     private static bool IsHex(string value) => value.All(char.IsAsciiHexDigit);
+}
+
+/// <summary>What <see cref="RequestSignature.Check"/> needs of a request, read once by <see cref="RequestSignature.ReadAsync"/>.</summary>
+public sealed record SignedRequest(string Timestamp, string Signature, string Method, string Target, string BodySha256);
+
+/// <summary>Outcome of <see cref="RequestSignature.Check"/>.</summary>
+public enum SignatureCheck
+{
+    Ok,
+
+    /// <summary><c>X-Timestamp</c> or <c>X-Signature</c> absent or empty.</summary>
+    Missing,
+
+    /// <summary><c>X-Timestamp</c> is not whole seconds.</summary>
+    Malformed,
+
+    /// <summary>Outside the window.</summary>
+    ClockSkew,
+
+    /// <summary>Another secret, or signed over another method, target or body.</summary>
+    Mismatch,
 }

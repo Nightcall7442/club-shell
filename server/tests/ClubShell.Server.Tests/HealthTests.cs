@@ -84,6 +84,7 @@ public sealed class HealthTests(LongClockServerFixture server) : IClassFixture<L
         report = await ExpectAsync(server, 200, HttpMethod.Get, "/health", cashier);
         Assert.Equal(("maintenance", true), (Pc(report, hot.PcId).GetProperty("status").GetString(), Pc(report, hot.PcId).GetProperty("ticket").GetProperty("autoMaintenance").GetBoolean()));
         Assert.Equal("offline", Pc(report, worn.PcId).GetProperty("status").GetString()); // offline, not free: left alone
+        Assert.True(await Players.ScalarAsync<bool>(server, "SELECT reenroll_until IS NULL FROM pcs WHERE id = @PcId", new { hot.PcId })); // only the owner opens it (D-78)
 
         var inWork = (await ExpectAsync(server, 200, HttpMethod.Patch, $"/health/tickets/{ticketId}", cashier, new { status = "inWork", note = "Чистка кулера" })).GetProperty("ticket");
         Assert.Equal(("inWork", "Чистка кулера", JsonValueKind.Null), (inWork.GetProperty("status").GetString(), inWork.GetProperty("note").GetString(), inWork.GetProperty("resolvedAt").ValueKind));
