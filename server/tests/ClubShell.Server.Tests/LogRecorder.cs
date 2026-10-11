@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace ClubShell.Server.Tests;
@@ -7,14 +8,22 @@ namespace ClubShell.Server.Tests;
 public sealed record LogLine(string Category, LogLevel Level, string Message);
 
 /// <summary>
-/// Keeps every log line of a host (<c>builder.ConfigureLogging(l => l.AddProvider(recorder))</c>), from its start on: what the
-/// server logs about PINs is asserted, not just looked at.
+/// Keeps every log line of a host (<c>builder.ConfigureLogging(l => l.AddProvider(recorder))</c>), from its start on, or of a
+/// running server from <see cref="On"/>: what the server logs about PINs and PCs is asserted, not just looked at.
 /// </summary>
 public sealed class LogRecorder : ILoggerProvider
 {
     private readonly ConcurrentQueue<LogLine> _lines = new();
 
     public IReadOnlyList<LogLine> Lines => [.. _lines];
+
+    /// <summary>Records what an already running server logs from now on.</summary>
+    public static LogRecorder On(ServerFixture server)
+    {
+        var recorder = new LogRecorder();
+        server.Services.GetRequiredService<ILoggerFactory>().AddProvider(recorder);
+        return recorder;
+    }
 
     public ILogger CreateLogger(string categoryName) => new Logger(categoryName, _lines);
 

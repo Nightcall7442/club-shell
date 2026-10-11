@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using ClubShell.Core.Abstractions;
 using ClubShell.Core.Http;
@@ -62,7 +61,7 @@ public sealed class RegisterProofTests(ServerFixture audit, EnforceServerFixture
     [Fact]
     public async Task Without_a_proof_enforce_refuses_and_writes_nothing()
     {
-        var logs = Logs.Of(enforce);
+        var logs = LogRecorder.On(enforce);
         var agent = await TestAgent.CreateAsync(enforce);
         var before = await RowAsync(enforce, agent.PcId);
         using (var refused = await TestAgent.RegisterAsync(enforce, TestAgent.RegisterBody(agent.Hwid, TestAgent.RandomMac(), machineName: "INTRUDER", agentVersion: "9.9.9")))
@@ -73,7 +72,7 @@ public sealed class RegisterProofTests(ServerFixture audit, EnforceServerFixture
 
         // Inventory, agent version, cv, secret and refresh tokens as they were: the PC goes on with what it holds.
         Assert.Equal(before, await RowAsync(enforce, agent.PcId));
-        Assert.Contains("refused without a valid proof (none)", Assert.Single(logs.Warnings(agent.PcId)), StringComparison.Ordinal);
+        Assert.Contains("refused without a valid proof (none)", Assert.Single(Warnings(logs, agent.PcId)), StringComparison.Ordinal);
         using (var config = await agent.SendAsync(HttpMethod.Get, agent.Path("config")))
         {
             Assert.Equal(200, (int)config.StatusCode);
@@ -129,7 +128,7 @@ public sealed class RegisterProofTests(ServerFixture audit, EnforceServerFixture
     [Fact]
     public async Task Audit_re_issues_without_a_proof_as_before_and_warns_without_the_headers()
     {
-        var logs = Logs.Of(audit);
+        var logs = LogRecorder.On(audit);
         var first = await TestAgent.CreateAsync(audit);
         var second = await TestAgent.CreateAsync(audit, first.Hwid);
         Assert.Equal(first.PcId, second.PcId);
@@ -144,11 +143,11 @@ public sealed class RegisterProofTests(ServerFixture audit, EnforceServerFixture
             await Players.ReadAsync(proven, 200);
         }
 
-        var warnings = logs.Warnings(first.PcId);
+        var warnings = Warnings(logs, first.PcId);
         Assert.Equal(2, warnings.Count);
         Assert.Contains("re-registered without a valid proof (none)", warnings[0], StringComparison.Ordinal);
         Assert.Contains("re-registered without a valid proof (mismatch)", warnings[1], StringComparison.Ordinal);
-        Assert.DoesNotMatch("[0-9a-f]{64}", string.Join('\n', logs.About(first.PcId)));
+        Assert.DoesNotMatch("[0-9a-f]{64}", string.Join('\n', About(logs, first.PcId)));
     }
 
     [Fact]
@@ -277,6 +276,15 @@ public sealed class RegisterProofTests(ServerFixture audit, EnforceServerFixture
         await Contract.ReadErrorAsync(response, 403, "forbidden", "pendingApproval");
     }
 
+    /// <summary>The PC's warnings among the recorded lines, in order.</summary>
+    private static List<string> Warnings(LogRecorder logs, Guid pcId) => [.. About(logs, pcId, LogLevel.Warning)];
+
+    /// <summary>The recorded messages that name the PC (of one level, or all).</summary>
+    private static IEnumerable<string> About(LogRecorder logs, Guid pcId, LogLevel? level = null) => logs.Lines
+        .Where(l => level is null || l.Level == level)
+        .Select(l => l.Message)
+        .Where(m => m.Contains(pcId.ToString(), StringComparison.Ordinal));
+
     /// <summary>Everything a registration may write to the PC's row, and its live refresh tokens, as one hash.</summary>
     private static Task<string> RowAsync(ServerFixture server, Guid pcId) => Players.ScalarAsync<string>(
         server,
@@ -391,36 +399,5 @@ public sealed class RegisterProofSocketTests(EnforceKestrelServerFixture server)
 
         await stop.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
-    }
-}
-
-/// <summary>Messages the server logs from the moment of <see cref="Of"/> (rendered, with their level).</summary>
-internal sealed class Logs : ILoggerProvider, ILogger
-{
-    private readonly ConcurrentQueue<(LogLevel Level, string Message)> _entries = new();
-
-    public static Logs Of(ServerFixture server)
-    {
-        var logs = new Logs();
-        server.Services.GetRequiredService<ILoggerFactory>().AddProvider(logs);
-        return logs;
-    }
-
-    public List<string> Warnings(Guid pcId) => [.. _entries.Where(e => e.Level == LogLevel.Warning).Select(e => e.Message).Where(m => m.Contains(pcId.ToString(), StringComparison.Ordinal))];
-
-    public IEnumerable<string> About(Guid pcId) => _entries.Select(e => e.Message).Where(m => m.Contains(pcId.ToString(), StringComparison.Ordinal));
-
-    public ILogger CreateLogger(string categoryName) => this;
-
-    public IDisposable? BeginScope<TState>(TState state)
-        where TState : notnull => null;
-
-    public bool IsEnabled(LogLevel logLevel) => true;
-
-    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
-        _entries.Enqueue((logLevel, formatter(state, exception)));
-
-    public void Dispose()
-    {
     }
 }
