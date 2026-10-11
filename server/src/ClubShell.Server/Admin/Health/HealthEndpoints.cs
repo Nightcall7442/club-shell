@@ -14,8 +14,8 @@ namespace ClubShell.Server.Admin;
 /// PC health at the counter (slice S5): <c>adminHealth</c> — every live PC of the club with its <see cref="HealthDiagnosis"/>,
 /// open ticket and games volume (D-73), the thresholds and the last 100 tickets; <c>adminUpdateTicket</c> — staff move a
 /// repair ticket (journal <c>pcCommand</c>, <c>meta.kind = repair</c>); resolving the last unresolved ticket that took its PC out of service
-/// puts the PC back (<c>maintenance = false</c>); <c>adminSaveHealthSettings</c> — the owner's thresholds, clamped
-/// (<c>x-clamp</c>). Tickets are opened, escalated and acted on by the <see cref="HealthWorker"/>.
+/// puts the PC back (<c>maintenance = false</c>, closing the owner's re-enroll window too, D-78); <c>adminSaveHealthSettings</c>
+/// — the owner's thresholds, clamped (<c>x-clamp</c>). Tickets are opened, escalated and acted on by the <see cref="HealthWorker"/>.
 /// </summary>
 public static class HealthEndpoints
 {
@@ -104,7 +104,7 @@ public static class HealthEndpoints
         {
             await c.ExecuteAsync(
                 """
-                UPDATE pcs SET maintenance = false, updated_at = @now
+                UPDATE pcs SET maintenance = false, reenroll_until = NULL, updated_at = @now
                 WHERE id = @PcId AND club_id = @ClubId AND maintenance
                   AND NOT EXISTS (SELECT 1 FROM health_tickets WHERE pc_id = @PcId AND put_maintenance AND status <> 'resolved')
                 """,
