@@ -194,8 +194,13 @@ Input validation at the boundaries:
 - The Shell (`tracing` JSON) forwards `console.error` through `sys_log_client_error`, rate-limited on the Agent.
 - Crash reports (`CrashRecovery`) include the last 50 Shell log lines — those are subject to the same redaction
   rules because they are the Shell's own log.
-- `logs\` is kiosk-user append-only; a player can write noise into the Shell log but cannot read the Agent log's
-  history beyond what the ACL allows (`install.ps1` grants `(OI)(CI)M` on `logs\` — treat Shell logs as untrusted).
+- `logs\` grants BUILTIN\Users Modify (the MSI: `installer/wix/Components.wxs`, `DataLogsFolder`; `install.ps1`:
+  `(OI)(CI)M`), and Modify includes Read: a player can write noise into the Shell log **and read the Agent log**. Treat
+  Shell logs as untrusted and the Agent log as player-readable: nothing a player could misuse belongs in it. Known
+  leftovers for the next agent build: the hardware id at start (`AgentWorker`, the identity of the PC towards the
+  server) and the club's game-account login names (`AccountInjector`); the Agent log tail also goes out with telemetry.
+- The central server never logs a staff PIN: a wrong PIN logs only the address, and a generated owner PIN goes to a
+  0600 file in the server's data directory while the log names only the file (server DESIGN D-77).
 
 ---
 

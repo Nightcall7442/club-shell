@@ -20,6 +20,7 @@ import type {
 const BASE = (import.meta.env['VITE_ADMIN_API'] as string | undefined) ?? 'http://localhost:8080/api/v1';
 const TOKEN_KEY = 'clubshell.admin.token';
 const CLUB_CODE_KEY = 'clubshell.admin.clubCode';
+const DEVICE_KEY = 'clubshell.admin.device';
 
 let token: string | null = (() => {
   try {
@@ -59,6 +60,35 @@ export function setClubCode(value: string): void {
 
 export function hasToken(): boolean {
   return token !== null;
+}
+
+let device: string | null = null;
+
+/**
+ * This browser's id, sent with the PIN (D-76): 32 random bytes in base64url, made once and kept in localStorage, also
+ * across sign-outs. A club trusts a browser that signed in with it, so outsiders' wrong PINs (a player on the club's
+ * Wi-Fi) do not lock out the desk. Without storage (private mode) the id lasts as long as the page and the browser is
+ * simply never trusted.
+ */
+export function deviceId(): string {
+  if (device) return device;
+  try {
+    const kept = localStorage.getItem(DEVICE_KEY);
+    if (kept && /^[A-Za-z0-9_-]{22,86}$/.test(kept)) return (device = kept);
+  } catch {
+    // no storage: a new id for this page
+  }
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  device = btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  try {
+    localStorage.setItem(DEVICE_KEY, device);
+  } catch {
+    // private mode: the id is not kept
+  }
+  return device;
 }
 
 export interface SeatUser {
@@ -1108,7 +1138,7 @@ export type TariffInput = Omit<Tariff, 'id' | 'pricePerHour' | 'packagePrice'> &
 
 export const clubApi = {
   login: (pin: string, clubCode?: string): Promise<{ token: string; staff: StaffMember; shift: Shift | null }> =>
-    post('/admin/login', clubCode ? { pin, clubCode } : { pin }),
+    post('/admin/login', clubCode ? { pin, clubCode, deviceId: deviceId() } : { pin, deviceId: deviceId() }),
   me: (): Promise<{ staff: StaffMember; shift: Shift | null }> => call('/admin/me'),
   /** Revokes the staff token on the server; the caller drops it locally. */
   logout: (): Promise<unknown> => post('/admin/logout', {}),

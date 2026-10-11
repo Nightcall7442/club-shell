@@ -72,6 +72,28 @@ function isMoney(v: unknown): v is Money {
   return typeof v === 'object' && v !== null && typeof (v as Money).amount === 'number';
 }
 
+/** A wait rounded up: `14 мин`, `3 ч` (a club-wide PIN lock lasts up to a day). */
+function waitLabel(sec: number): string {
+  const min = Math.max(1, Math.ceil(sec / 60));
+  return min < 60 ? t('{n} мин', { n: min }) : t('{n} ч', { n: Math.ceil(min / 60) });
+}
+
+/**
+ * Too many wrong PINs (D-76): how long, and who is locked out — this browser or address (`source`), every browser that
+ * never signed in to the club (`club`: the desk that did still can), or every known one (`trusted`).
+ */
+function rateLimited(d: Record<string, unknown>): string {
+  const sec = d['retryAfterSec'];
+  if (typeof sec !== 'number') return t('Слишком много неверных PIN. Повторите позже');
+  const copy =
+    d['scope'] === 'club'
+      ? 'Слишком много неверных PIN с новых устройств. Войдите с компьютера, где уже входили, или повторите через {wait}'
+      : d['scope'] === 'trusted'
+        ? 'Слишком много неверных PIN в клубе. Повторите через {wait}'
+        : 'Слишком много неверных PIN. Повторите через {wait}';
+  return t(copy, { wait: waitLabel(sec) });
+}
+
 /** Server error → one line for the cashier, in the console language. */
 export function describe(e: unknown): string {
   if (e instanceof AdminError) {
@@ -103,6 +125,7 @@ export function describe(e: unknown): string {
       const copy = VALIDATION_COPY[`${String(d['field'])}:${String(d['reason'])}`];
       if (copy) return t(copy);
     }
+    if (e.code === 'rateLimited') return rateLimited(d);
     const detail = [d['rule'], d['reason'], d['state'], d['code']].find(
       (v): v is string => typeof v === 'string' && v in DETAIL_COPY,
     );

@@ -15,13 +15,17 @@ namespace ClubShell.Server.Tests;
 /// <summary>
 /// Staff authentication (DESIGN §3.5, §3.6, S4): <c>invalidPin</c> and 429 after five wrong PINs, logout always 200 and
 /// revoking, deactivation killing the tokens at once, <c>ck_</c> = owner, <c>ownerOnly</c> (also before a 501), sliding expiry.
+/// The club-wide PIN limits are off in this fixture; <see cref="StaffLoginTests"/> covers them.
 /// </summary>
 public sealed class StaffAuthTests(ServerFixture server) : IClassFixture<ServerFixture>
 {
+    /// <summary>Just past the wrong-PIN window (<c>RateLimit:PinWindowSec</c>, 900 s, D-76).</summary>
+    private static readonly TimeSpan PastWindow = TimeSpan.FromSeconds(901);
+
     [Fact]
     public async Task Wrong_pin_is_401_invalidPin_and_five_in_the_window_make_it_429()
     {
-        server.Clock.Advance(TimeSpan.FromMinutes(6)); // earlier failures of this fixture leave the window
+        server.Clock.Advance(PastWindow); // earlier failures of this fixture leave the window
         for (var i = 0; i < 5; i++)
         {
             using var wrong = await server.Http.PostAsync("/api/v1/admin/login", JsonBody(new { pin = "9999" }));
@@ -34,17 +38,27 @@ public sealed class StaffAuthTests(ServerFixture server) : IClassFixture<ServerF
         {
             var body = await Players.ReadAsync(limited, 429);
             Contract.AssertError(body, "rateLimited");
-            Assert.Equal(body.GetProperty("error").GetProperty("details").GetProperty("retryAfterSec").GetInt32().ToString(), limited.Headers.RetryAfter!.ToString());
+            var details = body.GetProperty("error").GetProperty("details");
+            Assert.Equal(details.GetProperty("retryAfterSec").GetInt32().ToString(), limited.Headers.RetryAfter!.ToString());
+            Assert.InRange(details.GetProperty("retryAfterSec").GetInt32(), 1, 900);
+            Assert.Equal("source", details.GetProperty("scope").GetString());
         }
 
+        // Still blocked just before the window ends: it is 900 s now, no longer 300.
         server.Clock.Advance(TimeSpan.FromSeconds(301));
+        using (var stillLimited = await raw.PostAsync("/api/v1/admin/login", JsonBody(new { pin = OwnerPin })))
+        {
+            Assert.Equal(429, (int)stillLimited.StatusCode);
+        }
+
+        server.Clock.Advance(PastWindow);
         await LoginAsync(server, OwnerPin);
     }
 
     [Fact]
     public async Task Parallel_wrong_pins_get_only_the_allowed_attempts_and_a_right_pin_costs_none()
     {
-        server.Clock.Advance(TimeSpan.FromMinutes(6));
+        server.Clock.Advance(PastWindow);
         using var raw = server.CreateDefaultClient(); // 429 is not in the vendored contract yet
         var answers = await Task.WhenAll(Enumerable.Range(0, 40).Select(async _ =>
         {
@@ -54,8 +68,8 @@ public sealed class StaffAuthTests(ServerFixture server) : IClassFixture<ServerF
         }));
         Assert.Equal([("401 invalidPin", 5), ("429 ", 35)], answers.GroupBy(a => a).Select(g => (g.Key, g.Count())).OrderBy(g => g.Key));
 
-        // After the window: a right PIN gives its attempt back, so five wrong ones still get 401 and only then 429.
-        server.Clock.Advance(TimeSpan.FromSeconds(301));
+        // After the window: a right PIN costs no attempt, so five wrong ones still get 401 and only then 429.
+        server.Clock.Advance(PastWindow);
         await LoginAsync(server, OwnerPin);
         for (var i = 0; i < 5; i++)
         {
@@ -68,7 +82,7 @@ public sealed class StaffAuthTests(ServerFixture server) : IClassFixture<ServerF
             Assert.Equal(429, (int)limited.StatusCode);
         }
 
-        server.Clock.Advance(TimeSpan.FromSeconds(301));
+        server.Clock.Advance(PastWindow);
     }
 
     [Fact]

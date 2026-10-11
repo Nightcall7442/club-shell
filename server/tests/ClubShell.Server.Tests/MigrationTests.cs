@@ -40,6 +40,14 @@ public sealed class MigrationTests(ServerFixture server) : IClassFixture<ServerF
         Assert.Equal(tables.Order(), (await TablesAsync()).Intersect(tables).Order());
         Assert.Equal(2, await ScalarAsync("SELECT count(*)::int FROM information_schema.columns WHERE table_name = 'products' AND column_name IN ('source', 'deleted_by')"));
         Assert.Equal(1, await ScalarAsync("SELECT count(*)::int FROM pg_indexes WHERE indexname = 'session_events_server'"));
+
+        // M0010 alone: the staff PIN failures and the trusted browsers go and come back (D-76).
+        string[] login = ["staff_devices", "staff_login_failures"];
+        runner.MigrateDown(2026100501);
+        Assert.Empty((await TablesAsync()).Intersect(login));
+        runner.MigrateUp();
+        Assert.Equal(login, (await TablesAsync()).Intersect(login).Order());
+        Assert.Equal(2, await ScalarAsync("SELECT count(*)::int FROM pg_indexes WHERE indexname IN ('staff_login_failures_source', 'staff_login_failures_club')"));
     }
 
     /// <summary>

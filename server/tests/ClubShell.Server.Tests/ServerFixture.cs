@@ -62,11 +62,17 @@ public class ServerFixture : WebApplicationFactory<Program>, IAsyncLifetime
         builder.UseSetting("ConnectionStrings:Club", TestDatabases.ConnectionTo(_database));
         builder.UseSetting("Auth:SigningKeyPath", Path.Combine(_dataDir, "jwt-signing-key.pem"));
         builder.UseSetting("Auth:PepperPath", Path.Combine(_dataDir, "pin-pepper.key"));
+        builder.UseSetting("Auth:OwnerPinPath", Path.Combine(_dataDir, "owner-pin.txt"));
         builder.UseSetting("Cors:AllowedOrigins:0", AdminOrigin);
         builder.UseSetting("Club:EnrollmentKey", ClubKey);
         builder.UseSetting("Club:AutoApprovePcs", "true");
         builder.UseSetting("Workers:Enabled", "false");
         builder.UseSetting("Seed:Dev", "true");
+
+        // Every request of a fixture comes from one unknown address: the club-wide PIN limits (D-76) would add up the wrong
+        // PINs of unrelated tests. StaffLoginTests turns them on.
+        builder.UseSetting("RateLimit:PinClubAttempts", "0");
+        builder.UseSetting("RateLimit:PinTrustedAttempts", "0");
         foreach (var (key, value) in Settings)
         {
             builder.UseSetting(key, value);

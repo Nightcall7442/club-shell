@@ -213,6 +213,7 @@ server/
 | `Auth:Issuer` / `Auth:Audience` | `clubshell-server` / `club-agent` | JWT агента |
 | `Auth:SigningKeyPath` | `data/jwt-signing-key.pem` | RSA-3072, создаётся при первом старте (§3.2) |
 | `Auth:PepperPath` | `data/pin-pepper.key` | 32 случайных байта, создаются при первом старте; HMAC для PIN персонала |
+| `Auth:OwnerPinPath` | `data/owner-pin.txt` | Сгенерированный PIN первого владельца (0600, D-77). Пусто — файла нет, на первом старте нужен `Club:OwnerPin` |
 | `Auth:AgentTokenMinutes` | `60` | |
 | `Auth:RefreshTokenDays` | `30` | |
 | `Auth:UserTokenHours` | `12` | Предел непрерывного входа игрока (N3) |
@@ -223,7 +224,7 @@ server/
 | `Club:TimeZone` | `Asia/Tashkent` | |
 | `Club:EnrollmentKey` / `Club:PreviousEnrollmentKey` | `""` / `""` | `X-Club-Key` агента. Пустое значение закрывает регистрацию |
 | `Club:AutoApprovePcs` | `false` (Development: `true`) | |
-| `Club:OwnerPin` | `""` | При пустой таблице `staff`: создать владельца. Пусто → PIN генерируется и один раз пишется в лог |
+| `Club:OwnerPin` | `""` | При пустой таблице `staff`: создать владельца с этим PIN (4–8 цифр, иначе старт падает; значение не печатается). Пусто → случайный 6-значный PIN в `Auth:OwnerPinPath`, в лог — только путь (D-77). Со `staff` не используется: каждый старт напоминает убрать |
 | `Club:OfflineLogin` | `true` | Выдавать `offlineHash` |
 | `Club:GuestLogin` | `true` | Иначе `403 guestDisabled` |
 | `Realtime:PingSec` / `PongTimeoutSec` / `MaxFrameBytes` | `20` / `10` / `1048576` | |
@@ -237,7 +238,8 @@ server/
 | `Sessions:ResyncSec` | `30` | |
 | `Sessions:PostpaidCreditLimit` | `0` | Тиёны; `null` = без лимита (владелец, §12) |
 | `RateLimit:AgentPerMinute` / `AgentBurst` | `600` / `100` | |
-| `RateLimit:PinAttempts` / `PinWindowSec` | `5` / `300` | |
+| `RateLimit:PinAttempts` / `PinWindowSec` | `5` / `900` | Неверные PIN с одного источника в клубе (D-76) |
+| `RateLimit:PinClubAttempts` / `PinClubWindowSec` / `PinTrustedAttempts` / `PinDeviceTrustDays` | `30` / `86400` / `30` / `60` | Клубные лимиты неверных PIN для новых и для доверенных браузеров (`0` — выключить), срок доверия браузеру после входа (D-76) |
 | `Cors:AllowedOrigins` | `[]` (Development: `http://localhost:1431`, `http://localhost:5174`) | Касса |
 | `Idempotency:TtlHours` | `24` | |
 | `Telemetry:RetentionDays` | `8` | Здоровью нужна неделя плюс сутки |
@@ -411,7 +413,12 @@ X-Signature = lowercase hex( HMAC-SHA256( base64decode(signingSecret),
 - `POST /admin/login {pin}` → непрозрачный токен (32 байта, в БД SHA-256), срок скользящий 12 ч, абсолютный 7 д.
 - PIN хранится как `HMAC-SHA256(pepper, pin)`. Хеш детерминирован и индексируется: вход идёт по одному PIN, поэтому
   bcrypt не подходит. `UNIQUE(network_id, pin_hmac)`, уникальность проверяется и при `PATCH` (`400 reason=taken`).
-- Каждый запрос проверяет `staff.active`. Деактивация сразу убивает все токены сотрудника.
+- Каждый запрос проверяет `staff.active`. Деактивация сразу убивает все токены сотрудника. Новый PIN (`adminUpdateStaff`)
+  отзывает остальные токены сотрудника, кроме токена самого запроса: кто узнал старый PIN, выходит везде (D-77).
+- Первый владелец (D-77): при пустой `staff` — с `Club:OwnerPin` (4–8 цифр) или со случайным PIN в файле
+  `Auth:OwnerPinPath` (в лог — только путь).
+- Неверные PIN ограничены по клубу и источнику в базе (§3.6, D-76); касса шлёт с PIN свой `deviceId`, и браузер, где уже
+  входили с верным PIN, считается отдельно от IP клуба.
 - Роли `owner` | `cashier`. Owner-only маршруты перечислены в §11 (S4/S5). Поле `blacklisted` в
   `PATCH /admin/clients/{id}` тоже только для владельца (`x-owner-only-fields`). Нарушение → `403 reason=ownerOnly`.
 - **`ck_…` = токен владельца** (`frag/paths-admin.yaml:7, 941, 984`). Действия записываются в аудит от
@@ -431,7 +438,7 @@ X-Signature = lowercase hex( HMAC-SHA256( base64decode(signingSecret),
 |---|---|---|---|
 | agent | `sub` JWT | token bucket 600/мин, burst 100 | `429 rateLimited`, `Retry-After`, `details.retryAfterSec` |
 | register/refresh | IP | 30/мин | то же |
-| admin login | IP (IPv6 — /64) | 5 неудач за 300 с | то же (нужна правка контракта, OQ-4) |
+| admin login | источник в клубе: доверенный браузер (`deviceId`) или IP (IPv6 — /64); клуб — отдельно все новые и все доверенные браузеры | 5 неудач за 900 с; 30 за 24 ч у новых браузеров клуба, 30 у доверенных (D-76) | то же + `details.scope` (`source` \| `club` \| `trusted`), и для верного PIN (нужна правка контракта, OQ-4) |
 | player login | (user, pc) | см. §3.4 | `401 badCredentials attemptsLeft=0` |
 | вход по карте | ПК | 5 неудач за 15 мин (§3.4, D-75) | `401 badCredentials attemptsLeft=0` |
 
@@ -442,7 +449,9 @@ X-Signature = lowercase hex( HMAC-SHA256( base64decode(signingSecret),
   действие. Мок пишет его до валидации (`mock/routes/admin.ts:258`). Лимита в 5000 записей нет.
 - **Деньги** — в `ledger_entries` (append-only, §4.3).
 - **События безопасности** пишутся в структурированный лог, без таблицы: регистрация, pendingApproval,
-  refresh-reuse, несовпадение подписи, replay, неверный PIN.
+  refresh-reuse, несовпадение подписи, replay, неверный PIN, вход в кассу (Information). Неверные PIN ещё и считаются в
+  `staff_login_failures` для лимитов; срабатывание клубного лимита — вебхук `suspicious` и `LogError` в Sentry (id клуба
+  и счётчики, без PIN и адресов, D-76).
 
 ### 3.8 CORS кассы (`cc/openapi` info §11)
 
@@ -494,6 +503,8 @@ X-Signature = lowercase hex( HMAC-SHA256( base64decode(signingSecret),
 | `telemetry_events` | id bigint identity, club_id, pc_id, kind text, at, data jsonb, received_at | `INDEX (club_id, received_at)`; чистка 30 д | M0001 |
 | `staff` | id, network_id, club_id, name, role (`owner\|cashier`), pin_hmac bytea, active, created_at, updated_at | `UNIQUE(network_id, pin_hmac)` | M0001 (для bootstrap) |
 | `staff_tokens` | token_hash PK, staff_id, club_id, created_at, last_used_at, expires_at, revoked_at NULL | | M0001 |
+| `staff_login_failures` | id identity, club_id (без FK: `Guid.Empty` — неизвестный код или выключенный клуб), source (`net:<IPv4 или /64>` \| `dev:<base64url SHA-256 deviceId>`), trusted, alerted (неудача, после которой ушло оповещение), at | INDEX (club_id, source, at), (club_id, trusted, at); чистка старше окон (D-76) | M0010 |
+| `staff_devices` | club_id FK, device_hash bytea (SHA-256 `deviceId`), last_staff_id NULL (FK, ON DELETE SET NULL), first_login_at, last_login_at | PK (club_id, device_hash); чистка старше `PinDeviceTrustDays` (D-76) | M0010 |
 | `users` | id, network_id, username, display_name, avatar_url NULL, role (`guest\|member\|vip\|admin`), locale (`en\|ru\|uz`), flags text[], password_hash NULL, unlock_pin_hash NULL, card_id NULL, banned bool, transient bool (гость), created_at, last_seen_at, deleted_at NULL | `UNIQUE(network_id, lower(username))`; `UNIQUE(network_id, lower(card_id)) WHERE card_id IS NOT NULL` | M0002 |
 | `user_tokens` | token_hash PK, user_id, pc_id, created_at, expires_at | `UNIQUE(pc_id)` | M0002 |
 | `login_failures` | network_id, username (lower), trace_id uuid, attempts, at | PK (network_id, username, trace_id); неудача = `greatest(attempts − 1, 1)` (§3.4) | M0002 |
@@ -1161,7 +1172,7 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
 | `HealthWorker` | `CSHlth` | 30 с | Часовые корзины из `pc_metrics`; issues hot/trend/fpsDrop/unstable; тикеты (один на пару ПК+вид, эскалация, без повторного открытия 6 ч), `autoMaintenance`, вебхук `hardware`. **Без симуляции** (`mock/health.ts:386-452`) |
 | `ClubTickWorker` | `CSClub` | 60 с | Хеш набора живых баннеров → `config_version++` при изменении (OQ-21); автоматизация `minutesLeft` |
 | `WebhookWorker` | `CSHook` | 1 с | `webhook_outbox`: POST с таймаутом 5 с, 3 повтора с задержкой; перед отправкой отклоняет адреса loopback, private, link-local и metadata (OQ-11); обновляет `last_status`/`last_at` |
-| `MaintenanceWorker` | `CSMant` | 10 мин | Удаление ключей идемпотентности старше 24 ч, `pc_metrics` старше 8 д, `telemetry_events` старше 30 д, просроченных токенов (refresh, user, staff, qr); вызовы администратора: без ответа 12 ч — `resolved` («auto»), старше 30 д — удаление (касса, часть 3); сверка кеша баланса с леджером (раз в сутки, `LogError` при расхождении) |
+| `MaintenanceWorker` | `CSMant` | 10 мин | Удаление ключей идемпотентности старше 24 ч, `pc_metrics` старше 8 д, `telemetry_events` старше 30 д, просроченных токенов (refresh, user, staff, qr); вызовы администратора: без ответа 12 ч — `resolved` («auto»), старше 30 д — удаление (касса, часть 3); неверные PIN старше окон лимитов и браузеры, которым клуб больше не доверяет (D-76); сверка кеша баланса с леджером (раз в сутки, `LogError` при расхождении) |
 
 - **Сверка офлайн-событий** фонового воркера не требует: она синхронна в `POST /sessions/{id}/events` и
   `POST /sessions` (реплей). Хвосты закрывает `SessionTickWorker`.
@@ -1466,7 +1477,7 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
   `PcStatusWorker` в S4 пишет только `telemetry_events kind=pcOffline`; вебхук и `pcIdleMinutes` — в S5. Лимит
   неверных PIN — в памяти по IP, для IPv6 — по /64 (`RateLimit:PinAttempts`/`PinWindowSec`); попытка засчитывается
   до проверки PIN и возвращается при верном PIN, поэтому параллельные запросы лимит не обходят. `429` на
-  `adminLogin` ждёт правки контракта (§12.2 п. 4).
+  `adminLogin` ждёт правки контракта (§12.2 п. 4). С D-76 лимит в базе, по клубу и источнику, с клубными лимитами.
 - **Тесты:**
   - `StaffAuthTests` (invalidPin, 429 после 5, logout всегда 200, деактивация убивает токены, `ck_` = owner,
     ownerOnly);
@@ -1650,10 +1661,12 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
   - PostgreSQL — сервис Railway в том же проекте. Строку подключения собирают ссылками, без парсинга URL в коде:
     `ConnectionStrings__Club=Host=${{Postgres.PGHOST}};Port=${{Postgres.PGPORT}};Username=${{Postgres.PGUSER}};Password=${{Postgres.PGPASSWORD}};Database=${{Postgres.PGDATABASE}}`
     (приватная сеть Railway).
-  - Переменные: `Proxy__ClientIpHeader=X-Real-IP`, `Club__EnrollmentKey`, `Club__OwnerPin`,
+  - Переменные: `Proxy__ClientIpHeader=X-Real-IP`, `Club__EnrollmentKey`, `Club__OwnerPin` (с D-77 лучше не задавать:
+    PIN владельца — в файле на volume),
     `Cors__AllowedOrigins__0=<origin кассы>`, `ASPNETCORE_ENVIRONMENT=Production`.
   - Край Railway должен перезаписывать присланный клиентом `X-Real-IP`: по `Proxy:ClientIpHeader` работает лимит
-    неверных PIN (§3.6). Не проверено; проверить при первом деплое.
+    неверных PIN (§3.6). Проверка — IP в строке лога `Wrong staff PIN from …` после запроса с поддельным заголовком
+    (PILOT §1 п. 3): «6 поддельных заголовков → 429» не отличает перезапись от одного адреса прокси на всех.
   - WS: Railway не ограничивает длительность и простой WebSocket. HTTP-запрос живёт до 15 мин, тело загружается
     до 5 мин, лимит — 10 000 одновременных соединений.
   - Бэкапы: автоматические бэкапы volume и у Postgres, и у `/app/data` (тариф Pro). Без pepper все PIN
@@ -2077,6 +2090,8 @@ anticheat/report — S3; `PATCH /admin/games/{id}` (реализуется) и `
 | D-73 | Игровой диск и железо в кассе: `gamesVolume` из последнего heartbeat в `GET /admin/pcs` и `GET /admin/health` — сырой объект агента (null-поля опущены, `null` — не присылал), касса решает, что показать (выключенный ПК и `owner: none` — ничего); железо — `pcs.hardware` как есть. В `GET /admin/overview` не добавлено: карта зала их не показывает |
 | D-74 | `GET /games` скрывает игры, которые ПК без Vanguard не запустит, пока последний heartbeat ПК говорит `vanguardInstalled = false` или `vanguardLoaded = false`: с эффективным античитом Vanguard (`vanguard` или Riot без тега — как агент), а если политика клуба требует `vanguard` в `anticheat.required` при включённом `blockOnViolation` (seed так больше не делает, Q-16) — все игры с античитом, как откажет гейт агента; без `antiCheat` или с `null` — ничего; Secure Boot и TPM не учитываются (их проверяет агент при запуске); ETag укороченного списка свой, у полного — прежний; `GET /games/{id}` не скрывает |
 | D-75 | Неверные карты при входе считаются по ПК (`card:<pcId>` в `login_failures`, те же 5 за 15 мин и повтор trace-id, что у пароля): 5 — `401 badCredentials attemptsLeft=0` до конца окна, даже для привязанной карты; верная карта счётчик не сбрасывает; другие ПК и пароль не затронуты. Киоск при `attemptsLeft=0` пишет «Слишком много попыток» |
+| D-76 | Неверные PIN кассы считаются в базе (`staff_login_failures`, M0010) по клубу и источнику, под `pg_advisory_xact_lock` клуба (те же проверки идут и до блокировки, чтобы поток отказов не стоял в очереди; ожидание не дольше 5 с). Источник — браузер, которому клуб доверяет: касса шлёт с PIN `deviceId` (32 случайных байта в localStorage, переживает выход), доверие даёт верный PIN с ним за последние `PinDeviceTrustDays` = 60 дней (`staff_devices`, только SHA-256); иначе IP (IPv6 — /64, не IPv4 /24: клуб и мобильные сети за одним NAT). Лимиты: 5 за 900 с на источник (`scope=source`); 30 за 24 ч со всех недоверенных источников клуба (`scope=club`: игрок в Wi-Fi клуба или перебор с сотни адресов закрывают только новые браузеры, кассы входят); 30 за 24 ч со всех доверенных (`scope=trusted`: кассир не обойдёт лимит новыми браузерами). Отказ — `429 rateLimited {retryAfterSec, scope}` + `Retry-After`, и для верного PIN; отказ не записывается; верный PIN счётчик не сбрасывает (как D-75); `400 clubCode required` не считается; неизвестный код и выключенный клуб — неудача в корзине `Guid.Empty`, только лимит источника. Первое срабатывание клубного лимита за окно — вебхук `suspicious` и `LogError` (Sentry: id клуба и счётчики). Перезапуск и деплой счёт не сбрасывают, старое чистит `MaintenanceWorker`; выданные токены лимит не трогает. Касса пишет, сколько ждать, а при `scope=club` — что войти можно с компьютера, где уже входили. Закрывает Q-10 |
+| D-77 | PIN первого владельца не попадает в лог: при пустой `staff` и пустом `Club:OwnerPin` случайный 6-значный PIN пишется в `Auth:OwnerPinPath` (`data/owner-pin.txt` на volume, 0600, через временный файл и переименование) до создания владельца, в лог — только путь; без пути или при ошибке записи старт падает и владелец не создаётся (на volume уже лежит pepper, с которым дамп базы открывает любой PIN, так что файл новой границы не добавляет). `Club:OwnerPin` проверяется как PIN сотрудника (4–8 цифр): неверный роняет старт, сообщение называет настройку, но не значение. Каждый старт со `staff` напоминает без PIN: сгенерированный PIN ещё действует (файл удаляется, как только нет), `Club:OwnerPin` ещё равен PIN активного владельца (сменить в кассе, затем удалить переменную) или не используется (удалить). Новый PIN в `adminUpdateStaff` отзывает остальные токены сотрудника, кроме токена запроса: владелец, сменивший свой PIN, остаётся в этой сессии, кассир со сменённым PIN выходит везде. CI `docker-smoke` читает PIN из volume и проверяет, что лог называет только файл |
 
 ### 12.2 Изменения контракта (PR в club-contracts, ведёт лид, владелец не нужен)
 
@@ -2085,8 +2100,8 @@ anticheat/report — S3; `PATCH /admin/games/{id}` (реализуется) и `
 2. Добавить `/users/{userId}/game-settings*`: list, DELETE — required; GET, PUT и upload-target — notImplemented.
 3. Добавить `PATCH /admin/games/{id}` (required) и поле `AdminGame.settingsPaths`. Добавить `GET /admin/network` и
    `POST /admin/network/clubs` как notImplemented.
-4. `429 rateLimited` для `POST /admin/login`. В описании `staffBearer` указать, что `ck_` принимается как токен
-   владельца.
+4. `429 rateLimited` для `POST /admin/login` (`details.retryAfterSec`, `details.scope`: `source` | `club` | `trusted`,
+   D-76). В описании `staffBearer` указать, что `ck_` принимается как токен владельца.
 5. Добавить правила `tariffZone`/`tariffTime` в 403 для `adminOpenSession` и `adminExtend`; `transaction` в ответе
    topup уже есть.
 6. Операция подтверждения QR, например `POST /admin/qr/{token}/confirm` (касса) — либо флаг `features.qrLogin`.
@@ -2102,7 +2117,8 @@ anticheat/report — S3; `PATCH /admin/games/{id}` (реализуется) и `
 12. `adminExtend`: добавить `403 Forbidden`. Сервер отвечает `403 policyDenied` (`pcMaintenance`, `blacklisted`,
     `minorCurfew`, `tariffZone`, `tariffTime`, §5.6), а контракт объявляет только 200/400/401/402/404/409/500.
 13. `adminLogin`: необязательное поле `clubCode` в `AdminLoginRequest` (сервер с несколькими клубами, «Платформа» в §11); `400
-    validation field=clubCode reason=required`, когда кодов несколько, а код не прислан.
+    validation field=clubCode reason=required`, когда кодов несколько, а код не прислан. Необязательное поле `deviceId`
+    (22–86 символов base64url; другое значение сервер пропускает, не отвечая 400) — браузер, которому клуб доверяет (D-76).
 14. Касса (§11, «Касса: смена и выбор клиента»): `409 conflict reason=shiftClosed` у `adminTopUp` (409 не объявлен вовсе),
     `adminOpenSession`, `adminExtend`; поле `payment` в `AdminOpenSessionRequest` и `adminExtend`; поле
     `AdminShiftTotals.topUpByMethod`; операция `GET /admin/clients/lookup`.
@@ -2160,7 +2176,7 @@ anticheat/report — S3; `PATCH /admin/games/{id}` (реализуется) и `
 | Q-7 | ~~Где разворачиваем?~~ **Отвечено: Railway (D-23).** Открыто: домен кассы и API, тариф Railway (для бэкапов volume нужен Pro) | `*.up.railway.app` до выбора домена |
 | Q-8 | Связывать ли ПК с club-server (фаза 2): добавит ли владелец в club-server read-only эндпоинт и токен для списка машин? | v1: хранится только MAC |
 | Q-9 | Промокод — один раз на клиента? | D-15: да |
-| Q-10 | Лимит неверных PIN `adminLogin` считается по IP, а игроки выходят в интернет с того же публичного IP клуба, что и касса: 5 неверных PIN от любого игрока на 5 мин блокируют вход всем кассирам (выданные токены продолжают работать). Варианты: пропускать консоль, уже входившую раньше (метка устройства); считать неудачи ещё и по сотруднику | Как сейчас: по IP (IPv6 — по /64) |
+| Q-10 | ~~Лимит неверных PIN `adminLogin` считается по IP, а игроки выходят в интернет с того же публичного IP клуба, что и касса: 5 неверных PIN от любого игрока на 5 мин блокируют вход всем кассирам (выданные токены продолжают работать). Варианты: пропускать консоль, уже входившую раньше (метка устройства); считать неудачи ещё и по сотруднику~~ **Решено (D-76, 2026-10-12):** метка устройства — браузер, где уже входили, считается отдельно; клубные лимиты 30 за 24 ч для новых и для доверенных браузеров | D-76 |
 | Q-11 | `adminTopUp.method`: сервер принимает только `cash`/`card`/`payme`/`click`/`uzum` (CHECK в M0002), контракт — любую строку до 16 символов (`cash` → `topUpCash`, остальное → `topUpOther`). Любой кассир может провести безналичное пополнение: оно не меняет `expectedCash` и ни с чем не сверяется. Варианты: безналичное только владельцу; обязательный номер платежа; сузить контракт до списка | Как сейчас: 5 способов, любой кассир |
 | Q-12 | `getUpdateManifest` принимает только токен агента, а контракт допускает и `publishToken` (им проверяет `publish.ps1`). Сервер v1 обновлений не раздаёт (всегда 204) — подтвердить, что `publishToken` пока не нужен | Только токен агента, `publishToken` → 401 |
 | Q-13 | Бонус правила `sessionStarted`/`visitCount` начисляется один раз на id сеанса, поэтому кассир может «нафармить» бонусные деньги: открыть предоплаченный сеанс подельнику и завершить его через минуту с возвратом почти всей суммы (постфактум видны только флаги `earlyEnd`/`earlyEnds`). Варианты: отложить бонус, пока сеанс не отработал хотя бы минимум минут тарифа; забирать бонус назад, когда сеанс завершён досрочно с возвратом; разрешить бонус только для `topupAtLeast` | Как сейчас: риск задокументирован |

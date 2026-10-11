@@ -1,3 +1,4 @@
+using ClubShell.Server.Auth;
 using Dapper;
 using Npgsql;
 
@@ -22,11 +23,12 @@ public sealed class MaintenanceOptions
 /// Housekeeping (DESIGN §8), every 10 minutes under <c>pg_advisory_lock(CSMant)</c>: expired idempotency keys, old
 /// metrics and telemetry events, expired or revoked tokens (agent refresh, player, staff, QR), finished webhook
 /// deliveries and old automation firings, admin calls left open for 12 h (resolved by «auto») and older than the telemetry
-/// retention (deleted); once a day the ledger check — every wallet's cached balance against the sum of
+/// retention (deleted), wrong staff PINs past every limit's window and browsers no longer trusted (D-76); once a day the ledger check — every wallet's cached balance against the sum of
 /// its ledger rows (§4.3), an error in the log for each mismatch (the balance is never "fixed": corrections are
 /// <c>adjustment</c> rows). Tests call <see cref="RunOnceAsync"/>.
 /// </summary>
-public sealed class MaintenanceWorker(NpgsqlDataSource db, MaintenanceOptions options, TimeProvider clock, ILogger<MaintenanceWorker> logger) : BackgroundService
+public sealed class MaintenanceWorker(NpgsqlDataSource db, MaintenanceOptions options, AuthOptions auth, TimeProvider clock, ILogger<MaintenanceWorker> logger)
+    : BackgroundService
 {
     public static readonly long LockKey = AdvisoryLocks.Key("CSMant");
 
@@ -50,6 +52,8 @@ public sealed class MaintenanceWorker(NpgsqlDataSource db, MaintenanceOptions op
             DELETE FROM rule_firings WHERE fired_at < @outbox;
             UPDATE admin_calls SET status = 'resolved', resolved_at = @now, resolved_by_name = 'auto' WHERE status <> 'resolved' AND received_at < @calls;
             DELETE FROM admin_calls WHERE received_at < @events;
+            DELETE FROM staff_login_failures WHERE at < @pinFailures;
+            DELETE FROM staff_devices WHERE last_login_at < @devices;
             """,
             new
             {
@@ -64,6 +68,8 @@ public sealed class MaintenanceWorker(NpgsqlDataSource db, MaintenanceOptions op
                 metrics = now - TimeSpan.FromDays(options.MetricsRetentionDays),
                 events = now - TimeSpan.FromDays(options.TelemetryEventsRetentionDays),
                 outbox = now - TimeSpan.FromDays(options.OutboxRetentionDays),
+                pinFailures = now - TimeSpan.FromSeconds(Math.Max(auth.PinWindowSec, auth.PinClubWindowSec)),
+                devices = now - TimeSpan.FromDays(auth.PinDeviceTrustDays),
             });
         logger.LogDebug("Maintenance removed {Rows} rows", removed);
 

@@ -4,7 +4,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
-using ClubShell.Contracts.Errors;
+using ClubShell.Server.Admin;
 using ClubShell.Server.Infrastructure;
 using Dapper;
 using Npgsql;
@@ -17,29 +17,22 @@ namespace ClubShell.Server.Auth;
 /// <see cref="AuthOptions.PepperPath"/>, created on first start; without it every PIN is lost. A token is 32 random bytes
 /// (<c>st_</c> + base64url), only its SHA-256 is stored; it lives <see cref="AuthOptions.StaffTokenSlidingHours"/> since its
 /// last use and at most <see cref="AuthOptions.StaffTokenAbsoluteDays"/>, and dies with logout or the staff member's
-/// deactivation (checked on every request). <c>ck_…</c> is the owner (synthetic "API key"), compared in constant time
-/// with <c>clubs.api_key_hash</c> and never revoked by logout.
+/// deactivation or a new PIN (checked on every request). <c>ck_…</c> is the owner (synthetic "API key"), compared in
+/// constant time with <c>clubs.api_key_hash</c> and never revoked by logout. Wrong PINs are limited by
+/// <see cref="StaffLoginGuard"/>.
 /// </summary>
-public sealed class StaffTokens(NpgsqlDataSource db, AuthOptions options, TimeProvider clock, ILogger<StaffTokens> logger)
+public sealed class StaffTokens(NpgsqlDataSource db, AuthOptions options, TimeProvider clock, StaffLoginGuard guard, ILogger<StaffTokens> logger)
 {
     public const string ApiKeyName = "API key";
 
     private readonly Lazy<byte[]> _pepper = new(() => LoadOrCreatePepper(options.PepperPath));
 
-    /// <summary>
-    /// Wrong PINs per client (DESIGN §3.6: 5 in 300 s, then 429), keyed by <see cref="PinLimitKey"/>, oldest first. One
-    /// lock guards the map: login attempts are rare, and a key emptied by a right PIN or swept once per window is dropped,
-    /// so the map holds only clients with failures inside the window.
-    /// </summary>
-    private readonly Dictionary<string, List<DateTimeOffset>> _failures = [];
-
-    private DateTimeOffset _nextSweep;
-
     public byte[] PinHmac(string pin) => HMACSHA256.HashData(_pepper.Value, Encoding.UTF8.GetBytes(pin));
 
     /// <summary>
-    /// The PIN limiter's client key: an IPv4 address (also when mapped into IPv6), or the /64 of an IPv6 one — a single
-    /// subscriber usually holds a whole /64 and could otherwise rotate addresses; "" when unknown.
+    /// The network source of a PIN attempt (<see cref="StaffLoginGuard"/>): an IPv4 address (also when mapped into IPv6), or
+    /// the /64 of an IPv6 one — a single subscriber usually holds a whole /64 and could otherwise rotate addresses; "" when
+    /// unknown.
     /// </summary>
     public static string PinLimitKey(IPAddress? ip)
     {
@@ -65,111 +58,60 @@ public sealed class StaffTokens(NpgsqlDataSource db, AuthOptions options, TimePr
 
     /// <summary>
     /// The active staff member of <paramref name="pin"/> with a new token, or null for a wrong PIN; <c>429 rateLimited</c>
-    /// when <paramref name="client"/> used up its attempts. The attempt is counted as a failure before the lookup and given
-    /// back unless the PIN turned out wrong: check and count are one step, so parallel requests cannot all pass the check
-    /// before any failure is recorded. ponytail: in memory, per instance (one instance, D-20); a restart forgets the failures.
+    /// when a limit of <see cref="StaffLoginGuard"/> is full for this attempt's source (the browser of
+    /// <paramref name="deviceId"/> when the club trusts it, else <paramref name="client"/>). The limits are checked before and
+    /// under the club's lock, and the lookup with the failure, or with the token and the trusted browser, is one transaction:
+    /// parallel requests cannot all pass the check before a failure is recorded, and a restart forgets nothing (D-76).
     /// </summary>
     /// <remarks>
     /// The PIN is unique only inside its network, so it is looked up in one club: the one of <paramref name="clubCode"/>, or
-    /// the only club of the server when no code is sent (400 <c>clubCode required</c> once there are more). An unknown code
-    /// or a disabled club is a wrong PIN: it counts as an attempt and does not tell which codes exist.
+    /// the only club of the server when no code is sent (400 <c>clubCode required</c> once there are more, counting nothing).
+    /// An unknown code or a disabled club is a wrong PIN: it counts as an attempt and does not tell which codes exist.
     /// </remarks>
-    public async Task<(string Token, StaffContext Staff)?> LoginAsync(string pin, string? clubCode, IPAddress? client)
+    public async Task<(string Token, StaffContext Staff)?> LoginAsync(string pin, string? clubCode, IPAddress? client, string? deviceId)
     {
-        var key = PinLimitKey(client);
-        var attempt = TakeAttempt(key);
-        var wrong = false;
-        try
+        var now = clock.GetUtcNow();
+        await using var c = await db.OpenConnectionAsync();
+        var code = string.IsNullOrWhiteSpace(clubCode) ? null : clubCode.Trim().ToUpperInvariant();
+        var clubs = (await c.QueryAsync<(Guid Id, bool Disabled)>(
+            "SELECT id, disabled FROM clubs WHERE @code IS NULL OR code = @code ORDER BY created_at, id LIMIT 2", new { code })).ToList();
+        if (code is null && clubs.Count > 1)
         {
-            var now = clock.GetUtcNow();
-            await using var c = await db.OpenConnectionAsync();
-            var code = string.IsNullOrWhiteSpace(clubCode) ? null : clubCode.Trim().ToUpperInvariant();
-            if (code is null && await c.ExecuteScalarAsync<long>("SELECT count(*) FROM clubs") > 1)
-            {
-                throw ApiException.Validation("clubCode", "required", "This server holds several clubs: send the club code with the PIN");
-            }
-
-            var staff = await c.QuerySingleOrDefaultAsync<StaffRow>(
-                $"{StaffRow.Select} WHERE s.pin_hmac = @hmac AND s.active AND NOT cl.disabled AND (@code IS NULL OR cl.code = @code)",
-                new { hmac = PinHmac(pin), code });
-            if (staff is null)
-            {
-                wrong = true;
-
-                // Security event (DESIGN §3.7); the PIN itself is never logged.
-                logger.LogWarning("Wrong staff PIN from {Ip}", client);
-                return null;
-            }
-
-            var token = "st_" + Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
-            await c.ExecuteAsync(
-                """
-                INSERT INTO staff_tokens (token_hash, staff_id, club_id, created_at, last_used_at, expires_at)
-                VALUES (@hash, @Id, @ClubId, @now, @now, @expires)
-                """,
-                new { hash = Hash(token), staff.Id, staff.ClubId, now, expires = now.AddDays(options.StaffTokenAbsoluteDays) });
-            return (token, staff.ToContext());
+            throw ApiException.Validation("clubCode", "required", "This server holds several clubs: send the club code with the PIN");
         }
-        finally
+
+        var clubId = clubs is [{ Disabled: false } club] ? club.Id : Guid.Empty;
+        var source = await guard.SourceAsync(c, clubId, client, deviceId, now);
+        await guard.CheckAsync(c, null, source, now);
+        await using var tx = await c.BeginTransactionAsync();
+        await StaffLoginGuard.LockAsync(c, tx, clubId);
+        await guard.CheckAsync(c, tx, source, now);
+        var staff = clubId == Guid.Empty
+            ? null
+            : await c.QuerySingleOrDefaultAsync<StaffRow>(
+                $"{StaffRow.Select} WHERE s.club_id = @clubId AND s.pin_hmac = @hmac AND s.active AND NOT cl.disabled",
+                new { clubId, hmac = PinHmac(pin) }, tx);
+        if (staff is null)
         {
-            if (!wrong)
-            {
-                GiveBack(key, attempt);
-            }
+            await guard.FailAsync(c, tx, source, now);
+            await tx.CommitAsync();
+
+            // Security event (DESIGN §3.7); the PIN itself is never logged.
+            logger.LogWarning("Wrong staff PIN from {Ip} for club {ClubId}", client, clubId);
+            return null;
         }
-    }
 
-    /// <summary>Counts one attempt of <paramref name="key"/> and returns its time, or throws 429 with <c>Retry-After</c> when the window is full.</summary>
-    private DateTimeOffset TakeAttempt(string key)
-    {
-        var window = TimeSpan.FromSeconds(options.PinWindowSec);
-        lock (_failures)
-        {
-            var now = clock.GetUtcNow();
-            if (now >= _nextSweep)
-            {
-                foreach (var (other, old) in _failures)
-                {
-                    old.RemoveAll(t => now - t >= window);
-                    if (old.Count == 0)
-                    {
-                        _failures.Remove(other);
-                    }
-                }
-
-                _nextSweep = now + window;
-            }
-
-            if (!_failures.TryGetValue(key, out var times))
-            {
-                _failures[key] = times = [];
-            }
-
-            times.RemoveAll(t => now - t >= window);
-            if (times.Count >= options.PinAttempts)
-            {
-                var wait = Math.Max(1, (int)Math.Ceiling((times[0] + window - now).TotalSeconds));
-                throw new ApiException(StatusCodes.Status429TooManyRequests, ErrorCode.RateLimited, "Too many wrong PINs", new { retryAfterSec = wait })
-                {
-                    Headers = { ["Retry-After"] = wait.ToString(CultureInfo.InvariantCulture) },
-                };
-            }
-
-            times.Add(now);
-            return now;
-        }
-    }
-
-    /// <summary>Takes back the attempt of a login that was not a wrong PIN.</summary>
-    private void GiveBack(string key, DateTimeOffset attempt)
-    {
-        lock (_failures)
-        {
-            if (_failures.TryGetValue(key, out var times) && times.Remove(attempt) && times.Count == 0)
-            {
-                _failures.Remove(key);
-            }
-        }
+        var token = "st_" + Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
+        await c.ExecuteAsync(
+            """
+            INSERT INTO staff_tokens (token_hash, staff_id, club_id, created_at, last_used_at, expires_at)
+            VALUES (@hash, @Id, @ClubId, @now, @now, @expires)
+            """,
+            new { hash = Hash(token), staff.Id, staff.ClubId, now, expires = now.AddDays(options.StaffTokenAbsoluteDays) }, tx);
+        await StaffLoginGuard.TrustAsync(c, tx, source, staff.Id, now);
+        await tx.CommitAsync();
+        logger.LogInformation("Staff {StaffId} of club {ClubId} signed in from {Ip} (trusted browser: {Trusted})", staff.Id, staff.ClubId, client, source.Trusted);
+        return (token, staff.ToContext());
     }
 
     /// <summary>The staff member of a live token or of the club API key; null when neither.</summary>
@@ -224,30 +166,121 @@ public sealed class StaffTokens(NpgsqlDataSource db, AuthOptions options, TimePr
     }
 
     /// <summary>
-    /// First start with an empty <c>staff</c> table: the owner is created with <paramref name="ownerPin"/> (<c>Club:OwnerPin</c>),
-    /// or with a generated 6-digit PIN written to the log once.
+    /// Revokes every live token of <paramref name="staffId"/> but <paramref name="keep"/> (the caller's own, when members change
+    /// their own PIN), in the caller's transaction: a new PIN signs out whoever learned the old one (D-77).
+    /// </summary>
+    public static Task RevokeOthersAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid staffId, string? keep, DateTimeOffset now) =>
+        c.ExecuteAsync(
+            "UPDATE staff_tokens SET revoked_at = @now WHERE staff_id = @staffId AND revoked_at IS NULL AND token_hash <> @keep",
+            new { staffId, now, keep = Hash(keep ?? "") },
+            tx);
+
+    /// <summary>
+    /// The first owner, on every start (D-77). With an empty <c>staff</c> table the owner of the first club is created with
+    /// <paramref name="ownerPin"/> (<c>Club:OwnerPin</c>), which must be 4–8 digits like any staff PIN — else the start fails
+    /// naming the setting, never the value; or, without it, with a random 6-digit PIN written to
+    /// <see cref="AuthOptions.OwnerPinPath"/> first (the data volume already holds the pepper, which with a database dump
+    /// opens every PIN anyway). Only the path is logged: the log reaches the hosting dashboard, chats and screenshots. No path,
+    /// or a file that cannot be written, fails the start with nobody created. Once staff exists, every start reminds without
+    /// the PIN: the generated PIN still in use (its file goes once it is not), a <c>Club:OwnerPin</c> left in the settings.
     /// </summary>
     public async Task EnsureOwnerAsync(string? ownerPin)
     {
         await using var c = await db.OpenConnectionAsync();
         if (await c.ExecuteScalarAsync<bool>("SELECT EXISTS (SELECT 1 FROM staff)"))
         {
+            await RemindAsync(c, ownerPin);
             return;
         }
 
-        var pin = string.IsNullOrEmpty(ownerPin) ? RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6", CultureInfo.InvariantCulture) : ownerPin;
-        await c.ExecuteAsync(
+        if (!string.IsNullOrEmpty(ownerPin))
+        {
+            if (!StaffAdminEndpoints.IsPin(ownerPin))
+            {
+                throw new InvalidOperationException("Club:OwnerPin must be 4 to 8 digits (0-9); the owner was not created");
+            }
+
+            await InsertOwnerAsync(c, ownerPin);
+            logger.LogInformation("No staff yet: owner created with the PIN of Club:OwnerPin; change it in the console, then remove the setting");
+            return;
+        }
+
+        var path = options.OwnerPinPath;
+        if (path.Length == 0)
+        {
+            throw new InvalidOperationException("No staff yet: set Club:OwnerPin, or Auth:OwnerPinPath for a generated PIN; the owner was not created");
+        }
+
+        var pin = RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6", CultureInfo.InvariantCulture);
+        WriteSecret(path, pin + "\n");
+        try
+        {
+            if (await InsertOwnerAsync(c, pin) == 0)
+            {
+                File.Delete(path);
+                return;
+            }
+        }
+        catch
+        {
+            File.Delete(path);
+            throw;
+        }
+
+        logger.LogWarning("No staff yet: owner created with a generated PIN, written to {Path} (readable by the server's user only); sign in with it and change it in the console", path);
+    }
+
+    private Task<int> InsertOwnerAsync(NpgsqlConnection c, string pin) =>
+        c.ExecuteAsync(
             """
             INSERT INTO staff (id, network_id, club_id, name, role, pin_hmac)
             SELECT @id, network_id, id, 'Владелец', 'owner', @hmac FROM clubs ORDER BY created_at, id LIMIT 1
             ON CONFLICT DO NOTHING
             """,
             new { id = Guid.CreateVersion7(clock.GetUtcNow()), hmac = PinHmac(pin) });
-        if (string.IsNullOrEmpty(ownerPin))
+
+    /// <summary>The reminders of a start with staff; never the PIN, and nothing here stops the start.</summary>
+    private async Task RemindAsync(NpgsqlConnection c, string? ownerPin)
+    {
+        var path = options.OwnerPinPath;
+        if (path.Length > 0 && File.Exists(path))
         {
-            logger.LogWarning("No staff yet: owner created with PIN {Pin}; change it in the console", pin);
+            try
+            {
+                if (await InUseAsync(c, (await File.ReadAllTextAsync(path)).Trim(), ownersOnly: false))
+                {
+                    logger.LogWarning("The owner still signs in with the generated PIN in {Path}: change it in the console; the file goes at the next start after that", path);
+                }
+                else
+                {
+                    File.Delete(path);
+                    logger.LogInformation("The generated owner PIN in {Path} is no longer used: file removed", path);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                logger.LogWarning("The generated owner PIN file {Path} could not be checked or removed: {Error}", path, ex.Message);
+            }
+        }
+
+        if (!string.IsNullOrEmpty(ownerPin))
+        {
+            if (await InUseAsync(c, ownerPin, ownersOnly: true))
+            {
+                logger.LogWarning("Club:OwnerPin is still the PIN of an active owner: change that PIN in the console, then remove the setting (Railway: Club__OwnerPin)");
+            }
+            else
+            {
+                logger.LogInformation("Club:OwnerPin is not used once the club has staff: remove the setting (Railway: Club__OwnerPin)");
+            }
         }
     }
+
+    /// <summary>An active member (an owner, with <paramref name="ownersOnly"/>) signs in with <paramref name="pin"/>.</summary>
+    private Task<bool> InUseAsync(NpgsqlConnection c, string pin, bool ownersOnly) =>
+        c.ExecuteScalarAsync<bool>(
+            "SELECT EXISTS (SELECT 1 FROM staff WHERE pin_hmac = @hmac AND active AND (NOT @ownersOnly OR role = 'owner'))",
+            new { hmac = PinHmac(pin), ownersOnly });
 
     /// <summary>
     /// The club API key (<c>adminApiKey</c>): the current <c>ck_&lt;32 hex&gt;</c>, created on first read (a fresh club has
@@ -299,6 +332,30 @@ public sealed class StaffTokens(NpgsqlDataSource db, AuthOptions options, TimePr
     }
 
     private static byte[] Hash(string token) => SHA256.HashData(Encoding.UTF8.GetBytes(token));
+
+    /// <summary>
+    /// <paramref name="text"/> as the whole of <paramref name="path"/>: created 0600 on Unix in one step (never readable by
+    /// others, not even for a moment) under a temporary name and renamed into place, so a crash leaves no half-written file.
+    /// </summary>
+    private static void WriteSecret(string path, string text)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        var temp = path + ".tmp";
+        File.Delete(temp);
+        var file = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write };
+        if (!OperatingSystem.IsWindows())
+        {
+            file.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        }
+
+        using (var stream = new FileStream(temp, file))
+        {
+            stream.Write(Encoding.ASCII.GetBytes(text));
+            stream.Flush(flushToDisk: true);
+        }
+
+        File.Move(temp, path, overwrite: true);
+    }
 
     /// <summary>32 random bytes created once (0600 on Unix), never over a file another process just wrote.</summary>
     private static byte[] LoadOrCreatePepper(string path)

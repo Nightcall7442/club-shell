@@ -241,6 +241,20 @@ jobs:
           CLUB_KEY: smoke-club-key
         run: bash server/scripts/smoke.sh http://localhost:8080
 
+      # D-77: without CLUB_OWNER_PIN the generated owner PIN is in the data volume (0600) and the log names only the file.
+      # The repository is public, so the PIN is masked before anything could print it.
+      - name: Generated owner PIN (in the volume, not in the log)
+        run: |
+          pin=$(docker compose -f server/compose.yaml exec -T server cat /app/data/owner-pin.txt | tr -d '\r\n')
+          echo "::add-mask::$pin"
+          [[ "$pin" =~ ^[0-9]{6}$ ]] || { echo "owner-pin.txt does not hold a 6-digit PIN"; exit 1; }
+          logs=$(docker compose -f server/compose.yaml logs --no-color server)
+          grep -qF 'owner-pin.txt' <<<"$logs" || { echo "the log does not name the PIN file"; exit 1; }
+          if grep -qwF "$pin" <<<"$logs"; then echo "the PIN is in the log"; exit 1; fi
+          status=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+            -d "{\"pin\":\"$pin\"}" http://localhost:8080/api/v1/admin/login)
+          [ "$status" = 200 ] || { echo "sign-in with the generated PIN: HTTP $status"; exit 1; }
+
       - name: Container logs
         if: failure()
         run: docker compose -f server/compose.yaml logs --no-color --tail 200
