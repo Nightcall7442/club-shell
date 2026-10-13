@@ -4,7 +4,8 @@
 #   server   ubuntu  restore/build (-warnaserror)/test of server/ClubShell.Server.sln against a postgres:18 service,
 #                    then contract drift: server/contracts vs deepunites/club-contracts at server/contracts/REF
 #   e2e-admin-real  ubuntu  the admin console's Playwright suite (tests/shell-e2e, project admin) against this server
-#                    (ADMIN_SERVER=real, DESIGN §10.c) on a throwaway postgres:18 database
+#                    (ADMIN_SERVER=real, DESIGN §10.c) on a throwaway postgres:18 database; also when only the console
+#                    or its spec changed (apps/admin, tests/shell-e2e/admin, the Playwright config)
 #   docker-smoke  ubuntu  server/Dockerfile + server/compose.yaml: build the image, `docker compose up --wait`, then
 #                    server/scripts/smoke.sh (/health, register a PC, signed heartbeat) against the container (DESIGN §11 S6)
 #
@@ -43,6 +44,7 @@ jobs:
       pull-requests: read
     outputs:
       server: ${{ steps.filter.outputs.server }}
+      admin: ${{ steps.filter.outputs.admin }}
     steps:
       - uses: actions/checkout@v4
 
@@ -61,6 +63,12 @@ jobs:
               - 'nuget.config'
               - '.editorconfig'
               - '.github/workflows/server.yml'
+            # The admin console and the spec e2e-admin-real runs: ci.yml checks them only against the mock.
+            admin:
+              - 'apps/admin/**'
+              - 'tests/shell-e2e/admin/**'
+              - 'tests/shell-e2e/playwright.config.ts'
+              - 'tests/shell-e2e/package.json'
 
   server:
     name: Server (build, test on PostgreSQL 18)
@@ -154,7 +162,10 @@ jobs:
   e2e-admin-real:
     name: Admin console e2e against the real server
     needs: [changes, server]
-    if: needs.changes.outputs.server == 'true'
+    # A change to the console alone skips the server job; that skip must not skip this one (a failed server job still does).
+    if: >-
+      ${{ !cancelled() && needs.server.result != 'failure'
+      && (needs.changes.outputs.server == 'true' || needs.changes.outputs.admin == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     services:
