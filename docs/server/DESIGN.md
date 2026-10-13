@@ -1329,7 +1329,8 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
   - окружение сервера e2e: `Club__EnrollmentKey=e2e` и `Club__AutoApprovePcs=true` (спека сама регистрирует ПК с ключом `e2e`);
     `Seed__DevPcs=true` — 12 мест зала, одобренные и только что виденные (флаг только для e2e: тесты сервера работают с
     `Seed:Dev` без мест) вместе с `Agents__OfflineAfterSec=31536000`: без агентов места остаются свободными;
-    `Catalog__GamesSeedPath=tests/shell-e2e/admin/games.e2e.json` (CS2 с путями настроек игрока, Rust без);
+    `Catalog__GamesSeedPath=tests/shell-e2e/admin/games.e2e.json` (CS2 с путями настроек игрока, Rust без; VALORANT с
+    Vanguard и Apex Legends с EAC — для D-74: без Vanguard скрывается только первая);
   - правки `console.spec.ts` (перечислены в PR): тест регистрации клиента шлёт полное `hardware`, MAC через двоеточия и
     подписывает `POST /auth/login` подписью агента (`signature()`; мок её не проверяет); два теста, рассчитанные на мок,
     при `ADMIN_SERVER=real` пропускаются — «PC health…» (симулятор телеметрии мока; сервер выводит заявки из телеметрии
