@@ -8,9 +8,10 @@ using Npgsql;
 namespace ClubShell.Server.Admin;
 
 /// <summary>
-/// Staff sign-in (slice S4, DESIGN §3.5): <c>adminLogin</c> by PIN (<c>401 invalidPin</c>; after
-/// <see cref="AuthOptions.PinAttempts"/> wrong PINs from one IP (IPv6: one /64) within the window <c>429 rateLimited</c> +
-/// <c>Retry-After</c>, for any PIN — the contract does not declare that 429 yet, OQ-4 / §12.2 item 4), <c>adminLogout</c> (always
+/// Staff sign-in (slice S4, DESIGN §3.5): <c>adminLogin</c> by PIN (<c>401 invalidPin</c>; past a wrong-PIN limit of
+/// <see cref="StaffLoginGuard"/> — per source, and club-wide for new and for trusted browsers, D-76 — <c>429 rateLimited</c>
+/// with <c>retryAfterSec</c>, <c>scope</c> and <c>Retry-After</c>, for any PIN — the contract does not declare that 429 yet,
+/// OQ-4 / §12.2 item 4), <c>adminLogout</c> (always
 /// <c>200 {ok:true}</c>, <c>ck_</c> is not revoked) and <c>adminMe</c>. <c>active</c> is always true: an inactive member
 /// cannot sign in.
 /// </summary>
@@ -46,7 +47,8 @@ public static class StaffEndpoints
             throw ApiException.Validation("pin", pin.Length == 0 ? "min" : "max");
         }
 
-        var (token, member) = await staff.LoginAsync(pin, request.ClubCode, context.Connection.RemoteIpAddress)
+        var deviceId = request.DeviceId is { ValueKind: JsonValueKind.String } device ? device.GetString() : null;
+        var (token, member) = await staff.LoginAsync(pin, request.ClubCode, context.Connection.RemoteIpAddress, deviceId)
             ?? throw ApiException.Unauthorized("invalidPin", "No active staff member with this PIN");
         await using var c = await db.OpenConnectionAsync();
         return AdminJson.Ok(new AdminLoginResponse(token, Member(member), await ShiftEndpoints.OpenShiftAsync(c, member.ClubId)));

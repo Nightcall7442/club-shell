@@ -20,6 +20,8 @@ public static class AgentEndpoints
     public static readonly string[] Operations =
         ["register", "refresh", "heartbeat", "sendTelemetry", "getConfig", "getPolicies", "getCommands", "ackCommand"];
 
+    private const string AgentVersionHeader = "X-Agent-Version";
+
     public static void MapAgentEndpoints(this IEndpointRouteBuilder app)
     {
         var api = app.MapApiGroup("/api/v1/agents");
@@ -54,7 +56,7 @@ public static class AgentEndpoints
 
     private static async Task<IResult> RegisterAsync(
         HttpContext context, AgentRegisterRequest request, PcRepository pcs, ClubRepository clubs, TokenService tokens, AgentSocketHub hub,
-        ClubOptions club, AuthOptions auth, AgentOptions agents, SessionsOptions sessions, TimeProvider clock, ILoggerFactory logs)
+        ReplayLog replays, ClubOptions club, AuthOptions auth, AgentOptions agents, SessionsOptions sessions, TimeProvider clock, ILoggerFactory logs)
     {
         var logger = logs.CreateLogger(typeof(AgentEndpoints).FullName!);
         Require(request.Hwid, "hwid");
@@ -69,11 +71,39 @@ public static class AgentEndpoints
 
         var clubId = context.Features.GetRequiredFeature<ClubContext>().ClubId;
         var now = clock.GetUtcNow();
-        var (pc, refresh) = await pcs.RegisterAsync(clubId, request, NormalizeMac(request.MacAddress), club.AutoApprovePcs, TimeSpan.FromDays(auth.RefreshTokenDays), now);
+        var gate = new RegisterProofGate(
+            agents.RegisterProof, context.Features.Get<SignedRequest>(), replays, TimeSpan.FromSeconds(auth.SignatureWindowSec), hub.IsConnected,
+            TimeSpan.FromSeconds(agents.OfflineAfterSec));
+        var (pc, refresh, proof, problem) = await pcs.RegisterAsync(
+            clubId, request, NormalizeMac(request.MacAddress), club.AutoApprovePcs, TimeSpan.FromDays(auth.RefreshTokenDays), now, gate);
+
+        // Security events (DESIGN §3.7, D-78), never with the signature headers.
+        var ip = context.Connection.RemoteIpAddress;
+        var agentVersion = context.Request.Headers[AgentVersionHeader].ToString() is { Length: > 0 } v ? v[..Math.Min(v.Length, 32)] : "?";
+        switch (proof)
+        {
+            case ProofOutcome.Refused:
+                logger.LogWarning("Re-registration of PC {PcId} refused without a valid proof ({Problem}) from {Ip}, agent {AgentVersion}", pc.Id, problem, ip, agentVersion);
+                break;
+            case ProofOutcome.Unproven:
+                logger.LogWarning(
+                    "PC {PcId} re-registered without a valid proof ({Problem}) from {Ip}, agent {AgentVersion}; Agents:RegisterProof=enforce would refuse it",
+                    pc.Id, problem, ip, agentVersion);
+                break;
+            case ProofOutcome.Reenrolled:
+                logger.LogWarning("PC {PcId} re-enrolled in the owner's maintenance window without a proof ({Problem}) from {Ip}, agent {AgentVersion}", pc.Id, problem, ip, agentVersion);
+                break;
+        }
+
         if (refresh is null)
         {
-            // Security event (DESIGN §3.7). The agent retries registration with backoff until the owner approves the PC.
-            logger.LogInformation("PC {PcId} ({MachineName}) awaits approval", pc.Id, request.MachineName);
+            // Security event (DESIGN §3.7). The agent retries registration with backoff until the owner approves the PC; a
+            // refused re-registration answers the same, and the PC keeps the credentials it has (D-78).
+            if (proof != ProofOutcome.Refused)
+            {
+                logger.LogInformation("PC {PcId} ({MachineName}) awaits approval", pc.Id, request.MachineName);
+            }
+
             throw new ApiException(StatusCodes.Status403Forbidden, ErrorCode.Forbidden, "PC is waiting for approval", new { reason = "pendingApproval", pcId = pc.Id });
         }
 

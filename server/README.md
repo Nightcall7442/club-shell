@@ -24,14 +24,15 @@
   Каталог — из `data/games.json` (`Catalog:GamesSeedPath`, массив контрактных `Game` + `settingsPaths`): upsert по id при
   старте, пропавшие — soft delete, изменение поднимает `catalogVersion`. Нет файла — каталог не трогается.
 - S4: 17 операций кассы — вход по PIN (`adminLogin`/`Logout`/`Me`; PIN хранится как HMAC с pepper из
-  `data/pin-pepper.key`, токен скользящий 12 ч / абсолютный 7 д, 5 неверных PIN с IP за 300 с → `429`; `ck_…` из
+  `data/pin-pepper.key`, токен скользящий 12 ч / абсолютный 7 д, лимиты неверных PIN в базе — D-76, ниже; `ck_…` из
   `clubs.api_key` = владелец), карта (`adminOverview`, `adminPcs`, `adminAddPc`/`UpdatePc`/`DeletePc` — одобрение ПК
   через `maintenance:false`), сеансы и деньги (`adminOpenSession`/`Extend`/`End`, `adminTopUp` с бонусом `bonusTiers`,
   `adminQuote` — та же `SessionService`/`Pricing`/`Ledger`, что у киоска), команды ПК (`adminCommand`: ack до
   `Agents:AckWaitSec`, офлайн → `agentOffline`), смена (`adminShift`/`OpenShift`/`CloseShift`, X/Z по `shift_id` строк
   леджера, `expectedCash` = открытие + наличные пополнения). Журнал действий — `audit_entries` (append-only). CORS только
   для `/api/v1/admin/*` и `Cors:AllowedOrigins`. `PcStatusWorker` пишет `pcOffline` в `telemetry_events`. Первый старт с
-  пустой `staff` создаёт владельца с `Club:OwnerPin` (пусто — PIN пишется в лог один раз).
+  пустой `staff` создаёт владельца с `Club:OwnerPin` (пусто — случайный PIN в файле `data/owner-pin.txt`, в логе только путь,
+  D-77).
 - S5: 27 операций кассы, часть 2 — персонал (`adminStaff`/`AddStaff`/`UpdateStaff`; последний активный владелец не
   отключается), клиенты (`adminClients` … `adminClientTransactions`; `adminRedeemPromo` — атомарно и раз на клиента), тарифы,
   товары и остатки (вебхук `lowStock`), настройки клуба (`adminSettings`/`SaveSettings` по JSON Schema контракта,
@@ -60,6 +61,15 @@
   владелец его не одобрит (`PATCH /admin/pcs/{pcId} {maintenance:false}`). `Club:AutoApprovePcs=true` — только для dev
   и тестов.
   Неизвестный HWID с MAC живого ПК клуба (замена диска) создаёт ПК в ожидании с номером и именем старого места.
+- Перерегистрация одобренного ПК (D-78): агент 1.0.18 подписывает её прежним `signingSecret`, и тогда секрет сохраняется.
+  `Agents:RegisterProof`: `audit` (по умолчанию) — без подписи как раньше, плюс Warning «re-registered without a valid
+  proof»; `enforce` — без подписи `403 pendingApproval` и ничего не меняется, кроме окна владельца (`maintenance:true`,
+  `Agents:ReenrollWindowMin` = 60 мин, только офлайн-ПК); `off` — подпись не смотрится. Переход: сервер с `audit` → агент
+  1.0.18 на пилотном ПК (после ночи в его журнале «Stored agent tokens refreshed», в логе сервера по нему ни «registered», ни
+  предупреждения) → 1.0.18 на всех ПК → когда все одобренные ПК на 1.0.18+ и предупреждений нет несколько дней,
+  `Agents__RegisterProof=enforce` и перезапуск (откат — снова `audit`, данные не меняются). Пока хоть один ПК на старом агенте,
+  `enforce` не включать: тот ждал бы окна владельца после каждого включения. Переустановка ПК при `enforce` —
+  `docs/server/PILOT.md` §3.
 - Refresh-токен одноразовый; повтор использованного отзывает все токены ПК (`401 reused`), WS закрывается `4401`.
 - Политика ПК берётся из `data/policy.json`, а если его нет — из `config/policies.example.json` (копируется в
   `seed/`). Изменённый seed при старте поднимает `policyVersion`.
@@ -146,9 +156,31 @@ CLUB_KEY=<CLUB_ENROLLMENT_KEY> bash server/scripts/smoke.sh http://localhost:808
 
 - TLS завершает прокси, сервер слушает HTTP. Прокси **не переписывает путь** (`/api/v1/*` и `/ws/agent` уходят как есть) и
   пропускает WebSocket upgrade (`Upgrade`, `Connection`); таймаут простоя WS — не меньше минуты (сервер шлёт ping раз в 20 с).
-- Адрес клиента (по нему считается лимит неверных PIN): либо `Proxy__ClientIpHeader=X-Real-IP`, либо список доверенных
+- Адрес клиента (по нему считаются неверные PIN браузеров, которым клуб ещё не доверяет, D-76): либо `Proxy__ClientIpHeader=X-Real-IP`, либо список доверенных
   прокси `Proxy__Trusted__0=<CIDR>` (тогда читается `X-Forwarded-For` / `-Proto`). Включайте только если сервер доступен
   исключительно через этот прокси и тот перезаписывает присланный клиентом заголовок; иначе клиент подставит любой адрес сам.
+
+### Неверные PIN кассы (D-76)
+
+Неудачи входа хранятся в базе (`staff_login_failures`), поэтому перезапуск и деплой их не сбрасывают. Верный PIN счётчик не
+обнуляет; пока лимит исчерпан, отказ (`429 rateLimited`, `details.retryAfterSec`, `details.scope`, `Retry-After`) получает и
+верный PIN.
+
+- **5 за 15 мин с одного источника** — `scope=source`. Источник — браузер, которому клуб доверяет (в нём входили с верным PIN за
+  последние 60 дней; касса шлёт свой `deviceId`), иначе IP (IPv6 — /64).
+- **30 за сутки со всех браузеров, которым клуб не доверяет**, — `scope=club` для всех таких браузеров клуба. Кассы, где уже
+  входили, работают: игрок в Wi-Fi клуба или перебор с сотни адресов не закрывают смену.
+- **30 за сутки со всех доверенных браузеров** — `scope=trusted`: кассир не обойдёт лимит, заводя новые браузеры. Исчерпанный
+  лимит закрывает вход всем доверенным браузерам клуба, кассам тоже, до суток; новый браузер (окно инкогнито) при этом входит,
+  пока не исчерпан лимит новых.
+- Доверие браузеру снимается, когда сотрудника, входившего в нём последним, отключают или ему меняют PIN (и при сбросе PIN
+  платформой): уволенный кассир или вор PIN перебирает в лимите новых браузеров. Общая касса снова доверенная после
+  следующего верного входа с неё.
+- Срабатывание клубного лимита (раз за окно): вебхук `suspicious` клуба и ошибка в Sentry — id клуба и счётчики, без PIN и адресов.
+- Снять раньше: подождать окно или войти с кассы, где уже входили (при `scope=trusted` — с нового браузера); в крайнем
+  случае в базе `DELETE FROM staff_login_failures WHERE club_id = '<id клуба>';`.
+- Настройки: `RateLimit__PinAttempts` / `PinWindowSec` / `PinClubAttempts` / `PinClubWindowSec` / `PinTrustedAttempts` /
+  `PinDeviceTrustDays`; `0` у клубных лимитов их выключает.
 
 ### Секреты и ротация
 
@@ -158,7 +190,7 @@ CLUB_KEY=<CLUB_ENROLLMENT_KEY> bash server/scripts/smoke.sh http://localhost:808
 | Pepper PINов и паролей | `data/pin-pepper.key` | **не менять**: без него все PIN персонала и пароли клиентов недействительны |
 | Ключ регистрации агентов | `Club__EnrollmentKey` | новый ключ в `Club__EnrollmentKey`, старый в `Club__PreviousEnrollmentKey`; раздать агентам; убрать старый |
 | Ключ API `ck_…` | хеш в базе, показывается владельцу в кассе | `adminRotateApiKey`: старый ключ недействителен сразу |
-| PIN владельца | первый старт: `Club__OwnerPin`, пусто — случайный PIN один раз в лог | менять в кассе (`adminUpdateStaff`) |
+| PIN владельца | первый старт: `Club__OwnerPin` (4–8 цифр), пусто — случайный PIN в `data/owner-pin.txt` (0600, в логе только путь) | менять в кассе (`adminUpdateStaff`; прочие входы сотрудника закрываются); после смены файл удаляется при следующем старте, а `Club__OwnerPin` убрать из переменных. Если PIN мог утечь (например, пока лежал в `Club__OwnerPin`), после смены PIN сменить и ключ API: владелец читает `ck_` в кассе, смена PIN его не отзывает |
 | Пароль PostgreSQL | `POSTGRES_PASSWORD` / переменные Railway | менять вместе со строкой подключения |
 
 ### Резервное копирование и восстановление
@@ -196,15 +228,22 @@ Directory — корень репозитория, config path `/server/railway.
    - `ConnectionStrings__Club=Host=${{Postgres.PGHOST}};Port=${{Postgres.PGPORT}};Username=${{Postgres.PGUSER}};Password=${{Postgres.PGPASSWORD}};Database=${{Postgres.PGDATABASE}}`
    - `ASPNETCORE_ENVIRONMENT=Production`
    - `Proxy__ClientIpHeader=X-Real-IP`
-   - `Club__EnrollmentKey=<случайная строка>`, `Club__OwnerPin=<PIN владельца>`, `Club__TimeZone=<зона клуба>`
+   - `Club__EnrollmentKey=<случайная строка>`, `Club__TimeZone=<зона клуба>`. `Club__OwnerPin` не задавать: сервер сам создаст
+     владельца со случайным PIN и запишет его в volume, в логе будет только путь `/app/data/owner-pin.txt`. Прочитать PIN —
+     `railway ssh -- cat /app/data/owner-pin.txt` (CLI попросит один раз добавить SSH-ключ; токен проекта ключи не добавляет),
+     войти и сменить PIN в кассе; файл удалится при следующем старте. Если PIN всё же задан переменной (4–8 цифр, иначе сервер не
+     стартует), после первого входа сменить его в кассе и удалить переменную: пока она совпадает с PIN владельца, каждый старт
+     пишет об этом предупреждение (без самого PIN).
    - `Cors__AllowedOrigins__0=<origin кассы>`
    - `Sentry__Dsn=<DSN проекта Sentry>` — по желанию: без неё сервер работает как раньше, ошибки не отправляются. Репозиторий
      открытый, поэтому DSN только в переменной, не в `appsettings.json`; вставлять без кавычек. Ошибка в DSN не роняет
      сервер: он стартует без Sentry и пишет в лог «Sentry is off: …». Что уходит в Sentry и что вычищается — D-72.
      Бесплатный план Sentry — 5 000 ошибок в месяц: сервер шлёт одну ошибку каждого вида в час, а в настройках проекта
      Sentry стоит проверить, что включена Spike Protection.
-5. Проверить, что край Railway перезаписывает присланный клиентом `X-Real-IP` (от этого зависит лимит неверных PIN): запрос
-   с поддельным `X-Real-IP` должен считаться по реальному адресу. **Не проверено.**
+5. Проверить, что край Railway перезаписывает присланный клиентом `X-Real-IP` (от этого зависят лимиты неверных PIN, D-76):
+   один неверный PIN с известного публичного адреса и с поддельным `X-Real-IP` — строка лога `Wrong staff PIN from <IP>` должна
+   показать настоящий публичный адрес, а не поддельный и не адрес прокси (приватный или `100.64.x`). Опыт с 6 поддельными
+   заголовками (5×401, потом 429) этого не доказывает: так же выглядит и случай, когда все клиенты считаются по адресу прокси.
 6. Домен: сертификат Railway на `*.up.railway.app` или CNAME домена клуба; `https://<домен>/health` → 200.
 7. `ServerUrl` в MSI агента — этот адрес; ключ регистрации — `Club__EnrollmentKey`. Первый ПК ждёт одобрения владельца в кассе.
 8. Включить автоматические бэкапы volume у PostgreSQL и у `/app/data` (тариф Pro).
@@ -246,10 +285,11 @@ Playwright сам запускает `dotnet run` (Development, `Seed:Dev`, CORS
 
 Все ключи и значения по умолчанию — таблица в DESIGN §2.5. Используются: `ConnectionStrings:Club`,
 `Database:MigrateOnStart`, `Contracts:OpenApiPath`, `Auth:Issuer` / `Audience` / `SigningKeyPath` /
-`AgentTokenMinutes` / `RefreshTokenDays` / `SignatureWindowSec` / `UserTokenHours` / `PepperPath` / `StaffTokenSlidingHours` /
-`StaffTokenAbsoluteDays`, `Club:Name` / `TimeZone` / `EnrollmentKey` / `PreviousEnrollmentKey` / `AutoApprovePcs` /
+`AgentTokenMinutes` / `RefreshTokenDays` / `SignatureWindowSec` / `UserTokenHours` / `PepperPath` / `OwnerPinPath` /
+`StaffTokenSlidingHours` / `StaffTokenAbsoluteDays`, `Club:Name` / `TimeZone` / `EnrollmentKey` / `PreviousEnrollmentKey` / `AutoApprovePcs` /
 `OwnerPin` / `OfflineLogin` / `GuestLogin`, `Realtime:PingSec` / `PongTimeoutSec` / `MaxFrameBytes`, `Agents:HeartbeatSec` /
-`OfflineAfterSec` / `CommandTtlMin` / `AckWaitSec`, `RateLimit:PinAttempts` / `PinWindowSec`, `Cors:AllowedOrigins`, `Sessions:GraceSec` /
+`OfflineAfterSec` / `CommandTtlMin` / `AckWaitSec` / `RegisterProof` / `ReenrollWindowMin`, `RateLimit:PinAttempts` / `PinWindowSec` /
+`PinClubAttempts` / `PinClubWindowSec` / `PinTrustedAttempts` / `PinDeviceTrustDays`, `Cors:AllowedOrigins`, `Sessions:GraceSec` /
 `MaxOfflineMinutes` (уходят в конфиг агента) / `TickMs` / `ResyncSec` / `PostpaidCreditLimit` (тиёны; `null` — без
 лимита), `Catalog:PolicySeedPath` / `GamesSeedPath`, `Workers:Enabled`, `Seed:Dev`, `Proxy:Trusted` / `ClientIpHeader`, `Sentry:Dsn`
 (и остальные ключи `Sentry:*` SDK, кроме приватности и Sentry Logs — их задаёт код; без DSN Sentry не подключается),
@@ -330,7 +370,7 @@ Playwright сам запускает `dotnet run` (Development, `Seed:Dev`, CORS
 | Тариф удалён | удаляется совсем | soft delete, цена постоплаты заморожена в сеансе |
 | Журнал кассира | пишется до проверок, 5000 записей | после проверок, в транзакции действия, append-only без лимита |
 | X/Z-отчёт смены | транзакции по времени, наличные — регуляркой по описанию | строки леджера по `shift_id`, наличные — `method = cash` |
-| Неверный PIN | без ограничений | 5 с одного IP за 300 с → `429` |
+| Неверный PIN | без ограничений | в базе (D-76): 5 с одного источника (IP, IPv6 — /64, или браузер, которому клуб доверяет) за 15 мин; 30 за сутки со всех новых браузеров клуба и 30 — со всех доверенных → `429 {retryAfterSec, scope}` |
 | Номер места | повторы разрешены | занятый номер — `400 number taken` |
 | Завершение с кассы | `sessionUpdated` агенту | команда `endSession {reason: admin}`, без push (§5.7) |
 | `pcStatusChanged` | рассылается | не шлётся (AsyncAPI notImplemented), касса опрашивает |

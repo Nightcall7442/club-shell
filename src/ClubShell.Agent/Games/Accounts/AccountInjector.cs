@@ -192,7 +192,8 @@ public sealed class AccountInjector
         await KillLauncherAsync(lease.Launcher, cancellationToken).ConfigureAwait(false);
         string? exe = _detector.ResolveLauncherExe(lease.Launcher);
         InjectionResult result = await strategy.InjectAsync(game, lease, exe, cancellationToken).ConfigureAwait(false);
-        _logger.LogInformation("Injected {Launcher} credentials for {Title} (account {Username})", lease.Launcher, game.Title, lease.Username);
+        // The lease, not the login: the Agent log is readable by the kiosk user.
+        _logger.LogInformation("Injected {Launcher} credentials for {Title} (lease {LeaseId})", lease.Launcher, game.Title, lease.LeaseId);
         return result;
     }
 
@@ -426,9 +427,9 @@ public sealed class AccountInjector
         if (args is not null && !IsExchangeCode(lease.Launcher, authType))
         {
             logger.LogWarning(
-                "SECURITY: games.accountPool.allowPasswordOnCommandLine is on; the {Launcher} password of account {Username} is on the launcher command line, readable by every process in the kiosk session",
+                "SECURITY: games.accountPool.allowPasswordOnCommandLine is on; the {Launcher} password of lease {LeaseId} is on the launcher command line, readable by every process in the kiosk session",
                 lease.Launcher,
-                lease.Username);
+                lease.LeaseId);
         }
 
         return args;

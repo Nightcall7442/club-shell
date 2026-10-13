@@ -48,6 +48,12 @@ Base URL: `https://<server>/api/v1` (`agent.json → server.baseUrl`). WebSocket
 4. 401 with `code = unauthorized` and `details.reason = "expired"` → `POST /agents/refresh`; if refresh
    fails with 401 → re-register (server re-issues if HWID matches an existing PC; else creates a new PC in
    `maintenance` status pending admin approval — `403 forbidden`, `details.reason = "pendingApproval"`).
+5. Re-registration proof (server D-78, Agent 1.0.18): at start an expiring access token is refreshed, and the Agent
+   registers again only when the refresh is rejected (401/403), never on a transport error. A PC that holds tokens
+   signs that registration with its stored `signingSecret` (`X-Timestamp`, `X-Signature`, §2.2) next to `X-Club-Key`;
+   with a valid proof the server keeps the secret. With `Agents:RegisterProof=enforce` an unproven re-registration of an
+   approved PC is answered `403 pendingApproval` (retried with the usual backoff) unless the owner opened the PC's
+   re-enroll window (`maintenance:true`). `X-Server-Time` of every refresh/register answer sets the clock offset.
 
 JWT claims: `sub` = pcId, `club` = clubId, `hwid`, `role = "agent"`, `iat`, `exp`, `jti`. Agent validates
 `exp` locally only (no signature check needed client-side; server public key is not distributed).

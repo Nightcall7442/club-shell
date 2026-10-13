@@ -189,8 +189,12 @@ public sealed record AdminHallPc(
 public sealed record AdminHallPcList(IReadOnlyList<AdminHallPc> Items, IReadOnlyList<AdminZone> Zones);
 
 // Requests: every field nullable, so a missing one is told apart from a default (400 required).
-/// <summary><c>clubCode</c> is beyond the contract: needed once the server holds more than one club (M0006).</summary>
-public sealed record AdminLoginRequest(string? Pin, string? ClubCode);
+/// <summary>
+/// <c>clubCode</c> and <c>deviceId</c> are beyond the contract: the code is needed once the server holds more than one club
+/// (M0006); the device id is the console's random browser id, by which a club trusts a desk (D-76) — any JSON is taken, a
+/// value that is not a well-formed id is ignored, never a 400.
+/// </summary>
+public sealed record AdminLoginRequest(string? Pin, string? ClubCode, JsonElement? DeviceId);
 
 /// <summary>
 /// Money the cashier takes with opening or extending (beyond the contract): topped up in the action's transaction, so a

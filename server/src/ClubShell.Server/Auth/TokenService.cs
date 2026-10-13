@@ -31,16 +31,36 @@ public sealed class AuthOptions
     /// <summary>32-byte HMAC key of staff PINs (DESIGN §3.5), created on first start; relative paths resolve against the content root.</summary>
     public string PepperPath { get; set; } = "data/pin-pepper.key";
 
+    /// <summary>
+    /// Where a generated owner PIN is written on the first start (D-77): readable only by the server's user, never logged;
+    /// relative paths resolve against the content root. Empty: no file, so <c>Club:OwnerPin</c> is required then.
+    /// </summary>
+    public string OwnerPinPath { get; set; } = "data/owner-pin.txt";
+
     /// <summary>A staff token dies this long after its last use…</summary>
     public int StaffTokenSlidingHours { get; set; } = 12;
 
     /// <summary>…and this long after sign-in in any case.</summary>
     public int StaffTokenAbsoluteDays { get; set; } = 7;
 
-    /// <summary>Wrong PINs per client IP within <see cref="PinWindowSec"/> before <c>POST /admin/login</c> answers 429 (<c>RateLimit:*</c>).</summary>
+    /// <summary>
+    /// Wrong PINs of one source in one club within <see cref="PinWindowSec"/> before <c>POST /admin/login</c> answers 429
+    /// (D-76; <c>RateLimit:*</c>, as the rest below). A source is a trusted browser, else the IP (IPv6: its /64).
+    /// </summary>
     public int PinAttempts { get; set; } = 5;
 
-    public int PinWindowSec { get; set; } = 300;
+    public int PinWindowSec { get; set; } = 900;
+
+    /// <summary>Wrong PINs from untrusted sources of one club within <see cref="PinClubWindowSec"/> before all of them get 429; 0 — off.</summary>
+    public int PinClubAttempts { get; set; } = 30;
+
+    public int PinClubWindowSec { get; set; } = 86_400;
+
+    /// <summary>The same for the club's trusted browsers together: caps a cashier who makes many of them; 0 — off.</summary>
+    public int PinTrustedAttempts { get; set; } = 30;
+
+    /// <summary>A browser stays trusted by a club this long after its last successful sign-in there.</summary>
+    public int PinDeviceTrustDays { get; set; } = 60;
 }
 
 /// <summary>

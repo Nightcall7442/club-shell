@@ -18,7 +18,8 @@ namespace ClubShell.Server.Admin;
 /// The hall editor (slice S4, DESIGN §9): <c>adminPcs</c> (seats with map position, device, hardware, last telemetry and the
 /// last heartbeat's games volume, D-73),
 /// and for the owner <c>adminAddPc</c> (a seat without a PC yet: approved, <c>offline</c>, no HWID), <c>adminUpdatePc</c>
-/// (partial; <c>maintenance:false</c> is also how a PC waiting for approval is approved, D-7) and <c>adminDeletePc</c> (soft
+/// (partial; <c>maintenance:false</c> is also how a PC waiting for approval is approved, D-7; <c>maintenance:true</c> opens
+/// the re-enroll window of a reinstalled PC for <c>Agents:ReenrollWindowMin</c>, D-78) and <c>adminDeletePc</c> (soft
 /// delete: the agent's tokens answer <c>401 revoked</c>, its socket closes 4401; <c>409 pcBusy</c> during a session). A
 /// taken seat number is <c>400 number taken</c> (the contract declares no 409 there). Changing name, zone or number bumps
 /// <c>config_version</c> (they are in <c>AgentServerConfig</c>), a zone also <c>catalog_version</c>, and the PC gets
@@ -107,15 +108,18 @@ public static class PcAdminEndpoints
         await using (var c = await db.OpenConnectionAsync())
         await using (var tx = await c.BeginTransactionAsync())
         {
+            // maintenance:true also opens the re-enroll window of a reinstalled or reimaged PC, false closes it (D-78).
             await SeatAsync(c, tx, () => c.ExecuteAsync(
                 """
                 UPDATE pcs SET zone = coalesce(@Zone, zone), name = coalesce(@Name, name), number = coalesce(@Number, number),
                                x = coalesce(@X, x), y = coalesce(@Y, y), device_kind = coalesce(@Device, device_kind),
                                maintenance = coalesce(@Maintenance, maintenance),
-                               approved = approved OR coalesce(NOT @Maintenance, false), updated_at = @now
+                               approved = approved OR coalesce(NOT @Maintenance, false),
+                               reenroll_until = CASE WHEN @Maintenance THEN @reenrollUntil WHEN NOT @Maintenance THEN NULL ELSE reenroll_until END,
+                               updated_at = @now
                 WHERE id = @pcId
                 """,
-                new { pcId, r.Zone, r.Name, r.Number, r.X, r.Y, r.Device, r.Maintenance, now },
+                new { pcId, r.Zone, r.Name, r.Number, r.X, r.Y, r.Device, r.Maintenance, reenrollUntil = now.AddMinutes(agents.ReenrollWindowMin), now },
                 tx));
             if (config || zone)
             {

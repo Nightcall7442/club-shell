@@ -112,6 +112,16 @@ public sealed class Hwid
     }
 
     /// <summary>
+    /// What a log may carry of a hardware id: its first 8 characters. The log folder is readable by the kiosk user, and the
+    /// full id with the club key names the PC to the server (D-78).
+    /// </summary>
+    public static string LogPrefix(string hwid)
+    {
+        ArgumentNullException.ThrowIfNull(hwid);
+        return hwid.Length <= 8 ? hwid : hwid[..8];
+    }
+
+    /// <summary>
     /// Deterministic hash of <paramref name="components"/>: each is normalized with <see cref="Normalize"/>, unusable
     /// ones dropped, the rest joined with <c>|</c> in order and hashed with SHA-256 (64 lower-case hex chars).
     /// </summary>

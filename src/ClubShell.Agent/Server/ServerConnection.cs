@@ -41,8 +41,9 @@ public interface IConnectivityEventSink
 }
 
 /// <summary>
-/// Owns the Agent's relationship with the central server (SERVER_API.md §2, §6): registers the PC (or reuses valid
-/// tokens), keeps the access token fresh (refreshing it shortly before <c>exp</c> and reconnecting the live socket with
+/// Owns the Agent's relationship with the central server (SERVER_API.md §2, §6): reuses or refreshes stored tokens and
+/// registers the PC only without them or when the server rejects the refresh (D-78), keeps the access token fresh
+/// (refreshing it shortly before <c>exp</c> and reconnecting the live socket with
 /// it), and runs the <see cref="RealtimeClient"/> WebSocket under a <see cref="Reconnector"/>. Commands are routed to <see cref="IServerCommandSink"/>, pushes to
 /// <see cref="IServerPushSink"/>, and connectivity transitions to <see cref="IConnectivityEventSink"/>. Registered as
 /// a singleton and as an <see cref="IHostedService"/>; other services take it to read <see cref="PcId"/>,
@@ -60,8 +61,6 @@ public sealed class ServerConnection : IHostedService, IDisposable
     /// </summary>
     public static readonly TimeSpan MinRefreshDelay = TimeSpan.FromMinutes(1);
 
-    private static readonly TimeSpan RegisterRetryMin = TimeSpan.FromSeconds(3);
-    private static readonly TimeSpan RegisterRetryMax = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan MaxTimerWait = TimeSpan.FromDays(1);
 
     private readonly IServerClient _server;
@@ -229,35 +228,14 @@ public sealed class ServerConnection : IHostedService, IDisposable
         }
     }
 
+    /// <summary>Refresh first, register only when the refresh is rejected (D-78, <see cref="AgentCredentials"/>).</summary>
     private async Task EnsureRegisteredAsync(CancellationToken cancellationToken)
     {
-        var attempt = 0;
-        while (!cancellationToken.IsCancellationRequested)
+        await AgentCredentials.EnsureAsync(_server, _tokens, RegisterOnceAsync, _clock, TokenRefreshLeeway, _logger, cancellationToken).ConfigureAwait(false);
+        if (_tokens.Agent is { } tokens && tokens.PcId != _pcId)
         {
-            if (_tokens.Agent is { } existing && !existing.IsExpired(_server.ServerNow, TokenRefreshLeeway))
-            {
-                _pcId = existing.PcId;
-                await PersistPcIdAsync(existing.PcId, cancellationToken).ConfigureAwait(false);
-                _logger.LogInformation("Reusing stored agent tokens for PC {PcId}", existing.PcId);
-                return;
-            }
-
-            try
-            {
-                await RegisterOnceAsync(cancellationToken).ConfigureAwait(false);
-                return;
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                attempt++;
-                var delay = Reconnector.ComputeDelay(attempt, RegisterRetryMin, RegisterRetryMax, 2.0);
-                _logger.LogWarning(ex, "Registration attempt {Attempt} failed; retrying in {Delay}", attempt, delay);
-                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
-            }
+            _pcId = tokens.PcId;
+            await PersistPcIdAsync(tokens.PcId, cancellationToken).ConfigureAwait(false);
         }
     }
 

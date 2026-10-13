@@ -9,7 +9,7 @@ namespace ClubShell.Server.Tests;
 /// PC health (slice S5, DESIGN §8) on the fixture's clock with metrics seeded as the agent's telemetry stores them: the
 /// <see cref="HealthWorker"/> opens one ticket per PC and problem with the <c>hardware</c> event, escalates a medium one in
 /// place, takes a free PC with a serious problem out of service when <c>autoMaintenance</c> is on, and resolving that
-/// ticket puts the PC back; a problem fixed less than 6 h ago is not reopened.
+/// ticket puts the PC back (and closes the owner's re-enroll window, D-78); a problem fixed less than 6 h ago is not reopened.
 /// </summary>
 public sealed class HealthTests(LongClockServerFixture server) : IClassFixture<LongClockServerFixture>
 {
@@ -84,13 +84,19 @@ public sealed class HealthTests(LongClockServerFixture server) : IClassFixture<L
         report = await ExpectAsync(server, 200, HttpMethod.Get, "/health", cashier);
         Assert.Equal(("maintenance", true), (Pc(report, hot.PcId).GetProperty("status").GetString(), Pc(report, hot.PcId).GetProperty("ticket").GetProperty("autoMaintenance").GetBoolean()));
         Assert.Equal("offline", Pc(report, worn.PcId).GetProperty("status").GetString()); // offline, not free: left alone
+        Assert.True(await Players.ScalarAsync<bool>(server, "SELECT reenroll_until IS NULL FROM pcs WHERE id = @PcId", new { hot.PcId })); // only the owner opens it (D-78)
 
         var inWork = (await ExpectAsync(server, 200, HttpMethod.Patch, $"/health/tickets/{ticketId}", cashier, new { status = "inWork", note = "Чистка кулера" })).GetProperty("ticket");
         Assert.Equal(("inWork", "Чистка кулера", JsonValueKind.Null), (inWork.GetProperty("status").GetString(), inWork.GetProperty("note").GetString(), inWork.GetProperty("resolvedAt").ValueKind));
         Assert.True(await Players.ScalarAsync<bool>(server, "SELECT maintenance FROM pcs WHERE id = @PcId", new { hot.PcId }));
+
+        // The owner's «Обслуживание» on top opens the re-enroll window; the PC back in service closes it (D-78).
+        await ExpectAsync(server, 200, HttpMethod.Patch, $"/pcs/{hot.PcId}", owner, new { maintenance = true });
+        Assert.True(await Players.ScalarAsync<bool>(server, "SELECT reenroll_until IS NOT NULL FROM pcs WHERE id = @PcId", new { hot.PcId }));
         var resolved = (await ExpectAsync(server, 200, HttpMethod.Patch, $"/health/tickets/{ticketId}", cashier, new { status = "resolved", note = (string?)null })).GetProperty("ticket");
         Assert.Equal(("resolved", "Чистка кулера"), (resolved.GetProperty("status").GetString(), resolved.GetProperty("note").GetString()));
         Assert.False(await Players.ScalarAsync<bool>(server, "SELECT maintenance FROM pcs WHERE id = @PcId", new { hot.PcId }));
+        Assert.True(await Players.ScalarAsync<bool>(server, "SELECT reenroll_until IS NULL FROM pcs WHERE id = @PcId", new { hot.PcId }));
         Assert.Equal("inWork,resolved", await Players.ScalarAsync<string>(server,
             "SELECT string_agg(meta ->> 'status', ',' ORDER BY meta ->> 'status') FROM audit_entries WHERE action = 'pcCommand' AND pc_id = @PcId AND meta ->> 'kind' = 'repair'",
             new { hot.PcId }));

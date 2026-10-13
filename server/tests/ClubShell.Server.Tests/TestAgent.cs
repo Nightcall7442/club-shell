@@ -40,12 +40,32 @@ public sealed class TestAgent(ServerFixture server, JsonElement registration, st
         return server.Http.SendAsync(request);
     }
 
+    /// <summary>
+    /// <c>POST /agents/register</c> signed like the re-registration of an agent that holds <paramref name="secret"/> (D-78):
+    /// <paramref name="signedBody"/> signs another body, <paramref name="timestamp"/> defaults to the fixture clock.
+    /// </summary>
+    public static Task<HttpResponseMessage> RegisterSignedAsync(ServerFixture server, string body, byte[] secret, long? timestamp = null, string? signedBody = null)
+    {
+        const string target = "/api/v1/agents/register";
+        var ts = (timestamp ?? server.Clock.GetUtcNow().ToUnixTimeSeconds()).ToString(CultureInfo.InvariantCulture);
+        var request = new HttpRequestMessage(HttpMethod.Post, target) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+        request.Headers.Add(AgentAuthMiddleware.ClubKeyHeader, ServerFixture.ClubKey);
+        request.Headers.Add(RequestSignature.TimestampHeader, ts);
+        request.Headers.Add(RequestSignature.SignatureHeader, RequestSignature.Compute(
+            secret, ts, "POST", target, Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(signedBody ?? body)))));
+        return server.Http.SendAsync(request);
+    }
+
+    /// <summary>This PC registers again, proving its secret (or <paramref name="secret"/>) as agents from 1.0.18 do (D-78).</summary>
+    public Task<HttpResponseMessage> ReRegisterAsync(byte[]? secret = null, long? timestamp = null) =>
+        RegisterSignedAsync(server, RegisterBody(Hwid, RandomMac()), secret ?? Secret, timestamp);
+
     /// <summary>A contract-valid <c>AgentRegisterRequest</c>.</summary>
-    public static string RegisterBody(string hwid, string mac, Guid? previousPcId = null, string machineName = "CLUB-PC") => JsonSerializer.Serialize(new
+    public static string RegisterBody(string hwid, string mac, Guid? previousPcId = null, string machineName = "CLUB-PC", string agentVersion = "1.4.2") => JsonSerializer.Serialize(new
     {
         hwid,
         machineName,
-        agentVersion = "1.4.2",
+        agentVersion,
         hardware = new
         {
             cpu = new { model = "Ryzen 5 5600", cores = 6, threads = 12 },

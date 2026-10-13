@@ -1,11 +1,15 @@
 using System.Text.Json;
+using Dapper;
+using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 using static ClubShell.Server.Tests.Staff;
 
 namespace ClubShell.Server.Tests;
 
 /// <summary>
 /// The owner's staff editor (slice S5, DESIGN §3.5): owner only (<c>ck_</c> too), PIN 4–8 digits and unique on create and
-/// change, nobody disables themselves, disabling revokes the member's tokens for good.
+/// change, a new PIN signs the member out elsewhere (D-77; a sign-in with the old PIN racing the change too), nobody disables
+/// themselves, disabling revokes the member's tokens for good.
 /// </summary>
 public sealed class StaffAdminTests(ServerFixture server) : IClassFixture<ServerFixture>
 {
@@ -61,6 +65,75 @@ public sealed class StaffAdminTests(ServerFixture server) : IClassFixture<Server
         Assert.Equal(("active", "self"), Details(await ExpectAsync(server, 400, HttpMethod.Patch, $"/staff/{self}", owner, new { active = false })));
         Assert.Equal(2, await Players.ScalarAsync<int>(server, "SELECT count(*)::int FROM audit_entries WHERE action = 'staffUpdate' AND meta ->> 'staffId' = @id", new { id }));
         Assert.Equal(0, await Players.ScalarAsync<int>(server, "SELECT count(*)::int FROM audit_entries WHERE meta::text LIKE '%98765%' OR detail LIKE '%98765%'"));
+    }
+
+    [Fact]
+    public async Task A_new_pin_signs_the_member_out_elsewhere_and_an_owner_keeps_the_session_that_changed_their_own()
+    {
+        var owner = await LoginAsync(server, OwnerPin);
+        var cashierId = (await ExpectAsync(server, 200, HttpMethod.Post, "/staff", owner, new { name = "Смена PIN", role = "cashier", pin = "3141" })).GetProperty("id").GetString();
+        var desk = await LoginAsync(server, "3141");
+        var phone = await LoginAsync(server, "3141");
+
+        // The owner changes the cashier's PIN: whoever knew the old one is out, on every device (D-77).
+        await ExpectAsync(server, 200, HttpMethod.Patch, $"/staff/{cashierId}", owner, new { pin = "31415" });
+        foreach (var token in new[] { desk, phone })
+        {
+            using var response = await server.Http.SendAsync(Request(HttpMethod.Get, "/me", token));
+            await Contract.ReadErrorAsync(response, 401, "unauthorized", "invalid");
+        }
+
+        await ExpectAsync(server, 200, HttpMethod.Get, "/me", await LoginAsync(server, "31415"));
+
+        // An owner changes their own PIN: the session they did it from stays, their other one ends; a rename ends nothing.
+        var secondId = (await ExpectAsync(server, 200, HttpMethod.Post, "/staff", owner, new { name = "Второй владелец PIN", role = "owner", pin = "27182818" })).GetProperty("id").GetString();
+        var here = await LoginAsync(server, "27182818");
+        var there = await LoginAsync(server, "27182818");
+        await ExpectAsync(server, 200, HttpMethod.Patch, $"/staff/{secondId}", here, new { name = "Второй владелец" });
+        await ExpectAsync(server, 200, HttpMethod.Get, "/me", there);
+        await ExpectAsync(server, 200, HttpMethod.Patch, $"/staff/{secondId}", here, new { pin = "2718281" });
+        await ExpectAsync(server, 200, HttpMethod.Get, "/me", here);
+        using (var response = await server.Http.SendAsync(Request(HttpMethod.Get, "/me", there)))
+        {
+            await Contract.ReadErrorAsync(response, 401, "unauthorized", "invalid");
+        }
+
+        // Only the member's own tokens: the first owner's session is untouched.
+        await ExpectAsync(server, 200, HttpMethod.Get, "/me", owner);
+    }
+
+    [Fact]
+    public async Task A_sign_in_with_the_old_pin_racing_the_change_keeps_no_token()
+    {
+        // The change goes through the API key, whose check does not touch staff_tokens, which the test holds below.
+        var key = await ApiKeyAsync(server);
+        try
+        {
+            var id = (await ExpectAsync(server, 200, HttpMethod.Post, "/staff", key, new { name = "Гонка PIN", role = "cashier", pin = "60221" })).GetProperty("id").GetString();
+
+            // The sign-in has matched the old PIN and waits to store its token when the change starts: one must wait for the
+            // other, so that the change revokes the token or the sign-in reads the new PIN (D-77).
+            string token;
+            await using (var hold = await server.Services.GetRequiredService<NpgsqlDataSource>().OpenConnectionAsync())
+            await using (var tx = await hold.BeginTransactionAsync())
+            {
+                await hold.ExecuteAsync("LOCK TABLE staff_tokens IN EXCLUSIVE MODE", transaction: tx);
+                var signIn = LoginAsync(server, "60221");
+                await LockWaitsAsync(1);
+                var change = ExpectAsync(server, 200, HttpMethod.Patch, $"/staff/{id}", key, new { pin = "60222" });
+                await LockWaitsAsync(2);
+                await tx.CommitAsync();
+                token = await signIn;
+                await change;
+            }
+
+            using var response = await server.Http.SendAsync(Request(HttpMethod.Get, "/me", token));
+            await Contract.ReadErrorAsync(response, 401, "unauthorized", "invalid");
+        }
+        finally
+        {
+            await ClearApiKeyAsync(server);
+        }
     }
 
     [Fact]
@@ -190,6 +263,22 @@ public sealed class StaffAdminTests(ServerFixture server) : IClassFixture<Server
     }
 
     private Task<bool> ActiveAsync(Guid id) => Players.ScalarAsync<bool>(server, "SELECT active FROM staff WHERE id = @id", new { id });
+
+    /// <summary>Until <paramref name="count"/> statements of the fixture's database wait on a lock.</summary>
+    private async Task LockWaitsAsync(int count)
+    {
+        for (var i = 0; i < 200; i++)
+        {
+            if (await Players.ScalarAsync<int>(server, "SELECT count(*)::int FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'") >= count)
+            {
+                return;
+            }
+
+            await Task.Delay(25);
+        }
+
+        Assert.Fail($"{count} statements never waited on a lock");
+    }
 
     private const string StaffTokensName = Auth.StaffTokens.ApiKeyName;
 

@@ -44,15 +44,68 @@ public sealed class PcRow
     /// </summary>
     public PcStatus Status(bool connected, DateTimeOffset now, TimeSpan offlineAfter) =>
         Maintenance ? PcStatus.Maintenance
-        : !connected && (LastHeartbeatAt is not { } at || now - at >= offlineAfter) ? PcStatus.Offline
+        : Offline(connected, now, offlineAfter) ? PcStatus.Offline
         : OpenSessionState == "locked" ? PcStatus.Locked
         : OpenSessionState is not null ? PcStatus.Busy
         : PcStatus.Free;
+
+    /// <summary>No live socket and no heartbeat within <paramref name="offlineAfter"/>, maintenance or not (DESIGN §6.6).</summary>
+    public bool Offline(bool connected, DateTimeOffset now, TimeSpan offlineAfter) =>
+        !connected && (LastHeartbeatAt is not { } at || now - at >= offlineAfter);
 
     /// <summary>The wire <c>Pc</c>; <c>hwid</c> is set only for the PC itself.</summary>
     public Pc ToPc(PcStatus status, bool withHwid) => new(
         Id, Name, Zone, Number, withHwid ? Hwid : null, IpAddress, status, CurrentSessionId: OpenSessionId, AgentVersion,
         ShellVersion.Length > 0 ? ShellVersion : "0.0.0", LastHeartbeatAt ?? CreatedAt);
+}
+
+/// <summary>How <see cref="PcRepository.RegisterAsync"/> judged the proof of a re-registration (D-78).</summary>
+public enum ProofOutcome
+{
+    /// <summary>No proof needed: a new or pending PC, the first credentials after approval, or <see cref="RegisterProofMode.Off"/>.</summary>
+    NotNeeded,
+
+    /// <summary>Signed with the PC's secret: new tokens, the secret is kept.</summary>
+    Proven,
+
+    /// <summary><see cref="RegisterProofMode.Audit"/> without a valid proof: new credentials as before D-78.</summary>
+    Unproven,
+
+    /// <summary><see cref="RegisterProofMode.Enforce"/> without a valid proof, in the owner's window for an offline PC: new credentials.</summary>
+    Reenrolled,
+
+    /// <summary><see cref="RegisterProofMode.Enforce"/> without a valid proof otherwise: nothing written, no credentials.</summary>
+    Refused,
+}
+
+/// <summary>
+/// Outcome of <see cref="PcRepository.RegisterAsync"/>: no <see cref="RefreshToken"/> means no credentials (pending or
+/// <see cref="ProofOutcome.Refused"/>). <see cref="Problem"/> says why a proof failed: <c>none</c> | <c>mismatch</c> |
+/// <c>clockSkew</c> | <c>replay</c>.
+/// </summary>
+public sealed record RegisterResult(PcRow Pc, string? RefreshToken, ProofOutcome Proof, string? Problem);
+
+/// <summary>
+/// What <see cref="PcRepository.RegisterAsync"/> needs to judge a re-registration (D-78): the mode, the request's signature
+/// (<see langword="null"/> when unsigned), the replay log and whether a PC has a live socket.
+/// </summary>
+public sealed class RegisterProofGate(
+    RegisterProofMode mode, SignedRequest? proof, ReplayLog replays, TimeSpan window, Func<Guid, bool> connected, TimeSpan offlineAfter)
+{
+    public RegisterProofMode Mode => mode;
+
+    /// <summary><see langword="null"/> when the request is signed with <paramref name="secret"/>, in the window and not a repeat; else why not.</summary>
+    public string? Problem(Guid pcId, byte[] secret, DateTimeOffset now) =>
+        proof is null ? "none"
+        : RequestSignature.Check(proof, secret, window, now) switch
+        {
+            SignatureCheck.Ok => replays.Seen(pcId, proof.Timestamp, proof.Signature) ? "replay" : null,
+            SignatureCheck.Missing => "none",
+            SignatureCheck.ClockSkew => "clockSkew",
+            _ => "mismatch",
+        };
+
+    public bool Offline(PcRow pc, DateTimeOffset now) => pc.Offline(connected(pc.Id), now, offlineAfter);
 }
 
 /// <summary>Outcome of <see cref="PcRepository.RefreshAsync"/>; anything but <see cref="Ok"/> is a <c>401</c> reason.</summary>
@@ -95,9 +148,15 @@ public sealed class PcRepository(NpgsqlDataSource db, ILogger<PcRepository> logg
     /// always pending, it may only take the seat once approved. An approved PC gets a new signing secret,
     /// <c>credentials_version + 1</c> (every earlier token of the PC is revoked) and a fresh refresh token.
     /// A pending PC gets no credentials. A HWID of another club is <c>409 conflict</c>.
+    /// <para>
+    /// An approved PC that already holds a secret re-registers by <paramref name="gate"/> (D-78): with a valid proof it
+    /// keeps the secret (a lost response is retried with the same proof); without one, audit re-issues as above and
+    /// enforce writes nothing (<see cref="ProofOutcome.Refused"/>) unless the owner's re-enroll window is open and the PC
+    /// offline. Any new credentials close the window.
+    /// </para>
     /// </summary>
-    public async Task<(PcRow Pc, string? RefreshToken)> RegisterAsync(
-        Guid clubId, AgentRegisterRequest request, string mac, bool autoApprove, TimeSpan refreshTtl, DateTimeOffset now)
+    public async Task<RegisterResult> RegisterAsync(
+        Guid clubId, AgentRegisterRequest request, string mac, bool autoApprove, TimeSpan refreshTtl, DateTimeOffset now, RegisterProofGate gate)
     {
         await using var c = await db.OpenConnectionAsync();
         await using var tx = await c.BeginTransactionAsync();
@@ -107,6 +166,8 @@ public sealed class PcRepository(NpgsqlDataSource db, ILogger<PcRepository> logg
         var known = await c.QuerySingleOrDefaultAsync<PcRow>(
             $"SELECT {Columns} FROM pcs WHERE hwid = @hwid AND deleted_at IS NULL", new { hwid = request.Hwid }, tx);
         Guid id;
+        var proof = ProofOutcome.NotNeeded;
+        string? problem = null;
         if (known is not null)
         {
             if (known.ClubId != clubId)
@@ -115,6 +176,31 @@ public sealed class PcRepository(NpgsqlDataSource db, ILogger<PcRepository> logg
             }
 
             id = known.Id;
+
+            // The first credentials after the owner's approval (no secret yet, D-7) need no proof.
+            if (gate.Mode != RegisterProofMode.Off && known.Approved && known.SigningSecret is { } secret)
+            {
+                problem = gate.Problem(id, secret, now);
+                if (problem is null)
+                {
+                    proof = ProofOutcome.Proven;
+                }
+                else if (gate.Mode == RegisterProofMode.Audit)
+                {
+                    proof = ProofOutcome.Unproven;
+                }
+                else if (gate.Offline(known, now)
+                    && await c.ExecuteScalarAsync<bool>("SELECT coalesce(reenroll_until > @now, false) FROM pcs WHERE id = @id", new { id, now }, tx))
+                {
+                    proof = ProofOutcome.Reenrolled;
+                }
+                else
+                {
+                    // Nothing is written (the transaction rolls back): the PC keeps its inventory, tokens and socket.
+                    return new RegisterResult(known, null, ProofOutcome.Refused, problem);
+                }
+            }
+
             await c.ExecuteAsync(
                 """
                 UPDATE pcs SET machine_name = @machineName, mac_address = @mac, ip_address = @ip, hardware = @hardware::jsonb,
@@ -181,17 +267,19 @@ public sealed class PcRepository(NpgsqlDataSource db, ILogger<PcRepository> logg
         {
             await c.ExecuteAsync(
                 """
-                UPDATE pcs SET signing_secret = @secret, credentials_version = credentials_version + 1 WHERE id = @id;
+                UPDATE pcs SET signing_secret = CASE WHEN @keep THEN signing_secret ELSE @secret END,
+                               credentials_version = credentials_version + 1, reenroll_until = NULL
+                WHERE id = @id;
                 DELETE FROM agent_refresh_tokens WHERE pc_id = @id;
                 """,
-                new { id, secret = RandomNumberGenerator.GetBytes(32) },
+                new { id, keep = proof == ProofOutcome.Proven, secret = RandomNumberGenerator.GetBytes(32) },
                 tx);
             refresh = await IssueRefreshTokenAsync(c, tx, id, refreshTtl, now);
         }
 
         var pc = await c.QuerySingleAsync<PcRow>($"SELECT {Columns} FROM pcs WHERE id = @id", new { id }, tx);
         await tx.CommitAsync();
-        return (pc, refresh);
+        return new RegisterResult(pc, refresh, proof, problem);
     }
 
     /// <summary>

@@ -186,7 +186,10 @@ public static class PlatformEndpoints
         return AdminJson.Ok(new { owner = new PlatformOwner(staffId, name, true) }, StatusCodes.Status201Created);
     }
 
-    /// <summary>A forgotten owner PIN: new PIN, the owner active again, every earlier token of theirs revoked.</summary>
+    /// <summary>
+    /// A forgotten owner PIN: new PIN, the owner active again, every earlier token of theirs revoked, and the browsers they
+    /// signed in from last no longer trusted (D-76).
+    /// </summary>
     private static async Task<IResult> ResetPinAsync(Guid id, Guid staffId, [FromBody] JsonElement body, NpgsqlDataSource db, StaffTokens tokens, TimeProvider clock, ILogger<PlatformLog> logger)
     {
         var r = Api.Read<PlatformPinRequest>(body, "pin");
@@ -205,6 +208,7 @@ public static class PlatformEndpoints
         }
 
         await c.ExecuteAsync("UPDATE staff_tokens SET revoked_at = @now WHERE staff_id = @staffId AND revoked_at IS NULL", new { staffId, now }, tx);
+        await StaffLoginGuard.ForgetAsync(c, tx, id, staffId);
         await tx.CommitAsync();
         logger.LogInformation("Platform: PIN of owner {StaffId} of club {ClubId} reset", staffId, id);
         return AdminJson.Ok(new { ok = true });

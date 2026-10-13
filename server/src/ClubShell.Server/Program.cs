@@ -36,8 +36,13 @@ var connectionString = builder.Configuration.GetConnectionString("Club")
 var authOptions = builder.Configuration.GetSection("Auth").Get<AuthOptions>() ?? new AuthOptions();
 authOptions.SigningKeyPath = Path.Combine(builder.Environment.ContentRootPath, authOptions.SigningKeyPath);
 authOptions.PepperPath = Path.Combine(builder.Environment.ContentRootPath, authOptions.PepperPath);
+authOptions.OwnerPinPath = string.IsNullOrEmpty(authOptions.OwnerPinPath) ? "" : Path.Combine(builder.Environment.ContentRootPath, authOptions.OwnerPinPath);
 authOptions.PinAttempts = builder.Configuration.GetValue("RateLimit:PinAttempts", authOptions.PinAttempts);
 authOptions.PinWindowSec = builder.Configuration.GetValue("RateLimit:PinWindowSec", authOptions.PinWindowSec);
+authOptions.PinClubAttempts = builder.Configuration.GetValue("RateLimit:PinClubAttempts", authOptions.PinClubAttempts);
+authOptions.PinClubWindowSec = builder.Configuration.GetValue("RateLimit:PinClubWindowSec", authOptions.PinClubWindowSec);
+authOptions.PinTrustedAttempts = builder.Configuration.GetValue("RateLimit:PinTrustedAttempts", authOptions.PinTrustedAttempts);
+authOptions.PinDeviceTrustDays = builder.Configuration.GetValue("RateLimit:PinDeviceTrustDays", authOptions.PinDeviceTrustDays);
 var clubOptions = builder.Configuration.GetSection("Club").Get<ClubOptions>() ?? new ClubOptions();
 var proxyOptions = builder.Configuration.GetSection("Proxy").Get<ProxyOptions>() ?? new ProxyOptions();
 var agentOptions = builder.Configuration.GetSection("Agents").Get<AgentOptions>() ?? new AgentOptions();
@@ -81,6 +86,7 @@ builder.Services.AddSingleton<CommandRepository>();
 builder.Services.AddSingleton<AgentSocketHub>();
 builder.Services.AddSingleton<CommandDispatcher>();
 builder.Services.AddSingleton<UserTokens>();
+builder.Services.AddSingleton<StaffLoginGuard>();
 builder.Services.AddSingleton<StaffTokens>();
 builder.Services.AddSingleton<Pushes>();
 builder.Services.AddSingleton<SessionService>();
@@ -137,7 +143,8 @@ if (builder.Configuration.GetValue("Seed:Dev", false))
         seats: builder.Configuration.GetValue("Seed:DevPcs", false));
 }
 
-// After the dev seed: its staff fills the table, so no owner PIN is generated in Development.
+// After the dev seed: its staff fills the table, so no owner PIN is generated in Development. A Club:OwnerPin that is not
+// 4–8 digits, or a generated PIN that cannot be written, stops the start here (D-77).
 await staffTokens.EnsureOwnerAsync(builder.Configuration["Club:OwnerPin"]);
 
 if (proxyOptions.ClientIpHeader.Length > 0)
