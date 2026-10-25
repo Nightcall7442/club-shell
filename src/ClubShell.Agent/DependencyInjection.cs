@@ -321,6 +321,8 @@ public static class AgentServiceCollectionExtensions
         // Kiosk account first: PipeServer.StartAsync writes the Shell token ACL'd to the kiosk SID and the pipe DACL
         // grants that SID; without it a Shell launched by the watchdog could never connect. Hosted services start
         // sequentially in this order (ServicesStartConcurrently is off), so StartAsync completes before the next starts.
+        // Before it, paths.persistent gets its ACL: the kiosk password and the agent tokens are written there.
+        services.AddHostedService<PersistentStateDirectory>();
         services.AddHostedService(sp => sp.GetRequiredService<TempUserProvisioner>());
         services.AddHostedService(sp => sp.GetRequiredService<PipeServer>());
         services.AddHostedService(sp => sp.GetRequiredService<ServerConnection>());

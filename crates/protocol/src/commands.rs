@@ -1644,6 +1644,23 @@ pub struct HeartbeatGamesVolume {
     pub since: Option<DateTime<Utc>>,
 }
 
+/// Kiosk account in a heartbeat (`shell.kioskUser`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct HeartbeatKioskUser {
+    /// Account name.
+    pub name: String,
+    /// Provisioned: exists, enabled, a plain member of Users, password known to the Agent.
+    pub ready: bool,
+    /// Why it is not ready (`KioskUserProblems`); `null` when ready or not tried yet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub problem: Option<String>,
+    /// Privileged local groups the existing account belongs to
+    /// (`KioskUserProblems.PrivilegedAccount`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub privileged_groups: Option<Vec<String>>,
+}
+
 /// Response of `POST /agents/{pcId}/heartbeat`.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -1710,6 +1727,10 @@ pub struct HeartbeatRequest {
     /// Riot Vanguard and platform security state (omitted by older agents).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub anti_cheat: Option<HeartbeatAntiCheat>,
+    /// State of the kiosk account, so a PC whose kiosk cannot be provisioned is visible (omitted by
+    /// older agents).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kiosk_user: Option<HeartbeatKioskUser>,
 }
 
 wire_enum! {
@@ -1738,6 +1759,17 @@ pub struct KillGameCommand {
     pub pid: Option<i32>,
     /// Terminate immediately instead of a graceful close.
     pub force: bool,
+}
+
+/// Well-known values of `HeartbeatKioskUser.Problem`.
+pub mod kiosk_user_problems {
+    /// The existing account of that name is in Administrators or another privileged local group;
+    /// the Agent refuses to take it over.
+    pub const PRIVILEGED_ACCOUNT: &str = "privilegedAccount";
+    /// The account does not exist and `shell.kioskUser.createIfMissing` is off.
+    pub const MISSING: &str = "missing";
+    /// Provisioning failed for another reason (see the Agent log).
+    pub const PROVISIONING_FAILED: &str = "provisioningFailed";
 }
 
 /// Payload of `ServerCommandType.Lock`; also `shell.command{lock}` args.
@@ -3656,11 +3688,17 @@ mod tests {
                 secure_boot: None,
                 tpm: None,
             }),
+            kiosk_user: Some(HeartbeatKioskUser {
+                name: "club".into(),
+                ready: false,
+                problem: Some(kiosk_user_problems::PRIVILEGED_ACCOUNT.into()),
+                privileged_groups: Some(vec!["Administrators".into()]),
+            }),
         };
         let json = serde_json::to_string(&hb).unwrap();
         assert_eq!(
             json,
-            r#"{"status":"busy","currentSessionId":"00000000-0000-0000-0000-000000000000","agentVersion":"1.4.2","shellVersion":"1.4.2","uptimeSec":8123,"ipAddress":"10.0.1.12","policyVersion":12,"runningGames":[{"gameId":"00000000-0000-0000-0000-000000000000","pid":7788,"startedAt":"2026-09-21T10:21:00.000Z"}],"offlineQueue":0,"shellConnected":true,"gamesVolume":{"owner":"disklessHelper"},"antiCheat":{"vanguardInstalled":true}}"#
+            r#"{"status":"busy","currentSessionId":"00000000-0000-0000-0000-000000000000","agentVersion":"1.4.2","shellVersion":"1.4.2","uptimeSec":8123,"ipAddress":"10.0.1.12","policyVersion":12,"runningGames":[{"gameId":"00000000-0000-0000-0000-000000000000","pid":7788,"startedAt":"2026-09-21T10:21:00.000Z"}],"offlineQueue":0,"shellConnected":true,"gamesVolume":{"owner":"disklessHelper"},"antiCheat":{"vanguardInstalled":true},"kioskUser":{"name":"club","ready":false,"problem":"privilegedAccount","privilegedGroups":["Administrators"]}}"#
         );
         assert_eq!(serde_json::from_str::<HeartbeatRequest>(&json).unwrap(), hb);
         let res: HeartbeatResponse = serde_json::from_str(

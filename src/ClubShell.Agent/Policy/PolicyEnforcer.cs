@@ -246,7 +246,10 @@ public sealed class PolicyEnforcer : IPolicyEnforcer, IDisposable
         try
         {
             sid = string.IsNullOrWhiteSpace(_kiosk.Sid) ? null : _kiosk.Sid;
-            if (!string.IsNullOrWhiteSpace(_kiosk.UserName) && WtsSessions.FindByUser(_kiosk.UserName) is { } session)
+
+            // No SID means no kiosk account yet — possibly one refused because it is an administrator (SHELL_CHANGES 24):
+            // a session of that name is then not the kiosk's and gets no session-scoped rules.
+            if (sid is not null && !string.IsNullOrWhiteSpace(_kiosk.UserName) && WtsSessions.FindByUser(_kiosk.UserName) is { } session)
             {
                 sessionId = (int)session.Id;
             }

@@ -130,6 +130,42 @@ public sealed class FolderRedirect
         });
     }
 
+    /// <summary>
+    /// Empties the redirected folders under <paramref name="targetBase"/> (<c>Desktop</c>, <c>Documents</c>, ...): their
+    /// contents go, the folders stay so the registry keeps pointing at existing directories. A link inside is removed,
+    /// never followed. Anything else in <paramref name="targetBase"/> is left alone. Returns the number of entries that
+    /// could not be deleted (in use, access denied); they are logged.
+    /// </summary>
+    public int Clear(string targetBase)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetBase);
+        int failed = 0;
+        foreach ((_, string dirName) in Map.Values)
+        {
+            var folder = new DirectoryInfo(Path.Combine(targetBase, dirName));
+            if (!folder.Exists)
+            {
+                continue;
+            }
+
+            foreach (FileSystemInfo entry in folder.EnumerateFileSystemInfos())
+            {
+                try
+                {
+                    DeleteEntry(entry);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    failed++;
+                    _logger.LogWarning(ex, "Could not delete {Path} from a redirected folder", entry.FullName);
+                }
+            }
+        }
+
+        _logger.LogInformation("Redirected folders under {Base} emptied ({Failed} left behind)", targetBase, failed);
+        return failed;
+    }
+
     /// <summary>Creates <paramref name="path"/> and grants the user full control; with <paramref name="protect"/> inheritance is cut so only SYSTEM, Administrators and the user have access.</summary>
     public static void EnsureDirectory(string path, SecurityIdentifier user, bool protect)
     {
@@ -161,6 +197,25 @@ public sealed class FolderRedirect
             yield return (RegistryHive.Users, RegistryHelper.UserHiveKey(hiveKey, UserShellFoldersKey), name);
             yield return (RegistryHive.Users, RegistryHelper.UserHiveKey(hiveKey, ShellFoldersKey), name);
         }
+    }
+
+    /// <summary>Deletes a file or a directory tree; read-only attributes are cleared first and a link is removed without following it.</summary>
+    private static void DeleteEntry(FileSystemInfo entry)
+    {
+        if (entry is DirectoryInfo directory && !entry.Attributes.HasFlag(FileAttributes.ReparsePoint))
+        {
+            foreach (FileSystemInfo child in directory.EnumerateFileSystemInfos())
+            {
+                DeleteEntry(child);
+            }
+        }
+
+        if (entry.Attributes.HasFlag(FileAttributes.ReadOnly))
+        {
+            entry.Attributes &= ~FileAttributes.ReadOnly;
+        }
+
+        entry.Delete();
     }
 
     /// <summary>Runs <paramref name="action"/> against the live hive, or against a temporarily mounted NTUSER.DAT.</summary>

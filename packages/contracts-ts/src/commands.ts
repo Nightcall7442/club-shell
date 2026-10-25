@@ -1549,6 +1549,18 @@ export interface HeartbeatGamesVolume {
   since?: string | null;
 }
 
+/** Kiosk account in a heartbeat (`shell.kioskUser`). */
+export interface HeartbeatKioskUser {
+  /** Account name. */
+  name: string;
+  /** Provisioned: exists, enabled, a plain member of Users, password known to the Agent. */
+  ready: boolean;
+  /** Why it is not ready (`KioskUserProblems`); `null` when ready or not tried yet. */
+  problem?: string | null;
+  /** Privileged local groups the existing account belongs to (`KioskUserProblems.PrivilegedAccount`). */
+  privilegedGroups?: string[] | null;
+}
+
 /** Response of `POST /agents/{pcId}/heartbeat`. */
 export interface HeartbeatResponse {
   /** Server clock (used for offset correction). */
@@ -1603,6 +1615,8 @@ export interface HeartbeatRequest {
   gamesVolume?: HeartbeatGamesVolume | null;
   /** Riot Vanguard and platform security state (omitted by older agents). */
   antiCheat?: HeartbeatAntiCheat | null;
+  /** State of the kiosk account, so a PC whose kiosk cannot be provisioned is visible (omitted by older agents). */
+  kioskUser?: HeartbeatKioskUser | null;
 }
 
 /** Authentication level an IPC request requires (IPC_PROTOCOL.md §7 "auth" column). */
@@ -1628,6 +1642,21 @@ export interface KillGameCommand {
   /** Terminate immediately instead of a graceful close. */
   force: boolean;
 }
+
+/** Well-known values of `HeartbeatKioskUser.Problem`. */
+export const KioskUserProblems = {
+  /**
+   * The existing account of that name is in Administrators or another privileged local group; the Agent refuses to take
+   * it over.
+   */
+  PrivilegedAccount: 'privilegedAccount',
+  /** The account does not exist and `shell.kioskUser.createIfMissing` is off. */
+  Missing: 'missing',
+  /** Provisioning failed for another reason (see the Agent log). */
+  ProvisioningFailed: 'provisioningFailed',
+} as const;
+/** One of the {@link KioskUserProblems} values. */
+export type KioskUserProblem = (typeof KioskUserProblems)[keyof typeof KioskUserProblems];
 
 /** Payload of `ServerCommandType.Lock`; also `shell.command{lock}` args. */
 export interface LockCommand {

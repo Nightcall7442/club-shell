@@ -143,6 +143,14 @@ public sealed class ShellRegistry
         _logger.LogInformation("Auto-logon enabled for {Domain}\\{User}", domain, userName);
     }
 
+    /// <summary>
+    /// The password Winlogon will use for auto-logon: the LSA secret <c>DefaultPassword</c>, else a clear-text
+    /// <c>DefaultPassword</c> registry value (left by an image that set auto-logon by hand); <see langword="null"/> when neither exists.
+    /// </summary>
+    public string? GetAutoLogonPassword() =>
+        LsaSecrets.Retrieve(DefaultPasswordSecret)
+        ?? RegistryHelper.Get<string>(RegistryHive.LocalMachine, MachineWinlogonKey, "DefaultPassword");
+
     /// <summary>Disables auto-logon and removes the stored password (registry value and LSA secret).</summary>
     public void ClearAutoLogon()
     {
@@ -178,6 +186,45 @@ internal static class LsaSecrets
                 {
                     LSA_UNICODE_STRING valueString = Make(valueChars, value.Length);
                     ThrowIfFailed(Advapi32.LsaStorePrivateData(policy, &keyString, &valueString), nameof(Advapi32.LsaStorePrivateData));
+                }
+            }
+        }
+        finally
+        {
+            _ = Advapi32.LsaClose(policy);
+        }
+    }
+
+    /// <summary>The secret stored under <paramref name="key"/>, or <see langword="null"/> when there is none.</summary>
+    public static unsafe string? Retrieve(string key)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        const int ObjectNameNotFound = unchecked((int)0xC0000034);
+        LSA_OBJECT_ATTRIBUTES attributes = LSA_OBJECT_ATTRIBUTES.Create();
+        ThrowIfFailed(Advapi32.LsaOpenPolicy(0, ref attributes, NativeConst.POLICY_GET_PRIVATE_INFORMATION, out nint policy), nameof(Advapi32.LsaOpenPolicy));
+        try
+        {
+            fixed (char* keyChars = key)
+            {
+                LSA_UNICODE_STRING keyString = Make(keyChars, key.Length);
+                LSA_UNICODE_STRING* data = null;
+                int status = Advapi32.LsaRetrievePrivateData(policy, &keyString, &data);
+                if (status == ObjectNameNotFound)
+                {
+                    return null;
+                }
+
+                ThrowIfFailed(status, nameof(Advapi32.LsaRetrievePrivateData));
+                try
+                {
+                    return data is null || data->Length == 0 ? null : new string((char*)data->Buffer, 0, data->Length / sizeof(char));
+                }
+                finally
+                {
+                    if (data is not null)
+                    {
+                        _ = Advapi32.LsaFreeMemory((nint)data);
+                    }
                 }
             }
         }
