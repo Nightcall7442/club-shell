@@ -244,6 +244,9 @@ public static class IpcMessages
         /// <summary><see cref="SysUnlockAdminRequest"/> → <see cref="SysUnlockAdminResponse"/>.</summary>
         public const string UnlockAdmin = "sys.unlockAdmin";
 
+        /// <summary><see cref="SysAdminExitRequest"/> → <see cref="SysAdminExitResponse"/>.</summary>
+        public const string AdminExit = "sys.adminExit";
+
         /// <summary><see cref="SysLogClientErrorRequest"/> → <see cref="OkResponse"/>.</summary>
         public const string LogClientError = "sys.logClientError";
 
@@ -1097,6 +1100,21 @@ public sealed record SysUnlockAdminResponse(
     bool Ok,
     string AdminToken,
     DateTimeOffset ExpiresAt);
+
+/// <summary>
+/// Request of <c>sys.adminExit</c>, sent by the Shell right before it closes for an administrator (<c>kiosk_exit</c>): the
+/// Agent pauses the Shell watchdog for <paramref name="Minutes"/> (default 30, at most 480) instead of treating the exit
+/// as a crash; while the pause lasts USB storage works and the process deny-list is not enforced. The pause also ends
+/// when the kiosk session signs out or the PC restarts. <c>unauthorized</c> unless <paramref name="AdminToken"/> is an
+/// unexpired <c>sys.unlockAdmin</c> token.
+/// </summary>
+/// <param name="AdminToken">Token from <c>sys.unlockAdmin</c>.</param>
+/// <param name="Minutes">Length of the pause; <see langword="null"/> = the default.</param>
+public sealed record SysAdminExitRequest(string AdminToken, int? Minutes = null);
+
+/// <summary>Response of <c>sys.adminExit</c>.</summary>
+/// <param name="ResumeAt">When the watchdog starts the Shell again (unless the session changes first).</param>
+public sealed record SysAdminExitResponse(DateTimeOffset ResumeAt);
 
 /// <summary>Request of <c>sys.logClientError</c> (rate limited 10/s, silently dropped beyond).</summary>
 /// <param name="Level">Severity.</param>

@@ -42,6 +42,9 @@ foreach ($entry in $entries) {
     }
 }
 
+# USB storage back on (SHELL_CHANGES 28) even when the installer's own uninstall did not run: the policy's
+# USBSTOR Start=4 is machine-wide and outlives the agent.
+Set-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\USBSTOR' -Name Start -Value 3 -Type DWord -ErrorAction SilentlyContinue
 # Pilot helper task from enable-kiosk-autologon.ps1 (keeps the auto-logon domain); harmless when absent.
 Unregister-ScheduledTask -TaskPath '\ClubShell\' -TaskName 'AutoLogonDomain' -Confirm:$false -ErrorAction SilentlyContinue
 

@@ -212,6 +212,7 @@ public static class AgentServiceCollectionExtensions
         services.TryAddSingleton<ClubShell.Agent.Users.IProfileResetTrigger>(sp => sp.GetRequiredService<ProfileResetService>());
 
         services.TryAddSingleton<CrashRecovery>();
+        services.TryAddSingleton<AdminMaintenance>();
         services.TryAddSingleton<ShellLauncher>();
         services.TryAddSingleton<IShellRelauncher>(sp => sp.GetRequiredService<ShellLauncher>());
         services.TryAddSingleton<IKioskSessionLocator>(sp => sp.GetRequiredService<ShellLauncher>());
@@ -558,7 +559,10 @@ internal sealed class AntiCheatGameControlAdapter : IAntiCheatGameControl
 }
 
 /// <summary>
-/// Processes the allowlist enforcement must never touch: the Agent process, the kiosk Shell, and every running game.
+/// Processes the allowlist enforcement must never touch: the Agent process, the kiosk Shell, every running game and
+/// everything in a game's job object (its helpers and anti-cheat, started after the job was assigned). The children of
+/// the Agent and of a game are protected through <see cref="ProtectsChildrenOf"/>, the latter for a game whose job
+/// could not be assigned.
 /// Dependencies are held directly (neither depends on the allowlist module, so there is no cycle).
 /// </summary>
 [SupportedOSPlatform("windows")]
@@ -578,7 +582,30 @@ internal sealed class ProtectedProcessesAdapter : IProtectedProcesses
     public bool IsProtected(int pid) =>
         pid == Environment.ProcessId
         || pid == _launcher.Current?.Pid
-        || _games.Find(pid) is not null;
+        || _games.Find(pid) is not null
+        || InGameJob(pid);
+
+    public bool ProtectsChildrenOf(int pid) => pid == Environment.ProcessId || _games.Find(pid) is not null || InGameJob(pid);
+
+    private bool InGameJob(int pid)
+    {
+        foreach (GameLaunchRecord record in _games.All())
+        {
+            try
+            {
+                if (record.Job.IsInJob(pid))
+                {
+                    return true;
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+                // The game exited while we looked.
+            }
+        }
+
+        return false;
+    }
 }
 
 /// <summary>

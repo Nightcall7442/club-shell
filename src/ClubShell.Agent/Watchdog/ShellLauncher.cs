@@ -40,6 +40,7 @@ public sealed class ShellLauncher : IShellRelauncher, IKioskSessionLocator, IKio
     private readonly IKioskCredentials _kiosk;
     private readonly IOptionsMonitor<AgentSettings> _settings;
     private readonly IClock _clock;
+    private readonly AdminMaintenance _maintenance;
     private readonly ILogger<ShellLauncher> _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
@@ -56,17 +57,20 @@ public sealed class ShellLauncher : IShellRelauncher, IKioskSessionLocator, IKio
         IKioskCredentials kiosk,
         IOptionsMonitor<AgentSettings> settings,
         IClock clock,
+        AdminMaintenance maintenance,
         ILogger<ShellLauncher> logger)
     {
         ArgumentNullException.ThrowIfNull(processes);
         ArgumentNullException.ThrowIfNull(kiosk);
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(maintenance);
         ArgumentNullException.ThrowIfNull(logger);
         _processes = processes;
         _kiosk = kiosk;
         _settings = settings;
         _clock = clock;
+        _maintenance = maintenance;
         _logger = logger;
     }
 
@@ -92,8 +96,11 @@ public sealed class ShellLauncher : IShellRelauncher, IKioskSessionLocator, IKio
         }
     }
 
-    /// <summary><see langword="true"/> while automatic restarts are suspended (see <see cref="IShellRelauncher"/>).</summary>
-    public bool RestartsSuspended => _suspended;
+    /// <summary>
+    /// <see langword="true"/> while automatic restarts are suspended: by <see cref="IShellRelauncher"/> (profile reset,
+    /// Shell update) or by an administrator's maintenance window (<see cref="AdminMaintenance"/>, <c>sys.adminExit</c>).
+    /// </summary>
+    public bool RestartsSuspended => _suspended || _maintenance.IsActive;
 
     /// <inheritdoc />
     public string KioskUser => _kiosk.UserName;

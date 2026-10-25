@@ -374,13 +374,35 @@ public sealed class ProcessAllowlistTests
 
         result.Error.Should().BeNull();
         module.IsAllowed("CheatEngine.exe").Should().BeFalse();
-        module.IsAllowed(@"C:\Tools\cheat-o-matic\loader.exe").Should().BeFalse("the full path matches *cheat*");
+        module.IsAllowed(@"C:\Tools\cheat-o-matic\loader.exe").Should().BeTrue("a pattern without a separator matches the image name only");
+        module.IsAllowed(@"C:\Program Files (x86)\EasyAntiCheat\EasyAntiCheat.exe").Should().BeFalse("the image name itself matches *cheat*");
+        module.IsAllowed(@"G:\Games\Apex\EasyAntiCheat\start_protected_game.exe").Should().BeTrue("the folder name no longer counts");
         module.IsAllowed("CMD.EXE").Should().BeFalse();
         module.IsAllowed(@"C:\Windows\System32\wscript.exe").Should().BeFalse();
         module.IsAllowed(@"C:\Windows\SysWOW64\wscript.exe").Should().BeTrue("a full-path pattern only matches that path");
         module.IsAllowed(@"C:\Games\CS2\cs2.exe").Should().BeTrue();
         module.IsAllowed("chess.exe").Should().BeTrue();
     }
+
+    [Theory]
+    [InlineData("*cheat*", false)]
+    [InlineData("cmd.exe", false)]
+    [InlineData(@"C:\Games\**", true)]
+    [InlineData(@"*\Downloads\*.exe", true)]
+    [InlineData("G:/Steam/*", true)]
+    public void IsPathPattern_IsAPatternWithASeparator(string pattern, bool expected) =>
+        ProcessAllowlistModule.IsPathPattern(pattern).Should().Be(expected);
+
+    [Theory]
+    [InlineData("CN=Epic Games Inc., O=Epic Games Inc., L=Cary, S=North Carolina, C=US", "Epic Games Inc.")]
+    [InlineData("CN=BattlEye Innovations e.K., O=BattlEye Innovations e.K., L=Bad Hersfeld, C=DE", "BattlEye Innovations e.K.")]
+    [InlineData("CN=\"Riot Games, Inc.\", O=\"Riot Games, Inc.\", L=Los Angeles, S=California, C=US", "Riot Games, Inc.")]
+    [InlineData("CN=FACEIT LIMITED, O=FACEIT LIMITED, L=London, C=GB", "FACEIT LIMITED")]
+    [InlineData("CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US", null)]
+    [InlineData("CN=Cheat Engine, O=Cheat Engine", null)]
+    [InlineData("OU=Epic Games, CN=Someone Else", null)]
+    public void AntiCheatVendor_MatchesTheSignersNameOrOrganization(string subject, string? expected) =>
+        ProcessAllowlistModule.AntiCheatVendor(subject).Should().Be(expected);
 
     [WindowsFact]
     public async Task EmptyPatternList_AllowsEverything()
@@ -450,6 +472,65 @@ public sealed class ProcessAllowlistTests
             KillQuietly(guarded);
             KillQuietly(victim);
         }
+    }
+
+    [WindowsFact]
+    public async Task DenyMode_LeavesAGamesChildrenAndSignedAntiCheatAlone()
+    {
+        int session;
+        using (Process current = Process.GetCurrentProcess())
+        {
+            session = current.SessionId;
+        }
+
+        if (session <= 0)
+        {
+            return; // Session 0 (service host): the sweep is a no-op by design, nothing to observe.
+        }
+
+        using var dir = new TempDir();
+        string child = Path.Combine(dir.Root, "clubshell-allowlist-" + Guid.NewGuid().ToString("N") + ".exe");
+        string signed = Path.Combine(dir.Root, "clubshell-allowlist-" + Guid.NewGuid().ToString("N") + ".exe");
+        File.Copy(Path.Combine(Environment.SystemDirectory, "cmd.exe"), child);
+        File.Copy(Path.Combine(Environment.SystemDirectory, "cmd.exe"), signed);
+        using Process gameChild = Spawn(child);
+        using Process antiCheat = Spawn(signed);
+        try
+        {
+            // This test process plays the running game: everything it starts is the game's.
+            var games = new GameParent(Environment.ProcessId);
+            using var watcher = new ProcessWatcher();
+            using var module = new ProcessAllowlistModule(watcher, new ProcessKiller(), [games], SystemClock.Instance, NullLogger<ProcessAllowlistModule>.Instance)
+            {
+                VerifiedSigner = path => string.Equals(path, signed, StringComparison.OrdinalIgnoreCase) ? "CN=Epic Games Inc., O=Epic Games Inc." : null,
+            };
+            PcPolicy policy = PolicyFactory.Create(allowlist: new ProcessAllowlistPolicy(AllowlistMode.Deny, [Path.GetFileName(child), Path.GetFileName(signed)]));
+            PolicyModuleResult result = await module.ApplyAsync(policy, new PolicyContext(null, session), CancellationToken.None);
+
+            result.Error.Should().BeNull();
+            await Task.Delay(TimeSpan.FromSeconds(1));
+            gameChild.HasExited.Should().BeFalse("a running game's children are left alone");
+            games.Running = false;
+            await module.ApplyAsync(policy, new PolicyContext(null, session), CancellationToken.None);
+            using var exit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await gameChild.WaitForExitAsync(exit.Token);
+            antiCheat.HasExited.Should().BeFalse("a file signed by an anti-cheat vendor is left alone");
+        }
+        finally
+        {
+            KillQuietly(gameChild);
+            KillQuietly(antiCheat);
+        }
+    }
+
+    /// <summary>A running game whose children are protected while <see cref="Running"/>.</summary>
+    private sealed class GameParent(int pid) : IProtectedProcesses
+    {
+        public bool Running { get; set; } = true;
+
+        public bool IsProtected(int candidate) => false;
+
+        public bool ProtectsChildrenOf(int candidate) => Running && candidate == pid;
     }
 
     private static Process Spawn(string exe)

@@ -5,6 +5,7 @@ using System.Runtime.Versioning;
 using System.Security.Principal;
 using System.Text.RegularExpressions;
 
+using ClubShell.Agent.Watchdog;
 using ClubShell.Contracts.Pcs;
 using ClubShell.Core.Abstractions;
 using ClubShell.Windows.Processes;
@@ -19,6 +20,13 @@ public interface IProtectedProcesses
 {
     /// <summary><see langword="true"/> when <paramref name="pid"/> must be left alone.</summary>
     bool IsProtected(int pid);
+
+    /// <summary>
+    /// <see langword="true"/> when the processes <paramref name="pid"/> starts must be left alone too: the Agent's own
+    /// helpers (the clipboard clear runs <c>cmd.exe</c> in the player's session), a running game's helpers and
+    /// anti-cheat. Not the Shell's: a file dialog there would hand the player a <c>cmd.exe</c> nothing kills.
+    /// </summary>
+    bool ProtectsChildrenOf(int pid) => false;
 }
 
 /// <summary>A process killed by the allow-list (audit).</summary>
@@ -30,12 +38,16 @@ public interface IProtectedProcesses
 public sealed record ProcessBlockedEvent(int Pid, string Name, string? Path, string Rule, DateTimeOffset At);
 
 /// <summary>
-/// Section <c>processAllowlist</c>: wildcard patterns (<c>*cheat*</c>, <c>cmd.exe</c>, <c>C:\Games\*</c>) matched
-/// case-insensitively against the image name and the full path. In <see cref="AllowlistMode.Allow"/> only matching
-/// processes may run, in <see cref="AllowlistMode.Deny"/> matching processes are killed. Applies to the kiosk WTS
-/// session only (never session 0), sweeps already-running processes on apply and watches
-/// <see cref="ProcessWatcher.ProcessStarted"/> afterwards. <see cref="ProcessKiller.SystemCritical"/>, the Agent and
-/// every <see cref="IProtectedProcesses"/> pid are exempt. <see cref="IsAllowed"/> is the same check for launch requests.
+/// Section <c>processAllowlist</c>: wildcard patterns matched case-insensitively — a pattern with a path separator
+/// (<c>C:\Games\*</c>, <c>*\Downloads\*.exe</c>) against the full path, any other (<c>*cheat*</c>, <c>cmd.exe</c>) against
+/// the image name only, so <c>*cheat*</c> no longer hits every exe in an <c>EasyAntiCheat</c> folder. In
+/// <see cref="AllowlistMode.Allow"/> only matching processes may run, in <see cref="AllowlistMode.Deny"/> matching
+/// processes are killed. Applies to the kiosk WTS session only (never session 0), sweeps already-running processes on
+/// apply and watches <see cref="ProcessWatcher.ProcessStarted"/> afterwards. Exempt: <see cref="ProcessKiller.SystemCritical"/>,
+/// the Agent, every <see cref="IProtectedProcesses"/> pid and the children of a pid it
+/// <see cref="IProtectedProcesses.ProtectsChildrenOf">protects with its children</see> (the Agent's and a game's helpers), and files
+/// whose Authenticode signature verifies to an anti-cheat vendor (<see cref="AntiCheatSigners"/>).
+/// <see cref="IsAllowed"/> is the same pattern check for launch requests.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class ProcessAllowlistModule : IPolicyModule, IDisposable
@@ -43,24 +55,42 @@ public sealed class ProcessAllowlistModule : IPolicyModule, IDisposable
     /// <summary>Section key.</summary>
     public const string SectionKey = "processAllowlist";
 
+    /// <summary>
+    /// Anti-cheat vendors whose signed files are never killed, matched as a prefix of the signing certificate's
+    /// <c>CN</c> or <c>O</c>: Easy Anti-Cheat (Epic Games, formerly Kamu / EasyAntiCheat Oy), BattlEye, Riot Vanguard,
+    /// FACEIT, PunkBuster (Even Balance), XIGNCODE (Wellbia) and nProtect GameGuard (INCA Internet).
+    /// </summary>
+    public static IReadOnlyList<string> AntiCheatSigners { get; } =
+    [
+        "Epic Games", "EasyAntiCheat", "Kamu", "BattlEye Innovations", "Riot Games", "FACEIT", "Even Balance", "Wellbia", "INCA Internet",
+    ];
+
+    private const int SignerCacheLimit = 512;
+
     private readonly ProcessWatcher _watcher;
     private readonly ProcessKiller _killer;
     private readonly IProtectedProcesses[] _protected;
     private readonly IClock _clock;
+    private readonly AdminMaintenance? _maintenance;
     private readonly ILogger<ProcessAllowlistModule> _logger;
     private readonly ConcurrentDictionary<string, Regex> _regexCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, SignerCheck> _signers = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _gate = new();
     private Ruleset? _rules;
     private bool _subscribed;
     private bool _disposed;
 
-    /// <summary>Creates the module; <paramref name="watcher"/> is shared and not disposed here.</summary>
+    /// <summary>
+    /// Creates the module; <paramref name="watcher"/> is shared and not disposed here. While an administrator's
+    /// <paramref name="maintenance"/> window is open nothing is killed; when it ends the session is swept again.
+    /// </summary>
     public ProcessAllowlistModule(
         ProcessWatcher watcher,
         ProcessKiller killer,
         IEnumerable<IProtectedProcesses> protectedProcesses,
         IClock clock,
-        ILogger<ProcessAllowlistModule> logger)
+        ILogger<ProcessAllowlistModule> logger,
+        AdminMaintenance? maintenance = null)
     {
         ArgumentNullException.ThrowIfNull(protectedProcesses);
         _watcher = watcher;
@@ -68,10 +98,18 @@ public sealed class ProcessAllowlistModule : IPolicyModule, IDisposable
         _protected = protectedProcesses.ToArray();
         _clock = clock;
         _logger = logger;
+        _maintenance = maintenance;
+        if (maintenance is not null)
+        {
+            maintenance.Changed += OnMaintenanceChanged;
+        }
     }
 
     /// <summary>A process was killed by the allow-list.</summary>
     public event EventHandler<ProcessBlockedEvent>? ProcessBlocked;
+
+    /// <summary>Subject of the verified Authenticode signer of a file, or <see langword="null"/>; replaceable for tests.</summary>
+    public Func<string, string?> VerifiedSigner { get; set; } = Authenticode.VerifiedSigner;
 
     /// <inheritdoc />
     public string Section => SectionKey;
@@ -94,7 +132,7 @@ public sealed class ProcessAllowlistModule : IPolicyModule, IDisposable
         cancellationToken.ThrowIfCancellationRequested();
         ProcessAllowlistPolicy allowlist = policy.ProcessAllowlist;
         var notes = new List<string>();
-        var compiled = new List<(string Pattern, Regex Regex)>(allowlist.Patterns.Count);
+        var compiled = new List<Rule>(allowlist.Patterns.Count);
         foreach (string pattern in allowlist.Patterns)
         {
             if (string.IsNullOrWhiteSpace(pattern))
@@ -104,7 +142,7 @@ public sealed class ProcessAllowlistModule : IPolicyModule, IDisposable
 
             try
             {
-                compiled.Add((pattern, _regexCache.GetOrAdd(pattern, static p => ProcessKiller.WildcardToRegex(p))));
+                compiled.Add(new Rule(pattern, _regexCache.GetOrAdd(pattern, static p => ProcessKiller.WildcardToRegex(p)), IsPathPattern(pattern)));
             }
             catch (ArgumentException ex)
             {
@@ -150,6 +188,11 @@ public sealed class ProcessAllowlistModule : IPolicyModule, IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
+        if (_maintenance is not null)
+        {
+            _maintenance.Changed -= OnMaintenanceChanged;
+        }
+
         Unsubscribe();
         lock (_gate)
         {
@@ -183,12 +226,12 @@ public sealed class ProcessAllowlistModule : IPolicyModule, IDisposable
         }
 
         string name = Path.GetFileName(path);
-        foreach ((string pattern, Regex regex) in rules.Patterns)
+        foreach ((string pattern, Regex regex, bool matchesPath) in rules.Patterns)
         {
             bool match;
             try
             {
-                match = regex.IsMatch(name) || regex.IsMatch(path);
+                match = regex.IsMatch(matchesPath ? path : name);
             }
             catch (RegexMatchTimeoutException)
             {
@@ -218,6 +261,7 @@ public sealed class ProcessAllowlistModule : IPolicyModule, IDisposable
             return 0;
         }
 
+        Dictionary<int, int> parents = ParentsByPid();
         int killed = 0;
         foreach (Process process in Process.GetProcesses())
         {
@@ -230,7 +274,8 @@ public sealed class ProcessAllowlistModule : IPolicyModule, IDisposable
                         continue;
                     }
 
-                    if (Consider(process.Id, process.ProcessName + ".exe", TryGetPath(process)))
+                    int? parent = parents.TryGetValue(process.Id, out int p) ? p : null;
+                    if (Consider(process.Id, process.ProcessName + ".exe", TryGetPath(process), parent))
                     {
                         killed++;
                     }
@@ -247,6 +292,24 @@ public sealed class ProcessAllowlistModule : IPolicyModule, IDisposable
         }
 
         return killed;
+    }
+
+    private static Dictionary<int, int> ParentsByPid()
+    {
+        try
+        {
+            var parents = new Dictionary<int, int>();
+            foreach (ProcessSnapshotEntry entry in ProcessKiller.Snapshot())
+            {
+                parents[entry.Pid] = entry.ParentPid;
+            }
+
+            return parents;
+        }
+        catch (Win32Exception)
+        {
+            return [];
+        }
     }
 
     private static string? TryGetPath(Process process)
@@ -266,7 +329,7 @@ public sealed class ProcessAllowlistModule : IPolicyModule, IDisposable
     }
 
     /// <summary>Kills <paramref name="pid"/> when the rules say so; <see langword="true"/> when it was killed.</summary>
-    private bool Consider(int pid, string name, string? path)
+    private bool Consider(int pid, string name, string? path, int? parentPid)
     {
         if (pid <= 4 || pid == Environment.ProcessId || ProcessKiller.SystemCritical.Contains(name))
         {
@@ -278,13 +341,16 @@ public sealed class ProcessAllowlistModule : IPolicyModule, IDisposable
             return false;
         }
 
-        foreach (IProtectedProcesses source in _protected)
+        if (_maintenance?.IsActive == true)
         {
-            if (source.IsProtected(pid))
-            {
-                _logger.LogDebug("Allow-list would block {Name} ({Pid}) but it is protected", name, pid);
-                return false;
-            }
+            _logger.LogInformation("Allow-list leaves {Name} ({Pid}) alone: administrator maintenance", name, pid);
+            return false;
+        }
+
+        if (Exemption(pid, parentPid, path) is { } why)
+        {
+            _logger.LogDebug("Allow-list would block {Name} ({Pid}) but {Reason}", name, pid, why);
+            return false;
         }
 
         KilledProcess? killed = _killer.KillProcess(pid, TimeSpan.Zero);
@@ -297,6 +363,117 @@ public sealed class ProcessAllowlistModule : IPolicyModule, IDisposable
         _logger.LogWarning("Process allow-list killed {Name} ({Pid}) path={Path} rule={Rule}", name, pid, path, reason);
         ProcessBlocked?.Invoke(this, new ProcessBlockedEvent(pid, name, path, reason, _clock.UtcNow));
         return true;
+    }
+
+    /// <summary>Why a process the rules block is still left alone, or <see langword="null"/> when it is not.</summary>
+    private string? Exemption(int pid, int? parentPid, string? path)
+    {
+        foreach (IProtectedProcesses source in _protected)
+        {
+            if (source.IsProtected(pid))
+            {
+                return "it is protected";
+            }
+        }
+
+        if (parentPid is { } parent && parent > 4)
+        {
+            foreach (IProtectedProcesses source in _protected)
+            {
+                if (source.ProtectsChildrenOf(parent))
+                {
+                    return $"its parent {parent} is the Agent or a running game";
+                }
+            }
+        }
+
+        return path is not null && AntiCheatSigner(path) is { } signer ? $"it is signed by {signer}" : null;
+    }
+
+    /// <summary>The anti-cheat vendor that signed <paramref name="path"/>, cached per file version (path, size, write time).</summary>
+    private string? AntiCheatSigner(string path)
+    {
+        long length;
+        DateTime written;
+        try
+        {
+            var file = new FileInfo(path);
+            if (!file.Exists)
+            {
+                return null;
+            }
+
+            length = file.Length;
+            written = file.LastWriteTimeUtc;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return null;
+        }
+
+        if (_signers.TryGetValue(path, out SignerCheck? cached) && cached.Length == length && cached.Written == written)
+        {
+            return cached.Vendor;
+        }
+
+        string? vendor = null;
+        try
+        {
+            vendor = VerifiedSigner(path) is { } subject ? AntiCheatVendor(subject) : null;
+        }
+        catch (Exception ex) when (ex is Win32Exception or ArgumentException or IOException or UnauthorizedAccessException)
+        {
+            _logger.LogDebug(ex, "Signature check of {Path} failed", path);
+        }
+
+        if (_signers.Count >= SignerCacheLimit)
+        {
+            _signers.Clear();
+        }
+
+        _signers[path] = new SignerCheck(length, written, vendor);
+        return vendor;
+    }
+
+    /// <summary>The <see cref="AntiCheatSigners"/> entry a certificate subject belongs to, or <see langword="null"/>.</summary>
+    public static string? AntiCheatVendor(string subject)
+    {
+        ArgumentNullException.ThrowIfNull(subject);
+        foreach (string name in Authenticode.NamesOf(subject))
+        {
+            foreach (string vendor in AntiCheatSigners)
+            {
+                if (name.StartsWith(vendor, StringComparison.OrdinalIgnoreCase))
+                {
+                    return name;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary><see langword="true"/> for a pattern matched against the full path: one with a path separator.</summary>
+    public static bool IsPathPattern(string pattern) =>
+        pattern.Contains('\\', StringComparison.Ordinal) || pattern.Contains('/', StringComparison.Ordinal);
+
+    /// <summary>When a maintenance window ends, what the administrator left running in the kiosk session is swept.</summary>
+    private void OnMaintenanceChanged(object? sender, bool active)
+    {
+        if (active || _rules is not { Patterns.Length: > 0 } rules)
+        {
+            return;
+        }
+
+        try
+        {
+            int killed = Sweep(rules);
+            _logger.LogInformation("Allow-list sweep after maintenance killed {Count} process(es)", killed);
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+        {
+            _logger.LogWarning(ex, "Allow-list sweep after maintenance failed");
+        }
     }
 
     private void OnProcessStarted(object? sender, ProcessStartedEventArgs e)
@@ -314,7 +491,7 @@ public sealed class ProcessAllowlistModule : IPolicyModule, IDisposable
 
         try
         {
-            _ = Consider(e.Pid, e.Name, e.Path);
+            _ = Consider(e.Pid, e.Name, e.Path, e.ParentPid);
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or ArgumentException)
         {
@@ -358,5 +535,10 @@ public sealed class ProcessAllowlistModule : IPolicyModule, IDisposable
         }
     }
 
-    private sealed record Ruleset(AllowlistMode Mode, (string Pattern, Regex Regex)[] Patterns, int? SessionId, string? KioskSid);
+    private sealed record Ruleset(AllowlistMode Mode, Rule[] Patterns, int? SessionId, string? KioskSid);
+
+    /// <summary>A compiled pattern; <paramref name="MatchesPath"/> when it is matched against the full path instead of the image name.</summary>
+    private sealed record Rule(string Pattern, Regex Regex, bool MatchesPath);
+
+    private sealed record SignerCheck(long Length, DateTime Written, string? Vendor);
 }

@@ -330,6 +330,8 @@ export interface Db {
   configVersion: number;
   catalogVersion: string;
   policy: Policy;
+  /** The owner saved the club's own policy (SHELL_CHANGES 27); a reseed leaves it alone. Absent in older files: false. */
+  policyCustom?: boolean;
   pcs: PcRecord[];
   users: UserRecord[];
   games: Game[];
@@ -1657,7 +1659,7 @@ function seedAchievements(t0: number, users: UserRecord[]): Record<string, Achie
   return out;
 }
 
-function seedPolicy(): Policy {
+export function seedPolicy(): Policy {
   const file = new URL('../../../config/policies.example.json', import.meta.url);
   return JSON.parse(readFileSync(file, 'utf8')) as Policy;
 }

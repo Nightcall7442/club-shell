@@ -644,6 +644,8 @@ export const IpcNames = {
     SetLocale: 'sys.setLocale',
     /** `SysUnlockAdminRequest` → `SysUnlockAdminResponse`. */
     UnlockAdmin: 'sys.unlockAdmin',
+    /** `SysAdminExitRequest` → `SysAdminExitResponse`. */
+    AdminExit: 'sys.adminExit',
     /** `SysLogClientErrorRequest` → `OkResponse`. */
     LogClientError: 'sys.logClientError',
     /** `SysAckAdminMessageRequest` → `OkResponse`. */
@@ -991,6 +993,25 @@ export interface ShopProductsResponse {
 export interface SysAckAdminMessageRequest {
   /** Id of the acknowledged `AdminMessage`. */
   id: string;
+}
+
+/**
+ * Request of `sys.adminExit`, sent by the Shell right before it closes for an administrator (`kiosk_exit`): the Agent
+ * pauses the Shell watchdog for `minutes` (default 30, at most 480) instead of treating the exit as a crash; while the
+ * pause lasts USB storage works and the process deny-list is not enforced. The pause also ends when the kiosk session
+ * signs out or the PC restarts. `unauthorized` unless `adminToken` is an unexpired `sys.unlockAdmin` token.
+ */
+export interface SysAdminExitRequest {
+  /** Token from `sys.unlockAdmin`. */
+  adminToken: string;
+  /** Length of the pause; `null` = the default. */
+  minutes?: number | null;
+}
+
+/** Response of `sys.adminExit`. */
+export interface SysAdminExitResponse {
+  /** When the watchdog starts the Shell again (unless the session changes first). */
+  resumeAt: string;
 }
 
 /** Request of `sys.callAdmin` (rate limited 1 per 30 s). */
@@ -1341,6 +1362,8 @@ export const AgentCommand = {
   SysSetLocale: 'sys.setLocale',
   /** `sys.unlockAdmin` */
   SysUnlockAdmin: 'sys.unlockAdmin',
+  /** `sys.adminExit` */
+  SysAdminExit: 'sys.adminExit',
   /** `sys.logClientError` */
   SysLogClientError: 'sys.logClientError',
   /** `sys.ackAdminMessage` */
@@ -2556,6 +2579,7 @@ export interface IpcRequestMap {
   [IpcNames.Sys.SetVolume]: { request: SetVolumeRequest; response: VolumeState };
   [IpcNames.Sys.SetLocale]: { request: SysSetLocaleRequest; response: SysSetLocaleResponse };
   [IpcNames.Sys.UnlockAdmin]: { request: SysUnlockAdminRequest; response: SysUnlockAdminResponse };
+  [IpcNames.Sys.AdminExit]: { request: SysAdminExitRequest; response: SysAdminExitResponse };
   [IpcNames.Sys.LogClientError]: { request: SysLogClientErrorRequest; response: OkResponse };
   [IpcNames.Sys.AckAdminMessage]: { request: SysAckAdminMessageRequest; response: OkResponse };
   [IpcNames.Policy.Get]: { request: null; response: Policy };

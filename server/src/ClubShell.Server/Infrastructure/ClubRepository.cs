@@ -152,7 +152,8 @@ public sealed class ClubRepository(NpgsqlDataSource db, TimeProvider clock)
 
     /// <summary>
     /// Seed of the policy (DESIGN §12 D-14): every club whose stored policy differs from <paramref name="seed"/> (ignoring
-    /// <c>version</c>/<c>updatedAt</c>) gets it with <c>policy_version + 1</c>. The document is stored as the contract
+    /// <c>version</c>/<c>updatedAt</c>) gets it with <c>policy_version + 1</c>, except a club whose owner saved its own
+    /// policy (<c>policy_custom</c>, SHELL_CHANGES 27). The document is stored as the contract
     /// <see cref="Policy"/> serializes it, so what the agent reads back always parses. Returns the clubs that changed.
     /// ponytail: agents learn a reseed from the heartbeat; the <c>reloadPolicy</c> push to connected PCs comes with a
     /// runtime reload (none in v1: the seed is read at start, when no PC is connected).
@@ -163,18 +164,14 @@ public sealed class ClubRepository(NpgsqlDataSource db, TimeProvider clock)
         await using var tx = await c.BeginTransactionAsync(cancellationToken);
         var now = clock.GetUtcNow();
         var changed = 0;
-        foreach (var (id, version, json) in await c.QueryAsync<(Guid, int, string?)>("SELECT id, policy_version, policy::text FROM clubs FOR UPDATE", transaction: tx))
+        foreach (var (id, version, json) in await c.QueryAsync<(Guid, int, string?)>("SELECT id, policy_version, policy::text FROM clubs WHERE NOT policy_custom FOR UPDATE", transaction: tx))
         {
             if (json is not null && Normalized(JsonDefaults.Deserialize<Policy>(json)!) == Normalized(seed))
             {
                 continue;
             }
 
-            var next = version + 1;
-            await c.ExecuteAsync(
-                "UPDATE clubs SET policy = @policy::jsonb, policy_version = @next, updated_at = @now WHERE id = @id",
-                new { id, next, now, policy = JsonDefaults.Serialize(seed with { Version = next, UpdatedAt = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerMillisecond)) }) },
-                tx);
+            await StorePolicyAsync(c, tx, id, version, seed, custom: false, now);
             changed++;
         }
 
@@ -182,6 +179,20 @@ public sealed class ClubRepository(NpgsqlDataSource db, TimeProvider clock)
         return changed;
 
         static string Normalized(Policy policy) => JsonDefaults.Serialize(policy with { Version = 0, UpdatedAt = default });
+    }
+
+    /// <summary>
+    /// Writes <paramref name="policy"/> as the club's policy with <c>policy_version = <paramref name="version"/> + 1</c> and
+    /// <c>updatedAt</c> = <paramref name="now"/> (to the millisecond), and whether it is the club's own; returns the stored document.
+    /// </summary>
+    public static async Task<Policy> StorePolicyAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid clubId, int version, Policy policy, bool custom, DateTimeOffset now)
+    {
+        var stored = policy with { Version = version + 1, UpdatedAt = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerMillisecond)) };
+        await c.ExecuteAsync(
+            "UPDATE clubs SET policy = @policy::jsonb, policy_version = @next, policy_custom = @custom, updated_at = @now WHERE id = @clubId",
+            new { clubId, next = stored.Version, custom, now, policy = JsonDefaults.Serialize(stored) },
+            tx);
+        return stored;
     }
 
     /// <summary>The club whose current or previous enrollment key is <paramref name="key"/> (constant-time compare).</summary>

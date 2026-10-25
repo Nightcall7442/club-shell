@@ -661,7 +661,8 @@ unless the key ends with `Ms`.
     "enabled": true,
     "blockedDomains": ["*.torrent-site.example"],
     "allowedDomains": [],                         // non-empty = allow-list mode
-    "dnsServers": ["1.1.1.3", "1.0.0.3"],
+    "dnsServers": [],                             // empty = DNS stays as DHCP gives it; ["1.1.1.3", "1.0.0.3"]
+                                                  // = Cloudflare for Families on every physical adapter
     "blockResolvedIps": false,                    // optional; true = also firewall the IPs blocked domains resolve to
     "protectedDomains": []                        // optional; never blocked, on top of the built-in launcher/anti-cheat
                                                   // list and the host of server.baseUrl

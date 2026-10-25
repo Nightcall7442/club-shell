@@ -217,16 +217,54 @@ public sealed class GameDetector
     {
         var libraries = new List<string>();
         string? root = SteamRoot();
-        if (root is null)
+        if (root is not null)
         {
-            return libraries;
+            libraries.Add(root);
+            AddSteamLibraryFolders(root, libraries);
         }
 
-        libraries.Add(root);
+        // A library root that is itself a Steam library (G:\Steam, G:\SteamLibrary) counts even when the client's
+        // libraryfolders.vdf does not list it: the games disk of a club PC is a copy made elsewhere (SHELL_CHANGES 31).
+        foreach (string library in SteamLibrariesIn(_settings.CurrentValue.Games.LibraryRoots, Directory.Exists))
+        {
+            if (!libraries.Contains(library, StringComparer.OrdinalIgnoreCase))
+            {
+                libraries.Add(library);
+            }
+        }
+
+        return libraries;
+    }
+
+    /// <summary>The <paramref name="roots"/> that hold a Steam library (a <c>steamapps</c> folder), as full paths.</summary>
+    public static IReadOnlyList<string> SteamLibrariesIn(IEnumerable<string> roots, Func<string, bool> directoryExists)
+    {
+        ArgumentNullException.ThrowIfNull(roots);
+        ArgumentNullException.ThrowIfNull(directoryExists);
+        var libraries = new List<string>();
+        foreach (string root in roots)
+        {
+            if (string.IsNullOrWhiteSpace(root))
+            {
+                continue;
+            }
+
+            string full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+            if (directoryExists(Path.Combine(full, "steamapps")) && !libraries.Contains(full, StringComparer.OrdinalIgnoreCase))
+            {
+                libraries.Add(full);
+            }
+        }
+
+        return libraries;
+    }
+
+    private void AddSteamLibraryFolders(string root, List<string> libraries)
+    {
         string vdf = Path.Combine(root, "steamapps", "libraryfolders.vdf");
         if (!File.Exists(vdf))
         {
-            return libraries;
+            return;
         }
 
         try
@@ -235,7 +273,7 @@ public sealed class GameDetector
             VdfNode? folders = parsed["libraryfolders"] ?? parsed["LibraryFolders"];
             if (folders is null)
             {
-                return libraries;
+                return;
             }
 
             foreach ((string key, VdfNode node) in folders.Children)
@@ -260,16 +298,24 @@ public sealed class GameDetector
         {
             _logger.LogDebug(ex, "Cannot read {Vdf}", vdf);
         }
-
-        return libraries;
     }
 
+    /// <summary>
+    /// The Steam client folder: <c>games.launchers.steam.exePath</c> when that file exists, else the <c>SteamPath</c> a
+    /// signed-in user's Steam last ran from (HKCU, where Steam itself records it: <c>g:/steam</c> for a client on the
+    /// games disk), else HKLM <c>InstallPath</c>, else <c>Program Files (x86)\Steam</c>.
+    /// </summary>
     private string? SteamRoot()
     {
         string? configured = _settings.CurrentValue.Games.Launchers.Steam?.ExePath;
         if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured))
         {
             return Path.GetDirectoryName(configured);
+        }
+
+        if (UserSteamPath() is { } user)
+        {
+            return user;
         }
 
         string? registry = RegistryString(RegistryHive.LocalMachine, @"SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath")
@@ -568,6 +614,39 @@ public sealed class GameDetector
         }
 
         return sb.ToString().Trim();
+    }
+
+    /// <summary><c>HKU\&lt;sid&gt;\Software\Valve\Steam\SteamPath</c> of a loaded user hive whose folder holds steam.exe.</summary>
+    private static string? UserSteamPath()
+    {
+        string[] sids;
+        try
+        {
+            sids = Registry.Users.GetSubKeyNames();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return null;
+        }
+
+        foreach (string sid in sids)
+        {
+            if (!sid.StartsWith("S-1-5-21-", StringComparison.OrdinalIgnoreCase) || sid.EndsWith("_Classes", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (RegistryString(RegistryHive.Users, sid + @"\Software\Valve\Steam", "SteamPath") is { } path)
+            {
+                string dir = path.Replace('/', '\\');
+                if (File.Exists(Path.Combine(dir, "steam.exe")))
+                {
+                    return dir;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static string? RegistryString(RegistryHive hive, string key, string name)

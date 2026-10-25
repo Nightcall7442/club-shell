@@ -39,6 +39,7 @@ import {
   optInt,
   optStr,
   publicPc,
+  seedPolicy,
   settleStatus,
   str,
   uuid,
@@ -821,6 +822,38 @@ export function clubRoutes(app: FastifyInstance): void {
     markDirty();
     broadcast('pcStatusChanged', { pcId: pc.id, status: pc.status });
     return { pc: publicPc(pc) };
+  });
+
+  /**
+   * The club's PC policy (beyond the contract, SHELL_CHANGES 27), owner only: the policy the Agents get, `custom` once
+   * the owner saved one. A save takes the sections of a `Policy` (version and `updatedAt` are the server's), a delete goes
+   * back to the seed; both bump the version, which the Agents see in their next heartbeat.
+   */
+  app.get('/admin/policy', async (req) => {
+    requireStaff(req, 'owner');
+    return { policy: db.policy, custom: db.policyCustom ?? false };
+  });
+
+  app.put('/admin/policy', async (req) => {
+    requireStaff(req, 'owner');
+    const b = body(req);
+    for (const key of Object.keys(db.policy)) {
+      if (key !== 'version' && key !== 'updatedAt' && !isObject(b[key])) throw errors.validation(key, 'required');
+    }
+    const mode = (b['processAllowlist'] as Record<string, unknown>)['mode'];
+    if (mode !== 'allow' && mode !== 'deny') throw errors.validation('processAllowlist.mode', 'enum');
+    db.policy = { ...(b as unknown as typeof db.policy), version: db.policy.version + 1, updatedAt: now() };
+    db.policyCustom = true;
+    markDirty();
+    return { policy: db.policy, custom: true };
+  });
+
+  app.delete('/admin/policy', async (req) => {
+    requireStaff(req, 'owner');
+    db.policy = { ...seedPolicy(), version: db.policy.version + 1, updatedAt: now() };
+    db.policyCustom = false;
+    markDirty();
+    return { policy: db.policy, custom: false };
   });
 
   /** Adds a seat or a device (console, VR…) to the hall. */

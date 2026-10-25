@@ -16,7 +16,7 @@ import { Modal } from '@/components/ui/Modal';
 import { useGamepad } from '@/hooks/useGamepad';
 import i18n from '@/i18n';
 import { chime } from '@/lib/sound';
-import { toShellApiError } from '@/lib/tauri';
+import { api, toShellApiError } from '@/lib/tauri';
 import { launcherLabelKey } from '@/screens/Games/GameCard';
 import { isLaunchCancelled, useGamesStore } from '@/store/games';
 import { describeError, useNotificationsStore } from '@/store/notifications';
@@ -47,6 +47,25 @@ export function describeLaunchError(e: unknown, game?: Game | null): string {
 }
 
 /**
+ * Asks the Agent again whether a game the catalogue marks as not installed is there now: the mark is from the Agent's
+ * last scan, and the games disk (G: on a club PC) may have come up since (SHELL_CHANGES 31). A positive answer
+ * updates the store, so the card stops showing the game as missing.
+ */
+async function installedNow(gameId: string): Promise<boolean> {
+  try {
+    const status = await api.games.installStatus(gameId);
+    const games = useGamesStore.getState();
+    const game = games.byId.get(gameId);
+    if (status.installed && game) {
+      games.upsert({ ...game, installed: true, installPath: status.installPath ?? game.installPath });
+    }
+    return status.installed;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Launches a game through the store. Returns the result, or `null` when a pre-check failed or the Agent rejected
  * (a toast with the mapped message is shown in both cases; the overlay shows the error state as well).
  */
@@ -62,7 +81,7 @@ export async function launchGame(gameId: string): Promise<LaunchResult | null> {
     });
     return null;
   }
-  if (game && !game.installed) {
+  if (game && !game.installed && !(await installedNow(gameId))) {
     notify.push({ title: i18n.t('games.launchFailed'), body: i18n.t('errors.gameNotInstalled'), level: 'error' });
     return null;
   }

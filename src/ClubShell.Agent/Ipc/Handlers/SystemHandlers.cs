@@ -3,12 +3,14 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
+using ClubShell.Agent.Games;
 using ClubShell.Agent.Policy;
 using ClubShell.Agent.Power;
 using ClubShell.Agent.Remote;
 using ClubShell.Agent.Server;
 using ClubShell.Agent.Session;
 using ClubShell.Agent.Updates;
+using ClubShell.Agent.Watchdog;
 using ClubShell.Contracts.Commands;
 using ClubShell.Contracts.Errors;
 using ClubShell.Contracts.Ipc;
@@ -68,6 +70,8 @@ public sealed class SystemHandlers : IIpcHandlerGroup
     private readonly NetworkProbe _network;
     private readonly IPolicyEnforcer _policy;
     private readonly IKioskCredentials _kiosk;
+    private readonly AdminMaintenance _maintenance;
+    private readonly IKioskSessionLocator _kioskSession;
     private readonly IOptionsMonitor<AgentSettings> _settings;
     private readonly IClock _clock;
     private readonly ILogger<SystemHandlers> _logger;
@@ -97,6 +101,8 @@ public sealed class SystemHandlers : IIpcHandlerGroup
         NetworkProbe network,
         IPolicyEnforcer policy,
         IKioskCredentials kiosk,
+        AdminMaintenance maintenance,
+        IKioskSessionLocator kioskSession,
         IOptionsMonitor<AgentSettings> settings,
         IClock clock,
         ILogger<SystemHandlers> logger)
@@ -116,6 +122,8 @@ public sealed class SystemHandlers : IIpcHandlerGroup
         ArgumentNullException.ThrowIfNull(network);
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(kiosk);
+        ArgumentNullException.ThrowIfNull(maintenance);
+        ArgumentNullException.ThrowIfNull(kioskSession);
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(logger);
@@ -134,6 +142,8 @@ public sealed class SystemHandlers : IIpcHandlerGroup
         _network = network;
         _policy = policy;
         _kiosk = kiosk;
+        _maintenance = maintenance;
+        _kioskSession = kioskSession;
         _settings = settings;
         _clock = clock;
         _logger = logger;
@@ -154,6 +164,7 @@ public sealed class SystemHandlers : IIpcHandlerGroup
         dispatcher.Register<SetVolumeRequest, VolumeState>(IpcMessages.Sys.SetVolume, (_, request, _) => Task.FromResult(SetVolume(request)));
         dispatcher.Register<SysSetLocaleRequest, SysSetLocaleResponse>(IpcMessages.Sys.SetLocale, SetLocaleAsync);
         dispatcher.Register<SysUnlockAdminRequest, SysUnlockAdminResponse>(IpcMessages.Sys.UnlockAdmin, (_, request, _) => Task.FromResult(UnlockAdmin(request)));
+        dispatcher.Register<SysAdminExitRequest, SysAdminExitResponse>(IpcMessages.Sys.AdminExit, (_, request, _) => Task.FromResult(AdminExit(request)));
         dispatcher.Register<SysLogClientErrorRequest, OkResponse>(IpcMessages.Sys.LogClientError, (_, request, _) => Task.FromResult(LogClientError(request)));
         dispatcher.Register<SysAckAdminMessageRequest, OkResponse>(IpcMessages.Sys.AckAdminMessage, (_, request, _) => Task.FromResult(AckAdminMessage(request)));
         dispatcher.RegisterNoPayload<UpdateCheckResponse>(IpcMessages.Update.Check, UpdateCheckAsync);
@@ -170,6 +181,29 @@ public sealed class SystemHandlers : IIpcHandlerGroup
 
         PruneAdminTokens(_clock.UtcNow);
         return _adminTokens.TryGetValue(token, out DateTimeOffset expiresAt) && expiresAt > _clock.UtcNow;
+    }
+
+    /// <summary>
+    /// <c>sys.adminExit</c>: the Shell closes for an administrator who unlocked it with the PIN, so the watchdog pauses
+    /// instead of restarting it as a crash, and USB storage and service tools work (<see cref="AdminMaintenance"/>).
+    /// </summary>
+    public SysAdminExitResponse AdminExit(SysAdminExitRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (!IsAdminTokenValid(request.AdminToken))
+        {
+            throw IpcError.Unauthorized("invalid or expired admin token").ToException();
+        }
+
+        int minutes = request.Minutes ?? AdminMaintenance.DefaultMinutes;
+        if (minutes is < 1 or > AdminMaintenance.MaxMinutes)
+        {
+            throw IpcError.Validation("minutes", $"must be 1..{AdminMaintenance.MaxMinutes}").ToException();
+        }
+
+        int? session = _kioskSession.ActiveSessionId;
+        DateTimeOffset until = _maintenance.Begin(TimeSpan.FromMinutes(minutes), session is { } id ? (uint)id : null);
+        return new SysAdminExitResponse(until);
     }
 
     /// <summary>Best-effort master volume on the default render endpoint (Core Audio); persisted to <c>shell.json</c> either way.</summary>

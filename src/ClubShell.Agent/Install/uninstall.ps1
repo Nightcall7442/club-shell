@@ -2,7 +2,8 @@
 <#
 .SYNOPSIS
     Uninstalls the ClubShell Agent: stops and removes the service, restores explorer.exe as the shell, clears
-    auto-logon, removes ClubShell firewall rules and the hosts-file block, and optionally purges data and the kiosk user.
+    auto-logon, turns USB storage back on, removes ClubShell firewall rules and the hosts-file block, and optionally
+    purges data and the kiosk user.
 .DESCRIPTION
     Reverses install.ps1 / the Agent's runtime policy. Safe and logged; supports -WhatIf. The Agent normally restores
     the shell and auto-logon when a policy is reverted, but this script re-asserts those in case the service is gone.
@@ -66,6 +67,19 @@ try {
     Remove-RegistryValueSafe -Path $userWinlogon -Name 'Shell'
 } catch {
     Write-Verbose "Kiosk user '$KioskUser' shell override not reverted (user missing or hive not loaded)."
+}
+
+# 2b. USB storage back on (SHELL_CHANGES 28): the policy's USBSTOR Start=4 is machine-wide and outlives the service. ----
+$usbStor = 'HKLM:\SYSTEM\CurrentControlSet\Services\USBSTOR'
+if ((Test-Path -LiteralPath $usbStor) -and $PSCmdlet.ShouldProcess('USBSTOR', 'Allow USB storage (Start=3)')) {
+    Set-ItemProperty -LiteralPath $usbStor -Name 'Start' -Value 3 -Type DWord -ErrorAction SilentlyContinue
+}
+# The HID install block the policy may have set (DenyDeviceClasses\1 = HID class); left alone when it is someone else's.
+$deviceInstall = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions'
+$hidClass = '{745a17a0-74d3-11d0-b6fe-00a0c9f57da2}'
+if ((Get-ItemProperty -LiteralPath "$deviceInstall\DenyDeviceClasses" -Name '1' -ErrorAction SilentlyContinue).'1' -eq $hidClass) {
+    Remove-RegistryValueSafe -Path "$deviceInstall\DenyDeviceClasses" -Name '1'
+    Set-ItemProperty -LiteralPath $deviceInstall -Name 'DenyDeviceClasses' -Value 0 -Type DWord -ErrorAction SilentlyContinue
 }
 
 # 3. Firewall rules ('ClubShell-*'). -----------------------------------------------------------

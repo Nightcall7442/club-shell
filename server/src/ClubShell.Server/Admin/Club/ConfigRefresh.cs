@@ -12,11 +12,15 @@ namespace ClubShell.Server.Admin;
 /// </summary>
 public static class ConfigRefresh
 {
+    public static Task<IReadOnlyList<(Guid PcId, ServerCommandEnvelope Command)>> QueueAsync(
+        NpgsqlConnection c, NpgsqlTransaction tx, CommandDispatcher commands, AgentSocketHub hub, Guid clubId, RefreshConfigCommand flags, Guid? staffId = null) =>
+        QueueAsync(c, tx, commands, hub, clubId, NewCommand.RefreshConfig(flags), staffId);
+
+    /// <summary><paramref name="command"/> for every connected approved PC of the club (<c>reloadPolicy</c> after a policy change).</summary>
     public static async Task<IReadOnlyList<(Guid PcId, ServerCommandEnvelope Command)>> QueueAsync(
-        NpgsqlConnection c, NpgsqlTransaction tx, CommandDispatcher commands, AgentSocketHub hub, Guid clubId, RefreshConfigCommand flags, Guid? staffId = null)
+        NpgsqlConnection c, NpgsqlTransaction tx, CommandDispatcher commands, AgentSocketHub hub, Guid clubId, NewCommand command, Guid? staffId = null)
     {
         var queued = new List<(Guid, ServerCommandEnvelope)>();
-        var command = NewCommand.RefreshConfig(flags);
         foreach (var pcId in await c.QueryAsync<Guid>(
                      "SELECT id FROM pcs WHERE club_id = @clubId AND approved AND deleted_at IS NULL ORDER BY id", new { clubId }, tx))
         {

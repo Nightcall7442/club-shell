@@ -2353,6 +2353,78 @@ test('the owner marks a PC as without persistent storage, a cashier cannot (SHEL
   expect(await stateless()).toBe(true);
 });
 
+test('the owner keeps a PC policy of the club, a cashier cannot (SHELL_CHANGES 27)', async ({ request }) => {
+  const owner = auth(await tokenFor(request, OWNER_PIN));
+  type ClubPolicy = {
+    policy: Record<string, unknown> & { version: number; webFilter: { dnsServers: string[] } };
+    custom: boolean;
+  };
+  const read = async (): Promise<ClubPolicy> => {
+    const res = await request.get(`${API}/admin/policy`, { headers: owner });
+    expect(res.ok(), await res.text()).toBeTruthy();
+    return (await res.json()) as ClubPolicy;
+  };
+  const before = await read();
+  // The seed sets no DNS servers: the club's DHCP decides (the boot NIC of a diskless seat keeps its resolver).
+  expect(before.policy.webFilter.dnsServers).toEqual([]);
+
+  const edited = { ...before.policy, webFilter: { ...before.policy.webFilter, dnsServers: ['10.10.0.1'] } };
+  const saved = await request.put(`${API}/admin/policy`, { headers: owner, data: edited });
+  expect(saved.ok(), await saved.text()).toBeTruthy();
+  const mine = await read();
+  expect(mine.custom).toBe(true);
+  expect(mine.policy.version).toBe(before.policy.version + 1);
+  expect(mine.policy.webFilter.dnsServers).toEqual(['10.10.0.1']);
+
+  const cashier = auth(await tokenFor(request, CASHIER_PIN));
+  expect((await request.get(`${API}/admin/policy`, { headers: cashier })).status()).toBe(403);
+  expect((await request.put(`${API}/admin/policy`, { headers: cashier, data: before.policy })).status()).toBe(403);
+  expect((await request.delete(`${API}/admin/policy`, { headers: cashier })).status()).toBe(403);
+  const broken = { ...before.policy, processAllowlist: { mode: 'maybe', patterns: [] } };
+  expect((await request.put(`${API}/admin/policy`, { headers: owner, data: broken })).status()).toBe(400);
+
+  const reset = await request.delete(`${API}/admin/policy`, { headers: owner });
+  expect(reset.ok(), await reset.text()).toBeTruthy();
+  const back = await read();
+  expect(back.custom).toBe(false);
+  expect(back.policy.webFilter.dnsServers).toEqual([]);
+});
+
+test('the owner edits the PC policy on the hall page and goes back to the default (SHELL_CHANGES 27)', async ({
+  page,
+}) => {
+  test.skip(
+    REAL,
+    "The server's dev seed puts its seats at pixel positions: the hall page's grid is too slow to render here. The routes " +
+      'are checked against the real server by the test above.',
+  );
+  await signIn(page, OWNER_PIN);
+  await page.goto('/#/hall');
+  const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Политика ПК' }) });
+  const editor = section.getByRole('textbox', { name: 'Политика ПК (JSON)' });
+  await expect(section).toContainText('Политика по умолчанию');
+  await expect(editor).toHaveValue(/"dnsServers": \[\]/);
+
+  await editor.fill('{ not json');
+  await section.getByRole('button', { name: 'Сохранить политику' }).click();
+  await expect(section).toContainText('Это не JSON');
+
+  await section.getByRole('button', { name: 'Отменить правки' }).click();
+  const text = await editor.inputValue();
+  await editor.fill(text.replace('"dnsServers": []', '"dnsServers": ["10.10.0.1"]'));
+  await section.getByRole('button', { name: 'Сохранить политику' }).click();
+  await expect(section).toContainText(/Политика сохранена, версия \d+/);
+  await expect(section).toContainText('Своя политика клуба');
+
+  await page.reload();
+  await expect(editor).toHaveValue(/"10\.10\.0\.1"/);
+  await section.getByRole('button', { name: 'Вернуть по умолчанию' }).click();
+  await section.getByRole('button', { name: 'Вернуть', exact: true }).click();
+  await expect(section).toContainText(/Возвращена политика по умолчанию, версия \d+/);
+  await expect(section).toContainText('Политика по умолчанию');
+  await expect(editor).toHaveValue(/"dnsServers": \[\]/);
+});
+
 test('a PC without a loaded Vanguard is not offered the games it could not start (D-74)', async ({ request }) => {
   const pc = await registerAgent(request, 'vgk');
   const listed = async (): Promise<{ id: string; launcher: string; antiCheat: string }[]> => {

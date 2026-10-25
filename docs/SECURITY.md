@@ -295,9 +295,9 @@ Agent
 Policy (`policies.json`)
 
 - [ ] `shellReplacement.enabled = true` with the installed `shellExe`.
-- [ ] `processAllowlist` deny list at least as strict as `config/policies.example.json` (`cmd`, `powershell`, `pwsh`, `regedit`, `taskmgr`, `mmc`, `control`, `msconfig`, `wscript`, `cscript`, `mshta`, `*cheat*`, `*inject*`); prefer `allow` mode on fixed images.
-- [ ] `usb.allowStorage = false`; `allowHid = true` only if players bring their own peripherals.
-- [ ] `webFilter.enabled = true`, filtering `dnsServers`, blocked domains maintained centrally.
+- [ ] `processAllowlist` deny list at least as strict as `config/policies.example.json` (`cmd`, `powershell`, `pwsh`, `regedit`, `taskmgr`, `mmc`, `control`, `msconfig`, `wscript`, `cscript`, `mshta`, `*cheat*`, `*inject*`); prefer `allow` mode on fixed images. A pattern without `\` or `/` matches the image name only; folders need a path pattern (`*\Downloads\*.exe`). Exempt by design: the Agent's own helpers, a running game's children and job, and files whose Authenticode signature verifies to an anti-cheat vendor (WinVerifyTrust, chain to a trusted root, no revocation fetch). A name-only deny list is defence in depth: a renamed copy of `cmd.exe` passes it, so the account staying a plain member of Users is what actually holds.
+- [ ] `usb.allowStorage = false`; `allowHid = true` only if players bring their own peripherals. Storage works while an administrator's maintenance window is open (`sys.adminExit` after the PIN, at most 8 h, in memory only) and the policy is applied again when it ends; uninstalling the Agent sets `USBSTOR Start=3` back.
+- [ ] `webFilter.enabled = true`, blocked domains maintained centrally. The seed sets no `dnsServers` (DNS stays as DHCP gives it, which keeps a diskless seat's boot NIC on the club's resolver); set filtering resolvers in the club's own policy («Зал и устройства» → «Политика ПК», owner only) or in the club's DHCP.
 - [ ] `explorer.disableTaskManager / disableRun / disableSettings / disableWinKey / disableAltTab = true`, `blockedKeyCombos` reviewed.
 - [ ] `anticheat.blockOnViolation = true`, `required` set for the club's competitive titles.
 

@@ -171,6 +171,23 @@ auto-logon holds and rotates it only once the kiosk session exists (`shell.kiosk
 The hardware id leaves out a disk on an iSCSI, USB, SD or virtual bus (SHELL_CHANGES 30), so a diskless seat's id does
 not follow the seat disk the club server assigns it, and a hybrid's does not change with the order its disks come up in.
 
+The seed policy sets no DNS servers (SHELL_CHANGES 27): the Agent leaves every adapter, the boot NIC included, with the
+resolvers the club's DHCP gives. A club that wants filtering resolvers sets them in its own policy (cash desk,
+«Зал и устройства», «Политика ПК»), which the server's seed then no longer overwrites.
+
+## Games on the games disk
+
+With Steam on the games disk, `agent.json → games.launchers.steam.exePath = "G:\\Steam\\steam.exe"` is all the Agent
+needs (SHELL_CHANGES 31). Without it the Agent also finds the client through the `SteamPath` Steam records for the
+signed-in user, and a `games.libraryRoots` entry holding a `steamapps` folder (`G:\Steam`) counts as a Steam library
+even when the client's `libraryfolders.vdf` does not list it. When G: comes up after the Agent started, the next
+maintenance tick (15 s) sees the new disk and rescans the installs; otherwise they are rescanned every
+`games.scanIntervalSec`. The Shell asks the Agent again before it refuses a game the catalogue still marks as missing.
+
+To service a seat, unlock the Shell with the admin PIN and exit: the Agent then keeps the Shell closed for 30 minutes,
+lets USB drives work and does not kill `cmd`, `reg` or `powershell` in the kiosk session (SHELL_CHANGES 28, 33, 34).
+Signing out hands the seat back at once; a reboot always comes back sealed.
+
 ## Known gaps
 
 * The helper's server API (`diskless/v1/…`) belongs to the club's diskless server; it is not part of
