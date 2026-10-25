@@ -830,6 +830,8 @@ Errors: `rateLimited` (1 per 30 s), `validation`.
 #### `sys.setVolume` (auth: hello) — Request: `{ level: int, muted?: bool }` (`0–100`) Response: `{ level: int, muted: bool }`. Errors: `validation`. Applied via the Agent to the kiosk user's default audio endpoint (Core Audio in the user session through the helper) and persisted in `ShellSettings`.
 #### `sys.setLocale` (auth: hello) — Request: `{ locale: Locale }` Response: `{ locale: Locale }`. Errors: `validation`. Persists to `shell.json` and to the user profile when logged in.
 #### `sys.unlockAdmin` (auth: hello) — Request: `{ pin: string }` Response: `{ ok: true, adminToken: string, expiresAt: datetime }` — grants the kiosk exit hotkey path (`kiosk_exit`) for 5 min. Errors: `unauthorized`, `rateLimited` (3 attempts/min).
+
+#### `sys.adminExit` (auth: hello) — Request: `{ adminToken: string, minutes?: int }` Response: `{ resumeAt: datetime }` — sent by `kiosk_exit` right before the Shell closes for an administrator (SHELL_CHANGES 33): opens a maintenance window of `minutes` (default 30, 1–480) in which the watchdog does not restart the Shell and does not count the exit as a crash, USB storage works and the process deny-list is not enforced. It ends at `resumeAt`, when the kiosk session signs out, or when the Agent restarts; a second call extends it. Errors: `unauthorized` (token not issued by `sys.unlockAdmin` or expired), `validation` (`minutes`).
 #### `sys.logClientError` (auth: hello) — Request: `{ level: "warn" | "error", message: string, stack?: string, route?: string }` Response: `{ ok: true }`. Rate limited 10/s, silently dropped beyond.
 
 ### 7.13 policy

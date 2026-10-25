@@ -74,8 +74,8 @@ which is stripped before the process is created.
 
 | Aspect | Implementation |
 |--------|----------------|
-| Launcher exe | `agent.json → games.launchers.steam.exePath`; else `HKLM\SOFTWARE\WOW6432Node\Valve\Steam\InstallPath` / `HKLM\SOFTWARE\Valve\Steam\InstallPath` + `steam.exe`; else `%ProgramFiles(x86)%\Steam\steam.exe` (`GameDetector.ResolveLauncherExe`, `SteamRoot`) |
-| Install detection | `GameDetector.DetectSteam`: for every library in `steamapps\libraryfolders.vdf` (parsed by `VdfNode`), read `steamapps\appmanifest_<appid>.acf`; `StateFlags & 4` must be set (fully installed); install dir = `steamapps\common\<installdir>`, size from `SizeOnDisk`, version from `buildid` |
+| Launcher exe | `agent.json → games.launchers.steam.exePath` when the file exists (a club PC: `G:\Steam\steam.exe`); else the `SteamPath` of a loaded user hive (`HKU\<sid>\Software\Valve\Steam`, written by the client itself, e.g. `g:/steam`) when `steam.exe` is there; else `HKLM\SOFTWARE\WOW6432Node\Valve\Steam\InstallPath` / `HKLM\SOFTWARE\Valve\Steam\InstallPath` + `steam.exe`; else `%ProgramFiles(x86)%\Steam\steam.exe` (`GameDetector.ResolveLauncherExe`, `SteamRoot`) |
+| Install detection | `GameDetector.DetectSteam`: for the client folder, every library in its `steamapps\libraryfolders.vdf` (parsed by `VdfNode`) and every `games.libraryRoots` entry that holds a `steamapps` folder (`SteamLibrariesIn`, SHELL_CHANGES 31: a games disk copied from elsewhere need not be in the client's list), read `steamapps\appmanifest_<appid>.acf`; `StateFlags & 4` must be set (fully installed); install dir = `steamapps\common\<installdir>`, size from `SizeOnDisk`, version from `buildid`. The games disk mounting late is picked up by the rescan on a disk change (`scanIntervalSec` below), and the Shell asks `games.installStatus` again before it refuses to launch a game marked as not installed |
 | `launcherAppId` | numeric app id (validated: digits only → `validation{launcherAppId}`) |
 | Command | `steam.exe -applaunch <appid> [game.Args] [extraArgs]`; `-login <user> <pass>` is prepended only when `games.accountPool.allowPasswordOnCommandLine` is on (section 6.2) |
 | Game process | `ExpectedProcessNames` default = file name of `game.ExePath`; when the catalogue has no `exePath`, any non-helper process whose image lives under the install dir |
@@ -409,7 +409,7 @@ restored, lease released (`launchFailed`), `game.stateChanged{failed, error}`, l
 | Key | Default | Used by |
 |-----|---------|---------|
 | `libraryRoots` | `["D:\\Games", "G:\\Games"]` | `GameDetector.DetectByPath`, `FindUninstallEntry` fallback |
-| `scanIntervalSec` | 900 | reserved: parsed into `GamesSettings` but no periodic rescan timer reads it today; `GameLibrary.RescanAsync` runs on demand (`games.list` refresh) |
+| `scanIntervalSec` | 900 | `GameLibrary.RescanIfDueAsync` (Agent maintenance loop, every 15 s) re-runs install detection once this much time has passed, and at once when the set of ready local disks changes — the games disk mounting after the Agent started (SHELL_CHANGES 31) |
 | `launchTimeoutSec` | 90 | `LaunchRequest.LaunchTimeoutSec`, `WaitForGameProcessAsync` |
 | `killGraceSec` | 10 | `LauncherBase.KillAsync` graceful window, `KillAllAsync` wait |
 | `accountPool.enabled` | false (server config turns it on) | `AccountPool.Enabled` (disabled → `accountPoolExhausted` for games needing an account) |

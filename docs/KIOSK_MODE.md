@@ -197,11 +197,17 @@ undocumented → runtime hide), `disableAltTab` and `blockedKeyCombos` (hook onl
 
 Process allow-list semantics (`ProcessAllowlistModule`):
 
-| `mode` | Pattern matches (image name or full path, wildcards `*`/`?`, `ProcessKiller.WildcardToRegex`) | Effect |
-|--------|-----------------------------------------------------------------------------------------------|--------|
+| `mode` | Pattern matches (wildcards `*`/`?`, `ProcessKiller.WildcardToRegex`) | Effect |
+|--------|-------------------------------------------------------------------|--------|
 | `deny` | match | killed (`ProcessBlocked` event, `policyDenied` for `apps.launch` / `games.launch`) |
 | `allow` | no match | killed |
-| any | `ProcessKiller.SystemCritical`, the Agent, every `IProtectedProcesses` pid (Shell, running games, remote-admin helpers) | never killed |
+| any | `ProcessKiller.SystemCritical`, the Agent and the processes it starts, every `IProtectedProcesses` pid (Shell, running games and everything in a game's job, remote-admin helpers), the children of a running game, files whose Authenticode signature verifies to an anti-cheat vendor (`ProcessAllowlistModule.AntiCheatSigners`: Epic Games / EasyAntiCheat, BattlEye, Riot, FACEIT, Even Balance, Wellbia, INCA) | never killed |
+| any | an administrator's maintenance window is open (`sys.adminExit`, §6) | never killed; the session is swept again when it ends |
+
+A pattern with a path separator (`C:\Games\*`, `*\Downloads\*.exe`) is matched against the full path, any other
+(`*cheat*`, `cmd.exe`) against the image name only (SHELL_CHANGES 34): `*cheat*` no longer hits every exe in an
+`EasyAntiCheat` folder, while `EasyAntiCheat.exe` itself still matches by name and is spared only by its signature or
+by being a game's child.
 
 Example deny list from `config/policies.example.json`: `cmd.exe`, `powershell.exe`, `pwsh.exe`, `regedit.exe`,
 `taskmgr.exe`, `mmc.exe`, `control.exe`, `msconfig.exe`, `wscript.exe`, `cscript.exe`, `mshta.exe`, `*cheat*`,
@@ -269,9 +275,15 @@ Notes:
   with `notConfigured`.
 - `AppState::admin_token_valid` compares the cached token and its expiry; `kiosk_exit` refuses invalid or expired
   tokens with `unauthorized`.
-- After `kiosk_exit{explorer}` the watchdog **will relaunch the Shell** unless restarts are suspended or the policy
-  is reverted (section 8) — use it for a quick look, use `uninstall.ps1` / policy `shellReplacement.enabled=false`
-  for maintenance sessions (`SHELL_REPLACEMENT.md` §7).
+- `kiosk_exit` first tells the Agent (`sys.adminExit` with the admin token, SHELL_CHANGES 33), which opens a
+  **maintenance window** (`AdminMaintenance`, 30 min by default, at most 480): the watchdog does not relaunch the
+  Shell and does not count the exit as a crash, USB storage works, and the process deny-list is not enforced, so
+  `cmd`, `reg` and `powershell` run in the kiosk session. The window ends when it times out (the Shell comes back),
+  when the kiosk session signs out (auto-logon brings the kiosk back at once — the way to hand the PC back early), or
+  when the Agent or the PC restarts (the window is in memory only). When it ends the USB policy is applied again and
+  the deny-list sweeps the session. An older Agent answers `notFound`; the exit still happens and the watchdog
+  relaunches the Shell as before. For longer work use an administrator's own account, `uninstall.ps1` or policy
+  `shellReplacement.enabled=false` (`SHELL_REPLACEMENT.md` §7).
 - Dev mode is always admin mode (`admin_mode: AtomicBool::new(dev)`).
 
 ---
