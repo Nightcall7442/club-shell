@@ -22,8 +22,9 @@ public interface IProtectedProcesses
     bool IsProtected(int pid);
 
     /// <summary>
-    /// <see langword="true"/> when the processes <paramref name="pid"/> starts must be left alone too: a running game's
-    /// helpers and anti-cheat. Not the Shell's: a file dialog there would hand the player a <c>cmd.exe</c> nothing kills.
+    /// <see langword="true"/> when the processes <paramref name="pid"/> starts must be left alone too: the Agent's own
+    /// helpers (the clipboard clear runs <c>cmd.exe</c> in the player's session), a running game's helpers and
+    /// anti-cheat. Not the Shell's: a file dialog there would hand the player a <c>cmd.exe</c> nothing kills.
     /// </summary>
     bool ProtectsChildrenOf(int pid) => false;
 }
@@ -43,8 +44,8 @@ public sealed record ProcessBlockedEvent(int Pid, string Name, string? Path, str
 /// <see cref="AllowlistMode.Allow"/> only matching processes may run, in <see cref="AllowlistMode.Deny"/> matching
 /// processes are killed. Applies to the kiosk WTS session only (never session 0), sweeps already-running processes on
 /// apply and watches <see cref="ProcessWatcher.ProcessStarted"/> afterwards. Exempt: <see cref="ProcessKiller.SystemCritical"/>,
-/// the Agent and the processes it starts, every <see cref="IProtectedProcesses"/> pid and the children of a pid it
-/// <see cref="IProtectedProcesses.ProtectsChildrenOf">protects with its children</see> (a game's helpers), and files
+/// the Agent, every <see cref="IProtectedProcesses"/> pid and the children of a pid it
+/// <see cref="IProtectedProcesses.ProtectsChildrenOf">protects with its children</see> (the Agent's and a game's helpers), and files
 /// whose Authenticode signature verifies to an anti-cheat vendor (<see cref="AntiCheatSigners"/>).
 /// <see cref="IsAllowed"/> is the same pattern check for launch requests.
 /// </summary>
@@ -377,17 +378,11 @@ public sealed class ProcessAllowlistModule : IPolicyModule, IDisposable
 
         if (parentPid is { } parent && parent > 4)
         {
-            // The Agent's own helpers (the clipboard clear runs cmd.exe in the player's session).
-            if (parent == Environment.ProcessId)
-            {
-                return "the Agent started it";
-            }
-
             foreach (IProtectedProcesses source in _protected)
             {
                 if (source.ProtectsChildrenOf(parent))
                 {
-                    return $"its parent {parent} is a running game";
+                    return $"its parent {parent} is the Agent or a running game";
                 }
             }
         }

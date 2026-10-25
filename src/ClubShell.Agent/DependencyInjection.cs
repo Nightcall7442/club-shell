@@ -560,8 +560,9 @@ internal sealed class AntiCheatGameControlAdapter : IAntiCheatGameControl
 
 /// <summary>
 /// Processes the allowlist enforcement must never touch: the Agent process, the kiosk Shell, every running game and
-/// everything in a game's job object (its helpers and anti-cheat, started after the job was assigned); a game's
-/// children are protected through <see cref="ProtectsChildrenOf"/> too, for a game whose job could not be assigned.
+/// everything in a game's job object (its helpers and anti-cheat, started after the job was assigned). The children of
+/// the Agent and of a game are protected through <see cref="ProtectsChildrenOf"/>, the latter for a game whose job
+/// could not be assigned.
 /// Dependencies are held directly (neither depends on the allowlist module, so there is no cycle).
 /// </summary>
 [SupportedOSPlatform("windows")]
@@ -584,7 +585,7 @@ internal sealed class ProtectedProcessesAdapter : IProtectedProcesses
         || _games.Find(pid) is not null
         || InGameJob(pid);
 
-    public bool ProtectsChildrenOf(int pid) => _games.Find(pid) is not null || InGameJob(pid);
+    public bool ProtectsChildrenOf(int pid) => pid == Environment.ProcessId || _games.Find(pid) is not null || InGameJob(pid);
 
     private bool InGameJob(int pid)
     {

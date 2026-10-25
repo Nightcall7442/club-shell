@@ -498,8 +498,7 @@ public sealed class ProcessAllowlistTests
         try
         {
             // This test process plays the running game: everything it starts is the game's.
-            IProtectedProcesses games = Substitute.For<IProtectedProcesses>();
-            games.ProtectsChildrenOf(Environment.ProcessId).Returns(true);
+            var games = new GameParent(Environment.ProcessId);
             using var watcher = new ProcessWatcher();
             using var module = new ProcessAllowlistModule(watcher, new ProcessKiller(), [games], SystemClock.Instance, NullLogger<ProcessAllowlistModule>.Instance)
             {
@@ -511,7 +510,7 @@ public sealed class ProcessAllowlistTests
             result.Error.Should().BeNull();
             await Task.Delay(TimeSpan.FromSeconds(1));
             gameChild.HasExited.Should().BeFalse("a running game's children are left alone");
-            games.ProtectsChildrenOf(Environment.ProcessId).Returns(false);
+            games.Running = false;
             await module.ApplyAsync(policy, new PolicyContext(null, session), CancellationToken.None);
             using var exit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             await gameChild.WaitForExitAsync(exit.Token);
@@ -522,6 +521,16 @@ public sealed class ProcessAllowlistTests
             KillQuietly(gameChild);
             KillQuietly(antiCheat);
         }
+    }
+
+    /// <summary>A running game whose children are protected while <see cref="Running"/>.</summary>
+    private sealed class GameParent(int pid) : IProtectedProcesses
+    {
+        public bool Running { get; set; } = true;
+
+        public bool IsProtected(int candidate) => false;
+
+        public bool ProtectsChildrenOf(int candidate) => Running && candidate == pid;
     }
 
     private static Process Spawn(string exe)
