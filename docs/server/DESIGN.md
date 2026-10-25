@@ -98,7 +98,8 @@ server/
 - **global.json.** На main `8.0.400`; ветка поднимает до `10.0.100` / `latestFeature`, а `latestFeature` не
   переходит мажорную версию. Поэтому весь репозиторий (и агент) собирается SDK 10: `setup-dev-vm.ps1` ставит SDK 10
   и SDK 8 (рантайм 8.0 для тестов агента), `dev.ps1` проверяет SDK 10. Агентские проекты остаются `net8.0`
-  (`cs/src/*/*.csproj`).
+  (`cs/src/*/*.csproj`). С SHELL_CHANGES 38 (2026-10-25) агент, его библиотеки, тесты и ContractsGen — `net10.0`, агент
+  публикуется self-contained; рантайм 8.0 в CI больше не ставится.
 - **Корневой `Directory.Build.props`.** Фиксирует `LangVersion 12.0` и признаёт тестовыми только проекты под
   `cs/tests/` (`cs/Directory.Build.props:10, 38-41`). Поэтому `server/Directory.Build.props` переопределяет
   `LangVersion` на 14 и сам ставит `IsTestProject=true` для `server/tests/**`.
@@ -1971,6 +1972,12 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
   появлении диска, перепроверка `games.installStatus` в шелле), п. 34 (шаблоны без `\` — только по имени, дети игры и
   агента, подписанные файлы античитов; на время окна обслуживания список не действует) — docs/KIOSK_MODE.md,
   docs/GAME_LAUNCHERS.md, docs/SECURITY.md.
+- **Установщик и релиз, третий блок:** п. 32 (MSI ставит `ClubDisklessHelper` только там, где его нет, никогда не
+  заменяет, не останавливает и не удаляет его службу, не переподписывает exe; «read-only» в описаниях исправлено), п. 35
+  (`prepare-image.ps1` удаляет `secure\kiosk.cred`, `cache\*.json`, `profile-*.marker`, `cache\profile-keep`, чистит
+  `paths.persistent` и возвращает USBSTOR), п. 38 (агент и библиотеки — .NET 10 LTS, агент self-contained single-file,
+  бандл без загрузки рантайма .NET), п. 39 (версия исходников 1.0.18; выпуск — пуш тега `v1.0.18`, `release.yml` даёт
+  MSI, `ClubShellSetup.exe`, `SHA256SUMS.txt` и подписи, если заданы секреты подписи) — docs/DISKLESS.md, docs/UPDATES.md.
 
 ### 11.1 Все 75 required-операций + WS → срезы
 
@@ -2066,7 +2073,7 @@ anticheat/report — S3; `PATCH /admin/games/{id}` (реализуется) и `
 
 | ID | Решение |
 |---|---|
-| D-1 | Сервер живёт в монорепо `server/`, net10, отдельный sln и CI-job на ubuntu + PG18; агент остаётся на net8 |
+| D-1 | Сервер живёт в монорепо `server/`, net10, отдельный sln и CI-job на ubuntu + PG18; агент остаётся на net8 (до SHELL_CHANGES 38: с 2026-10-25 агент тоже net10, self-contained) |
 | D-2 | DTO агента и игрока — из ClubShell.Contracts (новые добавляются туда же); admin DTO пишутся вручную; сериализация — `JsonDefaults` / `AdminJson` (§2.4) |
 | D-3 | Контракт вендорится в `server/contracts` с `REF`; CI проверяет дрейф |
 | D-4 | Повтор подписи **не** отклоняется (`ReplayMode=Log`); режим `Reject` → `409 replay` только для POST/PATCH без ключа |

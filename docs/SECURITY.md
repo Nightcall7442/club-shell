@@ -162,7 +162,7 @@ boundary protected is "kiosk user vs. machine", not "administrator vs. machine".
 
 | Component | Account | Notes |
 |-----------|---------|-------|
-| `ClubShellAgent.exe` | `NT AUTHORITY\SYSTEM` (`register-service.ps1`, `obj= LocalSystem`) | needed for `WTSQueryUserToken`, LSA secrets, `USBSTOR`, firewall, user management, hive loading |
+| `ClubShellAgent.exe` | `NT AUTHORITY\SYSTEM` (`register-service.ps1`, `obj= LocalSystem`) | needed for `WTSQueryUserToken`, LSA secrets, `USBSTOR`, firewall, user management, hive loading. Self-contained .NET 10 (SHELL_CHANGES 38): the runtime inside the exe gets .NET security fixes only with a ClubShell release, not from Microsoft Update, so ship a release after each .NET 10 servicing update that matters |
 | Privileges | `SeTcbPrivilege` (`GetUserToken`, `RunAsSystemInSession`), `SeAssignPrimaryTokenPrivilege` + `SeIncreaseQuotaPrivilege` (`CreateProcessAsUser`) | enabled per call by `PrivilegeScope` and disabled again on dispose; never left on |
 | `clubshell-shell.exe` | kiosk user | no privileged API; every OS effect is an IPC request the Agent validates |
 | Kiosk user | local, `BUILTIN\Users` only (`LocalUserManager.AddToGroup` refuses `Administrators`; an existing account of that name in a privileged group is refused, `shell.kioskUser.removeFromPrivilegedGroups`), `UserCannotChangePassword`, random 24-char password rotated on start | cannot read `secure\`, `agent.json` is read-only for it, `logs\` append only |

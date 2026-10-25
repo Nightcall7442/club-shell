@@ -362,7 +362,17 @@ assembly informational version), the Shell from `tauri.conf.json → version` as
 `--config` (`clubshell_shell::shell_version()`, which `auth.hello`, `kiosk_state` and the logs report; the
 `Cargo.toml` workspace version is not used). The manifest `version` must match the version the component
 reports or `ConfirmAppliedAsync` will never see a match and the rollback logic will flag a successful
-install as failed.
+install as failed. A release passes `-p:Version` from its tag, so the sources' version (1.0.18 since
+SHELL_CHANGES 39) is what local and CI builds report.
+
+**A versioned release** (SHELL_CHANGES 39). Merge to `main`, then push the tag: `git tag v1.0.18 && git push origin
+v1.0.18`. `release.yml` builds the Agent (self-contained, .NET 10: the PC needs no .NET install, SHELL_CHANGES 38),
+the MSI, `ClubShellSetup.exe` and `SHA256SUMS.txt`, and creates the GitHub release `v1.0.18` with them. The binaries
+are Authenticode-signed only when the `CODESIGN_PFX_BASE64` / `CODESIGN_PFX_PASSWORD` secrets are set (unsigned
+otherwise, with a warning; `publish.ps1` then refuses to publish them to the update channel), and `manifest.json` is
+signed with `UPDATE_MANIFEST_KEY_PEM`. Whoever installs the release checks the MSI against `SHA256SUMS.txt`
+(`Get-FileHash ClubShell-1.0.18.msi`); a PC running it then reports `agentVersion 1.0.18` in its heartbeat, which is
+what to check on every approved PC before switching `Agents:RegisterProof` to `enforce` (docs/SECURITY.md).
 
 ---
 
