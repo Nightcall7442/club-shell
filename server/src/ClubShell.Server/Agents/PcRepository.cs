@@ -25,6 +25,10 @@ public sealed class PcRow
     public string IpAddress { get; init; } = "";
     public bool Approved { get; init; }
     public bool Maintenance { get; init; }
+
+    /// <summary>Marked by the owner as a PC without persistent storage (a diskless seat): it re-registers at every boot (SHELL_CHANGES 25).</summary>
+    public bool Stateless { get; init; }
+
     public byte[]? SigningSecret { get; init; }
     public int CredentialsVersion { get; init; }
     public string AgentVersion { get; init; } = "";
@@ -74,6 +78,13 @@ public enum ProofOutcome
     /// <summary><see cref="RegisterProofMode.Enforce"/> without a valid proof, in the owner's window for an offline PC: new credentials.</summary>
     Reenrolled,
 
+    /// <summary>
+    /// Without a valid proof, from a PC the owner marked as without persistent storage (<see cref="PcRow.Stateless"/>):
+    /// it lost its secret at boot, which is expected. New credentials; under <see cref="RegisterProofMode.Enforce"/> only
+    /// while the PC is offline, as for the re-enroll window.
+    /// </summary>
+    Stateless,
+
     /// <summary><see cref="RegisterProofMode.Enforce"/> without a valid proof otherwise: nothing written, no credentials.</summary>
     Refused,
 }
@@ -121,7 +132,7 @@ public enum RefreshOutcome
 public sealed class PcRepository(NpgsqlDataSource db, ILogger<PcRepository> logger)
 {
     private const string Columns = """
-        id, club_id, number, name, zone, hwid, ip_address, approved, maintenance, signing_secret, credentials_version,
+        id, club_id, number, name, zone, hwid, ip_address, approved, maintenance, stateless, signing_secret, credentials_version,
         agent_version, shell_version, last_heartbeat_at, created_at, deleted_at,
         (SELECT s.id FROM sessions s WHERE s.pc_id = pcs.id AND s.state <> 'ended') AS open_session_id,
         (SELECT s.state FROM sessions s WHERE s.pc_id = pcs.id AND s.state <> 'ended') AS open_session_state
@@ -152,7 +163,8 @@ public sealed class PcRepository(NpgsqlDataSource db, ILogger<PcRepository> logg
     /// An approved PC that already holds a secret re-registers by <paramref name="gate"/> (D-78): with a valid proof it
     /// keeps the secret (a lost response is retried with the same proof); without one, audit re-issues as above and
     /// enforce writes nothing (<see cref="ProofOutcome.Refused"/>) unless the owner's re-enroll window is open and the PC
-    /// offline. Any new credentials close the window.
+    /// offline. A PC marked as without persistent storage re-registers without a proof as expected
+    /// (<see cref="ProofOutcome.Stateless"/>; under enforce while offline). Any new credentials close the window.
     /// </para>
     /// </summary>
     public async Task<RegisterResult> RegisterAsync(
@@ -184,6 +196,10 @@ public sealed class PcRepository(NpgsqlDataSource db, ILogger<PcRepository> logg
                 if (problem is null)
                 {
                     proof = ProofOutcome.Proven;
+                }
+                else if (known.Stateless && (gate.Mode == RegisterProofMode.Audit || gate.Offline(known, now)))
+                {
+                    proof = ProofOutcome.Stateless;
                 }
                 else if (gate.Mode == RegisterProofMode.Audit)
                 {

@@ -330,6 +330,9 @@ export const UZ: Record<string, string> = {
   Обложка: 'Muqova',
   'Обои (URL)': 'Fon rasmi (URL)',
   Обслуживание: 'Xizmat koʻrsatish',
+  'Без постоянного диска': 'Doimiy disksiz',
+  'Бездисковый ПК: C: чистый при каждой загрузке, и ПК регистрируется заново — это не тревога.':
+    'Disksiz kompyuter: har yuklanishda C: toza boʻladi va kompyuter qaytadan roʻyxatdan oʻtadi — bu xavf emas.',
   Ограничения: 'Cheklovlar',
   'Ожидается в кассе': 'Kassada kutilmoqda',
   'Ожидалось в кассе': 'Kassada kutilgan',
@@ -1459,6 +1462,9 @@ export const EN: Record<string, string> = {
   Обложка: 'Cover',
   'Обои (URL)': 'Wallpaper (URL)',
   Обслуживание: 'Maintenance',
+  'Без постоянного диска': 'No persistent disk',
+  'Бездисковый ПК: C: чистый при каждой загрузке, и ПК регистрируется заново — это не тревога.':
+    'Diskless PC: C: is clean at every boot and the PC registers anew; that is not an alarm.',
   Ограничения: 'Restrictions',
   'Ожидается в кассе': 'Expected in drawer',
   'Ожидалось в кассе': 'Expected in drawer',

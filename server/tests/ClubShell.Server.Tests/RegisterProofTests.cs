@@ -247,6 +247,56 @@ public sealed class RegisterProofTests(ServerFixture audit, EnforceServerFixture
     }
 
     [Fact]
+    public async Task A_pc_without_persistent_storage_re_registers_without_a_proof_while_offline_and_only_an_info_is_logged()
+    {
+        // SHELL_CHANGES 25: a diskless seat boots a clean C: and has lost its secret at every boot.
+        var logs = LogRecorder.On(enforce);
+        var owner = await LoginAsync(enforce, OwnerPin);
+        var agent = await TestAgent.CreateAsync(enforce);
+        await Players.ReadAsync(await agent.HeartbeatAsync(), 200);
+        await ExpectAsync(enforce, 200, HttpMethod.Patch, $"/pcs/{agent.PcId}", owner, new { stateless = true });
+        var hall = await ExpectAsync(enforce, 200, HttpMethod.Get, "/pcs", owner);
+        Assert.True(hall.GetProperty("items").EnumerateArray().Single(p => p.GetProperty("id").GetGuid() == agent.PcId).GetProperty("stateless").GetBoolean());
+
+        // Still online by its heartbeat: an intruder with the club key and the HWID is refused like for any PC.
+        await AssertRefusedAsync(agent);
+
+        // Rebooted: offline after 90 s of silence, then the same PC with new credentials, and not put in maintenance
+        // (the re-enroll window does that); its first heartbeat makes it free.
+        enforce.Clock.Advance(TimeSpan.FromSeconds(91));
+        using (var reboot = await TestAgent.RegisterAsync(enforce, TestAgent.RegisterBody(agent.Hwid, TestAgent.RandomMac())))
+        {
+            var again = new TestAgent(enforce, await Players.ReadAsync(reboot, 200), agent.Hwid);
+            Assert.Equal(agent.PcId, again.PcId);
+            Assert.NotEqual(agent.Secret, again.Secret);
+            Assert.Equal("offline", again.Registration.GetProperty("pc").GetProperty("status").GetString());
+            var beat = await Players.ReadAsync(await again.HeartbeatAsync(), 200);
+            Assert.Equal("free", beat.GetProperty("pcStatus").GetString());
+        }
+
+        Assert.Contains(About(logs, agent.PcId, LogLevel.Information), m => m.Contains("without persistent storage re-registered", StringComparison.Ordinal));
+        Assert.DoesNotContain(Warnings(logs, agent.PcId), m => m.Contains("re-registered without a valid proof", StringComparison.Ordinal));
+
+        // Unmarked again: refused, and a cashier cannot mark it.
+        enforce.Clock.Advance(TimeSpan.FromSeconds(91));
+        await ExpectAsync(enforce, 200, HttpMethod.Patch, $"/pcs/{agent.PcId}", owner, new { stateless = false });
+        await AssertRefusedAsync(agent);
+        var cashier = await LoginAsync(enforce, CashierPin);
+        Contract.AssertError(await ExpectAsync(enforce, 403, HttpMethod.Patch, $"/pcs/{agent.PcId}", cashier, new { stateless = true }), "forbidden", "ownerOnly");
+    }
+
+    [Fact]
+    public async Task In_audit_a_pc_without_persistent_storage_re_registers_without_the_warning()
+    {
+        var logs = LogRecorder.On(audit);
+        var agent = await TestAgent.CreateAsync(audit);
+        await ExpectAsync(audit, 200, HttpMethod.Patch, $"/pcs/{agent.PcId}", await LoginAsync(audit, OwnerPin), new { stateless = true });
+        var again = await TestAgent.CreateAsync(audit, agent.Hwid);
+        Assert.Equal(agent.PcId, again.PcId);
+        Assert.Empty(Warnings(logs, agent.PcId));
+    }
+
+    [Fact]
     public async Task After_a_reused_refresh_token_a_proven_registration_restores_the_pc()
     {
         // A lost refresh response: the agent comes back with the token the server already used, so every token of the PC

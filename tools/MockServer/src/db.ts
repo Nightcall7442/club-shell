@@ -125,6 +125,8 @@ export interface PcRecord extends Pc {
   runningGames?: RunningGame[];
   /** `gamesVolume` of its last heartbeat: the games disk «Состояние ПК» and the hall editor show (D-73). */
   gamesVolume?: HeartbeatGamesVolume | null;
+  /** Marked by the owner as a PC without persistent storage, which re-registers at every boot (SHELL_CHANGES 25). */
+  stateless?: boolean;
   /** Vanguard's state in its last heartbeat: `GET /games` leaves out what this PC cannot start without it (D-74). */
   antiCheat?: Pick<HeartbeatAntiCheat, 'vanguardInstalled' | 'vanguardLoaded'> | null;
 }

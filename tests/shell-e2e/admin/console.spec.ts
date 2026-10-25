@@ -2325,6 +2325,32 @@ test('the hall editor shows the hardware the selected PC reported', async ({ pag
   await expect(panel).toContainText('ядер: 4, потоков: 8');
   await expect(panel).toContainText('8 ГБ');
   await expect(panel).toContainText('10.0.22631');
+
+  // A diskless seat is marked in the same panel (SHELL_CHANGES 25).
+  const diskless = panel.getByRole('switch', { name: 'Без постоянного диска' });
+  await expect(diskless).toHaveAttribute('aria-checked', 'false');
+  await diskless.click();
+  await expect(diskless).toHaveAttribute('aria-checked', 'true');
+});
+
+test('the owner marks a PC as without persistent storage, a cashier cannot (SHELL_CHANGES 25)', async ({ request }) => {
+  const pc = await registerAgent(request, 'stateless');
+  const owner = auth(await tokenFor(request, OWNER_PIN));
+  const stateless = async (): Promise<boolean | undefined> => {
+    const hall = (await (await request.get(`${API}/admin/pcs`, { headers: owner })).json()) as {
+      items: { id: string; stateless?: boolean }[];
+    };
+    return hall.items.find((p) => p.id === pc.pcId)?.stateless;
+  };
+  expect(await stateless()).toBe(false);
+  const marked = await request.patch(`${API}/admin/pcs/${pc.pcId}`, { headers: owner, data: { stateless: true } });
+  expect(marked.ok(), await marked.text()).toBeTruthy();
+  expect(await stateless()).toBe(true);
+  const cashier = auth(await tokenFor(request, CASHIER_PIN));
+  expect(
+    (await request.patch(`${API}/admin/pcs/${pc.pcId}`, { headers: cashier, data: { stateless: false } })).status(),
+  ).toBe(403);
+  expect(await stateless()).toBe(true);
 });
 
 test('a PC without a loaded Vanguard is not offered the games it could not start (D-74)', async ({ request }) => {
