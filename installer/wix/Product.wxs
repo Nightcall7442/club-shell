@@ -8,7 +8,8 @@
     KIOSKUSER        Local kiosk account name (default: club); persisted in HKLM\SOFTWARE\ClubShell\KioskUser
     INSTALLSHELL     1 (default) installs the Shell feature; 0 installs the Agent only
     INSTALLFOLDER    Install root (default: C:\Program Files\ClubShell)
-    SKIPDOTNETCHECK  1 skips the .NET runtime launch condition (a newer 8.0.x patch is installed)
+    (no .NET prerequisite: the Agent is self-contained, SHELL_CHANGES 38; a SKIPDOTNETCHECK passed by older
+     command lines is ignored)
     INSTALLDISKLESS  1 installs the optional ClubDisklessHelper feature (only in MSIs built with DisklessHelperDir;
                      its DISKLESS* properties are listed in DisklessHelper.wxs, the feature itself in docs/DISKLESS.md)
 
@@ -52,22 +53,16 @@
     <Property Id="SERVERURL" Value="https://club.example.uz" Secure="yes" />
     <Property Id="CLUBAPIKEY" Secure="yes" Hidden="yes" />
     <Property Id="INSTALLSHELL" Value="1" Secure="yes" />
-    <Property Id="SKIPDOTNETCHECK" Secure="yes" />
     <Property Id="KIOSKUSER" Value="club" Secure="yes">
       <!-- Persisted by the RegistryValues component so uninstall/upgrade know the kiosk account without arguments. -->
       <RegistrySearch Id="KioskUserSearch" Root="HKLM" Key="SOFTWARE\ClubShell" Name="KioskUser" Type="raw" Bitness="always64" />
     </Property>
 
-    <!-- Detection: existing agent.json (never overwritten) and the exact .NET runtime the bundle ships. -->
+    <!-- Detection: existing agent.json (never overwritten). -->
     <Property Id="AGENTJSONEXISTS">
       <DirectorySearch Id="ClubShellDataSearch" Path="[CommonAppDataFolder]ClubShell" Depth="0">
         <FileSearch Id="AgentJsonSearch" Name="agent.json" />
       </DirectorySearch>
-    </Property>
-    <Property Id="DOTNET8RUNTIME">
-      <RegistrySearch Id="DotnetRuntimeSearch" Root="HKLM"
-                      Key="SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.NETCore.App"
-                      Name="$(var.DotnetRuntimeVersion)" Type="raw" Bitness="always64" />
     </Property>
 
     <Launch Condition="Installed OR VersionNT64"
@@ -80,8 +75,6 @@
     </Property>
     <Launch Condition="Installed OR (WINDOWSBUILDNUMBER &gt;= 17763)"
             Message="ClubShell requires Windows 10 version 1809 (build 17763) or later." />
-    <Launch Condition="Installed OR DOTNET8RUNTIME OR SKIPDOTNETCHECK"
-            Message="The Microsoft .NET Runtime $(var.DotnetRuntimeVersion) (x64) is required. Run ClubShellSetup.exe, which installs it, or install it from https://dotnet.microsoft.com and retry. If a newer 8.0.x runtime is already installed, pass SKIPDOTNETCHECK=1." />
 
     <!-- Directory layout: C:\Program Files\ClubShell\{Agent,Shell} and C:\ProgramData\ClubShell (ARCHITECTURE.md section 9). -->
     <StandardDirectory Id="ProgramFiles64Folder">
@@ -136,7 +129,7 @@
 <?ifdef DisklessHelperDir ?>
     <!-- Optional, off by default: only in MSIs built with -p:DisklessHelperDir (DisklessHelper.wxs). -->
     <Feature Id="DisklessHelper" Title="Club diskless helper" Level="1000"
-             Description="ClubDisklessHelper service: mounts the club's games library volume read-only over iSCSI as the club server assigns it. While it is installed the Agent does not mount storage.gamesShare. Install with INSTALLDISKLESS=1.">
+             Description="ClubDisklessHelper service: mounts the club's games library volume over iSCSI as the club server assigns it. Installed only where no helper is present, and never replaced, stopped or removed by ClubShell. While it is installed the Agent does not mount storage.gamesShare. Install with INSTALLDISKLESS=1.">
       <ComponentGroupRef Id="DisklessHelper" />
       <Level Value="1" Condition="INSTALLDISKLESS = 1" />
     </Feature>

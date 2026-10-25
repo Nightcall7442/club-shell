@@ -28,7 +28,7 @@ by the client is specified here.
 │  GAMING PC (Windows 10/11 x64)                                                           │
 │                                                                                          │
 │  ┌──────────────────────────── Session 0 (non-interactive) ─────────────────────────┐    │
-│  │  ClubShellAgent.exe  — .NET 8 Worker Service, runs as NT AUTHORITY\SYSTEM        │    │
+│  │  ClubShellAgent.exe  — .NET 10 Worker Service, runs as NT AUTHORITY\SYSTEM       │    │
 │  │   ├─ ServerClient (REST + RetryPolicy + signing)      ├─ SessionManager / Timers  │    │
 │  │   ├─ RealtimeClient (WS + Reconnector)                ├─ OfflineSessionStore      │    │
 │  │   ├─ PipeServer \\.\pipe\clubshell-agent              ├─ PolicyEnforcer          │    │
@@ -57,17 +57,17 @@ by the client is specified here.
 
 | Path | Component | Runtime |
 |------|-----------|---------|
-| `src/ClubShell.Contracts` | DTOs / enums (System.Text.Json, camelCase, string enums): canonical for IPC, server-wire types follow club-contracts (§1.2) | .NET 8 lib |
-| `src/ClubShell.Core` | Abstractions, config, HTTP, logging, realtime, security, updates. No Win32. | .NET 8 lib |
-| `src/ClubShell.Windows` | Win32 layer (P/Invoke, hooks, WMI, WTS, job objects, registry, firewall, users) | net8.0-windows lib |
-| `src/ClubShell.Agent` | `ClubShellAgent` Windows service | .NET 8 Worker |
+| `src/ClubShell.Contracts` | DTOs / enums (System.Text.Json, camelCase, string enums): canonical for IPC, server-wire types follow club-contracts (§1.2) | .NET 10 lib |
+| `src/ClubShell.Core` | Abstractions, config, HTTP, logging, realtime, security, updates. No Win32. | .NET 10 lib |
+| `src/ClubShell.Windows` | Win32 layer (P/Invoke, hooks, WMI, WTS, job objects, registry, firewall, users) | net10.0-windows lib |
+| `src/ClubShell.Agent` | `ClubShellAgent` Windows service, published self-contained single-file (no .NET install on the PC) | .NET 10 Worker |
 | `apps/shell` | Kiosk UI (Tauri 2 + React 18) | Rust + WebView2 |
 | `crates/protocol` | Rust mirror of Contracts (serde) — generated | Rust crate |
 | `crates/winutil` | Rust Win32 helpers (windows 0.58) | Rust crate |
 | `packages/contracts-ts` | TS mirror of Contracts — generated | npm package |
 | `tools/ContractsGen` | Reflection over Contracts → TS + Rust | .NET tool |
 | `tools/MockServer` | Fastify + ws mock of central server | Node 20 |
-| `installer/wix` | WiX v5: `ClubShell.msi` (Agent service + Shell + config/themes) and the `ClubShellSetup.exe` Burn bundle (.NET 8 runtime + WebView2 bootstrapper + MSI) | MSI / EXE |
+| `installer/wix` | WiX v5: `ClubShell.msi` (Agent service + Shell + config/themes) and the `ClubShellSetup.exe` Burn bundle (WebView2 bootstrapper + MSI; no .NET runtime, the Agent is self-contained) | MSI / EXE |
 | `config/*` | Defaults deployed to `C:\ProgramData\ClubShell` | JSON |
 
 ### 1.2 Contract sources and mirroring rule

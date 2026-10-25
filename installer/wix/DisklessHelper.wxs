@@ -1,10 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   Optional feature DisklessHelper: ClubDisklessHelper, the shell-agnostic service that mounts the club's games library
-  volume read-only over iSCSI as the club server assigns it (docs/DISKLESS.md). It is a separate product: this file is
-  compiled in only when the build gets -p:DisklessHelperDir=<folder holding ClubDisklessHelper.exe>, and the feature
-  (Level 1000) is installed only with INSTALLDISKLESS=1 or ADDLOCAL=DisklessHelper. Major upgrades keep it installed
-  (MigrateFeatureStates), so an Agent MSI update does not need the property again.
+  volume over iSCSI as the club server assigns it (a shared read-only LUN, or a writable per-seat copy the club server
+  resets at every boot; docs/DISKLESS.md). It is a separate product: this file is compiled in only when the build gets
+  -p:DisklessHelperDir=<folder holding ClubDisklessHelper.exe>, and the feature (Level 1000) is installed only with
+  INSTALLDISKLESS=1 or ADDLOCAL=DisklessHelper.
+
+  The helper's owner installs and updates it (SHELL_CHANGES 32): this MSI only puts it on a PC that has none. The exe
+  component is NeverOverwrite (a helper already there, of any version, is left as it is) and Permanent (an upgrade or
+  an uninstall of ClubShell never removes it), and there is no ServiceControl: ClubShell never stops, restarts or
+  deletes the ClubDisklessHelper service, so a player's G: never goes away because ClubShell was updated.
 
     C:\Program Files\ClubDiskless\ClubDisklessHelper.exe   service ClubDisklessHelper: LocalSystem, automatic start,
                                                             restart on failure
@@ -21,8 +26,7 @@
 
   Start policy: a fresh install registers the service but does not start it. On a reference image a start before
   sysprep would register that machine with the club server, and every PC cloned from the image would share the
-  registration. The service starts at the next boot, at once with DISKLESSSTART=1, and after every upgrade: replacing
-  the exe stops it, and the library must not stay unmanaged until the next reboot. The start is best effort (sc.exe,
+  registration. The service starts at the next boot, or at once with DISKLESSSTART=1. The start is best effort (sc.exe,
   Return="ignore") so a helper that cannot start never rolls back the ClubShell install.
 
   While the service is installed the Agent's GamesShareMounter stands down: storage.gamesShare is ignored.
@@ -45,13 +49,13 @@
     </StandardDirectory>
 
     <ComponentGroup Id="DisklessHelper">
-      <Component Id="DisklessHelperExe" Directory="DisklessDir">
+      <Component Id="DisklessHelperExe" Directory="DisklessDir" NeverOverwrite="yes" Permanent="yes">
         <File Id="ClubDisklessHelper.exe" Source="$(var.DisklessHelperDir)\ClubDisklessHelper.exe" KeyPath="yes" />
 
         <ServiceInstall Id="DisklessHelperServiceInstall"
                         Name="ClubDisklessHelper"
                         DisplayName="Club diskless helper"
-                        Description="Mounts the club's games library volume read-only over iSCSI, as assigned by the club server."
+                        Description="Mounts the club's games library volume over iSCSI, as assigned by the club server."
                         Type="ownProcess"
                         Start="auto"
                         ErrorControl="normal"
@@ -64,13 +68,7 @@
                               RestartServiceDelayInSeconds="5"
                               ResetPeriodInDays="1" />
         </ServiceInstall>
-
-        <!-- No Start here (start policy above): stop before the exe is replaced or removed, delete on uninstall. -->
-        <ServiceControl Id="DisklessHelperServiceControl"
-                        Name="ClubDisklessHelper"
-                        Stop="both"
-                        Remove="uninstall"
-                        Wait="yes" />
+        <!-- No ServiceControl: ClubShell never stops or deletes the helper's service (see above). -->
       </Component>
 
       <Component Id="DisklessConfigureScript" Directory="DisklessDir">
@@ -102,7 +100,7 @@
       <Custom Action="CA_ConfigureDisklessHelper" After="InstallFiles"
               Condition="(&amp;DisklessHelper = 3) AND DISKLESSSERVERURL AND DISKLESSCLUBKEY AND NOT REMOVE" />
       <Custom Action="CA_StartDisklessHelper" After="StartServices"
-              Condition="(&amp;DisklessHelper = 3) AND (DISKLESSSTART = 1 OR WIX_UPGRADE_DETECTED) AND NOT REMOVE" />
+              Condition="(&amp;DisklessHelper = 3) AND DISKLESSSTART = 1 AND NOT REMOVE" />
     </InstallExecuteSequence>
   </Fragment>
 

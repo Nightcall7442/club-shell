@@ -7,7 +7,7 @@
   -->
 
   <PropertyGroup>
-    <TargetFramework>net8.0-windows10.0.17763.0</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
     <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
     <RootNamespace>ClubShell.Windows</RootNamespace>
     <AssemblyName>ClubShell.Windows</AssemblyName>
@@ -22,10 +22,8 @@
   <ItemGroup>
     <PackageReference Include="System.Management" />
     <PackageReference Include="System.Diagnostics.PerformanceCounter" />
-    <PackageReference Include="Microsoft.Win32.Registry" />
     <PackageReference Include="System.DirectoryServices.AccountManagement" />
     <PackageReference Include="System.ServiceProcess.ServiceController" />
-    <PackageReference Include="System.IO.Pipes.AccessControl" />
   </ItemGroup>
 
 </Project>

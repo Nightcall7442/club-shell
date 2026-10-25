@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <!-- Must match ClubShell.Agent / ClubShell.Windows: a lower TargetPlatformVersion cannot reference a higher one. -->
-    <TargetFramework>net8.0-windows10.0.17763.0</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
     <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
     <RootNamespace>ClubShell.Agent.Tests</RootNamespace>
     <!-- ClubShellAgent is built for win-x64; matching the architecture avoids MSB3270 on the project reference. -->

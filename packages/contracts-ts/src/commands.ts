@@ -1529,7 +1529,10 @@ export const GamesVolumeOwner = {
   None: 'none',
   /** The Agent maps the SMB share of `storage.gamesShare`. */
   Agent: 'agent',
-  /** ClubDisklessHelper (read-only iSCSI, docs/DISKLESS.md); it reports the volume to its own server. */
+  /**
+   * ClubDisklessHelper (iSCSI as the club server assigns it, docs/DISKLESS.md); it reports the volume to its own
+   * server.
+   */
   DisklessHelper: 'disklessHelper',
 } as const;
 /** Who mounts the games library volume on the PC (heartbeat `gamesVolume.owner`). */

@@ -189,7 +189,7 @@ ClubShell закрывает контур на самом ПК: **оболочк
 - Именованный канал `\\.\pipe\clubshell-agent` с ACL, токеном оболочки и проверкой процесса-клиента
 - HMAC-SHA256 подпись запросов к серверу, DPAPI для секретов, никаких входящих портов на ПК
 - Mock-сервер на Fastify: весь REST + WebSocket, чтобы разрабатывать и показывать без бэкенда
-- Установщик WiX v5: MSI со службой, оболочкой и конфигами (+ по желанию служба ClubDisklessHelper, `INSTALLDISKLESS=1`) + Burn-бандл с .NET 8 и WebView2
+- Установщик WiX v5: MSI со службой, оболочкой и конфигами (+ по желанию служба ClubDisklessHelper, `INSTALLDISKLESS=1`) + Burn-бандл с WebView2; агент self-contained, рантайм .NET ставить не нужно, установка без интернета
 
 ---
 
@@ -207,7 +207,7 @@ flowchart TB
 
     subgraph PC["Игровой ПК — Windows 10/11 x64"]
         subgraph S0["Сессия 0"]
-            A["ClubShellAgent<br/>.NET 8 Worker Service, LocalSystem<br/>сеансы · лаунчеры · политики · античит · обновления"]
+            A["ClubShellAgent<br/>.NET 10 Worker Service, LocalSystem<br/>сеансы · лаунчеры · политики · античит · обновления"]
         end
         subgraph S1["Интерактивная сессия киоск-пользователя"]
             SH["clubshell-shell.exe<br/>Tauri 2 (Rust): pipe-клиент, хуки, topmost, геймпад"]
@@ -235,7 +235,7 @@ flowchart TB
 
 | Слой | Что используется |
 |---|---|
-| Агент и библиотеки | .NET 8, C# 12, Worker Service, Serilog, Microsoft.Data.Sqlite, Polly (Http.Resilience), `TreatWarningsAsErrors` |
+| Агент и библиотеки | .NET 10 LTS (self-contained), C# 12, Worker Service, Serilog, Microsoft.Data.Sqlite, Polly (Http.Resilience), `TreatWarningsAsErrors` |
 | Win32-слой | `LibraryImport` P/Invoke, низкоуровневые хуки, WMI, WTS, job objects, реестр, DPAPI |
 | Оболочка, хост | Rust 2021, Tauri 2, tokio, `windows` 0.58, gilrs |
 | Оболочка, UI | React 18, Vite 5, TypeScript 5.5, Tailwind CSS 3.4, Zustand 4, react-router 6, i18next 23, framer-motion |
@@ -307,7 +307,7 @@ Copy-Item .env.example .env
 | Что | Сколько |
 |---|---|
 | xUnit | 5 наборов, больше 1000 проверок: агент и библиотеки — Contracts, Core, Windows, Agent (`ci.yml`), включая сквозной тест именованного канала; сервер — на временной базе PostgreSQL 18 (`server.yml`), каждый ответ сверяется со схемой контракта. Точные числа — в отчётах последнего прогона CI (артефакты `dotnet-test-results`, `server-test-results`) |
-| Компиляция .NET | `ClubShell.sln` (агент, net8.0) и `server/ClubShell.Server.sln` (сервер, net10.0) на SDK 10, NetAnalyzers, `/warnaserror` — в CI |
+| Компиляция .NET | `ClubShell.sln` (агент, net10.0) и `server/ClubShell.Server.sln` (сервер, net10.0) на SDK 10, NetAnalyzers, `/warnaserror` — в CI |
 | Rust | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test` (`ci.yml`) |
 | TypeScript | `tsc --noEmit` во всех пакетах, `vite build` без предупреждений о размере чанков |
 | Интерфейс | 12 разделов, прогон в mock-режиме на 1600×900 / 1920×1080; Playwright e2e: киоск (вход, каталог, HUD в игре, оформление клуба, настройки игр игрока, этот ПК, настройки ПК) и админка (в том числе PIN и роли, язык, смена, расчёт цены, экран игрока, контроль кассиров, состояние ПК, пути настроек игр, сеть клубов, Idempotency-Key денежных операций, ключ API и выход, регистрация клиента с паролем и картой); в CI оба в mock-режиме, админка ещё и против настоящего сервера (`server.yml`) |
@@ -404,7 +404,7 @@ tools/scripts/         build · dev · package · sign · publish · setup-dev-v
 <details>
 <summary><b>English summary</b></summary>
 
-**ClubShell** is client software for gaming clubs / internet cafés (Uzbekistan / CIS; UI in Russian, Uzbek and English; prices in UZS). Each gaming PC runs a **.NET 8 Windows service** (`ClubShellAgent`, session 0: sessions and billing timers, game launching via Steam / Epic / Battle.net / Riot / EA / Ubisoft with an account pool, server policies, anti-cheat checks, updates, telemetry, remote admin) and a **Tauri 2 + React kiosk shell** that replaces `explorer.exe` for the local kiosk user. The shell ships the "Obsidian" theme (a minimal layout with a restrained HUD layer: corner-bracket focus, mono telemetry labels, dot-matrix time and money, one ice-blue accent — the game art carries the colour), a pause-menu HUD frame (section tabs between LB/RB on top, a status line with time, balance and controller prompts at the bottom), a calm home with the selected game, a poster-wall catalogue and an in-game HUD (`Ctrl+Shift+H`: time, balance, +30 min, call admin) over the running game. They talk over the named pipe `\\.\pipe\clubshell-agent`; the agent talks to the club server over REST + WebSocket with HMAC-signed requests. Offline mode keeps the timer and queues events in SQLite.
+**ClubShell** is client software for gaming clubs / internet cafés (Uzbekistan / CIS; UI in Russian, Uzbek and English; prices in UZS). Each gaming PC runs a **.NET 10 Windows service** (`ClubShellAgent`, session 0: sessions and billing timers, game launching via Steam / Epic / Battle.net / Riot / EA / Ubisoft with an account pool, server policies, anti-cheat checks, updates, telemetry, remote admin) and a **Tauri 2 + React kiosk shell** that replaces `explorer.exe` for the local kiosk user. The shell ships the "Obsidian" theme (a minimal layout with a restrained HUD layer: corner-bracket focus, mono telemetry labels, dot-matrix time and money, one ice-blue accent — the game art carries the colour), a pause-menu HUD frame (section tabs between LB/RB on top, a status line with time, balance and controller prompts at the bottom), a calm home with the selected game, a poster-wall catalogue and an in-game HUD (`Ctrl+Shift+H`: time, balance, +30 min, call admin) over the running game. They talk over the named pipe `\\.\pipe\clubshell-agent`; the agent talks to the club server over REST + WebSocket with HMAC-signed requests. Offline mode keeps the timer and queues events in SQLite.
 
 The **central server** (`server/`, .NET 10 + PostgreSQL 18, hosted on Railway) implements the [club-contracts](https://github.com/deepunites/club-contracts) API (OpenAPI 3.1 + AsyncAPI, the wire's source of truth, vendored in `server/contracts`) in slices S0–S6, all done: S0 (skeleton, JWT/HMAC, idempotency, `501` for every operation not implemented yet), S1 (agent registration with owner approval, heartbeat, config/policies, command queue, `/ws/agent`), S2 (player login, sessions and billing, wallet ledger, offline session replay), S3 (games, updates, PCs), S4–S5 (cashier API) and S6 (Docker image, Railway deployment, smoke test in CI) ([state](server/README.md), [design](docs/server/DESIGN.md)).
 

@@ -452,7 +452,11 @@ internal static class AntiCheatProbe
     {
         try
         {
+            // SYSLIB0057: X509CertificateLoader has no Authenticode counterpart (it loads certificate files, not the
+            // signature embedded in a PE file).
+#pragma warning disable SYSLIB0057
             using var certificate = X509Certificate.CreateFromSignedFile(path);
+#pragma warning restore SYSLIB0057
             return true;
         }
         catch (CryptographicException)

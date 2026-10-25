@@ -20,8 +20,9 @@
       DisklessHelperDir optional: folder holding ClubDisklessHelper.exe (a separate product, not in this repository).
                         When set, the MSI gains the off-by-default DisklessHelper feature (DisklessHelper.wxs,
                         docs/DISKLESS.md); when empty the MSI is exactly as before.
-      Dotnet* / WebView2*  remote prerequisite payloads of the bundle; when refreshing them pass the new
-                        size / SHA-512 / file version (the SHA-512 must match the file at the URL).
+      WebView2*         the bundle's only remote prerequisite payload (the Agent is self-contained, no .NET
+                        runtime); when refreshing it pass the new size / SHA-512 / file version (the SHA-512 must
+                        match the file at the URL).
 
     Expected validation output: one ICE03 "string overflow" warning for SetCA_SeedAgentConfig (inline PowerShell
     command line longer than the 255 characters ICE validates; Windows Installer does not enforce that width). The
@@ -67,12 +68,6 @@
   </PropertyGroup>
 
   <PropertyGroup Label="Bundle prerequisites (remote payloads)">
-    <!-- .NET 8 runtime (framework-dependent Agent). Fixed, versioned URL; values verified against the published file. -->
-    <DotnetRuntimeVersion Condition="'$(DotnetRuntimeVersion)' == ''">8.0.8</DotnetRuntimeVersion>
-    <DotnetRuntimeFileVersion Condition="'$(DotnetRuntimeFileVersion)' == ''">8.0.8.33916</DotnetRuntimeFileVersion>
-    <DotnetRuntimeUrl Condition="'$(DotnetRuntimeUrl)' == ''">https://builds.dotnet.microsoft.com/dotnet/Runtime/8.0.8/dotnet-runtime-8.0.8-win-x64.exe</DotnetRuntimeUrl>
-    <DotnetRuntimeSha512 Condition="'$(DotnetRuntimeSha512)' == ''">57f2a276176661a340b96991b584bcb81ba3c0150e3684cb109b29cc3a8ebe6fdf1e586d948d498e7aaf22f7401c1cc94062c13cffd20999771ecc5dfc2e917e</DotnetRuntimeSha512>
-    <DotnetRuntimeSize Condition="'$(DotnetRuntimeSize)' == ''">28703680</DotnetRuntimeSize>
     <!-- WebView2 Evergreen bootstrapper (Tauri shell). Microsoft re-publishes this file under the same fwlink, so
          the hash drifts: re-download it and pass the new WebView2Size / WebView2Sha512 / WebView2FileVersion. -->
     <WebView2Url Condition="'$(WebView2Url)' == ''">https://go.microsoft.com/fwlink/p/?LinkId=2124703</WebView2Url>
@@ -85,7 +80,7 @@
   <PropertyGroup Condition="'$(Configuration)' != 'Bundle'">
     <OutputType>Package</OutputType>
     <OutputName>ClubShell</OutputName>
-    <DefineConstants>$(DefineConstants);Version=$(MsiVersion);AgentPublishDir=$(AgentPublishDir);ShellBundleDir=$(ShellBundleDir);ConfigDir=$(ConfigDir);AgentScriptsDir=$(AgentScriptsDir);IconDir=$(IconDir);DotnetRuntimeVersion=$(DotnetRuntimeVersion)</DefineConstants>
+    <DefineConstants>$(DefineConstants);Version=$(MsiVersion);AgentPublishDir=$(AgentPublishDir);ShellBundleDir=$(ShellBundleDir);ConfigDir=$(ConfigDir);AgentScriptsDir=$(AgentScriptsDir);IconDir=$(IconDir)</DefineConstants>
   </PropertyGroup>
   <ItemGroup Condition="'$(Configuration)' != 'Bundle'">
     <Compile Include="Product.wxs" />
@@ -104,7 +99,7 @@
   <PropertyGroup Condition="'$(Configuration)' == 'Bundle'">
     <OutputType>Bundle</OutputType>
     <OutputName>ClubShellSetup</OutputName>
-    <DefineConstants>$(DefineConstants);Version=$(MsiVersion);MsiPath=$(MsiPath);IconDir=$(IconDir);DotnetRuntimeVersion=$(DotnetRuntimeVersion);DotnetRuntimeFileVersion=$(DotnetRuntimeFileVersion);DotnetRuntimeUrl=$(DotnetRuntimeUrl);DotnetRuntimeSha512=$(DotnetRuntimeSha512);DotnetRuntimeSize=$(DotnetRuntimeSize);WebView2Url=$(WebView2Url);WebView2FileVersion=$(WebView2FileVersion);WebView2Sha512=$(WebView2Sha512);WebView2Size=$(WebView2Size)</DefineConstants>
+    <DefineConstants>$(DefineConstants);Version=$(MsiVersion);MsiPath=$(MsiPath);IconDir=$(IconDir);WebView2Url=$(WebView2Url);WebView2FileVersion=$(WebView2FileVersion);WebView2Sha512=$(WebView2Sha512);WebView2Size=$(WebView2Size)</DefineConstants>
     <!-- Club-specific bundle (Bundle.wxs): the server origin and, optionally, the club registration key as variable defaults. -->
     <DefaultServerUrl Condition="'$(DefaultServerUrl)' == ''">https://club.example.uz</DefaultServerUrl>
     <DefineConstants>$(DefineConstants);DefaultServerUrl=$(DefaultServerUrl)</DefineConstants>
@@ -120,7 +115,6 @@
     <PackageReference Include="WixToolset.Firewall.wixext" Version="5.0.1" />
     <PackageReference Include="WixToolset.UI.wixext" Version="5.0.1" />
     <PackageReference Include="WixToolset.BootstrapperApplications.wixext" Version="5.0.1" />
-    <PackageReference Include="WixToolset.Netfx.wixext" Version="5.0.1" />
   </ItemGroup>
 
   <ItemGroup>
