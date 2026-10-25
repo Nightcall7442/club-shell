@@ -146,7 +146,10 @@ public sealed class ShellReplacementPolicyModule : IPolicyModule
     {
         try
         {
+            // SYSLIB0057: X509CertificateLoader has no Authenticode counterpart (the signer embedded in a PE file).
+#pragma warning disable SYSLIB0057
             using X509Certificate certificate = X509Certificate.CreateFromSignedFile(exe);
+#pragma warning restore SYSLIB0057
             return "shell executable Authenticode signer: " + certificate.Subject;
         }
         catch (CryptographicException ex)

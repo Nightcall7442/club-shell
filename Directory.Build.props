@@ -2,7 +2,7 @@
 
   <!--
     Shared MSBuild properties for every .NET project in the repository.
-    TargetFramework is deliberately NOT set here: each project picks net8.0 or net8.0-windows.
+    TargetFramework is deliberately NOT set here: each project picks net10.0 or net10.0-windows (the server: net10.0).
     Package versions live in Directory.Packages.props (Central Package Management).
   -->
 
@@ -30,7 +30,8 @@
     <Product>ClubShell</Product>
     <Authors>ClubShell contributors</Authors>
     <Copyright>Copyright (c) 2026 ClubShell contributors</Copyright>
-    <VersionPrefix>1.0.0</VersionPrefix>
+    <!-- Release builds pass -p:Version from the tag (release.yml); this is the version of local and CI builds. -->
+    <VersionPrefix>1.0.18</VersionPrefix>
   </PropertyGroup>
 
   <PropertyGroup Label="Output layout">

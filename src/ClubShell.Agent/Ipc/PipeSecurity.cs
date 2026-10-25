@@ -186,7 +186,10 @@ public static class PipeSecurityFactory
 
         try
         {
+            // SYSLIB0057: X509CertificateLoader has no Authenticode counterpart (the signer embedded in a PE file).
+#pragma warning disable SYSLIB0057
             using var certificate = new X509Certificate2(X509Certificate.CreateFromSignedFile(path));
+#pragma warning restore SYSLIB0057
             return certificate.Thumbprint;
         }
         catch (CryptographicException)

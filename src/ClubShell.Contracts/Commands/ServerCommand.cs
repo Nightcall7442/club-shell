@@ -837,7 +837,7 @@ public enum GamesVolumeOwner
     /// <summary>The Agent maps the SMB share of <c>storage.gamesShare</c>.</summary>
     Agent,
 
-    /// <summary>ClubDisklessHelper (read-only iSCSI, docs/DISKLESS.md); it reports the volume to its own server.</summary>
+    /// <summary>ClubDisklessHelper (iSCSI as the club server assigns it, docs/DISKLESS.md); it reports the volume to its own server.</summary>
     DisklessHelper,
 }
 

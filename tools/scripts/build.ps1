@@ -286,7 +286,7 @@ try {
             $out = Join-Path $ArtifactsDir 'publish\agent'
             Invoke-Native -Command 'dotnet' -Arguments @(
                 'publish', (Join-Path $RepoRoot 'src\ClubShell.Agent\ClubShell.Agent.csproj'),
-                '-c', $Configuration, '-r', 'win-x64', '--self-contained', 'false',
+                '-c', $Configuration, '-r', 'win-x64', '--self-contained', 'true',
                 '-p:PublishSingleFile=true', "-p:Version=$Version", '-o', $out, '-nologo')
             Write-Ok "Agent published to $out"
         }

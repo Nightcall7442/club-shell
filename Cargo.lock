@@ -354,7 +354,7 @@ dependencies = [
 
 [[package]]
 name = "clubshell-protocol"
-version = "1.0.0"
+version = "1.0.18"
 dependencies = [
  "chrono",
  "serde",
@@ -365,7 +365,7 @@ dependencies = [
 
 [[package]]
 name = "clubshell-shell"
-version = "1.0.0"
+version = "1.0.18"
 dependencies = [
  "anyhow",
  "bytes",
@@ -395,7 +395,7 @@ dependencies = [
 
 [[package]]
 name = "clubshell-shell-tests"
-version = "1.0.0"
+version = "1.0.18"
 dependencies = [
  "anyhow",
  "clubshell-protocol",
@@ -406,7 +406,7 @@ dependencies = [
 
 [[package]]
 name = "clubshell-winutil"
-version = "1.0.0"
+version = "1.0.18"
 dependencies = [
  "bytes",
  "chrono",

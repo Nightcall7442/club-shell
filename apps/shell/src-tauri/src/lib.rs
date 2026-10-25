@@ -37,7 +37,7 @@ static EXITING: AtomicBool = AtomicBool::new(false);
 static SHELL_VERSION: OnceLock<String> = OnceLock::new();
 
 /// Version of this Shell build as the installer and the update manifest know it. `CARGO_PKG_VERSION` is the
-/// workspace version (`1.0.0`), which a release never bumps, so `auth.hello` would never confirm a Shell update
+/// workspace version of the sources, which a release never bumps, so `auth.hello` would never confirm a Shell update
 /// (`UPDATES.md` §5.3). Falls back to it in tests and before [`run`].
 pub fn shell_version() -> &'static str {
     SHELL_VERSION

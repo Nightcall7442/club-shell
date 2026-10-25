@@ -43,7 +43,11 @@ public static class Authenticode
 
         try
         {
+            // SYSLIB0057: X509CertificateLoader has no Authenticode counterpart; this only reads the signer of a file
+            // WinVerifyTrust has just verified.
+#pragma warning disable SYSLIB0057
             using var certificate = X509Certificate.CreateFromSignedFile(path);
+#pragma warning restore SYSLIB0057
             return certificate.Subject;
         }
         catch (Exception ex) when (ex is CryptographicException or IOException or UnauthorizedAccessException)
