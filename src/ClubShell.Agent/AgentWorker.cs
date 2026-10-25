@@ -358,6 +358,8 @@ public sealed class AgentWorker : BackgroundService
                 // A reset owed but not paid at startup — the deletion failed, or the debt was incurred since — would
                 // otherwise wait for the next Agent restart. Throttles itself; a no-op when nothing is owed.
                 await _profileReset.ResetIfDirtyAsync(cancellationToken).ConfigureAwait(false);
+                // games.scanIntervalSec, and at once when the games disk mounts after startup (SHELL_CHANGES 31).
+                _ = await _games.RescanIfDueAsync(cancellationToken).ConfigureAwait(false);
                 if (_connection.IsOnline)
                 {
                     await FlushOutboxAsync(cancellationToken).ConfigureAwait(false);

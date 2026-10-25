@@ -363,6 +363,8 @@ public sealed class ClubTimeConverter : JsonConverter<TimeOnly>
 [JsonSerializable(typeof(SysSetLocaleResponse))]
 [JsonSerializable(typeof(SysUnlockAdminRequest))]
 [JsonSerializable(typeof(SysUnlockAdminResponse))]
+[JsonSerializable(typeof(SysAdminExitRequest))]
+[JsonSerializable(typeof(SysAdminExitResponse))]
 [JsonSerializable(typeof(SysLogClientErrorRequest))]
 [JsonSerializable(typeof(SysAckAdminMessageRequest))]
 [JsonSerializable(typeof(PolicySource))]

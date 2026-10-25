@@ -8,6 +8,7 @@ import type {
   HeartbeatGamesVolume,
   Money,
   PcStatus,
+  Policy,
   Product,
   Session,
   ServerErrorEnvelope,
@@ -1138,6 +1139,12 @@ export type TariffInput = Omit<Tariff, 'id' | 'pricePerHour' | 'packagePrice'> &
   timeWindows: TariffTimeWindow[];
 };
 
+/** `GET /admin/policy`: the club's PC policy; `custom` once the owner saved one (the server's seed no longer replaces it). */
+export interface ClubPolicy {
+  policy: Policy;
+  custom: boolean;
+}
+
 export const clubApi = {
   login: (pin: string, clubCode?: string): Promise<{ token: string; staff: StaffMember; shift: Shift | null }> =>
     post('/admin/login', clubCode ? { pin, clubCode, deviceId: deviceId() } : { pin, deviceId: deviceId() }),
@@ -1230,6 +1237,13 @@ export const clubApi = {
     y?: number;
   }): Promise<unknown> => post('/admin/pcs', input),
   deletePc: (id: string): Promise<unknown> => del(`/admin/pcs/${id}`),
+
+  /** The PC policy the club's Agents enforce (beyond the contract, SHELL_CHANGES 27). */
+  policy: (): Promise<ClubPolicy> => call('/admin/policy'),
+  /** Makes `policy` the club's own (the server sets `version` and `updatedAt`); the startup seed then leaves it. */
+  savePolicy: (policy: Policy): Promise<ClubPolicy> => put('/admin/policy', policy),
+  /** Back to the policy every club is seeded with. */
+  resetPolicy: (): Promise<ClubPolicy> => del('/admin/policy'),
 
   products: (): Promise<{ items: Product[]; lowAt: number }> => call('/admin/products'),
   /**

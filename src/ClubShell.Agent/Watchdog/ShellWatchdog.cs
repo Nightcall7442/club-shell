@@ -29,7 +29,7 @@ public enum ShellState
     /// <summary>Crash loop: fallback shell active, relaunches paused until the session recovers.</summary>
     SafeMode,
 
-    /// <summary>Restarts suspended by a profile reset / Shell update.</summary>
+    /// <summary>Restarts suspended by a profile reset / Shell update or an administrator's maintenance window.</summary>
     Suspended,
 }
 
@@ -53,6 +53,7 @@ public sealed class ShellWatchdog : BackgroundService
     private readonly SessionChangeWatcher _sessionWatcher;
     private readonly IShellConnectionState _shell;
     private readonly CrashRecovery _recovery;
+    private readonly AdminMaintenance _maintenance;
     private readonly IOptionsMonitor<AgentSettings> _settings;
     private readonly IClock _clock;
     private readonly ILogger<ShellWatchdog> _logger;
@@ -69,6 +70,7 @@ public sealed class ShellWatchdog : BackgroundService
         SessionChangeWatcher sessionWatcher,
         IShellConnectionState shell,
         CrashRecovery recovery,
+        AdminMaintenance maintenance,
         IOptionsMonitor<AgentSettings> settings,
         IClock clock,
         ILogger<ShellWatchdog> logger)
@@ -77,6 +79,7 @@ public sealed class ShellWatchdog : BackgroundService
         ArgumentNullException.ThrowIfNull(sessionWatcher);
         ArgumentNullException.ThrowIfNull(shell);
         ArgumentNullException.ThrowIfNull(recovery);
+        ArgumentNullException.ThrowIfNull(maintenance);
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(logger);
@@ -84,6 +87,7 @@ public sealed class ShellWatchdog : BackgroundService
         _sessionWatcher = sessionWatcher;
         _shell = shell;
         _recovery = recovery;
+        _maintenance = maintenance;
         _settings = settings;
         _clock = clock;
         _logger = logger;
@@ -204,7 +208,8 @@ public sealed class ShellWatchdog : BackgroundService
 
         if (_launcher.RestartsSuspended)
         {
-            // Intentional stop (profile reset / Shell update); the relaunch is driven by IShellRelauncher.
+            // Intentional stop (profile reset / Shell update: the relaunch is driven by IShellRelauncher) or an administrator's
+            // exit (sys.adminExit): not a crash, the Shell comes back when the maintenance window ends.
             return;
         }
 
@@ -308,8 +313,12 @@ public sealed class ShellWatchdog : BackgroundService
                 Wake();
                 break;
             case SessionChangeReason.Logoff:
-            case SessionChangeReason.ConsoleDisconnect:
             case SessionChangeReason.SessionRemove:
+                // Signing out is how an administrator hands the PC back before the maintenance window times out.
+                _maintenance.OnSessionEnded(e.SessionId);
+                Wake();
+                break;
+            case SessionChangeReason.ConsoleDisconnect:
                 Wake();
                 break;
             default:

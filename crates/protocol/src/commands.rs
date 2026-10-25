@@ -655,6 +655,8 @@ pub mod names {
         pub const SET_LOCALE: &str = "sys.setLocale";
         /// `SysUnlockAdminRequest` → `SysUnlockAdminResponse`.
         pub const UNLOCK_ADMIN: &str = "sys.unlockAdmin";
+        /// `SysAdminExitRequest` → `SysAdminExitResponse`.
+        pub const ADMIN_EXIT: &str = "sys.adminExit";
         /// `SysLogClientErrorRequest` → `OkResponse`.
         pub const LOG_CLIENT_ERROR: &str = "sys.logClientError";
         /// `SysAckAdminMessageRequest` → `OkResponse`.
@@ -1077,6 +1079,30 @@ pub struct ShopProductsResponse {
 pub struct SysAckAdminMessageRequest {
     /// Id of the acknowledged `AdminMessage`.
     pub id: Uuid,
+}
+
+/// Request of `sys.adminExit`, sent by the Shell right before it closes for an administrator
+/// (`kiosk_exit`): the Agent pauses the Shell watchdog for `minutes` (default 30, at most 480)
+/// instead of treating the exit as a crash; while the pause lasts USB storage works and the process
+/// deny-list is not enforced. The pause also ends when the kiosk session signs out or the PC
+/// restarts. `unauthorized` unless `adminToken` is an unexpired `sys.unlockAdmin` token.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SysAdminExitRequest {
+    /// Token from `sys.unlockAdmin`.
+    pub admin_token: String,
+    /// Length of the pause; `null` = the default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minutes: Option<i32>,
+}
+
+/// Response of `sys.adminExit`.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SysAdminExitResponse {
+    /// When the watchdog starts the Shell again (unless the session changes first).
+    #[serde(with = "crate::wire::ts")]
+    pub resume_at: DateTime<Utc>,
 }
 
 /// Request of `sys.callAdmin` (rate limited 1 per 30 s).
@@ -2495,6 +2521,7 @@ agent_commands! {
     SysSetVolume => names::sys::SET_VOLUME, Hello;
     SysSetLocale => names::sys::SET_LOCALE, Hello;
     SysUnlockAdmin => names::sys::UNLOCK_ADMIN, Hello;
+    SysAdminExit => names::sys::ADMIN_EXIT, Hello;
     SysLogClientError => names::sys::LOG_CLIENT_ERROR, Hello;
     SysAckAdminMessage => names::sys::ACK_ADMIN_MESSAGE, Hello;
     PolicyGet => names::policy::GET, Hello;
@@ -2905,7 +2932,7 @@ mod tests {
 
     #[test]
     fn agent_command_table_matches_ipc_protocol() {
-        assert_eq!(AgentCommand::ALL.len(), 65);
+        assert_eq!(AgentCommand::ALL.len(), 66);
         let expected: &[&str] = &[
             "auth.hello",
             "auth.login",
@@ -2966,6 +2993,7 @@ mod tests {
             "sys.setVolume",
             "sys.setLocale",
             "sys.unlockAdmin",
+            "sys.adminExit",
             "sys.logClientError",
             "sys.ackAdminMessage",
             "policy.get",

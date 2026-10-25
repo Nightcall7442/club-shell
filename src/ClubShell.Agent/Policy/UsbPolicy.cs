@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 
+using ClubShell.Agent.Watchdog;
 using ClubShell.Contracts.Pcs;
 using ClubShell.Windows.Native;
 using ClubShell.Windows.Registry;
@@ -15,9 +16,11 @@ namespace ClubShell.Agent.Policy;
 /// Section <c>usb</c>: machine-wide USBSTOR service start value and DeviceInstall class restrictions from
 /// <see cref="PolicyRegistry.RulesFor"/> (HKLM rules only), plus ejection of removable volumes that are already
 /// mounted when storage is blocked (the registry only stops newly attached devices). Revert restores the snapshot.
+/// During an administrator's maintenance window (<see cref="AdminMaintenance"/>, SHELL_CHANGES 28) storage is allowed
+/// whatever the policy says; the policy is applied again when the window ends.
 /// </summary>
 [SupportedOSPlatform("windows")]
-public sealed class UsbPolicyModule : IPolicyModule
+public sealed class UsbPolicyModule : IPolicyModule, IDisposable
 {
     /// <summary>Section key.</summary>
     public const string SectionKey = "usb";
@@ -25,11 +28,21 @@ public sealed class UsbPolicyModule : IPolicyModule
     private const uint IoctlStorageEjectMedia = 0x002D4808;
 
     private readonly ILogger<UsbPolicyModule> _logger;
+    private readonly AdminMaintenance? _maintenance;
     private readonly object _gate = new();
     private RegistrySnapshot? _snapshot;
+    private PcPolicy? _applied;
 
-    /// <summary>Creates the module.</summary>
-    public UsbPolicyModule(ILogger<UsbPolicyModule> logger) => _logger = logger;
+    /// <summary>Creates the module; <paramref name="maintenance"/> lets an administrator use USB storage.</summary>
+    public UsbPolicyModule(ILogger<UsbPolicyModule> logger, AdminMaintenance? maintenance = null)
+    {
+        _logger = logger;
+        _maintenance = maintenance;
+        if (maintenance is not null)
+        {
+            maintenance.Changed += OnMaintenanceChanged;
+        }
+    }
 
     /// <inheritdoc />
     public string Section => SectionKey;
@@ -39,16 +52,37 @@ public sealed class UsbPolicyModule : IPolicyModule
     {
         ArgumentNullException.ThrowIfNull(policy);
         cancellationToken.ThrowIfCancellationRequested();
-        UsbPolicy usb = policy.Usb;
+        return Task.FromResult(PolicyModuleResult.Ok(Apply(policy)));
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        if (_maintenance is not null)
+        {
+            _maintenance.Changed -= OnMaintenanceChanged;
+        }
+    }
+
+    private string[] Apply(PcPolicy policy)
+    {
+        bool maintenance = _maintenance?.IsActive == true;
+        UsbPolicy usb = maintenance ? policy.Usb with { AllowStorage = true } : policy.Usb;
         var notes = new List<string>();
         lock (_gate)
         {
-            List<PolicyRegistryRule> rules = PolicyRegistry.RulesFor(policy, null)
+            List<PolicyRegistryRule> rules = PolicyRegistry.RulesFor(policy with { Usb = usb }, null)
                 .Where(r => r.Hive == RegistryHive.LocalMachine && IsUsbRule(r.Key))
                 .ToList();
             RegistrySnapshot before = RegistryPolicyOps.Apply(rules);
             _snapshot ??= before;
+            _applied = policy;
             notes.Add($"{rules.Count} HKLM value(s) written");
+        }
+
+        if (maintenance && !policy.Usb.AllowStorage)
+        {
+            notes.Add("administrator maintenance: USB mass storage allowed until it ends");
         }
 
         notes.Add(usb.AllowStorage ? "USB mass storage allowed (USBSTOR start=3)" : "USB mass storage disabled for new devices (USBSTOR start=4)");
@@ -58,7 +92,32 @@ public sealed class UsbPolicyModule : IPolicyModule
             notes.AddRange(EjectRemovableVolumes());
         }
 
-        return Task.FromResult(PolicyModuleResult.Ok(notes.ToArray()));
+        return notes.ToArray();
+    }
+
+    /// <summary>Re-applies the last policy when a maintenance window opens or ends (storage on, then back to the policy).</summary>
+    private void OnMaintenanceChanged(object? sender, bool active)
+    {
+        PcPolicy? policy;
+        lock (_gate)
+        {
+            policy = _applied;
+        }
+
+        if (policy is null || policy.Usb.AllowStorage)
+        {
+            return;
+        }
+
+        try
+        {
+            string[] notes = Apply(policy);
+            _logger.LogInformation("USB policy re-applied for maintenance {State}: {Notes}", active ? "start" : "end", string.Join("; ", notes));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or InvalidOperationException)
+        {
+            _logger.LogWarning(ex, "USB policy could not be re-applied for maintenance {State}", active ? "start" : "end");
+        }
     }
 
     /// <inheritdoc />

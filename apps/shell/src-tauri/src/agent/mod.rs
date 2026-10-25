@@ -875,6 +875,7 @@ impl MockTransport {
                     json!({ "ok": true, "adminToken": format!("mock-admin-{}", Uuid::new_v4().simple()), "expiresAt": in_secs(600) }),
                 )
             }
+            AgentCommand::SysAdminExit => Some(json!({ "resumeAt": in_secs(30 * 60) })),
             AgentCommand::SysLogClientError => {
                 tracing::warn!(target: "webview", level = %p["level"], message = %p["message"], route = %p["route"], "client error (mock agent)");
                 None

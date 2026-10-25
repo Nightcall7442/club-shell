@@ -1,7 +1,7 @@
 /**
  * Hall map editor (owner): devices on a square grid at their (x, y), selected device on the right (with its live load,
  * games disk and hardware as its Agent reports them), zones below the add form when nothing is selected. Click a device
- * to select it, click an empty cell or use the arrow keys to move it.
+ * to select it, click an empty cell or use the arrow keys to move it. Below, the PC policy of the club (`policyEditor.tsx`).
  */
 import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import clsx from 'clsx';
@@ -28,6 +28,7 @@ import {
   Well,
 } from '@/ui';
 import { FieldGroup, OwnerPage } from './ownerKit';
+import { PolicyEditor } from './policyEditor';
 
 const MIN_COLS = 16;
 const MIN_ROWS = 10;
@@ -650,6 +651,7 @@ export default function HallPage(): JSX.Element {
           <ZonesEditor onSaved={load} />
         </aside>
       </div>
+      <PolicyEditor />
     </OwnerPage>
   );
 }

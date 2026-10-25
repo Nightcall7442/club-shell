@@ -189,6 +189,7 @@ app.MapShopSaleEndpoints();
 app.MapCallAdminEndpoints();
 app.MapPlatformEndpoints();
 app.MapNetworkEndpoints();
+app.MapPolicyEndpoints();
 app.Map("/ws/agent", (HttpContext context, AgentSocketHub hub) => hub.HandleAsync(context));
 app.MapNotImplemented(ContractStatus.Load(contractPath), ContractStatus.Implemented);
 app.MapFallback("/api/v1/{**route}", context =>

@@ -29,6 +29,8 @@ public sealed class GameLibrary : IDisposable
     private readonly ILogger<GameLibrary> _logger;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private CatalogSnapshot _snapshot = CatalogSnapshot.Empty;
+    private DateTimeOffset _scannedAt;
+    private string? _scannedDrives;
 
     /// <summary>Creates the library (call <see cref="LoadAsync"/> at startup).</summary>
     public GameLibrary(IServerClient server, GameDetector detector, IOptionsMonitor<AgentSettings> settings, IClock clock, ILogger<GameLibrary> logger)
@@ -105,6 +107,7 @@ public sealed class GameLibrary : IDisposable
                 games.AddRange(page.Items);
             }
 
+            MarkScanned();
             IReadOnlyDictionary<Guid, GameInstallStatus> installs = await _detector.DetectAllAsync(games, cancellationToken).ConfigureAwait(false);
             var next = CatalogSnapshot.Create(Merge(games, installs), page.CatalogVersion, first.ETag);
             await PersistAsync(next, cancellationToken).ConfigureAwait(false);
@@ -118,22 +121,58 @@ public sealed class GameLibrary : IDisposable
         }
     }
 
-    /// <summary>Re-runs install detection over the current catalogue without contacting the server.</summary>
+    /// <summary>
+    /// Re-runs install detection over the current catalogue without contacting the server; serialized with
+    /// <see cref="RefreshAsync"/>, so a rescan never puts back the catalogue a refresh has just replaced.
+    /// </summary>
     public async Task RescanAsync(CancellationToken cancellationToken)
     {
-        _detector.Invalidate();
-        CatalogSnapshot current = Volatile.Read(ref _snapshot);
-        if (current.Games.IsEmpty)
+        await _refreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            return;
+            _detector.Invalidate();
+            MarkScanned();
+            CatalogSnapshot current = Volatile.Read(ref _snapshot);
+            if (current.Games.IsEmpty)
+            {
+                return;
+            }
+
+            IReadOnlyDictionary<Guid, GameInstallStatus> installs = await _detector.DetectAllAsync(current.Games, cancellationToken).ConfigureAwait(false);
+            var next = CatalogSnapshot.Create(Merge(current.Games, installs), current.Version, current.ETag);
+            if (!next.Games.SequenceEqual(current.Games))
+            {
+                Swap(next);
+            }
+        }
+        finally
+        {
+            _refreshGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Re-runs install detection when <c>games.scanIntervalSec</c> has passed since the last scan, or at once when the
+    /// set of local disks changed — the games disk (G: on a club PC) mounted after the Agent started, or went away
+    /// (SHELL_CHANGES 31). Called from the Agent's maintenance loop; returns <see langword="true"/> when it scanned.
+    /// </summary>
+    public async Task<bool> RescanIfDueAsync(CancellationToken cancellationToken)
+    {
+        string drives = LocalDrives();
+        TimeSpan interval = TimeSpan.FromSeconds(_settings.CurrentValue.Games.ScanIntervalSec);
+        bool disksChanged = _scannedDrives is not null && !string.Equals(drives, _scannedDrives, StringComparison.OrdinalIgnoreCase);
+        if (!disksChanged && _clock.UtcNow - _scannedAt < interval)
+        {
+            return false;
         }
 
-        IReadOnlyDictionary<Guid, GameInstallStatus> installs = await _detector.DetectAllAsync(current.Games, cancellationToken).ConfigureAwait(false);
-        var next = CatalogSnapshot.Create(Merge(current.Games, installs), current.Version, current.ETag);
-        if (!next.Games.SequenceEqual(current.Games))
+        if (disksChanged)
         {
-            Swap(next);
+            _logger.LogInformation("Local disks changed ({Before} -> {After}); rescanning installed games", _scannedDrives, drives);
         }
+
+        await RescanAsync(cancellationToken).ConfigureAwait(false);
+        return true;
     }
 
     /// <summary>Handles a <c>refreshConfig</c> command; returns <see langword="true"/> when the games cache was refreshed.</summary>
@@ -229,6 +268,27 @@ public sealed class GameLibrary : IDisposable
     {
         _refreshGate.Dispose();
         GC.SuppressFinalize(this);
+    }
+
+    private void MarkScanned()
+    {
+        _scannedAt = _clock.UtcNow;
+        _scannedDrives = LocalDrives();
+    }
+
+    /// <summary>Letters of the ready fixed and removable disks (<c>C:\,D:\,G:\</c>); network and optical drives are left out.</summary>
+    private static string LocalDrives()
+    {
+        try
+        {
+            return string.Join(',', DriveInfo.GetDrives()
+                .Where(d => d.DriveType is DriveType.Fixed or DriveType.Removable && d.IsReady)
+                .Select(d => d.Name));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return string.Empty;
+        }
     }
 
     private static Game Apply(Game game, GameInstallStatus status) => game with

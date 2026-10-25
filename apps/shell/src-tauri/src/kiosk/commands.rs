@@ -1,11 +1,14 @@
-//! `kiosk_*` commands (`TAURI_COMMANDS.md` §2.14): local, no IPC. Registered by `lib.rs` through
+//! `kiosk_*` commands (`TAURI_COMMANDS.md` §2.14): local, no IPC except the `sys.adminExit` notice of
+//! `kiosk_exit`. Registered by `lib.rs` through
 //! `crate::commands::invoke_handler!` next to the proxy commands; every handler takes the managed
 //! `AppState` and the managed `Arc<Kiosk>` (`kiosk::spawn_all` + `app.manage`).
 
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
+use clubshell_protocol::commands::{names, SysAdminExitRequest, SysAdminExitResponse};
 use clubshell_protocol::user::Locale;
 use serde::Serialize;
 use serde_json::Value;
@@ -125,7 +128,12 @@ pub async fn kiosk_focus(kiosk: State<'_, Arc<Kiosk>>) -> CmdResult<()> {
     Ok(())
 }
 
+/// How long `kiosk_exit` waits for the Agent to acknowledge `sys.adminExit` before closing anyway.
+const ADMIN_EXIT_NOTICE_TIMEOUT: Duration = Duration::from_secs(3);
+
 /// `kiosk_exit`: needs the unexpired token from `sys_unlock_admin`; `action` ∈ `explorer` | `quit`.
+/// The Agent is told first (`sys.adminExit`), so its watchdog pauses for the administrator instead of
+/// restarting the Shell as a crash (SHELL_CHANGES 33); an older Agent, or none, does not stop the exit.
 #[tauri::command]
 pub async fn kiosk_exit(
     state: State<'_, AppState>,
@@ -141,6 +149,24 @@ pub async fn kiosk_exit(
     if !state.admin_token_valid(&admin_token) {
         tracing::warn!(action = %action, "kiosk_exit rejected: invalid or expired admin token");
         return Err(ShellError::unauthorized("invalid or expired admin token"));
+    }
+    let notice = SysAdminExitRequest {
+        admin_token,
+        minutes: None,
+    };
+    match state
+        .agent
+        .request_with_timeout::<_, SysAdminExitResponse>(
+            names::sys::ADMIN_EXIT,
+            &notice,
+            ADMIN_EXIT_NOTICE_TIMEOUT,
+        )
+        .await
+    {
+        Ok(resp) => tracing::info!(resume_at = %resp.resume_at, "agent paused the shell watchdog"),
+        Err(e) => {
+            tracing::warn!(error = %e, "sys.adminExit failed; the agent may restart the shell")
+        }
     }
     kiosk.exit(start_explorer);
     Ok(())

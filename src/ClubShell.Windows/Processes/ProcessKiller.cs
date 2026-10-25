@@ -44,6 +44,9 @@ public sealed class ProcessKiller
         "textinputhost.exe", "applicationframehost.exe", "clubshellagent.exe", "clubshell-shell.exe",
     };
 
+    /// <summary>Every process with its parent pid and image name (Toolhelp32 snapshot); throws on failure.</summary>
+    public static IReadOnlyList<ProcessSnapshotEntry> Snapshot() => Toolhelp32.Snapshot();
+
     /// <summary>
     /// Kills <paramref name="pid"/> and all of its descendants (children first). With <paramref name="gracefulTimeout"/>
     /// &gt; 0 the processes whose windows took WM_CLOSE get that long to exit on their own; the rest are terminated at once.
