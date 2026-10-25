@@ -465,7 +465,15 @@ unless the key ends with `Ms`.
     "kioskUser": {
       "name": "club",
       "createIfMissing": true,
-      "rotatePasswordOnStart": true,
+      "removeFromPrivilegedGroups": false,        // an existing account in Administrators/Power Users/... is refused
+                                                  // (heartbeat kioskUser.problem = privilegedAccount); true removes it from those groups
+      "rotatePasswordOnStart": true,              // waits for the kiosk session while auto-logon has yet to log it on
+      "passwordRotationDays": 7,
+      "folderRedirect": {
+        "enabled": true,                          // Desktop/Documents/Downloads/Pictures/Videos/Saved Games off C:
+        "root": null,                             // null = <non-system fixed drive already holding them, else most free>\ClubShell\Users
+        "clearOnReset": true                      // emptied by every profile reset
+      },
       "resetProfileOnLogout": true,
       "profileTemplate": null,                    // string path | null. Folder copied into a fresh profile.
       "preserveOnReset": null                     // string[] | null. Profile-relative dirs carried across a reset;

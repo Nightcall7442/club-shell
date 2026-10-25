@@ -151,6 +151,26 @@ enabling it in a club, on one bench PC (Windows 11 Pro, TrueNAS with a published
 7. Server off + reboot → G: comes back from `assignment.json`; TrueNAS off + reboot → desktop without delay, no G:.
 8. FACEIT and Vanguard with a game on G: (anti-cheat drivers reading from a read-only iSCSI volume).
 
+## PCs whose C: is clean at every boot
+
+A diskless seat boots Windows over iSCSI from a fresh copy of the image, so everything the Agent keeps in
+`C:\ProgramData\ClubShell` is gone after each reboot: the agent tokens and signing secret (`secure\agent.tokens`), the
+kiosk password (`secure\kiosk.cred`), `agent-identity.json`, the offline outbox (`cache\offline.db`) and the
+power-command acks (`cache\power-acks.json`). Two ways to run on such a PC (SHELL_CHANGES 25):
+
+* **A directory that survives the reboot** — `agent.json → paths.persistent` (absolute, e.g. a persistent volume the
+  club server gives each seat). The identity, the secrets, the outbox and the acks then live there; the Agent creates it
+  accessible to SYSTEM and Administrators only. The PC keeps its credentials and its unsent events across reboots.
+* **No such directory** — mark the PC in the cash desk, «Зал и устройства», «Без постоянного диска». The server then
+  expects the PC to register again without proof at every boot (an information in the log, not the D-78 warning), and
+  `Agents:RegisterProof=enforce` lets it through while the PC is offline. Unsent offline events of a boot are lost.
+
+The kiosk password needs neither: while Windows auto-logon still has to log the kiosk on, the Agent takes the password
+auto-logon holds and rotates it only once the kiosk session exists (`shell.kioskUser.rotatePasswordOnStart`).
+
+The hardware id leaves out a disk on an iSCSI, USB, SD or virtual bus (SHELL_CHANGES 30), so a diskless seat's id does
+not follow the seat disk the club server assigns it, and a hybrid's does not change with the order its disks come up in.
+
 ## Known gaps
 
 * The helper's server API (`diskless/v1/…`) belongs to the club's diskless server; it is not part of
