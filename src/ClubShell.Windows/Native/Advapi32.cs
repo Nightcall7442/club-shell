@@ -315,6 +315,13 @@ public static partial class Advapi32
     [LibraryImport(Lib)]
     internal static unsafe partial int LsaStorePrivateData(nint PolicyHandle, LSA_UNICODE_STRING* KeyName, LSA_UNICODE_STRING* PrivateData);
 
+    /// <summary><paramref name="PrivateData"/> receives the secret (free it with <see cref="LsaFreeMemory"/>); STATUS_OBJECT_NAME_NOT_FOUND when there is none.</summary>
+    [LibraryImport(Lib)]
+    internal static unsafe partial int LsaRetrievePrivateData(nint PolicyHandle, LSA_UNICODE_STRING* KeyName, LSA_UNICODE_STRING** PrivateData);
+
+    [LibraryImport(Lib)]
+    internal static partial int LsaFreeMemory(nint Buffer);
+
     [LibraryImport(Lib)]
     internal static partial int LsaClose(nint ObjectHandle);
 

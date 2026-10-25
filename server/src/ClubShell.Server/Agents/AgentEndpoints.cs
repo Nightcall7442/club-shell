@@ -93,6 +93,10 @@ public static class AgentEndpoints
             case ProofOutcome.Reenrolled:
                 logger.LogWarning("PC {PcId} re-enrolled in the owner's maintenance window without a proof ({Problem}) from {Ip}, agent {AgentVersion}", pc.Id, problem, ip, agentVersion);
                 break;
+            case ProofOutcome.Stateless:
+                // Expected at every boot of a diskless seat (SHELL_CHANGES 25): an information, not a security event.
+                logger.LogInformation("PC {PcId} without persistent storage re-registered without a proof ({Problem}) from {Ip}, agent {AgentVersion}", pc.Id, problem, ip, agentVersion);
+                break;
         }
 
         if (refresh is null)

@@ -103,6 +103,13 @@ public sealed class ShellLauncher : IShellRelauncher, IKioskSessionLocator, IKio
     {
         get
         {
+            // Without the kiosk SID the account is not provisioned — or refused as an administrator (SHELL_CHANGES 24): a
+            // session of that name is not the kiosk's, and a Shell started there could not even open the pipe.
+            if (string.IsNullOrEmpty(_kiosk.Sid))
+            {
+                return null;
+            }
+
             try
             {
                 return WtsSessions.FindByUser(KioskUser) is { IsActive: true } session ? (int)session.Id : null;

@@ -100,7 +100,7 @@ public sealed class OfflineSessionStore : IDisposable
         _clock = clock;
         _logger = logger;
         var current = settings.CurrentValue;
-        DatabasePath = current.ResolvePath(current.Offline.StorePath);
+        DatabasePath = current.ResolvePersistentPath(current.Offline.StorePath);
         _connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = DatabasePath,

@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Runtime.Versioning;
 using ClubShell.Agent.AntiCheat;
 using ClubShell.Agent.Storage;
+using ClubShell.Agent.Users;
 using ClubShell.Contracts.Commands;
 using ClubShell.Contracts.Errors;
 using ClubShell.Contracts.Ipc;
@@ -57,7 +58,8 @@ public interface IConfigRefresh
 /// <c>catalogVersion</c> triggers <see cref="IConfigRefresh"/>; <c>pendingCommands &gt; 0</c> pulls
 /// <c>GET /agents/{pcId}/commands</c> and dispatches each to <see cref="IServerCommandSink"/>; the returned
 /// <c>serverTime</c> is used to log clock skew. Each beat also carries the games library state
-/// (<see cref="GamesShareMounter.VolumeState"/>) and the Vanguard / Secure Boot / TPM state.
+/// (<see cref="GamesShareMounter.VolumeState"/>), the Vanguard / Secure Boot / TPM state and the kiosk account state
+/// (<see cref="TempUserProvisioner.Status"/>).
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class HeartbeatService : BackgroundService
@@ -75,6 +77,7 @@ public sealed class HeartbeatService : BackgroundService
     private readonly NetworkProbe _network;
     private readonly GamesShareMounter _gamesVolume;
     private readonly WmiQueries _wmi;
+    private readonly TempUserProvisioner _kiosk;
     private readonly IClock _clock;
     private readonly IOptionsMonitor<AgentSettings> _settings;
     private readonly ILogger<HeartbeatService> _logger;
@@ -98,6 +101,7 @@ public sealed class HeartbeatService : BackgroundService
         NetworkProbe network,
         GamesShareMounter gamesVolume,
         WmiQueries wmi,
+        TempUserProvisioner kiosk,
         IClock clock,
         IOptionsMonitor<AgentSettings> settings,
         ILogger<HeartbeatService> logger)
@@ -115,6 +119,7 @@ public sealed class HeartbeatService : BackgroundService
         ArgumentNullException.ThrowIfNull(network);
         ArgumentNullException.ThrowIfNull(gamesVolume);
         ArgumentNullException.ThrowIfNull(wmi);
+        ArgumentNullException.ThrowIfNull(kiosk);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(logger);
@@ -132,6 +137,7 @@ public sealed class HeartbeatService : BackgroundService
         _network = network;
         _gamesVolume = gamesVolume;
         _wmi = wmi;
+        _kiosk = kiosk;
         _clock = clock;
         _settings = settings;
         _logger = logger;
@@ -191,7 +197,8 @@ public sealed class HeartbeatService : BackgroundService
             _queueDepth.Count,
             _shell.IsConnected,
             _gamesVolume.VolumeState(),
-            await AntiCheatStateAsync(cancellationToken).ConfigureAwait(false));
+            await AntiCheatStateAsync(cancellationToken).ConfigureAwait(false),
+            _kiosk.Status);
 
         var sentAt = _clock.UtcNow;
         var response = await _server.HeartbeatAsync(pcId, request, cancellationToken).ConfigureAwait(false);

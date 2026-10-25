@@ -1068,6 +1068,8 @@ export interface HallPc {
   } | null;
   /** The games disk of the PC's last heartbeat (D-73); null — never reported; absent from an older server. */
   gamesVolume?: HeartbeatGamesVolume | null;
+  /** Marked as without persistent storage: it re-registers at every boot (SHELL_CHANGES 25); absent from an older server. */
+  stateless?: boolean;
 }
 
 export interface AdminGame {
@@ -1216,6 +1218,7 @@ export const clubApi = {
       y: number;
       device: DeviceKind;
       maintenance: boolean;
+      stateless: boolean;
     }>,
   ): Promise<unknown> => patch(`/admin/pcs/${id}`, input),
   addPc: (input: {

@@ -164,6 +164,13 @@ public sealed class AgentSettings
     /// <summary>Resolves a path from the config (relative paths are relative to <see cref="PathsSettings.ProgramData"/>).</summary>
     public string ResolvePath(string path) => ClubShellPaths.Resolve(Paths.ProgramData, path);
 
+    /// <summary>
+    /// Resolves the path of state that must survive a reboot — the agent identity, the offline outbox, the power-command
+    /// acks: relative to <see cref="PathsSettings.Persistent"/> when set, else like <see cref="ResolvePath"/>.
+    /// </summary>
+    public string ResolvePersistentPath(string path) =>
+        string.IsNullOrWhiteSpace(Paths.Persistent) ? ResolvePath(path) : ClubShellPaths.Resolve(Paths.Persistent, path);
+
     /// <summary>Absolute cache directory.</summary>
     [JsonIgnore]
     public string CacheDir => ResolvePath(Paths.Cache);
@@ -172,9 +179,9 @@ public sealed class AgentSettings
     [JsonIgnore]
     public string LogsDir => ResolvePath(Logging.Directory);
 
-    /// <summary>Absolute secrets directory.</summary>
+    /// <summary>Absolute secrets directory (under <see cref="PathsSettings.Persistent"/> when set).</summary>
     [JsonIgnore]
-    public string SecureDir => ResolvePath(Paths.Secure);
+    public string SecureDir => ResolvePersistentPath(Paths.Secure);
 
     /// <summary>Absolute themes directory.</summary>
     [JsonIgnore]
@@ -343,8 +350,26 @@ public sealed class KioskUserSettings
     /// <summary>Create the account when missing.</summary>
     public bool CreateIfMissing { get; set; } = true;
 
-    /// <summary>Rotate the password at every Agent start.</summary>
+    /// <summary>
+    /// An existing account of this name that is a member of Administrators or another privileged local group is refused
+    /// (the kiosk would run with those rights): the Agent leaves it untouched and reports <c>privilegedAccount</c> in the
+    /// log and the heartbeat. <see langword="true"/> takes it over and removes it from those groups instead.
+    /// </summary>
+    public bool RemoveFromPrivilegedGroups { get; set; }
+
+    /// <summary>
+    /// Rotate the password at every Agent start. While Windows auto-logon still has to log the kiosk on, the rotation
+    /// waits until the kiosk session exists, so it never races the logon.
+    /// </summary>
     public bool RotatePasswordOnStart { get; set; } = true;
+
+    /// <summary>Maximum age of the kiosk password in days before the Agent rotates it.</summary>
+    [Range(1, 3650)]
+    public int PasswordRotationDays { get; set; } = 7;
+
+    /// <summary>Redirection of the kiosk user's Desktop, Documents, Downloads, Pictures, Videos and Saved Games to another drive.</summary>
+    [Required]
+    public FolderRedirectSettings FolderRedirect { get; set; } = new();
 
     /// <summary>Reset the profile after each session.</summary>
     public bool ResetProfileOnLogout { get; set; } = true;
@@ -359,6 +384,23 @@ public sealed class KioskUserSettings
     /// club a stream of false <c>serviceStopped</c> reports.
     /// </summary>
     public string[]? PreserveOnReset { get; set; }
+}
+
+/// <summary><c>agent.json → shell.kioskUser.folderRedirect</c>.</summary>
+public sealed class FolderRedirectSettings
+{
+    /// <summary>Redirect the shell folders at all; <see langword="false"/> keeps them in the profile on C:.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// Base directory; the folders go to <c>&lt;root&gt;\&lt;kiosk user&gt;\Desktop</c>, ... <see langword="null"/> picks
+    /// <c>&lt;non-system fixed drive with the most free space&gt;\ClubShell\Users</c> at every start and after every
+    /// profile reset, which on a club PC may well be the games drive: set it, or turn redirection off, when that matters.
+    /// </summary>
+    public string? Root { get; set; }
+
+    /// <summary>Empty the redirected folders when the profile is reset, so the next player does not get the previous player's files.</summary>
+    public bool ClearOnReset { get; set; } = true;
 }
 
 /// <summary><c>agent.json → session</c>.</summary>
@@ -748,6 +790,15 @@ public sealed class PathsSettings
     /// <summary>Secrets directory.</summary>
     [Required]
     public string Secure { get; set; } = ClubShellPaths.SecureDirName;
+
+    /// <summary>
+    /// Directory that survives a reboot on a PC whose system drive is reset at every boot (a diskless seat): when set,
+    /// <see cref="Secure"/> (agent tokens, signing secret, kiosk password, HWID fallback), <c>agent-identity.json</c>, the
+    /// offline outbox (<c>offline.storePath</c>) and the power-command acks live under it instead of
+    /// <see cref="ProgramData"/>, so the PC neither registers anew nor loses unsent events at every boot. The Agent
+    /// creates it accessible to SYSTEM and Administrators only. <see langword="null"/>: everything under <see cref="ProgramData"/>.
+    /// </summary>
+    public string? Persistent { get; set; }
 
     /// <summary>Themes directory.</summary>
     [Required]

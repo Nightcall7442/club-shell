@@ -179,12 +179,13 @@ public sealed record AdminPcResponse(Pc Pc);
 /// <summary>
 /// <c>AdminHallPc</c>: the <c>Pc</c> fields flat plus the map's. <c>gamesVolume</c> (beyond the contract, D-73): the
 /// <c>gamesVolume</c> of the PC's last heartbeat as the agent sent it (<c>HeartbeatGamesVolume</c>, its null fields left
-/// out); null — the PC never reported one (no heartbeat yet, or an older agent).
+/// out); null — the PC never reported one (no heartbeat yet, or an older agent). <c>stateless</c> (beyond the contract,
+/// SHELL_CHANGES 25): the owner marked the PC as without persistent storage, so it re-registers at every boot.
 /// </summary>
 public sealed record AdminHallPc(
     Guid Id, string Name, string Zone, int Number, string? Hwid, string IpAddress, PcStatus Status, Guid? CurrentSessionId,
     string AgentVersion, string ShellVersion, DateTimeOffset LastHeartbeatAt, int X, int Y, string Device, JsonElement? Hardware, JsonElement? Metrics,
-    JsonElement? GamesVolume);
+    JsonElement? GamesVolume, bool Stateless);
 
 public sealed record AdminHallPcList(IReadOnlyList<AdminHallPc> Items, IReadOnlyList<AdminZone> Zones);
 
@@ -225,7 +226,8 @@ public sealed record AdminCashRequest(long? OpeningCash, long? ClosingCash);
 
 public sealed record AdminQuoteRequest(Guid? TariffId, Guid? PcId, int? Minutes, Guid? UserId);
 
-public sealed record AdminPcChange(string? Zone, int? Number, string? Device, string? Name, int? X, int? Y, bool? Maintenance);
+/// <summary><c>stateless</c> is beyond the contract (SHELL_CHANGES 25, <see cref="AdminHallPc"/>).</summary>
+public sealed record AdminPcChange(string? Zone, int? Number, string? Device, string? Name, int? X, int? Y, bool? Maintenance, bool? Stateless = null);
 
 // Slice S5, part A: staff, clients, promo codes, tariffs, stock.
 public sealed record AdminStaffList(IReadOnlyList<AdminStaffMember> Items);

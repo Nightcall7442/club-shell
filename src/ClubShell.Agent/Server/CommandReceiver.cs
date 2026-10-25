@@ -159,7 +159,7 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
         _settings = settings;
         _clock = clock;
         _logger = logger;
-        _powerAcks = new PowerAckStore(Path.Combine(settings.CurrentValue.CacheDir, PowerAcksFileName), clock, logger);
+        _powerAcks = new PowerAckStore(Path.Combine(settings.CurrentValue.ResolvePersistentPath(settings.CurrentValue.Paths.Cache), PowerAcksFileName), clock, logger);
     }
 
     /// <inheritdoc />

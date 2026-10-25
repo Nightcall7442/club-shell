@@ -10,6 +10,7 @@ using ClubShell.Core.Realtime;
 using ClubShell.Core.Security;
 using ClubShell.Windows.Hardware;
 using ClubShell.Windows.Network;
+using ClubShell.Windows.Registry;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -239,8 +240,18 @@ public sealed class ServerConnection : IHostedService, IDisposable
         }
     }
 
+    /// <summary>
+    /// Whether Windows setup is still running (<see cref="WindowsSetup.IsInProgress()"/>); replaceable for tests. A
+    /// registration waits while it is, polled every <see cref="WindowsSetupPollInterval"/>.
+    /// </summary>
+    public Func<bool> WindowsSetupInProgress { get; set; } = WindowsSetup.IsInProgress;
+
+    /// <summary>Poll interval of <see cref="WindowsSetupInProgress"/> while a registration waits.</summary>
+    public static TimeSpan WindowsSetupPollInterval { get; } = TimeSpan.FromSeconds(15);
+
     private async Task RegisterOnceAsync(CancellationToken cancellationToken)
     {
+        await WaitForWindowsSetupAsync(cancellationToken).ConfigureAwait(false);
         var hardware = await _hardware.GetAsync(cancellationToken).ConfigureAwait(false);
         var hwid = await _hwid.GetAsync(cancellationToken).ConfigureAwait(false);
         var net = _network.GetInfo();
@@ -257,6 +268,31 @@ public sealed class ServerConnection : IHostedService, IDisposable
         _pcId = response.PcId;
         await PersistPcIdAsync(response.PcId, cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("Registered as PC {PcId} ({PcName}, zone {Zone})", response.PcId, response.Pc.Name, response.Pc.Zone);
+    }
+
+    /// <summary>
+    /// Holds a registration while Windows setup (specialize, OOBE) is still running on a freshly imaged PC: the machine
+    /// still has a temporary name then and would be registered under it, with a HWID read before setup finished
+    /// (SHELL_CHANGES 35).
+    /// </summary>
+    private async Task WaitForWindowsSetupAsync(CancellationToken cancellationToken)
+    {
+        var logged = false;
+        while (WindowsSetupInProgress())
+        {
+            if (!logged)
+            {
+                _logger.LogInformation("Windows setup is still running; registration waits until it finishes");
+                logged = true;
+            }
+
+            await _clock.Delay(WindowsSetupPollInterval, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (logged)
+        {
+            _logger.LogInformation("Windows setup finished; registering");
+        }
     }
 
     /// <summary>
@@ -444,7 +480,7 @@ public sealed class ServerConnection : IHostedService, IDisposable
         }
     }
 
-    private string IdentityPath() => _settings.CurrentValue.ResolvePath(IdentityFileName);
+    private string IdentityPath() => _settings.CurrentValue.ResolvePersistentPath(IdentityFileName);
 
     private Guid? LoadPersistedPcId()
     {

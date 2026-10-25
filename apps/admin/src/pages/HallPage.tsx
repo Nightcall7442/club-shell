@@ -190,6 +190,22 @@ function DevicePanel({
           }, null)
         }
       />
+      <div className="flex flex-col gap-1">
+        <Toggle
+          label={t('Без постоянного диска')}
+          checked={pc.stateless === true}
+          disabled={busy}
+          onChange={(v) =>
+            void run(async () => {
+              await clubApi.updatePc(pc.id, { stateless: v });
+              await onChanged();
+            }, null)
+          }
+        />
+        <p className="text-[12px] text-muted">
+          {t('Бездисковый ПК: C: чистый при каждой загрузке, и ПК регистрируется заново — это не тревога.')}
+        </p>
+      </div>
 
       {m && (
         <div className="flex flex-col gap-2">

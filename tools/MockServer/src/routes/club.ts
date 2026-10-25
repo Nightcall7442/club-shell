@@ -795,6 +795,7 @@ export function clubRoutes(app: FastifyInstance): void {
         hardware: hardwareOf(p),
         metrics: p.metrics.at(-1) ?? null,
         gamesVolume: gamesVolumeOf(p),
+        stateless: p.stateless ?? false,
       })),
       zones: c.zones,
     };
@@ -811,6 +812,7 @@ export function clubRoutes(app: FastifyInstance): void {
     if (typeof b['x'] === 'number') pc.x = int(b, 'x', 0, 200);
     if (typeof b['y'] === 'number') pc.y = int(b, 'y', 0, 200);
     if (typeof b['device'] === 'string') club().devices[pc.id] = str(b, 'device', 16) as DeviceKind;
+    if (typeof b['stateless'] === 'boolean') pc.stateless = b['stateless'];
     if (typeof b['maintenance'] === 'boolean') {
       // Back from maintenance the status is derived again: a registered PC not heard from yet is offline.
       pc.status = b['maintenance'] ? 'maintenance' : 'free';

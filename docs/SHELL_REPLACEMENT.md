@@ -82,8 +82,14 @@ StartAsync (≤ StartupTimeout 60 s) ─▶ ProvisionAsync
    ├─ !Exists(name) && createIfMissing ─▶ LocalUserManager.Create(name, GeneratePassword(), …)
    │       PasswordNeverExpires, UserCannotChangePassword, Enabled, member of BUILTIN\Users only
    │
-   ├─ exists ─▶ reuse stored password iff  !rotatePasswordOnStart ∧ age < RotationPeriod (7 d) ∧ CanLogon(name, pw)
-   │            else SetPassword(GeneratePassword()); SetEnabled(true); AddToGroup(BUILTIN\Users)
+   ├─ exists ─▶ in Administrators / another privileged local group?  ─▶ refuse (KioskAccountRefusedException,
+   │            heartbeat kioskUser.problem = privilegedAccount), unless removeFromPrivilegedGroups: RemoveFromGroup each
+   │            KioskProvisioningRules.PlanPassword:
+   │              reuse stored password iff  !rotatePasswordOnStart ∧ age < passwordRotationDays ∧ CanLogon(name, pw)
+   │              rotation due while auto-logon has yet to log the kiosk on ─▶ keep the stored (else the auto-logon LSA)
+   │                password that logs on now, rotation owed until the kiosk session exists (RotateIfOwedAsync)
+   │              else SetPassword(GeneratePassword()) and, at once, the LSA DefaultPassword of an enabled auto-logon
+   │            SetEnabled(true); AddToGroup(BUILTIN\Users)
    │
    ├─ sid = GetSid(name)
    ├─ SaveAsync → secure\kiosk.cred  (JSON {userName, password, sid, rotatedAt} wrapped by ITokenProtector = DPAPI LocalMachine)
@@ -96,8 +102,8 @@ StartAsync (≤ StartupTimeout 60 s) ─▶ ProvisionAsync
 |----------|-------|
 | Account name | `agent.json → shell.kioskUser.name` (default `club` in code, `config/agent.default.json`, `install.ps1 -KioskUser` and the MSI `KIOSKUSER` property; `install.ps1` writes it into `agent.json`) |
 | Password | `LocalUserManager.GeneratePassword()` — 24 cryptographically random characters, one of each class, no ambiguous glyphs |
-| Rotation | at every Agent start when `rotatePasswordOnStart` (default true); otherwise when older than `RotationPeriod` or when the stored one no longer logs on (`ProcessAsUser.LogonUser` probe); `RotatePasswordAsync` on demand |
-| Group membership | `LocalUserManager.AddToGroup` refuses `BUILTIN\Administrators`; the account is a plain user |
+| Rotation | at every Agent start when `rotatePasswordOnStart` (default true); otherwise when older than `passwordRotationDays` (7) or when the stored one no longer logs on (`ProcessAsUser.LogonUser` probe); `RotatePasswordAsync` on demand. A rotation due while auto-logon still has to log the kiosk on waits for the kiosk session (the maintenance loop calls `RotateIfOwedAsync`), so SAM and the LSA secret never change between Winlogon reading one and checking the other; a new password updates the LSA secret right after SAM |
+| Group membership | `LocalUserManager.AddToGroup` refuses `BUILTIN\Administrators`; the account is a plain user. An existing account of that name in a privileged local group (Administrators, Power Users, Account/Server/Print/Backup/Network Configuration Operators, Hyper-V Administrators) is refused and left untouched, unless `shell.kioskUser.removeFromPrivilegedGroups` |
 | Storage | `C:\ProgramData\ClubShell\secure\kiosk.cred` (`TempUserProvisioner.CredentialsFileName`), DPAPI-protected, `secure\` is SYSTEM/Administrators only |
 | Exposure | `IKioskCredentials` in memory for the policy module; never logged, never sent to the Shell or the server |
 | Failure | logged, host keeps starting; `AgentWorker` retries while `IsProvisioned` is false |

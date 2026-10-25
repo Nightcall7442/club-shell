@@ -32,6 +32,10 @@ public sealed class HardwareInventory : IHardwareIdSource, IDisposable
     private readonly NetworkProbe _network;
     private readonly IClock _clock;
     private readonly ILogger<HardwareInventory> _logger;
+    // MSFT_PhysicalDisk.BusType of a disk inside the PC: SCSI 1, ATA 3, RAID 8, SAS 10, SATA 11, NVMe 17. Not iSCSI 9,
+    // USB 7, SD 12, MMC 13, Virtual 14, File Backed Virtual 15, Storage Spaces 16, nor Fibre Channel 6 or 1394 4.
+    private static readonly HashSet<int> LocalBusTypes = [1, 3, 8, 10, 11, 17];
+
     private readonly SemaphoreSlim _gate = new(1, 1);
     private HardwareInfo? _cached;
     private long _cachedAt;
@@ -178,7 +182,8 @@ public sealed class HardwareInventory : IHardwareIdSource, IDisposable
         Task<WmiBaseboard?> boardTask = _wmi.GetBaseboardAsync(cancellationToken);
         Task<WmiCpu?> cpuTask = _wmi.GetCpuAsync(cancellationToken);
         Task<IReadOnlyList<WmiDiskDrive>> drivesTask = _wmi.GetDiskDrivesAsync(cancellationToken);
-        await Task.WhenAll(uuidTask, boardTask, cpuTask, drivesTask).ConfigureAwait(false);
+        Task<IReadOnlyList<WmiPhysicalDisk>> physicalTask = _wmi.GetPhysicalDisksAsync(cancellationToken);
+        await Task.WhenAll(uuidTask, boardTask, cpuTask, drivesTask, physicalTask).ConfigureAwait(false);
 
         var components = new List<string>(5);
         string? uuid = await uuidTask.ConfigureAwait(false);
@@ -197,10 +202,9 @@ public sealed class HardwareInventory : IHardwareIdSource, IDisposable
             components.Add("cpu:" + cpuId);
         }
 
-        IReadOnlyList<WmiDiskDrive> drives = await drivesTask.ConfigureAwait(false);
-        if (drives.Count > 0 && Hwid.IsUsable(drives[0].SerialNumber))
+        if (HwidDiskSerial(await drivesTask.ConfigureAwait(false), await physicalTask.ConfigureAwait(false)) is { } diskSerial)
         {
-            components.Add("disk:" + drives[0].SerialNumber);
+            components.Add("disk:" + diskSerial);
         }
 
         string mac = _network.GetInfo().Mac;
@@ -210,6 +214,37 @@ public sealed class HardwareInventory : IHardwareIdSource, IDisposable
         }
 
         return components;
+    }
+
+    /// <summary>
+    /// The disk serial number that goes into the hardware id: that of the lowest-index disk on a local bus (SCSI, ATA,
+    /// RAID, SAS, SATA, NVMe — <c>MSFT_PhysicalDisk.BusType</c>) with fixed media, or none. An iSCSI, USB, SD or virtual
+    /// disk is skipped: on a diskless PC "Disk 0" is the seat's iSCSI disk, on a hybrid the disk order follows the order
+    /// the disks came up in, and either would change the id (SHELL_CHANGES 30). Without bus types (the Storage namespace
+    /// is unavailable) the lowest-index disk is taken, as before, so such a PC keeps its id.
+    /// </summary>
+    public static string? HwidDiskSerial(IReadOnlyList<WmiDiskDrive> drives, IReadOnlyList<WmiPhysicalDisk> physicalDisks)
+    {
+        ArgumentNullException.ThrowIfNull(drives);
+        ArgumentNullException.ThrowIfNull(physicalDisks);
+        if (physicalDisks.Count == 0)
+        {
+            return drives.Count > 0 && Hwid.IsUsable(drives[0].SerialNumber) ? drives[0].SerialNumber : null;
+        }
+
+        foreach (WmiDiskDrive drive in drives.OrderBy(d => d.Index))
+        {
+            WmiPhysicalDisk? physical = physicalDisks.FirstOrDefault(p => p.DeviceNumber == drive.Index);
+            if (physical is null || !LocalBusTypes.Contains(physical.BusType) || drive.MediaType.StartsWith("Removable", StringComparison.OrdinalIgnoreCase)
+                || drive.MediaType.StartsWith("External", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            return Hwid.IsUsable(drive.SerialNumber) ? drive.SerialNumber : null;
+        }
+
+        return null;
     }
 
     /// <inheritdoc />

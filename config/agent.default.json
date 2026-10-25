@@ -27,7 +27,10 @@
     "kioskUser": {
       "name": "club",
       "createIfMissing": true,
+      "removeFromPrivilegedGroups": false,
       "rotatePasswordOnStart": true,
+      "passwordRotationDays": 7,
+      "folderRedirect": { "enabled": true, "root": null, "clearOnReset": true },
       "resetProfileOnLogout": true,
       "profileTemplate": null,
       "preserveOnReset": null

@@ -138,6 +138,61 @@ public sealed class LocalUserManager
     }
 
     /// <summary>
+    /// Local groups whose members are not a plain user: Administrators, Power Users, Account, Server, Print, Backup and
+    /// Network Configuration Operators, Hyper-V Administrators. A kiosk account must be in none of them.
+    /// </summary>
+    public static IReadOnlyList<string> PrivilegedGroupSids { get; } =
+    [
+        NativeConst.SID_BUILTIN_ADMINISTRATORS,
+        "S-1-5-32-547",
+        "S-1-5-32-548",
+        "S-1-5-32-549",
+        "S-1-5-32-550",
+        "S-1-5-32-551",
+        "S-1-5-32-556",
+        "S-1-5-32-578",
+    ];
+
+    /// <summary>
+    /// The privileged local groups (<see cref="PrivilegedGroupSids"/>) the account is a direct member of, as SID and
+    /// group name; groups absent on this edition of Windows are skipped. Local accounts cannot be in domain groups and
+    /// local groups do not nest, so direct membership is the whole answer.
+    /// </summary>
+    public IReadOnlyList<(string Sid, string Name)> GetPrivilegedGroups(string name)
+    {
+        using PrincipalContext context = Machine();
+        using UserPrincipal user = Require(context, name);
+        var groups = new List<(string, string)>();
+        foreach (string sid in PrivilegedGroupSids)
+        {
+            using GroupPrincipal? group = GroupPrincipal.FindByIdentity(context, IdentityType.Sid, sid);
+            if (group is not null && user.IsMemberOf(group))
+            {
+                groups.Add((sid, group.Name ?? sid));
+            }
+        }
+
+        return groups;
+    }
+
+    /// <summary>Removes the user from a local group by SID; a no-op when it is not a member.</summary>
+    public void RemoveFromGroup(string name, string groupSid)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(groupSid);
+        using PrincipalContext context = Machine();
+        using UserPrincipal user = Require(context, name);
+        using GroupPrincipal group = GroupPrincipal.FindByIdentity(context, IdentityType.Sid, groupSid)
+            ?? throw new InvalidOperationException($"Local group {groupSid} not found.");
+        if (!group.Members.Remove(user))
+        {
+            return;
+        }
+
+        group.Save();
+        _logger.LogWarning("Removed {User} from group {Group}", name, group.Name);
+    }
+
+    /// <summary>
     /// Idempotent kiosk account provisioning: creates the account when missing, always rotates the password,
     /// re-asserts flags, enabled state and Users membership. Returns <see langword="true"/> when the account was created.
     /// </summary>

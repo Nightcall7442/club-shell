@@ -181,6 +181,14 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
                 return;
             }
 
+            // Without a provisioned kiosk the configured name may be someone else's account (a refused administrator,
+            // SHELL_CHANGES 24): its profile is not ours to delete.
+            if (!_provisioner.IsProvisioned)
+            {
+                _logger.LogWarning("Profile reset ({Reason}) skipped: the kiosk account is not provisioned", reason);
+                return;
+            }
+
             var user = _provisioner.UserName;
             _logger.LogInformation("Resetting profile of {User}: {Reason}", user, reason);
             try
@@ -189,6 +197,8 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
                 LogoffKioskSessions(user);
                 IReadOnlyList<string> preserve = _settings.CurrentValue.Shell.KioskUser.PreserveOnReset ?? ProfileReset.PreservedDirectories;
                 var result = await Task.Run(() => _reset.ResetProfile(user, preserve), cancellationToken).ConfigureAwait(false);
+                // The redirected Desktop, Documents, ... live outside the profile: empty them too, while the kiosk is logged off.
+                await Task.Run(_provisioner.ClearRedirectedFolders, cancellationToken).ConfigureAwait(false);
                 _lastResetAt = _clock.UtcNow;
                 if (result.Deleted)
                 {

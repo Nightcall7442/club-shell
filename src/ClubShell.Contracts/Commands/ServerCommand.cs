@@ -787,6 +787,7 @@ public sealed record HeartbeatRunningGame(
 /// <param name="ShellConnected">Whether the Shell pipe connection is alive.</param>
 /// <param name="GamesVolume">Who mounts the games library and whether it is mounted (omitted by older agents).</param>
 /// <param name="AntiCheat">Riot Vanguard and platform security state (omitted by older agents).</param>
+/// <param name="KioskUser">State of the kiosk account, so a PC whose kiosk cannot be provisioned is visible (omitted by older agents).</param>
 public sealed record HeartbeatRequest(
     PcStatus Status,
     Guid? CurrentSessionId,
@@ -799,7 +800,32 @@ public sealed record HeartbeatRequest(
     int OfflineQueue,
     bool ShellConnected,
     HeartbeatGamesVolume? GamesVolume = null,
-    HeartbeatAntiCheat? AntiCheat = null);
+    HeartbeatAntiCheat? AntiCheat = null,
+    HeartbeatKioskUser? KioskUser = null);
+
+/// <summary>Well-known values of <see cref="HeartbeatKioskUser.Problem"/>.</summary>
+public static class KioskUserProblems
+{
+    /// <summary>The existing account of that name is in Administrators or another privileged local group; the Agent refuses to take it over.</summary>
+    public const string PrivilegedAccount = "privilegedAccount";
+
+    /// <summary>The account does not exist and <c>shell.kioskUser.createIfMissing</c> is off.</summary>
+    public const string Missing = "missing";
+
+    /// <summary>Provisioning failed for another reason (see the Agent log).</summary>
+    public const string ProvisioningFailed = "provisioningFailed";
+}
+
+/// <summary>Kiosk account in a heartbeat (<c>shell.kioskUser</c>).</summary>
+/// <param name="Name">Account name.</param>
+/// <param name="Ready">Provisioned: exists, enabled, a plain member of Users, password known to the Agent.</param>
+/// <param name="Problem">Why it is not ready (<see cref="KioskUserProblems"/>); <see langword="null"/> when ready or not tried yet.</param>
+/// <param name="PrivilegedGroups">Privileged local groups the existing account belongs to (<see cref="KioskUserProblems.PrivilegedAccount"/>).</param>
+public sealed record HeartbeatKioskUser(
+    string Name,
+    bool Ready,
+    string? Problem = null,
+    IReadOnlyList<string>? PrivilegedGroups = null);
 
 /// <summary>Who mounts the games library volume on the PC (heartbeat <c>gamesVolume.owner</c>).</summary>
 [JsonConverter(typeof(CamelCaseEnumConverter<GamesVolumeOwner>))]

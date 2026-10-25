@@ -165,7 +165,7 @@ boundary protected is "kiosk user vs. machine", not "administrator vs. machine".
 | `ClubShellAgent.exe` | `NT AUTHORITY\SYSTEM` (`register-service.ps1`, `obj= LocalSystem`) | needed for `WTSQueryUserToken`, LSA secrets, `USBSTOR`, firewall, user management, hive loading |
 | Privileges | `SeTcbPrivilege` (`GetUserToken`, `RunAsSystemInSession`), `SeAssignPrimaryTokenPrivilege` + `SeIncreaseQuotaPrivilege` (`CreateProcessAsUser`) | enabled per call by `PrivilegeScope` and disabled again on dispose; never left on |
 | `clubshell-shell.exe` | kiosk user | no privileged API; every OS effect is an IPC request the Agent validates |
-| Kiosk user | local, `BUILTIN\Users` only (`LocalUserManager.AddToGroup` refuses `Administrators`), `UserCannotChangePassword`, random 24-char password rotated on start | cannot read `secure\`, `agent.json` is read-only for it, `logs\` append only |
+| Kiosk user | local, `BUILTIN\Users` only (`LocalUserManager.AddToGroup` refuses `Administrators`; an existing account of that name in a privileged group is refused, `shell.kioskUser.removeFromPrivilegedGroups`), `UserCannotChangePassword`, random 24-char password rotated on start | cannot read `secure\`, `agent.json` is read-only for it, `logs\` append only |
 | Games | kiosk user, inside a `JobObject` (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`) | tree-killed on exit / session end; `processAllowlist` kills anything else in the kiosk session |
 | Fallback overlay | SYSTEM in the interactive session (`ProcessAsUser.RunAsSystemInSession`) | documented as the only SYSTEM process the player can see; never player-facing programs |
 
