@@ -71,6 +71,64 @@ public sealed class ProfileReset
         @"AppData\Roaming\BattlEye",
     };
 
+    /// <summary>
+    /// Profile-relative files and directories inside <see cref="PreservedDirectories"/> that hold a player's sign-in, removed
+    /// from whatever is carried across a reset (SHELL_CHANGES 42): the Riot Client's "Stay signed in" session and the
+    /// FACEIT client's cookies and web storage (an Electron profile). A preserved entry inside one of them is not carried.
+    /// </summary>
+    public static IReadOnlyList<string> SignInPaths { get; } = new[]
+    {
+        @"AppData\Local\Riot Games\Riot Client\Data\RiotGamesPrivateSettings.yaml",
+        @"AppData\Local\Riot Games\Riot Client\Data\RiotClientPrivateSettings.yaml",
+        @"AppData\Roaming\FACEIT\Cookies",
+        @"AppData\Roaming\FACEIT\Network",
+        @"AppData\Roaming\FACEIT\Local Storage",
+        @"AppData\Roaming\FACEIT\Session Storage",
+        @"AppData\Roaming\FACEIT\IndexedDB",
+    };
+
+    /// <summary>
+    /// Deletes the <see cref="SignInPaths"/> under <paramref name="directory"/>, the copy of the profile-relative
+    /// <paramref name="relative"/>; returns how many were there. <see langword="false"/> from <paramref name="carried"/>
+    /// when <paramref name="relative"/> is itself a sign-in path or inside one.
+    /// </summary>
+    public static int RemoveSignIns(string directory, string relative, out bool carried)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(directory);
+        ArgumentException.ThrowIfNullOrEmpty(relative);
+        string prefix = relative.TrimEnd('\\') + "\\";
+        carried = true;
+        int removed = 0;
+        foreach (string signIn in SignInPaths)
+        {
+            // The preserved entry is the sign-in path or lies inside it.
+            if (prefix.StartsWith(signIn + "\\", StringComparison.OrdinalIgnoreCase))
+            {
+                carried = false;
+                continue;
+            }
+
+            if (!signIn.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string path = Path.Combine([directory, .. signIn[prefix.Length..].Split('\\')]);
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+                removed++;
+            }
+            else if (Directory.Exists(path))
+            {
+                Directory.Delete(path, recursive: true);
+                removed++;
+            }
+        }
+
+        return removed;
+    }
+
     /// <summary>Profile-relative directories emptied by <see cref="CleanCaches"/> (shader caches stay: see <see cref="PreservedDirectories"/>).</summary>
     public static IReadOnlyList<string> CacheDirectories { get; } = new[]
     {
@@ -286,6 +344,18 @@ public sealed class ProfileReset
                     continue;
                 }
 
+                // Again here: a stash left by an agent before SHELL_CHANGES 42 still holds the sign-ins.
+                if (RemoveSignIns(source, relative, out bool carried) > 0 || !carried)
+                {
+                    _logger.LogInformation("Sign-in data removed from the preserved {Relative}", relative);
+                }
+
+                if (!carried)
+                {
+                    Directory.Delete(source, recursive: true);
+                    continue;
+                }
+
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                 Directory.Move(source, target);
                 restored++;
@@ -359,6 +429,17 @@ public sealed class ProfileReset
                 if (Directory.Exists(target))
                 {
                     Directory.Delete(target, recursive: true);
+                }
+
+                if (RemoveSignIns(source, relative, out bool carried) > 0)
+                {
+                    _logger.LogInformation("Sign-in data removed from {Relative} before it is carried across the reset", relative);
+                }
+
+                if (!carried)
+                {
+                    _logger.LogWarning("{Relative} holds a player's sign-in and is not carried across the reset", relative);
+                    continue;
                 }
 
                 Directory.CreateDirectory(stash);

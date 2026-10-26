@@ -291,7 +291,7 @@ Notes:
 ## 7. Dev mode
 
 `kiosk::dev_mode(config)` = `CLUBSHELL_DEV=1` (`config::env::DEV`, `ShellConfig::is_dev`) **or** a debug build
-(`cfg!(debug_assertions)`). Effects:
+(`cfg!(debug_assertions)`); a release build ignores `CLUBSHELL_DEV` (SHELL_CHANGES 40), so dev mode is debug-only. Effects:
 
 | Area | Dev mode behaviour |
 |------|--------------------|
@@ -392,5 +392,5 @@ Run on a real PC (not a VM) with the release build, `policies.example.json` appl
 
 | Variable | Set by | Effect |
 |----------|--------|--------|
-| `CLUBSHELL_DEV=1` | developer | dev mode + mock agent (section 7) |
-| `CLUBSHELL_PIPE`, `CLUBSHELL_SHELL_TOKEN`, `CLUBSHELL_LOCALE` | `ShellLauncher.BuildEnvironment` | pipe name, token path, UI locale for the launched Shell |
+| `CLUBSHELL_DEV=1` | developer | dev mode + mock agent (section 7); debug builds only |
+| `CLUBSHELL_PIPE`, `CLUBSHELL_SHELL_TOKEN`, `CLUBSHELL_LOCALE` | `ShellLauncher.BuildEnvironment` | pipe name, token path, UI locale for the launched Shell; any other `CLUBSHELL_*` of the kiosk account's environment is dropped |

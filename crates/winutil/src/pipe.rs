@@ -77,6 +77,10 @@ pub struct PipeOptions {
     /// `false` disables the heartbeat task (diagnostic clients).
     pub heartbeat: bool,
     pub event_buffer: usize,
+    /// Refuse a pipe that is not owned by LocalSystem or `BUILTIN\Administrators` (the release Shell,
+    /// SHELL_CHANGES 40): a pipe a player's own program created under a name it slipped in through
+    /// `CLUBSHELL_PIPE` is owned by the player, who cannot give it another owner.
+    pub require_trusted_server: bool,
 }
 
 impl Default for PipeOptions {
@@ -87,8 +91,58 @@ impl Default for PipeOptions {
             heartbeat_max_misses: HEARTBEAT_MAX_MISSES,
             heartbeat: true,
             event_buffer: EVENT_BUFFER,
+            require_trusted_server: false,
         }
     }
+}
+
+/// `true` when the owner of the pipe object behind `pipe` is LocalSystem or `BUILTIN\Administrators`,
+/// as for a pipe the Agent service created; a standard user can only own pipes it creates itself.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn pipe_owner_is_trusted(pipe: &tokio::net::windows::named_pipe::NamedPipeClient) -> Result<bool> {
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::Foundation::{LocalFree, ERROR_SUCCESS, HANDLE, HLOCAL};
+    use windows::Win32::Security::Authorization::{GetSecurityInfo, SE_KERNEL_OBJECT};
+    use windows::Win32::Security::{
+        IsWellKnownSid, WinBuiltinAdministratorsSid, WinLocalSystemSid, OWNER_SECURITY_INFORMATION,
+        PSECURITY_DESCRIPTOR, PSID,
+    };
+
+    let handle = HANDLE(pipe.as_raw_handle());
+    let mut owner = PSID::default();
+    let mut descriptor = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: `handle` is the live pipe handle `pipe` owns (opened with READ_CONTROL through
+    // GENERIC_READ); the out pointers are valid for the call. `owner` points into `descriptor`,
+    // which is freed below once the owner has been checked.
+    let status = unsafe {
+        GetSecurityInfo(
+            handle,
+            SE_KERNEL_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            Some(&mut owner),
+            None,
+            None,
+            None,
+            Some(&mut descriptor),
+        )
+    };
+    if status != ERROR_SUCCESS {
+        return Err(crate::from_error(
+            "GetSecurityInfo",
+            windows::core::Error::from(status.to_hresult()),
+        ));
+    }
+    // SAFETY: `owner` is a valid SID inside `descriptor`, which is still allocated.
+    let trusted = unsafe {
+        IsWellKnownSid(owner, WinLocalSystemSid).as_bool()
+            || IsWellKnownSid(owner, WinBuiltinAdministratorsSid).as_bool()
+    };
+    // SAFETY: `descriptor` was allocated by GetSecurityInfo with LocalAlloc and is freed once.
+    unsafe {
+        let _ = LocalFree(HLOCAL(descriptor.0));
+    }
+    Ok(trusted)
 }
 
 /// Feeds `bytes` to `reader` and drains every complete envelope. A malformed JSON frame is logged and
@@ -366,6 +420,13 @@ impl PipeClient {
         loop {
             match ClientOptions::new().open(&path) {
                 Ok(pipe) => {
+                    if options.require_trusted_server && !pipe_owner_is_trusted(&pipe)? {
+                        tracing::error!(path = %path, "pipe is not owned by LocalSystem or Administrators; refusing it");
+                        return Err(WinUtilError::Io(std::io::Error::new(
+                            std::io::ErrorKind::PermissionDenied,
+                            "the pipe server is not the Agent (pipe not owned by LocalSystem or Administrators)",
+                        )));
+                    }
                     tracing::info!(path = %path, "pipe connected");
                     return Ok(Self::from_stream(pipe, options));
                 }
@@ -609,6 +670,7 @@ mod tests {
             heartbeat_max_misses: 2,
             heartbeat,
             event_buffer: 8,
+            require_trusted_server: false,
         }
     }
 

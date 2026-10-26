@@ -111,7 +111,7 @@ sealed, signed binary (`SignatureVerified` mode on production builds).
 | Control | Implementation |
 |---------|----------------|
 | TLS | `RetryPolicy` builds the `SocketsHttpHandler`; certificate chain must validate; optional SPKI pinning: `server.tlsPinSha256[]` = base64 SHA-256 of the SubjectPublicKeyInfo (`RetryPolicy.ComputeSpkiPin`); the `ClubShell:Dev` relaxation only exists in dev configuration |
-| Identity | `POST /agents/register` with `X-Club-Key` (`server.clubApiKey`) + HWID (`Hwid`, SHA-256 over SMBIOS UUID / disk serial / MAC from `HardwareInventory`, persistent fallback when fewer than `Hwid.MinComponents`) → `accessToken` (RS256 JWT ≈ 1 h), `refreshToken` (30 d, single-use rotation), `signingSecret` (32-byte base64). The key and the HWID only name the PC: a player can read both (`agent.json`, the HWID is a hardware fact). An Agent that holds tokens signs its re-registration with the stored `signingSecret` like any agent request, and the server keeps the secret when the proof holds (D-78). With `Agents:RegisterProof=enforce` the server gives an approved PC new credentials without that proof only inside the owner's re-enroll window (`maintenance:true`, PC offline); the default `audit` re-issues and logs a warning |
+| Identity | `POST /agents/register` with `X-Club-Key` (`server.clubApiKey`) + HWID (`Hwid`, SHA-256 over SMBIOS UUID / disk serial / MAC from `HardwareInventory`, persistent fallback when fewer than `Hwid.MinComponents`) → `accessToken` (RS256 JWT ≈ 1 h), `refreshToken` (30 d, single-use rotation), `signingSecret` (32-byte base64). The key and the HWID only name the PC: the Agent keeps the key in `secure\club.key` (section 5), but treat it as known to players — older installs had it in `agent.json`, the club's setup bundle carries it — and the HWID is a hardware fact a player at the PC can compute. An Agent that holds tokens signs its re-registration with the stored `signingSecret` like any agent request, and the server keeps the secret when the proof holds (D-78). With `Agents:RegisterProof=enforce` the server gives an approved PC new credentials without that proof only inside the owner's re-enroll window (`maintenance:true`, PC offline); the default `audit` re-issues and logs a warning |
 | Every request | `Authorization: Bearer <accessToken>` + `X-Timestamp` + `X-Signature` (`ServerClient` auth section, `server.signingEnabled` default true) |
 | Signature | `Signing.Sign(secret, unixSeconds, method, pathAndQuery, bodySha256Hex)` = lowercase hex `HMAC-SHA256(secret, ts + METHOD + PATH + BODY_HASH)`; `BODY_HASH` = SHA-256 of the raw body, `Signing.EmptyBodySha256` for none; `PATH` includes the query and the `/api/v1` prefix exactly as sent |
 | Clock skew | server accepts ±300 s (`server.clockSkewToleranceSec`, `Signing.DefaultSkew`); the Agent signs with `ServerClient.ServerNow` = local clock + offset learned from `serverTime` in register/heartbeat responses and from `X-Server-Time` of every register/refresh answer, errors included (so a re-registration after a rejected refresh is in the window); a `401 unauthorized{reason: clockSkew}` with `X-Server-Time` corrects the offset and retries **once** |
@@ -123,6 +123,17 @@ sealed, signed binary (`SignatureVerified` mode on production builds).
 
 `Signing.Verify` (constant-time compare + skew window) exists in Core for tests and tooling; the Agent only signs.
 
+What a leaked club key gets (SHELL_CHANGES 41, `PcRepository.RegisterAsync`):
+
+| Attempt | `off` | `audit` (default) | `enforce` |
+|---------|-------|-------------------|-----------|
+| A PC the club does not have (new HWID) | a pending PC in «Зал и устройства», no credentials until the owner approves it (unless the club auto-approves PCs) | same | same |
+| The identity of an approved PC (its HWID, without its `signingSecret`) | new credentials | new credentials, warning `re-registered without a valid proof` in the server log; the real PC's secret is replaced, so it re-registers too and the warning repeats | `403`, nothing written; except the owner's re-enroll window for that PC while it is offline, and a PC marked as without persistent storage (D-79) while it is offline |
+
+Credentials for an approved PC are that PC to the server: heartbeats, commands, pooled game accounts it leases. So
+switch to `enforce` once every approved PC runs an Agent that signs its re-registration (D-78), and rotate
+`Club__EnrollmentKey` when the key leaks (new key: `CLUBAPIKEY` on the next install, or `agent.json → server.clubApiKey`).
+
 ---
 
 ## 5. Token and secret storage
@@ -131,6 +142,7 @@ sealed, signed binary (`SignatureVerified` mode on production builds).
 |--------|-------|------------|
 | Agent tokens (`accessToken`, `refreshToken`, `signingSecret`, `expiresAt`) | `secure\agent.tokens` (`ClubShellPaths.AgentTokensFileName`) | `TokenStore` + `DpapiTokenProtector`: `ProtectedData.Protect(..., entropy "ClubShell.Agent.tokens.v1", DataProtectionScope.LocalMachine)`; unreadable file → treated as empty → re-registration |
 | User tokens (`X-User-Token`) | same file, `UserTokens` | held by the Agent only; **never** sent to the Shell (the Shell gets `User` DTOs, not tokens) |
+| Club key (`X-Club-Key`, registration only) | `secure\club.key` (`ClubKeyStore`) | same `ITokenProtector`. The installer writes it into `agent.json` (readable by every account); `ClubKeyMigration` moves it here at Agent start and whenever `agent.json` gets one again, and blanks it there once stored. A key in `agent.json` wins over the stored one. `prepare-image.ps1` puts it back into `agent.json` for the image (a clone's DPAPI machine keys may differ) |
 | Kiosk account password | `secure\kiosk.cred` | same `ITokenProtector`; in memory as `IKioskCredentials.Password`; also the LSA secret `DefaultPassword` for auto-logon (`ShellRegistry.SetAutoLogon`) — never the clear-text registry value |
 | Shell token | `secure\shell.token` | plain hex by design (the Shell must read it); ACL kiosk `Read` only; regenerated per Agent start |
 | Games share credentials | `secure\share.cred` | DPAPI |
@@ -291,6 +303,8 @@ Agent
 - [ ] `remoteAdmin.showIndicator = true`; `allowRemoteInput` stays off (the default) unless the club uses remote assistance; input is refused while a game with an anti-cheat runs.
 - [ ] `logging.level = Information` (never `Verbose`), `retainDays` per local data-retention rules.
 - [ ] `C:\ProgramData\ClubShell` ACLs as written by `install.ps1` (root Users read, `secure\` SYSTEM/Admins only, `logs\` kiosk modify, `agent.json` not writable by the kiosk user).
+- [ ] After the Agent's first start `agent.json → server.clubApiKey` is blank and `secure\club.key` exists.
+- [ ] `Agents:RegisterProof = enforce` on the server once every approved PC reports an Agent that signs its re-registration.
 
 Policy (`policies.json`)
 
@@ -304,7 +318,7 @@ Policy (`policies.json`)
 Shell
 
 - [ ] Admin PIN set with `tools/scripts/set-admin-pin.ps1` (6-12 digits, not shared with players), `exitHotkey` changed from the default, `devtools = false`.
-- [ ] Release build only (`cfg!(debug_assertions)` turns hardening off), `CLUBSHELL_DEV` never set on club PCs.
+- [ ] Release build only (`cfg!(debug_assertions)` turns hardening off); a release build ignores `CLUBSHELL_DEV` and `CLUBSHELL_DATA_DIR`.
 - [ ] Theme / wallpaper / ads assets served from trusted hosts (`img-src https:` in the CSP is broad by necessity for covers).
 
 Server side (out of scope of this repo, but required for the controls above to mean anything)

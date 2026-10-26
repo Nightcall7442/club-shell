@@ -263,7 +263,8 @@ correct drift.
     validate schema, apply env overrides CLUBSHELL__*, then the last server config from cache\server-config.json
  3. Serilog init (file sink logs\agent-<date>.json, rolling)
  4. Hwid.Compute() (SMBIOS UUID + disk serial + MAC, SHA-256)  → hwid
- 5. TokenStore.Load() (DPAPI). If none or refresh fails → POST /agents/register (clubApiKey + hwid)
+ 5. TokenStore.Load() (DPAPI). If none or refresh fails → POST /agents/register (club key + hwid; the key from
+    agent.json, else secure\club.key, where ClubKeyMigration moves it at start)
  6. GET /agents/{pcId}/config  → merge server overrides into runtime config
  7. GET /agents/{pcId}/policies → PolicyEnforcer.Apply (registry, firewall, DNS filter, USB, hooks config)
  8. Storage: mount the SMB games share if configured (backoff, non-fatal; follows later settings changes, never
@@ -444,7 +445,7 @@ unless the key ends with `Ms`.
   "server": {
     "baseUrl": "https://club.example.uz/api/v1",  // required
     "wsUrl": "wss://club.example.uz/ws/agent",    // required
-    "clubApiKey": "",                             // required for first registration; may be blank after tokens exist
+    "clubApiKey": "",                             // as the installer writes it; moved into secure\club.key (DPAPI) at start
     "timeoutSec": 15,                             // per request
     "tlsPinSha256": [],                           // base64 SPKI pins; empty = system trust only
     "retry": { "maxAttempts": 5, "baseDelayMs": 500, "maxDelayMs": 15000 },
@@ -478,6 +479,7 @@ unless the key ends with `Ms`.
       "profileTemplate": null,                    // string path | null. Folder copied into a fresh profile.
       "preserveOnReset": null                     // string[] | null. Profile-relative dirs carried across a reset;
                                                   // null = ProfileReset.PreservedDirectories (anti-cheat, shader caches).
+                                                  // ProfileReset.SignInPaths inside them are never carried.
     },
     "watchdogIntervalMs": 2000,
     "restartDelayMs": 1500,

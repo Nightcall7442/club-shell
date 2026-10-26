@@ -66,6 +66,7 @@ public sealed class ServerClient : IServerClient, IDisposable
 
     private readonly HttpClient _http;
     private readonly ITokenStore _tokens;
+    private readonly ClubKeyStore _clubKey;
     private readonly Hwid _hwid;
     private readonly IClock _clock;
     private readonly IOptionsMonitor<AgentSettings> _settings;
@@ -78,6 +79,7 @@ public sealed class ServerClient : IServerClient, IDisposable
     public ServerClient(
         IHttpClientFactory httpClientFactory,
         ITokenStore tokens,
+        ClubKeyStore clubKey,
         Hwid hwid,
         IClock clock,
         IOptionsMonitor<AgentSettings> settings,
@@ -85,12 +87,14 @@ public sealed class ServerClient : IServerClient, IDisposable
     {
         ArgumentNullException.ThrowIfNull(httpClientFactory);
         ArgumentNullException.ThrowIfNull(tokens);
+        ArgumentNullException.ThrowIfNull(clubKey);
         ArgumentNullException.ThrowIfNull(hwid);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(logger);
         _http = httpClientFactory.CreateClient(RetryPolicy.HttpClientName);
         _tokens = tokens;
+        _clubKey = clubKey;
         _hwid = hwid;
         _clock = clock;
         _settings = settings;
@@ -877,12 +881,15 @@ public sealed class ServerClient : IServerClient, IDisposable
                 return null;
 
             case AuthMode.Club:
-                if (string.IsNullOrEmpty(server.ClubApiKey))
+                // agent.json first: a key written there is newer than secure\club.key until the Agent moves it (SHELL_CHANGES 41).
+                string? clubKey = server.ClubApiKey is { Length: > 0 } configured ? configured : _clubKey.Read();
+                if (string.IsNullOrEmpty(clubKey))
                 {
-                    throw new ServerApiException(ErrorCode.Unauthorized, HttpStatusCode.Unauthorized, null, null, "server.clubApiKey is not configured; cannot register");
+                    throw new ServerApiException(
+                        ErrorCode.Unauthorized, HttpStatusCode.Unauthorized, null, null, "No club key (server.clubApiKey and secure\\club.key are empty); cannot register");
                 }
 
-                request.Headers.Add(ClubKeyHeader, server.ClubApiKey);
+                request.Headers.Add(ClubKeyHeader, clubKey);
 
                 // A PC that holds credentials proves it on re-registration: signed with its current secret, so the club
                 // key and the HWID alone do not get a PC's credentials (D-78). A secret that cannot be read signs nothing.

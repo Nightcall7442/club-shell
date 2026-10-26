@@ -49,6 +49,9 @@ public static class ClubShellPaths
     /// <summary>Persistent random hardware-id fallback (<c>secure\hwid.fallback</c>).</summary>
     public const string HwidFallbackFileName = "hwid.fallback";
 
+    /// <summary>DPAPI-wrapped club key (<c>secure\club.key</c>, SHELL_CHANGES 41).</summary>
+    public const string ClubKeyFileName = "club.key";
+
     /// <summary>Default <c>agent.json</c> path.</summary>
     public static string AgentJson => Path.Combine(ProgramData, AgentJsonFileName);
 
@@ -202,6 +205,10 @@ public sealed class AgentSettings
     /// <summary>Absolute path of the DPAPI-wrapped agent tokens file.</summary>
     [JsonIgnore]
     public string AgentTokensPath => Path.Combine(SecureDir, ClubShellPaths.AgentTokensFileName);
+
+    /// <summary>Absolute path of the DPAPI-wrapped club key.</summary>
+    [JsonIgnore]
+    public string ClubKeyPath => Path.Combine(SecureDir, ClubShellPaths.ClubKeyFileName);
 }
 
 /// <summary><c>agent.json → server</c>.</summary>
@@ -215,7 +222,10 @@ public sealed class ServerSettings
     [Required]
     public string WsUrl { get; set; } = "wss://club.example.uz/ws/agent";
 
-    /// <summary>Club API key for first registration; may be blank once tokens exist.</summary>
+    /// <summary>
+    /// Club API key for registration as the installer writes it. The Agent moves it into <c>secure\club.key</c> at start and
+    /// blanks it here (SHELL_CHANGES 41); a key written here later replaces the stored one.
+    /// </summary>
     public string ClubApiKey { get; set; } = "";
 
     /// <summary>Per-request timeout in seconds.</summary>

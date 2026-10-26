@@ -41,7 +41,7 @@ Base URL: `https://<server>/api/v1` (`agent.json → server.baseUrl`). WebSocket
 
 ### 2.1 Agent identity
 
-1. `POST /agents/register` with `X-Club-Key: <clubApiKey>` (from `agent.json`) — no Bearer.
+1. `POST /agents/register` with `X-Club-Key: <clubApiKey>` (from `agent.json`, or `secure\club.key` once the Agent has moved it there) — no Bearer.
 2. Response gives `accessToken` (JWT RS256, `exp` ≈ 1 h), `refreshToken` (opaque, 30 d, single-use
    rotation), `signingSecret` (32-byte base64, used for HMAC), `pcId`.
 3. Every other request: `Authorization: Bearer <accessToken>`.
