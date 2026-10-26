@@ -475,6 +475,31 @@ public sealed class ServerClientTests : IDisposable
     }
 
     [Fact]
+    public async Task Registration_takes_the_club_key_from_secure_when_agent_json_has_none()
+    {
+        // SHELL_CHANGES 41: the Agent moved the key out of agent.json; a key written there again wins until it is moved.
+        _handler.Responder = _ => Pending();
+        ClubKey.Store("stored-key").Should().BeTrue();
+        await RegisterRefusedAsync();
+        _settings.Server.ClubApiKey = "new-key";
+        await RegisterRefusedAsync();
+
+        _handler.Requests.Select(r => r.Header("X-Club-Key")).Should().Equal("stored-key", "new-key");
+    }
+
+    [Fact]
+    public async Task Registration_without_any_club_key_is_refused_before_it_is_sent()
+    {
+        var hardware = new HardwareInfo(
+            new CpuInfo("Ryzen 5 5600", 6, 12), [], 16384, [], [], new NetworkInfo("aa:bb:cc:dd:ee:ff", "10.0.1.12", "Ethernet"), new OsInfo("10.0.22631", "22631"), []);
+        Func<Task> act = () => _client.RegisterAsync(
+            new AgentRegisterRequest(Hwid.Compute(HardwareComponents), "CLUB-PC", "1.0.18", hardware, "10.0.1.12", "aa:bb:cc:dd:ee:ff", null), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<ServerApiException>()).Which.Code.Should().Be(ErrorCode.Unauthorized);
+        _handler.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task Refresh_answers_set_the_server_clock_so_the_registration_proof_is_in_the_window()
     {
         // The PC clock runs ahead of the server's. Every refresh answer, the rejected one too, carries X-Server-Time.
@@ -834,11 +859,13 @@ public sealed class ServerClientTests : IDisposable
     private static string ErrorBody(ErrorCode code, string message, string? reason, string traceId) =>
         JsonDefaults.Serialize(new ServerErrorEnvelope(new ServerError(code, message, reason is null ? null : JsonDefaults.ToElement(new ReasonDetails(reason)), traceId)));
 
+    private ClubKeyStore ClubKey => new(Path.Combine(_tempDir, "club.key"), new NullTokenProtector(), NullLogger<ClubKeyStore>.Instance);
+
     private ServerClient NewClient(IHttpClientFactory factory)
     {
         var hardware = Substitute.For<IHardwareIdSource>();
         hardware.GetComponentsAsync(Arg.Any<CancellationToken>()).Returns(HardwareComponents);
-        return new ServerClient(factory, _tokens, new Hwid(hardware, Path.Combine(_tempDir, "hwid.fallback")), _clock, _options, NullLogger<ServerClient>.Instance);
+        return new ServerClient(factory, _tokens, ClubKey, new Hwid(hardware, Path.Combine(_tempDir, "hwid.fallback")), _clock, _options, NullLogger<ServerClient>.Instance);
     }
 
     private Task RegisterAsync() =>

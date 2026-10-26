@@ -10,8 +10,9 @@
       2. creates the kiosk account's profile (an administrator holds that privilege);
       3. turns off what blocks or interrupts auto-logon on Windows 11: "only Windows Hello sign-in"
          (DevicePasswordLessBuildVersion), a logon message (legal notice), IgnoreShiftOverride, the first-logon animation
-         and the privacy questions for a new account; and turns off the kiosk profile reset after each session
-         (shell.kioskUser.resetProfileOnLogout), which in 1.0.6/1.0.7 recreates the profile without the shell;
+         and the privacy questions for a new account; on an agent older than 1.0.15 it also turns off the kiosk
+         profile reset after each session (shell.kioskUser.resetProfileOnLogout), which there recreates the profile
+         without the shell (1.0.15 writes the shell into the recreated profile; set-profile-reset.ps1 turns it back on);
       4. sets the service to plain auto start (installers up to 1.0.7 use delayed-auto, so the Shell showed "agent
          disconnected" for about two minutes after every boot) and restarts the agent: on start it sets its own
          password for the account, writes the shell into the profile and
@@ -123,6 +124,16 @@ function Register-DomainNameTask {
         -Description 'ClubShell pilot: keeps the computer name as the auto-logon domain of the kiosk account (agent 1.0.6 writes ".").' -Force | Out-Null
 }
 
+# Version of the installed agent (ClubShellAgent.exe), or $null when it cannot be read.
+function Get-AgentVersion {
+    $exe = Join-Path $env:ProgramFiles 'ClubShell\Agent\ClubShellAgent.exe'
+    if (-not (Test-Path -LiteralPath $exe)) { return $null }
+    $text = [string] (Get-Item -LiteralPath $exe).VersionInfo.ProductVersion
+    $parsed = $null
+    if ([Version]::TryParse(($text -split '[+-]')[0], [ref] $parsed)) { return $parsed }
+    return $null
+}
+
 # Sets shell.kioskUser.resetProfileOnLogout = false in agent.json (written to a temp file and checked first).
 function Disable-ProfileReset {
     if (-not (Test-Path -LiteralPath $AgentConfig)) { return 'нет agent.json' }
@@ -207,7 +218,7 @@ public static extern int CreateProfile(string pszUserSid, string pszUserName, Sy
     }
     Write-Ok "профиль: $profilePath"
 
-    # --- 3. Windows settings that block or interrupt auto-logon; profile reset off
+    # --- 3. Windows settings that block or interrupt auto-logon; profile reset off on agents before 1.0.15
     Write-Step '3/5  Настройки Windows, которые мешают автовходу'
     $before = (Get-ItemProperty -LiteralPath $passwordLessKey -ErrorAction SilentlyContinue).DevicePasswordLessBuildVersion
     Set-RegistryValue $passwordLessKey 'DevicePasswordLessBuildVersion' 0 'DWord'
@@ -235,9 +246,15 @@ public static extern int CreateProfile(string pszUserSid, string pszUserName, Sy
     Set-RegistryValue 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\OOBE' 'DisablePrivacyExperience' 1 'DWord'
     Write-Ok 'отключены анимация первого входа и вопросы о конфиденциальности для нового пользователя'
 
-    $resetProblem = Disable-ProfileReset
-    if ($resetProblem) { Write-Note "очистку профиля между клиентами выключить не удалось ($resetProblem)" }
-    else { Write-Ok 'очистка профиля между клиентами выключена до исправления в агенте (иначе после сеанса пропадает шелл)' }
+    # 1.0.15 writes the shell into the profile Windows recreates after a reset; older agents leave a Windows desktop there.
+    $agentVersion = Get-AgentVersion
+    if ($agentVersion -and $agentVersion -ge [Version]'1.0.15') {
+        Write-Ok "очистка профиля между клиентами остаётся как в agent.json (агент $agentVersion восстанавливает шелл в новом профиле)"
+    } else {
+        $resetProblem = Disable-ProfileReset
+        if ($resetProblem) { Write-Note "очистку профиля между клиентами выключить не удалось ($resetProblem)" }
+        else { Write-Ok 'очистка профиля между клиентами выключена: агент старше 1.0.15 (обновите его и запустите set-profile-reset.ps1)' }
+    }
 
     # --- 4. Agent restart: provisioning, shell into the profile, then auto-logon
     Write-Step '4/5  Перезапуск агента'

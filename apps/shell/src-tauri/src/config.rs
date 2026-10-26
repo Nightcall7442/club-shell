@@ -1,7 +1,10 @@
 //! Shell configuration (`ARCHITECTURE.md` §12.2, `config/shell.default.json`).
 //!
 //! Resolution order: embedded defaults → `<data dir>\shell.json` overlay (deep-merged, so a partial
-//! file is fine) → `CLUBSHELL_*` environment overrides. The JSON shape is `shell.json` exactly;
+//! file is fine) → `CLUBSHELL_*` environment overrides. A release build ignores `CLUBSHELL_DEV` and
+//! `CLUBSHELL_DATA_DIR` and takes `ProgramData` from the Known Folder, not the environment
+//! (SHELL_CHANGES 40): Winlogon starts the Shell with the kiosk account's own environment, which the
+//! player can set (`setx`). The JSON shape is `shell.json` exactly;
 //! everything that is not part of the file (data directory, token path, dev mode) lives in
 //! [`RuntimeConfig`] and is skipped by serde, so `settings_get_shell_config` never leaks it.
 
@@ -223,19 +226,76 @@ pub struct RuntimeConfig {
     pub data_dir: PathBuf,
     /// `secure\shell.token` (or `CLUBSHELL_SHELL_TOKEN`).
     pub token_path: PathBuf,
-    /// Mock mode without the Agent (`CLUBSHELL_DEV=1`).
+    /// Mock mode without the Agent (`CLUBSHELL_DEV=1`, debug builds only).
     pub dev: bool,
     /// The overlay file that was actually applied, if it existed.
     pub overlay_path: Option<PathBuf>,
+    /// Variables that were set but ignored because this is a release build (logged once at start).
+    pub ignored_env: Vec<&'static str>,
 }
 
-/// `%ProgramData%\ClubShell`, overridable with `CLUBSHELL_DATA_DIR`.
-pub fn default_data_dir() -> PathBuf {
-    if let Some(dir) = non_empty_env(env::DATA_DIR) {
-        return PathBuf::from(dir);
+/// `true` in a release build: no environment variable may switch the kiosk hardening off.
+pub const fn hardened_build() -> bool {
+    !cfg!(debug_assertions)
+}
+
+/// The variables a release build ignores although they are set.
+pub fn ignored_env() -> Vec<&'static str> {
+    ignored_of(hardened_build(), |name| non_empty_env(name).is_some())
+}
+
+/// [`ignored_env`] for a build kind and a lookup of which variables are set.
+fn ignored_of(hardened: bool, is_set: impl Fn(&str) -> bool) -> Vec<&'static str> {
+    if !hardened {
+        return Vec::new();
     }
-    let program_data = non_empty_env("ProgramData").unwrap_or_else(|| r"C:\ProgramData".to_owned());
-    Path::new(&program_data).join("ClubShell")
+    [env::DEV, env::DATA_DIR]
+        .into_iter()
+        .filter(|name| is_set(name))
+        .collect()
+}
+
+/// `%ProgramData%\ClubShell`; a debug build honours `CLUBSHELL_DATA_DIR`.
+pub fn default_data_dir() -> PathBuf {
+    if !hardened_build() {
+        if let Some(dir) = non_empty_env(env::DATA_DIR) {
+            return PathBuf::from(dir);
+        }
+    }
+    program_data().join("ClubShell")
+}
+
+/// The ProgramData folder: the Known Folder in a release build on Windows (the registry, not the
+/// `ProgramData` variable a user can override), else `%ProgramData%`, else `C:\ProgramData`.
+fn program_data() -> PathBuf {
+    #[cfg(windows)]
+    if hardened_build() {
+        if let Some(path) = known_program_data() {
+            return path;
+        }
+    }
+    PathBuf::from(non_empty_env("ProgramData").unwrap_or_else(|| r"C:\ProgramData".to_owned()))
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn known_program_data() -> Option<PathBuf> {
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows::Win32::UI::Shell::{FOLDERID_ProgramData, SHGetKnownFolderPath, KF_FLAG_DEFAULT};
+
+    // SAFETY: FOLDERID_ProgramData is a static GUID; no token (current user). On success the
+    // returned buffer is NUL-terminated, read once and freed with CoTaskMemFree.
+    unsafe {
+        let raw = SHGetKnownFolderPath(&FOLDERID_ProgramData, KF_FLAG_DEFAULT, None).ok()?;
+        let path = raw.to_string().ok();
+        CoTaskMemFree(Some(raw.0 as *const core::ffi::c_void));
+        path.filter(|p| !p.is_empty()).map(PathBuf::from)
+    }
+}
+
+/// `CLUBSHELL_DEV` set to a true value, honoured in debug builds only.
+fn dev_flag() -> bool {
+    !hardened_build() && env_flag(env::DEV)
 }
 
 fn non_empty_env(name: &str) -> Option<String> {
@@ -278,6 +338,7 @@ impl ShellConfig {
             data_dir,
             dev: false,
             overlay_path: None,
+            ignored_env: Vec::new(),
         };
         config
     }
@@ -339,8 +400,9 @@ impl ShellConfig {
             token_path: non_empty_env(env::SHELL_TOKEN)
                 .map(PathBuf::from)
                 .unwrap_or_else(|| data_dir.join("secure").join("shell.token")),
-            dev: env_flag(env::DEV),
+            dev: dev_flag(),
             overlay_path: overlay_applied.then_some(overlay_path),
+            ignored_env: ignored_env(),
         };
         config.validate()?;
         Ok(config)
@@ -458,6 +520,17 @@ impl Default for ShellConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_release_build_ignores_the_dev_and_data_dir_overrides() {
+        let set = |name: &str| name == env::DEV || name == env::DATA_DIR || name == env::LOCALE;
+        assert_eq!(ignored_of(true, set), vec![env::DEV, env::DATA_DIR]);
+        assert!(ignored_of(true, |_| false).is_empty());
+        assert!(
+            ignored_of(false, set).is_empty(),
+            "a debug build honours them"
+        );
+    }
 
     #[test]
     fn defaults_parse_and_validate() {

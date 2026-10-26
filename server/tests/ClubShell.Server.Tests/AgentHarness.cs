@@ -7,6 +7,7 @@ using ClubShell.Core.Realtime;
 using ClubShell.Core.Security;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace ClubShell.Server.Tests;
 
@@ -75,6 +76,7 @@ public sealed class AgentHarness : IAsyncDisposable
         http.AddHttpMessageHandler(() => new ContractValidatingHandler(server));
         services.AddSingleton<IClock>(new SystemClock(clock));
         services.AddSingleton<ITokenStore>(provider => new TokenStore(Path.Combine(dir, "agent.tokens"), new NullTokenProtector(), provider.GetRequiredService<IClock>()));
+        services.AddSingleton(provider => new ClubKeyStore(Path.Combine(dir, "club.key"), new NullTokenProtector(), provider.GetRequiredService<ILogger<ClubKeyStore>>()));
         services.AddSingleton(new Hwid(new FixedHardware(board), Path.Combine(dir, "hwid.fallback")));
         services.AddSingleton<ServerClient>();
         services.AddSingleton<RealtimeClient>();

@@ -67,11 +67,19 @@ watchdog restarts it (`ARCHITECTURE.md` §2 rule 3–4).
 
 | Variable | Effect |
 |----------|--------|
-| `CLUBSHELL_DATA_DIR` | Data directory (default `%ProgramData%\ClubShell`) |
+| `CLUBSHELL_DATA_DIR` | Data directory (default `%ProgramData%\ClubShell`). Debug builds only |
 | `CLUBSHELL_PIPE` | Overrides `ipc.pipeName` |
 | `CLUBSHELL_SHELL_TOKEN` | Path of the shell token file (default `<data dir>\secure\shell.token`) |
 | `CLUBSHELL_LOCALE` | Overrides `locale` (`en` / `ru` / `uz`) |
-| `CLUBSHELL_DEV` | `1`/`true` → mock transport, hardening off |
+| `CLUBSHELL_DEV` | `1`/`true` → mock transport, hardening off. Debug builds only |
+
+A release build (`config::hardened_build()`) ignores `CLUBSHELL_DEV` and `CLUBSHELL_DATA_DIR` (SHELL_CHANGES 40): the
+kiosk account could set them for itself (`setx`) and get an unprotected Shell on the mock agent or its own
+`shell.json`. The data directory is then `ProgramData\ClubShell` from the known folder, and the log warns when either
+variable is set. The Agent also drops every `CLUBSHELL_*` of the user's own environment before it adds the three it
+sets (`ShellLauncher`, `ProcessStartSpec.DropEnvPrefixes`). A release build connects only to a pipe owned by
+LocalSystem or Administrators (`PipeOptions::require_trusted_server`): a pipe the kiosk account created first under
+the Agent's name is refused before the shell token is sent.
 
 `validate()` rejects zero timeouts, inverted backoff, a non-bare `theme` name, `gamepad.pollMs == 0`,
 a dead-zone outside `[0, 1)`, `ui.gridColumns == 0`, volume > 100 and an unknown `logging.level`.

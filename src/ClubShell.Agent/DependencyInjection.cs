@@ -324,6 +324,8 @@ public static class AgentServiceCollectionExtensions
         // sequentially in this order (ServicesStartConcurrently is off), so StartAsync completes before the next starts.
         // Before it, paths.persistent gets its ACL: the kiosk password and the agent tokens are written there.
         services.AddHostedService<PersistentStateDirectory>();
+        // The club key leaves agent.json (readable by every account) for secure\ (SHELL_CHANGES 41), after the ACL above.
+        services.AddHostedService<ClubKeyMigration>();
         services.AddHostedService(sp => sp.GetRequiredService<TempUserProvisioner>());
         services.AddHostedService(sp => sp.GetRequiredService<PipeServer>());
         services.AddHostedService(sp => sp.GetRequiredService<ServerConnection>());

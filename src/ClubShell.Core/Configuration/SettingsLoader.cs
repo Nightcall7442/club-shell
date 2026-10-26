@@ -467,6 +467,32 @@ public sealed class SettingsLoader : IOptionsMonitor<AgentSettings>, IOptions<Ag
         await LoadAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Like <see cref="PatchAsync"/>, but writes <c>agent.json</c> and reloads only when <paramref name="mutate"/> returns
+    /// <see langword="true"/>; returns that value. A missing file is not created.
+    /// </summary>
+    public async Task<bool> TryPatchAsync(Func<JsonObject, bool> mutate, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(mutate);
+        await _loadLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (await ReadDocumentAsync(_loaderOptions.ConfigPath, cancellationToken).ConfigureAwait(false) is not { } document || !mutate(document))
+            {
+                return false;
+            }
+
+            await WriteAtomicAsync(document, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _loadLock.Release();
+        }
+
+        await LoadAsync(cancellationToken).ConfigureAwait(false);
+        return true;
+    }
+
     /// <summary>Persists the identity assigned by the server at registration (<c>pcId</c>, <c>pcName</c>, <c>zone</c>).</summary>
     public Task SetPcIdentityAsync(Guid pcId, string? pcName, string? zone, CancellationToken cancellationToken) =>
         PatchAsync(
@@ -783,7 +809,7 @@ public static class CoreServiceCollectionExtensions
     /// <summary>
     /// Registers the platform-neutral services: <see cref="IClock"/>, <see cref="SettingsLoader"/> (also as
     /// <see cref="IOptionsMonitor{TOptions}"/>/<see cref="IOptions{TOptions}"/> of <see cref="AgentSettings"/>),
-    /// <see cref="ITokenStore"/>, <see cref="Hwid"/>, the resilient server <see cref="HttpClient"/>,
+    /// <see cref="ITokenStore"/>, <see cref="ClubKeyStore"/>, <see cref="Hwid"/>, the resilient server <see cref="HttpClient"/>,
     /// <see cref="ServerClient"/>, <see cref="RealtimeClient"/>, <see cref="Reconnector"/> and the update pipeline.
     /// <paramref name="configuration"/> is the host configuration (<c>ClubShell:*</c> keys, see
     /// <see cref="SettingsLoaderOptions.FromConfiguration"/>); the Agent configuration itself comes from <c>agent.json</c>.
@@ -821,6 +847,11 @@ public static class CoreServiceCollectionExtensions
             provider.GetRequiredService<ITokenProtector>(),
             provider.GetRequiredService<IClock>(),
             provider.GetRequiredService<ILogger<TokenStore>>()));
+
+        services.TryAddSingleton(provider => new ClubKeyStore(
+            provider.GetRequiredService<SettingsLoader>().Current.ClubKeyPath,
+            provider.GetRequiredService<ITokenProtector>(),
+            provider.GetRequiredService<ILogger<ClubKeyStore>>()));
 
         services.TryAddSingleton<IHardwareIdSource, BasicHardwareIdSource>();
         services.TryAddSingleton(provider => new Hwid(

@@ -40,10 +40,11 @@ public interface IShellRelauncher
 /// Deletes the kiosk user's profile between sessions (<c>shell.kioskUser.resetProfileOnLogout</c>): stops the Shell,
 /// logs the kiosk user off, runs <see cref="ProfileReset.ResetProfile(string, IReadOnlyList{string})"/>, re-applies
 /// the shell-folder redirection, relaunches the Shell and moves the preserved anti-cheat directories
-/// (<c>shell.kioskUser.preserveOnReset</c>) back into the recreated profile. Resets are serialized, skipped while a
-/// session is open and rate-limited by <see cref="Cooldown"/>. Triggered automatically on
-/// <see cref="SessionEventType.Ended"/> (subscribed while the hosted service runs) and on demand through
-/// <see cref="IProfileResetTrigger"/>.
+/// (<c>shell.kioskUser.preserveOnReset</c>) back into the recreated profile. Resets are serialized and skipped while a
+/// session is open. Triggered automatically on <see cref="SessionEventType.Ended"/> (subscribed while the hosted service
+/// runs), always: a player's session dirties the profile however soon after the last reset it ended (SHELL_CHANGES 42).
+/// <see cref="Cooldown"/> rate-limits only the on-demand requests through <see cref="IProfileResetTrigger"/> and the
+/// retries of a reset that failed.
 /// <para>
 /// A session that never ends — the PC loses power, the Agent is killed — produces no <see cref="SessionEventType.Ended"/>
 /// and would leave the profile for the next player. <see cref="SessionEventType.Started"/> therefore writes a debt
@@ -110,7 +111,7 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
         return Task.CompletedTask;
     }
 
-    /// <summary>Minimum time between two resets.</summary>
+    /// <summary>Minimum time between two on-demand resets, and between two retries of a profile left behind; the reset after a session ignores it.</summary>
     public TimeSpan Cooldown { get; set; } = TimeSpan.FromMinutes(5);
 
     /// <summary>Time of the last completed reset (persisted by <see cref="ProfileReset"/>).</summary>
@@ -155,7 +156,7 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
         await RequestResetAsync("dirtyProfile", force: true, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Shared body of both triggers; <paramref name="force"/> skips the cooldown for a debt that must be paid.</summary>
+    /// <summary>Shared body of the triggers; <paramref name="force"/> skips the cooldown for a profile a player has used.</summary>
     private async Task RequestResetAsync(string reason, bool force, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(reason);
@@ -407,7 +408,9 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
         try
         {
             await _clock.Delay(SessionSettleDelay, CancellationToken.None).ConfigureAwait(false);
-            await RequestResetAsync("sessionEnded", CancellationToken.None).ConfigureAwait(false);
+            // Forced: a session that ended within the cooldown of the last reset (a short one, or one right after the
+            // previous player's) would otherwise hand its profile to the next player.
+            await RequestResetAsync("sessionEnded", force: true, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

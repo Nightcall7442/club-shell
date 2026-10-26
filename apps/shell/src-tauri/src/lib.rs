@@ -63,6 +63,12 @@ pub fn run() {
     if let Some(e) = config_error {
         tracing::error!(error = %e, "shell.json rejected; running with embedded defaults");
     }
+    if !config.runtime.ignored_env.is_empty() {
+        tracing::warn!(
+            ignored = ?config.runtime.ignored_env,
+            "release build: these environment variables are set and ignored"
+        );
+    }
 
     if !config.is_dev() && !acquire_single_instance() {
         tracing::warn!("another ClubShell instance is running; focusing it and exiting");

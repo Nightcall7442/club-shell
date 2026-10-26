@@ -121,13 +121,17 @@ been created by the first logon.
 ### 3.2 Profile reset
 
 `ProfileResetService` (hosted) subscribes to `ISessionService.Changed` and, on `SessionEventType.Ended` with
-`shell.kioskUser.resetProfileOnLogout`, waits 2 s and calls `RequestResetAsync("sessionEnded")`:
+`shell.kioskUser.resetProfileOnLogout`, waits 2 s and resets (`"sessionEnded"`):
 
 | Guard | Effect |
 |-------|--------|
 | a reset is already running | skipped |
-| `Cooldown` (5 min) since the last reset | skipped |
+| `Cooldown` (5 min) since the last reset | ignored after a session (SHELL_CHANGES 42); on-demand requests and retries of a failed reset are skipped |
 | a session is open (`ISessionService.State.IsOpen()`) | skipped |
+
+What `preserveOnReset` carries across the reset never carries a sign-in: `ProfileReset.SignInPaths` (the Riot Client's
+`RiotGamesPrivateSettings.yaml` / `RiotClientPrivateSettings.yaml`, the FACEIT client's cookies and web storage) are
+deleted from the preserved directories, and a preserved entry inside one of them is not carried.
 
 Reset sequence: `IShellRelauncher.StopAsync` (Shell stopped, watchdog `Suspended`) → `WtsSessions.Logoff` for every
 session of the kiosk user (up to 4 rounds) → `ProfileReset.ResetProfile(user)`: wait for hive unload, then

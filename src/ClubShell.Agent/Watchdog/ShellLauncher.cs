@@ -24,7 +24,8 @@ public sealed record ShellProcess(int Pid, SafeProcessHandle Handle, uint Sessio
 /// <summary>
 /// Launches the kiosk Shell (<c>shell.exePath</c>) into the interactive console session with the kiosk user's primary
 /// token (<c>CreateProcessAsUser</c>, desktop <c>winsta0\default</c>, working dir = Shell install dir) and the
-/// environment variables the Shell needs (<c>CLUBSHELL_PIPE</c>, <c>CLUBSHELL_SHELL_TOKEN</c>, <c>CLUBSHELL_LOCALE</c>).
+/// environment variables the Shell needs (<c>CLUBSHELL_PIPE</c>, <c>CLUBSHELL_SHELL_TOKEN</c>, <c>CLUBSHELL_LOCALE</c>); every
+/// other <c>CLUBSHELL_*</c> of the kiosk account's own environment is dropped.
 /// Owns the single Shell process, stops it gracefully (WM_CLOSE then terminate) and can drop an <c>explorer.exe</c>
 /// fallback shell for safe mode. Implements <see cref="IShellRelauncher"/> (stop + suspend / resume + relaunch),
 /// <see cref="IKioskSessionLocator"/> and <see cref="IKioskProfilePaths"/> for the Games/Users subsystems.
@@ -32,6 +33,7 @@ public sealed record ShellProcess(int Pid, SafeProcessHandle Handle, uint Sessio
 [SupportedOSPlatform("windows")]
 public sealed class ShellLauncher : IShellRelauncher, IKioskSessionLocator, IKioskProfilePaths, IDisposable
 {
+    private const string ShellEnvPrefix = "CLUBSHELL_";
     private const string PipeEnvVar = "CLUBSHELL_PIPE";
     private const string TokenEnvVar = "CLUBSHELL_SHELL_TOKEN";
     private const string LocaleEnvVar = "CLUBSHELL_LOCALE";
@@ -199,6 +201,9 @@ public sealed class ShellLauncher : IShellRelauncher, IKioskSessionLocator, IKio
                 Exe = exe,
                 WorkingDir = Path.GetDirectoryName(exe),
                 Env = BuildEnvironment(settings),
+                // SHELL_CHANGES 40: a CLUBSHELL_* the kiosk account set for itself (setx CLUBSHELL_DEV 1) never
+                // reaches the Shell; only the Agent's own three are passed.
+                DropEnvPrefixes = [ShellEnvPrefix],
                 SessionId = (uint)sessionId,
                 Job = job,
             };

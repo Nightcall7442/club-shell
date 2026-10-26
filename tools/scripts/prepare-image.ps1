@@ -15,9 +15,13 @@
     reset (cache\profile-keep). USB storage is switched back on (USBSTOR Start=3, the policy's HID block removed) so
     the image carries Windows' own state; the agent applies the club's policy again at the first boot of each clone.
 
+    The agent keeps the club key DPAPI-wrapped in secure\club.key (machine scope) and blanks it in agent.json. A clone
+    whose machine keys differ (sysprep) could not open that file, so the script puts the key back into agent.json and
+    deletes secure\club.key: each clone's agent moves it into its own secure\club.key at the first start.
+
     It refuses to run without the update signing key (Agent\update-public.pem): a clone without it refuses every
-    update and can only get it by a visit. It prints the server and the last 4 characters of the club key in
-    agent.json, so the owner can check that a rotated key reached this PC before cloning it.
+    update and can only get it by a visit. It prints the server and the last 4 characters of the club key, so the
+    owner can check that a rotated key reached this PC before cloning it.
 
     Capture the image right after it, without a reboot: on the next boot the agent starts and registers again.
     The PC this one registered as stays in the console (Map) as a pending or approved seat: delete it there.
@@ -49,18 +53,39 @@ if (-not (Test-Path -LiteralPath (Join-Path $agentDir 'update-public.pem'))) {
 }
 
 # Which server and key the clones will register with (agent.json is kept across upgrades; the setup replaces the key).
+# The key is in agent.json until the agent moves it into secure\club.key (DPAPI, machine scope, the agent's entropy).
 $agentJson = Join-Path $dataDir 'agent.json'
+$config = $null
+$keyFile = $null
+$storedKey = $null
 if (Test-Path -LiteralPath $agentJson) {
     try {
         $config = Get-Content -LiteralPath $agentJson -Raw | ConvertFrom-Json
         $persistentDir = [string]$config.paths.persistent
         $key = [string]$config.server.clubApiKey
+        if (-not $key) {
+            $secureRoot = if ($persistentDir -and [IO.Path]::IsPathRooted($persistentDir)) { $persistentDir } else { $dataDir }
+            $keyFile = Join-Path $secureRoot 'secure\club.key'
+            if (Test-Path -LiteralPath $keyFile) {
+                Add-Type -AssemblyName System.Security
+                $entropy = [Text.Encoding]::UTF8.GetBytes('ClubShell.Agent.tokens.v1')
+                $plain = [Security.Cryptography.ProtectedData]::Unprotect(
+                    [IO.File]::ReadAllBytes($keyFile), $entropy, [Security.Cryptography.DataProtectionScope]::LocalMachine)
+                $storedKey = [Text.Encoding]::UTF8.GetString($plain)
+                $key = $storedKey
+            }
+        }
         $tail = if ($key.Length -ge 4) { $key.Substring($key.Length - 4) } else { '(нет ключа)' }
         Write-Host "Сервер: $($config.server.baseUrl)"
         Write-Host "Ключ клуба заканчивается на: $tail  (сверьте с Club__EnrollmentKey на Railway)" -ForegroundColor Cyan
     } catch {
-        Write-Host "Не удалось прочитать agent.json: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "Не удалось прочитать agent.json или ключ клуба: $($_.Exception.Message)" -ForegroundColor Yellow
     }
+}
+# secure\club.key is deleted below: without the key back in agent.json the clones could not register.
+if ($keyFile -and (Test-Path -LiteralPath $keyFile) -and -not $storedKey) {
+    Write-Host 'Ключ клуба в secure\club.key не расшифровывается. Запишите ключ в agent.json -> server.clubApiKey и запустите этот файл снова.' -ForegroundColor Red
+    exit 1
 }
 
 if ($svc.Status -ne 'Stopped') {
@@ -75,7 +100,7 @@ if ($persistentDir -and [IO.Path]::IsPathRooted($persistentDir) -and (Test-Path 
     $roots += $persistentDir
 }
 $files = @(
-    'agent-identity.json', 'secure\agent.tokens', 'secure\hwid.fallback', 'secure\shell.token', 'secure\kiosk.cred',
+    'agent-identity.json', 'secure\agent.tokens', 'secure\hwid.fallback', 'secure\shell.token', 'secure\kiosk.cred', 'secure\club.key',
     'cache\offline.db', 'cache\offline.db-wal', 'cache\offline.db-shm', 'crash-history.json')
 foreach ($root in $roots) {
     foreach ($rel in $files + 'cache\power-acks.json') {
@@ -106,6 +131,13 @@ foreach ($rel in 'pending-update', 'cache\updates', 'cache\saves', 'cache\player
             $removed++
         }
     }
+}
+
+# The club key goes back into agent.json (secure\club.key is deleted above): each clone stores it under its own DPAPI keys.
+if ($storedKey -and $config) {
+    $config.server | Add-Member -NotePropertyName clubApiKey -NotePropertyValue $storedKey -Force
+    ($config | ConvertTo-Json -Depth 12) | Set-Content -LiteralPath $agentJson -Encoding utf8
+    Write-Host 'Ключ клуба возвращён в agent.json: каждый клон при первом запуске спрячет его в secure\club.key.'
 }
 
 # USB storage as Windows ships it; the clone's agent applies the club's policy at its first boot.

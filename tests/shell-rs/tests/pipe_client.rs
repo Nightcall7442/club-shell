@@ -58,6 +58,7 @@ mod windows_pipe {
             heartbeat_max_misses: 3,
             heartbeat,
             event_buffer: 16,
+            require_trusted_server: false,
         }
     }
 

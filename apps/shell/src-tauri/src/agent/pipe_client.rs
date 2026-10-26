@@ -70,6 +70,8 @@ impl PipeTransport {
             connect_timeout: config.ipc.connect_timeout(),
             options: PipeOptions {
                 request_timeout: config.ipc.request_timeout(),
+                // A release Shell talks only to a pipe the Agent service created (SHELL_CHANGES 40).
+                require_trusted_server: crate::config::hardened_build(),
                 ..PipeOptions::default()
             },
             current: RwLock::new(None),

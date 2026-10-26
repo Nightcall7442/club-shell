@@ -26,6 +26,12 @@ public sealed record ProcessStartSpec
     /// <summary>Extra environment variables merged over the target user's block.</summary>
     public IReadOnlyDictionary<string, string>? Env { get; init; }
 
+    /// <summary>
+    /// Variables of the user's own environment that are dropped before <see cref="Env"/> is added, by name prefix
+    /// (case-insensitive): what the account set for itself (<c>setx</c>) must not reach the process.
+    /// </summary>
+    public IReadOnlyList<string>? DropEnvPrefixes { get; init; }
+
     /// <summary>Interactive WTS session to launch into (uses the logged-on user's token). Requires LocalSystem.</summary>
     public uint? SessionId { get; init; }
 
@@ -294,7 +300,7 @@ public sealed class ProcessLauncher
         SafeTokenHandle token = spec.RunAsUser ?? (owned = ProcessAsUser.GetUserToken(spec.SessionId.GetValueOrDefault()));
         try
         {
-            using EnvironmentBlock env = EnvironmentBlock.Build(token, spec.Env);
+            using EnvironmentBlock env = EnvironmentBlock.Build(token, spec.Env, spec.DropEnvPrefixes);
             uint flags = NativeConst.CREATE_UNICODE_ENVIRONMENT | spec.Priority | (spec.Hidden ? NativeConst.CREATE_NO_WINDOW : NativeConst.CREATE_NEW_CONSOLE);
             (uint pid, SafeProcessHandle handle) = ProcessAsUser.CreateProcessAsUser(token, spec.Exe, spec.Args, workingDir, env.Pointer, ProcessAsUser.DefaultDesktop, flags, spec.Hidden);
             return new LaunchedProcess((int)pid, handle, spec.Exe, startedAt);
@@ -395,8 +401,11 @@ internal sealed class EnvironmentBlock : IDisposable
     /// <summary>LPVOID lpEnvironment (double-null-terminated UTF-16 block); 0 lets CreateProcess inherit.</summary>
     public nint Pointer { get; private set; }
 
-    /// <summary>Builds the block from <see cref="Userenv.CreateEnvironmentBlock"/> for <paramref name="token"/> plus <paramref name="extra"/>.</summary>
-    public static EnvironmentBlock Build(SafeTokenHandle token, IReadOnlyDictionary<string, string>? extra)
+    /// <summary>
+    /// Builds the block from <see cref="Userenv.CreateEnvironmentBlock"/> for <paramref name="token"/>, without the
+    /// variables whose name starts with one of <paramref name="dropPrefixes"/>, plus <paramref name="extra"/>.
+    /// </summary>
+    public static EnvironmentBlock Build(SafeTokenHandle token, IReadOnlyDictionary<string, string>? extra, IReadOnlyList<string>? dropPrefixes = null)
     {
         var variables = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         bool added = false;
@@ -432,14 +441,7 @@ internal sealed class EnvironmentBlock : IDisposable
             }
         }
 
-        if (extra is not null)
-        {
-            foreach ((string key, string value) in extra)
-            {
-                variables[key] = value;
-            }
-        }
-
+        ProcessEnvironment.Merge(variables, extra, dropPrefixes);
         var text = new StringBuilder();
         foreach ((string key, string value) in variables)
         {
@@ -527,6 +529,31 @@ internal static class ProcessWait
                 {
                     process.DangerousRelease();
                 }
+            }
+        }
+    }
+}
+
+/// <summary>Environment of a process the Agent starts as a user.</summary>
+public static class ProcessEnvironment
+{
+    /// <summary>Drops the <paramref name="dropPrefixes"/> variables from <paramref name="variables"/>, then sets <paramref name="extra"/>.</summary>
+    public static void Merge(IDictionary<string, string> variables, IReadOnlyDictionary<string, string>? extra, IReadOnlyList<string>? dropPrefixes)
+    {
+        ArgumentNullException.ThrowIfNull(variables);
+        if (dropPrefixes is { Count: > 0 })
+        {
+            foreach (string key in variables.Keys.Where(k => dropPrefixes.Any(p => k.StartsWith(p, StringComparison.OrdinalIgnoreCase))).ToList())
+            {
+                _ = variables.Remove(key);
+            }
+        }
+
+        if (extra is not null)
+        {
+            foreach ((string key, string value) in extra)
+            {
+                variables[key] = value;
             }
         }
     }
