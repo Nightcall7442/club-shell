@@ -11,7 +11,10 @@ namespace ClubShell.Server.Agents;
 /// <summary>
 /// Derived PC status watcher (DESIGN §6.6, §8), every 5 s under <c>pg_advisory_lock(CSPcSt)</c>: a PC that turns
 /// <c>offline</c> (no live socket, no fresh heartbeat) gets a <c>telemetry_events kind=pcOffline</c> row — the health
-/// issue <c>unstable</c> counts them — and the <c>pcOffline</c> event for the webhooks, in one transaction. A PC that turns
+/// issue <c>unstable</c> counts them — and the <c>pcOffline</c> event for the webhooks, in one transaction. Not when the
+/// stop was planned (SHELL_CHANGES 44): a <c>reboot</c>/<c>shutdown</c> command went to it, or its agent closed the socket
+/// itself (it does when Windows shuts down or restarts and when the service stops), within
+/// <see cref="AgentOptions.PlannedOfflineMin"/>; a PC in maintenance is never offline. A PC that turns
 /// <c>free</c> starts its idle stretch for the <c>pcIdleMinutes</c> automation (<see cref="AutomationService.IdleAsync"/>).
 /// No push: <c>pcStatusChanged</c> is notImplemented, the console polls.
 /// ponytail: the last status lives in memory, so the first pass after a restart only records, and an idle stretch starts
@@ -50,6 +53,26 @@ public sealed class PcStatusWorker(
             {
                 _freeSince.TryRemove(pc.Id, out _);
             }
+        }
+
+        if (went.Count > 0)
+        {
+            await using var c = await db.OpenConnectionAsync();
+            var planned = (await c.QueryAsync<Guid>(
+                """
+                SELECT p.id FROM pcs p
+                WHERE p.id = ANY(@ids)
+                  AND (p.goodbye_at > @since
+                       OR EXISTS (SELECT 1 FROM agent_commands a
+                                  WHERE a.pc_id = p.id AND a.name IN ('reboot', 'shutdown') AND a.created_at > @since AND a.superseded_at IS NULL))
+                """,
+                new { ids = went.Select(p => p.Id).ToArray(), since = now - TimeSpan.FromMinutes(agents.PlannedOfflineMin) })).ToHashSet();
+            foreach (var pc in went.Where(p => planned.Contains(p.Id)))
+            {
+                logger.LogInformation("PC {Name} ({PcId}) went offline after a planned stop", pc.Name, pc.Id);
+            }
+
+            went.RemoveAll(p => planned.Contains(p.Id));
         }
 
         if (went.Count > 0)

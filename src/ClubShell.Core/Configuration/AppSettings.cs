@@ -596,6 +596,28 @@ public sealed class StorageSettings
     /// <summary>Games network share.</summary>
     [Required]
     public GamesShareSettings GamesShare { get; set; } = new();
+
+    /// <summary>Local copies of the catalogue's art and trailers.</summary>
+    [Required]
+    public MediaCacheSettings MediaCache { get; set; } = new();
+}
+
+/// <summary>
+/// <c>agent.json → storage.mediaCache</c> (SHELL_CHANGES 46): the Agent downloads the catalogue's covers and wide art (and,
+/// with <see cref="Videos"/>, the trailers) into <c>cache\media</c> and gives the Shell those files, so they show without
+/// the internet and from a club server on plain http, which the Shell's CSP would not load.
+/// </summary>
+public sealed class MediaCacheSettings
+{
+    /// <summary>Cache the catalogue's art; off = the Shell loads every URL itself.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Cache the trailers too. Off by default: tens of MB per game, fetched by every PC from the same uplink.</summary>
+    public bool Videos { get; set; }
+
+    /// <summary>Size of <c>cache\media</c>; the least recently used files go first.</summary>
+    [Range(64, 65536)]
+    public int MaxMb { get; set; } = 4096;
 }
 
 /// <summary><c>agent.json → storage.gamesShare</c>.</summary>

@@ -180,6 +180,9 @@ public sealed class AgentSocketHub(
                 await DeliverAsync(connection, await commands.PendingAsync(agent.Pc.Id), lifetime.Token);
                 connection.Ready.TrySetResult();
 
+                // Back after a stop it announced: its next offline is judged on its own (SHELL_CHANGES 44).
+                await pcs.SetGoodbyeAsync(agent.Pc.Id, null);
+
                 // Keepalive and expiry only send our close frame; the receive loop reads the peer's answer and ends
                 // the connection (CloseAsync drops it after a grace period when the peer stays silent).
                 background = [KeepAliveLoopAsync(connection, lifetime.Token), ExpiryAsync(agent, connection, lifetime.Token)];
@@ -253,6 +256,13 @@ public sealed class AgentSocketHub(
 
             if (result.MessageType == WebSocketMessageType.Close)
             {
+                // The agent closed first (our close frame not sent: CloseReceived, not Closed): it is stopping, which a
+                // PC that then goes offline is not an incident for (SHELL_CHANGES 44). Its answer to our close is not.
+                if (connection.Socket.State == WebSocketState.CloseReceived)
+                {
+                    await RecordGoodbyeAsync(agent.Pc.Id);
+                }
+
                 await connection.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye");
                 return;
             }
@@ -367,6 +377,19 @@ public sealed class AgentSocketHub(
         }
         catch (Exception ex) when (ex is OperationCanceledException or WebSocketException or ObjectDisposedException)
         {
+        }
+    }
+
+    private async Task RecordGoodbyeAsync(Guid pcId)
+    {
+        try
+        {
+            await pcs.SetGoodbyeAsync(pcId, clock.GetUtcNow());
+        }
+        catch (NpgsqlException ex)
+        {
+            // Only the planned stop is lost: the PC's offline then counts as an incident.
+            logger.LogWarning(ex, "Could not record that agent {PcId} closed its socket", pcId);
         }
     }
 

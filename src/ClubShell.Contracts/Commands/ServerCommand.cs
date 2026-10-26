@@ -852,16 +852,21 @@ public sealed record HeartbeatGamesVolume(
     string? DriveLetter,
     DateTimeOffset? Since);
 
-/// <summary>Anti-cheat prerequisites in a heartbeat, so the server can hide Riot games on PCs without Vanguard. <see langword="null"/> = unknown.</summary>
+/// <summary>Anti-cheat prerequisites in a heartbeat, so the server can hide Riot and FACEIT games on PCs that cannot run them. <see langword="null"/> = unknown.</summary>
 /// <param name="VanguardInstalled">The Vanguard driver <c>vgk</c> is installed.</param>
 /// <param name="VanguardLoaded">The <c>vgk</c> driver is loaded (it loads at boot; a fresh install needs a reboot).</param>
 /// <param name="SecureBoot">UEFI Secure Boot is on.</param>
 /// <param name="Tpm">A TPM is present.</param>
+/// <param name="FaceitInstalled">
+/// The FACEIT Anti-Cheat driver is installed, its binary present and Authenticode-signed: what the agent's launch gate
+/// checks for a FACEIT game (SHELL_CHANGES 43).
+/// </param>
 public sealed record HeartbeatAntiCheat(
     bool? VanguardInstalled,
     bool? VanguardLoaded,
     bool? SecureBoot,
-    bool? Tpm);
+    bool? Tpm,
+    bool? FaceitInstalled = null);
 
 /// <summary>Response of <c>POST /agents/{pcId}/heartbeat</c>.</summary>
 /// <param name="ServerTime">Server clock (used for offset correction).</param>

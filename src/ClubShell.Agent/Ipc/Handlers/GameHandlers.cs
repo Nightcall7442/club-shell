@@ -15,13 +15,15 @@ namespace ClubShell.Agent.Ipc.Handlers;
 
 /// <summary>
 /// <c>games.*</c> and <c>apps.*</c> requests (IPC_PROTOCOL.md §7.3, §7.4). Games go through <see cref="GameLibrary"/>
-/// and <see cref="GameLaunchService"/>; the apps catalogue (<c>GET /apps</c>) is cached in <c>cache\apps.json</c> and
+/// and <see cref="GameLaunchService"/>, their art and trailers from <c>cache\media</c> once cached
+/// (<see cref="GameMediaCache"/>); the apps catalogue (<c>GET /apps</c>) is cached in <c>cache\apps.json</c> and
 /// filtered by the process allow-list, and apps are started in the kiosk session through <see cref="ProcessLauncher"/>.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class GameHandlers : IIpcHandlerGroup
 {
     private readonly GameLibrary _library;
+    private readonly GameMediaCache _media;
     private readonly GameLaunchService _launch;
     private readonly IServerClient _server;
     private readonly ProcessLauncher _processes;
@@ -35,6 +37,7 @@ public sealed class GameHandlers : IIpcHandlerGroup
     /// <summary>Creates the group. <paramref name="allowlist"/> is optional; without it only <see cref="App.Allowed"/> gates app launches.</summary>
     public GameHandlers(
         GameLibrary library,
+        GameMediaCache media,
         GameLaunchService launch,
         IServerClient server,
         ProcessLauncher processes,
@@ -46,6 +49,7 @@ public sealed class GameHandlers : IIpcHandlerGroup
         ProcessAllowlistModule? allowlist = null)
     {
         ArgumentNullException.ThrowIfNull(library);
+        ArgumentNullException.ThrowIfNull(media);
         ArgumentNullException.ThrowIfNull(launch);
         ArgumentNullException.ThrowIfNull(server);
         ArgumentNullException.ThrowIfNull(processes);
@@ -55,6 +59,7 @@ public sealed class GameHandlers : IIpcHandlerGroup
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(logger);
         _library = library;
+        _media = media;
         _launch = launch;
         _server = server;
         _processes = processes;
@@ -70,7 +75,7 @@ public sealed class GameHandlers : IIpcHandlerGroup
     public void Register(MessageDispatcher dispatcher)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
-        dispatcher.RegisterOptional<GamesListRequest, GamesListResponse>(IpcMessages.Games.List, (_, request, cancellationToken) => _library.ListAsync(request ?? new GamesListRequest(), cancellationToken));
+        dispatcher.RegisterOptional<GamesListRequest, GamesListResponse>(IpcMessages.Games.List, ListAsync);
         dispatcher.Register<GamesGetRequest, Game>(IpcMessages.Games.Get, GetAsync);
         dispatcher.Register<GamesLaunchRequest, LaunchResult>(IpcMessages.Games.Launch, LaunchAsync);
         dispatcher.RegisterOptional<GamesKillRequest, GamesKillResponse>(IpcMessages.Games.Kill, (_, request, cancellationToken) => _launch.KillAsync(request ?? new GamesKillRequest(), cancellationToken));
@@ -121,6 +126,12 @@ public sealed class GameHandlers : IIpcHandlerGroup
         return new AppsListResponse(items);
     }
 
+    private async Task<GamesListResponse> ListAsync(IpcContext context, GamesListRequest? request, CancellationToken cancellationToken)
+    {
+        GamesListResponse list = await _library.ListAsync(request ?? new GamesListRequest(), cancellationToken).ConfigureAwait(false);
+        return list with { Items = list.Items.Select(_media.Localize).ToList() };
+    }
+
     private async Task<Game> GetAsync(IpcContext context, GamesGetRequest request, CancellationToken cancellationToken)
     {
         if (request.GameId == Guid.Empty)
@@ -128,8 +139,9 @@ public sealed class GameHandlers : IIpcHandlerGroup
             throw IpcError.Validation("gameId", "required").ToException();
         }
 
-        return await _library.GetAsync(request.GameId, cancellationToken).ConfigureAwait(false)
-               ?? throw IpcError.NotFound($"Game {request.GameId}").ToException();
+        Game game = await _library.GetAsync(request.GameId, cancellationToken).ConfigureAwait(false)
+                    ?? throw IpcError.NotFound($"Game {request.GameId}").ToException();
+        return _media.Localize(game);
     }
 
     private async Task<LaunchResult> LaunchAsync(IpcContext context, GamesLaunchRequest request, CancellationToken cancellationToken)

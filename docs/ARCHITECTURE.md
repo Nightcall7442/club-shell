@@ -527,6 +527,11 @@ unless the key ends with `Ms`.
       "iscsi": null                               // legacy; non-null = the Agent mounts nothing and logs an error:
                                                   //   iSCSI libraries belong to ClubDisklessHelper (DISKLESS.md).
                                                   // The whole section is ignored while the helper is installed.
+    },
+    "mediaCache": {                               // the catalogue's art in cache\media for the Shell (SHELL_CHANGES 46)
+      "enabled": true,
+      "videos": false,                            // trailers too: tens of MB per game from every PC
+      "maxMb": 4096                               // 64..65536, least recently used first
     }
   },
   "updates": {

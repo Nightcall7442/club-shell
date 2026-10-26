@@ -426,7 +426,11 @@ Common symptoms:
   `update.progress` is capped at 2/s by the Agent. Store subscriptions use selectors so a metrics tick does
   not re-render the games grid.
 * **Images**: covers are served from `cache\media\` (Agent `LocalCache`) through the asset protocol (no base64, no fetch
-  through JS); `GameArtwork` resolves paths once per `src` (`useResolvedAsset`).
+  through JS); `GameArtwork` resolves paths once per `src` (`useResolvedAsset`). The Agent caches the catalogue's covers
+  and wide art after every catalogue change (`GameMediaCache`, `storage.mediaCache`, SHELL_CHANGES 46) and names the
+  cached ones in `games.list` / `games.get` by their ProgramData-relative path; trailers too with
+  `storage.mediaCache.videos`. So the art shows without the internet and from a club server on plain http, which the
+  CSP (`img-src`/`media-src` `https:`) would not load.
 * **Rust**: the keyboard hook callback never blocks (channel hand-off), the topmost guard runs on a 250 ms
   timer, the gamepad thread sleeps `pollMs` (16 ms) and 250 ms while disabled.
 * **Build**: `vite build` targets `chrome110` and minifies with esbuild; `TAURI_ENV_DEBUG` keeps sourcemaps

@@ -157,6 +157,20 @@ which is stripped before the process is created.
 | Credential injection | `ExeStrategy` → `InjectionResult.None` |
 | Save dir default | `%USERPROFILE%\Saved Games\{title}` |
 
+### 3.8 Rockstar Games Launcher, Lesta Game Center (as `exe`)
+
+There is no `LauncherType` for them (SHELL_CHANGES 43): add their games as `exe`. A new value would first have to enter
+the closed `LauncherType` enum of the contract, and every Agent, Shell and server older than it reads it as `unknown`
+(`x-agent-fallback`): such an Agent refuses to start the game and its offline store drops the launch reports. As `exe`
+the game starts and is detected by its path (§3.7); what is missing is what neither store needs here: no
+account-pool injection, no manifest-based detection, no `launcherReady`.
+
+- `exePath`: the game's own starter in its folder on the games disk, the same path on every PC. A Rockstar title's
+  starter opens the Rockstar Games Launcher, which asks the player to sign in; a Lesta title (Мир танков, Мир кораблей)
+  is started from its folder too.
+- Updates: the launchers update their games themselves and want a signed-in user. Update the reference image or the
+  games disk in an administrator's session or in the PIN maintenance window (`KIOSK_MODE.md`), not in a player's session.
+
 ---
 
 ## 4. Install detection (`GameDetector`)

@@ -230,14 +230,20 @@ function TrailerPreview({ url }: { url: string }): JSX.Element {
 /** Add or edit one game of the club; saves straight to the server. */
 function GameEditor({
   game,
+  clubZones,
   onDone,
   onCancel,
 }: {
   game: AdminGame | null;
+  /** The club's zones (club settings); a zone the game names that is no longer among them still shows. */
+  clubZones: string[];
   onDone: () => void;
   onCancel: () => void;
 }): JSX.Element {
   const [form, setForm] = useState<GameForm>(() => (game ? formOf(game) : EMPTY_FORM));
+  const savedZones = game?.zones ?? [];
+  const [zones, setZones] = useState<string[]>(savedZones);
+  const zoneChips = [...clubZones, ...zones.filter((z) => !clubZones.includes(z))];
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -267,8 +273,14 @@ function GameEditor({
     }
   };
 
+  // Zones are saved on their own (they do not make a starter game the club's), after the card.
   const save = (): Promise<void> =>
-    run(() => (game ? clubApi.saveGame(game.id, inputOf(form)) : clubApi.addGame(inputOf(form))));
+    run(async () => {
+      const { game: saved } = game
+        ? await clubApi.saveGame(game.id, inputOf(form))
+        : await clubApi.addGame(inputOf(form));
+      if (JSON.stringify(zones) !== JSON.stringify(savedZones)) await clubApi.saveGameZones(saved.id, zones);
+    });
 
   return (
     <Section variant="solid" title={game ? t('Игра · {title}', { title: game.title }) : t('Новая игра')}>
@@ -374,6 +386,25 @@ function GameEditor({
               })}
             </div>
           </FieldGroup>
+          {zoneChips.length > 0 && (
+            <FieldGroup label={t('Зоны')} hint={t('Ничего не выбрано — все зоны')} className="lg:col-span-2">
+              <div className="flex flex-wrap gap-1.5">
+                {zoneChips.map((z) => {
+                  const on = zones.includes(z);
+                  return (
+                    <Chip
+                      key={z}
+                      tone="outlined"
+                      pressed={on}
+                      onClick={() => setZones(on ? zones.filter((x) => x !== z) : [...zones, z])}
+                    >
+                      {z}
+                    </Chip>
+                  );
+                })}
+              </div>
+            </FieldGroup>
+          )}
           <Field label={t('Описание')} hint={t('Необязательно')} className="lg:col-span-2">
             <textarea
               className={clsx(inputCls, 'h-auto min-h-20 resize-y py-2.5 leading-relaxed')}
@@ -530,6 +561,7 @@ export default function CatalogPage(): JSX.Element {
         <GameEditor
           key={gameEdit}
           game={gameEdit === 'new' ? null : (byId.get(gameEdit) ?? null)}
+          clubZones={(s.draft?.zones ?? []).map((z) => z.name)}
           onCancel={() => setGameEdit(null)}
           onDone={() => {
             setGameEdit(null);
@@ -610,6 +642,16 @@ export default function CatalogPage(): JSX.Element {
               key: 'launcher',
               title: t('Лаунчер'),
               render: (g) => <span className="text-dim">{t(LAUNCHER[g.launcher] ?? g.launcher)}</span>,
+            },
+            {
+              key: 'zones',
+              title: t('Зоны'),
+              render: (g) =>
+                g.zones?.length ? (
+                  <span className="text-dim">{g.zones.join(', ')}</span>
+                ) : (
+                  <span className="text-muted">{t('Все')}</span>
+                ),
             },
             {
               key: 'installed',

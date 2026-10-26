@@ -1006,9 +1006,27 @@ export function clubRoutes(app: FastifyInstance): void {
         hidden: c.catalog.hidden.includes(g.id),
         featured: c.catalog.featured.includes(g.id),
         settingsPaths: g.settingsPaths ?? [],
+        zones: db.gameZones?.[g.id] ?? [],
       })),
       order: c.catalog.order,
     };
+  });
+
+  /** Zones the game is offered in (SHELL_CHANGES 43); empty = every zone. */
+  app.put<{ Params: { id: string } }>('/admin/games/:id/zones', async (req) => {
+    requireStaff(req, 'owner');
+    const game = findGame(req.params.id);
+    if (!game) throw errors.notFound('game');
+    const raw = body(req)['zones'];
+    if (!Array.isArray(raw) || raw.some((z) => typeof z !== 'string')) throw errors.validation('zones', 'format');
+    const zones = [...new Set((raw as string[]).map((z) => z.trim()))];
+    if (zones.some((z) => z.length === 0 || z.length > 32)) throw errors.validation('zones', 'format');
+    if (zones.length > 20) throw errors.validation('zones', 'max');
+    const all = (db.gameZones ??= {});
+    if (zones.length > 0) all[game.id] = zones;
+    else delete all[game.id];
+    bumpCatalog();
+    return { zones };
   });
 
   /** Where a game keeps a player's own settings, carried from PC to PC per player (`Game.settingsPaths`). */

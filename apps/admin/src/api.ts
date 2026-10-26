@@ -1094,6 +1094,8 @@ export interface AdminGame {
   custom?: boolean;
   /** Trailer the player shell plays behind the game's art: a direct https link to an .mp4/.webm file. */
   videoUrl?: string | null;
+  /** Zones whose PCs offer the game; empty = every zone. */
+  zones?: string[];
 }
 
 /** What the owner sets for a game of the club (`POST /admin/games`, `PUT /admin/games/{id}`). */
@@ -1278,6 +1280,9 @@ export const clubApi = {
   addGame: (input: GameInput): Promise<{ game: AdminGame }> => post('/admin/games', input),
   saveGame: (id: string, input: GameInput): Promise<{ game: AdminGame }> => put(`/admin/games/${id}`, input),
   deleteGame: (id: string): Promise<unknown> => del(`/admin/games/${id}`),
+  /** Zones whose PCs offer the game; an empty list offers it in every zone. */
+  saveGameZones: (id: string, zones: string[]): Promise<{ zones: string[] }> =>
+    put(`/admin/games/${id}/zones`, { zones }),
 
   reports: (days: number): Promise<Reports> => call(`/admin/reports?days=${days}`),
   network: (days: number): Promise<NetworkReport> => call(`/admin/network?days=${days}`),

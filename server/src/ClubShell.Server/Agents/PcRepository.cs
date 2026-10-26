@@ -341,6 +341,14 @@ public sealed class PcRepository(NpgsqlDataSource db, ILogger<PcRepository> logg
         return (outcome, pc, refresh);
     }
 
+    /// <summary>The agent closed its socket itself at <paramref name="now"/> (<see langword="null"/>: it connected again, SHELL_CHANGES 44).</summary>
+    public async Task SetGoodbyeAsync(Guid id, DateTimeOffset? now)
+    {
+        await using var c = await db.OpenConnectionAsync();
+        await c.ExecuteAsync(
+            "UPDATE pcs SET goodbye_at = @now::timestamptz WHERE id = @id AND goodbye_at IS DISTINCT FROM @now::timestamptz", new { id, now });
+    }
+
     public async Task RecordHeartbeatAsync(Guid id, HeartbeatRequest request, DateTimeOffset now)
     {
         await using var c = await db.OpenConnectionAsync();

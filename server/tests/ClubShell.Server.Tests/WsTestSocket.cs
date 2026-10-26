@@ -114,4 +114,15 @@ public static class Wait
 
         Assert.True(condition());
     }
+
+    /// <summary>The same for a condition read from the database.</summary>
+    public static async Task UntilAsync(Func<Task<bool>> condition)
+    {
+        for (var i = 0; i < 200 && !await condition(); i++)
+        {
+            await Task.Delay(50);
+        }
+
+        Assert.True(await condition());
+    }
 }

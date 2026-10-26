@@ -16,12 +16,13 @@ using Npgsql;
 namespace ClubShell.Server.Games;
 
 /// <summary>
-/// Games catalog (slice S3, DESIGN §4.2, §7.3): <c>getGames</c> (owner's order first, hidden left out, games that need
-/// Vanguard left out on a PC whose last heartbeat says it cannot run (D-74), ETag
-/// <c>"g&lt;catalog_version&gt;-&lt;hash(page, zone, player's lastPlayedAt, no Vanguard)&gt;"</c>, pages up to 1000), <c>getGame</c> and
-/// <c>sendLaunchReport</c>. <c>X-User-Token</c> only fills <c>lastPlayedAt</c> — the newest successful launch of the
-/// player — and an invalid one is ignored. <c>settingsPaths</c> never leaves the server.
-/// ponytail: <c>zone</c> is echoed into the ETag but filters nothing (no per-zone catalog in the club settings yet), as the mock.
+/// Games catalog (slice S3, DESIGN §4.2, §7.3): <c>getGames</c> (owner's order first, hidden left out, games of other
+/// zones left out (SHELL_CHANGES 43), games that need Vanguard or FACEIT left out on a PC whose last heartbeat says it
+/// cannot run them (D-74), ETag <c>"g&lt;catalog_version&gt;-&lt;hash(page, zone, player's lastPlayedAt, missing anti-cheats)&gt;"</c>,
+/// pages up to 1000), <c>getGame</c> and <c>sendLaunchReport</c>. <c>X-User-Token</c> only fills <c>lastPlayedAt</c> — the
+/// newest successful launch of the player — and an invalid one is ignored. <c>settingsPaths</c> never leaves the server.
+/// The zone is the PC's own (<c>pcs.zone</c>, what the owner set in the hall), not the <c>zone</c> the agent sends: the
+/// agent's copy of it may be stale. A game with zones is offered only in them; one without, in every zone.
 /// </summary>
 public static class GameEndpoints
 {
@@ -37,27 +38,35 @@ public static class GameEndpoints
         api.MapPost("/{id:guid}/launch-report", LaunchReportAsync).WithMetadata(new AuthRequirement(AuthMode.Agent));
     }
 
-    private static async Task<IResult> ListAsync(HttpContext context, string? zone, string? page, string? pageSize, NpgsqlDataSource db)
+    private static async Task<IResult> ListAsync(HttpContext context, string? page, string? pageSize, NpgsqlDataSource db)
     {
         var pc = context.Features.GetRequiredFeature<AgentContext>().Pc;
         var userId = context.Features.Get<UserContext>()?.UserId;
         await using var c = await db.OpenConnectionAsync();
 
         // The PC's last heartbeat says Vanguard cannot run (vgk missing or not loaded): Riot games would only fail at launch
-        // with antiCheatBlocked (D-74). No antiCheat in it (an older agent, no heartbeat yet) or a field the agent could not
-        // read (null, left out) hides nothing. The club's policy may require Vanguard for every game with an anti-cheat
-        // (anticheat.required, as the seed does): while it blocks on a violation, the agent's gate refuses those games too.
-        var (version, catalog, noVanguard, vanguardRequired) = await c.QuerySingleAsync<(int, string?, bool, bool)>(
+        // with antiCheatBlocked (D-74); the same for FACEIT games when the FACEIT driver is missing or unsigned. No antiCheat
+        // in it (an older agent, no heartbeat yet) or a field the agent could not read (null, left out) hides nothing. The
+        // club's policy may require an anti-cheat for every game with one (anticheat.required; the shipped seed requires
+        // none): while it blocks on a violation, the agent's gate refuses those games too.
+        var (version, catalog, zone, noVanguard, vanguardRequired, noFaceit, faceitRequired) =
+            await c.QuerySingleAsync<(int, string?, string?, bool, bool, bool, bool)>(
             """
             SELECT catalog_version, (settings -> 'catalog')::text,
+                   (SELECT p.zone FROM pcs p WHERE p.id = @PcId),
                    coalesce((SELECT (p.last_heartbeat -> 'antiCheat' -> 'vanguardInstalled') = 'false'::jsonb
                                     OR (p.last_heartbeat -> 'antiCheat' -> 'vanguardLoaded') = 'false'::jsonb
                              FROM pcs p WHERE p.id = @PcId), false),
                    coalesce((policy -> 'anticheat' -> 'required') @> '["vanguard"]'::jsonb
+                            AND (policy -> 'anticheat' -> 'blockOnViolation') IS DISTINCT FROM 'false'::jsonb, false),
+                   coalesce((SELECT (p.last_heartbeat -> 'antiCheat' -> 'faceitInstalled') = 'false'::jsonb
+                             FROM pcs p WHERE p.id = @PcId), false),
+                   coalesce((policy -> 'anticheat' -> 'required') @> '["faceit"]'::jsonb
                             AND (policy -> 'anticheat' -> 'blockOnViolation') IS DISTINCT FROM 'false'::jsonb, false)
             FROM clubs WHERE id = @ClubId
             """,
             new { pc.ClubId, PcId = pc.Id });
+        var missing = new MissingAntiCheats(noVanguard, vanguardRequired, noFaceit, faceitRequired);
         var played = await LastPlayedAsync(c, userId, null);
 
         // No page and no pageSize: the whole catalog at once; only page: pages of 1000 (mock paginate(…, 1000)). The applied
@@ -67,8 +76,7 @@ public static class GameEndpoints
         var (p, size) = whole ? (1, 0) : Paging.Normalize(page, pageSize ?? "1000", MaxPageSize);
         var view = whole ? "all" : $"{p}x{size}";
         var lastPlayed = string.Join(',', played.OrderBy(g => g.Key).Select(g => $"{g.Key:N}={g.Value.ToUnixTimeMilliseconds()}"));
-        var hiding = !noVanguard ? "" : vanguardRequired ? "|noVanguard|required" : "|noVanguard";
-        var tag = $"g{version}-{Hash($"{view}|{zone}|{lastPlayed}{hiding}")}";
+        var tag = $"g{version}-{Hash($"{view}|{zone}|{lastPlayed}{missing.Tag}")}";
         if (AgentEndpoints.NotModified(context, tag))
         {
             return Results.StatusCode(StatusCodes.Status304NotModified);
@@ -77,10 +85,15 @@ public static class GameEndpoints
         var settings = catalog is null ? null : JsonSerializer.Deserialize<CatalogSettings>(catalog, JsonSerializerOptions.Web);
         var hidden = settings?.Hidden?.ToHashSet() ?? [];
         var order = settings?.Order ?? [];
-        var all = (await c.QueryAsync<(Guid Id, string Data)>("SELECT id, data::text FROM games WHERE club_id = @ClubId AND deleted_at IS NULL", new { pc.ClubId }))
+        var all = (await c.QueryAsync<(Guid Id, string Data)>(
+                """
+                SELECT id, data::text FROM games
+                WHERE club_id = @ClubId AND deleted_at IS NULL AND (zones IS NULL OR cardinality(zones) = 0 OR @zone = ANY(zones))
+                """,
+                new { pc.ClubId, zone }))
             .Where(g => !hidden.Contains(g.Id))
             .Select(g => JsonDefaults.Deserialize<Game>(g.Data)! with { LastPlayedAt = played.TryGetValue(g.Id, out var at) ? at : null })
-            .Where(g => !noVanguard || !NeedsVanguard(EffectiveAntiCheat(g), vanguardRequired))
+            .Where(g => !missing.Blocks(EffectiveAntiCheat(g)))
             .OrderBy(g => Array.IndexOf(order, g.Id) is var i and >= 0 ? i : int.MaxValue)
             .ThenBy(g => g.Title, StringComparer.Ordinal)
             .ThenBy(g => g.Id)
@@ -183,17 +196,33 @@ public static class GameEndpoints
     private static AntiCheatKind EffectiveAntiCheat(Game game) =>
         game.AntiCheat == AntiCheatKind.None && game.Launcher == LauncherType.Riot ? AntiCheatKind.Vanguard : game.AntiCheat;
 
-    /// <summary>
-    /// Whether a PC without a loaded vgk cannot start a game whose effective anti-cheat is <paramref name="kind"/>: a
-    /// Vanguard game never starts there (Riot's own client refuses it), and any other game with an anti-cheat is refused
-    /// by the agent's gate when the club's policy requires Vanguard and blocks on a violation
-    /// (<c>AntiCheatMonitor.CheckForLaunchAsync</c> checks <c>policy.required ∪ {kind}</c>). A game without one starts:
-    /// the gate is not called for it.
-    /// </summary>
-    private static bool NeedsVanguard(AntiCheatKind kind, bool vanguardRequired) =>
-        kind == AntiCheatKind.Vanguard || (kind != AntiCheatKind.None && vanguardRequired);
-
     private static string Hash(string text) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)))[..12];
+
+    /// <summary>
+    /// The anti-cheats the PC's last heartbeat says cannot run (<c>No*</c>) and whether the club's policy requires each for
+    /// every game with an anti-cheat while it blocks on a violation (<c>*Required</c>).
+    /// </summary>
+    private sealed record MissingAntiCheats(bool NoVanguard, bool VanguardRequired, bool NoFaceit, bool FaceitRequired)
+    {
+        /// <summary>
+        /// Part of the ETag: empty when nothing is missing, so the ETags of every other PC stay as they were; the Vanguard
+        /// part is spelled as before FACEIT was added.
+        /// </summary>
+        public string Tag =>
+            (!NoVanguard ? "" : VanguardRequired ? "|noVanguard|required" : "|noVanguard")
+            + (!NoFaceit ? "" : FaceitRequired ? "|noFaceit|required" : "|noFaceit");
+
+        /// <summary>
+        /// Whether the PC cannot start a game whose effective anti-cheat is <paramref name="kind"/>: a Vanguard game never
+        /// starts without a loaded vgk (Riot's own client refuses it), a FACEIT game never without the FACEIT driver (the
+        /// agent's gate refuses it), and any other game with an anti-cheat is refused by the gate when the club's policy
+        /// requires the missing one and blocks on a violation (<c>AntiCheatMonitor.CheckForLaunchAsync</c> checks
+        /// <c>policy.required ∪ {kind}</c>). A game without one starts: the gate is not called for it.
+        /// </summary>
+        public bool Blocks(AntiCheatKind kind) =>
+            kind != AntiCheatKind.None
+            && ((NoVanguard && (kind == AntiCheatKind.Vanguard || VanguardRequired)) || (NoFaceit && (kind == AntiCheatKind.Faceit || FaceitRequired)));
+    }
 
     /// <summary><c>clubs.settings.catalog</c> (<c>AdminClubSettings.catalog</c>, written by S5).</summary>
     private sealed class CatalogSettings
