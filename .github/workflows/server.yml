@@ -118,9 +118,9 @@ jobs:
           retention-days: 14
 
       # openapi.json/asyncapi.json must be the yaml converted (the schema tests read the json, the 501 table the yaml), and both
-      # yaml files must equal club-contracts at REF. REF may be a club-contracts commit that is not pushed yet (52a895a,
-      # branch shell-changes-p0-p1): then the remote comparison is skipped with a warning, so main does not go red over
-      # another repository. Once REF is fetchable the comparison is strict.
+      # yaml files must equal club-contracts at REF. REF is 52a895a, the head of club-contracts PR #1 (refs/pull/1/head, a
+      # fork's shell-changes-p0-p1), fetchable by its SHA; once PR #1 is merged REF moves to the commit on main. A REF that
+      # cannot be fetched skips the remote comparison with a warning, so main does not go red over another repository.
       - name: Contract drift (server/contracts vs club-contracts@REF)
         shell: bash
         env:
