@@ -1629,8 +1629,8 @@ pub struct HardwareChangedEvent {
     pub diff: Vec<String>,
 }
 
-/// Anti-cheat prerequisites in a heartbeat, so the server can hide Riot games on PCs without
-/// Vanguard. `null` = unknown.
+/// Anti-cheat prerequisites in a heartbeat, so the server can hide Riot and FACEIT games on PCs
+/// that cannot run them. `null` = unknown.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct HeartbeatAntiCheat {
@@ -1646,6 +1646,10 @@ pub struct HeartbeatAntiCheat {
     /// A TPM is present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tpm: Option<bool>,
+    /// The FACEIT Anti-Cheat driver is installed, its binary present and Authenticode-signed: what
+    /// the agent's launch gate checks for a FACEIT game (SHELL_CHANGES 43).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub faceit_installed: Option<bool>,
 }
 
 /// Games library volume in a heartbeat.
@@ -3715,6 +3719,7 @@ mod tests {
                 vanguard_loaded: None,
                 secure_boot: None,
                 tpm: None,
+                faceit_installed: Some(false),
             }),
             kiosk_user: Some(HeartbeatKioskUser {
                 name: "club".into(),
@@ -3726,7 +3731,7 @@ mod tests {
         let json = serde_json::to_string(&hb).unwrap();
         assert_eq!(
             json,
-            r#"{"status":"busy","currentSessionId":"00000000-0000-0000-0000-000000000000","agentVersion":"1.4.2","shellVersion":"1.4.2","uptimeSec":8123,"ipAddress":"10.0.1.12","policyVersion":12,"runningGames":[{"gameId":"00000000-0000-0000-0000-000000000000","pid":7788,"startedAt":"2026-09-21T10:21:00.000Z"}],"offlineQueue":0,"shellConnected":true,"gamesVolume":{"owner":"disklessHelper"},"antiCheat":{"vanguardInstalled":true},"kioskUser":{"name":"club","ready":false,"problem":"privilegedAccount","privilegedGroups":["Administrators"]}}"#
+            r#"{"status":"busy","currentSessionId":"00000000-0000-0000-0000-000000000000","agentVersion":"1.4.2","shellVersion":"1.4.2","uptimeSec":8123,"ipAddress":"10.0.1.12","policyVersion":12,"runningGames":[{"gameId":"00000000-0000-0000-0000-000000000000","pid":7788,"startedAt":"2026-09-21T10:21:00.000Z"}],"offlineQueue":0,"shellConnected":true,"gamesVolume":{"owner":"disklessHelper"},"antiCheat":{"vanguardInstalled":true,"faceitInstalled":false},"kioskUser":{"name":"club","ready":false,"problem":"privilegedAccount","privilegedGroups":["Administrators"]}}"#
         );
         assert_eq!(serde_json::from_str::<HeartbeatRequest>(&json).unwrap(), hb);
         let res: HeartbeatResponse = serde_json::from_str(

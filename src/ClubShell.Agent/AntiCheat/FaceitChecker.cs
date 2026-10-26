@@ -77,6 +77,16 @@ public sealed class FaceitChecker : IAntiCheatChecker
         return Task.FromResult(new AntiCheatCheckResult(Kind, false, AntiCheatChecks.ServiceStopped));
     }
 
+    /// <summary>
+    /// What <see cref="CheckAsync"/> checks, without logging: the heartbeat reports it (SHELL_CHANGES 43), so the server can
+    /// leave FACEIT games out of the catalog of a PC whose gate would refuse them.
+    /// </summary>
+    public static bool IsInstalled()
+    {
+        var driver = AntiCheatProbe.QueryService(DriverName);
+        return driver.Installed && driver.ImageExists && driver.ImagePath is not null && AntiCheatProbe.HasAuthenticodeSignature(driver.ImagePath);
+    }
+
     private AntiCheatCheckResult CheckInstalled(out ServiceInfo? driver)
     {
         driver = AntiCheatProbe.QueryService(DriverName);

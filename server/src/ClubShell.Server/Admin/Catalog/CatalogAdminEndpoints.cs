@@ -17,12 +17,12 @@ namespace ClubShell.Server.Admin;
 /// <c>AdminGame</c>, plus what the console's catalog page reads and edits beyond the contract: <c>settingsPaths</c> (S5),
 /// how the game starts (<c>launcherAppId</c>, <c>exePath</c>, <c>args</c>), <c>description</c>, <c>custom</c> — the
 /// club's own game (added or changed by the owner), which the seed no longer touches — and <c>videoUrl</c>, the trailer
-/// the shell plays behind the game's art.
+/// the shell plays behind the game's art, and <c>zones</c>, the zones the game is offered in (empty = every zone).
 /// </summary>
 public sealed record AdminGame(
     Guid Id, string Title, string? CoverUrl, bool Installed, string Launcher, IReadOnlyList<string> Category, bool Hidden, bool Featured,
     IReadOnlyList<string> SettingsPaths, string? LauncherAppId = null, string? ExePath = null, string? Args = null, string Description = "",
-    bool Custom = false, string? VideoUrl = null);
+    bool Custom = false, string? VideoUrl = null, IReadOnlyList<string>? Zones = null);
 
 public sealed record AdminGameList(IReadOnlyList<AdminGame> Items, IReadOnlyList<Guid> Order);
 
@@ -36,7 +36,9 @@ public sealed record AdminGameResponse(AdminGame Game);
 /// one, <c>PUT /{id}</c> replaces how it starts and looks, <c>DELETE /{id}</c> removes it (soft; unknown or gone = 200, as
 /// tariffs). Every change marks the game <c>origin = 'club'</c>, so the seed of the next start leaves it as the owner left
 /// it (<see cref="Games.CatalogSeed"/>), bumps <c>catalog_version</c> and sends <c>refreshConfig {games:true}</c> to the
-/// connected PCs (§5.9).
+/// connected PCs (§5.9). <c>PUT /{id}/zones {zones}</c> (owner, SHELL_CHANGES 43) sets the zones the game is offered in —
+/// up to 20 zone names of 1 to 32 characters, as a PC's zone; empty = every zone. The seed never writes them, so they do
+/// not make a seed game the club's.
 /// </summary>
 public static partial class CatalogAdminEndpoints
 {
@@ -59,6 +61,7 @@ public static partial class CatalogAdminEndpoints
         api.MapPut("/{id}", SaveAsync).WithMetadata(new AuthRequirement(AuthMode.Staff, OwnerOnly: true));
         api.MapPatch("/{id}", SettingsPathsAsync).WithMetadata(new AuthRequirement(AuthMode.Staff, OwnerOnly: true));
         api.MapDelete("/{id}", DeleteAsync).WithMetadata(new AuthRequirement(AuthMode.Staff, OwnerOnly: true));
+        api.MapPut("/{id}/zones", ZonesAsync).WithMetadata(new AuthRequirement(AuthMode.Staff, OwnerOnly: true));
     }
 
     private static async Task<IResult> ListAsync(HttpContext context, NpgsqlDataSource db)
@@ -226,6 +229,59 @@ public static partial class CatalogAdminEndpoints
         return AdminJson.Ok(new { settingsPaths = paths });
     }
 
+    private static async Task<IResult> ZonesAsync(
+        HttpContext context, string id, [FromBody] JsonElement body, NpgsqlDataSource db, CommandDispatcher commands, AgentSocketHub hub, TimeProvider clock)
+    {
+        var staff = context.Features.GetRequiredFeature<StaffContext>();
+        if (body.ValueKind != JsonValueKind.Object)
+        {
+            throw ApiException.Validation("body", "schema", "JSON object expected");
+        }
+
+        if (!body.TryGetProperty("zones", out var raw) || raw.ValueKind == JsonValueKind.Null)
+        {
+            throw ApiException.Validation("zones", "required");
+        }
+
+        if (raw.ValueKind != JsonValueKind.Array || raw.EnumerateArray().Any(z => z.ValueKind != JsonValueKind.String))
+        {
+            throw ApiException.Validation("zones", "format");
+        }
+
+        string[] zones = [.. raw.EnumerateArray().Select(z => z.GetString()!.Trim()).Distinct(StringComparer.Ordinal)];
+        if (zones.Any(z => z.Length is 0 or > 32))
+        {
+            throw ApiException.Validation("zones", "format");
+        }
+
+        if (zones.Length > 20)
+        {
+            throw ApiException.Validation("zones", "max");
+        }
+
+        var gameId = Guid.TryParse(id, out var parsed) ? parsed : throw ApiException.NotFound("game");
+        IReadOnlyList<(Guid PcId, ServerCommandEnvelope Command)> queued;
+        await using (var c = await db.OpenConnectionAsync())
+        await using (var tx = await c.BeginTransactionAsync())
+        {
+            var now = clock.GetUtcNow();
+            var title = await c.QuerySingleOrDefaultAsync<string>(
+                """
+                UPDATE games SET zones = @stored, updated_at = @now
+                WHERE id = @gameId AND club_id = @ClubId AND deleted_at IS NULL
+                RETURNING title
+                """,
+                new { gameId, staff.ClubId, stored = zones.Length > 0 ? zones : null, now }, tx)
+                ?? throw ApiException.NotFound("game");
+            await Audit.WriteAsync(c, tx, staff, now, "gameZones", detail: title, meta: new { gameId, zones });
+            queued = await ChangedAsync(c, tx, commands, hub, staff, now);
+            await tx.CommitAsync();
+        }
+
+        await ConfigRefresh.SendAsync(commands, queued);
+        return AdminJson.Ok(new { zones });
+    }
+
     /// <summary>A catalog change: <c>catalog_version</c> moves (heartbeat, ETag) and the connected PCs reload the games.</summary>
     private static async Task<IReadOnlyList<(Guid PcId, ServerCommandEnvelope Command)>> ChangedAsync(
         NpgsqlConnection c, NpgsqlTransaction tx, CommandDispatcher commands, AgentSocketHub hub, StaffContext staff, DateTimeOffset now)
@@ -359,7 +415,7 @@ public static partial class CatalogAdminEndpoints
     /// <summary>A <c>games</c> row (properties: Dapper hands <c>text[]</c> to a constructor as <see cref="Array"/>).</summary>
     private sealed class GameRow
     {
-        public const string Columns = "id, title, data::text AS data, settings_paths, origin";
+        public const string Columns = "id, title, data::text AS data, settings_paths, origin, zones";
 
         public Guid Id { get; init; }
 
@@ -370,6 +426,8 @@ public static partial class CatalogAdminEndpoints
         public string[]? SettingsPaths { get; init; }
 
         public string Origin { get; init; } = "seed";
+
+        public string[]? Zones { get; init; }
 
         public AdminGame ToWire(bool hidden, bool featured)
         {
@@ -385,7 +443,7 @@ public static partial class CatalogAdminEndpoints
                     ? [.. category.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!)]
                     : [],
                 hidden, featured, SettingsPaths ?? [], Text("launcherAppId"), Text("exePath"), Text("args"), Text("description") ?? "", Origin == "club",
-                Text("videoUrl"));
+                Text("videoUrl"), Zones ?? []);
         }
     }
 }

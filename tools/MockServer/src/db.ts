@@ -127,8 +127,8 @@ export interface PcRecord extends Pc {
   gamesVolume?: HeartbeatGamesVolume | null;
   /** Marked by the owner as a PC without persistent storage, which re-registers at every boot (SHELL_CHANGES 25). */
   stateless?: boolean;
-  /** Vanguard's state in its last heartbeat: `GET /games` leaves out what this PC cannot start without it (D-74). */
-  antiCheat?: Pick<HeartbeatAntiCheat, 'vanguardInstalled' | 'vanguardLoaded'> | null;
+  /** Vanguard's and FACEIT's state in its last heartbeat: `GET /games` leaves out what this PC cannot start (D-74, SHELL_CHANGES 43). */
+  antiCheat?: Pick<HeartbeatAntiCheat, 'vanguardInstalled' | 'vanguardLoaded' | 'faceitInstalled'> | null;
 }
 
 /** A game the Agent reports running (`HeartbeatRequest.runningGames[]`). */
@@ -335,6 +335,8 @@ export interface Db {
   pcs: PcRecord[];
   users: UserRecord[];
   games: Game[];
+  /** Zones a game is offered in, by game id (SHELL_CHANGES 43); a game without an entry is offered in every zone. */
+  gameZones?: Record<string, string[]>;
   apps: App[];
   tariffs: Tariff[];
   products: ProductRecord[];

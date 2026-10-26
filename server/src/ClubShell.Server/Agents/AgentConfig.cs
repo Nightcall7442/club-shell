@@ -27,6 +27,12 @@ public sealed class AgentOptions
 
     /// <summary>How long the owner's <c>maintenance:true</c> lets an offline PC re-enroll without proof (D-78).</summary>
     public int ReenrollWindowMin { get; set; } = 60;
+
+    /// <summary>
+    /// How long after a <c>reboot</c>/<c>shutdown</c> command, or after the agent closed its socket itself, a PC that goes
+    /// offline is a planned stop and not a <c>pcOffline</c> incident (SHELL_CHANGES 44).
+    /// </summary>
+    public int PlannedOfflineMin { get; set; } = 15;
 }
 
 /// <summary><c>Agents:RegisterProof</c> (D-78).</summary>

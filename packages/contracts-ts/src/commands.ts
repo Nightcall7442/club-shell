@@ -1547,7 +1547,8 @@ export interface HardwareChangedEvent {
 }
 
 /**
- * Anti-cheat prerequisites in a heartbeat, so the server can hide Riot games on PCs without Vanguard. `null` = unknown.
+ * Anti-cheat prerequisites in a heartbeat, so the server can hide Riot and FACEIT games on PCs that cannot run them.
+ * `null` = unknown.
  */
 export interface HeartbeatAntiCheat {
   /** The Vanguard driver `vgk` is installed. */
@@ -1558,6 +1559,11 @@ export interface HeartbeatAntiCheat {
   secureBoot?: boolean | null;
   /** A TPM is present. */
   tpm?: boolean | null;
+  /**
+   * The FACEIT Anti-Cheat driver is installed, its binary present and Authenticode-signed: what the agent's launch gate
+   * checks for a FACEIT game (SHELL_CHANGES 43).
+   */
+  faceitInstalled?: boolean | null;
 }
 
 /** Games library volume in a heartbeat. */

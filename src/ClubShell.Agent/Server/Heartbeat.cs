@@ -225,7 +225,7 @@ public sealed class HeartbeatService : BackgroundService
         }
     }
 
-    /// <summary>Vanguard driver, Secure Boot and TPM; a probe that fails leaves its field unknown instead of failing the beat.</summary>
+    /// <summary>Vanguard and FACEIT drivers, Secure Boot and TPM; a probe that fails leaves its field unknown instead of failing the beat.</summary>
     private async Task<HeartbeatAntiCheat> AntiCheatStateAsync(CancellationToken cancellationToken)
     {
         // TPM presence only changes across a reboot, which restarts the Agent, so one answered WMI query is kept.
@@ -243,7 +243,17 @@ public sealed class HeartbeatService : BackgroundService
             _logger.LogDebug(ex, "Vanguard driver state unknown");
         }
 
-        return new HeartbeatAntiCheat(installed, loaded, WmiQueries.GetSecureBootEnabled(), _tpmPresent);
+        bool? faceit = null;
+        try
+        {
+            faceit = FaceitChecker.IsInstalled();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or Win32Exception)
+        {
+            _logger.LogDebug(ex, "FACEIT driver state unknown");
+        }
+
+        return new HeartbeatAntiCheat(installed, loaded, WmiQueries.GetSecureBootEnabled(), _tpmPresent, faceit);
     }
 
     private PcStatus MapStatus()

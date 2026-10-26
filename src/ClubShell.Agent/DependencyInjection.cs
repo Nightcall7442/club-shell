@@ -179,6 +179,7 @@ public static class AgentServiceCollectionExtensions
     {
         services.TryAddSingleton<GamesShareMounter>();
         services.TryAddSingleton<LocalCache>();
+        services.TryAddSingleton<GameMediaCache>();
     }
 
     // ---- Anti-cheat ------------------------------------------------------------------------
@@ -334,6 +335,8 @@ public static class AgentServiceCollectionExtensions
         services.AddHostedService(sp => sp.GetRequiredService<AntiCheatMonitor>());
         services.AddHostedService(sp => sp.GetRequiredService<AgentUpdater>());
         services.AddHostedService(sp => sp.GetRequiredService<ShellWatchdog>());
+        // Caches the catalogue's art after each catalogue change (SHELL_CHANGES 46).
+        services.AddHostedService(sp => sp.GetRequiredService<GameMediaCache>());
         // Nothing depends on ProfileResetService; hosting it is what constructs it and subscribes the post-session reset.
         services.AddHostedService(sp => sp.GetRequiredService<ProfileResetService>());
         services.AddHostedService<AgentWorker>();

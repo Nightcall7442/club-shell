@@ -257,6 +257,7 @@ export function pcsRoutes(app: FastifyInstance): void {
       ? {
           vanguardInstalled: optBool(antiCheat, 'vanguardInstalled'),
           vanguardLoaded: optBool(antiCheat, 'vanguardLoaded'),
+          faceitInstalled: optBool(antiCheat, 'faceitInstalled'),
         }
       : null;
     pc.lastHeartbeatAt = now();

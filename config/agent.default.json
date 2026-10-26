@@ -82,6 +82,11 @@
       "credentialsRef": "secure\\share.cred",
       "mountRetries": 3,
       "iscsi": null
+    },
+    "mediaCache": {
+      "enabled": true,
+      "videos": false,
+      "maxMb": 4096
     }
   },
   "updates": {
