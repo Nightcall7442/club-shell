@@ -27,6 +27,7 @@ import {
   Toggle,
   Well,
 } from '@/ui';
+import { InstallKit } from './installKit';
 import { FieldGroup, OwnerPage } from './ownerKit';
 import { PolicyEditor } from './policyEditor';
 
@@ -651,6 +652,7 @@ export default function HallPage(): JSX.Element {
           <ZonesEditor onSaved={load} />
         </aside>
       </div>
+      <InstallKit />
       <PolicyEditor />
     </OwnerPage>
   );
