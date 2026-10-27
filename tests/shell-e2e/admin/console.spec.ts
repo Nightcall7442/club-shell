@@ -484,6 +484,24 @@ test('a wrong PIN is refused with a clear message', async ({ page }) => {
   await expect(page.getByText('Неверный PIN или сессия истекла')).toBeVisible();
 });
 
+test('the PC key pasted as the club code is named for what it is and nothing is sent', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  let sent = false;
+  page.on('request', (r) => {
+    if (r.url().endsWith('/admin/login')) sent = true;
+  });
+  // A made-up key of the shape the platform admin issues (24 letters and digits).
+  await page.getByLabel('Код клуба').fill('ExampleKey0123456789ABCD');
+  await expect(page.getByText('Это не код клуба, а ключ для ПК.', { exact: false })).toBeVisible();
+  await page.getByLabel('Код клуба').blur();
+  for (const d of '0000') await page.keyboard.press(d);
+  await expect(page.getByRole('button', { name: 'Войти' })).toBeDisabled();
+  await page.keyboard.press('Enter');
+  expect(sent).toBe(false);
+});
+
 test('the console sends one browser id with every PIN, keeps it across sign-outs and explains a PIN lockout', async ({
   page,
 }) => {

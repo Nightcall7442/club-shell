@@ -331,6 +331,9 @@ export const UZ: Record<string, string> = {
   'Обои (URL)': 'Fon rasmi (URL)',
   Обслуживание: 'Xizmat koʻrsatish',
   'Политика ПК': 'Kompyuter siyosati',
+  'Это не код клуба, а ключ для ПК. Код клуба — до 12 символов, он в суперадминке рядом с названием клуба.':
+    'Bu klub kodi emas, kompyuter kaliti. Klub kodi 12 belgigacha, u superadminda klub nomi yonida.',
+  'Неверный код клуба или PIN': 'Klub kodi yoki PIN notoʻgʻri',
   'Сервер не отвечает:': 'Server javob bermayapti:',
   'Скачиваю установщик ClubShell…': 'ClubShell oʻrnatuvchisi yuklab olinmoqda…',
   'В последнем релизе нет установщика ClubShellSetup.': 'Soʻnggi relizda ClubShellSetup oʻrnatuvchisi yoʻq.',
@@ -1500,6 +1503,9 @@ export const EN: Record<string, string> = {
   'Обои (URL)': 'Wallpaper (URL)',
   Обслуживание: 'Maintenance',
   'Политика ПК': 'PC policy',
+  'Это не код клуба, а ключ для ПК. Код клуба — до 12 символов, он в суперадминке рядом с названием клуба.':
+    'This is the PC key, not the club code. The club code is up to 12 characters; it is next to the club name in the platform admin.',
+  'Неверный код клуба или PIN': 'Wrong club code or PIN',
   'Сервер не отвечает:': 'The server does not answer:',
   'Скачиваю установщик ClubShell…': 'Downloading the ClubShell installer…',
   'В последнем релизе нет установщика ClubShellSetup.': 'The latest release has no ClubShellSetup installer.',
