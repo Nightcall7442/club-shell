@@ -182,8 +182,14 @@ function Login({ onDone }: { onDone: (staff: StaffMember) => void }): JSX.Elemen
   const [clubCode, setClubCodeState] = useState(getClubCode);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // A club code is up to 12 characters; something longer is the 24-character PC key (or the platform key) pasted here.
+  const codeIssue =
+    clubCode.length > 12
+      ? t('Это не код клуба, а ключ для ПК. Код клуба — до 12 символов, он в суперадминке рядом с названием клуба.')
+      : null;
 
   const submit = async (value: string): Promise<void> => {
+    if (codeIssue) return;
     setBusy(true);
     setError(null);
     const code = clubCode.trim().toUpperCase();
@@ -194,7 +200,9 @@ function Login({ onDone }: { onDone: (staff: StaffMember) => void }): JSX.Elemen
       onDone(r.staff);
     } catch (e) {
       const needsCode = e instanceof AdminError && e.details?.['field'] === 'clubCode';
-      setError(needsCode ? t('Введите код клуба') : describe(e));
+      // With a code the server answers an unknown code and a wrong PIN alike (it does not tell which clubs exist).
+      const refused = e instanceof AdminError && e.code === 'unauthorized' && code !== '';
+      setError(needsCode ? t('Введите код клуба') : refused ? t('Неверный код клуба или PIN') : describe(e));
       setPin('');
     } finally {
       setBusy(false);
@@ -237,7 +245,8 @@ function Login({ onDone }: { onDone: (staff: StaffMember) => void }): JSX.Elemen
               'text-center font-mono uppercase tracking-widest placeholder:font-sans placeholder:normal-case placeholder:tracking-normal',
             )}
             value={clubCode}
-            maxLength={12}
+            maxLength={64}
+            aria-invalid={codeIssue !== null}
             autoComplete="off"
             spellCheck={false}
             placeholder={t('если клубов несколько')}
@@ -246,6 +255,7 @@ function Login({ onDone }: { onDone: (staff: StaffMember) => void }): JSX.Elemen
               if (e.key === 'Enter') e.currentTarget.blur();
             }}
           />
+          {codeIssue && <span className="text-center text-[12px] leading-4 text-danger-ink">{codeIssue}</span>}
         </label>
         <div className="flex flex-col items-center gap-3">
           <span className="label-sm">{t('Введите PIN')}</span>
@@ -288,7 +298,7 @@ function Login({ onDone }: { onDone: (staff: StaffMember) => void }): JSX.Elemen
           variant="primary"
           size="lg"
           className="w-full"
-          disabled={pin.length < 4 || busy}
+          disabled={pin.length < 4 || busy || codeIssue !== null}
           onClick={() => void submit(pin)}
         >
           {t('Войти')}

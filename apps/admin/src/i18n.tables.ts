@@ -331,6 +331,31 @@ export const UZ: Record<string, string> = {
   'Обои (URL)': 'Fon rasmi (URL)',
   Обслуживание: 'Xizmat koʻrsatish',
   'Политика ПК': 'Kompyuter siyosati',
+  'Это не код клуба, а ключ для ПК. Код клуба — до 12 символов, он в суперадминке рядом с названием клуба.':
+    'Bu klub kodi emas, kompyuter kaliti. Klub kodi 12 belgigacha, u superadminda klub nomi yonida.',
+  'Неверный код клуба или PIN': 'Klub kodi yoki PIN notoʻgʻri',
+  'Сервер не отвечает:': 'Server javob bermayapti:',
+  'Скачиваю установщик ClubShell…': 'ClubShell oʻrnatuvchisi yuklab olinmoqda…',
+  'В последнем релизе нет установщика ClubShellSetup.': 'Soʻnggi relizda ClubShellSetup oʻrnatuvchisi yoʻq.',
+  'Ставлю ClubShell, это несколько минут…': 'ClubShell oʻrnatilmoqda, bu bir necha daqiqa oladi…',
+  'Установщик завершился с ошибкой, код:': 'Oʻrnatuvchi xato bilan tugadi, kod:',
+  'ClubShell установлен. Одобрите этот ПК в кассе: «Зал и устройства».':
+    'ClubShell oʻrnatildi. Bu kompyuterni kassada tasdiqlang: «Zal va qurilmalar».',
+  'Перезагрузите ПК, чтобы закончить установку.': 'Oʻrnatishni yakunlash uchun kompyuterni qayta ishga tushiring.',
+  'Ключ — латинские буквы и цифры, без пробелов': 'Kalit — lotin harflari va raqamlar, boʻshliqsiz',
+  'Учётная запись — латинские буквы и цифры, до 20 символов': 'Hisob — lotin harflari va raqamlar, 20 belgigacha',
+  'Установка на ПК': 'Kompyuterga oʻrnatish',
+  'Скачать установщик': 'Oʻrnatuvchini yuklab olish',
+  'Файл установки ставит агента и оболочку на игровой ПК одним запуском: в нём уже адрес сервера и ключ для ПК. Установщик он берёт рядом с собой или в «Загрузках», а без него скачивает последний. Новый ПК появится здесь как ожидающий — одобрите его.':
+    'Oʻrnatish fayli agent va qobiqni oʻyin kompyuteriga bir marta ishga tushirishda oʻrnatadi: unda server manzili va kompyuter kaliti bor. Oʻrnatuvchini u yonidan yoki «Yuklanmalar»dan oladi, boʻlmasa soʻnggisini yuklab oladi. Yangi kompyuter bu yerda kutayotgan sifatida paydo boʻladi — uni tasdiqlang.',
+  'Ключ для ПК': 'Kompyuter kaliti',
+  'Выдаётся при создании клуба в суперадминке или задан на сервере (Club__EnrollmentKey). Касса его не хранит.':
+    'Klub superadminda yaratilganda beriladi yoki serverda belgilangan (Club__EnrollmentKey). Kassa uni saqlamaydi.',
+  'Учётная запись киоска': 'Kiosk hisobi',
+  'Обычно club': 'Odatda club',
+  'Запустите файл на игровом ПК. В нём ключ для ПК: храните его только в клубе.':
+    'Faylni oʻyin kompyuterida ishga tushiring. Unda kompyuter kaliti bor: uni faqat klubda saqlang.',
+  'Скачать файл установки': 'Oʻrnatish faylini yuklab olish',
   'Своя политика клуба': 'Klubning oʻz siyosati',
   'Политика по умолчанию': 'Standart siyosat',
   'Что агент делает на каждом ПК клуба: запрещённые процессы, флешки, веб-фильтр и DNS, ограничения Windows. Пустой список dnsServers — DNS остаётся от DHCP. После сохранения обновление с сервера эту политику не заменяет.':
@@ -1478,6 +1503,32 @@ export const EN: Record<string, string> = {
   'Обои (URL)': 'Wallpaper (URL)',
   Обслуживание: 'Maintenance',
   'Политика ПК': 'PC policy',
+  'Это не код клуба, а ключ для ПК. Код клуба — до 12 символов, он в суперадминке рядом с названием клуба.':
+    'This is the PC key, not the club code. The club code is up to 12 characters; it is next to the club name in the platform admin.',
+  'Неверный код клуба или PIN': 'Wrong club code or PIN',
+  'Сервер не отвечает:': 'The server does not answer:',
+  'Скачиваю установщик ClubShell…': 'Downloading the ClubShell installer…',
+  'В последнем релизе нет установщика ClubShellSetup.': 'The latest release has no ClubShellSetup installer.',
+  'Ставлю ClubShell, это несколько минут…': 'Installing ClubShell, this takes a few minutes…',
+  'Установщик завершился с ошибкой, код:': 'The installer failed, code:',
+  'ClubShell установлен. Одобрите этот ПК в кассе: «Зал и устройства».':
+    'ClubShell is installed. Approve this PC in the console: Hall and devices.',
+  'Перезагрузите ПК, чтобы закончить установку.': 'Restart the PC to finish the installation.',
+  'Ключ — латинские буквы и цифры, без пробелов': 'The key is Latin letters and digits, no spaces',
+  'Учётная запись — латинские буквы и цифры, до 20 символов':
+    'The account is Latin letters and digits, up to 20 characters',
+  'Установка на ПК': 'Install on PCs',
+  'Скачать установщик': 'Download the installer',
+  'Файл установки ставит агента и оболочку на игровой ПК одним запуском: в нём уже адрес сервера и ключ для ПК. Установщик он берёт рядом с собой или в «Загрузках», а без него скачивает последний. Новый ПК появится здесь как ожидающий — одобрите его.':
+    'The install file puts the agent and the shell on a gaming PC in one run: it already holds the server address and the PC key. It takes the installer from its own folder or Downloads, and downloads the latest one otherwise. The new PC shows up here as pending: approve it.',
+  'Ключ для ПК': 'PC key',
+  'Выдаётся при создании клуба в суперадминке или задан на сервере (Club__EnrollmentKey). Касса его не хранит.':
+    'Issued when the club is created in the platform admin, or set on the server (Club__EnrollmentKey). The console does not keep it.',
+  'Учётная запись киоска': 'Kiosk account',
+  'Обычно club': 'Usually club',
+  'Запустите файл на игровом ПК. В нём ключ для ПК: храните его только в клубе.':
+    'Run the file on a gaming PC. It holds the PC key: keep it in the club.',
+  'Скачать файл установки': 'Download the install file',
   'Своя политика клуба': 'Club’s own policy',
   'Политика по умолчанию': 'Default policy',
   'Что агент делает на каждом ПК клуба: запрещённые процессы, флешки, веб-фильтр и DNS, ограничения Windows. Пустой список dnsServers — DNS остаётся от DHCP. После сохранения обновление с сервера эту политику не заменяет.':

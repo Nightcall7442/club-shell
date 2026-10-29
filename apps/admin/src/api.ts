@@ -19,6 +19,9 @@ import type {
 } from '@clubshell/contracts';
 
 const BASE = (import.meta.env['VITE_ADMIN_API'] as string | undefined) ?? 'http://localhost:8080/api/v1';
+
+/** The server's origin, what the PC installer takes as `SERVERURL` (the API base without `/api/v1`). */
+export const SERVER_ORIGIN = new URL(BASE, window.location.href).origin;
 const TOKEN_KEY = 'clubshell.admin.token';
 const CLUB_CODE_KEY = 'clubshell.admin.clubCode';
 const DEVICE_KEY = 'clubshell.admin.device';
