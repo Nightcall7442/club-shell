@@ -49,6 +49,10 @@ public static partial class Kernel32
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool TerminateProcess(SafeHandle hProcess, uint uExitCode);
 
+    /// <summary>Returns the previous suspend count, or <c>0xFFFFFFFF</c> on failure.</summary>
+    [LibraryImport(Lib, SetLastError = true)]
+    public static partial uint ResumeThread(nint hThread);
+
     /// <summary>Returns WAIT_OBJECT_0 / WAIT_TIMEOUT / WAIT_ABANDONED / WAIT_FAILED (see <see cref="WaitResult"/>).</summary>
     [LibraryImport(Lib, SetLastError = true)]
     public static partial uint WaitForSingleObject(SafeHandle hHandle, uint dwMilliseconds);

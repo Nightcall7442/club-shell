@@ -66,6 +66,7 @@
     "accountPool": { "enabled": false, "leaseTtlSec": 14400, "releaseOnExit": true, "allowPasswordOnCommandLine": false },
     "cloudSave": { "enabled": false, "root": "cache\\saves", "maxMb": 512 },
     "playerSettings": { "enabled": true, "root": "cache\\player-settings", "maxMb": 16 },
+    "registryDefaults": [],
     "launchers": {
       "steam": { "exePath": "C:\\Program Files (x86)\\Steam\\steam.exe" },
       "epic": { "exePath": "C:\\Program Files (x86)\\Epic Games\\Launcher\\Portal\\Binaries\\Win32\\EpicGamesLauncher.exe" },

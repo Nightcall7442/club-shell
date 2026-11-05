@@ -11,7 +11,8 @@ use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
 
 use clubshell_winutil::window::{
-    enumerate_windows, force_foreground, foreground_window, set_window_display_affinity, window_pid,
+    enumerate_windows, force_foreground, foreground_window, place_window,
+    set_window_display_affinity, window_pid,
 };
 use clubshell_winutil::Rect;
 use parking_lot::{Mutex, RwLock};
@@ -200,7 +201,7 @@ impl WindowGuard {
             guard.apply_dev_window();
         } else {
             if config.kiosk.fullscreen {
-                if let Err(e) = guard.move_to_monitor(primary) {
+                if let Err(e) = guard.enter_fullscreen(primary) {
                     tracing::warn!(error = %e, "cannot place the window on the primary monitor");
                 }
             }
@@ -249,19 +250,36 @@ impl WindowGuard {
         self.set_fullscreen(!self.is_fullscreen())
     }
 
-    /// Moves the window to `rect` (a monitor rectangle) keeping the fullscreen state
-    /// (`kiosk_move_to_monitor`, display changes).
-    pub fn move_to_monitor(&self, rect: Rect) -> CmdResult<()> {
+    /// Startup: puts the window on `rect` (the primary monitor) and makes it fullscreen.
+    fn enter_fullscreen(&self, rect: Rect) -> CmdResult<()> {
         let w = &self.window;
-        w.set_fullscreen(false)?;
         w.set_position(PhysicalPosition::new(rect.left, rect.top))?;
         w.set_size(PhysicalSize::new(
             u32::try_from(rect.width()).unwrap_or(0),
             u32::try_from(rect.height()).unwrap_or(0),
         ))?;
-        if self.fullscreen.load(Ordering::Acquire) {
-            w.set_fullscreen(true)?;
+        w.set_fullscreen(true)?;
+        Ok(())
+    }
+
+    /// Moves the window onto `rect` (a monitor rectangle) without activating it, leaving its
+    /// fullscreen state alone (`kiosk_move_to_monitor`, display changes; SHELL_CHANGES 80). Leaving
+    /// and re-entering fullscreen activated the Shell, and a fullscreen game that is switching its
+    /// display mode loses the foreground to it and drops back to the desktop. Nothing is done when
+    /// the window already covers `rect`.
+    pub fn move_to_monitor(&self, rect: Rect) -> CmdResult<()> {
+        if self.hwnd != 0 {
+            if place_window(self.hwnd, rect)? {
+                tracing::info!(?rect, "main window re-placed");
+            }
+            return Ok(());
         }
+        let w = &self.window;
+        w.set_position(PhysicalPosition::new(rect.left, rect.top))?;
+        w.set_size(PhysicalSize::new(
+            u32::try_from(rect.width()).unwrap_or(0),
+            u32::try_from(rect.height()).unwrap_or(0),
+        ))?;
         Ok(())
     }
 

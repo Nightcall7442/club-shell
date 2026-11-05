@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Management;
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using ClubShell.Windows.Native;
 using Microsoft.Extensions.Logging;
@@ -83,6 +84,40 @@ public sealed class ProcessWatcher : IAsyncDisposable, IDisposable
                 StartPolling();
             }
         }
+    }
+
+    /// <summary>
+    /// A handle of its own to <paramref name="process"/> (<c>SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION</c>) for
+    /// <see cref="WatchHandleAsync"/>: kept from the process's creation, it still gives the real exit code of a process
+    /// that is gone before anyone opened it by pid (SHELL_CHANGES 83).
+    /// </summary>
+    public static SafeProcessHandle DuplicateForWait(SafeHandle process)
+    {
+        ArgumentNullException.ThrowIfNull(process);
+        bool added = false;
+        try
+        {
+            process.DangerousAddRef(ref added);
+            nint self = Kernel32.GetCurrentProcess();
+            Win32Error.ThrowIfFalse(
+                Kernel32.DuplicateHandle(self, process.DangerousGetHandle(), self, out nint dup, NativeConst.SYNCHRONIZE | NativeConst.PROCESS_QUERY_LIMITED_INFORMATION, false, 0),
+                nameof(Kernel32.DuplicateHandle));
+            return new SafeProcessHandle(dup, ownsHandle: true);
+        }
+        finally
+        {
+            if (added)
+            {
+                process.DangerousRelease();
+            }
+        }
+    }
+
+    /// <summary>Completes with the exit code of the process behind <paramref name="handle"/> (not disposed).</summary>
+    public static Task<int> WatchHandleAsync(SafeProcessHandle handle, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(handle);
+        return ProcessWait.WaitForExitAsync(handle, ct);
     }
 
     /// <summary>Completes with the exit code of <paramref name="pid"/>; throws <see cref="ArgumentException"/> when no such process exists.</summary>

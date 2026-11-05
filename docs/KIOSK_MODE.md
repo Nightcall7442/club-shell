@@ -114,7 +114,7 @@ the game's focus.
 
 | Guard | Mechanism |
 |-------|-----------|
-| Fullscreen | borderless window sized to the primary monitor rect (`MultiMonitor::primary_rect`), re-applied on `kiosk_set_fullscreen` and display changes |
+| Fullscreen | borderless window sized to the primary monitor rect (`MultiMonitor::primary_rect`), entered at start and on `kiosk_set_fullscreen`. A display change re-places it with `place_window` (`SetWindowPos` with `SWP_NOACTIVATE \| SWP_NOZORDER`, nothing done when the rect is unchanged) and never toggles fullscreen — that activated the Shell under a game switching its display mode (SHELL_CHANGES 80) |
 | Close prevention | `WindowEvent::CloseRequested` is cancelled unless `kiosk_exit` is in progress |
 | Focus loss | after `REFOCUS_DELAY` (200 ms) `force_foreground` unless the new foreground pid is allow-listed (running game via `allow_foreground_pid`, `TabTip.exe`); emits `kiosk://focus` |
 | Stray windows | every `SWEEP_INTERVAL` (3 s) `enumerate_windows` and `SW_FORCEMINIMIZE` top-level windows of non-allow-listed processes; classes in `SKIP_CLASSES` (`Shell_TrayWnd`, `Progman`, `WorkerW`, `IPTIP_Main_Window`, …) are never touched |
@@ -231,7 +231,12 @@ Example deny list from `config/policies.example.json`: `cmd.exe`, `powershell.ex
 ## 5. Game mode relaxations
 
 `KioskControl::set_game_mode(true)` is called when `game.stateChanged{running}` arrives; `false` on
-`exited | failed | killed`. `game.stateChanged` also feeds `WindowGuard::allow_foreground_pid(pid)`.
+`exited | failed | killed`. `game.stateChanged` also feeds `WindowGuard::allow_foreground_pid(pid)` and
+`AllowSetForegroundWindow(pid)`.
+
+The Agent creates the game from session 0, so Windows lets its window take the foreground only with the leave of the
+foreground owner: `games_launch` calls `AllowSetForegroundWindow(ASFW_ANY)` before sending `games.launch`, while the
+Shell is still in front after the click on "Play" (SHELL_CHANGES 81).
 
 | Guard | Normal | Game mode |
 |-------|--------|-----------|
@@ -240,6 +245,7 @@ Example deny list from `config/policies.example.json`: `cmd.exe`, `powershell.ex
 | `AltTabBlocker` (topmost guard) | on (if `topmostGuard`) | off |
 | `WindowGuard` refocus / sweep | on | off; game pid allow-listed |
 | Idle detector | on | paused (`IdleDetector::set_paused`) |
+| Display change (`WM_DISPLAYCHANGE`) | main window re-placed, overlay re-sized, taskbar re-hidden | logged at info and deferred to the end of game mode: a game switching resolution (CS 1.6, stretched 4:3) must not see the Shell move under it |
 | Overlay | main webview | toasts and ads rendered by the overlay window over the game |
 | `kiosk_set_guard` request | applied | remembered (`guard_wanted`) and re-applied when the game exits |
 

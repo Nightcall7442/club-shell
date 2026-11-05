@@ -475,7 +475,9 @@ export interface LaunchRequest {
   accountLeaseId?: string | null;
   /** Extra command line (policy-sanitized). */
   extraArgs?: string | null;
-  /** Requested resolution. */
+  /**
+   * Not applied: a game sets its own display mode (its arguments or settings). Accepted and logged for compatibility.
+   */
   resolution?: Resolution | null;
   /** Seconds to wait for the game process/window before failing. */
   launchTimeoutSec: number;

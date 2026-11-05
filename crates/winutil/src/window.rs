@@ -44,14 +44,15 @@ mod imp {
     use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
     use windows::Win32::UI::Shell::{SHAppBarMessage, APPBARDATA};
     use windows::Win32::UI::WindowsAndMessaging::{
-        BringWindowToTop, EnumChildWindows, EnumWindows, GetClassNameW, GetForegroundWindow,
-        GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
-        SetForegroundWindow, SetWindowDisplayAffinity, SetWindowPos, ShowWindow, GWL_EXSTYLE,
-        GWL_STYLE, HWND_NOTOPMOST, HWND_TOPMOST, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
-        SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_FORCEMINIMIZE, SW_HIDE,
-        SW_SHOW, WDA_EXCLUDEFROMCAPTURE, WDA_NONE, WINDOW_LONG_PTR_INDEX, WS_CAPTION,
-        WS_EX_CLIENTEDGE, WS_EX_DLGMODALFRAME, WS_EX_STATICEDGE, WS_EX_TOOLWINDOW,
-        WS_EX_WINDOWEDGE, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU, WS_THICKFRAME,
+        AllowSetForegroundWindow, BringWindowToTop, EnumChildWindows, EnumWindows, GetClassNameW,
+        GetForegroundWindow, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsIconic,
+        IsWindowVisible, SetForegroundWindow, SetWindowDisplayAffinity, SetWindowPos, ShowWindow,
+        ASFW_ANY, GWL_EXSTYLE, GWL_STYLE, HWND_NOTOPMOST, HWND_TOPMOST, SWP_FRAMECHANGED,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
+        SW_FORCEMINIMIZE, SW_HIDE, SW_SHOW, WDA_EXCLUDEFROMCAPTURE, WDA_NONE,
+        WINDOW_LONG_PTR_INDEX, WS_CAPTION, WS_EX_CLIENTEDGE, WS_EX_DLGMODALFRAME, WS_EX_STATICEDGE,
+        WS_EX_TOOLWINDOW, WS_EX_WINDOWEDGE, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU,
+        WS_THICKFRAME,
     };
     #[cfg(target_pointer_width = "64")]
     use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, SetWindowLongPtrW};
@@ -234,6 +235,35 @@ mod imp {
             )
         }
         .ret("SetWindowPos")
+    }
+
+    /// Moves and sizes `hwnd` to `rect` without activating it or changing its Z order. Returns
+    /// `false` when the window already covers exactly `rect` (nothing is done).
+    pub fn place_window(hwnd: isize, rect: Rect) -> Result<bool> {
+        if window_rect(hwnd)? == rect {
+            return Ok(false);
+        }
+        // SAFETY: no preconditions beyond a window handle.
+        unsafe {
+            SetWindowPos(
+                hwnd_from_raw(hwnd),
+                HWND::default(),
+                rect.left,
+                rect.top,
+                rect.width(),
+                rect.height(),
+                SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER,
+            )
+        }
+        .ret("SetWindowPos")?;
+        Ok(true)
+    }
+
+    /// `AllowSetForegroundWindow` for `pid`, or for any process when `None` (`ASFW_ANY`). Works only
+    /// while this process owns the foreground; returns whether Windows granted it.
+    pub fn allow_set_foreground(pid: Option<u32>) -> bool {
+        // SAFETY: no preconditions.
+        unsafe { AllowSetForegroundWindow(pid.unwrap_or(ASFW_ANY)) }.is_ok()
     }
 
     /// Raw `HWND` of the current foreground window (0 when none).
@@ -504,6 +534,14 @@ mod imp {
         0
     }
 
+    pub fn place_window(_hwnd: isize, _rect: Rect) -> Result<bool> {
+        Err(WinUtilError::Unsupported)
+    }
+
+    pub fn allow_set_foreground(_pid: Option<u32>) -> bool {
+        false
+    }
+
     pub fn is_foreground(_hwnd: isize) -> bool {
         false
     }
@@ -561,10 +599,10 @@ mod imp {
 }
 
 pub use imp::{
-    child_windows, enumerate_windows, find_window, force_foreground, foreground_window,
-    hide_taskbar, is_foreground, minimize_others, set_fullscreen_borderless, set_topmost,
-    set_window_display_affinity, show_taskbar, taskbar_autohide, window_pid, window_rect,
-    TopmostGuard,
+    allow_set_foreground, child_windows, enumerate_windows, find_window, force_foreground,
+    foreground_window, hide_taskbar, is_foreground, minimize_others, place_window,
+    set_fullscreen_borderless, set_topmost, set_window_display_affinity, show_taskbar,
+    taskbar_autohide, window_pid, window_rect, TopmostGuard,
 };
 
 #[cfg(test)]

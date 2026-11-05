@@ -1,4 +1,5 @@
 using ClubShell.Contracts.Games;
+using Microsoft.Win32.SafeHandles;
 
 namespace ClubShell.Core.Abstractions;
 
@@ -6,12 +7,16 @@ namespace ClubShell.Core.Abstractions;
 /// <param name="WtsSessionId">Windows Terminal Services session id of the kiosk user.</param>
 /// <param name="UserName">Kiosk user account name (e.g. <c>club</c>).</param>
 /// <param name="Env">Extra environment variables merged into the user's environment block (launcher credentials never go here).</param>
-/// <param name="Resolution">Requested resolution, when the launcher supports it.</param>
+/// <param name="GameCreated">
+/// Called by a launcher that starts the game's executable itself (no launcher client in between) with the new process's
+/// id and handle, before its first instruction runs: the job goes on there, and a handle is kept for the real exit code
+/// (SHELL_CHANGES 83). The handle is the launcher's: duplicate it to keep it.
+/// </param>
 public sealed record LaunchContext(
     int WtsSessionId,
     string UserName,
     IReadOnlyDictionary<string, string> Env,
-    Resolution? Resolution);
+    Action<int, SafeProcessHandle>? GameCreated = null);
 
 /// <summary>
 /// One launcher backend (Steam, Epic, Battle.net, Riot, EA, Ubisoft, plain exe). Implementations live in the Agent

@@ -419,7 +419,9 @@ export interface GamesLaunchRequest {
   useAccountPool?: boolean | null;
   /** Extra command line (appended after policy sanitization). */
   extraArgs?: string | null;
-  /** Requested resolution. */
+  /**
+   * Not applied: a game sets its own display mode (its arguments or settings). Accepted and logged for compatibility.
+   */
   resolution?: Resolution | null;
 }
 

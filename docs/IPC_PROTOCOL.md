@@ -335,7 +335,7 @@ refused with `validation`, and an `unknown` server locale is ignored. `ErrorCode
 | `useAccountPool` | bool | yes | |
 | `accountLeaseId` | uuid | no | reuse an existing lease |
 | `extraArgs` | string | no | |
-| `resolution` | `{ width: int, height: int }` | no | |
+| `resolution` | `{ width: int, height: int }` | no | accepted and logged, not applied: a game sets its own display mode |
 | `launchTimeoutSec` | int | yes | |
 
 `LaunchResult`
@@ -720,7 +720,7 @@ Request
 | `gameId` | uuid | yes | |
 | `useAccountPool` | bool | no | default = `game.requiresAccount` |
 | `extraArgs` | string | no | appended after policy sanitization |
-| `resolution` | `{ width: int, height: int }` | no | |
+| `resolution` | `{ width: int, height: int }` | no | accepted and logged, not applied: a game sets its own display mode |
 
 Response: `LaunchResult` (`ok = true`; failures are returned as errors, not `ok = false`, over IPC).
 Errors: `sessionNotActive` (also when `locked`/`paused`), `notFound`, `gameNotInstalled`,

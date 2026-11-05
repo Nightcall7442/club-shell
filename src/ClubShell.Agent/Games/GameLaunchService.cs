@@ -15,6 +15,7 @@ using ClubShell.Core.Abstractions;
 using ClubShell.Core.Configuration;
 using ClubShell.Windows.Processes;
 using Microsoft.Extensions.Options;
+using Microsoft.Win32.SafeHandles;
 using PlaySession = ClubShell.Contracts.Sessions.Session;
 
 namespace ClubShell.Agent.Games;
@@ -80,6 +81,7 @@ public sealed class GameLaunchService : IDisposable
     private readonly AccountInjector _injector;
     private readonly CloudSaveSync _saves;
     private readonly PlayerSettingsSync? _playerSettings;
+    private readonly GameRegistryDefaults? _registryDefaults;
     private readonly GameSessionTracker _tracker;
     private readonly IKioskSessionLocator _kiosk;
     private readonly IServerClient _server;
@@ -108,10 +110,12 @@ public sealed class GameLaunchService : IDisposable
         IOptionsMonitor<AgentSettings> settings,
         IClock clock,
         ILogger<GameLaunchService> logger,
-        PlayerSettingsSync? playerSettings = null)
+        PlayerSettingsSync? playerSettings = null,
+        GameRegistryDefaults? registryDefaults = null)
     {
         ArgumentNullException.ThrowIfNull(launchers);
         _playerSettings = playerSettings;
+        _registryDefaults = registryDefaults;
         _library = library;
         _sessions = sessions;
         _policy = policy;
@@ -215,6 +219,7 @@ public sealed class GameLaunchService : IDisposable
         ActiveLease? lease = null;
         InjectionResult? injection = null;
         JobObject? job = null;
+        SafeProcessHandle? gameHandle = null;
         IpcError error;
         try
         {
@@ -289,6 +294,9 @@ public sealed class GameLaunchService : IDisposable
                 ThrowIfCancelled(game, inFlight);
             }
 
+            // The club's defaults for what games keep in HKCU, which a fresh profile lacks.
+            _ = _registryDefaults?.Apply();
+
             var env = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             if (injection is not null)
             {
@@ -311,7 +319,40 @@ public sealed class GameLaunchService : IDisposable
                 ExtraArgs = SanitizeArgs(request.ExtraArgs),
                 LaunchTimeoutSec = timeoutSec,
             };
-            var context = new LaunchContext(wtsSession, _kiosk.KioskUser, env, request.Resolution);
+            // SHELL_CHANGES 83: a game the launcher starts itself (no launcher client in between) goes into its job before
+            // its first instruction, so a child it starts at once is caught too, and its handle is kept from creation so
+            // that a game which quits at once still reports its real exit code.
+            JobObject created = job = JobObject.Create(null, killOnClose: true);
+            int? createdPid = null;
+            var context = new LaunchContext(wtsSession, _kiosk.KioskUser, env, (pid, handle) =>
+            {
+                createdPid = pid;
+                try
+                {
+                    created.Assign(handle);
+                }
+                catch (Win32Exception ex)
+                {
+                    _logger.LogDebug(ex, "Cannot assign pid {Pid} to a job object", pid);
+                }
+
+                try
+                {
+                    gameHandle = ProcessWatcher.DuplicateForWait(handle);
+                }
+                catch (Win32Exception ex)
+                {
+                    _logger.LogDebug(ex, "Cannot keep a handle to pid {Pid}; its exit code is read by pid", pid);
+                }
+            });
+            if (request.Resolution is { } resolution)
+            {
+                _logger.LogInformation(
+                    "Requested resolution {Width}x{Height} for {Title} is not applied: a game sets its own display mode (its arguments or settings)",
+                    resolution.Width,
+                    resolution.Height,
+                    game.Title);
+            }
 
             await PublishAsync(new GameStateChanged(game.Id, game.Title, GameState.Launching, _clock.UtcNow), cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("Launching {Title} via {Launcher} in session {WtsSession} (lease {LeaseId})", game.Title, game.Launcher, wtsSession, lease?.LeaseId);
@@ -344,7 +385,22 @@ public sealed class GameLaunchService : IDisposable
                 throw Cancelled(game).ToException();
             }
 
-            job = CreateJob(pid);
+            if (createdPid != pid)
+            {
+                // The game is not the process the launcher created (a launcher client started it): its own job, by pid.
+                gameHandle?.Dispose();
+                gameHandle = null;
+                if (createdPid is null)
+                {
+                    job.Dispose();
+                    job = CreateJob(pid);
+                }
+                else
+                {
+                    AssignToJob(job, pid);
+                }
+            }
+
             int durationMs = (int)_clock.GetElapsedTime(startedTs).TotalMilliseconds;
             var running = new RunningGame(game.Id, game.Title, pid, result.StartedAt, lease?.LeaseId, GameState.Running);
 
@@ -352,10 +408,11 @@ public sealed class GameLaunchService : IDisposable
             // at once (Counter-Strike 1.6's cstrike.exe) had its Exited published first, and the Shell then stayed on
             // "running" for good, its "close game" answered notFound.
             await PublishAsync(new GameStateChanged(game.Id, game.Title, GameState.Running, _clock.UtcNow, pid), cancellationToken).ConfigureAwait(false);
-            await _tracker.TrackAsync(new GameLaunchRecord(game, effective, running, lease, injection, antiCheat, job, durationMs), cancellationToken).ConfigureAwait(false);
+            await _tracker.TrackAsync(new GameLaunchRecord(game, effective, running, lease, injection, antiCheat, job, durationMs, gameHandle), cancellationToken).ConfigureAwait(false);
             Settled(game, inFlight); // tracked: "close game" reaches it through the tracker from here on
             string? injectionError = injection?.Error;
             job = null;
+            gameHandle = null;
             injection = null;
             lease = null;
             await ReportAsync(game, effective, result, durationMs, antiCheat, injectionError, cancellationToken).ConfigureAwait(false);
@@ -380,6 +437,7 @@ public sealed class GameLaunchService : IDisposable
             error = Cancelled(game);
         }
 
+        gameHandle?.Dispose();
         return await FailAsync(game, request, startedAt, startedTs, antiCheat, error, lease, injection, job, () => Settled(game, inFlight), cancellationToken).ConfigureAwait(false);
     }
 
@@ -828,6 +886,12 @@ public sealed class GameLaunchService : IDisposable
     private JobObject CreateJob(int pid)
     {
         JobObject job = JobObject.Create(null, killOnClose: true);
+        AssignToJob(job, pid);
+        return job;
+    }
+
+    private void AssignToJob(JobObject job, int pid)
+    {
         try
         {
             job.Assign(pid);
@@ -837,8 +901,6 @@ public sealed class GameLaunchService : IDisposable
             // Already in a launcher-owned job without nesting rights: tree kill by pid still works.
             _logger.LogDebug(ex, "Cannot assign pid {Pid} to a job object", pid);
         }
-
-        return job;
     }
 
     private void OnLeaseExpired(object? sender, ActiveLease lease)
