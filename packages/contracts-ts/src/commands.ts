@@ -1591,6 +1591,15 @@ export interface HeartbeatKioskUser {
   problem?: string | null;
   /** Privileged local groups the existing account belongs to (`KioskUserProblems.PrivilegedAccount`). */
   privilegedGroups?: string[] | null;
+  /** Winlogon logs this account on by itself (`AutoAdminLogon` 1 for it); `null` when unknown. */
+  autoLogon?: boolean | null;
+  /**
+   * `ForceAutoLogon` is 1: Winlogon logs the account on again after every sign-out, not only at boot (SHELL_CHANGES
+   * 76); `null` when unknown.
+   */
+  forceAutoLogon?: boolean | null;
+  /** `AutoLogonCount`: boots left before auto-logon switches itself off; `null` when not set. */
+  autoLogonCount?: number | null;
 }
 
 /** Response of `POST /agents/{pcId}/heartbeat`. */
@@ -1948,6 +1957,11 @@ export const TelemetryEventKinds = {
   LauncherError: 'launcherError',
   /** Outbox entry dead-lettered. */
   Deadletter: 'deadletter',
+  /**
+   * The kiosk account did not log on again (a session ended, the PC stayed on the Windows sign-in screen) and the Agent
+   * rebooted the PC to bring the Shell back (SHELL_CHANGES 77). Data: `{ reason }`.
+   */
+  KioskLogonLost: 'kioskLogonLost',
 } as const;
 /** One of the {@link TelemetryEventKinds} values. */
 export type TelemetryEventKind = (typeof TelemetryEventKinds)[keyof typeof TelemetryEventKinds];

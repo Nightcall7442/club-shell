@@ -213,7 +213,7 @@ Request
 |-------|------|----------|-------|
 | `samples` | `PcMetrics[]` | yes | ≤ 120 per batch |
 | `hardware` | `HardwareInfo` | no | full inventory in the first batch after every Agent start, then only when a rescan (every `hardwareRescanSec`) finds a change |
-| `events` | `{ kind: string, at: datetime, data: object }[]` | yes | agent diagnostics: `shellCrash`, `shellCrashLoop`, `policyApplyFailed`, `updateFailed`, `pipeError`, `launcherError`, `deadletter`; the Agent sends ≤ 100 per batch (the rest go in the next ones) |
+| `events` | `{ kind: string, at: datetime, data: object }[]` | yes | agent diagnostics: `shellCrash`, `shellCrashLoop`, `kioskLogonLost`, `policyApplyFailed`, `updateFailed`, `pipeError`, `launcherError`, `deadletter`; the Agent sends ≤ 100 per batch (the rest go in the next ones) |
 | `logsTail` | string[] | no | last ≤ 50 Warning+ log lines when `events` non-empty |
 
 Response `204`. A `4xx` other than `401`/`408`/`429` drops the batch (the server rejected its content); after any

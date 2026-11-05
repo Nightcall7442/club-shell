@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Management;
 using System.Runtime.Versioning;
 using ClubShell.Windows.Native;
 using ClubShell.Windows.Registry;
@@ -18,17 +17,24 @@ public sealed record ProfileResetResult(bool Deleted, long FreedBytes, IReadOnly
 
 /// <summary>
 /// Deletes the kiosk user's profile between sessions (ARCHITECTURE.md §6.1 step 9, <c>resetProfileOnLogout</c>):
-/// logs the user off, then tries DeleteProfileW, WMI <c>Win32_UserProfile.Delete</c> and finally a manual
-/// directory + ProfileList removal. <see cref="PreservedDirectories"/> are moved aside first and put back by
-/// <see cref="RestorePreserved"/> after the next logon. <see cref="CleanCaches"/> is the light variant that only
-/// empties caches.
+/// logs the user off, moves the profile directory aside and removes its <c>ProfileList</c> entry the moment the hive is
+/// unloaded, then deletes the moved directory. Winlogon logs the kiosk on again right after the sign-out
+/// (<c>ForceAutoLogon</c>, SHELL_CHANGES 76), so nothing slow may run between the unload and that logon: the new logon
+/// must find no profile and get a fresh one. <see cref="PreservedDirectories"/> are taken from the moved directory and
+/// put back by <see cref="RestorePreserved"/> after the next logon. <see cref="CleanCaches"/> is the light variant that
+/// only empties caches.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class ProfileReset
 {
-    private const int DeleteAttempts = 3;
-    private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(2);
+    /// <summary>Suffix of a profile directory moved aside by a reset, before the time stamp (<c>C:\Users\player.reset-…</c>).</summary>
+    public const string TombstoneSuffix = ".reset-";
+
+    private const string ProfileGuidKey = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileGuid";
     private static readonly TimeSpan UnloadTimeout = TimeSpan.FromSeconds(20);
+
+    // Fine-grained: the hive is unloaded only between the sign-out and the auto-logon that follows it.
+    private static readonly TimeSpan UnloadPoll = TimeSpan.FromMilliseconds(50);
     private readonly ILogger<ProfileReset> _logger;
     private readonly string _markerPath;
     private readonly string _dirtyPath;
@@ -234,47 +240,91 @@ public sealed class ProfileReset
     public ProfileResetResult ResetProfile(string userName) => ResetProfile(userName, PreservedDirectories);
 
     /// <summary>
-    /// Logs <paramref name="userName"/> off everywhere and deletes its profile directory and registry entry.
-    /// <paramref name="preserve"/> (profile-relative directories) is moved aside first and put back by
-    /// <see cref="RestorePreserved"/> once the profile has been recreated at the next logon.
+    /// Logs <paramref name="userName"/> off and resets its profile: the sessions in <paramref name="sessions"/> (all of the
+    /// user's sessions now when <see langword="null"/>) are logged off once each — a session Winlogon logs on after that is
+    /// the next player's and is left alone. As soon as the hive is unloaded the profile directory is renamed
+    /// (<see cref="TombstoneSuffix"/>) and its <c>ProfileList</c> entry removed, so the next logon creates a fresh profile
+    /// under the same name; only then are <paramref name="preserve"/> (profile-relative directories, put back by
+    /// <see cref="RestorePreserved"/> after the next logon) carried out of the moved directory and the rest deleted. When
+    /// the hive is loaded again before that, or the directory cannot be moved, the new logon has won: nothing is deleted
+    /// under it and the result is not <see cref="ProfileResetResult.Deleted"/>, so the debt stays for the next idle moment.
     /// </summary>
-    public ProfileResetResult ResetProfile(string userName, IReadOnlyList<string> preserve)
+    public ProfileResetResult ResetProfile(string userName, IReadOnlyList<string> preserve, IReadOnlyCollection<uint>? sessions = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(userName);
         ArgumentNullException.ThrowIfNull(preserve);
         var errors = new List<string>();
         string sid = Advapi32.LookupAccountSid(userName) ?? throw new InvalidOperationException($"Account {userName} not found.");
 
-        LogoffEverywhere(userName, errors);
-        WaitForHiveUnload(sid);
+        Logoff(userName, sessions, errors);
+        if (!WaitForHiveUnload(sid))
+        {
+            errors.Add("the profile is in use: the kiosk logged on again before it could be reset");
+            _logger.LogWarning("Profile of {User} ({Sid}) is loaded again; left for the next idle moment", userName, sid);
+            return new ProfileResetResult(false, 0, errors);
+        }
 
-        string? profilePath = RegistryHelper.GetProfileImagePath(sid);
-        Stash(sid, profilePath, preserve, errors);
-        long size = profilePath is not null ? DirectorySize(profilePath) : 0;
-        bool deleted = false;
-
-        if (profilePath is null && !RegistryHelper.Exists(RegistryHive.LocalMachine, RegistryHelper.ProfileListKey + "\\" + sid))
+        string? profilePath = RegistryHelper.GetProfileImagePath(sid) is { Length: > 0 } image ? Path.TrimEndingDirectorySeparator(image) : null;
+        string listKey = RegistryHelper.ProfileListKey + "\\" + sid;
+        if (profilePath is null && !RegistryHelper.Exists(RegistryHive.LocalMachine, listKey))
         {
             _logger.LogInformation("No profile registered for {User} ({Sid}); nothing to reset", userName, sid);
-        }
-        else
-        {
-            deleted = Retry(() => DeleteWithApi(sid), "DeleteProfileW", errors)
-                || Retry(() => DeleteWithWmi(sid), "Win32_UserProfile.Delete", errors)
-                || DeleteManually(sid, profilePath, errors);
+            DeleteTombstones(ProfilesRoot(), AccountName(userName), errors);
+            TouchLastReset();
+            return new ProfileResetResult(false, 0, errors);
         }
 
-        if (deleted)
+        string? tombstone = null;
+        if (profilePath is not null && Directory.Exists(profilePath))
         {
-            _logger.LogInformation("Profile of {User} ({Sid}) deleted, {Bytes} bytes freed", userName, sid, size);
-        }
-        else
-        {
-            _logger.LogWarning("Profile of {User} ({Sid}) could not be deleted: {Errors}", userName, sid, string.Join("; ", errors));
+            tombstone = profilePath + TombstoneSuffix + DateTime.UtcNow.ToString("yyyyMMddHHmmssfff", CultureInfo.InvariantCulture);
+            try
+            {
+                Directory.Move(profilePath, tombstone);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                errors.Add($"{profilePath}: {ex.Message}");
+                _logger.LogWarning(ex, "Profile of {User} could not be moved aside (in use); left for the next idle moment", userName);
+                return new ProfileResetResult(false, 0, errors);
+            }
         }
 
+        if (!RemoveProfileEntry(sid, errors))
+        {
+            // The entry would point at a directory that is gone, and the next logon would get a TEMP profile: put it back.
+            if (tombstone is not null)
+            {
+                try
+                {
+                    Directory.Move(tombstone, profilePath!);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    errors.Add($"{tombstone}: {ex.Message}");
+                }
+            }
+
+            _logger.LogWarning("Profile entry of {User} ({Sid}) could not be removed: {Errors}", userName, sid, string.Join("; ", errors));
+            return new ProfileResetResult(false, 0, errors);
+        }
+
+        // Out of the way: a logon from now on gets a fresh profile. Nothing below races it.
+        long size = 0;
+        if (tombstone is not null)
+        {
+            Stash(sid, tombstone, preserve, errors);
+            size = DirectorySize(tombstone);
+            // This tombstone and any an earlier reset left behind.
+            if (DeleteTombstones(Path.GetDirectoryName(profilePath), Path.GetFileName(profilePath)!, errors) > 0)
+            {
+                _logger.LogWarning("Old profile directories of {User} not fully deleted; the next reset tries again", userName);
+            }
+        }
+
+        _logger.LogInformation("Profile of {User} ({Sid}) deleted, {Bytes} bytes freed", userName, sid, size);
         TouchLastReset();
-        return new ProfileResetResult(deleted, deleted ? size : 0, errors);
+        return new ProfileResetResult(true, size, errors);
     }
 
     /// <summary>Empties <see cref="CacheDirectories"/> inside the profile without deleting it (user may stay logged on; locked files are skipped).</summary>
@@ -474,132 +524,73 @@ public sealed class ProfileReset
         }
     }
 
-    private void LogoffEverywhere(string userName, List<string> errors)
+    /// <summary>The ids of <paramref name="userName"/>'s sessions now.</summary>
+    public static IReadOnlyCollection<uint> SessionsOf(string userName) =>
+        [.. WtsSessions.Enumerate().Where(s => s.HasUser && MatchesUser(s, userName)).Select(s => s.Id)];
+
+    /// <summary>Logs each of <paramref name="sessions"/> off once, if it still belongs to <paramref name="userName"/>.</summary>
+    private void Logoff(string userName, IReadOnlyCollection<uint>? sessions, List<string> errors)
     {
-        foreach (WtsSession session in WtsSessions.Enumerate())
+        foreach (uint id in sessions ?? SessionsOf(userName))
         {
-            if (!session.HasUser || !MatchesUser(session, userName))
+            if (WtsSessions.Get(id) is not { HasUser: true } session || !MatchesUser(session, userName))
             {
                 continue;
             }
 
             try
             {
-                _logger.LogInformation("Logging off session {SessionId} of {User}", session.Id, userName);
-                WtsSessions.Logoff(session.Id, wait: true);
+                _logger.LogInformation("Logging off session {SessionId} of {User}", id, userName);
+                WtsSessions.Logoff(id, wait: true);
             }
             catch (System.ComponentModel.Win32Exception ex)
             {
-                errors.Add($"Logoff session {session.Id}: {ex.Message}");
+                errors.Add($"Logoff session {id}: {ex.Message}");
             }
         }
     }
 
-    private static bool MatchesUser(WtsSession session, string userName)
+    private static bool MatchesUser(WtsSession session, string userName) =>
+        string.Equals(session.UserName, AccountName(userName), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary><c>club</c> for <c>PC\club</c>.</summary>
+    private static string AccountName(string userName)
     {
         int slash = userName.IndexOf('\\');
-        string name = slash >= 0 ? userName[(slash + 1)..] : userName;
-        return string.Equals(session.UserName, name, StringComparison.OrdinalIgnoreCase);
+        return slash >= 0 ? userName[(slash + 1)..] : userName;
     }
 
-    private void WaitForHiveUnload(string sid)
+    /// <summary><see langword="true"/> once HKU\&lt;sid&gt; is unloaded; <see langword="false"/> when it stays loaded for <see cref="UnloadTimeout"/>.</summary>
+    private bool WaitForHiveUnload(string sid)
     {
         long deadline = Environment.TickCount64 + (long)UnloadTimeout.TotalMilliseconds;
-        while (RegistryHelper.Exists(RegistryHive.Users, sid) && Environment.TickCount64 < deadline)
+        while (RegistryHelper.Exists(RegistryHive.Users, sid))
         {
-            Thread.Sleep(500);
-        }
-
-        if (RegistryHelper.Exists(RegistryHive.Users, sid))
-        {
-            _logger.LogWarning("Hive HKU\\{Sid} is still loaded after {Timeout}; deletion may fail", sid, UnloadTimeout);
-        }
-    }
-
-    private bool Retry(Func<bool> attempt, string what, List<string> errors)
-    {
-        for (int i = 1; i <= DeleteAttempts; i++)
-        {
-            try
+            if (Environment.TickCount64 >= deadline)
             {
-                if (attempt())
-                {
-                    return true;
-                }
-            }
-            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or ManagementException or UnauthorizedAccessException or IOException or System.Runtime.InteropServices.COMException)
-            {
-                errors.Add($"{what} attempt {i}: {ex.Message}");
-                _logger.LogDebug(ex, "{What} attempt {Attempt} failed", what, i);
+                _logger.LogWarning("Hive HKU\\{Sid} is still loaded after {Timeout}", sid, UnloadTimeout);
+                return false;
             }
 
-            if (i < DeleteAttempts)
-            {
-                Thread.Sleep(RetryDelay);
-            }
+            Thread.Sleep(UnloadPoll);
         }
 
-        return false;
+        return true;
     }
 
-    private static bool DeleteWithApi(string sid)
-    {
-        if (Userenv.DeleteProfileW(sid, null, null))
-        {
-            return true;
-        }
+    /// <summary>Where Windows creates profiles (<c>ProfileList\ProfilesDirectory</c>, normally <c>C:\Users</c>).</summary>
+    private static string? ProfilesRoot() =>
+        RegistryHelper.Get<string>(RegistryHive.LocalMachine, RegistryHelper.ProfileListKey, "ProfilesDirectory") is { Length: > 0 } root
+            ? Environment.ExpandEnvironmentVariables(root)
+            : null;
 
-        int error = Win32Error.Last();
-        if (error == NativeConst.ERROR_FILE_NOT_FOUND || error == NativeConst.ERROR_PATH_NOT_FOUND)
-        {
-            return false;
-        }
-
-        Win32Error.Throw(error, nameof(Userenv.DeleteProfileW));
-        return false;
-    }
-
-    private static bool DeleteWithWmi(string sid)
-    {
-        using var searcher = new ManagementObjectSearcher($"SELECT * FROM Win32_UserProfile WHERE SID = '{sid}'");
-        using ManagementObjectCollection profiles = searcher.Get();
-        bool any = false;
-        foreach (ManagementBaseObject item in profiles)
-        {
-            using (item)
-            {
-                if (item is ManagementObject profile)
-                {
-                    _ = profile.InvokeMethod("Delete", null!);
-                    any = true;
-                }
-            }
-        }
-
-        return any;
-    }
-
-    private bool DeleteManually(string sid, string? profilePath, List<string> errors)
+    /// <summary>Removes <c>ProfileList\&lt;sid&gt;</c>, its <c>.bak</c> and the <c>ProfileGuid</c> entry it names.</summary>
+    private bool RemoveProfileEntry(string sid, List<string> errors)
     {
         bool ok = true;
-        if (profilePath is not null && Directory.Exists(profilePath))
-        {
-            ok = DeleteContents(profilePath, errors);
-            if (ok)
-            {
-                try
-                {
-                    Directory.Delete(profilePath, recursive: true);
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    errors.Add($"{profilePath}: {ex.Message}");
-                    ok = false;
-                }
-            }
-        }
-
-        foreach (string key in new[] { RegistryHelper.ProfileListKey + "\\" + sid, RegistryHelper.ProfileListKey + "\\" + sid + ".bak" })
+        string listKey = RegistryHelper.ProfileListKey + "\\" + sid;
+        string? guid = RegistryHelper.Get<string>(RegistryHive.LocalMachine, listKey, "Guid");
+        foreach (string key in new[] { listKey, listKey + ".bak" })
         {
             try
             {
@@ -612,8 +603,66 @@ public sealed class ProfileReset
             }
         }
 
-        _logger.LogInformation("Manual profile removal for {Sid}: ok={Ok}", sid, ok);
+        if (ok && guid is { Length: > 0 })
+        {
+            try
+            {
+                _ = RegistryHelper.DeleteKey(RegistryHive.LocalMachine, ProfileGuidKey + "\\" + guid, recursive: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                // Only a stale index entry; the next logon does not read it.
+                _logger.LogDebug(ex, "ProfileGuid {Guid} could not be removed", guid);
+            }
+        }
+
         return ok;
+    }
+
+    /// <summary>
+    /// Deletes the directories in <paramref name="root"/> that resets moved the profile directory
+    /// <paramref name="profileName"/> to (<c>club.reset-…</c>) and could not delete then (locked files). Returns how many
+    /// remain; what stayed is reported in <paramref name="errors"/>.
+    /// </summary>
+    public static int DeleteTombstones(string? root, string profileName, List<string> errors)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(profileName);
+        ArgumentNullException.ThrowIfNull(errors);
+        if (root is null || !Directory.Exists(root))
+        {
+            return 0;
+        }
+
+        int left = 0;
+        foreach (string dir in Directory.EnumerateDirectories(root, profileName + TombstoneSuffix + "*"))
+        {
+            if (!DeleteTree(dir, errors))
+            {
+                left++;
+            }
+        }
+
+        return left;
+    }
+
+    /// <summary>Deletes <paramref name="path"/> and everything in it; what stays is reported in <paramref name="errors"/>.</summary>
+    private static bool DeleteTree(string path, List<string> errors)
+    {
+        if (!DeleteContents(path, errors))
+        {
+            return false;
+        }
+
+        try
+        {
+            Directory.Delete(path, recursive: true);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            errors.Add($"{path}: {ex.Message}");
+            return false;
+        }
     }
 
     /// <summary>Deletes everything inside <paramref name="path"/> (not the directory itself); returns <see langword="false"/> when something remained.</summary>

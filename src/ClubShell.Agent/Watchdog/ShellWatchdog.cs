@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using ClubShell.Agent.Server;
+using ClubShell.Agent.Users;
 using ClubShell.Core.Abstractions;
 using ClubShell.Core.Configuration;
 using ClubShell.Windows.Sessions;
@@ -54,6 +55,13 @@ public sealed class ShellWatchdog : BackgroundService
     private readonly IShellConnectionState _shell;
     private readonly CrashRecovery _recovery;
     private readonly AdminMaintenance _maintenance;
+    private readonly KioskLogonGuard? _logonGuard;
+
+    /// <summary>How long the kiosk session may be missing before <see cref="KioskLogonGuard"/> is asked (SHELL_CHANGES 77).</summary>
+    private static readonly TimeSpan LogonLostAfter = TimeSpan.FromMinutes(3);
+
+    private DateTimeOffset? _waitingSince;
+    private DateTimeOffset _nextGuardAt;
     private readonly IOptionsMonitor<AgentSettings> _settings;
     private readonly IClock _clock;
     private readonly ILogger<ShellWatchdog> _logger;
@@ -73,7 +81,8 @@ public sealed class ShellWatchdog : BackgroundService
         AdminMaintenance maintenance,
         IOptionsMonitor<AgentSettings> settings,
         IClock clock,
-        ILogger<ShellWatchdog> logger)
+        ILogger<ShellWatchdog> logger,
+        KioskLogonGuard? logonGuard = null)
     {
         ArgumentNullException.ThrowIfNull(launcher);
         ArgumentNullException.ThrowIfNull(sessionWatcher);
@@ -88,6 +97,7 @@ public sealed class ShellWatchdog : BackgroundService
         _shell = shell;
         _recovery = recovery;
         _maintenance = maintenance;
+        _logonGuard = logonGuard;
         _settings = settings;
         _clock = clock;
         _logger = logger;
@@ -148,6 +158,7 @@ public sealed class ShellWatchdog : BackgroundService
             if (_launcher.RestartsSuspended)
             {
                 SetStatus(ShellState.Suspended);
+                _waitingSince = null;
                 await WaitAsync(interval, stoppingToken).ConfigureAwait(false);
                 continue;
             }
@@ -155,9 +166,12 @@ public sealed class ShellWatchdog : BackgroundService
             if (_launcher.ActiveSessionId is null)
             {
                 SetStatus(ShellState.WaitingForSession);
+                AskLogonGuard();
                 await WaitAsync(interval, stoppingToken).ConfigureAwait(false);
                 continue;
             }
+
+            _waitingSince = null;
 
             if (!_launcher.IsRunning)
             {
@@ -347,6 +361,41 @@ public sealed class ShellWatchdog : BackgroundService
         catch (OperationCanceledException)
         {
             // Shutting down.
+        }
+    }
+
+    /// <summary>
+    /// No kiosk session for <see cref="LogonLostAfter"/>: the PC is on the Windows sign-in screen (the logon after a
+    /// session failed). The guard decides whether to reboot; asked again every <see cref="LogonLostAfter"/> while it lasts.
+    /// </summary>
+    private void AskLogonGuard()
+    {
+        if (_logonGuard is null)
+        {
+            return;
+        }
+
+        DateTimeOffset now = _clock.UtcNow;
+        if (_waitingSince is null)
+        {
+            _waitingSince = now;
+            _nextGuardAt = now + LogonLostAfter;
+            return;
+        }
+
+        if (now < _nextGuardAt)
+        {
+            return;
+        }
+
+        _nextGuardAt = now + LogonLostAfter;
+        try
+        {
+            _ = _logonGuard.Recover("watchdog");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Kiosk logon guard failed");
         }
     }
 

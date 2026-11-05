@@ -64,6 +64,7 @@ function Disable-KioskAutoLogon {
     $winlogon = Get-ItemProperty -LiteralPath $winlogonKey
     if ($winlogon.AutoAdminLogon -eq '1' -and $winlogon.DefaultUserName -eq $KioskUser) {
         Set-RegistryValue $winlogonKey 'AutoAdminLogon' '0' 'String'
+        Remove-ItemProperty -LiteralPath $winlogonKey -Name 'ForceAutoLogon' -ErrorAction SilentlyContinue
         Write-Host 'Автовход выключен, чтобы клиент не попал на обычный рабочий стол Windows.' -ForegroundColor Red
     }
 }

@@ -59,6 +59,7 @@ Remove-RegistryValueSafe -Path $WinlogonKey -Name 'DefaultUserName'
 Remove-RegistryValueSafe -Path $WinlogonKey -Name 'DefaultPassword'
 Remove-RegistryValueSafe -Path $WinlogonKey -Name 'DefaultDomainName'
 Remove-RegistryValueSafe -Path $WinlogonKey -Name 'AutoLogonCount'
+Remove-RegistryValueSafe -Path $WinlogonKey -Name 'ForceAutoLogon'
 
 # Per-user custom shell (reverts to the default explorer.exe). Best effort: only when the hive is loaded.
 try {

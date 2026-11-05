@@ -104,11 +104,13 @@ public sealed class ShellRegistry
     }
 
     /// <summary>
-    /// Enables auto-logon for <paramref name="userName"/>: AutoAdminLogon=1, DefaultUserName/DefaultDomainName,
-    /// password stored as LSA secret, any clear-text DefaultPassword value removed, and the Windows Hello-only sign-in
-    /// switched off. A local account (<paramref name="domain"/> empty or ".") gets the computer name, the value Windows
-    /// documents for DefaultDomainName. <paramref name="count"/> sets AutoLogonCount (auto-logon disables itself after
-    /// that many boots).
+    /// Enables auto-logon for <paramref name="userName"/>: AutoAdminLogon=1 and ForceAutoLogon=1, DefaultUserName/
+    /// DefaultDomainName, password stored as LSA secret, any clear-text DefaultPassword value removed, and the Windows
+    /// Hello-only sign-in switched off. AutoAdminLogon alone logs the account on once per boot; ForceAutoLogon makes
+    /// Winlogon log it on again after every sign-out, which is how the kiosk comes back after a session ends and its
+    /// profile is reset (SHELL_CHANGES 76). A local account (<paramref name="domain"/> empty or ".") gets the computer
+    /// name, the value Windows documents for DefaultDomainName. <paramref name="count"/> sets AutoLogonCount (auto-logon
+    /// disables itself after that many boots).
     /// </summary>
     public void SetAutoLogon(string userName, string password, string? domain = null, int? count = null)
     {
@@ -123,6 +125,7 @@ public sealed class ShellRegistry
         RegistryHelper.Set(RegistryHive.LocalMachine, MachineWinlogonKey, "DefaultUserName", userName, RegistryValueKind.String);
         RegistryHelper.Set(RegistryHive.LocalMachine, MachineWinlogonKey, "DefaultDomainName", domain, RegistryValueKind.String);
         RegistryHelper.Set(RegistryHive.LocalMachine, MachineWinlogonKey, "AutoAdminLogon", "1", RegistryValueKind.String);
+        RegistryHelper.Set(RegistryHive.LocalMachine, MachineWinlogonKey, "ForceAutoLogon", "1", RegistryValueKind.String);
         int passwordLess = RegistryHelper.Get<int>(RegistryHive.LocalMachine, PasswordLessDeviceKey, "DevicePasswordLessBuildVersion");
         if (passwordLess != 0)
         {
@@ -151,16 +154,33 @@ public sealed class ShellRegistry
         LsaSecrets.Retrieve(DefaultPasswordSecret)
         ?? RegistryHelper.Get<string>(RegistryHive.LocalMachine, MachineWinlogonKey, "DefaultPassword");
 
+    /// <summary>Winlogon's auto-logon as the registry holds it now (heartbeat, the kiosk logon guard).</summary>
+    public static AutoLogonState GetAutoLogon() => new(
+        RegistryHelper.Get<string>(RegistryHive.LocalMachine, MachineWinlogonKey, "AutoAdminLogon") == "1",
+        RegistryHelper.Get<string>(RegistryHive.LocalMachine, MachineWinlogonKey, "DefaultUserName") is { Length: > 0 } user ? user : null,
+        RegistryHelper.Get<string>(RegistryHive.LocalMachine, MachineWinlogonKey, "ForceAutoLogon") == "1",
+        RegistryHelper.ValueExists(RegistryHive.LocalMachine, MachineWinlogonKey, "AutoLogonCount")
+            ? RegistryHelper.Get<int>(RegistryHive.LocalMachine, MachineWinlogonKey, "AutoLogonCount")
+            : null);
+
     /// <summary>Disables auto-logon and removes the stored password (registry value and LSA secret).</summary>
     public void ClearAutoLogon()
     {
         RegistryHelper.Set(RegistryHive.LocalMachine, MachineWinlogonKey, "AutoAdminLogon", "0", RegistryValueKind.String);
+        _ = RegistryHelper.DeleteValue(RegistryHive.LocalMachine, MachineWinlogonKey, "ForceAutoLogon");
         _ = RegistryHelper.DeleteValue(RegistryHive.LocalMachine, MachineWinlogonKey, "DefaultPassword");
         _ = RegistryHelper.DeleteValue(RegistryHive.LocalMachine, MachineWinlogonKey, "AutoLogonCount");
         LsaSecrets.Store(DefaultPasswordSecret, null);
         _logger.LogInformation("Auto-logon disabled");
     }
 }
+
+/// <summary>Winlogon's auto-logon settings.</summary>
+/// <param name="Enabled"><c>AutoAdminLogon</c> is "1".</param>
+/// <param name="UserName"><c>DefaultUserName</c>, or <see langword="null"/>.</param>
+/// <param name="Forced"><c>ForceAutoLogon</c> is "1": the account is logged on again after every sign-out.</param>
+/// <param name="Count"><c>AutoLogonCount</c> (boots left before auto-logon switches itself off), or <see langword="null"/>.</param>
+public sealed record AutoLogonState(bool Enabled, string? UserName, bool Forced, int? Count);
 
 /// <summary>LSA private data (secrets) over <see cref="Advapi32"/>; every LSA function returns an NTSTATUS.</summary>
 [SupportedOSPlatform("windows")]

@@ -384,6 +384,14 @@ public sealed class KioskUserSettings
     /// <summary>Reset the profile after each session.</summary>
     public bool ResetProfileOnLogout { get; set; } = true;
 
+    /// <summary>
+    /// How the profile is reset after a session (SHELL_CHANGES 78): <c>logoff</c> signs the kiosk out and deletes its
+    /// profile; <c>reboot</c> reboots the PC instead, for a PC whose system disk comes back clean at every boot (a diskless
+    /// seat); <c>auto</c> (default) reboots when the system disk is on iSCSI, else signs out.
+    /// </summary>
+    [AllowedValues("auto", "logoff", "reboot")]
+    public string ResetMode { get; set; } = "auto";
+
     /// <summary>Folder copied into a fresh profile, when set.</summary>
     public string? ProfileTemplate { get; set; }
 
