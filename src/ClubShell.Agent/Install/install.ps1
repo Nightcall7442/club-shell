@@ -18,7 +18,8 @@
 .PARAMETER ClubApiKey
     Club registration key written to server.clubApiKey.
 .PARAMETER KioskUser
-    Kiosk account name written to shell.kioskUser.name. Default: club.
+    Kiosk account name written to shell.kioskUser.name. Default: the one this PC already has
+    (HKLM\SOFTWARE\ClubShell\KioskUser, then agent.json), else player.
 .PARAMETER Force
     Overwrite an existing agent.json.
 #>
@@ -28,9 +29,18 @@ param(
     [string] $SourceDir  = $PSScriptRoot,
     [string] $ServerUrl,
     [string] $ClubApiKey,
-    [string] $KioskUser = 'club',
+    [string] $KioskUser = '',
     [switch] $Force
 )
+
+# The kiosk this PC already has (SHELL_CHANGES 64): the name the installer stored, then agent.json; 'player' on a new PC.
+if (-not $KioskUser) {
+    try { $KioskUser = [string](Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\ClubShell' -Name KioskUser -ErrorAction Stop).KioskUser } catch { }
+}
+if (-not $KioskUser) {
+    try { $KioskUser = [string](Get-Content -LiteralPath (Join-Path $env:ProgramData 'ClubShell\agent.json') -Raw -ErrorAction Stop | ConvertFrom-Json).shell.kioskUser.name } catch { }
+}
+if (-not $KioskUser) { $KioskUser = 'player' }
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'

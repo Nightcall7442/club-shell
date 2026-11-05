@@ -41,6 +41,10 @@
       <Component Id="AgentUninstallScript" Directory="AgentInstallDir">
         <File Id="uninstall.ps1" Source="$(var.AgentScriptsDir)\uninstall.ps1" KeyPath="yes" />
       </Component>
+      <!-- The admin PIN (secure\admin-pin): without it the Shell's admin screen answers notConfigured (SHELL_CHANGES 65). -->
+      <Component Id="AgentSetAdminPinScript" Directory="AgentInstallDir">
+        <File Id="set_admin_pin.ps1" Name="set-admin-pin.ps1" Source="$(var.AgentScriptsDir)\set-admin-pin.ps1" KeyPath="yes" />
+      </Component>
 
       <!-- Application event-log source used by Serilog (manageEventSource: false -> must exist before first start).
            Message file: the .NET Framework generic message DLL, the same one New-EventLog registers. -->
@@ -148,6 +152,15 @@
           <RegistryValue Name="DataDir" Type="string" Value="[ClubShellDataDir]" />
           <RegistryValue Name="Version" Type="string" Value="$(var.Version)" />
           <RegistryValue Name="KioskUser" Type="string" Value="[KIOSKUSER]" />
+        </RegistryKey>
+      </Component>
+      <!-- CLUBAPIKEY (SHELL_CHANGES 70): left for the Agent in a key only SYSTEM and Administrators can read, never on a
+           command line. The Agent moves it into secure\club.key at its next start and deletes the value. -->
+      <Component Id="RegistryEnrollmentKey" Directory="INSTALLFOLDER" Condition="CLUBAPIKEY">
+        <RegistryKey Root="HKLM" Key="SOFTWARE\ClubShell\Enrollment">
+          <PermissionEx Sddl="D:P(A;CI;KA;;;SY)(A;CI;KA;;;BA)" />
+          <RegistryValue Name="Installed" Type="integer" Value="1" KeyPath="yes" />
+          <RegistryValue Name="ClubKey" Type="string" Value="[CLUBAPIKEY]" />
         </RegistryKey>
       </Component>
     </ComponentGroup>

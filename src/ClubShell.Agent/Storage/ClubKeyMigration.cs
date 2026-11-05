@@ -1,6 +1,8 @@
+using System.Security;
 using System.Text.Json.Nodes;
 using ClubShell.Core.Configuration;
 using ClubShell.Core.Security;
+using Microsoft.Win32;
 
 namespace ClubShell.Agent.Storage;
 
@@ -9,18 +11,28 @@ namespace ClubShell.Agent.Storage;
 /// (<see cref="ClubKeyStore"/>, SHELL_CHANGES 41): at start and whenever <c>agent.json</c> gets a key again (the
 /// installer's <c>CLUBAPIKEY</c>, an edit). The key is blanked in <c>agent.json</c> only once it is stored; until then
 /// it stays there and registration uses it. A key given through the environment is never in the file and stays where it is.
+/// The installer leaves <c>CLUBAPIKEY</c> in <see cref="InstallerKeyPath"/> instead of on a command line (SHELL_CHANGES
+/// 70): it is taken from there first and the value deleted once stored.
 /// Registered after <see cref="PersistentStateDirectory"/>, which gives <c>paths.persistent</c> its ACL first.
 /// </summary>
 public sealed class ClubKeyMigration : IHostedService, IDisposable
 {
+    /// <summary>HKLM key the MSI leaves <c>CLUBAPIKEY</c> in (SYSTEM and Administrators only).</summary>
+    public const string InstallerKeyPath = @"SOFTWARE\ClubShell\Enrollment";
+
+    /// <summary>Value under <see cref="InstallerKeyPath"/>.</summary>
+    public const string InstallerKeyName = "ClubKey";
+
     private readonly SettingsLoader _loader;
     private readonly ClubKeyStore _store;
     private readonly ILogger<ClubKeyMigration> _logger;
+    private readonly Func<string?> _readInstallerKey;
+    private readonly Action _clearInstallerKey;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private CancellationTokenSource? _stopping;
 
-    /// <summary>Creates the service.</summary>
-    public ClubKeyMigration(SettingsLoader loader, ClubKeyStore store, ILogger<ClubKeyMigration> logger)
+    /// <summary>Creates the service; the two delegates stand in for the installer's registry value in tests.</summary>
+    public ClubKeyMigration(SettingsLoader loader, ClubKeyStore store, ILogger<ClubKeyMigration> logger, Func<string?>? readInstallerKey = null, Action? clearInstallerKey = null)
     {
         ArgumentNullException.ThrowIfNull(loader);
         ArgumentNullException.ThrowIfNull(store);
@@ -28,6 +40,8 @@ public sealed class ClubKeyMigration : IHostedService, IDisposable
         _loader = loader;
         _store = store;
         _logger = logger;
+        _readInstallerKey = readInstallerKey ?? ReadInstallerKey;
+        _clearInstallerKey = clearInstallerKey ?? ClearInstallerKey;
     }
 
     /// <inheritdoc />
@@ -54,19 +68,28 @@ public sealed class ClubKeyMigration : IHostedService, IDisposable
         _gate.Dispose();
     }
 
-    /// <summary>Moves a key found in <c>agent.json</c>; <see langword="true"/> when one was moved.</summary>
+    /// <summary>
+    /// Moves a key found in <c>agent.json</c>, then one the installer left (<see cref="InstallerKeyPath"/>), which wins
+    /// when both are there — it comes from the latest setup; <see langword="true"/> when one was moved.
+    /// </summary>
     public async Task<bool> MigrateAsync(CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             bool moved = await _loader.TryPatchAsync(TakeKey, cancellationToken).ConfigureAwait(false);
+            bool fromInstaller = TakeInstallerKey();
+            if (fromInstaller)
+            {
+                _logger.LogInformation("Club key left by the installer stored in {Path}", _store.FilePath);
+            }
+
             if (moved)
             {
                 _logger.LogInformation("Club key moved from agent.json into {Path}", _store.FilePath);
             }
 
-            return moved;
+            return moved || fromInstaller;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
         {
@@ -78,6 +101,62 @@ public sealed class ClubKeyMigration : IHostedService, IDisposable
         {
             _gate.Release();
         }
+    }
+
+    /// <summary>Stores the installer's key and deletes the value; <see langword="true"/> when one was stored.</summary>
+    private bool TakeInstallerKey()
+    {
+        string? key;
+        try
+        {
+            key = _readInstallerKey();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException)
+        {
+            _logger.LogWarning(ex, "Club key left by the installer could not be read");
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(key) || !_store.Store(key.Trim()))
+        {
+            return false;
+        }
+
+        try
+        {
+            _clearInstallerKey();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException)
+        {
+            // Stored already; the value is taken again at the next start, with the same result.
+            _logger.LogWarning(ex, "Club key left by the installer stored but not deleted from the registry");
+        }
+
+        return true;
+    }
+
+    private static string? ReadInstallerKey()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return null;
+        }
+
+        using RegistryKey hklm = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+        using RegistryKey? key = hklm.OpenSubKey(InstallerKeyPath);
+        return key?.GetValue(InstallerKeyName) as string;
+    }
+
+    private static void ClearInstallerKey()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using RegistryKey hklm = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+        using RegistryKey? key = hklm.OpenSubKey(InstallerKeyPath, writable: true);
+        key?.DeleteValue(InstallerKeyName, throwOnMissingValue: false);
     }
 
     private bool TakeKey(JsonObject document)

@@ -102,6 +102,16 @@ and leaves it installed when ClubShell is upgraded or removed (`Permanent`, no `
 in the middle of a session therefore never takes G: away from a player. MSIs built before this change did stop and
 replace the helper on upgrade; a club that installs the helper itself (the club of this reconciliation) is not affected.
 
+**Upgrading a PC whose helper came from an MSI built before that change** (SHELL_CHANGES 58). Windows Installer removes
+the old package as a whole before installing the new one (`MajorUpgrade` after `InstallInitialize`), and the old
+package did not mark the helper `Permanent`: its service is stopped and deleted with its exe. The new MSI then puts its
+own copy back only when it was built with `-DisklessHelperDir` and given `INSTALLDISKLESS=1`, and starts it only with
+`DISKLESSSTART=1`; a released MSI carries no helper, so the PC has no G: until the helper is installed again. On such a
+PC either upgrade with an MSI built with the helper and `INSTALLDISKLESS=1 DISKLESSSTART=1` (its `helper.json` and
+`credentials.bin` in `%ProgramData%\ClubDiskless` are kept, so it comes back with the same registration), or install the
+helper with its own installer right after the upgrade, between sessions. No released ClubShell MSI ever carried the
+helper, so only PCs set up from such a custom build are concerned.
+
 The feature `DisklessHelper` is off by default. Public properties (MSI or `ClubShellSetup.exe`):
 
 | Property | Meaning |

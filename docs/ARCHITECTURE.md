@@ -114,7 +114,7 @@ UTF-8, `null` for explicitly-null optionals of the "nullable" class (see each ta
 | Process | Account | Windows session | Started by | Lifetime |
 |---------|---------|-----------------|------------|----------|
 | `ClubShellAgent.exe` | `NT AUTHORITY\SYSTEM` | 0 | Service Control Manager, start = Automatic (Delayed) | boot → shutdown |
-| `clubshell-shell.exe` | kiosk user (`club`, local, non-admin) | interactive (1, 2, …) | Agent watchdog via `CreateProcessAsUser` with the kiosk user's primary token | logon → logoff / crash |
+| `clubshell-shell.exe` | kiosk user (`player`, local, non-admin) | interactive (1, 2, …) | Agent watchdog via `CreateProcessAsUser` with the kiosk user's primary token | logon → logoff / crash |
 | Game / app processes | kiosk user | same as Shell | Agent (`ProcessAsUser` + job object) | launch → exit / kill |
 | `explorer.exe` | — | — | never for the kiosk user (`Shell` registry value = `clubshell-shell.exe`) | — |
 
@@ -123,7 +123,7 @@ Rules:
 1. The Agent is the only privileged component. It owns every OS-level side effect (launch, kill, firewall,
    registry policy, power, users, storage). The Shell is UI only and never calls a privileged API.
 2. Windows auto-logon (`AutoAdminLogon` + `ForceAutoLogon`) logs the kiosk user in at boot and again after every
-   sign-out (`shell.kioskUser.name`, default `club`
+   sign-out (`shell.kioskUser.name`, default `player` — `club` before SHELL_CHANGES 64, kept on upgrade
    in code, `config/agent.default.json`, `install.ps1 -KioskUser` and the MSI `KIOSKUSER` property).
    Winlogon's per-user `Shell` value for that account points at `clubshell-shell.exe`; for admins it remains
    `explorer.exe` (`SHELL_REPLACEMENT.md`).
@@ -473,7 +473,9 @@ unless the key ends with `Ms`.
       "passwordRotationDays": 7,
       "folderRedirect": {
         "enabled": true,                          // Desktop/Documents/Downloads/Pictures/Videos/Saved Games off C:
-        "root": null,                             // null = <non-system fixed drive already holding them, else most free>\ClubShell\Users
+        "root": null,                             // null = <non-system fixed drive already holding them, else most free>\ClubShell\Users,
+                                                  // never a games disk (iSCSI, G:, H:), nor freshly a libraryRoots drive (SHELL_CHANGES 73);
+                                                  // set it (a folder on C:) or enabled=false on a diskless seat
         "clearOnReset": true                      // emptied by every profile reset
       },
       "resetProfileOnLogout": true,
@@ -505,7 +507,7 @@ unless the key ends with `Ms`.
     "userCacheTtlHours": 168
   },
   "games": {
-    "libraryRoots": ["D:\\Games", "G:\\Games"],
+    "libraryRoots": ["D:\\Games", "G:\\Games", "H:\\Games"],    // H: offline games disk (SHELL_CHANGES 72)
     "scanIntervalSec": 900,
     "launchTimeoutSec": 90,
     "killGraceSec": 10,

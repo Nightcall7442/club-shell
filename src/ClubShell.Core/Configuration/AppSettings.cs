@@ -355,7 +355,7 @@ public sealed class KioskUserSettings
 {
     /// <summary>Local account name.</summary>
     [Required]
-    public string Name { get; set; } = "club";
+    public string Name { get; set; } = "player";
 
     /// <summary>Create the account when missing.</summary>
     public bool CreateIfMissing { get; set; } = true;
@@ -474,7 +474,7 @@ public sealed class OfflineSettings
 public sealed class GamesSettings
 {
     /// <summary>Library roots scanned for installs.</summary>
-    public string[] LibraryRoots { get; set; } = new[] { "D:\\Games", "G:\\Games" };
+    public string[] LibraryRoots { get; set; } = new[] { "D:\\Games", "G:\\Games", "H:\\Games" };
 
     /// <summary>Library rescan interval.</summary>
     [Range(10, 86400)]

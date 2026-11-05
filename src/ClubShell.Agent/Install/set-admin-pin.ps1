@@ -10,7 +10,7 @@
 .PARAMETER Remove
     Deletes the PIN: the admin panel can no longer be unlocked on this PC.
 .EXAMPLE
-    .\set-admin-pin.ps1
+    & 'C:\Program Files\ClubShell\Agent\Install\set-admin-pin.ps1'
 #>
 [CmdletBinding()]
 param([switch] $Remove)

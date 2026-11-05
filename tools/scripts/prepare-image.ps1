@@ -88,6 +88,14 @@ if ($keyFile -and (Test-Path -LiteralPath $keyFile) -and -not $storedKey) {
     exit 1
 }
 
+# cache\profile-dirty.marker: the profile of the last player is still owed a reset (SHELL_CHANGES 50). Imaged as it is, it
+# would be handed to the first player on every PC made from this image.
+$dirty = Join-Path $dataDir 'cache\profile-dirty.marker'
+if (Test-Path -LiteralPath $dirty) {
+    Write-Host 'Профиль киоска после прошлого сеанса ещё не сброшен (cache\profile-dirty.marker). Выйдите из учётной записи киоска и подождите минуту, пока агент сбросит профиль, затем запустите этот файл снова.' -ForegroundColor Red
+    exit 1
+}
+
 if ($svc.Status -ne 'Stopped') {
     Stop-Service -Name $service -Force
     $svc.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
@@ -112,11 +120,12 @@ foreach ($root in $roots) {
     }
 }
 
-# Server caches (server-config.json, power-acks.json, games.json, ...) and the profile-reset markers. Not
-# cache\dns-filter.state: it remembers the DNS the adapters had before the policy, which the agent puts back.
+# Server caches (server-config.json, power-acks.json, games.json, ...) and the last-reset marker. Not
+# cache\dns-filter.state: it remembers the DNS the adapters had before the policy, which the agent puts back; and never
+# cache\profile-dirty.marker, the debt checked above.
 $cache = Join-Path $dataDir 'cache'
 if (Test-Path -LiteralPath $cache) {
-    foreach ($item in Get-ChildItem -LiteralPath $cache -File -Force | Where-Object { $_.Name -like '*.json' -or $_.Name -like 'profile-*.marker' }) {
+    foreach ($item in Get-ChildItem -LiteralPath $cache -File -Force | Where-Object { $_.Name -like '*.json' -or $_.Name -eq 'profile-reset.marker' }) {
         Remove-Item -LiteralPath $item.FullName -Force
         $removed++
     }

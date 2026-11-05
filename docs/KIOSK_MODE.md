@@ -263,7 +263,7 @@ React: AdminPinDialog → invoke sys_unlock_admin{pin}
    │ commands/system.rs: trims, ≤ ADMIN_PIN_MAX chars, IPC sys.unlockAdmin
    ▼
 Agent SystemHandlers.UnlockAdmin: pin ≤ 32 chars, ≤ 3 failures/min (MaxUnlockAdminAttemptsPerMinute → rateLimited),
-   VerifyPin(shell.json → kiosk.adminPinHash) → unauthorized{notConfigured|badPin} on failure
+   VerifyPin(secure\admin-pin) → unauthorized{notConfigured|badPin} on failure
    success → 32 random bytes hex token, AdminTokenLifetime = 5 min
    ▼
 Shell AppState.set_admin_unlock(token, expiresAt)  →  Kiosk::set_admin_mode(true) shows the tray (polled every 5 s)
@@ -276,9 +276,11 @@ Shell AppState.set_admin_unlock(token, expiresAt)  →  Kiosk::set_admin_mode(tr
 
 Notes:
 
-- The PIN is validated by the **Agent** (never by the webview); `settings_get_shell_config` blanks `kiosk.adminPinHash`
-  before returning `shell.json` to React because a hash is brute-forceable. With no hash configured every attempt fails
-  with `notConfigured`.
+- The PIN is validated by the **Agent** (never by the webview) against `C:\ProgramData\ClubShell\secure\admin-pin`
+  (PBKDF2, SYSTEM and Administrators only), written by `C:\Program Files\ClubShell\Agent\Install\set-admin-pin.ps1`
+  (SHELL_CHANGES 65). `shell.json → kiosk.adminPinHash` is not read: the kiosk account can read `shell.json`, and a
+  hash of a short PIN is guessed offline; `settings_get_shell_config` still blanks it. With no PIN file every attempt
+  fails with `notConfigured`.
 - `AppState::admin_token_valid` compares the cached token and its expiry; `kiosk_exit` refuses invalid or expired
   tokens with `unauthorized`.
 - `kiosk_exit` first tells the Agent (`sys.adminExit` with the admin token, SHELL_CHANGES 33), which opens a
@@ -380,7 +382,7 @@ Run on a real PC (not a VM) with the release build, `policies.example.json` appl
 | `overlayOnLock` | true | `set_locked` overlay |
 | `allowVirtualKeyboard` | true | `kiosk_virtual_keyboard` (policy `kiosk.allowVirtualKeyboard` wins) |
 | `exitHotkey` | `Ctrl+Alt+Shift+F12` | `default_hotkeys` (empty = only `Ctrl+Alt+Shift+A`) |
-| `adminPinHash` | null | `SystemHandlers.UnlockAdmin` (read by the Agent from `shell.json`) |
+| `adminPinHash` | null | ignored (SHELL_CHANGES 40): the PIN is `secure\admin-pin`, set with `set-admin-pin.ps1` |
 | `idle.dimAfterSec` / `timeoutSec` / `screensaverAfterSec` | 120 / 300 / 600 | `IdleDetector` stages |
 | `monitors.primaryIndex` / `secondaryMode` | 0 / `black` | `MultiMonitor` |
 | `devtools` | false | `kiosk_open_devtools` |

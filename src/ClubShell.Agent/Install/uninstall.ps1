@@ -8,7 +8,8 @@
     Reverses install.ps1 / the Agent's runtime policy. Safe and logged; supports -WhatIf. The Agent normally restores
     the shell and auto-logon when a policy is reverted, but this script re-asserts those in case the service is gone.
 .PARAMETER KioskUser
-    Kiosk account name whose per-user shell override is removed. Default: club.
+    Kiosk account name whose per-user shell override is removed. Default: the one this PC has (HKLM\SOFTWARE\ClubShell\KioskUser,
+    then agent.json), else player.
 .PARAMETER PurgeData
     Remove C:\ProgramData\ClubShell (configuration, cache, logs, secrets).
 .PARAMETER RemoveKioskUser
@@ -16,10 +17,19 @@
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
-    [string] $KioskUser = 'club',
+    [string] $KioskUser = '',
     [switch] $PurgeData,
     [switch] $RemoveKioskUser
 )
+
+# The kiosk this PC already has (SHELL_CHANGES 64): the name the installer stored, then agent.json; 'player' on a new PC.
+if (-not $KioskUser) {
+    try { $KioskUser = [string](Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\ClubShell' -Name KioskUser -ErrorAction Stop).KioskUser } catch { }
+}
+if (-not $KioskUser) {
+    try { $KioskUser = [string](Get-Content -LiteralPath (Join-Path $env:ProgramData 'ClubShell\agent.json') -Raw -ErrorAction Stop | ConvertFrom-Json).shell.kioskUser.name } catch { }
+}
+if (-not $KioskUser) { $KioskUser = 'player' }
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -61,13 +71,77 @@ Remove-RegistryValueSafe -Path $WinlogonKey -Name 'DefaultDomainName'
 Remove-RegistryValueSafe -Path $WinlogonKey -Name 'AutoLogonCount'
 Remove-RegistryValueSafe -Path $WinlogonKey -Name 'ForceAutoLogon'
 
-# Per-user custom shell (reverts to the default explorer.exe). Best effort: only when the hive is loaded.
-try {
-    $kioskSid = (New-Object System.Security.Principal.NTAccount($KioskUser)).Translate([System.Security.Principal.SecurityIdentifier]).Value
-    $userWinlogon = "Registry::HKEY_USERS\$kioskSid\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
-    Remove-RegistryValueSafe -Path $userWinlogon -Name 'Shell'
-} catch {
-    Write-Verbose "Kiosk user '$KioskUser' shell override not reverted (user missing or hive not loaded)."
+# The kiosk password auto-logon kept as the LSA secret DefaultPassword (SHELL_CHANGES 67): storing nothing deletes it.
+if ($PSCmdlet.ShouldProcess('LSA secret DefaultPassword', 'Delete')) {
+    Add-Type -ErrorAction Stop -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class ClubShellLsaSecret {
+    [StructLayout(LayoutKind.Sequential)] private struct UnicodeString { public ushort Length; public ushort MaximumLength; public IntPtr Buffer; }
+    [StructLayout(LayoutKind.Sequential)] private struct ObjectAttributes { public int Length; public IntPtr RootDirectory; public IntPtr ObjectName; public uint Attributes; public IntPtr SecurityDescriptor; public IntPtr SecurityQualityOfService; }
+    [DllImport("advapi32.dll")] private static extern uint LsaOpenPolicy(IntPtr systemName, ref ObjectAttributes attributes, uint access, out IntPtr policy);
+    [DllImport("advapi32.dll")] private static extern uint LsaStorePrivateData(IntPtr policy, ref UnicodeString keyName, IntPtr privateData);
+    [DllImport("advapi32.dll")] private static extern uint LsaClose(IntPtr policy);
+    [DllImport("advapi32.dll")] private static extern int LsaNtStatusToWinError(uint status);
+    // Win32 error code; 0 = deleted, 2 = there was none.
+    public static int Delete(string name) {
+        var attributes = new ObjectAttributes();
+        attributes.Length = Marshal.SizeOf(typeof(ObjectAttributes));
+        IntPtr policy;
+        uint status = LsaOpenPolicy(IntPtr.Zero, ref attributes, 0x20, out policy); // POLICY_CREATE_SECRET, as the Agent stores it
+        if (status != 0) { return LsaNtStatusToWinError(status); }
+        var key = new UnicodeString();
+        key.Buffer = Marshal.StringToHGlobalUni(name);
+        key.Length = (ushort)(name.Length * 2);
+        key.MaximumLength = (ushort)((name.Length + 1) * 2);
+        try { status = LsaStorePrivateData(policy, ref key, IntPtr.Zero); return status == 0 ? 0 : LsaNtStatusToWinError(status); }
+        finally { Marshal.FreeHGlobal(key.Buffer); LsaClose(policy); }
+    }
+}
+'@
+    $lsaResult = [ClubShellLsaSecret]::Delete('DefaultPassword')
+    if ($lsaResult -notin 0, 2) { Write-Warning "LSA secret DefaultPassword not deleted (error $lsaResult)." }
+}
+
+# The kiosk's own hive (SHELL_CHANGES 67): the custom shell (Winlogon\Shell, Policies\System\Shell) and the Explorer
+# restrictions, or the kiosk would start the removed clubshell-shell.exe at its next logon. Loaded for the purpose when
+# the kiosk is not signed in.
+function Clear-KioskHive {
+    param([string] $Root)
+    Remove-RegistryValueSafe -Path "$Root\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name 'Shell'
+    foreach ($section in 'System', 'Explorer') {
+        $key = "$Root\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\$section"
+        if ((Test-Path -LiteralPath $key) -and $PSCmdlet.ShouldProcess($key, 'Remove the kiosk restrictions')) {
+            Remove-Item -LiteralPath $key -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+$kioskSid = $null
+try { $kioskSid = (New-Object System.Security.Principal.NTAccount($KioskUser)).Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { }
+if (-not $kioskSid) {
+    Write-Verbose "Kiosk user '$KioskUser' not found; its hive is left alone."
+} elseif (Test-Path -LiteralPath "Registry::HKEY_USERS\$kioskSid") {
+    Clear-KioskHive -Root "Registry::HKEY_USERS\$kioskSid"
+} else {
+    $profilePath = $null
+    try { $profilePath = [string](Get-ItemProperty -LiteralPath "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$kioskSid" -Name ProfileImagePath -ErrorAction Stop).ProfileImagePath } catch { }
+    $ntuser = if ($profilePath) { Join-Path ([Environment]::ExpandEnvironmentVariables($profilePath)) 'NTUSER.DAT' } else { $null }
+    if ($ntuser -and (Test-Path -LiteralPath $ntuser) -and $PSCmdlet.ShouldProcess($ntuser, 'Load and clean the kiosk hive')) {
+        $mount = 'HKU\ClubShellUninstall'
+        $global:LASTEXITCODE = 0
+        & reg.exe load $mount $ntuser | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            try { Clear-KioskHive -Root 'Registry::HKEY_USERS\ClubShellUninstall' }
+            finally {
+                [GC]::Collect()
+                [GC]::WaitForPendingFinalizers()
+                & reg.exe unload $mount | Out-Null
+            }
+        } else {
+            Write-Warning "Kiosk hive $ntuser could not be loaded (reg load exit code $LASTEXITCODE); its shell override stays."
+        }
+    }
 }
 
 # 2b. USB storage back on (SHELL_CHANGES 28): the policy's USBSTOR Start=4 is machine-wide and outlives the service. ----

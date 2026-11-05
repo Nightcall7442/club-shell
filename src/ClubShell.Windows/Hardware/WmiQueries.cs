@@ -498,6 +498,39 @@ public sealed partial class WmiQueries
         return disks.FirstOrDefault(d => d.DeviceNumber == system.DiskNumber)?.BusType;
     }
 
+    /// <summary>
+    /// Drive letters on disks of <c>MSFT_PhysicalDisk.BusType</c> <paramref name="busType"/> (9 = iSCSI), synchronously;
+    /// empty when the Storage namespace does not answer.
+    /// </summary>
+    public IReadOnlySet<char> DriveLettersOnBus(int busType)
+    {
+        var disks = new HashSet<int>();
+        foreach (IReadOnlyDictionary<string, object?> row in Query(StorageScope, "SELECT DeviceId, BusType FROM MSFT_PhysicalDisk"))
+        {
+            if (row.GetInt32("BusType") == busType && int.TryParse(row.GetString("DeviceId"), NumberStyles.None, CultureInfo.InvariantCulture, out int number))
+            {
+                _ = disks.Add(number);
+            }
+        }
+
+        var letters = new HashSet<char>();
+        if (disks.Count == 0)
+        {
+            return letters;
+        }
+
+        foreach (IReadOnlyDictionary<string, object?> row in Query(StorageScope, "SELECT DiskNumber, DriveLetter FROM MSFT_Partition"))
+        {
+            char letter = char.ToUpperInvariant(row.GetChar("DriveLetter"));
+            if (letter is >= 'A' and <= 'Z' && disks.Contains(row.GetInt32("DiskNumber", -1)))
+            {
+                _ = letters.Add(letter);
+            }
+        }
+
+        return letters;
+    }
+
     /// <summary>MSFT_Partition rows that carry a drive letter.</summary>
     public async Task<IReadOnlyList<WmiPartition>> GetPartitionsAsync(CancellationToken cancellationToken)
     {

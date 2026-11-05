@@ -8,6 +8,7 @@ using ClubShell.Contracts.Commands;
 using ClubShell.Core.Abstractions;
 using ClubShell.Core.Configuration;
 using ClubShell.Core.Security;
+using ClubShell.Windows.Hardware;
 using ClubShell.Windows.Registry;
 using ClubShell.Windows.Sessions;
 using ClubShell.Windows.Users;
@@ -45,6 +46,10 @@ public sealed class TempUserProvisioner : IKioskCredentials, IHostedService, IDi
     private readonly IOptionsMonitor<AgentSettings> _settings;
     private readonly IClock _clock;
     private readonly ILogger<TempUserProvisioner> _logger;
+    private readonly WmiQueries? _wmi;
+
+    /// <summary><c>MSFT_PhysicalDisk.BusType</c> of an iSCSI disk.</summary>
+    private const int IscsiBusType = 9;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private KioskCredentialsRecord? _current;
     private HeartbeatKioskUser? _status;
@@ -53,8 +58,9 @@ public sealed class TempUserProvisioner : IKioskCredentials, IHostedService, IDi
     private bool _disposed;
 
     /// <summary>Creates the provisioner.</summary>
-    public TempUserProvisioner(LocalUserManager users, FolderRedirect redirect, ShellRegistry shellRegistry, ITokenProtector protector, IOptionsMonitor<AgentSettings> settings, IClock clock, ILogger<TempUserProvisioner> logger)
+    public TempUserProvisioner(LocalUserManager users, FolderRedirect redirect, ShellRegistry shellRegistry, ITokenProtector protector, IOptionsMonitor<AgentSettings> settings, IClock clock, ILogger<TempUserProvisioner> logger, WmiQueries? wmi = null)
     {
+        _wmi = wmi;
         ArgumentNullException.ThrowIfNull(users);
         ArgumentNullException.ThrowIfNull(redirect);
         ArgumentNullException.ThrowIfNull(shellRegistry);
@@ -440,17 +446,26 @@ public sealed class TempUserProvisioner : IKioskCredentials, IHostedService, IDi
 
     /// <summary>
     /// Where the folders go: <c>&lt;root&gt;\&lt;user&gt;</c> for a configured root, else <c>ClubShell\Users\&lt;user&gt;</c>
-    /// on the non-system fixed drive that already holds it, else on the one with the most free space. Sticking to the
-    /// drive that already holds the folders keeps them in one place when free space shifts between starts.
+    /// on the drive <see cref="KioskProvisioningRules.PickDataDrive"/> picks — never a games disk. Sticking to the drive
+    /// that already holds the folders keeps them in one place when free space shifts between starts.
     /// </summary>
-    private static string? RedirectTargetOf(string userName, FolderRedirectSettings settings) =>
+    private string? RedirectTargetOf(string userName, FolderRedirectSettings settings) =>
         KioskProvisioningRules.RedirectTarget(settings.Root, string.IsNullOrWhiteSpace(settings.Root) ? DetectDataRoot(userName) : null, userName);
 
-    private static string? DetectDataRoot(string userName)
+    private string? DetectDataRoot(string userName)
     {
         var system = Path.GetPathRoot(Environment.SystemDirectory) ?? "C:\\";
-        DriveInfo? best = null;
-        long bestFree = -1;
+        IReadOnlySet<char> iscsi = new HashSet<char>();
+        try
+        {
+            iscsi = _wmi?.DriveLettersOnBus(IscsiBusType) ?? iscsi;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "iSCSI drives unknown; G: and H: are still left out");
+        }
+
+        var candidates = new List<DataDriveCandidate>();
         foreach (var drive in DriveInfo.GetDrives())
         {
             try
@@ -460,17 +475,11 @@ public sealed class TempUserProvisioner : IKioskCredentials, IHostedService, IDi
                     continue;
                 }
 
-                if (Directory.Exists(Path.Combine(drive.Name, "ClubShell", "Users", userName)))
-                {
-                    return drive.Name;
-                }
-
-                var free = drive.AvailableFreeSpace;
-                if (free > bestFree)
-                {
-                    bestFree = free;
-                    best = drive;
-                }
+                candidates.Add(new DataDriveCandidate(
+                    drive.Name,
+                    drive.AvailableFreeSpace,
+                    Directory.Exists(Path.Combine(drive.Name, "ClubShell", "Users", userName)),
+                    iscsi.Contains(char.ToUpperInvariant(drive.Name[0]))));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -478,7 +487,7 @@ public sealed class TempUserProvisioner : IKioskCredentials, IHostedService, IDi
             }
         }
 
-        return best?.Name;
+        return KioskProvisioningRules.PickDataDrive(candidates, _settings.CurrentValue.Games.LibraryRoots ?? []);
     }
 
     private bool IsAutoLogonPending(string userName)

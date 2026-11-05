@@ -5,6 +5,7 @@ using ClubShell.Agent.Watchdog;
 using ClubShell.Contracts.Pcs;
 using ClubShell.Windows.Native;
 using ClubShell.Windows.Registry;
+using ClubShell.Windows.Sessions;
 
 using Microsoft.Win32;
 
@@ -16,8 +17,10 @@ namespace ClubShell.Agent.Policy;
 /// Section <c>usb</c>: machine-wide USBSTOR service start value and DeviceInstall class restrictions from
 /// <see cref="PolicyRegistry.RulesFor"/> (HKLM rules only), plus ejection of removable volumes that are already
 /// mounted when storage is blocked (the registry only stops newly attached devices). Revert restores the snapshot.
-/// During an administrator's maintenance window (<see cref="AdminMaintenance"/>, SHELL_CHANGES 28) storage is allowed
-/// whatever the policy says; the policy is applied again when the window ends.
+/// During an administrator's maintenance window (<see cref="AdminMaintenance"/>, SHELL_CHANGES 28), and while someone other
+/// than the kiosk is signed in at the console (an administrator's own account, Shift at boot; SHELL_CHANGES 68), storage is
+/// allowed whatever the policy says; the policy is applied again when that ends. The process deny-list already spares
+/// those sessions.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class UsbPolicyModule : IPolicyModule, IDisposable
@@ -29,18 +32,31 @@ public sealed class UsbPolicyModule : IPolicyModule, IDisposable
 
     private readonly ILogger<UsbPolicyModule> _logger;
     private readonly AdminMaintenance? _maintenance;
+    private readonly IKioskCredentials? _kiosk;
+    private readonly SessionChangeWatcher? _sessions;
     private readonly object _gate = new();
     private RegistrySnapshot? _snapshot;
     private PcPolicy? _applied;
+    private bool _openedForOther;
 
-    /// <summary>Creates the module; <paramref name="maintenance"/> lets an administrator use USB storage.</summary>
-    public UsbPolicyModule(ILogger<UsbPolicyModule> logger, AdminMaintenance? maintenance = null)
+    /// <summary>
+    /// Creates the module; <paramref name="maintenance"/> lets an administrator use USB storage, and with
+    /// <paramref name="kiosk"/> and <paramref name="sessions"/> so does any account other than the kiosk at the console.
+    /// </summary>
+    public UsbPolicyModule(ILogger<UsbPolicyModule> logger, AdminMaintenance? maintenance = null, IKioskCredentials? kiosk = null, SessionChangeWatcher? sessions = null)
     {
         _logger = logger;
         _maintenance = maintenance;
+        _kiosk = kiosk;
+        _sessions = sessions;
         if (maintenance is not null)
         {
             maintenance.Changed += OnMaintenanceChanged;
+        }
+
+        if (sessions is not null)
+        {
+            sessions.SessionChanged += OnSessionChanged;
         }
     }
 
@@ -62,12 +78,43 @@ public sealed class UsbPolicyModule : IPolicyModule, IDisposable
         {
             _maintenance.Changed -= OnMaintenanceChanged;
         }
+
+        if (_sessions is not null)
+        {
+            _sessions.SessionChanged -= OnSessionChanged;
+        }
+    }
+
+    /// <summary>
+    /// The account signed in at the console when it is not the kiosk (an administrator's own session), else
+    /// <see langword="null"/>. Unknown kiosk, no console user, or an error: <see langword="null"/>, the policy as it is.
+    /// </summary>
+    private string? OtherUserAtConsole()
+    {
+        if (_kiosk is not { UserName: { Length: > 0 } kiosk })
+        {
+            return null;
+        }
+
+        try
+        {
+            uint console = WtsSessions.GetActiveConsoleSessionId();
+            return console != uint.MaxValue && WtsSessions.Get(console) is { HasUser: true, UserName: var user } && !string.Equals(user, kiosk, StringComparison.OrdinalIgnoreCase)
+                ? user
+                : null;
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            return null;
+        }
     }
 
     private string[] Apply(PcPolicy policy)
     {
         bool maintenance = _maintenance?.IsActive == true;
-        UsbPolicy usb = maintenance ? policy.Usb with { AllowStorage = true } : policy.Usb;
+        string? other = OtherUserAtConsole();
+        bool open = maintenance || other is not null;
+        UsbPolicy usb = open ? policy.Usb with { AllowStorage = true } : policy.Usb;
         var notes = new List<string>();
         lock (_gate)
         {
@@ -77,12 +124,18 @@ public sealed class UsbPolicyModule : IPolicyModule, IDisposable
             RegistrySnapshot before = RegistryPolicyOps.Apply(rules);
             _snapshot ??= before;
             _applied = policy;
+            _openedForOther = other is not null;
             notes.Add($"{rules.Count} HKLM value(s) written");
         }
 
         if (maintenance && !policy.Usb.AllowStorage)
         {
             notes.Add("administrator maintenance: USB mass storage allowed until it ends");
+        }
+
+        if (other is not null && !policy.Usb.AllowStorage)
+        {
+            notes.Add($"{other} is signed in at the console, not the kiosk: USB mass storage allowed until they sign out");
         }
 
         notes.Add(usb.AllowStorage ? "USB mass storage allowed (USBSTOR start=3)" : "USB mass storage disabled for new devices (USBSTOR start=4)");
@@ -117,6 +170,38 @@ public sealed class UsbPolicyModule : IPolicyModule, IDisposable
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or InvalidOperationException)
         {
             _logger.LogWarning(ex, "USB policy could not be re-applied for maintenance {State}", active ? "start" : "end");
+        }
+    }
+
+    /// <summary>A sign-in or sign-out at the console: re-applies the policy when who is there changed sides.</summary>
+    private void OnSessionChanged(object? sender, SessionChangedEventArgs e)
+    {
+        if (e.Reason is not (SessionChangeReason.Logon or SessionChangeReason.Logoff or SessionChangeReason.ConsoleConnect or SessionChangeReason.ConsoleDisconnect))
+        {
+            return;
+        }
+
+        PcPolicy? policy;
+        bool wasOpen;
+        lock (_gate)
+        {
+            policy = _applied;
+            wasOpen = _openedForOther;
+        }
+
+        if (policy is null || policy.Usb.AllowStorage || wasOpen == (OtherUserAtConsole() is not null))
+        {
+            return;
+        }
+
+        try
+        {
+            string[] notes = Apply(policy);
+            _logger.LogInformation("USB policy re-applied after {Reason} of session {SessionId}: {Notes}", e.Reason, e.SessionId, string.Join("; ", notes));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or InvalidOperationException)
+        {
+            _logger.LogWarning(ex, "USB policy could not be re-applied after {Reason}", e.Reason);
         }
     }
 

@@ -71,6 +71,39 @@ public static class KioskProvisioningRules
         return (KioskPasswordSource.New, false);
     }
 
+    /// <summary>Letters the club's games disks use (SHELL_CHANGES 73): G: online games, H: offline games.</summary>
+    public static readonly IReadOnlySet<char> GamesDiskLetters = new HashSet<char> { 'G', 'H' };
+
+    /// <summary>
+    /// The drive the kiosk user's folders go to when no root is configured, among the non-system fixed drives
+    /// (SHELL_CHANGES 73): never a games disk — one on an iSCSI bus, or G: / H: — whose writes go to the seat's layer on the
+    /// club server (a shared quota, reset at every boot); the drive that already holds the folders, else the one with the
+    /// most free space that is not the drive of a <c>games.libraryRoots</c> entry. A library drive that already holds
+    /// them (a hybrid's D:) keeps them.
+    /// </summary>
+    public static string? PickDataDrive(IEnumerable<DataDriveCandidate> drives, IEnumerable<string> libraryRoots)
+    {
+        ArgumentNullException.ThrowIfNull(drives);
+        ArgumentNullException.ThrowIfNull(libraryRoots);
+        HashSet<char> libraryLetters = libraryRoots.Select(DriveLetter).Where(l => l is not null).Select(l => l!.Value).ToHashSet();
+        List<DataDriveCandidate> usable = drives
+            .Where(d => !d.Iscsi && DriveLetter(d.Name) is { } letter && !GamesDiskLetters.Contains(letter))
+            .ToList();
+        if (usable.FirstOrDefault(d => d.HoldsFolders) is { } holding)
+        {
+            return holding.Name;
+        }
+
+        return usable
+            .Where(d => !libraryLetters.Contains(DriveLetter(d.Name)!.Value))
+            .OrderByDescending(d => d.FreeBytes)
+            .FirstOrDefault()?.Name;
+    }
+
+    /// <summary><c>D</c> for <c>D:\</c> or <c>d:\Games</c>; <see langword="null"/> without a drive letter.</summary>
+    private static char? DriveLetter(string? path) =>
+        path is { Length: >= 2 } && path[1] == ':' && char.IsAsciiLetter(path[0]) ? char.ToUpperInvariant(path[0]) : null;
+
     /// <summary>
     /// The directory the kiosk user's shell folders go to: <c>&lt;root&gt;\&lt;user&gt;</c> for a configured root, else
     /// <c>&lt;detected data drive&gt;\ClubShell\Users\&lt;user&gt;</c>; <see langword="null"/> when there is neither.
@@ -86,3 +119,10 @@ public static class KioskProvisioningRules
         return detectedDrive is null ? null : Path.Combine(detectedDrive, "ClubShell", "Users", userName);
     }
 }
+
+/// <summary>A non-system fixed drive as <see cref="KioskProvisioningRules.PickDataDrive"/> weighs it.</summary>
+/// <param name="Name">Root, <c>D:\</c>.</param>
+/// <param name="FreeBytes">Free space.</param>
+/// <param name="HoldsFolders">It already holds <c>ClubShell\Users\&lt;user&gt;</c>.</param>
+/// <param name="Iscsi">It is on an iSCSI disk.</param>
+public sealed record DataDriveCandidate(string Name, long FreeBytes, bool HoldsFolders, bool Iscsi);

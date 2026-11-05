@@ -352,7 +352,8 @@ export const UZ: Record<string, string> = {
   'Выдаётся при создании клуба в суперадминке или задан на сервере (Club__EnrollmentKey). Касса его не хранит.':
     'Klub superadminda yaratilganda beriladi yoki serverda belgilangan (Club__EnrollmentKey). Kassa uni saqlamaydi.',
   'Учётная запись киоска': 'Kiosk hisobi',
-  'Обычно club': 'Odatda club',
+  'Обычно player. ПК, где ClubShell уже стоит, оставляет своё имя.':
+    'Odatda player. ClubShell oʻrnatilgan kompyuter oʻz nomini saqlaydi.',
   'Запустите файл на игровом ПК. В нём ключ для ПК: храните его только в клубе.':
     'Faylni oʻyin kompyuterida ishga tushiring. Unda kompyuter kaliti bor: uni faqat klubda saqlang.',
   'Скачать файл установки': 'Oʻrnatish faylini yuklab olish',
@@ -1525,7 +1526,8 @@ export const EN: Record<string, string> = {
   'Выдаётся при создании клуба в суперадминке или задан на сервере (Club__EnrollmentKey). Касса его не хранит.':
     'Issued when the club is created in the platform admin, or set on the server (Club__EnrollmentKey). The console does not keep it.',
   'Учётная запись киоска': 'Kiosk account',
-  'Обычно club': 'Usually club',
+  'Обычно player. ПК, где ClubShell уже стоит, оставляет своё имя.':
+    'Usually player. A PC that already has ClubShell keeps its own name.',
   'Запустите файл на игровом ПК. В нём ключ для ПК: храните его только в клубе.':
     'Run the file on a gaming PC. It holds the PC key: keep it in the club.',
   'Скачать файл установки': 'Download the install file',

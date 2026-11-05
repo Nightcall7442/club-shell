@@ -57,10 +57,10 @@ VITE_ADMIN_API=https://<api>/api/v1 pnpm --filter @clubshell/admin build     # �
 ## 3. Агент на ПК
 
 ```powershell
-ClubShellSetup.exe /quiet SERVERURL=https://<api> CLUBAPIKEY=<Club__EnrollmentKey> KIOSKUSER=club INSTALLSHELL=1
+ClubShellSetup.exe /quiet SERVERURL=https://<api> CLUBAPIKEY=<Club__EnrollmentKey> INSTALLSHELL=1
 ```
 
-`baseUrl` (`…/api/v1`) и `wsUrl` (`wss://…/ws/agent`) выводятся из `SERVERURL`, ключ пишется в `agent.json → server.clubApiKey`. При первом запуске агент переносит ключ в `secure\club.key` (DPAPI, читают только SYSTEM и администраторы), в `agent.json` поле остаётся пустым.
+`baseUrl` (`…/api/v1`) и `wsUrl` (`wss://…/ws/agent`) выводятся из `SERVERURL`. Ключ установщик не передаёт в командной строке (SHELL_CHANGES 70): он оставляет его в `HKLM\SOFTWARE\ClubShell\Enrollment` (читают только SYSTEM и администраторы), а агент при запуске переносит его в `secure\club.key` (DPAPI) и удаляет значение из реестра. Учётная запись киоска по умолчанию — `player` (SHELL_CHANGES 64); на ПК, где ClubShell уже стоит, остаётся прежнее имя, задать другое — `KIOSKUSER=<имя>`.
 
 **Файл установки из кассы.** Владелец: «Зал и устройства» → «Установка на ПК». Вставьте ключ для ПК (тот, что
 суперадминка показала при создании клуба, или `Club__EnrollmentKey`) и нажмите «Скачать файл установки». Получится

@@ -23,7 +23,7 @@
 .PARAMETER WithWindowsSdk
     Also install the Windows 11 SDK (signtool.exe).
 .PARAMETER KioskUser
-    Name of the local kiosk test account. Default: club.
+    Name of the local kiosk test account. Default: player.
 .PARAMETER KioskPassword
     Password for the kiosk account (SecureString). Default: a random 16-character password, printed once.
 .PARAMETER SkipKioskUser
@@ -47,7 +47,7 @@ param(
     [switch] $SkipRust,
     [switch] $WithWindowsSdk,
     [ValidatePattern('^[A-Za-z0-9_.-]{1,20}$')]
-    [string] $KioskUser = 'club',
+    [string] $KioskUser = 'player',
     [System.Security.SecureString] $KioskPassword,
     [switch] $SkipKioskUser,
     [ValidateRange(1, 65535)]
