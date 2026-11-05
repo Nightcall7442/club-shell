@@ -157,7 +157,8 @@
       <!-- CLUBAPIKEY (SHELL_CHANGES 70): left for the Agent in a key only SYSTEM and Administrators can read, never on a
            command line. The Agent moves it into secure\club.key at its next start and deletes the value. -->
       <Component Id="RegistryEnrollmentKey" Directory="INSTALLFOLDER" Condition="CLUBAPIKEY">
-        <RegistryKey Root="HKLM" Key="SOFTWARE\ClubShell\Enrollment">
+        <!-- ForceCreateOnInstall: WiX applies PermissionEx only to a key it creates as such (WIX0255). -->
+        <RegistryKey Root="HKLM" Key="SOFTWARE\ClubShell\Enrollment" ForceCreateOnInstall="yes">
           <PermissionEx Sddl="D:P(A;CI;KA;;;SY)(A;CI;KA;;;BA)" />
           <RegistryValue Name="Installed" Type="integer" Value="1" KeyPath="yes" />
           <RegistryValue Name="ClubKey" Type="string" Value="[CLUBAPIKEY]" />
