@@ -438,23 +438,35 @@ public sealed partial class WmiQueries
     }
 
     /// <summary>Physical disk drives as seen by Win32_DiskDrive, ordered by index.</summary>
-    public async Task<IReadOnlyList<WmiDiskDrive>> GetDiskDrivesAsync(CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<WmiDiskDrive>> GetDiskDrivesAsync(CancellationToken cancellationToken) =>
+        (await TryGetDiskDrivesAsync(cancellationToken).ConfigureAwait(false)).Drives;
+
+    /// <summary>Like <see cref="GetDiskDrivesAsync"/>, with whether WMI answered at all (an error or timeout is not "no disks").</summary>
+    public async Task<(bool Answered, IReadOnlyList<WmiDiskDrive> Drives)> TryGetDiskDrivesAsync(CancellationToken cancellationToken)
     {
-        IReadOnlyList<IReadOnlyDictionary<string, object?>> rows = await QueryAsync(CimV2, "SELECT Index, Model, SerialNumber, Size, InterfaceType, MediaType FROM Win32_DiskDrive", null, cancellationToken).ConfigureAwait(false);
-        var result = new List<WmiDiskDrive>(rows.Count);
-        foreach (IReadOnlyDictionary<string, object?> row in rows)
+        WmiQueryResult query = await TryQueryAsync(CimV2, "SELECT Index, Model, SerialNumber, Size, InterfaceType, MediaType FROM Win32_DiskDrive", null, cancellationToken).ConfigureAwait(false);
+        var result = new List<WmiDiskDrive>(query.Rows.Count);
+        foreach (IReadOnlyDictionary<string, object?> row in query.Rows)
         {
             result.Add(new WmiDiskDrive(row.GetInt32("Index", -1), CollapseSpaces(row.GetString("Model")), row.GetString("SerialNumber"), row.GetInt64("Size"), row.GetString("InterfaceType"), row.GetString("MediaType")));
         }
 
         result.Sort(static (a, b) => a.Index.CompareTo(b.Index));
-        return result;
+        return (query.Succeeded, result);
     }
 
     /// <summary>MSFT_PhysicalDisk rows (media type SSD/HDD, bus type NVMe/SATA/iSCSI); empty when the Storage namespace is unavailable.</summary>
-    public async Task<IReadOnlyList<WmiPhysicalDisk>> GetPhysicalDisksAsync(CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<WmiPhysicalDisk>> GetPhysicalDisksAsync(CancellationToken cancellationToken) =>
+        (await TryGetPhysicalDisksAsync(cancellationToken).ConfigureAwait(false)).Disks;
+
+    /// <summary>
+    /// Like <see cref="GetPhysicalDisksAsync"/>, with whether the Storage provider answered at all: a timeout or an error
+    /// while it is busy (a diskless seat connecting iSCSI at boot) is not the same as a PC without bus types.
+    /// </summary>
+    public async Task<(bool Answered, IReadOnlyList<WmiPhysicalDisk> Disks)> TryGetPhysicalDisksAsync(CancellationToken cancellationToken)
     {
-        IReadOnlyList<IReadOnlyDictionary<string, object?>> rows = await QueryAsync(StorageScope, "SELECT DeviceId, FriendlyName, SerialNumber, Size, MediaType, BusType FROM MSFT_PhysicalDisk", null, cancellationToken).ConfigureAwait(false);
+        WmiQueryResult query = await TryQueryAsync(StorageScope, "SELECT DeviceId, FriendlyName, SerialNumber, Size, MediaType, BusType FROM MSFT_PhysicalDisk", null, cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<IReadOnlyDictionary<string, object?>> rows = query.Rows;
         var result = new List<WmiPhysicalDisk>(rows.Count);
         foreach (IReadOnlyDictionary<string, object?> row in rows)
         {
@@ -466,7 +478,7 @@ public sealed partial class WmiQueries
             result.Add(new WmiPhysicalDisk(number, CollapseSpaces(row.GetString("FriendlyName")), row.GetString("SerialNumber"), row.GetInt64("Size"), row.GetInt32("MediaType"), row.GetInt32("BusType")));
         }
 
-        return result;
+        return (query.Succeeded, result);
     }
 
     /// <summary>

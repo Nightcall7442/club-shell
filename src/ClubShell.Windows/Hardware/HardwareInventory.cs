@@ -36,6 +36,12 @@ public sealed class HardwareInventory : IHardwareIdSource, IDisposable
     // USB 7, SD 12, MMC 13, Virtual 14, File Backed Virtual 15, Storage Spaces 16, nor Fibre Channel 6 or 1394 4.
     private static readonly HashSet<int> LocalBusTypes = [1, 3, 8, 10, 11, 17];
 
+    /// <summary>Win32_DiskDrive model fragments of iSCSI targets and virtual disks (TrueNAS, LIO, Hyper-V, VMware, QEMU).</summary>
+    private static readonly string[] RemoteModelFragments = ["iSCSI", "TrueNAS", "FreeNAS", "LIO-ORG", "Virtual", "VMware", "QEMU"];
+
+    private const int DiskQueryAttempts = 4;
+    private static readonly TimeSpan DiskQueryRetryDelay = TimeSpan.FromSeconds(3);
+
     private readonly SemaphoreSlim _gate = new(1, 1);
     private HardwareInfo? _cached;
     private long _cachedAt;
@@ -181,9 +187,8 @@ public sealed class HardwareInventory : IHardwareIdSource, IDisposable
         Task<string?> uuidTask = _wmi.GetSystemUuidAsync(cancellationToken);
         Task<WmiBaseboard?> boardTask = _wmi.GetBaseboardAsync(cancellationToken);
         Task<WmiCpu?> cpuTask = _wmi.GetCpuAsync(cancellationToken);
-        Task<IReadOnlyList<WmiDiskDrive>> drivesTask = _wmi.GetDiskDrivesAsync(cancellationToken);
-        Task<IReadOnlyList<WmiPhysicalDisk>> physicalTask = _wmi.GetPhysicalDisksAsync(cancellationToken);
-        await Task.WhenAll(uuidTask, boardTask, cpuTask, drivesTask, physicalTask).ConfigureAwait(false);
+        Task<(IReadOnlyList<WmiDiskDrive> Drives, IReadOnlyList<WmiPhysicalDisk> Physical)> disksTask = DisksForHwidAsync(cancellationToken);
+        await Task.WhenAll(uuidTask, boardTask, cpuTask, disksTask).ConfigureAwait(false);
 
         var components = new List<string>(5);
         string? uuid = await uuidTask.ConfigureAwait(false);
@@ -202,7 +207,8 @@ public sealed class HardwareInventory : IHardwareIdSource, IDisposable
             components.Add("cpu:" + cpuId);
         }
 
-        if (HwidDiskSerial(await drivesTask.ConfigureAwait(false), await physicalTask.ConfigureAwait(false)) is { } diskSerial)
+        (IReadOnlyList<WmiDiskDrive> drives, IReadOnlyList<WmiPhysicalDisk> physical) = await disksTask.ConfigureAwait(false);
+        if (HwidDiskSerial(drives, physical) is { } diskSerial)
         {
             components.Add("disk:" + diskSerial);
         }
@@ -217,11 +223,50 @@ public sealed class HardwareInventory : IHardwareIdSource, IDisposable
     }
 
     /// <summary>
+    /// The disks for <see cref="HwidDiskSerial"/>. A query that did not answer (a timeout or a provider error, as at the
+    /// boot of a diskless seat while its iSCSI disks come up) is asked again, up to <see cref="DiskQueryAttempts"/> times,
+    /// instead of being taken for a PC without bus types (SHELL_CHANGES 48).
+    /// </summary>
+    private async Task<(IReadOnlyList<WmiDiskDrive> Drives, IReadOnlyList<WmiPhysicalDisk> Physical)> DisksForHwidAsync(CancellationToken cancellationToken)
+    {
+        IReadOnlyList<WmiDiskDrive> drives = [];
+        IReadOnlyList<WmiPhysicalDisk> physical = [];
+        bool drivesAnswered = false;
+        bool physicalAnswered = false;
+        for (int attempt = 1; attempt <= DiskQueryAttempts; attempt++)
+        {
+            if (!drivesAnswered)
+            {
+                (drivesAnswered, drives) = await _wmi.TryGetDiskDrivesAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            if (!physicalAnswered)
+            {
+                (physicalAnswered, physical) = await _wmi.TryGetPhysicalDisksAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            if (drivesAnswered && physicalAnswered)
+            {
+                break;
+            }
+
+            if (attempt < DiskQueryAttempts)
+            {
+                _logger.LogInformation("Disk query for the hardware id did not answer (attempt {Attempt} of {Attempts}); asking again", attempt, DiskQueryAttempts);
+                await Task.Delay(DiskQueryRetryDelay, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        return (drives, physical);
+    }
+
+    /// <summary>
     /// The disk serial number that goes into the hardware id: that of the lowest-index disk on a local bus (SCSI, ATA,
     /// RAID, SAS, SATA, NVMe — <c>MSFT_PhysicalDisk.BusType</c>) with fixed media, or none. An iSCSI, USB, SD or virtual
     /// disk is skipped: on a diskless PC "Disk 0" is the seat's iSCSI disk, on a hybrid the disk order follows the order
     /// the disks came up in, and either would change the id (SHELL_CHANGES 30). Without bus types (the Storage namespace
-    /// is unavailable) the lowest-index disk is taken, as before, so such a PC keeps its id.
+    /// is unavailable) the lowest-index disk is taken, as before, so such a PC keeps its id — unless its model names an
+    /// iSCSI target or a virtual disk (SHELL_CHANGES 48).
     /// </summary>
     public static string? HwidDiskSerial(IReadOnlyList<WmiDiskDrive> drives, IReadOnlyList<WmiPhysicalDisk> physicalDisks)
     {
@@ -229,7 +274,7 @@ public sealed class HardwareInventory : IHardwareIdSource, IDisposable
         ArgumentNullException.ThrowIfNull(physicalDisks);
         if (physicalDisks.Count == 0)
         {
-            return drives.Count > 0 && Hwid.IsUsable(drives[0].SerialNumber) ? drives[0].SerialNumber : null;
+            return drives.Count > 0 && !LooksRemote(drives[0]) && Hwid.IsUsable(drives[0].SerialNumber) ? drives[0].SerialNumber : null;
         }
 
         foreach (WmiDiskDrive drive in drives.OrderBy(d => d.Index))
@@ -246,6 +291,11 @@ public sealed class HardwareInventory : IHardwareIdSource, IDisposable
 
         return null;
     }
+
+    private static bool LooksRemote(WmiDiskDrive drive) =>
+        Array.Exists(RemoteModelFragments, f => drive.Model.Contains(f, StringComparison.OrdinalIgnoreCase))
+        || drive.MediaType.StartsWith("Removable", StringComparison.OrdinalIgnoreCase)
+        || drive.MediaType.StartsWith("External", StringComparison.OrdinalIgnoreCase);
 
     /// <inheritdoc />
     public void Dispose()

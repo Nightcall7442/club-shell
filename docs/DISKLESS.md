@@ -167,6 +167,10 @@ power-command acks (`cache\power-acks.json`). Two ways to run on such a PC (SHEL
 * **A directory that survives the reboot** — `agent.json → paths.persistent` (absolute, e.g. a persistent volume the
   club server gives each seat). The identity, the secrets, the outbox and the acks then live there; the Agent creates it
   accessible to SYSTEM and Administrators only. The PC keeps its credentials and its unsent events across reboots.
+  It must be a directory of the Agent's own, such as `P:\ClubShell` (SHELL_CHANGES 53): a volume root (`D:\`, a
+  writable `G:\`) or a directory that already holds other files would be shut to everyone else, so the Agent leaves its
+  rights alone, logs an error and protects only its own `secure` and `cache` subdirectories there. A directory the
+  Agent prepared carries `.clubshell-persistent`.
 * **No such directory** — mark the PC in the cash desk, «Зал и устройства», «Без постоянного диска». The server then
   expects the PC to register again without proof at every boot (an information in the log, not the D-78 warning), and
   `Agents:RegisterProof=enforce` lets it through while the PC is offline. Unsent offline events of a boot are lost.

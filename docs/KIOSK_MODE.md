@@ -284,9 +284,11 @@ Notes:
 - `kiosk_exit` first tells the Agent (`sys.adminExit` with the admin token, SHELL_CHANGES 33), which opens a
   **maintenance window** (`AdminMaintenance`, 30 min by default, at most 480): the watchdog does not relaunch the
   Shell and does not count the exit as a crash, USB storage works, and the process deny-list is not enforced, so
-  `cmd`, `reg` and `powershell` run in the kiosk session. The window ends when it times out (the Shell comes back),
-  when the kiosk session signs out (auto-logon brings the kiosk back at once — the way to hand the PC back early), or
-  when the Agent or the PC restarts (the window is in memory only). When it ends the USB policy is applied again and
+  `cmd`, `reg` and `powershell` run in the kiosk session. A message box on the administrator's desktop says until when.
+  The window ends when it times out (the Shell comes back), when the kiosk session signs out (auto-logon brings the
+  kiosk back at once — the way to hand the PC back early), when a player's session starts, when the Shell connects
+  again, or when the cash desk locks the PC (SHELL_CHANGES 49). It is kept in `secure\maintenance.json` and survives an
+  Agent restart in the same Windows boot (an installer, an update), never a reboot (SHELL_CHANGES 69). When it ends the USB policy is applied again and
   the deny-list sweeps the session. An older Agent answers `notFound`; the exit still happens and the watchdog
   relaunches the Shell as before. For longer work use an administrator's own account, `uninstall.ps1` or policy
   `shellReplacement.enabled=false` (`SHELL_REPLACEMENT.md` §7).

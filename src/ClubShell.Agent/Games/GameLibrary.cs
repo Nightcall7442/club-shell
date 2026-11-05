@@ -130,24 +130,32 @@ public sealed class GameLibrary : IDisposable
         await _refreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            _detector.Invalidate();
-            MarkScanned();
-            CatalogSnapshot current = Volatile.Read(ref _snapshot);
-            if (current.Games.IsEmpty)
-            {
-                return;
-            }
-
-            IReadOnlyDictionary<Guid, GameInstallStatus> installs = await _detector.DetectAllAsync(current.Games, cancellationToken).ConfigureAwait(false);
-            var next = CatalogSnapshot.Create(Merge(current.Games, installs), current.Version, current.ETag);
-            if (!next.Games.SequenceEqual(current.Games))
-            {
-                Swap(next);
-            }
+            await RescanCoreAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             _refreshGate.Release();
+        }
+    }
+
+    /// <summary>The rescan, with <see cref="_refreshGate"/> held. A changed snapshot is saved too (SHELL_CHANGES 71).</summary>
+    private async Task RescanCoreAsync(CancellationToken cancellationToken)
+    {
+        _detector.Invalidate();
+        MarkScanned();
+        CatalogSnapshot current = Volatile.Read(ref _snapshot);
+        if (current.Games.IsEmpty)
+        {
+            return;
+        }
+
+        IReadOnlyDictionary<Guid, GameInstallStatus> installs = await _detector.DetectAllAsync(current.Games, cancellationToken).ConfigureAwait(false);
+        var next = CatalogSnapshot.Create(Merge(current.Games, installs), current.Version, current.ETag);
+        if (!next.Games.SequenceEqual(current.Games))
+        {
+            // Saved as well: after an Agent restart, cache\games.json shows what the last scan found, not the last refresh.
+            await PersistAsync(next, cancellationToken).ConfigureAwait(false);
+            Swap(next);
         }
     }
 
@@ -166,13 +174,28 @@ public sealed class GameLibrary : IDisposable
             return false;
         }
 
-        if (disksChanged)
+        // A catalogue refresh holds the gate for as long as the server takes to answer: the maintenance tick does not wait
+        // for it, the rescan is simply due again on the next tick (SHELL_CHANGES 55).
+        if (!await _refreshGate.WaitAsync(TimeSpan.Zero, cancellationToken).ConfigureAwait(false))
         {
-            _logger.LogInformation("Local disks changed ({Before} -> {After}); rescanning installed games", _scannedDrives, drives);
+            _logger.LogDebug("Catalogue refresh in progress; rescan on the next tick");
+            return false;
         }
 
-        await RescanAsync(cancellationToken).ConfigureAwait(false);
-        return true;
+        try
+        {
+            if (disksChanged)
+            {
+                _logger.LogInformation("Local disks changed ({Before} -> {After}); rescanning installed games", _scannedDrives, drives);
+            }
+
+            await RescanCoreAsync(cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        finally
+        {
+            _refreshGate.Release();
+        }
     }
 
     /// <summary>Handles a <c>refreshConfig</c> command; returns <see langword="true"/> when the games cache was refreshed.</summary>
@@ -212,11 +235,34 @@ public sealed class GameLibrary : IDisposable
         }
     }
 
-    /// <summary>Fresh install status for one game (bypasses the snapshot's cached merge).</summary>
+    /// <summary>
+    /// Fresh install status for one game, past the detector's cache (SHELL_CHANGES 54): the player's re-check right after a
+    /// disk came up must not get the "not installed" of a minute ago. A changed status is put into the snapshot too, unless
+    /// a refresh or a rescan is replacing it at that moment.
+    /// </summary>
     public async Task<GameInstallStatus> GetInstallStatusAsync(Guid gameId, CancellationToken cancellationToken)
     {
         Game game = Get(gameId) ?? throw IpcError.NotFound($"Game {gameId}").ToException();
-        return await _detector.DetectAsync(game, cancellationToken).ConfigureAwait(false);
+        GameInstallStatus status = await _detector.DetectAsync(game, cancellationToken, fresh: true).ConfigureAwait(false);
+        if (Apply(game, status) != game && await _refreshGate.WaitAsync(TimeSpan.Zero, cancellationToken).ConfigureAwait(false))
+        {
+            try
+            {
+                CatalogSnapshot current = Volatile.Read(ref _snapshot);
+                if (current.ById.TryGetValue(gameId, out Game? known))
+                {
+                    var next = CatalogSnapshot.Create(current.Games.Select(g => g.Id == gameId ? Apply(known, status) : g).ToImmutableArray(), current.Version, current.ETag);
+                    await PersistAsync(next, cancellationToken).ConfigureAwait(false);
+                    Swap(next);
+                }
+            }
+            finally
+            {
+                _refreshGate.Release();
+            }
+        }
+
+        return status;
     }
 
     /// <summary>Filters, sorts and pages the current snapshot.</summary>

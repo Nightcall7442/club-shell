@@ -1,6 +1,8 @@
 using ClubShell.Agent.Watchdog;
 using ClubShell.Core.Abstractions;
+using ClubShell.Core.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace ClubShell.Agent.Tests;
 
@@ -58,6 +60,76 @@ public sealed class AdminMaintenanceTests
         window.OnSessionEnded(7);
 
         heard.Should().BeTrue("a window opened without a known session ends with any sign-out");
+    }
+
+    [Fact]
+    public void An_agent_restart_in_the_same_boot_keeps_the_window_and_a_reboot_does_not()
+    {
+        using var dir = new TempDir();
+        var time = new ManualTime(new DateTimeOffset(2026, 11, 5, 12, 0, 0, TimeSpan.Zero));
+        TimeSpan uptime = TimeSpan.FromHours(1);
+        IOptionsMonitor<AgentSettings> settings = Settings(dir.Path);
+
+        using (var first = new AdminMaintenance(new SystemClock(time), NullLogger<AdminMaintenance>.Instance, settings, () => uptime))
+        {
+            first.Begin(TimeSpan.FromMinutes(30), sessionId: 3);
+        }
+
+        time.Now += TimeSpan.FromMinutes(5);
+        uptime += TimeSpan.FromMinutes(5);
+        using (var restarted = new AdminMaintenance(new SystemClock(time), NullLogger<AdminMaintenance>.Instance, settings, () => uptime))
+        {
+            restarted.IsActive.Should().BeTrue("the Agent restarted in the same boot (an installer, an update)");
+            restarted.Until.Should().Be(time.Now + TimeSpan.FromMinutes(25));
+            restarted.Session.Should().Be(3u);
+        }
+
+        uptime = TimeSpan.FromMinutes(2); // rebooted
+        using var rebooted = new AdminMaintenance(new SystemClock(time), NullLogger<AdminMaintenance>.Instance, settings, () => uptime);
+        rebooted.IsActive.Should().BeFalse("a reboot always comes back sealed");
+        File.Exists(Path.Combine(dir.Path, "secure", AdminMaintenance.StateFileName)).Should().BeFalse();
+    }
+
+    [Fact]
+    public void An_ended_or_expired_window_is_not_restored()
+    {
+        using var dir = new TempDir();
+        var time = new ManualTime(new DateTimeOffset(2026, 11, 5, 12, 0, 0, TimeSpan.Zero));
+        IOptionsMonitor<AgentSettings> settings = Settings(dir.Path);
+        TimeSpan Uptime() => TimeSpan.FromHours(1) + (time.Now - new DateTimeOffset(2026, 11, 5, 12, 0, 0, TimeSpan.Zero));
+
+        using (var window = new AdminMaintenance(new SystemClock(time), NullLogger<AdminMaintenance>.Instance, settings, Uptime))
+        {
+            window.Begin(TimeSpan.FromMinutes(30), sessionId: 3);
+            window.End("the Shell connected again");
+        }
+
+        new AdminMaintenance(new SystemClock(time), NullLogger<AdminMaintenance>.Instance, settings, Uptime).IsActive.Should().BeFalse();
+
+        using (var window = new AdminMaintenance(new SystemClock(time), NullLogger<AdminMaintenance>.Instance, settings, Uptime))
+        {
+            window.Begin(TimeSpan.FromMinutes(10), sessionId: 3);
+        }
+
+        time.Now += TimeSpan.FromMinutes(11);
+        new AdminMaintenance(new SystemClock(time), NullLogger<AdminMaintenance>.Instance, settings, Uptime).IsActive.Should().BeFalse();
+    }
+
+    private static IOptionsMonitor<AgentSettings> Settings(string root)
+    {
+        var settings = new AgentSettings();
+        settings.Paths.ProgramData = root;
+        settings.Paths.Secure = Path.Combine(root, "secure");
+        var options = Substitute.For<IOptionsMonitor<AgentSettings>>();
+        options.CurrentValue.Returns(settings);
+        return options;
+    }
+
+    private sealed class TempDir : IDisposable
+    {
+        public string Path { get; } = Directory.CreateTempSubdirectory("clubshell-maint-").FullName;
+
+        public void Dispose() => Directory.Delete(Path, recursive: true);
     }
 
     /// <summary>A clock whose time only moves when the test says so (timers still run on the system clock).</summary>

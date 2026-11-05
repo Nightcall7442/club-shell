@@ -44,6 +44,16 @@ public sealed class HwidDiskAndSetupTests
     }
 
     [Fact]
+    public void Without_bus_types_an_iscsi_or_virtual_disk_0_is_not_taken()
+    {
+        HardwareInventory.HwidDiskSerial([Drive(0, "SEAT-LUN-12", model: "TrueNAS iSCSI Disk SCSI Disk Device")], []).Should().BeNull();
+        HardwareInventory.HwidDiskSerial([Drive(0, "LIO-LUN", model: "LIO-ORG seat12 SCSI Disk Device")], []).Should().BeNull();
+        HardwareInventory.HwidDiskSerial([Drive(0, "VHD-0", model: "Microsoft Virtual Disk")], []).Should().BeNull();
+        HardwareInventory.HwidDiskSerial([Drive(0, "USB-0", "Removable Media")], []).Should().BeNull();
+        HardwareInventory.HwidDiskSerial([Drive(0, "SAMSUNG-SSD", model: "Samsung SSD 980 PRO 1TB")], []).Should().Be("SAMSUNG-SSD");
+    }
+
+    [Fact]
     public void A_local_disk_with_removable_or_external_media_is_skipped()
     {
         var drives = new[] { Drive(0, "SATA-DOCK", "External hard disk media"), Drive(1, "SATA-INSIDE") };
@@ -63,8 +73,8 @@ public sealed class HwidDiskAndSetupTests
             _ => throw new ArgumentException(name),
         }).Should().Be(expected);
 
-    private static WmiDiskDrive Drive(int index, string serial, string media = "Fixed hard disk media") =>
-        new(index, "Model", serial, 512L << 30, "SCSI", media);
+    private static WmiDiskDrive Drive(int index, string serial, string media = "Fixed hard disk media", string model = "Model") =>
+        new(index, model, serial, 512L << 30, "SCSI", media);
 
     private static WmiPhysicalDisk Physical(int number, int bus) => new(number, "Disk", "", 512L << 30, 4, bus);
 }

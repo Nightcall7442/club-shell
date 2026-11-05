@@ -275,11 +275,22 @@ public sealed class TempUserProvisioner : IKioskCredentials, IHostedService, IDi
             var current = Volatile.Read(ref _current) ?? throw new InvalidOperationException("Kiosk user is not provisioned yet; call ProvisionAsync first.");
             var password = LocalUserManager.GeneratePassword();
             _users.SetPassword(current.UserName, password);
-            RefreshAutoLogon(current.UserName, password);
+            // From here the new password is the account's: whatever fails below, auto-logon and the next policy apply must
+            // use it, or the LSA secret would be written back with the old one and auto-logon break (SHELL_CHANGES 52).
             var record = current with { Password = password, RotatedAt = _clock.UtcNow };
-            await SaveAsync(record, cancellationToken).ConfigureAwait(false);
             Volatile.Write(ref _current, record);
             _rotationOwed = false;
+            RefreshAutoLogon(current.UserName, password);
+            try
+            {
+                await SaveAsync(record, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException)
+            {
+                // The next Agent start reads the old password from disk and rotates again at the kiosk's logon.
+                _logger.LogError(ex, "Kiosk user {User} password rotated but not saved", record.UserName);
+            }
+
             _logger.LogInformation("Kiosk user {User} password rotated", record.UserName);
             RaiseChanged(record);
             return record;

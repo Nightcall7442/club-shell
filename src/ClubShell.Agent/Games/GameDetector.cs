@@ -85,7 +85,7 @@ public sealed class GameDetector
         string? ubisoftDir = RegistryString(RegistryHive.LocalMachine, @"SOFTWARE\WOW6432Node\Ubisoft\Launcher", "InstallDir")?.Replace('/', '\\');
         string?[] candidates = launcher switch
         {
-            LauncherType.Steam => new[] { Combine(SteamRoot(), "steam.exe") },
+            LauncherType.Steam => new[] { Combine(SteamRoot(forLaunch: true), "steam.exe") },
             LauncherType.Epic => new[] { Path.Combine(ProgramFilesX86(), "Epic Games", "Launcher", "Portal", "Binaries", "Win32", "EpicGamesLauncher.exe") },
             LauncherType.BattleNet => new[] { Path.Combine(ProgramFilesX86(), "Battle.net", "Battle.net.exe"), Path.Combine(ProgramFilesX86(), "Battle.net", "Battle.net Launcher.exe") },
             LauncherType.Riot => new[] { Combine(RiotClientDir(), "RiotClientServices.exe") },
@@ -105,12 +105,15 @@ public sealed class GameDetector
         return candidates.FirstOrDefault(c => c is not null && File.Exists(c));
     }
 
-    /// <summary>Detects the install state of <paramref name="game"/> (cached for <see cref="CacheTtl"/>).</summary>
-    public async Task<GameInstallStatus> DetectAsync(Game game, CancellationToken cancellationToken)
+    /// <summary>
+    /// Detects the install state of <paramref name="game"/>, cached for <see cref="CacheTtl"/> unless
+    /// <paramref name="fresh"/> (the player's re-check before a launch, SHELL_CHANGES 54).
+    /// </summary>
+    public async Task<GameInstallStatus> DetectAsync(Game game, CancellationToken cancellationToken, bool fresh = false)
     {
         ArgumentNullException.ThrowIfNull(game);
         DateTimeOffset now = _clock.UtcNow;
-        if (_cache.TryGetValue(game.Id, out (DateTimeOffset At, GameInstallStatus Status) hit) && now - hit.At < CacheTtl)
+        if (!fresh && _cache.TryGetValue(game.Id, out (DateTimeOffset At, GameInstallStatus Status) hit) && now - hit.At < CacheTtl)
         {
             return hit.Status;
         }
@@ -301,11 +304,13 @@ public sealed class GameDetector
     }
 
     /// <summary>
-    /// The Steam client folder: <c>games.launchers.steam.exePath</c> when that file exists, else the <c>SteamPath</c> a
-    /// signed-in user's Steam last ran from (HKCU, where Steam itself records it: <c>g:/steam</c> for a client on the
-    /// games disk), else HKLM <c>InstallPath</c>, else <c>Program Files (x86)\Steam</c>.
+    /// The Steam client folder: <c>games.launchers.steam.exePath</c> when that file exists, else — to find installed games
+    /// only — the <c>SteamPath</c> a signed-in user's Steam last ran from (HKCU, where Steam itself records it:
+    /// <c>g:/steam</c> for a client on the games disk), else HKLM <c>InstallPath</c>, else <c>Program Files (x86)\Steam</c>.
+    /// The user's value is the player's to write, so the <c>steam.exe</c> the Agent starts (<paramref name="forLaunch"/>)
+    /// never comes from it (SHELL_CHANGES 51).
     /// </summary>
-    private string? SteamRoot()
+    private string? SteamRoot(bool forLaunch = false)
     {
         string? configured = _settings.CurrentValue.Games.Launchers.Steam?.ExePath;
         if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured))
@@ -313,7 +318,7 @@ public sealed class GameDetector
             return Path.GetDirectoryName(configured);
         }
 
-        if (UserSteamPath() is { } user)
+        if (!forLaunch && UserSteamPath() is { } user)
         {
             return user;
         }
