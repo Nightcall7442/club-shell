@@ -41,8 +41,18 @@ public sealed record ProcessStartSpec
     /// <summary>Priority class (NORMAL_PRIORITY_CLASS by default).</summary>
     public uint Priority { get; init; } = NativeConst.NORMAL_PRIORITY_CLASS;
 
-    /// <summary>Job the new process is assigned to right after creation.</summary>
+    /// <summary>
+    /// Job the new process is assigned to: before its first instruction when it starts in a session (created suspended),
+    /// right after creation otherwise.
+    /// </summary>
     public JobObject? Job { get; init; }
+
+    /// <summary>
+    /// Called with the new process's id and handle at the same point as the <see cref="Job"/> assignment, after it. The
+    /// handle is the launcher's and is closed with the <see cref="LaunchedProcess"/>: duplicate it to keep it
+    /// (<see cref="ProcessWatcher.DuplicateForWait"/>). An exception from it fails the launch and terminates the process.
+    /// </summary>
+    public Action<int, SafeProcessHandle>? BeforeResume { get; init; }
 
     /// <summary>Start without a visible window / console.</summary>
     public bool Hidden { get; init; }
@@ -177,13 +187,19 @@ public sealed class ProcessLauncher
 
         string workingDir = spec.WorkingDir ?? Path.GetDirectoryName(spec.Exe) ?? Environment.SystemDirectory;
         DateTimeOffset startedAt = DateTimeOffset.UtcNow;
-        LaunchedProcess launched = spec.SessionId is not null || spec.RunAsUser is not null
+        bool asUser = spec.SessionId is not null || spec.RunAsUser is not null;
+        LaunchedProcess launched = asUser
             ? LaunchAsUser(spec, workingDir, startedAt)
             : LaunchLocal(spec, workingDir, startedAt);
 
         try
         {
-            spec.Job?.Assign(launched.Handle);
+            if (!asUser)
+            {
+                spec.Job?.Assign(launched.Handle);
+                spec.BeforeResume?.Invoke(launched.Pid, launched.Handle);
+            }
+
             if (spec.Priority != NativeConst.NORMAL_PRIORITY_CLASS && !Kernel32.SetPriorityClass(launched.Handle, spec.Priority))
             {
                 _logger.LogWarning("SetPriorityClass({Priority}) failed for pid {Pid}: {Error}", spec.Priority, launched.Pid, Win32Error.Message(Win32Error.Last()));
@@ -302,7 +318,14 @@ public sealed class ProcessLauncher
         {
             using EnvironmentBlock env = EnvironmentBlock.Build(token, spec.Env, spec.DropEnvPrefixes);
             uint flags = NativeConst.CREATE_UNICODE_ENVIRONMENT | spec.Priority | (spec.Hidden ? NativeConst.CREATE_NO_WINDOW : NativeConst.CREATE_NEW_CONSOLE);
-            (uint pid, SafeProcessHandle handle) = ProcessAsUser.CreateProcessAsUser(token, spec.Exe, spec.Args, workingDir, env.Pointer, ProcessAsUser.DefaultDesktop, flags, spec.Hidden);
+            Action<uint, SafeProcessHandle>? beforeResume = spec.Job is null && spec.BeforeResume is null
+                ? null
+                : (pid, handle) =>
+                {
+                    spec.Job?.Assign(handle);
+                    spec.BeforeResume?.Invoke((int)pid, handle);
+                };
+            (uint pid, SafeProcessHandle handle) = ProcessAsUser.CreateProcessAsUser(token, spec.Exe, spec.Args, workingDir, env.Pointer, ProcessAsUser.DefaultDesktop, flags, spec.Hidden, beforeResume);
             return new LaunchedProcess((int)pid, handle, spec.Exe, startedAt);
         }
         finally

@@ -46,7 +46,7 @@ public sealed record Resolution(
 /// <param name="UseAccountPool">Lease a pooled account and inject credentials.</param>
 /// <param name="AccountLeaseId">Reuse an existing lease.</param>
 /// <param name="ExtraArgs">Extra command line (policy-sanitized).</param>
-/// <param name="Resolution">Requested resolution.</param>
+/// <param name="Resolution">Not applied: a game sets its own display mode (its arguments or settings). Accepted and logged for compatibility.</param>
 /// <param name="LaunchTimeoutSec">Seconds to wait for the game process/window before failing.</param>
 public sealed record LaunchRequest(
     Guid GameId,

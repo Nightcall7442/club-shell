@@ -183,6 +183,9 @@ public static class ProcessAsUser
     /// <summary>
     /// CreateProcessAsUserW on <paramref name="desktop"/>. <paramref name="environmentBlock"/> is a Unicode block
     /// (0 = inherit the Agent's). Returns the pid and an all-access process handle; the thread handle is closed.
+    /// With <paramref name="beforeResume"/> the process is created suspended and that runs before its first
+    /// instruction (a job assigned there catches every child, SHELL_CHANGES 83); should it throw, the process is
+    /// terminated.
     /// </summary>
     public static (uint Pid, SafeProcessHandle Handle) CreateProcessAsUser(
         SafeTokenHandle token,
@@ -192,7 +195,8 @@ public static class ProcessAsUser
         nint environmentBlock,
         string desktop = DefaultDesktop,
         uint creationFlags = DefaultCreationFlags,
-        bool hidden = false)
+        bool hidden = false,
+        Action<uint, SafeProcessHandle>? beforeResume = null)
     {
         ArgumentNullException.ThrowIfNull(token);
         ArgumentException.ThrowIfNullOrWhiteSpace(exe);
@@ -211,13 +215,36 @@ public static class ProcessAsUser
         {
             string commandLine = ProcessLauncher.BuildCommandLine(exe, args);
             string directory = workingDir ?? Path.GetDirectoryName(exe) ?? Environment.SystemDirectory;
-            if (!Advapi32.CreateProcessAsUser(token, exe, commandLine, environmentBlock, directory, creationFlags, false, ref startup, out PROCESS_INFORMATION info))
+            uint flags = beforeResume is null ? creationFlags : creationFlags | NativeConst.CREATE_SUSPENDED;
+            if (!Advapi32.CreateProcessAsUser(token, exe, commandLine, environmentBlock, directory, flags, false, ref startup, out PROCESS_INFORMATION info))
             {
                 Win32Error.ThrowLastError(nameof(Advapi32.CreateProcessAsUserW));
             }
 
-            _ = Kernel32.CloseHandle(info.hThread);
-            return (info.dwProcessId, new SafeProcessHandle(info.hProcess, ownsHandle: true));
+            var handle = new SafeProcessHandle(info.hProcess, ownsHandle: true);
+            try
+            {
+                if (beforeResume is not null)
+                {
+                    beforeResume(info.dwProcessId, handle);
+                    if (Kernel32.ResumeThread(info.hThread) == uint.MaxValue)
+                    {
+                        Win32Error.ThrowLastError(nameof(Kernel32.ResumeThread));
+                    }
+                }
+            }
+            catch
+            {
+                _ = Kernel32.TerminateProcess(handle, 1);
+                handle.Dispose();
+                throw;
+            }
+            finally
+            {
+                _ = Kernel32.CloseHandle(info.hThread);
+            }
+
+            return (info.dwProcessId, handle);
         }
         finally
         {

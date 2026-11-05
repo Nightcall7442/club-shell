@@ -139,6 +139,7 @@ public abstract class LauncherBase : IGameLauncher
             WorkingDir = command.WorkingDir ?? Path.GetDirectoryName(command.Exe),
             Env = env,
             SessionId = sessionId,
+            BeforeResume = command.WaitForGameProcess ? null : context.GameCreated,
         };
 
         LaunchedProcess launched;

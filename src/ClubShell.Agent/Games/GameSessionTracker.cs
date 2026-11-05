@@ -9,6 +9,7 @@ using ClubShell.Core.Abstractions;
 using ClubShell.Core.Configuration;
 using ClubShell.Windows.Processes;
 using Microsoft.Extensions.Options;
+using Microsoft.Win32.SafeHandles;
 
 namespace ClubShell.Agent.Games;
 
@@ -21,6 +22,10 @@ namespace ClubShell.Agent.Games;
 /// <param name="AntiCheat">Pre-launch anti-cheat result (echoed in the exit report).</param>
 /// <param name="Job">Job object the game process was assigned to (disposed on exit; kill-on-close).</param>
 /// <param name="LaunchDurationMs">Launch latency.</param>
+/// <param name="Process">
+/// Handle to the game's process kept from its creation, when the Agent started the game itself; the exit is read from it,
+/// so a game gone before the watcher attached still reports its real code. Taken and disposed by the watcher.
+/// </param>
 public sealed record GameLaunchRecord(
     Game Game,
     LaunchRequest Request,
@@ -29,7 +34,8 @@ public sealed record GameLaunchRecord(
     InjectionResult? Injection,
     AntiCheatCheckResult AntiCheat,
     JobObject Job,
-    int LaunchDurationMs);
+    int LaunchDurationMs,
+    SafeProcessHandle? Process = null);
 
 /// <summary>Raised once a tracked game has exited and all cleanup ran.</summary>
 /// <param name="Record">Launch record.</param>
@@ -180,12 +186,17 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
     {
         int pid = tracked.Record.Running.Pid;
         CancellationToken ct = _cts.Token;
+        SafeProcessHandle? handle = tracked.Record.Process;
+        tracked.Record = tracked.Record with { Process = null };
+        using SafeProcessHandle? owned = handle;
         int exitCode;
         while (true)
         {
             try
             {
-                exitCode = await ProcessWatcher.WatchPidAsync(pid, ct).ConfigureAwait(false);
+                exitCode = handle is not null
+                    ? await ProcessWatcher.WatchHandleAsync(handle, ct).ConfigureAwait(false)
+                    : await ProcessWatcher.WatchPidAsync(pid, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -197,6 +208,9 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
                 _logger.LogDebug(ex, "Pid {Pid} already gone when the watcher attached", pid);
                 exitCode = -1;
             }
+
+            // The handle is the first process's; a successor is watched by pid.
+            handle = null;
 
             // A launcher that hands over and exits (Counter-Strike 1.6's cstrike.exe restarts itself): follow the
             // process that carries on, so the game stays "running", can be closed and is ended with the session.

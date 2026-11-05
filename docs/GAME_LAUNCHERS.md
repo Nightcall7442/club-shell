@@ -40,8 +40,20 @@ public interface IGameLauncher
     Task KillAsync(int pid, bool force, CancellationToken ct);
 }
 
-public sealed record LaunchContext(int WtsSessionId, string UserName, IReadOnlyDictionary<string, string> Env, Resolution? Resolution);
+public sealed record LaunchContext(int WtsSessionId, string UserName, IReadOnlyDictionary<string, string> Env, Action<int, SafeProcessHandle>? GameCreated = null);
 ```
+
+`GameCreated` is called by a launcher that starts the game's executable itself (`LaunchCommand.WaitForGameProcess`
+false), through `ProcessStartSpec.BeforeResume`: the process is created `CREATE_SUSPENDED`, and the hook runs before
+its first instruction. `GameLaunchService` puts it in the launch's job there (a child it starts at once is caught too)
+and keeps a duplicated handle (`ProcessWatcher.DuplicateForWait`) that `GameSessionTracker` waits on, so a game that
+quits at once reports its real exit code instead of -1 (SHELL_CHANGES 83). `LaunchRequest.resolution` is accepted and
+logged but not applied: a game sets its own display mode through its arguments or settings.
+
+Before every launch `GameRegistryDefaults` writes `games.registryDefaults` into the kiosk's HKCU — value by value,
+only where the value is missing — so games that keep settings in the registry (GoldSrc's display mode in
+`HKCU\Software\Valve\Half-Life\Settings`) start from the club's values in a profile that is new after every reset
+(SHELL_CHANGES 82). Keys are limited to `HKCU\Software`, outside the `Policies` keys.
 
 `LauncherBase` implements everything except `BuildCommand`:
 
@@ -325,7 +337,7 @@ Cloud saves follow the pooled *account*; a player's own binds, sensitivity and g
 
 | Mechanism | Where | Behaviour |
 |-----------|-------|-----------|
-| Job object | `GameLaunchService.CreateJob(pid)` → `JobObject.Create(null, killOnClose: true)` + `Assign(pid)` | One job per launch; disposing it (`GameSessionTracker` after exit, `FailAsync`) kills anything still inside. Assignment can fail when the launcher already put the game in a non-nestable job — logged at debug, tree kill still works |
+| Job object | `JobObject.Create(null, killOnClose: true)` per launch: a game the Agent starts itself is assigned in `LaunchContext.GameCreated`, before it runs; a game a launcher client starts, by pid once found (`CreateJob(pid)`) | One job per launch; disposing it (`GameSessionTracker` after exit, `FailAsync`) kills anything still inside. Assignment can fail when the launcher already put the game in a non-nestable job — logged at debug, tree kill still works |
 | Tree kill | `LauncherBase.KillAsync(pid, force)` → `ProcessKiller.KillTree(pid, grace)` | Toolhelp snapshot, descendants first, root last; `grace = 0` when `force`, else `games.killGraceSec` (default 10): `WM_CLOSE` first, terminate after the grace |
 | Protected images | `ProcessKiller.SystemCritical` | never killed (`clubshellagent.exe`, `clubshell-shell.exe`, `csrss.exe`, …) |
 | `games.kill` | `GameLaunchService.KillAsync(GamesKillRequest)` | by `pid`, by `gameId` (all instances) or everything; `force` from the request; lease reason `manual` |

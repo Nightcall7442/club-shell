@@ -135,6 +135,7 @@ public static class AgentServiceCollectionExtensions
         services.TryAddSingleton<AccountInjector>();
         services.TryAddSingleton<CloudSaveSync>();
         services.TryAddSingleton<PlayerSettingsSync>();
+        services.TryAddSingleton<GameRegistryDefaults>();
         services.TryAddSingleton<GameSessionTracker>();
         services.TryAddSingleton<GameLaunchService>();
 

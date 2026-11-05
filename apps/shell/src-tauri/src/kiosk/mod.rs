@@ -108,6 +108,8 @@ pub struct Kiosk {
     tabtip: Mutex<Option<Child>>,
     locked: AtomicBool,
     game_mode: AtomicBool,
+    /// A display change happened during a game; applied when it ends (SHELL_CHANGES 80).
+    displays_pending: Mutex<bool>,
     /// `kiosk_set_guard` state, applied whenever no game runs.
     guard_wanted: AtomicBool,
     /// A club-approved window of another process is open (`begin_external_window`): the guard stays down.
@@ -184,6 +186,7 @@ impl Kiosk {
             tabtip: Mutex::new(None),
             locked: AtomicBool::new(false),
             game_mode: AtomicBool::new(false),
+            displays_pending: Mutex::new(false),
             guard_wanted: AtomicBool::new(!dev),
             external_window: AtomicBool::new(false),
             admin_mode: AtomicBool::new(dev),
@@ -191,25 +194,13 @@ impl Kiosk {
             tasks: Mutex::new(Vec::new()),
         });
 
-        // Display changes: main window back to the primary, overlay spans the new virtual screen,
-        // taskbar re-hidden (Explorer re-shows it on WM_DISPLAYCHANGE).
+        // Display changes: see `on_displays_changed`.
         {
-            let (window, overlay, taskbar) = (
-                Arc::clone(&kiosk.window),
-                Arc::clone(&kiosk.overlay),
-                Arc::clone(&kiosk.taskbar),
-            );
-            let preferred = config.monitors.primary_index;
+            let weak = Arc::downgrade(&kiosk);
             kiosk.monitors.on_change(move |list| {
-                if let Some(primary) = multi_monitor::primary_of(list, preferred) {
-                    if let Err(e) = window.move_to_monitor(primary.rect) {
-                        tracing::warn!(error = %e, "cannot re-place the main window after a display change");
-                    }
+                if let Some(kiosk) = weak.upgrade() {
+                    kiosk.on_displays_changed(list.len());
                 }
-                if let Some(rect) = multi_monitor::union_rect(list) {
-                    overlay.set_bounds(rect);
-                }
-                taskbar.rehide();
             });
         }
         let consumer = spawn_hotkey_consumer(
@@ -332,6 +323,39 @@ impl Kiosk {
         let effective = active && !self.is_game_mode();
         self.alt_tab.set_enabled(effective);
         self.window.set_active(effective);
+    }
+
+    /// A display change: the main window back on the primary monitor, the overlay over the new
+    /// virtual screen, the taskbar re-hidden (Explorer re-shows it on `WM_DISPLAYCHANGE`). During a
+    /// game it waits for the game's end (SHELL_CHANGES 80): a game switching its display mode fires
+    /// these, and the Shell must not move under it.
+    fn on_displays_changed(&self, count: usize) {
+        let mut pending = self.displays_pending.lock();
+        // Read under the lock: `set_game_mode(false)` clears the flag before taking `pending`.
+        if self.is_game_mode() {
+            tracing::info!(
+                monitors = count,
+                "display change during a game; the Shell is re-placed when it ends"
+            );
+            *pending = true;
+            return;
+        }
+        drop(pending);
+        self.apply_displays();
+    }
+
+    fn apply_displays(&self) {
+        let list = self.monitors.monitors();
+        if let Some(primary) = multi_monitor::primary_of(&list, self.config.monitors.primary_index)
+        {
+            if let Err(e) = self.window.move_to_monitor(primary.rect) {
+                tracing::warn!(error = %e, "cannot re-place the main window after a display change");
+            }
+        }
+        if let Some(rect) = multi_monitor::union_rect(&list) {
+            self.overlay.set_bounds(rect);
+        }
+        self.taskbar.rehide();
     }
 
     /// Dock: lets `pid` own the foreground, in front of the Shell, until the Shell is focused again
@@ -489,6 +513,8 @@ impl Kiosk {
                         GameState::Launching | GameState::Running => {
                             if let Some(pid) = change.pid.and_then(|p| u32::try_from(p).ok()) {
                                 self.window.allow_foreground_pid(pid);
+                                // Windows' own leave too, while the Shell may still own the foreground.
+                                let _ = clubshell_winutil::window::allow_set_foreground(Some(pid));
                             }
                         }
                         GameState::Exited | GameState::Failed | GameState::Killed => {
@@ -602,6 +628,9 @@ impl KioskControl for Kiosk {
             return;
         }
         tracing::info!(on, "game mode");
+        if !on && std::mem::take(&mut *self.displays_pending.lock()) {
+            self.apply_displays();
+        }
         // Game mode supersedes a dock hand-off: the guard is down for the game, and its exit clears
         // the allowlist and re-arms everything.
         let _ = self.window.take_hand_off();

@@ -623,7 +623,7 @@ public sealed record GamesGetRequest(Guid GameId);
 /// <param name="GameId">Game id.</param>
 /// <param name="UseAccountPool">Defaults to <see cref="Game.RequiresAccount"/>.</param>
 /// <param name="ExtraArgs">Extra command line (appended after policy sanitization).</param>
-/// <param name="Resolution">Requested resolution.</param>
+/// <param name="Resolution">Not applied: a game sets its own display mode (its arguments or settings). Accepted and logged for compatibility.</param>
 public sealed record GamesLaunchRequest(
     Guid GameId,
     bool? UseAccountPool = null,

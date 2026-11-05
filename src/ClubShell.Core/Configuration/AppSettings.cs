@@ -500,6 +500,14 @@ public sealed class GamesSettings
     [Required]
     public PlayerSettingsSyncSettings PlayerSettings { get; set; } = new();
 
+    /// <summary>
+    /// Values games keep in the player's registry, written into the kiosk's HKCU before every launch where they are
+    /// missing (SHELL_CHANGES 82): the club's defaults for a profile that is fresh after every reset. GoldSrc (Counter-Strike
+    /// 1.6) keeps its display mode only in <c>HKCU\Software\Valve\Half-Life\Settings</c>. A value the player changed in
+    /// the session is left as it is.
+    /// </summary>
+    public List<GameRegistryDefault> RegistryDefaults { get; set; } = new();
+
     /// <summary>Launcher clients.</summary>
     [Required]
     public LaunchersSettings Launchers { get; set; } = new();
@@ -849,6 +857,53 @@ public sealed class PathsSettings
     public string PendingUpdate { get; set; } = ClubShellPaths.PendingUpdateDirName;
 }
 
+/// <summary>One key of <see cref="GamesSettings.RegistryDefaults"/>.</summary>
+public sealed class GameRegistryDefault
+{
+    private static readonly string[] PolicyKeys = [@"Software\Policies", @"Software\Microsoft\Windows\CurrentVersion\Policies"];
+
+    /// <summary>Key under the player's HKCU, e.g. <c>Software\Valve\Half-Life\Settings</c> (an <c>HKCU\</c> prefix is accepted).</summary>
+    public string Key { get; set; } = string.Empty;
+
+    /// <summary>REG_DWORD values by name.</summary>
+    public Dictionary<string, int> Dwords { get; set; } = new();
+
+    /// <summary>REG_SZ values by name.</summary>
+    public Dictionary<string, string> Strings { get; set; } = new();
+
+    /// <summary>
+    /// <paramref name="key"/> relative to HKCU (<c>Software\…</c>), or <see langword="null"/> when it is not under
+    /// <c>Software</c> or lies in the policy keys the kiosk lockdown writes.
+    /// </summary>
+    public static string? NormalizeKey(string? key)
+    {
+        string k = (key ?? string.Empty).Trim().Replace('/', '\\').Trim('\\');
+        foreach (string prefix in new[] { @"HKCU\", @"HKEY_CURRENT_USER\" })
+        {
+            if (k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                k = k[prefix.Length..].TrimStart('\\');
+            }
+        }
+
+        string[] parts = k.Split('\\');
+        if (parts.Length < 2 || !parts[0].Equals("Software", StringComparison.OrdinalIgnoreCase) || parts.Any(p => p.Length == 0 || p is "." or ".."))
+        {
+            return null;
+        }
+
+        foreach (string policy in PolicyKeys)
+        {
+            if (k.Equals(policy, StringComparison.OrdinalIgnoreCase) || k.StartsWith(policy + "\\", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+        }
+
+        return k;
+    }
+}
+
 /// <summary>
 /// Validates <see cref="AgentSettings"/>: DataAnnotations on every nested settings object plus semantic checks
 /// (absolute <c>http(s)</c>/<c>ws(s)</c> URLs, retry bounds). Registered as <see cref="IValidateOptions{TOptions}"/>.
@@ -880,6 +935,14 @@ public sealed class AgentSettingsValidator : IValidateOptions<AgentSettings>
         if (settings.Session?.WarningMinutes is { } marks && Array.Exists(marks, m => m <= 0))
         {
             errors.Add("session.warningMinutes: every mark must be > 0");
+        }
+
+        for (int i = 0; i < (settings.Games?.RegistryDefaults?.Count ?? 0); i++)
+        {
+            if (GameRegistryDefault.NormalizeKey(settings.Games!.RegistryDefaults[i].Key) is null)
+            {
+                errors.Add($"games.registryDefaults[{i}].key: must be a key under HKCU\\Software, outside the policy keys");
+            }
         }
 
         return errors;

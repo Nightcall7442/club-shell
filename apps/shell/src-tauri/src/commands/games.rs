@@ -63,6 +63,12 @@ pub async fn games_launch(
         state.kiosk().set_game_mode(true);
     }
     tracing::info!(game_id = %req.game_id, account_pool = ?req.use_account_pool, "launching game");
+    // SHELL_CHANGES 81: the Agent creates the game from session 0, and Windows lets a new window take
+    // the foreground only with the foreground owner's leave — the Shell's, now that the player has
+    // just clicked "Play". By the game's Running event its window may exist already.
+    if !clubshell_winutil::window::allow_set_foreground(None) {
+        tracing::debug!("AllowSetForegroundWindow(ASFW_ANY) refused: the Shell is not in front");
+    }
 
     let result = state
         .agent

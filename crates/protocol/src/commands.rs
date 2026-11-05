@@ -423,7 +423,8 @@ pub struct GamesLaunchRequest {
     /// Extra command line (appended after policy sanitization).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extra_args: Option<String>,
-    /// Requested resolution.
+    /// Not applied: a game sets its own display mode (its arguments or settings). Accepted and
+    /// logged for compatibility.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resolution: Option<Resolution>,
 }

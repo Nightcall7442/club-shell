@@ -511,6 +511,13 @@ unless the key ends with `Ms`.
     "killGraceSec": 10,
     "accountPool": { "enabled": false, "leaseTtlSec": 14400, "releaseOnExit": true, "allowPasswordOnCommandLine": false },  // on only via server config
     "cloudSave": { "enabled": false, "root": "cache\\saves", "maxMb": 512 },           // on only via server config
+    "registryDefaults": [                         // written into the kiosk's HKCU before every launch where missing;
+      {                                           // keys under HKCU\Software only, never the Policies keys
+        "key": "Software\\Valve\\Half-Life\\Settings",
+        "dwords": { "ScreenWindowed": 0, "ScreenWidth": 1920, "ScreenHeight": 1080, "ScreenBPP": 32 },
+        "strings": {}
+      }
+    ],
     "launchers": {
       "steam":     { "exePath": "C:\\Program Files (x86)\\Steam\\steam.exe" },
       "epic":      { "exePath": "C:\\Program Files (x86)\\Epic Games\\Launcher\\Portal\\Binaries\\Win32\\EpicGamesLauncher.exe" },
