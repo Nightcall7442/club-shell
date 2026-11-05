@@ -793,13 +793,13 @@ test('the owner sees and edits where a game keeps player settings', async ({ pag
   await signIn(page, OWNER_PIN);
   await page.goto('/#/catalog');
   const cs2 = page.getByRole('row').filter({ hasText: 'Counter-Strike 2' });
-  await expect(cs2.getByRole('button', { name: 'Переносятся' })).toBeVisible();
+  await expect(cs2.getByRole('button', { name: 'Пути заданы' })).toBeVisible();
 
   const rust = page.getByRole('row').filter({ hasText: 'Rust' });
   await rust.getByRole('button', { name: 'Не заданы' }).click();
   await page.getByLabel('Пути к настройкам игрока').fill('%APPDATA%\\Rust\\cfg');
   await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
-  await expect(rust.getByRole('button', { name: 'Переносятся' })).toBeVisible();
+  await expect(rust.getByRole('button', { name: 'Пути заданы' })).toBeVisible();
 });
 
 test('saving only the zones of a game sends only its zones (SHELL_CHANGES 61)', async ({ page }) => {

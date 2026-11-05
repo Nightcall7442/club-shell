@@ -22,6 +22,7 @@ import { isLaunchCancelled, useGamesStore } from '@/store/games';
 import { describeError, useNotificationsStore } from '@/store/notifications';
 import { useSessionStore } from '@/store/session';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
+import { notInstalledReason } from '@/lib/gameAvailability';
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Launch entry point
@@ -56,8 +57,13 @@ async function installedNow(gameId: string): Promise<boolean> {
     const status = await api.games.installStatus(gameId);
     const games = useGamesStore.getState();
     const game = games.byId.get(gameId);
-    if (status.installed && game) {
-      games.upsert({ ...game, installed: true, installPath: status.installPath ?? game.installPath });
+    if (game && (status.installed || status.missingDrive !== game.missingDrive)) {
+      games.upsert({
+        ...game,
+        installed: status.installed,
+        installPath: status.installPath ?? game.installPath,
+        missingDrive: status.missingDrive ?? null,
+      });
     }
     return status.installed;
   } catch {
@@ -82,7 +88,11 @@ export async function launchGame(gameId: string): Promise<LaunchResult | null> {
     return null;
   }
   if (game && !game.installed && !(await installedNow(gameId))) {
-    notify.push({ title: i18n.t('games.launchFailed'), body: i18n.t('errors.gameNotInstalled'), level: 'error' });
+    notify.push({
+      title: i18n.t('games.launchFailed'),
+      body: notInstalledReason(useGamesStore.getState().byId.get(gameId) ?? game, i18n.t),
+      level: 'error',
+    });
     return null;
   }
   if (games.running.some((r) => r.gameId === gameId)) {

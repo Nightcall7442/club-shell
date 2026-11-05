@@ -102,6 +102,11 @@ public sealed class SessionCleanup
             steps.Add(("directories.clean", CleanExtraDirectoriesAsync));
         }
 
+        if (CleanupTargets(_settings.CurrentValue) is { Count: > 0 } targets)
+        {
+            steps.Add(("files.clean", ct => CleanTargetsAsync(targets, ct)));
+        }
+
         var results = new List<CleanupStepResult>(steps.Count);
         foreach (var (name, action) in steps)
         {
@@ -196,6 +201,68 @@ public sealed class SessionCleanup
             foreach (var error in result.Errors)
             {
                 _logger.LogDebug("Profile cache cleanup: {Error}", error);
+            }
+        },
+        cancellationToken);
+
+    /// <summary>
+    /// <c>session.cleanupPaths</c>, expanded, and Steam's <c>config\loginusers.vdf</c> with
+    /// <c>session.cleanSteamLoginUsers</c> (SHELL_CHANGES 85): what the next player must not find on the games disks.
+    /// </summary>
+    public static IReadOnlyList<string> CleanupTargets(AgentSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        var targets = new List<string>();
+        foreach (string path in settings.Session.CleanupPaths ?? [])
+        {
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                targets.Add(Environment.ExpandEnvironmentVariables(path.Trim()));
+            }
+        }
+
+        if (settings.Session.CleanSteamLoginUsers
+            && settings.Games.Launchers.Steam?.ExePath is { Length: > 0 } steam
+            && Path.GetDirectoryName(steam) is { Length: > 0 } steamDir)
+        {
+            targets.Add(Path.Combine(steamDir, "config", "loginusers.vdf"));
+        }
+
+        return targets;
+    }
+
+    private Task CleanTargetsAsync(IReadOnlyList<string> targets, CancellationToken cancellationToken) => Task.Run(
+        () =>
+        {
+            var failures = 0;
+            foreach (string target in targets)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (Directory.Exists(target))
+                {
+                    failures += EmptyDirectory(target);
+                    continue;
+                }
+
+                try
+                {
+                    if (File.Exists(target))
+                    {
+                        File.SetAttributes(target, FileAttributes.Normal);
+                        File.Delete(target);
+                        _logger.LogDebug("Deleted {Path} after the session", target);
+                    }
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    _logger.LogWarning(ex, "{Path} could not be deleted after the session", target);
+                    failures++;
+                }
+            }
+
+            if (failures > 0)
+            {
+                throw new IOException($"{failures} cleanup paths could not be deleted");
             }
         },
         cancellationToken);

@@ -23,6 +23,7 @@ import { categoryLabel } from './Categories';
 import { launcherLabelKey } from './GameCard';
 import { GameHero, antiCheatLabel } from './GameHero';
 import { LaunchOverlay, launchGame } from './LaunchOverlay';
+import { notInstalledLabel } from '@/lib/gameAvailability';
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Spec comparison
@@ -340,6 +341,11 @@ export default function GameDetails(): JSX.Element {
                     {t('games.settingsFollow')}
                   </p>
                 )}
+                {/* SHELL_CHANGES 75: a game started from its own folder (the offline games on H:) keeps its saves on the
+                    PC, which is reset after the session and at every boot of a diskless seat. */}
+                {game.launcher === 'exe' && (game.settingsPaths?.length ?? 0) === 0 && (
+                  <p className="text-base text-muted">{t('games.progressNotKept')}</p>
+                )}
                 {game.requiresAccount && (
                   <div className="flex items-start gap-3 rounded-lg bg-accent/10 p-4 text-text">
                     <Badge tone="accent" size="sm" className="mt-0.5">
@@ -379,7 +385,7 @@ export default function GameDetails(): JSX.Element {
                   <h3 className="hud-label">{t('games.installStatus')}</h3>
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge tone={game.installed ? 'success' : 'muted'} dot>
-                      {game.installed ? t('games.installed') : t('games.notInstalled')}
+                      {game.installed ? t('games.installed') : notInstalledLabel(game, t)}
                     </Badge>
                     {install && (
                       <Badge tone={install.launcherReady ? 'success' : 'danger'} dot>

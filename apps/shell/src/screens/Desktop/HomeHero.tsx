@@ -22,6 +22,7 @@ import { launchGame } from '@/screens/Games/LaunchOverlay';
 import { selectFeaturedGames, selectRecentGames, useGamesStore } from '@/store/games';
 import { useNotificationsStore } from '@/store/notifications';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
+import { notInstalledLabel, notInstalledReason } from '@/lib/gameAvailability';
 
 const STRIP_MAX = 6;
 
@@ -259,7 +260,7 @@ export function HomeHero(): JSX.Element {
                   <ul className="flex flex-wrap items-center gap-2" aria-label={t('common.details')}>
                     {!hero.installed && (
                       <li>
-                        <Badge tone="muted">{t('games.notInstalled')}</Badge>
+                        <Badge tone="muted">{notInstalledLabel(hero, t)}</Badge>
                       </li>
                     )}
                     {hero.requiresAccount && (
@@ -297,7 +298,7 @@ export function HomeHero(): JSX.Element {
                     icon={<PlayIcon />}
                     loading={isLaunching}
                     disabled={!hero.installed}
-                    title={hero.installed ? undefined : t('errors.gameNotInstalled')}
+                    title={hero.installed ? undefined : notInstalledReason(hero, t)}
                     onClick={() => play(hero)}
                     className="min-w-[11rem]"
                   >

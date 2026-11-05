@@ -151,6 +151,7 @@
     "sessionNotActive": "Faol seans yo'q",
     "sessionAlreadyActive": "Seans allaqachon faol",
     "gameNotInstalled": "Bu o'yin ushbu kompyuterga o'rnatilmagan",
+    "gameOnMissingDrive": "Bu o'yin {{drive}} diskida, bu kompyuterda esa bunday disk yo'q. Boshqa kompyuterga o'ting yoki administratorni chaqiring.",
     "gameLaunchFailed": "O'yinni ishga tushirib bo'lmadi",
     "accountPoolExhausted": "Hozir bo'sh o'yin akkauntlari yo'q, keyinroq urinib ko'ring",
     "antiCheatBlocked": "Anti-chit ishga tushirishni blokladi. Administratorni chaqiring",
@@ -367,6 +368,8 @@
     "playNow": "Hozir o'ynash",
     "installed": "O'rnatilgan",
     "notInstalled": "O'rnatilmagan",
+    "unavailableHere": "Bu kompyuterda mavjud emas",
+    "progressNotKept": "Bu oʻyinning yutuqlari va sozlamalari saqlanmaydi: seansdan yoki kompyuter qayta yoqilgandan keyin u boshidan boshlanadi.",
     "requiresAccount": "Klub akkaunti",
     "requiresAccountHint": "O'yin klub akkaunti bilan avtomatik kiradi",
     "antiCheat": "Anti-chit",
@@ -943,9 +946,9 @@
     "gameSettings": {
       "tab": "Oʻyin sozlamalari",
       "title": "Oʻyin sozlamalari",
-      "hint": "Tugmalar, sezgirlik va grafika har bir oʻyindan keyin saqlanadi va klubning istalgan kompyuterida sizni kutadi — oʻtiring va uydagidek oʻynang.",
+      "hint": "Klub ularni kompyuterlar orasida koʻchirishni yoqqanda, tugmalar, sezgirlik va grafika shu yerda boʻladi. Hozircha oʻyin sozlamalari kompyuterda faqat seans oxirigacha qoladi.",
       "emptyTitle": "Hozircha boʻsh",
-      "emptyHint": "CS2, Dota 2, Fortnite yoki boshqa oʻyinni oʻynang — sozlamalaringiz oʻzi saqlanadi.",
+      "emptyHint": "Klubda oʻyin sozlamalarini kompyuterlar orasida koʻchirish hali yoqilmagan.",
       "saved": "Saqlangan {{when}} · {{size}}",
       "reset": "Tiklash",
       "resetFor": "{{title}} sozlamalarini tiklash"

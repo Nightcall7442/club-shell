@@ -343,6 +343,7 @@ public sealed class GameLibrary : IDisposable
         InstallPath = status.InstallPath ?? game.InstallPath,
         Version = status.Version ?? game.Version,
         SizeGb = status.SizeGb > 0 ? status.SizeGb : game.SizeGb,
+        MissingDrive = status.MissingDrive,
     };
 
     private static ImmutableArray<Game> Merge(IEnumerable<Game> games, IReadOnlyDictionary<Guid, GameInstallStatus> installs)

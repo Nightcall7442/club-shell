@@ -48,7 +48,9 @@
     "heartbeatSec": 30,
     "graceSec": 60,
     "autoLockOnIdleSec": 0,
-    "persistIntervalSec": 5
+    "persistIntervalSec": 5,
+    "cleanupPaths": [],
+    "cleanSteamLoginUsers": true
   },
   "offline": {
     "enabled": true,

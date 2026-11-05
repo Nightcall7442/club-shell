@@ -23,10 +23,10 @@ export const UZ: Record<string, string> = {
   'этот сервер': 'shu server',
   'Настройки игрока': 'Oʻyinchi sozlamalari',
   'Настройки игрока · {title}': 'Oʻyinchi sozlamalari · {title}',
-  'Файлы и папки, где игра хранит бинды, чувствительность и графику игрока. Агент сохраняет их после игры и возвращает игроку на любом ПК. По одному пути в строке; можно {installPath}, %LOCALAPPDATA%, %APPDATA%, %USERPROFILE%.':
-    'Oʻyin oʻyinchining tugmalari, sezgirligi va grafikasini saqlaydigan fayl va papkalar. Agent ularni oʻyindan keyin saqlaydi va istalgan kompyuterda oʻyinchiga qaytaradi. Har qatorda bitta yoʻl; {installPath}, %LOCALAPPDATA%, %APPDATA%, %USERPROFILE% ishlatish mumkin.',
+  'Файлы и папки, где игра хранит бинды, чувствительность и графику игрока. Пути запоминаются, но перенос настроек между ПК пока не работает: сервер их ещё не хранит. По одному пути в строке; можно {installPath}, %LOCALAPPDATA%, %APPDATA%, %USERPROFILE%.':
+    'Oʻyin oʻyinchining tugmalari, sezgirligi va grafikasini saqlaydigan fayl va papkalar. Yoʻllar eslab qolinadi, lekin sozlamalarni kompyuterlar orasida koʻchirish hozircha ishlamaydi: server ularni hali saqlamaydi. Har qatorda bitta yoʻl; {installPath}, %LOCALAPPDATA%, %APPDATA%, %USERPROFILE% ishlatish mumkin.',
   'Пути к настройкам игрока': 'Oʻyinchi sozlamalari yoʻllari',
-  Переносятся: 'Koʻchiriladi',
+  'Пути заданы': 'Yoʻllar belgilangan',
   'Не заданы': 'Belgilanmagan',
   'CPU за сутки': 'CPU bir sutkada',
   'CPU сейчас / обычно': 'CPU hozir / odatda',
@@ -1196,10 +1196,10 @@ export const EN: Record<string, string> = {
   'этот сервер': 'this server',
   'Настройки игрока': 'Player settings',
   'Настройки игрока · {title}': 'Player settings · {title}',
-  'Файлы и папки, где игра хранит бинды, чувствительность и графику игрока. Агент сохраняет их после игры и возвращает игроку на любом ПК. По одному пути в строке; можно {installPath}, %LOCALAPPDATA%, %APPDATA%, %USERPROFILE%.':
-    "Files and folders where the game keeps the player's binds, sensitivity and graphics. The Agent saves them after the game and gives them back to the player on any PC. One path per line; {installPath}, %LOCALAPPDATA%, %APPDATA%, %USERPROFILE% are allowed.",
+  'Файлы и папки, где игра хранит бинды, чувствительность и графику игрока. Пути запоминаются, но перенос настроек между ПК пока не работает: сервер их ещё не хранит. По одному пути в строке; можно {installPath}, %LOCALAPPDATA%, %APPDATA%, %USERPROFILE%.':
+    "Files and folders where the game keeps the player's binds, sensitivity and graphics. The paths are kept, but carrying the settings between PCs does not work yet: the server does not store them. One path per line; {installPath}, %LOCALAPPDATA%, %APPDATA%, %USERPROFILE% are allowed.",
   'Пути к настройкам игрока': 'Player settings paths',
-  Переносятся: 'Carried',
+  'Пути заданы': 'Paths set',
   'Не заданы': 'Not set',
   'CPU за сутки': 'CPU, 24 h',
   'CPU сейчас / обычно': 'CPU now / usual',

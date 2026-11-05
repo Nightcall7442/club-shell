@@ -591,7 +591,7 @@ export default function CatalogPage(): JSX.Element {
         >
           <p className="max-w-[880px] text-[13px] leading-5 text-dim">
             {t(
-              'Файлы и папки, где игра хранит бинды, чувствительность и графику игрока. Агент сохраняет их после игры и возвращает игроку на любом ПК. По одному пути в строке; можно {installPath}, %LOCALAPPDATA%, %APPDATA%, %USERPROFILE%.',
+              'Файлы и папки, где игра хранит бинды, чувствительность и графику игрока. Пути запоминаются, но перенос настроек между ПК пока не работает: сервер их ещё не хранит. По одному пути в строке; можно {installPath}, %LOCALAPPDATA%, %APPDATA%, %USERPROFILE%.',
             )}
           </p>
           <textarea
@@ -685,7 +685,7 @@ export default function CatalogPage(): JSX.Element {
                   {g.settingsPaths.length > 0 ? (
                     <>
                       <CheckIcon size={15} strokeWidth={2} className="text-accent" />
-                      <span className="text-accent">{t('Переносятся')}</span>
+                      <span className="text-accent">{t('Пути заданы')}</span>
                     </>
                   ) : (
                     <span className="text-muted">{t('Не заданы')}</span>

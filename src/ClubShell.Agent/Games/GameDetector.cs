@@ -167,7 +167,28 @@ public sealed class GameDetector
             sizeGb ?? game.SizeGb,
             version ?? game.Version,
             installed ? now : null,
-            launcherReady);
+            launcherReady,
+            installed ? null : MissingDrive(game));
+    }
+
+    /// <summary>
+    /// The drive (<c>H:</c>) of the game's catalogue path — install directory, else an absolute executable — when this PC
+    /// does not have it: the catalogue is the club's, and a PC without the offline games disk cannot have the game at all
+    /// (SHELL_CHANGES 74). <see langword="null"/> for a relative or launcher-found path, or a drive that is there.
+    /// </summary>
+    public static string? MissingDrive(Game game)
+    {
+        ArgumentNullException.ThrowIfNull(game);
+        foreach (string? path in new[] { game.InstallPath, game.ExePath })
+        {
+            if (path is { Length: >= 3 } && char.IsAsciiLetter(path[0]) && path[1] == ':' && path[2] is '\\' or '/')
+            {
+                string drive = char.ToUpperInvariant(path[0]) + ":";
+                return Directory.Exists(drive + Path.DirectorySeparatorChar) ? null : drive;
+            }
+        }
+
+        return null;
     }
 
     // ---- Steam ----------------------------------------------------------------------------------

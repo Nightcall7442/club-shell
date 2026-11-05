@@ -496,7 +496,10 @@ unless the key ends with `Ms`.
     "heartbeatSec": 30,
     "graceSec": 60,                               // after endsAt before forced lock
     "autoLockOnIdleSec": 0,                       // 0 = disabled (policy.kiosk.idleTimeoutSec wins if set)
-    "persistIntervalSec": 5
+    "persistIntervalSec": 5,
+    "cleanupPaths": [],                           // files deleted / folders emptied after every session (env vars
+                                                  // expanded): what games leave on the games disks (SHELL_CHANGES 85)
+    "cleanSteamLoginUsers": true                  // + <steam dir>\config\loginusers.vdf (the accounts that signed in)
   },
   "offline": {
     "enabled": true,

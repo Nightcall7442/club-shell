@@ -203,6 +203,8 @@ export interface GameInstallStatus {
   verifiedAt?: string | null;
   /** Launcher client present and logged in (where detectable). */
   launcherReady: boolean;
+  /** Not installed because the drive of the game's path (`H:`) is not on this PC (SHELL_CHANGES 74). */
+  missingDrive?: string | null;
 }
 
 /** Minimum hardware specification of a game. */
@@ -370,6 +372,11 @@ export interface Game {
    * (`PlayerSettingsBundle`); `null` or empty = not carried.
    */
   settingsPaths?: string[] | null;
+  /**
+   * Set by the Agent: the drive (`H:`) the game's catalogue path is on, which this PC does not have — the game is
+   * unavailable here rather than not installed (a PC without the offline games disk, SHELL_CHANGES 74).
+   */
+  missingDrive?: string | null;
 }
 
 /** Body of `POST /games/{id}/launch-report` (SERVER_API.md §4.6). */

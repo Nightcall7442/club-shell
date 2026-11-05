@@ -19,6 +19,7 @@ import { formatGb } from '@/lib/format';
 import { useThemeStore } from '@/store/theme';
 import { categoryLabel } from './Categories';
 import { launcherLabelKey } from './GameCard';
+import { notInstalledLabel, notInstalledReason } from '@/lib/gameAvailability';
 
 export type HeroSize = 'md' | 'lg';
 
@@ -216,7 +217,7 @@ export function GameHero({
             {!game.installed && (
               <li>
                 <Badge tone="muted" solid>
-                  {t('games.notInstalled')}
+                  {notInstalledLabel(game, t)}
                 </Badge>
               </li>
             )}
@@ -256,7 +257,7 @@ export function GameHero({
               icon={<PlayIcon />}
               loading={launching}
               disabled={!game.installed}
-              title={game.installed ? undefined : t('errors.gameNotInstalled')}
+              title={game.installed ? undefined : notInstalledReason(game, t)}
               onClick={() => onPlay(game)}
             >
               {launching ? t('games.launching') : t('games.playNow')}

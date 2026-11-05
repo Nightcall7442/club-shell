@@ -442,6 +442,19 @@ public sealed class SessionSettings
     /// <summary>Interval at which session state is persisted to <c>cache\session.json</c>.</summary>
     [Range(1, 600)]
     public int PersistIntervalSec { get; set; } = 5;
+
+    /// <summary>
+    /// Files deleted and folders emptied after every session (environment variables expanded), for what games and launchers
+    /// leave outside the player's profile: on the games disks, which are reset only at boot (SHELL_CHANGES 85) — e.g.
+    /// <c>H:\Games\Half-Life\cstrike\config.cfg</c> (CS 1.6 nick and binds).
+    /// </summary>
+    public string[] CleanupPaths { get; set; } = [];
+
+    /// <summary>
+    /// Also delete Steam's <c>config\loginusers.vdf</c> (next to <c>games.launchers.steam.exePath</c>) after every session:
+    /// it lists the Steam accounts that signed in on this PC, for the next player to see.
+    /// </summary>
+    public bool CleanSteamLoginUsers { get; set; } = true;
 }
 
 /// <summary><c>agent.json → offline</c>.</summary>
