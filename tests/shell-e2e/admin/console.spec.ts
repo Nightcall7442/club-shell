@@ -805,8 +805,8 @@ test('the owner sees and edits where a game keeps player settings', async ({ pag
 test('saving only the zones of a game sends only its zones (SHELL_CHANGES 61)', async ({ page }) => {
   await signIn(page, OWNER_PIN);
   await page.goto('/#/catalog');
-  await page.getByRole('row').filter({ hasText: 'Dota 2' }).getByRole('button', { name: 'Изменить' }).click();
-  const editor = page.locator('section').filter({ has: page.getByRole('heading', { name: /Игра · Dota 2/ }) });
+  await page.getByRole('row').filter({ hasText: 'Apex Legends' }).getByRole('button', { name: 'Изменить' }).click();
+  const editor = page.locator('section').filter({ has: page.getByRole('heading', { name: /Игра · Apex Legends/ }) });
   await editor.getByRole('button', { name: 'Bootcamp', exact: true }).click();
 
   // A PUT of the card would make a starter game the club's, and the seed would stop updating it.
