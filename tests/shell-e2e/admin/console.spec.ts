@@ -802,6 +802,23 @@ test('the owner sees and edits where a game keeps player settings', async ({ pag
   await expect(rust.getByRole('button', { name: 'Переносятся' })).toBeVisible();
 });
 
+test('saving only the zones of a game sends only its zones (SHELL_CHANGES 61)', async ({ page }) => {
+  await signIn(page, OWNER_PIN);
+  await page.goto('/#/catalog');
+  await page.getByRole('row').filter({ hasText: 'Dota 2' }).getByRole('button', { name: 'Изменить' }).click();
+  const editor = page.locator('section').filter({ has: page.getByRole('heading', { name: /Игра · Dota 2/ }) });
+  await editor.getByRole('button', { name: 'Bootcamp', exact: true }).click();
+
+  // A PUT of the card would make a starter game the club's, and the seed would stop updating it.
+  const sent: string[] = [];
+  page.on('request', (r) => {
+    if (r.method() === 'PUT' && r.url().includes('/admin/games/')) sent.push(new URL(r.url()).pathname);
+  });
+  await editor.getByRole('button', { name: 'Сохранить', exact: true }).click();
+  await expect.poll(() => sent.length).toBe(1);
+  expect(sent[0]).toMatch(/\/admin\/games\/[^/]+\/zones$/);
+});
+
 test('the owner sees every club of the network and adds one', async ({ page, request }) => {
   test.skip(REAL, 'The club network answers 501 on the central server (DESIGN D-19).');
   const cashier = await tokenFor(request, CASHIER_PIN);

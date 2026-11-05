@@ -286,6 +286,28 @@ public sealed class RegisterProofTests(ServerFixture audit, EnforceServerFixture
     }
 
     [Fact]
+    public async Task A_pc_without_persistent_storage_that_said_goodbye_re_registers_at_once_and_its_refusals_are_infos()
+    {
+        // SHELL_CHANGES 57: a diskless seat back from a reboot within 90 s of its last heartbeat.
+        var logs = LogRecorder.On(enforce);
+        var owner = await LoginAsync(enforce, OwnerPin);
+        var agent = await TestAgent.CreateAsync(enforce);
+        await Players.ReadAsync(await agent.HeartbeatAsync(), 200);
+        await ExpectAsync(enforce, 200, HttpMethod.Patch, $"/pcs/{agent.PcId}", owner, new { stateless = true });
+
+        await AssertRefusedAsync(agent);
+        Assert.DoesNotContain(Warnings(logs, agent.PcId), m => m.Contains("refused without a valid proof", StringComparison.Ordinal));
+        Assert.Contains(About(logs, agent.PcId, LogLevel.Information), m => m.Contains("refused while it still counts as online", StringComparison.Ordinal));
+
+        // The agent closed its socket itself (the reboot): no need to wait out the 90 s.
+        await enforce.Services.GetRequiredService<PcRepository>().SetGoodbyeAsync(agent.PcId, enforce.Clock.GetUtcNow());
+        using var reboot = await TestAgent.RegisterAsync(enforce, TestAgent.RegisterBody(agent.Hwid, TestAgent.RandomMac()));
+        var again = new TestAgent(enforce, await Players.ReadAsync(reboot, 200), agent.Hwid);
+        Assert.Equal(agent.PcId, again.PcId);
+        Assert.Contains(About(logs, agent.PcId, LogLevel.Information), m => m.Contains("without persistent storage re-registered", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task In_audit_a_pc_without_persistent_storage_re_registers_without_the_warning()
     {
         var logs = LogRecorder.On(audit);

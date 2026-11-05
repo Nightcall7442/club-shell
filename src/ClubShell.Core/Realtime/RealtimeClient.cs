@@ -250,7 +250,7 @@ public sealed class RealtimeClient
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         try
         {
-            await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "closing", timeout.Token).ConfigureAwait(false);
+            await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, AgentStopReason.Current ?? AgentStopReason.Default, timeout.Token).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is WebSocketException or OperationCanceledException or ObjectDisposedException)
         {

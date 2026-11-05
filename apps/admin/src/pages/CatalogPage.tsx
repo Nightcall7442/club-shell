@@ -248,7 +248,9 @@ function GameEditor({
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const set = (p: Partial<GameForm>): void => setForm((f) => ({ ...f, ...p }));
-  const issue = problem(form);
+  // Only a card that is sent has to pass the checks: zones alone go without it (SHELL_CHANGES 61).
+  const cardChanged = !game || JSON.stringify(inputOf(form)) !== JSON.stringify(inputOf(formOf(game)));
+  const issue = cardChanged ? problem(form) : null;
   const exe = form.launcher === 'exe';
   const steam = form.launcher === 'steam';
   const cover =
@@ -273,13 +275,15 @@ function GameEditor({
     }
   };
 
-  // Zones are saved on their own (they do not make a starter game the club's), after the card.
+  // Zones are saved on their own (they do not make a starter game the club's), after the card. A card left as it was is
+  // not saved at all: its PUT would make a starter game the club's and stop the seed from updating it (SHELL_CHANGES 61).
   const save = (): Promise<void> =>
     run(async () => {
-      const { game: saved } = game
-        ? await clubApi.saveGame(game.id, inputOf(form))
-        : await clubApi.addGame(inputOf(form));
-      if (JSON.stringify(zones) !== JSON.stringify(savedZones)) await clubApi.saveGameZones(saved.id, zones);
+      const id =
+        cardChanged || !game
+          ? (game ? await clubApi.saveGame(game.id, inputOf(form)) : await clubApi.addGame(inputOf(form))).game.id
+          : game.id;
+      if (JSON.stringify(zones) !== JSON.stringify(savedZones)) await clubApi.saveGameZones(id, zones);
     });
 
   return (
