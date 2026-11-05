@@ -53,7 +53,7 @@ if ($club) {
     Add "club profile: $(if ($profilePath) { "$profilePath (NTUSER.DAT present: $(Test-Path (Join-Path ([Environment]::ExpandEnvironmentVariables($profilePath)) 'NTUSER.DAT')))" } else { 'none' })"
 }
 $winlogon = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -ErrorAction SilentlyContinue
-Add "Winlogon: AutoAdminLogon=$($winlogon.AutoAdminLogon) DefaultUserName=$($winlogon.DefaultUserName) DefaultDomainName=$($winlogon.DefaultDomainName) Shell=$($winlogon.Shell) DefaultPassword in registry=$([bool]($winlogon.PSObject.Properties.Name -contains 'DefaultPassword'))"
+Add "Winlogon: AutoAdminLogon=$($winlogon.AutoAdminLogon) ForceAutoLogon=$($winlogon.ForceAutoLogon) AutoLogonCount=$($winlogon.AutoLogonCount) DefaultUserName=$($winlogon.DefaultUserName) DefaultDomainName=$($winlogon.DefaultDomainName) Shell=$($winlogon.Shell) DefaultPassword in registry=$([bool]($winlogon.PSObject.Properties.Name -contains 'DefaultPassword'))"
 $passwordless = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\PasswordLess\Device' -ErrorAction SilentlyContinue).DevicePasswordLessBuildVersion
 Add "Windows Hello passwordless (2 blocks auto-logon): $passwordless"
 Add "Sessions: $((query session 2>$null) -join ' | ')"

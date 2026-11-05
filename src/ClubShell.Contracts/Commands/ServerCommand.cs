@@ -821,11 +821,20 @@ public static class KioskUserProblems
 /// <param name="Ready">Provisioned: exists, enabled, a plain member of Users, password known to the Agent.</param>
 /// <param name="Problem">Why it is not ready (<see cref="KioskUserProblems"/>); <see langword="null"/> when ready or not tried yet.</param>
 /// <param name="PrivilegedGroups">Privileged local groups the existing account belongs to (<see cref="KioskUserProblems.PrivilegedAccount"/>).</param>
+/// <param name="AutoLogon">Winlogon logs this account on by itself (<c>AutoAdminLogon</c> 1 for it); <see langword="null"/> when unknown.</param>
+/// <param name="ForceAutoLogon">
+/// <c>ForceAutoLogon</c> is 1: Winlogon logs the account on again after every sign-out, not only at boot (SHELL_CHANGES 76);
+/// <see langword="null"/> when unknown.
+/// </param>
+/// <param name="AutoLogonCount"><c>AutoLogonCount</c>: boots left before auto-logon switches itself off; <see langword="null"/> when not set.</param>
 public sealed record HeartbeatKioskUser(
     string Name,
     bool Ready,
     string? Problem = null,
-    IReadOnlyList<string>? PrivilegedGroups = null);
+    IReadOnlyList<string>? PrivilegedGroups = null,
+    bool? AutoLogon = null,
+    bool? ForceAutoLogon = null,
+    int? AutoLogonCount = null);
 
 /// <summary>Who mounts the games library volume on the PC (heartbeat <c>gamesVolume.owner</c>).</summary>
 [JsonConverter(typeof(CamelCaseEnumConverter<GamesVolumeOwner>))]
@@ -908,6 +917,12 @@ public static class TelemetryEventKinds
 
     /// <summary>Outbox entry dead-lettered.</summary>
     public const string Deadletter = "deadletter";
+
+    /// <summary>
+    /// The kiosk account did not log on again (a session ended, the PC stayed on the Windows sign-in screen) and the Agent
+    /// rebooted the PC to bring the Shell back (SHELL_CHANGES 77). Data: <c>{ reason }</c>.
+    /// </summary>
+    public const string KioskLogonLost = "kioskLogonLost";
 }
 
 /// <summary>Agent diagnostic event in a telemetry batch.</summary>

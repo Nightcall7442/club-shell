@@ -45,6 +45,7 @@ logs the executable's Authenticode signer (`DescribeSignature`) — presence onl
 | `DefaultDomainName` | the computer name for a local account (`domain` empty or `"."`), as Windows documents it |
 | `DefaultPassword` | **deleted** — the clear-text registry value is never used |
 | `AutoLogonCount` | set when `count` is given, otherwise deleted (unlimited) |
+| `ForceAutoLogon` | `"1"` — Winlogon logs the kiosk on again after every sign-out, not only at boot (SHELL_CHANGES 76) |
 | LSA secret `DefaultPassword` (`ShellRegistry.DefaultPasswordSecret`) | password, via `LsaSecrets.Store` → `LsaOpenPolicy(POLICY_CREATE_SECRET)` + `LsaStorePrivateData` |
 
 Winlogon reads the LSA secret exactly like the registry value, but the secret is only readable by SYSTEM (and
@@ -56,8 +57,16 @@ Windows 11's "only allow Windows Hello sign-in" on (value 2) the password sign-i
 Auto-logon is turned on only after the shell is written into the kiosk hive, so the kiosk account needs a profile
 first: `LocalUserManager.EnsureProfile` creates it with `CreateProfile`, which fails with 0x80070522 unless the service
 holds `SeTakeOwnershipPrivilege` (part of the `sc privs` list the installer sets).
-`ClearAutoLogon()` sets `AutoAdminLogon = 0`, deletes `DefaultPassword` / `AutoLogonCount` and stores a `null`
-secret (deletes it).
+`ClearAutoLogon()` sets `AutoAdminLogon = 0`, deletes `DefaultPassword` / `AutoLogonCount` / `ForceAutoLogon` and
+stores a `null` secret (deletes it). `GetAutoLogon()` reads the values back for the heartbeat
+(`kioskUser.autoLogon` / `forceAutoLogon` / `autoLogonCount`).
+
+Without `ForceAutoLogon` Winlogon logs the account on once per boot: after the first player's session ended the PC
+stayed at the sign-in screen with the Shell waiting for a session that never came. If the kiosk still does not come
+back, `KioskLogonGuard` reboots the PC (SHELL_CHANGES 77): the watchdog asks it after 3 min without a kiosk session
+(`WaitingForSession`), the profile reset after its 60 s wait. It reboots only when auto-logon is the kiosk's, nobody
+else is signed in (console or Remote Desktop), no maintenance window is open, the Agent has run for 5 min and its last
+such reboot was more than 30 min ago (`cache\kiosk-logon-reboot.txt`), and raises the telemetry event `kioskLogonLost` (`reason`).
 
 Who calls it:
 
@@ -133,11 +142,23 @@ What `preserveOnReset` carries across the reset never carries a sign-in: `Profil
 `RiotGamesPrivateSettings.yaml` / `RiotClientPrivateSettings.yaml`, the FACEIT client's cookies and web storage) are
 deleted from the preserved directories, and a preserved entry inside one of them is not carried.
 
-Reset sequence: `IShellRelauncher.StopAsync` (Shell stopped, watchdog `Suspended`) → `WtsSessions.Logoff` for every
-session of the kiosk user (up to 4 rounds) → `ProfileReset.ResetProfile(user)`: wait for hive unload, then
-`DeleteProfileW` → WMI `Win32_UserProfile.Delete` → manual directory + `ProfileList` removal (3 attempts each) →
-`IShellRelauncher.RelaunchAsync` (watchdog resumes; auto-logon recreates the session and a fresh profile) →
-`ApplyFolderRedirect` (best effort, retried by the provisioner). The marker
+Reset sequence: `IShellRelauncher.StopAsync` (Shell stopped, watchdog `Suspended`) →
+`ProfileReset.ResetProfile(user, preserve, sessions)`: each session the player left (`ProfileReset.SessionsOf`) is
+logged off once → wait for the hive to unload (20 s) → the profile directory is renamed to
+`<profile>.reset-<UTC time>` (the tombstone) and its `ProfileList` / `ProfileGuid` entries are deleted → the preserved
+directories are stashed out of the tombstone and it is deleted → `IShellRelauncher.RelaunchAsync` (watchdog resumes) →
+`ApplyFolderRedirect` (best effort, retried by the provisioner).
+
+Winlogon logs the kiosk on again as soon as the player's session is gone (`ForceAutoLogon`), possibly while the old
+profile is still being deleted. Renaming it away first means that logon always finds no profile and gets a fresh one;
+the reset never logs off the new session (it is the next player's) and never deletes a profile that is loaded — when
+the hive is loaded again before it is renamed, the reset fails and is retried (`ResetIfDirtyAsync`). Tombstones left
+by a crash are deleted by the next reset.
+
+`shell.kioskUser.resetMode` (SHELL_CHANGES 78): `logoff` resets the profile as above; `reboot` reboots the PC 5 s after
+the session instead — for a diskless PC whose system disk comes back clean at boot; `auto` (the default) reboots when
+the system disk is on iSCSI (`MSFT_PhysicalDisk.BusType` 9) and resets the profile otherwise. A reboot Windows
+refuses falls back to the profile reset. The marker
 `cache\profile-reset.marker` records the last reset. `ProfileReset.CleanCaches` is the light variant used by
 `SessionCleanup` while the user stays logged on.
 
@@ -259,7 +280,7 @@ reset after 86400 s).
 | `PolicyEnforcer.RevertAllAsync` (Agent stopping with revert, or policy removed; each module's `RevertAsync` in reverse order) | `RestoreExplorer(sid)` + `ClearAutoLogon()` |
 | `kiosk_exit{action: "explorer"}` from the admin unlock (`KIOSK_MODE.md` §6) | `explorer.exe` spawned by the Shell before it exits — temporary; the watchdog relaunches the Shell unless suspended |
 | Safe mode | `ShellLauncher.LaunchExplorerAsync` — temporary, same as above |
-| `src/ClubShell.Agent/Install/uninstall.ps1` | stops/deletes the service (`register-service.ps1 -Uninstall`), sets `AutoAdminLogon = 0`, removes `DefaultUserName` / `DefaultPassword` / `DefaultDomainName` / `AutoLogonCount`, deletes `HKU\<kioskSid>\...\Winlogon\Shell` when the hive is loaded, removes `ClubShell-*` firewall rules and the hosts-file block; `-PurgeData` removes `C:\ProgramData\ClubShell`, `-RemoveKioskUser` deletes the account. Note it does **not** delete the LSA `DefaultPassword` secret nor the `Policies\System\Shell` value; run the manual steps below when the service is already gone |
+| `src/ClubShell.Agent/Install/uninstall.ps1` | stops/deletes the service (`register-service.ps1 -Uninstall`), sets `AutoAdminLogon = 0`, removes `DefaultUserName` / `DefaultPassword` / `DefaultDomainName` / `AutoLogonCount` / `ForceAutoLogon`, deletes `HKU\<kioskSid>\...\Winlogon\Shell` when the hive is loaded, removes `ClubShell-*` firewall rules and the hosts-file block; `-PurgeData` removes `C:\ProgramData\ClubShell`, `-RemoveKioskUser` deletes the account. Note it does **not** delete the LSA `DefaultPassword` secret nor the `Policies\System\Shell` value; run the manual steps below when the service is already gone |
 
 Manual restore (service not running, hive loaded because the kiosk user is logged on):
 

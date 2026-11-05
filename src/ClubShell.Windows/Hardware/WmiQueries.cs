@@ -469,6 +469,23 @@ public sealed partial class WmiQueries
         return result;
     }
 
+    /// <summary>
+    /// <c>MSFT_PhysicalDisk.BusType</c> of the disk holding the Windows drive (<c>%SystemDrive%</c>): 9 = iSCSI, a diskless
+    /// seat; <see langword="null"/> when the Storage namespace does not say.
+    /// </summary>
+    public async Task<int?> GetSystemDiskBusTypeAsync(CancellationToken cancellationToken)
+    {
+        char letter = char.ToUpperInvariant((Environment.GetEnvironmentVariable("SystemDrive") ?? "C:")[0]);
+        IReadOnlyList<WmiPartition> partitions = await GetPartitionsAsync(cancellationToken).ConfigureAwait(false);
+        if (partitions.FirstOrDefault(p => p.DriveLetter == letter) is not { DiskNumber: >= 0 } system)
+        {
+            return null;
+        }
+
+        IReadOnlyList<WmiPhysicalDisk> disks = await GetPhysicalDisksAsync(cancellationToken).ConfigureAwait(false);
+        return disks.FirstOrDefault(d => d.DeviceNumber == system.DiskNumber)?.BusType;
+    }
+
     /// <summary>MSFT_Partition rows that carry a drive letter.</summary>
     public async Task<IReadOnlyList<WmiPartition>> GetPartitionsAsync(CancellationToken cancellationToken)
     {

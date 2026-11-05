@@ -1689,6 +1689,16 @@ pub struct HeartbeatKioskUser {
     /// (`KioskUserProblems.PrivilegedAccount`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub privileged_groups: Option<Vec<String>>,
+    /// Winlogon logs this account on by itself (`AutoAdminLogon` 1 for it); `null` when unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_logon: Option<bool>,
+    /// `ForceAutoLogon` is 1: Winlogon logs the account on again after every sign-out, not only at
+    /// boot (SHELL_CHANGES 76); `null` when unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub force_auto_logon: Option<bool>,
+    /// `AutoLogonCount`: boots left before auto-logon switches itself off; `null` when not set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_logon_count: Option<i32>,
 }
 
 /// Response of `POST /agents/{pcId}/heartbeat`.
@@ -2193,6 +2203,10 @@ pub mod telemetry_event_kinds {
     pub const LAUNCHER_ERROR: &str = "launcherError";
     /// Outbox entry dead-lettered.
     pub const DEADLETTER: &str = "deadletter";
+    /// The kiosk account did not log on again (a session ended, the PC stayed on the Windows
+    /// sign-in screen) and the Agent rebooted the PC to bring the Shell back (SHELL_CHANGES 77).
+    /// Data: `{ reason }`.
+    pub const KIOSK_LOGON_LOST: &str = "kioskLogonLost";
 }
 
 wire_enum! {
@@ -3726,12 +3740,15 @@ mod tests {
                 ready: false,
                 problem: Some(kiosk_user_problems::PRIVILEGED_ACCOUNT.into()),
                 privileged_groups: Some(vec!["Administrators".into()]),
+                auto_logon: Some(true),
+                force_auto_logon: Some(true),
+                auto_logon_count: None,
             }),
         };
         let json = serde_json::to_string(&hb).unwrap();
         assert_eq!(
             json,
-            r#"{"status":"busy","currentSessionId":"00000000-0000-0000-0000-000000000000","agentVersion":"1.4.2","shellVersion":"1.4.2","uptimeSec":8123,"ipAddress":"10.0.1.12","policyVersion":12,"runningGames":[{"gameId":"00000000-0000-0000-0000-000000000000","pid":7788,"startedAt":"2026-09-21T10:21:00.000Z"}],"offlineQueue":0,"shellConnected":true,"gamesVolume":{"owner":"disklessHelper"},"antiCheat":{"vanguardInstalled":true,"faceitInstalled":false},"kioskUser":{"name":"club","ready":false,"problem":"privilegedAccount","privilegedGroups":["Administrators"]}}"#
+            r#"{"status":"busy","currentSessionId":"00000000-0000-0000-0000-000000000000","agentVersion":"1.4.2","shellVersion":"1.4.2","uptimeSec":8123,"ipAddress":"10.0.1.12","policyVersion":12,"runningGames":[{"gameId":"00000000-0000-0000-0000-000000000000","pid":7788,"startedAt":"2026-09-21T10:21:00.000Z"}],"offlineQueue":0,"shellConnected":true,"gamesVolume":{"owner":"disklessHelper"},"antiCheat":{"vanguardInstalled":true,"faceitInstalled":false},"kioskUser":{"name":"club","ready":false,"problem":"privilegedAccount","privilegedGroups":["Administrators"],"autoLogon":true,"forceAutoLogon":true}}"#
         );
         assert_eq!(serde_json::from_str::<HeartbeatRequest>(&json).unwrap(), hb);
         let res: HeartbeatResponse = serde_json::from_str(

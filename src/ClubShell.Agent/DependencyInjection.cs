@@ -209,6 +209,7 @@ public static class AgentServiceCollectionExtensions
     {
         services.TryAddSingleton<TempUserProvisioner>();
         services.TryAddSingleton<IKioskCredentials>(sp => sp.GetRequiredService<TempUserProvisioner>());
+        services.TryAddSingleton<KioskLogonGuard>();
         services.TryAddSingleton<ProfileResetService>();
         services.TryAddSingleton<ClubShell.Agent.Users.IProfileResetTrigger>(sp => sp.GetRequiredService<ProfileResetService>());
 

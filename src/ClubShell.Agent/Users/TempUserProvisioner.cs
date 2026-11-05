@@ -83,9 +83,30 @@ public sealed class TempUserProvisioner : IKioskCredentials, IHostedService, IDi
     /// <summary><see langword="true"/> while a rotation that was due at provisioning waits for the kiosk session (<see cref="RotateIfOwedAsync"/>).</summary>
     public bool RotationOwed => _rotationOwed;
 
-    /// <summary>State of the kiosk account as the heartbeat reports it (<c>kioskUser</c>).</summary>
-    public HeartbeatKioskUser Status =>
-        IsProvisioned ? new HeartbeatKioskUser(UserName, Ready: true) : Volatile.Read(ref _status) ?? new HeartbeatKioskUser(UserName, Ready: false);
+    /// <summary>State of the kiosk account as the heartbeat reports it (<c>kioskUser</c>), with Winlogon's auto-logon for it.</summary>
+    public HeartbeatKioskUser Status
+    {
+        get
+        {
+            HeartbeatKioskUser status = IsProvisioned
+                ? new HeartbeatKioskUser(UserName, Ready: true)
+                : Volatile.Read(ref _status) ?? new HeartbeatKioskUser(UserName, Ready: false);
+            try
+            {
+                AutoLogonState autoLogon = ShellRegistry.GetAutoLogon();
+                return status with
+                {
+                    AutoLogon = autoLogon.Enabled && string.Equals(autoLogon.UserName, status.Name, StringComparison.OrdinalIgnoreCase),
+                    ForceAutoLogon = autoLogon.Forced,
+                    AutoLogonCount = autoLogon.Count,
+                };
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                return status;
+            }
+        }
+    }
 
     /// <summary>Kiosk account name (<c>shell.kioskUser.name</c>).</summary>
     public string UserName => Volatile.Read(ref _current)?.UserName ?? _settings.CurrentValue.Shell.KioskUser.Name;

@@ -2233,7 +2233,8 @@ anticheat/report — S3; `PATCH /admin/games/{id}` (реализуется) и `
     `signingSecret`; `403 pendingApproval` получает и одобренный ПК, чья перерегистрация не доказана; фраза описания
     `register` о повторной регистрации «каждое утро» верна только для агентов до 1.0.18.
 20. Сверка SHELL_CHANGES 2026-10-25 (п. 24, 25), пока вне контракта: `HeartbeatRequest.kioskUser`
-    (`HeartbeatKioskUser {name, ready, problem?, privilegedGroups?}`, `problem` — `privilegedAccount` | `missing` |
+    (`HeartbeatKioskUser {name, ready, problem?, privilegedGroups?, autoLogon?, forceAutoLogon?, autoLogonCount?}` —
+    последние три по п. 76, `problem` — `privilegedAccount` | `missing` |
     `provisioningFailed`) — сервер сохраняет его в `last_heartbeat` вместе с остальным телом; `AdminHallPc.stateless` и
     `AdminPcUpdateRequest.stateless` (D-79). Схемы этих объектов открыты, проверки ответов и дрейф по REF не задеты.
 21. Своя политика клуба (D-80), пока вне контракта: `GET /admin/policy` → `{policy: Policy, custom: boolean}`,

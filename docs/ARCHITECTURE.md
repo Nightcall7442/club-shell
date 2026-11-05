@@ -122,7 +122,8 @@ Rules:
 
 1. The Agent is the only privileged component. It owns every OS-level side effect (launch, kill, firewall,
    registry policy, power, users, storage). The Shell is UI only and never calls a privileged API.
-2. Windows auto-logon (`AutoAdminLogon`) logs the kiosk user in at boot (`shell.kioskUser.name`, default `club`
+2. Windows auto-logon (`AutoAdminLogon` + `ForceAutoLogon`) logs the kiosk user in at boot and again after every
+   sign-out (`shell.kioskUser.name`, default `club`
    in code, `config/agent.default.json`, `install.ps1 -KioskUser` and the MSI `KIOSKUSER` property).
    Winlogon's per-user `Shell` value for that account points at `clubshell-shell.exe`; for admins it remains
    `explorer.exe` (`SHELL_REPLACEMENT.md`).
@@ -476,6 +477,8 @@ unless the key ends with `Ms`.
         "clearOnReset": true                      // emptied by every profile reset
       },
       "resetProfileOnLogout": true,
+      "resetMode": "auto",                        // after a session: "logoff" resets the profile; "reboot" reboots the PC
+                                                  // (system disk reset at boot); "auto" = reboot on an iSCSI system disk
       "profileTemplate": null,                    // string path | null. Folder copied into a fresh profile.
       "preserveOnReset": null                     // string[] | null. Profile-relative dirs carried across a reset;
                                                   // null = ProfileReset.PreservedDirectories (anti-cheat, shader caches).

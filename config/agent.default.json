@@ -32,6 +32,7 @@
       "passwordRotationDays": 7,
       "folderRedirect": { "enabled": true, "root": null, "clearOnReset": true },
       "resetProfileOnLogout": true,
+      "resetMode": "auto",
       "profileTemplate": null,
       "preserveOnReset": null
     },

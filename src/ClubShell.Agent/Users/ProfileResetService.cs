@@ -5,6 +5,8 @@ using ClubShell.Contracts.Sessions;
 using ClubShell.Core.Abstractions;
 using ClubShell.Agent.Policy;
 using ClubShell.Core.Configuration;
+using ClubShell.Windows.Hardware;
+using ClubShell.Windows.Power;
 using ClubShell.Windows.Sessions;
 using ClubShell.Windows.Users;
 using Microsoft.Extensions.Options;
@@ -32,7 +34,10 @@ public interface IShellRelauncher
     /// <summary>Stops the Shell and suspends automatic restarts until <see cref="RelaunchAsync"/>.</summary>
     Task StopAsync(CancellationToken cancellationToken);
 
-    /// <summary>Resumes the watchdog and starts the Shell in the interactive session (logging the kiosk user on when needed).</summary>
+    /// <summary>
+    /// Resumes the watchdog, which starts the Shell once the kiosk session exists. The Agent does not log the kiosk on:
+    /// Winlogon does, through auto-logon with <c>ForceAutoLogon</c> (<c>ShellRegistry.SetAutoLogon</c>).
+    /// </summary>
     Task RelaunchAsync(CancellationToken cancellationToken);
 }
 
@@ -46,6 +51,12 @@ public interface IShellRelauncher
 /// <see cref="Cooldown"/> rate-limits only the on-demand requests through <see cref="IProfileResetTrigger"/> and the
 /// retries of a reset that failed.
 /// <para>
+/// After a session the kiosk is logged on again by Winlogon (<c>ForceAutoLogon</c>, SHELL_CHANGES 76); when it does not
+/// come back within <see cref="RestoreTimeout"/>, <see cref="KioskLogonGuard"/> reboots the PC (SHELL_CHANGES 77). A PC
+/// whose system disk is reset at every boot (<c>shell.kioskUser.resetMode</c> <c>reboot</c>, or <c>auto</c> on an iSCSI
+/// system disk) is rebooted after a session instead of having its profile deleted (SHELL_CHANGES 78).
+/// </para>
+/// <para>
 /// A session that never ends — the PC loses power, the Agent is killed — produces no <see cref="SessionEventType.Ended"/>
 /// and would leave the profile for the next player. <see cref="SessionEventType.Started"/> therefore writes a debt
 /// marker that outlives the crash, and <see cref="ResetIfDirtyAsync"/> pays it at the next Agent start and on every
@@ -56,7 +67,9 @@ public interface IShellRelauncher
 [SupportedOSPlatform("windows")]
 public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, IDisposable
 {
-    private const int MaxLogoffRounds = 4;
+    /// <summary><c>MSFT_PhysicalDisk.BusType</c> of an iSCSI disk.</summary>
+    private const int IscsiBusType = 9;
+    private const int RebootDelaySec = 5;
     private static readonly TimeSpan SessionSettleDelay = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan RestoreTimeout = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan RestorePollInterval = TimeSpan.FromSeconds(2);
@@ -70,13 +83,28 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
     private readonly IClock _clock;
     private readonly ILogger<ProfileResetService> _logger;
     private readonly PolicyEnforcer? _enforcer;
+    private readonly KioskLogonGuard? _logonGuard;
+    private readonly PowerControl? _power;
+    private readonly WmiQueries? _wmi;
     private readonly SemaphoreSlim _lock = new(1, 1);
+    private bool? _systemDiskIscsi;
     private DateTimeOffset? _lastResetAt;
     private DateTimeOffset? _lastDirtyAttemptAt;
     private bool _disposed;
 
     /// <summary>Creates the service; <see cref="StartAsync"/> subscribes it to session changes.</summary>
-    public ProfileResetService(ProfileReset reset, TempUserProvisioner provisioner, IShellRelauncher relauncher, ISessionService sessions, IOptionsMonitor<AgentSettings> settings, IClock clock, ILogger<ProfileResetService> logger, PolicyEnforcer? enforcer = null)
+    public ProfileResetService(
+        ProfileReset reset,
+        TempUserProvisioner provisioner,
+        IShellRelauncher relauncher,
+        ISessionService sessions,
+        IOptionsMonitor<AgentSettings> settings,
+        IClock clock,
+        ILogger<ProfileResetService> logger,
+        PolicyEnforcer? enforcer = null,
+        KioskLogonGuard? logonGuard = null,
+        PowerControl? power = null,
+        WmiQueries? wmi = null)
     {
         ArgumentNullException.ThrowIfNull(reset);
         ArgumentNullException.ThrowIfNull(provisioner);
@@ -93,6 +121,9 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
         _clock = clock;
         _logger = logger;
         _enforcer = enforcer;
+        _logonGuard = logonGuard;
+        _power = power;
+        _wmi = wmi;
         _lastResetAt = reset.LastReset;
     }
 
@@ -195,9 +226,11 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
             try
             {
                 await _relauncher.StopAsync(cancellationToken).ConfigureAwait(false);
-                LogoffKioskSessions(user);
                 IReadOnlyList<string> preserve = _settings.CurrentValue.Shell.KioskUser.PreserveOnReset ?? ProfileReset.PreservedDirectories;
-                var result = await Task.Run(() => _reset.ResetProfile(user, preserve), cancellationToken).ConfigureAwait(false);
+                // The sessions of the player who just left, logged off once each: Winlogon logs the kiosk on again at
+                // once (ForceAutoLogon), and that session is the next player's, not one to chase.
+                IReadOnlyCollection<uint> sessions = ProfileReset.SessionsOf(user);
+                var result = await Task.Run(() => _reset.ResetProfile(user, preserve, sessions), cancellationToken).ConfigureAwait(false);
                 // The redirected Desktop, Documents, ... live outside the profile: empty them too, while the kiosk is logged off.
                 await Task.Run(_provisioner.ClearRedirectedFolders, cancellationToken).ConfigureAwait(false);
                 _lastResetAt = _clock.UtcNow;
@@ -299,6 +332,7 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
             if (_clock.UtcNow >= deadline)
             {
                 _logger.LogWarning("Kiosk user {User} did not log on again within {Timeout}; policies are re-applied at the next logon", user, RestoreTimeout);
+                _ = _logonGuard?.Recover("profileReset");
                 return;
             }
 
@@ -345,29 +379,6 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
         }
     }
 
-    private void LogoffKioskSessions(string user)
-    {
-        for (var round = 0; round < MaxLogoffRounds; round++)
-        {
-            var session = WtsSessions.FindByUser(user);
-            if (session is null)
-            {
-                return;
-            }
-
-            try
-            {
-                _logger.LogInformation("Logging off session {SessionId} of {User}", session.Id, user);
-                WtsSessions.Logoff(session.Id, wait: true);
-            }
-            catch (Win32Exception ex)
-            {
-                _logger.LogWarning(ex, "Logoff of session {SessionId} failed", session.Id);
-                return;
-            }
-        }
-    }
-
     private void OnSessionChanged(object? sender, SessionEvent e)
     {
         if (!_settings.CurrentValue.Shell.KioskUser.ResetProfileOnLogout)
@@ -408,6 +419,11 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
         try
         {
             await _clock.Delay(SessionSettleDelay, CancellationToken.None).ConfigureAwait(false);
+            if (await RebootsAfterSessionAsync().ConfigureAwait(false) && RebootAfterSession())
+            {
+                return;
+            }
+
             // Forced: a session that ended within the cooldown of the last reset (a short one, or one right after the
             // previous player's) would otherwise hand its profile to the next player.
             await RequestResetAsync("sessionEnded", force: true, CancellationToken.None).ConfigureAwait(false);
@@ -416,5 +432,66 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
         {
             _logger.LogError(ex, "Profile reset after session end failed");
         }
+    }
+
+    /// <summary><c>shell.kioskUser.resetMode</c>: <c>reboot</c>, or <c>auto</c> on a system disk that is on iSCSI.</summary>
+    private async Task<bool> RebootsAfterSessionAsync()
+    {
+        string mode = _settings.CurrentValue.Shell.KioskUser.ResetMode;
+        if (_power is null || mode == "logoff")
+        {
+            return false;
+        }
+
+        if (mode == "reboot")
+        {
+            return true;
+        }
+
+        if (_systemDiskIscsi is null && _wmi is not null)
+        {
+            try
+            {
+                if (await _wmi.GetSystemDiskBusTypeAsync(CancellationToken.None).ConfigureAwait(false) is { } bus)
+                {
+                    _systemDiskIscsi = bus == IscsiBusType;
+                    _logger.LogInformation("System disk bus type {BusType}: {Mode} after a session", bus, _systemDiskIscsi == true ? "reboot" : "profile reset");
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogDebug(ex, "System disk bus type unknown");
+            }
+        }
+
+        return _systemDiskIscsi == true;
+    }
+
+    /// <summary>
+    /// The reboot is the reset: the system disk of such a PC comes back clean, the kiosk's profile with it, and auto-logon
+    /// runs at boot. Returns <see langword="false"/> when Windows refuses the reboot, and the profile is reset instead.
+    /// </summary>
+    private bool RebootAfterSession()
+    {
+        if (_sessions.State.IsOpen())
+        {
+            // The same rule as a reset: an open session is never pulled from under a player.
+            _logger.LogInformation("Reboot after the session skipped: the next session already started");
+            return true;
+        }
+
+        try
+        {
+            _power!.Reboot(RebootDelaySec, message: null, force: true);
+        }
+        catch (Win32Exception ex)
+        {
+            _logger.LogError(ex, "Reboot after the session failed; resetting the profile instead");
+            return false;
+        }
+
+        _reset.ClearDirty();
+        _logger.LogInformation("Session ended on a PC whose system disk is reset at boot: rebooting in {Delay} s instead of resetting the profile", RebootDelaySec);
+        return true;
     }
 }
