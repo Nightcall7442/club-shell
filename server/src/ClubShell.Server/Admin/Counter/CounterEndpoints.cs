@@ -228,6 +228,7 @@ public static partial class CounterEndpoints
         {
             await AdvisoryLocks.PcAsync(c, tx, pc.Id);
             await ShiftEndpoints.RequireOpenAsync(c, tx, staff);
+            await RequireReadyAsync(c, tx, pc, sessions.Clock.GetUtcNow());
             if (payment is { } pay)
             {
                 paid = await PostTopUpAsync(c, tx, staff, effects, r.UserId!.Value, pay.Amount, pay.Method, sessions.Clock.GetUtcNow(), forSession: true);
@@ -279,6 +280,7 @@ public static partial class CounterEndpoints
             var now = sessions.Clock.GetUtcNow();
             await AdvisoryLocks.PcAsync(c, tx, pc.Id);
             await ShiftEndpoints.RequireOpenAsync(c, tx, staff);
+            await RequireReadyAsync(c, tx, pc, now);
             var guest = await Guests.CreateAsync(c, tx, staff.NetworkId, pc.Number, name ?? $"Гость {pc.Number}", "ru", now);
             if (payment is { } pay)
             {
@@ -777,6 +779,30 @@ public static partial class CounterEndpoints
     /// <summary>A live PC of the staff member's club, else <c>404 what=pc</c>.</summary>
     public static async Task<PcRow> LivePcAsync(PcRepository pcs, StaffContext staff, Guid pcId) =>
         await pcs.FindAsync(pcId) is { DeletedAt: null } pc && pc.ClubId == staff.ClubId ? pc : throw ApiException.NotFound("pc");
+
+    /// <summary>A heartbeat this recent tells whether the PC is ready (SHELL_CHANGES 86); an older one is a PC that is off.</summary>
+    private static readonly TimeSpan ReadinessFresh = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// SHELL_CHANGES 86: a PC whose agent reports it is still attaching its games disks (<c>preparing</c>) or found none
+    /// (<c>notReady</c>) takes no one: <c>409 pcNotReady {state}</c>. A desk open skips <c>session.start</c> on the PC,
+    /// so the agent's own refusal does not cover it. An agent that does not report readiness, or a PC whose last
+    /// heartbeat is stale (switched off), seats as before.
+    /// </summary>
+    private static async Task RequireReadyAsync(NpgsqlConnection c, NpgsqlTransaction tx, PcRow pc, DateTimeOffset now)
+    {
+        if (pc.LastHeartbeatAt is not { } at || now - at >= ReadinessFresh)
+        {
+            return;
+        }
+
+        var state = await c.QuerySingleOrDefaultAsync<string?>(
+            "SELECT last_heartbeat -> 'readiness' ->> 'state' FROM pcs WHERE id = @Id", new { pc.Id }, tx);
+        if (state is "preparing" or "notReady")
+        {
+            throw new ApiException(StatusCodes.Status409Conflict, ErrorCode.Conflict, "Conflict: pcNotReady", new { reason = "pcNotReady", state });
+        }
+    }
 
     /// <summary>The open session to act on, locked: by <c>sessionId</c> when given (it wins, as in the mock), else the PC's.</summary>
     private static async Task<SessionRow> TargetAsync(NpgsqlConnection c, NpgsqlTransaction tx, StaffContext staff, AdminSessionTarget r)

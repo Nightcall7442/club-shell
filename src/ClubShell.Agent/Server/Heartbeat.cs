@@ -64,6 +64,7 @@ public interface IConfigRefresh
 [SupportedOSPlatform("windows")]
 public sealed class HeartbeatService : BackgroundService
 {
+    private readonly Readiness.PcReadinessService? _readiness;
     private readonly ServerConnection _connection;
     private readonly IServerClient _server;
     private readonly ISessionService _sessions;
@@ -104,8 +105,10 @@ public sealed class HeartbeatService : BackgroundService
         TempUserProvisioner kiosk,
         IClock clock,
         IOptionsMonitor<AgentSettings> settings,
-        ILogger<HeartbeatService> logger)
+        ILogger<HeartbeatService> logger,
+        Readiness.PcReadinessService? readiness = null)
     {
+        _readiness = readiness;
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(server);
         ArgumentNullException.ThrowIfNull(sessions);
@@ -198,7 +201,8 @@ public sealed class HeartbeatService : BackgroundService
             _shell.IsConnected,
             _gamesVolume.VolumeState(),
             await AntiCheatStateAsync(cancellationToken).ConfigureAwait(false),
-            _kiosk.Status);
+            _kiosk.Status,
+            _readiness?.Current);
 
         var sentAt = _clock.UtcNow;
         var response = await _server.HeartbeatAsync(pcId, request, cancellationToken).ConfigureAwait(false);

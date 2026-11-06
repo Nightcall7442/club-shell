@@ -395,6 +395,10 @@ public sealed class ClubTimeConverter : JsonConverter<TimeOnly>
 [JsonSerializable(typeof(AuthExpired))]
 [JsonSerializable(typeof(PlayerSavesState))]
 [JsonSerializable(typeof(PlayerSavesStatus))]
+[JsonSerializable(typeof(PcReadinessState))]
+[JsonSerializable(typeof(PcReadinessDisk))]
+[JsonSerializable(typeof(PcReadiness))]
+[JsonSerializable(typeof(GamesChanged))]
 
 // Commands / WS / REST agent surface.
 [JsonSerializable(typeof(UpdateChannel))]

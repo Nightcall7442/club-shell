@@ -174,7 +174,8 @@
       "tariffTime": "This tariff is not available right now: pick another one.",
       "pcMaintenance": "This PC is under maintenance: take another one or call the staff.",
       "blacklisted": "Sign-in is closed for this account: please talk to the staff."
-    }
+    },
+    "pcNotReady": "The PC is still preparing: the games disks are attaching. Please wait a moment."
   },
   "lock": {
     "title": "Welcome",
@@ -255,7 +256,21 @@
     "gpu": "GPU",
     "ram": "RAM",
     "startPlaying": "Start playing",
-    "logoutInstead": "Log out"
+    "logoutInstead": "Log out",
+    "preparing": {
+      "title": "Preparing the PC…",
+      "hint": "Attaching the games disks. Sign-in opens as soon as everything is ready.",
+      "notReadyTitle": "The PC is not ready to play",
+      "notReadyHint": "The games disks did not attach. Please call an administrator.",
+      "disks": "Games disks",
+      "games": "Online games",
+      "solo": "Offline games",
+      "state": {
+        "ready": "ready",
+        "attaching": "attaching",
+        "unavailable": "unavailable"
+      }
+    }
   },
   "desktop": {
     "title": "Home",
@@ -493,7 +508,9 @@
     "selectGame": "Select a game",
     "resultsCount": "{{count}} shown",
     "installedFilterOn": "Showing installed games only",
-    "settingsFollow": "Your binds, sensitivity and graphics load on this PC and are saved after the game"
+    "settingsFollow": "Your binds, sensitivity and graphics load on this PC and are saved after the game",
+    "disksAttaching": "Games are being attached…",
+    "noneInstalled": "No games are available on this PC. Please call an administrator."
   },
   "apps": {
     "title": "Apps",

@@ -6,6 +6,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::error::IpcError;
+use crate::events::PcReadiness;
 use crate::games::{App, Game, GamesSort, LauncherType, Resolution, RunningGame};
 use crate::pc::{
     AgentServerConfig, ConnectivityState, HardwareInfo, Pc, PcMetrics, PcStatus, Policy, ShellClub,
@@ -205,6 +206,10 @@ pub struct AuthStatusResponse {
         skip_serializing_if = "Option::is_none"
     )]
     pub expires_at: Option<DateTime<Utc>>,
+    /// Whether the PC may let a player in yet (SHELL_CHANGES 86): the sign-in screen waits for it
+    /// as for this answer. `null` from an Agent that does not know it: ready.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub readiness: Option<PcReadiness>,
 }
 
 /// Request of `booking.cancel`.
@@ -720,6 +725,10 @@ pub mod names {
         pub const SHOP_ORDER_UPDATED: &str = "shop.orderUpdated";
         /// Payload `PlayerSavesStatus`.
         pub const SAVES_STATUS: &str = "saves.status";
+        /// Payload `PcReadiness`.
+        pub const SYS_READINESS_CHANGED: &str = "sys.readinessChanged";
+        /// Payload `GamesChanged`.
+        pub const GAMES_CHANGED: &str = "games.changed";
 
         /// All values.
         pub const ALL: &[&str] = &[
@@ -742,6 +751,8 @@ pub mod names {
             AUTH_EXPIRED,
             SHOP_ORDER_UPDATED,
             SAVES_STATUS,
+            SYS_READINESS_CHANGED,
+            GAMES_CHANGED,
         ];
     }
 }
@@ -1775,6 +1786,10 @@ pub struct HeartbeatRequest {
     /// older agents).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kiosk_user: Option<HeartbeatKioskUser>,
+    /// Whether the PC lets a player in yet (SHELL_CHANGES 86): the cash desk shows "preparing" /
+    /// "not ready" and does not seat anyone on it meanwhile (omitted by older agents).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub readiness: Option<PcReadiness>,
 }
 
 wire_enum! {
@@ -3056,7 +3071,7 @@ mod tests {
         );
         assert!(AgentCommand::try_from("nope.nope").is_err());
         assert!(!AgentCommand::is_known("Session.Start"));
-        assert_eq!(names::events::ALL.len(), 19);
+        assert_eq!(names::events::ALL.len(), 21);
     }
 
     #[test]
@@ -3144,6 +3159,7 @@ mod tests {
             user: None,
             session: None,
             expires_at: None,
+            readiness: None,
         };
         assert_eq!(
             serde_json::to_string(&status).unwrap(),
@@ -3748,6 +3764,7 @@ mod tests {
                 force_auto_logon: Some(true),
                 auto_logon_count: None,
             }),
+            readiness: None,
         };
         let json = serde_json::to_string(&hb).unwrap();
         assert_eq!(

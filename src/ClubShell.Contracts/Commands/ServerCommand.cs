@@ -788,6 +788,10 @@ public sealed record HeartbeatRunningGame(
 /// <param name="GamesVolume">Who mounts the games library and whether it is mounted (omitted by older agents).</param>
 /// <param name="AntiCheat">Riot Vanguard and platform security state (omitted by older agents).</param>
 /// <param name="KioskUser">State of the kiosk account, so a PC whose kiosk cannot be provisioned is visible (omitted by older agents).</param>
+/// <param name="Readiness">
+/// Whether the PC lets a player in yet (SHELL_CHANGES 86): the cash desk shows "preparing" / "not ready" and does not
+/// seat anyone on it meanwhile (omitted by older agents).
+/// </param>
 public sealed record HeartbeatRequest(
     PcStatus Status,
     Guid? CurrentSessionId,
@@ -801,7 +805,8 @@ public sealed record HeartbeatRequest(
     bool ShellConnected,
     HeartbeatGamesVolume? GamesVolume = null,
     HeartbeatAntiCheat? AntiCheat = null,
-    HeartbeatKioskUser? KioskUser = null);
+    HeartbeatKioskUser? KioskUser = null,
+    Ipc.PcReadiness? Readiness = null);
 
 /// <summary>Well-known values of <see cref="HeartbeatKioskUser.Problem"/>.</summary>
 public static class KioskUserProblems

@@ -1068,6 +1068,10 @@ internal static class FileMap
         ["AuthExpired"] = ("events", "events"),
         ["PlayerSavesState"] = ("events", "events"),
         ["PlayerSavesStatus"] = ("events", "events"),
+        ["PcReadinessState"] = ("events", "events"),
+        ["PcReadinessDisk"] = ("events", "events"),
+        ["PcReadiness"] = ("events", "events"),
+        ["GamesChanged"] = ("events", "events"),
 
         // Notifications sit next to the events in TS and with the users in Rust.
         ["NotificationLevel"] = ("events", "user"),

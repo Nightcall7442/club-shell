@@ -22,6 +22,7 @@ const DETAIL_COPY: Record<string, string> = {
   noShift: 'Смена не открыта',
   shiftClosed: 'Смена не открыта — откройте смену, чтобы принимать деньги',
   pcBusy: 'ПК занят',
+  pcNotReady: 'ПК готовится: диски игр ещё подключаются',
   taken: 'Уже занято',
   digits4to8: 'PIN — от 4 до 8 цифр',
   expired: 'Срок действия истёк',

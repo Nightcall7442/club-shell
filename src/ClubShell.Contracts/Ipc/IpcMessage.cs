@@ -334,12 +334,18 @@ public static class IpcMessages
         /// <summary>Payload <see cref="Ipc.PlayerSavesStatus"/>.</summary>
         public const string SavesStatus = "saves.status";
 
+        /// <summary>Payload <see cref="Ipc.PcReadiness"/>.</summary>
+        public const string SysReadinessChanged = "sys.readinessChanged";
+
+        /// <summary>Payload <see cref="Ipc.GamesChanged"/>.</summary>
+        public const string GamesChanged = "games.changed";
+
         /// <summary>All event names.</summary>
         public static IReadOnlyList<string> All { get; } = new[]
         {
             SessionUpdated, SessionWarning, SessionEnded, WalletUpdated, ChatMessage, NotificationPush, AdminMessage,
             AdminRemoteControl, GameStateChanged, PolicyChanged, UpdateAvailable, UpdateProgress, UpdateReady, SysMetrics,
-            SysConnectivity, ShellCommand, AuthExpired, ShopOrderUpdated, SavesStatus,
+            SysConnectivity, ShellCommand, AuthExpired, ShopOrderUpdated, SavesStatus, SysReadinessChanged, GamesChanged,
         };
     }
 }
@@ -516,12 +522,17 @@ public sealed record AuthLogoutResponse(
 /// <param name="User">Logged-in user.</param>
 /// <param name="Session">Current session.</param>
 /// <param name="ExpiresAt">User token expiry.</param>
+/// <param name="Readiness">
+/// Whether the PC may let a player in yet (SHELL_CHANGES 86): the sign-in screen waits for it as for this answer.
+/// <see langword="null"/> from an Agent that does not know it: ready.
+/// </param>
 public sealed record AuthStatusResponse(
     bool Authenticated,
     ConnectivityState Mode,
     User? User = null,
     Session? Session = null,
-    DateTimeOffset? ExpiresAt = null);
+    DateTimeOffset? ExpiresAt = null,
+    PcReadiness? Readiness = null);
 
 #endregion
 
@@ -1432,5 +1443,35 @@ public enum PlayerSavesState
 /// <summary>Payload of <c>saves.status</c>, sent on every change of <see cref="State"/>.</summary>
 /// <param name="State">Where the player's saves are.</param>
 public sealed record PlayerSavesStatus(PlayerSavesState State);
+
+/// <summary>Whether the PC may let a player in (SHELL_CHANGES 86).</summary>
+[JsonConverter(typeof(CamelCaseEnumConverter<PcReadinessState>))]
+public enum PcReadinessState
+{
+    /// <summary>The games disks are still being attached: no sign-in, no session yet.</summary>
+    Preparing,
+
+    /// <summary>Everything that could be attached is; the game list is fresh. Once ready, a PC stays ready until the Agent restarts.</summary>
+    Ready,
+
+    /// <summary>No games disk came up in time: no sign-in; the PC turns ready as soon as one does.</summary>
+    NotReady,
+}
+
+/// <summary>One games disk in <see cref="PcReadiness"/>.</summary>
+/// <param name="Library"><c>games</c>, <c>solo</c>, … (the diskless helper's names), or the library root when the helper does not report its disks.</param>
+/// <param name="Letter">Drive letter, when known.</param>
+/// <param name="State"><c>mounted</c>, <c>attaching</c>, <c>preparing</c>, or why it is not coming (<c>failed</c>, <c>noServer</c>, <c>missing</c>, …).</param>
+public sealed record PcReadinessDisk(string Library, string? Letter, string State);
+
+/// <summary>Payload of <c>sys.readinessChanged</c> and <see cref="AuthStatusResponse.Readiness"/>; part of the heartbeat.</summary>
+/// <param name="State">Preparing, ready or not ready.</param>
+/// <param name="Disks">The games disks and how far each is.</param>
+/// <param name="Deadline">When the wait for the disks gives up (while preparing).</param>
+public sealed record PcReadiness(PcReadinessState State, IReadOnlyList<PcReadinessDisk> Disks, DateTimeOffset? Deadline = null);
+
+/// <summary>Payload of <c>games.changed</c>: the game list changed (a disk came or went, the catalogue was updated).</summary>
+/// <param name="CatalogVersion">Catalogue version after the change.</param>
+public sealed record GamesChanged(string? CatalogVersion);
 
 #endregion
