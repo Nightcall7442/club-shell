@@ -21,6 +21,7 @@ export default {
         text: themeColor('text'),
         muted: themeColor('muted'),
         danger: themeColor('danger'),
+        'danger-solid': themeColor('danger-solid'),
         success: themeColor('success'),
       },
       borderRadius: {

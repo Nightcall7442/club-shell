@@ -91,7 +91,8 @@ export default function IdleScreen(): JSX.Element {
               {pcName && <p className="hud-label mt-2">{t('idle.pcName', { name: pcName, zone: pcZone })}</p>}
             </div>
           </div>
-          <span className="hud-label flex items-center gap-2 text-success">
+          {/* On a pill: the wallpaper behind the corner can be any colour. */}
+          <span className="hud-label flex items-center gap-2 rounded-full bg-bg/70 px-3 py-1.5 text-success">
             <span aria-hidden="true" className="h-2 w-2 rounded-full bg-success" />
             {t('idle.pcFree')}
           </span>

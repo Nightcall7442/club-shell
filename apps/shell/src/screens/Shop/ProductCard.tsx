@@ -68,7 +68,6 @@ export const ProductCard = memo(function ProductCard({
       className={clsx(
         'glass group relative flex flex-col overflow-hidden rounded-lg transition-[box-shadow,border-color] duration-[var(--dur-fast)] hover:border-[color:var(--hairline-hover)]',
         'focus-within:border-glow',
-        !available && 'opacity-60',
         className,
       )}
       aria-label={product.title}
@@ -95,6 +94,9 @@ export const ProductCard = memo(function ProductCard({
             {product.title.slice(0, 1).toUpperCase()}
           </span>
         )}
+        {/* Out of stock dims the picture only: the card's badges and title stay readable (the whole card at 60 %
+            took «Нет в наличии» itself under 4:1). */}
+        {!available && <div aria-hidden="true" className="absolute inset-0 bg-bg/60" />}
         <div className="absolute left-2 top-2 flex flex-wrap gap-1.5">
           <Badge size="sm" tone="neutral" className="bg-bg/70">
             {t(`shop.category.${product.category}`)}
@@ -120,7 +122,10 @@ export const ProductCard = memo(function ProductCard({
       <div className="flex flex-1 flex-col gap-2 p-3">
         <h3 className="line-clamp-2 min-h-[2.6em] text-base font-semibold leading-snug text-text">{product.title}</h3>
         <div className="mt-auto flex items-center justify-between gap-2">
-          <DotAmount value={formatMoney(product.price, locale)} className="tnum text-xl text-text" />
+          <DotAmount
+            value={formatMoney(product.price, locale)}
+            className={clsx('tnum text-xl', available ? 'text-text' : 'text-muted')}
+          />
           {qty === 0 ? (
             // Icon-only rather than labelled: next to the price the label wrapped the amount onto two lines. Size lg
             // (3rem) is exactly the height of the − n + stepper it turns into, so the card does not jump.

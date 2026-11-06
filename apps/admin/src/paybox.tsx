@@ -336,7 +336,7 @@ export function PayBox({
               readOnly={frozen || fixed}
               aria-readonly={frozen || fixed}
               className={clsx(
-                'tnum min-w-[1ch] max-w-full flex-[0_1_auto] bg-transparent font-display font-medium leading-none text-hi caret-accent outline-none [field-sizing:content] placeholder:text-muted/60',
+                'tnum min-w-[1ch] max-w-full flex-[0_1_auto] bg-transparent font-display font-medium leading-none text-hi caret-accent outline-none [field-sizing:content] placeholder:text-muted',
                 fixed ? 'text-[22px] tracking-[-0.01em]' : 'text-[36px] tracking-[-0.02em]',
               )}
               value={fixed ? exactDigits(exact) : groupDigits(digits)}

@@ -32,9 +32,9 @@ export function isActiveBooking(b: Booking): boolean {
 /** Free seats are the bright ones; everything unavailable recedes, so the eye finds a place without a colour key. */
 const STATUS_CLASS: Record<PcStatus, string> = {
   free: 'bg-text/[0.07] text-text border-text/25 hover:bg-text/[0.12]',
-  busy: 'bg-transparent text-muted/70 border-text/[0.07]',
+  busy: 'bg-transparent text-muted border-text/[0.07]',
   booked: 'bg-accent/10 text-accent border-accent/35',
-  locked: 'bg-transparent text-muted/70 border-text/[0.07]',
+  locked: 'bg-transparent text-muted border-text/[0.07]',
   maintenance: 'bg-transparent text-muted/50 border-dashed border-text/15',
   offline: 'bg-transparent text-muted/40 border-text/[0.05]',
   unknown: 'bg-transparent text-muted/40 border-text/[0.05]',

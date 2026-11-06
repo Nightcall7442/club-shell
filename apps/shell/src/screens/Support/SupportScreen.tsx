@@ -165,7 +165,7 @@ export function ReportProblemForm(): JSX.Element {
           }
         }}
         className={clsx(
-          'field themed-scrollbar w-full resize-none rounded-md px-3 py-2 text-base text-text outline-none placeholder:text-muted/70',
+          'field themed-scrollbar w-full resize-none rounded-md px-3 py-2 text-base text-text outline-none placeholder:text-muted',
           'focus:border-accent/60 focus:[box-shadow:var(--shadow-glow)]',
           error && 'border-danger/70',
         )}

@@ -22,11 +22,11 @@ read those properties. Switching themes never reloads the page.
 | `colors` | `ThemeColors` | yes | default palette per key | Eight colours, each `#RRGGBB` or `#RRGGBBAA` (`#RGB` is also accepted by `hexToRgb`). Alpha is ignored; Tailwind supplies opacity. |
 | `colors.bg` | hex | yes | `#07090C` | Page background. |
 | `colors.surface` | hex | yes | `#0D1117` | Cards, panels, popovers (`.glass`, `.glass-strong`). |
-| `colors.primary` | hex | yes | `#F4F4F5` | Primary actions, focus ring, selection. Text on it is `--c-on-primary`, derived by luminance (dark on light primaries, white otherwise). |
-| `colors.accent` | hex | yes | `#9ADFFF` | The one colour in the chrome: focus brackets, active nav rail, the `cta` button, grid, bonuses, booked seats, timer warning. Text on it is `--c-on-accent`. Text on it is `--c-on-accent`. |
+| `colors.primary` | hex | yes | `#F4F4F5` | Primary actions, focus ring, selection. Text on it is `--c-on-primary`: the theme `bg` or white, whichever has the higher contrast on the fill (`onColor`). |
+| `colors.accent` | hex | yes | `#9ADFFF` | The one colour in the chrome: focus brackets, active nav rail, the `cta` button, grid, bonuses, booked seats, timer warning. Text on it is `--c-on-accent`, chosen the same way. |
 | `colors.text` | hex | yes | `#E8F1F6` | Primary text. |
-| `colors.muted` | hex | yes | `#7D8A96` | Secondary text, scrollbars. |
-| `colors.danger` | hex | yes | `#EF4444` | Errors, session timer warning/critical. |
+| `colors.muted` | hex | yes | `#8B98A5` | Secondary text, scrollbars. Keep it at 6:1 or more on `surface`: it also sits on tinted badges and on glass over a wallpaper, where it loses about a quarter of that. |
+| `colors.danger` | hex | yes | `#EF4444` | Errors, session timer warning/critical. Solid danger badges and buttons fill with `--c-danger-solid`, this colour darkened until white text on it reaches 4.6:1 (`solidFill`). |
 | `colors.success` | hex | yes | `#22C55E` | Success states. |
 | `radius` | `int` px | yes | `10` | Base corner radius; Tailwind derives `sm`/`md`/`lg`/`xl`/`2xl` from it. |
 | `font` | `string` | yes | `"Inter"` | Font family name; falls back to the bundled `Inter Variable` (`@fontsource-variable/inter`, so the default renders the same on a PC that never had Inter installed), then `system-ui`, `Segoe UI`, `sans-serif`. Empty → default. |
@@ -158,7 +158,7 @@ accent. The game art carries the colour.
 | primary | `#F4F4F5` | white actions (dark text via `--c-on-primary`) |
 | accent | `#9ADFFF` | ice blue: brackets, active nav rail, the main call to action, bonuses, booked seats |
 | text | `#E8F1F6` | cool near-white |
-| muted | `#7D8A96` | cool grey |
+| muted | `#8B98A5` | cool grey |
 | danger | `#EF4444` | red: LIVE, errors, critical timer |
 | success | `#22C55E` | green |
 
@@ -177,10 +177,10 @@ bundled (`@fontsource-variable/unbounded`, `jetbrains-mono`, `doto`), so they re
 |-----|-----|------|
 | bg | `#07060F` | near-black violet |
 | surface | `#120F24` | panels |
-| primary | `#A855F7` | purple actions |
+| primary | `#A855F7` | purple actions (dark text: white would be 3.96:1) |
 | accent | `#F0ABFC` | pink highlight |
 | text | `#FAF5FF` | lavender-white |
-| muted | `#8E85B3` | dusty violet |
+| muted | `#9A92BE` | dusty violet |
 | danger | `#FB7185` | rose |
 | success | `#34D399` | mint |
 

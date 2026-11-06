@@ -170,7 +170,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             autoGrow(e.target);
           }}
           onKeyDown={onKeyDown}
-          className="max-h-[11rem] min-h-[2.75rem] flex-1 resize-none select-text bg-transparent py-2 text-base leading-7 text-text outline-none placeholder:text-muted/70 disabled:cursor-not-allowed"
+          className="max-h-[11rem] min-h-[2.75rem] flex-1 resize-none select-text bg-transparent py-2 text-base leading-7 text-text outline-none placeholder:text-muted disabled:cursor-not-allowed"
         />
         <Button
           type="submit"

@@ -166,7 +166,7 @@ export function CardLogin({ onSuccess, className, tapped = null }: CardLoginProp
           <p
             className={clsx(
               'tnum font-mono text-[clamp(1.25rem,2.6vh,1.625rem)] tracking-[0.18em]',
-              masked ? 'text-text' : 'text-muted/50',
+              masked ? 'text-text' : 'text-muted',
             )}
           >
             {masked ?? '•••• ••••'}

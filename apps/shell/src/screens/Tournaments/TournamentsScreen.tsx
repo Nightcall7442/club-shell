@@ -412,7 +412,7 @@ export default function TournamentsScreen(): JSX.Element {
                 priority
                 className="w-full shrink-0 rounded-none"
                 overlay={
-                  <div className="absolute inset-0 flex flex-col justify-end gap-2 bg-gradient-to-t from-bg/95 via-bg/40 to-transparent p-6">
+                  <div className="absolute inset-0 flex flex-col justify-end gap-2 bg-gradient-to-t from-bg/95 via-bg/75 to-transparent p-6">
                     <div className="flex flex-wrap items-center gap-3">
                       <Badge
                         tone={STATE_TONE[selected.state]}

@@ -469,7 +469,7 @@ function LaunchSequence({
                   <span
                     className={clsx(
                       'font-mono text-xs uppercase tracking-[0.14em]',
-                      s.state === 'done' ? 'text-success' : s.state === 'active' ? 'text-accent' : 'text-muted/60',
+                      s.state === 'done' ? 'text-success' : s.state === 'active' ? 'text-accent' : 'text-muted',
                     )}
                   >
                     {s.state === 'done' ? (

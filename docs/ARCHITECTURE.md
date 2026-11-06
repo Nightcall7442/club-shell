@@ -721,7 +721,7 @@ unless the key ends with `Ms`.
     "primary": "#F4F4F5",
     "accent": "#9ADFFF",
     "text": "#E8F1F6",
-    "muted": "#7D8A96",
+    "muted": "#8B98A5",
     "danger": "#EF4444",
     "success": "#22C55E"
   },

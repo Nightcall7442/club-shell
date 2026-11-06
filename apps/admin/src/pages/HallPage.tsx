@@ -539,7 +539,7 @@ export default function HallPage(): JSX.Element {
               className={clsx(
                 'hud-focus absolute inset-[3px] flex items-center justify-center rounded-[7px] border bg-bg/70 font-display text-[15px] font-medium leading-none tracking-[-0.01em] transition-colors [--brk-inset:-5px] [--brk-size:10px] hover:bg-text/[0.05]',
                 on ? 'z-10 border-accent/80 bg-accent/[0.08] text-hi shadow-sel' : 'border-accent/[0.16]',
-                p.status === 'offline' ? 'text-text/[0.34]' : !on && 'text-text/[0.88]',
+                p.status === 'offline' ? 'text-text/50' : !on && 'text-text/[0.88]',
               )}
             >
               {colorOf.get(p.zone) && (

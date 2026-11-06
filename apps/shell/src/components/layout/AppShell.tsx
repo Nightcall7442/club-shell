@@ -86,7 +86,7 @@ export function AppShell(): JSX.Element {
             animate={{ y: 0, opacity: 1 }}
             transition={{ duration: 0.6, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
             data-scrolled={scrolled}
-            className="absolute inset-x-0 top-0 z-20 h-[var(--topbar-h)] min-w-0 border-b border-transparent bg-gradient-to-b from-bg/90 via-bg/50 to-transparent transition-[background-color,border-color] duration-[var(--dur-base)] data-[scrolled=true]:border-[color:var(--hairline)] data-[scrolled=true]:bg-bg"
+            className="absolute inset-x-0 top-0 z-20 h-[var(--topbar-h)] min-w-0 border-b border-transparent bg-gradient-to-b from-bg/95 via-bg/85 to-transparent transition-[background-color,border-color] duration-[var(--dur-base)] data-[scrolled=true]:border-[color:var(--hairline)] data-[scrolled=true]:bg-bg"
           >
             <TopBar />
           </motion.header>
