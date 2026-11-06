@@ -27,7 +27,7 @@ const VARIANT: Record<ButtonVariant, string> = {
   secondary:
     'bg-text/[0.06] text-text shadow-[inset_0_0_0_1px_rgb(var(--c-text)/0.08)] hover:bg-text/10 active:bg-text/[0.14]',
   ghost: 'bg-transparent text-text hover:bg-text/[0.06] active:bg-text/10',
-  danger: 'bg-danger text-white hover:bg-danger/90 active:bg-danger/80',
+  danger: 'bg-danger-solid text-white hover:bg-danger-solid/90 active:bg-danger-solid/80',
   cta: 'cut-corners hud-focus !rounded-none text-on-accent',
 };
 

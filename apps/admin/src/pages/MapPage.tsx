@@ -412,7 +412,7 @@ function SeatTile({
     sub.push({ text: prepaid ? (tariff ?? '') : t('Постоплата'), tone: 'plain' });
   const numberTone =
     status === 'offline' && !session
-      ? 'text-text/[0.34]'
+      ? 'text-text/50'
       : status === 'locked' && !session
         ? 'text-text/[0.55]'
         : session || call

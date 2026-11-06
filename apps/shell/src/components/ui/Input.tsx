@@ -65,7 +65,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
           aria-invalid={hasError || undefined}
           aria-describedby={describedBy}
           className={clsx(
-            'h-full min-w-0 flex-1 bg-transparent text-text outline-none placeholder:text-muted/70 disabled:cursor-not-allowed',
+            'h-full min-w-0 flex-1 bg-transparent text-text outline-none placeholder:text-muted disabled:cursor-not-allowed',
             className,
           )}
           {...rest}

@@ -31,7 +31,7 @@ const SOLID: Record<BadgeTone, string> = {
   primary: 'bg-primary text-on-primary',
   accent: 'bg-accent text-on-accent',
   success: 'bg-success text-bg',
-  danger: 'bg-danger text-white',
+  danger: 'bg-danger-solid text-white',
   muted: 'bg-muted text-bg',
 };
 

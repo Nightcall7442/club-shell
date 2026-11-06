@@ -22,7 +22,11 @@ const SIZES: Record<AvatarSize, string> = {
   xl: 'h-24 w-24 text-3xl',
 };
 
-/** Deterministic hue per name so guests without pictures still look distinct. */
+/**
+ * Deterministic hue per name so guests without pictures still look distinct. The gradient is in OKLCH at a fixed
+ * lightness: every hue is equally dark there, so the initials keep 4.6:1 or more (HSL at 45 % left yellow names at
+ * 1.6:1).
+ */
 function hueOf(name: string): number {
   let h = 0;
   for (let i = 0; i < name.length; i += 1) {
@@ -54,7 +58,10 @@ export const Avatar = forwardRef<HTMLSpanElement, AvatarProps>(function Avatar(
       style={
         showImage
           ? style
-          : { background: `linear-gradient(135deg, hsl(${hue} 70% 45%), hsl(${(hue + 40) % 360} 70% 30%))`, ...style }
+          : {
+              background: `linear-gradient(135deg, oklch(0.48 0.12 ${hue}), oklch(0.34 0.1 ${(hue + 40) % 360}))`,
+              ...style,
+            }
       }
       {...rest}
     >

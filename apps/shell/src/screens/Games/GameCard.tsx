@@ -154,7 +154,8 @@ export const GameCard = forwardRef<HTMLButtonElement, GameCardProps>(function Ga
                     {t('games.running')}
                   </Badge>
                 ) : (
-                  <Badge tone="muted" size="sm">
+                  // Solid: on a greyed-out cover a tinted badge has nothing dark to stand on.
+                  <Badge tone="muted" size="sm" solid>
                     {notInstalledLabel(game, t)}
                   </Badge>
                 )}

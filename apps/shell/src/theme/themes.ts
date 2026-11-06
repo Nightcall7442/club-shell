@@ -6,6 +6,9 @@
  */
 import type { Theme, ThemeColors } from '@clubshell/contracts';
 import { api } from '@/lib/tauri';
+import { hexToRgb, isLight, onColor, shade, solidFill } from './colors';
+
+export { contrastRatio, hexToRgb, isLight, luminance, onColor, shade, solidFill } from './colors';
 
 /** Alias kept for the module contract. */
 export type ThemeDef = Theme;
@@ -21,7 +24,7 @@ export const DEFAULT_THEME: Theme = {
     primary: '#F4F4F5',
     accent: '#9ADFFF',
     text: '#E8F1F6',
-    muted: '#7D8A96',
+    muted: '#8B98A5',
     danger: '#EF4444',
     success: '#22C55E',
   },
@@ -46,7 +49,7 @@ export const NEON_THEME: Theme = {
     primary: '#A855F7',
     accent: '#F0ABFC',
     text: '#FAF5FF',
-    muted: '#8E85B3',
+    muted: '#9A92BE',
     danger: '#FB7185',
     success: '#34D399',
   },
@@ -78,60 +81,6 @@ export const THEME_COLOR_KEYS: readonly (keyof ThemeColors)[] = [
   'danger',
   'success',
 ];
-
-/**
- * `#RGB`, `#RRGGBB` or `#RRGGBBAA` → `"R G B"` (alpha ignored, Tailwind supplies it).
- * Returns `null` for anything else so a malformed theme cannot blank the UI.
- */
-export function hexToRgb(hex: string): string | null {
-  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.exec(hex.trim());
-  if (!m) {
-    return null;
-  }
-  let h = m[1] ?? '';
-  if (h.length === 3) {
-    h = h
-      .split('')
-      .map((c) => c + c)
-      .join('');
-  }
-  const r = parseInt(h.slice(0, 2), 16);
-  const g = parseInt(h.slice(2, 4), 16);
-  const b = parseInt(h.slice(4, 6), 16);
-  return `${r} ${g} ${b}`;
-}
-
-/** Mixes a theme hex colour towards black/white (for hover/active shades); `amount` −1..1. */
-export function shade(hex: string, amount: number): string {
-  const rgb = hexToRgb(hex);
-  if (!rgb) {
-    return hex;
-  }
-  const [r, g, b] = rgb.split(' ').map(Number) as [number, number, number];
-  const target = amount < 0 ? 0 : 255;
-  const k = Math.min(1, Math.abs(amount));
-  const mix = (c: number): number => Math.round(c + (target - c) * k);
-  const to = (c: number): string => mix(c).toString(16).padStart(2, '0');
-  return `#${to(r)}${to(g)}${to(b)}`;
-}
-
-/** WCAG relative luminance 0..1 of a hex colour (`0` for malformed input). */
-export function luminance(hex: string): number {
-  const rgb = hexToRgb(hex);
-  if (!rgb) {
-    return 0;
-  }
-  const [r, g, b] = rgb.split(' ').map((c) => {
-    const v = Number(c) / 255;
-    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
-  }) as [number, number, number];
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-
-/** `true` when text on this colour should be dark (light primaries such as white buttons). */
-export function isLight(hex: string): boolean {
-  return luminance(hex) > 0.4;
-}
 
 /** Type guard for a `Theme` object read from JSON. */
 export function isTheme(value: unknown): value is Theme {
@@ -202,9 +151,9 @@ export function applyTheme(theme: Theme): void {
   root.style.setProperty('--c-primary-hover', hexToRgb(shade(t.colors.primary, 0.1 * dir)) ?? '');
   root.style.setProperty('--c-primary-active', hexToRgb(shade(t.colors.primary, 0.2 * dir)) ?? '');
   for (const key of ['primary', 'accent'] as const) {
-    const on = isLight(t.colors[key]) ? t.colors.bg : '#FFFFFF';
-    root.style.setProperty(`--c-on-${key}`, hexToRgb(on) ?? '255 255 255');
+    root.style.setProperty(`--c-on-${key}`, hexToRgb(onColor(t.colors[key], t.colors.bg)) ?? '255 255 255');
   }
+  root.style.setProperty('--c-danger-solid', hexToRgb(solidFill(t.colors.danger)) ?? '');
   root.style.setProperty('--radius', `${t.radius}px`);
   root.style.setProperty('--font', `"${t.font.replace(/"/g, '')}"`);
   root.style.setProperty('--blur', `${t.blur}px`);
