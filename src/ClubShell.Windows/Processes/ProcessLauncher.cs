@@ -57,6 +57,12 @@ public sealed record ProcessStartSpec
     /// <summary>Start without a visible window / console.</summary>
     public bool Hidden { get; init; }
 
+    /// <summary>
+    /// Text shown as <c>***</c> wherever it appears in the logged command line (a pooled account's credentials on a
+    /// launcher's command line, SHELL_CHANGES 83). Never logged itself.
+    /// </summary>
+    public string? RedactInLog { get; init; }
+
     /// <summary>When &gt; 0, wait up to this long for the process to show a top-level window before returning.</summary>
     public int WaitForInputIdleMs { get; init; }
 }
@@ -205,7 +211,13 @@ public sealed class ProcessLauncher
                 _logger.LogWarning("SetPriorityClass({Priority}) failed for pid {Pid}: {Error}", spec.Priority, launched.Pid, Win32Error.Message(Win32Error.Last()));
             }
 
-            _logger.LogInformation("Launched {Exe} as pid {Pid} (session {SessionId})", spec.Exe, launched.Pid, spec.SessionId);
+            // SHELL_CHANGES 83: what was started, exactly, so a game that went wrong can be told apart in the log.
+            _logger.LogInformation(
+                "Launched pid {Pid} (session {SessionId}): {CommandLine} in {WorkingDir}",
+                launched.Pid,
+                spec.SessionId,
+                Redact(BuildCommandLine(spec.Exe, spec.Args), spec.RedactInLog),
+                workingDir);
 
             if (spec.WaitForInputIdleMs > 0)
             {
@@ -301,6 +313,13 @@ public sealed class ProcessLauncher
 
             await Task.Delay(WindowPollInterval, ct).ConfigureAwait(false);
         }
+    }
+
+    /// <summary><paramref name="text"/> with every occurrence of <paramref name="secret"/> replaced by <c>***</c>.</summary>
+    public static string Redact(string text, string? secret)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        return string.IsNullOrWhiteSpace(secret) ? text : text.Replace(secret.Trim(), "***", StringComparison.Ordinal);
     }
 
     /// <summary>Builds <c>"exe" args</c> for CreateProcess.</summary>

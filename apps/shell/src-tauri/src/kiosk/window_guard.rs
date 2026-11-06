@@ -118,6 +118,15 @@ pub(crate) fn process_path(pid: u32) -> Option<String> {
 }
 
 /// Executable name (`game.exe`) of `pid`, when accessible.
+/// Image name of `pid` (`hl.exe`), for the log; `None` for pid 0 or when it cannot be read.
+pub(crate) fn process_name_of(pid: u32) -> Option<String> {
+    if pid == 0 {
+        None
+    } else {
+        process_name(pid)
+    }
+}
+
 fn process_name(pid: u32) -> Option<String> {
     let path = process_path(pid)?;
     path.rsplit(['\\', '/'])
@@ -164,6 +173,8 @@ pub struct WindowGuard {
     hand_off: Mutex<Option<u32>>,
     /// Run when the Shell takes the foreground back from a hand-off (the kiosk re-arms its guard).
     on_return: OnceLock<Box<dyn Fn() + Send + Sync>>,
+    /// Run when the Shell's window gets the focus during a game (the kiosk may give it back to the game).
+    on_game_focus: OnceLock<Box<dyn Fn() + Send + Sync>>,
     refocus: Mutex<Option<JoinHandle<()>>>,
     sweep: Mutex<Option<JoinHandle<()>>>,
 }
@@ -194,6 +205,7 @@ impl WindowGuard {
             allowed: RwLock::new(HashSet::new()),
             hand_off: Mutex::new(None),
             on_return: OnceLock::new(),
+            on_game_focus: OnceLock::new(),
             refocus: Mutex::new(None),
             sweep: Mutex::new(None),
         });
@@ -317,6 +329,11 @@ impl WindowGuard {
     /// active, which the kiosk sets before calling this).
     pub fn set_game_mode(&self, on: bool) {
         self.game_mode.store(on, Ordering::Release);
+        if on && !self.dev {
+            // SHELL_CHANGES 81: tao keeps its own ALWAYS_ON_TOP flag (set at start) and writes WS_EX_TOPMOST back on
+            // its next style change; `set_topmost(false)` alone (the Alt+Tab guard) would not stick. No activation.
+            let _ = self.window.set_always_on_top(false);
+        }
         if !on && self.should_guard() {
             let _ = self.window.set_always_on_top(true);
             self.focus();
@@ -386,6 +403,13 @@ impl WindowGuard {
         }
     }
 
+    /// Sets the handler run when the Shell's window gets the focus during a game (SHELL_CHANGES 81).
+    pub fn on_game_focus(&self, f: impl Fn() + Send + Sync + 'static) {
+        if self.on_game_focus.set(Box::new(f)).is_err() {
+            tracing::warn!("game focus handler already set");
+        }
+    }
+
     /// `WDA_EXCLUDEFROMCAPTURE` on / off (remote-control capture must see the Shell: keep `false`).
     pub fn set_capture_excluded(&self, exclude: bool) -> CmdResult<()> {
         if self.hwnd == 0 {
@@ -443,7 +467,12 @@ impl WindowGuard {
         } else {
             process_name(pid)
         };
-        tracing::debug!(has_focus = focused, pid, process = ?foreground_process, "focus changed");
+        if self.is_game_mode() {
+            // SHELL_CHANGES 83: who has the foreground during a game is worth the log.
+            tracing::info!(has_focus = focused, pid, process = ?foreground_process, "focus changed during the game");
+        } else {
+            tracing::debug!(has_focus = focused, pid, process = ?foreground_process, "focus changed");
+        }
         if let Err(e) = self.app.emit(
             FOCUS_EVENT,
             FocusEvent {
@@ -452,6 +481,14 @@ impl WindowGuard {
             },
         ) {
             tracing::warn!(error = %e, "cannot emit kiosk://focus");
+        }
+        if focused && self.is_game_mode() && !self.is_locked() {
+            let me = Arc::clone(self);
+            tauri::async_runtime::spawn(async move {
+                if let Some(f) = me.on_game_focus.get() {
+                    f();
+                }
+            });
         }
         if focused && self.is_handed_off() {
             let me = Arc::clone(self);

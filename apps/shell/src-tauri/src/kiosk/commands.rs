@@ -122,6 +122,11 @@ pub async fn kiosk_virtual_keyboard(
 /// `kiosk_focus`: re-asserts the Shell window in the foreground.
 #[tauri::command]
 pub async fn kiosk_focus(kiosk: State<'_, Arc<Kiosk>>) -> CmdResult<()> {
+    if kiosk.is_game_mode() {
+        // SHELL_CHANGES 80/81: during a game the Shell never activates itself; it comes back when the game ends.
+        tracing::debug!("kiosk_focus ignored during a game");
+        return Ok(());
+    }
     if !kiosk.window().focus() {
         tracing::debug!("kiosk_focus: window is not in the foreground after the request");
     }
