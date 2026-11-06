@@ -665,6 +665,12 @@ export const UZ: Record<string, string> = {
   'Реестр, строка {n}: нужен вид HKCU\\Software\\…\\Имя = dword:1 или = "текст"':
     'Reyestr, {n}-qator: HKCU\\Software\\…\\Nom = dword:1 yoki = "matn" koʻrinishi kerak',
   'Значения реестра': 'Reyestr qiymatlari',
+  'ПК на экране входа': 'Kompyuter kirish ekranida',
+  'ПК стоит на экране входа Windows: после сеанса игрок не вошёл заново. Перезагрузите ПК.':
+    'Kompyuter Windows kirish ekranida turibdi: seansdan keyin oʻyinchi qayta kirmadi. Kompyuterni qayta yoqing.',
+  'Профиль не удаляется': 'Profil oʻchirilmayapti',
+  'Профиль игрока на этом ПК не удаляется: следующий игрок может получить чужие настройки. Перезагрузите ПК.':
+    'Bu kompyuterda oʻyinchi profili oʻchirilmayapti: keyingi oʻyinchi boshqaning sozlamalarini olishi mumkin. Kompyuterni qayta yoqing.',
   'Необязательно. Агент записывает их игроку перед каждым запуском — например, язык или полноэкранный режим. По одному в строке: HKCU\\Software\\…\\Имя = dword:1 или = "текст".':
     'Ixtiyoriy. Agent ularni har bir ishga tushirishdan oldin oʻyinchiga yozadi — masalan, til yoki toʻliq ekran rejimi. Har qatorda bittadan: HKCU\\Software\\…\\Nom = dword:1 yoki = "matn".',
   'Ключ реестра — только под HKCU\\Software и не в разделе Policies':
@@ -1848,6 +1854,12 @@ export const EN: Record<string, string> = {
   'Реестр, строка {n}: нужен вид HKCU\\Software\\…\\Имя = dword:1 или = "текст"':
     'Registry, line {n}: write it as HKCU\\Software\\…\\Name = dword:1 or = "text"',
   'Значения реестра': 'Registry values',
+  'ПК на экране входа': 'PC on the sign-in screen',
+  'ПК стоит на экране входа Windows: после сеанса игрок не вошёл заново. Перезагрузите ПК.':
+    'The PC sits on the Windows sign-in screen: the player account did not sign in again after the session. Restart the PC.',
+  'Профиль не удаляется': 'Profile not deleted',
+  'Профиль игрока на этом ПК не удаляется: следующий игрок может получить чужие настройки. Перезагрузите ПК.':
+    'The player profile on this PC cannot be deleted: the next player may get the previous one’s settings. Restart the PC.',
   'Необязательно. Агент записывает их игроку перед каждым запуском — например, язык или полноэкранный режим. По одному в строке: HKCU\\Software\\…\\Имя = dword:1 или = "текст".':
     'Optional. The agent writes them for the player before every launch — the language or full-screen mode, say. One per line: HKCU\\Software\\…\\Name = dword:1 or = "text".',
   'Ключ реестра — только под HKCU\\Software и не в разделе Policies':

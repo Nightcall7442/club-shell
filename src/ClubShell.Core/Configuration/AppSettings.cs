@@ -391,7 +391,8 @@ public sealed class KioskUserSettings
     /// <summary>
     /// How the profile is reset after a session (SHELL_CHANGES 78): <c>logoff</c> signs the kiosk out and deletes its
     /// profile; <c>reboot</c> reboots the PC instead, for a PC whose system disk comes back clean at every boot (a diskless
-    /// seat); <c>auto</c> (default) reboots when the system disk is on iSCSI, else signs out.
+    /// seat); <c>auto</c> (default) follows the server's <c>pcs.stateless</c> (heartbeat answer) and, before a server has
+    /// said, reboots when the system disk is on iSCSI, else signs out.
     /// </summary>
     [AllowedValues("auto", "logoff", "reboot")]
     public string ResetMode { get; set; } = "auto";

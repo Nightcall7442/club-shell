@@ -23,6 +23,12 @@ public interface IPlayerSaves
     bool Attached { get; }
 
     /// <summary>
+    /// <see langword="true"/> from the attach until its detach has finished: a reboot must wait (the helper collects the
+    /// saves from the profile).
+    /// </summary>
+    bool Busy { get; }
+
+    /// <summary>
     /// A successful <c>auth.login</c>: starts laying the player's saves out and returns at once. Never for a guest
     /// (<paramref name="guest"/>, or the user's role). The same player signing in again changes nothing.
     /// </summary>
@@ -136,6 +142,18 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
             lock (_gate)
             {
                 return _current is { Release: null };
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public bool Busy
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _current is not null;
             }
         }
     }

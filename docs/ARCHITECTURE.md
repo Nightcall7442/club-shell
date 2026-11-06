@@ -480,7 +480,8 @@ unless the key ends with `Ms`.
       },
       "resetProfileOnLogout": true,
       "resetMode": "auto",                        // after a session: "logoff" resets the profile; "reboot" reboots the PC
-                                                  // (system disk reset at boot); "auto" = reboot on an iSCSI system disk
+                                                  // (system disk reset at boot); "auto" = the server's pcs.stateless,
+                                                  // before the first heartbeat: reboot on an iSCSI system disk
       "preserveOnReset": null                     // string[] | null. Profile-relative dirs carried across a reset;
                                                   // null = ProfileReset.PreservedDirectories (anti-cheat, shader caches).
                                                   // ProfileReset.SignInPaths inside them are never carried.

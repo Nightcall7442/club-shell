@@ -832,6 +832,15 @@ public static class KioskUserProblems
 /// <see langword="null"/> when unknown.
 /// </param>
 /// <param name="AutoLogonCount"><c>AutoLogonCount</c>: boots left before auto-logon switches itself off; <see langword="null"/> when not set.</param>
+/// <param name="ResetMode">How the profile is reset after a session on this PC now: <c>logoff</c> or <c>reboot</c> (SHELL_CHANGES 78).</param>
+/// <param name="LogonLost">
+/// The Agent signed the kiosk out and Winlogon did not log it on again, and the one reboot allowed for that within
+/// 15 minutes was already spent: the PC sits on the Windows sign-in screen (SHELL_CHANGES 77).
+/// </param>
+/// <param name="ProfileResetFailed">
+/// The kiosk's profile could not be deleted after a session, again after the one reboot for that: the next player may
+/// get the previous one's settings (SHELL_CHANGES 76). Cleared by the first reset that succeeds.
+/// </param>
 public sealed record HeartbeatKioskUser(
     string Name,
     bool Ready,
@@ -839,7 +848,10 @@ public sealed record HeartbeatKioskUser(
     IReadOnlyList<string>? PrivilegedGroups = null,
     bool? AutoLogon = null,
     bool? ForceAutoLogon = null,
-    int? AutoLogonCount = null);
+    int? AutoLogonCount = null,
+    string? ResetMode = null,
+    bool? LogonLost = null,
+    bool? ProfileResetFailed = null);
 
 /// <summary>Who mounts the games library volume on the PC (heartbeat <c>gamesVolume.owner</c>).</summary>
 [JsonConverter(typeof(CamelCaseEnumConverter<GamesVolumeOwner>))]
@@ -890,6 +902,11 @@ public sealed record HeartbeatAntiCheat(
 /// <param name="CatalogVersion">Games/apps catalogue version; refresh lists when changed.</param>
 /// <param name="PendingCommands">Commands queued while WS was down.</param>
 /// <param name="Session">Server view of the current session for reconciliation.</param>
+/// <param name="Stateless">
+/// The owner marked the PC as without persistent storage (<c>pcs.stateless</c>): its system disk comes back clean at
+/// every boot, so with <c>shell.kioskUser.resetMode</c> <c>auto</c> the agent reboots it after a session instead of
+/// deleting the kiosk's profile (SHELL_CHANGES 78). <see langword="null"/> from an older server.
+/// </param>
 public sealed record HeartbeatResponse(
     DateTimeOffset ServerTime,
     PcStatus PcStatus,
@@ -897,7 +914,8 @@ public sealed record HeartbeatResponse(
     int ConfigVersion,
     string CatalogVersion,
     int PendingCommands,
-    Session? Session = null);
+    Session? Session = null,
+    bool? Stateless = null);
 
 /// <summary>Well-known values of <see cref="TelemetryEvent.Kind"/>.</summary>
 public static class TelemetryEventKinds

@@ -102,6 +102,8 @@ export interface SeatUser {
   balance: Money;
 }
 
+export type KioskAlert = 'logonLost' | 'profileResetFailed';
+
 export interface Seat {
   pc: {
     id: string;
@@ -113,6 +115,12 @@ export interface Seat {
     agentVersion?: string;
     shellVersion?: string;
   };
+  /**
+   * What went wrong with the PC's player account after a session (SHELL_CHANGES 76–77): `logonLost` — it sits on the
+   * Windows sign-in screen; `profileResetFailed` — the player's profile could not be deleted. null — nothing (absent from
+   * an older server).
+   */
+  kioskAlert?: KioskAlert | null;
   session: Session | null;
   user: SeatUser | null;
   /**
@@ -1074,6 +1082,8 @@ export interface HallPc {
   gamesVolume?: HeartbeatGamesVolume | null;
   /** Marked as without persistent storage: it re-registers at every boot (SHELL_CHANGES 25); absent from an older server. */
   stateless?: boolean;
+  /** As on {@link Seat}: the sign-in screen, or a profile that could not be deleted (SHELL_CHANGES 76–77). */
+  kioskAlert?: KioskAlert | null;
 }
 
 export interface AdminGame {

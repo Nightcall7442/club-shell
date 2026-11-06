@@ -47,11 +47,11 @@ public static class PcAdminEndpoints
         var staff = context.Features.GetRequiredFeature<StaffContext>();
         var now = clock.GetUtcNow();
         await using var c = await db.OpenConnectionAsync();
-        var map = (await c.QueryAsync<(Guid Id, int X, int Y, string DeviceKind, string? Hardware, string? Metrics, string? GamesVolume)>(
+        var map = (await c.QueryAsync<(Guid Id, int X, int Y, string DeviceKind, string? Hardware, string? Metrics, string? GamesVolume, string? KioskUser)>(
             """
             SELECT p.id, p.x, p.y, p.device_kind, p.hardware::text,
                    (SELECT m.data::text FROM pc_metrics m WHERE m.pc_id = p.id ORDER BY m.at DESC LIMIT 1),
-                   (p.last_heartbeat -> 'gamesVolume')::text
+                   (p.last_heartbeat -> 'gamesVolume')::text, (p.last_heartbeat -> 'kioskUser')::text
             FROM pcs p WHERE p.club_id = @ClubId AND p.deleted_at IS NULL
             """,
             new { staff.ClubId })).ToDictionary(m => m.Id);
@@ -60,14 +60,28 @@ public static class PcAdminEndpoints
             var wire = pc.ToPc(pc.Status(hub.IsConnected(pc.Id), now, TimeSpan.FromSeconds(agents.OfflineAfterSec)), withHwid: false);
 
             // A PC registered between the two reads is drawn with the column defaults of a new seat.
-            var m = map.TryGetValue(pc.Id, out var row) ? row : (pc.Id, 0, 0, "pc", null, null, null);
+            var m = map.TryGetValue(pc.Id, out var row) ? row : (pc.Id, 0, 0, "pc", null, null, null, null);
             return new AdminHallPc(
                 wire.Id, wire.Name, wire.Zone, wire.Number, wire.Hwid, wire.IpAddress, wire.Status, wire.CurrentSessionId, wire.AgentVersion,
                 wire.ShellVersion, wire.LastHeartbeatAt, m.X, m.Y, m.DeviceKind,
                 m.Hardware is null ? null : JsonElement.Parse(m.Hardware), m.Metrics is null ? null : JsonElement.Parse(m.Metrics),
-                m.GamesVolume is null ? null : JsonElement.Parse(m.GamesVolume), pc.Stateless);
+                m.GamesVolume is null ? null : JsonElement.Parse(m.GamesVolume), pc.Stateless, KioskAlert(m.KioskUser));
         }).ToList();
         return AdminJson.Ok(new AdminHallPcList(items, await CounterEndpoints.ZonesAsync(c, staff.ClubId)));
+    }
+
+    /// <summary><c>kioskAlert</c> of the hall from the last heartbeat's <c>kioskUser</c>: the sign-in screen first, it stops the PC.</summary>
+    private static string? KioskAlert(string? kioskUser)
+    {
+        if (kioskUser is null)
+        {
+            return null;
+        }
+
+        using var doc = JsonDocument.Parse(kioskUser);
+        bool Flag(string name) => doc.RootElement.ValueKind == JsonValueKind.Object
+            && doc.RootElement.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;
+        return Flag("logonLost") ? "logonLost" : Flag("profileResetFailed") ? "profileResetFailed" : null;
     }
 
     private static async Task<IResult> AddAsync(HttpContext context, [FromBody] JsonElement body, IdempotencyStore store, TimeProvider clock)

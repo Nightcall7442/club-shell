@@ -65,6 +65,9 @@ public interface IConfigRefresh
 public sealed class HeartbeatService : BackgroundService
 {
     private readonly Readiness.PcReadinessService? _readiness;
+    private readonly ServerPcFlags? _flags;
+    private readonly ProfileResetService? _profileReset;
+    private readonly KioskLogonGuard? _logonGuard;
     private readonly ServerConnection _connection;
     private readonly IServerClient _server;
     private readonly ISessionService _sessions;
@@ -106,9 +109,15 @@ public sealed class HeartbeatService : BackgroundService
         IClock clock,
         IOptionsMonitor<AgentSettings> settings,
         ILogger<HeartbeatService> logger,
-        Readiness.PcReadinessService? readiness = null)
+        Readiness.PcReadinessService? readiness = null,
+        ServerPcFlags? flags = null,
+        ProfileResetService? profileReset = null,
+        KioskLogonGuard? logonGuard = null)
     {
         _readiness = readiness;
+        _flags = flags;
+        _profileReset = profileReset;
+        _logonGuard = logonGuard;
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(server);
         ArgumentNullException.ThrowIfNull(sessions);
@@ -201,7 +210,7 @@ public sealed class HeartbeatService : BackgroundService
             _shell.IsConnected,
             _gamesVolume.VolumeState(),
             await AntiCheatStateAsync(cancellationToken).ConfigureAwait(false),
-            _kiosk.Status,
+            KioskStatus(),
             _readiness?.Current);
 
         var sentAt = _clock.UtcNow;
@@ -221,6 +230,7 @@ public sealed class HeartbeatService : BackgroundService
             await SafeRefreshPolicyAsync(cancellationToken).ConfigureAwait(false);
         }
 
+        _flags?.Update(response.Stateless);
         await ApplyCacheVersionsAsync(response, cancellationToken).ConfigureAwait(false);
 
         if (response.PendingCommands > 0)
@@ -258,6 +268,18 @@ public sealed class HeartbeatService : BackgroundService
         }
 
         return new HeartbeatAntiCheat(installed, loaded, WmiQueries.GetSecureBootEnabled(), _tpmPresent, faceit);
+    }
+
+    /// <summary>The kiosk account with how its profile is reset and what went wrong with that (SHELL_CHANGES 76–78).</summary>
+    private HeartbeatKioskUser KioskStatus()
+    {
+        HeartbeatKioskUser status = _kiosk.Status;
+        return status with
+        {
+            ResetMode = _profileReset?.ResetMode,
+            LogonLost = _logonGuard?.LogonLost == true ? true : null,
+            ProfileResetFailed = _profileReset?.ResetFailed == true ? true : null,
+        };
     }
 
     private PcStatus MapStatus()

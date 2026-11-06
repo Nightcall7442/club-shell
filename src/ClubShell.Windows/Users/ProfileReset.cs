@@ -192,6 +192,22 @@ public sealed class ProfileReset
         }
     }
 
+    /// <summary>When the debt of <see cref="DirtyUser"/> was written; <see langword="null"/> when there is none.</summary>
+    public DateTimeOffset? DirtySince
+    {
+        get
+        {
+            try
+            {
+                return File.Exists(_dirtyPath) ? new DateTimeOffset(File.GetLastWriteTimeUtc(_dirtyPath), TimeSpan.Zero) : null;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return null;
+            }
+        }
+    }
+
     /// <summary>Records that the profile of <paramref name="userName"/> is in use and owes a reset.</summary>
     public void MarkDirty(string userName)
     {

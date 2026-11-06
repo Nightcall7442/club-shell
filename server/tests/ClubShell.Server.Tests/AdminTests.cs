@@ -598,6 +598,39 @@ public sealed class PcAdminTests(ApprovalServerFixture server) : IClassFixture<A
             Assert.Equal(("disklessHelper", false), (v.GetProperty("owner").GetString(), v.TryGetProperty("mounted", out _))));
     }
 
+    [Fact]
+    public async Task The_heartbeat_answers_stateless_and_the_hall_shows_what_went_wrong_with_the_kiosk()
+    {
+        var owner = await LoginAsync(server, OwnerPin);
+        var cashier = await LoginAsync(server, CashierPin);
+        var agent = await ApprovedAgentAsync(owner);
+        async Task<bool> StatelessAsync() =>
+            (await Players.ReadAsync(await agent.HeartbeatAsync(), 200)).GetProperty("stateless").GetBoolean();
+        async Task<JsonElement> AlertAsync()
+        {
+            var hall = (await ExpectAsync(server, 200, HttpMethod.Get, "/pcs", cashier)).GetProperty("items").EnumerateArray()
+                .Single(p => p.GetProperty("id").GetGuid() == agent.PcId).GetProperty("kioskAlert");
+            var seat = (await ExpectAsync(server, 200, HttpMethod.Get, "/overview", cashier)).GetProperty("seats").EnumerateArray()
+                .Single(s => s.GetProperty("pc").GetProperty("id").GetGuid() == agent.PcId).GetProperty("kioskAlert");
+            Assert.Equal(hall.GetRawText(), seat.GetRawText());
+            return hall;
+        }
+
+        // SHELL_CHANGES 78: the agent learns the owner's mark from every heartbeat.
+        Assert.False(await StatelessAsync());
+        await ExpectAsync(server, 200, HttpMethod.Patch, $"/pcs/{agent.PcId}", owner, new { stateless = true });
+        Assert.True(await StatelessAsync());
+        Assert.Equal(JsonValueKind.Null, (await AlertAsync()).ValueKind);
+
+        // SHELL_CHANGES 76–77: the sign-in screen outranks a profile that could not be deleted.
+        await Players.ReadAsync(await agent.HeartbeatAsync(kioskUser: new { name = "player", ready = true, profileResetFailed = true }), 200);
+        Assert.Equal("profileResetFailed", (await AlertAsync()).GetString());
+        await Players.ReadAsync(await agent.HeartbeatAsync(kioskUser: new { name = "player", ready = true, logonLost = true, profileResetFailed = true }), 200);
+        Assert.Equal("logonLost", (await AlertAsync()).GetString());
+        await Players.ReadAsync(await agent.HeartbeatAsync(kioskUser: new { name = "player", ready = true }), 200);
+        Assert.Equal(JsonValueKind.Null, (await AlertAsync()).ValueKind);
+    }
+
     /// <summary>A new PC waits for approval (D-7), the owner approves it with <c>maintenance:false</c>, the agent registers again.</summary>
     private async Task<TestAgent> ApprovedAgentAsync(string owner)
     {

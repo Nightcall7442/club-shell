@@ -64,9 +64,15 @@ stores a `null` secret (deletes it). `GetAutoLogon()` reads the values back for 
 Without `ForceAutoLogon` Winlogon logs the account on once per boot: after the first player's session ended the PC
 stayed at the sign-in screen with the Shell waiting for a session that never came. If the kiosk still does not come
 back, `KioskLogonGuard` reboots the PC (SHELL_CHANGES 77): the watchdog asks it after 3 min without a kiosk session
-(`WaitingForSession`), the profile reset after its 60 s wait. It reboots only when auto-logon is the kiosk's, nobody
-else is signed in (console or Remote Desktop), no maintenance window is open, the Agent has run for 5 min and its last
-such reboot was more than 30 min ago (`cache\kiosk-logon-reboot.txt`), and raises the telemetry event `kioskLogonLost` (`reason`).
+(`WaitingForSession`), the profile reset after its 60 s wait. It reboots only when the Agent itself signed the kiosk
+out (a profile reset after a session or for a debt — an administrator holding Shift at boot gets the sign-in screen
+and keeps it), auto-logon is the kiosk's, nobody else is signed in (console or Remote Desktop), no maintenance window
+is open, the last player's saves are collected (`profile.detach`, SHELL_CHANGES 23) and the outbox is empty (the end
+of the session is on the server: on a diskless seat the outbox is on C:), the Agent has run for 5 min and its last
+such reboot was more than 15 min ago (`cache\kiosk-logon-reboot.txt`), and raises the telemetry event `kioskLogonLost`
+(`reason`, `rebooted: true`). Within the 15 min it does not reboot again: `kioskLogonLost` with `rebooted: false`, and
+the heartbeat's `kioskUser.logonLost` until the kiosk is back, which the cash desk shows on the seat as "PC on the
+sign-in screen".
 
 Who calls it:
 
@@ -159,10 +165,23 @@ the reset never logs off the new session (it is the next player's) and never del
 the hive is loaded again before it is renamed, the reset fails and is retried (`ResetIfDirtyAsync`). Tombstones left
 by a crash are deleted by the next reset.
 
+The retry of a debt (`profile-dirty.marker`, every 5 min while idle) never signs out a player who signed in and has
+not started a session yet. A reset that leaves the profile behind twice in a row reboots the PC at the next idle
+moment (no session, nobody signed in or at the console, the saves collected, the outbox empty, no maintenance window)
+— the reboot releases whatever held the files and the next Agent start pays the debt — once:
+`cache\profile-reset-reboot.txt` remembers it until a reset succeeds, and a reset that fails after it sets the
+heartbeat's `kioskUser.profileResetFailed`, which the cash desk shows on the seat.
+
 `shell.kioskUser.resetMode` (SHELL_CHANGES 78): `logoff` resets the profile as above; `reboot` reboots the PC 5 s after
-the session instead — for a diskless PC whose system disk comes back clean at boot; `auto` (the default) reboots when
-the system disk is on iSCSI (`MSFT_PhysicalDisk.BusType` 9) and resets the profile otherwise. A reboot Windows
-refuses falls back to the profile reset. The marker
+the session instead — for a diskless PC whose system disk comes back clean at boot; `auto` (the default) follows the
+server: the owner's "without persistent storage" mark (`pcs.stateless`) comes in every heartbeat answer
+(`stateless`, kept in `cache\pc-stateless.txt`) and decides; before a server has said, it reboots when the system disk
+is on iSCSI (`MSFT_PhysicalDisk.BusType` 9). The mode in effect is in the heartbeat (`kioskUser.resetMode`). The
+reboot comes after the games have closed and the saves are collected, and only once the outbox is empty — the end of
+the session is on the server: the outbox is on C: and would go with it. While it is not (the server unreachable), the
+profile is reset as on any PC and the reboot waits for an idle moment with an empty outbox. A debt is not paid by a
+reset on such a PC: one written before the boot is dropped (C: came back clean), one written after it (the Agent
+restarted without a reboot) is paid by an idle reboot. A reboot Windows refuses falls back to the profile reset. The marker
 `cache\profile-reset.marker` records the last reset. `ProfileReset.CleanCaches` is the light variant used by
 `SessionCleanup` while the user stays logged on.
 

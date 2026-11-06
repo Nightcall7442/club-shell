@@ -1613,6 +1613,18 @@ export interface HeartbeatKioskUser {
   forceAutoLogon?: boolean | null;
   /** `AutoLogonCount`: boots left before auto-logon switches itself off; `null` when not set. */
   autoLogonCount?: number | null;
+  /** How the profile is reset after a session on this PC now: `logoff` or `reboot` (SHELL_CHANGES 78). */
+  resetMode?: string | null;
+  /**
+   * The Agent signed the kiosk out and Winlogon did not log it on again, and the one reboot allowed for that within 15
+   * minutes was already spent: the PC sits on the Windows sign-in screen (SHELL_CHANGES 77).
+   */
+  logonLost?: boolean | null;
+  /**
+   * The kiosk's profile could not be deleted after a session, again after the one reboot for that: the next player may
+   * get the previous one's settings (SHELL_CHANGES 76). Cleared by the first reset that succeeds.
+   */
+  profileResetFailed?: boolean | null;
 }
 
 /** Response of `POST /agents/{pcId}/heartbeat`. */
@@ -1631,6 +1643,12 @@ export interface HeartbeatResponse {
   pendingCommands: number;
   /** Server view of the current session for reconciliation. */
   session?: Session | null;
+  /**
+   * The owner marked the PC as without persistent storage (`pcs.stateless`): its system disk comes back clean at every
+   * boot, so with `shell.kioskUser.resetMode``auto` the agent reboots it after a session instead of deleting the
+   * kiosk's profile (SHELL_CHANGES 78). `null` from an older server.
+   */
+  stateless?: boolean | null;
 }
 
 /** Running game summary in a heartbeat. */

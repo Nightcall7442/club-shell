@@ -1714,6 +1714,20 @@ pub struct HeartbeatKioskUser {
     /// `AutoLogonCount`: boots left before auto-logon switches itself off; `null` when not set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_logon_count: Option<i32>,
+    /// How the profile is reset after a session on this PC now: `logoff` or `reboot` (SHELL_CHANGES
+    /// 78).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reset_mode: Option<String>,
+    /// The Agent signed the kiosk out and Winlogon did not log it on again, and the one reboot
+    /// allowed for that within 15 minutes was already spent: the PC sits on the Windows sign-in
+    /// screen (SHELL_CHANGES 77).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logon_lost: Option<bool>,
+    /// The kiosk's profile could not be deleted after a session, again after the one reboot for
+    /// that: the next player may get the previous one's settings (SHELL_CHANGES 76). Cleared by the
+    /// first reset that succeeds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_reset_failed: Option<bool>,
 }
 
 /// Response of `POST /agents/{pcId}/heartbeat`.
@@ -1736,6 +1750,12 @@ pub struct HeartbeatResponse {
     /// Server view of the current session for reconciliation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<Session>,
+    /// The owner marked the PC as without persistent storage (`pcs.stateless`): its system disk
+    /// comes back clean at every boot, so with `shell.kioskUser.resetMode``auto` the agent reboots
+    /// it after a session instead of deleting the kiosk's profile (SHELL_CHANGES 78). `null` from
+    /// an older server.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stateless: Option<bool>,
 }
 
 /// Running game summary in a heartbeat.
@@ -3763,6 +3783,9 @@ mod tests {
                 auto_logon: Some(true),
                 force_auto_logon: Some(true),
                 auto_logon_count: None,
+                reset_mode: None,
+                logon_lost: None,
+                profile_reset_failed: None,
             }),
             readiness: None,
         };

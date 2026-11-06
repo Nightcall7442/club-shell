@@ -214,7 +214,7 @@ The helper attaches G: and H: only after Windows has started, while the kiosk is
 a player signing in meanwhile saw "no games" (SHELL_CHANGES 86). The Agent therefore keeps the PC **preparing** until
 the disks are there (`src/ClubShell.Agent/Readiness`):
 
-* **Who decides.** A helper whose `ping` reports `ready` and `disks` (the version after 1.8.1): its word, polled every
+* **Who decides.** A helper whose `ping` reports `ready` and `disks` (1.9.0 and later): its word, polled every
   1.5 s, waited for up to `shell.readiness.timeoutSec` (180) from the start of the wait. An older helper (no `ready`, or
   no channel for 10 s): every library root off the system drive must exist, waited for up to the timeout counted from
   Windows' start (an Agent restarted during the day does not wait again). No `ClubDisklessHelper` service, or

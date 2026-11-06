@@ -108,6 +108,16 @@ public static partial class CounterEndpoints
             """,
             new { staff.ClubId }))
             .ToDictionary(g => g.PcId, g => new AdminSeatGame(g.Id, g.Title, g.CoverUrl, g.HeroUrl));
+        // SHELL_CHANGES 76–77: the PC sits on the Windows sign-in screen, or the player's profile could not be deleted.
+        var kioskAlerts = (await c.QueryAsync<(Guid PcId, string Alert)>(
+            """
+            SELECT p.id, CASE WHEN p.last_heartbeat #>> '{kioskUser,logonLost}' = 'true' THEN 'logonLost' ELSE 'profileResetFailed' END
+            FROM pcs p
+            WHERE p.club_id = @ClubId AND p.deleted_at IS NULL
+              AND (p.last_heartbeat #>> '{kioskUser,logonLost}' = 'true' OR p.last_heartbeat #>> '{kioskUser,profileResetFailed}' = 'true')
+            """,
+            new { staff.ClubId }))
+            .ToDictionary(a => a.PcId, a => a.Alert);
         var seats = hall.Select(pc =>
         {
             var status = pc.Status(hub.IsConnected(pc.Id), now, TimeSpan.FromSeconds(agents.OfflineAfterSec));
@@ -117,7 +127,8 @@ public static partial class CounterEndpoints
                 s?.ToWire(now),
                 s is not null && players.TryGetValue(s.UserId, out var user) ? user : null,
                 s is null ? null : signedIn.Contains(pc.Id),
-                s is not null && status is Contracts.Pcs.PcStatus.Busy or Contracts.Pcs.PcStatus.Locked ? games.GetValueOrDefault(pc.Id) : null);
+                s is not null && status is Contracts.Pcs.PcStatus.Busy or Contracts.Pcs.PcStatus.Locked ? games.GetValueOrDefault(pc.Id) : null,
+                status == Contracts.Pcs.PcStatus.Offline ? null : kioskAlerts.GetValueOrDefault(pc.Id));
         }).ToList();
         var tariffs = (await c.QueryAsync<TariffRow>(
             $"SELECT {TariffRow.Columns} FROM tariffs WHERE club_id = @ClubId AND deleted_at IS NULL ORDER BY created_at, id", new { staff.ClubId }))
