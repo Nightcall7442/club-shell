@@ -705,6 +705,8 @@ export const IpcNames = {
     AuthExpired: 'auth.expired',
     /** Payload `Order`. */
     ShopOrderUpdated: 'shop.orderUpdated',
+    /** Payload `PlayerSavesStatus`. */
+    SavesStatus: 'saves.status',
   },
 } as const;
 

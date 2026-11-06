@@ -516,6 +516,7 @@ unless the key ends with `Ms`.
     "killGraceSec": 10,
     "accountPool": { "enabled": false, "leaseTtlSec": 14400, "releaseOnExit": true, "allowPasswordOnCommandLine": false },  // on only via server config
     "cloudSave": { "enabled": false, "root": "cache\\saves", "maxMb": 512 },           // on only via server config
+    "playerSaves": { "mode": "auto", "attachTimeoutSec": 60, "detachTimeoutSec": 120 }, // through the diskless helper (DISKLESS.md)
     "registryDefaults": [                         // written into the kiosk's HKCU before every launch where missing;
       {                                           // keys under HKCU\Software only, never the Policies keys
         "key": "Software\\Valve\\Half-Life\\Settings",

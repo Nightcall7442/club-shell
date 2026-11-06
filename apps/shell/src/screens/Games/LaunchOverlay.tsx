@@ -123,7 +123,7 @@ export async function launchGame(gameId: string): Promise<LaunchResult | null> {
 // Overlay
 // ---------------------------------------------------------------------------------------------------------------------
 
-export type LaunchStep = 'antiCheat' | 'account' | 'launcher' | 'window';
+export type LaunchStep = 'saves' | 'antiCheat' | 'account' | 'launcher' | 'window';
 export type LaunchPhase = 'launching' | 'running' | 'error';
 
 interface LaunchView {
@@ -148,6 +148,29 @@ export function launchStepIndex(steps: LaunchStep[], elapsedMs: number, pidKnown
     return steps.length - 1;
   }
   return Math.min(steps.length - 2, Math.max(0, Math.floor(elapsedMs / STEP_MS)));
+}
+
+/**
+ * Steps and active index of a launch that may have waited for the player's saves (SHELL_CHANGES 23): the Agent holds
+ * the launch until the diskless helper has laid them out, so "loading your saves" leads while they load and the other
+ * steps count from when that ended.
+ */
+export function launchProgress(
+  base: LaunchStep[],
+  now: number,
+  startedAt: number,
+  pidKnown: boolean,
+  saves: { loading: boolean; changedAt: number },
+): { steps: LaunchStep[]; index: number } {
+  const waited = saves.loading || saves.changedAt > startedAt;
+  if (!waited) {
+    return { steps: base, index: launchStepIndex(base, Math.max(0, now - startedAt), pidKnown) };
+  }
+  const steps: LaunchStep[] = ['saves', ...base];
+  if (saves.loading) {
+    return { steps, index: 0 };
+  }
+  return { steps, index: 1 + launchStepIndex(base, Math.max(0, now - saves.changedAt), pidKnown) };
 }
 
 function CheckIcon(): JSX.Element {
@@ -191,6 +214,8 @@ export function LaunchOverlay(): JSX.Element {
   const running = useGamesStore((s) => s.running);
   const byId = useGamesStore((s) => s.byId);
   const kill = useGamesStore((s) => s.kill);
+  const savesLoading = useGamesStore((s) => s.saves === 'loading');
+  const savesChangedAt = useGamesStore((s) => s.savesChangedAt);
   const pushError = useNotificationsStore((s) => s.pushError);
   const [view, setView] = useState<LaunchView | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -268,9 +293,16 @@ export function LaunchOverlay(): JSX.Element {
   });
 
   const game = view ? (byId.get(view.gameId) ?? null) : null;
-  const steps = launchSteps(game?.requiresAccount ?? true);
   const elapsed = view ? Math.max(0, now - view.startedAt) : 0;
-  const stepIndex = phase === 'running' ? steps.length : launchStepIndex(steps, elapsed, launching?.pid != null);
+  const progress = launchProgress(
+    launchSteps(game?.requiresAccount ?? true),
+    now,
+    view?.startedAt ?? now,
+    launching?.pid != null,
+    { loading: savesLoading, changedAt: savesChangedAt },
+  );
+  const steps = progress.steps;
+  const stepIndex = phase === 'running' ? steps.length : progress.index;
   const percent = phase === 'running' ? 100 : ((stepIndex + 0.5) / steps.length) * 100;
   const slow = phase === 'launching' && elapsed > SLOW_AFTER_MS;
 

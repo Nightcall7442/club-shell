@@ -91,6 +91,13 @@ public static partial class Kernel32
     [LibraryImport(Lib, SetLastError = true)]
     public static partial uint WTSGetActiveConsoleSessionId();
 
+    // ---- named pipes ----------------------------------------------------------------------------
+
+    /// <summary>Process id of the server end of a connected client pipe.</summary>
+    [LibraryImport(Lib, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool GetNamedPipeServerProcessId(SafeHandle Pipe, out uint ServerProcessId);
+
     // ---- Toolhelp32 (process snapshots) -------------------------------------------------------
 
     /// <summary>Returns INVALID_HANDLE_VALUE on failure; close with <see cref="CloseHandle"/>. Use TH32CS_SNAPPROCESS for processes.</summary>

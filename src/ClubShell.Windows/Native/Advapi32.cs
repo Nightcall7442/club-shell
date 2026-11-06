@@ -286,6 +286,11 @@ public static partial class Advapi32
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool QueryServiceStatus(SafeServiceHandle hService, out SERVICE_STATUS lpServiceStatus);
 
+    /// <summary><paramref name="InfoLevel"/> = <c>SC_STATUS_PROCESS_INFO</c>; <paramref name="cbBufSize"/> = the size of <see cref="SERVICE_STATUS_PROCESS"/>.</summary>
+    [LibraryImport(Lib, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool QueryServiceStatusEx(SafeServiceHandle hService, uint InfoLevel, out SERVICE_STATUS_PROCESS lpBuffer, uint cbBufSize, out uint pcbBytesNeeded);
+
     /// <summary><paramref name="lpServiceArgVectors"/> = 0 for no arguments.</summary>
     [LibraryImport(Lib, SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     [return: MarshalAs(UnmanagedType.Bool)]

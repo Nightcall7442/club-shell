@@ -513,6 +513,10 @@ public sealed class GamesSettings
     [Required]
     public PlayerSettingsSyncSettings PlayerSettings { get; set; } = new();
 
+    /// <summary>A player's game saves on any PC of the club, through the diskless helper (SHELL_CHANGES 23).</summary>
+    [Required]
+    public PlayerSavesSettings PlayerSaves { get; set; } = new();
+
     /// <summary>
     /// Values games keep in the player's registry, written into the kiosk's HKCU before every launch where they are
     /// missing (SHELL_CHANGES 82): the club's defaults for a profile that is fresh after every reset. GoldSrc (Counter-Strike
@@ -575,6 +579,29 @@ public sealed class PlayerSettingsSyncSettings
     /// <summary>Maximum bundle size; settings are small, anything bigger is a misconfigured path.</summary>
     [Range(1, 1000)]
     public int MaxMb { get; set; } = 16;
+}
+
+/// <summary>
+/// <c>agent.json → games.playerSaves</c> (SHELL_CHANGES 23): the club server keeps a player's saves, the diskless helper
+/// (<c>ClubDisklessHelper</c> 1.7.0+) lays them out in the kiosk profile at sign-in and collects them at the end of the
+/// session; the Agent only tells it when.
+/// </summary>
+public sealed class PlayerSavesSettings
+{
+    /// <summary>
+    /// <c>auto</c> (default): on where the <c>ClubDisklessHelper</c> service is installed; <c>on</c>: always (a missing
+    /// helper shows the player "saves unavailable"); <c>off</c>: never.
+    /// </summary>
+    [AllowedValues("auto", "on", "off")]
+    public string Mode { get; set; } = "auto";
+
+    /// <summary>How long the first game launch waits for the saves to be laid out.</summary>
+    [Range(5, 600)]
+    public int AttachTimeoutSec { get; set; } = 60;
+
+    /// <summary>How long the end of a session waits for the saves to be collected, retries included, before the profile is reset.</summary>
+    [Range(5, 600)]
+    public int DetachTimeoutSec { get; set; } = 120;
 }
 
 /// <summary>One launcher client (<c>agent.json → games.launchers.*</c>).</summary>

@@ -458,10 +458,17 @@
     "sessionRequired": "O'ynash uchun seansni boshlang",
     "nowPlaying": "Hozir o'ynayapsiz",
     "launchStep": {
+      "saves": "Saqlanmalaringiz yuklanmoqda…",
       "antiCheat": "Anti-cheat tekshirilmoqda",
       "account": "Klub akkaunti bilan kirish",
       "launcher": "Launcher ishga tushirilmoqda",
       "window": "O'yin oynasi kutilmoqda"
+    },
+    "saves": {
+      "unavailable": "Saqlanmalar mavjud emas",
+      "unavailableBody": "O'ynash mumkin, lekin bu seans natijalari saqlanmaydi.",
+      "tooLarge": "Saqlanmalar 200 MB dan katta, saqlanmadi",
+      "tooLargeBody": "Klub serverida oldingi versiya qoldi."
     },
     "launchReady": "O'yin ishga tushdi",
     "launchCancel": "Ishga tushirishni bekor qilish",

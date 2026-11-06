@@ -116,6 +116,24 @@ function wireListeners(): void {
       wallet().onUpdated(b);
       auth().setBalance(b.amount);
     }),
+    events.on('saves.status', (e) => {
+      const before = games().saves;
+      games().onSavesStatus(e);
+      if (before === e.state) {
+        return;
+      }
+      // The player's saves (SHELL_CHANGES 23): said once, when the helper could not lay them out or keep them.
+      if (e.state === 'unavailable' || e.state === 'tooLarge') {
+        notify().push({
+          id: 'saves',
+          title: t(`games.saves.${e.state}`),
+          body: t(`games.saves.${e.state}Body`),
+          level: 'warning',
+          ttlSec: 12,
+          source: 'agent',
+        });
+      }
+    }),
     events.on('shop.orderUpdated', (o) => {
       const prev = shop().orders.find((x) => x.id === o.id);
       shop().onOrderUpdated(o);

@@ -718,6 +718,8 @@ pub mod names {
         pub const AUTH_EXPIRED: &str = "auth.expired";
         /// Payload `Order`.
         pub const SHOP_ORDER_UPDATED: &str = "shop.orderUpdated";
+        /// Payload `PlayerSavesStatus`.
+        pub const SAVES_STATUS: &str = "saves.status";
 
         /// All values.
         pub const ALL: &[&str] = &[
@@ -739,6 +741,7 @@ pub mod names {
             SHELL_COMMAND,
             AUTH_EXPIRED,
             SHOP_ORDER_UPDATED,
+            SAVES_STATUS,
         ];
     }
 }
@@ -3053,7 +3056,7 @@ mod tests {
         );
         assert!(AgentCommand::try_from("nope.nope").is_err());
         assert!(!AgentCommand::is_known("Session.Start"));
-        assert_eq!(names::events::ALL.len(), 18);
+        assert_eq!(names::events::ALL.len(), 19);
     }
 
     #[test]

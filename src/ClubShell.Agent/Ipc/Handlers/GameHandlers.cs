@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Runtime.Versioning;
 using ClubShell.Agent.Games;
 using ClubShell.Agent.Policy;
+using ClubShell.Agent.Saves;
 using ClubShell.Agent.Server;
 using ClubShell.Contracts.Games;
 using ClubShell.Contracts.Ipc;
@@ -31,10 +32,14 @@ public sealed class GameHandlers : IIpcHandlerGroup
     private readonly ServerConnection _connection;
     private readonly ShellSettingsStore _shellSettings;
     private readonly ProcessAllowlistModule? _allowlist;
+    private readonly IPlayerSaves? _saves;
     private readonly ILogger<GameHandlers> _logger;
     private readonly ContractFileCache<AppsListResponse> _apps;
 
-    /// <summary>Creates the group. <paramref name="allowlist"/> is optional; without it only <see cref="App.Allowed"/> gates app launches.</summary>
+    /// <summary>
+    /// Creates the group. <paramref name="allowlist"/> is optional; without it only <see cref="App.Allowed"/> gates app
+    /// launches. With <paramref name="saves"/> a game launch first waits for the player's saves (SHELL_CHANGES 23).
+    /// </summary>
     public GameHandlers(
         GameLibrary library,
         GameMediaCache media,
@@ -46,7 +51,8 @@ public sealed class GameHandlers : IIpcHandlerGroup
         ShellSettingsStore shellSettings,
         IOptionsMonitor<AgentSettings> settings,
         ILogger<GameHandlers> logger,
-        ProcessAllowlistModule? allowlist = null)
+        ProcessAllowlistModule? allowlist = null,
+        IPlayerSaves? saves = null)
     {
         ArgumentNullException.ThrowIfNull(library);
         ArgumentNullException.ThrowIfNull(media);
@@ -67,6 +73,7 @@ public sealed class GameHandlers : IIpcHandlerGroup
         _connection = connection;
         _shellSettings = shellSettings;
         _allowlist = allowlist;
+        _saves = saves;
         _logger = logger;
         _apps = new ContractFileCache<AppsListResponse>(Path.Combine(settings.CurrentValue.CacheDir, "apps.json"), logger);
     }
@@ -154,6 +161,13 @@ public sealed class GameHandlers : IIpcHandlerGroup
         if (request.Resolution is { } resolution && (resolution.Width <= 0 || resolution.Height <= 0))
         {
             throw IpcError.Validation("resolution", "range").ToException();
+        }
+
+        if (_saves is not null)
+        {
+            // The game must find the player's saves where it looks for them: the launch waits for the attach (up to
+            // games.playerSaves.attachTimeoutSec; the Shell shows "loading your saves" meanwhile, saves.status).
+            await _saves.WaitForAttachAsync(cancellationToken).ConfigureAwait(false);
         }
 
         LaunchResult result = await _launch.LaunchAsync(request, cancellationToken).ConfigureAwait(false);

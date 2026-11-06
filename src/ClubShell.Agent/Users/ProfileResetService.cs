@@ -4,6 +4,7 @@ using System.Runtime.Versioning;
 using ClubShell.Contracts.Sessions;
 using ClubShell.Core.Abstractions;
 using ClubShell.Agent.Policy;
+using ClubShell.Agent.Saves;
 using ClubShell.Core.Configuration;
 using ClubShell.Windows.Hardware;
 using ClubShell.Windows.Power;
@@ -57,6 +58,11 @@ public interface IShellRelauncher
 /// system disk) is rebooted after a session instead of having its profile deleted (SHELL_CHANGES 78).
 /// </para>
 /// <para>
+/// When the diskless helper laid the player's saves out (SHELL_CHANGES 23), neither happens before it has collected
+/// them: the reset waits for the detach (<see cref="IPlayerSaves.WaitReleasedAsync"/>), which itself starts once the
+/// games have exited — the profile's folders would be empty by then otherwise.
+/// </para>
+/// <para>
 /// A session that never ends — the PC loses power, the Agent is killed — produces no <see cref="SessionEventType.Ended"/>
 /// and would leave the profile for the next player. <see cref="SessionEventType.Started"/> therefore writes a debt
 /// marker that outlives the crash, and <see cref="ResetIfDirtyAsync"/> pays it at the next Agent start and on every
@@ -86,6 +92,7 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
     private readonly KioskLogonGuard? _logonGuard;
     private readonly PowerControl? _power;
     private readonly WmiQueries? _wmi;
+    private readonly IPlayerSaves? _saves;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private bool? _systemDiskIscsi;
     private DateTimeOffset? _lastResetAt;
@@ -104,7 +111,8 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
         PolicyEnforcer? enforcer = null,
         KioskLogonGuard? logonGuard = null,
         PowerControl? power = null,
-        WmiQueries? wmi = null)
+        WmiQueries? wmi = null,
+        IPlayerSaves? saves = null)
     {
         ArgumentNullException.ThrowIfNull(reset);
         ArgumentNullException.ThrowIfNull(provisioner);
@@ -124,6 +132,7 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
         _logonGuard = logonGuard;
         _power = power;
         _wmi = wmi;
+        _saves = saves;
         _lastResetAt = reset.LastReset;
     }
 
@@ -419,6 +428,13 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
         try
         {
             await _clock.Delay(SessionSettleDelay, CancellationToken.None).ConfigureAwait(false);
+            if (_saves is not null)
+            {
+                // The cleanup closes the games (a step of up to 20 s) and only then starts the detach.
+                TimeSpan max = TimeSpan.FromSeconds(40 + _settings.CurrentValue.Games.PlayerSaves.DetachTimeoutSec);
+                await _saves.WaitReleasedAsync(max, CancellationToken.None).ConfigureAwait(false);
+            }
+
             if (await RebootsAfterSessionAsync().ConfigureAwait(false) && RebootAfterSession())
             {
                 return;
