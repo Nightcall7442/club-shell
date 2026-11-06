@@ -458,10 +458,17 @@
     "sessionRequired": "Start a session to play",
     "nowPlaying": "Now playing",
     "launchStep": {
+      "saves": "Loading your saves…",
       "antiCheat": "Checking anti-cheat",
       "account": "Signing in with a club account",
       "launcher": "Starting the launcher",
       "window": "Waiting for the game window"
+    },
+    "saves": {
+      "unavailable": "Saves unavailable",
+      "unavailableBody": "You can play, but this session's progress will not be kept.",
+      "tooLarge": "Saves are over 200 MB and were not kept",
+      "tooLargeBody": "The club server keeps the previous version."
     },
     "launchReady": "The game is running",
     "launchCancel": "Cancel launch",

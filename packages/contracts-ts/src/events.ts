@@ -66,6 +66,28 @@ export interface GameStateChanged {
   error?: IpcError | null;
 }
 
+/** Where the signed-in player's game saves are on this PC (SHELL_CHANGES 23). */
+export const PlayerSavesState = {
+  /** No saves to carry: nobody signed in, a guest, or saves are off on this PC. */
+  None: 'none',
+  /** The diskless helper is laying the player's saves out; a game launch waits for it. */
+  Loading: 'loading',
+  /** The player's saves are in place. */
+  Ready: 'ready',
+  /** The saves could not be laid out: the player plays without them this session. */
+  Unavailable: 'unavailable',
+  /** At the end of the session: the saves are over the club's limit and were not kept. */
+  TooLarge: 'tooLarge',
+} as const;
+/** Where the signed-in player's game saves are on this PC (SHELL_CHANGES 23). */
+export type PlayerSavesState = (typeof PlayerSavesState)[keyof typeof PlayerSavesState];
+
+/** Payload of `saves.status`, sent on every change of `PlayerSavesStatus.State`. */
+export interface PlayerSavesStatus {
+  /** Where the player's saves are. */
+  state: PlayerSavesState;
+}
+
 /** Payload of `policy.changed`. */
 export interface PolicyChanged {
   /** Policy version. */
@@ -298,6 +320,7 @@ export interface AgentEventMap {
   [IpcNames.Events.ShellCommand]: ShellCommand;
   [IpcNames.Events.AuthExpired]: AuthExpired;
   [IpcNames.Events.ShopOrderUpdated]: Order;
+  [IpcNames.Events.SavesStatus]: PlayerSavesStatus;
 }
 
 /** Agent → Shell event name (`'session.updated' | 'session.warning' | ...`). */

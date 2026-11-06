@@ -870,6 +870,7 @@ Errors: `rateLimited` (1 per 30 s), `validation`.
 | `shell.command` | `{ command: ShellCommandKind, args: object \| null, commandId: uuid }` | server/admin-driven UI commands (see below) |
 | `auth.expired` | `{ reason: "tokenExpired" \| "revoked" \| "admin" }` | user context invalidated; Shell returns to login |
 | `shop.orderUpdated` | `Order` | order status changed (server push `orderUpdated`, `SERVER_API.md` §6.3); also mirrored as `notification.push` |
+| `saves.status` | `{ state: "none" \| "loading" \| "ready" \| "unavailable" \| "tooLarge" }` | the player's saves through the diskless helper (`docs/DISKLESS.md`, "Player saves"); `loading` holds `games.launch`, `unavailable` and `tooLarge` are told to the player once |
 
 `shell.command.args` per command:
 

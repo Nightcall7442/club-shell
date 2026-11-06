@@ -103,6 +103,30 @@ pub struct GameStateChanged {
     pub error: Option<IpcError>,
 }
 
+wire_enum! {
+    /// Where the signed-in player's game saves are on this PC (SHELL_CHANGES 23).
+    PlayerSavesState {
+        /// No saves to carry: nobody signed in, a guest, or saves are off on this PC.
+        None = "none",
+        /// The diskless helper is laying the player's saves out; a game launch waits for it.
+        Loading = "loading",
+        /// The player's saves are in place.
+        Ready = "ready",
+        /// The saves could not be laid out: the player plays without them this session.
+        Unavailable = "unavailable",
+        /// At the end of the session: the saves are over the club's limit and were not kept.
+        TooLarge = "tooLarge",
+    }
+}
+
+/// Payload of `saves.status`, sent on every change of `PlayerSavesStatus.State`.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerSavesStatus {
+    /// Where the player's saves are.
+    pub state: PlayerSavesState,
+}
+
 /// Payload of `policy.changed`.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -507,7 +531,15 @@ mod tests {
             serde_json::to_string(&ready).unwrap(),
             r#"{"component":"shell","version":"1.5.0","restartRequired":true,"mandatory":false,"applyAt":"2026-09-21T04:00:00.000Z"}"#
         );
-        assert_eq!(event_names::ALL.len(), 18);
+        assert_eq!(event_names::ALL.len(), 19);
+        // SHELL_CHANGES 23: the player's saves.
+        let saves = PlayerSavesStatus {
+            state: PlayerSavesState::TooLarge,
+        };
+        assert_eq!(
+            serde_json::to_string(&saves).unwrap(),
+            r#"{"state":"tooLarge"}"#
+        );
     }
 }
 // ---- END MANUAL ----

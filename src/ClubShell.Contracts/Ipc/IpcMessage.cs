@@ -331,12 +331,15 @@ public static class IpcMessages
         /// <summary>Payload <see cref="Contracts.Shop.Order"/>.</summary>
         public const string ShopOrderUpdated = "shop.orderUpdated";
 
+        /// <summary>Payload <see cref="Ipc.PlayerSavesStatus"/>.</summary>
+        public const string SavesStatus = "saves.status";
+
         /// <summary>All event names.</summary>
         public static IReadOnlyList<string> All { get; } = new[]
         {
             SessionUpdated, SessionWarning, SessionEnded, WalletUpdated, ChatMessage, NotificationPush, AdminMessage,
             AdminRemoteControl, GameStateChanged, PolicyChanged, UpdateAvailable, UpdateProgress, UpdateReady, SysMetrics,
-            SysConnectivity, ShellCommand, AuthExpired, ShopOrderUpdated,
+            SysConnectivity, ShellCommand, AuthExpired, ShopOrderUpdated, SavesStatus,
         };
     }
 }
@@ -1405,5 +1408,29 @@ public sealed record ShellCommand(
 /// <summary>Payload of <c>auth.expired</c>; the Shell returns to the login screen.</summary>
 /// <param name="Reason">Why the user context was invalidated.</param>
 public sealed record AuthExpired(AuthExpiredReason Reason);
+
+/// <summary>Where the signed-in player's game saves are on this PC (SHELL_CHANGES 23).</summary>
+[JsonConverter(typeof(CamelCaseEnumConverter<PlayerSavesState>))]
+public enum PlayerSavesState
+{
+    /// <summary>No saves to carry: nobody signed in, a guest, or saves are off on this PC.</summary>
+    None,
+
+    /// <summary>The diskless helper is laying the player's saves out; a game launch waits for it.</summary>
+    Loading,
+
+    /// <summary>The player's saves are in place.</summary>
+    Ready,
+
+    /// <summary>The saves could not be laid out: the player plays without them this session.</summary>
+    Unavailable,
+
+    /// <summary>At the end of the session: the saves are over the club's limit and were not kept.</summary>
+    TooLarge,
+}
+
+/// <summary>Payload of <c>saves.status</c>, sent on every change of <see cref="State"/>.</summary>
+/// <param name="State">Where the player's saves are.</param>
+public sealed record PlayerSavesStatus(PlayerSavesState State);
 
 #endregion

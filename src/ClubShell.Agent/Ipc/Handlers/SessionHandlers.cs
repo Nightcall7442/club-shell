@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Text.Json;
 using ClubShell.Agent.Policy;
+using ClubShell.Agent.Saves;
 using ClubShell.Agent.Server;
 using ClubShell.Agent.Session;
 using ClubShell.Agent.Updates;
@@ -265,6 +266,7 @@ public sealed class SessionHandlers : IIpcHandlerGroup
         }
 
         _logger.LogInformation("User {UserId} ({Username}) logged in via {Kind} (online); session {SessionId}", auth.User.Id, auth.User.Username, request.Kind, session?.Id);
+        Saves?.SignedIn(auth.User, guest: request.Kind == AuthKind.Guest);
         return new AuthLoginResponse(auth.User, session, auth.ExpiresAt, ConnectivityState.Online);
     }
 
@@ -320,6 +322,8 @@ public sealed class SessionHandlers : IIpcHandlerGroup
         DateTimeOffset expiresAt = _clock.UtcNow.AddMinutes(Math.Max(1, offline.MaxOfflineMinutes));
         _users.Set(user, expiresAt, ConnectivityState.Offline);
         _logger.LogInformation("User {UserId} ({Username}) logged in from the offline cache", user.Id, user.Username);
+        // The club server is on the local network: the saves are laid out without the cash desk too.
+        Saves?.SignedIn(user);
         return new AuthLoginResponse(user, SessionOf(user), expiresAt, ConnectivityState.Offline);
     }
 
@@ -353,6 +357,13 @@ public sealed class SessionHandlers : IIpcHandlerGroup
             {
                 _logger.LogDebug(ex, "Server logout failed; user tokens dropped locally");
             }
+        }
+
+        if (!sessionEnded)
+        {
+            // Signed out without a session end of their own: no cleanup closes the games, so the release does that first.
+            // A session end has already started it (SessionCleanup, saves.detach).
+            Saves?.BeginRelease(reason, closeGames: true);
         }
 
         _lock.ForgetPin(user.Id);
@@ -428,6 +439,9 @@ public sealed class SessionHandlers : IIpcHandlerGroup
     }
 
     // ---- helpers ----------------------------------------------------------------------------
+
+    /// <summary>The player's saves (SHELL_CHANGES 23); resolved lazily, absent in tests that build the handlers by hand.</summary>
+    private IPlayerSaves? Saves => _services.GetService<IPlayerSaves>();
 
     private Guid PcId => _settings.CurrentValue.PcId ?? _connection.PcId ?? Guid.Empty;
 

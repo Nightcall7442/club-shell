@@ -1122,6 +1122,21 @@ public struct CREDENTIALW
     public readonly string UserNameString => UserName == 0 ? string.Empty : Marshal.PtrToStringUni(UserName) ?? string.Empty;
 }
 
+/// <summary>SERVICE_STATUS_PROCESS (<see cref="Advapi32.QueryServiceStatusEx"/>, <c>SC_STATUS_PROCESS_INFO</c>).</summary>
+[StructLayout(LayoutKind.Sequential)]
+public struct SERVICE_STATUS_PROCESS
+{
+    public uint dwServiceType;
+    public uint dwCurrentState;
+    public uint dwControlsAccepted;
+    public uint dwWin32ExitCode;
+    public uint dwServiceSpecificExitCode;
+    public uint dwCheckPoint;
+    public uint dwWaitHint;
+    public uint dwProcessId;
+    public uint dwServiceFlags;
+}
+
 /// <summary>SERVICE_STATUS.</summary>
 [StructLayout(LayoutKind.Sequential)]
 public struct SERVICE_STATUS
@@ -2230,6 +2245,7 @@ public static class NativeConst
     public const uint SERVICE_CONTINUE_PENDING = 0x00000005;
     public const uint SERVICE_PAUSE_PENDING = 0x00000006;
     public const uint SERVICE_PAUSED = 0x00000007;
+    public const uint SC_STATUS_PROCESS_INFO = 0;
 
     // ---- WTSSendMessage / MessageBox result ---------------------------------------------------
     public const uint WTS_MESSAGE_TIMEOUT_NONE = 0;

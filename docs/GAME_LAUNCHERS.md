@@ -338,6 +338,19 @@ Cloud saves follow the pooled *account*; a player's own binds, sensitivity and g
 | Save | after exit, before the lease release: pack → `POST …/upload-target` → `PUT` zip → `PUT /users/{userId}/game-settings/{gameId}` |
 | Failure policy | logged and swallowed: a launch or an exit never waits on settings |
 
+Settings only, never saves (SHELL_CHANGES 84, 23): a player's single-player saves are carried by the diskless helper
+(`docs/DISKLESS.md`, "Player saves"). A folder on the club server's "Saves" list must not be in a game's
+`settingsPaths`, or the two mechanisms overwrite each other's files.
+
+### 7.2 Player saves (`PlayerSavesService`)
+
+| Item | Value |
+|------|-------|
+| Enabled | `agent.json → games.playerSaves.mode`: `auto` (default; where the `ClubDisklessHelper` service is installed), `on`, `off` |
+| Attach | after a member's `auth.login` (online or offline), `profile.attach` over `\\.\pipe\club-diskless-helper`; `games.launch` waits for it up to `attachTimeoutSec` (60) |
+| Detach | at session end or sign-out, after the games have exited (asked to close first, whatever ended the session), retried within `detachTimeoutSec` (120); the profile reset waits for it |
+| Shell | `saves.status` (`loading` → launch step "Loading your saves…"; `unavailable`, `tooLarge` → a toast) |
+
 ---
 
 ## 8. Kill semantics

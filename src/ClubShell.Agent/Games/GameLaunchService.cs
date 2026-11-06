@@ -511,10 +511,14 @@ public sealed class GameLaunchService : IDisposable
     public IReadOnlyList<HeartbeatRunningGame> HeartbeatGames() =>
         _tracker.ListRunning().Select(r => new HeartbeatRunningGame(r.GameId, r.Pid, r.StartedAt)).ToList();
 
-    /// <summary>Session-end teardown: terminates every tracked game (graceful close first unless the reason is urgent) and releases their leases.</summary>
-    public async Task KillAllAsync(SessionEndReason reason, CancellationToken cancellationToken)
+    /// <summary>
+    /// Session-end teardown: terminates every tracked game and releases their leases. A game is asked to close first
+    /// (killed after <c>games.killGraceSec</c>) when the player ended the session or when <paramref name="graceful"/> —
+    /// the player's saves are about to be collected (SHELL_CHANGES 23) and many games write theirs on the way out.
+    /// </summary>
+    public async Task KillAllAsync(SessionEndReason reason, bool graceful, CancellationToken cancellationToken)
     {
-        bool force = reason is not SessionEndReason.User;
+        bool force = !graceful && reason is not SessionEndReason.User;
 
         // A game still starting would come up after the session is over.
         await CancelLaunchesAsync(null, wait: true, cancellationToken).ConfigureAwait(false);

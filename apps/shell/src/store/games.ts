@@ -11,6 +11,8 @@ import {
   type GamesLaunchRequest,
   type GamesSort,
   type LaunchResult,
+  type PlayerSavesState,
+  type PlayerSavesStatus,
   type RunningGame,
 } from '@clubshell/contracts';
 import { create } from 'zustand';
@@ -48,6 +50,10 @@ export interface GamesState {
   launching: LaunchingState | null;
   launchError: ShellError | null;
   lastStateChange: GameStateChanged | null;
+  /** The player's saves (`saves.status`, SHELL_CHANGES 23): a launch waits while they are `loading`. */
+  saves: PlayerSavesState;
+  /** `Date.now()` of the last `saves` change: a launch that started before it waited for the saves. */
+  savesChangedAt: number;
   status: AsyncStatus;
   error: ShellError | null;
 }
@@ -65,6 +71,7 @@ export interface GamesActions {
   /** Kills one game (or every running game when omitted). */
   kill(gameId?: string, force?: boolean): Promise<GamesKillResponse>;
   onStateChanged(e: GameStateChanged): void;
+  onSavesStatus(e: PlayerSavesStatus): void;
   upsert(game: Game): void;
   /** Clears user-scoped state (running, launching, selection, filters); keeps the catalogue. */
   reset(): void;
@@ -86,6 +93,8 @@ const initialState: GamesState = {
   launching: null,
   launchError: null,
   lastStateChange: null,
+  saves: 'none',
+  savesChangedAt: 0,
   status: 'idle',
   error: null,
 };
@@ -220,6 +229,12 @@ export const useGamesStore = create<GamesStore>()(
           return { killed: 0, pids: [] };
         }
         throw error;
+      }
+    },
+
+    onSavesStatus(e) {
+      if (get().saves !== e.state) {
+        set({ saves: e.state, savesChangedAt: Date.now() });
       }
     },
 

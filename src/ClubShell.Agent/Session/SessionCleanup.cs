@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using ClubShell.Agent.Saves;
 using ClubShell.Contracts.Sessions;
 using ClubShell.Core.Abstractions;
 using ClubShell.Core.Configuration;
@@ -13,8 +14,12 @@ namespace ClubShell.Agent.Session;
 /// <summary>Game-side teardown at session end; implemented by the games subsystem.</summary>
 public interface IGameSessionCleanup
 {
-    /// <summary>Terminates every running game of the session (job object) and reports the exits.</summary>
-    Task KillAllAsync(SessionEndReason reason, CancellationToken cancellationToken);
+    /// <summary>
+    /// Terminates every running game of the session (job object) and waits for the exits. A game is asked to close
+    /// first when the player ended the session, or when <paramref name="graceful"/> — many games write their save on
+    /// the way out (SHELL_CHANGES 23) — and is killed after <c>games.killGraceSec</c>.
+    /// </summary>
+    Task KillAllAsync(SessionEndReason reason, bool graceful, CancellationToken cancellationToken);
 
     /// <summary>Releases every account-pool lease held by the session (cloud saves uploaded first when enabled).</summary>
     Task ReleaseLeasesAsync(SessionEndReason reason, CancellationToken cancellationToken);
@@ -42,6 +47,12 @@ public sealed record CleanupReport(IReadOnlyList<CleanupStepResult> Steps, IRead
 /// the clipboard, empty temp/download/browser caches of the kiosk profile. Each step is isolated (own try/catch and
 /// <see cref="StepTimeout"/>); a failing step never stops the next one. The kiosk profile reset is not a step here: the
 /// Users subsystem (<c>ProfileResetService</c>) runs it on the <c>ended</c> session event, once the session is closed.
+/// <para>
+/// With the player's saves laid out by the diskless helper (SHELL_CHANGES 23) the games are asked to close even when the
+/// session was not ended by the player — many write their save on the way out — and once they have exited
+/// <c>saves.detach</c> starts collecting the saves. It runs in the background (up to 120 s, longer than the Shell waits for
+/// an answer); the profile reset waits for it (<see cref="IPlayerSaves.WaitReleasedAsync"/>).
+/// </para>
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class SessionCleanup
@@ -50,15 +61,17 @@ public sealed class SessionCleanup
     private readonly IClock _clock;
     private readonly ILogger<SessionCleanup> _logger;
     private readonly IGameSessionCleanup? _games;
+    private readonly IPlayerSaves? _saves;
     private readonly ProcessLauncher _launcher = new();
     private readonly ProfileReset _profiles = new();
 
-    /// <summary>Creates the cleanup; <paramref name="games"/> is an optional collaborator.</summary>
+    /// <summary>Creates the cleanup; <paramref name="games"/> and <paramref name="saves"/> are optional collaborators.</summary>
     public SessionCleanup(
         IOptionsMonitor<AgentSettings> settings,
         IClock clock,
         ILogger<SessionCleanup> logger,
-        IGameSessionCleanup? games = null)
+        IGameSessionCleanup? games = null,
+        IPlayerSaves? saves = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(clock);
@@ -67,6 +80,7 @@ public sealed class SessionCleanup
         _clock = clock;
         _logger = logger;
         _games = games;
+        _saves = saves;
     }
 
     /// <summary>Per-step timeout.</summary>
@@ -87,11 +101,25 @@ public sealed class SessionCleanup
         var started = _clock.GetTimestamp();
         var kiosk = _settings.CurrentValue.Shell.KioskUser;
         var steps = new List<(string Name, Func<CancellationToken, Task> Action)>();
+        bool savesOut = _saves?.Attached == true;
         if (_games is not null)
         {
-            var games = _games;
-            steps.Add(("games.kill", ct => games.KillAllAsync(reason, ct)));
-            steps.Add(("games.releaseLeases", ct => games.ReleaseLeasesAsync(reason, ct)));
+            steps.Add(("games.kill", ct => _games.KillAllAsync(reason, graceful: savesOut, ct)));
+        }
+
+        if (savesOut)
+        {
+            var saves = _saves!;
+            steps.Add(("saves.detach", _ =>
+            {
+                saves.BeginRelease(reason, closeGames: false);
+                return Task.CompletedTask;
+            }));
+        }
+
+        if (_games is not null)
+        {
+            steps.Add(("games.releaseLeases", ct => _games.ReleaseLeasesAsync(reason, ct)));
         }
 
         steps.Add(("windows.close", CloseUserWindowsAsync));

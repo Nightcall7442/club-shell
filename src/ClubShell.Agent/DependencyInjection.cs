@@ -9,6 +9,7 @@ using ClubShell.Agent.Ipc.Handlers;
 using ClubShell.Agent.Policy;
 using ClubShell.Agent.Power;
 using ClubShell.Agent.Remote;
+using ClubShell.Agent.Saves;
 using ClubShell.Agent.Server;
 using ClubShell.Agent.Session;
 using ClubShell.Agent.Storage;
@@ -119,6 +120,10 @@ public static class AgentServiceCollectionExtensions
     {
         services.TryAddSingleton<OfflineSessionStore>();
         services.TryAddSingleton<SessionTimer>();
+        // The player's saves through the diskless helper (SHELL_CHANGES 23): attach at sign-in, detach at session end.
+        services.TryAddSingleton<IDisklessHelperChannel, DisklessHelperChannel>();
+        services.TryAddSingleton<PlayerSavesService>();
+        services.TryAddSingleton<IPlayerSaves>(sp => sp.GetRequiredService<PlayerSavesService>());
         services.TryAddSingleton<SessionCleanup>();
         services.TryAddSingleton<SessionManager>();
         services.TryAddSingleton<ISessionService>(sp => sp.GetRequiredService<SessionManager>());
@@ -340,6 +345,8 @@ public static class AgentServiceCollectionExtensions
         services.AddHostedService(sp => sp.GetRequiredService<AgentUpdater>());
         services.AddHostedService(sp => sp.GetRequiredService<ShellWatchdog>());
         services.AddHostedService<AdminMaintenanceCloser>();
+        // Pings the diskless helper at start so its version (or its absence) is in the log.
+        services.AddHostedService(sp => sp.GetRequiredService<PlayerSavesService>());
         // Caches the catalogue's art after each catalogue change (SHELL_CHANGES 46).
         services.AddHostedService(sp => sp.GetRequiredService<GameMediaCache>());
         // Nothing depends on ProfileResetService; hosting it is what constructs it and subscribes the post-session reset.
@@ -521,8 +528,8 @@ internal sealed class SessionGameCleanupAdapter : ClubShell.Agent.Session.IGameS
         _services = services;
     }
 
-    public Task KillAllAsync(ClubShell.Contracts.Sessions.SessionEndReason reason, CancellationToken cancellationToken) =>
-        _services.GetRequiredService<GameLaunchService>().KillAllAsync(reason, cancellationToken);
+    public Task KillAllAsync(ClubShell.Contracts.Sessions.SessionEndReason reason, bool graceful, CancellationToken cancellationToken) =>
+        _services.GetRequiredService<GameLaunchService>().KillAllAsync(reason, graceful, cancellationToken);
 
     public Task ReleaseLeasesAsync(ClubShell.Contracts.Sessions.SessionEndReason reason, CancellationToken cancellationToken) =>
         _services.GetRequiredService<AccountPool>().ReleaseAllAsync(AccountLeaseReleaseReason.SessionEnd, cancellationToken);

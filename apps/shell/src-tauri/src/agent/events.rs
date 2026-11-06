@@ -174,6 +174,6 @@ mod tests {
             agent_event_name(ev::SESSION_UPDATED),
             "agent://session.updated"
         );
-        assert_eq!(ev::ALL.len(), 18);
+        assert_eq!(ev::ALL.len(), 19);
     }
 }

@@ -208,6 +208,40 @@ To service a seat, unlock the Shell with the admin PIN and exit: the Agent then 
 lets USB drives work and does not kill `cmd`, `reg` or `powershell` in the kiosk session (SHELL_CHANGES 28, 33, 34).
 Signing out hands the seat back at once; a reboot always comes back sealed.
 
+## Player saves
+
+A player's single-player saves follow their account to any PC of the club (SHELL_CHANGES 23). The club server keeps
+them, the helper (`ClubDisklessHelper` 1.7.0 or newer, on every seat, diskless or hybrid) moves the files, and the Agent
+tells it when, over `\\.\pipe\club-diskless-helper` (`src/ClubShell.Agent/Saves`):
+
+* **Channel.** One connection per command, one UTF-8 JSON line each way. The pipe admits only SYSTEM and
+  Administrators, so the Agent (LocalSystem) calls it, never the Shell. Any process could create a pipe of that name
+  while the helper is stopped, so the Agent connects at `TokenImpersonationLevel.Identification` and sends nothing
+  unless `GetNamedPipeServerProcessId` is the PID of the running `ClubDisklessHelper` service (a mismatch is logged as
+  a security error). `{"op":"ping"}` at Agent start puts the helper's version in the log.
+* **Sign-in.** After every successful `auth.login` of a member, online or from the offline cache, the Agent sends
+  `profile.attach` with `playerId` (the cash desk's `User.Id`, `D` form) and `windowsUserSid` (the kiosk account). A
+  game launch waits for it, up to `games.playerSaves.attachTimeoutSec` (60 s); the Shell shows "Loading your saves…"
+  (`saves.status`). Any failure lets the player play without saves and tells them so. Guests get neither attach nor
+  detach.
+* **End of session**, for any reason, and sign-out: the games are asked to close (also when the cashier or the timer
+  ended the session: many games write their save on the way out) and their exit is awaited; then `profile.detach`,
+  retried on `serverUnavailable`, `disabled`, `internal` (remaining game processes killed first) and a missing
+  channel, within `games.playerSaves.detachTimeoutSec` (120 s). Only then is the kiosk signed out and its profile
+  reset, or the seat rebooted. `overLimit` tells the player their saves are over 200 MB and were not kept. Every attach
+  that was sent gets its detach, a failed or timed-out one included.
+* **Never a late detach.** What was laid out is held only in memory: after an Agent restart, or a power cut, no detach
+  is sent; the server keeps the previous version and the next sign-in lays that out.
+* **Settings.** `games.playerSaves.mode`: `auto` (default, on where the helper service is installed), `on`, `off`.
+  Keep `shell.kioskUser.folderRedirect.enabled` off on these PCs (the Agent warns otherwise): the helper looks for
+  `%DOCUMENTS%` and `%SAVEDGAMES%` inside the profile. Do not list a folder from the club server's "Saves" list in a
+  game's `settingsPaths`: `PlayerSettingsSync` would carry the same files and the two would overwrite each other.
+
+`club-server/scripts/golden/saves-test.ps1` sends the same commands by hand (`ping`, `attach`, `detach`). On the bench:
+sign in, play, end the session, sign in as the same player on another seat — the progress is there; a guest causes no
+calls; the profile reset comes only after the detach answer (the Agent log and the helper's Application log,
+`Saves attach/detach of player …`).
+
 ## Known gaps
 
 * The helper's server API (`diskless/v1/…`) belongs to the club's diskless server; it is not part of
