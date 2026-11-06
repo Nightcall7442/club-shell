@@ -463,6 +463,7 @@ public sealed class ClubTimeConverter : JsonConverter<TimeOnly>
 [JsonSerializable(typeof(AntiCheatReport))]
 [JsonSerializable(typeof(GameMinSpec))]
 [JsonSerializable(typeof(Game))]
+[JsonSerializable(typeof(GameRegistryValue))]
 [JsonSerializable(typeof(App))]
 [JsonSerializable(typeof(GameState))]
 [JsonSerializable(typeof(Resolution))]

@@ -67,6 +67,7 @@ const VALIDATION_COPY: Record<string, string> = {
   'note:required': 'Для «Другое» напишите комментарий',
   'note:min': 'Комментарий — не короче 3 символов',
   'note:max': 'Комментарий — не длиннее 200 символов',
+  'registryValues:key': 'Ключ реестра — только под HKCU\\Software и не в разделе Policies',
 };
 
 function isMoney(v: unknown): v is Money {

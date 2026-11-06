@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using ClubShell.Contracts.Serialization;
 
@@ -58,6 +59,10 @@ public sealed record GameMinSpec(
 /// Set by the Agent: the drive (<c>H:</c>) the game's catalogue path is on, which this PC does not have — the game is
 /// unavailable here rather than not installed (a PC without the offline games disk, SHELL_CHANGES 74).
 /// </param>
+/// <param name="RegistryValues">
+/// Registry values the club sets in the player's HKCU before every launch (SHELL_CHANGES 82); <see langword="null"/> or
+/// empty = none.
+/// </param>
 public sealed record Game(
     Guid Id,
     string Title,
@@ -82,7 +87,19 @@ public sealed record Game(
     double SizeGb,
     string? Version = null,
     IReadOnlyList<string>? SettingsPaths = null,
-    string? MissingDrive = null);
+    string? MissingDrive = null,
+    IReadOnlyList<GameRegistryValue>? RegistryValues = null);
+
+/// <summary>
+/// A value the Agent writes into the player's HKCU before every launch of the game (SHELL_CHANGES 82), after the player's
+/// own settings are restored, so the club's value wins: a game that keeps its display mode in the registry (GoldSrc's
+/// <c>ScreenWindowed</c>, a crash flag) starts the way the club set it however a previous run left it.
+/// </summary>
+/// <param name="Key">Key under <c>HKCU\Software\</c> (the <c>HKCU\</c> prefix optional); never the policy keys.</param>
+/// <param name="Name">Value name.</param>
+/// <param name="Type"><c>dword</c> or <c>string</c>.</param>
+/// <param name="Value">A number (0..4294967295) for <c>dword</c>, a string for <c>string</c>.</param>
+public sealed record GameRegistryValue(string Key, string Name, string Type, JsonElement Value);
 
 /// <summary>Response of <c>games.installStatus</c>.</summary>
 /// <param name="GameId">Game id.</param>

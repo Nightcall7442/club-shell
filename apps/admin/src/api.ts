@@ -1099,6 +1099,16 @@ export interface AdminGame {
   videoUrl?: string | null;
   /** Zones whose PCs offer the game; empty = every zone. */
   zones?: string[];
+  /** Values the agent writes under the player's HKCU before every launch (SHELL_CHANGES 82); absent from an older server. */
+  registryValues?: GameRegistryValue[];
+}
+
+/** One registry value of a game: `key` under `HKCU\Software`, a `dword` (0..4294967295) or a `string`. */
+export interface GameRegistryValue {
+  key: string;
+  name: string;
+  type: 'dword' | 'string';
+  value: number | string;
 }
 
 /** What the owner sets for a game of the club (`POST /admin/games`, `PUT /admin/games/{id}`). */
@@ -1113,6 +1123,8 @@ export interface GameInput {
   description?: string | null;
   /** https only; null — no trailer (a save replaces the game's card, so send the current one to keep it). */
   videoUrl?: string | null;
+  /** Absent — the game keeps its values; empty — none. */
+  registryValues?: GameRegistryValue[];
 }
 
 export interface PriceQuote {

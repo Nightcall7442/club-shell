@@ -33,7 +33,6 @@
       "folderRedirect": { "enabled": true, "root": null, "clearOnReset": true },
       "resetProfileOnLogout": true,
       "resetMode": "auto",
-      "profileTemplate": null,
       "preserveOnReset": null
     },
     "readiness": { "enabled": true, "timeoutSec": 180 },

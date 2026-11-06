@@ -661,6 +661,14 @@ export const UZ: Record<string, string> = {
   'Необязательно. Прямая ссылка на сам файл: ролик без звука идёт за картинкой игры на ПК. Ссылка на YouTube не подойдёт.':
     'Ixtiyoriy. Faylning oʻziga toʻgʻridan-toʻgʻri havola: rolik kompyuterlarda oʻyin rasmi ortida ovozsiz aylanadi. YouTube havolasi toʻgʻri kelmaydi.',
   'Ролик — ссылка https://… на файл .mp4 или .webm': 'Rolik — .mp4 yoki .webm fayliga https://… havola',
+  'Значений реестра — не больше {n}': 'Reyestr qiymatlari — {n} tadan koʻp emas',
+  'Реестр, строка {n}: нужен вид HKCU\\Software\\…\\Имя = dword:1 или = "текст"':
+    'Reyestr, {n}-qator: HKCU\\Software\\…\\Nom = dword:1 yoki = "matn" koʻrinishi kerak',
+  'Значения реестра': 'Reyestr qiymatlari',
+  'Необязательно. Агент записывает их игроку перед каждым запуском — например, язык или полноэкранный режим. По одному в строке: HKCU\\Software\\…\\Имя = dword:1 или = "текст".':
+    'Ixtiyoriy. Agent ularni har bir ishga tushirishdan oldin oʻyinchiga yozadi — masalan, til yoki toʻliq ekran rejimi. Har qatorda bittadan: HKCU\\Software\\…\\Nom = dword:1 yoki = "matn".',
+  'Ключ реестра — только под HKCU\\Software и не в разделе Policies':
+    'Reyestr kaliti — faqat HKCU\\Software ostida va Policies boʻlimida emas',
   'Ролик не открывается: нужна прямая ссылка на файл .mp4 или .webm':
     'Rolik ochilmayapti: .mp4 yoki .webm fayliga toʻgʻridan-toʻgʻri havola kerak',
   Ролик: 'Rolik',
@@ -1836,6 +1844,14 @@ export const EN: Record<string, string> = {
   'Необязательно. Прямая ссылка на сам файл: ролик без звука идёт за картинкой игры на ПК. Ссылка на YouTube не подойдёт.':
     "Optional. A direct link to the file itself: the trailer plays muted behind the game's art on the PCs. A YouTube link will not work.",
   'Ролик — ссылка https://… на файл .mp4 или .webm': 'The trailer is an https://… link to an .mp4 or .webm file',
+  'Значений реестра — не больше {n}': 'No more than {n} registry values',
+  'Реестр, строка {n}: нужен вид HKCU\\Software\\…\\Имя = dword:1 или = "текст"':
+    'Registry, line {n}: write it as HKCU\\Software\\…\\Name = dword:1 or = "text"',
+  'Значения реестра': 'Registry values',
+  'Необязательно. Агент записывает их игроку перед каждым запуском — например, язык или полноэкранный режим. По одному в строке: HKCU\\Software\\…\\Имя = dword:1 или = "текст".':
+    'Optional. The agent writes them for the player before every launch — the language or full-screen mode, say. One per line: HKCU\\Software\\…\\Name = dword:1 or = "text".',
+  'Ключ реестра — только под HKCU\\Software и не в разделе Policies':
+    'A registry key goes under HKCU\\Software only, outside Policies',
   'Ролик не открывается: нужна прямая ссылка на файл .mp4 или .webm':
     'The trailer does not open: it needs a direct link to an .mp4 or .webm file',
   Ролик: 'Trailer',

@@ -124,6 +124,60 @@ public sealed class CatalogOwnerGamesTests(ExampleCatalogFixture server) : IClas
     }
 
     [Fact]
+    public async Task Registry_values_ride_the_card_to_the_pcs()
+    {
+        var owner = await LoginAsync(server, OwnerPin);
+        var (status, body) = await SendRawAsync(HttpMethod.Post, "/games", owner, new
+        {
+            title = "Reg Game", launcher = "exe", exePath = @"G:\Reg\reg.exe",
+            registryValues = new object[]
+            {
+                new { key = @"HKCU\Software\Valve\Steam", name = "Language", type = "string", value = "russian" },
+                new { key = @"Software/Studio/Game/", name = " Fullscreen ", type = "dword", value = 4294967295L },
+            },
+        });
+        Assert.Equal(200, status);
+        var id = body.GetProperty("game").GetProperty("id").GetGuid();
+        var values = body.GetProperty("game").GetProperty("registryValues").EnumerateArray().ToList();
+        Assert.Equal([(@"HKCU\Software\Valve\Steam", "Language", "string", "\"russian\""), (@"HKCU\Software\Studio\Game", "Fullscreen", "dword", "4294967295")],
+            values.Select(v => (v.GetProperty("key").GetString(), v.GetProperty("name").GetString(), v.GetProperty("type").GetString(), v.GetProperty("value").GetRawText())));
+
+        var agent = await TestAgent.CreateAsync(server);
+        var seen = (await AgentGamesAsync(agent)).Single(g => g.GetProperty("id").GetGuid() == id);
+        Assert.Equal(2, seen.GetProperty("registryValues").GetArrayLength());
+
+        // A save without the field (an older cash desk) keeps them; an empty list drops them.
+        Assert.Equal(200, (await SendRawAsync(HttpMethod.Put, $"/games/{id}", owner, new { title = "Reg Game", launcher = "exe", exePath = @"G:\Reg\reg.exe" })).Status);
+        Assert.Equal(2, await Players.ScalarAsync<int>(server, "SELECT jsonb_array_length(data -> 'registryValues') FROM games WHERE id = @id", new { id }));
+        (status, body) = await SendRawAsync(HttpMethod.Put, $"/games/{id}", owner, new { title = "Reg Game", launcher = "exe", exePath = @"G:\Reg\reg.exe", registryValues = Array.Empty<object>() });
+        Assert.Equal((200, 0), (status, body.GetProperty("game").GetProperty("registryValues").GetArrayLength()));
+
+        foreach (var (bad, reason) in new (object, string)[]
+        {
+            (new { key = @"HKLM\Software\X", name = "A", type = "dword", value = 1 }, "key"),
+            (new { key = @"HKCU\Control Panel\Desktop", name = "A", type = "dword", value = 1 }, "key"),
+            (new { key = @"HKCU\Software", name = "A", type = "dword", value = 1 }, "key"),
+            (new { key = @"HKCU\Software\Policies\Microsoft", name = "A", type = "dword", value = 1 }, "key"),
+            (new { key = @"Software\Microsoft\Windows\CurrentVersion\Policies\System", name = "A", type = "dword", value = 1 }, "key"),
+            (new { key = @"Software\..\X", name = "A", type = "dword", value = 1 }, "key"),
+            (new { key = @"Software\X", name = " ", type = "dword", value = 1 }, "name"),
+            (new { key = @"Software\X", name = "A", type = "dword", value = -1 }, "value"),
+            (new { key = @"Software\X", name = "A", type = "dword", value = 4294967296L }, "value"),
+            (new { key = @"Software\X", name = "A", type = "dword", value = "1" }, "value"),
+            (new { key = @"Software\X", name = "A", type = "string", value = new string('s', 1025) }, "value"),
+            (new { key = @"Software\X", name = "A", type = "qword", value = 1 }, "value"),
+        })
+        {
+            (status, body) = await SendRawAsync(HttpMethod.Put, $"/games/{id}", owner, new { title = "Reg Game", launcher = "exe", exePath = @"G:\Reg\reg.exe", registryValues = new[] { bad } });
+            Assert.Equal((400, "registryValues", reason), (status, body.GetProperty("error").GetProperty("details").GetProperty("field").GetString(),
+                body.GetProperty("error").GetProperty("details").GetProperty("reason").GetString()));
+        }
+
+        var many = Enumerable.Range(0, 21).Select(i => new { key = @"Software\X", name = $"V{i}", type = "dword", value = i }).ToArray();
+        Assert.Equal(400, (await SendRawAsync(HttpMethod.Put, $"/games/{id}", owner, new { title = "Reg Game", launcher = "exe", exePath = @"G:\Reg\reg.exe", registryValues = many })).Status);
+    }
+
+    [Fact]
     public async Task The_seed_leaves_the_club_games_alone()
     {
         var owner = await LoginAsync(server, OwnerPin);

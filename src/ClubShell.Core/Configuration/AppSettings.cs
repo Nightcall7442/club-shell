@@ -396,9 +396,6 @@ public sealed class KioskUserSettings
     [AllowedValues("auto", "logoff", "reboot")]
     public string ResetMode { get; set; } = "auto";
 
-    /// <summary>Folder copied into a fresh profile, when set.</summary>
-    public string? ProfileTemplate { get; set; }
-
     /// <summary>
     /// Profile-relative directories carried across a profile reset; <see langword="null"/> keeps the built-in
     /// anti-cheat and shader-cache list (<c>ProfileReset.PreservedDirectories</c>), an empty array preserves nothing. Wiping these
