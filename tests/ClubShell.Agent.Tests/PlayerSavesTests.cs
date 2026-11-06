@@ -53,6 +53,7 @@ public sealed class PlayerSavesTests
     [InlineData("profileNotFound", HelperErrorCode.ProfileNotFound)]
     [InlineData("badRequest", HelperErrorCode.BadRequest)]
     [InlineData("internal", HelperErrorCode.Internal)]
+    [InlineData("updating", HelperErrorCode.Updating)]
     [InlineData("somethingNew", HelperErrorCode.Internal)]
     public void Error_codes_are_read_and_an_unknown_one_counts_as_internal(string wire, HelperErrorCode expected)
     {
@@ -71,6 +72,22 @@ public sealed class PlayerSavesTests
 
         HelperResult russian = HelperProtocol.ParseReply("{\"ok\":false,\"error\":\"internal\",\"message\":\"\\u0424\\u0430\\u0439\\u043b \\u0437\\u0430\\u043d\\u044f\\u0442\"}");
         russian.Message.Should().Be("Файл занят");
+
+        HelperResult v18 = HelperProtocol.ParseReply("{\"ok\":true,\"version\":\"1.8.0\",\"build\":\"ab12\",\"updating\":true}");
+        v18.Build.Should().Be("ab12");
+        v18.Updating.Should().BeTrue();
+        v18.Ready.Should().BeNull("1.8.0 does not report its disks yet");
+        v18.Disks.Should().BeNull();
+
+        HelperResult disks = HelperProtocol.ParseReply(
+            "{\"ok\":true,\"ready\":false,\"disks\":[{\"library\":\"games\",\"letter\":\"G\",\"state\":\"mounted\"},{\"library\":\"solo\",\"state\":\"brandNew\"},{\"library\":\"x\",\"state\":\"noServer\"}]}");
+        disks.Ready.Should().BeFalse();
+        disks.Disks.Should().HaveCount(3);
+        disks.Disks![0].Should().Be(new HelperDisk("games", "G", "mounted"));
+        disks.Disks[0].Mounted.Should().BeTrue();
+        disks.Disks[1].Pending.Should().BeTrue("an unknown state counts as still attaching");
+        disks.Disks[2].Pending.Should().BeFalse();
+        disks.Disks[2].Mounted.Should().BeFalse();
 
         HelperProtocol.ParseReply("not json").Kind.Should().Be(HelperResultKind.Failed);
         HelperProtocol.ParseReply("{\"error\":\"internal\"}").Kind.Should().Be(HelperResultKind.Failed);
@@ -211,6 +228,32 @@ public sealed class PlayerSavesTests
         await harness.Saves.WaitReleasedAsync(TimeSpan.FromSeconds(5), CancellationToken.None);
 
         harness.Channel.Ops.Should().Equal("profile.attach", "profile.detach");
+    }
+
+    [Fact]
+    public async Task An_attach_answered_updating_is_repeated_while_the_helper_replaces_itself()
+    {
+        var harness = new Harness();
+        harness.Channel.Answer("profile.attach", Error(HelperErrorCode.Updating), Error(HelperErrorCode.Updating), new HelperResult(HelperResultKind.Ok));
+
+        harness.Saves.SignedIn(Member());
+        await harness.Saves.WaitForAttachAsync(CancellationToken.None);
+
+        harness.Channel.Ops.Should().Equal("profile.attach", "profile.attach", "profile.attach");
+        harness.Saves.State.Should().Be(PlayerSavesState.Ready);
+    }
+
+    [Fact]
+    public async Task A_detach_answered_updating_is_repeated_without_killing_the_games()
+    {
+        var harness = new Harness();
+        harness.Channel.Answer("profile.detach", Error(HelperErrorCode.Updating), new HelperResult(HelperResultKind.Ok));
+        await AttachAsync(harness);
+
+        harness.Saves.BeginRelease(SessionEndReason.User, closeGames: false);
+        await harness.Saves.WaitReleasedAsync(TimeSpan.FromSeconds(5), CancellationToken.None);
+
+        harness.Log.Should().Equal("profile.attach", "profile.detach", "profile.detach");
     }
 
     [Fact]
@@ -366,6 +409,7 @@ public sealed class PlayerSavesTests
                 () => helperInstalled)
             {
                 RetryDelay = TimeSpan.FromMilliseconds(10),
+                UpdatingRetryDelay = TimeSpan.FromMilliseconds(10),
             };
         }
 

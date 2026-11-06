@@ -230,6 +230,12 @@ tells it when, over `\\.\pipe\club-diskless-helper` (`src/ClubShell.Agent/Saves`
   channel, within `games.playerSaves.detachTimeoutSec` (120 s). Only then is the kiosk signed out and its profile
   reset, or the seat rebooted. `overLimit` tells the player their saves are over 200 MB and were not kept. Every attach
   that was sent gets its detach, a failed or timed-out one included.
+* **Helper self-update (1.8.0+).** The helper restarts itself when it updates; its channel is gone for 5–30 s (up
+  to 2 minutes on a rollback). A missing channel, or one not served by the helper service, is retried every second
+  within the command's own timeout (attach 60 s, detach 120 s), the service PID looked up afresh at every connection.
+  `{"ok":false,"error":"updating"}` (the helper is replacing its executable; nothing was done) is repeated every 5 s
+  within the same timeout — never treated as `internal`, so it does not kill the games. `ping` logs the helper's
+  `version` and `build`.
 * **Never a late detach.** What was laid out is held only in memory: after an Agent restart, or a power cut, no detach
   is sent; the server keeps the previous version and the next sign-in lays that out.
 * **Settings.** `games.playerSaves.mode`: `auto` (default, on where the helper service is installed), `on`, `off`.
