@@ -18,7 +18,8 @@
     Path to ClubShellSetup-<version>.exe. Default: the newest ClubShellSetup*.exe next to this script, in the current
     folder or in Downloads.
 .PARAMETER KioskUser
-    Windows account of the kiosk. Default: club.
+    Windows account of the kiosk. Default: the one this PC already has (HKLM\SOFTWARE\ClubShell\KioskUser, then
+    agent.json), else player.
 .PARAMETER ForImage
     Reference PC for an image: install, then stop the agent and delete agent-identity.json, agent.tokens, hwid.fallback.
 .PARAMETER WaitMinutes
@@ -33,10 +34,19 @@ param(
     [string] $ServerUrl,
     [string] $ClubKey,
     [string] $SetupPath,
-    [string] $KioskUser = 'club',
+    [string] $KioskUser = '',
     [switch] $ForImage,
     [int] $WaitMinutes = 5
 )
+
+# The kiosk this PC already has (SHELL_CHANGES 64): the name the installer stored, then agent.json; 'player' on a new PC.
+if (-not $KioskUser) {
+    try { $KioskUser = [string](Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\ClubShell' -Name KioskUser -ErrorAction Stop).KioskUser } catch { }
+}
+if (-not $KioskUser) {
+    try { $KioskUser = [string](Get-Content -LiteralPath (Join-Path $env:ProgramData 'ClubShell\agent.json') -Raw -ErrorAction Stop | ConvertFrom-Json).shell.kioskUser.name } catch { }
+}
+if (-not $KioskUser) { $KioskUser = 'player' }
 
 $ErrorActionPreference = 'Stop'
 $ServiceName = 'ClubShellAgent'

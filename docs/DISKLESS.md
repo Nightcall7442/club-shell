@@ -102,6 +102,16 @@ and leaves it installed when ClubShell is upgraded or removed (`Permanent`, no `
 in the middle of a session therefore never takes G: away from a player. MSIs built before this change did stop and
 replace the helper on upgrade; a club that installs the helper itself (the club of this reconciliation) is not affected.
 
+**Upgrading a PC whose helper came from an MSI built before that change** (SHELL_CHANGES 58). Windows Installer removes
+the old package as a whole before installing the new one (`MajorUpgrade` after `InstallInitialize`), and the old
+package did not mark the helper `Permanent`: its service is stopped and deleted with its exe. The new MSI then puts its
+own copy back only when it was built with `-DisklessHelperDir` and given `INSTALLDISKLESS=1`, and starts it only with
+`DISKLESSSTART=1`; a released MSI carries no helper, so the PC has no G: until the helper is installed again. On such a
+PC either upgrade with an MSI built with the helper and `INSTALLDISKLESS=1 DISKLESSSTART=1` (its `helper.json` and
+`credentials.bin` in `%ProgramData%\ClubDiskless` are kept, so it comes back with the same registration), or install the
+helper with its own installer right after the upgrade, between sessions. No released ClubShell MSI ever carried the
+helper, so only PCs set up from such a custom build are concerned.
+
 The feature `DisklessHelper` is off by default. Public properties (MSI or `ClubShellSetup.exe`):
 
 | Property | Meaning |
@@ -167,6 +177,10 @@ power-command acks (`cache\power-acks.json`). Two ways to run on such a PC (SHEL
 * **A directory that survives the reboot** — `agent.json → paths.persistent` (absolute, e.g. a persistent volume the
   club server gives each seat). The identity, the secrets, the outbox and the acks then live there; the Agent creates it
   accessible to SYSTEM and Administrators only. The PC keeps its credentials and its unsent events across reboots.
+  It must be a directory of the Agent's own, such as `P:\ClubShell` (SHELL_CHANGES 53): a volume root (`D:\`, a
+  writable `G:\`) or a directory that already holds other files would be shut to everyone else, so the Agent leaves its
+  rights alone, logs an error and protects only its own `secure` and `cache` subdirectories there. A directory the
+  Agent prepared carries `.clubshell-persistent`.
 * **No such directory** — mark the PC in the cash desk, «Зал и устройства», «Без постоянного диска». The server then
   expects the PC to register again without proof at every boot (an information in the log, not the D-78 warning), and
   `Agents:RegisterProof=enforce` lets it through while the PC is offline. Unsent offline events of a boot are lost.

@@ -355,7 +355,7 @@ public sealed class KioskUserSettings
 {
     /// <summary>Local account name.</summary>
     [Required]
-    public string Name { get; set; } = "club";
+    public string Name { get; set; } = "player";
 
     /// <summary>Create the account when missing.</summary>
     public bool CreateIfMissing { get; set; } = true;
@@ -442,6 +442,19 @@ public sealed class SessionSettings
     /// <summary>Interval at which session state is persisted to <c>cache\session.json</c>.</summary>
     [Range(1, 600)]
     public int PersistIntervalSec { get; set; } = 5;
+
+    /// <summary>
+    /// Files deleted and folders emptied after every session (environment variables expanded), for what games and launchers
+    /// leave outside the player's profile: on the games disks, which are reset only at boot (SHELL_CHANGES 85) — e.g.
+    /// <c>H:\Games\Half-Life\cstrike\config.cfg</c> (CS 1.6 nick and binds).
+    /// </summary>
+    public string[] CleanupPaths { get; set; } = [];
+
+    /// <summary>
+    /// Also delete Steam's <c>config\loginusers.vdf</c> (next to <c>games.launchers.steam.exePath</c>) after every session:
+    /// it lists the Steam accounts that signed in on this PC, for the next player to see.
+    /// </summary>
+    public bool CleanSteamLoginUsers { get; set; } = true;
 }
 
 /// <summary><c>agent.json → offline</c>.</summary>
@@ -474,7 +487,7 @@ public sealed class OfflineSettings
 public sealed class GamesSettings
 {
     /// <summary>Library roots scanned for installs.</summary>
-    public string[] LibraryRoots { get; set; } = new[] { "D:\\Games", "G:\\Games" };
+    public string[] LibraryRoots { get; set; } = new[] { "D:\\Games", "G:\\Games", "H:\\Games" };
 
     /// <summary>Library rescan interval.</summary>
     [Range(10, 86400)]

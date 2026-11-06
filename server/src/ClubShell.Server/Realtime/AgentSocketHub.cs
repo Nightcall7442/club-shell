@@ -260,7 +260,7 @@ public sealed class AgentSocketHub(
                 // PC that then goes offline is not an incident for (SHELL_CHANGES 44). Its answer to our close is not.
                 if (connection.Socket.State == WebSocketState.CloseReceived)
                 {
-                    await RecordGoodbyeAsync(agent.Pc.Id);
+                    await RecordGoodbyeAsync(agent.Pc.Id, connection.Socket.CloseStatusDescription);
                 }
 
                 await connection.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye");
@@ -380,11 +380,11 @@ public sealed class AgentSocketHub(
         }
     }
 
-    private async Task RecordGoodbyeAsync(Guid pcId)
+    private async Task RecordGoodbyeAsync(Guid pcId, string? reason)
     {
         try
         {
-            await pcs.SetGoodbyeAsync(pcId, clock.GetUtcNow());
+            await pcs.SetGoodbyeAsync(pcId, clock.GetUtcNow(), reason);
         }
         catch (NpgsqlException ex)
         {

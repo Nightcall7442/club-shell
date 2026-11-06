@@ -40,17 +40,24 @@ if ($svc) {
 }
 $agentProc = Get-Process ClubShellAgent -ErrorAction SilentlyContinue
 if ($agentProc) { Add "Agent process: running since $($agentProc.StartTime.ToString('HH:mm:ss')), CPU $([math]::Round($agentProc.CPU,1)) s" }
-Add "Kiosk user 'club': $([bool](Get-LocalUser -Name club -ErrorAction SilentlyContinue))"
+# The kiosk this PC has (SHELL_CHANGES 64): agent.json, then what the installer stored.
+$kioskName = $null
+try { $kioskName = [string](Get-Content -LiteralPath (Join-Path $data 'agent.json') -Raw -ErrorAction Stop | ConvertFrom-Json).shell.kioskUser.name } catch { }
+if (-not $kioskName) {
+    try { $kioskName = [string](Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\ClubShell' -Name KioskUser -ErrorAction Stop).KioskUser } catch { }
+}
+if (-not $kioskName) { $kioskName = 'player' }
+Add "Kiosk user '$kioskName': $([bool](Get-LocalUser -Name $kioskName -ErrorAction SilentlyContinue))"
 Add "agent.json present: $(Test-Path (Join-Path $data 'agent.json'))"
 
 Add ''
 Add '--- Kiosk account and auto-logon'
-$club = Get-LocalUser -Name club -ErrorAction SilentlyContinue
-if ($club) {
-    $sid = $club.SID.Value
+$kiosk = Get-LocalUser -Name $kioskName -ErrorAction SilentlyContinue
+if ($kiosk) {
+    $sid = $kiosk.SID.Value
     $profilePath = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$sid" -ErrorAction SilentlyContinue).ProfileImagePath
-    Add "club: enabled $($club.Enabled), SID $sid"
-    Add "club profile: $(if ($profilePath) { "$profilePath (NTUSER.DAT present: $(Test-Path (Join-Path ([Environment]::ExpandEnvironmentVariables($profilePath)) 'NTUSER.DAT')))" } else { 'none' })"
+    Add "${kioskName}: enabled $($kiosk.Enabled), SID $sid"
+    Add "$kioskName profile: $(if ($profilePath) { "$profilePath (NTUSER.DAT present: $(Test-Path (Join-Path ([Environment]::ExpandEnvironmentVariables($profilePath)) 'NTUSER.DAT')))" } else { 'none' })"
 }
 $winlogon = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -ErrorAction SilentlyContinue
 Add "Winlogon: AutoAdminLogon=$($winlogon.AutoAdminLogon) ForceAutoLogon=$($winlogon.ForceAutoLogon) AutoLogonCount=$($winlogon.AutoLogonCount) DefaultUserName=$($winlogon.DefaultUserName) DefaultDomainName=$($winlogon.DefaultDomainName) Shell=$($winlogon.Shell) DefaultPassword in registry=$([bool]($winlogon.PSObject.Properties.Name -contains 'DefaultPassword'))"

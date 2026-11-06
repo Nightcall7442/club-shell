@@ -25,7 +25,7 @@
   "shell": {
     "exePath": "C:\\Program Files\\ClubShell\\Shell\\clubshell-shell.exe",
     "kioskUser": {
-      "name": "club",
+      "name": "player",
       "createIfMissing": true,
       "removeFromPrivilegedGroups": false,
       "rotatePasswordOnStart": true,
@@ -48,7 +48,9 @@
     "heartbeatSec": 30,
     "graceSec": 60,
     "autoLockOnIdleSec": 0,
-    "persistIntervalSec": 5
+    "persistIntervalSec": 5,
+    "cleanupPaths": [],
+    "cleanSteamLoginUsers": true
   },
   "offline": {
     "enabled": true,
@@ -59,7 +61,7 @@
     "userCacheTtlHours": 168
   },
   "games": {
-    "libraryRoots": ["D:\\Games", "G:\\Games"],
+    "libraryRoots": ["D:\\Games", "G:\\Games", "H:\\Games"],
     "scanIntervalSec": 900,
     "launchTimeoutSec": 90,
     "killGraceSec": 10,

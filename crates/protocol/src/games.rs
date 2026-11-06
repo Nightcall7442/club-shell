@@ -233,6 +233,10 @@ pub struct GameInstallStatus {
     pub verified_at: Option<DateTime<Utc>>,
     /// Launcher client present and logged in (where detectable).
     pub launcher_ready: bool,
+    /// Not installed because the drive of the game's path (`H:`) is not on this PC (SHELL_CHANGES
+    /// 74).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub missing_drive: Option<String>,
 }
 
 /// Minimum hardware specification of a game.
@@ -423,6 +427,11 @@ pub struct Game {
     /// not carried.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub settings_paths: Option<Vec<String>>,
+    /// Set by the Agent: the drive (`H:`) the game's catalogue path is on, which this PC does not
+    /// have — the game is unavailable here rather than not installed (a PC without the offline
+    /// games disk, SHELL_CHANGES 74).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub missing_drive: Option<String>,
 }
 
 /// Body of `POST /games/{id}/launch-report` (SERVER_API.md §4.6).
@@ -707,6 +716,7 @@ mod tests {
             size_gb: 35.5,
             version: None,
             settings_paths: None,
+            missing_drive: None,
         };
         let json = serde_json::to_string(&g).unwrap();
         assert_eq!(

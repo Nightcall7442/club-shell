@@ -793,13 +793,30 @@ test('the owner sees and edits where a game keeps player settings', async ({ pag
   await signIn(page, OWNER_PIN);
   await page.goto('/#/catalog');
   const cs2 = page.getByRole('row').filter({ hasText: 'Counter-Strike 2' });
-  await expect(cs2.getByRole('button', { name: 'Переносятся' })).toBeVisible();
+  await expect(cs2.getByRole('button', { name: 'Пути заданы' })).toBeVisible();
 
   const rust = page.getByRole('row').filter({ hasText: 'Rust' });
   await rust.getByRole('button', { name: 'Не заданы' }).click();
   await page.getByLabel('Пути к настройкам игрока').fill('%APPDATA%\\Rust\\cfg');
   await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
-  await expect(rust.getByRole('button', { name: 'Переносятся' })).toBeVisible();
+  await expect(rust.getByRole('button', { name: 'Пути заданы' })).toBeVisible();
+});
+
+test('saving only the zones of a game sends only its zones (SHELL_CHANGES 61)', async ({ page }) => {
+  await signIn(page, OWNER_PIN);
+  await page.goto('/#/catalog');
+  await page.getByRole('row').filter({ hasText: 'Apex Legends' }).getByRole('button', { name: 'Изменить' }).click();
+  const editor = page.locator('section').filter({ has: page.getByRole('heading', { name: /Игра · Apex Legends/ }) });
+  await editor.getByRole('button', { name: 'Bootcamp', exact: true }).click();
+
+  // A PUT of the card would make a starter game the club's, and the seed would stop updating it.
+  const sent: string[] = [];
+  page.on('request', (r) => {
+    if (r.method() === 'PUT' && r.url().includes('/admin/games/')) sent.push(new URL(r.url()).pathname);
+  });
+  await editor.getByRole('button', { name: 'Сохранить', exact: true }).click();
+  await expect.poll(() => sent.length).toBe(1);
+  expect(sent[0]).toMatch(/\/admin\/games\/[^/]+\/zones$/);
 });
 
 test('the owner sees every club of the network and adds one', async ({ page, request }) => {

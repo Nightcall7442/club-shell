@@ -70,7 +70,7 @@ export function installCmd(server: string, key: string, kiosk: string, repo: str
 
 export function InstallKit(): JSX.Element {
   const [key, setKey] = useState('');
-  const [kiosk, setKiosk] = useState('club');
+  const [kiosk, setKiosk] = useState('player');
   const issue = !KEY.test(key.trim())
     ? t('Ключ — латинские буквы и цифры, без пробелов')
     : !KIOSK.test(kiosk.trim())
@@ -121,7 +121,10 @@ export function InstallKit(): JSX.Element {
             onChange={(e) => setKey(e.target.value)}
           />
         </Field>
-        <Field label={t('Учётная запись киоска')} hint={t('Обычно club')}>
+        <Field
+          label={t('Учётная запись киоска')}
+          hint={t('Обычно player. ПК, где ClubShell уже стоит, оставляет своё имя.')}
+        >
           <Input
             className="font-mono"
             autoComplete="off"

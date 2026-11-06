@@ -76,6 +76,7 @@ public sealed partial class PowerControl
         EnableShutdownPrivilege();
         if (Advapi32.AbortSystemShutdownW(null))
         {
+            ClubShell.Core.Realtime.AgentStopReason.Set(null);
             _logger.LogInformation("Pending shutdown aborted");
             return true;
         }
@@ -209,6 +210,8 @@ public sealed partial class PowerControl
             Win32Error.ThrowLastError(nameof(Advapi32.InitiateSystemShutdownExW));
         }
 
+        // Told to the server as the Agent's goodbye: a reboot that does not come back is an incident (SHELL_CHANGES 60).
+        ClubShell.Core.Realtime.AgentStopReason.Set(reboot ? ClubShell.Core.Realtime.AgentStopReason.Reboot : ClubShell.Core.Realtime.AgentStopReason.Shutdown);
         _logger.LogWarning("{Action} initiated (delay {Delay}s, force {Force}): {Message}", reboot ? "Reboot" : "Shutdown", delaySec, force, message ?? string.Empty);
     }
 

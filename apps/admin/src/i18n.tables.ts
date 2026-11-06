@@ -23,10 +23,10 @@ export const UZ: Record<string, string> = {
   'этот сервер': 'shu server',
   'Настройки игрока': 'Oʻyinchi sozlamalari',
   'Настройки игрока · {title}': 'Oʻyinchi sozlamalari · {title}',
-  'Файлы и папки, где игра хранит бинды, чувствительность и графику игрока. Агент сохраняет их после игры и возвращает игроку на любом ПК. По одному пути в строке; можно {installPath}, %LOCALAPPDATA%, %APPDATA%, %USERPROFILE%.':
-    'Oʻyin oʻyinchining tugmalari, sezgirligi va grafikasini saqlaydigan fayl va papkalar. Agent ularni oʻyindan keyin saqlaydi va istalgan kompyuterda oʻyinchiga qaytaradi. Har qatorda bitta yoʻl; {installPath}, %LOCALAPPDATA%, %APPDATA%, %USERPROFILE% ishlatish mumkin.',
+  'Файлы и папки, где игра хранит бинды, чувствительность и графику игрока. Пути запоминаются, но перенос настроек между ПК пока не работает: сервер их ещё не хранит. По одному пути в строке; можно {installPath}, %LOCALAPPDATA%, %APPDATA%, %USERPROFILE%.':
+    'Oʻyin oʻyinchining tugmalari, sezgirligi va grafikasini saqlaydigan fayl va papkalar. Yoʻllar eslab qolinadi, lekin sozlamalarni kompyuterlar orasida koʻchirish hozircha ishlamaydi: server ularni hali saqlamaydi. Har qatorda bitta yoʻl; {installPath}, %LOCALAPPDATA%, %APPDATA%, %USERPROFILE% ishlatish mumkin.',
   'Пути к настройкам игрока': 'Oʻyinchi sozlamalari yoʻllari',
-  Переносятся: 'Koʻchiriladi',
+  'Пути заданы': 'Yoʻllar belgilangan',
   'Не заданы': 'Belgilanmagan',
   'CPU за сутки': 'CPU bir sutkada',
   'CPU сейчас / обычно': 'CPU hozir / odatda',
@@ -352,7 +352,8 @@ export const UZ: Record<string, string> = {
   'Выдаётся при создании клуба в суперадминке или задан на сервере (Club__EnrollmentKey). Касса его не хранит.':
     'Klub superadminda yaratilganda beriladi yoki serverda belgilangan (Club__EnrollmentKey). Kassa uni saqlamaydi.',
   'Учётная запись киоска': 'Kiosk hisobi',
-  'Обычно club': 'Odatda club',
+  'Обычно player. ПК, где ClubShell уже стоит, оставляет своё имя.':
+    'Odatda player. ClubShell oʻrnatilgan kompyuter oʻz nomini saqlaydi.',
   'Запустите файл на игровом ПК. В нём ключ для ПК: храните его только в клубе.':
     'Faylni oʻyin kompyuterida ishga tushiring. Unda kompyuter kaliti bor: uni faqat klubda saqlang.',
   'Скачать файл установки': 'Oʻrnatish faylini yuklab olish',
@@ -1195,10 +1196,10 @@ export const EN: Record<string, string> = {
   'этот сервер': 'this server',
   'Настройки игрока': 'Player settings',
   'Настройки игрока · {title}': 'Player settings · {title}',
-  'Файлы и папки, где игра хранит бинды, чувствительность и графику игрока. Агент сохраняет их после игры и возвращает игроку на любом ПК. По одному пути в строке; можно {installPath}, %LOCALAPPDATA%, %APPDATA%, %USERPROFILE%.':
-    "Files and folders where the game keeps the player's binds, sensitivity and graphics. The Agent saves them after the game and gives them back to the player on any PC. One path per line; {installPath}, %LOCALAPPDATA%, %APPDATA%, %USERPROFILE% are allowed.",
+  'Файлы и папки, где игра хранит бинды, чувствительность и графику игрока. Пути запоминаются, но перенос настроек между ПК пока не работает: сервер их ещё не хранит. По одному пути в строке; можно {installPath}, %LOCALAPPDATA%, %APPDATA%, %USERPROFILE%.':
+    "Files and folders where the game keeps the player's binds, sensitivity and graphics. The paths are kept, but carrying the settings between PCs does not work yet: the server does not store them. One path per line; {installPath}, %LOCALAPPDATA%, %APPDATA%, %USERPROFILE% are allowed.",
   'Пути к настройкам игрока': 'Player settings paths',
-  Переносятся: 'Carried',
+  'Пути заданы': 'Paths set',
   'Не заданы': 'Not set',
   'CPU за сутки': 'CPU, 24 h',
   'CPU сейчас / обычно': 'CPU now / usual',
@@ -1525,7 +1526,8 @@ export const EN: Record<string, string> = {
   'Выдаётся при создании клуба в суперадминке или задан на сервере (Club__EnrollmentKey). Касса его не хранит.':
     'Issued when the club is created in the platform admin, or set on the server (Club__EnrollmentKey). The console does not keep it.',
   'Учётная запись киоска': 'Kiosk account',
-  'Обычно club': 'Usually club',
+  'Обычно player. ПК, где ClubShell уже стоит, оставляет своё имя.':
+    'Usually player. A PC that already has ClubShell keeps its own name.',
   'Запустите файл на игровом ПК. В нём ключ для ПК: храните его только в клубе.':
     'Run the file on a gaming PC. It holds the PC key: keep it in the club.',
   'Скачать файл установки': 'Download the install file',

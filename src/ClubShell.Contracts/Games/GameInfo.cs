@@ -54,6 +54,10 @@ public sealed record GameMinSpec(
 /// <c>%LOCALAPPDATA%</c>, <c>%APPDATA%</c>, <c>%USERPROFILE%</c>, <c>{installPath}</c>. The Agent carries them from PC
 /// to PC per player (<see cref="PlayerSettingsBundle"/>); <see langword="null"/> or empty = not carried.
 /// </param>
+/// <param name="MissingDrive">
+/// Set by the Agent: the drive (<c>H:</c>) the game's catalogue path is on, which this PC does not have — the game is
+/// unavailable here rather than not installed (a PC without the offline games disk, SHELL_CHANGES 74).
+/// </param>
 public sealed record Game(
     Guid Id,
     string Title,
@@ -77,7 +81,8 @@ public sealed record Game(
     GameMinSpec? MinSpec,
     double SizeGb,
     string? Version = null,
-    IReadOnlyList<string>? SettingsPaths = null);
+    IReadOnlyList<string>? SettingsPaths = null,
+    string? MissingDrive = null);
 
 /// <summary>Response of <c>games.installStatus</c>.</summary>
 /// <param name="GameId">Game id.</param>
@@ -87,6 +92,7 @@ public sealed record Game(
 /// <param name="Version">Detected version.</param>
 /// <param name="VerifiedAt">Last successful verification.</param>
 /// <param name="LauncherReady">Launcher client present and logged in (where detectable).</param>
+/// <param name="MissingDrive">Not installed because the drive of the game's path (<c>H:</c>) is not on this PC (SHELL_CHANGES 74).</param>
 public sealed record GameInstallStatus(
     Guid GameId,
     bool Installed,
@@ -94,7 +100,8 @@ public sealed record GameInstallStatus(
     double SizeGb,
     string? Version,
     DateTimeOffset? VerifiedAt,
-    bool LauncherReady);
+    bool LauncherReady,
+    string? MissingDrive = null);
 
 /// <summary>Well-known values of <see cref="App.Category"/>.</summary>
 public static class AppCategories

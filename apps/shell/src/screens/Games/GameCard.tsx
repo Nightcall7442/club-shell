@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/Badge';
 import { useLocale } from '@/hooks/useLocale';
 import { formatRelativeDay } from '@/lib/format';
 import { categoryLabel } from './Categories';
+import { notInstalledLabel } from '@/lib/gameAvailability';
 
 export interface GameCardProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'onSelect'> {
   game: Game;
@@ -154,7 +155,7 @@ export const GameCard = forwardRef<HTMLButtonElement, GameCardProps>(function Ga
                   </Badge>
                 ) : (
                   <Badge tone="muted" size="sm">
-                    {t('games.notInstalled')}
+                    {notInstalledLabel(game, t)}
                   </Badge>
                 )}
               </div>

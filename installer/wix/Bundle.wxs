@@ -3,7 +3,7 @@
   ClubShellSetup.exe: Burn bundle = prerequisites + ClubShell.msi.
 
     ClubShellSetup.exe                                        interactive (license, install folder)
-    ClubShellSetup.exe /quiet SERVERURL=https://club.example.uz CLUBAPIKEY=... KIOSKUSER=club INSTALLSHELL=1
+    ClubShellSetup.exe /quiet SERVERURL=https://club.example.uz CLUBAPIKEY=... KIOSKUSER=player INSTALLSHELL=1
     ClubShellSetup.exe /quiet ... INSTALLDISKLESS=1 DISKLESSSERVERURL=https://club-server DISKLESSCLUBKEY=... (DisklessHelper.wxs)
     ClubShellSetup.exe /layout C:\offline                     download the WebView2 bootstrapper next to the bundle
     ClubShellSetup.exe /uninstall /quiet
@@ -54,7 +54,7 @@
     <?else?>
     <Variable Name="CLUBAPIKEY" Hidden="yes" bal:Overridable="yes" />
     <?endif?>
-    <Variable Name="KIOSKUSER" Type="string" Value="club" bal:Overridable="yes" />
+    <Variable Name="KIOSKUSER" Type="string" Value="player" bal:Overridable="yes" />
     <Variable Name="INSTALLSHELL" Type="string" Value="1" bal:Overridable="yes" />
     <!-- Optional ClubDisklessHelper feature (only present in MSIs built with DisklessHelperDir; docs/DISKLESS.md). -->
     <Variable Name="INSTALLDISKLESS" Type="string" Value="0" bal:Overridable="yes" />

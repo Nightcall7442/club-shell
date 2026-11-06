@@ -71,9 +71,13 @@ such reboot was more than 30 min ago (`cache\kiosk-logon-reboot.txt`), and raise
 Who calls it:
 
 - `ShellReplacementPolicyModule.ApplyAsync` after setting the shell (needs `IKioskCredentials.Password`; fails the
-  section with "auto-logon deferred" until the account is provisioned, which `PolicyEnforcer` retries).
+  section with "auto-logon deferred" until the account is provisioned, which `PolicyEnforcer` retries). While
+  `shellReplacement.enabled` is on it sets auto-logon to the kiosk **unconditionally** — at every Agent start, every
+  change of the section and after every profile reset — so an operator's own auto-logon does not survive on such a PC
+  (SHELL_CHANGES 66). To sign in as an administrator, hold Shift while Windows starts, or turn
+  `shellReplacement.enabled` off for that PC.
 - `TempUserProvisioner.RefreshAutoLogon` after every password rotation, **only if** auto-logon is enabled and
-  `DefaultUserName` equals the kiosk account — an operator's own auto-logon is never overwritten.
+  `DefaultUserName` equals the kiosk account: a rotation alone never switches auto-logon to the kiosk.
 - `RevertAsync` / `uninstall.ps1` clear it.
 
 Fast user switching, "Switch user" and lock screens are handled by the explorer lockdown (`KIOSK_MODE.md` §3).
@@ -109,7 +113,7 @@ StartAsync (≤ StartupTimeout 60 s) ─▶ ProvisionAsync
 
 | Property | Value |
 |----------|-------|
-| Account name | `agent.json → shell.kioskUser.name` (default `club` in code, `config/agent.default.json`, `install.ps1 -KioskUser` and the MSI `KIOSKUSER` property; `install.ps1` writes it into `agent.json`) |
+| Account name | `agent.json → shell.kioskUser.name` (default `player` in code, `config/agent.default.json` and the MSI `KIOSKUSER` property — `club` before SHELL_CHANGES 64; an MSI upgrade keeps the name stored in `HKLM\SOFTWARE\ClubShell\KioskUser`, and `install.ps1`, `uninstall.ps1`, `enable-kiosk-autologon.ps1`, `pilot-install.ps1` and `diagnose-agent.ps1` take the PC's own name from there or from `agent.json` unless `-KioskUser` is given; `install.ps1` writes it into `agent.json`) |
 | Password | `LocalUserManager.GeneratePassword()` — 24 cryptographically random characters, one of each class, no ambiguous glyphs |
 | Rotation | at every Agent start when `rotatePasswordOnStart` (default true); otherwise when older than `passwordRotationDays` (7) or when the stored one no longer logs on (`ProcessAsUser.LogonUser` probe); `RotatePasswordAsync` on demand. A rotation due while auto-logon still has to log the kiosk on waits for the kiosk session (the maintenance loop calls `RotateIfOwedAsync`), so SAM and the LSA secret never change between Winlogon reading one and checking the other; a new password updates the LSA secret right after SAM |
 | Group membership | `LocalUserManager.AddToGroup` refuses `BUILTIN\Administrators`; the account is a plain user. An existing account of that name in a privileged local group (Administrators, Power Users, Account/Server/Print/Backup/Network Configuration Operators, Hyper-V Administrators) is refused and left untouched, unless `shell.kioskUser.removeFromPrivilegedGroups` |
@@ -277,10 +281,10 @@ reset after 86400 s).
 | Path | What happens |
 |------|--------------|
 | Policy `shellReplacement.enabled = false` (server or `policies.json`) | `ShellReplacementPolicyModule.ApplyAsync` → `ShellRegistry.RestoreExplorer(sid)`; auto-logon untouched; effective at the next logon of the kiosk user |
-| `PolicyEnforcer.RevertAllAsync` (Agent stopping with revert, or policy removed; each module's `RevertAsync` in reverse order) | `RestoreExplorer(sid)` + `ClearAutoLogon()` |
+| `PolicyEnforcer.RevertAllAsync` (each module's `RevertAsync` in reverse order: `RestoreExplorer(sid)` + `ClearAutoLogon()`) | **not called by the Agent today** (SHELL_CHANGES 67): an Agent that stops leaves the kiosk sealed, on purpose; `uninstall.ps1` below is the way back |
 | `kiosk_exit{action: "explorer"}` from the admin unlock (`KIOSK_MODE.md` §6) | `explorer.exe` spawned by the Shell before it exits — temporary; the watchdog relaunches the Shell unless suspended |
 | Safe mode | `ShellLauncher.LaunchExplorerAsync` — temporary, same as above |
-| `src/ClubShell.Agent/Install/uninstall.ps1` | stops/deletes the service (`register-service.ps1 -Uninstall`), sets `AutoAdminLogon = 0`, removes `DefaultUserName` / `DefaultPassword` / `DefaultDomainName` / `AutoLogonCount` / `ForceAutoLogon`, deletes `HKU\<kioskSid>\...\Winlogon\Shell` when the hive is loaded, removes `ClubShell-*` firewall rules and the hosts-file block; `-PurgeData` removes `C:\ProgramData\ClubShell`, `-RemoveKioskUser` deletes the account. Note it does **not** delete the LSA `DefaultPassword` secret nor the `Policies\System\Shell` value; run the manual steps below when the service is already gone |
+| `src/ClubShell.Agent/Install/uninstall.ps1` | stops/deletes the service (`register-service.ps1 -Uninstall`), sets `AutoAdminLogon = 0`, removes `DefaultUserName` / `DefaultPassword` / `DefaultDomainName` / `AutoLogonCount` / `ForceAutoLogon`, deletes the LSA `DefaultPassword` secret (the kiosk password), and in the kiosk's hive — loaded from `NTUSER.DAT` for the purpose when the kiosk is not signed in — `Winlogon\Shell` and the `Policies\System` / `Policies\Explorer` keys (custom shell and Explorer restrictions, SHELL_CHANGES 67); removes `ClubShell-*` firewall rules and the hosts-file block; `-PurgeData` removes `C:\ProgramData\ClubShell`, `-RemoveKioskUser` deletes the account. Run the manual steps below when the script itself is gone |
 
 Manual restore (service not running, hive loaded because the kiosk user is logged on):
 

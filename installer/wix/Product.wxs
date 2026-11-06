@@ -4,9 +4,10 @@
 
   Public properties (msiexec /i ClubShell.msi PROP=value ... or via ClubShellSetup.exe):
     SERVERURL        Central server origin, e.g. https://club.example.uz  (baseUrl/wsUrl are derived from it)
-    CLUBAPIKEY       Club registration key written to agent.json -> server.clubApiKey (hidden from logs); the Agent
-                     moves it into secure\club.key (DPAPI) at its next start
-    KIOSKUSER        Local kiosk account name (default: club); persisted in HKLM\SOFTWARE\ClubShell\KioskUser
+    CLUBAPIKEY       Club registration key (hidden from logs). Left in HKLM\SOFTWARE\ClubShell\Enrollment\ClubKey, a key
+                     only SYSTEM and Administrators can read, never on a command line; the Agent moves it into
+                     secure\club.key (DPAPI) at its next start and deletes the value (SHELL_CHANGES 70)
+    KIOSKUSER        Local kiosk account name (default: player; an upgrade keeps the stored one); persisted in HKLM\SOFTWARE\ClubShell\KioskUser
     INSTALLSHELL     1 (default) installs the Shell feature; 0 installs the Agent only
     INSTALLFOLDER    Install root (default: C:\Program Files\ClubShell)
     (no .NET prerequisite: the Agent is self-contained, SHELL_CHANGES 38; a SKIPDOTNETCHECK passed by older
@@ -17,7 +18,7 @@
   The declarative parts mirror src/ClubShell.Agent/Install/*.ps1: service registration (Service.wxs), ProgramData tree
   and ACLs (Components.wxs), event-log source, firewall rule. Deferred custom actions (WixQuietExec, run as SYSTEM)
   cover what Windows Installer cannot express: seeding agent.json from the shipped defaults (fresh install only; an
-  existing file is kept and only gets an explicitly passed CLUBAPIKEY / SERVERURL), sc.exe privs / delayed-auto for the service, and Install\uninstall.ps1 on removal
+  existing file is kept and only gets an explicitly passed SERVERURL), sc.exe privs / delayed-auto for the service, and Install\uninstall.ps1 on removal
   (restores explorer.exe as shell, clears auto-logon, removes the Agent's runtime firewall/hosts changes).
 
   Verified with wix.exe 5.0.1: builds without warnings; ICE validation reports only the documented ICE03.
@@ -54,7 +55,7 @@
     <Property Id="SERVERURL" Value="https://club.example.uz" Secure="yes" />
     <Property Id="CLUBAPIKEY" Secure="yes" Hidden="yes" />
     <Property Id="INSTALLSHELL" Value="1" Secure="yes" />
-    <Property Id="KIOSKUSER" Value="club" Secure="yes">
+    <Property Id="KIOSKUSER" Value="player" Secure="yes">
       <!-- Persisted by the RegistryValues component so uninstall/upgrade know the kiosk account without arguments. -->
       <RegistrySearch Id="KioskUserSearch" Root="HKLM" Key="SOFTWARE\ClubShell" Name="KioskUser" Type="raw" Bitness="always64" />
     </Property>
@@ -151,21 +152,16 @@
             The command line exceeds the 255-character width ICE03 validates for CustomAction.Target; Windows Installer
             does not enforce that width and WixQuietExec runs it unchanged, so that single ICE03 warning is expected. -->
     <SetProperty Id="CA_SeedAgentConfig" Sequence="execute" Before="CA_SeedAgentConfig"
-                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command &quot;$ErrorActionPreference = 'Stop'; $c = Get-Content -LiteralPath '[AgentConfigDir]agent.default.json' -Raw | ConvertFrom-Json; $u = '[SERVERURL]'.TrimEnd('/') -replace '/api/v\d+$', ''; $c.server.baseUrl = $u + '/api/v1'; $c.server.wsUrl = ($u -replace '^http', 'ws') + '/ws/agent'; $c.server.clubApiKey = '[CLUBAPIKEY]'; $c.shell.kioskUser.name = '[KIOSKUSER]'; $c | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath '[ClubShellDataDir]agent.json' -Encoding utf8&quot;" />
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command &quot;$ErrorActionPreference = 'Stop'; $c = Get-Content -LiteralPath '[AgentConfigDir]agent.default.json' -Raw | ConvertFrom-Json; $u = '[SERVERURL]'.TrimEnd('/') -replace '/api/v\d+$', ''; $c.server.baseUrl = $u + '/api/v1'; $c.server.wsUrl = ($u -replace '^http', 'ws') + '/ws/agent'; $c.shell.kioskUser.name = '[KIOSKUSER]'; $c | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath '[ClubShellDataDir]agent.json' -Encoding utf8&quot;" />
     <CustomAction Id="CA_SeedAgentConfig" DllEntry="WixQuietExec" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
                   Execute="deferred" Impersonate="no" Return="check" HideTarget="yes" />
-    <!-- The command line carries CLUBAPIKEY: keep the property change out of the MSI log as well. -->
-    <Property Id="CA_SeedAgentConfig" Hidden="yes" />
+    <!-- CLUBAPIKEY never goes on a command line (SHELL_CHANGES 70): process-creation auditing, PowerShell logging and
+         WixQuietExec's verbose log would all see it. The RegistryEnrollmentKey component (Components.wxs) leaves it for
+         the Agent, on a fresh install and on an upgrade alike, so a rotated key reaches a PC by running the new setup. -->
 
-    <!-- 1b. Upgrade over an existing agent.json (kept, see 1): an explicitly given CLUBAPIKEY / SERVERURL still replaces
-             the stored one, so a rotated enrollment key or a new server address reaches a PC by running the new setup
-             (the reference PC before imaging, PILOT.md). The rest of the file is kept. Return="ignore": a hand-edited
-             file must never block an upgrade. Two actions because the script cannot use braces for an if. -->
-    <SetProperty Id="CA_UpdateAgentKey" Sequence="execute" Before="CA_UpdateAgentKey"
-                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command &quot;$ErrorActionPreference = 'Stop'; $p = '[ClubShellDataDir]agent.json'; $c = Get-Content -LiteralPath $p -Raw | ConvertFrom-Json; $c.server.clubApiKey = '[CLUBAPIKEY]'; $c | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $p -Encoding utf8&quot;" />
-    <CustomAction Id="CA_UpdateAgentKey" DllEntry="WixQuietExec" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
-                  Execute="deferred" Impersonate="no" Return="ignore" HideTarget="yes" />
-    <Property Id="CA_UpdateAgentKey" Hidden="yes" />
+    <!-- 1b. Upgrade over an existing agent.json (kept, see 1): an explicitly given SERVERURL still replaces the stored
+             address (the reference PC before imaging, PILOT.md). The rest of the file is kept. Return="ignore": a
+             hand-edited file must never block an upgrade. -->
     <SetProperty Id="CA_UpdateAgentServer" Sequence="execute" Before="CA_UpdateAgentServer"
                  Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command &quot;$ErrorActionPreference = 'Stop'; $p = '[ClubShellDataDir]agent.json'; $c = Get-Content -LiteralPath $p -Raw | ConvertFrom-Json; $u = '[SERVERURL]'.TrimEnd('/') -replace '/api/v\d+$', ''; $c.server.baseUrl = $u + '/api/v1'; $c.server.wsUrl = ($u -replace '^http', 'ws') + '/ws/agent'; $c | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $p -Encoding utf8&quot;" />
     <CustomAction Id="CA_UpdateAgentServer" DllEntry="WixQuietExec" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
@@ -195,9 +191,7 @@
     <InstallExecuteSequence>
       <Custom Action="CA_SeedAgentConfig" After="InstallFiles"
               Condition="NOT Installed AND NOT AGENTJSONEXISTS AND NOT REMOVE" />
-      <Custom Action="CA_UpdateAgentKey" After="CA_SeedAgentConfig"
-              Condition="AGENTJSONEXISTS AND CLUBAPIKEY AND NOT REMOVE" />
-      <Custom Action="CA_UpdateAgentServer" After="CA_UpdateAgentKey"
+      <Custom Action="CA_UpdateAgentServer" After="CA_SeedAgentConfig"
               Condition="AGENTJSONEXISTS AND SERVERURL AND SERVERURL &lt;&gt; &quot;https://club.example.uz&quot; AND NOT REMOVE" />
       <Custom Action="CA_ServicePrivileges" After="InstallServices"
               Condition="NOT REMOVE" />

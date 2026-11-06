@@ -147,7 +147,7 @@ switch to `enforce` once every approved PC runs an Agent that signs its re-regis
 | Shell token | `secure\shell.token` | plain hex by design (the Shell must read it); ACL kiosk `Read` only; regenerated per Agent start |
 | Games share credentials | `secure\share.cred` | DPAPI |
 | Account-pool secrets | memory only (`ActiveLease`) | see section 6 |
-| Admin PIN | `C:ProgramDataClubShellsecureadmin-pin` (PBKDF2-SHA256 `pbkdf2$600000$…`, written by `tools/scripts/set-admin-pin.ps1`; SYSTEM + Administrators only) | verified by the Agent (`SystemHandlers.UnlockAdmin`), PBKDF2 only, 3 failures/min, tokens 32 random bytes with 5 min lifetime. `shell.json → kiosk.adminPinHash` is ignored: the kiosk account can read shell.json and would guess a short PIN offline |
+| Admin PIN | `C:\ProgramData\ClubShell\secure\admin-pin` (PBKDF2-SHA256 `pbkdf2$600000$…`, written by `set-admin-pin.ps1`, installed in `C:\Program Files\ClubShell\Agent\Install`; SYSTEM + Administrators only) | verified by the Agent (`SystemHandlers.UnlockAdmin`), PBKDF2 only, 3 failures/min, tokens 32 random bytes with 5 min lifetime. `shell.json → kiosk.adminPinHash` is ignored: the kiosk account can read shell.json and would guess a short PIN offline |
 | `NullTokenProtector` | tests only | pass-through; must never be registered in production DI |
 
 `secure\` is SYSTEM/Administrators only (`install.ps1`, `ARCHITECTURE.md` §9); the kiosk user cannot list it. DPAPI
@@ -310,14 +310,14 @@ Policy (`policies.json`)
 
 - [ ] `shellReplacement.enabled = true` with the installed `shellExe`.
 - [ ] `processAllowlist` deny list at least as strict as `config/policies.example.json` (`cmd`, `powershell`, `pwsh`, `regedit`, `taskmgr`, `mmc`, `control`, `msconfig`, `wscript`, `cscript`, `mshta`, `*cheat*`, `*inject*`); prefer `allow` mode on fixed images. A pattern without `\` or `/` matches the image name only; folders need a path pattern (`*\Downloads\*.exe`). Exempt by design: the Agent's own helpers, a running game's children and job, and files whose Authenticode signature verifies to an anti-cheat vendor (WinVerifyTrust, chain to a trusted root, no revocation fetch). A name-only deny list is defence in depth: a renamed copy of `cmd.exe` passes it, so the account staying a plain member of Users is what actually holds.
-- [ ] `usb.allowStorage = false`; `allowHid = true` only if players bring their own peripherals. Storage works while an administrator's maintenance window is open (`sys.adminExit` after the PIN, at most 8 h, in memory only) and the policy is applied again when it ends; uninstalling the Agent sets `USBSTOR Start=3` back.
+- [ ] `usb.allowStorage = false`; `allowHid = true` only if players bring their own peripherals. Storage works while someone other than the kiosk is signed in at the console (an administrator's own account, Shift at boot; SHELL_CHANGES 68) and while an administrator's maintenance window is open (`sys.adminExit` after the PIN, at most 8 h, ended by a player's session, the Shell's return or a lock from the cash desk, and never surviving a reboot) and the policy is applied again when it ends; uninstalling the Agent sets `USBSTOR Start=3` back.
 - [ ] `webFilter.enabled = true`, blocked domains maintained centrally. The seed sets no `dnsServers` (DNS stays as DHCP gives it, which keeps a diskless seat's boot NIC on the club's resolver); set filtering resolvers in the club's own policy («Зал и устройства» → «Политика ПК», owner only) or in the club's DHCP.
 - [ ] `explorer.disableTaskManager / disableRun / disableSettings / disableWinKey / disableAltTab = true`, `blockedKeyCombos` reviewed.
 - [ ] `anticheat.blockOnViolation = true`, `required` set for the club's competitive titles.
 
 Shell
 
-- [ ] Admin PIN set with `tools/scripts/set-admin-pin.ps1` (6-12 digits, not shared with players), `exitHotkey` changed from the default, `devtools = false`.
+- [ ] Admin PIN set with `C:\Program Files\ClubShell\Agent\Install\set-admin-pin.ps1` (6-12 digits, not shared with players), `exitHotkey` changed from the default, `devtools = false`.
 - [ ] Release build only (`cfg!(debug_assertions)` turns hardening off); a release build ignores `CLUBSHELL_DEV` and `CLUBSHELL_DATA_DIR`.
 - [ ] Theme / wallpaper / ads assets served from trusted hosts (`img-src https:` in the CSP is broad by necessity for covers).
 

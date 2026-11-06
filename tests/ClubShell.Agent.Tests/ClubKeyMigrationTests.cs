@@ -48,6 +48,22 @@ public sealed class ClubKeyMigrationTests : IDisposable
     }
 
     [Fact]
+    public async Task The_installers_key_is_stored_deleted_from_the_registry_and_wins_over_agent_json()
+    {
+        using var loader = await LoadAsync(Config("old-key-in-agent-json"));
+        var store = Store(loader);
+        string? installer = "  key-from-setup  ";
+        using var migration = new ClubKeyMigration(loader, store, NullLogger<ClubKeyMigration>.Instance, () => installer, () => installer = null);
+
+        (await migration.MigrateAsync(CancellationToken.None)).Should().BeTrue();
+
+        store.Read().Should().Be("key-from-setup", "SHELL_CHANGES 70: it comes from the latest setup");
+        installer.Should().BeNull("the value is deleted once stored");
+        ClubKeyInFile().Should().BeEmpty();
+        (await migration.MigrateAsync(CancellationToken.None)).Should().BeFalse("nothing is left to move");
+    }
+
+    [Fact]
     public async Task A_key_from_the_environment_or_a_blank_key_writes_nothing()
     {
         string before = Config("").ToJsonString();

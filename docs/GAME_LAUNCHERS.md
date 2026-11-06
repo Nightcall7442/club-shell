@@ -50,6 +50,13 @@ and keeps a duplicated handle (`ProcessWatcher.DuplicateForWait`) that `GameSess
 quits at once reports its real exit code instead of -1 (SHELL_CHANGES 83). `LaunchRequest.resolution` is accepted and
 logged but not applied: a game sets its own display mode through its arguments or settings.
 
+A game that is not installed because its catalogue path is on a drive the PC does not have (the offline games disk H:
+on a PC without it) carries `missingDrive` (`H:`) on `Game` and on `games.installStatus` (SHELL_CHANGES 74): the Shell
+shows it as "not available on this PC" and says why when Play is pressed, instead of "not installed". A game started
+from its own folder (`launcher: exe`, no `settingsPaths`) says on its page that its progress is not kept (SHELL_CHANGES
+75). `settingsPaths` are stored by the cash desk but do not reach the Agent yet (the server's storage, S5, is not
+there): the cash desk and the Shell no longer promise that player settings follow the player (SHELL_CHANGES 84).
+
 Before every launch `GameRegistryDefaults` writes `games.registryDefaults` into the kiosk's HKCU — value by value,
 only where the value is missing — so games that keep settings in the registry (GoldSrc's display mode in
 `HKCU\Software\Valve\Half-Life\Settings`) start from the club's values in a profile that is new after every reset

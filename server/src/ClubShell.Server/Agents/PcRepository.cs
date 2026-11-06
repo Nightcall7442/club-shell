@@ -34,6 +34,9 @@ public sealed class PcRow
     public string AgentVersion { get; init; } = "";
     public string ShellVersion { get; init; } = "";
     public DateTimeOffset? LastHeartbeatAt { get; init; }
+
+    /// <summary>When the agent last closed its socket itself (shutdown, reboot); cleared when it connects again.</summary>
+    public DateTimeOffset? GoodbyeAt { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset? DeletedAt { get; init; }
 
@@ -117,6 +120,12 @@ public sealed class RegisterProofGate(
         };
 
     public bool Offline(PcRow pc, DateTimeOffset now) => pc.Offline(connected(pc.Id), now, offlineAfter);
+
+    /// <summary>
+    /// <see cref="Offline"/>, or gone by its own word (SHELL_CHANGES 57): no socket and a goodbye since — a PC that rebooted
+    /// within <c>offlineAfter</c> of its last heartbeat. Used only for a PC without persistent storage.
+    /// </summary>
+    public bool OfflineOrSaidGoodbye(PcRow pc, DateTimeOffset now) => Offline(pc, now) || (!connected(pc.Id) && pc.GoodbyeAt is not null);
 }
 
 /// <summary>Outcome of <see cref="PcRepository.RefreshAsync"/>; anything but <see cref="Ok"/> is a <c>401</c> reason.</summary>
@@ -133,7 +142,7 @@ public sealed class PcRepository(NpgsqlDataSource db, ILogger<PcRepository> logg
 {
     private const string Columns = """
         id, club_id, number, name, zone, hwid, ip_address, approved, maintenance, stateless, signing_secret, credentials_version,
-        agent_version, shell_version, last_heartbeat_at, created_at, deleted_at,
+        agent_version, shell_version, last_heartbeat_at, goodbye_at, created_at, deleted_at,
         (SELECT s.id FROM sessions s WHERE s.pc_id = pcs.id AND s.state <> 'ended') AS open_session_id,
         (SELECT s.state FROM sessions s WHERE s.pc_id = pcs.id AND s.state <> 'ended') AS open_session_state
         """;
@@ -197,7 +206,7 @@ public sealed class PcRepository(NpgsqlDataSource db, ILogger<PcRepository> logg
                 {
                     proof = ProofOutcome.Proven;
                 }
-                else if (known.Stateless && (gate.Mode == RegisterProofMode.Audit || gate.Offline(known, now)))
+                else if (known.Stateless && (gate.Mode == RegisterProofMode.Audit || gate.OfflineOrSaidGoodbye(known, now)))
                 {
                     proof = ProofOutcome.Stateless;
                 }
@@ -341,12 +350,20 @@ public sealed class PcRepository(NpgsqlDataSource db, ILogger<PcRepository> logg
         return (outcome, pc, refresh);
     }
 
-    /// <summary>The agent closed its socket itself at <paramref name="now"/> (<see langword="null"/>: it connected again, SHELL_CHANGES 44).</summary>
-    public async Task SetGoodbyeAsync(Guid id, DateTimeOffset? now)
+    /// <summary>
+    /// The agent closed its socket itself at <paramref name="now"/> (<see langword="null"/>: it connected again, SHELL_CHANGES
+    /// 44), for <paramref name="reason"/> — <c>reboot</c> or <c>shutdown</c> when it started that itself (SHELL_CHANGES 60).
+    /// </summary>
+    public async Task SetGoodbyeAsync(Guid id, DateTimeOffset? now, string? reason = null)
     {
+        reason = now is null || reason is not ("reboot" or "shutdown") ? null : reason;
         await using var c = await db.OpenConnectionAsync();
         await c.ExecuteAsync(
-            "UPDATE pcs SET goodbye_at = @now::timestamptz WHERE id = @id AND goodbye_at IS DISTINCT FROM @now::timestamptz", new { id, now });
+            """
+            UPDATE pcs SET goodbye_at = @now::timestamptz, goodbye_reason = @reason
+            WHERE id = @id AND (goodbye_at IS DISTINCT FROM @now::timestamptz OR goodbye_reason IS DISTINCT FROM @reason)
+            """,
+            new { id, now, reason });
     }
 
     public async Task RecordHeartbeatAsync(Guid id, HeartbeatRequest request, DateTimeOffset now)

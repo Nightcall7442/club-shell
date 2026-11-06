@@ -10,6 +10,7 @@ using ClubShell.Agent.Power;
 using ClubShell.Agent.Remote;
 using ClubShell.Agent.Session;
 using ClubShell.Agent.Updates;
+using ClubShell.Agent.Watchdog;
 using ClubShell.Contracts.Commands;
 using ClubShell.Contracts.Errors;
 using ClubShell.Contracts.Games;
@@ -93,6 +94,7 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
     private readonly ConcurrentDictionary<Guid, SeenEntry> _seen = new();
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _inflight = new();
     private readonly PowerAckStore _powerAcks;
+    private readonly AdminMaintenance? _maintenance;
 
     /// <summary>Creates the receiver. All dependencies are singletons.</summary>
     public CommandReceiver(
@@ -116,8 +118,10 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
         IClock clock,
         ILogger<CommandReceiver> logger,
         IVolumeController? volume = null,
-        ShellSettingsStore? shellSettings = null)
+        ShellSettingsStore? shellSettings = null,
+        AdminMaintenance? maintenance = null)
     {
+        _maintenance = maintenance;
         ArgumentNullException.ThrowIfNull(tokens);
         ArgumentNullException.ThrowIfNull(server);
         ArgumentNullException.ThrowIfNull(settingsLoader);
@@ -290,6 +294,8 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
     private async Task<CommandAck> LockAsync(ServerCommand command, CancellationToken cancellationToken)
     {
         var payload = command.PayloadAs<LockCommand>() ?? new LockCommand();
+        // The cash desk wants this PC sealed: an administrator's maintenance window ends too (SHELL_CHANGES 49).
+        _maintenance?.End("locked from the cash desk");
         if (_sessions.State.IsOpen())
         {
             _ = await _sessionLock.LockAsync(payload.Reason, cancellationToken).ConfigureAwait(false);

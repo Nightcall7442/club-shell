@@ -489,14 +489,20 @@ public sealed class ProcessAllowlistModule : IPolicyModule, IDisposable
             return;
         }
 
-        try
+        // Off the watcher's thread (SHELL_CHANGES 56): the anti-cheat signature check of a blocked process hashes its file,
+        // and the next process starts — another one to kill among them — must not wait for it.
+        _ = Task.Run(() =>
         {
-            _ = Consider(e.Pid, e.Name, e.Path, e.ParentPid);
-        }
-        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or ArgumentException)
-        {
-            _logger.LogWarning(ex, "Allow-list check failed for {Name} ({Pid})", e.Name, e.Pid);
-        }
+            try
+            {
+                _ = Consider(e.Pid, e.Name, e.Path, e.ParentPid);
+            }
+            catch (Exception ex)
+            {
+                // Fire-and-forget: nothing else would observe it.
+                _logger.LogWarning(ex, "Allow-list check failed for {Name} ({Pid})", e.Name, e.Pid);
+            }
+        });
     }
 
     /// <summary>Immutable rule snapshot swapped atomically on apply.</summary>

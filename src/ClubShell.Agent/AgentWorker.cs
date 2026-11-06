@@ -64,6 +64,11 @@ public sealed class AgentWorker : BackgroundService
     private static readonly TimeSpan DirtyResetTimeout = TimeSpan.FromMinutes(3);
     private static readonly TimeSpan StepRetryDelay = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan MaintenanceInterval = TimeSpan.FromSeconds(15);
+
+    /// <summary>Pause after a failed kiosk password rotation before the tick tries it again.</summary>
+    private static readonly TimeSpan RotationRetryPause = TimeSpan.FromMinutes(5);
+
+    private DateTimeOffset _nextRotationAttempt;
     private const int MaxStepAttempts = 3;
 
     private readonly Hwid _hwid;
@@ -349,33 +354,49 @@ public sealed class AgentWorker : BackgroundService
         using var timer = new PeriodicTimer(MaintenanceInterval);
         while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
         {
-            try
+            // Each step on its own (SHELL_CHANGES 52): one that throws no longer skips the profile reset, the rescan, the
+            // outbox and the health report behind it, every tick, for as long as it keeps failing.
+            await TickStepAsync("user expiry", ExpireUserIfNeededAsync, cancellationToken).ConfigureAwait(false);
+            await TickStepAsync("identity", PersistIdentityIfNeededAsync, cancellationToken).ConfigureAwait(false);
+            // A kiosk password rotation due at start waited for auto-logon; it runs once the kiosk session exists. After a
+            // failure it waits RotationRetryPause rather than hit SAM and LSA every tick.
+            if (_clock.UtcNow >= _nextRotationAttempt
+                && !await TickStepAsync("kiosk password rotation", async ct => _ = await _provisioner.RotateIfOwedAsync(ct).ConfigureAwait(false), cancellationToken).ConfigureAwait(false))
             {
-                await ExpireUserIfNeededAsync(cancellationToken).ConfigureAwait(false);
-                await PersistIdentityIfNeededAsync(cancellationToken).ConfigureAwait(false);
-                // A kiosk password rotation due at start waited for auto-logon; it runs once the kiosk session exists.
-                _ = await _provisioner.RotateIfOwedAsync(cancellationToken).ConfigureAwait(false);
-                // A reset owed but not paid at startup — the deletion failed, or the debt was incurred since — would
-                // otherwise wait for the next Agent restart. Throttles itself; a no-op when nothing is owed.
-                await _profileReset.ResetIfDirtyAsync(cancellationToken).ConfigureAwait(false);
-                // games.scanIntervalSec, and at once when the games disk mounts after startup (SHELL_CHANGES 31).
-                _ = await _games.RescanIfDueAsync(cancellationToken).ConfigureAwait(false);
-                if (_connection.IsOnline)
-                {
-                    await FlushOutboxAsync(cancellationToken).ConfigureAwait(false);
-                    await _sessions.SyncWithServerAsync(cancellationToken).ConfigureAwait(false);
-                }
+                _nextRotationAttempt = _clock.UtcNow + RotationRetryPause;
+            }
 
-                ReportHealth();
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            // A reset owed but not paid at startup — the deletion failed, or the debt was incurred since — would
+            // otherwise wait for the next Agent restart. Throttles itself; a no-op when nothing is owed.
+            await TickStepAsync("profile reset", _profileReset.ResetIfDirtyAsync, cancellationToken).ConfigureAwait(false);
+            // games.scanIntervalSec, and at once when the games disk mounts after startup (SHELL_CHANGES 31).
+            await TickStepAsync("games rescan", async ct => _ = await _games.RescanIfDueAsync(ct).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+            if (_connection.IsOnline)
             {
-                break;
+                await TickStepAsync("outbox", FlushOutboxAsync, cancellationToken).ConfigureAwait(false);
+                await TickStepAsync("session sync", _sessions.SyncWithServerAsync, cancellationToken).ConfigureAwait(false);
             }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Agent maintenance tick failed");
-            }
+
+            await TickStepAsync("health", _ => { ReportHealth(); return Task.CompletedTask; }, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>One step of the maintenance tick; <see langword="false"/> when it failed (logged).</summary>
+    private async Task<bool> TickStepAsync(string name, Func<CancellationToken, Task> step, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await step(cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Agent maintenance step {Step} failed", name);
+            return false;
         }
     }
 

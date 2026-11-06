@@ -79,4 +79,33 @@ public sealed class KioskProvisioningRulesTests
     }
 
     private static bool Never() => throw new InvalidOperationException("this probe must not run");
+    [Fact]
+    public void The_folders_never_go_to_a_games_disk_even_the_emptiest()
+    {
+        string[] roots = [@"D:\Games", @"G:\Games", @"H:\Games"];
+        var drives = new[]
+        {
+            new DataDriveCandidate(@"H:\", 1L << 40, false, Iscsi: true),
+            new DataDriveCandidate(@"G:\", 1L << 39, false, Iscsi: false),
+            new DataDriveCandidate(@"E:\", 1L << 38, false, Iscsi: true),
+            new DataDriveCandidate(@"F:\", 1L << 30, false, Iscsi: false),
+        };
+
+        KioskProvisioningRules.PickDataDrive(drives, roots).Should().Be(@"F:\", "SHELL_CHANGES 73: H: is a nearly empty iSCSI disk and would have won");
+        KioskProvisioningRules.PickDataDrive(drives.Take(3), roots).Should().BeNull("no local data drive: the folders stay in the profile");
+    }
+
+    [Fact]
+    public void A_library_drive_is_not_picked_fresh_but_keeps_folders_it_already_holds()
+    {
+        string[] roots = [@"D:\Games", @"G:\Games"];
+        var fresh = new[] { new DataDriveCandidate(@"D:\", 1L << 40, false, false), new DataDriveCandidate(@"E:\", 1L << 30, false, false) };
+        KioskProvisioningRules.PickDataDrive(fresh, roots).Should().Be(@"E:\");
+
+        var holding = new[] { new DataDriveCandidate(@"D:\", 1L << 40, true, false), new DataDriveCandidate(@"E:\", 1L << 30, false, false) };
+        KioskProvisioningRules.PickDataDrive(holding, roots).Should().Be(@"D:\", "a hybrid that already keeps them on D: is not moved");
+
+        var onGames = new[] { new DataDriveCandidate(@"G:\", 1L << 40, true, false), new DataDriveCandidate(@"E:\", 1L << 30, false, false) };
+        KioskProvisioningRules.PickDataDrive(onGames, roots).Should().Be(@"E:\", "folders left on a games disk by an older agent are not kept there");
+    }
 }

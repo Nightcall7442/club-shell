@@ -151,6 +151,7 @@
     "sessionNotActive": "No active session",
     "sessionAlreadyActive": "A session is already active",
     "gameNotInstalled": "This game is not installed on this PC",
+    "gameOnMissingDrive": "This game is on drive {{drive}}, which this PC does not have. Take another PC or call an administrator.",
     "gameLaunchFailed": "The game could not be started",
     "accountPoolExhausted": "No free game accounts right now, please try later",
     "antiCheatBlocked": "Anti-cheat blocked the launch. Please call an administrator",
@@ -367,6 +368,8 @@
     "playNow": "Play now",
     "installed": "Installed",
     "notInstalled": "Not installed",
+    "unavailableHere": "Not available on this PC",
+    "progressNotKept": "This game's progress and settings are not kept: after the session or a PC restart it starts over.",
     "requiresAccount": "Club account",
     "requiresAccountHint": "The game signs in with a club account automatically",
     "antiCheat": "Anti-cheat",
@@ -943,9 +946,9 @@
     "gameSettings": {
       "tab": "Game settings",
       "title": "Game settings",
-      "hint": "Binds, sensitivity and graphics are saved after every game and wait for you at any PC in the club — sit down and play like at home.",
+      "hint": "Your binds, sensitivity and graphics will show here once the club turns on carrying them between PCs. For now a game's settings stay on the PC until the session ends.",
       "emptyTitle": "Nothing yet",
-      "emptyHint": "Play CS2, Dota 2, Fortnite or another game — your settings will be saved on their own.",
+      "emptyHint": "Carrying game settings between PCs is not on in this club yet.",
       "saved": "Saved {{when}} · {{size}}",
       "reset": "Reset",
       "resetFor": "Reset {{title}} settings"

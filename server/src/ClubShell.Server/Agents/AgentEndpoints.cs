@@ -82,6 +82,11 @@ public static class AgentEndpoints
         var agentVersion = context.Request.Headers[AgentVersionHeader].ToString() is { Length: > 0 } v ? v[..Math.Min(v.Length, 32)] : "?";
         switch (proof)
         {
+            case ProofOutcome.Refused when pc.Stateless:
+                // A diskless seat back from a reboot before the server noticed it went (SHELL_CHANGES 57): it asks again and
+                // gets in once it counts as offline. Noise, not the security event D-78 decides on.
+                logger.LogInformation("Re-registration of PC {PcId} without persistent storage refused while it still counts as online ({Problem}) from {Ip}, agent {AgentVersion}", pc.Id, problem, ip, agentVersion);
+                break;
             case ProofOutcome.Refused:
                 logger.LogWarning("Re-registration of PC {PcId} refused without a valid proof ({Problem}) from {Ip}, agent {AgentVersion}", pc.Id, problem, ip, agentVersion);
                 break;
