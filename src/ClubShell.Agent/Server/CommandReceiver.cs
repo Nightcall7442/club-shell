@@ -95,6 +95,7 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _inflight = new();
     private readonly PowerAckStore _powerAcks;
     private readonly AdminMaintenance? _maintenance;
+    private readonly IServiceProvider? _services;
 
     /// <summary>Creates the receiver. All dependencies are singletons.</summary>
     public CommandReceiver(
@@ -119,9 +120,11 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
         ILogger<CommandReceiver> logger,
         IVolumeController? volume = null,
         ShellSettingsStore? shellSettings = null,
-        AdminMaintenance? maintenance = null)
+        AdminMaintenance? maintenance = null,
+        IServiceProvider? services = null)
     {
         _maintenance = maintenance;
+        _services = services;
         ArgumentNullException.ThrowIfNull(tokens);
         ArgumentNullException.ThrowIfNull(server);
         ArgumentNullException.ThrowIfNull(settingsLoader);
@@ -288,8 +291,22 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
         ServerCommandType.ShowAds => ShowAdsAsync(command, cancellationToken),
         ServerCommandType.SetVolume => SetVolumeAsync(command, cancellationToken),
         ServerCommandType.RefreshConfig => RefreshConfigAsync(command, cancellationToken),
+        ServerCommandType.ResetProfile => ResetProfileAsync(command, cancellationToken),
         _ => throw new IpcException(IpcError.UnknownMessage(command.Type.ToWireName())),
     };
+
+    /// <summary>«Сбросить профиль игрока» from the cash desk (SHELL_CHANGES 76): acked once the reset has started.</summary>
+    private async Task<CommandAck> ResetProfileAsync(ServerCommand command, CancellationToken cancellationToken)
+    {
+        // Resolved here, not injected: the reset service reaches the Shell's pipe, which reaches this receiver.
+        if (_services?.GetService(typeof(Users.IProfileResetTrigger)) is not Users.IProfileResetTrigger reset)
+        {
+            throw new IpcException(IpcError.UnknownMessage(command.Type.ToWireName()));
+        }
+
+        string by = command.IssuedBy is { Length: > 0 } who ? $"the cash desk ({who})" : "the cash desk";
+        return CommandAck.Success(await reset.ResetForStaffAsync(by, cancellationToken).ConfigureAwait(false));
+    }
 
     private async Task<CommandAck> LockAsync(ServerCommand command, CancellationToken cancellationToken)
     {

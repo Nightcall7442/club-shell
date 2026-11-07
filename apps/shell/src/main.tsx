@@ -22,7 +22,14 @@ import { installGlobalErrorHandlers, log } from '@/lib/logger';
 import { api, events, isTauri } from '@/lib/tauri';
 import { App } from '@/App';
 import { getWindowRole, type WindowRole } from '@/router';
-import { bootstrapStores, DEFAULT_SETTINGS, useAuthStore, useSettingsStore, useThemeStore } from '@/store';
+import {
+  bootstrapStores,
+  DEFAULT_SETTINGS,
+  selectPcReady,
+  useAuthStore,
+  useSettingsStore,
+  useThemeStore,
+} from '@/store';
 import { applyTheme, currentTheme } from '@/theme/themes';
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -226,7 +233,8 @@ async function boot(role: WindowRole): Promise<void> {
   installKioskGuards();
   if (role === 'main') {
     // From boot on, so the card a player taps on the attract screen still signs in on the lock screen it wakes.
-    installCardReader(() => useAuthStore.getState().user === null);
+    // A tap while the PC is preparing would only be refused (SHELL_CHANGES 86).
+    installCardReader(() => useAuthStore.getState().user === null && selectPcReady(useAuthStore.getState()));
   }
   document.documentElement.dataset['window'] = role;
   if (role === 'overlay') {

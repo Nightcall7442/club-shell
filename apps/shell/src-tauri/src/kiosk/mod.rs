@@ -15,6 +15,7 @@
 
 pub mod alt_tab;
 pub mod commands;
+pub mod front;
 pub mod idle_detector;
 pub mod keyboard_hook;
 pub mod multi_monitor;
@@ -64,6 +65,8 @@ use crate::tray::Tray;
 pub const ADMIN_MODE_POLL: Duration = Duration::from_secs(5);
 /// Overlay TTL for admin messages / session warnings shown over a game.
 pub const TOAST_TTL: Duration = Duration::from_secs(15);
+/// Player input this recent when the Shell gets the focus during a game means they came to the Shell on purpose.
+pub const GAME_REFOCUS_QUIET: Duration = Duration::from_secs(1);
 /// Path of the Windows touch keyboard host.
 pub const TABTIP_RELATIVE: &str = r"microsoft shared\ink\TabTip.exe";
 
@@ -110,6 +113,8 @@ pub struct Kiosk {
     game_mode: AtomicBool,
     /// A display change happened during a game; applied when it ends (SHELL_CHANGES 80).
     displays_pending: Mutex<bool>,
+    /// The running game kept in front of the Shell (SHELL_CHANGES 81).
+    front: Arc<front::GameFront>,
     /// `kiosk_set_guard` state, applied whenever no game runs.
     guard_wanted: AtomicBool,
     /// A club-approved window of another process is open (`begin_external_window`): the guard stays down.
@@ -187,6 +192,7 @@ impl Kiosk {
             locked: AtomicBool::new(false),
             game_mode: AtomicBool::new(false),
             displays_pending: Mutex::new(false),
+            front: front::GameFront::new(),
             guard_wanted: AtomicBool::new(!dev),
             external_window: AtomicBool::new(false),
             admin_mode: AtomicBool::new(dev),
@@ -210,6 +216,29 @@ impl Kiosk {
             hotkey_rx,
         );
         kiosk.tasks.lock().push(consumer);
+        // The Shell's window took the foreground during a game. A game re-creating its window (a display-mode change,
+        // "Apply" in its video settings) leaves the Shell in front: give the foreground back unless the player came
+        // to the Shell themselves (input within the last second: Alt+Tab, a click) or the lock / HUD needs it.
+        {
+            let weak = Arc::downgrade(&kiosk);
+            kiosk.window.on_game_focus(move || {
+                let Some(kiosk) = weak.upgrade() else {
+                    return;
+                };
+                if kiosk.is_locked() || kiosk.overlay.is_visible() {
+                    return;
+                }
+                let input = clubshell_winutil::input::idle_duration().unwrap_or(Duration::MAX);
+                if input < GAME_REFOCUS_QUIET {
+                    tracing::info!(
+                        input_ms = input.as_millis(),
+                        "the player came to the shell during the game"
+                    );
+                    return;
+                }
+                kiosk.front.reclaim();
+            });
+        }
         // The player is back in the Shell after the dock put a program in front of it.
         {
             let weak = Arc::downgrade(&kiosk);
@@ -515,9 +544,15 @@ impl Kiosk {
                                 self.window.allow_foreground_pid(pid);
                                 // Windows' own leave too, while the Shell may still own the foreground.
                                 let _ = clubshell_winutil::window::allow_set_foreground(Some(pid));
+                                if change.state == GameState::Running && !self.dev {
+                                    // SHELL_CHANGES 81: the leave is gone at the player's next input; the Shell
+                                    // brings the game's window to the front itself (also for a cash-desk launch).
+                                    self.front.track(pid);
+                                }
                             }
                         }
                         GameState::Exited | GameState::Failed | GameState::Killed => {
+                            self.front.clear();
                             self.window.clear_allowed_pids()
                         }
                     }
@@ -628,6 +663,9 @@ impl KioskControl for Kiosk {
             return;
         }
         tracing::info!(on, "game mode");
+        if !on {
+            self.front.clear();
+        }
         if !on && std::mem::take(&mut *self.displays_pending.lock()) {
             self.apply_displays();
         }

@@ -167,7 +167,8 @@ public sealed class CommandCatalogTests
     public async Task Not_implemented_commands_are_refused()
     {
         var dispatcher = new CommandDispatcher(null!, null!, new AgentOptions());
-        var refused = Enum.GetValues<ServerCommandType>().Where(t => !CommandDispatcher.Required.Contains(t)).ToList();
+        var refused = Enum.GetValues<ServerCommandType>()
+            .Where(t => !CommandDispatcher.Required.Contains(t) && !CommandDispatcher.BeyondContract.Contains(t)).ToList();
         Assert.Equal(9, refused.Count);
         foreach (var type in refused)
         {

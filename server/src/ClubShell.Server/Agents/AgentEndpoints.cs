@@ -184,7 +184,8 @@ public static class AgentEndpoints
             PolicyVersion: view.PolicyVersion,
             ConfigVersion: view.ConfigVersion,
             CatalogVersion: view.CatalogVersion.ToString(CultureInfo.InvariantCulture),
-            PendingCommands: await commands.PendingCountAsync(pc.Id, hub.LiveDelivered(pc.Id))));
+            PendingCommands: await commands.PendingCountAsync(pc.Id, hub.LiveDelivered(pc.Id)),
+            Stateless: pc.Stateless));
     }
 
     /// <summary>The contract obliges the server to take up to 120 samples and 1024 events: old agents do not split batches.</summary>

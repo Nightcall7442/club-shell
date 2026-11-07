@@ -74,9 +74,10 @@ public sealed record AdminMember(Guid Id, string DisplayName, string Role, Money
 /// <summary>
 /// <c>signedIn</c> (beyond the contract, D-49): the session's player holds a live token on the PC; null — no session.
 /// <c>game</c> (beyond the contract, D-71): the game the PC's agent reports running for this session, from its last
-/// heartbeat; null — none, no session, or the PC is not busy or locked.
+/// heartbeat; null — none, no session, or the PC is not busy or locked. <c>kioskAlert</c> (beyond the contract,
+/// SHELL_CHANGES 76–77): as on <see cref="AdminHallPc"/>, of a PC that is not offline.
 /// </summary>
-public sealed record AdminSeat(Pc Pc, Session? Session, AdminSeatUser? User, bool? SignedIn = null, AdminSeatGame? Game = null);
+public sealed record AdminSeat(Pc Pc, Session? Session, AdminSeatUser? User, bool? SignedIn = null, AdminSeatGame? Game = null, string? KioskAlert = null);
 
 /// <summary>A running game on the map (D-71): the catalog title and art; an empty <c>coverUrl</c> is null.</summary>
 public sealed record AdminSeatGame(Guid Id, string Title, string? CoverUrl, string? HeroUrl);
@@ -181,11 +182,14 @@ public sealed record AdminPcResponse(Pc Pc);
 /// <c>gamesVolume</c> of the PC's last heartbeat as the agent sent it (<c>HeartbeatGamesVolume</c>, its null fields left
 /// out); null — the PC never reported one (no heartbeat yet, or an older agent). <c>stateless</c> (beyond the contract,
 /// SHELL_CHANGES 25): the owner marked the PC as without persistent storage, so it re-registers at every boot.
+/// <c>kioskAlert</c> (beyond the contract, SHELL_CHANGES 76–77): what the last heartbeat's <c>kioskUser</c> says went
+/// wrong after a session — <c>logonLost</c> (the PC sits on the Windows sign-in screen) or <c>profileResetFailed</c> (the
+/// player's profile could not be deleted); null — nothing.
 /// </summary>
 public sealed record AdminHallPc(
     Guid Id, string Name, string Zone, int Number, string? Hwid, string IpAddress, PcStatus Status, Guid? CurrentSessionId,
     string AgentVersion, string ShellVersion, DateTimeOffset LastHeartbeatAt, int X, int Y, string Device, JsonElement? Hardware, JsonElement? Metrics,
-    JsonElement? GamesVolume, bool Stateless);
+    JsonElement? GamesVolume, bool Stateless, string? KioskAlert = null);
 
 public sealed record AdminHallPcList(IReadOnlyList<AdminHallPc> Items, IReadOnlyList<AdminZone> Zones);
 

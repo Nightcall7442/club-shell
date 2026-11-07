@@ -205,6 +205,7 @@ public sealed class SessionHandlers : IIpcHandlerGroup
     private async Task<AuthLoginResponse> LoginAsync(IpcContext context, AuthLoginRequest request, CancellationToken cancellationToken)
     {
         ValidateLogin(request);
+        RequireReady();
         if (_sessions.State.IsOpen() && _sessions.Current is { } open && _users.User is { } current && open.UserId == current.Id
             && !string.Equals(current.Username, request.Username, StringComparison.OrdinalIgnoreCase) && request.Kind == AuthKind.Password)
         {
@@ -375,14 +376,16 @@ public sealed class SessionHandlers : IIpcHandlerGroup
     private AuthStatusResponse Status()
     {
         User? user = _users.User;
+        PcReadiness? readiness = PcReadiness?.Current;
         return user is null
-            ? new AuthStatusResponse(false, _connection.Connectivity)
-            : new AuthStatusResponse(true, _users.Mode, user, SessionOf(user), _users.ExpiresAt);
+            ? new AuthStatusResponse(false, _connection.Connectivity, Readiness: readiness)
+            : new AuthStatusResponse(true, _users.Mode, user, SessionOf(user), _users.ExpiresAt, readiness);
     }
 
     private async Task<QrLoginStart> QrStartAsync(IpcContext context, CancellationToken cancellationToken)
     {
         RequireOnline();
+        RequireReady();
         Guid pcId = PcId;
         if (pcId == Guid.Empty)
         {
@@ -396,6 +399,7 @@ public sealed class SessionHandlers : IIpcHandlerGroup
 
     private Task<PlaySession> StartAsync(IpcContext context, SessionStartRequest request, CancellationToken cancellationToken)
     {
+        RequireReady();
         User user = context.RequireUser();
         if (request.TariffId == Guid.Empty)
         {
@@ -442,6 +446,24 @@ public sealed class SessionHandlers : IIpcHandlerGroup
 
     /// <summary>The player's saves (SHELL_CHANGES 23); resolved lazily, absent in tests that build the handlers by hand.</summary>
     private IPlayerSaves? Saves => _services.GetService<IPlayerSaves>();
+
+    /// <summary>Whether the PC lets a player in yet (SHELL_CHANGES 86); absent in tests that build the handlers by hand.</summary>
+    private Readiness.PcReadinessService? PcReadiness => _services.GetService<Readiness.PcReadinessService>();
+
+    /// <summary>
+    /// Sign-in, QR and session start wait for the games disks (SHELL_CHANGES 86), whatever sends them: the Shell keeps its
+    /// sign-in screen closed meanwhile, but a card tap or a phone's QR confirmation still arrives.
+    /// </summary>
+    private void RequireReady()
+    {
+        if (PcReadiness is { IsReady: false } readiness)
+        {
+            throw IpcError.Of(
+                ErrorCode.Conflict,
+                "The PC is still preparing its games disks",
+                Details(("reason", "pcNotReady"), ("state", readiness.Current.State == PcReadinessState.NotReady ? "notReady" : "preparing"))).ToException();
+        }
+    }
 
     private Guid PcId => _settings.CurrentValue.PcId ?? _connection.PcId ?? Guid.Empty;
 

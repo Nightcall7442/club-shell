@@ -149,6 +149,13 @@ public enum ServerCommandType
 
     /// <summary>Re-fetch caches; payload <see cref="RefreshConfigCommand"/>; result <see cref="RefreshConfigResult"/>.</summary>
     RefreshConfig,
+
+    /// <summary>
+    /// Reset the player profile of the PC without ending its session (SHELL_CHANGES 76): close the games, collect the
+    /// saves, sign the kiosk out and delete its profile, and back into the same session; no payload; result
+    /// <see cref="ResetProfileResult"/> as soon as it started. An agent that predates it answers <c>notFound</c>.
+    /// </summary>
+    ResetProfile,
 }
 
 /// <summary>Normalized server command as handled by the Agent's command dispatcher.</summary>
@@ -268,6 +275,15 @@ public static class ServerCommandTypes
     /// <summary>camelCase wire name of <paramref name="type"/>.</summary>
     public static string ToWireName(this ServerCommandType type) => JsonNamingPolicy.CamelCase.ConvertName(type.ToString());
 }
+
+/// <summary>
+/// Result of <see cref="ServerCommandType.ResetProfile"/> and <c>sys.resetProfile</c>: the reset started (the Shell is
+/// back in about half a minute). A refusal is an error instead: <c>conflict</c> with the reason <c>resetRunning</c> or
+/// <c>kioskNotReady</c>.
+/// </summary>
+/// <param name="Started">Always <see langword="true"/>.</param>
+/// <param name="SessionId">The session that goes on in the new profile, if one is open.</param>
+public sealed record ResetProfileResult(bool Started, Guid? SessionId = null);
 
 /// <summary>Payload of <see cref="ServerCommandType.Lock"/>; also <c>shell.command{lock}</c> args.</summary>
 /// <param name="Reason">Machine-readable reason.</param>
@@ -788,6 +804,10 @@ public sealed record HeartbeatRunningGame(
 /// <param name="GamesVolume">Who mounts the games library and whether it is mounted (omitted by older agents).</param>
 /// <param name="AntiCheat">Riot Vanguard and platform security state (omitted by older agents).</param>
 /// <param name="KioskUser">State of the kiosk account, so a PC whose kiosk cannot be provisioned is visible (omitted by older agents).</param>
+/// <param name="Readiness">
+/// Whether the PC lets a player in yet (SHELL_CHANGES 86): the cash desk shows "preparing" / "not ready" and does not
+/// seat anyone on it meanwhile (omitted by older agents).
+/// </param>
 public sealed record HeartbeatRequest(
     PcStatus Status,
     Guid? CurrentSessionId,
@@ -801,7 +821,8 @@ public sealed record HeartbeatRequest(
     bool ShellConnected,
     HeartbeatGamesVolume? GamesVolume = null,
     HeartbeatAntiCheat? AntiCheat = null,
-    HeartbeatKioskUser? KioskUser = null);
+    HeartbeatKioskUser? KioskUser = null,
+    Ipc.PcReadiness? Readiness = null);
 
 /// <summary>Well-known values of <see cref="HeartbeatKioskUser.Problem"/>.</summary>
 public static class KioskUserProblems
@@ -827,6 +848,15 @@ public static class KioskUserProblems
 /// <see langword="null"/> when unknown.
 /// </param>
 /// <param name="AutoLogonCount"><c>AutoLogonCount</c>: boots left before auto-logon switches itself off; <see langword="null"/> when not set.</param>
+/// <param name="ResetMode">How the profile is reset after a session on this PC now: <c>logoff</c> or <c>reboot</c> (SHELL_CHANGES 78).</param>
+/// <param name="LogonLost">
+/// The Agent signed the kiosk out and Winlogon did not log it on again, and the one reboot allowed for that within
+/// 15 minutes was already spent: the PC sits on the Windows sign-in screen (SHELL_CHANGES 77).
+/// </param>
+/// <param name="ProfileResetFailed">
+/// The kiosk's profile could not be deleted after a session, again after the one reboot for that: the next player may
+/// get the previous one's settings (SHELL_CHANGES 76). Cleared by the first reset that succeeds.
+/// </param>
 public sealed record HeartbeatKioskUser(
     string Name,
     bool Ready,
@@ -834,7 +864,10 @@ public sealed record HeartbeatKioskUser(
     IReadOnlyList<string>? PrivilegedGroups = null,
     bool? AutoLogon = null,
     bool? ForceAutoLogon = null,
-    int? AutoLogonCount = null);
+    int? AutoLogonCount = null,
+    string? ResetMode = null,
+    bool? LogonLost = null,
+    bool? ProfileResetFailed = null);
 
 /// <summary>Who mounts the games library volume on the PC (heartbeat <c>gamesVolume.owner</c>).</summary>
 [JsonConverter(typeof(CamelCaseEnumConverter<GamesVolumeOwner>))]
@@ -885,6 +918,11 @@ public sealed record HeartbeatAntiCheat(
 /// <param name="CatalogVersion">Games/apps catalogue version; refresh lists when changed.</param>
 /// <param name="PendingCommands">Commands queued while WS was down.</param>
 /// <param name="Session">Server view of the current session for reconciliation.</param>
+/// <param name="Stateless">
+/// The owner marked the PC as without persistent storage (<c>pcs.stateless</c>): its system disk comes back clean at
+/// every boot, so with <c>shell.kioskUser.resetMode</c> <c>auto</c> the agent reboots it after a session instead of
+/// deleting the kiosk's profile (SHELL_CHANGES 78). <see langword="null"/> from an older server.
+/// </param>
 public sealed record HeartbeatResponse(
     DateTimeOffset ServerTime,
     PcStatus PcStatus,
@@ -892,7 +930,8 @@ public sealed record HeartbeatResponse(
     int ConfigVersion,
     string CatalogVersion,
     int PendingCommands,
-    Session? Session = null);
+    Session? Session = null,
+    bool? Stateless = null);
 
 /// <summary>Well-known values of <see cref="TelemetryEvent.Kind"/>.</summary>
 public static class TelemetryEventKinds

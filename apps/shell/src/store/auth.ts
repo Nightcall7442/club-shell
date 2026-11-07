@@ -10,6 +10,7 @@ import type {
   AuthStatusResponse,
   ConnectivityState,
   Money,
+  PcReadiness,
   SessionEndReason,
   User,
 } from '@clubshell/contracts';
@@ -50,6 +51,11 @@ export interface AuthState {
   error: ShellError | null;
   /** Set by `logout` when it ended a session; cleared on the next login or by `dismissReceipt`. */
   receipt: LeaveReceipt | null;
+  /**
+   * Whether the PC lets a player in yet (`auth.status` / `sys.readinessChanged`, SHELL_CHANGES 86): the sign-in screen
+   * stays closed until the games disks are attached. `null` from an Agent that does not report it: ready.
+   */
+  readiness: PcReadiness | null;
 }
 
 export interface AuthActions {
@@ -64,6 +70,7 @@ export interface AuthActions {
   updateUser(patch: Partial<User>): void;
   setBalance(balance: Money): void;
   onExpired(reason: AuthExpiredReason): void;
+  onReadiness(readiness: PcReadiness): void;
   clearError(): void;
   dismissReceipt(): void;
   reset(): void;
@@ -80,6 +87,7 @@ const initialState: AuthState = {
   status: 'idle',
   error: null,
   receipt: null,
+  readiness: null,
 };
 
 export const useAuthStore = create<AuthStore>()(
@@ -151,6 +159,7 @@ export const useAuthStore = create<AuthStore>()(
           expiresAt: res.expiresAt ?? null,
           ready: true,
           status: 'ready',
+          readiness: res.readiness ?? null,
         });
         useSessionStore.getState().setSession(res.authenticated ? (res.session ?? null) : null);
         return res;
@@ -177,7 +186,11 @@ export const useAuthStore = create<AuthStore>()(
     onExpired(reason) {
       track('auth.expired', { reason });
       useSessionStore.getState().reset();
-      set({ ...initialState, ready: true, status: 'ready', expiredReason: reason });
+      set({ ...initialState, ready: true, status: 'ready', expiredReason: reason, readiness: get().readiness });
+    },
+
+    onReadiness(readiness) {
+      set({ readiness });
     },
 
     clearError() {
@@ -185,11 +198,13 @@ export const useAuthStore = create<AuthStore>()(
     },
 
     reset() {
-      set({ ...initialState, ready: get().ready });
+      set({ ...initialState, ready: get().ready, readiness: get().readiness });
     },
   })),
 );
 
+/** Selector: the PC lets a player in (no readiness reported counts as ready, SHELL_CHANGES 86). */
+export const selectPcReady = (s: AuthStore): boolean => s.readiness === null || s.readiness.state === 'ready';
 /** Selector: logged in. */
 export const selectIsAuthenticated = (s: AuthStore): boolean => s.user !== null;
 /** Selector: guest account. */

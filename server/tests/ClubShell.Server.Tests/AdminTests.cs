@@ -598,6 +598,39 @@ public sealed class PcAdminTests(ApprovalServerFixture server) : IClassFixture<A
             Assert.Equal(("disklessHelper", false), (v.GetProperty("owner").GetString(), v.TryGetProperty("mounted", out _))));
     }
 
+    [Fact]
+    public async Task The_heartbeat_answers_stateless_and_the_hall_shows_what_went_wrong_with_the_kiosk()
+    {
+        var owner = await LoginAsync(server, OwnerPin);
+        var cashier = await LoginAsync(server, CashierPin);
+        var agent = await ApprovedAgentAsync(owner);
+        async Task<bool> StatelessAsync() =>
+            (await Players.ReadAsync(await agent.HeartbeatAsync(), 200)).GetProperty("stateless").GetBoolean();
+        async Task<JsonElement> AlertAsync()
+        {
+            var hall = (await ExpectAsync(server, 200, HttpMethod.Get, "/pcs", cashier)).GetProperty("items").EnumerateArray()
+                .Single(p => p.GetProperty("id").GetGuid() == agent.PcId).GetProperty("kioskAlert");
+            var seat = (await ExpectAsync(server, 200, HttpMethod.Get, "/overview", cashier)).GetProperty("seats").EnumerateArray()
+                .Single(s => s.GetProperty("pc").GetProperty("id").GetGuid() == agent.PcId).GetProperty("kioskAlert");
+            Assert.Equal(hall.GetRawText(), seat.GetRawText());
+            return hall;
+        }
+
+        // SHELL_CHANGES 78: the agent learns the owner's mark from every heartbeat.
+        Assert.False(await StatelessAsync());
+        await ExpectAsync(server, 200, HttpMethod.Patch, $"/pcs/{agent.PcId}", owner, new { stateless = true });
+        Assert.True(await StatelessAsync());
+        Assert.Equal(JsonValueKind.Null, (await AlertAsync()).ValueKind);
+
+        // SHELL_CHANGES 76–77: the sign-in screen outranks a profile that could not be deleted.
+        await Players.ReadAsync(await agent.HeartbeatAsync(kioskUser: new { name = "player", ready = true, profileResetFailed = true }), 200);
+        Assert.Equal("profileResetFailed", (await AlertAsync()).GetString());
+        await Players.ReadAsync(await agent.HeartbeatAsync(kioskUser: new { name = "player", ready = true, logonLost = true, profileResetFailed = true }), 200);
+        Assert.Equal("logonLost", (await AlertAsync()).GetString());
+        await Players.ReadAsync(await agent.HeartbeatAsync(kioskUser: new { name = "player", ready = true }), 200);
+        Assert.Equal(JsonValueKind.Null, (await AlertAsync()).ValueKind);
+    }
+
     /// <summary>A new PC waits for approval (D-7), the owner approves it with <c>maintenance:false</c>, the agent registers again.</summary>
     private async Task<TestAgent> ApprovedAgentAsync(string owner)
     {
@@ -680,6 +713,45 @@ public sealed class AdminCommandTests(ShortAckServerFixture server) : IClassFixt
         var silent = ExpectAsync(server, 200, HttpMethod.Post, $"/pcs/{agent.PcId}/command", owner, new { kind = "reboot" });
         Assert.Equal("reboot", (await socket.ReceiveAsync()).GetProperty("name").GetString());
         Assert.Equal("timeout", (await silent).GetProperty("ack").GetProperty("error").GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task Reset_profile_goes_only_to_a_connected_pc_and_an_old_agent_refuses_it()
+    {
+        var owner = await LoginAsync(server, OwnerPin);
+        var agent = await TestAgent.CreateAsync(server);
+
+        // SHELL_CHANGES 76: never queued for later — a reset hours later would hit the next player.
+        var offline = (await ExpectAsync(server, 200, HttpMethod.Post, $"/pcs/{agent.PcId}/command", owner, new { kind = "resetProfile" })).GetProperty("ack");
+        Assert.Equal((false, "agentOffline"), (offline.GetProperty("ok").GetBoolean(), offline.GetProperty("error").GetProperty("code").GetString()));
+        Assert.Equal(0, await Players.ScalarAsync<int>(server, "SELECT count(*)::int FROM agent_commands WHERE pc_id = @PcId", new { agent.PcId }));
+
+        using var socket = await WsTestSocket.ConnectAsync(server, agent.AccessToken);
+        await Wait.UntilAsync(() => server.Services.GetRequiredService<AgentSocketHub>().IsConnected(agent.PcId));
+        foreach (var (ok, code) in new[] { (true, (string?)null), (false, "notFound") })
+        {
+            var call = ExpectAsync(server, 200, HttpMethod.Post, $"/pcs/{agent.PcId}/command", owner, new { kind = "resetProfile" });
+            var frame = await socket.ReceiveAsync();
+            Assert.Equal("resetProfile", frame.GetProperty("name").GetString());
+            await socket.SendAsync(new
+            {
+                type = "ack", id = Guid.NewGuid(), ts = DateTimeOffset.UtcNow, payload = (object?)null,
+                ack = ok
+                    ? (object)new { id = frame.GetProperty("id").GetGuid(), ok = true, result = new { started = true } }
+                    : new { id = frame.GetProperty("id").GetGuid(), ok = false, error = new { code, message = "Unknown command 'resetProfile'", details = (object?)null } },
+            });
+            var ack = (await call).GetProperty("ack");
+            Assert.Equal(ok, ack.GetProperty("ok").GetBoolean());
+            if (!ok)
+            {
+                Assert.Equal(code, ack.GetProperty("error").GetProperty("code").GetString());
+            }
+        }
+
+        Assert.Equal(2, await Players.ScalarAsync<int>(server,
+            "SELECT count(*)::int FROM audit_entries WHERE action = 'pcCommand' AND pc_id = @PcId AND meta ->> 'kind' = 'resetProfile'", new { agent.PcId }));
+        var bulk = await ExpectAsync(server, 400, HttpMethod.Post, "/pcs/commands", owner, new { pcIds = new[] { agent.PcId }, kind = "resetProfile" });
+        Assert.Equal("kind", bulk.GetProperty("error").GetProperty("details").GetProperty("field").GetString());
     }
 
     [Fact]

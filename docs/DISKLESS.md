@@ -208,6 +208,29 @@ To service a seat, unlock the Shell with the admin PIN and exit: the Agent then 
 lets USB drives work and does not kill `cmd`, `reg` or `powershell` in the kiosk session (SHELL_CHANGES 28, 33, 34).
 Signing out hands the seat back at once; a reboot always comes back sealed.
 
+## Games disks before sign-in
+
+The helper attaches G: and H: only after Windows has started, while the kiosk is logged on automatically before that;
+a player signing in meanwhile saw "no games" (SHELL_CHANGES 86). The Agent therefore keeps the PC **preparing** until
+the disks are there (`src/ClubShell.Agent/Readiness`):
+
+* **Who decides.** A helper whose `ping` reports `ready` and `disks` (1.9.0 and later): its word, polled every
+  1.5 s, waited for up to `shell.readiness.timeoutSec` (180) from the start of the wait. An older helper (no `ready`, or
+  no channel for 10 s): every library root off the system drive must exist, waited for up to the timeout counted from
+  Windows' start (an Agent restarted during the day does not wait again). No `ClubDisklessHelper` service, or
+  `shell.readiness.enabled` off: ready at once.
+* **When the wait ends** with at least one disk attached (or none expected) the games are re-scanned and the PC is
+  **ready** — once per Agent run: between players on a hybrid the disks stay. With no disk at all it is **not ready**
+  and turns ready as soon as one comes.
+* **Until ready** `auth.login`, `auth.qrStart` and `session.start` answer `conflict {reason: pcNotReady}`; the Shell
+  shows "Preparing the PC…" with each disk's progress instead of the sign-in card (no password, QR, guest or card
+  tap), or "The PC is not ready to play — call an administrator". The heartbeat carries `readiness`, and the server
+  refuses a desk seat on a PC that reports `preparing` or `notReady` (`409 pcNotReady`), since a desk open bypasses
+  `session.start`.
+* **Later changes.** Every change of the game list (a disk attaching or going during the day, a catalogue update) is
+  sent as `games.changed`, and the Shell re-reads the list on any screen. A catalogue answered with 304 at start is
+  re-scanned too: its install marks were the last boot's.
+
 ## Player saves
 
 A player's single-player saves follow their account to any PC of the club (SHELL_CHANGES 23). The club server keeps
@@ -230,6 +253,12 @@ tells it when, over `\\.\pipe\club-diskless-helper` (`src/ClubShell.Agent/Saves`
   channel, within `games.playerSaves.detachTimeoutSec` (120 s). Only then is the kiosk signed out and its profile
   reset, or the seat rebooted. `overLimit` tells the player their saves are over 200 MB and were not kept. Every attach
   that was sent gets its detach, a failed or timed-out one included.
+* **Helper self-update (1.8.0+).** The helper restarts itself when it updates; its channel is gone for 5–30 s (up
+  to 2 minutes on a rollback). A missing channel, or one not served by the helper service, is retried every second
+  within the command's own timeout (attach 60 s, detach 120 s), the service PID looked up afresh at every connection.
+  `{"ok":false,"error":"updating"}` (the helper is replacing its executable; nothing was done) is repeated every 5 s
+  within the same timeout — never treated as `internal`, so it does not kill the games. `ping` logs the helper's
+  `version` and `build`.
 * **Never a late detach.** What was laid out is held only in memory: after an Agent restart, or a power cut, no detach
   is sent; the server keeps the previous version and the next sign-in lays that out.
 * **Settings.** `games.playerSaves.mode`: `auto` (default, on where the helper service is installed), `on`, `off`.

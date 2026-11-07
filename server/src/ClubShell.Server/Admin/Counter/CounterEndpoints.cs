@@ -108,6 +108,16 @@ public static partial class CounterEndpoints
             """,
             new { staff.ClubId }))
             .ToDictionary(g => g.PcId, g => new AdminSeatGame(g.Id, g.Title, g.CoverUrl, g.HeroUrl));
+        // SHELL_CHANGES 76–77: the PC sits on the Windows sign-in screen, or the player's profile could not be deleted.
+        var kioskAlerts = (await c.QueryAsync<(Guid PcId, string Alert)>(
+            """
+            SELECT p.id, CASE WHEN p.last_heartbeat #>> '{kioskUser,logonLost}' = 'true' THEN 'logonLost' ELSE 'profileResetFailed' END
+            FROM pcs p
+            WHERE p.club_id = @ClubId AND p.deleted_at IS NULL
+              AND (p.last_heartbeat #>> '{kioskUser,logonLost}' = 'true' OR p.last_heartbeat #>> '{kioskUser,profileResetFailed}' = 'true')
+            """,
+            new { staff.ClubId }))
+            .ToDictionary(a => a.PcId, a => a.Alert);
         var seats = hall.Select(pc =>
         {
             var status = pc.Status(hub.IsConnected(pc.Id), now, TimeSpan.FromSeconds(agents.OfflineAfterSec));
@@ -117,7 +127,8 @@ public static partial class CounterEndpoints
                 s?.ToWire(now),
                 s is not null && players.TryGetValue(s.UserId, out var user) ? user : null,
                 s is null ? null : signedIn.Contains(pc.Id),
-                s is not null && status is Contracts.Pcs.PcStatus.Busy or Contracts.Pcs.PcStatus.Locked ? games.GetValueOrDefault(pc.Id) : null);
+                s is not null && status is Contracts.Pcs.PcStatus.Busy or Contracts.Pcs.PcStatus.Locked ? games.GetValueOrDefault(pc.Id) : null,
+                status == Contracts.Pcs.PcStatus.Offline ? null : kioskAlerts.GetValueOrDefault(pc.Id));
         }).ToList();
         var tariffs = (await c.QueryAsync<TariffRow>(
             $"SELECT {TariffRow.Columns} FROM tariffs WHERE club_id = @ClubId AND deleted_at IS NULL ORDER BY created_at, id", new { staff.ClubId }))
@@ -228,6 +239,7 @@ public static partial class CounterEndpoints
         {
             await AdvisoryLocks.PcAsync(c, tx, pc.Id);
             await ShiftEndpoints.RequireOpenAsync(c, tx, staff);
+            await RequireReadyAsync(c, tx, pc, sessions.Clock.GetUtcNow());
             if (payment is { } pay)
             {
                 paid = await PostTopUpAsync(c, tx, staff, effects, r.UserId!.Value, pay.Amount, pay.Method, sessions.Clock.GetUtcNow(), forSession: true);
@@ -279,6 +291,7 @@ public static partial class CounterEndpoints
             var now = sessions.Clock.GetUtcNow();
             await AdvisoryLocks.PcAsync(c, tx, pc.Id);
             await ShiftEndpoints.RequireOpenAsync(c, tx, staff);
+            await RequireReadyAsync(c, tx, pc, now);
             var guest = await Guests.CreateAsync(c, tx, staff.NetworkId, pc.Number, name ?? $"Гость {pc.Number}", "ru", now);
             if (payment is { } pay)
             {
@@ -689,7 +702,9 @@ public static partial class CounterEndpoints
     /// <summary>
     /// <c>adminCommand</c> (§6.4 step 4): queued, then its ack awaited up to <see cref="AgentOptions.AckWaitSec"/>; an offline PC
     /// answers <c>agentOffline</c> at once (the command stays queued), no ack in time <c>timeout</c> — both inside a 200.
-    /// <c>unlock</c> supersedes the PC's pending <c>lock</c>.
+    /// <c>unlock</c> supersedes the PC's pending <c>lock</c>. <c>resetProfile</c> (SHELL_CHANGES 76) is not queued for an
+    /// offline PC: a reset that fires hours later would surprise the next player; an agent that predates it answers
+    /// <c>notFound</c>, which the desk shows as a refusal.
     /// </summary>
     private static async Task<IResult> CommandAsync(
         HttpContext context, Guid pcId, [FromBody] JsonElement body, PcRepository pcs, NpgsqlDataSource db, CommandDispatcher dispatcher,
@@ -707,6 +722,11 @@ public static partial class CounterEndpoints
 
         // The command and its audit entry commit together (DESIGN §3.7); it goes to the PC after the commit.
         var online = hub.IsConnected(pc.Id);
+        if (!online && command.Type == ServerCommandType.ResetProfile)
+        {
+            return AdminJson.Ok(new { ack = new CommandAck(false, IpcError.Of(ErrorCode.AgentOffline, "The PC is offline; nothing was sent")) });
+        }
+
         ServerCommandEnvelope queued;
         await using (var c = await db.OpenConnectionAsync())
         await using (var tx = await c.BeginTransactionAsync())
@@ -738,6 +758,7 @@ public static partial class CounterEndpoints
         "unlock" => NewCommand.Unlock(),
         "reboot" => NewCommand.Reboot(new PowerCommand(5, false, text)),
         "shutdown" => NewCommand.Shutdown(new PowerCommand(5, false, text)),
+        "resetProfile" => NewCommand.ResetProfile(),
         _ => throw ApiException.Validation("kind", "unknown"),
     };
 
@@ -777,6 +798,30 @@ public static partial class CounterEndpoints
     /// <summary>A live PC of the staff member's club, else <c>404 what=pc</c>.</summary>
     public static async Task<PcRow> LivePcAsync(PcRepository pcs, StaffContext staff, Guid pcId) =>
         await pcs.FindAsync(pcId) is { DeletedAt: null } pc && pc.ClubId == staff.ClubId ? pc : throw ApiException.NotFound("pc");
+
+    /// <summary>A heartbeat this recent tells whether the PC is ready (SHELL_CHANGES 86); an older one is a PC that is off.</summary>
+    private static readonly TimeSpan ReadinessFresh = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// SHELL_CHANGES 86: a PC whose agent reports it is still attaching its games disks (<c>preparing</c>) or found none
+    /// (<c>notReady</c>) takes no one: <c>409 pcNotReady {state}</c>. A desk open skips <c>session.start</c> on the PC,
+    /// so the agent's own refusal does not cover it. An agent that does not report readiness, or a PC whose last
+    /// heartbeat is stale (switched off), seats as before.
+    /// </summary>
+    private static async Task RequireReadyAsync(NpgsqlConnection c, NpgsqlTransaction tx, PcRow pc, DateTimeOffset now)
+    {
+        if (pc.LastHeartbeatAt is not { } at || now - at >= ReadinessFresh)
+        {
+            return;
+        }
+
+        var state = await c.QuerySingleOrDefaultAsync<string?>(
+            "SELECT last_heartbeat -> 'readiness' ->> 'state' FROM pcs WHERE id = @Id", new { pc.Id }, tx);
+        if (state is "preparing" or "notReady")
+        {
+            throw new ApiException(StatusCodes.Status409Conflict, ErrorCode.Conflict, "Conflict: pcNotReady", new { reason = "pcNotReady", state });
+        }
+    }
 
     /// <summary>The open session to act on, locked: by <c>sessionId</c> when given (it wins, as in the mock), else the PC's.</summary>
     private static async Task<SessionRow> TargetAsync(NpgsqlConnection c, NpgsqlTransaction tx, StaffContext staff, AdminSessionTarget r)

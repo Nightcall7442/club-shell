@@ -33,6 +33,30 @@ public enum HelperErrorCode
 
     /// <summary>Anything else, including a code this Agent does not know.</summary>
     Internal,
+
+    /// <summary>
+    /// Helper 1.8.0+ is replacing its own executable and is about to restart (self-update): the command was not run and
+    /// nothing changed; retry in 5 s.
+    /// </summary>
+    Updating,
+}
+
+/// <summary>One games disk as the helper reports it in <c>ping</c> (SHELL_CHANGES 86).</summary>
+/// <param name="Library"><c>games</c> (G:), <c>solo</c> (H:), …</param>
+/// <param name="Letter">Drive letter, when known.</param>
+/// <param name="State"><c>mounted</c>; <c>attaching</c>/<c>preparing</c> (still coming); <c>failed</c>, <c>noServer</c>, … (not coming).</param>
+public sealed record HelperDisk(string Library, string? Letter, string State)
+{
+    /// <summary>The disk is on its letter.</summary>
+    public bool Mounted => State == "mounted";
+
+    /// <summary>The disk is still being attached or prepared by the server (an unknown state counts as such).</summary>
+    public bool Pending => State is "attaching" or "preparing" || !KnownStates.Contains(State);
+
+    private static readonly HashSet<string> KnownStates = new(StringComparer.Ordinal)
+    {
+        "mounted", "attaching", "preparing", "failed", "noServer", "unpublished", "disabled", "master",
+    };
 }
 
 /// <summary>How a helper command ended, from the Agent's side.</summary>
@@ -64,6 +88,21 @@ public enum HelperResultKind
 /// <param name="Version">Helper version (answer to <c>ping</c>).</param>
 public sealed record HelperResult(HelperResultKind Kind, HelperErrorCode Code = HelperErrorCode.None, string? Message = null, string? Version = null)
 {
+    /// <summary>SHA-256 of the helper's executable (<c>ping</c>, 1.8.0+).</summary>
+    public string? Build { get; init; }
+
+    /// <summary>The helper is replacing its executable right now (<c>ping</c>, 1.8.0+).</summary>
+    public bool Updating { get; init; }
+
+    /// <summary>
+    /// <c>ping</c> of a helper that reports its disks (SHELL_CHANGES 86): <see langword="true"/> once nothing is being
+    /// attached or prepared any more; <see langword="null"/> for a helper without the field.
+    /// </summary>
+    public bool? Ready { get; init; }
+
+    /// <summary>The games disks the helper looks after (<c>ping</c>); <see langword="null"/> for a helper without the field.</summary>
+    public IReadOnlyList<HelperDisk>? Disks { get; init; }
+
     /// <summary><see langword="true"/> for <c>{"ok":true}</c>.</summary>
     public bool IsOk => Kind == HelperResultKind.Ok;
 
@@ -141,6 +180,7 @@ public static class HelperProtocol
         HelperErrorCode.ProfileNotFound => "profileNotFound",
         HelperErrorCode.BadRequest => "badRequest",
         HelperErrorCode.Internal => "internal",
+        HelperErrorCode.Updating => "updating",
         _ => "none",
     };
 
@@ -160,7 +200,13 @@ public static class HelperProtocol
             string? message = String(root, "message");
             if (ok.GetBoolean())
             {
-                return new HelperResult(HelperResultKind.Ok, Message: message, Version: String(root, "version"));
+                return new HelperResult(HelperResultKind.Ok, Message: message, Version: String(root, "version"))
+                {
+                    Build = String(root, "build"),
+                    Updating = root.TryGetProperty("updating", out JsonElement updating) && updating.ValueKind == JsonValueKind.True,
+                    Ready = root.TryGetProperty("ready", out JsonElement ready) && ready.ValueKind is JsonValueKind.True or JsonValueKind.False ? ready.GetBoolean() : null,
+                    Disks = root.TryGetProperty("disks", out JsonElement disks) && disks.ValueKind == JsonValueKind.Array ? ReadDisks(disks) : null,
+                };
             }
 
             HelperErrorCode code = String(root, "error") switch
@@ -172,6 +218,7 @@ public static class HelperProtocol
                 "masterMode" => HelperErrorCode.MasterMode,
                 "profileNotFound" => HelperErrorCode.ProfileNotFound,
                 "badRequest" => HelperErrorCode.BadRequest,
+                "updating" => HelperErrorCode.Updating,
                 _ => HelperErrorCode.Internal,
             };
             return new HelperResult(HelperResultKind.Error, code, message);
@@ -251,6 +298,22 @@ public static class HelperProtocol
         }
 
         return Encoding.UTF8.GetString(bytes);
+    }
+
+    private static List<HelperDisk> ReadDisks(JsonElement disks)
+    {
+        var list = new List<HelperDisk>();
+        foreach (JsonElement disk in disks.EnumerateArray())
+        {
+            if (disk.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            list.Add(new HelperDisk(String(disk, "library") ?? "?", String(disk, "letter"), String(disk, "state") ?? "attaching"));
+        }
+
+        return list;
     }
 
     private static string? String(JsonElement root, string name) =>

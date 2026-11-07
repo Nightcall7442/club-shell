@@ -3,7 +3,14 @@ import clsx from 'clsx';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { tariffPriceFor, type Locale, type Money, type Session, type Tariff } from '@clubshell/contracts';
+import {
+  tariffPriceFor,
+  type Locale,
+  type Money,
+  type PcReadiness,
+  type Session,
+  type Tariff,
+} from '@clubshell/contracts';
 import { Background } from '@/components/layout/Background';
 import { NotificationCenter } from '@/components/layout/NotificationCenter';
 import { Avatar } from '@/components/ui/Avatar';
@@ -23,7 +30,7 @@ import { onCardRead } from '@/lib/cardReader';
 import { formatDurationSec, formatMoney } from '@/lib/format';
 import { api, toShellApiError } from '@/lib/tauri';
 import { formatClock } from '@/lib/time';
-import { selectIsGuest, useAuthStore } from '@/store/auth';
+import { selectIsGuest, selectPcReady, useAuthStore } from '@/store/auth';
 import { useNotificationsStore } from '@/store/notifications';
 import { useGamesStore } from '@/store/games';
 import { useSessionStore } from '@/store/session';
@@ -665,12 +672,68 @@ function LeaveReceiptNote(): JSX.Element | null {
   );
 }
 
+/** Name of a games disk on the preparing screen: the helper's libraries by name, a library root as it is. */
+function diskLabel(library: string, t: (key: string) => string): string {
+  return library === 'games' ? t('lock.preparing.games') : library === 'solo' ? t('lock.preparing.solo') : library;
+}
+
+/**
+ * SHELL_CHANGES 86: while the diskless helper is still attaching the games disks no one signs in — a player would land
+ * in an empty library. The card shows how far each disk is; with no disk at all after the wait, the PC is "not ready"
+ * and the player is sent to the administrator.
+ */
+function PreparingCard({ readiness }: { readiness: PcReadiness }): JSX.Element {
+  const { t } = useTranslation();
+  const notReady = readiness.state === 'notReady';
+  return (
+    <div role="status" aria-live="polite" className="flex flex-col items-center gap-5 py-6 text-center">
+      {!notReady && <Spinner size="xl" />}
+      <div>
+        <h1 className="font-display text-3xl font-light leading-tight tracking-tight text-text">
+          {notReady ? t('lock.preparing.notReadyTitle') : t('lock.preparing.title')}
+        </h1>
+        <p className="mt-1 text-balance text-base text-muted">
+          {notReady ? t('lock.preparing.notReadyHint') : t('lock.preparing.hint')}
+        </p>
+      </div>
+      {readiness.disks.length > 0 && (
+        <ul className="flex w-full flex-col gap-2" aria-label={t('lock.preparing.disks')}>
+          {readiness.disks.map((d) => {
+            const state =
+              d.state === 'mounted'
+                ? 'ready'
+                : d.state === 'attaching' || d.state === 'preparing'
+                  ? 'attaching'
+                  : 'unavailable';
+            return (
+              <li
+                key={`${d.library}-${d.letter ?? ''}`}
+                className="flex items-center justify-between gap-3 rounded-md bg-text/[0.04] px-4 py-2.5 text-base"
+              >
+                <span className="truncate text-text">
+                  {diskLabel(d.library, t)}
+                  {d.letter && <span className="ml-2 font-mono text-sm text-muted">{d.letter}:</span>}
+                </span>
+                <Badge tone={state === 'ready' ? 'success' : state === 'attaching' ? 'accent' : 'muted'} size="sm">
+                  {t(`lock.preparing.state.${state}`)}
+                </Badge>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function LockScreen(): JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { user, isOpen, isLocked } = useSession();
   const ready = useAuthStore((s) => s.ready);
+  const readiness = useAuthStore((s) => s.readiness);
+  const pcReady = useAuthStore(selectPcReady);
   const expiredReason = useAuthStore((s) => s.expiredReason);
   const logout = useAuthStore((s) => s.logout);
   const defaultRoute = useSettingsStore((s) => s.shellConfig?.ui.defaultRoute ?? '/home');
@@ -694,7 +757,7 @@ export default function LockScreen(): JSX.Element {
   useGamepad();
 
   const hasUser = user !== null;
-  const showTariffs = ready && hasUser && !isOpen;
+  const showTariffs = ready && pcReady && hasUser && !isOpen;
 
   useEffect(() => {
     trackScreen(pathname);
@@ -707,11 +770,12 @@ export default function LockScreen(): JSX.Element {
     void useGamesStore.getState().load(true);
   }, []);
 
+  // A session open before the PC is ready (restored after an Agent restart, opened at the desk) waits here too.
   useEffect(() => {
-    if (hasUser && isOpen && !isLocked) {
+    if (hasUser && isOpen && !isLocked && pcReady) {
       navigate(defaultRoute, { replace: true });
     }
-  }, [hasUser, isOpen, isLocked, defaultRoute, navigate]);
+  }, [hasUser, isOpen, isLocked, pcReady, defaultRoute, navigate]);
 
   useEffect(() => {
     if (idle && !hasUser && !isLocked) {
@@ -744,7 +808,7 @@ export default function LockScreen(): JSX.Element {
   // tab, which signs in with it; the number is not lost and the player does not tap twice.
   const [tapped, setTapped] = useState<{ cardId: string } | null>(null);
   useEffect(() => {
-    if (!ready || isLocked || hasUser) {
+    if (!ready || !pcReady || isLocked || hasUser) {
       return undefined;
     }
     return onCardRead((cardId) => {
@@ -752,7 +816,7 @@ export default function LockScreen(): JSX.Element {
       setTab('card');
       setTapped({ cardId });
     });
-  }, [ready, isLocked, hasUser]);
+  }, [ready, pcReady, isLocked, hasUser]);
 
   const tabs = useMemo<TabItem<LoginTab>[]>(
     () => [
@@ -824,6 +888,8 @@ export default function LockScreen(): JSX.Element {
               <div className="flex justify-center py-16">
                 <Spinner size="xl" />
               </div>
+            ) : !pcReady && readiness ? (
+              <PreparingCard readiness={readiness} />
             ) : isLocked ? (
               <UnlockForm />
             ) : (

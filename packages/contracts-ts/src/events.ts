@@ -66,6 +66,49 @@ export interface GameStateChanged {
   error?: IpcError | null;
 }
 
+/** Payload of `games.changed`: the game list changed (a disk came or went, the catalogue was updated). */
+export interface GamesChanged {
+  /** Catalogue version after the change. */
+  catalogVersion?: string | null;
+}
+
+/** One games disk in `PcReadiness`. */
+export interface PcReadinessDisk {
+  /**
+   * `games`, `solo`, … (the diskless helper's names), or the library root when the helper does not report its disks.
+   */
+  library: string;
+  /** Drive letter, when known. */
+  letter?: string | null;
+  /** `mounted`, `attaching`, `preparing`, or why it is not coming (`failed`, `noServer`, `missing`, …). */
+  state: string;
+}
+
+/** Whether the PC may let a player in (SHELL_CHANGES 86). */
+export const PcReadinessState = {
+  /** The games disks are still being attached: no sign-in, no session yet. */
+  Preparing: 'preparing',
+  /**
+   * Everything that could be attached is; the game list is fresh. Once ready, a PC stays ready until the Agent
+   * restarts.
+   */
+  Ready: 'ready',
+  /** No games disk came up in time: no sign-in; the PC turns ready as soon as one does. */
+  NotReady: 'notReady',
+} as const;
+/** Whether the PC may let a player in (SHELL_CHANGES 86). */
+export type PcReadinessState = (typeof PcReadinessState)[keyof typeof PcReadinessState];
+
+/** Payload of `sys.readinessChanged` and `AuthStatusResponse.Readiness`; part of the heartbeat. */
+export interface PcReadiness {
+  /** Preparing, ready or not ready. */
+  state: PcReadinessState;
+  /** The games disks and how far each is. */
+  disks: PcReadinessDisk[];
+  /** When the wait for the disks gives up (while preparing). */
+  deadline?: string | null;
+}
+
 /** Where the signed-in player's game saves are on this PC (SHELL_CHANGES 23). */
 export const PlayerSavesState = {
   /** No saves to carry: nobody signed in, a guest, or saves are off on this PC. */
@@ -321,6 +364,8 @@ export interface AgentEventMap {
   [IpcNames.Events.AuthExpired]: AuthExpired;
   [IpcNames.Events.ShopOrderUpdated]: Order;
   [IpcNames.Events.SavesStatus]: PlayerSavesStatus;
+  [IpcNames.Events.SysReadinessChanged]: PcReadiness;
+  [IpcNames.Events.GamesChanged]: GamesChanged;
 }
 
 /** Agent → Shell event name (`'session.updated' | 'session.warning' | ...`). */

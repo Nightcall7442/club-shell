@@ -23,6 +23,12 @@ public interface IPlayerSaves
     bool Attached { get; }
 
     /// <summary>
+    /// <see langword="true"/> from the attach until its detach has finished: a reboot must wait (the helper collects the
+    /// saves from the profile).
+    /// </summary>
+    bool Busy { get; }
+
+    /// <summary>
     /// A successful <c>auth.login</c>: starts laying the player's saves out and returns at once. Never for a guest
     /// (<paramref name="guest"/>, or the user's role). The same player signing in again changes nothing.
     /// </summary>
@@ -113,6 +119,9 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
     /// <summary>Pause between two detach attempts.</summary>
     public TimeSpan RetryDelay { get; set; } = TimeSpan.FromSeconds(3);
 
+    /// <summary>Pause before repeating a command the helper answered with <c>updating</c> (it is replacing its executable).</summary>
+    public TimeSpan UpdatingRetryDelay { get; set; } = TimeSpan.FromSeconds(5);
+
     /// <inheritdoc />
     public PlayerSavesState State
     {
@@ -133,6 +142,18 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
             lock (_gate)
             {
                 return _current is { Release: null };
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public bool Busy
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _current is not null;
             }
         }
     }
@@ -318,13 +339,34 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
         }
         else
         {
-            try
+            // A missing channel is retried by the channel itself; "updating" (helper 1.8.0+ replacing its exe) here,
+            // every 5 s, both within the attach timeout.
+            while (true)
             {
-                result = await _channel.SendAsync(HelperProtocol.Attach(attachment.PlayerId, sid), AttachTimeout, CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OutOfMemoryException)
-            {
-                result = new HelperResult(HelperResultKind.Failed, Message: ex.Message);
+                TimeSpan remaining = AttachTimeout - _clock.GetElapsedTime(started);
+                try
+                {
+                    result = await _channel.SendAsync(HelperProtocol.Attach(attachment.PlayerId, sid), remaining, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    result = new HelperResult(HelperResultKind.Failed, Message: ex.Message);
+                }
+
+                if (result is not { Kind: HelperResultKind.Error, Code: HelperErrorCode.Updating })
+                {
+                    break;
+                }
+
+                remaining = AttachTimeout - _clock.GetElapsedTime(started);
+                if (remaining <= UpdatingRetryDelay)
+                {
+                    result = new HelperResult(HelperResultKind.Timeout, Message: "the helper was still updating when the attach timeout ran out");
+                    break;
+                }
+
+                _logger.LogInformation("Saves attach of player {PlayerId}: the helper is updating; retrying in {Delay}", attachment.PlayerId, UpdatingRetryDelay);
+                await _clock.Delay(UpdatingRetryDelay, CancellationToken.None).ConfigureAwait(false);
             }
         }
 
@@ -417,10 +459,11 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
                 await CloseGamesAsync(reason, graceful: false).ConfigureAwait(false);
             }
 
+            TimeSpan pause = result is { Kind: HelperResultKind.Error, Code: HelperErrorCode.Updating } ? UpdatingRetryDelay : RetryDelay;
             remaining = budget - _clock.GetElapsedTime(started);
             if (remaining > TimeSpan.Zero)
             {
-                await _clock.Delay(remaining < RetryDelay ? remaining : RetryDelay, CancellationToken.None).ConfigureAwait(false);
+                await _clock.Delay(remaining < pause ? remaining : pause, CancellationToken.None).ConfigureAwait(false);
             }
         }
     }
@@ -479,6 +522,9 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
                     case HelperErrorCode.BadRequest or HelperErrorCode.ProfileNotFound:
                         _logger.LogError("Saves detach of player {PlayerId}: {Code} ({Message}); nothing sent, the session's progress is lost", playerId, result.Describe(), result.Message);
                         return false;
+                    case HelperErrorCode.Updating:
+                        _logger.LogInformation("Saves detach of player {PlayerId}: the helper is updating, attempt {Attempt}; retrying in {Delay}", playerId, attempt, UpdatingRetryDelay);
+                        return true;
                     default:
                         // serverUnavailable, disabled, internal: the attach still holds, a retry can succeed.
                         _logger.LogWarning("Saves detach of player {PlayerId}: {Code} ({Message}), attempt {Attempt}; retrying", playerId, result.Describe(), result.Message, attempt);
@@ -499,7 +545,12 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
             HelperResult result = await _channel.SendAsync(HelperProtocol.Ping(), TimeSpan.FromSeconds(10), CancellationToken.None).ConfigureAwait(false);
             if (result.IsOk)
             {
-                _logger.LogInformation("Saves: diskless helper {Version} answers on {Pipe}", result.Version ?? "?", HelperProtocol.PipeName);
+                _logger.LogInformation(
+                    "Saves: diskless helper {Version} (build {Build}{Updating}) answers on {Pipe}",
+                    result.Version ?? "?",
+                    result.Build ?? "?",
+                    result.Updating ? ", updating" : string.Empty,
+                    HelperProtocol.PipeName);
             }
             else
             {

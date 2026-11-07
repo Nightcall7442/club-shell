@@ -294,8 +294,10 @@ public sealed class GameLaunchService : IDisposable
                 ThrowIfCancelled(game, inFlight);
             }
 
-            // The club's defaults for what games keep in HKCU, which a fresh profile lacks.
+            // The club's defaults for what games keep in HKCU, which a fresh profile lacks; then the game's own catalogue
+            // values over whatever is there (SHELL_CHANGES 82), the player's restored settings included.
             _ = _registryDefaults?.Apply();
+            _ = _registryDefaults?.ApplyCatalogue(game);
 
             var env = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             if (injection is not null)

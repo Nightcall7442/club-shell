@@ -62,6 +62,15 @@ only where the value is missing — so games that keep settings in the registry 
 `HKCU\Software\Valve\Half-Life\Settings`) start from the club's values in a profile that is new after every reset
 (SHELL_CHANGES 82). Keys are limited to `HKCU\Software`, outside the `Policies` keys.
 
+A game's own card can carry `registryValues` (`[{key, name, type: "dword"|"string", value}]`, set by the owner in the
+cash desk's game card, one line per value: `HKCU\Software\…\Name = dword:1` or `= "text"`). `GameRegistryDefaults.ApplyCatalogue`
+writes them right after the club-wide defaults and **over** whatever is there, so the club's value wins however the
+previous run left it (a crash flag, a windowed mode). The server checks them (at most 20; a key under `HKCU\Software`,
+not the `Policies` keys; a name of 1–255 characters; a `dword` of 0..4294967295 or a string of up to 1024 characters)
+and stores them in the card; the Agent checks the key again and skips a wrong value with a warning. A save without
+the field keeps the card's values; an empty list removes them. The local `profileTemplate` setting is dropped: no code
+ever read it, and the per-game values cover what it was meant for.
+
 `LauncherBase` implements everything except `BuildCommand`:
 
 ```csharp

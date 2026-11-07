@@ -583,6 +583,7 @@ Response `204`.
 | `showAds` | `{ items: { url, type, durationSec }[], skippable: bool }` | IPC `shell.command{showAds}` | `null` |
 | `setVolume` | `{ level: int, muted?: bool }` | set volume | `{ level, muted }` |
 | `refreshConfig` | `{ config?: bool, games?: bool, apps?: bool, tariffs?: bool, products?: bool, themes?: bool }` | re-fetch selected caches (all when empty) | `{ refreshed: string[] }` |
+| `resetProfile` | — | beyond the contract (SHELL_CHANGES 76): reset the player profile without ending the session — games closed, saves collected, kiosk signed out and its profile deleted, back in the same session; acked as soon as it started; sent by the cash desk's `POST /admin/pcs/{id}/command {kind: "resetProfile"}` only to a connected PC (an offline one gets nothing, `agentOffline`), journal `pcCommand`; an older agent answers `notFound` | `{ started: true, sessionId?: uuid }` |
 
 ### 6.2 Agent → Server events (`AgentEventType`)
 

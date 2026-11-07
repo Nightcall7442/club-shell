@@ -238,6 +238,27 @@ The Agent creates the game from session 0, so Windows lets its window take the f
 foreground owner: `games_launch` calls `AllowSetForegroundWindow(ASFW_ANY)` before sending `games.launch`, while the
 Shell is still in front after the click on "Play" (SHELL_CHANGES 81).
 
+That leave is gone at the player's next input to the Shell, so the Shell also brings the game up itself
+(`kiosk/front.rs`): after every `running` event with a pid (from the Shell or from the cash desk; a successor's
+`running` replaces the target) it polls every 250 ms, up to 30 s, for a window of that pid the dock would list and
+raises it (`open_windows::bring_to_front`). It stops once the game owns the foreground, on its `exited | failed |
+killed`, or when another program took the foreground (the player went there). The log gets "game window found",
+"game window brought to front ok=…", "game window not found within 30 s", other programs' windows seen meanwhile and
+the foreground owner 5 s after `running`.
+
+During a game the Shell never activates itself: `kiosk_focus` is ignored, display changes wait for the game's end,
+and entering game mode also clears tao's ALWAYS_ON_TOP flag (`set_always_on_top(false)`), which would otherwise put
+`WS_EX_TOPMOST` back on its next style change. Should the Shell's window get the focus anyway (a game re-creating its
+window on a display-mode change), the game's window is brought back — unless the player caused it (input within the
+last second: Alt+Tab, a click), the Shell is locked, or the HUD/lock overlay is up.
+
+Programs from the "Apps" screen (SHELL_CHANGES 87) are started the same way and would stay under the Shell, its
+topmost guard taking the screen back within 250 ms. `apps_launch` therefore gives `ASFW_ANY` before the request,
+notes the program windows already open, hands the foreground off to the new pid like the dock (allow-list, topmost
+guard paused) and, in the background, waits up to 15 s for its window — else a window that was not there before
+(a stub launcher's child, a single-instance program handing over) — and brings it up, handing off to that window's
+process. No window in 15 s ends the hand-off. The command answers at once.
+
 | Guard | Normal | Game mode |
 |-------|--------|-----------|
 | Blocked chords | `HookPolicy::combos()` | `HookPolicy::game_combos()`: only `Win*` chords and `Ctrl+Shift+Esc`; `Alt+Tab`, `Alt+F4`, `PrintScreen` released so games and their overlays work |

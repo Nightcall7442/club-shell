@@ -39,52 +39,104 @@ public sealed class DisklessHelperChannel : IDisklessHelperChannel
         _logger = logger;
     }
 
+    /// <summary>Pause between two connection attempts while the channel is missing (the helper restarting).</summary>
+    public static readonly TimeSpan RetryInterval = TimeSpan.FromSeconds(1);
+
     /// <inheritdoc />
+    /// <remarks>
+    /// The helper restarts itself when it updates (1.8.0+): its channel is gone for 5–30 s, up to 2 minutes on a
+    /// rollback. A missing channel, or one served by another process, is therefore retried every
+    /// <see cref="RetryInterval"/> until <paramref name="timeout"/> runs out, and the service's PID is looked up afresh
+    /// at every connection — the restarted service is a new process, and while it is down anyone may own the name.
+    /// </remarks>
     public async Task<HelperResult> SendAsync(byte[] request, TimeSpan timeout, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         DateTime deadline = DateTime.UtcNow + timeout;
-        using var pipe = new NamedPipeClientStream(
-            ".",
-            HelperProtocol.PipeName,
-            PipeDirection.InOut,
-            PipeOptions.Asynchronous,
-            TokenImpersonationLevel.Identification);
-        try
+        HelperResult last = new(HelperResultKind.Unreachable, Message: $"{HelperProtocol.PipeName} not found");
+        bool securityLogged = false;
+        int attempts = 0;
+        while (true)
         {
-            TimeSpan connect = timeout < ConnectTimeout ? timeout : ConnectTimeout;
-            await pipe.ConnectAsync(connect, cancellationToken).ConfigureAwait(false);
-        }
-        catch (TimeoutException)
-        {
-            return new HelperResult(HelperResultKind.Unreachable, Message: $"{HelperProtocol.PipeName} did not open within {ConnectTimeout.TotalSeconds:0}s");
-        }
-        catch (IOException ex)
-        {
-            return new HelperResult(HelperResultKind.Unreachable, Message: ex.Message);
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            return new HelperResult(HelperResultKind.Unreachable, Message: ex.Message);
-        }
+            attempts++;
+            TimeSpan remaining = deadline - DateTime.UtcNow;
+            if (remaining <= TimeSpan.Zero)
+            {
+                return attempts > 2 ? last with { Message = $"{last.Message} ({attempts - 1} attempts)" } : last;
+            }
 
+            using var pipe = new NamedPipeClientStream(
+                ".",
+                HelperProtocol.PipeName,
+                PipeDirection.InOut,
+                PipeOptions.Asynchronous,
+                TokenImpersonationLevel.Identification);
+            HelperResult? refused = null;
+            try
+            {
+                await pipe.ConnectAsync(remaining < ConnectTimeout ? remaining : ConnectTimeout, cancellationToken).ConfigureAwait(false);
+                refused = CheckServer(pipe, ref securityLogged);
+            }
+            catch (TimeoutException)
+            {
+                last = new HelperResult(HelperResultKind.Unreachable, Message: $"{HelperProtocol.PipeName} did not open");
+            }
+            catch (IOException ex)
+            {
+                last = new HelperResult(HelperResultKind.Unreachable, Message: ex.Message);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                last = new HelperResult(HelperResultKind.Unreachable, Message: ex.Message);
+            }
+
+            if (pipe.IsConnected && refused is null)
+            {
+                return await HelperProtocol.ExchangeAsync(pipe, request, deadline - DateTime.UtcNow, cancellationToken).ConfigureAwait(false);
+            }
+
+            last = refused ?? last;
+            remaining = deadline - DateTime.UtcNow;
+            if (remaining > TimeSpan.Zero)
+            {
+                await Task.Delay(remaining < RetryInterval ? remaining : RetryInterval, cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// <see langword="null"/> when the pipe's server is the running helper service, else why not (nothing is sent then).
+    /// The first mismatch of a command is logged as a security error, the retries at debug.
+    /// </summary>
+    private HelperResult? CheckServer(NamedPipeClientStream pipe, ref bool securityLogged)
+    {
         if (!Kernel32.GetNamedPipeServerProcessId(pipe.SafePipeHandle, out uint serverPid))
         {
             return new HelperResult(HelperResultKind.Refused, Message: $"server process of the pipe unknown ({Win32Error.Message(Win32Error.Last())})");
         }
 
         uint? servicePid = ServiceProcess.RunningProcessId(HelperProtocol.ServiceName);
-        if (servicePid != serverPid)
+        if (servicePid == serverPid)
+        {
+            return null;
+        }
+
+        string service = servicePid?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "not running";
+        if (!securityLogged)
         {
             _logger.LogError(
                 "SECURITY: {Pipe} is served by pid {ServerPid}, not by the {Service} service (pid {ServicePid}); nothing sent",
                 HelperProtocol.PipeName,
                 serverPid,
                 HelperProtocol.ServiceName,
-                servicePid?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "not running");
-            return new HelperResult(HelperResultKind.Refused, Message: $"pipe server pid {serverPid} is not the helper service");
+                service);
+            securityLogged = true;
+        }
+        else
+        {
+            _logger.LogDebug("{Pipe} still served by pid {ServerPid}, service pid {ServicePid}", HelperProtocol.PipeName, serverPid, service);
         }
 
-        return await HelperProtocol.ExchangeAsync(pipe, request, deadline - DateTime.UtcNow, cancellationToken).ConfigureAwait(false);
+        return new HelperResult(HelperResultKind.Refused, Message: $"pipe server pid {serverPid} is not the helper service");
     }
 }

@@ -64,6 +64,7 @@ import type {
   SysCallAdminResponse,
   SysSetLocaleResponse,
   SysUnlockAdminResponse,
+  ResetProfileResult,
   Tariff,
   Theme,
   TopupIntent,
@@ -1862,6 +1863,15 @@ cmd('sys_unlock_admin', (args): SysUnlockAdminResponse => {
   const token = newId();
   mockState.adminToken = { token, expiresAt: now + 300_000 };
   return { ok: true, adminToken: token, expiresAt: new Date(now + 300_000).toISOString() };
+});
+
+cmd('sys_reset_profile', (args): ResetProfileResult => {
+  const admin = mockState.adminToken;
+  if (!admin || admin.token !== str(args, 'adminToken') || admin.expiresAt <= Date.now()) {
+    mockError('unauthorized', 'invalid or expired admin token');
+  }
+  console.info('[mock] sys_reset_profile — the agent would reset the player profile and restart the shell');
+  return { started: true, sessionId: mockState.session?.id };
 });
 
 cmd('sys_ack_admin_message', (): OkResponse => ({ ok: true }), { fast: true });
