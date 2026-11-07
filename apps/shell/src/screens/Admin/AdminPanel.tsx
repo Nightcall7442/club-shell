@@ -1,7 +1,8 @@
 /**
  * The hidden administrator panel (exit hotkey from shell.json or `kiosk://hotkey exit`, mounted once by
- * `GlobalListeners`): admin PIN → reboot / shutdown / exit to the desktop / quit / devtools / reload. Errors surface as
- * toasts.
+ * `GlobalListeners`): admin PIN → reboot / shutdown / exit to the desktop / quit / devtools / reload / reset the player
+ * profile (SHELL_CHANGES 76: asks twice, the game closes and the Shell comes back in the same session). Errors surface
+ * as toasts.
  */
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -26,7 +27,7 @@ interface AdminToken {
   expiresAt: string;
 }
 
-type AdminAction = 'reboot' | 'shutdown' | 'explorer' | 'quit' | 'devtools' | 'reload';
+type AdminAction = 'reboot' | 'shutdown' | 'explorer' | 'quit' | 'devtools' | 'reload' | 'resetProfile';
 
 const POWER_DELAY_SEC = 30;
 
@@ -45,6 +46,7 @@ export function AdminPanel({ open, onClose }: AdminPanelProps): JSX.Element {
   const [checking, setChecking] = useState(false);
   const [admin, setAdmin] = useState<AdminToken | null>(null);
   const [busy, setBusy] = useState<AdminAction | null>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -52,6 +54,7 @@ export function AdminPanel({ open, onClose }: AdminPanelProps): JSX.Element {
       setError(null);
       setChecking(false);
       setBusy(null);
+      setConfirmReset(false);
       setAdmin((a) => (a && Date.parse(a.expiresAt) > Date.now() ? a : null));
     }
   }, [open]);
@@ -84,6 +87,11 @@ export function AdminPanel({ open, onClose }: AdminPanelProps): JSX.Element {
       setAdmin(null);
       return;
     }
+    if (action === 'resetProfile' && !confirmReset) {
+      setConfirmReset(true);
+      return;
+    }
+    setConfirmReset(false);
     setBusy(action);
     try {
       switch (action) {
@@ -121,6 +129,18 @@ export function AdminPanel({ open, onClose }: AdminPanelProps): JSX.Element {
         case 'reload':
           await api.kiosk.reload();
           break;
+        case 'resetProfile':
+          await api.system.resetProfile(admin.token);
+          push({
+            id: 'resetProfile',
+            title: t('admin.resetProfileStarted'),
+            body: t('admin.resetProfileStartedBody'),
+            level: 'warning',
+            ttlSec: null,
+            source: 'system',
+          });
+          onClose();
+          break;
       }
     } catch (err) {
       pushError(err, t('settings.adminPanel'));
@@ -135,6 +155,11 @@ export function AdminPanel({ open, onClose }: AdminPanelProps): JSX.Element {
       { key: 'devtools', label: t('settings.devtools'), variant: 'secondary', hidden: !devtoolsAllowed },
       { key: 'explorer', label: t('settings.exitExplorer'), variant: 'primary' },
       { key: 'quit', label: t('settings.exitQuit'), variant: 'primary' },
+      {
+        key: 'resetProfile',
+        label: confirmReset ? t('settings.resetProfileConfirm') : t('settings.resetProfile'),
+        variant: 'danger',
+      },
       { key: 'reboot', label: t('settings.reboot'), variant: 'danger' },
       { key: 'shutdown', label: t('settings.shutdown'), variant: 'danger' },
     ];

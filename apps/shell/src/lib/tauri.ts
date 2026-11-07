@@ -49,6 +49,7 @@ import type {
   Product,
   ProfileUpdateRequest,
   QrLoginStart,
+  ResetProfileResult,
   RunningGame,
   ScheduledResult,
   Session,
@@ -601,6 +602,8 @@ export const api = {
     setVolume: (level: number, muted?: boolean): Promise<VolumeState> => invoke('sys_set_volume', { level, muted }),
     setLocale: (locale: Locale): Promise<SysSetLocaleResponse> => invoke('sys_set_locale', { locale }),
     unlockAdmin: (pin: string): Promise<SysUnlockAdminResponse> => invoke('sys_unlock_admin', { pin }),
+    /** SHELL_CHANGES 76: the player profile is reset without ending the session; this Shell restarts with it. */
+    resetProfile: (adminToken: string): Promise<ResetProfileResult> => invoke('sys_reset_profile', { adminToken }),
     ackAdminMessage: (id: string): Promise<OkResponse> => invoke('sys_ack_admin_message', { id }),
     logClientError: (e: SysLogClientErrorRequest): Promise<void> =>
       invoke<null>('sys_log_client_error', { e }).then(() => undefined),

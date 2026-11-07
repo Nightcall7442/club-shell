@@ -24,6 +24,9 @@ public sealed record NewCommand(ServerCommandType Type, JsonElement? Payload)
 
     public static NewCommand Shutdown(PowerCommand payload) => new(ServerCommandType.Shutdown, JsonDefaults.ToElement(payload));
 
+    /// <summary>«Сбросить профиль игрока» (SHELL_CHANGES 76): result <c>ResetProfileResult</c>; an older agent answers <c>notFound</c>.</summary>
+    public static NewCommand ResetProfile() => new(ServerCommandType.ResetProfile, null);
+
     public static NewCommand EndSession(EndSessionCommand payload) => new(ServerCommandType.EndSession, JsonDefaults.ToElement(payload));
 
     /// <summary>The server has already charged: v1 always sends <c>charge:false</c> (§5.6).</summary>
@@ -40,7 +43,8 @@ public sealed record NewCommand(ServerCommandType Type, JsonElement? Payload)
 /// <summary>
 /// Queues a command and sends it at once when the PC is connected (DESIGN §6.4 step 1); otherwise it waits for the next
 /// connection or the REST drain. Every command expires after <see cref="AgentOptions.CommandTtlMin"/>. Commands the
-/// contract marks <c>notImplemented</c> are refused: the agent may not know them.
+/// contract marks <c>notImplemented</c> are refused: the agent may not know them. <see cref="BeyondContract"/> ones are
+/// this repository's own (an older agent answers them <c>notFound</c>, and the caller shows that as a refusal).
 /// </summary>
 public sealed class CommandDispatcher(CommandRepository commands, AgentSocketHub hub, AgentOptions options)
 {
@@ -58,6 +62,12 @@ public sealed class CommandDispatcher(CommandRepository commands, AgentSocketHub
         ServerCommandType.RefreshConfig,
     };
 
+    /// <summary>Commands beyond the contract that this server sends: <c>resetProfile</c> (SHELL_CHANGES 76).</summary>
+    public static readonly IReadOnlySet<ServerCommandType> BeyondContract = new HashSet<ServerCommandType>
+    {
+        ServerCommandType.ResetProfile,
+    };
+
     /// <param name="supersedes">An earlier command this one cancels (<c>lock</c> → <c>unlock</c>, AsyncAPI §7).</param>
     public async Task<ServerCommandEnvelope> EnqueueAsync(Guid clubId, Guid pcId, NewCommand command, Guid? supersedes = null, Guid? issuedByStaffId = null)
     {
@@ -73,7 +83,7 @@ public sealed class CommandDispatcher(CommandRepository commands, AgentSocketHub
     /// </summary>
     public Task<ServerCommandEnvelope> QueueAsync(
         NpgsqlTransaction? tx, Guid clubId, Guid pcId, NewCommand command, Guid? supersedes = null, Guid? issuedByStaffId = null, TimeSpan? ttl = null) =>
-        Required.Contains(command.Type)
+        Required.Contains(command.Type) || BeyondContract.Contains(command.Type)
             ? commands.EnqueueAsync(clubId, pcId, command.Type, command.Payload, supersedes, issuedByStaffId, ttl ?? TimeSpan.FromMinutes(options.CommandTtlMin), tx)
             : throw new ArgumentException($"Command {command.Type.ToWireName()} is notImplemented in the contract and is never sent", nameof(command));
 

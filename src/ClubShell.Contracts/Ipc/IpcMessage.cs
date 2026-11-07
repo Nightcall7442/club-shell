@@ -247,6 +247,9 @@ public static class IpcMessages
         /// <summary><see cref="SysAdminExitRequest"/> → <see cref="SysAdminExitResponse"/>.</summary>
         public const string AdminExit = "sys.adminExit";
 
+        /// <summary><see cref="SysResetProfileRequest"/> → <see cref="Commands.ResetProfileResult"/> (SHELL_CHANGES 76).</summary>
+        public const string ResetProfile = "sys.resetProfile";
+
         /// <summary><see cref="SysLogClientErrorRequest"/> → <see cref="OkResponse"/>.</summary>
         public const string LogClientError = "sys.logClientError";
 
@@ -1125,6 +1128,13 @@ public sealed record SysUnlockAdminResponse(
 /// <param name="AdminToken">Token from <c>sys.unlockAdmin</c>.</param>
 /// <param name="Minutes">Length of the pause; <see langword="null"/> = the default.</param>
 public sealed record SysAdminExitRequest(string AdminToken, int? Minutes = null);
+
+/// <summary>
+/// Request of <c>sys.resetProfile</c> from the Shell's administrator menu: the player profile of this PC is reset without
+/// ending the session (SHELL_CHANGES 76); requires an unexpired <c>sys.unlockAdmin</c> token.
+/// </summary>
+/// <param name="AdminToken">Token from <c>sys.unlockAdmin</c>.</param>
+public sealed record SysResetProfileRequest(string AdminToken);
 
 /// <summary>Response of <c>sys.adminExit</c>.</summary>
 /// <param name="ResumeAt">When the watchdog starts the Shell again (unless the session changes first).</param>

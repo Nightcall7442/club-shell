@@ -83,6 +83,7 @@ public sealed class SystemHandlers : IIpcHandlerGroup
     private int _clientErrorsInWindow;
     private Pc? _cachedPc;
     private DateTimeOffset _cachedPcAt;
+    private readonly IServiceProvider? _services;
 
     /// <summary>Creates the group.</summary>
     public SystemHandlers(
@@ -105,8 +106,10 @@ public sealed class SystemHandlers : IIpcHandlerGroup
         IKioskSessionLocator kioskSession,
         IOptionsMonitor<AgentSettings> settings,
         IClock clock,
-        ILogger<SystemHandlers> logger)
+        ILogger<SystemHandlers> logger,
+        IServiceProvider? services = null)
     {
+        _services = services;
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(server);
         ArgumentNullException.ThrowIfNull(hardware);
@@ -165,6 +168,7 @@ public sealed class SystemHandlers : IIpcHandlerGroup
         dispatcher.Register<SysSetLocaleRequest, SysSetLocaleResponse>(IpcMessages.Sys.SetLocale, SetLocaleAsync);
         dispatcher.Register<SysUnlockAdminRequest, SysUnlockAdminResponse>(IpcMessages.Sys.UnlockAdmin, (_, request, _) => Task.FromResult(UnlockAdmin(request)));
         dispatcher.Register<SysAdminExitRequest, SysAdminExitResponse>(IpcMessages.Sys.AdminExit, (_, request, _) => Task.FromResult(AdminExit(request)));
+        dispatcher.Register<SysResetProfileRequest, ResetProfileResult>(IpcMessages.Sys.ResetProfile, (_, request, ct) => ResetProfileAsync(request, ct));
         dispatcher.Register<SysLogClientErrorRequest, OkResponse>(IpcMessages.Sys.LogClientError, (_, request, _) => Task.FromResult(LogClientError(request)));
         dispatcher.Register<SysAckAdminMessageRequest, OkResponse>(IpcMessages.Sys.AckAdminMessage, (_, request, _) => Task.FromResult(AckAdminMessage(request)));
         dispatcher.RegisterNoPayload<UpdateCheckResponse>(IpcMessages.Update.Check, UpdateCheckAsync);
@@ -204,6 +208,27 @@ public sealed class SystemHandlers : IIpcHandlerGroup
         int? session = _kioskSession.ActiveSessionId;
         DateTimeOffset until = _maintenance.Begin(TimeSpan.FromMinutes(minutes), session is { } id ? (uint)id : null);
         return new SysAdminExitResponse(until);
+    }
+
+    /// <summary>
+    /// <c>sys.resetProfile</c> from the administrator menu (SHELL_CHANGES 76): the player profile is reset without ending
+    /// the session; the Shell closes with it and comes back in the same session.
+    /// </summary>
+    public Task<ResetProfileResult> ResetProfileAsync(SysResetProfileRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (!IsAdminTokenValid(request.AdminToken))
+        {
+            throw IpcError.Unauthorized("invalid or expired admin token").ToException();
+        }
+
+        // Resolved here, not injected: the reset service reaches the Shell's pipe, which reaches these handlers.
+        if (_services?.GetService(typeof(Users.IProfileResetTrigger)) is not Users.IProfileResetTrigger reset)
+        {
+            throw IpcError.UnknownMessage(IpcMessages.Sys.ResetProfile).ToException();
+        }
+
+        return reset.ResetForStaffAsync("the administrator menu", cancellationToken);
     }
 
     /// <summary>Best-effort master volume on the default render endpoint (Core Audio); persisted to <c>shell.json</c> either way.</summary>

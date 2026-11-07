@@ -172,6 +172,15 @@ moment (no session, nobody signed in or at the console, the saves collected, the
 `cache\profile-reset-reboot.txt` remembers it until a reset succeeds, and a reset that fails after it sets the
 heartbeat's `kioskUser.profileResetFailed`, which the cash desk shows on the seat.
 
+«Сбросить профиль игрока на этом ПК» (SHELL_CHANGES 76) mends a profile spoilt mid-session (a game that left a
+broken display mode in the registry) without ending the session: the cash desk's PC card («Ещё ⋯», server command
+`resetProfile`, only to a connected PC, journal `pcCommand`) or the Shell's administrator menu (`sys.resetProfile`,
+admin PIN, asked twice). `ProfileResetService.ResetForStaffAsync` closes the games and collects the saves
+(`profile.detach`), resets the profile as above with the session open, and Winlogon logs the kiosk on again; the Shell
+comes back in the same session (its time keeps running), the debt marker is written again for the session's end, and
+the signed-in player's saves are laid out again (`profile.attach`). Who asked goes into the Agent log. An Agent that
+predates it answers `notFound` and the cash desk says it cannot.
+
 `shell.kioskUser.resetMode` (SHELL_CHANGES 78): `logoff` resets the profile as above; `reboot` reboots the PC 5 s after
 the session instead — for a diskless PC whose system disk comes back clean at boot; `auto` (the default) follows the
 server: the owner's "without persistent storage" mark (`pcs.stateless`) comes in every heartbeat answer

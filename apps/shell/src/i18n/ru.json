@@ -1270,7 +1270,9 @@
     "largeText": "Крупный текст",
     "adminPanel": "Панель администратора",
     "reboot": "Перезагрузить ПК",
-    "shutdown": "Выключить ПК"
+    "shutdown": "Выключить ПК",
+    "resetProfile": "Сбросить профиль игрока",
+    "resetProfileConfirm": "Точно сбросить? Игра закроется"
   },
   "notifications": {
     "title": "Уведомления",
@@ -1327,6 +1329,8 @@
     "rebootIn": "Перезагрузка через {{seconds}} с",
     "shutdownScheduled": "Этот ПК будет выключен",
     "shutdownIn": "Выключение через {{seconds}} с",
+    "resetProfileStarted": "Профиль игрока сбрасывается",
+    "resetProfileStartedBody": "Игры закрываются, через полминуты оболочка вернётся в тот же сеанс",
     "messageFromStaff": "Сообщение персонала",
     "callAdminTitle": "Вызов администратора",
     "adminOnWay": "Администратор уже идёт",

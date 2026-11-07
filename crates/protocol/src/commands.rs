@@ -663,6 +663,8 @@ pub mod names {
         pub const UNLOCK_ADMIN: &str = "sys.unlockAdmin";
         /// `SysAdminExitRequest` → `SysAdminExitResponse`.
         pub const ADMIN_EXIT: &str = "sys.adminExit";
+        /// `SysResetProfileRequest` → `ResetProfileResult` (SHELL_CHANGES 76).
+        pub const RESET_PROFILE: &str = "sys.resetProfile";
         /// `SysLogClientErrorRequest` → `OkResponse`.
         pub const LOG_CLIENT_ERROR: &str = "sys.logClientError";
         /// `SysAckAdminMessageRequest` → `OkResponse`.
@@ -1217,6 +1219,16 @@ pub struct SysPowerRequest {
     /// Free-text reason.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+}
+
+/// Request of `sys.resetProfile` from the Shell's administrator menu: the player profile of this PC
+/// is reset without ending the session (SHELL_CHANGES 76); requires an unexpired `sys.unlockAdmin`
+/// token.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SysResetProfileRequest {
+    /// Token from `sys.unlockAdmin`.
+    pub admin_token: String,
 }
 
 /// Request of `sys.setLocale`.
@@ -2018,6 +2030,19 @@ pub struct RemoteControlStopResult {
     pub duration_sec: i32,
 }
 
+/// Result of `ServerCommandType.ResetProfile` and `sys.resetProfile`: the reset started (the Shell
+/// is back in about half a minute). A refusal is an error instead (`conflict` with
+/// `reason``resetRunning` or `kioskNotReady`).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetProfileResult {
+    /// Always `true`.
+    pub started: bool,
+    /// The session that goes on in the new profile, if one is open.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<Uuid>,
+}
+
 /// Result of power commands and `sys.reboot`/`sys.shutdown`.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -2132,6 +2157,11 @@ wire_enum! {
         SetVolume = "setVolume",
         /// Re-fetch caches; payload `RefreshConfigCommand`; result `RefreshConfigResult`.
         RefreshConfig = "refreshConfig",
+        /// Reset the player profile of the PC without ending its session (SHELL_CHANGES 76): close
+        /// the games, collect the saves, sign the kiosk out and delete its profile, and back into
+        /// the same session; no payload; result `ResetProfileResult` as soon as it started. An
+        /// agent that predates it answers `notFound`.
+        ResetProfile = "resetProfile",
     }
 }
 
@@ -2579,6 +2609,7 @@ agent_commands! {
     SysSetLocale => names::sys::SET_LOCALE, Hello;
     SysUnlockAdmin => names::sys::UNLOCK_ADMIN, Hello;
     SysAdminExit => names::sys::ADMIN_EXIT, Hello;
+    SysResetProfile => names::sys::RESET_PROFILE, Hello;
     SysLogClientError => names::sys::LOG_CLIENT_ERROR, Hello;
     SysAckAdminMessage => names::sys::ACK_ADMIN_MESSAGE, Hello;
     PolicyGet => names::policy::GET, Hello;
@@ -2949,6 +2980,7 @@ mod tests {
                 "showAds",
                 "setVolume",
                 "refreshConfig",
+                "resetProfile",
             ],
         );
         assert_wire(
@@ -2989,7 +3021,7 @@ mod tests {
 
     #[test]
     fn agent_command_table_matches_ipc_protocol() {
-        assert_eq!(AgentCommand::ALL.len(), 66);
+        assert_eq!(AgentCommand::ALL.len(), 67);
         let expected: &[&str] = &[
             "auth.hello",
             "auth.login",
@@ -3051,6 +3083,7 @@ mod tests {
             "sys.setLocale",
             "sys.unlockAdmin",
             "sys.adminExit",
+            "sys.resetProfile",
             "sys.logClientError",
             "sys.ackAdminMessage",
             "policy.get",

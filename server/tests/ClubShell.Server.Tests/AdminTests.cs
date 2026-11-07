@@ -716,6 +716,45 @@ public sealed class AdminCommandTests(ShortAckServerFixture server) : IClassFixt
     }
 
     [Fact]
+    public async Task Reset_profile_goes_only_to_a_connected_pc_and_an_old_agent_refuses_it()
+    {
+        var owner = await LoginAsync(server, OwnerPin);
+        var agent = await TestAgent.CreateAsync(server);
+
+        // SHELL_CHANGES 76: never queued for later — a reset hours later would hit the next player.
+        var offline = (await ExpectAsync(server, 200, HttpMethod.Post, $"/pcs/{agent.PcId}/command", owner, new { kind = "resetProfile" })).GetProperty("ack");
+        Assert.Equal((false, "agentOffline"), (offline.GetProperty("ok").GetBoolean(), offline.GetProperty("error").GetProperty("code").GetString()));
+        Assert.Equal(0, await Players.ScalarAsync<int>(server, "SELECT count(*)::int FROM agent_commands WHERE pc_id = @PcId", new { agent.PcId }));
+
+        using var socket = await WsTestSocket.ConnectAsync(server, agent.AccessToken);
+        await Wait.UntilAsync(() => server.Services.GetRequiredService<AgentSocketHub>().IsConnected(agent.PcId));
+        foreach (var (ok, code) in new[] { (true, (string?)null), (false, "notFound") })
+        {
+            var call = ExpectAsync(server, 200, HttpMethod.Post, $"/pcs/{agent.PcId}/command", owner, new { kind = "resetProfile" });
+            var frame = await socket.ReceiveAsync();
+            Assert.Equal("resetProfile", frame.GetProperty("name").GetString());
+            await socket.SendAsync(new
+            {
+                type = "ack", id = Guid.NewGuid(), ts = DateTimeOffset.UtcNow, payload = (object?)null,
+                ack = ok
+                    ? (object)new { id = frame.GetProperty("id").GetGuid(), ok = true, result = new { started = true } }
+                    : new { id = frame.GetProperty("id").GetGuid(), ok = false, error = new { code, message = "Unknown command 'resetProfile'", details = (object?)null } },
+            });
+            var ack = (await call).GetProperty("ack");
+            Assert.Equal(ok, ack.GetProperty("ok").GetBoolean());
+            if (!ok)
+            {
+                Assert.Equal(code, ack.GetProperty("error").GetProperty("code").GetString());
+            }
+        }
+
+        Assert.Equal(2, await Players.ScalarAsync<int>(server,
+            "SELECT count(*)::int FROM audit_entries WHERE action = 'pcCommand' AND pc_id = @PcId AND meta ->> 'kind' = 'resetProfile'", new { agent.PcId }));
+        var bulk = await ExpectAsync(server, 400, HttpMethod.Post, "/pcs/commands", owner, new { pcIds = new[] { agent.PcId }, kind = "resetProfile" });
+        Assert.Equal("kind", bulk.GetProperty("error").GetProperty("details").GetProperty("field").GetString());
+    }
+
+    [Fact]
     public async Task Cashier_extend_and_end_queue_extendSession_and_endSession()
     {
         var owner = await LoginAsync(server, OwnerPin);

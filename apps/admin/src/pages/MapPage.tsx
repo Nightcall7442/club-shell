@@ -782,6 +782,24 @@ function ExactSummary({ price, label }: { price: number; label?: string }): JSX.
 }
 
 /** What a PC did with a command, in words: never «done» when it was only queued or did not answer (D-66). */
+/**
+ * «Сбросить профиль игрока» (SHELL_CHANGES 76): what the PC said. Never queued — an offline PC got nothing; an agent that
+ * predates the command answers `notFound`, a refusal rather than "done".
+ */
+function resetNote(ack: CommandAck): NoteState {
+  if (ack.ok)
+    return {
+      text: t('Профиль игрока сбрасывается: игра закроется, через полминуты оболочка вернётся в тот же сеанс'),
+      tone: 'ok',
+    };
+  if (ack.error?.code === 'agentOffline') return { text: t('ПК офлайн — ничего не отправлено'), tone: 'warn' };
+  if (ack.error?.code === 'notFound')
+    return { text: t('Агент на этом ПК не умеет сбрасывать профиль — обновите его'), tone: 'err' };
+  if (ack.error?.code === 'conflict') return { text: t('Сброс профиля уже идёт или ПК не готов'), tone: 'warn' };
+  if (ack.error?.code === 'timeout') return { text: t('Нет ответа от ПК за 30 с'), tone: 'warn' };
+  return ackNote(ack, '');
+}
+
 function ackNote(ack: CommandAck, done: string): NoteState {
   if (ack.ok) return { text: done, tone: 'ok' };
   if (ack.error?.code === 'agentOffline') return { text: t('ПК офлайн — команда в очереди до 10 мин'), tone: 'warn' };
@@ -968,12 +986,23 @@ function TechActions({
   /** The confirm with the seat as it was when it opened: its session is the one that may be ended. */
   const [confirm, setConfirm] = useState<{ kind: 'reboot' | 'shutdown'; seat: Seat } | null>(null);
   const [lost, setLost] = useState<LostCommand | null>(() => lostPower.get(seat.pc.id) ?? null);
+  /** «Сбросить профиль игрока» asks once more: the player's game closes. */
+  const [confirmReset, setConfirmReset] = useState(false);
   const current = useRef(seat.pc.id);
   current.current = seat.pc.id;
   useEffect(() => {
     setConfirm(null);
+    setConfirmReset(false);
     setLost(lostPower.get(seat.pc.id) ?? null);
   }, [seat.pc.id]);
+  const resetProfile = (): void => {
+    if (!confirmReset) {
+      setConfirmReset(true);
+      return;
+    }
+    setConfirmReset(false);
+    void run('resetProfile', async () => resetNote((await adminApi.command(seat.pc.id, { kind: 'resetProfile' })).ack));
+  };
   const command = (kind: 'lock' | 'unlock', done: string): void =>
     void run(kind, async () => ackNote((await adminApi.command(seat.pc.id, { kind })).ack, done));
   /** Sends `input` under `key`: a new command has a new key, a retry the one it first went with. */
@@ -1085,6 +1114,18 @@ function TechActions({
               onClick={() => ask('shutdown')}
             >
               {t('Выключить')}
+            </Button>
+            <Button
+              variant={confirmReset ? 'danger' : 'tertiary'}
+              className={clsx(WRAP, 'col-span-2')}
+              disabled={busy || seat.pc.status === 'offline'}
+              onClick={resetProfile}
+            >
+              {confirmReset
+                ? t('Точно сбросить? Игра игрока закроется')
+                : seat.session
+                  ? t('Сбросить профиль игрока (сеанс продолжится)')
+                  : t('Сбросить профиль игрока')}
             </Button>
           </div>
         </div>

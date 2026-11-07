@@ -702,7 +702,9 @@ public static partial class CounterEndpoints
     /// <summary>
     /// <c>adminCommand</c> (§6.4 step 4): queued, then its ack awaited up to <see cref="AgentOptions.AckWaitSec"/>; an offline PC
     /// answers <c>agentOffline</c> at once (the command stays queued), no ack in time <c>timeout</c> — both inside a 200.
-    /// <c>unlock</c> supersedes the PC's pending <c>lock</c>.
+    /// <c>unlock</c> supersedes the PC's pending <c>lock</c>. <c>resetProfile</c> (SHELL_CHANGES 76) is not queued for an
+    /// offline PC: a reset that fires hours later would surprise the next player; an agent that predates it answers
+    /// <c>notFound</c>, which the desk shows as a refusal.
     /// </summary>
     private static async Task<IResult> CommandAsync(
         HttpContext context, Guid pcId, [FromBody] JsonElement body, PcRepository pcs, NpgsqlDataSource db, CommandDispatcher dispatcher,
@@ -720,6 +722,11 @@ public static partial class CounterEndpoints
 
         // The command and its audit entry commit together (DESIGN §3.7); it goes to the PC after the commit.
         var online = hub.IsConnected(pc.Id);
+        if (!online && command.Type == ServerCommandType.ResetProfile)
+        {
+            return AdminJson.Ok(new { ack = new CommandAck(false, IpcError.Of(ErrorCode.AgentOffline, "The PC is offline; nothing was sent")) });
+        }
+
         ServerCommandEnvelope queued;
         await using (var c = await db.OpenConnectionAsync())
         await using (var tx = await c.BeginTransactionAsync())
@@ -751,6 +758,7 @@ public static partial class CounterEndpoints
         "unlock" => NewCommand.Unlock(),
         "reboot" => NewCommand.Reboot(new PowerCommand(5, false, text)),
         "shutdown" => NewCommand.Shutdown(new PowerCommand(5, false, text)),
+        "resetProfile" => NewCommand.ResetProfile(),
         _ => throw ApiException.Validation("kind", "unknown"),
     };
 

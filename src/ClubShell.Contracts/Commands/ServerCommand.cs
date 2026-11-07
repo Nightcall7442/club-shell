@@ -149,6 +149,13 @@ public enum ServerCommandType
 
     /// <summary>Re-fetch caches; payload <see cref="RefreshConfigCommand"/>; result <see cref="RefreshConfigResult"/>.</summary>
     RefreshConfig,
+
+    /// <summary>
+    /// Reset the player profile of the PC without ending its session (SHELL_CHANGES 76): close the games, collect the
+    /// saves, sign the kiosk out and delete its profile, and back into the same session; no payload; result
+    /// <see cref="ResetProfileResult"/> as soon as it started. An agent that predates it answers <c>notFound</c>.
+    /// </summary>
+    ResetProfile,
 }
 
 /// <summary>Normalized server command as handled by the Agent's command dispatcher.</summary>
@@ -268,6 +275,15 @@ public static class ServerCommandTypes
     /// <summary>camelCase wire name of <paramref name="type"/>.</summary>
     public static string ToWireName(this ServerCommandType type) => JsonNamingPolicy.CamelCase.ConvertName(type.ToString());
 }
+
+/// <summary>
+/// Result of <see cref="ServerCommandType.ResetProfile"/> and <c>sys.resetProfile</c>: the reset started (the Shell is
+/// back in about half a minute). A refusal is an error instead: <c>conflict</c> with the reason <c>resetRunning</c> or
+/// <c>kioskNotReady</c>.
+/// </summary>
+/// <param name="Started">Always <see langword="true"/>.</param>
+/// <param name="SessionId">The session that goes on in the new profile, if one is open.</param>
+public sealed record ResetProfileResult(bool Started, Guid? SessionId = null);
 
 /// <summary>Payload of <see cref="ServerCommandType.Lock"/>; also <c>shell.command{lock}</c> args.</summary>
 /// <param name="Reason">Machine-readable reason.</param>

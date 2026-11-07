@@ -653,6 +653,8 @@ export const IpcNames = {
     UnlockAdmin: 'sys.unlockAdmin',
     /** `SysAdminExitRequest` → `SysAdminExitResponse`. */
     AdminExit: 'sys.adminExit',
+    /** `SysResetProfileRequest` → `ResetProfileResult` (SHELL_CHANGES 76). */
+    ResetProfile: 'sys.resetProfile',
     /** `SysLogClientErrorRequest` → `OkResponse`. */
     LogClientError: 'sys.logClientError',
     /** `SysAckAdminMessageRequest` → `OkResponse`. */
@@ -1098,6 +1100,15 @@ export interface SysPowerRequest {
   delaySec?: number | null;
   /** Free-text reason. */
   reason?: string | null;
+}
+
+/**
+ * Request of `sys.resetProfile` from the Shell's administrator menu: the player profile of this PC is reset without
+ * ending the session (SHELL_CHANGES 76); requires an unexpired `sys.unlockAdmin` token.
+ */
+export interface SysResetProfileRequest {
+  /** Token from `sys.unlockAdmin`. */
+  adminToken: string;
 }
 
 /** Request of `sys.setLocale`. */
@@ -1857,6 +1868,17 @@ export interface RemoteControlStopResult {
   durationSec: number;
 }
 
+/**
+ * Result of `ServerCommandType.ResetProfile` and `sys.resetProfile`: the reset started (the Shell is back in about half
+ * a minute). A refusal is an error instead (`conflict` with `reason``resetRunning` or `kioskNotReady`).
+ */
+export interface ResetProfileResult {
+  /** Always `true`. */
+  started: boolean;
+  /** The session that goes on in the new profile, if one is open. */
+  sessionId?: string | null;
+}
+
 /** Result of power commands and `sys.reboot`/`sys.shutdown`. */
 export interface ScheduledResult {
   /** When the action will run. */
@@ -1927,6 +1949,12 @@ export const ServerCommandType = {
   SetVolume: 'setVolume',
   /** Re-fetch caches; payload `RefreshConfigCommand`; result `RefreshConfigResult`. */
   RefreshConfig: 'refreshConfig',
+  /**
+   * Reset the player profile of the PC without ending its session (SHELL_CHANGES 76): close the games, collect the
+   * saves, sign the kiosk out and delete its profile, and back into the same session; no payload; result
+   * `ResetProfileResult` as soon as it started. An agent that predates it answers `notFound`.
+   */
+  ResetProfile: 'resetProfile',
 } as const;
 /** Command types the server may send over WS / `GET /agents/{pcId}/commands` (SERVER_API.md §6.1). */
 export type ServerCommandType = (typeof ServerCommandType)[keyof typeof ServerCommandType];
@@ -2692,6 +2720,7 @@ export interface ServerCommandPayloadMap {
   showAds: ShowAdsArgs;
   setVolume: SetVolumeRequest;
   refreshConfig: RefreshConfigCommand | null;
+  resetProfile: null;
 }
 
 /** Ack result type per server command. */
@@ -2715,6 +2744,7 @@ export interface ServerCommandResultMap {
   showAds: null;
   setVolume: VolumeState;
   refreshConfig: RefreshConfigResult;
+  resetProfile: ResetProfileResult;
 }
 
 /** Normalized server command as handled by the Agent's command dispatcher. */

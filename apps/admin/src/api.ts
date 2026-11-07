@@ -466,6 +466,9 @@ export interface MoveResponse {
 
 export type PcCommandKind = 'message' | 'lock' | 'unlock' | 'reboot' | 'shutdown';
 
+/** A command of one PC: the bulk ones and `resetProfile` (SHELL_CHANGES 76: never queued for an offline PC; an older agent answers `notFound`). */
+export type OnePcCommandKind = PcCommandKind | 'resetProfile';
+
 /** A PC's answer to a command; `agentOffline` — not connected (queued), `timeout` — no answer in time. */
 export interface CommandAck {
   ok: boolean;
@@ -564,7 +567,7 @@ export const adminApi = {
   /** Gives a walk-in guest's refund back in cash: `amount` must equal what is payable now (beyond the contract). */
   payout: (input: { userId: string; amount: number }, key: string): Promise<PayoutResult> =>
     postMoney('/admin/wallet/payout', { ...input, method: 'cash' }, key),
-  command: (pcId: string, input: { kind: PcCommandKind; text?: string }): Promise<{ ack: CommandAck }> =>
+  command: (pcId: string, input: { kind: OnePcCommandKind; text?: string }): Promise<{ ack: CommandAck }> =>
     post(`/admin/pcs/${pcId}/command`, input),
   /** Name or login substring, any part of the phone digits, or the exact card; under 2 characters — recent clients. */
   lookupClients: (q: string): Promise<{ items: ClientHit[] }> =>

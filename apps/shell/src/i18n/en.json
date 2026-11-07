@@ -1270,7 +1270,9 @@
     "largeText": "Large text",
     "adminPanel": "Administrator panel",
     "reboot": "Restart PC",
-    "shutdown": "Shut down PC"
+    "shutdown": "Shut down PC",
+    "resetProfile": "Reset the player profile",
+    "resetProfileConfirm": "Reset it? The game will close"
   },
   "notifications": {
     "title": "Notifications",
@@ -1327,6 +1329,8 @@
     "rebootIn": "Restarting in {{seconds}} s",
     "shutdownScheduled": "This PC will shut down",
     "shutdownIn": "Shutting down in {{seconds}} s",
+    "resetProfileStarted": "Resetting the player profile",
+    "resetProfileStartedBody": "The games are closing; the shell is back in the same session in about half a minute",
     "messageFromStaff": "Staff message",
     "callAdminTitle": "Call administrator",
     "adminOnWay": "An administrator is on the way",

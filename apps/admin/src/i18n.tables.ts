@@ -666,6 +666,16 @@ export const UZ: Record<string, string> = {
     'Reyestr, {n}-qator: HKCU\\Software\\…\\Nom = dword:1 yoki = "matn" koʻrinishi kerak',
   'Значения реестра': 'Reyestr qiymatlari',
   'ПК на экране входа': 'Kompyuter kirish ekranida',
+  'Профиль игрока сбрасывается: игра закроется, через полминуты оболочка вернётся в тот же сеанс':
+    'Oʻyinchi profili tiklanmoqda: oʻyin yopiladi, yarim daqiqadan soʻng qobiq oʻsha seansga qaytadi',
+  'ПК офлайн — ничего не отправлено': 'Kompyuter oflayn — hech narsa yuborilmadi',
+  'Агент на этом ПК не умеет сбрасывать профиль — обновите его':
+    'Bu kompyuterdagi agent profilni tiklay olmaydi — uni yangilang',
+  'Сброс профиля уже идёт или ПК не готов': 'Profil allaqachon tiklanmoqda yoki kompyuter tayyor emas',
+  'Нет ответа от ПК за 30 с': 'Kompyuter 30 soniya ichida javob bermadi',
+  'Точно сбросить? Игра игрока закроется': 'Rostdan tiklansinmi? Oʻyinchining oʻyini yopiladi',
+  'Сбросить профиль игрока (сеанс продолжится)': 'Oʻyinchi profilini tiklash (seans davom etadi)',
+  'Сбросить профиль игрока': 'Oʻyinchi profilini tiklash',
   'ПК стоит на экране входа Windows: после сеанса игрок не вошёл заново. Перезагрузите ПК.':
     'Kompyuter Windows kirish ekranida turibdi: seansdan keyin oʻyinchi qayta kirmadi. Kompyuterni qayta yoqing.',
   'Профиль не удаляется': 'Profil oʻchirilmayapti',
@@ -1855,6 +1865,16 @@ export const EN: Record<string, string> = {
     'Registry, line {n}: write it as HKCU\\Software\\…\\Name = dword:1 or = "text"',
   'Значения реестра': 'Registry values',
   'ПК на экране входа': 'PC on the sign-in screen',
+  'Профиль игрока сбрасывается: игра закроется, через полминуты оболочка вернётся в тот же сеанс':
+    'Resetting the player profile: the game closes, the shell is back in the same session in about half a minute',
+  'ПК офлайн — ничего не отправлено': 'The PC is offline — nothing was sent',
+  'Агент на этом ПК не умеет сбрасывать профиль — обновите его':
+    'The agent on this PC cannot reset the profile — update it',
+  'Сброс профиля уже идёт или ПК не готов': 'A profile reset is already running, or the PC is not ready',
+  'Нет ответа от ПК за 30 с': 'No answer from the PC in 30 s',
+  'Точно сбросить? Игра игрока закроется': 'Reset it? The player’s game will close',
+  'Сбросить профиль игрока (сеанс продолжится)': 'Reset the player profile (the session goes on)',
+  'Сбросить профиль игрока': 'Reset the player profile',
   'ПК стоит на экране входа Windows: после сеанса игрок не вошёл заново. Перезагрузите ПК.':
     'The PC sits on the Windows sign-in screen: the player account did not sign in again after the session. Restart the PC.',
   'Профиль не удаляется': 'Profile not deleted',

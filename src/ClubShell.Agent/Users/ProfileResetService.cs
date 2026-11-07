@@ -2,7 +2,10 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.Versioning;
+using ClubShell.Contracts.Commands;
+using ClubShell.Contracts.Ipc;
 using ClubShell.Contracts.Sessions;
+using ClubShell.Contracts.Users;
 using ClubShell.Core.Abstractions;
 using ClubShell.Agent.Ipc;
 using ClubShell.Agent.Policy;
@@ -32,6 +35,14 @@ public interface IProfileResetTrigger
     /// self-throttled when there is one it cannot pay.
     /// </summary>
     Task ResetIfDirtyAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// «Сбросить профиль игрока на этом ПК» from the cash desk or the Shell's administrator menu (SHELL_CHANGES 76): the
+    /// games are closed, the saves collected, the kiosk signed out and its profile deleted as after a session, and the
+    /// open session goes on in the fresh profile (its time keeps running). Starts and returns at once;
+    /// <paramref name="by"/> goes into the log. Throws <see cref="IpcException"/> <c>conflict</c> when it cannot start.
+    /// </summary>
+    Task<ResetProfileResult> ResetForStaffAsync(string by, CancellationToken cancellationToken);
 }
 
 /// <summary>Control over the interactive Shell process (implemented by the watchdog).</summary>
@@ -112,7 +123,9 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
     private readonly ShellUserContext? _users;
     private readonly OfflineSessionStore? _outbox;
     private readonly AdminMaintenance? _maintenance;
+    private readonly IGameSessionCleanup? _games;
     private readonly SemaphoreSlim _lock = new(1, 1);
+    private int _staffReset;
     private bool? _systemDiskIscsi;
     private bool _busTypeAsked;
     private string? _resetMode;
@@ -142,7 +155,8 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
         ServerPcFlags? flags = null,
         ShellUserContext? users = null,
         OfflineSessionStore? outbox = null,
-        AdminMaintenance? maintenance = null)
+        AdminMaintenance? maintenance = null,
+        IGameSessionCleanup? games = null)
     {
         ArgumentNullException.ThrowIfNull(reset);
         ArgumentNullException.ThrowIfNull(provisioner);
@@ -167,6 +181,7 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
         _users = users;
         _outbox = outbox;
         _maintenance = maintenance;
+        _games = games;
         _lastResetAt = reset.LastReset;
     }
 
@@ -266,8 +281,86 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
         await RequestResetAsync("dirtyProfile", force: true, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Shared body of the triggers; <paramref name="force"/> skips the cooldown for a profile a player has used.</summary>
-    private async Task RequestResetAsync(string reason, bool force, CancellationToken cancellationToken)
+    /// <inheritdoc />
+    public Task<ResetProfileResult> ResetForStaffAsync(string by, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(by);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_provisioner.IsProvisioned)
+        {
+            throw IpcError.Conflict("The player account of this PC is not ready", "kioskNotReady").ToException();
+        }
+
+        if (IsResetting || Interlocked.CompareExchange(ref _staffReset, 1, 0) != 0)
+        {
+            throw IpcError.Conflict("A profile reset is already running", "resetRunning").ToException();
+        }
+
+        Guid? sessionId = _sessions.State.IsOpen() ? _sessions.Current?.Id : null;
+        _logger.LogWarning("Player profile reset requested by {By}; session {SessionId} goes on", by, sessionId);
+        _ = Task.Run(() => ResetForStaffCoreAsync(by));
+        return Task.FromResult(new ResetProfileResult(true, sessionId));
+    }
+
+    private async Task ResetForStaffCoreAsync(string by)
+    {
+        try
+        {
+            User? player = _users?.User;
+            // The games first, then the saves out of the profile (SHELL_CHANGES 23): the detach closes the games itself.
+            if (_saves?.Attached == true)
+            {
+                _saves.BeginRelease(SessionEndReason.Admin, closeGames: true);
+            }
+            else if (_games is not null)
+            {
+                await _games.KillAllAsync(SessionEndReason.Admin, graceful: true, CancellationToken.None).ConfigureAwait(false);
+            }
+
+            if (_saves is not null)
+            {
+                TimeSpan max = TimeSpan.FromSeconds(40 + _settings.CurrentValue.Games.PlayerSaves.DetachTimeoutSec);
+                await _saves.WaitReleasedAsync(max, CancellationToken.None).ConfigureAwait(false);
+            }
+
+            await RequestResetAsync("requested by " + by, force: true, CancellationToken.None, duringSession: true).ConfigureAwait(false);
+
+            if (_sessions.State.IsOpen())
+            {
+                // The player goes on in the fresh profile: it owes a reset again at the session's end.
+                try
+                {
+                    _reset.MarkDirty(_provisioner.UserName);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    _logger.LogWarning(ex, "Profile could not be marked dirty after the reset");
+                }
+            }
+
+            // Back in: the saves of the same player laid out again into the new profile.
+            if (player is not null && _users?.User?.Id == player.Id && WtsSessions.FindByUser(_provisioner.UserName) is not null)
+            {
+                _saves?.SignedIn(player);
+            }
+
+            _logger.LogInformation("Player profile reset requested by {By} finished", by);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger.LogError(ex, "Player profile reset requested by {By} failed", by);
+        }
+        finally
+        {
+            Volatile.Write(ref _staffReset, 0);
+        }
+    }
+
+    /// <summary>
+    /// Shared body of the triggers; <paramref name="force"/> skips the cooldown for a profile a player has used;
+    /// <paramref name="duringSession"/> (a staff reset) runs under an open session.
+    /// </summary>
+    private async Task RequestResetAsync(string reason, bool force, CancellationToken cancellationToken, bool duringSession = false)
     {
         ArgumentNullException.ThrowIfNull(reason);
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -286,7 +379,7 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
                 return;
             }
 
-            if (_sessions.State.IsOpen())
+            if (!duringSession && _sessions.State.IsOpen())
             {
                 _logger.LogWarning("Profile reset ({Reason}) skipped: a session is open", reason);
                 return;
