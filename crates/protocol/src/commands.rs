@@ -2031,8 +2031,8 @@ pub struct RemoteControlStopResult {
 }
 
 /// Result of `ServerCommandType.ResetProfile` and `sys.resetProfile`: the reset started (the Shell
-/// is back in about half a minute). A refusal is an error instead (`conflict` with
-/// `reason``resetRunning` or `kioskNotReady`).
+/// is back in about half a minute). A refusal is an error instead: `conflict` with the reason
+/// `resetRunning` or `kioskNotReady`.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ResetProfileResult {

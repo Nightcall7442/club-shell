@@ -1870,7 +1870,7 @@ export interface RemoteControlStopResult {
 
 /**
  * Result of `ServerCommandType.ResetProfile` and `sys.resetProfile`: the reset started (the Shell is back in about half
- * a minute). A refusal is an error instead (`conflict` with `reason``resetRunning` or `kioskNotReady`).
+ * a minute). A refusal is an error instead: `conflict` with the reason `resetRunning` or `kioskNotReady`.
  */
 export interface ResetProfileResult {
   /** Always `true`. */
