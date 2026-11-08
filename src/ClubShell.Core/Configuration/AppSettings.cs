@@ -322,6 +322,10 @@ public sealed class ShellHostSettings
     [Required]
     public KioskUserSettings KioskUser { get; set; } = new();
 
+    /// <summary>The wait for the games disks before a player is let in (SHELL_CHANGES 86).</summary>
+    [Required]
+    public ReadinessSettings Readiness { get; set; } = new();
+
     /// <summary>WTS enumeration interval.</summary>
     [Range(100, 60000)]
     public int WatchdogIntervalMs { get; set; } = 2000;
@@ -387,13 +391,11 @@ public sealed class KioskUserSettings
     /// <summary>
     /// How the profile is reset after a session (SHELL_CHANGES 78): <c>logoff</c> signs the kiosk out and deletes its
     /// profile; <c>reboot</c> reboots the PC instead, for a PC whose system disk comes back clean at every boot (a diskless
-    /// seat); <c>auto</c> (default) reboots when the system disk is on iSCSI, else signs out.
+    /// seat); <c>auto</c> (default) follows the server's <c>pcs.stateless</c> (heartbeat answer) and, before a server has
+    /// said, reboots when the system disk is on iSCSI, else signs out.
     /// </summary>
     [AllowedValues("auto", "logoff", "reboot")]
     public string ResetMode { get; set; } = "auto";
-
-    /// <summary>Folder copied into a fresh profile, when set.</summary>
-    public string? ProfileTemplate { get; set; }
 
     /// <summary>
     /// Profile-relative directories carried across a profile reset; <see langword="null"/> keeps the built-in
@@ -402,6 +404,23 @@ public sealed class KioskUserSettings
     /// club a stream of false <c>serviceStopped</c> reports.
     /// </summary>
     public string[]? PreserveOnReset { get; set; }
+}
+
+/// <summary>
+/// <c>agent.json → shell.readiness</c> (SHELL_CHANGES 86): where the diskless helper attaches the games disks, the
+/// sign-in screen waits for them (at most <see cref="TimeoutSec"/>), so a player never signs in to an empty library.
+/// </summary>
+public sealed class ReadinessSettings
+{
+    /// <summary>Wait for the disks at all; off lets players in at once, as before.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// Longest wait: from the start of the wait when the helper reports its disks, else from Windows' start (an Agent
+    /// restarted during the day does not wait again).
+    /// </summary>
+    [Range(10, 3600)]
+    public int TimeoutSec { get; set; } = 180;
 }
 
 /// <summary><c>agent.json → shell.kioskUser.folderRedirect</c>.</summary>

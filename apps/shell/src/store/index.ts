@@ -116,6 +116,18 @@ function wireListeners(): void {
       wallet().onUpdated(b);
       auth().setBalance(b.amount);
     }),
+    // SHELL_CHANGES 86: the sign-in screen opens once the games disks are attached, with a fresh game list.
+    events.on('sys.readinessChanged', (r) => {
+      const before = auth().readiness?.state;
+      auth().onReadiness(r);
+      if (r.state === 'ready' && before !== 'ready') {
+        void games().load(true);
+      }
+    }),
+    // A disk that came (or went) later, a game the owner added: the list is re-read quietly, on any screen.
+    events.on('games.changed', () => {
+      void games().load(true);
+    }),
     events.on('saves.status', (e) => {
       const before = games().saves;
       games().onSavesStatus(e);

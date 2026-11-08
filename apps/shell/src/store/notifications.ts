@@ -152,6 +152,10 @@ export function describeError(e: unknown): string {
       return i18n.t(ruleKey);
     }
   }
+  // SHELL_CHANGES 86: the Agent lets nobody in while the games disks are still attaching.
+  if (err.code === 'conflict' && details['reason'] === 'pcNotReady') {
+    return i18n.t('errors.pcNotReady');
+  }
   const key = `errors.${err.code}`;
   return i18n.exists(key) ? i18n.t(key, vars) : i18n.t('errors.generic');
 }

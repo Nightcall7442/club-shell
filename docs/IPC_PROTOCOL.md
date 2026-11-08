@@ -831,6 +831,8 @@ Errors: `rateLimited` (1 per 30 s), `validation`.
 #### `sys.setLocale` (auth: hello) — Request: `{ locale: Locale }` Response: `{ locale: Locale }`. Errors: `validation`. Persists to `shell.json` and to the user profile when logged in.
 #### `sys.unlockAdmin` (auth: hello) — Request: `{ pin: string }` Response: `{ ok: true, adminToken: string, expiresAt: datetime }` — grants the kiosk exit hotkey path (`kiosk_exit`) for 5 min. Errors: `unauthorized`, `rateLimited` (3 attempts/min).
 
+#### `sys.resetProfile` (auth: hello) — Request: `{ adminToken: string }` Response: `{ started: true, sessionId?: uuid }` — «Сбросить профиль игрока» from the administrator menu (SHELL_CHANGES 76; the cash desk sends the same as the server command `resetProfile`): the player's games are closed, the saves collected (`profile.detach`), the kiosk signed out and its profile deleted as after a session, and Winlogon logs it on again; the Shell is closed for it and started again, in the same open session (its time keeps running; the saves of the signed-in player are laid out again). Answers as soon as the reset started. Errors: `unauthorized` (bad token), `conflict` `{ reason: "resetRunning" | "kioskNotReady" }`.
+
 #### `sys.adminExit` (auth: hello) — Request: `{ adminToken: string, minutes?: int }` Response: `{ resumeAt: datetime }` — sent by `kiosk_exit` right before the Shell closes for an administrator (SHELL_CHANGES 33): opens a maintenance window of `minutes` (default 30, 1–480) in which the watchdog does not restart the Shell and does not count the exit as a crash, USB storage works and the process deny-list is not enforced. It ends at `resumeAt`, when the kiosk session signs out, when a player's session starts, when the Shell connects again, or on a `lock` from the cash desk; it survives an Agent restart in the same Windows boot, not a reboot. A second call extends it. Errors: `unauthorized` (token not issued by `sys.unlockAdmin` or expired), `validation` (`minutes`).
 #### `sys.logClientError` (auth: hello) — Request: `{ level: "warn" | "error", message: string, stack?: string, route?: string }` Response: `{ ok: true }`. Rate limited 10/s, silently dropped beyond.
 
@@ -870,6 +872,8 @@ Errors: `rateLimited` (1 per 30 s), `validation`.
 | `shell.command` | `{ command: ShellCommandKind, args: object \| null, commandId: uuid }` | server/admin-driven UI commands (see below) |
 | `auth.expired` | `{ reason: "tokenExpired" \| "revoked" \| "admin" }` | user context invalidated; Shell returns to login |
 | `shop.orderUpdated` | `Order` | order status changed (server push `orderUpdated`, `SERVER_API.md` §6.3); also mirrored as `notification.push` |
+| `sys.readinessChanged` | `PcReadiness { state: "preparing" \| "ready" \| "notReady", disks: [{ library, letter?, state }], deadline? }` | the games disks before sign-in (`docs/DISKLESS.md`, "Games disks before sign-in"); also in the `auth.status` answer (`readiness`, absent from older agents = ready) |
+| `games.changed` | `{ catalogVersion }` | the game list changed (a disk came or went, the catalogue was updated): the Shell re-reads it on any screen |
 | `saves.status` | `{ state: "none" \| "loading" \| "ready" \| "unavailable" \| "tooLarge" }` | the player's saves through the diskless helper (`docs/DISKLESS.md`, "Player saves"); `loading` holds `games.launch`, `unavailable` and `tooLarge` are told to the player once |
 
 `shell.command.args` per command:

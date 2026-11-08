@@ -16,7 +16,7 @@ namespace ClubShell.Agent.Games;
 /// <see cref="GameDetector"/> install results. Snapshots are immutable and swapped atomically.
 /// </summary>
 [SupportedOSPlatform("windows")]
-public sealed class GameLibrary : IDisposable
+public sealed class GameLibrary : IDisposable, Readiness.IReadinessLibrary
 {
     private const string CacheFileName = "games.json";
     private const string EtagFileName = "games.etag";
@@ -57,24 +57,38 @@ public sealed class GameLibrary : IDisposable
     /// <summary>When the catalogue was last fetched from the server.</summary>
     public DateTimeOffset? LastRefreshAt { get; private set; }
 
+    /// <summary><see langword="true"/> once <see cref="LoadAsync"/> finished (whatever it found).</summary>
+    public bool Loaded { get; private set; }
+
     /// <summary>Path of the persisted catalogue.</summary>
     public string CachePath => Path.Combine(_settings.CurrentValue.CacheDir, CacheFileName);
 
     /// <summary>Loads the persisted catalogue, then tries a server refresh (network failure is logged, not thrown).</summary>
     public async Task LoadAsync(CancellationToken cancellationToken)
     {
-        await LoadCacheAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await RefreshAsync(force: false, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is ServerApiException or HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
-        {
-            _logger.LogWarning(ex, "Catalogue refresh failed; serving {Count} cached games (version {Version})", Count, CatalogVersion);
-            if (Count > 0)
+            await LoadCacheAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                await RescanAsync(cancellationToken).ConfigureAwait(false);
+                // 304: the cached catalogue's install marks are the last boot's (SHELL_CHANGES 86) — check them now.
+                if (!await RefreshAsync(force: false, cancellationToken).ConfigureAwait(false) && Count > 0)
+                {
+                    await RescanAsync(cancellationToken).ConfigureAwait(false);
+                }
             }
+            catch (Exception ex) when (ex is ServerApiException or HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "Catalogue refresh failed; serving {Count} cached games (version {Version})", Count, CatalogVersion);
+                if (Count > 0)
+                {
+                    await RescanAsync(cancellationToken).ConfigureAwait(false);
+                }
+            }
+        }
+        finally
+        {
+            Loaded = true;
         }
     }
 

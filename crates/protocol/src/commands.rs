@@ -6,6 +6,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::error::IpcError;
+use crate::events::PcReadiness;
 use crate::games::{App, Game, GamesSort, LauncherType, Resolution, RunningGame};
 use crate::pc::{
     AgentServerConfig, ConnectivityState, HardwareInfo, Pc, PcMetrics, PcStatus, Policy, ShellClub,
@@ -205,6 +206,10 @@ pub struct AuthStatusResponse {
         skip_serializing_if = "Option::is_none"
     )]
     pub expires_at: Option<DateTime<Utc>>,
+    /// Whether the PC may let a player in yet (SHELL_CHANGES 86): the sign-in screen waits for it
+    /// as for this answer. `null` from an Agent that does not know it: ready.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub readiness: Option<PcReadiness>,
 }
 
 /// Request of `booking.cancel`.
@@ -658,6 +663,8 @@ pub mod names {
         pub const UNLOCK_ADMIN: &str = "sys.unlockAdmin";
         /// `SysAdminExitRequest` → `SysAdminExitResponse`.
         pub const ADMIN_EXIT: &str = "sys.adminExit";
+        /// `SysResetProfileRequest` → `ResetProfileResult` (SHELL_CHANGES 76).
+        pub const RESET_PROFILE: &str = "sys.resetProfile";
         /// `SysLogClientErrorRequest` → `OkResponse`.
         pub const LOG_CLIENT_ERROR: &str = "sys.logClientError";
         /// `SysAckAdminMessageRequest` → `OkResponse`.
@@ -720,6 +727,10 @@ pub mod names {
         pub const SHOP_ORDER_UPDATED: &str = "shop.orderUpdated";
         /// Payload `PlayerSavesStatus`.
         pub const SAVES_STATUS: &str = "saves.status";
+        /// Payload `PcReadiness`.
+        pub const SYS_READINESS_CHANGED: &str = "sys.readinessChanged";
+        /// Payload `GamesChanged`.
+        pub const GAMES_CHANGED: &str = "games.changed";
 
         /// All values.
         pub const ALL: &[&str] = &[
@@ -742,6 +753,8 @@ pub mod names {
             AUTH_EXPIRED,
             SHOP_ORDER_UPDATED,
             SAVES_STATUS,
+            SYS_READINESS_CHANGED,
+            GAMES_CHANGED,
         ];
     }
 }
@@ -1206,6 +1219,16 @@ pub struct SysPowerRequest {
     /// Free-text reason.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+}
+
+/// Request of `sys.resetProfile` from the Shell's administrator menu: the player profile of this PC
+/// is reset without ending the session (SHELL_CHANGES 76); requires an unexpired `sys.unlockAdmin`
+/// token.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SysResetProfileRequest {
+    /// Token from `sys.unlockAdmin`.
+    pub admin_token: String,
 }
 
 /// Request of `sys.setLocale`.
@@ -1703,6 +1726,20 @@ pub struct HeartbeatKioskUser {
     /// `AutoLogonCount`: boots left before auto-logon switches itself off; `null` when not set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_logon_count: Option<i32>,
+    /// How the profile is reset after a session on this PC now: `logoff` or `reboot` (SHELL_CHANGES
+    /// 78).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reset_mode: Option<String>,
+    /// The Agent signed the kiosk out and Winlogon did not log it on again, and the one reboot
+    /// allowed for that within 15 minutes was already spent: the PC sits on the Windows sign-in
+    /// screen (SHELL_CHANGES 77).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logon_lost: Option<bool>,
+    /// The kiosk's profile could not be deleted after a session, again after the one reboot for
+    /// that: the next player may get the previous one's settings (SHELL_CHANGES 76). Cleared by the
+    /// first reset that succeeds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_reset_failed: Option<bool>,
 }
 
 /// Response of `POST /agents/{pcId}/heartbeat`.
@@ -1725,6 +1762,12 @@ pub struct HeartbeatResponse {
     /// Server view of the current session for reconciliation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<Session>,
+    /// The owner marked the PC as without persistent storage (`pcs.stateless`): its system disk
+    /// comes back clean at every boot, so with `shell.kioskUser.resetMode``auto` the agent reboots
+    /// it after a session instead of deleting the kiosk's profile (SHELL_CHANGES 78). `null` from
+    /// an older server.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stateless: Option<bool>,
 }
 
 /// Running game summary in a heartbeat.
@@ -1775,6 +1818,10 @@ pub struct HeartbeatRequest {
     /// older agents).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kiosk_user: Option<HeartbeatKioskUser>,
+    /// Whether the PC lets a player in yet (SHELL_CHANGES 86): the cash desk shows "preparing" /
+    /// "not ready" and does not seat anyone on it meanwhile (omitted by older agents).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub readiness: Option<PcReadiness>,
 }
 
 wire_enum! {
@@ -1983,6 +2030,19 @@ pub struct RemoteControlStopResult {
     pub duration_sec: i32,
 }
 
+/// Result of `ServerCommandType.ResetProfile` and `sys.resetProfile`: the reset started (the Shell
+/// is back in about half a minute). A refusal is an error instead: `conflict` with the reason
+/// `resetRunning` or `kioskNotReady`.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetProfileResult {
+    /// Always `true`.
+    pub started: bool,
+    /// The session that goes on in the new profile, if one is open.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<Uuid>,
+}
+
 /// Result of power commands and `sys.reboot`/`sys.shutdown`.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -2097,6 +2157,11 @@ wire_enum! {
         SetVolume = "setVolume",
         /// Re-fetch caches; payload `RefreshConfigCommand`; result `RefreshConfigResult`.
         RefreshConfig = "refreshConfig",
+        /// Reset the player profile of the PC without ending its session (SHELL_CHANGES 76): close
+        /// the games, collect the saves, sign the kiosk out and delete its profile, and back into
+        /// the same session; no payload; result `ResetProfileResult` as soon as it started. An
+        /// agent that predates it answers `notFound`.
+        ResetProfile = "resetProfile",
     }
 }
 
@@ -2544,6 +2609,7 @@ agent_commands! {
     SysSetLocale => names::sys::SET_LOCALE, Hello;
     SysUnlockAdmin => names::sys::UNLOCK_ADMIN, Hello;
     SysAdminExit => names::sys::ADMIN_EXIT, Hello;
+    SysResetProfile => names::sys::RESET_PROFILE, Hello;
     SysLogClientError => names::sys::LOG_CLIENT_ERROR, Hello;
     SysAckAdminMessage => names::sys::ACK_ADMIN_MESSAGE, Hello;
     PolicyGet => names::policy::GET, Hello;
@@ -2914,6 +2980,7 @@ mod tests {
                 "showAds",
                 "setVolume",
                 "refreshConfig",
+                "resetProfile",
             ],
         );
         assert_wire(
@@ -2954,7 +3021,7 @@ mod tests {
 
     #[test]
     fn agent_command_table_matches_ipc_protocol() {
-        assert_eq!(AgentCommand::ALL.len(), 66);
+        assert_eq!(AgentCommand::ALL.len(), 67);
         let expected: &[&str] = &[
             "auth.hello",
             "auth.login",
@@ -3016,6 +3083,7 @@ mod tests {
             "sys.setLocale",
             "sys.unlockAdmin",
             "sys.adminExit",
+            "sys.resetProfile",
             "sys.logClientError",
             "sys.ackAdminMessage",
             "policy.get",
@@ -3056,7 +3124,7 @@ mod tests {
         );
         assert!(AgentCommand::try_from("nope.nope").is_err());
         assert!(!AgentCommand::is_known("Session.Start"));
-        assert_eq!(names::events::ALL.len(), 19);
+        assert_eq!(names::events::ALL.len(), 21);
     }
 
     #[test]
@@ -3144,6 +3212,7 @@ mod tests {
             user: None,
             session: None,
             expires_at: None,
+            readiness: None,
         };
         assert_eq!(
             serde_json::to_string(&status).unwrap(),
@@ -3747,7 +3816,11 @@ mod tests {
                 auto_logon: Some(true),
                 force_auto_logon: Some(true),
                 auto_logon_count: None,
+                reset_mode: None,
+                logon_lost: None,
+                profile_reset_failed: None,
             }),
+            readiness: None,
         };
         let json = serde_json::to_string(&hb).unwrap();
         assert_eq!(

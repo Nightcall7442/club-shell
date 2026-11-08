@@ -7,11 +7,11 @@ use std::sync::Arc;
 
 use clubshell_protocol::commands::{
     names, CallAdminCategory, ClientErrorLevel, OkResponse, PolicyReloadRequest,
-    PolicyReloadResponse, ScheduledResult, SetVolumeRequest, SysAckAdminMessageRequest,
-    SysCallAdminRequest, SysCallAdminResponse, SysHardwareRequest, SysLockScreenRequest,
-    SysLogClientErrorRequest, SysPowerRequest, SysSetLocaleRequest, SysSetLocaleResponse,
-    SysUnlockAdminRequest, SysUnlockAdminResponse, UpdateApplyRequest, UpdateApplyResponse,
-    UpdateCheckResponse, UpdateComponent, VolumeState,
+    PolicyReloadResponse, ResetProfileResult, ScheduledResult, SetVolumeRequest,
+    SysAckAdminMessageRequest, SysCallAdminRequest, SysCallAdminResponse, SysHardwareRequest,
+    SysLockScreenRequest, SysLogClientErrorRequest, SysPowerRequest, SysResetProfileRequest,
+    SysSetLocaleRequest, SysSetLocaleResponse, SysUnlockAdminRequest, SysUnlockAdminResponse,
+    UpdateApplyRequest, UpdateApplyResponse, UpdateCheckResponse, UpdateComponent, VolumeState,
 };
 use clubshell_protocol::pc::{HardwareInfo, PcInfo, PcMetrics, Policy};
 use clubshell_protocol::user::Locale;
@@ -87,6 +87,28 @@ pub async fn sys_reboot(
     let req = validate_power(delay_sec, reason)?;
     tracing::warn!(delay_sec = ?req.delay_sec, reason = ?req.reason, "reboot requested");
     state.agent.request(names::sys::REBOOT, &req).await
+}
+
+/// `sys_reset_profile` → `sys.resetProfile` (SHELL_CHANGES 76): needs the unexpired token from
+/// `sys_unlock_admin`. The Agent closes the games, stops this Shell for the reset and starts it again
+/// in the same session; the answer comes as soon as the reset started.
+#[tauri::command]
+pub async fn sys_reset_profile(
+    state: State<'_, AppState>,
+    admin_token: String,
+) -> CmdResult<ResetProfileResult> {
+    if !state.admin_token_valid(&admin_token) {
+        tracing::warn!("sys_reset_profile rejected: invalid or expired admin token");
+        return Err(ShellError::unauthorized("invalid or expired admin token"));
+    }
+    tracing::warn!("player profile reset requested from the administrator menu");
+    state
+        .agent
+        .request(
+            names::sys::RESET_PROFILE,
+            &SysResetProfileRequest { admin_token },
+        )
+        .await
 }
 
 /// `sys_shutdown` → `sys.shutdown`.

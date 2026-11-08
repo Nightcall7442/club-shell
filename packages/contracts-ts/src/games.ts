@@ -217,6 +217,22 @@ export interface GameMinSpec {
   ramMb: number;
 }
 
+/**
+ * A value the Agent writes into the player's HKCU before every launch of the game (SHELL_CHANGES 82), after the
+ * player's own settings are restored, so the club's value wins: a game that keeps its display mode in the registry
+ * (GoldSrc's `ScreenWindowed`, a crash flag) starts the way the club set it however a previous run left it.
+ */
+export interface GameRegistryValue {
+  /** Key under `HKCU\Software\` (the `HKCU\` prefix optional); never the policy keys. */
+  key: string;
+  /** Value name. */
+  name: string;
+  /** `dword` or `string`. */
+  type: string;
+  /** A number (0..4294967295) for `dword`, a string for `string`. */
+  value: JsonObject;
+}
+
 /** Lifecycle state of a launched game process. */
 export const GameState = {
   /** Launcher invoked; waiting for the game window/process. */
@@ -377,6 +393,10 @@ export interface Game {
    * unavailable here rather than not installed (a PC without the offline games disk, SHELL_CHANGES 74).
    */
   missingDrive?: string | null;
+  /**
+   * Registry values the club sets in the player's HKCU before every launch (SHELL_CHANGES 82); `null` or empty = none.
+   */
+  registryValues?: GameRegistryValue[] | null;
 }
 
 /** Body of `POST /games/{id}/launch-report` (SERVER_API.md §4.6). */

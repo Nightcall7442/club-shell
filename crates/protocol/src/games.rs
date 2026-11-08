@@ -251,6 +251,23 @@ pub struct GameMinSpec {
     pub ram_mb: i32,
 }
 
+/// A value the Agent writes into the player's HKCU before every launch of the game (SHELL_CHANGES
+/// 82), after the player's own settings are restored, so the club's value wins: a game that keeps
+/// its display mode in the registry (GoldSrc's `ScreenWindowed`, a crash flag) starts the way the
+/// club set it however a previous run left it.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct GameRegistryValue {
+    /// Key under `HKCU\Software\` (the `HKCU\` prefix optional); never the policy keys.
+    pub key: String,
+    /// Value name.
+    pub name: String,
+    /// `dword` or `string`.
+    pub r#type: String,
+    /// A number (0..4294967295) for `dword`, a string for `string`.
+    pub value: Value,
+}
+
 wire_enum! {
     /// Lifecycle state of a launched game process.
     GameState {
@@ -432,6 +449,10 @@ pub struct Game {
     /// games disk, SHELL_CHANGES 74).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub missing_drive: Option<String>,
+    /// Registry values the club sets in the player's HKCU before every launch (SHELL_CHANGES 82);
+    /// `null` or empty = none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registry_values: Option<Vec<GameRegistryValue>>,
 }
 
 /// Body of `POST /games/{id}/launch-report` (SERVER_API.md §4.6).
@@ -717,6 +738,7 @@ mod tests {
             version: None,
             settings_paths: None,
             missing_drive: None,
+            registry_values: None,
         };
         let json = serde_json::to_string(&g).unwrap();
         assert_eq!(

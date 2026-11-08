@@ -876,6 +876,7 @@ impl MockTransport {
                 )
             }
             AgentCommand::SysAdminExit => Some(json!({ "resumeAt": in_secs(30 * 60) })),
+            AgentCommand::SysResetProfile => Some(json!({ "started": true })),
             AgentCommand::SysLogClientError => {
                 tracing::warn!(target: "webview", level = %p["level"], message = %p["message"], route = %p["route"], "client error (mock agent)");
                 None

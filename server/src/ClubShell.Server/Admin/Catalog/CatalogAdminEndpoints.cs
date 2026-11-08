@@ -22,7 +22,7 @@ namespace ClubShell.Server.Admin;
 public sealed record AdminGame(
     Guid Id, string Title, string? CoverUrl, bool Installed, string Launcher, IReadOnlyList<string> Category, bool Hidden, bool Featured,
     IReadOnlyList<string> SettingsPaths, string? LauncherAppId = null, string? ExePath = null, string? Args = null, string Description = "",
-    bool Custom = false, string? VideoUrl = null, IReadOnlyList<string>? Zones = null);
+    bool Custom = false, string? VideoUrl = null, IReadOnlyList<string>? Zones = null, IReadOnlyList<GameRegistryValue>? RegistryValues = null);
 
 public sealed record AdminGameList(IReadOnlyList<AdminGame> Items, IReadOnlyList<Guid> Order);
 
@@ -354,7 +354,70 @@ public static partial class CatalogAdminEndpoints
 
         return new GameInput(
             title, launcher, appId, exePath, AdminInput.OptionalText(Blank(r.Args), "args", 500), cover, category,
-            AdminInput.OptionalText(Blank(r.Description), "description", 1000) ?? "", video);
+            AdminInput.OptionalText(Blank(r.Description), "description", 1000) ?? "", video, RegistryValues(r.RegistryValues));
+    }
+
+    /// <summary>Policy keys the kiosk lockdown writes: never a game's to change.</summary>
+    private static readonly string[] PolicyKeys = [@"Software\Policies", @"Software\Microsoft\Windows\CurrentVersion\Policies"];
+
+    /// <summary>
+    /// <c>registryValues</c> of a card (SHELL_CHANGES 82): at most 20, each a key under <c>HKCU\Software</c> (not the
+    /// policy keys) of up to 255 characters, a name of 1–255, <c>dword</c> with a number 0..4294967295 or <c>string</c> with
+    /// up to 1024 characters. Absent = keep the game's; empty = none.
+    /// </summary>
+    private static List<GameRegistryValue>? RegistryValues(RegistryValueBody?[]? raw)
+    {
+        if (raw is null)
+        {
+            return null;
+        }
+
+        if (raw.Length > 20)
+        {
+            throw ApiException.Validation("registryValues", "max");
+        }
+
+        var values = new List<GameRegistryValue>(raw.Length);
+        foreach (var v in raw)
+        {
+            string key = (v?.Key ?? "").Trim().Replace('/', '\\').Trim('\\');
+            foreach (var prefix in new[] { @"HKCU\", @"HKEY_CURRENT_USER\" })
+            {
+                if (key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    key = key[prefix.Length..].TrimStart('\\');
+                }
+            }
+
+            string[] parts = key.Split('\\');
+            if (key.Length > 255 || parts.Length < 2 || !parts[0].Equals("Software", StringComparison.OrdinalIgnoreCase)
+                || parts.Any(p => p.Length == 0 || p is "." or "..")
+                || PolicyKeys.Any(p => key.Equals(p, StringComparison.OrdinalIgnoreCase) || key.StartsWith(p + "\\", StringComparison.OrdinalIgnoreCase)))
+            {
+                throw ApiException.Validation("registryValues", "key");
+            }
+
+            string name = (v!.Name ?? "").Trim();
+            if (name.Length is 0 or > 255)
+            {
+                throw ApiException.Validation("registryValues", "name");
+            }
+
+            var value = v.Value;
+            switch (v.Type)
+            {
+                case "dword" when value.ValueKind == JsonValueKind.Number && value.TryGetUInt32(out _):
+                    break;
+                case "string" when value.ValueKind == JsonValueKind.String && value.GetString()!.Length <= 1024:
+                    break;
+                default:
+                    throw ApiException.Validation("registryValues", "value");
+            }
+
+            values.Add(new GameRegistryValue(@"HKCU\" + key, name, v.Type!, value.Clone()));
+        }
+
+        return values;
     }
 
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
@@ -382,11 +445,13 @@ public static partial class CatalogAdminEndpoints
     /// <summary>The request body as sent; <see cref="Parse"/> checks it.</summary>
     private sealed record GameInputBody(
         string? Title, string? Launcher, string? LauncherAppId, string? ExePath, string? Args, string? CoverUrl, string?[]? Category, string? Description,
-        string? VideoUrl);
+        string? VideoUrl, RegistryValueBody?[]? RegistryValues = null);
+
+    private sealed record RegistryValueBody(string? Key, string? Name, string? Type, JsonElement Value);
 
     private sealed record GameInput(
         string Title, LauncherType Launcher, string? LauncherAppId, string? ExePath, string? Args, string? CoverUrl, List<string> Category, string Description,
-        string? VideoUrl)
+        string? VideoUrl, List<GameRegistryValue>? RegistryValues)
     {
         /// <summary>
         /// <paramref name="game"/> started and shown as this input says. A Steam game without a cover gets its store art; a
@@ -408,6 +473,7 @@ public static partial class CatalogAdminEndpoints
                 VideoUrl = VideoUrl,
                 Category = Category,
                 Description = Description,
+                RegistryValues = RegistryValues ?? game.RegistryValues,
             };
         }
     }
@@ -443,7 +509,10 @@ public static partial class CatalogAdminEndpoints
                     ? [.. category.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!)]
                     : [],
                 hidden, featured, SettingsPaths ?? [], Text("launcherAppId"), Text("exePath"), Text("args"), Text("description") ?? "", Origin == "club",
-                Text("videoUrl"), Zones ?? []);
+                Text("videoUrl"), Zones ?? [],
+                data.TryGetProperty("registryValues", out var values) && values.ValueKind == JsonValueKind.Array
+                    ? [.. values.EnumerateArray().Select(v => JsonDefaults.Deserialize<GameRegistryValue>(v.GetRawText())!)]
+                    : []);
         }
     }
 }

@@ -103,6 +103,61 @@ pub struct GameStateChanged {
     pub error: Option<IpcError>,
 }
 
+/// Payload of `games.changed`: the game list changed (a disk came or went, the catalogue was
+/// updated).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct GamesChanged {
+    /// Catalogue version after the change.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub catalog_version: Option<String>,
+}
+
+/// One games disk in `PcReadiness`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PcReadinessDisk {
+    /// `games`, `solo`, … (the diskless helper's names), or the library root when the helper does
+    /// not report its disks.
+    pub library: String,
+    /// Drive letter, when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub letter: Option<String>,
+    /// `mounted`, `attaching`, `preparing`, or why it is not coming (`failed`, `noServer`,
+    /// `missing`, …).
+    pub state: String,
+}
+
+wire_enum! {
+    /// Whether the PC may let a player in (SHELL_CHANGES 86).
+    PcReadinessState {
+        /// The games disks are still being attached: no sign-in, no session yet.
+        Preparing = "preparing",
+        /// Everything that could be attached is; the game list is fresh. Once ready, a PC stays
+        /// ready until the Agent restarts.
+        Ready = "ready",
+        /// No games disk came up in time: no sign-in; the PC turns ready as soon as one does.
+        NotReady = "notReady",
+    }
+}
+
+/// Payload of `sys.readinessChanged` and `AuthStatusResponse.Readiness`; part of the heartbeat.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PcReadiness {
+    /// Preparing, ready or not ready.
+    pub state: PcReadinessState,
+    /// The games disks and how far each is.
+    pub disks: Vec<PcReadinessDisk>,
+    /// When the wait for the disks gives up (while preparing).
+    #[serde(
+        default,
+        with = "crate::wire::ts_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub deadline: Option<DateTime<Utc>>,
+}
+
 wire_enum! {
     /// Where the signed-in player's game saves are on this PC (SHELL_CHANGES 23).
     PlayerSavesState {
@@ -531,7 +586,7 @@ mod tests {
             serde_json::to_string(&ready).unwrap(),
             r#"{"component":"shell","version":"1.5.0","restartRequired":true,"mandatory":false,"applyAt":"2026-09-21T04:00:00.000Z"}"#
         );
-        assert_eq!(event_names::ALL.len(), 19);
+        assert_eq!(event_names::ALL.len(), 21);
         // SHELL_CHANGES 23: the player's saves.
         let saves = PlayerSavesStatus {
             state: PlayerSavesState::TooLarge,

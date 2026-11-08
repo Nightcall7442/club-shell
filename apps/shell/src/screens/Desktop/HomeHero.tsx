@@ -19,6 +19,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { categoryLabel } from '@/screens/Games/Categories';
 import { launcherLabelKey } from '@/screens/Games/GameCard';
 import { launchGame } from '@/screens/Games/LaunchOverlay';
+import { selectPcReady, useAuthStore } from '@/store/auth';
 import { selectFeaturedGames, selectRecentGames, useGamesStore } from '@/store/games';
 import { useNotificationsStore } from '@/store/notifications';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
@@ -150,6 +151,7 @@ export function HomeHero(): JSX.Element {
   const isRunning = hero !== null && running.some((r) => r.gameId === hero.id);
   const isLaunching = hero !== null && launching?.gameId === hero.id;
   const loading = status === 'loading' && strip.length === 0;
+  const pcReady = useAuthStore(selectPcReady);
   const fade = { duration: animations ? 0.25 : 0 };
 
   // Initial focus for keyboard/gamepad users: Play, unless something else already holds focus.
@@ -230,7 +232,11 @@ export function HomeHero(): JSX.Element {
 
           {!loading && !hero && (
             <div className="flex flex-col items-start gap-4">
-              <p className="text-[length:var(--fs-xl)] font-semibold text-text">{t('games.empty')}</p>
+              {/* SHELL_CHANGES 86: "no games" only for an empty catalogue; games that are there but not installed are
+                  still coming (the disks attaching) or not on this PC. */}
+              <p className="text-[length:var(--fs-xl)] font-semibold text-text">
+                {byId.size === 0 ? t('games.empty') : pcReady ? t('games.noneInstalled') : t('games.disksAttaching')}
+              </p>
               <Button ref={primary} variant="primary" size="lg" icon={<GridIcon />} onClick={() => navigate('/games')}>
                 {t('desktop.allGames')}
               </Button>

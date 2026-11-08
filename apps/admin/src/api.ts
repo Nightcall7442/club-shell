@@ -102,6 +102,8 @@ export interface SeatUser {
   balance: Money;
 }
 
+export type KioskAlert = 'logonLost' | 'profileResetFailed';
+
 export interface Seat {
   pc: {
     id: string;
@@ -113,6 +115,12 @@ export interface Seat {
     agentVersion?: string;
     shellVersion?: string;
   };
+  /**
+   * What went wrong with the PC's player account after a session (SHELL_CHANGES 76–77): `logonLost` — it sits on the
+   * Windows sign-in screen; `profileResetFailed` — the player's profile could not be deleted. null — nothing (absent from
+   * an older server).
+   */
+  kioskAlert?: KioskAlert | null;
   session: Session | null;
   user: SeatUser | null;
   /**
@@ -458,6 +466,9 @@ export interface MoveResponse {
 
 export type PcCommandKind = 'message' | 'lock' | 'unlock' | 'reboot' | 'shutdown';
 
+/** A command of one PC: the bulk ones and `resetProfile` (SHELL_CHANGES 76: never queued for an offline PC; an older agent answers `notFound`). */
+export type OnePcCommandKind = PcCommandKind | 'resetProfile';
+
 /** A PC's answer to a command; `agentOffline` — not connected (queued), `timeout` — no answer in time. */
 export interface CommandAck {
   ok: boolean;
@@ -556,7 +567,7 @@ export const adminApi = {
   /** Gives a walk-in guest's refund back in cash: `amount` must equal what is payable now (beyond the contract). */
   payout: (input: { userId: string; amount: number }, key: string): Promise<PayoutResult> =>
     postMoney('/admin/wallet/payout', { ...input, method: 'cash' }, key),
-  command: (pcId: string, input: { kind: PcCommandKind; text?: string }): Promise<{ ack: CommandAck }> =>
+  command: (pcId: string, input: { kind: OnePcCommandKind; text?: string }): Promise<{ ack: CommandAck }> =>
     post(`/admin/pcs/${pcId}/command`, input),
   /** Name or login substring, any part of the phone digits, or the exact card; under 2 characters — recent clients. */
   lookupClients: (q: string): Promise<{ items: ClientHit[] }> =>
@@ -1074,6 +1085,8 @@ export interface HallPc {
   gamesVolume?: HeartbeatGamesVolume | null;
   /** Marked as without persistent storage: it re-registers at every boot (SHELL_CHANGES 25); absent from an older server. */
   stateless?: boolean;
+  /** As on {@link Seat}: the sign-in screen, or a profile that could not be deleted (SHELL_CHANGES 76–77). */
+  kioskAlert?: KioskAlert | null;
 }
 
 export interface AdminGame {
@@ -1099,6 +1112,16 @@ export interface AdminGame {
   videoUrl?: string | null;
   /** Zones whose PCs offer the game; empty = every zone. */
   zones?: string[];
+  /** Values the agent writes under the player's HKCU before every launch (SHELL_CHANGES 82); absent from an older server. */
+  registryValues?: GameRegistryValue[];
+}
+
+/** One registry value of a game: `key` under `HKCU\Software`, a `dword` (0..4294967295) or a `string`. */
+export interface GameRegistryValue {
+  key: string;
+  name: string;
+  type: 'dword' | 'string';
+  value: number | string;
 }
 
 /** What the owner sets for a game of the club (`POST /admin/games`, `PUT /admin/games/{id}`). */
@@ -1113,6 +1136,8 @@ export interface GameInput {
   description?: string | null;
   /** https only; null — no trailer (a save replaces the game's card, so send the current one to keep it). */
   videoUrl?: string | null;
+  /** Absent — the game keeps its values; empty — none. */
+  registryValues?: GameRegistryValue[];
 }
 
 export interface PriceQuote {

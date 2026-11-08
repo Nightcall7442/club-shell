@@ -212,9 +212,18 @@ pub async fn kiosk_focus_window(
     Ok(front)
 }
 
+/// The program windows open in this session (Z order, front-most first), as owned copies. Blocking: enumerates
+/// every top-level window.
+pub(crate) fn program_windows() -> Vec<WindowDescriptor> {
+    programs(&native::windows(), std::process::id())
+        .into_iter()
+        .cloned()
+        .collect()
+}
+
 /// Restores `hwnd` when minimized and makes it the foreground window; `true` when `pid` owns the
 /// foreground afterwards (it may have activated another of its windows, a dialog say).
-fn bring_to_front(hwnd: isize, pid: u32) -> bool {
+pub(crate) fn bring_to_front(hwnd: isize, pid: u32) -> bool {
     // The Shell owns the foreground right now: let the program activate its own windows too.
     native::allow_set_foreground(pid);
     if native::restore(hwnd) {

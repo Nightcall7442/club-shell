@@ -365,6 +365,8 @@ public sealed class ClubTimeConverter : JsonConverter<TimeOnly>
 [JsonSerializable(typeof(SysUnlockAdminResponse))]
 [JsonSerializable(typeof(SysAdminExitRequest))]
 [JsonSerializable(typeof(SysAdminExitResponse))]
+[JsonSerializable(typeof(SysResetProfileRequest))]
+[JsonSerializable(typeof(ResetProfileResult))]
 [JsonSerializable(typeof(SysLogClientErrorRequest))]
 [JsonSerializable(typeof(SysAckAdminMessageRequest))]
 [JsonSerializable(typeof(PolicySource))]
@@ -395,6 +397,10 @@ public sealed class ClubTimeConverter : JsonConverter<TimeOnly>
 [JsonSerializable(typeof(AuthExpired))]
 [JsonSerializable(typeof(PlayerSavesState))]
 [JsonSerializable(typeof(PlayerSavesStatus))]
+[JsonSerializable(typeof(PcReadinessState))]
+[JsonSerializable(typeof(PcReadinessDisk))]
+[JsonSerializable(typeof(PcReadiness))]
+[JsonSerializable(typeof(GamesChanged))]
 
 // Commands / WS / REST agent surface.
 [JsonSerializable(typeof(UpdateChannel))]
@@ -459,6 +465,7 @@ public sealed class ClubTimeConverter : JsonConverter<TimeOnly>
 [JsonSerializable(typeof(AntiCheatReport))]
 [JsonSerializable(typeof(GameMinSpec))]
 [JsonSerializable(typeof(Game))]
+[JsonSerializable(typeof(GameRegistryValue))]
 [JsonSerializable(typeof(App))]
 [JsonSerializable(typeof(GameState))]
 [JsonSerializable(typeof(Resolution))]

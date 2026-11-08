@@ -4,7 +4,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
-import { clubApi, type AdminGame, type ClubSettings, type GameInput } from '@/api';
+import { clubApi, type AdminGame, type ClubSettings, type GameInput, type GameRegistryValue } from '@/api';
 import { describe } from '@/errors';
 import { t } from '@/i18n';
 import { CheckIcon, ChevronDownIcon, GamepadIcon, SearchIcon } from '@/icons';
@@ -75,6 +75,8 @@ interface GameForm {
   category: string[];
   description: string;
   videoUrl: string;
+  /** Registry values, one per line: `HKCU\Software\…\Name = dword:1` or `… = "text"`. */
+  registry: string;
 }
 
 const EMPTY_FORM: GameForm = {
@@ -87,7 +89,50 @@ const EMPTY_FORM: GameForm = {
   category: [],
   description: '',
   videoUrl: '',
+  registry: '',
 };
+
+const MAX_REGISTRY_VALUES = 20;
+const DWORD_MAX = 4294967295;
+
+/** One line of the registry editor: the value's full path, then `= dword:N` (decimal, or 0x… hex) or `= "text"`. */
+function registryLineOf(v: GameRegistryValue): string {
+  const value = v.type === 'dword' ? `dword:${v.value}` : JSON.stringify(String(v.value));
+  return `${v.key}\\${v.name} = ${value}`;
+}
+
+/** The registry editor's lines as values, or the first wrong line's number. */
+function parseRegistry(text: string): { values: GameRegistryValue[] } | { line: number } {
+  const values: GameRegistryValue[] = [];
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!.trim();
+    if (!line) continue;
+    const m = /^(.+?)\s*=\s*(.+)$/.exec(line);
+    const path = m?.[1]?.trim().replace(/\//g, '\\').replace(/\\+$/, '') ?? '';
+    const cut = path.lastIndexOf('\\');
+    const key = path.slice(0, cut);
+    const name = path.slice(cut + 1).trim();
+    const raw = m?.[2]?.trim() ?? '';
+    if (cut <= 0 || !name || !/^(?:(?:HKCU|HKEY_CURRENT_USER)\\)?Software\\./i.test(key)) return { line: i + 1 };
+    const dword = /^dword:\s*(0x[0-9a-f]{1,8}|\d{1,10})$/i.exec(raw);
+    if (dword) {
+      const n = Number(dword[1]);
+      if (!Number.isInteger(n) || n < 0 || n > DWORD_MAX) return { line: i + 1 };
+      values.push({ key, name, type: 'dword', value: n });
+      continue;
+    }
+    if (!raw.startsWith('"')) return { line: i + 1 };
+    try {
+      const s: unknown = JSON.parse(raw);
+      if (typeof s !== 'string' || s.length > 1024) return { line: i + 1 };
+      values.push({ key, name, type: 'string', value: s });
+    } catch {
+      return { line: i + 1 };
+    }
+  }
+  return values.length > MAX_REGISTRY_VALUES ? { line: MAX_REGISTRY_VALUES + 1 } : { values };
+}
 
 /** A trailer link the server takes (https only); whether it is a playable file shows in the preview. */
 const VIDEO_URL = /^https:\/\/\S+$/i;
@@ -105,6 +150,7 @@ function formOf(g: AdminGame): GameForm {
     category: g.category,
     description: g.description ?? '',
     videoUrl: g.videoUrl ?? '',
+    registry: (g.registryValues ?? []).map(registryLineOf).join('\n'),
   };
 }
 
@@ -133,6 +179,11 @@ function problem(f: GameForm): string | null {
   if (cover && !/^https?:\/\/\S+$/i.test(cover)) return t('Обложка — ссылка на картинку (https://…)');
   const video = f.videoUrl.trim();
   if (video && !VIDEO_URL.test(video)) return t('Ролик — ссылка https://… на файл .mp4 или .webm');
+  const registry = parseRegistry(f.registry);
+  if ('line' in registry)
+    return registry.line > MAX_REGISTRY_VALUES
+      ? t('Значений реестра — не больше {n}', { n: MAX_REGISTRY_VALUES })
+      : t('Реестр, строка {n}: нужен вид HKCU\\Software\\…\\Имя = dword:1 или = "текст"', { n: registry.line });
   return null;
 }
 
@@ -148,6 +199,10 @@ function inputOf(f: GameForm): GameInput {
     category: f.category,
     description: f.description.trim() || null,
     videoUrl: f.videoUrl.trim() || null,
+    registryValues: (() => {
+      const r = parseRegistry(f.registry);
+      return 'values' in r ? r.values : [];
+    })(),
   };
 }
 
@@ -415,6 +470,22 @@ function GameEditor({
               maxLength={1000}
               value={form.description}
               onChange={(e) => set({ description: e.target.value })}
+            />
+          </Field>
+          <Field
+            label={t('Значения реестра')}
+            hint={t(
+              'Необязательно. Агент записывает их игроку перед каждым запуском — например, язык или полноэкранный режим. По одному в строке: HKCU\\Software\\…\\Имя = dword:1 или = "текст".',
+            )}
+            className="lg:col-span-2"
+          >
+            <textarea
+              className={clsx(inputCls, 'h-auto min-h-20 resize-y py-2.5 font-mono text-[13px] leading-relaxed')}
+              spellCheck={false}
+              autoComplete="off"
+              placeholder={'HKCU\\Software\\Valve\\Steam\\Language = "russian"'}
+              value={form.registry}
+              onChange={(e) => set({ registry: e.target.value })}
             />
           </Field>
         </div>

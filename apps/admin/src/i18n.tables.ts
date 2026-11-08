@@ -412,6 +412,7 @@ export const UZ: Record<string, string> = {
   'ПК выключается': 'Kompyuter oʻchirilmoqda',
   'ПК заблокирован': 'Kompyuter bloklandi',
   'ПК занят': 'Kompyuter band',
+  'ПК готовится: диски игр ещё подключаются': 'Kompyuter tayyorlanmoqda: o‘yin disklari hali ulanmoqda',
   'ПК не в сети': 'Kompyuter tarmoqda emas',
   'ПК перезагружается': 'Kompyuter qayta ishga tushmoqda',
   'ПК разблокирован': 'Kompyuter blokdan chiqarildi',
@@ -660,6 +661,30 @@ export const UZ: Record<string, string> = {
   'Необязательно. Прямая ссылка на сам файл: ролик без звука идёт за картинкой игры на ПК. Ссылка на YouTube не подойдёт.':
     'Ixtiyoriy. Faylning oʻziga toʻgʻridan-toʻgʻri havola: rolik kompyuterlarda oʻyin rasmi ortida ovozsiz aylanadi. YouTube havolasi toʻgʻri kelmaydi.',
   'Ролик — ссылка https://… на файл .mp4 или .webm': 'Rolik — .mp4 yoki .webm fayliga https://… havola',
+  'Значений реестра — не больше {n}': 'Reyestr qiymatlari — {n} tadan koʻp emas',
+  'Реестр, строка {n}: нужен вид HKCU\\Software\\…\\Имя = dword:1 или = "текст"':
+    'Reyestr, {n}-qator: HKCU\\Software\\…\\Nom = dword:1 yoki = "matn" koʻrinishi kerak',
+  'Значения реестра': 'Reyestr qiymatlari',
+  'ПК на экране входа': 'Kompyuter kirish ekranida',
+  'Профиль игрока сбрасывается: игра закроется, через полминуты оболочка вернётся в тот же сеанс':
+    'Oʻyinchi profili tiklanmoqda: oʻyin yopiladi, yarim daqiqadan soʻng qobiq oʻsha seansga qaytadi',
+  'ПК офлайн — ничего не отправлено': 'Kompyuter oflayn — hech narsa yuborilmadi',
+  'Агент на этом ПК не умеет сбрасывать профиль — обновите его':
+    'Bu kompyuterdagi agent profilni tiklay olmaydi — uni yangilang',
+  'Сброс профиля уже идёт или ПК не готов': 'Profil allaqachon tiklanmoqda yoki kompyuter tayyor emas',
+  'Нет ответа от ПК за 30 с': 'Kompyuter 30 soniya ichida javob bermadi',
+  'Точно сбросить? Игра игрока закроется': 'Rostdan tiklansinmi? Oʻyinchining oʻyini yopiladi',
+  'Сбросить профиль игрока (сеанс продолжится)': 'Oʻyinchi profilini tiklash (seans davom etadi)',
+  'Сбросить профиль игрока': 'Oʻyinchi profilini tiklash',
+  'ПК стоит на экране входа Windows: после сеанса игрок не вошёл заново. Перезагрузите ПК.':
+    'Kompyuter Windows kirish ekranida turibdi: seansdan keyin oʻyinchi qayta kirmadi. Kompyuterni qayta yoqing.',
+  'Профиль не удаляется': 'Profil oʻchirilmayapti',
+  'Профиль игрока на этом ПК не удаляется: следующий игрок может получить чужие настройки. Перезагрузите ПК.':
+    'Bu kompyuterda oʻyinchi profili oʻchirilmayapti: keyingi oʻyinchi boshqaning sozlamalarini olishi mumkin. Kompyuterni qayta yoqing.',
+  'Необязательно. Агент записывает их игроку перед каждым запуском — например, язык или полноэкранный режим. По одному в строке: HKCU\\Software\\…\\Имя = dword:1 или = "текст".':
+    'Ixtiyoriy. Agent ularni har bir ishga tushirishdan oldin oʻyinchiga yozadi — masalan, til yoki toʻliq ekran rejimi. Har qatorda bittadan: HKCU\\Software\\…\\Nom = dword:1 yoki = "matn".',
+  'Ключ реестра — только под HKCU\\Software и не в разделе Policies':
+    'Reyestr kaliti — faqat HKCU\\Software ostida va Policies boʻlimida emas',
   'Ролик не открывается: нужна прямая ссылка на файл .mp4 или .webm':
     'Rolik ochilmayapti: .mp4 yoki .webm fayliga toʻgʻridan-toʻgʻri havola kerak',
   Ролик: 'Rolik',
@@ -1586,6 +1611,7 @@ export const EN: Record<string, string> = {
   'ПК выключается': 'PC shutting down',
   'ПК заблокирован': 'PC locked',
   'ПК занят': 'PC is busy',
+  'ПК готовится: диски игр ещё подключаются': 'The PC is preparing: its games disks are still attaching',
   'ПК не в сети': 'PC offline',
   'ПК перезагружается': 'PC restarting',
   'ПК разблокирован': 'PC unlocked',
@@ -1834,6 +1860,30 @@ export const EN: Record<string, string> = {
   'Необязательно. Прямая ссылка на сам файл: ролик без звука идёт за картинкой игры на ПК. Ссылка на YouTube не подойдёт.':
     "Optional. A direct link to the file itself: the trailer plays muted behind the game's art on the PCs. A YouTube link will not work.",
   'Ролик — ссылка https://… на файл .mp4 или .webm': 'The trailer is an https://… link to an .mp4 or .webm file',
+  'Значений реестра — не больше {n}': 'No more than {n} registry values',
+  'Реестр, строка {n}: нужен вид HKCU\\Software\\…\\Имя = dword:1 или = "текст"':
+    'Registry, line {n}: write it as HKCU\\Software\\…\\Name = dword:1 or = "text"',
+  'Значения реестра': 'Registry values',
+  'ПК на экране входа': 'PC on the sign-in screen',
+  'Профиль игрока сбрасывается: игра закроется, через полминуты оболочка вернётся в тот же сеанс':
+    'Resetting the player profile: the game closes, the shell is back in the same session in about half a minute',
+  'ПК офлайн — ничего не отправлено': 'The PC is offline — nothing was sent',
+  'Агент на этом ПК не умеет сбрасывать профиль — обновите его':
+    'The agent on this PC cannot reset the profile — update it',
+  'Сброс профиля уже идёт или ПК не готов': 'A profile reset is already running, or the PC is not ready',
+  'Нет ответа от ПК за 30 с': 'No answer from the PC in 30 s',
+  'Точно сбросить? Игра игрока закроется': 'Reset it? The player’s game will close',
+  'Сбросить профиль игрока (сеанс продолжится)': 'Reset the player profile (the session goes on)',
+  'Сбросить профиль игрока': 'Reset the player profile',
+  'ПК стоит на экране входа Windows: после сеанса игрок не вошёл заново. Перезагрузите ПК.':
+    'The PC sits on the Windows sign-in screen: the player account did not sign in again after the session. Restart the PC.',
+  'Профиль не удаляется': 'Profile not deleted',
+  'Профиль игрока на этом ПК не удаляется: следующий игрок может получить чужие настройки. Перезагрузите ПК.':
+    'The player profile on this PC cannot be deleted: the next player may get the previous one’s settings. Restart the PC.',
+  'Необязательно. Агент записывает их игроку перед каждым запуском — например, язык или полноэкранный режим. По одному в строке: HKCU\\Software\\…\\Имя = dword:1 или = "текст".':
+    'Optional. The agent writes them for the player before every launch — the language or full-screen mode, say. One per line: HKCU\\Software\\…\\Name = dword:1 or = "text".',
+  'Ключ реестра — только под HKCU\\Software и не в разделе Policies':
+    'A registry key goes under HKCU\\Software only, outside Policies',
   'Ролик не открывается: нужна прямая ссылка на файл .mp4 или .webm':
     'The trailer does not open: it needs a direct link to an .mp4 or .webm file',
   Ролик: 'Trailer',

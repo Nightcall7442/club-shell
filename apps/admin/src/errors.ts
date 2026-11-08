@@ -22,6 +22,7 @@ const DETAIL_COPY: Record<string, string> = {
   noShift: 'Смена не открыта',
   shiftClosed: 'Смена не открыта — откройте смену, чтобы принимать деньги',
   pcBusy: 'ПК занят',
+  pcNotReady: 'ПК готовится: диски игр ещё подключаются',
   taken: 'Уже занято',
   digits4to8: 'PIN — от 4 до 8 цифр',
   expired: 'Срок действия истёк',
@@ -66,6 +67,7 @@ const VALIDATION_COPY: Record<string, string> = {
   'note:required': 'Для «Другое» напишите комментарий',
   'note:min': 'Комментарий — не короче 3 символов',
   'note:max': 'Комментарий — не длиннее 200 символов',
+  'registryValues:key': 'Ключ реестра — только под HKCU\\Software и не в разделе Policies',
 };
 
 function isMoney(v: unknown): v is Money {

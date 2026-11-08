@@ -231,7 +231,13 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
 
             _games.TryRemove(pid, out _);
             tracked.Record = tracked.Record with { Running = tracked.Record.Running with { Pid = successor } };
-            _logger.LogInformation("{Title}: pid {Pid} exited and handed over to pid {Successor}; following it", tracked.Record.Game.Title, pid, successor);
+            _logger.LogInformation(
+                "{Title}: pid {Pid} exited with code {ExitCode} after {RanSec}s and handed over to pid {Successor}; following it",
+                tracked.Record.Game.Title,
+                pid,
+                exitCode,
+                (int)Math.Max(0, (_clock.UtcNow - tracked.Record.Running.StartedAt).TotalSeconds),
+                successor);
             await PublishAsync(new GameStateChanged(tracked.Record.Game.Id, tracked.Record.Game.Title, GameState.Running, _clock.UtcNow, successor), ct).ConfigureAwait(false);
             pid = successor;
         }

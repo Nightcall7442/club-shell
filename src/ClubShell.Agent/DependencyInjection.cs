@@ -8,6 +8,7 @@ using ClubShell.Agent.Ipc;
 using ClubShell.Agent.Ipc.Handlers;
 using ClubShell.Agent.Policy;
 using ClubShell.Agent.Power;
+using ClubShell.Agent.Readiness;
 using ClubShell.Agent.Remote;
 using ClubShell.Agent.Saves;
 using ClubShell.Agent.Server;
@@ -143,6 +144,9 @@ public static class AgentServiceCollectionExtensions
         services.TryAddSingleton<GameRegistryDefaults>();
         services.TryAddSingleton<GameSessionTracker>();
         services.TryAddSingleton<GameLaunchService>();
+        // The wait for the games disks before a player is let in (SHELL_CHANGES 86).
+        services.TryAddSingleton<IReadinessLibrary>(sp => sp.GetRequiredService<GameLibrary>());
+        services.TryAddSingleton<PcReadinessService>();
 
         services.AddSingleton<IGameLauncher, ExeLauncher>();
         services.AddSingleton<IGameLauncher, SteamLauncher>();
@@ -215,6 +219,7 @@ public static class AgentServiceCollectionExtensions
     {
         services.TryAddSingleton<TempUserProvisioner>();
         services.TryAddSingleton<IKioskCredentials>(sp => sp.GetRequiredService<TempUserProvisioner>());
+        services.TryAddSingleton<ClubShell.Agent.Server.ServerPcFlags>();
         services.TryAddSingleton<KioskLogonGuard>();
         services.TryAddSingleton<ProfileResetService>();
         services.TryAddSingleton<ClubShell.Agent.Users.IProfileResetTrigger>(sp => sp.GetRequiredService<ProfileResetService>());
@@ -345,6 +350,7 @@ public static class AgentServiceCollectionExtensions
         services.AddHostedService(sp => sp.GetRequiredService<AgentUpdater>());
         services.AddHostedService(sp => sp.GetRequiredService<ShellWatchdog>());
         services.AddHostedService<AdminMaintenanceCloser>();
+        services.AddHostedService(sp => sp.GetRequiredService<PcReadinessService>());
         // Pings the diskless helper at start so its version (or its absence) is in the log.
         services.AddHostedService(sp => sp.GetRequiredService<PlayerSavesService>());
         // Caches the catalogue's art after each catalogue change (SHELL_CHANGES 46).

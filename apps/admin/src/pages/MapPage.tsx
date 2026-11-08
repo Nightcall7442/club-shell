@@ -36,6 +36,7 @@ import {
   type CommandAck,
   type GuestDebt,
   type GuestRefund,
+  type KioskAlert,
   type Member,
   type MoveResponse,
   type Overview,
@@ -248,6 +249,18 @@ function settleOf(r: SessionResult, seat: Seat, user: SeatUser): SettleTarget | 
 // Pieces
 // ---------------------------------------------------------------------------------------------------------------------
 
+/** What the agent reports went wrong with the PC's player account (SHELL_CHANGES 76–77), on the card and the tile. */
+const KIOSK_ALERT: Record<KioskAlert, { short: string; text: string }> = {
+  logonLost: {
+    short: 'ПК на экране входа',
+    text: 'ПК стоит на экране входа Windows: после сеанса игрок не вошёл заново. Перезагрузите ПК.',
+  },
+  profileResetFailed: {
+    short: 'Профиль не удаляется',
+    text: 'Профиль игрока на этом ПК не удаляется: следующий игрок может получить чужие настройки. Перезагрузите ПК.',
+  },
+};
+
 function Wrench({ severity, size = 14 }: { severity: 'high' | 'medium'; size?: number }): JSX.Element {
   return (
     <svg
@@ -431,7 +444,7 @@ function SeatTile({
       aria-pressed={checked ?? selected}
       aria-disabled={blocked || undefined}
       data-selected={selected || undefined}
-      title={`${seat.pc.name} · ${t(s.label)}${seat.user ? ` · ${nameOf(seat.user)}` : ''}${waiting ? ` · ${t('ждёт входа')}` : ''}${repair ? ` · ${t('Нужен ремонт')}` : ''}${call ? ` · ${t('Вызов администратора')}` : ''}`}
+      title={`${seat.pc.name} · ${t(s.label)}${seat.user ? ` · ${nameOf(seat.user)}` : ''}${waiting ? ` · ${t('ждёт входа')}` : ''}${repair ? ` · ${t('Нужен ремонт')}` : ''}${call ? ` · ${t('Вызов администратора')}` : ''}${seat.kioskAlert ? ` · ${t(KIOSK_ALERT[seat.kioskAlert].short)}` : ''}`}
       style={style}
       className={clsx(
         'focus-ring hud-focus group relative flex h-28 min-w-0 flex-col justify-between rounded-md border pb-[13px] pl-3.5 pr-3 pt-3 text-left transition-[border-color,box-shadow,opacity] duration-200',
@@ -769,6 +782,24 @@ function ExactSummary({ price, label }: { price: number; label?: string }): JSX.
 }
 
 /** What a PC did with a command, in words: never «done» when it was only queued or did not answer (D-66). */
+/**
+ * «Сбросить профиль игрока» (SHELL_CHANGES 76): what the PC said. Never queued — an offline PC got nothing; an agent that
+ * predates the command answers `notFound`, a refusal rather than "done".
+ */
+function resetNote(ack: CommandAck): NoteState {
+  if (ack.ok)
+    return {
+      text: t('Профиль игрока сбрасывается: игра закроется, через полминуты оболочка вернётся в тот же сеанс'),
+      tone: 'ok',
+    };
+  if (ack.error?.code === 'agentOffline') return { text: t('ПК офлайн — ничего не отправлено'), tone: 'warn' };
+  if (ack.error?.code === 'notFound')
+    return { text: t('Агент на этом ПК не умеет сбрасывать профиль — обновите его'), tone: 'err' };
+  if (ack.error?.code === 'conflict') return { text: t('Сброс профиля уже идёт или ПК не готов'), tone: 'warn' };
+  if (ack.error?.code === 'timeout') return { text: t('Нет ответа от ПК за 30 с'), tone: 'warn' };
+  return ackNote(ack, '');
+}
+
 function ackNote(ack: CommandAck, done: string): NoteState {
   if (ack.ok) return { text: done, tone: 'ok' };
   if (ack.error?.code === 'agentOffline') return { text: t('ПК офлайн — команда в очереди до 10 мин'), tone: 'warn' };
@@ -955,12 +986,23 @@ function TechActions({
   /** The confirm with the seat as it was when it opened: its session is the one that may be ended. */
   const [confirm, setConfirm] = useState<{ kind: 'reboot' | 'shutdown'; seat: Seat } | null>(null);
   const [lost, setLost] = useState<LostCommand | null>(() => lostPower.get(seat.pc.id) ?? null);
+  /** «Сбросить профиль игрока» asks once more: the player's game closes. */
+  const [confirmReset, setConfirmReset] = useState(false);
   const current = useRef(seat.pc.id);
   current.current = seat.pc.id;
   useEffect(() => {
     setConfirm(null);
+    setConfirmReset(false);
     setLost(lostPower.get(seat.pc.id) ?? null);
   }, [seat.pc.id]);
+  const resetProfile = (): void => {
+    if (!confirmReset) {
+      setConfirmReset(true);
+      return;
+    }
+    setConfirmReset(false);
+    void run('resetProfile', async () => resetNote((await adminApi.command(seat.pc.id, { kind: 'resetProfile' })).ack));
+  };
   const command = (kind: 'lock' | 'unlock', done: string): void =>
     void run(kind, async () => ackNote((await adminApi.command(seat.pc.id, { kind })).ack, done));
   /** Sends `input` under `key`: a new command has a new key, a retry the one it first went with. */
@@ -1072,6 +1114,18 @@ function TechActions({
               onClick={() => ask('shutdown')}
             >
               {t('Выключить')}
+            </Button>
+            <Button
+              variant={confirmReset ? 'danger' : 'tertiary'}
+              className={clsx(WRAP, 'col-span-2')}
+              disabled={busy || seat.pc.status === 'offline'}
+              onClick={resetProfile}
+            >
+              {confirmReset
+                ? t('Точно сбросить? Игра игрока закроется')
+                : seat.session
+                  ? t('Сбросить профиль игрока (сеанс продолжится)')
+                  : t('Сбросить профиль игрока')}
             </Button>
           </div>
         </div>
@@ -1606,7 +1660,7 @@ function SeatPanel({
   };
 
   // The player's call heads the card's body: amber, glowing while it rings, with «Иду» / «Закрыть вызов».
-  const banner = call ? (
+  const callBanner = call ? (
     <section
       aria-label={t('Вызов администратора')}
       className={clsx(
@@ -1627,6 +1681,17 @@ function SeatPanel({
       <CallGroupActions group={call} compact />
     </section>
   ) : null;
+  const banner =
+    callBanner || seat.kioskAlert ? (
+      <>
+        {callBanner}
+        {seat.kioskAlert && (
+          <Note tone="warn" role="status">
+            {t(KIOSK_ALERT[seat.kioskAlert].text)}
+          </Note>
+        )}
+      </>
+    ) : null;
 
   return seat.session && seat.user ? (
     <BusySeat

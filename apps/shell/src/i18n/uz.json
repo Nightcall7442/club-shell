@@ -174,7 +174,8 @@
       "tariffTime": "Bu tarif hozir amal qilmaydi: boshqasini tanlang.",
       "pcMaintenance": "Kompyuter taʼmirda: boshqasiga oʻtiring yoki administratorni chaqiring.",
       "blacklisted": "Bu akkaunt uchun kirish yopiq: administratorga murojaat qiling."
-    }
+    },
+    "pcNotReady": "Kompyuter hali tayyorlanmoqda: o‘yin disklari ulanmoqda. Biroz kuting."
   },
   "lock": {
     "title": "Xush kelibsiz",
@@ -255,7 +256,21 @@
     "gpu": "GPU",
     "ram": "RAM",
     "startPlaying": "O‘yinni boshlash",
-    "logoutInstead": "Chiqish"
+    "logoutInstead": "Chiqish",
+    "preparing": {
+      "title": "Kompyuter tayyorlanmoqda…",
+      "hint": "O‘yin disklari ulanmoqda. Hammasi tayyor bo‘lishi bilan kirish ochiladi.",
+      "notReadyTitle": "Kompyuter o‘yinga tayyor emas",
+      "notReadyHint": "O‘yin disklari ulanmadi. Administratorni chaqiring.",
+      "disks": "O‘yin disklari",
+      "games": "Onlayn o‘yinlar",
+      "solo": "Oflayn o‘yinlar",
+      "state": {
+        "ready": "tayyor",
+        "attaching": "ulanmoqda",
+        "unavailable": "mavjud emas"
+      }
+    }
   },
   "desktop": {
     "title": "Bosh sahifa",
@@ -493,7 +508,9 @@
     "selectGame": "O'yinni tanlang",
     "resultsCount": "Ko'rsatilgan: {{count}}",
     "installedFilterOn": "Faqat o'rnatilgan o'yinlar ko'rsatilmoqda",
-    "settingsFollow": "Tugmalar, sezgirlik va grafika sozlamalaringiz shu kompyuterga yuklanadi va oʻyindan keyin saqlanadi"
+    "settingsFollow": "Tugmalar, sezgirlik va grafika sozlamalaringiz shu kompyuterga yuklanadi va oʻyindan keyin saqlanadi",
+    "disksAttaching": "O‘yinlar ulanmoqda…",
+    "noneInstalled": "Bu kompyuterda o‘yinlar mavjud emas. Administratorni chaqiring."
   },
   "apps": {
     "title": "Ilovalar",
@@ -1253,7 +1270,9 @@
     "largeText": "Katta matn",
     "adminPanel": "Administrator paneli",
     "reboot": "Kompyuterni qayta yuklash",
-    "shutdown": "Kompyuterni o'chirish"
+    "shutdown": "Kompyuterni o'chirish",
+    "resetProfile": "Oʻyinchi profilini tiklash",
+    "resetProfileConfirm": "Rostdan tiklansinmi? Oʻyin yopiladi"
   },
   "notifications": {
     "title": "Bildirishnomalar",
@@ -1310,6 +1329,8 @@
     "rebootIn": "{{seconds}} soniyadan keyin qayta yuklanadi",
     "shutdownScheduled": "Bu kompyuter o'chiriladi",
     "shutdownIn": "{{seconds}} soniyadan keyin o'chiriladi",
+    "resetProfileStarted": "Oʻyinchi profili tiklanmoqda",
+    "resetProfileStartedBody": "Oʻyinlar yopilmoqda, yarim daqiqadan soʻng qobiq oʻsha seansga qaytadi",
     "messageFromStaff": "Xodimlar xabari",
     "callAdminTitle": "Administratorni chaqirish",
     "adminOnWay": "Administrator kelmoqda",
