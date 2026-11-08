@@ -382,7 +382,7 @@ export function ShiftChip({ onClick }: { onClick: () => void }): JSX.Element {
       <StatusDot tone={shift ? 'ok' : loaded ? 'danger' : 'muted'} />
       <span className="truncate">{who}</span>
       {shift && (
-        <span aria-hidden="true" className="label-sm hidden min-[1280px]:inline">
+        <span aria-hidden="true" className="label-sm hidden text-text min-[1280px]:inline">
           {t('открыта')}
         </span>
       )}
