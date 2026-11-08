@@ -4,7 +4,7 @@
  * user-scoped slices on logout (listeners stay, the lock screen still needs them); `teardownStores()` removes
  * the listeners and timers (HMR / tests) so a later `bootstrapStores()` starts clean.
  */
-import type { Session } from '@clubshell/contracts';
+import type { PcReadiness, Session } from '@clubshell/contracts';
 import i18n, { initI18n } from '@/i18n';
 import { log } from '@/lib/logger';
 import { api, events, isTauri } from '@/lib/tauri';
@@ -33,6 +33,50 @@ let bootPromise: Promise<void> | null = null;
 let unsubscribes: (() => void)[] = [];
 
 const t = (key: string, vars?: Record<string, unknown>): string => i18n.t(key, vars);
+
+/**
+ * The PC's readiness (SHELL_CHANGES 86), from `sys.readinessChanged` or from {@link startReadinessPoll}: the sign-in
+ * screen opens once the games disks are attached, with a fresh game list.
+ */
+function applyReadiness(r: PcReadiness): void {
+  const before = useAuthStore.getState().readiness?.state;
+  useAuthStore.getState().onReadiness(r);
+  if (r.state === 'ready' && before !== 'ready') {
+    void useGamesStore.getState().load(true);
+  }
+}
+
+/** How often readiness is re-read while the PC is not ready yet. */
+const READINESS_POLL_MS = 5_000;
+
+/**
+ * While the screen says «Подготовка ПК…» or «ПК не готов…», readiness is re-read from `auth.status` every 5 s, so a
+ * lost `sys.readinessChanged` never keeps the PC closed (SHELL_CHANGES 88). Quiet when ready or unknown.
+ */
+function startReadinessPoll(): () => void {
+  let busy = false;
+  const timer = setInterval(() => {
+    const state = useAuthStore.getState().readiness?.state;
+    if (busy || state === undefined || state === 'ready') {
+      return;
+    }
+    busy = true;
+    api.auth
+      .status()
+      .then(
+        (res) => {
+          if (res.readiness) {
+            applyReadiness(res.readiness);
+          }
+        },
+        (e: unknown) => log.debug('readiness poll failed', e),
+      )
+      .finally(() => {
+        busy = false;
+      });
+  }, READINESS_POLL_MS);
+  return () => clearInterval(timer);
+}
 
 function currentRoute(): string {
   return typeof window === 'undefined' ? '' : (window.location.hash.replace(/^#/, '').split('?')[0] ?? '');
@@ -117,13 +161,8 @@ function wireListeners(): void {
       auth().setBalance(b.amount);
     }),
     // SHELL_CHANGES 86: the sign-in screen opens once the games disks are attached, with a fresh game list.
-    events.on('sys.readinessChanged', (r) => {
-      const before = auth().readiness?.state;
-      auth().onReadiness(r);
-      if (r.state === 'ready' && before !== 'ready') {
-        void games().load(true);
-      }
-    }),
+    events.on('sys.readinessChanged', applyReadiness),
+    startReadinessPoll(),
     // A disk that came (or went) later, a game the owner added: the list is re-read quietly, on any screen.
     events.on('games.changed', () => {
       void games().load(true);

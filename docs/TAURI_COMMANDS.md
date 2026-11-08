@@ -269,6 +269,13 @@ Subscribed with `listen<T>(name, handler)` from `@tauri-apps/api/event`. Payload
 
 ### 3.1 `agent://*` — mirror of IPC events (`IPC_PROTOCOL.md` §8)
 
+On the wire the dots of the IPC name are colons: `sys.readinessChanged` travels as `agent://sys:readinessChanged`.
+Tauri 2 takes only letters, digits, `-`, `/`, `:` and `_` in an event name and refuses to emit any other, so with the
+dot no agent event ever reached the webview (SHELL_CHANGES 88). The Rust side maps the name in `agent_event_name`, and
+the webview maps it in `wireEventName` (`apps/shell/src/lib/tauri.ts` `listen`). The table and the webview code use
+the IPC names, and so does the mock bus. While the lock screen shows «Подготовка ПК…» or «ПК не готов…», the webview
+also re-reads `auth.status` every 5 s, so a lost `sys.readinessChanged` never keeps the PC closed.
+
 | Event | Payload |
 |-------|---------|
 | `agent://session.updated` | `Session` |

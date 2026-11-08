@@ -714,7 +714,7 @@ function PreparingCard({ readiness }: { readiness: PcReadiness }): JSX.Element {
                   {diskLabel(d.library, t)}
                   {d.letter && <span className="ml-2 font-mono text-sm text-muted">{d.letter}:</span>}
                 </span>
-                <Badge tone={state === 'ready' ? 'success' : state === 'attaching' ? 'accent' : 'muted'} size="sm">
+                <Badge tone={state === 'ready' ? 'success' : state === 'attaching' ? 'accent' : 'neutral'} size="sm">
                   {t(`lock.preparing.state.${state}`)}
                 </Badge>
               </li>

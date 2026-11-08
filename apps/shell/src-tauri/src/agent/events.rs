@@ -1,6 +1,7 @@
 //! Agent → webview fan-out (`TAURI_COMMANDS.md` §3): every IPC event becomes the Tauri event
-//! `agent://<name>` with the same payload, pipe state changes become `kiosk://connectivity`, and a
-//! few events also update [`AppState`] caches / the kiosk seam before they are forwarded.
+//! `agent://<name>` (the IPC name with `.` → `:`, see [`agent_event_name`]) with the same payload,
+//! pipe state changes become `kiosk://connectivity`, and a few events also update [`AppState`]
+//! caches / the kiosk seam before they are forwarded.
 
 use std::time::{Duration, Instant};
 
@@ -21,9 +22,13 @@ use crate::state::AppState;
 /// Minimum interval between two forwarded `sys.metrics` events.
 pub const METRICS_MIN_INTERVAL: Duration = Duration::from_secs(1);
 
-/// Tauri event name for an IPC event name.
+/// Tauri event name for an IPC event name: `agent://` and the IPC name with `.` → `:`
+/// (`sys.readinessChanged` → `agent://sys:readinessChanged`). Tauri 2 takes only letters, digits,
+/// `-`, `/`, `:` and `_` in an event name and refuses to emit any other, so with the dot no agent
+/// event ever reached the webview (SHELL_CHANGES 88). The webview maps the name the same way
+/// (`wireEventName` in `apps/shell/src/lib/tauri.ts`).
 pub fn agent_event_name(ipc_name: &str) -> String {
-    format!("agent://{ipc_name}")
+    format!("agent://{}", ipc_name.replace('.', ":"))
 }
 
 /// `kiosk://connectivity` event name.
@@ -151,7 +156,7 @@ fn forward(app: &AppHandle, state: &AppState, filter: &mut EventFilter, env: Ipc
         _ => {}
     }
     if let Err(e) = app.emit(&agent_event_name(&env.name), payload) {
-        tracing::warn!(name = %env.name, error = %e, "cannot emit agent event to webview");
+        tracing::error!(name = %env.name, error = %e, "cannot emit agent event to webview");
     }
 }
 
@@ -168,12 +173,33 @@ mod tests {
         assert!(f.allow_metrics());
     }
 
+    /// Tauri 2's own rule for event names (`tauri::event::EventName`, not public): an `emit` with
+    /// any other character fails.
+    fn tauri_accepts(name: &str) -> bool {
+        name.chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '-' | '/' | ':' | '_'))
+    }
+
     #[test]
     fn event_names_are_mirrored() {
         assert_eq!(
             agent_event_name(ev::SESSION_UPDATED),
-            "agent://session.updated"
+            "agent://session:updated"
+        );
+        assert_eq!(
+            agent_event_name(ev::SYS_READINESS_CHANGED),
+            "agent://sys:readinessChanged"
         );
         assert_eq!(ev::ALL.len(), 21);
+    }
+
+    #[test]
+    fn every_forwarded_event_name_is_one_tauri_emits() {
+        for name in ev::ALL {
+            let wire = agent_event_name(name);
+            assert!(tauri_accepts(&wire), "{wire} would be refused by Tauri");
+        }
+        assert!(tauri_accepts(CONNECTIVITY_EVENT));
+        assert!(!tauri_accepts("agent://sys.readinessChanged"));
     }
 }

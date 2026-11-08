@@ -86,6 +86,9 @@ import type {
 } from '@clubshell/contracts';
 import { isErrorCode } from '@clubshell/contracts';
 import { emitMock, registry, subscribeMock } from '@/mocks/handlers';
+import { wireEventName } from './wireEventName';
+
+export { wireEventName };
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Errors
@@ -295,7 +298,7 @@ export function listen<T>(event: string, handler: (payload: T) => void): () => v
   }
   let active = true;
   let unlisten: (() => void) | null = null;
-  tauriListen<T>(event, (e) => {
+  tauriListen<T>(wireEventName(event), (e) => {
     if (active) {
       handler(e.payload);
     }
