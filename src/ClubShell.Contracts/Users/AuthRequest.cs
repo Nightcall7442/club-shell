@@ -90,9 +90,9 @@ public enum AuthExpiredReason
 /// <param name="PcId">PC the login originates from.</param>
 /// <param name="Hwid">Hardware id of the PC (sha256 hex).</param>
 /// <param name="EndElsewhere">
-/// The player confirmed «end my session on the other PC and sign in here»: the server ends (settles) the player's open
-/// session on another PC first, but only when nobody is signed in there with this account (no live user token on that
-/// PC); otherwise the sign-in is refused as without it (<c>409 activeSessionElsewhere</c>).
+/// The player confirmed «end my session on the other PC and sign in here» after <c>409 activeSessionElsewhere</c>: the
+/// server ends (settles) the player's open session on the other PC like a sign-out there, signs that PC out
+/// (<c>userRevoked {reason: signedInElsewhere}</c>), then signs in here. Without it the sign-in is refused as before.
 /// </param>
 public sealed record AuthRequest(
     AuthKind Kind,

@@ -110,10 +110,10 @@ pub struct AuthRequest {
     pub pc_id: Uuid,
     /// Hardware id of the PC (sha256 hex).
     pub hwid: String,
-    /// The player confirmed «end my session on the other PC and sign in here»: the server ends
-    /// (settles) the player's open session on another PC first, but only when nobody is signed in
-    /// there with this account (no live user token on that PC); otherwise the sign-in is refused as
-    /// without it (`409 activeSessionElsewhere`).
+    /// The player confirmed «end my session on the other PC and sign in here» after `409
+    /// activeSessionElsewhere`: the server ends (settles) the player's open session on the other PC
+    /// like a sign-out there, signs that PC out (`userRevoked {reason: signedInElsewhere}`), then
+    /// signs in here. Without it the sign-in is refused as before.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_elsewhere: Option<bool>,
 }
@@ -372,7 +372,7 @@ pub struct Notification {
 
 /// Body of `POST /users/{userId}/pin/verify`: checks the player's unlock PIN against the one stored
 /// on the server (so a PIN set on one PC unlocks on any). `204` = matches; `401 badSecret` = does
-/// not, or none is set (`404 notFound` with `reason: noPin` when none is set). Counted by the same
+/// not match; `404 notFound` with `reason: noPin` = none is set. Failures count toward the same
 /// lockout as sign-in.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
