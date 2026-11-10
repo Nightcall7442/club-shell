@@ -47,6 +47,9 @@ public static class Endpoints
     /// <summary><c>GET /sessions/current</c> (add <c>?pcId=</c>).</summary>
     public const string SessionsCurrent = "sessions/current";
 
+    /// <summary><c>POST /sessions/quote</c>.</summary>
+    public const string SessionsQuote = "sessions/quote";
+
     /// <summary><c>GET /games</c>.</summary>
     public const string Games = "games";
 
@@ -121,6 +124,9 @@ public static class Endpoints
 
     /// <summary><c>GET /users/{userId}/loyalty</c>.</summary>
     public static string UserLoyalty(Guid userId) => $"users/{Id(userId)}/loyalty";
+
+    /// <summary><c>POST /users/{userId}/pin/verify</c>.</summary>
+    public static string UserPinVerify(Guid userId) => $"users/{Id(userId)}/pin/verify";
 
     /// <summary><c>POST /sessions/{id}/pause</c>.</summary>
     public static string SessionPause(Guid sessionId) => $"sessions/{Id(sessionId)}/pause";

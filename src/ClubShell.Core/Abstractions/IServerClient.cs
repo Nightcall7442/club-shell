@@ -98,6 +98,28 @@ public sealed class ServerApiException : Exception
     }
 }
 
+/// <summary>
+/// Raised by <see cref="IServerClient.UserTokenRejected"/>: a call made with the player's token (<c>X-User-Token</c>) was
+/// refused with <c>401 userToken</c>, because the token expired, was revoked or belongs to another PC.
+/// </summary>
+public sealed class UserTokenRejectedEventArgs : EventArgs
+{
+    /// <summary>Creates the arguments.</summary>
+    /// <param name="userId">Player whose token was sent; <see langword="null"/> when none was held.</param>
+    /// <param name="problem">The server's <c>details.problem</c> (<c>expired</c>, <c>revoked</c>, <c>invalid</c>, <c>boundElsewhere</c>), when sent.</param>
+    public UserTokenRejectedEventArgs(Guid? userId, string? problem)
+    {
+        UserId = userId;
+        Problem = problem;
+    }
+
+    /// <summary>Player whose token was sent; <see langword="null"/> when none was held.</summary>
+    public Guid? UserId { get; }
+
+    /// <summary>The server's <c>details.problem</c>, when sent.</summary>
+    public string? Problem { get; }
+}
+
 /// <summary>Result of a conditional (<c>If-None-Match</c>) GET.</summary>
 /// <typeparam name="T">Body type.</typeparam>
 /// <param name="Value">Fresh body; <see langword="null"/> when <paramref name="NotModified"/>.</param>
@@ -179,6 +201,12 @@ public interface IAuthApi
 
     /// <summary><c>GET /users/{userId}/loyalty</c>.</summary>
     Task<Loyalty> GetUserLoyaltyAsync(Guid userId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// <c>POST /users/{userId}/pin/verify</c>: completes on <c>204</c> (the PIN matches); <c>401 badSecret</c> (it does not)
+    /// and <c>404 notFound {reason: noPin}</c> (none is set) are thrown as <see cref="ServerApiException"/>.
+    /// </summary>
+    Task VerifyPinAsync(Guid userId, PinVerifyRequest request, CancellationToken cancellationToken);
 }
 
 /// <summary>Sessions (SERVER_API.md §4.5).</summary>
@@ -204,6 +232,9 @@ public interface ISessionApi
 
     /// <summary><c>POST /sessions/{id}/events</c> (idempotent, ≤ 100 events).</summary>
     Task PostSessionEventsAsync(Guid sessionId, SessionEventsBatch batch, Guid idempotencyKey, CancellationToken cancellationToken);
+
+    /// <summary><c>POST /sessions/quote</c>: the server's price for a session on a PC for a player; nothing is created or charged.</summary>
+    Task<SessionQuote> QuoteSessionAsync(SessionQuoteRequest request, CancellationToken cancellationToken);
 }
 
 /// <summary>Games catalogue, account pool, launch reports and apps (SERVER_API.md §4.6–4.7).</summary>
@@ -357,4 +388,10 @@ public interface IServerClient : IAgentApi, IAuthApi, ISessionApi, IGamesApi, IW
 
     /// <summary>Value of <c>Accept-Language</c> (<c>ru</c>, <c>uz</c>, <c>en</c>) for localized catalogue fields; <see langword="null"/> = not sent.</summary>
     string? AcceptLanguage { get; set; }
+
+    /// <summary>
+    /// A call made with the player's token was refused with <c>401 userToken</c> (raised on the caller's flow, before the
+    /// exception reaches the caller). The Agent locks an open session and asks the player to sign in again.
+    /// </summary>
+    event EventHandler<UserTokenRejectedEventArgs>? UserTokenRejected;
 }

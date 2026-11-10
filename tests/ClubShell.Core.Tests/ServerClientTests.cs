@@ -72,6 +72,8 @@ public sealed class ServerClientTests : IDisposable
         { Endpoints.AuthLogout, "auth/logout" },
         { Endpoints.Sessions, "sessions" },
         { Endpoints.SessionsCurrent, "sessions/current" },
+        { Endpoints.SessionsQuote, "sessions/quote" },
+        { Endpoints.UserPinVerify(UserId), "users/3f9a1d2e-6c4b-4f5a-9a1b-2c3d4e5f6a7b/pin/verify" },
         { Endpoints.Games, "games" },
         { Endpoints.Apps, "apps" },
         { Endpoints.Tariffs, "tariffs" },
@@ -408,6 +410,80 @@ public sealed class ServerClientTests : IDisposable
         error.IsAuthFailure.Should().BeTrue();
         _handler.Requests.Should().ContainSingle().Which.Header("X-User-Token").Should().Be("user-access");
         _tokens.Agent!.AccessToken.Should().Be("access-1");
+    }
+
+    [Fact]
+    public async Task User_token_rejection_raises_UserTokenRejected_with_the_player_and_the_problem()
+    {
+        await RegisterAsync();
+        await _tokens.SetUserAsync(new UserTokens(UserId, "user-access", "user-refresh", _clock.UtcNow.AddHours(1)), CancellationToken.None);
+        using var document = System.Text.Json.JsonDocument.Parse("""{ "reason": "userToken", "problem": "expired" }""");
+        var details = document.RootElement.Clone();
+        _handler.Responder = _ => Json(HttpStatusCode.Unauthorized, JsonDefaults.Serialize(new ServerErrorEnvelope(new ServerError(ErrorCode.Unauthorized, "expired", details, "t-u"))));
+        UserTokenRejectedEventArgs? raised = null;
+        _client.UserTokenRejected += (_, e) => raised = e;
+
+        Func<Task> act = () => _client.ExtendSessionAsync(SessionId, new SessionExtendRequest(30), IdempotencyKey, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<ServerApiException>()).Which.Reason.Should().Be("userToken");
+        raised.Should().NotBeNull();
+        raised!.UserId.Should().Be(UserId);
+        raised.Problem.Should().Be("expired");
+    }
+
+    [Fact]
+    public async Task Bad_credentials_at_sign_in_are_neither_refreshed_nor_retried()
+    {
+        await RegisterAsync();
+        _handler.Responder = _ => Json(HttpStatusCode.Unauthorized, ErrorBody(ErrorCode.Unauthorized, "Wrong credentials", "badCredentials", "t-bad"));
+        var raised = false;
+        _client.UserTokenRejected += (_, _) => raised = true;
+
+        Func<Task> act = () => _client.LoginAsync(new Contracts.Users.AuthRequest(Contracts.Users.AuthKind.Password, "ab", "pw", null, null, null, PcId, "hw"), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<ServerApiException>()).Which.Reason.Should().Be("badCredentials");
+        _handler.Requests.Should().ContainSingle("a refresh and a retry would count the wrong password twice toward the lockout");
+        raised.Should().BeFalse("only a refused player token is reported");
+    }
+
+    [Fact]
+    public async Task Pin_verify_posts_the_pin_with_the_player_token_and_a_wrong_pin_is_not_retried()
+    {
+        await RegisterAsync();
+        await _tokens.SetUserAsync(new UserTokens(UserId, "user-access", "user-refresh", _clock.UtcNow.AddHours(1)), CancellationToken.None);
+        _handler.Responder = _ => new HttpResponseMessage(HttpStatusCode.NoContent);
+
+        await _client.VerifyPinAsync(UserId, new Contracts.Users.PinVerifyRequest("1234"), CancellationToken.None);
+
+        var request = _handler.Requests.Should().ContainSingle().Subject;
+        request.Method.Should().Be(HttpMethod.Post);
+        request.Uri.PathAndQuery.Should().Be("/api/v1/users/" + UserId.ToString("D") + "/pin/verify");
+        request.Header("X-User-Token").Should().Be("user-access");
+        JsonDefaults.Deserialize<Contracts.Users.PinVerifyRequest>(request.Body!)!.Pin.Should().Be("1234");
+
+        _handler.Responder = _ => Json(HttpStatusCode.Unauthorized, ErrorBody(ErrorCode.Unauthorized, "Wrong PIN", "badSecret", "t-pin"));
+        Func<Task> wrong = () => _client.VerifyPinAsync(UserId, new Contracts.Users.PinVerifyRequest("9999"), CancellationToken.None);
+
+        (await wrong.Should().ThrowAsync<ServerApiException>()).Which.Reason.Should().Be("badSecret");
+        _handler.Requests.Should().HaveCount(2, "a wrong PIN is not answered with a token refresh and a second try");
+    }
+
+    [Fact]
+    public async Task Quote_posts_the_pc_player_and_tariff_and_reads_the_price()
+    {
+        await RegisterAsync();
+        await _tokens.SetUserAsync(new UserTokens(UserId, "user-access", "user-refresh", _clock.UtcNow.AddHours(1)), CancellationToken.None);
+        var quote = new SessionQuote(60, Money.Uzs(10_000), Money.Uzs(9_000), 100, 10, "group", false);
+        _handler.Responder = _ => Ok(quote);
+        var request = new SessionQuoteRequest(PcId, UserId, TariffId, 60);
+
+        var answer = await _client.QuoteSessionAsync(request, CancellationToken.None);
+
+        answer.Should().Be(quote);
+        var sent = _handler.Requests.Should().ContainSingle().Subject;
+        sent.Uri.PathAndQuery.Should().Be("/api/v1/sessions/quote");
+        sent.Header("X-User-Token").Should().Be("user-access");
+        JsonDefaults.Deserialize<SessionQuoteRequest>(sent.Body!).Should().Be(request);
     }
 
     [Fact]
