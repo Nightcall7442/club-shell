@@ -7,14 +7,14 @@ use chrono::{DateTime, Duration, NaiveDate, Utc};
 use clubshell_protocol::commands::{
     names, BookingCancelRequest, BookingReserveRequest, BookingSeatsRequest, BookingSeatsResponse,
     ProfileAchievementsResponse, SessionEndRequest, SessionExtendRequest, SessionLockRequest,
-    SessionPauseRequest, SessionStartRequest, SessionTimeLeftResponse, SessionUnlockRequest,
-    TournamentsJoinRequest, TournamentsLeaderboardRequest, TournamentsLeaderboardResponse,
-    TournamentsListRequest, TournamentsListResponse,
+    SessionPauseRequest, SessionQuoteIpcRequest, SessionStartRequest, SessionTimeLeftResponse,
+    SessionUnlockRequest, TournamentsJoinRequest, TournamentsLeaderboardRequest,
+    TournamentsLeaderboardResponse, TournamentsListRequest, TournamentsListResponse,
 };
 use clubshell_protocol::games::{
     PlayerSettingsItem, PlayerSettingsListResponse, PlayerSettingsResetRequest,
 };
-use clubshell_protocol::session::{Session, SessionEndReason, SessionEndResult};
+use clubshell_protocol::session::{Session, SessionEndReason, SessionEndResult, SessionQuote};
 use clubshell_protocol::user::{
     Achievement, Booking, Loyalty, ProfileUpdateRequest, Tournament, User, UserStats,
 };
@@ -166,6 +166,26 @@ pub async fn session_unlock(
 #[tauri::command]
 pub async fn session_time_left(state: State<'_, AppState>) -> CmdResult<SessionTimeLeftResponse> {
     state.agent.request(names::session::TIME_LEFT, &()).await
+}
+
+/// `session_quote` → `session.quote`: what starting (or extending with) `tariffId` for `minutes`
+/// (`null` = one hour, or the package) costs the signed-in player on this PC, with the club's day
+/// rate and the player's discount. Nothing is created or charged; offline the Agent answers
+/// `409 offlineUnavailable` and the UI shows the list price as approximate.
+#[tauri::command]
+pub async fn session_quote(
+    state: State<'_, AppState>,
+    req: SessionQuoteIpcRequest,
+) -> CmdResult<SessionQuote> {
+    validate_quote(&req)?;
+    state.agent.request(names::session::QUOTE, &req).await
+}
+
+fn validate_quote(req: &SessionQuoteIpcRequest) -> CmdResult<()> {
+    if req.tariff_id.is_nil() {
+        return Err(ShellError::validation("tariffId", "required"));
+    }
+    validate::optional_range("minutes", req.minutes, 1, MAX_MINUTES)
 }
 
 fn validate_unlock(
@@ -442,6 +462,27 @@ mod tests {
             validate_unlock(Some(String::new()), None).is_err(),
             "empty password counts as absent"
         );
+    }
+
+    #[test]
+    fn quote_needs_a_tariff_and_sane_minutes() {
+        let quote =
+            |tariff_id: Uuid, minutes: Option<i32>| SessionQuoteIpcRequest { tariff_id, minutes };
+        let tariff = Uuid::from_u128(7);
+        assert!(
+            validate_quote(&quote(tariff, None)).is_ok(),
+            "an hour, or the package"
+        );
+        assert!(validate_quote(&quote(tariff, Some(30))).is_ok());
+        assert!(validate_quote(&quote(Uuid::nil(), Some(30))).is_err());
+        assert!(validate_quote(&quote(tariff, Some(0))).is_err());
+        assert!(validate_quote(&quote(tariff, Some(MAX_MINUTES + 1))).is_err());
+        // The frontend's `{ req: { tariffId, minutes } }` maps onto the IPC request as is.
+        let req: SessionQuoteIpcRequest = serde_json::from_value(
+            serde_json::json!({ "tariffId": tariff.to_string(), "minutes": 30 }),
+        )
+        .unwrap();
+        assert_eq!(req, quote(tariff, Some(30)));
     }
 
     #[test]

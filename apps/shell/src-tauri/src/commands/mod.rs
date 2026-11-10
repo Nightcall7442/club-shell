@@ -52,6 +52,7 @@ pub const COMMAND_NAMES: &[&str] = &[
     "session_lock",
     "session_unlock",
     "session_time_left",
+    "session_quote",
     "games_list",
     "games_get",
     "games_launch",
@@ -135,6 +136,7 @@ macro_rules! invoke_handler {
             crate::commands::session::session_lock,
             crate::commands::session::session_unlock,
             crate::commands::session::session_time_left,
+            crate::commands::session::session_quote,
             crate::commands::games::games_list,
             crate::commands::games::games_get,
             crate::commands::games::games_launch,
@@ -314,7 +316,7 @@ mod tests {
         let handler: Box<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync> =
             Box::new(invoke_handler!());
         drop(handler);
-        assert_eq!(COMMAND_NAMES.len(), 67);
+        assert_eq!(COMMAND_NAMES.len(), 68);
         let mut sorted = COMMAND_NAMES.to_vec();
         sorted.sort_unstable();
         sorted.dedup();
