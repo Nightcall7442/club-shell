@@ -23,6 +23,7 @@ using ClubShell.Contracts.Serialization;
 using ClubShell.Contracts.Sessions;
 using ClubShell.Contracts.Shop;
 using ClubShell.Contracts.Users;
+using ClubShell.Contracts.Wallet;
 using ClubShell.Core.Abstractions;
 using ClubShell.Core.Configuration;
 using Microsoft.Extensions.Options;
@@ -244,7 +245,7 @@ public sealed class IpcEventBridge :
         switch (kind)
         {
             case WsPushKind.WalletUpdated:
-                await PublishRawAsync(IpcMessages.Events.WalletUpdated, payload, cancellationToken).ConfigureAwait(false);
+                await OnWalletUpdatedAsync(payload, cancellationToken).ConfigureAwait(false);
                 break;
             case WsPushKind.ChatMessage:
                 await PublishRawAsync(IpcMessages.Events.ChatMessage, payload, cancellationToken).ConfigureAwait(false);
@@ -288,12 +289,21 @@ public sealed class IpcEventBridge :
 
                 break;
             case WsPushKind.UserRevoked:
-                if (Decode<UserRevokedPush>(payload) is { } revoked && _users.User is { } user && user.Id == revoked.UserId)
+                if (Decode<UserRevokedPush>(payload) is not { } revoked)
                 {
+                    break;
+                }
+
+                if (_services.GetService<SignInGuard>() is { } guard)
+                {
+                    await guard.HandleRevokedAsync(revoked, cancellationToken).ConfigureAwait(false);
+                }
+                else if (_users.User is { } user && user.Id == revoked.UserId)
+                {
+                    // Hosts without the guard (tests): sign out with the server's reason.
                     _logger.LogWarning("User {UserId} revoked by the server: {Reason}", revoked.UserId, revoked.Reason);
-                    await EndSessionOfRevokedUserAsync(user.Id, cancellationToken).ConfigureAwait(false);
                     _users.Clear();
-                    await PublishAsync(IpcMessages.Events.AuthExpired, new AuthExpired(AuthExpiredReason.Revoked), cancellationToken).ConfigureAwait(false);
+                    await PublishAsync(IpcMessages.Events.AuthExpired, new AuthExpired(SignInGuard.MapRevokedReason(revoked.Reason)), cancellationToken).ConfigureAwait(false);
                 }
 
                 break;
@@ -322,24 +332,55 @@ public sealed class IpcEventBridge :
         }
     }
 
+    /// <summary>
+    /// Re-sends the current server connectivity (<c>sys.connectivity</c>) after a Shell completed <c>auth.hello</c>: a
+    /// Shell that starts or reconnects assumes it is online until told otherwise, and a transition published while no
+    /// Shell was connected is lost.
+    /// </summary>
+    public ValueTask PublishCurrentConnectivityAsync(CancellationToken cancellationToken)
+    {
+        int queued = _services.GetService<IOfflineQueueDepth>()?.Count ?? LastConnectivity?.QueuedEvents ?? 0;
+        ConnectivityEvent current = _services.GetService<IServerLinkState>() is { } link
+            ? new ConnectivityEvent(link.Connectivity, link.ConnectivitySince, queued)
+            : LastConnectivity ?? new ConnectivityEvent(ConnectivityState.Offline, _clock.UtcNow, queued);
+        Volatile.Write(ref _lastConnectivity, current);
+        return PublishAsync(IpcMessages.Events.SysConnectivity, current, cancellationToken);
+    }
+
     private static string ShortId(Guid id) => id.ToString("N")[..8];
 
-    /// <summary>SERVER_API.md §6.3 <c>userRevoked</c>: the open session of the revoked user is ended (<see cref="SessionEndReason.Admin"/>) before the user context is dropped.</summary>
-    private async ValueTask EndSessionOfRevokedUserAsync(Guid userId, CancellationToken cancellationToken)
+    /// <summary>
+    /// SERVER_API.md §6.3 <c>walletUpdated</c>: only the signed-in player's balance is taken (a push for another player,
+    /// e.g. one who left, is dropped): the user snapshot and the offline cache follow it, then the Shell gets
+    /// <c>wallet.updated</c>.
+    /// </summary>
+    private async ValueTask OnWalletUpdatedAsync(JsonElement? payload, CancellationToken cancellationToken)
     {
-        if (_services.GetService<ISessionService>() is not { } sessions || !sessions.State.IsOpen() || sessions.Current?.UserId != userId)
+        if (Decode<Balance>(payload) is not { } balance)
         {
+            _logger.LogWarning("walletUpdated push without a balance; ignored");
             return;
         }
 
-        try
+        if (!_users.UpdateBalance(balance))
         {
-            await sessions.EndAsync(SessionEndReason.Admin, cancellationToken).ConfigureAwait(false);
+            _logger.LogDebug("walletUpdated for {UserId} ignored: not the signed-in player", balance.UserId);
+            return;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+
+        if (_services.GetService<OfflineSessionStore>() is { } store)
         {
-            _logger.LogWarning(ex, "Session of revoked user {UserId} could not be ended", userId);
+            try
+            {
+                await store.UpdateCachedBalanceAsync(balance.UserId, balance.Amount, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogDebug(ex, "Cached balance of {UserId} not updated", balance.UserId);
+            }
         }
+
+        await PublishRawAsync(IpcMessages.Events.WalletUpdated, payload, cancellationToken).ConfigureAwait(false);
     }
 
     private ValueTask PublishRawAsync(string eventName, JsonElement? payload, CancellationToken cancellationToken)
@@ -890,6 +931,11 @@ public sealed class PipeServer : BackgroundService
                 // §3: mismatch → response flushed, then the connection is closed.
                 connection.CloseReason = "auth.hello rejected: " + response.Error.Code;
                 connection.Outbound.Writer.TryComplete();
+            }
+            else if (string.Equals(request.Name, IpcMessages.Auth.Hello, StringComparison.Ordinal) && !response.IsError)
+            {
+                // After the answer is queued, so the Shell has its hello before the state it then shows.
+                await _bridge.PublishCurrentConnectivityAsync(token).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)

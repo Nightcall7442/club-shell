@@ -11,6 +11,7 @@ using ClubShell.Agent.Watchdog;
 using ClubShell.Contracts.Commands;
 using ClubShell.Contracts.Ipc;
 using ClubShell.Contracts.Pcs;
+using ClubShell.Contracts.Sessions;
 using ClubShell.Contracts.Users;
 using ClubShell.Core.Abstractions;
 using ClubShell.Core.Configuration;
@@ -91,6 +92,8 @@ public sealed class AgentWorker : BackgroundService
     private readonly IClock _clock;
     private readonly SettingsLoader _settingsLoader;
     private readonly ILogger<AgentWorker> _logger;
+    private readonly SignInGuard? _signIn;
+    private readonly SignedInUserStore? _signedIn;
 
     private volatile bool _ready;
     private Guid _persistedPcId;
@@ -116,7 +119,9 @@ public sealed class AgentWorker : BackgroundService
         IIpcEventPublisher publisher,
         IClock clock,
         SettingsLoader settingsLoader,
-        ILogger<AgentWorker> logger)
+        ILogger<AgentWorker> logger,
+        SignInGuard? signIn = null,
+        SignedInUserStore? signedIn = null)
     {
         ArgumentNullException.ThrowIfNull(hwid);
         ArgumentNullException.ThrowIfNull(provisioner);
@@ -159,6 +164,8 @@ public sealed class AgentWorker : BackgroundService
         _clock = clock;
         _settingsLoader = settingsLoader;
         _logger = logger;
+        _signIn = signIn;
+        _signedIn = signedIn;
     }
 
     /// <summary><see langword="true"/> once the startup sequence completed.</summary>
@@ -268,6 +275,19 @@ public sealed class AgentWorker : BackgroundService
             SessionRestoreTimeout,
             critical: false,
             cancellationToken).ConfigureAwait(false);
+
+        // 6a. The player of that session, still signed in (G2): restored only when the session is still theirs.
+        if (_signedIn is not null)
+        {
+            try
+            {
+                _ = _signedIn.Restore();
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "Saved sign-in could not be restored");
+            }
+        }
 
         // 6b. Game catalogue (§7.3): the cached copy, then the server's. Nothing else loads it at start: without this step
         //     the Shell's Games screen was empty after every restart until the catalogue changed on the server.
@@ -402,12 +422,21 @@ public sealed class AgentWorker : BackgroundService
 
     /// <summary>
     /// IPC_PROTOCOL.md §8 <c>auth.expired{tokenExpired}</c>: the Agent-held user access token (or the offline grace
-    /// window) has expired and cannot be refreshed, so the user context is dropped and the Shell returns to login. An
-    /// open session is left running: <c>auth.login</c> re-binds it to the same user.
+    /// window) has expired, so the player is signed out and the Shell returns to login. While the player has a session
+    /// open here nothing happens: the server extends the token on every heartbeat of that session, and a real expiry
+    /// comes back as <c>401 userToken</c>, which locks the session until the same player signs in again
+    /// (<see cref="SignInGuard"/>).
     /// </summary>
     private async Task ExpireUserIfNeededAsync(CancellationToken cancellationToken)
     {
-        if (_users.User is not { } user || _users.ExpiresAt is not { } expiresAt || expiresAt > _clock.UtcNow || !_users.Clear())
+        if (_signIn is not null)
+        {
+            await _signIn.ExpireIfDueAsync(cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (_users.User is not { } user || _users.ExpiresAt is not { } expiresAt || expiresAt > _clock.UtcNow
+            || (_sessions.State.IsOpen() && _sessions.Current?.UserId == user.Id) || !_users.Clear())
         {
             return;
         }
