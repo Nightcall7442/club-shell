@@ -1,5 +1,9 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using ClubShell.Contracts.Sessions;
+using ClubShell.Server.Infrastructure;
+using ClubShell.Server.Sessions;
+using Microsoft.Extensions.DependencyInjection;
 using static ClubShell.Server.Tests.PurchaseRulesTests;
 
 namespace ClubShell.Server.Tests;
@@ -23,26 +27,20 @@ public sealed class SessionLifecycleTests(LongClockServerFixture server) : Ledge
         Server.Clock.Advance(TimeSpan.FromMinutes(10));
         Assert.Equal(3000, (await CurrentAsync(agent)).GetProperty("secondsLeft").GetInt32());
 
-        var paused = await Players.ReadAsync(await agent.PostAsync($"/api/v1/sessions/{id}/pause", null), 200);
-        Assert.Equal(("paused", 3000), (paused.GetProperty("state").GetString(), paused.GetProperty("secondsLeft").GetInt32()));
-        Assert.Equal(Server.Clock.GetUtcNow(), paused.GetProperty("pausedAt").GetDateTimeOffset());
-        Assert.False(paused.TryGetProperty("endsAt", out _));
-
-        using (var again = await agent.PostAsync($"/api/v1/sessions/{id}/pause", null))
-        {
-            await Contract.ReadErrorAsync(again, 409, "conflict", "alreadyPaused");
-        }
+        // The player may not stop the clock (403 staffOnly); the server's own pause does.
+        var paused = await Sessions.PauseAsync(id, player.Id, agent.PcId);
+        Assert.Equal((SessionState.Paused, 3000), (paused.State, paused.SecondsLeft));
+        Assert.Equal(Server.Clock.GetUtcNow(), paused.PausedAt);
+        Assert.Null(paused.EndsAt);
+        Assert.Equal("alreadyPaused", Reason(await Assert.ThrowsAsync<ApiException>(() => Sessions.PauseAsync(id, player.Id, agent.PcId))));
 
         Server.Clock.Advance(TimeSpan.FromMinutes(5));
         Assert.Equal(3000, (await CurrentAsync(agent)).GetProperty("secondsLeft").GetInt32());
 
-        var resumed = await Players.ReadAsync(await agent.PostAsync($"/api/v1/sessions/{id}/resume", null), 200);
-        Assert.Equal("active", resumed.GetProperty("state").GetString());
-        Assert.Equal(Server.Clock.GetUtcNow().AddSeconds(3000), resumed.GetProperty("endsAt").GetDateTimeOffset());
-        using (var again = await agent.PostAsync($"/api/v1/sessions/{id}/resume", null))
-        {
-            await Contract.ReadErrorAsync(again, 409, "conflict", "notPaused");
-        }
+        var resumed = await Sessions.ResumeAsync(id, player.Id, agent.PcId);
+        Assert.Equal(SessionState.Active, resumed.State);
+        Assert.Equal(Server.Clock.GetUtcNow().AddSeconds(3000), resumed.EndsAt);
+        Assert.Equal("notPaused", Reason(await Assert.ThrowsAsync<ApiException>(() => Sessions.ResumeAsync(id, player.Id, agent.PcId))));
 
         Server.Clock.Advance(TimeSpan.FromMinutes(1));
         Assert.Equal(2940, (await CurrentAsync(agent)).GetProperty("secondsLeft").GetInt32());
@@ -64,9 +62,9 @@ public sealed class SessionLifecycleTests(LongClockServerFixture server) : Ledge
         var current = await CurrentAsync(agent);
         Assert.Equal(("locked", 3000), (current.GetProperty("state").GetString(), current.GetProperty("secondsLeft").GetInt32()));
 
-        // locked comes from queued agent events and is informational: the player may have unlocked already, pause works.
-        var paused = await Players.ReadAsync(await agent.PostAsync($"/api/v1/sessions/{id}/pause", null), 200);
-        Assert.Equal(("paused", 3000), (paused.GetProperty("state").GetString(), paused.GetProperty("secondsLeft").GetInt32()));
+        // locked comes from queued agent events and is informational: the player may have unlocked already, a pause works.
+        var paused = await Sessions.PauseAsync(id, player.Id, agent.PcId);
+        Assert.Equal((SessionState.Paused, 3000), (paused.State, paused.SecondsLeft));
     }
 
     /// <summary>The second a pause falls in is used: resume/pause every 950 ms is not free play (a floor billed 0 s).</summary>
@@ -76,12 +74,12 @@ public sealed class SessionLifecycleTests(LongClockServerFixture server) : Ledge
         var (agent, player) = await Players.SignedInAsync(Server);
         var (_, created) = await Players.StartAsync(agent, player);
         var id = created.GetProperty("id").GetGuid();
-        await Players.ReadAsync(await agent.PostAsync($"/api/v1/sessions/{id}/pause", null), 200);
+        await Sessions.PauseAsync(id, player.Id, agent.PcId);
         for (var i = 0; i < 10; i++)
         {
-            await Players.ReadAsync(await agent.PostAsync($"/api/v1/sessions/{id}/resume", null), 200);
+            await Sessions.ResumeAsync(id, player.Id, agent.PcId);
             Server.Clock.Advance(TimeSpan.FromMilliseconds(950));
-            await Players.ReadAsync(await agent.PostAsync($"/api/v1/sessions/{id}/pause", null), 200);
+            await Sessions.PauseAsync(id, player.Id, agent.PcId);
         }
 
         Assert.Equal(10, (await CurrentAsync(agent)).GetProperty("secondsUsed").GetInt32());
@@ -101,9 +99,12 @@ public sealed class SessionLifecycleTests(LongClockServerFixture server) : Ledge
         Assert.Equal(Server.Clock.GetUtcNow().AddSeconds(1800), extended.GetProperty("endsAt").GetDateTimeOffset());
     }
 
-    /// <summary>A player token of PC A acts only on A: signed in on A and B, the player's session on B is not paused, resumed or extended from A.</summary>
+    /// <summary>
+    /// A player token of PC A acts only on A: signed in on A and B, the player's session on B is not extended from A
+    /// (<c>pcMismatch</c>); pause and resume are no player's at all (<c>staffOnly</c>).
+    /// </summary>
     [Fact]
-    public async Task Pause_resume_and_extend_of_the_players_session_on_another_pc_are_403_pc_mismatch()
+    public async Task Pause_resume_and_extend_of_the_players_session_on_another_pc_are_refused()
     {
         var (a, player) = await Players.SignedInAsync(Server);
         var b = await TestAgent.CreateAsync(Server);
@@ -111,10 +112,11 @@ public sealed class SessionLifecycleTests(LongClockServerFixture server) : Ledge
         var (_, created) = await Players.StartAsync(b, player);
         var id = created.GetProperty("id").GetGuid();
 
-        foreach (var (path, body, key) in new (string, object?, Guid?)[] { ("pause", null, null), ("resume", null, null), ("extend", new { minutes = 30 }, Guid.NewGuid()) })
+        foreach (var (path, body, key, reason) in new (string, object?, Guid?, string)[]
+                 { ("pause", null, null, "staffOnly"), ("resume", null, null, "staffOnly"), ("extend", new { minutes = 30 }, Guid.NewGuid(), "pcMismatch") })
         {
             using var response = await a.PostAsync($"/api/v1/sessions/{id}/{path}", body, key);
-            await Contract.ReadErrorAsync(response, 403, "forbidden", "pcMismatch");
+            await Contract.ReadErrorAsync(response, 403, "forbidden", reason);
         }
 
         Assert.Equal(("active", 8_800_000L), ((await CurrentAsync(b)).GetProperty("state").GetString(), await Players.BalanceAsync(Server, player.Id)));
@@ -182,17 +184,35 @@ public sealed class SessionLifecycleTests(LongClockServerFixture server) : Ledge
         Assert.Equal("busy", beat.GetProperty("pcStatus").GetString());
     }
 
+    /// <summary>
+    /// Billing does not stop at the player's request: pause and resume with a player token are <c>403 staffOnly</c>, for
+    /// the player's own session as for anyone's, and the clock runs on; without a player token they are <c>401 userToken</c>.
+    /// </summary>
     [Fact]
-    public async Task Pause_of_another_players_session_is_403_not_owner()
+    public async Task A_player_may_neither_pause_nor_resume()
     {
         var (agent, player) = await Players.SignedInAsync(Server);
         var (_, created) = await Players.StartAsync(agent, player);
+        var id = created.GetProperty("id").GetGuid();
+        await Contract.ReadErrorAsync(await agent.PostAsync($"/api/v1/sessions/{id}/pause", null), 403, "forbidden", "staffOnly");
+        Server.Clock.Advance(TimeSpan.FromMinutes(1));
+        Assert.Equal(("active", 3540), ((await CurrentAsync(agent)).GetProperty("state").GetString(), (await CurrentAsync(agent)).GetProperty("secondsLeft").GetInt32()));
+
+        // Paused by the server, the player's resume is refused too: the session stays paused.
+        await Sessions.PauseAsync(id, player.Id, agent.PcId);
+        await Contract.ReadErrorAsync(await agent.PostAsync($"/api/v1/sessions/{id}/resume", null), 403, "forbidden", "staffOnly");
+        Assert.Equal("paused", (await CurrentAsync(agent)).GetProperty("state").GetString());
+        await Sessions.ResumeAsync(id, player.Id, agent.PcId);
+
         var (stranger, _) = await Players.SignedInAsync(Server);
-        using var response = await stranger.PostAsync($"/api/v1/sessions/{created.GetProperty("id").GetGuid()}/pause", null);
-        await Contract.ReadErrorAsync(response, 403, "forbidden", "notOwner");
-        using var missing = await stranger.PostAsync($"/api/v1/sessions/{Guid.NewGuid()}/pause", null);
-        Assert.Equal("session", Details(await Contract.ReadErrorAsync(missing, 404, "notFound")).GetProperty("what").GetString());
+        await Contract.ReadErrorAsync(await stranger.PostAsync($"/api/v1/sessions/{id}/pause", null), 403, "forbidden", "staffOnly");
+        agent.UserToken = null;
+        await Contract.ReadErrorAsync(await agent.PostAsync($"/api/v1/sessions/{id}/resume", null), 401, "unauthorized", "userToken");
     }
+
+    private SessionService Sessions => Server.Services.GetRequiredService<SessionService>();
+
+    private static string? Reason(ApiException ex) => JsonSerializer.SerializeToElement(ex.Details).GetProperty("reason").GetString();
 
     private static async Task<JsonElement> CurrentAsync(TestAgent agent)
     {

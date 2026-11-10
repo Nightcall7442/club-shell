@@ -221,10 +221,11 @@ public sealed class MoveTests(LongClockServerFixture server) : LedgerCheckedTest
         Assert.Equal("active", (await Seats.MoveAsync(Server, owner, a.PcId, b.PcId)).GetProperty("session").GetProperty("state").GetString());
         await ExpectAsync(Server, 200, HttpMethod.Post, "/sessions/end", owner, new { sessionId = id });
 
-        // Paused by the player: resumed on the new PC with the time it had.
-        var (p, _, paused) = await Seats.SeatedAsync(Server, owner);
+        // Paused (the server's pause: a player may not): resumed on the new PC with the time it had.
+        var sessions = Server.Services.GetRequiredService<SessionService>();
+        var (p, pPlayer, paused) = await Seats.SeatedAsync(Server, owner);
         Server.Clock.Advance(TimeSpan.FromMinutes(1));
-        await Players.ReadAsync(await p.PostAsync($"/api/v1/sessions/{paused}/pause", new { }), 200);
+        await sessions.PauseAsync(paused, pPlayer.Id, p.PcId);
         Server.Clock.Advance(TimeSpan.FromMinutes(3));
         var target = await Seats.OnlineAsync(Server);
         var resumed = (await Seats.MoveAsync(Server, owner, p.PcId, target.PcId)).GetProperty("session");
@@ -233,10 +234,10 @@ public sealed class MoveTests(LongClockServerFixture server) : LedgerCheckedTest
 
         // Paused postpaid with a cap (0, as the kiosk's) whose next minute is not affordable: 402, nothing moved. A desk seat
         // without a debt limit set has no cap and would move.
-        var (post, _, postId) = await Seats.SeatedAsync(Server, owner, prepaid: false, balance: 20_000);
+        var (post, postPlayer, postId) = await Seats.SeatedAsync(Server, owner, prepaid: false, balance: 20_000);
         await Players.ExecuteAsync(Server, "UPDATE sessions SET debt_limit = 0 WHERE id = @postId", new { postId });
         Server.Clock.Advance(TimeSpan.FromSeconds(60));
-        await Players.ReadAsync(await post.PostAsync($"/api/v1/sessions/{postId}/pause", new { }), 200);
+        await sessions.PauseAsync(postId, postPlayer.Id, post.PcId);
         var other = await Seats.OnlineAsync(Server);
         Contract.AssertError(await Seats.MoveAsync(Server, owner, post.PcId, other.PcId, 402), "insufficientFunds");
         Assert.Equal($"paused {post.PcId}", await Seats.StateAsync(Server, postId));

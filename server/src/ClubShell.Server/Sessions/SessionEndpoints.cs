@@ -30,11 +30,11 @@ public static class SessionEndpoints
 
         // Agent token alone is enough for the offline replay (D-11); the handler demands the player token otherwise.
         api.MapPost("", CreateAsync).WithMetadata(new AuthRequirement(AuthMode.AgentOptionalUser));
-        api.MapPost("/{id:guid}/pause", (HttpContext context, Guid id, SessionService sessions) =>
-            sessions.PauseAsync(id, context.Features.GetRequiredFeature<UserContext>().UserId, context.Features.GetRequiredFeature<AgentContext>().Pc.Id))
+        // Billing does not stop at the player's request: the contract's user mode (401 userToken without a player token)
+        // and then 403 staffOnly. SessionService.PauseAsync/ResumeAsync stay for the server's own use.
+        api.MapPost("/{id:guid}/pause", (RequestDelegate)(_ => throw StaffOnly("pause")))
             .WithMetadata(new AuthRequirement(AuthMode.User));
-        api.MapPost("/{id:guid}/resume", (HttpContext context, Guid id, SessionService sessions) =>
-            sessions.ResumeAsync(id, context.Features.GetRequiredFeature<UserContext>().UserId, context.Features.GetRequiredFeature<AgentContext>().Pc.Id))
+        api.MapPost("/{id:guid}/resume", (RequestDelegate)(_ => throw StaffOnly("resume")))
             .WithMetadata(new AuthRequirement(AuthMode.User));
         api.MapPost("/{id:guid}/extend", ExtendAsync).WithMetadata(new AuthRequirement(AuthMode.User));
 
@@ -119,8 +119,13 @@ public static class SessionEndpoints
             throw ApiException.Validation("secondsUsed", "min");
         }
 
-        return TypedResults.Ok(await sessions.EndAsync(id, context.Features.GetRequiredFeature<AgentContext>().Pc.Id, report));
+        return TypedResults.Ok(await sessions.EndAsync(
+            id, context.Features.GetRequiredFeature<AgentContext>().Pc.Id, report, byPlayer: context.Features.Get<UserContext>() is not null));
     }
+
+    /// <summary><c>403 forbidden staffOnly</c>: the player may not stop or start the billing clock (pause/resume).</summary>
+    private static ApiException StaffOnly(string action) =>
+        ApiException.Forbidden("staffOnly", $"Only the cash desk may {action} a session: billing does not stop at the player's request");
 
     /// <summary>
     /// <c>POST /sessions/{id}/events</c> (§5.12). The session is looked up by id or, for an offline session not yet

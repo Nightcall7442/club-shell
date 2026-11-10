@@ -231,6 +231,13 @@ public sealed class SessionService(
     public static long? DebtLimitFor(string role, ClubPricing club, bool desk) =>
         !desk ? 0 : role == "guest" ? club.GuestDebtLimit : club.MemberDebtLimit;
 
+    /// <summary>
+    /// End reasons a call with a player token may give (<see cref="EndAsync"/>): the player's own (<c>user</c>, <c>idle</c>)
+    /// and the agent's timer (<c>timeUp</c>, <c>agentRestart</c>). None of them refunds unused time.
+    /// </summary>
+    public static readonly IReadOnlySet<SessionEndReason> PlayerEndReasons = new HashSet<SessionEndReason>
+        { SessionEndReason.User, SessionEndReason.Idle, SessionEndReason.TimeUp, SessionEndReason.AgentRestart };
+
     /// <summary><c>403 policyDenied</c>: <c>details.rule</c> names the rule, <c>details.reason</c> repeats it (the agent reads <c>reason</c>).</summary>
     public static ApiException PolicyDenied(string rule) =>
         new(StatusCodes.Status403Forbidden, ErrorCode.PolicyDenied, $"Denied by club policy: {rule}", new { rule, reason = rule });
@@ -677,12 +684,18 @@ public sealed class SessionService(
     }
 
     /// <summary>
-    /// <c>POST /sessions/{id}/end</c> (§5.7): settled at the server's now. The agent's <c>secondsUsed</c>/<c>endedAt</c>
-    /// are kept in <c>agent_reported</c> for audit only. An ended session is <c>409 sessionNotActive</c> + <c>details.session</c>;
-    /// so is a session the desk moved off the caller's PC (D-61), with its «ended view»: the old PC ends it cleanly and
-    /// nothing is settled.
+    /// <c>POST /sessions/{id}/end</c> (§5.7): settled at the server's now — except a session the offline replay created
+    /// (<c>origin = offline</c>): the agent replays its end after the fact, so it is settled at the agent's <c>endedAt</c>,
+    /// clamped between the session's last transition and now (a postpaid one played offline is not billed up to the moment
+    /// the PC came back). The agent's <c>secondsUsed</c>/<c>endedAt</c> are kept in <c>agent_reported</c>. An ended session
+    /// is <c>409 sessionNotActive</c> + <c>details.session</c>; so is a session the desk moved off the caller's PC (D-61), with
+    /// its «ended view»: the old PC ends it cleanly and nothing is settled. With <paramref name="byPlayer"/> (a player token
+    /// came with the call) only the reasons a player or the agent's own timer gives are taken — <c>user</c>, <c>idle</c>,
+    /// <c>timeUp</c>, <c>agentRestart</c>, none of which refunds; <c>admin</c>/<c>error</c> are the desk's and the server's
+    /// (the refund of unused time), <c>403 forbidden staffOnly</c>. These checks come after the session's own state, so the
+    /// agent echoing an end the desk already made still gets its 409.
     /// </summary>
-    public async Task<SessionEndResult> EndAsync(Guid sessionId, Guid pcId, SessionEndReport report)
+    public async Task<SessionEndResult> EndAsync(Guid sessionId, Guid pcId, SessionEndReport report, bool byPlayer)
     {
         var effects = new SessionEffects();
         SessionEndResult result;
@@ -704,11 +717,17 @@ public sealed class SessionService(
                 throw NotActive(s.ToWire(now));
             }
 
-            await c.ExecuteAsync(
-                "UPDATE sessions SET agent_reported = @reported::jsonb WHERE id = @sessionId",
+            if (byPlayer && !PlayerEndReasons.Contains(report.Reason))
+            {
+                throw ApiException.Forbidden("staffOnly", "Only the cash desk ends a session with this reason");
+            }
+
+            var origin = await c.ExecuteScalarAsync<string>(
+                "UPDATE sessions SET agent_reported = @reported::jsonb WHERE id = @sessionId RETURNING origin",
                 new { sessionId, reported = JsonSerializer.Serialize(new { report.SecondsUsed, report.EndedAt }, ServerJson.Options) },
                 tx);
-            var (charged, refunded) = await SettleAsync(c, tx, s, now, report.Reason, effects);
+            var end = origin == "offline" && report.EndedAt is { } at ? Min(Max(at, s.LastTransitionAt), now) : now;
+            var (charged, refunded) = await SettleAsync(c, tx, s, end, report.Reason, effects);
             await tx.CommitAsync();
             result = new SessionEndResult(effects.Sessions[^1], Money.Uzs(charged), Money.Uzs(refunded));
         }

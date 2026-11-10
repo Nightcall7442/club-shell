@@ -145,8 +145,10 @@ public static class PlayerAuthEndpoints
 
     /// <summary>
     /// Ends the player's open session on this PC with <c>reason</c> (settlement §5.7) and drops the player's token of this
-    /// PC. The agent has usually ended the session itself already. No <c>userRevoked</c>: the PC asked for it, and the
-    /// agent treats that push as a forced revocation (the lock screen would say the sign-in expired).
+    /// PC. The agent has usually ended the session itself already. A sign-out is the player's own end: <c>admin</c> and
+    /// <c>error</c> (the desk's and the server's reasons, which refund unused time) are settled as <c>user</c>. No
+    /// <c>userRevoked</c>: the PC asked for it, and the agent treats that push as a forced revocation (the lock screen would
+    /// say the sign-in expired).
     /// </summary>
     private static async Task<IResult> LogoutAsync(
         HttpContext context, [FromBody] JsonElement body, NpgsqlDataSource db, SessionService sessions, TimeProvider clock)
@@ -170,7 +172,8 @@ public static class PlayerAuthEndpoints
                 new { user.UserId, pcId = pc.Id }, tx);
             if (open is not null)
             {
-                await sessions.SettleAsync(c, tx, open, now, request.Reason, effects);
+                var reason = SessionService.PlayerEndReasons.Contains(request.Reason) ? request.Reason : SessionEndReason.User;
+                await sessions.SettleAsync(c, tx, open, now, reason, effects);
             }
 
             await c.ExecuteAsync(
