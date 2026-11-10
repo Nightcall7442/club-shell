@@ -652,6 +652,8 @@ export function clubRoutes(app: FastifyInstance): void {
     requireStaff(req);
     const b = body(req);
     const username = str(b, 'username', 32).toLowerCase();
+    // As the server: a new login is 3–32 characters.
+    if (username.trim().length < 3) throw errors.validation('username', 'min');
     if (db.users.some((u) => u.username.toLowerCase() === username)) throw errors.validation('username', 'taken');
     // No password sent: nobody knows one until the cashier resets it.
     const password = b['password'] === undefined || b['password'] === null ? uuid() : passwordOf(b);

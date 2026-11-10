@@ -119,7 +119,7 @@ async function registerAgent(request: APIRequestContext, tag: string): Promise<A
 async function agentCall(
   request: APIRequestContext,
   pc: AgentPc,
-  method: 'GET' | 'POST',
+  method: 'GET' | 'POST' | 'PATCH',
   path: string,
   data?: Record<string, unknown>,
   userToken?: string,
@@ -917,6 +917,10 @@ test('a client registered at the counter signs in on a PC with the issued passwo
   await page.goto('/#/clients');
   await page.getByRole('button', { name: 'Новый клиент' }).click();
   await page.getByLabel('Имя').fill('E2E Вход');
+  // A login is 3–32 characters, as the server takes it: two are refused before anything is sent.
+  await page.getByLabel('Логин').fill('ab');
+  await expect(page.getByText('Логин — от 3 до 32 символов')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Создать' })).toBeDisabled();
   await page.getByLabel('Логин').fill(username);
   await page.getByLabel('Номер карты').fill(`CARD-${username}`);
   await page.getByRole('button', { name: 'Создать' }).click();
@@ -1208,6 +1212,84 @@ test("a password login on a PC holding someone else's desk session is refused", 
   expect((await moneyPost(request, '/admin/sessions/end', { pcId: pc.pcId })).ok()).toBeTruthy();
 });
 
+test('a player whose session is open on another PC ends it there and signs in here; quote and PIN check for the kiosk', async ({
+  request,
+}) => {
+  await ensureShift(request);
+  const there = await registerAgent(request, 'ee-there');
+  const here = await registerAgent(request, 'ee-here');
+  const tariffId = await standardTariff(request);
+  const client = await newClient(request, 'ee');
+  const cashier = auth(await tokenFor(request, CASHIER_PIN));
+  const priceOf = async (pcId: string): Promise<number> =>
+    (
+      (await (
+        await request.post(`${API}/admin/quote`, {
+          headers: cashier,
+          data: { tariffId, pcId, minutes: 60, userId: client.id },
+        })
+      ).json()) as { total: { amount: number } }
+    ).total.amount;
+  // The desk seats the client on the other PC; nobody has signed in there.
+  const open = await moneyPost(request, '/admin/sessions', {
+    pcId: there.pcId,
+    userId: client.id,
+    tariffId,
+    minutes: 60,
+    payment: { amount: await priceOf(there.pcId), method: 'cash' },
+  });
+  expect(open.status(), await open.text()).toBe(201);
+
+  const login = (endElsewhere?: boolean): Promise<APIResponse> =>
+    agentCall(request, here, 'POST', '/auth/login', {
+      kind: 'password',
+      pcId: here.pcId,
+      hwid: here.hwid,
+      username: client.username,
+      password: client.password,
+      ...(endElsewhere ? { endElsewhere: true } : {}),
+    });
+  const refused = await login();
+  expect(refused.status()).toBe(409);
+  const details = ((await refused.json()) as { error: { details: { reason: string; pcId: string; pcName: string } } })
+    .error.details;
+  expect(details.reason).toBe('activeSessionElsewhere');
+  expect(details.pcId).toBe(there.pcId);
+  expect(details.pcName).toBeTruthy();
+
+  // «End the session on that PC and sign in here».
+  const signedIn = await login(true);
+  expect(signedIn.status(), await signedIn.text()).toBe(200);
+  const { accessToken } = (await signedIn.json()) as { accessToken: string };
+  expect((await seatOf(request, there.pcId)).session ?? null).toBeNull();
+
+  // The kiosk's price is the desk's price for this player here.
+  const quote = await agentCall(
+    request,
+    here,
+    'POST',
+    '/sessions/quote',
+    { pcId: here.pcId, userId: client.id, tariffId, minutes: 60 },
+    accessToken,
+  );
+  expect(quote.status(), await quote.text()).toBe(200);
+  const q = (await quote.json()) as { total: { amount: number }; minutes: number; package: boolean };
+  expect(q.total.amount).toBe(await priceOf(here.pcId));
+  expect(q.minutes).toBe(60);
+  expect(q.package).toBe(false);
+
+  // The unlock PIN is checked against the server's.
+  const verify = (pin: string): Promise<APIResponse> =>
+    agentCall(request, here, 'POST', `/users/${client.id}/pin/verify`, { pin }, accessToken);
+  expect((await verify('4321')).status()).toBe(404);
+  const setPin = await agentCall(request, here, 'PATCH', `/users/${client.id}`, { pin: '4321' }, accessToken);
+  expect(setPin.ok(), await setPin.text()).toBeTruthy();
+  expect((await verify('4321')).status()).toBe(204);
+  const wrong = await verify('1111');
+  expect(wrong.status()).toBe(401);
+  expect(((await wrong.json()) as { error: { details: { reason: string } } }).error.details.reason).toBe('badSecret');
+});
+
 test("a postpaid guest's bill is taken at the end with the exact pay box, and an unpaid one waits in the debts panel", async ({
   page,
   request,
@@ -1344,12 +1426,37 @@ test('a member plays postpaid from the balance and is signed out by the desk end
   const after = await agentCall(request, pc, 'GET', `/wallet/${member.id}/balance`, undefined, accessToken);
   expect(after.status()).toBe(401);
 
-  // With nothing on the balance and no member debt allowed, postpaid is off for the client.
+  // Desk postpaid needs no money on the balance: without a member debt cap (null or 0) it is open to every client.
+  const club = (await (await request.get(`${API}/admin/club`, { headers: owner })).json()) as {
+    limits: Record<string, unknown>;
+  };
+  const setLimits = async (extra: Record<string, unknown>): Promise<void> => {
+    const res = await request.patch(`${API}/admin/club`, {
+      headers: owner,
+      data: { limits: { ...club.limits, ...extra } },
+    });
+    expect(res.ok(), await res.text()).toBeTruthy();
+  };
   const broke = await newClient(request, 'pp-broke');
-  await page.getByRole('combobox', { name: 'Кто' }).fill(broke.username);
-  await page.getByRole('option').filter({ hasText: broke.username }).click();
-  await expect(page.getByRole('group', { name: 'Оплата' }).getByRole('button', { name: 'Постоплата' })).toBeDisabled();
-  await expect(page.getByText('Постоплата — только с баланса, а на нём нет даже на минуту')).toBeVisible();
+  const pick = async (): Promise<void> => {
+    await page.reload();
+    await tile.click();
+    await page.getByRole('combobox', { name: 'Кто' }).fill(broke.username);
+    await page.getByRole('option').filter({ hasText: broke.username }).click();
+  };
+  const postpaid = page.getByRole('group', { name: 'Оплата' }).getByRole('button', { name: 'Постоплата' });
+  try {
+    await setLimits({ memberDebtLimit: null });
+    await pick();
+    await expect(postpaid).toBeEnabled();
+    // A cap (desk sessions only) below what the first minute costs closes it for a client with nothing on the balance.
+    await setLimits({ memberDebtLimit: 100 });
+    await pick();
+    await expect(postpaid).toBeDisabled();
+    await expect(page.getByText('Баланс и разрешённый долг не покрывают первую минуту')).toBeVisible();
+  } finally {
+    await setLimits({});
+  }
 });
 
 test('package tariffs are cards priced by the quote and seat for the package minutes', async ({ page, request }) => {

@@ -9,6 +9,7 @@ import { randomBytes } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { AuthKind, Locale, SessionEndReason, type AuthResponse, type QrLoginStatus } from '@clubshell/contracts';
 import {
+  ApiError,
   body,
   createUserToken,
   db,
@@ -22,6 +23,7 @@ import {
   oneOf,
   openSessionForPc,
   openSessionForUser,
+  optBool,
   optOneOf,
   optStr,
   publicUser,
@@ -70,15 +72,34 @@ function assertPcFree(pc: PcRecord, userId: string | null): void {
   if (open && open.userId !== userId) throw errors.forbidden('pcOccupied');
 }
 
-/** Binds the user to the PC and builds the `AuthResponse`. */
-function authResponse(user: UserRecord, pc: PcRecord, extra: { offlineHash?: string | null } = {}): AuthResponse {
+/** Someone is signed in on `pcId` with this account right now (a live user token bound there). */
+function signedInOn(userId: string, pcId: string): boolean {
+  return Object.values(db.userTokens).some(
+    (t) => t.userId === userId && t.pcId === pcId && Date.parse(t.expiresAt) > Date.now(),
+  );
+}
+
+/**
+ * Binds the user to the PC and builds the `AuthResponse`. The player's session open on another PC refuses the sign-in
+ * (`409 activeSessionElsewhere`) unless they confirmed «end it there and sign in here» (`endElsewhere`): then it is
+ * ended and settled first — but only while nobody is signed in there with this account.
+ */
+function authResponse(
+  user: UserRecord,
+  pc: PcRecord,
+  extra: { offlineHash?: string | null; endElsewhere?: boolean } = {},
+): AuthResponse {
   if (user.flags.includes('banned')) throw errors.forbidden('banned');
   const elsewhere = openSessionForUser(user.id);
   if (elsewhere && elsewhere.pcId !== pc.id) {
-    throw errors.conflict('activeSessionElsewhere', {
-      pcId: elsewhere.pcId,
-      pcName: findPc(elsewhere.pcId)?.name ?? null,
-    });
+    if (!extra.endElsewhere || signedInOn(user.id, elsewhere.pcId)) {
+      throw errors.conflict('activeSessionElsewhere', {
+        pcId: elsewhere.pcId,
+        pcName: findPc(elsewhere.pcId)?.name ?? null,
+      });
+    }
+    assertPcFree(pc, user.id);
+    endSession(elsewhere, SessionEndReason.User);
   }
   assertPcFree(pc, user.id);
   const tokens = createUserToken(user, pc.id);
@@ -193,7 +214,7 @@ export function authRoutes(app: FastifyInstance): void {
         user = createGuest(pc, optStr(b, 'username', 32), null);
         break;
     }
-    return authResponse(user, pc, { offlineHash: hash });
+    return authResponse(user, pc, { offlineHash: hash, endElsewhere: optBool(b, 'endElsewhere') === true });
   });
 
   app.post('/auth/qr/start', async (req) => {
@@ -333,6 +354,25 @@ export function authRoutes(app: FastifyInstance): void {
     if (pin !== null) user.pin = pin;
     markDirty();
     return publicUser(user);
+  });
+
+  /**
+   * The player's unlock PIN against the stored one, so a PIN set on one PC unlocks on any: `204` matches, `401
+   * badSecret` does not, `404 noPin` when none is set. Counted with the sign-in attempts of the account.
+   */
+  app.post<{ Params: { userId: string } }>('/users/:userId/pin/verify', async (req, reply) => {
+    const { user } = requireUser(req, req.params.userId);
+    const pin = str(body(req), 'pin', 6);
+    if (!/^\d{4,6}$/.test(pin)) throw errors.validation('pin', 'format');
+    if (!user.pin) throw new ApiError('notFound', 'No PIN is set', { what: 'pin', reason: 'noPin' });
+    const key = user.username.toLowerCase();
+    if (pin !== user.pin) {
+      const attempts = (failedAttempts.get(key) ?? 0) + 1;
+      failedAttempts.set(key, attempts);
+      throw errors.unauthorized('badSecret', { attemptsLeft: Math.max(0, 5 - attempts) });
+    }
+    failedAttempts.delete(key);
+    return reply.code(204).send();
   });
 
   app.get<{ Params: { userId: string } }>('/users/:userId/stats', async (req) => {

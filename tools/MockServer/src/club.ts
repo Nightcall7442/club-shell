@@ -318,8 +318,9 @@ export interface ClubConfig {
   happyHours: HappyHour[];
   loyalty: LoyaltyLevel[];
   /**
-   * `guestPostpaid` / `guestDebtLimit` (null or 0 — no limit) let guests play postpaid; `memberDebtLimit` (0 or absent —
-   * none) is how far a member's postpaid may go below zero; `cashOutOwnerOnly` keeps cash-outs to the owner.
+   * Desk postpaid: `guestPostpaid` (absent = on) lets the desk seat guests postpaid; `guestDebtLimit` / `memberDebtLimit`
+   * (null or 0 — no cap) cap a desk postpaid seat's bill / how far below zero a member may go — desk sessions only, the
+   * kiosk never opens postpaid on them. `cashOutOwnerOnly` keeps cash-outs to the owner.
    */
   limits: {
     minorAge: number;
