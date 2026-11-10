@@ -72,17 +72,17 @@ function assertPcFree(pc: PcRecord, userId: string | null): void {
   if (open && open.userId !== userId) throw errors.forbidden('pcOccupied');
 }
 
-/** Someone is signed in on `pcId` with this account right now (a live user token bound there). */
-function signedInOn(userId: string, pcId: string): boolean {
-  return Object.values(db.userTokens).some(
-    (t) => t.userId === userId && t.pcId === pcId && Date.parse(t.expiresAt) > Date.now(),
-  );
+/** Drops the player's tokens on every PC but `keepPcId` (the server signs those PCs out: `signedInElsewhere`). */
+function signOutElsewhere(userId: string, keepPcId: string): void {
+  for (const [token, t] of Object.entries(db.userTokens)) {
+    if (t.userId === userId && t.pcId !== keepPcId) delete db.userTokens[token];
+  }
 }
 
 /**
  * Binds the user to the PC and builds the `AuthResponse`. The player's session open on another PC refuses the sign-in
  * (`409 activeSessionElsewhere`) unless they confirmed «end it there and sign in here» (`endElsewhere`): then it is
- * ended and settled first — but only while nobody is signed in there with this account.
+ * ended and settled first. Like the server, a sign-in signs the player out of every other PC.
  */
 function authResponse(
   user: UserRecord,
@@ -92,7 +92,7 @@ function authResponse(
   if (user.flags.includes('banned')) throw errors.forbidden('banned');
   const elsewhere = openSessionForUser(user.id);
   if (elsewhere && elsewhere.pcId !== pc.id) {
-    if (!extra.endElsewhere || signedInOn(user.id, elsewhere.pcId)) {
+    if (!extra.endElsewhere) {
       throw errors.conflict('activeSessionElsewhere', {
         pcId: elsewhere.pcId,
         pcName: findPc(elsewhere.pcId)?.name ?? null,
@@ -102,6 +102,7 @@ function authResponse(
     endSession(elsewhere, SessionEndReason.User);
   }
   assertPcFree(pc, user.id);
+  signOutElsewhere(user.id, pc.id);
   const tokens = createUserToken(user, pc.id);
   const own = openSessionForPc(pc.id);
   return {
