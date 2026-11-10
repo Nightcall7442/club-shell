@@ -240,7 +240,7 @@ public static class PlayerAuthEndpoints
     /// on one name are serialized (transaction advisory lock), so parallel guesses cannot all pass the count.
     /// </summary>
     private static Task<Guid> CheckPasswordAsync(NpgsqlConnection c, Guid network, string username, string password, Guid traceId, DateTimeOffset now) =>
-        CountFailuresAsync(c, network, username.ToLowerInvariant()[..Math.Min(username.Length, 64)], traceId, now, forgetOnSuccess: true, async tx =>
+        CountFailuresAsync(c, network, LockoutKey(username), traceId, now, forgetOnSuccess: true, async tx =>
         {
             var user = await c.QuerySingleOrDefaultAsync<Credentials>(
                 """
@@ -265,13 +265,34 @@ public static class PlayerAuthEndpoints
                 new { network, cardId }, tx));
 
     /// <summary>
+    /// <c>POST /users/{userId}/pin/verify</c>: the player's unlock PIN against <paramref name="pinHash"/>, under the same lockout
+    /// as the password of <paramref name="username"/> (§3.4) — a wrong PIN is a failure of that name (<c>401 unauthorized
+    /// badSecret {attemptsLeft}</c>), 5 of them (PINs and passwords together) within 15 min refuse even the right PIN, and the
+    /// right password, with sign-in's own refusal (<c>401 badCredentials {attemptsLeft: 0}</c>); a right PIN clears the count
+    /// as a right password does. The agent's free repeat after a refresh holds as for sign-in.
+    /// </summary>
+    internal static Task CheckPinAsync(NpgsqlConnection c, Guid network, string username, string pinHash, string pin, Guid traceId, DateTimeOffset now) =>
+        CountFailuresAsync(c, network, LockoutKey(username), traceId, now, forgetOnSuccess: true,
+            _ => Task.FromResult<Guid?>(Passwords.Verify(pinHash, pin) ? Guid.Empty : null),
+            miss: attemptsLeft => new ApiException(StatusCodes.Status401Unauthorized, ErrorCode.Unauthorized, "Wrong PIN", new { reason = "badSecret", attemptsLeft }));
+
+    /// <summary>The <c>login_failures</c> key of a player name: lower-cased (any script), at most 64 characters.</summary>
+    private static string LockoutKey(string username)
+    {
+        var lower = username.ToLowerInvariant();
+        return lower[..Math.Min(lower.Length, 64)];
+    }
+
+    /// <summary>
     /// The failure count of <paramref name="key"/> in <c>login_failures</c> around <paramref name="check"/>: refused with
     /// <c>attemptsLeft = 0</c> at <see cref="MaxFailures"/> within <see cref="FailureWindow"/>, a miss recorded once per
-    /// trace (the agent's first repeat is free), a match returned (and the count dropped when
-    /// <paramref name="forgetOnSuccess"/>). Serialized per key by a transaction advisory lock.
+    /// trace (the agent's first repeat is free) and answered by <paramref name="miss"/> (default <c>401 badCredentials</c>)
+    /// with the attempts left, a match returned (and the count dropped when <paramref name="forgetOnSuccess"/>).
+    /// Serialized per key by a transaction advisory lock.
     /// </summary>
     private static async Task<Guid> CountFailuresAsync(
-        NpgsqlConnection c, Guid network, string key, Guid traceId, DateTimeOffset now, bool forgetOnSuccess, Func<NpgsqlTransaction, Task<Guid?>> check)
+        NpgsqlConnection c, Guid network, string key, Guid traceId, DateTimeOffset now, bool forgetOnSuccess, Func<NpgsqlTransaction, Task<Guid?>> check,
+        Func<int, ApiException>? miss = null)
     {
         const string Count = """
             SELECT coalesce(sum(greatest(attempts - 1, 1)), 0)::int FROM login_failures
@@ -304,7 +325,7 @@ public static class PlayerAuthEndpoints
             args, tx);
         var failures = await c.ExecuteScalarAsync<int>(Count, args, tx);
         await tx.CommitAsync();
-        throw BadCredentials(Math.Max(0, MaxFailures - failures));
+        throw (miss ?? BadCredentials)(Math.Max(0, MaxFailures - failures));
     }
 
     /// <summary>

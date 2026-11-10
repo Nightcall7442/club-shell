@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ClubShell.Contracts.Serialization;
 using ClubShell.Contracts.Wallet;
 using ClubShell.Server.Infrastructure;
@@ -175,7 +176,15 @@ public sealed class ClubPricing
 }
 
 /// <summary>The price of a purchase and how it was reached; stored as <c>meta</c> of the charge (<c>package</c>: never refunded, §5.7).</summary>
-public sealed record Quote(int Minutes, long Base, int DayPct, int DiscountPct, string? DiscountReason, long Total, bool Package);
+public sealed record Quote(int Minutes, long Base, int DayPct, int DiscountPct, string? DiscountReason, long Total, bool Package)
+{
+    /// <summary>
+    /// The kind of discount <see cref="DiscountReason"/> names — <c>group</c>, <c>loyalty</c> or <c>happyHour</c> — or null
+    /// without one: the kiosk's <c>SessionQuote.discountReason</c>. Not part of the charge's <c>meta</c>.
+    /// </summary>
+    [JsonIgnore]
+    public string? DiscountKind { get; init; }
+}
 
 /// <summary>
 /// The single price function of every channel (DESIGN §5.1, D-8): kiosk create/extend, cashier open/extend, quote,
@@ -209,23 +218,23 @@ public static class Pricing
             ? club.HolidayPct
             : club.WeekdayPct[(int)local.DayOfWeek];
 
-        (int Pct, string Name)? best = null;
-        void Offer(int pct, string name)
+        (int Pct, string Name, string Kind)? best = null;
+        void Offer(int pct, string name, string kind)
         {
             if (pct > 0 && (best is null || pct > best.Value.Pct))
             {
-                best = (pct, name);
+                best = (pct, name, kind);
             }
         }
 
         if (groupId is not null && club.Groups.FirstOrDefault(g => g.Id == groupId) is { } group)
         {
-            Offer(group.DiscountPct, group.Name);
+            Offer(group.DiscountPct, group.Name, "group");
         }
 
         if (lifetimeSpent is { } spent && club.LevelOf(spent) is { } level)
         {
-            Offer(level.DiscountPct, level.Name);
+            Offer(level.DiscountPct, level.Name, "loyalty");
         }
 
         var minute = (local.Hour * 60) + local.Minute;
@@ -236,12 +245,12 @@ public static class Pricing
                 && (hh.Zones.Length == 0 || hh.Zones.Contains(zone, StringComparer.OrdinalIgnoreCase))
                 && (from <= to ? minute >= from && minute < to : minute >= from || minute < to))
             {
-                Offer(hh.DiscountPct, hh.Name);
+                Offer(hh.DiscountPct, hh.Name, "happyHour");
             }
         }
 
         var @base = tariff.IsPackage ? tariff.PackagePrice ?? 0 : Base(tariff.PricePerHour, minutes);
         var discount = best?.Pct ?? 0;
-        return new Quote(minutes, @base, dayPct, discount, best?.Name, Total(@base, dayPct, discount), tariff.IsPackage);
+        return new Quote(minutes, @base, dayPct, discount, best?.Name, Total(@base, dayPct, discount), tariff.IsPackage) { DiscountKind = best?.Kind };
     }
 }

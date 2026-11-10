@@ -50,6 +50,27 @@ public sealed class ClientPowersTests(LongClockServerFixture server) : LedgerChe
     }
 
     /// <summary>
+    /// The agent's own ends go with the PC token alone (its timer's <c>timeUp</c>, <c>agentRestart</c>, <c>error</c>, a desk
+    /// command): any reason is taken; <c>timeUp</c>, <c>agentRestart</c>, <c>user</c> and <c>idle</c> never refund, so dropping
+    /// the player token is no way to a refund of a player's own end.
+    /// </summary>
+    [Fact]
+    public async Task The_agents_own_ends_with_the_pc_token_alone_are_taken_and_refund_only_admin_and_error()
+    {
+        foreach (var (reason, refund) in new[] { ("timeUp", 0L), ("agentRestart", 0L), ("user", 0L), ("idle", 0L), ("error", 1_000_000L) })
+        {
+            var (agent, player) = await Players.SignedInAsync(Server);
+            var (_, created) = await Players.StartAsync(agent, player);
+            var id = created.GetProperty("id").GetGuid();
+            Server.Clock.Advance(TimeSpan.FromMinutes(10));
+            agent.UserToken = null;
+            var ended = await Players.ReadAsync(await agent.PostAsync($"/api/v1/sessions/{id}/end", new { reason, secondsUsed = 600 }), 200);
+            Assert.Equal((reason, refund), (await Players.ScalarAsync<string>(Server, "SELECT end_reason FROM sessions WHERE id = @id", new { id }), Amount(ended.GetProperty("refunded"))));
+            Assert.Equal(8_800_000 + refund, await Players.BalanceAsync(Server, player.Id));
+        }
+    }
+
+    /// <summary>
     /// An end the server already made, echoed by the agent with <c>admin</c> while the member's token is still valid (the
     /// tick's time-up keeps a member signed in): the session is over, so 409 with the ended session (the agent's success),
     /// not 403. The agent's own <c>admin</c> end without a player token (a power command, a revoked player) is the

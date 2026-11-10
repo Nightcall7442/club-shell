@@ -150,6 +150,24 @@ public sealed class TestAgent(ServerFixture server, JsonElement registration, st
         return server.Http.SendAsync(request);
     }
 
+    /// <summary>
+    /// A signed POST to a route beyond the contract (<c>/sessions/quote</c>, <c>/users/{userId}/pin/verify</c>), on a client
+    /// that does not validate against openapi.json; an error body must still be the error envelope. The status and the body.
+    /// </summary>
+    public async Task<(int Status, JsonElement Body)> RawPostAsync(string target, object body)
+    {
+        using var raw = server.CreateDefaultClient();
+        using var response = await raw.SendAsync(Request(HttpMethod.Post, target, body as string ?? JsonSerializer.Serialize(body)));
+        var text = await response.Content.ReadAsStringAsync();
+        var json = text.Length == 0 ? default : JsonElement.Parse(text);
+        if ((int)response.StatusCode >= 400)
+        {
+            Contract.AssertMatches("ServerErrorEnvelope", json);
+        }
+
+        return ((int)response.StatusCode, json);
+    }
+
     /// <summary>Signs <paramref name="player"/> in on this PC with a password (200 expected); keeps the user token.</summary>
     public async Task<JsonElement> LoginAsync(TestPlayer player)
     {

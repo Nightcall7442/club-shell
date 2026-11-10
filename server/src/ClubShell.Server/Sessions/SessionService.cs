@@ -442,6 +442,46 @@ public sealed class SessionService(
         return session;
     }
 
+    /// <summary>
+    /// <c>POST /sessions/quote</c> (beyond the contract): what <see cref="CreateAsync"/> would charge <paramref name="userId"/>
+    /// now for <paramref name="tariffId"/> on <paramref name="pc"/> — the same refusals (a missing player or tariff 404, a PC in
+    /// maintenance, the buyer's and the tariff's rules of §5.2: blacklisted, curfew, zone, time window; given minutes outside
+    /// the tariff's range 400) and the same <see cref="Pricing.Compute"/> with the club's day rate and the player's best
+    /// discount. <paramref name="minutes"/> null prices one hour; a package prices its own minutes. Nothing is created or
+    /// charged.
+    /// </summary>
+    public async Task<SessionQuote> QuoteAsync(PcRow pc, Guid userId, Guid tariffId, int? minutes)
+    {
+        await using var c = await db.OpenConnectionAsync();
+        var now = clock.GetUtcNow();
+        var club = await ClubAsync(c, null, pc.ClubId);
+        var buyer = await BuyerAsync(c, null, club, userId) ?? throw ApiException.NotFound("user");
+        var tariff = await TariffAsync(c, null, club.Id, tariffId) ?? throw ApiException.NotFound("tariff");
+        if (pc.Maintenance)
+        {
+            throw PolicyDenied("pcMaintenance");
+        }
+
+        CheckRules(pc.Zone, buyer, tariff, club, now, offlineReplay: false);
+        int priced;
+        if (tariff.IsPackage)
+        {
+            priced = tariff.PackageMinutes!.Value;
+        }
+        else if (minutes is { } wanted)
+        {
+            CheckMinutes(tariff, wanted);
+            priced = wanted;
+        }
+        else
+        {
+            priced = 60;
+        }
+
+        var q = Pricing.Compute(tariff, priced, buyer.GroupId, buyer.LifetimeSpent, pc.Zone, now, club.Pricing);
+        return new SessionQuote(q.Minutes, Money.Uzs(q.Base), Money.Uzs(q.Total), q.DayPct, q.DiscountPct, q.DiscountKind, q.Package);
+    }
+
     /// <summary><c>POST /sessions/{id}/pause</c> (§5.5): <c>active</c> → <c>paused</c>, the clock stops.</summary>
     public async Task<Session> PauseAsync(Guid sessionId, Guid userId, Guid pcId)
     {

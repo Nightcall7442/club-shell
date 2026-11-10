@@ -19,9 +19,15 @@ public sealed class UserRow
 {
     public const string Select = """
         SELECT u.id, u.username, u.display_name, u.avatar_url, u.role, u.locale, u.flags, u.banned, u.created_at, u.last_seen_at,
-               w.main_balance, w.lifetime_spent
+               u.unlock_pin_hash IS NOT NULL AS pin_set, w.main_balance, w.lifetime_spent
         FROM users u JOIN wallets w ON w.user_id = u.id
         """;
+
+    /// <summary>
+    /// <c>User.flags</c> entry (beyond <c>UserFlags</c> of the contract): the player has an unlock PIN, checked by
+    /// <c>POST /users/{userId}/pin/verify</c>; without it the unlock form opens on the password.
+    /// </summary>
+    public const string PinSetFlag = "pinSet";
 
     public Guid Id { get; init; }
     public string Username { get; init; } = "";
@@ -33,22 +39,31 @@ public sealed class UserRow
     public bool Banned { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset? LastSeenAt { get; init; }
+
+    /// <summary><c>unlock_pin_hash</c> is set: <see cref="PinSetFlag"/> in <c>flags</c>.</summary>
+    public bool PinSet { get; init; }
+
     public long MainBalance { get; init; }
     public long LifetimeSpent { get; init; }
 
-    /// <summary>One loyalty model (§5.13 item 5): the club's level by lifetime spend, 0-based on the wire; points = spend / 100.</summary>
+    /// <summary>
+    /// One loyalty model (§5.13 item 5): the club's level by lifetime spend, 0-based on the wire; points = spend / 100. The
+    /// stored flags plus <c>banned</c> and <see cref="PinSetFlag"/> as they apply.
+    /// </summary>
     public User ToWire(ClubPricing club) => new(
         Id, Username, DisplayName, AvatarUrl, Enum.Parse<UserRole>(Role, ignoreCase: true), Money.Uzs(MainBalance),
         Math.Max(0, (club.LevelOf(LifetimeSpent)?.Level ?? 1) - 1), Points(LifetimeSpent), CreatedAt, LastSeenAt,
-        Enum.Parse<Locale>(Locale, ignoreCase: true), Banned ? [.. Flags, UserFlags.Banned] : Flags);
+        Enum.Parse<Locale>(Locale, ignoreCase: true),
+        [.. Flags, .. Banned ? new[] { UserFlags.Banned } : [], .. PinSet ? new[] { PinSetFlag } : []]);
 
     public static int Points(long tiyin) => (int)Math.Min(int.MaxValue, tiyin / 100);
 }
 
 /// <summary>
 /// The player's own profile (S2): <c>getUser</c>, <c>updateUser</c>, <c>getUserStats</c>, <c>getUserAchievements</c>,
-/// <c>getUserLoyalty</c>, and beyond the contract <c>/users/{userId}/game-settings</c> — list <c>{items:[]}</c> and
-/// <c>DELETE</c> 204, the rest 501 (DESIGN §1: player settings are not stored in v1).
+/// <c>getUserLoyalty</c>, and beyond the contract <c>POST /users/{userId}/pin/verify</c> and
+/// <c>/users/{userId}/game-settings</c> — list <c>{items:[]}</c> and <c>DELETE</c> 204, the rest 501 (DESIGN §1: player
+/// settings are not stored in v1).
 /// </summary>
 public static partial class UserEndpoints
 {
@@ -64,6 +79,7 @@ public static partial class UserEndpoints
             return TypedResults.Ok(await LoadAsync(c, context, userId));
         });
         own.MapPatch("", UpdateAsync);
+        own.MapPost("/pin/verify", VerifyPinAsync);
         own.MapGet("/stats", StatsAsync);
         own.MapGet("/achievements", () => TypedResults.Ok(new ProfileAchievementsResponse([])));
         own.MapGet("/loyalty", LoyaltyAsync);
@@ -132,6 +148,35 @@ public static partial class UserEndpoints
                 pin = request.Pin is null ? null : Passwords.Hash(request.Pin),
             });
         return TypedResults.Ok(await LoadAsync(c, context, userId));
+    }
+
+    /// <summary>
+    /// <c>POST /users/{userId}/pin/verify</c> (beyond the contract; <c>PinVerifyRequest</c>): the PIN a player set on any PC
+    /// (<c>PATCH /users/{userId} {pin}</c>) unlocks on every PC. <c>204</c> — it matches; <c>401 unauthorized badSecret
+    /// {attemptsLeft}</c> — it does not; <c>404 notFound {what: pin, reason: noPin}</c> — none is set; a PIN that is not 4–6
+    /// digits is <c>400 validation pin format</c> and not counted. Failures share the password's lockout (5 in 15 min, then
+    /// <c>401 badCredentials {attemptsLeft: 0}</c> as sign-in answers, <see cref="PlayerAuthEndpoints.CheckPinAsync"/>).
+    /// </summary>
+    private static async Task<IResult> VerifyPinAsync(
+        HttpContext context, Guid userId, [FromBody] System.Text.Json.JsonElement body, NpgsqlDataSource db, TimeProvider clock)
+    {
+        var request = Api.Read<PinVerifyRequest>(body, "pin");
+        if (!PinPattern().IsMatch(request.Pin))
+        {
+            throw ApiException.Validation("pin", "format");
+        }
+
+        await using var c = await db.OpenConnectionAsync();
+        var user = await c.QuerySingleOrDefaultAsync<(Guid NetworkId, string Username, string? PinHash)?>(
+            "SELECT network_id, username, unlock_pin_hash FROM users WHERE id = @userId AND deleted_at IS NULL", new { userId })
+            ?? throw ApiException.NotFound("user");
+        if (user.PinHash is not { } hash)
+        {
+            throw new ApiException(StatusCodes.Status404NotFound, Contracts.Errors.ErrorCode.NotFound, "No unlock PIN is set", new { what = "pin", reason = "noPin" });
+        }
+
+        await PlayerAuthEndpoints.CheckPinAsync(c, user.NetworkId, user.Username, hash, request.Pin, Guid.Parse(ApiErrorWriter.TraceId(context)), clock.GetUtcNow());
+        return Results.NoContent();
     }
 
     /// <summary>

@@ -30,6 +30,9 @@ public static class SessionEndpoints
 
         // Agent token alone is enough for the offline replay (D-11); the handler demands the player token otherwise.
         api.MapPost("", CreateAsync).WithMetadata(new AuthRequirement(AuthMode.AgentOptionalUser));
+
+        // Beyond the contract: the price the kiosk shows before a start (no operation id, not in the 501 table).
+        api.MapPost("/quote", QuoteAsync).WithMetadata(new AuthRequirement(AuthMode.User));
         // Billing does not stop at the player's request: the contract's user mode (401 userToken without a player token)
         // and then 403 staffOnly. SessionService.PauseAsync/ResumeAsync stay for the server's own use.
         api.MapPost("/{id:guid}/pause", (RequestDelegate)(_ => throw StaffOnly("pause")))
@@ -87,6 +90,29 @@ public static class SessionEndpoints
             new IdempotentResult(StatusCodes.Status201Created, JsonDefaults.ToElement(await sessions.CreateAsync(c, tx, agent.Pc, request, replay, effects))));
         await sessions.PublishAsync(effects);
         return result;
+    }
+
+    /// <summary>
+    /// <c>POST /sessions/quote</c> (<c>SessionQuoteRequest</c> → <c>200 SessionQuote</c>): the signed-in player's price on
+    /// this PC — <c>userId</c> must be the token's player (<c>403 notOwner</c>), <c>pcId</c> the agent's PC (<c>403
+    /// pcMismatch</c>); the rest is <see cref="SessionService.QuoteAsync"/>. Read-only: no <c>Idempotency-Key</c>.
+    /// </summary>
+    private static async Task<IResult> QuoteAsync(HttpContext context, [FromBody] JsonElement body, SessionService sessions)
+    {
+        var agent = context.Features.GetRequiredFeature<AgentContext>();
+        var user = context.Features.GetRequiredFeature<UserContext>();
+        var request = Api.Read<SessionQuoteRequest>(body, "pcId", "userId", "tariffId");
+        if (request.UserId != user.UserId)
+        {
+            throw ApiException.Forbidden("notOwner", "userId is not the signed-in player");
+        }
+
+        if (request.PcId != agent.Pc.Id)
+        {
+            throw ApiException.Forbidden("pcMismatch", "pcId does not match the agent token");
+        }
+
+        return TypedResults.Ok(await sessions.QuoteAsync(agent.Pc, user.UserId, request.TariffId, request.Minutes));
     }
 
     private static async Task<IResult> ExtendAsync(HttpContext context, Guid id, [FromBody] JsonElement body, IdempotencyStore store, SessionService sessions)
