@@ -11,7 +11,7 @@ namespace ClubShell.Server.Tests;
 /// Slice S2 through the real agent <see cref="ClubShell.Core.Http.ServerClient"/> (DESIGN §10.b): login (password, card,
 /// guest) → balance → tariffs → createSession → current (<c>secondsLeft</c>) → pause/resume → extend → end (a repeated
 /// end is the agent's success path); offline replay (<c>startedAt</c>, <c>clientSessionId</c>) and its events batch sent
-/// twice with the same key; a wrong password counted once although the client repeats it after a refresh. Then the
+/// twice with the same key; a wrong password counted once, and the client does not repeat it after a refresh. Then the
 /// races: two concurrent creates → one 201 and one 409; one key twice at once → one effect.
 /// </summary>
 public sealed class AgentHarnessS2Tests(LongClockServerFixture server) : LedgerCheckedTest(server), IClassFixture<LongClockServerFixture>
@@ -97,7 +97,7 @@ public sealed class AgentHarnessS2Tests(LongClockServerFixture server) : LedgerC
     }
 
     [Fact]
-    public async Task Wrong_password_is_counted_once_although_the_client_repeats_it_after_a_refresh()
+    public async Task Wrong_password_is_counted_once_and_the_client_does_not_repeat_it()
     {
         await using var agent = await AgentHarness.CreateAsync(Server);
         var client = agent.Client;
@@ -108,8 +108,8 @@ public sealed class AgentHarnessS2Tests(LongClockServerFixture server) : LedgerC
         var error = await Assert.ThrowsAsync<ServerApiException>(() => client.LoginAsync(Password(player, "wrong", pcId, agent.Hwid), CancellationToken.None));
         Assert.Equal((ErrorCode.Unauthorized, "badCredentials"), (error.Code, error.Reason));
         Assert.Equal(4, error.Error!.Details!.Value.GetProperty("attemptsLeft").GetInt32());
-        Assert.NotEqual(refreshToken, agent.Tokens.Agent!.RefreshToken); // the client did refresh and repeat
-        Assert.Equal("1/2", await Players.ScalarAsync<string>(Server, "SELECT count(*) || '/' || sum(attempts) FROM login_failures WHERE username = lower(@Username)", new { player.Username })); // one failure, the repeat free
+        Assert.Equal(refreshToken, agent.Tokens.Agent!.RefreshToken); // a wrong secret is not retried with a refreshed token
+        Assert.Equal("1/1", await Players.ScalarAsync<string>(Server, "SELECT count(*) || '/' || sum(attempts) FROM login_failures WHERE username = lower(@Username)", new { player.Username })); // one failure, one attempt
     }
 
     [Fact]
