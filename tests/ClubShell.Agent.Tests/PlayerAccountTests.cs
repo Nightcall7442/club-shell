@@ -596,6 +596,20 @@ public sealed class PlayerAccountTests : IDisposable
     }
 
     [Fact]
+    public async Task Rate_limited_sign_in_does_not_fall_back_to_the_offline_cache()
+    {
+        _link.Connectivity = ConnectivityState.Online;
+        await _store.CacheUserAsync("an", OfflineSessionStore.HashPassword("secret", 1000), _member, CancellationToken.None);
+        _server.LoginAsync(Arg.Any<AuthRequest>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(ServerError(ErrorCode.RateLimited, HttpStatusCode.TooManyRequests, """{ "retryAfterSec": 30 }"""));
+
+        IpcEnvelope reply = await SendAsync(IpcMessages.Auth.Login, new AuthLoginRequest(AuthKind.Password, "an", "secret"));
+
+        reply.Error!.Code.Should().Be(ErrorCode.RateLimited);
+        _users.User.Should().BeNull("the cache must not sidestep the server's limit on attempts");
+    }
+
+    [Fact]
     public async Task Guest_display_name_and_one_letter_logins_reach_the_server()
     {
         _link.Connectivity = ConnectivityState.Online;

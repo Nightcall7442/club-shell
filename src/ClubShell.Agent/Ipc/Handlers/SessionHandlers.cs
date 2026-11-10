@@ -244,8 +244,9 @@ public sealed class SessionHandlers : IIpcHandlerGroup
             {
                 auth = await LoginOnlineAsync(request, pcId, hwid, cancellationToken).ConfigureAwait(false);
             }
-            catch (ServerApiException ex) when (ex.IsRetryable)
+            catch (ServerApiException ex) when (ex.IsRetryable && ex.Code != ErrorCode.RateLimited)
             {
+                // Not a 429: the offline cache must not sidestep the server's limit on attempts.
                 _logger.LogWarning("Server login failed ({Code}); trying the offline cache", ex.Code);
             }
             catch (HttpRequestException ex)
