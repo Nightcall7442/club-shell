@@ -231,8 +231,10 @@ public sealed class MoveTests(LongClockServerFixture server) : LedgerCheckedTest
         Assert.Equal(("active", 3540), (resumed.GetProperty("state").GetString(), resumed.GetProperty("secondsLeft").GetInt32()));
         await ExpectAsync(Server, 200, HttpMethod.Post, "/sessions/end", owner, new { sessionId = paused });
 
-        // Paused postpaid whose next minute is not affordable: 402, nothing moved.
+        // Paused postpaid with a cap (0, as the kiosk's) whose next minute is not affordable: 402, nothing moved. A desk seat
+        // without a debt limit set has no cap and would move.
         var (post, _, postId) = await Seats.SeatedAsync(Server, owner, prepaid: false, balance: 20_000);
+        await Players.ExecuteAsync(Server, "UPDATE sessions SET debt_limit = 0 WHERE id = @postId", new { postId });
         Server.Clock.Advance(TimeSpan.FromSeconds(60));
         await Players.ReadAsync(await post.PostAsync($"/api/v1/sessions/{postId}/pause", new { }), 200);
         var other = await Seats.OnlineAsync(Server);

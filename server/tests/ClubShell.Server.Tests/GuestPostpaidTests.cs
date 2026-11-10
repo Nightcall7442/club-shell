@@ -6,43 +6,34 @@ using static ClubShell.Server.Tests.Staff;
 namespace ClubShell.Server.Tests;
 
 /// <summary>
-/// Postpaid for guests, the club's choice (<c>settings.limits.guestPostpaid</c>, beyond the contract): off by default
-/// (<c>PurchaseRulesTests.Guest_may_not_play_postpaid</c>); on, a guest with an empty wallet plays and the bill becomes a
-/// guest debt on the counter (<c>adminOverview.guestDebts</c>) that a cash top-up clears; <c>limits.guestDebtLimit</c>
-/// stops the session at the minute boundary like D-10 does for members. Standard costs 20 000 tiyin a minute.
+/// Postpaid for guests (<c>settings.limits.guestPostpaid</c>, beyond the contract): the kiosk never starts a guest's postpaid
+/// session (<c>403 policyDenied postpaidNotAllowed</c>, whatever account the guest button made and whatever the club set);
+/// the desk seats a guest postpaid unless the owner turned it off, with no cap by default — a guest with an empty wallet
+/// plays and the bill becomes a guest debt on the counter (<c>adminOverview.guestDebts</c>) that a cash top-up clears;
+/// <c>limits.guestDebtLimit</c> caps a desk seat at the minute boundary like D-10 does. Standard costs 20 000 tiyin a minute.
 /// </summary>
 public sealed class GuestPostpaidTests(LongClockServerFixture server) : LedgerCheckedTest(server), IClassFixture<LongClockServerFixture>
 {
     private SessionTickWorker Tick => Server.Services.GetRequiredService<SessionTickWorker>();
 
     [Fact]
-    public async Task A_guest_plays_postpaid_and_the_bill_is_taken_at_the_counter()
+    public async Task A_guest_on_the_kiosk_may_not_start_postpaid_whatever_the_club_allows_the_desk()
     {
         await LimitsAsync("""{"minorAge":18,"minorCurfew":"22:00","guestPostpaid":true}""");
         try
         {
-            var (agent, guest) = await GuestAsync();
-            var (status, session) = await Players.StartAsync(agent, guest, prepaid: false);
-            Assert.True(status == 201, $"expected 201, got {status}: {session}");
+            // A new guest account per press changes nothing: each one is refused.
+            for (var i = 0; i < 2; i++)
+            {
+                var (agent, guest) = await GuestAsync();
+                var (status, body) = await Players.StartAsync(agent, guest, prepaid: false);
+                Assert.True(status == 403, $"expected 403, got {status}: {body}");
+                Contract.AssertError(body, "policyDenied", "postpaidNotAllowed");
+                Assert.Equal("postpaidNotAllowed", body.GetProperty("error").GetProperty("details").GetProperty("rule").GetString());
 
-            // No limit set: the tick does not stop a guest whose bill already exceeds the (empty) wallet.
-            await AdvanceOnlineAsync(agent, TimeSpan.FromMinutes(10));
-            var id = session.GetProperty("id").GetGuid();
-            Assert.Equal("active", await StateAsync(id));
-
-            var owner = await LoginAsync(Server, OwnerPin);
-            var settled = await ExpectAsync(Server, 200, HttpMethod.Post, "/sessions/end", owner, new { sessionId = id });
-            Assert.Equal(200_000, settled.GetProperty("charged").GetProperty("amount").GetInt64());
-            Assert.Equal(-200_000, await Players.BalanceAsync(Server, guest.Id));
-
-            var debt = Assert.Single(await DebtsAsync(owner), d => d.GetProperty("userId").GetGuid() == guest.Id);
-            Assert.Equal(200_000, debt.GetProperty("debt").GetProperty("amount").GetInt64());
-            Assert.False(string.IsNullOrEmpty(debt.GetProperty("pc").GetString()));
-
-            await OpenShiftAsync(Server, owner);
-            await ExpectAsync(Server, 200, HttpMethod.Post, "/wallet/topup", owner, new { userId = guest.Id, amount = 200_000, method = "cash" });
-            Assert.Equal(0, await Players.BalanceAsync(Server, guest.Id));
-            Assert.DoesNotContain(await DebtsAsync(owner), d => d.GetProperty("userId").GetGuid() == guest.Id);
+                // Prepaid from the guest's balance is the kiosk's way (here: none, so 402).
+                Assert.Equal(402, (await Players.StartAsync(agent, guest)).Status);
+            }
         }
         finally
         {
@@ -50,30 +41,58 @@ public sealed class GuestPostpaidTests(LongClockServerFixture server) : LedgerCh
         }
     }
 
+    [Fact]
+    public async Task A_desk_guest_plays_postpaid_by_default_and_the_bill_is_taken_at_the_counter()
+    {
+        var owner = await LoginAsync(Server, OwnerPin);
+        await OpenShiftAsync(Server, owner);
+        var agent = await Seats.OnlineAsync(Server);
+        var opened = await RawExpectAsync(Server, 201, HttpMethod.Post, "/sessions/guest", owner, Seat(agent.PcId), Guid.NewGuid());
+        var id = opened.GetProperty("session").GetProperty("id").GetGuid();
+        var guestId = opened.GetProperty("user").GetProperty("id").GetGuid();
+
+        // No limit set: the tick does not stop a guest whose bill already exceeds the (empty) wallet.
+        await AdvanceOnlineAsync(agent, TimeSpan.FromMinutes(10));
+        Assert.Equal("active", await StateAsync(id));
+
+        var settled = await ExpectAsync(Server, 200, HttpMethod.Post, "/sessions/end", owner, new { sessionId = id });
+        Assert.Equal(200_000, settled.GetProperty("charged").GetProperty("amount").GetInt64());
+        Assert.Equal(-200_000, await Players.BalanceAsync(Server, guestId));
+
+        var debt = Assert.Single(await DebtsAsync(owner), d => d.GetProperty("userId").GetGuid() == guestId);
+        Assert.Equal(200_000, debt.GetProperty("debt").GetProperty("amount").GetInt64());
+        Assert.False(string.IsNullOrEmpty(debt.GetProperty("pc").GetString()));
+
+        await ExpectAsync(Server, 200, HttpMethod.Post, "/wallet/topup", owner, new { userId = guestId, amount = 200_000, method = "cash" });
+        Assert.Equal(0, await Players.BalanceAsync(Server, guestId));
+        Assert.DoesNotContain(await DebtsAsync(owner), d => d.GetProperty("userId").GetGuid() == guestId);
+    }
+
     /// <summary>A 50 000 limit pays 2 minutes (40 000); the 3rd (60 000) is not started, as D-10 for a member's balance.</summary>
     [Fact]
-    public async Task The_guest_debt_limit_stops_the_session_at_the_last_minute_it_covers()
+    public async Task The_guest_debt_limit_stops_a_desk_seat_at_the_last_minute_it_covers()
     {
-        await LimitsAsync("""{"minorAge":18,"minorCurfew":"22:00","guestPostpaid":true,"guestDebtLimit":50000}""");
+        var owner = await LoginAsync(Server, OwnerPin);
+        await OpenShiftAsync(Server, owner);
+        await LimitsAsync("""{"minorAge":18,"minorCurfew":"22:00","guestDebtLimit":50000}""");
         try
         {
-            var (agent, guest) = await GuestAsync();
-            var (_, session) = await Players.StartAsync(agent, guest, prepaid: false);
-            var id = session.GetProperty("id").GetGuid();
+            var agent = await Seats.OnlineAsync(Server);
+            var opened = await RawExpectAsync(Server, 201, HttpMethod.Post, "/sessions/guest", owner, Seat(agent.PcId), Guid.NewGuid());
+            var id = opened.GetProperty("session").GetProperty("id").GetGuid();
+            Assert.Equal(50_000, await Players.ScalarAsync<long>(Server, "SELECT debt_limit FROM sessions WHERE id = @id", new { id }));
 
             await AdvanceOnlineAsync(agent, TimeSpan.FromSeconds(119));
             Assert.Equal("active", await StateAsync(id));
 
             await AdvanceOnlineAsync(agent, TimeSpan.FromSeconds(1));
             Assert.Equal("ended", await StateAsync(id));
-            Assert.Equal(-40_000, await Players.BalanceAsync(Server, guest.Id));
+            Assert.Equal(-40_000, await Players.BalanceAsync(Server, opened.GetProperty("user").GetProperty("id").GetGuid()));
 
-            // A limit below the first minute refuses the start, as an empty wallet does for a member (402).
-            await LimitsAsync("""{"minorAge":18,"minorCurfew":"22:00","guestPostpaid":true,"guestDebtLimit":10000}""");
-            var (second, secondGuest) = await GuestAsync();
-            var (status, body) = await Players.StartAsync(second, secondGuest, prepaid: false);
-            Assert.Equal(402, status);
-            Contract.AssertError(body, "insufficientFunds");
+            // A limit below the first minute refuses the seat (402), and leaves no guest account behind.
+            await LimitsAsync("""{"minorAge":18,"minorCurfew":"22:00","guestDebtLimit":10000}""");
+            var second = await Seats.OnlineAsync(Server);
+            Contract.AssertError(await RawExpectAsync(Server, 402, HttpMethod.Post, "/sessions/guest", owner, Seat(second.PcId), Guid.NewGuid()), "insufficientFunds");
         }
         finally
         {
@@ -82,25 +101,37 @@ public sealed class GuestPostpaidTests(LongClockServerFixture server) : LedgerCh
     }
 
     [Fact]
-    public async Task The_owner_turns_it_on_in_the_club_settings()
+    public async Task The_owner_turns_it_off_in_the_club_settings()
     {
         var owner = await LoginAsync(Server, OwnerPin);
+        await OpenShiftAsync(Server, owner);
         try
         {
-            await ExpectAsync(Server, 200, HttpMethod.Patch, "/club", owner, new { limits = new { minorAge = 18, minorCurfew = "22:00", guestPostpaid = true, guestDebtLimit = 5_000_000 } });
+            // Unset, the console reads it as on: what the server applies.
+            Assert.True((await ExpectAsync(Server, 200, HttpMethod.Get, "/club", owner)).GetProperty("limits").GetProperty("guestPostpaid").GetBoolean());
+
+            await ExpectAsync(Server, 200, HttpMethod.Patch, "/club", owner, new { limits = new { minorAge = 18, minorCurfew = "22:00", guestPostpaid = false, guestDebtLimit = 5_000_000 } });
             var limits = (await ExpectAsync(Server, 200, HttpMethod.Get, "/club", owner)).GetProperty("limits");
-            Assert.True(limits.GetProperty("guestPostpaid").GetBoolean());
+            Assert.False(limits.GetProperty("guestPostpaid").GetBoolean());
             Assert.Equal(5_000_000, limits.GetProperty("guestDebtLimit").GetInt64());
 
-            var (agent, guest) = await GuestAsync();
-            var (status, _) = await Players.StartAsync(agent, guest, prepaid: false);
-            Assert.Equal(201, status);
+            var agent = await Seats.OnlineAsync(Server);
+            var refused = await RawExpectAsync(Server, 403, HttpMethod.Post, "/sessions/guest", owner, Seat(agent.PcId), Guid.NewGuid());
+            Contract.AssertError(refused, "policyDenied", "postpaidNotAllowed");
+
+            await ExpectAsync(Server, 200, HttpMethod.Patch, "/club", owner, new { limits = new { minorAge = 18, minorCurfew = "22:00", guestPostpaid = true, guestDebtLimit = 5_000_000 } });
+            var opened = await RawExpectAsync(Server, 201, HttpMethod.Post, "/sessions/guest", owner, Seat(agent.PcId), Guid.NewGuid());
+            Assert.Equal(5_000_000, await Players.ScalarAsync<long>(Server, "SELECT debt_limit FROM sessions WHERE id = @id",
+                new { id = opened.GetProperty("session").GetProperty("id").GetGuid() }));
+            await ExpectAsync(Server, 200, HttpMethod.Post, "/sessions/end", owner, new { pcId = agent.PcId });
         }
         finally
         {
             await Players.ExecuteAsync(Server, "UPDATE clubs SET settings = settings - 'limits'");
         }
     }
+
+    private static object Seat(Guid pcId) => new { pcId, tariffId = Players.Standard, minutes = 60, prepaid = false };
 
     private Task LimitsAsync(string json) =>
         Players.ExecuteAsync(Server, "UPDATE clubs SET settings = jsonb_set(settings, '{limits}', @json::jsonb)", new { json });

@@ -71,9 +71,6 @@ public sealed class SessionsOptions
 
     /// <summary>Every this many seconds an open session is pushed to its PC again (<c>sessionUpdated</c>).</summary>
     public int ResyncSec { get; set; } = 30;
-
-    /// <summary>Postpaid stops when its cost reaches balance + this (tiyin, D-10); null = no limit.</summary>
-    public long? PostpaidCreditLimit { get; set; } = 0;
 }
 
 /// <summary>

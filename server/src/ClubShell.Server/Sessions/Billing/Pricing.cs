@@ -77,18 +77,22 @@ public sealed class ClubPricing
     public string MinorCurfew { get; init; } = "22:00";
 
     /// <summary>
-    /// <c>limits.guestPostpaid</c> (beyond the contract, owner's choice in the console): a guest may play postpaid and pay at
-    /// the counter afterwards. Off by default — a guest who walks away leaves an unpaid bill.
+    /// <c>limits.guestPostpaid</c> (beyond the contract, owner's choice in the console): the desk may seat a guest postpaid,
+    /// to pay at the counter afterwards. On unless the owner turned it off (<c>false</c>). The kiosk never starts a guest's
+    /// postpaid session, whatever this says.
     /// </summary>
-    public bool GuestPostpaid { get; init; }
+    public bool GuestPostpaid { get; init; } = true;
 
-    /// <summary><c>limits.guestDebtLimit</c> (tiyin): how far a guest's postpaid bill may run; null or 0 — no limit.</summary>
+    /// <summary>
+    /// <c>limits.guestDebtLimit</c> (tiyin): how far below zero a guest's postpaid seat from the desk may run; null or 0 — no
+    /// cap.
+    /// </summary>
     public long? GuestDebtLimit { get; init; }
 
     /// <summary>
-    /// <c>limits.memberDebtLimit</c> (tiyin, beyond the contract, D-31): how far a member's postpaid bill may run below zero;
-    /// null or 0 — the server's <c>Sessions:PostpaidCreditLimit</c> (0: no debt, the balance must cover every minute). Not
-    /// "no limit" as for guests: the console shows it as a toggle plus an amount.
+    /// <c>limits.memberDebtLimit</c> (tiyin, beyond the contract, D-31): how far below zero a member's postpaid seat from the
+    /// desk may run; null or 0 — no cap. A member's own pay-as-you-go from the kiosk always has 0: the balance must cover
+    /// every minute (<see cref="SessionService.DebtLimitFor"/>).
     /// </summary>
     public long? MemberDebtLimit { get; init; }
 
@@ -115,7 +119,7 @@ public sealed class ClubPricing
             Loyalty = (doc?.Loyalty ?? []).OrderBy(l => l.MinSpent).ToArray(),
             MinorAge = doc?.Limits?.MinorAge ?? 18,
             MinorCurfew = doc?.Limits?.MinorCurfew ?? "22:00",
-            GuestPostpaid = doc?.Limits?.GuestPostpaid ?? false,
+            GuestPostpaid = doc?.Limits?.GuestPostpaid ?? true,
             GuestDebtLimit = doc?.Limits?.GuestDebtLimit is > 0 and var limit ? limit : null,
             MemberDebtLimit = doc?.Limits?.MemberDebtLimit is > 0 and var memberLimit ? memberLimit : null,
             CashOutOwnerOnly = doc?.Limits?.CashOutOwnerOnly ?? false,

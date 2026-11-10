@@ -290,8 +290,7 @@ Playwright сам запускает `dotnet run` (Development, `Seed:Dev`, CORS
 `OwnerPin` / `OfflineLogin` / `GuestLogin`, `Realtime:PingSec` / `PongTimeoutSec` / `MaxFrameBytes`, `Agents:HeartbeatSec` /
 `OfflineAfterSec` / `CommandTtlMin` / `AckWaitSec` / `RegisterProof` / `ReenrollWindowMin`, `RateLimit:PinAttempts` / `PinWindowSec` /
 `PinClubAttempts` / `PinClubWindowSec` / `PinTrustedAttempts` / `PinDeviceTrustDays`, `Cors:AllowedOrigins`, `Sessions:GraceSec` /
-`MaxOfflineMinutes` (уходят в конфиг агента) / `TickMs` / `ResyncSec` / `PostpaidCreditLimit` (тиёны; `null` — без
-лимита), `Catalog:PolicySeedPath` / `GamesSeedPath`, `Workers:Enabled`, `Seed:Dev`, `Proxy:Trusted` / `ClientIpHeader`, `Sentry:Dsn`
+`MaxOfflineMinutes` (уходят в конфиг агента) / `TickMs` / `ResyncSec`, `Catalog:PolicySeedPath` / `GamesSeedPath`, `Workers:Enabled`, `Seed:Dev`, `Proxy:Trusted` / `ClientIpHeader`, `Sentry:Dsn`
 (и остальные ключи `Sentry:*` SDK, кроме приватности и Sentry Logs — их задаёт код; без DSN Sentry не подключается),
 переменная окружения `PORT`.
 
@@ -360,7 +359,7 @@ Playwright сам запускает `dotnet run` (Development, `Seed:Dev`, CORS
 | `paused`/`resumed`/`extended`/`ended` в `/events` | только записываются | применяются в момент `at` (§5.12), `ended` рассчитывает сеанс |
 | Офлайн-реплей `POST /sessions` | нужен токен игрока, отвечает 402 | хватает токена агента, overdraft вместо 402 (D-11) |
 | Время вышло | завершение ровно в 0, в том числе у офлайн-ПК | `ending` + бесплатная грация, только онлайн; офлайн — после 240 мин тишины (D-12) |
-| Постоплата | без лимита | `402`, если нет средств на первую минуту; останавливается на границе минуты, когда следующая не по средствам с `PostpaidCreditLimit` (D-10) |
+| Постоплата | без лимита | с киоска — только участник и только с баланса (лимит долга 0): `402`, если нет средств на первую минуту, остановка на границе минуты, когда следующая не по средствам (D-10); гость с киоска — `403 postpaidNotAllowed`. С кассы — участник и гость (`limits.guestPostpaid`, по умолчанию включено), без лимита, если `limits.memberDebtLimit`/`guestDebtLimit` не заданы; лимит сеанса запоминается при открытии (`sessions.debt_limit`) |
 | Блокировка | — | не останавливает оплату (`SessionState.cs:23` агента устарел) |
 | `/sessions/current` | `pcId` не сверяется | `403 pcMismatch` |
 | Неверный пароль | считается на каждый запрос (агент повторяет после refresh → −2), по имени | по имени, известному или нет; один повтор `X-Trace-Id` бесплатный; 5 за 15 мин — `attemptsLeft=0`; попытки по одному имени по очереди |
