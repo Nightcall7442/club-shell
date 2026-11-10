@@ -388,6 +388,15 @@ function setUser(user: User): void {
   persistAuth(user.username);
 }
 
+/** `player` / `player`: a member without an unlock PIN (the unlock form opens on the password). */
+const PLAYER_USER: User = {
+  ...USER,
+  id: '00000000-0000-4000-8000-000000000203',
+  username: 'player',
+  displayName: 'Player',
+  balance: uzs(20_000),
+};
+
 function makeGuest(displayName?: string | null): User {
   const n = Math.floor(100 + Math.random() * 900);
   return {
@@ -600,7 +609,14 @@ function bootFromUrl(): void {
   if (!username) {
     return;
   }
-  const user = username === 'vip' ? VIP_USER : username.startsWith('guest') ? makeGuest(username) : USER;
+  const user =
+    username === 'vip'
+      ? VIP_USER
+      : username === 'player'
+        ? PLAYER_USER
+        : username.startsWith('guest')
+          ? makeGuest(username)
+          : USER;
   setUser(user);
   if (wantAuth || stored === 'demo' || stored === 'vip') {
     mockState.session = activeSessionFor(user);
@@ -880,7 +896,7 @@ cmd('auth_login', (args): AuthLoginResponse => {
       if (MOCK_CREDENTIALS[username] !== password) {
         mockError('unauthorized', 'Invalid credentials', { reason: 'invalidCredentials' });
       }
-      user = username === 'vip' ? VIP_USER : USER;
+      user = username === 'vip' ? VIP_USER : username === 'player' ? PLAYER_USER : USER;
       break;
     }
     case 'guest':

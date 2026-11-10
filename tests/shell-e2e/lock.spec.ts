@@ -90,11 +90,42 @@ async function tapCard(page: Page, cardId: string): Promise<void> {
   }, cardId);
 }
 
-/** Tariff picker shown after a guest's login (no session yet) → "Start playing" → `/home`. */
-async function startSession(page: Page): Promise<void> {
-  const picker = page.getByRole('dialog', { name: en('wallet.chooseTariff') });
-  await expect(picker).toBeVisible();
-  await picker.getByRole('button', { name: en('lock.startPlaying') }).click();
+/** Calls `window.__clubshellMock.simulate[name](...args)` (the mock agent's dev helpers, apps/shell/src/mocks). */
+async function simulate(page: Page, name: string, ...args: unknown[]): Promise<void> {
+  await page.waitForFunction(() => Boolean((window as unknown as { __clubshellMock?: unknown }).__clubshellMock));
+  await page.evaluate(
+    ([fn, rest]) =>
+      (
+        window as unknown as { __clubshellMock: { simulate: Record<string, (...a: unknown[]) => void> } }
+      ).__clubshellMock.simulate[fn as string]?.(...(rest as unknown[])),
+    [name, args] as const,
+  );
+}
+
+/** The mock agent's record of sign-in attempts (no secrets). */
+function loginLog(page: Page): Promise<{ kind: string; endElsewhere: boolean }[]> {
+  return page.evaluate(
+    () =>
+      (window as unknown as { __clubshellMock: { state: { loginLog: { kind: string; endElsewhere: boolean }[] } } })
+        .__clubshellMock.state.loginLog,
+  );
+}
+
+/**
+ * Signed in with a running prepaid session (`?mock=auth`, the mock's `demo`), on `/home`, in English through the top
+ * bar's sound-and-language menu (as games.spec.ts does).
+ */
+async function openPlaying(page: Page): Promise<void> {
+  await page.goto('/?mock=auth#/home');
+  const trigger = page.locator('header [data-popover-trigger]');
+  await expect(trigger).toBeVisible();
+  if ((await page.locator('html').getAttribute('lang')) !== 'en') {
+    await trigger.click();
+    const option = page.getByRole('option', { name: 'English' });
+    await expect(option).toBeVisible();
+    await option.press('Enter');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  }
   await playing(page);
 }
 
@@ -222,11 +253,23 @@ test.describe('lock screen', () => {
     await expect(submit).toBeEnabled();
     await submit.click();
 
-    await startSession(page);
+    // A guest cannot start (or pay for) time at the kiosk: the desk opens it.
+    const desk = page.getByRole('dialog', { name: en('session.guestNoSession.title') });
+    await expect(desk).toBeVisible();
+    await expect(desk.getByText(en('session.guestNoSession.hint'))).toBeVisible();
+    await expect(desk.getByRole('button', { name: en('lock.callAdmin') })).toBeVisible();
+    await expect(page.getByRole('button', { name: en('lock.startPlaying') })).toHaveCount(0);
+    await expect(page.getByRole('dialog', { name: en('wallet.chooseTariff') })).toHaveCount(0);
+
+    // The cashier opens the time on this PC: the guest is in at once.
+    await simulate(page, 'deskStart', 60);
+    await playing(page);
     await expect(page.getByText(en('desktop.guestBadge'), { exact: true })).toBeVisible();
     await expect(
       page.getByRole('button', { name: new RegExp(`^${escapeRegExp(en('desktop.userMenu'))}: Playwright`) }),
     ).toBeVisible();
+    // No lock for a guest: there is no PIN or password to come back with.
+    await expect(page.getByRole('button', { name: en('desktop.lock'), exact: true })).toHaveCount(0);
   });
 
   test('card sign-in: a reader types the number and presses Enter', async ({ page }) => {
@@ -368,5 +411,145 @@ test.describe('lock screen', () => {
     await expect(page).toHaveURL(/#\/home$/);
     await expect(sessionTimer(page)).toBeVisible();
     await expect(page.getByRole('button', { name: en('desktop.lock'), exact: true })).toBeVisible();
+  });
+});
+
+test.describe('player accounts', () => {
+  test('a member buys prepaid time only, and time-up never starts pay as you go', async ({ page }) => {
+    await openPlaying(page);
+    // The prepaid time runs out.
+    await simulate(page, 'sessionSeconds', 2);
+    const picker = page.getByRole('dialog', { name: en('wallet.chooseTariff') });
+    await expect(picker).toBeVisible({ timeout: 10_000 });
+    // No auto-start after time-up (the member still has money): the picker stays.
+    await page.waitForTimeout(1_500);
+    await expect(picker).toBeVisible();
+    await expect(page).toHaveURL(/#\/lock$/);
+
+    // No pay-as-you-go choice for a player: minutes are bought in advance.
+    await expect(picker.getByRole('radio', { name: en('wallet.postpaid') })).toHaveCount(0);
+    await expect(picker.getByRole('radio', { name: en('wallet.prepaid') })).toHaveCount(0);
+    await expect(picker.getByText(en('session.prepaidHint'))).toBeVisible();
+    await expect(picker.getByRole('radiogroup', { name: en('session.minutes') })).toBeVisible();
+    // Priced by the server's quote: Standard, one hour.
+    await expect(picker.getByText(/12[,.\s  ]?000/).first()).toBeVisible();
+
+    await picker.getByRole('button', { name: en('lock.startPlaying') }).click();
+    await playing(page);
+    // A prepaid session counts down (pay as you go would show the time used and the bill).
+    await expect(page.getByText(en('session.openEnded'), { exact: true })).toHaveCount(0);
+  });
+
+  test('a session open on another PC: end it there and sign in here', async ({ page }) => {
+    await openLock(page);
+    await simulate(page, 'sessionElsewhere', 'PC-07');
+    await signIn(page, DEMO_USER, DEMO_PASSWORD);
+
+    const dialog = page.getByRole('dialog', { name: en('lock.elsewhere.title', { pc: 'PC-07' }) });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText(en('lock.elsewhere.body'))).toBeVisible();
+    // The form says nothing on its own: the dialog is the answer.
+    await expect(page.getByRole('alert').filter({ hasText: 'PC-07' })).toHaveCount(0);
+    expect(await loginLog(page)).toEqual([{ kind: 'password', endElsewhere: false }]);
+
+    await dialog.getByRole('button', { name: en('lock.elsewhere.confirm', { pc: 'PC-07' }) }).click();
+    await playing(page);
+    // The same sign-in, repeated once with endElsewhere.
+    expect(await loginLog(page)).toEqual([
+      { kind: 'password', endElsewhere: false },
+      { kind: 'password', endElsewhere: true },
+    ]);
+  });
+
+  test('cancelling the end-elsewhere dialog signs nobody in and sends nothing more', async ({ page }) => {
+    await openLock(page);
+    await simulate(page, 'sessionElsewhere', 'PC-03');
+    await page.getByRole('tab', { name: en('lock.methodCard') }).click();
+    const card = field(page, en('lock.cardNumber'));
+    await card.fill(DEMO_CARD);
+    await card.press('Enter');
+
+    const dialog = page.getByRole('dialog', { name: en('lock.elsewhere.title', { pc: 'PC-03' }) });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: en('common.cancel') }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page).toHaveURL(/#\/lock$/);
+    await expect(sessionTimer(page)).toHaveCount(0);
+    expect(await loginLog(page)).toEqual([{ kind: 'card', endElsewhere: false }]);
+  });
+
+  test('locked from the desk: the screen says so and offers no unlock form', async ({ page }) => {
+    await openPlaying(page);
+    await simulate(page, 'staffLock');
+
+    await expect(page).toHaveURL(/#\/lock$/);
+    await expect(page.getByRole('heading', { level: 1, name: en('lock.staffLockedTitle') })).toBeVisible();
+    await expect(page.getByText(en('lock.staffLockedHint'))).toBeVisible();
+    await expect(page.getByRole('tablist', { name: en('lock.chooseMethod') })).toHaveCount(0);
+    await expect(page.locator('input[type="password"]')).toHaveCount(0);
+
+    // The desk unlocks it: back to the game.
+    await simulate(page, 'staffUnlock');
+    await playing(page);
+  });
+
+  test('without a PIN the unlock form opens on the password', async ({ page }) => {
+    await openLock(page);
+    // `player` has no unlock PIN in the mock.
+    await signIn(page, 'player', 'player');
+    await playing(page);
+    await page.getByRole('button', { name: en('desktop.lock'), exact: true }).click();
+    await expect(page).toHaveURL(/#\/lock$/);
+    await expect(page.getByRole('tab', { name: en('lock.methodPassword') })).toHaveAttribute('aria-selected', 'true');
+    const password = field(page, en('lock.password'));
+    await expect(password).toBeVisible();
+    await password.fill('player');
+    await password.press('Enter');
+    await playing(page);
+  });
+
+  test('a failed sign-out is shown with a retry, and the player stays signed in until it works', async ({ page }) => {
+    await openPlaying(page);
+    await simulate(page, 'failNext', 'auth_logout', 'agentOffline');
+
+    await page.getByRole('button', { name: en('session.leave'), exact: true }).click();
+    const leave = page.getByRole('dialog', { name: en('session.leaveTitle') });
+    // Honest: unused prepaid time is not returned.
+    await expect(leave).toContainText(/not returned/);
+    await leave.getByRole('button', { name: en('session.leaveConfirm') }).click();
+
+    const failed = page.getByRole('dialog', { name: en('session.logoutFailed.title') });
+    await expect(failed).toBeVisible();
+    await expect(failed).toContainText(en('errors.agentOffline'));
+    await expect(page).toHaveURL(/#\/home$/);
+    await expect(sessionTimer(page)).toBeVisible();
+
+    await failed.getByRole('button', { name: en('session.logoutFailed.retry') }).click();
+    await expect(page).toHaveURL(/#\/lock$/);
+    await expect(page.getByRole('heading', { level: 1, name: en('lock.title') })).toBeVisible();
+    await expect(failed).toHaveCount(0);
+  });
+
+  test('sign-in expired mid-session: the same member signs in again and plays on', async ({ page }) => {
+    await openPlaying(page);
+    await simulate(page, 'authExpired', 'tokenExpired');
+
+    await expect(page).toHaveURL(/#\/lock$/);
+    await expect(page.getByText(en('lock.relogin.title', { name: 'Bobur Y.' }))).toBeVisible();
+    await expect(page.getByText(en('lock.relogin.hint'))).toBeVisible();
+    await expect(field(page, en('lock.username'))).toHaveValue(DEMO_USER);
+    const password = field(page, en('lock.password'));
+    await password.fill(DEMO_PASSWORD);
+    await password.press('Enter');
+    await playing(page);
+    // The kept session continues: prepaid, counting down.
+    await expect(page.getByText(en('session.openEnded'), { exact: true })).toHaveCount(0);
+  });
+
+  test('signed out by the desk: the lock screen says why', async ({ page }) => {
+    await openPlaying(page);
+    await simulate(page, 'authExpired', 'sessionEnded');
+    await expect(page).toHaveURL(/#\/lock$/);
+    await expect(page.getByRole('status').filter({ hasText: en('lock.expired.sessionEnded') })).toBeVisible();
   });
 });
