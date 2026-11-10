@@ -44,12 +44,16 @@ export interface LeaveReceipt {
 /** Where the player's session is open after `409 activeSessionElsewhere` on a sign-in. */
 export type ElsewhereSession = ElsewhereInfo;
 
-/** The player whose sign-in expired (`tokenExpired`) while their session was open: the lock screen offers them back in. */
+/**
+ * The player whose sign-in expired (`tokenExpired`) while their session was open; the Agent keeps it locked. A member
+ * signs in again (any method) and plays on; a guest cannot (a new guest is another account): the desk unlocks it.
+ */
 export interface ReloginUser {
   userId: string;
   username: string;
   displayName: string;
   avatarUrl: string | null;
+  guest: boolean;
 }
 
 /** A sign-out the Agent refused: the player is still signed in and the session still runs. */
@@ -312,12 +316,13 @@ export const useAuthStore = create<AuthStore>()(
         const session = useSessionStore.getState().session;
         // The Agent locked the open session when the token ran out: the same member signs in again and plays on.
         const relogin: ReloginUser | null =
-          reason === 'tokenExpired' && user && user.role !== 'guest' && session && isSessionOpen(session.state)
+          reason === 'tokenExpired' && user && session && isSessionOpen(session.state)
             ? {
                 userId: user.id,
                 username: user.username,
                 displayName: user.displayName,
                 avatarUrl: user.avatarUrl ?? null,
+                guest: user.role === 'guest',
               }
             : null;
         elsewhereRetry.clear();

@@ -491,6 +491,33 @@ test.describe('player accounts', () => {
     // The desk unlocks it: back to the game.
     await simulate(page, 'staffUnlock');
     await playing(page);
+
+    // The player's own lock, which the desk then takes over: the PIN form gives way to the desk's card.
+    await page.getByRole('button', { name: en('desktop.lock'), exact: true }).click();
+    await expect(page.getByRole('button', { name: en('lock.unlockWithPin') })).toBeVisible();
+    await simulate(page, 'staffLock');
+    await expect(page.getByRole('heading', { level: 1, name: en('lock.staffLockedTitle') })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.locator('input[type="password"]')).toHaveCount(0);
+  });
+
+  test('a guest whose sign-in expired mid-session is sent to the desk, not to a sign-in as someone new', async ({
+    page,
+  }) => {
+    await openLock(page);
+    await page.getByRole('tab', { name: en('lock.methodGuest') }).click();
+    await page.getByRole('checkbox', { name: en('lock.guestTerms') }).check();
+    await page.getByRole('button', { name: en('lock.guest'), exact: true }).click();
+    await expect(page.getByRole('dialog', { name: en('session.guestNoSession.title') })).toBeVisible();
+    await simulate(page, 'deskStart', 60);
+    await playing(page);
+
+    await simulate(page, 'authExpired', 'tokenExpired');
+    await expect(page).toHaveURL(/#\/lock$/);
+    await expect(page.getByText(en('lock.relogin.guestTitle'))).toBeVisible();
+    await expect(page.getByText(en('lock.relogin.guestHint'))).toBeVisible();
+    await expect(page.getByRole('button', { name: en('lock.relogin.other') })).toHaveCount(0);
   });
 
   test('without a PIN the unlock form opens on the password', async ({ page }) => {

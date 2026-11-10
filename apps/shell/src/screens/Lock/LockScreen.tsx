@@ -23,7 +23,7 @@ import { useSession } from '@/hooks/useSession';
 import { trackScreen } from '@/lib/analytics';
 import { pickAutoStartTariff } from '@/lib/autoStart';
 import { onCardRead } from '@/lib/cardReader';
-import { errorReason } from '@/lib/errorText';
+import { errorDetails, errorReason } from '@/lib/errorText';
 import { formatDurationSec, formatMoney } from '@/lib/format';
 import { listPrice } from '@/lib/pricing';
 import { fetchQuote } from '@/lib/quotes';
@@ -206,12 +206,14 @@ export function UnlockForm({ onSuccess, className }: UnlockFormProps): JSX.Eleme
         // Not locked any more (admin unlocked / session ended): resync and let the screen re-route.
         void reload();
       }
-      if (reason === 'noPin') {
-        // No PIN on the account (any more): the password it is.
+      const message = loginErrorMessage(shellErr, method === 'pin' ? 'unlockPin' : 'unlockPassword');
+      const lockedOut = method === 'pin' && errorDetails(shellErr.details)['attemptsLeft'] === 0;
+      if (reason === 'noPin' || lockedOut) {
+        // No PIN on the account (any more), or PIN unlocks locked out (even the right one is refused): the password.
         picked.current = true;
         setMethod('password');
       }
-      setError(loginErrorMessage(shellErr, method === 'pin' ? 'unlockPin' : 'unlockPassword'));
+      setError(message);
     }
   };
 
@@ -917,8 +919,9 @@ function ExpiredNote(): JSX.Element | null {
 }
 
 /**
- * The member whose sign-in ran out mid-session (`auth.expired {tokenExpired}`; the Agent locked the session): their
- * name, why, and the password tab with their username filled in — signing in again picks the session back up.
+ * The player whose sign-in ran out mid-session (`auth.expired {tokenExpired}`; the Agent keeps the session locked). A
+ * member: their name, why, and the password tab with their username filled in — signing in again (any method) picks
+ * the session back up. A guest cannot sign in to it again: the desk unlocks it.
  */
 function ReloginNote(): JSX.Element | null {
   const { t } = useTranslation();
@@ -931,16 +934,20 @@ function ReloginNote(): JSX.Element | null {
     <div role="status" className="mb-4 flex items-center gap-4 rounded-md bg-accent/15 px-4 py-3 text-left">
       <Avatar name={relogin.displayName} src={relogin.avatarUrl} size="md" />
       <div className="min-w-0 flex-1">
-        <p className="font-semibold text-text">{t('lock.relogin.title', { name: relogin.displayName })}</p>
-        <p className="text-sm text-muted">{t('lock.relogin.hint')}</p>
-        <button
-          type="button"
-          data-nav="true"
-          onClick={clear}
-          className="focus-ring mt-1 rounded-sm text-sm font-medium text-accent underline-offset-2 hover:underline"
-        >
-          {t('lock.relogin.other')}
-        </button>
+        <p className="font-semibold text-text">
+          {relogin.guest ? t('lock.relogin.guestTitle') : t('lock.relogin.title', { name: relogin.displayName })}
+        </p>
+        <p className="text-sm text-muted">{relogin.guest ? t('lock.relogin.guestHint') : t('lock.relogin.hint')}</p>
+        {!relogin.guest && (
+          <button
+            type="button"
+            data-nav="true"
+            onClick={clear}
+            className="focus-ring mt-1 rounded-sm text-sm font-medium text-accent underline-offset-2 hover:underline"
+          >
+            {t('lock.relogin.other')}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -1097,11 +1104,12 @@ export default function LockScreen(): JSX.Element {
 
   // Signing the same member in again after their sign-in expired mid-session: the password tab, username filled in.
   useEffect(() => {
-    if (relogin) {
+    if (relogin && !relogin.guest) {
       picked.current = true;
       setTab('password');
     }
   }, [relogin]);
+  const reloginMember = relogin && !relogin.guest ? relogin : null;
 
   // A reader's card from whatever was showing — another tab, or the attract screen this one replaced — goes to the card
   // tab, which signs in with it; the number is not lost and the player does not tap twice.
@@ -1224,7 +1232,9 @@ export default function LockScreen(): JSX.Element {
                 />
                 <div role="tabpanel" id={`lock-panel-${tab}`} aria-labelledby={`lock-tab-${tab}`}>
                   {tab === 'qr' && <QrLogin />}
-                  {tab === 'password' && <LoginForm key={relogin?.userId ?? ''} initialUsername={relogin?.username} />}
+                  {tab === 'password' && (
+                    <LoginForm key={reloginMember?.userId ?? ''} initialUsername={reloginMember?.username} />
+                  )}
                   {tab === 'card' && <CardLogin tapped={tapped} />}
                   {tab === 'guest' && <GuestLogin />}
                 </div>

@@ -183,9 +183,11 @@
       "staffLock": "The PC is locked by the administrator: only the desk can unlock it.",
       "guestLock": "A guest session cannot be locked.",
       "guestDisabled": "Guest sign-in is off in this club: please ask the administrator.",
-      "offlineUnavailable": "No connection with the club server: pay as you go and current prices are unavailable. Try again in a moment.",
+      "offlineUnavailable": "No connection with the club server: this is not available offline. Try again in a moment.",
       "activeSessionElsewhere": "Your session is open on PC {{pc}}. Sign out there or ask the administrator.",
-      "activeSessionElsewhereUnknown": "Your session is open on another PC. Sign out there or ask the administrator."
+      "activeSessionElsewhereUnknown": "Your session is open on another PC. Sign out there or ask the administrator.",
+      "otherUser": "This session belongs to another player.",
+      "userToken": "Your sign-in was not accepted: please sign in again."
     }
   },
   "lock": {
@@ -309,8 +311,13 @@
     "relogin": {
       "title": "Continue as {{name}}",
       "hint": "Your sign-in expired while you were playing. Your session is kept: sign in again to continue.",
-      "other": "Sign in with another account"
-    }
+      "other": "Sign in with another account",
+      "guestTitle": "Your guest session is locked",
+      "guestHint": "Your sign-in expired. The session and its time are kept: ask the administrator to unlock it."
+    },
+    "wrongPinLeft": "Wrong PIN. Attempts left: {{attempts}}",
+    "wrongPasswordLeft": "Wrong password. Attempts left: {{attempts}}",
+    "pinLockedOut": "Too many wrong PINs: unlock with your password or ask the administrator."
   },
   "desktop": {
     "title": "Home",
@@ -1284,7 +1291,8 @@
       "title": "Could not sign out",
       "body": "{{error}} You are still signed in on this PC and the session is still open.",
       "retry": "Try again"
-    }
+    },
+    "idleBodyLock": "Nobody has touched this PC for 10 minutes. In {{seconds}} s the screen locks; your paid time is kept."
   },
   "settings": {
     "title": "Settings",

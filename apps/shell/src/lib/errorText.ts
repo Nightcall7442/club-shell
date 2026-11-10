@@ -39,6 +39,7 @@ const REASON_KEYS: ReadonlySet<string> = new Set([
   'guestLock',
   'guestDisabled',
   'offlineUnavailable',
+  'otherUser',
 ]);
 
 /** A sign-in or an unlock form (wrong secrets, lockouts and empty fields read as such). */
@@ -55,16 +56,26 @@ export function errorText(code: string, details: unknown, context: ErrorContext 
       if (reason === 'noPin') {
         return one('lock.noPin');
       }
+      if (reason === 'userToken') {
+        // The player's token was refused (expired, revoked): signing in again is the way back.
+        return one('errors.reason.userToken', 'errors.unauthorized');
+      }
       const wrongSecret =
         reason === 'badSecret' || reason === 'badCredentials' || reason === 'wrongPin' || reason === 'wrongPassword';
-      if (d['attemptsLeft'] === 0) {
-        return one('lock.tooManyAttempts');
+      const left = d['attemptsLeft'];
+      if (left === 0) {
+        // Locked out of PIN unlocks (the server refuses even the right PIN then): the password still works.
+        return context === 'unlockPin' ? one('lock.pinLockedOut', 'lock.tooManyAttempts') : one('lock.tooManyAttempts');
       }
+      if (typeof left === 'number' && left > 0) {
+        vars['attempts'] = left;
+      }
+      const counted = typeof left === 'number' && left > 0;
       if (context === 'unlockPin' && (wrongSecret || reason === null)) {
-        return one('lock.wrongPin');
+        return counted ? one('lock.wrongPinLeft', 'lock.wrongPin') : one('lock.wrongPin');
       }
       if (context === 'unlockPassword' && (wrongSecret || reason === null)) {
-        return one('lock.wrongPassword');
+        return counted ? one('lock.wrongPasswordLeft', 'lock.wrongPassword') : one('lock.wrongPassword');
       }
       if (reason === 'wrongPin') {
         return one('lock.wrongPin');
@@ -73,12 +84,7 @@ export function errorText(code: string, details: unknown, context: ErrorContext 
         return one('lock.wrongPassword');
       }
       if (context === 'login') {
-        const left = d['attemptsLeft'];
-        if (typeof left === 'number' && left > 0) {
-          vars['attempts'] = left;
-          return one('lock.invalidCredentialsLeft', 'lock.invalidCredentials');
-        }
-        return one('lock.invalidCredentials');
+        return counted ? one('lock.invalidCredentialsLeft', 'lock.invalidCredentials') : one('lock.invalidCredentials');
       }
       return one('errors.unauthorized');
     }

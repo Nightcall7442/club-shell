@@ -451,7 +451,8 @@ export function clubRoutes(app: FastifyInstance): void {
       promoCodes: c.promoCodes,
       happyHours: c.happyHours,
       loyalty: c.loyalty,
-      limits: c.limits,
+      // As the server: guest postpaid at the desk is on unless the owner turned it off.
+      limits: { ...c.limits, guestPostpaid: c.limits.guestPostpaid ?? true },
       catalog: c.catalog,
       banners: c.banners,
       rulesText: c.rulesText,

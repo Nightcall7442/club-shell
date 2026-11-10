@@ -746,6 +746,10 @@ export const simulate = {
       mockState.session.pausedAt = nowIso();
       mockState.lockedByStaff = true;
       emitSession();
+    } else if (command === 'lock' && mockState.session?.state === 'locked' && !mockState.lockedByStaff) {
+      // A player's lock the desk takes over: still `locked`, announced with a `session.updated` (as the Agent does).
+      mockState.lockedByStaff = true;
+      emitSession();
     }
     if (command === 'unlock' && mockState.session && mockState.session.state === 'locked') {
       mockState.session.state = 'active';
@@ -1105,7 +1109,7 @@ cmd('session_start', (args): Session => {
   } else {
     // Pay as you go at the kiosk: a member's, from the balance, and only online; a guest's time is the desk's.
     if (user.role === 'guest') {
-      mockError('policyDenied', 'Guests pay at the desk', { reason: 'postpaidNotAllowed' });
+      mockError('policyDenied', 'Guests pay at the desk', { rule: 'postpaidNotAllowed' });
     }
     if (mockState.serverOffline) {
       mockError('conflict', 'The club server is unreachable', { reason: 'offlineUnavailable' });

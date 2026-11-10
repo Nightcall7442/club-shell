@@ -183,9 +183,11 @@
       "staffLock": "Kompyuter administrator tomonidan bloklangan: uni faqat kassada ochish mumkin.",
       "guestLock": "Mehmon seansini bloklab bo'lmaydi.",
       "guestDisabled": "Bu klubda mehmon sifatida kirish o'chirilgan: administratorga murojaat qiling.",
-      "offlineUnavailable": "Klub serveri bilan aloqa yo'q: foydalanish bo'yicha to'lov va joriy narxlar hozir mavjud emas. Birozdan keyin urinib ko'ring.",
+      "offlineUnavailable": "Klub serveri bilan aloqa yo'q: aloqasiz bu mavjud emas. Birozdan keyin urinib ko'ring.",
       "activeSessionElsewhere": "Seansingiz {{pc}} kompyuterida ochiq. U yerda chiqing yoki administratorga murojaat qiling.",
-      "activeSessionElsewhereUnknown": "Seansingiz boshqa kompyuterda ochiq. U yerda chiqing yoki administratorga murojaat qiling."
+      "activeSessionElsewhereUnknown": "Seansingiz boshqa kompyuterda ochiq. U yerda chiqing yoki administratorga murojaat qiling.",
+      "otherUser": "Bu seans boshqa o'yinchiga tegishli.",
+      "userToken": "Kirish qabul qilinmadi: qaytadan kiring."
     }
   },
   "lock": {
@@ -309,8 +311,13 @@
     "relogin": {
       "title": "{{name}} sifatida davom etish",
       "hint": "O'yin davomida kirish muddati tugadi. Seans saqlangan — davom etish uchun qaytadan kiring.",
-      "other": "Boshqa hisob bilan kirish"
-    }
+      "other": "Boshqa hisob bilan kirish",
+      "guestTitle": "Mehmon seansi bloklangan",
+      "guestHint": "Kirish muddati tugadi. Seans va uning vaqti saqlangan — administratordan uni blokdan chiqarishni so'rang."
+    },
+    "wrongPinLeft": "PIN noto'g'ri. Qolgan urinishlar: {{attempts}}",
+    "wrongPasswordLeft": "Parol noto'g'ri. Qolgan urinishlar: {{attempts}}",
+    "pinLockedOut": "Juda ko'p noto'g'ri PIN: parol bilan oching yoki administratorga murojaat qiling."
   },
   "desktop": {
     "title": "Bosh sahifa",
@@ -1284,7 +1291,8 @@
       "title": "Hisobdan chiqib bo'lmadi",
       "body": "{{error}} Siz hali ham bu kompyuterda hisobdasiz, seans yakunlanmagan.",
       "retry": "Qayta urinish"
-    }
+    },
+    "idleBodyLock": "Kompyuterdan 10 daqiqa davomida hech kim foydalanmadi. {{seconds}} soniyadan keyin ekran bloklanadi — to'langan vaqt saqlanadi."
   },
   "settings": {
     "title": "Sozlamalar",

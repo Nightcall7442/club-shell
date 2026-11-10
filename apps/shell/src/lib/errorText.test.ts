@@ -67,6 +67,20 @@ describe('errorText', () => {
     assert.equal(left.keys[0], 'lock.invalidCredentialsLeft');
     assert.equal(left.vars['attempts'], 2);
     assert.equal(first('unauthorized', { reason: 'badCredentials', attemptsLeft: 0 }, 'login'), 'lock.tooManyAttempts');
+    const pinLeft = errorText('unauthorized', { reason: 'badSecret', attemptsLeft: 3 }, 'unlockPin');
+    assert.equal(pinLeft.keys[0], 'lock.wrongPinLeft');
+    assert.equal(pinLeft.vars['attempts'], 3);
+    // Locked out (the right PIN is refused too): the password, or the administrator.
+    assert.equal(
+      first('unauthorized', { reason: 'badCredentials', attemptsLeft: 0 }, 'unlockPin'),
+      'lock.pinLockedOut',
+    );
+    assert.equal(
+      first('unauthorized', { reason: 'badCredentials', attemptsLeft: 0 }, 'unlockPassword'),
+      'lock.tooManyAttempts',
+    );
+    assert.equal(first('unauthorized', { reason: 'userToken' }), 'errors.reason.userToken');
+    assert.equal(first('forbidden', { reason: 'otherUser' }), 'errors.reason.otherUser');
     assert.equal(first('rateLimited', {}, 'login'), 'lock.tooManyAttempts');
     assert.equal(first('rateLimited', { retryAfterSec: 9 }), 'errors.rateLimited');
     assert.equal(first('validation', { field: 'cardId' }, 'login'), 'lock.cardRequired');
@@ -88,6 +102,11 @@ describe('errorText', () => {
       ['conflict', { reason: 'pcNotReady' }, 'login'],
       ['policyDenied', { reason: 'postpaidNotAllowed' }, 'action'],
       ['unauthorized', { reason: 'noPin' }, 'unlockPin'],
+      ['unauthorized', { reason: 'badSecret', attemptsLeft: 2 }, 'unlockPin'],
+      ['unauthorized', { reason: 'badSecret', attemptsLeft: 2 }, 'unlockPassword'],
+      ['unauthorized', { reason: 'userToken' }, 'action'],
+      ['unauthorized', { reason: 'badCredentials', attemptsLeft: 0 }, 'unlockPin'],
+      ['forbidden', { reason: 'otherUser' }, 'action'],
       ['unauthorized', { reason: 'badCredentials', attemptsLeft: 3 }, 'login'],
     ];
     for (const [code, details, context] of cases) {

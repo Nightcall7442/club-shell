@@ -121,6 +121,30 @@ function stopBalancePoll(): void {
   }
 }
 
+/** `auth.status` for who locked the session at most this often (the Agent pushes `session.updated` every second). */
+const LOCK_READ_MS = 3_000;
+let lockReadAt = 0;
+let lockReadTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Re-reads `lockedByStaff` / `pinSet`; `force` on the lock itself, throttled for the pushes that follow — a push inside
+ * the window is read at its end, so a takeover right after the player's own lock is not missed.
+ */
+function readLock(force = false): void {
+  const wait = LOCK_READ_MS - (Date.now() - lockReadAt);
+  if (!force && wait > 0) {
+    lockReadTimer ??= setTimeout(() => {
+      lockReadTimer = null;
+      if (useSessionStore.getState().state === 'locked') {
+        readLock(true);
+      }
+    }, wait);
+    return;
+  }
+  lockReadAt = Date.now();
+  void useAuthStore.getState().refreshLock();
+}
+
 function currentRoute(): string {
   return typeof window === 'undefined' ? '' : (window.location.hash.replace(/^#/, '').split('?')[0] ?? '');
 }
@@ -172,7 +196,7 @@ function wireListeners(): void {
       (s) => s.state,
       (state, prev) => {
         if (state === 'locked' && prev !== 'locked') {
-          void auth().refreshLock();
+          readLock(true);
         } else if (state !== 'locked' && auth().lockedByStaff) {
           auth().setLockedByStaff(false);
         }
@@ -198,7 +222,15 @@ function wireListeners(): void {
     ),
 
     // ----- session -----------------------------------------------------------------------------------------------------
-    events.on('session.updated', (s: Session) => session().setSession(s)),
+    events.on('session.updated', (s: Session) => {
+      const wasLocked = session().state === 'locked';
+      session().setSession(s);
+      // A player's lock the desk took over stays `locked`: the Agent says so with a `session.updated`, and
+      // `auth.status.lockedByStaff` tells which.
+      if (wasLocked && s.state === 'locked' && !auth().lockedByStaff) {
+        readLock();
+      }
+    }),
     events.on('session.warning', (w) => {
       session().onWarning(w);
       notify().notifySessionWarning(w);
@@ -562,6 +594,10 @@ export function teardownStores(): void {
   unsubscribes = [];
   stopSessionTicker();
   stopBalancePoll();
+  if (lockReadTimer !== null) {
+    clearTimeout(lockReadTimer);
+    lockReadTimer = null;
+  }
   stopToastTimer();
   bootPromise = null;
 }
