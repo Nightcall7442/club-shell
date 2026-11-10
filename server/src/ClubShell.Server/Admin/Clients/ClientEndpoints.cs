@@ -106,14 +106,22 @@ public static class ClientEndpoints
 
     /// <summary>
     /// A member with zero balances and the club profile. No <c>password</c>: a random one nobody knows (only a reset gives
-    /// the client one). Checks in the mock's order: fields, login taken, card taken.
+    /// the client one). Checks in the mock's order: fields (<c>username</c> trimmed, 3–32 characters: <c>400 username
+    /// min|max</c>), login taken, card taken.
     /// </summary>
     private static async Task<IResult> AddAsync(HttpContext context, [FromBody] JsonElement body, IdempotencyStore store, TimeProvider clock)
     {
         var staff = context.Features.GetRequiredFeature<StaffContext>();
         var r = Api.Read<AdminClientCreateRequest>(body, "displayName", "username");
         var displayName = AdminInput.Text(r.DisplayName, "displayName", 64);
-        var username = AdminInput.Text(r.Username, "username", 32).ToLowerInvariant();
+        // 3–32 characters, as the contract's User.username (sign-in trims the typed name, so the stored one is trimmed too);
+        // lower-cased here in any script — PostgreSQL's lower() under the C locale folds only ASCII.
+        var username = AdminInput.Text(r.Username?.Trim(), "username", 32).ToLowerInvariant();
+        if (username.Length < 3)
+        {
+            throw ApiException.Validation("username", "min");
+        }
+
         var password = r.Password is null ? null : Password(r.Password);
         var phone = AdminInput.OptionalText(r.Phone, "phone", 32) ?? "";
         var birthYear = AdminInput.Range(r.BirthYear, "birthYear", 1900, 2100);

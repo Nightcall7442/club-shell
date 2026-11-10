@@ -233,21 +233,27 @@ public static class PlayerAuthEndpoints
     }
 
     /// <summary>
-    /// Password check with the lockout (§3.4, D-17): failures are counted per lower-cased username of the network, known
-    /// or not (so <c>attemptsLeft</c> does not tell which names exist; an unknown one costs a dummy derivation); 5 in 15 min
-    /// refuse even the right password with <c>attemptsLeft = 0</c> until the window passes. The agent repeats a 401 once
-    /// after a refresh with the same <c>X-Trace-Id</c> (N2): that first repeat is free, every further one counts. Attempts
-    /// on one name are serialized (transaction advisory lock), so parallel guesses cannot all pass the count.
+    /// Password check with the lockout (§3.4, D-17); the name in any case, Cyrillic too. Failures are counted per
+    /// lower-cased username of the network, known or not (so <c>attemptsLeft</c> does not tell which names exist; an unknown
+    /// one costs a dummy derivation); 5 in 15 min refuse even the right password with <c>attemptsLeft = 0</c> until the window
+    /// passes. An agent that repeats a 401 once after a refresh with the same <c>X-Trace-Id</c> (N2) gets that first repeat
+    /// free, every further one counts (agents from this release do not repeat it). Attempts on one name are serialized
+    /// (transaction advisory lock), so parallel guesses cannot all pass the count.
     /// </summary>
     private static Task<Guid> CheckPasswordAsync(NpgsqlConnection c, Guid network, string username, string password, Guid traceId, DateTimeOffset now) =>
         CountFailuresAsync(c, network, LockoutKey(username), traceId, now, forgetOnSuccess: true, async tx =>
         {
-            var user = await c.QuerySingleOrDefaultAsync<Credentials>(
+            // lower() under the C locale folds only ASCII: the name is also folded here in any script (the desk stores names
+            // folded that way), and an exact match of the old rule wins over the folded one.
+            var user = await c.QueryFirstOrDefaultAsync<Credentials>(
                 """
                 SELECT id, password_hash FROM users
-                WHERE network_id = @network AND lower(username) = lower(@username) AND deleted_at IS NULL AND NOT transient
+                WHERE network_id = @network AND (lower(username) = lower(@username) OR lower(username) = @folded)
+                  AND deleted_at IS NULL AND NOT transient
+                ORDER BY lower(username) = lower(@username) DESC
+                LIMIT 1
                 """,
-                new { network, username }, tx);
+                new { network, username, folded = username.ToLowerInvariant() }, tx);
             return Passwords.Verify(user?.PasswordHash, password) && user is not null ? user.Id : null;
         });
 
