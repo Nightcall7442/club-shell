@@ -120,14 +120,20 @@ public sealed class AgentHarnessS2Tests(LongClockServerFixture server) : LedgerC
         Assert.Equal(new[] { 201, 409 }, results.Select(r => r.Status).Order());
         Contract.AssertError(results.Single(r => r.Status == 409).Body, "sessionAlreadyActive");
 
-        // One player on two PCs: the open-session index of the player decides.
+        // One player on two PCs: signing in on the second signs the first out (401 userToken there); the desk seating the
+        // player on the first while the kiosk of the second starts: the open-session index of the player decides.
         var first = await TestAgent.CreateAsync(Server);
         var second = await TestAgent.CreateAsync(Server);
         var both = await Players.CreateAsync(Server);
         await first.LoginAsync(both);
         await second.LoginAsync(both);
-        results = await Task.WhenAll(Players.StartAsync(first, both), Players.StartAsync(second, both));
-        Assert.Equal(new[] { 201, 409 }, results.Select(r => r.Status).Order());
+        Assert.Equal(401, (await Players.StartAsync(first, both)).Status);
+        var owner = await Staff.LoginAsync(Server, Staff.OwnerPin);
+        await Staff.OpenShiftAsync(Server, owner);
+        var desk = Staff.SendAsync(Server, HttpMethod.Post, "/sessions", owner, new { pcId = first.PcId, userId = both.Id, tariffId = Players.Standard, minutes = 60 });
+        var kiosk = Players.StartAsync(second, both);
+        await Task.WhenAll(desk, kiosk);
+        Assert.Equal(new[] { 201, 409 }, new[] { (await desk).Status, (await kiosk).Status }.Order());
         Assert.Equal(10_000_000 - 1_200_000, await Players.BalanceAsync(Server, both.Id));
     }
 

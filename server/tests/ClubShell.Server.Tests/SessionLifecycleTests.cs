@@ -100,8 +100,9 @@ public sealed class SessionLifecycleTests(LongClockServerFixture server) : Ledge
     }
 
     /// <summary>
-    /// A player token of PC A acts only on A: signed in on A and B, the player's session on B is not extended from A
-    /// (<c>pcMismatch</c>); pause and resume are no player's at all (<c>staffOnly</c>).
+    /// A player token of PC A acts only on A: signing in on B signs the player out of A (its token is gone, <c>401
+    /// userToken invalid</c>), and B's token sent from A is <c>401 userToken boundElsewhere</c> — the player's session on B is
+    /// neither paused, resumed nor extended from A.
     /// </summary>
     [Fact]
     public async Task Pause_resume_and_extend_of_the_players_session_on_another_pc_are_refused()
@@ -112,11 +113,14 @@ public sealed class SessionLifecycleTests(LongClockServerFixture server) : Ledge
         var (_, created) = await Players.StartAsync(b, player);
         var id = created.GetProperty("id").GetGuid();
 
-        foreach (var (path, body, key, reason) in new (string, object?, Guid?, string)[]
-                 { ("pause", null, null, "staffOnly"), ("resume", null, null, "staffOnly"), ("extend", new { minutes = 30 }, Guid.NewGuid(), "pcMismatch") })
+        foreach (var (token, problem) in new[] { (a.UserToken, "invalid"), (b.UserToken, "boundElsewhere") })
         {
-            using var response = await a.PostAsync($"/api/v1/sessions/{id}/{path}", body, key);
-            await Contract.ReadErrorAsync(response, 403, "forbidden", reason);
+            a.UserToken = token;
+            foreach (var (path, body, key) in new (string, object?, Guid?)[] { ("pause", null, null), ("resume", null, null), ("extend", new { minutes = 30 }, Guid.NewGuid()) })
+            {
+                using var response = await a.PostAsync($"/api/v1/sessions/{id}/{path}", body, key);
+                Assert.Equal(problem, Details(await Contract.ReadErrorAsync(response, 401, "unauthorized", "userToken")).GetProperty("problem").GetString());
+            }
         }
 
         Assert.Equal(("active", 8_800_000L), ((await CurrentAsync(b)).GetProperty("state").GetString(), await Players.BalanceAsync(Server, player.Id)));
