@@ -6,8 +6,9 @@ using static ClubShell.Server.Tests.Staff;
 namespace ClubShell.Server.Tests;
 
 /// <summary>
-/// Postpaid from the desk (cash desk part 2, D-30..D-35, D-38): <c>prepaid:false</c> seats a member on the balance (and
-/// <c>limits.memberDebtLimit</c> below zero, off by default) or a guest under <c>limits.guestPostpaid</c>; the desk end
+/// Postpaid from the desk (cash desk part 2, D-30..D-35, D-38): <c>prepaid:false</c> seats a member or a guest
+/// (<c>limits.guestPostpaid</c>, on unless the owner turns it off) with no cap, or under <c>limits.memberDebtLimit</c> /
+/// <c>guestDebtLimit</c> when the owner sets one (taken when the seat opens, <c>sessions.debt_limit</c>); the desk end
 /// charges the frozen price; a debt is taken with <c>adminTopUp {settleDebt}</c> of exactly the debt in tiyin, with no bonus;
 /// an ordinary top-up's tier bonus counts only the money above a debt. A package or a payment never goes with postpaid, and
 /// a postpaid open racing the close is refused rather than journaled without a shift. Standard costs 20 000 tiyin a minute.
@@ -50,14 +51,22 @@ public sealed class DeskPostpaidTests(LongClockServerFixture server) : LedgerChe
         var member = await Players.CreateAsync(Server, balance: 0);
         var agent = await TestAgent.CreateAsync(Server);
 
-        // Off by default: an empty balance does not pay the first minute.
-        Contract.AssertError(await ExpectAsync(Server, 402, HttpMethod.Post, "/sessions", cashier, Postpaid(agent.PcId, member.Id)), "insufficientFunds");
+        // No cap by default: an empty balance is seated (it was 402 while the desk applied the kiosk's 0).
+        var free = await Players.CreateAsync(Server, balance: 0);
+        var freeId = (await ExpectAsync(Server, 201, HttpMethod.Post, "/sessions", cashier, Postpaid(agent.PcId, free.Id))).GetProperty("session").GetProperty("id").GetGuid();
+        Assert.Null(await Players.ScalarAsync<long?>(Server, "SELECT debt_limit FROM sessions WHERE id = @freeId", new { freeId }));
         try
         {
             await ExpectAsync(Server, 200, HttpMethod.Patch, "/club", owner, new { limits = new { minorAge = 18, minorCurfew = "22:00", memberDebtLimit = 50_000 } });
             Assert.Equal(50_000, (await ExpectAsync(Server, 200, HttpMethod.Get, "/club", cashier)).GetProperty("limits").GetProperty("memberDebtLimit").GetInt64());
             Assert.Equal(("limits.memberDebtLimit", "min"), Field(await ExpectAsync(Server, 400, HttpMethod.Patch, "/club", owner,
                 new { limits = new { minorAge = 18, minorCurfew = "22:00", memberDebtLimit = -1 } })));
+
+            // The seat opened before the cap keeps its own «no cap»: the tick lets it run past 50 000 below zero, the desk end
+            // makes the bill a debt.
+            await AdvanceOnlineAsync(agent, TimeSpan.FromMinutes(3));
+            Assert.Equal("active", await StateAsync(freeId));
+            Assert.Equal(-60_000, Amount((await ExpectAsync(Server, 200, HttpMethod.Post, "/sessions/end", cashier, new { sessionId = freeId })).GetProperty("balance")));
 
             // 50 000 below zero pays two minutes (40 000); the tick does not start the third.
             var id = (await ExpectAsync(Server, 201, HttpMethod.Post, "/sessions", cashier, Postpaid(agent.PcId, member.Id))).GetProperty("session").GetProperty("id").GetGuid();
@@ -116,13 +125,20 @@ public sealed class DeskPostpaidTests(LongClockServerFixture server) : LedgerChe
         await OpenShiftAsync(Server, cashier);
         var agent = await TestAgent.CreateAsync(Server);
         object Seat() => new { pcId = agent.PcId, tariffId = Players.Standard, minutes = 60, prepaid = false };
-        Assert.Equal("postpaidNotAllowed", (await RawExpectAsync(Server, 403, HttpMethod.Post, "/sessions/guest", cashier, Seat(), Guid.NewGuid()))
-            .GetProperty("error").GetProperty("details").GetProperty("rule").GetString());
 
-        await Players.ExecuteAsync(Server, """UPDATE clubs SET settings = jsonb_set(settings, '{limits}', '{"minorAge":18,"minorCurfew":"22:00","guestPostpaid":true}'::jsonb)""");
+        // Off only when the owner turns it off.
+        await Players.ExecuteAsync(Server, """UPDATE clubs SET settings = jsonb_set(settings, '{limits}', '{"minorAge":18,"minorCurfew":"22:00","guestPostpaid":false}'::jsonb)""");
+        var refused = (await RawExpectAsync(Server, 403, HttpMethod.Post, "/sessions/guest", cashier, Seat(), Guid.NewGuid())).GetProperty("error");
+        Assert.Equal(("policyDenied", "postpaidNotAllowed", "postpaidNotAllowed"), (refused.GetProperty("code").GetString(),
+            refused.GetProperty("details").GetProperty("rule").GetString(), refused.GetProperty("details").GetProperty("reason").GetString()));
+
+        // On by default (no limits saved): the guest is seated with nothing paid and no cap.
+        await Players.ExecuteAsync(Server, "UPDATE clubs SET settings = settings - 'limits'");
         try
         {
             var opened = await RawExpectAsync(Server, 201, HttpMethod.Post, "/sessions/guest", cashier, Seat(), Guid.NewGuid());
+            Assert.Null(await Players.ScalarAsync<long?>(Server, "SELECT debt_limit FROM sessions WHERE id = @id",
+                new { id = opened.GetProperty("session").GetProperty("id").GetGuid() }));
             Assert.Equal((-1, 0L), (opened.GetProperty("session").GetProperty("secondsLeft").GetInt32(), Amount(opened.GetProperty("charged"))));
             var guestId = opened.GetProperty("user").GetProperty("id").GetGuid();
             Server.Clock.Advance(TimeSpan.FromMinutes(10));

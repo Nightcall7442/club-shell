@@ -121,9 +121,17 @@ public sealed class DeskGuestTests(ServerFixture server) : LedgerCheckedTest(ser
         Assert.Equal("pcMaintenance", refused.GetProperty("error").GetProperty("details").GetProperty("rule").GetString());
         await Players.ExecuteAsync(Server, "UPDATE pcs SET maintenance = false WHERE id = @PcId", new { agent.PcId });
 
-        // A guest postpaid seat while the club does not allow it.
-        Assert.Equal("postpaidNotAllowed", (await RawExpectAsync(Server, 403, HttpMethod.Post, "/sessions/guest", cashier, Seat(agent.PcId, prepaid: false), Guid.NewGuid()))
-            .GetProperty("error").GetProperty("details").GetProperty("rule").GetString());
+        // A guest postpaid seat while the owner turned it off (it is on unless limits.guestPostpaid is false).
+        await Players.ExecuteAsync(Server, """UPDATE clubs SET settings = jsonb_set(settings, '{limits}', '{"minorAge":18,"minorCurfew":"22:00","guestPostpaid":false}'::jsonb)""");
+        try
+        {
+            Assert.Equal("postpaidNotAllowed", (await RawExpectAsync(Server, 403, HttpMethod.Post, "/sessions/guest", cashier, Seat(agent.PcId, prepaid: false), Guid.NewGuid()))
+                .GetProperty("error").GetProperty("details").GetProperty("rule").GetString());
+        }
+        finally
+        {
+            await Players.ExecuteAsync(Server, "UPDATE clubs SET settings = settings - 'limits'");
+        }
 
         // Nothing of the refused seats: no guest account, no ledger row, no journal entry.
         Assert.Equal(counts, await CountsAsync());

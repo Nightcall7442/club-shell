@@ -1,10 +1,12 @@
 using System.Buffers.Text;
 using System.Security.Cryptography;
 using System.Text.Json;
+using ClubShell.Contracts.Commands;
 using ClubShell.Contracts.Errors;
 using ClubShell.Contracts.Sessions;
 using ClubShell.Contracts.Users;
 using ClubShell.Server.Infrastructure;
+using ClubShell.Server.Realtime;
 using ClubShell.Server.Sessions;
 using ClubShell.Server.Users;
 using Dapper;
@@ -17,8 +19,10 @@ namespace ClubShell.Server.Auth;
 /// <summary>
 /// Player sign-in on a PC (DESIGN §3.4, slice S2): <c>login</c> (password | card | token), <c>guestLogin</c>, the QR pair
 /// (<c>startQrLogin</c>/<c>getQrLoginStatus</c>, D-18: nothing confirms it in v1, so it goes pending → expired) and
-/// <c>logout</c>. Every sign-in displaces the previous player of the PC (<c>user_tokens UNIQUE(pc_id)</c>), but none is let
-/// onto a PC that holds another player's open session (<c>403 pcOccupied</c>, D-26).
+/// <c>logout</c>. Every sign-in displaces the previous player of the PC (<c>user_tokens UNIQUE(pc_id)</c>) and signs the
+/// player out of every other PC (<c>userRevoked signedInElsewhere</c>), but none is let onto a PC that holds another player's
+/// open session (<c>403 pcOccupied</c>, D-26); the player's own open session on another PC is <c>409
+/// activeSessionElsewhere</c> until they confirm ending it (<c>endElsewhere</c>).
 /// </summary>
 public static class PlayerAuthEndpoints
 {
@@ -46,10 +50,12 @@ public static class PlayerAuthEndpoints
     /// PC); <c>token</c> has no
     /// issuer in the contract, so it is always <c>401 badCredentials</c>; <c>qr</c>/<c>guest</c> have their own operations
     /// (<c>400 kind enum</c>). <c>offlineHash</c> is derived anew from the presented password (the agent's PBKDF2 format)
-    /// for password logins when <c>Club:OfflineLogin</c>; the stored hash never leaves the server.
+    /// for password logins when <c>Club:OfflineLogin</c>; the stored hash never leaves the server. <c>endElsewhere: true</c>
+    /// ends the player's open session on another PC instead of answering <c>409 activeSessionElsewhere</c>
+    /// (<see cref="SignInAsync"/>).
     /// </summary>
     private static async Task<IResult> LoginAsync(
-        HttpContext context, [FromBody] JsonElement body, NpgsqlDataSource db, UserTokens tokens, ClubOptions options, TimeProvider clock)
+        HttpContext context, [FromBody] JsonElement body, NpgsqlDataSource db, UserTokens tokens, SessionService sessions, ClubOptions options, TimeProvider clock)
     {
         var pc = context.Features.GetRequiredFeature<AgentContext>().Pc;
         var request = Api.Read<AuthRequest>(body, "kind", "pcId", "hwid");
@@ -87,7 +93,8 @@ public static class PlayerAuthEndpoints
                 throw BadCredentials(MaxFailures);
         }
 
-        return TypedResults.Ok(await SignInAsync(c, tokens, clock, club, pc, _ => Task.FromResult(userId), offlineHash));
+        return TypedResults.Ok(await SignInAsync(
+            c, tokens, sessions, club, pc, _ => Task.FromResult(userId), offlineHash, endElsewhere: request.EndElsewhere == true));
     }
 
     /// <summary>
@@ -98,7 +105,7 @@ public static class PlayerAuthEndpoints
     /// in the sign-in's transaction under the PC's lock, so a refused press creates no account. No <c>offlineHash</c>.
     /// </summary>
     private static async Task<IResult> GuestAsync(
-        HttpContext context, [FromBody] JsonElement body, NpgsqlDataSource db, UserTokens tokens, ClubOptions options, TimeProvider clock)
+        HttpContext context, [FromBody] JsonElement body, NpgsqlDataSource db, UserTokens tokens, SessionService sessions, ClubOptions options, TimeProvider clock)
     {
         var pc = context.Features.GetRequiredFeature<AgentContext>().Pc;
         var request = Api.Read<GuestAuthRequest>(body, "pcId", "hwid");
@@ -115,7 +122,7 @@ public static class PlayerAuthEndpoints
         var locale = request.Locale is { } l ? JsonNamingPolicy.CamelCase.ConvertName(l.ToString()) : "ru";
         await using var c = await db.OpenConnectionAsync();
         var club = await SessionService.ClubAsync(c, null, pc.ClubId);
-        return TypedResults.Ok(await SignInAsync(c, tokens, clock, club, pc, async tx =>
+        return TypedResults.Ok(await SignInAsync(c, tokens, sessions, club, pc, async tx =>
         {
             if (await Guests.DeskGuestOfPcAsync(c, tx, pc.Id) is { } deskGuest)
             {
@@ -140,13 +147,15 @@ public static class PlayerAuthEndpoints
             }
 
             return await Guests.CreateAsync(c, tx, club.NetworkId, pc.Number, name, locale, clock.GetUtcNow());
-        }, offlineHash: null));
+        }, offlineHash: null, endElsewhere: false));
     }
 
     /// <summary>
     /// Ends the player's open session on this PC with <c>reason</c> (settlement §5.7) and drops the player's token of this
-    /// PC. The agent has usually ended the session itself already. No <c>userRevoked</c>: the PC asked for it, and the
-    /// agent treats that push as a forced revocation (the lock screen would say the sign-in expired).
+    /// PC. The agent has usually ended the session itself already. A sign-out is the player's own end: <c>admin</c> and
+    /// <c>error</c> (the desk's and the server's reasons, which refund unused time) are settled as <c>user</c>. No
+    /// <c>userRevoked</c>: the PC asked for it, and the agent treats that push as a forced revocation (the lock screen would
+    /// say the sign-in expired).
     /// </summary>
     private static async Task<IResult> LogoutAsync(
         HttpContext context, [FromBody] JsonElement body, NpgsqlDataSource db, SessionService sessions, TimeProvider clock)
@@ -170,7 +179,8 @@ public static class PlayerAuthEndpoints
                 new { user.UserId, pcId = pc.Id }, tx);
             if (open is not null)
             {
-                await sessions.SettleAsync(c, tx, open, now, request.Reason, effects);
+                var reason = SessionService.PlayerEndReasons.Contains(request.Reason) ? request.Reason : SessionEndReason.User;
+                await sessions.SettleAsync(c, tx, open, now, reason, effects);
             }
 
             await c.ExecuteAsync(
@@ -223,21 +233,27 @@ public static class PlayerAuthEndpoints
     }
 
     /// <summary>
-    /// Password check with the lockout (§3.4, D-17): failures are counted per lower-cased username of the network, known
-    /// or not (so <c>attemptsLeft</c> does not tell which names exist; an unknown one costs a dummy derivation); 5 in 15 min
-    /// refuse even the right password with <c>attemptsLeft = 0</c> until the window passes. The agent repeats a 401 once
-    /// after a refresh with the same <c>X-Trace-Id</c> (N2): that first repeat is free, every further one counts. Attempts
-    /// on one name are serialized (transaction advisory lock), so parallel guesses cannot all pass the count.
+    /// Password check with the lockout (§3.4, D-17); the name in any case, Cyrillic too. Failures are counted per
+    /// lower-cased username of the network, known or not (so <c>attemptsLeft</c> does not tell which names exist; an unknown
+    /// one costs a dummy derivation); 5 in 15 min refuse even the right password with <c>attemptsLeft = 0</c> until the window
+    /// passes. An agent that repeats a 401 once after a refresh with the same <c>X-Trace-Id</c> (N2) gets that first repeat
+    /// free, every further one counts (agents from this release do not repeat it). Attempts on one name are serialized
+    /// (transaction advisory lock), so parallel guesses cannot all pass the count.
     /// </summary>
     private static Task<Guid> CheckPasswordAsync(NpgsqlConnection c, Guid network, string username, string password, Guid traceId, DateTimeOffset now) =>
-        CountFailuresAsync(c, network, username.ToLowerInvariant()[..Math.Min(username.Length, 64)], traceId, now, forgetOnSuccess: true, async tx =>
+        CountFailuresAsync(c, network, LockoutKey(username), traceId, now, forgetOnSuccess: true, async tx =>
         {
-            var user = await c.QuerySingleOrDefaultAsync<Credentials>(
+            // lower() under the C locale folds only ASCII: the name is also folded here in any script (the desk stores names
+            // folded that way), and an exact match of the old rule wins over the folded one.
+            var user = await c.QueryFirstOrDefaultAsync<Credentials>(
                 """
                 SELECT id, password_hash FROM users
-                WHERE network_id = @network AND lower(username) = lower(@username) AND deleted_at IS NULL AND NOT transient
+                WHERE network_id = @network AND (lower(username) = lower(@username) OR lower(username) = @folded)
+                  AND deleted_at IS NULL AND NOT transient
+                ORDER BY lower(username) = lower(@username) DESC
+                LIMIT 1
                 """,
-                new { network, username }, tx);
+                new { network, username, folded = username.ToLowerInvariant() }, tx);
             return Passwords.Verify(user?.PasswordHash, password) && user is not null ? user.Id : null;
         });
 
@@ -255,13 +271,34 @@ public static class PlayerAuthEndpoints
                 new { network, cardId }, tx));
 
     /// <summary>
+    /// <c>POST /users/{userId}/pin/verify</c>: the player's unlock PIN against <paramref name="pinHash"/>, under the same lockout
+    /// as the password of <paramref name="username"/> (§3.4) — a wrong PIN is a failure of that name (<c>401 unauthorized
+    /// badSecret {attemptsLeft}</c>), 5 of them (PINs and passwords together) within 15 min refuse even the right PIN, and the
+    /// right password, with sign-in's own refusal (<c>401 badCredentials {attemptsLeft: 0}</c>); a right PIN clears the count
+    /// as a right password does. The agent's free repeat after a refresh holds as for sign-in.
+    /// </summary>
+    internal static Task CheckPinAsync(NpgsqlConnection c, Guid network, string username, string pinHash, string pin, Guid traceId, DateTimeOffset now) =>
+        CountFailuresAsync(c, network, LockoutKey(username), traceId, now, forgetOnSuccess: true,
+            _ => Task.FromResult<Guid?>(Passwords.Verify(pinHash, pin) ? Guid.Empty : null),
+            miss: attemptsLeft => new ApiException(StatusCodes.Status401Unauthorized, ErrorCode.Unauthorized, "Wrong PIN", new { reason = "badSecret", attemptsLeft }));
+
+    /// <summary>The <c>login_failures</c> key of a player name: lower-cased (any script), at most 64 characters.</summary>
+    private static string LockoutKey(string username)
+    {
+        var lower = username.ToLowerInvariant();
+        return lower[..Math.Min(lower.Length, 64)];
+    }
+
+    /// <summary>
     /// The failure count of <paramref name="key"/> in <c>login_failures</c> around <paramref name="check"/>: refused with
     /// <c>attemptsLeft = 0</c> at <see cref="MaxFailures"/> within <see cref="FailureWindow"/>, a miss recorded once per
-    /// trace (the agent's first repeat is free), a match returned (and the count dropped when
-    /// <paramref name="forgetOnSuccess"/>). Serialized per key by a transaction advisory lock.
+    /// trace (the agent's first repeat is free) and answered by <paramref name="miss"/> (default <c>401 badCredentials</c>)
+    /// with the attempts left, a match returned (and the count dropped when <paramref name="forgetOnSuccess"/>).
+    /// Serialized per key by a transaction advisory lock.
     /// </summary>
     private static async Task<Guid> CountFailuresAsync(
-        NpgsqlConnection c, Guid network, string key, Guid traceId, DateTimeOffset now, bool forgetOnSuccess, Func<NpgsqlTransaction, Task<Guid?>> check)
+        NpgsqlConnection c, Guid network, string key, Guid traceId, DateTimeOffset now, bool forgetOnSuccess, Func<NpgsqlTransaction, Task<Guid?>> check,
+        Func<int, ApiException>? miss = null)
     {
         const string Count = """
             SELECT coalesce(sum(greatest(attempts - 1, 1)), 0)::int FROM login_failures
@@ -294,31 +331,54 @@ public static class PlayerAuthEndpoints
             args, tx);
         var failures = await c.ExecuteScalarAsync<int>(Count, args, tx);
         await tx.CommitAsync();
-        throw BadCredentials(Math.Max(0, MaxFailures - failures));
+        throw (miss ?? BadCredentials)(Math.Max(0, MaxFailures - failures));
     }
 
     /// <summary>
-    /// The checks after the credentials (§3.4) and the token, in one transaction under the PC's advisory lock (D-27): the
-    /// player (<paramref name="who"/>: known, or found or created by the guest press in this transaction), <c>403 banned</c>
-    /// (banned or blacklisted in this club), <c>403 ageRestricted</c> (a minor in the curfew), <c>409
-    /// activeSessionElsewhere</c>, <c>403 pcOccupied</c> when the PC holds another player's open session (D-26: otherwise the
-    /// session resync would unlock the desktop under the wrong name); then the token of this PC and the player's open session
-    /// on this PC, if any. The refresh token is opaque and never accepted: players have none.
+    /// The checks after the credentials (§3.4) and the token, in one transaction under the PC's advisory lock (D-27) and the
+    /// player's (<see cref="AdvisoryLocks.UserAsync"/>): the player (<paramref name="who"/>: known, or found or created by
+    /// the guest press in this transaction), <c>403 banned</c> (banned or blacklisted in this club), <c>403 ageRestricted</c>
+    /// (a minor in the curfew), the player's open session on another PC, <c>403 pcOccupied</c> when this PC holds another
+    /// player's open session (D-26: otherwise the session resync would unlock the desktop under the wrong name); then the
+    /// token of this PC and the player's open session on this PC, if any. The refresh token is opaque and never accepted:
+    /// players have none.
+    /// <para>
+    /// An open session on another PC is <c>409 conflict activeSessionElsewhere {pcId, pcName}</c>, unless
+    /// <paramref name="endElsewhere"/> (the player confirmed «end it there and sign in here»): then it is ended like a sign-out
+    /// there — settled with <c>user</c>, <c>endSession {reason: user}</c> queued for that PC — in this transaction, which also
+    /// holds that PC's lock. The PC locks are taken in their id order (as a desk move takes them), so the first attempt, which
+    /// does not know the other PC yet, starts over with both. Whatever this sign-in refuses after that (<c>pcOccupied</c>)
+    /// rolls the end back with it.
+    /// </para>
+    /// <para>
+    /// The player is one player: their tokens of every other PC are deleted, and each of those PCs that still had a live one
+    /// (and the PC whose session was ended) gets <c>userRevoked {reason: signedInElsewhere}</c> after the commit — a stale
+    /// token there would let that kiosk start a session on the player's money when the next wallet push arrives.
+    /// </para>
     /// </summary>
     private static async Task<AuthResponse> SignInAsync(
-        NpgsqlConnection c, UserTokens tokens, TimeProvider clock, ClubInfo club, Agents.PcRow pc, Func<NpgsqlTransaction, Task<Guid>> who,
-        string? offlineHash)
+        NpgsqlConnection c, UserTokens tokens, SessionService sessions, ClubInfo club, Agents.PcRow pc, Func<NpgsqlTransaction, Task<Guid>> who,
+        string? offlineHash, bool endElsewhere)
     {
-        var now = clock.GetUtcNow();
         Guid userId;
         SessionRow? open;
         string token;
         DateTimeOffset expiresAt;
-        await using (var tx = await c.BeginTransactionAsync())
+        DateTimeOffset now;
+        var effects = new SessionEffects();
+        Guid? elsewhere = null;
+        for (var attempt = 1; ; attempt++)
         {
+            now = sessions.Clock.GetUtcNow();
+            await using var tx = await c.BeginTransactionAsync();
             await c.ExecuteAsync("SET LOCAL lock_timeout = '10s'", transaction: tx);
-            await AdvisoryLocks.PcAsync(c, tx, pc.Id);
+            foreach (var locked in new[] { pc.Id, elsewhere ?? pc.Id }.Distinct().Order())
+            {
+                await AdvisoryLocks.PcAsync(c, tx, locked);
+            }
+
             userId = await who(tx);
+            await AdvisoryLocks.UserAsync(c, tx, userId);
             var buyer = await SessionService.BuyerAsync(c, tx, club, userId) ?? throw BadCredentials(MaxFailures);
             if (buyer.Banned || buyer.Blacklisted)
             {
@@ -332,11 +392,34 @@ public static class PlayerAuthEndpoints
 
             open = await c.QuerySingleOrDefaultAsync<SessionRow>(
                 $"SELECT {SessionRow.Columns} FROM sessions WHERE user_id = @userId AND state <> 'ended'", new { userId }, tx);
+            Guid? ended = null;
             if (open is not null && open.PcId != pc.Id)
             {
-                var pcName = await c.ExecuteScalarAsync<string>("SELECT name FROM pcs WHERE id = @PcId", new { open.PcId }, tx);
-                throw new ApiException(StatusCodes.Status409Conflict, ErrorCode.Conflict, "The player has an open session on another PC",
-                    new { reason = "activeSessionElsewhere", pcId = open.PcId, pcName });
+                if (!endElsewhere || (open.PcId != elsewhere && attempt >= 3))
+                {
+                    var pcName = await c.ExecuteScalarAsync<string>("SELECT name FROM pcs WHERE id = @PcId", new { open.PcId }, tx);
+                    throw new ApiException(StatusCodes.Status409Conflict, ErrorCode.Conflict, "The player has an open session on another PC",
+                        new { reason = "activeSessionElsewhere", pcId = open.PcId, pcName });
+                }
+
+                if (open.PcId != elsewhere)
+                {
+                    // That PC's lock is not held yet: start over with both, in order.
+                    elsewhere = open.PcId;
+                    await tx.RollbackAsync();
+                    continue;
+                }
+
+                // Under that PC's lock no desk end or move can touch it; the tick may have ended it meanwhile.
+                if (await SessionService.LockAsync(c, tx, open.Id) is { Ended: false } other && other.PcId == elsewhere)
+                {
+                    await sessions.SettleAsync(c, tx, other, now, SessionEndReason.User, effects);
+                    effects.Sessions.RemoveAll(pushed => pushed.Id == other.Id);
+                    effects.Commands.Add((other.ClubId, other.PcId, NewCommand.EndSession(new EndSessionCommand(other.Id, SessionEndReason.User))));
+                    ended = other.PcId;
+                }
+
+                open = null;
             }
 
             if (await SessionService.OpenOfPcAsync(c, pc.Id, tx) is { } occupant && occupant.UserId != userId)
@@ -344,11 +427,26 @@ public static class PlayerAuthEndpoints
                 throw PcOccupied();
             }
 
+            var revoked = (await c.QueryAsync<(Guid PcId, bool Live)>(
+                "DELETE FROM user_tokens WHERE user_id = @userId AND pc_id <> @pcId RETURNING pc_id, expires_at > @now",
+                new { userId, pcId = pc.Id, now }, tx)).Where(t => t.Live).Select(t => t.PcId).ToHashSet();
+            if (ended is { } endedPc)
+            {
+                revoked.Add(endedPc);
+            }
+
+            foreach (var revokedPc in revoked)
+            {
+                effects.RevokedAfter.Add((userId, revokedPc, "signedInElsewhere"));
+            }
+
             (token, expiresAt) = await tokens.IssueAsync(c, tx, userId, pc.Id);
             await c.ExecuteAsync("UPDATE users SET last_seen_at = @now WHERE id = @userId", new { userId, now }, tx);
             await tx.CommitAsync();
+            break;
         }
 
+        await sessions.PublishAsync(effects);
         var user = await c.QuerySingleAsync<UserRow>($"{UserRow.Select} WHERE u.id = @userId", new { userId });
         return new AuthResponse(user.ToWire(club.Pricing), open?.ToWire(now), token, UserTokens.NewToken(), expiresAt, offlineHash);
     }

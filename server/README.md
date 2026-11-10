@@ -18,6 +18,14 @@
   новые первыми, страницы по 50 до 200, фильтры `type`/`from`/`to`) и `/users/{userId}/game-settings` (список → `{items:[]}`, `DELETE` → 204,
   остальные game-settings → 501). Пуши `sessionUpdated`, `walletUpdated` (`userRevoked` — с кассой в S4: `logout`
   самого ПК его не шлёт).
+- Игрок и ПК (docs/SERVER_API.md §2.3, §4.3–§4.5): токен игрока не может то, что делает касса — `pauseSession`/`resumeSession`
+  всегда `403 staffOnly`, `endSession` с токеном игрока только `user`/`idle`/`timeUp`/`agentRestart` (без возврата),
+  `admin`/`error` — `403 staffOnly` (свои завершения агент шлёт без токена игрока). Вход игрока выводит его со всех других
+  ПК (`userRevoked signedInElsewhere`); открытый сеанс на другом ПК — `409 activeSessionElsewhere`, с `endElsewhere: true`
+  он завершается как выход там. Токен игрока скользящий: каждый heartbeat ПК с открытым сеансом игрока продлевает его на
+  12 ч. Сверх контракта: `POST /sessions/quote` (цена старта, как у `createSession`), `POST /users/{userId}/pin/verify`
+  (PIN разблокировки на сервере, неверные PIN — в общий лимит с паролем), флаг `pinSet` в `User.flags`. Офлайн-сеанс,
+  завершённый задним числом, считается до его `endedAt`.
 - S3: `getGames` (страницы до 1000, скрытые исключены, порядок владельца, ETag `"g<catalogVersion>-<hash>"` с
   `lastPlayedAt` игрока), `getGame`, `sendLaunchReport` (повтор из офлайн-очереди хранится один раз), `getUpdateManifest`
   (всегда `204`, решение владельца), `getPc` (`hwid` только своего ПК) и сверх контракта `POST /anticheat/report` (204).
@@ -290,8 +298,7 @@ Playwright сам запускает `dotnet run` (Development, `Seed:Dev`, CORS
 `OwnerPin` / `OfflineLogin` / `GuestLogin`, `Realtime:PingSec` / `PongTimeoutSec` / `MaxFrameBytes`, `Agents:HeartbeatSec` /
 `OfflineAfterSec` / `CommandTtlMin` / `AckWaitSec` / `RegisterProof` / `ReenrollWindowMin`, `RateLimit:PinAttempts` / `PinWindowSec` /
 `PinClubAttempts` / `PinClubWindowSec` / `PinTrustedAttempts` / `PinDeviceTrustDays`, `Cors:AllowedOrigins`, `Sessions:GraceSec` /
-`MaxOfflineMinutes` (уходят в конфиг агента) / `TickMs` / `ResyncSec` / `PostpaidCreditLimit` (тиёны; `null` — без
-лимита), `Catalog:PolicySeedPath` / `GamesSeedPath`, `Workers:Enabled`, `Seed:Dev`, `Proxy:Trusted` / `ClientIpHeader`, `Sentry:Dsn`
+`MaxOfflineMinutes` (уходят в конфиг агента) / `TickMs` / `ResyncSec`, `Catalog:PolicySeedPath` / `GamesSeedPath`, `Workers:Enabled`, `Seed:Dev`, `Proxy:Trusted` / `ClientIpHeader`, `Sentry:Dsn`
 (и остальные ключи `Sentry:*` SDK, кроме приватности и Sentry Logs — их задаёт код; без DSN Sentry не подключается),
 переменная окружения `PORT`.
 
@@ -360,7 +367,7 @@ Playwright сам запускает `dotnet run` (Development, `Seed:Dev`, CORS
 | `paused`/`resumed`/`extended`/`ended` в `/events` | только записываются | применяются в момент `at` (§5.12), `ended` рассчитывает сеанс |
 | Офлайн-реплей `POST /sessions` | нужен токен игрока, отвечает 402 | хватает токена агента, overdraft вместо 402 (D-11) |
 | Время вышло | завершение ровно в 0, в том числе у офлайн-ПК | `ending` + бесплатная грация, только онлайн; офлайн — после 240 мин тишины (D-12) |
-| Постоплата | без лимита | `402`, если нет средств на первую минуту; останавливается на границе минуты, когда следующая не по средствам с `PostpaidCreditLimit` (D-10) |
+| Постоплата | без лимита | с киоска — только участник и только с баланса (лимит долга 0): `402`, если нет средств на первую минуту, остановка на границе минуты, когда следующая не по средствам (D-10); гость с киоска — `403 postpaidNotAllowed`. С кассы — участник и гость (`limits.guestPostpaid`, по умолчанию включено), без лимита, если `limits.memberDebtLimit`/`guestDebtLimit` не заданы; лимит сеанса запоминается при открытии (`sessions.debt_limit`) |
 | Блокировка | — | не останавливает оплату (`SessionState.cs:23` агента устарел) |
 | `/sessions/current` | `pcId` не сверяется | `403 pcMismatch` |
 | Неверный пароль | считается на каждый запрос (агент повторяет после refresh → −2), по имени | по имени, известному или нет; один повтор `X-Trace-Id` бесплатный; 5 за 15 мин — `attemptsLeft=0`; попытки по одному имени по очереди |

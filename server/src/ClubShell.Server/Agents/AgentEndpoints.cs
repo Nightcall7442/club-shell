@@ -156,9 +156,13 @@ public static class AgentEndpoints
         return TypedResults.Ok(new AgentRefreshResponse(access, refresh!, expiresAt));
     }
 
+    /// <summary>
+    /// <c>heartbeat</c>: recorded on the PC, and the token of the player whose session is open there lives on
+    /// (<see cref="UserTokens.SlideAsync"/>).
+    /// </summary>
     private static async Task<IResult> HeartbeatAsync(
         HttpContext context, HeartbeatRequest request, PcRepository pcs, ClubRepository clubs, CommandRepository commands, AgentSocketHub hub,
-        AgentOptions agents, TimeProvider clock)
+        UserTokens tokens, AgentOptions agents, TimeProvider clock)
     {
         Require(request.AgentVersion, "agentVersion");
 
@@ -177,6 +181,7 @@ public static class AgentEndpoints
         var pc = context.Features.GetRequiredFeature<AgentContext>().Pc;
         var now = clock.GetUtcNow();
         await pcs.RecordHeartbeatAsync(pc.Id, request, now);
+        await tokens.SlideAsync(pc.Id);
         var view = await clubs.GetAgentViewAsync(pc.ClubId);
         return TypedResults.Ok(new HeartbeatResponse(
             ServerTime: now,

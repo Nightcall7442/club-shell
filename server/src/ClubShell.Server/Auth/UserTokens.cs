@@ -9,7 +9,8 @@ namespace ClubShell.Server.Auth;
 /// <summary>
 /// Player tokens (DESIGN §3.4): opaque, 32 random bytes base64url, only the SHA-256 is stored. A token is bound to the
 /// pair (user, PC); <c>UNIQUE(pc_id)</c> makes a new sign-in on a PC displace the previous player. Lifetime
-/// <see cref="AuthOptions.UserTokenHours"/>; there is no refresh of a player token.
+/// <see cref="AuthOptions.UserTokenHours"/>, sliding while the player's session is open on that PC (<see cref="SlideAsync"/>);
+/// there is no refresh of a player token.
 /// </summary>
 public sealed class UserTokens(NpgsqlDataSource db, AuthOptions options, TimeProvider clock)
 {
@@ -53,6 +54,25 @@ public sealed class UserTokens(NpgsqlDataSource db, AuthOptions options, TimePro
             : row.ExpiresAt <= clock.GetUtcNow() ? (null, "expired")
             : row.PcId != pcId ? (null, "boundElsewhere")
             : (new UserContext(row.UserId), null);
+    }
+
+    /// <summary>
+    /// The sliding lifetime (SERVER_API.md §2.3), on every heartbeat of <paramref name="pcId"/>: while the token's player has
+    /// an open session on that PC, the token lives <see cref="AuthOptions.UserTokenHours"/> from now — a long session does not
+    /// lose its player at the 12th hour. An expired token is not revived, and one whose player has no open session there
+    /// expires as issued.
+    /// </summary>
+    public async Task SlideAsync(Guid pcId)
+    {
+        var now = clock.GetUtcNow();
+        await using var c = await db.OpenConnectionAsync();
+        await c.ExecuteAsync(
+            """
+            UPDATE user_tokens t SET expires_at = @expires
+            WHERE t.pc_id = @pcId AND t.expires_at > @now AND t.expires_at < @expires
+              AND EXISTS (SELECT 1 FROM sessions s WHERE s.pc_id = t.pc_id AND s.user_id = t.user_id AND s.state <> 'ended')
+            """,
+            new { pcId, now, expires = now.AddHours(options.UserTokenHours) });
     }
 
     /// <summary>PCs where <paramref name="userId"/> holds a live token (<c>walletUpdated</c> goes to all of them, DESIGN §6.5).</summary>

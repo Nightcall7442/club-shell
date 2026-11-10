@@ -41,17 +41,20 @@ public sealed class AgentHarnessS2Tests(LongClockServerFixture server) : LedgerC
         var current = await client.GetCurrentSessionAsync(pcId, CancellationToken.None);
         Assert.Equal((session.Id, 3000), (current!.Id, current.SecondsLeft));
 
-        Assert.Equal(SessionState.Paused, (await client.PauseSessionAsync(session.Id, CancellationToken.None)).State);
+        // Billing does not stop at the player's request: 403 staffOnly, and the clock runs on.
+        var pause = await Assert.ThrowsAsync<ServerApiException>(() => client.PauseSessionAsync(session.Id, CancellationToken.None));
+        Assert.Equal((ErrorCode.Forbidden, "staffOnly"), (pause.Code, pause.Reason));
         Advance(agent, TimeSpan.FromMinutes(5));
-        var resumed = await client.ResumeSessionAsync(session.Id, CancellationToken.None);
-        Assert.Equal((SessionState.Active, 3000), (resumed.State, resumed.SecondsLeft));
+        var resume = await Assert.ThrowsAsync<ServerApiException>(() => client.ResumeSessionAsync(session.Id, CancellationToken.None));
+        Assert.Equal((ErrorCode.Forbidden, "staffOnly"), (resume.Code, resume.Reason));
+        Assert.Equal(2700, (await client.GetCurrentSessionAsync(pcId, CancellationToken.None))!.SecondsLeft);
 
         var extended = await client.ExtendSessionAsync(session.Id, new SessionExtendRequest(30), Guid.NewGuid(), CancellationToken.None);
-        Assert.Equal(4800, extended.SecondsLeft);
+        Assert.Equal(4500, extended.SecondsLeft);
 
-        var ended = await client.EndSessionAsync(session.Id, new SessionEndReport(SessionEndReason.User, 600, agent.Clock.GetUtcNow()), CancellationToken.None);
-        Assert.Equal((SessionState.Ended, 600), (ended.Session.State, ended.Session.SecondsUsed));
-        var again = await client.EndSessionAsync(session.Id, new SessionEndReport(SessionEndReason.User, 600), CancellationToken.None);
+        var ended = await client.EndSessionAsync(session.Id, new SessionEndReport(SessionEndReason.User, 900, agent.Clock.GetUtcNow()), CancellationToken.None);
+        Assert.Equal((SessionState.Ended, 900), (ended.Session.State, ended.Session.SecondsUsed));
+        var again = await client.EndSessionAsync(session.Id, new SessionEndReport(SessionEndReason.User, 900), CancellationToken.None);
         Assert.Equal((SessionState.Ended, 0L), (again.Session.State, again.Charged.Amount)); // 409 + details.session = done
         Assert.Equal(5_000_000 - 1_800_000, await Players.BalanceAsync(Server, player.Id));
 
@@ -117,14 +120,20 @@ public sealed class AgentHarnessS2Tests(LongClockServerFixture server) : LedgerC
         Assert.Equal(new[] { 201, 409 }, results.Select(r => r.Status).Order());
         Contract.AssertError(results.Single(r => r.Status == 409).Body, "sessionAlreadyActive");
 
-        // One player on two PCs: the open-session index of the player decides.
+        // One player on two PCs: signing in on the second signs the first out (401 userToken there); the desk seating the
+        // player on the first while the kiosk of the second starts: the open-session index of the player decides.
         var first = await TestAgent.CreateAsync(Server);
         var second = await TestAgent.CreateAsync(Server);
         var both = await Players.CreateAsync(Server);
         await first.LoginAsync(both);
         await second.LoginAsync(both);
-        results = await Task.WhenAll(Players.StartAsync(first, both), Players.StartAsync(second, both));
-        Assert.Equal(new[] { 201, 409 }, results.Select(r => r.Status).Order());
+        Assert.Equal(401, (await Players.StartAsync(first, both)).Status);
+        var owner = await Staff.LoginAsync(Server, Staff.OwnerPin);
+        await Staff.OpenShiftAsync(Server, owner);
+        var desk = Staff.SendAsync(Server, HttpMethod.Post, "/sessions", owner, new { pcId = first.PcId, userId = both.Id, tariffId = Players.Standard, minutes = 60 });
+        var kiosk = Players.StartAsync(second, both);
+        await Task.WhenAll(desk, kiosk);
+        Assert.Equal(new[] { 201, 409 }, new[] { (await desk).Status, (await kiosk).Status }.Order());
         Assert.Equal(10_000_000 - 1_200_000, await Players.BalanceAsync(Server, both.Id));
     }
 
@@ -208,8 +217,8 @@ public sealed class CoverageS2Tests(ServerFixture server) : LedgerCheckedTest(se
         await client.GetTariffsAsync(null, null, ct);
         var session = await client.CreateSessionAsync(new SessionCreateRequest(pcId, player.Id, Players.Standard, 60, true), Guid.NewGuid(), ct);
         await client.GetCurrentSessionAsync(pcId, ct);
-        await client.PauseSessionAsync(session.Id, ct);
-        await client.ResumeSessionAsync(session.Id, ct);
+        await Assert.ThrowsAsync<ServerApiException>(() => client.PauseSessionAsync(session.Id, ct)); // 403 staffOnly: the desk's alone
+        await Assert.ThrowsAsync<ServerApiException>(() => client.ResumeSessionAsync(session.Id, ct));
         await client.ExtendSessionAsync(session.Id, new SessionExtendRequest(30), Guid.NewGuid(), ct);
         await client.PostSessionEventsAsync(session.Id, new SessionEventsBatch([SessionEvent.Warning(session.Id, agent.Clock.GetUtcNow(), 5)]), Guid.NewGuid(), ct);
         await client.EndSessionAsync(session.Id, new SessionEndReport(SessionEndReason.User, 1), ct);
@@ -219,7 +228,7 @@ public sealed class CoverageS2Tests(ServerFixture server) : LedgerCheckedTest(se
         {
             ["login"] = 200, ["startQrLogin"] = 200, ["getQrLoginStatus"] = 200, ["guestLogin"] = 200, ["logout"] = 204,
             ["getUser"] = 200, ["updateUser"] = 200, ["getUserStats"] = 200, ["getUserAchievements"] = 200, ["getUserLoyalty"] = 200,
-            ["getCurrentSession"] = 200, ["createSession"] = 201, ["pauseSession"] = 200, ["resumeSession"] = 200, ["endSession"] = 200,
+            ["getCurrentSession"] = 200, ["createSession"] = 201, ["pauseSession"] = 403, ["resumeSession"] = 403, ["endSession"] = 200,
             ["extendSession"] = 200, ["postSessionEvents"] = 204, ["getTariffs"] = 200, ["getBalance"] = 200,
             ["getTransactions"] = 200,
         };

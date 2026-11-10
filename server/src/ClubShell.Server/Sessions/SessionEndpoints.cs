@@ -30,11 +30,14 @@ public static class SessionEndpoints
 
         // Agent token alone is enough for the offline replay (D-11); the handler demands the player token otherwise.
         api.MapPost("", CreateAsync).WithMetadata(new AuthRequirement(AuthMode.AgentOptionalUser));
-        api.MapPost("/{id:guid}/pause", (HttpContext context, Guid id, SessionService sessions) =>
-            sessions.PauseAsync(id, context.Features.GetRequiredFeature<UserContext>().UserId, context.Features.GetRequiredFeature<AgentContext>().Pc.Id))
+
+        // Beyond the contract: the price the kiosk shows before a start (no operation id, not in the 501 table).
+        api.MapPost("/quote", QuoteAsync).WithMetadata(new AuthRequirement(AuthMode.User));
+        // Billing does not stop at the player's request: the contract's user mode (401 userToken without a player token)
+        // and then 403 staffOnly. SessionService.PauseAsync/ResumeAsync stay for the server's own use.
+        api.MapPost("/{id:guid}/pause", (RequestDelegate)(_ => throw StaffOnly("pause")))
             .WithMetadata(new AuthRequirement(AuthMode.User));
-        api.MapPost("/{id:guid}/resume", (HttpContext context, Guid id, SessionService sessions) =>
-            sessions.ResumeAsync(id, context.Features.GetRequiredFeature<UserContext>().UserId, context.Features.GetRequiredFeature<AgentContext>().Pc.Id))
+        api.MapPost("/{id:guid}/resume", (RequestDelegate)(_ => throw StaffOnly("resume")))
             .WithMetadata(new AuthRequirement(AuthMode.User));
         api.MapPost("/{id:guid}/extend", ExtendAsync).WithMetadata(new AuthRequirement(AuthMode.User));
 
@@ -89,6 +92,29 @@ public static class SessionEndpoints
         return result;
     }
 
+    /// <summary>
+    /// <c>POST /sessions/quote</c> (<c>SessionQuoteRequest</c> → <c>200 SessionQuote</c>): the signed-in player's price on
+    /// this PC — <c>userId</c> must be the token's player (<c>403 notOwner</c>), <c>pcId</c> the agent's PC (<c>403
+    /// pcMismatch</c>); the rest is <see cref="SessionService.QuoteAsync"/>. Read-only: no <c>Idempotency-Key</c>.
+    /// </summary>
+    private static async Task<IResult> QuoteAsync(HttpContext context, [FromBody] JsonElement body, SessionService sessions)
+    {
+        var agent = context.Features.GetRequiredFeature<AgentContext>();
+        var user = context.Features.GetRequiredFeature<UserContext>();
+        var request = Api.Read<SessionQuoteRequest>(body, "pcId", "userId", "tariffId");
+        if (request.UserId != user.UserId)
+        {
+            throw ApiException.Forbidden("notOwner", "userId is not the signed-in player");
+        }
+
+        if (request.PcId != agent.Pc.Id)
+        {
+            throw ApiException.Forbidden("pcMismatch", "pcId does not match the agent token");
+        }
+
+        return TypedResults.Ok(await sessions.QuoteAsync(agent.Pc, user.UserId, request.TariffId, request.Minutes));
+    }
+
     private static async Task<IResult> ExtendAsync(HttpContext context, Guid id, [FromBody] JsonElement body, IdempotencyStore store, SessionService sessions)
     {
         var agent = context.Features.GetRequiredFeature<AgentContext>();
@@ -119,8 +145,13 @@ public static class SessionEndpoints
             throw ApiException.Validation("secondsUsed", "min");
         }
 
-        return TypedResults.Ok(await sessions.EndAsync(id, context.Features.GetRequiredFeature<AgentContext>().Pc.Id, report));
+        return TypedResults.Ok(await sessions.EndAsync(
+            id, context.Features.GetRequiredFeature<AgentContext>().Pc.Id, report, byPlayer: context.Features.Get<UserContext>() is not null));
     }
+
+    /// <summary><c>403 forbidden staffOnly</c>: the player may not stop or start the billing clock (pause/resume).</summary>
+    private static ApiException StaffOnly(string action) =>
+        ApiException.Forbidden("staffOnly", $"Only the cash desk may {action} a session: billing does not stop at the player's request");
 
     /// <summary>
     /// <c>POST /sessions/{id}/events</c> (§5.12). The session is looked up by id or, for an offline session not yet
