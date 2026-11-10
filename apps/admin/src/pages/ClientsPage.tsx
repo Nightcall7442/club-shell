@@ -36,6 +36,9 @@ import {
 type NoteState = { text: string; tone: 'ok' | 'err' } | null;
 
 const nf = new Intl.NumberFormat('ru-RU');
+/** A new client's login: as long as the server accepts (3–32 characters). */
+const USERNAME_MIN = 3;
+const USERNAME_MAX = 32;
 
 const PASSWORD_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789';
 
@@ -502,6 +505,9 @@ function NewClientPanel({
   const [groupId, setGroupId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<NoteState>(null);
+  // As the server: a new login is 3–32 characters (the field already drops spaces and upper case).
+  const loginLength = login.trim().length;
+  const loginOk = loginLength >= USERNAME_MIN && loginLength <= USERNAME_MAX;
 
   const create = async (): Promise<void> => {
     setBusy(true);
@@ -540,10 +546,19 @@ function NewClientPanel({
           <Field label={t('Имя')}>
             <Input value={name} autoFocus onChange={(e) => setName(e.target.value)} />
           </Field>
-          <Field label={t('Логин')}>
+          <Field
+            label={t('Логин')}
+            hint={
+              loginLength > 0 && !loginOk
+                ? t('Логин — от {min} до {max} символов', { min: USERNAME_MIN, max: USERNAME_MAX })
+                : t('От {min} до {max} символов', { min: USERNAME_MIN, max: USERNAME_MAX })
+            }
+          >
             <Input
               value={login}
-              className="font-mono"
+              className={clsx('font-mono', loginLength > 0 && !loginOk && 'border-danger/60')}
+              maxLength={USERNAME_MAX}
+              aria-invalid={loginLength > 0 && !loginOk}
               onChange={(e) => setLogin(e.target.value.toLowerCase().replace(/\s/g, ''))}
             />
           </Field>
@@ -580,7 +595,7 @@ function NewClientPanel({
           <Button variant="ghost" onClick={onCancel}>
             {t('Отменить')}
           </Button>
-          <Button variant="primary" disabled={busy || !name.trim() || !login.trim()} onClick={() => void create()}>
+          <Button variant="primary" disabled={busy || !name.trim() || !loginOk} onClick={() => void create()}>
             {t('Создать')}
           </Button>
         </div>

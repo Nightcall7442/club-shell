@@ -842,18 +842,16 @@ export interface ClubSettings {
   happyHours: HappyHour[];
   loyalty: LoyaltyLevel[];
   /**
-   * `guestPostpaid` / `guestDebtLimit` (tiyin, null or 0 — no limit) are beyond the contract: guests may play postpaid and
-   * pay at the counter afterwards; their unpaid bills come back in `Overview.guestDebts`.
+   * Postpaid is the desk's (a player at the kiosk buys time in advance). `guestPostpaid` (absent = on) lets the desk seat
+   * guests postpaid, paid at the counter afterwards; their unpaid bills come back in `Overview.guestDebts`.
+   * `guestDebtLimit` / `memberDebtLimit` (tiyin): how far a desk postpaid session may run up a bill (guests) or below
+   * zero (members); `null` or 0 — no cap. The caps apply to desk sessions only.
    */
   limits: {
     minorAge: number;
     minorCurfew: string;
     guestPostpaid?: boolean;
     guestDebtLimit?: number | null;
-    /**
-     * How far below zero a member's postpaid session may run (tiyin); 0 or absent — no member debt: a member plays
-     * postpaid only while the balance lasts (D-31).
-     */
     memberDebtLimit?: number | null;
     /** Only the owner takes cash out of the drawer (D-40). */
     cashOutOwnerOnly?: boolean;
