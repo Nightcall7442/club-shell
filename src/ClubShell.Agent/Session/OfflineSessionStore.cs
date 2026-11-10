@@ -6,8 +6,10 @@ using ClubShell.Contracts.Games;
 using ClubShell.Contracts.Serialization;
 using ClubShell.Contracts.Sessions;
 using ClubShell.Contracts.Users;
+using ClubShell.Contracts.Wallet;
 using ClubShell.Core.Abstractions;
 using ClubShell.Core.Configuration;
+using ClubShell.Core.Security;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using PlaySession = ClubShell.Contracts.Sessions.Session;
@@ -82,6 +84,7 @@ public sealed class OfflineSessionStore : IDisposable
     private readonly IOptionsMonitor<AgentSettings> _settings;
     private readonly IClock _clock;
     private readonly ILogger<OfflineSessionStore> _logger;
+    private readonly ITokenStore? _tokens;
     private readonly string _connectionString;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly SemaphoreSlim _initLock = new(1, 1);
@@ -90,8 +93,11 @@ public sealed class OfflineSessionStore : IDisposable
     private TimeSpan _backoff = MinBackoff;
     private bool _backoffActive;
 
-    /// <summary>Creates the store; the file is created on first use.</summary>
-    public OfflineSessionStore(IOptionsMonitor<AgentSettings> settings, IClock clock, ILogger<OfflineSessionStore> logger)
+    /// <summary>
+    /// Creates the store; the file is created on first use. <paramref name="tokens"/> tells whose player token a queued
+    /// sign-out may still be replayed with (<see cref="QueueLogoutAsync"/>); without it queued sign-outs are not replayed.
+    /// </summary>
+    public OfflineSessionStore(IOptionsMonitor<AgentSettings> settings, IClock clock, ILogger<OfflineSessionStore> logger, ITokenStore? tokens = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(clock);
@@ -99,6 +105,7 @@ public sealed class OfflineSessionStore : IDisposable
         _settings = settings;
         _clock = clock;
         _logger = logger;
+        _tokens = tokens;
         var current = settings.CurrentValue;
         DatabasePath = current.ResolvePersistentPath(current.Offline.StorePath);
         _connectionString = new SqliteConnectionStringBuilder
@@ -185,6 +192,15 @@ public sealed class OfflineSessionStore : IDisposable
                     createdAt TEXT NOT NULL,
                     attempts INTEGER NOT NULL DEFAULT 0,
                     lastError TEXT NULL);
+                CREATE TABLE IF NOT EXISTS pins(
+                    userId TEXT PRIMARY KEY,
+                    hash TEXT NOT NULL,
+                    cachedAt TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS logouts(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    userId TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    createdAt TEXT NOT NULL);
                 """;
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             _initialized = true;
@@ -523,9 +539,9 @@ public sealed class OfflineSessionStore : IDisposable
         using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT
-                (SELECT COUNT(*) FROM events WHERE deadLetter = 0) + (SELECT COUNT(*) FROM reports) + (SELECT COUNT(*) FROM finished WHERE attempts < @max),
+                (SELECT COUNT(*) FROM events WHERE deadLetter = 0) + (SELECT COUNT(*) FROM reports) + (SELECT COUNT(*) FROM finished WHERE attempts < @max) + (SELECT COUNT(*) FROM logouts),
                 (SELECT COUNT(*) FROM events WHERE deadLetter = 1) + (SELECT COUNT(*) FROM finished WHERE attempts >= @max),
-                (SELECT MIN(createdAt) FROM (SELECT createdAt FROM events WHERE deadLetter = 0 UNION ALL SELECT createdAt FROM reports UNION ALL SELECT createdAt FROM finished WHERE attempts < @max));
+                (SELECT MIN(createdAt) FROM (SELECT createdAt FROM events WHERE deadLetter = 0 UNION ALL SELECT createdAt FROM reports UNION ALL SELECT createdAt FROM finished WHERE attempts < @max UNION ALL SELECT createdAt FROM logouts));
             """;
         command.Parameters.AddWithValue("@max", MaxDeliveryAttempts);
         using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
@@ -711,6 +727,9 @@ public sealed class OfflineSessionStore : IDisposable
 
                 await UpdateByIdsAsync("DELETE FROM reports WHERE id IN ({0});", [id], null, cancellationToken).ConfigureAwait(false);
             }
+
+            // Last: a sign-out settles any session still open with the time of its replay, so every `ended` goes first.
+            sent += await ReplayLogoutsAsync(server, cancellationToken).ConfigureAwait(false);
         }
 
         var remaining = (await GetQueueStatsAsync(cancellationToken).ConfigureAwait(false)).Pending;
@@ -862,6 +881,227 @@ public sealed class OfflineSessionStore : IDisposable
         return JsonDefaults.Deserialize<User>(reader.GetString(1));
     }
 
+    /// <summary>
+    /// Sets the main balance of every cached row of <paramref name="userId"/> (a <c>walletUpdated</c> push, a charge taken
+    /// offline), so an offline start or extension is checked against what the player really has. No-op when not cached.
+    /// </summary>
+    public async Task UpdateCachedBalanceAsync(Guid userId, Money balance, CancellationToken cancellationToken)
+    {
+        await InitializeAsync(cancellationToken).ConfigureAwait(false);
+        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+            var rows = new List<(string Username, User User)>();
+            using (var select = connection.CreateCommand())
+            {
+                select.CommandText = "SELECT username, userJson FROM users WHERE userId = @userId;";
+                select.Parameters.AddWithValue("@userId", userId.ToString("D"));
+                using var reader = await select.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+                while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    if (JsonDefaults.Deserialize<User>(reader.GetString(1)) is { } user)
+                    {
+                        rows.Add((reader.GetString(0), user));
+                    }
+                }
+            }
+
+            foreach (var (username, user) in rows)
+            {
+                using var update = connection.CreateCommand();
+                // cachedAt is left alone: a balance update does not make the cached password any fresher.
+                update.CommandText = "UPDATE users SET userJson = @userJson WHERE username = @username;";
+                update.Parameters.AddWithValue("@userJson", JsonDefaults.Serialize(user with { Balance = balance }));
+                update.Parameters.AddWithValue("@username", username);
+                await update.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
+    #endregion
+
+    #region Unlock PINs
+
+    /// <summary>Keeps the salted hash (<see cref="HashPassword"/>) of the last PIN verified or set on this PC for <paramref name="userId"/>.</summary>
+    public async Task SavePinHashAsync(Guid userId, string hash, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(hash);
+        await InitializeAsync(cancellationToken).ConfigureAwait(false);
+        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO pins(userId, hash, cachedAt) VALUES (@userId, @hash, @cachedAt)
+                ON CONFLICT(userId) DO UPDATE SET hash = excluded.hash, cachedAt = excluded.cachedAt;
+                """;
+            command.Parameters.AddWithValue("@userId", userId.ToString("D"));
+            command.Parameters.AddWithValue("@hash", hash);
+            command.Parameters.AddWithValue("@cachedAt", Stamp(_clock.UtcNow));
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
+    /// <summary>The cached PIN hash of <paramref name="userId"/>, or <see langword="null"/>.</summary>
+    public async Task<string?> GetPinHashAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        await InitializeAsync(cancellationToken).ConfigureAwait(false);
+        using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT hash FROM pins WHERE userId = @userId;";
+        command.Parameters.AddWithValue("@userId", userId.ToString("D"));
+        return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) as string;
+    }
+
+    /// <summary>Forgets the cached PIN of <paramref name="userId"/> (the server says none is set).</summary>
+    public async Task DeletePinHashAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        await InitializeAsync(cancellationToken).ConfigureAwait(false);
+        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+            using var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM pins WHERE userId = @userId;";
+            command.Parameters.AddWithValue("@userId", userId.ToString("D"));
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
+    #endregion
+
+    #region Sign-outs
+
+    /// <summary>
+    /// Queues <c>POST /auth/logout</c> of <paramref name="userId"/> that could not reach the server; replayed last by
+    /// <see cref="FlushAsync"/> with the player token still held for that player (dropped when it is gone or replaced).
+    /// </summary>
+    public async Task QueueLogoutAsync(Guid userId, SessionEndReason reason, CancellationToken cancellationToken)
+    {
+        await InitializeAsync(cancellationToken).ConfigureAwait(false);
+        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+            using var command = connection.CreateCommand();
+            command.CommandText = "INSERT INTO logouts(userId, reason, createdAt) VALUES (@userId, @reason, @createdAt);";
+            command.Parameters.AddWithValue("@userId", userId.ToString("D"));
+            command.Parameters.AddWithValue("@reason", JsonDefaults.Serialize(reason));
+            command.Parameters.AddWithValue("@createdAt", Stamp(_clock.UtcNow));
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Drops every queued sign-out: a new sign-in on this PC replaces the player token server-side, and replaying an old
+    /// sign-out with a token reused by an offline sign-in would throw the player out.
+    /// </summary>
+    public async Task DropQueuedLogoutsAsync(CancellationToken cancellationToken)
+    {
+        await InitializeAsync(cancellationToken).ConfigureAwait(false);
+        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+            using var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM logouts;";
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
+    private async Task<int> ReplayLogoutsAsync(IServerClient server, CancellationToken cancellationToken)
+    {
+        if (FlushBackoffRemaining > TimeSpan.Zero)
+        {
+            return 0;
+        }
+
+        var rows = new List<(long Id, Guid UserId, SessionEndReason Reason)>();
+        await InitializeAsync(cancellationToken).ConfigureAwait(false);
+        using (var connection = await OpenAsync(cancellationToken).ConfigureAwait(false))
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT id, userId, reason FROM logouts ORDER BY id;";
+            using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                SessionEndReason reason = SessionEndReason.User;
+                try
+                {
+                    reason = JsonDefaults.Deserialize<SessionEndReason>(reader.GetString(2));
+                }
+                catch (System.Text.Json.JsonException)
+                {
+                    // Replayed as a plain sign-out.
+                }
+
+                rows.Add((reader.GetInt64(0), Guid.TryParse(reader.GetString(1), out var userId) ? userId : Guid.Empty, reason is SessionEndReason.Unknown ? SessionEndReason.User : reason));
+            }
+        }
+
+        var sent = 0;
+        foreach (var (id, userId, reason) in rows)
+        {
+            if (_tokens?.User?.UserId is not { } holder || holder != userId)
+            {
+                _logger.LogInformation("Queued sign-out of {UserId} dropped: this PC no longer holds that player's token", userId);
+                await UpdateByIdsAsync("DELETE FROM logouts WHERE id IN ({0});", [id], null, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+
+            try
+            {
+                await server.LogoutAsync(new LogoutRequest(reason), cancellationToken).ConfigureAwait(false);
+                sent++;
+                ResetBackoff();
+                _logger.LogInformation("Queued sign-out of {UserId} ({Reason}) replayed", userId, reason);
+            }
+            catch (ServerApiException ex) when (ex.IsRetryable)
+            {
+                _logger.LogWarning("Queued sign-out replay paused: {Code} ({Message}); next attempt in {Backoff}", ex.Code, ex.Message, _backoff);
+                ArmBackoff();
+                return sent;
+            }
+            catch (ServerApiException ex)
+            {
+                // Refused: the token is gone server-side (expired, replaced), which is what the sign-out wanted.
+                _logger.LogInformation("Queued sign-out of {UserId} refused by the server ({Code}); dropped", userId, ex.Code);
+            }
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested && (ex is HttpRequestException or OperationCanceledException or TimeoutException))
+            {
+                _logger.LogWarning(ex, "Queued sign-out replay transport failure; next attempt in {Backoff}", _backoff);
+                ArmBackoff();
+                return sent;
+            }
+
+            await UpdateByIdsAsync("DELETE FROM logouts WHERE id IN ({0});", [id], null, cancellationToken).ConfigureAwait(false);
+        }
+
+        return sent;
+    }
+
     #endregion
 
     /// <summary>
@@ -879,7 +1119,7 @@ public sealed class OfflineSessionStore : IDisposable
             var deleted = 0;
             using (var users = connection.CreateCommand())
             {
-                users.CommandText = "DELETE FROM users WHERE cachedAt < @before;";
+                users.CommandText = "DELETE FROM users WHERE cachedAt < @before; DELETE FROM pins WHERE cachedAt < @before;";
                 users.Parameters.AddWithValue("@before", Stamp(now - TimeSpan.FromHours(Math.Max(1, _settings.CurrentValue.Offline.UserCacheTtlHours))));
                 deleted += await users.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }

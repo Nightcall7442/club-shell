@@ -6,6 +6,7 @@ using ClubShell.Contracts.Ipc;
 using ClubShell.Contracts.Pcs;
 using ClubShell.Contracts.Serialization;
 using ClubShell.Contracts.Users;
+using ClubShell.Contracts.Wallet;
 using ClubShell.Core.Abstractions;
 using PlaySession = ClubShell.Contracts.Sessions.Session;
 
@@ -60,9 +61,39 @@ public sealed class ShellUserContext
     private User? _user;
     private DateTimeOffset? _expiresAt;
     private ConnectivityState _mode;
+    private Balance? _balance;
+    private TaskCompletionSource? _signingOut;
 
     /// <summary>Raised after every change (login, refresh, logout).</summary>
     public event EventHandler? Changed;
+
+    /// <summary>
+    /// <see langword="true"/> while <c>auth.logout</c> runs (session end, server logout, local clear): the profile reset
+    /// after the session waits for it (<see cref="WaitForSignOutAsync"/>), and a refused player token is not reported
+    /// as an expiry meanwhile.
+    /// </summary>
+    public bool IsSigningOut
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _signingOut is not null;
+            }
+        }
+    }
+
+    /// <summary>Last full wallet snapshot of the signed-in player (<c>wallet.balance</c>, <c>walletUpdated</c> push), or <see langword="null"/>.</summary>
+    public Balance? LastBalance
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _balance;
+            }
+        }
+    }
 
     /// <summary>Logged-in user, or <see langword="null"/>.</summary>
     public User? User
@@ -109,12 +140,96 @@ public sealed class ShellUserContext
         ArgumentNullException.ThrowIfNull(user);
         lock (_gate)
         {
+            if (_user?.Id != user.Id)
+            {
+                _balance = null;
+            }
+
             _user = user;
             _expiresAt = expiresAt;
             _mode = mode;
         }
 
         Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Takes a wallet snapshot for the signed-in player: <see cref="User.Balance"/> follows <see cref="Balance.Amount"/>.
+    /// <see langword="false"/> (nothing changed) when nobody is signed in or the balance is another player's.
+    /// </summary>
+    public bool UpdateBalance(Balance balance)
+    {
+        ArgumentNullException.ThrowIfNull(balance);
+        lock (_gate)
+        {
+            if (_user is null || _user.Id != balance.UserId)
+            {
+                return false;
+            }
+
+            _balance = balance;
+            _user = _user with { Balance = balance.Amount };
+        }
+
+        Changed?.Invoke(this, EventArgs.Empty);
+        return true;
+    }
+
+    /// <summary>
+    /// Marks a sign-out in progress until the returned scope is disposed (<see cref="IsSigningOut"/>). Nested calls share
+    /// the first scope's completion.
+    /// </summary>
+    public IDisposable BeginSignOut()
+    {
+        lock (_gate)
+        {
+            if (_signingOut is not null)
+            {
+                return new SignOutScope(this, null);
+            }
+
+            var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _signingOut = completion;
+            return new SignOutScope(this, completion);
+        }
+    }
+
+    /// <summary>Completes when no sign-out is running, or after <paramref name="timeout"/>; <see langword="false"/> on the timeout.</summary>
+    public async Task<bool> WaitForSignOutAsync(TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        Task? running;
+        lock (_gate)
+        {
+            running = _signingOut?.Task;
+        }
+
+        if (running is null)
+        {
+            return true;
+        }
+
+        try
+        {
+            await running.WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (TimeoutException)
+        {
+            return false;
+        }
+    }
+
+    private void EndSignOut(TaskCompletionSource completion)
+    {
+        lock (_gate)
+        {
+            if (ReferenceEquals(_signingOut, completion))
+            {
+                _signingOut = null;
+            }
+        }
+
+        completion.TrySetResult();
     }
 
     /// <summary>Replaces the user snapshot (profile refresh) when it is the same account; <see langword="false"/> otherwise.</summary>
@@ -148,10 +263,31 @@ public sealed class ShellUserContext
             _user = null;
             _expiresAt = null;
             _mode = ConnectivityState.Offline;
+            _balance = null;
         }
 
         Changed?.Invoke(this, EventArgs.Empty);
         return true;
+    }
+
+    private sealed class SignOutScope : IDisposable
+    {
+        private readonly ShellUserContext _owner;
+        private TaskCompletionSource? _completion;
+
+        public SignOutScope(ShellUserContext owner, TaskCompletionSource? completion)
+        {
+            _owner = owner;
+            _completion = completion;
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _completion, null) is { } completion)
+            {
+                _owner.EndSignOut(completion);
+            }
+        }
     }
 }
 

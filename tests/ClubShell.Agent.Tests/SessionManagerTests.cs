@@ -293,6 +293,9 @@ public sealed class SessionManagerTests : IDisposable
                 _events.Add(e);
             }
         };
+
+        // The player signed in once online: their profile (and balance) is in the offline cache.
+        _store.CacheUserAsync("player", null, Player(100_000), CancellationToken.None).GetAwaiter().GetResult();
     }
 
     public void Dispose()
@@ -617,7 +620,121 @@ public sealed class SessionManagerTests : IDisposable
         await _server.DidNotReceive().GetCurrentSessionAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
     }
 
+    // ---- offline rules (G7) and the server's cost (G14) ------------------------------------------
+
+    [Fact]
+    public async Task Offline_pay_as_you_go_is_refused_even_when_the_server_drops_mid_start()
+    {
+        _server.CreateSessionAsync(Arg.Any<SessionCreateRequest>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>()).ThrowsAsync(Unavailable());
+        _server.GetTariffsAsync(Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(new EtagResponse<TariffsResponse>(new TariffsResponse([StandardTariff()], T0), null, false));
+
+        Func<Task> start = () => _manager.StartAsync(new SessionCreateRequest(PcId, UserId, TariffId, null, Prepaid: false), CancellationToken.None);
+
+        var error = (await start.Should().ThrowAsync<IpcException>()).Which.Error;
+        error.Code.Should().Be(ErrorCode.Conflict);
+        error.DetailsAs<ReasonDetails>()!.Reason.Should().Be("offlineUnavailable");
+        _manager.State.Should().Be(SessionState.Idle);
+    }
+
+    [Fact]
+    public async Task Offline_prepaid_start_is_checked_against_the_cached_balance_and_takes_from_it()
+    {
+        await _store.CacheUserAsync("player", null, Player(8_000), CancellationToken.None);
+        _server.CreateSessionAsync(Arg.Any<SessionCreateRequest>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>()).ThrowsAsync(Unavailable());
+        _server.GetTariffsAsync(Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(new EtagResponse<TariffsResponse>(new TariffsResponse([StandardTariff()], T0), null, false));
+
+        Func<Task> tooMuch = () => _manager.StartAsync(new SessionCreateRequest(PcId, UserId, TariffId, 120, Prepaid: true), CancellationToken.None);
+        (await tooMuch.Should().ThrowAsync<IpcException>()).Which.Code.Should().Be(ErrorCode.InsufficientFunds, "12 000 for 2 h > 8 000 cached; no going negative offline");
+
+        await _manager.StartAsync(Request(), CancellationToken.None);
+
+        (await _store.GetCachedUserAsync(UserId, CancellationToken.None))!.Balance.Should().Be(Money.Uzs(2_000), "6 000 for the hour was taken from the cached 8 000");
+        Func<Task> extend = () => _manager.ExtendAsync(30, null, CancellationToken.None);
+        (await extend.Should().ThrowAsync<IpcException>()).Which.Code.Should().Be(ErrorCode.InsufficientFunds, "3 000 for 30 min > the 2 000 left");
+        _manager.Current!.SecondsLeft.Should().Be(3600);
+    }
+
+    [Fact]
+    public async Task Offline_start_without_a_known_balance_or_tariff_is_refused()
+    {
+        _server.CreateSessionAsync(Arg.Any<SessionCreateRequest>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>()).ThrowsAsync(Unavailable());
+        _server.GetTariffsAsync(Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>()).ThrowsAsync(Unavailable());
+
+        Func<Task> unknownTariff = () => _manager.StartAsync(Request(), CancellationToken.None);
+        (await unknownTariff.Should().ThrowAsync<IpcException>()).Which.Code.Should().Be(ErrorCode.NotFound, "an unknown tariff has no price: it was a free session before");
+
+        _server.GetTariffsAsync(Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(new EtagResponse<TariffsResponse>(new TariffsResponse([StandardTariff()], T0), null, false));
+        _time.Advance(TimeSpan.FromMinutes(16));
+        Func<Task> stranger = () => _manager.StartAsync(new SessionCreateRequest(PcId, Guid.NewGuid(), TariffId, 60, Prepaid: true), CancellationToken.None);
+        var error = (await stranger.Should().ThrowAsync<IpcException>()).Which.Error;
+        error.Code.Should().Be(ErrorCode.Conflict);
+        error.DetailsAs<ReasonDetails>()!.Reason.Should().Be("offlineUnavailable", "no balance is known for a player never cached here");
+    }
+
+    [Fact]
+    public async Task Offline_start_applies_the_tariffs_zone_rule_like_the_server()
+    {
+        _server.CreateSessionAsync(Arg.Any<SessionCreateRequest>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>()).ThrowsAsync(Unavailable());
+        var bootcamp = StandardTariff() with { Zones = ["bootcamp"] };
+        _server.GetTariffsAsync(Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(new EtagResponse<TariffsResponse>(new TariffsResponse([bootcamp], T0), null, false));
+
+        Func<Task> start = () => _manager.StartAsync(Request(), CancellationToken.None);
+
+        var error = (await start.Should().ThrowAsync<IpcException>()).Which.Error;
+        error.Code.Should().Be(ErrorCode.PolicyDenied);
+        error.DetailsAs<PolicyDeniedDetails>()!.Rule.Should().Be("tariffZone", "this PC is in zone vip");
+    }
+
+    [Fact]
+    public async Task Offline_start_after_a_restart_prices_from_the_tariffs_kept_on_disk()
+    {
+        var settings = new AgentSettings { PcId = PcId, Zone = "vip" };
+        settings.Paths.ProgramData = _dir.Root;
+        Directory.CreateDirectory(settings.CacheDir);
+        await File.WriteAllBytesAsync(Path.Combine(settings.CacheDir, SessionManager.TariffsCacheFileName), Contracts.Serialization.JsonDefaults.SerializeToUtf8Bytes(new TariffsResponse([StandardTariff()], T0)));
+        _server.CreateSessionAsync(Arg.Any<SessionCreateRequest>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>()).ThrowsAsync(Unavailable());
+        _server.GetTariffsAsync(Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>()).ThrowsAsync(Unavailable());
+
+        PlaySession session = await _manager.StartAsync(Request(), CancellationToken.None);
+
+        session.Cost.Should().Be(Money.Uzs(6_000));
+        _manager.IsOfflineSession.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Online_pay_as_you_go_keeps_the_servers_cost_instead_of_adding_the_list_price()
+    {
+        Guid id = Guid.NewGuid();
+        PlaySession postpaid = ServerSession(id, secondsLeft: PlaySession.OpenEnded, cost: 0) with { IsPrepaid = false, EndsAt = null };
+        _server.CreateSessionAsync(Arg.Any<SessionCreateRequest>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(postpaid);
+        _server.GetTariffsAsync(Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(new EtagResponse<TariffsResponse>(new TariffsResponse([StandardTariff()], T0), null, false));
+        _manager.PostpaidChargeIntervalMinutes = 1;
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await _manager.StartAsync(new SessionCreateRequest(PcId, UserId, TariffId, null, Prepaid: false), CancellationToken.None);
+        await _time.WaitForTimersAsync(1, cts.Token);
+
+        for (int i = 0; i < 180; i++)
+        {
+            _time.Advance(TimeSpan.FromSeconds(1));
+        }
+
+        await Task.Delay(200, cts.Token);
+        _manager.Current!.Cost.Should().Be(Money.Uzs(0), "the cost of a session the server knows comes from the server only");
+        Events().Should().NotContain(e => e.Type == SessionEventType.Charged);
+
+        await _manager.ApplyServerSessionAsync(postpaid with { Cost = Money.Uzs(270), SecondsUsed = 180 }, CancellationToken.None);
+        _manager.Current!.Cost.Should().Be(Money.Uzs(270), "the server's figure, with its day rate and the player's discount");
+    }
+
     // ---- helpers --------------------------------------------------------------------------------
+
+    private static Contracts.Users.User Player(long balance) =>
+        new(UserId, "player", "Player", null, Contracts.Users.UserRole.Member, Money.Uzs(balance), 0, 0, T0.AddDays(-30), T0, Contracts.Users.Locale.Ru, []);
 
     private List<SessionEvent> Events()
     {
