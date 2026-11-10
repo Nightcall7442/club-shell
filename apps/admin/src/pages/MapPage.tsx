@@ -2605,18 +2605,18 @@ function FreeSeat({ seat, tariffs, banner, note, busy, run, onDone, setNote }: P
     // `pkgQuotes` is the cache itself: reading it must not refetch.
   }, [packageIds, seat.pc.id, userId, requote]);
 
-  // Postpaid: a guest only when the club allows it; a member while the balance (and the club's member debt limit)
-  // covers the first minute — the server refuses otherwise (D-30, D-31).
+  // Postpaid at the desk is on by default for members and guests. A guest is refused only when the club turned guest
+  // postpaid off; a member only under a debt cap (`memberDebtLimit` > 0) that the balance plus the cap cannot cover for
+  // the first minute — `null` or 0 is no cap at all, as on the server.
   const limits = club.limits;
-  const memberLimit = limits?.memberDebtLimit ?? 0;
+  const memberCap = limits?.memberDebtLimit ?? null;
+  const capped = memberCap !== null && memberCap > 0;
   const postpaidOff: string | null = guest
-    ? limits?.guestPostpaid
+    ? (limits?.guestPostpaid ?? true)
       ? null
       : t('Постоплата для гостей выключена в настройках клуба')
-    : who && hourlyQuote && who.balance.amount + memberLimit < firstMinute(hourlyQuote, hourlyMinutes)
-      ? memberLimit > 0
-        ? t('Баланс и разрешённый долг не покрывают первую минуту')
-        : t('Постоплата — только с баланса, а на нём нет даже на минуту')
+    : capped && who && hourlyQuote && who.balance.amount + memberCap < firstMinute(hourlyQuote, hourlyMinutes)
+      ? t('Баланс и разрешённый долг не покрывают первую минуту')
       : null;
   const prepaid = wantPrepaid || postpaidOff !== null || !cashDesk2;
   // Forced back to prepaid (the client cannot afford a minute, a guest while guest postpaid is off): the choice follows,

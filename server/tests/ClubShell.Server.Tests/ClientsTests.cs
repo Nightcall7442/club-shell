@@ -10,6 +10,41 @@ namespace ClubShell.Server.Tests;
 /// </summary>
 public sealed class ClientsTests(ServerFixture server) : LedgerCheckedTest(server), IClassFixture<ServerFixture>
 {
+    /// <summary>
+    /// A login name from the desk is trimmed and 3–32 characters (as the contract's <c>User.username</c>), stored lower-cased
+    /// in any script; a player signs in with it in any case, Cyrillic too. A name of 1–2 characters made before keeps
+    /// signing in.
+    /// </summary>
+    [Fact]
+    public async Task A_desk_login_name_is_3_to_32_characters_and_signs_in_in_any_case()
+    {
+        var cashier = await LoginAsync(Server, CashierPin);
+        var tag = Guid.NewGuid().ToString("N")[..6];
+        foreach (var (username, reason) in new[] { ("ab", "min"), ("  ab  ", "min"), (new string('x', 33), "max"), ("", "required") })
+        {
+            Assert.Equal(("username", reason), StaffAdminTests.Details(await ExpectAsync(Server, 400, HttpMethod.Post, "/clients", cashier,
+                new { username, displayName = "Короткое имя", password = Players.Password })));
+        }
+
+        var created = (await ExpectAsync(Server, 200, HttpMethod.Post, "/clients", cashier,
+            new { username = $"  Иван-{tag}  ", displayName = "Иван", password = Players.Password })).GetProperty("client");
+        Assert.Equal($"иван-{tag}", created.GetProperty("username").GetString());
+        var id = created.GetProperty("id").GetGuid();
+        var agent = await TestAgent.CreateAsync(Server);
+        foreach (var typed in new[] { $"ИВАН-{tag}", $"Иван-{tag}", $"иван-{tag}" })
+        {
+            Assert.Equal(id, (await agent.LoginAsync(new TestPlayer(id, typed))).GetProperty("user").GetProperty("id").GetGuid());
+        }
+
+        // An existing two-letter name (allowed before) signs in as it is (raw client: the contract's User wants 3+).
+        var old = await Players.CreateAsync(Server);
+        var shortName = "q" + tag[0];
+        await Players.ExecuteAsync(Server, "UPDATE users SET username = @shortName WHERE id = @Id", new { shortName, old.Id });
+        var (status, auth) = await agent.RawPostAsync("/api/v1/auth/login",
+            new { kind = "password", username = shortName.ToUpperInvariant(), password = Players.Password, pcId = agent.PcId, hwid = agent.Hwid });
+        Assert.Equal((200, old.Id), (status, auth.GetProperty("user").GetProperty("id").GetGuid()));
+    }
+
     [Fact]
     public async Task Login_and_card_are_unique_case_insensitively_and_the_card_signs_in()
     {
@@ -46,8 +81,8 @@ public sealed class ClientsTests(ServerFixture server) : LedgerCheckedTest(serve
             await Players.ReadAsync(byCard, 200);
         }
 
-        // Without a password nobody knows one; a short name is fine (1–32).
-        var other = (await ExpectAsync(Server, 200, HttpMethod.Post, "/clients", cashier, new { username = tag[..2], displayName = "Без пароля" })).GetProperty("client");
+        // Without a password nobody knows one; a short name is fine (3–32).
+        var other = (await ExpectAsync(Server, 200, HttpMethod.Post, "/clients", cashier, new { username = tag[..3], displayName = "Без пароля" })).GetProperty("client");
         Assert.StartsWith("pbkdf2$", await Players.ScalarAsync<string>(Server, "SELECT password_hash FROM users WHERE id = @id", new { id = other.GetProperty("id").GetGuid() }));
 
         var otherId = other.GetProperty("id").GetGuid();

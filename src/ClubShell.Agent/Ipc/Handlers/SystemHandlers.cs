@@ -347,6 +347,12 @@ public sealed class SystemHandlers : IIpcHandlerGroup
 
     private async Task<OkResponse> LockScreenAsync(IpcContext context, SysLockScreenRequest? request, CancellationToken cancellationToken)
     {
+        if (_sessions.State.IsOpen() && context.User is { Role: UserRole.Guest } guest && _sessions.Current?.UserId == guest.Id)
+        {
+            // The same rule as session.lock: a guest has no PIN or password to unlock with.
+            throw IpcError.Forbidden("A guest has no PIN or password to unlock with", "guestLock").ToException();
+        }
+
         await _power.LockAsync(request?.Reason, cancellationToken).ConfigureAwait(false);
         return OkResponse.Instance;
     }

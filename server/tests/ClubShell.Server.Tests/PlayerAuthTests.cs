@@ -261,15 +261,22 @@ public sealed class PlayerAuthTests(LongClockServerFixture server) : LedgerCheck
     {
         var (agent, player) = await Players.SignedInAsync(Server);
         var (_, created) = await Players.StartAsync(agent, player);
-        using (var logout = await agent.PostAsync("/api/v1/auth/logout", new { reason = "admin" }))
+        using (var logout = await agent.PostAsync("/api/v1/auth/logout", new { reason = "idle" }))
         {
             await Players.ReadAsync(logout, 204);
         }
 
         var id = created.GetProperty("id").GetGuid();
-        Assert.Equal(("ended", "admin"), (await Players.ScalarAsync<string>(Server, "SELECT state FROM sessions WHERE id = @id", new { id }),
+        Assert.Equal(("ended", "idle"), (await Players.ScalarAsync<string>(Server, "SELECT state FROM sessions WHERE id = @id", new { id }),
             await Players.ScalarAsync<string>(Server, "SELECT end_reason FROM sessions WHERE id = @id", new { id })));
-        Assert.Equal(10_000_000, await Players.BalanceAsync(Server, player.Id)); // admin: the unused hour is refunded
+        Assert.Equal(8_800_000, await Players.BalanceAsync(Server, player.Id)); // the player's end: the unused hour is not refunded
+
+        // A player's sign-out is never the desk's end: admin is settled as user, without the refund.
+        await agent.LoginAsync(player);
+        var (_, second) = await Players.StartAsync(agent, player);
+        await Players.ReadAsync(await agent.PostAsync("/api/v1/auth/logout", new { reason = "admin" }), 204);
+        Assert.Equal("user", await Players.ScalarAsync<string>(Server, "SELECT end_reason FROM sessions WHERE id = @id", new { id = second.GetProperty("id").GetGuid() }));
+        Assert.Equal(7_600_000, await Players.BalanceAsync(Server, player.Id));
 
         using var after = await agent.SendAsync(HttpMethod.Get, $"/api/v1/users/{player.Id}");
         await Contract.ReadErrorAsync(after, 401, "unauthorized", "userToken");

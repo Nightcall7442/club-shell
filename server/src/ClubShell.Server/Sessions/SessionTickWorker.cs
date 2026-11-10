@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using ClubShell.Contracts.Commands;
 using ClubShell.Contracts.Sessions;
+using ClubShell.Contracts.Users;
 using ClubShell.Server.Agents;
 using ClubShell.Server.Infrastructure;
 using ClubShell.Server.Realtime;
@@ -13,8 +14,9 @@ namespace ClubShell.Server.Sessions;
 /// <summary>
 /// The session tick (DESIGN §5.10, §8), every <see cref="SessionsOptions.TickMs"/> under <c>pg_advisory_lock(CSSess)</c>,
 /// for PCs with a fresh heartbeat and an empty agent outbox: a prepaid session becomes <c>ending</c> at <c>ends_at</c> and
-/// is ended with <c>timeUp</c> after <see cref="SessionsOptions.GraceSec"/> (grace is free); a postpaid one ends at the
-/// minute boundary where the next minute exceeds balance + its limit (<see cref="SessionService.PostpaidLimit"/>, D-10). Any
+/// is ended with <c>timeUp</c> after <see cref="SessionsOptions.GraceSec"/> (grace is free); a postpaid one with a cap ends
+/// at the minute boundary where the next minute exceeds balance + its own limit (<see cref="SessionRow.DebtLimit"/>, D-10),
+/// warned 5 and 1 minutes before; one without a cap (a desk seat, no debt limit set) runs until it is ended. Any
 /// other PC is left to its agent (it is the authority then, §5.11) until <see cref="SessionsOptions.MaxOfflineMinutes"/>
 /// of silence. A server-side end queues <c>endSession</c> for the agent (§6.4). Every <see cref="SessionsOptions.ResyncSec"/> an open session is pushed to its PC again. Tests call
 /// <see cref="RunOnceAsync"/> with the fixture's clock; the hosted loop runs only with <c>Workers:Enabled</c>.
@@ -42,7 +44,7 @@ public sealed class SessionTickWorker(
             // ponytail: 100 per tick and all open postpaid re-read each second; page by ends_at/id if a club outgrows it.
             var open = (await c.QueryAsync<TickRow>(
                 """
-                SELECT s.*, p.last_heartbeat_at, w.main_balance, t.settled, u.role, u.transient, cl.time_zone, cl.settings::text AS club_settings
+                SELECT s.*, p.last_heartbeat_at, w.main_balance, t.settled, u.transient, cl.time_zone, cl.settings::text AS club_settings
                 FROM sessions s JOIN pcs p ON p.id = s.pc_id JOIN wallets w ON w.user_id = s.user_id
                 JOIN users u ON u.id = s.user_id JOIN clubs cl ON cl.id = s.club_id
                 CROSS JOIN LATERAL (SELECT coalesce(p.last_heartbeat_at > @fresh AND coalesce((p.last_heartbeat->>'offlineQueue')::int, 0) = 0, false) AS settled) t
@@ -101,15 +103,22 @@ public sealed class SessionTickWorker(
                         effects.Sessions.Add(s.ToWire(now));
                     }
                 }
-                else if (!s.IsPrepaid && sessions.PostpaidLimit(s.Role, ClubPricing.Parse(s.TimeZone, s.ClubSettings)) is { } limit)
+                else if (!s.IsPrepaid && s.DebtLimit is { } limit)
                 {
-                    // D-10: stop at the minute boundary where the next second would start a minute beyond balance + limit;
-                    // a late tick still ends there, so only fully played minutes are charged and the limit holds.
+                    // D-10: stop at the minute boundary where the next second would start a minute beyond balance + the
+                    // session's own limit; a late tick still ends there, so only fully played minutes are charged and the
+                    // limit holds.
                     var used = s.Used(now);
-                    if (Pricing.Frozen(s.PricePerHourSnapshot, used + 1, s.DayPct, s.DiscountPct) > s.MainBalance + limit
-                        && await SignOutLockAsync(c, tx, s))
+                    if (Pricing.Frozen(s.PricePerHourSnapshot, used + 1, s.DayPct, s.DiscountPct) > s.MainBalance + limit)
                     {
-                        await EndAsync(c, tx, s, Max(now.AddSeconds((used / 60 * 60) - used), s.LastTransitionAt), effects, signOut: true);
+                        if (await SignOutLockAsync(c, tx, s))
+                        {
+                            await EndAsync(c, tx, s, Max(now.AddSeconds((used / 60 * 60) - used), s.LastTransitionAt), effects, signOut: true);
+                        }
+                    }
+                    else
+                    {
+                        await WarnAsync(c, tx, s, used, limit, now, effects);
                     }
                 }
             }
@@ -156,6 +165,45 @@ public sealed class SessionTickWorker(
         if (signOut && s.Transient)
         {
             await SessionService.SignOutAsync(c, tx, s.UserId, s.PcId, effects);
+        }
+    }
+
+    /// <summary>
+    /// Minutes of money left at which a capped postpaid session is warned, as the agent warns a prepaid one before its time
+    /// runs out.
+    /// </summary>
+    public static readonly int[] PostpaidWarningMinutes = [5, 1];
+
+    /// <summary>
+    /// Warns a running postpaid session with a cap (a kiosk pay-as-you-go, a desk seat under a debt limit) when the money
+    /// left — balance + its limit — pays for at most 5, then 1 more minutes before this tick would end it (the cut-off is the
+    /// minute boundary where the next minute is not affordable, so «at most N minutes» is <c>frozen(used + N·60 + 1) &gt;
+    /// balance + limit</c>). The mark goes to <c>warnings_sent</c> and the session is pushed (<c>sessionUpdated</c> with
+    /// <c>warningsSent</c>, the field the agent keeps its prepaid <c>session.warning</c> marks in), and a <c>notification</c>
+    /// push tells the player at once. Marks reached together warn once, with the fewer minutes. A mark whose minutes are no
+    /// longer near (the balance was topped up) is taken back, so it warns again later — as the agent re-arms a prepaid mark
+    /// after an extension.
+    /// </summary>
+    private static async Task WarnAsync(NpgsqlConnection c, NpgsqlTransaction tx, TickRow s, int used, long limit, DateTimeOffset now, SessionEffects effects)
+    {
+        var due = PostpaidWarningMinutes.Where(m => Pricing.Frozen(s.PricePerHourSnapshot, used + (m * 60) + 1, s.DayPct, s.DiscountPct) > s.MainBalance + limit).ToArray();
+        var kept = s.WarningsSent.Where(m => !PostpaidWarningMinutes.Contains(m) || due.Contains(m)).ToArray();
+        var fresh = due.Except(kept).ToArray();
+        if (fresh.Length == 0 && kept.Length == s.WarningsSent.Length)
+        {
+            return;
+        }
+
+        s.WarningsSent = [.. kept, .. fresh.OrderDescending()];
+        await SessionService.SaveAsync(c, tx, s, now);
+        effects.Sessions.Add(s.ToWire(now));
+        if (fresh.Length > 0)
+        {
+            var minutes = fresh.Min();
+            effects.Notifications.Add((s.PcId, new Notification(
+                Guid.NewGuid(), "Деньги на балансе заканчиваются",
+                $"Осталось примерно на {minutes} мин игры. Пополните баланс у администратора, иначе сеанс завершится.",
+                NotificationLevel.Warning, TtlSec: 60)));
         }
     }
 
@@ -234,13 +282,12 @@ public sealed class SessionTickWorker(
         public DateTimeOffset? LastHeartbeatAt { get; init; }
         public long MainBalance { get; init; }
 
-        /// <summary>The player's role and the club's zone and settings: a guest's postpaid limit is the club's (<c>limits.guestDebtLimit</c>).</summary>
-        public string Role { get; init; } = "";
-
         /// <summary>A temporary guest account: signed out when its session ends here (D-28).</summary>
         public bool Transient { get; init; }
 
+        /// <summary>The club's zone and settings (<c>limits.autoExtendMinutes</c>).</summary>
         public string TimeZone { get; init; } = "Asia/Tashkent";
+
         public string? ClubSettings { get; init; }
 
         /// <summary>Fresh heartbeat with an empty outbox: the server's clock decides (§5.10).</summary>

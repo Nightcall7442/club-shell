@@ -388,6 +388,12 @@ public sealed class PipeServerEndToEndTests
         welcome.PayloadAs<AuthHelloResponse>()!.Protocol.Should().Be(IpcEnvelope.CurrentVersion);
         harness.Server.IsShellConnected.Should().BeTrue();
 
+        // Right after the hello the Agent tells the Shell where the server link stands (it starts assuming online).
+        IpcEnvelope connectivity = await ReceiveAsync(client, cts.Token);
+        connectivity.Kind.Should().Be(IpcKind.Event);
+        connectivity.Name.Should().Be(IpcMessages.Events.SysConnectivity);
+        connectivity.PayloadAs<ConnectivityEvent>()!.State.Should().Be(ConnectivityState.Offline);
+
         IpcEnvelope ping = IpcEnvelope.Request(IpcMessages.Sys.Ping, new SysPingRequest(7, DateTimeOffset.UtcNow));
         await SendAsync(client, ping, cts.Token);
         IpcEnvelope pong = await ReceiveAsync(client, cts.Token);

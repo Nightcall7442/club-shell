@@ -129,6 +129,9 @@ public static class AgentServiceCollectionExtensions
         services.TryAddSingleton<SessionManager>();
         services.TryAddSingleton<ISessionService>(sp => sp.GetRequiredService<SessionManager>());
         services.TryAddSingleton<SessionLock>();
+        // The signed-in player across an Agent restart (G2) and the sign-in that ends under the player (G3, G10).
+        services.TryAddSingleton<SignedInUserStore>();
+        services.TryAddSingleton<SignInGuard>();
     }
 
     // ---- Games -----------------------------------------------------------------------------
@@ -243,6 +246,7 @@ public static class AgentServiceCollectionExtensions
         services.TryAddSingleton<RemoteInputService>();
 
         services.TryAddSingleton<ServerConnection>();
+        services.TryAddSingleton<IServerLinkState>(sp => sp.GetRequiredService<ServerConnection>());
         services.TryAddSingleton<CommandReceiver>();
         services.TryAddSingleton<IServerCommandSink>(sp => sp.GetRequiredService<CommandReceiver>());
         services.TryAddSingleton<IPolicyRefresh>(sp => sp.GetRequiredService<CommandReceiver>());

@@ -100,6 +100,12 @@ public static class ClubSettingsEndpoints
             }
         }
 
+        // limits.guestPostpaid is on unless the owner turned it off (ClubPricing.GuestPostpaid): the console shows what applies.
+        if (ordered["limits"] is JsonObject limits && limits["guestPostpaid"] is null)
+        {
+            limits["guestPostpaid"] = true;
+        }
+
         ordered["automation"] = await AutomationAsync(c, staff.ClubId);
         ordered["notifications"] = new JsonObject { ["bigTopupAt"] = stored["notifications"]?["bigTopupAt"]?.DeepClone() ?? DefaultBigTopupAt };
         ordered["webhooks"] = await WebhooksAsync(c, staff.ClubId);

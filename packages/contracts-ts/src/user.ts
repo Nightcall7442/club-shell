@@ -36,6 +36,18 @@ export const AuthExpiredReason = {
   Revoked: 'revoked',
   /** Admin forced logout. */
   Admin: 'admin',
+  /** The cash desk ended the player's session (server push `userRevoked {reason: sessionEnded}`). */
+  SessionEnded: 'sessionEnded',
+  /** The cash desk seated someone else on this PC (`seatTaken`). */
+  SeatTaken: 'seatTaken',
+  /** The cash desk moved the player's session to another PC (`seatMoved`). */
+  SeatMoved: 'seatMoved',
+  /** The player signed in on another PC (`signedInElsewhere`). */
+  SignedInElsewhere: 'signedInElsewhere',
+  /** The club blocked the account (`blacklisted`). */
+  Blacklisted: 'blacklisted',
+  /** The cash desk reset the account's password (`passwordReset`). */
+  PasswordReset: 'passwordReset',
 } as const;
 /** Why the user context was invalidated (`auth.expired` event). */
 export type AuthExpiredReason = (typeof AuthExpiredReason)[keyof typeof AuthExpiredReason];
@@ -78,6 +90,12 @@ export interface AuthRequest {
   pcId: string;
   /** Hardware id of the PC (sha256 hex). */
   hwid: string;
+  /**
+   * The player confirmed «end my session on the other PC and sign in here» after `409 activeSessionElsewhere`: the
+   * server ends (settles) the player's open session on the other PC like a sign-out there, signs that PC out
+   * (`userRevoked {reason: signedInElsewhere}`), then signs in here. Without it the sign-in is refused as before.
+   */
+  endElsewhere?: boolean | null;
 }
 
 /** Body of `POST /booking/reserve`. Sent with an `Idempotency-Key`. */
@@ -252,6 +270,16 @@ export interface Loyalty {
   nextLevelAt: number;
   /** Localized perk descriptions. */
   perks: string[];
+}
+
+/**
+ * Body of `POST /users/{userId}/pin/verify`: checks the player's unlock PIN against the one stored on the server (so a
+ * PIN set on one PC unlocks on any). `204` = matches; `401 badSecret` = does not match; `404 notFound` with `reason:
+ * noPin` = none is set. Failures count toward the same lockout as sign-in.
+ */
+export interface PinVerifyRequest {
+  /** 4–6 digit PIN. */
+  pin: string;
 }
 
 /** Body of `profile.update` and `PATCH /users/{userId}`; all fields optional. */

@@ -109,7 +109,10 @@ if ($persistentDir -and [IO.Path]::IsPathRooted($persistentDir) -and (Test-Path 
 }
 $files = @(
     'agent-identity.json', 'secure\agent.tokens', 'secure\hwid.fallback', 'secure\shell.token', 'secure\kiosk.cred', 'secure\club.key',
-    'cache\offline.db', 'cache\offline.db-wal', 'cache\offline.db-shm', 'crash-history.json')
+    'cache\offline.db', 'cache\offline.db-wal', 'cache\offline.db-shm', 'crash-history.json',
+    # This PC's reboots for a profile debt and for a lost auto-logon (SHELL_CHANGES 76-77): a seat booted from the image
+    # would take the master's as its own, skip its one reboot for a debt and wait out the master's 15 minutes.
+    'cache\profile-reset-reboot.txt', 'cache\kiosk-logon-reboot.txt')
 foreach ($root in $roots) {
     foreach ($rel in $files + 'cache\power-acks.json') {
         $path = Join-Path $root $rel

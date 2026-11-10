@@ -1,16 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import clsx from 'clsx';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
-import {
-  tariffPriceFor,
-  type Locale,
-  type Money,
-  type PcReadiness,
-  type Session,
-  type Tariff,
-} from '@clubshell/contracts';
+import type { Locale, Money, PcReadiness, Session, Tariff } from '@clubshell/contracts';
 import { Background } from '@/components/layout/Background';
 import { NotificationCenter } from '@/components/layout/NotificationCenter';
 import { Avatar } from '@/components/ui/Avatar';
@@ -18,20 +11,26 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
+import { formatPrice, PriceNote } from '@/components/ui/PriceNote';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Spinner } from '@/components/ui/Spinner';
 import { Tabs, type TabItem } from '@/components/ui/Tabs';
 import { focusElement, useGamepad } from '@/hooks/useGamepad';
 import { useIdle } from '@/hooks/useIdle';
 import { useLocale } from '@/hooks/useLocale';
+import { usePrice } from '@/hooks/usePrice';
 import { useSession } from '@/hooks/useSession';
 import { trackScreen } from '@/lib/analytics';
+import { pickAutoStartTariff } from '@/lib/autoStart';
 import { onCardRead } from '@/lib/cardReader';
+import { errorDetails, errorReason } from '@/lib/errorText';
 import { formatDurationSec, formatMoney } from '@/lib/format';
+import { listPrice } from '@/lib/pricing';
+import { fetchQuote } from '@/lib/quotes';
 import { api, toShellApiError } from '@/lib/tauri';
-import { formatClock } from '@/lib/time';
+import { formatClock, serverNow } from '@/lib/time';
 import { selectIsGuest, selectPcReady, useAuthStore } from '@/store/auth';
-import { useNotificationsStore } from '@/store/notifications';
+import { describeError, useNotificationsStore } from '@/store/notifications';
 import { useGamesStore } from '@/store/games';
 import { useSessionStore } from '@/store/session';
 import { useSettingsStore } from '@/store/settings';
@@ -39,6 +38,7 @@ import { useThemeStore } from '@/store/theme';
 import { useWalletStore } from '@/store/wallet';
 import { AdsCarousel } from '@/screens/Idle/AdsCarousel';
 import { describeWindow } from '@/screens/Idle/PriceList';
+import { tariffAvailableNow } from '@/lib/tariffs';
 import { ClubMark } from '@/components/brand/ClubMark';
 import { useClub } from '@/hooks/useClub';
 import { CardLogin } from './CardLogin';
@@ -138,13 +138,25 @@ export interface UnlockFormProps {
 
 type UnlockMethod = 'pin' | 'password';
 
+/** PIN first only for a player who has one (`auth.status.pinSet`); otherwise the password. */
+const unlockMethodFor = (pinSet: boolean | null): UnlockMethod => (pinSet === true ? 'pin' : 'password');
+
 export function UnlockForm({ onSuccess, className }: UnlockFormProps): JSX.Element {
   const { t } = useTranslation();
   const { user, timeLabel, isOpenEnded, unlock, busy } = useSession();
   const reload = useSessionStore((s) => s.load);
-  const [method, setMethod] = useState<UnlockMethod>('pin');
+  const pinSet = useAuthStore((s) => s.pinSet);
+  const setLockedByStaff = useAuthStore((s) => s.setLockedByStaff);
+  const [method, setMethod] = useState<UnlockMethod>(() => unlockMethodFor(pinSet));
   const [secret, setSecret] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // `pinSet` arrives with `auth.status` after the lock: follow it until the player picks a tab.
+  const picked = useRef(false);
+  useEffect(() => {
+    if (!picked.current) {
+      setMethod(unlockMethodFor(pinSet));
+    }
+  }, [pinSet]);
   const tabs = useMemo<TabItem<UnlockMethod>[]>(
     () => [
       { key: 'pin', label: t('lock.pin') },
@@ -154,6 +166,7 @@ export function UnlockForm({ onSuccess, className }: UnlockFormProps): JSX.Eleme
   );
 
   const switchMethod = (m: UnlockMethod): void => {
+    picked.current = true;
     setMethod(m);
     setSecret('');
     setError(null);
@@ -182,12 +195,25 @@ export function UnlockForm({ onSuccess, className }: UnlockFormProps): JSX.Eleme
       onSuccess?.(session);
     } catch (err) {
       const shellErr = toShellApiError(err);
+      const reason = errorReason(shellErr.details);
+      setSecret('');
+      if (shellErr.code === 'forbidden' && reason === 'staffLock') {
+        // Locked from the desk: no secret of the player's opens it; the screen says so instead of the form.
+        setLockedByStaff(true);
+        return;
+      }
       if (shellErr.code === 'conflict') {
         // Not locked any more (admin unlocked / session ended): resync and let the screen re-route.
         void reload();
       }
-      setError(loginErrorMessage(shellErr, t));
-      setSecret('');
+      const message = loginErrorMessage(shellErr, method === 'pin' ? 'unlockPin' : 'unlockPassword');
+      const lockedOut = method === 'pin' && errorDetails(shellErr.details)['attemptsLeft'] === 0;
+      if (reason === 'noPin' || lockedOut) {
+        // No PIN on the account (any more), or PIN unlocks locked out (even the right one is refused): the password.
+        picked.current = true;
+        setMethod('password');
+      }
+      setError(message);
     }
   };
 
@@ -238,6 +264,36 @@ export function UnlockForm({ onSuccess, className }: UnlockFormProps): JSX.Eleme
   );
 }
 
+/**
+ * Locked from the cash desk (`auth.status.lockedByStaff`): only the desk unlocks it (`session.unlock` answers `403
+ * staffLock`), so there is no PIN or password form to try — the screen says who locked it and where to go.
+ */
+export function StaffLockCard({ className }: { className?: string }): JSX.Element {
+  const { t } = useTranslation();
+  const { user, timeLabel, isOpenEnded } = useSession();
+  const name = user?.displayName ?? t('common.unknown');
+  return (
+    <div role="status" className={clsx('flex flex-col items-center gap-5 py-4 text-center', className)}>
+      <Avatar name={name} src={user?.avatarUrl} size="xl" ring />
+      <div>
+        <h1 className="font-display text-3xl font-light leading-tight tracking-tight text-text">
+          {t('lock.staffLockedTitle')}
+        </h1>
+        <p className="mt-2 text-balance text-base text-muted">{t('lock.staffLockedHint')}</p>
+      </div>
+      <div className="flex flex-wrap items-center justify-center gap-3">
+        <Badge tone="danger" size="lg" dot>
+          {t('lock.locked')}
+        </Badge>
+        <span className="tnum text-lg text-muted">
+          {name} · {t('lock.timeLeft')}:{' '}
+          <span className="font-bold text-text">{isOpenEnded ? t('session.openEnded') : timeLabel}</span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Logged in without a session → choose a tariff
 // ---------------------------------------------------------------------------------------------------------------------
@@ -264,22 +320,24 @@ interface OptionCardProps {
   selected: boolean;
   onSelect: () => void;
   title: string;
-  hint?: string;
+  hint?: ReactNode;
+  disabled?: boolean;
   children?: ReactNode;
   className?: string;
 }
 
-function OptionCard({ selected, onSelect, title, hint, children, className }: OptionCardProps): JSX.Element {
+function OptionCard({ selected, onSelect, title, hint, disabled, children, className }: OptionCardProps): JSX.Element {
   return (
     <button
       type="button"
       role="radio"
       aria-checked={selected}
       data-nav="true"
+      disabled={disabled}
       onClick={onSelect}
       // The shared pick-one look (`.choice`, as for minute presets just below): accent edge and fill when chosen.
       className={clsx(
-        'focus-ring choice flex flex-col items-start gap-1 rounded-lg px-4 py-3 text-left',
+        'focus-ring choice flex flex-col items-start gap-1 rounded-lg px-4 py-3 text-left disabled:cursor-not-allowed disabled:opacity-50',
         selected && 'choice-on',
         className,
       )}
@@ -291,55 +349,184 @@ function OptionCard({ selected, onSelect, title, hint, children, className }: Op
   );
 }
 
+/** A tariff of the picker with its quoted price (an hour, or the package). */
+function TariffOption({
+  tariff,
+  selected,
+  available,
+  onSelect,
+}: {
+  tariff: Tariff;
+  selected: boolean;
+  available: boolean;
+  onSelect: () => void;
+}): JSX.Element {
+  const { t } = useTranslation();
+  const { locale } = useLocale();
+  const price = usePrice(tariff, null);
+  const amount = price ? formatPrice(price, locale) : formatMoney(tariff.pricePerHour, locale);
+  return (
+    <OptionCard
+      selected={selected}
+      onSelect={onSelect}
+      disabled={!available}
+      title={tariff.name}
+      hint={
+        tariff.isPackage
+          ? t('wallet.packageMinutes', { minutes: tariff.packageMinutes ?? tariff.minMinutes, price: amount })
+          : t('wallet.perHour', { price: amount })
+      }
+    >
+      {price?.discountPct ? <PriceNote view={price} /> : null}
+      {tariff.timeWindows.length > 0 && (
+        <span className="text-xs text-accent">
+          {tariff.timeWindows.map((w) => describeWindow(w, locale, t)).join(' · ')}
+        </span>
+      )}
+    </OptionCard>
+  );
+}
+
+/**
+ * A guest without a session: the time is opened and paid at the desk (the Agent refuses a guest's own pay-as-you-go
+ * start, and a guest has no balance for prepaid), so the picker sends them to the administrator instead of offering a
+ * start they cannot pay for. The session the desk opens takes them in by itself (`session.updated`).
+ */
+function GuestPayAtDesk({ open, onLogout }: { open: boolean; onLogout?: () => void }): JSX.Element {
+  const { t } = useTranslation();
+  const callAdminEnabled = useSettingsStore((s) => s.features.callAdmin);
+  const push = useNotificationsStore((s) => s.push);
+  const pushError = useNotificationsStore((s) => s.pushError);
+  const lastEnded = useSessionStore((s) => s.lastEnded);
+  const [calling, setCalling] = useState(false);
+
+  const callAdmin = async (): Promise<void> => {
+    setCalling(true);
+    try {
+      await api.system.callAdmin('help');
+      push({
+        id: 'call-admin',
+        title: t('notifications.callAdminSent'),
+        body: t('admin.adminOnWay'),
+        level: 'success',
+        source: 'system',
+      });
+    } catch (e) {
+      pushError(e, t('admin.callAdminTitle'));
+    } finally {
+      setCalling(false);
+    }
+  };
+
+  return (
+    <Modal
+      open={open}
+      onClose={() => undefined}
+      closeOnBackdrop={false}
+      closeOnEscape={false}
+      showClose={false}
+      size="md"
+      title={t('session.guestNoSession.title')}
+      description={t('session.guestNoSession.hint')}
+      footer={
+        <>
+          <Button variant="ghost" size="lg" onClick={onLogout}>
+            {t('lock.logoutInstead')}
+          </Button>
+          {callAdminEnabled && (
+            <Button variant="cta" size="lg" loading={calling} onClick={() => void callAdmin()}>
+              {t('lock.callAdmin')}
+            </Button>
+          )}
+        </>
+      }
+    >
+      {lastEnded && (
+        <div role="status" className="rounded-md bg-accent/15 px-4 py-3">
+          <p className="font-semibold text-accent">{t('session.endedTitle')}</p>
+          <p className="text-sm text-muted">{t(`session.endedReason.${lastEnded.reason}`)}</p>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+/**
+ * The tariff picker of a member signed in without a session: time is bought in advance from the balance at the
+ * server's price (`session.quote`). Pay as you go is not a choice here — it is the cash desk's, and the owner's one
+ * auto-start right after a fresh sign-in ({@link pickAutoStartTariff}). A guest gets {@link GuestPayAtDesk}.
+ */
 export function StartSessionModal({ open, onStarted, onLogout }: StartSessionModalProps): JSX.Element {
+  const isGuest = useAuthStore(selectIsGuest);
+  return isGuest ? (
+    <GuestPayAtDesk open={open} onLogout={onLogout} />
+  ) : (
+    <MemberTariffPicker open={open} onStarted={onStarted} onLogout={onLogout} />
+  );
+}
+
+function MemberTariffPicker({ open, onStarted, onLogout }: StartSessionModalProps): JSX.Element {
   const { t } = useTranslation();
   const { locale } = useLocale();
   const tariffs = useWalletStore((s) => s.tariffs);
   const loadTariffs = useWalletStore((s) => s.loadTariffs);
-  const balance = useAuthStore((s) => s.user?.balance ?? null);
-  const isGuest = useAuthStore(selectIsGuest);
+  // The wallet follows `wallet.updated` and the 30 s poll; the user record is the sign-in's.
+  const walletBalance = useWalletStore((s) => s.balance?.amount ?? null);
+  const userBalance = useAuthStore((s) => s.user?.balance ?? null);
+  const balance = walletBalance ?? userBalance;
+  const armed = useAuthStore((s) => s.autoStartArmed);
+  const disarm = useAuthStore((s) => s.disarmAutoStart);
   const { start, busy, lastEnded } = useSession();
   const reload = useSessionStore((s) => s.load);
+  const push = useNotificationsStore((s) => s.push);
   const pushError = useNotificationsStore((s) => s.pushError);
+  const pcZone = useSettingsStore((s) => s.pcInfo?.pc.zone ?? '');
   const [tariffId, setTariffId] = useState<string | null>(null);
-  const [prepaid, setPrepaid] = useState(true);
   const [minutes, setMinutes] = useState(60);
-  const [loading, setLoading] = useState(false);
+  const [loadState, setLoadState] = useState<'idle' | 'loading' | 'done'>('idle');
 
-  // Fresh defaults each time the picker opens; guests (no balance) start postpaid.
+  // Fresh defaults each time the picker opens.
   useEffect(() => {
-    if (!open) {
-      return;
+    if (open) {
+      setTariffId(null);
+      setMinutes(60);
     }
-    setTariffId(null);
-    setMinutes(60);
-    setPrepaid(!isGuest && (balance?.amount ?? 0) > 0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   useEffect(() => {
-    if (!open || tariffs.length > 0) {
+    if (!open || tariffs.length > 0 || loadState !== 'idle') {
       return;
     }
-    setLoading(true);
-    void loadTariffs().finally(() => setLoading(false));
-  }, [open, tariffs.length, loadTariffs]);
+    setLoadState('loading');
+    void loadTariffs().finally(() => setLoadState('done'));
+  }, [open, tariffs.length, loadState, loadTariffs]);
+  const tariffsReady = tariffs.length > 0 || loadState === 'done';
 
-  const tariff = tariffs.find((x) => x.id === tariffId) ?? tariffs[0] ?? null;
+  // What can be bought right now: this PC's zone and the tariff's hours (club clock, minute resolution).
+  const [now, setNow] = useState(() => serverNow());
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    setNow(serverNow());
+    const timer = setInterval(() => setNow(serverNow()), 60_000);
+    return () => clearInterval(timer);
+  }, [open]);
+  const availableNow = useCallback((x: Tariff) => tariffAvailableNow(x, pcZone, now), [pcZone, now]);
+  const tariff = tariffs.find((x) => x.id === tariffId && availableNow(x)) ?? tariffs.find(availableNow) ?? null;
   const options = useMemo(() => (tariff ? tariffMinuteOptions(tariff) : []), [tariff]);
-  const effectivePrepaid = tariff?.isPackage === true || prepaid;
   const effectiveMinutes = options.includes(minutes) ? minutes : (options.find((m) => m >= 60) ?? options[0] ?? 60);
-  const price: Money | null = tariff && effectivePrepaid ? tariffPriceFor(tariff, effectiveMinutes) : null;
-  const notEnough = price !== null && balance !== null && price.amount > balance.amount;
+  const price = usePrice(open ? tariff : null, effectiveMinutes);
+  const notEnough = price !== null && balance !== null && price.amount.amount > balance.amount;
   const after: Money | null =
-    price && balance ? { amount: balance.amount - price.amount, currency: balance.currency } : null;
+    price && balance ? { amount: balance.amount - price.amount.amount, currency: balance.currency } : null;
 
   const submit = async (): Promise<void> => {
     if (!tariff) {
       return;
     }
     try {
-      const session = await start(tariff.id, effectivePrepaid, effectivePrepaid ? effectiveMinutes : undefined);
+      const session = await start(tariff.id, true, effectiveMinutes);
       onStarted?.(session);
     } catch (e) {
       const err = toShellApiError(e);
@@ -350,19 +537,12 @@ export function StartSessionModal({ open, onStarted, onLogout }: StartSessionMod
     }
   };
 
-  // A member with money on the balance plays at once, without the picker (owner's request): postpaid on the cheapest
-  // hourly tariff of this PC's zone, charged from the balance; the server stops the session when the balance runs out.
-  // The picker shows only when that start fails (or there is no such tariff); guests always choose.
-  const pcZone = useSettingsStore((s) => s.pcInfo?.pc.zone ?? '');
+  // The owner's auto-start: right after a fresh sign-in only, with money on the balance, on the cheapest hourly tariff
+  // open now — pay as you go from the balance, which the server stops when the balance runs out. Decided once, when
+  // the tariffs are in; the picker shows when it does not apply or the start fails.
   const autoTariff = useMemo(
-    () =>
-      tariffs
-        .filter(
-          (x) =>
-            !x.isPackage && (x.zones.length === 0 || x.zones.some((z) => z.toLowerCase() === pcZone.toLowerCase())),
-        )
-        .sort((a, b) => a.pricePerHour.amount - b.pricePerHour.amount)[0] ?? null,
-    [tariffs, pcZone],
+    () => pickAutoStartTariff({ armed, isGuest: false, balance: balance?.amount ?? null, tariffs, availableNow }),
+    [armed, balance, tariffs, availableNow],
   );
   const [autoState, setAutoState] = useState<'idle' | 'starting' | 'failed'>('idle');
   useEffect(() => {
@@ -370,14 +550,35 @@ export function StartSessionModal({ open, onStarted, onLogout }: StartSessionMod
       setAutoState('idle');
     }
   }, [open]);
-  const wantsAuto = open && !isGuest && (balance?.amount ?? 0) > 0 && autoState !== 'failed';
   useEffect(() => {
-    if (!wantsAuto || autoState !== 'idle' || !autoTariff) {
+    if (!open || !armed || autoState !== 'idle' || !tariffsReady) {
+      return;
+    }
+    // One attempt per sign-in, whatever its outcome.
+    disarm();
+    if (!autoTariff) {
       return;
     }
     setAutoState('starting');
     start(autoTariff.id, false)
-      .then((session) => onStarted?.(session))
+      .then((session) => {
+        void fetchQuote(autoTariff.id, null)
+          .then(
+            (q) => q.total,
+            () => listPrice(autoTariff, null),
+          )
+          .then((perHour) =>
+            push({
+              id: 'auto-start',
+              title: t('session.autoStarted.title'),
+              body: t('session.autoStarted.body', { tariff: autoTariff.name, price: formatMoney(perHour, locale) }),
+              level: 'info',
+              ttlSec: 12,
+              source: 'local',
+            }),
+          );
+        onStarted?.(session);
+      })
       .catch((e: unknown) => {
         const err = toShellApiError(e);
         if (err.code === 'sessionAlreadyActive') {
@@ -386,8 +587,10 @@ export function StartSessionModal({ open, onStarted, onLogout }: StartSessionMod
         pushError(err, t('session.start'));
         setAutoState('failed');
       });
-  }, [wantsAuto, autoState, autoTariff, start, onStarted, reload, pushError, t]);
-  const modalOpen = open && !(wantsAuto && (loading || autoTariff !== null));
+  }, [open, armed, autoState, tariffsReady, autoTariff, disarm, start, onStarted, reload, push, pushError, t, locale]);
+  // Hidden while the auto-start decides or runs, so the picker does not flash under a session that is starting.
+  const deciding = armed && !tariffsReady && (balance?.amount ?? 0) > 0;
+  const modalOpen = open && autoState !== 'starting' && !deciding;
 
   return (
     <Modal
@@ -419,10 +622,11 @@ export function StartSessionModal({ open, onStarted, onLogout }: StartSessionMod
       {balance && (
         <p className="mb-4 text-base text-muted">
           {t('wallet.balance')}: <span className="tnum font-bold text-text">{formatMoney(balance, locale)}</span>
+          <span className="block text-sm">{t('session.prepaidHint')}</span>
         </p>
       )}
 
-      {loading ? (
+      {!tariffsReady ? (
         <div className="grid grid-cols-[repeat(auto-fit,minmax(13rem,1fr))] gap-3">
           {[0, 1, 2].map((i) => (
             <Skeleton key={i} height="7.5rem" className="rounded-lg" />
@@ -437,82 +641,54 @@ export function StartSessionModal({ open, onStarted, onLogout }: StartSessionMod
           className="grid grid-cols-[repeat(auto-fit,minmax(13rem,1fr))] gap-3"
         >
           {tariffs.map((x) => (
-            <OptionCard
+            <TariffOption
               key={x.id}
+              tariff={x}
               selected={tariff?.id === x.id}
+              available={availableNow(x)}
               onSelect={() => setTariffId(x.id)}
-              title={x.name}
-              hint={
-                x.isPackage && x.packagePrice
-                  ? t('wallet.packageMinutes', {
-                      minutes: x.packageMinutes ?? x.minMinutes,
-                      price: formatMoney(x.packagePrice, locale),
-                    })
-                  : t('wallet.perHour', { price: formatMoney(x.pricePerHour, locale) })
-              }
-            >
-              {x.timeWindows.length > 0 && (
-                <span className="text-xs text-accent">
-                  {x.timeWindows.map((w) => describeWindow(w, locale, t)).join(' · ')}
-                </span>
-              )}
-            </OptionCard>
+            />
           ))}
         </div>
       )}
 
       {tariff && !tariff.isPackage && (
-        <div className="mt-5 flex flex-col gap-4">
-          <div role="radiogroup" aria-label={t('wallet.chooseMinutes')} className="grid grid-cols-2 gap-3">
-            <OptionCard
-              selected={prepaid}
-              onSelect={() => setPrepaid(true)}
-              title={t('wallet.prepaid')}
-              hint={t('wallet.prepaidHint')}
-            />
-            <OptionCard
-              selected={!prepaid}
-              onSelect={() => setPrepaid(false)}
-              title={t('wallet.postpaid')}
-              hint={t('wallet.postpaidHint')}
-            />
+        <div className="mt-5">
+          <p className="mb-2 text-sm text-muted">{t('wallet.chooseMinutes')}</p>
+          <div role="radiogroup" aria-label={t('session.minutes')} className="flex flex-wrap gap-2">
+            {options.map((m) => (
+              <button
+                key={m}
+                type="button"
+                role="radio"
+                aria-checked={m === effectiveMinutes}
+                data-nav="true"
+                onClick={() => setMinutes(m)}
+                className={clsx(
+                  'focus-ring tnum h-11 rounded-md px-4 text-base font-semibold',
+                  m === effectiveMinutes ? 'choice choice-on' : 'choice',
+                )}
+              >
+                {formatDurationSec(m * 60)}
+              </button>
+            ))}
           </div>
-          {prepaid && (
-            <div>
-              <p className="mb-2 text-sm text-muted">{t('wallet.chooseMinutes')}</p>
-              <div role="radiogroup" aria-label={t('session.minutes')} className="flex flex-wrap gap-2">
-                {options.map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    role="radio"
-                    aria-checked={m === effectiveMinutes}
-                    data-nav="true"
-                    onClick={() => setMinutes(m)}
-                    className={clsx(
-                      'focus-ring tnum h-11 rounded-md px-4 text-base font-semibold',
-                      m === effectiveMinutes ? 'choice choice-on' : 'choice',
-                    )}
-                  >
-                    {formatDurationSec(m * 60)}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       )}
 
-      {tariff && (
+      {tariff && price && (
         <dl className="mt-5 grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 rounded-md bg-text/5 px-4 py-3 text-base">
           <dt className="text-muted">{t('wallet.tariff')}</dt>
           <dd className="text-right font-semibold text-text">{tariff.name}</dd>
           <dt className="text-muted">{t('wallet.estimatedCost')}</dt>
-          <dd className="tnum text-right font-bold text-text">
-            {price
-              ? formatMoney(price, locale)
-              : t('wallet.perHour', { price: formatMoney(tariff.pricePerHour, locale) })}
+          <dd className={clsx('tnum text-right font-bold text-text', price.loading && 'opacity-60')}>
+            {formatPrice(price, locale)}
           </dd>
+          {(price.base || price.approximate) && (
+            <dd className="col-span-2 text-right">
+              <PriceNote view={price} />
+            </dd>
+          )}
           {after && (
             <>
               <dt className="text-muted">{t('wallet.balanceAfter')}</dt>
@@ -726,6 +902,127 @@ function PreparingCard({ readiness }: { readiness: PcReadiness }): JSX.Element {
   );
 }
 
+/** Why the player was signed out (`auth.expired`): the desk ended the session, seated someone else, moved it, … */
+function ExpiredNote(): JSX.Element | null {
+  const { t, i18n } = useTranslation();
+  const reason = useAuthStore((s) => s.expiredReason);
+  const relogin = useAuthStore((s) => s.relogin);
+  if (!reason || relogin) {
+    return null;
+  }
+  const key = `lock.expired.${reason}`;
+  return (
+    <p role="status" className="mb-4 rounded-md bg-accent/15 px-4 py-3 text-base text-accent">
+      {i18n.exists(key) ? t(key) : t('lock.expired.unknown')}
+    </p>
+  );
+}
+
+/**
+ * The player whose sign-in ran out mid-session (`auth.expired {tokenExpired}`; the Agent keeps the session locked). A
+ * member: their name, why, and the password tab with their username filled in — signing in again (any method) picks
+ * the session back up. A guest cannot sign in to it again: the desk unlocks it.
+ */
+function ReloginNote(): JSX.Element | null {
+  const { t } = useTranslation();
+  const relogin = useAuthStore((s) => s.relogin);
+  const clear = useAuthStore((s) => s.clearRelogin);
+  if (!relogin) {
+    return null;
+  }
+  return (
+    <div role="status" className="mb-4 flex items-center gap-4 rounded-md bg-accent/15 px-4 py-3 text-left">
+      <Avatar name={relogin.displayName} src={relogin.avatarUrl} size="md" />
+      <div className="min-w-0 flex-1">
+        <p className="font-semibold text-text">
+          {relogin.guest ? t('lock.relogin.guestTitle') : t('lock.relogin.title', { name: relogin.displayName })}
+        </p>
+        <p className="text-sm text-muted">{relogin.guest ? t('lock.relogin.guestHint') : t('lock.relogin.hint')}</p>
+        {!relogin.guest && (
+          <button
+            type="button"
+            data-nav="true"
+            onClick={clear}
+            className="focus-ring mt-1 rounded-sm text-sm font-medium text-accent underline-offset-2 hover:underline"
+          >
+            {t('lock.relogin.other')}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * `409 activeSessionElsewhere`: the player's session is open on another PC. «End the session on PC N and sign in
+ * here» repeats the same sign-in with `endElsewhere: true` (its secrets were kept in memory for this one retry only);
+ * cancel forgets them.
+ */
+function ElsewhereDialog(): JSX.Element {
+  const { t } = useTranslation();
+  const elsewhere = useAuthStore((s) => s.elsewhere);
+  const confirm = useAuthStore((s) => s.endElsewhereAndLogin);
+  const cancel = useAuthStore((s) => s.cancelElsewhere);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Kept while the retry runs: the store clears `elsewhere` as it sends it.
+  const [shown, setShown] = useState(elsewhere);
+  useEffect(() => {
+    if (elsewhere) {
+      setShown(elsewhere);
+      setError(null);
+    }
+  }, [elsewhere]);
+  const pc = shown?.pcName ?? null;
+
+  const close = (): void => {
+    cancel();
+    setShown(null);
+    setError(null);
+  };
+
+  const endThere = async (): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      await confirm();
+      setShown(null);
+    } catch (e) {
+      setError(describeError(e, 'login'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      open={shown !== null}
+      onClose={() => !busy && close()}
+      title={pc ? t('lock.elsewhere.title', { pc }) : t('lock.elsewhere.titleUnknown')}
+      description={t('lock.elsewhere.body')}
+      size="md"
+      footer={
+        <>
+          <Button variant="ghost" size="lg" onClick={close} disabled={busy}>
+            {t('common.cancel')}
+          </Button>
+          {error === null && (
+            <Button variant="cta" size="lg" loading={busy} onClick={() => void endThere()}>
+              {pc ? t('lock.elsewhere.confirm', { pc }) : t('lock.elsewhere.confirmUnknown')}
+            </Button>
+          )}
+        </>
+      }
+    >
+      {error && (
+        <p role="alert" className="rounded-md bg-danger/15 px-4 py-3 text-base font-medium text-danger">
+          {error}
+        </p>
+      )}
+    </Modal>
+  );
+}
+
 export default function LockScreen(): JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -734,7 +1031,8 @@ export default function LockScreen(): JSX.Element {
   const ready = useAuthStore((s) => s.ready);
   const readiness = useAuthStore((s) => s.readiness);
   const pcReady = useAuthStore(selectPcReady);
-  const expiredReason = useAuthStore((s) => s.expiredReason);
+  const lockedByStaff = useAuthStore((s) => s.lockedByStaff);
+  const relogin = useAuthStore((s) => s.relogin);
   const logout = useAuthStore((s) => s.logout);
   const defaultRoute = useSettingsStore((s) => s.shellConfig?.ui.defaultRoute ?? '/home');
   const pcName = useSettingsStore((s) => s.pcInfo?.pc.name ?? null);
@@ -803,6 +1101,15 @@ export default function LockScreen(): JSX.Element {
       setTab((current) => (current === 'qr' ? 'password' : current));
     }
   }, [qrLogin]);
+
+  // Signing the same member in again after their sign-in expired mid-session: the password tab, username filled in.
+  useEffect(() => {
+    if (relogin && !relogin.guest) {
+      picked.current = true;
+      setTab('password');
+    }
+  }, [relogin]);
+  const reloginMember = relogin && !relogin.guest ? relogin : null;
 
   // A reader's card from whatever was showing — another tab, or the attract screen this one replaced — goes to the card
   // tab, which signs in with it; the number is not lost and the player does not tap twice.
@@ -891,7 +1198,11 @@ export default function LockScreen(): JSX.Element {
             ) : !pcReady && readiness ? (
               <PreparingCard readiness={readiness} />
             ) : isLocked ? (
-              <UnlockForm />
+              lockedByStaff ? (
+                <StaffLockCard />
+              ) : (
+                <UnlockForm />
+              )
             ) : (
               <>
                 {/* Spacing follows the screen height: at 1366×768 the QR card has to fit without a scrollbar. */}
@@ -901,11 +1212,8 @@ export default function LockScreen(): JSX.Element {
                   </h1>
                   <p className="mt-1 text-balance text-base text-muted">{t('lock.subtitle')}</p>
                 </div>
-                {expiredReason && (
-                  <p role="status" className="mb-4 rounded-md bg-accent/15 px-4 py-3 text-base text-accent">
-                    {t('lock.sessionExpired')}
-                  </p>
-                )}
+                <ExpiredNote />
+                <ReloginNote />
                 <LeaveReceiptNote />
                 <Tabs
                   items={tabs}
@@ -924,7 +1232,9 @@ export default function LockScreen(): JSX.Element {
                 />
                 <div role="tabpanel" id={`lock-panel-${tab}`} aria-labelledby={`lock-tab-${tab}`}>
                   {tab === 'qr' && <QrLogin />}
-                  {tab === 'password' && <LoginForm />}
+                  {tab === 'password' && (
+                    <LoginForm key={reloginMember?.userId ?? ''} initialUsername={reloginMember?.username} />
+                  )}
                   {tab === 'card' && <CardLogin tapped={tapped} />}
                   {tab === 'guest' && <GuestLogin />}
                 </div>
@@ -947,6 +1257,7 @@ export default function LockScreen(): JSX.Element {
       </div>
 
       <StartSessionModal open={showTariffs} onLogout={() => void logout('user')} />
+      <ElsewhereDialog />
       <NotificationCenter />
     </div>
   );

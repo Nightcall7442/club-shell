@@ -153,9 +153,14 @@ export const UZ: Record<string, string> = {
   'Принять {sum}': '{sum} qabul qilish',
   'Оплата принята · {name} · {sum}': 'Toʻlov qabul qilindi · {name} · {sum}',
   'Постоплата для гостей': 'Mehmonlar uchun keyin toʻlash',
-  'Гость играет без предоплаты и платит на кассе после сеанса. Неоплаченные счета видны на карте зала.':
-    'Mehmon oldindan toʻlamasdan oʻynaydi va seansdan keyin kassada toʻlaydi. Toʻlanmagan hisoblar zal xaritasida koʻrinadi.',
-  'Наибольший долг гостя (0 — без ограничения)': 'Mehmonning eng katta qarzi (0 — cheklovsiz)',
+  'Постоплата — только при посадке с кассы: на ПК игрок сам покупает время заранее. По умолчанию постоплата на кассе включена для клиентов и гостей.':
+    'Keyin toʻlash — faqat kassadan oʻtqazishda: kompyuterda oʻyinchi vaqtni oldindan oʻzi sotib oladi. Odatiy holatda kassada keyin toʻlash mijozlar va mehmonlar uchun yoqilgan.',
+  'Кассир сажает гостя без предоплаты, гость платит на кассе после сеанса. Неоплаченные счета видны на карте зала.':
+    'Kassir mehmonni oldindan toʻlovsiz oʻtqazadi, mehmon seansdan keyin kassada toʻlaydi. Toʻlanmagan hisoblar zal xaritasida koʻrinadi.',
+  'Наибольший долг гостя': 'Mehmonning eng katta qarzi',
+  'Пусто — без ограничения. Ограничение действует только на сеансы с кассы.':
+    'Boʻsh — cheklovsiz. Cheklov faqat kassadan ochilgan seanslarga taalluqli.',
+  'без ограничения': 'cheklovsiz',
   'Баннеров нет': 'Bannerlar yoʻq',
   Баннеры: 'Bannerlar',
   'Без группы': 'Guruhsiz',
@@ -805,12 +810,11 @@ export const UZ: Record<string, string> = {
   'Операции смены': 'Smena amallari',
   'Операций пока нет': 'Hozircha amallar yoʻq',
   Ещё: 'Yana',
-  'Разрешить клиентам долг на постоплате': 'Mijozlarga keyin toʻlashda qarzga oʻynashga ruxsat berish',
-  'Без этого клиент на постоплате играет, пока хватает баланса. С ним — уходит в минус до суммы ниже и гасит долг на кассе.':
-    'Busiz mijoz keyin toʻlashda balans yetguncha oʻynaydi. Bu bilan — quyidagi summagacha minusga ketadi va qarzni kassada toʻlaydi.',
-  'Наибольший долг клиента': 'Mijozning eng katta qarzi',
-  'Укажите сумму больше нуля, иначе долг останется выключен':
-    'Noldan katta summani kiriting, aks holda qarz oʻchiq qoladi',
+  'Наибольший долг клиента на постоплате': 'Keyin toʻlashda mijozning eng katta qarzi',
+  'Насколько клиент с кассовой постоплатой может уйти в минус. Пусто — без ограничения. Ограничение действует только на сеансы с кассы.':
+    'Kassadan keyin toʻlash bilan oʻtqazilgan mijoz qanchagacha minusga ketishi mumkin. Boʻsh — cheklovsiz. Cheklov faqat kassadan ochilgan seanslarga taalluqli.',
+  'Логин — от {min} до {max} символов': 'Login — {min} dan {max} gacha belgi',
+  'От {min} до {max} символов': '{min} dan {max} gacha belgi',
   'Изъятие из кассы — только владелец': 'Kassadan pul olish — faqat egasi',
   'Кассир сможет только вносить деньги в кассу; изымать — владелец.':
     'Kassir faqat kassaga pul kirita oladi; olish — egasi.',
@@ -838,8 +842,6 @@ export const UZ: Record<string, string> = {
   'Долг оплачен · {sum} · {method}': 'Qarz toʻlandi · {sum} · {method}',
   'Баланс и разрешённый долг не покрывают первую минуту':
     'Balans va ruxsat etilgan qarz birinchi daqiqani ham qoplamaydi',
-  'Постоплата — только с баланса, а на нём нет даже на минуту':
-    'Keyin toʻlash — faqat balansdan, unda esa bir daqiqaga ham pul yoʻq',
   'Сеанс открыт · постоплата': 'Seans ochildi · keyin toʻlash',
   'Кто садится': 'Kim oʻtiradi',
   'Гость {n}': 'Mehmon {n}',
@@ -1351,9 +1353,14 @@ export const EN: Record<string, string> = {
   'Принять {sum}': 'Collect {sum}',
   'Оплата принята · {name} · {sum}': 'Payment taken · {name} · {sum}',
   'Постоплата для гостей': 'Postpaid for guests',
-  'Гость играет без предоплаты и платит на кассе после сеанса. Неоплаченные счета видны на карте зала.':
-    'A guest plays without paying first and pays at the counter after the session. Unpaid bills show on the hall map.',
-  'Наибольший долг гостя (0 — без ограничения)': 'Largest guest debt (0 — no limit)',
+  'Постоплата — только при посадке с кассы: на ПК игрок сам покупает время заранее. По умолчанию постоплата на кассе включена для клиентов и гостей.':
+    'Postpaid is for seats opened at the desk only: on a PC the player buys time in advance. By default desk postpaid is on for clients and guests.',
+  'Кассир сажает гостя без предоплаты, гость платит на кассе после сеанса. Неоплаченные счета видны на карте зала.':
+    'The cashier seats a guest without prepayment; the guest pays at the desk after the session. Unpaid bills show on the hall map.',
+  'Наибольший долг гостя': 'Largest guest debt',
+  'Пусто — без ограничения. Ограничение действует только на сеансы с кассы.':
+    'Empty — no limit. The limit applies to sessions opened at the desk only.',
+  'без ограничения': 'no limit',
   'Баннеров нет': 'No banners',
   Баннеры: 'Banners',
   'Без группы': 'No group',
@@ -2002,11 +2009,11 @@ export const EN: Record<string, string> = {
   'Операции смены': 'Shift operations',
   'Операций пока нет': 'No operations yet',
   Ещё: 'More',
-  'Разрешить клиентам долг на постоплате': 'Let clients run into debt on postpaid',
-  'Без этого клиент на постоплате играет, пока хватает баланса. С ним — уходит в минус до суммы ниже и гасит долг на кассе.':
-    'Without it a postpaid client plays while the balance lasts. With it the balance may go below zero down to the amount below, and the client pays the debt at the desk.',
-  'Наибольший долг клиента': 'Largest client debt',
-  'Укажите сумму больше нуля, иначе долг останется выключен': 'Enter an amount above zero, or debt stays off',
+  'Наибольший долг клиента на постоплате': 'Largest client debt on postpaid',
+  'Насколько клиент с кассовой постоплатой может уйти в минус. Пусто — без ограничения. Ограничение действует только на сеансы с кассы.':
+    'How far below zero a client seated postpaid at the desk may go. Empty — no limit. The limit applies to sessions opened at the desk only.',
+  'Логин — от {min} до {max} символов': 'Login — {min} to {max} characters',
+  'От {min} до {max} символов': '{min} to {max} characters',
   'Изъятие из кассы — только владелец': 'Only the owner takes cash out of the drawer',
   'Кассир сможет только вносить деньги в кассу; изымать — владелец.':
     'A cashier can only put cash in; the owner takes it out.',
@@ -2034,8 +2041,6 @@ export const EN: Record<string, string> = {
   'Долг оплачен · {sum} · {method}': 'Debt paid · {sum} · {method}',
   'Баланс и разрешённый долг не покрывают первую минуту':
     'The balance and the allowed debt do not cover the first minute',
-  'Постоплата — только с баланса, а на нём нет даже на минуту':
-    'Postpaid runs on the balance only, and it does not cover even a minute',
   'Сеанс открыт · постоплата': 'Session opened · postpaid',
   'Кто садится': 'Who sits',
   'Гость {n}': 'Guest {n}',

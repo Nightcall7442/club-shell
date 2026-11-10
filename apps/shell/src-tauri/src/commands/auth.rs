@@ -18,7 +18,9 @@ const PASSWORD_MAX: usize = 128;
 /// QR / card / one-time tokens.
 const TOKEN_MAX: usize = 512;
 
-/// `auth_login` → `auth.login`. Caches the returned user/session.
+/// `auth_login` → `auth.login`. Caches the returned user/session. `endElsewhere: true` (the player's
+/// confirmation after `409 activeSessionElsewhere`) is passed through as is: the server ends the
+/// player's session on the other PC and signs them in here.
 #[tauri::command]
 pub async fn auth_login(
     state: State<'_, AppState>,
@@ -137,6 +139,7 @@ mod tests {
             qr_token: None,
             card_id: None,
             token: None,
+            end_elsewhere: None,
         }
     }
 
@@ -167,6 +170,30 @@ mod tests {
             Some(" x "),
             "passwords are never trimmed"
         );
+    }
+
+    #[test]
+    fn end_elsewhere_reaches_the_agent() {
+        // The frontend's retry after `409 activeSessionElsewhere`: `{ req: { …, endElsewhere: true } }`.
+        let req: AuthLoginRequest = serde_json::from_value(serde_json::json!({
+            "kind": "card", "cardId": " CARD-1 ", "endElsewhere": true
+        }))
+        .unwrap();
+        let ok = validate_login(req).unwrap();
+        assert_eq!(ok.end_elsewhere, Some(true));
+        assert_eq!(ok.card_id.as_deref(), Some("CARD-1"));
+        let wire = serde_json::to_value(&ok).unwrap();
+        assert_eq!(wire["endElsewhere"], true);
+        // A first attempt says nothing about it.
+        let first = validate_login(AuthLoginRequest {
+            card_id: Some("CARD-1".into()),
+            ..login(AuthKind::Card)
+        })
+        .unwrap();
+        assert!(serde_json::to_value(&first)
+            .unwrap()
+            .get("endElsewhere")
+            .is_none());
     }
 
     #[test]

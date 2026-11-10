@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using ClubShell.Contracts.Errors;
 using ClubShell.Contracts.Ipc;
+using ClubShell.Contracts.Serialization;
 using ClubShell.Contracts.Sessions;
 using ClubShell.Contracts.Wallet;
 using ClubShell.Core.Abstractions;
@@ -40,6 +41,9 @@ public interface ISessionEventSink
 /// </summary>
 public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposable
 {
+    /// <summary>File name of the tariffs copy <c>wallet.tariffs</c> keeps in <c>paths.cache</c>.</summary>
+    public const string TariffsCacheFileName = "tariffs.json";
+
     private static readonly TimeSpan TariffRefreshInterval = TimeSpan.FromMinutes(15);
 
     private readonly IServerClient _server;
@@ -386,8 +390,15 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
                     throw IpcError.Validation("minutes", "open-ended session cannot be extended offline").ToException();
                 }
 
-                var tariff = await FindTariffAsync(tariffId ?? session.TariffId, cancellationToken).ConfigureAwait(false);
-                cost = tariff?.PriceFor(minutes) ?? Money.Zero;
+                var tariff = await FindTariffAsync(tariffId ?? session.TariffId, cancellationToken).ConfigureAwait(false)
+                    ?? throw IpcError.NotFound("Tariff").ToException();
+                if (tariffId is { } switched && switched != session.TariffId)
+                {
+                    CheckTariffRules(tariff, _clock.UtcNow);
+                }
+
+                cost = session.IsPrepaid ? tariff.PriceFor(minutes) : Money.Zero;
+                await ChargeOfflineAsync(session.UserId, cost, cancellationToken).ConfigureAwait(false);
                 _timer.Extend(minutes * 60);
                 _session = session with { Cost = session.Cost + cost, TariffId = tariffId ?? session.TariffId };
             }
@@ -587,26 +598,41 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
             throw IpcError.AgentOffline().ToException();
         }
 
-        var tariff = await FindTariffAsync(request.TariffId, cancellationToken).ConfigureAwait(false);
-        var minutes = request.Minutes ?? tariff?.PackageMinutes;
-        if (request.Prepaid && minutes is null or <= 0)
+        // Pay-as-you-go and postpaid are billed by the server as the time runs, against a debt limit only it knows.
+        if (!request.Prepaid)
         {
-            throw IpcError.Validation("minutes", "required for a prepaid session").ToException();
+            throw IpcError.Conflict("Pay-as-you-go needs the club server", "offlineUnavailable").ToException();
         }
 
-        var cap = Math.Max(1, offline.MaxOfflineMinutes);
-        var budgetMinutes = Math.Min(minutes ?? cap, cap);
-        var cost = request.Prepaid ? tariff?.PriceFor(budgetMinutes) ?? Money.Zero : Money.Zero;
-        if (request.Prepaid && cost.IsPositive)
+        // Without the tariff there is no price to check the balance against: a free session otherwise.
+        var tariff = await FindTariffAsync(request.TariffId, cancellationToken).ConfigureAwait(false)
+            ?? throw IpcError.NotFound("Tariff").ToException();
+        var now = _clock.UtcNow;
+        CheckTariffRules(tariff, now);
+        var minutes = tariff.IsPackage ? tariff.PackageMinutes : request.Minutes;
+        if (minutes is null or <= 0)
         {
-            var cached = await _store.GetCachedUserAsync(request.UserId, cancellationToken).ConfigureAwait(false);
-            if (cached is not null && cached.Balance.IsSameCurrency(cost) && cached.Balance < cost)
+            throw IpcError.Validation("minutes", "required").ToException();
+        }
+
+        if (!tariff.IsPackage)
+        {
+            if (minutes < Math.Max(1, tariff.MinMinutes))
             {
-                throw IpcError.InsufficientFunds(cost, cached.Balance).ToException();
+                throw IpcError.Validation("minutes", "min").ToException();
+            }
+
+            if (tariff.MaxMinutes is { } max && minutes > max)
+            {
+                throw IpcError.Validation("minutes", "max").ToException();
             }
         }
 
-        var now = _clock.UtcNow;
+        var cap = Math.Max(1, offline.MaxOfflineMinutes);
+        var budgetMinutes = Math.Min(minutes.Value, cap);
+        var cost = tariff.PriceFor(budgetMinutes);
+        await ChargeOfflineAsync(request.UserId, cost, cancellationToken).ConfigureAwait(false);
+
         var id = request.ClientSessionId ?? Guid.NewGuid();
         var session = new PlaySession(
             id,
@@ -625,6 +651,54 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
         var pending = new OfflineSessionCreate(request with { StartedAt = now, ClientSessionId = id, Minutes = budgetMinutes }, key);
         _logger.LogInformation("Offline session {SessionId} created for {Minutes} min (cap {Cap})", id, budgetMinutes, cap);
         return (session, pending);
+    }
+
+    /// <summary>
+    /// The tariff's own rules, as the server applies them at a purchase (§5.2 rules 6–7): its zones must include this PC's
+    /// zone (<c>policyDenied {rule: tariffZone}</c>) and its windows the local time (<c>policyDenied {rule: tariffTime}</c>).
+    /// </summary>
+    private void CheckTariffRules(Tariff tariff, DateTimeOffset now)
+    {
+        var zone = _settings.CurrentValue.Zone ?? string.Empty;
+        if (tariff.Zones.Count > 0 && !tariff.Zones.Contains(zone, StringComparer.OrdinalIgnoreCase))
+        {
+            throw IpcError.PolicyDenied("tariffZone").ToException();
+        }
+
+        var local = TimeZoneInfo.ConvertTime(now, TimeZoneInfo.Local);
+        if (!tariff.IsValidFor(zone, local.DayOfWeek.ToWeekday(), TimeOnly.FromDateTime(local.DateTime)))
+        {
+            throw IpcError.PolicyDenied("tariffTime").ToException();
+        }
+    }
+
+    /// <summary>
+    /// An offline purchase against the balance cached for the player (no going below zero without the server): refused
+    /// with <c>insufficientFunds</c>, or <c>conflict {reason: offlineUnavailable}</c> when no balance is known; taken from
+    /// the cached balance otherwise, so the next offline purchase sees what is left. The server charges the wallet itself
+    /// when the session is replayed.
+    /// </summary>
+    private async Task ChargeOfflineAsync(Guid userId, Money cost, CancellationToken cancellationToken)
+    {
+        if (!cost.IsPositive)
+        {
+            return;
+        }
+
+        var cached = await _store.GetCachedUserAsync(userId, cancellationToken).ConfigureAwait(false)
+            ?? throw IpcError.Conflict("The player's balance is not known offline", "offlineUnavailable").ToException();
+        if (!cached.Balance.IsSameCurrency(cost))
+        {
+            throw IpcError.Conflict("The player's balance is not known offline", "offlineUnavailable").ToException();
+        }
+
+        if (cached.Balance < cost)
+        {
+            throw IpcError.InsufficientFunds(cost, cached.Balance).ToException();
+        }
+
+        await _store.UpdateCachedBalanceAsync(userId, cached.Balance - cost, cancellationToken).ConfigureAwait(false);
+        _logger.LogInformation("Offline charge of {Cost} taken from the cached balance of {UserId}", cost, userId);
     }
 
     private async Task ActivateCoreAsync(PlaySession session, OfflineSessionCreate? pending, CancellationToken cancellationToken)
@@ -917,6 +991,13 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
                 _logger.LogWarning("End not confirmed by server ({Code}); settling offline", ex.Code);
                 offline = true;
             }
+            catch (ServerApiException ex) when (ex.IsAuthFailure)
+            {
+                // A refused token (the player's expired, the session moved to another PC) must not leave the session
+                // ending forever: its end goes through the outbox, posted with the agent token, which the server applies.
+                _logger.LogWarning("End of session {SessionId} refused ({Code} {Reason}); settling through the outbox", session.Id, ex.Code, ex.Reason);
+                offline = true;
+            }
         }
 
         _timer.Stop();
@@ -1012,7 +1093,27 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
             _tariffsFetchedAt = _clock.GetTimestamp();
         }
 
+        if (_tariffs.Count == 0)
+        {
+            // Started without the server: the copy wallet.tariffs keeps on disk for the Shell.
+            _tariffs = LoadCachedTariffs();
+        }
+
         return _tariffs.FirstOrDefault(t => t.Id == tariffId);
+    }
+
+    private IReadOnlyList<Tariff> LoadCachedTariffs()
+    {
+        var path = Path.Combine(_settings.CurrentValue.CacheDir, TariffsCacheFileName);
+        try
+        {
+            return File.Exists(path) && JsonDefaults.Deserialize<TariffsResponse>(File.ReadAllBytes(path)) is { } cached ? cached.Items : [];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            _logger.LogDebug(ex, "Cached tariffs at {Path} not read", path);
+            return [];
+        }
     }
 
     #endregion
@@ -1107,7 +1208,11 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
         }
 
         var persistDue = _clock.GetElapsedTime(_lastPersistAt) >= TimeSpan.FromSeconds(Math.Max(1, _settings.CurrentValue.Session.PersistIntervalSec));
+        // The cost of a session the server knows is the server's (session.updated, heartbeat): its day rate and the
+        // player's discount are not in the tariff's list price, so a local sum drifted from what is charged. Only a session
+        // the server has not seen yet keeps a local estimate at list price.
         var chargeDue = !_session.IsPrepaid
+            && _pendingCreate is not null
             && PostpaidChargeIntervalMinutes > 0
             && _state.IsTimerRunning()
             && tick.SecondsUsed - _lastChargedUsedSec >= PostpaidChargeIntervalMinutes * 60;
@@ -1134,7 +1239,7 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
                 return;
             }
 
-            if (chargeDue && !_session.IsPrepaid && _state.IsTimerRunning())
+            if (chargeDue && !_session.IsPrepaid && _pendingCreate is not null && _state.IsTimerRunning())
             {
                 var used = _timer.SecondsUsed;
                 var minutes = PostpaidChargeIntervalMinutes;

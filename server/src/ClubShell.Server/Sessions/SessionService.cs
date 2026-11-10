@@ -3,6 +3,7 @@ using ClubShell.Contracts.Commands;
 using ClubShell.Contracts.Errors;
 using ClubShell.Contracts.Serialization;
 using ClubShell.Contracts.Sessions;
+using ClubShell.Contracts.Users;
 using ClubShell.Contracts.Wallet;
 using ClubShell.Server.Agents;
 using ClubShell.Server.Auth;
@@ -24,7 +25,7 @@ public class SessionRow
     public const string Columns = """
         id, club_id, pc_id, user_id, tariff_id, state, is_prepaid, started_at, ended_at, end_reason, purchased_sec,
         used_before_sec, running_since, paused_at, ends_at, last_transition_at, price_per_hour_snapshot, day_pct,
-        discount_pct, charged_total, refunded_total, warnings_sent, client_session_id
+        discount_pct, charged_total, refunded_total, warnings_sent, client_session_id, debt_limit
         """;
 
     public Guid Id { get; init; }
@@ -50,6 +51,12 @@ public class SessionRow
     public long RefundedTotal { get; set; }
     public int[] WarningsSent { get; set; } = [];
     public Guid? ClientSessionId { get; init; }
+
+    /// <summary>
+    /// How far below zero the balance may run before the tick ends this postpaid session, taken when it opened
+    /// (<see cref="SessionService.DebtLimitFor"/>); null — no cap (and every prepaid session).
+    /// </summary>
+    public long? DebtLimit { get; init; }
 
     public bool Ended => State == "ended";
 
@@ -181,6 +188,9 @@ public sealed class SessionEffects
     /// PC) is pushed to the old PC right after the sessions, so its agent closes the session without charging anything.
     /// </summary>
     public List<Session> Departed { get; } = [];
+
+    /// <summary><c>notification</c> pushes to a PC after the sessions (the tick's warning that a capped postpaid session's money runs out).</summary>
+    public List<(Guid PcId, Notification Notification)> Notifications { get; } = [];
 }
 
 /// <summary>The club facts every rule needs.</summary>
@@ -212,15 +222,25 @@ public sealed class SessionService(
     public TimeProvider Clock => clock;
 
     /// <summary>
-    /// How far below zero a postpaid session of <paramref name="role"/> may run (D-10): a guest by the club's
-    /// <c>limits.guestDebtLimit</c> (null — no limit; guests are let in at all only with <c>limits.guestPostpaid</c>), anyone
-    /// else by the club's <c>limits.memberDebtLimit</c> (D-31), or without one by <see cref="SessionsOptions.PostpaidCreditLimit"/>
-    /// (0 by default: a member plays postpaid only while the balance lasts).
+    /// The debt limit a new postpaid session of <paramref name="role"/> gets, stored on it (<see cref="SessionRow.DebtLimit"/>):
+    /// how far below zero the balance may run before the tick ends it (D-10); null — no cap. The kiosk (the player's own
+    /// pay-as-you-go, members only: <see cref="CreateAsync"/> refuses a guest's) gets 0 whatever the club's settings — the
+    /// balance must cover every minute. The desk (<paramref name="desk"/>) gets the club's <c>limits.guestDebtLimit</c> or
+    /// <c>limits.memberDebtLimit</c> (D-31); unset or 0 there — no cap: the cashier seated the player and takes the bill.
     /// </summary>
-    public long? PostpaidLimit(string role, ClubPricing club) => role == "guest" ? club.GuestDebtLimit : club.MemberDebtLimit ?? options.PostpaidCreditLimit;
+    public static long? DebtLimitFor(string role, ClubPricing club, bool desk) =>
+        !desk ? 0 : role == "guest" ? club.GuestDebtLimit : club.MemberDebtLimit;
 
+    /// <summary>
+    /// End reasons a call with a player token may give (<see cref="EndAsync"/>): the player's own (<c>user</c>, <c>idle</c>)
+    /// and the agent's timer (<c>timeUp</c>, <c>agentRestart</c>). None of them refunds unused time.
+    /// </summary>
+    public static readonly IReadOnlySet<SessionEndReason> PlayerEndReasons = new HashSet<SessionEndReason>
+        { SessionEndReason.User, SessionEndReason.Idle, SessionEndReason.TimeUp, SessionEndReason.AgentRestart };
+
+    /// <summary><c>403 policyDenied</c>: <c>details.rule</c> names the rule, <c>details.reason</c> repeats it (the agent reads <c>reason</c>).</summary>
     public static ApiException PolicyDenied(string rule) =>
-        new(StatusCodes.Status403Forbidden, ErrorCode.PolicyDenied, $"Denied by club policy: {rule}", new { rule });
+        new(StatusCodes.Status403Forbidden, ErrorCode.PolicyDenied, $"Denied by club policy: {rule}", new { rule, reason = rule });
 
     public static ApiException Conflict(string reason) =>
         new(StatusCodes.Status409Conflict, ErrorCode.Conflict, $"Conflict: {reason}", new { reason });
@@ -339,13 +359,17 @@ public sealed class SessionService(
             CheckMinutes(tariff, minutes);
         }
 
-        if (!request.Prepaid && buyer.Role == "guest" && !club.Pricing.GuestPostpaid)
+        // A guest never starts postpaid from the kiosk, whatever account the guest button made; the desk and the offline
+        // replay follow limits.guestPostpaid (on unless the owner turned it off).
+        if (!request.Prepaid && buyer.Role == "guest" && ((staff is null && !replay) || !club.Pricing.GuestPostpaid))
         {
             throw PolicyDenied("postpaidNotAllowed");
         }
 
+        // The offline replay records what the agent let happen: the kiosk's limit, without the 402.
+        var debtLimit = request.Prepaid ? null : replay ? 0 : DebtLimitFor(buyer.Role, club.Pricing, desk: staff is not null);
         var quote = Pricing.Compute(tariff, minutes, buyer.GroupId, buyer.LifetimeSpent, pc.Zone, start, club.Pricing);
-        if (!request.Prepaid && !replay && PostpaidLimit(buyer.Role, club.Pricing) is { } limit)
+        if (!request.Prepaid && !replay && debtLimit is { } limit)
         {
             // Rule 10 for postpaid (D-10): the first minute must be affordable, as the tick would stop it at once.
             var first = Pricing.Frozen(tariff.PricePerHour, 1, quote.DayPct, quote.DiscountPct);
@@ -364,7 +388,7 @@ public sealed class SessionService(
             Id = id, ClubId = club.Id, PcId = pc.Id, UserId = buyer.Id, TariffId = tariff.Id, State = "active", IsPrepaid = request.Prepaid,
             StartedAt = start, PurchasedSec = request.Prepaid ? minutes * 60 : 0, RunningSince = start, LastTransitionAt = start,
             PricePerHourSnapshot = tariff.PricePerHour, DayPct = quote.DayPct, DiscountPct = quote.DiscountPct,
-            ChargedTotal = request.Prepaid ? quote.Total : 0, ClientSessionId = request.ClientSessionId,
+            ChargedTotal = request.Prepaid ? quote.Total : 0, ClientSessionId = request.ClientSessionId, DebtLimit = debtLimit,
         };
         row.EndsAt = row.PrepaidEnd();
 
@@ -377,16 +401,17 @@ public sealed class SessionService(
                 """
                 INSERT INTO sessions (id, club_id, pc_id, user_id, tariff_id, state, is_prepaid, origin, started_at, purchased_sec,
                                       running_since, ends_at, last_transition_at, price_per_hour_snapshot, day_pct, discount_pct,
-                                      discount_reason, charged_total, client_session_id, created_by_staff_id, created_at, updated_at)
+                                      discount_reason, charged_total, client_session_id, created_by_staff_id, debt_limit, created_at, updated_at)
                 VALUES (@Id, @ClubId, @PcId, @UserId, @TariffId, 'active', @IsPrepaid, @origin, @StartedAt, @PurchasedSec,
                         @RunningSince, @EndsAt, @LastTransitionAt, @PricePerHourSnapshot, @DayPct, @DiscountPct,
-                        @reason, @ChargedTotal, @ClientSessionId, @staffId, @now, @now)
+                        @reason, @ChargedTotal, @ClientSessionId, @staffId, @DebtLimit, @now, @now)
                 """,
                 new
                 {
                     row.Id, row.ClubId, row.PcId, row.UserId, row.TariffId, row.IsPrepaid, origin = replay ? "offline" : staff is null ? "kiosk" : "cashier",
                     row.StartedAt, row.PurchasedSec, row.RunningSince, row.EndsAt, row.LastTransitionAt, row.PricePerHourSnapshot,
-                    row.DayPct, row.DiscountPct, reason = quote.DiscountReason, row.ChargedTotal, row.ClientSessionId, staffId = staff?.StaffId, now,
+                    row.DayPct, row.DiscountPct, reason = quote.DiscountReason, row.ChargedTotal, row.ClientSessionId, staffId = staff?.StaffId,
+                    row.DebtLimit, now,
                 },
                 tx);
         }
@@ -417,7 +442,51 @@ public sealed class SessionService(
         return session;
     }
 
-    /// <summary><c>POST /sessions/{id}/pause</c> (§5.5): <c>active</c> → <c>paused</c>, the clock stops.</summary>
+    /// <summary>
+    /// <c>POST /sessions/quote</c> (beyond the contract): what <see cref="CreateAsync"/> would charge <paramref name="userId"/>
+    /// now for <paramref name="tariffId"/> on <paramref name="pc"/> — the same refusals (a missing player or tariff 404, a PC in
+    /// maintenance, the buyer's and the tariff's rules of §5.2: blacklisted, curfew, zone, time window; given minutes outside
+    /// the tariff's range 400) and the same <see cref="Pricing.Compute"/> with the club's day rate and the player's best
+    /// discount. <paramref name="minutes"/> null prices one hour; a package prices its own minutes. Nothing is created or
+    /// charged.
+    /// </summary>
+    public async Task<SessionQuote> QuoteAsync(PcRow pc, Guid userId, Guid tariffId, int? minutes)
+    {
+        await using var c = await db.OpenConnectionAsync();
+        var now = clock.GetUtcNow();
+        var club = await ClubAsync(c, null, pc.ClubId);
+        var buyer = await BuyerAsync(c, null, club, userId) ?? throw ApiException.NotFound("user");
+        var tariff = await TariffAsync(c, null, club.Id, tariffId) ?? throw ApiException.NotFound("tariff");
+        if (pc.Maintenance)
+        {
+            throw PolicyDenied("pcMaintenance");
+        }
+
+        CheckRules(pc.Zone, buyer, tariff, club, now, offlineReplay: false);
+        int priced;
+        if (tariff.IsPackage)
+        {
+            priced = tariff.PackageMinutes!.Value;
+        }
+        else if (minutes is { } wanted)
+        {
+            CheckMinutes(tariff, wanted);
+            priced = wanted;
+        }
+        else
+        {
+            priced = 60;
+        }
+
+        var q = Pricing.Compute(tariff, priced, buyer.GroupId, buyer.LifetimeSpent, pc.Zone, now, club.Pricing);
+        return new SessionQuote(q.Minutes, Money.Uzs(q.Base), Money.Uzs(q.Total), q.DayPct, q.DiscountPct, q.DiscountKind, q.Package);
+    }
+
+    /// <summary>
+    /// The pause of §5.5: <c>active</c> → <c>paused</c>, the clock stops. Not a player's to call: <c>POST
+    /// /sessions/{id}/pause</c> with a player token is <c>403 staffOnly</c> (billing does not stop at the player's request);
+    /// kept for the server's own use.
+    /// </summary>
     public async Task<Session> PauseAsync(Guid sessionId, Guid userId, Guid pcId)
     {
         var (c, tx) = await BeginAsync(db);
@@ -443,9 +512,9 @@ public sealed class SessionService(
     }
 
     /// <summary>
-    /// <c>POST /sessions/{id}/resume</c> (§5.5): <c>paused</c> → <c>active</c>. Prepaid needs time left (else
-    /// <c>sessionNotActive</c>); postpaid needs its next second affordable within balance + credit limit (else 402, as the
-    /// tick would stop it).
+    /// The resume of §5.5: <c>paused</c> → <c>active</c>. Prepaid needs time left (else <c>sessionNotActive</c>); postpaid
+    /// needs its next second affordable within balance + its own debt limit (else 402, as the tick would stop it). Like
+    /// <see cref="PauseAsync"/>, not a player's to call (<c>POST /sessions/{id}/resume</c> is <c>403 staffOnly</c>).
     /// </summary>
     public async Task<Session> ResumeAsync(Guid sessionId, Guid userId, Guid pcId)
     {
@@ -471,11 +540,13 @@ public sealed class SessionService(
         }
     }
 
-    /// <summary>A paused postpaid session resumes only if its next second is affordable within balance + limit (else 402, as the tick would stop it).</summary>
-    private async Task EnsureResumableAsync(NpgsqlConnection c, NpgsqlTransaction tx, SessionRow s)
+    /// <summary>
+    /// A paused postpaid session resumes only if its next second is affordable within balance + its own limit (else 402,
+    /// as the tick would stop it); one without a cap always resumes.
+    /// </summary>
+    private static async Task EnsureResumableAsync(NpgsqlConnection c, NpgsqlTransaction tx, SessionRow s)
     {
-        var role = s.IsPrepaid ? "" : await c.ExecuteScalarAsync<string>("SELECT role FROM users WHERE id = @UserId", new { s.UserId }, tx) ?? "";
-        if (!s.IsPrepaid && PostpaidLimit(role, (await ClubAsync(c, tx, s.ClubId)).Pricing) is { } limit)
+        if (!s.IsPrepaid && s.DebtLimit is { } limit)
         {
             var balance = await c.ExecuteScalarAsync<long>("SELECT main_balance FROM wallets WHERE user_id = @UserId", new { s.UserId }, tx);
             var next = Pricing.Frozen(s.PricePerHourSnapshot, s.UsedBeforeSec + 1, s.DayPct, s.DiscountPct);
@@ -657,12 +728,18 @@ public sealed class SessionService(
     }
 
     /// <summary>
-    /// <c>POST /sessions/{id}/end</c> (§5.7): settled at the server's now. The agent's <c>secondsUsed</c>/<c>endedAt</c>
-    /// are kept in <c>agent_reported</c> for audit only. An ended session is <c>409 sessionNotActive</c> + <c>details.session</c>;
-    /// so is a session the desk moved off the caller's PC (D-61), with its «ended view»: the old PC ends it cleanly and
-    /// nothing is settled.
+    /// <c>POST /sessions/{id}/end</c> (§5.7): settled at the server's now — except a session the offline replay created
+    /// (<c>origin = offline</c>): the agent replays its end after the fact, so it is settled at the agent's <c>endedAt</c>,
+    /// clamped between the session's last transition and now (a postpaid one played offline is not billed up to the moment
+    /// the PC came back). The agent's <c>secondsUsed</c>/<c>endedAt</c> are kept in <c>agent_reported</c>. An ended session
+    /// is <c>409 sessionNotActive</c> + <c>details.session</c>; so is a session the desk moved off the caller's PC (D-61), with
+    /// its «ended view»: the old PC ends it cleanly and nothing is settled. With <paramref name="byPlayer"/> (a player token
+    /// came with the call) only the reasons a player or the agent's own timer gives are taken — <c>user</c>, <c>idle</c>,
+    /// <c>timeUp</c>, <c>agentRestart</c>, none of which refunds; <c>admin</c>/<c>error</c> are the desk's and the server's
+    /// (the refund of unused time), <c>403 forbidden staffOnly</c>. These checks come after the session's own state, so the
+    /// agent echoing an end the desk already made still gets its 409.
     /// </summary>
-    public async Task<SessionEndResult> EndAsync(Guid sessionId, Guid pcId, SessionEndReport report)
+    public async Task<SessionEndResult> EndAsync(Guid sessionId, Guid pcId, SessionEndReport report, bool byPlayer)
     {
         var effects = new SessionEffects();
         SessionEndResult result;
@@ -684,11 +761,17 @@ public sealed class SessionService(
                 throw NotActive(s.ToWire(now));
             }
 
-            await c.ExecuteAsync(
-                "UPDATE sessions SET agent_reported = @reported::jsonb WHERE id = @sessionId",
+            if (byPlayer && !PlayerEndReasons.Contains(report.Reason))
+            {
+                throw ApiException.Forbidden("staffOnly", "Only the cash desk ends a session with this reason");
+            }
+
+            var origin = await c.ExecuteScalarAsync<string>(
+                "UPDATE sessions SET agent_reported = @reported::jsonb WHERE id = @sessionId RETURNING origin",
                 new { sessionId, reported = JsonSerializer.Serialize(new { report.SecondsUsed, report.EndedAt }, ServerJson.Options) },
                 tx);
-            var (charged, refunded) = await SettleAsync(c, tx, s, now, report.Reason, effects);
+            var end = origin == "offline" && report.EndedAt is { } at ? Min(Max(at, s.LastTransitionAt), now) : now;
+            var (charged, refunded) = await SettleAsync(c, tx, s, end, report.Reason, effects);
             await tx.CommitAsync();
             result = new SessionEndResult(effects.Sessions[^1], Money.Uzs(charged), Money.Uzs(refunded));
         }
@@ -858,8 +941,8 @@ public sealed class SessionService(
 
     /// <summary>
     /// Sends what a committed change produced, in this order: <c>userRevoked</c> of a seat taken, the sessions, the ended
-    /// views of moved sessions to their old PCs, the wallets, the commands, <c>userRevoked</c> of a session ended or moved. A
-    /// failure here must not fail a request whose money is committed.
+    /// views of moved sessions to their old PCs, the notifications, the wallets, the commands, <c>userRevoked</c> of a session
+    /// ended or moved or of a player signed in elsewhere. A failure here must not fail a request whose money is committed.
     /// </summary>
     public async Task PublishAsync(SessionEffects effects)
     {
@@ -878,6 +961,11 @@ public sealed class SessionService(
             foreach (var view in effects.Departed)
             {
                 await pushes.SessionAsync(view);
+            }
+
+            foreach (var (pcId, notification) in effects.Notifications)
+            {
+                await pushes.NotificationAsync(pcId, notification);
             }
 
             foreach (var userId in effects.Wallets)

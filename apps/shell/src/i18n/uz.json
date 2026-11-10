@@ -168,14 +168,27 @@
     "network": "Tarmoq xatosi",
     "generic": "Nimadir noto'g'ri ketdi. Qayta urinib ko'ring",
     "policy": {
-      "postpaidNotAllowed": "Keyin toʻlov bu yerda oʻchirilgan: kassada balansni toʻldiring va vaqtni oldindan tanlang.",
+      "postpaidNotAllowed": "Bu yerda foydalanish bo'yicha to'lov mavjud emas: vaqtni oldindan sotib oling.",
       "minorCurfew": "Bu vaqtda voyaga yetmaganlar oʻynay olmaydi.",
       "tariffZone": "Bu tarif shu kompyuter zonasida amal qilmaydi: boshqasini tanlang.",
       "tariffTime": "Bu tarif hozir amal qilmaydi: boshqasini tanlang.",
       "pcMaintenance": "Kompyuter taʼmirda: boshqasiga oʻtiring yoki administratorni chaqiring.",
       "blacklisted": "Bu akkaunt uchun kirish yopiq: administratorga murojaat qiling."
     },
-    "pcNotReady": "Kompyuter hali tayyorlanmoqda: o‘yin disklari ulanmoqda. Biroz kuting."
+    "pcNotReady": "Kompyuter hali tayyorlanmoqda: o‘yin disklari ulanmoqda. Biroz kuting.",
+    "reason": {
+      "ageRestricted": "Yoshingiz bo'yicha hozir kirish mumkin emas. Xodimlarga murojaat qiling.",
+      "pcOccupied": "Bu kompyuter band: unda boshqa o'yinchining seansi ochiq. Boshqa kompyuterni tanlang yoki administratorga murojaat qiling.",
+      "staffOnly": "Buni faqat administrator qila oladi.",
+      "staffLock": "Kompyuter administrator tomonidan bloklangan: uni faqat kassada ochish mumkin.",
+      "guestLock": "Mehmon seansini bloklab bo'lmaydi.",
+      "guestDisabled": "Bu klubda mehmon sifatida kirish o'chirilgan: administratorga murojaat qiling.",
+      "offlineUnavailable": "Klub serveri bilan aloqa yo'q: aloqasiz bu mavjud emas. Birozdan keyin urinib ko'ring.",
+      "activeSessionElsewhere": "Seansingiz {{pc}} kompyuterida ochiq. U yerda chiqing yoki administratorga murojaat qiling.",
+      "activeSessionElsewhereUnknown": "Seansingiz boshqa kompyuterda ochiq. U yerda chiqing yoki administratorga murojaat qiling.",
+      "otherUser": "Bu seans boshqa o'yinchiga tegishli.",
+      "userToken": "Kirish qabul qilinmadi: qaytadan kiring."
+    }
   },
   "lock": {
     "title": "Xush kelibsiz",
@@ -270,7 +283,41 @@
         "attaching": "ulanmoqda",
         "unavailable": "mavjud emas"
       }
-    }
+    },
+    "noPin": "Bu hisob uchun PIN o'rnatilmagan: parol bilan oching.",
+    "invalidCredentialsLeft": "Login yoki parol noto'g'ri. Qolgan urinishlar: {{attempts}}",
+    "forbidden": "Bu hisob uchun bu yerda kirish taqiqlangan. Xodimlarga murojaat qiling.",
+    "elsewhere": {
+      "title": "Seans {{pc}} kompyuterida ochiq",
+      "titleUnknown": "Seans boshqa kompyuterda ochiq",
+      "body": "Bir vaqtda faqat bitta kompyuterda o'ynash mumkin. Bu yerda kirish uchun u yerdagi seansni yakunlang: avval u yerda ishlatilgan vaqt hisoblanadi.",
+      "confirm": "{{pc}} kompyuteridagi seansni yakunlab, shu yerda kirish",
+      "confirmUnknown": "U seansni yakunlab, shu yerda kirish"
+    },
+    "staffLockedTitle": "Kompyuter administrator tomonidan bloklangan",
+    "staffLockedHint": "Seansingiz saqlangan. Kompyuterni faqat administrator ochishi mumkin — kassaga murojaat qiling.",
+    "expired": {
+      "tokenExpired": "Kirish muddati tugadi, qaytadan kiring",
+      "revoked": "Siz hisobdan chiqarildingiz. Qaytadan kiring",
+      "admin": "Administrator sizni hisobdan chiqardi",
+      "sessionEnded": "Administrator seansingizni yakunladi",
+      "seatTaken": "Administrator bu kompyuterga boshqa o'yinchini o'tqazdi",
+      "seatMoved": "Seansingiz boshqa kompyuterga ko'chirildi — unga o'ting",
+      "signedInElsewhere": "Siz boshqa kompyuterda kirdingiz",
+      "blacklisted": "Bu hisob uchun kirish yopilgan: xodimlarga murojaat qiling",
+      "passwordReset": "Parolingiz kassada tiklandi: yangi parol bilan kiring",
+      "unknown": "Siz hisobdan chiqarildingiz. Qaytadan kiring"
+    },
+    "relogin": {
+      "title": "{{name}} sifatida davom etish",
+      "hint": "O'yin davomida kirish muddati tugadi. Seans saqlangan — davom etish uchun qaytadan kiring.",
+      "other": "Boshqa hisob bilan kirish",
+      "guestTitle": "Mehmon seansi bloklangan",
+      "guestHint": "Kirish muddati tugadi. Seans va uning vaqti saqlangan — administratordan uni blokdan chiqarishni so'rang."
+    },
+    "wrongPinLeft": "PIN noto'g'ri. Qolgan urinishlar: {{attempts}}",
+    "wrongPasswordLeft": "Parol noto'g'ri. Qolgan urinishlar: {{attempts}}",
+    "pinLockedOut": "Juda ko'p noto'g'ri PIN: parol bilan oching yoki administratorga murojaat qiling."
   },
   "desktop": {
     "title": "Bosh sahifa",
@@ -739,7 +786,16 @@
     "periodOut": "Sarflandi",
     "zoneOfPc": "Bu kompyuter zonasi: {{zone}}",
     "dueNow": "Hozir toʻlanadi:",
-    "dueHint": "Keyin toʻlov: summa oʻyinni tugatganingizda balansdan yechiladi."
+    "dueHint": "Foydalanish bo'yicha to'lov: vaqt balansdan to'lanadi.",
+    "approx": "taxminan",
+    "approxHint": "Taxminiy narx: hozir klub serveri bilan aloqa yo'q",
+    "discountPct": "Chegirma {{pct}}%",
+    "discountReason": {
+      "group": "guruh chegirmasi",
+      "loyalty": "sodiqlik chegirmasi",
+      "happyHour": "baxtli soatlar"
+    },
+    "dueHintGuest": "Tugatganingizda kassada to'lang."
   },
   "chat": {
     "title": "Chat",
@@ -1168,7 +1224,7 @@
     "resuming": "Davom ettirilmoqda…",
     "end": "Seansni tugatish",
     "endTitle": "Seansni tugatish",
-    "endConfirm": "Seans hozir tugatilsinmi? Ishlatilmagan oldindan to'langan vaqt qaytariladi.",
+    "endConfirm": "Seansni hozir yakunlaysizmi? Foydalanilmagan to'langan vaqt qaytarilmaydi.",
     "ending": "Tugatilmoqda…",
     "lock": "Bloklash",
     "lockTitle": "Ekranni bloklash",
@@ -1208,17 +1264,35 @@
     "timerLabel": "Seans taymeri",
     "lastMinute": "Oxirgi daqiqa!",
     "overtime": "Qo'shimcha vaqt",
-    "extendPostpaid": "Keyin toʻlovda vaqt qoʻshish shart emas: balans yetguncha oʻynaysiz, toʻlov oxirida.",
+    "extendPostpaid": "Foydalanish bo'yicha to'lovda vaqt qo'shish shart emas: balans yetguncha o'yin davom etadi.",
     "due": "Toʻlov",
     "leave": "Tugatib chiqish",
     "leaveTitle": "Oʻyinni tugatib chiqasizmi?",
     "leaveConfirm": "Tugatib chiqish",
     "leaveNoSession": "Shu kompyuterdagi akkauntingizdan chiqasiz.",
-    "leavePostpaid": "Siz {{duration}} oʻynadingiz. Balansdan {{amount}} yechiladi va akkauntdan chiqasiz.",
-    "leavePrepaid": "Siz {{duration}} oʻynadingiz. Ishlatilmagan vaqt balansga qaytadi va akkauntdan chiqasiz.",
+    "leavePostpaid": "Siz {{duration}} davomida {{amount}} ga o'ynadingiz — to'lov balansdan. Siz hisobdan chiqasiz.",
+    "leavePrepaid": "Siz {{duration}} o'ynadingiz. Qolgan to'langan vaqt ({{left}}) balansga qaytarilmaydi. Siz hisobdan chiqasiz.",
     "idleTitle": "Shu yerdamisiz?",
     "idleBody": "10 daqiqa davomida kompyuterga hech kim tegmadi. {{seconds}} soniyadan keyin oʻyin tugaydi va akkaunt yopiladi.",
-    "idleStay": "Shu yerdaman"
+    "idleStay": "Shu yerdaman",
+    "guestNoSession": {
+      "title": "Vaqt kassada to'lanadi",
+      "hint": "Mehmon vaqtni o'zi boshlay olmaydi: administratordan shu kompyuterda vaqt ochishini so'rang. Vaqt ochilishi bilan o'yin shu yerda boshlanadi."
+    },
+    "prepaidHint": "Vaqt balansdan oldindan to'lanadi.",
+    "autoStarted": {
+      "title": "O'yin: foydalanish bo'yicha to'lov",
+      "body": "{{tariff}}: balansdan har daqiqada yechiladi (soatiga {{price}}). Balans tugaganda seans to'xtaydi."
+    },
+    "leaveGuest": "Siz {{duration}} davomida {{amount}} ga o'ynadingiz — kassada to'lang. Siz hisobdan chiqasiz.",
+    "extendPostpaidGuest": "Vaqt qo'shish shart emas: tugatganingizda kassada to'laysiz.",
+    "extendPackage": "Paket davomiyligi belgilangan: qo'shimcha vaqtni «Hamyon» bo'limida sotib oling.",
+    "logoutFailed": {
+      "title": "Hisobdan chiqib bo'lmadi",
+      "body": "{{error}} Siz hali ham bu kompyuterda hisobdasiz, seans yakunlanmagan.",
+      "retry": "Qayta urinish"
+    },
+    "idleBodyLock": "Kompyuterdan 10 daqiqa davomida hech kim foydalanmadi. {{seconds}} soniyadan keyin ekran bloklanadi — to'langan vaqt saqlanadi."
   },
   "settings": {
     "title": "Sozlamalar",
@@ -1405,7 +1479,9 @@
     "monitorChanged": "Monitor sozlamalari o'zgardi",
     "volumeChanged": "Ovoz {{level}}%",
     "muted": "Ovoz o'chirilgan",
-    "unmuted": "Ovoz yoqilgan"
+    "unmuted": "Ovoz yoqilgan",
+    "hudExtendConfirm": "{{minutes}} daqiqani {{price}} ga qo'shasizmi?",
+    "hudExtendConfirmApprox": "{{minutes}} daqiqani taxminan {{price}} ga qo'shasizmi?"
   },
   "pcSettings": {
     "restoredHint": "Seansingiz tugaguncha amal qiladi, keyin klub sozlamalari qaytadi",

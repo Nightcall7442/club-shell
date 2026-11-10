@@ -42,6 +42,22 @@ public interface IConnectivityEventSink
 }
 
 /// <summary>
+/// What the IPC handlers read of the server link: whether the server is reachable now and the PC's id. Implemented by
+/// <see cref="ServerConnection"/>; a seam for tests, which cannot open the WebSocket.
+/// </summary>
+public interface IServerLinkState
+{
+    /// <summary>Current connectivity (driven by the WebSocket).</summary>
+    ConnectivityState Connectivity { get; }
+
+    /// <summary>Time of the last connectivity transition.</summary>
+    DateTimeOffset ConnectivitySince { get; }
+
+    /// <summary>Assigned PC id once registered; <see langword="null"/> before then.</summary>
+    Guid? PcId { get; }
+}
+
+/// <summary>
 /// Owns the Agent's relationship with the central server (SERVER_API.md §2, §6): reuses or refreshes stored tokens and
 /// registers the PC only without them or when the server rejects the refresh (D-78), keeps the access token fresh
 /// (refreshing it shortly before <c>exp</c> and reconnecting the live socket with
@@ -51,7 +67,7 @@ public interface IConnectivityEventSink
 /// <see cref="IsOnline"/> and <see cref="ServerTimeOffset"/>.
 /// </summary>
 [SupportedOSPlatform("windows")]
-public sealed class ServerConnection : IHostedService, IDisposable
+public sealed class ServerConnection : IHostedService, IServerLinkState, IDisposable
 {
     private const string IdentityFileName = "agent-identity.json";
     private static readonly TimeSpan TokenRefreshLeeway = TimeSpan.FromMinutes(2);
@@ -140,6 +156,9 @@ public sealed class ServerConnection : IHostedService, IDisposable
 
     /// <summary>Current connectivity state, driven by the WebSocket connection.</summary>
     public ConnectivityState Connectivity => _connectivity;
+
+    /// <inheritdoc />
+    public DateTimeOffset ConnectivitySince => _connectivitySince;
 
     /// <summary><see langword="true"/> while the WebSocket is connected.</summary>
     public bool IsOnline => _realtime.IsConnected;

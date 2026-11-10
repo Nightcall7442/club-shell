@@ -138,11 +138,21 @@ public sealed class SettlementTests(LongClockServerFixture server) : LedgerCheck
         await Contract.ReadErrorAsync(bad, 400, "validation");
     }
 
+    /// <summary>The agent's end; <c>admin</c>/<c>error</c> without the player's token, as the agent sends them (with it: 403 staffOnly).</summary>
     private async Task<JsonElement> EndAsync(TestAgent agent, JsonElement session, string reason)
     {
-        using var response = await agent.PostAsync($"/api/v1/sessions/{session.GetProperty("id").GetGuid()}/end",
-            new { reason, secondsUsed = 1, endedAt = Server.Clock.GetUtcNow() });
-        return await Players.ReadAsync(response, 200);
+        var token = agent.UserToken;
+        agent.UserToken = reason is "admin" or "error" ? null : token;
+        try
+        {
+            using var response = await agent.PostAsync($"/api/v1/sessions/{session.GetProperty("id").GetGuid()}/end",
+                new { reason, secondsUsed = 1, endedAt = Server.Clock.GetUtcNow() });
+            return await Players.ReadAsync(response, 200);
+        }
+        finally
+        {
+            agent.UserToken = token;
+        }
     }
 
     private static async Task<long> CurrentCostAsync(TestAgent agent)

@@ -154,6 +154,33 @@ public sealed record SessionCreateRequest(
     DateTimeOffset? StartedAt = null,
     Guid? ClientSessionId = null);
 
+/// <summary>
+/// Body of <c>POST /sessions/quote</c>: what <see cref="SessionCreateRequest"/> with the same values would charge now,
+/// with the club's day rate and the player's discount applied. Nothing is created or charged.
+/// </summary>
+/// <param name="PcId">PC (its zone decides the happy hours that apply).</param>
+/// <param name="UserId">Player (group and loyalty discounts).</param>
+/// <param name="TariffId">Tariff.</param>
+/// <param name="Minutes">Minutes to buy; <see langword="null"/> = one hour, or the package.</param>
+public sealed record SessionQuoteRequest(Guid PcId, Guid UserId, Guid TariffId, int? Minutes = null);
+
+/// <summary>Answer of <c>POST /sessions/quote</c> and of IPC <c>session.quote</c>: the price the server will charge.</summary>
+/// <param name="Minutes">Minutes priced (the package's for a package tariff).</param>
+/// <param name="Base">List price of those minutes.</param>
+/// <param name="Total">What starting would charge (prepaid) or charges per that much time (postpaid).</param>
+/// <param name="DayPct">Day rate in percent (weekday or holiday), 100 = list price.</param>
+/// <param name="DiscountPct">Player discount in percent (the best of group, loyalty and happy hour).</param>
+/// <param name="DiscountReason">Which discount applies (<c>group</c>, <c>loyalty</c>, <c>happyHour</c>), or none.</param>
+/// <param name="Package">The tariff is a package: <paramref name="Minutes"/> are fixed.</param>
+public sealed record SessionQuote(
+    int Minutes,
+    Money Base,
+    Money Total,
+    int DayPct,
+    int DiscountPct,
+    string? DiscountReason,
+    bool Package);
+
 /// <summary>Body of <c>POST /sessions/{id}/end</c>.</summary>
 /// <param name="Reason">End reason.</param>
 /// <param name="SecondsUsed">Seconds consumed as measured by the Agent.</param>

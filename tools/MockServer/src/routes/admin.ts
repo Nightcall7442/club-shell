@@ -13,8 +13,8 @@
  * a session only settles the balance and does not. Opening and extending take an optional `payment {amount, method}`:
  * the top-up and the session in one step, every refusal checked before either, and the journal written last.
  *
- * Cash desk part 2, as on the server: a seat may be postpaid (`prepaid: false`; guests by `limits.guestPostpaid`,
- * members while the balance and `limits.memberDebtLimit` cover the first minute); a walk-in guest is seated with
+ * Cash desk part 2, as on the server: a seat may be postpaid (`prepaid: false`; guests unless `limits.guestPostpaid` is
+ * false, members always; a positive `guestDebtLimit` / `memberDebtLimit` caps it); a walk-in guest is seated with
  * `POST /admin/sessions/guest` and signs in with «Гость» on that PC; a desk open signs out anyone else on the PC
  * (`seatTaken`), a desk end signs the player out (`sessionEnded`); a debt is taken exactly (`settleDebt`) and a guest's
  * refund given back in cash (`/admin/wallet/payout`), never more than the guest paid in cash and got back.
@@ -227,14 +227,18 @@ function prepaidOf(b: Record<string, unknown>): boolean {
   return optBool(b, 'prepaid') ?? true;
 }
 
+/** Desk postpaid for guests: on unless the club turned it off (absent = on, the server's default). */
+const guestPostpaidOn = (): boolean => club().limits.guestPostpaid ?? true;
+
 /**
- * Postpaid's first minute must be affordable (the server's Rule 10): a guest within `limits.guestDebtLimit` (none — no
- * limit), anyone else within the balance plus `limits.memberDebtLimit` (0 or absent — no debt).
+ * A desk postpaid seat under a debt cap (the server's Rule 10): the first minute must fit within the balance plus
+ * `limits.guestDebtLimit` (guests) or `limits.memberDebtLimit` (members). `null` or 0 is no cap at all: desk postpaid
+ * works by default for both. The caps are the desk's only.
  */
 function checkPostpaid(user: UserRecord, tariff: Tariff, zone: string): void {
   const limits = club().limits;
-  const guestLimit = limits.guestDebtLimit ?? 0;
-  const limit = user.role === 'guest' ? (guestLimit > 0 ? guestLimit : null) : Math.max(0, limits.memberDebtLimit ?? 0);
+  const cap = user.role === 'guest' ? (limits.guestDebtLimit ?? 0) : (limits.memberDebtLimit ?? 0);
+  const limit = cap > 0 ? cap : null;
   if (limit === null) return;
   const first = quote(tariff, 1, user.role === 'guest' ? null : user.id, zone).total;
   if (first.amount > user.balance.amount + limit) throw errors.insufficientFunds(first, user.balance);
@@ -473,8 +477,7 @@ export function adminRoutes(app: FastifyInstance): void {
         });
       if (profileOf(userId).blacklisted) throw errors.policyDenied('blacklisted');
       if (isMinor(userId) && inCurfew()) throw errors.policyDenied('minorCurfew');
-      if (!prepaid && user.role === 'guest' && !club().limits.guestPostpaid)
-        throw errors.policyDenied('postpaidNotAllowed');
+      if (!prepaid && user.role === 'guest' && !guestPostpaidOn()) throw errors.policyDenied('postpaidNotAllowed');
       const mins = tariff.isPackage ? (tariff.packageMinutes ?? minutes) : prepaid ? minutes : 0;
       const priced = quote(tariff, prepaid ? mins : 60, userId, pc.zone);
       if (prepaid) checkFunds(user, payment, priced.total);
@@ -518,7 +521,7 @@ export function adminRoutes(app: FastifyInstance): void {
         if (payment && payment.amount !== priced.total.amount)
           throw errors.conflict('priceChanged', { total: priced.total });
         checkSeat(pc, tariff, prepaid);
-        if (!prepaid && !club().limits.guestPostpaid) throw errors.policyDenied('postpaidNotAllowed');
+        if (!prepaid && !guestPostpaidOn()) throw errors.policyDenied('postpaidNotAllowed');
         if (!prepaid) {
           const limit = club().limits.guestDebtLimit ?? 0;
           const first = quote(tariff, 1, null, pc.zone).total;

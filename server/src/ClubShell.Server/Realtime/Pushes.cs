@@ -17,6 +17,10 @@ public sealed class Pushes(AgentSocketHub hub, UserTokens tokens, NpgsqlDataSour
 {
     public Task SessionAsync(Session session) => hub.TryPushAsync(session.PcId, WsPushKind.SessionUpdated, JsonDefaults.ToElement(session));
 
+    /// <summary><c>notification</c> to <paramref name="pcId"/>; the agent shows it as IPC <c>notification.push</c>.</summary>
+    public Task NotificationAsync(Guid pcId, Contracts.Users.Notification notification) =>
+        hub.TryPushAsync(pcId, WsPushKind.Notification, JsonDefaults.ToElement(notification));
+
     /// <summary><c>userRevoked {userId, reason}</c> to <paramref name="pcIds"/>; the agent signs the player out and ends the session.</summary>
     public async Task UserRevokedAsync(Guid userId, string reason, IEnumerable<Guid> pcIds)
     {

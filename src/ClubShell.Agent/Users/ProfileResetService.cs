@@ -103,6 +103,9 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
     private const int RebootDelaySec = 5;
     private const string RebootMarkerFileName = "profile-reset-reboot.txt";
     private static readonly TimeSpan SessionSettleDelay = TimeSpan.FromSeconds(2);
+
+    /// <summary>Longest wait for a sign-out still running (<c>auth.logout</c> has a 45 s budget).</summary>
+    private static readonly TimeSpan SignOutWait = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan RestoreTimeout = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan RestorePollInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan ExplorerWatch = TimeSpan.FromSeconds(30);
@@ -606,6 +609,14 @@ public sealed class ProfileResetService : IProfileResetTrigger, IHostedService, 
         try
         {
             await _clock.Delay(SessionSettleDelay, CancellationToken.None).ConfigureAwait(false);
+
+            // A sign-out ends the session first and then signs the player out on the server: stopping the Shell before it
+            // finished left the player signed in for the next Shell (G1).
+            if (_users is not null && !await _users.WaitForSignOutAsync(SignOutWait, CancellationToken.None).ConfigureAwait(false))
+            {
+                _logger.LogWarning("The sign-out after the session did not finish within {Wait}; resetting the profile anyway", SignOutWait);
+            }
+
             if (_saves is not null)
             {
                 // The cleanup closes the games (a step of up to 20 s) and only then starts the detach.

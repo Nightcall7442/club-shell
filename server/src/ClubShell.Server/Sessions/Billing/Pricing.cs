@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ClubShell.Contracts.Serialization;
 using ClubShell.Contracts.Wallet;
 using ClubShell.Server.Infrastructure;
@@ -77,18 +78,22 @@ public sealed class ClubPricing
     public string MinorCurfew { get; init; } = "22:00";
 
     /// <summary>
-    /// <c>limits.guestPostpaid</c> (beyond the contract, owner's choice in the console): a guest may play postpaid and pay at
-    /// the counter afterwards. Off by default — a guest who walks away leaves an unpaid bill.
+    /// <c>limits.guestPostpaid</c> (beyond the contract, owner's choice in the console): the desk may seat a guest postpaid,
+    /// to pay at the counter afterwards. On unless the owner turned it off (<c>false</c>). The kiosk never starts a guest's
+    /// postpaid session, whatever this says.
     /// </summary>
-    public bool GuestPostpaid { get; init; }
+    public bool GuestPostpaid { get; init; } = true;
 
-    /// <summary><c>limits.guestDebtLimit</c> (tiyin): how far a guest's postpaid bill may run; null or 0 — no limit.</summary>
+    /// <summary>
+    /// <c>limits.guestDebtLimit</c> (tiyin): how far below zero a guest's postpaid seat from the desk may run; null or 0 — no
+    /// cap.
+    /// </summary>
     public long? GuestDebtLimit { get; init; }
 
     /// <summary>
-    /// <c>limits.memberDebtLimit</c> (tiyin, beyond the contract, D-31): how far a member's postpaid bill may run below zero;
-    /// null or 0 — the server's <c>Sessions:PostpaidCreditLimit</c> (0: no debt, the balance must cover every minute). Not
-    /// "no limit" as for guests: the console shows it as a toggle plus an amount.
+    /// <c>limits.memberDebtLimit</c> (tiyin, beyond the contract, D-31): how far below zero a member's postpaid seat from the
+    /// desk may run; null or 0 — no cap. A member's own pay-as-you-go from the kiosk always has 0: the balance must cover
+    /// every minute (<see cref="SessionService.DebtLimitFor"/>).
     /// </summary>
     public long? MemberDebtLimit { get; init; }
 
@@ -115,7 +120,7 @@ public sealed class ClubPricing
             Loyalty = (doc?.Loyalty ?? []).OrderBy(l => l.MinSpent).ToArray(),
             MinorAge = doc?.Limits?.MinorAge ?? 18,
             MinorCurfew = doc?.Limits?.MinorCurfew ?? "22:00",
-            GuestPostpaid = doc?.Limits?.GuestPostpaid ?? false,
+            GuestPostpaid = doc?.Limits?.GuestPostpaid ?? true,
             GuestDebtLimit = doc?.Limits?.GuestDebtLimit is > 0 and var limit ? limit : null,
             MemberDebtLimit = doc?.Limits?.MemberDebtLimit is > 0 and var memberLimit ? memberLimit : null,
             CashOutOwnerOnly = doc?.Limits?.CashOutOwnerOnly ?? false,
@@ -171,7 +176,15 @@ public sealed class ClubPricing
 }
 
 /// <summary>The price of a purchase and how it was reached; stored as <c>meta</c> of the charge (<c>package</c>: never refunded, §5.7).</summary>
-public sealed record Quote(int Minutes, long Base, int DayPct, int DiscountPct, string? DiscountReason, long Total, bool Package);
+public sealed record Quote(int Minutes, long Base, int DayPct, int DiscountPct, string? DiscountReason, long Total, bool Package)
+{
+    /// <summary>
+    /// The kind of discount <see cref="DiscountReason"/> names — <c>group</c>, <c>loyalty</c> or <c>happyHour</c> — or null
+    /// without one: the kiosk's <c>SessionQuote.discountReason</c>. Not part of the charge's <c>meta</c>.
+    /// </summary>
+    [JsonIgnore]
+    public string? DiscountKind { get; init; }
+}
 
 /// <summary>
 /// The single price function of every channel (DESIGN §5.1, D-8): kiosk create/extend, cashier open/extend, quote,
@@ -205,23 +218,23 @@ public static class Pricing
             ? club.HolidayPct
             : club.WeekdayPct[(int)local.DayOfWeek];
 
-        (int Pct, string Name)? best = null;
-        void Offer(int pct, string name)
+        (int Pct, string Name, string Kind)? best = null;
+        void Offer(int pct, string name, string kind)
         {
             if (pct > 0 && (best is null || pct > best.Value.Pct))
             {
-                best = (pct, name);
+                best = (pct, name, kind);
             }
         }
 
         if (groupId is not null && club.Groups.FirstOrDefault(g => g.Id == groupId) is { } group)
         {
-            Offer(group.DiscountPct, group.Name);
+            Offer(group.DiscountPct, group.Name, "group");
         }
 
         if (lifetimeSpent is { } spent && club.LevelOf(spent) is { } level)
         {
-            Offer(level.DiscountPct, level.Name);
+            Offer(level.DiscountPct, level.Name, "loyalty");
         }
 
         var minute = (local.Hour * 60) + local.Minute;
@@ -232,12 +245,12 @@ public static class Pricing
                 && (hh.Zones.Length == 0 || hh.Zones.Contains(zone, StringComparer.OrdinalIgnoreCase))
                 && (from <= to ? minute >= from && minute < to : minute >= from || minute < to))
             {
-                Offer(hh.DiscountPct, hh.Name);
+                Offer(hh.DiscountPct, hh.Name, "happyHour");
             }
         }
 
         var @base = tariff.IsPackage ? tariff.PackagePrice ?? 0 : Base(tariff.PricePerHour, minutes);
         var discount = best?.Pct ?? 0;
-        return new Quote(minutes, @base, dayPct, discount, best?.Name, Total(@base, dayPct, discount), tariff.IsPackage);
+        return new Quote(minutes, @base, dayPct, discount, best?.Name, Total(@base, dayPct, discount), tariff.IsPackage) { DiscountKind = best?.Kind };
     }
 }

@@ -51,6 +51,19 @@ wire_enum! {
         Revoked = "revoked",
         /// Admin forced logout.
         Admin = "admin",
+        /// The cash desk ended the player's session (server push `userRevoked {reason:
+        /// sessionEnded}`).
+        SessionEnded = "sessionEnded",
+        /// The cash desk seated someone else on this PC (`seatTaken`).
+        SeatTaken = "seatTaken",
+        /// The cash desk moved the player's session to another PC (`seatMoved`).
+        SeatMoved = "seatMoved",
+        /// The player signed in on another PC (`signedInElsewhere`).
+        SignedInElsewhere = "signedInElsewhere",
+        /// The club blocked the account (`blacklisted`).
+        Blacklisted = "blacklisted",
+        /// The cash desk reset the account's password (`passwordReset`).
+        PasswordReset = "passwordReset",
     }
 }
 
@@ -97,6 +110,12 @@ pub struct AuthRequest {
     pub pc_id: Uuid,
     /// Hardware id of the PC (sha256 hex).
     pub hwid: String,
+    /// The player confirmed «end my session on the other PC and sign in here» after `409
+    /// activeSessionElsewhere`: the server ends (settles) the player's open session on the other PC
+    /// like a sign-out there, signs that PC out (`userRevoked {reason: signedInElsewhere}`), then
+    /// signs in here. Without it the sign-in is refused as before.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_elsewhere: Option<bool>,
 }
 
 /// Body of `POST /booking/reserve`. Sent with an `Idempotency-Key`.
@@ -349,6 +368,17 @@ pub struct Notification {
     /// Optional call-to-action.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action: Option<NotificationAction>,
+}
+
+/// Body of `POST /users/{userId}/pin/verify`: checks the player's unlock PIN against the one stored
+/// on the server (so a PIN set on one PC unlocks on any). `204` = matches; `401 badSecret` = does
+/// not match; `404 notFound` with `reason: noPin` = none is set. Failures count toward the same
+/// lockout as sign-in.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PinVerifyRequest {
+    /// 4–6 digit PIN.
+    pub pin: String,
 }
 
 /// Body of `profile.update` and `PATCH /users/{userId}`; all fields optional.
@@ -689,6 +719,7 @@ impl AuthRequest {
             token: mask(&self.token),
             pc_id: self.pc_id,
             hwid: self.hwid.clone(),
+            end_elsewhere: self.end_elsewhere,
         }
     }
 }
@@ -753,7 +784,17 @@ mod tests {
         );
         assert_wire(
             AuthExpiredReason::ALL,
-            &["tokenExpired", "revoked", "admin"],
+            &[
+                "tokenExpired",
+                "revoked",
+                "admin",
+                "sessionEnded",
+                "seatTaken",
+                "seatMoved",
+                "signedInElsewhere",
+                "blacklisted",
+                "passwordReset",
+            ],
         );
     }
 
@@ -782,6 +823,7 @@ mod tests {
             token: None,
             pc_id: Uuid::nil(),
             hwid: "ab".into(),
+            end_elsewhere: None,
         };
         assert_eq!(
             serde_json::to_string(&r).unwrap(),

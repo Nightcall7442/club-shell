@@ -92,6 +92,54 @@ public sealed class MigrationTests(ServerFixture server) : IClassFixture<ServerF
         Assert.Equal(1, await ScalarAsync("SELECT count(*)::int FROM clubs WHERE settings #>> '{features,callAdmin}' = 'false'"));
     }
 
+    /// <summary>
+    /// M0017: the open postpaid sessions get the limit the server applied to them before — a member the club's
+    /// <c>memberDebtLimit</c> or 0, a guest the club's <c>guestDebtLimit</c> or none (no cap); prepaid and ended ones none.
+    /// </summary>
+    [Fact]
+    public async Task M0017_gives_open_postpaid_sessions_the_limit_they_had()
+    {
+        using var scope = server.Services.CreateScope();
+        var runner = scope.ServiceProvider.GetRequiredService<IMigrationRunner>();
+        await server.Services.GetRequiredService<ClubShell.Server.Infrastructure.ClubRepository>().EnsureAsync(
+            server.Services.GetRequiredService<ClubShell.Server.Infrastructure.ClubOptions>());
+        runner.MigrateDown(2026110501);
+        var salt = Guid.NewGuid().ToString("N")[..8];
+        await using (var c = await server.Services.GetRequiredService<NpgsqlDataSource>().OpenConnectionAsync())
+        {
+            await c.ExecuteAsync(
+                """
+                UPDATE clubs SET settings = jsonb_set(settings, '{limits}', '{"memberDebtLimit": 70000}');
+                INSERT INTO tariffs (id, club_id, name, price_per_hour) SELECT md5(@salt || 't')::uuid, id, 'M0017', 1200000 FROM clubs LIMIT 1;
+                INSERT INTO pcs (id, club_id, number, name) SELECT md5(@salt || 'pc' || i)::uuid, id, 900 + i, 'm17 ' || i FROM clubs, generate_series(1, 4) i LIMIT 4;
+                INSERT INTO users (id, network_id, username, display_name, role)
+                SELECT md5(@salt || 'u' || i)::uuid, network_id, 'm17-' || @salt || '-' || i, 'm17', CASE WHEN i = 2 THEN 'guest' ELSE 'member' END
+                FROM clubs, generate_series(1, 4) i LIMIT 4;
+                INSERT INTO sessions (id, club_id, pc_id, user_id, tariff_id, state, is_prepaid, origin, started_at, ended_at, running_since,
+                                      last_transition_at, price_per_hour_snapshot, day_pct, discount_pct, created_at, updated_at)
+                SELECT md5(@salt || 's' || i)::uuid, cl.id, md5(@salt || 'pc' || i)::uuid, md5(@salt || 'u' || i)::uuid, md5(@salt || 't')::uuid,
+                       CASE WHEN i = 4 THEN 'ended' ELSE 'active' END, i = 3, 'kiosk', now(), CASE WHEN i = 4 THEN now() END, now(), now(), 1200000, 100, 0, now(), now()
+                FROM (SELECT id FROM clubs LIMIT 1) cl, generate_series(1, 4) i;
+                """,
+                new { salt });
+        }
+
+        runner.MigrateUp();
+        await using (var c = await server.Services.GetRequiredService<NpgsqlDataSource>().OpenConnectionAsync())
+        {
+            // 1 a member, 2 a guest (no guestDebtLimit: no cap), 3 prepaid, 4 ended.
+            Assert.Equal("1:70000 2:- 3:- 4:-", await c.ExecuteScalarAsync<string>(
+                """
+                SELECT string_agg(i || ':' || coalesce((SELECT debt_limit::text FROM sessions WHERE id = md5(@salt || 's' || i)::uuid), '-'), ' ' ORDER BY i)
+                FROM generate_series(1, 4) i
+                """,
+                new { salt }));
+            await c.ExecuteAsync(
+                "UPDATE sessions SET state = 'ended', ended_at = now() WHERE id IN (SELECT md5(@salt || 's' || i)::uuid FROM generate_series(1, 3) i); UPDATE clubs SET settings = settings - 'limits'",
+                new { salt });
+        }
+    }
+
     private async Task<int> ScalarAsync(string sql)
     {
         await using var c = await server.Services.GetRequiredService<NpgsqlDataSource>().OpenConnectionAsync();

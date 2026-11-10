@@ -1,4 +1,6 @@
 using System.Text.Json;
+using ClubShell.Server.Sessions;
+using Microsoft.Extensions.DependencyInjection;
 using static ClubShell.Server.Tests.PurchaseRulesTests;
 
 namespace ClubShell.Server.Tests;
@@ -92,7 +94,7 @@ public sealed class EventsTests(LongClockServerFixture server) : LedgerCheckedTe
         var id = created.GetProperty("id").GetGuid();
         var t0 = Server.Clock.GetUtcNow();
         Server.Clock.Advance(TimeSpan.FromMinutes(10));
-        await Players.ReadAsync(await agent.PostAsync($"/api/v1/sessions/{id}/pause", null), 200);
+        await Server.Services.GetRequiredService<SessionService>().PauseAsync(id, player.Id, agent.PcId); // the server's own pause
 
         await PostAsync(agent, id, Guid.NewGuid(), ("resumed", t0.AddMinutes(5), null));
         Assert.Equal("paused", (await CurrentAsync(agent)).GetProperty("state").GetString());
@@ -107,7 +109,7 @@ public sealed class EventsTests(LongClockServerFixture server) : LedgerCheckedTe
         var (_, created) = await Players.StartAsync(agent, player);
         var id = created.GetProperty("id").GetGuid();
         Server.Clock.Advance(TimeSpan.FromMinutes(10));
-        await Players.ReadAsync(await agent.PostAsync($"/api/v1/sessions/{id}/pause", null), 200);
+        await Server.Services.GetRequiredService<SessionService>().PauseAsync(id, player.Id, agent.PcId); // the server's own pause
         var paused = Server.Clock.GetUtcNow();
         Server.Clock.Advance(TimeSpan.FromMinutes(5));
 

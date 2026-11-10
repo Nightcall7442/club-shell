@@ -62,6 +62,18 @@ public sealed class ServerClient : IServerClient, IDisposable
     private const string ReasonUserToken = "userToken";
     private const string DefaultArch = "x64";
 
+    /// <summary>
+    /// <c>401</c> reasons about what the player typed or holds, not the agent's token: never answered with a refresh and a
+    /// retry, which would count a wrong password or PIN twice toward the sign-in lockout.
+    /// </summary>
+    private static readonly HashSet<string> FinalUnauthorizedReasons = new(StringComparer.Ordinal)
+    {
+        ReasonUserToken,
+        "badCredentials",
+        "badSecret",
+        "invalidPin",
+    };
+
     private static readonly AsyncLocal<Guid?> CurrentTrace = new();
 
     private readonly HttpClient _http;
@@ -120,6 +132,9 @@ public sealed class ServerClient : IServerClient, IDisposable
 
     /// <inheritdoc />
     public string? AcceptLanguage { get; set; }
+
+    /// <inheritdoc />
+    public event EventHandler<UserTokenRejectedEventArgs>? UserTokenRejected;
 
     /// <summary>Agent version sent as <c>X-Agent-Version</c> / <c>User-Agent</c>.</summary>
     public string AgentVersion { get; } = ClubShellVersion.Current;
@@ -255,10 +270,15 @@ public sealed class ServerClient : IServerClient, IDisposable
         {
             await SendJsonNoContentAsync(HttpMethod.Post, Endpoints.AuthLogout, request, AuthMode.User, null, cancellationToken).ConfigureAwait(false);
         }
-        finally
+        catch (ServerApiException ex) when (!ex.IsRetryable)
         {
-            await _tokens.SetUserAsync(null, cancellationToken).ConfigureAwait(false);
+            // Refused (the token is already gone server-side): nothing is left to revoke with it.
+            await _tokens.SetUserAsync(null, CancellationToken.None).ConfigureAwait(false);
+            throw;
         }
+
+        // Kept after a transport failure or a cancellation: the Agent replays the sign-out with it from its outbox.
+        await _tokens.SetUserAsync(null, CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -283,6 +303,13 @@ public sealed class ServerClient : IServerClient, IDisposable
     /// <inheritdoc />
     public Task<Loyalty> GetUserLoyaltyAsync(Guid userId, CancellationToken cancellationToken) =>
         GetAsync<Loyalty>(Endpoints.UserLoyalty(userId), AuthMode.User, cancellationToken);
+
+    /// <inheritdoc />
+    public Task VerifyPinAsync(Guid userId, PinVerifyRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return SendJsonNoContentAsync(HttpMethod.Post, Endpoints.UserPinVerify(userId), request, AuthMode.User, null, cancellationToken);
+    }
 
     #endregion
 
@@ -311,9 +338,13 @@ public sealed class ServerClient : IServerClient, IDisposable
     public async Task<SessionEndResult> EndSessionAsync(Guid sessionId, SessionEndReport report, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(report);
+
+        // The player's token goes only with the player's own reasons: with it the server accepts user/idle and nothing
+        // else (403 staffOnly). Time up, a cash desk command or a restart are the Agent's ends, sent as the Agent.
+        var auth = report.Reason is SessionEndReason.User or SessionEndReason.Idle ? AuthMode.User : AuthMode.Agent;
         try
         {
-            return await SendJsonAsync<SessionEndReport, SessionEndResult>(HttpMethod.Post, Endpoints.SessionEnd(sessionId), report, AuthMode.User, null, cancellationToken).ConfigureAwait(false);
+            return await SendJsonAsync<SessionEndReport, SessionEndResult>(HttpMethod.Post, Endpoints.SessionEnd(sessionId), report, auth, null, cancellationToken).ConfigureAwait(false);
         }
         catch (ServerApiException ex) when (ex.Code == ErrorCode.SessionNotActive && TryGetEndedSession(ex, out var session))
         {
@@ -334,6 +365,13 @@ public sealed class ServerClient : IServerClient, IDisposable
     {
         ArgumentNullException.ThrowIfNull(batch);
         return SendJsonNoContentAsync(HttpMethod.Post, Endpoints.SessionEvents(sessionId), batch, AuthMode.Agent, idempotencyKey, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task<SessionQuote> QuoteSessionAsync(SessionQuoteRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return SendJsonAsync<SessionQuoteRequest, SessionQuote>(HttpMethod.Post, Endpoints.SessionsQuote, request, AuthMode.User, null, cancellationToken);
     }
 
     #endregion
@@ -792,12 +830,17 @@ public sealed class ServerClient : IServerClient, IDisposable
                 continue;
             }
 
-            if (!refreshed && !string.Equals(reason, ReasonUserToken, StringComparison.Ordinal))
+            if (!refreshed && (reason is null || !FinalUnauthorizedReasons.Contains(reason)))
             {
                 refreshed = true;
                 _logger.LogInformation("Agent token rejected ({Reason}); refreshing", reason ?? "unauthorized");
                 await RefreshIfStaleAsync(accessToken, cancellationToken).ConfigureAwait(false);
                 continue;
+            }
+
+            if (auth == AuthMode.User && string.Equals(reason, ReasonUserToken, StringComparison.Ordinal))
+            {
+                RaiseUserTokenRejected(error);
             }
 
             throw error;
@@ -964,6 +1007,24 @@ public sealed class ServerClient : IServerClient, IDisposable
         await _tokens.SetAgentAsync(rotated, cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("Agent tokens refreshed; access token valid until {ExpiresAt}", response.ExpiresAt);
         return response;
+    }
+
+    private void RaiseUserTokenRejected(ServerApiException error)
+    {
+        string? problem = error.Error?.Details is { ValueKind: JsonValueKind.Object } details
+            && details.TryGetProperty("problem", out var value)
+            && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+        _logger.LogWarning("The player's token was refused ({Problem})", problem ?? "userToken");
+        try
+        {
+            UserTokenRejected?.Invoke(this, new UserTokenRejectedEventArgs(_tokens.User?.UserId, problem));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "UserTokenRejected listener threw");
+        }
     }
 
     private Task StoreUserTokensAsync(AuthResponse auth, CancellationToken cancellationToken) =>

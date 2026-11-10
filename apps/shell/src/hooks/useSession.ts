@@ -56,8 +56,6 @@ export interface SessionFacade {
   lastResult: SessionEndResult | null;
   busy: boolean;
   start: (tariffId: string, prepaid: boolean, minutes?: number) => Promise<Session>;
-  pause: (reason?: string) => Promise<Session>;
-  resume: () => Promise<Session>;
   extend: (minutes: number, tariffId?: string) => Promise<Session>;
   end: (reason?: SessionEndReason) => Promise<SessionEndResult>;
   lock: (reason?: string) => Promise<Session>;
@@ -85,8 +83,6 @@ export function useSession(): SessionFacade {
       lastResult: st.lastResult,
       status: st.status,
       start: st.start,
-      pause: st.pause,
-      resume: st.resume,
       extend: st.extend,
       end: st.end,
       lock: st.lock,
@@ -124,8 +120,6 @@ export function useSession(): SessionFacade {
       lastResult: s.lastResult,
       busy: s.status === 'loading',
       start: s.start,
-      pause: s.pause,
-      resume: s.resume,
       extend: s.extend,
       end: s.end,
       lock: s.lock,

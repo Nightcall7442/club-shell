@@ -28,6 +28,19 @@ namespace ClubShell.Agent.Ipc.Handlers;
 /// <summary><c>auth.*</c> and <c>session.*</c> requests (IPC_PROTOCOL.md §7.1, §7.2).</summary>
 public sealed class SessionHandlers : IIpcHandlerGroup
 {
+    /// <summary>
+    /// How long <c>auth.logout</c> may take for the session end (games closed, settlement), the server sign-out and the
+    /// local clear. Its own budget, never the request's token: the profile reset after the session closes the Shell, and
+    /// with it the pipe, while the sign-out is still running.
+    /// </summary>
+    public static readonly TimeSpan LogoutBudget = TimeSpan.FromSeconds(45);
+
+    /// <summary>Error reason of a request only the cash desk may make (pause, resume, an end or sign-out reason other than <c>user</c>/<c>idle</c>).</summary>
+    public const string StaffOnlyReason = "staffOnly";
+
+    /// <summary>Error reason of a request that needs the club server and is not served offline.</summary>
+    public const string OfflineUnavailableReason = "offlineUnavailable";
+
     private readonly SessionManager _sessions;
     private readonly SessionLock _lock;
     private readonly OfflineSessionStore _store;
@@ -35,7 +48,7 @@ public sealed class SessionHandlers : IIpcHandlerGroup
     private readonly Hwid _hwid;
     private readonly ShellUserContext _users;
     private readonly ShellTokenStore _token;
-    private readonly ServerConnection _connection;
+    private readonly IServerLinkState _connection;
     private readonly IPolicyEnforcer _policy;
     private readonly IKioskCredentials _kiosk;
     private readonly ShellSettingsStore _shellSettings;
@@ -43,6 +56,7 @@ public sealed class SessionHandlers : IIpcHandlerGroup
     private readonly IOptionsMonitor<AgentSettings> _settings;
     private readonly IClock _clock;
     private readonly ILogger<SessionHandlers> _logger;
+    private readonly ITokenStore? _tokens;
 
     /// <summary>Creates the group. <paramref name="services"/> resolves <see cref="ShellUpdater"/> lazily (it depends on the watchdog).</summary>
     public SessionHandlers(
@@ -53,14 +67,15 @@ public sealed class SessionHandlers : IIpcHandlerGroup
         Hwid hwid,
         ShellUserContext users,
         ShellTokenStore token,
-        ServerConnection connection,
+        IServerLinkState connection,
         IPolicyEnforcer policy,
         IKioskCredentials kiosk,
         ShellSettingsStore shellSettings,
         IServiceProvider services,
         IOptionsMonitor<AgentSettings> settings,
         IClock clock,
-        ILogger<SessionHandlers> logger)
+        ILogger<SessionHandlers> logger,
+        ITokenStore? tokens = null)
     {
         ArgumentNullException.ThrowIfNull(sessions);
         ArgumentNullException.ThrowIfNull(sessionLock);
@@ -92,6 +107,7 @@ public sealed class SessionHandlers : IIpcHandlerGroup
         _settings = settings;
         _clock = clock;
         _logger = logger;
+        _tokens = tokens;
     }
 
     /// <inheritdoc />
@@ -101,18 +117,20 @@ public sealed class SessionHandlers : IIpcHandlerGroup
         dispatcher.Register<AuthHelloRequest, AuthHelloResponse>(IpcMessages.Auth.Hello, HelloAsync);
         dispatcher.Register<AuthLoginRequest, AuthLoginResponse>(IpcMessages.Auth.Login, LoginAsync);
         dispatcher.RegisterOptional<AuthLogoutRequest, AuthLogoutResponse>(IpcMessages.Auth.Logout, LogoutAsync);
-        dispatcher.RegisterNoPayload<AuthStatusResponse>(IpcMessages.Auth.Status, (_, _) => Task.FromResult(Status()));
+        dispatcher.RegisterNoPayload<AuthStatusResponse>(IpcMessages.Auth.Status, (_, cancellationToken) => StatusAsync(cancellationToken));
         dispatcher.RegisterNoPayload<QrLoginStart>(IpcMessages.Auth.QrStart, QrStartAsync);
 
         dispatcher.RegisterNoPayload<PlaySession?>(IpcMessages.Session.Get, (context, _) => Task.FromResult(SessionOf(context.User)));
         dispatcher.Register<SessionStartRequest, PlaySession>(IpcMessages.Session.Start, StartAsync);
-        dispatcher.RegisterOptional<SessionPauseRequest, PlaySession>(IpcMessages.Session.Pause, (_, request, cancellationToken) => _sessions.PauseAsync(request?.Reason, cancellationToken));
-        dispatcher.RegisterNoPayload<PlaySession>(IpcMessages.Session.Resume, (_, cancellationToken) => _sessions.ResumeAsync(cancellationToken));
-        dispatcher.RegisterOptional<SessionEndRequest, SessionEndResult>(IpcMessages.Session.End, (_, request, cancellationToken) => _sessions.EndAsync(request?.Reason ?? SessionEndReason.User, cancellationToken));
+        // Billing never stops on the player's request: pause and resume are the cash desk's (server commands).
+        dispatcher.RegisterOptional<SessionPauseRequest, PlaySession>(IpcMessages.Session.Pause, (_, _, _) => throw StaffOnly("Only the cash desk pauses a session"));
+        dispatcher.RegisterNoPayload<PlaySession>(IpcMessages.Session.Resume, (_, _) => throw StaffOnly("Only the cash desk resumes a session"));
+        dispatcher.RegisterOptional<SessionEndRequest, SessionEndResult>(IpcMessages.Session.End, EndAsync);
         dispatcher.Register<SessionExtendRequest, PlaySession>(IpcMessages.Session.Extend, ExtendAsync);
-        dispatcher.RegisterOptional<SessionLockRequest, PlaySession>(IpcMessages.Session.Lock, (_, request, cancellationToken) => _lock.LockAsync(request?.Reason, cancellationToken));
-        dispatcher.RegisterOptional<SessionUnlockRequest, PlaySession>(IpcMessages.Session.Unlock, (context, request, cancellationToken) => _lock.UnlockAsync(context.RequireUser(), request ?? new SessionUnlockRequest(), cancellationToken));
+        dispatcher.RegisterOptional<SessionLockRequest, PlaySession>(IpcMessages.Session.Lock, LockAsync);
+        dispatcher.RegisterOptional<SessionUnlockRequest, PlaySession>(IpcMessages.Session.Unlock, (context, request, cancellationToken) => _lock.UnlockAsync(context.RequireUser(), request ?? new SessionUnlockRequest(), IsOnline, cancellationToken));
         dispatcher.RegisterNoPayload<SessionTimeLeftResponse>(IpcMessages.Session.TimeLeft, (_, _) => Task.FromResult(_sessions.GetTimeLeft()));
+        dispatcher.Register<SessionQuoteIpcRequest, SessionQuote>(IpcMessages.Session.Quote, QuoteAsync);
     }
 
     /// <summary>Agent capabilities advertised in <c>auth.hello</c> (IPC_PROTOCOL.md §3), derived from settings, policy and <c>shell.json</c> features.</summary>
@@ -226,8 +244,9 @@ public sealed class SessionHandlers : IIpcHandlerGroup
             {
                 auth = await LoginOnlineAsync(request, pcId, hwid, cancellationToken).ConfigureAwait(false);
             }
-            catch (ServerApiException ex) when (ex.IsRetryable)
+            catch (ServerApiException ex) when (ex.IsRetryable && ex.Code != ErrorCode.RateLimited)
             {
+                // Not a 429: the offline cache must not sidestep the server's limit on attempts.
                 _logger.LogWarning("Server login failed ({Code}); trying the offline cache", ex.Code);
             }
             catch (HttpRequestException ex)
@@ -246,7 +265,10 @@ public sealed class SessionHandlers : IIpcHandlerGroup
             throw IpcError.Forbidden("Account is banned", "banned").ToException();
         }
 
-        await CacheUserAsync(request.Username ?? auth.User.Username, auth, cancellationToken).ConfigureAwait(false);
+        // A guest's username field carries the display name they typed, not a login name.
+        string cacheKey = request.Kind == AuthKind.Guest ? auth.User.Username : request.Username ?? auth.User.Username;
+        await CacheUserAsync(cacheKey, auth, cancellationToken).ConfigureAwait(false);
+        await DropQueuedLogoutsAsync().ConfigureAwait(false);
         _users.Set(auth.User, auth.ExpiresAt, ConnectivityState.Online);
         PlaySession? session = auth.Session;
         if (session is not null)
@@ -266,6 +288,7 @@ public sealed class SessionHandlers : IIpcHandlerGroup
             session = SessionOf(auth.User);
         }
 
+        session = await ResumeAfterSignInAsync(auth.User, cancellationToken).ConfigureAwait(false) ?? session;
         _logger.LogInformation("User {UserId} ({Username}) logged in via {Kind} (online); session {SessionId}", auth.User.Id, auth.User.Username, request.Kind, session?.Id);
         Saves?.SignedIn(auth.User, guest: request.Kind == AuthKind.Guest);
         return new AuthLoginResponse(auth.User, session, auth.ExpiresAt, ConnectivityState.Online);
@@ -276,7 +299,9 @@ public sealed class SessionHandlers : IIpcHandlerGroup
         switch (request.Kind)
         {
             case AuthKind.Guest:
-                return await _server.GuestLoginAsync(new GuestAuthRequest(pcId, hwid, null, _shellSettings.Get().Locale), cancellationToken).ConfigureAwait(false);
+                // The Shell sends the name a guest typed in the username field (empty: the server names the guest).
+                string? displayName = string.IsNullOrWhiteSpace(request.Username) ? null : request.Username.Trim();
+                return await _server.GuestLoginAsync(new GuestAuthRequest(pcId, hwid, displayName, _shellSettings.Get().Locale), cancellationToken).ConfigureAwait(false);
             case AuthKind.Qr:
             {
                 QrLoginStatus status = await _server.GetQrLoginStatusAsync(request.QrToken!, cancellationToken).ConfigureAwait(false);
@@ -321,31 +346,141 @@ public sealed class SessionHandlers : IIpcHandlerGroup
         }
 
         DateTimeOffset expiresAt = _clock.UtcNow.AddMinutes(Math.Max(1, offline.MaxOfflineMinutes));
+        if (_tokens?.User is { } held && held.UserId != user.Id)
+        {
+            // Another player's token must not be sent on this player's behalf once the server is back.
+            await _tokens.SetUserAsync(null, CancellationToken.None).ConfigureAwait(false);
+        }
+
+        await DropQueuedLogoutsAsync().ConfigureAwait(false);
         _users.Set(user, expiresAt, ConnectivityState.Offline);
+        PlaySession? session = await ResumeAfterSignInAsync(user, cancellationToken).ConfigureAwait(false) ?? SessionOf(user);
         _logger.LogInformation("User {UserId} ({Username}) logged in from the offline cache", user.Id, user.Username);
         // The club server is on the local network: the saves are laid out without the cash desk too.
         Saves?.SignedIn(user);
-        return new AuthLoginResponse(user, SessionOf(user), expiresAt, ConnectivityState.Offline);
+        return new AuthLoginResponse(user, session, expiresAt, ConnectivityState.Offline);
     }
 
+    /// <summary>
+    /// A session of <paramref name="user"/> locked because their sign-in ended (token refused, sign-in revoked) goes on
+    /// now that they signed in again (G3). Returns the unlocked session, or <see langword="null"/> when nothing changed.
+    /// </summary>
+    private async Task<PlaySession?> ResumeAfterSignInAsync(User user, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _lock.ResumeAfterSignInAsync(user, cancellationToken).ConfigureAwait(false) ? SessionOf(user) : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Session of {UserId} could not be unlocked after the new sign-in", user.Id);
+            return null;
+        }
+    }
+
+    /// <summary>A sign-in supersedes a sign-out still queued for the server (see <see cref="OfflineSessionStore.DropQueuedLogoutsAsync"/>).</summary>
+    private async Task DropQueuedLogoutsAsync()
+    {
+        try
+        {
+            await _store.DropQueuedLogoutsAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Queued sign-outs could not be dropped");
+        }
+    }
+
+    /// <summary>
+    /// Signs the player out as one step (G1): their session ends (settled by the server, or queued in the outbox when it
+    /// cannot be reached), the server drops their token (<c>POST /auth/logout</c>, queued too when unreachable) and the
+    /// signed-in player is cleared — in a <see langword="finally"/>, whatever failed. All of it runs under
+    /// <see cref="LogoutBudget"/>, not under <paramref name="cancellationToken"/>: the session end starts the profile reset,
+    /// which closes the Shell and with it this request's pipe, and a sign-out cancelled half-way left the player signed in
+    /// (the Shell came back signed in and opened a new session). The profile reset waits for the sign-out
+    /// (<see cref="ShellUserContext.WaitForSignOutAsync"/>).
+    /// </summary>
     private async Task<AuthLogoutResponse> LogoutAsync(IpcContext context, AuthLogoutRequest? request, CancellationToken cancellationToken)
     {
         SessionEndReason reason = request?.Reason ?? SessionEndReason.User;
-        if (reason is not (SessionEndReason.User or SessionEndReason.Idle or SessionEndReason.Admin))
+        RequirePlayerReason(reason);
+        User user = context.RequireUser();
+        if (cancellationToken.IsCancellationRequested)
         {
-            throw IpcError.Validation("reason", "invalid").ToException();
+            _logger.LogInformation("auth.logout of {UserId}: the request was cancelled; signing out all the same", user.Id);
         }
 
-        User user = context.RequireUser();
+        using IDisposable signingOut = _users.BeginSignOut();
+        using var budget = new CancellationTokenSource(LogoutBudget);
         PlaySession? ended = null;
         bool sessionEnded = false;
-        // Only the player's own session ends with the sign-out: a session the cashier opened for someone else on this PC
-        // (a guest signed in meanwhile) stays theirs — ending it here settled it as "user" with no refund.
-        if (_sessions.State.IsOpen() && _sessions.Current is { } open && open.UserId == user.Id)
+        bool queued = false;
+        try
         {
-            SessionEndResult result = await _sessions.EndAsync(reason, cancellationToken).ConfigureAwait(false);
-            ended = result.Session;
-            sessionEnded = true;
+            // Only the player's own session ends with the sign-out: a session the cashier opened for someone else on this PC
+            // (a guest signed in meanwhile) stays theirs — ending it here settled it as "user" with no refund.
+            bool ownSession = OwnsOpenSession(user);
+            if (ownSession)
+            {
+                try
+                {
+                    SessionEndResult result = await _sessions.EndAsync(reason, budget.Token).ConfigureAwait(false);
+                    ended = result.Session;
+                }
+                catch (Exception ex) when (ex is ServerApiException or IpcException or HttpRequestException or OperationCanceledException or TimeoutException)
+                {
+                    // The server's sign-out below settles a session it still has open.
+                    _logger.LogWarning(ex, "Session end at the sign-out of {UserId} did not complete; the server's sign-out settles it", user.Id);
+                }
+
+                sessionEnded = !OwnsOpenSession(user);
+            }
+
+            queued = await ServerLogoutAsync(user, reason, budget.Token).ConfigureAwait(false);
+            if (ownSession && !sessionEnded && !queued)
+            {
+                // Settled by the server's sign-out: take its view so the local session ends too.
+                try
+                {
+                    await _sessions.SyncWithServerAsync(budget.Token).ConfigureAwait(false);
+                    sessionEnded = !OwnsOpenSession(user);
+                }
+                catch (Exception ex) when (ex is ServerApiException or HttpRequestException or OperationCanceledException)
+                {
+                    _logger.LogWarning(ex, "Session sync after the sign-out of {UserId} failed", user.Id);
+                }
+            }
+
+            if (!ownSession)
+            {
+                // Signed out without a session end of their own: no cleanup closes the games, so the release does that first.
+                // A session end has already started it (SessionCleanup, saves.detach).
+                Saves?.BeginRelease(reason, closeGames: true);
+            }
+        }
+        finally
+        {
+            if (_users.User?.Id == user.Id)
+            {
+                _users.Clear();
+            }
+        }
+
+        _logger.LogInformation("User {UserId} logged out ({Reason}); session ended: {SessionEnded}; server sign-out {Delivery}", user.Id, reason, sessionEnded, queued ? "queued" : "done");
+        return new AuthLogoutResponse(true, sessionEnded, ended);
+    }
+
+    /// <summary>
+    /// <c>POST /auth/logout</c> for <paramref name="user"/>; queued in the outbox when the server cannot be reached
+    /// (replayed with the player token, which is kept for it). <see langword="true"/> when queued.
+    /// </summary>
+    private async Task<bool> ServerLogoutAsync(User user, SessionEndReason reason, CancellationToken cancellationToken)
+    {
+        if (_tokens is not null && _tokens.User?.UserId != user.Id)
+        {
+            // Signed in from the offline cache, or the token is already gone: the server has nothing of this sign-in to
+            // revoke, and a sign-out sent now would carry no token or another player's.
+            return false;
         }
 
         if (IsOnline)
@@ -353,33 +488,46 @@ public sealed class SessionHandlers : IIpcHandlerGroup
             try
             {
                 await _server.LogoutAsync(new LogoutRequest(reason), cancellationToken).ConfigureAwait(false);
+                return false;
             }
-            catch (Exception ex) when (ex is ServerApiException or HttpRequestException)
+            catch (ServerApiException ex) when (!ex.IsRetryable)
             {
-                _logger.LogDebug(ex, "Server logout failed; user tokens dropped locally");
+                // Refused: the token is gone server-side already, which is what the sign-out wanted.
+                _logger.LogInformation("Server refused the sign-out of {UserId} ({Code}); nothing left to revoke", user.Id, ex.Code);
+                return false;
+            }
+            catch (Exception ex) when (ex is ServerApiException or HttpRequestException or OperationCanceledException or TimeoutException)
+            {
+                _logger.LogWarning("Server sign-out of {UserId} not delivered ({Message}); queued", user.Id, ex.Message);
             }
         }
 
-        if (!sessionEnded)
+        try
         {
-            // Signed out without a session end of their own: no cleanup closes the games, so the release does that first.
-            // A session end has already started it (SessionCleanup, saves.detach).
-            Saves?.BeginRelease(reason, closeGames: true);
+            await _store.QueueLogoutAsync(user.Id, reason, CancellationToken.None).ConfigureAwait(false);
+            return true;
         }
-
-        _lock.ForgetPin(user.Id);
-        _users.Clear();
-        _logger.LogInformation("User {UserId} logged out ({Reason}); session ended: {SessionEnded}", user.Id, reason, sessionEnded);
-        return new AuthLogoutResponse(true, sessionEnded, ended);
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Sign-out of {UserId} could not be queued for the server", user.Id);
+            return false;
+        }
     }
 
-    private AuthStatusResponse Status()
+    private async Task<AuthStatusResponse> StatusAsync(CancellationToken cancellationToken)
     {
         User? user = _users.User;
         PcReadiness? readiness = PcReadiness?.Current;
-        return user is null
-            ? new AuthStatusResponse(false, _connection.Connectivity, Readiness: readiness)
-            : new AuthStatusResponse(true, _users.Mode, user, SessionOf(user), _users.ExpiresAt, readiness);
+        // The link as it is now, not as it was at sign-in: a Shell (re)started while the server is down must show offline.
+        ConnectivityState mode = _connection.Connectivity;
+        bool lockedByStaff = _lock.IsLockedByStaff;
+        if (user is null)
+        {
+            return new AuthStatusResponse(false, mode, Readiness: readiness, LockedByStaff: lockedByStaff);
+        }
+
+        bool pinSet = user.HasFlag(SessionLock.PinSetFlag) || await _lock.HasCachedPinAsync(user.Id, cancellationToken).ConfigureAwait(false);
+        return new AuthStatusResponse(true, mode, user, SessionOf(user), _users.ExpiresAt, readiness, lockedByStaff, pinSet);
     }
 
     private async Task<QrLoginStart> QrStartAsync(IpcContext context, CancellationToken cancellationToken)
@@ -416,11 +564,11 @@ public sealed class SessionHandlers : IIpcHandlerGroup
             throw IpcError.Forbidden("Account is banned", "banned").ToException();
         }
 
-        // Online the server decides: a club may let guests play postpaid (settings limits.guestPostpaid). Offline the
-        // agent cannot know it, so a guest stays prepaid-only then.
-        if (!request.Prepaid && !user.IsMember && !IsOnline)
+        // Online the server decides who may play as they go (members from their balance, guests per club settings).
+        // Offline nobody does: that time is billed by the server as it runs, against a debt limit only it knows.
+        if (!request.Prepaid && !IsOnline)
         {
-            throw IpcError.PolicyDenied("postpaidNotAllowed").ToException();
+            throw OfflineUnavailable("Pay-as-you-go needs the club server");
         }
 
         Guid pcId = PcId;
@@ -429,17 +577,96 @@ public sealed class SessionHandlers : IIpcHandlerGroup
             throw IpcError.AgentOffline().ToException();
         }
 
-        return _sessions.StartAsync(new SessionCreateRequest(pcId, user.Id, request.TariffId, request.Minutes, request.Prepaid), cancellationToken);
+        return StartCoreAsync(user, new SessionCreateRequest(pcId, user.Id, request.TariffId, request.Minutes, request.Prepaid), cancellationToken);
     }
 
-    private Task<PlaySession> ExtendAsync(IpcContext context, SessionExtendRequest request, CancellationToken cancellationToken)
+    private async Task<PlaySession> StartCoreAsync(User user, SessionCreateRequest create, CancellationToken cancellationToken)
+    {
+        PlaySession session = await _sessions.StartAsync(create, cancellationToken).ConfigureAwait(false);
+        await RefreshOfflineBalanceAsync(user.Id, cancellationToken).ConfigureAwait(false);
+        return session;
+    }
+
+    private async Task<PlaySession> ExtendAsync(IpcContext context, SessionExtendRequest request, CancellationToken cancellationToken)
     {
         if (request.Minutes <= 0)
         {
             throw IpcError.Validation("minutes", "min").ToException();
         }
 
-        return _sessions.ExtendAsync(request.Minutes, request.TariffId, cancellationToken);
+        User user = context.RequireUser();
+        RequireOwnSessionOffline(user);
+        PlaySession session = await _sessions.ExtendAsync(request.Minutes, request.TariffId, cancellationToken).ConfigureAwait(false);
+        await RefreshOfflineBalanceAsync(user.Id, cancellationToken).ConfigureAwait(false);
+        return session;
+    }
+
+    /// <summary><c>session.end</c> from the Shell: only <c>user</c> and <c>idle</c> (G4); any other reason is the cash desk's.</summary>
+    private Task<SessionEndResult> EndAsync(IpcContext context, SessionEndRequest? request, CancellationToken cancellationToken)
+    {
+        SessionEndReason reason = request?.Reason ?? SessionEndReason.User;
+        RequirePlayerReason(reason);
+        RequireOwnSessionOffline(context.RequireUser());
+        return _sessions.EndAsync(reason, cancellationToken);
+    }
+
+    /// <summary>
+    /// <c>session.lock</c> from the Shell: a guest has no PIN or password to unlock with (<c>forbidden {reason: guestLock}</c>,
+    /// G15), and a player locks only their own session (<c>forbidden {reason: otherUser}</c>).
+    /// </summary>
+    private Task<PlaySession> LockAsync(IpcContext context, SessionLockRequest? request, CancellationToken cancellationToken)
+    {
+        User user = context.RequireUser();
+        if (user.Role == UserRole.Guest)
+        {
+            throw IpcError.Forbidden("A guest has no PIN or password to unlock with", "guestLock").ToException();
+        }
+
+        if (_sessions.Current is { } session && session.UserId != user.Id)
+        {
+            throw IpcError.Forbidden("Session belongs to another user", "otherUser").ToException();
+        }
+
+        return _lock.LockAsync(request?.Reason, cancellationToken);
+    }
+
+    /// <summary>
+    /// <c>session.quote</c> (G13): the server's price of <paramref name="request"/> for this PC and the signed-in player,
+    /// with the day rate and the player's discount. Offline: <c>conflict {reason: offlineUnavailable}</c>.
+    /// </summary>
+    private async Task<SessionQuote> QuoteAsync(IpcContext context, SessionQuoteIpcRequest request, CancellationToken cancellationToken)
+    {
+        User user = context.RequireUser();
+        if (request.TariffId == Guid.Empty)
+        {
+            throw IpcError.Validation("tariffId", "required").ToException();
+        }
+
+        if (request.Minutes is { } minutes && minutes <= 0)
+        {
+            throw IpcError.Validation("minutes", "min").ToException();
+        }
+
+        if (!IsOnline)
+        {
+            throw OfflineUnavailable("Prices come from the club server");
+        }
+
+        Guid pcId = PcId;
+        if (pcId == Guid.Empty)
+        {
+            throw OfflineUnavailable("This PC is not registered with the club server yet");
+        }
+
+        try
+        {
+            return await _server.QuoteSessionAsync(new SessionQuoteRequest(pcId, user.Id, request.TariffId, request.Minutes), cancellationToken).ConfigureAwait(false);
+        }
+        catch (ServerApiException ex) when (ex.IsRetryable && ex.Code != ErrorCode.RateLimited)
+        {
+            _logger.LogWarning("session.quote: server unavailable ({Code})", ex.Code);
+            throw OfflineUnavailable("Prices come from the club server");
+        }
     }
 
     // ---- helpers ----------------------------------------------------------------------------
@@ -483,6 +710,55 @@ public sealed class SessionHandlers : IIpcHandlerGroup
         return current is not null && _sessions.State.IsOpen() && (user is null || current.UserId == user.Id) ? current : null;
     }
 
+    private bool OwnsOpenSession(User user) =>
+        _sessions.State.IsOpen() && _sessions.Current is { } open && open.UserId == user.Id;
+
+    /// <summary>
+    /// Without the server nobody checks whose session a request touches (online the server refuses another player's):
+    /// offline, or for a session the server has not seen yet, the session must be the signed-in player's (G7).
+    /// </summary>
+    private void RequireOwnSessionOffline(User user)
+    {
+        if ((!IsOnline || _sessions.IsOfflineSession) && _sessions.Current is { } session && session.UserId != user.Id)
+        {
+            throw IpcError.Forbidden("Session belongs to another user", "otherUser").ToException();
+        }
+    }
+
+    /// <summary>The cached balance after an offline purchase (taken from it locally) mirrored into the signed-in player.</summary>
+    private async Task RefreshOfflineBalanceAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        if (IsOnline && !_sessions.IsOfflineSession)
+        {
+            return;
+        }
+
+        try
+        {
+            if (await _store.GetCachedUserAsync(userId, cancellationToken).ConfigureAwait(false) is { } cached && _users.User is { } user && user.Id == userId && user.Balance != cached.Balance)
+            {
+                _users.Update(user with { Balance = cached.Balance });
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "Cached balance of {UserId} not read", userId);
+        }
+    }
+
+    /// <summary>Only <c>user</c> and <c>idle</c> may come from the Shell; anything else is <c>forbidden {reason: staffOnly}</c>.</summary>
+    private static void RequirePlayerReason(SessionEndReason reason)
+    {
+        if (reason is not (SessionEndReason.User or SessionEndReason.Idle))
+        {
+            throw StaffOnly($"Only the cash desk ends a session as '{JsonNamingPolicy.CamelCase.ConvertName(reason.ToString())}'");
+        }
+    }
+
+    private static IpcException StaffOnly(string message) => IpcError.Forbidden(message, StaffOnlyReason).ToException();
+
+    private static IpcException OfflineUnavailable(string message) => IpcError.Conflict(message, OfflineUnavailableReason).ToException();
+
     private async Task CacheUserAsync(string username, AuthResponse auth, CancellationToken cancellationToken)
     {
         try
@@ -517,7 +793,8 @@ public sealed class SessionHandlers : IIpcHandlerGroup
         switch (request.Kind)
         {
             case AuthKind.Password:
-                if (string.IsNullOrWhiteSpace(request.Username) || request.Username.Length is < 3 or > 32)
+                // The cash desk creates logins of 1–2 characters too; the server validates the rest.
+                if (string.IsNullOrWhiteSpace(request.Username) || request.Username.Length > 32)
                 {
                     throw IpcError.Validation("username", "required").ToException();
                 }
@@ -550,6 +827,12 @@ public sealed class SessionHandlers : IIpcHandlerGroup
 
                 break;
             case AuthKind.Guest:
+                // Optional display name in the username field.
+                if (request.Username is { Length: > UserDomainHandlers.MaxDisplayNameLength })
+                {
+                    throw IpcError.Validation("username", "length").ToException();
+                }
+
                 break;
             default:
                 throw IpcError.Validation("kind", "invalid").ToException();
@@ -595,7 +878,7 @@ public sealed class UserDomainHandlers : IIpcHandlerGroup
     private readonly IServerClient _server;
     private readonly ShellUserContext _users;
     private readonly ISessionService _sessions;
-    private readonly ServerConnection _connection;
+    private readonly IServerLinkState _connection;
     private readonly SessionLock _lock;
     private readonly ShellSettingsStore _shellSettings;
     private readonly IOptionsMonitor<AgentSettings> _settings;
@@ -603,14 +886,13 @@ public sealed class UserDomainHandlers : IIpcHandlerGroup
     private readonly ILogger<UserDomainHandlers> _logger;
     private readonly ContractFileCache<TariffsResponse> _tariffs;
     private readonly ContractFileCache<ShopProductsResponse> _products;
-    private Balance? _lastBalance;
 
     /// <summary>Creates the group.</summary>
     public UserDomainHandlers(
         IServerClient server,
         ShellUserContext users,
         ISessionService sessions,
-        ServerConnection connection,
+        IServerLinkState connection,
         SessionLock sessionLock,
         ShellSettingsStore shellSettings,
         IOptionsMonitor<AgentSettings> settings,
@@ -696,7 +978,7 @@ public sealed class UserDomainHandlers : IIpcHandlerGroup
             try
             {
                 Balance balance = await _server.GetBalanceAsync(user.Id, cancellationToken).ConfigureAwait(false);
-                _lastBalance = balance;
+                _users.UpdateBalance(balance);
                 return balance;
             }
             catch (Exception ex) when (IsConnectivity(ex))
@@ -705,10 +987,13 @@ public sealed class UserDomainHandlers : IIpcHandlerGroup
             }
         }
 
-        Balance? cached = _lastBalance;
-        return cached is not null && cached.UserId == user.Id
-            ? cached
-            : new Balance(user.Id, user.Balance, Money.Zero, user.Balance.Currency, user.LastSeenAt ?? user.CreatedAt);
+        // The signed-in player's snapshot follows every walletUpdated push and offline charge; the bonus comes from the
+        // last full answer of the server.
+        User current = _users.User is { } signedIn && signedIn.Id == user.Id ? signedIn : user;
+        Balance? last = _users.LastBalance;
+        return last is not null && last.UserId == user.Id && last.Amount == current.Balance
+            ? last
+            : new Balance(user.Id, current.Balance, last?.UserId == user.Id ? last.Bonus : Money.Zero with { Currency = current.Balance.Currency }, current.Balance.Currency, last?.UpdatedAt ?? current.LastSeenAt ?? current.CreatedAt);
     }
 
     private async Task<WalletTariffsResponse> TariffsAsync(IpcContext context, WalletTariffsRequest? request, CancellationToken cancellationToken)
@@ -1038,10 +1323,24 @@ public sealed class UserDomainHandlers : IIpcHandlerGroup
 
         RequireOnline();
         User updated = await _server.UpdateUserAsync(user.Id, request, cancellationToken).ConfigureAwait(false);
+        if (request.Pin is not null && !updated.HasFlag(SessionLock.PinSetFlag))
+        {
+            // An older server without the flag: the PIN is set all the same.
+            updated = updated with { Flags = [.. updated.Flags, SessionLock.PinSetFlag] };
+        }
+
         _users.Update(updated);
         if (request.Pin is { } newPin)
         {
-            _lock.RememberPin(user.Id, newPin);
+            // Only a salted hash is kept, for an unlock while the server is unreachable (G12).
+            try
+            {
+                await _lock.RememberPinAsync(user.Id, newPin, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "The new PIN of {UserId} could not be cached for offline unlock", user.Id);
+            }
         }
 
         if (request.Locale is { } locale)

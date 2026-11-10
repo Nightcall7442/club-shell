@@ -27,7 +27,11 @@ public sealed class LedgerInvariantTests(ServerFixture server) : LedgerCheckedTe
         var (_, created) = await Players.StartAsync(agent, player);
         var id = created.GetProperty("id").GetGuid();
         await Players.ReadAsync(await agent.PostAsync($"/api/v1/sessions/{id}/extend", new { minutes = 30 }, Guid.NewGuid()), 200);
+        // admin (refunded) is the agent's own end, without the player's token: with it, it is 403 staffOnly.
+        var token = agent.UserToken;
+        agent.UserToken = null;
         await Players.ReadAsync(await agent.PostAsync($"/api/v1/sessions/{id}/end", new { reason = "admin", secondsUsed = 0 }), 200);
+        agent.UserToken = token;
         var (_, postpaid) = await Players.StartAsync(agent, player, prepaid: false);
         Server.Clock.Advance(TimeSpan.FromMinutes(59));
         await Players.ReadAsync(await agent.PostAsync($"/api/v1/sessions/{postpaid.GetProperty("id").GetGuid()}/end", new { reason = "user", secondsUsed = 0 }), 200);

@@ -54,6 +54,9 @@ public enum AgentCommand
     /// <summary><c>session.timeLeft</c></summary>
     SessionTimeLeft,
 
+    /// <summary><c>session.quote</c></summary>
+    SessionQuote,
+
     /// <summary><c>games.list</c></summary>
     GamesList,
 
@@ -259,6 +262,7 @@ public static class AgentCommands
         AgentCommand.SessionLock => IpcMessages.Session.Lock,
         AgentCommand.SessionUnlock => IpcMessages.Session.Unlock,
         AgentCommand.SessionTimeLeft => IpcMessages.Session.TimeLeft,
+        AgentCommand.SessionQuote => IpcMessages.Session.Quote,
         AgentCommand.GamesList => IpcMessages.Games.List,
         AgentCommand.GamesGet => IpcMessages.Games.Get,
         AgentCommand.GamesLaunch => IpcMessages.Games.Launch,
@@ -324,7 +328,7 @@ public static class AgentCommands
         AgentCommand.AuthHello or AgentCommand.SysPing => IpcAuthLevel.None,
 
         AgentCommand.AuthLogout
-            or AgentCommand.SessionGet or AgentCommand.SessionStart or AgentCommand.SessionTimeLeft
+            or AgentCommand.SessionGet or AgentCommand.SessionStart or AgentCommand.SessionTimeLeft or AgentCommand.SessionQuote
             or AgentCommand.WalletBalance or AgentCommand.WalletHistory or AgentCommand.WalletTopupIntent
             or AgentCommand.ShopOrderStatus or AgentCommand.ShopOrders
             or AgentCommand.ChatHistory or AgentCommand.ChatSend or AgentCommand.ChatMarkRead

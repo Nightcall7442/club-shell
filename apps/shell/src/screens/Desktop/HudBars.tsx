@@ -313,7 +313,7 @@ export function TopBar(): JSX.Element {
   const showClock = useSettingsStore((s) => s.shellConfig?.ui.showClock ?? true);
   const clockFormat = useSettingsStore((s) => s.shellConfig?.ui.clockFormat ?? 'HH:mm');
   const pushError = useNotificationsStore((s) => s.pushError);
-  const { isActive, lock, busy } = useSession();
+  const { isActive, isGuest, lock, busy } = useSession();
   const [locking, setLocking] = useState(false);
 
   const onLock = async (): Promise<void> => {
@@ -348,7 +348,8 @@ export function TopBar(): JSX.Element {
         {showClock && <Clock format={clockFormat} />}
         <span aria-hidden="true" className="mx-2 h-6 w-px bg-text/15" />
         <SystemMenu />
-        {isActive && (
+        {/* A guest has no PIN or password to unlock with (the Agent refuses a guest's lock: `guestLock`). */}
+        {isActive && !isGuest && (
           <Button
             variant="ghost"
             iconOnly

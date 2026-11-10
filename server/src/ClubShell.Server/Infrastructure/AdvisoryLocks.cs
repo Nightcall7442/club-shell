@@ -34,6 +34,14 @@ public static class AdvisoryLocks
         c.ExecuteAsync("SELECT pg_advisory_xact_lock(hashtextextended('pc:' || @pcId::text, 0))", new { pcId }, tx);
 
     /// <summary>
+    /// One player's sign-ins, one after another, taken after the PC locks of the sign-in (and by nothing else, so it closes
+    /// no cycle): two PCs signing the same player in at once each see the other's token and revoke it, instead of both
+    /// keeping one.
+    /// </summary>
+    public static Task UserAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid userId) =>
+        c.ExecuteAsync("SELECT pg_advisory_xact_lock(hashtextextended('user:' || @userId::text, 0))", new { userId }, tx);
+
+    /// <summary>
     /// <see cref="PcAsync"/> without waiting, for the session tick, which already holds its sessions' rows: false when a
     /// sign-in, desk open or desk end of the PC is in progress (waiting there could deadlock with a desk end, which takes
     /// this lock before the session row), and the tick leaves that session to its next run.

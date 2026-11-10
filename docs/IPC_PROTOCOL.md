@@ -145,6 +145,26 @@ Ping/pong are exempt from rate limiting and are not logged above Verbose.
 Any request may additionally return `internal`, `protocolError`, `rateLimited`, `timeout`, `unauthorized`
 (before hello) — these are not repeated in the per-message tables.
 
+### 5.1 `details.reason`
+
+Most refusals carry `details.reason`; the Shell shows its own text per reason. A server refusal is passed through with
+its `details` unchanged (plus `traceId`), so the server's reasons and extra fields reach the Shell as sent.
+
+| Code | `details.reason` | Extra fields | Raised by | Meaning |
+|------|------------------|--------------|-----------|---------|
+| `forbidden` | `staffOnly` | — | Agent | `session.pause` / `session.resume`, or `session.end` / `auth.logout` with a reason other than `user` / `idle`: only the cash desk may (billing never stops on the player's request) |
+| `forbidden` | `staffLock` | — | Agent | `session.unlock` while the session is locked from the cash desk: only the desk unlocks it (`auth.status.lockedByStaff`) |
+| `forbidden` | `guestLock` | — | Agent | `session.lock` / `sys.lockScreen` by a guest: a guest has no PIN or password to unlock with |
+| `forbidden` | `otherUser` | — | Agent | the session belongs to another player (`session.lock`, `session.unlock`; offline also `session.extend`, `session.end`) |
+| `conflict` | `offlineUnavailable` | — | Agent | needs the club server: `session.start` with `prepaid: false` offline (no pay-as-you-go offline), `session.quote` offline, an offline purchase for a player whose balance is not known on this PC |
+| `unauthorized` | `badSecret` | `attemptsLeft?` | Agent / server | `session.unlock`: wrong PIN or password (`attemptsLeft` when the server counts toward the sign-in lockout) |
+| `unauthorized` | `noPin` | — | Agent / server | `session.unlock` with a PIN: none is set (server `404 noPin`), or offline none is known on this PC — use the password |
+| `unauthorized` | `userToken` | `problem?` | server | the player's token was refused; the Agent also sends `auth.expired {tokenExpired}` (§8) |
+| `unauthorized` | `badCredentials` | `attemptsLeft` | server | `auth.login`: wrong login or password (`attemptsLeft = 0`: locked out for a while) |
+| `conflict` | `activeSessionElsewhere` | `pcId`, `pcName` | server | `auth.login`: the player has an open session on another PC; repeat with `endElsewhere: true` to end it and sign in here |
+| `forbidden` | `banned`, `ageRestricted`, `pcOccupied` | — | server / Agent | `auth.login` refused |
+| `policyDenied` | `details.rule`: `postpaidNotAllowed`, `tariffZone`, `tariffTime` | — | server / Agent (offline) | `session.start` / `session.extend`: not allowed for this player, zone or time |
+
 ---
 
 ## 6. Domain types (canonical)
@@ -178,6 +198,7 @@ member names (C#/Rust/TS) are PascalCase.
 | `SessionEndReason` | `user`, `timeUp`, `admin`, `idle`, `agentRestart`, `error`, `unknown` |
 | `NotificationLevel` | `info`, `warning`, `error`, `success`, `unknown` |
 | `AuthKind` | `password`, `qr`, `guest`, `card`, `token` |
+| `AuthExpiredReason` | `tokenExpired`, `revoked`, `admin`, `sessionEnded`, `seatTaken`, `seatMoved`, `signedInElsewhere`, `blacklisted`, `passwordReset` |
 | `AllowlistMode` | `allow`, `deny`, `unknown` |
 | `UpdateChannel` | `stable`, `beta`, `unknown` |
 | `UpdateComponent` | `agent`, `shell`, `unknown` |
@@ -610,11 +631,12 @@ Request
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
 | `kind` | `AuthKind` | yes | |
-| `username` | string | no | required for `password` |
+| `username` | string | no | required for `password` (1–32 characters; the server validates the rest); for `guest` the optional display name (≤ 64) |
 | `password` | string | no | required for `password`; never logged |
 | `qrToken` | string | no | required for `qr` |
 | `cardId` | string | no | required for `card` |
 | `token` | string | no | required for `token` |
+| `endElsewhere` | bool | no | the player confirmed «end my session on PC N and sign in here» after `conflict {reason: activeSessionElsewhere, pcId, pcName}`: the server settles that session like a sign-out there, signs that PC out (`auth.expired {signedInElsewhere}` on it) and signs in here |
 
 Response
 
@@ -625,9 +647,13 @@ Response
 | `expiresAt` | datetime | yes | user access token expiry (Agent-held) |
 | `mode` | `ConnectivityState` | yes | `offline` when validated from cache |
 
-Errors: `unauthorized` (bad credentials / expired qr), `validation`, `forbidden` (banned / role not allowed
-on this zone), `agentOffline` (kind not supported offline), `serverUnavailable`, `rateLimited`,
-`conflict` (user already has an active session on another PC; `details.pcName`), `policyDenied`.
+Errors: `unauthorized` (`badCredentials {attemptsLeft}` / expired qr), `validation`, `forbidden` (`banned`,
+`ageRestricted`, `pcOccupied`), `agentOffline` (kind not supported offline), `serverUnavailable`, `rateLimited`,
+`conflict` (`activeSessionElsewhere {pcId, pcName}`: an open session on another PC, see `endElsewhere`; `sessionActive`:
+another player's session is open here), `policyDenied`. Server refusals keep their `details` (§5.1).
+
+A session of this player locked because their sign-in ended (`auth.expired {tokenExpired}` or a revocation that left the
+session open, §8) is unlocked by this sign-in and goes on; `session` in the answer is that session.
 
 ```json
 { "kind": "password", "username": "player1", "password": "***" }
@@ -636,15 +662,30 @@ on this zone), `agentOffline` (kind not supported offline), `serverUnavailable`,
 
 #### `auth.logout` — end user context (auth: user)
 
-Request: `{ reason?: SessionEndReason }` (default `user`; the Shell sends `user`, `idle` or `admin`).
-Response: `{ ok: true, sessionEnded: bool, session?: Session }` — an active session is ended first
+Request: `{ reason?: SessionEndReason }` (default `user`; only `user` or `idle` from the Shell).
+Response: `{ ok: true, sessionEnded: bool, session?: Session }` — the player's own open session is ended first
 (`SessionEndReason` = reason).
-Errors: none specific.
+Errors: `forbidden {reason: staffOnly}` for any other reason.
+
+The sign-out is one step that always completes, whatever happens to the request: the session end (settled by the server),
+`POST /auth/logout` (the server drops the player's token) and the local clear (in a `finally`) run under the Agent's own
+45 s budget, not the request's. The profile reset after the session (which closes the Shell, and with it the pipe) waits
+for it, so the next Shell starts signed out. When the server cannot be reached the player is signed out locally all the
+same, the session's end and the sign-out are queued in the outbox (replayed in that order once the server is back), and
+the answer is `ok: true` (`sys.connectivity` / `auth.status.mode` tell the Shell it is offline). The answer may never
+arrive when the Shell is closed under it; the Shell clears its own state regardless.
 
 #### `auth.status` — current auth state (auth: hello)
 
 Request: —
-Response: `{ authenticated: bool, user?: User, session?: Session, mode: ConnectivityState, expiresAt?: datetime }`
+Response: `{ authenticated: bool, user?: User, session?: Session, mode: ConnectivityState, expiresAt?: datetime, readiness?: PcReadiness, lockedByStaff?: bool, pinSet?: bool }`
+
+- `mode` is the server link as it is now (not as it was at sign-in): a Shell (re)started while the server is down shows offline.
+- `lockedByStaff`: the session is locked from the cash desk; only the desk unlocks it (`session.unlock` → `forbidden {reason: staffLock}`), the Shell shows no PIN/password form. Absent from older agents.
+- `pinSet` (when signed in): the player has an unlock PIN (`user.flags` contains `pinSet`, or one is cached on this PC); without one the unlock form opens on the password.
+
+The signed-in player survives an Agent restart while their session runs (saved protected with DPAPI, restored when the
+restored session is still theirs), so `auth.status` after an Agent update still reports them.
 
 #### `auth.qrStart` — begin QR login (auth: hello)
 
@@ -669,32 +710,69 @@ Request
 
 Response: `Session`.
 Errors: `sessionAlreadyActive`, `insufficientFunds`, `notFound` (tariff), `validation`, `policyDenied`
-(tariff not valid for zone/time, postpaid not allowed), `agentOffline` (offline sessions disabled),
-`serverUnavailable`.
+(`tariffZone` / `tariffTime`, `postpaidNotAllowed`), `conflict {reason: offlineUnavailable}`, `agentOffline` (offline
+sessions disabled), `serverUnavailable`.
+
+Online the server decides everything (`prepaid: false` = pay-as-you-go from the balance for a member, debt limit 0;
+`policyDenied {rule: postpaidNotAllowed}` for a guest unless the club allows it). Offline (or when the server drops during
+the start):
+
+- `prepaid: false` → `conflict {reason: offlineUnavailable}`: pay-as-you-go is billed by the server as it runs;
+- the tariff must be known on this PC (`notFound` otherwise), its zones and time windows apply as online
+  (`policyDenied {rule: tariffZone | tariffTime}`), and `minMinutes` / `maxMinutes`;
+- the price (list price, at most `offline.maxOfflineMinutes`) is checked against the player's balance cached on this PC
+  and taken from it: `insufficientFunds` when it does not cover it, `conflict {reason: offlineUnavailable}` when no
+  balance is known. The server charges the wallet when the session is replayed.
+
+The Agent never starts a session on its own (not after a prepaid session's time is up either).
 
 ```json
 { "tariffId": "b1a5…", "minutes": 60, "prepaid": true }
 ```
 
-#### `session.pause` (auth: session) — Request: `{ reason?: string }` Response: `Session`. Errors: `sessionNotActive`, `policyDenied` (pause not allowed for tariff), `conflict` (already paused).
+#### `session.pause` (auth: session) — Request: `{ reason?: string }`. Always `forbidden {reason: staffOnly}`: billing never stops on the player's request; only the cash desk pauses a session (the server's view reaches the Agent as `session.updated`).
 
-#### `session.resume` (auth: session) — Request: — Response: `Session`. Errors: `sessionNotActive`, `conflict` (not paused), `insufficientFunds` (postpaid balance exhausted).
+#### `session.resume` (auth: session) — Request: —. Always `forbidden {reason: staffOnly}`, as `session.pause`.
 
-#### `session.end` (auth: session) — Request: `{ reason?: SessionEndReason }` Response: `{ session: Session, charged: Money, refunded: Money }`. Errors: `sessionNotActive`.
+#### `session.end` (auth: session) — Request: `{ reason?: SessionEndReason }` (default `user`; only `user` or `idle` from the Shell) Response: `{ session: Session, charged: Money, refunded: Money }`. Errors: `sessionNotActive`, `forbidden {reason: staffOnly}` (any other reason), `forbidden {reason: otherUser}` (offline: another player's session).
 
 #### `session.extend` (auth: session)
 
 Request: `{ minutes: int, tariffId?: uuid }` — `tariffId` defaults to current.
 Response: `Session`.
-Errors: `sessionNotActive`, `insufficientFunds`, `validation` (exceeds `maxMinutes`), `policyDenied`, `agentOffline`.
+Errors: `sessionNotActive`, `insufficientFunds`, `validation` (exceeds `maxMinutes`), `policyDenied`, `agentOffline`,
+`notFound` (tariff unknown offline), `forbidden {reason: otherUser}` (offline: another player's session). Offline the
+price is checked against, and taken from, the cached balance as for `session.start`.
 
-#### `session.lock` (auth: session) — Request: `{ reason?: string }` Response: `Session` (state `locked`; timer keeps running unless tariff pauses on lock). Errors: `sessionNotActive`.
+#### `session.lock` (auth: session) — Request: `{ reason?: string }` Response: `Session` (state `locked`; timer keeps running unless tariff pauses on lock). Errors: `sessionNotActive`, `forbidden {reason: guestLock}` (a guest has no PIN or password to unlock with; the idle auto-lock skips guests too), `forbidden {reason: otherUser}`.
 
 #### `session.unlock` (auth: session)
 
 Request: `{ password?: string, pin?: string }` — one of; `pin` = 4–6 digit user PIN.
 Response: `Session`.
-Errors: `sessionNotActive`, `unauthorized` (wrong secret), `rateLimited` (5 failures/min).
+Errors: `sessionNotActive`, `forbidden {reason: staffLock}` (locked from the cash desk: only the desk's `unlock`
+opens it), `forbidden {reason: otherUser}`, `unauthorized {reason: badSecret, attemptsLeft?}` (wrong secret),
+`unauthorized {reason: noPin}` (PIN: none set, or offline none known on this PC — use the password), `validation`,
+`rateLimited` (5 failures/min).
+
+A PIN is checked by the server online (`POST /users/{id}/pin/verify`, so a PIN set on one PC unlocks on any; failures
+count toward the sign-in lockout) and offline against a salted hash of the last PIN verified or set on this PC for that
+player (only the hash is kept, in the offline store). A password is checked by a server sign-in online and the offline
+login cache offline.
+
+Who locked the session decides what unlocks it: the player (or the idle auto-lock) — their PIN or password; the cash
+desk (server command `lock`) — only the server's `unlock`; the end of the player's sign-in (`auth.expired`, §8) — signing
+in again as the same player (`auth.login`). A cash desk lock on a session the player had locked makes it a staff lock and
+sends `session.updated`; the origin survives an Agent restart.
+
+#### `session.quote` (auth: user)
+
+Request: `{ tariffId: uuid, minutes?: int }` (`minutes` absent = one hour, or the package).
+Response: `SessionQuote { minutes: int, base: Money, total: Money, dayPct: int, discountPct: int, discountReason?: string, package: bool }`
+— the server's price for this PC and the signed-in player (`POST /sessions/quote`), with the club's day rate and the
+player's discount; nothing is created or charged. Show `total` before `session.start` / `session.extend`.
+Errors: `validation`, `conflict {reason: offlineUnavailable}` (offline: prices come from the server), `notFound`
+(tariff), `policyDenied`.
 
 #### `session.timeLeft` (auth: user)
 
@@ -796,7 +874,7 @@ Default `roomId` when omitted: `pc:<pcId>` (support chat with admins).
 ### 7.10 profile
 
 #### `profile.get` (auth: user) — Request: — Response: `User`.
-#### `profile.update` (auth: user) — Request: `{ displayName?: string, avatarUrl?: string, locale?: Locale, pin?: string }` Response: `User`. Errors: `validation`, `agentOffline`, `forbidden` (guest).
+#### `profile.update` (auth: user) — Request: `{ displayName?: string, avatarUrl?: string, locale?: Locale, pin?: string }` Response: `User` (`flags` contains `pinSet` once a PIN is set). Errors: `validation`, `agentOffline`, `forbidden` (guest). A new `pin` is also kept on this PC as a salted hash, for an offline unlock.
 #### `profile.stats` (auth: user) — Request: — Response: `UserStats`. Errors: `agentOffline`.
 #### `profile.achievements` (auth: user) — Request: — Response: `{ items: Achievement[] }`. Errors: `agentOffline`.
 #### `profile.loyalty` (auth: user) — Request: — Response: `Loyalty`. Errors: `agentOffline`.
@@ -857,7 +935,7 @@ Errors: `rateLimited` (1 per 30 s), `validation`.
 | `session.updated` | `Session` | any state/field change (≤ 1/s coalesced; `secondsLeft` updates every 1 s are NOT sent — Shell counts locally and resyncs with `session.timeLeft`) |
 | `session.warning` | `{ sessionId: uuid, minutesLeft: int, secondsLeft: int, endsAt: datetime }` | at each `session.warningMinutes` mark and once at 0 |
 | `session.ended` | `{ session: Session, reason: SessionEndReason, charged: Money }` | after end/timeout/admin |
-| `wallet.updated` | `Balance` | balance changed (top-up, charge, purchase) |
+| `wallet.updated` | `Balance` | balance changed (top-up, charge, purchase) — only the signed-in player's (a server push for another player is dropped); `user.balance` in `auth.status` follows it |
 | `chat.message` | `ChatMessage` | new message in a room the PC/user belongs to |
 | `notification.push` | `Notification` | server or agent notifications |
 | `admin.message` | `{ id: uuid, from: string, text: string, level: NotificationLevel, requiresAck: bool, at: datetime }` | admin → this PC; Shell shows modal; ack via `sys.ackAdminMessage` (below) |
@@ -868,9 +946,9 @@ Errors: `rateLimited` (1 per 30 s), `validation`.
 | `update.progress` | `{ component: UpdateComponent, version: string, phase: UpdatePhase, percent: int, bytesDone: long, bytesTotal: long, error?: IpcError }` | ≤ 2/s |
 | `update.ready` | `{ component: UpdateComponent, version: string, restartRequired: bool, applyAt?: datetime, mandatory: bool }` | staged and verified |
 | `sys.metrics` | `PcMetrics` | every `telemetry.metricsIntervalSec` while a subscriber requested it via `settings.showMetricsOverlay` or a session is active |
-| `sys.connectivity` | `{ state: ConnectivityState, since: datetime, queuedEvents: int, serverLatencyMs?: int }` | server connectivity transitions + every 60 s |
+| `sys.connectivity` | `{ state: ConnectivityState, since: datetime, queuedEvents: int, serverLatencyMs?: int }` | server connectivity transitions + every 60 s, and right after every successful `auth.hello` (a Shell that starts or reconnects must not assume online) |
 | `shell.command` | `{ command: ShellCommandKind, args: object \| null, commandId: uuid }` | server/admin-driven UI commands (see below) |
-| `auth.expired` | `{ reason: "tokenExpired" \| "revoked" \| "admin" }` | user context invalidated; Shell returns to login |
+| `auth.expired` | `{ reason: AuthExpiredReason }` | the player was signed out without asking; Shell returns to login and says why (see below) |
 | `shop.orderUpdated` | `Order` | order status changed (server push `orderUpdated`, `SERVER_API.md` §6.3); also mirrored as `notification.push` |
 | `sys.readinessChanged` | `PcReadiness { state: "preparing" \| "ready" \| "notReady", disks: [{ library, letter?, state }], deadline? }` | the games disks before sign-in (`docs/DISKLESS.md`, "Games disks before sign-in"); also in the `auth.status` answer (`readiness`, absent from older agents = ready) |
 | `games.changed` | `{ catalogVersion }` | the game list changed (a disk came or went, the catalogue was updated): the Shell re-reads it on any screen |
@@ -888,6 +966,24 @@ Errors: `rateLimited` (1 per 30 s), `validation`.
 
 Ack request for admin messages: `sys.ackAdminMessage` (auth: hello) — Request `{ id: uuid }` Response `{ ok: true }`.
 
+`auth.expired.reason`:
+
+| reason | When | The player's open session on this PC |
+|--------|------|--------------------------------------|
+| `tokenExpired` | the server refused the player's token (`401 userToken`), or it expired with no session open (the server extends it while the player has a session here, so mid-session this should be rare) | kept, locked (`session.updated` state `locked`); signing in again as the same player unlocks it and it goes on |
+| `sessionEnded` | the cash desk ended the player's session | ended by the server (`session.ended` arrives too) |
+| `seatTaken` | the cash desk seated someone else on this PC | ended or handed over by the server |
+| `seatMoved` | the cash desk moved the session to another PC | gone from this PC (not settled here) |
+| `signedInElsewhere` | the player signed in on another PC (with `endElsewhere`, which ends this PC's session) | ended by the server |
+| `blacklisted` | the club blocked the account | ended by the server; if it is still open, locked |
+| `passwordReset` | the cash desk reset the password | if still open, locked until the player signs in again with the new password |
+| `revoked` | any other revocation reason | if still open, locked |
+| `admin` | forced sign-out | as `revoked` |
+
+On a revocation the Agent takes the server's view of the session first (it ended, moved or handed over the seat itself);
+a session that is still the player's is kept behind the lock instead of being dropped. A revocation for another player
+than the signed-in one is ignored.
+
 ---
 
 ## 9. Sequences
@@ -897,7 +993,8 @@ Ack request for admin messages: `sys.ackAdminMessage` (auth: hello) — Request 
 ```
 Shell: pipe error → clear pending (reject with timeout) → emit kiosk://connectivity{agent:"disconnected"}
        → backoff → CreateFile → auth.hello → auth.status/session.get → emit kiosk://connectivity{agent:"connected"}
-Agent: connection dropped → nothing (all state is agent-side)
+Agent: connection dropped → nothing (all state is agent-side, the signed-in player included — also across an Agent
+       restart while their session runs); after the hello answer → event sys.connectivity (current server link)
 ```
 
 ### 9.2 Session timeout

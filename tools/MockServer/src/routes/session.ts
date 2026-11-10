@@ -53,6 +53,7 @@ import {
   type SessionRecord,
   knownValues,
 } from '../db.js';
+import { quote } from '../club.js';
 import { broadcast, pushToPc, pushToUser } from '../ws.js';
 
 const END_REASONS = knownValues(SessionEndReason);
@@ -253,6 +254,31 @@ export function sessionRoutes(app: FastifyInstance): void {
       if (cost.amount > 0) pushToUser(user.id, 'walletUpdated', balanceOf(user));
       return { status: 201, body: session };
     });
+  });
+
+  /**
+   * `POST /sessions/quote`: what `POST /sessions` with the same values would charge now — the club's day rate and the
+   * player's discount applied (`quote`). Nothing is created or charged; a package costs its price for its minutes.
+   */
+  app.post('/sessions/quote', async (req) => {
+    const { pc, user } = requireUser(req);
+    const b = body(req);
+    if (str(b, 'pcId', 64) !== pc.id) throw errors.forbidden('pcMismatch');
+    if (str(b, 'userId', 64) !== user.id) throw errors.forbidden('notOwner');
+    const tariff = findTariff(str(b, 'tariffId', 64));
+    if (!tariff) throw errors.notFound('tariff');
+    const minutes = optInt(b, 'minutes', 1);
+    const priced = tariff.isPackage ? (tariff.packageMinutes ?? minutes ?? 60) : (minutes ?? 60);
+    const q = quote(tariff, priced, user.role === 'guest' ? null : user.id, pc.zone);
+    return {
+      minutes: priced,
+      base: q.base,
+      total: q.total,
+      dayPct: q.dayPct,
+      discountPct: q.discountPct,
+      discountReason: q.discountReason,
+      package: tariff.isPackage,
+    };
   });
 
   app.post<{ Params: { id: string } }>('/sessions/:id/pause', async (req) => {

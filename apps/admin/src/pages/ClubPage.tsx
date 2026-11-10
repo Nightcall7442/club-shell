@@ -134,11 +134,44 @@ function Preview({ s }: { s: ClubSettings }): JSX.Element {
   );
 }
 
+/**
+ * A debt cap in sums: empty (stored `null`; 0 reads the same) is no cap at all — the server's meaning for
+ * `guestDebtLimit` and `memberDebtLimit` alike.
+ */
+function DebtLimitInput({
+  value,
+  onChange,
+}: {
+  /** Tiyin; `null` or 0 — no cap. */
+  value: number | null;
+  onChange: (tiyin: number | null) => void;
+}): JSX.Element {
+  const sums = value !== null && value > 0 ? Math.round(value / 100) : null;
+  return (
+    <div className="relative">
+      <input
+        type="number"
+        min={0}
+        max={10_000_000}
+        inputMode="numeric"
+        className={clsx(inputCls, 'tnum pr-10')}
+        placeholder={t('без ограничения')}
+        value={sums ?? ''}
+        onChange={(e) => {
+          const n = Math.floor(Number(e.target.value));
+          onChange(e.target.value.trim() === '' || !Number.isFinite(n) || n <= 0 ? null : n * 100);
+        }}
+      />
+      <span className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-xs text-muted">
+        {t('сум')}
+      </span>
+    </div>
+  );
+}
+
 export default function ClubPage(): JSX.Element {
   const st = useClubSettings();
   const [rulesLang, setRulesLang] = useState<Lang>('ru');
-  // Members' debt is a toggle and an amount: the toggle stays on while the amount is being typed (0 would mean off).
-  const [debtOn, setDebtOn] = useState<boolean | null>(null);
   const s = st.draft;
 
   if (!s) {
@@ -150,8 +183,8 @@ export default function ClubPage(): JSX.Element {
     );
   }
 
-  const memberDebt = s.limits.memberDebtLimit ?? 0;
-  const memberDebtOn = debtOn ?? memberDebt > 0;
+  // Desk postpaid is on unless the owner turned it off (a club saved before it was a setting has no value).
+  const guestPostpaid = s.limits.guestPostpaid ?? true;
   const branding = (patch: Partial<ClubSettings['branding']>): void => st.set('branding', { ...s.branding, ...patch });
   const banner = (id: string, patch: Partial<Banner>): void =>
     st.set(
@@ -378,55 +411,45 @@ export default function ClubPage(): JSX.Element {
                   />
                 </Field>
               )}
+              {/* Postpaid is the desk's: on a PC the player buys time in advance (a member signing in with money
+                  plays pay as you go from the balance until it runs out — that start is not capped here). */}
+              <p className="text-[11.5px] leading-4 text-muted">
+                {t(
+                  'Постоплата — только при посадке с кассы: на ПК игрок сам покупает время заранее. По умолчанию постоплата на кассе включена для клиентов и гостей.',
+                )}
+              </p>
               <Toggle
                 label={t('Постоплата для гостей')}
-                checked={s.limits.guestPostpaid ?? false}
+                checked={guestPostpaid}
                 onChange={(v) => st.set('limits', { ...s.limits, guestPostpaid: v })}
               />
               <p className="-mt-1 pl-14 text-[11.5px] leading-4 text-muted">
                 {t(
-                  'Гость играет без предоплаты и платит на кассе после сеанса. Неоплаченные счета видны на карте зала.',
+                  'Кассир сажает гостя без предоплаты, гость платит на кассе после сеанса. Неоплаченные счета видны на карте зала.',
                 )}
               </p>
-              {s.limits.guestPostpaid && (
-                <Field label={t('Наибольший долг гостя (0 — без ограничения)')}>
-                  <NumberInput
-                    value={Math.round((s.limits.guestDebtLimit ?? 0) / 100)}
-                    min={0}
-                    max={10_000_000}
-                    suffix={t('сум')}
-                    onChange={(n) => st.set('limits', { ...s.limits, guestDebtLimit: n > 0 ? n * 100 : null })}
-                  />
-                </Field>
-              )}
-              {/* For members 0 means "no debt", unlike the guests' limit above: a toggle, then a required amount. */}
-              <Toggle
-                label={t('Разрешить клиентам долг на постоплате')}
-                checked={memberDebtOn}
-                onChange={(v) => {
-                  setDebtOn(v);
-                  st.set('limits', { ...s.limits, memberDebtLimit: v ? (memberDebt > 0 ? memberDebt : 5_000_000) : 0 });
-                }}
-              />
-              <p className="-mt-1 pl-14 text-[11.5px] leading-4 text-muted">
-                {t(
-                  'Без этого клиент на постоплате играет, пока хватает баланса. С ним — уходит в минус до суммы ниже и гасит долг на кассе.',
-                )}
-              </p>
-              {memberDebtOn && (
+              {guestPostpaid && (
                 <Field
-                  label={t('Наибольший долг клиента')}
-                  hint={memberDebt > 0 ? undefined : t('Укажите сумму больше нуля, иначе долг останется выключен')}
+                  label={t('Наибольший долг гостя')}
+                  hint={t('Пусто — без ограничения. Ограничение действует только на сеансы с кассы.')}
                 >
-                  <NumberInput
-                    value={Math.round(memberDebt / 100)}
-                    min={1}
-                    max={10_000_000}
-                    suffix={t('сум')}
-                    onChange={(n) => st.set('limits', { ...s.limits, memberDebtLimit: Math.max(0, n) * 100 })}
+                  <DebtLimitInput
+                    value={s.limits.guestDebtLimit ?? null}
+                    onChange={(v) => st.set('limits', { ...s.limits, guestDebtLimit: v })}
                   />
                 </Field>
               )}
+              <Field
+                label={t('Наибольший долг клиента на постоплате')}
+                hint={t(
+                  'Насколько клиент с кассовой постоплатой может уйти в минус. Пусто — без ограничения. Ограничение действует только на сеансы с кассы.',
+                )}
+              >
+                <DebtLimitInput
+                  value={s.limits.memberDebtLimit ?? null}
+                  onChange={(v) => st.set('limits', { ...s.limits, memberDebtLimit: v })}
+                />
+              </Field>
               <Toggle
                 label={t('Изъятие из кассы — только владелец')}
                 checked={s.limits.cashOutOwnerOnly ?? false}
@@ -448,10 +471,7 @@ export default function ClubPage(): JSX.Element {
         dirty={st.dirty}
         saving={st.saving}
         onSave={() => void st.save()}
-        onReset={() => {
-          setDebtOn(null);
-          st.reset();
-        }}
+        onReset={() => st.reset()}
         label={t('Есть несохранённые изменения')}
       />
     </OwnerPage>

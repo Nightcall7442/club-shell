@@ -315,7 +315,8 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
         _maintenance?.End("locked from the cash desk");
         if (_sessions.State.IsOpen())
         {
-            _ = await _sessionLock.LockAsync(payload.Reason, cancellationToken).ConfigureAwait(false);
+            // A staff lock: the player's PIN or password does not open it, only the cash desk's unlock (G5).
+            _ = await _sessionLock.LockByStaffAsync(payload.Reason, cancellationToken).ConfigureAwait(false);
         }
 
         await _shell.SendAsync(ShellCommand.Of(ShellCommandKind.Lock, payload, Guid.NewGuid()), cancellationToken).ConfigureAwait(false);
@@ -326,7 +327,7 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
     {
         if (_sessions.State == SessionState.Locked)
         {
-            _ = await _sessions.UnlockAsync(cancellationToken).ConfigureAwait(false);
+            _ = await _sessionLock.UnlockByStaffAsync(cancellationToken).ConfigureAwait(false);
         }
 
         await _shell.SendAsync(new ShellCommand(ShellCommandKind.Unlock, null, Guid.NewGuid()), cancellationToken).ConfigureAwait(false);
