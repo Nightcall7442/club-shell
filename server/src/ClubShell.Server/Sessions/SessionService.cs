@@ -482,7 +482,11 @@ public sealed class SessionService(
         return new SessionQuote(q.Minutes, Money.Uzs(q.Base), Money.Uzs(q.Total), q.DayPct, q.DiscountPct, q.DiscountKind, q.Package);
     }
 
-    /// <summary><c>POST /sessions/{id}/pause</c> (§5.5): <c>active</c> → <c>paused</c>, the clock stops.</summary>
+    /// <summary>
+    /// The pause of §5.5: <c>active</c> → <c>paused</c>, the clock stops. Not a player's to call: <c>POST
+    /// /sessions/{id}/pause</c> with a player token is <c>403 staffOnly</c> (billing does not stop at the player's request);
+    /// kept for the server's own use.
+    /// </summary>
     public async Task<Session> PauseAsync(Guid sessionId, Guid userId, Guid pcId)
     {
         var (c, tx) = await BeginAsync(db);
@@ -508,9 +512,9 @@ public sealed class SessionService(
     }
 
     /// <summary>
-    /// <c>POST /sessions/{id}/resume</c> (§5.5): <c>paused</c> → <c>active</c>. Prepaid needs time left (else
-    /// <c>sessionNotActive</c>); postpaid needs its next second affordable within balance + credit limit (else 402, as the
-    /// tick would stop it).
+    /// The resume of §5.5: <c>paused</c> → <c>active</c>. Prepaid needs time left (else <c>sessionNotActive</c>); postpaid
+    /// needs its next second affordable within balance + its own debt limit (else 402, as the tick would stop it). Like
+    /// <see cref="PauseAsync"/>, not a player's to call (<c>POST /sessions/{id}/resume</c> is <c>403 staffOnly</c>).
     /// </summary>
     public async Task<Session> ResumeAsync(Guid sessionId, Guid userId, Guid pcId)
     {
