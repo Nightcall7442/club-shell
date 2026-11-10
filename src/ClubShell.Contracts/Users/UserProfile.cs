@@ -124,6 +124,14 @@ public sealed record ProfileUpdateRequest(
     Locale? Locale = null,
     string? Pin = null);
 
+/// <summary>
+/// Body of <c>POST /users/{userId}/pin/verify</c>: checks the player's unlock PIN against the one stored on the server
+/// (so a PIN set on one PC unlocks on any). <c>204</c> = matches; <c>401 badSecret</c> = does not match;
+/// <c>404 notFound</c> with <c>reason: noPin</c> = none is set. Failures count toward the same lockout as sign-in.
+/// </summary>
+/// <param name="Pin">4–6 digit PIN.</param>
+public sealed record PinVerifyRequest(string Pin);
+
 #endregion
 
 #region Stats / achievements / loyalty

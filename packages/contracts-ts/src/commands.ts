@@ -213,6 +213,11 @@ export interface AuthLoginRequest {
   cardId?: string | null;
   /** One-time token (`AuthKind.Token`). */
   token?: string | null;
+  /**
+   * The player confirmed «end my session on PC N and sign in here» after `409 activeSessionElsewhere`
+   * (`AuthRequest.EndElsewhere`).
+   */
+  endElsewhere?: boolean | null;
 }
 
 /** Response of `auth.login`. */
@@ -260,6 +265,13 @@ export interface AuthStatusResponse {
    * `null` from an Agent that does not know it: ready.
    */
   readiness?: PcReadiness | null;
+  /**
+   * The session is locked from the cash desk: only the desk unlocks it, the player's PIN or password does not
+   * (`session.unlock` answers `403 staffLock`). `null` from an older Agent.
+   */
+  lockedByStaff?: boolean | null;
+  /** The signed-in player has an unlock PIN; without one the unlock form opens on the password. */
+  pinSet?: boolean | null;
 }
 
 /** Request of `booking.cancel`. */
@@ -529,6 +541,8 @@ export const IpcNames = {
     Unlock: 'session.unlock',
     /** — → `SessionTimeLeftResponse`. */
     TimeLeft: 'session.timeLeft',
+    /** `SessionQuoteIpcRequest` → `SessionQuote`: the server's price for this PC and player. */
+    Quote: 'session.quote',
   },
   /** `games.*` */
   Games: {
@@ -825,6 +839,14 @@ export interface SessionLockRequest {
 export interface SessionPauseRequest {
   /** Free-text reason. */
   reason?: string | null;
+}
+
+/** Request of `session.quote`: what starting `tariffId` would cost the signed-in player here. */
+export interface SessionQuoteIpcRequest {
+  /** Tariff. */
+  tariffId: string;
+  /** Prepaid minutes; `null` = the price of one hour (or of the package). */
+  minutes?: number | null;
 }
 
 /** Request of `session.start`. */
@@ -1296,6 +1318,8 @@ export const AgentCommand = {
   SessionUnlock: 'session.unlock',
   /** `session.timeLeft` */
   SessionTimeLeft: 'session.timeLeft',
+  /** `session.quote` */
+  SessionQuote: 'session.quote',
   /** `games.list` */
   GamesList: 'games.list',
   /** `games.get` */
@@ -2355,7 +2379,7 @@ import type {
   PlayerSettingsResetRequest,
 } from './games.js';
 import type { PcInfo } from './pc.js';
-import type { SessionEndResult, SessionEndedEvent, SessionStartedEvent } from './session.js';
+import type { SessionEndResult, SessionEndedEvent, SessionQuote, SessionStartedEvent } from './session.js';
 import type { Loyalty, ProfileUpdateRequest, QrLoginStart, UserStats } from './user.js';
 import type { Balance, TopupIntent, Transaction } from './wallet.js';
 // ---- END MANUAL ----
@@ -2515,6 +2539,7 @@ const USER_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
   AgentCommand.SessionGet,
   AgentCommand.SessionStart,
   AgentCommand.SessionTimeLeft,
+  AgentCommand.SessionQuote,
   AgentCommand.WalletBalance,
   AgentCommand.WalletHistory,
   AgentCommand.WalletTopupIntent,
@@ -2618,6 +2643,7 @@ export interface IpcRequestMap {
   [IpcNames.Session.Lock]: { request: SessionLockRequest | null; response: Session };
   [IpcNames.Session.Unlock]: { request: SessionUnlockRequest; response: Session };
   [IpcNames.Session.TimeLeft]: { request: null; response: SessionTimeLeftResponse };
+  [IpcNames.Session.Quote]: { request: SessionQuoteIpcRequest; response: SessionQuote };
   [IpcNames.Games.List]: { request: GamesListRequest | null; response: GamesListResponse };
   [IpcNames.Games.Get]: { request: GamesGetRequest; response: Game };
   [IpcNames.Games.Launch]: { request: GamesLaunchRequest; response: LaunchResult };

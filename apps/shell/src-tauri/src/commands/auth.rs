@@ -137,6 +137,7 @@ mod tests {
             qr_token: None,
             card_id: None,
             token: None,
+            end_elsewhere: None,
         }
     }
 

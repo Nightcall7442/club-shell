@@ -65,6 +65,9 @@ public static class IpcMessages
 
         /// <summary>— → <see cref="SessionTimeLeftResponse"/>.</summary>
         public const string TimeLeft = "session.timeLeft";
+
+        /// <summary><see cref="SessionQuoteIpcRequest"/> → <see cref="SessionQuote"/>: the server's price for this PC and player.</summary>
+        public const string Quote = "session.quote";
     }
 
     /// <summary><c>games.*</c></summary>
@@ -482,17 +485,22 @@ public sealed record AuthHelloResponse(
 /// <param name="QrToken">QR token (<see cref="AuthKind.Qr"/>).</param>
 /// <param name="CardId">Card id (<see cref="AuthKind.Card"/>).</param>
 /// <param name="Token">One-time token (<see cref="AuthKind.Token"/>).</param>
+/// <param name="EndElsewhere">
+/// The player confirmed «end my session on PC N and sign in here» after <c>409 activeSessionElsewhere</c>
+/// (<see cref="AuthRequest.EndElsewhere"/>).
+/// </param>
 public sealed record AuthLoginRequest(
     AuthKind Kind,
     string? Username = null,
     string? Password = null,
     string? QrToken = null,
     string? CardId = null,
-    string? Token = null)
+    string? Token = null,
+    bool? EndElsewhere = null)
 {
     /// <summary>Builds the server-facing <see cref="AuthRequest"/>.</summary>
     public AuthRequest ToServerRequest(Guid pcId, string hwid) =>
-        new(Kind, Username, Password, QrToken, CardId, Token, pcId, hwid);
+        new(Kind, Username, Password, QrToken, CardId, Token, pcId, hwid, EndElsewhere);
 }
 
 /// <summary>Response of <c>auth.login</c>.</summary>
@@ -529,13 +537,20 @@ public sealed record AuthLogoutResponse(
 /// Whether the PC may let a player in yet (SHELL_CHANGES 86): the sign-in screen waits for it as for this answer.
 /// <see langword="null"/> from an Agent that does not know it: ready.
 /// </param>
+/// <param name="LockedByStaff">
+/// The session is locked from the cash desk: only the desk unlocks it, the player's PIN or password does not
+/// (<c>session.unlock</c> answers <c>403 staffLock</c>). <see langword="null"/> from an older Agent.
+/// </param>
+/// <param name="PinSet">The signed-in player has an unlock PIN; without one the unlock form opens on the password.</param>
 public sealed record AuthStatusResponse(
     bool Authenticated,
     ConnectivityState Mode,
     User? User = null,
     Session? Session = null,
     DateTimeOffset? ExpiresAt = null,
-    PcReadiness? Readiness = null);
+    PcReadiness? Readiness = null,
+    bool? LockedByStaff = null,
+    bool? PinSet = null);
 
 #endregion
 
@@ -564,6 +579,11 @@ public sealed record SessionEndRequest(SessionEndReason? Reason = null);
 public sealed record SessionExtendRequest(
     int Minutes,
     Guid? TariffId = null);
+
+/// <summary>Request of <c>session.quote</c>: what starting <paramref name="TariffId"/> would cost the signed-in player here.</summary>
+/// <param name="TariffId">Tariff.</param>
+/// <param name="Minutes">Prepaid minutes; <see langword="null"/> = the price of one hour (or of the package).</param>
+public sealed record SessionQuoteIpcRequest(Guid TariffId, int? Minutes = null);
 
 /// <summary>Request of <c>session.lock</c>.</summary>
 /// <param name="Reason">Free-text reason.</param>

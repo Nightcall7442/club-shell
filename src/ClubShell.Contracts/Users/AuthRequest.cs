@@ -56,6 +56,24 @@ public enum AuthExpiredReason
 
     /// <summary>Admin forced logout.</summary>
     Admin,
+
+    /// <summary>The cash desk ended the player's session (server push <c>userRevoked {reason: sessionEnded}</c>).</summary>
+    SessionEnded,
+
+    /// <summary>The cash desk seated someone else on this PC (<c>seatTaken</c>).</summary>
+    SeatTaken,
+
+    /// <summary>The cash desk moved the player's session to another PC (<c>seatMoved</c>).</summary>
+    SeatMoved,
+
+    /// <summary>The player signed in on another PC (<c>signedInElsewhere</c>).</summary>
+    SignedInElsewhere,
+
+    /// <summary>The club blocked the account (<c>blacklisted</c>).</summary>
+    Blacklisted,
+
+    /// <summary>The cash desk reset the account's password (<c>passwordReset</c>).</summary>
+    PasswordReset,
 }
 
 /// <summary>
@@ -71,6 +89,11 @@ public enum AuthExpiredReason
 /// <param name="Token">One-time token (<see cref="AuthKind.Token"/>).</param>
 /// <param name="PcId">PC the login originates from.</param>
 /// <param name="Hwid">Hardware id of the PC (sha256 hex).</param>
+/// <param name="EndElsewhere">
+/// The player confirmed «end my session on the other PC and sign in here»: the server ends (settles) the player's open
+/// session on another PC first, but only when nobody is signed in there with this account (no live user token on that
+/// PC); otherwise the sign-in is refused as without it (<c>409 activeSessionElsewhere</c>).
+/// </param>
 public sealed record AuthRequest(
     AuthKind Kind,
     string? Username,
@@ -79,7 +102,8 @@ public sealed record AuthRequest(
     string? CardId,
     string? Token,
     Guid PcId,
-    string Hwid)
+    string Hwid,
+    bool? EndElsewhere = null)
 {
     /// <summary>Copy with secrets blanked, for logging/telemetry.</summary>
     public AuthRequest Redacted() => this with

@@ -144,6 +144,10 @@ pub struct AuthLoginRequest {
     /// One-time token (`AuthKind.Token`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
+    /// The player confirmed «end my session on PC N and sign in here» after `409
+    /// activeSessionElsewhere` (`AuthRequest.EndElsewhere`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_elsewhere: Option<bool>,
 }
 
 /// Response of `auth.login`.
@@ -210,6 +214,13 @@ pub struct AuthStatusResponse {
     /// as for this answer. `null` from an Agent that does not know it: ready.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub readiness: Option<PcReadiness>,
+    /// The session is locked from the cash desk: only the desk unlocks it, the player's PIN or
+    /// password does not (`session.unlock` answers `403 staffLock`). `null` from an older Agent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locked_by_staff: Option<bool>,
+    /// The signed-in player has an unlock PIN; without one the unlock form opens on the password.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pin_set: Option<bool>,
 }
 
 /// Request of `booking.cancel`.
@@ -529,6 +540,8 @@ pub mod names {
         pub const UNLOCK: &str = "session.unlock";
         /// — → `SessionTimeLeftResponse`.
         pub const TIME_LEFT: &str = "session.timeLeft";
+        /// `SessionQuoteIpcRequest` → `SessionQuote`: the server's price for this PC and player.
+        pub const QUOTE: &str = "session.quote";
     }
 
     /// `games.*`
@@ -860,6 +873,17 @@ pub struct SessionPauseRequest {
     /// Free-text reason.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+}
+
+/// Request of `session.quote`: what starting `tariffId` would cost the signed-in player here.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionQuoteIpcRequest {
+    /// Tariff.
+    pub tariff_id: Uuid,
+    /// Prepaid minutes; `null` = the price of one hour (or of the package).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minutes: Option<i32>,
 }
 
 /// Request of `session.start`.
@@ -2562,6 +2586,7 @@ agent_commands! {
     SessionLock => names::session::LOCK, Session;
     SessionUnlock => names::session::UNLOCK, Session;
     SessionTimeLeft => names::session::TIME_LEFT, User;
+    SessionQuote => names::session::QUOTE, User;
     GamesList => names::games::LIST, Hello;
     GamesGet => names::games::GET, Hello;
     GamesLaunch => names::games::LAUNCH, Session;
@@ -2712,6 +2737,7 @@ impl AuthLoginRequest {
             token: self.token.clone(),
             pc_id,
             hwid: hwid.to_owned(),
+            end_elsewhere: self.end_elsewhere,
         }
     }
 }
@@ -3021,7 +3047,7 @@ mod tests {
 
     #[test]
     fn agent_command_table_matches_ipc_protocol() {
-        assert_eq!(AgentCommand::ALL.len(), 67);
+        assert_eq!(AgentCommand::ALL.len(), 68);
         let expected: &[&str] = &[
             "auth.hello",
             "auth.login",
@@ -3037,6 +3063,7 @@ mod tests {
             "session.lock",
             "session.unlock",
             "session.timeLeft",
+            "session.quote",
             "games.list",
             "games.get",
             "games.launch",
@@ -3179,6 +3206,7 @@ mod tests {
             qr_token: None,
             card_id: None,
             token: None,
+            end_elsewhere: None,
         };
         assert_eq!(
             serde_json::to_string(&login).unwrap(),
@@ -3213,6 +3241,8 @@ mod tests {
             session: None,
             expires_at: None,
             readiness: None,
+            locked_by_staff: None,
+            pin_set: None,
         };
         assert_eq!(
             serde_json::to_string(&status).unwrap(),

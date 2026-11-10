@@ -672,6 +672,20 @@ impl MockTransport {
                     "sessionId": s.map(|s| s["id"].clone()), "endsAt": s.map(|s| s["endsAt"].clone())
                 }))
             }
+            AgentCommand::SessionQuote => {
+                // List price, no day rate or discount: enough for the dev UI.
+                let tariff = mock_tariffs()
+                    .as_array()
+                    .and_then(|all| all.iter().find(|t| t["id"] == p["tariffId"]).cloned())
+                    .ok_or_else(|| mock_err(ErrorCode::NotFound, "Tariff not found"))?;
+                let minutes = p["minutes"].as_i64().unwrap_or(60);
+                let per_hour = tariff["pricePerHour"]["amount"].as_i64().unwrap_or(0);
+                let price = money(per_hour * minutes / 60);
+                Some(json!({
+                    "minutes": minutes, "base": price.clone(), "total": price, "dayPct": 100,
+                    "discountPct": 0, "package": false
+                }))
+            }
             AgentCommand::GamesList => {
                 let games = mock_games();
                 let total = games.len();

@@ -153,6 +153,43 @@ pub struct SessionExtendedData {
     pub cost: Money,
 }
 
+/// Answer of `POST /sessions/quote` and of IPC `session.quote`: the price the server will charge.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionQuote {
+    /// Minutes priced (the package's for a package tariff).
+    pub minutes: i32,
+    /// List price of those minutes.
+    pub base: Money,
+    /// What starting would charge (prepaid) or charges per that much time (postpaid).
+    pub total: Money,
+    /// Day rate in percent (weekday or holiday), 100 = list price.
+    pub day_pct: i32,
+    /// Player discount in percent (the best of group, loyalty and happy hour).
+    pub discount_pct: i32,
+    /// Which discount applies (`group`, `loyalty`, `happyHour`), or none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discount_reason: Option<String>,
+    /// The tariff is a package: `minutes` are fixed.
+    pub package: bool,
+}
+
+/// Body of `POST /sessions/quote`: what `SessionCreateRequest` with the same values would charge
+/// now, with the club's day rate and the player's discount applied. Nothing is created or charged.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionQuoteRequest {
+    /// PC (its zone decides the happy hours that apply).
+    pub pc_id: Uuid,
+    /// Player (group and loyalty discounts).
+    pub user_id: Uuid,
+    /// Tariff.
+    pub tariff_id: Uuid,
+    /// Minutes to buy; `null` = one hour, or the package.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minutes: Option<i32>,
+}
+
 wire_enum! {
     /// Session state machine (IPC_PROTOCOL.md §6.1, §9.2).
     SessionState {

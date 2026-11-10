@@ -105,6 +105,39 @@ export interface SessionExtendedData {
   cost: Money;
 }
 
+/** Answer of `POST /sessions/quote` and of IPC `session.quote`: the price the server will charge. */
+export interface SessionQuote {
+  /** Minutes priced (the package's for a package tariff). */
+  minutes: number;
+  /** List price of those minutes. */
+  base: Money;
+  /** What starting would charge (prepaid) or charges per that much time (postpaid). */
+  total: Money;
+  /** Day rate in percent (weekday or holiday), 100 = list price. */
+  dayPct: number;
+  /** Player discount in percent (the best of group, loyalty and happy hour). */
+  discountPct: number;
+  /** Which discount applies (`group`, `loyalty`, `happyHour`), or none. */
+  discountReason?: string | null;
+  /** The tariff is a package: `minutes` are fixed. */
+  package: boolean;
+}
+
+/**
+ * Body of `POST /sessions/quote`: what `SessionCreateRequest` with the same values would charge now, with the club's
+ * day rate and the player's discount applied. Nothing is created or charged.
+ */
+export interface SessionQuoteRequest {
+  /** PC (its zone decides the happy hours that apply). */
+  pcId: string;
+  /** Player (group and loyalty discounts). */
+  userId: string;
+  /** Tariff. */
+  tariffId: string;
+  /** Minutes to buy; `null` = one hour, or the package. */
+  minutes?: number | null;
+}
+
 /** Session state machine (IPC_PROTOCOL.md §6.1, §9.2). */
 export const SessionState = {
   /** No session. */
