@@ -168,14 +168,25 @@
     "network": "Network error",
     "generic": "Something went wrong. Please try again",
     "policy": {
-      "postpaidNotAllowed": "Pay-later is off here: top up at the counter and pick your time in advance.",
+      "postpaidNotAllowed": "Pay as you go is not available here: buy your time in advance.",
       "minorCurfew": "Minors cannot play at this time.",
       "tariffZone": "This tariff does not apply in this PC's zone: pick another one.",
       "tariffTime": "This tariff is not available right now: pick another one.",
       "pcMaintenance": "This PC is under maintenance: take another one or call the staff.",
       "blacklisted": "Sign-in is closed for this account: please talk to the staff."
     },
-    "pcNotReady": "The PC is still preparing: the games disks are attaching. Please wait a moment."
+    "pcNotReady": "The PC is still preparing: the games disks are attaching. Please wait a moment.",
+    "reason": {
+      "ageRestricted": "Sign-in is not allowed for your age right now. Please talk to the staff.",
+      "pcOccupied": "This PC is taken: another player's session is open here. Take another PC or ask the administrator.",
+      "staffOnly": "Only the administrator can do this.",
+      "staffLock": "The PC is locked by the administrator: only the desk can unlock it.",
+      "guestLock": "A guest session cannot be locked.",
+      "guestDisabled": "Guest sign-in is off in this club: please ask the administrator.",
+      "offlineUnavailable": "No connection with the club server: pay as you go and current prices are unavailable. Try again in a moment.",
+      "activeSessionElsewhere": "Your session is open on PC {{pc}}. Sign out there or ask the administrator.",
+      "activeSessionElsewhereUnknown": "Your session is open on another PC. Sign out there or ask the administrator."
+    }
   },
   "lock": {
     "title": "Welcome",
@@ -270,6 +281,35 @@
         "attaching": "attaching",
         "unavailable": "unavailable"
       }
+    },
+    "noPin": "No PIN is set for this account: unlock with your password.",
+    "invalidCredentialsLeft": "Wrong username or password. Attempts left: {{attempts}}",
+    "forbidden": "Sign-in is not allowed for this account here. Please contact staff.",
+    "elsewhere": {
+      "title": "Session open on PC {{pc}}",
+      "titleUnknown": "Session open on another PC",
+      "body": "You can play on one PC at a time. To sign in here, end the session there: the time used there is settled first.",
+      "confirm": "End the session on PC {{pc}} and sign in here",
+      "confirmUnknown": "End that session and sign in here"
+    },
+    "staffLockedTitle": "Locked by the administrator",
+    "staffLockedHint": "Your session is kept. Only the administrator can unlock this PC: please ask at the desk.",
+    "expired": {
+      "tokenExpired": "Your login has expired, please sign in again",
+      "revoked": "You were signed out. Please sign in again",
+      "admin": "The administrator signed you out",
+      "sessionEnded": "The administrator ended your session",
+      "seatTaken": "The administrator seated another player on this PC",
+      "seatMoved": "Your session was moved to another PC: please go to it",
+      "signedInElsewhere": "You signed in on another PC",
+      "blacklisted": "Sign-in is closed for this account: please talk to the staff",
+      "passwordReset": "Your password was reset at the desk: sign in with the new one",
+      "unknown": "You were signed out. Please sign in again"
+    },
+    "relogin": {
+      "title": "Continue as {{name}}",
+      "hint": "Your sign-in expired while you were playing. Your session is kept: sign in again to continue.",
+      "other": "Sign in with another account"
     }
   },
   "desktop": {
@@ -739,7 +779,16 @@
     "periodOut": "Spent",
     "zoneOfPc": "This PC's zone: {{zone}}",
     "dueNow": "Due so far:",
-    "dueHint": "Postpaid: the amount is taken from your balance when you finish playing."
+    "dueHint": "Pay as you go: the time is paid from your balance.",
+    "approx": "approx.",
+    "approxHint": "Approximate list price: the club server is unreachable right now",
+    "discountPct": "Discount {{pct}}%",
+    "discountReason": {
+      "group": "group discount",
+      "loyalty": "loyalty discount",
+      "happyHour": "happy hour"
+    },
+    "dueHintGuest": "Pay at the desk when you finish."
   },
   "chat": {
     "title": "Chat",
@@ -1168,7 +1217,7 @@
     "resuming": "Resuming…",
     "end": "End session",
     "endTitle": "End session",
-    "endConfirm": "End your session now? Unused prepaid time is refunded.",
+    "endConfirm": "End your session now? Unused prepaid time is not returned.",
     "ending": "Ending…",
     "lock": "Lock",
     "lockTitle": "Lock screen",
@@ -1208,17 +1257,34 @@
     "timerLabel": "Session timer",
     "lastMinute": "Last minute!",
     "overtime": "Overtime",
-    "extendPostpaid": "No need to add time on postpaid: you play while the balance lasts and pay at the end.",
+    "extendPostpaid": "No need to add time when paying as you go: you play while the balance lasts.",
     "due": "Due",
     "leave": "End and leave",
     "leaveTitle": "End the game and leave?",
     "leaveConfirm": "End and leave",
     "leaveNoSession": "You will be signed out of your account on this PC.",
-    "leavePostpaid": "You played {{duration}}. {{amount}} will be taken from your balance and you will be signed out.",
-    "leavePrepaid": "You played {{duration}}. Unused time goes back to your balance and you will be signed out.",
+    "leavePostpaid": "You played {{duration}} for {{amount}}, paid from your balance. You will be signed out.",
+    "leavePrepaid": "You played {{duration}}. The paid time left ({{left}}) is not returned to the balance. You will be signed out.",
     "idleTitle": "Are you still here?",
     "idleBody": "Nobody has touched this PC for 10 minutes. In {{seconds}} s the game ends and the account closes.",
-    "idleStay": "I am here"
+    "idleStay": "I am here",
+    "guestNoSession": {
+      "title": "Time is paid at the desk",
+      "hint": "A guest cannot start time on their own: ask the administrator to open time on this PC. Play starts here as soon as it is open."
+    },
+    "prepaidHint": "Time is paid in advance from your balance.",
+    "autoStarted": {
+      "title": "Playing, pay as you go",
+      "body": "{{tariff}}: charged per minute from your balance ({{price}} per hour). The session stops when the balance runs out."
+    },
+    "leaveGuest": "You played {{duration}} for {{amount}}: pay at the desk. You will be signed out.",
+    "extendPostpaidGuest": "No need to add time: you pay at the desk when you finish.",
+    "extendPackage": "A package has a fixed length: buy more time on the Wallet screen.",
+    "logoutFailed": {
+      "title": "Could not sign out",
+      "body": "{{error}} You are still signed in on this PC and the session is still open.",
+      "retry": "Try again"
+    }
   },
   "settings": {
     "title": "Settings",
@@ -1405,7 +1471,9 @@
     "monitorChanged": "Display configuration changed",
     "volumeChanged": "Volume {{level}}%",
     "muted": "Muted",
-    "unmuted": "Sound on"
+    "unmuted": "Sound on",
+    "hudExtendConfirm": "Add {{minutes}} min for {{price}}?",
+    "hudExtendConfirmApprox": "Add {{minutes}} min for about {{price}}?"
   },
   "pcSettings": {
     "restoredHint": "Applies until your session ends, then the club's settings come back",

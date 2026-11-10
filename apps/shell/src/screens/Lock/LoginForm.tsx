@@ -1,10 +1,10 @@
 import { useState, type FormEvent, type KeyboardEvent } from 'react';
 import clsx from 'clsx';
-import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import type { AuthLoginResponse } from '@clubshell/contracts';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { isActiveSessionElsewhere, type ErrorContext } from '@/lib/errorText';
 import { isTauri, toShellApiError } from '@/lib/tauri';
 import { useAuthStore } from '@/store/auth';
 import { describeError } from '@/store/notifications';
@@ -12,45 +12,22 @@ import { describeError } from '@/store/notifications';
 export interface LoginFormProps {
   onSuccess?: (res: AuthLoginResponse) => void;
   className?: string;
+  /** Pre-filled username (signing the same player in again after `auth.expired`). */
+  initialUsername?: string;
 }
 
-/** Human message for a failed password / PIN / card check; anything unexpected falls back to `describeError`. */
-export function loginErrorMessage(e: unknown, t: TFunction): string {
+/**
+ * Human message for a failed sign-in or unlock: each reason of the Agent has its own line (`errorText`), a wrong
+ * secret reads by the form that asked (`context`).
+ */
+export function loginErrorMessage(e: unknown, context: ErrorContext = 'login'): string {
+  return describeError(e, context);
+}
+
+/** `409 activeSessionElsewhere`: the lock screen's dialog says it (and offers to end it there), not the form. */
+export function isElsewhereError(e: unknown): boolean {
   const err = toShellApiError(e);
-  const details = (typeof err.details === 'object' && err.details !== null ? err.details : {}) as Record<
-    string,
-    unknown
-  >;
-  switch (err.code) {
-    case 'unauthorized':
-      if (details['reason'] === 'wrongPin') {
-        return t('lock.wrongPin');
-      }
-      if (details['reason'] === 'wrongPassword') {
-        return t('lock.wrongPassword');
-      }
-      return t('lock.invalidCredentials');
-    case 'forbidden':
-      return t('lock.banned');
-    case 'rateLimited':
-      return t('lock.tooManyAttempts');
-    case 'validation':
-      if (details['field'] === 'username') {
-        return t('lock.usernameRequired');
-      }
-      if (details['field'] === 'password') {
-        return t('lock.passwordRequired');
-      }
-      if (details['field'] === 'pin') {
-        return t('lock.pinRequired');
-      }
-      if (details['field'] === 'cardId') {
-        return t('lock.cardRequired');
-      }
-      return describeError(err);
-    default:
-      return describeError(err);
-  }
+  return isActiveSessionElsewhere(err.code, err.details);
 }
 
 const EyeIcon = ({ off }: { off: boolean }): JSX.Element => (
@@ -71,10 +48,10 @@ const EyeIcon = ({ off }: { off: boolean }): JSX.Element => (
 );
 
 /** Username + password login; submits on Enter, maps server errors to i18n, warns about Caps Lock. */
-export function LoginForm({ onSuccess, className }: LoginFormProps): JSX.Element {
+export function LoginForm({ onSuccess, className, initialUsername = '' }: LoginFormProps): JSX.Element {
   const { t } = useTranslation();
   const login = useAuthStore((s) => s.login);
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState(initialUsername);
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
   const [caps, setCaps] = useState(false);
@@ -105,7 +82,7 @@ export function LoginForm({ onSuccess, className }: LoginFormProps): JSX.Element
       setPassword('');
       onSuccess?.(res);
     } catch (err) {
-      setErrors({ form: loginErrorMessage(err, t) });
+      setErrors(isElsewhereError(err) ? {} : { form: loginErrorMessage(err) });
       setPassword('');
     } finally {
       setBusy(false);
@@ -140,6 +117,7 @@ export function LoginForm({ onSuccess, className }: LoginFormProps): JSX.Element
         autoComplete="new-password"
         label={t('lock.password')}
         placeholder={t('lock.passwordPlaceholder')}
+        autoFocus={initialUsername.length > 0}
         value={password}
         onChange={(e) => setPassword(e.target.value)}
         onKeyDown={onKey}

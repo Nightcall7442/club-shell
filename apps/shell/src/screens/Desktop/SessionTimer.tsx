@@ -1,17 +1,19 @@
 /**
  * Session countdown: a status-line row with a tick scale, or a card with an SVG ring (used / total); `mm:ss`
  * under 10 minutes or `hh:mm:ss` otherwise, paused/locked badges and a pulsing danger state under 5 minutes. Clicking a timed session opens {@link ExtendSessionModal}
- * (30/60/120 minute presets priced by the session tariff → `session_extend`).
+ * (30/60/120 minute presets priced by the server's quote → `session_extend`); not for open-ended or package sessions.
  */
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
-import { SESSION_OPEN_ENDED, tariffPriceFor, type Money, type Tariff } from '@clubshell/contracts';
+import { SESSION_OPEN_ENDED, type Money, type Tariff } from '@clubshell/contracts';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { DotAmount } from '@/components/ui/DotAmount';
 import { Modal } from '@/components/ui/Modal';
+import { formatPrice, PriceNote } from '@/components/ui/PriceNote';
 import { useLocale } from '@/hooks/useLocale';
+import { usePrice } from '@/hooks/usePrice';
 import { MMSS_BELOW_SEC, useSession } from '@/hooks/useSession';
 import { formatMoney } from '@/lib/format';
 import { hhmmss, mmss } from '@/lib/time';
@@ -111,9 +113,11 @@ export function SessionTimer({ compact = false, className }: SessionTimerProps):
   const { t } = useTranslation();
   const { locale } = useLocale();
   const s = useSession();
-  // Postpaid is charged in one go at the end, so the balance does not move meanwhile: show what is owed so far.
+  // Open-ended time (pay as you go, a desk's postpaid): show what it has cost so far.
   const due = s.isOpen && s.isOpenEnded && s.cost ? formatMoney(s.cost, locale) : null;
   const [extendOpen, setExtendOpen] = useState(false);
+  // A package has a fixed length: "+30 min" on its tariff would charge a whole package.
+  const packageSession = useWalletStore((w) => selectTariff(s.tariffId)(w)?.isPackage === true);
 
   const total = s.secondsUsed + Math.max(0, s.secondsLeft);
   const progress = s.isOpenEnded ? 1 : total > 0 ? s.secondsUsed / total : 0;
@@ -127,7 +131,7 @@ export function SessionTimer({ compact = false, className }: SessionTimerProps):
         : s.isOpenEnded
           ? 'muted'
           : 'primary';
-  const canExtend = s.isOpen && !s.isOpenEnded;
+  const canExtend = s.isOpen && !s.isOpenEnded && !packageSession;
 
   const badge = s.isLocked ? (
     <Badge tone="danger" size="sm" dot>
@@ -254,10 +258,43 @@ export interface ExtendSessionModalProps {
   onClose: () => void;
 }
 
+/** An extend preset with the server's price for it. */
+function ExtendChip({
+  tariff,
+  minutes,
+  active,
+  onSelect,
+}: {
+  tariff: Tariff | null;
+  minutes: number;
+  active: boolean;
+  onSelect: () => void;
+}): JSX.Element {
+  const { t } = useTranslation();
+  const { locale } = useLocale();
+  const price = usePrice(tariff, minutes);
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      data-nav="true"
+      onClick={onSelect}
+      className={clsx(
+        'focus-ring flex flex-col items-center gap-1 rounded-lg px-3 py-4',
+        active ? 'choice choice-on' : 'choice text-muted',
+      )}
+    >
+      <DotAmount value={t('session.extendMinutes', { minutes })} className="text-[1.7rem] leading-none text-text" />
+      {price && <span className="tnum text-sm">{formatPrice(price, locale)}</span>}
+    </button>
+  );
+}
+
 export function ExtendSessionModal({ open, onClose }: ExtendSessionModalProps): JSX.Element {
   const { t } = useTranslation();
   const { locale } = useLocale();
-  const { session, tariffId, extend, busy, isOpen, isOpenEnded } = useSession();
+  const { session, tariffId, extend, busy, isOpen, isOpenEnded, isGuest } = useSession();
   const tariff = useWalletStore(selectTariff(tariffId));
   const tariffsLoaded = useWalletStore((s) => s.tariffs.length > 0);
   const loadTariffs = useWalletStore((s) => s.loadTariffs);
@@ -282,10 +319,11 @@ export function ExtendSessionModal({ open, onClose }: ExtendSessionModalProps): 
   }, [open, presets]);
 
   const prepaid = session?.isPrepaid ?? true;
-  const cost: Money | null = tariff && prepaid ? tariffPriceFor(tariff, minutes) : null;
-  const after: Money | null = cost ? { amount: balance.amount - cost.amount, currency: balance.currency } : null;
+  const isPackage = tariff?.isPackage === true;
+  const cost = usePrice(open && prepaid && !isPackage ? tariff : null, minutes);
+  const after: Money | null = cost ? { amount: balance.amount - cost.amount.amount, currency: balance.currency } : null;
   const insufficient = after !== null && after.amount < 0;
-  const disabled = !isOpen || isOpenEnded || !prepaid || insufficient || submitting || busy;
+  const disabled = !isOpen || isOpenEnded || !prepaid || isPackage || insufficient || submitting || busy;
 
   const confirm = async (): Promise<void> => {
     if (disabled) {
@@ -323,30 +361,15 @@ export function ExtendSessionModal({ open, onClose }: ExtendSessionModalProps): 
     >
       <div className="flex flex-col gap-5">
         <div role="radiogroup" aria-label={t('session.minutes')} className="grid grid-cols-3 gap-3">
-          {presets.map((m) => {
-            const price = tariff && prepaid ? formatMoney(tariffPriceFor(tariff, m), locale) : null;
-            const active = m === minutes;
-            return (
-              <button
-                key={m}
-                type="button"
-                role="radio"
-                aria-checked={active}
-                data-nav="true"
-                onClick={() => setMinutes(m)}
-                className={clsx(
-                  'focus-ring flex flex-col items-center gap-1 rounded-lg px-3 py-4',
-                  active ? 'choice choice-on' : 'choice text-muted',
-                )}
-              >
-                <DotAmount
-                  value={t('session.extendMinutes', { minutes: m })}
-                  className="text-[1.7rem] leading-none text-text"
-                />
-                {price && <span className="tnum text-sm">{price}</span>}
-              </button>
-            );
-          })}
+          {presets.map((m) => (
+            <ExtendChip
+              key={m}
+              tariff={open && prepaid && !isPackage ? tariff : null}
+              minutes={m}
+              active={m === minutes}
+              onSelect={() => setMinutes(m)}
+            />
+          ))}
         </div>
 
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-base">
@@ -357,7 +380,12 @@ export function ExtendSessionModal({ open, onClose }: ExtendSessionModalProps): 
           {cost && (
             <>
               <dt className="text-muted">{t('wallet.estimatedCost')}</dt>
-              <dd className="tnum text-right font-semibold">{formatMoney(cost, locale)}</dd>
+              <dd className="tnum text-right font-semibold">{formatPrice(cost, locale)}</dd>
+              {(cost.base || cost.approximate) && (
+                <dd className="col-span-2 text-right">
+                  <PriceNote view={cost} />
+                </dd>
+              )}
               <dt className="text-muted">{t('wallet.balanceAfter')}</dt>
               <dd className={clsx('tnum text-right font-semibold', insufficient ? 'text-danger' : 'text-success')}>
                 {after ? formatMoney(after, locale) : '—'}
@@ -366,7 +394,10 @@ export function ExtendSessionModal({ open, onClose }: ExtendSessionModalProps): 
           )}
         </dl>
 
-        {!prepaid && <p className="text-sm text-muted">{t('session.extendPostpaid')}</p>}
+        {!prepaid && (
+          <p className="text-sm text-muted">{t(isGuest ? 'session.extendPostpaidGuest' : 'session.extendPostpaid')}</p>
+        )}
+        {prepaid && isPackage && <p className="text-sm text-muted">{t('session.extendPackage')}</p>}
         {insufficient && (
           <p role="alert" className="text-sm text-danger">
             {t('wallet.notEnough')}. {t('shop.topUpFirst')}

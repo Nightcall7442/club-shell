@@ -53,10 +53,13 @@ import type {
   Session,
   SessionEndReason,
   SessionEndResult,
+  SessionQuote,
+  SessionQuoteIpcRequest,
   SessionStartRequest,
   SessionTimeLeftResponse,
   SettingsSetRequest,
   PlayerSettingsItem,
+  AuthExpiredReason,
   ShellClub,
   ShellSettings,
   ShopOrderRequest,
@@ -274,6 +277,18 @@ interface MockState {
   idempotency: Map<string, unknown>;
   kiosk: KioskState;
   updateReady: boolean;
+  /** The session was locked from the cash desk (`auth.status.lockedByStaff`; `session.unlock` → `403 staffLock`). */
+  lockedByStaff: boolean;
+  /** The token ran out with the session open: the Agent locked it until the same player signs in again. */
+  lockedByExpiry: boolean;
+  /** The member's session is open on another PC (`409 activeSessionElsewhere` until `endElsewhere: true`). */
+  elsewhere: { pcId: string; pcName: string } | null;
+  /** Every sign-in attempt, without its secrets (tests read `endElsewhere`). */
+  loginLog: { kind: string; endElsewhere: boolean }[];
+  /** One-shot failures by command (`simulate.failNext`). */
+  failNext: Record<string, { code: ErrorCode; message: string; details?: Record<string, unknown> }[]>;
+  /** The club server is unreachable (`simulate.connectivity('offline')`): quotes and pay as you go are refused. */
+  serverOffline: boolean;
 }
 
 function balanceFor(user: User | null): Balance {
@@ -311,6 +326,12 @@ function freshState(): MockState {
     idempotency: new Map(),
     kiosk: clone(KIOSK_STATE),
     updateReady: false,
+    lockedByStaff: false,
+    lockedByExpiry: false,
+    elsewhere: null,
+    loginLog: [],
+    failNext: {},
+    serverOffline: false,
   };
 }
 
@@ -416,6 +437,29 @@ function pushTransaction(type: Transaction['type'], amount: Money, description: 
   emitMock('agent://wallet.updated', clone(mockState.balance));
 }
 
+/** The demo VIP's loyalty level gives 10 % off, so the quote's discount shows in a demo. */
+const VIP_DISCOUNT_PCT = 10;
+
+/**
+ * What the server would charge (`POST /sessions/quote`): the list price, no day rate, the player's discount; rounded to
+ * whole sums as the server does. A package costs its price for its minutes.
+ */
+function quoteFor(tariff: Tariff, minutes: number | null, user: User | null): SessionQuote {
+  const priced = tariff.isPackage ? (tariff.packageMinutes ?? tariff.minMinutes) : (minutes ?? 60);
+  const base = tariffPriceFor(tariff, priced);
+  const discountPct = user?.role === 'vip' ? VIP_DISCOUNT_PCT : 0;
+  const total = money(Math.round((base.amount * (100 - discountPct)) / 100 / 100) * 100);
+  return {
+    minutes: priced,
+    base,
+    total,
+    dayPct: 100,
+    discountPct,
+    discountReason: discountPct > 0 ? 'loyalty' : null,
+    package: tariff.isPackage,
+  };
+}
+
 function assertFunds(required: Money): void {
   const user = requireUser();
   if (user.balance.amount < required.amount) {
@@ -430,7 +474,8 @@ function assertFunds(required: Money): void {
 const WARNING_MARKS = [15, 5, 1] as const;
 
 function emitSession(): void {
-  if (mockState.session) {
+  // Nobody signed in (a session kept after the token ran out): nothing to tell the lock screen.
+  if (mockState.session && mockState.user) {
     emitMock('agent://session.updated', clone(mockState.session));
   }
 }
@@ -444,7 +489,8 @@ function endSession(reason: SessionEndReason): SessionEndResult {
   let charged = money(0);
   let refunded = money(0);
   if (s.isPrepaid) {
-    if (s.secondsLeft > 60 && tariff && !tariff.isPackage) {
+    // As the server: a player's own end (or the idle sign-out) returns nothing; only the desk refunds unused time.
+    if (reason === 'admin' && s.secondsLeft > 60 && tariff && !tariff.isPackage) {
       refunded = tariffPriceFor(tariff, Math.floor(s.secondsLeft / 60));
       pushTransaction('refund', refunded, `Refund: unused ${Math.floor(s.secondsLeft / 60)} min`, s.id);
     }
@@ -470,13 +516,16 @@ function endSession(reason: SessionEndReason): SessionEndResult {
   mockState.session = null;
   mockState.running = [];
   mockState.kiosk.gameMode = false;
+  mockState.lockedByStaff = false;
+  mockState.lockedByExpiry = false;
   emitMock('agent://session.ended', { session: clone(ended), reason, charged });
   return { session: ended, charged, refunded };
 }
 
 function tick(): void {
   const s = mockState.session;
-  if (!s) {
+  // A session kept for a player whose token ran out waits for them.
+  if (!s || !mockState.user) {
     return;
   }
   if (s.state === 'active' || s.state === 'locked' || s.state === 'ending') {
@@ -642,6 +691,7 @@ export const simulate = {
     emitMock('agent://update.ready', r);
   },
   connectivity(state: 'online' | 'offline'): void {
+    mockState.serverOffline = state === 'offline';
     emitMock('agent://sys.connectivity', {
       state,
       since: nowIso(),
@@ -674,21 +724,92 @@ export const simulate = {
             : command === 'lock'
               ? { reason: 'admin', message: 'Locked by staff' }
               : null;
+    // `shell.command{lock}` comes from the cash desk: only the desk unlocks it.
     if (command === 'lock' && mockState.session && mockState.session.state === 'active') {
       mockState.session.state = 'locked';
       mockState.session.pausedAt = nowIso();
+      mockState.lockedByStaff = true;
       emitSession();
     }
     if (command === 'unlock' && mockState.session && mockState.session.state === 'locked') {
       mockState.session.state = 'active';
       mockState.session.pausedAt = null;
+      mockState.lockedByStaff = false;
       emitSession();
     }
     emitMock('agent://shell.command', { command, args, commandId: newId() });
   },
-  authExpired(reason: 'tokenExpired' | 'revoked' | 'admin' = 'admin'): void {
+  /** The cash desk locks the PC (`lockedByStaff`): no PIN or password of the player's opens it. */
+  staffLock(): void {
+    simulate.shellCommand('lock');
+  },
+  staffUnlock(): void {
+    simulate.shellCommand('unlock');
+  },
+  /** The cash desk pauses / resumes the session (a player cannot: `403 staffOnly`). */
+  deskPause(paused = true): void {
+    const s = mockState.session;
+    if (s && (s.state === 'active' || s.state === 'paused')) {
+      s.state = paused ? 'paused' : 'active';
+      s.pausedAt = paused ? nowIso() : null;
+      emitSession();
+    }
+  },
+  /** The cash desk seats someone on this PC: a guest who signed in without a session starts playing. */
+  deskStart(minutes = 60): void {
+    const user = mockState.user;
+    if (!user || mockState.session) {
+      return;
+    }
+    const tariff = TARIFFS[0];
+    mockState.session = {
+      id: newId(),
+      userId: user.id,
+      pcId: PC_ID,
+      state: 'active',
+      startedAt: nowIso(),
+      endsAt: isoIn(minutes * 60),
+      pausedAt: null,
+      tariffId: tariff?.id ?? newId(),
+      secondsLeft: minutes * 60,
+      secondsUsed: 0,
+      cost: tariff ? tariffPriceFor(tariff, minutes) : money(0),
+      isPrepaid: true,
+      warningsSent: [],
+    };
+    emitSession();
+  },
+  /** The session runs on a package tariff (Night 5h): "+30 min" would charge a whole package. */
+  packageSession(): void {
+    const pkg = TARIFFS.find((t) => t.isPackage);
+    if (mockState.session && pkg) {
+      mockState.session.tariffId = pkg.id;
+      mockState.session.isPrepaid = true;
+      emitSession();
+    }
+  },
+  /** The member's session is open on another PC: the next sign-in is refused with `activeSessionElsewhere`. */
+  sessionElsewhere(pcName = 'PC-07'): void {
+    mockState.elsewhere = { pcId: newId(), pcName };
+  },
+  /** The next call of `command` fails with `code` (and `details`), once. */
+  failNext(command: string, code: ErrorCode, details?: Record<string, unknown>, message = `${command} failed`): void {
+    (mockState.failNext[command] ??= []).push({ code, message, details });
+  },
+  /**
+   * The player is signed out by the Agent. With `tokenExpired` and an open session the Agent locks the session and
+   * keeps it: the same player signing in again continues it.
+   */
+  authExpired(reason: AuthExpiredReason = 'admin'): void {
+    const s = mockState.session;
+    if (reason === 'tokenExpired' && s && s.state !== 'ended') {
+      s.state = 'locked';
+      s.pausedAt = nowIso();
+      mockState.lockedByExpiry = true;
+    } else {
+      mockState.session = null;
+    }
     mockState.user = null;
-    mockState.session = null;
     persistAuth(null);
     emitMock('agent://auth.expired', { reason });
   },
@@ -726,6 +847,10 @@ function cmd(name: string, fn: MockHandler, opts: { fast?: boolean } = {}): void
     ensureStarted();
     if (!opts.fast) {
       await latency();
+    }
+    const failure = mockState.failNext[name]?.shift();
+    if (failure) {
+      mockError(failure.code, failure.message, failure.details);
     }
     return fn(args ?? {});
   };
@@ -772,7 +897,7 @@ cmd('auth_login', (args): AuthLoginResponse => {
       if (qr.confirmedAt === null) {
         mockError('unauthorized', 'QR login not confirmed yet', { reason: 'pending' });
       }
-      mockState.qr = null;
+      // Consumed below, once every check passed (a refused sign-in can be repeated with `endElsewhere`).
       user = USER;
       break;
     }
@@ -808,7 +933,34 @@ cmd('auth_login', (args): AuthLoginResponse => {
     default:
       mockError('validation', 'Unknown auth kind', { field: 'kind', reason: 'format' });
   }
+  mockState.loginLog.push({ kind: req.kind, endElsewhere: req.endElsewhere === true });
+  // One PC at a time (as the server): the member's session open elsewhere is ended only on their say-so.
+  if (user.role !== 'guest' && mockState.elsewhere) {
+    if (!req.endElsewhere) {
+      mockError('conflict', 'The session is open on another PC', {
+        reason: 'activeSessionElsewhere',
+        pcId: mockState.elsewhere.pcId,
+        pcName: mockState.elsewhere.pcName,
+      });
+    }
+    mockState.elsewhere = null;
+  }
+  const kept = mockState.session;
+  if (kept && kept.userId !== user.id && mockState.lockedByExpiry) {
+    // The previous player's session waits for them (their token ran out): nobody else signs in on it.
+    mockError('forbidden', 'This PC holds another player session', { reason: 'pcOccupied' });
+  }
+  if (req.kind === 'qr') {
+    mockState.qr = null;
+  }
   setUser(user);
+  if (kept && kept.userId === user.id && mockState.lockedByExpiry) {
+    // Signed in again after the token ran out: the session carries on.
+    mockState.lockedByExpiry = false;
+    kept.state = 'active';
+    kept.pausedAt = null;
+    kept.endsAt = kept.secondsLeft > 0 ? isoIn(kept.secondsLeft) : kept.endsAt;
+  }
   const session = mockState.session && mockState.session.userId === user.id ? clone(mockState.session) : null;
   if (!session) {
     mockState.session = null;
@@ -834,14 +986,19 @@ cmd('auth_logout', (args): AuthLogoutResponse => {
   return { ok: true, sessionEnded: ended !== null, session: ended };
 });
 
+/** Accounts with an unlock PIN: the demo members; `player` has none, and a guest never does. */
+const hasPin = (user: User | null): boolean => user !== null && user.role !== 'guest' && user.username !== 'player';
+
 cmd(
   'auth_status',
   (): AuthStatusResponse => ({
     authenticated: mockState.user !== null,
     mode: 'online',
     user: mockState.user ? clone(mockState.user) : null,
-    session: mockState.session ? clone(mockState.session) : null,
+    session: mockState.user && mockState.session ? clone(mockState.session) : null,
     expiresAt: mockState.expiresAt,
+    lockedByStaff: mockState.lockedByStaff && mockState.session?.state === 'locked',
+    pinSet: hasPin(mockState.user),
   }),
 );
 
@@ -880,7 +1037,25 @@ cmd('auth_qr_start', (): QrLoginStart => {
 
 // ----- session --------------------------------------------------------------------------------------------------------
 
-cmd('session_get', (): Session | null => (mockState.session ? clone(mockState.session) : null));
+// A session kept for a player whose token ran out is not anybody's to see until they sign in again.
+const visibleSession = (): Session | null => (mockState.user ? mockState.session : null);
+
+cmd('session_get', (): Session | null => {
+  const s = visibleSession();
+  return s ? clone(s) : null;
+});
+
+cmd('session_quote', (args): SessionQuote => {
+  const user = requireUser();
+  const req = obj<SessionQuoteIpcRequest>(args, 'req');
+  if (!req?.tariffId) {
+    mockError('validation', 'tariffId is required', { field: 'tariffId', reason: 'required' });
+  }
+  if (mockState.serverOffline) {
+    mockError('conflict', 'The club server is unreachable', { reason: 'offlineUnavailable' });
+  }
+  return quoteFor(tariffById(req.tariffId), req.minutes ?? null, user);
+});
 
 cmd('session_start', (args): Session => {
   const user = requireUser();
@@ -907,11 +1082,21 @@ cmd('session_start', (args): Session => {
       mockError('validation', `Maximum ${tariff.maxMinutes} minutes`, { field: 'minutes', reason: 'max' });
     }
   }
-  const price = req.prepaid && minutes ? tariffPriceFor(tariff, minutes) : money(0);
+  // The server's price (the player's discount), as the quote said.
+  const price = req.prepaid && minutes ? quoteFor(tariff, minutes, user).total : money(0);
   if (req.prepaid) {
     assertFunds(price);
-  } else if (user.role === 'guest' && user.balance.amount <= 0) {
-    // guests may play postpaid; nothing to check
+  } else {
+    // Pay as you go at the kiosk: a member's, from the balance, and only online; a guest's time is the desk's.
+    if (user.role === 'guest') {
+      mockError('policyDenied', 'Guests pay at the desk', { reason: 'postpaidNotAllowed' });
+    }
+    if (mockState.serverOffline) {
+      mockError('conflict', 'The club server is unreachable', { reason: 'offlineUnavailable' });
+    }
+    if (user.balance.amount <= 0) {
+      mockError('insufficientFunds', 'Insufficient funds', { required: money(100), available: { ...user.balance } });
+    }
   }
   const id = newId();
   if (req.prepaid && price.amount > 0) {
@@ -937,29 +1122,15 @@ cmd('session_start', (args): Session => {
   return clone(mockState.session);
 });
 
+// Pausing is the cash desk's (`simulate.deskPause`): the Agent refuses a player's pause and resume.
 cmd('session_pause', (): Session => {
-  const s = requireSession();
-  if (s.state !== 'active') {
-    mockError('conflict', 'Session is not active', { reason: s.state });
-  }
-  s.state = 'paused';
-  s.pausedAt = nowIso();
-  emitSession();
-  return clone(s);
+  requireSession();
+  mockError('forbidden', 'Only staff can pause a session', { reason: 'staffOnly' });
 });
 
 cmd('session_resume', (): Session => {
-  const s = requireSession();
-  if (s.state !== 'paused') {
-    mockError('conflict', 'Session is not paused', { reason: s.state });
-  }
-  s.state = 'active';
-  s.pausedAt = null;
-  if (s.secondsLeft > 0) {
-    s.endsAt = isoIn(s.secondsLeft);
-  }
-  emitSession();
-  return clone(s);
+  requireSession();
+  mockError('forbidden', 'Only staff can resume a session', { reason: 'staffOnly' });
 });
 
 cmd('session_end', (args): SessionEndResult => {
@@ -977,7 +1148,8 @@ cmd('session_extend', (args): Session => {
     mockError('validation', 'minutes must be a positive integer', { field: 'minutes', reason: 'min' });
   }
   const tariff = tariffById(str(args, 'tariffId') ?? s.tariffId);
-  const price = tariffPriceFor(tariff, minutes);
+  // As the server: the quote's price — and on a package tariff, the whole package (why the shell hides "+30" there).
+  const price = quoteFor(tariff, minutes, mockState.user).total;
   if (s.isPrepaid) {
     assertFunds(price);
     pushTransaction('charge', money(-price.amount), `Extend ${minutes} min ${tariff.name}`, s.id);
@@ -992,6 +1164,9 @@ cmd('session_extend', (args): Session => {
 
 cmd('session_lock', (): Session => {
   const s = requireSession();
+  if (mockState.user?.role === 'guest') {
+    mockError('forbidden', 'A guest session cannot be locked', { reason: 'guestLock' });
+  }
   s.state = 'locked';
   s.pausedAt = nowIso();
   mockState.kiosk.locked = true;
@@ -1004,16 +1179,23 @@ cmd('session_unlock', (args): Session => {
   if (!s || s.state !== 'locked') {
     mockError('conflict', 'Session is not locked', { reason: s?.state ?? 'idle' });
   }
+  if (mockState.lockedByStaff) {
+    mockError('forbidden', 'Locked by staff', { reason: 'staffLock' });
+  }
   const password = str(args, 'password');
   const pin = str(args, 'pin');
   const user = requireUser();
+  if (pin !== undefined && !hasPin(user)) {
+    mockError('unauthorized', 'No PIN is set', { reason: 'noPin' });
+  }
   const passwordOk = password !== undefined && MOCK_CREDENTIALS[user.username] === password;
   const pinOk = pin !== undefined && pin === MOCK_USER_PIN;
   if (!passwordOk && !pinOk) {
     if (password === undefined && pin === undefined) {
       mockError('validation', 'password or pin is required', { field: 'pin', reason: 'required' });
     }
-    mockError('unauthorized', 'Wrong secret', { reason: pin !== undefined ? 'wrongPin' : 'wrongPassword' });
+    // As the Agent (and the server's PIN check): one reason for a wrong PIN and a wrong password.
+    mockError('unauthorized', 'Wrong secret', { reason: 'badSecret' });
   }
   s.state = 'active';
   s.pausedAt = null;
@@ -1025,7 +1207,7 @@ cmd('session_unlock', (args): Session => {
 cmd(
   'session_time_left',
   (): SessionTimeLeftResponse => {
-    const s = mockState.session;
+    const s = visibleSession();
     return {
       state: s?.state ?? 'idle',
       secondsLeft: s ? s.secondsLeft : 0,

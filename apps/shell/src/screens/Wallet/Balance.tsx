@@ -154,7 +154,9 @@ export const Balance = forwardRef<HTMLButtonElement, BalanceProps>(function Bala
                 <p className="mt-3 text-base">
                   <span className="text-muted">{t('wallet.dueNow')}</span>{' '}
                   <span className="tnum font-semibold text-accent">{formatMoney(due, locale)}</span>
-                  <span className="block text-sm text-muted">{t('wallet.dueHint')}</span>
+                  <span className="block text-sm text-muted">
+                    {t(session.isGuest ? 'wallet.dueHintGuest' : 'wallet.dueHint')}
+                  </span>
                 </p>
               )}
               {balance.bonus.amount > 0 && (

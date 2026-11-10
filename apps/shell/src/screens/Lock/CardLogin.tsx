@@ -10,7 +10,7 @@ import { CARD_KEY, CARD_MAX, readerKey } from '@/lib/cardReader';
 import { insertText } from '@/lib/insertText';
 import { isTauri, toShellApiError } from '@/lib/tauri';
 import { useAuthStore } from '@/store/auth';
-import { loginErrorMessage } from './LoginForm';
+import { isElsewhereError, loginErrorMessage } from './LoginForm';
 
 export interface CardLoginProps {
   onSuccess?: (res: AuthLoginResponse) => void;
@@ -28,10 +28,14 @@ function maskCard(id: string): string {
  * As for a password, except that a card no account holds reads "not recognised" rather than a wrong login, and the
  * server's lockout of this PC's card sign-in (`attemptsLeft: 0` after 5 wrong cards in 15 minutes) reads "wait".
  */
-function cardErrorMessage(e: unknown, t: TFunction): string {
+function cardErrorMessage(e: unknown, t: TFunction): string | null {
   const err = toShellApiError(e);
+  if (isElsewhereError(err)) {
+    // The lock screen's dialog says it.
+    return null;
+  }
   if (err.code !== 'unauthorized') {
-    return loginErrorMessage(err, t);
+    return loginErrorMessage(err);
   }
   const details =
     typeof err.details === 'object' && err.details !== null ? (err.details as Record<string, unknown>) : {};

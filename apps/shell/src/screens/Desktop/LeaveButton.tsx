@@ -43,14 +43,18 @@ const IconLeave = (): JSX.Element => (
   </svg>
 );
 
-/** Signs out (ending the session) and goes to the lock screen. */
+/**
+ * Signs out (ending the session) and goes to the lock screen. A refused sign-out stays where it is: the root's
+ * `LogoutFailedDialog` says the player is still signed in and offers a retry.
+ */
 function useLeave(): (reason: 'user' | 'idle') => Promise<void> {
   const logout = useAuthStore((s) => s.logout);
   const navigate = useNavigate();
   return useCallback(
     async (reason) => {
-      await logout(reason);
-      navigate('/lock', { replace: true });
+      if (await logout(reason)) {
+        navigate('/lock', { replace: true });
+      }
     },
     [logout, navigate],
   );
@@ -68,15 +72,18 @@ export function LeaveButton(): JSX.Element | null {
     return null;
   }
 
-  // What ending now means for the player's money: a postpaid bill is taken now, unused prepaid time goes back.
+  // What ending now means for the player's money, honestly: the server does not refund a player's own end, so unused
+  // prepaid time is lost; pay as you go shows what it cost; a guest's bill is paid at the desk.
+  const duration = formatDurationSec(s.secondsUsed, { compact: true });
+  const amount = s.cost ? formatMoney(s.cost, locale) : '—';
   const detail = !s.isOpen
     ? t('session.leaveNoSession')
     : s.isOpenEnded
-      ? t('session.leavePostpaid', {
-          duration: formatDurationSec(s.secondsUsed, { compact: true }),
-          amount: s.cost ? formatMoney(s.cost, locale) : '—',
-        })
-      : t('session.leavePrepaid', { duration: formatDurationSec(s.secondsUsed, { compact: true }) });
+      ? t(s.isGuest ? 'session.leaveGuest' : 'session.leavePostpaid', { duration, amount })
+      : t('session.leavePrepaid', {
+          duration,
+          left: formatDurationSec(Math.max(0, s.secondsLeft), { compact: true }),
+        });
 
   const confirm = async (): Promise<void> => {
     setBusy(true);

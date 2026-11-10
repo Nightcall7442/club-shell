@@ -3,33 +3,35 @@
  * an existing session for this PC; it is handed to the session store here so screens need a single call.
  * `bootstrapStores()` resets every user-scoped slice when `user` drops to null (logout, `auth.expired`).
  */
-import type {
-  AuthExpiredReason,
-  AuthKind,
-  AuthLoginResponse,
-  AuthStatusResponse,
-  ConnectivityState,
-  Money,
-  PcReadiness,
-  SessionEndReason,
-  User,
+import {
+  isSessionOpen,
+  type AuthExpiredReason,
+  type AuthKind,
+  type AuthLoginRequest,
+  type AuthLoginResponse,
+  type AuthStatusResponse,
+  type ConnectivityState,
+  type Money,
+  type PcReadiness,
+  type SessionEndReason,
+  type User,
 } from '@clubshell/contracts';
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { resetAnalyticsSession, track } from '@/lib/analytics';
 import { log } from '@/lib/logger';
+import {
+  buildLoginRequest,
+  createElsewhereRetry,
+  elsewhereOf,
+  type AuthCredentials,
+  type ElsewhereInfo,
+} from '@/lib/signIn';
 import { api, toShellApiError, type ShellError } from '@/lib/tauri';
 import { useSessionStore } from './session';
 import { asShellError, type AsyncStatus } from './settings';
 
-/** Secrets per `AuthKind`; only the field matching `kind` is used. */
-export interface AuthCredentials {
-  username?: string;
-  password?: string;
-  qrToken?: string;
-  cardId?: string;
-  token?: string;
-}
+export type { AuthCredentials } from '@/lib/signIn';
 
 /** What the lock screen shows the player who just left: time played and what the session cost. */
 export interface LeaveReceipt {
@@ -37,6 +39,23 @@ export interface LeaveReceipt {
   cost: Money;
   /** `Date.now()` when it was taken; the lock screen shows it for a few seconds. */
   at: number;
+}
+
+/** Where the player's session is open after `409 activeSessionElsewhere` on a sign-in. */
+export type ElsewhereSession = ElsewhereInfo;
+
+/** The player whose sign-in expired (`tokenExpired`) while their session was open: the lock screen offers them back in. */
+export interface ReloginUser {
+  userId: string;
+  username: string;
+  displayName: string;
+  avatarUrl: string | null;
+}
+
+/** A sign-out the Agent refused: the player is still signed in and the session still runs. */
+export interface LogoutFailure {
+  reason: SessionEndReason;
+  error: ShellError;
 }
 
 export interface AuthState {
@@ -53,24 +72,65 @@ export interface AuthState {
   receipt: LeaveReceipt | null;
   /**
    * Whether the PC lets a player in yet (`auth.status` / `sys.readinessChanged`, SHELL_CHANGES 86): the sign-in screen
-   * stays closed until the games disks are attached. `null` from an Agent that does not report it: ready.
+   * stays closed until the games disks are attached. `null` from an Agent that does not report it: ready. A property of
+   * the PC, not of the player: it survives logout and `auth.expired`.
    */
   readiness: PcReadiness | null;
+  /** The last sign-in was refused because the player's session is open on another PC (the dialog's data). */
+  elsewhere: ElsewhereSession | null;
+  /** Set by `auth.expired {tokenExpired}` with an open session: sign the same player in again and continue. */
+  relogin: ReloginUser | null;
+  /** The session is locked from the cash desk (`auth.status.lockedByStaff`): only the desk unlocks it. */
+  lockedByStaff: boolean;
+  /** The player has an unlock PIN (`auth.status.pinSet`); `null` until known. */
+  pinSet: boolean | null;
+  /** The last `logout` failed: shown with a retry instead of pretending the player left. */
+  logoutFailure: LogoutFailure | null;
+  /**
+   * A fresh sign-in without a session: the tariff picker may start the owner's pay-as-you-go session once, right
+   * now. Never set by `auth.status`, by a sign-in that brought its session back, or after a session ended.
+   */
+  autoStartArmed: boolean;
+}
+
+/** Options of {@link AuthActions.login}. */
+export interface LoginOptions {
+  /** The player confirmed «end my session on the other PC and sign in here». */
+  endElsewhere?: boolean;
 }
 
 export interface AuthActions {
-  login(kind: AuthKind, creds?: AuthCredentials): Promise<AuthLoginResponse>;
+  login(kind: AuthKind, creds?: AuthCredentials, opts?: LoginOptions): Promise<AuthLoginResponse>;
   loginGuest(displayName?: string): Promise<AuthLoginResponse>;
-  /** Ends the session (if any) and clears the user. Errors are logged; the local state is cleared regardless. */
-  logout(reason?: SessionEndReason): Promise<void>;
+  /**
+   * Repeats the sign-in refused with `activeSessionElsewhere`, with `endElsewhere: true`. Its secrets were kept in
+   * memory only for this and are forgotten as the retry is sent. `null` when there is nothing to repeat.
+   */
+  endElsewhereAndLogin(): Promise<AuthLoginResponse | null>;
+  /** Drops the refused sign-in and its secrets. */
+  cancelElsewhere(): void;
+  /**
+   * Ends the session (if any) and clears the user. `false` when the Agent refused: nothing is cleared and the failure
+   * is in `logoutFailure` for the screen to show with a retry.
+   */
+  logout(reason?: SessionEndReason): Promise<boolean>;
+  /** Tries the failed sign-out again (same reason). */
+  retryLogout(): Promise<boolean>;
+  dismissLogoutFailure(): void;
   /** `auth_status` → user + session; errors leave the current state untouched. */
   refresh(): Promise<AuthStatusResponse | null>;
+  /** `auth_status` for the lock screen: who locked the session (`lockedByStaff`) and whether a PIN unlocks it. */
+  refreshLock(): Promise<void>;
   setUser(user: User | null): void;
   /** Merges a partial user update (profile edits, `wallet.updated` balance mirror). */
   updateUser(patch: Partial<User>): void;
   setBalance(balance: Money): void;
+  setLockedByStaff(locked: boolean): void;
   onExpired(reason: AuthExpiredReason): void;
   onReadiness(readiness: PcReadiness): void;
+  /** The picker used (or passed on) the one auto-start a fresh sign-in allows. */
+  disarmAutoStart(): void;
+  clearRelogin(): void;
   clearError(): void;
   dismissReceipt(): void;
   reset(): void;
@@ -88,23 +148,27 @@ const initialState: AuthState = {
   error: null,
   receipt: null,
   readiness: null,
+  elsewhere: null,
+  relogin: null,
+  lockedByStaff: false,
+  pinSet: null,
+  logoutFailure: null,
+  autoStartArmed: false,
 };
 
-export const useAuthStore = create<AuthStore>()(
-  subscribeWithSelector((set, get) => ({
-    ...initialState,
+/**
+ * The secrets of a sign-in refused with `activeSessionElsewhere`, for the one retry with `endElsewhere`. Closure memory
+ * only: never in the store (devtools, snapshots), never persisted; dropped on cancel, success, logout, expiry or the retry.
+ */
+const elsewhereRetry = createElsewhereRetry();
 
-    async login(kind, creds = {}) {
+export const useAuthStore = create<AuthStore>()(
+  subscribeWithSelector((set, get) => {
+    /** Sends a sign-in; a refusal with `activeSessionElsewhere` opens the lock screen's dialog. */
+    const signIn = async (req: AuthLoginRequest): Promise<AuthLoginResponse> => {
       set({ status: 'loading', error: null });
       try {
-        const res = await api.auth.login({
-          kind,
-          username: creds.username ?? null,
-          password: creds.password ?? null,
-          qrToken: creds.qrToken ?? null,
-          cardId: creds.cardId ?? null,
-          token: creds.token ?? null,
-        });
+        const res = await elsewhereRetry.send(req, (r) => api.auth.login(r));
         resetAnalyticsSession();
         set({
           user: res.user,
@@ -114,93 +178,175 @@ export const useAuthStore = create<AuthStore>()(
           receipt: null,
           ready: true,
           status: 'ready',
+          elsewhere: null,
+          relogin: null,
+          logoutFailure: null,
+          lockedByStaff: false,
+          pinSet: null,
+          autoStartArmed: !res.session,
         });
         useSessionStore.getState().setSession(res.session ?? null);
-        track('auth.login', { kind, role: res.user.role, mode: res.mode });
+        track('auth.login', {
+          kind: req.kind,
+          role: res.user.role,
+          mode: res.mode,
+          endElsewhere: req.endElsewhere === true,
+        });
         return res;
       } catch (e) {
         const err = toShellApiError(e);
-        set({ status: 'error', error: err.toJSON() });
+        set({ status: 'error', error: err.toJSON(), elsewhere: elsewhereRetry.armed ? elsewhereOf(err) : null });
         throw err;
       }
-    },
+    };
 
-    loginGuest(displayName) {
-      return get().login('guest', displayName ? { username: displayName } : {});
-    },
+    return {
+      ...initialState,
 
-    async logout(reason = 'user') {
-      set({ status: 'loading', error: null });
-      let receipt: LeaveReceipt | null = null;
-      try {
-        const res = await api.auth.logout(reason);
-        if (res.sessionEnded && res.session) {
-          receipt = { secondsUsed: res.session.secondsUsed, cost: res.session.cost, at: Date.now() };
+      login(kind, creds = {}, opts = {}) {
+        return signIn(buildLoginRequest(kind, creds, opts.endElsewhere === true));
+      },
+
+      loginGuest(displayName) {
+        return get().login('guest', displayName ? { username: displayName } : {});
+      },
+
+      async endElsewhereAndLogin() {
+        const req = elsewhereRetry.take();
+        set({ elsewhere: null });
+        return req ? signIn(req) : null;
+      },
+
+      cancelElsewhere() {
+        elsewhereRetry.clear();
+        set({ elsewhere: null });
+      },
+
+      async logout(reason = 'user') {
+        set({ status: 'loading', error: null, logoutFailure: null });
+        let receipt: LeaveReceipt | null = null;
+        try {
+          const res = await api.auth.logout(reason);
+          if (res.sessionEnded && res.session) {
+            receipt = { secondsUsed: res.session.secondsUsed, cost: res.session.cost, at: Date.now() };
+          }
+        } catch (e) {
+          // The Agent kept the player signed in (and the meter running): say so, never pretend they left.
+          const error = asShellError(e);
+          log.warn('auth.logout failed', error);
+          track('auth.logoutFailed', { reason, code: error.code });
+          set({ status: 'error', error, logoutFailure: { reason, error } });
+          return false;
         }
-      } catch (e) {
-        log.warn('auth.logout failed', asShellError(e));
-      }
-      track('auth.logout', { reason });
-      useSessionStore.getState().reset();
-      set({ ...initialState, ready: true, status: 'ready', receipt });
-    },
+        elsewhereRetry.clear();
+        track('auth.logout', { reason });
+        useSessionStore.getState().reset();
+        set({ ...initialState, ready: true, status: 'ready', receipt, readiness: get().readiness });
+        return true;
+      },
 
-    dismissReceipt() {
-      set({ receipt: null });
-    },
+      retryLogout() {
+        return get().logout(get().logoutFailure?.reason ?? 'user');
+      },
 
-    async refresh() {
-      set({ status: 'loading', error: null });
-      try {
-        const res = await api.auth.status();
-        set({
-          user: res.authenticated ? (res.user ?? null) : null,
-          mode: res.mode,
-          expiresAt: res.expiresAt ?? null,
-          ready: true,
-          status: 'ready',
-          readiness: res.readiness ?? null,
-        });
-        useSessionStore.getState().setSession(res.authenticated ? (res.session ?? null) : null);
-        return res;
-      } catch (e) {
-        const error = asShellError(e);
-        log.warn('auth.status failed', error);
-        set({ ready: true, status: 'error', error });
-        return null;
-      }
-    },
+      dismissLogoutFailure() {
+        set({ logoutFailure: null });
+      },
 
-    setUser(user) {
-      set({ user });
-    },
+      dismissReceipt() {
+        set({ receipt: null });
+      },
 
-    updateUser(patch) {
-      set((s) => (s.user ? { user: { ...s.user, ...patch } } : {}));
-    },
+      async refresh() {
+        set({ status: 'loading', error: null });
+        try {
+          const res = await api.auth.status();
+          set({
+            user: res.authenticated ? (res.user ?? null) : null,
+            mode: res.mode,
+            expiresAt: res.expiresAt ?? null,
+            ready: true,
+            status: 'ready',
+            readiness: res.readiness ?? null,
+            lockedByStaff: res.lockedByStaff === true,
+            pinSet: res.pinSet ?? null,
+          });
+          useSessionStore.getState().setSession(res.authenticated ? (res.session ?? null) : null);
+          return res;
+        } catch (e) {
+          const error = asShellError(e);
+          log.warn('auth.status failed', error);
+          set({ ready: true, status: 'error', error });
+          return null;
+        }
+      },
 
-    setBalance(balance) {
-      get().updateUser({ balance });
-    },
+      async refreshLock() {
+        try {
+          const res = await api.auth.status();
+          set({ lockedByStaff: res.lockedByStaff === true, pinSet: res.pinSet ?? null });
+        } catch (e) {
+          log.debug('auth.status (lock) failed', asShellError(e));
+        }
+      },
 
-    onExpired(reason) {
-      track('auth.expired', { reason });
-      useSessionStore.getState().reset();
-      set({ ...initialState, ready: true, status: 'ready', expiredReason: reason, readiness: get().readiness });
-    },
+      setUser(user) {
+        set({ user });
+      },
 
-    onReadiness(readiness) {
-      set({ readiness });
-    },
+      updateUser(patch) {
+        set((s) => (s.user ? { user: { ...s.user, ...patch } } : {}));
+      },
 
-    clearError() {
-      set({ error: null, status: get().status === 'error' ? 'idle' : get().status });
-    },
+      setBalance(balance) {
+        get().updateUser({ balance });
+      },
 
-    reset() {
-      set({ ...initialState, ready: get().ready, readiness: get().readiness });
-    },
-  })),
+      setLockedByStaff(locked) {
+        set({ lockedByStaff: locked });
+      },
+
+      onExpired(reason) {
+        track('auth.expired', { reason });
+        const { user, readiness } = get();
+        const session = useSessionStore.getState().session;
+        // The Agent locked the open session when the token ran out: the same member signs in again and plays on.
+        const relogin: ReloginUser | null =
+          reason === 'tokenExpired' && user && user.role !== 'guest' && session && isSessionOpen(session.state)
+            ? {
+                userId: user.id,
+                username: user.username,
+                displayName: user.displayName,
+                avatarUrl: user.avatarUrl ?? null,
+              }
+            : null;
+        elsewhereRetry.clear();
+        useSessionStore.getState().reset();
+        set({ ...initialState, ready: true, status: 'ready', expiredReason: reason, readiness, relogin });
+      },
+
+      onReadiness(readiness) {
+        set({ readiness });
+      },
+
+      disarmAutoStart() {
+        set({ autoStartArmed: false });
+      },
+
+      clearRelogin() {
+        set({ relogin: null });
+      },
+
+      clearError() {
+        set({ error: null, status: get().status === 'error' ? 'idle' : get().status });
+      },
+
+      reset() {
+        elsewhereRetry.clear();
+        set({ ...initialState, ready: get().ready, readiness: get().readiness });
+      },
+    };
+  }),
 );
 
 /** Selector: the PC lets a player in (no readiness reported counts as ready, SHELL_CHANGES 86). */
