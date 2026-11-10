@@ -184,7 +184,10 @@ public interface IAuthApi
     /// <summary><c>POST /auth/guest</c>.</summary>
     Task<AuthResponse> GuestLoginAsync(GuestAuthRequest request, CancellationToken cancellationToken);
 
-    /// <summary><c>POST /auth/logout</c> (auth: user).</summary>
+    /// <summary>
+    /// <c>POST /auth/logout</c> (auth: user). The stored player token is dropped once the server answered (a refusal
+    /// included); after a transport failure it is kept, so the sign-out can be replayed with it.
+    /// </summary>
     Task LogoutAsync(LogoutRequest request, CancellationToken cancellationToken);
 
     /// <summary><c>GET /users/{userId}</c>.</summary>
@@ -224,7 +227,11 @@ public interface ISessionApi
     /// <summary><c>POST /sessions/{id}/resume</c>.</summary>
     Task<Session> ResumeSessionAsync(Guid sessionId, CancellationToken cancellationToken);
 
-    /// <summary><c>POST /sessions/{id}/end</c>. A <c>sessionNotActive</c> conflict whose <c>details.session.state</c> is <c>ended</c> is returned as success.</summary>
+    /// <summary>
+    /// <c>POST /sessions/{id}/end</c>. A <c>sessionNotActive</c> conflict whose <c>details.session.state</c> is <c>ended</c> is
+    /// returned as success. The player's token is sent only with <c>user</c> and <c>idle</c>; the Agent's own reasons
+    /// (time up, a cash desk command, a restart) go with the agent token alone.
+    /// </summary>
     Task<SessionEndResult> EndSessionAsync(Guid sessionId, SessionEndReport report, CancellationToken cancellationToken);
 
     /// <summary><c>POST /sessions/{id}/extend</c> (auth: user, idempotent).</summary>

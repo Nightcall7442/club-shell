@@ -468,6 +468,50 @@ public sealed class ServerClientTests : IDisposable
         _handler.Requests.Should().HaveCount(2, "a wrong PIN is not answered with a token refresh and a second try");
     }
 
+    [Theory]
+    [InlineData(SessionEndReason.User, true)]
+    [InlineData(SessionEndReason.Idle, true)]
+    [InlineData(SessionEndReason.TimeUp, false)]
+    [InlineData(SessionEndReason.Admin, false)]
+    [InlineData(SessionEndReason.AgentRestart, false)]
+    public async Task Session_end_carries_the_player_token_only_for_the_players_own_reasons(SessionEndReason reason, bool withPlayerToken)
+    {
+        await RegisterAsync();
+        await _tokens.SetUserAsync(new UserTokens(UserId, "user-access", "user-refresh", _clock.UtcNow.AddHours(1)), CancellationToken.None);
+        _handler.Responder = _ => Ok(new SessionEndResult(SampleSession() with { State = SessionState.Ended }, Money.Zero, Money.Zero));
+
+        await _client.EndSessionAsync(SessionId, new SessionEndReport(reason, 60, _clock.UtcNow), CancellationToken.None);
+
+        var request = _handler.Requests.Should().ContainSingle().Subject;
+        request.Header("Authorization").Should().Be("Bearer access-1");
+        request.Header("X-User-Token").Should().Be(withPlayerToken ? "user-access" : null, "with the player's token the server accepts only user/idle");
+    }
+
+    [Fact]
+    public async Task Logout_keeps_the_player_token_after_a_transport_failure_and_drops_it_once_answered()
+    {
+        await RegisterAsync();
+        var logout = new Contracts.Users.LogoutRequest(SessionEndReason.User);
+        await _tokens.SetUserAsync(new UserTokens(UserId, "user-access", "user-refresh", _clock.UtcNow.AddHours(1)), CancellationToken.None);
+        _handler.Responder = _ => Json(HttpStatusCode.ServiceUnavailable, ErrorBody(ErrorCode.ServerUnavailable, "down", null, "t-down"));
+
+        Func<Task> down = () => _client.LogoutAsync(logout, CancellationToken.None);
+
+        (await down.Should().ThrowAsync<ServerApiException>()).Which.IsRetryable.Should().BeTrue();
+        _tokens.User!.AccessToken.Should().Be("user-access", "the Agent replays the sign-out with it");
+
+        _handler.Responder = _ => new HttpResponseMessage(HttpStatusCode.NoContent);
+        await _client.LogoutAsync(logout, CancellationToken.None);
+        _tokens.User.Should().BeNull();
+
+        await _tokens.SetUserAsync(new UserTokens(UserId, "user-access", "user-refresh", _clock.UtcNow.AddHours(1)), CancellationToken.None);
+        _handler.Responder = _ => Json(HttpStatusCode.Unauthorized, ErrorBody(ErrorCode.Unauthorized, "gone", "userToken", "t-gone"));
+        Func<Task> refused = () => _client.LogoutAsync(logout, CancellationToken.None);
+
+        await refused.Should().ThrowAsync<ServerApiException>();
+        _tokens.User.Should().BeNull("a refused token has nothing left to revoke");
+    }
+
     [Fact]
     public async Task Quote_posts_the_pc_player_and_tariff_and_reads_the_price()
     {

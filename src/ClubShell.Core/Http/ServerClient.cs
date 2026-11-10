@@ -270,10 +270,15 @@ public sealed class ServerClient : IServerClient, IDisposable
         {
             await SendJsonNoContentAsync(HttpMethod.Post, Endpoints.AuthLogout, request, AuthMode.User, null, cancellationToken).ConfigureAwait(false);
         }
-        finally
+        catch (ServerApiException ex) when (!ex.IsRetryable)
         {
-            await _tokens.SetUserAsync(null, cancellationToken).ConfigureAwait(false);
+            // Refused (the token is already gone server-side): nothing is left to revoke with it.
+            await _tokens.SetUserAsync(null, CancellationToken.None).ConfigureAwait(false);
+            throw;
         }
+
+        // Kept after a transport failure or a cancellation: the Agent replays the sign-out with it from its outbox.
+        await _tokens.SetUserAsync(null, CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -333,9 +338,13 @@ public sealed class ServerClient : IServerClient, IDisposable
     public async Task<SessionEndResult> EndSessionAsync(Guid sessionId, SessionEndReport report, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(report);
+
+        // The player's token goes only with the player's own reasons: with it the server accepts user/idle and nothing
+        // else (403 staffOnly). Time up, a cash desk command or a restart are the Agent's ends, sent as the Agent.
+        var auth = report.Reason is SessionEndReason.User or SessionEndReason.Idle ? AuthMode.User : AuthMode.Agent;
         try
         {
-            return await SendJsonAsync<SessionEndReport, SessionEndResult>(HttpMethod.Post, Endpoints.SessionEnd(sessionId), report, AuthMode.User, null, cancellationToken).ConfigureAwait(false);
+            return await SendJsonAsync<SessionEndReport, SessionEndResult>(HttpMethod.Post, Endpoints.SessionEnd(sessionId), report, auth, null, cancellationToken).ConfigureAwait(false);
         }
         catch (ServerApiException ex) when (ex.Code == ErrorCode.SessionNotActive && TryGetEndedSession(ex, out var session))
         {
