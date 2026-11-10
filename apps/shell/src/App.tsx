@@ -10,6 +10,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { RouterProvider, useLocation, useNavigate } from 'react-router-dom';
 import type { ShowAdsArgs } from '@clubshell/contracts';
+import { LogoutFailedDialog } from '@/components/layout/LogoutFailedDialog';
 import { Button } from '@/components/ui/Button';
 import { useHotkeys } from '@/hooks/useHotkeys';
 import { useAgentEvent, useKioskEvent } from '@/hooks/useTauriEvent';
@@ -173,6 +174,7 @@ export function GlobalListeners(): JSX.Element {
     <>
       <AdsOverlay args={ads} onClose={closeAds} />
       <AdminPanel open={adminOpen} onClose={closeAdmin} />
+      <LogoutFailedDialog />
     </>
   );
 }

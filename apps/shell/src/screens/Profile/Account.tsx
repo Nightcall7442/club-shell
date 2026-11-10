@@ -142,10 +142,13 @@ export function Account(): JSX.Element {
 
   const confirmLogout = async (): Promise<void> => {
     setLoggingOut(true);
-    await logout('user');
+    const ok = await logout('user');
     setLoggingOut(false);
     setLogoutOpen(false);
-    navigate('/lock', { replace: true });
+    // Refused: the root's dialog says so and retries; the player stays here, still signed in.
+    if (ok) {
+      navigate('/lock', { replace: true });
+    }
   };
 
   const isGuest = user?.role === 'guest';

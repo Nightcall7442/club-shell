@@ -7,6 +7,7 @@
 import type { PcReadiness, Session } from '@clubshell/contracts';
 import i18n, { initI18n } from '@/i18n';
 import { log } from '@/lib/logger';
+import { clearQuoteCache } from '@/lib/quotes';
 import { api, events, isTauri } from '@/lib/tauri';
 import { setAccentOverride } from '@/theme/themes';
 import { useAuthStore } from './auth';
@@ -78,6 +79,72 @@ function startReadinessPoll(): () => void {
   return () => clearInterval(timer);
 }
 
+/** How often the balance is re-read while someone is signed in, besides the `wallet.updated` push. */
+export const BALANCE_POLL_MS = 30_000;
+let balanceTimer: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * A missed `wallet.updated` (a top-up at the desk while the link blinked, a per-minute charge) must not leave a wrong
+ * balance on screen for the rest of the visit: it is re-read every 30 s while signed in.
+ */
+async function pollBalance(): Promise<void> {
+  const userId = useAuthStore.getState().user?.id;
+  if (!userId) {
+    stopBalancePoll();
+    return;
+  }
+  try {
+    const b = await api.wallet.balance();
+    // Signed out (or another player in) meanwhile: not theirs.
+    if (useAuthStore.getState().user?.id !== userId) {
+      return;
+    }
+    const before = useWalletStore.getState().balance;
+    if (!before || before.amount.amount !== b.amount.amount || before.bonus.amount !== b.bonus.amount) {
+      useWalletStore.getState().onUpdated(b);
+      useAuthStore.getState().setBalance(b.amount);
+    }
+  } catch (e) {
+    log.debug('balance poll failed', e);
+  }
+}
+
+function startBalancePoll(): void {
+  stopBalancePoll();
+  balanceTimer = setInterval(() => void pollBalance(), BALANCE_POLL_MS);
+}
+
+function stopBalancePoll(): void {
+  if (balanceTimer !== null) {
+    clearInterval(balanceTimer);
+    balanceTimer = null;
+  }
+}
+
+/** `auth.status` for who locked the session at most this often (the Agent pushes `session.updated` every second). */
+const LOCK_READ_MS = 3_000;
+let lockReadAt = 0;
+let lockReadTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Re-reads `lockedByStaff` / `pinSet`; `force` on the lock itself, throttled for the pushes that follow — a push inside
+ * the window is read at its end, so a takeover right after the player's own lock is not missed.
+ */
+function readLock(force = false): void {
+  const wait = LOCK_READ_MS - (Date.now() - lockReadAt);
+  if (!force && wait > 0) {
+    lockReadTimer ??= setTimeout(() => {
+      lockReadTimer = null;
+      if (useSessionStore.getState().state === 'locked') {
+        readLock(true);
+      }
+    }, wait);
+    return;
+  }
+  lockReadAt = Date.now();
+  void useAuthStore.getState().refreshLock();
+}
+
 function currentRoute(): string {
   return typeof window === 'undefined' ? '' : (window.location.hash.replace(/^#/, '').split('?')[0] ?? '');
 }
@@ -110,10 +177,28 @@ function wireListeners(): void {
     useAuthStore.subscribe(
       (s) => s.user,
       (user, prev) => {
+        if (user?.id !== prev?.id) {
+          // Discounts are the player's: another player (or none) never sees the last one's prices.
+          clearQuoteCache();
+        }
         if (prev && !user) {
+          stopBalancePoll();
           resetStores();
         } else if (user && (!prev || prev.id !== user.id)) {
           void loadUserData();
+          startBalancePoll();
+        }
+      },
+    ),
+    // Who locked the session (the desk or the player) and whether a PIN unlocks it: read when it locks; a session
+    // that is not locked any more is not the desk's lock either.
+    useSessionStore.subscribe(
+      (s) => s.state,
+      (state, prev) => {
+        if (state === 'locked' && prev !== 'locked') {
+          readLock(true);
+        } else if (state !== 'locked' && auth().lockedByStaff) {
+          auth().setLockedByStaff(false);
         }
       },
     ),
@@ -137,13 +222,23 @@ function wireListeners(): void {
     ),
 
     // ----- session -----------------------------------------------------------------------------------------------------
-    events.on('session.updated', (s: Session) => session().setSession(s)),
+    events.on('session.updated', (s: Session) => {
+      const wasLocked = session().state === 'locked';
+      session().setSession(s);
+      // A player's lock the desk took over stays `locked`: the Agent says so with a `session.updated`, and
+      // `auth.status.lockedByStaff` tells which.
+      if (wasLocked && s.state === 'locked' && !auth().lockedByStaff) {
+        readLock();
+      }
+    }),
     events.on('session.warning', (w) => {
       session().onWarning(w);
       notify().notifySessionWarning(w);
     }),
     events.on('session.ended', (e) => {
       session().onEnded(e);
+      // The owner's auto-start follows a fresh sign-in only: never a session that ran out or was ended.
+      auth().disarmAutoStart();
       notify().clearSessionWarning();
       games().reset();
       notify().push({
@@ -367,7 +462,8 @@ function wireListeners(): void {
       const { volume } = settings().settings;
       switch (h.name) {
         case 'lock':
-          if (session().state === 'active') {
+          // A guest has no PIN or password to come back with (the Agent refuses with `guestLock` anyway).
+          if (session().state === 'active' && auth().user?.role !== 'guest') {
             void session()
               .lock('hotkey')
               .catch((e: unknown) => notify().pushError(e));
@@ -457,6 +553,7 @@ export function bootstrapStores(): Promise<void> {
     }
     void useThemeStore.getState().loadList();
     if (useAuthStore.getState().user) {
+      startBalancePoll();
       await loadUserData();
     }
     log.info(`stores ready (${isTauri() ? 'tauri' : 'mock'})`);
@@ -496,6 +593,11 @@ export function teardownStores(): void {
   }
   unsubscribes = [];
   stopSessionTicker();
+  stopBalancePoll();
+  if (lockReadTimer !== null) {
+    clearTimeout(lockReadTimer);
+    lockReadTimer = null;
+  }
   stopToastTimer();
   bootPromise = null;
 }

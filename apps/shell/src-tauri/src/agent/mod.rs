@@ -561,7 +561,9 @@ impl MockTransport {
             }
             AgentCommand::AuthStatus => Some(json!({
                 "authenticated": db.user.is_some(), "mode": "online", "user": db.user, "session": db.session,
-                "expiresAt": db.user.as_ref().map(|_| in_secs(8 * 3600))
+                "expiresAt": db.user.as_ref().map(|_| in_secs(8 * 3600)),
+                // The mock player has a PIN (any unlocks); the dev mock never locks from the desk.
+                "lockedByStaff": false, "pinSet": db.user.is_some()
             })),
             AgentCommand::AuthQrStart => Some(json!({
                 "qrToken": "mock-qr-token", "qrUrl": "https://example.invalid/qr/mock", "expiresAt": in_secs(120), "pollIntervalSec": 2

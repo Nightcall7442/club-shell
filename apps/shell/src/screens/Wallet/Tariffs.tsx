@@ -3,24 +3,20 @@ import clsx from 'clsx';
 import { motion } from 'framer-motion';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
-import {
-  tariffIsValidFor,
-  tariffPriceFor,
-  WEEKDAYS,
-  weekdayFromJsDay,
-  type Tariff,
-  type TariffTimeWindow,
-} from '@clubshell/contracts';
+import { WEEKDAYS, type Tariff, type TariffTimeWindow } from '@clubshell/contracts';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
+import { formatPrice, PriceNote } from '@/components/ui/PriceNote';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { DotAmount } from '@/components/ui/DotAmount';
 import { useLocale } from '@/hooks/useLocale';
+import { usePrice } from '@/hooks/usePrice';
 import { useSession } from '@/hooks/useSession';
 import { formatMoney } from '@/lib/format';
 import { isShellApiError } from '@/lib/tauri';
-import { formatClock, serverNow } from '@/lib/time';
+import { tariffAvailableNow } from '@/lib/tariffs';
+import { serverNow } from '@/lib/time';
 import { describeError, useNotificationsStore } from '@/store/notifications';
 import { useSettingsStore } from '@/store/settings';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
@@ -32,11 +28,7 @@ export type TariffAction = 'start' | 'extend';
 /** Minute presets offered for hourly tariffs (filtered by `minMinutes`/`maxMinutes`). */
 export const MINUTE_PRESETS: readonly number[] = [30, 60, 90, 120, 180, 240, 300, 480];
 
-/** `true` when the tariff applies to `zone` (unknown zone = any) at `at` (club local time). */
-export function tariffAvailableNow(tariff: Tariff, zone: string, at: Date): boolean {
-  const z = zone || tariff.zones[0] || '';
-  return tariffIsValidFor(tariff, z, weekdayFromJsDay(at.getDay()), formatClock(at, 'HH:mm'));
-}
+export { tariffAvailableNow };
 
 /** Minutes the user may buy under a tariff (package → its fixed length). */
 export function tariffMinuteOptions(tariff: Tariff): number[] {
@@ -97,6 +89,8 @@ export function TariffCard({ tariff, available, current, action, onAction }: Tar
   const { t } = useTranslation();
   const { locale } = useLocale();
   const pkg = tariff.isPackage && tariff.packagePrice && tariff.packageMinutes ? tariff.packagePrice : null;
+  // The server's price for this player now (an hour, or the package): day rate and discount applied.
+  const price = usePrice(tariff, null);
 
   return (
     <article
@@ -111,9 +105,9 @@ export function TariffCard({ tariff, available, current, action, onAction }: Tar
         <div className="min-w-0">
           <h3 className="truncate text-xl font-bold text-text">{tariff.name}</h3>
           {/* The hourly rate is the big number below; only a package needs a line here, for its minutes. */}
-          {pkg && (
+          {pkg && price && (
             <p className="tnum text-base text-muted">
-              {t('wallet.packageMinutes', { minutes: tariff.packageMinutes, price: formatMoney(pkg, locale) })}
+              {t('wallet.packageMinutes', { minutes: tariff.packageMinutes, price: formatPrice(price, locale) })}
             </p>
           )}
         </div>
@@ -135,10 +129,16 @@ export function TariffCard({ tariff, available, current, action, onAction }: Tar
         </div>
       </header>
 
-      <p className="tnum text-[clamp(1.6rem,2.2vw,2.4rem)] leading-none text-text">
-        <DotAmount value={formatMoney(pkg ?? tariff.pricePerHour, locale)} />
+      <p
+        className={clsx(
+          'tnum text-[clamp(1.6rem,2.2vw,2.4rem)] leading-none text-text',
+          price?.loading && 'opacity-60',
+        )}
+      >
+        <DotAmount value={price ? formatPrice(price, locale) : formatMoney(pkg ?? tariff.pricePerHour, locale)} />
         {!pkg && <span className="ml-1 text-base font-semibold text-muted">/ {t('common.hourShort')}</span>}
       </p>
+      <PriceNote view={price} className="-mt-1" />
 
       <ul className="flex flex-col gap-1 text-sm text-muted">
         {tariff.timeWindows.length === 0 ? (
@@ -195,6 +195,49 @@ export interface TariffActionModalProps {
   onInsufficientFunds?: () => void;
 }
 
+/** A minute preset with its quoted price. */
+function MinuteChip({
+  tariff,
+  minutes,
+  active,
+  onSelect,
+}: {
+  tariff: Tariff;
+  minutes: number;
+  active: boolean;
+  onSelect: () => void;
+}): JSX.Element {
+  const { t } = useTranslation();
+  const { locale } = useLocale();
+  const price = usePrice(tariff, minutes);
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      data-nav="true"
+      onClick={onSelect}
+      className={clsx(
+        'focus-ring tnum flex h-16 flex-col items-center justify-center rounded-lg text-base font-bold transition-colors duration-[var(--dur-fast)]',
+        active ? 'choice choice-on' : 'choice',
+      )}
+    >
+      <span>
+        {minutes} {t('common.min')}
+      </span>
+      {price && (
+        <span className={clsx('text-xs font-medium', active ? 'text-on-primary/70' : 'text-muted')}>
+          {formatPrice(price, locale)}
+        </span>
+      )}
+    </button>
+  );
+}
+
+/**
+ * Buying time with a tariff: the player pays in advance from the balance, at the server's price (`session.quote`).
+ * Pay as you go is the cash desk's (and the owner's auto-start after a sign-in), never a choice here.
+ */
 export function TariffActionModal({
   tariff,
   action,
@@ -210,21 +253,17 @@ export function TariffActionModal({
   const pushError = useNotificationsStore((s) => s.pushError);
   const options = useMemo(() => (tariff ? tariffMinuteOptions(tariff) : []), [tariff]);
   const [minutes, setMinutes] = useState<number>(options[0] ?? 60);
-  const [prepaid, setPrepaid] = useState(true);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (open) {
       setMinutes(options.includes(60) ? 60 : (options[0] ?? 60));
-      setPrepaid(true);
       setBusy(false);
     }
   }, [open, options]);
 
-  const isPackage = Boolean(tariff?.isPackage);
-  const charged = action === 'extend' || prepaid || isPackage;
-  const cost = tariff ? tariffPriceFor(tariff, minutes) : null;
-  const notEnough = charged && cost !== null && cost.amount > balance.amount;
+  const cost = usePrice(open ? tariff : null, minutes);
+  const notEnough = cost !== null && cost.amount.amount > balance.amount;
 
   const submit = async (): Promise<void> => {
     if (!tariff) {
@@ -233,7 +272,7 @@ export function TariffActionModal({
     setBusy(true);
     try {
       if (action === 'start') {
-        await session.start(tariff.id, prepaid || isPackage, prepaid || isPackage ? minutes : undefined);
+        await session.start(tariff.id, true, minutes);
         push({ title: t('session.started'), body: tariff.name, level: 'success' });
       } else {
         await session.extend(minutes, tariff.id);
@@ -280,77 +319,27 @@ export function TariffActionModal({
       <ModalBackHandler onBack={onClose} />
       {tariff && (
         <div className="flex flex-col gap-5">
-          {action === 'start' && !isPackage && (
-            <fieldset className="grid grid-cols-2 gap-2">
-              {(
-                [
-                  { key: true, label: t('wallet.prepaid'), hint: t('wallet.prepaidHint') },
-                  { key: false, label: t('wallet.postpaid'), hint: t('wallet.postpaidHint') },
-                ] as const
-              ).map((opt) => (
-                <button
-                  key={String(opt.key)}
-                  type="button"
-                  role="radio"
-                  aria-checked={prepaid === opt.key}
-                  data-nav="true"
-                  onClick={() => setPrepaid(opt.key)}
-                  className={clsx(
-                    'focus-ring flex flex-col items-start gap-1 rounded-lg p-4 text-left transition-colors duration-[var(--dur-fast)]',
-                    prepaid === opt.key ? 'bg-primary/20 border-glow' : 'glass hover:bg-surface/80',
-                  )}
-                >
-                  <span className="text-base font-bold text-text">{opt.label}</span>
-                  <span className="text-sm text-muted">{opt.hint}</span>
-                </button>
+          {action === 'start' && <p className="text-sm text-muted">{t('session.prepaidHint')}</p>}
+          <fieldset className="flex flex-col gap-2">
+            <legend className="mb-2 text-sm font-medium text-muted">{t('wallet.chooseMinutes')}</legend>
+            <div role="radiogroup" aria-label={t('wallet.chooseMinutes')} className="grid grid-cols-4 gap-2">
+              {options.map((m) => (
+                <MinuteChip key={m} tariff={tariff} minutes={m} active={minutes === m} onSelect={() => setMinutes(m)} />
               ))}
-            </fieldset>
-          )}
-
-          {charged && (
-            <fieldset className="flex flex-col gap-2">
-              <legend className="mb-2 text-sm font-medium text-muted">{t('wallet.chooseMinutes')}</legend>
-              <div className="grid grid-cols-4 gap-2">
-                {options.map((m) => {
-                  const active = minutes === m;
-                  return (
-                    <button
-                      key={m}
-                      type="button"
-                      role="radio"
-                      aria-checked={active}
-                      data-nav="true"
-                      onClick={() => setMinutes(m)}
-                      className={clsx(
-                        'focus-ring tnum flex h-16 flex-col items-center justify-center rounded-lg text-base font-bold transition-colors duration-[var(--dur-fast)]',
-                        active ? 'choice choice-on' : 'choice',
-                      )}
-                    >
-                      <span>
-                        {m} {t('common.min')}
-                      </span>
-                      <span className={clsx('text-xs font-medium', active ? 'text-on-primary/70' : 'text-muted')}>
-                        {formatMoney(tariffPriceFor(tariff, m), locale)}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </fieldset>
-          )}
+            </div>
+          </fieldset>
 
           <dl className="flex flex-col gap-1 rounded-lg bg-text/5 px-4 py-3 text-base">
             <div className="flex items-center justify-between">
               <dt className="text-muted">{t('wallet.estimatedCost')}</dt>
-              <dd className="tnum text-xl font-semibold text-text">
-                {charged && cost ? formatMoney(cost, locale) : t('wallet.postpaid')}
-              </dd>
+              <dd className="tnum text-xl font-semibold text-text">{cost ? formatPrice(cost, locale) : '—'}</dd>
             </div>
-            {charged && cost && (
+            {cost && <PriceNote view={cost} className="self-end" />}
+            {cost && (
               <div className="flex items-center justify-between text-sm">
                 <dt className="text-muted">{t('wallet.balanceAfter')}</dt>
                 <dd className={clsx('tnum font-semibold', notEnough ? 'text-danger' : 'text-muted')}>
-                  {formatMoney({ amount: balance.amount - cost.amount, currency: cost.currency }, locale)}
+                  {formatMoney({ amount: balance.amount - cost.amount.amount, currency: cost.amount.currency }, locale)}
                 </dd>
               </div>
             )}
@@ -390,8 +379,11 @@ export function Tariffs({ onInsufficientFunds, className }: TariffsProps): JSX.E
   }, []);
 
   const zone = pcZone ?? tariffZone ?? '';
+  // A guest's time is opened and paid at the desk; pay as you go needs no extension.
   const action: TariffAction | null = !session.isOpen
-    ? 'start'
+    ? session.isGuest
+      ? null
+      : 'start'
     : session.isLocked || session.isOpenEnded
       ? null
       : 'extend';

@@ -19,6 +19,7 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import i18n, { currentLocale } from '@/i18n';
 import { trackError } from '@/lib/analytics';
+import { errorText, type ErrorContext } from '@/lib/errorText';
 import { formatMoney } from '@/lib/format';
 import { log } from '@/lib/logger';
 import { api, toShellApiError, uuid } from '@/lib/tauri';
@@ -128,36 +129,22 @@ function isMoney(v: unknown): v is Money {
   );
 }
 
-/** Human message for any error (`ShellApiError`, plain `{code}` or unknown) via `errors.<code>`. */
-export function describeError(e: unknown): string {
+/**
+ * Human message for any error (`ShellApiError`, plain `{code}` or unknown): `code` + `details.reason` through
+ * {@link errorText} (each reason of the Agent and the server has its own line), `errors.generic` for anything unknown.
+ * `context` says which form asked (a sign-in reads a wrong secret differently from an unlock).
+ */
+export function describeError(e: unknown, context: ErrorContext = 'action'): string {
   const err = toShellApiError(e);
-  const details = (typeof err.details === 'object' && err.details !== null ? err.details : {}) as Record<
-    string,
-    unknown
-  >;
+  const text = errorText(err.code, err.details, context);
   const locale = currentLocale();
-  const vars: Record<string, unknown> = {};
+  const vars: Record<string, unknown> = { ...text.vars };
   if (err.code === 'insufficientFunds') {
-    vars['required'] = isMoney(details['required']) ? formatMoney(details['required'], locale) : '—';
-    vars['available'] = isMoney(details['available']) ? formatMoney(details['available'], locale) : '—';
+    vars['required'] = isMoney(vars['required']) ? formatMoney(vars['required'], locale) : '—';
+    vars['available'] = isMoney(vars['available']) ? formatMoney(vars['available'], locale) : '—';
   }
-  if (err.code === 'rateLimited') {
-    vars['seconds'] = typeof details['retryAfterSec'] === 'number' ? details['retryAfterSec'] : 30;
-  }
-  // Which club rule said no (`details.rule`, server and Agent alike): "policy" alone tells the player nothing.
-  const rule = details['rule'];
-  if (err.code === 'policyDenied' && typeof rule === 'string' && !rule.includes('.')) {
-    const ruleKey = `errors.policy.${rule}`;
-    if (i18n.exists(ruleKey)) {
-      return i18n.t(ruleKey);
-    }
-  }
-  // SHELL_CHANGES 86: the Agent lets nobody in while the games disks are still attaching.
-  if (err.code === 'conflict' && details['reason'] === 'pcNotReady') {
-    return i18n.t('errors.pcNotReady');
-  }
-  const key = `errors.${err.code}`;
-  return i18n.exists(key) ? i18n.t(key, vars) : i18n.t('errors.generic');
+  const key = text.keys.find((k) => i18n.exists(k));
+  return key ? i18n.t(key, vars) : i18n.t('errors.generic');
 }
 
 // ponytail: one interval for every toast; a per-toast timeout is more code for no gain at ≤5 toasts.

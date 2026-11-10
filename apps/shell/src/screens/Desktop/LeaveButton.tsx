@@ -5,11 +5,13 @@
  *   Settings → the bottom of the page, so players walked away instead: the meter kept running on a postpaid session,
  *   and whoever sat down next played on their account and balance.
  * - {@link IdleLeavePrompt}: after {@link IDLE_LEAVE_SEC} without any input, with no game running and the Shell in front,
- *   "Вы ещё здесь?" counts down {@link IDLE_LEAVE_COUNTDOWN_SEC} seconds and then signs the player out (`idle`). It stays
- *   out of the way while a game or a program from the dock is in front: a cutscene or a film has no input either, and
- *   the player would never see the prompt behind it.
+ *   "Вы ещё здесь?" counts down {@link IDLE_LEAVE_COUNTDOWN_SEC} seconds. A member's prepaid time is theirs, so it then
+ *   locks the screen (`session.lock {idle}`: the paid minutes wait; the Agent itself only ever locks on idle). Pay as you
+ *   go, a desk's postpaid and a guest (who cannot lock: `guestLock`) are signed out (`idle`), so no meter keeps running
+ *   for an empty seat. It stays out of the way while a game or a program from the dock is in front: a cutscene or a film
+ *   has no input either, and the player would never see the prompt behind it.
  *
- * Both end the session through `auth.logout`; the lock screen then shows what the visit cost (`auth.receipt`).
+ * Signing out goes through `auth.logout`; the lock screen then shows what the visit cost (`auth.receipt`).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -22,6 +24,7 @@ import { useSession } from '@/hooks/useSession';
 import { formatDurationSec, formatMoney } from '@/lib/format';
 import { useAuthStore } from '@/store/auth';
 import { useGamesStore } from '@/store/games';
+import { useNotificationsStore } from '@/store/notifications';
 
 /** No input for this long, outside games, and the Shell asks whether anyone is still there. */
 export const IDLE_LEAVE_SEC = 10 * 60;
@@ -43,14 +46,18 @@ const IconLeave = (): JSX.Element => (
   </svg>
 );
 
-/** Signs out (ending the session) and goes to the lock screen. */
+/**
+ * Signs out (ending the session) and goes to the lock screen. A refused sign-out stays where it is: the root's
+ * `LogoutFailedDialog` says the player is still signed in and offers a retry.
+ */
 function useLeave(): (reason: 'user' | 'idle') => Promise<void> {
   const logout = useAuthStore((s) => s.logout);
   const navigate = useNavigate();
   return useCallback(
     async (reason) => {
-      await logout(reason);
-      navigate('/lock', { replace: true });
+      if (await logout(reason)) {
+        navigate('/lock', { replace: true });
+      }
     },
     [logout, navigate],
   );
@@ -68,15 +75,18 @@ export function LeaveButton(): JSX.Element | null {
     return null;
   }
 
-  // What ending now means for the player's money: a postpaid bill is taken now, unused prepaid time goes back.
+  // What ending now means for the player's money, honestly: the server does not refund a player's own end, so unused
+  // prepaid time is lost; pay as you go shows what it cost; a guest's bill is paid at the desk.
+  const duration = formatDurationSec(s.secondsUsed, { compact: true });
+  const amount = s.cost ? formatMoney(s.cost, locale) : '—';
   const detail = !s.isOpen
     ? t('session.leaveNoSession')
     : s.isOpenEnded
-      ? t('session.leavePostpaid', {
-          duration: formatDurationSec(s.secondsUsed, { compact: true }),
-          amount: s.cost ? formatMoney(s.cost, locale) : '—',
-        })
-      : t('session.leavePrepaid', { duration: formatDurationSec(s.secondsUsed, { compact: true }) });
+      ? t(s.isGuest ? 'session.leaveGuest' : 'session.leavePostpaid', { duration, amount })
+      : t('session.leavePrepaid', {
+          duration,
+          left: formatDurationSec(Math.max(0, s.secondsLeft), { compact: true }),
+        });
 
   const confirm = async (): Promise<void> => {
     setBusy(true);
@@ -126,9 +136,26 @@ export function IdleLeavePrompt(): JSX.Element | null {
   const s = useSession();
   const { idle, reset } = useIdle(IDLE_LEAVE_SEC);
   const gameRunning = useGamesStore((g) => g.running.some((r) => r.state === 'running' || r.state === 'launching'));
+  const navigate = useNavigate();
+  const pushError = useNotificationsStore((n) => n.pushError);
   const leave = useLeave();
-  const leaveRef = useRef(leave);
-  leaveRef.current = leave;
+  // A member's prepaid minutes are kept (lock); open-ended time and a guest's are signed out.
+  const lockInstead = s.isOpen && !s.isOpenEnded && !s.isGuest;
+  const idleOut = async (): Promise<void> => {
+    if (!lockInstead) {
+      await leave('idle');
+      return;
+    }
+    try {
+      await s.lock('idle');
+      navigate('/lock', { replace: true });
+    } catch (e) {
+      // Never end paid time instead: the Agent's own idle lock follows anyway.
+      pushError(e, t('session.lockTitle'));
+    }
+  };
+  const idleOutRef = useRef(idleOut);
+  idleOutRef.current = idleOut;
   // A deadline rather than a decrementing counter: the screen re-renders every second while idle, which must not
   // restart the countdown.
   const [deadline, setDeadline] = useState<number | null>(null);
@@ -154,7 +181,7 @@ export function IdleLeavePrompt(): JSX.Element | null {
   useEffect(() => {
     if (deadline !== null && now >= deadline) {
       setDeadline(null);
-      void leaveRef.current('idle');
+      void idleOutRef.current();
     }
   }, [now, deadline]);
 
@@ -172,7 +199,9 @@ export function IdleLeavePrompt(): JSX.Element | null {
       open
       onClose={stay}
       title={t('session.idleTitle')}
-      description={t('session.idleBody', { seconds: Math.max(0, Math.ceil((deadline - now) / 1000)) })}
+      description={t(lockInstead ? 'session.idleBodyLock' : 'session.idleBody', {
+        seconds: Math.max(0, Math.ceil((deadline - now) / 1000)),
+      })}
       size="sm"
       footer={
         <>

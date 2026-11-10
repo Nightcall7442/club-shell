@@ -136,8 +136,10 @@ export function QrLogin({ onSuccess, className }: QrLoginProps): JSX.Element {
           clearError();
           setAttempt((n) => n + 1);
         } else {
+          // A refusal (blocked account, session open on another PC — the lock screen's dialog offers to end it there):
+          // the code stops; a new one is a tap away.
           setPhase('error');
-          setMessage(describeError(err));
+          setMessage(describeError(err, 'login'));
         }
       } finally {
         inFlight = false;

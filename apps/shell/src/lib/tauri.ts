@@ -55,6 +55,8 @@ import type {
   Session,
   SessionEndReason,
   SessionEndResult,
+  SessionQuote,
+  SessionQuoteIpcRequest,
   SessionStartRequest,
   SessionTimeLeftResponse,
   SettingsSetRequest,
@@ -512,8 +514,8 @@ export const api = {
   session: {
     get: (): Promise<Session | null> => invoke('session_get'),
     start: (req: SessionStartRequest): Promise<Session> => invoke('session_start', { req }),
-    pause: (reason?: string): Promise<Session> => invoke('session_pause', { reason }),
-    resume: (): Promise<Session> => invoke('session_resume'),
+    /** The server's price for this PC and player (day rate, discount); nothing is created or charged. */
+    quote: (req: SessionQuoteIpcRequest): Promise<SessionQuote> => invoke('session_quote', { req }),
     end: (reason?: SessionEndReason): Promise<SessionEndResult> => invoke('session_end', { reason }),
     extend: (minutes: number, tariffId?: string): Promise<Session> => invoke('session_extend', { minutes, tariffId }),
     lock: (reason?: string): Promise<Session> => invoke('session_lock', { reason }),

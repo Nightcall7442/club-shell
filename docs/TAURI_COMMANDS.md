@@ -59,13 +59,16 @@ returns `Promise<T>` and rejects with `ShellApiError` (§4).
 
 | Command | TS signature | Args | Returns | IPC |
 |---------|--------------|------|---------|-----|
-| `auth_login` | `api.auth.login(req: AuthLoginRequest): Promise<AuthLoginResponse>` | `{ req: { kind: AuthKind; username?: string; password?: string; qrToken?: string; cardId?: string; token?: string } }` | `{ user: User; session: Session \| null; expiresAt: string; mode: ConnectivityState }` | `auth.login` |
+| `auth_login` | `api.auth.login(req: AuthLoginRequest): Promise<AuthLoginResponse>` | `{ req: { kind: AuthKind; username?: string; password?: string; qrToken?: string; cardId?: string; token?: string; endElsewhere?: boolean } }` | `{ user: User; session: Session \| null; expiresAt: string; mode: ConnectivityState }` | `auth.login` |
 | `auth_logout` | `api.auth.logout(reason?: SessionEndReason): Promise<AuthLogoutResponse>` | `{ reason?: string }` | `{ ok: true; sessionEnded: boolean; session?: Session }` | `auth.logout` |
-| `auth_status` | `api.auth.status(): Promise<AuthStatusResponse>` | `{}` | `{ authenticated: boolean; user?: User; session?: Session; mode: ConnectivityState; expiresAt?: string }` | `auth.status` |
+| `auth_status` | `api.auth.status(): Promise<AuthStatusResponse>` | `{}` | `{ authenticated: boolean; user?: User; session?: Session; mode: ConnectivityState; expiresAt?: string; readiness?: PcReadiness; lockedByStaff?: boolean; pinSet?: boolean }` | `auth.status` |
 | `auth_qr_start` | `api.auth.qrStart(): Promise<QrLoginStart>` | `{}` | `{ qrToken: string; qrUrl: string; expiresAt: string; pollIntervalSec: number }` | `auth.qrStart` |
 
 Errors: as per the IPC message. `auth_login` with `kind = "password"` and empty `password` → `validation`
-raised in Rust before the pipe is touched (`source: "tauri"`).
+raised in Rust before the pipe is touched (`source: "tauri"`). `409 conflict {reason: activeSessionElsewhere, pcId, pcName}`:
+the lock screen asks «end the session on PC N and sign in here» and repeats the same request with `endElsewhere: true`
+(the secrets stay in memory for that one retry only). `auth_logout` failing leaves the player signed in: the UI says so
+and offers a retry.
 
 ### 2.2 session
 
@@ -73,13 +76,14 @@ raised in Rust before the pipe is touched (`source: "tauri"`).
 |---------|--------------|------|---------|-----|
 | `session_get` | `api.session.get(): Promise<Session \| null>` | `{}` | `Session \| null` | `session.get` |
 | `session_start` | `api.session.start(req: SessionStartRequest): Promise<Session>` | `{ req: { tariffId: string; minutes?: number; prepaid: boolean } }` | `Session` | `session.start` |
-| `session_pause` | `api.session.pause(reason?: string): Promise<Session>` | `{ reason?: string }` | `Session` | `session.pause` |
-| `session_resume` | `api.session.resume(): Promise<Session>` | `{}` | `Session` | `session.resume` |
+| `session_pause` | — (staff only: the Agent answers a player `403 staffOnly`; the UI has no pause) | `{ reason?: string }` | `Session` | `session.pause` |
+| `session_resume` | — (staff only, as `session_pause`) | `{}` | `Session` | `session.resume` |
 | `session_end` | `api.session.end(reason?: SessionEndReason): Promise<SessionEndResult>` | `{ reason?: SessionEndReason }` | `{ session: Session; charged: Money; refunded: Money }` | `session.end` |
 | `session_extend` | `api.session.extend(minutes: number, tariffId?: string): Promise<Session>` | `{ minutes: number; tariffId?: string }` | `Session` | `session.extend` |
 | `session_lock` | `api.session.lock(reason?: string): Promise<Session>` | `{ reason?: string }` | `Session` | `session.lock` |
 | `session_unlock` | `api.session.unlock(secret: { password?: string; pin?: string }): Promise<Session>` | `{ password?: string; pin?: string }` | `Session` | `session.unlock` |
 | `session_time_left` | `api.session.timeLeft(): Promise<SessionTimeLeftResponse>` | `{}` | `{ sessionId?: string; state: SessionState; secondsLeft: number; secondsUsed: number; endsAt?: string; serverTime: string }` | `session.timeLeft` |
+| `session_quote` | `api.session.quote(req: SessionQuoteIpcRequest): Promise<SessionQuote>` | `{ req: { tariffId: string; minutes?: number } }` | `{ minutes: number; base: Money; total: Money; dayPct: number; discountPct: number; discountReason?: string; package: boolean }` | `session.quote` |
 
 ### 2.3 games
 
@@ -390,12 +394,12 @@ Rules:
 ### 4.1 Command registry
 
 There is no generated `commands.json`: `src-tauri/build.rs` only runs `tauri_build::build()`. The registry is the
-`COMMAND_NAMES` constant in `apps/shell/src-tauri/src/commands/mod.rs` (the 66 proxy commands below, asserted by a
+`COMMAND_NAMES` constant in `apps/shell/src-tauri/src/commands/mod.rs` (the 68 proxy commands below, asserted by a
 unit test) plus the 17 `kiosk_*` commands registered from `kiosk/commands.rs` and `kiosk/open_windows.rs` through the
 `invoke_handler!` macro in `lib.rs`, and after them the 6 `pc_*` commands of §2.15 (`commands/pc/`) and the display commands:
 
 ```json
-{ "protocol": 1, "commands": ["auth_login", "auth_logout", "auth_status", "auth_qr_start", "session_get", "session_start", "session_pause", "session_resume", "session_end", "session_extend", "session_lock", "session_unlock", "session_time_left", "games_list", "games_get", "games_launch", "games_kill", "games_running", "games_install_status", "apps_list", "apps_launch", "wallet_balance", "wallet_tariffs", "wallet_history", "wallet_topup_intent", "shop_products", "shop_order", "shop_order_status", "shop_orders", "chat_history", "chat_send", "chat_mark_read", "booking_seats", "booking_reserve", "booking_cancel", "tournaments_list", "tournaments_join", "tournaments_leaderboard", "profile_get", "profile_update", "profile_stats", "profile_achievements", "profile_loyalty", "profile_game_settings", "profile_game_settings_reset", "settings_get", "settings_set", "settings_get_theme", "settings_list_themes", "settings_get_shell_config", "policy_get", "policy_reload", "sys_pc_info", "sys_hardware", "sys_metrics", "sys_call_admin", "sys_reboot", "sys_shutdown", "sys_lock_screen", "sys_set_volume", "sys_set_locale", "sys_unlock_admin", "sys_reset_profile", "sys_ack_admin_message", "sys_log_client_error", "update_check", "update_apply", "kiosk_state", "kiosk_set_guard", "kiosk_set_fullscreen", "kiosk_show_overlay", "kiosk_monitors", "kiosk_move_to_monitor", "kiosk_virtual_keyboard", "kiosk_focus", "kiosk_exit", "kiosk_reload", "kiosk_open_devtools", "kiosk_gamepad_state", "kiosk_idle_reset", "kiosk_i18n_bundle", "kiosk_asset_url", "kiosk_open_windows", "kiosk_focus_window", "pc_mouse_get", "pc_mouse_set", "pc_audio_outputs", "pc_audio_set_output", "pc_gpu_panels", "pc_gpu_panel_open", "display_list", "display_set_refresh_rate", "display_confirm", "display_revert"],
+{ "protocol": 1, "commands": ["auth_login", "auth_logout", "auth_status", "auth_qr_start", "session_get", "session_start", "session_pause", "session_resume", "session_end", "session_extend", "session_lock", "session_unlock", "session_time_left", "session_quote", "games_list", "games_get", "games_launch", "games_kill", "games_running", "games_install_status", "apps_list", "apps_launch", "wallet_balance", "wallet_tariffs", "wallet_history", "wallet_topup_intent", "shop_products", "shop_order", "shop_order_status", "shop_orders", "chat_history", "chat_send", "chat_mark_read", "booking_seats", "booking_reserve", "booking_cancel", "tournaments_list", "tournaments_join", "tournaments_leaderboard", "profile_get", "profile_update", "profile_stats", "profile_achievements", "profile_loyalty", "profile_game_settings", "profile_game_settings_reset", "settings_get", "settings_set", "settings_get_theme", "settings_list_themes", "settings_get_shell_config", "policy_get", "policy_reload", "sys_pc_info", "sys_hardware", "sys_metrics", "sys_call_admin", "sys_reboot", "sys_shutdown", "sys_lock_screen", "sys_set_volume", "sys_set_locale", "sys_unlock_admin", "sys_reset_profile", "sys_ack_admin_message", "sys_log_client_error", "update_check", "update_apply", "kiosk_state", "kiosk_set_guard", "kiosk_set_fullscreen", "kiosk_show_overlay", "kiosk_monitors", "kiosk_move_to_monitor", "kiosk_virtual_keyboard", "kiosk_focus", "kiosk_exit", "kiosk_reload", "kiosk_open_devtools", "kiosk_gamepad_state", "kiosk_idle_reset", "kiosk_i18n_bundle", "kiosk_asset_url", "kiosk_open_windows", "kiosk_focus_window", "pc_mouse_get", "pc_mouse_set", "pc_audio_outputs", "pc_audio_set_output", "pc_gpu_panels", "pc_gpu_panel_open", "display_list", "display_set_refresh_rate", "display_confirm", "display_revert"],
   "events": ["agent://session.updated", "agent://session.warning", "agent://session.ended", "agent://wallet.updated", "agent://chat.message", "agent://notification.push", "agent://admin.message", "agent://admin.remoteControl", "agent://game.stateChanged", "agent://policy.changed", "agent://update.available", "agent://update.progress", "agent://update.ready", "agent://sys.metrics", "agent://sys.connectivity", "agent://shell.command", "agent://auth.expired", "agent://shop.orderUpdated", "kiosk://idle", "kiosk://gamepad", "kiosk://hotkey", "kiosk://monitorChanged", "kiosk://connectivity", "kiosk://themeChanged", "kiosk://localeChanged", "kiosk://focus", "kiosk://overlay"] }
 ```
 

@@ -45,8 +45,8 @@ export interface SessionStoreActions {
   /** `session_get`; errors are swallowed (no session assumed). */
   load(): Promise<Session | null>;
   start(tariffId: string, prepaid: boolean, minutes?: number): Promise<Session>;
-  pause(reason?: string): Promise<Session>;
-  resume(): Promise<Session>;
+  // No pause/resume: pausing is the cash desk's (the Agent answers a player's `403 staffOnly`); a session the desk
+  // paused still shows as paused (`state`).
   extend(minutes: number, tariffId?: string): Promise<Session>;
   end(reason?: SessionEndReason): Promise<SessionEndResult>;
   lock(reason?: string): Promise<Session>;
@@ -136,14 +136,6 @@ export const useSessionStore = create<SessionStore>()(
 
       start(tariffId, prepaid, minutes) {
         return run('start', () => api.session.start({ tariffId, prepaid, minutes: minutes ?? null }), applySession);
-      },
-
-      pause(reason) {
-        return run('pause', () => api.session.pause(reason), applySession);
-      },
-
-      resume() {
-        return run('resume', () => api.session.resume(), applySession);
       },
 
       extend(minutes, tariffId) {
