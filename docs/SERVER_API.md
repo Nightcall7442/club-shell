@@ -98,7 +98,26 @@ X-Signature: hex(HMAC-SHA256(key, message))
 User-scoped endpoints (`/users/*`, `/sessions*`, `/wallet/*`, `/shop/orders*`, `/chat/*`, `/booking/*`,
 `/tournaments/{id}/join`, `/games/{id}/accounts/*`) additionally require `X-User-Token: <user accessToken>`
 obtained from `POST /auth/*`. The server verifies the user token belongs to a user currently bound to this
-`pcId`. Missing/invalid → `401 unauthorized` with `details.reason = "userToken"`.
+`pcId`. Missing/invalid → `401 unauthorized` with `details.reason = "userToken"` and `details.problem`
+(`invalid` | `expired` | `boundElsewhere` | `revoked`).
+
+**Lifetime (sliding).** A player token lives `Auth:UserTokenHours` (12 h) from the sign-in (`AuthResponse.expiresAt`),
+and while that player's session is open on that PC every `POST /agents/{pcId}/heartbeat` moves its expiry to
+now + 12 h — a long session never loses its player mid-game. Without an open session the token expires as issued
+(or as last extended); an expired token is never revived. The server cannot tell the Agent the new expiry
+(`HeartbeatResponse` has no field for it), so the Agent must not drop the player at its local `expiresAt` while the
+player's session is open; the server's `401 userToken {problem: expired}` is the end of the sign-in.
+
+**One player, one PC.** A sign-in (`POST /auth/login`, `POST /auth/guest`) deletes the player's tokens on every other
+PC; each of those PCs that still held a live one gets the push `userRevoked {userId, reason: "signedInElsewhere"}`
+(§6.3). An open session on another PC is `409 activeSessionElsewhere` unless the player confirms `endElsewhere`
+(§4.3).
+
+**Player tokens are not the desk's.** With `X-User-Token` the server refuses what only the cash desk or the server
+does: `POST /sessions/{id}/pause` and `/resume` (always `403 forbidden {reason: staffOnly}`), and
+`POST /sessions/{id}/end` with a reason other than `user`, `idle`, `timeUp`, `agentRestart` (`403 staffOnly`; §4.5).
+The Agent's own ends (its timer, a desk/server `endSession`, a revoked player, a power command) go with the agent token
+alone.
 
 ---
 
@@ -199,7 +218,8 @@ Response `200`
 | `pendingCommands` | int | yes | commands queued while WS was down; Agent expects them via WS on reconnect or polls `GET /agents/{pcId}/commands` |
 | `session` | `Session` | no | server view of the current session (reconciliation) |
 
-Errors: `404 notFound` (pc deleted → re-register).
+Errors: `404 notFound` (pc deleted → re-register). Each heartbeat also extends the token of the player whose session is
+open on this PC (§2.3).
 
 #### `GET /agents/{pcId}/commands` — auth: agent (fallback when WS unavailable)
 
@@ -268,9 +288,21 @@ if this user has an open session on this `pcId` (e.g. after Agent restart). Serv
 `users` table of `cache\offline.db`. The Agent verifies only the PBKDF2-SHA256 form
 `pbkdf2$<iterations>$<salt base64>$<hash base64>` (`OfflineSessionStore.HashPassword` / `VerifyPassword`);
 any other encoding (e.g. an Argon2id PHC string) is stored but fails closed at offline login.
-Errors: `401 unauthorized` (bad credentials; `details.attemptsLeft`), `403 forbidden` (`banned`, `zoneNotAllowed`, `ageRestricted`), `409 conflict` (active session elsewhere; `details: { pcId, pcName }`), `429`.
+Errors: `401 unauthorized` (`details.reason = "badCredentials"`, `details.attemptsLeft`), `403 forbidden` (`banned` —
+banned or blacklisted in this club, `ageRestricted`, `pcOccupied` — this PC holds another player's open session),
+`409 conflict` (`details: { reason: "activeSessionElsewhere", pcId, pcName }`), `429`.
 Failures are counted per username for `password` and per PC for `card` (a card number can be typed and guessed):
-5 within 15 min answer `attemptsLeft: 0`, even for the right password or a bound card, until the window passes.
+5 within 15 min answer `attemptsLeft: 0`, even for the right password or a bound card, until the window passes. Wrong
+unlock PINs (`POST /users/{userId}/pin/verify`) count toward the same per-username lockout. The username matches in
+any case, Cyrillic included.
+
+`endElsewhere: true` (`AuthRequest.endElsewhere`, the player's confirmation after `409 activeSessionElsewhere`): the
+player's open session on the other PC is ended like a sign-out there — settled with reason `user` (prepaid: no refund;
+postpaid: the minutes played), `endSession {sessionId, reason: "user"}` queued for that PC, the player's token there
+deleted and `userRevoked {userId, reason: "signedInElsewhere"}` pushed to it — and the player is signed in here, in one
+transaction: when this sign-in is refused after all (`pcOccupied`, `banned`, `401`), nothing is ended. Without it (or
+`false`) the answer is `409` as before. Every successful sign-in, with or without it, also signs the player out of every
+other PC where they still hold a token (`userRevoked {reason: "signedInElsewhere"}`, §2.3).
 
 #### `POST /auth/qr/start` — auth: agent
 
@@ -289,12 +321,21 @@ transient `guest` user (`username = "guest-<pcNumber>-<n>"`). Errors: `403 forbi
 #### `POST /auth/logout` — auth: user
 
 Request `{ reason: "user" | "idle" | "admin" | "agentRestart" }` → `204`. Ends the open session if any
-(server records `SessionEndReason`).
+(server records `SessionEndReason`). A sign-out is the player's own end: `admin`/`error` are recorded and settled as
+`user` (no refund of unused prepaid time). No `userRevoked` is pushed for it.
 
 ### 4.4 Users
 
-#### `GET /users/{userId}` — auth: user (self) → `User`.
+#### `GET /users/{userId}` — auth: user (self) → `User`. `flags` contains `"pinSet"` when the player has an unlock PIN (beyond `UserFlags`).
 #### `PATCH /users/{userId}` — auth: user (self) — Request `{ displayName?: string, avatarUrl?: string, locale?: Locale, pin?: string }` → `User`. Errors: `403` (guest), `400`.
+#### `POST /users/{userId}/pin/verify` — auth: user (self) — beyond the contract
+
+Request `PinVerifyRequest { pin: string }` (4–6 digits) → `204` (the PIN set with `PATCH /users/{userId} {pin}` on any
+PC matches). Errors: `401 unauthorized {reason: "badSecret", attemptsLeft}` (wrong PIN), `404 notFound
+{what: "pin", reason: "noPin"}` (none set), `400 validation {field: "pin", reason: "format"}` (not counted),
+`403 forbidden {reason: "notOwner"}` (another player's id). Wrong PINs count toward the sign-in lockout of the
+player's username (5 wrong PINs or passwords within 15 min); while locked even the right PIN gets sign-in's refusal,
+`401 unauthorized {reason: "badCredentials", attemptsLeft: 0}`. A right PIN clears the count.
 #### `GET /users/{userId}/stats` → `UserStats`.
 #### `GET /users/{userId}/achievements` → `{ items: Achievement[] }`.
 #### `GET /users/{userId}/loyalty` → `Loyalty`.
@@ -327,13 +368,53 @@ Request
 | `clientSessionId` | uuid | no | Agent-generated id used offline; server adopts it as `id` if free |
 
 Response `201 Session`.
-Errors: `409 sessionAlreadyActive`, `402 insufficientFunds`, `404 notFound` (tariff/pc), `403 policyDenied` (`details.rule`: `tariffZone`, `tariffTime`, `postpaidNotAllowed`, `pcBooked`, `pcMaintenance`).
+Errors: `409 sessionAlreadyActive`, `402 insufficientFunds`, `404 notFound` (tariff/pc), `403 policyDenied` (`details.rule`, repeated as `details.reason`: `tariffZone`, `tariffTime`, `postpaidNotAllowed`, `pcBooked`, `pcMaintenance`, `blacklisted`, `minorCurfew`).
 
-#### `POST /sessions/{id}/pause` — auth: user → `Session`. Errors: `409 sessionNotActive`, `409 conflict` (already paused), `403 policyDenied`.
-#### `POST /sessions/{id}/resume` — auth: user → `Session`. Errors: `409 sessionNotActive`, `409 conflict`, `402`.
-#### `POST /sessions/{id}/end` — auth: agent (user token optional; Agent may end on timeout/admin)
+**Postpaid (`prepaid: false`) and the debt limit.** Who may run a postpaid bill, and how far below zero the balance
+may go before the server ends the session (the *debt limit*, taken when the session opens and kept on it —
+`sessions.debt_limit`; a later change of the club's settings does not touch open sessions):
 
-Request `{ reason: SessionEndReason, endedAt?: datetime, secondsUsed: int }` → `{ session: Session, charged: Money, refunded: Money }`. Errors: `409 sessionNotActive` (already ended → treated as success by the Agent when `details.session.state = ended`).
+| Channel | Member | Guest |
+|---------|--------|-------|
+| Kiosk (`POST /sessions` with the player's token: the player's own pay-as-you-go, e.g. the Agent's auto-start) | allowed, limit **0** whatever the club set: `402` unless the balance pays the first minute; ended (`timeUp`, `endSession` command) at the minute boundary where the next minute is not affordable | `403 policyDenied postpaidNotAllowed` — always, whatever account the guest button made |
+| Desk (`POST /admin/sessions`, `/admin/sessions/guest` with `prepaid: false`) | allowed; limit `limits.memberDebtLimit`, **unset or 0 = no cap** | allowed unless `limits.guestPostpaid` is `false` (**on by default**); limit `limits.guestDebtLimit`, unset or 0 = no cap |
+| Offline replay (`startedAt` + `clientSessionId`) | recorded as the Agent let it happen, limit 0, no `402` | as the desk's `guestPostpaid` |
+
+A session with a cap is warned before the cut-off: when the money left (balance + limit) pays for at most 5, then at
+most 1 more minutes, the server adds the mark (`5`, `1`) to `Session.warningsSent`, pushes `sessionUpdated`, then a
+`notification` push (`level: warning`, «Осталось примерно на N мин игры…»). A top-up that moves the cut-off away takes
+the mark back. A session without a cap is never cut off by the server and never warned. Postpaid sessions opened before
+the debt limit existed keep the limit the server applied then (member: `memberDebtLimit` or 0; guest:
+`guestDebtLimit` or no cap).
+
+#### `POST /sessions/quote` — auth: user — beyond the contract
+
+Request `SessionQuoteRequest { pcId, userId, tariffId, minutes? }` → `200 SessionQuote { minutes, base: Money, total:
+Money, dayPct, discountPct, discountReason, package }`: what `POST /sessions` would charge now for that player, tariff
+and PC — the same price function (day rate, the best of group / loyalty / happy-hour discount, never summed) and the
+same refusals: `404 notFound` (`user`, `tariff`), `403 policyDenied` (`pcMaintenance`, `blacklisted`, `minorCurfew`,
+`tariffZone`, `tariffTime`), `400 validation minutes min|max`. `minutes` omitted = one hour; a package is priced at its
+own minutes (`package: true`). `discountReason` is the kind of discount (`group`, `loyalty`, `happyHour`) or `null`.
+`userId` must be the token's player (`403 forbidden notOwner`), `pcId` this PC (`403 forbidden pcMismatch`). Nothing is
+created or charged; no `Idempotency-Key`.
+
+#### `POST /sessions/{id}/pause` — auth: user → always `403 forbidden {reason: "staffOnly"}` (billing does not stop at the player's request; `401 userToken` without a player token).
+#### `POST /sessions/{id}/resume` — auth: user → always `403 forbidden {reason: "staffOnly"}`.
+#### `POST /sessions/{id}/end` — auth: agent, player token optional
+
+Request `{ reason: SessionEndReason, endedAt?: datetime, secondsUsed: int }` → `{ session: Session, charged: Money, refunded: Money }`. Errors: `409 sessionNotActive` (already ended → treated as success by the Agent when `details.session.state = ended`), `403 forbidden pcMismatch` (another PC's session).
+
+- **With a player token** only the player's own reasons and the Agent's timer's are taken — `user`, `idle`, `timeUp`,
+  `agentRestart`; `admin`/`error` are `403 forbidden {reason: "staffOnly"}`. The 409 and `pcMismatch` checks come
+  first, so echoing an end the server already made still gets the 409.
+- **Agent token alone** (the Agent's own ends): any reason.
+- **Refund** of unused prepaid hourly time only for `admin`/`error` (pro rata to what was paid, a package never);
+  `user`, `idle`, `timeUp`, `agentRestart` never refund, with or without a player token. Postpaid is charged the frozen
+  price of the minutes played.
+- **When**: settled at the server's now; a session created by the offline replay is settled at `endedAt` clamped
+  between its last transition (its start, at the latest) and now — the replayed end of an offline game is not billed
+  up to the moment the PC came back. (The offline replay's `startedAt` is likewise taken up to now, and refused older
+  than `Sessions:MaxReplayHours`.)
 
 #### `POST /sessions/{id}/extend` — auth: user, idempotent
 
@@ -488,6 +569,7 @@ Response `204`.
 | POST | `/auth/logout` | user |
 | GET | `/users/{userId}` | user |
 | PATCH | `/users/{userId}` | user |
+| POST | `/users/{userId}/pin/verify` | user (beyond the contract) |
 | GET | `/users/{userId}/stats` | user |
 | GET | `/users/{userId}/achievements` | user |
 | GET | `/users/{userId}/loyalty` | user |
@@ -498,6 +580,7 @@ Response `204`.
 | DELETE | `/users/{userId}/game-settings/{gameId}` | user |
 | GET | `/sessions/current?pcId=` | agent |
 | POST | `/sessions` | user |
+| POST | `/sessions/quote` | user (beyond the contract) |
 | POST | `/sessions/{id}/pause` | user |
 | POST | `/sessions/{id}/resume` | user |
 | POST | `/sessions/{id}/end` | agent |
@@ -613,13 +696,20 @@ dropped, not queued. Each has a REST path of its own: `anticheatViolation` is al
 |------|---------|--------------|
 | `walletUpdated` | `Balance` | IPC `wallet.updated` |
 | `chatMessage` | `ChatMessage` | IPC `chat.message` |
-| `notification` | `Notification` | IPC `notification.push` |
+| `notification` | `Notification` | IPC `notification.push` (the server sends it before a capped postpaid session's cut-off, §4.5) |
 | `orderUpdated` | `Order` | IPC `notification.push` (level `info`) + `shop.orderUpdated` (Tauri `agent://shop.orderUpdated`, payload `Order`) |
 | `bookingUpdated` | `Booking` | IPC `notification.push` |
 | `tournamentUpdated` | `Tournament` | IPC `notification.push` |
 | `sessionUpdated` | `Session` | reconcile; IPC `session.updated` |
 | `pcStatusChanged` | `{ pcId: uuid, status: PcStatus }` | cache for seat map |
-| `userRevoked` | `{ userId: uuid, reason: string }` | IPC `auth.expired{revoked}`, end session |
+| `userRevoked` | `{ userId: uuid, reason: string }` | IPC `auth.expired{reason}`, end session |
+
+`userRevoked.reason` — the server's reasons (`AuthExpiredReason`): `sessionEnded` (the desk ended the session, or a
+guest's time ran out), `seatTaken` (the desk seated someone else on this PC), `seatMoved` (the desk moved the session
+to another PC), `signedInElsewhere` (the player signed in on another PC; with `endElsewhere` the session here was
+already ended, `endSession {reason: user}` precedes the push), `blacklisted`, `passwordReset`. For the first four the
+server has already ended or moved the session, so the Agent's own end of it is answered `409 sessionNotActive`; after
+`blacklisted`/`passwordReset` the session is still open and the Agent ends it (agent token, its own reason).
 
 Example frames:
 

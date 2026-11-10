@@ -18,6 +18,14 @@
   новые первыми, страницы по 50 до 200, фильтры `type`/`from`/`to`) и `/users/{userId}/game-settings` (список → `{items:[]}`, `DELETE` → 204,
   остальные game-settings → 501). Пуши `sessionUpdated`, `walletUpdated` (`userRevoked` — с кассой в S4: `logout`
   самого ПК его не шлёт).
+- Игрок и ПК (docs/SERVER_API.md §2.3, §4.3–§4.5): токен игрока не может то, что делает касса — `pauseSession`/`resumeSession`
+  всегда `403 staffOnly`, `endSession` с токеном игрока только `user`/`idle`/`timeUp`/`agentRestart` (без возврата),
+  `admin`/`error` — `403 staffOnly` (свои завершения агент шлёт без токена игрока). Вход игрока выводит его со всех других
+  ПК (`userRevoked signedInElsewhere`); открытый сеанс на другом ПК — `409 activeSessionElsewhere`, с `endElsewhere: true`
+  он завершается как выход там. Токен игрока скользящий: каждый heartbeat ПК с открытым сеансом игрока продлевает его на
+  12 ч. Сверх контракта: `POST /sessions/quote` (цена старта, как у `createSession`), `POST /users/{userId}/pin/verify`
+  (PIN разблокировки на сервере, неверные PIN — в общий лимит с паролем), флаг `pinSet` в `User.flags`. Офлайн-сеанс,
+  завершённый задним числом, считается до его `endedAt`.
 - S3: `getGames` (страницы до 1000, скрытые исключены, порядок владельца, ETag `"g<catalogVersion>-<hash>"` с
   `lastPlayedAt` игрока), `getGame`, `sendLaunchReport` (повтор из офлайн-очереди хранится один раз), `getUpdateManifest`
   (всегда `204`, решение владельца), `getPc` (`hwid` только своего ПК) и сверх контракта `POST /anticheat/report` (204).
