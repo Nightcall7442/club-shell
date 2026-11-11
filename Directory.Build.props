@@ -31,7 +31,7 @@
     <Authors>ClubShell contributors</Authors>
     <Copyright>Copyright (c) 2026 ClubShell contributors</Copyright>
     <!-- Release builds pass -p:Version from the tag (release.yml); this is the version of local and CI builds. -->
-    <VersionPrefix>1.0.20</VersionPrefix>
+    <VersionPrefix>1.0.21</VersionPrefix>
   </PropertyGroup>
 
   <PropertyGroup Label="Output layout">
