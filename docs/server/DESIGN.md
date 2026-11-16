@@ -1821,6 +1821,12 @@ INSERT INTO idempotency_keys(...) VALUES (...) ON CONFLICT DO NOTHING;   -- ко
   Только временный гость (`409 notGuest`) без открытого сеанса (`409 guestPlaying`), в открытой смене, и ящик должен её
   вмещать (`409 cashShort {available}`). Возврат за неиспользованное время по-прежнему только при завершении кассой
   (D-50): «Выйти» на ПК оставляет время неиспользованным.
+- **Списание долга** (SHELL_CHANGES 90): `POST /admin/wallet/write-off {userId, amount, reason}` (`Idempotency-Key`
+  обязателен): владелец или кассир с отметкой «Списание долгов» (`staff.debt_write_off`, M0020; иначе `403
+  writeOffNotAllowed`); ровно долг (`409 debtChanged {debt}`, нет долга — `409 noDebt`), не во время сеанса (`409
+  sessionOpen`: постоплата списывается в конце), причина 1–200 символов. Леджер: `adjustment` +долг без способа оплаты,
+  `meta.kind = debtWriteOff` — ни наличных, ни выручки, «В кассе» то же; X/Z — `writeOffs`/`writeOffCount`, «Отчёты» —
+  `totals.writeOffs`. Журнал — `debtWriteOff` (автор, сумма, причина, последний сеанс игрока). Смена не нужна.
 - **Пакеты** (D-38, D-39): `adminQuote` отдаёт ещё `rule` (`tariffZone | tariffTime | null`, `SessionService.TariffRule`)
   и `minutes` (у пакета — его минуты). Продление пакетом продаёт его минуты, в журнале — реально купленные минуты, цена и
   оплата; продление почасовым тарифом переключает сеанс на него.

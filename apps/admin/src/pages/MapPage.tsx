@@ -224,6 +224,7 @@ type SheetState =
   | { kind: 'extend' }
   | { kind: 'end' }
   | { kind: 'settle'; target: SettleTarget }
+  | { kind: 'writeOffAll'; debts: GuestDebt[] }
   | { kind: 'move'; fromPcId: string; toPcId: string }
   | null;
 
@@ -2389,6 +2390,8 @@ function SettleSheet({
   const [error, setError] = useState<string | null>(null);
   const [lost, setLost] = useState(false);
   const [done, setDone] = useState<{ text: string; receipt: ReceiptData } | null>(null);
+  const [writtenOff, setWrittenOff] = useState<string | null>(null);
+  const canWriteOff = useCanWriteOff();
   const key = useHeldKey();
   const payout = target.debt <= 0;
   const name = target.guest
@@ -2440,7 +2443,16 @@ function SettleSheet({
       onClose={onClose}
       footer={<PayFooter />}
     >
-      {done ? (
+      {writtenOff ? (
+        <>
+          <Note tone="ok" role="status">
+            {writtenOff}
+          </Note>
+          <Button variant="primary" autoFocus onClick={onClose}>
+            {t('Готово')}
+          </Button>
+        </>
+      ) : done ? (
         <>
           <Note tone="ok" role="status">
             {done.text}
@@ -2516,6 +2528,17 @@ function SettleSheet({
               }
             }}
           />
+          {canWriteOff && (
+            <WriteOffBox
+              userId={target.userId}
+              debt={debt}
+              onChanged={setDebt}
+              onDone={(text) => {
+                setWrittenOff(text);
+                onDone();
+              }}
+            />
+          )}
         </>
       )}
     </Sheet>
@@ -2954,6 +2977,180 @@ function FreeSeat({ seat, tariffs, banner, note, busy, run, onDone, setNote }: P
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+// Write-off (SHELL_CHANGES 90): a debt the club gives up, without money, with a reason
+// ---------------------------------------------------------------------------------------------------------------------
+
+/** The owner always; a cashier with the owner's mark («Персонал» → «Списание долгов»). */
+function useCanWriteOff(): boolean {
+  const staff = useClub().staff;
+  return staff !== null && (staff.role === 'owner' || staff.debtWriteOff === true);
+}
+
+/**
+ * Under the pay box of a debt: «Списать долг» with a reason, asked once more. Nothing goes into the shift — «В кассе», the
+ * cash and the revenue stay the same; the journal has `debtWriteOff`. A changed debt comes back with the new figure.
+ */
+function WriteOffBox({
+  userId,
+  debt,
+  onChanged,
+  onDone,
+}: {
+  userId: string;
+  debt: number;
+  onChanged: (debt: number) => void;
+  onDone: (text: string) => void;
+}): JSX.Element {
+  const [reason, setReason] = useState('');
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const key = useHeldKey();
+  const reasonId = useId();
+  const ready = reason.trim().length > 0 && !busy;
+
+  const writeOff = async (): Promise<void> => {
+    if (!asking) {
+      setAsking(true);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await adminApi.writeOff({ userId, amount: debt, reason: reason.trim() }, key.take());
+      key.settle();
+      onDone(t('Долг списан · {sum} · без денег в кассу', { sum: moneyExact(debt) }));
+    } catch (e) {
+      key.settle(e);
+      const next = changedAmount(e, 'debtChanged', 'debt');
+      if (next !== null) onChanged(next);
+      const why = reasonOf(e);
+      setError(
+        why === 'sessionOpen'
+          ? t('Игрок ещё в сеансе: сначала завершите его')
+          : why === 'writeOffNotAllowed'
+            ? t('Списывать долги может владелец или кассир с его разрешением')
+            : describe(e),
+      );
+      setAsking(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-line pt-3">
+      <label htmlFor={reasonId} className="label-sm">
+        {t('Или списать долг (без денег)')}
+      </label>
+      <input
+        id={reasonId}
+        className={inputCls}
+        maxLength={200}
+        placeholder={t('Причина: тестовый сеанс, ПК выключили…')}
+        value={reason}
+        onChange={(e) => {
+          setReason(e.target.value);
+          setAsking(false);
+        }}
+      />
+      <Button variant={asking ? 'danger' : 'tertiary'} disabled={!ready} onClick={() => void writeOff()}>
+        {asking
+          ? t('Точно списать {sum}? Денег в кассу не будет', { sum: moneyExact(debt) })
+          : t('Списать {sum}', { sum: moneyExact(debt) })}
+      </Button>
+      {error && (
+        <Note tone="err" role="alert">
+          {error}
+        </Note>
+      )}
+    </div>
+  );
+}
+
+/** «Списать все долги гостей»: the list and the total first, one reason for all, then each debt written off in turn. */
+function WriteOffAllSheet({
+  debts,
+  onClose,
+  onDone,
+}: {
+  debts: GuestDebt[];
+  onClose: () => void;
+  onDone: () => void;
+}): JSX.Element {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ done: number; failed: string[] } | null>(null);
+  const total = debts.reduce((acc, d) => acc + d.debt.amount, 0);
+  const reasonId = useId();
+
+  const run = async (): Promise<void> => {
+    setBusy(true);
+    const failed: string[] = [];
+    let done = 0;
+    for (const d of debts) {
+      try {
+        await adminApi.writeOff({ userId: d.userId, amount: d.debt.amount, reason: reason.trim() }, newKey());
+        done++;
+      } catch (e) {
+        failed.push(`${guestDisplayName(d.displayName)}: ${describe(e)}`);
+      }
+    }
+    setResult({ done, failed });
+    setBusy(false);
+    onDone();
+  };
+
+  return (
+    <Sheet title={t('Списать все долги гостей')} onClose={busy ? undefined : onClose}>
+      {result ? (
+        <>
+          <Note tone={result.failed.length > 0 ? 'warn' : 'ok'} role="status">
+            {t('Списано долгов: {n}', { n: result.done })}
+          </Note>
+          {result.failed.map((f) => (
+            <p key={f} className="text-xs text-danger-ink">
+              {f}
+            </p>
+          ))}
+          <Button variant="primary" autoFocus onClick={onClose}>
+            {t('Готово')}
+          </Button>
+        </>
+      ) : (
+        <>
+          <ul className="thin-scrollbar flex max-h-72 flex-col divide-y divide-accent/[0.07] overflow-y-auto">
+            {debts.map((d) => (
+              <li key={d.userId} className="flex items-center justify-between gap-3 py-1.5 text-[13px]">
+                <span className="truncate">{guestDisplayName(d.displayName)}</span>
+                <span className="tnum font-medium">{moneyExact(d.debt.amount)}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="tnum text-sm font-semibold text-hi">
+            {t('Итого: {sum} · {n} долгов', { sum: moneyExact(total), n: debts.length })}
+          </p>
+          <label htmlFor={reasonId} className="label-sm">
+            {t('Причина')}
+          </label>
+          <input
+            id={reasonId}
+            className={inputCls}
+            maxLength={200}
+            placeholder={t('Причина: тестовый сеанс, ПК выключили…')}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+          />
+          <Button variant="danger" disabled={busy || reason.trim().length === 0} onClick={() => void run()}>
+            {busy ? '…' : t('Списать {sum} без денег в кассу', { sum: moneyExact(total) })}
+          </Button>
+        </>
+      )}
+    </Sheet>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 // «Расчёт с гостями и долги»: postpaid bills to take, guests' refunds to give back
 // ---------------------------------------------------------------------------------------------------------------------
 
@@ -2967,21 +3164,32 @@ function SettleList({
   refunds,
   kept,
   onSettle,
+  onWriteOffAll,
 }: {
   debts: GuestDebt[];
   refunds: GuestRefund[];
   kept: number;
   onSettle: (target: SettleTarget) => void;
+  onWriteOffAll: (debts: GuestDebt[]) => void;
 }): JSX.Element {
   const id = useId();
+  const canWriteOff = useCanWriteOff();
+  const guestDebts = debts.filter((d) => d.role === undefined || d.role === 'guest');
   const where = (pc: string | null, endedAt: string | null): string =>
     [pc ? pcLabel(pc) : null, endedAt ? clock(endedAt) : null].filter(Boolean).join(' · ');
   return (
     <section aria-labelledby={id} className="glass-side flex shrink-0 flex-col gap-2 px-5 pb-2 pt-3.5">
-      <h2 id={id} className="label flex items-center gap-2 text-warning">
-        <AlertTriangleIcon size={13} strong />
-        {t('Расчёт с гостями и долги')}
-      </h2>
+      <div className="flex items-center justify-between gap-3">
+        <h2 id={id} className="label flex items-center gap-2 text-warning">
+          <AlertTriangleIcon size={13} strong />
+          {t('Расчёт с гостями и долги')}
+        </h2>
+        {canWriteOff && guestDebts.length > 1 && (
+          <Button size="sm" variant="ghost" onClick={() => onWriteOffAll(guestDebts)}>
+            {t('Списать все долги гостей')}
+          </Button>
+        )}
+      </div>
       <ul className="thin-scrollbar flex max-h-56 flex-col divide-y divide-accent/[0.07] overflow-y-auto">
         {debts.map((d) => {
           const guest = d.role === undefined || d.role === 'guest';
@@ -3541,6 +3749,7 @@ export function MapPage(): JSX.Element {
               refunds={refunds}
               kept={allRefunds.length - refunds.length}
               onSettle={(target) => setSheet({ kind: 'settle', target })}
+              onWriteOffAll={(list) => setSheet({ kind: 'writeOffAll', debts: list })}
             />
           )}
         </div>
@@ -3602,6 +3811,16 @@ export function MapPage(): JSX.Element {
         <SettleSheet
           key={sheet.target.userId}
           target={sheet.target}
+          onClose={() => setSheet(null)}
+          onDone={() => {
+            void load();
+            shift.refresh();
+          }}
+        />
+      )}
+      {sheet?.kind === 'writeOffAll' && (
+        <WriteOffAllSheet
+          debts={sheet.debts}
           onClose={() => setSheet(null)}
           onDone={() => {
             void load();

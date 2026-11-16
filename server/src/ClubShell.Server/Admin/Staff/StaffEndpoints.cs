@@ -37,11 +37,14 @@ public static class StaffEndpoints
         }).WithMetadata(new AuthRequirement(AuthMode.Staff));
     }
 
-    /// <summary>The signed-in member as <c>AdminStaffMember</c>: active by definition, <c>pcService</c> read from the row.</summary>
+    /// <summary>The signed-in member as <c>AdminStaffMember</c>: active by definition, <c>pcService</c> and <c>debtWriteOff</c> read from the row.</summary>
     public static async Task<AdminStaffMember> MemberAsync(NpgsqlConnection c, StaffContext staff)
     {
-        var marked = staff.StaffId is { } id && await c.ExecuteScalarAsync<bool>("SELECT pc_service FROM staff WHERE id = @id", new { id });
-        return new(staff.WireId, staff.Name, staff.Role, Active: true, StaffAdminEndpoints.PcService(staff.Role, marked));
+        var (pcService, writeOff) = staff.StaffId is { } id
+            ? await c.QuerySingleAsync<(bool, bool)>("SELECT pc_service, debt_write_off FROM staff WHERE id = @id", new { id })
+            : (false, false);
+        return new(staff.WireId, staff.Name, staff.Role, Active: true, StaffAdminEndpoints.PcService(staff.Role, pcService),
+            StaffAdminEndpoints.PcService(staff.Role, writeOff));
     }
 
     private static async Task<IResult> LoginAsync(HttpContext context, [FromBody] JsonElement body, StaffTokens staff, NpgsqlDataSource db)

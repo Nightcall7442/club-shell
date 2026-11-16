@@ -40,10 +40,10 @@ public static partial class StaffAdminEndpoints
     {
         var staff = context.Features.GetRequiredFeature<StaffContext>();
         await using var c = await db.OpenConnectionAsync();
-        var items = await c.QueryAsync<(Guid Id, string Name, string Role, bool Active, bool PcService)>(
-            "SELECT id, name, role, active, pc_service FROM staff WHERE club_id = @ClubId ORDER BY created_at, id", new { staff.ClubId });
+        var items = await c.QueryAsync<(Guid Id, string Name, string Role, bool Active, bool PcService, bool DebtWriteOff)>(
+            "SELECT id, name, role, active, pc_service, debt_write_off FROM staff WHERE club_id = @ClubId ORDER BY created_at, id", new { staff.ClubId });
         return AdminJson.Ok(new AdminStaffList(items.Select(s => new AdminStaffMember(
-            s.Id.ToString(), s.Name, s.Role, s.Active, PcService(s.Role, s.PcService))).ToList()));
+            s.Id.ToString(), s.Name, s.Role, s.Active, PcService(s.Role, s.PcService), PcService(s.Role, s.DebtWriteOff))).ToList()));
     }
 
     private static async Task<IResult> AddAsync(
@@ -55,18 +55,19 @@ public static partial class StaffAdminEndpoints
         var role = r.Role is "owner" or "cashier" ? r.Role : throw ApiException.Validation("role", "enum");
         var hmac = tokens.PinHmac(Pin(r.Pin!));
         var pcService = r.PcService ?? false;
+        var debtWriteOff = r.DebtWriteOff ?? false;
         return await store.ExecuteHttpAsync(context, ShiftEndpoints.Principal(staff), keyRequired: false, body, async (c, tx) =>
         {
             var now = clock.GetUtcNow();
             var id = Guid.CreateVersion7(now);
             await PinWriteAsync(c, tx, () => c.ExecuteAsync(
                 """
-                INSERT INTO staff (id, network_id, club_id, name, role, pin_hmac, active, pc_service, created_at, updated_at)
-                VALUES (@id, @NetworkId, @ClubId, @name, @role, @hmac, true, @pcService, @now, @now)
+                INSERT INTO staff (id, network_id, club_id, name, role, pin_hmac, active, pc_service, debt_write_off, created_at, updated_at)
+                VALUES (@id, @NetworkId, @ClubId, @name, @role, @hmac, true, @pcService, @debtWriteOff, @now, @now)
                 """,
-                new { id, staff.NetworkId, staff.ClubId, name, role, hmac, pcService, now },
+                new { id, staff.NetworkId, staff.ClubId, name, role, hmac, pcService, debtWriteOff, now },
                 tx));
-            await Audit.WriteAsync(c, tx, staff, now, "staffAdd", detail: name, meta: new { staffId = id, role, pcService });
+            await Audit.WriteAsync(c, tx, staff, now, "staffAdd", detail: name, meta: new { staffId = id, role, pcService, debtWriteOff });
             return new IdempotentResult(StatusCodes.Status200OK, AdminJson.ToElement(new AdminStaffCreateResponse(id.ToString())));
         });
     }
@@ -111,10 +112,10 @@ public static partial class StaffAdminEndpoints
         await PinWriteAsync(c, tx, () => c.ExecuteAsync(
             """
             UPDATE staff SET name = coalesce(@name, name), active = coalesce(@Active, active), pin_hmac = coalesce(@hmac, pin_hmac),
-                pc_service = coalesce(@PcService, pc_service), updated_at = @now
+                pc_service = coalesce(@PcService, pc_service), debt_write_off = coalesce(@DebtWriteOff, debt_write_off), updated_at = @now
             WHERE id = @staffId
             """,
-            new { staffId, name, r.Active, hmac, r.PcService, now },
+            new { staffId, name, r.Active, hmac, r.PcService, r.DebtWriteOff, now },
             tx));
         if (r.Active == false && before.Active)
         {
@@ -132,7 +133,7 @@ public static partial class StaffAdminEndpoints
 
         // The PIN itself never reaches the journal: only that it changed.
         await Audit.WriteAsync(c, tx, staff, now, "staffUpdate", detail: name ?? before.Name,
-            meta: new { staffId, name, active = r.Active, pinChanged = hmac is not null, pcService = r.PcService });
+            meta: new { staffId, name, active = r.Active, pinChanged = hmac is not null, pcService = r.PcService, debtWriteOff = r.DebtWriteOff });
         await tx.CommitAsync();
         return AdminJson.Ok(AdminJson.OkBody);
     }

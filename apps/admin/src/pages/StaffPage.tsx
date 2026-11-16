@@ -68,6 +68,7 @@ export default function StaffPage(): JSX.Element {
   const [role, setRole] = useState<StaffRole>('cashier');
   const [pin, setPin] = useState('');
   const [pcService, setPcService] = useState(false);
+  const [debtWriteOff, setDebtWriteOff] = useState(false);
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -166,6 +167,29 @@ export default function StaffPage(): JSX.Element {
                 ),
             },
             {
+              key: 'debtWriteOff',
+              title: t('Списание долгов'),
+              width: '12rem',
+              render: (s) =>
+                s.role === 'owner' ? (
+                  <span className="text-[13px] text-muted">{t('Всегда')}</span>
+                ) : (
+                  <Toggle
+                    checked={s.debtWriteOff === true}
+                    disabled={busy || s.debtWriteOff === undefined}
+                    label={s.debtWriteOff ? t('Может списывать') : t('Не может')}
+                    onChange={(v) =>
+                      void run(async () => {
+                        await clubApi.updateStaff(s.id, { debtWriteOff: v });
+                        return v
+                          ? t('{name}: может списывать долги', { name: s.name })
+                          : t('{name}: списание долгов выключено', { name: s.name });
+                      })
+                    }
+                  />
+                ),
+            },
+            {
               key: 'pin',
               title: t('PIN'),
               num: true,
@@ -200,12 +224,19 @@ export default function StaffPage(): JSX.Element {
             e.preventDefault();
             if (!canAdd) return;
             void run(async () => {
-              await clubApi.addStaff({ name: name.trim(), role, pin, pcService: role === 'owner' || pcService });
+              await clubApi.addStaff({
+                name: name.trim(),
+                role,
+                pin,
+                pcService: role === 'owner' || pcService,
+                debtWriteOff: role === 'owner' || debtWriteOff,
+              });
               const done = t('{name} добавлен', { name: name.trim() });
               setName('');
               setPin('');
               setRole('cashier');
               setPcService(false);
+              setDebtWriteOff(false);
               return done;
             });
           }}
@@ -254,7 +285,14 @@ export default function StaffPage(): JSX.Element {
           </Button>
           {role === 'cashier' && (
             <div className="md:col-span-4">
-              <Toggle checked={pcService} onChange={setPcService} label={t('Разрешить вход на ПК для обслуживания')} />
+              <div className="flex flex-wrap gap-x-8 gap-y-3">
+                <Toggle
+                  checked={pcService}
+                  onChange={setPcService}
+                  label={t('Разрешить вход на ПК для обслуживания')}
+                />
+                <Toggle checked={debtWriteOff} onChange={setDebtWriteOff} label={t('Разрешить списывать долги')} />
+              </div>
             </div>
           )}
         </form>

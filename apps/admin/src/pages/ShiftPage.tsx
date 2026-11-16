@@ -140,6 +140,10 @@ function TotalsGrid({ x }: { x: ShiftTotals }): JSX.Element {
     [t('Магазин'), x.shop],
     [t('Возвраты'), x.refunds],
     [t('Бонусы'), x.bonuses],
+    // Not money: debts the club gave up (SHELL_CHANGES 90), shown apart from the revenue.
+    ...((x.writeOffs ?? 0) > 0
+      ? ([[t('Списано долгов ({n})', { n: x.writeOffCount ?? 0 }), x.writeOffs ?? 0]] as [string, number][])
+      : []),
   ];
   const drawer: [string, number][] = [
     [t('Внесения'), x.cashIn ?? 0],

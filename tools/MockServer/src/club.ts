@@ -47,6 +47,8 @@ export interface StaffRecord {
   active: boolean;
   /** The owner's mark: may sign in to their own Windows account on the club's PCs (an owner always may). */
   pcService?: boolean;
+  /** The owner's mark: may write a debt off (SHELL_CHANGES 90; an owner always may). */
+  debtWriteOff?: boolean;
 }
 
 /** `pcService` as the server answers it: an owner always, a cashier with the owner's mark. */
@@ -73,6 +75,9 @@ export interface ShiftTotals {
   cashOut: number;
   /** Cash given back to walk-in guests (cash `adjustment` rows). */
   payouts: number;
+  /** Debts written off, without money (SHELL_CHANGES 90), and how many. */
+  writeOffs: number;
+  writeOffCount: number;
   /** Cash top-ups booked with the club API key: in `topUpCash`, but never in the drawer. */
   apiCash: number;
   /**
@@ -257,6 +262,7 @@ export type AuditAction =
   | 'cashIn'
   | 'cashOut'
   | 'payout'
+  | 'debtWriteOff'
   | 'shopSale'
   | 'shopVoid'
   | 'sessionMove'
@@ -834,6 +840,8 @@ export function totalsSince(from: string, to: string = now(), shift: ShiftRecord
     cashIn: 0,
     cashOut: 0,
     payouts: 0,
+    writeOffs: 0,
+    writeOffCount: 0,
     apiCash: 0,
     shopByMethod: { cash: 0, card: 0, payme: 0, click: 0, uzum: 0, balance: 0 },
     shopVoids: 0,
@@ -868,6 +876,10 @@ export function totalsSince(from: string, to: string = now(), shift: ShiftRecord
       }
       case 'adjustment':
         if (tx.description === PAYOUT_DESCRIPTION) t.payouts += -a;
+        if (tx.description.startsWith(WRITE_OFF_DESCRIPTION)) {
+          t.writeOffs += a;
+          t.writeOffCount += 1;
+        }
         break;
       case 'charge':
         t.sessions += -a;
@@ -886,6 +898,13 @@ export function totalsSince(from: string, to: string = now(), shift: ShiftRecord
     }
   }
   return t;
+}
+
+/** The ledger description of a debt written off (SHELL_CHANGES 90), followed by the reason. */
+export const WRITE_OFF_DESCRIPTION = 'Списание долга: ';
+
+export function mayWriteOff(s: StaffRecord): boolean {
+  return s.role === 'owner' || s.debtWriteOff === true;
 }
 
 export function openShift(): ShiftRecord | null {

@@ -63,6 +63,7 @@ import {
   expectedCashOf,
   loyaltyOf,
   mayServicePcs,
+  mayWriteOff,
   openShift,
   profileOf,
   quote,
@@ -241,7 +242,13 @@ export function clubRoutes(app: FastifyInstance): void {
     const shift = openShift();
     return {
       token,
-      staff: { id: staff.id, name: staff.name, role: staff.role, pcService: mayServicePcs(staff) },
+      staff: {
+        id: staff.id,
+        name: staff.name,
+        role: staff.role,
+        pcService: mayServicePcs(staff),
+        debtWriteOff: mayWriteOff(staff),
+      },
       shift: shift && shiftView(shift),
     };
   });
@@ -261,7 +268,7 @@ export function clubRoutes(app: FastifyInstance): void {
     const s = requireStaff(req);
     const shift = openShift();
     return {
-      staff: { id: s.id, name: s.name, role: s.role, pcService: mayServicePcs(s) },
+      staff: { id: s.id, name: s.name, role: s.role, pcService: mayServicePcs(s), debtWriteOff: mayWriteOff(s) },
       shift: shift && shiftView(shift),
     };
   });
@@ -286,7 +293,11 @@ export function clubRoutes(app: FastifyInstance): void {
   app.get('/admin/staff', async (req) => {
     requireStaff(req, 'owner');
     return {
-      items: club().staff.map(({ pin: _pin, ...s }) => ({ ...s, pcService: mayServicePcs({ pin: _pin, ...s }) })),
+      items: club().staff.map(({ pin: _pin, ...s }) => ({
+        ...s,
+        pcService: mayServicePcs({ pin: _pin, ...s }),
+        debtWriteOff: mayWriteOff({ pin: _pin, ...s }),
+      })),
     };
   });
 
@@ -304,6 +315,7 @@ export function clubRoutes(app: FastifyInstance): void {
       pin,
       active: true,
       pcService: b['pcService'] === true,
+      debtWriteOff: b['debtWriteOff'] === true,
     };
     club().staff.push(rec);
     markDirty();
@@ -321,6 +333,7 @@ export function clubRoutes(app: FastifyInstance): void {
       s.active = b['active'];
     }
     if (typeof b['pcService'] === 'boolean') s.pcService = b['pcService'];
+    if (typeof b['debtWriteOff'] === 'boolean') s.debtWriteOff = b['debtWriteOff'];
     if (typeof b['pin'] === 'string') {
       const pin = str(b, 'pin', 12);
       if (!/^\d{4,8}$/.test(pin)) throw errors.validation('pin', 'digits4to8');

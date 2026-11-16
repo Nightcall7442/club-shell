@@ -28,9 +28,10 @@ public static class AdminJson
 
 /// <summary>
 /// A staff member; beyond the contract: <c>pcService</c> — may sign in to their own Windows account on a club PC with their PIN
-/// (<c>POST /agents/{pcId}/staff/verify</c>), always <see langword="true"/> for an owner.
+/// (<c>POST /agents/{pcId}/staff/verify</c>), always <see langword="true"/> for an owner; <c>debtWriteOff</c> — may write a debt off
+/// (<c>POST /admin/wallet/write-off</c>, SHELL_CHANGES 90), always for an owner.
 /// </summary>
-public sealed record AdminStaffMember(string Id, string Name, string Role, bool Active, bool PcService);
+public sealed record AdminStaffMember(string Id, string Name, string Role, bool Active, bool PcService, bool DebtWriteOff);
 
 /// <summary>
 /// X/Z report; beyond the contract: <c>topUpByMethod</c> splits the top-ups by payment method, <c>cashIn</c>/<c>cashOut</c>
@@ -42,7 +43,7 @@ public sealed record AdminStaffMember(string Id, string Name, string Role, bool 
 public sealed record AdminShiftTotals(
     long TopUpCash, long TopUpOther, long Sessions, long Shop, long Refunds, long Bonuses, int Count, AdminTopUpByMethod TopUpByMethod,
     long CashIn = 0, long CashOut = 0, long Payouts = 0, long ApiCash = 0, AdminShopByMethod? ShopByMethod = null, long ShopVoids = 0,
-    int ShopVoidCount = 0);
+    int ShopVoidCount = 0, long WriteOffs = 0, int WriteOffCount = 0);
 
 /// <summary>Top-ups of a shift by <c>ledger_entries.method</c>; <c>other</c> — rows with no method.</summary>
 public sealed record AdminTopUpByMethod(long Cash, long Card, long Payme, long Click, long Uzum, long Other);
@@ -225,6 +226,9 @@ public sealed record AdminTopUpRequest(Guid? UserId, long? Amount, string? Metho
 /// <summary>A guest's cash payout (<c>POST /admin/wallet/payout</c>, beyond the contract, D-37).</summary>
 public sealed record AdminPayoutRequest(Guid? UserId, long? Amount, string? Method);
 
+/// <summary>Body of <c>POST /admin/wallet/write-off</c> (beyond the contract, SHELL_CHANGES 90): the whole debt and why.</summary>
+public sealed record AdminWriteOffRequest(Guid? UserId, long? Amount, string? Reason);
+
 /// <summary>Cash into or out of the drawer (<c>POST /admin/shift/cash</c>, beyond the contract, D-40).</summary>
 public sealed record AdminCashMoveRequest(string? Kind, long? Amount, string? ReasonCode, string? Note);
 
@@ -276,9 +280,9 @@ public sealed record AdminProductList(IReadOnlyList<Contracts.Shop.Product> Item
 
 public sealed record AdminProductResponse(Contracts.Shop.Product Product);
 
-public sealed record AdminStaffCreateRequest(string? Name, string? Role, string? Pin, bool? PcService = null);
+public sealed record AdminStaffCreateRequest(string? Name, string? Role, string? Pin, bool? PcService = null, bool? DebtWriteOff = null);
 
-public sealed record AdminStaffUpdateRequest(string? Name, bool? Active, string? Pin, bool? PcService = null);
+public sealed record AdminStaffUpdateRequest(string? Name, bool? Active, string? Pin, bool? PcService = null, bool? DebtWriteOff = null);
 
 /// <summary><c>telegram</c> is prohibited: not a member, so the binder skips it (accepted and ignored).</summary>
 public sealed record AdminClientCreateRequest(

@@ -567,6 +567,15 @@ export const adminApi = {
   /** Gives a walk-in guest's refund back in cash: `amount` must equal what is payable now (beyond the contract). */
   payout: (input: { userId: string; amount: number }, key: string): Promise<PayoutResult> =>
     postMoney('/admin/wallet/payout', { ...input, method: 'cash' }, key),
+  /**
+   * Writes a debt off without money (SHELL_CHANGES 90): exactly the debt (`409 debtChanged {debt}`), with a reason; the
+   * owner, or a cashier with the owner's mark (`403 writeOffNotAllowed`); never during a session (`409 sessionOpen`).
+   */
+  writeOff: (
+    input: { userId: string; amount: number; reason: string },
+    key: string,
+  ): Promise<{ balance: Money; writtenOff: Money; transactionId: string }> =>
+    postMoney('/admin/wallet/write-off', input, key),
   command: (pcId: string, input: { kind: OnePcCommandKind; text?: string }): Promise<{ ack: CommandAck }> =>
     post(`/admin/pcs/${pcId}/command`, input),
   /** Name or login substring, any part of the phone digits, or the exact card; under 2 characters — recent clients. */
@@ -607,6 +616,8 @@ export interface StaffMember {
    * to install games, launchers and programs; always true for an owner. Absent from an older server.
    */
   pcService?: boolean;
+  /** May write a debt off (SHELL_CHANGES 90); always true for an owner. Absent from an older server. */
+  debtWriteOff?: boolean;
 }
 
 /** A ClubShell release published to this server (UPDATES.md §8). */
@@ -656,6 +667,9 @@ export interface ShiftTotals {
   cashOut?: number;
   /** Cash given back to walk-in guests. */
   payouts?: number;
+  /** Debts written off in the shift, without money (SHELL_CHANGES 90), and how many. */
+  writeOffs?: number;
+  writeOffCount?: number;
   /** Cash top-ups booked with the club API key: not in the drawer, so not in the expected cash. */
   apiCash?: number;
   /**
@@ -1189,7 +1203,15 @@ export interface PriceQuote {
 
 export interface Reports {
   days: number;
-  totals: { sessions: number; shop: number; topUps: number; sessionsCount: number };
+  totals: {
+    sessions: number;
+    shop: number;
+    topUps: number;
+    sessionsCount: number;
+    /** Debts written off in the period (not revenue, SHELL_CHANGES 90); absent from an older server. */
+    writeOffs?: number;
+    writeOffCount?: number;
+  };
   byDay: { date: string; sessions: number; shop: number; topUps: number }[];
   /** Seat-hours per weekday (0 = Sunday) × hour. */
   heat: number[][];
@@ -1218,11 +1240,16 @@ export const clubApi = {
   logout: (): Promise<unknown> => post('/admin/logout', {}),
 
   staff: (): Promise<{ items: StaffMember[] }> => call('/admin/staff'),
-  addStaff: (input: { name: string; role: StaffRole; pin: string; pcService?: boolean }): Promise<{ id: string }> =>
-    post('/admin/staff', input),
+  addStaff: (input: {
+    name: string;
+    role: StaffRole;
+    pin: string;
+    pcService?: boolean;
+    debtWriteOff?: boolean;
+  }): Promise<{ id: string }> => post('/admin/staff', input),
   updateStaff: (
     id: string,
-    input: Partial<{ name: string; active: boolean; pin: string; pcService: boolean }>,
+    input: Partial<{ name: string; active: boolean; pin: string; pcService: boolean; debtWriteOff: boolean }>,
   ): Promise<unknown> => patch(`/admin/staff/${id}`, input),
 
   /** ClubShell updates (owner only, beyond the contract). */

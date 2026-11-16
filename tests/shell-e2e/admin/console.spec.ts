@@ -2671,3 +2671,38 @@ test('a cashier cannot read or start ClubShell updates', async ({ request }) => 
   expect((await request.get(`${API}/admin/updates`, { headers: cashier })).status()).toBe(403);
   expect((await request.post(`${API}/admin/updates/apply`, { headers: cashier, data: {} })).status()).toBe(403);
 });
+
+test("the owner writes a guest's debt off without money: the drawer stays, X counts it apart", async ({
+  page,
+  request,
+}) => {
+  const pc = await registerAgent(request, 'writeoff');
+  await signIn(page, OWNER_PIN);
+  const name = `E2E Списание ${Date.now()}`;
+  await page.locator(`#seat-${pc.pcId}`).click();
+  await expect(page.getByRole('heading', { name: /Посадить на/ })).toBeVisible();
+  await page.getByRole('group', { name: 'Кто садится' }).getByRole('button', { name: 'Гость' }).click();
+  await page.getByLabel('Имя').fill(name);
+  await page.getByRole('group', { name: 'Оплата' }).getByRole('button', { name: 'Постоплата' }).click();
+  await page.getByRole('button', { name: 'Посадить · постоплата' }).click();
+  await expect(page.getByText('Сеанс открыт · постоплата')).toBeVisible();
+  await expect.poll(async () => (await seatOf(request, pc.pcId)).session?.cost.amount ?? 0).toBeGreaterThan(0);
+  await page.getByRole('button', { name: 'Завершить сеанс', exact: true }).click();
+  const confirm = page.getByRole('dialog', { name: /Завершить сеанс/ });
+  await confirm.getByRole('button', { name: 'Завершить сеанс', exact: true }).click();
+
+  const sheet = page.getByRole('dialog', { name: `Долг · ${name}` });
+  const before = (await shiftState(request)).x;
+  await sheet.getByLabel('Или списать долг (без денег)').fill('тестовый сеанс');
+  await sheet.getByRole('button', { name: /^Списать / }).click();
+  await sheet.getByRole('button', { name: /^Точно списать/ }).click();
+  await expect(sheet.getByRole('status')).toContainText('Долг списан');
+  await sheet.getByRole('button', { name: 'Готово' }).click();
+
+  const after = (await shiftState(request)).x;
+  expect(after?.topUpByMethod['cash']).toBe(before?.topUpByMethod['cash']);
+  expect((after as { writeOffs?: number } | null)?.writeOffs ?? 0).toBeGreaterThan(
+    (before as { writeOffs?: number } | null)?.writeOffs ?? 0,
+  );
+  expect((await overview(request)).guestDebts?.some((d) => d.displayName === name) ?? false).toBe(false);
+});

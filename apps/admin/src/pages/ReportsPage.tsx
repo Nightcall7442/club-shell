@@ -174,6 +174,14 @@ export default function ReportsPage(): JSX.Element {
             <KpiCard compact label={t('Пополнения')} value={sum(data.totals.topUps)} unit={t('сум')} />
             <KpiCard compact label={t('Сеансов')} value={nf.format(data.totals.sessionsCount)} />
           </div>
+          {(data.totals.writeOffs ?? 0) > 0 && (
+            <p className="text-[13px] text-muted">
+              {t('Списано долгов: {sum} сум ({n}) — не выручка', {
+                sum: sum(data.totals.writeOffs ?? 0),
+                n: data.totals.writeOffCount ?? 0,
+              })}
+            </p>
+          )}
 
           <Section title={t('Выручка по дням')}>
             <RevenueChart rows={data.byDay} />
