@@ -451,6 +451,11 @@ async function signIn(page: Page, pin: string, { shift = true }: { shift?: boole
   await page.keyboard.press('Enter');
 }
 
+/** The map by zones (SHELL_CHANGES 94): full tiles, whatever the size of the hall plan's cells. */
+async function zonesView(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'По зонам' }).click();
+}
+
 async function tokenFor(request: APIRequestContext, pin: string): Promise<string> {
   const res = await request.post(`${API}/admin/login`, { data: { pin } });
   expect(res.ok()).toBeTruthy();
@@ -1117,6 +1122,8 @@ test('a walk-in guest is seated from the map with one exact payment and the «Г
   const pc = await registerAgent(request, 'guest');
   await stubPrint(page);
   await signIn(page, CASHIER_PIN);
+  // What the tile says (player, «ждёт входа», game): the full tiles of the zone view.
+  await zonesView(page);
   const tile = page.locator(`#seat-${pc.pcId}`);
   await tile.click();
   await expect(page.getByRole('heading', { name: /Посадить на/ })).toBeVisible();
@@ -1999,6 +2006,8 @@ test('a session is moved to another PC with its time and money, and the old PC i
   const t0 = Date.now();
 
   await signIn(page, CASHIER_PIN);
+  // What the tile says (player, «ждёт входа», game): the full tiles of the zone view.
+  await zonesView(page);
   await page.locator(`#seat-${a.pcId}`).click();
   await page.getByRole('button', { name: 'Пересадить на другой ПК…' }).click();
   await expect(page.getByText(/^Пересадка с .+: нажмите свободный ПК/)).toBeVisible();
@@ -2382,6 +2391,8 @@ test('a busy seat shows the game its PC reports', async ({ page, request }) => {
 
   // The tile names the game, with its cover art or without (a catalog game may have none).
   await signIn(page, CASHIER_PIN);
+  // What the tile says (player, «ждёт входа», game): the full tiles of the zone view.
+  await zonesView(page);
   const tile = page.locator(`#seat-${pc.pcId}`);
   await expect(tile).toContainText('Counter-Strike 2');
 
@@ -2535,11 +2546,6 @@ test('the owner keeps a PC policy of the club, a cashier cannot (SHELL_CHANGES 2
 test('the owner edits the PC policy on the hall page and goes back to the default (SHELL_CHANGES 27)', async ({
   page,
 }) => {
-  test.skip(
-    REAL,
-    "The server's dev seed puts its seats at pixel positions: the hall page's grid is too slow to render here. The routes " +
-      'are checked against the real server by the test above.',
-  );
   await signIn(page, OWNER_PIN);
   await page.goto('/#/hall');
   const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Политика ПК' }) });
@@ -2565,6 +2571,139 @@ test('the owner edits the PC policy on the hall page and goes back to the defaul
   await expect(section).toContainText(/Возвращена политика по умолчанию, версия \d+/);
   await expect(section).toContainText('Политика по умолчанию');
   await expect(editor).toHaveValue(/"dnsServers": \[\]/);
+});
+
+type HallItem = { id: string; name: string; number: number; zone: string; x: number; y: number; rotation?: number };
+
+async function hallOf(request: APIRequestContext): Promise<{ items: HallItem[]; plan?: unknown }> {
+  const res = await request.get(`${API}/admin/pcs`, { headers: auth(await tokenFor(request, OWNER_PIN)) });
+  expect(res.ok(), await res.text()).toBeTruthy();
+  return (await res.json()) as { items: HallItem[]; plan?: unknown };
+}
+
+test('the owner drags PCs on the hall plan, lines a group up, turns it and draws the bar; two PCs never share a cell (SHELL_CHANGES 94)', async ({
+  page,
+  request,
+}) => {
+  const a = await registerAgent(request, 'hall-a');
+  const b = await registerAgent(request, 'hall-b');
+  let hall = await hallOf(request);
+  const find = (id: string): HallItem => hall.items.find((p) => p.id === id)!;
+  // A new PC takes a free cell: none shares it.
+  for (const id of [a.pcId, b.pcId]) {
+    const p = find(id);
+    expect(hall.items.filter((o) => o.x === p.x && o.y === p.y).map((o) => o.id)).toEqual([id]);
+  }
+  // A free strip below the hall to work in.
+  const free = Math.max(...hall.items.map((p) => p.y)) + 2;
+
+  await signIn(page, OWNER_PIN);
+  await page.goto('/#/hall');
+  const plan = page.getByTestId('hall-plan');
+  await expect(plan).toBeVisible();
+  const tile = (id: string) => plan.locator(`button[data-pc="${find(id).number}"]`);
+  const cellCenter = async (x: number, y: number): Promise<{ x: number; y: number }> => {
+    const box = (await plan.boundingBox())!;
+    return { x: box.x + x * 44 + 22, y: box.y + y * 44 + 22 };
+  };
+  const drag = async (id: string, x: number, y: number): Promise<void> => {
+    const from = (await tile(id).boundingBox())!;
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+    await page.mouse.down();
+    const to = await cellCenter(x, y);
+    await page.mouse.move(to.x, to.y, { steps: 8 });
+    await page.mouse.up();
+  };
+
+  // Drag a PC to a free cell: one save, the server has it there.
+  await drag(a.pcId, 1, free);
+  await expect.poll(async () => ((hall = await hallOf(request)), [find(a.pcId).x, find(a.pcId).y])).toEqual([1, free]);
+
+  // Onto another PC: refused, named, nothing moves.
+  const bBefore = find(b.pcId);
+  await drag(b.pcId, 1, free);
+  await expect(page.getByText(`Клетка занята: ${find(a.pcId).name}`)).toBeVisible();
+  hall = await hallOf(request);
+  expect([find(b.pcId).x, find(b.pcId).y]).toEqual([bBefore.x, bBefore.y]);
+
+  // Shift-click picks both; «Расставить» lines them up by number from the cell given, a gap between.
+  await tile(a.pcId).click();
+  await tile(b.pcId).click({ modifiers: ['Shift'] });
+  const panel = page.locator('section').filter({ hasText: 'Выбрано: 2 ПК' });
+  await expect(panel).toBeVisible();
+  await panel.getByLabel('С колонки (x)').fill('4');
+  await panel.getByLabel('С ряда (y)').fill(String(free + 2));
+  await panel.getByLabel('Промежуток, клеток').fill('1');
+  await panel.getByRole('button', { name: 'Расставить' }).click();
+  const [first, second] = [find(a.pcId), find(b.pcId)].sort((p, q) => p.number - q.number);
+  await expect
+    .poll(async () => {
+      hall = await hallOf(request);
+      return [find(first!.id).x, find(first!.id).y, find(second!.id).x, find(second!.id).y];
+    })
+    .toEqual([3, free + 1, 5, free + 1]);
+
+  // The group turns together: where the monitors face.
+  await panel.getByRole('button', { name: 'Повернуть вправо' }).click();
+  await expect
+    .poll(async () => {
+      hall = await hallOf(request);
+      return [find(a.pcId).rotation, find(b.pcId).rotation];
+    })
+    .toEqual([90, 90]);
+
+  // The plan: the bar, saved once.
+  await page.keyboard.press('Escape');
+  const planSection = page.locator('section').filter({ has: page.getByText('План зала', { exact: true }) });
+  await planSection.getByRole('button', { name: '+ Бар / касса' }).click();
+  await planSection.getByLabel('Подпись').fill('Бар E2E');
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).last().click();
+  await expect(planSection).toContainText('План зала сохранён');
+  await expect(plan.locator('[data-object="bar"]')).toContainText('Бар E2E');
+  const saved = (await hallOf(request)).plan as { objects: { kind: string; text: string | null }[] };
+  expect(saved.objects.some((o) => o.kind === 'bar' && o.text === 'Бар E2E')).toBeTruthy();
+
+  // Leave the hall without a plan for the other tests.
+  await request.delete(`${API}/admin/pcs/plan`, { headers: auth(await tokenFor(request, OWNER_PIN)) });
+});
+
+test('the map shows the hall as it stands, every PC in view at 1366×768, and the zones on request (SHELL_CHANGES 94)', async ({
+  page,
+  request,
+}) => {
+  const hall = await hallOf(request);
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await signIn(page, OWNER_PIN);
+  const plan = page.getByTestId('map-plan');
+  await expect(plan).toBeVisible();
+  const frame = (await plan.boundingBox())!;
+  // Every PC inside the panel without scrolling, at its place: left of a PC further right in its row.
+  for (const p of hall.items) {
+    const box = (await page.locator(`#seat-${p.id}`).boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(frame.x - 1);
+    expect(box.y).toBeGreaterThanOrEqual(frame.y - 1);
+    expect(box.x + box.width).toBeLessThanOrEqual(frame.x + frame.width + 1);
+    expect(box.y + box.height).toBeLessThanOrEqual(frame.y + frame.height + 1);
+  }
+  const row = hall.items.filter((p) => p.y === hall.items[0]!.y).sort((p, q) => p.x - q.x);
+  if (row.length >= 2) {
+    const left = (await page.locator(`#seat-${row[0]!.id}`).boundingBox())!;
+    const right = (await page.locator(`#seat-${row[row.length - 1]!.id}`).boundingBox())!;
+    expect(left.x).toBeLessThan(right.x);
+  }
+
+  // «+» enlarges, «Весь зал» fits again; «По зонам» is the old view, remembered.
+  await page.getByRole('button', { name: 'Крупнее' }).click();
+  await expect(page.getByRole('button', { name: 'Весь зал' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Весь зал' }).click();
+  await page.getByRole('button', { name: 'По зонам' }).click();
+  await expect(plan).toBeHidden();
+  await expect(page.locator(`#seat-${hall.items[0]!.id}`)).toBeVisible();
+  await page.reload();
+  await expect(page.locator(`#seat-${hall.items[0]!.id}`)).toBeVisible();
+  await expect(plan).toBeHidden();
+  await page.getByRole('button', { name: 'План зала' }).click();
+  await expect(plan).toBeVisible();
 });
 
 test('a PC without a loaded Vanguard is not offered the games it could not start (D-74)', async ({ request }) => {

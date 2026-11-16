@@ -134,6 +134,8 @@ export interface Seat {
    * older server — the map shows no game.
    */
   game?: SeatGame | null;
+  /** Where the PC stands on the hall plan (SHELL_CHANGES 94); absent from an older server — the map shows zones. */
+  place?: HallPlace;
 }
 
 /** A running game on a seat (`Seat.game`). */
@@ -187,6 +189,8 @@ export interface Overview {
    * Absent from an older server: no inbox then.
    */
   calls?: Call[];
+  /** The club's hall plan (SHELL_CHANGES 94); null — none drawn; absent from an older server. */
+  hallPlan?: HallPlan | null;
 }
 
 export type CallCategory = 'help' | 'technical' | 'order' | 'other' | 'problem';
@@ -1111,6 +1115,47 @@ export interface Client {
 }
 
 export type DeviceKind = 'pc' | 'console' | 'vr' | 'other';
+
+/** Where a PC's monitor faces on the hall plan: 0 up, 90 right, 180 down, 270 left. */
+export type Rotation = 0 | 90 | 180 | 270;
+
+export type HallObjectKind = 'wall' | 'bar' | 'entrance' | 'aisle' | 'label';
+
+/** An object on the hall plan, `w` × `h` cells from (x, y). */
+export interface HallObject {
+  id: string;
+  kind: HallObjectKind;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  text?: string | null;
+}
+
+/** A zone's area on the hall plan: a rectangle in the zone's colour with its name. */
+export interface HallArea {
+  id: string;
+  zone: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** The club's hall plan (SHELL_CHANGES 94): grid size in cells, objects and zone areas. */
+export interface HallPlan {
+  width: number;
+  height: number;
+  objects: HallObject[];
+  areas: HallArea[];
+}
+
+/** Where a PC stands on the hall plan (`Seat.place`). */
+export interface HallPlace {
+  x: number;
+  y: number;
+  rotation: Rotation;
+}
 export interface HallPc {
   id: string;
   name: string;
@@ -1120,6 +1165,8 @@ export interface HallPc {
   ipAddress: string;
   x: number;
   y: number;
+  /** Where the monitor faces on the plan, degrees clockwise from «up» (SHELL_CHANGES 94); absent from an older server. */
+  rotation?: Rotation;
   device: DeviceKind;
   /** What the Agent reported at registration and on every change since; null — no Agent has run on this seat. */
   hardware: HardwareInfo | null;
@@ -1317,7 +1364,12 @@ export const clubApi = {
   redeemPromo: (userId: string, code: string): Promise<{ balance: Money }> =>
     postMoney('/admin/promo/redeem', { userId, code }),
 
-  pcs: (): Promise<{ items: HallPc[]; zones: Zone[] }> => call('/admin/pcs'),
+  pcs: (): Promise<{ items: HallPc[]; zones: Zone[]; plan?: HallPlan | null }> => call('/admin/pcs'),
+  /** One save for a moved group (SHELL_CHANGES 94); `409 cellTaken {pcId}` — a cell is held by another PC. */
+  layoutPcs: (items: { id: string; x: number; y: number; rotation?: Rotation }[]): Promise<unknown> =>
+    patch('/admin/pcs/layout', { items }),
+  saveHallPlan: (plan: HallPlan): Promise<unknown> => put('/admin/pcs/plan', plan),
+  clearHallPlan: (): Promise<unknown> => del('/admin/pcs/plan'),
   updatePc: (
     id: string,
     input: Partial<{
@@ -1326,6 +1378,7 @@ export const clubApi = {
       number: number;
       x: number;
       y: number;
+      rotation: Rotation;
       device: DeviceKind;
       maintenance: boolean;
       stateless: boolean;
