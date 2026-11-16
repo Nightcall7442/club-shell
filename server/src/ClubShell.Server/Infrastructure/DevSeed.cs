@@ -160,7 +160,8 @@ public static class DevSeed
                 new
                 {
                     id = Sid("pc:" + n), clubId, n, name = $"PC-{n:00}", zone = n <= 8 ? "Standard" : n <= 10 ? "VIP" : "Bootcamp",
-                    x = ((n - 1) % 6) * 120 + 60, y = ((n - 1) / 6) * 120 + 60, now,
+                    // Grid cells of the hall plan (SHELL_CHANGES 94), as the hall editor places them: two rows of six.
+                    x = (n - 1) % 6, y = (n - 1) / 6, now,
                 },
                 tx);
         }

@@ -132,6 +132,22 @@ public sealed record ProfileUpdateRequest(
 /// <param name="Pin">4–6 digit PIN.</param>
 public sealed record PinVerifyRequest(string Pin);
 
+/// <summary>
+/// Body of <c>POST /agents/{pcId}/staff/verify</c> (beyond the contract): the Agent checks a staff member's PIN before it lets
+/// them sign in to their own Windows account on the PC (<c>sys.staffSignIn</c>). <c>200</c> with <see cref="StaffVerifyResponse"/>;
+/// <c>401 unauthorized</c> with <c>reason: invalidPin</c>; <c>403 forbidden</c> with <c>reason: pcService</c> (an active member of the
+/// PC's club the owner did not allow to service PCs); <c>429 rateLimited</c> with <c>retryAfterSec</c> — wrong PINs from PCs
+/// count with the cash desk's PIN limits, in the club's budget for untrusted sources, per PC.
+/// </summary>
+/// <param name="Pin">The PIN, 4–8 digits.</param>
+public sealed record StaffVerifyRequest(string Pin);
+
+/// <summary>Response of <c>POST /agents/{pcId}/staff/verify</c>: who signed in; the server has written it to the staff journal.</summary>
+/// <param name="StaffId">Staff member.</param>
+/// <param name="Name">Name for the log and the Shell.</param>
+/// <param name="Role"><c>owner</c> or <c>cashier</c>.</param>
+public sealed record StaffVerifyResponse(Guid StaffId, string Name, string Role);
+
 #endregion
 
 #region Stats / achievements / loyalty

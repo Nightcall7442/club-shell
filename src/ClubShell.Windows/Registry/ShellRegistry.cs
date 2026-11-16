@@ -163,6 +163,18 @@ public sealed class ShellRegistry
             ? RegistryHelper.Get<int>(RegistryHive.LocalMachine, MachineWinlogonKey, "AutoLogonCount")
             : null);
 
+    /// <summary>
+    /// Pauses auto-logon for a staff member's Windows sign-in: <c>AutoAdminLogon = 0</c> and no <c>ForceAutoLogon</c>, so the
+    /// next sign-out leaves Windows on its sign-in screen instead of logging the kiosk straight back on. The account name
+    /// and the LSA-stored password stay: <see cref="SetAutoLogon"/> with the kiosk's current password resumes it.
+    /// </summary>
+    public void PauseAutoLogon()
+    {
+        RegistryHelper.Set(RegistryHive.LocalMachine, MachineWinlogonKey, "AutoAdminLogon", "0", RegistryValueKind.String);
+        _ = RegistryHelper.DeleteValue(RegistryHive.LocalMachine, MachineWinlogonKey, "ForceAutoLogon");
+        _logger.LogWarning("Auto-logon paused for a staff member's Windows sign-in");
+    }
+
     /// <summary>Disables auto-logon and removes the stored password (registry value and LSA secret).</summary>
     public void ClearAutoLogon()
     {

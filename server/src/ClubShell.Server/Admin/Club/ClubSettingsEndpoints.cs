@@ -125,7 +125,7 @@ public static class ClubSettingsEndpoints
         "features" => new JsonObject
         {
             ["shop"] = false, ["chat"] = false, ["booking"] = false, ["tournaments"] = false, ["profile"] = true, ["topup"] = false, ["apps"] = false,
-            ["callAdmin"] = true, ["gpuPanel"] = false,
+            ["callAdmin"] = true, ["gpuPanel"] = false, ["lockScreenPower"] = true,
         },
         "pricing" => new JsonObject { ["weekdayPct"] = new JsonArray(100, 100, 100, 100, 100, 100, 100), ["holidays"] = new JsonArray(), ["holidayPct"] = 100 },
         "limits" => new JsonObject { ["minorAge"] = 18, ["minorCurfew"] = "22:00" },

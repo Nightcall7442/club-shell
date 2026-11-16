@@ -153,6 +153,19 @@ pub struct SessionExtendedData {
     pub cost: Money,
 }
 
+/// Response of `GET /sessions/{id}/handoff` (beyond the contract, SHELL_CHANGES 92): whether the PC
+/// whose session `sessionId` a sign-in elsewhere ended has handed the player's saves back — its
+/// Agent acknowledged the `endSession` command after `profile.detach`, or the command is no longer
+/// waiting (expired, superseded).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionHandoff {
+    /// The ended session.
+    pub session_id: Uuid,
+    /// The saves may be laid out on the new PC.
+    pub released: bool,
+}
+
 /// Answer of `POST /sessions/quote` and of IPC `session.quote`: the price the server will charge.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

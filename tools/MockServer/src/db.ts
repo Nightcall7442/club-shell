@@ -106,6 +106,8 @@ export interface PcRecord extends Pc {
   hwid: string | null;
   x: number;
   y: number;
+  /** Where the monitor faces on the plan, degrees (SHELL_CHANGES 94); absent — 0. */
+  rotation?: number;
   machineName: string | null;
   macAddress: string | null;
   signingSecret: string | null;

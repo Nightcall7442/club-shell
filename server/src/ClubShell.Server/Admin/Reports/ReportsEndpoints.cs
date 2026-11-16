@@ -7,7 +7,8 @@ using Npgsql;
 
 namespace ClubShell.Server.Admin;
 
-public sealed record ReportsTotals(long Sessions, long Shop, long TopUps, int SessionsCount);
+/// <summary>Beyond the contract: <c>writeOffs</c> / <c>writeOffCount</c> — debts written off in the period (SHELL_CHANGES 90), not revenue.</summary>
+public sealed record ReportsTotals(long Sessions, long Shop, long TopUps, int SessionsCount, long WriteOffs = 0, int WriteOffCount = 0);
 
 public sealed record ReportsDay(string Date, long Sessions, long Shop, long TopUps);
 
@@ -114,7 +115,15 @@ public static class ReportsEndpoints
             """,
             new { staff.ClubId, start, now })).ToList();
 
-        var totals = new ReportsTotals(byDay.Sum(d => d.Sessions), byDay.Sum(d => d.Shop), byDay.Sum(d => d.TopUps), sessions.Count);
+        var writeOffs = await c.QuerySingleAsync<(long Amount, int Count)>(
+            """
+            SELECT coalesce(sum(amount), 0)::bigint, count(*)::int FROM ledger_entries
+            WHERE club_id = @ClubId AND type = 'adjustment' AND method IS NULL AND meta ->> 'kind' = 'debtWriteOff'
+              AND created_at >= @start AND created_at <= @now
+            """,
+            new { staff.ClubId, start, now });
+        var totals = new ReportsTotals(
+            byDay.Sum(d => d.Sessions), byDay.Sum(d => d.Shop), byDay.Sum(d => d.TopUps), sessions.Count, writeOffs.Amount, writeOffs.Count);
         return AdminJson.Ok(new Reports(period, totals, byDay, heat, topGames, topProducts, await ShiftEndpoints.OpenedSinceAsync(c, staff.ClubId, start)));
     }
 }

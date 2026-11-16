@@ -414,6 +414,8 @@ public static class ShiftEndpoints
                    coalesce(sum(amount) FILTER (WHERE type = 'bonus'), 0)::bigint AS "Bonuses",
                    coalesce(-sum(amount) FILTER (WHERE type = 'adjustment' AND method = 'cash'), 0)::bigint AS "Payouts",
                    coalesce(sum(amount) FILTER (WHERE type = 'topUp' AND method = 'cash' AND staff_id IS NULL), 0)::bigint AS "ApiCash",
+                   coalesce(sum(amount) FILTER (WHERE type = 'adjustment' AND method IS NULL AND meta ->> 'kind' = 'debtWriteOff'), 0)::bigint AS "WriteOffs",
+                   (count(*) FILTER (WHERE type = 'adjustment' AND method IS NULL AND meta ->> 'kind' = 'debtWriteOff'))::int AS "WriteOffCount",
                    (SELECT coalesce(sum(amount) FILTER (WHERE kind = 'in'), 0) FROM cash_movements WHERE shift_id = @shiftId)::bigint AS "CashIn",
                    (SELECT coalesce(sum(amount) FILTER (WHERE kind = 'out'), 0) FROM cash_movements WHERE shift_id = @shiftId)::bigint AS "CashOut",
                    count(*)::int AS "Count"
@@ -510,11 +512,14 @@ public static class ShiftEndpoints
         public long ApiCash { get; init; }
         public long CashIn { get; init; }
         public long CashOut { get; init; }
+        public long WriteOffs { get; init; }
+        public int WriteOffCount { get; init; }
         public int Count { get; init; }
 
         public AdminShiftTotals ToWire(ShopRow bar) => new(
             Cash, Card + Payme + Click + Uzum + Other, Sessions, Shop + bar.MethodNet, Refunds, Bonuses, Count, new(Cash, Card, Payme, Click, Uzum, Other),
-            CashIn, CashOut, Payouts, ApiCash, new(bar.Cash, bar.Card, bar.Payme, bar.Click, bar.Uzum, bar.Balance), bar.Voids, bar.VoidCount);
+            CashIn, CashOut, Payouts, ApiCash, new(bar.Cash, bar.Card, bar.Payme, bar.Click, bar.Uzum, bar.Balance), bar.Voids, bar.VoidCount,
+            WriteOffs, WriteOffCount);
     }
 
     private sealed class TodayRow

@@ -347,6 +347,28 @@ export interface Seat {
   status: PcStatus;
 }
 
+/**
+ * Body of `POST /agents/{pcId}/staff/verify` (beyond the contract): the Agent checks a staff member's PIN before it
+ * lets them sign in to their own Windows account on the PC (`sys.staffSignIn`). `200` with `StaffVerifyResponse`; `401
+ * unauthorized` with `reason: invalidPin`; `403 forbidden` with `reason: pcService` (an active member of the PC's club
+ * the owner did not allow to service PCs); `429 rateLimited` with `retryAfterSec` — wrong PINs from PCs count with the
+ * cash desk's PIN limits, in the club's budget for untrusted sources, per PC.
+ */
+export interface StaffVerifyRequest {
+  /** The PIN, 4–8 digits. */
+  pin: string;
+}
+
+/** Response of `POST /agents/{pcId}/staff/verify`: who signed in; the server has written it to the staff journal. */
+export interface StaffVerifyResponse {
+  /** Staff member. */
+  staffId: string;
+  /** Name for the log and the Shell. */
+  name: string;
+  /** `owner` or `cashier`. */
+  role: string;
+}
+
 /** Tournament lifecycle. */
 export const TournamentState = {
   /** Announced; registration not open. */
@@ -485,6 +507,12 @@ export interface AuthResponse {
   expiresAt: string;
   /** Argon2id PHC string for offline password verification, when the club allows offline login. */
   offlineHash?: string | null;
+  /**
+   * Beyond the contract (SHELL_CHANGES 92): the sign-in ended the player's session on another PC («Завершить там и
+   * войти здесь»), whose Agent is now collecting their saves; this PC lays them out only once `GET
+   * /sessions/{id}/handoff` says that PC released them.
+   */
+  handoffSessionId?: string | null;
 }
 
 /** Response of `GET /auth/qr/{token}`. */

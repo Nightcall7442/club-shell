@@ -40,6 +40,7 @@ import { pcsRoutes } from './routes/pcs.js';
 import { sessionRoutes, tickSessions } from './routes/session.js';
 import { shopRoutes, tickShop } from './routes/shop.js';
 import { tickWallet, walletRoutes } from './routes/wallet.js';
+import { updatesRoutes } from './routes/updates.js';
 import { connections, registerWs } from './ws.js';
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -312,6 +313,7 @@ export async function buildApp(opts: Options): Promise<FastifyInstance> {
       authRoutes(api);
       adminRoutes(api);
       clubRoutes(api);
+      updatesRoutes(api);
       barRoutes(api);
       sessionRoutes(api);
       gamesRoutes(api);

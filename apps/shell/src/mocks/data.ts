@@ -1292,6 +1292,7 @@ export const SETTINGS: ShellSettings = {
     // The mock confirms a scanned code (?mock=qr) and has an NVIDIA panel, so both are on here.
     qrLogin: true,
     gpuPanel: true,
+    lockScreenPower: true,
   },
 };
 

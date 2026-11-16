@@ -451,6 +451,11 @@ async function signIn(page: Page, pin: string, { shift = true }: { shift?: boole
   await page.keyboard.press('Enter');
 }
 
+/** The map by zones (SHELL_CHANGES 94): full tiles, whatever the size of the hall plan's cells. */
+async function zonesView(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'По зонам' }).click();
+}
+
 async function tokenFor(request: APIRequestContext, pin: string): Promise<string> {
   const res = await request.post(`${API}/admin/login`, { data: { pin } });
   expect(res.ok()).toBeTruthy();
@@ -1117,6 +1122,8 @@ test('a walk-in guest is seated from the map with one exact payment and the «Г
   const pc = await registerAgent(request, 'guest');
   await stubPrint(page);
   await signIn(page, CASHIER_PIN);
+  // What the tile says (player, «ждёт входа», game): the full tiles of the zone view.
+  await zonesView(page);
   const tile = page.locator(`#seat-${pc.pcId}`);
   await tile.click();
   await expect(page.getByRole('heading', { name: /Посадить на/ })).toBeVisible();
@@ -1999,6 +2006,8 @@ test('a session is moved to another PC with its time and money, and the old PC i
   const t0 = Date.now();
 
   await signIn(page, CASHIER_PIN);
+  // What the tile says (player, «ждёт входа», game): the full tiles of the zone view.
+  await zonesView(page);
   await page.locator(`#seat-${a.pcId}`).click();
   await page.getByRole('button', { name: 'Пересадить на другой ПК…' }).click();
   await expect(page.getByText(/^Пересадка с .+: нажмите свободный ПК/)).toBeVisible();
@@ -2382,6 +2391,8 @@ test('a busy seat shows the game its PC reports', async ({ page, request }) => {
 
   // The tile names the game, with its cover art or without (a catalog game may have none).
   await signIn(page, CASHIER_PIN);
+  // What the tile says (player, «ждёт входа», game): the full tiles of the zone view.
+  await zonesView(page);
   const tile = page.locator(`#seat-${pc.pcId}`);
   await expect(tile).toContainText('Counter-Strike 2');
 
@@ -2535,11 +2546,6 @@ test('the owner keeps a PC policy of the club, a cashier cannot (SHELL_CHANGES 2
 test('the owner edits the PC policy on the hall page and goes back to the default (SHELL_CHANGES 27)', async ({
   page,
 }) => {
-  test.skip(
-    REAL,
-    "The server's dev seed puts its seats at pixel positions: the hall page's grid is too slow to render here. The routes " +
-      'are checked against the real server by the test above.',
-  );
   await signIn(page, OWNER_PIN);
   await page.goto('/#/hall');
   const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Политика ПК' }) });
@@ -2567,6 +2573,139 @@ test('the owner edits the PC policy on the hall page and goes back to the defaul
   await expect(editor).toHaveValue(/"dnsServers": \[\]/);
 });
 
+type HallItem = { id: string; name: string; number: number; zone: string; x: number; y: number; rotation?: number };
+
+async function hallOf(request: APIRequestContext): Promise<{ items: HallItem[]; plan?: unknown }> {
+  const res = await request.get(`${API}/admin/pcs`, { headers: auth(await tokenFor(request, OWNER_PIN)) });
+  expect(res.ok(), await res.text()).toBeTruthy();
+  return (await res.json()) as { items: HallItem[]; plan?: unknown };
+}
+
+test('the owner drags PCs on the hall plan, lines a group up, turns it and draws the bar; two PCs never share a cell (SHELL_CHANGES 94)', async ({
+  page,
+  request,
+}) => {
+  const a = await registerAgent(request, 'hall-a');
+  const b = await registerAgent(request, 'hall-b');
+  let hall = await hallOf(request);
+  const find = (id: string): HallItem => hall.items.find((p) => p.id === id)!;
+  // A new PC takes a free cell: none shares it.
+  for (const id of [a.pcId, b.pcId]) {
+    const p = find(id);
+    expect(hall.items.filter((o) => o.x === p.x && o.y === p.y).map((o) => o.id)).toEqual([id]);
+  }
+  // A free strip below the hall to work in.
+  const free = Math.max(...hall.items.map((p) => p.y)) + 2;
+
+  await signIn(page, OWNER_PIN);
+  await page.goto('/#/hall');
+  const plan = page.getByTestId('hall-plan');
+  await expect(plan).toBeVisible();
+  const tile = (id: string) => plan.locator(`button[data-pc="${find(id).number}"]`);
+  const cellCenter = async (x: number, y: number): Promise<{ x: number; y: number }> => {
+    const box = (await plan.boundingBox())!;
+    return { x: box.x + x * 44 + 22, y: box.y + y * 44 + 22 };
+  };
+  const drag = async (id: string, x: number, y: number): Promise<void> => {
+    const from = (await tile(id).boundingBox())!;
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+    await page.mouse.down();
+    const to = await cellCenter(x, y);
+    await page.mouse.move(to.x, to.y, { steps: 8 });
+    await page.mouse.up();
+  };
+
+  // Drag a PC to a free cell: one save, the server has it there.
+  await drag(a.pcId, 1, free);
+  await expect.poll(async () => ((hall = await hallOf(request)), [find(a.pcId).x, find(a.pcId).y])).toEqual([1, free]);
+
+  // Onto another PC: refused, named, nothing moves.
+  const bBefore = find(b.pcId);
+  await drag(b.pcId, 1, free);
+  await expect(page.getByText(`Клетка занята: ${find(a.pcId).name}`)).toBeVisible();
+  hall = await hallOf(request);
+  expect([find(b.pcId).x, find(b.pcId).y]).toEqual([bBefore.x, bBefore.y]);
+
+  // Shift-click picks both; «Расставить» lines them up by number from the cell given, a gap between.
+  await tile(a.pcId).click();
+  await tile(b.pcId).click({ modifiers: ['Shift'] });
+  const panel = page.locator('section').filter({ hasText: 'Выбрано: 2 ПК' });
+  await expect(panel).toBeVisible();
+  await panel.getByLabel('С колонки (x)').fill('4');
+  await panel.getByLabel('С ряда (y)').fill(String(free + 2));
+  await panel.getByLabel('Промежуток, клеток').fill('1');
+  await panel.getByRole('button', { name: 'Расставить' }).click();
+  const [first, second] = [find(a.pcId), find(b.pcId)].sort((p, q) => p.number - q.number);
+  await expect
+    .poll(async () => {
+      hall = await hallOf(request);
+      return [find(first!.id).x, find(first!.id).y, find(second!.id).x, find(second!.id).y];
+    })
+    .toEqual([3, free + 1, 5, free + 1]);
+
+  // The group turns together: where the monitors face.
+  await panel.getByRole('button', { name: 'Повернуть вправо' }).click();
+  await expect
+    .poll(async () => {
+      hall = await hallOf(request);
+      return [find(a.pcId).rotation, find(b.pcId).rotation];
+    })
+    .toEqual([90, 90]);
+
+  // The plan: the bar, saved once.
+  await page.keyboard.press('Escape');
+  const planSection = page.locator('section').filter({ has: page.getByText('План зала', { exact: true }) });
+  await planSection.getByRole('button', { name: '+ Бар / касса' }).click();
+  await planSection.getByLabel('Подпись').fill('Бар E2E');
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).last().click();
+  await expect(planSection).toContainText('План зала сохранён');
+  await expect(plan.locator('[data-object="bar"]')).toContainText('Бар E2E');
+  const saved = (await hallOf(request)).plan as { objects: { kind: string; text: string | null }[] };
+  expect(saved.objects.some((o) => o.kind === 'bar' && o.text === 'Бар E2E')).toBeTruthy();
+
+  // Leave the hall without a plan for the other tests.
+  await request.delete(`${API}/admin/pcs/plan`, { headers: auth(await tokenFor(request, OWNER_PIN)) });
+});
+
+test('the map shows the hall as it stands, every PC in view at 1366×768, and the zones on request (SHELL_CHANGES 94)', async ({
+  page,
+  request,
+}) => {
+  const hall = await hallOf(request);
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await signIn(page, OWNER_PIN);
+  const plan = page.getByTestId('map-plan');
+  await expect(plan).toBeVisible();
+  const frame = (await plan.boundingBox())!;
+  // Every PC inside the panel without scrolling, at its place: left of a PC further right in its row.
+  for (const p of hall.items) {
+    const box = (await page.locator(`#seat-${p.id}`).boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(frame.x - 1);
+    expect(box.y).toBeGreaterThanOrEqual(frame.y - 1);
+    expect(box.x + box.width).toBeLessThanOrEqual(frame.x + frame.width + 1);
+    expect(box.y + box.height).toBeLessThanOrEqual(frame.y + frame.height + 1);
+  }
+  const row = hall.items.filter((p) => p.y === hall.items[0]!.y).sort((p, q) => p.x - q.x);
+  if (row.length >= 2) {
+    const left = (await page.locator(`#seat-${row[0]!.id}`).boundingBox())!;
+    const right = (await page.locator(`#seat-${row[row.length - 1]!.id}`).boundingBox())!;
+    expect(left.x).toBeLessThan(right.x);
+  }
+
+  // «+» enlarges, «Весь зал» fits again; «По зонам» is the old view, remembered.
+  await page.getByRole('button', { name: 'Крупнее' }).click();
+  await expect(page.getByRole('button', { name: 'Весь зал' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Весь зал' }).click();
+  await page.getByRole('button', { name: 'По зонам' }).click();
+  await expect(plan).toBeHidden();
+  await expect(page.locator(`#seat-${hall.items[0]!.id}`)).toBeVisible();
+  await page.reload();
+  await expect(page.locator(`#seat-${hall.items[0]!.id}`)).toBeVisible();
+  await expect(plan).toBeHidden();
+  await page.getByRole('button', { name: 'План зала' }).click();
+  await expect(plan).toBeVisible();
+});
+
 test('a PC without a loaded Vanguard is not offered the games it could not start (D-74)', async ({ request }) => {
   const pc = await registerAgent(request, 'vgk');
   const listed = async (): Promise<{ id: string; launcher: string; antiCheat: string }[]> => {
@@ -2589,4 +2728,120 @@ test('a PC without a loaded Vanguard is not offered the games it could not start
   // Loaded after the reboot: the whole catalog again.
   await heartbeat(request, pc, { antiCheat: { vanguardInstalled: true, vanguardLoaded: true } });
   expect((await listed()).map((g) => g.id)).toEqual(all.map((g) => g.id));
+});
+
+test('the owner allows a cashier to sign in to Windows on the PCs, and the PC checks that PIN (staff sign-in)', async ({
+  page,
+  request,
+}) => {
+  const pc = await registerAgent(request, 'staff-signin');
+  const pin = String(10_000_000 + (randomBytes(4).readUInt32BE() % 90_000_000));
+  const name = `E2E техник ${pin.slice(-4)}`;
+  const verify = async (p: string): Promise<{ status: number; body: Record<string, unknown> }> => {
+    const res = await agentCall(request, pc, 'POST', `/agents/${pc.pcId}/staff/verify`, { pin: p });
+    return { status: res.status(), body: (await res.json()) as Record<string, unknown> };
+  };
+  const reason = (body: Record<string, unknown>): unknown =>
+    ((body['error'] as Record<string, unknown>)['details'] as Record<string, unknown>)['reason'];
+
+  await signIn(page, OWNER_PIN);
+  await page.goto('/#/staff');
+  await page.getByRole('textbox').first().fill(name);
+  await page.locator('input[type="password"]').last().fill(pin);
+  await page.getByRole('button', { name: 'Добавить', exact: true }).click();
+  const row = page.getByRole('row').filter({ hasText: name });
+  await expect(row).toBeVisible();
+
+  // Without the mark the PC refuses the cashier's PIN; the owner's always works.
+  const refused = await verify(pin);
+  expect([refused.status, reason(refused.body)]).toEqual([403, 'pcService']);
+  expect((await verify(OWNER_PIN)).status).toBe(200);
+  const wrong = await verify('86420975');
+  expect([wrong.status, reason(wrong.body)]).toEqual([401, 'invalidPin']);
+
+  await row.getByRole('switch', { name: 'Нет' }).click();
+  await expect(row.getByRole('switch', { name: 'Разрешён' })).toBeVisible();
+  const allowed = await verify(pin);
+  expect(allowed.status).toBe(200);
+  expect(allowed.body).toMatchObject({ name, role: 'cashier' });
+
+  const owner = auth(await tokenFor(request, OWNER_PIN));
+  const journal = (await (await request.get(`${API}/admin/control?days=1`, { headers: owner })).json()) as {
+    log: { action: string; detail: string; staffName: string }[];
+  };
+  expect(
+    journal.log.some((e) => e.action === 'pcCommand' && e.staffName === name && e.detail.endsWith('serviceSignIn')),
+  ).toBe(true);
+});
+
+test('the owner sees the ClubShell release and the PCs behind it, turns on automatic updates and updates the PCs', async ({
+  page,
+}) => {
+  await signIn(page, OWNER_PIN);
+  await page.goto('/#/updates');
+  await expect(page.getByRole('heading', { name: 'Обновления ClubShell' })).toBeVisible();
+  const auto = page.getByRole('switch', {
+    name: 'Обновлять автоматически ночью (04:00–07:00), когда за ПК никого нет',
+  });
+  await expect(auto).toHaveAttribute('aria-checked', 'false');
+  await auto.click();
+  await expect(page.getByText('Автообновление включено', { exact: false })).toBeVisible();
+  await expect(auto).toHaveAttribute('aria-checked', 'true');
+  await auto.click();
+  await expect(auto).toHaveAttribute('aria-checked', 'false');
+
+  if (REAL) {
+    // The e2e server has no publisher token: nothing published.
+    await expect(
+      page.getByText('На сервер ещё не опубликован ни один выпуск ClubShell', { exact: false }),
+    ).toBeVisible();
+    return;
+  }
+
+  // The mock's demo release is newer than its PCs; none is connected over the socket, so nothing is sent.
+  await expect(page.getByText('ClubShell 1.5.0')).toBeVisible();
+  await expect(page.getByText('нужно обновить:', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: 'Обновить все ПК' }).click();
+  await expect(page.getByText('ПК офлайн — не отправлено', { exact: false })).toBeVisible();
+});
+
+test('a cashier cannot read or start ClubShell updates', async ({ request }) => {
+  const cashier = auth(await tokenFor(request, CASHIER_PIN));
+  expect((await request.get(`${API}/admin/updates`, { headers: cashier })).status()).toBe(403);
+  expect((await request.post(`${API}/admin/updates/apply`, { headers: cashier, data: {} })).status()).toBe(403);
+});
+
+test("the owner writes a guest's debt off without money: the drawer stays, X counts it apart", async ({
+  page,
+  request,
+}) => {
+  const pc = await registerAgent(request, 'writeoff');
+  await signIn(page, OWNER_PIN);
+  const name = `E2E Списание ${Date.now()}`;
+  await page.locator(`#seat-${pc.pcId}`).click();
+  await expect(page.getByRole('heading', { name: /Посадить на/ })).toBeVisible();
+  await page.getByRole('group', { name: 'Кто садится' }).getByRole('button', { name: 'Гость' }).click();
+  await page.getByLabel('Имя').fill(name);
+  await page.getByRole('group', { name: 'Оплата' }).getByRole('button', { name: 'Постоплата' }).click();
+  await page.getByRole('button', { name: 'Посадить · постоплата' }).click();
+  await expect(page.getByText('Сеанс открыт · постоплата')).toBeVisible();
+  await expect.poll(async () => (await seatOf(request, pc.pcId)).session?.cost.amount ?? 0).toBeGreaterThan(0);
+  await page.getByRole('button', { name: 'Завершить сеанс', exact: true }).click();
+  const confirm = page.getByRole('dialog', { name: /Завершить сеанс/ });
+  await confirm.getByRole('button', { name: 'Завершить сеанс', exact: true }).click();
+
+  const sheet = page.getByRole('dialog', { name: `Долг · ${name}` });
+  const before = (await shiftState(request)).x;
+  await sheet.getByLabel('Или списать долг (без денег)').fill('тестовый сеанс');
+  await sheet.getByRole('button', { name: /^Списать / }).click();
+  await sheet.getByRole('button', { name: /^Точно списать/ }).click();
+  await expect(sheet.getByRole('status')).toContainText('Долг списан');
+  await sheet.getByRole('button', { name: 'Готово' }).click();
+
+  const after = (await shiftState(request)).x;
+  expect(after?.topUpByMethod['cash']).toBe(before?.topUpByMethod['cash']);
+  expect((after as { writeOffs?: number } | null)?.writeOffs ?? 0).toBeGreaterThan(
+    (before as { writeOffs?: number } | null)?.writeOffs ?? 0,
+  );
+  expect((await overview(request)).guestDebts?.some((d) => d.displayName === name) ?? false).toBe(false);
 });

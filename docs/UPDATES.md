@@ -103,6 +103,10 @@ channel/component, `204` when `current` is already the latest, `404` for an unkn
 (`ServerClient.GetUpdateManifestAsync`, `Endpoints.UpdateManifest`). The MockServer implements it in
 `tools/MockServer/src/routes/pcs.ts` (`204` when the published version is not newer than `current`).
 
+The club server (`server/`) answers it from the release published to it (§8.1), and only for a PC whose club turned
+on «Обновлять автоматически» in the admin console (`clubs.auto_update`, off by default); otherwise `204`. The same
+switch sets `AgentServerConfig.updates.enabled`, so without it a PC does not even check on its schedule.
+
 ---
 
 ## 3. Checking — `UpdateChecker`
@@ -137,8 +141,10 @@ channel/component, `204` when `current` is already the latest, `404` for an unkn
 1. Target `updates.downloadDir` (default `cache\updates`), file name `PackageFileName()` =
    `<agent|shell>-<version>.<msi|exe>` (extension from the URL; unsafe characters → `_`). A finished and
    verified package is reused without a download.
-2. Download to `<name>.tmp` over the `RetryPolicy.DownloadHttpClientName` client with `Authorization:
-   Bearer <agent access token>`; an existing `.tmp` resumes with `Range: bytes=<existing>-`. Up to
+2. Download to `<name>.tmp` over the `RetryPolicy.DownloadHttpClientName` client; `Authorization:
+   Bearer <agent access token>` is sent **only when `manifest.url` is on the club server** (same scheme, host and
+   port as `server.baseUrl`, `UpdateDownloader.IsServerOrigin`) — a package hosted elsewhere (a GitHub release, a CDN)
+   is fetched without it, so the token never leaves for a third party; an existing `.tmp` resumes with `Range: bytes=<existing>-`. Up to
    `MaxAttempts = 3` attempts, 2 s × attempt between them, each resuming. Progress is reported at most
    every `ProgressInterval = 500 ms` as `UpdateProgress { phase: downloading, percent, bytesDone, bytesTotal }`.
 3. `VerifyAsync`: file length must equal `size`; `Signing.Sha256FileAsync` must equal `sha256`
@@ -313,9 +319,32 @@ false }` when nothing is staged). Both are behind the admin panel in the Shell (
   is the operator's "I know, try again" path, and the way to push a specific version to one PC.
 * Without: `CheckOnceAsync` and stage the latest applicable manifest for the component; nothing applicable
   → `{ scheduled: false }`.
-* `applyNow: true` → `ApplyPendingAsync` immediately, regardless of session, auto-install flag or apply
-  window (the operator has decided). `applyNow: false` → the package waits for the normal decision loop.
+* `applyNow: true` → `ApplyPendingAsync` immediately when no session is open, regardless of the auto-install flag
+  or the apply window (the owner has decided). With a player on the PC it is **not** applied: the request is
+  remembered (`cache\update-requested-<agent|shell>`, so it survives the Agent's own restart) and the decision loop
+  applies the package at the first idle moment, window or not — `{ scheduled: true }`. A mandatory package keeps
+  its own rule (§5.2). `applyNow: false` → the package waits for the normal decision loop.
 * The response (`UpdateApplyResponse`) is the command ack payload.
+
+### 8.1 Updates from the club server — «Обновления ClubShell»
+
+The club server hosts the releases itself (`server/src/ClubShell.Server/Updates`):
+
+| Step | Who | Request |
+|------|-----|---------|
+| Upload the packages | publisher (`publish.ps1 -Target Http -Destination https://<server>`) | `PUT /<channel>/<version>/<file>` (outside `/api/v1`), `Authorization: Bearer <publishToken>`; stored under `Updates:StoragePath` (default `data/updates`, on the data volume) |
+| Publish the release | publisher | `POST /api/v1/updates/<channel>/manifest` with the signed `manifest.json` (`publishUpdateManifest`): every component must be signed (`400` otherwise); the latest per channel is kept in `update_releases` |
+| Check | publisher | `GET /api/v1/updates/<channel>/manifest?component=<c>&current=0.0.0` with the same token: the component as published |
+| Offer | PC | `getUpdateManifest` (§2.2): the component when newer than `current` and the club's automatic updates are on |
+| Download | PC | `GET /<channel>/<version>/<file>` with the Agent's access token alone (no request signature; `Range`) |
+| Update now | owner, admin console «Обновления ClubShell» | `POST /api/v1/admin/updates/apply {channel?, pcIds?}`: to every connected PC that is behind, an `update` command per component (Shell first, then Agent) with the manifest and `applyNow: true` (§8): a free PC installs at once, a busy one when the session ends (`afterSession`), an offline PC gets nothing (`offline`); journalled as `pcCommand` · `update` |
+| Automatic | owner | `PATCH /api/v1/admin/updates {auto}`: «Обновлять автоматически ночью» — PCs check every `checkIntervalSec` and install in their apply window (`04:00–07:00`) with nobody on them |
+
+The publisher token is the server's `Updates:PublishToken` (environment `Updates__PublishToken`, at least 24
+characters) and CI's `CLUBSHELL_PUBLISH_TOKEN`; without it the server hosts no releases (`501`). Package the release
+with `-BaseUrl https://<server>` (CI: `UPDATE_BASE_URL`), so the manifest URLs point at the server and the Agents
+download from it with their token. `GET /api/v1/admin/updates` shows the published releases and each PC's Agent and
+Shell versions; a PC reports them in every heartbeat.
 
 ---
 

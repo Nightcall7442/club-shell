@@ -56,6 +56,21 @@ public sealed class SignInElsewhereTests(KestrelServerFixture server) : LedgerCh
 
         // A plays on with the token it got.
         a.UserToken = auth.GetProperty("accessToken").GetString();
+
+        // SHELL_CHANGES 92: A lays the saves out only once B handed them back — B acks endSession after its detach.
+        Assert.Equal(id, auth.GetProperty("handoffSessionId").GetGuid());
+        var (status, handoff) = await a.RawGetAsync($"/api/v1/sessions/{id}/handoff");
+        Assert.Equal((200, false), (status, handoff.GetProperty("released").GetBoolean()));
+        await Players.ReadAsync(await b.PostAsync(b.Path($"commands/{command.GetProperty("id").GetGuid()}/ack"), new { ok = true }), 204);
+        (status, handoff) = await a.RawGetAsync($"/api/v1/sessions/{id}/handoff");
+        Assert.Equal((200, true), (status, handoff.GetProperty("released").GetBoolean()));
+
+        // Only the player's own session.
+        var (_, other) = await Players.SignedInAsync(Server);
+        var stranger = await TestAgent.CreateAsync(Server);
+        stranger.UserToken = (await stranger.LoginAsync(other)).GetProperty("accessToken").GetString();
+        Assert.Equal(404, (await stranger.RawGetAsync($"/api/v1/sessions/{id}/handoff")).Status);
+
         Assert.Equal(201, (await Players.StartAsync(a, player)).Status);
     }
 

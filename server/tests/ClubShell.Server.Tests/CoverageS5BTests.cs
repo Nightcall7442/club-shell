@@ -56,7 +56,9 @@ public sealed class CoverageS5BTests(ServerFixture server) : LedgerCheckedTest(s
     {
         var required = Contract.Operations.Where(o => o.Operation.GetProperty("x-server-status").GetString() == "required").Select(o => o.OperationId).ToList();
         Assert.Equal(75, required.Count);
-        Assert.Equal(required.Append("getBalance").Append("reportAntiCheat").Append("getTransactions").Append("callAdmin").Order(), ContractStatus.Implemented.Order());
+        Assert.Equal(
+            required.Append("getBalance").Append("reportAntiCheat").Append("getTransactions").Append("callAdmin").Append("publishUpdateManifest").Order(),
+            ContractStatus.Implemented.Order());
 
         // PATCH /admin/games/{id} is not in the contract: a client without the response validator.
         var owner = await LoginAsync(Server, OwnerPin);

@@ -268,7 +268,18 @@ function wireListeners(): void {
       if (before === e.state) {
         return;
       }
-      // The player's saves (SHELL_CHANGES 23): said once, when the helper could not lay them out or keep them.
+      // The player's saves (SHELL_CHANGES 23): said once, when the helper could not lay them out or keep them — and when
+      // they still come back from the PC the player left (SHELL_CHANGES 92).
+      if (e.state === 'transferring') {
+        notify().push({
+          id: 'saves',
+          title: t('games.saves.transferring'),
+          body: t('games.saves.transferringBody'),
+          level: 'info',
+          ttlSec: 10,
+          source: 'agent',
+        });
+      }
       if (e.state === 'unavailable' || e.state === 'tooLarge') {
         notify().push({
           id: 'saves',

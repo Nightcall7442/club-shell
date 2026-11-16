@@ -122,13 +122,19 @@ public sealed record AuthRequest(
 /// <param name="RefreshToken">User refresh token.</param>
 /// <param name="ExpiresAt">Access token expiry.</param>
 /// <param name="OfflineHash">Argon2id PHC string for offline password verification, when the club allows offline login.</param>
+/// <param name="HandoffSessionId">
+/// Beyond the contract (SHELL_CHANGES 92): the sign-in ended the player's session on another PC («Завершить там и войти
+/// здесь»), whose Agent is now collecting their saves; this PC lays them out only once
+/// <c>GET /sessions/{id}/handoff</c> says that PC released them.
+/// </param>
 public sealed record AuthResponse(
     User User,
     Session? Session,
     string AccessToken,
     string RefreshToken,
     DateTimeOffset ExpiresAt,
-    string? OfflineHash = null);
+    string? OfflineHash = null,
+    Guid? HandoffSessionId = null);
 
 /// <summary>Body of <c>POST /auth/qr/start</c>.</summary>
 /// <param name="PcId">PC requesting the QR login.</param>

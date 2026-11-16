@@ -105,6 +105,18 @@ export interface SessionExtendedData {
   cost: Money;
 }
 
+/**
+ * Response of `GET /sessions/{id}/handoff` (beyond the contract, SHELL_CHANGES 92): whether the PC whose session
+ * `sessionId` a sign-in elsewhere ended has handed the player's saves back — its Agent acknowledged the `endSession`
+ * command after `profile.detach`, or the command is no longer waiting (expired, superseded).
+ */
+export interface SessionHandoff {
+  /** The ended session. */
+  sessionId: string;
+  /** The saves may be laid out on the new PC. */
+  released: boolean;
+}
+
 /** Answer of `POST /sessions/quote` and of IPC `session.quote`: the price the server will charge. */
 export interface SessionQuote {
   /** Minutes priced (the package's for a package tariff). */

@@ -281,6 +281,17 @@ export function sessionRoutes(app: FastifyInstance): void {
     };
   });
 
+  /**
+   * `GET /sessions/{id}/handoff` (SHELL_CHANGES 92): whether the PC whose session «end it there and sign in here» ended
+   * has handed the player's saves back. The mock has no agent on that PC to wait for: an own session is released.
+   */
+  app.get<{ Params: { id: string } }>('/sessions/:id/handoff', async (req) => {
+    const { user } = requireUser(req);
+    const s = findSession(req.params.id);
+    if (!s || s.userId !== user.id) throw errors.notFound('session');
+    return { sessionId: s.id, released: true };
+  });
+
   app.post<{ Params: { id: string } }>('/sessions/:id/pause', async (req) => {
     const { user } = requireUser(req);
     const s = ownedOpenSession(req.params.id, user.id);

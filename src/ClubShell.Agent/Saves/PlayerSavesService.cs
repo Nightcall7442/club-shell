@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ClubShell.Agent.Ipc;
 using ClubShell.Agent.Policy;
 using ClubShell.Agent.Session;
@@ -31,8 +32,11 @@ public interface IPlayerSaves
     /// <summary>
     /// A successful <c>auth.login</c>: starts laying the player's saves out and returns at once. Never for a guest
     /// (<paramref name="guest"/>, or the user's role). The same player signing in again changes nothing.
+    /// <paramref name="handoff"/> (SHELL_CHANGES 92): the sign-in ended the player's session on another PC, which is
+    /// collecting their saves; the attach waits for it (state <see cref="PlayerSavesState.Transferring"/>), at most the
+    /// detach timeout + 20 s, then goes out anyway.
     /// </summary>
-    void SignedIn(User user, bool guest = false);
+    void SignedIn(User user, bool guest = false, Func<CancellationToken, Task>? handoff = null);
 
     /// <summary>A game launch waits here for the saves to be laid out (up to the attach timeout); never throws but on cancel.</summary>
     Task WaitForAttachAsync(CancellationToken cancellationToken);
@@ -50,6 +54,14 @@ public interface IPlayerSaves
     /// has not started yet because the games are still closing. <see langword="false"/> when the wait ran out.
     /// </summary>
     Task<bool> WaitReleasedAsync(TimeSpan max, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// At Agent start, after the sign-in restore (SHELL_CHANGES 91): the attachment kept on disk is taken back for
+    /// <paramref name="restored"/> — the player whose session goes on — without a new <c>profile.attach</c> (the helper
+    /// still holds it, and a new attach would lay the server's copy over the progress made before the restart). One of
+    /// another player, or with nobody restored, is collected now (<c>profile.detach</c>).
+    /// </summary>
+    void RestoreAfterStart(User? restored);
 }
 
 /// <summary>
@@ -63,8 +75,9 @@ public interface IPlayerSaves
 /// <item><c>profile.detach</c> at the end of the session, after the games have closed and before the kiosk is signed out
 /// and its profile reset (<see cref="WaitReleasedAsync"/>), retried within <see cref="PlayerSavesSettings.DetachTimeoutSec"/>
 /// while the helper may still succeed;</item>
-/// <item>never after the profile was reset: what was laid out is held only in memory, so an Agent restart forgets it and
-/// a missed detach is not caught up — the helper's copy on the server stays the previous one.</item>
+/// <item>what was laid out is also kept on disk (<c>cache\saves-attachment.json</c>: the player, the kiosk SID, when):
+/// an Agent restarted mid-session takes it back with the player's sign-in (<see cref="RestoreAfterStart"/>, no second
+/// attach) and detaches at the session end as usual (SHELL_CHANGES 91).</item>
 /// </list>
 /// </summary>
 public sealed class PlayerSavesService : IPlayerSaves, IHostedService
@@ -79,6 +92,9 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
     private readonly Func<bool> _helperInstalled;
     private readonly object _gate = new();
     private Attachment? _current;
+
+    /// <summary>File of the attachment the helper holds, under the persistent cache.</summary>
+    public const string StateFileName = "saves-attachment.json";
     private PlayerSavesState _state = PlayerSavesState.None;
     private Task _publishing = Task.CompletedTask;
 
@@ -164,6 +180,9 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
 
     private TimeSpan DetachTimeout => TimeSpan.FromSeconds(Config.DetachTimeoutSec);
 
+    /// <summary>How long the attach waits for the previous PC to hand the saves back (SHELL_CHANGES 92).</summary>
+    private TimeSpan HandoffTimeout => DetachTimeout + TimeSpan.FromSeconds(20);
+
     /// <summary><c>games.playerSaves.mode</c>: <c>on</c>, <c>off</c>, or <c>auto</c> — on where the helper service is installed.</summary>
     public bool Enabled => Config.Mode switch
     {
@@ -193,7 +212,7 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <inheritdoc />
-    public void SignedIn(User user, bool guest = false)
+    public void SignedIn(User user, bool guest = false, Func<CancellationToken, Task>? handoff = null)
     {
         ArgumentNullException.ThrowIfNull(user);
         guest |= user.Role == UserRole.Guest;
@@ -230,10 +249,12 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
             }
 
             previous = _current?.Release ?? Task.CompletedTask;
-            attachment = new Attachment(playerId);
+            attachment = new Attachment(playerId) { Handoff = handoff };
             _current = attachment;
-            SetStateLocked(PlayerSavesState.Loading);
+            SetStateLocked(handoff is null ? PlayerSavesState.Loading : PlayerSavesState.Transferring);
         }
+
+        Persist(attachment);
 
         // Off the lock and off the IPC thread; a launch waits on attachment.AttachDone, set before this runs.
         _ = Task.Run(() => AttachAsync(attachment, previous));
@@ -243,9 +264,11 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
     public async Task WaitForAttachAsync(CancellationToken cancellationToken)
     {
         Task? attach;
+        TimeSpan budget;
         lock (_gate)
         {
             attach = _current is { Release: null } current ? current.AttachDone.Task : null;
+            budget = _current is { Handoff: not null } ? AttachTimeout + HandoffTimeout : AttachTimeout;
         }
 
         if (attach is null || attach.IsCompleted)
@@ -255,11 +278,11 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
 
         try
         {
-            await attach.WaitAsync(AttachTimeout + TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+            await attach.WaitAsync(budget + TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {
-            _logger.LogWarning("Saves: the launch stopped waiting for the attach after {Timeout}", AttachTimeout);
+            _logger.LogWarning("Saves: the launch stopped waiting for the attach after {Timeout}", budget);
         }
     }
 
@@ -272,6 +295,48 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
             {
                 StartReleaseLocked(current, reason, closeGames);
             }
+        }
+    }
+
+    /// <inheritdoc />
+    public void RestoreAfterStart(User? restored)
+    {
+        Persisted? saved = LoadPersisted();
+        if (saved is null)
+        {
+            return;
+        }
+
+        var attachment = new Attachment(saved.PlayerId);
+        attachment.AttachDone.TrySetResult();
+        bool same = restored is not null && restored.Role != UserRole.Guest
+            && string.Equals(HelperProtocol.PlayerId(restored.Id), saved.PlayerId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(saved.Sid, _kiosk.Sid, StringComparison.OrdinalIgnoreCase);
+        lock (_gate)
+        {
+            if (_current is not null)
+            {
+                return;
+            }
+
+            _current = attachment;
+            if (same)
+            {
+                SetStateLocked(PlayerSavesState.Ready);
+            }
+            else
+            {
+                StartReleaseLocked(attachment, SessionEndReason.AgentRestart, closeGames: false);
+            }
+        }
+
+        if (same)
+        {
+            _logger.LogWarning("Saves: attachment of player {PlayerId} (attached {At:O}) restored from disk after an Agent restart; no new attach", saved.PlayerId, saved.AttachedAt);
+        }
+        else
+        {
+            _logger.LogWarning("Saves: attachment of player {PlayerId} found on disk without that player's session; detaching it now", saved.PlayerId);
         }
     }
 
@@ -330,6 +395,11 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
             _logger.LogDebug(ex, "Saves: previous detach failed");
         }
 
+        if (attachment.Handoff is { } handoff)
+        {
+            await WaitHandoffAsync(attachment, handoff).ConfigureAwait(false);
+        }
+
         string sid = _kiosk.Sid;
         HelperResult result;
         long started = _clock.GetTimestamp();
@@ -380,6 +450,34 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
         }
     }
 
+    /// <summary>The previous PC collects the player's saves first; then the attach (state back to loading).</summary>
+    private async Task WaitHandoffAsync(Attachment attachment, Func<CancellationToken, Task> handoff)
+    {
+        long started = _clock.GetTimestamp();
+        using var budget = new CancellationTokenSource(HandoffTimeout);
+        try
+        {
+            await handoff(budget.Token).WaitAsync(HandoffTimeout).ConfigureAwait(false);
+            _logger.LogInformation("Saves of player {PlayerId}: the previous PC handed them back after {Elapsed}; attaching", attachment.PlayerId, _clock.GetElapsedTime(started));
+        }
+        catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
+        {
+            _logger.LogWarning("Saves of player {PlayerId}: the previous PC did not hand them back within {Timeout}; attaching anyway, its last progress may be missing", attachment.PlayerId, HandoffTimeout);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger.LogWarning(ex, "Saves of player {PlayerId}: waiting for the previous PC failed; attaching anyway", attachment.PlayerId);
+        }
+
+        lock (_gate)
+        {
+            if (ReferenceEquals(_current, attachment) && attachment.Release is null)
+            {
+                SetStateLocked(PlayerSavesState.Loading);
+            }
+        }
+    }
+
     private async Task ReleaseAsync(Attachment attachment, SessionEndReason reason, bool closeGames)
     {
         long started = _clock.GetTimestamp();
@@ -388,7 +486,8 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
             // A detach sent before its attach would find nothing laid out and leave the attach's files behind.
             try
             {
-                await attachment.AttachDone.Task.WaitAsync(AttachTimeout + TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+                TimeSpan wait = AttachTimeout + TimeSpan.FromSeconds(5) + (attachment.Handoff is null ? TimeSpan.Zero : HandoffTimeout);
+                await attachment.AttachDone.Task.WaitAsync(wait).ConfigureAwait(false);
             }
             catch (TimeoutException)
             {
@@ -417,6 +516,8 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
                     {
                         SetStateLocked(PlayerSavesState.None);
                     }
+
+                    Forget(attachment);
                 }
             }
 
@@ -616,6 +717,63 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
     }
 
     /// <summary>One player's saves on this PC: attach sent, detach not finished.</summary>
+    private string StatePath
+    {
+        get
+        {
+            AgentSettings settings = _settings.CurrentValue;
+            return Path.Combine(settings.ResolvePersistentPath(settings.Paths.Cache), StateFileName);
+        }
+    }
+
+    private void Persist(Attachment attachment)
+    {
+        try
+        {
+            string path = StatePath;
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            string temp = path + ".tmp";
+            File.WriteAllText(temp, JsonSerializer.Serialize(new Persisted(attachment.PlayerId, _kiosk.Sid, _clock.UtcNow)));
+            File.Move(temp, path, overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Saves: attachment of player {PlayerId} not kept on disk; an Agent restart would forget it", attachment.PlayerId);
+        }
+    }
+
+    private void Forget(Attachment attachment)
+    {
+        try
+        {
+            string path = StatePath;
+            if (LoadPersisted() is { } saved && string.Equals(saved.PlayerId, attachment.PlayerId, StringComparison.OrdinalIgnoreCase))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Saves: attachment file not deleted");
+        }
+    }
+
+    private Persisted? LoadPersisted()
+    {
+        try
+        {
+            string path = StatePath;
+            return File.Exists(path) ? JsonSerializer.Deserialize<Persisted>(File.ReadAllText(path)) is { PlayerId.Length: > 0 } p ? p : null : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            _logger.LogWarning(ex, "Saves: attachment file unreadable; ignored");
+            return null;
+        }
+    }
+
+    private sealed record Persisted(string PlayerId, string Sid, DateTimeOffset AttachedAt);
+
     private sealed class Attachment(string playerId)
     {
         public string PlayerId { get; } = playerId;
@@ -624,6 +782,9 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
         public TaskCompletionSource AttachDone { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public Task? Release { get; set; }
+
+        /// <summary>The previous PC hands the saves back first (SHELL_CHANGES 92).</summary>
+        public Func<CancellationToken, Task>? Handoff { get; init; }
 
         public TaskCompletionSource Released { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }

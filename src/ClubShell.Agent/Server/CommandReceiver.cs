@@ -389,16 +389,38 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
             : CommandAck.Failure(IpcError.Of(ErrorCode.ServerUnavailable, $"Wake-on-LAN packet to {payload.TargetMac} could not be sent"));
     }
 
+    /// <summary>
+    /// <c>endSession</c>: the session ends here; the ack waits until the player's saves are handed back
+    /// (<c>profile.detach</c>, at most the detach timeout + 20 s): a sign-in on another PC that ended this session lays them
+    /// out only after this ack (SHELL_CHANGES 92, <c>GET /sessions/{id}/handoff</c>).
+    /// </summary>
     private async Task<CommandAck> EndSessionAsync(ServerCommand command, CancellationToken cancellationToken)
     {
         var payload = Require<EndSessionCommand>(command);
         if (_sessions.Current is { } current && current.Id != payload.SessionId)
         {
+            await WaitSavesReleasedAsync(cancellationToken).ConfigureAwait(false);
             return CommandAck.Failure(IpcError.NotFound($"Session {payload.SessionId}"));
         }
 
         var result = await _sessions.EndAsync(payload.Reason, cancellationToken).ConfigureAwait(false);
+        await WaitSavesReleasedAsync(cancellationToken).ConfigureAwait(false);
         return CommandAck.Success(new SessionResult(result.Session));
+    }
+
+    private async Task WaitSavesReleasedAsync(CancellationToken cancellationToken)
+    {
+        // Resolved here, not injected: the saves service reaches the Shell's pipe, which reaches this receiver.
+        if (_services?.GetService(typeof(Saves.IPlayerSaves)) is not Saves.IPlayerSaves saves || !saves.Busy)
+        {
+            return;
+        }
+
+        var max = TimeSpan.FromSeconds(_settings.CurrentValue.Games.PlayerSaves.DetachTimeoutSec + 20);
+        if (!await saves.WaitReleasedAsync(max, cancellationToken).ConfigureAwait(false))
+        {
+            _logger.LogWarning("endSession acked before the saves were handed back (not within {Max})", max);
+        }
     }
 
     private async Task<CommandAck> ExtendSessionAsync(ServerCommand command, CancellationToken cancellationToken)

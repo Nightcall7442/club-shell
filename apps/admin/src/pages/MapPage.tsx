@@ -85,6 +85,7 @@ import {
 } from '@/paybox';
 import { guestSignIn, type ReceiptData } from '@/print';
 import { useShift } from '@/shift';
+import { HallPlanView, ZoomControls, hasPlaces } from './mapPlan';
 import { Badge, Button, Chip, EmptyState, Field, Kbd, Note, Segmented, Sheet, inputCls } from '@/ui';
 
 const POLL_MS = 2000;
@@ -105,6 +106,7 @@ const WIDE_QUERY = '(min-width: 1800px)';
 const SHORT_QUERY = '(max-height: 840px)';
 /** Below 1800 px, whether the feed is unfolded under a tall form (seating, several PCs): 'feed' — unfolded. */
 const PANEL_KEY = 'clubshell.admin.map.panel';
+const VIEW_KEY = 'clubshell.admin.map.view';
 /**
  * `minutes` is required by the contract even where the server ignores it (a package, postpaid): the console sends
  * this then.
@@ -224,6 +226,7 @@ type SheetState =
   | { kind: 'extend' }
   | { kind: 'end' }
   | { kind: 'settle'; target: SettleTarget }
+  | { kind: 'writeOffAll'; debts: GuestDebt[] }
   | { kind: 'move'; fromPcId: string; toPcId: string }
   | null;
 
@@ -311,6 +314,16 @@ function clockLeft(sec: number): string {
 }
 
 /** Text over a picture: the shadows that keep it legible (spec §6.4). */
+/** The status of a compact plan tile (SHELL_CHANGES 94), where the status word has no room: a dot in the corner. */
+const COMPACT_DOT: Record<Seat['pc']['status'], string> = {
+  free: 'bg-success/70',
+  busy: 'bg-accent shadow-[0_0_6px_rgb(var(--c-accent)/0.8)]',
+  locked: 'bg-danger',
+  maintenance: 'bg-warning/70',
+  booked: 'border border-accent',
+  offline: 'bg-text/[0.18]',
+};
+
 const SHADOW_NUM = '[text-shadow:0_1px_3px_rgb(0_0_0/0.6)]';
 const SHADOW_NAME = '[text-shadow:0_1px_2px_rgb(0_0_0/0.8)]';
 const SHADOW_SUB = '[text-shadow:0_0_6px_rgb(0_0_0/0.95),0_1px_2px_rgb(0_0_0/0.9)]';
@@ -350,8 +363,14 @@ function SeatTile({
   call,
   onSelect,
   repair,
+  box,
+  compact = false,
 }: {
   seat: Seat;
+  /** On the hall plan (SHELL_CHANGES 94): the tile's absolute place and size, instead of the zone grid's fixed height. */
+  box?: CSSProperties;
+  /** A small plan cell: number, status colour and time only (the title still says everything). */
+  compact?: boolean;
   /** The session's tariff name: the tile's second line when the PC reports no game. */
   tariff?: string;
   selected: boolean;
@@ -368,6 +387,8 @@ function SeatTile({
 }): JSX.Element {
   const s = STATUS[seat.pc.status];
   const status = seat.pc.status;
+  // A plan cell too small for a second line: the number alone (the status dot and the title say the rest).
+  const tiny = compact && typeof box?.width === 'number' && box.width < 28;
   const session = seat.session;
   const left = secondsLeft(session);
   const prepaid = session?.isPrepaid ?? false;
@@ -431,7 +452,7 @@ function SeatTile({
         : session || call
           ? 'text-white'
           : 'text-text/[0.88]';
-  const style: CSSProperties = { background };
+  const style: CSSProperties = { background, ...box };
   return (
     <button
       type="button"
@@ -447,7 +468,10 @@ function SeatTile({
       title={`${seat.pc.name} · ${t(s.label)}${seat.user ? ` · ${nameOf(seat.user)}` : ''}${waiting ? ` · ${t('ждёт входа')}` : ''}${repair ? ` · ${t('Нужен ремонт')}` : ''}${call ? ` · ${t('Вызов администратора')}` : ''}${seat.kioskAlert ? ` · ${t(KIOSK_ALERT[seat.kioskAlert].short)}` : ''}`}
       style={style}
       className={clsx(
-        'focus-ring hud-focus group relative flex h-28 min-w-0 flex-col justify-between rounded-md border pb-[13px] pl-3.5 pr-3 pt-3 text-left transition-[border-color,box-shadow,opacity] duration-200',
+        'focus-ring hud-focus group flex min-w-0 flex-col justify-between rounded-md border text-left transition-[border-color,box-shadow,opacity] duration-200',
+        box ? 'absolute' : 'relative h-28',
+        compact ? 'items-center overflow-hidden px-0.5 py-0.5' : 'pb-[13px] pl-3.5 pr-3 pt-3',
+        box && (selected || checked) && 'z-20',
         // Border and glow: amber when the cashier is needed, the accent when selected, else the state's hairline.
         call
           ? 'border-warning/[0.45] shadow-[0_0_22px_-8px_rgb(var(--c-warning)/0.45)]'
@@ -484,10 +508,20 @@ function SeatTile({
         )
       )}
 
-      <span className="relative flex h-[22px] items-center justify-between gap-1.5">
+      <span
+        className={clsx(
+          'relative flex items-center gap-1',
+          compact
+            ? tiny
+              ? 'h-full w-full justify-center'
+              : 'h-4 w-full justify-center'
+            : 'h-[22px] justify-between gap-1.5',
+        )}
+      >
         <span
           className={clsx(
-            'font-display text-xl font-medium leading-none tracking-[-0.01em]',
+            'font-display font-medium leading-none tracking-[-0.01em]',
+            compact ? (tiny ? 'text-[11px]' : 'text-[13px]') : 'text-xl',
             numberTone,
             art && SHADOW_NUM,
           )}
@@ -509,12 +543,30 @@ function SeatTile({
             <span
               role="img"
               aria-label={t('Заканчивается')}
-              className="flex h-[22px] w-[22px] items-center justify-center rounded-[6px] border border-warning/50 bg-bg/[0.62]"
+              className={clsx(
+                'flex items-center justify-center rounded-[6px] border border-warning/50 bg-bg/[0.62]',
+                compact ? 'h-3.5 w-3.5 [&>svg]:h-2.5 [&>svg]:w-2.5' : 'h-[22px] w-[22px]',
+              )}
             >
               <AlertTriangleIcon size={13} strong className="text-warning" />
             </span>
           )}
-          {session && !prepaid && (
+          {compact && repair && (
+            <span className="absolute -left-0.5 -top-0.5">
+              <Wrench severity={repair} size={9} />
+            </span>
+          )}
+          {compact && !call && !ending && (
+            <span
+              role="img"
+              aria-label={t(s.label)}
+              className={clsx(
+                'absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full',
+                session ? COMPACT_DOT.busy : COMPACT_DOT[status],
+              )}
+            />
+          )}
+          {session && !prepaid && !compact && (
             <span
               title={t('Постоплата')}
               className="inline-flex h-5 items-center rounded-sm border border-accent/[0.28] bg-bg/60 px-1.5 text-sm font-medium leading-none text-accent"
@@ -523,7 +575,7 @@ function SeatTile({
             </span>
           )}
           {/* In «Выбрать» mode only the marks that need the cashier stay beside the box; the title lists the rest. */}
-          {checked === null && (
+          {checked === null && !compact && (
             <>
               {waiting && !call && <SignInIcon size={15} className="text-accent" />}
               {status === 'locked' && <Lock />}
@@ -546,7 +598,7 @@ function SeatTile({
         </span>
       </span>
 
-      {(session || call) && (
+      {(session || call) && !compact && (
         <span className="relative block min-w-0">
           {session && seat.user && (
             <span
@@ -580,12 +632,13 @@ function SeatTile({
         </span>
       )}
 
-      {session ? (
+      {tiny ? null : session ? (
         // Postpaid has no time left (`secondsLeft` −1): its running bill, the ∞ mark is the badge above.
         prepaid ? (
           <span
             className={clsx(
-              'num-dot relative text-base leading-none tracking-[0.02em]',
+              'num-dot relative leading-none tracking-[0.02em]',
+              compact ? 'text-[11px]' : 'text-base',
               ending ? 'text-warning' : waiting && !art ? 'text-text/[0.86]' : 'text-white',
               art && SHADOW_READOUT,
             )}
@@ -594,16 +647,22 @@ function SeatTile({
           </span>
         ) : (
           <span className="relative flex items-baseline gap-1 whitespace-nowrap">
-            <span className={clsx('num-dot text-[15px] leading-none text-white', art && SHADOW_READOUT)}>
-              {moneyParts(session.cost.amount).num}
+            <span
+              className={clsx(
+                'num-dot leading-none text-white',
+                compact ? 'text-[11px]' : 'text-[15px]',
+                art && SHADOW_READOUT,
+              )}
+            >
+              {compact ? '∞' : moneyParts(session.cost.amount).num}
             </span>
-            <span className="text-[10.5px] font-medium leading-none text-soft">{t('сум')}</span>
+            {!compact && <span className="text-[10.5px] font-medium leading-none text-soft">{t('сум')}</span>}
           </span>
         )
-      ) : (
+      ) : compact ? null : (
         <span
           className={clsx(
-            'relative flex items-center gap-1.5 font-mono text-[10px] uppercase leading-none',
+            'relative flex min-w-0 items-center gap-1.5 truncate font-mono uppercase leading-none text-[10px]',
             status === 'locked'
               ? 'font-semibold tracking-[0.12em] text-danger'
               : 'font-medium tracking-[0.14em] text-muted',
@@ -2389,6 +2448,8 @@ function SettleSheet({
   const [error, setError] = useState<string | null>(null);
   const [lost, setLost] = useState(false);
   const [done, setDone] = useState<{ text: string; receipt: ReceiptData } | null>(null);
+  const [writtenOff, setWrittenOff] = useState<string | null>(null);
+  const canWriteOff = useCanWriteOff();
   const key = useHeldKey();
   const payout = target.debt <= 0;
   const name = target.guest
@@ -2440,7 +2501,16 @@ function SettleSheet({
       onClose={onClose}
       footer={<PayFooter />}
     >
-      {done ? (
+      {writtenOff ? (
+        <>
+          <Note tone="ok" role="status">
+            {writtenOff}
+          </Note>
+          <Button variant="primary" autoFocus onClick={onClose}>
+            {t('Готово')}
+          </Button>
+        </>
+      ) : done ? (
         <>
           <Note tone="ok" role="status">
             {done.text}
@@ -2516,6 +2586,17 @@ function SettleSheet({
               }
             }}
           />
+          {canWriteOff && (
+            <WriteOffBox
+              userId={target.userId}
+              debt={debt}
+              onChanged={setDebt}
+              onDone={(text) => {
+                setWrittenOff(text);
+                onDone();
+              }}
+            />
+          )}
         </>
       )}
     </Sheet>
@@ -2954,6 +3035,180 @@ function FreeSeat({ seat, tariffs, banner, note, busy, run, onDone, setNote }: P
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+// Write-off (SHELL_CHANGES 90): a debt the club gives up, without money, with a reason
+// ---------------------------------------------------------------------------------------------------------------------
+
+/** The owner always; a cashier with the owner's mark («Персонал» → «Списание долгов»). */
+function useCanWriteOff(): boolean {
+  const staff = useClub().staff;
+  return staff !== null && (staff.role === 'owner' || staff.debtWriteOff === true);
+}
+
+/**
+ * Under the pay box of a debt: «Списать долг» with a reason, asked once more. Nothing goes into the shift — «В кассе», the
+ * cash and the revenue stay the same; the journal has `debtWriteOff`. A changed debt comes back with the new figure.
+ */
+function WriteOffBox({
+  userId,
+  debt,
+  onChanged,
+  onDone,
+}: {
+  userId: string;
+  debt: number;
+  onChanged: (debt: number) => void;
+  onDone: (text: string) => void;
+}): JSX.Element {
+  const [reason, setReason] = useState('');
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const key = useHeldKey();
+  const reasonId = useId();
+  const ready = reason.trim().length > 0 && !busy;
+
+  const writeOff = async (): Promise<void> => {
+    if (!asking) {
+      setAsking(true);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await adminApi.writeOff({ userId, amount: debt, reason: reason.trim() }, key.take());
+      key.settle();
+      onDone(t('Долг списан · {sum} · без денег в кассу', { sum: moneyExact(debt) }));
+    } catch (e) {
+      key.settle(e);
+      const next = changedAmount(e, 'debtChanged', 'debt');
+      if (next !== null) onChanged(next);
+      const why = reasonOf(e);
+      setError(
+        why === 'sessionOpen'
+          ? t('Игрок ещё в сеансе: сначала завершите его')
+          : why === 'writeOffNotAllowed'
+            ? t('Списывать долги может владелец или кассир с его разрешением')
+            : describe(e),
+      );
+      setAsking(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-line pt-3">
+      <label htmlFor={reasonId} className="label-sm">
+        {t('Или списать долг (без денег)')}
+      </label>
+      <input
+        id={reasonId}
+        className={inputCls}
+        maxLength={200}
+        placeholder={t('Причина: тестовый сеанс, ПК выключили…')}
+        value={reason}
+        onChange={(e) => {
+          setReason(e.target.value);
+          setAsking(false);
+        }}
+      />
+      <Button variant={asking ? 'danger' : 'tertiary'} disabled={!ready} onClick={() => void writeOff()}>
+        {asking
+          ? t('Точно списать {sum}? Денег в кассу не будет', { sum: moneyExact(debt) })
+          : t('Списать {sum}', { sum: moneyExact(debt) })}
+      </Button>
+      {error && (
+        <Note tone="err" role="alert">
+          {error}
+        </Note>
+      )}
+    </div>
+  );
+}
+
+/** «Списать все долги гостей»: the list and the total first, one reason for all, then each debt written off in turn. */
+function WriteOffAllSheet({
+  debts,
+  onClose,
+  onDone,
+}: {
+  debts: GuestDebt[];
+  onClose: () => void;
+  onDone: () => void;
+}): JSX.Element {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ done: number; failed: string[] } | null>(null);
+  const total = debts.reduce((acc, d) => acc + d.debt.amount, 0);
+  const reasonId = useId();
+
+  const run = async (): Promise<void> => {
+    setBusy(true);
+    const failed: string[] = [];
+    let done = 0;
+    for (const d of debts) {
+      try {
+        await adminApi.writeOff({ userId: d.userId, amount: d.debt.amount, reason: reason.trim() }, newKey());
+        done++;
+      } catch (e) {
+        failed.push(`${guestDisplayName(d.displayName)}: ${describe(e)}`);
+      }
+    }
+    setResult({ done, failed });
+    setBusy(false);
+    onDone();
+  };
+
+  return (
+    <Sheet title={t('Списать все долги гостей')} onClose={busy ? undefined : onClose}>
+      {result ? (
+        <>
+          <Note tone={result.failed.length > 0 ? 'warn' : 'ok'} role="status">
+            {t('Списано долгов: {n}', { n: result.done })}
+          </Note>
+          {result.failed.map((f) => (
+            <p key={f} className="text-xs text-danger-ink">
+              {f}
+            </p>
+          ))}
+          <Button variant="primary" autoFocus onClick={onClose}>
+            {t('Готово')}
+          </Button>
+        </>
+      ) : (
+        <>
+          <ul className="thin-scrollbar flex max-h-72 flex-col divide-y divide-accent/[0.07] overflow-y-auto">
+            {debts.map((d) => (
+              <li key={d.userId} className="flex items-center justify-between gap-3 py-1.5 text-[13px]">
+                <span className="truncate">{guestDisplayName(d.displayName)}</span>
+                <span className="tnum font-medium">{moneyExact(d.debt.amount)}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="tnum text-sm font-semibold text-hi">
+            {t('Итого: {sum} · {n} долгов', { sum: moneyExact(total), n: debts.length })}
+          </p>
+          <label htmlFor={reasonId} className="label-sm">
+            {t('Причина')}
+          </label>
+          <input
+            id={reasonId}
+            className={inputCls}
+            maxLength={200}
+            placeholder={t('Причина: тестовый сеанс, ПК выключили…')}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+          />
+          <Button variant="danger" disabled={busy || reason.trim().length === 0} onClick={() => void run()}>
+            {busy ? '…' : t('Списать {sum} без денег в кассу', { sum: moneyExact(total) })}
+          </Button>
+        </>
+      )}
+    </Sheet>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 // «Расчёт с гостями и долги»: postpaid bills to take, guests' refunds to give back
 // ---------------------------------------------------------------------------------------------------------------------
 
@@ -2967,21 +3222,32 @@ function SettleList({
   refunds,
   kept,
   onSettle,
+  onWriteOffAll,
 }: {
   debts: GuestDebt[];
   refunds: GuestRefund[];
   kept: number;
   onSettle: (target: SettleTarget) => void;
+  onWriteOffAll: (debts: GuestDebt[]) => void;
 }): JSX.Element {
   const id = useId();
+  const canWriteOff = useCanWriteOff();
+  const guestDebts = debts.filter((d) => d.role === undefined || d.role === 'guest');
   const where = (pc: string | null, endedAt: string | null): string =>
     [pc ? pcLabel(pc) : null, endedAt ? clock(endedAt) : null].filter(Boolean).join(' · ');
   return (
     <section aria-labelledby={id} className="glass-side flex shrink-0 flex-col gap-2 px-5 pb-2 pt-3.5">
-      <h2 id={id} className="label flex items-center gap-2 text-warning">
-        <AlertTriangleIcon size={13} strong />
-        {t('Расчёт с гостями и долги')}
-      </h2>
+      <div className="flex items-center justify-between gap-3">
+        <h2 id={id} className="label flex items-center gap-2 text-warning">
+          <AlertTriangleIcon size={13} strong />
+          {t('Расчёт с гостями и долги')}
+        </h2>
+        {canWriteOff && guestDebts.length > 1 && (
+          <Button size="sm" variant="ghost" onClick={() => onWriteOffAll(guestDebts)}>
+            {t('Списать все долги гостей')}
+          </Button>
+        )}
+      </div>
       <ul className="thin-scrollbar flex max-h-56 flex-col divide-y divide-accent/[0.07] overflow-y-auto">
         {debts.map((d) => {
           const guest = d.role === undefined || d.role === 'guest';
@@ -3058,6 +3324,25 @@ function SettleList({
 // App
 // ---------------------------------------------------------------------------------------------------------------------
 
+type MapView = 'plan' | 'zones';
+
+/** The map's view, remembered per browser (SHELL_CHANGES 94): the hall plan unless the cashier chose the zones. */
+function readView(): MapView {
+  try {
+    return localStorage.getItem(VIEW_KEY) === 'zones' ? 'zones' : 'plan';
+  } catch {
+    return 'plan';
+  }
+}
+
+function writeView(v: MapView): void {
+  try {
+    localStorage.setItem(VIEW_KEY, v);
+  } catch {
+    // Private mode: the choice lasts for the page.
+  }
+}
+
 function readPanel(): 'seat' | 'feed' {
   try {
     return localStorage.getItem(PANEL_KEY) === 'feed' ? 'feed' : 'seat';
@@ -3087,6 +3372,8 @@ export function MapPage(): JSX.Element {
   /** «Пересажен на ПК 07 · ждёт входа», shown over the target's panel after a move. */
   const [moved, setMoved] = useState<{ pcId: string; text: string } | null>(null);
   const [filter, setFilter] = useState<Filter | null>(null);
+  const [viewChoice, setViewChoice] = useState<MapView>(readView);
+  const [zoom, setZoom] = useState(1);
   const [sheet, setSheet] = useState<SheetState>(null);
   const [digits, setDigits] = useState('');
   const [tick, setTick] = useState(0);
@@ -3170,6 +3457,29 @@ export function MapPage(): JSX.Element {
   }, [seats]);
   const active = filter ? FILTERS.find((x) => x.id === filter) : undefined;
   void tick;
+  // The plan only when the server sends every PC's place (an older one does not): else the zones, as before.
+  const planned = hasPlaces(seats);
+  const view: MapView = planned ? viewChoice : 'zones';
+  const setView = (v: MapView): void => {
+    setViewChoice(v);
+    writeView(v);
+  };
+  const tileFor = (x: Seat, box?: CSSProperties, compact?: boolean): JSX.Element => (
+    <SeatTile
+      key={x.pc.id}
+      seat={x}
+      tariff={tariffName(x.session?.tariffId)}
+      repair={repairs.get(x.pc.id)}
+      call={callsByPc.get(x.pc.id)}
+      selected={multi.size === 0 && x.pc.id === selected}
+      checked={selectMode || multi.size > 0 ? multi.has(x.pc.id) || (multi.size === 0 && x.pc.id === selected) : null}
+      dimmed={active !== undefined && !active.test(x, repairs.has(x.pc.id))}
+      blocked={notTarget(x)}
+      onSelect={(e) => onTile(x, e)}
+      box={box}
+      compact={compact}
+    />
+  );
   const shownIds = zones.flatMap(([, list]) =>
     list.filter((x) => !active || active.test(x, repairs.has(x.pc.id))).map((x) => x.pc.id),
   );
@@ -3467,6 +3777,20 @@ export function MapPage(): JSX.Element {
                 })}
               </div>
               <span className="min-w-2 flex-1" />
+              {view === 'plan' && <ZoomControls zoom={zoom} onZoom={setZoom} />}
+              {planned && (
+                <Segmented
+                  label={t('Вид карты')}
+                  size="md"
+                  full={false}
+                  value={view}
+                  onChange={setView}
+                  options={[
+                    { id: 'plan', label: t('План зала') },
+                    { id: 'zones', label: t('По зонам') },
+                  ]}
+                />
+              )}
               <Chip
                 tone="outlined"
                 pressed={selectMode}
@@ -3485,54 +3809,50 @@ export function MapPage(): JSX.Element {
               The tiles scroll inside the panel, with room around them for the selected tile's brackets and glow; the
               bottom edge fades (only the bottom: a top fade would dim the brackets of a selected first-row tile).
             */}
-            <div className="thin-scrollbar -mx-3 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-3 pb-[18px] pt-[18px] [mask-image:linear-gradient(180deg,#000_calc(100%-18px),transparent)]">
-              {zones.map(([zone, list]) => {
-                const numbers = list.map((x) => x.pc.number);
-                const lo = Math.min(...numbers);
-                const hi = Math.max(...numbers);
-                return (
-                  <section key={zone} className="flex flex-col gap-2.5">
-                    <h2 className="flex h-4 items-center gap-3">
-                      <span className="font-mono text-[10.5px] font-semibold uppercase leading-none tracking-[0.2em] text-text">
-                        {zone}
-                      </span>
-                      <span className="tnum font-mono text-[10px] font-medium leading-none tracking-[0.1em] text-muted">
-                        {lo === hi ? pad2(lo) : `${pad2(lo)}–${pad2(hi)}`}
-                      </span>
-                      <span
-                        aria-hidden="true"
-                        className="h-px min-w-4 flex-1 bg-[linear-gradient(90deg,rgb(var(--c-accent)/0.18),rgb(var(--c-accent)/0.04))]"
-                      />
-                      <span className="label tnum whitespace-nowrap tracking-[0.14em]">
-                        {t('{n} свободно', { n: list.filter((x) => x.pc.status === 'free').length })}
-                      </span>
-                    </h2>
-                    {/* Six to a row from 1366 to 1920 (F's rhythm): narrower tiles on the small screen, wider on the big. */}
-                    <div className="grid grid-cols-[repeat(auto-fill,minmax(122px,1fr))] gap-2.5 min-[1400px]:grid-cols-[repeat(auto-fill,minmax(136px,1fr))] min-[1800px]:grid-cols-[repeat(auto-fill,minmax(196px,1fr))]">
-                      {list.map((x) => (
-                        <SeatTile
-                          key={x.pc.id}
-                          seat={x}
-                          tariff={tariffName(x.session?.tariffId)}
-                          repair={repairs.get(x.pc.id)}
-                          call={callsByPc.get(x.pc.id)}
-                          selected={multi.size === 0 && x.pc.id === selected}
-                          checked={
-                            selectMode || multi.size > 0
-                              ? multi.has(x.pc.id) || (multi.size === 0 && x.pc.id === selected)
-                              : null
-                          }
-                          dimmed={active !== undefined && !active.test(x, repairs.has(x.pc.id))}
-                          blocked={notTarget(x)}
-                          onSelect={(e) => onTile(x, e)}
+            {view === 'plan' ? (
+              <div className="flex min-h-0 flex-1 flex-col pb-3 pt-3">
+                <HallPlanView
+                  seats={seats}
+                  plan={data?.hallPlan}
+                  zones={data?.zones ?? []}
+                  renderTile={(x, box, compact) => tileFor(x, box, compact)}
+                  zoom={zoom}
+                  onZoom={setZoom}
+                />
+              </div>
+            ) : (
+              <div className="thin-scrollbar -mx-3 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-3 pb-[18px] pt-[18px] [mask-image:linear-gradient(180deg,#000_calc(100%-18px),transparent)]">
+                {zones.map(([zone, list]) => {
+                  const numbers = list.map((x) => x.pc.number);
+                  const lo = Math.min(...numbers);
+                  const hi = Math.max(...numbers);
+                  return (
+                    <section key={zone} className="flex flex-col gap-2.5">
+                      <h2 className="flex h-4 items-center gap-3">
+                        <span className="font-mono text-[10.5px] font-semibold uppercase leading-none tracking-[0.2em] text-text">
+                          {zone}
+                        </span>
+                        <span className="tnum font-mono text-[10px] font-medium leading-none tracking-[0.1em] text-muted">
+                          {lo === hi ? pad2(lo) : `${pad2(lo)}–${pad2(hi)}`}
+                        </span>
+                        <span
+                          aria-hidden="true"
+                          className="h-px min-w-4 flex-1 bg-[linear-gradient(90deg,rgb(var(--c-accent)/0.18),rgb(var(--c-accent)/0.04))]"
                         />
-                      ))}
-                    </div>
-                  </section>
-                );
-              })}
-              {seats.length === 0 && !error && <p className="text-sm text-muted">{t('Нет данных о ПК')}</p>}
-            </div>
+                        <span className="label tnum whitespace-nowrap tracking-[0.14em]">
+                          {t('{n} свободно', { n: list.filter((x) => x.pc.status === 'free').length })}
+                        </span>
+                      </h2>
+                      {/* Six to a row from 1366 to 1920 (F's rhythm): narrower tiles on the small screen, wider on the big. */}
+                      <div className="grid grid-cols-[repeat(auto-fill,minmax(122px,1fr))] gap-2.5 min-[1400px]:grid-cols-[repeat(auto-fill,minmax(136px,1fr))] min-[1800px]:grid-cols-[repeat(auto-fill,minmax(196px,1fr))]">
+                        {list.map((x) => tileFor(x))}
+                      </div>
+                    </section>
+                  );
+                })}
+                {seats.length === 0 && !error && <p className="text-sm text-muted">{t('Нет данных о ПК')}</p>}
+              </div>
+            )}
           </div>
 
           {(debts.length > 0 || refunds.length > 0) && (
@@ -3541,6 +3861,7 @@ export function MapPage(): JSX.Element {
               refunds={refunds}
               kept={allRefunds.length - refunds.length}
               onSettle={(target) => setSheet({ kind: 'settle', target })}
+              onWriteOffAll={(list) => setSheet({ kind: 'writeOffAll', debts: list })}
             />
           )}
         </div>
@@ -3602,6 +3923,16 @@ export function MapPage(): JSX.Element {
         <SettleSheet
           key={sheet.target.userId}
           target={sheet.target}
+          onClose={() => setSheet(null)}
+          onDone={() => {
+            void load();
+            shift.refresh();
+          }}
+        />
+      )}
+      {sheet?.kind === 'writeOffAll' && (
+        <WriteOffAllSheet
+          debts={sheet.debts}
           onClose={() => setSheet(null)}
           onDone={() => {
             void load();

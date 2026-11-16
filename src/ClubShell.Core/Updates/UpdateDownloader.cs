@@ -204,6 +204,17 @@ public sealed class UpdateDownloader
         exception is HttpRequestException or IOException or TimeoutException
         || (exception is OperationCanceledException && !cancellationToken.IsCancellationRequested);
 
+    /// <summary>
+    /// <see langword="true"/> when <paramref name="url"/> is on the club server of <paramref name="serverBaseUrl"/> (same
+    /// scheme, host and port): only then does a package download carry the Agent's token.
+    /// </summary>
+    public static bool IsServerOrigin(string? url, string? serverBaseUrl) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var target)
+        && Uri.TryCreate(serverBaseUrl, UriKind.Absolute, out var server)
+        && string.Equals(target.Scheme, server.Scheme, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(target.IdnHost, server.IdnHost, StringComparison.OrdinalIgnoreCase)
+        && target.Port == server.Port;
+
     private static void TryDelete(string path)
     {
         try
@@ -246,7 +257,10 @@ public sealed class UpdateDownloader
         }
 
         using var request = new HttpRequestMessage(HttpMethod.Get, manifest.Url);
-        if (_tokens.Agent is { } tokens)
+
+        // The Agent's token goes to the club server only: a package hosted elsewhere (a GitHub release, a CDN) is fetched
+        // without it — the package is checked by its SHA-256 and RSA-PSS signature, not by who served it.
+        if (_tokens.Agent is { } tokens && IsServerOrigin(manifest.Url, _settings.CurrentValue.Server?.BaseUrl))
         {
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
         }

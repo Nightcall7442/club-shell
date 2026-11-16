@@ -169,7 +169,7 @@ public sealed class CommandCatalogTests
         var dispatcher = new CommandDispatcher(null!, null!, new AgentOptions());
         var refused = Enum.GetValues<ServerCommandType>()
             .Where(t => !CommandDispatcher.Required.Contains(t) && !CommandDispatcher.BeyondContract.Contains(t)).ToList();
-        Assert.Equal(9, refused.Count);
+        Assert.Equal(8, refused.Count);
         foreach (var type in refused)
         {
             await Assert.ThrowsAsync<ArgumentException>(() => dispatcher.EnqueueAsync(Guid.NewGuid(), Guid.NewGuid(), new NewCommand(type, null)));

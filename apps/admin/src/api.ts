@@ -134,6 +134,8 @@ export interface Seat {
    * older server — the map shows no game.
    */
   game?: SeatGame | null;
+  /** Where the PC stands on the hall plan (SHELL_CHANGES 94); absent from an older server — the map shows zones. */
+  place?: HallPlace;
 }
 
 /** A running game on a seat (`Seat.game`). */
@@ -187,6 +189,8 @@ export interface Overview {
    * Absent from an older server: no inbox then.
    */
   calls?: Call[];
+  /** The club's hall plan (SHELL_CHANGES 94); null — none drawn; absent from an older server. */
+  hallPlan?: HallPlan | null;
 }
 
 export type CallCategory = 'help' | 'technical' | 'order' | 'other' | 'problem';
@@ -567,6 +571,15 @@ export const adminApi = {
   /** Gives a walk-in guest's refund back in cash: `amount` must equal what is payable now (beyond the contract). */
   payout: (input: { userId: string; amount: number }, key: string): Promise<PayoutResult> =>
     postMoney('/admin/wallet/payout', { ...input, method: 'cash' }, key),
+  /**
+   * Writes a debt off without money (SHELL_CHANGES 90): exactly the debt (`409 debtChanged {debt}`), with a reason; the
+   * owner, or a cashier with the owner's mark (`403 writeOffNotAllowed`); never during a session (`409 sessionOpen`).
+   */
+  writeOff: (
+    input: { userId: string; amount: number; reason: string },
+    key: string,
+  ): Promise<{ balance: Money; writtenOff: Money; transactionId: string }> =>
+    postMoney('/admin/wallet/write-off', input, key),
   command: (pcId: string, input: { kind: OnePcCommandKind; text?: string }): Promise<{ ack: CommandAck }> =>
     post(`/admin/pcs/${pcId}/command`, input),
   /** Name or login substring, any part of the phone digits, or the exact card; under 2 characters — recent clients. */
@@ -602,7 +615,46 @@ export interface StaffMember {
   name: string;
   role: StaffRole;
   active: boolean;
+  /**
+   * May sign in to their own Windows account on the club's PCs with their PIN («Вход для персонала» on the lock screen),
+   * to install games, launchers and programs; always true for an owner. Absent from an older server.
+   */
+  pcService?: boolean;
+  /** May write a debt off (SHELL_CHANGES 90); always true for an owner. Absent from an older server. */
+  debtWriteOff?: boolean;
 }
+
+/** A ClubShell release published to this server (UPDATES.md §8). */
+export interface UpdateRelease {
+  channel: 'stable' | 'beta';
+  version: string;
+  publishedAt: string;
+  agent: string | null;
+  shell: string | null;
+  notes: string;
+  mandatory: boolean;
+}
+
+/** A PC and the ClubShell it runs. */
+export interface UpdatePc {
+  id: string;
+  name: string;
+  number: number;
+  online: boolean;
+  busy: boolean;
+  agentVersion: string;
+  shellVersion: string;
+}
+
+export interface UpdatesState {
+  /** The club's PCs check for a new release by themselves and install it at night with nobody on them. */
+  auto: boolean;
+  releases: UpdateRelease[];
+  pcs: UpdatePc[];
+}
+
+/** What «Обновить ClubShell» did on one PC. */
+export type UpdateResult = 'sent' | 'afterSession' | 'upToDate' | 'offline';
 
 export interface ShiftTotals {
   topUpCash: number;
@@ -619,6 +671,9 @@ export interface ShiftTotals {
   cashOut?: number;
   /** Cash given back to walk-in guests. */
   payouts?: number;
+  /** Debts written off in the shift, without money (SHELL_CHANGES 90), and how many. */
+  writeOffs?: number;
+  writeOffCount?: number;
   /** Cash top-ups booked with the club API key: not in the drawer, so not in the expected cash. */
   apiCash?: number;
   /**
@@ -1060,6 +1115,47 @@ export interface Client {
 }
 
 export type DeviceKind = 'pc' | 'console' | 'vr' | 'other';
+
+/** Where a PC's monitor faces on the hall plan: 0 up, 90 right, 180 down, 270 left. */
+export type Rotation = 0 | 90 | 180 | 270;
+
+export type HallObjectKind = 'wall' | 'bar' | 'entrance' | 'aisle' | 'label';
+
+/** An object on the hall plan, `w` × `h` cells from (x, y). */
+export interface HallObject {
+  id: string;
+  kind: HallObjectKind;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  text?: string | null;
+}
+
+/** A zone's area on the hall plan: a rectangle in the zone's colour with its name. */
+export interface HallArea {
+  id: string;
+  zone: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** The club's hall plan (SHELL_CHANGES 94): grid size in cells, objects and zone areas. */
+export interface HallPlan {
+  width: number;
+  height: number;
+  objects: HallObject[];
+  areas: HallArea[];
+}
+
+/** Where a PC stands on the hall plan (`Seat.place`). */
+export interface HallPlace {
+  x: number;
+  y: number;
+  rotation: Rotation;
+}
 export interface HallPc {
   id: string;
   name: string;
@@ -1069,6 +1165,8 @@ export interface HallPc {
   ipAddress: string;
   x: number;
   y: number;
+  /** Where the monitor faces on the plan, degrees clockwise from «up» (SHELL_CHANGES 94); absent from an older server. */
+  rotation?: Rotation;
   device: DeviceKind;
   /** What the Agent reported at registration and on every change since; null — no Agent has run on this seat. */
   hardware: HardwareInfo | null;
@@ -1152,7 +1250,15 @@ export interface PriceQuote {
 
 export interface Reports {
   days: number;
-  totals: { sessions: number; shop: number; topUps: number; sessionsCount: number };
+  totals: {
+    sessions: number;
+    shop: number;
+    topUps: number;
+    sessionsCount: number;
+    /** Debts written off in the period (not revenue, SHELL_CHANGES 90); absent from an older server. */
+    writeOffs?: number;
+    writeOffCount?: number;
+  };
   byDay: { date: string; sessions: number; shop: number; topUps: number }[];
   /** Seat-hours per weekday (0 = Sunday) × hour. */
   heat: number[][];
@@ -1181,10 +1287,26 @@ export const clubApi = {
   logout: (): Promise<unknown> => post('/admin/logout', {}),
 
   staff: (): Promise<{ items: StaffMember[] }> => call('/admin/staff'),
-  addStaff: (input: { name: string; role: StaffRole; pin: string }): Promise<{ id: string }> =>
-    post('/admin/staff', input),
-  updateStaff: (id: string, input: Partial<{ name: string; active: boolean; pin: string }>): Promise<unknown> =>
-    patch(`/admin/staff/${id}`, input),
+  addStaff: (input: {
+    name: string;
+    role: StaffRole;
+    pin: string;
+    pcService?: boolean;
+    debtWriteOff?: boolean;
+  }): Promise<{ id: string }> => post('/admin/staff', input),
+  updateStaff: (
+    id: string,
+    input: Partial<{ name: string; active: boolean; pin: string; pcService: boolean; debtWriteOff: boolean }>,
+  ): Promise<unknown> => patch(`/admin/staff/${id}`, input),
+
+  /** ClubShell updates (owner only, beyond the contract). */
+  updates: (): Promise<UpdatesState> => call('/admin/updates'),
+  setAutoUpdate: (auto: boolean): Promise<unknown> => patch('/admin/updates', { auto }),
+  applyUpdate: (input: {
+    channel?: 'stable' | 'beta';
+    pcIds?: string[];
+  }): Promise<{ channel: string; version: string; results: { pcId: string; name: string; result: UpdateResult }[] }> =>
+    post('/admin/updates/apply', input),
 
   /** `expectedCash` — what the open shift's drawer should hold now (absent from an older server). */
   shift: (): Promise<{ shift: Shift | null; x: ShiftTotals | null; history: Shift[]; expectedCash?: number | null }> =>
@@ -1242,7 +1364,12 @@ export const clubApi = {
   redeemPromo: (userId: string, code: string): Promise<{ balance: Money }> =>
     postMoney('/admin/promo/redeem', { userId, code }),
 
-  pcs: (): Promise<{ items: HallPc[]; zones: Zone[] }> => call('/admin/pcs'),
+  pcs: (): Promise<{ items: HallPc[]; zones: Zone[]; plan?: HallPlan | null }> => call('/admin/pcs'),
+  /** One save for a moved group (SHELL_CHANGES 94); `409 cellTaken {pcId}` — a cell is held by another PC. */
+  layoutPcs: (items: { id: string; x: number; y: number; rotation?: Rotation }[]): Promise<unknown> =>
+    patch('/admin/pcs/layout', { items }),
+  saveHallPlan: (plan: HallPlan): Promise<unknown> => put('/admin/pcs/plan', plan),
+  clearHallPlan: (): Promise<unknown> => del('/admin/pcs/plan'),
   updatePc: (
     id: string,
     input: Partial<{
@@ -1251,6 +1378,7 @@ export const clubApi = {
       number: number;
       x: number;
       y: number;
+      rotation: Rotation;
       device: DeviceKind;
       maintenance: boolean;
       stateless: boolean;

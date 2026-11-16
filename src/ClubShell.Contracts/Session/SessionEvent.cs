@@ -164,6 +164,15 @@ public sealed record SessionCreateRequest(
 /// <param name="Minutes">Minutes to buy; <see langword="null"/> = one hour, or the package.</param>
 public sealed record SessionQuoteRequest(Guid PcId, Guid UserId, Guid TariffId, int? Minutes = null);
 
+/// <summary>
+/// Response of <c>GET /sessions/{id}/handoff</c> (beyond the contract, SHELL_CHANGES 92): whether the PC whose session
+/// <paramref name="SessionId"/> a sign-in elsewhere ended has handed the player's saves back — its Agent acknowledged the
+/// <c>endSession</c> command after <c>profile.detach</c>, or the command is no longer waiting (expired, superseded).
+/// </summary>
+/// <param name="SessionId">The ended session.</param>
+/// <param name="Released">The saves may be laid out on the new PC.</param>
+public sealed record SessionHandoff(Guid SessionId, bool Released);
+
 /// <summary>Answer of <c>POST /sessions/quote</c> and of IPC <c>session.quote</c>: the price the server will charge.</summary>
 /// <param name="Minutes">Minutes priced (the package's for a package tariff).</param>
 /// <param name="Base">List price of those minutes.</param>

@@ -98,6 +98,9 @@ public static class Endpoints
     /// <summary><c>POST /agents/{pcId}/commands/{commandId}/ack</c>.</summary>
     public static string AgentCommandAck(Guid pcId, Guid commandId) => $"agents/{Id(pcId)}/commands/{Id(commandId)}/ack";
 
+    /// <summary><c>POST /agents/{pcId}/staff/verify</c>.</summary>
+    public static string AgentStaffVerify(Guid pcId) => $"agents/{Id(pcId)}/staff/verify";
+
     /// <summary><c>GET /pcs/{pcId}</c>.</summary>
     public static string Pc(Guid pcId) => $"pcs/{Id(pcId)}";
 
@@ -127,6 +130,9 @@ public static class Endpoints
 
     /// <summary><c>POST /users/{userId}/pin/verify</c>.</summary>
     public static string UserPinVerify(Guid userId) => $"users/{Id(userId)}/pin/verify";
+
+    /// <summary><c>GET /sessions/{id}/handoff</c>.</summary>
+    public static string SessionHandoff(Guid sessionId) => $"sessions/{Id(sessionId)}/handoff";
 
     /// <summary><c>POST /sessions/{id}/pause</c>.</summary>
     public static string SessionPause(Guid sessionId) => $"sessions/{Id(sessionId)}/pause";

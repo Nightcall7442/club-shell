@@ -37,6 +37,8 @@ const FEATURES: { key: keyof ShellFeatures; label: string }[] = [
   { key: 'callAdmin', label: 'Вызов администратора (кнопка на ПК, звонок на кассе)' },
   // Off by default: the panel pauses the kiosk guard while open, and its driver settings stay for the next player.
   { key: 'gpuPanel', label: 'Панель видеокарты (NVIDIA / AMD / Intel)' },
+  // On unless switched off (SHELL_CHANGES 93): power without the PIN, only while nobody plays.
+  { key: 'lockScreenPower', label: 'Кнопки «Выключить» и «Перезагрузить» на экране входа' },
 ];
 
 /** Kiosk tabs in their shell order; `Игры` is always there. */
@@ -245,7 +247,9 @@ export default function ClubPage(): JSX.Element {
                 <Toggle
                   key={f.key}
                   label={t(f.label)}
-                  checked={s.features[f.key] === true}
+                  checked={
+                    f.key === 'lockScreenPower' ? s.features.lockScreenPower !== false : s.features[f.key] === true
+                  }
                   onChange={(v) => st.set('features', { ...s.features, [f.key]: v })}
                 />
               ))}

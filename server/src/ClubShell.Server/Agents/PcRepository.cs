@@ -40,6 +40,13 @@ public sealed class PcRow
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset? DeletedAt { get; init; }
 
+    /// <summary>Where the PC stands on the hall plan and where its monitor faces (SHELL_CHANGES 94).</summary>
+    public int X { get; init; }
+
+    public int Y { get; init; }
+
+    public int Rotation { get; init; }
+
     /// <summary>The open session of the PC: the status and <c>Pc.currentSessionId</c> are derived from it (DESIGN §6.6).</summary>
     public Guid? OpenSessionId { get; init; }
 
@@ -142,7 +149,7 @@ public sealed class PcRepository(NpgsqlDataSource db, ILogger<PcRepository> logg
 {
     private const string Columns = """
         id, club_id, number, name, zone, hwid, ip_address, approved, maintenance, stateless, signing_secret, credentials_version,
-        agent_version, shell_version, last_heartbeat_at, goodbye_at, created_at, deleted_at,
+        agent_version, shell_version, last_heartbeat_at, goodbye_at, created_at, deleted_at, x, y, rotation,
         (SELECT s.id FROM sessions s WHERE s.pc_id = pcs.id AND s.state <> 'ended') AS open_session_id,
         (SELECT s.state FROM sessions s WHERE s.pc_id = pcs.id AND s.state <> 'ended') AS open_session_state
         """;
@@ -270,6 +277,9 @@ public sealed class PcRepository(NpgsqlDataSource db, ILogger<PcRepository> logg
             var number = seat?.Number ?? named ?? await c.ExecuteScalarAsync<int>(
                 "SELECT coalesce(max(number), 0) + 1 FROM pcs WHERE club_id = @clubId AND deleted_at IS NULL", new { clubId }, tx);
             var approved = autoApprove && seat is null;
+            // SHELL_CHANGES 94: a new PC takes the first free cell of the hall, not (0, 0) under another PC; a PC taking over
+            // a seat (same MAC, a reinstall) stands where that seat stood, as it replaces it.
+            var (x, y) = seat is not null ? (seat.X, seat.Y) : await Admin.HallLayout.FreeCellAsync(c, tx, clubId);
             id = Guid.CreateVersion7(now);
             await c.ExecuteAsync(
                 """
@@ -280,7 +290,7 @@ public sealed class PcRepository(NpgsqlDataSource db, ILogger<PcRepository> logg
                 """,
                 new
                 {
-                    id, clubId, number, name = seat?.Name ?? GeneratedName(number), zone = seat?.Zone ?? "", x = seat?.X ?? 0, y = seat?.Y ?? 0,
+                    id, clubId, number, name = seat?.Name ?? GeneratedName(number), zone = seat?.Zone ?? "", x, y,
                     deviceKind = seat?.DeviceKind ?? "pc", hwid = request.Hwid, mac, machineName = request.MachineName,
                     ip = request.IpAddress, hardware, approved, agentVersion = request.AgentVersion, now,
                 },

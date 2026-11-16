@@ -101,7 +101,8 @@ public static class AgentConfig
     /// <summary>
     /// <see cref="ServedFeatures"/> plus the owner's <c>features.gpuPanel</c> (off unless switched on: the vendor panel
     /// pauses the kiosk guard and its driver settings stay for the next player, so the club decides) and
-    /// <c>features.callAdmin</c> (on unless switched off: the desk rings for it, D-62).
+    /// <c>features.callAdmin</c> (on unless switched off: the desk rings for it, D-62) and <c>features.lockScreenPower</c>
+    /// (on unless switched off: «Выключить» / «Перезагрузить» on the lock screen, SHELL_CHANGES 93).
     /// </summary>
     public static JsonElement FeaturesOf(string? settingsJson)
     {
@@ -109,7 +110,11 @@ public static class AgentConfig
         var features = doc.RootElement.TryGetProperty("features", out var f) && f.ValueKind == JsonValueKind.Object ? f : default;
         var gpuPanel = features.ValueKind == JsonValueKind.Object && features.TryGetProperty("gpuPanel", out var g) && g.ValueKind == JsonValueKind.True;
         var callAdmin = !(features.ValueKind == JsonValueKind.Object && features.TryGetProperty("callAdmin", out var a) && a.ValueKind == JsonValueKind.False);
-        return JsonSerializer.SerializeToElement(new Dictionary<string, bool>(ServedFeatures) { ["callAdmin"] = callAdmin, ["gpuPanel"] = gpuPanel });
+        var power = !(features.ValueKind == JsonValueKind.Object && features.TryGetProperty("lockScreenPower", out var p) && p.ValueKind == JsonValueKind.False);
+        return JsonSerializer.SerializeToElement(new Dictionary<string, bool>(ServedFeatures)
+        {
+            ["callAdmin"] = callAdmin, ["gpuPanel"] = gpuPanel, ["lockScreenPower"] = power,
+        });
     }
 
     private static readonly JsonElement Games = JsonSerializer.SerializeToElement(new
@@ -129,7 +134,9 @@ public static class AgentConfig
         Session: JsonSerializer.SerializeToElement(new { heartbeatSec = agents.HeartbeatSec, graceSec = sessions.GraceSec }),
         Offline: JsonSerializer.SerializeToElement(new { maxOfflineMinutes = sessions.MaxOfflineMinutes }),
         Games: Games,
-        Updates: new UpdatesConfigOverride(Enabled: false),
+        // The scheduled update check only where the owner turned on automatic updates (UPDATES.md §8); the admin console's
+        // «Обновить ClubShell» works without it.
+        Updates: new UpdatesConfigOverride(Enabled: club.AutoUpdate),
         Anticheat: Anticheat,
         Shell: new ShellConfigOverride(Theme: "default", Features: FeaturesOf(club.Settings), Club: club.Club),
         Themes: []);

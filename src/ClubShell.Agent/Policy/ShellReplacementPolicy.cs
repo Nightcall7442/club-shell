@@ -2,6 +2,7 @@ using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 
+using ClubShell.Agent.Watchdog;
 using ClubShell.Contracts.Pcs;
 using ClubShell.Windows.Registry;
 
@@ -37,16 +38,18 @@ public sealed class ShellReplacementPolicyModule : IPolicyModule
     private readonly ShellRegistry _shell;
     private readonly IKioskCredentials _kiosk;
     private readonly ILogger<ShellReplacementPolicyModule> _logger;
+    private readonly AdminMaintenance? _maintenance;
     private readonly object _gate = new();
     private string? _appliedSid;
     private bool _autoLogonSet;
 
-    /// <summary>Creates the module.</summary>
-    public ShellReplacementPolicyModule(ShellRegistry shell, IKioskCredentials kiosk, ILogger<ShellReplacementPolicyModule> logger)
+    /// <summary>Creates the module; <paramref name="maintenance"/> holds auto-logon paused during a staff member's Windows sign-in.</summary>
+    public ShellReplacementPolicyModule(ShellRegistry shell, IKioskCredentials kiosk, ILogger<ShellReplacementPolicyModule> logger, AdminMaintenance? maintenance = null)
     {
         _shell = shell;
         _kiosk = kiosk;
         _logger = logger;
+        _maintenance = maintenance;
     }
 
     /// <inheritdoc />
@@ -105,6 +108,14 @@ public sealed class ShellReplacementPolicyModule : IPolicyModule
                 return Task.FromResult(PolicyModuleResult.Failed(
                     new InvalidOperationException("Kiosk credentials unavailable; auto-logon deferred until the kiosk account is provisioned."),
                     notes.ToArray()));
+            }
+
+            if (_maintenance?.AutoLogonPaused == true)
+            {
+                // A staff member is on their way to the Windows sign-in screen: auto-logon now would log the kiosk on in
+                // front of them. StaffWindowsSignIn resumes it once they signed in or the sign-in is given up.
+                notes.Add($"auto-logon for {_kiosk.UserName} left paused: a staff member's Windows sign-in is open");
+                return Task.FromResult(PolicyModuleResult.Ok(notes.ToArray()));
             }
 
             _shell.SetAutoLogon(_kiosk.UserName, _kiosk.Password);

@@ -1,11 +1,24 @@
 /**
- * Hall map editor (owner): devices on a square grid at their (x, y), selected device on the right (with its live load,
- * games disk and hardware as its Agent reports them), zones below the add form when nothing is selected. Click a device
- * to select it, click an empty cell or use the arrow keys to move it. Below, the PC policy of the club (`policyEditor.tsx`).
+ * Hall editor (owner, SHELL_CHANGES 94): the hall as it stands — devices at their (x, y) on the plan with where their
+ * monitor faces, over the plan's zone areas and objects (walls, bar, entrance, aisles, labels). Drag a device (mouse or
+ * finger) to move it; Shift/Ctrl-click or a frame drawn on the empty plan selects several, and dragging one of them moves
+ * the group — one save for the whole move (`PATCH /admin/pcs/layout`), refused on a taken cell. «Расставить» lines the
+ * selected PCs (or a whole zone) up by number. PCs that still share a cell are flagged to be moved apart. On the right:
+ * the selection's place, the selected device (live load, games disk, hardware), the add form, the plan and the zones.
+ * Below, the PC policy of the club (`policyEditor.tsx`).
  */
-import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import clsx from 'clsx';
-import { clubApi, type DeviceKind, type HallPc, type Zone } from '@/api';
+import {
+  AdminError,
+  clubApi,
+  type DeviceKind,
+  type HallObjectKind,
+  type HallPc,
+  type HallPlan,
+  type Rotation,
+  type Zone,
+} from '@/api';
 import { GamesDisk, HardwareList, gamesDisk } from '@/device';
 import { describe } from '@/errors';
 import { t } from '@/i18n';
@@ -29,6 +42,17 @@ import {
 } from '@/ui';
 import { InstallKit } from './installKit';
 import { FieldGroup, OwnerPage } from './ownerKit';
+import {
+  MAX_CELL,
+  OBJECT_KINDS,
+  PlanBackdrop,
+  RotationMark,
+  gridBackground,
+  nextRotation,
+  objectLabel,
+  planSize,
+  sharedCells,
+} from './hallKit';
 import { PolicyEditor } from './policyEditor';
 
 const MIN_COLS = 16;
@@ -305,15 +329,14 @@ function DevicePanel({
 // Nothing selected: add a device, manage zones
 // ---------------------------------------------------------------------------------------------------------------------
 
+/** A new seat: the server puts it in the first free cell of the hall (drag it to its place after). */
 function AddDevice({
   zones,
   pcs,
-  freeCell,
   onAdded,
 }: {
   zones: Zone[];
   pcs: HallPc[];
-  freeCell: { x: number; y: number } | null;
   onAdded: (id: string | null) => Promise<void>;
 }): JSX.Element {
   const nextNumber = pcs.reduce((n, p) => Math.max(n, p.number), 0) + 1;
@@ -332,7 +355,7 @@ function AddDevice({
     setBusy(true);
     setNote(null);
     try {
-      const r = (await clubApi.addPc({ zone, number, device, ...(freeCell ?? {}) })) as { pc?: { id: string } };
+      const r = (await clubApi.addPc({ zone, number, device })) as { pc?: { id: string } };
       await onAdded(r.pc?.id ?? null);
     } catch (e) {
       setNote({ text: describe(e), tone: 'err' });
@@ -353,12 +376,7 @@ function AddDevice({
         <DevicePick value={device} onChange={setDevice} />
       </FieldGroup>
       <Note note={note} />
-      <Button
-        variant="primary"
-        className="self-end"
-        disabled={busy || !zone || number < 1 || freeCell === null}
-        onClick={() => void add()}
-      >
+      <Button variant="primary" className="self-end" disabled={busy || !zone || number < 1} onClick={() => void add()}>
         {t('Добавить')}
       </Button>
     </Section>
@@ -450,20 +468,484 @@ function ZonesEditor({ onSaved }: { onSaved: () => Promise<void> }): JSX.Element
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+// Placement: one move of the selected PCs, checked against the rest of the hall before one save
+// ---------------------------------------------------------------------------------------------------------------------
+
+type Target = { id: string; x: number; y: number; rotation?: Rotation };
+
+/**
+ * Why `targets` cannot be placed: a cell outside the grid, two of them in one cell, or a cell held by a PC that does not
+ * move. null — they can.
+ */
+function placementProblem(targets: Target[], pcs: HallPc[]): string | null {
+  const moving = new Set(targets.map((t) => t.id));
+  const held = new Map(pcs.filter((p) => !moving.has(p.id)).map((p) => [`${p.x}:${p.y}`, p]));
+  const seen = new Set<string>();
+  for (const tg of targets) {
+    if (tg.x < 0 || tg.y < 0 || tg.x > MAX_CELL || tg.y > MAX_CELL) return t('За пределами зала');
+    const key = `${tg.x}:${tg.y}`;
+    const other = held.get(key);
+    if (other) return t('Клетка занята: {name}', { name: other.name });
+    if (seen.has(key)) return t('Два ПК не могут стоять в одной клетке');
+    seen.add(key);
+  }
+  return null;
+}
+
+/** The server's refusal of a placement, naming the PC in the way when it says which. */
+function placementError(e: unknown, pcs: HallPc[]): string {
+  if (e instanceof AdminError && e.details?.['reason'] === 'cellTaken') {
+    const other = pcs.find((p) => p.id === e.details?.['pcId']);
+    if (other) return t('Клетка занята: {name}', { name: other.name });
+  }
+  return describe(e);
+}
+
+/**
+ * «Расставить»: the PCs by number from (x0, y0), in a row (or a column) of `perLine`, `gap` empty cells between PCs and
+ * between lines.
+ */
+export function arrange(
+  pcs: HallPc[],
+  from: { x: number; y: number },
+  direction: 'row' | 'column',
+  perLine: number,
+  gap: number,
+): Target[] {
+  const step = 1 + Math.max(0, gap);
+  const line = Math.max(1, perLine);
+  return [...pcs]
+    .sort((a, b) => a.number - b.number)
+    .map((p, i) => {
+      const along = (i % line) * step;
+      const across = Math.floor(i / line) * step;
+      return direction === 'row'
+        ? { id: p.id, x: from.x + along, y: from.y + across }
+        : { id: p.id, x: from.x + across, y: from.y + along };
+    });
+}
+
+function RotateButtons({ onRotate, disabled }: { onRotate: (step: 1 | -1) => void; disabled?: boolean }): JSX.Element {
+  return (
+    <div className="flex gap-1.5">
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={disabled}
+        onClick={() => onRotate(-1)}
+        aria-label={t('Повернуть влево')}
+      >
+        ⟲ {t('Повернуть влево')}
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={disabled}
+        onClick={() => onRotate(1)}
+        aria-label={t('Повернуть вправо')}
+      >
+        ⟳ {t('Повернуть вправо')}
+      </Button>
+    </div>
+  );
+}
+
+/** The selected PCs: their cell (one PC), where they face, «Расставить» for a group or a whole zone. */
+function PlacePanel({
+  selected,
+  zones,
+  pcs,
+  busy,
+  onPlace,
+  onSelectZone,
+}: {
+  selected: HallPc[];
+  zones: Zone[];
+  pcs: HallPc[];
+  busy: boolean;
+  onPlace: (targets: Target[]) => Promise<boolean>;
+  onSelectZone: (zone: string) => void;
+}): JSX.Element {
+  const one = selected.length === 1 ? selected[0] : undefined;
+  const minX = Math.min(...selected.map((p) => p.x));
+  const minY = Math.min(...selected.map((p) => p.y));
+  const [x, setX] = useState(minX);
+  const [y, setY] = useState(minY);
+  const [direction, setDirection] = useState<'row' | 'column'>('row');
+  const [perLine, setPerLine] = useState(Math.max(1, selected.length));
+  const [gap, setGap] = useState(0);
+  const ids = selected.map((p) => p.id).join(',');
+
+  useEffect(() => {
+    setX(minX);
+    setY(minY);
+    setPerLine(Math.max(1, selected.length));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ids]);
+
+  const rotate = (step: 1 | -1): void =>
+    void onPlace(selected.map((p) => ({ id: p.id, x: p.x, y: p.y, rotation: nextRotation(p.rotation, step) })));
+
+  return (
+    <Section
+      variant="solid"
+      title={one ? t('Место {name}', { name: one.name }) : t('Выбрано: {n} ПК', { n: selected.length })}
+    >
+      {one ? (
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={t('Колонка (x)')}>
+            <NumberInput value={x + 1} min={1} max={MAX_CELL + 1} onChange={(v) => setX(v - 1)} />
+          </Field>
+          <Field label={t('Ряд (y)')}>
+            <NumberInput value={y + 1} min={1} max={MAX_CELL + 1} onChange={(v) => setY(v - 1)} />
+          </Field>
+          <Button
+            className="col-span-2"
+            disabled={busy || (x === one.x && y === one.y)}
+            onClick={() => void onPlace([{ id: one.id, x, y }])}
+          >
+            {t('Поставить сюда')}
+          </Button>
+        </div>
+      ) : (
+        <>
+          <p className="text-[13px] text-muted">
+            {t('Перетащите любой из выбранных ПК — сдвинется вся группа. Или расставьте их по номерам:')}
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={t('С колонки (x)')}>
+              <NumberInput value={x + 1} min={1} max={MAX_CELL + 1} onChange={(v) => setX(v - 1)} />
+            </Field>
+            <Field label={t('С ряда (y)')}>
+              <NumberInput value={y + 1} min={1} max={MAX_CELL + 1} onChange={(v) => setY(v - 1)} />
+            </Field>
+            <Field label={t('ПК в линии')}>
+              <NumberInput value={perLine} min={1} max={MAX_CELL} onChange={setPerLine} />
+            </Field>
+            <Field label={t('Промежуток, клеток')}>
+              <NumberInput value={gap} min={0} max={5} onChange={setGap} />
+            </Field>
+          </div>
+          <Segmented
+            label={t('Направление')}
+            value={direction}
+            onChange={setDirection}
+            options={[
+              { id: 'row', label: t('В ряд') },
+              { id: 'column', label: t('Колонкой') },
+            ]}
+          />
+          <Button
+            variant="primary"
+            disabled={busy}
+            onClick={() => void onPlace(arrange(selected, { x, y }, direction, perLine, gap))}
+          >
+            {t('Расставить')}
+          </Button>
+        </>
+      )}
+      <FieldGroup label={t('Куда смотрит монитор')}>
+        <RotateButtons disabled={busy} onRotate={rotate} />
+      </FieldGroup>
+      {zones.length > 0 && (
+        <FieldGroup label={t('Выбрать всю зону')}>
+          <div className="flex flex-wrap gap-1.5">
+            {zones.map((z) => (
+              <Chip key={z.name} tone="outlined" onClick={() => onSelectZone(z.name)}>
+                {z.name} · {pcs.filter((p) => p.zone === z.name).length}
+              </Chip>
+            ))}
+          </div>
+        </FieldGroup>
+      )}
+    </Section>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The plan: size, objects, zone areas
+// ---------------------------------------------------------------------------------------------------------------------
+
+const EMPTY_PLAN: HallPlan = { width: 16, height: 10, objects: [], areas: [] };
+
+let planIds = 0;
+const newId = (prefix: string): string => `${prefix}-${Date.now().toString(36)}-${(planIds++).toString(36)}`;
+
+function BoxFields({
+  value,
+  onChange,
+}: {
+  value: { x: number; y: number; w: number; h: number };
+  onChange: (v: { x: number; y: number; w: number; h: number }) => void;
+}): JSX.Element {
+  const field = (k: 'x' | 'y' | 'w' | 'h', label: string, shift: number) => (
+    <Field label={label}>
+      <NumberInput
+        value={value[k] + shift}
+        min={shift === 1 ? 1 : 1}
+        max={MAX_CELL + 1}
+        onChange={(v) => onChange({ ...value, [k]: Math.max(shift === 1 ? 0 : 1, v - shift) })}
+      />
+    </Field>
+  );
+  return (
+    <div className="grid grid-cols-4 gap-2">
+      {field('x', t('x'), 1)}
+      {field('y', t('y'), 1)}
+      {field('w', t('Шир.'), 0)}
+      {field('h', t('Выс.'), 0)}
+    </div>
+  );
+}
+
+/** Size of the hall, objects and zone areas, saved together (`PUT /admin/pcs/plan`). */
+function PlanEditor({
+  draft,
+  saved,
+  zones,
+  pcs,
+  onChange,
+  onSaved,
+  focus,
+  onFocus,
+}: {
+  draft: HallPlan;
+  saved: HallPlan | null;
+  zones: Zone[];
+  pcs: HallPc[];
+  onChange: (p: HallPlan) => void;
+  onSaved: () => Promise<void>;
+  focus: string | null;
+  onFocus: (id: string | null) => void;
+}): JSX.Element {
+  const [saving, setSaving] = useState(false);
+  const [note, setNote] = useState<NoteState>(null);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(saved ?? EMPTY_PLAN);
+  const set = (p: Partial<HallPlan>): void => onChange({ ...draft, ...p });
+
+  const addObject = (kind: HallObjectKind): void => {
+    const id = newId(kind);
+    const size = kind === 'wall' ? { w: 6, h: 1 } : kind === 'label' ? { w: 3, h: 1 } : { w: 2, h: 2 };
+    set({
+      objects: [...draft.objects, { id, kind, x: 0, y: Math.max(0, draft.height - size.h), ...size, text: null }],
+    });
+    onFocus(id);
+  };
+
+  /** A zone's area around its PCs (one free cell of margin), or a 4×3 box when it has none yet. */
+  const addArea = (zone: string): void => {
+    const own = pcs.filter((p) => p.zone === zone);
+    const id = newId('area');
+    const area =
+      own.length > 0
+        ? (() => {
+            const x = Math.max(0, Math.min(...own.map((p) => p.x)) - 1);
+            const y = Math.max(0, Math.min(...own.map((p) => p.y)) - 1);
+            return {
+              id,
+              zone,
+              x,
+              y,
+              w: Math.max(...own.map((p) => p.x)) + 2 - x,
+              h: Math.max(...own.map((p) => p.y)) + 2 - y,
+            };
+          })()
+        : { id, zone, x: 0, y: 0, w: 4, h: 3 };
+    set({ areas: [...draft.areas.filter((a) => a.zone !== zone), area] });
+    onFocus(id);
+  };
+
+  const save = async (): Promise<void> => {
+    setSaving(true);
+    setNote(null);
+    try {
+      await clubApi.saveHallPlan(draft);
+      await onSaved();
+      setNote({ text: t('План зала сохранён'), tone: 'ok' });
+    } catch (e) {
+      setNote({ text: describe(e), tone: 'err' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <Section variant="side" title={t('План зала')}>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={t('Ширина зала, клеток')}>
+            <NumberInput value={draft.width} min={1} max={MAX_CELL + 1} onChange={(v) => set({ width: v })} />
+          </Field>
+          <Field label={t('Высота зала, клеток')}>
+            <NumberInput value={draft.height} min={1} max={MAX_CELL + 1} onChange={(v) => set({ height: v })} />
+          </Field>
+        </div>
+
+        <FieldGroup label={t('Добавить на план')}>
+          <div className="flex flex-wrap gap-1.5">
+            {OBJECT_KINDS.map((k) => (
+              <Chip key={k.id} tone="outlined" onClick={() => addObject(k.id)}>
+                + {t(k.label)}
+              </Chip>
+            ))}
+          </div>
+        </FieldGroup>
+        {draft.objects.length > 0 && (
+          <ul className="flex flex-col gap-3">
+            {draft.objects.map((o, i) => (
+              <li
+                key={o.id}
+                data-plan-object={o.id}
+                onFocusCapture={() => onFocus(o.id)}
+                className={clsx(
+                  'flex flex-col gap-2 rounded-md border p-2.5',
+                  focus === o.id ? 'border-accent/60' : 'border-line',
+                )}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="label-sm text-text">{objectLabel(o.kind)}</span>
+                  <Button
+                    size="sm"
+                    variant="tertiary"
+                    onClick={() => set({ objects: draft.objects.filter((_, j) => j !== i) })}
+                  >
+                    {t('Удалить')}
+                  </Button>
+                </div>
+                <BoxFields
+                  value={o}
+                  onChange={(b) => set({ objects: draft.objects.map((x, j) => (j === i ? { ...x, ...b } : x)) })}
+                />
+                <Field label={t('Подпись')}>
+                  <Input
+                    value={o.text ?? ''}
+                    maxLength={40}
+                    onChange={(e) =>
+                      set({
+                        objects: draft.objects.map((x, j) => (j === i ? { ...x, text: e.target.value || null } : x)),
+                      })
+                    }
+                  />
+                </Field>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {zones.length > 0 && (
+          <FieldGroup
+            label={t('Область зоны')}
+            hint={t('Прямоугольник в цвете зоны вокруг её ПК; поправьте размеры ниже')}
+          >
+            <div className="flex flex-wrap gap-1.5">
+              {zones.map((z) => (
+                <Chip key={z.name} tone="outlined" onClick={() => addArea(z.name)}>
+                  {t('Обвести {zone}', { zone: z.name })}
+                </Chip>
+              ))}
+            </div>
+          </FieldGroup>
+        )}
+        {draft.areas.length > 0 && (
+          <ul className="flex flex-col gap-3">
+            {draft.areas.map((a, i) => (
+              <li
+                key={a.id}
+                onFocusCapture={() => onFocus(a.id)}
+                className={clsx(
+                  'flex flex-col gap-2 rounded-md border p-2.5',
+                  focus === a.id ? 'border-accent/60' : 'border-line',
+                )}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="label-sm text-text">{t('Зона {zone}', { zone: a.zone })}</span>
+                  <Button
+                    size="sm"
+                    variant="tertiary"
+                    onClick={() => set({ areas: draft.areas.filter((_, j) => j !== i) })}
+                  >
+                    {t('Удалить')}
+                  </Button>
+                </div>
+                <BoxFields
+                  value={a}
+                  onChange={(b) => set({ areas: draft.areas.map((x, j) => (j === i ? { ...x, ...b } : x)) })}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+        <Note note={note} />
+        {saved && (
+          <Button
+            variant="tertiary"
+            size="sm"
+            className="self-start"
+            disabled={saving}
+            onClick={() =>
+              void (async () => {
+                setSaving(true);
+                try {
+                  await clubApi.clearHallPlan();
+                  await onSaved();
+                } catch (e) {
+                  setNote({ text: describe(e), tone: 'err' });
+                } finally {
+                  setSaving(false);
+                }
+              })()
+            }
+          >
+            {t('Убрать план')}
+          </Button>
+        )}
+      </Section>
+      <SaveBar
+        dirty={dirty}
+        saving={saving}
+        label={t('План зала изменён')}
+        onReset={() => onChange(saved ?? EMPTY_PLAN)}
+        onSave={() => void save()}
+      />
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------------------------------------------------
+
+const CELL = 44;
+const ZOOMS = [0.5, 0.65, 0.8, 1, 1.25];
+
+type Drag =
+  | { kind: 'move'; x0: number; y0: number; ids: string[]; moved: boolean; pressed: string; additive: boolean }
+  | { kind: 'band'; x0: number; y0: number; additive: boolean; base: Set<string> };
 
 export default function HallPage(): JSX.Element {
   const [pcs, setPcs] = useState<HallPc[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
+  const [plan, setPlan] = useState<HallPlan | null>(null);
+  const [draft, setDraft] = useState<HallPlan>(EMPTY_PLAN);
+  const [focus, setFocus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selection, setSelection] = useState<Set<string>>(new Set());
+  const [delta, setDelta] = useState<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
+  const [band, setBand] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const drag = useRef<Drag | null>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const cell = Math.round(CELL * zoom);
 
   const load = useCallback(async () => {
     try {
       const r = await clubApi.pcs();
       setPcs(r.items);
       setZones(r.zones);
+      setPlan(r.plan ?? null);
+      setDraft(r.plan ?? EMPTY_PLAN);
+      setSelection((s) => new Set([...s].filter((id) => r.items.some((p) => p.id === id))));
       setError(null);
     } catch (e) {
       setError(describe(e));
@@ -474,111 +956,148 @@ export default function HallPage(): JSX.Element {
     void load();
   }, [load]);
 
-  const cols = Math.max(MIN_COLS, ...pcs.map((p) => p.x + 2));
-  const rows = Math.max(MIN_ROWS, ...pcs.map((p) => p.y + 2));
-  const at = useMemo(() => {
-    const m = new Map<string, HallPc>();
-    for (const p of pcs) m.set(`${p.x}:${p.y}`, p);
-    return m;
-  }, [pcs]);
+  // One spare row and column beyond everything, to drag into.
+  const size = planSize(pcs, draft, { cols: MIN_COLS - 1, rows: MIN_ROWS - 1 });
+  const cols = size.cols + 1;
+  const rows = size.rows + 1;
   const colorOf = useMemo(() => new Map(zones.map((z) => [z.name, z.color])), [zones]);
-  const pc = pcs.find((p) => p.id === selected) ?? null;
+  const shared = useMemo(() => sharedCells(pcs), [pcs]);
+  const selected = pcs.filter((p) => selection.has(p.id));
+  const one = selected.length === 1 ? selected[0] : null;
 
-  const freeCell = useMemo(() => {
-    for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) if (!at.has(`${x}:${y}`)) return { x, y };
-    return null;
-  }, [at, cols, rows]);
-
-  const move = async (target: HallPc, x: number, y: number): Promise<void> => {
-    if (x < 0 || y < 0 || x >= cols || y >= rows || at.has(`${x}:${y}`)) return;
-    setPcs((list) => list.map((p) => (p.id === target.id ? { ...p, x, y } : p)));
+  const place = async (targets: Target[]): Promise<boolean> => {
+    const problem = placementProblem(targets, pcs);
+    if (problem) {
+      setError(problem);
+      return false;
+    }
+    const by = new Map(targets.map((tg) => [tg.id, tg]));
+    setPcs((list) => list.map((p) => (by.has(p.id) ? { ...p, ...by.get(p.id) } : p)));
+    setBusy(true);
     try {
-      await clubApi.updatePc(target.id, { x, y });
+      await clubApi.layoutPcs(targets);
       setError(null);
+      return true;
     } catch (e) {
-      setError(describe(e));
+      setError(placementError(e, pcs));
       await load();
+      return false;
+    } finally {
+      setBusy(false);
     }
   };
 
+  /** The pointer's position in the plan's box, px. */
+  const at = (e: PointerEvent<HTMLElement>): { x: number; y: number } => {
+    const r = boxRef.current?.getBoundingClientRect();
+    return { x: e.clientX - (r?.left ?? 0), y: e.clientY - (r?.top ?? 0) };
+  };
+
+  const onTileDown = (e: PointerEvent<HTMLButtonElement>, p: HallPc): void => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    boxRef.current?.setPointerCapture(e.pointerId);
+    const additive = e.shiftKey || e.ctrlKey || e.metaKey;
+    let ids: string[];
+    if (additive) {
+      const next = new Set(selection);
+      if (next.has(p.id)) next.delete(p.id);
+      else next.add(p.id);
+      setSelection(next);
+      ids = [...next];
+    } else if (selection.has(p.id)) {
+      ids = [...selection];
+    } else {
+      setSelection(new Set([p.id]));
+      ids = [p.id];
+    }
+    const { x, y } = at(e);
+    drag.current = { kind: 'move', x0: x, y0: y, ids, moved: false, pressed: p.id, additive };
+  };
+
+  const onBoxDown = (e: PointerEvent<HTMLDivElement>): void => {
+    if (e.button !== 0) return;
+    boxRef.current?.setPointerCapture(e.pointerId);
+    const additive = e.shiftKey || e.ctrlKey || e.metaKey;
+    const { x, y } = at(e);
+    drag.current = { kind: 'band', x0: x, y0: y, additive, base: additive ? new Set(selection) : new Set() };
+  };
+
+  const onMove = (e: PointerEvent<HTMLDivElement>): void => {
+    const d = drag.current;
+    if (!d) return;
+    const { x, y } = at(e);
+    if (d.kind === 'move') {
+      const dx = Math.round((x - d.x0) / cell);
+      const dy = Math.round((y - d.y0) / cell);
+      if (dx !== 0 || dy !== 0) d.moved = true;
+      setDelta((old) => (old.dx === dx && old.dy === dy ? old : { dx, dy }));
+      return;
+    }
+    const r = { x: Math.min(d.x0, x), y: Math.min(d.y0, y), w: Math.abs(x - d.x0), h: Math.abs(y - d.y0) };
+    if (r.w < 4 && r.h < 4) return;
+    setBand(r);
+    const inside = pcs.filter((p) => {
+      const cx = (p.x + 0.5) * cell;
+      const cy = (p.y + 0.5) * cell;
+      return cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h;
+    });
+    setSelection(new Set([...d.base, ...inside.map((p) => p.id)]));
+  };
+
+  const onUp = (): void => {
+    const d = drag.current;
+    drag.current = null;
+    if (!d) return;
+    if (d.kind === 'band') {
+      if (!band && !d.additive) setSelection(new Set());
+      setBand(null);
+      return;
+    }
+    const { dx, dy } = delta;
+    setDelta({ dx: 0, dy: 0 });
+    if (!d.moved || (dx === 0 && dy === 0)) {
+      // A plain click on a PC of a group: that PC alone.
+      if (!d.additive && !d.moved && selection.size > 1) setSelection(new Set([d.pressed]));
+      return;
+    }
+    const moving = pcs.filter((p) => d.ids.includes(p.id));
+    void place(moving.map((p) => ({ id: p.id, x: p.x + dx, y: p.y + dy })));
+  };
+
   const onKey = (e: KeyboardEvent<HTMLDivElement>): void => {
-    if (!pc) return;
+    if (e.key === 'Escape') {
+      setSelection(new Set());
+      return;
+    }
     const d: Record<string, [number, number]> = {
       ArrowLeft: [-1, 0],
       ArrowRight: [1, 0],
       ArrowUp: [0, -1],
       ArrowDown: [0, 1],
     };
-    if (e.key === 'Escape') {
-      setSelected(null);
-      return;
-    }
     const step = d[e.key];
-    if (!step) return;
+    if (!step || selected.length === 0 || busy) return;
     e.preventDefault();
-    void move(pc, pc.x + step[0], pc.y + step[1]);
+    void place(selected.map((p) => ({ id: p.id, x: p.x + step[0], y: p.y + step[1] })));
   };
 
-  const cells: JSX.Element[] = [];
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      const p = at.get(`${x}:${y}`);
-      const on = p !== undefined && p.id === selected;
-      cells.push(
-        <div key={`${x}:${y}`} className="relative aspect-square border-b border-r border-accent/[0.06]">
-          {p ? (
-            <button
-              type="button"
-              tabIndex={-1}
-              onClick={() => setSelected(on ? null : p.id)}
-              aria-pressed={on}
-              title={`${p.name} · ${p.zone}`}
-              data-selected={on}
-              // F's hairline frames the device; the selection adds the target brackets. The zone's own colour (the
-              // owner's data) is only the small bar inside its left edge, never a border.
-              className={clsx(
-                'hud-focus absolute inset-[3px] flex items-center justify-center rounded-[7px] border bg-bg/70 font-display text-[15px] font-medium leading-none tracking-[-0.01em] transition-colors [--brk-inset:-5px] [--brk-size:10px] hover:bg-text/[0.05]',
-                on ? 'z-10 border-accent/80 bg-accent/[0.08] text-hi shadow-sel' : 'border-accent/[0.16]',
-                p.status === 'offline' ? 'text-text/50' : !on && 'text-text/[0.88]',
-              )}
-            >
-              {colorOf.get(p.zone) && (
-                <span
-                  aria-hidden="true"
-                  className="absolute bottom-3 left-0 top-3 w-[3px] rounded-r-[2px] opacity-70"
-                  style={{ background: colorOf.get(p.zone) }}
-                />
-              )}
-              <span className="tnum">{String(p.number).padStart(2, '0')}</span>
-              {p.status === 'maintenance' ? (
-                <WrenchIcon size={10} strokeWidth={2} className="absolute right-1 top-1 text-muted" />
-              ) : (
-                <span className={clsx('absolute right-1 top-1 h-1.5 w-1.5 rounded-full', STATUS_DOT[p.status])} />
-              )}
-              {p.device !== 'pc' && (
-                <span className="absolute bottom-0.5 left-1 text-muted">
-                  <DeviceGlyph kind={p.device} />
-                </span>
-              )}
-            </button>
-          ) : (
-            <button
-              type="button"
-              tabIndex={-1}
-              aria-label={`${x + 1}, ${y + 1}`}
-              onClick={() => (pc ? void move(pc, x, y) : undefined)}
-              className={clsx('absolute inset-0', pc ? 'hover:bg-accent/[0.06]' : 'cursor-default')}
-            />
-          )}
-        </div>,
-      );
-    }
-  }
+  const overlapNames = [...shared.values()].map((list) => list.map((p) => p.name).join(' + '));
 
   return (
     <OwnerPage>
       <PageHeader title={t('Зал и устройства')} caption={t('Настройка клуба')} />
       {error && <Note note={{ text: error, tone: 'err' }} />}
+      {overlapNames.length > 0 && (
+        <Note
+          note={{
+            text: t('В одной клетке стоят: {list}. Перетащите один из них на свободное место.', {
+              list: overlapNames.join(', '),
+            }),
+            tone: 'warn',
+          }}
+        />
+      )}
       <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_400px]">
         <div
           tabIndex={0}
@@ -586,29 +1105,120 @@ export default function HallPage(): JSX.Element {
           aria-label={t('Схема зала')}
           className="focus-ring glass-panel flex min-w-0 flex-col gap-4 px-5 pb-5 pt-[18px] outline-none"
         >
-          {/* A mono section title like the panels beside it (every page under a PageHeader heads its panels so). */}
           <header className="flex min-h-7 flex-wrap items-center justify-between gap-x-3 gap-y-1">
             <h2 className="label text-text">{t('Схема зала')}</h2>
-            {pc ? (
-              <span className="flex items-center gap-2">
-                <Kbd>← ↑ ↓ →</Kbd>
-                <span className="label-sm">{t('сдвинуть')}</span>
-                <Kbd className="ml-2">Esc</Kbd>
-                <span className="label-sm">{t('снять выбор')}</span>
+            <span className="flex flex-wrap items-center gap-2">
+              {selected.length > 0 ? (
+                <>
+                  <span className="label-sm">{t('тащите мышью или')}</span>
+                  <Kbd>← ↑ ↓ →</Kbd>
+                  <Kbd className="ml-2">Esc</Kbd>
+                  <span className="label-sm">{t('снять выбор')}</span>
+                </>
+              ) : (
+                <span className="label-sm">
+                  {t('Нажмите ПК или обведите несколько рамкой; Shift — добавить к выбору')}
+                </span>
+              )}
+              <span className="ml-2 flex items-center gap-1">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-label={t('Мельче')}
+                  disabled={zoom <= ZOOMS[0]!}
+                  onClick={() => setZoom(ZOOMS[Math.max(0, ZOOMS.indexOf(zoom) - 1)]!)}
+                >
+                  −
+                </Button>
+                <span className="tnum w-10 text-center font-mono text-[11px] text-muted">
+                  {Math.round(zoom * 100)}%
+                </span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-label={t('Крупнее')}
+                  disabled={zoom >= ZOOMS[ZOOMS.length - 1]!}
+                  onClick={() => setZoom(ZOOMS[Math.min(ZOOMS.length - 1, ZOOMS.indexOf(zoom) + 1)]!)}
+                >
+                  +
+                </Button>
               </span>
-            ) : (
-              <span className="label-sm">{t('Нажмите устройство, чтобы изменить его')}</span>
-            )}
+            </span>
           </header>
           {/* Padded so the selection's brackets, just outside the device, are not clipped by the scroller. */}
-          <div className="thin-scrollbar -m-1.5 overflow-x-auto p-1.5">
+          <div className="thin-scrollbar -m-1.5 overflow-auto p-1.5">
             <div
-              className="grid border-l border-t border-accent/[0.06]"
-              style={{
-                gridTemplateColumns: `repeat(${cols}, minmax(2.75rem, 1fr))`,
-              }}
+              ref={boxRef}
+              data-testid="hall-plan"
+              onPointerDown={onBoxDown}
+              onPointerMove={onMove}
+              onPointerUp={onUp}
+              onPointerCancel={onUp}
+              className="relative select-none border-l border-t border-accent/[0.06]"
+              style={{ width: cols * cell, height: rows * cell, touchAction: 'none', ...gridBackground(cell) }}
             >
-              {cells}
+              <PlanBackdrop plan={draft} zones={zones} cell={cell} selected={focus} compact={zoom < 0.8} />
+              {pcs.map((p) => {
+                const on = selection.has(p.id);
+                const moving = on && (delta.dx !== 0 || delta.dy !== 0);
+                const stack = shared.get(`${p.x}:${p.y}`);
+                const offset = stack ? stack.indexOf(p) * 8 : 0;
+                const x = p.x + (moving ? delta.dx : 0);
+                const y = p.y + (moving ? delta.dy : 0);
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    tabIndex={-1}
+                    data-pc={p.number}
+                    onPointerDown={(e) => onTileDown(e, p)}
+                    aria-pressed={on}
+                    title={`${p.name} · ${p.zone} · ${x + 1}, ${y + 1}`}
+                    data-selected={on}
+                    className={clsx(
+                      'hud-focus absolute flex touch-none items-center justify-center rounded-[7px] border bg-bg/80 font-display font-medium leading-none tracking-[-0.01em] transition-colors [--brk-inset:-5px] [--brk-size:10px] hover:bg-text/[0.05]',
+                      zoom < 0.8 ? 'text-[11px]' : 'text-[15px]',
+                      on ? 'z-10 border-accent/80 bg-accent/[0.08] text-hi shadow-sel' : 'border-accent/[0.16]',
+                      moving && 'opacity-80',
+                      stack && 'ring-2 ring-danger/70',
+                      p.status === 'offline' ? 'text-text/50' : !on && 'text-text/[0.88]',
+                    )}
+                    style={{
+                      left: x * cell + 3 + offset,
+                      top: y * cell + 3 + offset,
+                      width: cell - 6,
+                      height: cell - 6,
+                    }}
+                  >
+                    {colorOf.get(p.zone) && (
+                      <span
+                        aria-hidden="true"
+                        className="absolute bottom-2 left-0 top-2 w-[3px] rounded-r-[2px] opacity-70"
+                        style={{ background: colorOf.get(p.zone) }}
+                      />
+                    )}
+                    <RotationMark rotation={p.rotation} />
+                    <span className="tnum">{String(p.number).padStart(2, '0')}</span>
+                    {p.status === 'maintenance' ? (
+                      <WrenchIcon size={10} strokeWidth={2} className="absolute right-1 top-1 text-muted" />
+                    ) : (
+                      <span className={clsx('absolute right-1 top-1 h-1.5 w-1.5 rounded-full', STATUS_DOT[p.status])} />
+                    )}
+                    {p.device !== 'pc' && (
+                      <span className="absolute bottom-0.5 left-1 text-muted">
+                        <DeviceGlyph kind={p.device} />
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+              {band && (
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute z-20 rounded-[4px] border border-accent/70 bg-accent/[0.08]"
+                  style={{ left: band.x, top: band.y, width: band.w, height: band.h }}
+                />
+              )}
             </div>
           </div>
           <ul className="flex flex-wrap gap-x-6 gap-y-2">
@@ -627,27 +1237,46 @@ export default function HallPage(): JSX.Element {
         </div>
 
         <aside className="flex flex-col gap-5">
-          {pc ? (
+          {selected.length > 0 && (
+            <PlacePanel
+              selected={selected}
+              zones={zones}
+              pcs={pcs}
+              busy={busy}
+              onPlace={place}
+              onSelectZone={(zone) => setSelection(new Set(pcs.filter((p) => p.zone === zone).map((p) => p.id)))}
+            />
+          )}
+          {one ? (
             <DevicePanel
-              pc={pc}
+              pc={one}
               zones={zones}
               onChanged={load}
               onDeleted={() => {
-                setSelected(null);
+                setSelection(new Set());
                 void load();
               }}
             />
-          ) : (
+          ) : selected.length === 0 ? (
             <AddDevice
               zones={zones}
               pcs={pcs}
-              freeCell={freeCell}
               onAdded={async (id) => {
                 await load();
-                if (id) setSelected(id);
+                if (id) setSelection(new Set([id]));
               }}
             />
-          )}
+          ) : null}
+          <PlanEditor
+            draft={draft}
+            saved={plan}
+            zones={zones}
+            pcs={pcs}
+            onChange={setDraft}
+            onSaved={load}
+            focus={focus}
+            onFocus={setFocus}
+          />
           {/* Always here: a PC can only be put in a zone that exists, so the zones must be reachable from its panel too. */}
           <ZonesEditor onSaved={load} />
         </aside>

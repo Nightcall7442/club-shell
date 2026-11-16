@@ -694,6 +694,25 @@ public sealed class PlayerAccountTests : IDisposable
         await _publisher.Received(1).PublishAsync(IpcMessages.Events.AuthExpired, Arg.Is<AuthExpired>(e => e.Reason == AuthExpiredReason.PasswordReset), Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task Signed_in_elsewhere_without_a_session_here_collects_the_saves_and_resets_the_profile()
+    {
+        var saves = Substitute.For<ClubShell.Agent.Saves.IPlayerSaves>();
+        var reset = Substitute.For<ClubShell.Agent.Users.IProfileResetTrigger>();
+        var services = Substitute.For<IServiceProvider>();
+        services.GetService(typeof(ClubShell.Agent.Saves.IPlayerSaves)).Returns(saves);
+        services.GetService(typeof(ClubShell.Agent.Users.IProfileResetTrigger)).Returns(reset);
+        using var guard = new SignInGuard(_users, _sessions, _lock, _tokens, _publisher, _server, _clock, NullLogger<SignInGuard>.Instance, services);
+        _users.Set(_member, T0.AddHours(8), ConnectivityState.Online);
+
+        await guard.HandleRevokedAsync(new UserRevokedPush(_member.Id, "signedInElsewhere"), CancellationToken.None);
+
+        _users.User.Should().BeNull();
+        saves.Received(1).BeginRelease(SessionEndReason.User, closeGames: true);
+        await Task.Delay(100);
+        await reset.Received(1).RequestResetAsync(Arg.Is<string>(r => r.Contains("SignedInElsewhere")), Arg.Any<CancellationToken>());
+    }
+
     // ---- G11: connectivity ------------------------------------------------------------------------
 
     [Fact]

@@ -134,6 +134,84 @@ public sealed class PlayerSavesTests
     }
 
     [Fact]
+    public async Task An_agent_restarted_mid_session_takes_the_attachment_back_from_disk_without_a_new_attach()
+    {
+        var before = new Harness();
+        User player = Member();
+        before.Saves.SignedIn(player);
+        await before.Saves.WaitForAttachAsync(CancellationToken.None);
+        File.Exists(Path.Combine(before.Root, "cache", PlayerSavesService.StateFileName)).Should().BeTrue();
+
+        // The Agent restarts: the player's session and sign-in are restored, the helper still holds the saves.
+        var after = new Harness(root: before.Root);
+        after.Saves.RestoreAfterStart(player);
+
+        after.Channel.Ops.Should().BeEmpty("a second attach would lay the server's copy over the progress made so far");
+        after.Saves.Attached.Should().BeTrue();
+        after.Saves.State.Should().Be(PlayerSavesState.Ready);
+
+        // The session ends: the detach goes out as usual and the file is gone.
+        after.Saves.BeginRelease(SessionEndReason.User, closeGames: false);
+        (await after.Saves.WaitReleasedAsync(TimeSpan.FromSeconds(10), CancellationToken.None)).Should().BeTrue();
+        after.Channel.Ops.Should().Equal("profile.detach");
+        after.Channel.Requests[0].GetProperty("playerId").GetString().Should().Be(player.Id.ToString("D"));
+        File.Exists(Path.Combine(before.Root, "cache", PlayerSavesService.StateFileName)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task An_attachment_left_on_disk_without_that_players_session_is_detached_at_start()
+    {
+        var before = new Harness();
+        User player = Member();
+        before.Saves.SignedIn(player);
+        await before.Saves.WaitForAttachAsync(CancellationToken.None);
+
+        var after = new Harness(root: before.Root);
+        after.Saves.RestoreAfterStart(restored: null);
+        (await after.Saves.WaitReleasedAsync(TimeSpan.FromSeconds(10), CancellationToken.None)).Should().BeTrue();
+
+        after.Channel.Ops.Should().Equal("profile.detach");
+        after.Saves.Attached.Should().BeFalse();
+        File.Exists(Path.Combine(before.Root, "cache", PlayerSavesService.StateFileName)).Should().BeFalse();
+
+        // Nothing on disk: nothing to do.
+        var again = new Harness(root: before.Root);
+        again.Saves.RestoreAfterStart(player);
+        again.Channel.Ops.Should().BeEmpty();
+        again.Saves.Busy.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task After_ending_the_session_on_another_pc_the_attach_waits_for_that_pc_to_hand_the_saves_back()
+    {
+        var harness = new Harness();
+        var released = new TaskCompletionSource();
+        harness.Saves.SignedIn(Member(), handoff: _ => released.Task);
+
+        harness.Saves.State.Should().Be(PlayerSavesState.Transferring);
+        Task launch = harness.Saves.WaitForAttachAsync(CancellationToken.None);
+        await Task.Delay(200);
+        harness.Channel.Ops.Should().BeEmpty("the previous PC still holds the player's saves");
+        launch.IsCompleted.Should().BeFalse("a game launch waits for the handoff too");
+
+        released.SetResult();
+        await launch;
+        harness.Channel.Ops.Should().Equal("profile.attach");
+        harness.Saves.State.Should().Be(PlayerSavesState.Ready);
+        (await harness.Events.WaitForAsync(PlayerSavesState.Ready)).Should().Equal(
+            PlayerSavesState.Transferring, PlayerSavesState.Loading, PlayerSavesState.Ready);
+    }
+
+    [Fact]
+    public async Task A_handoff_that_fails_still_attaches()
+    {
+        var harness = new Harness();
+        harness.Saves.SignedIn(Member(), handoff: _ => Task.FromException(new InvalidOperationException("server gone")));
+        await harness.Saves.WaitForAttachAsync(CancellationToken.None);
+        harness.Channel.Ops.Should().Equal("profile.attach");
+    }
+
+    [Fact]
     public async Task Signing_in_again_as_the_same_player_does_not_attach_twice()
     {
         var harness = new Harness();
@@ -391,9 +469,11 @@ public sealed class PlayerSavesTests
 
     private sealed class Harness
     {
-        public Harness(string mode = "on", bool helperInstalled = true, int detachTimeoutSec = 120)
+        public Harness(string mode = "on", bool helperInstalled = true, int detachTimeoutSec = 120, string? root = null)
         {
             var settings = new AgentSettings();
+            Root = root ?? Directory.CreateTempSubdirectory("clubshell-saves-").FullName;
+            settings.Paths.ProgramData = Root;
             settings.Games.PlayerSaves.Mode = mode;
             settings.Games.PlayerSaves.DetachTimeoutSec = detachTimeoutSec;
             Channel = new FakeChannel(Log);
@@ -412,6 +492,9 @@ public sealed class PlayerSavesTests
                 UpdatingRetryDelay = TimeSpan.FromMilliseconds(10),
             };
         }
+
+        /// <summary>ProgramData of this Agent: a second harness on the same root is the Agent after a restart.</summary>
+        public string Root { get; }
 
         /// <summary>Helper commands and game kills, in order (the fakes lock it).</summary>
         public List<string> Log { get; } = [];

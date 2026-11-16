@@ -502,8 +502,11 @@ public sealed class AgentHarnessS3Tests(CatalogServerFixture server) : IClassFix
         {
             ["getGames"] = 200, ["getGame"] = 200, ["sendLaunchReport"] = 204, ["getUpdateManifest"] = 204, ["getPc"] = 200, ["reportAntiCheat"] = 204,
         };
+        // publishUpdateManifest is the release publisher's, not the agent's (UpdateReleaseTests).
         Assert.Equal(
-            Games.GameEndpoints.Operations.Concat(Updates.UpdateEndpoints.Operations).Concat(Agents.PcEndpoints.Operations).Order(), success.Keys.Order());
+            Games.GameEndpoints.Operations.Concat(Updates.UpdateEndpoints.Operations).Concat(Agents.PcEndpoints.Operations)
+                .Where(op => op != "publishUpdateManifest").Order(),
+            success.Keys.Order());
         Assert.All(success, op => Assert.True(server.Covered.ContainsKey($"{op.Key} {op.Value}"), $"{op.Key} {op.Value} not covered"));
         Assert.True(server.Covered.ContainsKey("getGames 304"));
     }

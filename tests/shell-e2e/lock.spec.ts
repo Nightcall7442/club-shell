@@ -580,3 +580,65 @@ test.describe('player accounts', () => {
     await expect(page.getByRole('status').filter({ hasText: en('lock.expired.sessionEnded') })).toBeVisible();
   });
 });
+
+test.describe('staff sign-in to Windows', () => {
+  test('a staff PIN is checked: a cashier without the right and a wrong PIN are told so, the owner goes on', async ({
+    page,
+  }) => {
+    await openLock(page);
+    await page.getByRole('button', { name: en('lock.staff.button') }).click();
+    const dialog = page.getByRole('dialog', { name: en('lock.staff.title') });
+    await expect(dialog).toBeVisible();
+    const pin = dialog.getByLabel(en('lock.staff.pin'));
+    const submit = dialog.getByRole('button', { name: en('lock.staff.submit') });
+
+    await pin.fill('12');
+    await submit.click();
+    await expect(dialog.getByText(en('lock.staff.pinFormat'))).toBeVisible();
+
+    // The mock's cashier (1111) has no "PC service" mark; 9999 is nobody's PIN.
+    await pin.fill('1111');
+    await submit.click();
+    await expect(dialog.getByText(en('lock.staff.notAllowed'))).toBeVisible();
+    await expect(pin).toHaveValue('');
+    await pin.fill('9999');
+    await submit.click();
+    await expect(dialog.getByText(en('lock.staff.wrongPin'))).toBeVisible();
+
+    // The owner (0000): the Agent signs the kiosk out next; the screen says what to do in Windows.
+    await pin.fill('0000');
+    await submit.click();
+    const done = page.getByRole('dialog', { name: en('lock.staff.doneTitle', { name: 'Владелец' }) });
+    await expect(done).toBeVisible();
+    await expect(done.getByText(en('lock.staff.doneBody', { minutes: 10 }))).toBeVisible();
+  });
+
+  test('the staff button is not offered while a player is signed in', async ({ page }) => {
+    await openPlaying(page);
+    await page.getByRole('button', { name: en('desktop.lock'), exact: true }).click();
+    await expect(page.getByRole('button', { name: en('lock.unlockWithPin') })).toBeVisible();
+    await expect(page.getByRole('button', { name: en('lock.staff.button') })).toHaveCount(0);
+  });
+});
+
+test.describe('power on the lock screen (SHELL_CHANGES 93)', () => {
+  test('shut down and restart ask first and are not offered while a player is signed in', async ({ page }) => {
+    await openLock(page);
+    await page.getByRole('button', { name: en('lock.power.reboot'), exact: true }).click();
+    const confirm = page.getByRole('dialog', { name: en('lock.power.confirmReboot') });
+    await expect(confirm).toBeVisible();
+    await confirm.getByRole('button', { name: en('common.cancel') }).click();
+    await expect(confirm).toHaveCount(0);
+
+    await page.getByRole('button', { name: en('lock.power.shutdown'), exact: true }).click();
+    const shutdown = page.getByRole('dialog', { name: en('lock.power.confirmShutdown') });
+    await shutdown.getByRole('button', { name: en('lock.power.yes') }).click();
+    await expect(page.getByText(en('lock.power.shuttingDown'))).toBeVisible();
+    await expect(shutdown).toHaveCount(0);
+
+    await openPlaying(page);
+    await page.getByRole('button', { name: en('desktop.lock'), exact: true }).click();
+    await expect(page.getByRole('button', { name: en('lock.unlockWithPin') })).toBeVisible();
+    await expect(page.getByRole('button', { name: en('lock.power.shutdown'), exact: true })).toHaveCount(0);
+  });
+});

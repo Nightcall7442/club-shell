@@ -214,6 +214,13 @@ public sealed class ServerClient : IServerClient, IDisposable
     }
 
     /// <inheritdoc />
+    public Task<StaffVerifyResponse> VerifyStaffPinAsync(Guid pcId, StaffVerifyRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return SendJsonAsync<StaffVerifyRequest, StaffVerifyResponse>(HttpMethod.Post, Endpoints.AgentStaffVerify(pcId), request, AuthMode.Agent, null, cancellationToken);
+    }
+
+    /// <inheritdoc />
     public Task<PcsResponse> GetPcsAsync(string? zone, CancellationToken cancellationToken) =>
         GetAsync<PcsResponse>(Endpoints.Pcs + new QueryBuilder().Add("zone", zone), AuthMode.Agent, cancellationToken);
 
@@ -366,6 +373,10 @@ public sealed class ServerClient : IServerClient, IDisposable
         ArgumentNullException.ThrowIfNull(batch);
         return SendJsonNoContentAsync(HttpMethod.Post, Endpoints.SessionEvents(sessionId), batch, AuthMode.Agent, idempotencyKey, cancellationToken);
     }
+
+    /// <inheritdoc />
+    public Task<SessionHandoff> GetSessionHandoffAsync(Guid sessionId, CancellationToken cancellationToken) =>
+        GetAsync<SessionHandoff>(Endpoints.SessionHandoff(sessionId), AuthMode.User, cancellationToken);
 
     /// <inheritdoc />
     public Task<SessionQuote> QuoteSessionAsync(SessionQuoteRequest request, CancellationToken cancellationToken)

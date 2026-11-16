@@ -91,6 +91,47 @@ public sealed class AdminMaintenanceTests
     }
 
     [Fact]
+    public void A_windows_sign_in_holds_auto_logon_until_attached_ignores_the_kiosks_sign_out_and_survives_an_agent_restart()
+    {
+        using var dir = new TempDir();
+        var time = new ManualTime(new DateTimeOffset(2026, 11, 16, 12, 0, 0, TimeSpan.Zero));
+        TimeSpan uptime = TimeSpan.FromHours(1);
+        IOptionsMonitor<AgentSettings> settings = Settings(dir.Path);
+
+        using (var first = new AdminMaintenance(new SystemClock(time), NullLogger<AdminMaintenance>.Instance, settings, () => uptime))
+        {
+            first.BeginWindowsSignIn(TimeSpan.FromMinutes(240), "Техник");
+            first.WindowsSignIn.Should().BeTrue();
+            first.AutoLogonPaused.Should().BeTrue();
+            first.Session.Should().BeNull();
+            first.OnSessionEnded(1);
+            first.IsActive.Should().BeTrue("the kiosk is signed out on purpose");
+        }
+
+        time.Now += TimeSpan.FromMinutes(3);
+        uptime += TimeSpan.FromMinutes(3);
+        using (var restarted = new AdminMaintenance(new SystemClock(time), NullLogger<AdminMaintenance>.Instance, settings, () => uptime))
+        {
+            restarted.AutoLogonPaused.Should().BeTrue("still waiting for the staff member after an Agent restart");
+            restarted.StaffName.Should().Be("Техник");
+            restarted.Attach(4).Should().BeTrue();
+            restarted.Attach(5).Should().BeFalse("one staff session per window");
+        }
+
+        time.Now += TimeSpan.FromMinutes(30);
+        uptime += TimeSpan.FromMinutes(30);
+        using var again = new AdminMaintenance(new SystemClock(time), NullLogger<AdminMaintenance>.Instance, settings, () => uptime);
+        again.WindowsSignIn.Should().BeTrue();
+        again.AutoLogonPaused.Should().BeFalse();
+        again.Session.Should().Be(4u);
+        again.OnSessionEnded(1);
+        again.IsActive.Should().BeTrue("only the staff member's sign-out ends it");
+        again.OnSessionEnded(4);
+        again.IsActive.Should().BeFalse();
+        again.WindowsSignIn.Should().BeFalse();
+    }
+
+    [Fact]
     public void An_ended_or_expired_window_is_not_restored()
     {
         using var dir = new TempDir();

@@ -10,8 +10,9 @@ use clubshell_protocol::commands::{
     PolicyReloadResponse, ResetProfileResult, ScheduledResult, SetVolumeRequest,
     SysAckAdminMessageRequest, SysCallAdminRequest, SysCallAdminResponse, SysHardwareRequest,
     SysLockScreenRequest, SysLogClientErrorRequest, SysPowerRequest, SysResetProfileRequest,
-    SysSetLocaleRequest, SysSetLocaleResponse, SysUnlockAdminRequest, SysUnlockAdminResponse,
-    UpdateApplyRequest, UpdateApplyResponse, UpdateCheckResponse, UpdateComponent, VolumeState,
+    SysSetLocaleRequest, SysSetLocaleResponse, SysStaffSignInRequest, SysStaffSignInResponse,
+    SysUnlockAdminRequest, SysUnlockAdminResponse, UpdateApplyRequest, UpdateApplyResponse,
+    UpdateCheckResponse, UpdateComponent, VolumeState,
 };
 use clubshell_protocol::pc::{HardwareInfo, PcInfo, PcMetrics, Policy};
 use clubshell_protocol::user::Locale;
@@ -196,6 +197,43 @@ pub async fn sys_unlock_admin(
     Ok(resp)
 }
 
+/// `sys_staff_sign_in` → `sys.staffSignIn`: a staff member's PIN from the admin console (4–8
+/// digits, checked by the server through the Agent, never logged). On success the Agent signs the
+/// kiosk out of Windows a moment later, so the staff member can sign in to their own account; the
+/// Shell only shows the answer until then. `minutes` = length of the maintenance window (`null` =
+/// the Agent's default).
+#[tauri::command]
+pub async fn sys_staff_sign_in(
+    state: State<'_, AppState>,
+    pin: String,
+    minutes: Option<i32>,
+) -> CmdResult<SysStaffSignInResponse> {
+    let pin = validate_staff_pin(&pin)?;
+    if let Some(m) = minutes {
+        if !(1..=480).contains(&m) {
+            return Err(ShellError::validation("minutes", "range"));
+        }
+    }
+    let resp: SysStaffSignInResponse = state
+        .agent
+        .request(
+            names::sys::STAFF_SIGN_IN,
+            &SysStaffSignInRequest { pin, minutes },
+        )
+        .await?;
+    tracing::warn!(until = %resp.until, "staff Windows sign-in: the kiosk is about to be signed out");
+    Ok(resp)
+}
+
+/// A staff PIN is 4–8 ASCII digits (the admin console's rule), trimmed.
+fn validate_staff_pin(pin: &str) -> CmdResult<String> {
+    let pin = pin.trim();
+    if !(4..=8).contains(&pin.len()) || !pin.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(ShellError::validation("pin", "digits4to8"));
+    }
+    Ok(pin.to_owned())
+}
+
 /// `sys_ack_admin_message` → `sys.ackAdminMessage`.
 #[tauri::command]
 pub async fn sys_ack_admin_message(state: State<'_, AppState>, id: Uuid) -> CmdResult<OkResponse> {
@@ -307,6 +345,15 @@ pub async fn update_apply(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_staff_pin_is_four_to_eight_digits() {
+        assert_eq!(super::validate_staff_pin(" 2468 ").unwrap(), "2468");
+        assert_eq!(super::validate_staff_pin("12345678").unwrap(), "12345678");
+        for bad in ["123", "123456789", "12a4", "１２３４", ""] {
+            assert!(super::validate_staff_pin(bad).is_err(), "{bad}");
+        }
+    }
     use super::*;
 
     #[test]

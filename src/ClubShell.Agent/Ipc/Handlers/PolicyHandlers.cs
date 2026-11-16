@@ -306,7 +306,8 @@ public sealed class ShellSettingsStore
                 GetBool(features?["apps"], true),
                 GetBool(features?["callAdmin"], true),
                 GetBool(features?["qrLogin"], false),
-                GetBool(features?["gpuPanel"], false)),
+                GetBool(features?["gpuPanel"], false),
+                GetBool(features?["lockScreenPower"], true)),
             MapClub(root["club"]));
     }
 

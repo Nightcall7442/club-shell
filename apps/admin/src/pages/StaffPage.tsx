@@ -1,5 +1,7 @@
 /**
- * Staff (owner only): who can sign in to the console, with which role; switch access off, reset a PIN, add people.
+ * Staff (owner only): who can sign in to the console, with which role; switch access off, reset a PIN, add people; and
+ * who may sign in to their own Windows account on the club's PCs with their PIN to install games and programs («PC
+ * service»: an owner always may, a cashier with the mark).
  */
 import { useCallback, useEffect, useState } from 'react';
 import clsx from 'clsx';
@@ -65,6 +67,8 @@ export default function StaffPage(): JSX.Element {
   const [name, setName] = useState('');
   const [role, setRole] = useState<StaffRole>('cashier');
   const [pin, setPin] = useState('');
+  const [pcService, setPcService] = useState(false);
+  const [debtWriteOff, setDebtWriteOff] = useState(false);
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -140,6 +144,52 @@ export default function StaffPage(): JSX.Element {
               ),
             },
             {
+              key: 'pcService',
+              title: t('Вход на ПК'),
+              width: '12rem',
+              render: (s) =>
+                s.role === 'owner' ? (
+                  <span className="text-[13px] text-muted">{t('Всегда')}</span>
+                ) : (
+                  <Toggle
+                    checked={s.pcService === true}
+                    disabled={busy || s.pcService === undefined}
+                    label={s.pcService ? t('Разрешён') : t('Нет')}
+                    onChange={(v) =>
+                      void run(async () => {
+                        await clubApi.updateStaff(s.id, { pcService: v });
+                        return v
+                          ? t('{name}: вход на ПК разрешён', { name: s.name })
+                          : t('{name}: вход на ПК выключен', { name: s.name });
+                      })
+                    }
+                  />
+                ),
+            },
+            {
+              key: 'debtWriteOff',
+              title: t('Списание долгов'),
+              width: '12rem',
+              render: (s) =>
+                s.role === 'owner' ? (
+                  <span className="text-[13px] text-muted">{t('Всегда')}</span>
+                ) : (
+                  <Toggle
+                    checked={s.debtWriteOff === true}
+                    disabled={busy || s.debtWriteOff === undefined}
+                    label={s.debtWriteOff ? t('Может списывать') : t('Не может')}
+                    onChange={(v) =>
+                      void run(async () => {
+                        await clubApi.updateStaff(s.id, { debtWriteOff: v });
+                        return v
+                          ? t('{name}: может списывать долги', { name: s.name })
+                          : t('{name}: списание долгов выключено', { name: s.name });
+                      })
+                    }
+                  />
+                ),
+            },
+            {
               key: 'pin',
               title: t('PIN'),
               num: true,
@@ -174,11 +224,19 @@ export default function StaffPage(): JSX.Element {
             e.preventDefault();
             if (!canAdd) return;
             void run(async () => {
-              await clubApi.addStaff({ name: name.trim(), role, pin });
+              await clubApi.addStaff({
+                name: name.trim(),
+                role,
+                pin,
+                pcService: role === 'owner' || pcService,
+                debtWriteOff: role === 'owner' || debtWriteOff,
+              });
               const done = t('{name} добавлен', { name: name.trim() });
               setName('');
               setPin('');
               setRole('cashier');
+              setPcService(false);
+              setDebtWriteOff(false);
               return done;
             });
           }}
@@ -225,7 +283,24 @@ export default function StaffPage(): JSX.Element {
           <Button type="submit" variant="primary" disabled={!canAdd}>
             {t('Добавить')}
           </Button>
+          {role === 'cashier' && (
+            <div className="md:col-span-4">
+              <div className="flex flex-wrap gap-x-8 gap-y-3">
+                <Toggle
+                  checked={pcService}
+                  onChange={setPcService}
+                  label={t('Разрешить вход на ПК для обслуживания')}
+                />
+                <Toggle checked={debtWriteOff} onChange={setDebtWriteOff} label={t('Разрешить списывать долги')} />
+              </div>
+            </div>
+          )}
         </form>
+        <p className="mt-4 text-[13px] text-muted">
+          {t(
+            'Вход на ПК — кнопка «Вход для персонала» на экране блокировки: сотрудник вводит свой PIN, ПК выходит из оболочки, и он входит в свою учётную запись Windows, чтобы ставить игры, лаунчеры и программы. Владельцу разрешено всегда.',
+          )}
+        </p>
       </Section>
     </OwnerPage>
   );

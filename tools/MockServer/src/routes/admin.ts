@@ -58,11 +58,14 @@ import {
   type SessionRecord,
   type UserRecord,
 } from '../db.js';
+import { hallPlan } from '../hall.js';
 import { endSession } from './session.js';
 import { createGuest } from './auth.js';
 import { isApiKey, requireStaff, topUpWithBonus } from './club.js';
 import {
   PAYOUT_DESCRIPTION,
+  WRITE_OFF_DESCRIPTION,
+  mayWriteOff,
   PAY_METHODS,
   club,
   clubHooks,
@@ -97,6 +100,7 @@ interface SeatView {
   user: { id: string; displayName: string; role: string; balance: Money } | null;
   signedIn: boolean | null;
   game: SeatGame | null;
+  place: { x: number; y: number; rotation: number };
 }
 
 /** The game on a busy seat (D-71): the catalog title and art; an empty cover is null. */
@@ -148,6 +152,7 @@ function seatOf(pc: PcRecord): SeatView {
     // A desk session nobody has signed in to yet: its clock already runs (D-49).
     signedIn: rec ? signedInOn(rec.userId, pc.id) : null,
     game: gameOf(pc, rec),
+    place: { x: pc.x, y: pc.y, rotation: pc.rotation ?? 0 },
   };
 }
 
@@ -441,6 +446,7 @@ export function adminRoutes(app: FastifyInstance): void {
       repairs: openTicketMarks(),
       guestDebts: debts,
       guestRefunds: refunds,
+      hallPlan: hallPlan(),
       // Cash desk part 3: the players' calls the desk has not closed (D-63).
       calls: liveCalls(),
     };
@@ -822,6 +828,42 @@ export function adminRoutes(app: FastifyInstance): void {
           meta: { method: 'cash', transactionId: transaction.id },
         });
         return { status: 200, body: { balance: user.balance, payable: uzs(payableOf(user)), transaction } };
+      },
+      { keyRequired: true },
+    );
+  });
+
+  /**
+   * Debt write-off (SHELL_CHANGES 90), as the server: exactly the debt (`409 debtChanged {debt}`, none — `noDebt`), not in
+   * a session (`409 sessionOpen`), a reason; the owner or a cashier with the mark (`403 writeOffNotAllowed`). An
+   * `adjustment` without money; the journal has `debtWriteOff`; X counts it as `writeOffs`.
+   */
+  app.post('/admin/wallet/write-off', async (req, reply) => {
+    const staff = requireAdmin(req);
+    return idempotent(
+      req,
+      reply,
+      async () => {
+        if (!mayWriteOff(staff)) throw errors.forbidden('writeOffNotAllowed');
+        const b = body(req);
+        const user = findUser(str(b, 'userId', 64));
+        const amount = int(b, 'amount', 1, 100_000_000_000);
+        const reason = (optStr(b, 'reason', 200) ?? '').trim();
+        if (!reason) throw errors.validation('reason', 'required');
+        if (!user) throw errors.notFound('user');
+        if (openSessionForUser(user.id)) throw errors.conflict('sessionOpen');
+        const debt = Math.max(0, -user.balance.amount);
+        if (debt === 0) throw errors.conflict('noDebt');
+        if (amount !== debt) throw errors.conflict('debtChanged', { debt: uzs(debt) });
+        const transaction = applyTransaction(user, 'adjustment', uzs(amount), WRITE_OFF_DESCRIPTION + reason, null);
+        pushToUser(user.id, 'walletUpdated', balanceOf(user));
+        record(staff, 'debtWriteOff', {
+          userId: user.id,
+          amount,
+          detail: `${user.displayName}: ${reason}`,
+          meta: { reason, transactionId: transaction.id },
+        });
+        return { status: 200, body: { balance: user.balance, writtenOff: uzs(amount), transactionId: transaction.id } };
       },
       { keyRequired: true },
     );

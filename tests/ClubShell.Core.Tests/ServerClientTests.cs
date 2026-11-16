@@ -90,12 +90,14 @@ public sealed class ServerClientTests : IDisposable
         { Endpoints.AgentPolicies(PcId), "agents/" + PcText + "/policies" },
         { Endpoints.AgentCommands(PcId), "agents/" + PcText + "/commands" },
         { Endpoints.AgentCommandAck(PcId, IdempotencyKey), "agents/" + PcText + "/commands/0a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d/ack" },
+        { Endpoints.AgentStaffVerify(PcId), "agents/" + PcText + "/staff/verify" },
         { Endpoints.Pc(PcId), "pcs/" + PcText },
         { Endpoints.AuthQr("tok/en"), "auth/qr/tok%2Fen" },
         { Endpoints.User(UserId), "users/3f9a1d2e-6c4b-4f5a-9a1b-2c3d4e5f6a7b" },
         { Endpoints.UserStats(UserId), "users/3f9a1d2e-6c4b-4f5a-9a1b-2c3d4e5f6a7b/stats" },
         { Endpoints.UserAchievements(UserId), "users/3f9a1d2e-6c4b-4f5a-9a1b-2c3d4e5f6a7b/achievements" },
         { Endpoints.UserLoyalty(UserId), "users/3f9a1d2e-6c4b-4f5a-9a1b-2c3d4e5f6a7b/loyalty" },
+        { Endpoints.SessionHandoff(SessionId), "sessions/9c1e0000-0000-4000-8000-000000000001/handoff" },
         { Endpoints.SessionPause(SessionId), "sessions/9c1e0000-0000-4000-8000-000000000001/pause" },
         { Endpoints.SessionResume(SessionId), "sessions/9c1e0000-0000-4000-8000-000000000001/resume" },
         { Endpoints.SessionEnd(SessionId), "sessions/9c1e0000-0000-4000-8000-000000000001/end" },
@@ -465,6 +467,30 @@ public sealed class ServerClientTests : IDisposable
         Func<Task> wrong = () => _client.VerifyPinAsync(UserId, new Contracts.Users.PinVerifyRequest("9999"), CancellationToken.None);
 
         (await wrong.Should().ThrowAsync<ServerApiException>()).Which.Reason.Should().Be("badSecret");
+        _handler.Requests.Should().HaveCount(2, "a wrong PIN is not answered with a token refresh and a second try");
+    }
+
+    [Fact]
+    public async Task Staff_verify_posts_the_pin_with_the_agent_token_and_a_wrong_pin_is_not_retried()
+    {
+        await RegisterAsync();
+        var staffId = Guid.NewGuid();
+        _handler.Responder = _ => Ok(new Contracts.Users.StaffVerifyResponse(staffId, "Техник", "cashier"));
+
+        var who = await _client.VerifyStaffPinAsync(PcId, new Contracts.Users.StaffVerifyRequest("2468"), CancellationToken.None);
+
+        who.Should().Be(new Contracts.Users.StaffVerifyResponse(staffId, "Техник", "cashier"));
+        var request = _handler.Requests.Should().ContainSingle().Subject;
+        request.Method.Should().Be(HttpMethod.Post);
+        request.Uri.PathAndQuery.Should().Be("/api/v1/agents/" + PcText + "/staff/verify");
+        request.Header("Authorization").Should().Be("Bearer access-1");
+        request.Header("X-User-Token").Should().BeNull("a staff PIN is not a player's call");
+        JsonDefaults.Deserialize<Contracts.Users.StaffVerifyRequest>(request.Body!)!.Pin.Should().Be("2468");
+
+        _handler.Responder = _ => Json(HttpStatusCode.Unauthorized, ErrorBody(ErrorCode.Unauthorized, "Wrong PIN", "invalidPin", "t-staff"));
+        Func<Task> wrong = () => _client.VerifyStaffPinAsync(PcId, new Contracts.Users.StaffVerifyRequest("9999"), CancellationToken.None);
+
+        (await wrong.Should().ThrowAsync<ServerApiException>()).Which.Reason.Should().Be("invalidPin");
         _handler.Requests.Should().HaveCount(2, "a wrong PIN is not answered with a token refresh and a second try");
     }
 
@@ -1052,4 +1078,19 @@ internal sealed class FakeHttpHandler : HttpMessageHandler
 
         return Responder(captured);
     }
+}
+
+/// <summary>A package download carries the Agent's token to the club server only.</summary>
+public sealed class UpdateDownloaderOriginTests
+{
+    [Theory]
+    [InlineData("https://club.example.uz/api/v1/updates/stable/1.0.22/ClubShell-1.0.22.msi", true)]
+    [InlineData("https://CLUB.example.uz:443/api/v1/updates/stable/x.msi", true)]
+    [InlineData("https://github.com/acme/club-shell/releases/download/v1.0.22/ClubShell-1.0.22.msi", false)]
+    [InlineData("http://club.example.uz/api/v1/updates/stable/x.msi", false)]
+    [InlineData("https://club.example.uz.evil.example/x.msi", false)]
+    [InlineData("https://club.example.uz:8443/x.msi", false)]
+    [InlineData("not a url", false)]
+    public void Only_the_servers_origin_gets_the_token(string url, bool expected) =>
+        ClubShell.Core.Updates.UpdateDownloader.IsServerOrigin(url, "https://club.example.uz/api/v1").Should().Be(expected);
 }

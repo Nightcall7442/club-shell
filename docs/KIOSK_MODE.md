@@ -317,6 +317,47 @@ Notes:
   `shellReplacement.enabled=false` (`SHELL_REPLACEMENT.md` §7).
 - Dev mode is always admin mode (`admin_mode: AtomicBool::new(dev)`).
 
+### 6.0 Power on the lock screen (SHELL_CHANGES 93)
+
+«Выключить» and «Перезагрузить» sit in the lock screen's footer while nobody is signed in, no session is open and the
+desk has not locked the PC — on «Подготовка ПК…» too, so a PC that is not ready can be restarted without the PIN. Each
+asks first, then `sys.shutdown` / `sys.reboot` (3 s, reason `lockScreen`). The Agent still refuses during a session
+(`conflict sessionActive`) and where `agent.json → power.allowShellReboot` is off (`policyDenied`); the screen says so.
+The club turns the buttons off with `features.lockScreenPower = false` (admin console «Экран игрока»; absent = on). The
+server takes such a stop as planned: the Agent says goodbye with the reason `shutdown` / `reboot` (no `pcOffline` alert).
+
+### 6.1 Staff sign-in to their own Windows account
+
+The maintenance window above runs in the kiosk account, which is a plain user whose profile is reset: no place to install
+games, launchers or programs. For that a staff member signs in to **their own Windows account** (with an administrator's
+rights) from the lock screen:
+
+```
+Lock screen «Вход для персонала» (no player signed in) → staff PIN from the admin console
+   │ sys_staff_sign_in{pin} → IPC sys.staffSignIn
+   ▼
+Agent StaffWindowsSignIn: online, no session, auto-logon is the kiosk's
+   │ POST /agents/{pcId}/staff/verify — owner always, cashier with «Обслуживание ПК» (Персонал page); staff journal
+   ▼
+AdminMaintenance.BeginWindowsSignIn (240 min, at most 480): Shell not restarted, USB storage and service tools allowed
+ShellRegistry.PauseAutoLogon: AutoAdminLogon = 0, no ForceAutoLogon (+ mark secure\staff-signin-autologon-paused)
+2 s later WTSLogoffSession(kiosk) → Windows sign-in screen
+   │ the staff member signs in to their account (other user) → session attached, auto-logon resumed, notice on their desktop
+   ▼
+their sign-out (or a restart) → Winlogon logs the kiosk on → Shell connects → window ends
+```
+
+- The kiosk's own sign-out does not end this window (`AdminMaintenance.OnSessionEnded` ignores it); the staff member's
+  session does. The time running out, a player's session or the Shell connecting end it too.
+- While nobody has signed in yet, auto-logon stays paused: the `shellReplacement` policy leaves it alone
+  (`AdminMaintenance.AutoLogonPaused`). Nobody within 10 min: auto-logon resumes and the kiosk logon guard restarts the PC
+  into the kiosk (`KioskLogonGuard`, at most once per 15 min; refused while someone else is signed in).
+- After a reboot the window is gone; an Agent that finds the pause mark resumes auto-logon (and lets the guard restart the
+  PC when the kiosk is not logged on). An Agent restarted by an installer keeps the window.
+- Refusals on the lock screen: wrong PIN, «not allowed to sign in to the PCs» (the owner's mark is off), a player on the
+  PC, no server connection, too many wrong PINs (the cash desk's limits, counted per PC), «the kiosk does not log on by
+  itself on this PC».
+
 ---
 
 ## 7. Dev mode

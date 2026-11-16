@@ -250,6 +250,9 @@ public static class IpcMessages
         /// <summary><see cref="SysAdminExitRequest"/> → <see cref="SysAdminExitResponse"/>.</summary>
         public const string AdminExit = "sys.adminExit";
 
+        /// <summary><see cref="SysStaffSignInRequest"/> → <see cref="SysStaffSignInResponse"/>: a staff member signs in to their own Windows account.</summary>
+        public const string StaffSignIn = "sys.staffSignIn";
+
         /// <summary><see cref="SysResetProfileRequest"/> → <see cref="Commands.ResetProfileResult"/> (SHELL_CHANGES 76).</summary>
         public const string ResetProfile = "sys.resetProfile";
 
@@ -960,6 +963,7 @@ public sealed record ProfileAchievementsResponse(IReadOnlyList<Achievement> Item
 /// <param name="CallAdmin">Call admin.</param>
 /// <param name="QrLogin">QR sign-in on the lock screen (off until the server can confirm a scanned code).</param>
 /// <param name="GpuPanel">Button that opens the NVIDIA / AMD / Intel panel over the Shell (off by default: the panel pauses the kiosk guard and its settings stay for the next player).</param>
+/// <param name="LockScreenPower">«Выключить» and «Перезагрузить» on the lock screen, without a session (SHELL_CHANGES 93): only <see langword="false"/> hides them — absent (an older Agent) is on.</param>
 public sealed record ShellFeatures(
     bool Shop,
     bool Chat,
@@ -970,7 +974,8 @@ public sealed record ShellFeatures(
     bool Apps,
     bool CallAdmin,
     bool QrLogin = false,
-    bool GpuPanel = false);
+    bool GpuPanel = false,
+    bool? LockScreenPower = null);
 
 /// <summary>Settings subset of <c>shell.json</c> exposed to the UI (IPC_PROTOCOL.md §6.21); persisted by the Agent.</summary>
 /// <param name="Locale">UI locale.</param>
@@ -1148,6 +1153,28 @@ public sealed record SysUnlockAdminResponse(
 /// <param name="AdminToken">Token from <c>sys.unlockAdmin</c>.</param>
 /// <param name="Minutes">Length of the pause; <see langword="null"/> = the default.</param>
 public sealed record SysAdminExitRequest(string AdminToken, int? Minutes = null);
+
+/// <summary>
+/// Request of <c>sys.staffSignIn</c> from the lock screen's «Staff» button: a staff member the owner allowed to service PCs
+/// (an owner always) signs in to their own Windows account on this PC, to install games, launchers and programs. The Agent
+/// checks <paramref name="Pin"/> on the server (<c>POST /agents/{pcId}/staff/verify</c>), opens a maintenance window,
+/// pauses the kiosk's auto-logon and signs the kiosk out, so Windows shows its sign-in screen; the kiosk comes back when
+/// the staff member signs out of Windows, when the window ends, or after a reboot. Only without a player: no one signed
+/// in and no session open (<c>conflict</c> with <c>reason: sessionActive</c>). Refusals: <c>unauthorized</c> with
+/// <c>reason: invalidPin</c> (wrong PIN), <c>forbidden</c> with <c>reason: pcService</c> (the member may not service PCs),
+/// <c>rateLimited</c> (too many wrong PINs, <c>retryAfterSec</c>), <c>agentOffline</c> (the server cannot check the PIN),
+/// <c>conflict</c> with <c>reason: kioskOff</c> (the kiosk account does not log on by itself on this PC, so there is nothing to
+/// hand back), <c>validation</c> with <c>field: pin</c> (not 4–8 digits) or <c>field: minutes</c>.
+/// </summary>
+/// <param name="Pin">The staff member's PIN from the admin console, 4–8 digits.</param>
+/// <param name="Minutes">Length of the maintenance window; <see langword="null"/> = 4 hours, at most 8.</param>
+public sealed record SysStaffSignInRequest(string Pin, int? Minutes = null);
+
+/// <summary>Response of <c>sys.staffSignIn</c>, sent just before the kiosk is signed out.</summary>
+/// <param name="StaffName">Name of the staff member, for the Shell's farewell and the log.</param>
+/// <param name="Until">End of the maintenance window: the kiosk comes back then if nobody signed in to Windows.</param>
+/// <param name="SignInWithinSec">How long the Windows sign-in screen waits for the staff member before the PC restarts into the kiosk.</param>
+public sealed record SysStaffSignInResponse(string StaffName, DateTimeOffset Until, int SignInWithinSec);
 
 /// <summary>
 /// Request of <c>sys.resetProfile</c> from the Shell's administrator menu: the player profile of this PC is reset without
@@ -1468,6 +1495,12 @@ public enum PlayerSavesState
 
     /// <summary>At the end of the session: the saves are over the club's limit and were not kept.</summary>
     TooLarge,
+
+    /// <summary>
+    /// The player ended their session on another PC to sign in here (SHELL_CHANGES 92): their saves are being handed back
+    /// there first; a game launch waits, then <see cref="Loading"/>.
+    /// </summary>
+    Transferring,
 }
 
 /// <summary>Payload of <c>saves.status</c>, sent on every change of <see cref="State"/>.</summary>

@@ -195,6 +195,9 @@ public enum AgentCommand
     /// <summary><c>sys.adminExit</c></summary>
     SysAdminExit,
 
+    /// <summary><c>sys.staffSignIn</c></summary>
+    SysStaffSignIn,
+
     /// <summary><c>sys.logClientError</c></summary>
     SysLogClientError,
 
@@ -309,6 +312,7 @@ public static class AgentCommands
         AgentCommand.SysSetLocale => IpcMessages.Sys.SetLocale,
         AgentCommand.SysUnlockAdmin => IpcMessages.Sys.UnlockAdmin,
         AgentCommand.SysAdminExit => IpcMessages.Sys.AdminExit,
+        AgentCommand.SysStaffSignIn => IpcMessages.Sys.StaffSignIn,
         AgentCommand.SysLogClientError => IpcMessages.Sys.LogClientError,
         AgentCommand.SysAckAdminMessage => IpcMessages.Sys.AckAdminMessage,
         AgentCommand.PolicyGet => IpcMessages.Policy.Get,

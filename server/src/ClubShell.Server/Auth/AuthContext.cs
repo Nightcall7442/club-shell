@@ -25,6 +25,15 @@ public enum AuthMode
 
     /// <summary><c>Authorization: Bearer</c> platform administrator key (<c>Platform:AdminKey</c>, beyond the contract).</summary>
     Platform,
+
+    /// <summary>
+    /// <c>Authorization: Bearer</c> release publisher token (<c>publishToken</c>, <c>Updates:PublishToken</c>): <c>501</c> while
+    /// the server has none configured, <c>401</c> for another token (<c>publishUpdateManifest</c>, the package uploads).
+    /// </summary>
+    Publisher,
+
+    /// <summary>The release publisher's token (sets <see cref="PublisherContext"/>), else the agent (<c>getUpdateManifest</c>).</summary>
+    AgentOrPublisher,
 }
 
 /// <summary>
@@ -61,3 +70,6 @@ public sealed record UserContext(Guid UserId);
 /// the agent-optional-user mode, where the request goes on without a player (offline replay of <c>POST /sessions</c>).
 /// </summary>
 public sealed record UserTokenProblem(string Problem);
+
+/// <summary>The request carries the release publisher's token (<see cref="AuthMode.AgentOrPublisher"/>).</summary>
+public sealed record PublisherContext;

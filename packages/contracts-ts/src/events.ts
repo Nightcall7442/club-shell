@@ -121,6 +121,11 @@ export const PlayerSavesState = {
   Unavailable: 'unavailable',
   /** At the end of the session: the saves are over the club's limit and were not kept. */
   TooLarge: 'tooLarge',
+  /**
+   * The player ended their session on another PC to sign in here (SHELL_CHANGES 92): their saves are being handed back
+   * there first; a game launch waits, then `PlayerSavesState.Loading`.
+   */
+  Transferring: 'transferring',
 } as const;
 /** Where the signed-in player's game saves are on this PC (SHELL_CHANGES 23). */
 export type PlayerSavesState = (typeof PlayerSavesState)[keyof typeof PlayerSavesState];

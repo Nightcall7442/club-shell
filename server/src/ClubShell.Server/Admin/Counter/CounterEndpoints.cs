@@ -59,6 +59,7 @@ public static partial class CounterEndpoints
         api.MapPost("/sessions/move", MoveAsync);
         api.MapPost("/wallet/topup", TopUpAsync);
         api.MapPost("/wallet/payout", PayoutAsync);
+        api.MapPost("/wallet/write-off", WriteOffAsync);
         api.MapPost("/pcs/{pcId:guid}/command", CommandAsync);
         api.MapPost("/pcs/commands", CommandsAsync);
         api.MapPost("/quote", QuoteAsync);
@@ -128,7 +129,8 @@ public static partial class CounterEndpoints
                 s is not null && players.TryGetValue(s.UserId, out var user) ? user : null,
                 s is null ? null : signedIn.Contains(pc.Id),
                 s is not null && status is Contracts.Pcs.PcStatus.Busy or Contracts.Pcs.PcStatus.Locked ? games.GetValueOrDefault(pc.Id) : null,
-                status == Contracts.Pcs.PcStatus.Offline ? null : kioskAlerts.GetValueOrDefault(pc.Id));
+                status == Contracts.Pcs.PcStatus.Offline ? null : kioskAlerts.GetValueOrDefault(pc.Id),
+                new HallPlace(pc.X, pc.Y, pc.Rotation));
         }).ToList();
         var tariffs = (await c.QueryAsync<TariffRow>(
             $"SELECT {TariffRow.Columns} FROM tariffs WHERE club_id = @ClubId AND deleted_at IS NULL ORDER BY created_at, id", new { staff.ClubId }))
@@ -186,7 +188,8 @@ public static partial class CounterEndpoints
             .Select(r => (object)new { pcId = r.PcId, severity = r.Severity }).ToList();
         return AdminJson.Ok(new AdminOverview(
             now, new AdminOccupancy(seats.Count(s => s.Pc.Status == Contracts.Pcs.PcStatus.Free), seats.Count), seats, tariffs, members,
-            await ZonesAsync(c, staff.ClubId), repairs, debts, refunds, await AdminCalls.LiveAsync(c, staff.ClubId, now)));
+            await ZonesAsync(c, staff.ClubId), repairs, debts, refunds, await AdminCalls.LiveAsync(c, staff.ClubId, now),
+            await HallLayout.PlanAsync(c, staff.ClubId)));
     }
 
     /// <summary>
@@ -573,6 +576,73 @@ public static partial class CounterEndpoints
         effects.Wallets.Add(userId);
         var transaction = new Transaction(id, userId, TransactionType.TopUp, Money.Uzs(amount), Money.Uzs(row.BalanceAfter), row.Description, row.CreatedAt);
         return new TopUpPosted(id, userId, amount, balance, bonus, transaction, method);
+    }
+
+    /// <summary>
+    /// <c>POST /admin/wallet/write-off</c> (beyond the contract, SHELL_CHANGES 90): a debt the club gives up — a test
+    /// session, a seat left open on a PC that was switched off — closed without money. Exactly the debt
+    /// (<c>409 debtChanged {debt}</c>, none — <c>409 noDebt</c>), not while the player is still in a session
+    /// (<c>409 sessionOpen</c>: the debt still grows), with a reason (1–200 characters). An owner always may, a cashier only
+    /// with the owner's mark (<c>403 writeOffNotAllowed</c>). Ledger: an <c>adjustment</c> of +debt without a payment method
+    /// (<c>meta.kind = debtWriteOff</c>): no cash, no revenue, «В кассе» unchanged; X/Z count it apart as <c>writeOffs</c>.
+    /// Journal: <c>debtWriteOff</c> with the amount, the reason and the player's last session. No shift needed;
+    /// <c>Idempotency-Key</c> required.
+    /// </summary>
+    private static async Task<IResult> WriteOffAsync(HttpContext context, [FromBody] JsonElement body, IdempotencyStore store, SessionService sessions)
+    {
+        var staff = context.Features.GetRequiredFeature<StaffContext>();
+        var r = Api.Read<AdminWriteOffRequest>(body, "userId", "amount", "reason");
+        var amount = r.Amount!.Value is < 1 ? throw ApiException.Validation("amount", "min")
+            : r.Amount.Value > 100_000_000_000 ? throw ApiException.Validation("amount", "max") : r.Amount.Value;
+        var reason = AdminInput.Text(r.Reason?.Trim(), "reason", 200);
+        var effects = new SessionEffects();
+        var result = await store.ExecuteHttpAsync(context, ShiftEndpoints.Principal(staff), keyRequired: true, body, async (c, tx) =>
+        {
+            if (!staff.IsOwner && !await c.ExecuteScalarAsync<bool>("SELECT debt_write_off FROM staff WHERE id = @StaffId", new { staff.StaffId }, tx))
+            {
+                throw ApiException.Forbidden("writeOffNotAllowed", "Only the owner, or a cashier the owner allowed, writes a debt off");
+            }
+
+            var now = sessions.Clock.GetUtcNow();
+            var userId = r.UserId!.Value;
+            var wallet = await c.QuerySingleOrDefaultAsync<(long Balance, string Who)?>(
+                """
+                SELECT w.main_balance, u.display_name FROM wallets w JOIN users u ON u.id = w.user_id
+                WHERE u.id = @userId AND u.network_id = @NetworkId AND u.deleted_at IS NULL
+                FOR UPDATE OF w
+                """,
+                new { userId, staff.NetworkId }, tx)
+                ?? throw ApiException.NotFound("user");
+            // A postpaid bill is charged at the end: during a session the debt is not final yet.
+            if (await c.ExecuteScalarAsync<bool>("SELECT EXISTS (SELECT 1 FROM sessions WHERE user_id = @userId AND state <> 'ended')", new { userId }, tx))
+            {
+                throw SessionService.Conflict("sessionOpen");
+            }
+
+            var debt = Math.Max(0, -wallet.Balance);
+            if (debt == 0)
+            {
+                throw SessionService.Conflict("noDebt");
+            }
+
+            if (amount != debt)
+            {
+                throw new ApiException(StatusCodes.Status409Conflict, ErrorCode.Conflict, "Conflict: debtChanged", new { reason = "debtChanged", debt = Money.Uzs(debt) });
+            }
+
+            var sessionId = await c.ExecuteScalarAsync<Guid?>(
+                "SELECT id FROM sessions WHERE user_id = @userId ORDER BY started_at DESC, id DESC LIMIT 1", new { userId }, tx);
+            var id = Guid.CreateVersion7(now);
+            var balance = await Ledger.PostAsync(c, tx, userId, allowOverdraft: false, now,
+                new LedgerLine("adjustment", amount, "Списание долга: " + reason, staff.ClubId, SessionId: sessionId, StaffId: staff.StaffId, Id: id,
+                    Meta: new { kind = "debtWriteOff", reason }));
+            await Audit.WriteAsync(c, tx, staff, now, "debtWriteOff", userId, amount: amount, detail: $"{wallet.Who}: {reason}",
+                meta: new { reason, sessionId, transactionId = id });
+            effects.Wallets.Add(userId);
+            return new IdempotentResult(StatusCodes.Status200OK, AdminJson.ToElement(new { balance = Money.Uzs(balance), writtenOff = Money.Uzs(amount), transactionId = id }));
+        });
+        await sessions.PublishAsync(effects);
+        return result;
     }
 
     /// <summary>

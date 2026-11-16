@@ -50,7 +50,10 @@ public sealed class NotImplementedTests(ServerFixture server) : IClassFixture<Se
         string[] required = [.. s1, .. s2, .. s3, .. s4, .. s5a, .. s5b];
         Assert.Equal(75, required.Length);
         Assert.Equal(75, Contract.Operations.Count(o => o.Operation.GetProperty("x-server-status").GetString() == "required"));
-        Assert.Equal(required.Append("getBalance").Append("reportAntiCheat").Append("getTransactions").Append("callAdmin").Order(), ContractStatus.Implemented.Order());
+        // publishUpdateManifest beyond the required set: implemented with Updates:PublishToken, 501 without it (UpdateReleaseTests).
+        Assert.Equal(
+            required.Append("getBalance").Append("reportAntiCheat").Append("getTransactions").Append("callAdmin").Append("publishUpdateManifest").Order(),
+            ContractStatus.Implemented.Order());
         var owner = await Staff.LoginAsync(server, Staff.OwnerPin);
         Assert.All(required, id => Assert.Equal("required", Contract.Operations.Single(o => o.OperationId == id).Operation.GetProperty("x-server-status").GetString()));
 
@@ -74,7 +77,7 @@ public sealed class NotImplementedTests(ServerFixture server) : IClassFixture<Se
             Assert.False(response.Headers.Contains("Retry-After"), op.OperationId);
         }
 
-        Assert.Equal(23, pending.Count);
+        Assert.Equal(22, pending.Count);
     }
 
     /// <summary>Credentials of the operation's contract <c>security</c>: agent routes also carry the signed-in player's token, staff routes the owner's.</summary>

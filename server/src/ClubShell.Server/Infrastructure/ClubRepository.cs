@@ -44,6 +44,9 @@ public sealed class ClubAgentView
     public string TimeZone { get; init; } = "Asia/Tashkent";
     public string? Settings { get; init; }
 
+    /// <summary>The club's PCs check for ClubShell updates by themselves and install them at night (<c>clubs.auto_update</c>).</summary>
+    public bool AutoUpdate { get; init; }
+
     /// <summary>Branding, the banners live on the club's local date and the rules (<see cref="Agents.AgentConfig.ShellClubOf"/>).</summary>
     public ShellClub Club { get; set; } = new();
 }
@@ -138,7 +141,7 @@ public sealed class ClubRepository(NpgsqlDataSource db, TimeProvider clock)
     {
         await using var c = await db.OpenConnectionAsync();
         var view = await c.QuerySingleAsync<ClubAgentView>(
-            "SELECT name, config_version, catalog_version, policy_version, time_zone, settings::text AS settings FROM clubs WHERE id = @clubId", new { clubId });
+            "SELECT name, config_version, catalog_version, policy_version, time_zone, settings::text AS settings, auto_update FROM clubs WHERE id = @clubId", new { clubId });
         view.Club = Agents.AgentConfig.ShellClubOf(view.Name, view.Settings, DateOnly.FromDateTime(ClubTime.Local(clock.GetUtcNow(), view.TimeZone)));
         return view;
     }

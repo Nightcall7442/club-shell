@@ -26,7 +26,12 @@ public static class AdminJson
     public static readonly object OkBody = new { ok = true };
 }
 
-public sealed record AdminStaffMember(string Id, string Name, string Role, bool Active);
+/// <summary>
+/// A staff member; beyond the contract: <c>pcService</c> — may sign in to their own Windows account on a club PC with their PIN
+/// (<c>POST /agents/{pcId}/staff/verify</c>), always <see langword="true"/> for an owner; <c>debtWriteOff</c> — may write a debt off
+/// (<c>POST /admin/wallet/write-off</c>, SHELL_CHANGES 90), always for an owner.
+/// </summary>
+public sealed record AdminStaffMember(string Id, string Name, string Role, bool Active, bool PcService, bool DebtWriteOff);
 
 /// <summary>
 /// X/Z report; beyond the contract: <c>topUpByMethod</c> splits the top-ups by payment method, <c>cashIn</c>/<c>cashOut</c>
@@ -38,7 +43,7 @@ public sealed record AdminStaffMember(string Id, string Name, string Role, bool 
 public sealed record AdminShiftTotals(
     long TopUpCash, long TopUpOther, long Sessions, long Shop, long Refunds, long Bonuses, int Count, AdminTopUpByMethod TopUpByMethod,
     long CashIn = 0, long CashOut = 0, long Payouts = 0, long ApiCash = 0, AdminShopByMethod? ShopByMethod = null, long ShopVoids = 0,
-    int ShopVoidCount = 0);
+    int ShopVoidCount = 0, long WriteOffs = 0, int WriteOffCount = 0);
 
 /// <summary>Top-ups of a shift by <c>ledger_entries.method</c>; <c>other</c> — rows with no method.</summary>
 public sealed record AdminTopUpByMethod(long Cash, long Card, long Payme, long Click, long Uzum, long Other);
@@ -75,9 +80,11 @@ public sealed record AdminMember(Guid Id, string DisplayName, string Role, Money
 /// <c>signedIn</c> (beyond the contract, D-49): the session's player holds a live token on the PC; null — no session.
 /// <c>game</c> (beyond the contract, D-71): the game the PC's agent reports running for this session, from its last
 /// heartbeat; null — none, no session, or the PC is not busy or locked. <c>kioskAlert</c> (beyond the contract,
-/// SHELL_CHANGES 76–77): as on <see cref="AdminHallPc"/>, of a PC that is not offline.
+/// SHELL_CHANGES 76–77): as on <see cref="AdminHallPc"/>, of a PC that is not offline. <c>place</c> (beyond the contract,
+/// SHELL_CHANGES 94): where the PC stands on the hall plan.
 /// </summary>
-public sealed record AdminSeat(Pc Pc, Session? Session, AdminSeatUser? User, bool? SignedIn = null, AdminSeatGame? Game = null, string? KioskAlert = null);
+public sealed record AdminSeat(
+    Pc Pc, Session? Session, AdminSeatUser? User, bool? SignedIn = null, AdminSeatGame? Game = null, string? KioskAlert = null, HallPlace? Place = null);
 
 /// <summary>A running game on the map (D-71): the catalog title and art; an empty <c>coverUrl</c> is null.</summary>
 public sealed record AdminSeatGame(Guid Id, string Title, string? CoverUrl, string? HeroUrl);
@@ -88,7 +95,7 @@ public sealed record AdminOccupancy(int Free, int Total);
 public sealed record AdminOverview(
     DateTimeOffset At, AdminOccupancy Club, IReadOnlyList<AdminSeat> Seats, IReadOnlyList<Tariff> Tariffs, IReadOnlyList<AdminMember> Users,
     IReadOnlyList<AdminZone> Zones, IReadOnlyList<object> Repairs, IReadOnlyList<AdminGuestDebt> GuestDebts, IReadOnlyList<AdminGuestRefund> GuestRefunds,
-    IReadOnlyList<AdminCall>? Calls = null);
+    IReadOnlyList<AdminCall>? Calls = null, HallPlan? HallPlan = null);
 
 /// <summary>
 /// An unpaid postpaid bill (beyond the contract): a guest's (<c>limits.guestPostpaid</c>) or a member's
@@ -189,9 +196,10 @@ public sealed record AdminPcResponse(Pc Pc);
 public sealed record AdminHallPc(
     Guid Id, string Name, string Zone, int Number, string? Hwid, string IpAddress, PcStatus Status, Guid? CurrentSessionId,
     string AgentVersion, string ShellVersion, DateTimeOffset LastHeartbeatAt, int X, int Y, string Device, JsonElement? Hardware, JsonElement? Metrics,
-    JsonElement? GamesVolume, bool Stateless, string? KioskAlert = null);
+    JsonElement? GamesVolume, bool Stateless, string? KioskAlert = null, int Rotation = 0);
 
-public sealed record AdminHallPcList(IReadOnlyList<AdminHallPc> Items, IReadOnlyList<AdminZone> Zones);
+/// <summary><c>plan</c> (beyond the contract, SHELL_CHANGES 94): the club's hall plan, null when none was drawn.</summary>
+public sealed record AdminHallPcList(IReadOnlyList<AdminHallPc> Items, IReadOnlyList<AdminZone> Zones, HallPlan? Plan = null);
 
 // Requests: every field nullable, so a missing one is told apart from a default (400 required).
 /// <summary>
@@ -221,6 +229,9 @@ public sealed record AdminTopUpRequest(Guid? UserId, long? Amount, string? Metho
 /// <summary>A guest's cash payout (<c>POST /admin/wallet/payout</c>, beyond the contract, D-37).</summary>
 public sealed record AdminPayoutRequest(Guid? UserId, long? Amount, string? Method);
 
+/// <summary>Body of <c>POST /admin/wallet/write-off</c> (beyond the contract, SHELL_CHANGES 90): the whole debt and why.</summary>
+public sealed record AdminWriteOffRequest(Guid? UserId, long? Amount, string? Reason);
+
 /// <summary>Cash into or out of the drawer (<c>POST /admin/shift/cash</c>, beyond the contract, D-40).</summary>
 public sealed record AdminCashMoveRequest(string? Kind, long? Amount, string? ReasonCode, string? Note);
 
@@ -231,7 +242,7 @@ public sealed record AdminCashRequest(long? OpeningCash, long? ClosingCash);
 public sealed record AdminQuoteRequest(Guid? TariffId, Guid? PcId, int? Minutes, Guid? UserId);
 
 /// <summary><c>stateless</c> is beyond the contract (SHELL_CHANGES 25, <see cref="AdminHallPc"/>).</summary>
-public sealed record AdminPcChange(string? Zone, int? Number, string? Device, string? Name, int? X, int? Y, bool? Maintenance, bool? Stateless = null);
+public sealed record AdminPcChange(string? Zone, int? Number, string? Device, string? Name, int? X, int? Y, bool? Maintenance, bool? Stateless = null, int? Rotation = null);
 
 // Slice S5, part A: staff, clients, promo codes, tariffs, stock.
 public sealed record AdminStaffList(IReadOnlyList<AdminStaffMember> Items);
@@ -272,9 +283,9 @@ public sealed record AdminProductList(IReadOnlyList<Contracts.Shop.Product> Item
 
 public sealed record AdminProductResponse(Contracts.Shop.Product Product);
 
-public sealed record AdminStaffCreateRequest(string? Name, string? Role, string? Pin);
+public sealed record AdminStaffCreateRequest(string? Name, string? Role, string? Pin, bool? PcService = null, bool? DebtWriteOff = null);
 
-public sealed record AdminStaffUpdateRequest(string? Name, bool? Active, string? Pin);
+public sealed record AdminStaffUpdateRequest(string? Name, bool? Active, string? Pin, bool? PcService = null, bool? DebtWriteOff = null);
 
 /// <summary><c>telegram</c> is prohibited: not a member, so the binder skips it (accepted and ignored).</summary>
 public sealed record AdminClientCreateRequest(

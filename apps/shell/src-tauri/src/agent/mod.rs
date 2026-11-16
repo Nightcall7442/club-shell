@@ -892,6 +892,15 @@ impl MockTransport {
                 )
             }
             AgentCommand::SysAdminExit => Some(json!({ "resumeAt": in_secs(30 * 60) })),
+            // The dev mock knows the demo owner's PIN only; nothing is signed out.
+            AgentCommand::SysStaffSignIn => {
+                if p["pin"].as_str() != Some(MOCK_ADMIN_PIN) {
+                    return Err(mock_err(ErrorCode::Unauthorized, "Wrong PIN"));
+                }
+                Some(
+                    json!({ "staffName": "Владелец", "until": in_secs(4 * 3600), "signInWithinSec": 600 }),
+                )
+            }
             AgentCommand::SysResetProfile => Some(json!({ "started": true })),
             AgentCommand::SysLogClientError => {
                 tracing::warn!(target: "webview", level = %p["level"], message = %p["message"], route = %p["route"], "client error (mock agent)");

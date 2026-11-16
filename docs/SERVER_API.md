@@ -273,6 +273,20 @@ heartbeat; the first heartbeat always fetches the current one.
 
 Response `Policy`. `304` when unchanged.
 
+#### `POST /agents/{pcId}/staff/verify` — auth: agent — beyond the contract
+
+A staff member's PIN typed on this PC («Вход для персонала» on the lock screen, IPC `sys.staffSignIn`), before the Agent
+lets them sign in to their own Windows account to install games, launchers and programs. Request `StaffVerifyRequest
+{ pin: string }` (4–8 digits) → `200 StaffVerifyResponse { staffId: uuid, name: string, role: "owner" | "cashier" }`.
+Allowed: an active member of the PC's club who may service PCs — an owner always, a cashier with the owner's
+`pcService` mark (`AdminStaffMember.pcService`, set with `POST`/`PATCH /admin/staff`). The sign-in is written to the
+staff journal as `pcCommand` with `detail` `"<PC> · serviceSignIn"` and `meta.kind = "serviceSignIn"`. Errors:
+`401 unauthorized {reason: "invalidPin"}` (no active member with this PIN; final — the Agent does not refresh and
+retry), `403 forbidden {reason: "pcService"}` (a cashier without the mark; not counted as a wrong PIN), `400 validation
+{field: "pin", reason: "digits4to8"}` (not counted), `429 rateLimited {retryAfterSec, scope}` — wrong PINs count with the
+cash desk's PIN limits (D-76): per PC (`pc:<id>`, `RateLimit:PinAttempts` in `PinWindowSec`) and in the club's budget
+for untrusted sources, so a player guessing at a PC cannot lock out the desks; past a limit even the right PIN waits.
+
 ### 4.2 PCs
 
 #### `GET /pcs` — auth: agent — query `zone?` → `{ items: Pc[] }` (club-wide, for the seat map and "friends" views; `hwid` omitted for other PCs).
@@ -303,6 +317,8 @@ deleted and `userRevoked {userId, reason: "signedInElsewhere"}` pushed to it —
 transaction: when this sign-in is refused after all (`pcOccupied`, `banned`, `401`), nothing is ended. Without it (or
 `false`) the answer is `409` as before. Every successful sign-in, with or without it, also signs the player out of every
 other PC where they still hold a token (`userRevoked {reason: "signedInElsewhere"}`, §2.3).
+The answer then carries `handoffSessionId`, the session ended there: the Agent here waits on
+`GET /sessions/{id}/handoff` for that PC to hand the player's saves back before attaching them (SHELL_CHANGES 92).
 
 #### `POST /auth/qr/start` — auth: agent
 
@@ -416,6 +432,11 @@ Request `{ reason: SessionEndReason, endedAt?: datetime, secondsUsed: int }` →
   up to the moment the PC came back. (The offline replay's `startedAt` is likewise taken up to now, and refused older
   than `Sessions:MaxReplayHours`.)
 
+#### `GET /sessions/{id}/handoff` — auth: user — beyond the contract
+`{ sessionId, released }`: whether the PC of the player's ended session (`AuthResponse.handoffSessionId`) has acked its
+`endSession` — its Agent does so after detaching the saves. `released` is also true when that command was superseded or
+expired. Someone else's session (or none) — `404 notFound`.
+
 #### `POST /sessions/{id}/extend` — auth: user, idempotent
 
 Request `{ minutes: int, tariffId?: uuid }` → `Session`. Errors: `409 sessionNotActive`, `402`, `400` (over `maxMinutes`), `403 policyDenied`.
@@ -519,7 +540,8 @@ Room ids: `pc:<pcId>` (created implicitly), `zone:<zone>`, `club`, `dm:<userIdA>
 
 ### 4.13 Updates
 
-#### `GET /updates/{channel}/manifest` — auth: agent — query `component` (required), `current` (semver, required), `arch?` (`x64`) → `200 UpdateManifest` or `204` (up to date). Errors: `404` (unknown channel/component). Package download at `manifest.url` requires the same Bearer header; supports `Range`.
+#### `GET /updates/{channel}/manifest` — auth: agent or the release publisher's token — query `component` (required), `current` (semver, required), `arch?` (`x64`) → `200 UpdateManifest` or `204` (up to date). Errors: `404` (unknown channel/component). Package download at `manifest.url` requires the same Bearer header (the Agent sends it only to its own server); supports `Range`. The club server offers a PC the release only while its club's automatic updates are on (UPDATES.md §8.1).
+#### `POST /updates/{channel}/manifest` — auth: release publisher token (`Updates:PublishToken`) — the signed `manifest.json` of a release (`publishUpdateManifest`; packages first with `PUT /<channel>/<version>/<file>` outside `/api/v1`). `501` while the server has no publisher token. UPDATES.md §8.1.
 
 ### 4.14 Support / anti-cheat
 
@@ -560,6 +582,7 @@ Response `204`.
 | GET | `/agents/{pcId}/policies` | agent |
 | GET | `/agents/{pcId}/commands` | agent |
 | POST | `/agents/{pcId}/commands/{commandId}/ack` | agent |
+| POST | `/agents/{pcId}/staff/verify` | agent (beyond the contract) |
 | GET | `/pcs` | agent |
 | GET | `/pcs/{pcId}` | agent |
 | POST | `/auth/login` | agent |
@@ -613,6 +636,7 @@ Response `204`.
 | POST | `/tournaments/{id}/join` | user |
 | GET | `/tournaments/{id}/leaderboard` | agent |
 | GET | `/updates/{channel}/manifest` | agent |
+| POST | `/updates/{channel}/manifest` | release publisher |
 | POST | `/support/call-admin` | agent |
 | POST | `/anticheat/report` | agent |
 

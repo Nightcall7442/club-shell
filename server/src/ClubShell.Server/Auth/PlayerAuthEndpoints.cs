@@ -362,6 +362,7 @@ public static class PlayerAuthEndpoints
     {
         Guid userId;
         SessionRow? open;
+        Guid? handoff = null;
         string token;
         DateTimeOffset expiresAt;
         DateTimeOffset now;
@@ -417,6 +418,9 @@ public static class PlayerAuthEndpoints
                     effects.Sessions.RemoveAll(pushed => pushed.Id == other.Id);
                     effects.Commands.Add((other.ClubId, other.PcId, NewCommand.EndSession(new EndSessionCommand(other.Id, SessionEndReason.User))));
                     ended = other.PcId;
+
+                    // That PC hands the saves back before this one lays them out (SHELL_CHANGES 92): GET /sessions/{id}/handoff.
+                    handoff = other.Id;
                 }
 
                 open = null;
@@ -448,7 +452,7 @@ public static class PlayerAuthEndpoints
 
         await sessions.PublishAsync(effects);
         var user = await c.QuerySingleAsync<UserRow>($"{UserRow.Select} WHERE u.id = @userId", new { userId });
-        return new AuthResponse(user.ToWire(club.Pricing), open?.ToWire(now), token, UserTokens.NewToken(), expiresAt, offlineHash);
+        return new AuthResponse(user.ToWire(club.Pricing), open?.ToWire(now), token, UserTokens.NewToken(), expiresAt, offlineHash, handoff);
     }
 
     private static ApiException BadCredentials(int attemptsLeft) =>

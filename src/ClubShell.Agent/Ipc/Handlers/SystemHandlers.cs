@@ -169,6 +169,7 @@ public sealed class SystemHandlers : IIpcHandlerGroup
         dispatcher.Register<SysUnlockAdminRequest, SysUnlockAdminResponse>(IpcMessages.Sys.UnlockAdmin, (_, request, _) => Task.FromResult(UnlockAdmin(request)));
         dispatcher.Register<SysAdminExitRequest, SysAdminExitResponse>(IpcMessages.Sys.AdminExit, (_, request, _) => Task.FromResult(AdminExit(request)));
         dispatcher.Register<SysResetProfileRequest, ResetProfileResult>(IpcMessages.Sys.ResetProfile, (_, request, ct) => ResetProfileAsync(request, ct));
+        dispatcher.Register<SysStaffSignInRequest, SysStaffSignInResponse>(IpcMessages.Sys.StaffSignIn, (_, request, ct) => StaffSignInAsync(request, ct));
         dispatcher.Register<SysLogClientErrorRequest, OkResponse>(IpcMessages.Sys.LogClientError, (_, request, _) => Task.FromResult(LogClientError(request)));
         dispatcher.Register<SysAckAdminMessageRequest, OkResponse>(IpcMessages.Sys.AckAdminMessage, (_, request, _) => Task.FromResult(AckAdminMessage(request)));
         dispatcher.RegisterNoPayload<UpdateCheckResponse>(IpcMessages.Update.Check, UpdateCheckAsync);
@@ -229,6 +230,24 @@ public sealed class SystemHandlers : IIpcHandlerGroup
         }
 
         return reset.ResetForStaffAsync("the administrator menu", cancellationToken);
+    }
+
+    /// <summary>
+    /// <c>sys.staffSignIn</c> from the lock screen: a staff member signs in to their own Windows account
+    /// (<see cref="Users.StaffWindowsSignIn"/>). The PIN is the server's to check, not the PC's admin PIN.
+    /// </summary>
+    public Task<SysStaffSignInResponse> StaffSignInAsync(SysStaffSignInRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // Resolved here, not injected: the sign-in reaches the session watcher and the kiosk account, kept out of this
+        // handler's construction like the profile reset.
+        if (_services?.GetService(typeof(Users.StaffWindowsSignIn)) is not Users.StaffWindowsSignIn signIn)
+        {
+            throw IpcError.UnknownMessage(IpcMessages.Sys.StaffSignIn).ToException();
+        }
+
+        return signIn.SignInAsync(request, cancellationToken);
     }
 
     /// <summary>Best-effort master volume on the default render endpoint (Core Audio); persisted to <c>shell.json</c> either way.</summary>

@@ -234,6 +234,10 @@ public static class AgentServiceCollectionExtensions
         services.TryAddSingleton<IKioskSessionLocator>(sp => sp.GetRequiredService<ShellLauncher>());
         services.TryAddSingleton<IKioskProfilePaths>(sp => sp.GetRequiredService<ShellLauncher>());
         services.TryAddSingleton<ShellWatchdog>();
+
+        // A staff member's sign-in to their own Windows account (sys.staffSignIn).
+        services.TryAddSingleton<ClubShell.Agent.Users.IStaffSignInHost, ClubShell.Agent.Users.WindowsStaffSignInHost>();
+        services.TryAddSingleton<ClubShell.Agent.Users.StaffWindowsSignIn>();
     }
 
     // ---- Server + remote -------------------------------------------------------------------
@@ -354,6 +358,8 @@ public static class AgentServiceCollectionExtensions
         services.AddHostedService(sp => sp.GetRequiredService<AgentUpdater>());
         services.AddHostedService(sp => sp.GetRequiredService<ShellWatchdog>());
         services.AddHostedService<AdminMaintenanceCloser>();
+        // After the watchdog, whose session watcher it listens to; resumes an auto-logon a reboot left paused.
+        services.AddHostedService(sp => sp.GetRequiredService<ClubShell.Agent.Users.StaffWindowsSignIn>());
         services.AddHostedService(sp => sp.GetRequiredService<PcReadinessService>());
         // Pings the diskless helper at start so its version (or its absence) is in the log.
         services.AddHostedService(sp => sp.GetRequiredService<PlayerSavesService>());

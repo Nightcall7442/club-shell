@@ -66,6 +66,7 @@ import type {
   ShopOrdersResponse,
   SysCallAdminResponse,
   SysSetLocaleResponse,
+  SysStaffSignInResponse,
   SysUnlockAdminResponse,
   ResetProfileResult,
   Tariff,
@@ -2006,7 +2007,14 @@ cmd('sys_call_admin', (args): SysCallAdminResponse => {
   return { ticketId, createdAt: nowIso(), queuePosition: 1 };
 });
 
-const power = (args: Record<string, unknown>): ScheduledResult => ({ scheduledAt: isoIn(num(args, 'delaySec') ?? 30) });
+/** As the Agent: refused during a session (`conflict sessionActive`, SHELL_CHANGES 93). */
+const power = (args: Record<string, unknown>): ScheduledResult => {
+  const s = mockState.session;
+  if (s && s.state !== 'ended' && s.state !== 'idle') {
+    mockError('conflict', 'A session is open', { reason: 'sessionActive' });
+  }
+  return { scheduledAt: isoIn(num(args, 'delaySec') ?? 30) };
+};
 cmd('sys_reboot', power);
 cmd('sys_shutdown', power);
 
@@ -2065,6 +2073,28 @@ cmd('sys_unlock_admin', (args): SysUnlockAdminResponse => {
   const token = newId();
   mockState.adminToken = { token, expiresAt: now + 300_000 };
   return { ok: true, adminToken: token, expiresAt: new Date(now + 300_000).toISOString() };
+});
+
+/**
+ * A staff member's Windows sign-in: the mock knows the demo staff — owner 0000 (may service PCs) and cashier 1111
+ * (without the owner's mark: `forbidden pcService`); anything else is a wrong PIN. Nothing is signed out.
+ */
+cmd('sys_staff_sign_in', (args): SysStaffSignInResponse => {
+  const pin = str(args, 'pin') ?? '';
+  if (!/^\d{4,8}$/.test(pin)) {
+    mockError('validation', 'PIN must be 4-8 digits', { field: 'pin', reason: 'digits4to8' });
+  }
+  if (mockState.user || (mockState.session && mockState.session.state !== 'ended')) {
+    mockError('conflict', 'A player is on this PC: end the session first', { reason: 'sessionActive' });
+  }
+  if (pin === '1111') {
+    mockError('forbidden', 'This staff member may not sign in to the club PCs', { reason: 'pcService' });
+  }
+  if (pin !== MOCK_ADMIN_PIN) {
+    mockError('unauthorized', 'No active staff member with this PIN', { reason: 'invalidPin' });
+  }
+  console.info('[mock] sys_staff_sign_in — the agent would sign the kiosk out of Windows now');
+  return { staffName: 'Владелец', until: new Date(Date.now() + 4 * 3600_000).toISOString(), signInWithinSec: 600 };
 });
 
 cmd('sys_reset_profile', (args): ResetProfileResult => {
