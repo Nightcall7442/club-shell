@@ -2590,3 +2590,47 @@ test('a PC without a loaded Vanguard is not offered the games it could not start
   await heartbeat(request, pc, { antiCheat: { vanguardInstalled: true, vanguardLoaded: true } });
   expect((await listed()).map((g) => g.id)).toEqual(all.map((g) => g.id));
 });
+
+test('the owner allows a cashier to sign in to Windows on the PCs, and the PC checks that PIN (staff sign-in)', async ({
+  page,
+  request,
+}) => {
+  const pc = await registerAgent(request, 'staff-signin');
+  const pin = String(10_000_000 + (randomBytes(4).readUInt32BE() % 90_000_000));
+  const name = `E2E техник ${pin.slice(-4)}`;
+  const verify = async (p: string): Promise<{ status: number; body: Record<string, unknown> }> => {
+    const res = await agentCall(request, pc, 'POST', `/agents/${pc.pcId}/staff/verify`, { pin: p });
+    return { status: res.status(), body: (await res.json()) as Record<string, unknown> };
+  };
+  const reason = (body: Record<string, unknown>): unknown =>
+    ((body['error'] as Record<string, unknown>)['details'] as Record<string, unknown>)['reason'];
+
+  await signIn(page, OWNER_PIN);
+  await page.goto('/#/staff');
+  await page.getByRole('textbox').first().fill(name);
+  await page.locator('input[type="password"]').last().fill(pin);
+  await page.getByRole('button', { name: 'Добавить', exact: true }).click();
+  const row = page.getByRole('row').filter({ hasText: name });
+  await expect(row).toBeVisible();
+
+  // Without the mark the PC refuses the cashier's PIN; the owner's always works.
+  const refused = await verify(pin);
+  expect([refused.status, reason(refused.body)]).toEqual([403, 'pcService']);
+  expect((await verify(OWNER_PIN)).status).toBe(200);
+  const wrong = await verify('86420975');
+  expect([wrong.status, reason(wrong.body)]).toEqual([401, 'invalidPin']);
+
+  await row.getByRole('switch', { name: 'Нет' }).click();
+  await expect(row.getByRole('switch', { name: 'Разрешён' })).toBeVisible();
+  const allowed = await verify(pin);
+  expect(allowed.status).toBe(200);
+  expect(allowed.body).toMatchObject({ name, role: 'cashier' });
+
+  const owner = auth(await tokenFor(request, OWNER_PIN));
+  const journal = (await (await request.get(`${API}/admin/control?days=1`, { headers: owner })).json()) as {
+    log: { action: string; detail: string; staffName: string }[];
+  };
+  expect(
+    journal.log.some((e) => e.action === 'pcCommand' && e.staffName === name && e.detail.endsWith('serviceSignIn')),
+  ).toBe(true);
+});

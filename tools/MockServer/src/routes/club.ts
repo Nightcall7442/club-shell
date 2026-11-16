@@ -39,6 +39,7 @@ import {
   optInt,
   optStr,
   publicPc,
+  requireAgent,
   seedPolicy,
   settleStatus,
   str,
@@ -61,6 +62,7 @@ import {
   emit,
   expectedCashOf,
   loyaltyOf,
+  mayServicePcs,
   openShift,
   profileOf,
   quote,
@@ -237,7 +239,11 @@ export function clubRoutes(app: FastifyInstance): void {
     c.staffTokens[token] = staff.id;
     markDirty();
     const shift = openShift();
-    return { token, staff: { id: staff.id, name: staff.name, role: staff.role }, shift: shift && shiftView(shift) };
+    return {
+      token,
+      staff: { id: staff.id, name: staff.name, role: staff.role, pcService: mayServicePcs(staff) },
+      shift: shift && shiftView(shift),
+    };
   });
 
   /** Signs the staff member out: the token stops working at once. Always 200, so a repeated sign-out is harmless. */
@@ -254,12 +260,34 @@ export function clubRoutes(app: FastifyInstance): void {
   app.get('/admin/me', async (req) => {
     const s = requireStaff(req);
     const shift = openShift();
-    return { staff: { id: s.id, name: s.name, role: s.role }, shift: shift && shiftView(shift) };
+    return {
+      staff: { id: s.id, name: s.name, role: s.role, pcService: mayServicePcs(s) },
+      shift: shift && shiftView(shift),
+    };
+  });
+
+  /**
+   * Beyond the contract, as the server: a staff member's PIN typed on a club PC before the Agent lets them sign in to their
+   * own Windows account (`sys.staffSignIn`). 401 `invalidPin`, 403 `pcService` for a cashier without the owner's mark;
+   * the sign-in goes to the journal as `pcCommand` · `serviceSignIn`. The mock has no wrong-PIN limit (never 429).
+   */
+  app.post<{ Params: { pcId: string } }>('/agents/:pcId/staff/verify', async (req) => {
+    const pc = requireAgent(req, req.params.pcId);
+    const pin = str(body(req), 'pin', 12);
+    if (!/^\d{4,8}$/.test(pin)) throw errors.validation('pin', 'digits4to8');
+    const staff = club().staff.find((s) => s.active && s.pin === pin);
+    if (!staff) throw errors.unauthorized('invalidPin');
+    if (!mayServicePcs(staff)) throw errors.forbidden('pcService');
+    record(staff, 'pcCommand', { pcId: pc.id, detail: `${pc.name} · serviceSignIn`, meta: { kind: 'serviceSignIn' } });
+    markDirty();
+    return { staffId: staff.id, name: staff.name, role: staff.role };
   });
 
   app.get('/admin/staff', async (req) => {
     requireStaff(req, 'owner');
-    return { items: club().staff.map(({ pin: _pin, ...s }) => s) };
+    return {
+      items: club().staff.map(({ pin: _pin, ...s }) => ({ ...s, pcService: mayServicePcs({ pin: _pin, ...s }) })),
+    };
   });
 
   app.post('/admin/staff', async (req) => {
@@ -269,7 +297,14 @@ export function clubRoutes(app: FastifyInstance): void {
     const pin = str(b, 'pin', 12);
     if (!/^\d{4,8}$/.test(pin)) throw errors.validation('pin', 'digits4to8');
     if (club().staff.some((s) => s.pin === pin)) throw errors.validation('pin', 'taken');
-    const rec: StaffRecord = { id: uuid(), name: str(b, 'name', 64), role, pin, active: true };
+    const rec: StaffRecord = {
+      id: uuid(),
+      name: str(b, 'name', 64),
+      role,
+      pin,
+      active: true,
+      pcService: b['pcService'] === true,
+    };
     club().staff.push(rec);
     markDirty();
     return { id: rec.id };
@@ -285,6 +320,7 @@ export function clubRoutes(app: FastifyInstance): void {
       if (s.id === me.id && !b['active']) throw errors.validation('active', 'self');
       s.active = b['active'];
     }
+    if (typeof b['pcService'] === 'boolean') s.pcService = b['pcService'];
     if (typeof b['pin'] === 'string') {
       const pin = str(b, 'pin', 12);
       if (!/^\d{4,8}$/.test(pin)) throw errors.validation('pin', 'digits4to8');

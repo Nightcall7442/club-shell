@@ -602,6 +602,11 @@ export interface StaffMember {
   name: string;
   role: StaffRole;
   active: boolean;
+  /**
+   * May sign in to their own Windows account on the club's PCs with their PIN («Вход для персонала» on the lock screen),
+   * to install games, launchers and programs; always true for an owner. Absent from an older server.
+   */
+  pcService?: boolean;
 }
 
 export interface ShiftTotals {
@@ -1181,10 +1186,12 @@ export const clubApi = {
   logout: (): Promise<unknown> => post('/admin/logout', {}),
 
   staff: (): Promise<{ items: StaffMember[] }> => call('/admin/staff'),
-  addStaff: (input: { name: string; role: StaffRole; pin: string }): Promise<{ id: string }> =>
+  addStaff: (input: { name: string; role: StaffRole; pin: string; pcService?: boolean }): Promise<{ id: string }> =>
     post('/admin/staff', input),
-  updateStaff: (id: string, input: Partial<{ name: string; active: boolean; pin: string }>): Promise<unknown> =>
-    patch(`/admin/staff/${id}`, input),
+  updateStaff: (
+    id: string,
+    input: Partial<{ name: string; active: boolean; pin: string; pcService: boolean }>,
+  ): Promise<unknown> => patch(`/admin/staff/${id}`, input),
 
   /** `expectedCash` — what the open shift's drawer should hold now (absent from an older server). */
   shift: (): Promise<{ shift: Shift | null; x: ShiftTotals | null; history: Shift[]; expectedCash?: number | null }> =>

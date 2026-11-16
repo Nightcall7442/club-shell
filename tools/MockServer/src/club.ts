@@ -45,6 +45,13 @@ export interface StaffRecord {
   role: StaffRole;
   pin: string;
   active: boolean;
+  /** The owner's mark: may sign in to their own Windows account on the club's PCs (an owner always may). */
+  pcService?: boolean;
+}
+
+/** `pcService` as the server answers it: an owner always, a cashier with the owner's mark. */
+export function mayServicePcs(s: StaffRecord): boolean {
+  return s.role === 'owner' || s.pcService === true;
 }
 
 /** Payment methods of a counter top-up; `other` is any top-up the console did not book under one of them. */
