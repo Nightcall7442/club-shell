@@ -1093,4 +1093,16 @@ public sealed class UpdateDownloaderOriginTests
     [InlineData("not a url", false)]
     public void Only_the_servers_origin_gets_the_token(string url, bool expected) =>
         ClubShell.Core.Updates.UpdateDownloader.IsServerOrigin(url, "https://club.example.uz/api/v1").Should().Be(expected);
+
+    /// <summary>A release the club server keeps a copy of names its packages by path: they are on the club server.</summary>
+    [Theory]
+    [InlineData("/stable/1.0.23/ClubShell-1.0.23.msi", "https://club.example.uz/stable/1.0.23/ClubShell-1.0.23.msi")]
+    [InlineData("https://github.com/acme/club-shell/releases/download/v1.0.23/a.msi", "https://github.com/acme/club-shell/releases/download/v1.0.23/a.msi")]
+    [InlineData("//evil.example/a.msi", "//evil.example/a.msi")]
+    public void A_package_path_is_on_the_club_server(string url, string expected)
+    {
+        var resolved = ClubShell.Core.Updates.UpdateDownloader.ResolveUrl(url, "https://club.example.uz/api/v1");
+        resolved.Should().Be(expected);
+        ClubShell.Core.Updates.UpdateDownloader.IsServerOrigin(resolved, "https://club.example.uz/api/v1").Should().Be(url.StartsWith("/s", StringComparison.Ordinal));
+    }
 }

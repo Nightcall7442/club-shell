@@ -72,6 +72,8 @@ const realAdminApi = {
     // Cs2 (with player-settings paths) and Rust (without): what the catalog test edits.
     Catalog__GamesSeedPath: fileURLToPath(new URL('./admin/games.e2e.json', import.meta.url)),
     Cors__AllowedOrigins__0: ADMIN_URL,
+    // No look at GitHub from a test run («Проверить обновления» is checked by the server's own tests).
+    Updates__GitHub__Repository: '',
     Auth__SigningKeyPath: join(tmpdir(), `clubshell-admin-e2e-${process.pid}`, 'jwt-signing-key.pem'),
     Auth__PepperPath: join(tmpdir(), `clubshell-admin-e2e-${process.pid}`, 'pin-pepper.key'),
   },

@@ -34,9 +34,35 @@ public static class UpdateAdminEndpoints
         api.MapGet("", StatusAsync);
         api.MapPatch("", SetAutoAsync);
         api.MapPost("/apply", ApplyAsync);
+        api.MapPost("/check", Check);
     }
 
-    private static async Task<IResult> StatusAsync(HttpContext context, NpgsqlDataSource db, Releases releases, PcRepository pcs, AgentSocketHub hub)
+    /// <summary>
+    /// «Проверить обновления» (UPDATES.md §8.3): the server takes the newest GitHub release itself, in the background
+    /// (a package is tens of megabytes); <c>GET /admin/updates</c> shows how it went (<c>check</c>). <c>501</c> without
+    /// <c>Updates:GitHub:Repository</c>; <c>202</c> also while a check already runs.
+    /// </summary>
+    private static IResult Check(HttpContext context, GitHubImport import)
+    {
+        if (!import.Enabled)
+        {
+            throw ApiException.NotImplemented("updateCheck");
+        }
+
+        var started = import.Start("stable");
+        return AdminJson.Ok(new { started, check = CheckView(import.State) }, StatusCodes.Status202Accepted);
+    }
+
+    private static object CheckView(ImportState s) => new
+    {
+        state = s.State,
+        version = s.Version,
+        error = s.Error,
+        at = s.At == DateTimeOffset.MinValue ? (DateTimeOffset?)null : s.At,
+    };
+
+    private static async Task<IResult> StatusAsync(
+        HttpContext context, NpgsqlDataSource db, Releases releases, PcRepository pcs, AgentSocketHub hub, GitHubImport import)
     {
         var staff = context.Features.GetRequiredFeature<StaffContext>();
         await using var c = await db.OpenConnectionAsync();
@@ -71,7 +97,8 @@ public static class UpdateAdminEndpoints
             agentVersion = p.AgentVersion,
             shellVersion = p.ShellVersion,
         });
-        return AdminJson.Ok(new { auto, releases = published, pcs = items });
+        // canCheck/check (UPDATES.md §8.3): «Проверить обновления» takes the newest GitHub release to this server.
+        return AdminJson.Ok(new { auto, releases = published, pcs = items, canCheck = import.Enabled, check = CheckView(import.State) });
     }
 
     private static async Task<IResult> SetAutoAsync(

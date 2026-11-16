@@ -1,10 +1,18 @@
 /**
- * Обновления ClubShell (owner only): the release published to the club server, which PCs run an older Agent or Shell,
- * «Обновить» for every PC or one, and «Обновлять автоматически» (the PCs install a new release at night by themselves).
- * A free PC installs at once, a busy one when its session ends; an offline PC gets nothing.
+ * Обновления ClubShell (owner only): the release on the club server, which PCs run an older Agent or Shell, «Обновить»
+ * for every PC or one, and «Обновлять автоматически» (the PCs install a new release at night by themselves). A free PC
+ * installs at once, a busy one when its session ends; an offline PC gets nothing. «Проверить обновления» has the server
+ * take the newest release from GitHub itself (UPDATES.md §8.3); with automatic updates it also looks every few hours.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { clubApi, type UpdatePc, type UpdateRelease, type UpdateResult, type UpdatesState } from '@/api';
+import {
+  clubApi,
+  type UpdateCheck,
+  type UpdatePc,
+  type UpdateRelease,
+  type UpdateResult,
+  type UpdatesState,
+} from '@/api';
 import { describe } from '@/errors';
 import { dateLocale, t } from '@/i18n';
 import { Badge, Button, Note, PageHeader, Section, Table, Toggle } from '@/ui';
@@ -53,6 +61,26 @@ function summary(results: { result: UpdateResult }[], version: string): NoteStat
   return { text: `ClubShell ${version}: ${parts.join(', ')}`, tone: offline > 0 && sent + later === 0 ? 'warn' : 'ok' };
 }
 
+/** The last check in words, or null when there was none. */
+function checkNote(check: UpdateCheck | undefined): NoteState {
+  if (!check) return null;
+  switch (check.state) {
+    case 'running':
+      return { text: t('Сервер скачивает новую версию с GitHub…'), tone: 'ok' };
+    case 'imported':
+      return {
+        text: t('Загружена версия {version}: теперь её можно поставить на ПК', { version: check.version ?? '' }),
+        tone: 'ok',
+      };
+    case 'upToDate':
+      return { text: t('Новой версии нет: на сервере самая свежая'), tone: 'ok' };
+    case 'failed':
+      return { text: t('Не удалось загрузить обновление: {error}', { error: check.error ?? '' }), tone: 'err' };
+    default:
+      return null;
+  }
+}
+
 export default function UpdatesPage(): JSX.Element {
   const [state, setState] = useState<UpdatesState | null>(null);
   const [note, setNote] = useState<NoteState>(null);
@@ -69,6 +97,24 @@ export default function UpdatesPage(): JSX.Element {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // While the server downloads a release, look again every few seconds.
+  const running = state?.check?.state === 'running';
+  useEffect(() => {
+    if (!running) return undefined;
+    const id = window.setInterval(() => void load(), 3000);
+    return () => window.clearInterval(id);
+  }, [running, load]);
+
+  const check = async (): Promise<void> => {
+    setNote(null);
+    try {
+      await clubApi.checkUpdates();
+      await load();
+    } catch (e) {
+      setNote({ text: describe(e), tone: 'err' });
+    }
+  };
 
   const release = state?.releases.find((r) => r.channel === 'stable') ?? state?.releases[0] ?? null;
   const pcs = state?.pcs ?? [];
@@ -113,10 +159,24 @@ export default function UpdatesPage(): JSX.Element {
       <PageHeader title={t('Обновления ClubShell')} caption={t('Настройка клуба')} />
       <Note note={note} role="status" />
 
-      <Section title={t('Версия на сервере')}>
+      <Section
+        title={t('Версия на сервере')}
+        actions={
+          state?.canCheck ? (
+            <Button size="sm" variant="ghost" disabled={busy || running} onClick={() => void check()}>
+              {t('Проверить обновления')}
+            </Button>
+          ) : undefined
+        }
+      >
+        <Note note={checkNote(state?.check)} role="status" />
         {state && !release ? (
           <p className="text-[13px] text-muted">
-            {t('На сервер ещё не опубликован ни один выпуск ClubShell. Его публикует разработчик (publish.ps1).')}
+            {state.canCheck
+              ? t(
+                  'На сервере ещё нет ни одного выпуска ClubShell. Нажмите «Проверить обновления» — сервер скачает свежий.',
+                )
+              : t('На сервер ещё не опубликован ни один выпуск ClubShell. Его публикует разработчик (publish.ps1).')}
           </p>
         ) : release ? (
           <div className="flex flex-wrap items-center justify-between gap-4">

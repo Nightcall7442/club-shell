@@ -346,6 +346,28 @@ with `-BaseUrl https://<server>` (CI: `UPDATE_BASE_URL`), so the manifest URLs p
 download from it with their token. `GET /api/v1/admin/updates` shows the published releases and each PC's Agent and
 Shell versions; a PC reports them in every heartbeat.
 
+### 8.3 Releases taken from GitHub — «Проверить обновления»
+
+No publisher is needed: the club server takes the newest GitHub release itself (`Updates/GitHubImport.cs`).
+
+- **When.** The owner presses «Проверить обновления» in «Обновления ClubShell» (`POST /api/v1/admin/updates/check`,
+  `202`, runs in the background; `GET /api/v1/admin/updates` → `check {state: running|imported|upToDate|failed,
+  version, error, at}`), and every `Updates:GitHub:CheckEveryHours` (default 6, `0` — button only) while a club of the
+  server updates automatically.
+- **What.** The newest release of `Updates:GitHub:Repository` (default `Nightcall7442/club-shell`; empty — off,
+  `canCheck: false`, `501`) with a `manifest.json` asset, not a draft, a pre-release only for `beta`, newer than the
+  channel's release. Each component's package (the asset named as the last segment of its `url`) is downloaded into
+  `Updates:StoragePath` and must match the manifest's SHA-256 and size; an unsigned component is refused (the PCs would
+  refuse it too). A private repository needs `Updates:GitHub:Token`.
+- **How the PCs get it.** The stored manifest names each package by path — `/<channel>/<version>/<file>` — and an Agent
+  resolves a path against its own `server.baseUrl` (`UpdateDownloader.ResolveUrl`): the PCs download from the club
+  server with their token, never from GitHub, whatever name they reach the server by. Then «Обновить все ПК» or the
+  nightly automatic update, as in §8.1.
+
+CI builds such a release without `UPDATE_BASE_URL`: the packages are the release's own assets (`…/download/v<version>/
+<file>`, the shell's ZIP included), and `UPDATE_MANIFEST_KEY_PEM` signs them (§11). Pushing to an update server
+(`CLUBSHELL_PUBLISH_TOKEN`, S3) stays optional.
+
 ---
 
 ## 9. Offline behaviour
@@ -411,6 +433,12 @@ The update signing key is an RSA keypair (2048-bit minimum; 4096 recommended, it
 The **private** key never leaves the release machine / CI secret store; the **public** key is deployed
 with the Agent MSI as `C:\Program Files\ClubShell\Agent\update-public.pem` (`agent.json →
 updates.publicKeyPath`).
+
+**Key replaced in 1.0.23.** The key whose public half shipped until 1.0.22 had no private half in CI
+(`UPDATE_MANIFEST_KEY_PEM` unset), so every release up to 1.0.22 came out unsigned and no PC could take it as an
+update. 1.0.23 ships a new public key (`config/update-public.pem`); its private half is the CI secret
+`UPDATE_MANIFEST_KEY_PEM`. A PC on 1.0.22 or older gets 1.0.23 by hand once (the MSI from the GitHub release); from
+then on, «Проверить обновления» and «Обновить все ПК» (§8.3) carry every release.
 
 Generate (OpenSSL 3.x):
 

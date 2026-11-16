@@ -651,6 +651,18 @@ export interface UpdatesState {
   auto: boolean;
   releases: UpdateRelease[];
   pcs: UpdatePc[];
+  /** «Проверить обновления» is on: the server takes new releases from GitHub itself (absent from an older server). */
+  canCheck?: boolean;
+  /** How the last check went. */
+  check?: UpdateCheck;
+}
+
+/** The server's last look for a new ClubShell release on GitHub. */
+export interface UpdateCheck {
+  state: 'idle' | 'running' | 'imported' | 'upToDate' | 'failed';
+  version: string | null;
+  error: string | null;
+  at: string | null;
 }
 
 /** What «Обновить ClubShell» did on one PC. */
@@ -1302,6 +1314,8 @@ export const clubApi = {
   /** ClubShell updates (owner only, beyond the contract). */
   updates: (): Promise<UpdatesState> => call('/admin/updates'),
   setAutoUpdate: (auto: boolean): Promise<unknown> => patch('/admin/updates', { auto }),
+  /** The server looks for a new release on GitHub and takes it, in the background (`check` of {@link UpdatesState}). */
+  checkUpdates: (): Promise<{ started: boolean; check: UpdateCheck }> => post('/admin/updates/check', {}),
   applyUpdate: (input: {
     channel?: 'stable' | 'beta';
     pcIds?: string[];

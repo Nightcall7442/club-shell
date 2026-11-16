@@ -215,6 +215,21 @@ public sealed class UpdateDownloader
         && string.Equals(target.IdnHost, server.IdnHost, StringComparison.OrdinalIgnoreCase)
         && target.Port == server.Port;
 
+    /// <summary>
+    /// The package's absolute URL: a path (<c>/stable/1.2.0/ClubShell-1.2.0.msi</c>, a release the club server keeps a
+    /// copy of, e.g. imported from GitHub) is on the club server, whatever name this PC reaches it by.
+    /// </summary>
+    public static string ResolveUrl(string url, string? serverBaseUrl)
+    {
+        if (url.StartsWith('/') && !url.StartsWith("//", StringComparison.Ordinal)
+            && Uri.TryCreate(serverBaseUrl, UriKind.Absolute, out var server))
+        {
+            return new Uri(server, url).ToString();
+        }
+
+        return url;
+    }
+
     private static void TryDelete(string path)
     {
         try
@@ -256,11 +271,13 @@ public sealed class UpdateDownloader
             return;
         }
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, manifest.Url);
+        var serverBase = _settings.CurrentValue.Server?.BaseUrl;
+        var url = ResolveUrl(manifest.Url, serverBase);
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
 
         // The Agent's token goes to the club server only: a package hosted elsewhere (a GitHub release, a CDN) is fetched
         // without it — the package is checked by its SHA-256 and RSA-PSS signature, not by who served it.
-        if (_tokens.Agent is { } tokens && IsServerOrigin(manifest.Url, _settings.CurrentValue.Server?.BaseUrl))
+        if (_tokens.Agent is { } tokens && IsServerOrigin(url, serverBase))
         {
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
         }
