@@ -13,7 +13,8 @@ namespace ClubShell.Agent.Session;
 /// the token expired on its own, or the server revoked the sign-in (<c>userRevoked</c>). The player is signed out and the
 /// Shell told why (<c>auth.expired {reason}</c>), but a session of theirs that is still open is not dropped: it is locked
 /// (<see cref="SessionLockOrigin.SignIn"/>) and goes on as soon as the same player signs in again. Without a session the
-/// player is simply signed out, as before.
+/// player is signed out, the saves laid out for them are collected (games closed first, <c>profile.detach</c>) and then
+/// the kiosk profile is reset (SHELL_CHANGES 91): a player who signed in on another PC leaves nothing of theirs here.
 /// </summary>
 public sealed class SignInGuard : IDisposable
 {
@@ -26,6 +27,7 @@ public sealed class SignInGuard : IDisposable
     private readonly IClock _clock;
     private readonly ILogger<SignInGuard> _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly IServiceProvider? _services;
     private bool _disposed;
 
     /// <summary>Creates the guard and subscribes to <see cref="IServerClient.UserTokenRejected"/>.</summary>
@@ -37,7 +39,8 @@ public sealed class SignInGuard : IDisposable
         IIpcEventPublisher publisher,
         IServerClient server,
         IClock clock,
-        ILogger<SignInGuard> logger)
+        ILogger<SignInGuard> logger,
+        IServiceProvider? services = null)
     {
         ArgumentNullException.ThrowIfNull(users);
         ArgumentNullException.ThrowIfNull(sessions);
@@ -55,6 +58,7 @@ public sealed class SignInGuard : IDisposable
         _server = server;
         _clock = clock;
         _logger = logger;
+        _services = services;
         _server.UserTokenRejected += OnUserTokenRejected;
     }
 
@@ -212,10 +216,42 @@ public sealed class SignInGuard : IDisposable
 
             _logger.LogInformation("User {UserId} signed out ({Reason}); session kept and locked: {Locked}", user.Id, reason, locked);
             await _publisher.PublishAsync(IpcMessages.Events.AuthExpired, new AuthExpired(reason), cancellationToken).ConfigureAwait(false);
+            if (!OwnSessionOpen(user))
+            {
+                ReleaseAndReset(user, reason);
+            }
         }
         finally
         {
             _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// No session of the player here (SHELL_CHANGES 91): their saves are collected — games closed first, as a sign-out
+    /// without a session does — and the kiosk profile is reset once the detach is done (the reset waits for it).
+    /// </summary>
+    private void ReleaseAndReset(User user, AuthExpiredReason reason)
+    {
+        // Resolved here, not injected: the saves and the reset reach the Shell's pipe, which reaches this guard.
+        if (_services?.GetService(typeof(Saves.IPlayerSaves)) is Saves.IPlayerSaves saves)
+        {
+            saves.BeginRelease(SessionEndReason.User, closeGames: true);
+        }
+
+        if (_services?.GetService(typeof(Users.IProfileResetTrigger)) is Users.IProfileResetTrigger reset)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await reset.RequestResetAsync($"sign-in of {user.Id} ended ({reason})", CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    _logger.LogWarning(ex, "Profile reset after the sign-in of {UserId} ended failed", user.Id);
+                }
+            });
         }
     }
 

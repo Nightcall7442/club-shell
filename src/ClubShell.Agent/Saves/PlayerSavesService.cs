@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ClubShell.Agent.Ipc;
 using ClubShell.Agent.Policy;
 using ClubShell.Agent.Session;
@@ -50,6 +51,14 @@ public interface IPlayerSaves
     /// has not started yet because the games are still closing. <see langword="false"/> when the wait ran out.
     /// </summary>
     Task<bool> WaitReleasedAsync(TimeSpan max, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// At Agent start, after the sign-in restore (SHELL_CHANGES 91): the attachment kept on disk is taken back for
+    /// <paramref name="restored"/> — the player whose session goes on — without a new <c>profile.attach</c> (the helper
+    /// still holds it, and a new attach would lay the server's copy over the progress made before the restart). One of
+    /// another player, or with nobody restored, is collected now (<c>profile.detach</c>).
+    /// </summary>
+    void RestoreAfterStart(User? restored);
 }
 
 /// <summary>
@@ -63,8 +72,9 @@ public interface IPlayerSaves
 /// <item><c>profile.detach</c> at the end of the session, after the games have closed and before the kiosk is signed out
 /// and its profile reset (<see cref="WaitReleasedAsync"/>), retried within <see cref="PlayerSavesSettings.DetachTimeoutSec"/>
 /// while the helper may still succeed;</item>
-/// <item>never after the profile was reset: what was laid out is held only in memory, so an Agent restart forgets it and
-/// a missed detach is not caught up — the helper's copy on the server stays the previous one.</item>
+/// <item>what was laid out is also kept on disk (<c>cache\saves-attachment.json</c>: the player, the kiosk SID, when):
+/// an Agent restarted mid-session takes it back with the player's sign-in (<see cref="RestoreAfterStart"/>, no second
+/// attach) and detaches at the session end as usual (SHELL_CHANGES 91).</item>
 /// </list>
 /// </summary>
 public sealed class PlayerSavesService : IPlayerSaves, IHostedService
@@ -79,6 +89,9 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
     private readonly Func<bool> _helperInstalled;
     private readonly object _gate = new();
     private Attachment? _current;
+
+    /// <summary>File of the attachment the helper holds, under the persistent cache.</summary>
+    public const string StateFileName = "saves-attachment.json";
     private PlayerSavesState _state = PlayerSavesState.None;
     private Task _publishing = Task.CompletedTask;
 
@@ -235,6 +248,8 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
             SetStateLocked(PlayerSavesState.Loading);
         }
 
+        Persist(attachment);
+
         // Off the lock and off the IPC thread; a launch waits on attachment.AttachDone, set before this runs.
         _ = Task.Run(() => AttachAsync(attachment, previous));
     }
@@ -272,6 +287,48 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
             {
                 StartReleaseLocked(current, reason, closeGames);
             }
+        }
+    }
+
+    /// <inheritdoc />
+    public void RestoreAfterStart(User? restored)
+    {
+        Persisted? saved = LoadPersisted();
+        if (saved is null)
+        {
+            return;
+        }
+
+        var attachment = new Attachment(saved.PlayerId);
+        attachment.AttachDone.TrySetResult();
+        bool same = restored is not null && restored.Role != UserRole.Guest
+            && string.Equals(HelperProtocol.PlayerId(restored.Id), saved.PlayerId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(saved.Sid, _kiosk.Sid, StringComparison.OrdinalIgnoreCase);
+        lock (_gate)
+        {
+            if (_current is not null)
+            {
+                return;
+            }
+
+            _current = attachment;
+            if (same)
+            {
+                SetStateLocked(PlayerSavesState.Ready);
+            }
+            else
+            {
+                StartReleaseLocked(attachment, SessionEndReason.AgentRestart, closeGames: false);
+            }
+        }
+
+        if (same)
+        {
+            _logger.LogWarning("Saves: attachment of player {PlayerId} (attached {At:O}) restored from disk after an Agent restart; no new attach", saved.PlayerId, saved.AttachedAt);
+        }
+        else
+        {
+            _logger.LogWarning("Saves: attachment of player {PlayerId} found on disk without that player's session; detaching it now", saved.PlayerId);
         }
     }
 
@@ -417,6 +474,8 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
                     {
                         SetStateLocked(PlayerSavesState.None);
                     }
+
+                    Forget(attachment);
                 }
             }
 
@@ -616,6 +675,63 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
     }
 
     /// <summary>One player's saves on this PC: attach sent, detach not finished.</summary>
+    private string StatePath
+    {
+        get
+        {
+            AgentSettings settings = _settings.CurrentValue;
+            return Path.Combine(settings.ResolvePersistentPath(settings.Paths.Cache), StateFileName);
+        }
+    }
+
+    private void Persist(Attachment attachment)
+    {
+        try
+        {
+            string path = StatePath;
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            string temp = path + ".tmp";
+            File.WriteAllText(temp, JsonSerializer.Serialize(new Persisted(attachment.PlayerId, _kiosk.Sid, _clock.UtcNow)));
+            File.Move(temp, path, overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Saves: attachment of player {PlayerId} not kept on disk; an Agent restart would forget it", attachment.PlayerId);
+        }
+    }
+
+    private void Forget(Attachment attachment)
+    {
+        try
+        {
+            string path = StatePath;
+            if (LoadPersisted() is { } saved && string.Equals(saved.PlayerId, attachment.PlayerId, StringComparison.OrdinalIgnoreCase))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Saves: attachment file not deleted");
+        }
+    }
+
+    private Persisted? LoadPersisted()
+    {
+        try
+        {
+            string path = StatePath;
+            return File.Exists(path) ? JsonSerializer.Deserialize<Persisted>(File.ReadAllText(path)) is { PlayerId.Length: > 0 } p ? p : null : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            _logger.LogWarning(ex, "Saves: attachment file unreadable; ignored");
+            return null;
+        }
+    }
+
+    private sealed record Persisted(string PlayerId, string Sid, DateTimeOffset AttachedAt);
+
     private sealed class Attachment(string playerId)
     {
         public string PlayerId { get; } = playerId;

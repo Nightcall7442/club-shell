@@ -94,6 +94,7 @@ public sealed class AgentWorker : BackgroundService
     private readonly ILogger<AgentWorker> _logger;
     private readonly SignInGuard? _signIn;
     private readonly SignedInUserStore? _signedIn;
+    private readonly Saves.IPlayerSaves? _saves;
 
     private volatile bool _ready;
     private Guid _persistedPcId;
@@ -121,7 +122,8 @@ public sealed class AgentWorker : BackgroundService
         SettingsLoader settingsLoader,
         ILogger<AgentWorker> logger,
         SignInGuard? signIn = null,
-        SignedInUserStore? signedIn = null)
+        SignedInUserStore? signedIn = null,
+        Saves.IPlayerSaves? saves = null)
     {
         ArgumentNullException.ThrowIfNull(hwid);
         ArgumentNullException.ThrowIfNull(provisioner);
@@ -166,6 +168,7 @@ public sealed class AgentWorker : BackgroundService
         _logger = logger;
         _signIn = signIn;
         _signedIn = signedIn;
+        _saves = saves;
     }
 
     /// <summary><see langword="true"/> once the startup sequence completed.</summary>
@@ -287,6 +290,17 @@ public sealed class AgentWorker : BackgroundService
             {
                 _logger.LogWarning(ex, "Saved sign-in could not be restored");
             }
+        }
+
+        // 6a'. That player's saves, still with the helper (SHELL_CHANGES 91): taken back without a new attach, or — nobody's
+        //      session goes on — collected now.
+        try
+        {
+            _saves?.RestoreAfterStart(_users.User);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Saves attachment could not be restored");
         }
 
         // 6b. Game catalogue (§7.3): the cached copy, then the server's. Nothing else loads it at start: without this step

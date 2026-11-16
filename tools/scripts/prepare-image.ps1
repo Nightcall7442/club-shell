@@ -115,7 +115,7 @@ $files = @(
     'cache\profile-reset-reboot.txt', 'cache\kiosk-logon-reboot.txt',
     # The player signed in on the master and the source of its lock (SHELL_CHANGES 95, agent 1.0.21): no seat starts with
     # someone else's sign-in. The desk's update requests and an open maintenance window (a staff sign-in) are this PC's too.
-    'cache\signed-in-user.bin', 'cache\session-lock.json', 'cache\update-requested-agent', 'cache\update-requested-shell',
+    'cache\signed-in-user.bin', 'cache\session-lock.json', 'cache\saves-attachment.json', 'cache\update-requested-agent', 'cache\update-requested-shell',
     'secure\maintenance.json')
 foreach ($root in $roots) {
     foreach ($rel in $files + 'cache\power-acks.json') {
