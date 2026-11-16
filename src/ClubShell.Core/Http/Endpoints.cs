@@ -98,6 +98,9 @@ public static class Endpoints
     /// <summary><c>POST /agents/{pcId}/commands/{commandId}/ack</c>.</summary>
     public static string AgentCommandAck(Guid pcId, Guid commandId) => $"agents/{Id(pcId)}/commands/{Id(commandId)}/ack";
 
+    /// <summary><c>POST /agents/{pcId}/staff/verify</c>.</summary>
+    public static string AgentStaffVerify(Guid pcId) => $"agents/{Id(pcId)}/staff/verify";
+
     /// <summary><c>GET /pcs/{pcId}</c>.</summary>
     public static string Pc(Guid pcId) => $"pcs/{Id(pcId)}";
 

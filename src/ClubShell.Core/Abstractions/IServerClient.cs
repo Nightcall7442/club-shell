@@ -162,6 +162,13 @@ public interface IAgentApi
     /// <summary><c>POST /agents/{pcId}/commands/{commandId}/ack</c>.</summary>
     Task AckCommandAsync(Guid pcId, Guid commandId, CommandAck ack, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// <c>POST /agents/{pcId}/staff/verify</c> (beyond the contract): a staff member's PIN typed on this PC, before they sign in
+    /// to their own Windows account to service it. <c>401 invalidPin</c>, <c>403 pcService</c> and <c>429 rateLimited</c> are
+    /// thrown as <see cref="ServerApiException"/>; a wrong PIN is never retried after a token refresh.
+    /// </summary>
+    Task<StaffVerifyResponse> VerifyStaffPinAsync(Guid pcId, StaffVerifyRequest request, CancellationToken cancellationToken);
+
     /// <summary><c>GET /pcs?zone=</c>.</summary>
     Task<PcsResponse> GetPcsAsync(string? zone, CancellationToken cancellationToken);
 

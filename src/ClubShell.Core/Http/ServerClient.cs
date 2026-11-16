@@ -214,6 +214,13 @@ public sealed class ServerClient : IServerClient, IDisposable
     }
 
     /// <inheritdoc />
+    public Task<StaffVerifyResponse> VerifyStaffPinAsync(Guid pcId, StaffVerifyRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return SendJsonAsync<StaffVerifyRequest, StaffVerifyResponse>(HttpMethod.Post, Endpoints.AgentStaffVerify(pcId), request, AuthMode.Agent, null, cancellationToken);
+    }
+
+    /// <inheritdoc />
     public Task<PcsResponse> GetPcsAsync(string? zone, CancellationToken cancellationToken) =>
         GetAsync<PcsResponse>(Endpoints.Pcs + new QueryBuilder().Add("zone", zone), AuthMode.Agent, cancellationToken);
 
