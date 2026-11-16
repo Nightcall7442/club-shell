@@ -667,6 +667,8 @@ export const IpcNames = {
     UnlockAdmin: 'sys.unlockAdmin',
     /** `SysAdminExitRequest` → `SysAdminExitResponse`. */
     AdminExit: 'sys.adminExit',
+    /** `SysStaffSignInRequest` → `SysStaffSignInResponse`: a staff member signs in to their own Windows account. */
+    StaffSignIn: 'sys.staffSignIn',
     /** `SysResetProfileRequest` → `ResetProfileResult` (SHELL_CHANGES 76). */
     ResetProfile: 'sys.resetProfile',
     /** `SysLogClientErrorRequest` → `OkResponse`. */
@@ -1145,6 +1147,35 @@ export interface SysSetLocaleResponse {
   locale: Locale;
 }
 
+/**
+ * Request of `sys.staffSignIn` from the lock screen's «Staff» button: a staff member the owner allowed to service PCs
+ * (an owner always) signs in to their own Windows account on this PC, to install games, launchers and programs. The
+ * Agent checks `pin` on the server (`POST /agents/{pcId}/staff/verify`), opens a maintenance window, pauses the kiosk's
+ * auto-logon and signs the kiosk out, so Windows shows its sign-in screen; the kiosk comes back when the staff member
+ * signs out of Windows, when the window ends, or after a reboot. Only without a player: no one signed in and no session
+ * open (`conflict` with `reason: sessionActive`). Refusals: `unauthorized` with `reason: invalidPin` (wrong PIN),
+ * `forbidden` with `reason: pcService` (the member may not service PCs), `rateLimited` (too many wrong PINs,
+ * `retryAfterSec`), `agentOffline` (the server cannot check the PIN), `conflict` with `reason: kioskOff` (the kiosk
+ * account does not log on by itself on this PC, so there is nothing to hand back), `validation` with `field: pin` (not
+ * 4–8 digits) or `field: minutes`.
+ */
+export interface SysStaffSignInRequest {
+  /** The staff member's PIN from the admin console, 4–8 digits. */
+  pin: string;
+  /** Length of the maintenance window; `null` = 4 hours, at most 8. */
+  minutes?: number | null;
+}
+
+/** Response of `sys.staffSignIn`, sent just before the kiosk is signed out. */
+export interface SysStaffSignInResponse {
+  /** Name of the staff member, for the Shell's farewell and the log. */
+  staffName: string;
+  /** End of the maintenance window: the kiosk comes back then if nobody signed in to Windows. */
+  until: string;
+  /** How long the Windows sign-in screen waits for the staff member before the PC restarts into the kiosk. */
+  signInWithinSec: number;
+}
+
 /** Request of `sys.unlockAdmin` (rate limited 3 attempts/min). */
 export interface SysUnlockAdminRequest {
   /** Admin PIN. */
@@ -1412,6 +1443,8 @@ export const AgentCommand = {
   SysUnlockAdmin: 'sys.unlockAdmin',
   /** `sys.adminExit` */
   SysAdminExit: 'sys.adminExit',
+  /** `sys.staffSignIn` */
+  SysStaffSignIn: 'sys.staffSignIn',
   /** `sys.logClientError` */
   SysLogClientError: 'sys.logClientError',
   /** `sys.ackAdminMessage` */
@@ -2693,6 +2726,7 @@ export interface IpcRequestMap {
   [IpcNames.Sys.SetLocale]: { request: SysSetLocaleRequest; response: SysSetLocaleResponse };
   [IpcNames.Sys.UnlockAdmin]: { request: SysUnlockAdminRequest; response: SysUnlockAdminResponse };
   [IpcNames.Sys.AdminExit]: { request: SysAdminExitRequest; response: SysAdminExitResponse };
+  [IpcNames.Sys.StaffSignIn]: { request: SysStaffSignInRequest; response: SysStaffSignInResponse };
   [IpcNames.Sys.LogClientError]: { request: SysLogClientErrorRequest; response: OkResponse };
   [IpcNames.Sys.AckAdminMessage]: { request: SysAckAdminMessageRequest; response: OkResponse };
   [IpcNames.Policy.Get]: { request: null; response: Policy };

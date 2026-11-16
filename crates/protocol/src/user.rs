@@ -457,6 +457,32 @@ pub struct Seat {
     pub status: PcStatus,
 }
 
+/// Body of `POST /agents/{pcId}/staff/verify` (beyond the contract): the Agent checks a staff
+/// member's PIN before it lets them sign in to their own Windows account on the PC
+/// (`sys.staffSignIn`). `200` with `StaffVerifyResponse`; `401 unauthorized` with `reason:
+/// invalidPin`; `403 forbidden` with `reason: pcService` (an active member of the PC's club the
+/// owner did not allow to service PCs); `429 rateLimited` with `retryAfterSec` — wrong PINs from
+/// PCs count with the cash desk's PIN limits, in the club's budget for untrusted sources, per PC.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StaffVerifyRequest {
+    /// The PIN, 4–8 digits.
+    pub pin: String,
+}
+
+/// Response of `POST /agents/{pcId}/staff/verify`: who signed in; the server has written it to the
+/// staff journal.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StaffVerifyResponse {
+    /// Staff member.
+    pub staff_id: Uuid,
+    /// Name for the log and the Shell.
+    pub name: String,
+    /// `owner` or `cashier`.
+    pub role: String,
+}
+
 wire_enum! {
     /// Tournament lifecycle.
     TournamentState {

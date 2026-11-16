@@ -676,6 +676,9 @@ pub mod names {
         pub const UNLOCK_ADMIN: &str = "sys.unlockAdmin";
         /// `SysAdminExitRequest` → `SysAdminExitResponse`.
         pub const ADMIN_EXIT: &str = "sys.adminExit";
+        /// `SysStaffSignInRequest` → `SysStaffSignInResponse`: a staff member signs in to their own
+        /// Windows account.
+        pub const STAFF_SIGN_IN: &str = "sys.staffSignIn";
         /// `SysResetProfileRequest` → `ResetProfileResult` (SHELL_CHANGES 76).
         pub const RESET_PROFILE: &str = "sys.resetProfile";
         /// `SysLogClientErrorRequest` → `OkResponse`.
@@ -1269,6 +1272,42 @@ pub struct SysSetLocaleRequest {
 pub struct SysSetLocaleResponse {
     /// Applied locale.
     pub locale: Locale,
+}
+
+/// Request of `sys.staffSignIn` from the lock screen's «Staff» button: a staff member the owner
+/// allowed to service PCs (an owner always) signs in to their own Windows account on this PC, to
+/// install games, launchers and programs. The Agent checks `pin` on the server (`POST
+/// /agents/{pcId}/staff/verify`), opens a maintenance window, pauses the kiosk's auto-logon and
+/// signs the kiosk out, so Windows shows its sign-in screen; the kiosk comes back when the staff
+/// member signs out of Windows, when the window ends, or after a reboot. Only without a player: no
+/// one signed in and no session open (`conflict` with `reason: sessionActive`). Refusals:
+/// `unauthorized` with `reason: invalidPin` (wrong PIN), `forbidden` with `reason: pcService` (the
+/// member may not service PCs), `rateLimited` (too many wrong PINs, `retryAfterSec`),
+/// `agentOffline` (the server cannot check the PIN), `conflict` with `reason: kioskOff` (the kiosk
+/// account does not log on by itself on this PC, so there is nothing to hand back), `validation`
+/// with `field: pin` (not 4–8 digits) or `field: minutes`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SysStaffSignInRequest {
+    /// The staff member's PIN from the admin console, 4–8 digits.
+    pub pin: String,
+    /// Length of the maintenance window; `null` = 4 hours, at most 8.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minutes: Option<i32>,
+}
+
+/// Response of `sys.staffSignIn`, sent just before the kiosk is signed out.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SysStaffSignInResponse {
+    /// Name of the staff member, for the Shell's farewell and the log.
+    pub staff_name: String,
+    /// End of the maintenance window: the kiosk comes back then if nobody signed in to Windows.
+    #[serde(with = "crate::wire::ts")]
+    pub until: DateTime<Utc>,
+    /// How long the Windows sign-in screen waits for the staff member before the PC restarts into
+    /// the kiosk.
+    pub sign_in_within_sec: i32,
 }
 
 /// Request of `sys.unlockAdmin` (rate limited 3 attempts/min).
@@ -2634,6 +2673,7 @@ agent_commands! {
     SysSetLocale => names::sys::SET_LOCALE, Hello;
     SysUnlockAdmin => names::sys::UNLOCK_ADMIN, Hello;
     SysAdminExit => names::sys::ADMIN_EXIT, Hello;
+    SysStaffSignIn => names::sys::STAFF_SIGN_IN, Hello;
     SysResetProfile => names::sys::RESET_PROFILE, Hello;
     SysLogClientError => names::sys::LOG_CLIENT_ERROR, Hello;
     SysAckAdminMessage => names::sys::ACK_ADMIN_MESSAGE, Hello;
@@ -3047,7 +3087,7 @@ mod tests {
 
     #[test]
     fn agent_command_table_matches_ipc_protocol() {
-        assert_eq!(AgentCommand::ALL.len(), 68);
+        assert_eq!(AgentCommand::ALL.len(), 69);
         let expected: &[&str] = &[
             "auth.hello",
             "auth.login",
@@ -3110,6 +3150,7 @@ mod tests {
             "sys.setLocale",
             "sys.unlockAdmin",
             "sys.adminExit",
+            "sys.staffSignIn",
             "sys.resetProfile",
             "sys.logClientError",
             "sys.ackAdminMessage",
