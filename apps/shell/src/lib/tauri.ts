@@ -69,6 +69,7 @@ import type {
   SysCallAdminResponse,
   SysLogClientErrorRequest,
   SysSetLocaleResponse,
+  SysStaffSignInResponse,
   SysUnlockAdminResponse,
   Theme,
   TopupIntent,
@@ -607,6 +608,9 @@ export const api = {
     setVolume: (level: number, muted?: boolean): Promise<VolumeState> => invoke('sys_set_volume', { level, muted }),
     setLocale: (locale: Locale): Promise<SysSetLocaleResponse> => invoke('sys_set_locale', { locale }),
     unlockAdmin: (pin: string): Promise<SysUnlockAdminResponse> => invoke('sys_unlock_admin', { pin }),
+    /** A staff member's PIN from the admin console: the Agent signs the kiosk out so they sign in to their own Windows account. */
+    staffSignIn: (pin: string, minutes?: number): Promise<SysStaffSignInResponse> =>
+      invoke('sys_staff_sign_in', { pin, minutes }),
     /** SHELL_CHANGES 76: the player profile is reset without ending the session; this Shell restarts with it. */
     resetProfile: (adminToken: string): Promise<ResetProfileResult> => invoke('sys_reset_profile', { adminToken }),
     ackAdminMessage: (id: string): Promise<OkResponse> => invoke('sys_ack_admin_message', { id }),

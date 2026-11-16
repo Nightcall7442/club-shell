@@ -317,7 +317,25 @@
     },
     "wrongPinLeft": "Wrong PIN. Attempts left: {{attempts}}",
     "wrongPasswordLeft": "Wrong password. Attempts left: {{attempts}}",
-    "pinLockedOut": "Too many wrong PINs: unlock with your password or ask the administrator."
+    "pinLockedOut": "Too many wrong PINs: unlock with your password or ask the administrator.",
+    "staff": {
+      "button": "Staff sign-in",
+      "title": "Staff sign-in",
+      "hint": "Your PIN from the club admin console. The PC leaves the shell and you sign in to your own Windows account to install games, launchers and programs.",
+      "pin": "Staff PIN",
+      "pinPlaceholder": "4–8 digits",
+      "submit": "Sign in to Windows",
+      "pinFormat": "The PIN is 4 to 8 digits",
+      "wrongPin": "Wrong PIN",
+      "notAllowed": "This staff member may not sign in to the PCs. The owner turns it on in the admin console: Staff → PC service.",
+      "sessionActive": "A player is on this PC: end their session first.",
+      "kioskOff": "The shell does not sign in to Windows by itself on this PC: sign in to your account as usual.",
+      "offline": "No connection with the club server: the PIN cannot be checked now. Try again in a moment.",
+      "tooMany": "Too many wrong PINs. Try again in {{seconds}} s.",
+      "doneTitle": "{{name}}, the PC is leaving the shell",
+      "doneBody": "The Windows sign-in screen comes up in a moment: sign in to your account. If nobody signs in within {{minutes}} min, the PC restarts and goes back to the players.",
+      "doneBack": "When you are done, sign out of Windows (Start → Sign out): the PC goes back to the players. Otherwise it does so by itself at {{time}}."
+    }
   },
   "desktop": {
     "title": "Home",

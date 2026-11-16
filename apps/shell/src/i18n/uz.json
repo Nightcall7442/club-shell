@@ -317,7 +317,25 @@
     },
     "wrongPinLeft": "PIN noto'g'ri. Qolgan urinishlar: {{attempts}}",
     "wrongPasswordLeft": "Parol noto'g'ri. Qolgan urinishlar: {{attempts}}",
-    "pinLockedOut": "Juda ko'p noto'g'ri PIN: parol bilan oching yoki administratorga murojaat qiling."
+    "pinLockedOut": "Juda ko'p noto'g'ri PIN: parol bilan oching yoki administratorga murojaat qiling.",
+    "staff": {
+      "button": "Xodimlar uchun kirish",
+      "title": "Xodimlar uchun kirish",
+      "hint": "Klub admin panelidagi PIN. Kompyuter qobiqdan chiqadi va siz o'yinlar, launcherlar va dasturlarni o'rnatish uchun o'z Windows hisobingizga kirasiz.",
+      "pin": "Xodim PIN-kodi",
+      "pinPlaceholder": "4–8 ta raqam",
+      "submit": "Windows'ga kirish",
+      "pinFormat": "PIN 4 tadan 8 tagacha raqamdan iborat",
+      "wrongPin": "PIN noto'g'ri",
+      "notAllowed": "Bu xodimga kompyuterlarga kirish ruxsat etilmagan. Egasi buni admin panelda yoqadi: «Xodimlar» → «Kompyuterlarga xizmat».",
+      "sessionActive": "Kompyuterda hozir o'yinchi bor: avval uning seansini yakunlang.",
+      "kioskOff": "Bu kompyuterda qobiq Windows'ga o'zi kirmaydi: hisobingizga odatdagidek kiring.",
+      "offline": "Klub serveri bilan aloqa yo'q: PIN hozir tekshirib bo'lmaydi. Birozdan keyin urinib ko'ring.",
+      "tooMany": "Noto'g'ri PIN juda ko'p. {{seconds}} soniyadan keyin urinib ko'ring.",
+      "doneTitle": "{{name}}, kompyuter qobiqdan chiqmoqda",
+      "doneBody": "Hozir Windows kirish ekrani chiqadi: o'z hisobingizga kiring. Agar {{minutes}} daqiqa ichida hech kim kirmasa, kompyuter qayta ishga tushadi va o'yinchilarga qaytadi.",
+      "doneBack": "Ishni tugatgach, Windows'dan chiqing (Pusk → Chiqish): kompyuter o'yinchilarga qaytadi. Aks holda bu {{time}} da o'zi sodir bo'ladi."
+    }
   },
   "desktop": {
     "title": "Bosh sahifa",

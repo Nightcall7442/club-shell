@@ -102,6 +102,7 @@ pub const COMMAND_NAMES: &[&str] = &[
     "sys_set_volume",
     "sys_set_locale",
     "sys_unlock_admin",
+    "sys_staff_sign_in",
     "sys_reset_profile",
     "sys_ack_admin_message",
     "sys_log_client_error",
@@ -186,6 +187,7 @@ macro_rules! invoke_handler {
             crate::commands::system::sys_set_volume,
             crate::commands::system::sys_set_locale,
             crate::commands::system::sys_unlock_admin,
+            crate::commands::system::sys_staff_sign_in,
             crate::commands::system::sys_reset_profile,
             crate::commands::system::sys_ack_admin_message,
             crate::commands::system::sys_log_client_error,
@@ -316,7 +318,7 @@ mod tests {
         let handler: Box<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync> =
             Box::new(invoke_handler!());
         drop(handler);
-        assert_eq!(COMMAND_NAMES.len(), 68);
+        assert_eq!(COMMAND_NAMES.len(), 69);
         let mut sorted = COMMAND_NAMES.to_vec();
         sorted.sort_unstable();
         sorted.dedup();

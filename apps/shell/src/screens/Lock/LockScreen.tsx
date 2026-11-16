@@ -44,6 +44,7 @@ import { useClub } from '@/hooks/useClub';
 import { CardLogin } from './CardLogin';
 import { GuestLogin } from './GuestLogin';
 import { LoginForm, loginErrorMessage } from './LoginForm';
+import { StaffSignInButton } from './StaffSignIn';
 import { QrLogin } from './QrLogin';
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -1248,11 +1249,15 @@ export default function LockScreen(): JSX.Element {
           <div className="min-w-0">
             <LinkWarning />
           </div>
-          {callAdminEnabled && (
-            <Button variant="ghost" size="lg" icon={BellIcon} loading={calling} onClick={() => void callAdmin()}>
-              {t('lock.callAdmin')}
-            </Button>
-          )}
+          <div className="flex items-center gap-[var(--gap)]">
+            {/* Staff only: sign in to their own Windows account to install games and programs (not while a player is here). */}
+            {ready && !hasUser && !isLocked && <StaffSignInButton />}
+            {callAdminEnabled && (
+              <Button variant="ghost" size="lg" icon={BellIcon} loading={calling} onClick={() => void callAdmin()}>
+                {t('lock.callAdmin')}
+              </Button>
+            )}
+          </div>
         </footer>
       </div>
 
