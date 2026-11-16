@@ -533,7 +533,8 @@ Room ids: `pc:<pcId>` (created implicitly), `zone:<zone>`, `club`, `dm:<userIdA>
 
 ### 4.13 Updates
 
-#### `GET /updates/{channel}/manifest` — auth: agent — query `component` (required), `current` (semver, required), `arch?` (`x64`) → `200 UpdateManifest` or `204` (up to date). Errors: `404` (unknown channel/component). Package download at `manifest.url` requires the same Bearer header; supports `Range`.
+#### `GET /updates/{channel}/manifest` — auth: agent or the release publisher's token — query `component` (required), `current` (semver, required), `arch?` (`x64`) → `200 UpdateManifest` or `204` (up to date). Errors: `404` (unknown channel/component). Package download at `manifest.url` requires the same Bearer header (the Agent sends it only to its own server); supports `Range`. The club server offers a PC the release only while its club's automatic updates are on (UPDATES.md §8.1).
+#### `POST /updates/{channel}/manifest` — auth: release publisher token (`Updates:PublishToken`) — the signed `manifest.json` of a release (`publishUpdateManifest`; packages first with `PUT /<channel>/<version>/<file>` outside `/api/v1`). `501` while the server has no publisher token. UPDATES.md §8.1.
 
 ### 4.14 Support / anti-cheat
 
@@ -628,6 +629,7 @@ Response `204`.
 | POST | `/tournaments/{id}/join` | user |
 | GET | `/tournaments/{id}/leaderboard` | agent |
 | GET | `/updates/{channel}/manifest` | agent |
+| POST | `/updates/{channel}/manifest` | release publisher |
 | POST | `/support/call-admin` | agent |
 | POST | `/anticheat/report` | agent |
 
