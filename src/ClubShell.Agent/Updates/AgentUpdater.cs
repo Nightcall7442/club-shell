@@ -131,9 +131,12 @@ public sealed class AgentUpdater : BackgroundService
     }
 
     /// <summary>
-    /// Server <c>update</c> command: stages <see cref="UpdateCommand.Manifest"/> when given (bypassing suppression),
-    /// otherwise the latest applicable manifest of the component; with <see cref="UpdateCommand.ApplyNow"/> the
-    /// package is applied immediately, regardless of sessions or the apply window.
+    /// Server <c>update</c> command («Обновить ClubShell» from the admin console): stages
+    /// <see cref="UpdateCommand.Manifest"/> when given (bypassing suppression), otherwise the latest applicable manifest of
+    /// the component; with <see cref="UpdateCommand.ApplyNow"/> the package is applied at once when no session is open
+    /// (outside the apply window too). With a player on the PC it is not: the request is remembered (a file in the cache, so
+    /// it survives the Agent's own restart) and the package is applied as soon as the session ends —
+    /// <c>scheduled = true</c>. A mandatory package goes by its own rule (<see cref="MandatoryNoticeDelay"/>).
     /// </summary>
     public async Task<UpdateApplyResponse> HandleCommandAsync(UpdateCommand command, CancellationToken cancellationToken)
     {
@@ -176,6 +179,15 @@ public sealed class AgentUpdater : BackgroundService
 
             if (command.ApplyNow)
             {
+                if (_sessions.State.IsOpen() && !pending.Mandatory)
+                {
+                    SetRequested(component, true);
+                    _logger.LogInformation("{Component} {Version} requested by the server; applied when the session ends", ComponentName(component), pending.Version);
+                    Signal();
+                    return new UpdateApplyResponse(true);
+                }
+
+                SetRequested(component, false);
                 return await ApplyPendingAsync(component, pending, cancellationToken).ConfigureAwait(false);
             }
 
@@ -186,6 +198,46 @@ public sealed class AgentUpdater : BackgroundService
         {
             _work.Release();
         }
+    }
+
+    /// <summary>The server asked for <paramref name="component"/> to be applied at the first idle moment.</summary>
+    public bool IsRequested(UpdateComponent component)
+    {
+        try
+        {
+            return File.Exists(RequestedPath(component));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private void SetRequested(UpdateComponent component, bool on)
+    {
+        try
+        {
+            string path = RequestedPath(component);
+            if (on)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, _clock.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+            }
+            else if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            _logger.LogWarning(ex, "Update request mark of {Component} not {Action}", ComponentName(component), on ? "saved" : "removed");
+        }
+    }
+
+    private string RequestedPath(UpdateComponent component)
+    {
+        AgentSettings settings = _settings.CurrentValue;
+        return Path.Combine(settings.ResolvePersistentPath(settings.Paths.Cache), $"update-requested-{ComponentName(component).ToLowerInvariant()}");
     }
 
     /// <inheritdoc />
@@ -359,6 +411,7 @@ public sealed class AgentUpdater : BackgroundService
         _checker.Suppress(component, marker.ToVersion, UpdateChecker.FailedSuppression);
         await _applier.ClearPendingAsync(component, cancellationToken).ConfigureAwait(false);
         await _applier.ClearRollbackMarkerAsync(component, cancellationToken).ConfigureAwait(false);
+        SetRequested(component, false);
         if (component == UpdateComponent.Shell)
         {
             _ = await _shell.RollbackAsync(cancellationToken).ConfigureAwait(false);
@@ -408,7 +461,8 @@ public sealed class AgentUpdater : BackgroundService
         }
         else
         {
-            allowed = !sessionOpen && _checker.AutoInstall && _checker.IsInApplyWindow();
+            // Asked for by the server (the admin console's button): at the first idle moment, window or not.
+            allowed = !sessionOpen && (IsRequested(component) || (_checker.AutoInstall && _checker.IsInApplyWindow()));
         }
 
         if (!allowed)
@@ -416,6 +470,8 @@ public sealed class AgentUpdater : BackgroundService
             return;
         }
 
+        // Cleared first: an Agent package restarts this service, and the request is done either way.
+        SetRequested(component, false);
         _ = await ApplyPendingAsync(component, pending, cancellationToken).ConfigureAwait(false);
     }
 

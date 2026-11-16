@@ -1078,3 +1078,18 @@ internal sealed class FakeHttpHandler : HttpMessageHandler
         return Responder(captured);
     }
 }
+
+/// <summary>A package download carries the Agent's token to the club server only.</summary>
+public sealed class UpdateDownloaderOriginTests
+{
+    [Theory]
+    [InlineData("https://club.example.uz/api/v1/updates/stable/1.0.22/ClubShell-1.0.22.msi", true)]
+    [InlineData("https://CLUB.example.uz:443/api/v1/updates/stable/x.msi", true)]
+    [InlineData("https://github.com/acme/club-shell/releases/download/v1.0.22/ClubShell-1.0.22.msi", false)]
+    [InlineData("http://club.example.uz/api/v1/updates/stable/x.msi", false)]
+    [InlineData("https://club.example.uz.evil.example/x.msi", false)]
+    [InlineData("https://club.example.uz:8443/x.msi", false)]
+    [InlineData("not a url", false)]
+    public void Only_the_servers_origin_gets_the_token(string url, bool expected) =>
+        ClubShell.Core.Updates.UpdateDownloader.IsServerOrigin(url, "https://club.example.uz/api/v1").Should().Be(expected);
+}
