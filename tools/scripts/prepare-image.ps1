@@ -112,7 +112,11 @@ $files = @(
     'cache\offline.db', 'cache\offline.db-wal', 'cache\offline.db-shm', 'crash-history.json',
     # This PC's reboots for a profile debt and for a lost auto-logon (SHELL_CHANGES 76-77): a seat booted from the image
     # would take the master's as its own, skip its one reboot for a debt and wait out the master's 15 minutes.
-    'cache\profile-reset-reboot.txt', 'cache\kiosk-logon-reboot.txt')
+    'cache\profile-reset-reboot.txt', 'cache\kiosk-logon-reboot.txt',
+    # The player signed in on the master and the source of its lock (SHELL_CHANGES 95, agent 1.0.21): no seat starts with
+    # someone else's sign-in. The desk's update requests and an open maintenance window (a staff sign-in) are this PC's too.
+    'cache\signed-in-user.bin', 'cache\session-lock.json', 'cache\update-requested-agent', 'cache\update-requested-shell',
+    'secure\maintenance.json')
 foreach ($root in $roots) {
     foreach ($rel in $files + 'cache\power-acks.json') {
         $path = Join-Path $root $rel
