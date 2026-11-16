@@ -129,7 +129,9 @@ public static class AgentConfig
         Session: JsonSerializer.SerializeToElement(new { heartbeatSec = agents.HeartbeatSec, graceSec = sessions.GraceSec }),
         Offline: JsonSerializer.SerializeToElement(new { maxOfflineMinutes = sessions.MaxOfflineMinutes }),
         Games: Games,
-        Updates: new UpdatesConfigOverride(Enabled: false),
+        // The scheduled update check only where the owner turned on automatic updates (UPDATES.md §8); the admin console's
+        // «Обновить ClubShell» works without it.
+        Updates: new UpdatesConfigOverride(Enabled: club.AutoUpdate),
         Anticheat: Anticheat,
         Shell: new ShellConfigOverride(Theme: "default", Features: FeaturesOf(club.Settings), Club: club.Club),
         Themes: []);

@@ -28,6 +28,7 @@ public sealed class AgentAuthMiddleware(
     ReplayLog replays,
     AuthOptions options,
     Platform.PlatformOptions platform,
+    Updates.UpdateOptions updates,
     TimeProvider clock,
     ILogger<AgentAuthMiddleware> logger)
 {
@@ -108,6 +109,30 @@ public sealed class AgentAuthMiddleware(
                 break;
             case AuthMode.Platform:
                 Platform.PlatformEndpoints.Authenticate(context, platform, logger);
+                break;
+            case AuthMode.Publisher:
+                if (!updates.PublishEnabled)
+                {
+                    throw ApiException.NotImplemented("publishUpdateManifest");
+                }
+
+                if (!updates.IsPublishToken(BearerToken(context)))
+                {
+                    logger.LogWarning("Wrong release publisher token from {Ip}", context.Connection.RemoteIpAddress);
+                    throw ApiException.Unauthorized("publishToken", "Missing or invalid release publisher token");
+                }
+
+                break;
+            case AuthMode.AgentOrPublisher:
+                if (updates.IsPublishToken(BearerToken(context)))
+                {
+                    context.Features.Set(new PublisherContext());
+                }
+                else
+                {
+                    context.Features.Set(await AuthenticateAgentAsync(context));
+                }
+
                 break;
         }
 

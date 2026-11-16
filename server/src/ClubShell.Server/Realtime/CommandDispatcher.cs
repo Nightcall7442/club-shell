@@ -27,6 +27,9 @@ public sealed record NewCommand(ServerCommandType Type, JsonElement? Payload)
     /// <summary>«Сбросить профиль игрока» (SHELL_CHANGES 76): result <c>ResetProfileResult</c>; an older agent answers <c>notFound</c>.</summary>
     public static NewCommand ResetProfile() => new(ServerCommandType.ResetProfile, null);
 
+    /// <summary>«Обновить ClubShell» (UPDATES.md §8): the release's package of one component, applied at the PC's first idle moment.</summary>
+    public static NewCommand Update(UpdateCommand payload) => new(ServerCommandType.Update, JsonDefaults.ToElement(payload));
+
     public static NewCommand EndSession(EndSessionCommand payload) => new(ServerCommandType.EndSession, JsonDefaults.ToElement(payload));
 
     /// <summary>The server has already charged: v1 always sends <c>charge:false</c> (§5.6).</summary>
@@ -62,10 +65,15 @@ public sealed class CommandDispatcher(CommandRepository commands, AgentSocketHub
         ServerCommandType.RefreshConfig,
     };
 
-    /// <summary>Commands beyond the contract that this server sends: <c>resetProfile</c> (SHELL_CHANGES 76).</summary>
+    /// <summary>
+    /// Commands beyond the contract that this server sends: <c>resetProfile</c> (SHELL_CHANGES 76) and <c>update</c> (the
+    /// admin console's «Обновить ClubShell», UPDATES.md §8; the contract marks it notImplemented for servers that host no
+    /// releases).
+    /// </summary>
     public static readonly IReadOnlySet<ServerCommandType> BeyondContract = new HashSet<ServerCommandType>
     {
         ServerCommandType.ResetProfile,
+        ServerCommandType.Update,
     };
 
     /// <param name="supersedes">An earlier command this one cancels (<c>lock</c> → <c>unlock</c>, AsyncAPI §7).</param>

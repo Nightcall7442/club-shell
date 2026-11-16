@@ -50,6 +50,8 @@ var sessionOptions = builder.Configuration.GetSection("Sessions").Get<SessionsOp
 var realtimeOptions = builder.Configuration.GetSection("Realtime").Get<RealtimeOptions>() ?? new RealtimeOptions();
 var corsOptions = builder.Configuration.GetSection("Cors").Get<CorsOptions>() ?? new CorsOptions();
 var maintenanceOptions = builder.Configuration.GetSection("Maintenance").Get<MaintenanceOptions>() ?? new MaintenanceOptions();
+var updateOptions = builder.Configuration.GetSection("Updates").Get<UpdateOptions>() ?? new UpdateOptions();
+updateOptions.StoragePath = Path.Combine(builder.Environment.ContentRootPath, updateOptions.StoragePath);
 
 // Policy seed (D-14): data/policy.json when the operator put one there, else the example policy shipped with the build.
 var policySeedPath = Path.Combine(builder.Environment.ContentRootPath, builder.Configuration["Catalog:PolicySeedPath"] ?? "data/policy.json");
@@ -76,6 +78,8 @@ builder.Services.AddSingleton(sessionOptions);
 builder.Services.AddSingleton(realtimeOptions);
 builder.Services.AddSingleton(corsOptions);
 builder.Services.AddSingleton(maintenanceOptions);
+builder.Services.AddSingleton(updateOptions);
+builder.Services.AddSingleton<Releases>();
 builder.Services.AddClubDatabase(connectionString);
 builder.Services.AddSingleton<ClubRepository>();
 builder.Services.AddSingleton<PcRepository>();
@@ -170,6 +174,7 @@ app.MapSessionEndpoints();
 app.MapWalletEndpoints();
 app.MapGameEndpoints();
 app.MapUpdateEndpoints();
+app.MapUpdateAdminEndpoints();
 app.MapPcEndpoints();
 app.MapStaffEndpoints();
 app.MapCounterEndpoints();

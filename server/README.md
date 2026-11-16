@@ -28,7 +28,7 @@
   завершённый задним числом, считается до его `endedAt`.
 - S3: `getGames` (страницы до 1000, скрытые исключены, порядок владельца, ETag `"g<catalogVersion>-<hash>"` с
   `lastPlayedAt` игрока), `getGame`, `sendLaunchReport` (повтор из офлайн-очереди хранится один раз), `getUpdateManifest`
-  (всегда `204`, решение владельца), `getPc` (`hwid` только своего ПК) и сверх контракта `POST /anticheat/report` (204).
+  (`204`, пока владелец не включил автообновление — ниже), `getPc` (`hwid` только своего ПК) и сверх контракта `POST /anticheat/report` (204).
   Каталог — из `data/games.json` (`Catalog:GamesSeedPath`, массив контрактных `Game` + `settingsPaths`): upsert по id при
   старте, пропавшие — soft delete, изменение поднимает `catalogVersion`. Нет файла — каталог не трогается.
 - S4: 17 операций кассы — вход по PIN (`adminLogin`/`Logout`/`Me`; PIN хранится как HMAC с pepper из
@@ -51,7 +51,13 @@
 - Вход персонала на ПК (сверх контракта): `POST /agents/{pcId}/staff/verify` — PIN сотрудника с экрана блокировки, прежде чем
   агент пустит его в свою учётную запись Windows; владелец всегда, кассир — с отметкой `pcService` (`/admin/staff`,
   миграция M0018); вход пишется в журнал как `pcCommand` · `serviceSignIn`; неверные PIN — в лимиты кассы, по ПК.
-- Остальные 24 операции контракта отвечают `501` (в том числе `topup-intent`: платёжного провайдера нет, игрок пополняет
+- Обновления ClubShell (UPDATES.md §8.1): сервер хранит выпуски сам — издатель (`publish.ps1 -Target Http`, токен
+  `Updates__PublishToken`) загружает пакеты `PUT /<channel>/<version>/<file>` и манифест `POST /api/v1/updates/<channel>/manifest`
+  (`publishUpdateManifest`; без токена — `501`); агент скачивает пакет со своим токеном. Владелец в админке («Обновления
+  ClubShell», `/admin/updates`): «Обновить» — команда `update` подключённым ПК, которые отстают (свободный ставит сразу,
+  занятый — после сеанса), и «Обновлять автоматически ночью» (`clubs.auto_update`, по умолчанию выключено: тогда
+  `getUpdateManifest` отвечает `204`, а `updates.enabled` в конфиге агента — `false`).
+- Остальные 22 операции контракта отвечают `501` (в том числе `topup-intent`: платёжного провайдера нет, игрок пополняет
   счёт на кассе) (кассиру на owner-only из них — сначала `403 ownerOnly`).
 - Деньги (DESIGN §4.3, §5): единственная точка записи — `Wallet/Ledger.cs` (строка кошелька под `FOR UPDATE`,
   append-only `ledger_entries` с `balance_after`; `wallets.main_balance` — кеш суммы леджера). Цена — одна функция
