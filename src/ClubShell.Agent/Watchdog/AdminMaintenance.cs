@@ -13,6 +13,12 @@ namespace ClubShell.Agent.Watchdog;
 /// (<see cref="AdminMaintenanceCloser"/>, SHELL_CHANGES 49). It is kept in <c>secure\maintenance.json</c> and comes back
 /// after an Agent restart in the same Windows boot (an installer, an update), never after a reboot, which always comes
 /// back sealed (SHELL_CHANGES 69).
+/// <para>
+/// A staff member's Windows sign-in (<c>sys.staffSignIn</c>, <see cref="BeginWindowsSignIn"/>) opens the window without a
+/// session: the kiosk is signed out on purpose, so its sign-out does not end it, and the kiosk's auto-logon stays paused
+/// (<see cref="AutoLogonPaused"/>) until the staff member's own Windows session is <see cref="Attach">attached</see>; from
+/// then on it is that session's sign-out that ends the window.
+/// </para>
 /// </summary>
 public sealed class AdminMaintenance : IDisposable
 {
@@ -36,6 +42,8 @@ public sealed class AdminMaintenance : IDisposable
     private ITimer? _timer;
     private DateTimeOffset? _until;
     private uint? _session;
+    private bool _windows;
+    private string? _staff;
 
     /// <summary>
     /// Creates the window, closed — or, with <paramref name="settings"/>, as an Agent that restarted in the same boot left
@@ -79,7 +87,50 @@ public sealed class AdminMaintenance : IDisposable
         }
     }
 
-    /// <summary>Kiosk session the open window was opened in, when known.</summary>
+    /// <summary>
+    /// The open window is a staff member's Windows sign-in (<see cref="BeginWindowsSignIn"/>): the kiosk is signed out and
+    /// <see cref="Session"/> is the staff member's own Windows session once attached.
+    /// </summary>
+    public bool WindowsSignIn
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _windows && _until is { } until && until > _clock.UtcNow;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The kiosk's auto-logon must stay paused: a staff member's Windows sign-in is open and nobody has signed in to Windows
+    /// yet. Whoever sets auto-logon (the <c>shellReplacement</c> policy) leaves it alone meanwhile, or Winlogon could log the
+    /// kiosk on in front of the staff member.
+    /// </summary>
+    public bool AutoLogonPaused
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _windows && _session is null && _until is { } until && until > _clock.UtcNow;
+            }
+        }
+    }
+
+    /// <summary>Staff member of a Windows sign-in window, for notices and logs.</summary>
+    public string? StaffName
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _staff;
+            }
+        }
+    }
+
+    /// <summary>Kiosk session the open window was opened in (a Windows sign-in: the staff member's session), when known.</summary>
     public uint? Session
     {
         get
@@ -101,8 +152,8 @@ public sealed class AdminMaintenance : IDisposable
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(duration, TimeSpan.Zero);
         DateTimeOffset until = _clock.UtcNow + duration;
-        bool opened = Open(until, sessionId);
-        Save(until, sessionId);
+        bool opened = Open(until, sessionId, windows: false, staff: null);
+        Save();
         _logger.LogWarning("Administrator maintenance until {Until}: Shell restarts paused, USB storage and service tools allowed", until);
         if (opened)
         {
@@ -110,6 +161,47 @@ public sealed class AdminMaintenance : IDisposable
         }
 
         return until;
+    }
+
+    /// <summary>
+    /// Opens a window of <paramref name="duration"/> for <paramref name="staffName"/>'s sign-in to their own Windows account
+    /// (or turns the open one into it): no session yet, auto-logon held paused until <see cref="Attach"/>; returns when it ends.
+    /// </summary>
+    public DateTimeOffset BeginWindowsSignIn(TimeSpan duration, string staffName)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(duration, TimeSpan.Zero);
+        ArgumentException.ThrowIfNullOrWhiteSpace(staffName);
+        DateTimeOffset until = _clock.UtcNow + duration;
+        bool opened = Open(until, sessionId: null, windows: true, staff: staffName);
+        Save();
+        _logger.LogWarning("Staff member {Staff} signs in to Windows; maintenance until {Until}: Shell restarts paused, USB storage and service tools allowed", staffName, until);
+        if (opened)
+        {
+            Raise(true);
+        }
+
+        return until;
+    }
+
+    /// <summary>
+    /// The staff member signed in to Windows as session <paramref name="sessionId"/>: its sign-out now ends the window, and
+    /// auto-logon is no longer held. <see langword="false"/> when no Windows sign-in window waits for a session.
+    /// </summary>
+    public bool Attach(uint sessionId)
+    {
+        lock (_gate)
+        {
+            if (!_windows || _session is not null || _until is not { } until || until <= _clock.UtcNow)
+            {
+                return false;
+            }
+
+            _session = sessionId;
+        }
+
+        Save();
+        _logger.LogWarning("Staff member's Windows session {SessionId} attached to the maintenance window", sessionId);
+        return true;
     }
 
     /// <summary>Ends the open window (a no-op when none is open).</summary>
@@ -124,6 +216,8 @@ public sealed class AdminMaintenance : IDisposable
 
             _until = null;
             _session = null;
+            _windows = false;
+            _staff = null;
             _timer?.Dispose();
             _timer = null;
         }
@@ -133,13 +227,16 @@ public sealed class AdminMaintenance : IDisposable
         Raise(false);
     }
 
-    /// <summary>Ends the window when <paramref name="sessionId"/> is the session it was opened in (or that is unknown).</summary>
+    /// <summary>
+    /// Ends the window when <paramref name="sessionId"/> is the session it was opened in (or that is unknown); a Windows
+    /// sign-in window only when it is the staff member's attached session — the kiosk's own sign-out is part of it.
+    /// </summary>
     public void OnSessionEnded(uint sessionId)
     {
         bool mine;
         lock (_gate)
         {
-            mine = _until is not null && (_session is null || _session == sessionId);
+            mine = _until is not null && (_windows ? _session == sessionId : _session is null || _session == sessionId);
         }
 
         if (mine)
@@ -158,13 +255,15 @@ public sealed class AdminMaintenance : IDisposable
         }
     }
 
-    private bool Open(DateTimeOffset until, uint? sessionId)
+    private bool Open(DateTimeOffset until, uint? sessionId, bool windows, string? staff)
     {
         lock (_gate)
         {
             bool opened = _until is null;
             _until = until;
             _session = sessionId;
+            _windows = windows;
+            _staff = staff;
             _timer?.Dispose();
             _timer = _clock.Provider.CreateTimer(_ => End("timed out"), null, until - _clock.UtcNow, Timeout.InfiniteTimeSpan);
             return opened;
@@ -190,7 +289,7 @@ public sealed class AdminMaintenance : IDisposable
                 return;
             }
 
-            _ = Open(state.Until, state.Session);
+            _ = Open(state.Until, state.Session, state.WindowsSignIn, state.Staff);
             _logger.LogWarning("Administrator maintenance restored after an Agent restart, until {Until}", state.Until);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
@@ -200,17 +299,28 @@ public sealed class AdminMaintenance : IDisposable
         }
     }
 
-    private void Save(DateTimeOffset until, uint? sessionId)
+    private void Save()
     {
         if (StatePath is not { } path)
         {
             return;
         }
 
+        State state;
+        lock (_gate)
+        {
+            if (_until is not { } until)
+            {
+                return;
+            }
+
+            state = new State(until, _session, BootedAt(), _windows, _staff);
+        }
+
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, JsonSerializer.Serialize(new State(until, sessionId, BootedAt())));
+            File.WriteAllText(path, JsonSerializer.Serialize(state));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -256,5 +366,5 @@ public sealed class AdminMaintenance : IDisposable
         }
     }
 
-    private sealed record State(DateTimeOffset Until, uint? Session, DateTimeOffset BootedAt);
+    private sealed record State(DateTimeOffset Until, uint? Session, DateTimeOffset BootedAt, bool WindowsSignIn = false, string? Staff = null);
 }
