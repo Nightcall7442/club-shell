@@ -2007,7 +2007,14 @@ cmd('sys_call_admin', (args): SysCallAdminResponse => {
   return { ticketId, createdAt: nowIso(), queuePosition: 1 };
 });
 
-const power = (args: Record<string, unknown>): ScheduledResult => ({ scheduledAt: isoIn(num(args, 'delaySec') ?? 30) });
+/** As the Agent: refused during a session (`conflict sessionActive`, SHELL_CHANGES 93). */
+const power = (args: Record<string, unknown>): ScheduledResult => {
+  const s = mockState.session;
+  if (s && s.state !== 'ended' && s.state !== 'idle') {
+    mockError('conflict', 'A session is open', { reason: 'sessionActive' });
+  }
+  return { scheduledAt: isoIn(num(args, 'delaySec') ?? 30) };
+};
 cmd('sys_reboot', power);
 cmd('sys_shutdown', power);
 

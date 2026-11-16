@@ -130,6 +130,8 @@ export const UZ: Record<string, string> = {
   '{name} в пятницу': '{name} juma kuni',
   '{name} добавлен': '{name} qoʻshildi',
   '{name}: PIN изменён': '{name}: PIN oʻzgartirildi',
+  'Кнопки «Выключить» и «Перезагрузить» на экране входа':
+    'Kirish ekranida «Oʻchirish» va «Qayta ishga tushirish» tugmalari',
   '{n} ПК офлайн — не отправлено': '{n} ta kompyuter oflayn — yuborilmadi',
   '{n} ПК — после конца сеанса': '{n} ta kompyuter — seans tugagach',
   'Автообновление включено: свободные ПК поставят новую версию ночью (04:00–07:00)':
@@ -1365,6 +1367,7 @@ export const EN: Record<string, string> = {
   '{name} в пятницу': '{name} on Friday',
   '{name} добавлен': '{name} added',
   '{name}: PIN изменён': '{name}: PIN changed',
+  'Кнопки «Выключить» и «Перезагрузить» на экране входа': '«Shut down» and «Restart» buttons on the sign-in screen',
   '{n} ПК офлайн — не отправлено': '{n} PC(s) offline — nothing sent',
   '{n} ПК — после конца сеанса': '{n} PC(s) — after the session ends',
   'Автообновление включено: свободные ПК поставят новую версию ночью (04:00–07:00)':

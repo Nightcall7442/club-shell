@@ -73,6 +73,13 @@ public sealed class AgentApiTests(ServerFixture server) : IClassFixture<ServerFi
         Assert.False(features.GetProperty("shop").GetBoolean()); // v1 still serves no shop, whatever the owner chose
     }
 
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("""{"features":{"callAdmin":false}}""", true)]
+    [InlineData("""{"features":{"lockScreenPower":false}}""", false)]
+    public void Lock_screen_power_is_on_unless_the_owner_turns_it_off(string? settings, bool power) =>
+        Assert.Equal(power, ClubShell.Server.Agents.AgentConfig.FeaturesOf(settings).GetProperty("lockScreenPower").GetBoolean());
+
     [Fact]
     public async Task A_pending_clone_renamed_in_windows_moves_to_that_seat()
     {

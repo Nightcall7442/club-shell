@@ -54,6 +54,7 @@ export const DEFAULT_FEATURES: ShellFeatures = {
   callAdmin: true,
   qrLogin: false,
   gpuPanel: false,
+  lockScreenPower: true,
 };
 
 /**
@@ -366,7 +367,7 @@ export const useSettingsStore = create<SettingsStore>()(
     },
 
     isFeatureEnabled(feature) {
-      return get().features[feature];
+      return featureOn(get().features, feature);
     },
   })),
 );
@@ -379,7 +380,12 @@ export const selectFeatures = (s: SettingsStore): ShellFeatures => s.features;
 export const selectFeature =
   (feature: keyof ShellFeatures) =>
   (s: SettingsStore): boolean =>
-    s.features[feature];
+    featureOn(s.features, feature);
+
+/** A flag's value; `lockScreenPower` only an explicit `false` turns off (an older Agent does not send it). */
+export function featureOn(features: ShellFeatures, feature: keyof ShellFeatures): boolean {
+  return feature === 'lockScreenPower' ? features.lockScreenPower !== false : features[feature] === true;
+}
 /**
  * Selector: the primary display, live from the kiosk layer (a refresh rate switched a minute ago shows) and from the
  * hardware inventory until the kiosk state is known.

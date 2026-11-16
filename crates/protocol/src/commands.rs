@@ -1019,6 +1019,10 @@ pub struct ShellFeatures {
     /// pauses the kiosk guard and its settings stay for the next player).
     #[serde(default)]
     pub gpu_panel: bool,
+    /// «Выключить» and «Перезагрузить» on the lock screen, without a session (SHELL_CHANGES 93):
+    /// only `false` hides them — absent (an older Agent) is on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lock_screen_power: Option<bool>,
 }
 
 /// Settings subset of `shell.json` exposed to the UI (IPC_PROTOCOL.md §6.21); persisted by the

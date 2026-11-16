@@ -335,6 +335,17 @@
       "doneTitle": "{{name}}, kompyuter qobiqdan chiqmoqda",
       "doneBody": "Hozir Windows kirish ekrani chiqadi: o'z hisobingizga kiring. Agar {{minutes}} daqiqa ichida hech kim kirmasa, kompyuter qayta ishga tushadi va o'yinchilarga qaytadi.",
       "doneBack": "Ishni tugatgach, Windows'dan chiqing (Pusk → Chiqish): kompyuter o'yinchilarga qaytadi. Aks holda bu {{time}} da o'zi sodir bo'ladi."
+    },
+    "power": {
+      "shutdown": "Oʻchirish",
+      "reboot": "Qayta ishga tushirish",
+      "confirmShutdown": "Kompyuter oʻchirilsinmi?",
+      "confirmReboot": "Kompyuter qayta ishga tushirilsinmi?",
+      "yes": "Ha",
+      "shuttingDown": "Kompyuter oʻchmoqda…",
+      "rebooting": "Kompyuter qayta ishga tushmoqda…",
+      "sessionActive": "Hozir seans davom etmoqda: avval uni yakunlang.",
+      "denied": "Bu kompyuterda ekrandan oʻchirish taqiqlangan. Administratorga murojaat qiling."
     }
   },
   "desktop": {

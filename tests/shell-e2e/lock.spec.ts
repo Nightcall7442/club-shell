@@ -620,3 +620,25 @@ test.describe('staff sign-in to Windows', () => {
     await expect(page.getByRole('button', { name: en('lock.staff.button') })).toHaveCount(0);
   });
 });
+
+test.describe('power on the lock screen (SHELL_CHANGES 93)', () => {
+  test('shut down and restart ask first and are not offered while a player is signed in', async ({ page }) => {
+    await openLock(page);
+    await page.getByRole('button', { name: en('lock.power.reboot'), exact: true }).click();
+    const confirm = page.getByRole('dialog', { name: en('lock.power.confirmReboot') });
+    await expect(confirm).toBeVisible();
+    await confirm.getByRole('button', { name: en('common.cancel') }).click();
+    await expect(confirm).toHaveCount(0);
+
+    await page.getByRole('button', { name: en('lock.power.shutdown'), exact: true }).click();
+    const shutdown = page.getByRole('dialog', { name: en('lock.power.confirmShutdown') });
+    await shutdown.getByRole('button', { name: en('lock.power.yes') }).click();
+    await expect(page.getByText(en('lock.power.shuttingDown'))).toBeVisible();
+    await expect(shutdown).toHaveCount(0);
+
+    await openPlaying(page);
+    await page.getByRole('button', { name: en('desktop.lock'), exact: true }).click();
+    await expect(page.getByRole('button', { name: en('lock.unlockWithPin') })).toBeVisible();
+    await expect(page.getByRole('button', { name: en('lock.power.shutdown'), exact: true })).toHaveCount(0);
+  });
+});

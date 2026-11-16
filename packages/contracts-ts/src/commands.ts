@@ -952,6 +952,11 @@ export interface ShellFeatures {
    * and its settings stay for the next player).
    */
   gpuPanel: boolean;
+  /**
+   * «Выключить» and «Перезагрузить» on the lock screen, without a session (SHELL_CHANGES 93): only `false` hides them —
+   * absent (an older Agent) is on.
+   */
+  lockScreenPower?: boolean | null;
 }
 
 /** Settings subset of `shell.json` exposed to the UI (IPC_PROTOCOL.md §6.21); persisted by the Agent. */

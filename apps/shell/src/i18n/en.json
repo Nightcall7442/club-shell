@@ -335,6 +335,17 @@
       "doneTitle": "{{name}}, the PC is leaving the shell",
       "doneBody": "The Windows sign-in screen comes up in a moment: sign in to your account. If nobody signs in within {{minutes}} min, the PC restarts and goes back to the players.",
       "doneBack": "When you are done, sign out of Windows (Start → Sign out): the PC goes back to the players. Otherwise it does so by itself at {{time}}."
+    },
+    "power": {
+      "shutdown": "Shut down",
+      "reboot": "Restart",
+      "confirmShutdown": "Shut down the PC?",
+      "confirmReboot": "Restart the PC?",
+      "yes": "Yes",
+      "shuttingDown": "The PC is shutting down…",
+      "rebooting": "The PC is restarting…",
+      "sessionActive": "A session is running: end it first.",
+      "denied": "Power from the screen is not allowed on this PC. Ask the administrator."
     }
   },
   "desktop": {

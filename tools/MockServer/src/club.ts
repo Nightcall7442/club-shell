@@ -385,6 +385,7 @@ function defaults(): ClubConfig {
       callAdmin: true,
       qrLogin: true,
       gpuPanel: false,
+      lockScreenPower: true,
     },
     zones: [
       { name: 'Standard', color: '#22C55E' },

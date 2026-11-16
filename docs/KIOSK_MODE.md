@@ -317,6 +317,15 @@ Notes:
   `shellReplacement.enabled=false` (`SHELL_REPLACEMENT.md` §7).
 - Dev mode is always admin mode (`admin_mode: AtomicBool::new(dev)`).
 
+### 6.0 Power on the lock screen (SHELL_CHANGES 93)
+
+«Выключить» and «Перезагрузить» sit in the lock screen's footer while nobody is signed in, no session is open and the
+desk has not locked the PC — on «Подготовка ПК…» too, so a PC that is not ready can be restarted without the PIN. Each
+asks first, then `sys.shutdown` / `sys.reboot` (3 s, reason `lockScreen`). The Agent still refuses during a session
+(`conflict sessionActive`) and where `agent.json → power.allowShellReboot` is off (`policyDenied`); the screen says so.
+The club turns the buttons off with `features.lockScreenPower = false` (admin console «Экран игрока»; absent = on). The
+server takes such a stop as planned: the Agent says goodbye with the reason `shutdown` / `reboot` (no `pcOffline` alert).
+
 ### 6.1 Staff sign-in to their own Windows account
 
 The maintenance window above runs in the kiosk account, which is a plain user whose profile is reset: no place to install

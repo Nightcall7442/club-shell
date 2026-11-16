@@ -33,7 +33,7 @@ import { selectIsGuest, selectPcReady, useAuthStore } from '@/store/auth';
 import { describeError, useNotificationsStore } from '@/store/notifications';
 import { useGamesStore } from '@/store/games';
 import { useSessionStore } from '@/store/session';
-import { useSettingsStore } from '@/store/settings';
+import { selectFeature, useSettingsStore } from '@/store/settings';
 import { useThemeStore } from '@/store/theme';
 import { useWalletStore } from '@/store/wallet';
 import { AdsCarousel } from '@/screens/Idle/AdsCarousel';
@@ -44,6 +44,7 @@ import { useClub } from '@/hooks/useClub';
 import { CardLogin } from './CardLogin';
 import { GuestLogin } from './GuestLogin';
 import { LoginForm, loginErrorMessage } from './LoginForm';
+import { PowerButtons } from './PowerButtons';
 import { StaffSignInButton } from './StaffSignIn';
 import { QrLogin } from './QrLogin';
 
@@ -1040,6 +1041,7 @@ export default function LockScreen(): JSX.Element {
   const club = useClub();
   const pcZone = useSettingsStore((s) => s.pcInfo?.pc.zone ?? '');
   const callAdminEnabled = useSettingsStore((s) => s.features.callAdmin);
+  const lockScreenPower = useSettingsStore(selectFeature('lockScreenPower'));
   // Off until the server can confirm a scanned code (D-18): a QR that can never sign in only costs the player time.
   const qrLogin = useSettingsStore((s) => s.features.qrLogin);
   const animations = useThemeStore((s) => s.theme.animations);
@@ -1252,6 +1254,8 @@ export default function LockScreen(): JSX.Element {
           <div className="flex items-center gap-[var(--gap)]">
             {/* Staff only: sign in to their own Windows account to install games and programs (not while a player is here). */}
             {ready && !hasUser && !isLocked && <StaffSignInButton />}
+            {/* Power without the PIN, also on «Подготовка ПК…» (SHELL_CHANGES 93); never during a session or the desk's lock. */}
+            {ready && lockScreenPower && !hasUser && !isOpen && !lockedByStaff && <PowerButtons />}
             {callAdminEnabled && (
               <Button variant="ghost" size="lg" icon={BellIcon} loading={calling} onClick={() => void callAdmin()}>
                 {t('lock.callAdmin')}
