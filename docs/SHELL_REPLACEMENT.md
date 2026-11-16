@@ -80,8 +80,10 @@ Who calls it:
   section with "auto-logon deferred" until the account is provisioned, which `PolicyEnforcer` retries). While
   `shellReplacement.enabled` is on it sets auto-logon to the kiosk **unconditionally** — at every Agent start, every
   change of the section and after every profile reset — so an operator's own auto-logon does not survive on such a PC
-  (SHELL_CHANGES 66). To sign in as an administrator, hold Shift while Windows starts, or turn
-  `shellReplacement.enabled` off for that PC.
+  (SHELL_CHANGES 66). To sign in as an administrator, use «Вход для персонала» on the lock screen (a staff PIN with
+  the owner's «PC service» mark: the Agent pauses auto-logon and signs the kiosk out, `KIOSK_MODE.md` §6.1), hold Shift
+  while Windows starts, or turn `shellReplacement.enabled` off for that PC. While a staff sign-in waits for the staff
+  member (`AdminMaintenance.AutoLogonPaused`), the module leaves auto-logon paused.
 - `TempUserProvisioner.RefreshAutoLogon` after every password rotation, **only if** auto-logon is enabled and
   `DefaultUserName` equals the kiosk account: a rotation alone never switches auto-logon to the kiosk.
 - `RevertAsync` / `uninstall.ps1` clear it.

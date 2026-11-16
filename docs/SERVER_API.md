@@ -273,6 +273,20 @@ heartbeat; the first heartbeat always fetches the current one.
 
 Response `Policy`. `304` when unchanged.
 
+#### `POST /agents/{pcId}/staff/verify` — auth: agent — beyond the contract
+
+A staff member's PIN typed on this PC («Вход для персонала» on the lock screen, IPC `sys.staffSignIn`), before the Agent
+lets them sign in to their own Windows account to install games, launchers and programs. Request `StaffVerifyRequest
+{ pin: string }` (4–8 digits) → `200 StaffVerifyResponse { staffId: uuid, name: string, role: "owner" | "cashier" }`.
+Allowed: an active member of the PC's club who may service PCs — an owner always, a cashier with the owner's
+`pcService` mark (`AdminStaffMember.pcService`, set with `POST`/`PATCH /admin/staff`). The sign-in is written to the
+staff journal as `pcCommand` with `detail` `"<PC> · serviceSignIn"` and `meta.kind = "serviceSignIn"`. Errors:
+`401 unauthorized {reason: "invalidPin"}` (no active member with this PIN; final — the Agent does not refresh and
+retry), `403 forbidden {reason: "pcService"}` (a cashier without the mark; not counted as a wrong PIN), `400 validation
+{field: "pin", reason: "digits4to8"}` (not counted), `429 rateLimited {retryAfterSec, scope}` — wrong PINs count with the
+cash desk's PIN limits (D-76): per PC (`pc:<id>`, `RateLimit:PinAttempts` in `PinWindowSec`) and in the club's budget
+for untrusted sources, so a player guessing at a PC cannot lock out the desks; past a limit even the right PIN waits.
+
 ### 4.2 PCs
 
 #### `GET /pcs` — auth: agent — query `zone?` → `{ items: Pc[] }` (club-wide, for the seat map and "friends" views; `hwid` omitted for other PCs).
@@ -560,6 +574,7 @@ Response `204`.
 | GET | `/agents/{pcId}/policies` | agent |
 | GET | `/agents/{pcId}/commands` | agent |
 | POST | `/agents/{pcId}/commands/{commandId}/ack` | agent |
+| POST | `/agents/{pcId}/staff/verify` | agent (beyond the contract) |
 | GET | `/pcs` | agent |
 | GET | `/pcs/{pcId}` | agent |
 | POST | `/auth/login` | agent |
