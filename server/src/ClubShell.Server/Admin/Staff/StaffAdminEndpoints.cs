@@ -20,7 +20,9 @@ namespace ClubShell.Server.Admin;
 /// old PIN is signed out too; members who change their own PIN keep the session they did it from. Either also ends the club's
 /// trust in the browsers the member signed in from last (D-76). Nobody disables themselves (<c>400 active self</c>) and the
 /// club keeps one active owner at least (<c>400 active lastOwner</c>, decided under a lock on the active owners — the
-/// <c>ck_</c> key has no member to match "self", and two owners can disable each other at once).
+/// <c>ck_</c> key has no member to match "self", and two owners can disable each other at once). Beyond the contract:
+/// <c>pcService</c> on a member, on create and on change — the owner's mark that lets a cashier sign in to their own Windows
+/// account on a club PC (<see cref="PcService"/>; an owner always may, whatever the mark).
 /// </summary>
 public static partial class StaffAdminEndpoints
 {
@@ -38,9 +40,10 @@ public static partial class StaffAdminEndpoints
     {
         var staff = context.Features.GetRequiredFeature<StaffContext>();
         await using var c = await db.OpenConnectionAsync();
-        var items = await c.QueryAsync<(Guid Id, string Name, string Role, bool Active)>(
-            "SELECT id, name, role, active FROM staff WHERE club_id = @ClubId ORDER BY created_at, id", new { staff.ClubId });
-        return AdminJson.Ok(new AdminStaffList(items.Select(s => new AdminStaffMember(s.Id.ToString(), s.Name, s.Role, s.Active)).ToList()));
+        var items = await c.QueryAsync<(Guid Id, string Name, string Role, bool Active, bool PcService)>(
+            "SELECT id, name, role, active, pc_service FROM staff WHERE club_id = @ClubId ORDER BY created_at, id", new { staff.ClubId });
+        return AdminJson.Ok(new AdminStaffList(items.Select(s => new AdminStaffMember(
+            s.Id.ToString(), s.Name, s.Role, s.Active, PcService(s.Role, s.PcService))).ToList()));
     }
 
     private static async Task<IResult> AddAsync(
@@ -51,18 +54,19 @@ public static partial class StaffAdminEndpoints
         var name = AdminInput.Text(r.Name, "name", 64);
         var role = r.Role is "owner" or "cashier" ? r.Role : throw ApiException.Validation("role", "enum");
         var hmac = tokens.PinHmac(Pin(r.Pin!));
+        var pcService = r.PcService ?? false;
         return await store.ExecuteHttpAsync(context, ShiftEndpoints.Principal(staff), keyRequired: false, body, async (c, tx) =>
         {
             var now = clock.GetUtcNow();
             var id = Guid.CreateVersion7(now);
             await PinWriteAsync(c, tx, () => c.ExecuteAsync(
                 """
-                INSERT INTO staff (id, network_id, club_id, name, role, pin_hmac, active, created_at, updated_at)
-                VALUES (@id, @NetworkId, @ClubId, @name, @role, @hmac, true, @now, @now)
+                INSERT INTO staff (id, network_id, club_id, name, role, pin_hmac, active, pc_service, created_at, updated_at)
+                VALUES (@id, @NetworkId, @ClubId, @name, @role, @hmac, true, @pcService, @now, @now)
                 """,
-                new { id, staff.NetworkId, staff.ClubId, name, role, hmac, now },
+                new { id, staff.NetworkId, staff.ClubId, name, role, hmac, pcService, now },
                 tx));
-            await Audit.WriteAsync(c, tx, staff, now, "staffAdd", detail: name, meta: new { staffId = id, role });
+            await Audit.WriteAsync(c, tx, staff, now, "staffAdd", detail: name, meta: new { staffId = id, role, pcService });
             return new IdempotentResult(StatusCodes.Status200OK, AdminJson.ToElement(new AdminStaffCreateResponse(id.ToString())));
         });
     }
@@ -106,10 +110,11 @@ public static partial class StaffAdminEndpoints
 
         await PinWriteAsync(c, tx, () => c.ExecuteAsync(
             """
-            UPDATE staff SET name = coalesce(@name, name), active = coalesce(@Active, active), pin_hmac = coalesce(@hmac, pin_hmac), updated_at = @now
+            UPDATE staff SET name = coalesce(@name, name), active = coalesce(@Active, active), pin_hmac = coalesce(@hmac, pin_hmac),
+                pc_service = coalesce(@PcService, pc_service), updated_at = @now
             WHERE id = @staffId
             """,
-            new { staffId, name, r.Active, hmac, now },
+            new { staffId, name, r.Active, hmac, r.PcService, now },
             tx));
         if (r.Active == false && before.Active)
         {
@@ -127,10 +132,16 @@ public static partial class StaffAdminEndpoints
 
         // The PIN itself never reaches the journal: only that it changed.
         await Audit.WriteAsync(c, tx, staff, now, "staffUpdate", detail: name ?? before.Name,
-            meta: new { staffId, name, active = r.Active, pinChanged = hmac is not null });
+            meta: new { staffId, name, active = r.Active, pinChanged = hmac is not null, pcService = r.PcService });
         await tx.CommitAsync();
         return AdminJson.Ok(AdminJson.OkBody);
     }
+
+    /// <summary>
+    /// May sign in to their own Windows account on a club PC (<c>POST /agents/{pcId}/staff/verify</c>): an owner always, a
+    /// cashier with the owner's mark.
+    /// </summary>
+    internal static bool PcService(string role, bool marked) => role == "owner" || marked;
 
     /// <summary>4–8 ASCII digits (<c>\d</c> would take any Unicode digit), else <c>400 pin digits4to8</c>.</summary>
     internal static string Pin(string pin) => IsPin(pin) ? pin : throw ApiException.Validation("pin", "digits4to8");

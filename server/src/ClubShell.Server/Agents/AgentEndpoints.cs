@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Net.NetworkInformation;
 using ClubShell.Contracts.Commands;
 using ClubShell.Contracts.Errors;
+using ClubShell.Contracts.Users;
+using ClubShell.Server.Admin;
 using ClubShell.Server.Auth;
 using ClubShell.Server.Infrastructure;
 using ClubShell.Server.Realtime;
@@ -43,6 +45,7 @@ public static class AgentEndpoints
         pc.MapGet("/config", ConfigAsync);
         pc.MapGet("/policies", PoliciesAsync);
         pc.MapGet("/commands", async (Guid pcId, CommandRepository commands) => TypedResults.Ok(new ServerCommandsResponse(await commands.PendingAsync(pcId))));
+        pc.MapPost("/staff/verify", StaffVerifyAsync);
         pc.MapPost("/commands/{commandId:guid}/ack", async (Guid pcId, Guid commandId, CommandAck ack, CommandRepository commands) =>
         {
             if (!await commands.AckAsync(pcId, commandId, ack))
@@ -52,6 +55,23 @@ public static class AgentEndpoints
 
             return Results.NoContent();
         });
+    }
+
+    /// <summary>
+    /// Beyond the contract: <c>POST /agents/{pcId}/staff/verify</c> — a staff member's PIN typed on this PC, before the Agent
+    /// lets them sign in to their own Windows account to service it (<see cref="StaffTokens.VerifyForPcAsync"/>). The PIN is
+    /// 4–8 digits (<c>400 pin digits4to8</c>, not counted as a wrong PIN).
+    /// </summary>
+    private static async Task<IResult> StaffVerifyAsync(HttpContext context, StaffVerifyRequest request, StaffTokens staff)
+    {
+        var pin = request?.Pin ?? throw ApiException.Validation("pin", "required");
+        if (!StaffAdminEndpoints.IsPin(pin))
+        {
+            throw ApiException.Validation("pin", "digits4to8");
+        }
+
+        var member = await staff.VerifyForPcAsync(pin, context.Features.GetRequiredFeature<AgentContext>().Pc);
+        return TypedResults.Ok(new StaffVerifyResponse(member.StaffId!.Value, member.Name, member.Role));
     }
 
     private static async Task<IResult> RegisterAsync(

@@ -2,6 +2,7 @@ using System.Text.Json;
 using ClubShell.Server.Auth;
 using ClubShell.Server.Infrastructure;
 using Microsoft.AspNetCore.Http.Features;
+using Dapper;
 using Microsoft.AspNetCore.Mvc;
 using Npgsql;
 
@@ -32,11 +33,16 @@ public static class StaffEndpoints
         {
             var staff = context.Features.GetRequiredFeature<StaffContext>();
             await using var c = await db.OpenConnectionAsync();
-            return AdminJson.Ok(new AdminMeResponse(Member(staff), await ShiftEndpoints.OpenShiftAsync(c, staff.ClubId)));
+            return AdminJson.Ok(new AdminMeResponse(await MemberAsync(c, staff), await ShiftEndpoints.OpenShiftAsync(c, staff.ClubId)));
         }).WithMetadata(new AuthRequirement(AuthMode.Staff));
     }
 
-    public static AdminStaffMember Member(StaffContext staff) => new(staff.WireId, staff.Name, staff.Role, Active: true);
+    /// <summary>The signed-in member as <c>AdminStaffMember</c>: active by definition, <c>pcService</c> read from the row.</summary>
+    public static async Task<AdminStaffMember> MemberAsync(NpgsqlConnection c, StaffContext staff)
+    {
+        var marked = staff.StaffId is { } id && await c.ExecuteScalarAsync<bool>("SELECT pc_service FROM staff WHERE id = @id", new { id });
+        return new(staff.WireId, staff.Name, staff.Role, Active: true, StaffAdminEndpoints.PcService(staff.Role, marked));
+    }
 
     private static async Task<IResult> LoginAsync(HttpContext context, [FromBody] JsonElement body, StaffTokens staff, NpgsqlDataSource db)
     {
@@ -51,6 +57,6 @@ public static class StaffEndpoints
         var (token, member) = await staff.LoginAsync(pin, request.ClubCode, context.Connection.RemoteIpAddress, deviceId)
             ?? throw ApiException.Unauthorized("invalidPin", "No active staff member with this PIN");
         await using var c = await db.OpenConnectionAsync();
-        return AdminJson.Ok(new AdminLoginResponse(token, Member(member), await ShiftEndpoints.OpenShiftAsync(c, member.ClubId)));
+        return AdminJson.Ok(new AdminLoginResponse(token, await MemberAsync(c, member), await ShiftEndpoints.OpenShiftAsync(c, member.ClubId)));
     }
 }

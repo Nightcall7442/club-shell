@@ -48,6 +48,9 @@
   (`adminGames`, сверх контракта `PATCH /admin/games/{id}`), здоровье ПК (`adminHealth`, тикеты, автообслуживание), контроль
   (`adminControl`, 7 флагов) и отчёты (`adminReports`). Воркеры `HealthWorker`, `ClubTickWorker` (автоматизация),
   `WebhookWorker` (защита от SSRF, 3 повтора), `MaintenanceWorker`.
+- Вход персонала на ПК (сверх контракта): `POST /agents/{pcId}/staff/verify` — PIN сотрудника с экрана блокировки, прежде чем
+  агент пустит его в свою учётную запись Windows; владелец всегда, кассир — с отметкой `pcService` (`/admin/staff`,
+  миграция M0018); вход пишется в журнал как `pcCommand` · `serviceSignIn`; неверные PIN — в лимиты кассы, по ПК.
 - Остальные 24 операции контракта отвечают `501` (в том числе `topup-intent`: платёжного провайдера нет, игрок пополняет
   счёт на кассе) (кассиру на owner-only из них — сначала `403 ownerOnly`).
 - Деньги (DESIGN §4.3, §5): единственная точка записи — `Wallet/Ledger.cs` (строка кошелька под `FOR UPDATE`,

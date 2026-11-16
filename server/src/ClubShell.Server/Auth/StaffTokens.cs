@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using ClubShell.Server.Admin;
+using ClubShell.Server.Agents;
 using ClubShell.Server.Infrastructure;
 using Dapper;
 using Npgsql;
@@ -116,6 +117,52 @@ public sealed class StaffTokens(NpgsqlDataSource db, AuthOptions options, TimePr
         await tx.CommitAsync();
         logger.LogInformation("Staff {StaffId} of club {ClubId} signed in from {Ip} (trusted browser: {Trusted})", staff.Id, staff.ClubId, client, source.Trusted);
         return (token, staff.ToContext());
+    }
+
+    /// <summary>
+    /// A staff member's PIN typed on the club PC <paramref name="pc"/> (<c>POST /agents/{pcId}/staff/verify</c>), before the
+    /// Agent lets them sign in to their own Windows account there: the active member of the PC's club with this PIN who may
+    /// service PCs (an owner, or a cashier with the owner's mark), written to the staff journal as <c>pcCommand</c>
+    /// <c>serviceSignIn</c>. <c>401 invalidPin</c> for a wrong PIN, <c>403 pcService</c> for a member without the right.
+    /// Wrong PINs count with the cash desk's (<see cref="StaffLoginGuard"/>): per PC (<c>pc:&lt;id&gt;</c>) and in the club's
+    /// budget for untrusted sources, so a player guessing at a PC is limited like an outsider and cannot lock out the desks;
+    /// past a limit <c>429 rateLimited</c>, the right PIN too.
+    /// </summary>
+    public async Task<StaffContext> VerifyForPcAsync(string pin, PcRow pc)
+    {
+        ArgumentNullException.ThrowIfNull(pc);
+        var now = clock.GetUtcNow();
+        await using var c = await db.OpenConnectionAsync();
+        var source = new StaffLoginGuard.Source(pc.ClubId, "pc:" + pc.Id.ToString("N"), Trusted: false, DeviceHash: null);
+        await guard.CheckAsync(c, null, source, now);
+        await using var tx = await c.BeginTransactionAsync();
+        await StaffLoginGuard.LockAsync(c, tx, pc.ClubId);
+        await guard.CheckAsync(c, tx, source, now);
+        var staff = await c.QuerySingleOrDefaultAsync<StaffRow>(
+            $"{StaffRow.Select} WHERE s.club_id = @ClubId AND s.pin_hmac = @hmac AND s.active AND NOT cl.disabled",
+            new { pc.ClubId, hmac = PinHmac(pin) }, tx);
+        if (staff is null)
+        {
+            await guard.FailAsync(c, tx, source, now);
+            await tx.CommitAsync();
+
+            // Security event (DESIGN §3.7); the PIN itself is never logged.
+            logger.LogWarning("Wrong staff PIN on PC {PcId} ({PcName}) of club {ClubId}", pc.Id, pc.Name, pc.ClubId);
+            throw ApiException.Unauthorized("invalidPin", "No active staff member with this PIN");
+        }
+
+        if (!StaffAdminEndpoints.PcService(staff.Role, staff.PcService))
+        {
+            await tx.RollbackAsync();
+            logger.LogWarning("Staff {StaffId} may not service PCs: Windows sign-in on PC {PcId} ({PcName}) refused", staff.Id, pc.Id, pc.Name);
+            throw ApiException.Forbidden("pcService", "This staff member may not sign in to the club's PCs");
+        }
+
+        var member = staff.ToContext();
+        await Audit.WriteAsync(c, tx, member, now, "pcCommand", pcId: pc.Id, detail: $"{pc.Name} · serviceSignIn", meta: new { kind = "serviceSignIn" });
+        await tx.CommitAsync();
+        logger.LogInformation("Staff {StaffId} of club {ClubId} signs in to Windows on PC {PcId} ({PcName}) for service", staff.Id, staff.ClubId, pc.Id, pc.Name);
+        return member;
     }
 
     /// <summary>The staff member of a live token or of the club API key; null when neither.</summary>
@@ -389,13 +436,14 @@ public sealed class StaffTokens(NpgsqlDataSource db, AuthOptions options, TimePr
 
     private sealed class StaffRow
     {
-        public const string Select = "SELECT s.id, s.name, s.role, s.club_id, cl.network_id FROM staff s JOIN clubs cl ON cl.id = s.club_id";
+        public const string Select = "SELECT s.id, s.name, s.role, s.club_id, cl.network_id, s.pc_service FROM staff s JOIN clubs cl ON cl.id = s.club_id";
 
         public Guid Id { get; init; }
         public string Name { get; init; } = "";
         public string Role { get; init; } = "";
         public Guid ClubId { get; init; }
         public Guid NetworkId { get; init; }
+        public bool PcService { get; init; }
 
         public StaffContext ToContext() => new(Id, Name, Role, ClubId, NetworkId);
     }

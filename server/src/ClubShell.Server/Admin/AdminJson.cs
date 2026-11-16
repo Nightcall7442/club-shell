@@ -26,7 +26,11 @@ public static class AdminJson
     public static readonly object OkBody = new { ok = true };
 }
 
-public sealed record AdminStaffMember(string Id, string Name, string Role, bool Active);
+/// <summary>
+/// A staff member; beyond the contract: <c>pcService</c> — may sign in to their own Windows account on a club PC with their PIN
+/// (<c>POST /agents/{pcId}/staff/verify</c>), always <see langword="true"/> for an owner.
+/// </summary>
+public sealed record AdminStaffMember(string Id, string Name, string Role, bool Active, bool PcService);
 
 /// <summary>
 /// X/Z report; beyond the contract: <c>topUpByMethod</c> splits the top-ups by payment method, <c>cashIn</c>/<c>cashOut</c>
@@ -272,9 +276,9 @@ public sealed record AdminProductList(IReadOnlyList<Contracts.Shop.Product> Item
 
 public sealed record AdminProductResponse(Contracts.Shop.Product Product);
 
-public sealed record AdminStaffCreateRequest(string? Name, string? Role, string? Pin);
+public sealed record AdminStaffCreateRequest(string? Name, string? Role, string? Pin, bool? PcService = null);
 
-public sealed record AdminStaffUpdateRequest(string? Name, bool? Active, string? Pin);
+public sealed record AdminStaffUpdateRequest(string? Name, bool? Active, string? Pin, bool? PcService = null);
 
 /// <summary><c>telegram</c> is prohibited: not a member, so the binder skips it (accepted and ignored).</summary>
 public sealed record AdminClientCreateRequest(
