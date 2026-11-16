@@ -641,6 +641,11 @@ pub struct AuthResponse {
     /// Argon2id PHC string for offline password verification, when the club allows offline login.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub offline_hash: Option<String>,
+    /// Beyond the contract (SHELL_CHANGES 92): the sign-in ended the player's session on another PC
+    /// («Завершить там и войти здесь»), whose Agent is now collecting their saves; this PC lays
+    /// them out only once `GET /sessions/{id}/handoff` says that PC released them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub handoff_session_id: Option<Uuid>,
 }
 
 /// Response of `GET /auth/qr/{token}`.

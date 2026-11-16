@@ -131,6 +131,9 @@ public static class Endpoints
     /// <summary><c>POST /users/{userId}/pin/verify</c>.</summary>
     public static string UserPinVerify(Guid userId) => $"users/{Id(userId)}/pin/verify";
 
+    /// <summary><c>GET /sessions/{id}/handoff</c>.</summary>
+    public static string SessionHandoff(Guid sessionId) => $"sessions/{Id(sessionId)}/handoff";
+
     /// <summary><c>POST /sessions/{id}/pause</c>.</summary>
     public static string SessionPause(Guid sessionId) => $"sessions/{Id(sessionId)}/pause";
 

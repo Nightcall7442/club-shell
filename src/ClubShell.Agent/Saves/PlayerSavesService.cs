@@ -32,8 +32,11 @@ public interface IPlayerSaves
     /// <summary>
     /// A successful <c>auth.login</c>: starts laying the player's saves out and returns at once. Never for a guest
     /// (<paramref name="guest"/>, or the user's role). The same player signing in again changes nothing.
+    /// <paramref name="handoff"/> (SHELL_CHANGES 92): the sign-in ended the player's session on another PC, which is
+    /// collecting their saves; the attach waits for it (state <see cref="PlayerSavesState.Transferring"/>), at most the
+    /// detach timeout + 20 s, then goes out anyway.
     /// </summary>
-    void SignedIn(User user, bool guest = false);
+    void SignedIn(User user, bool guest = false, Func<CancellationToken, Task>? handoff = null);
 
     /// <summary>A game launch waits here for the saves to be laid out (up to the attach timeout); never throws but on cancel.</summary>
     Task WaitForAttachAsync(CancellationToken cancellationToken);
@@ -177,6 +180,9 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
 
     private TimeSpan DetachTimeout => TimeSpan.FromSeconds(Config.DetachTimeoutSec);
 
+    /// <summary>How long the attach waits for the previous PC to hand the saves back (SHELL_CHANGES 92).</summary>
+    private TimeSpan HandoffTimeout => DetachTimeout + TimeSpan.FromSeconds(20);
+
     /// <summary><c>games.playerSaves.mode</c>: <c>on</c>, <c>off</c>, or <c>auto</c> — on where the helper service is installed.</summary>
     public bool Enabled => Config.Mode switch
     {
@@ -206,7 +212,7 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <inheritdoc />
-    public void SignedIn(User user, bool guest = false)
+    public void SignedIn(User user, bool guest = false, Func<CancellationToken, Task>? handoff = null)
     {
         ArgumentNullException.ThrowIfNull(user);
         guest |= user.Role == UserRole.Guest;
@@ -243,9 +249,9 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
             }
 
             previous = _current?.Release ?? Task.CompletedTask;
-            attachment = new Attachment(playerId);
+            attachment = new Attachment(playerId) { Handoff = handoff };
             _current = attachment;
-            SetStateLocked(PlayerSavesState.Loading);
+            SetStateLocked(handoff is null ? PlayerSavesState.Loading : PlayerSavesState.Transferring);
         }
 
         Persist(attachment);
@@ -258,9 +264,11 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
     public async Task WaitForAttachAsync(CancellationToken cancellationToken)
     {
         Task? attach;
+        TimeSpan budget;
         lock (_gate)
         {
             attach = _current is { Release: null } current ? current.AttachDone.Task : null;
+            budget = _current is { Handoff: not null } ? AttachTimeout + HandoffTimeout : AttachTimeout;
         }
 
         if (attach is null || attach.IsCompleted)
@@ -270,11 +278,11 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
 
         try
         {
-            await attach.WaitAsync(AttachTimeout + TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+            await attach.WaitAsync(budget + TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {
-            _logger.LogWarning("Saves: the launch stopped waiting for the attach after {Timeout}", AttachTimeout);
+            _logger.LogWarning("Saves: the launch stopped waiting for the attach after {Timeout}", budget);
         }
     }
 
@@ -387,6 +395,11 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
             _logger.LogDebug(ex, "Saves: previous detach failed");
         }
 
+        if (attachment.Handoff is { } handoff)
+        {
+            await WaitHandoffAsync(attachment, handoff).ConfigureAwait(false);
+        }
+
         string sid = _kiosk.Sid;
         HelperResult result;
         long started = _clock.GetTimestamp();
@@ -437,6 +450,34 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
         }
     }
 
+    /// <summary>The previous PC collects the player's saves first; then the attach (state back to loading).</summary>
+    private async Task WaitHandoffAsync(Attachment attachment, Func<CancellationToken, Task> handoff)
+    {
+        long started = _clock.GetTimestamp();
+        using var budget = new CancellationTokenSource(HandoffTimeout);
+        try
+        {
+            await handoff(budget.Token).WaitAsync(HandoffTimeout).ConfigureAwait(false);
+            _logger.LogInformation("Saves of player {PlayerId}: the previous PC handed them back after {Elapsed}; attaching", attachment.PlayerId, _clock.GetElapsedTime(started));
+        }
+        catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
+        {
+            _logger.LogWarning("Saves of player {PlayerId}: the previous PC did not hand them back within {Timeout}; attaching anyway, its last progress may be missing", attachment.PlayerId, HandoffTimeout);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger.LogWarning(ex, "Saves of player {PlayerId}: waiting for the previous PC failed; attaching anyway", attachment.PlayerId);
+        }
+
+        lock (_gate)
+        {
+            if (ReferenceEquals(_current, attachment) && attachment.Release is null)
+            {
+                SetStateLocked(PlayerSavesState.Loading);
+            }
+        }
+    }
+
     private async Task ReleaseAsync(Attachment attachment, SessionEndReason reason, bool closeGames)
     {
         long started = _clock.GetTimestamp();
@@ -445,7 +486,8 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
             // A detach sent before its attach would find nothing laid out and leave the attach's files behind.
             try
             {
-                await attachment.AttachDone.Task.WaitAsync(AttachTimeout + TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+                TimeSpan wait = AttachTimeout + TimeSpan.FromSeconds(5) + (attachment.Handoff is null ? TimeSpan.Zero : HandoffTimeout);
+                await attachment.AttachDone.Task.WaitAsync(wait).ConfigureAwait(false);
             }
             catch (TimeoutException)
             {
@@ -740,6 +782,9 @@ public sealed class PlayerSavesService : IPlayerSaves, IHostedService
         public TaskCompletionSource AttachDone { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public Task? Release { get; set; }
+
+        /// <summary>The previous PC hands the saves back first (SHELL_CHANGES 92).</summary>
+        public Func<CancellationToken, Task>? Handoff { get; init; }
 
         public TaskCompletionSource Released { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }

@@ -1495,6 +1495,12 @@ public enum PlayerSavesState
 
     /// <summary>At the end of the session: the saves are over the club's limit and were not kept.</summary>
     TooLarge,
+
+    /// <summary>
+    /// The player ended their session on another PC to sign in here (SHELL_CHANGES 92): their saves are being handed back
+    /// there first; a game launch waits, then <see cref="Loading"/>.
+    /// </summary>
+    Transferring,
 }
 
 /// <summary>Payload of <c>saves.status</c>, sent on every change of <see cref="State"/>.</summary>

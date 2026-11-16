@@ -290,8 +290,39 @@ public sealed class SessionHandlers : IIpcHandlerGroup
 
         session = await ResumeAfterSignInAsync(auth.User, cancellationToken).ConfigureAwait(false) ?? session;
         _logger.LogInformation("User {UserId} ({Username}) logged in via {Kind} (online); session {SessionId}", auth.User.Id, auth.User.Username, request.Kind, session?.Id);
-        Saves?.SignedIn(auth.User, guest: request.Kind == AuthKind.Guest);
+        Func<CancellationToken, Task>? handoff = auth.HandoffSessionId is { } ended ? ct => WaitHandoffAsync(ended, ct) : null;
+        Saves?.SignedIn(auth.User, guest: request.Kind == AuthKind.Guest, handoff);
         return new AuthLoginResponse(auth.User, session, auth.ExpiresAt, ConnectivityState.Online);
+    }
+
+    /// <summary>
+    /// SHELL_CHANGES 92: the sign-in ended the player's session <paramref name="ended"/> on another PC; polled every 2 s
+    /// until that PC handed their saves back. A server without the route (404) or a refusal counts as released; a network
+    /// error is tried again until the caller's budget runs out.
+    /// </summary>
+    private async Task WaitHandoffAsync(Guid ended, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            try
+            {
+                if ((await _server.GetSessionHandoffAsync(ended, cancellationToken).ConfigureAwait(false)).Released)
+                {
+                    return;
+                }
+            }
+            catch (ServerApiException ex) when (!ex.IsRetryable)
+            {
+                _logger.LogInformation("Saves handoff of session {SessionId}: the server cannot tell ({Code}); attaching", ended, ex.Code);
+                return;
+            }
+            catch (Exception ex) when (ex is HttpRequestException or ServerApiException)
+            {
+                _logger.LogDebug(ex, "Saves handoff of session {SessionId}: the server is unreachable; asking again", ended);
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private async Task<AuthResponse> LoginOnlineAsync(AuthLoginRequest request, Guid pcId, string hwid, CancellationToken cancellationToken)

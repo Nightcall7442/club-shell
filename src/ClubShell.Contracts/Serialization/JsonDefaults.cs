@@ -308,6 +308,7 @@ public sealed class ClubTimeConverter : JsonConverter<TimeOnly>
 [JsonSerializable(typeof(SessionQuoteIpcRequest))]
 [JsonSerializable(typeof(SessionQuoteRequest))]
 [JsonSerializable(typeof(SessionQuote))]
+[JsonSerializable(typeof(SessionHandoff))]
 [JsonSerializable(typeof(GamesSort))]
 [JsonSerializable(typeof(GamesListRequest))]
 [JsonSerializable(typeof(GamesListResponse))]

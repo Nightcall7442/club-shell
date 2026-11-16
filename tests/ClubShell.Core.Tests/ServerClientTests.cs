@@ -97,6 +97,7 @@ public sealed class ServerClientTests : IDisposable
         { Endpoints.UserStats(UserId), "users/3f9a1d2e-6c4b-4f5a-9a1b-2c3d4e5f6a7b/stats" },
         { Endpoints.UserAchievements(UserId), "users/3f9a1d2e-6c4b-4f5a-9a1b-2c3d4e5f6a7b/achievements" },
         { Endpoints.UserLoyalty(UserId), "users/3f9a1d2e-6c4b-4f5a-9a1b-2c3d4e5f6a7b/loyalty" },
+        { Endpoints.SessionHandoff(SessionId), "sessions/9c1e0000-0000-4000-8000-000000000001/handoff" },
         { Endpoints.SessionPause(SessionId), "sessions/9c1e0000-0000-4000-8000-000000000001/pause" },
         { Endpoints.SessionResume(SessionId), "sessions/9c1e0000-0000-4000-8000-000000000001/resume" },
         { Endpoints.SessionEnd(SessionId), "sessions/9c1e0000-0000-4000-8000-000000000001/end" },

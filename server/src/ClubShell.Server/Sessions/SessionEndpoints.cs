@@ -44,6 +44,34 @@ public static class SessionEndpoints
         // The agent ends sessions without a player too (time-up, admin command, power): the user token is optional.
         api.MapPost("/{id:guid}/end", EndAsync).WithMetadata(new AuthRequirement(AuthMode.AgentOptionalUser));
         api.MapPost("/{id:guid}/events", EventsAsync).WithMetadata(new AuthRequirement(AuthMode.Agent));
+        api.MapGet("/{id:guid}/handoff", HandoffAsync).WithMetadata(new AuthRequirement(AuthMode.User));
+    }
+
+    /// <summary>
+    /// Beyond the contract (SHELL_CHANGES 92): <c>GET /sessions/{id}/handoff</c> — the session a sign-in on this PC ended
+    /// elsewhere (<c>AuthResponse.handoffSessionId</c>): has that PC handed the player's saves back? Its Agent acknowledges
+    /// the <c>endSession</c> command once <c>profile.detach</c> is done; a command that is no longer waiting (expired,
+    /// superseded) or none at all counts as released, so the new PC never waits on a PC that will not answer. The player's
+    /// own session only (<c>404 session</c> otherwise).
+    /// </summary>
+    private static async Task<IResult> HandoffAsync(HttpContext context, Guid id, NpgsqlDataSource db, TimeProvider clock)
+    {
+        var user = context.Features.GetRequiredFeature<UserContext>();
+        await using var c = await db.OpenConnectionAsync();
+        if (!await c.ExecuteScalarAsync<bool>("SELECT EXISTS (SELECT 1 FROM sessions WHERE id = @id AND user_id = @UserId)", new { id, user.UserId }))
+        {
+            throw ApiException.NotFound("session");
+        }
+
+        var waiting = await c.ExecuteScalarAsync<bool>(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM agent_commands
+                WHERE name = 'endSession' AND payload ->> 'sessionId' = @sessionId
+                  AND acked_at IS NULL AND superseded_at IS NULL AND (expires_at IS NULL OR expires_at > @now))
+            """,
+            new { sessionId = id.ToString(), now = clock.GetUtcNow() });
+        return TypedResults.Ok(new SessionHandoff(id, Released: !waiting));
     }
 
     /// <summary><c>GET /sessions/current?pcId=</c>: the open session of the agent's own PC, or 204.</summary>

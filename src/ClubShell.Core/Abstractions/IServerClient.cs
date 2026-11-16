@@ -249,6 +249,12 @@ public interface ISessionApi
 
     /// <summary><c>POST /sessions/quote</c>: the server's price for a session on a PC for a player; nothing is created or charged.</summary>
     Task<SessionQuote> QuoteSessionAsync(SessionQuoteRequest request, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// <c>GET /sessions/{id}/handoff</c> (beyond the contract, SHELL_CHANGES 92), with the player's token: has the PC whose
+    /// session this sign-in ended handed the player's saves back?
+    /// </summary>
+    Task<SessionHandoff> GetSessionHandoffAsync(Guid sessionId, CancellationToken cancellationToken);
 }
 
 /// <summary>Games catalogue, account pool, launch reports and apps (SERVER_API.md §4.6–4.7).</summary>

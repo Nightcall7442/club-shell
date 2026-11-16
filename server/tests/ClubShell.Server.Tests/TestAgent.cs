@@ -168,6 +168,15 @@ public sealed class TestAgent(ServerFixture server, JsonElement registration, st
         return ((int)response.StatusCode, json);
     }
 
+    /// <summary>A signed GET to a route beyond the contract, on a client that does not validate against openapi.json.</summary>
+    public async Task<(int Status, JsonElement Body)> RawGetAsync(string target)
+    {
+        using var raw = server.CreateDefaultClient();
+        using var response = await raw.SendAsync(Request(HttpMethod.Get, target));
+        var text = await response.Content.ReadAsStringAsync();
+        return ((int)response.StatusCode, text.Length == 0 ? default : JsonElement.Parse(text));
+    }
+
     /// <summary>Signs <paramref name="player"/> in on this PC with a password (200 expected); keeps the user token.</summary>
     public async Task<JsonElement> LoginAsync(TestPlayer player)
     {

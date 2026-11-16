@@ -550,6 +550,7 @@
     "nowPlaying": "Now playing",
     "launchStep": {
       "saves": "Loading your saves…",
+      "savesTransfer": "Bringing your saves over…",
       "antiCheat": "Checking anti-cheat",
       "account": "Signing in with a club account",
       "launcher": "Starting the launcher",
@@ -559,7 +560,9 @@
       "unavailable": "Saves unavailable",
       "unavailableBody": "You can play, but this session's progress will not be kept.",
       "tooLarge": "Saves are over 200 MB and were not kept",
-      "tooLargeBody": "The club server keeps the previous version."
+      "tooLargeBody": "The club server keeps the previous version.",
+      "transferring": "Bringing your saves over",
+      "transferringBody": "Your saves are being collected from the PC you left. Games start as soon as they are here."
     },
     "launchReady": "The game is running",
     "launchCancel": "Cancel launch",

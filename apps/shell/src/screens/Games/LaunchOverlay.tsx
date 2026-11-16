@@ -214,7 +214,9 @@ export function LaunchOverlay(): JSX.Element {
   const running = useGamesStore((s) => s.running);
   const byId = useGamesStore((s) => s.byId);
   const kill = useGamesStore((s) => s.kill);
-  const savesLoading = useGamesStore((s) => s.saves === 'loading');
+  // `transferring` (SHELL_CHANGES 92): the saves come back from the PC the player left first; the launch waits as well.
+  const savesLoading = useGamesStore((s) => s.saves === 'loading' || s.saves === 'transferring');
+  const savesTransferring = useGamesStore((s) => s.saves === 'transferring');
   const savesChangedAt = useGamesStore((s) => s.savesChangedAt);
   const pushError = useNotificationsStore((s) => s.pushError);
   const [view, setView] = useState<LaunchView | null>(null);
@@ -367,7 +369,8 @@ export function LaunchOverlay(): JSX.Element {
       launcher={game ? t(launcherLabelKey(game.launcher)) : ''}
       steps={steps.map((step, i) => ({
         key: step,
-        label: t(`games.launchStep.${step}`),
+        label:
+          step === 'saves' && savesTransferring ? t('games.launchStep.savesTransfer') : t(`games.launchStep.${step}`),
         state: i < stepIndex ? 'done' : i === stepIndex && phase === 'launching' ? 'active' : 'pending',
       }))}
       percent={percent}

@@ -507,6 +507,12 @@ export interface AuthResponse {
   expiresAt: string;
   /** Argon2id PHC string for offline password verification, when the club allows offline login. */
   offlineHash?: string | null;
+  /**
+   * Beyond the contract (SHELL_CHANGES 92): the sign-in ended the player's session on another PC («Завершить там и
+   * войти здесь»), whose Agent is now collecting their saves; this PC lays them out only once `GET
+   * /sessions/{id}/handoff` says that PC released them.
+   */
+  handoffSessionId?: string | null;
 }
 
 /** Response of `GET /auth/qr/{token}`. */

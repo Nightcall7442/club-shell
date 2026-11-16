@@ -91,6 +91,7 @@ function authResponse(
 ): AuthResponse {
   if (user.flags.includes('banned')) throw errors.forbidden('banned');
   const elsewhere = openSessionForUser(user.id);
+  let handoff: string | null = null;
   if (elsewhere && elsewhere.pcId !== pc.id) {
     if (!extra.endElsewhere) {
       throw errors.conflict('activeSessionElsewhere', {
@@ -100,6 +101,7 @@ function authResponse(
     }
     assertPcFree(pc, user.id);
     endSession(elsewhere, SessionEndReason.User);
+    handoff = elsewhere.id;
   }
   assertPcFree(pc, user.id);
   signOutElsewhere(user.id, pc.id);
@@ -112,6 +114,7 @@ function authResponse(
     refreshToken: tokens.refreshToken,
     expiresAt: tokens.expiresAt,
     offlineHash: extra.offlineHash ?? null,
+    handoffSessionId: handoff,
   };
 }
 

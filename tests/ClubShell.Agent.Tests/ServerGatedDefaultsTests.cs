@@ -31,7 +31,7 @@ public sealed class ServerGatedDefaultsTests : IDisposable
 
         ShellFeatures features = store.Features;
 
-        features.Should().Be(new ShellFeatures(Shop: false, Chat: false, Booking: false, Tournaments: false, Profile: true, Topup: false, Apps: true, CallAdmin: true));
+        features.Should().Be(new ShellFeatures(Shop: false, Chat: false, Booking: false, Tournaments: false, Profile: true, Topup: false, Apps: true, CallAdmin: true, LockScreenPower: true));
     }
 
     [Fact]

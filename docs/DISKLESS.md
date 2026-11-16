@@ -265,6 +265,12 @@ tells it when, over `\\.\pipe\club-diskless-helper` (`src/ClubShell.Agent/Saves`
   the progress) — and detaches at the session end as usual. A file left without that player's session (another player,
   nobody restored) is detached at start. After a power cut the helper has forgotten its lease too; the detach then
   fails with `notAttached` and the server keeps the previous version.
+* **«Завершить там и войти здесь» (SHELL_CHANGES 92).** When the sign-in here ended the player's session on another PC
+  (`AuthResponse.handoffSessionId`), that PC still holds the saves until its detach finishes: its Agent acks
+  `endSession` only after the detach (at most `DetachTimeoutSec` + 20 s). Before the attach here the state is
+  `transferring` (the kiosk shows «Сохранения переносятся с другого ПК…»), and the Agent polls
+  `GET /sessions/{id}/handoff` every 2 s until `released`, for at most the detach timeout + 20 s; then it attaches as
+  usual (a failed or timed-out wait still attaches — the server's copy is the previous version at worst).
 * **Signed in elsewhere.** A player whose sign-in here is revoked (signed in on another PC, token expired, blacklisted)
   with no session of theirs on this PC: the games are closed, `profile.detach` sent, and the kiosk profile reset after
   it.

@@ -954,7 +954,7 @@ Errors: `rateLimited` (1 per 30 s), `validation`.
 | `shop.orderUpdated` | `Order` | order status changed (server push `orderUpdated`, `SERVER_API.md` §6.3); also mirrored as `notification.push` |
 | `sys.readinessChanged` | `PcReadiness { state: "preparing" \| "ready" \| "notReady", disks: [{ library, letter?, state }], deadline? }` | the games disks before sign-in (`docs/DISKLESS.md`, "Games disks before sign-in"); also in the `auth.status` answer (`readiness`, absent from older agents = ready) |
 | `games.changed` | `{ catalogVersion }` | the game list changed (a disk came or went, the catalogue was updated): the Shell re-reads it on any screen |
-| `saves.status` | `{ state: "none" \| "loading" \| "ready" \| "unavailable" \| "tooLarge" }` | the player's saves through the diskless helper (`docs/DISKLESS.md`, "Player saves"); `loading` holds `games.launch`, `unavailable` and `tooLarge` are told to the player once |
+| `saves.status` | `{ state: "none" \| "transferring" \| "loading" \| "ready" \| "unavailable" \| "tooLarge" }` | the player's saves through the diskless helper (`docs/DISKLESS.md`, "Player saves"); `transferring` (waiting for the PC where «end it there and sign in here» ended the session to hand the saves back) and `loading` hold `games.launch`, `unavailable` and `tooLarge` are told to the player once |
 
 `shell.command.args` per command:
 

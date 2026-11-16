@@ -317,6 +317,8 @@ deleted and `userRevoked {userId, reason: "signedInElsewhere"}` pushed to it —
 transaction: when this sign-in is refused after all (`pcOccupied`, `banned`, `401`), nothing is ended. Without it (or
 `false`) the answer is `409` as before. Every successful sign-in, with or without it, also signs the player out of every
 other PC where they still hold a token (`userRevoked {reason: "signedInElsewhere"}`, §2.3).
+The answer then carries `handoffSessionId`, the session ended there: the Agent here waits on
+`GET /sessions/{id}/handoff` for that PC to hand the player's saves back before attaching them (SHELL_CHANGES 92).
 
 #### `POST /auth/qr/start` — auth: agent
 
@@ -429,6 +431,11 @@ Request `{ reason: SessionEndReason, endedAt?: datetime, secondsUsed: int }` →
   between its last transition (its start, at the latest) and now — the replayed end of an offline game is not billed
   up to the moment the PC came back. (The offline replay's `startedAt` is likewise taken up to now, and refused older
   than `Sessions:MaxReplayHours`.)
+
+#### `GET /sessions/{id}/handoff` — auth: user — beyond the contract
+`{ sessionId, released }`: whether the PC of the player's ended session (`AuthResponse.handoffSessionId`) has acked its
+`endSession` — its Agent does so after detaching the saves. `released` is also true when that command was superseded or
+expired. Someone else's session (or none) — `404 notFound`.
 
 #### `POST /sessions/{id}/extend` — auth: user, idempotent
 

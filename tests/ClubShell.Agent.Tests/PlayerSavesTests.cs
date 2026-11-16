@@ -182,6 +182,36 @@ public sealed class PlayerSavesTests
     }
 
     [Fact]
+    public async Task After_ending_the_session_on_another_pc_the_attach_waits_for_that_pc_to_hand_the_saves_back()
+    {
+        var harness = new Harness();
+        var released = new TaskCompletionSource();
+        harness.Saves.SignedIn(Member(), handoff: _ => released.Task);
+
+        harness.Saves.State.Should().Be(PlayerSavesState.Transferring);
+        Task launch = harness.Saves.WaitForAttachAsync(CancellationToken.None);
+        await Task.Delay(200);
+        harness.Channel.Ops.Should().BeEmpty("the previous PC still holds the player's saves");
+        launch.IsCompleted.Should().BeFalse("a game launch waits for the handoff too");
+
+        released.SetResult();
+        await launch;
+        harness.Channel.Ops.Should().Equal("profile.attach");
+        harness.Saves.State.Should().Be(PlayerSavesState.Ready);
+        (await harness.Events.WaitForAsync(PlayerSavesState.Ready)).Should().Equal(
+            PlayerSavesState.Transferring, PlayerSavesState.Loading, PlayerSavesState.Ready);
+    }
+
+    [Fact]
+    public async Task A_handoff_that_fails_still_attaches()
+    {
+        var harness = new Harness();
+        harness.Saves.SignedIn(Member(), handoff: _ => Task.FromException(new InvalidOperationException("server gone")));
+        await harness.Saves.WaitForAttachAsync(CancellationToken.None);
+        harness.Channel.Ops.Should().Equal("profile.attach");
+    }
+
+    [Fact]
     public async Task Signing_in_again_as_the_same_player_does_not_attach_twice()
     {
         var harness = new Harness();

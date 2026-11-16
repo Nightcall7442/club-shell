@@ -375,6 +375,10 @@ public sealed class ServerClient : IServerClient, IDisposable
     }
 
     /// <inheritdoc />
+    public Task<SessionHandoff> GetSessionHandoffAsync(Guid sessionId, CancellationToken cancellationToken) =>
+        GetAsync<SessionHandoff>(Endpoints.SessionHandoff(sessionId), AuthMode.User, cancellationToken);
+
+    /// <inheritdoc />
     public Task<SessionQuote> QuoteSessionAsync(SessionQuoteRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
