@@ -194,7 +194,9 @@ jobs:
         env:
           UPDATE_BASE_URL: ${{ secrets.UPDATE_BASE_URL }}
         run: |
-          $baseUrl = if ($env:UPDATE_BASE_URL) { $env:UPDATE_BASE_URL } else { "https://github.com/$env:GITHUB_REPOSITORY/releases/download/v$env:VERSION" }
+          # Without an update server the packages are the GitHub release's own assets, which GitHub keeps flat
+          # (download/v<version>/<file>): the club server imports them from there («Проверить обновления»).
+          $baseUrl = if ($env:UPDATE_BASE_URL) { $env:UPDATE_BASE_URL } else { "https://github.com/$env:GITHUB_REPOSITORY/releases/download/v$env:VERSION/{file}" }
           ./tools/scripts/package.ps1 -Version $env:VERSION -Channel $env:CHANNEL -BaseUrl $baseUrl -NoZip
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -260,6 +262,7 @@ jobs:
           files: |
             release/*.msi
             release/*.exe
+            release/*.zip
             release/manifest.json
             release/SHA256SUMS.txt
 
@@ -316,8 +319,9 @@ jobs:
           ./tools/scripts/publish.ps1 -Target Http -Destination $env:UPDATE_BASE_URL -Version $env:VERSION -Channel $env:CHANNEL
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      # Pushing to an update server is optional: a club server imports the GitHub release itself (the owner's
+      # «Проверить обновления» in the admin console, Updates:GitHubRepository).
       - name: No publish credentials
         if: env.AWS_ACCESS_KEY_ID == '' && env.CLUBSHELL_PUBLISH_TOKEN == ''
         run: |
-          Write-Output '::error::Set AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY (S3) or CLUBSHELL_PUBLISH_TOKEN (HTTP) in the production environment'
-          exit 1
+          Write-Output '::notice::No S3 or HTTP publish credentials: the release stays on GitHub, where club servers import it from

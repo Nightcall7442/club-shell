@@ -1308,6 +1308,14 @@ export const UZ: Record<string, string> = {
   'Ширина зала, клеток': 'Zal kengligi, katak',
   'Эта клетка уже занята другим ПК': 'Bu katakni boshqa kompyuter egallagan',
   'тащите мышью или': 'sichqoncha bilan suring yoki',
+  'Загружена версия {version}: теперь её можно поставить на ПК':
+    '{version} versiya yuklandi: endi uni kompyuterlarga oʻrnatish mumkin',
+  'На сервере ещё нет ни одного выпуска ClubShell. Нажмите «Проверить обновления» — сервер скачает свежий.':
+    'Serverda hali ClubShell nashri yoʻq. «Yangilanishlarni tekshirish» tugmasini bosing — server eng yangisini yuklab oladi.',
+  'Не удалось загрузить обновление: {error}': 'Yangilanishni yuklab boʻlmadi: {error}',
+  'Новой версии нет: на сервере самая свежая': 'Yangi versiya yoʻq: serverda eng yangisi',
+  'Проверить обновления': 'Yangilanishlarni tekshirish',
+  'Сервер скачивает новую версию с GitHub…': "Server GitHub'dan yangi versiyani yuklab olmoqda…",
 };
 export const EN: Record<string, string> = {
   'Выручка за период': 'Revenue for the period',
@@ -2614,4 +2622,12 @@ export const EN: Record<string, string> = {
   'Ширина зала, клеток': 'Hall width, cells',
   'Эта клетка уже занята другим ПК': 'This cell is taken by another PC',
   'тащите мышью или': 'drag with the mouse or',
+  'Загружена версия {version}: теперь её можно поставить на ПК':
+    'Version {version} downloaded: it can now be installed on the PCs',
+  'На сервере ещё нет ни одного выпуска ClubShell. Нажмите «Проверить обновления» — сервер скачает свежий.':
+    'The server has no ClubShell release yet. Press «Check for updates» and the server will download the latest one.',
+  'Не удалось загрузить обновление: {error}': 'Could not download the update: {error}',
+  'Новой версии нет: на сервере самая свежая': 'No new version: the server has the latest',
+  'Проверить обновления': 'Check for updates',
+  'Сервер скачивает новую версию с GitHub…': 'The server is downloading the new version from GitHub…',
 };

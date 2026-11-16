@@ -52,6 +52,7 @@ var corsOptions = builder.Configuration.GetSection("Cors").Get<CorsOptions>() ??
 var maintenanceOptions = builder.Configuration.GetSection("Maintenance").Get<MaintenanceOptions>() ?? new MaintenanceOptions();
 var updateOptions = builder.Configuration.GetSection("Updates").Get<UpdateOptions>() ?? new UpdateOptions();
 updateOptions.StoragePath = Path.Combine(builder.Environment.ContentRootPath, updateOptions.StoragePath);
+var gitHubReleaseOptions = builder.Configuration.GetSection("Updates:GitHub").Get<GitHubReleaseOptions>() ?? new GitHubReleaseOptions();
 
 // Policy seed (D-14): data/policy.json when the operator put one there, else the example policy shipped with the build.
 var policySeedPath = Path.Combine(builder.Environment.ContentRootPath, builder.Configuration["Catalog:PolicySeedPath"] ?? "data/policy.json");
@@ -80,6 +81,8 @@ builder.Services.AddSingleton(corsOptions);
 builder.Services.AddSingleton(maintenanceOptions);
 builder.Services.AddSingleton(updateOptions);
 builder.Services.AddSingleton<Releases>();
+builder.Services.AddSingleton(gitHubReleaseOptions);
+builder.Services.AddSingleton<GitHubImport>();
 builder.Services.AddClubDatabase(connectionString);
 builder.Services.AddSingleton<ClubRepository>();
 builder.Services.AddSingleton<PcRepository>();
@@ -112,6 +115,7 @@ if (workers)
     builder.Services.AddHostedService(sp => sp.GetRequiredService<ClubTickWorker>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<WebhookWorker>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<MaintenanceWorker>());
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<GitHubImport>());
 }
 builder.Services.Configure<ForwardedHeadersOptions>(o =>
 {
