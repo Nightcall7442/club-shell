@@ -97,6 +97,7 @@ const ControlPage = lazy(() => import('@/pages/ControlPage'));
 const NetworkPage = lazy(() => import('@/pages/NetworkPage'));
 const HealthPage = lazy(() => import('@/pages/HealthPage'));
 const StaffPage = lazy(() => import('@/pages/StaffPage'));
+const UpdatesPage = lazy(() => import('@/pages/UpdatesPage'));
 
 interface SectionDef {
   id: string;
@@ -137,6 +138,7 @@ const GROUPS: { title: string; items: SectionDef[] }[] = [
         icon: <BellRuleIcon />,
         page: IntegrationsPage,
       },
+      { id: 'updates', title: 'Обновления ClubShell', ownerOnly: true, icon: <DownloadIcon />, page: UpdatesPage },
     ],
   },
   {

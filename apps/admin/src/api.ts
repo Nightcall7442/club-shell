@@ -609,6 +609,38 @@ export interface StaffMember {
   pcService?: boolean;
 }
 
+/** A ClubShell release published to this server (UPDATES.md §8). */
+export interface UpdateRelease {
+  channel: 'stable' | 'beta';
+  version: string;
+  publishedAt: string;
+  agent: string | null;
+  shell: string | null;
+  notes: string;
+  mandatory: boolean;
+}
+
+/** A PC and the ClubShell it runs. */
+export interface UpdatePc {
+  id: string;
+  name: string;
+  number: number;
+  online: boolean;
+  busy: boolean;
+  agentVersion: string;
+  shellVersion: string;
+}
+
+export interface UpdatesState {
+  /** The club's PCs check for a new release by themselves and install it at night with nobody on them. */
+  auto: boolean;
+  releases: UpdateRelease[];
+  pcs: UpdatePc[];
+}
+
+/** What «Обновить ClubShell» did on one PC. */
+export type UpdateResult = 'sent' | 'afterSession' | 'upToDate' | 'offline';
+
 export interface ShiftTotals {
   topUpCash: number;
   topUpOther: number;
@@ -1192,6 +1224,15 @@ export const clubApi = {
     id: string,
     input: Partial<{ name: string; active: boolean; pin: string; pcService: boolean }>,
   ): Promise<unknown> => patch(`/admin/staff/${id}`, input),
+
+  /** ClubShell updates (owner only, beyond the contract). */
+  updates: (): Promise<UpdatesState> => call('/admin/updates'),
+  setAutoUpdate: (auto: boolean): Promise<unknown> => patch('/admin/updates', { auto }),
+  applyUpdate: (input: {
+    channel?: 'stable' | 'beta';
+    pcIds?: string[];
+  }): Promise<{ channel: string; version: string; results: { pcId: string; name: string; result: UpdateResult }[] }> =>
+    post('/admin/updates/apply', input),
 
   /** `expectedCash` — what the open shift's drawer should hold now (absent from an older server). */
   shift: (): Promise<{ shift: Shift | null; x: ShiftTotals | null; history: Shift[]; expectedCash?: number | null }> =>

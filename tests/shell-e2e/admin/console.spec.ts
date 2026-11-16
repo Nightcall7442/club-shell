@@ -2634,3 +2634,40 @@ test('the owner allows a cashier to sign in to Windows on the PCs, and the PC ch
     journal.log.some((e) => e.action === 'pcCommand' && e.staffName === name && e.detail.endsWith('serviceSignIn')),
   ).toBe(true);
 });
+
+test('the owner sees the ClubShell release and the PCs behind it, turns on automatic updates and updates the PCs', async ({
+  page,
+}) => {
+  await signIn(page, OWNER_PIN);
+  await page.goto('/#/updates');
+  await expect(page.getByRole('heading', { name: 'Обновления ClubShell' })).toBeVisible();
+  const auto = page.getByRole('switch', {
+    name: 'Обновлять автоматически ночью (04:00–07:00), когда за ПК никого нет',
+  });
+  await expect(auto).toHaveAttribute('aria-checked', 'false');
+  await auto.click();
+  await expect(page.getByText('Автообновление включено', { exact: false })).toBeVisible();
+  await expect(auto).toHaveAttribute('aria-checked', 'true');
+  await auto.click();
+  await expect(auto).toHaveAttribute('aria-checked', 'false');
+
+  if (REAL) {
+    // The e2e server has no publisher token: nothing published.
+    await expect(
+      page.getByText('На сервер ещё не опубликован ни один выпуск ClubShell', { exact: false }),
+    ).toBeVisible();
+    return;
+  }
+
+  // The mock's demo release is newer than its PCs; none is connected over the socket, so nothing is sent.
+  await expect(page.getByText('ClubShell 1.5.0')).toBeVisible();
+  await expect(page.getByText('нужно обновить:', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: 'Обновить все ПК' }).click();
+  await expect(page.getByText('ПК офлайн — не отправлено', { exact: false })).toBeVisible();
+});
+
+test('a cashier cannot read or start ClubShell updates', async ({ request }) => {
+  const cashier = auth(await tokenFor(request, CASHIER_PIN));
+  expect((await request.get(`${API}/admin/updates`, { headers: cashier })).status()).toBe(403);
+  expect((await request.post(`${API}/admin/updates/apply`, { headers: cashier, data: {} })).status()).toBe(403);
+});
