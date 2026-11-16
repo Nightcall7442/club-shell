@@ -80,9 +80,11 @@ public sealed record AdminMember(Guid Id, string DisplayName, string Role, Money
 /// <c>signedIn</c> (beyond the contract, D-49): the session's player holds a live token on the PC; null — no session.
 /// <c>game</c> (beyond the contract, D-71): the game the PC's agent reports running for this session, from its last
 /// heartbeat; null — none, no session, or the PC is not busy or locked. <c>kioskAlert</c> (beyond the contract,
-/// SHELL_CHANGES 76–77): as on <see cref="AdminHallPc"/>, of a PC that is not offline.
+/// SHELL_CHANGES 76–77): as on <see cref="AdminHallPc"/>, of a PC that is not offline. <c>place</c> (beyond the contract,
+/// SHELL_CHANGES 94): where the PC stands on the hall plan.
 /// </summary>
-public sealed record AdminSeat(Pc Pc, Session? Session, AdminSeatUser? User, bool? SignedIn = null, AdminSeatGame? Game = null, string? KioskAlert = null);
+public sealed record AdminSeat(
+    Pc Pc, Session? Session, AdminSeatUser? User, bool? SignedIn = null, AdminSeatGame? Game = null, string? KioskAlert = null, HallPlace? Place = null);
 
 /// <summary>A running game on the map (D-71): the catalog title and art; an empty <c>coverUrl</c> is null.</summary>
 public sealed record AdminSeatGame(Guid Id, string Title, string? CoverUrl, string? HeroUrl);
@@ -93,7 +95,7 @@ public sealed record AdminOccupancy(int Free, int Total);
 public sealed record AdminOverview(
     DateTimeOffset At, AdminOccupancy Club, IReadOnlyList<AdminSeat> Seats, IReadOnlyList<Tariff> Tariffs, IReadOnlyList<AdminMember> Users,
     IReadOnlyList<AdminZone> Zones, IReadOnlyList<object> Repairs, IReadOnlyList<AdminGuestDebt> GuestDebts, IReadOnlyList<AdminGuestRefund> GuestRefunds,
-    IReadOnlyList<AdminCall>? Calls = null);
+    IReadOnlyList<AdminCall>? Calls = null, HallPlan? HallPlan = null);
 
 /// <summary>
 /// An unpaid postpaid bill (beyond the contract): a guest's (<c>limits.guestPostpaid</c>) or a member's
@@ -194,9 +196,10 @@ public sealed record AdminPcResponse(Pc Pc);
 public sealed record AdminHallPc(
     Guid Id, string Name, string Zone, int Number, string? Hwid, string IpAddress, PcStatus Status, Guid? CurrentSessionId,
     string AgentVersion, string ShellVersion, DateTimeOffset LastHeartbeatAt, int X, int Y, string Device, JsonElement? Hardware, JsonElement? Metrics,
-    JsonElement? GamesVolume, bool Stateless, string? KioskAlert = null);
+    JsonElement? GamesVolume, bool Stateless, string? KioskAlert = null, int Rotation = 0);
 
-public sealed record AdminHallPcList(IReadOnlyList<AdminHallPc> Items, IReadOnlyList<AdminZone> Zones);
+/// <summary><c>plan</c> (beyond the contract, SHELL_CHANGES 94): the club's hall plan, null when none was drawn.</summary>
+public sealed record AdminHallPcList(IReadOnlyList<AdminHallPc> Items, IReadOnlyList<AdminZone> Zones, HallPlan? Plan = null);
 
 // Requests: every field nullable, so a missing one is told apart from a default (400 required).
 /// <summary>
@@ -239,7 +242,7 @@ public sealed record AdminCashRequest(long? OpeningCash, long? ClosingCash);
 public sealed record AdminQuoteRequest(Guid? TariffId, Guid? PcId, int? Minutes, Guid? UserId);
 
 /// <summary><c>stateless</c> is beyond the contract (SHELL_CHANGES 25, <see cref="AdminHallPc"/>).</summary>
-public sealed record AdminPcChange(string? Zone, int? Number, string? Device, string? Name, int? X, int? Y, bool? Maintenance, bool? Stateless = null);
+public sealed record AdminPcChange(string? Zone, int? Number, string? Device, string? Name, int? X, int? Y, bool? Maintenance, bool? Stateless = null, int? Rotation = null);
 
 // Slice S5, part A: staff, clients, promo codes, tariffs, stock.
 public sealed record AdminStaffList(IReadOnlyList<AdminStaffMember> Items);

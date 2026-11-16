@@ -47,11 +47,11 @@ public static class PcAdminEndpoints
         var staff = context.Features.GetRequiredFeature<StaffContext>();
         var now = clock.GetUtcNow();
         await using var c = await db.OpenConnectionAsync();
-        var map = (await c.QueryAsync<(Guid Id, int X, int Y, string DeviceKind, string? Hardware, string? Metrics, string? GamesVolume, string? KioskUser)>(
+        var map = (await c.QueryAsync<(Guid Id, int X, int Y, string DeviceKind, string? Hardware, string? Metrics, string? GamesVolume, string? KioskUser, int Rotation)>(
             """
             SELECT p.id, p.x, p.y, p.device_kind, p.hardware::text,
                    (SELECT m.data::text FROM pc_metrics m WHERE m.pc_id = p.id ORDER BY m.at DESC LIMIT 1),
-                   (p.last_heartbeat -> 'gamesVolume')::text, (p.last_heartbeat -> 'kioskUser')::text
+                   (p.last_heartbeat -> 'gamesVolume')::text, (p.last_heartbeat -> 'kioskUser')::text, p.rotation
             FROM pcs p WHERE p.club_id = @ClubId AND p.deleted_at IS NULL
             """,
             new { staff.ClubId })).ToDictionary(m => m.Id);
@@ -60,14 +60,14 @@ public static class PcAdminEndpoints
             var wire = pc.ToPc(pc.Status(hub.IsConnected(pc.Id), now, TimeSpan.FromSeconds(agents.OfflineAfterSec)), withHwid: false);
 
             // A PC registered between the two reads is drawn with the column defaults of a new seat.
-            var m = map.TryGetValue(pc.Id, out var row) ? row : (pc.Id, 0, 0, "pc", null, null, null, null);
+            var m = map.TryGetValue(pc.Id, out var row) ? row : (pc.Id, 0, 0, "pc", null, null, null, null, 0);
             return new AdminHallPc(
                 wire.Id, wire.Name, wire.Zone, wire.Number, wire.Hwid, wire.IpAddress, wire.Status, wire.CurrentSessionId, wire.AgentVersion,
                 wire.ShellVersion, wire.LastHeartbeatAt, m.X, m.Y, m.DeviceKind,
                 m.Hardware is null ? null : JsonElement.Parse(m.Hardware), m.Metrics is null ? null : JsonElement.Parse(m.Metrics),
-                m.GamesVolume is null ? null : JsonElement.Parse(m.GamesVolume), pc.Stateless, KioskAlert(m.KioskUser));
+                m.GamesVolume is null ? null : JsonElement.Parse(m.GamesVolume), pc.Stateless, KioskAlert(m.KioskUser), m.Rotation);
         }).ToList();
-        return AdminJson.Ok(new AdminHallPcList(items, await CounterEndpoints.ZonesAsync(c, staff.ClubId)));
+        return AdminJson.Ok(new AdminHallPcList(items, await CounterEndpoints.ZonesAsync(c, staff.ClubId), await HallLayout.PlanAsync(c, staff.ClubId)));
     }
 
     /// <summary><c>kioskAlert</c> of the hall from the last heartbeat's <c>kioskUser</c>: the sign-in screen first, it stops the PC.</summary>
@@ -96,12 +96,17 @@ public static class PcAdminEndpoints
         {
             var now = clock.GetUtcNow();
             var id = Guid.CreateVersion7(now);
+
+            // SHELL_CHANGES 94: no two PCs in one cell; a seat without x/y takes the first free cell.
+            await HallLayout.LockAsync(c, tx, staff.ClubId);
+            var (x, y) = r.X is not null && r.Y is not null ? (r.X.Value, r.Y.Value) : await HallLayout.FreeCellAsync(c, tx, staff.ClubId);
+            await HallLayout.EnsureFreeAsync(c, tx, staff.ClubId, x, y);
             await SeatAsync(c, tx, () => c.ExecuteAsync(
                 """
-                INSERT INTO pcs (id, club_id, number, name, zone, x, y, device_kind, approved, maintenance, created_at, updated_at)
-                VALUES (@id, @ClubId, @number, @name, @Zone, @x, @y, @device, true, false, @now, @now)
+                INSERT INTO pcs (id, club_id, number, name, zone, x, y, rotation, device_kind, approved, maintenance, created_at, updated_at)
+                VALUES (@id, @ClubId, @number, @name, @Zone, @x, @y, coalesce(@Rotation, 0), @device, true, false, @now, @now)
                 """,
-                new { id, staff.ClubId, number, name, r.Zone, x = r.X ?? 0, y = r.Y ?? 0, device, now },
+                new { id, staff.ClubId, number, name, r.Zone, x, y, r.Rotation, device, now },
                 tx));
             await Audit.WriteAsync(c, tx, staff, now, "pcAdd", pcId: id, detail: $"{r.Zone} · {number}", meta: new { device });
             var pc = new Pc(id, name, r.Zone!, number, null, "", PcStatus.Offline, null, "", "0.0.0", now);
@@ -123,18 +128,25 @@ public static class PcAdminEndpoints
         await using (var c = await db.OpenConnectionAsync())
         await using (var tx = await c.BeginTransactionAsync())
         {
+            if (r.X is not null || r.Y is not null)
+            {
+                // SHELL_CHANGES 94: no two PCs in one cell.
+                await HallLayout.LockAsync(c, tx, staff.ClubId);
+                await HallLayout.EnsureFreeAsync(c, tx, staff.ClubId, r.X ?? pc.X, r.Y ?? pc.Y, pc.Id);
+            }
+
             // maintenance:true also opens the re-enroll window of a reinstalled or reimaged PC, false closes it (D-78).
             await SeatAsync(c, tx, () => c.ExecuteAsync(
                 """
                 UPDATE pcs SET zone = coalesce(@Zone, zone), name = coalesce(@Name, name), number = coalesce(@Number, number),
-                               x = coalesce(@X, x), y = coalesce(@Y, y), device_kind = coalesce(@Device, device_kind),
+                               x = coalesce(@X, x), y = coalesce(@Y, y), rotation = coalesce(@Rotation, rotation), device_kind = coalesce(@Device, device_kind),
                                maintenance = coalesce(@Maintenance, maintenance), stateless = coalesce(@Stateless, stateless),
                                approved = approved OR coalesce(NOT @Maintenance, false),
                                reenroll_until = CASE WHEN @Maintenance THEN @reenrollUntil WHEN NOT @Maintenance THEN NULL ELSE reenroll_until END,
                                updated_at = @now
                 WHERE id = @pcId
                 """,
-                new { pcId, r.Zone, r.Name, r.Number, r.X, r.Y, r.Device, r.Maintenance, r.Stateless, reenrollUntil = now.AddMinutes(agents.ReenrollWindowMin), now },
+                new { pcId, r.Zone, r.Name, r.Number, r.X, r.Y, r.Rotation, r.Device, r.Maintenance, r.Stateless, reenrollUntil = now.AddMinutes(agents.ReenrollWindowMin), now },
                 tx));
             if (config || zone)
             {
@@ -220,6 +232,8 @@ public static class PcAdminEndpoints
         {
             throw ApiException.Validation(r.X is < 0 or > 200 ? "x" : "y", "range");
         }
+
+        HallLayout.CheckRotation(r.Rotation);
 
         if (r.Device is { } device && !Devices.Contains(device, StringComparer.Ordinal))
         {

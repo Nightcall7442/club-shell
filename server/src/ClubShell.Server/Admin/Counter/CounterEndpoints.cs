@@ -129,7 +129,8 @@ public static partial class CounterEndpoints
                 s is not null && players.TryGetValue(s.UserId, out var user) ? user : null,
                 s is null ? null : signedIn.Contains(pc.Id),
                 s is not null && status is Contracts.Pcs.PcStatus.Busy or Contracts.Pcs.PcStatus.Locked ? games.GetValueOrDefault(pc.Id) : null,
-                status == Contracts.Pcs.PcStatus.Offline ? null : kioskAlerts.GetValueOrDefault(pc.Id));
+                status == Contracts.Pcs.PcStatus.Offline ? null : kioskAlerts.GetValueOrDefault(pc.Id),
+                new HallPlace(pc.X, pc.Y, pc.Rotation));
         }).ToList();
         var tariffs = (await c.QueryAsync<TariffRow>(
             $"SELECT {TariffRow.Columns} FROM tariffs WHERE club_id = @ClubId AND deleted_at IS NULL ORDER BY created_at, id", new { staff.ClubId }))
@@ -187,7 +188,8 @@ public static partial class CounterEndpoints
             .Select(r => (object)new { pcId = r.PcId, severity = r.Severity }).ToList();
         return AdminJson.Ok(new AdminOverview(
             now, new AdminOccupancy(seats.Count(s => s.Pc.Status == Contracts.Pcs.PcStatus.Free), seats.Count), seats, tariffs, members,
-            await ZonesAsync(c, staff.ClubId), repairs, debts, refunds, await AdminCalls.LiveAsync(c, staff.ClubId, now)));
+            await ZonesAsync(c, staff.ClubId), repairs, debts, refunds, await AdminCalls.LiveAsync(c, staff.ClubId, now),
+            await HallLayout.PlanAsync(c, staff.ClubId)));
     }
 
     /// <summary>

@@ -58,6 +58,7 @@ import {
   type SessionRecord,
   type UserRecord,
 } from '../db.js';
+import { hallPlan } from '../hall.js';
 import { endSession } from './session.js';
 import { createGuest } from './auth.js';
 import { isApiKey, requireStaff, topUpWithBonus } from './club.js';
@@ -99,6 +100,7 @@ interface SeatView {
   user: { id: string; displayName: string; role: string; balance: Money } | null;
   signedIn: boolean | null;
   game: SeatGame | null;
+  place: { x: number; y: number; rotation: number };
 }
 
 /** The game on a busy seat (D-71): the catalog title and art; an empty cover is null. */
@@ -150,6 +152,7 @@ function seatOf(pc: PcRecord): SeatView {
     // A desk session nobody has signed in to yet: its clock already runs (D-49).
     signedIn: rec ? signedInOn(rec.userId, pc.id) : null,
     game: gameOf(pc, rec),
+    place: { x: pc.x, y: pc.y, rotation: pc.rotation ?? 0 },
   };
 }
 
@@ -443,6 +446,7 @@ export function adminRoutes(app: FastifyInstance): void {
       repairs: openTicketMarks(),
       guestDebts: debts,
       guestRefunds: refunds,
+      hallPlan: hallPlan(),
       // Cash desk part 3: the players' calls the desk has not closed (D-63).
       calls: liveCalls(),
     };

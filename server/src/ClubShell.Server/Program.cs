@@ -180,6 +180,7 @@ app.MapStaffEndpoints();
 app.MapCounterEndpoints();
 app.MapShiftEndpoints();
 app.MapPcAdminEndpoints();
+app.MapHallLayoutEndpoints();
 app.MapStaffAdminEndpoints();
 app.MapClientEndpoints();
 app.MapPromoEndpoints();

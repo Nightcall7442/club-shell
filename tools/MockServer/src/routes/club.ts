@@ -84,6 +84,7 @@ import { broadcast, pushToUser } from '../ws.js';
 import { flagsFor, inContract, record, summaries } from '../control.js';
 import { operationsPage } from '../operations.js';
 import { addClub, network, networkReport } from '../network.js';
+import { MAX_CELL, cellTaken, checkRotation, ensureFree, freeCell, hallPlan, readPlan } from '../hall.js';
 import { DEFAULT_HEALTH, diagnose, health, updateTicket, type TicketStatus } from '../health.js';
 
 const LEGACY_TOKEN = process.env['MOCK_ADMIN_TOKEN'] ?? 'admin-dev-token';
@@ -844,6 +845,7 @@ export function clubRoutes(app: FastifyInstance): void {
         ...publicPc(p),
         x: p.x,
         y: p.y,
+        rotation: p.rotation ?? 0,
         device: c.devices[p.id] ?? 'pc',
         hardware: hardwareOf(p),
         metrics: p.metrics.at(-1) ?? null,
@@ -851,7 +853,67 @@ export function clubRoutes(app: FastifyInstance): void {
         stateless: p.stateless ?? false,
       })),
       zones: c.zones,
+      plan: hallPlan(),
     };
+  });
+
+  /**
+   * One save for a moved group (SHELL_CHANGES 94): the whole batch is checked first — no two of it in one cell, no cell
+   * held by a PC outside it (`409 cellTaken`) — then written.
+   */
+  app.patch('/admin/pcs/layout', async (req) => {
+    requireStaff(req, 'owner');
+    const b = body(req);
+    if (!Array.isArray(b['items'])) throw errors.validation('items', 'required');
+    const items = (b['items'] as Record<string, unknown>[]).map((it, i) => {
+      const pc = typeof it['id'] === 'string' ? findPc(it['id']) : undefined;
+      const x = it['x'];
+      const y = it['y'];
+      if (typeof x !== 'number' || !Number.isInteger(x) || x < 0 || x > MAX_CELL)
+        throw errors.validation(`items[${i}].x`, 'range');
+      if (typeof y !== 'number' || !Number.isInteger(y) || y < 0 || y > MAX_CELL)
+        throw errors.validation(`items[${i}].y`, 'range');
+      const rotation = checkRotation(it['rotation'], `items[${i}].rotation`);
+      if (!pc) throw errors.notFound('pc');
+      return { pc, x, y, rotation };
+    });
+    if (items.length === 0) throw errors.validation('items', 'min');
+    const ids = new Set(items.map((i) => i.pc.id));
+    if (ids.size !== items.length) throw errors.validation('items', 'duplicate');
+    const cells = new Map<string, string>();
+    for (const it of items) {
+      const key = `${it.x},${it.y}`;
+      const first = cells.get(key);
+      if (first) throw cellTaken(first, it.x, it.y);
+      cells.set(key, it.pc.id);
+    }
+    for (const it of items) {
+      const other = db.pcs.find((p) => !ids.has(p.id) && p.x === it.x && p.y === it.y);
+      if (other) throw cellTaken(other.id, it.x, it.y);
+    }
+    for (const it of items) {
+      it.pc.x = it.x;
+      it.pc.y = it.y;
+      if (it.rotation !== null) it.pc.rotation = it.rotation;
+    }
+    markDirty();
+    return { ok: true, count: items.length };
+  });
+
+  /** The club's hall plan (SHELL_CHANGES 94): grid size, objects, zone areas; DELETE clears it. */
+  app.put('/admin/pcs/plan', async (req) => {
+    requireStaff(req, 'owner');
+    const plan = readPlan(body(req));
+    club().hallPlan = plan;
+    markDirty();
+    return { ok: true, plan };
+  });
+
+  app.delete('/admin/pcs/plan', async (req) => {
+    requireStaff(req, 'owner');
+    club().hallPlan = null;
+    markDirty();
+    return { ok: true, plan: null };
   });
 
   app.patch<{ Params: { pcId: string } }>('/admin/pcs/:pcId', async (req) => {
@@ -862,8 +924,15 @@ export function clubRoutes(app: FastifyInstance): void {
     if (typeof b['zone'] === 'string') pc.zone = str(b, 'zone', 32);
     if (typeof b['name'] === 'string') pc.name = str(b, 'name', 32);
     if (typeof b['number'] === 'number') pc.number = int(b, 'number', 1, 9999);
-    if (typeof b['x'] === 'number') pc.x = int(b, 'x', 0, 200);
-    if (typeof b['y'] === 'number') pc.y = int(b, 'y', 0, 200);
+    if (typeof b['x'] === 'number' || typeof b['y'] === 'number') {
+      const x = typeof b['x'] === 'number' ? int(b, 'x', 0, 200) : pc.x;
+      const y = typeof b['y'] === 'number' ? int(b, 'y', 0, 200) : pc.y;
+      ensureFree(x, y, pc.id);
+      pc.x = x;
+      pc.y = y;
+    }
+    const rotation = checkRotation(b['rotation']);
+    if (rotation !== null) pc.rotation = rotation;
     if (typeof b['device'] === 'string') club().devices[pc.id] = str(b, 'device', 16) as DeviceKind;
     if (typeof b['stateless'] === 'boolean') pc.stateless = b['stateless'];
     if (typeof b['maintenance'] === 'boolean') {
@@ -914,6 +983,10 @@ export function clubRoutes(app: FastifyInstance): void {
     const b = body(req);
     const number = int(b, 'number', 1, 9999);
     const device = (optStr(b, 'device', 16) ?? 'pc') as DeviceKind;
+    const ox = optInt(b, 'x', 0, 200);
+    const oy = optInt(b, 'y', 0, 200);
+    const cell = ox !== null && oy !== null ? { x: ox, y: oy } : freeCell();
+    ensureFree(cell.x, cell.y);
     const rec: PcRecord = {
       ...(db.pcs[0] as PcRecord),
       id: uuid(),
@@ -921,8 +994,9 @@ export function clubRoutes(app: FastifyInstance): void {
         optStr(b, 'name', 32) ?? `${device === 'pc' ? 'PC' : device.toUpperCase()}-${String(number).padStart(2, '0')}`,
       zone: str(b, 'zone', 32),
       number,
-      x: optInt(b, 'x', 0, 200) ?? 0,
-      y: optInt(b, 'y', 0, 200) ?? 0,
+      x: cell.x,
+      y: cell.y,
+      rotation: checkRotation(b['rotation']) ?? 0,
       hwid: null,
       ipAddress: '0.0.0.0',
       status: 'offline',

@@ -58,6 +58,7 @@ import {
   knownValues,
   type Known,
 } from '../db.js';
+import { freeCell } from '../hall.js';
 import { CALL_CATEGORIES, USER_REPORT, callMessage, callerOf, insertCall, queuePosition } from '../calls.js';
 import { pendingCommands, resolveAck } from '../ws.js';
 import { realTelemetry } from '../health.js';
@@ -94,8 +95,8 @@ function assignPc(hwid: string, previousPcId: string | null, machineName: string
     zone: 'Standard',
     number,
     hwid,
-    x: (number - 1) % 6,
-    y: 8 + Math.floor((number - 19) / 6),
+    // SHELL_CHANGES 94: the first free cell, never under another PC.
+    ...freeCell(),
     ipAddress: '0.0.0.0',
     status: 'maintenance',
     currentSessionId: null,

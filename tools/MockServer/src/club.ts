@@ -318,6 +318,8 @@ export interface ClubConfig {
   features: ShellFeatures;
   zones: Zone[];
   devices: Record<string, DeviceKind>;
+  /** The hall plan drawn in the hall editor (SHELL_CHANGES 94); absent or null — none. */
+  hallPlan?: import('./hall.js').HallPlan | null;
   pricing: {
     /** Percent of the base price per weekday, 0 = Sunday. */
     weekdayPct: number[];
