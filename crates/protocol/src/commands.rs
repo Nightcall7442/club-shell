@@ -3556,6 +3556,7 @@ mod tests {
                 call_admin: true,
                 qr_login: false,
                 gpu_panel: true,
+                lock_screen_power: None,
             },
             club: None,
         };

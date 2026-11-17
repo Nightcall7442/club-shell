@@ -86,6 +86,7 @@ import {
 import { guestSignIn, type ReceiptData } from '@/print';
 import { useShift } from '@/shift';
 import { HallPlanView, ZoomControls, hasPlaces } from './mapPlan';
+import { QuickActions, type QuickAction, type QuickRequest } from './quickActions';
 import { Badge, Button, Chip, EmptyState, Field, Kbd, Note, Segmented, Sheet, inputCls } from '@/ui';
 
 const POLL_MS = 2000;
@@ -1678,6 +1679,7 @@ function SeatPanel({
   onDone,
   call,
   onStartMove,
+  request = null,
 }: {
   seat: Seat;
   members: Member[];
@@ -1689,6 +1691,8 @@ function SeatPanel({
   call?: CallGroup;
   /** «Пересадить на другой ПК…»: the map picks the target. */
   onStartMove: () => void;
+  /** A step the map's quick actions asked for (this seat's only). */
+  request?: QuickRequest | null;
 }): JSX.Element {
   const shift = useShift();
   const [busy, setBusy] = useState<string | null>(null);
@@ -1769,9 +1773,11 @@ function SeatPanel({
       onDone={done}
       setNote={setNote}
       onStartMove={onStartMove}
+      request={request?.pcId === seat.pc.id ? request : null}
     />
   ) : (
     <FreeSeat
+      request={request?.pcId === seat.pc.id ? request : null}
       seat={seat}
       tariffs={tariffs}
       banner={banner}
@@ -1840,6 +1846,7 @@ function BusySeat({
   onDone,
   setNote,
   onStartMove,
+  request,
 }: PartProps & {
   session: Session;
   user: SeatUser;
@@ -1848,6 +1855,7 @@ function BusySeat({
   setSheet: (s: SheetState) => void;
   version: number;
   onStartMove: () => void;
+  request: QuickRequest | null;
 }): JSX.Element {
   const shift = useShift();
   const hit = useClientHit(user, username, version);
@@ -1895,6 +1903,18 @@ function BusySeat({
   }, []);
 
   const actions = [session.isPrepaid, !guest].filter(Boolean).length;
+
+  // The map's quick actions: the same steps as this card's buttons.
+  const asked = useRef(0);
+  useEffect(() => {
+    if (!request || request.n === asked.current || busy !== null) return;
+    asked.current = request.n;
+    if (request.action === 'extend' && session.isPrepaid) setSheet({ kind: 'extend' });
+    else if (request.action === 'topup') latest.current();
+    else if (request.action === 'end') setSheet({ kind: 'end' });
+    else if (request.action === 'more') setTechOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request]);
 
   // Over a picture the readouts sit at the band's bottom (spec §6.7); without one they follow the band.
   const readouts = (
@@ -2607,7 +2627,17 @@ function SettleSheet({
 // Free seat: who (a client or a walk-in guest), how they pay, the tariff or a package — then "Посадить", or the pay box
 // ---------------------------------------------------------------------------------------------------------------------
 
-function FreeSeat({ seat, tariffs, banner, note, busy, run, onDone, setNote }: PartProps): JSX.Element {
+function FreeSeat({
+  seat,
+  tariffs,
+  banner,
+  note,
+  busy,
+  run,
+  onDone,
+  setNote,
+  request = null,
+}: PartProps & { request?: QuickRequest | null }): JSX.Element {
   const [techOpen, setTechOpen] = useState(false);
   const closed = useShiftClosed();
   const club = useClub();
@@ -2639,6 +2669,29 @@ function FreeSeat({ seat, tariffs, banner, note, busy, run, onDone, setNote }: P
     // The panel stays mounted from PC to PC: a key held for this PC's seat must not go out with another PC's body.
     openKey.reset();
   }, [seat.pc.id, openKey]);
+
+  // The map's quick actions: who sits down, the cursor in the field to fill.
+  const whoBox = useRef<HTMLDivElement>(null);
+  const asked = useRef(0);
+  useEffect(() => {
+    if (!request || request.n === asked.current) return;
+    asked.current = request.n;
+    if (request.action === 'more') {
+      setTechOpen(true);
+      return;
+    }
+    const asGuest = request.action === 'guest' && cashDesk2;
+    setGuest(asGuest);
+    setFocusField({ guest: asGuest, n: request.n });
+  }, [request, cashDesk2]);
+  // After the form shows the field asked for (the guest's name is drawn only once «Гость» is on).
+  const [focusField, setFocusField] = useState<{ guest: boolean; n: number } | null>(null);
+  useEffect(() => {
+    if (!focusField) return;
+    const field = focusField.guest ? document.getElementById(nameId) : whoBox.current?.querySelector('input');
+    field?.scrollIntoView({ block: 'nearest' });
+    (field as HTMLElement | null)?.focus();
+  }, [focusField, nameId]);
   useEffect(() => {
     if (!tariffId || !hourly.some((tf) => tf.id === tariffId)) {
       setTariffId(hourly[0]?.id ?? '');
@@ -2854,7 +2907,9 @@ function FreeSeat({ seat, tariffs, banner, note, busy, run, onDone, setNote }: P
             </span>
           </div>
         ) : (
-          <ClientPicker label={t('Кто')} value={who} onChange={setWho} />
+          <div ref={whoBox}>
+            <ClientPicker label={t('Кто')} value={who} onChange={setWho} />
+          </div>
         )}
 
         {cashDesk2 && (
@@ -3375,6 +3430,9 @@ export function MapPage(): JSX.Element {
   const [viewChoice, setViewChoice] = useState<MapView>(readView);
   const [zoom, setZoom] = useState(1);
   const [sheet, setSheet] = useState<SheetState>(null);
+  // The quick actions at the clicked tile, and the step they asked of the seat card.
+  const [quick, setQuick] = useState<{ pcId: string; anchor: DOMRect } | null>(null);
+  const [request, setRequest] = useState<QuickRequest | null>(null);
   const [digits, setDigits] = useState('');
   const [tick, setTick] = useState(0);
   const [panel, setPanelState] = useState<'seat' | 'feed'>(readPanel);
@@ -3533,10 +3591,28 @@ export function MapPage(): JSX.Element {
       toggle(x.pc.id);
       return;
     }
-    // A plain click: that one PC, whatever was picked before.
+    // A plain click: that one PC, whatever was picked before, and its quick actions at the tile (a second click on
+    // the same PC folds them).
     anchor.current = x.pc.id;
     setMulti(new Set());
     pick(x.pc.id);
+    const box = e.currentTarget.getBoundingClientRect();
+    setQuick((q) => (q?.pcId === x.pc.id ? null : { pcId: x.pc.id, anchor: box }));
+  };
+  const closeQuick = useCallback(() => setQuick(null), []);
+  const onQuick = (target: Seat, action: QuickAction): void => {
+    setQuick(null);
+    if (action === 'move') {
+      startMove(target);
+      return;
+    }
+    if (action === 'bar' && target.user) {
+      // The bar with this player and PC as the buyer, as the card's «Бар».
+      showBar({ pcId: target.pc.id, userId: target.user.id });
+      window.location.hash = '/bar';
+      return;
+    }
+    setRequest((r) => ({ pcId: target.pc.id, action, n: (r?.n ?? 0) + 1 }));
   };
   const startMove = (from: Seat): void => {
     setMulti(new Set());
@@ -3679,6 +3755,7 @@ export function MapPage(): JSX.Element {
           onDone={() => void load()}
           call={callsByPc.get(seat.pc.id)}
           onStartMove={() => startMove(seat)}
+          request={request}
         />
       </>
     ) : (
@@ -3866,6 +3943,14 @@ export function MapPage(): JSX.Element {
           )}
         </div>
 
+        {quick && !movePick && multi.size === 0 && !selectMode && seats.some((x) => x.pc.id === quick.pcId) && (
+          <QuickActions
+            seat={seats.find((x) => x.pc.id === quick.pcId)!}
+            anchor={quick.anchor}
+            onAction={(action) => onQuick(seats.find((x) => x.pc.id === quick.pcId)!, action)}
+            onClose={closeQuick}
+          />
+        )}
         <aside className="flex min-h-0 flex-col gap-3">
           <div
             className={clsx(

@@ -207,6 +207,12 @@ jobs:
           UPDATE_MANIFEST_KEY_PEM: ${{ secrets.UPDATE_MANIFEST_KEY_PEM }}
         run: |
           if (-not $env:UPDATE_MANIFEST_KEY_PEM) {
+            # A stable release nobody can install as an update is no release: stop here. (The secret must be a
+            # repository secret: this job has no environment, so an environment's secrets are not seen.)
+            if ($env:CHANNEL -eq 'stable') {
+              Write-Output '::error::UPDATE_MANIFEST_KEY_PEM is not set (Settings > Secrets and variables > Actions > Repository secrets): the packages would be unsigned and every PC would refuse them'
+              exit 1
+            }
             Write-Output '::warning::UPDATE_MANIFEST_KEY_PEM is not set; manifest.json is left unsigned (agents reject it and publish.ps1 refuses it)'
             exit 0
           }
@@ -324,4 +330,4 @@ jobs:
       - name: No publish credentials
         if: env.AWS_ACCESS_KEY_ID == '' && env.CLUBSHELL_PUBLISH_TOKEN == ''
         run: |
-          Write-Output '::notice::No S3 or HTTP publish credentials: the release stays on GitHub, where club servers import it from
+          Write-Output '::notice::No S3 or HTTP publish credentials: the release stays on GitHub, where club servers import it from'

@@ -2667,6 +2667,52 @@ test('the owner drags PCs on the hall plan, lines a group up, turns it and draws
   await request.delete(`${API}/admin/pcs/plan`, { headers: auth(await tokenFor(request, OWNER_PIN)) });
 });
 
+test('a click on a PC opens its quick actions at the tile: top up, extend, end; seat a client on a free one', async ({
+  page,
+  request,
+}) => {
+  const busy = await registerAgent(request, 'quick-busy');
+  const free = await registerAgent(request, 'quick-free');
+  const member = await newClient(request, 'quick');
+  await ensureShift(request);
+  await seatMember(request, busy, member.id);
+  await signIn(page, CASHIER_PIN);
+
+  // A busy PC: the session's steps by the tile; each opens the seat card's own sheet.
+  await page.locator(`#seat-${busy.pcId}`).click();
+  const menu = page.getByRole('menu');
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole('menuitem')).toHaveText([
+    'Продлить',
+    /^Пополнить/,
+    'Пересадить на другой ПК…',
+    'Бар',
+    'Ещё ⋯',
+    'Завершить сеанс',
+  ]);
+  await menu.getByRole('menuitem', { name: /^Пополнить/ }).click();
+  await expect(menu).toBeHidden();
+  await expect(page.getByRole('dialog', { name: `Пополнить · ${member.displayName}` })).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // Esc folds the menu and keeps the PC picked; a second click on the tile folds it too.
+  await page.locator(`#seat-${busy.pcId}`).click();
+  await expect(menu).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await expect(page.locator(`#seat-${busy.pcId}`)).toHaveAttribute('data-selected', 'true');
+  await page.locator(`#seat-${busy.pcId}`).click();
+  await expect(menu).toBeVisible();
+  await menu.getByRole('menuitem', { name: 'Завершить сеанс' }).click();
+  await expect(page.getByRole('dialog').filter({ hasText: member.displayName })).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // A free PC: «Посадить клиента» puts the cursor in the client field of the seat card.
+  await page.locator(`#seat-${free.pcId}`).click();
+  await menu.getByRole('menuitem', { name: 'Посадить клиента' }).click();
+  await expect(page.getByLabel('Кто', { exact: true })).toBeFocused();
+});
+
 test('the map shows the hall as it stands, every PC in view at 1366×768, and the zones on request (SHELL_CHANGES 94)', async ({
   page,
   request,
