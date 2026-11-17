@@ -284,6 +284,8 @@ interface MockState {
   lockedByExpiry: boolean;
   /** The member's session is open on another PC (`409 activeSessionElsewhere` until `endElsewhere: true`). */
   elsewhere: { pcId: string; pcName: string } | null;
+  /** The walk-in guest the desk seated on this PC (`simulate.deskGuest`): «guest» sign-in takes their session, as the server. */
+  deskGuest: User | null;
   /** Every sign-in attempt, without its secrets (tests read `endElsewhere`). */
   loginLog: { kind: string; endElsewhere: boolean }[];
   /** One-shot failures by command (`simulate.failNext`). */
@@ -330,6 +332,7 @@ function freshState(): MockState {
     lockedByStaff: false,
     lockedByExpiry: false,
     elsewhere: null,
+    deskGuest: null,
     loginLog: [],
     failNext: {},
     serverOffline: false,
@@ -776,6 +779,35 @@ export const simulate = {
       emitSession();
     }
   },
+  /**
+   * The cash desk seats a walk-in guest on this PC (the desk's «Гость»): the session is open and nobody is
+   * signed in yet — the Shell signs the guest in by itself (SHELL_CHANGES: no «Гость» tab).
+   */
+  deskGuest(name = 'Гость 3'): void {
+    if (mockState.user || mockState.session) {
+      return;
+    }
+    const guest = makeGuest(name);
+    mockState.deskGuest = guest;
+    const tariff = TARIFFS[0];
+    mockState.session = {
+      id: newId(),
+      userId: guest.id,
+      pcId: PC_ID,
+      state: 'active',
+      startedAt: nowIso(),
+      endsAt: isoIn(60 * 60),
+      pausedAt: null,
+      tariffId: tariff?.id ?? newId(),
+      secondsLeft: 60 * 60,
+      secondsUsed: 0,
+      cost: tariff ? tariffPriceFor(tariff, 60) : money(0),
+      isPrepaid: true,
+      warningsSent: [],
+    };
+    // As the Agent: the server's session reaches the Shell before anyone signs in on it.
+    emitMock('agent://session.updated', clone(mockState.session));
+  },
   /** The cash desk seats someone on this PC: a guest who signed in without a session starts playing. */
   deskStart(minutes = 60): void {
     const user = mockState.user;
@@ -905,7 +937,15 @@ cmd('auth_login', (args): AuthLoginResponse => {
       break;
     }
     case 'guest':
-      user = makeGuest(req.username ?? null);
+      // The desk's guest on this PC is taken over (D-25); a member's session here refuses a guest (D-26).
+      if (mockState.deskGuest) {
+        user = mockState.deskGuest;
+        mockState.deskGuest = null;
+      } else if (mockState.session && !mockState.user) {
+        mockError('forbidden', 'This PC holds another player session', { reason: 'pcOccupied' });
+      } else {
+        user = makeGuest(req.username ?? null);
+      }
       break;
     case 'qr': {
       const qr = mockState.qr;

@@ -185,8 +185,8 @@ export const UZ: Record<string, string> = {
   '{name}: вход на ПК разрешён': '{name}: kompyuterga kirish ruxsat etildi',
   '{name}: вход на ПК выключен': '{name}: kompyuterga kirish oʻchirildi',
   'Разрешить вход на ПК для обслуживания': 'Xizmat uchun kompyuterga kirishga ruxsat berish',
-  'Вход на ПК — кнопка «Вход для персонала» на экране блокировки: сотрудник вводит свой PIN, ПК выходит из оболочки, и он входит в свою учётную запись Windows, чтобы ставить игры, лаунчеры и программы. Владельцу разрешено всегда.':
-    'Kompyuterga kirish — bloklash ekranidagi «Xodimlar uchun kirish» tugmasi: xodim oʻz PIN-kodini kiritadi, kompyuter qobiqdan chiqadi va u oʻyinlar, launcherlar va dasturlarni oʻrnatish uchun oʻz Windows hisobiga kiradi. Egasiga har doim ruxsat.',
+  'Вход на ПК — кнопка «Тех. пользователь» на экране блокировки: сотрудник вводит свой PIN, ПК выходит из оболочки и сам входит в общую учётную запись техника «ClubTech» с правами администратора, чтобы ставить игры, лаунчеры и программы. Владельцу разрешено всегда.':
+    'Kompyuterga kirish — qulf ekranidagi «Texnik foydalanuvchi» tugmasi: xodim PIN kiritadi, kompyuter qobiqdan chiqadi va administrator huquqli umumiy texnik hisobga «ClubTech» oʻzi kiradi — oʻyin, launcher va dasturlarni oʻrnatish uchun. Egaga har doim ruxsat.',
   '{name}: доступ включён': '{name}: kirish yoqildi',
   '{name}: доступ выключен': '{name}: kirish oʻchirildi',
   '{n} дней': '{n} kun',
@@ -1511,8 +1511,8 @@ export const EN: Record<string, string> = {
   '{name}: вход на ПК разрешён': '{name}: PC sign-in allowed',
   '{name}: вход на ПК выключен': '{name}: PC sign-in turned off',
   'Разрешить вход на ПК для обслуживания': 'Allow PC sign-in for service',
-  'Вход на ПК — кнопка «Вход для персонала» на экране блокировки: сотрудник вводит свой PIN, ПК выходит из оболочки, и он входит в свою учётную запись Windows, чтобы ставить игры, лаунчеры и программы. Владельцу разрешено всегда.':
-    'PC sign-in is the «Staff sign-in» button on the lock screen: the staff member types their PIN, the PC leaves the shell, and they sign in to their own Windows account to install games, launchers and programs. An owner always may.',
+  'Вход на ПК — кнопка «Тех. пользователь» на экране блокировки: сотрудник вводит свой PIN, ПК выходит из оболочки и сам входит в общую учётную запись техника «ClubTech» с правами администратора, чтобы ставить игры, лаунчеры и программы. Владельцу разрешено всегда.':
+    'PC sign-in is the «Tech user» button on the lock screen: the staff member types their PIN, the PC leaves the shell and signs in to the shared technician account «ClubTech» with administrator rights by itself, to install games, launchers and programs. The owner always may.',
   '{name}: доступ включён': '{name}: access enabled',
   '{name}: доступ выключен': '{name}: access disabled',
   '{n} дней': '{n} days',

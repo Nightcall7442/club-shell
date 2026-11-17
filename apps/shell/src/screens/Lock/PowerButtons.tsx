@@ -14,6 +14,32 @@ import { describeError, useNotificationsStore } from '@/store';
 
 type PowerKind = 'shutdown' | 'reboot';
 
+const svg = {
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 2,
+  strokeLinecap: 'round' as const,
+  strokeLinejoin: 'round' as const,
+  'aria-hidden': true,
+};
+
+/** The power symbol: a broken ring with a bar. */
+const PowerIcon = (
+  <svg {...svg}>
+    <path d="M12 3v9" />
+    <path d="M6.3 6.3a8 8 0 1 0 11.4 0" />
+  </svg>
+);
+
+/** A circular arrow: start again. */
+const RebootIcon = (
+  <svg {...svg}>
+    <path d="M20 12a8 8 0 1 1-2.34-5.66" />
+    <path d="M20 4v5h-5" />
+  </svg>
+);
+
 /** Seconds the Agent waits before the power action: the answer and the toast get to the screen first. */
 const POWER_DELAY_SEC = 3;
 
@@ -62,10 +88,10 @@ export function PowerButtons(): JSX.Element {
 
   return (
     <>
-      <Button variant="ghost" size="lg" onClick={() => open('reboot')}>
+      <Button variant="ghost" size="lg" icon={RebootIcon} onClick={() => open('reboot')}>
         {t('lock.power.reboot')}
       </Button>
-      <Button variant="ghost" size="lg" onClick={() => open('shutdown')}>
+      <Button variant="ghost" size="lg" icon={PowerIcon} onClick={() => open('shutdown')}>
         {t('lock.power.shutdown')}
       </Button>
       <Modal

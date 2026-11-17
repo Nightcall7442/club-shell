@@ -275,7 +275,7 @@ Response `Policy`. `304` when unchanged.
 
 #### `POST /agents/{pcId}/staff/verify` — auth: agent — beyond the contract
 
-A staff member's PIN typed on this PC («Вход для персонала» on the lock screen, IPC `sys.staffSignIn`), before the Agent
+A staff member's PIN typed on this PC («Тех. пользователь» on the lock screen, IPC `sys.staffSignIn`), before the Agent
 lets them sign in to their own Windows account to install games, launchers and programs. Request `StaffVerifyRequest
 { pin: string }` (4–8 digits) → `200 StaffVerifyResponse { staffId: uuid, name: string, role: "owner" | "cashier" }`.
 Allowed: an active member of the PC's club who may service PCs — an owner always, a cashier with the owner's

@@ -42,7 +42,6 @@ import { tariffAvailableNow } from '@/lib/tariffs';
 import { ClubMark } from '@/components/brand/ClubMark';
 import { useClub } from '@/hooks/useClub';
 import { CardLogin } from './CardLogin';
-import { GuestLogin } from './GuestLogin';
 import { LoginForm, loginErrorMessage } from './LoginForm';
 import { PowerButtons } from './PowerButtons';
 import { StaffSignInButton } from './StaffSignIn';
@@ -719,7 +718,7 @@ function MemberTariffPicker({ open, onStarted, onLogout }: StartSessionModalProp
  * no club switch: every club can bind cards at the cash desk. A card tapped on any tab, or on the attract screen,
  * opens the card tab and signs in with it (`onCardRead`).
  */
-type LoginTab = 'qr' | 'password' | 'card' | 'guest';
+type LoginTab = 'qr' | 'password' | 'card';
 
 const KeyIcon = (
   <svg
@@ -763,20 +762,6 @@ const CardIcon = (
   >
     <rect x="2" y="5" width="20" height="14" rx="2" />
     <path d="M2 10h20M6 15h4" />
-  </svg>
-);
-const UserIcon = (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    aria-hidden="true"
-  >
-    <circle cx="12" cy="8" r="4" />
-    <path d="M4 21c0-4 3.6-7 8-7s8 3 8 7" />
   </svg>
 );
 const BellIcon = (
@@ -1071,6 +1056,30 @@ export default function LockScreen(): JSX.Element {
     void useGamesStore.getState().load(true);
   }, []);
 
+  // A walk-in guest the desk seated on this PC: no «Гость» tab, no rules box — the guest is signed in at once and the
+  // Shell opens its home screen. Tried once per session: a member's desk session refuses a guest (`403 pcOccupied`),
+  // and they sign in with their own account as before.
+  const sessionId = useSessionStore((s) => s.session?.id ?? null);
+  const loginGuest = useAuthStore((s) => s.loginGuest);
+  const triedGuest = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      !ready ||
+      !pcReady ||
+      hasUser ||
+      !isOpen ||
+      isLocked ||
+      sessionId === null ||
+      triedGuest.current === sessionId
+    ) {
+      return;
+    }
+    triedGuest.current = sessionId;
+    loginGuest().catch(() => {
+      // Not a guest's seat: the sign-in methods stay for its player.
+    });
+  }, [ready, pcReady, hasUser, isOpen, isLocked, sessionId, loginGuest]);
+
   // A session open before the PC is ready (restored after an Agent restart, opened at the desk) waits here too.
   useEffect(() => {
     if (hasUser && isOpen && !isLocked && pcReady) {
@@ -1133,7 +1142,6 @@ export default function LockScreen(): JSX.Element {
       ...(qrLogin ? [{ key: 'qr' as const, label: t('lock.methodQr'), icon: QrIcon }] : []),
       { key: 'password', label: t('lock.methodPassword'), icon: KeyIcon },
       { key: 'card', label: t('lock.methodCard'), icon: CardIcon },
-      { key: 'guest', label: t('lock.methodGuest'), icon: UserIcon },
     ],
     [t, qrLogin],
   );
@@ -1230,7 +1238,7 @@ export default function LockScreen(): JSX.Element {
                   label={t('lock.chooseMethod')}
                   size="lg"
                   idPrefix="lock"
-                  // Tighter sides than a lone tab strip: four methods ("Password", "Mehmon") have to fit the card.
+                  // Tighter sides than a lone tab strip: the methods ("Password", "Karta") have to fit the card.
                   className="mb-[clamp(0.875rem,2.2vh,1.5rem)] w-full [&>button]:flex-1 [&>button]:justify-center [&>button]:px-3"
                 />
                 <div role="tabpanel" id={`lock-panel-${tab}`} aria-labelledby={`lock-tab-${tab}`}>
@@ -1239,7 +1247,6 @@ export default function LockScreen(): JSX.Element {
                     <LoginForm key={reloginMember?.userId ?? ''} initialUsername={reloginMember?.username} />
                   )}
                   {tab === 'card' && <CardLogin tapped={tapped} />}
-                  {tab === 'guest' && <GuestLogin />}
                 </div>
               </>
             )}

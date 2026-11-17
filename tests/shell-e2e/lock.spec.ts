@@ -145,8 +145,9 @@ test.describe('lock screen', () => {
     await expect(page.getByText(en('lock.subtitle'))).toBeVisible();
     const tabs = page.getByRole('tablist', { name: en('lock.chooseMethod') });
     await expect(tabs).toBeVisible();
-    await expect(tabs.getByRole('tab')).toHaveCount(4);
-    for (const key of ['lock.methodQr', 'lock.methodPassword', 'lock.methodCard', 'lock.methodGuest']) {
+    // No «Гость» tab: the desk seats a guest and the Shell signs them in by itself.
+    await expect(tabs.getByRole('tab')).toHaveCount(3);
+    for (const key of ['lock.methodQr', 'lock.methodPassword', 'lock.methodCard']) {
       await expect(tabs.getByRole('tab', { name: en(key) })).toBeVisible();
     }
     // QR is the default: no keyboard needed and no password typed on a shared screen.
@@ -197,7 +198,7 @@ test.describe('lock screen', () => {
     // Mock settings boot the shell in Russian.
     await expect(page.getByRole('heading', { level: 1, name: ru('lock.title') })).toBeVisible();
     await expect(page.locator('html')).toHaveAttribute('lang', 'ru');
-    await expect(page.getByRole('tab', { name: ru('lock.methodGuest') })).toBeVisible();
+    await expect(page.getByRole('tab', { name: ru('lock.methodCard') })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Русский', exact: true })).toHaveAttribute('aria-pressed', 'true');
 
     await page.getByRole('button', { name: 'English', exact: true }).click();
@@ -205,7 +206,7 @@ test.describe('lock screen', () => {
     await expect(page.locator('html')).toHaveAttribute('lang', 'en');
     await expect(page.getByRole('heading', { level: 1, name: en('lock.title') })).toBeVisible();
     await expect(page.getByRole('heading', { level: 1, name: ru('lock.title') })).toHaveCount(0);
-    await expect(page.getByRole('tab', { name: en('lock.methodGuest') })).toBeVisible();
+    await expect(page.getByRole('tab', { name: en('lock.methodCard') })).toBeVisible();
     await expect(page.getByText(en('lock.scanQr'))).toBeVisible();
     await expect(page.getByRole('button', { name: 'English', exact: true })).toHaveAttribute('aria-pressed', 'true');
 
@@ -241,35 +242,30 @@ test.describe('lock screen', () => {
     await expect(panel.getByRole('button', { name: en('lock.qrRefresh') })).toBeVisible();
   });
 
-  test('guest login works', async ({ page }) => {
+  test('a guest the desk seated is signed in by itself and the Shell opens its home screen', async ({ page }) => {
     await openLock(page);
-    await page.getByRole('tab', { name: en('lock.methodGuest') }).click();
+    await expect(page.getByRole('tab', { name: /guest|гость/i })).toHaveCount(0);
 
-    await expect(page.getByText(en('lock.guestHint'))).toBeVisible();
-    const submit = page.getByRole('button', { name: en('lock.guest'), exact: true });
-    await expect(submit).toBeDisabled();
-    await field(page, en('lock.guestName')).fill('Playwright');
-    await page.getByRole('checkbox', { name: en('lock.guestTerms') }).check();
-    await expect(submit).toBeEnabled();
-    await submit.click();
-
-    // A guest cannot start (or pay for) time at the kiosk: the desk opens it.
-    const desk = page.getByRole('dialog', { name: en('session.guestNoSession.title') });
-    await expect(desk).toBeVisible();
-    await expect(desk.getByText(en('session.guestNoSession.hint'))).toBeVisible();
-    await expect(desk.getByRole('button', { name: en('lock.callAdmin') })).toBeVisible();
-    await expect(page.getByRole('button', { name: en('lock.startPlaying') })).toHaveCount(0);
-    await expect(page.getByRole('dialog', { name: en('wallet.chooseTariff') })).toHaveCount(0);
-
-    // The cashier opens the time on this PC: the guest is in at once.
-    await simulate(page, 'deskStart', 60);
+    // The cashier seats a walk-in guest on this PC: no tab, no rules box, no «start» — the guest is playing.
+    await simulate(page, 'deskGuest', 'Гость 3');
     await playing(page);
     await expect(page.getByText(en('desktop.guestBadge'), { exact: true })).toBeVisible();
     await expect(
-      page.getByRole('button', { name: new RegExp(`^${escapeRegExp(en('desktop.userMenu'))}: Playwright`) }),
+      page.getByRole('button', { name: new RegExp(`^${escapeRegExp(en('desktop.userMenu'))}: Гость 3`) }),
     ).toBeVisible();
     // No lock for a guest: there is no PIN or password to come back with.
     await expect(page.getByRole('button', { name: en('desktop.lock'), exact: true })).toHaveCount(0);
+  });
+
+  test('the lock screen has the tech user and power buttons with icons', async ({ page }) => {
+    await openLock(page);
+    for (const key of ['lock.staff.button', 'lock.power.reboot', 'lock.power.shutdown']) {
+      const button = page.getByRole('button', { name: en(key), exact: true });
+      await expect(button).toBeVisible();
+      await expect(button.locator('svg')).toHaveCount(1);
+    }
+    await page.getByRole('button', { name: en('lock.staff.button'), exact: true }).click();
+    await expect(page.getByRole('dialog', { name: en('lock.staff.title') })).toContainText('ClubTech');
   });
 
   test('card sign-in: a reader types the number and presses Enter', async ({ page }) => {
@@ -506,11 +502,7 @@ test.describe('player accounts', () => {
     page,
   }) => {
     await openLock(page);
-    await page.getByRole('tab', { name: en('lock.methodGuest') }).click();
-    await page.getByRole('checkbox', { name: en('lock.guestTerms') }).check();
-    await page.getByRole('button', { name: en('lock.guest'), exact: true }).click();
-    await expect(page.getByRole('dialog', { name: en('session.guestNoSession.title') })).toBeVisible();
-    await simulate(page, 'deskStart', 60);
+    await simulate(page, 'deskGuest', 'Гость 4');
     await playing(page);
 
     await simulate(page, 'authExpired', 'tokenExpired');
