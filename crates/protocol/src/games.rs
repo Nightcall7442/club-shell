@@ -453,6 +453,12 @@ pub struct Game {
     /// `null` or empty = none.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub registry_values: Option<Vec<GameRegistryValue>>,
+    /// Start the game without administrator rights although its manifest asks for them
+    /// (`requireAdministrator`, a launcher such as ICCup's): the Agent adds `RunAsInvoker` to the
+    /// process's `__COMPAT_LAYER`, which its children inherit (SHELL_CHANGES 96). Null or false —
+    /// off; without it such a game fails with `gameLaunchFailed {stage: "elevation"}`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_as_invoker: Option<bool>,
 }
 
 /// Body of `POST /games/{id}/launch-report` (SERVER_API.md §4.6).
@@ -739,6 +745,7 @@ mod tests {
             settings_paths: None,
             missing_drive: None,
             registry_values: None,
+            run_as_invoker: None,
         };
         let json = serde_json::to_string(&g).unwrap();
         assert_eq!(

@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { clubApi, type AdminGame, type ClubSettings, type GameInput, type GameRegistryValue } from '@/api';
 import { describe } from '@/errors';
-import { t } from '@/i18n';
+import { dateLocale, t } from '@/i18n';
 import { CheckIcon, ChevronDownIcon, GamepadIcon, SearchIcon } from '@/icons';
 import { useClubSettings } from '@/settings';
 import { Button, Chip, Field, Input, inputCls, Note, PageHeader, SaveBar, Section, Table, Toggle } from '@/ui';
@@ -77,6 +77,8 @@ interface GameForm {
   videoUrl: string;
   /** Registry values, one per line: `HKCU\Software\…\Name = dword:1` or `… = "text"`. */
   registry: string;
+  /** «Запускать без прав администратора»: an exe whose manifest asks for them starts as the player (SHELL_CHANGES 96). */
+  runAsInvoker: boolean;
 }
 
 const EMPTY_FORM: GameForm = {
@@ -90,6 +92,7 @@ const EMPTY_FORM: GameForm = {
   description: '',
   videoUrl: '',
   registry: '',
+  runAsInvoker: false,
 };
 
 const MAX_REGISTRY_VALUES = 20;
@@ -151,6 +154,7 @@ function formOf(g: AdminGame): GameForm {
     description: g.description ?? '',
     videoUrl: g.videoUrl ?? '',
     registry: (g.registryValues ?? []).map(registryLineOf).join('\n'),
+    runAsInvoker: g.runAsInvoker ?? false,
   };
 }
 
@@ -203,6 +207,8 @@ function inputOf(f: GameForm): GameInput {
       const r = parseRegistry(f.registry);
       return 'values' in r ? r.values : [];
     })(),
+    // Only an exe game starts its own process; a launcher game's flag is left off.
+    runAsInvoker: exe && f.runAsInvoker,
   };
 }
 
@@ -375,6 +381,32 @@ function GameEditor({
               <Field label={t('Параметры запуска')} hint={t('Необязательно, например -console -novid')}>
                 <Input className="font-mono" value={form.args} onChange={(e) => set({ args: e.target.value })} />
               </Field>
+              {game?.elevationFailure && !form.runAsInvoker && (
+                <Note
+                  note={{
+                    text: t(
+                      'На {pc} игра не запустилась ({time}): ей нужны права администратора. Включите «Запускать без прав администратора».',
+                      {
+                        pc: game.elevationFailure.pc,
+                        time: new Date(game.elevationFailure.at).toLocaleString(dateLocale()),
+                      },
+                    ),
+                    tone: 'warn',
+                  }}
+                />
+              )}
+              <div className="flex flex-col gap-1">
+                <Toggle
+                  label={t('Запускать без прав администратора')}
+                  checked={form.runAsInvoker}
+                  onChange={(v) => set({ runAsInvoker: v })}
+                />
+                <p className="text-[12px] text-muted">
+                  {t(
+                    'Для игр и лаунчеров, которые просят права администратора (например ICCup): без этого они не запускаются под игроком.',
+                  )}
+                </p>
+              </div>
             </>
           ) : (
             <Field
@@ -709,6 +741,11 @@ export default function CatalogPage(): JSX.Element {
                   {g.title}
                   {g.exePath && (
                     <span className="mt-0.5 block font-mono text-[11.5px] font-normal text-muted">{g.exePath}</span>
+                  )}
+                  {g.elevationFailure && (
+                    <span className="mt-0.5 block text-[11.5px] font-normal text-warning">
+                      {t('Нужны права администратора — откройте и включите запуск без них')}
+                    </span>
                   )}
                 </button>
               ),

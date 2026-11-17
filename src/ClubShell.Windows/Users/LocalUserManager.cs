@@ -213,6 +213,45 @@ public sealed class LocalUserManager
         return false;
     }
 
+    /// <summary>
+    /// The club's shared technician account (the shell's «Тех. пользователь»): created when missing, enabled, in
+    /// BUILTIN\Administrators — staff install games, launchers and programs in it — and given a new random
+    /// <paramref name="password"/> every time, which only the Agent holds (for one auto-logon). Nobody types or knows it;
+    /// <see cref="RotatePassword"/> spoils it again once the technician is in.
+    /// </summary>
+    public bool EnsureTechUser(string name, out string password)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        password = GeneratePassword();
+        bool created = false;
+        if (!Exists(name))
+        {
+            _ = Create(name, password, "ClubShell", "ClubShell technician account (installs games and programs)");
+            created = true;
+        }
+        else
+        {
+            SetPassword(name, password);
+            SetEnabled(name, true);
+        }
+
+        using PrincipalContext context = Machine();
+        using UserPrincipal user = Require(context, name);
+        using GroupPrincipal admins = GroupPrincipal.FindByIdentity(context, IdentityType.Sid, NativeConst.SID_BUILTIN_ADMINISTRATORS)
+            ?? throw new InvalidOperationException("BUILTIN\\Administrators not found.");
+        if (!admins.Members.Contains(user))
+        {
+            admins.Members.Add(user);
+            admins.Save();
+            _logger.LogWarning("Technician account {User} added to {Group}", name, admins.Name);
+        }
+
+        return created;
+    }
+
+    /// <summary>A new random password nobody knows (the technician's auto-logon one is spent).</summary>
+    public void RotatePassword(string name) => SetPassword(name, GeneratePassword());
+
     /// <summary>SAM names of local users starting with <paramref name="prefix"/> (case-insensitive).</summary>
     public IReadOnlyList<string> ListUsersWithPrefix(string prefix)
     {

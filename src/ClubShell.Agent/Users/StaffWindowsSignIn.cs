@@ -14,6 +14,7 @@ using ClubShell.Core.Abstractions;
 using ClubShell.Core.Configuration;
 using ClubShell.Windows.Registry;
 using ClubShell.Windows.Sessions;
+using ClubShell.Windows.Users;
 using Microsoft.Extensions.Options;
 
 namespace ClubShell.Agent.Users;
@@ -45,8 +46,17 @@ public interface IStaffSignInHost
     /// <summary>The active session of a user other than the kiosk (the console, or Remote Desktop), if any.</summary>
     uint? OtherActiveSession();
 
-    /// <summary>Pauses auto-logon (<see cref="ShellRegistry.PauseAutoLogon"/>) and leaves the mark.</summary>
-    void PauseAutoLogon();
+    /// <summary>The club's shared technician account the staff sign-in logs on (the shell's «Тех. пользователь»).</summary>
+    string TechUserName { get; }
+
+    /// <summary>
+    /// Leaves the mark, makes sure the technician account exists (an administrator, a fresh random password only the Agent
+    /// holds) and points Winlogon's auto-logon at it, so the kiosk's sign-out logs the technician on by itself.
+    /// </summary>
+    void LogOnTechnicianOnce();
+
+    /// <summary>Spoils the technician's auto-logon password once they are in (nobody can use it again).</summary>
+    void RetireTechnicianPassword();
 
     /// <summary>Turns the kiosk's auto-logon back on with its current password and clears the mark.</summary>
     void ResumeAutoLogon();
@@ -59,18 +69,20 @@ public interface IStaffSignInHost
 }
 
 /// <summary>
-/// A staff member signs in to their own Windows account on this PC (<c>sys.staffSignIn</c>), to install games, launchers
-/// and programs with an administrator's rights — the kiosk account has none, and its profile is reset. The lock screen's
-/// «Staff» button sends their PIN from the admin console; the server checks it and that the owner allowed them to service
-/// PCs (<c>POST /agents/{pcId}/staff/verify</c>, which also writes the staff journal). Then:
+/// A staff member signs in to the club's shared technician account on this PC (<c>sys.staffSignIn</c>, the lock screen's
+/// «Тех. пользователь»), to install games, launchers and programs with an administrator's rights — the kiosk account has
+/// none, and its profile is reset. They type only their PIN from the admin console; the server checks it and that the
+/// owner allowed them to service PCs (<c>POST /agents/{pcId}/staff/verify</c>, which also writes the staff journal). The
+/// technician account (<see cref="IStaffSignInHost.TechUserName"/>) has a random password nobody knows: the Agent sets it
+/// for one auto-logon and spoils it once the technician is in. Then:
 /// <list type="number">
 /// <item>a maintenance window opens in its Windows sign-in form (<see cref="AdminMaintenance.BeginWindowsSignIn"/>): the
 /// Shell is not restarted, USB storage and service tools work;</item>
-/// <item>the kiosk's auto-logon is paused (<c>ForceAutoLogon</c> would otherwise log the kiosk straight back on) and the
-/// kiosk is signed out a moment after the answer reached the Shell: Windows shows its sign-in screen;</item>
-/// <item>the first other user who signs in is the staff member: their session is attached to the window and auto-logon is
-/// turned back on at once, so their sign-out — or a reboot in the middle of an installer — brings the kiosk back by
-/// itself; a notice on their desktop says so;</item>
+/// <item>auto-logon is pointed at the technician account and the kiosk is signed out a moment after the answer reached the
+/// Shell: Winlogon logs the technician on by itself;</item>
+/// <item>the first other user who logs on is the technician: their session is attached to the window, the kiosk's
+/// auto-logon is turned back on at once and the technician's password spoiled, so their sign-out — or a reboot in the
+/// middle of an installer — brings the kiosk back by itself; a notice on their desktop says so;</item>
 /// <item>when the window ends (their sign-out, the time, a player's session, the Shell back), and nobody signed in within
 /// <see cref="SignInWithin"/>, auto-logon is resumed and the kiosk logon guard reboots the PC into the kiosk
 /// (<see cref="KioskLogonGuard"/>: only when nobody else is at work, at most once per 15 min).</item>
@@ -224,16 +236,21 @@ public sealed partial class StaffWindowsSignIn : IHostedService, IDisposable
 
         try
         {
-            _host.PauseAutoLogon();
+            _host.LogOnTechnicianOnce();
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex, "Auto-logon could not be paused; the staff sign-in is called off");
-            _maintenance.End("auto-logon could not be paused");
-            throw IpcError.Conflict("Auto-logon could not be paused on this PC", "kioskOff").ToException();
+            _logger.LogError(ex, "The technician account could not be prepared; the staff sign-in is called off");
+            _maintenance.End("the technician account could not be prepared");
+            if (_host.AutoLogonPausedMark)
+            {
+                Resume();
+            }
+
+            throw IpcError.Conflict("The technician account could not be prepared on this PC", "kioskOff").ToException();
         }
 
-        _logger.LogWarning("Staff member {Staff} ({Role}) signs in to Windows on this PC; the kiosk is signed out, maintenance until {Until}", staff.Name, staff.Role, until);
+        _logger.LogWarning("Staff member {Staff} ({Role}) logs on as {Tech} on this PC; the kiosk is signed out, maintenance until {Until}", staff.Name, staff.Role, _host.TechUserName, until);
         WaitForSignIn();
         _ = SignOutKioskSoonAsync();
         return new SysStaffSignInResponse(staff.Name, until, (int)SignInWithin.TotalSeconds);
@@ -300,6 +317,15 @@ public sealed partial class StaffWindowsSignIn : IHostedService, IDisposable
 
         StopWaiting();
         Resume();
+        try
+        {
+            _host.RetireTechnicianPassword();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "The technician's auto-logon password could not be spoiled; it is replaced at the next sign-in");
+        }
+
         _logger.LogWarning("{User} signed in to Windows (session {SessionId}) for {Staff}; signing out brings the kiosk back", user, sessionId, _maintenance.StaffName);
         if (_maintenance.Until is { } until)
         {
@@ -456,16 +482,22 @@ public sealed class WindowsStaffSignInHost : IStaffSignInHost
 {
     private const string MarkFileName = "staff-signin-autologon-paused";
 
+    /// <summary>The technician account's name (<c>security.techUserName</c> is not a setting: one name on every PC).</summary>
+    public const string TechAccount = "ClubTech";
+
     private static readonly TimeSpan NoticeTimeout = TimeSpan.FromSeconds(60);
 
     private readonly ShellRegistry _shell;
+    private readonly LocalUserManager _users;
     private readonly IKioskCredentials _kiosk;
     private readonly SessionChangeWatcher _watcher;
     private readonly IOptionsMonitor<AgentSettings> _settings;
 
     /// <summary>Creates the host.</summary>
-    public WindowsStaffSignInHost(ShellRegistry shell, IKioskCredentials kiosk, SessionChangeWatcher watcher, IOptionsMonitor<AgentSettings> settings)
+    public WindowsStaffSignInHost(ShellRegistry shell, LocalUserManager users, IKioskCredentials kiosk, SessionChangeWatcher watcher, IOptionsMonitor<AgentSettings> settings)
     {
+        ArgumentNullException.ThrowIfNull(users);
+        _users = users;
         ArgumentNullException.ThrowIfNull(shell);
         ArgumentNullException.ThrowIfNull(kiosk);
         ArgumentNullException.ThrowIfNull(watcher);
@@ -512,12 +544,20 @@ public sealed class WindowsStaffSignInHost : IStaffSignInHost
         WtsSessions.Enumerate().FirstOrDefault(s => s.HasUser && s.IsActive && !string.Equals(s.UserName, _kiosk.UserName, StringComparison.OrdinalIgnoreCase))?.Id;
 
     /// <inheritdoc />
-    public void PauseAutoLogon()
+    public string TechUserName => TechAccount;
+
+    /// <inheritdoc />
+    public void LogOnTechnicianOnce()
     {
+        // The mark first: whatever fails after it, the next start (or the window's end) puts the kiosk's auto-logon back.
         Directory.CreateDirectory(Path.GetDirectoryName(MarkPath)!);
         File.WriteAllText(MarkPath, DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
-        _shell.PauseAutoLogon();
+        _ = _users.EnsureTechUser(TechAccount, out string password);
+        _shell.SetAutoLogon(TechAccount, password);
     }
+
+    /// <inheritdoc />
+    public void RetireTechnicianPassword() => _users.RotatePassword(TechAccount);
 
     /// <inheritdoc />
     public void ResumeAutoLogon()

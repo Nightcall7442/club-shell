@@ -1,8 +1,9 @@
 /**
- * «Вход для персонала» on the lock screen: a staff member the owner allowed to service PCs types their PIN from the admin
- * console, and the Agent signs the kiosk out of Windows so they can sign in to their own Windows account — to install
- * games, launchers and programs with an administrator's rights (`sys.staffSignIn`). The PIN is checked on the server;
- * the kiosk comes back when they sign out of Windows, when the time runs out, after a restart, or when nobody signs in.
+ * «Тех. пользователь» on the lock screen: a staff member the owner allowed to service PCs types their PIN from the admin
+ * console, and the Agent signs the kiosk out of Windows and logs the club's shared technician account («ClubTech», an
+ * administrator, a password nobody knows) on by itself — to install games, launchers and programs (`sys.staffSignIn`).
+ * The PIN is checked on the server; the kiosk comes back when they sign out of Windows, when the time runs out, after a
+ * restart, or when the technician never logs on.
  */
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -17,6 +18,23 @@ import { describeError } from '@/store';
 
 const PIN_RE = /^\d{4,8}$/;
 
+/** A person with a wrench: the technician. */
+const TechIcon = (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <circle cx="9" cy="7" r="3.5" />
+    <path d="M2.5 20c0-3.6 2.9-6.5 6.5-6.5 1.2 0 2.3.3 3.2.9" />
+    <path d="M19.5 13.5a2.5 2.5 0 0 0-3.3 3.3l-2.7 2.7 1.4 1.4 2.7-2.7a2.5 2.5 0 0 0 3.3-3.3l-1.4 1.4-1.4-.4-.4-1.4z" />
+  </svg>
+);
+
 interface Done {
   name: string;
   until: string;
@@ -28,7 +46,7 @@ export function StaffSignInButton(): JSX.Element {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button variant="ghost" size="md" onClick={() => setOpen(true)}>
+      <Button variant="ghost" size="md" icon={TechIcon} onClick={() => setOpen(true)}>
         {t('lock.staff.button')}
       </Button>
       <StaffSignInDialog open={open} onClose={() => setOpen(false)} />

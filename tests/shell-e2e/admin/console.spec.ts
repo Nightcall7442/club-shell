@@ -807,6 +807,65 @@ test('the owner sees and edits where a game keeps player settings', async ({ pag
   await expect(rust.getByRole('button', { name: 'Пути заданы' })).toBeVisible();
 });
 
+test('a game refused for want of administrator rights is flagged, and the owner lets it start without them (SHELL_CHANGES 96)', async ({
+  page,
+  request,
+}) => {
+  test.skip(!REAL, "The mock does not edit a game's card.");
+  const owner = auth(await tokenFor(request, OWNER_PIN));
+  const title = `E2E ICCup ${Date.now()}`;
+  const exePath = 'G:\\Warcraft 3\\Launcher.exe';
+  const added = await request.post(`${API}/admin/games`, {
+    headers: owner,
+    data: { title, launcher: 'exe', exePath, category: [] },
+  });
+  expect(added.ok(), await added.text()).toBeTruthy();
+  const id = ((await added.json()) as { game: { id: string } }).game.id;
+
+  // A PC reports error 740, as an Agent does: the card says so.
+  const pc = await registerAgent(request, 'elevation');
+  await new Promise((r) => setTimeout(r, 1100));
+  const report = await agentCall(request, pc, 'POST', `/games/${id}/launch-report`, {
+    sessionId: randomUUID(),
+    userId: randomUUID(),
+    result: {
+      ok: false,
+      startedAt: new Date().toISOString(),
+      error: {
+        code: 'gameLaunchFailed',
+        message: 'Launcher.exe requires administrator rights',
+        details: { stage: 'elevation' },
+      },
+    },
+    durationMs: 120,
+    launcher: 'exe',
+    antiCheat: { kind: 'none', ok: true },
+    phase: 'launch',
+  });
+  expect(report.status(), await report.text()).toBe(204);
+
+  await signIn(page, OWNER_PIN);
+  await page.goto('/#/catalog');
+  const row = page.getByRole('row').filter({ hasText: title });
+  await expect(row).toContainText('Нужны права администратора');
+  await row.getByRole('button', { name: 'Изменить' }).click();
+  const editor = page
+    .locator('section')
+    .filter({ has: page.getByRole('heading', { name: new RegExp(`Игра · ${title}`) }) });
+  await expect(editor.getByText(/игра не запустилась .*нужны права администратора/)).toBeVisible();
+  const toggle = editor.getByRole('switch', { name: 'Запускать без прав администратора' });
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  await toggle.click();
+  await editor.getByRole('button', { name: 'Сохранить', exact: true }).click();
+  await expect(row).not.toContainText('Нужны права администратора');
+
+  // On the PCs: the game says so in the catalog the Agent reads.
+  const games = (await (await agentCall(request, pc, 'GET', '/games')).json()) as {
+    items: { id: string; runAsInvoker?: boolean }[];
+  };
+  expect(games.items.find((g) => g.id === id)?.runAsInvoker).toBe(true);
+});
+
 test('saving only the zones of a game sends only its zones (SHELL_CHANGES 61)', async ({ page }) => {
   await signIn(page, OWNER_PIN);
   await page.goto('/#/catalog');

@@ -397,6 +397,12 @@ export interface Game {
    * Registry values the club sets in the player's HKCU before every launch (SHELL_CHANGES 82); `null` or empty = none.
    */
   registryValues?: GameRegistryValue[] | null;
+  /**
+   * Start the game without administrator rights although its manifest asks for them (`requireAdministrator`, a launcher
+   * such as ICCup's): the Agent adds `RunAsInvoker` to the process's `__COMPAT_LAYER`, which its children inherit
+   * (SHELL_CHANGES 96). Null or false — off; without it such a game fails with `gameLaunchFailed {stage: "elevation"}`.
+   */
+  runAsInvoker?: boolean | null;
 }
 
 /** Body of `POST /games/{id}/launch-report` (SERVER_API.md §4.6). */

@@ -184,6 +184,7 @@ which is stripped before the process is created.
 | Command | `<exe> [game.Args] [extraArgs]`, working dir = exe directory, `WaitForGameProcess: false` (the launched pid **is** the game) |
 | Credential injection | `ExeStrategy` → `InjectionResult.None` |
 | Save dir default | `%USERPROFILE%\Saved Games\{title}` |
+| Administrator rights | `game.RunAsInvoker` («Запускать без прав администратора» in the catalog, SHELL_CHANGES 96): the process gets `__COMPAT_LAYER=RunAsInvoker`, added to the player's own layers (`ProcessEnvironment.AddLayers`), so an exe whose manifest says `requireAdministrator` (ICCup's `Launcher.exe`) starts as the player and its children inherit it. `CreateProcessAsUser` does not read the `AppCompatFlags\Layers` registry that Explorer honours. Without the flag such an exe fails with Win32 error 740, reported as `gameLaunchFailed {stage: "elevation"}`: the shell says the game needs administrator rights, and the catalog card shows the PC and time of the newest such failure (launch reports, 14 days, since the card was saved) until the owner turns the flag on |
 
 ### 3.8 Rockstar Games Launcher, Lesta Game Center (as `exe`)
 

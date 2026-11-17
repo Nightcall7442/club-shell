@@ -58,7 +58,7 @@ public sealed class StaffWindowsSignInTests : IDisposable
     }
 
     [Fact]
-    public async Task The_pin_opens_a_window_pauses_auto_logon_and_signs_the_kiosk_out_after_the_answer()
+    public async Task The_pin_opens_a_window_points_auto_logon_at_the_technician_and_signs_the_kiosk_out_after_the_answer()
     {
         var answer = await _signIn.SignInAsync(new SysStaffSignInRequest("2468"), CancellationToken.None);
 
@@ -68,6 +68,7 @@ public sealed class StaffWindowsSignInTests : IDisposable
         _maintenance.WindowsSignIn.Should().BeTrue();
         _maintenance.AutoLogonPaused.Should().BeTrue();
         _host.Paused.Should().BeTrue();
+        _host.TechAutoLogon.Should().BeTrue("Winlogon logs the technician on by itself once the kiosk is out");
         _host.SignedOut.Should().BeEmpty("the Shell shows the answer before the kiosk goes");
 
         await AdvanceAsync(StaffWindowsSignIn.SignOutDelay);
@@ -80,17 +81,19 @@ public sealed class StaffWindowsSignInTests : IDisposable
     }
 
     [Fact]
-    public async Task The_staff_members_session_is_attached_auto_logon_resumes_and_their_sign_out_ends_the_window()
+    public async Task The_technicians_session_is_attached_the_kiosks_auto_logon_resumes_the_password_is_spoiled_and_their_sign_out_ends_the_window()
     {
         await _signIn.SignInAsync(new SysStaffSignInRequest("2468", Minutes: 90), CancellationToken.None);
         await AdvanceAsync(StaffWindowsSignIn.SignOutDelay);
         _host.Logoff(KioskSession);
 
-        _host.Logon(StaffSession, "Administrator");
+        _host.Logon(StaffSession, FakeHost.Tech);
 
         _maintenance.Session.Should().Be(StaffSession);
         _maintenance.AutoLogonPaused.Should().BeFalse();
-        _host.Paused.Should().BeFalse("a restart or the staff member's sign-out must bring the kiosk back by itself");
+        _host.Paused.Should().BeFalse("a restart or the technician's sign-out must bring the kiosk back by itself");
+        _host.TechAutoLogon.Should().BeFalse();
+        _host.PasswordsRetired.Should().Be(1, "the auto-logon password is spent: nobody may use it again");
         _host.Notices.Should().ContainSingle(n => n.Session == StaffSession && n.Text.Contains("10:30", StringComparison.Ordinal));
 
         // Past the sign-in wait nothing is given up: they are in.
@@ -113,6 +116,7 @@ public sealed class StaffWindowsSignInTests : IDisposable
 
         _maintenance.IsActive.Should().BeFalse();
         _host.Paused.Should().BeFalse();
+        _host.TechAutoLogon.Should().BeFalse("a technician who never came must not be logged on later");
         _host.Resumes.Should().Be(1);
     }
 
@@ -241,11 +245,27 @@ public sealed class StaffWindowsSignInTests : IDisposable
 
         public uint? OtherActiveSession() => _sessions.FirstOrDefault(s => s.Value != Kiosk) is { Value: not null } other ? other.Key : null;
 
-        public void PauseAutoLogon() => Paused = true;
+        public const string Tech = "ClubTech";
+
+        /// <summary>Auto-logon points at the technician account (and the mark is left).</summary>
+        public bool TechAutoLogon { get; private set; }
+
+        public int PasswordsRetired { get; private set; }
+
+        public string TechUserName => Tech;
+
+        public void LogOnTechnicianOnce()
+        {
+            Paused = true;
+            TechAutoLogon = true;
+        }
+
+        public void RetireTechnicianPassword() => PasswordsRetired++;
 
         public void ResumeAutoLogon()
         {
             Paused = false;
+            TechAutoLogon = false;
             Resumes++;
         }
 

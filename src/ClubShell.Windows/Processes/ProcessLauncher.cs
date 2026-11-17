@@ -579,7 +579,16 @@ internal static class ProcessWait
 /// <summary>Environment of a process the Agent starts as a user.</summary>
 public static class ProcessEnvironment
 {
-    /// <summary>Drops the <paramref name="dropPrefixes"/> variables from <paramref name="variables"/>, then sets <paramref name="extra"/>.</summary>
+    /// <summary>
+    /// Windows' compatibility layers of a process (<c>RunAsInvoker</c>, …), space-separated: an extra value is added to
+    /// the user's own instead of replacing it (SHELL_CHANGES 96).
+    /// </summary>
+    public const string CompatLayer = "__COMPAT_LAYER";
+
+    /// <summary>
+    /// Drops the <paramref name="dropPrefixes"/> variables from <paramref name="variables"/>, then sets <paramref name="extra"/>;
+    /// <see cref="CompatLayer"/> is added to, each layer once.
+    /// </summary>
     public static void Merge(IDictionary<string, string> variables, IReadOnlyDictionary<string, string>? extra, IReadOnlyList<string>? dropPrefixes)
     {
         ArgumentNullException.ThrowIfNull(variables);
@@ -595,8 +604,30 @@ public static class ProcessEnvironment
         {
             foreach ((string key, string value) in extra)
             {
-                variables[key] = value;
+                if (string.Equals(key, CompatLayer, StringComparison.OrdinalIgnoreCase) && variables.TryGetValue(key, out string? own))
+                {
+                    variables[key] = AddLayers(own, value);
+                }
+                else
+                {
+                    variables[key] = value;
+                }
             }
         }
+    }
+
+    /// <summary><paramref name="current"/>'s layers, then those of <paramref name="added"/> it lacks.</summary>
+    public static string AddLayers(string? current, string added)
+    {
+        var layers = new List<string>((current ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        foreach (string layer in added.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!layers.Contains(layer, StringComparer.OrdinalIgnoreCase))
+            {
+                layers.Add(layer);
+            }
+        }
+
+        return string.Join(' ', layers);
     }
 }

@@ -329,20 +329,22 @@ server takes such a stop as planned: the Agent says goodbye with the reason `shu
 ### 6.1 Staff sign-in to their own Windows account
 
 The maintenance window above runs in the kiosk account, which is a plain user whose profile is reset: no place to install
-games, launchers or programs. For that a staff member signs in to **their own Windows account** (with an administrator's
-rights) from the lock screen:
+games, launchers or programs. For that a staff member logs on the club's shared **technician account «ClubTech»** (a local
+administrator the Agent creates) from the lock screen — only their PIN, no Windows password: the account's password is
+random, set for one auto-logon and replaced once they are in, so nobody knows it:
 
 ```
-Lock screen «Вход для персонала» (no player signed in) → staff PIN from the admin console
+Lock screen «Тех. пользователь» (no player signed in) → staff PIN from the admin console
    │ sys_staff_sign_in{pin} → IPC sys.staffSignIn
    ▼
 Agent StaffWindowsSignIn: online, no session, auto-logon is the kiosk's
    │ POST /agents/{pcId}/staff/verify — owner always, cashier with «Обслуживание ПК» (Персонал page); staff journal
    ▼
 AdminMaintenance.BeginWindowsSignIn (240 min, at most 480): Shell not restarted, USB storage and service tools allowed
-ShellRegistry.PauseAutoLogon: AutoAdminLogon = 0, no ForceAutoLogon (+ mark secure\staff-signin-autologon-paused)
-2 s later WTSLogoffSession(kiosk) → Windows sign-in screen
-   │ the staff member signs in to their account (other user) → session attached, auto-logon resumed, notice on their desktop
+LocalUserManager.EnsureTechUser(ClubTech): created if missing, Administrators, new random password
+ShellRegistry.SetAutoLogon(ClubTech, password) (+ mark secure\staff-signin-autologon-paused)
+2 s later WTSLogoffSession(kiosk) → Winlogon logs ClubTech on by itself
+   │ ClubTech's session → attached, the kiosk's auto-logon resumed, ClubTech's password replaced, notice on the desktop
    ▼
 their sign-out (or a restart) → Winlogon logs the kiosk on → Shell connects → window ends
 ```

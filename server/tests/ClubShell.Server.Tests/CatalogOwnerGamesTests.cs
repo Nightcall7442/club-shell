@@ -123,6 +123,53 @@ public sealed class CatalogOwnerGamesTests(ExampleCatalogFixture server) : IClas
         Assert.Equal(0, await Players.ScalarAsync<int>(server, "SELECT count(*)::int FROM games WHERE title = 'Game'"));
     }
 
+    /// <summary>
+    /// SHELL_CHANGES 96: a game refused for want of administrator rights (error 740) is flagged on its card with the PC
+    /// and time; «Запускать без прав администратора» reaches the PCs and the flag goes; a save without the field keeps it.
+    /// </summary>
+    [Fact]
+    public async Task Run_without_administrator_rights_is_offered_after_an_elevation_failure_and_reaches_the_pcs()
+    {
+        var owner = await LoginAsync(server, OwnerPin);
+        var (status, body) = await SendRawAsync(HttpMethod.Post, "/games", owner, new { title = "ICCup", launcher = "exe", exePath = @"G:\Warcraft 3\Launcher.exe" });
+        Assert.Equal(200, status);
+        var id = body.GetProperty("game").GetProperty("id").GetGuid();
+        Assert.False(body.GetProperty("game").GetProperty("runAsInvoker").GetBoolean());
+
+        // The PC reports the refusal, after the card was saved: the card says on which PC.
+        server.Clock.Advance(TimeSpan.FromSeconds(5));
+        var agent = await TestAgent.CreateAsync(server);
+        var report = new
+        {
+            sessionId = Guid.NewGuid(), userId = Guid.NewGuid(),
+            result = new
+            {
+                ok = false, startedAt = DateTimeOffset.UtcNow,
+                error = new { code = "gameLaunchFailed", message = "Launcher.exe requires administrator rights", details = new { stage = "elevation" } },
+            },
+            durationMs = 120, launcher = "exe", antiCheat = new { kind = "none", ok = true }, phase = "launch",
+        };
+        await Players.ReadAsync(await agent.PostAsync($"/api/v1/games/{id}/launch-report", report), 204);
+        var pcName = await Players.ScalarAsync<string>(server, "SELECT name FROM pcs WHERE id = @PcId", new { agent.PcId });
+        var card = await CardAsync(owner, id);
+        Assert.Equal(pcName, card.GetProperty("elevationFailure").GetProperty("pc").GetString());
+
+        // The flag: on the PCs, and the warning goes.
+        (status, body) = await SendRawAsync(HttpMethod.Put, $"/games/{id}", owner, new { title = "ICCup", launcher = "exe", exePath = @"G:\Warcraft 3\Launcher.exe", runAsInvoker = true });
+        Assert.Equal(200, status);
+        Assert.True(body.GetProperty("game").GetProperty("runAsInvoker").GetBoolean());
+        Assert.True((await AgentGamesAsync(agent)).Single(g => g.GetProperty("id").GetGuid() == id).GetProperty("runAsInvoker").GetBoolean());
+        card = await CardAsync(owner, id);
+        Assert.Equal(JsonValueKind.Null, card.GetProperty("elevationFailure").ValueKind);
+
+        // A save from an older cash desk (no field) keeps it.
+        Assert.Equal(200, (await SendRawAsync(HttpMethod.Put, $"/games/{id}", owner, new { title = "ICCup", launcher = "exe", exePath = @"G:\Warcraft 3\Launcher.exe" })).Status);
+        Assert.True((await CardAsync(owner, id)).GetProperty("runAsInvoker").GetBoolean());
+    }
+
+    private async Task<JsonElement> CardAsync(string owner, Guid id) =>
+        (await SendRawAsync(HttpMethod.Get, "/games", owner)).Body.GetProperty("items").EnumerateArray().Single(g => g.GetProperty("id").GetGuid() == id);
+
     [Fact]
     public async Task Registry_values_ride_the_card_to_the_pcs()
     {

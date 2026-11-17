@@ -63,6 +63,12 @@ public sealed record GameMinSpec(
 /// Registry values the club sets in the player's HKCU before every launch (SHELL_CHANGES 82); <see langword="null"/> or
 /// empty = none.
 /// </param>
+/// <param name="RunAsInvoker">
+/// Start the game without administrator rights although its manifest asks for them (<c>requireAdministrator</c>, a
+/// launcher such as ICCup's): the Agent adds <c>RunAsInvoker</c> to the process's <c>__COMPAT_LAYER</c>, which its
+/// children inherit (SHELL_CHANGES 96). Null or false — off; without it such a game fails with
+/// <c>gameLaunchFailed {stage: "elevation"}</c>.
+/// </param>
 public sealed record Game(
     Guid Id,
     string Title,
@@ -88,7 +94,8 @@ public sealed record Game(
     string? Version = null,
     IReadOnlyList<string>? SettingsPaths = null,
     string? MissingDrive = null,
-    IReadOnlyList<GameRegistryValue>? RegistryValues = null);
+    IReadOnlyList<GameRegistryValue>? RegistryValues = null,
+    bool? RunAsInvoker = null);
 
 /// <summary>
 /// A value the Agent writes into the player's HKCU before every launch of the game (SHELL_CHANGES 82), after the player's

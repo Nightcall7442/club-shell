@@ -185,8 +185,8 @@ export const UZ: Record<string, string> = {
   '{name}: вход на ПК разрешён': '{name}: kompyuterga kirish ruxsat etildi',
   '{name}: вход на ПК выключен': '{name}: kompyuterga kirish oʻchirildi',
   'Разрешить вход на ПК для обслуживания': 'Xizmat uchun kompyuterga kirishga ruxsat berish',
-  'Вход на ПК — кнопка «Вход для персонала» на экране блокировки: сотрудник вводит свой PIN, ПК выходит из оболочки, и он входит в свою учётную запись Windows, чтобы ставить игры, лаунчеры и программы. Владельцу разрешено всегда.':
-    'Kompyuterga kirish — bloklash ekranidagi «Xodimlar uchun kirish» tugmasi: xodim oʻz PIN-kodini kiritadi, kompyuter qobiqdan chiqadi va u oʻyinlar, launcherlar va dasturlarni oʻrnatish uchun oʻz Windows hisobiga kiradi. Egasiga har doim ruxsat.',
+  'Вход на ПК — кнопка «Тех. пользователь» на экране блокировки: сотрудник вводит свой PIN, ПК выходит из оболочки и сам входит в общую учётную запись техника «ClubTech» с правами администратора, чтобы ставить игры, лаунчеры и программы. Владельцу разрешено всегда.':
+    'Kompyuterga kirish — qulf ekranidagi «Texnik foydalanuvchi» tugmasi: xodim PIN kiritadi, kompyuter qobiqdan chiqadi va administrator huquqli umumiy texnik hisobga «ClubTech» oʻzi kiradi — oʻyin, launcher va dasturlarni oʻrnatish uchun. Egaga har doim ruxsat.',
   '{name}: доступ включён': '{name}: kirish yoqildi',
   '{name}: доступ выключен': '{name}: kirish oʻchirildi',
   '{n} дней': '{n} kun',
@@ -1318,6 +1318,13 @@ export const UZ: Record<string, string> = {
   'Сервер скачивает новую версию с GitHub…': "Server GitHub'dan yangi versiyani yuklab olmoqda…",
   'Действия с {pc}': '{pc} bilan amallar',
   'Посадить клиента': 'Mijozni oʻtqazish',
+  'Для игр и лаунчеров, которые просят права администратора (например ICCup): без этого они не запускаются под игроком.':
+    'Administrator huquqini soʻraydigan oʻyin va launcherlar uchun (masalan ICCup): busiz ular oʻyinchi nomidan ishga tushmaydi.',
+  'Запускать без прав администратора': 'Administrator huquqisiz ishga tushirish',
+  'На {pc} игра не запустилась ({time}): ей нужны права администратора. Включите «Запускать без прав администратора».':
+    '{pc} da oʻyin ishga tushmadi ({time}): unga administrator huquqi kerak. «Administrator huquqisiz ishga tushirish»ni yoqing.',
+  'Нужны права администратора — откройте и включите запуск без них':
+    'Administrator huquqi kerak — oching va ularsiz ishga tushirishni yoqing',
 };
 export const EN: Record<string, string> = {
   'Выручка за период': 'Revenue for the period',
@@ -1504,8 +1511,8 @@ export const EN: Record<string, string> = {
   '{name}: вход на ПК разрешён': '{name}: PC sign-in allowed',
   '{name}: вход на ПК выключен': '{name}: PC sign-in turned off',
   'Разрешить вход на ПК для обслуживания': 'Allow PC sign-in for service',
-  'Вход на ПК — кнопка «Вход для персонала» на экране блокировки: сотрудник вводит свой PIN, ПК выходит из оболочки, и он входит в свою учётную запись Windows, чтобы ставить игры, лаунчеры и программы. Владельцу разрешено всегда.':
-    'PC sign-in is the «Staff sign-in» button on the lock screen: the staff member types their PIN, the PC leaves the shell, and they sign in to their own Windows account to install games, launchers and programs. An owner always may.',
+  'Вход на ПК — кнопка «Тех. пользователь» на экране блокировки: сотрудник вводит свой PIN, ПК выходит из оболочки и сам входит в общую учётную запись техника «ClubTech» с правами администратора, чтобы ставить игры, лаунчеры и программы. Владельцу разрешено всегда.':
+    'PC sign-in is the «Tech user» button on the lock screen: the staff member types their PIN, the PC leaves the shell and signs in to the shared technician account «ClubTech» with administrator rights by itself, to install games, launchers and programs. The owner always may.',
   '{name}: доступ включён': '{name}: access enabled',
   '{name}: доступ выключен': '{name}: access disabled',
   '{n} дней': '{n} days',
@@ -2634,4 +2641,11 @@ export const EN: Record<string, string> = {
   'Сервер скачивает новую версию с GitHub…': 'The server is downloading the new version from GitHub…',
   'Действия с {pc}': 'Actions on {pc}',
   'Посадить клиента': 'Seat a client',
+  'Для игр и лаунчеров, которые просят права администратора (например ICCup): без этого они не запускаются под игроком.':
+    'For games and launchers that ask for administrator rights (ICCup, for example): without it they do not start as the player.',
+  'Запускать без прав администратора': 'Run without administrator rights',
+  'На {pc} игра не запустилась ({time}): ей нужны права администратора. Включите «Запускать без прав администратора».':
+    'The game did not start on {pc} ({time}): it needs administrator rights. Turn on «Run without administrator rights».',
+  'Нужны права администратора — откройте и включите запуск без них':
+    'Needs administrator rights: open it and turn on running without them',
 };

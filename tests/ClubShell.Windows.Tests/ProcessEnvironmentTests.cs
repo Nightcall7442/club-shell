@@ -43,4 +43,20 @@ public sealed class ProcessEnvironmentTests
 
         variables.Should().ContainKey("CLUBSHELL_DEV").And.ContainKey("A");
     }
+
+    /// <summary>SHELL_CHANGES 96: a game's <c>RunAsInvoker</c> joins the user's own compatibility layers, once.</summary>
+    [Fact]
+    public void A_compat_layer_is_added_to_the_users_own()
+    {
+        var variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["__COMPAT_LAYER"] = "HighDpiAware" };
+        ProcessEnvironment.Merge(variables, new Dictionary<string, string> { ["__compat_layer"] = "RunAsInvoker" }, null);
+        variables["__COMPAT_LAYER"].Should().Be("HighDpiAware RunAsInvoker");
+
+        ProcessEnvironment.Merge(variables, new Dictionary<string, string> { ["__COMPAT_LAYER"] = "runasinvoker" }, null);
+        variables["__COMPAT_LAYER"].Should().Be("HighDpiAware RunAsInvoker");
+
+        var fresh = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        ProcessEnvironment.Merge(fresh, new Dictionary<string, string> { ["__COMPAT_LAYER"] = "RunAsInvoker" }, null);
+        fresh["__COMPAT_LAYER"].Should().Be("RunAsInvoker");
+    }
 }

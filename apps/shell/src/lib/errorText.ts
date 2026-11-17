@@ -137,6 +137,12 @@ export function errorText(code: string, details: unknown, context: ErrorContext 
       }
       return one('errors.validation');
     }
+    case 'gameLaunchFailed':
+      // SHELL_CHANGES 96: the game's exe asks for administrator rights and the club has not marked it to start without
+      // them — the player can do nothing about it, the club's administrator can.
+      return d['stage'] === 'elevation'
+        ? one('errors.gameNeedsAdmin', 'errors.gameLaunchFailed')
+        : one('errors.gameLaunchFailed');
     case 'insufficientFunds':
       // Money is formatted by the caller (it needs the locale).
       vars['required'] = d['required'];
