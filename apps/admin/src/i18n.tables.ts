@@ -1316,6 +1316,8 @@ export const UZ: Record<string, string> = {
   'Новой версии нет: на сервере самая свежая': 'Yangi versiya yoʻq: serverda eng yangisi',
   'Проверить обновления': 'Yangilanishlarni tekshirish',
   'Сервер скачивает новую версию с GitHub…': "Server GitHub'dan yangi versiyani yuklab olmoqda…",
+  'Действия с {pc}': '{pc} bilan amallar',
+  'Посадить клиента': 'Mijozni oʻtqazish',
 };
 export const EN: Record<string, string> = {
   'Выручка за период': 'Revenue for the period',
@@ -2630,4 +2632,6 @@ export const EN: Record<string, string> = {
   'Новой версии нет: на сервере самая свежая': 'No new version: the server has the latest',
   'Проверить обновления': 'Check for updates',
   'Сервер скачивает новую версию с GitHub…': 'The server is downloading the new version from GitHub…',
+  'Действия с {pc}': 'Actions on {pc}',
+  'Посадить клиента': 'Seat a client',
 };
