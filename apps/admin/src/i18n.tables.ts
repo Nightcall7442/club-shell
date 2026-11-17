@@ -1318,6 +1318,13 @@ export const UZ: Record<string, string> = {
   'Сервер скачивает новую версию с GitHub…': "Server GitHub'dan yangi versiyani yuklab olmoqda…",
   'Действия с {pc}': '{pc} bilan amallar',
   'Посадить клиента': 'Mijozni oʻtqazish',
+  'Для игр и лаунчеров, которые просят права администратора (например ICCup): без этого они не запускаются под игроком.':
+    'Administrator huquqini soʻraydigan oʻyin va launcherlar uchun (masalan ICCup): busiz ular oʻyinchi nomidan ishga tushmaydi.',
+  'Запускать без прав администратора': 'Administrator huquqisiz ishga tushirish',
+  'На {pc} игра не запустилась ({time}): ей нужны права администратора. Включите «Запускать без прав администратора».':
+    '{pc} da oʻyin ishga tushmadi ({time}): unga administrator huquqi kerak. «Administrator huquqisiz ishga tushirish»ni yoqing.',
+  'Нужны права администратора — откройте и включите запуск без них':
+    'Administrator huquqi kerak — oching va ularsiz ishga tushirishni yoqing',
 };
 export const EN: Record<string, string> = {
   'Выручка за период': 'Revenue for the period',
@@ -2634,4 +2641,11 @@ export const EN: Record<string, string> = {
   'Сервер скачивает новую версию с GitHub…': 'The server is downloading the new version from GitHub…',
   'Действия с {pc}': 'Actions on {pc}',
   'Посадить клиента': 'Seat a client',
+  'Для игр и лаунчеров, которые просят права администратора (например ICCup): без этого они не запускаются под игроком.':
+    'For games and launchers that ask for administrator rights (ICCup, for example): without it they do not start as the player.',
+  'Запускать без прав администратора': 'Run without administrator rights',
+  'На {pc} игра не запустилась ({time}): ей нужны права администратора. Включите «Запускать без прав администратора».':
+    'The game did not start on {pc} ({time}): it needs administrator rights. Turn on «Run without administrator rights».',
+  'Нужны права администратора — откройте и включите запуск без них':
+    'Needs administrator rights: open it and turn on running without them',
 };

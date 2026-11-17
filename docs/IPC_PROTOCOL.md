@@ -129,7 +129,7 @@ Ping/pong are exempt from rate limiting and are not logged above Verbose.
 | `sessionNotActive` | SessionNotActive | 409 | Operation needs an Active/Paused session |
 | `sessionAlreadyActive` | SessionAlreadyActive | 409 | `session.start` while a session exists |
 | `gameNotInstalled` | GameNotInstalled | 409 | `installed = false` or install path missing |
-| `gameLaunchFailed` | GameLaunchFailed | 500 | Launcher error; `details: {stage, exitCode?, stderr?}` |
+| `gameLaunchFailed` | GameLaunchFailed | 500 | Launcher error; `details: {stage, exitCode?, stderr?}`; `stage: "elevation"` — the exe asks for administrator rights (Win32 740) and the game is not marked `runAsInvoker` (SHELL_CHANGES 96) |
 | `accountPoolExhausted` | AccountPoolExhausted | 409 | No free pooled account |
 | `antiCheatBlocked` | AntiCheatBlocked | 403 | Anti-cheat prerequisite failed; `details: {kind, reason}` |
 | `policyDenied` | PolicyDenied | 403 | Blocked by Policy; `details: {rule}` |

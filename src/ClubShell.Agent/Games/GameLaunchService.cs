@@ -313,6 +313,14 @@ public sealed class GameLaunchService : IDisposable
                 }
             }
 
+            // SHELL_CHANGES 96: a game whose manifest asks for administrator rights starts as the player all the same — the
+            // compatibility layer Explorer would apply, which CreateProcessAsUser does not read from the registry. Its
+            // children (a launcher's war3.exe) inherit the environment.
+            if (game.RunAsInvoker == true)
+            {
+                env[ProcessEnvironment.CompatLayer] = ProcessEnvironment.AddLayers(env.GetValueOrDefault(ProcessEnvironment.CompatLayer), "RunAsInvoker");
+            }
+
             int timeoutSec = request.LaunchTimeoutSec > 0 ? request.LaunchTimeoutSec : _settings.CurrentValue.Games.LaunchTimeoutSec;
             LaunchRequest effective = request with
             {

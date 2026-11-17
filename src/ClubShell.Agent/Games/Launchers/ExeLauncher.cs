@@ -32,6 +32,9 @@ public abstract class LauncherBase : IGameLauncher
     /// </summary>
     public const string LauncherArgsEnvKey = "CLUBSHELL_LAUNCHER_ARGS";
 
+    /// <summary>ERROR_ELEVATION_REQUIRED: the exe's manifest asks for administrator rights (SHELL_CHANGES 96).</summary>
+    public const int ElevationRequired = 740;
+
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(500);
 
     // ponytail: substring denylist for helper executables living next to the game; make it per-game catalogue data if it misfires.
@@ -147,6 +150,13 @@ public abstract class LauncherBase : IGameLauncher
         try
         {
             launched = await _processes.LaunchAsync(spec, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Win32Exception ex) when (ex.NativeErrorCode == ElevationRequired)
+        {
+            // SHELL_CHANGES 96: the exe's manifest asks for administrator rights (requireAdministrator) and the game is not
+            // marked «Запускать без прав администратора» — said as such, not as a generic failure.
+            Logger.LogWarning("{Launcher}: {Exe} requires administrator rights; turn on «run without administrator rights» for {Title}", Launcher, command.Exe, game.Title);
+            return LaunchResult.Failure(IpcError.GameLaunchFailed("elevation", $"{Path.GetFileName(command.Exe)} requires administrator rights"), startedAt, leaseId);
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException)
         {

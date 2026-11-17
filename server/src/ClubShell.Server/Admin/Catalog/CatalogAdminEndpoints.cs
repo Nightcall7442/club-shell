@@ -22,7 +22,15 @@ namespace ClubShell.Server.Admin;
 public sealed record AdminGame(
     Guid Id, string Title, string? CoverUrl, bool Installed, string Launcher, IReadOnlyList<string> Category, bool Hidden, bool Featured,
     IReadOnlyList<string> SettingsPaths, string? LauncherAppId = null, string? ExePath = null, string? Args = null, string Description = "",
-    bool Custom = false, string? VideoUrl = null, IReadOnlyList<string>? Zones = null, IReadOnlyList<GameRegistryValue>? RegistryValues = null);
+    bool Custom = false, string? VideoUrl = null, IReadOnlyList<string>? Zones = null, IReadOnlyList<GameRegistryValue>? RegistryValues = null,
+    bool RunAsInvoker = false, AdminElevationFailure? ElevationFailure = null);
+
+/// <summary>
+/// The newest launch of the game refused for want of administrator rights since the card was last saved (SHELL_CHANGES 96,
+/// <c>gameLaunchFailed {stage: elevation}</c> in the PCs' launch reports, 14 days at most): on which PC and when, so the
+/// owner turns on «Запускать без прав администратора».
+/// </summary>
+public sealed record AdminElevationFailure(string Pc, DateTimeOffset At);
 
 public sealed record AdminGameList(IReadOnlyList<AdminGame> Items, IReadOnlyList<Guid> Order);
 
@@ -64,15 +72,25 @@ public static partial class CatalogAdminEndpoints
         api.MapPut("/{id}/zones", ZonesAsync).WithMetadata(new AuthRequirement(AuthMode.Staff, OwnerOnly: true));
     }
 
-    private static async Task<IResult> ListAsync(HttpContext context, NpgsqlDataSource db)
+    private static async Task<IResult> ListAsync(HttpContext context, NpgsqlDataSource db, TimeProvider clock)
     {
         var staff = context.Features.GetRequiredFeature<StaffContext>();
         await using var c = await db.OpenConnectionAsync();
         var catalog = await c.ExecuteScalarAsync<string?>("SELECT (settings -> 'catalog')::text FROM clubs WHERE id = @ClubId", new { staff.ClubId });
         var (order, hidden, featured) = Marks(catalog);
+        var elevation = (await c.QueryAsync<(Guid GameId, string Pc, DateTimeOffset At)>(
+                """
+                SELECT DISTINCT ON (r.game_id) r.game_id, p.name, r.created_at
+                FROM launch_reports r JOIN games g ON g.id = r.game_id JOIN pcs p ON p.id = r.pc_id
+                WHERE r.club_id = @ClubId AND r.phase = 'launch' AND r.data #>> '{result,error,details,stage}' = 'elevation'
+                  AND r.created_at > g.updated_at AND r.created_at > @since
+                ORDER BY r.game_id, r.created_at DESC
+                """,
+                new { staff.ClubId, since = clock.GetUtcNow().AddDays(-14) }))
+            .ToDictionary(e => e.GameId, e => new AdminElevationFailure(e.Pc, e.At));
         var items = (await c.QueryAsync<GameRow>(
                 $"SELECT {GameRow.Columns} FROM games WHERE club_id = @ClubId AND deleted_at IS NULL", new { staff.ClubId }))
-            .Select(g => g.ToWire(hidden.Contains(g.Id), featured.Contains(g.Id)))
+            .Select(g => g.ToWire(hidden.Contains(g.Id), featured.Contains(g.Id), elevation.GetValueOrDefault(g.Id)))
             .OrderBy(g => order.IndexOf(g.Id) is var i and >= 0 ? i : int.MaxValue)
             .ThenBy(g => g.Title, StringComparer.Ordinal)
             .ThenBy(g => g.Id)
@@ -354,7 +372,7 @@ public static partial class CatalogAdminEndpoints
 
         return new GameInput(
             title, launcher, appId, exePath, AdminInput.OptionalText(Blank(r.Args), "args", 500), cover, category,
-            AdminInput.OptionalText(Blank(r.Description), "description", 1000) ?? "", video, RegistryValues(r.RegistryValues));
+            AdminInput.OptionalText(Blank(r.Description), "description", 1000) ?? "", video, RegistryValues(r.RegistryValues), r.RunAsInvoker);
     }
 
     /// <summary>Policy keys the kiosk lockdown writes: never a game's to change.</summary>
@@ -445,13 +463,13 @@ public static partial class CatalogAdminEndpoints
     /// <summary>The request body as sent; <see cref="Parse"/> checks it.</summary>
     private sealed record GameInputBody(
         string? Title, string? Launcher, string? LauncherAppId, string? ExePath, string? Args, string? CoverUrl, string?[]? Category, string? Description,
-        string? VideoUrl, RegistryValueBody?[]? RegistryValues = null);
+        string? VideoUrl, RegistryValueBody?[]? RegistryValues = null, bool? RunAsInvoker = null);
 
     private sealed record RegistryValueBody(string? Key, string? Name, string? Type, JsonElement Value);
 
     private sealed record GameInput(
         string Title, LauncherType Launcher, string? LauncherAppId, string? ExePath, string? Args, string? CoverUrl, List<string> Category, string Description,
-        string? VideoUrl, List<GameRegistryValue>? RegistryValues)
+        string? VideoUrl, List<GameRegistryValue>? RegistryValues, bool? RunAsInvoker = null)
     {
         /// <summary>
         /// <paramref name="game"/> started and shown as this input says. A Steam game without a cover gets its store art; a
@@ -474,6 +492,7 @@ public static partial class CatalogAdminEndpoints
                 Category = Category,
                 Description = Description,
                 RegistryValues = RegistryValues ?? game.RegistryValues,
+                RunAsInvoker = RunAsInvoker ?? game.RunAsInvoker,
             };
         }
     }
@@ -495,7 +514,7 @@ public static partial class CatalogAdminEndpoints
 
         public string[]? Zones { get; init; }
 
-        public AdminGame ToWire(bool hidden, bool featured)
+        public AdminGame ToWire(bool hidden, bool featured, AdminElevationFailure? elevation = null)
         {
             using var doc = JsonDocument.Parse(Data);
             var data = doc.RootElement;
@@ -512,7 +531,9 @@ public static partial class CatalogAdminEndpoints
                 Text("videoUrl"), Zones ?? [],
                 data.TryGetProperty("registryValues", out var values) && values.ValueKind == JsonValueKind.Array
                     ? [.. values.EnumerateArray().Select(v => JsonDefaults.Deserialize<GameRegistryValue>(v.GetRawText())!)]
-                    : []);
+                    : [],
+                data.TryGetProperty("runAsInvoker", out var invoker) && invoker.ValueKind == JsonValueKind.True,
+                data.TryGetProperty("runAsInvoker", out var off) && off.ValueKind == JsonValueKind.True ? null : elevation);
         }
     }
 }

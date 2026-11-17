@@ -1222,6 +1222,10 @@ export interface AdminGame {
   zones?: string[];
   /** Values the agent writes under the player's HKCU before every launch (SHELL_CHANGES 82); absent from an older server. */
   registryValues?: GameRegistryValue[];
+  /** Start the exe without administrator rights though its manifest asks for them (SHELL_CHANGES 96); absent from an older server. */
+  runAsInvoker?: boolean;
+  /** The newest launch refused for want of administrator rights since the card was saved: on which PC and when. */
+  elevationFailure?: { pc: string; at: string } | null;
 }
 
 /** One registry value of a game: `key` under `HKCU\Software`, a `dword` (0..4294967295) or a `string`. */
@@ -1246,6 +1250,8 @@ export interface GameInput {
   videoUrl?: string | null;
   /** Absent — the game keeps its values; empty — none. */
   registryValues?: GameRegistryValue[];
+  /** «Запускать без прав администратора» (SHELL_CHANGES 96); absent — the game keeps it. */
+  runAsInvoker?: boolean;
 }
 
 export interface PriceQuote {

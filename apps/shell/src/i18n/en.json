@@ -153,6 +153,7 @@
     "gameNotInstalled": "This game is not installed on this PC",
     "gameOnMissingDrive": "This game is on drive {{drive}}, which this PC does not have. Take another PC or call an administrator.",
     "gameLaunchFailed": "The game could not be started",
+    "gameNeedsAdmin": "The game needs administrator rights. Call the club's administrator: they will let it start without them.",
     "accountPoolExhausted": "No free game accounts right now, please try later",
     "antiCheatBlocked": "Anti-cheat blocked the launch. Please call an administrator",
     "policyDenied": "This action is disabled by club policy",

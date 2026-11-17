@@ -153,6 +153,7 @@
     "gameNotInstalled": "Bu o'yin ushbu kompyuterga o'rnatilmagan",
     "gameOnMissingDrive": "Bu o'yin {{drive}} diskida, bu kompyuterda esa bunday disk yo'q. Boshqa kompyuterga o'ting yoki administratorni chaqiring.",
     "gameLaunchFailed": "O'yinni ishga tushirib bo'lmadi",
+    "gameNeedsAdmin": "Oʻyinga administrator huquqi kerak. Klub administratorini chaqiring: u oʻyinni ularsiz ishga tushirishni yoqadi.",
     "accountPoolExhausted": "Hozir bo'sh o'yin akkauntlari yo'q, keyinroq urinib ko'ring",
     "antiCheatBlocked": "Anti-chit ishga tushirishni blokladi. Administratorni chaqiring",
     "policyDenied": "Bu amal klub siyosati bilan taqiqlangan",
