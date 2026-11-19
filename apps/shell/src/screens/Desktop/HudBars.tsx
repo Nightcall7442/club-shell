@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/Button';
 import { DotAmount } from '@/components/ui/DotAmount';
 import { Popover } from '@/components/ui/Popover';
 import { useGamepadConnected } from '@/hooks/useGamepad';
+import { useTweenedNumber } from '@/hooks/useTweenedNumber';
 import { useLocale } from '@/hooks/useLocale';
 import { useSession } from '@/hooks/useSession';
 import { formatMoney } from '@/lib/format';
@@ -261,6 +262,7 @@ function BalanceButton({ amount, topUp }: { amount: Money; topUp: boolean }): JS
   const { locale } = useLocale();
   const navigate = useNavigate();
   const money = formatMoney(amount, locale);
+  const counting = useTweenedNumber(amount.amount);
   return (
     <button
       type="button"
@@ -273,7 +275,10 @@ function BalanceButton({ amount, topUp }: { amount: Money; topUp: boolean }): JS
       className="focus-ring group flex h-12 items-center gap-3 rounded-md px-3 text-left transition-colors duration-[var(--dur-fast)] hover:bg-text/[0.04]"
     >
       <span className="hud-label">{t('desktop.balance')}</span>
-      <DotAmount value={money} className="text-[1.45rem] leading-none text-text" />
+      <DotAmount
+        value={formatMoney({ ...amount, amount: counting }, locale)}
+        className="text-[1.45rem] leading-none text-text"
+      />
       {topUp && <PlusButton />}
     </button>
   );

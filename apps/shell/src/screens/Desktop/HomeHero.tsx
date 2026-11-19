@@ -24,6 +24,7 @@ import { selectFeaturedGames, selectRecentGames, useGamesStore } from '@/store/g
 import { useNotificationsStore } from '@/store/notifications';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
 import { notInstalledLabel, notInstalledReason } from '@/lib/gameAvailability';
+import { EASE_OUT, useMotion } from '@/lib/motion';
 
 const STRIP_MAX = 6;
 
@@ -153,6 +154,8 @@ export function HomeHero(): JSX.Element {
   const loading = status === 'loading' && strip.length === 0;
   const pcReady = useAuthStore(selectPcReady);
   const fade = { duration: animations ? 0.25 : 0 };
+  // The art settles from a slight zoom as it fades in (a slow camera push); the title rises after it.
+  const moving = useMotion();
 
   // Initial focus for keyboard/gamepad users: Play, unless something else already holds focus.
   useEffect(() => {
@@ -200,10 +203,10 @@ export function HomeHero(): JSX.Element {
               <motion.div
                 key={hero.id}
                 className="absolute inset-0"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
+                initial={moving ? { opacity: 0, scale: 1.07 } : { opacity: 0 }}
+                animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0 }}
-                transition={fade}
+                transition={moving ? { opacity: { duration: 0.6 }, scale: { duration: 2.2, ease: EASE_OUT } } : fade}
               >
                 <GameArtwork
                   src={hero.heroUrl ?? hero.coverUrl}
@@ -248,10 +251,10 @@ export function HomeHero(): JSX.Element {
               <AnimatePresence mode="wait" initial={false}>
                 <motion.div
                   key={hero.id}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={fade}
+                  initial={moving ? { opacity: 0, y: 22 } : { opacity: 0 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={moving ? { opacity: 0, y: -10, transition: { duration: 0.16 } } : { opacity: 0 }}
+                  transition={moving ? { duration: 0.5, ease: EASE_OUT, delay: 0.08 } : fade}
                   className="flex flex-col gap-3"
                 >
                   {isRunning && (

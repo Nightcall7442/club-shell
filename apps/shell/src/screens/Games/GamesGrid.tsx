@@ -6,7 +6,9 @@
 import type { Game } from '@clubshell/contracts';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import clsx from 'clsx';
+import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
+import { EASE_OUT, useMotion } from '@/lib/motion';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { focusElement } from '@/hooks/useGamepad';
@@ -62,6 +64,9 @@ function EmptyIcon(): JSX.Element {
   );
 }
 
+/** Cards that stagger in on arrival; the rest appear at once. */
+const STAGGER_MAX = 21;
+
 export function GamesGrid({
   games,
   columns = 7,
@@ -76,6 +81,7 @@ export function GamesGrid({
   className,
 }: GamesGridProps): JSX.Element {
   const { t } = useTranslation();
+  const moving = useMotion();
   const cols = Math.max(2, Math.min(10, Math.round(columns)));
   const [limit, setLimit] = useState(cols * INITIAL_ROWS);
   const sentinel = useRef<HTMLDivElement>(null);
@@ -143,7 +149,15 @@ export function GamesGrid({
     <div className={className}>
       <ul ref={list} role="list" aria-label={t('games.gridLabel')} className="grid" style={style}>
         {visible.map((game, i) => (
-          <li key={game.id} className="min-w-0">
+          <motion.li
+            key={game.id}
+            className="min-w-0"
+            // The first rows come in one after another, like a shelf being stocked; cards further down (and those
+            // loaded on scroll) just appear, so a long catalogue never waits for its own animation.
+            initial={moving && i < STAGGER_MAX ? { opacity: 0, y: 18, scale: 0.97 } : false}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.42, ease: EASE_OUT, delay: Math.min(i, STAGGER_MAX) * 0.028 }}
+          >
             <GameCard
               game={game}
               selected={game.id === selectedId}
@@ -154,7 +168,7 @@ export function GamesGrid({
               onActivate={onActivate}
               onLaunch={onPlay}
             />
-          </li>
+          </motion.li>
         ))}
       </ul>
       {limit < games.length && <div ref={sentinel} aria-hidden="true" className="h-px w-full" />}
