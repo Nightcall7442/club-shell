@@ -2397,6 +2397,63 @@ test('bulk actions report each PC: offline PCs are skipped for power, a busy PC 
   await expect(page.getByRole('heading', { name: /Посадить на/ })).toBeVisible();
 });
 
+test('several PCs at once: a switched-off one is woken through a PC that is on, free ones get guest postpaid, and the sessions end together', async ({
+  page,
+  request,
+}) => {
+  await ensureShift(request);
+  const off = await registerAgent(request, 'wake-a');
+  const b = await registerAgent(request, 'post-b');
+  const c = await registerAgent(request, 'post-c');
+  // `off` never heartbeats: it is switched off. b and c are on and free.
+  await heartbeat(request, b);
+  await heartbeat(request, c);
+
+  await signIn(page, CASHIER_PIN);
+  for (const pc of [off, b, c]) await page.locator(`#seat-${pc.pcId}`).click({ modifiers: ['Control'] });
+  const panel = page.locator('aside').filter({ has: page.getByRole('heading', { name: 'Выбрано 3' }) });
+  await expect(panel).toBeVisible();
+
+  // «Включить» goes to the switched-off PC only: a PC that is on sends it the Wake-on-LAN packet.
+  await panel.getByRole('button', { name: /^Включить \(1 из 3\)/ }).click();
+  const wake = panel.getByRole('list', { name: 'Результат по ПК' }).locator(`[data-pc-result="${off.pcId}"]`);
+  await expect(wake).toContainText('сигнал');
+  await expect(wake).toContainText('через');
+
+  // Guest postpaid on the two free PCs, after a confirm listing them with their tariff.
+  await panel.getByRole('button', { name: /^Открыть постоплату \(2 из 3\)/ }).click();
+  await panel.getByRole('button', { name: 'Открыть', exact: true }).click();
+  const rows = panel.getByRole('list', { name: 'Сеансы по ПК' });
+  for (const pc of [b, c])
+    await expect(rows.locator(`[data-pc-result="${pc.pcId}"]`)).toContainText('постоплата открыта');
+  for (const pc of [b, c]) {
+    const seat = await seatOf(request, pc.pcId);
+    expect(seat.session?.isPrepaid).toBe(false);
+  }
+
+  // Both sessions end together; the bills go to «Расчёт с гостями и долги».
+  await panel.getByRole('button', { name: /^Завершить сеансы \(2 из 3\)/ }).click();
+  await panel.getByRole('button', { name: 'Завершить', exact: true }).click();
+  for (const pc of [b, c]) await expect(rows.locator(`[data-pc-result="${pc.pcId}"]`)).toContainText('сеанс завершён');
+  for (const pc of [b, c]) expect((await seatOf(request, pc.pcId)).session).toBeNull();
+
+  // One switched-off PC: «Включить» heads its card.
+  await page.keyboard.press('Escape');
+  await page.locator(`#seat-${off.pcId}`).click();
+  const offCard = page.getByRole('region', { name: 'ПК выключен' });
+  await offCard.getByRole('button', { name: 'Включить', exact: true }).click();
+  await expect(page.getByText(/сигнал (включения отправлен|уйдёт) через/)).toBeVisible();
+
+  // A whole group in one press: «Все» picks every PC of the map.
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Выбрать', exact: true }).click();
+  await page
+    .getByRole('group', { name: 'Выбрать группу' })
+    .getByRole('button', { name: /^Все \d+/ })
+    .click();
+  await expect(page.getByRole('heading', { name: /^Выбрано \d+/ })).toBeVisible();
+});
+
 test('a single PC command says when the PC is offline or busy instead of claiming success', async ({
   page,
   request,

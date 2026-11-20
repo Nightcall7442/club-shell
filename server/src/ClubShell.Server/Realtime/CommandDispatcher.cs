@@ -27,6 +27,9 @@ public sealed record NewCommand(ServerCommandType Type, JsonElement? Payload)
     /// <summary>«Сбросить профиль игрока» (SHELL_CHANGES 76): result <c>ResetProfileResult</c>; an older agent answers <c>notFound</c>.</summary>
     public static NewCommand ResetProfile() => new(ServerCommandType.ResetProfile, null);
 
+    /// <summary>To a PC that is on: send a Wake-on-LAN packet to another PC's MAC.</summary>
+    public static NewCommand Wake(WakeCommand payload) => new(ServerCommandType.Wake, JsonDefaults.ToElement(payload));
+
     /// <summary>«Обновить ClubShell» (UPDATES.md §8): the release's package of one component, applied at the PC's first idle moment.</summary>
     public static NewCommand Update(UpdateCommand payload) => new(ServerCommandType.Update, JsonDefaults.ToElement(payload));
 
@@ -68,12 +71,14 @@ public sealed class CommandDispatcher(CommandRepository commands, AgentSocketHub
     /// <summary>
     /// Commands beyond the contract that this server sends: <c>resetProfile</c> (SHELL_CHANGES 76) and <c>update</c> (the
     /// admin console's «Обновить ClubShell», UPDATES.md §8; the contract marks it notImplemented for servers that host no
-    /// releases).
+    /// releases) and <c>wake</c> (a PC that is on sends the Wake-on-LAN packet to a switched-off one: the desk's
+    /// «Включить», D-82; the agent's relay has been there since the first release).
     /// </summary>
     public static readonly IReadOnlySet<ServerCommandType> BeyondContract = new HashSet<ServerCommandType>
     {
         ServerCommandType.ResetProfile,
         ServerCommandType.Update,
+        ServerCommandType.Wake,
     };
 
     /// <param name="supersedes">An earlier command this one cancels (<c>lock</c> → <c>unlock</c>, AsyncAPI §7).</param>

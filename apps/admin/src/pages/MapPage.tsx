@@ -881,6 +881,21 @@ function outcomeText(r: BulkResult): string {
           : t('сеанс завершён'),
     );
   }
+  if (r.via !== undefined && r.via !== null) {
+    // A wake: the answer is the relay's — the packet went out; the PC shows up on the map once its agent connects.
+    parts.push(
+      r.outcome === 'done'
+        ? t('✓ сигнал включения отправлен через {pc}', { pc: pcLabel(r.via) })
+        : r.outcome === 'queued'
+          ? t('сигнал уйдёт через {pc}, как только он ответит', { pc: pcLabel(r.via) })
+          : r.outcome === 'noAnswer'
+            ? t('{pc} не ответил за 30 с', { pc: pcLabel(r.via) })
+            : r.ack?.error?.code === 'policyDenied'
+              ? t('на {pc} отключено включение по сети (политика ПК: power.wolEnabled)', { pc: pcLabel(r.via) })
+              : t('ошибка: {code}', { code: r.ack?.error?.code ?? '—' }),
+    );
+    return parts.join(' · ');
+  }
   switch (r.outcome) {
     case 'done':
       parts.push(t('✓ выполнено'));
@@ -900,7 +915,13 @@ function outcomeText(r: BulkResult): string {
           ? t('пропущен: идёт сеанс')
           : r.skipped === 'offline'
             ? t('пропущен: офлайн')
-            : t('пропущен: нет такого ПК'),
+            : r.skipped === 'online'
+              ? t('уже включён')
+              : r.skipped === 'noMac'
+                ? t('не включить: ПК ещё ни разу не подключался, его MAC-адрес неизвестен')
+                : r.skipped === 'noRelay'
+                  ? t('не включить: в клубе нет включённого ПК, чтобы отправить сигнал')
+                  : t('пропущен: нет такого ПК'),
       );
       break;
   }
@@ -920,6 +941,7 @@ const BULK_VERB: Record<PcCommandKind, string> = {
   unlock: 'Разблокировать',
   reboot: 'Перезагрузить',
   shutdown: 'Выключить',
+  wake: 'Включить',
 };
 
 const POWER_LABEL: Record<'reboot' | 'shutdown', { verb: string; done: string }> = {
@@ -1273,16 +1295,20 @@ const MESSAGE_PRESETS = ['Закрываемся через 20 минут', 'П�
  */
 function BulkPanel({
   seats,
+  tariffs,
   onDone,
   onClear,
   onStartMove,
 }: {
   seats: Seat[];
+  tariffs: Tariff[];
   onDone: () => void;
   onClear: () => void;
   onStartMove: (seat: Seat) => void;
 }): JSX.Element {
   const shift = useShift();
+  const club = useClub();
+  const closed = useShiftClosed();
   const [text, setText] = useState('');
   const [level, setLevel] = useState<'info' | 'warning'>('info');
   const [sending, setSending] = useState<PcCommandKind | null>(null);
@@ -1347,6 +1373,86 @@ function BulkPanel({
   const count = (n: number): string => (n === seats.length ? `(${n})` : t('({k} из {n})', { k: n, n: seats.length }));
   const failed = results?.list.filter((r) => r.outcome === 'failed') ?? [];
 
+  // Sessions of several PCs at once: postpaid for walk-in guests on the free ones, the end of the busy ones. Each PC is
+  // its own request (the desk's own routes), so one refusal stops nothing else; the confirm lists what will happen first.
+  const free = reachable.filter((s) => s.session === null && s.pc.status === 'free');
+  const ending = seats.filter((s) => s.session !== null);
+  const postpaidOff: string | null = !shift.cashDesk2
+    ? t('Сервер не поддерживает постоплату с кассы')
+    : (club.limits?.guestPostpaid ?? true)
+      ? null
+      : t('Постоплата для гостей выключена в настройках клуба');
+  const [sessionAsk, setSessionAsk] = useState<{ kind: 'open' | 'end'; seats: Seat[] } | null>(null);
+  const [sessionRows, setSessionRows] = useState<
+    { pcId: string; name: string; text: string; tone: 'ok' | 'warn' | 'err' }[] | null
+  >(null);
+  const [sessionBusy, setSessionBusy] = useState(false);
+  const tariffOf = (seat: Seat): Tariff | undefined => zoneTariffsOf(tariffs, seat.pc.zone).find((tf) => !tf.isPackage);
+
+  const runSessions = async (kind: 'open' | 'end', list: Seat[]): Promise<void> => {
+    setSessionAsk(null);
+    setSessionBusy(true);
+    setResults(null);
+    const rows: { pcId: string; name: string; text: string; tone: 'ok' | 'warn' | 'err' }[] = [];
+    let owed = 0;
+    for (const seat of list) {
+      const name = seat.pc.name;
+      try {
+        if (kind === 'open') {
+          const tf = tariffOf(seat);
+          if (!tf) {
+            rows.push({
+              pcId: seat.pc.id,
+              name,
+              text: t('нет почасового тарифа для зоны {zone}', { zone: seat.pc.zone }),
+              tone: 'warn',
+            });
+          } else {
+            await adminApi.openGuestSession(
+              { pcId: seat.pc.id, tariffId: tf.id, minutes: 60, prepaid: false },
+              newKey(),
+            );
+            rows.push({
+              pcId: seat.pc.id,
+              name,
+              text: t('✓ постоплата открыта · {tariff}', { tariff: tf.name }),
+              tone: 'ok',
+            });
+          }
+        } else {
+          const r = await adminApi.end({ pcId: seat.pc.id });
+          const settle = seat.user ? settleOf(r, seat, seat.user) : null;
+          const parts = [t('✓ сеанс завершён')];
+          if (settle && settle.debt > 0) {
+            owed += settle.debt;
+            parts.push(t('к оплате {sum}', { sum: moneyExact(settle.debt) }));
+          } else if (settle && settle.payable > 0) {
+            parts.push(t('вернуть {sum} наличными', { sum: moneyExact(settle.payable) }));
+          } else if (r.refunded && r.refunded.amount > 0) {
+            parts.push(t('возврат {sum}', { sum: money(r.refunded) }));
+          } else if (r.charged.amount > 0) {
+            parts.push(t('списано {sum}', { sum: money(r.charged) }));
+          }
+          rows.push({ pcId: seat.pc.id, name, text: parts.join(' · '), tone: 'ok' });
+        }
+      } catch (e) {
+        rows.push({ pcId: seat.pc.id, name, text: describe(e), tone: 'err' });
+      }
+      setSessionRows([...rows]);
+    }
+    if (owed > 0)
+      rows.push({
+        pcId: 'total',
+        name: t('Итого'),
+        text: t('к оплате {sum} — принять в «Расчёт с гостями и долги»', { sum: moneyExact(owed) }),
+        tone: 'warn',
+      });
+    setSessionRows(rows);
+    setSessionBusy(false);
+    onDone();
+    shift.refresh();
+  };
+
   return (
     <div className="panel-solid flex flex-col overflow-hidden">
       <SeatStrip
@@ -1363,6 +1469,111 @@ function BulkPanel({
       />
 
       <div className="flex flex-col gap-4 px-4 pb-4 pt-3.5">
+        <section aria-label={t('Сеансы и питание')} className="grid grid-cols-2 gap-2">
+          <Button
+            variant="primary"
+            className={clsx(WRAP, '!px-2.5')}
+            disabled={held || sessionBusy || offline.length === 0}
+            title={offline.length === 0 ? t('Среди выбранных нет выключенных ПК') : undefined}
+            onClick={() =>
+              fresh(
+                'wake',
+                offline.map((s) => s.pc.id),
+                null,
+              )
+            }
+          >
+            {sending === 'wake' ? '…' : `${t('Включить')} ${count(offline.length)}`}
+          </Button>
+          <Button
+            variant="secondary"
+            className={clsx(WRAP, '!px-2.5')}
+            disabled={held || sessionBusy || free.length === 0 || closed || postpaidOff !== null}
+            title={postpaidOff ?? (free.length === 0 ? t('Среди выбранных нет свободных ПК') : undefined)}
+            onClick={() => setSessionAsk({ kind: 'open', seats: free })}
+          >
+            {`${t('Открыть постоплату')} ${count(free.length)}`}
+          </Button>
+          <Button
+            variant="secondary"
+            className={clsx(WRAP, '!px-2.5 col-span-2')}
+            disabled={held || sessionBusy || ending.length === 0 || closed}
+            title={ending.length === 0 ? t('Среди выбранных нет ПК с сеансом') : undefined}
+            onClick={() => setSessionAsk({ kind: 'end', seats: ending })}
+          >
+            {`${t('Завершить сеансы')} ${count(ending.length)}`}
+          </Button>
+        </section>
+        {closed && (free.length > 0 || ending.length > 0) && <ShiftClosedNote />}
+        {postpaidOff && free.length > 0 && !closed && <p className="text-xs leading-5 text-muted">{postpaidOff}</p>}
+
+        {sessionAsk && (
+          <section className="well flex flex-col gap-2.5 px-3.5 py-3" aria-label={t('Подтверждение')}>
+            <p className="text-[13px] font-medium text-text">
+              {sessionAsk.kind === 'open'
+                ? t(
+                    'Открыть постоплату для гостей на {n} ПК? Гость нажмёт «Войти» на ПК, оплата — на кассе после игры.',
+                    {
+                      n: sessionAsk.seats.length,
+                    },
+                  )
+                : t('Завершить {n} сеансов? Время игроков остановится, постоплата встанет к оплате.', {
+                    n: sessionAsk.seats.length,
+                  })}
+            </p>
+            {sessionAsk.kind === 'end' ? (
+              <BusyList seats={sessionAsk.seats} />
+            ) : (
+              <ul className="flex flex-col gap-1 text-[12.5px] text-dim">
+                {sessionAsk.seats.map((x) => (
+                  <li key={x.pc.id} className="flex justify-between gap-3">
+                    <span className="font-mono uppercase tracking-[0.06em]">{pcLabel(x.pc.name)}</span>
+                    <span className="truncate">{tariffOf(x)?.name ?? t('нет тарифа')}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setSessionAsk(null)}>
+                {t('Отмена')}
+              </Button>
+              <Button
+                variant={sessionAsk.kind === 'end' ? 'danger' : 'primary'}
+                autoFocus
+                onClick={() => void runSessions(sessionAsk.kind, sessionAsk.seats)}
+              >
+                {sessionAsk.kind === 'open' ? t('Открыть') : t('Завершить')}
+              </Button>
+            </div>
+          </section>
+        )}
+        {sessionRows && (
+          <ul aria-label={t('Сеансы по ПК')} className="well flex flex-col divide-y divide-accent/[0.07] px-3.5">
+            {sessionRows.map((r) => (
+              <li
+                key={r.pcId}
+                data-pc-result={r.pcId}
+                className="flex min-h-9 items-baseline gap-3 py-2 text-[13px] leading-5"
+              >
+                <span className="w-14 shrink-0 font-mono text-[11px] uppercase tracking-[0.08em] text-muted">
+                  {r.pcId === 'total' ? r.name : pcLabel(r.name)}
+                </span>
+                <span
+                  className={clsx(
+                    'min-w-0',
+                    r.tone === 'ok' && 'text-accent',
+                    r.tone === 'warn' && 'text-warning',
+                    r.tone === 'err' && 'text-danger-ink',
+                  )}
+                >
+                  {r.text}
+                </span>
+              </li>
+            ))}
+            {sessionBusy && <li className="py-2 text-[13px] text-muted">…</li>}
+          </ul>
+        )}
+
         <section className="flex flex-col gap-2.5">
           <Field label={t('Сообщение на экран')}>
             <input
@@ -1431,7 +1642,7 @@ function BulkPanel({
         </section>
         {offline.length > 0 && (
           <p className="text-xs leading-5 text-muted">
-            {t('Офлайн: {list} — блокировку и питание они не получат', {
+            {t('Выключены: {list} — их можно включить, блокировку и перезагрузку они не получат', {
               list: offline.map((s) => pad2(s.pc.number)).join(', '),
             })}
           </p>
@@ -1744,9 +1955,38 @@ function SeatPanel({
       <CallGroupActions group={call} compact />
     </section>
   ) : null;
+  // A switched-off PC: «Включить» heads the card — a PC that is on sends it the Wake-on-LAN packet.
+  const wakeBanner =
+    seat.pc.status === 'offline' && !seat.session ? (
+      <section
+        aria-label={t('ПК выключен')}
+        className="flex items-center justify-between gap-3 rounded-md border border-text/10 bg-text/[0.03] py-2 pl-4 pr-2"
+      >
+        <span className="flex items-center gap-2 text-[13px] text-dim">
+          <PowerIcon size={15} className="text-muted" />
+          {t('ПК выключен')}
+        </span>
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={busy !== null}
+          onClick={() =>
+            void run('wake', async () => {
+              const r = (await adminApi.pcCommands({ pcIds: [seat.pc.id], kind: 'wake' }, newKey())).results[0];
+              if (!r) return { text: t('Ответа по ПК нет'), tone: 'warn' };
+              const ok = r.outcome === 'done' || r.outcome === 'queued';
+              return { text: outcomeText(r), tone: ok ? 'ok' : r.outcome === 'failed' ? 'err' : 'warn' };
+            })
+          }
+        >
+          {busy === 'wake' ? '…' : t('Включить')}
+        </Button>
+      </section>
+    ) : null;
   const banner =
-    callBanner || seat.kioskAlert ? (
+    callBanner || seat.kioskAlert || wakeBanner ? (
       <>
+        {wakeBanner}
         {callBanner}
         {seat.kioskAlert && (
           <Note tone="warn" role="status">
@@ -3732,6 +3972,7 @@ export function MapPage(): JSX.Element {
     bulk.length > 0 ? (
       <BulkPanel
         seats={bulk}
+        tariffs={data?.tariffs ?? []}
         onDone={() => void load()}
         onClear={() => {
           setMulti(new Set());
@@ -3881,6 +4122,34 @@ export function MapPage(): JSX.Element {
               >
                 {t('Выбрать')}
               </Chip>
+              {(selectMode || multi.size > 0) && movePick === null && (
+                // A whole group in one press: every PC on the map, the free ones, the switched-off ones, those in play.
+                <span role="group" aria-label={t('Выбрать группу')} className="flex items-center gap-1">
+                  {(
+                    [
+                      ['all', t('Все'), (_x: Seat) => true],
+                      ['free', t('Свободные'), (x: Seat) => x.session === null && x.pc.status === 'free'],
+                      ['off', t('Выключенные'), (x: Seat) => x.pc.status === 'offline' && x.session === null],
+                      ['busy', t('С сеансом'), (x: Seat) => x.session !== null],
+                    ] as const
+                  ).map(([id, label, test]) => {
+                    const ids = seats.filter((x) => shownIds.includes(x.pc.id) && test(x)).map((x) => x.pc.id);
+                    return (
+                      <Chip
+                        key={id}
+                        tone="outlined"
+                        disabled={ids.length === 0}
+                        onClick={() => {
+                          setSelectMode(true);
+                          setMulti(new Set(ids));
+                        }}
+                      >
+                        {`${label} ${ids.length}`}
+                      </Chip>
+                    );
+                  })}
+                </span>
+              )}
             </div>
             {/*
               The tiles scroll inside the panel, with room around them for the selected tile's brackets and glow; the

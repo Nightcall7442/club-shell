@@ -1325,6 +1325,48 @@ export const UZ: Record<string, string> = {
     '{pc} da oʻyin ishga tushmadi ({time}): unga administrator huquqi kerak. «Administrator huquqisiz ishga tushirish»ni yoqing.',
   'Нужны права администратора — откройте и включите запуск без них':
     'Administrator huquqi kerak — oching va ularsiz ishga tushirishni yoqing',
+  // Power on and several PCs at once (D-82)
+  'на {pc} отключено включение по сети (политика ПК: power.wolEnabled)':
+    '{pc}da tarmoq orqali yoqish oʻchirilgan (kompyuter siyosati: power.wolEnabled)',
+  'ПК выключен': 'Kompyuter oʻchirilgan',
+  Включить: 'Yoqish',
+  'Ответа по ПК нет': 'Kompyuter boʻyicha javob yoʻq',
+  '✓ сигнал включения отправлен через {pc}': '✓ yoqish signali {pc} orqali yuborildi',
+  'сигнал уйдёт через {pc}, как только он ответит': 'signal {pc} javob berishi bilan yuboriladi',
+  '{pc} не ответил за 30 с': '{pc} 30 soniyada javob bermadi',
+  'уже включён': 'allaqachon yoqilgan',
+  'не включить: ПК ещё ни разу не подключался, его MAC-адрес неизвестен':
+    'yoqib boʻlmaydi: kompyuter hali ulanmagan, MAC-manzili nomaʼlum',
+  'не включить: в клубе нет включённого ПК, чтобы отправить сигнал':
+    'yoqib boʻlmaydi: klubda signal yuborish uchun yoqilgan kompyuter yoʻq',
+  'Сервер не поддерживает постоплату с кассы': 'Server kassadan keyin toʻlovni qoʻllab-quvvatlamaydi',
+  'нет почасового тарифа для зоны {zone}': '{zone} zonasi uchun soatlik tarif yoʻq',
+  '✓ постоплата открыта · {tariff}': '✓ keyin toʻlov ochildi · {tariff}',
+  '✓ сеанс завершён': '✓ seans yakunlandi',
+  'к оплате {sum}': 'toʻlash kerak {sum}',
+  'вернуть {sum} наличными': '{sum} naqd qaytarish',
+  'к оплате {sum} — принять в «Расчёт с гостями и долги»':
+    'toʻlash kerak {sum} — «Mehmonlar bilan hisob va qarzlar»da qabul qiling',
+  'Сеансы и питание': 'Seanslar va quvvat',
+  'Среди выбранных нет выключенных ПК': 'Tanlanganlar orasida oʻchirilgan kompyuter yoʻq',
+  'Открыть постоплату': 'Keyin toʻlovni ochish',
+  'Среди выбранных нет свободных ПК': 'Tanlanganlar orasida boʻsh kompyuter yoʻq',
+  'Завершить сеансы': 'Seanslarni yakunlash',
+  'Среди выбранных нет ПК с сеансом': 'Tanlanganlar orasida seansli kompyuter yoʻq',
+  Подтверждение: 'Tasdiqlash',
+  'Открыть постоплату для гостей на {n} ПК? Гость нажмёт «Войти» на ПК, оплата — на кассе после игры.':
+    '{n} ta kompyuterda mehmonlar uchun keyin toʻlov ochilsinmi? Mehmon kompyuterda «Kirish»ni bosadi, toʻlov — oʻyindan keyin kassada.',
+  'Завершить {n} сеансов? Время игроков остановится, постоплата встанет к оплате.':
+    '{n} ta seans yakunlansinmi? Oʻyinchilar vaqti toʻxtaydi, keyin toʻlov hisobga qoʻyiladi.',
+  'нет тарифа': 'tarif yoʻq',
+  Открыть: 'Ochish',
+  'Сеансы по ПК': 'Kompyuterlar boʻyicha seanslar',
+  'Выключены: {list} — их можно включить, блокировку и перезагрузку они не получат':
+    'Oʻchirilgan: {list} — ularni yoqish mumkin, bloklash va qayta yuklashni olmaydi',
+  'Выбрать группу': 'Guruhni tanlash',
+  Свободные: 'Boʻshlar',
+  Выключенные: 'Oʻchirilganlar',
+  'С сеансом': 'Seansli',
 };
 export const EN: Record<string, string> = {
   'Выручка за период': 'Revenue for the period',
@@ -2648,4 +2690,45 @@ export const EN: Record<string, string> = {
     'The game did not start on {pc} ({time}): it needs administrator rights. Turn on «Run without administrator rights».',
   'Нужны права администратора — откройте и включите запуск без них':
     'Needs administrator rights: open it and turn on running without them',
+  // Power on and several PCs at once (D-82)
+  'на {pc} отключено включение по сети (политика ПК: power.wolEnabled)':
+    'wake on LAN is off on {pc} (PC policy: power.wolEnabled)',
+  'ПК выключен': 'The PC is off',
+  Включить: 'Power on',
+  'Ответа по ПК нет': 'No answer for the PC',
+  '✓ сигнал включения отправлен через {pc}': '✓ power-on signal sent through {pc}',
+  'сигнал уйдёт через {pc}, как только он ответит': 'the signal goes through {pc} as soon as it answers',
+  '{pc} не ответил за 30 с': '{pc} did not answer within 30 s',
+  'уже включён': 'already on',
+  'не включить: ПК ещё ни разу не подключался, его MAC-адрес неизвестен':
+    'cannot power on: the PC has never connected, its MAC address is unknown',
+  'не включить: в клубе нет включённого ПК, чтобы отправить сигнал':
+    'cannot power on: no PC in the club is on to send the signal',
+  'Сервер не поддерживает постоплату с кассы': 'The server does not support postpaid from the desk',
+  'нет почасового тарифа для зоны {zone}': 'no hourly tariff for zone {zone}',
+  '✓ постоплата открыта · {tariff}': '✓ postpaid opened · {tariff}',
+  '✓ сеанс завершён': '✓ session ended',
+  'к оплате {sum}': 'due {sum}',
+  'вернуть {sum} наличными': 'give back {sum} in cash',
+  'к оплате {sum} — принять в «Расчёт с гостями и долги»': 'due {sum} — take it in «Guest settlements and debts»',
+  'Сеансы и питание': 'Sessions and power',
+  'Среди выбранных нет выключенных ПК': 'None of the selected PCs is off',
+  'Открыть постоплату': 'Open postpaid',
+  'Среди выбранных нет свободных ПК': 'None of the selected PCs is free',
+  'Завершить сеансы': 'End sessions',
+  'Среди выбранных нет ПК с сеансом': 'None of the selected PCs has a session',
+  Подтверждение: 'Confirmation',
+  'Открыть постоплату для гостей на {n} ПК? Гость нажмёт «Войти» на ПК, оплата — на кассе после игры.':
+    'Open guest postpaid on {n} PCs? The guest presses «Sign in» on the PC and pays at the desk after playing.',
+  'Завершить {n} сеансов? Время игроков остановится, постоплата встанет к оплате.':
+    "End {n} sessions? The players' time stops and postpaid bills become due.",
+  'нет тарифа': 'no tariff',
+  Открыть: 'Open',
+  'Сеансы по ПК': 'Sessions by PC',
+  'Выключены: {list} — их можно включить, блокировку и перезагрузку они не получат':
+    'Off: {list} — they can be powered on; they get no lock or restart',
+  'Выбрать группу': 'Select a group',
+  Свободные: 'Free',
+  Выключенные: 'Off',
+  'С сеансом': 'In session',
 };

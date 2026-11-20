@@ -10,7 +10,7 @@ import { motion, type Transition } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import type { ShellFeatures } from '@clubshell/contracts';
-import { useGamepad } from '@/hooks/useGamepad';
+import { useGamepad, useGamepadConnected } from '@/hooks/useGamepad';
 import { press } from '@/lib/sound';
 import { selectUnreadTotal, useChatStore } from '@/store/chat';
 import { selectFeatures, useSettingsStore } from '@/store/settings';
@@ -85,10 +85,12 @@ export function NavBar({ className }: { className?: string }): JSX.Element {
   }, [location.pathname, defaultRoute, navigate]);
 
   useGamepad({ onTab: cycle, onBack: goHome });
+  // The LB / RB keycaps only with a controller connected: a mouse player switches sections by the tabs themselves.
+  const pad = useGamepadConnected();
 
   return (
     <nav aria-label={t('common.menu')} className={clsx('flex min-w-0 items-center gap-3', className)}>
-      <Keycap label="LB" title={t('desktop.prevSection')} onClick={() => cycle('prev')} />
+      {pad && <Keycap label="LB" title={t('desktop.prevSection')} onClick={() => cycle('prev')} />}
       <ul role="list" className="flex min-w-0 items-center">
         {items.map((item) => {
           const label = t(`desktop.nav.${item.key}`);
@@ -125,7 +127,7 @@ export function NavBar({ className }: { className?: string }): JSX.Element {
           );
         })}
       </ul>
-      <Keycap label="RB" title={t('desktop.nextSection')} onClick={() => cycle('next')} />
+      {pad && <Keycap label="RB" title={t('desktop.nextSection')} onClick={() => cycle('next')} />}
     </nav>
   );
 }

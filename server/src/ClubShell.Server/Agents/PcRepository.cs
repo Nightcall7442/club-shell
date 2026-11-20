@@ -23,6 +23,9 @@ public sealed class PcRow
     public string Zone { get; init; } = "";
     public string? Hwid { get; init; }
     public string IpAddress { get; init; } = "";
+
+    /// <summary>The MAC the agent reported (lower case, colons): what a Wake-on-LAN packet addresses; null before the first report.</summary>
+    public string? MacAddress { get; init; }
     public bool Approved { get; init; }
     public bool Maintenance { get; init; }
 
@@ -148,7 +151,7 @@ public enum RefreshOutcome
 public sealed class PcRepository(NpgsqlDataSource db, ILogger<PcRepository> logger)
 {
     private const string Columns = """
-        id, club_id, number, name, zone, hwid, ip_address, approved, maintenance, stateless, signing_secret, credentials_version,
+        id, club_id, number, name, zone, hwid, ip_address, mac_address, approved, maintenance, stateless, signing_secret, credentials_version,
         agent_version, shell_version, last_heartbeat_at, goodbye_at, created_at, deleted_at, x, y, rotation,
         (SELECT s.id FROM sessions s WHERE s.pc_id = pcs.id AND s.state <> 'ended') AS open_session_id,
         (SELECT s.state FROM sessions s WHERE s.pc_id = pcs.id AND s.state <> 'ended') AS open_session_state

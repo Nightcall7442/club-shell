@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ClubShell.Server.Agents;
 using ClubShell.Server.Realtime;
 using Microsoft.Extensions.DependencyInjection;
 using static ClubShell.Server.Tests.Staff;
@@ -191,6 +192,55 @@ public sealed class BulkCommandTests(ShortAckServerFixture server) : LedgerCheck
     }
 
     /// <summary>An online PC whose agent socket is connected.</summary>
+    [Fact]
+    public async Task Wake_powers_an_off_pc_on_through_a_pc_that_is_on_and_skips_one_that_is_on()
+    {
+        var owner = await LoginAsync(Server, OwnerPin);
+        var off = await TestAgent.CreateAsync(Server, mac: "AA:BB:CC:00:11:22");
+        var (relay, socket) = await LiveAsync();
+        using (socket)
+        {
+            // Both in a network of their own: the relay of the off PC is the one on beside it, not any other PC of the club.
+            var net = $"10.{Random.Shared.Next(100, 250)}.{Random.Shared.Next(0, 250)}";
+            await Players.ScalarAsync<int>(Server, "UPDATE pcs SET ip_address = CASE WHEN id = @a THEN @ipA ELSE @ipB END WHERE id IN (@a, @b) RETURNING 1",
+                new { a = off.PcId, b = relay.PcId, ipA = $"{net}.20", ipB = $"{net}.21" });
+            var call = RawAsync(Server, HttpMethod.Post, "/pcs/commands", owner, new { pcIds = new[] { off.PcId, relay.PcId }, kind = "wake" }, Guid.NewGuid());
+            var frame = await socket.ReceiveAsync();
+            Assert.Equal(("command", "wake", "aa:bb:cc:00:11:22"),
+                (frame.GetProperty("type").GetString(), frame.GetProperty("name").GetString(), frame.GetProperty("payload").GetProperty("targetMac").GetString()));
+            await socket.SendAsync(new
+            {
+                type = "ack", id = Guid.NewGuid(), ts = DateTimeOffset.UtcNow, payload = (object?)null,
+                ack = new { id = frame.GetProperty("id").GetGuid(), ok = true, result = (object?)null },
+            });
+            var (status, body, _) = await call;
+            Assert.Equal(200, status);
+            var results = body.GetProperty("results").EnumerateArray().ToList();
+            var relayName = await Players.ScalarAsync<string>(Server, "SELECT name FROM pcs WHERE id = @PcId", new { relay.PcId });
+            Assert.Equal(("done", relayName), (results[0].GetProperty("outcome").GetString(), results[0].GetProperty("via").GetString()));
+            Assert.Equal(("skipped", "online"), (results[1].GetProperty("outcome").GetString(), results[1].GetProperty("skipped").GetString()));
+
+            // The command is the relay's; the journal names the PC that was woken.
+            Assert.Equal((0, 1), (await CommandsAsync(off), await CommandsAsync(relay)));
+            Assert.Equal(1, await Players.ScalarAsync<int>(Server,
+                "SELECT count(*)::int FROM audit_entries WHERE action = 'pcCommand' AND pc_id = @PcId AND meta ->> 'kind' = 'wake'", new { off.PcId }));
+        }
+    }
+
+    [Fact]
+    public void A_wake_relay_is_on_in_the_targets_network_and_the_least_used()
+    {
+        PcRow Pc(int n, string ip) => new() { Id = Guid.NewGuid(), Number = n, Name = $"PC-{n}", IpAddress = ip };
+        var target = Pc(1, "192.168.1.20");
+        var far = Pc(2, "192.168.7.5");
+        var near = Pc(3, "192.168.1.30");
+        var near2 = Pc(4, "192.168.1.31");
+        var used = new Dictionary<Guid, int> { [near.Id] = 2 };
+        Assert.Same(near2, ClubShell.Server.Admin.CounterEndpoints.WakeRelay(target, [far, near, near2], used));
+        Assert.Same(far, ClubShell.Server.Admin.CounterEndpoints.WakeRelay(target, [far], used));
+        Assert.Null(ClubShell.Server.Admin.CounterEndpoints.WakeRelay(target, [target], used));
+    }
+
     private async Task<(TestAgent Agent, WsTestSocket Socket)> LiveAsync()
     {
         var agent = await TestAgent.CreateAsync(Server);
