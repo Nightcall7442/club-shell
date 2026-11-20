@@ -440,6 +440,10 @@ update. 1.0.23 ships a new public key (`config/update-public.pem`); its private 
 `UPDATE_MANIFEST_KEY_PEM`. A PC on 1.0.22 or older gets 1.0.23 by hand once (the MSI from the GitHub release); from
 then on, «Проверить обновления» and «Обновить все ПК» (§8.3) carry every release.
 
+**Key replaced again in 1.0.24.** The private half of the 1.0.23 key never reached the CI secret store and was lost, so
+1.0.23 could not be signed either. 1.0.24 ships a new public key; its private half is `UPDATE_MANIFEST_KEY_PEM`. A PC
+on 1.0.23 or older gets 1.0.24 by hand once (the MSI from the GitHub release); after that the console updates it.
+
 Generate (OpenSSL 3.x):
 
 ```powershell
