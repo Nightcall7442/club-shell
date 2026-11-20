@@ -468,10 +468,11 @@ export interface MoveResponse {
   signedIn: boolean;
 }
 
-export type PcCommandKind = 'message' | 'lock' | 'unlock' | 'reboot' | 'shutdown';
+/** `wake` powers an off PC on: a PC that is on sends the Wake-on-LAN packet (`via`). */
+export type PcCommandKind = 'message' | 'lock' | 'unlock' | 'reboot' | 'shutdown' | 'wake';
 
 /** A command of one PC: the bulk ones and `resetProfile` (SHELL_CHANGES 76: never queued for an offline PC; an older agent answers `notFound`). */
-export type OnePcCommandKind = PcCommandKind | 'resetProfile';
+export type OnePcCommandKind = Exclude<PcCommandKind, 'wake'> | 'resetProfile';
 
 /** A PC's answer to a command; `agentOffline` — not connected (queued), `timeout` — no answer in time. */
 export interface CommandAck {
@@ -484,7 +485,10 @@ export interface BulkResult {
   pcId: string;
   pcName: string | null;
   outcome: 'done' | 'queued' | 'noAnswer' | 'failed' | 'skipped';
-  skipped: 'sessionOpen' | 'offline' | 'notFound' | null;
+  /** `online` — a wake to a PC that is on; `noMac` — the PC never reported its MAC; `noRelay` — no PC on to send the packet. */
+  skipped: 'sessionOpen' | 'offline' | 'notFound' | 'online' | 'noMac' | 'noRelay' | null;
+  /** `wake`: the PC that sent the packet (its command and its answer). */
+  via?: string | null;
   ack: CommandAck | null;
   ended: {
     sessionId: string;

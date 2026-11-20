@@ -18,11 +18,11 @@ namespace ClubShell.Server.Admin;
 
 public static partial class CounterEndpoints
 {
-    private static readonly string[] BulkKinds = ["message", "lock", "unlock", "reboot", "shutdown"];
+    private static readonly string[] BulkKinds = ["message", "lock", "unlock", "reboot", "shutdown", "wake"];
 
     /// <summary>
     /// <c>POST /admin/pcs/commands</c> (beyond the contract, D-65): one command — <c>message | lock | unlock | reboot |
-    /// shutdown</c> — to up to 100 PCs, each answered on its own (<c>{batchId, results[]}</c>). <c>Idempotency-Key</c> required
+    /// shutdown | wake</c> — to up to 100 PCs, each answered on its own (<c>{batchId, results[]}</c>). <c>Idempotency-Key</c> required
     /// with the strict body check (D-70); a replay answers the stored results as they were before the acks (sent commands read
     /// <c>queued</c>). One transaction, one savepoint per PC: a refusal on one PC rolls back only that PC (<c>failed</c>, the
     /// refusal in <c>ack.error</c>). PCs not in the club are <c>skipped notFound</c>; an offline PC is skipped for lock, reboot
@@ -36,6 +36,15 @@ public static partial class CounterEndpoints
     /// ascending id order before any row lock (§4.4). Each PC sent to gets a <c>pcCommand</c> journal entry (<c>meta {kind,
     /// batchId}</c>). After the commit the commands go out and the acks of the connected PCs are awaited together, up to
     /// <see cref="AgentOptions.AckWaitSec"/>: <c>done</c> (ok), <c>failed</c> (refused), <c>noAnswer</c>, <c>queued</c> (offline).
+    /// <para>
+    /// <c>wake</c> powers off PCs on: a switched-off PC cannot take a command, so another PC of the club that is on — one in the
+    /// same /24 network first, a broadcast rarely crosses routers — sends the Wake-on-LAN packet to the PC's MAC
+    /// (<see cref="ServerCommandType.Wake"/>). The command and its ack are the relay's; the result names it (<c>via</c>).
+    /// <c>done</c> means the packet went out, not that the PC has booted: it shows up on the map when its agent connects. A PC
+    /// that is on is <c>skipped online</c>, one whose MAC never came is <c>skipped noMac</c>, and with no PC of the club on
+    /// to send the packet it is <c>skipped noRelay</c>. The relays are spread over the PCs that are on, so one slow relay
+    /// does not hold every packet.
+    /// </para>
     /// </summary>
     private static async Task<IResult> CommandsAsync(
         HttpContext context, [FromBody] JsonElement body, IdempotencyStore store, SessionService sessions, PcRepository pcs, CommandDispatcher dispatcher,
@@ -111,11 +120,47 @@ public static partial class CounterEndpoints
                 }
             }
 
+            // Wake: the PCs that are on, to send the packets; each wake goes to the least used relay of the target's network.
+            var relays = kind == "wake" ? hall.Values.Where(p => !Offline(p) && !p.Maintenance).ToList() : [];
+            var relayUse = relays.ToDictionary(p => p.Id, _ => 0);
+
+            async Task<AdminBulkCommandResult> WakeOneAsync(NpgsqlConnection c, NpgsqlTransaction tx, PcRow pc, DateTimeOffset now, Guid batchId)
+            {
+                if (!Offline(pc))
+                {
+                    return new AdminBulkCommandResult(pc.Id, pc.Name, "skipped", "online", null, null);
+                }
+
+                if (string.IsNullOrWhiteSpace(pc.MacAddress))
+                {
+                    return new AdminBulkCommandResult(pc.Id, pc.Name, "skipped", "noMac", null, null);
+                }
+
+                var relay = WakeRelay(pc, relays, relayUse);
+                if (relay is null)
+                {
+                    return new AdminBulkCommandResult(pc.Id, pc.Name, "skipped", "noRelay", null, null);
+                }
+
+                relayUse[relay.Id]++;
+                var queued = await dispatcher.QueueAsync(tx, relay.ClubId, relay.Id, NewCommand.Wake(new WakeCommand(pc.MacAddress)), issuedByStaffId: staff.StaffId);
+                await Audit.WriteAsync(c, tx, staff, now, "pcCommand", pcId: pc.Id, detail: $"{pc.Name} · wake · {relay.Name}",
+                    meta: new { kind = "wake", batchId, relayPcId = relay.Id });
+                sent.Add((results.Count, relay.Id, null, queued));
+                return new AdminBulkCommandResult(pc.Id, pc.Name, "queued", null, null, null) { Via = relay.Name };
+            }
+
             foreach (var id in ids)
             {
                 if (!hall.TryGetValue(id, out var pc))
                 {
                     results.Add(new AdminBulkCommandResult(id, null, "skipped", "notFound", null, null));
+                    continue;
+                }
+
+                if (kind == "wake")
+                {
+                    results.Add(await WakeOneAsync(c, tx, pc, now, batchId));
                     continue;
                 }
 
@@ -213,6 +258,24 @@ public static partial class CounterEndpoints
                 };
             }
         }
+    }
+
+    /// <summary>
+    /// The PC that sends a wake packet to <paramref name="target"/>: one that is on in the target's /24 network (by the last
+    /// address the agents reported), else any that is on; the least used first, then by number. Null when none is on.
+    /// </summary>
+    public static PcRow? WakeRelay(PcRow target, IReadOnlyList<PcRow> on, IReadOnlyDictionary<Guid, int> used)
+    {
+        static string? Net(string ip) => System.Net.IPAddress.TryParse(ip, out var a) && a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork
+            ? string.Join('.', a.GetAddressBytes().Take(3))
+            : null;
+
+        var net = Net(target.IpAddress);
+        return on.Where(p => p.Id != target.Id)
+            .OrderBy(p => net is not null && Net(p.IpAddress) == net ? 0 : 1)
+            .ThenBy(p => used.GetValueOrDefault(p.Id))
+            .ThenBy(p => p.Number)
+            .FirstOrDefault();
     }
 
     /// <summary>What one PC's savepoint produced, kept once the savepoint is released.</summary>

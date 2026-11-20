@@ -1005,6 +1005,7 @@ export function adminRoutes(app: FastifyInstance): void {
         const batchId = uuid();
         const results: BulkResult[] = [];
         const sent: { row: BulkResult; ack: Promise<CommandAck> }[] = [];
+        const relayUse = new Map<string, number>();
         for (const pcId of pcIds) {
           const pc = findPc(pcId);
           if (!pc) {
@@ -1013,6 +1014,42 @@ export function adminRoutes(app: FastifyInstance): void {
           }
           const row: BulkResult = { pcId, pcName: pc.name, outcome: 'queued', skipped: null, ack: null, ended: null };
           results.push(row);
+          if (kind === 'wake') {
+            // As the server: a PC that is on sends the Wake-on-LAN packet — one in the target's /24 first, the least used.
+            if (pc.status !== 'offline') {
+              row.outcome = 'skipped';
+              row.skipped = 'online';
+              continue;
+            }
+            if (!pc.macAddress) {
+              row.outcome = 'skipped';
+              row.skipped = 'noMac';
+              continue;
+            }
+            const net = (ip: string | null | undefined): string => (ip ?? '').split('.').slice(0, 3).join('.');
+            const relay = db.pcs
+              .filter((p) => p.id !== pc.id && p.status !== 'offline' && p.status !== 'maintenance')
+              .sort(
+                (a, b) =>
+                  Number(net(a.ipAddress) !== net(pc.ipAddress)) - Number(net(b.ipAddress) !== net(pc.ipAddress)) ||
+                  (relayUse.get(a.id) ?? 0) - (relayUse.get(b.id) ?? 0) ||
+                  a.number - b.number,
+              )[0];
+            if (!relay) {
+              row.outcome = 'skipped';
+              row.skipped = 'noRelay';
+              continue;
+            }
+            relayUse.set(relay.id, (relayUse.get(relay.id) ?? 0) + 1);
+            row.via = relay.name;
+            record(staff, 'pcCommand', {
+              pcId: pc.id,
+              detail: `${pc.name} · wake · ${relay.name}`,
+              meta: { kind, batchId, relayPcId: relay.id },
+            });
+            sent.push({ row, ack: sendCommand(relay.id, 'wake', { targetMac: pc.macAddress.toLowerCase() }) });
+            continue;
+          }
           const power = kind === 'reboot' || kind === 'shutdown';
           if ((power || kind === 'lock') && pc.status === 'offline') {
             row.outcome = 'skipped';
@@ -1066,14 +1103,16 @@ export function adminRoutes(app: FastifyInstance): void {
   });
 }
 
-const BULK_KINDS = ['message', 'lock', 'unlock', 'reboot', 'shutdown'] as const;
+const BULK_KINDS = ['message', 'lock', 'unlock', 'reboot', 'shutdown', 'wake'] as const;
 type BulkKind = (typeof BULK_KINDS)[number];
 
 interface BulkResult {
   pcId: string;
   pcName: string | null;
   outcome: 'done' | 'queued' | 'noAnswer' | 'failed' | 'skipped';
-  skipped: 'sessionOpen' | 'offline' | 'notFound' | null;
+  skipped: 'sessionOpen' | 'offline' | 'notFound' | 'online' | 'noMac' | 'noRelay' | null;
+  /** `wake`: the PC that sent the packet. */
+  via?: string;
   ack: CommandAck | null;
   ended: {
     sessionId: string;
@@ -1109,6 +1148,8 @@ function sendBulk(
       return sendCommand(pcId, 'reboot', { delaySec: 5, force: false, message: text });
     case 'shutdown':
       return sendCommand(pcId, 'shutdown', { delaySec: 5, force: false, message: text });
+    case 'wake':
+      throw new Error('wake goes to a relay, not through sendBulk');
   }
 }
 

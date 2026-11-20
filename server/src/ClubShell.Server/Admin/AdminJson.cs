@@ -383,6 +383,11 @@ public sealed record AdminBulkEnded(Guid SessionId, AdminSessionUser User, Money
 /// <c>outcome</c> <c>done | queued | noAnswer | failed | skipped</c>; <c>skipped</c> <c>sessionOpen | offline | notFound</c>
 /// when not sent; <c>ack</c> the PC's answer (a failure carries the refusal).
 /// </summary>
-public sealed record AdminBulkCommandResult(Guid PcId, string? PcName, string Outcome, string? Skipped, CommandAck? Ack, AdminBulkEnded? Ended);
+public sealed record AdminBulkCommandResult(Guid PcId, string? PcName, string Outcome, string? Skipped, CommandAck? Ack, AdminBulkEnded? Ended)
+{
+    /// <summary><c>wake</c>: the PC that sent the Wake-on-LAN packet (the command and its ack are that PC's).</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Via { get; init; }
+}
 
 public sealed record AdminBulkCommandResponse(Guid BatchId, IReadOnlyList<AdminBulkCommandResult> Results);
