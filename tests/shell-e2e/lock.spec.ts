@@ -549,6 +549,24 @@ test.describe('player accounts', () => {
     await expect(failed).toHaveCount(0);
   });
 
+  test('a postpaid session has no «leave»: the bill is paid at the desk, the player calls the administrator', async ({
+    page,
+  }) => {
+    await openPlaying(page);
+    await simulate(page, 'postpaidSession');
+
+    await expect(page.getByRole('button', { name: en('session.leave'), exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: en('session.payAtDesk'), exact: true }).click();
+    const pay = page.getByRole('dialog', { name: en('session.payAtDeskTitle') });
+    await expect(pay).toBeVisible();
+    await expect(pay.getByRole('button', { name: en('session.leaveConfirm') })).toHaveCount(0);
+    await pay.getByRole('button', { name: en('session.payAtDeskCallButton') }).click();
+    await expect(page.getByText(en('notifications.callAdminSent'))).toBeVisible();
+    // Still signed in and playing: only the cash desk ends it.
+    await expect(page).toHaveURL(/#\/home$/);
+    await expect(sessionTimer(page)).toBeVisible();
+  });
+
   test('sign-in expired mid-session: the same member signs in again and plays on', async ({ page }) => {
     await openPlaying(page);
     await simulate(page, 'authExpired', 'tokenExpired');

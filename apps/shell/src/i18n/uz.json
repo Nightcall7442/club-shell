@@ -1319,7 +1319,14 @@
       "body": "{{error}} Siz hali ham bu kompyuterda hisobdasiz, seans yakunlanmagan.",
       "retry": "Qayta urinish"
     },
-    "idleBodyLock": "Kompyuterdan 10 daqiqa davomida hech kim foydalanmadi. {{seconds}} soniyadan keyin ekran bloklanadi — to'langan vaqt saqlanadi."
+    "idleBodyLock": "Kompyuterdan 10 daqiqa davomida hech kim foydalanmadi. {{seconds}} soniyadan keyin ekran bloklanadi — to'langan vaqt saqlanadi.",
+    "payAtDesk": "Kassada toʻlash",
+    "payAtDeskTitle": "Keyin toʻlov kassada yopiladi",
+    "payAtDeskBody": "Siz {{duration}} oʻynadingiz, hozir toʻlash kerak: {{amount}}. Kassada toʻlaganingizda administrator seansni yakunlaydi.",
+    "payAtDeskCallButton": "Administratorni chaqirish",
+    "payAtDeskCall": "Oʻyinchi tugatib, keyin toʻlovni toʻlamoqchi: {{duration}}, {{amount}}",
+    "idleBodyPostpaid": "Kompyuterga 10 daqiqa tegilmadi. {{seconds}} soniyadan keyin administrator chaqiriladi: keyin toʻlov kassada yopiladi.",
+    "idlePostpaidCall": "Kompyuter 10 daqiqa harakatsiz, keyin toʻlov yopilmagan"
   },
   "settings": {
     "title": "Sozlamalar",

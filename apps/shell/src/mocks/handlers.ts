@@ -832,6 +832,15 @@ export const simulate = {
     };
     emitSession();
   },
+  /** The cash desk's postpaid: the session runs open-ended, paid at the desk when it ends. */
+  postpaidSession(): void {
+    if (mockState.session) {
+      mockState.session.isPrepaid = false;
+      mockState.session.secondsLeft = -1;
+      mockState.session.endsAt = null;
+      emitSession();
+    }
+  },
   /** The session runs on a package tariff (Night 5h): "+30 min" would charge a whole package. */
   packageSession(): void {
     const pkg = TARIFFS.find((t) => t.isPackage);
@@ -1034,8 +1043,17 @@ cmd('auth_login', (args): AuthLoginResponse => {
   };
 });
 
+/** As the Agent: a player's own postpaid session is paid and ended at the cash desk (`forbidden {reason: payAtDesk}`). */
+function refusePostpaidEnd(): void {
+  const s = mockState.session;
+  if (s && !s.isPrepaid && mockState.user && s.userId === mockState.user.id) {
+    mockError('forbidden', 'A postpaid session is ended at the cash desk, where it is paid', { reason: 'payAtDesk' });
+  }
+}
+
 cmd('auth_logout', (args): AuthLogoutResponse => {
   const reason = (str(args, 'reason') as SessionEndReason | undefined) ?? 'user';
+  refusePostpaidEnd();
   let ended: Session | null = null;
   if (mockState.session) {
     ended = endSession(reason).session;
@@ -1199,6 +1217,7 @@ cmd('session_end', (args): SessionEndResult => {
   if (!mockState.session) {
     mockError('sessionNotActive', 'No active session');
   }
+  refusePostpaidEnd();
   return endSession(reason);
 });
 

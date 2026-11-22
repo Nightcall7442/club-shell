@@ -4,6 +4,7 @@
  */
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSession } from '@/hooks/useSession';
 import { useNavigate } from 'react-router-dom';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { Button } from '@/components/ui/Button';
@@ -152,6 +153,9 @@ export function Account(): JSX.Element {
   };
 
   const isGuest = user?.role === 'guest';
+  // A postpaid session is paid and ended at the cash desk: no sign-out here (the Agent refuses it, `payAtDesk`).
+  const session = useSession();
+  const postpaid = session.isOpen && session.isOpenEnded;
 
   return (
     <div className="flex flex-col gap-[var(--gap)]">
@@ -166,9 +170,13 @@ export function Account(): JSX.Element {
                 {t('profile.changePin')}
               </Button>
             )}
-            <Button variant="danger" size="lg" onClick={() => setLogoutOpen(true)}>
-              {t('profile.logout')}
-            </Button>
+            {postpaid ? (
+              <p className="text-base text-muted">{t('session.payAtDeskTitle')}</p>
+            ) : (
+              <Button variant="danger" size="lg" onClick={() => setLogoutOpen(true)}>
+                {t('profile.logout')}
+              </Button>
+            )}
           </div>
         </SettingsSection>
 

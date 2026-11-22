@@ -38,6 +38,9 @@ public sealed class SessionHandlers : IIpcHandlerGroup
     /// <summary>Error reason of a request only the cash desk may make (pause, resume, an end or sign-out reason other than <c>user</c>/<c>idle</c>).</summary>
     public const string StaffOnlyReason = "staffOnly";
 
+    /// <summary><c>forbidden</c> reason of a player's own end of a postpaid session (paid and ended at the cash desk).</summary>
+    public const string PayAtDeskReason = "payAtDesk";
+
     /// <summary>Error reason of a request that needs the club server and is not served offline.</summary>
     public const string OfflineUnavailableReason = "offlineUnavailable";
 
@@ -436,6 +439,7 @@ public sealed class SessionHandlers : IIpcHandlerGroup
         SessionEndReason reason = request?.Reason ?? SessionEndReason.User;
         RequirePlayerReason(reason);
         User user = context.RequireUser();
+        RequireNotPostpaid(user);
         if (cancellationToken.IsCancellationRequested)
         {
             _logger.LogInformation("auth.logout of {UserId}: the request was cancelled; signing out all the same", user.Id);
@@ -637,7 +641,9 @@ public sealed class SessionHandlers : IIpcHandlerGroup
     {
         SessionEndReason reason = request?.Reason ?? SessionEndReason.User;
         RequirePlayerReason(reason);
-        RequireOwnSessionOffline(context.RequireUser());
+        User user = context.RequireUser();
+        RequireOwnSessionOffline(user);
+        RequireNotPostpaid(user);
         return _sessions.EndAsync(reason, cancellationToken);
     }
 
@@ -787,6 +793,18 @@ public sealed class SessionHandlers : IIpcHandlerGroup
     }
 
     private static IpcException StaffOnly(string message) => IpcError.Forbidden(message, StaffOnlyReason).ToException();
+
+    /// <summary>
+    /// A postpaid session of the player is ended only at the cash desk, where it is paid: ending it from the PC let players
+    /// walk out unpaid and left their accounts in the red. <c>forbidden {reason: payAtDesk}</c>.
+    /// </summary>
+    private void RequireNotPostpaid(User user)
+    {
+        if (OwnsOpenSession(user) && _sessions.Current is { IsPrepaid: false })
+        {
+            throw IpcError.Forbidden("A postpaid session is ended at the cash desk, where it is paid", PayAtDeskReason).ToException();
+        }
+    }
 
     private static IpcException OfflineUnavailable(string message) => IpcError.Conflict(message, OfflineUnavailableReason).ToException();
 

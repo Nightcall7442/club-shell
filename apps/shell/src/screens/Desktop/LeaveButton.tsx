@@ -3,12 +3,14 @@
  *
  * - {@link LeaveButton}: "Завершить и выйти" at the right end of the status line. Before it, signing out took Profile →
  *   Settings → the bottom of the page, so players walked away instead: the meter kept running on a postpaid session,
- *   and whoever sat down next played on their account and balance.
+ *   and whoever sat down next played on their account and balance. A postpaid session is never ended by the player:
+ *   the button becomes «Оплатить на кассе» (what is owed now, and a call to the administrator) — ending it here let
+ *   players walk out unpaid and left their accounts in the red. Only the cash desk ends it, taking the payment.
  * - {@link IdleLeavePrompt}: after {@link IDLE_LEAVE_SEC} without any input, with no game running and the Shell in front,
  *   "Вы ещё здесь?" counts down {@link IDLE_LEAVE_COUNTDOWN_SEC} seconds. A member's prepaid time is theirs, so it then
- *   locks the screen (`session.lock {idle}`: the paid minutes wait; the Agent itself only ever locks on idle). Pay as you
- *   go, a desk's postpaid and a guest (who cannot lock: `guestLock`) are signed out (`idle`), so no meter keeps running
- *   for an empty seat. It stays out of the way while a game or a program from the dock is in front: a cutscene or a film
+ *   locks the screen (`session.lock {idle}`: the paid minutes wait; the Agent itself only ever locks on idle). A guest
+ *   with prepaid time (who cannot lock: `guestLock`) is signed out (`idle`). A postpaid seat is never ended by idling:
+ *   the administrator is called instead (once per idle spell), who closes the bill at the desk. It stays out of the way while a game or a program from the dock is in front: a cutscene or a film
  *   has no input either, and the player would never see the prompt behind it.
  *
  * Signing out goes through `auth.logout`; the lock screen then shows what the visit cost (`auth.receipt`).
@@ -22,6 +24,7 @@ import { useIdle } from '@/hooks/useIdle';
 import { useLocale } from '@/hooks/useLocale';
 import { useSession } from '@/hooks/useSession';
 import { formatDurationSec, formatMoney } from '@/lib/format';
+import { api } from '@/lib/tauri';
 import { useAuthStore } from '@/store/auth';
 import { useGamesStore } from '@/store/games';
 import { useNotificationsStore } from '@/store/notifications';
@@ -73,6 +76,11 @@ export function LeaveButton(): JSX.Element | null {
 
   if (!s.user) {
     return null;
+  }
+
+  // Postpaid: the bill is paid at the desk, where the session is ended; the player can only call the administrator.
+  if (s.isOpen && s.isOpenEnded) {
+    return <PayAtDeskButton />;
   }
 
   // What ending now means for the player's money, honestly: the server does not refund a player's own end, so unused
@@ -141,7 +149,18 @@ export function IdleLeavePrompt(): JSX.Element | null {
   const leave = useLeave();
   // A member's prepaid minutes are kept (lock); open-ended time and a guest's are signed out.
   const lockInstead = s.isOpen && !s.isOpenEnded && !s.isGuest;
+  // A postpaid seat is never ended by idling (the bill would go unpaid): the administrator is called instead.
+  const postpaid = s.isOpen && s.isOpenEnded;
   const idleOut = async (): Promise<void> => {
+    if (postpaid) {
+      try {
+        await api.system.callAdmin('help', t('session.idlePostpaidCall'));
+      } catch (e) {
+        pushError(e, t('admin.callAdminTitle'));
+      }
+      reset();
+      return;
+    }
     if (!lockInstead) {
       await leave('idle');
       return;
@@ -199,20 +218,89 @@ export function IdleLeavePrompt(): JSX.Element | null {
       open
       onClose={stay}
       title={t('session.idleTitle')}
-      description={t(lockInstead ? 'session.idleBodyLock' : 'session.idleBody', {
-        seconds: Math.max(0, Math.ceil((deadline - now) / 1000)),
-      })}
+      description={t(
+        postpaid ? 'session.idleBodyPostpaid' : lockInstead ? 'session.idleBodyLock' : 'session.idleBody',
+        {
+          seconds: Math.max(0, Math.ceil((deadline - now) / 1000)),
+        },
+      )}
       size="sm"
       footer={
         <>
-          <Button variant="ghost" size="lg" onClick={() => void leave('user')}>
-            {t('session.leaveConfirm')}
-          </Button>
+          {!postpaid && (
+            <Button variant="ghost" size="lg" onClick={() => void leave('user')}>
+              {t('session.leaveConfirm')}
+            </Button>
+          )}
           <Button variant="cta" size="lg" onClick={stay}>
             {t('session.idleStay')}
           </Button>
         </>
       }
     />
+  );
+}
+
+/**
+ * «Оплатить на кассе» in place of «Завершить и выйти» on a postpaid session: what the visit costs so far, and a call to
+ * the administrator, who ends the session at the desk when it is paid.
+ */
+function PayAtDeskButton(): JSX.Element {
+  const { t } = useTranslation();
+  const { locale } = useLocale();
+  const s = useSession();
+  const pushError = useNotificationsStore((n) => n.pushError);
+  const push = useNotificationsStore((n) => n.push);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const duration = formatDurationSec(s.secondsUsed, { compact: true });
+  const amount = s.cost ? formatMoney(s.cost, locale) : '—';
+  const call = async (): Promise<void> => {
+    setBusy(true);
+    try {
+      await api.system.callAdmin('help', t('session.payAtDeskCall', { duration, amount }));
+      push({
+        id: 'call-admin',
+        title: t('notifications.callAdminSent'),
+        body: t('admin.adminOnWay'),
+        level: 'success',
+        source: 'system',
+      });
+      setOpen(false);
+    } catch (e) {
+      pushError(e, t('admin.callAdminTitle'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <button
+        type="button"
+        data-nav="true"
+        onClick={() => setOpen(true)}
+        className="focus-ring flex h-12 items-center gap-2 rounded-md px-3 text-sm font-medium text-muted transition-colors duration-[var(--dur-fast)] hover:bg-text/[0.06] hover:text-text [&>svg]:h-5 [&>svg]:w-5"
+      >
+        <IconLeave />
+        {t('session.payAtDesk')}
+      </button>
+      <Modal
+        open={open}
+        onClose={() => !busy && setOpen(false)}
+        title={t('session.payAtDeskTitle')}
+        description={t('session.payAtDeskBody', { duration, amount })}
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" size="lg" onClick={() => setOpen(false)} disabled={busy}>
+              {t('common.cancel')}
+            </Button>
+            <Button variant="cta" size="lg" loading={busy} onClick={() => void call()}>
+              {t('session.payAtDeskCallButton')}
+            </Button>
+          </>
+        }
+      />
+    </>
   );
 }

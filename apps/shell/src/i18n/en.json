@@ -1319,7 +1319,14 @@
       "body": "{{error}} You are still signed in on this PC and the session is still open.",
       "retry": "Try again"
     },
-    "idleBodyLock": "Nobody has touched this PC for 10 minutes. In {{seconds}} s the screen locks; your paid time is kept."
+    "idleBodyLock": "Nobody has touched this PC for 10 minutes. In {{seconds}} s the screen locks; your paid time is kept.",
+    "payAtDesk": "Pay at the desk",
+    "payAtDeskTitle": "Postpaid is closed at the desk",
+    "payAtDeskBody": "You have played {{duration}}, {{amount}} due so far. The administrator ends the session when you pay at the desk.",
+    "payAtDeskCallButton": "Call the administrator",
+    "payAtDeskCall": "The player wants to finish and pay the postpaid session: {{duration}}, {{amount}}",
+    "idleBodyPostpaid": "Nobody has touched the PC for 10 minutes. In {{seconds}} s the administrator is called: postpaid is closed at the desk.",
+    "idlePostpaidCall": "PC idle for 10 minutes, postpaid not closed"
   },
   "settings": {
     "title": "Settings",
