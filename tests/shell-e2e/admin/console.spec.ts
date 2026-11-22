@@ -2819,7 +2819,7 @@ test('the owner drags PCs on the hall plan, lines a group up, turns it and draws
   await request.delete(`${API}/admin/pcs/plan`, { headers: auth(await tokenFor(request, OWNER_PIN)) });
 });
 
-test('a click on a PC opens its quick actions at the tile: top up, extend, end; seat a client on a free one', async ({
+test('a left click picks a PC, a right click opens all its actions; each step opens in a window over the map', async ({
   page,
   request,
 }) => {
@@ -2829,40 +2829,61 @@ test('a click on a PC opens its quick actions at the tile: top up, extend, end; 
   await ensureShift(request);
   await seatMember(request, busy, member.id);
   await signIn(page, CASHIER_PIN);
-
-  // A busy PC: the session's steps by the tile; each opens the seat card's own sheet.
-  await page.locator(`#seat-${busy.pcId}`).click();
   const menu = page.getByRole('menu');
+
+  // A left click only picks: no menu.
+  await page.locator(`#seat-${busy.pcId}`).click();
+  await expect(page.locator(`#seat-${busy.pcId}`)).toHaveAttribute('data-selected', 'true');
+  await expect(menu).toBeHidden();
+
+  // A right click: the session's steps at the pointer; each opens the seat card's own sheet.
+  await page.locator(`#seat-${busy.pcId}`).click({ button: 'right' });
   await expect(menu).toBeVisible();
   await expect(menu.getByRole('menuitem')).toHaveText([
     'Продлить',
     /^Пополнить/,
     'Пересадить на другой ПК…',
     'Бар',
-    'Ещё ⋯',
+    'Управление ПК: сообщение, блокировка, перезагрузка…',
+    'Открыть карточку',
     'Завершить сеанс',
   ]);
   await menu.getByRole('menuitem', { name: /^Пополнить/ }).click();
   await expect(menu).toBeHidden();
   await expect(page.getByRole('dialog', { name: `Пополнить · ${member.displayName}` })).toBeVisible();
   await page.keyboard.press('Escape');
+  // The card is in the window, the right column only says so.
+  const window = page.getByRole('dialog', { name: /^ПК/ });
+  await expect(window).toBeVisible();
+  await expect(page.getByText('Действия открыты в окне над картой')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(window).toBeHidden();
 
-  // Esc folds the menu and keeps the PC picked; a second click on the tile folds it too.
-  await page.locator(`#seat-${busy.pcId}`).click();
+  // Esc folds the menu and keeps the PC picked.
+  await page.locator(`#seat-${busy.pcId}`).click({ button: 'right' });
   await expect(menu).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();
   await expect(page.locator(`#seat-${busy.pcId}`)).toHaveAttribute('data-selected', 'true');
-  await page.locator(`#seat-${busy.pcId}`).click();
-  await expect(menu).toBeVisible();
+  await page.locator(`#seat-${busy.pcId}`).click({ button: 'right' });
   await menu.getByRole('menuitem', { name: 'Завершить сеанс' }).click();
-  await expect(page.getByRole('dialog').filter({ hasText: member.displayName })).toBeVisible();
+  await expect(page.getByRole('dialog').filter({ hasText: member.displayName }).last()).toBeVisible();
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
 
-  // A free PC: «Посадить клиента» puts the cursor in the client field of the seat card.
-  await page.locator(`#seat-${free.pcId}`).click();
+  // A free PC: «Посадить клиента» puts the cursor in the client field of the card, in the window.
+  await page.locator(`#seat-${free.pcId}`).click({ button: 'right' });
+  await expect(menu.getByRole('menuitem', { name: 'Посадить гостя · постоплата' })).toBeVisible();
   await menu.getByRole('menuitem', { name: 'Посадить клиента' }).click();
-  await expect(page.getByLabel('Кто', { exact: true })).toBeFocused();
+  await expect(page.getByRole('dialog').getByLabel('Кто', { exact: true })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+
+  // «Посадить гостя · постоплата»: the guest form, postpaid already chosen.
+  await page.locator(`#seat-${free.pcId}`).click({ button: 'right' });
+  await menu.getByRole('menuitem', { name: 'Посадить гостя · постоплата' }).click();
+  const guestWindow = page.getByRole('dialog', { name: /^ПК/ });
+  await expect(guestWindow.getByRole('button', { name: /Посадить · постоплата/ })).toBeVisible();
 });
 
 test('the map shows the hall as it stands, every PC in view at 1366×768, and the zones on request (SHELL_CHANGES 94)', async ({

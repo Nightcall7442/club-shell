@@ -1,7 +1,8 @@
 /**
- * Quick actions at the PC the cashier clicked on the map: the seat's everyday steps — extend, top up, move, the bar, the
- * end of the session; for a free PC, seat a client or a guest — right at the tile instead of across the screen in the
- * seat card. Each one runs the seat card's own step (its sheet, its checks), so nothing differs from the card's buttons.
+ * The PC's menu on the map (a right click on its tile): every step of the seat — extend, top up, move, the bar, the PC's
+ * controls (message, lock, restart, power), the end of the session; for a free PC, seat a client, a guest prepaid or
+ * postpaid, switch it on — at the pointer. A left click only picks the PC. A step that needs a form opens in a window
+ * over the map (the seat card itself, so nothing differs from the card's buttons), never in the right column.
  * Esc, a click elsewhere, a scroll or another PC closes it.
  */
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
@@ -10,7 +11,18 @@ import type { Seat } from '@/api';
 import { t } from '@/i18n';
 
 /** What the menu asks of the seat card (the move and the bar the map does itself). */
-export type QuickAction = 'extend' | 'topup' | 'move' | 'bar' | 'more' | 'end' | 'client' | 'guest';
+export type QuickAction =
+  | 'extend'
+  | 'topup'
+  | 'move'
+  | 'bar'
+  | 'more'
+  | 'end'
+  | 'client'
+  | 'guest'
+  | 'guestPost'
+  | 'wake'
+  | 'open';
 
 /** A step the seat card is asked to take; `n` makes the same step asked twice a new request. */
 export interface QuickRequest {
@@ -26,9 +38,10 @@ interface Item {
   tone?: 'primary' | 'danger';
 }
 
-/** The menu's items for the seat as it is now. */
-export function quickItems(seat: Seat): Item[] {
+/** The menu's items for the seat as it is now; `guests`: the desk seats walk-in guests (a server with cash desk 2). */
+export function quickItems(seat: Seat, guests = true): Item[] {
   const session = seat.session;
+  const controls: Item = { action: 'more', label: t('Управление ПК: сообщение, блокировка, перезагрузка…') };
   if (session && seat.user) {
     const guest = seat.user.role === 'guest';
     return [
@@ -36,37 +49,46 @@ export function quickItems(seat: Seat): Item[] {
       ...(!guest ? [{ action: 'topup' as const, label: t('Пополнить'), hint: 'F2' }] : []),
       { action: 'move', label: t('Пересадить на другой ПК…') },
       { action: 'bar', label: t('Бар') },
-      { action: 'more', label: t('Ещё ⋯') },
+      controls,
+      { action: 'open', label: t('Открыть карточку') },
       { action: 'end', label: t('Завершить сеанс'), tone: 'danger' },
     ];
   }
-  if (session) return [{ action: 'more', label: t('Ещё ⋯') }];
+  if (session) return [controls, { action: 'open', label: t('Открыть карточку') }];
   return [
-    { action: 'client', label: t('Посадить клиента'), tone: 'primary' },
-    { action: 'guest', label: t('Посадить гостя') },
-    { action: 'more', label: t('Ещё ⋯') },
+    ...(seat.pc.status === 'offline' ? [{ action: 'wake' as const, label: t('Включить ПК'), tone: 'primary' as const }] : []),
+    { action: 'client', label: t('Посадить клиента'), tone: seat.pc.status === 'offline' ? undefined : ('primary' as const) },
+    ...(guests
+      ? [
+          { action: 'guest' as const, label: t('Посадить гостя · предоплата') },
+          { action: 'guestPost' as const, label: t('Посадить гостя · постоплата') },
+        ]
+      : []),
+    controls,
   ];
 }
 
 const GAP = 8;
-const WIDTH = 232;
+const WIDTH = 268;
 
 export function QuickActions({
   seat,
   anchor,
+  guests = true,
   onAction,
   onClose,
 }: {
   seat: Seat;
-  /** The tile's box on screen when it was clicked. */
+  /** Where the menu opens: the pointer of the right click (a zero-size box), else the tile's box. */
   anchor: DOMRect;
+  guests?: boolean;
   onAction: (action: QuickAction) => void;
   onClose: () => void;
 }): JSX.Element {
   const box = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
 
-  // Right of the tile, else left of it; kept on screen.
+  // Right of the anchor, else left of it; kept on screen.
   useLayoutEffect(() => {
     const h = box.current?.offsetHeight ?? 0;
     const vw = window.innerWidth;
@@ -103,7 +125,7 @@ export function QuickActions({
     };
   }, [onClose, seat.pc.id]);
 
-  const items = quickItems(seat);
+  const items = quickItems(seat, guests);
   const heading: ReactNode = (
     <span className="flex min-w-0 items-baseline justify-between gap-2 px-3 pb-1.5 pt-2.5">
       <span className="truncate font-display text-[15px] font-medium text-hi">{seat.pc.name}</span>
