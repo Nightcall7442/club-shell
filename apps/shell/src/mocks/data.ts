@@ -1294,6 +1294,8 @@ export const SETTINGS: ShellSettings = {
     gpuPanel: true,
     lockScreenPower: true,
   },
+  favorites: [],
+  accountPrefs: false,
 };
 
 /**

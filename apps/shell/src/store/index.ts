@@ -262,6 +262,8 @@ function wireListeners(): void {
     events.on('games.changed', () => {
       void games().load(true);
     }),
+    // D-86: a member's own theme, language, volume and favourites at sign-in, the PC's own back at sign-out.
+    events.on('settings.changed', (s) => void settings().applyPushed(s)),
     events.on('saves.status', (e) => {
       const before = games().saves;
       games().onSavesStatus(e);

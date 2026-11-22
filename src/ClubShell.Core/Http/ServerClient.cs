@@ -312,6 +312,17 @@ public sealed class ServerClient : IServerClient, IDisposable
         GetAsync<Loyalty>(Endpoints.UserLoyalty(userId), AuthMode.User, cancellationToken);
 
     /// <inheritdoc />
+    public Task<UserPrefs> GetUserPrefsAsync(Guid userId, CancellationToken cancellationToken) =>
+        GetAsync<UserPrefs>(Endpoints.UserPrefs(userId), AuthMode.User, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<UserPrefs> SaveUserPrefsAsync(Guid userId, UserPrefs prefs, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(prefs);
+        return SendJsonAsync<UserPrefs, UserPrefs>(HttpMethod.Put, Endpoints.UserPrefs(userId), prefs, AuthMode.User, null, cancellationToken);
+    }
+
+    /// <inheritdoc />
     public Task VerifyPinAsync(Guid userId, PinVerifyRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);

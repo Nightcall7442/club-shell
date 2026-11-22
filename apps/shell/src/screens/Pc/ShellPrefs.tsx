@@ -1,7 +1,7 @@
 /**
  * The Shell's own preferences in the PC block on Home: when an idle screen locks itself, and the theme (live swatches).
- * Both are saved on this PC (`settings_set`) and stay for the next player, as they did in Profile; errors surface as
- * toasts.
+ * The idle lock is saved on this PC (`settings_set`) and stays for the next player; a member's theme goes to their
+ * account and follows them to any PC (D-86), a guest's stays on this PC. Errors surface as toasts.
  */
 import { useEffect, useState } from 'react';
 import type { Theme } from '@clubshell/contracts';
@@ -205,8 +205,9 @@ export function ThemePicker(): JSX.Element {
 
 export function ThemeCard(): JSX.Element {
   const { t } = useTranslation();
+  const account = useSettingsStore((s) => s.settings.accountPrefs === true);
   return (
-    <SettingsSection title={t('settings.theme')}>
+    <SettingsSection title={t('settings.theme')} description={account ? t('settings.savedToAccount') : undefined}>
       <ThemePicker />
     </SettingsSection>
   );

@@ -212,6 +212,12 @@ public interface IAuthApi
     /// <summary><c>GET /users/{userId}/loyalty</c>.</summary>
     Task<Loyalty> GetUserLoyaltyAsync(Guid userId, CancellationToken cancellationToken);
 
+    /// <summary><c>GET /users/{userId}/prefs</c> (beyond the contract, D-86): the member's Shell preferences and favourites.</summary>
+    Task<UserPrefs> GetUserPrefsAsync(Guid userId, CancellationToken cancellationToken);
+
+    /// <summary><c>PUT /users/{userId}/prefs</c> (beyond the contract, D-86): replaces them; answers the stored value.</summary>
+    Task<UserPrefs> SaveUserPrefsAsync(Guid userId, UserPrefs prefs, CancellationToken cancellationToken);
+
     /// <summary>
     /// <c>POST /users/{userId}/pin/verify</c>: completes on <c>204</c> (the PIN matches); <c>401 badSecret</c> (it does not)
     /// and <c>404 notFound {reason: noPin}</c> (none is set) are thrown as <see cref="ServerApiException"/>.

@@ -1395,7 +1395,8 @@
     "reboot": "Kompyuterni qayta yuklash",
     "shutdown": "Kompyuterni o'chirish",
     "resetProfile": "Oʻyinchi profilini tiklash",
-    "resetProfileConfirm": "Rostdan tiklansinmi? Oʻyin yopiladi"
+    "resetProfileConfirm": "Rostdan tiklansinmi? Oʻyin yopiladi",
+    "savedToAccount": "Hisobingizda saqlanadi va klubning istalgan kompyuterida sizni kutadi"
   },
   "notifications": {
     "title": "Bildirishnomalar",
@@ -1652,5 +1653,15 @@
       "load": "{{value}}%",
       "hot": "qizib ketgan"
     }
+  },
+  "favorites": {
+    "title": "Sevimlilar",
+    "add": "Sevimlilarga qo‘shish",
+    "remove": "Sevimlilardan olib tashlash",
+    "addNamed": "{{title}}ni sevimlilarga qo‘shish",
+    "removeNamed": "{{title}}ni sevimlilardan olib tashlash",
+    "failed": "Sevimlilarni saqlab bo‘lmadi",
+    "launchApp": "{{title}}ni ochish",
+    "region": "Sevimlilar: tez ishga tushirish uchun o‘yinlar va ilovalar"
   }
 }

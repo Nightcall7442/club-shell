@@ -123,6 +123,86 @@ public sealed class UserTests(ServerFixture server) : LedgerCheckedTest(server),
     }
 
     [Fact]
+    public async Task Prefs_start_empty_are_replaced_by_put_and_read_back_on_any_pc()
+    {
+        // Beyond the vendored contract (D-86): around the contract-validating client.
+        var (agent, player) = await Players.SignedInAsync(Server);
+        using var http = Server.CreateClient();
+        var path = $"/api/v1/users/{player.Id}/prefs";
+        using (var empty = await http.SendAsync(agent.Request(HttpMethod.Get, path)))
+        {
+            var prefs = await Players.ReadAsync(empty, 200);
+            Assert.Equal(0, prefs.GetProperty("favorites").GetArrayLength());
+            Assert.False(prefs.TryGetProperty("theme", out _));
+        }
+
+        const string body = """{"theme":"neon","locale":"uz","volume":35,"muted":true,"uiSounds":false,"showMetricsOverlay":true,"favorites":["game:6f1c2b9e-0000-4000-8000-000000000001","app:discord"]}""";
+        using (var put = await http.SendAsync(agent.Request(HttpMethod.Put, path, body)))
+        {
+            Assert.Equal("neon", (await Players.ReadAsync(put, 200)).GetProperty("theme").GetString());
+        }
+
+        // The account's, not the PC's: another PC of the club reads the same.
+        var other = await TestAgent.CreateAsync(Server);
+        await Players.ReadAsync(await agent.PostAsync("/api/v1/auth/logout", new { reason = "user" }), 204);
+        await other.LoginAsync(player);
+        using var read = await http.SendAsync(other.Request(HttpMethod.Get, path));
+        var saved = await Players.ReadAsync(read, 200);
+        Assert.Equal(("neon", "uz", 35, true, false, true), (
+            saved.GetProperty("theme").GetString(), saved.GetProperty("locale").GetString(), saved.GetProperty("volume").GetInt32(),
+            saved.GetProperty("muted").GetBoolean(), saved.GetProperty("uiSounds").GetBoolean(), saved.GetProperty("showMetricsOverlay").GetBoolean()));
+        Assert.Equal(new[] { "game:6f1c2b9e-0000-4000-8000-000000000001", "app:discord" }, saved.GetProperty("favorites").EnumerateArray().Select(f => f.GetString()!).ToArray());
+
+        // PUT replaces: what is left out is "not chosen" again.
+        using (var replace = await http.SendAsync(other.Request(HttpMethod.Put, path, """{"favorites":[]}""")))
+        {
+            Assert.False((await Players.ReadAsync(replace, 200)).TryGetProperty("theme", out _));
+        }
+
+        using var foreign = await http.SendAsync(other.Request(HttpMethod.Get, $"/api/v1/users/{(await Players.CreateAsync(Server)).Id}/prefs"));
+        await Contract.ReadErrorAsync(foreign, 403, "forbidden", "notOwner");
+    }
+
+    [Fact]
+    public async Task Prefs_put_validates_each_field_and_a_guest_has_none()
+    {
+        var (agent, player) = await Players.SignedInAsync(Server);
+        using var http = Server.CreateClient();
+        var path = $"/api/v1/users/{player.Id}/prefs";
+        var many = string.Join(",", Enumerable.Range(0, 61).Select(i => $"\"game:{i}\""));
+        foreach (var (body, field, reason) in new[]
+        {
+            ("""{"theme":"../evil"}""", "theme", "format"),
+            ($$"""{"theme":"{{new string('t', 65)}}"}""", "theme", "format"),
+            ("""{"locale":"fr"}""", "locale", "enum"),
+            ("""{"volume":101}""", "volume", "range"),
+            ("""{"volume":-1}""", "volume", "range"),
+            ($$"""{"favorites":[{{many}}]}""", "favorites", "max"),
+            ("""{"favorites":["game:1","game:1"]}""", "favorites", "duplicate"),
+            ($$"""{"favorites":["{{new string('g', 65)}}"]}""", "favorites", "format"),
+            ("""{"favorites":["game 1"]}""", "favorites", "format"),
+        })
+        {
+            using var response = await http.SendAsync(agent.Request(HttpMethod.Put, path, body));
+            var error = await Contract.ReadErrorAsync(response, 400, "validation");
+            Assert.Equal((field, reason), (Details(error).GetProperty("field").GetString(), Details(error).GetProperty("reason").GetString()));
+        }
+
+        var guestPc = await TestAgent.CreateAsync(Server);
+        using var login = await guestPc.PostAsync("/api/v1/auth/guest", new { pcId = guestPc.PcId, hwid = guestPc.Hwid, displayName = (string?)null, locale = "ru" });
+        var auth = await Players.ReadAsync(login, 200);
+        guestPc.UserToken = auth.GetProperty("accessToken").GetString();
+        var guestPath = $"/api/v1/users/{auth.GetProperty("user").GetProperty("id").GetGuid()}/prefs";
+        using (var get = await http.SendAsync(guestPc.Request(HttpMethod.Get, guestPath)))
+        {
+            await Contract.ReadErrorAsync(get, 403, "forbidden", "guest");
+        }
+
+        using var put = await http.SendAsync(guestPc.Request(HttpMethod.Put, guestPath, """{"theme":"neon"}"""));
+        await Contract.ReadErrorAsync(put, 403, "forbidden", "guest");
+    }
+
+    [Fact]
     public async Task Tariffs_are_filtered_by_zone_and_always_answered_200()
     {
         var agent = await TestAgent.CreateAsync(Server);

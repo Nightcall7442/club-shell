@@ -578,6 +578,7 @@ public sealed class ClubTimeConverter : JsonConverter<TimeOnly>
 [JsonSerializable(typeof(Locale))]
 [JsonSerializable(typeof(User))]
 [JsonSerializable(typeof(ProfileUpdateRequest))]
+[JsonSerializable(typeof(UserPrefs))]
 [JsonSerializable(typeof(PinVerifyRequest))]
 [JsonSerializable(typeof(StaffVerifyRequest))]
 [JsonSerializable(typeof(StaffVerifyResponse))]

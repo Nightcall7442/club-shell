@@ -10,6 +10,7 @@ import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { EASE_OUT, useMotion } from '@/lib/motion';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { FavoriteButton } from '@/components/ui/FavoriteButton';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { focusElement } from '@/hooks/useGamepad';
 import { GameCard } from './GameCard';
@@ -151,7 +152,7 @@ export function GamesGrid({
         {visible.map((game, i) => (
           <motion.li
             key={game.id}
-            className="min-w-0"
+            className="group/fav relative min-w-0"
             // The first rows come in one after another, like a shelf being stocked; cards further down (and those
             // loaded on scroll) just appear, so a long catalogue never waits for its own animation.
             initial={moving && i < STAGGER_MAX ? { opacity: 0, y: 18, scale: 0.97 } : false}
@@ -167,6 +168,15 @@ export function GamesGrid({
               onSelect={onSelect}
               onActivate={onActivate}
               onLaunch={onPlay}
+            />
+            {/* A sibling, not inside the card's button (no button in a button); keyboard and gamepad star the game on
+                its page, so this one stays out of the grid's spatial navigation. */}
+            <FavoriteButton
+              kind="game"
+              id={game.id}
+              title={game.title}
+              pointerOnly
+              className="absolute right-3 top-[4.25rem] opacity-0 group-hover/fav:opacity-100 data-[favorite=on]:opacity-100"
             />
           </motion.li>
         ))}

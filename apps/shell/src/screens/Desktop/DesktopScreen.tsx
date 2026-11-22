@@ -1,5 +1,6 @@
 /**
- * Home (`/home`): greeting and selected game (`HomeHero`), then this PC and its settings (`ThisPcSection`), one row of
+ * Home (`/home`): greeting and selected game (`HomeHero`), the member's favourites («Избранное», when any), then this
+ * PC and its settings (`ThisPcSection`), one row of
  * glanceable panels — free seats, tournaments, recent staff chat — and the promo strip (ads playlist or tariffs) last.
  * The top bar's PC line lands here with `THIS_PC_STATE`: the PC block scrolls into view with its first control focused.
  */
@@ -8,26 +9,30 @@ import clsx from 'clsx';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
-import type { Tournament } from '@clubshell/contracts';
+import type { App, Tournament } from '@clubshell/contracts';
 import { useResolvedAsset } from '@/components/media/GameArtwork';
 import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { FavoriteButton } from '@/components/ui/FavoriteButton';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useClub } from '@/hooks/useClub';
 import { useLocale } from '@/hooks/useLocale';
 import { useSession } from '@/hooks/useSession';
+import { parseFavoriteKey, resolveFavorites } from '@/lib/favorites';
 import { formatDateTime, formatMoney, formatTime } from '@/lib/format';
 import { serverNow, toDateKey } from '@/lib/time';
 import { log } from '@/lib/logger';
 import { api } from '@/lib/tauri';
+import { AppTile, useAppLaunch } from '@/screens/Apps/AppTile';
 import { HomeHero } from '@/screens/Desktop/HomeHero';
-import { LaunchOverlay } from '@/screens/Games/LaunchOverlay';
+import { GameCard } from '@/screens/Games/GameCard';
+import { LaunchOverlay, launchGame } from '@/screens/Games/LaunchOverlay';
 import { THIS_PC_ID, type HomeFocusState } from '@/screens/Pc/PcBadge';
 import { ThisPcSection } from '@/screens/Pc/ThisPcSection';
 import { isPendingMessage, selectActiveRoom, useChatStore } from '@/store/chat';
 import { useGamesStore } from '@/store/games';
-import { selectFeatures, useSettingsStore } from '@/store/settings';
+import { selectAccountPrefs, selectFavorites, selectFeatures, useSettingsStore } from '@/store/settings';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
 import { useWalletStore } from '@/store/wallet';
 
@@ -400,6 +405,90 @@ export function RecentChat({ index }: { index: number }): JSX.Element {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+// Favourites
+// ---------------------------------------------------------------------------------------------------------------------
+
+/**
+ * The member's starred games and apps (D-86), newest first, as the library shows them: a game card opens its page and
+ * its play disc launches, an app tile opens the app. Hidden without an account or while nothing here is starred; the
+ * apps list is read only when an app is among them.
+ */
+export function FavoritesRow({ index }: { index: number }): JSX.Element | null {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const account = useSettingsStore(selectAccountPrefs);
+  const keys = useSettingsStore(selectFavorites);
+  const appsOn = useSettingsStore((s) => s.features.apps);
+  const byId = useGamesStore((s) => s.byId);
+  const running = useGamesStore((s) => s.running);
+  const { launchingId, launch } = useAppLaunch();
+  const [apps, setApps] = useState<App[]>([]);
+  const wantsApps = appsOn && keys.some((k) => parseFavoriteKey(k)?.kind === 'app');
+
+  useEffect(() => {
+    if (!wantsApps) {
+      return undefined;
+    }
+    let active = true;
+    api.apps.list().then(
+      (list) => active && setApps(list),
+      (e: unknown) => log.warn('favourites: apps list failed', e),
+    );
+    return () => {
+      active = false;
+    };
+  }, [wantsApps]);
+
+  const items = useMemo(
+    () => resolveFavorites(keys, Array.from(byId.values()), wantsApps ? apps : []),
+    [keys, byId, apps, wantsApps],
+  );
+  const runningIds = useMemo(() => new Set(running.map((r) => r.gameId)), [running]);
+
+  if (!account || items.length === 0) {
+    return null;
+  }
+
+  return (
+    <Section title={t('favorites.title')} index={index}>
+      <ul role="list" className="-mx-1 flex items-start gap-[var(--gap)] overflow-x-auto px-1 pb-2">
+        {items.map((item) => (
+          <li key={item.key} className="group/fav relative w-[clamp(150px,10vw,200px)] shrink-0">
+            {item.kind === 'game' ? (
+              <>
+                <GameCard
+                  game={item.game}
+                  running={runningIds.has(item.game.id)}
+                  onActivate={(g) => navigate(`/games/${g.id}`)}
+                  onLaunch={(g) => void launchGame(g.id)}
+                />
+                <FavoriteButton
+                  kind="game"
+                  id={item.game.id}
+                  title={item.game.title}
+                  pointerOnly
+                  className="absolute right-3 top-[4.25rem]"
+                />
+              </>
+            ) : (
+              <>
+                <AppTile
+                  app={item.app}
+                  onLaunch={(a) => void launch(a)}
+                  launching={launchingId === item.app.id}
+                  disabled={launchingId !== null && launchingId !== item.app.id}
+                />
+                <FavoriteButton kind="app" id={item.app.id} title={item.app.title} className="absolute right-3 top-3" />
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+    </Section>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 // Screen
 // ---------------------------------------------------------------------------------------------------------------------
 
@@ -426,6 +515,7 @@ export default function DesktopScreen(): JSX.Element {
   return (
     <div className="flex w-full flex-col gap-[calc(var(--gap)*2)]">
       <HomeHero />
+      <FavoritesRow index={0} />
       <ThisPcSection />
       {panels > 0 && (
         <div

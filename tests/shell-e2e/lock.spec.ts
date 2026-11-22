@@ -130,6 +130,17 @@ async function openPlaying(page: Page): Promise<void> {
 }
 
 /**
+ * Signed in as `demo` from the lock screen switched to English, for tests that come back to the lock screen: English
+ * is then the PC's own language. A language picked while signed in is the member's (D-86) and goes with them at
+ * sign-out, so {@link openPlaying} would leave the lock screen in the club's Russian.
+ */
+async function openPlayingFromLock(page: Page): Promise<void> {
+  await openLock(page);
+  await signIn(page, DEMO_USER, DEMO_PASSWORD);
+  await playing(page);
+}
+
+/**
  * A member with money on the balance (the mock's `demo`) plays at once: the cheapest tariff of the PC's zone starts
  * without the picker, straight to `/home`.
  */
@@ -545,7 +556,8 @@ test.describe('player accounts', () => {
 
     await failed.getByRole('button', { name: en('session.logoutFailed.retry') }).click();
     await expect(page).toHaveURL(/#\/lock$/);
-    await expect(page.getByRole('heading', { level: 1, name: en('lock.title') })).toBeVisible();
+    // English was the member's choice (D-86): the lock screen is back in the club's own language.
+    await expect(page.getByRole('heading', { level: 1, name: ru('lock.title') })).toBeVisible();
     await expect(failed).toHaveCount(0);
   });
 
@@ -572,6 +584,8 @@ test.describe('player accounts', () => {
     await simulate(page, 'authExpired', 'tokenExpired');
 
     await expect(page).toHaveURL(/#\/lock$/);
+    // The member's English went with them (D-86); the lock screen is the club's until they are back.
+    await useEnglish(page);
     await expect(page.getByText(en('lock.relogin.title', { name: 'Bobur Y.' }))).toBeVisible();
     await expect(page.getByText(en('lock.relogin.hint'))).toBeVisible();
     await expect(field(page, en('lock.username'))).toHaveValue(DEMO_USER);
@@ -584,7 +598,7 @@ test.describe('player accounts', () => {
   });
 
   test('signed out by the desk: the lock screen says why', async ({ page }) => {
-    await openPlaying(page);
+    await openPlayingFromLock(page);
     await simulate(page, 'authExpired', 'sessionEnded');
     await expect(page).toHaveURL(/#\/lock$/);
     await expect(page.getByRole('status').filter({ hasText: en('lock.expired.sessionEnded') })).toBeVisible();

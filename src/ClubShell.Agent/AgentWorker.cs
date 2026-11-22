@@ -95,6 +95,7 @@ public sealed class AgentWorker : BackgroundService
     private readonly SignInGuard? _signIn;
     private readonly SignedInUserStore? _signedIn;
     private readonly Saves.IPlayerSaves? _saves;
+    private readonly Users.AccountPrefsSync? _accountPrefs;
 
     private volatile bool _ready;
     private Guid _persistedPcId;
@@ -123,7 +124,8 @@ public sealed class AgentWorker : BackgroundService
         ILogger<AgentWorker> logger,
         SignInGuard? signIn = null,
         SignedInUserStore? signedIn = null,
-        Saves.IPlayerSaves? saves = null)
+        Saves.IPlayerSaves? saves = null,
+        Users.AccountPrefsSync? accountPrefs = null)
     {
         ArgumentNullException.ThrowIfNull(hwid);
         ArgumentNullException.ThrowIfNull(provisioner);
@@ -169,6 +171,8 @@ public sealed class AgentWorker : BackgroundService
         _signIn = signIn;
         _signedIn = signedIn;
         _saves = saves;
+        // Taken here so it follows the signed-in player from the start, the sign-in restored after a restart included (D-86).
+        _accountPrefs = accountPrefs;
     }
 
     /// <summary><see langword="true"/> once the startup sequence completed.</summary>
@@ -232,6 +236,12 @@ public sealed class AgentWorker : BackgroundService
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "Final offline flush on shutdown failed");
+        }
+
+        if (_accountPrefs is not null)
+        {
+            // A theme picked a second before an update must not be lost: the save under way finishes, briefly.
+            await Task.WhenAny(_accountPrefs.WhenIdleAsync(), Task.Delay(TimeSpan.FromSeconds(3), cancellationToken)).ConfigureAwait(false);
         }
 
         await base.StopAsync(cancellationToken).ConfigureAwait(false);

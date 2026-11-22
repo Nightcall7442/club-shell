@@ -570,6 +570,8 @@ virtual-key name without `VK_` (`Esc`, `Tab`, `F4`, `R`, `Delete`, `PrintScreen`
 | `uiSounds` | bool | yes | |
 | `features` | `{ shop, chat, booking, tournaments, profile, topup, apps, callAdmin: bool }` | yes | read-only |
 | `club` | `{ name?, accent?, logoUrl?, wallpaperUrl?: string, banners?: { id, title, imageUrl }[], rules?: { ru?, uz?, en? } }` | no | read-only; the owner's set-up from the admin console, written by the Agent from the server's `shell.club`. The Shell uses the name and logo on the lock, idle and top bar, the accent over the theme's, the wallpaper behind the lock screen, the banners in the home promo strip and the rules on Support; each missing field keeps the bundled default |
+| `favorites` | string[] | no | the signed-in member's starred games and apps (`game:<id>`, `app:<id>`), newest first; empty for a guest and with nobody signed in (D-86) |
+| `accountPrefs` | bool | no | `true` while a signed-in member's account preferences apply: `theme`, `locale`, `volume`, `muted`, `uiSounds`, `showMetricsOverlay` and `favorites` are theirs (read from and saved to `GET/PUT /users/{id}/prefs`), not the PC's; `shell.json` keeps the club's, back at sign-out (D-86) |
 
 `PcInfo`: `{ pc: Pc, agentVersion: string, shellVersion: string, protocolVersion: int, uptimeSec: long, kioskUser: string, connectivity: ConnectivityState, serverTime: datetime, policyVersion: int }`
 
@@ -892,9 +894,9 @@ Default `roomId` when omitted: `pc:<pcId>` (support chat with admins).
 #### `settings.get` (auth: hello) — Request: — Response: `ShellSettings`.
 #### `settings.set` (auth: hello)
 
-Request: `{ locale?: Locale, theme?: string, volume?: int, muted?: bool, idleTimeoutSec?: int, showMetricsOverlay?: bool, allowVirtualKeyboard?: bool, uiSounds?: bool }` — partial; at least one key.
+Request: `{ locale?: Locale, theme?: string, volume?: int, muted?: bool, idleTimeoutSec?: int, showMetricsOverlay?: bool, allowVirtualKeyboard?: bool, uiSounds?: bool, favorites?: string[] }` — partial; at least one key. While a member is signed in, the account keys (see `ShellSettings.accountPrefs`) go to their account, the rest to `shell.json`; `sys.setVolume` and `sys.setLocale` follow the same rule.
 Response: `ShellSettings` (full, after merge).
-Errors: `validation` (unknown theme, volume range), `policyDenied` (field locked by policy, `details.field`).
+Errors: `validation` (unknown theme, volume range, favourites: more than 60, a duplicate, a bad id), `policyDenied` (field locked by policy, `details.field`), `forbidden {reason: noAccount}` (`favorites` without a signed-in member).
 
 ### 7.12 sys
 
@@ -960,6 +962,7 @@ Errors: `rateLimited` (1 per 30 s), `validation`.
 | `shop.orderUpdated` | `Order` | order status changed (server push `orderUpdated`, `SERVER_API.md` §6.3); also mirrored as `notification.push` |
 | `sys.readinessChanged` | `PcReadiness { state: "preparing" \| "ready" \| "notReady", disks: [{ library, letter?, state }], deadline? }` | the games disks before sign-in (`docs/DISKLESS.md`, "Games disks before sign-in"); also in the `auth.status` answer (`readiness`, absent from older agents = ready) |
 | `games.changed` | `{ catalogVersion }` | the game list changed (a disk came or went, the catalogue was updated): the Shell re-reads it on any screen |
+| `settings.changed` | `ShellSettings` | the effective settings changed without the Shell asking: a member's account preferences came in after sign-in, or the PC's own came back at sign-out (D-86); the Shell re-applies theme, locale and volume |
 | `saves.status` | `{ state: "none" \| "transferring" \| "loading" \| "ready" \| "unavailable" \| "tooLarge" }` | the player's saves through the diskless helper (`docs/DISKLESS.md`, "Player saves"); `transferring` (waiting for the PC where «end it there and sign in here» ended the session to hand the saves back) and `loading` hold `games.launch`, `unavailable` and `tooLarge` are told to the player once |
 
 `shell.command.args` per command:

@@ -736,6 +736,11 @@ export const IpcNames = {
     SysReadinessChanged: 'sys.readinessChanged',
     /** Payload `GamesChanged`. */
     GamesChanged: 'games.changed',
+    /**
+     * Payload `ShellSettings` (effective, as `settings.get` answers): the settings changed without the Shell asking — a
+     * member's account preferences came in after sign-in, or the PC's own came back at sign-out (D-86).
+     */
+    SettingsChanged: 'settings.changed',
   },
 } as const;
 
@@ -895,7 +900,11 @@ export interface SetVolumeRequest {
   muted?: boolean | null;
 }
 
-/** Request of `settings.set`; partial, at least one key. */
+/**
+ * Request of `settings.set`; partial, at least one key. While a member is signed in, theme, locale, volume, muted, UI
+ * sounds and the metrics overlay are saved to their account instead of the PC (D-86); `favorites` needs a signed-in
+ * member (`forbidden {reason: noAccount}` otherwise).
+ */
 export interface SettingsSetRequest {
   /** UI locale. */
   locale?: Locale | null;
@@ -913,6 +922,8 @@ export interface SettingsSetRequest {
   allowVirtualKeyboard?: boolean | null;
   /** UI sounds. */
   uiSounds?: boolean | null;
+  /** The member's starred games and apps as a whole (replaces the list). */
+  favorites?: string[] | null;
 }
 
 /** Shell capabilities advertised in `AuthHelloRequest.Capabilities`. */
@@ -985,6 +996,16 @@ export interface ShellSettings {
   features: ShellFeatures;
   /** Club branding, banners and rules (read-only); `null` when the server sent none. */
   club?: ShellClub | null;
+  /**
+   * The signed-in member's starred games and apps (`game:<id>`, `app:<id>`), kept on their account; empty for a guest
+   * and with nobody signed in. `null` from an older Agent reads as empty.
+   */
+  favorites?: string[] | null;
+  /**
+   * `true` while a signed-in member's account preferences apply (theme, locale, volume, muted, UI sounds, metrics
+   * overlay and favourites follow them to any PC); `false` for a guest and with nobody signed in.
+   */
+  accountPrefs: boolean;
 }
 
 /** Request of `shop.order`. */

@@ -1,17 +1,18 @@
 /**
  * Apps (`/apps`): allowed applications grouped by category → `apps_launch` with a per-tile launching state and
- * a success / error toast. Loads `apps_list` on mount; skeletons while loading, retry on failure, empty state.
+ * a success / error toast. Loads `apps_list` on mount; skeletons while loading, retry on failure, empty state. A member
+ * stars a tile into the favourites on Home (D-86).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import type { App } from '@clubshell/contracts';
 import { Button } from '@/components/ui/Button';
+import { FavoriteButton } from '@/components/ui/FavoriteButton';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { collectNavigables, focusElement } from '@/hooks/useGamepad';
-import { track } from '@/lib/analytics';
 import { api, type ShellError } from '@/lib/tauri';
-import { AppTile, useAppCategoryLabel } from '@/screens/Apps/AppTile';
+import { AppTile, useAppCategoryLabel, useAppLaunch } from '@/screens/Apps/AppTile';
 import { useNotificationsStore } from '@/store/notifications';
 import { asShellError } from '@/store/settings';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
@@ -44,11 +45,10 @@ export default function AppsScreen(): JSX.Element {
   const { t } = useTranslation();
   const categoryLabel = useAppCategoryLabel();
   const animations = useThemeStore(selectAnimationsEnabled);
-  const push = useNotificationsStore((s) => s.push);
   const pushError = useNotificationsStore((s) => s.pushError);
   const [apps, setApps] = useState<App[] | null>(null);
   const [error, setError] = useState<ShellError | null>(null);
-  const [launchingId, setLaunchingId] = useState<string | null>(null);
+  const { launchingId, launch } = useAppLaunch();
   const root = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -84,28 +84,6 @@ export default function AppsScreen(): JSX.Element {
     });
     return () => cancelAnimationFrame(frame);
   }, [apps]);
-
-  const launch = async (app: App): Promise<void> => {
-    if (launchingId) {
-      return;
-    }
-    setLaunchingId(app.id);
-    track('app.launch', { appId: app.id });
-    try {
-      await api.apps.launch(app.id);
-      push({
-        id: `app-${app.id}`,
-        title: t('apps.launched', { title: app.title }),
-        level: 'success',
-        ttlSec: 4,
-        source: 'local',
-      });
-    } catch (e) {
-      pushError(e, t('apps.openFailed', { title: app.title }));
-    } finally {
-      setLaunchingId(null);
-    }
-  };
 
   return (
     <motion.div
@@ -163,13 +141,16 @@ export default function AppsScreen(): JSX.Element {
             className="grid grid-cols-[repeat(auto-fill,minmax(clamp(160px,11vw,220px),1fr))] gap-[var(--gap)]"
           >
             {group.apps.map((app) => (
-              <div key={app.id} role="listitem">
+              <div key={app.id} role="listitem" className="relative">
                 <AppTile
                   app={app}
                   onLaunch={(a) => void launch(a)}
                   launching={launchingId === app.id}
                   disabled={launchingId !== null && launchingId !== app.id}
                 />
+                {/* Next to the tile, not in it (no button in a button); an app has no page of its own, so this star
+                    is the one keyboard and gamepad reach too. */}
+                <FavoriteButton kind="app" id={app.id} title={app.title} className="absolute right-3 top-3" />
               </div>
             ))}
           </div>

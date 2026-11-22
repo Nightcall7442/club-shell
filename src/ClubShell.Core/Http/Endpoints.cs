@@ -128,6 +128,9 @@ public static class Endpoints
     /// <summary><c>GET /users/{userId}/loyalty</c>.</summary>
     public static string UserLoyalty(Guid userId) => $"users/{Id(userId)}/loyalty";
 
+    /// <summary><c>GET|PUT /users/{userId}/prefs</c> (beyond the contract, D-86).</summary>
+    public static string UserPrefs(Guid userId) => $"users/{Id(userId)}/prefs";
+
     /// <summary><c>POST /users/{userId}/pin/verify</c>.</summary>
     public static string UserPinVerify(Guid userId) => $"users/{Id(userId)}/pin/verify";
 

@@ -1395,7 +1395,8 @@
     "reboot": "Restart PC",
     "shutdown": "Shut down PC",
     "resetProfile": "Reset the player profile",
-    "resetProfileConfirm": "Reset it? The game will close"
+    "resetProfileConfirm": "Reset it? The game will close",
+    "savedToAccount": "Saved to your account: it follows you to any PC of the club"
   },
   "notifications": {
     "title": "Notifications",
@@ -1652,5 +1653,15 @@
       "load": "{{value}}%",
       "hot": "overheating"
     }
+  },
+  "favorites": {
+    "title": "Favorites",
+    "add": "Add to favorites",
+    "remove": "Remove from favorites",
+    "addNamed": "Add {{title}} to favorites",
+    "removeNamed": "Remove {{title}} from favorites",
+    "failed": "Could not save your favorites",
+    "launchApp": "Open {{title}}",
+    "region": "Favorites: games and apps for a quick start"
   }
 }

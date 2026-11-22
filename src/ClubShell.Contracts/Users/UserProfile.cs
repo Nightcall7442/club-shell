@@ -148,6 +148,82 @@ public sealed record StaffVerifyRequest(string Pin);
 /// <param name="Role"><c>owner</c> or <c>cashier</c>.</param>
 public sealed record StaffVerifyResponse(Guid StaffId, string Name, string Role);
 
+/// <summary>
+/// The player's Shell preferences and favourites, kept on their account (beyond the contract, DESIGN §12.1 D-86):
+/// <c>GET /users/{userId}/prefs</c> answers it, <c>PUT</c> replaces it. A field left <see langword="null"/> is not
+/// chosen by the player, and the PC's own (club) value applies to it. A guest has none (<c>403 guest</c>).
+/// </summary>
+/// <param name="Theme">Theme id.</param>
+/// <param name="Locale">UI locale.</param>
+/// <param name="Volume">Volume 0–100.</param>
+/// <param name="Muted">Muted.</param>
+/// <param name="UiSounds">UI sounds.</param>
+/// <param name="ShowMetricsOverlay">Metrics overlay.</param>
+/// <param name="Favorites">Starred games and apps (<c>game:&lt;id&gt;</c>, <c>app:&lt;id&gt;</c>) in the order starred; <see langword="null"/> reads as none.</param>
+public sealed record UserPrefs(
+    string? Theme = null,
+    Locale? Locale = null,
+    int? Volume = null,
+    bool? Muted = null,
+    bool? UiSounds = null,
+    bool? ShowMetricsOverlay = null,
+    IReadOnlyList<string>? Favorites = null)
+{
+    /// <summary>Most favourites one player keeps.</summary>
+    public const int MaxFavorites = 60;
+
+    /// <summary>Longest favourite id and theme id.</summary>
+    public const int MaxIdLength = 64;
+
+    /// <summary>
+    /// The first rule <paramref name="prefs"/> breaks as <c>(field, reason)</c>, or <see langword="null"/> when it is
+    /// valid; the server and the Agent check the same rules.
+    /// </summary>
+    public static (string Field, string Reason)? Check(UserPrefs prefs)
+    {
+        ArgumentNullException.ThrowIfNull(prefs);
+        // A theme is a file name under the PC's themes folder (any the Agent accepts on Windows), never a path.
+        if (prefs.Theme is { } theme && (string.IsNullOrWhiteSpace(theme) || theme.Length > MaxIdLength || theme is "." or ".."
+                                         || theme.Any(c => char.IsControl(c) || "\\/:*?\"<>|".Contains(c))))
+        {
+            return ("theme", "format");
+        }
+
+        if (prefs.Locale == Users.Locale.Unknown)
+        {
+            return ("locale", "enum");
+        }
+
+        if (prefs.Volume is < 0 or > 100)
+        {
+            return ("volume", "range");
+        }
+
+        if (prefs.Favorites is { } favorites)
+        {
+            if (favorites.Count > MaxFavorites)
+            {
+                return ("favorites", "max");
+            }
+
+            if (favorites.Any(f => f is null || f.Length is 0 or > MaxIdLength || !f.All(IsIdChar)))
+            {
+                return ("favorites", "format");
+            }
+
+            if (favorites.Distinct(StringComparer.Ordinal).Count() != favorites.Count)
+            {
+                return ("favorites", "duplicate");
+            }
+        }
+
+        return null;
+    }
+
+    // A favourite is a kind and a catalogue id (`game:<uuid>`, `app:<id>`): ASCII letters, digits and - _ . : only.
+    private static bool IsIdChar(char c) => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.' or ':';
+}
+
 #endregion
 
 #region Stats / achievements / loyalty

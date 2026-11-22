@@ -538,6 +538,43 @@ pub mod user_flags {
     pub const STAFF: &str = "staff";
 }
 
+/// The player's Shell preferences and favourites, kept on their account (beyond the contract,
+/// DESIGN §12.1 D-86): `GET /users/{userId}/prefs` answers it, `PUT` replaces it. A field left
+/// `null` is not chosen by the player, and the PC's own (club) value applies to it. A guest has
+/// none (`403 guest`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UserPrefs {
+    /// Theme id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
+    /// UI locale.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locale: Option<Locale>,
+    /// Volume 0–100.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub volume: Option<i32>,
+    /// Muted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub muted: Option<bool>,
+    /// UI sounds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ui_sounds: Option<bool>,
+    /// Metrics overlay.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_metrics_overlay: Option<bool>,
+    /// Starred games and apps (`game:<id>`, `app:<id>`) in the order starred; `null` reads as none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub favorites: Option<Vec<String>>,
+}
+
+impl UserPrefs {
+    /// Most favourites one player keeps.
+    pub const MAX_FAVORITES: i32 = 60;
+    /// Longest favourite id and theme id.
+    pub const MAX_ID_LENGTH: i32 = 64;
+}
+
 wire_enum! {
     /// User role; ordered by privilege.
     UserRole {

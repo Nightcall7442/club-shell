@@ -418,7 +418,9 @@ fn mock_settings(config: &ShellConfig) -> Value {
         "locale": config.locale, "theme": config.theme, "availableThemes": [config.theme],
         "volume": config.sound.default_volume, "muted": false, "idleTimeoutSec": config.idle.timeout_sec,
         "showMetricsOverlay": config.ui.show_metrics_overlay, "allowVirtualKeyboard": config.kiosk.allow_virtual_keyboard,
-        "uiSounds": config.sound.ui_sounds, "features": config.features
+        "uiSounds": config.sound.ui_sounds, "features": config.features,
+        // The mock never has an account behind it, but the Shell may still star games in a dev run.
+        "favorites": [], "accountPrefs": false
     })
 }
 

@@ -190,7 +190,7 @@ mod tests {
             agent_event_name(ev::SYS_READINESS_CHANGED),
             "agent://sys:readinessChanged"
         );
-        assert_eq!(ev::ALL.len(), 21);
+        assert_eq!(ev::ALL.len(), 22);
     }
 
     #[test]

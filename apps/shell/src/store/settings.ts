@@ -2,6 +2,8 @@
  * Device-level slice: `ShellSettings` (+ feature toggles) persisted through `settings_set`, plus the read-only
  * system context the UI needs everywhere (`shell.json`, `PcInfo`, hardware inventory, live metrics, kiosk state,
  * policy). Loaded first by `bootstrapStores()`; never reset on logout, except the live metrics (`clearMetrics`).
+ * While a member is signed in, the Agent answers with their account's theme, locale, volume, sounds, overlay and
+ * favourites over the PC's (D-86) and pushes `settings.changed` when those come and go: the store takes the push.
  */
 import type {
   GpuInfo,
@@ -18,6 +20,7 @@ import type {
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { changeLocale, toLocale } from '@/i18n';
+import { toggleFavorite } from '@/lib/favorites';
 import { log } from '@/lib/logger';
 import { api, isTauri, toShellApiError, type KioskState, type ShellConfig, type ShellError } from '@/lib/tauri';
 import { syncServerTime } from '@/lib/time';
@@ -72,7 +75,11 @@ export const DEFAULT_SETTINGS: ShellSettings = {
   allowVirtualKeyboard: false,
   uiSounds: true,
   features: DEFAULT_FEATURES,
+  favorites: [],
+  accountPrefs: false,
 };
+
+const NO_FAVORITES: readonly string[] = [];
 
 export interface SettingsState {
   settings: ShellSettings;
@@ -131,6 +138,14 @@ export interface SettingsActions {
   setIdleTimeout(sec: number): Promise<void>;
   /** Applies a locale pushed by the Agent (`kiosk://localeChanged`) without a round trip. */
   applyLocale(locale: Locale): Promise<void>;
+  /**
+   * Takes settings the Agent pushed (`settings.changed`: a member's account preferences came in at sign-in, or the
+   * PC's own came back at sign-out). Theme and locale follow through the store subscriptions; a different volume is
+   * set on the device too, which only `sys_set_volume` does.
+   */
+  applyPushed(settings: ShellSettings): Promise<void>;
+  /** Stars or unstars a game / app (`game:<id>`, `app:<id>`) on the member's account; rolls back and rethrows on failure. */
+  toggleFavorite(key: string): Promise<void>;
   setMetrics(metrics: PcMetrics): void;
   setKiosk(kiosk: KioskState): void;
   setPolicy(policy: Policy): void;
@@ -163,6 +178,9 @@ function normalize(s: ShellSettings): ShellSettings {
     locale: toLocale(s.locale),
     volume: Math.min(100, Math.max(0, Math.round(s.volume))),
     features: { ...DEFAULT_FEATURES, ...s.features },
+    // An older Agent sends neither: no account, no favourites.
+    favorites: s.favorites ?? [],
+    accountPrefs: s.accountPrefs === true,
   };
 }
 
@@ -344,6 +362,23 @@ export const useSettingsStore = create<SettingsStore>()(
       await changeLocale(l);
     },
 
+    async applyPushed(pushed) {
+      const before = get().settings;
+      const next = normalize(pushed);
+      set({ settings: next, features: next.features, loaded: true });
+      if (next.volume !== before.volume || next.muted !== before.muted) {
+        try {
+          await api.system.setVolume(next.volume, next.muted);
+        } catch (e) {
+          log.warn('settings.changed: volume not applied', asShellError(e));
+        }
+      }
+    },
+
+    async toggleFavorite(key) {
+      await get().set({ favorites: toggleFavorite(get().settings.favorites ?? [], key) });
+    },
+
     setMetrics(metrics) {
       set({ metrics, metricsAt: Date.now() });
     },
@@ -374,6 +409,10 @@ export const useSettingsStore = create<SettingsStore>()(
 
 /** Selector: current UI locale. */
 export const selectLocale = (s: SettingsStore): Locale => s.settings.locale;
+/** Selector: the member's starred games and apps (empty without an account). */
+export const selectFavorites = (s: SettingsStore): readonly string[] => s.settings.favorites ?? NO_FAVORITES;
+/** Selector: a member's account preferences apply (and favourites can be starred). */
+export const selectAccountPrefs = (s: SettingsStore): boolean => s.settings.accountPrefs === true;
 /** Selector: feature toggles. */
 export const selectFeatures = (s: SettingsStore): ShellFeatures => s.features;
 /** Selector factory: one feature flag. */
