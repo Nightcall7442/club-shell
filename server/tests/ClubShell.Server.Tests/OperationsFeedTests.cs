@@ -178,34 +178,42 @@ public sealed class OperationsFeedTests(LongClockServerFixture server) : LedgerC
     }
 
     [Fact]
-    public async Task Today_is_the_club_local_day_by_method()
+    public async Task Taken_counts_from_the_open_shift_and_starts_from_zero_with_every_shift()
     {
-        // Local noon of tomorrow; then no shift is open: «сегодня» still comes.
+        // D-83: the desk's «Принято за смену» is the open shift's, not the local day's — closing the shift zeroes it.
         const string zone = "Asia/Tashkent";
         var start = Server.Clock.GetUtcNow();
         var today = DateOnly.FromDateTime(ClubTime.Local(start, zone)).AddDays(1);
         Server.Clock.Advance(ClubTime.Utc(today.ToDateTime(new TimeOnly(12, 0)), zone) - start);
-        DateTimeOffset At(int dayOffset, int hour, int minute) => ClubTime.Utc(today.AddDays(dayOffset).ToDateTime(new TimeOnly(hour, minute)), zone);
+        DateTimeOffset At(int hour, int minute) => ClubTime.Utc(today.ToDateTime(new TimeOnly(hour, minute)), zone);
 
         var cashier = await LoginAsync(Server, CashierPin);
         await FreshShiftAsync(Server, cashier);
         await ExpectAsync(Server, 200, HttpMethod.Post, "/shift/close", cashier, new { closingCash = await ExpectedCashAsync(Server, cashier) });
-        var before = await RawExpectAsync(Server, 200, HttpMethod.Get, "/shift/operations", cashier);
-        Assert.Equal((JsonValueKind.Null, 0), (before.GetProperty("shift").ValueKind, before.GetProperty("items").GetArrayLength()));
-        Assert.Equal((today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), At(0, 0, 0)),
-            (before.GetProperty("today").GetProperty("date").GetString(), before.GetProperty("today").GetProperty("from").GetDateTimeOffset()));
+        var closed = await RawExpectAsync(Server, 200, HttpMethod.Get, "/shift/operations", cashier);
+        Assert.Equal((JsonValueKind.Null, 0), (closed.GetProperty("shift").ValueKind, closed.GetProperty("items").GetArrayLength()));
+        var none = closed.GetProperty("today");
+        Assert.Equal((today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), At(12, 0), 0L, 0L),
+            (none.GetProperty("date").GetString(), none.GetProperty("from").GetDateTimeOffset(), none.GetProperty("taken").GetInt64(), none.GetProperty("payouts").GetInt64()));
 
         var player = await Players.CreateAsync(Server, balance: 0);
         var clubId = await Players.ScalarAsync<Guid>(Server, "SELECT id FROM clubs");
-        await PostAsync(player.Id, At(-1, 23, 30), new LedgerLine("topUp", 5_000_000, "Вчера", clubId, Method: "cash")); // UTC: today 18:30 − 1 day
-        await PostAsync(player.Id, At(0, 0, 30), new LedgerLine("topUp", 700_000, "Сегодня", clubId, Method: "card"));
-        await PostAsync(player.Id, At(0, 1, 0), new LedgerLine("adjustment", -200_000, "Выдано наличными на кассе", clubId, Method: "cash"));
-        await PostAsync(player.Id, At(0, 2, 0), new LedgerLine("charge", -300_000, "Сеанс", clubId), new LedgerLine("refund", 100_000, "Возврат", clubId));
+        await PostAsync(player.Id, At(11, 0), new LedgerLine("topUp", 5_000_000, "До смены", clubId, Method: "cash"));
+        await FreshShiftAsync(Server, cashier, openingCash: 1_000_000); // the payout below comes out of this float
+        Server.Clock.Advance(TimeSpan.FromHours(3));
+        await PostAsync(player.Id, At(12, 30), new LedgerLine("topUp", 700_000, "В смену", clubId, Method: "card"));
+        await PostAsync(player.Id, At(13, 0), new LedgerLine("adjustment", -200_000, "Выдано наличными на кассе", clubId, Method: "cash"));
+        await PostAsync(player.Id, At(14, 0), new LedgerLine("charge", -300_000, "Сеанс", clubId), new LedgerLine("refund", 100_000, "Возврат", clubId));
 
+        var open = (await RawExpectAsync(Server, 200, HttpMethod.Get, "/shift/operations", cashier)).GetProperty("today");
+        Assert.Equal(At(12, 0), open.GetProperty("from").GetDateTimeOffset());
+        long Method(string name) => open.GetProperty("byMethod").TryGetProperty(name, out var v) ? v.GetInt64() : 0;
+        Assert.Equal((0L, 700_000L, 700_000L, 200_000L, 200_000L),
+            (Method("cash"), Method("card"), open.GetProperty("taken").GetInt64(), open.GetProperty("payouts").GetInt64(), open.GetProperty("sessions").GetInt64()));
+
+        await ExpectAsync(Server, 200, HttpMethod.Post, "/shift/close", cashier, new { closingCash = await ExpectedCashAsync(Server, cashier) });
         var after = (await RawExpectAsync(Server, 200, HttpMethod.Get, "/shift/operations", cashier)).GetProperty("today");
-        long Delta(string name) => after.GetProperty(name).GetInt64() - before.GetProperty("today").GetProperty(name).GetInt64();
-        long Method(string name) => after.GetProperty("byMethod").GetProperty(name).GetInt64() - before.GetProperty("today").GetProperty("byMethod").GetProperty(name).GetInt64();
-        Assert.Equal((0L, 700_000L, 700_000L, 200_000L, 200_000L), (Method("cash"), Method("card"), Delta("taken"), Delta("payouts"), Delta("sessions")));
+        Assert.Equal((0L, 0L, 0L), (after.GetProperty("taken").GetInt64(), after.GetProperty("payouts").GetInt64(), after.GetProperty("sessions").GetInt64()));
     }
 
     private void Tick() => Server.Clock.Advance(TimeSpan.FromSeconds(1));

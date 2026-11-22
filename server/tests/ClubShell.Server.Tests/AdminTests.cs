@@ -361,6 +361,62 @@ public sealed class CounterTests(ServerFixture server) : LedgerCheckedTest(serve
     }
 
     [Fact]
+    public async Task The_x2_promotion_doubles_a_desk_top_up_in_its_window_and_the_larger_bonus_wins()
+    {
+        var owner = await LoginAsync(Server, OwnerPin);
+        var token = await LoginAsync(Server, CashierPin);
+        await OpenShiftAsync(Server, token);
+        try
+        {
+            await ExpectAsync(Server, 200, HttpMethod.Patch, "/club", owner,
+                new { topUpPromo = new { enabled = true, bonusPct = 100, minAmount = 1_000_000, days = Array.Empty<int>(), from = (string?)null, to = (string?)null, until = (string?)null } });
+            var promo = (await ExpectAsync(Server, 200, HttpMethod.Get, "/club", token)).GetProperty("topUpPromo");
+            Assert.Equal((true, 100, 1_000_000L), (promo.GetProperty("enabled").GetBoolean(), promo.GetProperty("bonusPct").GetInt32(), promo.GetProperty("minAmount").GetInt64()));
+
+            // 20 000 sum: x2 (+20 000) beats the seeded tier; 5 000 sum is under the promotion's minimum.
+            var player = await Players.CreateAsync(Server, balance: 0);
+            var doubled = await ExpectAsync(Server, 200, HttpMethod.Post, "/wallet/topup", token, new { userId = player.Id, amount = 2_000_000 }, Guid.NewGuid());
+            Assert.Equal((2_000_000L, 4_000_000L), (doubled.GetProperty("bonus").GetProperty("amount").GetInt64(), doubled.GetProperty("balance").GetProperty("amount").GetInt64()));
+            Assert.Equal("Бонус за пополнение: акция +100%",
+                await Players.ScalarAsync<string>(Server, $"SELECT description FROM ledger_entries WHERE user_id = '{player.Id}' AND type = 'bonus'"));
+            var small = await ExpectAsync(Server, 200, HttpMethod.Post, "/wallet/topup", token, new { userId = player.Id, amount = 500_000 }, Guid.NewGuid());
+            Assert.Equal(0L, small.GetProperty("bonus").GetProperty("amount").GetInt64());
+
+            foreach (var (body, field, reason) in new (object, string, string)[]
+            {
+                (new { topUpPromo = new { enabled = true, bonusPct = 0 } }, "topUpPromo.bonusPct", "min"),
+                (new { topUpPromo = new { enabled = true, bonusPct = 100, days = new[] { 7 } } }, "topUpPromo.days", "enum"),
+                (new { topUpPromo = new { enabled = true, bonusPct = 100, from = "18:00" } }, "topUpPromo.to", "required"),
+                (new { topUpPromo = new { enabled = true, bonusPct = 100, from = "6pm", to = "20:00" } }, "topUpPromo.from", "format"),
+            })
+            {
+                Assert.Equal((field, reason), StaffAdminTests.Details(await ExpectAsync(Server, 400, HttpMethod.Patch, "/club", owner, body)));
+            }
+        }
+        finally
+        {
+            await ExpectAsync(Server, 200, HttpMethod.Patch, "/club", owner, new { topUpPromo = new { enabled = false } });
+        }
+    }
+
+    [Fact]
+    public void The_x2_promotion_runs_on_its_days_and_hours_of_the_club_time_past_midnight_too()
+    {
+        const string zone = "Asia/Tashkent"; // UTC+5
+        DateTimeOffset At(int day, int hour) => new DateTimeOffset(2026, 11, 22 + day, hour, 0, 0, TimeSpan.FromHours(5)); // 22.11.2026 is a Sunday
+        var night = new TopUpPromo(true, 100, 0, [5, 6], "22:00", "02:00", null); // Fri, Sat nights
+        Assert.False(night.ActiveAt(At(0, 23), zone));  // Sunday 23:00
+        Assert.True(night.ActiveAt(At(-1, 23), zone));  // Saturday 23:00
+        Assert.True(night.ActiveAt(At(0, 1), zone));    // Sunday 01:00 belongs to Saturday's night
+        Assert.False(night.ActiveAt(At(0, 2), zone));   // its end is exclusive
+        Assert.False(night.ActiveAt(At(-1, 12), zone)); // Saturday noon
+        Assert.False((night with { Enabled = false }).ActiveAt(At(-1, 23), zone));
+        Assert.False((night with { Until = At(-1, 20) }).ActiveAt(At(-1, 23), zone));
+        Assert.True((TopUpPromo.Default with { Enabled = true }).ActiveAt(At(3, 4), zone)); // every day, all day
+        Assert.Equal((100, 0), (night.PctFor(1, At(-1, 23), zone), night.PctFor(0, At(-1, 23), zone)));
+    }
+
+    [Fact]
     public async Task Top_up_adds_the_tier_bonus_half_up_to_100_once_per_key()
     {
         var token = await LoginAsync(Server, CashierPin);

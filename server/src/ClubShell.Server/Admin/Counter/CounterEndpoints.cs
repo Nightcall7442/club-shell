@@ -557,17 +557,21 @@ public static partial class CounterEndpoints
             throw new ApiException(StatusCodes.Status409Conflict, ErrorCode.Conflict, "Conflict: debtChanged", new { reason = "debtChanged", debt = Money.Uzs(debt) });
         }
 
-        var tiers = await c.ExecuteScalarAsync<string?>("SELECT (settings -> 'bonusTiers')::text FROM clubs WHERE id = @ClubId", new { staff.ClubId }, tx);
-        var bonus = wallet.Transient || settleDebt ? 0 : Bonus(Math.Max(0, amount - debt), tiers);
+        var (tiers, promoJson, timeZone) = await c.QuerySingleAsync<(string?, string?, string)>(
+            "SELECT (settings -> 'bonusTiers')::text, (settings -> 'topUpPromo')::text, time_zone FROM clubs WHERE id = @ClubId", new { staff.ClubId }, tx);
+        var bonusable = Math.Max(0, amount - debt);
+        var promoPct = TopUpPromo.Read(promoJson).PctFor(bonusable, now, timeZone);
+        var bonus = wallet.Transient || settleDebt ? 0 : Math.Max(Bonus(bonusable, tiers), Percent(bonusable, promoPct));
+        var promoApplied = bonus > 0 && promoPct > 0 && bonus == Percent(bonusable, promoPct);
         var id = Guid.CreateVersion7(now);
         var balance = await Ledger.PostAsync(c, tx, userId, allowOverdraft: false, now,
             new LedgerLine("topUp", amount, TopUpDescription(method), staff.ClubId, Method: method, StaffId: staff.StaffId, Id: id,
                 ShiftRequired: staff.StaffId is not null),
-            new LedgerLine("bonus", bonus, "Бонус за пополнение", staff.ClubId, StaffId: staff.StaffId));
+            new LedgerLine("bonus", bonus, promoApplied ? $"Бонус за пополнение: акция +{promoPct}%" : "Бонус за пополнение", staff.ClubId, StaffId: staff.StaffId));
         var row = await c.QuerySingleAsync<(long BalanceAfter, string Description, DateTimeOffset CreatedAt)>(
             "SELECT balance_after, description, created_at FROM ledger_entries WHERE id = @id", new { id }, tx);
         await Audit.WriteAsync(c, tx, staff, now, "topUp", userId, amount: amount, detail: wallet.Who,
-            meta: new { method, bonus, transactionId = id, forSession = forSession ? true : (bool?)null, debt = settleDebt ? true : (bool?)null });
+            meta: new { method, bonus, promoPct = promoApplied ? promoPct : (int?)null, transactionId = id, forSession = forSession ? true : (bool?)null, debt = settleDebt ? true : (bool?)null });
         if (!settleDebt && amount >= await ClubSettingsEndpoints.BigTopupAtAsync(c, tx, staff.ClubId))
         {
             await Webhooks.EnqueueAsync(c, tx, staff.ClubId, "bigTopup", now, $"{wallet.Who}: {Webhooks.Sum(amount)}", new { userId, amount });
@@ -758,8 +762,11 @@ public static partial class CounterEndpoints
     {
         var tiers = string.IsNullOrEmpty(tiersJson) ? [] : JsonSerializer.Deserialize<BonusTier[]>(tiersJson, JsonSerializerOptions.Web) ?? [];
         var pct = tiers.Where(t => amount >= t.MinAmount).OrderByDescending(t => t.MinAmount).Select(t => t.BonusPct).FirstOrDefault();
-        return ((amount * pct) + 5_000) / 10_000 * 100;
+        return Percent(amount, pct);
     }
+
+    /// <summary><paramref name="pct"/> % of <paramref name="amount"/>, half-up to 100 tiyin.</summary>
+    public static long Percent(long amount, int pct) => ((amount * pct) + 5_000) / 10_000 * 100;
 
     /// <summary>The top-up row's description, which the player also reads in the kiosk's wallet history: words, not the method code.</summary>
     private static string TopUpDescription(string method) => method switch

@@ -20,7 +20,7 @@ public sealed class SettingsTests(ServerFixture server) : LedgerCheckedTest(serv
         var doc = await ExpectAsync(Server, 200, HttpMethod.Get, "/club", cashier);
         Assert.Equal(
             ["branding", "features", "zones", "pricing", "groups", "bonusTiers", "promoCodes", "happyHours", "loyalty", "limits", "catalog", "banners",
-             "rulesText", "stock", "automation", "notifications", "webhooks", "control", "events"],
+             "rulesText", "stock", "topUpPromo", "automation", "notifications", "webhooks", "control", "events"],
             doc.EnumerateObject().Select(p => p.Name));
         Assert.DoesNotContain("telegram", doc.GetRawText(), StringComparison.OrdinalIgnoreCase);
         Assert.Equal("ClubShell", doc.GetProperty("branding").GetProperty("clubName").GetString());

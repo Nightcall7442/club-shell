@@ -2,7 +2,7 @@
  * The KPI strip over the counter pages (variant F): four glass cards that answer "how is the shift going" at a glance.
  *
  * 1. «Занято» — seats with a session out of all, the occupancy ticks and how many are free (from App's 5 s overview).
- * 2. «Сегодня принято» — today's money (the club's local day) net of the cash given back to guests, cash and cashless;
+ * 2. «Принято за смену» — the open shift's money (zero again after every close, D-83) net of the cash given back to guests, cash and cashless;
  *    the card is a button that opens the split by method, the payouts and the sessions. Polled every 15 s and whenever
  *    the shift's money changes; hidden on a server without the operations feed.
  * 3. «В кассе» — the cash the drawer should hold and the cashless taken in the shift, with «Внесение и изъятие».
@@ -121,7 +121,7 @@ function OccupancyCard({ hall }: { hall: HallCounts | null }): JSX.Element {
 }
 
 /**
- * «Сегодня принято»: the card is the button and its text reads «Сегодня принято 38 400 сум нал … · безнал …» (real
+ * «Принято за смену»: the card is the button and its text reads «Принято за смену 38 400 сум нал … · безнал …» (real
  * spaces between the pieces); the split by method opens under it.
  */
 function TodayCard({ today }: { today: Today | null }): JSX.Element {
@@ -141,7 +141,7 @@ function TodayCard({ today }: { today: Today | null }): JSX.Element {
     };
   }, [open]);
   // Until the first answer the card is not a button: whoever reads the button reads a real figure.
-  if (!today) return <KpiCard label={t('Сегодня принято')} value="—" tone="quiet" />;
+  if (!today) return <KpiCard label={t('Принято за смену')} value="—" tone="quiet" />;
   const split = todaySplit(today);
   return (
     <div ref={box} className="relative min-w-0">
@@ -161,7 +161,7 @@ function TodayCard({ today }: { today: Today | null }): JSX.Element {
         )}
       >
         <KpiBody
-          label={t('Сегодня принято')}
+          label={t('Принято за смену')}
           value={moneyParts(split.taken).num}
           unit={t('сум')}
           sub={`${t('нал {sum}', { sum: exactDigits(split.cash) })} · ${t('безнал {sum}', { sum: exactDigits(split.cashless) })}`}

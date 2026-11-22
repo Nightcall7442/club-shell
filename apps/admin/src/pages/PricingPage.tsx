@@ -15,6 +15,7 @@ import {
   type LoyaltyLevel,
   type PromoCode,
   type TariffInput,
+  type TopUpPromo,
 } from '@/api';
 import { describe } from '@/errors';
 import { money } from '@/format';
@@ -35,6 +36,7 @@ import {
   Segmented,
   Table,
   Tabs,
+  Toggle,
   inputCls,
 } from '@/ui';
 import { FieldGroup, OwnerPage } from './ownerKit';
@@ -45,7 +47,7 @@ const TABS: { id: Tab; title: string }[] = [
   { id: 'tariffs', title: 'Тарифы' },
   { id: 'days', title: 'Цены по дням' },
   { id: 'groups', title: 'Группы клиентов' },
-  { id: 'bonus', title: 'Бонусы и промокоды' },
+  { id: 'bonus', title: 'Бонусы, x2 и промокоды' },
   { id: 'happy', title: 'Счастливые часы' },
   { id: 'loyalty', title: 'Лояльность' },
 ];
@@ -646,6 +648,95 @@ function GroupsTab({ s, set }: { s: ClubSettings; set: ClubSettingsState['set'] 
   );
 }
 
+/** `until` of the promotion as the `datetime-local` value (the console's clock) and back. */
+function localInput(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const p = (n: number): string => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/**
+ * «Акция на пополнение» (D-84): x2 (or any percent) on top of a desk top-up on chosen days and hours, until a date. It
+ * does not add up with the tier bonus: the larger of the two is credited.
+ */
+function TopUpPromoSection({ promo, set }: { promo: TopUpPromo; set: (p: Partial<TopUpPromo>) => void }): JSX.Element {
+  const allDay = promo.from === null || promo.to === null;
+  const factor = (100 + promo.bonusPct) / 100;
+  return (
+    <Section
+      title={t('Акция на пополнение (x2)')}
+      className="max-w-3xl 2xl:col-span-2"
+      actions={<Toggle checked={promo.enabled} onChange={(v) => set({ enabled: v })} label={t('Акция включена')} />}
+    >
+      <div className="flex flex-col gap-4" data-testid="topup-promo">
+        <p className="text-sm text-muted">
+          {t('Гость пополняет — получает бонус сверху. 100 % — это x2. С бонусом по ступеням не суммируется: начисляется больший.')}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {[
+            { pct: 100, label: 'x2' },
+            { pct: 50, label: '+50 %' },
+            { pct: 200, label: 'x3' },
+          ].map((o) => (
+            <Pick key={o.pct} on={promo.bonusPct === o.pct} onClick={() => set({ bonusPct: o.pct })}>
+              {o.label}
+            </Pick>
+          ))}
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field label={t('Бонус сверху')} hint={t('Итого на счёт: x{factor}', { factor: String(factor) })}>
+            <NumberInput value={promo.bonusPct} min={1} max={400} suffix="%" onChange={(n) => set({ bonusPct: n })} />
+          </Field>
+          <Field label={t('От суммы')}>
+            <MoneyInput compact value={promo.minAmount} onChange={(n) => set({ minAmount: n })} />
+          </Field>
+        </div>
+        <Field label={t('Дни (ничего не выбрано — каждый день)')}>
+          <WeekdayPicks
+            on={(d) => promo.days.includes(d.idx)}
+            onToggle={(d) => set({ days: toggle(promo.days, d.idx).sort() })}
+          />
+        </Field>
+        <div className="flex min-h-10 flex-wrap items-center gap-4">
+          <Toggle
+            checked={allDay}
+            onChange={(v) => set(v ? { from: null, to: null } : { from: '18:00', to: '22:00' })}
+            label={t('Весь день')}
+          />
+          {!allDay && (
+            <div className="flex items-center gap-1.5">
+              <input
+                type="time"
+                aria-label={t('С')}
+                className={clsx(inputCls, 'tnum')}
+                value={promo.from ?? ''}
+                onChange={(e) => set({ from: e.target.value || null })}
+              />
+              <span className="text-muted">–</span>
+              <input
+                type="time"
+                aria-label={t('До')}
+                className={clsx(inputCls, 'tnum')}
+                value={promo.to ?? ''}
+                onChange={(e) => set({ to: e.target.value || null })}
+              />
+            </div>
+          )}
+        </div>
+        <Field label={t('Действует до (пусто — без срока)')}>
+          <input
+            type="datetime-local"
+            className={clsx(inputCls, 'tnum max-w-[16rem]')}
+            value={localInput(promo.until)}
+            onChange={(e) => set({ until: e.target.value ? new Date(e.target.value).toISOString() : null })}
+          />
+        </Field>
+      </div>
+    </Section>
+  );
+}
+
 function BonusTab({ s, set }: { s: ClubSettings; set: ClubSettingsState['set'] }): JSX.Element {
   const tiers = s.bonusTiers.map((tier, i) => ({ tier, i }));
   const editTier = (i: number, p: Partial<BonusTier>): void =>
@@ -726,6 +817,8 @@ function BonusTab({ s, set }: { s: ClubSettings; set: ClubSettingsState['set'] }
           ]}
         />
       </Section>
+
+      {s.topUpPromo && <TopUpPromoSection promo={s.topUpPromo} set={(p) => set('topUpPromo', { ...s.topUpPromo!, ...p })} />}
 
       <Section
         title={t('Промокоды')}
@@ -1050,8 +1143,17 @@ function LoyaltyTab({ s, set }: { s: ClubSettings; set: ClubSettingsState['set']
 // Page
 // ---------------------------------------------------------------------------------------------------------------------
 
+/** «Бонусы и акции» of the rail: the pricing page opened on its bonus tab. */
+export function BonusPage(): JSX.Element {
+  return <PricingView initialTab="bonus" />;
+}
+
 export default function PricingPage(): JSX.Element {
-  const [tab, setTab] = useState<Tab>('tariffs');
+  return <PricingView initialTab="tariffs" />;
+}
+
+function PricingView({ initialTab }: { initialTab: Tab }): JSX.Element {
+  const [tab, setTab] = useState<Tab>(initialTab);
   const settings = useClubSettings();
   const [tariffs, setTariffs] = useState<Tariff[]>([]);
 

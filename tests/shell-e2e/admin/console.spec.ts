@@ -728,6 +728,42 @@ test('the player-screen settings are saved on the server', async ({ page, reques
   expect(club.branding.clubName).toBe('E2E Arena');
 });
 
+test('the owner turns on «x2» for top-ups under «Бонусы и акции» and a desk top-up is doubled (D-84)', async ({
+  page,
+  request,
+}) => {
+  const owner = await tokenFor(request, OWNER_PIN);
+  const off = async (): Promise<void> => {
+    await request.patch(`${API}/admin/club`, { headers: auth(owner), data: { topUpPromo: { enabled: false } } });
+  };
+  try {
+    await signIn(page, OWNER_PIN);
+    // One click from the rail: the bonus tab of «Тарифы и цены».
+    await nav(page).getByText('Бонусы и акции', { exact: true }).click();
+    await expect(page.getByRole('tab', { name: 'Бонусы, x2 и промокоды' })).toHaveAttribute('aria-selected', 'true');
+    const promo = page.getByTestId('topup-promo');
+    await page.getByRole('switch', { name: 'Акция включена' }).click();
+    await promo.getByRole('button', { name: 'x2', exact: true }).click();
+    await expect(promo).toContainText('Итого на счёт: x2');
+    await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Сохранено' })).toBeVisible();
+
+    const club = (await (await request.get(`${API}/admin/club`, { headers: auth(owner) })).json()) as {
+      topUpPromo: { enabled: boolean; bonusPct: number; from: string | null };
+    };
+    expect(club.topUpPromo).toMatchObject({ enabled: true, bonusPct: 100, from: null });
+
+    await ensureShift(request);
+    const member = await newClient(request, 'x2-member');
+    const topUp = await moneyPost(request, '/admin/wallet/topup', { userId: member.id, amount: 2_000_000, method: 'cash' });
+    expect(topUp.ok(), await topUp.text()).toBeTruthy();
+    const paid = (await topUp.json()) as { bonus: { amount: number }; balance: { amount: number } };
+    expect([paid.bonus.amount, paid.balance.amount]).toEqual([2_000_000, 4_000_000]);
+  } finally {
+    await off();
+  }
+});
+
 test('cashier control flags a cash shortfall and quick refunds, and only the owner sees it', async ({
   page,
   request,
@@ -1128,7 +1164,7 @@ test('a typed amount topped up by card from the client search lands in the X-rep
   expect(x.x.topUpByMethod['cash']).toBe(0);
   expect(x.x.topUpCash).toBe(0);
   expect(x.x.topUpOther).toBe(4_500_000);
-  // The top-bar chip counts it as cashless (its name starts with «Смена ·»: the feed's «Сегодня принято» headline says
+  // The top-bar chip counts it as cashless (its name starts with «Смена ·»: the feed's «Принято за смену» headline says
   // «безнал …» too, and at 1920 px it is on the map next to the chip).
   await expect(page.getByRole('button', { name: /^Смена · .*безнал 45\s000/ })).toBeVisible();
 });
@@ -1733,7 +1769,7 @@ test("the operations feed shows each desk operation once with who, what and how 
 
   await stubPrint(page);
   await signIn(page, CASHIER_PIN);
-  // 1920 px: the feed is a column of its own; today's money is the «Сегодня принято» tile of the KPI strip above it.
+  // 1920 px: the feed is a column of its own; today's money is the «Принято за смену» tile of the KPI strip above it.
   const feed = page.locator('[data-feed="column"]');
   await expect(feed).toBeVisible();
   const seatRow = feed.getByRole('listitem').filter({ hasText: seated.displayName });
@@ -1755,8 +1791,8 @@ test("the operations feed shows each desk operation once with who, what and how 
   expect(rows.reduce((sum, r) => sum + r.drawer, 0)).toBe((await shiftState(request)).expectedCash);
 
   // Today's money (the KPI tile, which opens the split by method) covers at least these two payments.
-  const headline = (await page.getByRole('button', { name: /^Сегодня принято/ }).textContent()) ?? '';
-  const taken = Number(/Сегодня принято ([\d\s]+)/.exec(headline)?.[1]?.replace(/\s/g, '') ?? '0');
+  const headline = (await page.getByRole('button', { name: /^Принято за смену/ }).textContent()) ?? '';
+  const taken = Number(/Принято за смену ([\d\s]+)/.exec(headline)?.[1]?.replace(/\s/g, '') ?? '0');
   expect(taken * 100).toBeGreaterThanOrEqual(quote.total.amount + 4_500_000);
 
   // A reprint is a «Копия».
@@ -1790,7 +1826,7 @@ async function shelf(request: APIRequestContext, title: string, qty: number): Pr
 const cartOf = (page: Page) => page.getByRole('complementary', { name: 'Корзина' });
 const goods = (page: Page) => page.getByRole('list', { name: 'Товары' });
 
-test('the bar sells to a walk-in for cash: stock goes down, X, expected cash and «Сегодня принято» go up, the receipt lists the goods', async ({
+test('the bar sells to a walk-in for cash: stock goes down, X, expected cash and «Принято за смену» go up, the receipt lists the goods', async ({
   page,
   request,
 }) => {

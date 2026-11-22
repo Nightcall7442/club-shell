@@ -796,7 +796,7 @@ export interface Operation {
 }
 
 /**
- * Money taken today (the club's local day): top-ups by method, and the bar's method sales net of voids (`shopByMethod`,
+ * Money taken in the open shift (D-83; zero with no shift open): top-ups by method, and the bar's method sales net of voids (`shopByMethod`,
  * absent from an older server); `taken` is both, `taken − payouts` the headline; `shop` the goods sold either way.
  */
 export interface Today {
@@ -830,6 +830,20 @@ export interface ClientGroup {
 export interface BonusTier {
   minAmount: number;
   bonusPct: number;
+}
+/**
+ * The top-up promotion «x2» (D-84, beyond the contract): on, a desk top-up of at least `minAmount` gets `bonusPct` % on
+ * top (100 = x2) on `days` (0 = Sunday; empty — every day), `from`–`to` club time (both null — all day; `to` < `from`
+ * runs past midnight), until `until` (null — no end). The larger of it and the tier bonus is credited, not both.
+ */
+export interface TopUpPromo {
+  enabled: boolean;
+  bonusPct: number;
+  minAmount: number;
+  days: number[];
+  from: string | null;
+  to: string | null;
+  until: string | null;
 }
 export interface PromoCode {
   code: string;
@@ -909,6 +923,8 @@ export interface ClubSettings {
   pricing: { weekdayPct: number[]; holidays: string[]; holidayPct: number };
   groups: ClientGroup[];
   bonusTiers: BonusTier[];
+  /** Absent from an older server: the console hides the promotion. */
+  topUpPromo?: TopUpPromo;
   promoCodes: PromoCode[];
   happyHours: HappyHour[];
   loyalty: LoyaltyLevel[];

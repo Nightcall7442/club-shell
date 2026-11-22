@@ -56,6 +56,8 @@ import {
   CASH_REASONS,
   CLUB_EVENTS,
   DEFAULT_CONTROL,
+  DEFAULT_TOPUP_PROMO,
+  type TopUpPromo,
   club,
   clubHooks,
   drawerNow,
@@ -476,7 +478,7 @@ export function clubRoutes(app: FastifyInstance): void {
 
   /**
    * The shift's operations feed (beyond the contract, D-43): its journal newest first, a paid seat as one row, and
-   * today's money of the club's local day. A cashier reads the open shift and the last closed one, the owner any.
+   * the open shift's money (D-83). A cashier reads the open shift and the last closed one, the owner any.
    */
   app.get<{ Querystring: { shiftId?: string; before?: string; limit?: string; kinds?: string } }>(
     '/admin/shift/operations',
@@ -507,6 +509,7 @@ export function clubRoutes(app: FastifyInstance): void {
       banners: c.banners,
       rulesText: c.rulesText,
       stock: c.stock,
+      topUpPromo: c.topUpPromo ?? DEFAULT_TOPUP_PROMO,
       automation: c.automation,
       notifications: { bigTopupAt: c.notifications.bigTopupAt },
       webhooks: c.webhooks,
@@ -553,6 +556,7 @@ export function clubRoutes(app: FastifyInstance): void {
           throw errors.validation(`limits.${name}`, 'format');
       }
     }
+    if ('topUpPromo' in b) c.topUpPromo = parseTopUpPromo(b['topUpPromo']);
     for (const k of keys) {
       if (k in b) (c as unknown as Record<string, unknown>)[k] = b[k];
     }
@@ -1384,3 +1388,35 @@ export function topUpWithBonus(
 }
 
 export type { ShellFeatures };
+
+/** The owner's «x2» promotion, checked as the server checks it (`400 validation` on `topUpPromo.*`). */
+function parseTopUpPromo(raw: unknown): TopUpPromo {
+  if (!isObject(raw)) throw errors.validation('topUpPromo', 'schema');
+  const pct = typeof raw['bonusPct'] === 'number' ? raw['bonusPct'] : DEFAULT_TOPUP_PROMO.bonusPct;
+  if (pct < 1 || pct > 400) throw errors.validation('topUpPromo.bonusPct', pct < 1 ? 'min' : 'max');
+  const min = typeof raw['minAmount'] === 'number' ? raw['minAmount'] : 0;
+  if (min < 0) throw errors.validation('topUpPromo.minAmount', 'min');
+  const days = Array.isArray(raw['days']) ? (raw['days'] as unknown[]) : [];
+  if (days.some((d) => typeof d !== 'number' || !Number.isInteger(d) || d < 0 || d > 6))
+    throw errors.validation('topUpPromo.days', 'enum');
+  const time = (name: 'from' | 'to'): string | null => {
+    const v = raw[name];
+    if (typeof v !== 'string') return null;
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(v)) throw errors.validation(`topUpPromo.${name}`, 'format');
+    return v;
+  };
+  const from = time('from');
+  const to = time('to');
+  if ((from === null) !== (to === null)) throw errors.validation(from === null ? 'topUpPromo.from' : 'topUpPromo.to', 'required');
+  const until = typeof raw['until'] === 'string' ? raw['until'] : null;
+  if (until !== null && Number.isNaN(Date.parse(until))) throw errors.validation('topUpPromo.until', 'format');
+  return {
+    enabled: raw['enabled'] === true,
+    bonusPct: Math.round(pct),
+    minAmount: Math.round(min),
+    days: [...new Set(days as number[])].sort((a, b) => a - b),
+    from,
+    to,
+    until: until === null ? null : new Date(until).toISOString(),
+  };
+}

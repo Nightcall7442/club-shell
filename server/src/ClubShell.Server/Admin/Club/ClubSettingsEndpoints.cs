@@ -106,6 +106,7 @@ public static class ClubSettingsEndpoints
             limits["guestPostpaid"] = true;
         }
 
+        ordered["topUpPromo"] = TopUpPromo.Read(stored["topUpPromo"]?.ToJsonString()).ToJson();
         ordered["automation"] = await AutomationAsync(c, staff.ClubId);
         ordered["notifications"] = new JsonObject { ["bigTopupAt"] = stored["notifications"]?["bigTopupAt"]?.DeepClone() ?? DefaultBigTopupAt };
         ordered["webhooks"] = await WebhooksAsync(c, staff.ClubId);
@@ -200,6 +201,11 @@ public static class ClubSettingsEndpoints
             if (body.TryGetProperty("control", out var control))
             {
                 settings["control"] = JsonSerializer.SerializeToNode(Clamp(control, ControlOf(settings["control"]?.ToJsonString())), AdminJson.Options);
+            }
+
+            if (body.TryGetProperty("topUpPromo", out var topUpPromo))
+            {
+                settings["topUpPromo"] = TopUpPromo.Parse(topUpPromo).ToJson();
             }
 
             if (body.TryGetProperty("notifications", out var notifications))
