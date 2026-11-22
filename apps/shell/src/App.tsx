@@ -144,11 +144,14 @@ export function GlobalListeners(): JSX.Element {
     [navigate],
   );
 
-  // Native idle with nobody logged in → attract screen (the lock screen covers the local fallback).
+  // Native idle with nobody logged in → attract screen (the lock screen covers the local fallback). The owner's
+  // screensaver (D-87), once set, decides: off — never; on — after its own minutes.
+  const screensaver = useSettingsStore((s) => s.settings.club?.screensaver ?? null);
   useKioskEvent('idle', (p) => {
     const current = pathRef.current;
+    const due = screensaver ? screensaver.enabled && p.seconds >= screensaver.afterSec : p.idle;
     if (
-      p.idle &&
+      due &&
       useAuthStore.getState().user === null &&
       current !== '/idle' &&
       current !== '/overlay' &&
@@ -157,6 +160,7 @@ export function GlobalListeners(): JSX.Element {
       navigate('/idle', { replace: true });
     }
   });
+  useScreensaverTimer(screensaver, pathname, navigate);
 
   // Ads while the shell is in front; during a game the Rust overlay window plays them instead.
   useAgentEvent('shell.command', (c) => {
@@ -198,3 +202,42 @@ export function App({ role = 'main' }: AppProps): JSX.Element {
 }
 
 export default App;
+
+/** Input that counts as someone at the PC: it restarts the screensaver's wait. */
+const SCREENSAVER_INPUT = ['keydown', 'pointerdown', 'pointermove', 'touchstart', 'wheel'] as const;
+/** The club's settings are read again at most this often while a free PC waits (a new screensaver reaches it). */
+const SCREENSAVER_REFRESH_MS = 60_000;
+
+/**
+ * The owner's screensaver on a free PC (D-87): on the sign-in screen with nobody signed in, after `afterSec` without
+ * input the attract screen plays. The shell counts the input itself, so it does not hang on the native idle thresholds
+ * read at start-up; the club's settings are re-read while the PC waits, so a screensaver saved in the console reaches
+ * PCs that sit on the lock screen.
+ */
+function useScreensaverTimer(
+  screensaver: { enabled: boolean; afterSec: number } | null,
+  pathname: string,
+  navigate: ReturnType<typeof useNavigate>,
+): void {
+  const user = useAuthStore((s) => s.user);
+  const free = user === null && pathname === '/lock';
+  useEffect(() => {
+    if (!free) return undefined;
+    const refresh = window.setInterval(() => void useSettingsStore.getState().load(), SCREENSAVER_REFRESH_MS);
+    return () => window.clearInterval(refresh);
+  }, [free]);
+  useEffect(() => {
+    if (!free || !screensaver?.enabled || screensaver.afterSec <= 0) return undefined;
+    let timer = 0;
+    const arm = (): void => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => navigate('/idle', { replace: true }), screensaver.afterSec * 1000);
+    };
+    arm();
+    for (const ev of SCREENSAVER_INPUT) window.addEventListener(ev, arm, { passive: true });
+    return () => {
+      window.clearTimeout(timer);
+      for (const ev of SCREENSAVER_INPUT) window.removeEventListener(ev, arm);
+    };
+  }, [free, screensaver?.enabled, screensaver?.afterSec, navigate]);
+}

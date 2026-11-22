@@ -4,6 +4,22 @@ import type { JsonObject, UpdateChannel } from './commands.js';
 import type { Locale } from './user.js';
 
 /** A promo banner on the player's home screen, set by the club owner in the admin console. */
+/** One picture or clip of the screensaver. */
+export interface ScreensaverItem {
+  url: string;
+  type: 'image' | 'video';
+  /** Seconds on screen (an image; a video plays to its end). */
+  durationSec: number;
+}
+
+/** The free PCs' screensaver (D-87): the attract screen after `afterSec` seconds without input on the lock screen. */
+export interface ShellScreensaver {
+  enabled: boolean;
+  afterSec: number;
+  /** The owner's pictures and clips; empty — the club's built-in slides. */
+  items: ScreensaverItem[];
+}
+
 export interface ClubBanner {
   /** Banner id. */
   id: string;
@@ -263,6 +279,8 @@ export interface ShellClub {
   banners?: ClubBanner[] | null;
   /** Club rules shown on the support screen. */
   rules?: ClubRules | null;
+  /** The free PCs' screensaver; absent — the shell's own idle screen as before. */
+  screensaver?: ShellScreensaver | null;
 }
 
 /** Server override pushed into `shell.json`. */

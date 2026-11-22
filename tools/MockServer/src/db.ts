@@ -813,6 +813,7 @@ interface ClubForShell {
   branding?: { clubName: string; accent: string; logoUrl: string | null; wallpaperUrl: string | null };
   banners?: { id: string; title: string; imageUrl: string; from: string | null; to: string | null; enabled: boolean }[];
   rulesText?: { ru: string; uz: string; en: string };
+  screensaver?: { enabled: boolean; afterMinutes: number; items: { url: string; type: 'image' | 'video'; durationSec: number }[] };
 }
 
 function clubDoc(): ClubForShell | null {
@@ -843,6 +844,10 @@ function clubForShell(): ShellClub | null {
     wallpaperUrl: c.branding.wallpaperUrl,
     banners: live.map((b) => ({ id: b.id, title: b.title, imageUrl: b.imageUrl })),
     rules: c.rulesText ?? null,
+    // Only once the owner saved one (D-87), as the server.
+    ...(c.screensaver
+      ? { screensaver: { enabled: c.screensaver.enabled, afterSec: c.screensaver.afterMinutes * 60, items: c.screensaver.items } }
+      : {}),
   };
 }
 

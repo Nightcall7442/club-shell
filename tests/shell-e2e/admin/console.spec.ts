@@ -764,6 +764,48 @@ test('the owner turns on «x2» for top-ups under «Бонусы и акции»
   }
 });
 
+test('the owner sets the screensaver of the free PCs on «Экран игрока»; the PCs get it with the club config (D-87)', async ({
+  page,
+  request,
+}) => {
+  const owner = await tokenFor(request, OWNER_PIN);
+  try {
+    await signIn(page, OWNER_PIN);
+    await page.goto('/#/club');
+    await page.getByRole('switch', { name: 'Заставка включена' }).click();
+    await page.getByRole('button', { name: 'Добавить картинку или видео' }).click();
+    await page.getByTestId('screensaver-items').getByLabel('Ссылка на картинку или видео').fill('https://cdn.example.com/promo.mp4');
+    await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Сохранено' })).toBeVisible();
+
+    const club = (await (await request.get(`${API}/admin/club`, { headers: auth(owner) })).json()) as {
+      screensaver: { enabled: boolean; afterMinutes: number; items: { url: string; type: string }[] };
+    };
+    // A clip by its extension: «Видео» without touching the switch.
+    expect(club.screensaver).toMatchObject({
+      enabled: true,
+      afterMinutes: 5,
+      items: [{ url: 'https://cdn.example.com/promo.mp4', type: 'video' }],
+    });
+    const pc = await registerAgent(request, 'screensaver');
+    const config = (await (await agentCall(request, pc, 'GET', `/agents/${pc.pcId}/config`)).json()) as {
+      shell: { club: { screensaver?: { enabled: boolean; afterSec: number } } };
+    };
+    expect(config.shell.club.screensaver).toMatchObject({ enabled: true, afterSec: 300 });
+
+    const bad = await request.patch(`${API}/admin/club`, {
+      headers: auth(owner),
+      data: { screensaver: { enabled: true, afterMinutes: 5, items: [{ url: 'promo.mp4', type: 'video', durationSec: 10 }] } },
+    });
+    expect(bad.status()).toBe(400);
+  } finally {
+    await request.patch(`${API}/admin/club`, {
+      headers: auth(owner),
+      data: { screensaver: { enabled: false, afterMinutes: 5, items: [] } },
+    });
+  }
+});
+
 test('cashier control flags a cash shortfall and quick refunds, and only the owner sees it', async ({
   page,
   request,

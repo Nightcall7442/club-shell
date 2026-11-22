@@ -168,6 +168,15 @@ export interface TopUpPromo {
   until: string | null;
 }
 
+/** The free PCs' screensaver (D-87) as the server keeps it. */
+export interface ScreensaverSettings {
+  enabled: boolean;
+  afterMinutes: number;
+  items: { url: string; type: 'image' | 'video'; durationSec: number }[];
+}
+
+export const DEFAULT_SCREENSAVER: ScreensaverSettings = { enabled: false, afterMinutes: 5, items: [] };
+
 export const DEFAULT_TOPUP_PROMO: TopUpPromo = { enabled: false, bonusPct: 100, minAmount: 0, days: [], from: null, to: null, until: null };
 
 export interface PromoCode {
@@ -348,6 +357,7 @@ export interface ClubConfig {
   clients: Record<string, ClientProfile>;
   bonusTiers: BonusTier[];
   topUpPromo?: TopUpPromo;
+  screensaver?: ScreensaverSettings;
   promoCodes: PromoCode[];
   happyHours: HappyHour[];
   loyalty: LoyaltyLevel[];

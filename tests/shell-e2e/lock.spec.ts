@@ -651,4 +651,28 @@ test.describe('power on the lock screen (SHELL_CHANGES 93)', () => {
     await expect(page.getByRole('button', { name: en('lock.unlockWithPin') })).toBeVisible();
     await expect(page.getByRole('button', { name: en('lock.power.shutdown'), exact: true })).toHaveCount(0);
   });
+  test("the owner's screensaver starts on a free PC after its seconds without input and a touch brings the lock back (D-87)", async ({
+    page,
+  }) => {
+    await page.goto('/?screensaver=2#/lock');
+    await useEnglish(page);
+    await expect(page.getByText(en('lock.subtitle'))).toBeVisible();
+    // Input restarts the wait: still the lock screen 1.5 s after a key.
+    await page.waitForTimeout(1200);
+    await page.keyboard.press('Shift');
+    await page.waitForTimeout(1500);
+    await expect(page).toHaveURL(/#\/lock$/);
+    await expect(page).toHaveURL(/#\/idle$/, { timeout: 5000 });
+    await expect(page.getByText(en('idle.touchToStart'))).toBeVisible();
+    await page.mouse.click(400, 300);
+    await expect(page).toHaveURL(/#\/lock$/);
+  });
+
+  test('a screensaver the owner turned off never starts', async ({ page }) => {
+    await page.goto('/?screensaver=0#/lock');
+    await useEnglish(page);
+    await expect(page.getByText(en('lock.subtitle'))).toBeVisible();
+    await page.waitForTimeout(3000);
+    await expect(page).toHaveURL(/#\/lock$/);
+  });
 });

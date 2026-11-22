@@ -317,7 +317,7 @@ function freshState(): MockState {
     tournaments: clone(TOURNAMENTS),
     games: clone(GAMES),
     running: [],
-    settings: { ...clone(SETTINGS), club: demoClubRequested() ? clone(DEMO_CLUB) : null },
+    settings: { ...clone(SETTINGS), club: withScreensaver(demoClubRequested() ? clone(DEMO_CLUB) : null) },
     gameSettings: clone(PLAYER_GAME_SETTINGS),
     policy: clone(POLICY),
     volume: { level: SETTINGS.volume, muted: SETTINGS.muted },
@@ -675,6 +675,14 @@ export function resetMock(): void {
 // Dev simulation helpers (also on window.__clubshellMock.simulate)
 // ---------------------------------------------------------------------------------------------------------------------
 
+/** `?screensaver=<sec>` in the URL: the owner's screensaver (D-87) after that many seconds; `0` — turned off. */
+function withScreensaver(club: ShellClub | null): ShellClub | null {
+  const raw = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('screensaver');
+  if (raw === null) return club;
+  const sec = Number(raw);
+  return { ...(club ?? {}), screensaver: { enabled: sec > 0, afterSec: Math.max(0, sec), items: [] } };
+}
+
 /** `?club=demo` in the URL starts with the owner's branding from {@link DEMO_CLUB}. */
 function demoClubRequested(): boolean {
   return typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('club') === 'demo';
@@ -831,6 +839,16 @@ export const simulate = {
       warningsSent: [],
     };
     emitSession();
+  },
+  /**
+   * The owner's screensaver of the free PCs (D-87) as the next `settings_get` returns it; the shell re-reads the
+   * settings while it waits on the lock screen (or call `useSettingsStore.load()`).
+   */
+  screensaver(value: { enabled: boolean; afterSec: number; items?: { url: string; type: 'image' | 'video'; durationSec: number }[] } | null): void {
+    const club = { ...(mockState.settings.club ?? {}) };
+    if (value) club.screensaver = { enabled: value.enabled, afterSec: value.afterSec, items: value.items ?? [] };
+    else delete club.screensaver;
+    mockState.settings = { ...mockState.settings, club };
   },
   /** The cash desk's postpaid: the session runs open-ended, paid at the desk when it ends. */
   postpaidSession(): void {

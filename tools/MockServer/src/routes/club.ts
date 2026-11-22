@@ -57,6 +57,8 @@ import {
   CLUB_EVENTS,
   DEFAULT_CONTROL,
   DEFAULT_TOPUP_PROMO,
+  DEFAULT_SCREENSAVER,
+  type ScreensaverSettings,
   type TopUpPromo,
   club,
   clubHooks,
@@ -510,6 +512,7 @@ export function clubRoutes(app: FastifyInstance): void {
       rulesText: c.rulesText,
       stock: c.stock,
       topUpPromo: c.topUpPromo ?? DEFAULT_TOPUP_PROMO,
+      screensaver: c.screensaver ?? DEFAULT_SCREENSAVER,
       automation: c.automation,
       notifications: { bigTopupAt: c.notifications.bigTopupAt },
       webhooks: c.webhooks,
@@ -557,6 +560,7 @@ export function clubRoutes(app: FastifyInstance): void {
       }
     }
     if ('topUpPromo' in b) c.topUpPromo = parseTopUpPromo(b['topUpPromo']);
+    if ('screensaver' in b) c.screensaver = parseScreensaver(b['screensaver']);
     for (const k of keys) {
       if (k in b) (c as unknown as Record<string, unknown>)[k] = b[k];
     }
@@ -1419,4 +1423,25 @@ function parseTopUpPromo(raw: unknown): TopUpPromo {
     to,
     until: until === null ? null : new Date(until).toISOString(),
   };
+}
+
+/** The free PCs' screensaver, checked as the server checks it (`400 validation` on `screensaver.*`). */
+function parseScreensaver(raw: unknown): ScreensaverSettings {
+  if (!isObject(raw)) throw errors.validation('screensaver', 'schema');
+  const after = typeof raw['afterMinutes'] === 'number' ? Math.round(raw['afterMinutes']) : DEFAULT_SCREENSAVER.afterMinutes;
+  if (after < 1 || after > 120) throw errors.validation('screensaver.afterMinutes', after < 1 ? 'min' : 'max');
+  const list = Array.isArray(raw['items']) ? (raw['items'] as unknown[]) : [];
+  if (list.length > 20) throw errors.validation('screensaver.items', 'max');
+  const items = list.map((item, i) => {
+    const field = `screensaver.items[${i}]`;
+    const o = isObject(item) ? item : {};
+    const url = typeof o['url'] === 'string' ? o['url'].trim() : '';
+    if (!/^https?:\/\/\S+$/i.test(url)) throw errors.validation(`${field}.url`, 'format');
+    const type = o['type'] ?? 'image';
+    if (type !== 'image' && type !== 'video') throw errors.validation(`${field}.type`, 'enum');
+    const sec = typeof o['durationSec'] === 'number' ? Math.round(o['durationSec']) : 10;
+    if (sec < 3 || sec > 600) throw errors.validation(`${field}.durationSec`, sec < 3 ? 'min' : 'max');
+    return { url, type: type as 'image' | 'video', durationSec: sec };
+  });
+  return { enabled: raw['enabled'] === true, afterMinutes: after, items };
 }

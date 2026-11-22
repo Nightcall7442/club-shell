@@ -836,6 +836,12 @@ export interface BonusTier {
  * top (100 = x2) on `days` (0 = Sunday; empty — every day), `from`–`to` club time (both null — all day; `to` < `from`
  * runs past midnight), until `until` (null — no end). The larger of it and the tier bonus is credited, not both.
  */
+/** The free PCs' screensaver (D-87): after `afterMinutes` without input the PC plays `items` (none — built-in slides). */
+export interface ScreensaverSettings {
+  enabled: boolean;
+  afterMinutes: number;
+  items: { url: string; type: 'image' | 'video'; durationSec: number }[];
+}
 export interface TopUpPromo {
   enabled: boolean;
   bonusPct: number;
@@ -925,6 +931,8 @@ export interface ClubSettings {
   bonusTiers: BonusTier[];
   /** Absent from an older server: the console hides the promotion. */
   topUpPromo?: TopUpPromo;
+  /** The free PCs' screensaver (D-87); absent from an older server: the console hides it. */
+  screensaver?: ScreensaverSettings;
   promoCodes: PromoCode[];
   happyHours: HappyHour[];
   loyalty: LoyaltyLevel[];
