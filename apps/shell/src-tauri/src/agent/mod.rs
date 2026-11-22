@@ -763,6 +763,10 @@ impl MockTransport {
                     "paymentUrl": "https://example.invalid/pay/mock", "expiresAt": in_secs(900), "createdAt": now()
                 }))
             }
+            AgentCommand::WalletRedeemPromo => Some(json!({
+                "code": p["code"].as_str().unwrap_or("PROMO").to_uppercase(),
+                "bonus": money(10_000), "balance": money(55_000)
+            })),
             AgentCommand::ShopProducts => Some(json!({ "items": [] })),
             AgentCommand::ShopOrder | AgentCommand::BookingReserve => {
                 return Err(mock_err(

@@ -576,6 +576,8 @@ export const IpcNames = {
     History: 'wallet.history',
     /** `WalletTopupIntentRequest` → `TopupIntent`. */
     TopupIntent: 'wallet.topupIntent',
+    /** `WalletRedeemPromoRequest` → `WalletRedeemPromoResponse` (D-88). */
+    RedeemPromo: 'wallet.redeemPromo',
   },
   /** `shop.*` */
   Shop: {
@@ -1321,6 +1323,19 @@ export interface WalletTopupIntentRequest {
   provider: TopupProvider;
 }
 
+/** Request of `wallet.redeemPromo` (D-88): the member's own promo code of the club. */
+export interface WalletRedeemPromoRequest {
+  /** The code as typed (case does not matter), 1–32 characters. */
+  code: string;
+}
+
+/** Response of `wallet.redeemPromo`: the code as the club wrote it, the bonus credited and the new balance. */
+export interface WalletRedeemPromoResponse {
+  code: string;
+  bonus: Money;
+  balance: Money;
+}
+
 /**
  * Every Shell → Agent IPC request (IPC_PROTOCOL.md §7). Wire form is the IPC name (`auth.hello`, …) via
  * `AgentCommandJsonConverter`; use `AgentCommands.ToIpcName` / `AgentCommands.TryParse`.
@@ -1380,6 +1395,8 @@ export const AgentCommand = {
   WalletHistory: 'wallet.history',
   /** `wallet.topupIntent` */
   WalletTopupIntent: 'wallet.topupIntent',
+  /** `wallet.redeemPromo` */
+  WalletRedeemPromo: 'wallet.redeemPromo',
   /** `shop.products` */
   ShopProducts: 'shop.products',
   /** `shop.order` */
@@ -2581,6 +2598,7 @@ const USER_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
   AgentCommand.WalletBalance,
   AgentCommand.WalletHistory,
   AgentCommand.WalletTopupIntent,
+  AgentCommand.WalletRedeemPromo,
   AgentCommand.ShopOrderStatus,
   AgentCommand.ShopOrders,
   AgentCommand.ChatHistory,
@@ -2694,6 +2712,7 @@ export interface IpcRequestMap {
   [IpcNames.Wallet.Tariffs]: { request: WalletTariffsRequest | null; response: WalletTariffsResponse };
   [IpcNames.Wallet.History]: { request: WalletHistoryRequest | null; response: WalletHistoryResponse };
   [IpcNames.Wallet.TopupIntent]: { request: WalletTopupIntentRequest; response: TopupIntent };
+  [IpcNames.Wallet.RedeemPromo]: { request: WalletRedeemPromoRequest; response: WalletRedeemPromoResponse };
   [IpcNames.Shop.Products]: { request: ShopProductsRequest | null; response: ShopProductsResponse };
   [IpcNames.Shop.Order]: { request: ShopOrderRequest; response: Order };
   [IpcNames.Shop.OrderStatus]: { request: ShopOrderStatusRequest; response: Order };

@@ -495,6 +495,11 @@ public sealed class ServerClient : IServerClient, IDisposable
     public Task<TopupIntent> GetTopupIntentAsync(Guid userId, Guid intentId, CancellationToken cancellationToken) =>
         GetAsync<TopupIntent>(Endpoints.WalletTopupIntentStatus(userId, intentId), AuthMode.User, cancellationToken);
 
+    /// <inheritdoc />
+    public Task<WalletRedeemPromoResponse> RedeemPromoAsync(Guid userId, string code, CancellationToken cancellationToken) =>
+        SendJsonAsync<WalletRedeemPromoRequest, WalletRedeemPromoResponse>(
+            HttpMethod.Post, Endpoints.WalletPromo(userId), new WalletRedeemPromoRequest(code), AuthMode.User, Guid.NewGuid(), cancellationToken);
+
     #endregion
 
     #region Shop

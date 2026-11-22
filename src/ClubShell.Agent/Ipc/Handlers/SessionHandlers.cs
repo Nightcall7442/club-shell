@@ -979,6 +979,7 @@ public sealed class UserDomainHandlers : IIpcHandlerGroup
         dispatcher.RegisterOptional<WalletTariffsRequest, WalletTariffsResponse>(IpcMessages.Wallet.Tariffs, TariffsAsync);
         dispatcher.RegisterOptional<WalletHistoryRequest, WalletHistoryResponse>(IpcMessages.Wallet.History, HistoryAsync);
         dispatcher.Register<WalletTopupIntentRequest, TopupIntent>(IpcMessages.Wallet.TopupIntent, TopupIntentAsync);
+        dispatcher.Register<WalletRedeemPromoRequest, WalletRedeemPromoResponse>(IpcMessages.Wallet.RedeemPromo, RedeemPromoAsync);
 
         dispatcher.RegisterOptional<ShopProductsRequest, ShopProductsResponse>(IpcMessages.Shop.Products, ProductsAsync);
         dispatcher.Register<ShopOrderRequest, Order>(IpcMessages.Shop.Order, OrderAsync);
@@ -1089,6 +1090,28 @@ public sealed class UserDomainHandlers : IIpcHandlerGroup
 
         RequireOnline();
         return _server.CreateTopupIntentAsync(user.Id, new TopupIntentCreateRequest(request.Amount, request.Provider, PcId), Guid.NewGuid(), cancellationToken);
+    }
+
+    /// <summary>
+    /// <c>wallet.redeemPromo</c> (D-88): the member's own promo code, credited by the server; a guest has no account to
+    /// credit. The server's refusals (unknown, expired, used, too many tries) reach the shell as they are.
+    /// </summary>
+    private Task<WalletRedeemPromoResponse> RedeemPromoAsync(IpcContext context, WalletRedeemPromoRequest request, CancellationToken cancellationToken)
+    {
+        User user = context.RequireUser();
+        if (user.Role == UserRole.Guest)
+        {
+            throw IpcError.Forbidden("Guests have no account to credit a promo code to", "guest").ToException();
+        }
+
+        string code = request.Code?.Trim() ?? "";
+        if (code.Length is 0 or > 32)
+        {
+            throw IpcError.Validation("code", code.Length == 0 ? "required" : "max").ToException();
+        }
+
+        RequireOnline();
+        return _server.RedeemPromoAsync(user.Id, code, cancellationToken);
     }
 
     // ---- shop -------------------------------------------------------------------------------

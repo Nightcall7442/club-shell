@@ -116,6 +116,9 @@ public static class IpcMessages
 
         /// <summary><see cref="WalletTopupIntentRequest"/> → <see cref="Contracts.Wallet.TopupIntent"/>.</summary>
         public const string TopupIntent = "wallet.topupIntent";
+
+        /// <summary><see cref="WalletRedeemPromoRequest"/> → <see cref="WalletRedeemPromoResponse"/> (D-88).</summary>
+        public const string RedeemPromo = "wallet.redeemPromo";
     }
 
     /// <summary><c>shop.*</c></summary>
@@ -768,6 +771,16 @@ public sealed record WalletHistoryResponse(
 public sealed record WalletTopupIntentRequest(
     Money Amount,
     TopupProvider Provider);
+
+/// <summary>Request of <c>wallet.redeemPromo</c> (D-88): the member's own promo code of the club.</summary>
+/// <param name="Code">The code as typed (case does not matter), 1–32 characters.</param>
+public sealed record WalletRedeemPromoRequest(string Code);
+
+/// <summary>Response of <c>wallet.redeemPromo</c>: the code as the club wrote it, the bonus credited and the new balance.</summary>
+/// <param name="Code">The code.</param>
+/// <param name="Bonus">Credited to the main balance.</param>
+/// <param name="Balance">Main balance after the credit.</param>
+public sealed record WalletRedeemPromoResponse(string Code, Money Bonus, Money Balance);
 
 #endregion
 

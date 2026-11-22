@@ -839,6 +839,12 @@ Errors: `validation`, `agentOffline`, `serverUnavailable`, `policyDenied` (top-u
 
 Subsequent `wallet.updated` event signals completion.
 
+#### `wallet.redeemPromo` (auth: user) — D-88
+
+Request: `{ code: string }` — 1–32 characters, case does not matter.
+Response: `{ code: string, bonus: Money, balance: Money }` — the club's `bonus` code credited to the main balance (server `POST /wallet/{userId}/promo`, the same route the club's mobile app uses).
+Errors: `forbidden` (`guest`: no account to credit), `notFound` (`promo`), `validation` (`code`: `expired` / `exhausted` — used up or already redeemed by this member / `discountAtCheckout`), `rateLimited` (`promoAttempts`: too many wrong codes, wait 10 minutes), `agentOffline`, `serverUnavailable`. A `wallet.updated` event follows.
+
 ### 7.6 shop
 
 #### `shop.products` (auth: hello) — Request: `{ category?: ProductCategory, search?: string }` Response: `{ items: Product[] }`. Cached offline (with `inStock` unknown → shown as available, order fails offline).

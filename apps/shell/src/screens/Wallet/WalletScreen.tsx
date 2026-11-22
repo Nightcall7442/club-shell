@@ -8,6 +8,7 @@ import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
 import { useWalletStore } from '@/store/wallet';
 import { Balance } from './Balance';
 import { History } from './History';
+import { PromoCode } from './PromoCode';
 import { Tariffs } from './Tariffs';
 import { TopUpModal } from './TopUpModal';
 
@@ -82,6 +83,7 @@ export function WalletScreen(): JSX.Element {
           </h1>
         </header>
         <Balance ref={topUpButton} onTopUp={openTopUp} />
+        <PromoCode />
         <Tariffs onInsufficientFunds={openTopUp} />
       </div>
 

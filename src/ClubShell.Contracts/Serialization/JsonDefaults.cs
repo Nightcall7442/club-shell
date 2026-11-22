@@ -328,6 +328,8 @@ public sealed class ClubTimeConverter : JsonConverter<TimeOnly>
 [JsonSerializable(typeof(WalletHistoryRequest))]
 [JsonSerializable(typeof(WalletHistoryResponse))]
 [JsonSerializable(typeof(WalletTopupIntentRequest))]
+[JsonSerializable(typeof(WalletRedeemPromoRequest))]
+[JsonSerializable(typeof(WalletRedeemPromoResponse))]
 [JsonSerializable(typeof(ShopProductsRequest))]
 [JsonSerializable(typeof(ShopProductsResponse))]
 [JsonSerializable(typeof(ShopOrderRequest))]

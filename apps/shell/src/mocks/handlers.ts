@@ -84,6 +84,7 @@ import type {
   UserStats,
   VolumeState,
   WalletHistoryResponse,
+  WalletRedeemPromoResponse,
   WalletTariffsResponse,
 } from '@clubshell/contracts';
 import { tariffPriceFor } from '@clubshell/contracts';
@@ -1511,6 +1512,41 @@ cmd('wallet_history', (args): WalletHistoryResponse => {
   const page = Math.max(1, q.page ?? 1);
   const pageSize = Math.min(200, Math.max(1, q.pageSize ?? 20));
   return { items: clone(items.slice((page - 1) * pageSize, page * pageSize)), total: items.length, page, pageSize };
+});
+
+/** The club's promo codes in mock mode: `BONUS10` (+10 000 сум), `OLD` expired; one redeem per member and code. */
+const MOCK_PROMOS: Record<string, { value: number; expired?: boolean }> = {
+  BONUS10: { value: 1_000_000 },
+  OLD: { value: 500_000, expired: true },
+};
+const redeemedPromos = new Set<string>();
+let promoFailures = 0;
+
+cmd('wallet_redeem_promo', (args): WalletRedeemPromoResponse => {
+  const user = requireUser();
+  if (user.role === 'guest') {
+    mockError('forbidden', 'Guests have no account to credit a promo code to', { reason: 'guest' });
+  }
+  const code = (str(args, 'code') ?? '').trim().toUpperCase();
+  if (!code) {
+    mockError('validation', 'code is required', { field: 'code', reason: 'required' });
+  }
+  if (promoFailures >= 8) {
+    mockError('rateLimited', 'Too many wrong promo codes', { reason: 'promoAttempts', retryAfterSec: 600 });
+  }
+  const promo = MOCK_PROMOS[code];
+  if (!promo) {
+    promoFailures += 1;
+    mockError('notFound', 'promo not found', { what: 'promo' });
+  }
+  const key = `${user.id}:${code}`;
+  if (promo.expired || redeemedPromos.has(key)) {
+    promoFailures += 1;
+    mockError('validation', 'Invalid code', { field: 'code', reason: promo.expired ? 'expired' : 'exhausted' });
+  }
+  redeemedPromos.add(key);
+  pushTransaction('bonus', money(promo.value), `Промокод ${code}`, null);
+  return { code, bonus: money(promo.value), balance: { ...user.balance } };
 });
 
 cmd('wallet_topup_intent', (args): TopupIntent => {

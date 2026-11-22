@@ -173,6 +173,9 @@ public static class Endpoints
     /// <summary><c>POST /wallet/{userId}/topup-intent</c>.</summary>
     public static string WalletTopupIntent(Guid userId) => $"wallet/{Id(userId)}/topup-intent";
 
+    /// <summary><c>POST /wallet/{userId}/promo</c> (D-88, beyond the contract): the member's own promo code.</summary>
+    public static string WalletPromo(Guid userId) => $"wallet/{Id(userId)}/promo";
+
     /// <summary><c>GET /wallet/{userId}/topup-intent/{id}</c>.</summary>
     public static string WalletTopupIntentStatus(Guid userId, Guid intentId) => $"wallet/{Id(userId)}/topup-intent/{Id(intentId)}";
 

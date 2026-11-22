@@ -822,7 +822,22 @@
       "loyalty": "loyalty discount",
       "happyHour": "happy hour"
     },
-    "dueHintGuest": "Pay at the desk when you finish."
+    "dueHintGuest": "Pay at the desk when you finish.",
+    "promo": {
+      "title": "Promo code",
+      "hint": "Enter the club's code — the bonus lands on your balance at once.",
+      "field": "Promo code",
+      "placeholder": "E.G. BONUS10",
+      "apply": "Redeem",
+      "doneTitle": "Promo code redeemed",
+      "done": "+{{bonus}} to your balance for {{code}}",
+      "unknown": "No such code — check how it is spelled.",
+      "expired": "The code has expired.",
+      "used": "The code has already been used.",
+      "atDesk": "This code is a discount; it is applied at the desk.",
+      "tooMany": "Too many wrong codes. Try again in 10 minutes.",
+      "guest": "Promo codes are for club members. Sign up at the desk."
+    }
   },
   "chat": {
     "title": "Chat",

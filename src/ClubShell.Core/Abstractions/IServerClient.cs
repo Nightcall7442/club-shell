@@ -314,6 +314,9 @@ public interface IWalletApi
 
     /// <summary><c>GET /wallet/{userId}/topup-intent/{id}</c>.</summary>
     Task<TopupIntent> GetTopupIntentAsync(Guid userId, Guid intentId, CancellationToken cancellationToken);
+
+    /// <summary><c>POST /wallet/{userId}/promo</c> (D-88): the member redeems a promo code; a server without it answers 404.</summary>
+    Task<WalletRedeemPromoResponse> RedeemPromoAsync(Guid userId, string code, CancellationToken cancellationToken);
 }
 
 /// <summary>Shop (SERVER_API.md §4.9).</summary>

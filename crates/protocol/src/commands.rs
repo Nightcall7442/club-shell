@@ -578,6 +578,8 @@ pub mod names {
         pub const HISTORY: &str = "wallet.history";
         /// `WalletTopupIntentRequest` → `TopupIntent`.
         pub const TOPUP_INTENT: &str = "wallet.topupIntent";
+        /// `WalletRedeemPromoRequest` → `WalletRedeemPromoResponse` (D-88).
+        pub const REDEEM_PROMO: &str = "wallet.redeemPromo";
     }
 
     /// `shop.*`
@@ -1499,6 +1501,26 @@ pub struct WalletTopupIntentRequest {
     pub amount: Money,
     /// Provider.
     pub provider: TopupProvider,
+}
+
+/// Request of `wallet.redeemPromo` (D-88): the member's own promo code of the club.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WalletRedeemPromoRequest {
+    /// The code as typed (case does not matter), 1–32 characters.
+    pub code: String,
+}
+
+/// Response of `wallet.redeemPromo`: the code as the club wrote it, the bonus credited and the new balance.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WalletRedeemPromoResponse {
+    /// The code.
+    pub code: String,
+    /// Credited to the main balance.
+    pub bonus: Money,
+    /// Main balance after the credit.
+    pub balance: Money,
 }
 
 wire_enum! {
@@ -2642,6 +2664,7 @@ agent_commands! {
     WalletTariffs => names::wallet::TARIFFS, Hello;
     WalletHistory => names::wallet::HISTORY, User;
     WalletTopupIntent => names::wallet::TOPUP_INTENT, User;
+    WalletRedeemPromo => names::wallet::REDEEM_PROMO, User;
     ShopProducts => names::shop::PRODUCTS, Hello;
     ShopOrder => names::shop::ORDER, Session;
     ShopOrderStatus => names::shop::ORDER_STATUS, User;
@@ -3091,7 +3114,7 @@ mod tests {
 
     #[test]
     fn agent_command_table_matches_ipc_protocol() {
-        assert_eq!(AgentCommand::ALL.len(), 69);
+        assert_eq!(AgentCommand::ALL.len(), 70);
         let expected: &[&str] = &[
             "auth.hello",
             "auth.login",
@@ -3120,6 +3143,7 @@ mod tests {
             "wallet.tariffs",
             "wallet.history",
             "wallet.topupIntent",
+            "wallet.redeemPromo",
             "shop.products",
             "shop.order",
             "shop.orderStatus",
