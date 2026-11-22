@@ -443,8 +443,24 @@ public sealed class FolderRedirectSettings
 /// <summary><c>agent.json → session</c>.</summary>
 public sealed class SessionSettings
 {
-    /// <summary>Remaining-minute marks at which <c>session.warning</c> is emitted.</summary>
-    public int[] WarningMinutes { get; set; } = new[] { 10, 5, 1 };
+    /// <summary>
+    /// Remaining-minute marks at which <c>session.warning</c> is emitted: from 15 minutes left every 3 minutes, and the last
+    /// minute. Read through <see cref="EffectiveWarningMinutes"/>.
+    /// </summary>
+    public int[] WarningMinutes { get; set; } = DefaultWarningMinutes.ToArray();
+
+    /// <summary>The shipped marks: 15, 12, 9, 6, 3 minutes left and the last minute.</summary>
+    public static readonly IReadOnlyList<int> DefaultWarningMinutes = [15, 12, 9, 6, 3, 1];
+
+    /// <summary>The marks of releases before 1.0.25, copied into every PC's <c>agent.json</c> by the installer.</summary>
+    private static readonly int[] LegacyWarningMinutes = [10, 5, 1];
+
+    /// <summary>
+    /// The marks in force: <see cref="WarningMinutes"/>, except the untouched old default <c>[10, 5, 1]</c> that every PC's
+    /// <c>agent.json</c> carries from its install, which means the current default.
+    /// </summary>
+    public int[] EffectiveWarningMinutes() =>
+        WarningMinutes is { } marks && !marks.SequenceEqual(LegacyWarningMinutes) ? marks : DefaultWarningMinutes.ToArray();
 
     /// <summary>Server heartbeat interval.</summary>
     [Range(5, 3600)]
