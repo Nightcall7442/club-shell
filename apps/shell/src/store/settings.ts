@@ -64,7 +64,7 @@ export const DEFAULT_FEATURES: ShellFeatures = {
 export const DEFAULT_SETTINGS: ShellSettings = {
   locale: 'ru',
   theme: 'default',
-  availableThemes: ['default', 'neon'],
+  availableThemes: ['default', 'light', 'neon'],
   volume: 60,
   muted: false,
   idleTimeoutSec: 300,
