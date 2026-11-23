@@ -188,6 +188,7 @@ app.MapHallLayoutEndpoints();
 app.MapStaffAdminEndpoints();
 app.MapClientEndpoints();
 app.MapPromoEndpoints();
+app.MapMediaEndpoints();
 app.MapTariffEndpoints();
 app.MapStockEndpoints();
 app.MapClubSettingsEndpoints();

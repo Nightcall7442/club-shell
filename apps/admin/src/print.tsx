@@ -82,6 +82,13 @@ export function receiptLang(): Lang {
   return v === 'ru' || v === 'uz' || v === 'en' ? v : currentLang();
 }
 
+/** The club's logo on top of every slip (D-93), set by the console when it reads the club settings. */
+let receiptLogo: string | null = null;
+
+export function setReceiptLogo(url: string | null): void {
+  receiptLogo = url;
+}
+
 /** null — follow the console's language. */
 export function setReceiptLang(lang: Lang | null): void {
   write(LANG_KEY, lang);
@@ -188,6 +195,11 @@ function Head({
 }): JSX.Element {
   return (
     <>
+      {receiptLogo && (
+        <div className="slip-center">
+          <img src={receiptLogo} alt="" style={{ maxHeight: '18mm', maxWidth: '40mm', objectFit: 'contain' }} />
+        </div>
+      )}
       {club && <div className="slip-center slip-strong">{club}</div>}
       <div className="slip-center slip-title">{title}</div>
       {copy && <div className="slip-center slip-strong">{t('Копия')}</div>}

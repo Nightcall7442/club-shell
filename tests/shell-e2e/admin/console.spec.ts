@@ -806,6 +806,54 @@ test('the owner sets the screensaver of the free PCs on «Экран игрок�
   }
 });
 
+test('the owner uploads the club logo and picks the PCs theme under «Интерфейс и логотипы»; the PCs get both (D-93)', async ({
+  page,
+  request,
+}) => {
+  const owner = await tokenFor(request, OWNER_PIN);
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+    'base64',
+  );
+  const before = (await (await request.get(`${API}/admin/club`, { headers: auth(owner) })).json()) as {
+    branding: Record<string, unknown>;
+  };
+  try {
+    await signIn(page, OWNER_PIN);
+    await nav(page).getByText('Интерфейс и логотипы', { exact: true }).click();
+    await page.getByTestId('picture-logo').locator('input[type=file]').setInputFiles({ name: 'logo.png', mimeType: 'image/png', buffer: png });
+    await expect(page.getByTestId('picture-logo').locator('img')).toBeVisible();
+    await page.getByRole('radio', { name: /Daylight/ }).click();
+    await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Сохранено' })).toBeVisible();
+
+    const club = (await (await request.get(`${API}/admin/club`, { headers: auth(owner) })).json()) as {
+      branding: { logoUrl: string; theme: string };
+    };
+    expect(club.branding.theme).toBe('light');
+    expect(club.branding.logoUrl).toMatch(/^\/api\/v1\/media\//);
+    // Anyone reads the picture back (a PC's lock screen has no token); the rail shows it.
+    const served = await request.get(`${API.replace(/\/api\/v1$/, '')}${club.branding.logoUrl}`);
+    expect(served.headers()['content-type']).toContain('image/png');
+    await expect(page.locator('aside img').first()).toBeVisible();
+
+    const pc = await registerAgent(request, 'brand');
+    const config = (await (await agentCall(request, pc, 'GET', `/agents/${pc.pcId}/config`)).json()) as {
+      shell: { theme: string };
+    };
+    expect(config.shell.theme).toBe('light');
+
+    // Only pictures pass: an SVG dressed as a PNG is refused.
+    const svg = await request.post(`${API}/admin/media?kind=logo`, {
+      headers: { ...auth(owner), 'Content-Type': 'image/png' },
+      data: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'),
+    });
+    expect(svg.status()).toBe(400);
+  } finally {
+    await request.patch(`${API}/admin/club`, { headers: auth(owner), data: { branding: { ...before.branding, theme: 'default' } } });
+  }
+});
+
 test('cashier control flags a cash shortfall and quick refunds, and only the owner sees it', async ({
   page,
   request,

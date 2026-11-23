@@ -20,6 +20,34 @@ import type {
 
 const BASE = (import.meta.env['VITE_ADMIN_API'] as string | undefined) ?? 'http://localhost:8080/api/v1';
 
+/**
+ * A picture of the club as the console shows it: an uploaded one is a path on the club's server
+ * (`/api/v1/media/{id}`, D-93) and gets the server's address; a full URL stays as it is.
+ */
+export function mediaUrl(url: string | null | undefined): string | null {
+  const u = url?.trim();
+  if (!u) return null;
+  if (u.startsWith('/') && !u.startsWith('//')) return new URL(u, new URL(BASE, window.location.href)).toString();
+  return u;
+}
+
+/** What the server keeps of an upload: the path the settings store. */
+export interface UploadedMedia {
+  id: string;
+  url: string;
+  contentType: string;
+  size: number;
+}
+
+/** Uploads a PNG / JPEG / WebP / GIF of at most 5 MB as the owner (D-93); the server checks the bytes. */
+export async function uploadMedia(file: Blob, kind: 'logo' | 'wallpaper' | 'banner' | 'screensaver' | 'other'): Promise<UploadedMedia> {
+  return call<UploadedMedia>(`/admin/media?kind=${kind}`, {
+    method: 'POST',
+    body: file,
+    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+  });
+}
+
 /** The server's origin, what the PC installer takes as `SERVERURL` (the API base without `/api/v1`). */
 export const SERVER_ORIGIN = new URL(BASE, window.location.href).origin;
 const TOKEN_KEY = 'clubshell.admin.token';
@@ -923,7 +951,14 @@ export interface Webhook {
 
 /** The settings document the owner edits (`GET/PATCH /admin/club`). Amounts are minor units (tiyin). */
 export interface ClubSettings {
-  branding: { clubName: string; accent: string; logoUrl: string | null; wallpaperUrl: string | null };
+  branding: {
+    clubName: string;
+    accent: string;
+    logoUrl: string | null;
+    wallpaperUrl: string | null;
+    /** The shell theme of the club's PCs (D-93): `default` (Obsidian), `light` (Daylight) or `neon`; absent — default. */
+    theme?: 'default' | 'light' | 'neon';
+  };
   features: ShellFeatures;
   zones: Zone[];
   pricing: { weekdayPct: number[]; holidays: string[]; holidayPct: number };

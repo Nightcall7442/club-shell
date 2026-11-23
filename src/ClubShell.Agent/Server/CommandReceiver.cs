@@ -622,6 +622,7 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
 
         try
         {
+            shell = WithServerMedia(shell, _settings.CurrentValue.Server?.BaseUrl);
             var applied = _shellSettings.ApplyServerOverride(shell);
             _logger.LogInformation("Shell config from the server applied: theme {Theme}, locale {Locale}, features {Features}", applied.Theme, applied.Locale, applied.Features);
         }
@@ -629,6 +630,34 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
         {
             _logger.LogWarning(ex, "Shell config from the server could not be written to shell.json");
         }
+    }
+
+    /// <summary>
+    /// The club's own pictures (D-93) come as paths on the server (<c>/api/v1/media/{id}</c>): put the server's address
+    /// in front, so the Shell loads them over the network instead of looking for a local file of that name.
+    /// </summary>
+    public static ClubShell.Contracts.Pcs.ShellConfigOverride WithServerMedia(ClubShell.Contracts.Pcs.ShellConfigOverride shell, string? serverBaseUrl)
+    {
+        if (shell.Club is not { } club || !Uri.TryCreate(serverBaseUrl, UriKind.Absolute, out var server))
+        {
+            return shell;
+        }
+
+        string? Abs(string? url) =>
+            url is { Length: > 1 } && url[0] == '/' && url[1] != '/' ? new Uri(server, url).ToString() : url;
+
+        return shell with
+        {
+            Club = club with
+            {
+                LogoUrl = Abs(club.LogoUrl),
+                WallpaperUrl = Abs(club.WallpaperUrl),
+                Banners = club.Banners?.Select(b => b with { ImageUrl = Abs(b.ImageUrl) ?? b.ImageUrl }).ToList(),
+                Screensaver = club.Screensaver is { } ss
+                    ? ss with { Items = [.. ss.Items.Select(i => i with { Url = Abs(i.Url) ?? i.Url })] }
+                    : null,
+            },
+        };
     }
 
     private static TPayload Require<TPayload>(ServerCommand command)

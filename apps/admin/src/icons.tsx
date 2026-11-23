@@ -86,6 +86,7 @@ export const TagIcon = pathIcon(
   'M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8zM7.5 7.5h.01',
   'TagIcon',
 );
+export const BrushIcon = pathIcon('M14.5 4.5 19.5 9.5M4 20s1-4 3.5-6.5L16 5a2.1 2.1 0 0 1 3 3l-8.5 8.5C8 19 4 20 4 20z', 'BrushIcon');
 export const GiftIcon = pathIcon('M3 8h18v4H3zM5 12v9h14v-9M12 8v13M12 8S10.5 3 8 3a2.5 2.5 0 0 0 0 5M12 8s1.5-5 4-5a2.5 2.5 0 0 1 0 5', 'GiftIcon');
 export const MonitorIcon = pathIcon('M3 5h18v11H3zM8 20h8M12 16v4', 'MonitorIcon');
 export const GamepadIcon = pathIcon(

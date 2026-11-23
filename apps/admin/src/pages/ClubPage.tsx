@@ -187,13 +187,11 @@ export default function ClubPage(): JSX.Element {
 
   // Desk postpaid is on unless the owner turned it off (a club saved before it was a setting has no value).
   const guestPostpaid = s.limits.guestPostpaid ?? true;
-  const branding = (patch: Partial<ClubSettings['branding']>): void => st.set('branding', { ...s.branding, ...patch });
   const banner = (id: string, patch: Partial<Banner>): void =>
     st.set(
       'banners',
       s.banners.map((b) => (b.id === id ? { ...b, ...patch } : b)),
     );
-  const accentValid = HEX.test(s.branding.accent);
 
   return (
     <OwnerPage>
@@ -202,43 +200,13 @@ export default function ClubPage(): JSX.Element {
 
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_400px]">
         <div className="flex min-w-0 flex-col gap-5">
-          <Section title={t('Бренд')}>
-            <div className="grid gap-x-5 gap-y-4 md:grid-cols-2">
-              <Field label={t('Название клуба')}>
-                <Input value={s.branding.clubName} onChange={(e) => branding({ clubName: e.target.value })} />
-              </Field>
-              <Field label={t('Акцентный цвет')}>
-                <div className="flex gap-2">
-                  <input
-                    type="color"
-                    aria-label={t('Акцентный цвет')}
-                    value={accentValid ? s.branding.accent : '#9ADFFF'}
-                    onChange={(e) => branding({ accent: e.target.value.toUpperCase() })}
-                    className="focus-ring h-11 w-12 shrink-0 cursor-pointer rounded-md border border-accent/[0.16] bg-bg/50 p-1 hover:border-accent/[0.26]"
-                  />
-                  <Input
-                    value={s.branding.accent}
-                    maxLength={7}
-                    onChange={(e) => branding({ accent: e.target.value })}
-                    className={clsx('font-mono uppercase', !accentValid && 'border-warning/60')}
-                  />
-                </div>
-              </Field>
-              <Field label={t('Логотип (URL)')}>
-                <Input
-                  value={s.branding.logoUrl ?? ''}
-                  placeholder="https://"
-                  onChange={(e) => branding({ logoUrl: e.target.value.trim() ? e.target.value : null })}
-                />
-              </Field>
-              <Field label={t('Обои (URL)')}>
-                <Input
-                  value={s.branding.wallpaperUrl ?? ''}
-                  placeholder="https://"
-                  onChange={(e) => branding({ wallpaperUrl: e.target.value.trim() ? e.target.value : null })}
-                />
-              </Field>
-            </div>
+          <Section title={t('Название, логотип и тема')}>
+            <p className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted">
+              <span>{t('Название, логотип, обои, цвет и тема ПК — в разделе «Интерфейс и логотипы».')}</span>
+              <a href="#/interface" className="focus-ring rounded-sm font-medium text-accent hover:underline">
+                {t('Открыть')}
+              </a>
+            </p>
           </Section>
 
           <Section title={t('Разделы для игроков')}>

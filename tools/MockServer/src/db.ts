@@ -810,7 +810,7 @@ export function viewSession(s: SessionRecord, nowMs = Date.now()): Session {
 /** The slice of `db.club` the kiosk sees, read without importing the club module (it imports this one). */
 interface ClubForShell {
   features?: Record<string, boolean>;
-  branding?: { clubName: string; accent: string; logoUrl: string | null; wallpaperUrl: string | null };
+  branding?: { clubName: string; accent: string; logoUrl: string | null; wallpaperUrl: string | null; theme?: string };
   banners?: { id: string; title: string; imageUrl: string; from: string | null; to: string | null; enabled: boolean }[];
   rulesText?: { ru: string; uz: string; en: string };
   screensaver?: { enabled: boolean; afterMinutes: number; items: { url: string; type: 'image' | 'video'; durationSec: number }[] };
@@ -869,7 +869,8 @@ export function agentConfigFor(pc: PcRecord): AgentServerConfig {
     remoteAdmin: { allowScreenCapture: true, allowRemoteInput: true, showIndicator: true },
     shell: {
       locale: 'ru',
-      theme: pc.zone === 'VIP' ? 'neon' : 'default',
+      // The owner's choice (D-93) when made, else the demo's own split.
+      theme: clubDoc()?.branding?.theme ?? (pc.zone === 'VIP' ? 'neon' : 'default'),
       // The owner's switches from the admin console (`db.club.features`) win over the defaults.
       features: {
         shop: clubFeatures()?.shop ?? true,

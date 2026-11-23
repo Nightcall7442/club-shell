@@ -177,6 +177,13 @@ public static class ClubSettingsEndpoints
 
         ContractSchemas.Validate("AdminClubSettingsPatch", body);
         CheckIds(body);
+        // D-93: the club's default shell theme, one of the bundled ones (a PC without the theme would fall back silently).
+        if (body.TryGetProperty("branding", out var brand) && brand.TryGetProperty("theme", out var theme)
+            && theme.ValueKind != JsonValueKind.Null
+            && (theme.ValueKind != JsonValueKind.String || !Agents.AgentConfig.ShellThemes.Contains(theme.GetString())))
+        {
+            throw ApiException.Validation("branding.theme", "enum");
+        }
 
         IReadOnlyList<(Guid PcId, ServerCommandEnvelope Command)> queued = [];
         await using (var c = await db.OpenConnectionAsync())

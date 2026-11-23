@@ -491,6 +491,29 @@ export function clubRoutes(app: FastifyInstance): void {
   );
 
   // ------------------------------------------------------------------------------------------------ settings doc
+  /** D-93: the owner's pictures, as the server keeps them — PNG/JPEG/WebP/GIF by their bytes, at most 5 MB. */
+  app.post<{ Querystring: { kind?: string } }>('/admin/media', async (req, reply) => {
+    requireStaff(req, 'owner');
+    const kind = req.query.kind || 'other';
+    if (!['logo', 'wallpaper', 'banner', 'screensaver', 'other'].includes(kind)) throw errors.validation('kind', 'enum');
+    const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (bytes.length === 0) throw errors.validation('file', 'required');
+    if (bytes.length > 5 * 1024 * 1024) throw errors.validation('file', 'max');
+    const type = sniffPicture(bytes);
+    if (!type) throw errors.validation('file', 'format');
+    const id = uuid();
+    MEDIA.set(id, { type, bytes });
+    reply.code(201);
+    return { id, url: `/api/v1/media/${id}`, contentType: type, size: bytes.length };
+  });
+
+  app.get<{ Params: { id: string } }>('/media/:id', async (req, reply) => {
+    const m = MEDIA.get(req.params.id);
+    if (!m) throw errors.notFound('media');
+    reply.header('Cache-Control', 'public, max-age=31536000, immutable').header('X-Content-Type-Options', 'nosniff').type(m.type);
+    return m.bytes;
+  });
+
   /** Everything the owner edits on the "Клуб" pages, minus secrets: the API key has its own owner-only route. */
   app.get('/admin/club', async (req) => {
     requireStaff(req);
@@ -1444,4 +1467,16 @@ function parseScreensaver(raw: unknown): ScreensaverSettings {
     return { url, type: type as 'image' | 'video', durationSec: sec };
   });
   return { enabled: raw['enabled'] === true, afterMinutes: after, items };
+}
+
+/** Uploaded pictures of this run (D-93). */
+const MEDIA = new Map<string, { type: string; bytes: Buffer }>();
+
+/** The picture's type from its first bytes (as the server): an SVG or a page never passes as a logo. */
+function sniffPicture(b: Buffer): string | null {
+  if (b.length >= 8 && b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
+  if (b.length >= 12 && b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP') return 'image/webp';
+  if (b.length >= 6 && ['GIF87a', 'GIF89a'].includes(b.subarray(0, 6).toString('latin1'))) return 'image/gif';
+  return null;
 }
