@@ -20,6 +20,7 @@ import {
   applyTransaction,
   balanceOf,
   db,
+  errors,
   findPc,
   findUser,
   markDirty,
@@ -88,6 +89,9 @@ export interface ShiftTotals {
   /** What the shift's voids gave back, and how many there were. */
   shopVoids: number;
   shopVoidCount: number;
+  /** Desk top-ups taken back in the shift (D-91), already netted out of the top-up sums, and how many. */
+  topUpCancels?: number;
+  topUpCancelCount?: number;
 }
 
 /** How a bar sale was paid: a counter method, or the client's balance. */
@@ -296,7 +300,9 @@ export type AuditAction =
   | 'callAck'
   | 'callResolve'
   | 'stockCreate'
-  | 'stockArchive';
+  | 'stockArchive'
+  // D-91: a desk top-up taken back; listed by /admin/control apart (`corrections`), not in its journal.
+  | 'topUpCancel';
 
 export interface AuditEntry {
   id: string;
@@ -658,6 +664,52 @@ export function quote(
   return { base, dayPct, discountPct, discountReason: best?.reason ?? null, total: uzs(Math.max(0, total)) };
 }
 
+/**
+ * D-90, time «по сумме»: the quote of the most whole minutes of an hourly tariff the cashier's `amount` buys now, as the
+ * server sells it — from the shortest purchase (5, or the tariff's minimum; 5 for an extension) up to 24 h and the
+ * tariff's maximum less `purchasedMinutes` — so the price is never above the amount. A package sells only itself
+ * (`400 amount package`); too little for the shortest purchase is `409 amountTooLow {minutes, total}`. The price never
+ * falls as minutes grow, so a binary search finds it.
+ */
+export function minutesFor(
+  tariff: Tariff,
+  amount: number,
+  userId: string | null,
+  zone: string,
+  purchasedMinutes = 0,
+): { minutes: number; priced: PriceQuote } {
+  if (tariff.isPackage) throw errors.validation('amount', 'package');
+  const shortest = purchasedMinutes > 0 ? 5 : Math.max(5, tariff.minMinutes);
+  const longest = Math.max(
+    shortest,
+    Math.min(1440, tariff.maxMinutes != null ? tariff.maxMinutes - purchasedMinutes : 1440),
+  );
+  let best = quote(tariff, shortest, userId, zone);
+  if (best.total.amount > amount) throw errors.conflict('amountTooLow', { minutes: shortest, total: best.total });
+  let lo = shortest;
+  let hi = longest;
+  while (lo < hi) {
+    const mid = lo + Math.ceil((hi - lo) / 2);
+    const q = quote(tariff, mid, userId, zone);
+    if (q.total.amount <= amount) {
+      lo = mid;
+      best = q;
+    } else hi = mid - 1;
+  }
+  return { minutes: lo, priced: best };
+}
+
+/** D-90: the `amount` of a purchase «по сумме» (1 tiyin … 1 000 000 сум), prepaid only; null — none sent. */
+export function budgetOf(b: Record<string, unknown>, prepaid: boolean): number | null {
+  const raw = b['amount'];
+  if (raw === undefined || raw === null) return null;
+  if (!prepaid) throw errors.validation('amount', 'postpaid');
+  if (typeof raw !== 'number' || !Number.isInteger(raw)) throw errors.validation('amount', 'format');
+  if (raw < 1) throw errors.validation('amount', 'min');
+  if (raw > 100_000_000) throw errors.validation('amount', 'max');
+  return raw;
+}
+
 function localClock(d: Date): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
@@ -870,6 +922,8 @@ export function topUpMethod(description: string): PayMethod | 'other' {
 
 /** Description of a cash payout to a walk-in guest (an `adjustment` row). */
 export const PAYOUT_DESCRIPTION = 'Выдано наличными на кассе';
+/** The row that takes a desk top-up back (D-91): a `topUp` of −amount, its method still in the description. */
+export const TOPUP_CANCEL_DESCRIPTION = 'Cancelled top-up';
 /** A cash top-up booked with the club API key says so in its description. */
 export const API_TOPUP = 'via the club API';
 
@@ -897,6 +951,8 @@ export function totalsSince(from: string, to: string = now(), shift: ShiftRecord
     shopByMethod: { cash: 0, card: 0, payme: 0, click: 0, uzum: 0, balance: 0 },
     shopVoids: 0,
     shopVoidCount: 0,
+    topUpCancels: 0,
+    topUpCancelCount: 0,
   };
   for (const m of shift?.cashMoves ?? []) {
     if (m.kind === 'in') t.cashIn += m.amount;
@@ -923,6 +979,10 @@ export function totalsSince(from: string, to: string = now(), shift: ShiftRecord
         else t.topUpOther += a;
         t.topUpByMethod[method] += a;
         if (method === 'cash' && tx.description.includes(API_TOPUP)) t.apiCash += a;
+        if (tx.description.startsWith(TOPUP_CANCEL_DESCRIPTION)) {
+          t.topUpCancels = (t.topUpCancels ?? 0) - a;
+          t.topUpCancelCount = (t.topUpCancelCount ?? 0) + 1;
+        }
         break;
       }
       case 'adjustment':

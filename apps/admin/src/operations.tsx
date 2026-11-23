@@ -9,6 +9,8 @@
  * hover or focus (always on a touch screen). On the map the feed heads itself «Операции смены» with a «Журнал ›» link to
  * the Смена page; on the Смена page its section does.
  *
+ * A desk top-up has «Исправить / отменить…» (D-91): the right amount in one step, or the whole top-up back by its method.
+ *
  * Polls `GET /admin/shift/operations` every 5 s while the page is visible and refetches when the shift's money changes
  * ({@link useShift}`.version`); «Ещё» pages back with the server's cursor. A server without the route (404) hides it.
  */
@@ -22,6 +24,8 @@ import {
   type OperationKind,
   type OperationsPage,
   type SaleVoid,
+  type TopUpCancelReason,
+  type TopUpCancelResult,
   type VoidReason,
 } from '@/api';
 import { pcLabel } from '@/clientSearch';
@@ -30,11 +34,18 @@ import { describe, isLostAnswer } from '@/errors';
 import { exactDigits, minutesLabel, moneyExact } from '@/format';
 import { dateLocale, t } from '@/i18n';
 import { ChevronRightIcon, PrintIcon, pathIcon } from '@/icons';
-import { OPERATION_LABEL, REASON_LABEL, VOID_REASONS, VOID_REASON_LABEL } from '@/labels';
+import {
+  OPERATION_LABEL,
+  REASON_LABEL,
+  TOPUP_CANCEL_REASONS,
+  TOPUP_CANCEL_REASON_LABEL,
+  VOID_REASONS,
+  VOID_REASON_LABEL,
+} from '@/labels';
 import { methodName, useHeldKey } from '@/paybox';
 import { CashSlip, Receipt, printDocument, type ReceiptData } from '@/print';
 import { ChoiceButton, useShift } from '@/shift';
-import { Button, EmptyState, Field, Note, PanelHeader, Sheet, inputCls } from '@/ui';
+import { Button, EmptyState, Field, Note, PanelHeader, Segmented, Sheet, inputCls } from '@/ui';
 
 /** «Аннулировать…» of a row: an arrow turning back (the shared set has no undo mark). */
 const UndoIcon = pathIcon('M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11', 'UndoIcon');
@@ -42,6 +53,8 @@ const UndoIcon = pathIcon('M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11', 'UndoI
 const POLL_MS = 5000;
 /** A cashier takes a bar sale back within this many minutes of it; the owner later (D-56). */
 const VOID_WINDOW_MIN = 15;
+/** A cashier takes back their own desk top-up within this many minutes of it; the owner any of the open shift (D-91). */
+const CANCEL_WINDOW_MIN = 15;
 
 /** Kinds that have a slip to reprint. */
 const RECEIPT_KIND: Partial<Record<OperationKind, ReceiptData['kind']>> = {
@@ -61,7 +74,7 @@ export const FEED_FILTERS: { id: string; label: string; kinds: OperationKind[] }
   {
     id: 'money',
     label: 'Оплаты',
-    kinds: ['topUp', 'debtPaid', 'sessionOpen', 'sessionExtend', 'promoRedeem', 'shopSale'],
+    kinds: ['topUp', 'debtPaid', 'sessionOpen', 'sessionExtend', 'promoRedeem', 'shopSale', 'topUpCancel'],
   },
   { id: 'sessions', label: 'Сеансы', kinds: ['sessionOpen', 'sessionExtend', 'sessionEnd', 'sessionMove'] },
   { id: 'bar', label: 'Бар', kinds: ['shopSale', 'shopVoid'] },
@@ -107,6 +120,9 @@ export function operationWhat(op: Operation): string {
     if (op.kind === 'shopVoid' && op.note) parts.push(op.note);
   } else if (op.kind === 'sessionMove') {
     if (op.fromPc && op.pc) parts.push(`${pcLabel(op.fromPc.name)} → ${pcLabel(op.pc.name)}`);
+  } else if (op.kind === 'topUpCancel') {
+    if (op.reasonCode) parts.push(t(TOPUP_CANCEL_REASON_LABEL[op.reasonCode as TopUpCancelReason] ?? op.reasonCode));
+    if (op.note) parts.push(op.note);
   }
   return parts.join(' · ');
 }
@@ -118,6 +134,8 @@ function linesSummary(lines: Operation['lines']): string {
 
 /** How it was paid: the payment with its method, or what the balance paid. */
 function operationPaid(op: Operation): string | null {
+  if (op.kind === 'topUpCancel' && op.paid)
+    return t('возврат {sum}', { sum: `${moneyExact(op.paid.amount)} · ${methodName(op.paid.method)}` });
   if (op.kind === 'shopVoid')
     return op.method === 'balance' || !op.method
       ? t('на баланс {sum}', { sum: moneyExact(op.amount) })
@@ -250,6 +268,7 @@ function Row({
   op,
   club,
   onVoid,
+  onCancel,
   roomy,
   shiftStaff,
 }: {
@@ -257,6 +276,8 @@ function Row({
   club: string | null;
   /** «Аннулировать…» of a bar sale this staff member may still take back. */
   onVoid?: () => void;
+  /** «Исправить / отменить…» of a desk top-up this staff member may still take back (D-91). */
+  onCancel?: () => void;
   /** The Смена page: a little more air and type than the map's column. */
   roomy: boolean;
   /** Who runs the open shift: the map's feed leaves that name out of the row (every row would repeat it). */
@@ -296,7 +317,7 @@ function Row({
         >
           {op.voided && (
             <span className="inline-flex h-4 shrink-0 items-center rounded-sm border border-danger/40 bg-danger/[0.06] px-1.5 font-mono text-[8.5px] font-semibold uppercase leading-none tracking-[0.12em] text-danger-ink">
-              {t('аннулирован')}
+              {op.kind === 'topUp' ? t('отменено') : t('аннулирован')}
             </span>
           )}
           <span className="truncate">{operationWhat(op)}</span>
@@ -318,7 +339,7 @@ function Row({
         >
           <DrawerAmount op={op} />
         </span>
-        {(onVoid || printable) && (
+        {(onVoid || onCancel || printable) && (
           <span
             className={clsx(
               '-mr-1 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-focus-within/row:opacity-100 group-hover/row:opacity-100 [@media(hover:none)]:opacity-100',
@@ -331,6 +352,17 @@ function Row({
                 aria-label={t('Аннулировать…')}
                 title={t('Аннулировать…')}
                 onClick={onVoid}
+                className={clsx(ROW_ACTION, 'hover:!bg-danger/10 hover:!text-danger-ink')}
+              >
+                <UndoIcon size={14} />
+              </button>
+            )}
+            {onCancel && (
+              <button
+                type="button"
+                aria-label={t('Исправить / отменить…')}
+                title={t('Исправить / отменить…')}
+                onClick={onCancel}
                 className={clsx(ROW_ACTION, 'hover:!bg-danger/10 hover:!text-danger-ink')}
               >
                 <UndoIcon size={14} />
@@ -377,6 +409,7 @@ export function OperationsFeed({
   const club = useClub();
   const owner = club.staff?.role === 'owner';
   const [voiding, setVoiding] = useState<Operation | null>(null);
+  const [cancelling, setCancelling] = useState<Operation | null>(null);
   // Every row seen since the shift / filter was picked, newest first: a poll adds the new ones on top, «Ещё» the older
   // ones below, so a row never falls out between two pages.
   const [items, setItems] = useState<Operation[]>([]);
@@ -504,6 +537,16 @@ export function OperationsFeed({
                 ? () => setVoiding(op)
                 : undefined
             }
+            onCancel={
+              cancellable(op, {
+                owner,
+                me: club.staff?.name ?? null,
+                openShiftId: openShift?.id ?? null,
+                feedShiftId: page?.shift?.id ?? null,
+              })
+                ? () => setCancelling(op)
+                : undefined
+            }
           />
         ))}
       </ol>
@@ -531,6 +574,16 @@ export function OperationsFeed({
             {loadingMore ? '…' : t('Ещё')}
           </Button>
         ))}
+      {cancelling && (
+        <TopUpCancelSheet
+          op={cancelling}
+          onClose={() => setCancelling(null)}
+          onDone={() => {
+            refresh();
+            void load();
+          }}
+        />
+      )}
       {voiding && (
         <VoidSheet
           op={voiding}
@@ -556,6 +609,214 @@ function voidable(
   if (op.kind !== 'shopSale' || op.voided || !op.saleId || !openShiftId) return false;
   if (op.method !== 'balance' && feedShiftId !== openShiftId) return false;
   return owner || Date.now() - Date.parse(op.at) <= VOID_WINDOW_MIN * 60_000;
+}
+
+/**
+ * Whether «Исправить / отменить…» is offered (D-91; the server decides): a desk top-up of the open shift not taken back
+ * yet; a cashier only their own (the feed names the staff member) within 15 minutes of it.
+ */
+function cancellable(
+  op: Operation,
+  {
+    owner,
+    me,
+    openShiftId,
+    feedShiftId,
+  }: { owner: boolean; me: string | null; openShiftId: string | null; feedShiftId: string | null },
+): boolean {
+  if (op.kind !== 'topUp' || op.voided || !op.paid?.transactionId || !openShiftId || feedShiftId !== openShiftId)
+    return false;
+  return owner || (op.staffName === me && Date.now() - Date.parse(op.at) <= CANCEL_WINDOW_MIN * 60_000);
+}
+
+/**
+ * «Исправить сумму» or «Отменить пополнение» of a desk top-up (D-91): the right amount, which the server books in the same
+ * step by the same method, or the whole top-up back; a reason (a note for «Другое»); what to hand back or take. One key
+ * until a definite answer: a lost one offers only the same action again.
+ */
+function TopUpCancelSheet({
+  op,
+  onClose,
+  onDone,
+}: {
+  op: Operation;
+  onClose: () => void;
+  onDone: () => void;
+}): JSX.Element {
+  const [mode, setMode] = useState<'fix' | 'cancel'>('fix');
+  const [reason, setReason] = useState<TopUpCancelReason>('wrongAmount');
+  const [digits, setDigits] = useState('');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lost, setLost] = useState(false);
+  const [done, setDone] = useState<TopUpCancelResult | null>(null);
+  const key = useHeldKey();
+  const paid = op.paid ?? { amount: op.amount, method: 'cash', transactionId: null };
+  const method = paid.method;
+  const right = mode === 'fix' ? Number(digits || '0') * 100 : 0;
+  const trimmed = note.trim();
+  const noteOk = reason === 'other' ? trimmed.length >= 3 && trimmed.length <= 200 : trimmed.length <= 200;
+  const amountOk = mode === 'cancel' || (right > 0 && right !== paid.amount && right <= 100_000_000);
+  const ready = noteOk && amountOk && !busy && paid.transactionId !== null;
+  const diff = paid.amount - right;
+  const cash = method === 'cash';
+  const what =
+    diff > 0
+      ? cash
+        ? t('Выдайте {sum} наличными из кассы', { sum: moneyExact(diff) })
+        : t('Верните {sum} клиенту: {method}', { sum: moneyExact(diff), method: methodName(method) })
+      : diff < 0
+        ? t('Примите ещё {sum}: {method}', { sum: moneyExact(-diff), method: methodName(method) })
+        : null;
+
+  const submit = async (): Promise<void> => {
+    if (!ready || !paid.transactionId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await adminApi.cancelTopUp(
+        {
+          transactionId: paid.transactionId,
+          reasonCode: reason,
+          ...(trimmed ? { note: trimmed } : {}),
+          ...(mode === 'fix' ? { amount: right } : {}),
+        },
+        key.take(),
+      );
+      key.settle();
+      setLost(false);
+      setDone(r);
+      onDone();
+    } catch (e) {
+      key.settle(e);
+      setLost(isLostAnswer(e));
+      setError(
+        isLostAnswer(e)
+          ? t('Ответ сервера не пришёл: деньги могли пройти. Повторите это же действие — дважды оно не проведётся.')
+          : describe(e),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet title={t('Исправить пополнение')} onClose={onClose}>
+      {/* The top-up being corrected: when, whose, how much and how. */}
+      <div className="well flex items-center justify-between gap-4 px-3.5 py-3">
+        <span className="min-w-0">
+          <span className="label-sm tnum block">{time(op.at)}</span>
+          <span className="mt-1.5 block truncate text-[13px] font-medium leading-5 text-text">
+            {[op.client?.displayName, methodName(method)].filter(Boolean).join(' · ')}
+          </span>
+        </span>
+        <span className="tnum shrink-0 whitespace-nowrap font-mono text-[15px] font-semibold text-hi">
+          {moneyExact(paid.amount)}
+        </span>
+      </div>
+      {done ? (
+        <>
+          <Note role="status" tone="ok">
+            {done.topUp
+              ? t('Исправлено · {from} → {to}', {
+                  from: moneyExact(done.cancelled.amount),
+                  to: moneyExact(done.topUp.transaction.amount.amount),
+                })
+              : t('Пополнение отменено · {sum}', { sum: moneyExact(done.cancelled.amount) })}
+          </Note>
+          {done.cancelled.bonus > 0 && (
+            <p className="text-xs text-muted">
+              {t('Бонус {sum} снят с баланса', { sum: moneyExact(done.cancelled.bonus) })}
+            </p>
+          )}
+          <Button variant="primary" autoFocus onClick={onClose}>
+            {t('Готово')}
+          </Button>
+        </>
+      ) : (
+        <>
+          <Segmented
+            label={t('Что сделать')}
+            value={mode}
+            options={[
+              { id: 'fix', label: t('Исправить сумму') },
+              { id: 'cancel', label: t('Отменить пополнение') },
+            ]}
+            onChange={(v) => {
+              setMode(v as 'fix' | 'cancel');
+              if (v === 'fix') setReason('wrongAmount');
+            }}
+          />
+          {mode === 'fix' ? (
+            <Field
+              label={t('Правильная сумма')}
+              hint={t('Пополнится этим же способом: {method}', { method: methodName(method) })}
+            >
+              <div className="relative">
+                <input
+                  className={clsx(inputCls, 'tnum pr-14')}
+                  inputMode="numeric"
+                  autoFocus
+                  aria-label={t('Правильная сумма')}
+                  value={digits.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}
+                  readOnly={busy || lost}
+                  onChange={(e) => setDigits(e.target.value.replace(/\D/g, '').slice(0, 9))}
+                />
+                <span className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-medium text-muted">
+                  {t('сум')}
+                </span>
+              </div>
+            </Field>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <span className="label-sm">{t('Причина')}</span>
+              <div role="group" aria-label={t('Причина')} className="grid grid-cols-3 gap-2">
+                {TOPUP_CANCEL_REASONS.map((r) => (
+                  <ChoiceButton key={r} on={reason === r} disabled={busy || lost} onClick={() => setReason(r)}>
+                    {t(TOPUP_CANCEL_REASON_LABEL[r])}
+                  </ChoiceButton>
+                ))}
+              </div>
+            </div>
+          )}
+          <Field
+            label={t('Комментарий')}
+            hint={reason === 'other' ? t('Обязателен для «Другое»: от 3 до 200 символов') : t('Необязательно')}
+          >
+            <input
+              className={inputCls}
+              value={note}
+              maxLength={200}
+              readOnly={busy || lost}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </Field>
+          {/* Where the money goes; the bonus of the wrong top-up leaves with it. */}
+          {what && (
+            <p className="well px-3.5 py-3 text-[13px] font-medium leading-5 text-text">
+              {what}
+              <span className="mt-0.5 block text-xs font-normal text-muted">
+                {t('Бонус за ошибочное пополнение снимется с баланса')}
+              </span>
+            </p>
+          )}
+          {mode === 'fix' && right === paid.amount && (
+            <p className="text-xs font-medium text-warning">{t('Это та же сумма')}</p>
+          )}
+          <Note note={error ? { text: error, tone: 'err' } : null} />
+          <div className="flex justify-end gap-2 border-t border-accent/[0.08] pt-4">
+            <Button variant="ghost" onClick={onClose}>
+              {t('Отмена')}
+            </Button>
+            <Button variant="danger" disabled={!ready} onClick={() => void submit()}>
+              {busy ? '…' : lost ? t('Повторить') : mode === 'fix' ? t('Исправить') : t('Отменить пополнение')}
+            </Button>
+          </div>
+        </>
+      )}
+    </Sheet>
+  );
 }
 
 /**

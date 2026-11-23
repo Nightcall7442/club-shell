@@ -2,7 +2,7 @@
  * Names the counter gives to codes the server sends (payment methods, cash reasons, the kinds of the operations feed),
  * as Russian source keys of `t()`: the screens, the feed and the printed slips share them.
  */
-import type { CallCategory, CashReason, OperationKind, PayMethod, VoidReason } from '@/api';
+import type { CallCategory, CashReason, OperationKind, PayMethod, TopUpCancelReason, VoidReason } from '@/api';
 import { t } from '@/i18n';
 
 export const PAY_METHOD_LABEL: Record<PayMethod, string> = {
@@ -38,6 +38,7 @@ export const OPERATION_LABEL: Record<OperationKind, string> = {
   shopSale: 'Продажа бара',
   shopVoid: 'Аннулирование',
   sessionMove: 'Пересадка',
+  topUpCancel: 'Отмена пополнения',
 };
 
 /** What a player called the desk about (`problem` — a «report a problem» text from the kiosk). */
@@ -58,6 +59,15 @@ export const VOID_REASON_LABEL: Record<VoidReason, string> = {
 };
 
 export const VOID_REASONS: VoidReason[] = ['mistake', 'returned', 'defect', 'other'];
+
+/** Why a desk top-up is taken back (D-91). */
+export const TOPUP_CANCEL_REASON_LABEL: Record<TopUpCancelReason, string> = {
+  wrongAmount: 'Не та сумма',
+  wrongClient: 'Не тот клиент',
+  other: 'Другое',
+};
+
+export const TOPUP_CANCEL_REASONS: TopUpCancelReason[] = ['wrongAmount', 'wrongClient', 'other'];
 
 /** Product categories of the shop, in the order the bar shows them. */
 export const PRODUCT_CATEGORY_LABEL: Record<string, string> = {

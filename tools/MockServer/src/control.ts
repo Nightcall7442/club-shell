@@ -39,6 +39,9 @@ export interface StaffSummary {
   discounts: number;
   shortfall: number;
   flags: Record<Severity, number>;
+  /** Beyond the contract (D-91): the desk top-ups this cashier took back, how many and how much. */
+  topUpCancels: number;
+  topUpCancelled: number;
 }
 
 const MONEY_ACTIONS: ReadonlySet<AuditAction> = new Set([
@@ -66,6 +69,7 @@ const BEYOND_CONTRACT: ReadonlySet<AuditAction> = new Set([
   'callResolve',
   'stockCreate',
   'stockArchive',
+  'topUpCancel',
 ]);
 
 export function inContract(e: AuditEntry): boolean {
@@ -194,7 +198,11 @@ export function flagsFor(entries: readonly AuditEntry[]): Flag[] {
 }
 
 /** Per-cashier totals over a slice of the journal plus its flags. */
-export function summaries(entries: readonly AuditEntry[], flags: readonly Flag[]): StaffSummary[] {
+export function summaries(
+  entries: readonly AuditEntry[],
+  flags: readonly Flag[],
+  corrections: readonly AuditEntry[] = [],
+): StaffSummary[] {
   const byStaff = new Map<string, StaffSummary>();
   const of = (id: string, name: string): StaffSummary => {
     let s = byStaff.get(id);
@@ -209,6 +217,8 @@ export function summaries(entries: readonly AuditEntry[], flags: readonly Flag[]
         discounts: 0,
         shortfall: 0,
         flags: { high: 0, medium: 0, low: 0 },
+        topUpCancels: 0,
+        topUpCancelled: 0,
       };
       byStaff.set(id, s);
     }
@@ -225,6 +235,11 @@ export function summaries(entries: readonly AuditEntry[], flags: readonly Flag[]
     if (e.action === 'shiftClose') s.shortfall += Math.max(0, -Number(e.meta['diff'] ?? 0));
   }
   for (const f of flags) of(f.staffId, f.staffName).flags[f.severity] += 1;
+  for (const e of corrections) {
+    const s = of(e.staffId, e.staffName);
+    s.topUpCancels += 1;
+    s.topUpCancelled += e.amount;
+  }
   return [...byStaff.values()].sort(
     (a, b) => b.flags.high - a.flags.high || b.flags.medium - a.flags.medium || b.operations - a.operations,
   );
@@ -249,6 +264,20 @@ function alertOn(e: AuditEntry): void {
     ).length;
     if (count === ctl.earlyEndsPerShift) {
       emit('suspicious', `${e.staffName}: ${count} продажи бара аннулированы за смену`, { entryId: e.id });
+    }
+    return;
+  }
+  // A desk top-up taken back (D-91), as a bar void.
+  if (e.action === 'topUpCancel') {
+    if (e.amount >= club().notifications.bigTopupAt) {
+      emit('suspicious', `${e.staffName}: отменено пополнение ${e.detail} на ${money(e.amount)}`, { entryId: e.id });
+      return;
+    }
+    const count = club().audit.filter(
+      (x) => x.action === 'topUpCancel' && x.staffId === e.staffId && x.shiftId === e.shiftId,
+    ).length;
+    if (count === ctl.earlyEndsPerShift) {
+      emit('suspicious', `${e.staffName}: ${count} отмены пополнений за смену`, { entryId: e.id });
     }
     return;
   }

@@ -38,12 +38,13 @@ public sealed record AdminStaffMember(string Id, string Name, string Role, bool 
 /// are the drawer's movements (<c>cash_movements</c>), <c>payouts</c> the cash given back to guests, <c>apiCash</c> the cash
 /// top-ups the club API key posted (never in the drawer); cash desk part 3 (D-57): <c>shop</c> is the bar net of voids,
 /// <c>shopByMethod</c> splits it (the balance part may be negative in a shift that voids an earlier shift's sale),
-/// <c>shopVoids</c>/<c>shopVoidCount</c> the voids made in the shift. A Z saved before those fields reads them as 0.
+/// <c>shopVoids</c>/<c>shopVoidCount</c> the voids made in the shift; D-91: <c>topUpCancels</c>/<c>topUpCancelCount</c> the
+/// desk top-ups taken back in it (already netted out of the top-up sums). A Z saved before those fields reads them as 0.
 /// </summary>
 public sealed record AdminShiftTotals(
     long TopUpCash, long TopUpOther, long Sessions, long Shop, long Refunds, long Bonuses, int Count, AdminTopUpByMethod TopUpByMethod,
     long CashIn = 0, long CashOut = 0, long Payouts = 0, long ApiCash = 0, AdminShopByMethod? ShopByMethod = null, long ShopVoids = 0,
-    int ShopVoidCount = 0, long WriteOffs = 0, int WriteOffCount = 0);
+    int ShopVoidCount = 0, long WriteOffs = 0, int WriteOffCount = 0, long TopUpCancels = 0, int TopUpCancelCount = 0);
 
 /// <summary>Top-ups of a shift by <c>ledger_entries.method</c>; <c>other</c> — rows with no method.</summary>
 public sealed record AdminTopUpByMethod(long Cash, long Card, long Payme, long Click, long Uzum, long Other);
@@ -215,16 +216,36 @@ public sealed record AdminLoginRequest(string? Pin, string? ClubCode, JsonElemen
 /// </summary>
 public sealed record AdminPayment(long? Amount, string? Method);
 
-/// <summary><c>prepaid</c> (beyond the contract, D-30): false — postpaid from the desk; absent — prepaid, as before.</summary>
-public sealed record AdminOpenSessionRequest(Guid? PcId, Guid? UserId, Guid? TariffId, int? Minutes, AdminPayment? Payment = null, bool? Prepaid = null);
+/// <summary>
+/// <c>prepaid</c> (beyond the contract, D-30): false — postpaid from the desk; absent — prepaid, as before. <c>amount</c>
+/// (beyond the contract, D-90, tiyin): time «по сумме» — the server sells the most whole minutes this buys and ignores
+/// <c>minutes</c>.
+/// </summary>
+public sealed record AdminOpenSessionRequest(
+    Guid? PcId, Guid? UserId, Guid? TariffId, int? Minutes, AdminPayment? Payment = null, bool? Prepaid = null, long? Amount = null);
 
 /// <summary>A walk-in guest's seat (<c>POST /admin/sessions/guest</c>, beyond the contract, D-24).</summary>
-public sealed record AdminGuestSessionRequest(Guid? PcId, Guid? TariffId, int? Minutes, bool? Prepaid, string? DisplayName, AdminPayment? Payment);
+public sealed record AdminGuestSessionRequest(
+    Guid? PcId, Guid? TariffId, int? Minutes, bool? Prepaid, string? DisplayName, AdminPayment? Payment, long? Amount = null);
 
-public sealed record AdminSessionTarget(Guid? PcId, Guid? SessionId, int? Minutes, Guid? TariffId, AdminPayment? Payment = null);
+/// <summary><c>amount</c> (beyond the contract, D-90): extend «по сумме», as <see cref="AdminOpenSessionRequest"/>.</summary>
+public sealed record AdminSessionTarget(Guid? PcId, Guid? SessionId, int? Minutes, Guid? TariffId, AdminPayment? Payment = null, long? Amount = null);
 
 /// <summary><c>settleDebt</c> (beyond the contract, D-34): exactly the debt, no bonus.</summary>
 public sealed record AdminTopUpRequest(Guid? UserId, long? Amount, string? Method, bool? SettleDebt = null);
+
+/// <summary>
+/// Body of <c>POST /admin/wallet/topup/cancel</c> (beyond the contract, D-91): the desk top-up to take back, why, and
+/// <c>amount</c> — the right amount to top up instead, in the same method, in the same step.
+/// </summary>
+public sealed record AdminTopUpCancelRequest(Guid? TransactionId, string? ReasonCode, string? Note, long? Amount);
+
+/// <summary>A top-up taken back (D-91): the reversal row <c>id</c>, the top-up it cancels and what went back. Amounts in tiyin.</summary>
+public sealed record AdminTopUpCancelled(
+    Guid Id, DateTimeOffset At, Guid TransactionId, DateTimeOffset TopUpAt, long Amount, long Bonus, string Method, string ReasonCode, string? Note, string StaffName);
+
+/// <summary><c>topUp</c>: the corrected top-up when an <c>amount</c> came with the cancel.</summary>
+public sealed record AdminTopUpCancelResponse(AdminTopUpCancelled Cancelled, Money Balance, AdminTopUpResponse? TopUp, long ExpectedCash);
 
 /// <summary>A guest's cash payout (<c>POST /admin/wallet/payout</c>, beyond the contract, D-37).</summary>
 public sealed record AdminPayoutRequest(Guid? UserId, long? Amount, string? Method);
@@ -239,7 +260,11 @@ public sealed record AdminPcCommandRequest(string? Kind, string? Text);
 
 public sealed record AdminCashRequest(long? OpeningCash, long? ClosingCash);
 
-public sealed record AdminQuoteRequest(Guid? TariffId, Guid? PcId, int? Minutes, Guid? UserId);
+/// <summary>
+/// <c>amount</c> (beyond the contract, D-90): price the most whole minutes this buys instead of <c>minutes</c>;
+/// <c>sessionId</c> (with it): of an extension — the minutes the session may still add under the tariff's maximum.
+/// </summary>
+public sealed record AdminQuoteRequest(Guid? TariffId, Guid? PcId, int? Minutes, Guid? UserId, long? Amount = null, Guid? SessionId = null);
 
 /// <summary><c>stateless</c> is beyond the contract (SHELL_CHANGES 25, <see cref="AdminHallPc"/>).</summary>
 public sealed record AdminPcChange(string? Zone, int? Number, string? Device, string? Name, int? X, int? Y, bool? Maintenance, bool? Stateless = null, int? Rotation = null);

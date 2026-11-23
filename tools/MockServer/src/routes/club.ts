@@ -26,6 +26,7 @@ import {
   errors,
   findGame,
   findPc,
+  findSession,
   findTariff,
   findUser,
   idempotent,
@@ -69,6 +70,8 @@ import {
   mayServicePcs,
   mayWriteOff,
   openShift,
+  budgetOf,
+  minutesFor,
   profileOf,
   quote,
   shiftView,
@@ -675,8 +678,24 @@ export function clubRoutes(app: FastifyInstance): void {
     const pc = findPc(str(b, 'pcId', 64));
     if (!tariff) throw errors.notFound('tariff');
     if (!pc) throw errors.notFound('pc');
+    const userId = optStr(b, 'userId', 64);
+    const amount = budgetOf(b, true);
+    if (amount !== null && !tariff.isPackage) {
+      // An extension's quote names its session: the tariff's maximum counts the minutes it already bought (D-90).
+      const sessionId = optStr(b, 'sessionId', 64);
+      const session = sessionId ? findSession(sessionId) : undefined;
+      if (sessionId && !session) throw errors.notFound('session');
+      const { minutes, priced } = minutesFor(
+        tariff,
+        amount,
+        userId,
+        pc.zone,
+        session ? Math.floor(session.purchasedSec / 60) : 0,
+      );
+      return { ...priced, rule: tariffRule(tariff, pc.zone), minutes };
+    }
     const minutes = tariff.isPackage ? (tariff.packageMinutes ?? 60) : int(b, 'minutes', 5, 1440);
-    return { ...quote(tariff, minutes, optStr(b, 'userId', 64), pc.zone), rule: tariffRule(tariff, pc.zone), minutes };
+    return { ...quote(tariff, minutes, userId, pc.zone), rule: tariffRule(tariff, pc.zone), minutes };
   });
 
   // ------------------------------------------------------------------------------------------------ clients
@@ -1279,15 +1298,18 @@ export function clubRoutes(app: FastifyInstance): void {
     const from = new Date(Date.now() - days * 86_400_000).toISOString();
     const c = club();
     const inPeriod = c.audit.filter((e) => e.at >= from && inContract(e));
+    // D-91: the desk top-ups taken back, apart from the journal (outside the contract's actions).
+    const corrections = c.audit.filter((e) => e.at >= from && e.action === 'topUpCancel');
     const flags = flagsFor(inPeriod);
     const staffId = req.query.staffId;
     return {
       from,
       to: now(),
       settings: c.control,
-      staff: summaries(inPeriod, flags),
+      staff: summaries(inPeriod, flags, corrections),
       flags: staffId ? flags.filter((f) => f.staffId === staffId) : flags,
       log: (staffId ? inPeriod.filter((e) => e.staffId === staffId) : inPeriod).slice(0, 300),
+      corrections: (staffId ? corrections.filter((e) => e.staffId === staffId) : corrections).slice(0, 300),
     };
   });
 
@@ -1447,7 +1469,8 @@ function parseTopUpPromo(raw: unknown): TopUpPromo {
   };
   const from = time('from');
   const to = time('to');
-  if ((from === null) !== (to === null)) throw errors.validation(from === null ? 'topUpPromo.from' : 'topUpPromo.to', 'required');
+  if ((from === null) !== (to === null))
+    throw errors.validation(from === null ? 'topUpPromo.from' : 'topUpPromo.to', 'required');
   const until = typeof raw['until'] === 'string' ? raw['until'] : null;
   if (until !== null && Number.isNaN(Date.parse(until))) throw errors.validation('topUpPromo.until', 'format');
   return {
@@ -1464,7 +1487,8 @@ function parseTopUpPromo(raw: unknown): TopUpPromo {
 /** The free PCs' screensaver, checked as the server checks it (`400 validation` on `screensaver.*`). */
 function parseScreensaver(raw: unknown): ScreensaverSettings {
   if (!isObject(raw)) throw errors.validation('screensaver', 'schema');
-  const after = typeof raw['afterMinutes'] === 'number' ? Math.round(raw['afterMinutes']) : DEFAULT_SCREENSAVER.afterMinutes;
+  const after =
+    typeof raw['afterMinutes'] === 'number' ? Math.round(raw['afterMinutes']) : DEFAULT_SCREENSAVER.afterMinutes;
   if (after < 1 || after > 120) throw errors.validation('screensaver.afterMinutes', after < 1 ? 'min' : 'max');
   const list = Array.isArray(raw['items']) ? (raw['items'] as unknown[]) : [];
   if (list.length > 20) throw errors.validation('screensaver.items', 'max');
