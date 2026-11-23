@@ -161,9 +161,7 @@ pub(crate) fn own_folder(exe_path: &str) -> Option<String> {
     let exe = normalize_path(exe_path);
     let (dir, _) = exe.rsplit_once('\\')?;
     let parts: Vec<&str> = dir.split('\\').filter(|p| !p.is_empty()).collect();
-    if parts.len() < 3
-        || parts[1] == "windows"
-        || SHARED_FOLDERS.contains(&parts[parts.len() - 1])
+    if parts.len() < 3 || parts[1] == "windows" || SHARED_FOLDERS.contains(&parts[parts.len() - 1])
     {
         return None;
     }

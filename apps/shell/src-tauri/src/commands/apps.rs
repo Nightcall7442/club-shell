@@ -86,7 +86,13 @@ pub async fn apps_launch(
             .request(names::apps::LAUNCH, &request(Some(true)))
             .await?;
         let mut pids = resp.pids.clone();
-        pids.extend(again.pids.iter().copied().filter(|p| !resp.pids.contains(p)));
+        pids.extend(
+            again
+                .pids
+                .iter()
+                .copied()
+                .filter(|p| !resp.pids.contains(p)),
+        );
         resp = AppsLaunchResponse {
             pids,
             already_running: true,

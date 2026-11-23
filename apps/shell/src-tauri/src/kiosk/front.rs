@@ -290,7 +290,12 @@ pub async fn front_running_app(kiosk: Arc<Kiosk>, family: Vec<u32>) -> bool {
     let ok = tauri::async_runtime::spawn_blocking(move || bring_to_front(hwnd, owner))
         .await
         .unwrap_or(false);
-    tracing::info!(pid = owner, hwnd, ok, "running program brought to front instead of a second copy");
+    tracing::info!(
+        pid = owner,
+        hwnd,
+        ok,
+        "running program brought to front instead of a second copy"
+    );
     if !ok {
         kiosk.end_hand_off();
     }

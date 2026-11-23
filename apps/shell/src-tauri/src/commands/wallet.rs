@@ -97,7 +97,10 @@ pub async fn wallet_redeem_promo(
     }
     let r: WalletRedeemPromoResponse = state
         .agent
-        .request(names::wallet::REDEEM_PROMO, &WalletRedeemPromoRequest { code })
+        .request(
+            names::wallet::REDEEM_PROMO,
+            &WalletRedeemPromoRequest { code },
+        )
         .await?;
     tracing::info!(bonus = %r.bonus, "promo code redeemed");
     Ok(r)
