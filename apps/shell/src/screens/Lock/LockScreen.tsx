@@ -1291,12 +1291,13 @@ export default function LockScreen(): JSX.Element {
 
         <footer className="flex items-end justify-between gap-[var(--gap)]">
           {/* Versions and CPU/GPU/RAM used to sit here for every passer-by; staff find them on Support. */}
-          <div className="min-w-0">
+          <div className="flex min-w-0 items-end gap-3">
+            {/* Staff only, out of the players' way: a faint key in the corner (and Ctrl+Alt+T), not a labelled button
+                beside «Позвать администратора» that every player read as meant for them. */}
+            {ready && !hasUser && !isLocked && <StaffSignInButton />}
             <LinkWarning />
           </div>
           <div className="flex items-center gap-[var(--gap)]">
-            {/* Staff only: sign in to their own Windows account to install games and programs (not while a player is here). */}
-            {ready && !hasUser && !isLocked && <StaffSignInButton />}
             {/* Power without the PIN, also on «Подготовка ПК…» (SHELL_CHANGES 93); never during a session or the desk's lock. */}
             {ready && lockScreenPower && !hasUser && !isOpen && !lockedByStaff && <PowerButtons />}
             {callAdminEnabled && (
