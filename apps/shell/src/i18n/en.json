@@ -1709,5 +1709,9 @@
     "failed": "Could not save your favorites",
     "launchApp": "Open {{title}}",
     "region": "Favorites: games and apps for a quick start"
+  },
+  "pcLabel": {
+    "number": "PC {{number}}",
+    "pc": "PC"
   }
 }

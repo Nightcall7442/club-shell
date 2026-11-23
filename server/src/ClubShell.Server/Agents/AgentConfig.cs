@@ -185,7 +185,8 @@ public static class AgentConfig
             Banners: banners.Count > 0 ? banners : null,
             Rules: rules,
             Screensaver: screensaver,
-            SelfSignup: Auth.SelfSignup.Enabled(settings));
+            SelfSignup: Auth.SelfSignup.Enabled(settings),
+            PcLabel: Admin.PcLabel.ToShell(branding));
     }
 
     /// <summary>

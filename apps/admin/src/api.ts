@@ -999,6 +999,15 @@ export interface Webhook {
 }
 
 /** The settings document the owner edits (`GET/PATCH /admin/club`). Amounts are minor units (tiyin). */
+/** `branding.pcLabel` (D-95): what the PC's label says, the large number and the screens it shows on. */
+export interface PcLabelSettings {
+  format: 'nameZone' | 'name' | 'number';
+  large: boolean;
+  lock: boolean;
+  idle: boolean;
+  topBar: boolean;
+}
+
 export interface ClubSettings {
   branding: {
     clubName: string;
@@ -1007,6 +1016,8 @@ export interface ClubSettings {
     wallpaperUrl: string | null;
     /** The shell theme of the club's PCs (D-93): `default` (Obsidian), `light` (Daylight) or `neon`; absent — default. */
     theme?: 'default' | 'light' | 'neon';
+    /** How the PC's name or number shows on the player screen (D-95); absent — the name and zone everywhere. */
+    pcLabel?: PcLabelSettings;
   };
   features: ShellFeatures;
   zones: Zone[];

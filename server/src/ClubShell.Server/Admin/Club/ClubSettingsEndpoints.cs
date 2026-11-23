@@ -192,6 +192,13 @@ public static class ClubSettingsEndpoints
             throw ApiException.Validation("branding.theme", "enum");
         }
 
+        // D-95: how the PC's name or number shows on the player screen.
+        if (body.TryGetProperty("branding", out var label) && label.ValueKind == JsonValueKind.Object
+            && label.TryGetProperty("pcLabel", out var pcLabel))
+        {
+            PcLabel.Validate(pcLabel);
+        }
+
         IReadOnlyList<(Guid PcId, ServerCommandEnvelope Command)> queued = [];
         await using (var c = await db.OpenConnectionAsync())
         await using (var tx = await c.BeginTransactionAsync())

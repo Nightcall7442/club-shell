@@ -1709,5 +1709,9 @@
     "failed": "Sevimlilarni saqlab bo‘lmadi",
     "launchApp": "{{title}}ni ochish",
     "region": "Sevimlilar: tez ishga tushirish uchun o‘yinlar va ilovalar"
+  },
+  "pcLabel": {
+    "number": "PK {{number}}",
+    "pc": "PK"
   }
 }

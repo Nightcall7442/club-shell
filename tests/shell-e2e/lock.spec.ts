@@ -697,6 +697,19 @@ test.describe('power on the lock screen (SHELL_CHANGES 93)', () => {
     await expect(page).toHaveURL(/#\/lock$/);
   });
 
+  test('the PC label follows the owner: the large number on the lock screen, or nothing where it is turned off (D-95)', async ({
+    page,
+  }) => {
+    await page.goto('/?pcLabel=number,large#/lock');
+    await useEnglish(page);
+    await expect(page.getByLabel('PC 12')).toBeVisible();
+    await expect(page.getByText('12', { exact: true })).toBeVisible();
+    await page.goto('/?pcLabel=name,-lock#/lock');
+    await useEnglish(page);
+    await expect(page.getByText(en('lock.subtitle'))).toBeVisible();
+    await expect(page.getByText('PC-12', { exact: true })).toHaveCount(0);
+  });
+
   test('a screensaver the owner turned off never starts', async ({ page }) => {
     await page.goto('/?screensaver=0#/lock');
     await useEnglish(page);

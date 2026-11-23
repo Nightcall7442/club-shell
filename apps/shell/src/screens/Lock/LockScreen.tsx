@@ -40,6 +40,7 @@ import { AdsCarousel } from '@/screens/Idle/AdsCarousel';
 import { describeWindow } from '@/screens/Idle/PriceList';
 import { tariffAvailableNow } from '@/lib/tariffs';
 import { ClubMark } from '@/components/brand/ClubMark';
+import { PcLabel } from '@/components/brand/PcLabel';
 import { useClub } from '@/hooks/useClub';
 import { CardLogin } from './CardLogin';
 import { LoginForm, loginErrorMessage } from './LoginForm';
@@ -1023,9 +1024,7 @@ export default function LockScreen(): JSX.Element {
   const relogin = useAuthStore((s) => s.relogin);
   const logout = useAuthStore((s) => s.logout);
   const defaultRoute = useSettingsStore((s) => s.shellConfig?.ui.defaultRoute ?? '/home');
-  const pcName = useSettingsStore((s) => s.pcInfo?.pc.name ?? null);
   const club = useClub();
-  const pcZone = useSettingsStore((s) => s.pcInfo?.pc.zone ?? '');
   const callAdminEnabled = useSettingsStore((s) => s.features.callAdmin);
   const lockScreenPower = useSettingsStore(selectFeature('lockScreenPower'));
   // Off until the server can confirm a scanned code (D-18): a QR that can never sign in only costs the player time.
@@ -1195,7 +1194,7 @@ export default function LockScreen(): JSX.Element {
               <ClubMark className="h-7 w-7" />
               <p className="truncate font-display text-2xl font-light tracking-tight text-text">{club.name}</p>
             </div>
-            {pcName && <p className="hud-label mt-2">{t('idle.pcName', { name: pcName, zone: pcZone })}</p>}
+            <PcLabel place="lock" className="mt-2" />
           </div>
           <div className="flex items-center gap-[var(--gap)]">
             <LanguageSwitcher />

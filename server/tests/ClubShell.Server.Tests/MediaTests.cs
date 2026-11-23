@@ -74,4 +74,30 @@ public sealed class MediaTests(ServerFixture server) : LedgerCheckedTest(server)
             await ExpectAsync(Server, 200, HttpMethod.Patch, "/club", owner, new { branding = Branding("default") });
         }
     }
+
+    [Fact]
+    public async Task The_pc_label_the_owner_sets_goes_to_the_pcs_and_a_bad_one_is_refused()
+    {
+        var owner = await LoginAsync(Server, OwnerPin);
+        object Branding(object? pcLabel) => new { clubName = "Arena", accent = "#9ADFFF", logoUrl = (string?)null, wallpaperUrl = (string?)null, pcLabel };
+        try
+        {
+            await ExpectAsync(Server, 200, HttpMethod.Patch, "/club", owner,
+                new { branding = Branding(new { format = "number", large = true, @lock = true, idle = false, topBar = true }) });
+            var agent = await TestAgent.CreateAsync(Server);
+            var config = await Players.ReadAsync(await agent.SendAsync(HttpMethod.Get, agent.Path("config")), 200);
+            var label = config.GetProperty("shell").GetProperty("club").GetProperty("pcLabel");
+            Assert.Equal("number", label.GetProperty("format").GetString());
+            Assert.True(label.GetProperty("large").GetBoolean());
+            Assert.False(label.GetProperty("idle").GetBoolean());
+            Assert.Equal(("branding.pcLabel.format", "enum"),
+                StaffAdminTests.Details(await ExpectAsync(Server, 400, HttpMethod.Patch, "/club", owner, new { branding = Branding(new { format = "big" }) })));
+            Assert.Equal(("branding.pcLabel.large", "type"),
+                StaffAdminTests.Details(await ExpectAsync(Server, 400, HttpMethod.Patch, "/club", owner, new { branding = Branding(new { large = "yes" }) })));
+        }
+        finally
+        {
+            await ExpectAsync(Server, 200, HttpMethod.Patch, "/club", owner, new { branding = Branding(null) });
+        }
+    }
 }

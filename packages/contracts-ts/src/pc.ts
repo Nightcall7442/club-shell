@@ -257,6 +257,23 @@ export interface ScreensaverItem {
 }
 
 /**
+ * How the PC's own label shows on the player screen (D-95, beyond the contract), set by the owner under «Интерфейс и
+ * логотипы»: what it says, whether it is the large number readable across the hall, and on which screens.
+ */
+export interface ShellPcLabel {
+  /** `nameZone` (the PC name and its zone, the default), `name` or `number` (the PC number alone). */
+  format: string;
+  /** A large number on the lock and idle screens, readable across the hall. */
+  large: boolean;
+  /** Shown on the lock screen. */
+  lock: boolean;
+  /** Shown on the idle screen and the screensaver. */
+  idle: boolean;
+  /** Shown in the top bar while a player is signed in. */
+  topBar: boolean;
+}
+
+/**
  * The screensaver of the free PCs (D-87, beyond the contract): the attract screen after `afterSec` seconds without
  * input on the lock screen; off — it never starts.
  */
@@ -290,6 +307,8 @@ export interface ShellClub {
   screensaver?: ShellScreensaver | null;
   /** The lock screen offers «Создать аккаунт» (D-92: the owner's `limits.selfSignup`); null — an older server, off. */
   selfSignup?: boolean | null;
+  /** How the PC's name or number shows; null — the name and zone on every screen, as before. */
+  pcLabel?: ShellPcLabel | null;
 }
 
 /** Server override pushed into `shell.json`. */

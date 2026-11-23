@@ -5,11 +5,11 @@
  */
 import { useRef, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
-import { mediaUrl, uploadMedia, type ClubSettings } from '@/api';
+import { mediaUrl, uploadMedia, type ClubSettings, type PcLabelSettings } from '@/api';
 import { describe } from '@/errors';
 import { t } from '@/i18n';
 import { useClubSettings } from '@/settings';
-import { Button, Field, Input, Note, PageHeader, SaveBar, Section, inputCls } from '@/ui';
+import { Button, Field, Input, Note, PageHeader, SaveBar, Section, Toggle, inputCls } from '@/ui';
 import { OwnerPage } from './ownerKit';
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -46,6 +46,15 @@ const THEMES: { id: ThemeId; name: string; hint: string; bg: string; panel: stri
     text: '#FAF5FF',
     accent: '#F0ABFC',
   },
+];
+
+const PC_LABEL_DEFAULT: PcLabelSettings = { format: 'nameZone', large: false, lock: true, idle: true, topBar: true };
+
+/** What the PC's label can say, with how it reads for PC-05 in the VIP zone. */
+const PC_FORMATS: { id: PcLabelSettings['format']; name: string; sample: string }[] = [
+  { id: 'nameZone', name: 'Название и зона', sample: 'PC-05 · VIP' },
+  { id: 'name', name: 'Только название', sample: 'PC-05' },
+  { id: 'number', name: 'Только номер', sample: 'ПК 05' },
 ];
 
 const PICK_TYPES = 'image/png,image/jpeg,image/webp,image/gif';
@@ -148,6 +157,9 @@ export default function InterfacePage(): JSX.Element {
   const accentValid = HEX.test(s.branding.accent);
   const theme: ThemeId = s.branding.theme ?? 'default';
   const logo = mediaUrl(s.branding.logoUrl);
+  const pcLabel: PcLabelSettings = { ...PC_LABEL_DEFAULT, ...s.branding.pcLabel };
+  const setPcLabel = (patch: Partial<PcLabelSettings>): void => branding({ pcLabel: { ...pcLabel, ...patch } });
+  const pcSample = PC_FORMATS.find((f) => f.id === pcLabel.format)?.sample ?? 'PC-05 · VIP';
 
   return (
     <OwnerPage>
@@ -241,6 +253,58 @@ export default function InterfacePage(): JSX.Element {
               ))}
             </div>
           </Section>
+
+          <Section title={t('Номер ПК на экране')}>
+            <p className="mb-4 text-sm text-muted">
+              {t(
+                'Как ПК подписан для игрока: на экране входа, заставке и верхней панели. Игрок называет его кассиру и видит, куда принесут заказ.',
+              )}
+            </p>
+            <div role="radiogroup" aria-label={t('Что написано')} className="grid gap-3 sm:grid-cols-3">
+              {PC_FORMATS.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={pcLabel.format === f.id}
+                  onClick={() => setPcLabel({ format: f.id })}
+                  className={clsx(
+                    'focus-ring flex flex-col gap-1 rounded-md border p-3 text-left transition-colors',
+                    pcLabel.format === f.id
+                      ? 'border-accent/70 bg-accent/[0.08]'
+                      : 'border-text/10 hover:border-text/25',
+                  )}
+                >
+                  <span className="font-mono text-sm text-text">{f.id === 'number' ? t('ПК 05') : f.sample}</span>
+                  <span className="text-xs text-muted">{t(f.name)}</span>
+                </button>
+              ))}
+            </div>
+            <div className="mt-5 flex flex-col gap-3">
+              <Toggle
+                checked={pcLabel.large}
+                onChange={(v) => setPcLabel({ large: v })}
+                label={t('Крупный номер на экране входа и заставке — видно через зал')}
+              />
+              <span className="label-sm mt-2">{t('Где показывать')}</span>
+              <div className="flex flex-wrap gap-x-6 gap-y-3">
+                <Toggle checked={pcLabel.lock} onChange={(v) => setPcLabel({ lock: v })} label={t('Экран входа')} />
+                <Toggle checked={pcLabel.idle} onChange={(v) => setPcLabel({ idle: v })} label={t('Заставка')} />
+                <Toggle
+                  checked={pcLabel.topBar}
+                  onChange={(v) => setPcLabel({ topBar: v })}
+                  label={t('Верхняя панель')}
+                />
+              </div>
+            </div>
+            <p className="mt-4 text-xs text-muted">
+              {t('Название и номер каждого ПК меняются в разделе')}{' '}
+              <a href="#/hall" className="focus-ring rounded-sm font-medium text-accent hover:underline">
+                {t('Зал и устройства')}
+              </a>
+              .
+            </p>
+          </Section>
         </div>
 
         <Section variant="side" title={t('Так это выглядит')} className="xl:sticky xl:top-0">
@@ -252,18 +316,33 @@ export default function InterfacePage(): JSX.Element {
                 : (THEMES.find((x) => x.id === theme)?.bg ?? '#07090C'),
             }}
           >
-            <div className="flex items-center gap-2 rounded-sm bg-black/45 px-2 py-1.5 backdrop-blur-sm">
-              {logo ? (
-                <img src={logo} alt="" className="h-6 w-6 object-contain" />
-              ) : (
-                <span
-                  className="h-6 w-6 rounded-sm"
-                  style={{ background: accentValid ? s.branding.accent : '#9ADFFF' }}
-                />
-              )}
-              <span className="truncate text-sm font-semibold text-white">
-                {s.branding.clubName || t('Название клуба')}
-              </span>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2 rounded-sm bg-black/45 px-2 py-1.5 backdrop-blur-sm">
+                {logo ? (
+                  <img src={logo} alt="" className="h-6 w-6 object-contain" />
+                ) : (
+                  <span
+                    className="h-6 w-6 rounded-sm"
+                    style={{ background: accentValid ? s.branding.accent : '#9ADFFF' }}
+                  />
+                )}
+                <span className="min-w-0 truncate text-sm font-semibold text-white">
+                  {s.branding.clubName || t('Название клуба')}
+                </span>
+              </div>
+              {pcLabel.lock &&
+                (pcLabel.large ? (
+                  <div className="flex items-end gap-2 self-start rounded-sm bg-black/45 px-2 py-1 backdrop-blur-sm">
+                    <span className="font-display text-3xl font-light leading-none text-white">05</span>
+                    <span className="pb-0.5 text-[10px] uppercase tracking-wider text-white/80">
+                      {pcLabel.format === 'number' ? t('ПК') : pcSample}
+                    </span>
+                  </div>
+                ) : (
+                  <span className="self-start rounded-sm bg-black/45 px-2 py-0.5 text-[10px] uppercase tracking-wider text-white/85 backdrop-blur-sm">
+                    {pcLabel.format === 'number' ? t('ПК 05') : pcSample}
+                  </span>
+                ))}
             </div>
             <span
               className="self-start rounded-sm px-3 py-1.5 text-xs font-semibold text-black"

@@ -382,6 +382,26 @@ pub struct ScreensaverItem {
     pub duration_sec: i32,
 }
 
+/// How the PC's own label shows on the player screen (D-95, beyond the contract), set by the owner
+/// under «Интерфейс и логотипы»: what it says, whether it is the large number readable across the
+/// hall, and on which screens.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellPcLabel {
+    /// `nameZone` (the PC name and its zone, the default), `name` or `number` (the PC number
+    /// alone).
+    pub format: String,
+    /// A large number on the lock and idle screens, readable across the hall.
+    #[serde(default)]
+    pub large: bool,
+    /// Shown on the lock screen.
+    pub lock: bool,
+    /// Shown on the idle screen and the screensaver.
+    pub idle: bool,
+    /// Shown in the top bar while a player is signed in.
+    pub top_bar: bool,
+}
+
 /// Shell replacement for the kiosk user.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -436,6 +456,9 @@ pub struct ShellClub {
     /// older server, off.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub self_signup: Option<bool>,
+    /// How the PC's name or number shows; null — the name and zone on every screen, as before.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pc_label: Option<ShellPcLabel>,
 }
 
 /// Server override pushed into `shell.json`.

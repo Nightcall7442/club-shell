@@ -330,7 +330,10 @@ function freshState(): MockState {
     games: clone(GAMES),
     running: [],
     apps: [],
-    settings: { ...clone(SETTINGS), club: withSignup(withScreensaver(demoClubRequested() ? clone(DEMO_CLUB) : null)) },
+    settings: {
+      ...clone(SETTINGS),
+      club: withPcLabel(withSignup(withScreensaver(demoClubRequested() ? clone(DEMO_CLUB) : null))),
+    },
     gameSettings: clone(PLAYER_GAME_SETTINGS),
     policy: clone(POLICY),
     volume: { level: SETTINGS.volume, muted: SETTINGS.muted },
@@ -768,6 +771,26 @@ export function resetMock(): void {
 // ---------------------------------------------------------------------------------------------------------------------
 // Dev simulation helpers (also on window.__clubshellMock.simulate)
 // ---------------------------------------------------------------------------------------------------------------------
+
+/**
+ * `?pcLabel=<format>[,large][,-lock][,-idle][,-topBar]` in the URL: how the owner set the PC's label (D-95), e.g.
+ * `?pcLabel=number,large` or `?pcLabel=name,-topBar`.
+ */
+function withPcLabel(club: ShellClub | null): ShellClub | null {
+  const raw = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('pcLabel');
+  if (raw === null) return club;
+  const [format = 'nameZone', ...flags] = raw.split(',');
+  return {
+    ...(club ?? {}),
+    pcLabel: {
+      format,
+      large: flags.includes('large'),
+      lock: !flags.includes('-lock'),
+      idle: !flags.includes('-idle'),
+      topBar: !flags.includes('-topBar'),
+    },
+  };
+}
 
 /** `?screensaver=<sec>` in the URL: the owner's screensaver (D-87) after that many seconds; `0` — turned off. */
 function withScreensaver(club: ShellClub | null): ShellClub | null {
