@@ -282,6 +282,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.meta.outputs.tag }}
+          # A manual run from a branch tags the commit it built, not the default branch's head.
+          target_commitish: ${{ github.sha }}
           name: ClubShell ${{ needs.meta.outputs.version }}
           prerelease: ${{ needs.meta.outputs.channel == 'beta' }}
           generate_release_notes: true
