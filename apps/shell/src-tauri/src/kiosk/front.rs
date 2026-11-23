@@ -8,7 +8,9 @@
 //! - a game: after its `running` event (launched from the Shell or from the cash desk), up to [`GAME_WAIT`];
 //! - a program from the "Apps" screen: after `apps.launch`, up to [`APP_WAIT`], handed off like the dock does it so the
 //!   foreground guard and the stray-window sweep leave it alone; its window may belong to a child process or to an
-//!   instance that was already running, so a program window that was not there before the launch counts too.
+//!   instance that was already running, so the app's other processes (the Agent's pids) and a program window that was
+//!   not there before the launch count too;
+//! - an app that runs already: its front-most window at once ([`front_running_app`]), instead of a second copy.
 //!
 //! Waiting stops once the target owns the foreground, when the game ends, or when the player went to another program
 //! themselves (the foreground is neither the Shell's nor the target's).
@@ -26,8 +28,9 @@ use super::Kiosk;
 /// How long a game's window is waited for after its `running` event.
 pub const GAME_WAIT: Duration = Duration::from_secs(30);
 
-/// How long a program's window is waited for after `apps.launch`.
-pub const APP_WAIT: Duration = Duration::from_secs(15);
+/// How long a program's window is waited for after `apps.launch`. Steam or Discord checking for updates first show
+/// their window well after 15 s; once the wait gave up, the window came up under the Shell and the sweep minimized it.
+pub const APP_WAIT: Duration = Duration::from_secs(60);
 
 /// Polling interval of both waits.
 pub const POLL: Duration = Duration::from_millis(250);
@@ -191,16 +194,20 @@ impl GameFront {
     }
 }
 
+/// Bumped by every `bring_app`: a wait for an earlier launch stops once the player launched something else.
+static APP_GENERATION: AtomicU64 = AtomicU64::new(0);
+
 /// `apps.launch` answered with `pid` (SHELL_CHANGES 87): hands the foreground off to it and, in the background, waits
-/// for its window — or a child's, or a new program window — and brings it to the front. `before` are the program
-/// windows open before the launch.
-pub fn bring_app(kiosk: Arc<Kiosk>, pid: u32, before: HashSet<isize>) {
-    kiosk.hand_off_foreground(pid);
+/// for its window — one of `family` (every process of the app the Agent knows of), or a new program window — and
+/// brings it to the front. `before` are the program windows open before the launch.
+pub fn bring_app(kiosk: Arc<Kiosk>, pid: u32, family: Vec<u32>, before: HashSet<isize>) {
+    let generation = APP_GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
+    kiosk.hand_off_app(pid, &family);
     tauri::async_runtime::spawn(async move {
         let started = Instant::now();
         let mut target = pid;
         loop {
-            if kiosk.is_locked() {
+            if kiosk.is_locked() || APP_GENERATION.load(Ordering::Acquire) != generation {
                 return;
             }
             let elapsed = started.elapsed();
@@ -224,7 +231,7 @@ pub fn bring_app(kiosk: Arc<Kiosk>, pid: u32, before: HashSet<isize>) {
                 );
                 return;
             }
-            if poll.elsewhere(target) {
+            if poll.elsewhere(target) && !family.contains(&poll.foreground_pid) {
                 tracing::info!(
                     pid = target,
                     foreground = poll.foreground_pid,
@@ -232,19 +239,20 @@ pub fn bring_app(kiosk: Arc<Kiosk>, pid: u32, before: HashSet<isize>) {
                 );
                 return;
             }
-            // Its own window first; else one that was not there before the launch (a stub launcher's child, or the
-            // instance that was already running and took the work over).
+            // Its own window first, then one of its other processes'; else one that was not there before the launch
+            // (a stub launcher's child, or the instance that was already running and took the work over).
             let window = poll
                 .windows
                 .iter()
                 .find(|w| w.pid == target)
+                .or_else(|| poll.windows.iter().find(|w| family.contains(&w.pid)))
                 .or_else(|| poll.windows.iter().find(|w| !before.contains(&w.hwnd)));
             if let Some(window) = window {
                 let (hwnd, owner) = (window.hwnd, window.pid);
                 if owner != target {
                     tracing::info!(pid, owner, hwnd, title = %window.title, "program window belongs to another process");
                     target = owner;
-                    kiosk.hand_off_foreground(owner);
+                    kiosk.hand_off_app(owner, &family);
                 }
                 let ok = tauri::async_runtime::spawn_blocking(move || bring_to_front(hwnd, owner))
                     .await
@@ -263,6 +271,30 @@ pub fn bring_app(kiosk: Arc<Kiosk>, pid: u32, before: HashSet<isize>) {
             tokio::time::sleep(POLL).await;
         }
     });
+}
+
+/// An app that runs already (`apps.launch` answered `alreadyRunning`): brings a window of one of `family` to the front
+/// at once, handed off like the dock does it. `false` when none of its processes has a program window (it lives in the
+/// tray): the caller starts it again, which makes such an app show its window.
+pub async fn front_running_app(kiosk: Arc<Kiosk>, family: Vec<u32>) -> bool {
+    let windows = tauri::async_runtime::spawn_blocking(program_windows)
+        .await
+        .unwrap_or_default();
+    // Front-most first: the window the player saw last.
+    let Some(window) = windows.iter().find(|w| family.contains(&w.pid)) else {
+        return false;
+    };
+    let (hwnd, owner) = (window.hwnd, window.pid);
+    APP_GENERATION.fetch_add(1, Ordering::AcqRel);
+    kiosk.hand_off_app(owner, &family);
+    let ok = tauri::async_runtime::spawn_blocking(move || bring_to_front(hwnd, owner))
+        .await
+        .unwrap_or(false);
+    tracing::info!(pid = owner, hwnd, ok, "running program brought to front instead of a second copy");
+    if !ok {
+        kiosk.end_hand_off();
+    }
+    true
 }
 
 /// Program windows open right now (before a launch): `bring_app` tells new ones from these.

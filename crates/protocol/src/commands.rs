@@ -55,19 +55,62 @@ pub struct AppsLaunchRequest {
     /// Extra command line.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub args: Option<String>,
+    /// Start it even when it runs already: the running app has no window to bring forward (it lives in the tray, as
+    /// Discord or Steam do), and started again such an app shows its window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub force: Option<bool>,
 }
 
 /// Response of `apps.launch`.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AppsLaunchResponse {
     /// Always `true`.
     pub ok: bool,
-    /// Process id.
+    /// Process id (the running instance's when `already_running`).
     pub pid: i32,
-    /// Launch time.
+    /// Launch time (the running instance's when `already_running`).
     #[serde(with = "crate::wire::ts")]
     pub started_at: DateTime<Utc>,
+    /// The app was running already and nothing was started: the Shell brings its window to the front instead.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub already_running: bool,
+    /// Every process of the app the Agent knows of (the new one alone after a fresh launch); empty from an older Agent.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pids: Vec<i32>,
+}
+
+/// An app running in the player's session (`apps.running`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RunningApp {
+    /// App id.
+    pub app_id: Uuid,
+    /// App title.
+    pub title: String,
+    /// Main process: the one the Agent started, else the oldest of `pids`.
+    pub pid: i32,
+    /// Every process of the app: the started one, its descendants and the app's own executables.
+    pub pids: Vec<i32>,
+    /// When the Agent started it, else when its main process started.
+    #[serde(with = "crate::wire::ts")]
+    pub started_at: DateTime<Utc>,
+}
+
+/// Response of `apps.running`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AppsRunningResponse {
+    /// Running apps, oldest first.
+    pub items: Vec<RunningApp>,
+}
+
+/// Request of `apps.kill`: ends every process of one app (never the Shell, the Agent or a game). → `GamesKillResponse`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AppsKillRequest {
+    /// App id.
+    pub app_id: Uuid,
 }
 
 /// Response of `apps.list` and `GET /apps`.
@@ -566,6 +609,10 @@ pub mod names {
         pub const LIST: &str = "apps.list";
         /// `AppsLaunchRequest` → `AppsLaunchResponse`.
         pub const LAUNCH: &str = "apps.launch";
+        /// — → `AppsRunningResponse`.
+        pub const RUNNING: &str = "apps.running";
+        /// `AppsKillRequest` → `GamesKillResponse`.
+        pub const KILL: &str = "apps.kill";
     }
 
     /// `wallet.*`
@@ -2680,6 +2727,8 @@ agent_commands! {
     GamesInstallStatus => names::games::INSTALL_STATUS, Hello;
     AppsList => names::apps::LIST, Hello;
     AppsLaunch => names::apps::LAUNCH, Session;
+    AppsRunning => names::apps::RUNNING, Hello;
+    AppsKill => names::apps::KILL, Session;
     WalletBalance => names::wallet::BALANCE, User;
     WalletTariffs => names::wallet::TARIFFS, Hello;
     WalletHistory => names::wallet::HISTORY, User;
@@ -3134,7 +3183,7 @@ mod tests {
 
     #[test]
     fn agent_command_table_matches_ipc_protocol() {
-        assert_eq!(AgentCommand::ALL.len(), 70);
+        assert_eq!(AgentCommand::ALL.len(), 72);
         let expected: &[&str] = &[
             "auth.hello",
             "auth.login",
@@ -3159,6 +3208,8 @@ mod tests {
             "games.installStatus",
             "apps.list",
             "apps.launch",
+            "apps.running",
+            "apps.kill",
             "wallet.balance",
             "wallet.tariffs",
             "wallet.history",
@@ -3444,11 +3495,19 @@ mod tests {
             serde_json::to_string(&AppsLaunchResponse {
                 ok: true,
                 pid: 5,
-                started_at: t(1, 2, 3)
+                started_at: t(1, 2, 3),
+                already_running: false,
+                pids: vec![],
             })
             .unwrap(),
             r#"{"ok":true,"pid":5,"startedAt":"2026-09-21T01:02:03.000Z"}"#
         );
+        let again: AppsLaunchResponse = serde_json::from_str(
+            r#"{"ok":true,"pid":5,"startedAt":"2026-09-21T01:02:03.000Z","alreadyRunning":true,"pids":[5,6]}"#,
+        )
+        .unwrap();
+        assert!(again.already_running);
+        assert_eq!(again.pids, vec![5, 6]);
 
         let hist = WalletHistoryRequest {
             page: Some(2),

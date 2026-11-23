@@ -19,6 +19,8 @@ namespace ClubShell.Agent.Ipc.Handlers;
 /// and <see cref="GameLaunchService"/>, their art and trailers from <c>cache\media</c> once cached
 /// (<see cref="GameMediaCache"/>); the apps catalogue (<c>GET /apps</c>) is cached in <c>cache\apps.json</c> and
 /// filtered by the process allow-list, and apps are started in the kiosk session through <see cref="ProcessLauncher"/>.
+/// <see cref="RunningApps"/> tells which apps run (<c>apps.running</c>), what <c>apps.kill</c> ends, and makes a second
+/// <c>apps.launch</c> of a running app answer <c>alreadyRunning</c> instead of opening another copy.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class GameHandlers : IIpcHandlerGroup
@@ -35,6 +37,9 @@ public sealed class GameHandlers : IIpcHandlerGroup
     private readonly IPlayerSaves? _saves;
     private readonly ILogger<GameHandlers> _logger;
     private readonly ContractFileCache<AppsListResponse> _apps;
+    private readonly RunningApps _running;
+    private readonly IAppProcessSource _sessionProcesses;
+    private readonly ProcessKiller _killer;
 
     /// <summary>
     /// Creates the group. <paramref name="allowlist"/> is optional; without it only <see cref="App.Allowed"/> gates app
@@ -51,6 +56,9 @@ public sealed class GameHandlers : IIpcHandlerGroup
         ShellSettingsStore shellSettings,
         IOptionsMonitor<AgentSettings> settings,
         ILogger<GameHandlers> logger,
+        RunningApps runningApps,
+        IAppProcessSource sessionProcesses,
+        ProcessKiller killer,
         ProcessAllowlistModule? allowlist = null,
         IPlayerSaves? saves = null)
     {
@@ -64,6 +72,12 @@ public sealed class GameHandlers : IIpcHandlerGroup
         ArgumentNullException.ThrowIfNull(shellSettings);
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(runningApps);
+        ArgumentNullException.ThrowIfNull(sessionProcesses);
+        ArgumentNullException.ThrowIfNull(killer);
+        _running = runningApps;
+        _sessionProcesses = sessionProcesses;
+        _killer = killer;
         _library = library;
         _media = media;
         _launch = launch;
@@ -91,6 +105,8 @@ public sealed class GameHandlers : IIpcHandlerGroup
 
         dispatcher.RegisterNoPayload<AppsListResponse>(IpcMessages.Apps.List, ListAppsAsync);
         dispatcher.Register<AppsLaunchRequest, AppsLaunchResponse>(IpcMessages.Apps.Launch, LaunchAppAsync);
+        dispatcher.RegisterNoPayload<AppsRunningResponse>(IpcMessages.Apps.Running, (_, _) => Task.FromResult(new AppsRunningResponse(RunningAppsNow())));
+        dispatcher.Register<AppsKillRequest, GamesKillResponse>(IpcMessages.Apps.Kill, KillAppAsync);
     }
 
     /// <summary>Apps catalogue with <see cref="App.Allowed"/> combined with the process allow-list; cached copy when offline.</summary>
@@ -200,6 +216,18 @@ public sealed class GameHandlers : IIpcHandlerGroup
         }
 
         int sessionId = _kiosk.ActiveSessionId ?? throw IpcError.GameLaunchFailed("session", "No interactive kiosk session").ToException();
+
+        // A second tap on the tile used to start a second copy (a second Discord, a second Steam asking to log in again).
+        // The running one is brought to the front by the Shell instead.
+        IReadOnlyList<int> runningPids = AppPids(app, sessionId);
+        if (runningPids.Count > 0 && request.Force != true)
+        {
+            RunningApp? running = _running.Resolve(new[] { app }, _sessionProcesses.Snapshot(sessionId), GamePids()).FirstOrDefault();
+            int pid = running?.Pid ?? runningPids[0];
+            _logger.LogInformation("App {Title} ({AppId}) is already running as pid {Pid}; not started again", app.Title, app.Id, pid);
+            return new AppsLaunchResponse(true, pid, running?.StartedAt ?? DateTimeOffset.UtcNow, AlreadyRunning: true, Pids: running?.Pids ?? runningPids);
+        }
+
         var spec = new ProcessStartSpec
         {
             Exe = app.ExePath,
@@ -212,7 +240,8 @@ public sealed class GameHandlers : IIpcHandlerGroup
         {
             using LaunchedProcess launched = await _processes.LaunchAsync(spec, cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("App {Title} ({AppId}) launched as pid {Pid} in session {Session}", app.Title, app.Id, launched.Pid, sessionId);
-            return new AppsLaunchResponse(true, launched.Pid, launched.StartedAt);
+            _running.Record(app.Id, launched.Pid, launched.StartedAt);
+            return new AppsLaunchResponse(true, launched.Pid, launched.StartedAt, Pids: new[] { launched.Pid });
         }
         catch (Win32Exception ex)
         {
@@ -225,6 +254,65 @@ public sealed class GameHandlers : IIpcHandlerGroup
             throw IpcError.GameLaunchFailed("createProcess", ex.Message).ToException();
         }
     }
+
+    /// <summary>
+    /// <c>apps.kill</c>: ends every process of the app in the player's session, descendants first. Never a game's, the
+    /// Shell's, the Agent's or Windows' own (<see cref="RunningApps"/>, <see cref="ProcessKiller.SystemCritical"/>). The Shell
+    /// has asked the app's windows to close already; what is left is terminated.
+    /// </summary>
+    private Task<GamesKillResponse> KillAppAsync(IpcContext context, AppsKillRequest request, CancellationToken cancellationToken)
+    {
+        if (request.AppId == Guid.Empty)
+        {
+            throw IpcError.Validation("appId", "required").ToException();
+        }
+
+        int sessionId = _kiosk.ActiveSessionId ?? throw IpcError.NotFound($"Running app {request.AppId}").ToException();
+        App app = Catalogue().FirstOrDefault(a => a.Id == request.AppId) ?? throw IpcError.NotFound($"App {request.AppId}").ToException();
+        IReadOnlyList<AppProcess> processes = _sessionProcesses.Snapshot(sessionId);
+        IReadOnlyList<int> pids = RunningApps.Match(app, _running.LaunchOf(app.Id), processes, GamePids());
+        if (pids.Count == 0)
+        {
+            throw IpcError.NotFound($"Running app {app.Title}").ToException();
+        }
+
+        // Youngest first: a parent that respawns its children (a browser, an updater) is gone before it notices.
+        var started = processes.GroupBy(p => p.Pid).ToDictionary(g => g.Key, g => g.First().StartedAt ?? DateTimeOffset.MinValue);
+        var killed = new List<int>();
+        foreach (int pid in pids.OrderByDescending(p => started.GetValueOrDefault(p, DateTimeOffset.MinValue)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_killer.KillProcess(pid, TimeSpan.Zero) is { } dead)
+            {
+                killed.Add(dead.Pid);
+            }
+        }
+
+        _logger.LogInformation("App {Title} ({AppId}) closed: {Killed} of {Count} processes", app.Title, app.Id, killed.Count, pids.Count);
+        return Task.FromResult(new GamesKillResponse(killed.Count, killed));
+    }
+
+    /// <summary>The running apps of the cached catalogue (no server round trip: the Shell polls this).</summary>
+    private IReadOnlyList<RunningApp> RunningAppsNow()
+    {
+        if (_kiosk.ActiveSessionId is not { } sessionId)
+        {
+            return Array.Empty<RunningApp>();
+        }
+
+        IReadOnlyList<App> catalogue = Catalogue();
+        return catalogue.Count == 0
+            ? Array.Empty<RunningApp>()
+            : _running.Resolve(catalogue, _sessionProcesses.Snapshot(sessionId), GamePids());
+    }
+
+    private IReadOnlyList<int> AppPids(App app, int sessionId) =>
+        RunningApps.Match(app, _running.LaunchOf(app.Id), _sessionProcesses.Snapshot(sessionId), GamePids());
+
+    private IReadOnlyList<App> Catalogue() => _shellSettings.Features.Apps ? _apps.Get()?.Items ?? Array.Empty<App>() : Array.Empty<App>();
+
+    /// <summary>Pids of the running games: never an app's, so closing Steam does not take the game it started down.</summary>
+    private HashSet<int> GamePids() => _launch.Running().Items.Select(r => r.Pid).ToHashSet();
 
     private bool IsAllowed(string exePath) => _allowlist is null || string.IsNullOrWhiteSpace(exePath) || _allowlist.IsAllowed(exePath);
 }

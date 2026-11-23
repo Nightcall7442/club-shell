@@ -743,7 +743,11 @@ impl MockTransport {
                 { "id": MOCK_APP, "title": "Discord", "exePath": "C:\\Program Files\\Discord\\Discord.exe", "iconUrl": "", "category": "chat", "allowed": true }
             ] })),
             AgentCommand::AppsLaunch => {
-                Some(json!({ "ok": true, "pid": 4343, "startedAt": now() }))
+                Some(json!({ "ok": true, "pid": 4343, "startedAt": now(), "pids": [4343] }))
+            }
+            AgentCommand::AppsRunning => Some(json!({ "items": [] })),
+            AgentCommand::AppsKill => {
+                return Err(mock_err(ErrorCode::NotFound, "App is not running"));
             }
             AgentCommand::WalletBalance => Some(
                 json!({ "userId": user_id, "amount": money(50_000), "bonus": money(0), "currency": "UZS", "updatedAt": now() }),

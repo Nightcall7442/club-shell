@@ -40,6 +40,8 @@ export interface GameHeroProps {
   onDetails?: (game: Game) => void;
   /** Called after the user confirms closing the running game. */
   onKill?: (game: Game) => void;
+  /** «Перейти к игре» while it runs: its window to the front. */
+  onSwitch?: (game: Game) => void;
   className?: string;
 }
 
@@ -79,6 +81,14 @@ function StopIcon(): JSX.Element {
   );
 }
 
+function SwitchIcon(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+      <path d="M14 4h6v6M20 4l-8 8M10 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-4" />
+    </svg>
+  );
+}
+
 function InfoIcon(): JSX.Element {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
@@ -100,6 +110,7 @@ export function GameHero({
   onPlay,
   onDetails,
   onKill,
+  onSwitch,
   className,
 }: GameHeroProps): JSX.Element {
   const { t } = useTranslation();
@@ -247,9 +258,22 @@ export function GameHero({
         </motion.div>
         <div className="mt-1 flex flex-wrap items-center gap-3">
           {running ? (
-            <Button ref={primary} variant="danger" size="xl" icon={<StopIcon />} onClick={() => setConfirmKill(true)}>
-              {t('games.kill')}
-            </Button>
+            <>
+              {onSwitch && (
+                <Button ref={primary} variant="cta" size="xl" icon={<SwitchIcon />} onClick={() => onSwitch(game)}>
+                  {t('games.switchTo')}
+                </Button>
+              )}
+              <Button
+                ref={onSwitch ? undefined : primary}
+                variant="danger"
+                size="xl"
+                icon={<StopIcon />}
+                onClick={() => setConfirmKill(true)}
+              >
+                {t('games.kill')}
+              </Button>
+            </>
           ) : (
             <Button
               ref={primary}

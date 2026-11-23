@@ -100,6 +100,12 @@ public static class IpcMessages
 
         /// <summary><see cref="AppsLaunchRequest"/> → <see cref="AppsLaunchResponse"/>.</summary>
         public const string Launch = "apps.launch";
+
+        /// <summary>— → <see cref="AppsRunningResponse"/>.</summary>
+        public const string Running = "apps.running";
+
+        /// <summary><see cref="AppsKillRequest"/> → <see cref="GamesKillResponse"/>.</summary>
+        public const string Kill = "apps.kill";
     }
 
     /// <summary><c>wallet.*</c></summary>
@@ -711,18 +717,51 @@ public sealed record AppsListResponse(IReadOnlyList<App> Items);
 /// <summary>Request of <c>apps.launch</c>.</summary>
 /// <param name="AppId">App id.</param>
 /// <param name="Args">Extra command line.</param>
+/// <param name="Force">
+/// Start it even when it runs already. The Shell asks this when the running app has no window to bring forward (it lives
+/// in the tray, as Discord or Steam do): started again, such an app shows its window.
+/// </param>
 public sealed record AppsLaunchRequest(
     Guid AppId,
-    string? Args = null);
+    string? Args = null,
+    bool? Force = null);
 
 /// <summary>Response of <c>apps.launch</c>.</summary>
 /// <param name="Ok">Always <see langword="true"/>.</param>
-/// <param name="Pid">Process id.</param>
-/// <param name="StartedAt">Launch time.</param>
+/// <param name="Pid">Process id (the running instance's when <paramref name="AlreadyRunning"/>).</param>
+/// <param name="StartedAt">Launch time (the running instance's when <paramref name="AlreadyRunning"/>).</param>
+/// <param name="AlreadyRunning">
+/// The app was running already and nothing was started: the Shell brings its window to the front instead of opening a
+/// second copy.
+/// </param>
+/// <param name="Pids">Every process of the app the Agent knows of (the new one alone after a fresh launch).</param>
 public sealed record AppsLaunchResponse(
     bool Ok,
     int Pid,
+    DateTimeOffset StartedAt,
+    bool AlreadyRunning = false,
+    IReadOnlyList<int>? Pids = null);
+
+/// <summary>An app running in the player's session (<c>apps.running</c>).</summary>
+/// <param name="AppId">App id.</param>
+/// <param name="Title">App title.</param>
+/// <param name="Pid">Main process: the one the Agent started, else the oldest of <paramref name="Pids"/>.</param>
+/// <param name="Pids">Every process of the app: the started one, its descendants and the app's own executables.</param>
+/// <param name="StartedAt">When the Agent started it, else when its main process started.</param>
+public sealed record RunningApp(
+    Guid AppId,
+    string Title,
+    int Pid,
+    IReadOnlyList<int> Pids,
     DateTimeOffset StartedAt);
+
+/// <summary>Response of <c>apps.running</c>.</summary>
+/// <param name="Items">Running apps, oldest first.</param>
+public sealed record AppsRunningResponse(IReadOnlyList<RunningApp> Items);
+
+/// <summary>Request of <c>apps.kill</c>: ends every process of one app (never the Shell, the Agent or a game).</summary>
+/// <param name="AppId">App id.</param>
+public sealed record AppsKillRequest(Guid AppId);
 
 #endregion
 

@@ -13,6 +13,7 @@ import type {
   AgentEventMap,
   App,
   AppsLaunchResponse,
+  RunningApp,
   AuthLoginRequest,
   AuthLoginResponse,
   AuthLogoutResponse,
@@ -540,7 +541,12 @@ export const api = {
   },
   apps: {
     list: (): Promise<App[]> => invoke('apps_list'),
+    /** A running app is brought to the front instead of started again (`alreadyRunning: true`). */
     launch: (appId: string, args?: string): Promise<AppsLaunchResponse> => invoke('apps_launch', { appId, args }),
+    /** Apps running in the player's session, with every pid of each. */
+    running: (): Promise<RunningApp[]> => invoke('apps_running'),
+    /** Closes one app: its windows first, then whatever of it is left (never the Shell or a game). */
+    kill: (appId: string): Promise<GamesKillResponse> => invoke('apps_kill', { appId }),
   },
   wallet: {
     balance: (): Promise<Balance> => invoke('wallet_balance'),
@@ -633,7 +639,9 @@ export const api = {
       invoke<null>('kiosk_move_to_monitor', { index }).then(() => undefined),
     virtualKeyboard: (show: boolean): Promise<void> =>
       invoke<null>('kiosk_virtual_keyboard', { show }).then(() => undefined),
-    focus: (): Promise<void> => invoke<null>('kiosk_focus').then(() => undefined),
+    /** `user`: the player asked for it (HUD "back to ClubShell"); only then does it work during a game. */
+    focus: (user?: boolean): Promise<void> =>
+      invoke<null>('kiosk_focus', user ? { user } : undefined).then(() => undefined),
     exit: (adminToken: string, action: 'explorer' | 'quit'): Promise<void> =>
       invoke<null>('kiosk_exit', { adminToken, action }).then(() => undefined),
     reload: (): Promise<void> => invoke<null>('kiosk_reload').then(() => undefined),

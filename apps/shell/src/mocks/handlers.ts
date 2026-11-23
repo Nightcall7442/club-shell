@@ -13,6 +13,7 @@ import type {
   AdminMessage,
   App,
   AppsLaunchResponse,
+  RunningApp,
   AuthLoginRequest,
   AuthLoginResponse,
   AuthLogoutResponse,
@@ -267,6 +268,8 @@ interface MockState {
   tournaments: Tournament[];
   games: Game[];
   running: RunningGame[];
+  /** Apps started through `apps_launch` (each with one fake window in `kiosk_open_windows`). */
+  apps: RunningApp[];
   settings: ShellSettings;
   gameSettings: PlayerSettingsItem[];
   policy: Policy;
@@ -325,6 +328,7 @@ function freshState(): MockState {
     tournaments: clone(TOURNAMENTS),
     games: clone(GAMES),
     running: [],
+    apps: [],
     settings: { ...clone(SETTINGS), club: withScreensaver(demoClubRequested() ? clone(DEMO_CLUB) : null) },
     gameSettings: clone(PLAYER_GAME_SETTINGS),
     policy: clone(POLICY),
@@ -616,6 +620,7 @@ function endSession(reason: SessionEndReason): SessionEndResult {
   };
   mockState.session = null;
   mockState.running = [];
+  mockState.apps = [];
   mockState.kiosk.gameMode = false;
   mockState.lockedByStaff = false;
   mockState.lockedByExpiry = false;
@@ -1565,7 +1570,29 @@ cmd('apps_launch', (args): AppsLaunchResponse => {
   if (!app.allowed) {
     mockError('policyDenied', `${app.title} is blocked`, { rule: 'processAllowlist' });
   }
-  return { ok: true, pid: 6000 + Math.floor(Math.random() * 3000), startedAt: nowIso() };
+  // A second tap: the Agent answers `alreadyRunning` and the Shell brings the running window forward.
+  const running = mockState.apps.find((a) => a.appId === app.id);
+  if (running) {
+    console.info(`[mock] apps_launch(${app.title}): already running — its window would come to the front`);
+    return { ok: true, pid: running.pid, startedAt: running.startedAt, alreadyRunning: true, pids: [...running.pids] };
+  }
+  const pid = 8100 + mockState.apps.length * 10 + Math.floor(Math.random() * 9);
+  const startedAt = nowIso();
+  mockState.apps.push({ appId: app.id, title: app.title, pid, pids: [pid], startedAt });
+  return { ok: true, pid, startedAt, pids: [pid] };
+});
+
+cmd('apps_running', (): RunningApp[] => clone(mockState.apps), { fast: true });
+
+cmd('apps_kill', (args): GamesKillResponse => {
+  requireSession();
+  const appId = str(args, 'appId');
+  const victim = mockState.apps.find((a) => a.appId === appId);
+  if (!victim) {
+    mockError('notFound', 'App is not running', { name: appId ?? '' });
+  }
+  mockState.apps = mockState.apps.filter((a) => a !== victim);
+  return { killed: victim.pids.length, pids: [...victim.pids] };
 });
 
 // ----- wallet ---------------------------------------------------------------------------------------------------------
@@ -2781,7 +2808,10 @@ cmd('display_revert', (args): DisplayInfo => {
 
 // ----- open programs (status-bar dock) --------------------------------------------------------------------------------
 
-/** The fake programs plus a window per running game (its pid, an exe in its install folder), front-most first. */
+/**
+ * The fake programs plus a window per running game (its pid, an exe in its install folder) and per app started through
+ * `apps_launch`, front-most first. A fake program of the same exe folder as a started app is that app (one window).
+ */
 function openWindows(): OpenWindow[] {
   const games = mockState.running
     .filter((r) => r.state === 'running')
@@ -2789,7 +2819,13 @@ function openWindows(): OpenWindow[] {
       const dir = mockState.games.find((g) => g.id === r.gameId)?.installPath ?? 'D:\\Games';
       return { pid: r.pid, hwnd: r.pid * 16, title: r.title, exePath: `${dir}\\game.exe`, icon: null };
     });
-  return [...games, ...clone(OPEN_WINDOWS)];
+  const folder = (exe: string): string => exe.slice(0, exe.lastIndexOf('\\')).toLowerCase();
+  const apps = mockState.apps.map((a): OpenWindow => {
+    const app = APPS.find((x) => x.id === a.appId);
+    return { pid: a.pid, hwnd: a.pid * 16, title: a.title, exePath: app?.exePath ?? '', icon: app?.iconUrl ?? null };
+  });
+  const others = clone(OPEN_WINDOWS).filter((w) => !apps.some((a) => folder(w.exePath).startsWith(folder(a.exePath))));
+  return [...games, ...apps.reverse(), ...others];
 }
 
 cmd('kiosk_open_windows', (): OpenWindow[] => openWindows(), { fast: true });

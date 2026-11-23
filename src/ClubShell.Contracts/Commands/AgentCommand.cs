@@ -81,6 +81,12 @@ public enum AgentCommand
     /// <summary><c>apps.launch</c></summary>
     AppsLaunch,
 
+    /// <summary><c>apps.running</c></summary>
+    AppsRunning,
+
+    /// <summary><c>apps.kill</c></summary>
+    AppsKill,
+
     /// <summary><c>wallet.balance</c></summary>
     WalletBalance,
 
@@ -277,6 +283,8 @@ public static class AgentCommands
         AgentCommand.GamesInstallStatus => IpcMessages.Games.InstallStatus,
         AgentCommand.AppsList => IpcMessages.Apps.List,
         AgentCommand.AppsLaunch => IpcMessages.Apps.Launch,
+        AgentCommand.AppsRunning => IpcMessages.Apps.Running,
+        AgentCommand.AppsKill => IpcMessages.Apps.Kill,
         AgentCommand.WalletBalance => IpcMessages.Wallet.Balance,
         AgentCommand.WalletTariffs => IpcMessages.Wallet.Tariffs,
         AgentCommand.WalletHistory => IpcMessages.Wallet.History,
@@ -349,7 +357,7 @@ public static class AgentCommands
         AgentCommand.SessionPause or AgentCommand.SessionResume or AgentCommand.SessionEnd
             or AgentCommand.SessionExtend or AgentCommand.SessionLock or AgentCommand.SessionUnlock
             or AgentCommand.GamesLaunch or AgentCommand.GamesKill
-            or AgentCommand.AppsLaunch
+            or AgentCommand.AppsLaunch or AgentCommand.AppsKill
             or AgentCommand.ShopOrder => IpcAuthLevel.Session,
 
         _ => IpcAuthLevel.Hello,

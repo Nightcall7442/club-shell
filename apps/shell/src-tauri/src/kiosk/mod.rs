@@ -119,6 +119,8 @@ pub struct Kiosk {
     guard_wanted: AtomicBool,
     /// A club-approved window of another process is open (`begin_external_window`): the guard stays down.
     external_window: AtomicBool,
+    /// The other processes of the app handed the foreground (`hand_off_app`), dropped from the allowlist with it.
+    hand_off_extra: Mutex<Vec<u32>>,
     admin_mode: AtomicBool,
     shut: AtomicBool,
     tasks: Mutex<Vec<JoinHandle<()>>>,
@@ -195,6 +197,7 @@ impl Kiosk {
             front: front::GameFront::new(),
             guard_wanted: AtomicBool::new(!dev),
             external_window: AtomicBool::new(false),
+            hand_off_extra: Mutex::new(Vec::new()),
             admin_mode: AtomicBool::new(dev),
             shut: AtomicBool::new(false),
             tasks: Mutex::new(Vec::new()),
@@ -347,9 +350,13 @@ impl Kiosk {
     /// admin token / running game). Remembered and re-applied when a game exits.
     pub fn set_guard(&self, active: bool) {
         // Supersedes a dock hand-off; the program stays allowlisted (harmless once re-armed).
-        let _ = self.window.take_hand_off();
+        let handed_off = self.window.take_hand_off().is_some();
+        self.hand_off_extra.lock().clear();
         self.guard_wanted.store(active, Ordering::Release);
         let effective = active && !self.is_game_mode();
+        if handed_off && effective {
+            self.window.set_topmost_flag(true);
+        }
         self.alt_tab.set_enabled(effective);
         self.window.set_active(effective);
     }
@@ -387,32 +394,60 @@ impl Kiosk {
         self.taskbar.rehide();
     }
 
-    /// Dock: lets `pid` own the foreground, in front of the Shell, until the Shell is focused again
-    /// (HUD "back", the program closing) or locked. Outside game mode that means pausing the
-    /// topmost guard, which re-asserts the Shell regardless of the allowlist; the window guard keeps
-    /// minimizing every other stray window and re-focuses the Shell should anything else take over.
+    /// Dock, `apps_launch`: lets `pid` own the foreground, in front of the Shell, until the Shell is
+    /// focused again (HUD "back", the program closing or being minimized) or locked. Outside game
+    /// mode that means pausing the topmost guard, which re-asserts the Shell regardless of the
+    /// allowlist, and dropping tao's always-on-top flag too: with only `WS_EX_TOPMOST` cleared, tao
+    /// put it back on its next style change and the program sat in front of the player, invisible
+    /// under the Shell. The window guard keeps minimizing every other stray window and re-focuses
+    /// the Shell should anything else take over.
     pub fn hand_off_foreground(&self, pid: u32) {
         self.window.allow_foreground_pid(pid);
         if self.dev || self.is_game_mode() || !self.guard_wanted.load(Ordering::Acquire) {
             return; // the guard is already out of the way
         }
         match self.window.begin_hand_off(pid) {
-            None => self.alt_tab.set_enabled(false),
+            None => {
+                self.alt_tab.set_enabled(false);
+                self.window.set_topmost_flag(false);
+            }
             Some(previous) if previous != pid => self.window.disallow_foreground_pid(previous),
             Some(_) => {}
         }
         tracing::info!(pid, "foreground handed off");
     }
 
+    /// [`hand_off_foreground`](Self::hand_off_foreground) to `main`, with every other process of
+    /// the same app (the Agent's `apps.running` / `apps.launch` pids) allowed in front as well.
+    pub fn hand_off_app(&self, main: u32, pids: &[u32]) {
+        let extra: Vec<u32> = pids
+            .iter()
+            .copied()
+            .filter(|&pid| pid != 0 && pid != main && pid != std::process::id())
+            .collect();
+        for &pid in &extra {
+            self.window.allow_foreground_pid(pid);
+        }
+        self.hand_off_foreground(main);
+        if self.window.is_handed_off() {
+            self.hand_off_extra.lock().extend(extra);
+        }
+    }
+
     /// Ends a dock hand-off: the program loses its pass and the guard takes the screen back.
     pub fn end_hand_off(&self) {
         if let Some(pid) = self.window.take_hand_off() {
             self.window.disallow_foreground_pid(pid);
-            self.alt_tab.set_enabled(
-                self.guard_wanted.load(Ordering::Acquire)
-                    && !self.is_game_mode()
-                    && !self.external_window.load(Ordering::Acquire),
-            );
+            for extra in std::mem::take(&mut *self.hand_off_extra.lock()) {
+                self.window.disallow_foreground_pid(extra);
+            }
+            let guard = self.guard_wanted.load(Ordering::Acquire)
+                && !self.is_game_mode()
+                && !self.external_window.load(Ordering::Acquire);
+            if guard {
+                self.window.set_topmost_flag(true);
+            }
+            self.alt_tab.set_enabled(guard);
             tracing::info!(pid, "foreground back to the shell");
         }
     }
@@ -672,6 +707,7 @@ impl KioskControl for Kiosk {
         // Game mode supersedes a dock hand-off: the guard is down for the game, and its exit clears
         // the allowlist and re-arms everything.
         let _ = self.window.take_hand_off();
+        self.hand_off_extra.lock().clear();
         self.keyboard.set_game_mode(on);
         let guard = !on && self.guard_wanted.load(Ordering::Acquire);
         self.alt_tab.set_enabled(guard);

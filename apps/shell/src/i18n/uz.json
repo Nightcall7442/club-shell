@@ -476,6 +476,7 @@
     "empty": "Kutubxonada o'yinlar yo'q",
     "noResults": "So'rovingiz bo'yicha o'yin topilmadi",
     "kill": "O'yinni yopish",
+    "switchTo": "O‘yinga o‘tish",
     "killConfirm": "{{title}} yopilsinmi? Saqlanmagan natijalar yo'qolishi mumkin.",
     "killTitle": "O'yinni yopish",
     "killed": "O'yin yopildi",
@@ -592,6 +593,7 @@
     "launch": "Ochish",
     "launching": "Ochilmoqda…",
     "launched": "{{title}} ochildi",
+    "alreadyRunning": "{{title}} allaqachon ochiq — unga o‘tamiz",
     "notAllowed": "Klub siyosati bilan taqiqlangan",
     "empty": "Mavjud ilovalar yo'q",
     "running": "Ishlamoqda",
@@ -604,6 +606,17 @@
     },
     "iconAlt": "{{title}} belgisi",
     "openFailed": "{{title}} ochilmadi"
+  },
+  "running": {
+    "title": "Ishlamoqda",
+    "switchTo": "O‘tish",
+    "close": "Yopish",
+    "confirmClose": "Rostdan yopilsinmi?",
+    "game": "O‘yin",
+    "app": "Ilova",
+    "starting": "Ishga tushmoqda…",
+    "noWindow": "Oyna hali yo‘q: dastur hali ochilmoqda yoki trayda turibdi",
+    "backHint": "Ilova yoki o‘yindan ClubShell ga qaytish: Ctrl+Shift+H → «ClubShell ga qaytish» yoki ilova oynasini yig‘ing."
   },
   "shop": {
     "title": "Do'kon",
@@ -1513,6 +1526,7 @@
     "gameRunning": "O'yin ishlamoqda",
     "returnToShell": "ClubShell ga qaytish",
     "hudTitle": "Tezkor panel",
+    "hudHide": "Panelni yashirish",
     "hudExtend": "+30 daqiqa",
     "hudHint": "Esc — yopish · Ctrl+Shift+H — panel",
     "hotkeyBlocked": "Bu tugmalar birikmasi o'chirilgan",
