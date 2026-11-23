@@ -488,6 +488,20 @@ public sealed class PlayerAccountTests : IDisposable
         (await SendAsync(IpcMessages.Auth.Status)).PayloadAs<AuthStatusResponse>()!.LockedByStaff.Should().BeFalse();
     }
 
+    [Fact]
+    public async Task The_cash_desk_does_not_open_a_lock_the_player_set()
+    {
+        await SignInWithSessionAsync(_member);
+        (await SendAsync(IpcMessages.Session.Lock, new SessionLockRequest("break"))).IsError.Should().BeFalse();
+
+        // D-96: only the player's PIN or password opens their own lock; the desk's unlock is refused and nothing changes.
+        Func<Task> unlock = () => _lock.UnlockByStaffAsync(CancellationToken.None);
+
+        (await unlock.Should().ThrowAsync<IpcException>()).Which.Error.DetailsAs<ReasonDetails>()!.Reason.Should().Be("playerLock");
+        _sessions.State.Should().Be(SessionState.Locked);
+        _lock.IsLockedByStaff.Should().BeFalse();
+    }
+
     // ---- G15: a guest cannot lock -----------------------------------------------------------------
 
     [Fact]

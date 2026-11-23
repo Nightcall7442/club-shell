@@ -39,6 +39,7 @@ const DETAIL_COPY: Record<string, string> = {
   staffOnly: 'Нужен вход кассира, ключ API не подходит',
   ownerOnly: 'Только владелец может это сделать',
   pcOccupied: 'На этом ПК идёт чужой сеанс',
+  playerLock: 'Игрок сам заблокировал ПК: открыть его можно только его PIN или паролем',
   // Cash desk part 3
   outOfStock: 'Столько нет на складе',
   notSellable: 'Этот товар не продаётся на кассе',

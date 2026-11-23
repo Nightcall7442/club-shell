@@ -245,12 +245,21 @@ public sealed class SessionLock : IDisposable
         return true;
     }
 
-    /// <summary>Unlocks from the cash desk (server command <c>unlock</c>), whatever locked the session. No-op when it is not locked.</summary>
+    /// <summary>
+    /// Unlocks from the cash desk (server command <c>unlock</c>) the cash desk's own lock. A lock the player set, the idle
+    /// lock or an ended sign-in opens only with the player's own PIN or password: the desk never signs a player in
+    /// (D-96) — <c>forbidden {reason: playerLock}</c>. No-op when it is not locked.
+    /// </summary>
     public async Task<PlaySession?> UnlockByStaffAsync(CancellationToken cancellationToken)
     {
         if (!IsLocked)
         {
             return _sessions.Current;
+        }
+
+        if (!IsLockedByStaff)
+        {
+            throw IpcError.Forbidden("Locked by the player: only their PIN or password unlocks", "playerLock").ToException();
         }
 
         return await _sessions.UnlockAsync(cancellationToken).ConfigureAwait(false);
