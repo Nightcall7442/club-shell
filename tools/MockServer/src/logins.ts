@@ -5,9 +5,46 @@
  * with the smallest number that makes it unique.
  */
 const CYRILLIC: Record<string, string> = {
-  а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'y', к: 'k', л: 'l', м: 'm',
-  н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'kh', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'shch',
-  ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya', і: 'i', ї: 'i', є: 'e', ў: 'o', қ: 'q', ғ: 'g', ҳ: 'h',
+  а: 'a',
+  б: 'b',
+  в: 'v',
+  г: 'g',
+  д: 'd',
+  е: 'e',
+  ё: 'e',
+  ж: 'zh',
+  з: 'z',
+  и: 'i',
+  й: 'y',
+  к: 'k',
+  л: 'l',
+  м: 'm',
+  н: 'n',
+  о: 'o',
+  п: 'p',
+  р: 'r',
+  с: 's',
+  т: 't',
+  у: 'u',
+  ф: 'f',
+  х: 'kh',
+  ц: 'ts',
+  ч: 'ch',
+  ш: 'sh',
+  щ: 'shch',
+  ъ: '',
+  ы: 'y',
+  ь: '',
+  э: 'e',
+  ю: 'yu',
+  я: 'ya',
+  і: 'i',
+  ї: 'i',
+  є: 'e',
+  ў: 'o',
+  қ: 'q',
+  ғ: 'g',
+  ҳ: 'h',
 };
 
 /** Digits of a text that reads as a phone (digits with spaces and `+ - ( )`, 7–15 digits), else null. */
@@ -43,7 +80,11 @@ export function loginSlug(displayName: string): string {
 }
 
 /** A free login among `taken` (lower case): the phone's digits, else the name numbered on a collision. */
-export function generateLogin(displayName: string, phone: string | null | undefined, taken: (login: string) => boolean): string {
+export function generateLogin(
+  displayName: string,
+  phone: string | null | undefined,
+  taken: (login: string) => boolean,
+): string {
   const digits = phoneDigits(phone);
   if (digits && !taken(digits)) return digits;
   const slug = loginSlug(displayName);

@@ -587,7 +587,10 @@ test.describe('player accounts', () => {
 
     await expect(page.getByRole('button', { name: en('session.payAtDesk'), exact: true })).toHaveCount(0);
     await page.getByRole('button', { name: en('session.leave'), exact: true }).click();
-    await page.getByRole('dialog').getByRole('button', { name: en('session.leaveConfirm') }).click();
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: en('session.leaveConfirm') })
+      .click();
     await expect(page).toHaveURL(/#\/lock$/);
   });
 

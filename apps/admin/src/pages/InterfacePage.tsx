@@ -19,9 +19,33 @@ type ThemeId = NonNullable<Branding['theme']>;
 
 /** The bundled shell themes as swatches: background, panel, text and the accent the theme brings. */
 const THEMES: { id: ThemeId; name: string; hint: string; bg: string; panel: string; text: string; accent: string }[] = [
-  { id: 'default', name: 'Obsidian', hint: 'Тёмная, по умолчанию', bg: '#07090C', panel: '#0D1117', text: '#E8F1F6', accent: '#9ADFFF' },
-  { id: 'light', name: 'Daylight', hint: 'Светлая, для светлого зала', bg: '#EEF2F6', panel: '#FFFFFF', text: '#0F172A', accent: '#0369A1' },
-  { id: 'neon', name: 'Neon Night', hint: 'Тёмная, неоновая', bg: '#07060F', panel: '#120F24', text: '#FAF5FF', accent: '#F0ABFC' },
+  {
+    id: 'default',
+    name: 'Obsidian',
+    hint: 'Тёмная, по умолчанию',
+    bg: '#07090C',
+    panel: '#0D1117',
+    text: '#E8F1F6',
+    accent: '#9ADFFF',
+  },
+  {
+    id: 'light',
+    name: 'Daylight',
+    hint: 'Светлая, для светлого зала',
+    bg: '#EEF2F6',
+    panel: '#FFFFFF',
+    text: '#0F172A',
+    accent: '#0369A1',
+  },
+  {
+    id: 'neon',
+    name: 'Neon Night',
+    hint: 'Тёмная, неоновая',
+    bg: '#07060F',
+    panel: '#120F24',
+    text: '#FAF5FF',
+    accent: '#F0ABFC',
+  },
 ];
 
 const PICK_TYPES = 'image/png,image/jpeg,image/webp,image/gif';
@@ -162,7 +186,9 @@ export default function InterfacePage(): JSX.Element {
             <div className="grid gap-6 lg:grid-cols-2">
               <PictureField
                 label={t('Логотип')}
-                hint={t('PNG с прозрачным фоном, квадратный, до 5 МБ. Виден на экране входа, заставке, верхней панели ПК, в кассе и на чеках.')}
+                hint={t(
+                  'PNG с прозрачным фоном, квадратный, до 5 МБ. Виден на экране входа, заставке, верхней панели ПК, в кассе и на чеках.',
+                )}
                 value={s.branding.logoUrl}
                 kind="logo"
                 onChange={(url) => branding({ logoUrl: url })}
@@ -196,7 +222,11 @@ export default function InterfacePage(): JSX.Element {
                     theme === th.id ? 'border-accent/70 bg-accent/[0.08]' : 'border-text/10 hover:border-text/25',
                   )}
                 >
-                  <span className="flex h-16 overflow-hidden rounded-sm" style={{ background: th.bg }} aria-hidden="true">
+                  <span
+                    className="flex h-16 overflow-hidden rounded-sm"
+                    style={{ background: th.bg }}
+                    aria-hidden="true"
+                  >
                     <span className="m-2 flex flex-1 flex-col gap-1.5 rounded-sm p-2" style={{ background: th.panel }}>
                       <span className="h-1.5 w-2/3 rounded-full" style={{ background: th.text }} />
                       <span className="h-1.5 w-1/3 rounded-full opacity-60" style={{ background: th.text }} />
@@ -226,9 +256,14 @@ export default function InterfacePage(): JSX.Element {
               {logo ? (
                 <img src={logo} alt="" className="h-6 w-6 object-contain" />
               ) : (
-                <span className="h-6 w-6 rounded-sm" style={{ background: accentValid ? s.branding.accent : '#9ADFFF' }} />
+                <span
+                  className="h-6 w-6 rounded-sm"
+                  style={{ background: accentValid ? s.branding.accent : '#9ADFFF' }}
+                />
               )}
-              <span className="truncate text-sm font-semibold text-white">{s.branding.clubName || t('Название клуба')}</span>
+              <span className="truncate text-sm font-semibold text-white">
+                {s.branding.clubName || t('Название клуба')}
+              </span>
             </div>
             <span
               className="self-start rounded-sm px-3 py-1.5 text-xs font-semibold text-black"
@@ -237,9 +272,7 @@ export default function InterfacePage(): JSX.Element {
               {t('Войти')}
             </span>
           </div>
-          <p className="mt-3 text-xs text-muted">
-            {t('ПК получают изменения сразу после сохранения.')}
-          </p>
+          <p className="mt-3 text-xs text-muted">{t('ПК получают изменения сразу после сохранения.')}</p>
         </Section>
       </div>
 

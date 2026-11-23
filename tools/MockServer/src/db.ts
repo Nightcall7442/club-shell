@@ -813,7 +813,11 @@ interface ClubForShell {
   branding?: { clubName: string; accent: string; logoUrl: string | null; wallpaperUrl: string | null; theme?: string };
   banners?: { id: string; title: string; imageUrl: string; from: string | null; to: string | null; enabled: boolean }[];
   rulesText?: { ru: string; uz: string; en: string };
-  screensaver?: { enabled: boolean; afterMinutes: number; items: { url: string; type: 'image' | 'video'; durationSec: number }[] };
+  screensaver?: {
+    enabled: boolean;
+    afterMinutes: number;
+    items: { url: string; type: 'image' | 'video'; durationSec: number }[];
+  };
   limits?: { selfSignup?: boolean };
 }
 
@@ -848,7 +852,13 @@ function clubForShell(): ShellClub | null {
     selfSignup: c.limits?.selfSignup === true,
     // Only once the owner saved one (D-87), as the server.
     ...(c.screensaver
-      ? { screensaver: { enabled: c.screensaver.enabled, afterSec: c.screensaver.afterMinutes * 60, items: c.screensaver.items } }
+      ? {
+          screensaver: {
+            enabled: c.screensaver.enabled,
+            afterSec: c.screensaver.afterMinutes * 60,
+            items: c.screensaver.items,
+          },
+        }
       : {}),
   };
 }

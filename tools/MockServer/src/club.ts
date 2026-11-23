@@ -181,7 +181,15 @@ export interface ScreensaverSettings {
 
 export const DEFAULT_SCREENSAVER: ScreensaverSettings = { enabled: false, afterMinutes: 5, items: [] };
 
-export const DEFAULT_TOPUP_PROMO: TopUpPromo = { enabled: false, bonusPct: 100, minAmount: 0, days: [], from: null, to: null, until: null };
+export const DEFAULT_TOPUP_PROMO: TopUpPromo = {
+  enabled: false,
+  bonusPct: 100,
+  minAmount: 0,
+  days: [],
+  from: null,
+  to: null,
+  until: null,
+};
 
 export interface PromoCode {
   code: string;

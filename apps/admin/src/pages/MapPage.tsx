@@ -481,7 +481,11 @@ function SeatTile({
       className={clsx(
         'focus-ring hud-focus group flex min-w-0 flex-col justify-between rounded-md border text-left transition-[border-color,box-shadow,opacity] duration-200',
         box ? 'absolute' : 'relative h-28',
-        compact ? 'items-center overflow-hidden px-0.5 py-0.5' : dense ? 'overflow-hidden py-2 pl-3.5 pr-2.5' : 'pb-[13px] pl-3.5 pr-3 pt-3',
+        compact
+          ? 'items-center overflow-hidden px-0.5 py-0.5'
+          : dense
+            ? 'overflow-hidden py-2 pl-3.5 pr-2.5'
+            : 'pb-[13px] pl-3.5 pr-3 pt-3',
         box && (selected || checked) && 'z-20',
         // Border and glow: amber when the cashier is needed, the accent when selected, else the state's hairline.
         call
@@ -2022,12 +2026,7 @@ function SeatPanel({
           <PowerIcon size={15} className="text-muted" />
           {t('ПК выключен')}
         </span>
-        <Button
-          variant="primary"
-          size="sm"
-          disabled={busy !== null}
-          onClick={wake}
-        >
+        <Button variant="primary" size="sm" disabled={busy !== null} onClick={wake}>
           {busy === 'wake' ? '…' : t('Включить')}
         </Button>
       </section>
@@ -4130,7 +4129,9 @@ export function MapPage(): JSX.Element {
     pick(x.pc.id);
     // The context-menu key has no pointer: the menu goes next to the tile then.
     const at =
-      e.clientX === 0 && e.clientY === 0 ? e.currentTarget.getBoundingClientRect() : new DOMRect(e.clientX, e.clientY, 0, 0);
+      e.clientX === 0 && e.clientY === 0
+        ? e.currentTarget.getBoundingClientRect()
+        : new DOMRect(e.clientX, e.clientY, 0, 0);
     setQuick({ pcId: x.pc.id, anchor: at });
   };
   const closeQuick = useCallback(() => setQuick(null), []);
@@ -4162,8 +4163,32 @@ export function MapPage(): JSX.Element {
   // Keys: digits then Enter pick a PC by number (in «Выбрать» mode they toggle it, while a move waits they pick its
   // target); Ctrl+A takes every PC shown; Esc closes the sheet, then the set, then the move, then the typed number,
   // then the panel.
-  const keys = useRef({ seats, digits, sheet, dialog, selected, multi, selectMode, movePick, shownIds, toggle, chooseTarget });
-  keys.current = { seats, digits, sheet, dialog, selected, multi, selectMode, movePick, shownIds, toggle, chooseTarget };
+  const keys = useRef({
+    seats,
+    digits,
+    sheet,
+    dialog,
+    selected,
+    multi,
+    selectMode,
+    movePick,
+    shownIds,
+    toggle,
+    chooseTarget,
+  });
+  keys.current = {
+    seats,
+    digits,
+    sheet,
+    dialog,
+    selected,
+    multi,
+    selectMode,
+    movePick,
+    shownIds,
+    toggle,
+    chooseTarget,
+  };
   useEffect(() => {
     let timer = 0;
     const on = (e: KeyboardEvent): void => {
@@ -4274,7 +4299,12 @@ export function MapPage(): JSX.Element {
   const inWindow = (dialog === 'bulk' && bulk.length > 0) || dialogSeat !== null;
   const dialogWindow =
     dialog === 'bulk' && bulk.length > 0 ? (
-      <Sheet title={t('Выбрано {n} ПК', { n: bulk.length })} caption={t('Действия с ПК')} onClose={closeDialog} size="wide">
+      <Sheet
+        title={t('Выбрано {n} ПК', { n: bulk.length })}
+        caption={t('Действия с ПК')}
+        onClose={closeDialog}
+        size="wide"
+      >
         <BulkPanel
           seats={bulk}
           tariffs={data?.tariffs ?? []}
@@ -4310,51 +4340,50 @@ export function MapPage(): JSX.Element {
         {t('Закрыть окно')}
       </Button>
     </div>
-  ) :
-    bulk.length > 0 ? (
-      <BulkPanel
-        seats={bulk}
-        tariffs={data?.tariffs ?? []}
+  ) : bulk.length > 0 ? (
+    <BulkPanel
+      seats={bulk}
+      tariffs={data?.tariffs ?? []}
+      onDone={() => void load()}
+      onClear={() => {
+        setMulti(new Set());
+        setSelectMode(false);
+      }}
+      onStartMove={startMove}
+    />
+  ) : seat && data ? (
+    <>
+      {moved && moved.pcId === seat.pc.id && (
+        <Note tone="ok" role="status">
+          {moved.text}
+        </Note>
+      )}
+      <SeatPanel
+        seat={seat}
+        members={data.users}
+        tariffs={data.tariffs}
+        sheet={sheet}
+        setSheet={setSheet}
         onDone={() => void load()}
-        onClear={() => {
-          setMulti(new Set());
-          setSelectMode(false);
-        }}
-        onStartMove={startMove}
+        call={callsByPc.get(seat.pc.id)}
+        onStartMove={() => startMove(seat)}
       />
-    ) : seat && data ? (
-      <>
-        {moved && moved.pcId === seat.pc.id && (
-          <Note tone="ok" role="status">
-            {moved.text}
-          </Note>
-        )}
-        <SeatPanel
-          seat={seat}
-          members={data.users}
-          tariffs={data.tariffs}
-          sheet={sheet}
-          setSheet={setSheet}
-          onDone={() => void load()}
-          call={callsByPc.get(seat.pc.id)}
-          onStartMove={() => startMove(seat)}
-        />
-      </>
-    ) : (
-      <div className="glass-side flex flex-col items-center justify-center px-6 py-9">
-        <EmptyState
-          icon={<MonitorIcon size={22} />}
-          title={t('Выберите место')}
-          text={t('Левый клик — выбрать ПК, правый — все действия с ним. Номер ПК и Enter — выбрать место.')}
-          hint={
-            <>
-              {t('номер ПК')}
-              <Kbd className="text-text">Enter</Kbd>
-            </>
-          }
-        />
-      </div>
-    );
+    </>
+  ) : (
+    <div className="glass-side flex flex-col items-center justify-center px-6 py-9">
+      <EmptyState
+        icon={<MonitorIcon size={22} />}
+        title={t('Выберите место')}
+        text={t('Левый клик — выбрать ПК, правый — все действия с ним. Номер ПК и Enter — выбрать место.')}
+        hint={
+          <>
+            {t('номер ПК')}
+            <Kbd className="text-text">Enter</Kbd>
+          </>
+        }
+      />
+    </div>
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">

@@ -56,8 +56,14 @@ export function quickItems(seat: Seat, guests = true): Item[] {
   }
   if (session) return [controls, { action: 'open', label: t('Открыть карточку') }];
   return [
-    ...(seat.pc.status === 'offline' ? [{ action: 'wake' as const, label: t('Включить ПК'), tone: 'primary' as const }] : []),
-    { action: 'client', label: t('Посадить клиента'), tone: seat.pc.status === 'offline' ? undefined : ('primary' as const) },
+    ...(seat.pc.status === 'offline'
+      ? [{ action: 'wake' as const, label: t('Включить ПК'), tone: 'primary' as const }]
+      : []),
+    {
+      action: 'client',
+      label: t('Посадить клиента'),
+      tone: seat.pc.status === 'offline' ? undefined : ('primary' as const),
+    },
     ...(guests
       ? [
           { action: 'guest' as const, label: t('Посадить гостя · предоплата') },

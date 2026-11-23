@@ -40,7 +40,10 @@ export interface UploadedMedia {
 }
 
 /** Uploads a PNG / JPEG / WebP / GIF of at most 5 MB as the owner (D-93); the server checks the bytes. */
-export async function uploadMedia(file: Blob, kind: 'logo' | 'wallpaper' | 'banner' | 'screensaver' | 'other'): Promise<UploadedMedia> {
+export async function uploadMedia(
+  file: Blob,
+  kind: 'logo' | 'wallpaper' | 'banner' | 'screensaver' | 'other',
+): Promise<UploadedMedia> {
   return call<UploadedMedia>(`/admin/media?kind=${kind}`, {
     method: 'POST',
     body: file,

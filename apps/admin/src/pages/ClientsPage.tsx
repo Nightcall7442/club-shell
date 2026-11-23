@@ -812,13 +812,18 @@ function DeleteClient({ client, onDeleted }: { client: Client; onDeleted: () => 
       await clubApi.deleteClient(client.id);
       onDeleted();
     } catch (e) {
-      const details = e instanceof AdminError ? (e.details as { reason?: string; balance?: { amount: number } } | null) : null;
+      const details =
+        e instanceof AdminError ? (e.details as { reason?: string; balance?: { amount: number } } | null) : null;
       if (details?.reason === 'playing') setError(t('Клиент сейчас играет — сначала завершите сеанс.'));
       else if (details?.reason === 'balance' && details.balance)
         setError(
           details.balance.amount > 0
-            ? t('На балансе {sum} — сначала верните или спишите деньги.', { sum: money({ amount: details.balance.amount, currency: 'UZS' }) })
-            : t('Долг {sum} — сначала оплатите или спишите его.', { sum: money({ amount: -details.balance.amount, currency: 'UZS' }) }),
+            ? t('На балансе {sum} — сначала верните или спишите деньги.', {
+                sum: money({ amount: details.balance.amount, currency: 'UZS' }),
+              })
+            : t('Долг {sum} — сначала оплатите или спишите его.', {
+                sum: money({ amount: -details.balance.amount, currency: 'UZS' }),
+              }),
         );
       else setError(describe(e));
       setConfirm(false);
@@ -831,7 +836,9 @@ function DeleteClient({ client, onDeleted }: { client: Client; onDeleted: () => 
     <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-danger/20 pt-4">
       <span className="text-sm text-muted">
         {confirm
-          ? t('Удалить {name}? Клиент не сможет войти, история денег останется в отчётах.', { name: client.displayName })
+          ? t('Удалить {name}? Клиент не сможет войти, история денег останется в отчётах.', {
+              name: client.displayName,
+            })
           : t('Клиент пропадёт из списков, его логин и карта освободятся.')}
       </span>
       <div className="flex gap-2">

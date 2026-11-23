@@ -344,9 +344,7 @@ export default function ClubPage(): JSX.Element {
             />
           </Section>
 
-          {s.screensaver && (
-            <ScreensaverSection value={s.screensaver} onChange={(v) => st.set('screensaver', v)} />
-          )}
+          {s.screensaver && <ScreensaverSection value={s.screensaver} onChange={(v) => st.set('screensaver', v)} />}
 
           <Section title={t('Регистрация на ПК')}>
             <div className="flex flex-col gap-3 md:max-w-xl">
@@ -492,10 +490,18 @@ function ScreensaverSection({
       actions={<Toggle checked={value.enabled} onChange={(v) => set({ enabled: v })} label={t('Заставка включена')} />}
     >
       <p className="text-sm text-muted">
-        {t('Когда за ПК никого нет, после бездействия на экране идут ваши картинки и ролики. Касание — снова экран входа. Без файлов — встроенные слайды с ценами.')}
+        {t(
+          'Когда за ПК никого нет, после бездействия на экране идут ваши картинки и ролики. Касание — снова экран входа. Без файлов — встроенные слайды с ценами.',
+        )}
       </p>
       <Field label={t('Через сколько минут без действий')} className="max-w-[16rem]">
-        <NumberInput value={value.afterMinutes} min={1} max={120} suffix={t('мин')} onChange={(n) => set({ afterMinutes: n })} />
+        <NumberInput
+          value={value.afterMinutes}
+          min={1}
+          max={120}
+          suffix={t('мин')}
+          onChange={(n) => set({ afterMinutes: n })}
+        />
       </Field>
       <div data-testid="screensaver-items">
         <Table
@@ -515,7 +521,10 @@ function ScreensaverSection({
                     const url = e.target.value;
                     // A clip by its extension: the owner rarely thinks of the switch.
                     const video = /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url.trim());
-                    editItem(r.i, { url, type: video ? 'video' : r.item.type === 'video' && url.trim() === '' ? 'image' : r.item.type });
+                    editItem(r.i, {
+                      url,
+                      type: video ? 'video' : r.item.type === 'video' && url.trim() === '' ? 'image' : r.item.type,
+                    });
                   }}
                 />
               ),
@@ -556,7 +565,11 @@ function ScreensaverSection({
               title: '',
               width: '6rem',
               render: (r) => (
-                <Button variant="ghost" size="sm" onClick={() => set({ items: value.items.filter((_, j) => j !== r.i) })}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => set({ items: value.items.filter((_, j) => j !== r.i) })}
+                >
                   {t('Удалить')}
                 </Button>
               ),

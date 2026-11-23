@@ -359,7 +359,8 @@ export function authRoutes(app: FastifyInstance): void {
     }
     const password = typeof b['password'] === 'string' ? b['password'] : '';
     if (!password) throw errors.validation('password', 'required');
-    if (password.length < 4 || password.length > 64) throw errors.validation('password', password.length < 4 ? 'min' : 'max');
+    if (password.length < 4 || password.length > 64)
+      throw errors.validation('password', password.length < 4 ? 'min' : 'max');
     const rules = c.rulesText ?? { ru: '', uz: '', en: '' };
     if ([rules.ru, rules.uz, rules.en].some((r) => (r ?? '').trim()) && optBool(b, 'acceptRules') !== true) {
       throw errors.validation('acceptRules', 'required');

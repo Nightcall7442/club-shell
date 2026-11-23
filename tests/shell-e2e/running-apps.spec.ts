@@ -33,7 +33,9 @@ interface MockApps {
 }
 
 function mockApps(page: Page): Promise<MockApps['apps']> {
-  return page.evaluate(() => (window as unknown as { __clubshellMock: { state: MockApps } }).__clubshellMock.state.apps);
+  return page.evaluate(
+    () => (window as unknown as { __clubshellMock: { state: MockApps } }).__clubshellMock.state.apps,
+  );
 }
 
 async function open(page: Page, hash: string): Promise<Translate> {
@@ -162,7 +164,14 @@ test.describe('running apps', () => {
         throw new Error('no installed mock game');
       }
       const at = new Date().toISOString();
-      mock.state.running.push({ gameId: game.id, title: game.title, pid: 4321, startedAt: at, accountLeaseId: null, state: 'running' });
+      mock.state.running.push({
+        gameId: game.id,
+        title: game.title,
+        pid: 4321,
+        startedAt: at,
+        accountLeaseId: null,
+        state: 'running',
+      });
       mock.emit('agent://game.stateChanged', { gameId: game.id, title: game.title, pid: 4321, state: 'running', at });
       return game.title;
     });

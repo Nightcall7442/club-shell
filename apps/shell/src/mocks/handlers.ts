@@ -953,7 +953,13 @@ export const simulate = {
    * The owner's screensaver of the free PCs (D-87) as the next `settings_get` returns it; the shell re-reads the
    * settings while it waits on the lock screen (or call `useSettingsStore.load()`).
    */
-  screensaver(value: { enabled: boolean; afterSec: number; items?: { url: string; type: 'image' | 'video'; durationSec: number }[] } | null): void {
+  screensaver(
+    value: {
+      enabled: boolean;
+      afterSec: number;
+      items?: { url: string; type: 'image' | 'video'; durationSec: number }[];
+    } | null,
+  ): void {
     const club = { ...(mockState.settings.club ?? {}) };
     if (value) club.screensaver = { enabled: value.enabled, afterSec: value.afterSec, items: value.items ?? [] };
     else delete club.screensaver;

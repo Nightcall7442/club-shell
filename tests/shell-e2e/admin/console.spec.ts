@@ -755,7 +755,11 @@ test('the owner turns on «x2» for top-ups under «Бонусы и акции»
 
     await ensureShift(request);
     const member = await newClient(request, 'x2-member');
-    const topUp = await moneyPost(request, '/admin/wallet/topup', { userId: member.id, amount: 2_000_000, method: 'cash' });
+    const topUp = await moneyPost(request, '/admin/wallet/topup', {
+      userId: member.id,
+      amount: 2_000_000,
+      method: 'cash',
+    });
     expect(topUp.ok(), await topUp.text()).toBeTruthy();
     const paid = (await topUp.json()) as { bonus: { amount: number }; balance: { amount: number } };
     expect([paid.bonus.amount, paid.balance.amount]).toEqual([2_000_000, 4_000_000]);
@@ -774,7 +778,10 @@ test('the owner sets the screensaver of the free PCs on «Экран игрок�
     await page.goto('/#/club');
     await page.getByRole('switch', { name: 'Заставка включена' }).click();
     await page.getByRole('button', { name: 'Добавить картинку или видео' }).click();
-    await page.getByTestId('screensaver-items').getByLabel('Ссылка на картинку или видео').fill('https://cdn.example.com/promo.mp4');
+    await page
+      .getByTestId('screensaver-items')
+      .getByLabel('Ссылка на картинку или видео')
+      .fill('https://cdn.example.com/promo.mp4');
     await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
     await expect(page.getByRole('status').filter({ hasText: 'Сохранено' })).toBeVisible();
 
@@ -795,7 +802,9 @@ test('the owner sets the screensaver of the free PCs on «Экран игрок�
 
     const bad = await request.patch(`${API}/admin/club`, {
       headers: auth(owner),
-      data: { screensaver: { enabled: true, afterMinutes: 5, items: [{ url: 'promo.mp4', type: 'video', durationSec: 10 }] } },
+      data: {
+        screensaver: { enabled: true, afterMinutes: 5, items: [{ url: 'promo.mp4', type: 'video', durationSec: 10 }] },
+      },
     });
     expect(bad.status()).toBe(400);
   } finally {
@@ -821,7 +830,10 @@ test('the owner uploads the club logo and picks the PCs theme under «Интер
   try {
     await signIn(page, OWNER_PIN);
     await nav(page).getByText('Интерфейс и логотипы', { exact: true }).click();
-    await page.getByTestId('picture-logo').locator('input[type=file]').setInputFiles({ name: 'logo.png', mimeType: 'image/png', buffer: png });
+    await page
+      .getByTestId('picture-logo')
+      .locator('input[type=file]')
+      .setInputFiles({ name: 'logo.png', mimeType: 'image/png', buffer: png });
     await expect(page.getByTestId('picture-logo').locator('img')).toBeVisible();
     await page.getByRole('radio', { name: /Daylight/ }).click();
     await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
@@ -850,7 +862,10 @@ test('the owner uploads the club logo and picks the PCs theme under «Интер
     });
     expect(svg.status()).toBe(400);
   } finally {
-    await request.patch(`${API}/admin/club`, { headers: auth(owner), data: { branding: { ...before.branding, theme: 'default' } } });
+    await request.patch(`${API}/admin/club`, {
+      headers: auth(owner),
+      data: { branding: { ...before.branding, theme: 'default' } },
+    });
   }
 });
 
@@ -1230,7 +1245,10 @@ test('the owner lets players create their own account on the PC (D-92)', async (
 
     const made = await register();
     expect(made.status()).toBe(200);
-    const signedIn = (await made.json()) as { user: { role: string; balance: { amount: number } }; accessToken: string };
+    const signedIn = (await made.json()) as {
+      user: { role: string; balance: { amount: number } };
+      accessToken: string;
+    };
     expect(signedIn.user).toMatchObject({ role: 'member', balance: { amount: 0 } });
     expect(signedIn.accessToken).toBeTruthy();
   } finally {
@@ -3305,7 +3323,11 @@ test('a wrong desk top-up is corrected from the feed in one step: the difference
   await ensureShift(request);
   const client = await newClient(request, 'fix');
   // 200 000 сум in cash instead of 20 000.
-  const wrong = await moneyPost(request, '/admin/wallet/topup', { userId: client.id, amount: 20_000_000, method: 'cash' });
+  const wrong = await moneyPost(request, '/admin/wallet/topup', {
+    userId: client.id,
+    amount: 20_000_000,
+    method: 'cash',
+  });
   expect(wrong.status(), await wrong.text()).toBe(200);
   const wrongId = ((await wrong.json()) as { transaction: { id: string } }).transaction.id;
   const before = await shiftState(request);
@@ -3347,7 +3369,11 @@ test('a wrong desk top-up is corrected from the feed in one step: the difference
 
   // Money already spent at the bar is not taken back.
   const spent = await newClient(request, 'spent');
-  const topUp = await moneyPost(request, '/admin/wallet/topup', { userId: spent.id, amount: 1_000_000, method: 'card' });
+  const topUp = await moneyPost(request, '/admin/wallet/topup', {
+    userId: spent.id,
+    amount: 1_000_000,
+    method: 'card',
+  });
   const topUpId = ((await topUp.json()) as { transaction: { id: string } }).transaction.id;
   const item = await newProduct(request, 'spent', { price: 600_000, stockQty: null });
   const sale = await barSale(request, [{ product: item, qty: 1 }], { method: 'balance', userId: spent.id });
