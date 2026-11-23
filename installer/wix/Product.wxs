@@ -39,7 +39,10 @@
     <SummaryInformation Description="ClubShell client software for gaming clubs (Agent service and kiosk Shell)"
                         Keywords="Installer,ClubShell,Kiosk" />
 
+    <!-- Pre-releases share the MSI version (1.0.27-beta.1 and -beta.2 are both 1.0.27: Windows Installer takes only
+         numbers), so the same version must upgrade too; otherwise beta.2 installs beside beta.1 and the update fails. -->
     <MajorUpgrade Schedule="afterInstallInitialize"
+                  AllowSameVersionUpgrades="yes"
                   DowngradeErrorMessage="A newer version of ClubShell is already installed. Uninstall it first to install this version." />
 
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
