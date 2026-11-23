@@ -1546,6 +1546,13 @@ export const UZ: Record<string, string> = {
   'Найдено трейлеров: {found} из {n}. Сервер клуба скачает их сам.':
     'Topilgan treylerlar: {n} tadan {found} ta. Klub serveri ularni oʻzi yuklab oladi.',
   Есть: 'Bor',
+  'не видеофайл': 'video fayl emas',
+  'потоковое видео': 'oqimli video',
+  'больше {n} МБ': '{n} MB dan katta',
+  'не отвечает': 'javob bermayapti',
+  'файла нет': 'fayl yoʻq',
+  'не скачалась': 'yuklab boʻlmadi',
+  'Ссылка не подошла ({why})': 'Havola toʻgʻri kelmadi ({why})',
 };
 export const EN: Record<string, string> = {
   'Выручка за период': 'Revenue for the period',
@@ -3087,4 +3094,11 @@ export const EN: Record<string, string> = {
   'Найдено трейлеров: {found} из {n}. Сервер клуба скачает их сам.':
     'Trailers found: {found} of {n}. The club server downloads them itself.',
   Есть: 'Yes',
+  'не видеофайл': 'not a video file',
+  'потоковое видео': 'streaming video',
+  'больше {n} МБ': 'over {n} MB',
+  'не отвечает': 'not answering',
+  'файла нет': 'no file there',
+  'не скачалась': 'not downloaded',
+  'Ссылка не подошла ({why})': 'The link did not work ({why})',
 };

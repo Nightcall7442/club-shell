@@ -278,8 +278,11 @@ public sealed class TrailerTests(TrailerServerFixture server) : IClassFixture<Tr
 
         foreach (var (game, reason) in new[] { (page, "notAVideo"), (hls, "streamingFormat"), (big, "tooLarge"), (gone, "unavailable"), (youtube, "notAVideo") })
         {
+            // The link gives no trailer: the finder looks instead (the fake store does not answer), keeping the link and why.
             var t = (await AdminTrailerAsync(owner, game))!.Value;
-            Assert.Equal(("failed", reason), (t.GetProperty("status").GetString(), t.GetProperty("reason").GetString()));
+            Assert.Equal(("searching", "found", reason), (t.GetProperty("status").GetString(), t.GetProperty("origin").GetString(),
+                t.GetProperty("failedReason").GetString()));
+            Assert.StartsWith("https://", t.GetProperty("failedLink").GetString());
         }
 
         // A page or a playlist never reaches the PCs; a link that is only too big for the server still may play there.
@@ -360,14 +363,68 @@ public sealed class TrailerTests(TrailerServerFixture server) : IClassFixture<Tr
     }
 
     [Fact]
+    public async Task A_failed_owner_link_is_replaced_by_a_steam_trailer_but_a_ready_link_an_upload_and_a_removal_are_not()
+    {
+        var owner = await LoginAsync(server, OwnerPin);
+        server.Web.ServeJson(SteamTrailerFinder.Store + "appdetails?appids=4300&filters=movies", AppDetails("4300").Replace("/9002/", "/9300/", StringComparison.Ordinal));
+        server.Web.Serve("https://cdn.akamai.steamstatic.com/steam/apps/9300/movie_max.mp4", Mp4(8000), "video/mp4");
+        server.Web.Serve("https://cdn.example.com/rp/ok.mp4", Mp4(3000), "video/mp4");
+        server.Web.ServeJson(SteamTrailerFinder.Store + "appdetails?appids=4301&filters=movies", AppDetails("4301"));
+
+        const string YouTube = "https://www.youtube.com/watch?v=abc";
+        var card = new { title = "Replace Me", launcher = "steam", launcherAppId = "4300", videoUrl = YouTube };
+        var replaced = await AddGameAsync(owner, card);
+        var ready = await AddGameAsync(owner, new { title = "Ready Link", launcher = "steam", launcherAppId = "4301", videoUrl = "https://cdn.example.com/rp/ok.mp4" });
+        await server.DrainAsync();
+
+        // The YouTube page gave nothing; the Steam store's 1080p file took its place.
+        var t = (await AdminTrailerAsync(owner, replaced))!.Value;
+        Assert.Equal(("ready", "found", "https://cdn.akamai.steamstatic.com/steam/apps/9300/movie_max.mp4", YouTube, "notAVideo"), (
+            t.GetProperty("status").GetString(), t.GetProperty("origin").GetString(), t.GetProperty("sourceUrl").GetString(),
+            t.GetProperty("failedLink").GetString(), t.GetProperty("failedReason").GetString()));
+        var agent = await TestAgent.CreateAsync(server);
+        Assert.Equal(t.GetProperty("url").GetString(), Text(await AgentGameAsync(agent, replaced), "videoUrl"));
+
+        // The same card saved again (or the seed applied again) does not bring the failed link back.
+        Assert.Equal(200, (await SendRawAsync(HttpMethod.Put, $"/games/{replaced}", owner, card)).Status);
+        Assert.Equal("ready", (await AdminTrailerAsync(owner, replaced))!.Value.GetProperty("status").GetString());
+
+        // A ready owner link is never searched over.
+        var link = (await AdminTrailerAsync(owner, ready))!.Value;
+        Assert.Equal(("ready", "link"), (link.GetProperty("status").GetString(), link.GetProperty("origin").GetString()));
+        Assert.DoesNotContain(server.Web.Requests, r => r.Contains("appids=4301", StringComparison.Ordinal));
+
+        // «Найти трейлеры» takes up a failed link too (here one failed before the finder could look), not the ready one.
+        var manual = await AddGameAsync(owner, new { title = "Manual Replace", launcher = "steam", launcherAppId = "4300", videoUrl = "https://cdn.example.com/rp/dead.mp4" });
+        await Players.ExecuteAsync(server, "UPDATE game_trailers SET status = 'failed', reason = 'unavailable' WHERE game_id = @manual", new { manual });
+        var (_, find) = await SendRawAsync(HttpMethod.Post, "/games/trailers/find", owner);
+        var queued = find.GetProperty("gameIds").EnumerateArray().Select(g => g.GetGuid()).ToList();
+        Assert.Contains(manual, queued);
+        Assert.DoesNotContain(ready, queued);
+        Assert.DoesNotContain(replaced, queued);
+        await server.DrainAsync();
+        var m = (await AdminTrailerAsync(owner, manual))!.Value;
+        Assert.Equal(("ready", "found", "https://cdn.example.com/rp/dead.mp4", "unavailable"), (m.GetProperty("status").GetString(),
+            m.GetProperty("origin").GetString(), m.GetProperty("failedLink").GetString(), m.GetProperty("failedReason").GetString()));
+
+        // A new link from the owner is the owner's again.
+        Assert.Equal(200, (await SendRawAsync(HttpMethod.Put, $"/games/{manual}", owner,
+            new { title = "Manual Replace", launcher = "steam", launcherAppId = "4300", videoUrl = "https://cdn.example.com/rp/ok.mp4" })).Status);
+        var again = (await AdminTrailerAsync(owner, manual))!.Value;
+        Assert.Equal(("downloading", "link", JsonValueKind.Null), (again.GetProperty("status").GetString(), again.GetProperty("origin").GetString(),
+            again.GetProperty("failedLink").ValueKind));
+    }
+
+    [Fact]
     public async Task The_seeds_links_reach_the_pcs_until_the_copy_is_stored()
     {
         // games.example.json: Counter-Strike 2 with a Steam CDN link.
         var cs2 = Guid.Parse("5f504f55-cff1-4d58-bedc-5976a3cee48b");
         var link = await Players.ScalarAsync<string>(server, "SELECT data ->> 'videoUrl' FROM games WHERE id = @cs2", new { cs2 });
         Assert.StartsWith("https://", link);
-        Assert.Equal("link", await Players.ScalarAsync<string>(server, "SELECT origin FROM game_trailers WHERE game_id = @cs2", new { cs2 }));
-        Assert.Equal(link, await Players.ScalarAsync<string>(server, "SELECT source_url FROM game_trailers WHERE game_id = @cs2", new { cs2 }));
+        // The link to download — or, once the canned internet answered 404 to it in another test, the link the finder replaces.
+        Assert.Equal(link, await Players.ScalarAsync<string>(
+            server, "SELECT CASE WHEN origin = 'link' THEN source_url ELSE failed_link END FROM game_trailers WHERE game_id = @cs2", new { cs2 }));
         var agent = await TestAgent.CreateAsync(server);
         var seen = await AgentGameAsync(agent, cs2);
         if (await Players.ScalarAsync<string>(server, "SELECT status FROM game_trailers WHERE game_id = @cs2", new { cs2 }) != "ready")

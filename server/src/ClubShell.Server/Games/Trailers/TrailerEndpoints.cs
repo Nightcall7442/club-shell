@@ -17,7 +17,8 @@ namespace ClubShell.Server.Games;
 /// /api/v1/admin/games/{id}/trailer</c> uploads one as the raw body — an MP4 (H.264 plays everywhere) or WebM of at most
 /// <see cref="TrailerOptions.MaxBytes"/>, recognised by its first bytes; it replaces the card's link and is never
 /// replaced by the finder or the seed. <c>DELETE</c> takes the game's trailer off (and the finder leaves it alone).
-/// <c>POST /api/v1/admin/games/trailers/find</c> — «Найти трейлеры» — searches again for every game without one
+/// <c>POST /api/v1/admin/games/trailers/find</c> — «Найти трейлеры» — searches again for every game without one or whose
+/// link failed
 /// (<see cref="TrailerStore.SearchAgainAsync"/>) and answers <c>{queued, gameIds}</c>; the console follows their
 /// <c>trailer.status</c> in the games list.
 /// </summary>
@@ -111,7 +112,8 @@ public static class TrailerEndpoints
                 INSERT INTO game_trailers (game_id, club_id, origin, source_url, status, file_id, content_type, size, sha256, next_try_at, updated_at)
                 VALUES (@id, @ClubId, 'upload', NULL, 'ready', @FileId, @ContentType, @Size, @Sha256, @now, @now)
                 ON CONFLICT (game_id) DO UPDATE SET origin = 'upload', source_url = NULL, status = 'ready', reason = NULL, file_id = excluded.file_id,
-                    content_type = excluded.content_type, size = excluded.size, sha256 = excluded.sha256, attempts = 0, updated_at = excluded.updated_at
+                    content_type = excluded.content_type, size = excluded.size, sha256 = excluded.sha256, attempts = 0, updated_at = excluded.updated_at,
+                    failed_link = NULL, failed_reason = NULL
                 RETURNING {TrailerRow.Columns}
                 """,
                 new { id, staff.ClubId, stored.FileId, stored.ContentType, stored.Size, stored.Sha256, now }, tx);
@@ -146,7 +148,7 @@ public static class TrailerEndpoints
                 INSERT INTO game_trailers (game_id, club_id, origin, status, reason, next_try_at, updated_at)
                 VALUES (@id, @ClubId, 'found', 'failed', 'removed', @now, @now)
                 ON CONFLICT (game_id) DO UPDATE SET origin = 'found', source_url = NULL, status = 'failed', reason = 'removed', file_id = NULL,
-                    content_type = NULL, size = NULL, sha256 = NULL, attempts = 0, updated_at = @now
+                    content_type = NULL, size = NULL, sha256 = NULL, attempts = 0, updated_at = @now, failed_link = NULL, failed_reason = NULL
                 """,
                 new { id, staff.ClubId, now }, tx);
             await Audit.WriteAsync(c, tx, staff, now, "gameTrailerRemove", detail: title, meta: new { gameId = id });

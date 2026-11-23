@@ -299,6 +299,41 @@ function trailerStatus(
   return { text: reasons[tr.reason ?? ''] ?? t('Не удалось скачать ролик'), tone: 'warn' };
 }
 
+/** Why the card's link gave no trailer, in a few words (D-97). */
+function linkProblem(tr: AdminTrailer): string {
+  if (/(^|\.)(youtube\.com|youtu\.be)$/i.test(hostOf(tr.failedLink))) return 'YouTube';
+  const why: Record<string, string> = {
+    notAVideo: t('не видеофайл'),
+    streamingFormat: t('потоковое видео'),
+    tooLarge: t('больше {n} МБ', { n: TRAILER_MAX_BYTES / 1024 / 1024 }),
+    unreachable: t('не отвечает'),
+    unavailable: t('файла нет'),
+  };
+  return why[tr.failedReason ?? ''] ?? t('не скачалась');
+}
+
+function hostOf(url: string | null | undefined): string {
+  try {
+    return url ? new URL(url).hostname : '';
+  } catch {
+    return '';
+  }
+}
+
+/** The status, said after the failed link it stands in for: «Ссылка не подошла (YouTube) — найден в Steam · 1920×1080». */
+function replacedStatus(
+  tr: AdminTrailer,
+  size?: { width: number; height: number } | null,
+): { text: string; tone: 'ok' | 'warn' | 'muted' } {
+  const prefix = t('Ссылка не подошла ({why})', { why: linkProblem(tr) });
+  if (tr.status === 'ready') {
+    const parts = [t('найден в Steam'), ...(size ? [`${size.width}×${size.height}`] : []), fileSize(tr.size ?? 0)];
+    return { text: `${prefix} — ${parts.join(' · ')}`, tone: 'ok' };
+  }
+  const plain = trailerStatus({ ...tr, failedReason: null });
+  return { text: `${prefix} — ${plain.text}`, tone: tr.status === 'failed' ? 'warn' : 'muted' };
+}
+
 /** The upload's refusal in the console's words. */
 function uploadProblem(e: unknown): string {
   if (e instanceof AdminError && e.details?.['field'] === 'file') {
@@ -336,7 +371,7 @@ function TrailerField({
   const trailer = uploaded ?? (saved ? (game?.trailer ?? null) : null);
   const stored = trailer?.status === 'ready' ? mediaUrl(trailer.url) : null;
   const size = frame && frame.url === stored ? frame : null;
-  const status = trailer ? trailerStatus(trailer, size) : null;
+  const status = trailer ? (trailer.failedReason ? replacedStatus(trailer, size) : trailerStatus(trailer, size)) : null;
   // The club's target is 1080p: below it a trailer looks soft on the PCs' screens.
   const lowRes = size !== null && Math.min(size.width, size.height) < 1080;
   const typed = VIDEO_URL.test(link.trim()) ? link.trim() : null;

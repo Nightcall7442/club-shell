@@ -64,7 +64,12 @@ export interface AdminTrailer {
   contentType: string | null;
   size: number | null;
   /** `notAVideo`, `streamingFormat`, `tooLarge`, `unavailable`, `unreachable`, `notFound`, `fileLost`. */
-  reason: string | null;
+  reason:
+    | string
+    | null /** The card's link that gave no trailer, when the server looks in the Steam store instead (a file found replaces it). */;
+  failedLink?: string | null;
+  /** Why that link failed: a `reason` as above. */
+  failedReason?: string | null;
 }
 
 /** The biggest trailer the club server takes (D-97). */

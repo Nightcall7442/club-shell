@@ -12,7 +12,9 @@ namespace ClubShell.Server.Games;
 /// most <see cref="TrailerOptions.MaxBytes"/> within <see cref="TrailerOptions.DownloadTimeoutSec"/>): a video page
 /// (YouTube…) is refused without a request and anything but an mp4/webm by its first bytes — a web page as
 /// <c>notAVideo</c>, an HLS/DASH playlist as <c>streamingFormat</c>; 404/410 and other 4xx are <c>unavailable</c>. No
-/// answer, a timeout or a 5xx is tried again after 1, 10 and 60 minutes, then <c>unreachable</c>. A row the owner
+/// answer, a timeout or a 5xx is tried again after 1, 10 and 60 minutes, then <c>unreachable</c>. A card's link that
+/// fails so (<see cref="TrailerRow.ReplaceableReasons"/>) becomes a search, which keeps the link and its reason
+/// (<c>failed_link</c>/<c>failed_reason</c>): a file found replaces it. A row the owner
 /// changed meanwhile keeps the owner's change (the copy is swept). Each outcome a PC sees moves <c>catalog_version</c>
 /// and reloads the club's connected PCs. At start, ready copies lost with the disk are fetched again. Tests call
 /// <see cref="RunOnceAsync"/>.
@@ -187,7 +189,19 @@ public sealed class TrailerWorker(
         await using (var tx = await c.BeginTransactionAsync(cancellationToken))
         {
             var now = clock.GetUtcNow();
-            var changed = await c.ExecuteAsync(
+
+            // A card's link that gives no trailer: the finder looks in the Steam store instead, and what it finds replaces the link.
+            var replace = failure is not null && row.Origin == "link" && store.Options.AutoFind && TrailerRow.ReplaceableReasons.Contains(failure);
+            var changed = replace
+                ? await c.ExecuteAsync(
+                    """
+                    UPDATE game_trailers SET origin = 'found', failed_link = source_url, failed_reason = @failure, source_url = NULL, status = 'pending',
+                                             reason = NULL, attempts = 0, next_try_at = @now, updated_at = @now
+                    WHERE game_id = @GameId AND status = 'pending' AND origin = 'link' AND source_url IS NOT DISTINCT FROM @SourceUrl
+                    """,
+                    new { row.GameId, row.SourceUrl, now, failure },
+                    tx)
+                : await c.ExecuteAsync(
                 """
                 UPDATE game_trailers SET status = @status, reason = @failure, file_id = @fileId, content_type = @type, size = @size, sha256 = @sha,
                                          updated_at = @now
