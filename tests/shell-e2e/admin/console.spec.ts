@@ -1244,7 +1244,8 @@ test('a typed amount topped up by card from the client search lands in the X-rep
   await amount.fill('45000');
   await expect(amount).toHaveValue('45 000');
   // The method button is the confirmation.
-  await sheet.getByRole('button', { name: /^Карта/ }).click();
+  await sheet.getByRole('radio', { name: 'Карта' }).click();
+  await sheet.getByRole('button', { name: /^Пополнить · Карта/ }).click();
   await expect(sheet.getByRole('status')).toContainText(/Баланс пополнен · 45\s000 сум · Карта/);
 
   const x = (await (await request.get(`${API}/admin/shift`, { headers })).json()) as {
@@ -2019,6 +2020,7 @@ test("the bar charges a seated client's balance from the seat panel; a short bal
     .getByRole('button', { name: /^Club T-shirt/ })
     .click();
   await expect(cart).toContainText('Не хватает');
+  await cart.getByRole('radio', { name: 'Карта' }).click();
   await cart.getByRole('button', { name: /^Продать · Карта/ }).click();
   await expect(cart.getByRole('status')).toContainText('Продано');
   expect(await balance()).toBe(balanceBefore - water.price.amount);
