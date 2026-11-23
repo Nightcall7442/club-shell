@@ -44,9 +44,10 @@
     --shadow-float: 0 24px 64px -24px rgb(0 0 0 / 0.8);
     --shadow-panel: 0 24px 64px -32px rgb(0 0 0 / 0.85);
     --shadow-sheet: 0 24px 64px -24px rgb(0 0 0 / 0.8), 0 40px 120px -40px rgb(0 0 0 / 0.9);
-    --shadow-glow: 0 0 0 2px rgb(var(--c-accent) / 0.95), 0 0 22px -4px rgb(var(--c-accent) / 0.6);
+    /* Inside the element, so no scrolling row or clipping panel cuts it into a half-frame. */
+  --shadow-glow: inset 0 0 0 2px rgb(var(--c-accent) / 0.95), inset 0 0 18px -6px rgb(var(--c-accent) / 0.55);
     --shadow-glow-inset: inset 0 0 0 2px rgb(var(--c-accent) / 0.95);
-    --shadow-glow-danger: 0 0 0 2px rgb(var(--c-danger) / 0.9), 0 0 22px -4px rgb(var(--c-danger) / 0.55);
+    --shadow-glow-danger: inset 0 0 0 2px rgb(var(--c-danger) / 0.9), inset 0 0 18px -6px rgb(var(--c-danger) / 0.5);
     --glow-accent: drop-shadow(0 0 14px rgb(var(--c-accent) / 0.45));
     --glass-blur: blur(20px) saturate(1.15);
 

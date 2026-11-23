@@ -819,6 +819,19 @@ export function clubRoutes(app: FastifyInstance): void {
     return { ok: true };
   });
 
+  /** D-94: the owner deletes a settled client (no session, nothing on the balance), as the server. */
+  app.delete<{ Params: { id: string } }>('/admin/clients/:id', async (req) => {
+    const me = requireStaff(req, 'owner');
+    const user = findUser(req.params.id);
+    if (!user || user.transient) throw errors.notFound('user');
+    if (db.sessions.some((x) => x.userId === user.id && x.state !== 'ended' && x.state !== 'idle'))
+      throw errors.conflict('playing');
+    if (user.balance.amount !== 0) throw errors.conflict('balance', { balance: { ...user.balance } });
+    db.users = db.users.filter((u) => u.id !== user.id);
+    markDirty();
+    return { ok: true };
+  });
+
   /** Binds a club card to a client (`cardId: null` unbinds it). */
   app.post<{ Params: { id: string } }>('/admin/clients/:id/card', async (req) => {
     const me = requireStaff(req);

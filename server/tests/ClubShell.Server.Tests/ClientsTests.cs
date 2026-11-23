@@ -288,4 +288,39 @@ public sealed class ClientsTests(ServerFixture server) : LedgerCheckedTest(serve
         Assert.Equal("topUp", items[0].GetProperty("type").GetString());
         Assert.Equal(0, (await ExpectAsync(Server, 200, HttpMethod.Get, $"/clients/{Guid.NewGuid()}/transactions", cashier)).GetProperty("items").GetArrayLength());
     }
+
+    [Fact]
+    public async Task The_owner_deletes_a_settled_client_and_its_login_and_card_are_free_again()
+    {
+        var owner = await LoginAsync(Server, OwnerPin);
+        var cashier = await LoginAsync(Server, CashierPin);
+        var card = "DEL-" + Guid.NewGuid().ToString("N")[..8];
+        var (agent, player) = await Players.SignedInAsync(Server, balance: 0);
+        await Players.ExecuteAsync(Server, "UPDATE users SET card_id = @card WHERE id = @Id", new { card, player.Id });
+
+        // A cashier may not; money on the balance or a debt stop it with the amount.
+        await RawExpectAsync(Server, 403, HttpMethod.Delete, $"/clients/{player.Id}", cashier);
+        var rich = await Players.CreateAsync(Server, balance: 1_500_000);
+        var refused = await RawExpectAsync(Server, 409, HttpMethod.Delete, $"/clients/{rich.Id}", owner);
+        Assert.Equal(("balance", 1_500_000L), (refused.GetProperty("error").GetProperty("details").GetProperty("reason").GetString(),
+            refused.GetProperty("error").GetProperty("details").GetProperty("balance").GetProperty("amount").GetInt64()));
+
+        await RawExpectAsync(Server, 200, HttpMethod.Delete, $"/clients/{player.Id}", owner);
+        // Gone from the lists, signed out everywhere, the journal keeps who it was.
+        var list = await ExpectAsync(Server, 200, HttpMethod.Get, $"/clients?q={player.Username}", cashier);
+        Assert.DoesNotContain(player.Id.ToString(), list.GetRawText());
+        using (var me = await agent.SendAsync(HttpMethod.Get, $"/api/v1/users/{player.Id}"))
+        {
+            Assert.Equal(401, (int)me.StatusCode);
+        }
+
+        Assert.Contains(player.Username, await Players.ScalarAsync<string>(Server,
+            "SELECT detail FROM audit_entries WHERE action = 'clientDelete' AND user_id = @Id", new { player.Id }));
+        await RawExpectAsync(Server, 404, HttpMethod.Delete, $"/clients/{player.Id}", owner);
+
+        // The login and the card go to someone new.
+        var again = await ExpectAsync(Server, 200, HttpMethod.Post, "/clients", cashier,
+            new { displayName = "Новый", username = player.Username, password = "1234", cardId = card });
+        Assert.Equal(player.Username, again.GetProperty("client").GetProperty("username").GetString());
+    }
 }

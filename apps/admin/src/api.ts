@@ -1443,6 +1443,8 @@ export const clubApi = {
     post(`/admin/clients/${id}/card`, { cardId }),
   updateClient: (id: string, input: Partial<Client>): Promise<{ client: Client }> =>
     patch(`/admin/clients/${id}`, input),
+  /** D-94, owner only: `409 {reason: playing}` while it plays, `409 {reason: balance, balance}` with money or a debt left. */
+  deleteClient: (id: string): Promise<unknown> => del(`/admin/clients/${id}`),
   clientTransactions: (id: string): Promise<{ items: Transaction[] }> => call(`/admin/clients/${id}/transactions`),
   redeemPromo: (userId: string, code: string): Promise<{ balance: Money }> =>
     postMoney('/admin/promo/redeem', { userId, code }),

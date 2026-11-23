@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using ClubShell.Contracts.Errors;
 using System.Text.Json;
 using ClubShell.Contracts.Wallet;
 using ClubShell.Server.Auth;
@@ -43,6 +44,53 @@ public static class ClientEndpoints
         api.MapPost("/{id}/card", CardAsync);
         api.MapPost("/{id}/password", PasswordAsync);
         api.MapGet("/{id}/transactions", TransactionsAsync);
+        api.MapDelete("/{id}", DeleteAsync).WithMetadata(new AuthRequirement(AuthMode.Staff, OwnerOnly: true));
+    }
+
+    /// <summary>
+    /// <c>DELETE /admin/clients/{id}</c> (D-94, beyond the contract, owner only): the client leaves the lists and can no
+    /// longer sign in; the ledger, sessions and journal keep everything they did. Refused while it would lose money or a
+    /// running game: a session open anywhere (<c>409 playing</c>), money on the balance or a debt (<c>409 balance</c> with
+    /// the amount — top it off, refund it or write the debt off first). The login and the card are freed for someone new
+    /// (the login becomes <c>del-…</c>); every token is revoked and the PCs it was signed in on are told.
+    /// </summary>
+    private static async Task<IResult> DeleteAsync(HttpContext context, string id, NpgsqlDataSource db, Pushes pushes, TimeProvider clock)
+    {
+        var staff = context.Features.GetRequiredFeature<StaffContext>();
+        var userId = ClientId(id);
+        IReadOnlyList<Guid> revoked;
+        await using (var c = await db.OpenConnectionAsync())
+        await using (var tx = await c.BeginTransactionAsync())
+        {
+            var now = clock.GetUtcNow();
+            var name = await LockAsync(c, tx, staff, userId);
+            if (await c.ExecuteScalarAsync<bool>("SELECT EXISTS (SELECT 1 FROM sessions WHERE user_id = @userId AND state <> 'ended')", new { userId }, tx))
+            {
+                throw new ApiException(StatusCodes.Status409Conflict, ErrorCode.Conflict, "The client is playing: end the session first", new { reason = "playing" });
+            }
+
+            var balance = await c.ExecuteScalarAsync<long>("SELECT main_balance FROM wallets WHERE user_id = @userId FOR UPDATE", new { userId }, tx);
+            if (balance != 0)
+            {
+                throw new ApiException(StatusCodes.Status409Conflict, ErrorCode.Conflict,
+                    balance > 0 ? "Money is left on the balance" : "The client owes the club",
+                    new { reason = "balance", balance = Money.Uzs(balance) });
+            }
+
+            var login = await c.ExecuteScalarAsync<string>("SELECT username FROM users WHERE id = @userId", new { userId }, tx);
+            await c.ExecuteAsync(
+                """
+                UPDATE users SET deleted_at = @now, card_id = NULL, username = 'del-' || left(replace(id::text, '-', ''), 12)
+                WHERE id = @userId
+                """,
+                new { userId, now }, tx);
+            revoked = (await c.QueryAsync<Guid>("DELETE FROM user_tokens WHERE user_id = @userId RETURNING pc_id", new { userId }, tx)).ToList();
+            await Audit.WriteAsync(c, tx, staff, now, "clientDelete", userId, detail: $"{name} · {login}");
+            await tx.CommitAsync();
+        }
+
+        await pushes.UserRevokedAsync(userId, "deleted", revoked);
+        return AdminJson.Ok(AdminJson.OkBody);
     }
 
     /// <summary>

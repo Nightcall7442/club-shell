@@ -10,7 +10,8 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import type { Transaction } from '@clubshell/contracts';
-import { clubApi, type Client, type ClientGroup } from '@/api';
+import { AdminError, clubApi, type Client, type ClientGroup } from '@/api';
+import { useClub } from '@/club';
 import { describe } from '@/errors';
 import { money, moneyParts } from '@/format';
 import { dateLocale, t } from '@/i18n';
@@ -193,7 +194,10 @@ function ClientPanel({
   onSaved,
   onPasswordIssued,
   onToppedUp,
+  onDeleted,
 }: {
+  /** The owner deleted the client (D-94): the list drops it. */
+  onDeleted: (id: string) => void;
   client: Client;
   groups: ClientGroup[];
   issuedPassword: string | null;
@@ -210,6 +214,7 @@ function ClientPanel({
   const [groupId, setGroupId] = useState(client.groupId);
   const [note, setNote] = useState(client.note);
   const [blacklisted, setBlacklisted] = useState(client.blacklisted);
+  const owner = useClub().staff?.role === 'owner';
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<NoteState>(null);
   const [promo, setPromo] = useState('');
@@ -471,6 +476,8 @@ function ClientPanel({
           )}
         </CardBlock>
       </div>
+
+      {owner && <DeleteClient client={client} onDeleted={() => onDeleted(client.id)} />}
 
       {topUp && (
         <TopUpSheet
@@ -745,12 +752,73 @@ export default function ClientsPage(): JSX.Element {
               onSaved={replace}
               onPasswordIssued={(password) => setIssued({ id: client.id, password })}
               onToppedUp={() => void load(q.trim())}
+              onDeleted={(id) => {
+                setItems((list) => list.filter((x) => x.id !== id));
+                select(null);
+              }}
             />
           ) : (
             <EmptyState className="px-6 py-14" icon={<UsersIcon size={22} />} title={t('Выберите клиента')} />
           )}
         </aside>
       </div>
+    </div>
+  );
+}
+
+/**
+ * «Удалить клиента» (D-94, owner only): asked twice. The server refuses while the client plays or has money or a debt
+ * on the balance — the reason is said in words, with the amount, so the owner knows what to settle first.
+ */
+function DeleteClient({ client, onDeleted }: { client: Client; onDeleted: () => void }): JSX.Element {
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setConfirm(false);
+    setError(null);
+  }, [client.id]);
+
+  const run = async (): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      await clubApi.deleteClient(client.id);
+      onDeleted();
+    } catch (e) {
+      const details = e instanceof AdminError ? (e.details as { reason?: string; balance?: { amount: number } } | null) : null;
+      if (details?.reason === 'playing') setError(t('Клиент сейчас играет — сначала завершите сеанс.'));
+      else if (details?.reason === 'balance' && details.balance)
+        setError(
+          details.balance.amount > 0
+            ? t('На балансе {sum} — сначала верните или спишите деньги.', { sum: money({ amount: details.balance.amount, currency: 'UZS' }) })
+            : t('Долг {sum} — сначала оплатите или спишите его.', { sum: money({ amount: -details.balance.amount, currency: 'UZS' }) }),
+        );
+      else setError(describe(e));
+      setConfirm(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-danger/20 pt-4">
+      <span className="text-sm text-muted">
+        {confirm
+          ? t('Удалить {name}? Клиент не сможет войти, история денег останется в отчётах.', { name: client.displayName })
+          : t('Клиент пропадёт из списков, его логин и карта освободятся.')}
+      </span>
+      <div className="flex gap-2">
+        {confirm && (
+          <Button variant="ghost" disabled={busy} onClick={() => setConfirm(false)}>
+            {t('Отмена')}
+          </Button>
+        )}
+        <Button variant="danger" disabled={busy} onClick={() => (confirm ? void run() : setConfirm(true))}>
+          {busy ? '…' : confirm ? t('Да, удалить') : t('Удалить клиента')}
+        </Button>
+      </div>
+      {error && <p className="basis-full text-sm text-danger">{error}</p>}
     </div>
   );
 }
