@@ -322,6 +322,8 @@ public sealed class ClubTimeConverter : JsonConverter<TimeOnly>
 [JsonSerializable(typeof(AppsListResponse))]
 [JsonSerializable(typeof(AppsLaunchRequest))]
 [JsonSerializable(typeof(AppsLaunchResponse))]
+[JsonSerializable(typeof(AppsRunningResponse))]
+[JsonSerializable(typeof(AppsKillRequest))]
 [JsonSerializable(typeof(WalletTariffsRequest))]
 [JsonSerializable(typeof(WalletTariffsResponse))]
 [JsonSerializable(typeof(TariffsResponse))]

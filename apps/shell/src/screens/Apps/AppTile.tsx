@@ -1,6 +1,7 @@
 /**
  * One launchable application: big icon (resolved through `assetUrl`, initials fallback), title and category.
- * The whole tile is a `data-nav` button; a spinner overlay shows while `apps_launch` is in flight.
+ * The whole tile is a `data-nav` button; a spinner overlay shows while `apps_launch` is in flight, a "running" badge
+ * while the app runs (a tap then brings it to the front instead of opening a second copy).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
@@ -11,6 +12,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
 import { track } from '@/lib/analytics';
 import { initials } from '@/lib/format';
+import { notifyProgramsChanged } from '@/hooks/useRunningPrograms';
 import { api } from '@/lib/tauri';
 import { useNotificationsStore } from '@/store/notifications';
 
@@ -21,12 +23,15 @@ export interface AppTileProps {
   launching?: boolean;
   /** Another launch is running (or the app is blocked). */
   disabled?: boolean;
+  /** The app runs already: a tap brings it to the front. */
+  running?: boolean;
   className?: string;
 }
 
 /**
  * `apps_launch` with a per-app launching state and a success / error toast, shared by the Apps screen and Home's
- * favourites; one launch at a time.
+ * favourites; one launch at a time. An app that runs already comes to the front instead (`alreadyRunning`); either way
+ * the toast says how to come back to the Shell.
  */
 export function useAppLaunch(): { launchingId: string | null; launch: (app: App) => Promise<void> } {
   const { t } = useTranslation();
@@ -44,14 +49,16 @@ export function useAppLaunch(): { launchingId: string | null; launch: (app: App)
       setLaunchingId(app.id);
       track('app.launch', { appId: app.id });
       try {
-        await api.apps.launch(app.id);
+        const res = await api.apps.launch(app.id);
         push({
           id: `app-${app.id}`,
-          title: t('apps.launched', { title: app.title }),
+          title: t(res.alreadyRunning ? 'apps.alreadyRunning' : 'apps.launched', { title: app.title }),
+          body: t('running.backHint'),
           level: 'success',
-          ttlSec: 4,
+          ttlSec: 6,
           source: 'local',
         });
+        notifyProgramsChanged();
       } catch (e) {
         pushError(e, t('apps.openFailed', { title: app.title }));
       } finally {
@@ -71,7 +78,14 @@ export function useAppCategoryLabel(): (category: string) => string {
   return (category) => (i18n.exists(`apps.category.${category}`) ? t(`apps.category.${category}`) : category);
 }
 
-export function AppTile({ app, onLaunch, launching = false, disabled = false, className }: AppTileProps): JSX.Element {
+export function AppTile({
+  app,
+  onLaunch,
+  launching = false,
+  disabled = false,
+  running = false,
+  className,
+}: AppTileProps): JSX.Element {
   const { t } = useTranslation();
   const categoryLabel = useAppCategoryLabel();
   const { url } = useResolvedAsset(app.iconUrl);
@@ -85,7 +99,11 @@ export function AppTile({ app, onLaunch, launching = false, disabled = false, cl
       data-nav="true"
       disabled={disabled || blocked || launching}
       aria-busy={launching || undefined}
-      aria-label={blocked ? `${app.title}. ${t('apps.notAllowed')}` : `${t('apps.launch')} ${app.title}`}
+      aria-label={
+        blocked
+          ? `${app.title}. ${t('apps.notAllowed')}`
+          : `${t(running ? 'running.switchTo' : 'apps.launch')} ${app.title}`
+      }
       onClick={() => onLaunch(app)}
       className={clsx(
         'focus-ring hud-focus glass group relative flex w-full flex-col items-center gap-3 rounded-xl p-5 text-center transition-[background-color] duration-[var(--dur-fast)] ease-[var(--ease-out)]',
@@ -123,6 +141,10 @@ export function AppTile({ app, onLaunch, launching = false, disabled = false, cl
       {blocked ? (
         <Badge tone="danger" size="sm">
           {t('apps.notAllowed')}
+        </Badge>
+      ) : running && !launching ? (
+        <Badge tone="primary" size="sm" solid live>
+          {t('apps.running')}
         </Badge>
       ) : (
         <Badge

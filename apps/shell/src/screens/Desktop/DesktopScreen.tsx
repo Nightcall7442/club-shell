@@ -1,5 +1,6 @@
 /**
- * Home (`/home`): greeting and selected game (`HomeHero`), the member's favourites («Избранное», when any), then this
+ * Home (`/home`): greeting and selected game (`HomeHero`), what runs («Запущено», when anything does: switch to /
+ * close), the member's favourites («Избранное», when any), then this
  * PC and its settings (`ThisPcSection`), one row of
  * glanceable panels — free seats, tournaments, recent staff chat — and the promo strip (ads playlist or tariffs) last.
  * The top bar's PC line lands here with `THIS_PC_STATE`: the PC block scrolls into view with its first control focused.
@@ -26,6 +27,7 @@ import { log } from '@/lib/logger';
 import { api } from '@/lib/tauri';
 import { AppTile, useAppLaunch } from '@/screens/Apps/AppTile';
 import { HomeHero } from '@/screens/Desktop/HomeHero';
+import { RunningStrip } from '@/screens/Desktop/RunningStrip';
 import { GameCard } from '@/screens/Games/GameCard';
 import { LaunchOverlay, launchGame } from '@/screens/Games/LaunchOverlay';
 import { THIS_PC_ID, type HomeFocusState } from '@/screens/Pc/PcBadge';
@@ -515,6 +517,7 @@ export default function DesktopScreen(): JSX.Element {
   return (
     <div className="flex w-full flex-col gap-[calc(var(--gap)*2)]">
       <HomeHero />
+      <RunningStrip />
       <FavoritesRow index={0} />
       <ThisPcSection />
       {panels > 0 && (

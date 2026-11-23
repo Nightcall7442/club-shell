@@ -476,6 +476,7 @@
     "empty": "No games in the library",
     "noResults": "No games match your search",
     "kill": "Close game",
+    "switchTo": "Switch to game",
     "killConfirm": "Close {{title}}? Unsaved progress may be lost.",
     "killTitle": "Close game",
     "killed": "Game closed",
@@ -592,6 +593,7 @@
     "launch": "Open",
     "launching": "Opening…",
     "launched": "{{title}} opened",
+    "alreadyRunning": "{{title}} is already open — switching to it",
     "notAllowed": "Blocked by club policy",
     "empty": "No apps available",
     "running": "Running",
@@ -604,6 +606,17 @@
     },
     "iconAlt": "{{title}} icon",
     "openFailed": "Could not open {{title}}"
+  },
+  "running": {
+    "title": "Running",
+    "switchTo": "Switch to",
+    "close": "Close",
+    "confirmClose": "Close it?",
+    "game": "Game",
+    "app": "App",
+    "starting": "Starting…",
+    "noWindow": "No window yet: it is still opening or sits in the tray",
+    "backHint": "To come back to ClubShell from an app or a game: Ctrl+Shift+H → “Return to ClubShell”, or minimize the app’s window."
   },
   "shop": {
     "title": "Shop",
@@ -1513,6 +1526,7 @@
     "gameRunning": "Game running",
     "returnToShell": "Return to ClubShell",
     "hudTitle": "Quick panel",
+    "hudHide": "Hide panel",
     "hudExtend": "+30 min",
     "hudHint": "Esc — close · Ctrl+Shift+H — panel",
     "hotkeyBlocked": "This shortcut is disabled",

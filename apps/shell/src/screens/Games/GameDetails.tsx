@@ -23,6 +23,7 @@ import { categoryLabel } from './Categories';
 import { launcherLabelKey } from './GameCard';
 import { GameHero, antiCheatLabel } from './GameHero';
 import { LaunchOverlay, launchGame } from './LaunchOverlay';
+import { useSwitchToGame } from './useSwitchToGame';
 import { notInstalledLabel } from '@/lib/gameAvailability';
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -254,6 +255,7 @@ export default function GameDetails(): JSX.Element {
   useGamepad({ onBack: back });
 
   const isRunning = running.some((r) => r.gameId === id);
+  const switchToGame = useSwitchToGame();
   const duration = animations ? 0.25 : 0;
 
   const closeGame = async (g: Game): Promise<void> => {
@@ -296,6 +298,7 @@ export default function GameDetails(): JSX.Element {
             launching={launching?.gameId === id}
             onPlay={(g) => void launchGame(g.id)}
             onKill={(g) => void closeGame(g)}
+            onSwitch={(g) => void switchToGame(g.id)}
           />
 
           {game ? (

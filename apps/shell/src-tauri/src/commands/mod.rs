@@ -61,6 +61,8 @@ pub const COMMAND_NAMES: &[&str] = &[
     "games_install_status",
     "apps_list",
     "apps_launch",
+    "apps_running",
+    "apps_kill",
     "wallet_balance",
     "wallet_tariffs",
     "wallet_history",
@@ -147,6 +149,8 @@ macro_rules! invoke_handler {
             crate::commands::games::games_install_status,
             crate::commands::apps::apps_list,
             crate::commands::apps::apps_launch,
+            crate::commands::apps::apps_running,
+            crate::commands::apps::apps_kill,
             crate::commands::wallet::wallet_balance,
             crate::commands::wallet::wallet_tariffs,
             crate::commands::wallet::wallet_history,
@@ -320,7 +324,7 @@ mod tests {
         let handler: Box<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync> =
             Box::new(invoke_handler!());
         drop(handler);
-        assert_eq!(COMMAND_NAMES.len(), 69);
+        assert_eq!(COMMAND_NAMES.len(), 71);
         let mut sorted = COMMAND_NAMES.to_vec();
         sorted.sort_unstable();
         sorted.dedup();

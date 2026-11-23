@@ -246,7 +246,8 @@ killed`, or when another program took the foreground (the player went there). Th
 "game window brought to front ok=…", "game window not found within 30 s", other programs' windows seen meanwhile and
 the foreground owner 5 s after `running`.
 
-During a game the Shell never activates itself: `kiosk_focus` is ignored, display changes wait for the game's end,
+During a game the Shell never activates itself: `kiosk_focus` is ignored (except `user: true`, the HUD's "back to
+ClubShell": the player asked, and the click counts as their input below), display changes wait for the game's end,
 and entering game mode also clears tao's ALWAYS_ON_TOP flag (`set_always_on_top(false)`), which would otherwise put
 `WS_EX_TOPMOST` back on its next style change. Should the Shell's window get the focus anyway (a game re-creating its
 window on a display-mode change), the game's window is brought back — unless the player caused it (input within the
@@ -255,9 +256,25 @@ last second: Alt+Tab, a click), the Shell is locked, or the HUD/lock overlay is 
 Programs from the "Apps" screen (SHELL_CHANGES 87) are started the same way and would stay under the Shell, its
 topmost guard taking the screen back within 250 ms. `apps_launch` therefore gives `ASFW_ANY` before the request,
 notes the program windows already open, hands the foreground off to the new pid like the dock (allow-list, topmost
-guard paused) and, in the background, waits up to 15 s for its window — else a window that was not there before
-(a stub launcher's child, a single-instance program handing over) — and brings it up, handing off to that window's
-process. No window in 15 s ends the hand-off. The command answers at once.
+guard paused, and tao's ALWAYS_ON_TOP flag cleared as in game mode — with only `WS_EX_TOPMOST` dropped, tao put it
+back on its next style change and the program sat in front, invisible under the Shell) and, in the background, waits
+up to 60 s for a window of the app's processes (the Agent's `pids`) — else a window that was not there before (a stub
+launcher's child, a single-instance program handing over) — and brings it up, handing off to that window's process.
+No window in 60 s ends the hand-off (Steam or Discord updating themselves took longer than the former 15 s, and their
+window then came up under the Shell to be minimized by the sweep). The command answers at once.
+
+During a hand-off the processes running from the program's own folder (its helpers, its dialogs, Steam's
+`steamwebhelper.exe`) count as allow-listed too, so neither the refocus nor the sweep fights them. A check every
+400 ms brings the Shell back as soon as the program is not what the player sees: its window was minimized (Windows may
+leave the minimized window "in front" over a black screen), it closed, or something outside the allow-list took the
+foreground.
+
+An app that runs already is not started a second time (`apps.launch` answers `alreadyRunning`): its front-most window
+is brought forward; one without a window (in the tray) is started again (`force`), which makes it show its window.
+The Shell lists what runs («Запущено» on Home, on the Apps screen and in the HUD, from `games_running` +
+`apps_running`) with «Перейти» (to the front) and «Закрыть» (`games_kill`, or `apps_kill`: `WM_CLOSE` to its windows,
+then the Agent ends the rest). How to come back is on screen: Ctrl+Shift+H opens the HUD with "back to ClubShell", and
+minimizing the program returns to the Shell.
 
 | Guard | Normal | Game mode |
 |-------|--------|-----------|

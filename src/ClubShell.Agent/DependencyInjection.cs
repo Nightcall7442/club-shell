@@ -272,6 +272,8 @@ public static class AgentServiceCollectionExtensions
 
         services.AddSingleton<IIpcHandlerGroup, SessionHandlers>();
         services.AddSingleton<IIpcHandlerGroup, UserDomainHandlers>();
+        services.TryAddSingleton<RunningApps>();
+        services.TryAddSingleton<IAppProcessSource, SessionProcessSource>();
         services.AddSingleton<IIpcHandlerGroup, GameHandlers>();
         services.AddSingleton<IIpcHandlerGroup, PolicyHandlers>();
         services.AddSingleton<IIpcHandlerGroup, SystemHandlers>();

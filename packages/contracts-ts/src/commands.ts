@@ -141,16 +141,45 @@ export interface AppsLaunchRequest {
   appId: string;
   /** Extra command line. */
   args?: string | null;
+  /** Start it even when it runs already (a tray app with no window to bring forward shows one when started again). */
+  force?: boolean | null;
 }
 
 /** Response of `apps.launch`. */
 export interface AppsLaunchResponse {
   /** Always `true`. */
   ok: boolean;
-  /** Process id. */
+  /** Process id (the running instance's when `alreadyRunning`). */
   pid: number;
-  /** Launch time. */
+  /** Launch time (the running instance's when `alreadyRunning`). */
   startedAt: string;
+  /** The app was running already and nothing was started: the Shell brings its window to the front instead. */
+  alreadyRunning?: boolean;
+  /** Every process of the app the Agent knows of (the new one alone after a fresh launch); absent from an older Agent. */
+  pids?: number[];
+}
+
+/** An app running in the player's session (`apps.running`). */
+export interface RunningApp {
+  appId: string;
+  title: string;
+  /** Main process: the one the Agent started, else the oldest of `pids`. */
+  pid: number;
+  /** Every process of the app: the started one, its descendants and the app's own executables. */
+  pids: number[];
+  /** When the Agent started it, else when its main process started. */
+  startedAt: string;
+}
+
+/** Response of `apps.running`. */
+export interface AppsRunningResponse {
+  /** Running apps, oldest first. */
+  items: RunningApp[];
+}
+
+/** Request of `apps.kill`: ends every process of one app (never the Shell, the Agent or a game). */
+export interface AppsKillRequest {
+  appId: string;
 }
 
 /** Response of `apps.list` and `GET /apps`. */
@@ -565,6 +594,10 @@ export const IpcNames = {
     List: 'apps.list',
     /** `AppsLaunchRequest` → `AppsLaunchResponse`. */
     Launch: 'apps.launch',
+    /** — → `AppsRunningResponse`. */
+    Running: 'apps.running',
+    /** `AppsKillRequest` → `GamesKillResponse`. */
+    Kill: 'apps.kill',
   },
   /** `wallet.*` */
   Wallet: {
@@ -1408,6 +1441,10 @@ export const AgentCommand = {
   AppsList: 'apps.list',
   /** `apps.launch` */
   AppsLaunch: 'apps.launch',
+  /** `apps.running` */
+  AppsRunning: 'apps.running',
+  /** `apps.kill` */
+  AppsKill: 'apps.kill',
   /** `wallet.balance` */
   WalletBalance: 'wallet.balance',
   /** `wallet.tariffs` */
@@ -2647,6 +2684,7 @@ const SESSION_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
   AgentCommand.GamesLaunch,
   AgentCommand.GamesKill,
   AgentCommand.AppsLaunch,
+  AgentCommand.AppsKill,
   AgentCommand.ShopOrder,
 ]);
 
@@ -2729,6 +2767,8 @@ export interface IpcRequestMap {
   [IpcNames.Games.InstallStatus]: { request: GamesInstallStatusRequest; response: GameInstallStatus };
   [IpcNames.Apps.List]: { request: null; response: AppsListResponse };
   [IpcNames.Apps.Launch]: { request: AppsLaunchRequest; response: AppsLaunchResponse };
+  [IpcNames.Apps.Running]: { request: null; response: AppsRunningResponse };
+  [IpcNames.Apps.Kill]: { request: AppsKillRequest; response: GamesKillResponse };
   [IpcNames.Wallet.Balance]: { request: null; response: Balance };
   [IpcNames.Wallet.Tariffs]: { request: WalletTariffsRequest | null; response: WalletTariffsResponse };
   [IpcNames.Wallet.History]: { request: WalletHistoryRequest | null; response: WalletHistoryResponse };
