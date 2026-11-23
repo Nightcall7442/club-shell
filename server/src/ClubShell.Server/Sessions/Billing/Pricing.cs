@@ -209,6 +209,40 @@ public static class Pricing
     public static long Frozen(long pricePerHour, int usedSec, int dayPct, int discountPct) =>
         Total(Base(pricePerHour, (usedSec + 59) / 60), dayPct, discountPct);
 
+    /// <summary>
+    /// D-90, time «по сумме»: the quote of the most whole minutes in <paramref name="minMinutes"/>..<paramref name="maxMinutes"/>
+    /// of an hourly tariff whose <see cref="Compute"/> total is at most <paramref name="amount"/>, so the price charged is
+    /// never above what the cashier typed (the rest of a minute is not sold); null when even the shortest purchase costs
+    /// more. The total never falls as minutes grow (ceil base, then one half-up rounding), so a binary search finds it.
+    /// </summary>
+    public static Quote? MostFor(
+        TariffRow tariff, long amount, int minMinutes, int maxMinutes, string? groupId, long? lifetimeSpent, string zone, DateTimeOffset at, ClubPricing club)
+    {
+        Quote Price(int minutes) => Compute(tariff, minutes, groupId, lifetimeSpent, zone, at, club);
+        var best = Price(minMinutes);
+        if (best.Total > amount)
+        {
+            return null;
+        }
+
+        var (lo, hi) = (minMinutes, Math.Max(minMinutes, maxMinutes));
+        while (lo < hi)
+        {
+            var mid = lo + ((hi - lo + 1) / 2);
+            var q = Price(mid);
+            if (q.Total <= amount)
+            {
+                (lo, best) = (mid, q);
+            }
+            else
+            {
+                hi = mid - 1;
+            }
+        }
+
+        return best;
+    }
+
     /// <param name="groupId">The buyer's group in this club; null for a walk-in quote.</param>
     /// <param name="lifetimeSpent">The buyer's lifetime spend (loyalty level); null for a walk-in quote.</param>
     public static Quote Compute(TariffRow tariff, int minutes, string? groupId, long? lifetimeSpent, string zone, DateTimeOffset at, ClubPricing club)

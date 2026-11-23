@@ -2405,6 +2405,21 @@ function ExtendSheet({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [requote, setRequote] = useState(0);
+  // Time «по сумме» (D-90): the amount typed, priced for this session (the tariff's maximum counts what it bought).
+  const [byAmount, setByAmount] = useState(false);
+  const [amountDigits, setAmountDigits] = useState('');
+  const budget = byAmount && !choice.pkg && Number(amountDigits) > 0 ? Number(amountDigits) * 100 : null;
+  const amountQuote = useAmountQuote(budget === null || !hourlyId ? null : `${hourlyId}|${budget}|${requote}`, () =>
+    clubApi.quote({
+      tariffId: hourlyId,
+      pcId: seat.pc.id,
+      minutes: IGNORED_MINUTES,
+      userId: user.id,
+      amount: budget ?? 0,
+      sessionId: session.id,
+    }),
+  );
+  const amountMode = byAmount && !choice.pkg;
 
   useEffect(() => {
     if (!hourlyId) return undefined;
@@ -2437,9 +2452,20 @@ function ExtendSheet({
     };
   }, [current?.id, current?.isPackage, seat.pc.id, user.id, requote]);
 
-  const quote = choice.pkg ? pkgQuote : prices[choice.minutes];
+  const quote = choice.pkg ? pkgQuote : amountMode ? (amountQuote?.q ?? undefined) : prices[choice.minutes];
   const price = quote?.total.amount;
-  const bought = choice.pkg ? (current?.packageMinutes ?? quote?.minutes ?? 0) : choice.minutes;
+  const bought = choice.pkg
+    ? (current?.packageMinutes ?? quote?.minutes ?? 0)
+    : amountMode
+      ? (quote?.minutes ?? 0)
+      : choice.minutes;
+  const waiting = amountMode
+    ? budget === null
+      ? t('Введите сумму')
+      : amountQuote?.error
+        ? t('Сумма меньше минимальной')
+        : t('Считаем цену…')
+    : t('Считаем цену…');
   const blocked = quote?.rule ? describeRule(quote.rule) : null;
   const shortfall = price === undefined ? 0 : Math.max(0, price - user.balance.amount);
   // Enter extends once the prices are in: the button is off (and so unfocusable) until then.
@@ -2449,10 +2475,13 @@ function ExtendSheet({
     if (priced && shortfall === 0 && !guest) extendButton.current?.focus();
   }, [priced, shortfall, guest]);
 
-  const request = (): { pcId: string; minutes: number; tariffId: string } =>
+  const request = (): { pcId: string; minutes: number; tariffId: string; amount?: number } =>
     choice.pkg
       ? { pcId: seat.pc.id, minutes: IGNORED_MINUTES, tariffId: session.tariffId }
-      : { pcId: seat.pc.id, minutes: choice.minutes, tariffId: choice.tariffId };
+      : amountMode && budget !== null
+        ? // The server sells the minutes the amount buys (the quote's, sent too as the contract asks for minutes).
+          { pcId: seat.pc.id, minutes: bought || IGNORED_MINUTES, tariffId: choice.tariffId, amount: budget }
+        : { pcId: seat.pc.id, minutes: choice.minutes, tariffId: choice.tariffId };
 
   const tariffName = choice.pkg ? current?.name : hourly.find((x) => x.id === hourlyId)?.name;
   const receipt = (r: SessionResult, p: Payment | null): ReceiptData => ({
@@ -2499,7 +2528,10 @@ function ExtendSheet({
             choice.pkg && 'choice-on',
           )}
           aria-pressed={choice.pkg}
-          onClick={() => setChoice({ pkg: true })}
+          onClick={() => {
+            setChoice({ pkg: true });
+            setByAmount(false);
+          }}
         >
           <span className="min-w-0 truncate text-sm font-semibold">
             {t('Ещё пакет · {name}', { name: current.name })}
@@ -2531,7 +2563,7 @@ function ExtendSheet({
           )}
           <div className="grid grid-cols-4 gap-2">
             {MINUTE_PRESETS.map((m) => {
-              const on = !choice.pkg && m === choice.minutes;
+              const on = !choice.pkg && !amountMode && m === choice.minutes;
               return (
                 <button
                   type="button"
@@ -2541,7 +2573,10 @@ function ExtendSheet({
                     on && 'choice-on',
                   )}
                   aria-pressed={on}
-                  onClick={() => setChoice({ pkg: false, tariffId: hourlyId, minutes: m })}
+                  onClick={() => {
+                    setChoice({ pkg: false, tariffId: hourlyId, minutes: m });
+                    setByAmount(false);
+                  }}
                 >
                   <span className="text-[13.5px] font-semibold leading-none">+{minutesLabel(m)}</span>
                   <span className="font-mono text-[10.5px] leading-none text-muted">
@@ -2551,18 +2586,32 @@ function ExtendSheet({
               );
             })}
           </div>
+          <AmountRow
+            on={amountMode}
+            digits={amountDigits}
+            quoted={amountQuote}
+            onPick={() => {
+              if (choice.pkg) setChoice({ pkg: false, tariffId: hourlyId, minutes: 60 });
+              setByAmount(true);
+            }}
+            onDigits={(d) => {
+              if (choice.pkg) setChoice({ pkg: false, tariffId: hourlyId, minutes: 60 });
+              setByAmount(true);
+              setAmountDigits(d);
+            }}
+          />
         </div>
       )}
       {guest ? <ExactSummary price={price ?? 0} /> : <PaySummary price={price ?? 0} balance={user.balance.amount} />}
       {blocked && <p className="text-xs font-medium text-warning">{blocked}</p>}
       {guest || shortfall > 0 ? (
         <PayBox
-          key={`${choice.pkg ? 'pkg' : `${hourlyId}|${choice.minutes}`}`}
+          key={`${choice.pkg ? 'pkg' : amountMode ? `${hourlyId}|amount|${price ?? ''}` : `${hourlyId}|${choice.minutes}`}`}
           exact={guest ? (price ?? 0) : undefined}
           initial={guest ? undefined : shortfall}
           min={guest ? undefined : shortfall}
           verb={t('Продлить')}
-          disabled={price === undefined ? t('Считаем цену…') : blocked}
+          disabled={price === undefined ? waiting : blocked}
           onPay={async (p) => {
             // One request: the server tops up and extends together, a refused extension books no money.
             try {
@@ -2609,6 +2658,124 @@ function ExtendSheet({
       <Note note={error ? { text: error, tone: 'err' } : null} />
     </Sheet>
   );
+}
+
+/** `1 ч 46 мин`: the time an amount buys, read at a glance. */
+function hoursMinutes(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return [h > 0 ? t('{n} ч', { n: h }) : '', m > 0 || h === 0 ? t('{n} мин', { n: m }) : ''].filter(Boolean).join(' ');
+}
+
+/** What the quote of an amount says (D-90): the price and the time, the server's refusal, or nothing yet. */
+type AmountQuote = { key: string; q: PriceQuote | null; error: unknown };
+
+/** How long the cashier may pause between digits before the amount is priced. */
+const AMOUNT_DEBOUNCE_MS = 250;
+
+/**
+ * Time «по сумме» (D-90): the chip next to the minute chips and the money the cashier types. The server's quote turns
+ * the amount into the whole minutes it buys at today's price (the day percent, the best discount) — «≈ 1 ч 46 мин» —
+ * and the seat or extension sends the amount, so the server sells exactly those minutes; the price may be a little
+ * below the amount (the rest of a minute is not sold) and is what the pay box takes.
+ */
+function AmountRow({
+  on,
+  digits,
+  onPick,
+  onDigits,
+  quoted,
+}: {
+  on: boolean;
+  digits: string;
+  onPick: () => void;
+  onDigits: (digits: string) => void;
+  /** The quote of this amount; undefined — not asked yet. */
+  quoted: AmountQuote | null | undefined;
+}): JSX.Element {
+  const input = useRef<HTMLInputElement>(null);
+  const q = quoted?.q ?? null;
+  const line = !on
+    ? null
+    : digits === ''
+      ? t('Введите сумму — время посчитается по тарифу')
+      : quoted?.error
+        ? describe(quoted.error)
+        : q && q.minutes
+          ? q.total.amount < Number(digits) * 100
+            ? t('≈ {time} · спишется {sum}', { time: hoursMinutes(q.minutes), sum: moneyExact(q.total.amount) })
+            : t('≈ {time}', { time: hoursMinutes(q.minutes) })
+          : t('Считаем цену…');
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-stretch gap-2">
+        <button
+          type="button"
+          aria-pressed={on}
+          className={clsx(
+            'choice focus-ring h-11 shrink-0 rounded-md px-3 text-[13px] font-semibold',
+            on && 'choice-on',
+          )}
+          onClick={() => {
+            onPick();
+            input.current?.focus();
+          }}
+        >
+          {t('По сумме')}
+        </button>
+        <div className="relative min-w-0 flex-1">
+          <input
+            ref={input}
+            inputMode="numeric"
+            autoComplete="off"
+            aria-label={t('На какую сумму')}
+            placeholder={t('Сумма')}
+            className={clsx(inputCls, 'tnum h-11 pr-12')}
+            value={digits.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}
+            onFocus={onPick}
+            onChange={(e) => onDigits(e.target.value.replace(/\D/g, '').slice(0, 7))}
+          />
+          <span className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-medium text-muted">
+            {t('сум')}
+          </span>
+        </div>
+      </div>
+      {line && (
+        <p
+          aria-live="polite"
+          className={clsx('text-xs font-medium', quoted?.error ? 'text-warning' : 'text-accent')}
+          data-testid="amount-time"
+        >
+          {line}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The quote of time «по сумме» (D-90), asked {@link AMOUNT_DEBOUNCE_MS} after the last digit and kept with what it
+ * priced (`key`), so money is never taken on the quote of another amount, tariff or client.
+ */
+function useAmountQuote(key: string | null, ask: () => Promise<PriceQuote>): AmountQuote | null | undefined {
+  const [quoted, setQuoted] = useState<AmountQuote | null>(null);
+  const asker = useRef(ask);
+  asker.current = ask;
+  useEffect(() => {
+    if (key === null) return undefined;
+    let alive = true;
+    const timer = window.setTimeout(() => {
+      asker
+        .current()
+        .then((q) => alive && setQuoted({ key, q, error: null }))
+        .catch((error: unknown) => alive && setQuoted({ key, q: null, error }));
+    }, AMOUNT_DEBOUNCE_MS);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [key]);
+  return key === null ? null : quoted?.key === key ? quoted : undefined;
 }
 
 /** Why a tariff cannot be sold here now. */
@@ -2910,6 +3077,9 @@ function FreeSeat({
   const [tariffId, setTariffId] = useState('');
   const [minutes, setMinutes] = useState(60);
   const [pkgId, setPkgId] = useState<string | null>(null);
+  // Time «по сумме» (D-90): the chip is on and the amount typed (whole сум).
+  const [byAmount, setByAmount] = useState(false);
+  const [amountDigits, setAmountDigits] = useState('');
   // Bumped when the server says the price changed: every quote is asked again.
   const [requote, setRequote] = useState(0);
   const openKey = useHeldKey();
@@ -2923,6 +3093,8 @@ function FreeSeat({
     shownPc.current = seat.pc.id;
     setWho(null);
     setMinutes(60);
+    setByAmount(false);
+    setAmountDigits('');
     setGuest(false);
     setGuestName('');
     setPkgId(null);
@@ -2966,10 +3138,17 @@ function FreeSeat({
   // priced as a walk-in (no client).
   const userId = guest ? null : (who?.id ?? null);
   const hourlyMinutes = wantPrepaid ? minutes : 60;
+  // «По сумме» replaces the minute chips' quote: the amount is priced instead (`amountQuote`), the chips' is not asked.
+  const amountMode = wantPrepaid && byAmount;
+  const budget = amountMode && Number(amountDigits) > 0 ? Number(amountDigits) * 100 : null;
+  const amountQuote = useAmountQuote(
+    budget === null || !tariffId ? null : `${seat.pc.id}|${tariffId}|${budget}|${userId ?? ''}|${requote}`,
+    () => clubApi.quote({ tariffId, pcId: seat.pc.id, minutes: IGNORED_MINUTES, userId, amount: budget ?? 0 }),
+  );
   const quoteFor = `${seat.pc.id}|${tariffId}|${hourlyMinutes}|${userId ?? ''}|${requote}`;
   const [quoted, setQuoted] = useState<{ key: string; q: PriceQuote | null } | null>(null);
   useEffect(() => {
-    if (!tariffId) return undefined;
+    if (!tariffId || amountMode) return undefined;
     let alive = true;
     clubApi
       .quote({ tariffId, pcId: seat.pc.id, minutes: hourlyMinutes, userId })
@@ -2978,8 +3157,8 @@ function FreeSeat({
     return () => {
       alive = false;
     };
-  }, [tariffId, hourlyMinutes, userId, seat.pc.id, quoteFor]);
-  const hourlyQuote = quoted?.key === quoteFor ? quoted.q : null;
+  }, [tariffId, hourlyMinutes, userId, seat.pc.id, quoteFor, amountMode]);
+  const hourlyQuote = amountMode ? (amountQuote?.q ?? null) : quoted?.key === quoteFor ? quoted.q : null;
 
   // Package cards, each priced by the server for this PC and client (cached by pc|tariff|user).
   const [pkgQuotes, setPkgQuotes] = useState<Record<string, PriceQuote | null>>({});
@@ -3030,8 +3209,25 @@ function FreeSeat({
   const blockedRule = priceQuote?.rule ? describeRule(priceQuote.rule) : null;
   const selTariffId = pkg ? pkg.id : tariffId;
   const selTariff = pkg ?? hourly.find((x) => x.id === tariffId);
-  const sentMinutes = pkg || !prepaid ? IGNORED_MINUTES : minutes;
-  const bought = pkg ? (pkg.packageMinutes ?? priceQuote?.minutes ?? 0) : prepaid ? minutes : null;
+  // «По сумме»: the server sells the minutes the amount buys; the quote's go out as `minutes` (the contract wants some).
+  const sentAmount = !pkg && prepaid && amountMode ? budget : null;
+  const sentMinutes =
+    pkg || !prepaid ? IGNORED_MINUTES : sentAmount !== null ? (hourlyQuote?.minutes ?? IGNORED_MINUTES) : minutes;
+  const bought = pkg
+    ? (pkg.packageMinutes ?? priceQuote?.minutes ?? 0)
+    : prepaid
+      ? sentAmount !== null
+        ? (hourlyQuote?.minutes ?? 0)
+        : minutes
+      : null;
+  const waiting =
+    !pkg && amountMode
+      ? budget === null
+        ? t('Введите сумму')
+        : amountQuote?.error
+          ? t('Сумма меньше минимальной')
+          : t('Считаем цену…')
+      : t('Считаем цену…');
   // Opening a session debits the client's balance, so what it lacks is taken first, here, as a top-up.
   const shortfall = who && prepaid ? Math.max(0, price - who.balance.amount) : 0;
   const blocked = seat.pc.status === 'maintenance';
@@ -3082,6 +3278,7 @@ function FreeSeat({
               prepaid,
               ...(guestName.trim() ? { displayName: guestName.trim() } : {}),
               ...(payment ? { payment } : {}),
+              ...(sentAmount !== null ? { amount: sentAmount } : {}),
             },
             key ?? p?.key ?? openKey.take(),
           )
@@ -3093,6 +3290,7 @@ function FreeSeat({
               minutes: sentMinutes,
               ...(prepaid ? {} : { prepaid: false }),
               ...(payment ? { payment } : {}),
+              ...(sentAmount !== null ? { amount: sentAmount } : {}),
             },
             p?.key ?? key,
           );
@@ -3214,7 +3412,7 @@ function FreeSeat({
             <span className="label-sm">{t('Время')}</span>
             <div className="grid grid-cols-4 gap-2">
               {MINUTE_PRESETS.map((m) => {
-                const on = !pkg && m === minutes;
+                const on = !pkg && !amountMode && m === minutes;
                 return (
                   <button
                     type="button"
@@ -3227,6 +3425,7 @@ function FreeSeat({
                     onClick={() => {
                       setMinutes(m);
                       setPkgId(null);
+                      setByAmount(false);
                     }}
                   >
                     {minutesLabel(m)}
@@ -3234,6 +3433,22 @@ function FreeSeat({
                 );
               })}
             </div>
+            {hourly.length > 0 && (
+              <AmountRow
+                on={!pkg && amountMode}
+                digits={amountDigits}
+                quoted={amountQuote}
+                onPick={() => {
+                  setByAmount(true);
+                  setPkgId(null);
+                }}
+                onDigits={(d) => {
+                  setByAmount(true);
+                  setPkgId(null);
+                  setAmountDigits(d);
+                }}
+              />
+            )}
           </div>
         )}
         {prepaid && packages.length > 0 && (
@@ -3252,7 +3467,10 @@ function FreeSeat({
                     aria-pressed={on}
                     disabled={rule !== null}
                     title={rule ? describeRule(rule) : undefined}
-                    onClick={() => setPkgId(on ? null : p.id)}
+                    onClick={() => {
+                      setPkgId(on ? null : p.id);
+                      setByAmount(false);
+                    }}
                     className={clsx(
                       'choice focus-ring flex min-h-[72px] flex-col items-start justify-between gap-1 rounded-md px-3 py-2.5 text-left disabled:cursor-not-allowed disabled:opacity-40',
                       on && 'choice-on',
@@ -3308,11 +3526,11 @@ function FreeSeat({
 
         {prepaid && guest && !blocked ? (
           <PayBox
-            key={`${selTariffId}|${sentMinutes}`}
+            key={`${selTariffId}|${sentMinutes}|${price}`}
             exact={price}
             verb={t('Посадить гостя')}
             autoFocus={false}
-            disabled={quoteFresh ? blockedRule : t('Считаем цену…')}
+            disabled={quoteFresh ? blockedRule : waiting}
             onPay={async (p) => {
               const r = await openWith(p);
               setNote(seatNote(r, p));
@@ -3326,7 +3544,7 @@ function FreeSeat({
             verb={t('Посадить')}
             // Inline in the panel: no focus grab, or the PC number typed for the map would land in the amount.
             autoFocus={false}
-            disabled={quoteFresh ? blockedRule : t('Считаем цену…')}
+            disabled={quoteFresh ? blockedRule : waiting}
             onPay={async (p) => {
               // One request: the server tops up and opens together, so a refused session (blacklist, curfew, a busy
               // PC, a new price) books no money and the refusal stays in the box.

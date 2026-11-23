@@ -345,6 +345,34 @@ export interface TopUpResult {
   bonus?: Money;
 }
 
+/** Why a desk top-up is taken back (D-91). */
+export type TopUpCancelReason = 'wrongAmount' | 'wrongClient' | 'other';
+
+/**
+ * A desk top-up taken back (D-91): the reversal row `id`, the top-up it cancels and what went back by its method.
+ * Amounts in tiyin.
+ */
+export interface TopUpCancelled {
+  id: string;
+  at: string;
+  transactionId: string;
+  topUpAt: string;
+  amount: number;
+  bonus: number;
+  method: PayMethod;
+  reasonCode: TopUpCancelReason;
+  note: string | null;
+  staffName: string;
+}
+
+export interface TopUpCancelResult {
+  cancelled: TopUpCancelled;
+  balance: Money;
+  /** The right top-up booked in the same step (`amount` sent), else null. */
+  topUp: TopUpResult | null;
+  expectedCash: number;
+}
+
 export interface PayoutResult {
   balance: Money;
   /** What is still payable after this payout (normally 0). */
@@ -533,6 +561,8 @@ export const adminApi = {
       minutes: number;
       prepaid?: boolean;
       payment?: SessionPayment;
+      /** Time «по сумме» (D-90): the server sells the minutes this buys and ignores `minutes`. */
+      amount?: number;
     },
     key?: string,
   ): Promise<SessionResult> => postMoney<SessionResult>('/admin/sessions', input, key),
@@ -548,6 +578,7 @@ export const adminApi = {
       prepaid: boolean;
       displayName?: string;
       payment?: SessionPayment;
+      amount?: number;
     },
     key: string,
   ): Promise<SessionResult> => postMoney<SessionResult>('/admin/sessions/guest', input, key),
@@ -557,6 +588,7 @@ export const adminApi = {
       minutes: number;
       tariffId?: string;
       payment?: SessionPayment;
+      amount?: number;
     },
     key?: string,
   ): Promise<SessionResult> => postMoney<SessionResult>('/admin/sessions/extend', input, key),
@@ -572,6 +604,15 @@ export const adminApi = {
   /** Takes a debt to the tiyin: `amount` must equal the debt (409 `debtChanged {debt}` otherwise); no bonus. */
   settle: (input: { userId: string; amount: number; method: PayMethod }, key: string): Promise<TopUpResult> =>
     postMoney('/admin/wallet/topup', { ...input, settleDebt: true }, key),
+  /**
+   * Takes a desk top-up back (D-91): by its method, with the bonus it gave; `amount` books the right top-up in the same
+   * step. Refused once spent (`409 topUpSpent {spendable, required}`), outside its open shift (`topUpShiftClosed`), for a
+   * cashier after 15 minutes (`403 cancelWindow`) or for someone else's top-up (`403 notOwnTopUp`).
+   */
+  cancelTopUp: (
+    input: { transactionId: string; reasonCode: TopUpCancelReason; note?: string; amount?: number },
+    key: string,
+  ): Promise<TopUpCancelResult> => postMoney('/admin/wallet/topup/cancel', input, key),
   /** Gives a walk-in guest's refund back in cash: `amount` must equal what is payable now (beyond the contract). */
   payout: (input: { userId: string; amount: number }, key: string): Promise<PayoutResult> =>
     postMoney('/admin/wallet/payout', { ...input, method: 'cash' }, key),
@@ -700,6 +741,9 @@ export interface ShiftTotals {
   /** What the shift's voids gave back, and how many there were. */
   shopVoids?: number;
   shopVoidCount?: number;
+  /** Desk top-ups taken back in the shift (D-91; already out of the top-up sums), and how many. */
+  topUpCancels?: number;
+  topUpCancelCount?: number;
 }
 export interface Shift {
   id: string;
@@ -757,7 +801,9 @@ export type OperationKind =
   // Cash desk part 3 (D-68)
   | 'shopSale'
   | 'shopVoid'
-  | 'sessionMove';
+  | 'sessionMove'
+  // D-91: a desk top-up taken back
+  | 'topUpCancel';
 
 /** One row of the shift's operations feed: a paid open is one row with its payment merged in (D-43). */
 export interface Operation {
@@ -787,7 +833,7 @@ export interface Operation {
   saleId?: string | null;
   method?: SaleMethod | null;
   lines?: { title: string; qty: number; price: number }[] | null;
-  /** A bar sale taken back since. */
+  /** A bar sale taken back since, or a desk top-up taken back since (D-91). */
   voided?: boolean | null;
   /** A void: when the sale was. */
   voidOfAt?: string | null;
@@ -994,7 +1040,8 @@ export type AuditAction =
   // Beyond the contract enum (D-44): the Control page has their labels, the server does not send them there yet.
   | 'cashIn'
   | 'cashOut'
-  | 'payout';
+  | 'payout'
+  | 'topUpCancel';
 
 export interface AuditEntry {
   id: string;
@@ -1038,6 +1085,9 @@ export interface StaffSummary {
   discounts: number;
   shortfall: number;
   flags: Record<Severity, number>;
+  /** Desk top-ups this cashier took back in the period, how many and how much (D-91; absent from an older server). */
+  topUpCancels?: number;
+  topUpCancelled?: number;
 }
 
 export type HealthKind = 'cpuHot' | 'gpuHot' | 'cpuTrend' | 'gpuTrend' | 'fpsDrop' | 'unstable';
@@ -1132,6 +1182,8 @@ export interface ControlReport {
   staff: StaffSummary[];
   flags: ControlFlag[];
   log: AuditEntry[];
+  /** Desk top-ups taken back in the period (D-91; not in `log`), newest first; absent from an older server. */
+  corrections?: AuditEntry[];
 }
 
 export interface Client {
@@ -1389,8 +1441,18 @@ export const clubApi = {
   addTariff: (t: TariffInput): Promise<{ tariff: Tariff }> => post('/admin/tariffs', t),
   saveTariff: (id: string, t: TariffInput): Promise<{ tariff: Tariff }> => put(`/admin/tariffs/${id}`, t),
   deleteTariff: (id: string): Promise<unknown> => del(`/admin/tariffs/${id}`),
-  quote: (input: { tariffId: string; pcId: string; minutes: number; userId?: string | null }): Promise<PriceQuote> =>
-    post('/admin/quote', input),
+  /**
+   * `amount` (D-90): the most whole minutes it buys, priced (`minutes` of the answer); 409 `amountTooLow {minutes, total}`
+   * when it does not reach the shortest purchase. `sessionId`: of an extension (the tariff's maximum counts its minutes).
+   */
+  quote: (input: {
+    tariffId: string;
+    pcId: string;
+    minutes: number;
+    userId?: string | null;
+    amount?: number;
+    sessionId?: string;
+  }): Promise<PriceQuote> => post('/admin/quote', input),
 
   clients: (q = ''): Promise<{ items: Client[] }> => call(`/admin/clients?q=${encodeURIComponent(q)}`),
   addClient: (input: {

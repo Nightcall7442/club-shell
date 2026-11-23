@@ -19,11 +19,12 @@ public sealed record ControlFlag(
 public sealed record FlagCounts(int High, int Medium, int Low);
 
 public sealed record StaffSummary(
-    string StaffId, string StaffName, int Operations, long TopUps, long Refunds, int EarlyEnds, int Discounts, long Shortfall, FlagCounts Flags);
+    string StaffId, string StaffName, int Operations, long TopUps, long Refunds, int EarlyEnds, int Discounts, long Shortfall, FlagCounts Flags,
+    int TopUpCancels = 0, long TopUpCancelled = 0);
 
 public sealed record ControlReport(
     DateTimeOffset From, DateTimeOffset To, ControlSettings Settings, IReadOnlyList<StaffSummary> Staff, IReadOnlyList<ControlFlag> Flags,
-    IReadOnlyList<AuditEntry> Log);
+    IReadOnlyList<AuditEntry> Log, IReadOnlyList<AuditEntry>? Corrections = null);
 
 /// <summary>
 /// Cashier control (slice S5, port of the mock's <c>control.ts</c>): <c>adminControl</c> reads the staff journal of the
@@ -35,7 +36,10 @@ public sealed record ControlReport(
 /// <c>bigTopupAt</c>, low). <c>noShift</c> also counts the ledger rows a cashier posted that got no shift (<c>shift_id IS NULL</c>),
 /// which is what a row racing the shift close gets (§4.3), when the journal entry of the operation does not already show
 /// it. Only the contract's journal actions are read (the owner's configuration entries are left out). <c>staffId</c>
-/// narrows the flags and the journal, never the per-cashier totals.
+/// narrows the flags and the journal, never the per-cashier totals. Beyond the contract (D-91): <c>corrections</c> — the
+/// desk top-ups taken back in the period (journal <c>topUpCancel</c>, outside <c>AdminAuditAction</c>, so not in <c>log</c>),
+/// newest first, narrowed by <c>staffId</c> like the journal; per cashier <c>topUpCancels</c> (how many) and
+/// <c>topUpCancelled</c> (how much).
 /// </summary>
 public static class ControlEndpoints
 {
@@ -91,11 +95,20 @@ public static class ControlEndpoints
                 new { staff.ClubId, from, to }))
             .ToList();
 
+        var corrections = (await c.QueryAsync<EntryRow>(
+                $"""
+                SELECT {EntryRow.Columns} FROM audit_entries
+                WHERE club_id = @ClubId AND at >= @from AND at <= @to AND action = 'topUpCancel'
+                ORDER BY at DESC, id DESC
+                """,
+                new { staff.ClubId, from, to }))
+            .Select(e => e.ToWire()).ToList();
         var flags = Flags(entries, shiftless, settings, bigTopupAt);
         var report = new ControlReport(
-            from, to, settings, Summaries(entries, flags, settings),
+            from, to, settings, Summaries(entries, flags, settings, corrections),
             staffId is null ? flags : [.. flags.Where(f => f.StaffId == staffId)],
-            [.. (staffId is null ? entries : entries.Where(e => e.StaffId == staffId)).Take(300)]);
+            [.. (staffId is null ? entries : entries.Where(e => e.StaffId == staffId)).Take(300)],
+            [.. (staffId is null ? corrections : corrections.Where(e => e.StaffId == staffId)).Take(300)]);
         return AdminJson.Ok(report);
     }
 
@@ -187,7 +200,7 @@ public static class ControlEndpoints
 
     private static int Rank(string severity) => severity switch { "high" => 0, "medium" => 1, _ => 2 };
 
-    private static List<StaffSummary> Summaries(List<AuditEntry> entries, List<ControlFlag> flags, ControlSettings settings)
+    private static List<StaffSummary> Summaries(List<AuditEntry> entries, List<ControlFlag> flags, ControlSettings settings, List<AuditEntry> corrections)
     {
         var order = new List<string>();
         var names = new Dictionary<string, string>();
@@ -209,10 +222,16 @@ public static class ControlEndpoints
             Seen(f.StaffId, f.StaffName);
         }
 
+        foreach (var e in corrections)
+        {
+            Seen(e.StaffId, e.StaffName);
+        }
+
         return [.. order.Select(id =>
             {
                 var mine = entries.Where(e => e.StaffId == id).ToList();
                 var own = flags.Where(f => f.StaffId == id).ToList();
+                var cancels = corrections.Where(e => e.StaffId == id).ToList();
                 return new StaffSummary(
                     id, names[id], mine.Count,
                     mine.Where(e => e.Action == "topUp").Sum(e => e.Amount),
@@ -220,7 +239,8 @@ public static class ControlEndpoints
                     mine.Count(e => IsEarlyEnd(e, settings)),
                     mine.Count(e => e.Action == "clientGroup" && Number(e, "discountPct") >= settings.DiscountPct),
                     mine.Where(e => e.Action == "shiftClose").Sum(e => Math.Max(0, -(long)(Number(e, "diff") ?? 0))),
-                    new FlagCounts(own.Count(f => f.Severity == "high"), own.Count(f => f.Severity == "medium"), own.Count(f => f.Severity == "low")));
+                    new FlagCounts(own.Count(f => f.Severity == "high"), own.Count(f => f.Severity == "medium"), own.Count(f => f.Severity == "low")),
+                    cancels.Count, cancels.Sum(e => e.Amount));
             })
             .OrderByDescending(s => s.Flags.High).ThenByDescending(s => s.Flags.Medium).ThenByDescending(s => s.Operations)];
     }
@@ -315,6 +335,31 @@ public static class ControlAlerts
         if (count == settings.EarlyEndsPerShift)
         {
             await Webhooks.EnqueueAsync(c, tx, staff.ClubId, "suspicious", now, $"{staff.Name}: {count} аннулирования продаж бара за смену",
+                new { staffId = staff.WireId });
+        }
+    }
+
+    /// <summary>
+    /// A desk top-up taken back (D-91), as a bar void: <c>suspicious</c> when it is at least <c>notifications.bigTopupAt</c>,
+    /// and when this cashier's cancels in the shift reach <c>control.earlyEndsPerShift</c> (exactly then). Counted from
+    /// the journal, after the cancel's entry is written.
+    /// </summary>
+    public static async Task TopUpCancelAsync(
+        NpgsqlConnection c, NpgsqlTransaction tx, StaffContext staff, Guid shiftId, long amount, string who, DateTimeOffset now)
+    {
+        if (amount >= await ClubSettingsEndpoints.BigTopupAtAsync(c, tx, staff.ClubId))
+        {
+            await Webhooks.EnqueueAsync(c, tx, staff.ClubId, "suspicious", now, $"{staff.Name}: отменено пополнение {who} на {Webhooks.Sum(amount)}",
+                new { staffId = staff.WireId, amount });
+        }
+
+        var settings = await ClubSettingsEndpoints.ControlAsync(c, tx, staff.ClubId);
+        var count = await c.ExecuteScalarAsync<int>(
+            "SELECT count(*)::int FROM audit_entries WHERE club_id = @ClubId AND shift_id = @shiftId AND action = 'topUpCancel' AND staff_id IS NOT DISTINCT FROM @StaffId",
+            new { staff.ClubId, shiftId, staff.StaffId }, tx);
+        if (count == settings.EarlyEndsPerShift)
+        {
+            await Webhooks.EnqueueAsync(c, tx, staff.ClubId, "suspicious", now, $"{staff.Name}: {count} отмены пополнений за смену",
                 new { staffId = staff.WireId });
         }
     }

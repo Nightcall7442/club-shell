@@ -36,6 +36,7 @@ export const OPERATION_KINDS = [
   'shopSale',
   'shopVoid',
   'sessionMove',
+  'topUpCancel',
 ] as const;
 export type OperationKind = (typeof OPERATION_KINDS)[number];
 
@@ -65,7 +66,7 @@ export interface Operation {
   saleId?: string | null;
   method?: string | null;
   lines?: { title: string; qty: number; price: number }[] | null;
-  /** A sale that was voided since. */
+  /** A sale that was voided since, or a desk top-up taken back since (D-91). */
   voided?: boolean | null;
   /** A void: when the sale was. */
   voidOfAt?: string | null;
@@ -97,6 +98,11 @@ function toOperation(e: AuditEntry): Operation | null {
     paid = { amount: e.amount, method, transactionId: s('transactionId') };
     // A top-up with the club API key is booked as cash but never reached the drawer.
     if (method === 'cash' && m['api'] !== true) drawer = e.amount;
+  } else if (kind === 'topUpCancel') {
+    // D-91: the money of a desk top-up given back by its method.
+    const method = s('method') ?? 'cash';
+    paid = { amount: e.amount, method, transactionId: s('transactionId') };
+    if (method === 'cash') drawer = -e.amount;
   } else if (kind === 'sessionOpen' || kind === 'sessionExtend') {
     const amount = n('paidAmount');
     if (amount !== null) {
@@ -154,6 +160,13 @@ function toOperation(e: AuditEntry): Operation | null {
           lines: sale ? sale.lines.map((l) => ({ title: l.title, qty: l.qty, price: l.price })) : null,
           voided: kind === 'shopSale' ? db.shopSales.some((x) => x.kind === 'void' && x.voidOf === s('saleId')) : null,
           voidOfAt: kind === 'shopVoid' ? s('saleAt') : null,
+        }
+      : {}),
+    ...(kind === 'topUp'
+      ? {
+          voided: club().audit.some(
+            (x) => x.action === 'topUpCancel' && x.shiftId === e.shiftId && x.meta['cancelOf'] === s('transactionId'),
+          ),
         }
       : {}),
     ...(kind === 'sessionMove'

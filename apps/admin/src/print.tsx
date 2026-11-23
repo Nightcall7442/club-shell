@@ -477,6 +477,9 @@ export function ShiftReport({ r }: { r: ShiftReportData }): JSX.Element {
       )}
       {byMethod && byMethod.other > 0 && <Row label={t('Другое')} value={sum(byMethod.other)} />}
       {(x.apiCash ?? 0) > 0 && <Row label={t('Через API (нал.)')} value={sum(x.apiCash ?? 0)} />}
+      {(x.topUpCancelCount ?? 0) > 0 && (
+        <Row label={t('Отменено пополнений ({n})', { n: x.topUpCancelCount ?? 0 })} value={sum(x.topUpCancels ?? 0)} />
+      )}
       {shop && (
         <>
           <Rule />

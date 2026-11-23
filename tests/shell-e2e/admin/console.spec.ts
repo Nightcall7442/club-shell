@@ -3106,3 +3106,134 @@ test("the owner writes a guest's debt off without money: the drawer stays, X cou
   );
   expect((await overview(request)).guestDebts?.some((d) => d.displayName === name) ?? false).toBe(false);
 });
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Time «по сумме» (D-90) and correcting a desk top-up (D-91)
+// ---------------------------------------------------------------------------------------------------------------------
+
+/** `1 ч 40 мин`, as the map says the time an amount buys. */
+function hoursMinutes(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return [h > 0 ? `${h} ч` : '', m > 0 || h === 0 ? `${m} мин` : ''].filter(Boolean).join(' ');
+}
+
+test('time «по сумме»: the typed amount becomes the minutes it buys, and the seat and the extension sell exactly them (D-90)', async ({
+  page,
+  request,
+}) => {
+  const pc = await registerAgent(request, 'amount');
+  const client = await newClient(request, 'amount');
+  const tariffId = await standardTariff(request);
+  const cashier = auth(await tokenFor(request, CASHIER_PIN));
+  const priced = async (amount: number, sessionId?: string): Promise<{ minutes: number; total: { amount: number } }> =>
+    (
+      await request.post(`${API}/admin/quote`, {
+        headers: cashier,
+        data: { tariffId, pcId: pc.pcId, minutes: 60, userId: client.id, amount, ...(sessionId ? { sessionId } : {}) },
+      })
+    ).json();
+  const seatWant = await priced(2_000_000);
+  expect(seatWant.total.amount).toBeLessThanOrEqual(2_000_000);
+  const said = (min: number): RegExp => new RegExp(`^≈ ${hoursMinutes(min)}( ·|$)`);
+
+  await signIn(page, CASHIER_PIN);
+  await page.locator(`#seat-${pc.pcId}`).click();
+  await expect(page.getByRole('heading', { name: /Посадить на/ })).toBeVisible();
+  await page.getByRole('combobox', { name: 'Кто' }).fill(client.username);
+  await page.getByRole('option').filter({ hasText: client.username }).click();
+  await page.getByRole('combobox', { name: /^Тариф/ }).selectOption(tariffId);
+  await page.getByRole('button', { name: 'По сумме' }).click();
+  await page.getByLabel('На какую сумму').fill('20000');
+  await expect(page.getByTestId('amount-time')).toHaveText(said(seatWant.minutes));
+  // An amount below the shortest purchase is refused before anything is sent.
+  await page.getByLabel('На какую сумму').fill('1');
+  await expect(page.getByTestId('amount-time')).toContainText('Мало');
+  await page.getByLabel('На какую сумму').fill('20000');
+  await expect(page.getByTestId('amount-time')).toHaveText(said(seatWant.minutes));
+  // Nothing on the new client's balance: the pay box takes the price of those minutes.
+  await page.getByRole('button', { name: /^Посадить · Наличные/ }).click();
+  await expect(page.getByText(/Сеанс открыт/)).toBeVisible();
+  const seated = await seatOf(request, pc.pcId);
+  expect(seated.session?.cost.amount).toBe(seatWant.total.amount);
+  expect(seated.session?.secondsLeft ?? 0).toBeGreaterThan(seatWant.minutes * 60 - 30);
+  expect(seated.session?.secondsLeft ?? 0).toBeLessThanOrEqual(seatWant.minutes * 60);
+
+  // Extend for 5 000 сум: the quote of this session, paid at the desk.
+  const extendWant = await priced(500_000, seated.session!.id);
+  await page.getByRole('button', { name: 'Продлить', exact: true }).click();
+  const extend = page.getByRole('dialog', { name: /^Продлить/ });
+  await extend.getByRole('button', { name: 'По сумме' }).click();
+  await extend.getByLabel('На какую сумму').fill('5000');
+  await expect(extend.getByTestId('amount-time')).toHaveText(said(extendWant.minutes));
+  await extend.getByRole('button', { name: /^Продлить · Наличные/ }).click();
+  await expect(extend).toHaveCount(0);
+  await expect
+    .poll(async () => (await seatOf(request, pc.pcId)).session?.cost.amount ?? 0)
+    .toBe(seatWant.total.amount + extendWant.total.amount);
+  const rows = (await shiftOperations(request, 'sessionExtend')) as (OperationRow & { minutes: number | null })[];
+  expect(rows.find((r) => r.sessionId === seated.session!.id)?.minutes).toBe(extendWant.minutes);
+  await endAt(request, pc.pcId);
+});
+
+test('a wrong desk top-up is corrected from the feed in one step: the difference leaves the drawer, a second cancel and a spent one are refused (D-91)', async ({
+  page,
+  request,
+}) => {
+  await ensureShift(request);
+  const client = await newClient(request, 'fix');
+  // 200 000 сум in cash instead of 20 000.
+  const wrong = await moneyPost(request, '/admin/wallet/topup', { userId: client.id, amount: 20_000_000, method: 'cash' });
+  expect(wrong.status(), await wrong.text()).toBe(200);
+  const wrongId = ((await wrong.json()) as { transaction: { id: string } }).transaction.id;
+  const before = await shiftState(request);
+
+  await signIn(page, CASHIER_PIN);
+  const row = page
+    .locator('[data-feed="column"]')
+    .getByRole('listitem')
+    .filter({ hasText: client.displayName })
+    .filter({ hasText: 'Пополнение' })
+    .first();
+  await row.getByRole('button', { name: 'Исправить / отменить…' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Исправить пополнение' });
+  await sheet.getByLabel('Правильная сумма').fill('20000');
+  await expect(sheet).toContainText(/Выдайте 180\s000 сум наличными из кассы/);
+  await sheet.getByRole('button', { name: 'Исправить', exact: true }).click();
+  await expect(sheet.getByRole('status')).toContainText('Исправлено');
+  await sheet.getByRole('button', { name: 'Готово' }).click();
+  await expect(
+    page
+      .locator('[data-feed="column"]')
+      .getByRole('listitem')
+      .filter({ hasText: client.displayName })
+      .filter({ hasText: 'отменено' }),
+  ).toHaveCount(1);
+
+  const after = await shiftState(request);
+  expect((before.expectedCash ?? 0) - (after.expectedCash ?? 0)).toBe(18_000_000);
+  const counts = (s: typeof after): number => (s.x as { topUpCancelCount?: number } | null)?.topUpCancelCount ?? 0;
+  expect(counts(after) - counts(before)).toBe(1);
+  const cancels = await shiftOperations(request, 'topUpCancel');
+  expect(cancels.find((r) => r.client?.id === client.id)?.drawer).toBe(-20_000_000);
+  const again = await moneyPost(request, '/admin/wallet/topup/cancel', {
+    transactionId: wrongId,
+    reasonCode: 'wrongAmount',
+  });
+  expect(again.status()).toBe(409);
+  expect(await reasonOf(again)).toBe('alreadyCancelled');
+
+  // Money already spent at the bar is not taken back.
+  const spent = await newClient(request, 'spent');
+  const topUp = await moneyPost(request, '/admin/wallet/topup', { userId: spent.id, amount: 1_000_000, method: 'card' });
+  const topUpId = ((await topUp.json()) as { transaction: { id: string } }).transaction.id;
+  const item = await newProduct(request, 'spent', { price: 600_000, stockQty: null });
+  const sale = await barSale(request, [{ product: item, qty: 1 }], { method: 'balance', userId: spent.id });
+  expect(sale.status(), await sale.text()).toBe(201);
+  const refused = await moneyPost(request, '/admin/wallet/topup/cancel', {
+    transactionId: topUpId,
+    reasonCode: 'wrongClient',
+  });
+  expect(refused.status()).toBe(409);
+  expect(await reasonOf(refused)).toBe('topUpSpent');
+});

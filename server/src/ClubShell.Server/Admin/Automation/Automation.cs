@@ -51,8 +51,11 @@ public sealed class AutomationService(NpgsqlDataSource db, CommandDispatcher com
         }
     }
 
-    /// <summary>After a counter top-up of <paramref name="amount"/> (the <c>topUp</c> ledger row <paramref name="entryId"/>).</summary>
-    public async Task TopUpAsync(Guid clubId, Guid userId, long amount, Guid entryId)
+    /// <summary>
+    /// After a counter top-up of <paramref name="amount"/> (the <c>topUp</c> ledger row <paramref name="entryId"/>).
+    /// <paramref name="reachedBefore"/>: the top-up this one corrects (D-91) already fired the rules up to its amount.
+    /// </summary>
+    public async Task TopUpAsync(Guid clubId, Guid userId, long amount, Guid entryId, long reachedBefore = 0)
     {
         List<Rule> rules;
         await using (var c = await db.OpenConnectionAsync())
@@ -60,7 +63,7 @@ public sealed class AutomationService(NpgsqlDataSource db, CommandDispatcher com
             rules = [.. await RulesAsync(c, clubId, "topupAtLeast")];
         }
 
-        foreach (var rule in rules.Where(r => amount >= r.Value))
+        foreach (var rule in rules.Where(r => amount >= r.Value && reachedBefore < r.Value))
         {
             await FireAsync(clubId, rule, null, userId, $"topup:{entryId}");
         }
