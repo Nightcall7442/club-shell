@@ -30,6 +30,8 @@ public sealed class DeskPostpaidTests(LongClockServerFixture server) : LedgerChe
         Assert.Equal((-1, false, 0L, 5_000_000L), (opened.GetProperty("session").GetProperty("secondsLeft").GetInt32(), opened.GetProperty("session").GetProperty("isPrepaid").GetBoolean(),
             Amount(opened.GetProperty("charged")), Amount(opened.GetProperty("balance"))));
         Assert.False(opened.TryGetProperty("payment", out _));
+        // D-89: the desk's postpaid is paid at the desk — the PC offers no «leave» on it.
+        Assert.True(opened.GetProperty("session").GetProperty("payAtDesk").GetBoolean());
         var id = opened.GetProperty("session").GetProperty("id").GetGuid();
         var journal = await Players.ScalarAsync<string>(Server,
             "SELECT shift_id::text || ' ' || (meta ->> 'prepaid') || ' ' || (meta ->> 'minutes') FROM audit_entries WHERE action = 'sessionOpen' AND meta ->> 'sessionId' = @id",

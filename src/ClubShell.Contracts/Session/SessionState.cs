@@ -60,6 +60,7 @@ public static class SessionStateExtensions
 /// <param name="Cost">Cost accrued so far.</param>
 /// <param name="IsPrepaid">Prepaid (charged up front) vs postpaid.</param>
 /// <param name="WarningsSent">Minute marks already emitted as <c>session.warning</c>, e.g. <c>[10, 5]</c>.</param>
+/// <param name="PayAtDesk">Postpaid the cash desk opened (D-89, beyond the contract); null — the player may leave.</param>
 public sealed record Session(
     Guid Id,
     Guid UserId,
@@ -73,8 +74,17 @@ public sealed record Session(
     int SecondsUsed,
     Money Cost,
     bool IsPrepaid,
-    IReadOnlyList<int> WarningsSent)
+    IReadOnlyList<int> WarningsSent,
+    bool? PayAtDesk = null)
 {
+    /// <summary>
+    /// <see cref="PayAtDesk"/> (D-89, beyond the contract): postpaid the cash desk opened — paid and ended at the desk, so
+    /// the player cannot sign out of it or end it on the PC. Absent (an older server, a kiosk session, pay as you go from
+    /// the balance): the player may leave.
+    /// </summary>
+    [JsonIgnore]
+    public bool IsPayAtDesk => PayAtDesk == true && !IsPrepaid;
+
     /// <summary>Value of <see cref="SecondsLeft"/> for open-ended postpaid sessions.</summary>
     public const int OpenEnded = -1;
 

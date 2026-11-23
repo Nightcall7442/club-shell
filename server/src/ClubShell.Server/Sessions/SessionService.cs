@@ -25,7 +25,7 @@ public class SessionRow
     public const string Columns = """
         id, club_id, pc_id, user_id, tariff_id, state, is_prepaid, started_at, ended_at, end_reason, purchased_sec,
         used_before_sec, running_since, paused_at, ends_at, last_transition_at, price_per_hour_snapshot, day_pct,
-        discount_pct, charged_total, refunded_total, warnings_sent, client_session_id, debt_limit
+        discount_pct, charged_total, refunded_total, warnings_sent, client_session_id, debt_limit, origin
         """;
 
     public Guid Id { get; init; }
@@ -57,6 +57,15 @@ public class SessionRow
     /// (<see cref="SessionService.DebtLimitFor"/>); null — no cap (and every prepaid session).
     /// </summary>
     public long? DebtLimit { get; init; }
+
+    /// <summary><c>kiosk</c>, <c>cashier</c> or <c>offline</c>: who opened the session.</summary>
+    public string Origin { get; init; } = "kiosk";
+
+    /// <summary>
+    /// Postpaid the cash desk opened (D-89): paid and ended at the desk, never from the PC. A member's own pay as you go
+    /// from the kiosk is not: the server stops it when the balance runs out, so the player may leave it.
+    /// </summary>
+    public bool PayAtDesk => !IsPrepaid && Origin == "cashier";
 
     public bool Ended => State == "ended";
 
@@ -154,7 +163,7 @@ public class SessionRow
         var cost = IsPrepaid || Ended ? ChargedTotal - RefundedTotal : Pricing.Frozen(PricePerHourSnapshot, used, DayPct, DiscountPct);
         return new Session(
             Id, UserId, PcId, Enum.Parse<SessionState>(State, ignoreCase: true), StartedAt, Ended ? EndedAt : EndsAt, PausedAt, TariffId,
-            left, used, Money.Uzs(cost), IsPrepaid, WarningsSent);
+            left, used, Money.Uzs(cost), IsPrepaid, WarningsSent, PayAtDesk ? true : null);
     }
 }
 
@@ -389,6 +398,7 @@ public sealed class SessionService(
             StartedAt = start, PurchasedSec = request.Prepaid ? minutes * 60 : 0, RunningSince = start, LastTransitionAt = start,
             PricePerHourSnapshot = tariff.PricePerHour, DayPct = quote.DayPct, DiscountPct = quote.DiscountPct,
             ChargedTotal = request.Prepaid ? quote.Total : 0, ClientSessionId = request.ClientSessionId, DebtLimit = debtLimit,
+            Origin = replay ? "offline" : staff is null ? "kiosk" : "cashier",
         };
         row.EndsAt = row.PrepaidEnd();
 
@@ -408,7 +418,7 @@ public sealed class SessionService(
                 """,
                 new
                 {
-                    row.Id, row.ClubId, row.PcId, row.UserId, row.TariffId, row.IsPrepaid, origin = replay ? "offline" : staff is null ? "kiosk" : "cashier",
+                    row.Id, row.ClubId, row.PcId, row.UserId, row.TariffId, row.IsPrepaid, origin = row.Origin,
                     row.StartedAt, row.PurchasedSec, row.RunningSince, row.EndsAt, row.LastTransitionAt, row.PricePerHourSnapshot,
                     row.DayPct, row.DiscountPct, reason = quote.DiscountReason, row.ChargedTotal, row.ClientSessionId, staffId = staff?.StaffId,
                     row.DebtLimit, now,

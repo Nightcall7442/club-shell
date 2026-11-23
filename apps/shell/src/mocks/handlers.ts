@@ -944,6 +944,17 @@ export const simulate = {
       mockState.session.isPrepaid = false;
       mockState.session.secondsLeft = -1;
       mockState.session.endsAt = null;
+      mockState.session.payAtDesk = true;
+      emitSession();
+    }
+  },
+  /** The member's own pay as you go from the balance (the owner's auto-start): open-ended, but the player may leave. */
+  payAsYouGoSession(): void {
+    if (mockState.session) {
+      mockState.session.isPrepaid = false;
+      mockState.session.secondsLeft = -1;
+      mockState.session.endsAt = null;
+      mockState.session.payAtDesk = null;
       emitSession();
     }
   },
@@ -1152,7 +1163,7 @@ cmd('auth_login', (args): AuthLoginResponse => {
 /** As the Agent: a player's own postpaid session is paid and ended at the cash desk (`forbidden {reason: payAtDesk}`). */
 function refusePostpaidEnd(): void {
   const s = mockState.session;
-  if (s && !s.isPrepaid && mockState.user && s.userId === mockState.user.id) {
+  if (s && !s.isPrepaid && s.payAtDesk === true && mockState.user && s.userId === mockState.user.id) {
     mockError('forbidden', 'A postpaid session is ended at the cash desk, where it is paid', { reason: 'payAtDesk' });
   }
 }

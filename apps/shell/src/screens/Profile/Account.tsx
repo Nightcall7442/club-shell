@@ -155,7 +155,7 @@ export function Account(): JSX.Element {
   const isGuest = user?.role === 'guest';
   // A postpaid session is paid and ended at the cash desk: no sign-out here (the Agent refuses it, `payAtDesk`).
   const session = useSession();
-  const postpaid = session.isOpen && session.isOpenEnded;
+  const postpaid = session.isPayAtDesk;
 
   return (
     <div className="flex flex-col gap-[var(--gap)]">

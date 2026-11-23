@@ -800,7 +800,7 @@ public sealed class SessionHandlers : IIpcHandlerGroup
     /// </summary>
     private void RequireNotPostpaid(User user)
     {
-        if (OwnsOpenSession(user) && _sessions.Current is { IsPrepaid: false })
+        if (OwnsOpenSession(user) && _sessions.Current is { IsPayAtDesk: true })
         {
             throw IpcError.Forbidden("A postpaid session is ended at the cash desk, where it is paid", PayAtDeskReason).ToException();
         }

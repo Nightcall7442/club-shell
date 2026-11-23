@@ -79,7 +79,7 @@ export function LeaveButton(): JSX.Element | null {
   }
 
   // Postpaid: the bill is paid at the desk, where the session is ended; the player can only call the administrator.
-  if (s.isOpen && s.isOpenEnded) {
+  if (s.isPayAtDesk) {
     return <PayAtDeskButton />;
   }
 
@@ -150,7 +150,7 @@ export function IdleLeavePrompt(): JSX.Element | null {
   // A member's prepaid minutes are kept (lock); open-ended time and a guest's are signed out.
   const lockInstead = s.isOpen && !s.isOpenEnded && !s.isGuest;
   // A postpaid seat is never ended by idling (the bill would go unpaid): the administrator is called instead.
-  const postpaid = s.isOpen && s.isOpenEnded;
+  const postpaid = s.isPayAtDesk;
   const idleOut = async (): Promise<void> => {
     if (postpaid) {
       try {

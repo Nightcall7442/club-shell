@@ -579,6 +579,18 @@ test.describe('player accounts', () => {
     await expect(sessionTimer(page)).toBeVisible();
   });
 
+  test("a member's own pay as you go from the balance keeps «leave»: only the desk's postpaid is paid at the desk (D-89)", async ({
+    page,
+  }) => {
+    await openPlaying(page);
+    await simulate(page, 'payAsYouGoSession');
+
+    await expect(page.getByRole('button', { name: en('session.payAtDesk'), exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: en('session.leave'), exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name: en('session.leaveConfirm') }).click();
+    await expect(page).toHaveURL(/#\/lock$/);
+  });
+
   test('sign-in expired mid-session: the same member signs in again and plays on', async ({ page }) => {
     await openPlaying(page);
     await simulate(page, 'authExpired', 'tokenExpired');
