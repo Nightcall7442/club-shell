@@ -35,6 +35,7 @@ import {
   type ClubSettings,
   type StaffMember,
 } from '@/api';
+import { SETTINGS_SAVED } from '@/settings';
 import { setReceiptLogo } from '@/print';
 import { Wallpaper } from '@/art';
 import { AudioUnlockChip, CallsBell, CallsRinger, setCalls } from '@/calls';
@@ -483,7 +484,11 @@ export function App(): JSX.Element {
     }
     loadSettings();
     const id = setInterval(loadSettings, SETTINGS_POLL_MS);
-    return () => clearInterval(id);
+    window.addEventListener(SETTINGS_SAVED, loadSettings);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener(SETTINGS_SAVED, loadSettings);
+    };
   }, [staff, loadSettings]);
 
   const club = useMemo<ClubState>(

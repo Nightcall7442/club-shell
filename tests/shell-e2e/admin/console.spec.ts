@@ -712,7 +712,8 @@ test('the price takes the day rate and only the single best discount', async ({ 
 
 test('the player-screen settings are saved on the server', async ({ page, request }) => {
   await signIn(page, OWNER_PIN);
-  await page.goto('/#/club');
+  // The name lives with the logo and the colour under «Интерфейс и логотипы» (D-93).
+  await page.goto('/#/interface');
   const name = page.getByLabel('Название клуба');
   await name.fill('E2E Arena');
   const save = page.getByRole('button', { name: 'Сохранить', exact: true });
