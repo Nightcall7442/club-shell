@@ -15,6 +15,7 @@ import type {
   AppsLaunchResponse,
   AuthLoginRequest,
   AuthLoginResponse,
+  AuthRegisterRequest,
   AuthLogoutResponse,
   AuthStatusResponse,
   Balance,
@@ -325,7 +326,7 @@ function freshState(): MockState {
     tournaments: clone(TOURNAMENTS),
     games: clone(GAMES),
     running: [],
-    settings: { ...clone(SETTINGS), club: withScreensaver(demoClubRequested() ? clone(DEMO_CLUB) : null) },
+    settings: { ...clone(SETTINGS), club: withSignup(withScreensaver(demoClubRequested() ? clone(DEMO_CLUB) : null)) },
     gameSettings: clone(PLAYER_GAME_SETTINGS),
     policy: clone(POLICY),
     volume: { level: SETTINGS.volume, muted: SETTINGS.muted },
@@ -771,6 +772,17 @@ function withScreensaver(club: ShellClub | null): ShellClub | null {
   return { ...(club ?? {}), screensaver: { enabled: sec > 0, afterSec: Math.max(0, sec), items: [] } };
 }
 
+/**
+ * `?signup=on` in the URL: the owner allows players to create their own account on the lock screen (D-92);
+ * `?signup=rules` — and the club has rules to accept first.
+ */
+function withSignup(club: ShellClub | null): ShellClub | null {
+  const raw = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('signup');
+  if (raw !== 'on' && raw !== 'rules') return club;
+  const rules = raw === 'rules' ? { ru: 'Не есть за ПК\nБеречь технику', uz: '', en: '' } : club?.rules;
+  return { ...(club ?? {}), selfSignup: true, rules: rules ?? null };
+}
+
 /** `?club=demo` in the URL starts with the owner's branding from {@link DEMO_CLUB}. */
 function demoClubRequested(): boolean {
   return typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('club') === 'demo';
@@ -780,6 +792,10 @@ export const simulate = {
   /** Replaces the club block as if the Agent had written a new one from the server (`null` clears it). */
   club(club: ShellClub | null = DEMO_CLUB): void {
     mockState.settings = { ...mockState.settings, club: club ? clone(club) : null };
+  },
+  /** The owner's «Регистрация на ПК» switch (D-92) as the next `settings_get` returns it. */
+  selfSignup(on = true): void {
+    mockState.settings = { ...mockState.settings, club: { ...(mockState.settings.club ?? {}), selfSignup: on } };
   },
   adminMessage(text = 'Please finish your match, the club closes in 20 minutes.', requiresAck = true): AdminMessage {
     const m: AdminMessage = { id: newId(), from: ADMIN_NAME, text, level: 'warning', requiresAck, at: nowIso() };
@@ -1056,6 +1072,14 @@ cmd('auth_login', (args): AuthLoginResponse => {
       if (username === 'banned') {
         mockError('forbidden', 'Account is banned', { reason: 'banned' });
       }
+      const registered = registeredAccounts.get(phoneDigits(username) ?? username);
+      if (registered) {
+        if (registered.password !== password) {
+          mockError('unauthorized', 'Invalid credentials', { reason: 'invalidCredentials' });
+        }
+        user = registered.user;
+        break;
+      }
       if (MOCK_CREDENTIALS[username] !== password) {
         mockError('unauthorized', 'Invalid credentials', { reason: 'invalidCredentials' });
       }
@@ -1158,6 +1182,81 @@ cmd('auth_login', (args): AuthLoginResponse => {
     expiresAt: mockState.expiresAt ?? isoIn(3600),
     mode: 'online',
   };
+});
+
+/**
+ * Accounts players made on the lock screen in mock mode (D-92): login → user and password, so the new player can sign
+ * out and in again. Gone with a reload, as the rest of the mock.
+ */
+const registeredAccounts = new Map<string, { user: User; password: string }>();
+/** Accounts made by this PC (the server allows 5 an hour). */
+let accountsMade = 0;
+
+/** Digits of a login that reads as a phone (as the server: 7–15 digits with spaces and `+ - ( )`), else null. */
+function phoneDigits(text: string): string | null {
+  if (!/^[\d\s+\-()]+$/.test(text)) return null;
+  const digits = text.replace(/\D/g, '');
+  return digits.length >= 7 && digits.length <= 15 ? digits : null;
+}
+
+cmd('auth_register', (args): AuthLoginResponse => {
+  const req = obj<AuthRegisterRequest>(args, 'req');
+  if (!req) {
+    mockError('validation', 'req is required', { field: 'req', reason: 'required' });
+  }
+  const club = mockState.settings.club;
+  if (club?.selfSignup !== true) {
+    mockError('forbidden', 'This club registers new players at the desk', { reason: 'selfSignupDisabled' });
+  }
+  const displayName = (req.displayName ?? '').trim();
+  if (!displayName) {
+    mockError('validation', 'displayName is required', { field: 'displayName', reason: 'required' });
+  }
+  const typed = (req.username ?? '').trim();
+  const username = phoneDigits(typed) ?? typed.toLowerCase();
+  if (!username) {
+    mockError('validation', 'username is required', { field: 'username', reason: 'required' });
+  }
+  if (username.length < 3) {
+    mockError('validation', 'username too short', { field: 'username', reason: 'min' });
+  }
+  if (username in MOCK_CREDENTIALS || registeredAccounts.has(username)) {
+    mockError('validation', 'username taken', { field: 'username', reason: 'taken' });
+  }
+  const password = req.password ?? '';
+  if (password.length < 4) {
+    mockError('validation', 'password too short', { field: 'password', reason: password ? 'min' : 'required' });
+  }
+  const hasRules = [club.rules?.ru, club.rules?.uz, club.rules?.en].some((r) => (r ?? '').trim().length > 0);
+  if (hasRules && req.acceptRules !== true) {
+    mockError('validation', 'the club rules are not accepted', { field: 'acceptRules', reason: 'required' });
+  }
+  if (accountsMade >= 5) {
+    mockError('rateLimited', 'Too many accounts were created on this PC', {
+      reason: 'signupLimit',
+      retryAfterSec: 3600,
+    });
+  }
+  accountsMade += 1;
+  const user: User = {
+    ...USER,
+    id: newId(),
+    username,
+    displayName,
+    role: 'member',
+    balance: money(0),
+    loyaltyLevel: 0,
+    loyaltyPoints: 0,
+    createdAt: nowIso(),
+    lastSeenAt: nowIso(),
+    flags: [],
+  };
+  registeredAccounts.set(username, { user, password });
+  setUser(user);
+  // A new account starts with nothing, bonus included.
+  mockState.balance = { ...mockState.balance, bonus: money(0) };
+  mockState.session = null;
+  return { user: clone(user), session: null, expiresAt: mockState.expiresAt ?? isoIn(3600), mode: 'online' };
 });
 
 /** As the Agent: a player's own postpaid session is paid and ended at the cash desk (`forbidden {reason: payAtDesk}`). */

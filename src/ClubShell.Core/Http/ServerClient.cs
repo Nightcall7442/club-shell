@@ -270,6 +270,17 @@ public sealed class ServerClient : IServerClient, IDisposable
     }
 
     /// <inheritdoc />
+    public async Task<AuthResponse> RegisterPlayerAsync(RegisterAuthRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // No idempotency key, so the retry policy never repeats it: a lost answer must not make a second account.
+        var response = await SendJsonAsync<RegisterAuthRequest, AuthResponse>(HttpMethod.Post, Endpoints.AuthRegister, request, AuthMode.Agent, null, cancellationToken).ConfigureAwait(false);
+        await StoreUserTokensAsync(response, cancellationToken).ConfigureAwait(false);
+        return response;
+    }
+
+    /// <inheritdoc />
     public async Task LogoutAsync(LogoutRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);

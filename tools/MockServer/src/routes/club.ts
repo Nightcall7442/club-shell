@@ -51,6 +51,7 @@ import {
 } from '../db.js';
 import { PRODUCT_CATEGORIES, liveProducts, productView, voidOf } from './bar.js';
 import { gamesVolumeOf, hardwareOf } from '../devices.js';
+import { generateLogin, phoneDigits } from '../logins.js';
 import {
   API_TOPUP,
   CASH_REASONS,
@@ -506,7 +507,7 @@ export function clubRoutes(app: FastifyInstance): void {
       happyHours: c.happyHours,
       loyalty: c.loyalty,
       // As the server: guest postpaid at the desk is on unless the owner turned it off.
-      limits: { ...c.limits, guestPostpaid: c.limits.guestPostpaid ?? true },
+      limits: { ...c.limits, guestPostpaid: c.limits.guestPostpaid ?? true, selfSignup: c.limits.selfSignup ?? false },
       catalog: c.catalog,
       banners: c.banners,
       rulesText: c.rulesText,
@@ -553,7 +554,7 @@ export function clubRoutes(app: FastifyInstance): void {
         if (typeof v !== 'number' || !Number.isSafeInteger(v)) throw errors.validation(`limits.${name}`, 'format');
         if (v < 0) throw errors.validation(`limits.${name}`, 'min');
       }
-      for (const name of ['guestPostpaid', 'cashOutOwnerOnly']) {
+      for (const name of ['guestPostpaid', 'cashOutOwnerOnly', 'selfSignup']) {
         const v = limits[name];
         if (v !== undefined && v !== null && typeof v !== 'boolean')
           throw errors.validation(`limits.${name}`, 'format');
@@ -561,9 +562,12 @@ export function clubRoutes(app: FastifyInstance): void {
     }
     if ('topUpPromo' in b) c.topUpPromo = parseTopUpPromo(b['topUpPromo']);
     if ('screensaver' in b) c.screensaver = parseScreensaver(b['screensaver']);
+    const selfSignupBefore = c.limits.selfSignup === true;
     for (const k of keys) {
       if (k in b) (c as unknown as Record<string, unknown>)[k] = b[k];
     }
+    // The self-signup switch (D-92) reaches the PCs with their config, as on the server.
+    if ((c.limits.selfSignup === true) !== selfSignupBefore) bumpCatalog();
     if ('control' in b) {
       // Thresholds must stay usable numbers whatever the client sent.
       const n = (v: unknown, fallback: number, min: number, max: number): number =>
@@ -706,14 +710,26 @@ export function clubRoutes(app: FastifyInstance): void {
     return { items };
   });
 
-  /** Registers a client with the password (the console generates a temporary one) and card they sign in with. */
+  /**
+   * Registers a client with the password (the console generates a temporary one) and card they sign in with. Only the
+   * name is required (D-92): without a login one is made from the phone or the name, as the server makes it.
+   */
   app.post('/admin/clients', async (req) => {
     requireStaff(req);
     const b = body(req);
-    const username = str(b, 'username', 32).toLowerCase();
-    // As the server: a new login is 3–32 characters.
-    if (username.trim().length < 3) throw errors.validation('username', 'min');
-    if (db.users.some((u) => u.username.toLowerCase() === username)) throw errors.validation('username', 'taken');
+    const displayName = str(b, 'displayName', 64);
+    const typed = typeof b['username'] === 'string' ? b['username'].trim() : '';
+    const loginTaken = (login: string): boolean => db.users.some((u) => u.username.toLowerCase() === login);
+    let username: string;
+    if (typed) {
+      // As the server: a typed login is 3–32 characters; a phone number is kept as its digits.
+      username = phoneDigits(typed) ?? typed.toLowerCase();
+      if (username.length > 32) throw errors.validation('username', 'max');
+      if (username.length < 3) throw errors.validation('username', 'min');
+      if (loginTaken(username)) throw errors.validation('username', 'taken');
+    } else {
+      username = generateLogin(displayName, optStr(b, 'phone', 32), loginTaken);
+    }
     // No password sent: nobody knows one until the cashier resets it.
     const password = b['password'] === undefined || b['password'] === null ? uuid() : passwordOf(b);
     const cardId = cardOf(b, null);
@@ -722,7 +738,7 @@ export function clubRoutes(app: FastifyInstance): void {
       ...template,
       id: uuid(),
       username,
-      displayName: str(b, 'displayName', 64),
+      displayName,
       role: 'member',
       balance: uzs(0),
       bonus: uzs(0),

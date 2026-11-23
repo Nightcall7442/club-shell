@@ -281,6 +281,8 @@ export interface ShellClub {
   rules?: ClubRules | null;
   /** The free PCs' screensaver; absent — the shell's own idle screen as before. */
   screensaver?: ShellScreensaver | null;
+  /** The lock screen offers «Создать аккаунт» (D-92, the owner's `limits.selfSignup`); absent — off. */
+  selfSignup?: boolean | null;
 }
 
 /** Server override pushed into `shell.json`. */

@@ -659,6 +659,65 @@ public sealed class PlayerAccountTests : IDisposable
         await _server.Received(1).LoginAsync(Arg.Is<AuthRequest>(r => r.Username == "a"), Arg.Any<CancellationToken>());
     }
 
+    // ---- D-92: the player's own account ------------------------------------------------------------
+
+    [Fact]
+    public async Task A_player_registers_on_the_pc_and_is_signed_in_like_a_password_login()
+    {
+        _link.Connectivity = ConnectivityState.Online;
+        User made = _member with { Id = Guid.NewGuid(), Username = "samir", DisplayName = "Самир", Balance = Money.Uzs(0) };
+        _server.RegisterPlayerAsync(Arg.Any<RegisterAuthRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new AuthResponse(made, null, "token", "refresh", T0.AddHours(8), OfflineSessionStore.HashPassword("4321", 1000)));
+
+        IpcEnvelope reply = await SendAsync(IpcMessages.Auth.Register, new AuthRegisterRequest(" Самир ", " Samir ", "4321", AcceptRules: true));
+
+        reply.IsError.Should().BeFalse(reply.Error?.Message);
+        AuthLoginResponse signedIn = reply.PayloadAs<AuthLoginResponse>()!;
+        (signedIn.User.Id, signedIn.Mode, signedIn.Session).Should().Be((made.Id, ConnectivityState.Online, null));
+        _users.User!.Id.Should().Be(made.Id, "the new player is signed in on this PC");
+        await _server.Received(1).RegisterPlayerAsync(
+            Arg.Is<RegisterAuthRequest>(r => r.PcId == PcId && r.DisplayName == "Самир" && r.Username == "Samir" && r.Password == "4321" && r.AcceptRules == true),
+            Arg.Any<CancellationToken>());
+
+        // Kept for an offline sign-in under the login the server stored.
+        (await _store.TryOfflineLoginAsync("samir", "4321", CancellationToken.None))!.Id.Should().Be(made.Id);
+
+        // Nobody registers over a signed-in player.
+        IpcEnvelope again = await SendAsync(IpcMessages.Auth.Register, new AuthRegisterRequest("Другой", "other", "4321"));
+        again.Error!.Code.Should().Be(ErrorCode.Conflict);
+        again.Error.DetailsAs<ReasonDetails>()!.Reason.Should().Be("sessionActive");
+    }
+
+    [Fact]
+    public async Task Registration_checks_the_fields_needs_the_server_and_passes_its_refusals_on()
+    {
+        IpcEnvelope offline = await SendAsync(IpcMessages.Auth.Register, new AuthRegisterRequest("Самир", "samir", "4321"));
+        offline.Error!.Code.Should().Be(ErrorCode.AgentOffline, "an account is never made from the offline cache");
+
+        _link.Connectivity = ConnectivityState.Online;
+        foreach (var (request, field, reason) in new[]
+                 {
+                     (new AuthRegisterRequest(" ", "samir", "4321"), "displayName", "required"),
+                     (new AuthRegisterRequest(new string('я', 65), "samir", "4321"), "displayName", "max"),
+                     (new AuthRegisterRequest("Самир", new string('x', 33), "4321"), "username", "max"),
+                     (new AuthRegisterRequest("Самир", "samir", "123"), "password", "min"),
+                     (new AuthRegisterRequest("Самир", "samir", null), "password", "required"),
+                 })
+        {
+            IpcEnvelope refused = await SendAsync(IpcMessages.Auth.Register, request);
+            refused.Error!.Code.Should().Be(ErrorCode.Validation);
+            (refused.Error.Details!.Value.GetProperty("field").GetString(), refused.Error.Details!.Value.GetProperty("reason").GetString()).Should().Be((field, reason));
+        }
+
+        await _server.DidNotReceive().RegisterPlayerAsync(Arg.Any<RegisterAuthRequest>(), Arg.Any<CancellationToken>());
+        _server.RegisterPlayerAsync(Arg.Any<RegisterAuthRequest>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(ServerError(ErrorCode.Forbidden, HttpStatusCode.Forbidden, """{ "reason": "selfSignupDisabled" }"""));
+        IpcEnvelope disabled = await SendAsync(IpcMessages.Auth.Register, new AuthRegisterRequest("Самир", "samir", "4321"));
+        disabled.Error!.Code.Should().Be(ErrorCode.Forbidden);
+        disabled.Error.DetailsAs<ReasonDetails>()!.Reason.Should().Be("selfSignupDisabled");
+        _users.User.Should().BeNull();
+    }
+
     // ---- G9: wallet push --------------------------------------------------------------------------
 
     [Fact]

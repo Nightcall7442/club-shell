@@ -952,6 +952,8 @@ export interface ClubSettings {
     cashOutOwnerOnly?: boolean;
     /** Minutes the server extends a prepaid session by when it runs out and the balance pays; 0 — off. */
     autoExtendMinutes?: number;
+    /** Players create their own account on the lock screen (D-92); absent or false — off, registration at the desk. */
+    selfSignup?: boolean;
   };
   catalog: { order: string[]; hidden: string[]; featured: string[] };
   banners: Banner[];
@@ -1393,9 +1395,10 @@ export const clubApi = {
     post('/admin/quote', input),
 
   clients: (q = ''): Promise<{ items: Client[] }> => call(`/admin/clients?q=${encodeURIComponent(q)}`),
+  /** `username` absent — the server makes a unique Latin login (D-92), returned in `client.username`. */
   addClient: (input: {
     displayName: string;
-    username: string;
+    username?: string;
     phone?: string;
     birthYear?: number | null;
     groupId?: string | null;

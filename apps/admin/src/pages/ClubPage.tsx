@@ -1,7 +1,8 @@
 /**
  * "Экран игрока": what the kiosk shows to players — branding, the sections players can open, banners, the club rules
- * in three languages and the limits (minors, auto-extension, postpaid debts of guests and clients, who may take cash
- * out of the drawer). On the right, a live miniature of the kiosk built from the draft.
+ * in three languages, whether players create their own account on the lock screen (D-92, `limits.selfSignup`, off by
+ * default) and the limits (minors, auto-extension, postpaid debts of guests and clients, who may take cash out of the
+ * drawer). On the right, a live miniature of the kiosk built from the draft.
  */
 import { useState } from 'react';
 import clsx from 'clsx';
@@ -378,6 +379,21 @@ export default function ClubPage(): JSX.Element {
           {s.screensaver && (
             <ScreensaverSection value={s.screensaver} onChange={(v) => st.set('screensaver', v)} />
           )}
+
+          <Section title={t('Регистрация на ПК')}>
+            <div className="flex flex-col gap-3 md:max-w-xl">
+              <Toggle
+                label={t('Игроки создают аккаунт сами')}
+                checked={s.limits.selfSignup === true}
+                onChange={(v) => st.set('limits', { ...s.limits, selfSignup: v })}
+              />
+              <p className="-mt-1 pl-14 text-[11.5px] leading-4 text-muted">
+                {t(
+                  'На экране входа появится «Создать аккаунт»: имя, логин или телефон и пароль. Если заданы правила клуба, игрок соглашается с ними. Новый аккаунт — обычный клиент с нулевым балансом; с одного ПК — не больше 5 аккаунтов в час.',
+                )}
+              </p>
+            </div>
+          </Section>
 
           <Section title={t('Ограничения')}>
             <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2 md:max-w-xl">
