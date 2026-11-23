@@ -86,14 +86,18 @@ export function PlanBackdrop({
   cell,
   selected = null,
   compact = false,
+  place,
 }: {
   plan: HallPlan | null | undefined;
   zones: Zone[];
   cell: number;
   selected?: string | null;
   compact?: boolean;
+  /** Where a rectangle of the plan lands (the main map's rows and columns are not all one size); default: square cells. */
+  place?: (r: { x: number; y: number; w: number; h: number }) => CSSProperties;
 }): JSX.Element | null {
   if (!plan) return null;
+  const at = place ?? ((r: { x: number; y: number; w: number; h: number }) => box(r, cell));
   const colour = new Map(zones.map((z) => [z.name, z.color]));
   const text = compact ? 'text-[9px]' : 'text-[11px]';
   return (
@@ -108,7 +112,7 @@ export function PlanBackdrop({
             selected === a.id && 'outline outline-2 outline-accent',
           )}
           style={{
-            ...box(a, cell),
+            ...at(a),
             background: `${colour.get(a.zone) ?? '#7D8A96'}14`,
             borderColor: `${colour.get(a.zone) ?? '#7D8A96'}55`,
           }}
@@ -132,7 +136,7 @@ export function PlanBackdrop({
             text,
             selected === o.id && 'outline outline-2 outline-accent',
           )}
-          style={box(o, cell)}
+          style={at(o)}
         >
           {o.text ?? (o.kind === 'wall' || o.kind === 'aisle' ? '' : objectLabel(o.kind))}
         </div>

@@ -393,6 +393,8 @@ function SeatTile({
   const status = seat.pc.status;
   // A plan cell too small for a second line: the number alone (the status dot and the title say the rest).
   const tiny = compact && typeof box?.width === 'number' && box.width < 28;
+  // A short plan tile (1366×768): the time goes up beside the number and the game line drops, so nothing spills out.
+  const dense = !compact && typeof box?.height === 'number' && box.height < 92;
   const session = seat.session;
   const left = secondsLeft(session);
   const prepaid = session?.isPrepaid ?? false;
@@ -479,7 +481,7 @@ function SeatTile({
       className={clsx(
         'focus-ring hud-focus group flex min-w-0 flex-col justify-between rounded-md border text-left transition-[border-color,box-shadow,opacity] duration-200',
         box ? 'absolute' : 'relative h-28',
-        compact ? 'items-center overflow-hidden px-0.5 py-0.5' : 'pb-[13px] pl-3.5 pr-3 pt-3',
+        compact ? 'items-center overflow-hidden px-0.5 py-0.5' : dense ? 'overflow-hidden py-2 pl-3.5 pr-2.5' : 'pb-[13px] pl-3.5 pr-3 pt-3',
         box && (selected || checked) && 'z-20',
         // Border and glow: amber when the cashier is needed, the accent when selected, else the state's hairline.
         call
@@ -505,6 +507,26 @@ function SeatTile({
         blocked && 'cursor-not-allowed',
       )}
     >
+      {/* The state at a glance, on every tile and every size: green free, accent playing, amber ending or calling,
+          red locked or in repair, grey off. */}
+      <span
+        aria-hidden="true"
+        className={clsx(
+          'pointer-events-none absolute left-0 z-10 w-[3px] rounded-r-full',
+          compact ? 'bottom-1.5 top-1.5' : 'bottom-2.5 top-2.5',
+          call || ending
+            ? 'bg-warning shadow-[0_0_8px_rgb(var(--c-warning)/0.7)]'
+            : session
+              ? 'bg-accent shadow-[0_0_8px_rgb(var(--c-accent)/0.6)]'
+              : status === 'locked' || status === 'maintenance' || repair === 'high'
+                ? 'bg-danger'
+                : status === 'offline'
+                  ? 'bg-text/20'
+                  : status === 'booked'
+                    ? 'bg-accent/50'
+                    : 'bg-success',
+        )}
+      />
       {art ? (
         <GameArt src={cover} variant="tile" zoom>
           {bar}
@@ -538,6 +560,17 @@ function SeatTile({
           {pad2(seat.pc.number)}
         </span>
         <span className="flex min-w-0 items-center gap-1">
+          {dense && session && prepaid && (
+            <span
+              className={clsx(
+                'num-dot mr-1 text-[13px] leading-none',
+                ending ? 'text-warning' : 'text-white',
+                art && SHADOW_READOUT,
+              )}
+            >
+              {clockLeft(left)}
+            </span>
+          )}
           {call && (
             <span
               className={clsx(
@@ -616,7 +649,7 @@ function SeatTile({
               {nameOf(seat.user)}
             </span>
           )}
-          {sub.length > 0 && (
+          {sub.length > 0 && !dense && (
             <span
               className={clsx(
                 'mt-0.5 block truncate font-mono text-[9px] font-medium uppercase leading-3 tracking-[0.06em] text-[#D3DBE1]',
@@ -641,7 +674,7 @@ function SeatTile({
         </span>
       )}
 
-      {tiny ? null : session ? (
+      {tiny || (dense && session && prepaid) ? null : session ? (
         // Postpaid has no time left (`secondsLeft` −1): its running bill, the ∞ mark is the badge above.
         prepaid ? (
           <span
