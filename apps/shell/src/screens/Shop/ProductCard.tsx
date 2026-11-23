@@ -107,7 +107,8 @@ export const ProductCard = memo(function ProductCard({
             </Badge>
           )}
           {lowStock && (
-            <Badge size="sm" tone="accent">
+            // Over the photo: a backing of the page colour, or the accent text sits on a dark picture.
+            <Badge size="sm" tone="accent" className="bg-bg/85">
               {t('shop.lowStock', { count: product.stockQty ?? 0 })}
             </Badge>
           )}

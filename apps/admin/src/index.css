@@ -10,6 +10,11 @@
  * system's reduced transparency) drops every blur for weak counter PCs.
  */
 @layer base {
+  /* The Windows I-beam is dark and all but vanished over the dark fields: a white one with a black edge. */
+  input:not([type='range']):not([type='checkbox']):not([type='radio']):not([type='color']),
+  textarea {
+    cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='24' viewBox='0 0 16 24'><path d='M5 2h6M8 2v20M5 22h6' fill='none' stroke='%23000' stroke-width='4' stroke-linecap='round'/><path d='M5 2h6M8 2v20M5 22h6' fill='none' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/></svg>") 8 12, text;
+  }
   :root {
     --c-bg: 7 9 12;
     --c-surface: 13 17 23;

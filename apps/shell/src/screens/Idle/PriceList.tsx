@@ -142,7 +142,7 @@ export function PriceList({ tariffs, compact = false, className }: PriceListProp
       ) : (
         groups.map((group) => (
           <div key={group.zone ?? '*'} className="flex flex-col gap-2">
-            <h3 className={clsx('font-semibold text-muted', compact ? 'text-xs' : 'text-sm')}>
+            <h3 className={clsx('font-semibold text-text/80', compact ? 'text-xs' : 'text-sm')}>
               {group.zone ?? t('idle.allZones')}
             </h3>
             <ul role="list" className="flex flex-col gap-2">
@@ -176,7 +176,7 @@ export function PriceList({ tariffs, compact = false, className }: PriceListProp
                         )}
                       </div>
                       {tariff.timeWindows.length > 0 && (
-                        <p className={clsx('text-muted', compact ? 'text-xs' : 'text-sm')}>
+                        <p className={clsx('text-text/80', compact ? 'text-xs' : 'text-sm')}>
                           {tariff.timeWindows.map((w) => describeWindow(w, locale, t)).join(' · ')}
                         </p>
                       )}

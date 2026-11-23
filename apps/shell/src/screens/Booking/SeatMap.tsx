@@ -35,9 +35,9 @@ const STATUS_CLASS: Record<PcStatus, string> = {
   busy: 'bg-transparent text-muted border-text/[0.07]',
   booked: 'bg-accent/10 text-accent border-accent/35',
   locked: 'bg-transparent text-muted border-text/[0.07]',
-  maintenance: 'bg-transparent text-muted/50 border-dashed border-text/15',
-  offline: 'bg-transparent text-muted/40 border-text/[0.05]',
-  unknown: 'bg-transparent text-muted/40 border-text/[0.05]',
+  maintenance: 'bg-transparent text-muted/80 border-dashed border-text/20',
+  offline: 'bg-transparent text-muted/75 border-text/10',
+  unknown: 'bg-transparent text-muted/75 border-text/10',
 };
 
 const STATUS_DOT: Record<PcStatus, string> = {
