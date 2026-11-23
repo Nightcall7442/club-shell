@@ -495,19 +495,16 @@ function ConvertTo-JsonStringLiteral {
     return $builder.ToString()
 }
 
-function Get-ManifestCanonicalBytes {
+function ConvertTo-CanonicalTimestamp {
     <#
     .SYNOPSIS
-        UTF-8 bytes of {"component":..,"version":..,"url":..,"sha256":..,"size":N,"publishedAt":".."} for one
-        UpdateManifest object, byte-identical to Signing.ManifestCanonicalBytes.
+        A manifest publishedAt (string, [DateTime] or [DateTimeOffset]) as yyyy-MM-ddTHH:mm:ss.fffZ UTC, the form
+        Signing.ManifestCanonicalBytes signs.
     #>
-    param([Parameter(Mandatory)][object] $Entry)
-    # JsonNamingPolicy.CamelCase of the UpdateComponent enum name (Agent -> agent).
-    $componentName = [string]$Entry.component
-    $componentName = $componentName.Substring(0, 1).ToLowerInvariant() + $componentName.Substring(1)
+    param([Parameter(Mandatory)][object] $Value)
     # PowerShell 7's ConvertFrom-Json turns the ISO string into a [DateTime] already: [string] of that is the culture's
     # short form without milliseconds, and the signature then covered "…:57.000Z" while the manifest says "…:57.659Z".
-    $rawPublishedAt = $Entry.publishedAt
+    $rawPublishedAt = $Value
     if ($rawPublishedAt -is [DateTimeOffset]) {
         $publishedAt = $rawPublishedAt
     }
@@ -518,13 +515,27 @@ function Get-ManifestCanonicalBytes {
     else {
         $publishedAt = [DateTimeOffset]::Parse([string]$rawPublishedAt, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal)
     }
+    return $publishedAt.UtcDateTime.ToString($CanonicalTimestampFormat, [Globalization.CultureInfo]::InvariantCulture)
+}
+
+function Get-ManifestCanonicalBytes {
+    <#
+    .SYNOPSIS
+        UTF-8 bytes of {"component":..,"version":..,"url":..,"sha256":..,"size":N,"publishedAt":".."} for one
+        UpdateManifest object, byte-identical to Signing.ManifestCanonicalBytes.
+    #>
+    param([Parameter(Mandatory)][object] $Entry)
+    # JsonNamingPolicy.CamelCase of the UpdateComponent enum name (Agent -> agent).
+    $componentName = [string]$Entry.component
+    $componentName = $componentName.Substring(0, 1).ToLowerInvariant() + $componentName.Substring(1)
+    $publishedAt = ConvertTo-CanonicalTimestamp $Entry.publishedAt
     $json = '{' +
         '"component":' + (ConvertTo-JsonStringLiteral $componentName) + ',' +
         '"version":' + (ConvertTo-JsonStringLiteral ([string]$Entry.version)) + ',' +
         '"url":' + (ConvertTo-JsonStringLiteral ([string]$Entry.url)) + ',' +
         '"sha256":' + (ConvertTo-JsonStringLiteral ([string]$Entry.sha256)) + ',' +
         '"size":' + ([long]$Entry.size).ToString([Globalization.CultureInfo]::InvariantCulture) + ',' +
-        '"publishedAt":' + (ConvertTo-JsonStringLiteral $publishedAt.UtcDateTime.ToString($CanonicalTimestampFormat, [Globalization.CultureInfo]::InvariantCulture)) +
+        '"publishedAt":' + (ConvertTo-JsonStringLiteral $publishedAt) +
         '}'
     Write-Verbose "canonical: $json"
     return (New-Object System.Text.UTF8Encoding($false)).GetBytes($json)
@@ -608,6 +619,13 @@ function Invoke-ManifestMode {
                 $file.sha256 = Get-Sha256Hex -Path $path
                 $sums.Add("$($file.sha256) *$($file.path)")
             }
+        }
+        # ConvertFrom-Json made every publishedAt a [DateTime], and ConvertTo-Json would write it back with the trailing
+        # zeros of its milliseconds dropped (".050Z" -> ".05Z"): a reader that signs the string as written (the release
+        # verifier) would then not match. Write them back in the signed form.
+        if (Get-PropertyValue -Object $manifest -Name 'publishedAt') { $manifest.publishedAt = ConvertTo-CanonicalTimestamp $manifest.publishedAt }
+        foreach ($property in $components.PSObject.Properties) {
+            if (Get-PropertyValue -Object $property.Value -Name 'publishedAt') { $property.Value.publishedAt = ConvertTo-CanonicalTimestamp $property.Value.publishedAt }
         }
         Write-TextFile -Path $manifestFile -Text ($manifest | ConvertTo-Json -Depth 8)
         if ($sums.Count -gt 0) { Write-TextFile -Path (Join-Path $releaseDir 'SHA256SUMS.txt') -Text ($sums -join "`n") }
