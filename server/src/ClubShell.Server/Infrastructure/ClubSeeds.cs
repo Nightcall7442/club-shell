@@ -19,6 +19,12 @@ public sealed record ClubSeeds(string PolicyPath, string GamesPath, string Produ
         await services.GetRequiredService<ClubRepository>().SeedPolicyAsync(JsonDefaults.Deserialize<Policy>(File.ReadAllText(PolicyPath))
             ?? throw new InvalidOperationException($"Policy seed {PolicyPath} is empty"));
         await CatalogSeed.ApplyAsync(db, GamesPath, clock);
+        await using (var c = await db.OpenConnectionAsync())
+        {
+            // Every seeded game's trailer: its link downloaded once, or one looked for (D-97).
+            await services.GetRequiredService<TrailerStore>().SyncAsync(c, null, null, null, clock.GetUtcNow());
+        }
+
         await ProductSeed.ApplyAsync(db, ProductsPath, clock);
     }
 }

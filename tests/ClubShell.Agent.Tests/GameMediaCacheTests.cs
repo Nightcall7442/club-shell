@@ -52,6 +52,28 @@ public sealed class GameMediaCacheTests : IDisposable
     }
 
     [Fact]
+    public async Task A_trailer_stored_on_the_club_server_is_streamed_from_it_or_cached_from_it()
+    {
+        _settings.Server.BaseUrl = "http://10.0.0.2:8080/api/v1";
+        const string Stored = "http://10.0.0.2:8080/api/v1/trailers/0193a1b2-0000-7000-8000-000000000001";
+        using var cache = NewCache();
+        using var media = NewMedia(cache);
+        var game = Game(cover: Cover, hero: null, video: "/api/v1/trailers/0193a1b2-0000-7000-8000-000000000001") with { VideoSourceUrl = Video };
+
+        // D-97: the server's path gets its address; the original link stays for the Shell's second try.
+        var streamed = media.Localize(game);
+        streamed.VideoUrl.Should().Be(Stored);
+        streamed.VideoSourceUrl.Should().Be(Video);
+        _settings.Storage.MediaCache.Enabled = false;
+        media.Localize(game).VideoUrl.Should().Be(Stored, "the server's address is put in front with the cache off too");
+
+        _settings.Storage.MediaCache.Enabled = true;
+        _settings.Storage.MediaCache.Videos = true;
+        await cache.GetOrDownloadAsync(Stored, null, CancellationToken.None);
+        media.Localize(game).VideoUrl.Should().Be(@"cache\media\" + LocalCache.KeyFor(Stored));
+    }
+
+    [Fact]
     public async Task Nothing_is_rewritten_when_the_cache_is_off()
     {
         using var cache = NewCache();

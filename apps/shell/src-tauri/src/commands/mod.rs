@@ -43,6 +43,7 @@ pub const COMMAND_NAMES: &[&str] = &[
     "auth_logout",
     "auth_status",
     "auth_qr_start",
+    "auth_register",
     "session_get",
     "session_start",
     "session_pause",
@@ -61,6 +62,8 @@ pub const COMMAND_NAMES: &[&str] = &[
     "games_install_status",
     "apps_list",
     "apps_launch",
+    "apps_running",
+    "apps_kill",
     "wallet_balance",
     "wallet_tariffs",
     "wallet_history",
@@ -129,6 +132,7 @@ macro_rules! invoke_handler {
             crate::commands::auth::auth_logout,
             crate::commands::auth::auth_status,
             crate::commands::auth::auth_qr_start,
+            crate::commands::auth::auth_register,
             crate::commands::session::session_get,
             crate::commands::session::session_start,
             crate::commands::session::session_pause,
@@ -147,6 +151,8 @@ macro_rules! invoke_handler {
             crate::commands::games::games_install_status,
             crate::commands::apps::apps_list,
             crate::commands::apps::apps_launch,
+            crate::commands::apps::apps_running,
+            crate::commands::apps::apps_kill,
             crate::commands::wallet::wallet_balance,
             crate::commands::wallet::wallet_tariffs,
             crate::commands::wallet::wallet_history,
@@ -320,7 +326,7 @@ mod tests {
         let handler: Box<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync> =
             Box::new(invoke_handler!());
         drop(handler);
-        assert_eq!(COMMAND_NAMES.len(), 69);
+        assert_eq!(COMMAND_NAMES.len(), 73);
         let mut sorted = COMMAND_NAMES.to_vec();
         sorted.sort_unstable();
         sorted.dedup();

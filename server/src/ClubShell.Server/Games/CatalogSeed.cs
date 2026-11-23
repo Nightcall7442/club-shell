@@ -38,7 +38,7 @@ public static class CatalogSeed
                 // Local fields are the agent's (it overwrites them with its own scan); lastPlayedAt is per request.
                 var data = ServerJson.Jsonb(JsonDefaults.Serialize(game with
                 {
-                    Installed = false, InstallPath = null, LastPlayedAt = null, SettingsPaths = null,
+                    Installed = false, InstallPath = null, LastPlayedAt = null, SettingsPaths = null, VideoSourceUrl = null,
                 }));
                 rows += await c.ExecuteAsync(
                     """

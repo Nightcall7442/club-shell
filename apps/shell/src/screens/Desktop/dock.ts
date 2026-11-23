@@ -130,3 +130,21 @@ export function sameWindows(a: readonly OpenWindow[], b: readonly OpenWindow[]):
     })
   );
 }
+
+/**
+ * The window that brings a running program forward ("switch to" on the running strip): the front-most one of its
+ * processes (`pids`), else — a game whose launcher handed over to another process — one whose exe is under
+ * `installPath`. `null` when it has none (a program that lives in the tray, a game still starting).
+ */
+export function pickWindow(
+  windows: readonly OpenWindow[],
+  pids: readonly number[],
+  installPath: string | null = null,
+): OpenWindow | null {
+  const own = windows.find((w) => pids.includes(w.pid));
+  if (own) {
+    return own;
+  }
+  const dir = installPath ? normalizePath(installPath) : '';
+  return dir ? (windows.find((w) => normalizePath(w.exePath).startsWith(`${dir}\\`)) ?? null) : null;
+}

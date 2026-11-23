@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using ClubShell.Agent.Server;
 using ClubShell.Agent.Storage;
 using ClubShell.Contracts.Games;
 using ClubShell.Core.Configuration;
@@ -13,7 +14,9 @@ namespace ClubShell.Agent.Games;
 /// ProgramData-relative path (<c>cache\media\…</c>), which the Shell loads through its asset protocol. So the art shows
 /// without the internet and from a club server on plain http, which the Shell's CSP would not load; a URL not cached yet
 /// is passed on unchanged. A cache outside ProgramData (a <c>paths.cache</c> elsewhere) is not used: the Shell's asset
-/// scope does not reach it.
+/// scope does not reach it. The club server's own media — a stored trailer (<c>/api/v1/trailers/{id}</c>, D-97) or an
+/// uploaded picture — comes as a path on the server and gets the server's address first, cache or not: without
+/// <see cref="MediaCacheSettings.Videos"/> the Shell streams the trailer from the club server over the LAN.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class GameMediaCache : IHostedService, IDisposable
@@ -68,6 +71,7 @@ public sealed class GameMediaCache : IHostedService, IDisposable
     {
         ArgumentNullException.ThrowIfNull(game);
         var settings = _settings.CurrentValue;
+        game = OnServer(game, settings);
         if (!settings.Storage.MediaCache.Enabled)
         {
             return game;
@@ -94,7 +98,9 @@ public sealed class GameMediaCache : IHostedService, IDisposable
         try
         {
             _cache.MaxBytes = (long)media.MaxMb << 20;
+            var settings = _settings.CurrentValue;
             var urls = _library.Snapshot
+                .Select(g => OnServer(g, settings))
                 .SelectMany(g => media.Videos ? new[] { g.CoverUrl, g.HeroUrl, g.VideoUrl } : [g.CoverUrl, g.HeroUrl])
                 .Where(IsRemote)
                 .Select(u => u!)
@@ -108,6 +114,23 @@ public sealed class GameMediaCache : IHostedService, IDisposable
         {
             _prefetch.Release();
         }
+    }
+
+    /// <summary>The game's media paths on the club server as full URLs of it (<see cref="CommandReceiver.OnServer"/>).</summary>
+    private static Game OnServer(Game game, AgentSettings settings)
+    {
+        if (!Uri.TryCreate(settings.Server?.BaseUrl, UriKind.Absolute, out var server))
+        {
+            return game;
+        }
+
+        return game with
+        {
+            CoverUrl = CommandReceiver.OnServer(game.CoverUrl, server) ?? game.CoverUrl,
+            HeroUrl = CommandReceiver.OnServer(game.HeroUrl, server),
+            VideoUrl = CommandReceiver.OnServer(game.VideoUrl, server),
+            VideoSourceUrl = CommandReceiver.OnServer(game.VideoSourceUrl, server),
+        };
     }
 
     private static bool IsRemote(string? url) =>

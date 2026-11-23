@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -9,6 +9,7 @@ import { Clock } from '@/screens/Lock/LockScreen';
 import { useSettingsStore } from '@/store/settings';
 import { useThemeStore } from '@/store/theme';
 import { ClubMark } from '@/components/brand/ClubMark';
+import { PcLabel } from '@/components/brand/PcLabel';
 import { useClub } from '@/hooks/useClub';
 import { AdsCarousel } from './AdsCarousel';
 import { PriceList } from './PriceList';
@@ -25,11 +26,14 @@ export default function IdleScreen(): JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const pcName = useSettingsStore((s) => s.pcInfo?.pc.name ?? null);
   const club = useClub();
-  const pcZone = useSettingsStore((s) => s.pcInfo?.pc.zone ?? '');
   const animations = useThemeStore((s) => s.theme.animations);
-  const ownSlides = useSettingsStore((s) => s.settings.club?.screensaver?.items ?? EMPTY_SLIDES);
+  const ownItems = useSettingsStore((s) => s.settings.club?.screensaver?.items ?? EMPTY_SLIDES);
+  // The wire says `type` is a string: only `video` plays as a clip, anything else shows as a picture.
+  const ownSlides = useMemo(
+    () => ownItems.map((i) => ({ ...i, type: i.type === 'video' ? ('video' as const) : ('image' as const) })),
+    [ownItems],
+  );
 
   const wake = useCallback(() => navigate('/lock', { replace: true }), [navigate]);
 
@@ -91,7 +95,7 @@ export default function IdleScreen(): JSX.Element {
             <ClubMark className="h-8 w-8" />
             <div className="min-w-0">
               <p className="truncate font-display text-3xl font-light tracking-tight text-text">{club.name}</p>
-              {pcName && <p className="hud-label mt-2">{t('idle.pcName', { name: pcName, zone: pcZone })}</p>}
+              <PcLabel place="idle" className="mt-2" />
             </div>
           </div>
           {/* On a pill: the wallpaper behind the corner can be any colour. */}

@@ -40,12 +40,15 @@ import { AdsCarousel } from '@/screens/Idle/AdsCarousel';
 import { describeWindow } from '@/screens/Idle/PriceList';
 import { tariffAvailableNow } from '@/lib/tariffs';
 import { ClubMark } from '@/components/brand/ClubMark';
+import { PcLabel } from '@/components/brand/PcLabel';
 import { useClub } from '@/hooks/useClub';
 import { CardLogin } from './CardLogin';
+import { GuestCodeForm } from './GuestCodeForm';
 import { LoginForm, loginErrorMessage } from './LoginForm';
 import { PowerButtons } from './PowerButtons';
 import { StaffSignInButton } from './StaffSignIn';
 import { QrLogin } from './QrLogin';
+import { RegisterForm } from './RegisterForm';
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Small shared pieces (also used by the idle screen)
@@ -1022,9 +1025,7 @@ export default function LockScreen(): JSX.Element {
   const relogin = useAuthStore((s) => s.relogin);
   const logout = useAuthStore((s) => s.logout);
   const defaultRoute = useSettingsStore((s) => s.shellConfig?.ui.defaultRoute ?? '/home');
-  const pcName = useSettingsStore((s) => s.pcInfo?.pc.name ?? null);
   const club = useClub();
-  const pcZone = useSettingsStore((s) => s.pcInfo?.pc.zone ?? '');
   const callAdminEnabled = useSettingsStore((s) => s.features.callAdmin);
   const lockScreenPower = useSettingsStore(selectFeature('lockScreenPower'));
   // Off until the server can confirm a scanned code (D-18): a QR that can never sign in only costs the player time.
@@ -1037,6 +1038,9 @@ export default function LockScreen(): JSX.Element {
   const push = useNotificationsStore((s) => s.push);
   const pushError = useNotificationsStore((s) => s.pushError);
   const [tab, setTab] = useState<LoginTab>(() => (useSettingsStore.getState().features.qrLogin ? 'qr' : 'password'));
+  // «Создать аккаунт» (D-92): only while the owner allows it; the form replaces the sign-in methods until it is done.
+  const selfSignup = useSettingsStore((s) => s.settings.club?.selfSignup === true);
+  const [registering, setRegistering] = useState(false);
   const [calling, setCalling] = useState(false);
   const card = useRef<HTMLDivElement>(null);
   const { idle } = useIdle();
@@ -1044,6 +1048,13 @@ export default function LockScreen(): JSX.Element {
 
   const hasUser = user !== null;
   const showTariffs = ready && pcReady && hasUser && !isOpen;
+
+  // Signed in (the new account, or anyone), or the owner turned it off meanwhile: back to the sign-in card.
+  useEffect(() => {
+    if (hasUser || !selfSignup) {
+      setRegistering(false);
+    }
+  }, [hasUser, selfSignup]);
 
   useEffect(() => {
     trackScreen(pathname);
@@ -1056,29 +1067,9 @@ export default function LockScreen(): JSX.Element {
     void useGamesStore.getState().load(true);
   }, []);
 
-  // A walk-in guest the desk seated on this PC: no «Гость» tab, no rules box — the guest is signed in at once and the
-  // Shell opens its home screen. Tried once per session: a member's desk session refuses a guest (`403 pcOccupied`),
-  // and they sign in with their own account as before.
-  const sessionId = useSessionStore((s) => s.session?.id ?? null);
-  const loginGuest = useAuthStore((s) => s.loginGuest);
-  const triedGuest = useRef<string | null>(null);
-  useEffect(() => {
-    if (
-      !ready ||
-      !pcReady ||
-      hasUser ||
-      !isOpen ||
-      isLocked ||
-      sessionId === null ||
-      triedGuest.current === sessionId
-    ) {
-      return;
-    }
-    triedGuest.current = sessionId;
-    loginGuest().catch(() => {
-      // Not a guest's seat: the sign-in methods stay for its player.
-    });
-  }, [ready, pcReady, hasUser, isOpen, isLocked, sessionId, loginGuest]);
+  // A walk-in guest the desk seated on this PC (D-96): the guest types the code the cashier named — no PC signs anyone
+  // in on the server's word. A member's desk session has no code: its player signs in with their own account.
+  const guestSeat = useSessionStore((s) => s.session?.guestCode === true);
 
   // A session open before the PC is ready (restored after an Agent restart, opened at the desk) waits here too.
   useEffect(() => {
@@ -1184,7 +1175,7 @@ export default function LockScreen(): JSX.Element {
               <ClubMark className="h-7 w-7" />
               <p className="truncate font-display text-2xl font-light tracking-tight text-text">{club.name}</p>
             </div>
-            {pcName && <p className="hud-label mt-2">{t('idle.pcName', { name: pcName, zone: pcZone })}</p>}
+            <PcLabel place="lock" className="mt-2" />
           </div>
           <div className="flex items-center gap-[var(--gap)]">
             <LanguageSwitcher />
@@ -1214,6 +1205,15 @@ export default function LockScreen(): JSX.Element {
               ) : (
                 <UnlockForm />
               )
+            ) : guestSeat && isOpen && !hasUser ? (
+              <GuestCodeForm />
+            ) : registering && !hasUser ? (
+              <>
+                <h1 className="mb-[clamp(0.875rem,2.2vh,1.5rem)] text-center font-display text-3xl font-light leading-tight tracking-tight text-text">
+                  {t('lock.register.title')}
+                </h1>
+                <RegisterForm onCancel={() => setRegistering(false)} />
+              </>
             ) : (
               <>
                 {/* Spacing follows the screen height: at 1366×768 the QR card has to fit without a scrollbar. */}
@@ -1244,10 +1244,28 @@ export default function LockScreen(): JSX.Element {
                 <div role="tabpanel" id={`lock-panel-${tab}`} aria-labelledby={`lock-tab-${tab}`}>
                   {tab === 'qr' && <QrLogin />}
                   {tab === 'password' && (
-                    <LoginForm key={reloginMember?.userId ?? ''} initialUsername={reloginMember?.username} />
+                    <LoginForm
+                      key={reloginMember?.userId ?? ''}
+                      initialUsername={reloginMember?.username}
+                      onRegister={selfSignup && !hasUser ? () => setRegistering(true) : undefined}
+                    />
                   )}
                   {tab === 'card' && <CardLogin tapped={tapped} />}
                 </div>
+                {/* The password form says it under its button; the other methods get the same way in. */}
+                {selfSignup && !hasUser && tab !== 'password' && (
+                  <p className="mt-4 text-center text-sm text-muted">
+                    {t('lock.noAccount')}{' '}
+                    <button
+                      type="button"
+                      data-nav="true"
+                      onClick={() => setRegistering(true)}
+                      className="focus-ring rounded-sm font-medium text-accent underline-offset-4 hover:underline"
+                    >
+                      {t('lock.register.open')}
+                    </button>
+                  </p>
+                )}
               </>
             )}
           </motion.div>
@@ -1255,12 +1273,13 @@ export default function LockScreen(): JSX.Element {
 
         <footer className="flex items-end justify-between gap-[var(--gap)]">
           {/* Versions and CPU/GPU/RAM used to sit here for every passer-by; staff find them on Support. */}
-          <div className="min-w-0">
+          <div className="flex min-w-0 items-end gap-3">
+            {/* Staff only, out of the players' way: a faint key in the corner (and Ctrl+Alt+T), not a labelled button
+                beside «Позвать администратора» that every player read as meant for them. */}
+            {ready && !hasUser && !isLocked && <StaffSignInButton />}
             <LinkWarning />
           </div>
           <div className="flex items-center gap-[var(--gap)]">
-            {/* Staff only: sign in to their own Windows account to install games and programs (not while a player is here). */}
-            {ready && !hasUser && !isLocked && <StaffSignInButton />}
             {/* Power without the PIN, also on «Подготовка ПК…» (SHELL_CHANGES 93); never during a session or the desk's lock. */}
             {ready && lockScreenPower && !hasUser && !isOpen && !lockedByStaff && <PowerButtons />}
             {callAdminEnabled && (

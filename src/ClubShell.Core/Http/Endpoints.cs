@@ -38,6 +38,9 @@ public static class Endpoints
     /// <summary><c>POST /auth/guest</c>.</summary>
     public const string AuthGuest = "auth/guest";
 
+    /// <summary><c>POST /auth/register</c> (D-92, beyond the contract): a player's own account, signed in at once.</summary>
+    public const string AuthRegister = "auth/register";
+
     /// <summary><c>POST /auth/logout</c>.</summary>
     public const string AuthLogout = "auth/logout";
 

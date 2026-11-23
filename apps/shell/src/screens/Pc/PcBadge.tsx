@@ -6,6 +6,7 @@
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
+import { usePcLabel } from '@/components/brand/PcLabel';
 import { useLocale } from '@/hooks/useLocale';
 import { selectPrimaryGpu, selectPrimaryMonitor, useSettingsStore } from '@/store/settings';
 import { gpuShortName } from './devices/gpuVendor';
@@ -29,9 +30,10 @@ export function PcBadge({ className }: { className?: string }): JSX.Element {
   const gpu = useSettingsStore(selectPrimaryGpu);
   const monitor = useSettingsStore(selectPrimaryMonitor);
 
+  // The owner chooses what the PC is called here, or turns it off (D-95); the card and the monitor stay.
+  const label = usePcLabel('topBar');
   const parts = [
-    pc?.name,
-    pc?.zone,
+    label.text,
     gpu && gpuShortName(gpu.model),
     monitor && monitor.hz > 0 && formatUnit('hz', monitor.hz, locale, t),
   ].filter(Boolean);

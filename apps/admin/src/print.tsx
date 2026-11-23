@@ -82,6 +82,13 @@ export function receiptLang(): Lang {
   return v === 'ru' || v === 'uz' || v === 'en' ? v : currentLang();
 }
 
+/** The club's logo on top of every slip (D-93), set by the console when it reads the club settings. */
+let receiptLogo: string | null = null;
+
+export function setReceiptLogo(url: string | null): void {
+  receiptLogo = url;
+}
+
 /** null — follow the console's language. */
 export function setReceiptLang(lang: Lang | null): void {
   write(LANG_KEY, lang);
@@ -188,6 +195,11 @@ function Head({
 }): JSX.Element {
   return (
     <>
+      {receiptLogo && (
+        <div className="slip-center">
+          <img src={receiptLogo} alt="" style={{ maxHeight: '18mm', maxWidth: '40mm', objectFit: 'contain' }} />
+        </div>
+      )}
       {club && <div className="slip-center slip-strong">{club}</div>}
       <div className="slip-center slip-title">{title}</div>
       {copy && <div className="slip-center slip-strong">{t('Копия')}</div>}
@@ -208,11 +220,11 @@ function Foot(): JSX.Element {
 const methodLabel = (method: string): string => t(PAY_METHOD_LABEL[method as PayMethod] ?? method);
 
 /**
- * How a walk-in guest signs in to the seat the desk opened, in the kiosk's own words per language (its «Гость» tab,
- * the rules box, the button): `pc` is the PC's label.
+ * How a walk-in guest signs in to the seat the desk opened (D-96): the PC's lock screen asks for the code the cashier
+ * names (never printed: the slip only says where to type it). `pc` is the PC's label.
  */
 export function guestSignIn(pc: string): string {
-  return t('{pc}: вкладка «Гость» → «Я принимаю правила клуба» → «Играть как гость»', { pc });
+  return t('{pc}: на экране входа введите код, который назвал администратор', { pc });
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -477,6 +489,9 @@ export function ShiftReport({ r }: { r: ShiftReportData }): JSX.Element {
       )}
       {byMethod && byMethod.other > 0 && <Row label={t('Другое')} value={sum(byMethod.other)} />}
       {(x.apiCash ?? 0) > 0 && <Row label={t('Через API (нал.)')} value={sum(x.apiCash ?? 0)} />}
+      {(x.topUpCancelCount ?? 0) > 0 && (
+        <Row label={t('Отменено пополнений ({n})', { n: x.topUpCancelCount ?? 0 })} value={sum(x.topUpCancels ?? 0)} />
+      )}
       {shop && (
         <>
           <Rule />

@@ -1,7 +1,8 @@
 /**
  * "Экран игрока": what the kiosk shows to players — branding, the sections players can open, banners, the club rules
- * in three languages and the limits (minors, auto-extension, postpaid debts of guests and clients, who may take cash
- * out of the drawer). On the right, a live miniature of the kiosk built from the draft.
+ * in three languages, whether players create their own account on the lock screen (D-92, `limits.selfSignup`, off by
+ * default) and the limits (minors, auto-extension, postpaid debts of guests and clients, who may take cash out of the
+ * drawer). On the right, a live miniature of the kiosk built from the draft.
  */
 import { useState } from 'react';
 import clsx from 'clsx';
@@ -187,13 +188,11 @@ export default function ClubPage(): JSX.Element {
 
   // Desk postpaid is on unless the owner turned it off (a club saved before it was a setting has no value).
   const guestPostpaid = s.limits.guestPostpaid ?? true;
-  const branding = (patch: Partial<ClubSettings['branding']>): void => st.set('branding', { ...s.branding, ...patch });
   const banner = (id: string, patch: Partial<Banner>): void =>
     st.set(
       'banners',
       s.banners.map((b) => (b.id === id ? { ...b, ...patch } : b)),
     );
-  const accentValid = HEX.test(s.branding.accent);
 
   return (
     <OwnerPage>
@@ -202,43 +201,13 @@ export default function ClubPage(): JSX.Element {
 
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_400px]">
         <div className="flex min-w-0 flex-col gap-5">
-          <Section title={t('Бренд')}>
-            <div className="grid gap-x-5 gap-y-4 md:grid-cols-2">
-              <Field label={t('Название клуба')}>
-                <Input value={s.branding.clubName} onChange={(e) => branding({ clubName: e.target.value })} />
-              </Field>
-              <Field label={t('Акцентный цвет')}>
-                <div className="flex gap-2">
-                  <input
-                    type="color"
-                    aria-label={t('Акцентный цвет')}
-                    value={accentValid ? s.branding.accent : '#9ADFFF'}
-                    onChange={(e) => branding({ accent: e.target.value.toUpperCase() })}
-                    className="focus-ring h-11 w-12 shrink-0 cursor-pointer rounded-md border border-accent/[0.16] bg-bg/50 p-1 hover:border-accent/[0.26]"
-                  />
-                  <Input
-                    value={s.branding.accent}
-                    maxLength={7}
-                    onChange={(e) => branding({ accent: e.target.value })}
-                    className={clsx('font-mono uppercase', !accentValid && 'border-warning/60')}
-                  />
-                </div>
-              </Field>
-              <Field label={t('Логотип (URL)')}>
-                <Input
-                  value={s.branding.logoUrl ?? ''}
-                  placeholder="https://"
-                  onChange={(e) => branding({ logoUrl: e.target.value.trim() ? e.target.value : null })}
-                />
-              </Field>
-              <Field label={t('Обои (URL)')}>
-                <Input
-                  value={s.branding.wallpaperUrl ?? ''}
-                  placeholder="https://"
-                  onChange={(e) => branding({ wallpaperUrl: e.target.value.trim() ? e.target.value : null })}
-                />
-              </Field>
-            </div>
+          <Section title={t('Название, логотип и тема')}>
+            <p className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted">
+              <span>{t('Название, логотип, обои, цвет и тема ПК — в разделе «Интерфейс и логотипы».')}</span>
+              <a href="#/interface" className="focus-ring rounded-sm font-medium text-accent hover:underline">
+                {t('Открыть')}
+              </a>
+            </p>
           </Section>
 
           <Section title={t('Разделы для игроков')}>
@@ -375,9 +344,22 @@ export default function ClubPage(): JSX.Element {
             />
           </Section>
 
-          {s.screensaver && (
-            <ScreensaverSection value={s.screensaver} onChange={(v) => st.set('screensaver', v)} />
-          )}
+          {s.screensaver && <ScreensaverSection value={s.screensaver} onChange={(v) => st.set('screensaver', v)} />}
+
+          <Section title={t('Регистрация на ПК')}>
+            <div className="flex flex-col gap-3 md:max-w-xl">
+              <Toggle
+                label={t('Игроки создают аккаунт сами')}
+                checked={s.limits.selfSignup === true}
+                onChange={(v) => st.set('limits', { ...s.limits, selfSignup: v })}
+              />
+              <p className="-mt-1 pl-14 text-[11.5px] leading-4 text-muted">
+                {t(
+                  'На экране входа появится «Создать аккаунт»: имя, логин или телефон и пароль. Если заданы правила клуба, игрок соглашается с ними. Новый аккаунт — обычный клиент с нулевым балансом; с одного ПК — не больше 5 аккаунтов в час.',
+                )}
+              </p>
+            </div>
+          </Section>
 
           <Section title={t('Ограничения')}>
             <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2 md:max-w-xl">
@@ -508,10 +490,18 @@ function ScreensaverSection({
       actions={<Toggle checked={value.enabled} onChange={(v) => set({ enabled: v })} label={t('Заставка включена')} />}
     >
       <p className="text-sm text-muted">
-        {t('Когда за ПК никого нет, после бездействия на экране идут ваши картинки и ролики. Касание — снова экран входа. Без файлов — встроенные слайды с ценами.')}
+        {t(
+          'Когда за ПК никого нет, после бездействия на экране идут ваши картинки и ролики. Касание — снова экран входа. Без файлов — встроенные слайды с ценами.',
+        )}
       </p>
       <Field label={t('Через сколько минут без действий')} className="max-w-[16rem]">
-        <NumberInput value={value.afterMinutes} min={1} max={120} suffix={t('мин')} onChange={(n) => set({ afterMinutes: n })} />
+        <NumberInput
+          value={value.afterMinutes}
+          min={1}
+          max={120}
+          suffix={t('мин')}
+          onChange={(n) => set({ afterMinutes: n })}
+        />
       </Field>
       <div data-testid="screensaver-items">
         <Table
@@ -531,7 +521,10 @@ function ScreensaverSection({
                     const url = e.target.value;
                     // A clip by its extension: the owner rarely thinks of the switch.
                     const video = /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url.trim());
-                    editItem(r.i, { url, type: video ? 'video' : r.item.type === 'video' && url.trim() === '' ? 'image' : r.item.type });
+                    editItem(r.i, {
+                      url,
+                      type: video ? 'video' : r.item.type === 'video' && url.trim() === '' ? 'image' : r.item.type,
+                    });
                   }}
                 />
               ),
@@ -572,7 +565,11 @@ function ScreensaverSection({
               title: '',
               width: '6rem',
               render: (r) => (
-                <Button variant="ghost" size="sm" onClick={() => set({ items: value.items.filter((_, j) => j !== r.i) })}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => set({ items: value.items.filter((_, j) => j !== r.i) })}
+                >
                   {t('Удалить')}
                 </Button>
               ),

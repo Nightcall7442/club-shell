@@ -31,6 +31,12 @@ const VARIANT: Record<ButtonVariant, string> = {
   cta: 'cut-corners hud-focus !rounded-none text-on-accent',
 };
 
+/**
+ * A filled button that cannot be pressed yet («Заказать» with an empty cart): a plain grey with readable text. A faded
+ * accent fill read as neither on nor off and its label fell under 2:1 on the darker themes.
+ */
+const DISABLED_FILL = 'bg-text/[0.08] text-muted shadow-[inset_0_0_0_1px_rgb(var(--c-text)/0.1)]';
+
 const SIZE: Record<ButtonSize, string> = {
   md: 'h-11 gap-2 rounded-md px-4 text-base',
   lg: 'h-12 gap-2.5 rounded-lg px-5 text-base',
@@ -70,8 +76,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       className={clsx(
         'focus-ring relative inline-flex select-none items-center justify-center whitespace-nowrap font-semibold leading-none',
         'transition-[background-color,box-shadow,transform,filter] duration-[var(--dur-fast)] ease-[var(--ease-out)] active:scale-[0.97] disabled:active:scale-100',
-        'disabled:cursor-not-allowed disabled:opacity-40',
-        VARIANT[variant],
+        'disabled:cursor-not-allowed',
+        disabled && !loading && (variant === 'primary' || variant === 'danger') ? DISABLED_FILL : VARIANT[variant],
+        disabled && !loading && variant !== 'primary' && variant !== 'danger' && 'disabled:opacity-60',
         SIZE[size],
         iconOnly && ICON_ONLY[size],
         block && 'w-full',

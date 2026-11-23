@@ -296,6 +296,10 @@ pub struct GuestAuthRequest {
     /// Preferred locale.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub locale: Option<Locale>,
+    /// The four-digit code the cash desk gave a walk-in guest for this PC's seat (D-96, beyond the
+    /// contract); required while the PC holds such a seat, ignored otherwise. Never logged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
 }
 
 /// Body of `POST /auth/logout`.
@@ -437,6 +441,33 @@ wire_enum! {
         /// Agent never sends it to the server.
         Unknown = "unknown",
     }
+}
+
+/// Body of `POST /auth/register` (D-92, beyond the contract): a player creates their own account on
+/// the PC, where the owner allows it; answered like `POST /auth/login`. Secrets are never logged.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterAuthRequest {
+    /// PC.
+    pub pc_id: Uuid,
+    /// Hardware id.
+    pub hwid: String,
+    /// The player's name, 1–64 characters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    /// Login, 3–32 characters, or a phone number (stored as its digits); empty — the server makes
+    /// one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    /// Password, 4–64 characters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    /// The player accepted the club rules; required when the club has rules.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accept_rules: Option<bool>,
+    /// Preferred locale.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locale: Option<Locale>,
 }
 
 /// Seat on the club map (IPC_PROTOCOL.md §6.15).

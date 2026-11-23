@@ -696,6 +696,19 @@ Shell renders `qrUrl` and then calls `auth.login{kind:"qr", qrToken}` on each po
 with `details.status = "pending"|"scanned"` means keep polling, `"expired"` means restart.
 Errors: `agentOffline`, `serverUnavailable`.
 
+#### `auth.register` — the player's own account (auth: hello) — D-92
+
+Request: `{ displayName: string, username?: string, password: string, acceptRules?: boolean }` — name 1–64 characters;
+login 3–32 characters, or a phone number (stored as its digits, and the player signs in with the number however it is
+typed); absent — the server makes one from the name; password 4–64 characters (the Shell asks for it twice);
+`acceptRules: true` when the club has rules. Response: as `auth.login` — the new member (zero balances) signed in on this
+PC (server `POST /auth/register`, tokens kept as for a sign-in). Offered only while `shell.club.selfSignup` is `true`
+(the owner's switch, off by default). Needs the server: never served offline.
+Errors: `validation` (`displayName`/`username`/`password`: `required` / `min` / `max`; `username` `taken`;
+`acceptRules` `required`), `forbidden` (`selfSignupDisabled`; `pcOccupied`), `rateLimited` (`signupLimit`: this PC made
+5 accounts within the hour, `retryAfterSec`), `conflict` (`sessionActive`: a player is signed in here), `agentOffline`,
+`serverUnavailable`.
+
 ### 7.2 session
 
 #### `session.get` (auth: user) — Request: — Response: `Session | null` (payload `null` when none).
@@ -826,7 +839,38 @@ Errors: `notFound`.
 ### 7.4 apps
 
 #### `apps.list` (auth: hello) — Request: — Response: `{ items: App[] }`.
-#### `apps.launch` (auth: session) — Request: `{ appId: uuid, args?: string }` Response: `{ ok: true, pid: int, startedAt: datetime }`. Errors: `notFound`, `policyDenied`, `gameLaunchFailed`, `sessionNotActive`.
+#### `apps.launch` (auth: session)
+
+Request: `{ appId: uuid, args?: string, force?: bool }`
+Response: `{ ok: true, pid: int, startedAt: datetime, alreadyRunning?: bool, pids?: int[] }`
+Errors: `notFound`, `policyDenied`, `gameLaunchFailed`, `sessionNotActive`.
+
+An app that runs already in the player's session (see `apps.running`) is not started again: the response carries
+`alreadyRunning: true` with the running instance's `pid`, `startedAt` and every pid of it, and the Shell brings its
+window to the front. `force: true` starts it anyway — the Shell asks this when the running app has no window to bring
+forward (it lives in the tray, as Discord or Steam do), and started again such an app shows its window. After a fresh
+launch `pids` is `[pid]`.
+
+#### `apps.running` (auth: hello)
+
+Request: — Response: `{ items: RunningApp[] }` — `RunningApp = { appId: uuid, title: string, pid: int, pids: int[], startedAt: datetime }`, oldest first.
+
+The apps of the cached catalogue that run in the kiosk session. An app's processes are: the one the Agent started for
+it (while it lives), every descendant of an app process, and every process whose image is the app's executable or lives
+in the app's own folder (the executable's folder, unless that folder is shared: under the Windows directory, a drive
+root or first-level folder, `Program Files`, `AppData\Local`, …). A launcher that hands over and exits (Discord's
+`Update.exe`) and helpers in other folders (Steam's `steamwebhelper.exe`) are covered that way. Processes of a running
+game, the Shell, the Agent, `explorer.exe` and Windows' own critical images are never an app's, and a game under the
+client's folder (`steamapps\`) is never the client's. `pid` is the started process when it lives, else the oldest.
+The Shell polls this (no event).
+
+#### `apps.kill` (auth: session)
+
+Request: `{ appId: uuid }` Response: `{ killed: int, pids: int[] }` (`GamesKillResponse`).
+Errors: `notFound` (the app is not running), `validation`.
+
+Terminates every process of the app as `apps.running` counts them, youngest first. The Agent runs in session 0 and cannot
+reach the app's windows, so the Shell's `apps_kill` posts `WM_CLOSE` to them first and waits up to 3 s.
 
 ### 7.5 wallet
 

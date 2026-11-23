@@ -13,8 +13,10 @@ import type {
   AdminMessage,
   App,
   AppsLaunchResponse,
+  RunningApp,
   AuthLoginRequest,
   AuthLoginResponse,
+  AuthRegisterRequest,
   AuthLogoutResponse,
   AuthStatusResponse,
   Balance,
@@ -267,6 +269,8 @@ interface MockState {
   tournaments: Tournament[];
   games: Game[];
   running: RunningGame[];
+  /** Apps started through `apps_launch` (each with one fake window in `kiosk_open_windows`). */
+  apps: RunningApp[];
   settings: ShellSettings;
   gameSettings: PlayerSettingsItem[];
   policy: Policy;
@@ -286,8 +290,13 @@ interface MockState {
   lockedByExpiry: boolean;
   /** The member's session is open on another PC (`409 activeSessionElsewhere` until `endElsewhere: true`). */
   elsewhere: { pcId: string; pcName: string } | null;
-  /** The walk-in guest the desk seated on this PC (`simulate.deskGuest`): «guest» sign-in takes their session, as the server. */
-  deskGuest: User | null;
+  /**
+   * The walk-in guest the desk seated on this PC (`simulate.deskGuest`) and the seat's code (D-96): «guest» sign-in with
+   * that code takes their session, as the server; wrong codes are counted like wrong cards.
+   */
+  deskGuest: { user: User; code: string } | null;
+  /** Wrong desk-guest codes on this PC (ms timestamps), as the server's per-PC lockout. */
+  guestCodeFailures: number[];
   /** Every sign-in attempt, without its secrets (tests read `endElsewhere`). */
   loginLog: { kind: string; endElsewhere: boolean }[];
   /** One-shot failures by command (`simulate.failNext`). */
@@ -325,7 +334,11 @@ function freshState(): MockState {
     tournaments: clone(TOURNAMENTS),
     games: clone(GAMES),
     running: [],
-    settings: { ...clone(SETTINGS), club: withScreensaver(demoClubRequested() ? clone(DEMO_CLUB) : null) },
+    apps: [],
+    settings: {
+      ...clone(SETTINGS),
+      club: withPcLabel(withSignup(withScreensaver(demoClubRequested() ? clone(DEMO_CLUB) : null))),
+    },
     gameSettings: clone(PLAYER_GAME_SETTINGS),
     policy: clone(POLICY),
     volume: { level: SETTINGS.volume, muted: SETTINGS.muted },
@@ -334,6 +347,7 @@ function freshState(): MockState {
     lastCallAdminAt: 0,
     adminAttempts: [],
     cardFailures: [],
+    guestCodeFailures: [],
     idempotency: new Map(),
     kiosk: clone(KIOSK_STATE),
     updateReady: false,
@@ -616,6 +630,7 @@ function endSession(reason: SessionEndReason): SessionEndResult {
   };
   mockState.session = null;
   mockState.running = [];
+  mockState.apps = [];
   mockState.kiosk.gameMode = false;
   mockState.lockedByStaff = false;
   mockState.lockedByExpiry = false;
@@ -763,12 +778,43 @@ export function resetMock(): void {
 // Dev simulation helpers (also on window.__clubshellMock.simulate)
 // ---------------------------------------------------------------------------------------------------------------------
 
+/**
+ * `?pcLabel=<format>[,large][,-lock][,-idle][,-topBar]` in the URL: how the owner set the PC's label (D-95), e.g.
+ * `?pcLabel=number,large` or `?pcLabel=name,-topBar`.
+ */
+function withPcLabel(club: ShellClub | null): ShellClub | null {
+  const raw = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('pcLabel');
+  if (raw === null) return club;
+  const [format = 'nameZone', ...flags] = raw.split(',');
+  return {
+    ...(club ?? {}),
+    pcLabel: {
+      format,
+      large: flags.includes('large'),
+      lock: !flags.includes('-lock'),
+      idle: !flags.includes('-idle'),
+      topBar: !flags.includes('-topBar'),
+    },
+  };
+}
+
 /** `?screensaver=<sec>` in the URL: the owner's screensaver (D-87) after that many seconds; `0` — turned off. */
 function withScreensaver(club: ShellClub | null): ShellClub | null {
   const raw = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('screensaver');
   if (raw === null) return club;
   const sec = Number(raw);
   return { ...(club ?? {}), screensaver: { enabled: sec > 0, afterSec: Math.max(0, sec), items: [] } };
+}
+
+/**
+ * `?signup=on` in the URL: the owner allows players to create their own account on the lock screen (D-92);
+ * `?signup=rules` — and the club has rules to accept first.
+ */
+function withSignup(club: ShellClub | null): ShellClub | null {
+  const raw = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('signup');
+  if (raw !== 'on' && raw !== 'rules') return club;
+  const rules = raw === 'rules' ? { ru: 'Не есть за ПК\nБеречь технику', uz: '', en: '' } : club?.rules;
+  return { ...(club ?? {}), selfSignup: true, rules: rules ?? null };
 }
 
 /** `?club=demo` in the URL starts with the owner's branding from {@link DEMO_CLUB}. */
@@ -780,6 +826,10 @@ export const simulate = {
   /** Replaces the club block as if the Agent had written a new one from the server (`null` clears it). */
   club(club: ShellClub | null = DEMO_CLUB): void {
     mockState.settings = { ...mockState.settings, club: club ? clone(club) : null };
+  },
+  /** The owner's «Регистрация на ПК» switch (D-92) as the next `settings_get` returns it. */
+  selfSignup(on = true): void {
+    mockState.settings = { ...mockState.settings, club: { ...(mockState.settings.club ?? {}), selfSignup: on } };
   },
   adminMessage(text = 'Please finish your match, the club closes in 20 minutes.', requiresAck = true): AdminMessage {
     const m: AdminMessage = { id: newId(), from: ADMIN_NAME, text, level: 'warning', requiresAck, at: nowIso() };
@@ -876,15 +926,16 @@ export const simulate = {
     }
   },
   /**
-   * The cash desk seats a walk-in guest on this PC (the desk's «Гость»): the session is open and nobody is
-   * signed in yet — the Shell signs the guest in by itself (SHELL_CHANGES: no «Гость» tab).
+   * The cash desk seats a walk-in guest on this PC (the desk's «Гость») with the code it named to the guest (D-96): the
+   * session is open and nobody is signed in yet — the lock screen asks for the code.
    */
-  deskGuest(name = 'Гость 3'): void {
+  deskGuest(name = 'Гость 3', code = '1234'): void {
     if (mockState.user || mockState.session) {
       return;
     }
     const guest = makeGuest(name);
-    mockState.deskGuest = guest;
+    mockState.deskGuest = { user: guest, code };
+    mockState.guestCodeFailures = [];
     const tariff = TARIFFS[0];
     mockState.session = {
       id: newId(),
@@ -900,6 +951,7 @@ export const simulate = {
       cost: tariff ? tariffPriceFor(tariff, 60) : money(0),
       isPrepaid: true,
       warningsSent: [],
+      guestCode: true,
     };
     // As the Agent: the server's session reaches the Shell before anyone signs in on it.
     emitMock('agent://session.updated', clone(mockState.session));
@@ -932,7 +984,13 @@ export const simulate = {
    * The owner's screensaver of the free PCs (D-87) as the next `settings_get` returns it; the shell re-reads the
    * settings while it waits on the lock screen (or call `useSettingsStore.load()`).
    */
-  screensaver(value: { enabled: boolean; afterSec: number; items?: { url: string; type: 'image' | 'video'; durationSec: number }[] } | null): void {
+  screensaver(
+    value: {
+      enabled: boolean;
+      afterSec: number;
+      items?: { url: string; type: 'image' | 'video'; durationSec: number }[];
+    } | null,
+  ): void {
     const club = { ...(mockState.settings.club ?? {}) };
     if (value) club.screensaver = { enabled: value.enabled, afterSec: value.afterSec, items: value.items ?? [] };
     else delete club.screensaver;
@@ -1056,6 +1114,14 @@ cmd('auth_login', (args): AuthLoginResponse => {
       if (username === 'banned') {
         mockError('forbidden', 'Account is banned', { reason: 'banned' });
       }
+      const registered = registeredAccounts.get(phoneDigits(username) ?? username);
+      if (registered) {
+        if (registered.password !== password) {
+          mockError('unauthorized', 'Invalid credentials', { reason: 'invalidCredentials' });
+        }
+        user = registered.user;
+        break;
+      }
       if (MOCK_CREDENTIALS[username] !== password) {
         mockError('unauthorized', 'Invalid credentials', { reason: 'invalidCredentials' });
       }
@@ -1063,9 +1129,27 @@ cmd('auth_login', (args): AuthLoginResponse => {
       break;
     }
     case 'guest':
-      // The desk's guest on this PC is taken over (D-25); a member's session here refuses a guest (D-26).
+      // The desk's guest on this PC is taken over with the seat's code only (D-25, D-96); a member's session here
+      // refuses a guest (D-26).
       if (mockState.deskGuest) {
-        user = mockState.deskGuest;
+        const code = (req.code ?? '').trim();
+        if (code.length === 0) {
+          mockError('validation', 'code is required', { field: 'code', reason: 'required' });
+        }
+        const now = Date.now();
+        mockState.guestCodeFailures = mockState.guestCodeFailures.filter((t) => now - t < 15 * 60_000);
+        if (mockState.guestCodeFailures.length >= 5) {
+          mockError('unauthorized', 'Wrong credentials', { reason: 'badCredentials', attemptsLeft: 0 });
+        }
+        if (code !== mockState.deskGuest.code) {
+          mockState.guestCodeFailures.push(now);
+          mockError('unauthorized', 'Wrong credentials', {
+            reason: 'badCredentials',
+            attemptsLeft: Math.max(0, 5 - mockState.guestCodeFailures.length),
+          });
+        }
+        mockState.guestCodeFailures = [];
+        user = mockState.deskGuest.user;
         mockState.deskGuest = null;
       } else if (mockState.session && !mockState.user) {
         mockError('forbidden', 'This PC holds another player session', { reason: 'pcOccupied' });
@@ -1158,6 +1242,81 @@ cmd('auth_login', (args): AuthLoginResponse => {
     expiresAt: mockState.expiresAt ?? isoIn(3600),
     mode: 'online',
   };
+});
+
+/**
+ * Accounts players made on the lock screen in mock mode (D-92): login → user and password, so the new player can sign
+ * out and in again. Gone with a reload, as the rest of the mock.
+ */
+const registeredAccounts = new Map<string, { user: User; password: string }>();
+/** Accounts made by this PC (the server allows 5 an hour). */
+let accountsMade = 0;
+
+/** Digits of a login that reads as a phone (as the server: 7–15 digits with spaces and `+ - ( )`), else null. */
+function phoneDigits(text: string): string | null {
+  if (!/^[\d\s+\-()]+$/.test(text)) return null;
+  const digits = text.replace(/\D/g, '');
+  return digits.length >= 7 && digits.length <= 15 ? digits : null;
+}
+
+cmd('auth_register', (args): AuthLoginResponse => {
+  const req = obj<AuthRegisterRequest>(args, 'req');
+  if (!req) {
+    mockError('validation', 'req is required', { field: 'req', reason: 'required' });
+  }
+  const club = mockState.settings.club;
+  if (club?.selfSignup !== true) {
+    mockError('forbidden', 'This club registers new players at the desk', { reason: 'selfSignupDisabled' });
+  }
+  const displayName = (req.displayName ?? '').trim();
+  if (!displayName) {
+    mockError('validation', 'displayName is required', { field: 'displayName', reason: 'required' });
+  }
+  const typed = (req.username ?? '').trim();
+  const username = phoneDigits(typed) ?? typed.toLowerCase();
+  if (!username) {
+    mockError('validation', 'username is required', { field: 'username', reason: 'required' });
+  }
+  if (username.length < 3) {
+    mockError('validation', 'username too short', { field: 'username', reason: 'min' });
+  }
+  if (username in MOCK_CREDENTIALS || registeredAccounts.has(username)) {
+    mockError('validation', 'username taken', { field: 'username', reason: 'taken' });
+  }
+  const password = req.password ?? '';
+  if (password.length < 4) {
+    mockError('validation', 'password too short', { field: 'password', reason: password ? 'min' : 'required' });
+  }
+  const hasRules = [club.rules?.ru, club.rules?.uz, club.rules?.en].some((r) => (r ?? '').trim().length > 0);
+  if (hasRules && req.acceptRules !== true) {
+    mockError('validation', 'the club rules are not accepted', { field: 'acceptRules', reason: 'required' });
+  }
+  if (accountsMade >= 5) {
+    mockError('rateLimited', 'Too many accounts were created on this PC', {
+      reason: 'signupLimit',
+      retryAfterSec: 3600,
+    });
+  }
+  accountsMade += 1;
+  const user: User = {
+    ...USER,
+    id: newId(),
+    username,
+    displayName,
+    role: 'member',
+    balance: money(0),
+    loyaltyLevel: 0,
+    loyaltyPoints: 0,
+    createdAt: nowIso(),
+    lastSeenAt: nowIso(),
+    flags: [],
+  };
+  registeredAccounts.set(username, { user, password });
+  setUser(user);
+  // A new account starts with nothing, bonus included.
+  mockState.balance = { ...mockState.balance, bonus: money(0) };
+  mockState.session = null;
+  return { user: clone(user), session: null, expiresAt: mockState.expiresAt ?? isoIn(3600), mode: 'online' };
 });
 
 /** As the Agent: a player's own postpaid session is paid and ended at the cash desk (`forbidden {reason: payAtDesk}`). */
@@ -1565,7 +1724,29 @@ cmd('apps_launch', (args): AppsLaunchResponse => {
   if (!app.allowed) {
     mockError('policyDenied', `${app.title} is blocked`, { rule: 'processAllowlist' });
   }
-  return { ok: true, pid: 6000 + Math.floor(Math.random() * 3000), startedAt: nowIso() };
+  // A second tap: the Agent answers `alreadyRunning` and the Shell brings the running window forward.
+  const running = mockState.apps.find((a) => a.appId === app.id);
+  if (running) {
+    console.info(`[mock] apps_launch(${app.title}): already running — its window would come to the front`);
+    return { ok: true, pid: running.pid, startedAt: running.startedAt, alreadyRunning: true, pids: [...running.pids] };
+  }
+  const pid = 8100 + mockState.apps.length * 10 + Math.floor(Math.random() * 9);
+  const startedAt = nowIso();
+  mockState.apps.push({ appId: app.id, title: app.title, pid, pids: [pid], startedAt });
+  return { ok: true, pid, startedAt, alreadyRunning: false, pids: [pid] };
+});
+
+cmd('apps_running', (): RunningApp[] => clone(mockState.apps), { fast: true });
+
+cmd('apps_kill', (args): GamesKillResponse => {
+  requireSession();
+  const appId = str(args, 'appId');
+  const victim = mockState.apps.find((a) => a.appId === appId);
+  if (!victim) {
+    mockError('notFound', 'App is not running', { name: appId ?? '' });
+  }
+  mockState.apps = mockState.apps.filter((a) => a !== victim);
+  return { killed: victim.pids.length, pids: [...victim.pids] };
 });
 
 // ----- wallet ---------------------------------------------------------------------------------------------------------
@@ -2781,7 +2962,10 @@ cmd('display_revert', (args): DisplayInfo => {
 
 // ----- open programs (status-bar dock) --------------------------------------------------------------------------------
 
-/** The fake programs plus a window per running game (its pid, an exe in its install folder), front-most first. */
+/**
+ * The fake programs plus a window per running game (its pid, an exe in its install folder) and per app started through
+ * `apps_launch`, front-most first. A fake program of the same exe folder as a started app is that app (one window).
+ */
 function openWindows(): OpenWindow[] {
   const games = mockState.running
     .filter((r) => r.state === 'running')
@@ -2789,7 +2973,13 @@ function openWindows(): OpenWindow[] {
       const dir = mockState.games.find((g) => g.id === r.gameId)?.installPath ?? 'D:\\Games';
       return { pid: r.pid, hwnd: r.pid * 16, title: r.title, exePath: `${dir}\\game.exe`, icon: null };
     });
-  return [...games, ...clone(OPEN_WINDOWS)];
+  const folder = (exe: string): string => exe.slice(0, exe.lastIndexOf('\\')).toLowerCase();
+  const apps = mockState.apps.map((a): OpenWindow => {
+    const app = APPS.find((x) => x.id === a.appId);
+    return { pid: a.pid, hwnd: a.pid * 16, title: a.title, exePath: app?.exePath ?? '', icon: app?.iconUrl ?? null };
+  });
+  const others = clone(OPEN_WINDOWS).filter((w) => !apps.some((a) => folder(w.exePath).startsWith(folder(a.exePath))));
+  return [...games, ...apps.reverse(), ...others];
 }
 
 cmd('kiosk_open_windows', (): OpenWindow[] => openWindows(), { fast: true });

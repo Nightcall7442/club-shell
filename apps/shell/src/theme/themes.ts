@@ -24,7 +24,7 @@ export const DEFAULT_THEME: Theme = {
     primary: '#F4F4F5',
     accent: '#9ADFFF',
     text: '#E8F1F6',
-    muted: '#8B98A5',
+    muted: '#9AA6B2',
     danger: '#EF4444',
     success: '#22C55E',
   },

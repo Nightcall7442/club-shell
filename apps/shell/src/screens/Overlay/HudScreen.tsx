@@ -1,7 +1,8 @@
 /**
- * In-game quick panel (`kiosk://overlay { kind: "hud" }`, toggled by the `hud` hotkey while a game owns the screen):
+ * In-game quick panel (`kiosk://overlay { kind: "hud" }`, toggled by the `hud` hotkey over a game or an app):
  * time left with the ring, balance, "+30 min" (prepaid, non-package time only: the server's price, then a confirm), call
- * admin and "back to ClubShell". Lives in the overlay webview,
+ * admin, "back to ClubShell" (it works during a game too: `kiosk_focus { user: true }`) and what runs, each to switch
+ * to or close. The × only hides the panel, and says so. Lives in the overlay webview,
  * which has no session stores, so it reads through `api` and follows `session.updated` / `wallet.updated`.
  * Esc, a click outside the panel or 15 s without input hide it (the Rust side also has a 60 s backstop).
  */
@@ -22,6 +23,7 @@ import { listPrice, priceView, type PriceView } from '@/lib/pricing';
 import { api, events } from '@/lib/tauri';
 import { describeError } from '@/store/notifications';
 import { secondsSince, secondsUntil } from '@/lib/time';
+import { RunningStrip } from '@/screens/Desktop/RunningStrip';
 import { Ring, timerLabel, type RingProps } from '@/screens/Desktop/SessionTimer';
 
 const IDLE_HIDE_MS = 15_000;
@@ -211,7 +213,7 @@ export function HudScreen({ onClose }: { onClose: () => void }): JSX.Element {
 
   const back = async (): Promise<void> => {
     try {
-      await api.kiosk.focus();
+      await api.kiosk.focus(true);
     } finally {
       onClose();
     }
@@ -332,13 +334,20 @@ export function HudScreen({ onClose }: { onClose: () => void }): JSX.Element {
               variant="ghost"
               size="lg"
               iconOnly
-              aria-label={t('common.close')}
+              aria-label={t('kiosk.hudHide')}
+              title={t('kiosk.hudHide')}
               icon={<CloseIcon />}
               onClick={onClose}
             />
           </div>
         )}
 
+        {/* What runs, above the panel and its hint: switching to a program hides the HUD, closing one stays here. */}
+        <RunningStrip
+          variant="hud"
+          onSwitched={onClose}
+          className="glass-strong absolute bottom-[calc(100%+3rem)] left-0 right-0 rounded-xl p-3"
+        />
         <div className="hud-label pointer-events-none absolute -top-8 left-6 flex items-center gap-3">
           <span>{t('kiosk.hudHint')}</span>
           {note && <span className={note.tone === 'ok' ? 'text-success' : 'text-danger'}>{note.text}</span>}

@@ -34,6 +34,9 @@ public static class IpcMessages
 
         /// <summary>— → <see cref="QrLoginStart"/>.</summary>
         public const string QrStart = "auth.qrStart";
+
+        /// <summary><see cref="AuthRegisterRequest"/> → <see cref="AuthLoginResponse"/> (D-92).</summary>
+        public const string Register = "auth.register";
     }
 
     /// <summary><c>session.*</c></summary>
@@ -100,6 +103,12 @@ public static class IpcMessages
 
         /// <summary><see cref="AppsLaunchRequest"/> → <see cref="AppsLaunchResponse"/>.</summary>
         public const string Launch = "apps.launch";
+
+        /// <summary>— → <see cref="AppsRunningResponse"/>.</summary>
+        public const string Running = "apps.running";
+
+        /// <summary><see cref="AppsKillRequest"/> → <see cref="GamesKillResponse"/>.</summary>
+        public const string Kill = "apps.kill";
     }
 
     /// <summary><c>wallet.*</c></summary>
@@ -502,6 +511,10 @@ public sealed record AuthHelloResponse(
 /// The player confirmed «end my session on PC N and sign in here» after <c>409 activeSessionElsewhere</c>
 /// (<see cref="AuthRequest.EndElsewhere"/>).
 /// </param>
+/// <param name="Code">
+/// <see cref="AuthKind.Guest"/>: the four-digit code the cash desk gave a walk-in guest for this PC's seat
+/// (<see cref="GuestAuthRequest.Code"/>, D-96).
+/// </param>
 public sealed record AuthLoginRequest(
     AuthKind Kind,
     string? Username = null,
@@ -509,7 +522,8 @@ public sealed record AuthLoginRequest(
     string? QrToken = null,
     string? CardId = null,
     string? Token = null,
-    bool? EndElsewhere = null)
+    bool? EndElsewhere = null,
+    string? Code = null)
 {
     /// <summary>Builds the server-facing <see cref="AuthRequest"/>.</summary>
     public AuthRequest ToServerRequest(Guid pcId, string hwid) =>
@@ -526,6 +540,20 @@ public sealed record AuthLoginResponse(
     Session? Session,
     DateTimeOffset ExpiresAt,
     ConnectivityState Mode);
+
+/// <summary>
+/// Request of <c>auth.register</c> (D-92): a player creates their own account on the lock screen, where the club allows it
+/// (<c>shell.club.selfSignup</c>), and is signed in with it. Secrets are never logged.
+/// </summary>
+/// <param name="DisplayName">The player's name, 1–64 characters.</param>
+/// <param name="Username">Login, 3–32 characters, or a phone number (stored as its digits); empty — the server makes one.</param>
+/// <param name="Password">Password, 4–64 characters (the Shell asks for it twice).</param>
+/// <param name="AcceptRules">The player accepted the club rules; required when the club has rules.</param>
+public sealed record AuthRegisterRequest(
+    string? DisplayName,
+    string? Username,
+    string? Password,
+    bool? AcceptRules = null);
 
 /// <summary>Request of <c>auth.logout</c>.</summary>
 /// <param name="Reason">Why; defaults to <see cref="SessionEndReason.User"/>. Only <c>user</c>, <c>idle</c>, <c>admin</c> are valid from the Shell.</param>
@@ -711,18 +739,51 @@ public sealed record AppsListResponse(IReadOnlyList<App> Items);
 /// <summary>Request of <c>apps.launch</c>.</summary>
 /// <param name="AppId">App id.</param>
 /// <param name="Args">Extra command line.</param>
+/// <param name="Force">
+/// Start it even when it runs already. The Shell asks this when the running app has no window to bring forward (it lives
+/// in the tray, as Discord or Steam do): started again, such an app shows its window.
+/// </param>
 public sealed record AppsLaunchRequest(
     Guid AppId,
-    string? Args = null);
+    string? Args = null,
+    bool? Force = null);
 
 /// <summary>Response of <c>apps.launch</c>.</summary>
 /// <param name="Ok">Always <see langword="true"/>.</param>
-/// <param name="Pid">Process id.</param>
-/// <param name="StartedAt">Launch time.</param>
+/// <param name="Pid">Process id (the running instance's when <paramref name="AlreadyRunning"/>).</param>
+/// <param name="StartedAt">Launch time (the running instance's when <paramref name="AlreadyRunning"/>).</param>
+/// <param name="AlreadyRunning">
+/// The app was running already and nothing was started: the Shell brings its window to the front instead of opening a
+/// second copy.
+/// </param>
+/// <param name="Pids">Every process of the app the Agent knows of (the new one alone after a fresh launch).</param>
 public sealed record AppsLaunchResponse(
     bool Ok,
     int Pid,
+    DateTimeOffset StartedAt,
+    bool AlreadyRunning = false,
+    IReadOnlyList<int>? Pids = null);
+
+/// <summary>An app running in the player's session (<c>apps.running</c>).</summary>
+/// <param name="AppId">App id.</param>
+/// <param name="Title">App title.</param>
+/// <param name="Pid">Main process: the one the Agent started, else the oldest of <paramref name="Pids"/>.</param>
+/// <param name="Pids">Every process of the app: the started one, its descendants and the app's own executables.</param>
+/// <param name="StartedAt">When the Agent started it, else when its main process started.</param>
+public sealed record RunningApp(
+    Guid AppId,
+    string Title,
+    int Pid,
+    IReadOnlyList<int> Pids,
     DateTimeOffset StartedAt);
+
+/// <summary>Response of <c>apps.running</c>.</summary>
+/// <param name="Items">Running apps, oldest first.</param>
+public sealed record AppsRunningResponse(IReadOnlyList<RunningApp> Items);
+
+/// <summary>Request of <c>apps.kill</c>: ends every process of one app (never the Shell, the Agent or a game).</summary>
+/// <param name="AppId">App id.</param>
+public sealed record AppsKillRequest(Guid AppId);
 
 #endregion
 

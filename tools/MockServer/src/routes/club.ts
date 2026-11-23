@@ -26,6 +26,7 @@ import {
   errors,
   findGame,
   findPc,
+  findSession,
   findTariff,
   findUser,
   idempotent,
@@ -51,6 +52,8 @@ import {
 } from '../db.js';
 import { PRODUCT_CATEGORIES, liveProducts, productView, voidOf } from './bar.js';
 import { gamesVolumeOf, hardwareOf } from '../devices.js';
+import { trailerOf, trailerRoutes } from '../trailers.js';
+import { generateLogin, phoneDigits } from '../logins.js';
 import {
   API_TOPUP,
   CASH_REASONS,
@@ -69,6 +72,8 @@ import {
   mayServicePcs,
   mayWriteOff,
   openShift,
+  budgetOf,
+  minutesFor,
   profileOf,
   quote,
   shiftView,
@@ -233,6 +238,8 @@ function bumpCatalog(): void {
 }
 
 export function clubRoutes(app: FastifyInstance): void {
+  trailerRoutes(app, (req) => requireStaff(req, 'owner'));
+
   // ------------------------------------------------------------------------------------------------ staff & auth
   // `clubCode` and `deviceId` (the console's browser id, D-76) are accepted and ignored: the mock holds one club and has no
   // wrong-PIN limit, so it never answers 429.
@@ -491,6 +498,33 @@ export function clubRoutes(app: FastifyInstance): void {
   );
 
   // ------------------------------------------------------------------------------------------------ settings doc
+  /** D-93: the owner's pictures, as the server keeps them — PNG/JPEG/WebP/GIF by their bytes, at most 5 MB. */
+  app.post<{ Querystring: { kind?: string } }>('/admin/media', async (req, reply) => {
+    requireStaff(req, 'owner');
+    const kind = req.query.kind || 'other';
+    if (!['logo', 'wallpaper', 'banner', 'screensaver', 'other'].includes(kind))
+      throw errors.validation('kind', 'enum');
+    const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (bytes.length === 0) throw errors.validation('file', 'required');
+    if (bytes.length > 5 * 1024 * 1024) throw errors.validation('file', 'max');
+    const type = sniffPicture(bytes);
+    if (!type) throw errors.validation('file', 'format');
+    const id = uuid();
+    MEDIA.set(id, { type, bytes });
+    reply.code(201);
+    return { id, url: `/api/v1/media/${id}`, contentType: type, size: bytes.length };
+  });
+
+  app.get<{ Params: { id: string } }>('/media/:id', async (req, reply) => {
+    const m = MEDIA.get(req.params.id);
+    if (!m) throw errors.notFound('media');
+    reply
+      .header('Cache-Control', 'public, max-age=31536000, immutable')
+      .header('X-Content-Type-Options', 'nosniff')
+      .type(m.type);
+    return m.bytes;
+  });
+
   /** Everything the owner edits on the "Клуб" pages, minus secrets: the API key has its own owner-only route. */
   app.get('/admin/club', async (req) => {
     requireStaff(req);
@@ -506,7 +540,7 @@ export function clubRoutes(app: FastifyInstance): void {
       happyHours: c.happyHours,
       loyalty: c.loyalty,
       // As the server: guest postpaid at the desk is on unless the owner turned it off.
-      limits: { ...c.limits, guestPostpaid: c.limits.guestPostpaid ?? true },
+      limits: { ...c.limits, guestPostpaid: c.limits.guestPostpaid ?? true, selfSignup: c.limits.selfSignup ?? false },
       catalog: c.catalog,
       banners: c.banners,
       rulesText: c.rulesText,
@@ -553,7 +587,7 @@ export function clubRoutes(app: FastifyInstance): void {
         if (typeof v !== 'number' || !Number.isSafeInteger(v)) throw errors.validation(`limits.${name}`, 'format');
         if (v < 0) throw errors.validation(`limits.${name}`, 'min');
       }
-      for (const name of ['guestPostpaid', 'cashOutOwnerOnly']) {
+      for (const name of ['guestPostpaid', 'cashOutOwnerOnly', 'selfSignup']) {
         const v = limits[name];
         if (v !== undefined && v !== null && typeof v !== 'boolean')
           throw errors.validation(`limits.${name}`, 'format');
@@ -561,9 +595,12 @@ export function clubRoutes(app: FastifyInstance): void {
     }
     if ('topUpPromo' in b) c.topUpPromo = parseTopUpPromo(b['topUpPromo']);
     if ('screensaver' in b) c.screensaver = parseScreensaver(b['screensaver']);
+    const selfSignupBefore = c.limits.selfSignup === true;
     for (const k of keys) {
       if (k in b) (c as unknown as Record<string, unknown>)[k] = b[k];
     }
+    // The self-signup switch (D-92) reaches the PCs with their config, as on the server.
+    if ((c.limits.selfSignup === true) !== selfSignupBefore) bumpCatalog();
     if ('control' in b) {
       // Thresholds must stay usable numbers whatever the client sent.
       const n = (v: unknown, fallback: number, min: number, max: number): number =>
@@ -652,8 +689,24 @@ export function clubRoutes(app: FastifyInstance): void {
     const pc = findPc(str(b, 'pcId', 64));
     if (!tariff) throw errors.notFound('tariff');
     if (!pc) throw errors.notFound('pc');
+    const userId = optStr(b, 'userId', 64);
+    const amount = budgetOf(b, true);
+    if (amount !== null && !tariff.isPackage) {
+      // An extension's quote names its session: the tariff's maximum counts the minutes it already bought (D-90).
+      const sessionId = optStr(b, 'sessionId', 64);
+      const session = sessionId ? findSession(sessionId) : undefined;
+      if (sessionId && !session) throw errors.notFound('session');
+      const { minutes, priced } = minutesFor(
+        tariff,
+        amount,
+        userId,
+        pc.zone,
+        session ? Math.floor(session.purchasedSec / 60) : 0,
+      );
+      return { ...priced, rule: tariffRule(tariff, pc.zone), minutes };
+    }
     const minutes = tariff.isPackage ? (tariff.packageMinutes ?? 60) : int(b, 'minutes', 5, 1440);
-    return { ...quote(tariff, minutes, optStr(b, 'userId', 64), pc.zone), rule: tariffRule(tariff, pc.zone), minutes };
+    return { ...quote(tariff, minutes, userId, pc.zone), rule: tariffRule(tariff, pc.zone), minutes };
   });
 
   // ------------------------------------------------------------------------------------------------ clients
@@ -706,14 +759,26 @@ export function clubRoutes(app: FastifyInstance): void {
     return { items };
   });
 
-  /** Registers a client with the password (the console generates a temporary one) and card they sign in with. */
+  /**
+   * Registers a client with the password (the console generates a temporary one) and card they sign in with. Only the
+   * name is required (D-92): without a login one is made from the phone or the name, as the server makes it.
+   */
   app.post('/admin/clients', async (req) => {
     requireStaff(req);
     const b = body(req);
-    const username = str(b, 'username', 32).toLowerCase();
-    // As the server: a new login is 3–32 characters.
-    if (username.trim().length < 3) throw errors.validation('username', 'min');
-    if (db.users.some((u) => u.username.toLowerCase() === username)) throw errors.validation('username', 'taken');
+    const displayName = str(b, 'displayName', 64);
+    const typed = typeof b['username'] === 'string' ? b['username'].trim() : '';
+    const loginTaken = (login: string): boolean => db.users.some((u) => u.username.toLowerCase() === login);
+    let username: string;
+    if (typed) {
+      // As the server: a typed login is 3–32 characters; a phone number is kept as its digits.
+      username = phoneDigits(typed) ?? typed.toLowerCase();
+      if (username.length > 32) throw errors.validation('username', 'max');
+      if (username.length < 3) throw errors.validation('username', 'min');
+      if (loginTaken(username)) throw errors.validation('username', 'taken');
+    } else {
+      username = generateLogin(displayName, optStr(b, 'phone', 32), loginTaken);
+    }
     // No password sent: nobody knows one until the cashier resets it.
     const password = b['password'] === undefined || b['password'] === null ? uuid() : passwordOf(b);
     const cardId = cardOf(b, null);
@@ -722,7 +787,7 @@ export function clubRoutes(app: FastifyInstance): void {
       ...template,
       id: uuid(),
       username,
-      displayName: str(b, 'displayName', 64),
+      displayName,
       role: 'member',
       balance: uzs(0),
       bonus: uzs(0),
@@ -793,6 +858,19 @@ export function clubRoutes(app: FastifyInstance): void {
     user.password = passwordOf(body(req));
     markDirty();
     record(me, 'clientPassword', { userId: user.id, detail: user.displayName });
+    return { ok: true };
+  });
+
+  /** D-94: the owner deletes a settled client (no session, nothing on the balance), as the server. */
+  app.delete<{ Params: { id: string } }>('/admin/clients/:id', async (req) => {
+    const me = requireStaff(req, 'owner');
+    const user = findUser(req.params.id);
+    if (!user || user.transient) throw errors.notFound('user');
+    if (db.sessions.some((x) => x.userId === user.id && x.state !== 'ended' && x.state !== 'idle'))
+      throw errors.conflict('playing');
+    if (user.balance.amount !== 0) throw errors.conflict('balance', { balance: { ...user.balance } });
+    db.users = db.users.filter((u) => u.id !== user.id);
+    markDirty();
     return { ok: true };
   });
 
@@ -1141,6 +1219,10 @@ export function clubRoutes(app: FastifyInstance): void {
         featured: c.catalog.featured.includes(g.id),
         settingsPaths: g.settingsPaths ?? [],
         zones: db.gameZones?.[g.id] ?? [],
+        launcherAppId: g.launcherAppId,
+        exePath: g.exePath,
+        videoUrl: g.videoUrl ?? null,
+        trailer: trailerOf(g),
       })),
       order: c.catalog.order,
     };
@@ -1243,15 +1325,18 @@ export function clubRoutes(app: FastifyInstance): void {
     const from = new Date(Date.now() - days * 86_400_000).toISOString();
     const c = club();
     const inPeriod = c.audit.filter((e) => e.at >= from && inContract(e));
+    // D-91: the desk top-ups taken back, apart from the journal (outside the contract's actions).
+    const corrections = c.audit.filter((e) => e.at >= from && e.action === 'topUpCancel');
     const flags = flagsFor(inPeriod);
     const staffId = req.query.staffId;
     return {
       from,
       to: now(),
       settings: c.control,
-      staff: summaries(inPeriod, flags),
+      staff: summaries(inPeriod, flags, corrections),
       flags: staffId ? flags.filter((f) => f.staffId === staffId) : flags,
       log: (staffId ? inPeriod.filter((e) => e.staffId === staffId) : inPeriod).slice(0, 300),
+      corrections: (staffId ? corrections.filter((e) => e.staffId === staffId) : corrections).slice(0, 300),
     };
   });
 
@@ -1411,7 +1496,8 @@ function parseTopUpPromo(raw: unknown): TopUpPromo {
   };
   const from = time('from');
   const to = time('to');
-  if ((from === null) !== (to === null)) throw errors.validation(from === null ? 'topUpPromo.from' : 'topUpPromo.to', 'required');
+  if ((from === null) !== (to === null))
+    throw errors.validation(from === null ? 'topUpPromo.from' : 'topUpPromo.to', 'required');
   const until = typeof raw['until'] === 'string' ? raw['until'] : null;
   if (until !== null && Number.isNaN(Date.parse(until))) throw errors.validation('topUpPromo.until', 'format');
   return {
@@ -1428,7 +1514,8 @@ function parseTopUpPromo(raw: unknown): TopUpPromo {
 /** The free PCs' screensaver, checked as the server checks it (`400 validation` on `screensaver.*`). */
 function parseScreensaver(raw: unknown): ScreensaverSettings {
   if (!isObject(raw)) throw errors.validation('screensaver', 'schema');
-  const after = typeof raw['afterMinutes'] === 'number' ? Math.round(raw['afterMinutes']) : DEFAULT_SCREENSAVER.afterMinutes;
+  const after =
+    typeof raw['afterMinutes'] === 'number' ? Math.round(raw['afterMinutes']) : DEFAULT_SCREENSAVER.afterMinutes;
   if (after < 1 || after > 120) throw errors.validation('screensaver.afterMinutes', after < 1 ? 'min' : 'max');
   const list = Array.isArray(raw['items']) ? (raw['items'] as unknown[]) : [];
   if (list.length > 20) throw errors.validation('screensaver.items', 'max');
@@ -1444,4 +1531,22 @@ function parseScreensaver(raw: unknown): ScreensaverSettings {
     return { url, type: type as 'image' | 'video', durationSec: sec };
   });
   return { enabled: raw['enabled'] === true, afterMinutes: after, items };
+}
+
+/** Uploaded pictures of this run (D-93). */
+const MEDIA = new Map<string, { type: string; bytes: Buffer }>();
+
+/** The picture's type from its first bytes (as the server): an SVG or a page never passes as a logo. */
+function sniffPicture(b: Buffer): string | null {
+  if (b.length >= 8 && b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])))
+    return 'image/png';
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
+  if (
+    b.length >= 12 &&
+    b.subarray(0, 4).toString('latin1') === 'RIFF' &&
+    b.subarray(8, 12).toString('latin1') === 'WEBP'
+  )
+    return 'image/webp';
+  if (b.length >= 6 && ['GIF87a', 'GIF89a'].includes(b.subarray(0, 6).toString('latin1'))) return 'image/gif';
+  return null;
 }

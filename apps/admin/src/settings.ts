@@ -6,6 +6,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { clubApi, type ClubSettings } from '@/api';
 import { describe } from '@/errors';
 
+/** Fired on `window` after the owner saves club settings, so the console shell reloads what it shows. */
+export const SETTINGS_SAVED = 'clubshell:settings-saved';
 export interface ClubSettingsState {
   data: ClubSettings | null;
   draft: ClubSettings | null;
@@ -59,6 +61,8 @@ export function useClubSettings(): ClubSettingsState {
     try {
       await clubApi.saveSettings(diff);
       await reload();
+      // The rail, the wallpaper and the receipts show the new name and logo at once, not on the next poll.
+      window.dispatchEvent(new Event(SETTINGS_SAVED));
       return true;
     } catch (e) {
       setError(describe(e));

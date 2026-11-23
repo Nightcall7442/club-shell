@@ -63,6 +63,7 @@ returns `Promise<T>` and rejects with `ShellApiError` (§4).
 | `auth_logout` | `api.auth.logout(reason?: SessionEndReason): Promise<AuthLogoutResponse>` | `{ reason?: string }` | `{ ok: true; sessionEnded: boolean; session?: Session }` | `auth.logout` |
 | `auth_status` | `api.auth.status(): Promise<AuthStatusResponse>` | `{}` | `{ authenticated: boolean; user?: User; session?: Session; mode: ConnectivityState; expiresAt?: string; readiness?: PcReadiness; lockedByStaff?: boolean; pinSet?: boolean }` | `auth.status` |
 | `auth_qr_start` | `api.auth.qrStart(): Promise<QrLoginStart>` | `{}` | `{ qrToken: string; qrUrl: string; expiresAt: string; pollIntervalSec: number }` | `auth.qrStart` |
+| `auth_register` | `api.auth.register(req: AuthRegisterRequest): Promise<AuthLoginResponse>` | `{ req: { displayName: string; username?: string; password: string; acceptRules?: boolean } }` | `{ user: User; session: Session \| null; expiresAt: string; mode: ConnectivityState }` | `auth.register` |
 
 Errors: as per the IPC message. `auth_login` with `kind = "password"` and empty `password` → `validation`
 raised in Rust before the pipe is touched (`source: "tauri"`). `409 conflict {reason: activeSessionElsewhere, pcId, pcName}`:
@@ -107,7 +108,14 @@ re-focused.
 | Command | TS signature | Args | Returns | IPC |
 |---------|--------------|------|---------|-----|
 | `apps_list` | `api.apps.list(): Promise<App[]>` | `{}` | `App[]` | `apps.list` |
-| `apps_launch` | `api.apps.launch(appId: string, args?: string): Promise<AppsLaunchResponse>` | `{ appId: string; args?: string }` | `{ ok: true; pid: number; startedAt: string }` | `apps.launch` |
+| `apps_launch` | `api.apps.launch(appId: string, args?: string): Promise<AppsLaunchResponse>` | `{ appId: string; args?: string }` | `{ ok: true; pid: number; startedAt: string; alreadyRunning?: boolean; pids?: number[] }` | `apps.launch` (again with `force: true` when a running app has no window) |
+| `apps_running` | `api.apps.running(): Promise<RunningApp[]>` | `{}` | `RunningApp[]` | `apps.running` |
+| `apps_kill` | `api.apps.kill(appId: string): Promise<GamesKillResponse>` | `{ appId: string }` | `{ killed: number; pids: number[] }` | `WM_CLOSE` to the app's windows (≤ 3 s), then `apps.kill` |
+
+`apps_launch` of an app that runs already brings its front-most window forward (handed off like the dock does it)
+instead of a second copy; one without a window (a tray app) is started again with `force: true`, which makes it show
+one. `apps_kill` asks the app's windows to close first, then has the Agent end what is left (never the Shell, the Agent
+or a game); when the app was the program in front, the Shell takes the screen back.
 
 ### 2.5 wallet
 
@@ -220,7 +228,7 @@ after the Agent confirms, so all windows (overlay, secondary monitors) re-render
 | `kiosk_monitors` | `api.kiosk.monitors(): Promise<KioskMonitor[]>` | `{}` | `{ index: number; name: string; x: number; y: number; width: number; height: number; scale: number; hz: number; primary: boolean }[]` | |
 | `kiosk_move_to_monitor` | `api.kiosk.moveToMonitor(index: number): Promise<void>` | `{ index: number }` | `null` | `notFound` |
 | `kiosk_virtual_keyboard` | `api.kiosk.virtualKeyboard(show: boolean): Promise<void>` | `{ show: boolean }` | `null` | Launches/hides `TabTip.exe` when `allowVirtualKeyboard`; `policyDenied` otherwise |
-| `kiosk_focus` | `api.kiosk.focus(): Promise<void>` | `{}` | `null` | Re-assert foreground (used after game exit) |
+| `kiosk_focus` | `api.kiosk.focus(user?: boolean): Promise<void>` | `{ user?: boolean }` | `null` | Re-assert foreground (used after game exit). Ignored during a game unless `user: true` — the player's own "back to ClubShell" in the HUD |
 | `kiosk_exit` | `api.kiosk.exit(adminToken: string, action: 'explorer' \| 'quit'): Promise<void>` | `{ adminToken: string; action }` | `null` | Validates token with Agent (`sys.unlockAdmin` result cached in Rust), tells the Agent with `sys.adminExit` (up to 3 s; a failure is logged and the exit goes on) so the watchdog pauses for the administrator, drops hooks, optionally starts `explorer.exe`, exits. `unauthorized` on bad token. |
 | `kiosk_reload` | `api.kiosk.reload(): Promise<void>` | `{}` | `null` | Reloads the webview (dev/admin) |
 | `kiosk_open_devtools` | `api.kiosk.openDevtools(): Promise<void>` | `{}` | `null` | Only when `shell.json → devtools = true`, else `forbidden` |
@@ -396,12 +404,12 @@ Rules:
 ### 4.1 Command registry
 
 There is no generated `commands.json`: `src-tauri/build.rs` only runs `tauri_build::build()`. The registry is the
-`COMMAND_NAMES` constant in `apps/shell/src-tauri/src/commands/mod.rs` (the 69 proxy commands below, asserted by a
+`COMMAND_NAMES` constant in `apps/shell/src-tauri/src/commands/mod.rs` (the 72 proxy commands below, asserted by a
 unit test) plus the 17 `kiosk_*` commands registered from `kiosk/commands.rs` and `kiosk/open_windows.rs` through the
 `invoke_handler!` macro in `lib.rs`, and after them the 6 `pc_*` commands of §2.15 (`commands/pc/`) and the display commands:
 
 ```json
-{ "protocol": 1, "commands": ["auth_login", "auth_logout", "auth_status", "auth_qr_start", "session_get", "session_start", "session_pause", "session_resume", "session_end", "session_extend", "session_lock", "session_unlock", "session_time_left", "session_quote", "games_list", "games_get", "games_launch", "games_kill", "games_running", "games_install_status", "apps_list", "apps_launch", "wallet_balance", "wallet_tariffs", "wallet_history", "wallet_topup_intent", "wallet_redeem_promo", "shop_products", "shop_order", "shop_order_status", "shop_orders", "chat_history", "chat_send", "chat_mark_read", "booking_seats", "booking_reserve", "booking_cancel", "tournaments_list", "tournaments_join", "tournaments_leaderboard", "profile_get", "profile_update", "profile_stats", "profile_achievements", "profile_loyalty", "profile_game_settings", "profile_game_settings_reset", "settings_get", "settings_set", "settings_get_theme", "settings_list_themes", "settings_get_shell_config", "policy_get", "policy_reload", "sys_pc_info", "sys_hardware", "sys_metrics", "sys_call_admin", "sys_reboot", "sys_shutdown", "sys_lock_screen", "sys_set_volume", "sys_set_locale", "sys_unlock_admin", "sys_staff_sign_in", "sys_reset_profile", "sys_ack_admin_message", "sys_log_client_error", "update_check", "update_apply", "kiosk_state", "kiosk_set_guard", "kiosk_set_fullscreen", "kiosk_show_overlay", "kiosk_monitors", "kiosk_move_to_monitor", "kiosk_virtual_keyboard", "kiosk_focus", "kiosk_exit", "kiosk_reload", "kiosk_open_devtools", "kiosk_gamepad_state", "kiosk_idle_reset", "kiosk_i18n_bundle", "kiosk_asset_url", "kiosk_open_windows", "kiosk_focus_window", "pc_mouse_get", "pc_mouse_set", "pc_audio_outputs", "pc_audio_set_output", "pc_gpu_panels", "pc_gpu_panel_open", "display_list", "display_set_refresh_rate", "display_confirm", "display_revert"],
+{ "protocol": 1, "commands": ["auth_login", "auth_logout", "auth_status", "auth_qr_start", "auth_register", "session_get", "session_start", "session_pause", "session_resume", "session_end", "session_extend", "session_lock", "session_unlock", "session_time_left", "session_quote", "games_list", "games_get", "games_launch", "games_kill", "games_running", "games_install_status", "apps_list", "apps_launch", "apps_running", "apps_kill", "wallet_balance", "wallet_tariffs", "wallet_history", "wallet_topup_intent", "wallet_redeem_promo", "shop_products", "shop_order", "shop_order_status", "shop_orders", "chat_history", "chat_send", "chat_mark_read", "booking_seats", "booking_reserve", "booking_cancel", "tournaments_list", "tournaments_join", "tournaments_leaderboard", "profile_get", "profile_update", "profile_stats", "profile_achievements", "profile_loyalty", "profile_game_settings", "profile_game_settings_reset", "settings_get", "settings_set", "settings_get_theme", "settings_list_themes", "settings_get_shell_config", "policy_get", "policy_reload", "sys_pc_info", "sys_hardware", "sys_metrics", "sys_call_admin", "sys_reboot", "sys_shutdown", "sys_lock_screen", "sys_set_volume", "sys_set_locale", "sys_unlock_admin", "sys_staff_sign_in", "sys_reset_profile", "sys_ack_admin_message", "sys_log_client_error", "update_check", "update_apply", "kiosk_state", "kiosk_set_guard", "kiosk_set_fullscreen", "kiosk_show_overlay", "kiosk_monitors", "kiosk_move_to_monitor", "kiosk_virtual_keyboard", "kiosk_focus", "kiosk_exit", "kiosk_reload", "kiosk_open_devtools", "kiosk_gamepad_state", "kiosk_idle_reset", "kiosk_i18n_bundle", "kiosk_asset_url", "kiosk_open_windows", "kiosk_focus_window", "pc_mouse_get", "pc_mouse_set", "pc_audio_outputs", "pc_audio_set_output", "pc_gpu_panels", "pc_gpu_panel_open", "display_list", "display_set_refresh_rate", "display_confirm", "display_revert"],
   "events": ["agent://session.updated", "agent://session.warning", "agent://session.ended", "agent://wallet.updated", "agent://chat.message", "agent://notification.push", "agent://admin.message", "agent://admin.remoteControl", "agent://game.stateChanged", "agent://policy.changed", "agent://update.available", "agent://update.progress", "agent://update.ready", "agent://sys.metrics", "agent://sys.connectivity", "agent://shell.command", "agent://auth.expired", "agent://shop.orderUpdated", "kiosk://idle", "kiosk://gamepad", "kiosk://hotkey", "kiosk://monitorChanged", "kiosk://connectivity", "kiosk://themeChanged", "kiosk://localeChanged", "kiosk://focus", "kiosk://overlay"] }
 ```
 

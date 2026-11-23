@@ -47,6 +47,8 @@ import {
   type UserRecord,
   knownValues,
 } from '../db.js';
+import { club } from '../club.js';
+import { generateLogin, phoneDigits } from '../logins.js';
 import { endSession } from './session.js';
 
 const AUTH_KINDS = Object.values(AuthKind);
@@ -59,6 +61,11 @@ const failedAttempts = new Map<string, number>();
 /** Times of wrong cards per PC (D-75): a card number can be typed and guessed, so it is counted like a password. */
 const cardFailures = new Map<string, number[]>();
 const CARD_WINDOW_MS = 15 * 60_000;
+/** Wrong desk-guest codes per PC (D-96), counted like wrong cards within the same window. */
+const guestCodeFailures = new Map<string, number[]>();
+/** Accounts each PC made on its lock screen (D-92): at most 5 within the hour. */
+const signups = new Map<string, number[]>();
+const SIGNUP_WINDOW_MS = 60 * 60_000;
 
 /** Argon2id-shaped PHC string so the Agent can store it; not a real Argon2 hash (mock). */
 function offlineHash(user: UserRecord, password: string): string {
@@ -303,9 +310,10 @@ export function authRoutes(app: FastifyInstance): void {
   });
 
   /**
-   * «Гость» on the kiosk. A walk-in guest the desk seated on this PC is signed in to that seat (D-24, D-25), even with
-   * kiosk guest login off — and so is any guest's session the desk moved onto this PC (D-61); any other open session of
-   * the PC refuses it (`pcOccupied`, before an account is made); otherwise a new guest, as before.
+   * «Гость» on the kiosk. A walk-in guest's seat the desk opened or moved onto this PC (D-24, D-61) is signed in to
+   * only with its code (D-96): none is `400 code required`, a wrong one `401 badCredentials {attemptsLeft}`, counted
+   * per PC like wrong cards (5 in 15 min refuse even the right code) — even with kiosk guest login off; any other open
+   * session of the PC refuses it (`pcOccupied`, before an account is made); otherwise a new guest, as before.
    */
   app.post('/auth/guest', async (req) => {
     const pc = requireAgent(req);
@@ -316,8 +324,18 @@ export function authRoutes(app: FastifyInstance): void {
     const open = openSessionForPc(pc.id);
     if (open) {
       const owner = findUser(open.userId);
-      const deskSeated = (open.origin === 'cashier' && open.createdByStaffId) || (open.moves?.length ?? 0) > 0;
-      if (deskSeated && owner?.transient) {
+      if (open.guestCodeHash && owner?.transient) {
+        const code = (optStr(b, 'code', 16) ?? '').trim();
+        if (!code) throw errors.validation('code', 'required');
+        const at = Date.now();
+        const failures = (guestCodeFailures.get(pc.id) ?? []).filter((t) => at - t < CARD_WINDOW_MS);
+        if (failures.length >= 5) throw errors.unauthorized('badCredentials', { attemptsLeft: 0 });
+        if (sha256Hex(code) !== open.guestCodeHash) {
+          failures.push(at);
+          guestCodeFailures.set(pc.id, failures);
+          throw errors.unauthorized('badCredentials', { attemptsLeft: 5 - failures.length });
+        }
+        guestCodeFailures.delete(pc.id);
         if (locale) owner.locale = locale;
         markDirty();
         return authResponse(owner, pc);
@@ -326,6 +344,76 @@ export function authRoutes(app: FastifyInstance): void {
     }
     const guest = createGuest(pc, optStr(b, 'displayName', 32), locale);
     return authResponse(guest, pc);
+  });
+
+  /**
+   * A player's own account from the PC (D-92, beyond the contract), as on the server: only with the owner's
+   * `limits.selfSignup` (`403 selfSignupDisabled`), the rules accepted when the club has any, at most 5 accounts per PC
+   * an hour (`429 signupLimit`); a member with zero balances, signed in at once like `POST /auth/login`.
+   */
+  app.post('/auth/register', async (req) => {
+    const pc = requireAgent(req);
+    const b = body(req);
+    if (str(b, 'pcId', 64) !== pc.id) throw errors.forbidden('pcMismatch');
+    str(b, 'hwid', 128);
+    const c = club();
+    if (c.limits.selfSignup !== true) throw errors.forbidden('selfSignupDisabled');
+    const displayName = (optStr(b, 'displayName', 64) ?? '').trim();
+    if (!displayName) throw errors.validation('displayName', 'required');
+    const typed = (optStr(b, 'username', 32) ?? '').trim();
+    const loginTaken = (login: string): boolean => db.users.some((u) => u.username.toLowerCase() === login);
+    let username: string;
+    if (typed) {
+      username = phoneDigits(typed) ?? typed.toLowerCase();
+      if (username.length < 3) throw errors.validation('username', 'min');
+      if (loginTaken(username)) throw errors.validation('username', 'taken');
+    } else {
+      username = generateLogin(displayName, null, loginTaken);
+    }
+    const password = typeof b['password'] === 'string' ? b['password'] : '';
+    if (!password) throw errors.validation('password', 'required');
+    if (password.length < 4 || password.length > 64)
+      throw errors.validation('password', password.length < 4 ? 'min' : 'max');
+    const rules = c.rulesText ?? { ru: '', uz: '', en: '' };
+    if ([rules.ru, rules.uz, rules.en].some((r) => (r ?? '').trim()) && optBool(b, 'acceptRules') !== true) {
+      throw errors.validation('acceptRules', 'required');
+    }
+    const at = Date.now();
+    const recent = (signups.get(pc.id) ?? []).filter((t) => at - t < SIGNUP_WINDOW_MS);
+    if (recent.length >= 5) {
+      throw new ApiError('rateLimited', 'Too many accounts were created on this PC', {
+        reason: 'signupLimit',
+        retryAfterSec: Math.ceil((recent[0]! + SIGNUP_WINDOW_MS - at) / 1000),
+      });
+    }
+    assertPcFree(pc, null);
+    const user: UserRecord = {
+      id: uuid(),
+      username,
+      displayName,
+      avatarUrl: null,
+      role: 'member',
+      balance: zero(),
+      loyaltyLevel: 0,
+      loyaltyPoints: 0,
+      createdAt: now(),
+      lastSeenAt: now(),
+      locale: optOneOf(b, 'locale', LOCALES) ?? 'ru',
+      flags: [],
+      password,
+      pin: null,
+      cardId: null,
+      loginToken: null,
+      bonus: uzs(0),
+      muted: false,
+      transient: false,
+    };
+    db.users.push(user);
+    const phone = phoneDigits(typed) ? typed : '';
+    c.clients[user.id] = { groupId: null, note: '', blacklisted: false, phone, birthYear: null };
+    signups.set(pc.id, [...recent, at]);
+    markDirty();
+    return authResponse(user, pc, { offlineHash: offlineHash(user, password) });
   });
 
   app.post('/auth/logout', async (req, reply) => {

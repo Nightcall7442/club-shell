@@ -20,6 +20,101 @@ import type {
 
 const BASE = (import.meta.env['VITE_ADMIN_API'] as string | undefined) ?? 'http://localhost:8080/api/v1';
 
+/**
+ * A picture of the club as the console shows it: an uploaded one is a path on the club's server
+ * (`/api/v1/media/{id}`, D-93) and gets the server's address; a full URL stays as it is.
+ */
+export function mediaUrl(url: string | null | undefined): string | null {
+  const u = url?.trim();
+  if (!u) return null;
+  if (u.startsWith('/') && !u.startsWith('//')) return new URL(u, new URL(BASE, window.location.href)).toString();
+  return u;
+}
+
+/** What the server keeps of an upload: the path the settings store. */
+export interface UploadedMedia {
+  id: string;
+  url: string;
+  contentType: string;
+  size: number;
+}
+
+/** Uploads a PNG / JPEG / WebP / GIF of at most 5 MB as the owner (D-93); the server checks the bytes. */
+export async function uploadMedia(
+  file: Blob,
+  kind: 'logo' | 'wallpaper' | 'banner' | 'screensaver' | 'other',
+): Promise<UploadedMedia> {
+  return call<UploadedMedia>(`/admin/media?kind=${kind}`, {
+    method: 'POST',
+    body: file,
+    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+  });
+}
+
+/**
+ * A game's trailer as the club server keeps it (D-97): `searching` — the server is looking for one in the Steam store,
+ * `downloading` — fetching the link once, `ready` — `url` is the stored copy the PCs play, `failed` — see `reason`.
+ */
+export interface AdminTrailer {
+  status: 'searching' | 'downloading' | 'ready' | 'failed';
+  /** `link` — the card's link, `found` — found in the Steam store, `upload` — uploaded here. */
+  origin: 'link' | 'found' | 'upload';
+  sourceUrl: string | null;
+  url: string | null;
+  contentType: string | null;
+  size: number | null;
+  /** `notAVideo`, `streamingFormat`, `tooLarge`, `unavailable`, `unreachable`, `notFound`, `fileLost`. */
+  reason:
+    | string
+    | null /** The card's link that gave no trailer, when the server looks in the Steam store instead (a file found replaces it). */;
+  failedLink?: string | null;
+  /** Why that link failed: a `reason` as above. */
+  failedReason?: string | null;
+}
+
+/** The biggest trailer the club server takes (D-97). */
+export const TRAILER_MAX_BYTES = 500 * 1024 * 1024;
+
+/**
+ * Uploads an MP4 (H.264) or WebM trailer of a game as the owner (D-97), reporting the share sent (0..1). XHR, not
+ * fetch: fetch tells nothing of an upload's progress. The server checks the bytes.
+ */
+export function uploadGameTrailer(
+  gameId: string,
+  file: Blob,
+  onProgress?: (share: number) => void,
+): Promise<{ trailer: AdminTrailer }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${BASE}/admin/games/${encodeURIComponent(gameId)}/trailer`);
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && e.total > 0) onProgress?.(e.loaded / e.total);
+    };
+    xhr.onerror = () => reject(new AdminError('network', 'Network error', null));
+    xhr.onload = () => {
+      let parsed: unknown = null;
+      try {
+        parsed = JSON.parse(xhr.responseText);
+      } catch {
+        // not JSON: the status says enough
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(parsed as { trailer: AdminTrailer });
+        return;
+      }
+      const err = (parsed as ServerErrorEnvelope | null)?.error;
+      if (xhr.status === 401) {
+        setToken(null);
+        window.dispatchEvent(new Event('admin:signed-out'));
+      }
+      reject(new AdminError(err?.code ?? 'internal', err?.message ?? xhr.statusText, err?.details ?? null, xhr.status));
+    };
+    xhr.send(file);
+  });
+}
+
 /** The server's origin, what the PC installer takes as `SERVERURL` (the API base without `/api/v1`). */
 export const SERVER_ORIGIN = new URL(BASE, window.location.href).origin;
 const TOKEN_KEY = 'clubshell.admin.token';
@@ -337,12 +432,45 @@ export interface SessionResult {
   payment?: SessionPaid | null;
   /** End of a walk-in guest's session: the cash that may be given back now (D-37); null for members. */
   payable?: Money | null;
+  /**
+   * A walk-in guest's seat (D-96): the four digits the guest types on the PC to sign in. Sent once, in this answer
+   * only (the server keeps just its hash): the console shows it to the cashier, who names it to the guest.
+   */
+  guestCode?: string;
 }
 
 export interface TopUpResult {
   balance: Money;
   transaction: Transaction;
   bonus?: Money;
+}
+
+/** Why a desk top-up is taken back (D-91). */
+export type TopUpCancelReason = 'wrongAmount' | 'wrongClient' | 'other';
+
+/**
+ * A desk top-up taken back (D-91): the reversal row `id`, the top-up it cancels and what went back by its method.
+ * Amounts in tiyin.
+ */
+export interface TopUpCancelled {
+  id: string;
+  at: string;
+  transactionId: string;
+  topUpAt: string;
+  amount: number;
+  bonus: number;
+  method: PayMethod;
+  reasonCode: TopUpCancelReason;
+  note: string | null;
+  staffName: string;
+}
+
+export interface TopUpCancelResult {
+  cancelled: TopUpCancelled;
+  balance: Money;
+  /** The right top-up booked in the same step (`amount` sent), else null. */
+  topUp: TopUpResult | null;
+  expectedCash: number;
 }
 
 export interface PayoutResult {
@@ -466,6 +594,8 @@ export interface MoveResponse {
   user: { id: string; displayName: string; role: string };
   /** False: the player signs in on the target. */
   signedIn: boolean;
+  /** A walk-in guest moved (D-96): the new code the guest types on the target PC, in this answer only. */
+  guestCode?: string;
 }
 
 /** `wake` powers an off PC on: a PC that is on sends the Wake-on-LAN packet (`via`). */
@@ -533,12 +663,15 @@ export const adminApi = {
       minutes: number;
       prepaid?: boolean;
       payment?: SessionPayment;
+      /** Time «по сумме» (D-90): the server sells the minutes this buys and ignores `minutes`. */
+      amount?: number;
     },
     key?: string,
   ): Promise<SessionResult> => postMoney<SessionResult>('/admin/sessions', input, key),
   /**
-   * A walk-in guest's seat (beyond the contract): the server creates the guest account with the session; the guest
-   * presses «Гость» on that PC. Prepaid needs a payment of exactly the price; the key is required.
+   * A walk-in guest's seat (beyond the contract): the server creates the guest account with the session and answers
+   * the seat's four-digit code (`guestCode`, D-96) that the guest types on that PC. Prepaid needs a payment of exactly
+   * the price; the key is required (a replay answers a new code: the old one stops working).
    */
   openGuestSession: (
     input: {
@@ -548,6 +681,7 @@ export const adminApi = {
       prepaid: boolean;
       displayName?: string;
       payment?: SessionPayment;
+      amount?: number;
     },
     key: string,
   ): Promise<SessionResult> => postMoney<SessionResult>('/admin/sessions/guest', input, key),
@@ -557,6 +691,7 @@ export const adminApi = {
       minutes: number;
       tariffId?: string;
       payment?: SessionPayment;
+      amount?: number;
     },
     key?: string,
   ): Promise<SessionResult> => postMoney<SessionResult>('/admin/sessions/extend', input, key),
@@ -572,6 +707,15 @@ export const adminApi = {
   /** Takes a debt to the tiyin: `amount` must equal the debt (409 `debtChanged {debt}` otherwise); no bonus. */
   settle: (input: { userId: string; amount: number; method: PayMethod }, key: string): Promise<TopUpResult> =>
     postMoney('/admin/wallet/topup', { ...input, settleDebt: true }, key),
+  /**
+   * Takes a desk top-up back (D-91): by its method, with the bonus it gave; `amount` books the right top-up in the same
+   * step. Refused once spent (`409 topUpSpent {spendable, required}`), outside its open shift (`topUpShiftClosed`), for a
+   * cashier after 15 minutes (`403 cancelWindow`) or for someone else's top-up (`403 notOwnTopUp`).
+   */
+  cancelTopUp: (
+    input: { transactionId: string; reasonCode: TopUpCancelReason; note?: string; amount?: number },
+    key: string,
+  ): Promise<TopUpCancelResult> => postMoney('/admin/wallet/topup/cancel', input, key),
   /** Gives a walk-in guest's refund back in cash: `amount` must equal what is payable now (beyond the contract). */
   payout: (input: { userId: string; amount: number }, key: string): Promise<PayoutResult> =>
     postMoney('/admin/wallet/payout', { ...input, method: 'cash' }, key),
@@ -700,6 +844,9 @@ export interface ShiftTotals {
   /** What the shift's voids gave back, and how many there were. */
   shopVoids?: number;
   shopVoidCount?: number;
+  /** Desk top-ups taken back in the shift (D-91; already out of the top-up sums), and how many. */
+  topUpCancels?: number;
+  topUpCancelCount?: number;
 }
 export interface Shift {
   id: string;
@@ -757,7 +904,9 @@ export type OperationKind =
   // Cash desk part 3 (D-68)
   | 'shopSale'
   | 'shopVoid'
-  | 'sessionMove';
+  | 'sessionMove'
+  // D-91: a desk top-up taken back
+  | 'topUpCancel';
 
 /** One row of the shift's operations feed: a paid open is one row with its payment merged in (D-43). */
 export interface Operation {
@@ -787,7 +936,7 @@ export interface Operation {
   saleId?: string | null;
   method?: SaleMethod | null;
   lines?: { title: string; qty: number; price: number }[] | null;
-  /** A bar sale taken back since. */
+  /** A bar sale taken back since, or a desk top-up taken back since (D-91). */
   voided?: boolean | null;
   /** A void: when the sale was. */
   voidOfAt?: string | null;
@@ -922,8 +1071,26 @@ export interface Webhook {
 }
 
 /** The settings document the owner edits (`GET/PATCH /admin/club`). Amounts are minor units (tiyin). */
+/** `branding.pcLabel` (D-95): what the PC's label says, the large number and the screens it shows on. */
+export interface PcLabelSettings {
+  format: 'nameZone' | 'name' | 'number';
+  large: boolean;
+  lock: boolean;
+  idle: boolean;
+  topBar: boolean;
+}
+
 export interface ClubSettings {
-  branding: { clubName: string; accent: string; logoUrl: string | null; wallpaperUrl: string | null };
+  branding: {
+    clubName: string;
+    accent: string;
+    logoUrl: string | null;
+    wallpaperUrl: string | null;
+    /** The shell theme of the club's PCs (D-93): `default` (Obsidian), `light` (Daylight) or `neon`; absent — default. */
+    theme?: 'default' | 'light' | 'neon';
+    /** How the PC's name or number shows on the player screen (D-95); absent — the name and zone everywhere. */
+    pcLabel?: PcLabelSettings;
+  };
   features: ShellFeatures;
   zones: Zone[];
   pricing: { weekdayPct: number[]; holidays: string[]; holidayPct: number };
@@ -952,6 +1119,8 @@ export interface ClubSettings {
     cashOutOwnerOnly?: boolean;
     /** Minutes the server extends a prepaid session by when it runs out and the balance pays; 0 — off. */
     autoExtendMinutes?: number;
+    /** Players create their own account on the lock screen (D-92); absent or false — off, registration at the desk. */
+    selfSignup?: boolean;
   };
   catalog: { order: string[]; hidden: string[]; featured: string[] };
   banners: Banner[];
@@ -994,7 +1163,8 @@ export type AuditAction =
   // Beyond the contract enum (D-44): the Control page has their labels, the server does not send them there yet.
   | 'cashIn'
   | 'cashOut'
-  | 'payout';
+  | 'payout'
+  | 'topUpCancel';
 
 export interface AuditEntry {
   id: string;
@@ -1038,6 +1208,9 @@ export interface StaffSummary {
   discounts: number;
   shortfall: number;
   flags: Record<Severity, number>;
+  /** Desk top-ups this cashier took back in the period, how many and how much (D-91; absent from an older server). */
+  topUpCancels?: number;
+  topUpCancelled?: number;
 }
 
 export type HealthKind = 'cpuHot' | 'gpuHot' | 'cpuTrend' | 'gpuTrend' | 'fpsDrop' | 'unstable';
@@ -1132,6 +1305,8 @@ export interface ControlReport {
   staff: StaffSummary[];
   flags: ControlFlag[];
   log: AuditEntry[];
+  /** Desk top-ups taken back in the period (D-91; not in `log`), newest first; absent from an older server. */
+  corrections?: AuditEntry[];
 }
 
 export interface Client {
@@ -1246,6 +1421,8 @@ export interface AdminGame {
   custom?: boolean;
   /** Trailer the player shell plays behind the game's art: a direct https link to an .mp4/.webm file. */
   videoUrl?: string | null;
+  /** The club server's copy of the trailer and how far it got (D-97); null — none; absent from an older server. */
+  trailer?: AdminTrailer | null;
   /** Zones whose PCs offer the game; empty = every zone. */
   zones?: string[];
   /** Values the agent writes under the player's HKCU before every launch (SHELL_CHANGES 82); absent from an older server. */
@@ -1389,13 +1566,24 @@ export const clubApi = {
   addTariff: (t: TariffInput): Promise<{ tariff: Tariff }> => post('/admin/tariffs', t),
   saveTariff: (id: string, t: TariffInput): Promise<{ tariff: Tariff }> => put(`/admin/tariffs/${id}`, t),
   deleteTariff: (id: string): Promise<unknown> => del(`/admin/tariffs/${id}`),
-  quote: (input: { tariffId: string; pcId: string; minutes: number; userId?: string | null }): Promise<PriceQuote> =>
-    post('/admin/quote', input),
+  /**
+   * `amount` (D-90): the most whole minutes it buys, priced (`minutes` of the answer); 409 `amountTooLow {minutes, total}`
+   * when it does not reach the shortest purchase. `sessionId`: of an extension (the tariff's maximum counts its minutes).
+   */
+  quote: (input: {
+    tariffId: string;
+    pcId: string;
+    minutes: number;
+    userId?: string | null;
+    amount?: number;
+    sessionId?: string;
+  }): Promise<PriceQuote> => post('/admin/quote', input),
 
   clients: (q = ''): Promise<{ items: Client[] }> => call(`/admin/clients?q=${encodeURIComponent(q)}`),
+  /** `username` absent — the server makes a unique Latin login (D-92), returned in `client.username`. */
   addClient: (input: {
     displayName: string;
-    username: string;
+    username?: string;
     phone?: string;
     birthYear?: number | null;
     groupId?: string | null;
@@ -1408,6 +1596,8 @@ export const clubApi = {
     post(`/admin/clients/${id}/card`, { cardId }),
   updateClient: (id: string, input: Partial<Client>): Promise<{ client: Client }> =>
     patch(`/admin/clients/${id}`, input),
+  /** D-94, owner only: `409 {reason: playing}` while it plays, `409 {reason: balance, balance}` with money or a debt left. */
+  deleteClient: (id: string): Promise<unknown> => del(`/admin/clients/${id}`),
   clientTransactions: (id: string): Promise<{ items: Transaction[] }> => call(`/admin/clients/${id}/transactions`),
   redeemPromo: (userId: string, code: string): Promise<{ balance: Money }> =>
     postMoney('/admin/promo/redeem', { userId, code }),
@@ -1482,6 +1672,10 @@ export const clubApi = {
   addGame: (input: GameInput): Promise<{ game: AdminGame }> => post('/admin/games', input),
   saveGame: (id: string, input: GameInput): Promise<{ game: AdminGame }> => put(`/admin/games/${id}`, input),
   deleteGame: (id: string): Promise<unknown> => del(`/admin/games/${id}`),
+  /** Takes the game's trailer off (the link and the stored copy); the server does not look for another (D-97). */
+  removeGameTrailer: (id: string): Promise<unknown> => del(`/admin/games/${id}/trailer`),
+  /** «Найти трейлеры»: the server looks in the Steam store for every game without a trailer (D-97). */
+  findTrailers: (): Promise<{ queued: number; gameIds: string[] }> => post('/admin/games/trailers/find', {}),
   /** Zones whose PCs offer the game; an empty list offers it in every zone. */
   saveGameZones: (id: string, zones: string[]): Promise<{ zones: string[] }> =>
     put(`/admin/games/${id}/zones`, { zones }),

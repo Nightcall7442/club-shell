@@ -144,6 +144,10 @@ function TotalsGrid({ x }: { x: ShiftTotals }): JSX.Element {
     ...((x.writeOffs ?? 0) > 0
       ? ([[t('Списано долгов ({n})', { n: x.writeOffCount ?? 0 }), x.writeOffs ?? 0]] as [string, number][])
       : []),
+    // D-91: top-ups taken back, already out of the top-up sums above; shown so the owner sees them.
+    ...((x.topUpCancelCount ?? 0) > 0
+      ? ([[t('Отменено пополнений ({n})', { n: x.topUpCancelCount ?? 0 }), x.topUpCancels ?? 0]] as [string, number][])
+      : []),
   ];
   const drawer: [string, number][] = [
     [t('Внесения'), x.cashIn ?? 0],

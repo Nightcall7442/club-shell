@@ -325,6 +325,17 @@ public sealed record ClubRules(string? Ru = null, string? Uz = null, string? En 
 public sealed record ScreensaverItem(string Url, string Type, int DurationSec);
 
 /// <summary>
+/// How the PC's own label shows on the player screen (D-95, beyond the contract), set by the owner under «Интерфейс и
+/// логотипы»: what it says, whether it is the large number readable across the hall, and on which screens.
+/// </summary>
+/// <param name="Format"><c>nameZone</c> (the PC name and its zone, the default), <c>name</c> or <c>number</c> (the PC number alone).</param>
+/// <param name="Large">A large number on the lock and idle screens, readable across the hall.</param>
+/// <param name="Lock">Shown on the lock screen.</param>
+/// <param name="Idle">Shown on the idle screen and the screensaver.</param>
+/// <param name="TopBar">Shown in the top bar while a player is signed in.</param>
+public sealed record ShellPcLabel(string Format = "nameZone", bool Large = false, bool Lock = true, bool Idle = true, bool TopBar = true);
+
+/// <summary>
 /// The screensaver of the free PCs (D-87, beyond the contract): the attract screen after <paramref name="AfterSec"/>
 /// seconds without input on the lock screen; off — it never starts.
 /// </summary>
@@ -344,6 +355,10 @@ public sealed record ShellScreensaver(bool Enabled, int AfterSec, IReadOnlyList<
 /// <param name="Banners">Active banners, in display order.</param>
 /// <param name="Rules">Club rules shown on the support screen.</param>
 /// <param name="Screensaver">The free PCs' screensaver; null — the shell's own idle screen as before.</param>
+/// <param name="PcLabel">How the PC's name or number shows; null — the name and zone on every screen, as before.</param>
+/// <param name="SelfSignup">
+/// The lock screen offers «Создать аккаунт» (D-92: the owner's <c>limits.selfSignup</c>); null — an older server, off.
+/// </param>
 public sealed record ShellClub(
     string? Name = null,
     string? Accent = null,
@@ -351,7 +366,9 @@ public sealed record ShellClub(
     string? WallpaperUrl = null,
     IReadOnlyList<ClubBanner>? Banners = null,
     ClubRules? Rules = null,
-    ShellScreensaver? Screensaver = null);
+    ShellScreensaver? Screensaver = null,
+    bool? SelfSignup = null,
+    ShellPcLabel? PcLabel = null);
 
 /// <summary>Server override pushed into <c>shell.json</c>.</summary>
 /// <param name="Locale">Default locale.</param>

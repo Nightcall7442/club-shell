@@ -163,11 +163,40 @@ public sealed record QrLoginStatus(
 /// <param name="Hwid">Hardware id.</param>
 /// <param name="DisplayName">Optional display name.</param>
 /// <param name="Locale">Preferred locale.</param>
+/// <param name="Code">
+/// The four-digit code the cash desk gave a walk-in guest for this PC's seat (D-96, beyond the contract); required while
+/// the PC holds such a seat, ignored otherwise. Never logged.
+/// </param>
 public sealed record GuestAuthRequest(
     Guid PcId,
     string Hwid,
     string? DisplayName = null,
-    Locale? Locale = null);
+    Locale? Locale = null,
+    string? Code = null);
+
+/// <summary>
+/// Body of <c>POST /auth/register</c> (D-92, beyond the contract): a player creates their own account on the PC, where the
+/// owner allows it; answered like <c>POST /auth/login</c>. Secrets are never logged.
+/// </summary>
+/// <param name="PcId">PC.</param>
+/// <param name="Hwid">Hardware id.</param>
+/// <param name="DisplayName">The player's name, 1–64 characters.</param>
+/// <param name="Username">Login, 3–32 characters, or a phone number (stored as its digits); empty — the server makes one.</param>
+/// <param name="Password">Password, 4–64 characters.</param>
+/// <param name="AcceptRules">The player accepted the club rules; required when the club has rules.</param>
+/// <param name="Locale">Preferred locale.</param>
+public sealed record RegisterAuthRequest(
+    Guid PcId,
+    string Hwid,
+    string? DisplayName,
+    string? Username,
+    string? Password,
+    bool? AcceptRules = null,
+    Locale? Locale = null)
+{
+    /// <summary>Copy with the password blanked, for logging.</summary>
+    public RegisterAuthRequest Redacted() => this with { Password = Password is null ? null : "***" };
+}
 
 /// <summary>Body of <c>POST /auth/logout</c>.</summary>
 /// <param name="Reason">Why the user is logged out; the server records it as the session end reason.</param>

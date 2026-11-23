@@ -313,6 +313,17 @@
     "wrongPinLeft": "PIN noto'g'ri. Qolgan urinishlar: {{attempts}}",
     "wrongPasswordLeft": "Parol noto'g'ri. Qolgan urinishlar: {{attempts}}",
     "pinLockedOut": "Juda ko'p noto'g'ri PIN: parol bilan oching yoki administratorga murojaat qiling.",
+    "guestCode": {
+      "title": "Kassadagi kodni kiriting",
+      "hint": "Administrator ushbu kompyuterda seansingizni ochganda aytgan to'rt raqam.",
+      "label": "Kassadagi kod",
+      "keypad": "Kod raqamlari",
+      "erase": "Raqamni o'chirish",
+      "signingIn": "Kirilmoqda…",
+      "wrong": "Kod noto'g'ri",
+      "wrongLeft": "Kod noto'g'ri. Qolgan urinishlar: {{attempts}}",
+      "lockedOut": "Noto'g'ri kodlar juda ko'p. 15 daqiqa kuting yoki kassaga murojaat qiling."
+    },
     "staff": {
       "button": "Texnik foydalanuvchi",
       "title": "Texnik foydalanuvchi",
@@ -341,6 +352,38 @@
       "rebooting": "Kompyuter qayta ishga tushmoqda…",
       "sessionActive": "Hozir seans davom etmoqda: avval uni yakunlang.",
       "denied": "Bu kompyuterda ekrandan oʻchirish taqiqlangan. Administratorga murojaat qiling."
+    },
+    "register": {
+      "open": "Akkaunt yaratish",
+      "title": "Yangi akkaunt",
+      "subtitle": "Bir daqiqa oladi: keyin shu login bilan klubning istalgan kompyuterida kirasiz",
+      "name": "Ism",
+      "namePlaceholder": "Sizga qanday murojaat qilaylik",
+      "login": "Login yoki telefon",
+      "loginPlaceholder": "Masalan, bobur yoki +998 90 123 45 67",
+      "loginHint": "Shu bilan kirasiz. Telefon raqami ham bo'ladi",
+      "password": "Parol",
+      "passwordPlaceholder": "Kamida 4 ta belgi",
+      "passwordAgain": "Parolni takrorlang",
+      "passwordAgainPlaceholder": "Parolni yana kiriting",
+      "rulesTitle": "Klub qoidalari",
+      "acceptRules": "Klub qoidalari bilan tanishdim va roziman",
+      "submit": "Yaratish va kirish",
+      "submitting": "Akkaunt yaratilmoqda…",
+      "back": "Menda akkaunt bor",
+      "nameRequired": "Ismingizni kiriting",
+      "nameTooLong": "Ism 64 ta belgidan oshmasin",
+      "loginRequired": "Login o'ylab toping yoki telefon kiriting",
+      "loginTooShort": "Login 3 dan 32 tagacha belgi",
+      "loginTaken": "Bu login band — boshqasini o'ylab toping",
+      "passwordTooShort": "Parol kamida 4 ta belgi",
+      "passwordTooLong": "Parol 64 ta belgidan oshmasin",
+      "passwordMismatch": "Parollar mos kelmadi",
+      "rulesRequired": "Klub qoidalariga roziligingizni belgilang",
+      "disabled": "Kompyuterda ro'yxatdan o'tish o'chirilgan — administratorga murojaat qiling",
+      "tooMany": "Bu kompyuterdan ko'p akkaunt yaratilgan. Keyinroq urinib ko'ring yoki administratorga murojaat qiling",
+      "offline": "Klub serveri bilan aloqa yo'q — akkauntni hozir yaratib bo'lmaydi",
+      "welcome": "Akkaunt yaratildi. Loginingiz: {{login}}"
     }
   },
   "desktop": {
@@ -476,6 +519,7 @@
     "empty": "Kutubxonada o'yinlar yo'q",
     "noResults": "So'rovingiz bo'yicha o'yin topilmadi",
     "kill": "O'yinni yopish",
+    "switchTo": "O‘yinga o‘tish",
     "killConfirm": "{{title}} yopilsinmi? Saqlanmagan natijalar yo'qolishi mumkin.",
     "killTitle": "O'yinni yopish",
     "killed": "O'yin yopildi",
@@ -592,6 +636,7 @@
     "launch": "Ochish",
     "launching": "Ochilmoqda…",
     "launched": "{{title}} ochildi",
+    "alreadyRunning": "{{title}} allaqachon ochiq — unga o‘tamiz",
     "notAllowed": "Klub siyosati bilan taqiqlangan",
     "empty": "Mavjud ilovalar yo'q",
     "running": "Ishlamoqda",
@@ -604,6 +649,17 @@
     },
     "iconAlt": "{{title}} belgisi",
     "openFailed": "{{title}} ochilmadi"
+  },
+  "running": {
+    "title": "Ishlamoqda",
+    "switchTo": "O‘tish",
+    "close": "Yopish",
+    "confirmClose": "Rostdan yopilsinmi?",
+    "game": "O‘yin",
+    "app": "Ilova",
+    "starting": "Ishga tushmoqda…",
+    "noWindow": "Oyna hali yo‘q: dastur hali ochilmoqda yoki trayda turibdi",
+    "backHint": "Ilova yoki o‘yindan ClubShell ga qaytish: Ctrl+Shift+H → «ClubShell ga qaytish» yoki ilova oynasini yig‘ing."
   },
   "shop": {
     "title": "Do'kon",
@@ -1513,6 +1569,7 @@
     "gameRunning": "O'yin ishlamoqda",
     "returnToShell": "ClubShell ga qaytish",
     "hudTitle": "Tezkor panel",
+    "hudHide": "Panelni yashirish",
     "hudExtend": "+30 daqiqa",
     "hudHint": "Esc — yopish · Ctrl+Shift+H — panel",
     "hotkeyBlocked": "Bu tugmalar birikmasi o'chirilgan",
@@ -1663,5 +1720,9 @@
     "failed": "Sevimlilarni saqlab bo‘lmadi",
     "launchApp": "{{title}}ni ochish",
     "region": "Sevimlilar: tez ishga tushirish uchun o‘yinlar va ilovalar"
+  },
+  "pcLabel": {
+    "number": "PK {{number}}",
+    "pc": "PK"
   }
 }

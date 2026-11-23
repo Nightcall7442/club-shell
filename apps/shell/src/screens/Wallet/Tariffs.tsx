@@ -98,7 +98,7 @@ export function TariffCard({ tariff, available, current, action, onAction }: Tar
       className={clsx(
         'glass relative flex w-full flex-col gap-3 rounded-lg p-5 transition-[opacity,box-shadow] duration-[var(--dur-fast)] focus-within:border-glow',
         current && 'border-glow',
-        !available && 'opacity-60',
+        !available && 'opacity-80',
       )}
     >
       <header className="flex items-start justify-between gap-3">

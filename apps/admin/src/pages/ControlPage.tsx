@@ -1,7 +1,8 @@
 /**
  * Cashier control (owner only): the signals the server finds in the staff journal — cash short at close, sessions
  * refunded minutes after opening, big discounts handed out, the same client topped up again and again, money taken
- * with no shift open — per cashier for 7 / 30 / 90 days, the journal itself, and the thresholds of the rules.
+ * with no shift open — per cashier for 7 / 30 / 90 days, the journal itself, and the thresholds of the rules. Desk
+ * top-ups taken back (D-91) are listed apart («Отмены пополнений»): the server keeps them out of the contract's journal.
  */
 import { useEffect, useState } from 'react';
 import clsx from 'clsx';
@@ -18,7 +19,8 @@ import { describe } from '@/errors';
 import { dateLocale, t } from '@/i18n';
 import { money } from '@/format';
 import { CheckIcon } from '@/icons';
-import { REASON_LABEL } from '@/labels';
+import { REASON_LABEL, TOPUP_CANCEL_REASON_LABEL } from '@/labels';
+import { methodName } from '@/paybox';
 import { useClubSettings } from '@/settings';
 import { Badge, Button, Field, MoneyInput, Note, NumberInput, PageHeader, SaveBar, Section, Sum, Table } from '@/ui';
 import { OwnerPage, PeriodChips } from './ownerKit';
@@ -44,6 +46,7 @@ const ACTION_LABEL: Record<AuditAction, string> = {
   cashIn: 'Внесение',
   cashOut: 'Изъятие',
   payout: 'Выдача гостю',
+  topUpCancel: 'Отмена пополнения',
 };
 
 /**
@@ -111,6 +114,22 @@ function flagText(f: ControlFlag): string {
     default:
       return f.kind;
   }
+}
+
+/** A top-up taken back (D-91): whose, by which method, why, and the right amount when it was corrected in the same step. */
+function correctionDetail(e: AuditEntry): string {
+  const text = (k: string): string => (typeof e.meta[k] === 'string' ? (e.meta[k] as string) : '');
+  const reason = text('reasonCode');
+  const to = typeof e.meta['correctedTo'] === 'number' ? (e.meta['correctedTo'] as number) : null;
+  return [
+    e.detail,
+    text('method') ? methodName(text('method')) : '',
+    reason ? t(TOPUP_CANCEL_REASON_LABEL[reason as keyof typeof TOPUP_CANCEL_REASON_LABEL] ?? reason) : '',
+    text('note'),
+    to !== null ? t('исправлено на {sum}', { sum: uzs(to) }) : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 /** What the journal row says after the action; shift rows spell out the cash, the rest show the server's detail. */
@@ -254,6 +273,19 @@ export default function ControlPage(): JSX.Element {
                 { key: 'ops', title: t('Операций'), num: true, render: (s) => s.operations },
                 { key: 'topups', title: t('Пополнения'), num: true, render: (s) => <Sum minor={s.topUps} /> },
                 { key: 'refunds', title: t('Возвраты'), num: true, render: (s) => <Sum minor={s.refunds} /> },
+                {
+                  key: 'cancels',
+                  title: t('Отмены пополнений'),
+                  num: true,
+                  render: (s) =>
+                    (s.topUpCancels ?? 0) > 0 ? (
+                      <span className="font-semibold text-warning">
+                        {s.topUpCancels} · <Sum minor={s.topUpCancelled ?? 0} />
+                      </span>
+                    ) : (
+                      '—'
+                    ),
+                },
                 { key: 'early', title: t('Ранние закрытия'), num: true, render: (s) => s.earlyEnds },
                 { key: 'disc', title: t('Скидки'), num: true, render: (s) => s.discounts },
                 {
@@ -306,6 +338,37 @@ export default function ControlPage(): JSX.Element {
               </ul>
             )}
           </Section>
+
+          {data.corrections && data.corrections.length > 0 && (
+            <Section title={t('Отмены пополнений')} bodyClassName="p-2">
+              <Table<AuditEntry>
+                rows={data.corrections}
+                rowKey={(e) => e.id}
+                empty={t('Записей нет')}
+                columns={[
+                  {
+                    key: 'at',
+                    title: t('Время'),
+                    width: '9rem',
+                    render: (e) => <span className="tnum font-mono text-xs text-dim">{dateTime(e.at)}</span>,
+                  },
+                  { key: 'who', title: t('Сотрудник'), width: '11rem', render: (e) => e.staffName },
+                  {
+                    key: 'what',
+                    title: t('Что'),
+                    render: (e) => <span className="text-dim">{correctionDetail(e)}</span>,
+                  },
+                  {
+                    key: 'amount',
+                    title: t('Сумма'),
+                    num: true,
+                    width: '9rem',
+                    render: (e) => <Sum minor={e.amount} />,
+                  },
+                ]}
+              />
+            </Section>
+          )}
 
           <Section title={t('Журнал действий')} bodyClassName="p-2">
             <Table<AuditEntry>

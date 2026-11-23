@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using ClubShell.Contracts.Errors;
 using System.Text.Json;
 using ClubShell.Contracts.Wallet;
 using ClubShell.Server.Auth;
@@ -7,6 +8,7 @@ using ClubShell.Server.Infrastructure;
 using ClubShell.Server.Realtime;
 using ClubShell.Server.Sessions;
 using ClubShell.Server.Sessions.Billing;
+using ClubShell.Server.Users;
 using ClubShell.Server.Wallet;
 using Dapper;
 using Microsoft.AspNetCore.Http.Features;
@@ -43,6 +45,53 @@ public static class ClientEndpoints
         api.MapPost("/{id}/card", CardAsync);
         api.MapPost("/{id}/password", PasswordAsync);
         api.MapGet("/{id}/transactions", TransactionsAsync);
+        api.MapDelete("/{id}", DeleteAsync).WithMetadata(new AuthRequirement(AuthMode.Staff, OwnerOnly: true));
+    }
+
+    /// <summary>
+    /// <c>DELETE /admin/clients/{id}</c> (D-94, beyond the contract, owner only): the client leaves the lists and can no
+    /// longer sign in; the ledger, sessions and journal keep everything they did. Refused while it would lose money or a
+    /// running game: a session open anywhere (<c>409 playing</c>), money on the balance or a debt (<c>409 balance</c> with
+    /// the amount — top it off, refund it or write the debt off first). The login and the card are freed for someone new
+    /// (the login becomes <c>del-…</c>); every token is revoked and the PCs it was signed in on are told.
+    /// </summary>
+    private static async Task<IResult> DeleteAsync(HttpContext context, string id, NpgsqlDataSource db, Pushes pushes, TimeProvider clock)
+    {
+        var staff = context.Features.GetRequiredFeature<StaffContext>();
+        var userId = ClientId(id);
+        IReadOnlyList<Guid> revoked;
+        await using (var c = await db.OpenConnectionAsync())
+        await using (var tx = await c.BeginTransactionAsync())
+        {
+            var now = clock.GetUtcNow();
+            var name = await LockAsync(c, tx, staff, userId);
+            if (await c.ExecuteScalarAsync<bool>("SELECT EXISTS (SELECT 1 FROM sessions WHERE user_id = @userId AND state <> 'ended')", new { userId }, tx))
+            {
+                throw new ApiException(StatusCodes.Status409Conflict, ErrorCode.Conflict, "The client is playing: end the session first", new { reason = "playing" });
+            }
+
+            var balance = await c.ExecuteScalarAsync<long>("SELECT main_balance FROM wallets WHERE user_id = @userId FOR UPDATE", new { userId }, tx);
+            if (balance != 0)
+            {
+                throw new ApiException(StatusCodes.Status409Conflict, ErrorCode.Conflict,
+                    balance > 0 ? "Money is left on the balance" : "The client owes the club",
+                    new { reason = "balance", balance = Money.Uzs(balance) });
+            }
+
+            var login = await c.ExecuteScalarAsync<string>("SELECT username FROM users WHERE id = @userId", new { userId }, tx);
+            await c.ExecuteAsync(
+                """
+                UPDATE users SET deleted_at = @now, card_id = NULL, username = 'del-' || left(replace(id::text, '-', ''), 12)
+                WHERE id = @userId
+                """,
+                new { userId, now }, tx);
+            revoked = (await c.QueryAsync<Guid>("DELETE FROM user_tokens WHERE user_id = @userId RETURNING pc_id", new { userId }, tx)).ToList();
+            await Audit.WriteAsync(c, tx, staff, now, "clientDelete", userId, detail: $"{name} · {login}");
+            await tx.CommitAsync();
+        }
+
+        await pushes.UserRevokedAsync(userId, "deleted", revoked);
+        return AdminJson.Ok(AdminJson.OkBody);
     }
 
     /// <summary>
@@ -106,22 +155,19 @@ public static class ClientEndpoints
 
     /// <summary>
     /// A member with zero balances and the club profile. No <c>password</c>: a random one nobody knows (only a reset gives
-    /// the client one). Checks in the mock's order: fields (<c>username</c> trimmed, 3–32 characters: <c>400 username
-    /// min|max</c>), login taken, card taken.
+    /// the client one). Only the name is required (D-92): without <c>username</c> (absent, null or blank — the contract
+    /// still marks it required, so this route reads it by hand) the server makes a unique Latin one (<see
+    /// cref="Logins.GenerateAsync"/>: the phone's digits, else the name transliterated, numbered on a collision) and the
+    /// card in the answer carries it for the cashier to pass on. A typed one keeps its rules (<see cref="Logins.Typed"/>:
+    /// trimmed, 3–32 characters, <c>400 username min|max</c>; a phone number becomes its digits). Checks in the mock's
+    /// order: fields, login taken, card taken.
     /// </summary>
     private static async Task<IResult> AddAsync(HttpContext context, [FromBody] JsonElement body, IdempotencyStore store, TimeProvider clock)
     {
         var staff = context.Features.GetRequiredFeature<StaffContext>();
-        var r = Api.Read<AdminClientCreateRequest>(body, "displayName", "username");
+        var r = Api.Read<AdminClientCreateRequest>(body, "displayName");
         var displayName = AdminInput.Text(r.DisplayName, "displayName", 64);
-        // 3–32 characters, as the contract's User.username (sign-in trims the typed name, so the stored one is trimmed too);
-        // lower-cased here in any script — PostgreSQL's lower() under the C locale folds only ASCII.
-        var username = AdminInput.Text(r.Username?.Trim(), "username", 32).ToLowerInvariant();
-        if (username.Length < 3)
-        {
-            throw ApiException.Validation("username", "min");
-        }
-
+        var typed = string.IsNullOrWhiteSpace(r.Username) ? null : Logins.Typed(r.Username);
         var password = r.Password is null ? null : Password(r.Password);
         var phone = AdminInput.OptionalText(r.Phone, "phone", 32) ?? "";
         var birthYear = AdminInput.Range(r.BirthYear, "birthYear", 1900, 2100);
@@ -134,10 +180,15 @@ public static class ClientEndpoints
         {
             var now = clock.GetUtcNow();
             var id = Guid.CreateVersion7(now);
-            if (await c.ExecuteScalarAsync<bool>(
-                    "SELECT EXISTS (SELECT 1 FROM users WHERE network_id = @NetworkId AND lower(username) = @username)", new { staff.NetworkId, username }, tx))
+            string username;
+            if (typed is not null)
             {
-                throw ApiException.Validation("username", "taken");
+                await Logins.EnsureFreeAsync(c, tx, staff.NetworkId, typed);
+                username = typed;
+            }
+            else
+            {
+                username = await Logins.GenerateAsync(c, tx, staff.NetworkId, displayName, phone);
             }
 
             await CardFreeAsync(c, tx, staff, card, id);

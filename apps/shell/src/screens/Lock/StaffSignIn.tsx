@@ -44,11 +44,29 @@ interface Done {
 export function StaffSignInButton(): JSX.Element {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  // Ctrl+Alt+T opens it for staff who know; the corner icon is for those who do not.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.ctrlKey && e.altKey && e.code === 'KeyT') {
+        e.preventDefault();
+        setOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   return (
     <>
-      <Button variant="ghost" size="md" icon={TechIcon} onClick={() => setOpen(true)}>
-        {t('lock.staff.button')}
-      </Button>
+      <button
+        type="button"
+        data-nav="true"
+        aria-label={t('lock.staff.button')}
+        title={`${t('lock.staff.button')} · Ctrl+Alt+T`}
+        onClick={() => setOpen(true)}
+        className="focus-ring flex h-9 w-9 items-center justify-center rounded-md text-muted opacity-40 transition-opacity hover:opacity-90 focus-visible:opacity-100 [&>svg]:h-[18px] [&>svg]:w-[18px]"
+      >
+        {TechIcon}
+      </button>
       <StaffSignInDialog open={open} onClose={() => setOpen(false)} />
     </>
   );

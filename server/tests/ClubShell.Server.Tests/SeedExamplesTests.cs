@@ -11,7 +11,7 @@ public sealed class ExampleCatalogFixture : ServerFixture
         Settings["Catalog:ProductsSeedPath"] = ConfigFile("products.example.json");
     }
 
-    private static string ConfigFile(string name)
+    internal static string ConfigFile(string name)
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
         {

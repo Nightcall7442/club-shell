@@ -58,6 +58,7 @@ public static partial class CounterEndpoints
         api.MapPost("/sessions/end", EndAsync);
         api.MapPost("/sessions/move", MoveAsync);
         api.MapPost("/wallet/topup", TopUpAsync);
+        api.MapPost("/wallet/topup/cancel", TopUpCancelAsync);
         api.MapPost("/wallet/payout", PayoutAsync);
         api.MapPost("/wallet/write-off", WriteOffAsync);
         api.MapPost("/pcs/{pcId:guid}/command", CommandAsync);
@@ -235,6 +236,8 @@ public static partial class CounterEndpoints
             throw ApiException.Validation("payment", "postpaid");
         }
 
+        var budget = BudgetOf(r.Amount, prepaid);
+
         var pc = await LivePcAsync(pcs, staff, r.PcId!.Value);
         var effects = new SessionEffects();
         TopUpPosted? paid = null;
@@ -243,6 +246,11 @@ public static partial class CounterEndpoints
             await AdvisoryLocks.PcAsync(c, tx, pc.Id);
             await ShiftEndpoints.RequireOpenAsync(c, tx, staff);
             await RequireReadyAsync(c, tx, pc, sessions.Clock.GetUtcNow());
+            if (budget is { } amount)
+            {
+                minutes = await MinutesForAsync(c, tx, staff.ClubId, r.UserId!.Value, pc.Zone, r.TariffId!.Value, amount, 0, sessions.Clock.GetUtcNow());
+            }
+
             if (payment is { } pay)
             {
                 paid = await PostTopUpAsync(c, tx, staff, effects, r.UserId!.Value, pay.Amount, pay.Method, sessions.Clock.GetUtcNow(), forSession: true);
@@ -263,12 +271,13 @@ public static partial class CounterEndpoints
     /// <c>displayName</c> or «Гость &lt;PC number&gt;») and its seat in one transaction, so a refused seat leaves no account,
     /// money or journal entry. Prepaid needs a <c>payment</c> of exactly the price now (D-48, else <c>409 priceChanged
     /// {total}</c>): no extra money sits on a throwaway account; postpaid follows <c>limits.guestPostpaid</c> and takes no
-    /// payment. The guest gets no login code: pressing «Гость» on that PC signs in to this session (D-25). Staff only (the
-    /// club API key has no drawer and opens no seats for guests, <c>403 staffOnly</c>); <c>Idempotency-Key</c> required.
+    /// payment. The seat gets a four-digit code (D-96): only its hash is stored with the session, the plain code is in
+    /// this answer (<c>guestCode</c>) and nowhere else — the guest presses «Гость» on that PC and types it (D-25). Staff only
+    /// (the club API key has no drawer and opens no seats for guests, <c>403 staffOnly</c>); <c>Idempotency-Key</c> required.
     /// </summary>
     private static async Task<IResult> GuestOpenAsync(
         HttpContext context, [FromBody] JsonElement body, IdempotencyStore store, SessionService sessions, PcRepository pcs,
-        AutomationService automation, ILoggerFactory logs)
+        AutomationService automation, ILoggerFactory logs, NpgsqlDataSource db)
     {
         var staff = StaffOnly(context);
         var r = Api.Read<AdminGuestSessionRequest>(body, "pcId", "tariffId", "minutes");
@@ -286,15 +295,24 @@ public static partial class CounterEndpoints
             throw ApiException.Validation("payment", prepaid ? "required" : "postpaid");
         }
 
+        var budget = BudgetOf(r.Amount, prepaid);
+
         var pc = await LivePcAsync(pcs, staff, r.PcId!.Value);
         var effects = new SessionEffects();
         TopUpPosted? paid = null;
-        var result = await store.ExecuteHttpAsync(context, ShiftEndpoints.Principal(staff), keyRequired: true, body, async (c, tx) =>
+        var code = Guests.NewCode();
+        var result = await store.ExecuteHttpResultAsync(context, ShiftEndpoints.Principal(staff), keyRequired: true, body, async (c, tx) =>
         {
             var now = sessions.Clock.GetUtcNow();
             await AdvisoryLocks.PcAsync(c, tx, pc.Id);
             await ShiftEndpoints.RequireOpenAsync(c, tx, staff);
             await RequireReadyAsync(c, tx, pc, now);
+            if (budget is { } amount)
+            {
+                // A new guest is priced as a walk-in (no group, zero spend), exactly as its seat is charged (D-48).
+                minutes = await MinutesForAsync(c, tx, staff.ClubId, null, pc.Zone, r.TariffId!.Value, amount, 0, now);
+            }
+
             var guest = await Guests.CreateAsync(c, tx, staff.NetworkId, pc.Number, name ?? $"Гость {pc.Number}", "ru", now);
             if (payment is { } pay)
             {
@@ -303,12 +321,44 @@ public static partial class CounterEndpoints
             }
 
             var session = await sessions.CreateAsync(
-                c, tx, pc, new SessionCreateRequest(pc.Id, guest, r.TariffId!.Value, minutes, prepaid), replay: false, effects, staff);
+                c, tx, pc, new SessionCreateRequest(pc.Id, guest, r.TariffId!.Value, minutes, prepaid), replay: false, effects, staff,
+                guestCodeHash: Passwords.Hash(code));
             return new IdempotentResult(StatusCodes.Status201Created, await SeatedAsync(c, tx, staff, pc, session, paid, effects, now, guest: true));
         });
         await sessions.PublishAsync(effects);
         await AfterTopUpAsync(automation, logs, staff, paid);
-        return result;
+        return await WithGuestCodeAsync(db, result, code);
+    }
+
+    /// <summary>
+    /// The answer of a desk guest's seat with its code (D-96): <c>guestCode</c> is added to the answer, never to the stored
+    /// one, so the plain code is kept nowhere. A replay (the first answer was lost, the cashier never saw it) gives the seat a
+    /// new code and answers that one; the old code stops working. Without <paramref name="code"/>, or once the seat is gone
+    /// (ended meanwhile), the answer is as stored.
+    /// </summary>
+    private static async Task<IResult> WithGuestCodeAsync(NpgsqlDataSource db, IdempotentResult result, string? code)
+    {
+        if (code is null || result.Body is not { } stored || result.Status >= 300
+            || !stored.TryGetProperty("session", out var session) || !session.TryGetProperty("id", out var id))
+        {
+            return IdempotencyStore.ToHttp(result);
+        }
+
+        if (result.Replayed)
+        {
+            code = Guests.NewCode();
+            await using var c = await db.OpenConnectionAsync();
+            if (await c.ExecuteAsync(
+                    "UPDATE sessions SET guest_code_hash = @hash WHERE id = @id AND state <> 'ended' AND guest_code_hash IS NOT NULL",
+                    new { id = id.GetGuid(), hash = Passwords.Hash(code) }) == 0)
+            {
+                return IdempotencyStore.ToHttp(result);
+            }
+        }
+
+        var answer = System.Text.Json.Nodes.JsonNode.Parse(stored.GetRawText())!.AsObject();
+        answer["guestCode"] = code;
+        return Results.Content(answer.ToJsonString(), "application/json; charset=utf-8", statusCode: result.Status);
     }
 
     /// <summary>
@@ -393,6 +443,7 @@ public static partial class CounterEndpoints
         var r = Api.Read<AdminSessionTarget>(body, "minutes");
         var minutes = Minutes(r.Minutes!.Value);
         var payment = PaymentOf(r.Payment);
+        var budget = BudgetOf(r.Amount, prepaid: true);
         var effects = new SessionEffects();
         TopUpPosted? paid = null;
         var result = await store.ExecuteHttpAsync(context, ShiftEndpoints.Principal(staff), keyRequired: false, body, async (c, tx) =>
@@ -400,6 +451,12 @@ public static partial class CounterEndpoints
             var now = sessions.Clock.GetUtcNow();
             await ShiftEndpoints.RequireOpenAsync(c, tx, staff);
             var s = await TargetAsync(c, tx, staff, r);
+            if (budget is { } amount)
+            {
+                var zone = await c.ExecuteScalarAsync<string>("SELECT zone FROM pcs WHERE id = @PcId", new { s.PcId }, tx) ?? "";
+                minutes = await MinutesForAsync(c, tx, s.ClubId, s.UserId, zone, r.TariffId ?? s.TariffId, amount, s.PurchasedSec / 60, now);
+            }
+
             if (payment is { } pay)
             {
                 if (await c.ExecuteScalarAsync<bool>("SELECT transient FROM users WHERE id = @UserId", new { s.UserId }, tx))
@@ -525,7 +582,11 @@ public static partial class CounterEndpoints
     }
 
     /// <summary>A posted counter top-up: its ledger row, the balance after it, the tier bonus and how it was paid.</summary>
-    private sealed record TopUpPosted(Guid Id, Guid UserId, long Amount, long Balance, long Bonus, Transaction Transaction, string Method);
+    private sealed record TopUpPosted(Guid Id, Guid UserId, long Amount, long Balance, long Bonus, Transaction Transaction, string Method)
+    {
+        /// <summary>The amount of the top-up this one corrects (D-91): its automation already ran up to it.</summary>
+        public long ReachedBefore { get; init; }
+    }
 
     /// <summary>
     /// A counter top-up in the caller's transaction: the wallet locked first (§4.4: wallet → shifts), the top-up and the tier
@@ -536,7 +597,7 @@ public static partial class CounterEndpoints
     /// </summary>
     private static async Task<TopUpPosted> PostTopUpAsync(
         NpgsqlConnection c, NpgsqlTransaction tx, StaffContext staff, SessionEffects effects, Guid userId, long amount, string method, DateTimeOffset now,
-        bool forSession = false, bool settleDebt = false)
+        bool forSession = false, bool settleDebt = false, Guid? correctionOf = null)
     {
         var wallet = await c.QuerySingleOrDefaultAsync<(long Balance, string Who, bool Transient)?>(
             """
@@ -571,7 +632,11 @@ public static partial class CounterEndpoints
         var row = await c.QuerySingleAsync<(long BalanceAfter, string Description, DateTimeOffset CreatedAt)>(
             "SELECT balance_after, description, created_at FROM ledger_entries WHERE id = @id", new { id }, tx);
         await Audit.WriteAsync(c, tx, staff, now, "topUp", userId, amount: amount, detail: wallet.Who,
-            meta: new { method, bonus, promoPct = promoApplied ? promoPct : (int?)null, transactionId = id, forSession = forSession ? true : (bool?)null, debt = settleDebt ? true : (bool?)null });
+            meta: new
+            {
+                method, bonus, promoPct = promoApplied ? promoPct : (int?)null, transactionId = id, forSession = forSession ? true : (bool?)null,
+                debt = settleDebt ? true : (bool?)null, correctionOf,
+            });
         if (!settleDebt && amount >= await ClubSettingsEndpoints.BigTopupAtAsync(c, tx, staff.ClubId))
         {
             await Webhooks.EnqueueAsync(c, tx, staff.ClubId, "bigTopup", now, $"{wallet.Who}: {Webhooks.Sum(amount)}", new { userId, amount });
@@ -733,7 +798,7 @@ public static partial class CounterEndpoints
 
         try
         {
-            await automation.TopUpAsync(staff.ClubId, paid.UserId, paid.Amount, paid.Id);
+            await automation.TopUpAsync(staff.ClubId, paid.UserId, paid.Amount, paid.Id, paid.ReachedBefore);
         }
         catch (NpgsqlException ex)
         {
@@ -769,7 +834,7 @@ public static partial class CounterEndpoints
     public static long Percent(long amount, int pct) => ((amount * pct) + 5_000) / 10_000 * 100;
 
     /// <summary>The top-up row's description, which the player also reads in the kiosk's wallet history: words, not the method code.</summary>
-    private static string TopUpDescription(string method) => method switch
+    internal static string TopUpDescription(string method) => method switch
     {
         "cash" => "Пополнение на кассе наличными",
         "card" => "Пополнение на кассе картой",
@@ -857,12 +922,26 @@ public static partial class CounterEndpoints
         var zone = await c.QuerySingleOrDefaultAsync<string>(
             "SELECT zone FROM pcs WHERE id = @PcId AND club_id = @ClubId AND deleted_at IS NULL", new { r.PcId, staff.ClubId })
             ?? throw ApiException.NotFound("pc");
-        var minutes = tariff.IsPackage ? tariff.PackageMinutes!.Value : Minutes(r.Minutes ?? throw ApiException.Validation("minutes", "required"));
         var buyer = r.UserId is { } userId ? await SessionService.BuyerAsync(c, null, club, userId) : null;
         var now = clock.GetUtcNow();
-        var q = Pricing.Compute(tariff, minutes, buyer?.GroupId, buyer?.LifetimeSpent ?? 0, zone, now, club.Pricing);
+        Quote q;
+        if (BudgetOf(r.Amount, prepaid: true) is { } amount && !tariff.IsPackage)
+        {
+            // An extension's quote names its session: the tariff's maximum counts the minutes it already bought.
+            var purchased = r.SessionId is { } sessionId
+                ? await c.ExecuteScalarAsync<int?>("SELECT purchased_sec / 60 FROM sessions WHERE id = @sessionId AND club_id = @ClubId", new { sessionId, staff.ClubId })
+                  ?? throw ApiException.NotFound("session")
+                : 0;
+            q = MostFor(tariff, amount, purchased, buyer?.GroupId, buyer?.LifetimeSpent ?? 0, zone, now, club.Pricing);
+        }
+        else
+        {
+            var minutes = tariff.IsPackage ? tariff.PackageMinutes!.Value : Minutes(r.Minutes ?? throw ApiException.Validation("minutes", "required"));
+            q = Pricing.Compute(tariff, minutes, buyer?.GroupId, buyer?.LifetimeSpent ?? 0, zone, now, club.Pricing);
+        }
+
         return AdminJson.Ok(new AdminPriceQuote(
-            Money.Uzs(q.Base), q.DayPct, q.DiscountPct, q.DiscountReason, Money.Uzs(q.Total), SessionService.TariffRule(zone, tariff, club, now), minutes));
+            Money.Uzs(q.Base), q.DayPct, q.DiscountPct, q.DiscountReason, Money.Uzs(q.Total), SessionService.TariffRule(zone, tariff, club, now), q.Minutes));
     }
 
     /// <summary><c>settings.zones</c> (<c>AdminZone[]</c>); none configured — no zones.</summary>
@@ -909,6 +988,54 @@ public static partial class CounterEndpoints
         return id is { } sessionId && await SessionService.LockAsync(c, tx, sessionId) is { Ended: false } s && s.ClubId == staff.ClubId
             ? s
             : throw ApiException.NotFound("session");
+    }
+
+    /// <summary>
+    /// D-90: the <c>amount</c> of time «по сумме» (1 tiyin … 1 000 000 сум), only with a prepaid purchase
+    /// (<c>400 amount postpaid</c>); none — the minutes as sent.
+    /// </summary>
+    private static long? BudgetOf(long? amount, bool prepaid) => amount switch
+    {
+        null => null,
+        _ when !prepaid => throw ApiException.Validation("amount", "postpaid"),
+        < 1 => throw ApiException.Validation("amount", "min"),
+        > 100_000_000 => throw ApiException.Validation("amount", "max"),
+        { } a => a,
+    };
+
+    /// <summary>
+    /// D-90: the minutes <paramref name="amount"/> buys now of an hourly tariff for this buyer (null — a walk-in) on a PC
+    /// of <paramref name="zone"/>, in the action's transaction, so the desk and the charge never disagree: the most whole
+    /// minutes from the shortest purchase (5, or the tariff's minimum) up to 24 h and the tariff's maximum less
+    /// <paramref name="purchasedMinutes"/> (an extension). A package sells only itself (<c>400 amount package</c>); an amount
+    /// below the shortest purchase is <c>409 amountTooLow {minutes, total}</c>.
+    /// </summary>
+    private static async Task<int> MinutesForAsync(
+        NpgsqlConnection c, NpgsqlTransaction tx, Guid clubId, Guid? userId, string zone, Guid tariffId, long amount, int purchasedMinutes, DateTimeOffset now)
+    {
+        var club = await SessionService.ClubAsync(c, tx, clubId);
+        var tariff = await SessionService.TariffAsync(c, tx, clubId, tariffId) ?? throw ApiException.NotFound("tariff");
+        if (tariff.IsPackage)
+        {
+            throw ApiException.Validation("amount", "package");
+        }
+
+        var buyer = userId is { } id ? await SessionService.BuyerAsync(c, tx, club, id) ?? throw ApiException.NotFound("user") : null;
+        return MostFor(tariff, amount, purchasedMinutes, buyer?.GroupId, buyer?.LifetimeSpent ?? 0, zone, now, club.Pricing).Minutes;
+    }
+
+    /// <summary>The quote of <see cref="MinutesForAsync"/> (the console's live «≈ 1 ч 40 мин»), or <c>409 amountTooLow</c>.</summary>
+    private static Quote MostFor(
+        TariffRow tariff, long amount, int purchasedMinutes, string? groupId, long lifetimeSpent, string zone, DateTimeOffset now, ClubPricing club)
+    {
+        var shortest = purchasedMinutes > 0 ? 5 : Math.Max(5, tariff.MinMinutes);
+        var longest = Math.Min(1440, tariff.MaxMinutes is { } max ? max - purchasedMinutes : 1440);
+        return Pricing.MostFor(tariff, amount, shortest, longest, groupId, lifetimeSpent, zone, now, club)
+            ?? throw new ApiException(StatusCodes.Status409Conflict, ErrorCode.Conflict, "Conflict: amountTooLow", new
+            {
+                reason = "amountTooLow", minutes = shortest,
+                total = Money.Uzs(Pricing.Compute(tariff, shortest, groupId, lifetimeSpent, zone, now, club).Total),
+            });
     }
 
     private static int Minutes(int minutes) =>

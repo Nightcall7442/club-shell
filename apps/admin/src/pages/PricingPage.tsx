@@ -671,7 +671,9 @@ function TopUpPromoSection({ promo, set }: { promo: TopUpPromo; set: (p: Partial
     >
       <div className="flex flex-col gap-4" data-testid="topup-promo">
         <p className="text-sm text-muted">
-          {t('Гость пополняет — получает бонус сверху. 100 % — это x2. С бонусом по ступеням не суммируется: начисляется больший.')}
+          {t(
+            'Гость пополняет — получает бонус сверху. 100 % — это x2. С бонусом по ступеням не суммируется: начисляется больший.',
+          )}
         </p>
         <div className="flex flex-wrap gap-2">
           {[
@@ -818,7 +820,9 @@ function BonusTab({ s, set }: { s: ClubSettings; set: ClubSettingsState['set'] }
         />
       </Section>
 
-      {s.topUpPromo && <TopUpPromoSection promo={s.topUpPromo} set={(p) => set('topUpPromo', { ...s.topUpPromo!, ...p })} />}
+      {s.topUpPromo && (
+        <TopUpPromoSection promo={s.topUpPromo} set={(p) => set('topUpPromo', { ...s.topUpPromo!, ...p })} />
+      )}
 
       <Section
         title={t('Промокоды')}

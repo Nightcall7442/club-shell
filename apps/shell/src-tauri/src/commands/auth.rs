@@ -3,7 +3,7 @@
 
 use clubshell_protocol::commands::{
     names, AuthLoginRequest, AuthLoginResponse, AuthLogoutRequest, AuthLogoutResponse,
-    AuthStatusResponse,
+    AuthRegisterRequest, AuthStatusResponse,
 };
 use clubshell_protocol::session::SessionEndReason;
 use clubshell_protocol::user::{AuthKind, QrLoginStart};
@@ -17,6 +17,8 @@ const USERNAME_MAX: usize = 32;
 const PASSWORD_MAX: usize = 128;
 /// QR / card / one-time tokens.
 const TOKEN_MAX: usize = 512;
+/// A desk guest's seat code (D-96): four ASCII digits.
+const GUEST_CODE_LEN: usize = 4;
 
 /// `auth_login` → `auth.login`. Caches the returned user/session. `endElsewhere: true` (the player's
 /// confirmation after `409 activeSessionElsewhere`) is passed through as is: the server ends the
@@ -73,6 +75,49 @@ pub async fn auth_status(state: State<'_, AppState>) -> CmdResult<AuthStatusResp
     Ok(resp)
 }
 
+/// The player's name on a new account (the desk's limit).
+const DISPLAY_NAME_MAX: usize = 64;
+/// A new account's password: 4–64 characters (the server's rule).
+const NEW_PASSWORD_MIN: usize = 4;
+const NEW_PASSWORD_MAX: usize = 64;
+
+/// `auth_register` → `auth.register` (D-92): the player's own account from the lock screen, signed
+/// in at once like `auth_login` (the caches are filled the same way). The password is checked for
+/// length only and never logged; the club's switch, the login's rules and the per-PC limit are the
+/// server's.
+#[tauri::command]
+pub async fn auth_register(
+    state: State<'_, AppState>,
+    req: AuthRegisterRequest,
+) -> CmdResult<AuthLoginResponse> {
+    let req = validate_register(req)?;
+    let resp: AuthLoginResponse = state.agent.request(names::auth::REGISTER, &req).await?;
+    state.set_user(Some(resp.user.clone()));
+    state.set_session(resp.session.clone());
+    tracing::info!(user = %resp.user.username, "registered and signed in");
+    Ok(resp)
+}
+
+fn validate_register(mut req: AuthRegisterRequest) -> CmdResult<AuthRegisterRequest> {
+    req.display_name = Some(validate::required_text(
+        "displayName",
+        req.display_name.as_deref().unwrap_or_default(),
+        DISPLAY_NAME_MAX,
+    )?);
+    req.username = validate::optional_text("username", req.username, USERNAME_MAX)?;
+    let length = req.password.as_deref().map_or(0, |p| p.chars().count());
+    if length == 0 {
+        return Err(ShellError::validation("password", "required"));
+    }
+    if length < NEW_PASSWORD_MIN {
+        return Err(ShellError::validation("password", "min"));
+    }
+    if length > NEW_PASSWORD_MAX {
+        return Err(ShellError::validation("password", "max"));
+    }
+    Ok(req)
+}
+
 /// `auth_qr_start` → `auth.qrStart`.
 #[tauri::command]
 pub async fn auth_qr_start(state: State<'_, AppState>) -> CmdResult<QrLoginStart> {
@@ -121,7 +166,19 @@ fn validate_login(mut req: AuthLoginRequest) -> CmdResult<AuthLoginRequest> {
                 TOKEN_MAX,
             )?);
         }
-        AuthKind::Guest => {}
+        AuthKind::Guest => {
+            // The code the cash desk gave a walk-in guest for this PC's seat (D-96): exactly four digits when given.
+            if let Some(code) = req.code.as_deref().map(str::trim) {
+                if code.is_empty() {
+                    req.code = None;
+                } else if code.len() != GUEST_CODE_LEN || !code.bytes().all(|b| b.is_ascii_digit())
+                {
+                    return Err(ShellError::validation("code", "must be 4 digits"));
+                } else {
+                    req.code = Some(code.to_owned());
+                }
+            }
+        }
     }
     Ok(req)
 }
@@ -140,6 +197,7 @@ mod tests {
             card_id: None,
             token: None,
             end_elsewhere: None,
+            code: None,
         }
     }
 
@@ -207,5 +265,22 @@ mod tests {
         assert!(validate_login(login(AuthKind::Card)).is_err());
         assert!(validate_login(login(AuthKind::Token)).is_err());
         assert!(validate_login(login(AuthKind::Guest)).is_ok());
+    }
+
+    #[test]
+    fn a_guest_seat_code_is_four_digits() {
+        let guest = |code: &str| {
+            validate_login(AuthLoginRequest {
+                code: Some(code.into()),
+                ..login(AuthKind::Guest)
+            })
+        };
+        assert_eq!(guest(" 0420 ").unwrap().code.as_deref(), Some("0420"));
+        assert_eq!(guest("  ").unwrap().code, None);
+        for bad in ["123", "12345", "12a4", "١٢٣٤"] {
+            let e = guest(bad).unwrap_err();
+            assert_eq!(e.code, ErrorCode::Validation);
+            assert_eq!(e.details.unwrap()["field"], "code");
+        }
     }
 }

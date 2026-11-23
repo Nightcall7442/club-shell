@@ -4,6 +4,7 @@ using ClubShell.Contracts.Commands;
 using ClubShell.Contracts.Games;
 using ClubShell.Contracts.Serialization;
 using ClubShell.Server.Auth;
+using ClubShell.Server.Games;
 using ClubShell.Server.Infrastructure;
 using ClubShell.Server.Realtime;
 using Dapper;
@@ -17,13 +18,14 @@ namespace ClubShell.Server.Admin;
 /// <c>AdminGame</c>, plus what the console's catalog page reads and edits beyond the contract: <c>settingsPaths</c> (S5),
 /// how the game starts (<c>launcherAppId</c>, <c>exePath</c>, <c>args</c>), <c>description</c>, <c>custom</c> — the
 /// club's own game (added or changed by the owner), which the seed no longer touches — and <c>videoUrl</c>, the trailer
-/// the shell plays behind the game's art, and <c>zones</c>, the zones the game is offered in (empty = every zone).
+/// the shell plays behind the game's art, and <c>zones</c>, the zones the game is offered in (empty = every zone);
+/// <c>trailer</c> — the club server's copy of it and how far it got (D-97, <see cref="AdminTrailer"/>), null for none.
 /// </summary>
 public sealed record AdminGame(
     Guid Id, string Title, string? CoverUrl, bool Installed, string Launcher, IReadOnlyList<string> Category, bool Hidden, bool Featured,
     IReadOnlyList<string> SettingsPaths, string? LauncherAppId = null, string? ExePath = null, string? Args = null, string Description = "",
     bool Custom = false, string? VideoUrl = null, IReadOnlyList<string>? Zones = null, IReadOnlyList<GameRegistryValue>? RegistryValues = null,
-    bool RunAsInvoker = false, AdminElevationFailure? ElevationFailure = null);
+    bool RunAsInvoker = false, AdminElevationFailure? ElevationFailure = null, AdminTrailer? Trailer = null);
 
 /// <summary>
 /// The newest launch of the game refused for want of administrator rights since the card was last saved (SHELL_CHANGES 96,
@@ -74,6 +76,7 @@ public static partial class CatalogAdminEndpoints
 
     private static async Task<IResult> ListAsync(HttpContext context, NpgsqlDataSource db, TimeProvider clock)
     {
+        // A trailer the worker is fetching shows in the console as it goes (D-97).
         var staff = context.Features.GetRequiredFeature<StaffContext>();
         await using var c = await db.OpenConnectionAsync();
         var catalog = await c.ExecuteScalarAsync<string?>("SELECT (settings -> 'catalog')::text FROM clubs WHERE id = @ClubId", new { staff.ClubId });
@@ -88,9 +91,10 @@ public static partial class CatalogAdminEndpoints
                 """,
                 new { staff.ClubId, since = clock.GetUtcNow().AddDays(-14) }))
             .ToDictionary(e => e.GameId, e => new AdminElevationFailure(e.Pc, e.At));
+        var trailers = await TrailerStore.RowsAsync(c, staff.ClubId);
         var items = (await c.QueryAsync<GameRow>(
                 $"SELECT {GameRow.Columns} FROM games WHERE club_id = @ClubId AND deleted_at IS NULL", new { staff.ClubId }))
-            .Select(g => g.ToWire(hidden.Contains(g.Id), featured.Contains(g.Id), elevation.GetValueOrDefault(g.Id)))
+            .Select(g => g.ToWire(hidden.Contains(g.Id), featured.Contains(g.Id), elevation.GetValueOrDefault(g.Id), trailers.GetValueOrDefault(g.Id)))
             .OrderBy(g => order.IndexOf(g.Id) is var i and >= 0 ? i : int.MaxValue)
             .ThenBy(g => g.Title, StringComparer.Ordinal)
             .ThenBy(g => g.Id)
@@ -100,12 +104,14 @@ public static partial class CatalogAdminEndpoints
 
     /// <summary>A new game of the club; the id is the server's.</summary>
     private static async Task<IResult> AddAsync(
-        HttpContext context, [FromBody] JsonElement body, NpgsqlDataSource db, CommandDispatcher commands, AgentSocketHub hub, TimeProvider clock)
+        HttpContext context, [FromBody] JsonElement body, NpgsqlDataSource db, TrailerStore trailers, CommandDispatcher commands, AgentSocketHub hub,
+        TimeProvider clock)
     {
         var staff = context.Features.GetRequiredFeature<StaffContext>();
         var input = Parse(body);
         IReadOnlyList<(Guid PcId, ServerCommandEnvelope Command)> queued;
         GameRow row;
+        TrailerRow? trailer;
         await using (var c = await db.OpenConnectionAsync())
         await using (var tx = await c.BeginTransactionAsync())
         {
@@ -121,12 +127,14 @@ public static partial class CatalogAdminEndpoints
                 """,
                 new { game.Id, staff.ClubId, game.Title, data = Data(game), now }, tx);
             await Audit.WriteAsync(c, tx, staff, now, "gameAdd", detail: game.Title, meta: new { gameId = game.Id, launcher = Name(game.Launcher) });
+            await trailers.SyncAsync(c, tx, staff.ClubId, game.Id, now);
+            trailer = await TrailerStore.RowAsync(c, game.Id, tx);
             queued = await ChangedAsync(c, tx, commands, hub, staff, now);
             await tx.CommitAsync();
         }
 
         await ConfigRefresh.SendAsync(commands, queued);
-        return AdminJson.Ok(new AdminGameResponse(row.ToWire(false, false)));
+        return AdminJson.Ok(new AdminGameResponse(row.ToWire(false, false, trailer: trailer)));
     }
 
     /// <summary>
@@ -134,7 +142,8 @@ public static partial class CatalogAdminEndpoints
     /// age rating, anti-cheat…) stays. A seed game becomes the club's.
     /// </summary>
     private static async Task<IResult> SaveAsync(
-        HttpContext context, string id, [FromBody] JsonElement body, NpgsqlDataSource db, CommandDispatcher commands, AgentSocketHub hub, TimeProvider clock)
+        HttpContext context, string id, [FromBody] JsonElement body, NpgsqlDataSource db, TrailerStore trailers, CommandDispatcher commands, AgentSocketHub hub,
+        TimeProvider clock)
     {
         var staff = context.Features.GetRequiredFeature<StaffContext>();
         var input = Parse(body);
@@ -142,6 +151,7 @@ public static partial class CatalogAdminEndpoints
         IReadOnlyList<(Guid PcId, ServerCommandEnvelope Command)> queued;
         GameRow row;
         string? catalog;
+        TrailerRow? trailer;
         await using (var c = await db.OpenConnectionAsync())
         await using (var tx = await c.BeginTransactionAsync())
         {
@@ -158,6 +168,8 @@ public static partial class CatalogAdminEndpoints
                 """,
                 new { game.Title, data = Data(game), now, gameId, staff.ClubId }, tx);
             await Audit.WriteAsync(c, tx, staff, now, "gameSave", detail: game.Title, meta: new { gameId, launcher = Name(game.Launcher) });
+            await trailers.SyncAsync(c, tx, staff.ClubId, gameId, now);
+            trailer = await TrailerStore.RowAsync(c, gameId, tx);
             queued = await ChangedAsync(c, tx, commands, hub, staff, now);
             catalog = await c.ExecuteScalarAsync<string?>("SELECT (settings -> 'catalog')::text FROM clubs WHERE id = @ClubId", new { staff.ClubId }, tx);
             await tx.CommitAsync();
@@ -165,7 +177,7 @@ public static partial class CatalogAdminEndpoints
 
         await ConfigRefresh.SendAsync(commands, queued);
         var (_, hidden, featured) = Marks(catalog);
-        return AdminJson.Ok(new AdminGameResponse(row.ToWire(hidden.Contains(gameId), featured.Contains(gameId))));
+        return AdminJson.Ok(new AdminGameResponse(row.ToWire(hidden.Contains(gameId), featured.Contains(gameId), trailer: trailer)));
     }
 
     /// <summary>Soft delete (launch reports keep their game); a seed game stays deleted after the next start.</summary>
@@ -310,7 +322,7 @@ public static partial class CatalogAdminEndpoints
 
     /// <summary>The stored card: the agent's local fields and <c>settingsPaths</c> (a column) never go into <c>data</c>.</summary>
     private static string Data(Game game) =>
-        ServerJson.Jsonb(JsonDefaults.Serialize(game with { Installed = false, InstallPath = null, LastPlayedAt = null, SettingsPaths = null }));
+        ServerJson.Jsonb(JsonDefaults.Serialize(game with { Installed = false, InstallPath = null, LastPlayedAt = null, SettingsPaths = null, VideoSourceUrl = null }));
 
     private static string Name(LauncherType launcher) => Launchers.First(l => l.Value == launcher).Key;
 
@@ -319,8 +331,8 @@ public static partial class CatalogAdminEndpoints
     /// path of its <c>.exe</c> on the PCs (<c>C:\…</c> or <c>\\server\…</c>, quotes around it dropped); any other launcher needs its
     /// <c>launcherAppId</c> (Steam: the number from the store link) and runs no exe of its own. <c>coverUrl</c> is an
     /// http(s) link; without one a Steam game gets its store cover. <c>videoUrl</c>, the trailer, is an https link to the
-    /// file itself (<c>.mp4</c>/<c>.webm</c>; the shell plays https media only, and drops back to the art when it cannot);
-    /// without one the game has none. <c>category</c>: up to 5 keys as the shell knows them (<c>shooter</c>, <c>moba</c>,
+    /// file itself (<c>.mp4</c>/<c>.webm</c>), which the club server downloads once and the PCs play from it (D-97);
+    /// without one the server looks for one in the Steam store, unless the game has an uploaded one. <c>category</c>: up to 5 keys as the shell knows them (<c>shooter</c>, <c>moba</c>,
     /// …). Empty texts count as absent.
     /// </summary>
     private static GameInput Parse(JsonElement body)
@@ -514,7 +526,7 @@ public static partial class CatalogAdminEndpoints
 
         public string[]? Zones { get; init; }
 
-        public AdminGame ToWire(bool hidden, bool featured, AdminElevationFailure? elevation = null)
+        public AdminGame ToWire(bool hidden, bool featured, AdminElevationFailure? elevation = null, TrailerRow? trailer = null)
         {
             using var doc = JsonDocument.Parse(Data);
             var data = doc.RootElement;
@@ -533,7 +545,8 @@ public static partial class CatalogAdminEndpoints
                     ? [.. values.EnumerateArray().Select(v => JsonDefaults.Deserialize<GameRegistryValue>(v.GetRawText())!)]
                     : [],
                 data.TryGetProperty("runAsInvoker", out var invoker) && invoker.ValueKind == JsonValueKind.True,
-                data.TryGetProperty("runAsInvoker", out var off) && off.ValueKind == JsonValueKind.True ? null : elevation);
+                data.TryGetProperty("runAsInvoker", out var off) && off.ValueKind == JsonValueKind.True ? null : elevation,
+                TrailerStore.Wire(trailer));
         }
     }
 }

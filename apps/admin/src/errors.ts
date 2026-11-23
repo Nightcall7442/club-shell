@@ -39,6 +39,7 @@ const DETAIL_COPY: Record<string, string> = {
   staffOnly: 'Нужен вход кассира, ключ API не подходит',
   ownerOnly: 'Только владелец может это сделать',
   pcOccupied: 'На этом ПК идёт чужой сеанс',
+  playerLock: 'Игрок сам заблокировал ПК: открыть его можно только его PIN или паролем',
   // Cash desk part 3
   outOfStock: 'Столько нет на складе',
   notSellable: 'Этот товар не продаётся на кассе',
@@ -52,6 +53,12 @@ const DETAIL_COPY: Record<string, string> = {
   sessionEnding: 'Сеанс завершается',
   targetOffline: 'ПК не на связи',
   targetHasLocalSession: 'На ПК ещё не отправлен свой сеанс — подождите минуту',
+  // D-91: a desk top-up taken back
+  alreadyCancelled: 'Это пополнение уже отменено',
+  topUpShiftClosed: 'Пополнение другой смены: её касса уже закрыта',
+  notCorrectable: 'Это пополнение отменить нельзя: оно было оплатой сеанса или долга',
+  cancelWindow: 'Кассир отменяет пополнение в течение 15 минут, позже — владелец',
+  notOwnTopUp: 'Кассир отменяет только своё пополнение',
 };
 
 /** An amount the server sends as minor units or as a `Money`; null when neither. */
@@ -68,6 +75,8 @@ const VALIDATION_COPY: Record<string, string> = {
   'note:required': 'Для «Другое» напишите комментарий',
   'note:min': 'Комментарий — не короче 3 символов',
   'note:max': 'Комментарий — не длиннее 200 символов',
+  'amount:package': 'Пакет продаётся целиком, не по сумме',
+  'amount:same': 'Это та же сумма',
   'registryValues:key': 'Ключ реестра — только под HKCU\\Software и не в разделе Policies',
 };
 
@@ -123,6 +132,17 @@ export function describe(e: unknown): string {
       if (reason === 'outOfStock' && typeof d['available'] === 'number')
         return d['available'] > 0 ? t('На складе осталось {n} шт', { n: d['available'] }) : t('Товар закончился');
       if (reason === 'tariffZone') return t('Тариф не для зоны нового ПК — выберите другой');
+      // D-90: the amount does not reach the shortest purchase.
+      if (reason === 'amountTooLow' && typeof d['minutes'] === 'number' && amountOf(d['total']) !== null)
+        return t('Мало: {time} стоят {sum}', {
+          time: t('{n} мин', { n: d['minutes'] }),
+          sum: moneyExact(amountOf(d['total']) ?? 0),
+        });
+      // D-91: the player spent part of the top-up already.
+      if (reason === 'topUpSpent' && isMoney(d['spendable']))
+        return t('Клиент уже потратил часть: на балансе можно вернуть только {sum}', {
+          sum: moneyExact(d['spendable'].amount),
+        });
     }
     if (e.code === 'validation') {
       const copy = VALIDATION_COPY[`${String(d['field'])}:${String(d['reason'])}`];

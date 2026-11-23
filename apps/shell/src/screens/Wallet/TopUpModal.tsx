@@ -313,12 +313,13 @@ export function TopUpModal({ open, onClose, onPaid }: TopUpModalProps): JSX.Elem
           <fieldset className="flex flex-col gap-2">
             <legend className="mb-2 text-sm font-medium text-muted">{t('wallet.quickAmounts')}</legend>
             <div className="grid grid-cols-4 gap-2">
-              {TOPUP_PRESETS_UZS.map((value, i) => {
+              {TOPUP_PRESETS_UZS.map((value) => {
                 const active = custom.trim().length === 0 && preset === value;
                 return (
                   <button
                     key={value}
-                    ref={i === 0 ? firstFocus : undefined}
+                    // Focus starts on the chosen sum: on the first one it read as a second selection.
+                    ref={value === (preset ?? TOPUP_PRESETS_UZS[0]) ? firstFocus : undefined}
                     type="button"
                     data-nav="true"
                     aria-pressed={active}

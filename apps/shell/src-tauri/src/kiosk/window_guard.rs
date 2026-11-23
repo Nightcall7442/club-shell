@@ -1,9 +1,14 @@
 //! Main-window guard: fullscreen borderless on the primary monitor, close prevention, foreground
 //! re-assertion on focus loss (honouring a process allowlist: the running game, `TabTip.exe`, a
-//! program the dock handed the foreground to), a periodic sweep that minimizes stray windows of
-//! non-allowlisted processes, screen-capture affinity, and the `kiosk://focus` event
-//! (`TAURI_COMMANDS.md` §3.2). Dev mode turns the window into a normal resizable one and disables
-//! every guard.
+//! program the dock or a launch handed the foreground to, with the processes of that program's own
+//! folder), a periodic sweep that minimizes stray windows of non-allowlisted processes,
+//! screen-capture affinity, and the `kiosk://focus` event (`TAURI_COMMANDS.md` §3.2). Dev mode turns
+//! the window into a normal resizable one and disables every guard.
+//!
+//! While a program is handed the foreground, a quick check ([`HAND_OFF_CHECK`]) brings the Shell back
+//! the moment the program is no longer what the player sees: it closed, it was minimized (Windows
+//! may leave a minimized window "in front" with nothing on the screen but black), or something
+//! outside the allowlist took over.
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -34,6 +39,28 @@ pub const MAIN_LABEL: &str = "main";
 pub const SWEEP_INTERVAL: Duration = Duration::from_secs(3);
 /// Delay before re-taking the foreground after a focus loss (lets transient popups settle).
 const REFOCUS_DELAY: Duration = Duration::from_millis(200);
+/// Period of the hand-off check: how soon the Shell is back once the program handed the foreground
+/// is minimized or closed (the 3 s sweep left the player looking at a black screen meanwhile).
+pub const HAND_OFF_CHECK: Duration = Duration::from_millis(400);
+/// Last folder names many programs share: a program in one of them owns no folder ([`own_folder`]).
+const SHARED_FOLDERS: [&str; 16] = [
+    "windows",
+    "system32",
+    "syswow64",
+    "program files",
+    "program files (x86)",
+    "programdata",
+    "users",
+    "appdata",
+    "local",
+    "locallow",
+    "roaming",
+    "programs",
+    "temp",
+    "desktop",
+    "downloads",
+    "games",
+];
 const DEV_WINDOW_SIZE: (f64, f64) = (1280.0, 800.0);
 /// Window classes never minimized: desktop/shell, our display watcher, the touch keyboard, system UI.
 pub(crate) const SKIP_CLASSES: [&str; 9] = [
@@ -117,6 +144,30 @@ pub(crate) fn process_path(pid: u32) -> Option<String> {
     native::process_path(pid)
 }
 
+/// `C:/Program Files/X/` → `c:\program files\x`: one spelling for comparing Windows paths.
+pub(crate) fn normalize_path(path: &str) -> String {
+    path.trim()
+        .trim_matches('"')
+        .replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_lowercase()
+}
+
+/// The folder a program's executable owns (normalized), or `None` when that folder is shared by
+/// other programs: under the Windows directory, a drive root or a first-level folder, or a
+/// well-known shared one (`Program Files`, `AppData\Local`, ...). The Agent's `RunningApps` applies
+/// the same rule to tell an app's processes.
+pub(crate) fn own_folder(exe_path: &str) -> Option<String> {
+    let exe = normalize_path(exe_path);
+    let (dir, _) = exe.rsplit_once('\\')?;
+    let parts: Vec<&str> = dir.split('\\').filter(|p| !p.is_empty()).collect();
+    if parts.len() < 3 || parts[1] == "windows" || SHARED_FOLDERS.contains(&parts[parts.len() - 1])
+    {
+        return None;
+    }
+    Some(dir.to_owned())
+}
+
 /// Executable name (`game.exe`) of `pid`, when accessible.
 /// Image name of `pid` (`hl.exe`), for the log; `None` for pid 0 or when it cannot be read.
 pub(crate) fn process_name_of(pid: u32) -> Option<String> {
@@ -171,12 +222,16 @@ pub struct WindowGuard {
     allowed: RwLock<HashSet<u32>>,
     /// Process the dock handed the foreground to, until the Shell is focused again.
     hand_off: Mutex<Option<u32>>,
+    /// Own folder of the hand-off program ([`own_folder`]): its other processes (Discord's helpers,
+    /// Steam's `steamwebhelper.exe`) open windows and take the foreground too.
+    hand_off_dir: RwLock<Option<String>>,
     /// Run when the Shell takes the foreground back from a hand-off (the kiosk re-arms its guard).
     on_return: OnceLock<Box<dyn Fn() + Send + Sync>>,
     /// Run when the Shell's window gets the focus during a game (the kiosk may give it back to the game).
     on_game_focus: OnceLock<Box<dyn Fn() + Send + Sync>>,
     refocus: Mutex<Option<JoinHandle<()>>>,
     sweep: Mutex<Option<JoinHandle<()>>>,
+    hand_off_check: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl WindowGuard {
@@ -204,10 +259,12 @@ impl WindowGuard {
             shutting_down: AtomicBool::new(false),
             allowed: RwLock::new(HashSet::new()),
             hand_off: Mutex::new(None),
+            hand_off_dir: RwLock::new(None),
             on_return: OnceLock::new(),
             on_game_focus: OnceLock::new(),
             refocus: Mutex::new(None),
             sweep: Mutex::new(None),
+            hand_off_check: Mutex::new(None),
         });
         if dev {
             guard.apply_dev_window();
@@ -227,6 +284,7 @@ impl WindowGuard {
             }
         });
         guard.spawn_sweep();
+        guard.spawn_hand_off_check();
         tracing::info!(
             hwnd,
             dev,
@@ -344,6 +402,15 @@ impl WindowGuard {
         self.game_mode.load(Ordering::Acquire)
     }
 
+    /// tao's own always-on-top flag (SHELL_CHANGES 81): tao writes `WS_EX_TOPMOST` back from it on its
+    /// next style change, so a program put in front of the Shell with `set_topmost(false)` alone found
+    /// the Shell back on top of it a moment later. No activation. No-op in dev mode.
+    pub fn set_topmost_flag(&self, on: bool) {
+        if !self.dev {
+            let _ = self.window.set_always_on_top(on);
+        }
+    }
+
     pub fn set_locked(&self, locked: bool) {
         self.locked.store(locked, Ordering::Release);
     }
@@ -378,18 +445,41 @@ impl WindowGuard {
     }
 
     pub fn is_allowed_pid(&self, pid: u32) -> bool {
-        pid == self.own_pid || self.allowed.read().contains(&pid)
+        pid == self.own_pid || self.allowed.read().contains(&pid) || self.in_hand_off_folder(pid)
+    }
+
+    /// `pid` runs from the own folder of the program handed the foreground.
+    fn in_hand_off_folder(&self, pid: u32) -> bool {
+        if pid == 0 {
+            return false;
+        }
+        let Some(dir) = self.hand_off_dir.read().clone() else {
+            return false;
+        };
+        process_path(pid).is_some_and(|path| {
+            normalize_path(&path)
+                .strip_prefix(&dir)
+                .is_some_and(|rest| rest.starts_with('\\'))
+        })
     }
 
     /// Marks `pid` as the program the dock put in front (it must also be allowlisted); returns the
-    /// previous one. While set, the sweep also re-focuses the Shell when anything else takes over.
+    /// previous one. While set, the hand-off check re-focuses the Shell when anything else takes over
+    /// or the program is minimized.
     pub fn begin_hand_off(&self, pid: u32) -> Option<u32> {
+        *self.hand_off_dir.write() = process_path(pid).as_deref().and_then(own_folder);
         self.hand_off.lock().replace(pid)
     }
 
     /// Clears the hand-off; returns the program it was for.
     pub fn take_hand_off(&self) -> Option<u32> {
+        *self.hand_off_dir.write() = None;
         self.hand_off.lock().take()
+    }
+
+    /// The program the foreground is handed to, if any.
+    pub fn hand_off_pid(&self) -> Option<u32> {
+        *self.hand_off.lock()
     }
 
     pub fn is_handed_off(&self) -> bool {
@@ -427,6 +517,9 @@ impl WindowGuard {
             task.abort();
         }
         if let Some(task) = self.refocus.lock().take() {
+            task.abort();
+        }
+        if let Some(task) = self.hand_off_check.lock().take() {
             task.abort();
         }
         let _ = self.window.set_always_on_top(false);
@@ -540,16 +633,54 @@ impl WindowGuard {
                 tick.tick().await;
                 let Some(guard) = weak.upgrade() else { break };
                 if guard.should_guard() {
-                    // During a hand-off the topmost guard is paused: should the program close or
-                    // something else take the foreground, nobody else brings the Shell back.
-                    if guard.is_handed_off() {
-                        guard.refocus_if_needed();
-                    }
                     guard.sweep_stray_windows();
                 }
             }
         });
         *self.sweep.lock() = Some(task);
+    }
+
+    /// During a hand-off the topmost guard is paused: should the program close, be minimized or
+    /// lose the foreground to something else, nobody else brings the Shell back.
+    fn spawn_hand_off_check(self: &Arc<Self>) {
+        let weak: Weak<Self> = Arc::downgrade(self);
+        let task = tauri::async_runtime::spawn(async move {
+            let mut tick = tokio::time::interval(HAND_OFF_CHECK);
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tick.tick().await;
+                let Some(guard) = weak.upgrade() else { break };
+                if guard.should_guard() && guard.is_handed_off() {
+                    guard.check_hand_off();
+                }
+            }
+        });
+        *self.hand_off_check.lock() = Some(task);
+    }
+
+    /// One hand-off check: the Shell takes the screen back when the foreground is nobody's, a
+    /// minimized window (what minimizing the only program in front leaves) or outside the allowlist.
+    fn check_hand_off(&self) {
+        let hwnd = foreground_window();
+        let pid = if hwnd == 0 {
+            0
+        } else {
+            window_pid(hwnd).unwrap_or(0)
+        };
+        if pid == self.own_pid {
+            return; // the Shell (or its HUD) is in front already
+        }
+        let minimized = hwnd != 0 && native::is_iconic(hwnd);
+        if hwnd != 0 && !minimized && self.is_allowed_pid(pid) {
+            return;
+        }
+        let ok = self.focus();
+        tracing::info!(
+            pid,
+            minimized,
+            ok,
+            "handed-off program no longer in front; the shell takes the screen back"
+        );
     }
 
     /// Minimizes visible, titled top-level windows of processes that are neither us nor allowlisted.
@@ -603,5 +734,33 @@ mod tests {
         assert!(SKIP_CLASSES
             .iter()
             .any(|c| c.eq_ignore_ascii_case("shell_traywnd")));
+    }
+
+    #[test]
+    fn own_folder_skips_shared_folders() {
+        assert_eq!(
+            own_folder(r"C:\Program Files (x86)\Steam\steam.exe").as_deref(),
+            Some(r"c:\program files (x86)\steam")
+        );
+        assert_eq!(
+            own_folder(r"C:/Users/kiosk/AppData/Local/Discord/Update.exe").as_deref(),
+            Some(r"c:\users\kiosk\appdata\local\discord")
+        );
+        for shared in [
+            r"C:\Windows\System32\notepad.exe",
+            r"C:\Windows\notepad.exe",
+            r"C:\Program Files\tool.exe",
+            r"D:\Apps\tool.exe",
+            r"C:\Users\kiosk\AppData\Local\tool.exe",
+            r"tool.exe",
+            "",
+        ] {
+            assert_eq!(own_folder(shared), None, "{shared}");
+        }
+        assert_eq!(
+            normalize_path(r#""C:\Games\X\""#),
+            r"c:\games\x",
+            "quotes and the trailing separator go"
+        );
     }
 }

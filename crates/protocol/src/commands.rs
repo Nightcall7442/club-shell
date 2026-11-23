@@ -46,6 +46,14 @@ pub mod agent_capabilities {
     pub const TOURNAMENTS: &str = "tournaments";
 }
 
+/// Request of `apps.kill`: ends every process of one app (never the Shell, the Agent or a game).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AppsKillRequest {
+    /// App id.
+    pub app_id: Uuid,
+}
+
 /// Request of `apps.launch`.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -55,19 +63,31 @@ pub struct AppsLaunchRequest {
     /// Extra command line.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub args: Option<String>,
+    /// Start it even when it runs already. The Shell asks this when the running app has no window
+    /// to bring forward (it lives in the tray, as Discord or Steam do): started again, such an app
+    /// shows its window.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub force: Option<bool>,
 }
 
 /// Response of `apps.launch`.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AppsLaunchResponse {
     /// Always `true`.
     pub ok: bool,
-    /// Process id.
+    /// Process id (the running instance's when `alreadyRunning`).
     pub pid: i32,
-    /// Launch time.
+    /// Launch time (the running instance's when `alreadyRunning`).
     #[serde(with = "crate::wire::ts")]
     pub started_at: DateTime<Utc>,
+    /// The app was running already and nothing was started: the Shell brings its window to the
+    /// front instead of opening a second copy.
+    #[serde(default)]
+    pub already_running: bool,
+    /// Every process of the app the Agent knows of (the new one alone after a fresh launch).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pids: Option<Vec<i32>>,
 }
 
 /// Response of `apps.list` and `GET /apps`.
@@ -148,6 +168,10 @@ pub struct AuthLoginRequest {
     /// activeSessionElsewhere` (`AuthRequest.EndElsewhere`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_elsewhere: Option<bool>,
+    /// `AuthKind.Guest`: the four-digit code the cash desk gave a walk-in guest for this PC's seat
+    /// (`GuestAuthRequest.Code`, D-96).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
 }
 
 /// Response of `auth.login`.
@@ -187,6 +211,27 @@ pub struct AuthLogoutResponse {
     /// The ended session, when any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<Session>,
+}
+
+/// Request of `auth.register` (D-92): a player creates their own account on the lock screen, where
+/// the club allows it (`shell.club.selfSignup`), and is signed in with it. Secrets are never
+/// logged.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthRegisterRequest {
+    /// The player's name, 1–64 characters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    /// Login, 3–32 characters, or a phone number (stored as its digits); empty — the server makes
+    /// one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    /// Password, 4–64 characters (the Shell asks for it twice).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    /// The player accepted the club rules; required when the club has rules.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accept_rules: Option<bool>,
 }
 
 /// Response of `auth.status`.
@@ -518,6 +563,8 @@ pub mod names {
         pub const STATUS: &str = "auth.status";
         /// — → `QrLoginStart`.
         pub const QR_START: &str = "auth.qrStart";
+        /// `AuthRegisterRequest` → `AuthLoginResponse` (D-92).
+        pub const REGISTER: &str = "auth.register";
     }
 
     /// `session.*`
@@ -566,6 +613,10 @@ pub mod names {
         pub const LIST: &str = "apps.list";
         /// `AppsLaunchRequest` → `AppsLaunchResponse`.
         pub const LAUNCH: &str = "apps.launch";
+        /// — → `AppsRunningResponse`.
+        pub const RUNNING: &str = "apps.running";
+        /// `AppsKillRequest` → `GamesKillResponse`.
+        pub const KILL: &str = "apps.kill";
     }
 
     /// `wallet.*`
@@ -845,6 +896,31 @@ pub struct PolicyReloadResponse {
 pub struct ProfileAchievementsResponse {
     /// Achievements.
     pub items: Vec<Achievement>,
+}
+
+/// An app running in the player's session (`apps.running`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RunningApp {
+    /// App id.
+    pub app_id: Uuid,
+    /// App title.
+    pub title: String,
+    /// Main process: the one the Agent started, else the oldest of `pids`.
+    pub pid: i32,
+    /// Every process of the app: the started one, its descendants and the app's own executables.
+    pub pids: Vec<i32>,
+    /// When the Agent started it, else when its main process started.
+    #[serde(with = "crate::wire::ts")]
+    pub started_at: DateTime<Utc>,
+}
+
+/// Response of `apps.running`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AppsRunningResponse {
+    /// Running apps, oldest first.
+    pub items: Vec<RunningApp>,
 }
 
 /// Request of `session.end`.
@@ -1491,6 +1567,27 @@ pub struct WalletHistoryResponse {
     pub page_size: i32,
 }
 
+/// Request of `wallet.redeemPromo` (D-88): the member's own promo code of the club.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WalletRedeemPromoRequest {
+    /// The code as typed (case does not matter), 1–32 characters.
+    pub code: String,
+}
+
+/// Response of `wallet.redeemPromo`: the code as the club wrote it, the bonus credited and the new
+/// balance.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WalletRedeemPromoResponse {
+    /// The code.
+    pub code: String,
+    /// Credited to the main balance.
+    pub bonus: Money,
+    /// Main balance after the credit.
+    pub balance: Money,
+}
+
 /// Request of `wallet.tariffs`.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -1521,26 +1618,6 @@ pub struct WalletTopupIntentRequest {
     pub amount: Money,
     /// Provider.
     pub provider: TopupProvider,
-}
-
-/// Request of `wallet.redeemPromo` (D-88): the member's own promo code of the club.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct WalletRedeemPromoRequest {
-    /// The code as typed (case does not matter), 1–32 characters.
-    pub code: String,
-}
-
-/// Response of `wallet.redeemPromo`: the code as the club wrote it, the bonus credited and the new balance.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct WalletRedeemPromoResponse {
-    /// The code.
-    pub code: String,
-    /// Credited to the main balance.
-    pub bonus: Money,
-    /// Main balance after the credit.
-    pub balance: Money,
 }
 
 wire_enum! {
@@ -2662,6 +2739,7 @@ agent_commands! {
     AuthLogout => names::auth::LOGOUT, User;
     AuthStatus => names::auth::STATUS, Hello;
     AuthQrStart => names::auth::QR_START, Hello;
+    AuthRegister => names::auth::REGISTER, Hello;
     SessionGet => names::session::GET, User;
     SessionStart => names::session::START, User;
     SessionPause => names::session::PAUSE, Session;
@@ -2680,6 +2758,8 @@ agent_commands! {
     GamesInstallStatus => names::games::INSTALL_STATUS, Hello;
     AppsList => names::apps::LIST, Hello;
     AppsLaunch => names::apps::LAUNCH, Session;
+    AppsRunning => names::apps::RUNNING, Hello;
+    AppsKill => names::apps::KILL, Session;
     WalletBalance => names::wallet::BALANCE, User;
     WalletTariffs => names::wallet::TARIFFS, Hello;
     WalletHistory => names::wallet::HISTORY, User;
@@ -3134,13 +3214,14 @@ mod tests {
 
     #[test]
     fn agent_command_table_matches_ipc_protocol() {
-        assert_eq!(AgentCommand::ALL.len(), 70);
+        assert_eq!(AgentCommand::ALL.len(), 73);
         let expected: &[&str] = &[
             "auth.hello",
             "auth.login",
             "auth.logout",
             "auth.status",
             "auth.qrStart",
+            "auth.register",
             "session.get",
             "session.start",
             "session.pause",
@@ -3159,6 +3240,8 @@ mod tests {
             "games.installStatus",
             "apps.list",
             "apps.launch",
+            "apps.running",
+            "apps.kill",
             "wallet.balance",
             "wallet.tariffs",
             "wallet.history",
@@ -3296,6 +3379,7 @@ mod tests {
             card_id: None,
             token: None,
             end_elsewhere: None,
+            code: None,
         };
         assert_eq!(
             serde_json::to_string(&login).unwrap(),
@@ -3444,11 +3528,19 @@ mod tests {
             serde_json::to_string(&AppsLaunchResponse {
                 ok: true,
                 pid: 5,
-                started_at: t(1, 2, 3)
+                started_at: t(1, 2, 3),
+                already_running: false,
+                pids: None,
             })
             .unwrap(),
-            r#"{"ok":true,"pid":5,"startedAt":"2026-09-21T01:02:03.000Z"}"#
+            r#"{"ok":true,"pid":5,"startedAt":"2026-09-21T01:02:03.000Z","alreadyRunning":false}"#
         );
+        let again: AppsLaunchResponse = serde_json::from_str(
+            r#"{"ok":true,"pid":5,"startedAt":"2026-09-21T01:02:03.000Z","alreadyRunning":true,"pids":[5,6]}"#,
+        )
+        .unwrap();
+        assert!(again.already_running);
+        assert_eq!(again.pids, Some(vec![5, 6]));
 
         let hist = WalletHistoryRequest {
             page: Some(2),

@@ -192,6 +192,12 @@ public interface IAuthApi
     Task<AuthResponse> GuestLoginAsync(GuestAuthRequest request, CancellationToken cancellationToken);
 
     /// <summary>
+    /// <c>POST /auth/register</c> (D-92, beyond the contract): a new member account made from this PC, answered like a sign-in
+    /// (the tokens are kept the same way); a server without it answers 404.
+    /// </summary>
+    Task<AuthResponse> RegisterPlayerAsync(RegisterAuthRequest request, CancellationToken cancellationToken);
+
+    /// <summary>
     /// <c>POST /auth/logout</c> (auth: user). The stored player token is dropped once the server answered (a refusal
     /// included); after a transport failure it is kept, so the sign-out can be replayed with it.
     /// </summary>

@@ -119,13 +119,19 @@ pub async fn kiosk_virtual_keyboard(
     kiosk.virtual_keyboard(show)
 }
 
-/// `kiosk_focus`: re-asserts the Shell window in the foreground.
+/// `kiosk_focus`: re-asserts the Shell window in the foreground. `user: true` is the player asking for it (the HUD's
+/// "back to ClubShell"), which works during a game too.
 #[tauri::command]
-pub async fn kiosk_focus(kiosk: State<'_, Arc<Kiosk>>) -> CmdResult<()> {
-    if kiosk.is_game_mode() {
+pub async fn kiosk_focus(kiosk: State<'_, Arc<Kiosk>>, user: Option<bool>) -> CmdResult<()> {
+    if kiosk.is_game_mode() && user != Some(true) {
         // SHELL_CHANGES 80/81: during a game the Shell never activates itself; it comes back when the game ends.
         tracing::debug!("kiosk_focus ignored during a game");
         return Ok(());
+    }
+    if kiosk.is_game_mode() {
+        // The HUD's "back to ClubShell" used to end up above and do nothing: the player had no way back but closing
+        // the game. The click is fresh input, so the game-focus handler leaves the Shell in front (GAME_REFOCUS_QUIET).
+        tracing::info!("back to the shell during a game (player)");
     }
     if !kiosk.window().focus() {
         tracing::debug!("kiosk_focus: window is not in the foreground after the request");

@@ -567,6 +567,25 @@ impl MockTransport {
                 // The mock player has a PIN (any unlocks); the dev mock never locks from the desk.
                 "lockedByStaff": false, "pinSet": db.user.is_some()
             })),
+            AgentCommand::AuthRegister => {
+                // A new member with zero balances, signed in at once (no session yet).
+                let mut user = mock_user();
+                let name = p["displayName"].as_str().unwrap_or("Player");
+                let login = p["username"]
+                    .as_str()
+                    .filter(|s| !s.trim().is_empty())
+                    .map(|s| s.trim().to_lowercase())
+                    .unwrap_or_else(|| "player".to_owned());
+                user["id"] = json!(Uuid::new_v4());
+                user["username"] = json!(login);
+                user["displayName"] = json!(name);
+                user["balance"] = money(0);
+                db.user = Some(user.clone());
+                db.session = None;
+                Some(
+                    json!({ "user": user, "session": null, "expiresAt": in_secs(8 * 3600), "mode": "online" }),
+                )
+            }
             AgentCommand::AuthQrStart => Some(json!({
                 "qrToken": "mock-qr-token", "qrUrl": "https://example.invalid/qr/mock", "expiresAt": in_secs(120), "pollIntervalSec": 2
             })),
@@ -743,7 +762,11 @@ impl MockTransport {
                 { "id": MOCK_APP, "title": "Discord", "exePath": "C:\\Program Files\\Discord\\Discord.exe", "iconUrl": "", "category": "chat", "allowed": true }
             ] })),
             AgentCommand::AppsLaunch => {
-                Some(json!({ "ok": true, "pid": 4343, "startedAt": now() }))
+                Some(json!({ "ok": true, "pid": 4343, "startedAt": now(), "pids": [4343] }))
+            }
+            AgentCommand::AppsRunning => Some(json!({ "items": [] })),
+            AgentCommand::AppsKill => {
+                return Err(mock_err(ErrorCode::NotFound, "App is not running"));
             }
             AgentCommand::WalletBalance => Some(
                 json!({ "userId": user_id, "amount": money(50_000), "bonus": money(0), "currency": "UZS", "updatedAt": now() }),

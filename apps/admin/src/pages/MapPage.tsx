@@ -114,8 +114,17 @@ const VIEW_KEY = 'clubshell.admin.map.view';
  */
 const IGNORED_MINUTES = 60;
 
-/** A result line in the seat panel; a money step adds its slip («Чек») and a walk-in guest how to sign in. */
-type NoteState = { text: string; tone: 'ok' | 'warn' | 'err'; receipt?: ReceiptData; hint?: string } | null;
+/**
+ * A result line in the seat panel; a money step adds its slip («Чек»), a walk-in guest how to sign in and the seat's
+ * code (D-96), shown here once.
+ */
+type NoteState = {
+  text: string;
+  tone: 'ok' | 'warn' | 'err';
+  receipt?: ReceiptData;
+  hint?: string;
+  guestCode?: { code: string; pc: string };
+} | null;
 
 /**
  * A PC status in words: `label` for the tile's title and the seat card, `word` for the tile's bottom line (free,
@@ -393,6 +402,8 @@ function SeatTile({
   const status = seat.pc.status;
   // A plan cell too small for a second line: the number alone (the status dot and the title say the rest).
   const tiny = compact && typeof box?.width === 'number' && box.width < 28;
+  // A short plan tile (1366×768): the time goes up beside the number and the game line drops, so nothing spills out.
+  const dense = !compact && typeof box?.height === 'number' && box.height < 92;
   const session = seat.session;
   const left = secondsLeft(session);
   const prepaid = session?.isPrepaid ?? false;
@@ -479,7 +490,11 @@ function SeatTile({
       className={clsx(
         'focus-ring hud-focus group flex min-w-0 flex-col justify-between rounded-md border text-left transition-[border-color,box-shadow,opacity] duration-200',
         box ? 'absolute' : 'relative h-28',
-        compact ? 'items-center overflow-hidden px-0.5 py-0.5' : 'pb-[13px] pl-3.5 pr-3 pt-3',
+        compact
+          ? 'items-center overflow-hidden px-0.5 py-0.5'
+          : dense
+            ? 'overflow-hidden py-2 pl-3.5 pr-2.5'
+            : 'pb-[13px] pl-3.5 pr-3 pt-3',
         box && (selected || checked) && 'z-20',
         // Border and glow: amber when the cashier is needed, the accent when selected, else the state's hairline.
         call
@@ -505,6 +520,26 @@ function SeatTile({
         blocked && 'cursor-not-allowed',
       )}
     >
+      {/* The state at a glance, on every tile and every size: green free, accent playing, amber ending or calling,
+          red locked or in repair, grey off. */}
+      <span
+        aria-hidden="true"
+        className={clsx(
+          'pointer-events-none absolute left-0 z-10 w-[3px] rounded-r-full',
+          compact ? 'bottom-1.5 top-1.5' : 'bottom-2.5 top-2.5',
+          call || ending
+            ? 'bg-warning shadow-[0_0_8px_rgb(var(--c-warning)/0.7)]'
+            : session
+              ? 'bg-accent shadow-[0_0_8px_rgb(var(--c-accent)/0.6)]'
+              : status === 'locked' || status === 'maintenance' || repair === 'high'
+                ? 'bg-danger'
+                : status === 'offline'
+                  ? 'bg-text/20'
+                  : status === 'booked'
+                    ? 'bg-accent/50'
+                    : 'bg-success',
+        )}
+      />
       {art ? (
         <GameArt src={cover} variant="tile" zoom>
           {bar}
@@ -538,6 +573,17 @@ function SeatTile({
           {pad2(seat.pc.number)}
         </span>
         <span className="flex min-w-0 items-center gap-1">
+          {dense && session && prepaid && (
+            <span
+              className={clsx(
+                'num-dot mr-1 text-[13px] leading-none',
+                ending ? 'text-warning' : 'text-white',
+                art && SHADOW_READOUT,
+              )}
+            >
+              {clockLeft(left)}
+            </span>
+          )}
           {call && (
             <span
               className={clsx(
@@ -616,7 +662,7 @@ function SeatTile({
               {nameOf(seat.user)}
             </span>
           )}
-          {sub.length > 0 && (
+          {sub.length > 0 && !dense && (
             <span
               className={clsx(
                 'mt-0.5 block truncate font-mono text-[9px] font-medium uppercase leading-3 tracking-[0.06em] text-[#D3DBE1]',
@@ -641,7 +687,7 @@ function SeatTile({
         </span>
       )}
 
-      {tiny ? null : session ? (
+      {tiny || (dense && session && prepaid) ? null : session ? (
         // Postpaid has no time left (`secondsLeft` −1): its running bill, the ∞ mark is the badge above.
         prepaid ? (
           <span
@@ -685,17 +731,56 @@ function SeatTile({
   );
 }
 
-/** The panel's result line, with «Чек» for a money step and the guest's way in after a walk-in seat. */
+/** The panel's result line, with «Чек» for a money step and the guest's way in (and code) after a walk-in seat. */
 function SeatNote({ note }: { note: NoteState }): JSX.Element | null {
   if (!note) return null;
   return (
-    <Note tone={note.tone} role={note.tone === 'err' ? 'alert' : 'status'}>
-      <span className="flex items-start justify-between gap-3">
-        <span className="min-w-0">{note.text}</span>
-        {note.receipt && <ReceiptButton receipt={note.receipt} size="xs" className="-my-0.5 shrink-0" />}
-      </span>
-      {note.hint && <span className="mt-1.5 block text-xs font-normal text-dim">{note.hint}</span>}
-    </Note>
+    <>
+      <Note tone={note.tone} role={note.tone === 'err' ? 'alert' : 'status'}>
+        <span className="flex items-start justify-between gap-3">
+          <span className="min-w-0">{note.text}</span>
+          {note.receipt && <ReceiptButton receipt={note.receipt} size="xs" className="-my-0.5 shrink-0" />}
+        </span>
+        {note.hint && <span className="mt-1.5 block text-xs font-normal text-dim">{note.hint}</span>}
+      </Note>
+      {note.guestCode && <GuestCode code={note.guestCode.code} pc={note.guestCode.pc} />}
+    </>
+  );
+}
+
+/**
+ * A walk-in guest's seat code (D-96), large: no PC signs a guest in on the desk's word, so the cashier names these four
+ * digits and the guest types them on the PC. The server sends the code once (it keeps only its hash), so it is shown
+ * here with a copy button and not kept anywhere else; `pc` is the PC's label.
+ */
+function GuestCode({ code, pc }: { code: string; pc: string }): JSX.Element {
+  const [copied, setCopied] = useState<boolean | null>(null);
+  const copy = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return (
+    <section
+      aria-label={t('Код для входа гостя на {pc}', { pc })}
+      className="well flex items-center justify-between gap-3 px-3.5 py-3"
+    >
+      <div className="min-w-0">
+        <p className="text-[12.5px] leading-5 text-dim">{t('Назовите гостю код для входа на {pc}', { pc })}</p>
+        <p
+          data-guest-code={code}
+          className="tnum mt-1.5 select-all font-mono text-[40px] font-medium leading-none tracking-[0.3em] text-text"
+        >
+          {code}
+        </p>
+      </div>
+      <Button variant="ghost" size="xs" className="shrink-0" onClick={() => void copy()}>
+        {copied === true ? t('Скопировано') : copied === false ? t('Не скопировалось') : t('Копировать')}
+      </Button>
+    </section>
   );
 }
 
@@ -1392,7 +1477,7 @@ function BulkPanel({
       : t('Постоплата для гостей выключена в настройках клуба');
   const [sessionAsk, setSessionAsk] = useState<{ kind: 'open' | 'end'; seats: Seat[] } | null>(null);
   const [sessionRows, setSessionRows] = useState<
-    { pcId: string; name: string; text: string; tone: 'ok' | 'warn' | 'err' }[] | null
+    { pcId: string; name: string; text: string; tone: 'ok' | 'warn' | 'err'; guestCode?: string }[] | null
   >(null);
   const [sessionBusy, setSessionBusy] = useState(false);
   const tariffOf = (seat: Seat): Tariff | undefined => zoneTariffsOf(tariffs, seat.pc.zone).find((tf) => !tf.isPackage);
@@ -1401,7 +1486,7 @@ function BulkPanel({
     setSessionAsk(null);
     setSessionBusy(true);
     setResults(null);
-    const rows: { pcId: string; name: string; text: string; tone: 'ok' | 'warn' | 'err' }[] = [];
+    const rows: { pcId: string; name: string; text: string; tone: 'ok' | 'warn' | 'err'; guestCode?: string }[] = [];
     let owed = 0;
     for (const seat of list) {
       const name = seat.pc.name;
@@ -1416,7 +1501,7 @@ function BulkPanel({
               tone: 'warn',
             });
           } else {
-            await adminApi.openGuestSession(
+            const r = await adminApi.openGuestSession(
               { pcId: seat.pc.id, tariffId: tf.id, minutes: 60, prepaid: false },
               newKey(),
             );
@@ -1425,6 +1510,7 @@ function BulkPanel({
               name,
               text: t('✓ постоплата открыта · {tariff}', { tariff: tf.name }),
               tone: 'ok',
+              guestCode: r.guestCode,
             });
           }
         } else {
@@ -1520,7 +1606,7 @@ function BulkPanel({
             <p className="text-[13px] font-medium text-text">
               {sessionAsk.kind === 'open'
                 ? t(
-                    'Открыть постоплату для гостей на {n} ПК? Гость нажмёт «Войти» на ПК, оплата — на кассе после игры.',
+                    'Открыть постоплату для гостей на {n} ПК? Касса покажет код каждого ПК — гость введёт его на экране входа, оплата — на кассе после игры.',
                     {
                       n: sessionAsk.seats.length,
                     },
@@ -1557,6 +1643,11 @@ function BulkPanel({
         )}
         {sessionRows && (
           <ul aria-label={t('Сеансы по ПК')} className="well flex flex-col divide-y divide-accent/[0.07] px-3.5">
+            {sessionRows.some((r) => r.guestCode) && (
+              <li className="py-2 text-[12.5px] leading-5 text-dim">
+                {t('Назовите каждому гостю код его ПК: он введёт его на экране входа')}
+              </li>
+            )}
             {sessionRows.map((r) => (
               <li
                 key={r.pcId}
@@ -1576,6 +1667,15 @@ function BulkPanel({
                 >
                   {r.text}
                 </span>
+                {r.guestCode && (
+                  <span
+                    data-guest-code={r.guestCode}
+                    aria-label={t('Код для входа гостя на {pc}', { pc: pcLabel(r.name) })}
+                    className="tnum ml-auto shrink-0 select-all font-mono text-[22px] font-medium leading-none tracking-[0.25em] text-text"
+                  >
+                    {r.guestCode}
+                  </span>
+                )}
               </li>
             ))}
             {sessionBusy && <li className="py-2 text-[13px] text-muted">…</li>}
@@ -1880,7 +1980,7 @@ function MoveSheet({
         <li className="flex gap-2.5">
           <SignInIcon size={16} className="mt-0.5 text-accent" />
           {guest
-            ? t('{pc}: гость входит кнопкой «Гость»', { pc: pcLabel(to.pc.name) })
+            ? t('{pc}: гость входит по новому коду, касса покажет его после пересадки', { pc: pcLabel(to.pc.name) })
             : t('{pc}: игрок входит своим логином', { pc: pcLabel(to.pc.name) })}
         </li>
       </ul>
@@ -1989,12 +2089,7 @@ function SeatPanel({
           <PowerIcon size={15} className="text-muted" />
           {t('ПК выключен')}
         </span>
-        <Button
-          variant="primary"
-          size="sm"
-          disabled={busy !== null}
-          onClick={wake}
-        >
+        <Button variant="primary" size="sm" disabled={busy !== null} onClick={wake}>
           {busy === 'wake' ? '…' : t('Включить')}
         </Button>
       </section>
@@ -2405,6 +2500,21 @@ function ExtendSheet({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [requote, setRequote] = useState(0);
+  // Time «по сумме» (D-90): the amount typed, priced for this session (the tariff's maximum counts what it bought).
+  const [byAmount, setByAmount] = useState(false);
+  const [amountDigits, setAmountDigits] = useState('');
+  const budget = byAmount && !choice.pkg && Number(amountDigits) > 0 ? Number(amountDigits) * 100 : null;
+  const amountQuote = useAmountQuote(budget === null || !hourlyId ? null : `${hourlyId}|${budget}|${requote}`, () =>
+    clubApi.quote({
+      tariffId: hourlyId,
+      pcId: seat.pc.id,
+      minutes: IGNORED_MINUTES,
+      userId: user.id,
+      amount: budget ?? 0,
+      sessionId: session.id,
+    }),
+  );
+  const amountMode = byAmount && !choice.pkg;
 
   useEffect(() => {
     if (!hourlyId) return undefined;
@@ -2437,9 +2547,20 @@ function ExtendSheet({
     };
   }, [current?.id, current?.isPackage, seat.pc.id, user.id, requote]);
 
-  const quote = choice.pkg ? pkgQuote : prices[choice.minutes];
+  const quote = choice.pkg ? pkgQuote : amountMode ? (amountQuote?.q ?? undefined) : prices[choice.minutes];
   const price = quote?.total.amount;
-  const bought = choice.pkg ? (current?.packageMinutes ?? quote?.minutes ?? 0) : choice.minutes;
+  const bought = choice.pkg
+    ? (current?.packageMinutes ?? quote?.minutes ?? 0)
+    : amountMode
+      ? (quote?.minutes ?? 0)
+      : choice.minutes;
+  const waiting = amountMode
+    ? budget === null
+      ? t('Введите сумму')
+      : amountQuote?.error
+        ? t('Сумма меньше минимальной')
+        : t('Считаем цену…')
+    : t('Считаем цену…');
   const blocked = quote?.rule ? describeRule(quote.rule) : null;
   const shortfall = price === undefined ? 0 : Math.max(0, price - user.balance.amount);
   // Enter extends once the prices are in: the button is off (and so unfocusable) until then.
@@ -2449,10 +2570,13 @@ function ExtendSheet({
     if (priced && shortfall === 0 && !guest) extendButton.current?.focus();
   }, [priced, shortfall, guest]);
 
-  const request = (): { pcId: string; minutes: number; tariffId: string } =>
+  const request = (): { pcId: string; minutes: number; tariffId: string; amount?: number } =>
     choice.pkg
       ? { pcId: seat.pc.id, minutes: IGNORED_MINUTES, tariffId: session.tariffId }
-      : { pcId: seat.pc.id, minutes: choice.minutes, tariffId: choice.tariffId };
+      : amountMode && budget !== null
+        ? // The server sells the minutes the amount buys (the quote's, sent too as the contract asks for minutes).
+          { pcId: seat.pc.id, minutes: bought || IGNORED_MINUTES, tariffId: choice.tariffId, amount: budget }
+        : { pcId: seat.pc.id, minutes: choice.minutes, tariffId: choice.tariffId };
 
   const tariffName = choice.pkg ? current?.name : hourly.find((x) => x.id === hourlyId)?.name;
   const receipt = (r: SessionResult, p: Payment | null): ReceiptData => ({
@@ -2499,7 +2623,10 @@ function ExtendSheet({
             choice.pkg && 'choice-on',
           )}
           aria-pressed={choice.pkg}
-          onClick={() => setChoice({ pkg: true })}
+          onClick={() => {
+            setChoice({ pkg: true });
+            setByAmount(false);
+          }}
         >
           <span className="min-w-0 truncate text-sm font-semibold">
             {t('Ещё пакет · {name}', { name: current.name })}
@@ -2531,7 +2658,7 @@ function ExtendSheet({
           )}
           <div className="grid grid-cols-4 gap-2">
             {MINUTE_PRESETS.map((m) => {
-              const on = !choice.pkg && m === choice.minutes;
+              const on = !choice.pkg && !amountMode && m === choice.minutes;
               return (
                 <button
                   type="button"
@@ -2541,7 +2668,10 @@ function ExtendSheet({
                     on && 'choice-on',
                   )}
                   aria-pressed={on}
-                  onClick={() => setChoice({ pkg: false, tariffId: hourlyId, minutes: m })}
+                  onClick={() => {
+                    setChoice({ pkg: false, tariffId: hourlyId, minutes: m });
+                    setByAmount(false);
+                  }}
                 >
                   <span className="text-[13.5px] font-semibold leading-none">+{minutesLabel(m)}</span>
                   <span className="font-mono text-[10.5px] leading-none text-muted">
@@ -2551,18 +2681,32 @@ function ExtendSheet({
               );
             })}
           </div>
+          <AmountRow
+            on={amountMode}
+            digits={amountDigits}
+            quoted={amountQuote}
+            onPick={() => {
+              if (choice.pkg) setChoice({ pkg: false, tariffId: hourlyId, minutes: 60 });
+              setByAmount(true);
+            }}
+            onDigits={(d) => {
+              if (choice.pkg) setChoice({ pkg: false, tariffId: hourlyId, minutes: 60 });
+              setByAmount(true);
+              setAmountDigits(d);
+            }}
+          />
         </div>
       )}
       {guest ? <ExactSummary price={price ?? 0} /> : <PaySummary price={price ?? 0} balance={user.balance.amount} />}
       {blocked && <p className="text-xs font-medium text-warning">{blocked}</p>}
       {guest || shortfall > 0 ? (
         <PayBox
-          key={`${choice.pkg ? 'pkg' : `${hourlyId}|${choice.minutes}`}`}
+          key={`${choice.pkg ? 'pkg' : amountMode ? `${hourlyId}|amount|${price ?? ''}` : `${hourlyId}|${choice.minutes}`}`}
           exact={guest ? (price ?? 0) : undefined}
           initial={guest ? undefined : shortfall}
           min={guest ? undefined : shortfall}
           verb={t('Продлить')}
-          disabled={price === undefined ? t('Считаем цену…') : blocked}
+          disabled={price === undefined ? waiting : blocked}
           onPay={async (p) => {
             // One request: the server tops up and extends together, a refused extension books no money.
             try {
@@ -2609,6 +2753,124 @@ function ExtendSheet({
       <Note note={error ? { text: error, tone: 'err' } : null} />
     </Sheet>
   );
+}
+
+/** `1 ч 46 мин`: the time an amount buys, read at a glance. */
+function hoursMinutes(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return [h > 0 ? t('{n} ч', { n: h }) : '', m > 0 || h === 0 ? t('{n} мин', { n: m }) : ''].filter(Boolean).join(' ');
+}
+
+/** What the quote of an amount says (D-90): the price and the time, the server's refusal, or nothing yet. */
+type AmountQuote = { key: string; q: PriceQuote | null; error: unknown };
+
+/** How long the cashier may pause between digits before the amount is priced. */
+const AMOUNT_DEBOUNCE_MS = 250;
+
+/**
+ * Time «по сумме» (D-90): the chip next to the minute chips and the money the cashier types. The server's quote turns
+ * the amount into the whole minutes it buys at today's price (the day percent, the best discount) — «≈ 1 ч 46 мин» —
+ * and the seat or extension sends the amount, so the server sells exactly those minutes; the price may be a little
+ * below the amount (the rest of a minute is not sold) and is what the pay box takes.
+ */
+function AmountRow({
+  on,
+  digits,
+  onPick,
+  onDigits,
+  quoted,
+}: {
+  on: boolean;
+  digits: string;
+  onPick: () => void;
+  onDigits: (digits: string) => void;
+  /** The quote of this amount; undefined — not asked yet. */
+  quoted: AmountQuote | null | undefined;
+}): JSX.Element {
+  const input = useRef<HTMLInputElement>(null);
+  const q = quoted?.q ?? null;
+  const line = !on
+    ? null
+    : digits === ''
+      ? t('Введите сумму — время посчитается по тарифу')
+      : quoted?.error
+        ? describe(quoted.error)
+        : q && q.minutes
+          ? q.total.amount < Number(digits) * 100
+            ? t('≈ {time} · спишется {sum}', { time: hoursMinutes(q.minutes), sum: moneyExact(q.total.amount) })
+            : t('≈ {time}', { time: hoursMinutes(q.minutes) })
+          : t('Считаем цену…');
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-stretch gap-2">
+        <button
+          type="button"
+          aria-pressed={on}
+          className={clsx(
+            'choice focus-ring h-11 shrink-0 rounded-md px-3 text-[13px] font-semibold',
+            on && 'choice-on',
+          )}
+          onClick={() => {
+            onPick();
+            input.current?.focus();
+          }}
+        >
+          {t('По сумме')}
+        </button>
+        <div className="relative min-w-0 flex-1">
+          <input
+            ref={input}
+            inputMode="numeric"
+            autoComplete="off"
+            aria-label={t('На какую сумму')}
+            placeholder={t('Сумма')}
+            className={clsx(inputCls, 'tnum h-11 pr-12')}
+            value={digits.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}
+            onFocus={onPick}
+            onChange={(e) => onDigits(e.target.value.replace(/\D/g, '').slice(0, 7))}
+          />
+          <span className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-medium text-muted">
+            {t('сум')}
+          </span>
+        </div>
+      </div>
+      {line && (
+        <p
+          aria-live="polite"
+          className={clsx('text-xs font-medium', quoted?.error ? 'text-warning' : 'text-accent')}
+          data-testid="amount-time"
+        >
+          {line}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The quote of time «по сумме» (D-90), asked {@link AMOUNT_DEBOUNCE_MS} after the last digit and kept with what it
+ * priced (`key`), so money is never taken on the quote of another amount, tariff or client.
+ */
+function useAmountQuote(key: string | null, ask: () => Promise<PriceQuote>): AmountQuote | null | undefined {
+  const [quoted, setQuoted] = useState<AmountQuote | null>(null);
+  const asker = useRef(ask);
+  asker.current = ask;
+  useEffect(() => {
+    if (key === null) return undefined;
+    let alive = true;
+    const timer = window.setTimeout(() => {
+      asker
+        .current()
+        .then((q) => alive && setQuoted({ key, q, error: null }))
+        .catch((error: unknown) => alive && setQuoted({ key, q: null, error }));
+    }, AMOUNT_DEBOUNCE_MS);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [key]);
+  return key === null ? null : quoted?.key === key ? quoted : undefined;
 }
 
 /** Why a tariff cannot be sold here now. */
@@ -2910,6 +3172,9 @@ function FreeSeat({
   const [tariffId, setTariffId] = useState('');
   const [minutes, setMinutes] = useState(60);
   const [pkgId, setPkgId] = useState<string | null>(null);
+  // Time «по сумме» (D-90): the chip is on and the amount typed (whole сум).
+  const [byAmount, setByAmount] = useState(false);
+  const [amountDigits, setAmountDigits] = useState('');
   // Bumped when the server says the price changed: every quote is asked again.
   const [requote, setRequote] = useState(0);
   const openKey = useHeldKey();
@@ -2923,6 +3188,8 @@ function FreeSeat({
     shownPc.current = seat.pc.id;
     setWho(null);
     setMinutes(60);
+    setByAmount(false);
+    setAmountDigits('');
     setGuest(false);
     setGuestName('');
     setPkgId(null);
@@ -2966,10 +3233,17 @@ function FreeSeat({
   // priced as a walk-in (no client).
   const userId = guest ? null : (who?.id ?? null);
   const hourlyMinutes = wantPrepaid ? minutes : 60;
+  // «По сумме» replaces the minute chips' quote: the amount is priced instead (`amountQuote`), the chips' is not asked.
+  const amountMode = wantPrepaid && byAmount;
+  const budget = amountMode && Number(amountDigits) > 0 ? Number(amountDigits) * 100 : null;
+  const amountQuote = useAmountQuote(
+    budget === null || !tariffId ? null : `${seat.pc.id}|${tariffId}|${budget}|${userId ?? ''}|${requote}`,
+    () => clubApi.quote({ tariffId, pcId: seat.pc.id, minutes: IGNORED_MINUTES, userId, amount: budget ?? 0 }),
+  );
   const quoteFor = `${seat.pc.id}|${tariffId}|${hourlyMinutes}|${userId ?? ''}|${requote}`;
   const [quoted, setQuoted] = useState<{ key: string; q: PriceQuote | null } | null>(null);
   useEffect(() => {
-    if (!tariffId) return undefined;
+    if (!tariffId || amountMode) return undefined;
     let alive = true;
     clubApi
       .quote({ tariffId, pcId: seat.pc.id, minutes: hourlyMinutes, userId })
@@ -2978,8 +3252,8 @@ function FreeSeat({
     return () => {
       alive = false;
     };
-  }, [tariffId, hourlyMinutes, userId, seat.pc.id, quoteFor]);
-  const hourlyQuote = quoted?.key === quoteFor ? quoted.q : null;
+  }, [tariffId, hourlyMinutes, userId, seat.pc.id, quoteFor, amountMode]);
+  const hourlyQuote = amountMode ? (amountQuote?.q ?? null) : quoted?.key === quoteFor ? quoted.q : null;
 
   // Package cards, each priced by the server for this PC and client (cached by pc|tariff|user).
   const [pkgQuotes, setPkgQuotes] = useState<Record<string, PriceQuote | null>>({});
@@ -3030,8 +3304,25 @@ function FreeSeat({
   const blockedRule = priceQuote?.rule ? describeRule(priceQuote.rule) : null;
   const selTariffId = pkg ? pkg.id : tariffId;
   const selTariff = pkg ?? hourly.find((x) => x.id === tariffId);
-  const sentMinutes = pkg || !prepaid ? IGNORED_MINUTES : minutes;
-  const bought = pkg ? (pkg.packageMinutes ?? priceQuote?.minutes ?? 0) : prepaid ? minutes : null;
+  // «По сумме»: the server sells the minutes the amount buys; the quote's go out as `minutes` (the contract wants some).
+  const sentAmount = !pkg && prepaid && amountMode ? budget : null;
+  const sentMinutes =
+    pkg || !prepaid ? IGNORED_MINUTES : sentAmount !== null ? (hourlyQuote?.minutes ?? IGNORED_MINUTES) : minutes;
+  const bought = pkg
+    ? (pkg.packageMinutes ?? priceQuote?.minutes ?? 0)
+    : prepaid
+      ? sentAmount !== null
+        ? (hourlyQuote?.minutes ?? 0)
+        : minutes
+      : null;
+  const waiting =
+    !pkg && amountMode
+      ? budget === null
+        ? t('Введите сумму')
+        : amountQuote?.error
+          ? t('Сумма меньше минимальной')
+          : t('Считаем цену…')
+      : t('Считаем цену…');
   // Opening a session debits the client's balance, so what it lacks is taken first, here, as a top-up.
   const shortfall = who && prepaid ? Math.max(0, price - who.balance.amount) : 0;
   const blocked = seat.pc.status === 'maintenance';
@@ -3046,6 +3337,7 @@ function FreeSeat({
         : t('Сеанс открыт · постоплата'),
     tone: 'ok',
     hint: guest ? guestSignIn(pcLabel(seat.pc.name)) : undefined,
+    guestCode: guest && r.guestCode ? { code: r.guestCode, pc: pcLabel(seat.pc.name) } : undefined,
     receipt: {
       kind: 'seat',
       at: r.session.startedAt,
@@ -3082,6 +3374,7 @@ function FreeSeat({
               prepaid,
               ...(guestName.trim() ? { displayName: guestName.trim() } : {}),
               ...(payment ? { payment } : {}),
+              ...(sentAmount !== null ? { amount: sentAmount } : {}),
             },
             key ?? p?.key ?? openKey.take(),
           )
@@ -3093,6 +3386,7 @@ function FreeSeat({
               minutes: sentMinutes,
               ...(prepaid ? {} : { prepaid: false }),
               ...(payment ? { payment } : {}),
+              ...(sentAmount !== null ? { amount: sentAmount } : {}),
             },
             p?.key ?? key,
           );
@@ -3166,7 +3460,7 @@ function FreeSeat({
               onChange={(e) => setGuestName(e.target.value)}
             />
             <span className="text-[11.5px] leading-4 text-muted">
-              {t('Необязательно. Гость входит кнопкой «Гость» на этом ПК.')}
+              {t('Необязательно. Гость войдёт на этом ПК по коду, который покажет касса.')}
             </span>
           </div>
         ) : (
@@ -3214,7 +3508,7 @@ function FreeSeat({
             <span className="label-sm">{t('Время')}</span>
             <div className="grid grid-cols-4 gap-2">
               {MINUTE_PRESETS.map((m) => {
-                const on = !pkg && m === minutes;
+                const on = !pkg && !amountMode && m === minutes;
                 return (
                   <button
                     type="button"
@@ -3227,6 +3521,7 @@ function FreeSeat({
                     onClick={() => {
                       setMinutes(m);
                       setPkgId(null);
+                      setByAmount(false);
                     }}
                   >
                     {minutesLabel(m)}
@@ -3234,6 +3529,22 @@ function FreeSeat({
                 );
               })}
             </div>
+            {hourly.length > 0 && (
+              <AmountRow
+                on={!pkg && amountMode}
+                digits={amountDigits}
+                quoted={amountQuote}
+                onPick={() => {
+                  setByAmount(true);
+                  setPkgId(null);
+                }}
+                onDigits={(d) => {
+                  setByAmount(true);
+                  setPkgId(null);
+                  setAmountDigits(d);
+                }}
+              />
+            )}
           </div>
         )}
         {prepaid && packages.length > 0 && (
@@ -3252,7 +3563,10 @@ function FreeSeat({
                     aria-pressed={on}
                     disabled={rule !== null}
                     title={rule ? describeRule(rule) : undefined}
-                    onClick={() => setPkgId(on ? null : p.id)}
+                    onClick={() => {
+                      setPkgId(on ? null : p.id);
+                      setByAmount(false);
+                    }}
                     className={clsx(
                       'choice focus-ring flex min-h-[72px] flex-col items-start justify-between gap-1 rounded-md px-3 py-2.5 text-left disabled:cursor-not-allowed disabled:opacity-40',
                       on && 'choice-on',
@@ -3308,11 +3622,11 @@ function FreeSeat({
 
         {prepaid && guest && !blocked ? (
           <PayBox
-            key={`${selTariffId}|${sentMinutes}`}
+            key={`${selTariffId}|${sentMinutes}|${price}`}
             exact={price}
             verb={t('Посадить гостя')}
             autoFocus={false}
-            disabled={quoteFresh ? blockedRule : t('Считаем цену…')}
+            disabled={quoteFresh ? blockedRule : waiting}
             onPay={async (p) => {
               const r = await openWith(p);
               setNote(seatNote(r, p));
@@ -3326,7 +3640,7 @@ function FreeSeat({
             verb={t('Посадить')}
             // Inline in the panel: no focus grab, or the PC number typed for the map would land in the amount.
             autoFocus={false}
-            disabled={quoteFresh ? blockedRule : t('Считаем цену…')}
+            disabled={quoteFresh ? blockedRule : waiting}
             onPay={async (p) => {
               // One request: the server tops up and opens together, so a refused session (blacklist, curfew, a busy
               // PC, a new price) books no money and the refusal stays in the box.
@@ -3688,7 +4002,7 @@ export function MapPage(): JSX.Element {
   /** A session waiting for its new PC: the map picks the target. */
   const [movePick, setMovePick] = useState<{ fromPcId: string } | null>(null);
   /** «Пересажен на ПК 07 · ждёт входа», shown over the target's panel after a move. */
-  const [moved, setMoved] = useState<{ pcId: string; text: string } | null>(null);
+  const [moved, setMoved] = useState<{ pcId: string; text: string; guestCode?: string; pc?: string } | null>(null);
   const [filter, setFilter] = useState<Filter | null>(null);
   const [viewChoice, setViewChoice] = useState<MapView>(readView);
   const [zoom, setZoom] = useState(1);
@@ -3879,7 +4193,9 @@ export function MapPage(): JSX.Element {
     pick(x.pc.id);
     // The context-menu key has no pointer: the menu goes next to the tile then.
     const at =
-      e.clientX === 0 && e.clientY === 0 ? e.currentTarget.getBoundingClientRect() : new DOMRect(e.clientX, e.clientY, 0, 0);
+      e.clientX === 0 && e.clientY === 0
+        ? e.currentTarget.getBoundingClientRect()
+        : new DOMRect(e.clientX, e.clientY, 0, 0);
     setQuick({ pcId: x.pc.id, anchor: at });
   };
   const closeQuick = useCallback(() => setQuick(null), []);
@@ -3911,8 +4227,32 @@ export function MapPage(): JSX.Element {
   // Keys: digits then Enter pick a PC by number (in «Выбрать» mode they toggle it, while a move waits they pick its
   // target); Ctrl+A takes every PC shown; Esc closes the sheet, then the set, then the move, then the typed number,
   // then the panel.
-  const keys = useRef({ seats, digits, sheet, dialog, selected, multi, selectMode, movePick, shownIds, toggle, chooseTarget });
-  keys.current = { seats, digits, sheet, dialog, selected, multi, selectMode, movePick, shownIds, toggle, chooseTarget };
+  const keys = useRef({
+    seats,
+    digits,
+    sheet,
+    dialog,
+    selected,
+    multi,
+    selectMode,
+    movePick,
+    shownIds,
+    toggle,
+    chooseTarget,
+  });
+  keys.current = {
+    seats,
+    digits,
+    sheet,
+    dialog,
+    selected,
+    multi,
+    selectMode,
+    movePick,
+    shownIds,
+    toggle,
+    chooseTarget,
+  };
   useEffect(() => {
     let timer = 0;
     const on = (e: KeyboardEvent): void => {
@@ -4023,7 +4363,12 @@ export function MapPage(): JSX.Element {
   const inWindow = (dialog === 'bulk' && bulk.length > 0) || dialogSeat !== null;
   const dialogWindow =
     dialog === 'bulk' && bulk.length > 0 ? (
-      <Sheet title={t('Выбрано {n} ПК', { n: bulk.length })} caption={t('Действия с ПК')} onClose={closeDialog} size="wide">
+      <Sheet
+        title={t('Выбрано {n} ПК', { n: bulk.length })}
+        caption={t('Действия с ПК')}
+        onClose={closeDialog}
+        size="wide"
+      >
         <BulkPanel
           seats={bulk}
           tariffs={data?.tariffs ?? []}
@@ -4059,51 +4404,53 @@ export function MapPage(): JSX.Element {
         {t('Закрыть окно')}
       </Button>
     </div>
-  ) :
-    bulk.length > 0 ? (
-      <BulkPanel
-        seats={bulk}
-        tariffs={data?.tariffs ?? []}
+  ) : bulk.length > 0 ? (
+    <BulkPanel
+      seats={bulk}
+      tariffs={data?.tariffs ?? []}
+      onDone={() => void load()}
+      onClear={() => {
+        setMulti(new Set());
+        setSelectMode(false);
+      }}
+      onStartMove={startMove}
+    />
+  ) : seat && data ? (
+    <>
+      {moved && moved.pcId === seat.pc.id && (
+        <Note tone="ok" role="status">
+          {moved.text}
+        </Note>
+      )}
+      {moved && moved.pcId === seat.pc.id && moved.guestCode && (
+        <GuestCode code={moved.guestCode} pc={moved.pc ?? pcLabel(seat.pc.name)} />
+      )}
+      <SeatPanel
+        seat={seat}
+        members={data.users}
+        tariffs={data.tariffs}
+        sheet={sheet}
+        setSheet={setSheet}
         onDone={() => void load()}
-        onClear={() => {
-          setMulti(new Set());
-          setSelectMode(false);
-        }}
-        onStartMove={startMove}
+        call={callsByPc.get(seat.pc.id)}
+        onStartMove={() => startMove(seat)}
       />
-    ) : seat && data ? (
-      <>
-        {moved && moved.pcId === seat.pc.id && (
-          <Note tone="ok" role="status">
-            {moved.text}
-          </Note>
-        )}
-        <SeatPanel
-          seat={seat}
-          members={data.users}
-          tariffs={data.tariffs}
-          sheet={sheet}
-          setSheet={setSheet}
-          onDone={() => void load()}
-          call={callsByPc.get(seat.pc.id)}
-          onStartMove={() => startMove(seat)}
-        />
-      </>
-    ) : (
-      <div className="glass-side flex flex-col items-center justify-center px-6 py-9">
-        <EmptyState
-          icon={<MonitorIcon size={22} />}
-          title={t('Выберите место')}
-          text={t('Левый клик — выбрать ПК, правый — все действия с ним. Номер ПК и Enter — выбрать место.')}
-          hint={
-            <>
-              {t('номер ПК')}
-              <Kbd className="text-text">Enter</Kbd>
-            </>
-          }
-        />
-      </div>
-    );
+    </>
+  ) : (
+    <div className="glass-side flex flex-col items-center justify-center px-6 py-9">
+      <EmptyState
+        icon={<MonitorIcon size={22} />}
+        title={t('Выберите место')}
+        text={t('Левый клик — выбрать ПК, правый — все действия с ним. Номер ПК и Enter — выбрать место.')}
+        hint={
+          <>
+            {t('номер ПК')}
+            <Kbd className="text-text">Enter</Kbd>
+          </>
+        }
+      />
+    </div>
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
@@ -4400,6 +4747,8 @@ export function MapPage(): JSX.Element {
             setMoved({
               pcId: r.to.pcId,
               text: `${t('Пересажен на {pc}', { pc: pcLabel(r.to.name) })} · ${t('ждёт входа')}`,
+              guestCode: r.guestCode,
+              pc: pcLabel(r.to.name),
             });
             void load();
             shift.refresh();

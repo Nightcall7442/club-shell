@@ -19,6 +19,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { categoryLabel } from '@/screens/Games/Categories';
 import { launcherLabelKey } from '@/screens/Games/GameCard';
 import { launchGame } from '@/screens/Games/LaunchOverlay';
+import { useSwitchToGame } from '@/screens/Games/useSwitchToGame';
 import { selectPcReady, useAuthStore } from '@/store/auth';
 import { selectFeaturedGames, selectRecentGames, useGamesStore } from '@/store/games';
 import { useNotificationsStore } from '@/store/notifications';
@@ -50,6 +51,11 @@ const PlayIcon = (): JSX.Element => (
 const StopIcon = (): JSX.Element => (
   <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
     <rect x="6" y="6" width="12" height="12" rx="2" />
+  </svg>
+);
+const SwitchIcon = (): JSX.Element => (
+  <svg {...svgProps}>
+    <path d="M14 4h6v6M20 4l-8 8M10 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-4" />
   </svg>
 );
 const InfoIcon = (): JSX.Element => (
@@ -131,6 +137,7 @@ export function HomeHero(): JSX.Element {
   const launching = useGamesStore((s) => s.launching);
   const kill = useGamesStore((s) => s.kill);
   const pushError = useNotificationsStore((s) => s.pushError);
+  const switchToGame = useSwitchToGame();
   const [confirmKill, setConfirmKill] = useState(false);
   const primary = useRef<HTMLButtonElement>(null);
   const focusedOnce = useRef(false);
@@ -216,7 +223,7 @@ export function HomeHero(): JSX.Element {
                   className="rounded-none"
                   style={{ position: 'absolute', inset: 0, height: '100%', aspectRatio: 'auto' }}
                 />
-                <GameTrailer src={hero.videoUrl} poster={hero.heroUrl ?? hero.coverUrl} />
+                <GameTrailer src={hero.videoUrl} fallback={hero.videoSourceUrl} />
               </motion.div>
             )}
           </AnimatePresence>
@@ -290,15 +297,21 @@ export function HomeHero(): JSX.Element {
 
               <div className="flex flex-wrap items-center gap-2">
                 {isRunning ? (
-                  <Button
-                    ref={primary}
-                    variant="danger"
-                    size="lg"
-                    icon={<StopIcon />}
-                    onClick={() => setConfirmKill(true)}
-                  >
-                    {t('games.kill')}
-                  </Button>
+                  <>
+                    <Button
+                      ref={primary}
+                      variant="cta"
+                      size="lg"
+                      icon={<SwitchIcon />}
+                      onClick={() => void switchToGame(hero.id)}
+                      className="min-w-[11rem]"
+                    >
+                      {t('games.switchTo')}
+                    </Button>
+                    <Button variant="danger" size="lg" icon={<StopIcon />} onClick={() => setConfirmKill(true)}>
+                      {t('games.kill')}
+                    </Button>
+                  </>
                 ) : (
                   <Button
                     ref={primary}

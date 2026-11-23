@@ -313,6 +313,17 @@
     "wrongPinLeft": "Wrong PIN. Attempts left: {{attempts}}",
     "wrongPasswordLeft": "Wrong password. Attempts left: {{attempts}}",
     "pinLockedOut": "Too many wrong PINs: unlock with your password or ask the administrator.",
+    "guestCode": {
+      "title": "Enter the code from the desk",
+      "hint": "The four digits the administrator gave you when opening your session on this PC.",
+      "label": "Code from the desk",
+      "keypad": "Code digits",
+      "erase": "Erase a digit",
+      "signingIn": "Signing in…",
+      "wrong": "Wrong code",
+      "wrongLeft": "Wrong code. Attempts left: {{attempts}}",
+      "lockedOut": "Too many wrong codes. Wait 15 minutes or go to the desk."
+    },
     "staff": {
       "button": "Tech user",
       "title": "Tech user",
@@ -341,6 +352,38 @@
       "rebooting": "The PC is restarting…",
       "sessionActive": "A session is running: end it first.",
       "denied": "Power from the screen is not allowed on this PC. Ask the administrator."
+    },
+    "register": {
+      "open": "Create an account",
+      "title": "New account",
+      "subtitle": "Takes a minute: then sign in with this username on any PC of the club",
+      "name": "Name",
+      "namePlaceholder": "What should we call you",
+      "login": "Username or phone",
+      "loginPlaceholder": "For example, bobur or +998 90 123 45 67",
+      "loginHint": "You will sign in with it. A phone number works too",
+      "password": "Password",
+      "passwordPlaceholder": "At least 4 characters",
+      "passwordAgain": "Password again",
+      "passwordAgainPlaceholder": "Repeat the password",
+      "rulesTitle": "Club rules",
+      "acceptRules": "I have read the club rules and agree to them",
+      "submit": "Create and sign in",
+      "submitting": "Creating the account…",
+      "back": "I already have an account",
+      "nameRequired": "Enter your name",
+      "nameTooLong": "The name is at most 64 characters",
+      "loginRequired": "Choose a username or enter your phone",
+      "loginTooShort": "The username is 3 to 32 characters",
+      "loginTaken": "This username is taken — choose another one",
+      "passwordTooShort": "The password is at least 4 characters",
+      "passwordTooLong": "The password is at most 64 characters",
+      "passwordMismatch": "The passwords do not match",
+      "rulesRequired": "Tick that you agree to the club rules",
+      "disabled": "Signing up on the PC is turned off — ask the administrator",
+      "tooMany": "Many accounts were already created on this PC. Try later or ask the administrator",
+      "offline": "No connection to the club server — the account cannot be created now",
+      "welcome": "Account created. Your username: {{login}}"
     }
   },
   "desktop": {
@@ -476,6 +519,7 @@
     "empty": "No games in the library",
     "noResults": "No games match your search",
     "kill": "Close game",
+    "switchTo": "Switch to game",
     "killConfirm": "Close {{title}}? Unsaved progress may be lost.",
     "killTitle": "Close game",
     "killed": "Game closed",
@@ -592,6 +636,7 @@
     "launch": "Open",
     "launching": "Opening…",
     "launched": "{{title}} opened",
+    "alreadyRunning": "{{title}} is already open — switching to it",
     "notAllowed": "Blocked by club policy",
     "empty": "No apps available",
     "running": "Running",
@@ -604,6 +649,17 @@
     },
     "iconAlt": "{{title}} icon",
     "openFailed": "Could not open {{title}}"
+  },
+  "running": {
+    "title": "Running",
+    "switchTo": "Switch to",
+    "close": "Close",
+    "confirmClose": "Close it?",
+    "game": "Game",
+    "app": "App",
+    "starting": "Starting…",
+    "noWindow": "No window yet: it is still opening or sits in the tray",
+    "backHint": "To come back to ClubShell from an app or a game: Ctrl+Shift+H → “Return to ClubShell”, or minimize the app’s window."
   },
   "shop": {
     "title": "Shop",
@@ -1513,6 +1569,7 @@
     "gameRunning": "Game running",
     "returnToShell": "Return to ClubShell",
     "hudTitle": "Quick panel",
+    "hudHide": "Hide panel",
     "hudExtend": "+30 min",
     "hudHint": "Esc — close · Ctrl+Shift+H — panel",
     "hotkeyBlocked": "This shortcut is disabled",
@@ -1663,5 +1720,9 @@
     "failed": "Could not save your favorites",
     "launchApp": "Open {{title}}",
     "region": "Favorites: games and apps for a quick start"
+  },
+  "pcLabel": {
+    "number": "PC {{number}}",
+    "pc": "PC"
   }
 }

@@ -45,7 +45,7 @@ public static class ShiftEndpoints
     private static readonly string[] FeedKinds =
     [
         "topUp", "debtPaid", "sessionOpen", "sessionExtend", "sessionEnd", "payout", "cashIn", "cashOut", "shiftOpen", "shiftClose", "promoRedeem",
-        "shopSale", "shopVoid", "sessionMove",
+        "shopSale", "shopVoid", "sessionMove", "topUpCancel",
     ];
 
     public static void MapShiftEndpoints(this IEndpointRouteBuilder app)
@@ -147,6 +147,7 @@ public static class ShiftEndpoints
                 : $", внесено {Webhooks.Sum(totals.CashIn)} / изъято {Webhooks.Sum(totals.CashOut)} / выдано гостям {Webhooks.Sum(totals.Payouts)}";
             var bar = (totals.ShopByMethod?.Cash ?? 0) == 0 ? "" : $" (бар нал. {Webhooks.Sum(totals.ShopByMethod!.Cash)})";
             var voids = totals.ShopVoidCount == 0 ? "" : $", аннулировано {totals.ShopVoidCount} на {Webhooks.Sum(totals.ShopVoids)}";
+            voids += totals.TopUpCancelCount == 0 ? "" : $", отменено пополнений {totals.TopUpCancelCount} на {Webhooks.Sum(totals.TopUpCancels)}";
             await Webhooks.EnqueueAsync(c, tx, staff.ClubId, "shiftClosed", now,
                 $"{shift.StaffName}: сеансы {Webhooks.Sum(totals.Sessions)}, магазин {Webhooks.Sum(totals.Shop)}{bar}{voids}{moves}, касса {Webhooks.Sum(counted)} (ожидалось {Webhooks.Sum(expected)})",
                 new { shiftId = shift.Id });
@@ -269,7 +270,12 @@ public static class ShiftEndpoints
                 SELECT a.id, a.at, a.action, a.staff_id, a.staff_name, a.user_id, a.pc_id, a.amount, a.meta::text AS meta,
                        u.display_name AS user_name, u.role AS user_role, p.name AS pc_name,
                        CASE WHEN a.action = 'shopSale'
-                            THEN EXISTS (SELECT 1 FROM shop_sales v WHERE v.void_of = (a.meta ->> 'saleId')::uuid) END AS voided
+                            THEN EXISTS (SELECT 1 FROM shop_sales v WHERE v.void_of = (a.meta ->> 'saleId')::uuid)
+                            -- D-91: a top-up is taken back only in its own shift, so its cancel is in the same shift's journal.
+                            WHEN a.action = 'topUp'
+                            THEN EXISTS (SELECT 1 FROM audit_entries x
+                                         WHERE x.club_id = a.club_id AND x.shift_id = a.shift_id AND x.action = 'topUpCancel'
+                                           AND x.meta ->> 'cancelOf' = a.meta ->> 'transactionId') END AS voided
                 FROM audit_entries a LEFT JOIN users u ON u.id = a.user_id LEFT JOIN pcs p ON p.id = a.pc_id
                 WHERE a.club_id = @ClubId AND a.shift_id = @Id AND a.action = ANY(@actions)
                   AND NOT (a.action = 'topUp' AND coalesce((a.meta ->> 'forSession')::boolean, false))
@@ -419,6 +425,8 @@ public static class ShiftEndpoints
                    coalesce(sum(amount) FILTER (WHERE type = 'topUp' AND method = 'cash' AND staff_id IS NULL), 0)::bigint AS "ApiCash",
                    coalesce(sum(amount) FILTER (WHERE type = 'adjustment' AND method IS NULL AND meta ->> 'kind' = 'debtWriteOff'), 0)::bigint AS "WriteOffs",
                    (count(*) FILTER (WHERE type = 'adjustment' AND method IS NULL AND meta ->> 'kind' = 'debtWriteOff'))::int AS "WriteOffCount",
+                   coalesce(-sum(amount) FILTER (WHERE type = 'topUp' AND meta ->> 'kind' = 'topUpCancel'), 0)::bigint AS "TopUpCancels",
+                   (count(*) FILTER (WHERE type = 'topUp' AND meta ->> 'kind' = 'topUpCancel'))::int AS "TopUpCancelCount",
                    (SELECT coalesce(sum(amount) FILTER (WHERE kind = 'in'), 0) FROM cash_movements WHERE shift_id = @shiftId)::bigint AS "CashIn",
                    (SELECT coalesce(sum(amount) FILTER (WHERE kind = 'out'), 0) FROM cash_movements WHERE shift_id = @shiftId)::bigint AS "CashOut",
                    count(*)::int AS "Count"
@@ -517,12 +525,14 @@ public static class ShiftEndpoints
         public long CashOut { get; init; }
         public long WriteOffs { get; init; }
         public int WriteOffCount { get; init; }
+        public long TopUpCancels { get; init; }
+        public int TopUpCancelCount { get; init; }
         public int Count { get; init; }
 
         public AdminShiftTotals ToWire(ShopRow bar) => new(
             Cash, Card + Payme + Click + Uzum + Other, Sessions, Shop + bar.MethodNet, Refunds, Bonuses, Count, new(Cash, Card, Payme, Click, Uzum, Other),
             CashIn, CashOut, Payouts, ApiCash, new(bar.Cash, bar.Card, bar.Payme, bar.Click, bar.Uzum, bar.Balance), bar.Voids, bar.VoidCount,
-            WriteOffs, WriteOffCount);
+            WriteOffs, WriteOffCount, TopUpCancels, TopUpCancelCount);
     }
 
     private sealed class TodayRow
@@ -554,7 +564,7 @@ public static class ShiftEndpoints
         public string? UserRole { get; init; }
         public string? PcName { get; init; }
 
-        /// <summary>A bar sale voided since (null for other rows).</summary>
+        /// <summary>A bar sale voided since, or a desk top-up taken back since (D-91); null for other rows.</summary>
         public bool? Voided { get; init; }
 
         /// <summary>
@@ -575,7 +585,7 @@ public static class ShiftEndpoints
             var method = shop ? Text("method") : null;
             AdminOperationPaid? paid = kind switch
             {
-                "topUp" or "debtPaid" => new AdminOperationPaid(Amount, Text("method") ?? "cash", Uuid("transactionId")),
+                "topUp" or "debtPaid" or "topUpCancel" => new AdminOperationPaid(Amount, Text("method") ?? "cash", Uuid("transactionId")),
                 "sessionOpen" or "sessionExtend" when Number("paidAmount") is { } paidAmount =>
                     new AdminOperationPaid(paidAmount, Text("paidMethod") ?? "cash", Uuid("transactionId")),
                 "payout" => new AdminOperationPaid(Amount, "cash", Uuid("transactionId")),
@@ -588,6 +598,7 @@ public static class ShiftEndpoints
                 "topUp" or "debtPaid" or "sessionOpen" or "sessionExtend" => byStaff && paid is { Method: "cash" } ? paid.Amount : 0,
                 "cashIn" or "shiftOpen" => Amount,
                 "cashOut" or "payout" => -Amount,
+                "topUpCancel" => byStaff && paid is { Method: "cash" } ? -Amount : 0,
                 "shopSale" => method == "cash" ? Amount : 0,
                 "shopVoid" => method == "cash" ? -Amount : 0,
                 _ => 0,
@@ -614,7 +625,7 @@ public static class ShiftEndpoints
                 kind is "sessionOpen" or "sessionExtend" ? Amount : kind == "sessionEnd" ? Number("charged") : kind == "shopSale" && method == "balance" ? Amount : null,
                 quote, paid, drawer, Text("reasonCode"), Text("note"), Uuid("sessionId"),
                 kind is "sessionOpen" or "sessionExtend" ? Flag("package") : null, Uuid("movementId"),
-                shop ? Uuid("saleId") : null, method, lines, kind == "shopSale" ? Voided ?? false : null,
+                shop ? Uuid("saleId") : null, method, lines, kind is "shopSale" or "topUp" ? Voided ?? false : null,
                 kind == "shopVoid" && Text("saleAt") is { } saleAt && DateTimeOffset.TryParse(saleAt, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var voidOfAt)
                     ? voidOfAt.ToUniversalTime() : null,
                 fromPc);

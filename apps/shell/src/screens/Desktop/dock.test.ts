@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Game, RunningGame } from '@clubshell/contracts';
 import type { OpenWindow } from '@/lib/tauri';
-import { matchRunningGame, normalizePath, sameWindows, toDockItems } from './dock.ts';
+import { matchRunningGame, normalizePath, pickWindow, sameWindows, toDockItems } from './dock.ts';
 
 const win = (pid: number, title: string, exePath: string, hwnd = pid * 10): OpenWindow => ({
   pid,
@@ -123,5 +123,30 @@ describe('sameWindows', () => {
     assert.ok(!sameWindows([DISCORD, CHROME], [CHROME, DISCORD]));
     assert.ok(!sameWindows([DISCORD], [{ ...DISCORD, title: 'Discord | #general' }]));
     assert.ok(!sameWindows([DISCORD], []));
+  });
+});
+
+describe('pickWindow', () => {
+  const windows = [
+    win(7344, 'Twitch - Google Chrome', 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'),
+    win(6121, 'Discord', 'C:\\Users\\kiosk\\AppData\\Local\\Discord\\app-1.0.9163\\Discord.exe'),
+    win(
+      9001,
+      'Counter-Strike 2',
+      'D:\\SteamLibrary\\steamapps\\common\\Counter-Strike Global Offensive\\game\\cs2.exe',
+    ),
+  ];
+
+  it('takes the front-most window of any of the program’s processes', () => {
+    assert.equal(pickWindow(windows, [6120, 6121])?.hwnd, 61210);
+  });
+
+  it('finds a game by its install folder when its pid has no window', () => {
+    assert.equal(pickWindow(windows, [4242], CS2.installPath)?.pid, 9001);
+  });
+
+  it('answers null for a program without a window', () => {
+    assert.equal(pickWindow(windows, [1234]), null);
+    assert.equal(pickWindow(windows, [1234], 'E:\\Nowhere'), null);
   });
 });

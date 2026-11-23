@@ -25,7 +25,7 @@ public class SessionRow
     public const string Columns = """
         id, club_id, pc_id, user_id, tariff_id, state, is_prepaid, started_at, ended_at, end_reason, purchased_sec,
         used_before_sec, running_since, paused_at, ends_at, last_transition_at, price_per_hour_snapshot, day_pct,
-        discount_pct, charged_total, refunded_total, warnings_sent, client_session_id, debt_limit, origin
+        discount_pct, charged_total, refunded_total, warnings_sent, client_session_id, debt_limit, origin, guest_code_hash
         """;
 
     public Guid Id { get; init; }
@@ -66,6 +66,12 @@ public class SessionRow
     /// from the kiosk is not: the server stops it when the balance runs out, so the player may leave it.
     /// </summary>
     public bool PayAtDesk => !IsPrepaid && Origin == "cashier";
+
+    /// <summary>
+    /// The PBKDF2 hash of the code the desk gave a walk-in guest for this seat (D-96): «Гость» on the PC signs in to it only
+    /// with that code. Null — not a desk guest's seat.
+    /// </summary>
+    public string? GuestCodeHash { get; set; }
 
     public bool Ended => State == "ended";
 
@@ -163,7 +169,7 @@ public class SessionRow
         var cost = IsPrepaid || Ended ? ChargedTotal - RefundedTotal : Pricing.Frozen(PricePerHourSnapshot, used, DayPct, DiscountPct);
         return new Session(
             Id, UserId, PcId, Enum.Parse<SessionState>(State, ignoreCase: true), StartedAt, Ended ? EndedAt : EndsAt, PausedAt, TariffId,
-            left, used, Money.Uzs(cost), IsPrepaid, WarningsSent, PayAtDesk ? true : null);
+            left, used, Money.Uzs(cost), IsPrepaid, WarningsSent, PayAtDesk ? true : null, GuestCodeHash is null ? null : true);
     }
 }
 
@@ -304,9 +310,11 @@ public sealed class SessionService(
     /// of §5.11: priced at <c>startedAt</c>, overdraft instead of 402, of the rules only the player's (exists, not banned or
     /// blacklisted), and a session this PC already has under <c>clientSessionId</c> is returned as it is. With
     /// <paramref name="staffId"/> it is the cashier's <c>adminOpenSession</c> (origin <c>cashier</c>): the same rules and price.
+    /// <paramref name="guestCodeHash"/>: the desk guest's code (D-96), stored with the seat.
     /// </summary>
     public async Task<Session> CreateAsync(
-        NpgsqlConnection c, NpgsqlTransaction tx, PcRow pc, SessionCreateRequest request, bool replay, SessionEffects effects, StaffContext? staff = null)
+        NpgsqlConnection c, NpgsqlTransaction tx, PcRow pc, SessionCreateRequest request, bool replay, SessionEffects effects, StaffContext? staff = null,
+        string? guestCodeHash = null)
     {
         var now = clock.GetUtcNow();
         if (replay && await c.QuerySingleOrDefaultAsync<SessionRow>(
@@ -398,7 +406,7 @@ public sealed class SessionService(
             StartedAt = start, PurchasedSec = request.Prepaid ? minutes * 60 : 0, RunningSince = start, LastTransitionAt = start,
             PricePerHourSnapshot = tariff.PricePerHour, DayPct = quote.DayPct, DiscountPct = quote.DiscountPct,
             ChargedTotal = request.Prepaid ? quote.Total : 0, ClientSessionId = request.ClientSessionId, DebtLimit = debtLimit,
-            Origin = replay ? "offline" : staff is null ? "kiosk" : "cashier",
+            Origin = replay ? "offline" : staff is null ? "kiosk" : "cashier", GuestCodeHash = guestCodeHash,
         };
         row.EndsAt = row.PrepaidEnd();
 
@@ -411,17 +419,17 @@ public sealed class SessionService(
                 """
                 INSERT INTO sessions (id, club_id, pc_id, user_id, tariff_id, state, is_prepaid, origin, started_at, purchased_sec,
                                       running_since, ends_at, last_transition_at, price_per_hour_snapshot, day_pct, discount_pct,
-                                      discount_reason, charged_total, client_session_id, created_by_staff_id, debt_limit, created_at, updated_at)
+                                      discount_reason, charged_total, client_session_id, created_by_staff_id, debt_limit, guest_code_hash, created_at, updated_at)
                 VALUES (@Id, @ClubId, @PcId, @UserId, @TariffId, 'active', @IsPrepaid, @origin, @StartedAt, @PurchasedSec,
                         @RunningSince, @EndsAt, @LastTransitionAt, @PricePerHourSnapshot, @DayPct, @DiscountPct,
-                        @reason, @ChargedTotal, @ClientSessionId, @staffId, @DebtLimit, @now, @now)
+                        @reason, @ChargedTotal, @ClientSessionId, @staffId, @DebtLimit, @GuestCodeHash, @now, @now)
                 """,
                 new
                 {
                     row.Id, row.ClubId, row.PcId, row.UserId, row.TariffId, row.IsPrepaid, origin = row.Origin,
                     row.StartedAt, row.PurchasedSec, row.RunningSince, row.EndsAt, row.LastTransitionAt, row.PricePerHourSnapshot,
                     row.DayPct, row.DiscountPct, reason = quote.DiscountReason, row.ChargedTotal, row.ClientSessionId, staffId = staff?.StaffId,
-                    row.DebtLimit, now,
+                    row.DebtLimit, row.GuestCodeHash, now,
                 },
                 tx);
         }

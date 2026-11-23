@@ -9,6 +9,7 @@ import {
   type AuthKind,
   type AuthLoginRequest,
   type AuthLoginResponse,
+  type AuthRegisterRequest,
   type AuthStatusResponse,
   type ConnectivityState,
   type Money,
@@ -106,6 +107,10 @@ export interface LoginOptions {
 export interface AuthActions {
   login(kind: AuthKind, creds?: AuthCredentials, opts?: LoginOptions): Promise<AuthLoginResponse>;
   loginGuest(displayName?: string): Promise<AuthLoginResponse>;
+  /** A walk-in guest's desk seat (D-96): «Гость» with the four-digit code the cash desk gave. */
+  loginGuestCode(code: string): Promise<AuthLoginResponse>;
+  /** The player's own account from the lock screen (D-92): made by the server and signed in like a password login. */
+  register(req: AuthRegisterRequest): Promise<AuthLoginResponse>;
   /**
    * Repeats the sign-in refused with `activeSessionElsewhere`, with `endElsewhere: true`. Its secrets were kept in
    * memory only for this and are forgotten as the retry is sent. `null` when there is nothing to repeat.
@@ -173,23 +178,7 @@ export const useAuthStore = create<AuthStore>()(
       set({ status: 'loading', error: null });
       try {
         const res = await elsewhereRetry.send(req, (r) => api.auth.login(r));
-        resetAnalyticsSession();
-        set({
-          user: res.user,
-          mode: res.mode,
-          expiresAt: res.expiresAt,
-          expiredReason: null,
-          receipt: null,
-          ready: true,
-          status: 'ready',
-          elsewhere: null,
-          relogin: null,
-          logoutFailure: null,
-          lockedByStaff: false,
-          pinSet: null,
-          autoStartArmed: !res.session,
-        });
-        useSessionStore.getState().setSession(res.session ?? null);
+        signedIn(res);
         track('auth.login', {
           kind: req.kind,
           role: res.user.role,
@@ -204,6 +193,27 @@ export const useAuthStore = create<AuthStore>()(
       }
     };
 
+    /** The state of a fresh sign-in (a login or a new account), its session handed to the session store. */
+    const signedIn = (res: AuthLoginResponse): void => {
+      resetAnalyticsSession();
+      set({
+        user: res.user,
+        mode: res.mode,
+        expiresAt: res.expiresAt,
+        expiredReason: null,
+        receipt: null,
+        ready: true,
+        status: 'ready',
+        elsewhere: null,
+        relogin: null,
+        logoutFailure: null,
+        lockedByStaff: false,
+        pinSet: null,
+        autoStartArmed: !res.session,
+      });
+      useSessionStore.getState().setSession(res.session ?? null);
+    };
+
     return {
       ...initialState,
 
@@ -213,6 +223,24 @@ export const useAuthStore = create<AuthStore>()(
 
       loginGuest(displayName) {
         return get().login('guest', displayName ? { username: displayName } : {});
+      },
+
+      loginGuestCode(code) {
+        return get().login('guest', { code });
+      },
+
+      async register(req) {
+        set({ status: 'loading', error: null });
+        try {
+          const res = await api.auth.register(req);
+          signedIn(res);
+          track('auth.register', { role: res.user.role, mode: res.mode });
+          return res;
+        } catch (e) {
+          const err = toShellApiError(e);
+          set({ status: 'error', error: err.toJSON() });
+          throw err;
+        }
       },
 
       async endElsewhereAndLogin() {

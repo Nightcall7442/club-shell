@@ -28,12 +28,15 @@ import {
   clubApi,
   getClubCode,
   hasToken,
+  mediaUrl,
   setClubCode,
   setToken,
   type ClientHit,
   type ClubSettings,
   type StaffMember,
 } from '@/api';
+import { SETTINGS_SAVED } from '@/settings';
+import { setReceiptLogo } from '@/print';
 import { Wallpaper } from '@/art';
 import { AudioUnlockChip, CallsBell, CallsRinger, setCalls } from '@/calls';
 import { ClubContext, type ClubState } from '@/club';
@@ -60,6 +63,7 @@ import {
   ShieldIcon,
   TagIcon,
   GiftIcon,
+  BrushIcon,
   UsersIcon,
   pathIcon,
 } from '@/icons';
@@ -87,6 +91,7 @@ const BarPage = lazy(() => import('@/pages/BarPage'));
 const ShiftPage = lazy(() => import('@/pages/ShiftPage'));
 const ClientsPage = lazy(() => import('@/pages/ClientsPage'));
 const PricingPage = lazy(() => import('@/pages/PricingPage'));
+const InterfacePage = lazy(() => import('@/pages/InterfacePage'));
 const BonusPage = lazy(() => import('@/pages/PricingPage').then((m) => ({ default: m.BonusPage })));
 const HallPage = lazy(() => import('@/pages/HallPage'));
 const ShopPage = lazy(() => import('@/pages/ShopPage'));
@@ -134,6 +139,8 @@ const GROUPS: { title: string; items: SectionDef[] }[] = [
       { id: 'hall', title: 'Зал и устройства', ownerOnly: true, icon: <MonitorIcon />, page: HallPage },
       { id: 'catalog', title: 'Игры', ownerOnly: true, icon: <GamepadIcon />, page: CatalogPage },
       { id: 'club', title: 'Экран игрока', ownerOnly: true, icon: <ScreenIcon />, page: ClubPage },
+      // D-93: the club's name, logo, wallpaper, colour and the PCs' theme, with uploads.
+      { id: 'interface', title: 'Интерфейс и логотипы', ownerOnly: true, icon: <BrushIcon />, page: InterfacePage },
       { id: 'automation', title: 'Автоматизация', ownerOnly: true, icon: <BoltIcon />, page: AutomationPage },
       {
         id: 'integrations',
@@ -371,6 +378,8 @@ export function App(): JSX.Element {
   const [clubName, setClubName] = useState<string | null>(null);
   const [limits, setLimits] = useState<ClubSettings['limits'] | null>(null);
   const [wallpaperUrl, setWallpaperUrl] = useState<string | null>(null);
+  /** The club's own logo (D-93) at the top of the rail instead of the ClubShell mark. */
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
   // A client being topped up from the header's search (on any page, with or without a PC).
   const [topUpFor, setTopUpFor] = useState<ClientHit | null>(null);
   const search = useRef<HTMLInputElement>(null);
@@ -458,7 +467,9 @@ export function App(): JSX.Element {
       .then((s) => {
         setClubName(s.branding.clubName);
         setLimits(s.limits);
-        setWallpaperUrl(s.branding.wallpaperUrl || null);
+        setWallpaperUrl(mediaUrl(s.branding.wallpaperUrl));
+        setLogoUrl(mediaUrl(s.branding.logoUrl));
+        setReceiptLogo(mediaUrl(s.branding.logoUrl));
       })
       .catch(() => undefined);
   }, []);
@@ -473,7 +484,11 @@ export function App(): JSX.Element {
     }
     loadSettings();
     const id = setInterval(loadSettings, SETTINGS_POLL_MS);
-    return () => clearInterval(id);
+    window.addEventListener(SETTINGS_SAVED, loadSettings);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener(SETTINGS_SAVED, loadSettings);
+    };
   }, [staff, loadSettings]);
 
   const club = useMemo<ClubState>(
@@ -510,7 +525,11 @@ export function App(): JSX.Element {
           {/* Rail: the logo, the sections, then who is signed in and «Выйти». */}
           <aside className="glass-rail relative z-30 flex min-h-0 flex-col pb-4 pt-5">
             <div className="mb-3 flex shrink-0 justify-center">
-              <LogoMark size={30} />
+              {logoUrl ? (
+                <img src={logoUrl} alt={clubName ?? ''} className="h-10 w-10 rounded-md object-contain" />
+              ) : (
+                <LogoMark size={30} />
+              )}
             </div>
             <nav
               ref={railNav}

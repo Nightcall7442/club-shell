@@ -1,7 +1,8 @@
 /**
  * Apps (`/apps`): allowed applications grouped by category → `apps_launch` with a per-tile launching state and
  * a success / error toast. Loads `apps_list` on mount; skeletons while loading, retry on failure, empty state. A member
- * stars a tile into the favourites on Home (D-86).
+ * stars a tile into the favourites on Home (D-86). The «Запущено» strip on top lists what runs (switch to / close); a
+ * running app's tile says so, and tapping it brings the app to the front instead of opening a second copy.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
@@ -11,8 +12,10 @@ import { Button } from '@/components/ui/Button';
 import { FavoriteButton } from '@/components/ui/FavoriteButton';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { collectNavigables, focusElement } from '@/hooks/useGamepad';
+import { useRunningPrograms } from '@/hooks/useRunningPrograms';
 import { api, type ShellError } from '@/lib/tauri';
 import { AppTile, useAppCategoryLabel, useAppLaunch } from '@/screens/Apps/AppTile';
+import { RunningStrip } from '@/screens/Desktop/RunningStrip';
 import { useNotificationsStore } from '@/store/notifications';
 import { asShellError } from '@/store/settings';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
@@ -49,6 +52,8 @@ export default function AppsScreen(): JSX.Element {
   const [apps, setApps] = useState<App[] | null>(null);
   const [error, setError] = useState<ShellError | null>(null);
   const { launchingId, launch } = useAppLaunch();
+  const { programs } = useRunningPrograms();
+  const runningIds = useMemo(() => new Set(programs.filter((p) => p.kind === 'app').map((p) => p.id)), [programs]);
   const root = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -98,6 +103,7 @@ export default function AppsScreen(): JSX.Element {
           <h1 className="font-display text-[length:var(--fs-2xl)] font-light leading-[1.2] tracking-tight text-text">
             {t('apps.title')}
           </h1>
+          <p className="mt-1 text-base text-muted">{t('running.backHint')}</p>
         </div>
         {error && (
           <Button variant="secondary" onClick={() => void load()}>
@@ -105,6 +111,8 @@ export default function AppsScreen(): JSX.Element {
           </Button>
         )}
       </header>
+
+      <RunningStrip hint={false} />
 
       {apps === null && !error && (
         <div
@@ -147,6 +155,7 @@ export default function AppsScreen(): JSX.Element {
                   onLaunch={(a) => void launch(a)}
                   launching={launchingId === app.id}
                   disabled={launchingId !== null && launchingId !== app.id}
+                  running={runningIds.has(app.id)}
                 />
                 {/* Next to the tile, not in it (no button in a button); an app has no page of its own, so this star
                     is the one keyboard and gamepad reach too. */}

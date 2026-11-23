@@ -104,6 +104,22 @@ public static class AgentConfig
     /// <c>features.callAdmin</c> (on unless switched off: the desk rings for it, D-62) and <c>features.lockScreenPower</c>
     /// (on unless switched off: «Выключить» / «Перезагрузить» on the lock screen, SHELL_CHANGES 93).
     /// </summary>
+    /// <summary>The bundled shell themes the owner may pick as the club's default (D-93).</summary>
+    public static readonly string[] ShellThemes = ["default", "light", "neon"];
+
+    /// <summary>
+    /// <c>branding.theme</c>: the shell theme of the club's PCs (D-93; until then always <c>default</c>). A player's own
+    /// choice, saved to their account (D-86), still lies over it while they are signed in.
+    /// </summary>
+    public static string ThemeOf(string? settingsJson)
+    {
+        using var doc = JsonDocument.Parse(string.IsNullOrEmpty(settingsJson) ? "{}" : settingsJson);
+        return doc.RootElement.TryGetProperty("branding", out var b) && b.ValueKind == JsonValueKind.Object
+            && b.TryGetProperty("theme", out var t) && t.ValueKind == JsonValueKind.String && ShellThemes.Contains(t.GetString())
+            ? t.GetString()!
+            : "default";
+    }
+
     public static JsonElement FeaturesOf(string? settingsJson)
     {
         using var doc = JsonDocument.Parse(string.IsNullOrEmpty(settingsJson) ? "{}" : settingsJson);
@@ -138,7 +154,7 @@ public static class AgentConfig
         // «Обновить ClubShell» works without it.
         Updates: new UpdatesConfigOverride(Enabled: club.AutoUpdate),
         Anticheat: Anticheat,
-        Shell: new ShellConfigOverride(Theme: "default", Features: FeaturesOf(club.Settings), Club: club.Club),
+        Shell: new ShellConfigOverride(Theme: ThemeOf(club.Settings), Features: FeaturesOf(club.Settings), Club: club.Club),
         Themes: []);
 
     /// <summary>
@@ -168,7 +184,9 @@ public static class AgentConfig
             WallpaperUrl: Text(branding, "wallpaperUrl"),
             Banners: banners.Count > 0 ? banners : null,
             Rules: rules,
-            Screensaver: screensaver);
+            Screensaver: screensaver,
+            SelfSignup: Auth.SelfSignup.Enabled(settings),
+            PcLabel: Admin.PcLabel.ToShell(branding));
     }
 
     /// <summary>

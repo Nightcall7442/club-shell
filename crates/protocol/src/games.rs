@@ -409,7 +409,9 @@ pub struct Game {
     /// Wide hero image.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hero_url: Option<String>,
-    /// Trailer / background video.
+    /// Trailer / background video. From a club server: its own stored copy
+    /// (`/api/v1/trailers/{id}`, D-97) once it has one, which the Agent turns into the server's
+    /// full address; until then the original link.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub video_url: Option<String>,
     /// Localized description; may be empty.
@@ -459,6 +461,11 @@ pub struct Game {
     /// off; without it such a game fails with `gameLaunchFailed {stage: "elevation"}`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_as_invoker: Option<bool>,
+    /// Where the club server's stored trailer came from (D-97): the original https link, which the
+    /// Shell tries once when the stored copy does not play. Null — `Game.VideoUrl` is the original
+    /// itself, an upload, or there is none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video_source_url: Option<String>,
 }
 
 /// Body of `POST /games/{id}/launch-report` (SERVER_API.md §4.6).
@@ -746,6 +753,7 @@ mod tests {
             missing_drive: None,
             registry_values: None,
             run_as_invoker: None,
+            video_source_url: None,
         };
         let json = serde_json::to_string(&g).unwrap();
         assert_eq!(

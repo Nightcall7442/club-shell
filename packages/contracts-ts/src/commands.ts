@@ -135,22 +135,40 @@ export interface AntiCheatBlockedDetails {
   reason: string;
 }
 
+/** Request of `apps.kill`: ends every process of one app (never the Shell, the Agent or a game). */
+export interface AppsKillRequest {
+  /** App id. */
+  appId: string;
+}
+
 /** Request of `apps.launch`. */
 export interface AppsLaunchRequest {
   /** App id. */
   appId: string;
   /** Extra command line. */
   args?: string | null;
+  /**
+   * Start it even when it runs already. The Shell asks this when the running app has no window to bring forward (it
+   * lives in the tray, as Discord or Steam do): started again, such an app shows its window.
+   */
+  force?: boolean | null;
 }
 
 /** Response of `apps.launch`. */
 export interface AppsLaunchResponse {
   /** Always `true`. */
   ok: boolean;
-  /** Process id. */
+  /** Process id (the running instance's when `alreadyRunning`). */
   pid: number;
-  /** Launch time. */
+  /** Launch time (the running instance's when `alreadyRunning`). */
   startedAt: string;
+  /**
+   * The app was running already and nothing was started: the Shell brings its window to the front instead of opening a
+   * second copy.
+   */
+  alreadyRunning: boolean;
+  /** Every process of the app the Agent knows of (the new one alone after a fresh launch). */
+  pids?: number[] | null;
 }
 
 /** Response of `apps.list` and `GET /apps`. */
@@ -218,6 +236,11 @@ export interface AuthLoginRequest {
    * (`AuthRequest.EndElsewhere`).
    */
   endElsewhere?: boolean | null;
+  /**
+   * `AuthKind.Guest`: the four-digit code the cash desk gave a walk-in guest for this PC's seat
+   * (`GuestAuthRequest.Code`, D-96).
+   */
+  code?: string | null;
 }
 
 /** Response of `auth.login`. */
@@ -246,6 +269,21 @@ export interface AuthLogoutResponse {
   sessionEnded: boolean;
   /** The ended session, when any. */
   session?: Session | null;
+}
+
+/**
+ * Request of `auth.register` (D-92): a player creates their own account on the lock screen, where the club allows it
+ * (`shell.club.selfSignup`), and is signed in with it. Secrets are never logged.
+ */
+export interface AuthRegisterRequest {
+  /** The player's name, 1–64 characters. */
+  displayName?: string | null;
+  /** Login, 3–32 characters, or a phone number (stored as its digits); empty — the server makes one. */
+  username?: string | null;
+  /** Password, 4–64 characters (the Shell asks for it twice). */
+  password?: string | null;
+  /** The player accepted the club rules; required when the club has rules. */
+  acceptRules?: boolean | null;
 }
 
 /** Response of `auth.status`. */
@@ -520,6 +558,8 @@ export const IpcNames = {
     Status: 'auth.status',
     /** — → `QrLoginStart`. */
     QrStart: 'auth.qrStart',
+    /** `AuthRegisterRequest` → `AuthLoginResponse` (D-92). */
+    Register: 'auth.register',
   },
   /** `session.*` */
   Session: {
@@ -565,6 +605,10 @@ export const IpcNames = {
     List: 'apps.list',
     /** `AppsLaunchRequest` → `AppsLaunchResponse`. */
     Launch: 'apps.launch',
+    /** — → `AppsRunningResponse`. */
+    Running: 'apps.running',
+    /** `AppsKillRequest` → `GamesKillResponse`. */
+    Kill: 'apps.kill',
   },
   /** `wallet.*` */
   Wallet: {
@@ -822,6 +866,26 @@ export interface RateLimitDetails {
 export interface ReasonDetails {
   /** Reason code, e.g. `expired`, `banned`, `outOfStock`, `pendingApproval`. */
   reason: string;
+}
+
+/** An app running in the player's session (`apps.running`). */
+export interface RunningApp {
+  /** App id. */
+  appId: string;
+  /** App title. */
+  title: string;
+  /** Main process: the one the Agent started, else the oldest of `pids`. */
+  pid: number;
+  /** Every process of the app: the started one, its descendants and the app's own executables. */
+  pids: number[];
+  /** When the Agent started it, else when its main process started. */
+  startedAt: string;
+}
+
+/** Response of `apps.running`. */
+export interface AppsRunningResponse {
+  /** Running apps, oldest first. */
+  items: RunningApp[];
 }
 
 /** Request of `session.end`. */
@@ -1320,6 +1384,22 @@ export interface WalletHistoryRequest {
   type?: TransactionType | null;
 }
 
+/** Request of `wallet.redeemPromo` (D-88): the member's own promo code of the club. */
+export interface WalletRedeemPromoRequest {
+  /** The code as typed (case does not matter), 1–32 characters. */
+  code: string;
+}
+
+/** Response of `wallet.redeemPromo`: the code as the club wrote it, the bonus credited and the new balance. */
+export interface WalletRedeemPromoResponse {
+  /** The code. */
+  code: string;
+  /** Credited to the main balance. */
+  bonus: Money;
+  /** Main balance after the credit. */
+  balance: Money;
+}
+
 /** Request of `wallet.tariffs`. */
 export interface WalletTariffsRequest {
   /** Zone; defaults to this PC's zone. */
@@ -1344,19 +1424,6 @@ export interface WalletTopupIntentRequest {
   provider: TopupProvider;
 }
 
-/** Request of `wallet.redeemPromo` (D-88): the member's own promo code of the club. */
-export interface WalletRedeemPromoRequest {
-  /** The code as typed (case does not matter), 1–32 characters. */
-  code: string;
-}
-
-/** Response of `wallet.redeemPromo`: the code as the club wrote it, the bonus credited and the new balance. */
-export interface WalletRedeemPromoResponse {
-  code: string;
-  bonus: Money;
-  balance: Money;
-}
-
 /**
  * Every Shell → Agent IPC request (IPC_PROTOCOL.md §7). Wire form is the IPC name (`auth.hello`, …) via
  * `AgentCommandJsonConverter`; use `AgentCommands.ToIpcName` / `AgentCommands.TryParse`.
@@ -1372,6 +1439,8 @@ export const AgentCommand = {
   AuthStatus: 'auth.status',
   /** `auth.qrStart` */
   AuthQrStart: 'auth.qrStart',
+  /** `auth.register` */
+  AuthRegister: 'auth.register',
   /** `session.get` */
   SessionGet: 'session.get',
   /** `session.start` */
@@ -1408,6 +1477,10 @@ export const AgentCommand = {
   AppsList: 'apps.list',
   /** `apps.launch` */
   AppsLaunch: 'apps.launch',
+  /** `apps.running` */
+  AppsRunning: 'apps.running',
+  /** `apps.kill` */
+  AppsKill: 'apps.kill',
   /** `wallet.balance` */
   WalletBalance: 'wallet.balance',
   /** `wallet.tariffs` */
@@ -2647,6 +2720,7 @@ const SESSION_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
   AgentCommand.GamesLaunch,
   AgentCommand.GamesKill,
   AgentCommand.AppsLaunch,
+  AgentCommand.AppsKill,
   AgentCommand.ShopOrder,
 ]);
 
@@ -2711,6 +2785,7 @@ export interface IpcRequestMap {
   [IpcNames.Auth.Logout]: { request: AuthLogoutRequest | null; response: AuthLogoutResponse };
   [IpcNames.Auth.Status]: { request: null; response: AuthStatusResponse };
   [IpcNames.Auth.QrStart]: { request: null; response: QrLoginStart };
+  [IpcNames.Auth.Register]: { request: AuthRegisterRequest; response: AuthLoginResponse };
   [IpcNames.Session.Get]: { request: null; response: Session | null };
   [IpcNames.Session.Start]: { request: SessionStartRequest; response: Session };
   [IpcNames.Session.Pause]: { request: SessionPauseRequest | null; response: Session };
@@ -2729,6 +2804,8 @@ export interface IpcRequestMap {
   [IpcNames.Games.InstallStatus]: { request: GamesInstallStatusRequest; response: GameInstallStatus };
   [IpcNames.Apps.List]: { request: null; response: AppsListResponse };
   [IpcNames.Apps.Launch]: { request: AppsLaunchRequest; response: AppsLaunchResponse };
+  [IpcNames.Apps.Running]: { request: null; response: AppsRunningResponse };
+  [IpcNames.Apps.Kill]: { request: AppsKillRequest; response: GamesKillResponse };
   [IpcNames.Wallet.Balance]: { request: null; response: Balance };
   [IpcNames.Wallet.Tariffs]: { request: WalletTariffsRequest | null; response: WalletTariffsResponse };
   [IpcNames.Wallet.History]: { request: WalletHistoryRequest | null; response: WalletHistoryResponse };

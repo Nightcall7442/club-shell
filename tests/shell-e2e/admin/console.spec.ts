@@ -10,6 +10,7 @@
  */
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { expect, test, type APIRequestContext, type APIResponse, type Page } from '@playwright/test';
+import { fileURLToPath } from 'node:url';
 
 const API = 'http://localhost:8091/api/v1';
 const OWNER_PIN = '0000';
@@ -712,7 +713,8 @@ test('the price takes the day rate and only the single best discount', async ({ 
 
 test('the player-screen settings are saved on the server', async ({ page, request }) => {
   await signIn(page, OWNER_PIN);
-  await page.goto('/#/club');
+  // The name lives with the logo and the colour under «Интерфейс и логотипы» (D-93).
+  await page.goto('/#/interface');
   const name = page.getByLabel('Название клуба');
   await name.fill('E2E Arena');
   const save = page.getByRole('button', { name: 'Сохранить', exact: true });
@@ -755,7 +757,11 @@ test('the owner turns on «x2» for top-ups under «Бонусы и акции»
 
     await ensureShift(request);
     const member = await newClient(request, 'x2-member');
-    const topUp = await moneyPost(request, '/admin/wallet/topup', { userId: member.id, amount: 2_000_000, method: 'cash' });
+    const topUp = await moneyPost(request, '/admin/wallet/topup', {
+      userId: member.id,
+      amount: 2_000_000,
+      method: 'cash',
+    });
     expect(topUp.ok(), await topUp.text()).toBeTruthy();
     const paid = (await topUp.json()) as { bonus: { amount: number }; balance: { amount: number } };
     expect([paid.bonus.amount, paid.balance.amount]).toEqual([2_000_000, 4_000_000]);
@@ -774,7 +780,10 @@ test('the owner sets the screensaver of the free PCs on «Экран игрок�
     await page.goto('/#/club');
     await page.getByRole('switch', { name: 'Заставка включена' }).click();
     await page.getByRole('button', { name: 'Добавить картинку или видео' }).click();
-    await page.getByTestId('screensaver-items').getByLabel('Ссылка на картинку или видео').fill('https://cdn.example.com/promo.mp4');
+    await page
+      .getByTestId('screensaver-items')
+      .getByLabel('Ссылка на картинку или видео')
+      .fill('https://cdn.example.com/promo.mp4');
     await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
     await expect(page.getByRole('status').filter({ hasText: 'Сохранено' })).toBeVisible();
 
@@ -795,13 +804,69 @@ test('the owner sets the screensaver of the free PCs on «Экран игрок�
 
     const bad = await request.patch(`${API}/admin/club`, {
       headers: auth(owner),
-      data: { screensaver: { enabled: true, afterMinutes: 5, items: [{ url: 'promo.mp4', type: 'video', durationSec: 10 }] } },
+      data: {
+        screensaver: { enabled: true, afterMinutes: 5, items: [{ url: 'promo.mp4', type: 'video', durationSec: 10 }] },
+      },
     });
     expect(bad.status()).toBe(400);
   } finally {
     await request.patch(`${API}/admin/club`, {
       headers: auth(owner),
       data: { screensaver: { enabled: false, afterMinutes: 5, items: [] } },
+    });
+  }
+});
+
+test('the owner uploads the club logo and picks the PCs theme under «Интерфейс и логотипы»; the PCs get both (D-93)', async ({
+  page,
+  request,
+}) => {
+  const owner = await tokenFor(request, OWNER_PIN);
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+    'base64',
+  );
+  const before = (await (await request.get(`${API}/admin/club`, { headers: auth(owner) })).json()) as {
+    branding: Record<string, unknown>;
+  };
+  try {
+    await signIn(page, OWNER_PIN);
+    await nav(page).getByText('Интерфейс и логотипы', { exact: true }).click();
+    await page
+      .getByTestId('picture-logo')
+      .locator('input[type=file]')
+      .setInputFiles({ name: 'logo.png', mimeType: 'image/png', buffer: png });
+    await expect(page.getByTestId('picture-logo').locator('img')).toBeVisible();
+    await page.getByRole('radio', { name: /Daylight/ }).click();
+    await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Сохранено' })).toBeVisible();
+
+    const club = (await (await request.get(`${API}/admin/club`, { headers: auth(owner) })).json()) as {
+      branding: { logoUrl: string; theme: string };
+    };
+    expect(club.branding.theme).toBe('light');
+    expect(club.branding.logoUrl).toMatch(/^\/api\/v1\/media\//);
+    // Anyone reads the picture back (a PC's lock screen has no token); the rail shows it.
+    const served = await request.get(`${API.replace(/\/api\/v1$/, '')}${club.branding.logoUrl}`);
+    expect(served.headers()['content-type']).toContain('image/png');
+    await expect(page.locator('aside img').first()).toBeVisible();
+
+    const pc = await registerAgent(request, 'brand');
+    const config = (await (await agentCall(request, pc, 'GET', `/agents/${pc.pcId}/config`)).json()) as {
+      shell: { theme: string };
+    };
+    expect(config.shell.theme).toBe('light');
+
+    // Only pictures pass: an SVG dressed as a PNG is refused.
+    const svg = await request.post(`${API}/admin/media?kind=logo`, {
+      headers: { ...auth(owner), 'Content-Type': 'image/png' },
+      data: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'),
+    });
+    expect(svg.status()).toBe(400);
+  } finally {
+    await request.patch(`${API}/admin/club`, {
+      headers: auth(owner),
+      data: { branding: { ...before.branding, theme: 'default' } },
     });
   }
 });
@@ -942,6 +1007,39 @@ test('a game refused for want of administrator rights is flagged, and the owner 
     items: { id: string; runAsInvoker?: boolean }[];
   };
   expect(games.items.find((g) => g.id === id)?.runAsInvoker).toBe(true);
+});
+
+test('the owner uploads a trailer to the club server and sees its status and resolution (D-97)', async ({ page }) => {
+  await signIn(page, OWNER_PIN);
+  await page.goto('/#/catalog');
+  await page.getByRole('row').filter({ hasText: 'Counter-Strike 2' }).getByRole('button', { name: 'Изменить' }).click();
+  const editor = page
+    .locator('section')
+    .filter({ has: page.getByRole('heading', { name: /Игра · Counter-Strike 2/ }) });
+  const trailer = editor.getByTestId('trailer');
+
+  // Not a video: refused by its bytes, whatever the name says.
+  await trailer.getByLabel('Видеофайл ролика').setInputFiles({
+    name: 'trailer.mp4',
+    mimeType: 'video/mp4',
+    buffer: Buffer.from('<!doctype html><title>YouTube</title>'),
+  });
+  await expect(trailer.getByText('Это не видеофайл: нужен MP4 (H.264) или WebM')).toBeVisible();
+
+  // A small real WebM (320×180): stored, played back from the server, flagged as below the club's 1080p.
+  await trailer
+    .getByLabel('Видеофайл ролика')
+    .setInputFiles(fileURLToPath(new URL('../../../tools/MockServer/assets/trailer-sample.webm', import.meta.url)));
+  await expect(trailer.getByRole('status')).toContainText(/Готово · 320×180 · \d+ КБ · загружен/, { timeout: 10_000 });
+  await expect(trailer.getByText(/Ниже 1080p \(320×180\)/)).toBeVisible();
+  await expect(trailer.locator('video')).toHaveAttribute('src', /\/api\/v1\/trailers\/[0-9a-f-]{36}$/);
+  await expect(page.getByRole('row').filter({ hasText: 'Counter-Strike 2' })).toContainText('Есть');
+
+  // «Найти трейлеры»: the mock finds one for every Steam game without one.
+  if (!REAL) {
+    await page.getByRole('button', { name: 'Найти трейлеры' }).click();
+    await expect(page.getByText(/Найдено трейлеров: \d+ из \d+/)).toBeVisible({ timeout: 10_000 });
+  }
 });
 
 test('saving only the zones of a game sends only its zones (SHELL_CHANGES 61)', async ({ page }) => {
@@ -1124,6 +1222,81 @@ test('a client registered at the counter signs in on a PC with the issued passwo
   expect(await login({ kind: 'password', username, password: second })).toBe(200);
 });
 
+test('a client registered by name alone gets a login from the server, shown once with the password (D-92)', async ({
+  page,
+}) => {
+  await signIn(page, CASHIER_PIN);
+  await page.goto('/#/clients');
+  await page.getByRole('button', { name: 'Новый клиент' }).click();
+  await page.getByLabel('Имя').fill('Турсунов Бобур');
+  await expect(page.getByText('Пусто — придумаем по телефону или имени')).toBeVisible();
+  await page.getByRole('button', { name: 'Создать' }).click();
+
+  const login = page.getByRole('status').filter({ hasText: 'Логин клиента придуман сервером' }).locator('.font-mono');
+  await expect(login).toHaveText(/^tursunov\.bobur\d*$/);
+  const made = (await login.textContent()) ?? '';
+  await expect(page.getByText(`@${made}`, { exact: true })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Временный пароль' }).locator('.font-mono')).toHaveText(
+    /^[a-z2-9]{8}$/,
+  );
+
+  // The next client of the same name gets the next free login.
+  await page.getByRole('button', { name: 'Новый клиент' }).click();
+  await page.getByLabel('Имя').fill('Турсунов Бобур');
+  await page.getByRole('button', { name: 'Создать' }).click();
+  await expect(login).toHaveText(/^tursunov\.bobur\d+$/);
+  expect(await login.textContent()).not.toBe(made);
+});
+
+test('the owner lets players create their own account on the PC (D-92)', async ({ page, request }) => {
+  const owner = await tokenFor(request, OWNER_PIN);
+  const pc = await registerAgent(request, 'signup');
+  const register = (): Promise<APIResponse> =>
+    agentCall(request, pc, 'POST', '/auth/register', {
+      pcId: pc.pcId,
+      hwid: pc.hwid,
+      displayName: 'Самостоятельный',
+      username: `self-${Date.now()}`,
+      password: '4321',
+      acceptRules: true,
+    });
+  try {
+    // Off until the owner switches it on.
+    const off = await register();
+    expect(off.status()).toBe(403);
+    expect(((await off.json()) as { error: { details: { reason: string } } }).error.details.reason).toBe(
+      'selfSignupDisabled',
+    );
+
+    await signIn(page, OWNER_PIN);
+    await page.goto('/#/club');
+    await page.getByRole('switch', { name: 'Игроки создают аккаунт сами' }).click();
+    await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Сохранено' })).toBeVisible();
+    const config = (await (await agentCall(request, pc, 'GET', `/agents/${pc.pcId}/config`)).json()) as {
+      shell: { club: { selfSignup?: boolean } };
+    };
+    expect(config.shell.club.selfSignup).toBe(true);
+
+    const made = await register();
+    expect(made.status()).toBe(200);
+    const signedIn = (await made.json()) as {
+      user: { role: string; balance: { amount: number } };
+      accessToken: string;
+    };
+    expect(signedIn.user).toMatchObject({ role: 'member', balance: { amount: 0 } });
+    expect(signedIn.accessToken).toBeTruthy();
+  } finally {
+    const club = (await (await request.get(`${API}/admin/club`, { headers: auth(owner) })).json()) as {
+      limits: Record<string, unknown>;
+    };
+    await request.patch(`${API}/admin/club`, {
+      headers: auth(owner),
+      data: { limits: { ...club.limits, selfSignup: false } },
+    });
+  }
+});
+
 test('a cashier without an open shift has to open one, with the float the last shift closed with', async ({
   page,
   request,
@@ -1196,7 +1369,8 @@ test('a typed amount topped up by card from the client search lands in the X-rep
   await amount.fill('45000');
   await expect(amount).toHaveValue('45 000');
   // The method button is the confirmation.
-  await sheet.getByRole('button', { name: /^Карта/ }).click();
+  await sheet.getByRole('radio', { name: 'Карта' }).click();
+  await sheet.getByRole('button', { name: /^Пополнить · Карта/ }).click();
   await expect(sheet.getByRole('status')).toContainText(/Баланс пополнен · 45\s000 сум · Карта/);
 
   const x = (await (await request.get(`${API}/admin/shift`, { headers })).json()) as {
@@ -1252,7 +1426,7 @@ test('a client is seated from the map: the pay box takes what the balance lacks,
 // Cash desk, part 2: walk-in guests, postpaid, packages, settling, drawer moves, the operations feed, printing
 // ---------------------------------------------------------------------------------------------------------------------
 
-test('a walk-in guest is seated from the map with one exact payment and the «Гость» button on that PC signs in to it', async ({
+test('a walk-in guest is seated from the map with one exact payment and signs in on that PC with the code the desk shows (D-96)', async ({
   page,
   request,
 }) => {
@@ -1270,12 +1444,27 @@ test('a walk-in guest is seated from the map with one exact payment and the «Г
   await expect(page.getByLabel('Сумма')).toHaveAttribute('readonly', '');
   await page.getByRole('button', { name: /^Посадить гостя · Наличные/ }).click();
   await expect(page.getByText(/Сеанс открыт/)).toBeVisible();
-  // Nobody has pressed «Гость» on the PC yet, and the clock already runs.
+  // The seat's code, large, once: the cashier names it to the guest.
+  const codeBox = page.getByRole('region', { name: /^Код для входа гостя на/ });
+  await expect(codeBox).toContainText('Назовите гостю код для входа на');
+  const code = (await codeBox.locator('[data-guest-code]').getAttribute('data-guest-code')) ?? '';
+  expect(code).toMatch(/^\d{4}$/);
+  // Nobody has typed it on the PC yet, and the clock already runs.
   await expect(tile).toContainText('ждёт входа');
 
   const seat = await seatOf(request, pc.pcId);
   expect(seat.user?.role).toBe('guest');
-  const login = await agentCall(request, pc, 'POST', '/auth/guest', { pcId: pc.pcId, hwid: pc.hwid });
+  // «Гость» on the PC without the code, or with a wrong one, does not take the seat.
+  const bare = await agentCall(request, pc, 'POST', '/auth/guest', { pcId: pc.pcId, hwid: pc.hwid });
+  expect(bare.status(), await bare.text()).toBe(400);
+  const wrong = await agentCall(request, pc, 'POST', '/auth/guest', {
+    pcId: pc.pcId,
+    hwid: pc.hwid,
+    code: code === '0000' ? '1111' : '0000',
+  });
+  expect(wrong.status(), await wrong.text()).toBe(401);
+  expect(((await wrong.json()) as { error: { details: { attemptsLeft: number } } }).error.details.attemptsLeft).toBe(4);
+  const login = await agentCall(request, pc, 'POST', '/auth/guest', { pcId: pc.pcId, hwid: pc.hwid, code });
   expect(login.status(), await login.text()).toBe(200);
   const guest = (await login.json()) as {
     accessToken: string;
@@ -1971,6 +2160,7 @@ test("the bar charges a seated client's balance from the seat panel; a short bal
     .getByRole('button', { name: /^Club T-shirt/ })
     .click();
   await expect(cart).toContainText('Не хватает');
+  await cart.getByRole('radio', { name: 'Карта' }).click();
   await cart.getByRole('button', { name: /^Продать · Карта/ }).click();
   await expect(cart.getByRole('status')).toContainText('Продано');
   expect(await balance()).toBe(balanceBefore - water.price.amount);
@@ -2262,7 +2452,9 @@ test('a move to a busy, maintenance or still-playing PC is refused with the reas
   await endAt(request, c.pcId);
 });
 
-test('a walk-in guest and a kiosk guest moved to another PC sign in there with «Гость»', async ({ request }) => {
+test('a walk-in guest and a kiosk guest moved to another PC sign in there with the move’s new code', async ({
+  request,
+}) => {
   await ensureShift(request);
   const a = await registerAgent(request, 'g-a');
   const b = await registerAgent(request, 'g-b');
@@ -2290,7 +2482,12 @@ test('a walk-in guest and a kiosk guest moved to another PC sign in there with �
   const deskSession = ((await seated.json()) as { session: { id: string } }).session.id;
   const movedDesk = await moveSession(request, { fromPcId: a.pcId, sessionId: deskSession, toPcId: b.pcId });
   expect(movedDesk.status(), await movedDesk.text()).toBe(200);
-  const onB = await agentCall(request, b, 'POST', '/auth/guest', { pcId: b.pcId, hwid: b.hwid });
+  const codeOf = async (res: APIResponse): Promise<string> => ((await res.json()) as { guestCode: string }).guestCode;
+  const onB = await agentCall(request, b, 'POST', '/auth/guest', {
+    pcId: b.pcId,
+    hwid: b.hwid,
+    code: await codeOf(movedDesk),
+  });
   expect(onB.status(), await onB.text()).toBe(200);
   expect(await guestSession(onB)).toBe(deskSession);
 
@@ -2317,7 +2514,11 @@ test('a walk-in guest and a kiosk guest moved to another PC sign in there with �
   const kioskSession = ((await own.json()) as { id: string }).id;
   const movedKiosk = await moveSession(request, { fromPcId: c.pcId, sessionId: kioskSession, toPcId: d.pcId });
   expect(movedKiosk.status(), await movedKiosk.text()).toBe(200);
-  const onD = await agentCall(request, d, 'POST', '/auth/guest', { pcId: d.pcId, hwid: d.hwid });
+  const onD = await agentCall(request, d, 'POST', '/auth/guest', {
+    pcId: d.pcId,
+    hwid: d.hwid,
+    code: await codeOf(movedKiosk),
+  });
   expect(onD.status(), await onD.text()).toBe(200);
   expect(await guestSession(onD)).toBe(kioskSession);
 
@@ -2502,8 +2703,11 @@ test('several PCs at once: a switched-off one is woken through a PC that is on, 
   await panel.getByRole('button', { name: /^Открыть постоплату \(2 из 3\)/ }).click();
   await panel.getByRole('button', { name: 'Открыть', exact: true }).click();
   const rows = panel.getByRole('list', { name: 'Сеансы по ПК' });
-  for (const pc of [b, c])
+  for (const pc of [b, c]) {
     await expect(rows.locator(`[data-pc-result="${pc.pcId}"]`)).toContainText('постоплата открыта');
+    // Each PC's code is listed by its row: the cashier names it to that PC's guest (D-96).
+    await expect(rows.locator(`[data-pc-result="${pc.pcId}"] [data-guest-code]`)).toHaveText(/^\d{4}$/);
+  }
   for (const pc of [b, c]) {
     const seat = await seatOf(request, pc.pcId);
     expect(seat.session?.isPrepaid).toBe(false);
@@ -3105,4 +3309,143 @@ test("the owner writes a guest's debt off without money: the drawer stays, X cou
     (before as { writeOffs?: number } | null)?.writeOffs ?? 0,
   );
   expect((await overview(request)).guestDebts?.some((d) => d.displayName === name) ?? false).toBe(false);
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Time «по сумме» (D-90) and correcting a desk top-up (D-91)
+// ---------------------------------------------------------------------------------------------------------------------
+
+/** `1 ч 40 мин`, as the map says the time an amount buys. */
+function hoursMinutes(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return [h > 0 ? `${h} ч` : '', m > 0 || h === 0 ? `${m} мин` : ''].filter(Boolean).join(' ');
+}
+
+test('time «по сумме»: the typed amount becomes the minutes it buys, and the seat and the extension sell exactly them (D-90)', async ({
+  page,
+  request,
+}) => {
+  const pc = await registerAgent(request, 'amount');
+  const client = await newClient(request, 'amount');
+  const tariffId = await standardTariff(request);
+  const cashier = auth(await tokenFor(request, CASHIER_PIN));
+  const priced = async (amount: number, sessionId?: string): Promise<{ minutes: number; total: { amount: number } }> =>
+    (
+      await request.post(`${API}/admin/quote`, {
+        headers: cashier,
+        data: { tariffId, pcId: pc.pcId, minutes: 60, userId: client.id, amount, ...(sessionId ? { sessionId } : {}) },
+      })
+    ).json();
+  const seatWant = await priced(2_000_000);
+  expect(seatWant.total.amount).toBeLessThanOrEqual(2_000_000);
+  const said = (min: number): RegExp => new RegExp(`^≈ ${hoursMinutes(min)}( ·|$)`);
+
+  await signIn(page, CASHIER_PIN);
+  await page.locator(`#seat-${pc.pcId}`).click();
+  await expect(page.getByRole('heading', { name: /Посадить на/ })).toBeVisible();
+  await page.getByRole('combobox', { name: 'Кто' }).fill(client.username);
+  await page.getByRole('option').filter({ hasText: client.username }).click();
+  await page.getByRole('combobox', { name: /^Тариф/ }).selectOption(tariffId);
+  await page.getByRole('button', { name: 'По сумме' }).click();
+  await page.getByLabel('На какую сумму').fill('20000');
+  await expect(page.getByTestId('amount-time')).toHaveText(said(seatWant.minutes));
+  // An amount below the shortest purchase is refused before anything is sent.
+  await page.getByLabel('На какую сумму').fill('1');
+  await expect(page.getByTestId('amount-time')).toContainText('Мало');
+  await page.getByLabel('На какую сумму').fill('20000');
+  await expect(page.getByTestId('amount-time')).toHaveText(said(seatWant.minutes));
+  // Nothing on the new client's balance: the pay box takes the price of those minutes.
+  await page.getByRole('button', { name: /^Посадить · Наличные/ }).click();
+  await expect(page.getByText(/Сеанс открыт/)).toBeVisible();
+  const seated = await seatOf(request, pc.pcId);
+  expect(seated.session?.cost.amount).toBe(seatWant.total.amount);
+  expect(seated.session?.secondsLeft ?? 0).toBeGreaterThan(seatWant.minutes * 60 - 30);
+  expect(seated.session?.secondsLeft ?? 0).toBeLessThanOrEqual(seatWant.minutes * 60);
+
+  // Extend for 5 000 сум: the quote of this session, paid at the desk.
+  const extendWant = await priced(500_000, seated.session!.id);
+  await page.getByRole('button', { name: 'Продлить', exact: true }).click();
+  const extend = page.getByRole('dialog', { name: /^Продлить/ });
+  await extend.getByRole('button', { name: 'По сумме' }).click();
+  await extend.getByLabel('На какую сумму').fill('5000');
+  await expect(extend.getByTestId('amount-time')).toHaveText(said(extendWant.minutes));
+  await extend.getByRole('button', { name: /^Продлить · Наличные/ }).click();
+  await expect(extend).toHaveCount(0);
+  await expect
+    .poll(async () => (await seatOf(request, pc.pcId)).session?.cost.amount ?? 0)
+    .toBe(seatWant.total.amount + extendWant.total.amount);
+  const rows = (await shiftOperations(request, 'sessionExtend')) as (OperationRow & { minutes: number | null })[];
+  expect(rows.find((r) => r.sessionId === seated.session!.id)?.minutes).toBe(extendWant.minutes);
+  await endAt(request, pc.pcId);
+});
+
+test('a wrong desk top-up is corrected from the feed in one step: the difference leaves the drawer, a second cancel and a spent one are refused (D-91)', async ({
+  page,
+  request,
+}) => {
+  await ensureShift(request);
+  const client = await newClient(request, 'fix');
+  // 200 000 сум in cash instead of 20 000.
+  const wrong = await moneyPost(request, '/admin/wallet/topup', {
+    userId: client.id,
+    amount: 20_000_000,
+    method: 'cash',
+  });
+  expect(wrong.status(), await wrong.text()).toBe(200);
+  const wrongId = ((await wrong.json()) as { transaction: { id: string } }).transaction.id;
+  const before = await shiftState(request);
+
+  await signIn(page, CASHIER_PIN);
+  const row = page
+    .locator('[data-feed="column"]')
+    .getByRole('listitem')
+    .filter({ hasText: client.displayName })
+    .filter({ hasText: 'Пополнение' })
+    .first();
+  await row.getByRole('button', { name: 'Исправить / отменить…' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Исправить пополнение' });
+  await sheet.getByLabel('Правильная сумма').fill('20000');
+  await expect(sheet).toContainText(/Выдайте 180\s000 сум наличными из кассы/);
+  await sheet.getByRole('button', { name: 'Исправить', exact: true }).click();
+  await expect(sheet.getByRole('status')).toContainText('Исправлено');
+  await sheet.getByRole('button', { name: 'Готово' }).click();
+  await expect(
+    page
+      .locator('[data-feed="column"]')
+      .getByRole('listitem')
+      .filter({ hasText: client.displayName })
+      .filter({ hasText: 'отменено' }),
+  ).toHaveCount(1);
+
+  const after = await shiftState(request);
+  expect((before.expectedCash ?? 0) - (after.expectedCash ?? 0)).toBe(18_000_000);
+  const counts = (s: typeof after): number => (s.x as { topUpCancelCount?: number } | null)?.topUpCancelCount ?? 0;
+  expect(counts(after) - counts(before)).toBe(1);
+  const cancels = await shiftOperations(request, 'topUpCancel');
+  expect(cancels.find((r) => r.client?.id === client.id)?.drawer).toBe(-20_000_000);
+  const again = await moneyPost(request, '/admin/wallet/topup/cancel', {
+    transactionId: wrongId,
+    reasonCode: 'wrongAmount',
+  });
+  expect(again.status()).toBe(409);
+  expect(await reasonOf(again)).toBe('alreadyCancelled');
+
+  // Money already spent at the bar is not taken back.
+  const spent = await newClient(request, 'spent');
+  const topUp = await moneyPost(request, '/admin/wallet/topup', {
+    userId: spent.id,
+    amount: 1_000_000,
+    method: 'card',
+  });
+  const topUpId = ((await topUp.json()) as { transaction: { id: string } }).transaction.id;
+  const item = await newProduct(request, 'spent', { price: 600_000, stockQty: null });
+  const sale = await barSale(request, [{ product: item, qty: 1 }], { method: 'balance', userId: spent.id });
+  expect(sale.status(), await sale.text()).toBe(201);
+  const refused = await moneyPost(request, '/admin/wallet/topup/cancel', {
+    transactionId: topUpId,
+    reasonCode: 'wrongClient',
+  });
+  expect(refused.status()).toBe(409);
+  expect(await reasonOf(refused)).toBe('topUpSpent');
 });

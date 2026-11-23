@@ -313,6 +313,11 @@ interface GameSeed {
   lastPlayedMin?: number;
   description: string;
   video?: string;
+  /**
+   * The trailer's original link when `video` is the club server's copy (`Game.videoSourceUrl`, D-97). PUBG's copy is
+   * missing on purpose: the shell falls back to the original once.
+   */
+  videoSource?: string;
 }
 
 const GAME_SEEDS: GameSeed[] = [
@@ -392,7 +397,8 @@ const GAME_SEEDS: GameSeed[] = [
     n: 5,
     seed: 'pubg',
     title: 'PUBG: BATTLEGROUNDS',
-    video: '/mock-art/pubg-hero.mp4',
+    video: '/mock-trailers/pubg-copy.mp4',
+    videoSource: '/mock-art/pubg-hero.mp4',
     launcher: 'steam',
     appId: '578080',
     category: ['battleRoyale', 'shooter'],
@@ -597,6 +603,7 @@ export const GAMES: Game[] = GAME_SEEDS.map((g) => ({
   coverUrl: cover(g.seed),
   heroUrl: hero(g.seed),
   videoUrl: g.video ?? null,
+  videoSourceUrl: g.videoSource ?? null,
   description: g.description,
   ageRating: g.age,
   popularity: g.pop,

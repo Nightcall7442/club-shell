@@ -221,6 +221,24 @@ pub(crate) fn program_windows() -> Vec<WindowDescriptor> {
         .collect()
 }
 
+/// Asks every program window of `pids` to close (`WM_CLOSE`, the title bar's ×), never one of the
+/// Shell's; returns how many were asked. The Agent's `apps.kill` runs in session 0 and cannot reach
+/// these windows, so the Shell asks first: a browser keeps its tabs, an app saves what it must.
+pub(crate) fn close_program_windows(pids: &[u32]) -> usize {
+    let own = std::process::id();
+    program_windows()
+        .into_iter()
+        .filter(|w| w.pid != own && pids.contains(&w.pid))
+        .map(|w| native::post_close(w.hwnd))
+        .filter(|&posted| posted)
+        .count()
+}
+
+/// `true` while one of `pids` still has a program window.
+pub(crate) fn has_program_window(pids: &[u32]) -> bool {
+    program_windows().iter().any(|w| pids.contains(&w.pid))
+}
+
 /// Restores `hwnd` when minimized and makes it the foreground window; `true` when `pid` owns the
 /// foreground afterwards (it may have activated another of its windows, a dialog say).
 pub(crate) fn bring_to_front(hwnd: isize, pid: u32) -> bool {
@@ -388,7 +406,7 @@ mod native {
     use clubshell_winutil::hwnd_from_raw;
     use clubshell_winutil::window::enumerate_windows;
     use windows::core::PCWSTR;
-    use windows::Win32::Foundation::{RECT, S_OK};
+    use windows::Win32::Foundation::{LPARAM, RECT, S_OK, WPARAM};
     use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
     use windows::Win32::Graphics::Gdi::{
         CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits, GetObjectW, BITMAP, BITMAPINFO,
@@ -397,8 +415,8 @@ mod native {
     use windows::Win32::UI::Shell::SHDefExtractIconW;
     use windows::Win32::UI::WindowsAndMessaging::{
         AllowSetForegroundWindow, DestroyIcon, GetIconInfo, GetWindow, GetWindowLongW,
-        GetWindowRect, IsIconic, ShowWindowAsync, GWL_EXSTYLE, GW_OWNER, HICON, ICONINFO,
-        SW_RESTORE, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+        GetWindowRect, IsIconic, PostMessageW, ShowWindowAsync, GWL_EXSTYLE, GW_OWNER, HICON,
+        ICONINFO, SW_RESTORE, WM_CLOSE, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     };
 
     use super::WindowDescriptor;
@@ -478,6 +496,12 @@ mod native {
     pub fn is_minimized(hwnd: isize) -> bool {
         // SAFETY: no preconditions beyond a window handle.
         unsafe { IsIconic(hwnd_from_raw(hwnd)) }.as_bool()
+    }
+
+    /// Posts `WM_CLOSE` (no wait on a possibly hung thread); `true` when it was queued.
+    pub fn post_close(hwnd: isize) -> bool {
+        // SAFETY: no preconditions beyond a window handle; a stale handle just fails.
+        unsafe { PostMessageW(hwnd_from_raw(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0)) }.is_ok()
     }
 
     /// Main icon of the exe at `path`, `size` px square, as `(width, height, RGBA rows top-down)`;
@@ -606,6 +630,10 @@ mod native {
     }
 
     pub fn is_minimized(_hwnd: isize) -> bool {
+        false
+    }
+
+    pub fn post_close(_hwnd: isize) -> bool {
         false
     }
 

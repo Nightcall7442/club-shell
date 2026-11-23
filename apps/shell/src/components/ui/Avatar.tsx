@@ -50,7 +50,9 @@ export const Avatar = forwardRef<HTMLSpanElement, AvatarProps>(function Avatar(
       role="img"
       aria-label={name}
       className={clsx(
-        'relative inline-flex shrink-0 select-none items-center justify-center overflow-hidden rounded-full bg-surface font-bold uppercase text-text',
+        'relative inline-flex shrink-0 select-none items-center justify-center overflow-hidden rounded-full bg-surface font-bold uppercase',
+        // The initials sit on a dark generated gradient in every theme (white), a picture needs no colour.
+        showImage ? 'text-text' : 'text-white',
         SIZES[size],
         ring && 'border-glow',
         className,
