@@ -320,7 +320,7 @@ public sealed class PlayerAccountTests : IDisposable
     [InlineData(SessionEndReason.Idle)]
     public async Task A_postpaid_session_is_never_ended_from_the_shell_it_is_paid_and_ended_at_the_desk(SessionEndReason reason)
     {
-        await SignInWithSessionAsync(_member, prepaid: false);
+        await SignInWithSessionAsync(_member, prepaid: false, payAtDesk: true);
 
         IpcEnvelope end = await SendAsync(IpcMessages.Session.End, new SessionEndRequest(reason));
         IpcEnvelope logout = await SendAsync(IpcMessages.Auth.Logout, new AuthLogoutRequest(reason));
@@ -335,6 +335,18 @@ public sealed class PlayerAccountTests : IDisposable
         _users.User.Should().NotBeNull();
         await _server.DidNotReceive().EndSessionAsync(Arg.Any<Guid>(), Arg.Any<SessionEndReport>(), Arg.Any<CancellationToken>());
         await _server.DidNotReceive().LogoutAsync(Arg.Any<LogoutRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_members_own_pay_as_you_go_from_the_balance_may_be_ended_from_the_shell()
+    {
+        // D-89: open-ended too, but the server stops it when the balance runs out, so nothing is left unpaid.
+        await SignInWithSessionAsync(_member, prepaid: false);
+
+        IpcEnvelope end = await SendAsync(IpcMessages.Session.End, new SessionEndRequest(SessionEndReason.User));
+
+        end.Error?.DetailsAs<ReasonDetails>()?.Reason.Should().NotBe(SessionHandlers.PayAtDeskReason);
+        await _server.Received().EndSessionAsync(Arg.Any<Guid>(), Arg.Any<SessionEndReport>(), Arg.Any<CancellationToken>());
     }
 
     [Theory]
@@ -762,12 +774,12 @@ public sealed class PlayerAccountTests : IDisposable
         new(_sessions, _server, _store, _hwid, _clock, _monitor, NullLogger<SessionLock>.Instance, null, _tokens, _sink, _users);
 
     /// <summary>Signs <paramref name="user"/> in online (with a player token) and starts a server session of theirs.</summary>
-    private async Task<PlaySession> SignInWithSessionAsync(User user, DateTimeOffset? expiresAt = null, bool prepaid = true)
+    private async Task<PlaySession> SignInWithSessionAsync(User user, DateTimeOffset? expiresAt = null, bool prepaid = true, bool? payAtDesk = null)
     {
         _link.Connectivity = ConnectivityState.Online;
         await _tokens.SetUserAsync(new UserTokens(user.Id, "token-" + user.Username, "refresh", expiresAt ?? T0.AddHours(8)), CancellationToken.None);
         _users.Set(user, expiresAt ?? T0.AddHours(8), ConnectivityState.Online);
-        var session = new PlaySession(Guid.NewGuid(), user.Id, PcId, SessionState.Active, T0, T0.AddHours(1), null, TariffId, 3600, 0, Money.Uzs(6_000), prepaid, []);
+        var session = new PlaySession(Guid.NewGuid(), user.Id, PcId, SessionState.Active, T0, T0.AddHours(1), null, TariffId, prepaid ? 3600 : PlaySession.OpenEnded, 0, Money.Uzs(6_000), prepaid, [], payAtDesk);
         _server.CreateSessionAsync(Arg.Any<SessionCreateRequest>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(session);
         return await _sessions.StartAsync(new SessionCreateRequest(PcId, user.Id, TariffId, 60, prepaid), CancellationToken.None);
     }

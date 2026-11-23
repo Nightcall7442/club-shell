@@ -247,6 +247,15 @@ jobs:
           name: release-${{ needs.meta.outputs.version }}
           path: release
 
+      - name: Check out the verifier and the public key
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            tools/scripts/verify-release.sh
+            config/update-public.pem
+          sparse-checkout-cone-mode: false
+          path: src
+
       # SHA256SUMS.txt (LF, `<sha256> *<relative path>`) covers every file of the layout except manifest.json and
       # itself, which are written after the hashes are taken; manifest.json is covered by its RSA signatures.
       - name: Verify package contents
@@ -256,6 +265,18 @@ jobs:
           test -f release/manifest.json || { echo '::error::manifest.json missing from the release package'; exit 1; }
           test -f release/SHA256SUMS.txt || { echo '::error::SHA256SUMS.txt missing from the release package'; exit 1; }
           (cd release && sha256sum --check --strict SHA256SUMS.txt)
+
+      # The signatures as the PCs check them, with the repository's public key and not the signer's own code: a
+      # manifest whose signatures do not verify is never published.
+      - name: Verify signatures
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! python3 -c "import json,sys; m=json.load(open('release/manifest.json')); sys.exit(0 if m.get('manifestSignatures') else 1)"; then
+            if [ "${{ needs.meta.outputs.channel }}" = "stable" ]; then echo '::error::manifest.json is not signed'; exit 1; fi
+            echo '::warning::manifest.json is not signed (beta without UPDATE_MANIFEST_KEY_PEM)'; exit 0
+          fi
+          bash src/tools/scripts/verify-release.sh release src/config/update-public.pem
 
       - name: Create GitHub release ${{ needs.meta.outputs.tag }}
         uses: softprops/action-gh-release@v2

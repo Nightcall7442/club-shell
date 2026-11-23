@@ -43,6 +43,11 @@ export interface SessionFacade {
   isLocked: boolean;
   isEnded: boolean;
   isOpenEnded: boolean;
+  /**
+   * Postpaid the cash desk opened (D-89): paid and ended at the desk, so no «Завершить» / «Выйти» on the PC. A member's
+   * own pay as you go from the balance is open-ended too, but they may leave it.
+   */
+  isPayAtDesk: boolean;
   /** ≤ 15 minutes left. */
   isWarning: boolean;
   /** ≤ 5 minutes left. */
@@ -110,6 +115,7 @@ export function useSession(): SessionFacade {
       isLocked: s.state === 'locked',
       isEnded: s.state === 'ended',
       isOpenEnded,
+      isPayAtDesk: isOpen && s.session?.payAtDesk === true && s.session.isPrepaid === false,
       isWarning: timed && s.secondsLeft <= WARNING_MINUTES * 60,
       isCritical: timed && s.secondsLeft <= CRITICAL_MINUTES * 60,
       timeLabel: isOpen ? sessionTimeLabel(s.secondsLeft, s.secondsUsed) : '--:--',

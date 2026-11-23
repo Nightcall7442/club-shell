@@ -505,7 +505,19 @@ function Get-ManifestCanonicalBytes {
     # JsonNamingPolicy.CamelCase of the UpdateComponent enum name (Agent -> agent).
     $componentName = [string]$Entry.component
     $componentName = $componentName.Substring(0, 1).ToLowerInvariant() + $componentName.Substring(1)
-    $publishedAt = [DateTimeOffset]::Parse([string]$Entry.publishedAt, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal)
+    # PowerShell 7's ConvertFrom-Json turns the ISO string into a [DateTime] already: [string] of that is the culture's
+    # short form without milliseconds, and the signature then covered "…:57.000Z" while the manifest says "…:57.659Z".
+    $rawPublishedAt = $Entry.publishedAt
+    if ($rawPublishedAt -is [DateTimeOffset]) {
+        $publishedAt = $rawPublishedAt
+    }
+    elseif ($rawPublishedAt -is [DateTime]) {
+        $utc = if ($rawPublishedAt.Kind -eq [DateTimeKind]::Unspecified) { [DateTime]::SpecifyKind($rawPublishedAt, [DateTimeKind]::Utc) } else { $rawPublishedAt.ToUniversalTime() }
+        $publishedAt = [DateTimeOffset]::new($utc)
+    }
+    else {
+        $publishedAt = [DateTimeOffset]::Parse([string]$rawPublishedAt, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal)
+    }
     $json = '{' +
         '"component":' + (ConvertTo-JsonStringLiteral $componentName) + ',' +
         '"version":' + (ConvertTo-JsonStringLiteral ([string]$Entry.version)) + ',' +
