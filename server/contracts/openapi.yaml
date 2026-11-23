@@ -13649,12 +13649,7 @@ components:
           type:
           - string
           - 'null'
-          description: Трейлер / фоновое видео; с клубного сервера — его сохранённая копия /api/v1/trailers/{id} (D-97), пока её нет — исходная ссылка.
-        videoSourceUrl:
-          type:
-          - string
-          - 'null'
-          description: Исходная https-ссылка трейлера, когда videoUrl — копия клубного сервера (D-97); шелл пробует её один раз, если копия не играет.
+          description: Трейлер / фоновое видео.
         description:
           type: string
           description: Локализованное описание; может быть пустой строкой.
