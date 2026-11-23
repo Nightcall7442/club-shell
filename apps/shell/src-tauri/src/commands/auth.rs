@@ -97,9 +97,13 @@ pub async fn auth_register(
 }
 
 fn validate_register(mut req: AuthRegisterRequest) -> CmdResult<AuthRegisterRequest> {
-    req.display_name = validate::required_text("displayName", &req.display_name, DISPLAY_NAME_MAX)?;
+    req.display_name = Some(validate::required_text(
+        "displayName",
+        req.display_name.as_deref().unwrap_or_default(),
+        DISPLAY_NAME_MAX,
+    )?);
     req.username = validate::optional_text("username", req.username, USERNAME_MAX)?;
-    let length = req.password.chars().count();
+    let length = req.password.as_deref().map_or(0, |p| p.chars().count());
     if length == 0 {
         return Err(ShellError::validation("password", "required"));
     }

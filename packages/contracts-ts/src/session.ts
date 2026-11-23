@@ -203,10 +203,7 @@ export interface Session {
   isPrepaid: boolean;
   /** Minute marks already emitted as `session.warning`, e.g. `[10, 5]`. */
   warningsSent: number[];
-  /**
-   * Postpaid the cash desk opened (D-89, beyond the contract): paid and ended at the desk, so the player cannot leave it
-   * from the PC. Absent — a kiosk session or pay as you go from the balance: the player may leave.
-   */
+  /** Postpaid the cash desk opened (D-89, beyond the contract); null — the player may leave. */
   payAtDesk?: boolean | null;
 }
 /** Value of `Session.SecondsLeft` for open-ended postpaid sessions. */

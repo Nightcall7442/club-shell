@@ -135,13 +135,22 @@ export interface AntiCheatBlockedDetails {
   reason: string;
 }
 
+/** Request of `apps.kill`: ends every process of one app (never the Shell, the Agent or a game). */
+export interface AppsKillRequest {
+  /** App id. */
+  appId: string;
+}
+
 /** Request of `apps.launch`. */
 export interface AppsLaunchRequest {
   /** App id. */
   appId: string;
   /** Extra command line. */
   args?: string | null;
-  /** Start it even when it runs already (a tray app with no window to bring forward shows one when started again). */
+  /**
+   * Start it even when it runs already. The Shell asks this when the running app has no window to bring forward (it
+   * lives in the tray, as Discord or Steam do): started again, such an app shows its window.
+   */
   force?: boolean | null;
 }
 
@@ -153,33 +162,13 @@ export interface AppsLaunchResponse {
   pid: number;
   /** Launch time (the running instance's when `alreadyRunning`). */
   startedAt: string;
-  /** The app was running already and nothing was started: the Shell brings its window to the front instead. */
-  alreadyRunning?: boolean;
-  /** Every process of the app the Agent knows of (the new one alone after a fresh launch); absent from an older Agent. */
-  pids?: number[];
-}
-
-/** An app running in the player's session (`apps.running`). */
-export interface RunningApp {
-  appId: string;
-  title: string;
-  /** Main process: the one the Agent started, else the oldest of `pids`. */
-  pid: number;
-  /** Every process of the app: the started one, its descendants and the app's own executables. */
-  pids: number[];
-  /** When the Agent started it, else when its main process started. */
-  startedAt: string;
-}
-
-/** Response of `apps.running`. */
-export interface AppsRunningResponse {
-  /** Running apps, oldest first. */
-  items: RunningApp[];
-}
-
-/** Request of `apps.kill`: ends every process of one app (never the Shell, the Agent or a game). */
-export interface AppsKillRequest {
-  appId: string;
+  /**
+   * The app was running already and nothing was started: the Shell brings its window to the front instead of opening a
+   * second copy.
+   */
+  alreadyRunning: boolean;
+  /** Every process of the app the Agent knows of (the new one alone after a fresh launch). */
+  pids?: number[] | null;
 }
 
 /** Response of `apps.list` and `GET /apps`. */
@@ -261,21 +250,6 @@ export interface AuthLoginResponse {
   mode: ConnectivityState;
 }
 
-/**
- * Request of `auth.register` (D-92): a player creates their own account on the lock screen, where the club allows it
- * (`shell.club.selfSignup`), and is signed in with it. Secrets are never logged.
- */
-export interface AuthRegisterRequest {
-  /** The player's name, 1–64 characters. */
-  displayName: string;
-  /** Login, 3–32 characters, or a phone number (stored as its digits); absent — the server makes one. */
-  username?: string | null;
-  /** Password, 4–64 characters (the Shell asks for it twice). */
-  password: string;
-  /** The player accepted the club rules; required when the club has rules. */
-  acceptRules?: boolean | null;
-}
-
 /** Request of `auth.logout`. */
 export interface AuthLogoutRequest {
   /** Why; defaults to `SessionEndReason.User`. Only `user`, `idle`, `admin` are valid from the Shell. */
@@ -290,6 +264,21 @@ export interface AuthLogoutResponse {
   sessionEnded: boolean;
   /** The ended session, when any. */
   session?: Session | null;
+}
+
+/**
+ * Request of `auth.register` (D-92): a player creates their own account on the lock screen, where the club allows it
+ * (`shell.club.selfSignup`), and is signed in with it. Secrets are never logged.
+ */
+export interface AuthRegisterRequest {
+  /** The player's name, 1–64 characters. */
+  displayName?: string | null;
+  /** Login, 3–32 characters, or a phone number (stored as its digits); empty — the server makes one. */
+  username?: string | null;
+  /** Password, 4–64 characters (the Shell asks for it twice). */
+  password?: string | null;
+  /** The player accepted the club rules; required when the club has rules. */
+  acceptRules?: boolean | null;
 }
 
 /** Response of `auth.status`. */
@@ -874,6 +863,26 @@ export interface ReasonDetails {
   reason: string;
 }
 
+/** An app running in the player's session (`apps.running`). */
+export interface RunningApp {
+  /** App id. */
+  appId: string;
+  /** App title. */
+  title: string;
+  /** Main process: the one the Agent started, else the oldest of `pids`. */
+  pid: number;
+  /** Every process of the app: the started one, its descendants and the app's own executables. */
+  pids: number[];
+  /** When the Agent started it, else when its main process started. */
+  startedAt: string;
+}
+
+/** Response of `apps.running`. */
+export interface AppsRunningResponse {
+  /** Running apps, oldest first. */
+  items: RunningApp[];
+}
+
 /** Request of `session.end`. */
 export interface SessionEndRequest {
   /** End reason; defaults to `SessionEndReason.User`. */
@@ -1370,6 +1379,22 @@ export interface WalletHistoryRequest {
   type?: TransactionType | null;
 }
 
+/** Request of `wallet.redeemPromo` (D-88): the member's own promo code of the club. */
+export interface WalletRedeemPromoRequest {
+  /** The code as typed (case does not matter), 1–32 characters. */
+  code: string;
+}
+
+/** Response of `wallet.redeemPromo`: the code as the club wrote it, the bonus credited and the new balance. */
+export interface WalletRedeemPromoResponse {
+  /** The code. */
+  code: string;
+  /** Credited to the main balance. */
+  bonus: Money;
+  /** Main balance after the credit. */
+  balance: Money;
+}
+
 /** Request of `wallet.tariffs`. */
 export interface WalletTariffsRequest {
   /** Zone; defaults to this PC's zone. */
@@ -1392,19 +1417,6 @@ export interface WalletTopupIntentRequest {
   amount: Money;
   /** Provider. */
   provider: TopupProvider;
-}
-
-/** Request of `wallet.redeemPromo` (D-88): the member's own promo code of the club. */
-export interface WalletRedeemPromoRequest {
-  /** The code as typed (case does not matter), 1–32 characters. */
-  code: string;
-}
-
-/** Response of `wallet.redeemPromo`: the code as the club wrote it, the bonus credited and the new balance. */
-export interface WalletRedeemPromoResponse {
-  code: string;
-  bonus: Money;
-  balance: Money;
 }
 
 /**

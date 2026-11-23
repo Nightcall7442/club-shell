@@ -331,6 +331,27 @@ export const QrStatus = {
 /** State of a QR login handshake. */
 export type QrStatus = (typeof QrStatus)[keyof typeof QrStatus];
 
+/**
+ * Body of `POST /auth/register` (D-92, beyond the contract): a player creates their own account on the PC, where the
+ * owner allows it; answered like `POST /auth/login`. Secrets are never logged.
+ */
+export interface RegisterAuthRequest {
+  /** PC. */
+  pcId: string;
+  /** Hardware id. */
+  hwid: string;
+  /** The player's name, 1–64 characters. */
+  displayName?: string | null;
+  /** Login, 3–32 characters, or a phone number (stored as its digits); empty — the server makes one. */
+  username?: string | null;
+  /** Password, 4–64 characters. */
+  password?: string | null;
+  /** The player accepted the club rules; required when the club has rules. */
+  acceptRules?: boolean | null;
+  /** Preferred locale. */
+  locale?: Locale | null;
+}
+
 /** Seat on the club map (IPC_PROTOCOL.md §6.15). */
 export interface Seat {
   /** PC. */

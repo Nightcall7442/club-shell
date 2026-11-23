@@ -4,22 +4,6 @@ import type { JsonObject, UpdateChannel } from './commands.js';
 import type { Locale } from './user.js';
 
 /** A promo banner on the player's home screen, set by the club owner in the admin console. */
-/** One picture or clip of the screensaver. */
-export interface ScreensaverItem {
-  url: string;
-  type: 'image' | 'video';
-  /** Seconds on screen (an image; a video plays to its end). */
-  durationSec: number;
-}
-
-/** The free PCs' screensaver (D-87): the attract screen after `afterSec` seconds without input on the lock screen. */
-export interface ShellScreensaver {
-  enabled: boolean;
-  afterSec: number;
-  /** The owner's pictures and clips; empty — the club's built-in slides. */
-  items: ScreensaverItem[];
-}
-
 export interface ClubBanner {
   /** Banner id. */
   id: string;
@@ -262,6 +246,29 @@ export const PeripheralKinds = {
 /** One of the {@link PeripheralKinds} values. */
 export type PeripheralKind = (typeof PeripheralKinds)[keyof typeof PeripheralKinds];
 
+/** One picture or clip of the screensaver. */
+export interface ScreensaverItem {
+  /** Image or video URL. */
+  url: string;
+  /** `image` or `video`. */
+  type: string;
+  /** Seconds on screen (an image; a video plays to its end). */
+  durationSec: number;
+}
+
+/**
+ * The screensaver of the free PCs (D-87, beyond the contract): the attract screen after `afterSec` seconds without
+ * input on the lock screen; off — it never starts.
+ */
+export interface ShellScreensaver {
+  /** On. */
+  enabled: boolean;
+  /** Seconds of no input on a free PC before it starts. */
+  afterSec: number;
+  /** The owner's pictures and clips; empty — the club's built-in slides. */
+  items: ScreensaverItem[];
+}
+
 /**
  * The club's own look on the player screen (`shell.json → club`), set by the owner in the admin console and pushed with
  * the server config. Every field is optional: without it the Shell keeps its bundled defaults.
@@ -279,9 +286,9 @@ export interface ShellClub {
   banners?: ClubBanner[] | null;
   /** Club rules shown on the support screen. */
   rules?: ClubRules | null;
-  /** The free PCs' screensaver; absent — the shell's own idle screen as before. */
+  /** The free PCs' screensaver; null — the shell's own idle screen as before. */
   screensaver?: ShellScreensaver | null;
-  /** The lock screen offers «Создать аккаунт» (D-92, the owner's `limits.selfSignup`); absent — off. */
+  /** The lock screen offers «Создать аккаунт» (D-92: the owner's `limits.selfSignup`); null — an older server, off. */
   selfSignup?: boolean | null;
 }
 

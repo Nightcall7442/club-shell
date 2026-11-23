@@ -44,32 +44,6 @@ pub struct ClubBanner {
     pub image_url: String,
 }
 
-/// One picture or clip of the screensaver.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ScreensaverItem {
-    /// Image or video URL.
-    pub url: String,
-    /// `image` or `video`.
-    #[serde(rename = "type")]
-    pub kind: String,
-    /// Seconds on screen (an image; a video plays to its end).
-    pub duration_sec: i32,
-}
-
-/// The free PCs' screensaver (D-87): the attract screen after `after_sec` seconds without input on the lock screen.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ShellScreensaver {
-    /// On.
-    pub enabled: bool,
-    /// Seconds of no input on a free PC before it starts.
-    pub after_sec: i32,
-    /// The owner's pictures and clips; empty — the club's built-in slides.
-    #[serde(default)]
-    pub items: Vec<ScreensaverItem>,
-}
-
 /// Club rules in each UI language; a missing language falls back to Russian.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -396,6 +370,41 @@ pub struct ProcessAllowlistPolicy {
     pub patterns: Vec<String>,
 }
 
+/// One picture or clip of the screensaver.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreensaverItem {
+    /// Image or video URL.
+    pub url: String,
+    /// `image` or `video`.
+    pub r#type: String,
+    /// Seconds on screen (an image; a video plays to its end).
+    pub duration_sec: i32,
+}
+
+/// Shell replacement for the kiosk user.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellReplacementPolicy {
+    /// Replace `explorer.exe`.
+    pub enabled: bool,
+    /// Path of the shell executable.
+    pub shell_exe: String,
+}
+
+/// The screensaver of the free PCs (D-87, beyond the contract): the attract screen after `afterSec`
+/// seconds without input on the lock screen; off — it never starts.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellScreensaver {
+    /// On.
+    pub enabled: bool,
+    /// Seconds of no input on a free PC before it starts.
+    pub after_sec: i32,
+    /// The owner's pictures and clips; empty — the club's built-in slides.
+    pub items: Vec<ScreensaverItem>,
+}
+
 /// The club's own look on the player screen (`shell.json → club`), set by the owner in the admin
 /// console and pushed with the server config. Every field is optional: without it the Shell keeps
 /// its bundled defaults.
@@ -420,11 +429,12 @@ pub struct ShellClub {
     /// Club rules shown on the support screen.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rules: Option<ClubRules>,
-    /// The free PCs' screensaver; absent — the shell's own idle screen as before.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// The free PCs' screensaver; null — the shell's own idle screen as before.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub screensaver: Option<ShellScreensaver>,
-    /// The lock screen offers «Создать аккаунт» (D-92, the owner's `limits.selfSignup`); absent — off.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// The lock screen offers «Создать аккаунт» (D-92: the owner's `limits.selfSignup`); null — an
+    /// older server, off.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub self_signup: Option<bool>,
 }
 
@@ -450,16 +460,6 @@ pub struct ShellConfigOverride {
     /// Club branding, banners and rules; replaces `shell.json → club` as a whole.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub club: Option<ShellClub>,
-}
-
-/// Shell replacement for the kiosk user.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ShellReplacementPolicy {
-    /// Replace `explorer.exe`.
-    pub enabled: bool,
-    /// Path of the shell executable.
-    pub shell_exe: String,
 }
 
 /// Temperatures in °C; 0 when unavailable.

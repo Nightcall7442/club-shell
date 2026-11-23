@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -29,7 +29,12 @@ export default function IdleScreen(): JSX.Element {
   const club = useClub();
   const pcZone = useSettingsStore((s) => s.pcInfo?.pc.zone ?? '');
   const animations = useThemeStore((s) => s.theme.animations);
-  const ownSlides = useSettingsStore((s) => s.settings.club?.screensaver?.items ?? EMPTY_SLIDES);
+  const ownItems = useSettingsStore((s) => s.settings.club?.screensaver?.items ?? EMPTY_SLIDES);
+  // The wire says `type` is a string: only `video` plays as a clip, anything else shows as a picture.
+  const ownSlides = useMemo(
+    () => ownItems.map((i) => ({ ...i, type: i.type === 'video' ? ('video' as const) : ('image' as const) })),
+    [ownItems],
+  );
 
   const wake = useCallback(() => navigate('/lock', { replace: true }), [navigate]);
 

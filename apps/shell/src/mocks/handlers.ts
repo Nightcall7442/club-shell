@@ -1684,7 +1684,7 @@ cmd('apps_launch', (args): AppsLaunchResponse => {
   const pid = 8100 + mockState.apps.length * 10 + Math.floor(Math.random() * 9);
   const startedAt = nowIso();
   mockState.apps.push({ appId: app.id, title: app.title, pid, pids: [pid], startedAt });
-  return { ok: true, pid, startedAt, pids: [pid] };
+  return { ok: true, pid, startedAt, alreadyRunning: false, pids: [pid] };
 });
 
 cmd('apps_running', (): RunningApp[] => clone(mockState.apps), { fast: true });

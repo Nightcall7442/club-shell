@@ -268,8 +268,8 @@ pub struct Session {
     pub is_prepaid: bool,
     /// Minute marks already emitted as `session.warning`, e.g. `[10, 5]`.
     pub warnings_sent: Vec<i32>,
-    /// Postpaid the cash desk opened (D-89): paid and ended at the desk, never from the PC; absent — the player may leave.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Postpaid the cash desk opened (D-89, beyond the contract); null — the player may leave.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub pay_at_desk: Option<bool>,
 }
 

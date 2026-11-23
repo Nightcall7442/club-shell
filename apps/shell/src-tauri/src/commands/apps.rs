@@ -85,16 +85,14 @@ pub async fn apps_launch(
             .agent
             .request(names::apps::LAUNCH, &request(Some(true)))
             .await?;
-        let mut pids = resp.pids.clone();
-        pids.extend(
-            again
-                .pids
-                .iter()
-                .copied()
-                .filter(|p| !resp.pids.contains(p)),
-        );
+        let mut pids = resp.pids.clone().unwrap_or_default();
+        for p in again.pids.iter().flatten() {
+            if !pids.contains(p) {
+                pids.push(*p);
+            }
+        }
         resp = AppsLaunchResponse {
-            pids,
+            pids: Some(pids),
             already_running: true,
             ..again
         };
@@ -186,6 +184,7 @@ fn family_of(resp: &AppsLaunchResponse) -> Vec<u32> {
     let mut family: Vec<u32> = resp
         .pids
         .iter()
+        .flatten()
         .chain(std::iter::once(&resp.pid))
         .filter_map(|&p| u32::try_from(p).ok())
         .filter(|&p| p != 0)
@@ -207,7 +206,7 @@ mod tests {
             pid: 7,
             started_at: Utc::now(),
             already_running: true,
-            pids: vec![9, 7, 0, -1],
+            pids: Some(vec![9, 7, 0, -1]),
         };
         assert_eq!(family_of(&resp), vec![7, 9]);
     }
