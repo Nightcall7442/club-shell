@@ -32,8 +32,9 @@ public sealed record ControlSettings(int EarlyEndMinutes, int EarlyEndsPerShift,
 /// <c>lastStatus</c>/<c>lastAt</c>; a new entry starts from what was sent). A body that does not match
 /// <c>AdminClubSettingsPatch</c> is <c>400 validation</c>; <c>control</c> numbers are rounded and clamped, absent ones kept.
 /// The save holds the <c>clubs</c> row <c>FOR UPDATE</c>, which also serializes it with a promo redeem (§4.4). A changed
-/// <c>features</c>/<c>branding</c>/<c>catalog</c>/<c>rulesText</c>/<c>banners</c> bumps <c>config_version</c> (a changed
-/// <c>catalog</c> also <c>catalog_version</c>) and sends <c>refreshConfig</c> with explicit flags to the connected PCs (§5.9).
+/// <c>features</c>/<c>branding</c>/<c>catalog</c>/<c>rulesText</c>/<c>banners</c>/<c>screensaver</c>, or the
+/// <c>limits.selfSignup</c> switch (D-92), bumps <c>config_version</c> (a changed <c>catalog</c> also
+/// <c>catalog_version</c>) and sends <c>refreshConfig</c> with explicit flags to the connected PCs (§5.9).
 /// </summary>
 public static class ClubSettingsEndpoints
 {
@@ -44,7 +45,7 @@ public static class ClubSettingsEndpoints
         ["branding", "features", "zones", "pricing", "groups", "bonusTiers", "happyHours", "loyalty", "limits", "catalog", "banners", "rulesText", "stock"];
 
     /// <summary>Sections whose change reaches <c>AgentServerConfig</c> (§5.9).</summary>
-    private static readonly string[] ConfigSections = ["features", "branding", "catalog", "rulesText", "banners", "screensaver"];
+    private static readonly string[] ConfigSections = ["features", "branding", "catalog", "rulesText", "banners", "screensaver", "selfSignup"];
 
     /// <summary><c>notifications.bigTopupAt</c> when the owner has not set one (the mock's default, 200 000 sum).</summary>
     public const long DefaultBigTopupAt = 20_000_000;
@@ -104,6 +105,12 @@ public static class ClubSettingsEndpoints
         if (ordered["limits"] is JsonObject limits && limits["guestPostpaid"] is null)
         {
             limits["guestPostpaid"] = true;
+        }
+
+        // limits.selfSignup (D-92) is off until the owner turns it on.
+        if (ordered["limits"] is JsonObject signup && signup["selfSignup"] is null)
+        {
+            signup["selfSignup"] = false;
         }
 
         ordered["topUpPromo"] = TopUpPromo.Read(stored["topUpPromo"]?.ToJsonString()).ToJson();
@@ -195,6 +202,7 @@ public static class ClubSettingsEndpoints
                 "SELECT settings::text, time_zone FROM clubs WHERE id = @ClubId FOR UPDATE", new { staff.ClubId }, tx);
             var settings = JsonNode.Parse(settingsJson)!.AsObject();
             var changed = new List<string>();
+            var selfSignup = SelfSignupOn(settings);
             foreach (var key in Plain.Where(k => body.TryGetProperty(k, out _)))
             {
                 var next = JsonNode.Parse(body.GetProperty(key).GetRawText());
@@ -204,6 +212,12 @@ public static class ClubSettingsEndpoints
                 }
 
                 settings[key] = next;
+            }
+
+            // limits is not part of the PC's config, but its self-signup switch is (shell.club.selfSignup, D-92).
+            if (SelfSignupOn(settings) != selfSignup)
+            {
+                changed.Add("selfSignup");
             }
 
             if (body.TryGetProperty("control", out var control))
@@ -280,6 +294,9 @@ public static class ClubSettingsEndpoints
         await ConfigRefresh.SendAsync(commands, queued);
         return AdminJson.Ok(AdminJson.OkBody);
     }
+
+    private static bool SelfSignupOn(JsonObject settings) =>
+        settings["limits"] is JsonObject limits && limits["selfSignup"] is JsonValue on && on.GetValueKind() == JsonValueKind.True;
 
     /// <summary>The live banner set as the <see cref="ClubTickWorker"/> compares it (OQ-21).</summary>
     public static string BannersHash(string? settingsJson, DateOnly today) =>
@@ -373,7 +390,7 @@ public static class ClubSettingsEndpoints
                 }
             }
 
-            foreach (var name in new[] { "guestPostpaid", "cashOutOwnerOnly" })
+            foreach (var name in new[] { "guestPostpaid", "cashOutOwnerOnly", "selfSignup" })
             {
                 if (limits.TryGetProperty(name, out var v) && v.ValueKind is not (JsonValueKind.True or JsonValueKind.False or JsonValueKind.Null))
                 {

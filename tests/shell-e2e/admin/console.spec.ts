@@ -1172,6 +1172,78 @@ test('a client registered at the counter signs in on a PC with the issued passwo
   expect(await login({ kind: 'password', username, password: second })).toBe(200);
 });
 
+test('a client registered by name alone gets a login from the server, shown once with the password (D-92)', async ({
+  page,
+}) => {
+  await signIn(page, CASHIER_PIN);
+  await page.goto('/#/clients');
+  await page.getByRole('button', { name: 'Новый клиент' }).click();
+  await page.getByLabel('Имя').fill('Турсунов Бобур');
+  await expect(page.getByText('Пусто — придумаем по телефону или имени')).toBeVisible();
+  await page.getByRole('button', { name: 'Создать' }).click();
+
+  const login = page.getByRole('status').filter({ hasText: 'Логин клиента придуман сервером' }).locator('.font-mono');
+  await expect(login).toHaveText(/^tursunov\.bobur\d*$/);
+  const made = (await login.textContent()) ?? '';
+  await expect(page.getByText(`@${made}`, { exact: true })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Временный пароль' }).locator('.font-mono')).toHaveText(
+    /^[a-z2-9]{8}$/,
+  );
+
+  // The next client of the same name gets the next free login.
+  await page.getByRole('button', { name: 'Новый клиент' }).click();
+  await page.getByLabel('Имя').fill('Турсунов Бобур');
+  await page.getByRole('button', { name: 'Создать' }).click();
+  await expect(login).toHaveText(/^tursunov\.bobur\d+$/);
+  expect(await login.textContent()).not.toBe(made);
+});
+
+test('the owner lets players create their own account on the PC (D-92)', async ({ page, request }) => {
+  const owner = await tokenFor(request, OWNER_PIN);
+  const pc = await registerAgent(request, 'signup');
+  const register = (): Promise<APIResponse> =>
+    agentCall(request, pc, 'POST', '/auth/register', {
+      pcId: pc.pcId,
+      hwid: pc.hwid,
+      displayName: 'Самостоятельный',
+      username: `self-${Date.now()}`,
+      password: '4321',
+      acceptRules: true,
+    });
+  try {
+    // Off until the owner switches it on.
+    const off = await register();
+    expect(off.status()).toBe(403);
+    expect(((await off.json()) as { error: { details: { reason: string } } }).error.details.reason).toBe(
+      'selfSignupDisabled',
+    );
+
+    await signIn(page, OWNER_PIN);
+    await page.goto('/#/club');
+    await page.getByRole('switch', { name: 'Игроки создают аккаунт сами' }).click();
+    await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Сохранено' })).toBeVisible();
+    const config = (await (await agentCall(request, pc, 'GET', `/agents/${pc.pcId}/config`)).json()) as {
+      shell: { club: { selfSignup?: boolean } };
+    };
+    expect(config.shell.club.selfSignup).toBe(true);
+
+    const made = await register();
+    expect(made.status()).toBe(200);
+    const signedIn = (await made.json()) as { user: { role: string; balance: { amount: number } }; accessToken: string };
+    expect(signedIn.user).toMatchObject({ role: 'member', balance: { amount: 0 } });
+    expect(signedIn.accessToken).toBeTruthy();
+  } finally {
+    const club = (await (await request.get(`${API}/admin/club`, { headers: auth(owner) })).json()) as {
+      limits: Record<string, unknown>;
+    };
+    await request.patch(`${API}/admin/club`, {
+      headers: auth(owner),
+      data: { limits: { ...club.limits, selfSignup: false } },
+    });
+  }
+});
+
 test('a cashier without an open shift has to open one, with the float the last shift closed with', async ({
   page,
   request,

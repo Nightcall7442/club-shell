@@ -261,6 +261,21 @@ export interface AuthLoginResponse {
   mode: ConnectivityState;
 }
 
+/**
+ * Request of `auth.register` (D-92): a player creates their own account on the lock screen, where the club allows it
+ * (`shell.club.selfSignup`), and is signed in with it. Secrets are never logged.
+ */
+export interface AuthRegisterRequest {
+  /** The player's name, 1–64 characters. */
+  displayName: string;
+  /** Login, 3–32 characters, or a phone number (stored as its digits); absent — the server makes one. */
+  username?: string | null;
+  /** Password, 4–64 characters (the Shell asks for it twice). */
+  password: string;
+  /** The player accepted the club rules; required when the club has rules. */
+  acceptRules?: boolean | null;
+}
+
 /** Request of `auth.logout`. */
 export interface AuthLogoutRequest {
   /** Why; defaults to `SessionEndReason.User`. Only `user`, `idle`, `admin` are valid from the Shell. */
@@ -549,6 +564,8 @@ export const IpcNames = {
     Status: 'auth.status',
     /** — → `QrLoginStart`. */
     QrStart: 'auth.qrStart',
+    /** `AuthRegisterRequest` → `AuthLoginResponse` (D-92). */
+    Register: 'auth.register',
   },
   /** `session.*` */
   Session: {
@@ -1405,6 +1422,8 @@ export const AgentCommand = {
   AuthStatus: 'auth.status',
   /** `auth.qrStart` */
   AuthQrStart: 'auth.qrStart',
+  /** `auth.register` */
+  AuthRegister: 'auth.register',
   /** `session.get` */
   SessionGet: 'session.get',
   /** `session.start` */
@@ -2749,6 +2768,7 @@ export interface IpcRequestMap {
   [IpcNames.Auth.Logout]: { request: AuthLogoutRequest | null; response: AuthLogoutResponse };
   [IpcNames.Auth.Status]: { request: null; response: AuthStatusResponse };
   [IpcNames.Auth.QrStart]: { request: null; response: QrLoginStart };
+  [IpcNames.Auth.Register]: { request: AuthRegisterRequest; response: AuthLoginResponse };
   [IpcNames.Session.Get]: { request: null; response: Session | null };
   [IpcNames.Session.Start]: { request: SessionStartRequest; response: Session };
   [IpcNames.Session.Pause]: { request: SessionPauseRequest | null; response: Session };

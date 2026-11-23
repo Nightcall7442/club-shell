@@ -27,6 +27,9 @@ public enum AgentCommand
     /// <summary><c>auth.qrStart</c></summary>
     AuthQrStart,
 
+    /// <summary><c>auth.register</c></summary>
+    AuthRegister,
+
     /// <summary><c>session.get</c></summary>
     SessionGet,
 
@@ -265,6 +268,7 @@ public static class AgentCommands
         AgentCommand.AuthLogout => IpcMessages.Auth.Logout,
         AgentCommand.AuthStatus => IpcMessages.Auth.Status,
         AgentCommand.AuthQrStart => IpcMessages.Auth.QrStart,
+        AgentCommand.AuthRegister => IpcMessages.Auth.Register,
         AgentCommand.SessionGet => IpcMessages.Session.Get,
         AgentCommand.SessionStart => IpcMessages.Session.Start,
         AgentCommand.SessionPause => IpcMessages.Session.Pause,

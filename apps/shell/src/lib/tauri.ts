@@ -16,6 +16,7 @@ import type {
   RunningApp,
   AuthLoginRequest,
   AuthLoginResponse,
+  AuthRegisterRequest,
   AuthLogoutResponse,
   AuthStatusResponse,
   Balance,
@@ -510,6 +511,8 @@ export interface OpenWindow {
 export const api = {
   auth: {
     login: (req: AuthLoginRequest): Promise<AuthLoginResponse> => invoke('auth_login', { req }),
+    /** The player's own account (D-92): signed in at once, answered like `login`. */
+    register: (req: AuthRegisterRequest): Promise<AuthLoginResponse> => invoke('auth_register', { req }),
     logout: (reason?: SessionEndReason): Promise<AuthLogoutResponse> => invoke('auth_logout', { reason }),
     status: (): Promise<AuthStatusResponse> => invoke('auth_status'),
     qrStart: (): Promise<QrLoginStart> => invoke('auth_qr_start'),

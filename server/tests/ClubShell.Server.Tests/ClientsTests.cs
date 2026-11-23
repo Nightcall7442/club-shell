@@ -20,7 +20,7 @@ public sealed class ClientsTests(ServerFixture server) : LedgerCheckedTest(serve
     {
         var cashier = await LoginAsync(Server, CashierPin);
         var tag = Guid.NewGuid().ToString("N")[..6];
-        foreach (var (username, reason) in new[] { ("ab", "min"), ("  ab  ", "min"), (new string('x', 33), "max"), ("", "required") })
+        foreach (var (username, reason) in new[] { ("ab", "min"), ("  ab  ", "min"), (new string('x', 33), "max") })
         {
             Assert.Equal(("username", reason), StaffAdminTests.Details(await ExpectAsync(Server, 400, HttpMethod.Post, "/clients", cashier,
                 new { username, displayName = "Короткое имя", password = Players.Password })));

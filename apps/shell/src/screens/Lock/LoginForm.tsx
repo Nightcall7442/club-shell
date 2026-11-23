@@ -14,6 +14,8 @@ export interface LoginFormProps {
   className?: string;
   /** Pre-filled username (signing the same player in again after `auth.expired`). */
   initialUsername?: string;
+  /** «Создать аккаунт» instead of «ask the staff» (D-92: the club lets players register on the PC). */
+  onRegister?: () => void;
 }
 
 /**
@@ -48,7 +50,7 @@ const EyeIcon = ({ off }: { off: boolean }): JSX.Element => (
 );
 
 /** Username + password login; submits on Enter, maps server errors to i18n, warns about Caps Lock. */
-export function LoginForm({ onSuccess, className, initialUsername = '' }: LoginFormProps): JSX.Element {
+export function LoginForm({ onSuccess, className, initialUsername = '', onRegister }: LoginFormProps): JSX.Element {
   const { t } = useTranslation();
   const login = useAuthStore((s) => s.login);
   const [username, setUsername] = useState(initialUsername);
@@ -146,9 +148,24 @@ export function LoginForm({ onSuccess, className, initialUsername = '' }: LoginF
       <Button type="submit" variant="cta" size="xl" block loading={busy}>
         {busy ? t('lock.loggingIn') : t('lock.login')}
       </Button>
-      <p className="text-center text-sm text-muted">
-        {t('lock.noAccount')} {t('lock.askStaff')}
-      </p>
+      {onRegister ? (
+        <p className="text-center text-sm text-muted">
+          {t('lock.noAccount')}{' '}
+          <button
+            type="button"
+            data-nav="true"
+            onClick={onRegister}
+            disabled={busy}
+            className="focus-ring rounded-sm font-medium text-accent underline-offset-4 hover:underline"
+          >
+            {t('lock.register.open')}
+          </button>
+        </p>
+      ) : (
+        <p className="text-center text-sm text-muted">
+          {t('lock.noAccount')} {t('lock.askStaff')}
+        </p>
+      )}
     </form>
   );
 }

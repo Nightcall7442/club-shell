@@ -184,7 +184,8 @@ public static class AgentConfig
             WallpaperUrl: Text(branding, "wallpaperUrl"),
             Banners: banners.Count > 0 ? banners : null,
             Rules: rules,
-            Screensaver: screensaver);
+            Screensaver: screensaver,
+            SelfSignup: Auth.SelfSignup.Enabled(settings));
     }
 
     /// <summary>

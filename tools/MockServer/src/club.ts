@@ -380,6 +380,8 @@ export interface ClubConfig {
     memberDebtLimit?: number | null;
     cashOutOwnerOnly?: boolean;
     autoExtendMinutes?: number;
+    /** Players create their own account on the lock screen (D-92); absent — off. */
+    selfSignup?: boolean;
   };
   catalog: { order: string[]; hidden: string[]; featured: string[] };
   banners: Banner[];

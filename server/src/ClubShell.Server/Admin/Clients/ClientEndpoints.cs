@@ -8,6 +8,7 @@ using ClubShell.Server.Infrastructure;
 using ClubShell.Server.Realtime;
 using ClubShell.Server.Sessions;
 using ClubShell.Server.Sessions.Billing;
+using ClubShell.Server.Users;
 using ClubShell.Server.Wallet;
 using Dapper;
 using Microsoft.AspNetCore.Http.Features;
@@ -154,22 +155,19 @@ public static class ClientEndpoints
 
     /// <summary>
     /// A member with zero balances and the club profile. No <c>password</c>: a random one nobody knows (only a reset gives
-    /// the client one). Checks in the mock's order: fields (<c>username</c> trimmed, 3–32 characters: <c>400 username
-    /// min|max</c>), login taken, card taken.
+    /// the client one). Only the name is required (D-92): without <c>username</c> (absent, null or blank — the contract
+    /// still marks it required, so this route reads it by hand) the server makes a unique Latin one (<see
+    /// cref="Logins.GenerateAsync"/>: the phone's digits, else the name transliterated, numbered on a collision) and the
+    /// card in the answer carries it for the cashier to pass on. A typed one keeps its rules (<see cref="Logins.Typed"/>:
+    /// trimmed, 3–32 characters, <c>400 username min|max</c>; a phone number becomes its digits). Checks in the mock's
+    /// order: fields, login taken, card taken.
     /// </summary>
     private static async Task<IResult> AddAsync(HttpContext context, [FromBody] JsonElement body, IdempotencyStore store, TimeProvider clock)
     {
         var staff = context.Features.GetRequiredFeature<StaffContext>();
-        var r = Api.Read<AdminClientCreateRequest>(body, "displayName", "username");
+        var r = Api.Read<AdminClientCreateRequest>(body, "displayName");
         var displayName = AdminInput.Text(r.DisplayName, "displayName", 64);
-        // 3–32 characters, as the contract's User.username (sign-in trims the typed name, so the stored one is trimmed too);
-        // lower-cased here in any script — PostgreSQL's lower() under the C locale folds only ASCII.
-        var username = AdminInput.Text(r.Username?.Trim(), "username", 32).ToLowerInvariant();
-        if (username.Length < 3)
-        {
-            throw ApiException.Validation("username", "min");
-        }
-
+        var typed = string.IsNullOrWhiteSpace(r.Username) ? null : Logins.Typed(r.Username);
         var password = r.Password is null ? null : Password(r.Password);
         var phone = AdminInput.OptionalText(r.Phone, "phone", 32) ?? "";
         var birthYear = AdminInput.Range(r.BirthYear, "birthYear", 1900, 2100);
@@ -182,10 +180,15 @@ public static class ClientEndpoints
         {
             var now = clock.GetUtcNow();
             var id = Guid.CreateVersion7(now);
-            if (await c.ExecuteScalarAsync<bool>(
-                    "SELECT EXISTS (SELECT 1 FROM users WHERE network_id = @NetworkId AND lower(username) = @username)", new { staff.NetworkId, username }, tx))
+            string username;
+            if (typed is not null)
             {
-                throw ApiException.Validation("username", "taken");
+                await Logins.EnsureFreeAsync(c, tx, staff.NetworkId, typed);
+                username = typed;
+            }
+            else
+            {
+                username = await Logins.GenerateAsync(c, tx, staff.NetworkId, displayName, phone);
             }
 
             await CardFreeAsync(c, tx, staff, card, id);

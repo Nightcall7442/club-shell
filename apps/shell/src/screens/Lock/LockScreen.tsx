@@ -46,6 +46,7 @@ import { LoginForm, loginErrorMessage } from './LoginForm';
 import { PowerButtons } from './PowerButtons';
 import { StaffSignInButton } from './StaffSignIn';
 import { QrLogin } from './QrLogin';
+import { RegisterForm } from './RegisterForm';
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Small shared pieces (also used by the idle screen)
@@ -1037,6 +1038,9 @@ export default function LockScreen(): JSX.Element {
   const push = useNotificationsStore((s) => s.push);
   const pushError = useNotificationsStore((s) => s.pushError);
   const [tab, setTab] = useState<LoginTab>(() => (useSettingsStore.getState().features.qrLogin ? 'qr' : 'password'));
+  // «Создать аккаунт» (D-92): only while the owner allows it; the form replaces the sign-in methods until it is done.
+  const selfSignup = useSettingsStore((s) => s.settings.club?.selfSignup === true);
+  const [registering, setRegistering] = useState(false);
   const [calling, setCalling] = useState(false);
   const card = useRef<HTMLDivElement>(null);
   const { idle } = useIdle();
@@ -1044,6 +1048,13 @@ export default function LockScreen(): JSX.Element {
 
   const hasUser = user !== null;
   const showTariffs = ready && pcReady && hasUser && !isOpen;
+
+  // Signed in (the new account, or anyone), or the owner turned it off meanwhile: back to the sign-in card.
+  useEffect(() => {
+    if (hasUser || !selfSignup) {
+      setRegistering(false);
+    }
+  }, [hasUser, selfSignup]);
 
   useEffect(() => {
     trackScreen(pathname);
@@ -1214,6 +1225,13 @@ export default function LockScreen(): JSX.Element {
               ) : (
                 <UnlockForm />
               )
+            ) : registering && !hasUser ? (
+              <>
+                <h1 className="mb-[clamp(0.875rem,2.2vh,1.5rem)] text-center font-display text-3xl font-light leading-tight tracking-tight text-text">
+                  {t('lock.register.title')}
+                </h1>
+                <RegisterForm onCancel={() => setRegistering(false)} />
+              </>
             ) : (
               <>
                 {/* Spacing follows the screen height: at 1366×768 the QR card has to fit without a scrollbar. */}
@@ -1244,10 +1262,28 @@ export default function LockScreen(): JSX.Element {
                 <div role="tabpanel" id={`lock-panel-${tab}`} aria-labelledby={`lock-tab-${tab}`}>
                   {tab === 'qr' && <QrLogin />}
                   {tab === 'password' && (
-                    <LoginForm key={reloginMember?.userId ?? ''} initialUsername={reloginMember?.username} />
+                    <LoginForm
+                      key={reloginMember?.userId ?? ''}
+                      initialUsername={reloginMember?.username}
+                      onRegister={selfSignup && !hasUser ? () => setRegistering(true) : undefined}
+                    />
                   )}
                   {tab === 'card' && <CardLogin tapped={tapped} />}
                 </div>
+                {/* The password form says it under its button; the other methods get the same way in. */}
+                {selfSignup && !hasUser && tab !== 'password' && (
+                  <p className="mt-4 text-center text-sm text-muted">
+                    {t('lock.noAccount')}{' '}
+                    <button
+                      type="button"
+                      data-nav="true"
+                      onClick={() => setRegistering(true)}
+                      className="focus-ring rounded-sm font-medium text-accent underline-offset-4 hover:underline"
+                    >
+                      {t('lock.register.open')}
+                    </button>
+                  </p>
+                )}
               </>
             )}
           </motion.div>

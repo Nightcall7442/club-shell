@@ -209,6 +209,35 @@ pub struct AuthLoginResponse {
     pub mode: ConnectivityState,
 }
 
+/// Request of `auth.register` (D-92): a player creates their own account on the lock screen, where
+/// the club allows it (`shell.club.selfSignup`), and is signed in with it. Secrets are never logged.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthRegisterRequest {
+    /// The player's name, 1–64 characters.
+    pub display_name: String,
+    /// Login, 3–32 characters, or a phone number (stored as its digits); absent — the server makes one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    /// Password, 4–64 characters.
+    pub password: String,
+    /// The player accepted the club rules; required when the club has rules.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accept_rules: Option<bool>,
+}
+
+impl std::fmt::Debug for AuthRegisterRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The password never reaches a log line.
+        f.debug_struct("AuthRegisterRequest")
+            .field("display_name", &self.display_name)
+            .field("username", &self.username)
+            .field("password", &"***")
+            .field("accept_rules", &self.accept_rules)
+            .finish()
+    }
+}
+
 /// Request of `auth.logout`.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -561,6 +590,8 @@ pub mod names {
         pub const STATUS: &str = "auth.status";
         /// — → `QrLoginStart`.
         pub const QR_START: &str = "auth.qrStart";
+        /// `AuthRegisterRequest` → `AuthLoginResponse` (D-92).
+        pub const REGISTER: &str = "auth.register";
     }
 
     /// `session.*`
@@ -2709,6 +2740,7 @@ agent_commands! {
     AuthLogout => names::auth::LOGOUT, User;
     AuthStatus => names::auth::STATUS, Hello;
     AuthQrStart => names::auth::QR_START, Hello;
+    AuthRegister => names::auth::REGISTER, Hello;
     SessionGet => names::session::GET, User;
     SessionStart => names::session::START, User;
     SessionPause => names::session::PAUSE, Session;
@@ -3183,13 +3215,14 @@ mod tests {
 
     #[test]
     fn agent_command_table_matches_ipc_protocol() {
-        assert_eq!(AgentCommand::ALL.len(), 72);
+        assert_eq!(AgentCommand::ALL.len(), 73);
         let expected: &[&str] = &[
             "auth.hello",
             "auth.login",
             "auth.logout",
             "auth.status",
             "auth.qrStart",
+            "auth.register",
             "session.get",
             "session.start",
             "session.pause",

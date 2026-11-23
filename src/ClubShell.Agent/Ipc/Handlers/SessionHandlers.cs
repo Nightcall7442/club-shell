@@ -122,6 +122,7 @@ public sealed class SessionHandlers : IIpcHandlerGroup
         dispatcher.RegisterOptional<AuthLogoutRequest, AuthLogoutResponse>(IpcMessages.Auth.Logout, LogoutAsync);
         dispatcher.RegisterNoPayload<AuthStatusResponse>(IpcMessages.Auth.Status, (_, cancellationToken) => StatusAsync(cancellationToken));
         dispatcher.RegisterNoPayload<QrLoginStart>(IpcMessages.Auth.QrStart, QrStartAsync);
+        dispatcher.Register<AuthRegisterRequest, AuthLoginResponse>(IpcMessages.Auth.Register, RegisterAsync);
 
         dispatcher.RegisterNoPayload<PlaySession?>(IpcMessages.Session.Get, (context, _) => Task.FromResult(SessionOf(context.User)));
         dispatcher.Register<SessionStartRequest, PlaySession>(IpcMessages.Session.Start, StartAsync);
@@ -263,13 +264,66 @@ public sealed class SessionHandlers : IIpcHandlerGroup
             return await LoginOfflineAsync(request, cancellationToken).ConfigureAwait(false);
         }
 
+        // A guest's username field carries the display name they typed, not a login name.
+        string cacheKey = request.Kind == AuthKind.Guest ? auth.User.Username : request.Username ?? auth.User.Username;
+        return await SignedInOnlineAsync(auth, cacheKey, request.Kind.ToString(), guest: request.Kind == AuthKind.Guest, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// <c>auth.register</c> (D-92): the player's own account, made by the server where the club allows it
+    /// (<c>403 selfSignupDisabled</c> otherwise) and signed in at once — the server answers like a sign-in, so from here it
+    /// is one: the tokens kept, the offline cache filled under the new login, the session picked up. Needs the server: an
+    /// account cannot be made offline. The server's refusals (taken login, the rules, too many accounts from this PC) reach
+    /// the Shell as they are.
+    /// </summary>
+    private async Task<AuthLoginResponse> RegisterAsync(IpcContext context, AuthRegisterRequest request, CancellationToken cancellationToken)
+    {
+        string displayName = request.DisplayName?.Trim() ?? "";
+        if (displayName.Length is 0 or > 64)
+        {
+            throw IpcError.Validation("displayName", displayName.Length == 0 ? "required" : "max").ToException();
+        }
+
+        string? username = string.IsNullOrWhiteSpace(request.Username) ? null : request.Username.Trim();
+        if (username is { Length: > 32 })
+        {
+            throw IpcError.Validation("username", "max").ToException();
+        }
+
+        string password = request.Password ?? "";
+        if (password.Length is < 4 or > 64)
+        {
+            throw IpcError.Validation("password", password.Length == 0 ? "required" : password.Length < 4 ? "min" : "max").ToException();
+        }
+
+        RequireReady();
+        if (_users.User is not null)
+        {
+            throw IpcError.Conflict("A player is signed in on this PC", "sessionActive").ToException();
+        }
+
+        Guid pcId = PcId;
+        if (pcId == Guid.Empty)
+        {
+            throw IpcError.AgentOffline().ToException();
+        }
+
+        RequireOnline();
+        string hwid = await _hwid.GetAsync(cancellationToken).ConfigureAwait(false);
+        AuthResponse auth = await _server.RegisterPlayerAsync(
+            new RegisterAuthRequest(pcId, hwid, displayName, username, password, request.AcceptRules, _shellSettings.Get().Locale), cancellationToken).ConfigureAwait(false);
+        _logger.LogInformation("User {UserId} ({Username}) registered on this PC", auth.User.Id, auth.User.Username);
+        return await SignedInOnlineAsync(auth, auth.User.Username, "register", guest: false, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>The server signed <paramref name="auth"/>'s player in on this PC: everything the Agent does after a sign-in.</summary>
+    private async Task<AuthLoginResponse> SignedInOnlineAsync(AuthResponse auth, string cacheKey, string via, bool guest, CancellationToken cancellationToken)
+    {
         if (auth.User.HasFlag(UserFlags.Banned))
         {
             throw IpcError.Forbidden("Account is banned", "banned").ToException();
         }
 
-        // A guest's username field carries the display name they typed, not a login name.
-        string cacheKey = request.Kind == AuthKind.Guest ? auth.User.Username : request.Username ?? auth.User.Username;
         await CacheUserAsync(cacheKey, auth, cancellationToken).ConfigureAwait(false);
         await DropQueuedLogoutsAsync().ConfigureAwait(false);
         _users.Set(auth.User, auth.ExpiresAt, ConnectivityState.Online);
@@ -292,9 +346,9 @@ public sealed class SessionHandlers : IIpcHandlerGroup
         }
 
         session = await ResumeAfterSignInAsync(auth.User, cancellationToken).ConfigureAwait(false) ?? session;
-        _logger.LogInformation("User {UserId} ({Username}) logged in via {Kind} (online); session {SessionId}", auth.User.Id, auth.User.Username, request.Kind, session?.Id);
+        _logger.LogInformation("User {UserId} ({Username}) logged in via {Kind} (online); session {SessionId}", auth.User.Id, auth.User.Username, via, session?.Id);
         Func<CancellationToken, Task>? handoff = auth.HandoffSessionId is { } ended ? ct => WaitHandoffAsync(ended, ct) : null;
-        Saves?.SignedIn(auth.User, guest: request.Kind == AuthKind.Guest, handoff);
+        Saves?.SignedIn(auth.User, guest: guest, handoff);
         return new AuthLoginResponse(auth.User, session, auth.ExpiresAt, ConnectivityState.Online);
     }
 

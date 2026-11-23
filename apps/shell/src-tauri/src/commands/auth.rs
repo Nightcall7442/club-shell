@@ -3,7 +3,7 @@
 
 use clubshell_protocol::commands::{
     names, AuthLoginRequest, AuthLoginResponse, AuthLogoutRequest, AuthLogoutResponse,
-    AuthStatusResponse,
+    AuthRegisterRequest, AuthStatusResponse,
 };
 use clubshell_protocol::session::SessionEndReason;
 use clubshell_protocol::user::{AuthKind, QrLoginStart};
@@ -71,6 +71,45 @@ pub async fn auth_status(state: State<'_, AppState>) -> CmdResult<AuthStatusResp
     state.set_user(resp.user.clone());
     state.set_session(resp.session.clone());
     Ok(resp)
+}
+
+/// The player's name on a new account (the desk's limit).
+const DISPLAY_NAME_MAX: usize = 64;
+/// A new account's password: 4–64 characters (the server's rule).
+const NEW_PASSWORD_MIN: usize = 4;
+const NEW_PASSWORD_MAX: usize = 64;
+
+/// `auth_register` → `auth.register` (D-92): the player's own account from the lock screen, signed
+/// in at once like `auth_login` (the caches are filled the same way). The password is checked for
+/// length only and never logged; the club's switch, the login's rules and the per-PC limit are the
+/// server's.
+#[tauri::command]
+pub async fn auth_register(
+    state: State<'_, AppState>,
+    req: AuthRegisterRequest,
+) -> CmdResult<AuthLoginResponse> {
+    let req = validate_register(req)?;
+    let resp: AuthLoginResponse = state.agent.request(names::auth::REGISTER, &req).await?;
+    state.set_user(Some(resp.user.clone()));
+    state.set_session(resp.session.clone());
+    tracing::info!(user = %resp.user.username, "registered and signed in");
+    Ok(resp)
+}
+
+fn validate_register(mut req: AuthRegisterRequest) -> CmdResult<AuthRegisterRequest> {
+    req.display_name = validate::required_text("displayName", &req.display_name, DISPLAY_NAME_MAX)?;
+    req.username = validate::optional_text("username", req.username, USERNAME_MAX)?;
+    let length = req.password.chars().count();
+    if length == 0 {
+        return Err(ShellError::validation("password", "required"));
+    }
+    if length < NEW_PASSWORD_MIN {
+        return Err(ShellError::validation("password", "min"));
+    }
+    if length > NEW_PASSWORD_MAX {
+        return Err(ShellError::validation("password", "max"));
+    }
+    Ok(req)
 }
 
 /// `auth_qr_start` → `auth.qrStart`.

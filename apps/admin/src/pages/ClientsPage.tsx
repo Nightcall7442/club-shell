@@ -2,8 +2,9 @@
  * Clients (cashier + owner): search, the client list with group, loyalty level and money, and a side card (variant F:
  * the client's head on the blueprint grid, balance / bonus / visits / spent wells) to top up the balance (the same
  * «Пополнить» sheet as the search's), edit a profile, bind a club card, reset the sign-in password, redeem a promo code
- * and see the latest wallet entries — or to register a new client with a password and card, so they can sign in on a
- * PC. A password the console generates is shown to the cashier once. Blacklisting is the owner's call: the server
+ * and see the latest wallet entries — or to register a new client, so they can sign in on a PC: only the name is required
+ * (D-92); without a login the server makes one (from the phone or the name), without a password the console generates
+ * one, and either is shown to the cashier once. Blacklisting is the owner's call: the server
  * answers 403 to a cashier and the panel says. `#/clients/new` (the counter's "+ Новый клиент") opens the registration
  * straight away.
  */
@@ -63,6 +64,21 @@ function IssuedPassword({ password }: { password: string }): JSX.Element {
       <span className="mt-1.5 block font-mono text-xl font-semibold leading-7 tracking-[0.12em] text-hi">
         {password}
       </span>
+    </Note>
+  );
+}
+
+/**
+ * The login the server made for a client registered without one (D-92), shown once beside the password: a status note
+ * whose one `.font-mono` child is the login.
+ */
+function IssuedLogin({ login }: { login: string }): JSX.Element {
+  return (
+    <Note tone="ok" role="status">
+      <span className="block text-[12.5px] leading-5 text-soft">
+        {t('Логин клиента придуман сервером — сообщите его вместе с паролем')}
+      </span>
+      <span className="mt-1.5 block font-mono text-xl font-semibold leading-7 text-hi">{login}</span>
     </Note>
   );
 }
@@ -191,6 +207,7 @@ function ClientPanel({
   client,
   groups,
   issuedPassword,
+  issuedLogin,
   onSaved,
   onPasswordIssued,
   onToppedUp,
@@ -201,6 +218,8 @@ function ClientPanel({
   client: Client;
   groups: ClientGroup[];
   issuedPassword: string | null;
+  /** The login the server made at registration (D-92), shown once with the password. */
+  issuedLogin: string | null;
   onSaved: (c: Client) => void;
   onPasswordIssued: (password: string) => void;
   /** A top-up went through: the list reloads the balance. */
@@ -414,6 +433,7 @@ function ClientPanel({
             </div>
           </Field>
           <Note note={loginNote} />
+          {issuedLogin && <IssuedLogin login={issuedLogin} />}
           {issuedPassword && <IssuedPassword password={issuedPassword} />}
           <Button variant="tertiary" className="self-start" disabled={busy} onClick={() => void resetPassword()}>
             {t('Сбросить пароль')}
@@ -499,8 +519,11 @@ function NewClientPanel({
   onCancel,
 }: {
   groups: ClientGroup[];
-  /** `password` is the generated one to show once; `null` when the cashier typed it. */
-  onCreated: (c: Client, password: string | null) => void;
+  /**
+   * `issued`: what to show once — the generated password (`null` when the cashier typed one) and whether the server made
+   * the login (D-92: left empty), so the cashier tells the client both.
+   */
+  onCreated: (c: Client, issued: { password: string | null; loginGenerated: boolean }) => void;
   onCancel: () => void;
 }): JSX.Element {
   const [name, setName] = useState('');
@@ -512,9 +535,10 @@ function NewClientPanel({
   const [groupId, setGroupId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<NoteState>(null);
-  // As the server: a new login is 3–32 characters (the field already drops spaces and upper case).
+  // As the server: a typed login is 3–32 characters (the field already drops spaces and upper case); empty — the server
+  // makes one from the phone or the name (D-92).
   const loginLength = login.trim().length;
-  const loginOk = loginLength >= USERNAME_MIN && loginLength <= USERNAME_MAX;
+  const loginOk = loginLength === 0 || (loginLength >= USERNAME_MIN && loginLength <= USERNAME_MAX);
 
   const create = async (): Promise<void> => {
     setBusy(true);
@@ -523,14 +547,14 @@ function NewClientPanel({
     try {
       const r = await clubApi.addClient({
         displayName: name.trim(),
-        username: login.trim(),
+        ...(login.trim() ? { username: login.trim() } : {}),
         password: sent,
         cardId: card.trim() || null,
         phone: phone.trim() || undefined,
         birthYear: yearOf(birth),
         groupId,
       });
-      onCreated(r.client, password ? null : sent);
+      onCreated(r.client, { password: password ? null : sent, loginGenerated: !login.trim() });
     } catch (e) {
       setResult({ text: describe(e), tone: 'err' });
     } finally {
@@ -556,9 +580,9 @@ function NewClientPanel({
           <Field
             label={t('Логин')}
             hint={
-              loginLength > 0 && !loginOk
+              !loginOk
                 ? t('Логин — от {min} до {max} символов', { min: USERNAME_MIN, max: USERNAME_MAX })
-                : t('От {min} до {max} символов', { min: USERNAME_MIN, max: USERNAME_MAX })
+                : t('Пусто — придумаем по телефону или имени')
             }
           >
             <Input
@@ -621,8 +645,8 @@ export default function ClientsPage(): JSX.Element {
   const [groups, setGroups] = useState<ClientGroup[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | 'new' | null>(null);
-  // A generated password stays on screen only until the cashier moves to another client.
-  const [issued, setIssued] = useState<{ id: string; password: string } | null>(null);
+  // A generated password (and a login the server made) stays on screen only until the cashier moves to another client.
+  const [issued, setIssued] = useState<{ id: string; password: string | null; login: string | null } | null>(null);
   const select = (id: string | 'new' | null): void => {
     setSelected(id);
     setIssued(null);
@@ -738,10 +762,11 @@ export default function ClientsPage(): JSX.Element {
             <NewClientPanel
               groups={groups}
               onCancel={() => select(null)}
-              onCreated={(c, password) => {
+              onCreated={(c, { password, loginGenerated }) => {
                 setItems((list) => [c, ...list.filter((x) => x.id !== c.id)]);
                 setSelected(c.id);
-                setIssued(password ? { id: c.id, password } : null);
+                const login = loginGenerated ? c.username : null;
+                setIssued(password || login ? { id: c.id, password, login } : null);
               }}
             />
           ) : client ? (
@@ -749,8 +774,9 @@ export default function ClientsPage(): JSX.Element {
               client={client}
               groups={groups}
               issuedPassword={issued?.id === client.id ? issued.password : null}
+              issuedLogin={issued?.id === client.id ? issued.login : null}
               onSaved={replace}
-              onPasswordIssued={(password) => setIssued({ id: client.id, password })}
+              onPasswordIssued={(password) => setIssued({ id: client.id, password, login: null })}
               onToppedUp={() => void load(q.trim())}
               onDeleted={(id) => {
                 setItems((list) => list.filter((x) => x.id !== id));

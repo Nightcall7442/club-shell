@@ -696,6 +696,19 @@ Shell renders `qrUrl` and then calls `auth.login{kind:"qr", qrToken}` on each po
 with `details.status = "pending"|"scanned"` means keep polling, `"expired"` means restart.
 Errors: `agentOffline`, `serverUnavailable`.
 
+#### `auth.register` — the player's own account (auth: hello) — D-92
+
+Request: `{ displayName: string, username?: string, password: string, acceptRules?: boolean }` — name 1–64 characters;
+login 3–32 characters, or a phone number (stored as its digits, and the player signs in with the number however it is
+typed); absent — the server makes one from the name; password 4–64 characters (the Shell asks for it twice);
+`acceptRules: true` when the club has rules. Response: as `auth.login` — the new member (zero balances) signed in on this
+PC (server `POST /auth/register`, tokens kept as for a sign-in). Offered only while `shell.club.selfSignup` is `true`
+(the owner's switch, off by default). Needs the server: never served offline.
+Errors: `validation` (`displayName`/`username`/`password`: `required` / `min` / `max`; `username` `taken`;
+`acceptRules` `required`), `forbidden` (`selfSignupDisabled`; `pcOccupied`), `rateLimited` (`signupLimit`: this PC made
+5 accounts within the hour, `retryAfterSec`), `conflict` (`sessionActive`: a player is signed in here), `agentOffline`,
+`serverUnavailable`.
+
 ### 7.2 session
 
 #### `session.get` (auth: user) — Request: — Response: `Session | null` (payload `null` when none).

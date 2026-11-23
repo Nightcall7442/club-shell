@@ -344,6 +344,9 @@ public sealed record ShellScreensaver(bool Enabled, int AfterSec, IReadOnlyList<
 /// <param name="Banners">Active banners, in display order.</param>
 /// <param name="Rules">Club rules shown on the support screen.</param>
 /// <param name="Screensaver">The free PCs' screensaver; null — the shell's own idle screen as before.</param>
+/// <param name="SelfSignup">
+/// The lock screen offers «Создать аккаунт» (D-92: the owner's <c>limits.selfSignup</c>); null — an older server, off.
+/// </param>
 public sealed record ShellClub(
     string? Name = null,
     string? Accent = null,
@@ -351,7 +354,8 @@ public sealed record ShellClub(
     string? WallpaperUrl = null,
     IReadOnlyList<ClubBanner>? Banners = null,
     ClubRules? Rules = null,
-    ShellScreensaver? Screensaver = null);
+    ShellScreensaver? Screensaver = null,
+    bool? SelfSignup = null);
 
 /// <summary>Server override pushed into <c>shell.json</c>.</summary>
 /// <param name="Locale">Default locale.</param>

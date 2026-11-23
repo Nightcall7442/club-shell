@@ -423,6 +423,9 @@ pub struct ShellClub {
     /// The free PCs' screensaver; absent — the shell's own idle screen as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub screensaver: Option<ShellScreensaver>,
+    /// The lock screen offers «Создать аккаунт» (D-92, the owner's `limits.selfSignup`); absent — off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub self_signup: Option<bool>,
 }
 
 /// Server override pushed into `shell.json`.

@@ -694,6 +694,10 @@ export const UZ: Record<string, string> = {
   'Чёрный список': 'Qora roʻyxat',
   Шаблоны: 'Shablonlar',
   'Экран игрока': 'Oʻyinchi ekrani',
+  'Регистрация на ПК': 'Kompyuterda roʻyxatdan oʻtish',
+  'Игроки создают аккаунт сами': 'Oʻyinchilar akkauntni oʻzlari yaratadi',
+  'На экране входа появится «Создать аккаунт»: имя, логин или телефон и пароль. Если заданы правила клуба, игрок соглашается с ними. Новый аккаунт — обычный клиент с нулевым балансом; с одного ПК — не больше 5 аккаунтов в час.':
+    'Kirish ekranida «Akkaunt yaratish» paydo boʻladi: ism, login yoki telefon va parol. Klub qoidalari boʻlsa, oʻyinchi ularga rozilik bildiradi. Yangi akkaunt — balansi nol boʻlgan oddiy mijoz; bitta kompyuterdan soatiga 5 tadan ortiq akkaunt yaratilmaydi.',
   блок: 'blok',
   'бонус {sum} на баланс': 'balansga {sum} bonus',
   бронь: 'bron',
@@ -935,7 +939,9 @@ export const UZ: Record<string, string> = {
   'Насколько клиент с кассовой постоплатой может уйти в минус. Пусто — без ограничения. Ограничение действует только на сеансы с кассы.':
     'Kassadan keyin toʻlash bilan oʻtqazilgan mijoz qanchagacha minusga ketishi mumkin. Boʻsh — cheklovsiz. Cheklov faqat kassadan ochilgan seanslarga taalluqli.',
   'Логин — от {min} до {max} символов': 'Login — {min} dan {max} gacha belgi',
-  'От {min} до {max} символов': '{min} dan {max} gacha belgi',
+  'Пусто — придумаем по телефону или имени': 'Boʻsh qolsa — telefon yoki ism boʻyicha oʻzimiz tuzamiz',
+  'Логин клиента придуман сервером — сообщите его вместе с паролем':
+    'Mijoz logini server tomonidan tuzildi — uni parol bilan birga ayting',
   'Изъятие из кассы — только владелец': 'Kassadan pul olish — faqat egasi',
   'Кассир сможет только вносить деньги в кассу; изымать — владелец.':
     'Kassir faqat kassaga pul kirita oladi; olish — egasi.',
@@ -2166,6 +2172,10 @@ export const EN: Record<string, string> = {
   'Чёрный список': 'Blacklist',
   Шаблоны: 'Templates',
   'Экран игрока': 'Player screen',
+  'Регистрация на ПК': 'Sign-up on the PC',
+  'Игроки создают аккаунт сами': 'Players create their own account',
+  'На экране входа появится «Создать аккаунт»: имя, логин или телефон и пароль. Если заданы правила клуба, игрок соглашается с ними. Новый аккаунт — обычный клиент с нулевым балансом; с одного ПК — не больше 5 аккаунтов в час.':
+    'The sign-in screen gets «Create an account»: a name, a username or phone and a password. If the club has rules, the player accepts them. A new account is a plain client with a zero balance; one PC makes at most 5 accounts an hour.',
   блок: 'locked',
   'бонус {sum} на баланс': '{sum} bonus to balance',
   бронь: 'booked',
@@ -2405,7 +2415,9 @@ export const EN: Record<string, string> = {
   'Насколько клиент с кассовой постоплатой может уйти в минус. Пусто — без ограничения. Ограничение действует только на сеансы с кассы.':
     'How far below zero a client seated postpaid at the desk may go. Empty — no limit. The limit applies to sessions opened at the desk only.',
   'Логин — от {min} до {max} символов': 'Login — {min} to {max} characters',
-  'От {min} до {max} символов': '{min} to {max} characters',
+  'Пусто — придумаем по телефону или имени': 'Leave empty to make one from the phone or the name',
+  'Логин клиента придуман сервером — сообщите его вместе с паролем':
+    'The server made the client’s login — tell it to them with the password',
   'Изъятие из кассы — только владелец': 'Only the owner takes cash out of the drawer',
   'Кассир сможет только вносить деньги в кассу; изымать — владелец.':
     'A cashier can only put cash in; the owner takes it out.',
