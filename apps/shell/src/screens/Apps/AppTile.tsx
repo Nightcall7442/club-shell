@@ -2,14 +2,17 @@
  * One launchable application: big icon (resolved through `assetUrl`, initials fallback), title and category.
  * The whole tile is a `data-nav` button; a spinner overlay shows while `apps_launch` is in flight.
  */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 import type { App } from '@clubshell/contracts';
 import { useResolvedAsset } from '@/components/media/GameArtwork';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
+import { track } from '@/lib/analytics';
 import { initials } from '@/lib/format';
+import { api } from '@/lib/tauri';
+import { useNotificationsStore } from '@/store/notifications';
 
 export interface AppTileProps {
   app: App;
@@ -19,6 +22,47 @@ export interface AppTileProps {
   /** Another launch is running (or the app is blocked). */
   disabled?: boolean;
   className?: string;
+}
+
+/**
+ * `apps_launch` with a per-app launching state and a success / error toast, shared by the Apps screen and Home's
+ * favourites; one launch at a time.
+ */
+export function useAppLaunch(): { launchingId: string | null; launch: (app: App) => Promise<void> } {
+  const { t } = useTranslation();
+  const push = useNotificationsStore((s) => s.push);
+  const pushError = useNotificationsStore((s) => s.pushError);
+  const [launchingId, setLaunchingId] = useState<string | null>(null);
+  const busy = useRef(false);
+
+  const launch = useCallback(
+    async (app: App): Promise<void> => {
+      if (busy.current) {
+        return;
+      }
+      busy.current = true;
+      setLaunchingId(app.id);
+      track('app.launch', { appId: app.id });
+      try {
+        await api.apps.launch(app.id);
+        push({
+          id: `app-${app.id}`,
+          title: t('apps.launched', { title: app.title }),
+          level: 'success',
+          ttlSec: 4,
+          source: 'local',
+        });
+      } catch (e) {
+        pushError(e, t('apps.openFailed', { title: app.title }));
+      } finally {
+        busy.current = false;
+        setLaunchingId(null);
+      }
+    },
+    [push, pushError, t],
+  );
+
+  return { launchingId, launch };
 }
 
 /** `apps.category.<key>` when translated, else the raw category. */

@@ -6,7 +6,7 @@
 import { useState } from 'react';
 import clsx from 'clsx';
 import type { ShellFeatures } from '@clubshell/contracts';
-import type { Banner, ClubSettings } from '@/api';
+import type { Banner, ClubSettings, ScreensaverSettings } from '@/api';
 import { t, type Lang } from '@/i18n';
 import { useClubSettings } from '@/settings';
 import {
@@ -375,6 +375,10 @@ export default function ClubPage(): JSX.Element {
             />
           </Section>
 
+          {s.screensaver && (
+            <ScreensaverSection value={s.screensaver} onChange={(v) => st.set('screensaver', v)} />
+          )}
+
           <Section title={t('Ограничения')}>
             <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2 md:max-w-xl">
               <Field label={t('Несовершеннолетние — младше')}>
@@ -479,5 +483,112 @@ export default function ClubPage(): JSX.Element {
         label={t('Есть несохранённые изменения')}
       />
     </OwnerPage>
+  );
+}
+
+/**
+ * «Заставка на свободных ПК» (D-87): on a PC nobody is signed in to, after the minutes without input the shell plays
+ * these pictures and clips (none — its built-in slides with the prices) until someone touches it.
+ */
+function ScreensaverSection({
+  value,
+  onChange,
+}: {
+  value: ScreensaverSettings;
+  onChange: (v: ScreensaverSettings) => void;
+}): JSX.Element {
+  const set = (p: Partial<ScreensaverSettings>): void => onChange({ ...value, ...p });
+  const editItem = (i: number, p: Partial<ScreensaverSettings['items'][number]>): void =>
+    set({ items: value.items.map((x, j) => (j === i ? { ...x, ...p } : x)) });
+  const rows = value.items.map((item, i) => ({ item, i }));
+  return (
+    <Section
+      title={t('Заставка на свободных ПК')}
+      bodyClassName="flex flex-col gap-4"
+      actions={<Toggle checked={value.enabled} onChange={(v) => set({ enabled: v })} label={t('Заставка включена')} />}
+    >
+      <p className="text-sm text-muted">
+        {t('Когда за ПК никого нет, после бездействия на экране идут ваши картинки и ролики. Касание — снова экран входа. Без файлов — встроенные слайды с ценами.')}
+      </p>
+      <Field label={t('Через сколько минут без действий')} className="max-w-[16rem]">
+        <NumberInput value={value.afterMinutes} min={1} max={120} suffix={t('мин')} onChange={(n) => set({ afterMinutes: n })} />
+      </Field>
+      <div data-testid="screensaver-items">
+        <Table
+          rows={rows}
+          rowKey={(r) => String(r.i)}
+          empty={t('Файлов нет — будут встроенные слайды')}
+          columns={[
+            {
+              key: 'url',
+              title: t('Ссылка на картинку или видео'),
+              render: (r) => (
+                <Input
+                  aria-label={t('Ссылка на картинку или видео')}
+                  value={r.item.url}
+                  placeholder="https://"
+                  onChange={(e) => {
+                    const url = e.target.value;
+                    // A clip by its extension: the owner rarely thinks of the switch.
+                    const video = /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url.trim());
+                    editItem(r.i, { url, type: video ? 'video' : r.item.type === 'video' && url.trim() === '' ? 'image' : r.item.type });
+                  }}
+                />
+              ),
+            },
+            {
+              key: 'type',
+              title: t('Тип'),
+              width: '12rem',
+              render: (r) => (
+                <Segmented
+                  size="md"
+                  label={t('Тип')}
+                  value={r.item.type}
+                  onChange={(v) => editItem(r.i, { type: v })}
+                  options={[
+                    { id: 'image', label: t('Картинка') },
+                    { id: 'video', label: t('Видео') },
+                  ]}
+                />
+              ),
+            },
+            {
+              key: 'sec',
+              title: t('Секунд'),
+              width: '7.5rem',
+              render: (r) => (
+                <NumberInput
+                  value={r.item.durationSec}
+                  min={3}
+                  max={600}
+                  disabled={r.item.type === 'video'}
+                  onChange={(n) => editItem(r.i, { durationSec: n })}
+                />
+              ),
+            },
+            {
+              key: 'rm',
+              title: '',
+              width: '6rem',
+              render: (r) => (
+                <Button variant="ghost" size="sm" onClick={() => set({ items: value.items.filter((_, j) => j !== r.i) })}>
+                  {t('Удалить')}
+                </Button>
+              ),
+            },
+          ]}
+        />
+      </div>
+      <div>
+        <Button
+          size="sm"
+          disabled={value.items.length >= 20}
+          onClick={() => set({ items: [...value.items, { url: '', type: 'image', durationSec: 10 }] })}
+        >
+          {t('Добавить картинку или видео')}
+        </Button>
+      </div>
+    </Section>
   );
 }

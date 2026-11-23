@@ -116,6 +116,9 @@ public static class IpcMessages
 
         /// <summary><see cref="WalletTopupIntentRequest"/> → <see cref="Contracts.Wallet.TopupIntent"/>.</summary>
         public const string TopupIntent = "wallet.topupIntent";
+
+        /// <summary><see cref="WalletRedeemPromoRequest"/> → <see cref="WalletRedeemPromoResponse"/> (D-88).</summary>
+        public const string RedeemPromo = "wallet.redeemPromo";
     }
 
     /// <summary><c>shop.*</c></summary>
@@ -349,12 +352,19 @@ public static class IpcMessages
         /// <summary>Payload <see cref="Ipc.GamesChanged"/>.</summary>
         public const string GamesChanged = "games.changed";
 
+        /// <summary>
+        /// Payload <see cref="ShellSettings"/> (effective, as <c>settings.get</c> answers): the settings changed without the
+        /// Shell asking — a member's account preferences came in after sign-in, or the PC's own came back at sign-out (D-86).
+        /// </summary>
+        public const string SettingsChanged = "settings.changed";
+
         /// <summary>All event names.</summary>
         public static IReadOnlyList<string> All { get; } = new[]
         {
             SessionUpdated, SessionWarning, SessionEnded, WalletUpdated, ChatMessage, NotificationPush, AdminMessage,
             AdminRemoteControl, GameStateChanged, PolicyChanged, UpdateAvailable, UpdateProgress, UpdateReady, SysMetrics,
             SysConnectivity, ShellCommand, AuthExpired, ShopOrderUpdated, SavesStatus, SysReadinessChanged, GamesChanged,
+            SettingsChanged,
         };
     }
 }
@@ -769,6 +779,16 @@ public sealed record WalletTopupIntentRequest(
     Money Amount,
     TopupProvider Provider);
 
+/// <summary>Request of <c>wallet.redeemPromo</c> (D-88): the member's own promo code of the club.</summary>
+/// <param name="Code">The code as typed (case does not matter), 1–32 characters.</param>
+public sealed record WalletRedeemPromoRequest(string Code);
+
+/// <summary>Response of <c>wallet.redeemPromo</c>: the code as the club wrote it, the bonus credited and the new balance.</summary>
+/// <param name="Code">The code.</param>
+/// <param name="Bonus">Credited to the main balance.</param>
+/// <param name="Balance">Main balance after the credit.</param>
+public sealed record WalletRedeemPromoResponse(string Code, Money Bonus, Money Balance);
+
 #endregion
 
 #region Shop payloads
@@ -989,6 +1009,14 @@ public sealed record ShellFeatures(
 /// <param name="UiSounds">UI sounds.</param>
 /// <param name="Features">Feature toggles (read-only).</param>
 /// <param name="Club">Club branding, banners and rules (read-only); <see langword="null"/> when the server sent none.</param>
+/// <param name="Favorites">
+/// The signed-in member's starred games and apps (<c>game:&lt;id&gt;</c>, <c>app:&lt;id&gt;</c>), kept on their account; empty
+/// for a guest and with nobody signed in. <see langword="null"/> from an older Agent reads as empty.
+/// </param>
+/// <param name="AccountPrefs">
+/// <see langword="true"/> while a signed-in member's account preferences apply (theme, locale, volume, muted, UI sounds,
+/// metrics overlay and favourites follow them to any PC); <see langword="false"/> for a guest and with nobody signed in.
+/// </param>
 public sealed record ShellSettings(
     Locale Locale,
     string Theme,
@@ -1000,9 +1028,15 @@ public sealed record ShellSettings(
     bool AllowVirtualKeyboard,
     bool UiSounds,
     ShellFeatures Features,
-    ShellClub? Club = null);
+    ShellClub? Club = null,
+    IReadOnlyList<string>? Favorites = null,
+    bool AccountPrefs = false);
 
-/// <summary>Request of <c>settings.set</c>; partial, at least one key.</summary>
+/// <summary>
+/// Request of <c>settings.set</c>; partial, at least one key. While a member is signed in, theme, locale, volume, muted,
+/// UI sounds and the metrics overlay are saved to their account instead of the PC (D-86); <c>favorites</c> needs a
+/// signed-in member (<c>forbidden {reason: noAccount}</c> otherwise).
+/// </summary>
 /// <param name="Locale">UI locale.</param>
 /// <param name="Theme">Theme id (must exist).</param>
 /// <param name="Volume">Volume 0–100.</param>
@@ -1011,6 +1045,7 @@ public sealed record ShellSettings(
 /// <param name="ShowMetricsOverlay">Show the metrics overlay.</param>
 /// <param name="AllowVirtualKeyboard">Allow the on-screen keyboard.</param>
 /// <param name="UiSounds">UI sounds.</param>
+/// <param name="Favorites">The member's starred games and apps as a whole (replaces the list).</param>
 public sealed record SettingsSetRequest(
     Locale? Locale = null,
     string? Theme = null,
@@ -1019,12 +1054,13 @@ public sealed record SettingsSetRequest(
     int? IdleTimeoutSec = null,
     bool? ShowMetricsOverlay = null,
     bool? AllowVirtualKeyboard = null,
-    bool? UiSounds = null)
+    bool? UiSounds = null,
+    IReadOnlyList<string>? Favorites = null)
 {
     /// <summary><see langword="true"/> when no field is set (request is invalid).</summary>
     [JsonIgnore]
     public bool IsEmpty => Locale is null && Theme is null && Volume is null && Muted is null && IdleTimeoutSec is null
-                           && ShowMetricsOverlay is null && AllowVirtualKeyboard is null && UiSounds is null;
+                           && ShowMetricsOverlay is null && AllowVirtualKeyboard is null && UiSounds is null && Favorites is null;
 }
 
 #endregion

@@ -2,7 +2,7 @@
  * The shift's operations as the counter did them (D-43), newest first: who, for whom and on which PC, what (a seat, a
  * top-up, a cash move…), how it was paid and what it did to the drawer, with a ⎙ that reprints the slip as a «Копия».
  * A paid seat is one row with its payment merged in (the server leaves the session's top-up out). Today's money by
- * method is the KPI strip's «Сегодня принято» (`kpi.tsx`).
+ * method is the KPI strip's «Принято за смену» (`kpi.tsx`).
  *
  * Variant F: a row is time | what and who | the drawer's amount (mono; money is never coloured by its sign: «+» in the
  * text colour, «−» dimmed, «∞» for a postpaid seat). The row's ⎙ and «Аннулировать…» are small icon buttons that show on

@@ -576,6 +576,8 @@ export const IpcNames = {
     History: 'wallet.history',
     /** `WalletTopupIntentRequest` → `TopupIntent`. */
     TopupIntent: 'wallet.topupIntent',
+    /** `WalletRedeemPromoRequest` → `WalletRedeemPromoResponse` (D-88). */
+    RedeemPromo: 'wallet.redeemPromo',
   },
   /** `shop.*` */
   Shop: {
@@ -734,6 +736,11 @@ export const IpcNames = {
     SysReadinessChanged: 'sys.readinessChanged',
     /** Payload `GamesChanged`. */
     GamesChanged: 'games.changed',
+    /**
+     * Payload `ShellSettings` (effective, as `settings.get` answers): the settings changed without the Shell asking — a
+     * member's account preferences came in after sign-in, or the PC's own came back at sign-out (D-86).
+     */
+    SettingsChanged: 'settings.changed',
   },
 } as const;
 
@@ -893,7 +900,11 @@ export interface SetVolumeRequest {
   muted?: boolean | null;
 }
 
-/** Request of `settings.set`; partial, at least one key. */
+/**
+ * Request of `settings.set`; partial, at least one key. While a member is signed in, theme, locale, volume, muted, UI
+ * sounds and the metrics overlay are saved to their account instead of the PC (D-86); `favorites` needs a signed-in
+ * member (`forbidden {reason: noAccount}` otherwise).
+ */
 export interface SettingsSetRequest {
   /** UI locale. */
   locale?: Locale | null;
@@ -911,6 +922,8 @@ export interface SettingsSetRequest {
   allowVirtualKeyboard?: boolean | null;
   /** UI sounds. */
   uiSounds?: boolean | null;
+  /** The member's starred games and apps as a whole (replaces the list). */
+  favorites?: string[] | null;
 }
 
 /** Shell capabilities advertised in `AuthHelloRequest.Capabilities`. */
@@ -983,6 +996,16 @@ export interface ShellSettings {
   features: ShellFeatures;
   /** Club branding, banners and rules (read-only); `null` when the server sent none. */
   club?: ShellClub | null;
+  /**
+   * The signed-in member's starred games and apps (`game:<id>`, `app:<id>`), kept on their account; empty for a guest
+   * and with nobody signed in. `null` from an older Agent reads as empty.
+   */
+  favorites?: string[] | null;
+  /**
+   * `true` while a signed-in member's account preferences apply (theme, locale, volume, muted, UI sounds, metrics
+   * overlay and favourites follow them to any PC); `false` for a guest and with nobody signed in.
+   */
+  accountPrefs: boolean;
 }
 
 /** Request of `shop.order`. */
@@ -1321,6 +1344,19 @@ export interface WalletTopupIntentRequest {
   provider: TopupProvider;
 }
 
+/** Request of `wallet.redeemPromo` (D-88): the member's own promo code of the club. */
+export interface WalletRedeemPromoRequest {
+  /** The code as typed (case does not matter), 1–32 characters. */
+  code: string;
+}
+
+/** Response of `wallet.redeemPromo`: the code as the club wrote it, the bonus credited and the new balance. */
+export interface WalletRedeemPromoResponse {
+  code: string;
+  bonus: Money;
+  balance: Money;
+}
+
 /**
  * Every Shell → Agent IPC request (IPC_PROTOCOL.md §7). Wire form is the IPC name (`auth.hello`, …) via
  * `AgentCommandJsonConverter`; use `AgentCommands.ToIpcName` / `AgentCommands.TryParse`.
@@ -1380,6 +1416,8 @@ export const AgentCommand = {
   WalletHistory: 'wallet.history',
   /** `wallet.topupIntent` */
   WalletTopupIntent: 'wallet.topupIntent',
+  /** `wallet.redeemPromo` */
+  WalletRedeemPromo: 'wallet.redeemPromo',
   /** `shop.products` */
   ShopProducts: 'shop.products',
   /** `shop.order` */
@@ -2581,6 +2619,7 @@ const USER_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
   AgentCommand.WalletBalance,
   AgentCommand.WalletHistory,
   AgentCommand.WalletTopupIntent,
+  AgentCommand.WalletRedeemPromo,
   AgentCommand.ShopOrderStatus,
   AgentCommand.ShopOrders,
   AgentCommand.ChatHistory,
@@ -2694,6 +2733,7 @@ export interface IpcRequestMap {
   [IpcNames.Wallet.Tariffs]: { request: WalletTariffsRequest | null; response: WalletTariffsResponse };
   [IpcNames.Wallet.History]: { request: WalletHistoryRequest | null; response: WalletHistoryResponse };
   [IpcNames.Wallet.TopupIntent]: { request: WalletTopupIntentRequest; response: TopupIntent };
+  [IpcNames.Wallet.RedeemPromo]: { request: WalletRedeemPromoRequest; response: WalletRedeemPromoResponse };
   [IpcNames.Shop.Products]: { request: ShopProductsRequest | null; response: ShopProductsResponse };
   [IpcNames.Shop.Order]: { request: ShopOrderRequest; response: Order };
   [IpcNames.Shop.OrderStatus]: { request: ShopOrderStatusRequest; response: Order };

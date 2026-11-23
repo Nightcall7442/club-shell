@@ -590,7 +590,7 @@ mod tests {
             serde_json::to_string(&ready).unwrap(),
             r#"{"component":"shell","version":"1.5.0","restartRequired":true,"mandatory":false,"applyAt":"2026-09-21T04:00:00.000Z"}"#
         );
-        assert_eq!(event_names::ALL.len(), 21);
+        assert_eq!(event_names::ALL.len(), 22);
         // SHELL_CHANGES 23: the player's saves.
         let saves = PlayerSavesStatus {
             state: PlayerSavesState::TooLarge,

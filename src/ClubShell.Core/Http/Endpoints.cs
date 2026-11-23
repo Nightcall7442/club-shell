@@ -128,6 +128,9 @@ public static class Endpoints
     /// <summary><c>GET /users/{userId}/loyalty</c>.</summary>
     public static string UserLoyalty(Guid userId) => $"users/{Id(userId)}/loyalty";
 
+    /// <summary><c>GET|PUT /users/{userId}/prefs</c> (beyond the contract, D-86).</summary>
+    public static string UserPrefs(Guid userId) => $"users/{Id(userId)}/prefs";
+
     /// <summary><c>POST /users/{userId}/pin/verify</c>.</summary>
     public static string UserPinVerify(Guid userId) => $"users/{Id(userId)}/pin/verify";
 
@@ -172,6 +175,9 @@ public static class Endpoints
 
     /// <summary><c>POST /wallet/{userId}/topup-intent</c>.</summary>
     public static string WalletTopupIntent(Guid userId) => $"wallet/{Id(userId)}/topup-intent";
+
+    /// <summary><c>POST /wallet/{userId}/promo</c> (D-88, beyond the contract): the member's own promo code.</summary>
+    public static string WalletPromo(Guid userId) => $"wallet/{Id(userId)}/promo";
 
     /// <summary><c>GET /wallet/{userId}/topup-intent/{id}</c>.</summary>
     public static string WalletTopupIntentStatus(Guid userId, Guid intentId) => $"wallet/{Id(userId)}/topup-intent/{Id(intentId)}";

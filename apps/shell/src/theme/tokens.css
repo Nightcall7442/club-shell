@@ -72,6 +72,14 @@
   color-scheme: dark;
 }
 
+/* A light theme: native controls and scrollbars light, shadows a soft slate instead of black. */
+:root[data-light] {
+  --shadow-lift: 0 18px 36px -20px rgb(15 23 42 / 0.28);
+  --shadow-float: 0 24px 56px -24px rgb(15 23 42 / 0.32);
+  --sheen: linear-gradient(180deg, rgb(255 255 255 / 0.6) 0%, rgb(255 255 255 / 0) 42%);
+  color-scheme: light;
+}
+
 html {
   font-size: var(--fs-base);
   -webkit-text-size-adjust: 100%;

@@ -1,8 +1,9 @@
 //! `wallet_*` commands (`TAURI_COMMANDS.md` §2.5) → `wallet.*` IPC messages.
 
 use clubshell_protocol::commands::{
-    names, WalletHistoryRequest, WalletHistoryResponse, WalletTariffsRequest,
-    WalletTariffsResponse, WalletTopupIntentRequest,
+    names, WalletHistoryRequest, WalletHistoryResponse, WalletRedeemPromoRequest,
+    WalletRedeemPromoResponse, WalletTariffsRequest, WalletTariffsResponse,
+    WalletTopupIntentRequest,
 };
 use clubshell_protocol::wallet::{
     Balance, Money, TopupIntent, TopupIntentCreateRequest, TopupProvider,
@@ -75,4 +76,29 @@ pub async fn wallet_topup_intent(
         .await?;
     tracing::info!(intent_id = %intent.id, provider = %intent.provider, amount = %intent.amount, "top-up intent created");
     Ok(intent)
+}
+
+/// Longest promo code the club can write (the console's limit).
+const PROMO_CODE_MAX: usize = 32;
+
+/// `wallet_redeem_promo` → `wallet.redeemPromo` (D-88): the signed-in member's own promo code; the code itself is not
+/// logged (a working code is worth money to whoever reads the log).
+#[tauri::command]
+pub async fn wallet_redeem_promo(
+    state: State<'_, AppState>,
+    code: String,
+) -> CmdResult<WalletRedeemPromoResponse> {
+    let code = code.trim().to_owned();
+    if code.is_empty() {
+        return Err(ShellError::validation("code", "required"));
+    }
+    if code.chars().count() > PROMO_CODE_MAX {
+        return Err(ShellError::validation("code", "at most 32 characters"));
+    }
+    let r: WalletRedeemPromoResponse = state
+        .agent
+        .request(names::wallet::REDEEM_PROMO, &WalletRedeemPromoRequest { code })
+        .await?;
+    tracing::info!(bonus = %r.bonus, "promo code redeemed");
+    Ok(r)
 }

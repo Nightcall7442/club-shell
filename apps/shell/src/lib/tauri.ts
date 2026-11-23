@@ -85,6 +85,7 @@ import type {
   VolumeState,
   WalletHistoryRequest,
   WalletHistoryResponse,
+  WalletRedeemPromoResponse,
   WalletTariffsResponse,
 } from '@clubshell/contracts';
 import { isErrorCode } from '@clubshell/contracts';
@@ -547,6 +548,8 @@ export const api = {
     history: (q?: WalletHistoryRequest): Promise<WalletHistoryResponse> => invoke('wallet_history', { q }),
     topupIntent: (amount: Money, provider: TopupProvider): Promise<TopupIntent> =>
       invoke('wallet_topup_intent', { amount, provider }),
+    /** The member's own promo code (D-88): the bonus credited and the new balance. */
+    redeemPromo: (code: string): Promise<WalletRedeemPromoResponse> => invoke('wallet_redeem_promo', { code }),
   },
   shop: {
     products: (q?: ShopProductsRequest): Promise<Product[]> => invoke('shop_products', { q }),

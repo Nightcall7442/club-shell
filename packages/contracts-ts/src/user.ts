@@ -424,6 +424,32 @@ export const UserFlags = {
 /** One of the {@link UserFlags} values. */
 export type UserFlag = (typeof UserFlags)[keyof typeof UserFlags];
 
+/**
+ * The player's Shell preferences and favourites, kept on their account (beyond the contract, DESIGN §12.1 D-86): `GET
+ * /users/{userId}/prefs` answers it, `PUT` replaces it. A field left `null` is not chosen by the player, and the PC's
+ * own (club) value applies to it. A guest has none (`403 guest`).
+ */
+export interface UserPrefs {
+  /** Theme id. */
+  theme?: string | null;
+  /** UI locale. */
+  locale?: Locale | null;
+  /** Volume 0–100. */
+  volume?: number | null;
+  /** Muted. */
+  muted?: boolean | null;
+  /** UI sounds. */
+  uiSounds?: boolean | null;
+  /** Metrics overlay. */
+  showMetricsOverlay?: boolean | null;
+  /** Starred games and apps (`game:<id>`, `app:<id>`) in the order starred; `null` reads as none. */
+  favorites?: string[] | null;
+}
+/** Most favourites one player keeps. */
+export const USER_PREFS_MAX_FAVORITES = 60;
+/** Longest favourite id and theme id. */
+export const USER_PREFS_MAX_ID_LENGTH = 64;
+
 /** User role; ordered by privilege. */
 export const UserRole = {
   /** Transient guest. */

@@ -1273,7 +1273,7 @@ export const LOYALTY: Loyalty = {
 export const SETTINGS: ShellSettings = {
   locale: 'ru',
   theme: 'default',
-  availableThemes: ['default', 'neon'],
+  availableThemes: ['default', 'light', 'neon'],
   volume: 60,
   muted: false,
   idleTimeoutSec: 300,
@@ -1294,6 +1294,8 @@ export const SETTINGS: ShellSettings = {
     gpuPanel: true,
     lockScreenPower: true,
   },
+  favorites: [],
+  accountPrefs: false,
 };
 
 /**

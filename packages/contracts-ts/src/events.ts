@@ -316,7 +316,7 @@ export interface Notification {
 }
 
 // ---- BEGIN MANUAL ----
-import { IpcNames, type LockCommand } from './commands.js';
+import { IpcNames, type LockCommand, type ShellSettings } from './commands.js';
 import type { PcMetrics } from './pc.js';
 import type { Session, SessionEndedEvent, SessionWarning } from './session.js';
 import type { Order } from './shop.js';
@@ -371,6 +371,7 @@ export interface AgentEventMap {
   [IpcNames.Events.SavesStatus]: PlayerSavesStatus;
   [IpcNames.Events.SysReadinessChanged]: PcReadiness;
   [IpcNames.Events.GamesChanged]: GamesChanged;
+  [IpcNames.Events.SettingsChanged]: ShellSettings;
 }
 
 /** Agent → Shell event name (`'session.updated' | 'session.warning' | ...`). */

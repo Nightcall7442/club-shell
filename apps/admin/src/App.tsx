@@ -59,6 +59,7 @@ import {
   ScreenIcon,
   ShieldIcon,
   TagIcon,
+  GiftIcon,
   UsersIcon,
   pathIcon,
 } from '@/icons';
@@ -86,6 +87,7 @@ const BarPage = lazy(() => import('@/pages/BarPage'));
 const ShiftPage = lazy(() => import('@/pages/ShiftPage'));
 const ClientsPage = lazy(() => import('@/pages/ClientsPage'));
 const PricingPage = lazy(() => import('@/pages/PricingPage'));
+const BonusPage = lazy(() => import('@/pages/PricingPage').then((m) => ({ default: m.BonusPage })));
 const HallPage = lazy(() => import('@/pages/HallPage'));
 const ShopPage = lazy(() => import('@/pages/ShopPage'));
 const CatalogPage = lazy(() => import('@/pages/CatalogPage'));
@@ -127,6 +129,8 @@ const GROUPS: { title: string; items: SectionDef[] }[] = [
     title: 'Настройка клуба',
     items: [
       { id: 'pricing', title: 'Тарифы и цены', ownerOnly: true, icon: <TagIcon />, page: PricingPage },
+      // The same page on its bonus tab (D-84): bonuses, the x2 promotion and promo codes, one click from the rail.
+      { id: 'bonuses', title: 'Бонусы и акции', ownerOnly: true, icon: <GiftIcon />, page: BonusPage },
       { id: 'hall', title: 'Зал и устройства', ownerOnly: true, icon: <MonitorIcon />, page: HallPage },
       { id: 'catalog', title: 'Игры', ownerOnly: true, icon: <GamepadIcon />, page: CatalogPage },
       { id: 'club', title: 'Экран игрока', ownerOnly: true, icon: <ScreenIcon />, page: ClubPage },

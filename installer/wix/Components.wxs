@@ -92,6 +92,9 @@
       <Component Id="ThemeDefault" Directory="ClubShellThemesDir">
         <File Id="theme_default.json" Name="default.json" Source="$(var.ConfigDir)\themes\default.json" KeyPath="yes" />
       </Component>
+      <Component Id="ThemeLight" Directory="ClubShellThemesDir">
+        <File Id="theme_light.json" Name="light.json" Source="$(var.ConfigDir)\themes\light.json" KeyPath="yes" />
+      </Component>
       <Component Id="ThemeNeon" Directory="ClubShellThemesDir">
         <File Id="theme_neon.json" Name="neon.json" Source="$(var.ConfigDir)\themes\neon.json" KeyPath="yes" />
       </Component>

@@ -152,6 +152,33 @@ export interface BonusTier {
   bonusPct: number;
 }
 
+/**
+ * The top-up promotion «x2» (D-84, beyond the contract) as the server keeps it: on, a desk top-up of at least
+ * `minAmount` gets `bonusPct` % on top (100 = x2) on `days` (0 = Sunday; empty = every day), `from`–`to` of the club's
+ * clock (both null = all day; `to` < `from` runs past midnight), until `until` (null = no end). Not added to the tier
+ * bonus: the larger of the two wins.
+ */
+export interface TopUpPromo {
+  enabled: boolean;
+  bonusPct: number;
+  minAmount: number;
+  days: number[];
+  from: string | null;
+  to: string | null;
+  until: string | null;
+}
+
+/** The free PCs' screensaver (D-87) as the server keeps it. */
+export interface ScreensaverSettings {
+  enabled: boolean;
+  afterMinutes: number;
+  items: { url: string; type: 'image' | 'video'; durationSec: number }[];
+}
+
+export const DEFAULT_SCREENSAVER: ScreensaverSettings = { enabled: false, afterMinutes: 5, items: [] };
+
+export const DEFAULT_TOPUP_PROMO: TopUpPromo = { enabled: false, bonusPct: 100, minAmount: 0, days: [], from: null, to: null, until: null };
+
 export interface PromoCode {
   code: string;
   kind: 'bonus' | 'discountPct';
@@ -329,6 +356,8 @@ export interface ClubConfig {
   groups: ClientGroup[];
   clients: Record<string, ClientProfile>;
   bonusTiers: BonusTier[];
+  topUpPromo?: TopUpPromo;
+  screensaver?: ScreensaverSettings;
   promoCodes: PromoCode[];
   happyHours: HappyHour[];
   loyalty: LoyaltyLevel[];
@@ -643,10 +672,30 @@ export function tariffRule(tariff: Tariff, zone: string, at = new Date()): 'tari
   return null;
 }
 
-/** Bonus credited for a top-up of `amount` (minor units) by the tier table. */
+const promoMinutes = (hhmm: string | null): number | null =>
+  hhmm && /^\d{2}:\d{2}$/.test(hhmm) ? Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3)) : null;
+
+/** Whether the «x2» promotion runs at `at` (the mock's clock is the club's). */
+export function topUpPromoActive(p: TopUpPromo | undefined, at = new Date()): boolean {
+  if (!p?.enabled || (p.until && at.getTime() >= Date.parse(p.until))) return false;
+  const from = promoMinutes(p.from);
+  const to = promoMinutes(p.to);
+  const minute = at.getHours() * 60 + at.getMinutes();
+  if (from === null || to === null || from === to) return p.days.length === 0 || p.days.includes(at.getDay());
+  const overnight = to < from;
+  const inside = overnight ? minute >= from || minute < to : minute >= from && minute < to;
+  const day = overnight && minute < to ? (at.getDay() + 6) % 7 : at.getDay();
+  return inside && (p.days.length === 0 || p.days.includes(day));
+}
+
+const pctOf = (amount: number, pct: number): number => Math.round((amount * pct) / 100 / 100) * 100;
+
+/** Bonus credited for a top-up of `amount` (minor units): the tier table's or the «x2» promotion's, the larger. */
 export function topupBonus(amount: number): number {
   const tier = [...club().bonusTiers].sort((a, b) => b.minAmount - a.minAmount).find((t) => amount >= t.minAmount);
-  return tier ? Math.round((amount * tier.bonusPct) / 100 / 100) * 100 : 0;
+  const promo = club().topUpPromo;
+  const promoPct = amount > 0 && promo && amount >= promo.minAmount && topUpPromoActive(promo) ? promo.bonusPct : 0;
+  return Math.max(tier ? pctOf(amount, tier.bonusPct) : 0, pctOf(amount, promoPct));
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

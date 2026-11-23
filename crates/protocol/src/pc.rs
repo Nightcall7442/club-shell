@@ -44,6 +44,32 @@ pub struct ClubBanner {
     pub image_url: String,
 }
 
+/// One picture or clip of the screensaver.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreensaverItem {
+    /// Image or video URL.
+    pub url: String,
+    /// `image` or `video`.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Seconds on screen (an image; a video plays to its end).
+    pub duration_sec: i32,
+}
+
+/// The free PCs' screensaver (D-87): the attract screen after `after_sec` seconds without input on the lock screen.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellScreensaver {
+    /// On.
+    pub enabled: bool,
+    /// Seconds of no input on a free PC before it starts.
+    pub after_sec: i32,
+    /// The owner's pictures and clips; empty — the club's built-in slides.
+    #[serde(default)]
+    pub items: Vec<ScreensaverItem>,
+}
+
 /// Club rules in each UI language; a missing language falls back to Russian.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -394,6 +420,9 @@ pub struct ShellClub {
     /// Club rules shown on the support screen.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rules: Option<ClubRules>,
+    /// The free PCs' screensaver; absent — the shell's own idle screen as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub screensaver: Option<ShellScreensaver>,
 }
 
 /// Server override pushed into `shell.json`.

@@ -58,6 +58,7 @@ import type {
   SessionStartRequest,
   SessionTimeLeftResponse,
   SettingsSetRequest,
+  UserPrefs,
   PlayerSettingsItem,
   AuthExpiredReason,
   ShellClub,
@@ -84,6 +85,7 @@ import type {
   UserStats,
   VolumeState,
   WalletHistoryResponse,
+  WalletRedeemPromoResponse,
   WalletTariffsResponse,
 } from '@clubshell/contracts';
 import { tariffPriceFor } from '@clubshell/contracts';
@@ -292,6 +294,12 @@ interface MockState {
   failNext: Record<string, { code: ErrorCode; message: string; details?: Record<string, unknown> }[]>;
   /** The club server is unreachable (`simulate.connectivity('offline')`): quotes and pay as you go are refused. */
   serverOffline: boolean;
+  /** Each member's Shell preferences and favourites as the server keeps them (D-86), by user id. */
+  accountPrefs: Record<string, UserPrefs>;
+  /** The PC's own values of those keys while a member's are applied, restored at sign-out; `null` with none applied. */
+  deviceSettings: AccountSettings | null;
+  /** Every save of a member's preferences to the server (tests read it). */
+  prefsSaves: { userId: string; prefs: UserPrefs }[];
 }
 
 function balanceFor(user: User | null): Balance {
@@ -317,7 +325,7 @@ function freshState(): MockState {
     tournaments: clone(TOURNAMENTS),
     games: clone(GAMES),
     running: [],
-    settings: { ...clone(SETTINGS), club: demoClubRequested() ? clone(DEMO_CLUB) : null },
+    settings: { ...clone(SETTINGS), club: withScreensaver(demoClubRequested() ? clone(DEMO_CLUB) : null) },
     gameSettings: clone(PLAYER_GAME_SETTINGS),
     policy: clone(POLICY),
     volume: { level: SETTINGS.volume, muted: SETTINGS.muted },
@@ -336,6 +344,9 @@ function freshState(): MockState {
     loginLog: [],
     failNext: {},
     serverOffline: false,
+    accountPrefs: {},
+    deviceSettings: null,
+    prefsSaves: [],
   };
 }
 
@@ -386,10 +397,87 @@ function persistAuth(username: string | null): void {
 }
 
 function setUser(user: User): void {
+  if (mockState.user && mockState.user.id !== user.id) {
+    leaveAccount();
+  }
   mockState.user = clone(user);
   mockState.expiresAt = isoIn(3600);
   mockState.balance = balanceFor(mockState.user);
   persistAuth(user.username);
+  enterAccount(user);
+}
+
+/** Signs the player out of the mock: the PC's own settings come back, as the Agent does it. */
+function clearUser(): void {
+  mockState.user = null;
+  leaveAccount();
+}
+
+// ----- account preferences (D-86) -------------------------------------------------------------------------------------
+
+/** The keys of `ShellSettings` a member's account keeps. */
+type AccountSettings = Pick<ShellSettings, 'theme' | 'locale' | 'volume' | 'muted' | 'uiSounds' | 'showMetricsOverlay'>;
+
+function accountSettings(s: ShellSettings): AccountSettings {
+  return {
+    theme: s.theme,
+    locale: s.locale,
+    volume: s.volume,
+    muted: s.muted,
+    uiSounds: s.uiSounds,
+    showMetricsOverlay: s.showMetricsOverlay,
+  };
+}
+
+/** A member signed in: their saved preferences go over the PC's, and the Shell is told (`settings.changed`). */
+function enterAccount(user: User): void {
+  if (user.role === 'guest' || mockState.deviceSettings) {
+    return;
+  }
+  const s = mockState.settings;
+  mockState.deviceSettings = accountSettings(s);
+  const prefs = mockState.accountPrefs[user.id];
+  if (prefs) {
+    if (prefs.theme != null && s.availableThemes.includes(prefs.theme)) {
+      s.theme = prefs.theme;
+    }
+    s.locale = prefs.locale ?? s.locale;
+    s.volume = prefs.volume ?? s.volume;
+    s.muted = prefs.muted ?? s.muted;
+    s.uiSounds = prefs.uiSounds ?? s.uiSounds;
+    s.showMetricsOverlay = prefs.showMetricsOverlay ?? s.showMetricsOverlay;
+  }
+  s.favorites = [...(prefs?.favorites ?? [])];
+  s.accountPrefs = true;
+  mockState.volume = { level: s.volume, muted: s.muted };
+  emitMock('agent://settings.changed', clone(s));
+}
+
+/** Nobody (or a guest) is signed in any more: the PC's own settings are back. */
+function leaveAccount(): void {
+  const device = mockState.deviceSettings;
+  if (!device) {
+    return;
+  }
+  const s = mockState.settings;
+  Object.assign(s, device, { favorites: [], accountPrefs: false });
+  mockState.deviceSettings = null;
+  mockState.volume = { level: s.volume, muted: s.muted };
+  emitMock('agent://settings.changed', clone(s));
+}
+
+/** What the member chose is written to their account (`PUT /users/{id}/prefs`), not to the PC. */
+function saveAccount(): void {
+  const user = mockState.user;
+  if (!user || !mockState.deviceSettings) {
+    return;
+  }
+  const prefs: UserPrefs = {
+    ...accountSettings(mockState.settings),
+    favorites: [...(mockState.settings.favorites ?? [])],
+  };
+  mockState.accountPrefs[user.id] = prefs;
+  mockState.prefsSaves.push({ userId: user.id, prefs: clone(prefs) });
 }
 
 /** `player` / `player`: a member without an unlock PIN (the unlock form opens on the password). */
@@ -675,6 +763,14 @@ export function resetMock(): void {
 // Dev simulation helpers (also on window.__clubshellMock.simulate)
 // ---------------------------------------------------------------------------------------------------------------------
 
+/** `?screensaver=<sec>` in the URL: the owner's screensaver (D-87) after that many seconds; `0` — turned off. */
+function withScreensaver(club: ShellClub | null): ShellClub | null {
+  const raw = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('screensaver');
+  if (raw === null) return club;
+  const sec = Number(raw);
+  return { ...(club ?? {}), screensaver: { enabled: sec > 0, afterSec: Math.max(0, sec), items: [] } };
+}
+
 /** `?club=demo` in the URL starts with the owner's branding from {@link DEMO_CLUB}. */
 function demoClubRequested(): boolean {
   return typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('club') === 'demo';
@@ -832,6 +928,25 @@ export const simulate = {
     };
     emitSession();
   },
+  /**
+   * The owner's screensaver of the free PCs (D-87) as the next `settings_get` returns it; the shell re-reads the
+   * settings while it waits on the lock screen (or call `useSettingsStore.load()`).
+   */
+  screensaver(value: { enabled: boolean; afterSec: number; items?: { url: string; type: 'image' | 'video'; durationSec: number }[] } | null): void {
+    const club = { ...(mockState.settings.club ?? {}) };
+    if (value) club.screensaver = { enabled: value.enabled, afterSec: value.afterSec, items: value.items ?? [] };
+    else delete club.screensaver;
+    mockState.settings = { ...mockState.settings, club };
+  },
+  /** The cash desk's postpaid: the session runs open-ended, paid at the desk when it ends. */
+  postpaidSession(): void {
+    if (mockState.session) {
+      mockState.session.isPrepaid = false;
+      mockState.session.secondsLeft = -1;
+      mockState.session.endsAt = null;
+      emitSession();
+    }
+  },
   /** The session runs on a package tariff (Night 5h): "+30 min" would charge a whole package. */
   packageSession(): void {
     const pkg = TARIFFS.find((t) => t.isPackage);
@@ -862,7 +977,7 @@ export const simulate = {
     } else {
       mockState.session = null;
     }
-    mockState.user = null;
+    clearUser();
     persistAuth(null);
     emitMock('agent://auth.expired', { reason });
   },
@@ -1034,13 +1149,22 @@ cmd('auth_login', (args): AuthLoginResponse => {
   };
 });
 
+/** As the Agent: a player's own postpaid session is paid and ended at the cash desk (`forbidden {reason: payAtDesk}`). */
+function refusePostpaidEnd(): void {
+  const s = mockState.session;
+  if (s && !s.isPrepaid && mockState.user && s.userId === mockState.user.id) {
+    mockError('forbidden', 'A postpaid session is ended at the cash desk, where it is paid', { reason: 'payAtDesk' });
+  }
+}
+
 cmd('auth_logout', (args): AuthLogoutResponse => {
   const reason = (str(args, 'reason') as SessionEndReason | undefined) ?? 'user';
+  refusePostpaidEnd();
   let ended: Session | null = null;
   if (mockState.session) {
     ended = endSession(reason).session;
   }
-  mockState.user = null;
+  clearUser();
   mockState.expiresAt = null;
   mockState.balance = balanceFor(null);
   persistAuth(null);
@@ -1199,6 +1323,7 @@ cmd('session_end', (args): SessionEndResult => {
   if (!mockState.session) {
     mockError('sessionNotActive', 'No active session');
   }
+  refusePostpaidEnd();
   return endSession(reason);
 });
 
@@ -1474,6 +1599,41 @@ cmd('wallet_history', (args): WalletHistoryResponse => {
   const page = Math.max(1, q.page ?? 1);
   const pageSize = Math.min(200, Math.max(1, q.pageSize ?? 20));
   return { items: clone(items.slice((page - 1) * pageSize, page * pageSize)), total: items.length, page, pageSize };
+});
+
+/** The club's promo codes in mock mode: `BONUS10` (+10 000 сум), `OLD` expired; one redeem per member and code. */
+const MOCK_PROMOS: Record<string, { value: number; expired?: boolean }> = {
+  BONUS10: { value: 1_000_000 },
+  OLD: { value: 500_000, expired: true },
+};
+const redeemedPromos = new Set<string>();
+let promoFailures = 0;
+
+cmd('wallet_redeem_promo', (args): WalletRedeemPromoResponse => {
+  const user = requireUser();
+  if (user.role === 'guest') {
+    mockError('forbidden', 'Guests have no account to credit a promo code to', { reason: 'guest' });
+  }
+  const code = (str(args, 'code') ?? '').trim().toUpperCase();
+  if (!code) {
+    mockError('validation', 'code is required', { field: 'code', reason: 'required' });
+  }
+  if (promoFailures >= 8) {
+    mockError('rateLimited', 'Too many wrong promo codes', { reason: 'promoAttempts', retryAfterSec: 600 });
+  }
+  const promo = MOCK_PROMOS[code];
+  if (!promo) {
+    promoFailures += 1;
+    mockError('notFound', 'promo not found', { what: 'promo' });
+  }
+  const key = `${user.id}:${code}`;
+  if (promo.expired || redeemedPromos.has(key)) {
+    promoFailures += 1;
+    mockError('validation', 'Invalid code', { field: 'code', reason: promo.expired ? 'expired' : 'exhausted' });
+  }
+  redeemedPromos.add(key);
+  pushTransaction('bonus', money(promo.value), `Промокод ${code}`, null);
+  return { code, bonus: money(promo.value), balance: { ...user.balance } };
 });
 
 cmd('wallet_topup_intent', (args): TopupIntent => {
@@ -1945,6 +2105,15 @@ cmd('settings_set', (args): ShellSettings => {
     mockError('validation', 'patch must set at least one key', { field: 'patch', reason: 'required' });
   }
   const s = mockState.settings;
+  if (patch.favorites != null) {
+    if (!mockState.user || mockState.user.role === 'guest' || !mockState.deviceSettings) {
+      mockError('forbidden', "Favourites need a member's account", { reason: 'noAccount' });
+    }
+    if (patch.favorites.length > 60 || new Set(patch.favorites).size !== patch.favorites.length) {
+      mockError('validation', 'favorites: at most 60 unique ids', { field: 'favorites', reason: 'max' });
+    }
+    s.favorites = [...patch.favorites];
+  }
   if (patch.theme != null) {
     if (!s.availableThemes.includes(patch.theme)) {
       mockError('notFound', 'Theme not found', { name: patch.theme });
@@ -1983,6 +2152,7 @@ cmd('settings_set', (args): ShellSettings => {
   if (patch.uiSounds != null) {
     s.uiSounds = patch.uiSounds;
   }
+  saveAccount();
   if (patch.theme != null) {
     emitMock('kiosk://themeChanged', clone(builtinThemes[patch.theme] ?? DEFAULT_THEME));
   }
@@ -2080,6 +2250,7 @@ cmd(
     mockState.volume = { level: Math.round(level), muted: bool(args, 'muted') ?? mockState.volume.muted };
     mockState.settings.volume = mockState.volume.level;
     mockState.settings.muted = mockState.volume.muted;
+    saveAccount();
     return { ...mockState.volume };
   },
   { fast: true },

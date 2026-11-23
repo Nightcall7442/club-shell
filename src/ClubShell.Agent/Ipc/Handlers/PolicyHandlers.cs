@@ -37,6 +37,7 @@ public sealed class ShellSettingsStore
     private JsonObject? _document;
     private DateTime _documentWriteTimeUtc;
     private bool _warnedPinInShellJson;
+    private UserPrefs? _account;
 
     /// <summary>Creates the store.</summary>
     public ShellSettingsStore(IOptionsMonitor<AgentSettings> settings, ILogger<ShellSettingsStore> logger)
@@ -53,12 +54,50 @@ public sealed class ShellSettingsStore
     /// <summary>Defaults shipped next to the Agent (<c>config\shell.default.json</c>), used when <see cref="FilePath"/> is absent.</summary>
     public string ShippedDefaultsPath => Path.Combine(AppContext.BaseDirectory, "config", "shell.default.json");
 
-    /// <summary>Themes installed under <c>paths.themes</c> (file names without extension) plus the configured theme.</summary>
+    /// <summary>
+    /// Raised after the signed-in member changed one of their account preferences (<see cref="Apply"/>,
+    /// <see cref="SetVolume"/>, <see cref="SetLocale"/> while <see cref="Account"/> is set); not by <see cref="SetAccount"/>.
+    /// </summary>
+    public event EventHandler? AccountChanged;
+
+    /// <summary>
+    /// The signed-in member's account preferences laid over <c>shell.json</c> (D-86), or <see langword="null"/> with
+    /// nobody or a guest signed in. While set, theme, locale, volume, muted, UI sounds and the metrics overlay read from
+    /// it where the member chose them, and writes of those go to it, not to the file: the PC's own (club) values are
+    /// back the moment it is cleared at sign-out.
+    /// </summary>
+    public UserPrefs? Account
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _account;
+            }
+        }
+    }
+
+    /// <summary>Lays <paramref name="prefs"/> over the PC's settings, or clears the overlay (<see langword="null"/>).</summary>
+    public void SetAccount(UserPrefs? prefs)
+    {
+        lock (_gate)
+        {
+            _account = prefs;
+        }
+    }
+
+    /// <summary>Themes installed under <c>paths.themes</c> (file names without extension) plus the PC's configured theme.</summary>
     public IReadOnlyList<string> AvailableThemes
     {
         get
         {
-            var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase) { Get().Theme };
+            string configured;
+            lock (_gate)
+            {
+                configured = Map(Load()).Theme;
+            }
+
+            var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase) { configured };
             try
             {
                 string dir = _settings.CurrentValue.ThemesDir;
@@ -121,20 +160,106 @@ public sealed class ShellSettingsStore
     /// <summary>Feature toggles (<c>features.*</c>; shop, chat, booking, tournaments and topup default off, the rest on).</summary>
     public ShellFeatures Features => Get().Features;
 
-    /// <summary>Current settings.</summary>
+    /// <summary>Current settings: the PC's, with the signed-in member's account preferences over them.</summary>
     public ShellSettings Get()
     {
         lock (_gate)
         {
-            return Map(Load());
+            return Overlay(Map(Load()));
         }
     }
 
-    /// <summary>Merges <paramref name="patch"/> into <c>shell.json</c> (callers validate first) and returns the result.</summary>
+    /// <summary>The PC's own settings (<c>shell.json</c>), whoever is signed in.</summary>
+    public ShellSettings GetDevice()
+    {
+        lock (_gate)
+        {
+            return Map(Load()) with { Favorites = Array.Empty<string>() };
+        }
+    }
+
+    /// <summary>
+    /// Merges <paramref name="patch"/> (callers validate first) and returns the result: into the member's account
+    /// preferences for the keys they carry while <see cref="Account"/> is set, into <c>shell.json</c> for the rest.
+    /// </summary>
     public ShellSettings Apply(SettingsSetRequest patch)
     {
         ArgumentNullException.ThrowIfNull(patch);
-        return Mutate(root =>
+        bool accountChanged;
+        ShellSettings result;
+        lock (_gate)
+        {
+            accountChanged = _account is { } account && SetAccountCore(account with
+            {
+                Theme = patch.Theme ?? account.Theme,
+                Locale = patch.Locale ?? account.Locale,
+                Volume = patch.Volume ?? account.Volume,
+                Muted = patch.Muted ?? account.Muted,
+                UiSounds = patch.UiSounds ?? account.UiSounds,
+                ShowMetricsOverlay = patch.ShowMetricsOverlay ?? account.ShowMetricsOverlay,
+                Favorites = patch.Favorites ?? account.Favorites,
+            });
+            SettingsSetRequest device = _account is null
+                ? patch with { Favorites = null }
+                : new SettingsSetRequest(IdleTimeoutSec: patch.IdleTimeoutSec, AllowVirtualKeyboard: patch.AllowVirtualKeyboard);
+            result = device.IsEmpty ? Get() : ApplyDevice(device);
+        }
+
+        if (accountChanged)
+        {
+            AccountChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        return result;
+    }
+
+    /// <summary>Replaces the overlay with <paramref name="next"/>; <see langword="true"/> when that changed it. Under <see cref="_gate"/>.</summary>
+    private bool SetAccountCore(UserPrefs next)
+    {
+        bool changed = _account is not { } current || !SamePrefs(current, next);
+        _account = next;
+        return changed;
+    }
+
+    /// <summary>Field by field, the favourites by their sequence (record equality compares the list by reference).</summary>
+    public static bool SamePrefs(UserPrefs a, UserPrefs b)
+    {
+        ArgumentNullException.ThrowIfNull(a);
+        ArgumentNullException.ThrowIfNull(b);
+        return a with { Favorites = null } == b with { Favorites = null }
+               && (a.Favorites ?? Array.Empty<string>()).SequenceEqual(b.Favorites ?? Array.Empty<string>(), StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// <paramref name="device"/> with the account's choices over it. A theme this PC does not have keeps the PC's own
+    /// (the member chose it on another PC); the favourites are empty without an account.
+    /// </summary>
+    private ShellSettings Overlay(ShellSettings device)
+    {
+        if (_account is not { } account)
+        {
+            return device with { Favorites = Array.Empty<string>(), AccountPrefs = false };
+        }
+
+        string theme = account.Theme is { } chosen && !string.Equals(chosen, device.Theme, StringComparison.OrdinalIgnoreCase)
+                       && AvailableThemes.Contains(chosen, StringComparer.OrdinalIgnoreCase)
+            ? chosen
+            : device.Theme;
+        return device with
+        {
+            Theme = theme,
+            Locale = account.Locale is { } locale && locale != Locale.Unknown ? locale : device.Locale,
+            Volume = account.Volume is { } volume ? Math.Clamp(volume, 0, 100) : device.Volume,
+            Muted = account.Muted ?? device.Muted,
+            UiSounds = account.UiSounds ?? device.UiSounds,
+            ShowMetricsOverlay = account.ShowMetricsOverlay ?? device.ShowMetricsOverlay,
+            Favorites = account.Favorites ?? Array.Empty<string>(),
+            AccountPrefs = true,
+        };
+    }
+
+    private ShellSettings ApplyDevice(SettingsSetRequest patch) =>
+        Mutate(root =>
         {
             if (patch.Locale is { } locale)
             {
@@ -176,7 +301,6 @@ public sealed class ShellSettingsStore
                 Section(root, "sound")["uiSounds"] = sounds;
             }
         });
-    }
 
     /// <summary>
     /// Merges the server's <c>shell</c> block from <c>GET /config</c> into <c>shell.json</c>. Only the keys the server
@@ -225,23 +349,15 @@ public sealed class ShellSettingsStore
         }
     }
 
-    /// <summary>Persists the volume (<c>sound.volume</c> / <c>sound.muted</c>).</summary>
+    /// <summary>Persists the volume (<c>sound.volume</c> / <c>sound.muted</c>, or the member's account while signed in).</summary>
     public VolumeState SetVolume(int level, bool? muted)
     {
-        ShellSettings result = Mutate(root =>
-        {
-            JsonObject sound = Section(root, "sound");
-            sound["volume"] = Math.Clamp(level, 0, 100);
-            if (muted is { } m)
-            {
-                sound["muted"] = m;
-            }
-        });
+        ShellSettings result = Apply(new SettingsSetRequest(Volume: Math.Clamp(level, 0, 100), Muted: muted));
         return new VolumeState(result.Volume, result.Muted);
     }
 
-    /// <summary>Persists the UI locale.</summary>
-    public Locale SetLocale(Locale locale) => Mutate(root => root["locale"] = WireName(locale)).Locale;
+    /// <summary>Persists the UI locale (to the member's account while signed in).</summary>
+    public Locale SetLocale(Locale locale) => Apply(new SettingsSetRequest(Locale: locale)).Locale;
 
     /// <summary>Wire form of a locale (<c>en</c>, <c>ru</c>, <c>uz</c>).</summary>
     public static string WireName(Locale locale) => locale.ToString().ToLowerInvariant();
@@ -336,7 +452,7 @@ public sealed class ShellSettingsStore
             JsonObject root = Load();
             mutate(root);
             Save(root);
-            return Map(root);
+            return Overlay(Map(root));
         }
     }
 
@@ -422,14 +538,20 @@ public sealed class PolicyHandlers : IIpcHandlerGroup
     }
 
     /// <summary>Effective settings: the stored ones with policy locks and the theme list applied.</summary>
-    public ShellSettings Effective(ShellSettings stored)
+    public ShellSettings Effective(ShellSettings stored) => Effective(stored, _shellSettings, _enforcer);
+
+    /// <summary>Effective settings (see <see cref="Effective(ShellSettings)"/>) for the ones outside this group that push them.</summary>
+    public static ShellSettings Effective(ShellSettings stored, ShellSettingsStore shellSettings, IPolicyEnforcer enforcer)
     {
         ArgumentNullException.ThrowIfNull(stored);
-        bool keyboardAllowed = _enforcer.Current?.Kiosk.AllowVirtualKeyboard ?? true;
+        ArgumentNullException.ThrowIfNull(shellSettings);
+        ArgumentNullException.ThrowIfNull(enforcer);
+        bool keyboardAllowed = enforcer.Current?.Kiosk.AllowVirtualKeyboard ?? true;
         return stored with
         {
-            AvailableThemes = _shellSettings.AvailableThemes,
+            AvailableThemes = shellSettings.AvailableThemes,
             AllowVirtualKeyboard = stored.AllowVirtualKeyboard && keyboardAllowed,
+            Favorites = stored.Favorites ?? Array.Empty<string>(),
         };
     }
 
@@ -510,6 +632,20 @@ public sealed class PolicyHandlers : IIpcHandlerGroup
             throw IpcError.PolicyDenied("kiosk.allowVirtualKeyboard", "allowVirtualKeyboard").ToException();
         }
 
+        if (request.Favorites is { } favorites)
+        {
+            // Favourites live on the member's account (D-86): a guest or an empty PC has nowhere to keep them.
+            if (context.User is not { Role: not UserRole.Guest } || _shellSettings.Account is null)
+            {
+                throw IpcError.Forbidden("Favourites need a member's account", "noAccount").ToException();
+            }
+
+            if (UserPrefs.Check(new UserPrefs(Favorites: favorites)) is var (field, reason))
+            {
+                throw IpcError.Validation(field, reason).ToException();
+            }
+        }
+
         ShellSettings stored = _shellSettings.Apply(request);
         _logger.LogInformation("settings.set applied: {Fields}", DescribeFields(request));
         return Task.FromResult(Effective(stored));
@@ -556,6 +692,11 @@ public sealed class PolicyHandlers : IIpcHandlerGroup
         if (request.UiSounds is not null)
         {
             fields.Add("uiSounds");
+        }
+
+        if (request.Favorites is not null)
+        {
+            fields.Add("favorites");
         }
 
         return string.Join(",", fields);

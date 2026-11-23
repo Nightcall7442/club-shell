@@ -40,7 +40,7 @@ describe('solidFill', () => {
 });
 
 /** The bundled theme files, as the Agent ships them. */
-const themes = ['default', 'neon'].map(
+const themes = ['default', 'light', 'neon'].map(
   (name) =>
     JSON.parse(readFileSync(new URL(`../../../../config/themes/${name}.json`, import.meta.url), 'utf8')) as {
       name: string;

@@ -130,6 +130,17 @@ async function openPlaying(page: Page): Promise<void> {
 }
 
 /**
+ * Signed in as `demo` from the lock screen switched to English, for tests that come back to the lock screen: English
+ * is then the PC's own language. A language picked while signed in is the member's (D-86) and goes with them at
+ * sign-out, so {@link openPlaying} would leave the lock screen in the club's Russian.
+ */
+async function openPlayingFromLock(page: Page): Promise<void> {
+  await openLock(page);
+  await signIn(page, DEMO_USER, DEMO_PASSWORD);
+  await playing(page);
+}
+
+/**
  * A member with money on the balance (the mock's `demo`) plays at once: the cheapest tariff of the PC's zone starts
  * without the picker, straight to `/home`.
  */
@@ -545,8 +556,27 @@ test.describe('player accounts', () => {
 
     await failed.getByRole('button', { name: en('session.logoutFailed.retry') }).click();
     await expect(page).toHaveURL(/#\/lock$/);
-    await expect(page.getByRole('heading', { level: 1, name: en('lock.title') })).toBeVisible();
+    // English was the member's choice (D-86): the lock screen is back in the club's own language.
+    await expect(page.getByRole('heading', { level: 1, name: ru('lock.title') })).toBeVisible();
     await expect(failed).toHaveCount(0);
+  });
+
+  test('a postpaid session has no «leave»: the bill is paid at the desk, the player calls the administrator', async ({
+    page,
+  }) => {
+    await openPlaying(page);
+    await simulate(page, 'postpaidSession');
+
+    await expect(page.getByRole('button', { name: en('session.leave'), exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: en('session.payAtDesk'), exact: true }).click();
+    const pay = page.getByRole('dialog', { name: en('session.payAtDeskTitle') });
+    await expect(pay).toBeVisible();
+    await expect(pay.getByRole('button', { name: en('session.leaveConfirm') })).toHaveCount(0);
+    await pay.getByRole('button', { name: en('session.payAtDeskCallButton') }).click();
+    await expect(page.getByText(en('notifications.callAdminSent'))).toBeVisible();
+    // Still signed in and playing: only the cash desk ends it.
+    await expect(page).toHaveURL(/#\/home$/);
+    await expect(sessionTimer(page)).toBeVisible();
   });
 
   test('sign-in expired mid-session: the same member signs in again and plays on', async ({ page }) => {
@@ -554,6 +584,8 @@ test.describe('player accounts', () => {
     await simulate(page, 'authExpired', 'tokenExpired');
 
     await expect(page).toHaveURL(/#\/lock$/);
+    // The member's English went with them (D-86); the lock screen is the club's until they are back.
+    await useEnglish(page);
     await expect(page.getByText(en('lock.relogin.title', { name: 'Bobur Y.' }))).toBeVisible();
     await expect(page.getByText(en('lock.relogin.hint'))).toBeVisible();
     await expect(field(page, en('lock.username'))).toHaveValue(DEMO_USER);
@@ -566,7 +598,7 @@ test.describe('player accounts', () => {
   });
 
   test('signed out by the desk: the lock screen says why', async ({ page }) => {
-    await openPlaying(page);
+    await openPlayingFromLock(page);
     await simulate(page, 'authExpired', 'sessionEnded');
     await expect(page).toHaveURL(/#\/lock$/);
     await expect(page.getByRole('status').filter({ hasText: en('lock.expired.sessionEnded') })).toBeVisible();
@@ -632,5 +664,29 @@ test.describe('power on the lock screen (SHELL_CHANGES 93)', () => {
     await page.getByRole('button', { name: en('desktop.lock'), exact: true }).click();
     await expect(page.getByRole('button', { name: en('lock.unlockWithPin') })).toBeVisible();
     await expect(page.getByRole('button', { name: en('lock.power.shutdown'), exact: true })).toHaveCount(0);
+  });
+  test("the owner's screensaver starts on a free PC after its seconds without input and a touch brings the lock back (D-87)", async ({
+    page,
+  }) => {
+    await page.goto('/?screensaver=2#/lock');
+    await useEnglish(page);
+    await expect(page.getByText(en('lock.subtitle'))).toBeVisible();
+    // Input restarts the wait: still the lock screen 1.5 s after a key.
+    await page.waitForTimeout(1200);
+    await page.keyboard.press('Shift');
+    await page.waitForTimeout(1500);
+    await expect(page).toHaveURL(/#\/lock$/);
+    await expect(page).toHaveURL(/#\/idle$/, { timeout: 5000 });
+    await expect(page.getByText(en('idle.touchToStart'))).toBeVisible();
+    await page.mouse.click(400, 300);
+    await expect(page).toHaveURL(/#\/lock$/);
+  });
+
+  test('a screensaver the owner turned off never starts', async ({ page }) => {
+    await page.goto('/?screensaver=0#/lock');
+    await useEnglish(page);
+    await expect(page.getByText(en('lock.subtitle'))).toBeVisible();
+    await page.waitForTimeout(3000);
+    await expect(page).toHaveURL(/#\/lock$/);
   });
 });

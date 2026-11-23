@@ -61,9 +61,33 @@ export const NEON_THEME: Theme = {
   animations: true,
 };
 
+/** `config/themes/light.json`: a light theme for daylight halls — dark text on a pale background. */
+export const LIGHT_THEME: Theme = {
+  version: 1,
+  name: 'light',
+  displayName: 'Daylight',
+  colors: {
+    bg: '#EEF2F6',
+    surface: '#FFFFFF',
+    primary: '#0F172A',
+    accent: '#0369A1',
+    text: '#0F172A',
+    muted: '#465363',
+    danger: '#B91C1C',
+    success: '#166534',
+  },
+  radius: 12,
+  font: 'Inter',
+  backgroundVideo: null,
+  wallpaper: null,
+  blur: 0,
+  animations: true,
+};
+
 /** Themes bundled with the shell (fallback when the Agent data dir has none). */
 export const builtinThemes: Readonly<Record<string, Theme>> = {
   default: DEFAULT_THEME,
+  light: LIGHT_THEME,
   neon: NEON_THEME,
 };
 
@@ -161,7 +185,10 @@ export function applyTheme(theme: Theme): void {
   // Blurred, translucent panels only when the theme asks for them (see `.glass` in tokens.css).
   root.toggleAttribute('data-glass', t.blur > 0);
   root.dataset['animations'] = t.animations ? 'true' : 'false';
-  root.classList.add('dark');
+  // A light background (the light theme): light form controls and softer shadows (`[data-light]` in tokens.css).
+  const light = isLight(t.colors.bg);
+  root.classList.toggle('dark', !light);
+  root.toggleAttribute('data-light', light);
   const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
   if (meta) {
     meta.content = t.colors.bg;

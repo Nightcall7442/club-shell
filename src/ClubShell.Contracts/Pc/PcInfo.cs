@@ -318,6 +318,21 @@ public sealed record ClubBanner(string Id, string Title, string ImageUrl);
 /// <param name="En">English.</param>
 public sealed record ClubRules(string? Ru = null, string? Uz = null, string? En = null);
 
+/// <summary>One picture or clip of the screensaver.</summary>
+/// <param name="Url">Image or video URL.</param>
+/// <param name="Type"><c>image</c> or <c>video</c>.</param>
+/// <param name="DurationSec">Seconds on screen (an image; a video plays to its end).</param>
+public sealed record ScreensaverItem(string Url, string Type, int DurationSec);
+
+/// <summary>
+/// The screensaver of the free PCs (D-87, beyond the contract): the attract screen after <paramref name="AfterSec"/>
+/// seconds without input on the lock screen; off — it never starts.
+/// </summary>
+/// <param name="Enabled">On.</param>
+/// <param name="AfterSec">Seconds of no input on a free PC before it starts.</param>
+/// <param name="Items">The owner's pictures and clips; empty — the club's built-in slides.</param>
+public sealed record ShellScreensaver(bool Enabled, int AfterSec, IReadOnlyList<ScreensaverItem> Items);
+
 /// <summary>
 /// The club's own look on the player screen (<c>shell.json → club</c>), set by the owner in the admin console and
 /// pushed with the server config. Every field is optional: without it the Shell keeps its bundled defaults.
@@ -328,13 +343,15 @@ public sealed record ClubRules(string? Ru = null, string? Uz = null, string? En 
 /// <param name="WallpaperUrl">Wallpaper behind the lock and idle screens.</param>
 /// <param name="Banners">Active banners, in display order.</param>
 /// <param name="Rules">Club rules shown on the support screen.</param>
+/// <param name="Screensaver">The free PCs' screensaver; null — the shell's own idle screen as before.</param>
 public sealed record ShellClub(
     string? Name = null,
     string? Accent = null,
     string? LogoUrl = null,
     string? WallpaperUrl = null,
     IReadOnlyList<ClubBanner>? Banners = null,
-    ClubRules? Rules = null);
+    ClubRules? Rules = null,
+    ShellScreensaver? Screensaver = null);
 
 /// <summary>Server override pushed into <c>shell.json</c>.</summary>
 /// <param name="Locale">Default locale.</param>

@@ -212,6 +212,12 @@ public interface IAuthApi
     /// <summary><c>GET /users/{userId}/loyalty</c>.</summary>
     Task<Loyalty> GetUserLoyaltyAsync(Guid userId, CancellationToken cancellationToken);
 
+    /// <summary><c>GET /users/{userId}/prefs</c> (beyond the contract, D-86): the member's Shell preferences and favourites.</summary>
+    Task<UserPrefs> GetUserPrefsAsync(Guid userId, CancellationToken cancellationToken);
+
+    /// <summary><c>PUT /users/{userId}/prefs</c> (beyond the contract, D-86): replaces them; answers the stored value.</summary>
+    Task<UserPrefs> SaveUserPrefsAsync(Guid userId, UserPrefs prefs, CancellationToken cancellationToken);
+
     /// <summary>
     /// <c>POST /users/{userId}/pin/verify</c>: completes on <c>204</c> (the PIN matches); <c>401 badSecret</c> (it does not)
     /// and <c>404 notFound {reason: noPin}</c> (none is set) are thrown as <see cref="ServerApiException"/>.
@@ -314,6 +320,9 @@ public interface IWalletApi
 
     /// <summary><c>GET /wallet/{userId}/topup-intent/{id}</c>.</summary>
     Task<TopupIntent> GetTopupIntentAsync(Guid userId, Guid intentId, CancellationToken cancellationToken);
+
+    /// <summary><c>POST /wallet/{userId}/promo</c> (D-88): the member redeems a promo code; a server without it answers 404.</summary>
+    Task<WalletRedeemPromoResponse> RedeemPromoAsync(Guid userId, string code, CancellationToken cancellationToken);
 }
 
 /// <summary>Shop (SERVER_API.md §4.9).</summary>

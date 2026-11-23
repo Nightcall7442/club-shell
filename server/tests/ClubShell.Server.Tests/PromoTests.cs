@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ClubShell.Server.Admin;
 using static ClubShell.Server.Tests.Staff;
 
 namespace ClubShell.Server.Tests;
@@ -86,6 +87,37 @@ public sealed class PromoTests(ServerFixture server) : LedgerCheckedTest(server)
         Assert.Equal("bonus Промокод WELCOME", row);
     }
 
+    [Fact]
+    public async Task A_member_redeems_a_code_from_the_pc_once_and_wrong_codes_are_throttled()
+    {
+        var (agent, player) = await Players.SignedInAsync(Server, balance: 100_000);
+        var code = await PromoAsync(value: 1_000_000, usesLeft: 5);
+        var path = $"/api/v1/wallet/{player.Id}/promo";
+        var ok = Expect(await agent.RawPostAsync(path, new { code = code.ToLowerInvariant() }), 200);
+        Assert.Equal((code, 1_000_000L, 1_100_000L),
+            (ok.GetProperty("code").GetString(), ok.GetProperty("bonus").GetProperty("amount").GetInt64(), ok.GetProperty("balance").GetProperty("amount").GetInt64()));
+        Assert.Equal(1_100_000, await Players.BalanceAsync(Server, player.Id));
+        Assert.Equal(1, await Players.ScalarAsync<int>(Server,
+            "SELECT count(*)::int FROM promo_redemptions r JOIN promo_codes p ON p.id = r.promo_code_id WHERE p.code = @code AND r.staff_id IS NULL", new { code }));
+
+        // Once per member; another member's code or someone else's wallet is not theirs.
+        Assert.Equal("exhausted", Reason(Expect(await agent.RawPostAsync(path, new { code }), 400)));
+        Assert.Equal("required", Reason(Expect(await agent.RawPostAsync(path, new { code = "  " }), 400)));
+        var other = await Players.CreateAsync(Server);
+        Expect(await agent.RawPostAsync($"/api/v1/wallet/{other.Id}/promo", new { code }), 403);
+
+        // Wrong codes (the used-up one above counts): after the allowed tries the player waits, even with a right code.
+        var fresh = await PromoAsync(value: 50_000, usesLeft: null);
+        for (var i = 1; i < PromoEndpoints.MaxFailures; i++)
+        {
+            Assert.Equal("promo", Expect(await agent.RawPostAsync(path, new { code = $"NOPE{i}" }), 404)
+                .GetProperty("error").GetProperty("details").GetProperty("what").GetString());
+        }
+
+        var limited = Expect(await agent.RawPostAsync(path, new { code = fresh }), 429);
+        Assert.Equal("promoAttempts", Reason(limited));
+    }
+
     private async Task<string> PromoAsync(long value, int? usesLeft, DateTimeOffset? expiresAt = null, string kind = "bonus")
     {
         var code = "P" + Guid.NewGuid().ToString("N")[..10].ToUpperInvariant();
@@ -96,6 +128,12 @@ public sealed class PromoTests(ServerFixture server) : LedgerCheckedTest(server)
             """,
             new { id = Guid.NewGuid(), code, kind, value, usesLeft, expiresAt });
         return code;
+    }
+
+    private static JsonElement Expect((int Status, JsonElement Body) answer, int status)
+    {
+        Assert.True(answer.Status == status, $"expected {status}, got {answer.Status}: {answer.Body}");
+        return answer.Body;
     }
 
     private static string? Reason(JsonElement error) => error.GetProperty("error").GetProperty("details").GetProperty("reason").GetString();

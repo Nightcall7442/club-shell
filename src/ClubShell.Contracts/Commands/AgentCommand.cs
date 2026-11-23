@@ -93,6 +93,9 @@ public enum AgentCommand
     /// <summary><c>wallet.topupIntent</c></summary>
     WalletTopupIntent,
 
+    /// <summary><c>wallet.redeemPromo</c></summary>
+    WalletRedeemPromo,
+
     /// <summary><c>shop.products</c></summary>
     ShopProducts,
 
@@ -278,6 +281,7 @@ public static class AgentCommands
         AgentCommand.WalletTariffs => IpcMessages.Wallet.Tariffs,
         AgentCommand.WalletHistory => IpcMessages.Wallet.History,
         AgentCommand.WalletTopupIntent => IpcMessages.Wallet.TopupIntent,
+        AgentCommand.WalletRedeemPromo => IpcMessages.Wallet.RedeemPromo,
         AgentCommand.ShopProducts => IpcMessages.Shop.Products,
         AgentCommand.ShopOrder => IpcMessages.Shop.Order,
         AgentCommand.ShopOrderStatus => IpcMessages.Shop.OrderStatus,
@@ -333,7 +337,7 @@ public static class AgentCommands
 
         AgentCommand.AuthLogout
             or AgentCommand.SessionGet or AgentCommand.SessionStart or AgentCommand.SessionTimeLeft or AgentCommand.SessionQuote
-            or AgentCommand.WalletBalance or AgentCommand.WalletHistory or AgentCommand.WalletTopupIntent
+            or AgentCommand.WalletBalance or AgentCommand.WalletHistory or AgentCommand.WalletTopupIntent or AgentCommand.WalletRedeemPromo
             or AgentCommand.ShopOrderStatus or AgentCommand.ShopOrders
             or AgentCommand.ChatHistory or AgentCommand.ChatSend or AgentCommand.ChatMarkRead
             or AgentCommand.BookingReserve or AgentCommand.BookingCancel

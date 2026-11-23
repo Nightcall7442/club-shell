@@ -157,13 +157,18 @@ public static class AgentConfig
             rules = new ClubRules(Text(r, "ru"), Text(r, "uz"), Text(r, "en"));
         }
 
+        // Only once the owner saved one: a club that never did keeps the shell's own idle screen.
+        var screensaver = settings.TryGetProperty("screensaver", out var ss) && ss.ValueKind == JsonValueKind.Object
+            ? Admin.Screensaver.Read(ss.GetRawText()).ToShell()
+            : null;
         return new ShellClub(
             Name: Text(branding, "clubName") ?? clubName,
             Accent: Text(branding, "accent"),
             LogoUrl: Text(branding, "logoUrl"),
             WallpaperUrl: Text(branding, "wallpaperUrl"),
             Banners: banners.Count > 0 ? banners : null,
-            Rules: rules);
+            Rules: rules,
+            Screensaver: screensaver);
     }
 
     /// <summary>

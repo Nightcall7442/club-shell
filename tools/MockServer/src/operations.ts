@@ -3,8 +3,8 @@
  * (`club().audit`) as the server builds it from `audit_entries`: newest first by (at, id), a keyset cursor
  * (base64url `at|id`), the feed's kinds only. A paid seat or extension is one row: its top-up entry is marked
  * `forSession` and left out, the session entry carries the payment. A debt payment is a top-up marked `debt`. Each row
- * says what it did to the drawer. `today` is the club's local day (Asia/Tashkent here; the server uses the club's time
- * zone) by payment method, with the cash given back to guests.
+ * says what it did to the drawer. `today` is the open shift's money (D-83: zero again after every close, zero with no
+ * shift open) by payment method, with the cash given back to guests; its `date` is the club's local day (Asia/Tashkent).
  */
 import { isObject, db, errors, findPc, findUser } from './db.js';
 import {
@@ -191,7 +191,7 @@ function offsetMs(at: Date): number {
 }
 
 /**
- * Money of the club's local day so far, by method, minus the cash given back to guests in the headline. `byMethod` is
+ * Money of the open shift so far (D-83), by method, minus the cash given back to guests in the headline. `byMethod` is
  * top-ups only; the bar's method sales net of their voids are `shopByMethod` and in `taken`; `shop` is the goods sold
  * both ways (D-57).
  */
@@ -208,7 +208,7 @@ function today(): {
   const at = new Date();
   const offset = offsetMs(at);
   const date = new Date(at.getTime() + offset).toISOString().slice(0, 10);
-  const from = new Date(Date.parse(`${date}T00:00:00Z`) - offset).toISOString();
+  const from = openShift()?.openedAt ?? at.toISOString();
   const byMethod: Record<PayMethod | 'other', number> = { cash: 0, card: 0, payme: 0, click: 0, uzum: 0, other: 0 };
   let taken = 0;
   let payouts = 0;

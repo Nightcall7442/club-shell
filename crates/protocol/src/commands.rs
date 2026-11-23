@@ -578,6 +578,8 @@ pub mod names {
         pub const HISTORY: &str = "wallet.history";
         /// `WalletTopupIntentRequest` → `TopupIntent`.
         pub const TOPUP_INTENT: &str = "wallet.topupIntent";
+        /// `WalletRedeemPromoRequest` → `WalletRedeemPromoResponse` (D-88).
+        pub const REDEEM_PROMO: &str = "wallet.redeemPromo";
     }
 
     /// `shop.*`
@@ -747,6 +749,10 @@ pub mod names {
         pub const SYS_READINESS_CHANGED: &str = "sys.readinessChanged";
         /// Payload `GamesChanged`.
         pub const GAMES_CHANGED: &str = "games.changed";
+        /// Payload `ShellSettings` (effective, as `settings.get` answers): the settings changed
+        /// without the Shell asking — a member's account preferences came in after sign-in, or the
+        /// PC's own came back at sign-out (D-86).
+        pub const SETTINGS_CHANGED: &str = "settings.changed";
 
         /// All values.
         pub const ALL: &[&str] = &[
@@ -771,6 +777,7 @@ pub mod names {
             SAVES_STATUS,
             SYS_READINESS_CHANGED,
             GAMES_CHANGED,
+            SETTINGS_CHANGED,
         ];
     }
 }
@@ -950,7 +957,9 @@ pub struct SetVolumeRequest {
     pub muted: Option<bool>,
 }
 
-/// Request of `settings.set`; partial, at least one key.
+/// Request of `settings.set`; partial, at least one key. While a member is signed in, theme,
+/// locale, volume, muted, UI sounds and the metrics overlay are saved to their account instead of
+/// the PC (D-86); `favorites` needs a signed-in member (`forbidden {reason: noAccount}` otherwise).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsSetRequest {
@@ -978,6 +987,9 @@ pub struct SettingsSetRequest {
     /// UI sounds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ui_sounds: Option<bool>,
+    /// The member's starred games and apps as a whole (replaces the list).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub favorites: Option<Vec<String>>,
 }
 
 /// Shell capabilities advertised in `AuthHelloRequest.Capabilities`.
@@ -1053,6 +1065,16 @@ pub struct ShellSettings {
     /// Club branding, banners and rules (read-only); `null` when the server sent none.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub club: Option<ShellClub>,
+    /// The signed-in member's starred games and apps (`game:<id>`, `app:<id>`), kept on their
+    /// account; empty for a guest and with nobody signed in. `null` from an older Agent reads as
+    /// empty.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub favorites: Option<Vec<String>>,
+    /// `true` while a signed-in member's account preferences apply (theme, locale, volume, muted,
+    /// UI sounds, metrics overlay and favourites follow them to any PC); `false` for a guest and
+    /// with nobody signed in.
+    #[serde(default)]
+    pub account_prefs: bool,
 }
 
 /// Request of `shop.order`.
@@ -1499,6 +1521,26 @@ pub struct WalletTopupIntentRequest {
     pub amount: Money,
     /// Provider.
     pub provider: TopupProvider,
+}
+
+/// Request of `wallet.redeemPromo` (D-88): the member's own promo code of the club.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WalletRedeemPromoRequest {
+    /// The code as typed (case does not matter), 1–32 characters.
+    pub code: String,
+}
+
+/// Response of `wallet.redeemPromo`: the code as the club wrote it, the bonus credited and the new balance.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WalletRedeemPromoResponse {
+    /// The code.
+    pub code: String,
+    /// Credited to the main balance.
+    pub bonus: Money,
+    /// Main balance after the credit.
+    pub balance: Money,
 }
 
 wire_enum! {
@@ -2642,6 +2684,7 @@ agent_commands! {
     WalletTariffs => names::wallet::TARIFFS, Hello;
     WalletHistory => names::wallet::HISTORY, User;
     WalletTopupIntent => names::wallet::TOPUP_INTENT, User;
+    WalletRedeemPromo => names::wallet::REDEEM_PROMO, User;
     ShopProducts => names::shop::PRODUCTS, Hello;
     ShopOrder => names::shop::ORDER, Session;
     ShopOrderStatus => names::shop::ORDER_STATUS, User;
@@ -3091,7 +3134,7 @@ mod tests {
 
     #[test]
     fn agent_command_table_matches_ipc_protocol() {
-        assert_eq!(AgentCommand::ALL.len(), 69);
+        assert_eq!(AgentCommand::ALL.len(), 70);
         let expected: &[&str] = &[
             "auth.hello",
             "auth.login",
@@ -3120,6 +3163,7 @@ mod tests {
             "wallet.tariffs",
             "wallet.history",
             "wallet.topupIntent",
+            "wallet.redeemPromo",
             "shop.products",
             "shop.order",
             "shop.orderStatus",
@@ -3196,7 +3240,7 @@ mod tests {
         );
         assert!(AgentCommand::try_from("nope.nope").is_err());
         assert!(!AgentCommand::is_known("Session.Start"));
-        assert_eq!(names::events::ALL.len(), 21);
+        assert_eq!(names::events::ALL.len(), 22);
     }
 
     #[test]
@@ -3559,11 +3603,13 @@ mod tests {
                 lock_screen_power: None,
             },
             club: None,
+            favorites: Some(vec!["game:1".into()]),
+            account_prefs: true,
         };
         let json = serde_json::to_string(&settings).unwrap();
         assert_eq!(
             json,
-            r#"{"locale":"en","theme":"default","availableThemes":["default","neon"],"volume":60,"muted":false,"idleTimeoutSec":300,"showMetricsOverlay":false,"allowVirtualKeyboard":true,"uiSounds":true,"features":{"shop":true,"chat":true,"booking":true,"tournaments":true,"profile":true,"topup":true,"apps":true,"callAdmin":true,"qrLogin":false,"gpuPanel":true}}"#
+            r#"{"locale":"en","theme":"default","availableThemes":["default","neon"],"volume":60,"muted":false,"idleTimeoutSec":300,"showMetricsOverlay":false,"allowVirtualKeyboard":true,"uiSounds":true,"features":{"shop":true,"chat":true,"booking":true,"tournaments":true,"profile":true,"topup":true,"apps":true,"callAdmin":true,"qrLogin":false,"gpuPanel":true},"favorites":["game:1"],"accountPrefs":true}"#
         );
         // An Agent from before qrLogin / gpuPanel: both read as off.
         let older: ShellSettings =

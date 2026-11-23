@@ -295,15 +295,18 @@ public static class ShiftEndpoints
     }
 
     /// <summary>
-    /// «Сегодня» of the feed: the club's ledger since local midnight — top-ups by method, cash payouts, time (charges − refunds)
-    /// and the shop — plus the bar's method money net of today's voids (D-57): in <c>shopByMethod</c>, in <c>taken</c> (so the
-    /// desk's «Сегодня принято» has the walk-in bar money) and in <c>shop</c> (all goods, from the balance too).
+    /// «Принято за смену» of the feed (D-83; until then the club's local day): the club's ledger since the open shift opened —
+    /// top-ups by method, cash payouts, time (charges − refunds) and the shop — plus the bar's method money net of voids
+    /// (D-57): in <c>shopByMethod</c>, in <c>taken</c> (so the desk's card has the walk-in bar money) and in <c>shop</c> (all
+    /// goods, from the balance too). It starts from zero with every shift; with no shift open everything is zero
+    /// (<c>from</c> = now). <c>date</c> stays the club's local day.
     /// </summary>
     private static async Task<AdminToday> TodayAsync(NpgsqlConnection c, Guid clubId, DateTimeOffset now)
     {
         var timeZone = await c.ExecuteScalarAsync<string>("SELECT time_zone FROM clubs WHERE id = @clubId", new { clubId }) ?? "Asia/Tashkent";
         var today = DateOnly.FromDateTime(ClubTime.Local(now, timeZone));
-        var from = ClubTime.Utc(today.ToDateTime(TimeOnly.MinValue), timeZone);
+        var from = await c.ExecuteScalarAsync<DateTimeOffset?>(
+            "SELECT opened_at FROM shifts WHERE club_id = @clubId AND closed_at IS NULL", new { clubId }) ?? now;
         var t = await c.QuerySingleAsync<TodayRow>(
             """
             SELECT coalesce(sum(amount) FILTER (WHERE type = 'topUp' AND method = 'cash'), 0)::bigint AS "Cash",

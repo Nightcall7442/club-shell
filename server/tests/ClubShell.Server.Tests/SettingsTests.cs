@@ -20,7 +20,7 @@ public sealed class SettingsTests(ServerFixture server) : LedgerCheckedTest(serv
         var doc = await ExpectAsync(Server, 200, HttpMethod.Get, "/club", cashier);
         Assert.Equal(
             ["branding", "features", "zones", "pricing", "groups", "bonusTiers", "promoCodes", "happyHours", "loyalty", "limits", "catalog", "banners",
-             "rulesText", "stock", "automation", "notifications", "webhooks", "control", "events"],
+             "rulesText", "stock", "topUpPromo", "screensaver", "automation", "notifications", "webhooks", "control", "events"],
             doc.EnumerateObject().Select(p => p.Name));
         Assert.DoesNotContain("telegram", doc.GetRawText(), StringComparison.OrdinalIgnoreCase);
         Assert.Equal("ClubShell", doc.GetProperty("branding").GetProperty("clubName").GetString());
@@ -233,5 +233,36 @@ public sealed class SettingsRefreshTests(KestrelServerFixture server) : IClassFi
         Assert.Equal(["b1"], club.GetProperty("banners").EnumerateArray().Select(b => b.GetProperty("id").GetString()));
         Assert.Equal("Qoidalar", club.GetProperty("rules").GetProperty("uz").GetString());
         Assert.False(club.TryGetProperty("wallpaperUrl", out _));
+        Assert.False(club.TryGetProperty("screensaver", out _)); // never saved: the shell keeps its own idle screen
+
+        // The screensaver (D-87): checked, a new config version and refreshConfig, then shell.club.screensaver in seconds.
+        foreach (var (body, field, reason) in new (object, string, string)[]
+        {
+            (new { screensaver = new { enabled = true, afterMinutes = 0, items = Array.Empty<object>() } }, "screensaver.afterMinutes", "min"),
+            (new { screensaver = new { enabled = true, afterMinutes = 5, items = new[] { new { url = "ftp://x/a.png", type = "image", durationSec = 10 } } } }, "screensaver.items[0].url", "format"),
+            (new { screensaver = new { enabled = true, afterMinutes = 5, items = new[] { new { url = "https://cdn.example.com/a.gif", type = "gif", durationSec = 10 } } } }, "screensaver.items[0].type", "enum"),
+            (new { screensaver = new { enabled = true, afterMinutes = 5, items = new[] { new { url = "https://cdn.example.com/a.png", type = "image", durationSec = 1 } } } }, "screensaver.items[0].durationSec", "min"),
+        })
+        {
+            Assert.Equal((field, reason), StaffAdminTests.Details(await ExpectAsync(server, 400, HttpMethod.Patch, "/club", owner, body)));
+        }
+
+        await ExpectAsync(server, 200, HttpMethod.Patch, "/club", owner, new
+        {
+            screensaver = new
+            {
+                enabled = true, afterMinutes = 3,
+                items = new object[] { new { url = "https://cdn.example.com/promo.mp4", type = "video", durationSec = 30 }, new { url = "https://cdn.example.com/a.png", type = "image", durationSec = 8 } },
+            },
+        });
+        Assert.Equal($"{config + 3}/{catalog + 1}", await versions());
+        var saved = (await ExpectAsync(server, 200, HttpMethod.Get, "/club", owner)).GetProperty("screensaver");
+        Assert.Equal((true, 3, 2), (saved.GetProperty("enabled").GetBoolean(), saved.GetProperty("afterMinutes").GetInt32(), saved.GetProperty("items").GetArrayLength()));
+        var screensaver = (await Players.ReadAsync(await agent.SendAsync(HttpMethod.Get, agent.Path("config")), 200))
+            .GetProperty("shell").GetProperty("club").GetProperty("screensaver");
+        Assert.Equal((true, 180, "video", "https://cdn.example.com/a.png"),
+            (screensaver.GetProperty("enabled").GetBoolean(), screensaver.GetProperty("afterSec").GetInt32(),
+             screensaver.GetProperty("items")[0].GetProperty("type").GetString(), screensaver.GetProperty("items")[1].GetProperty("url").GetString()));
+        await ExpectAsync(server, 200, HttpMethod.Patch, "/club", owner, new { screensaver = new { enabled = false, afterMinutes = 5, items = Array.Empty<object>() } });
     }
 }

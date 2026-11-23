@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "name": "light",
+  "displayName": "Daylight",
+  "colors": {
+    "bg": "#EEF2F6",
+    "surface": "#FFFFFF",
+    "primary": "#0F172A",
+    "accent": "#0369A1",
+    "text": "#0F172A",
+    "muted": "#465363",
+    "danger": "#B91C1C",
+    "success": "#166534"
+  },
+  "radius": 12,
+  "font": "Inter",
+  "backgroundVideo": null,
+  "wallpaper": null,
+  "blur": 0,
+  "animations": true
+}

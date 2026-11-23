@@ -728,6 +728,84 @@ test('the player-screen settings are saved on the server', async ({ page, reques
   expect(club.branding.clubName).toBe('E2E Arena');
 });
 
+test('the owner turns on «x2» for top-ups under «Бонусы и акции» and a desk top-up is doubled (D-84)', async ({
+  page,
+  request,
+}) => {
+  const owner = await tokenFor(request, OWNER_PIN);
+  const off = async (): Promise<void> => {
+    await request.patch(`${API}/admin/club`, { headers: auth(owner), data: { topUpPromo: { enabled: false } } });
+  };
+  try {
+    await signIn(page, OWNER_PIN);
+    // One click from the rail: the bonus tab of «Тарифы и цены».
+    await nav(page).getByText('Бонусы и акции', { exact: true }).click();
+    await expect(page.getByRole('tab', { name: 'Бонусы, x2 и промокоды' })).toHaveAttribute('aria-selected', 'true');
+    const promo = page.getByTestId('topup-promo');
+    await page.getByRole('switch', { name: 'Акция включена' }).click();
+    await promo.getByRole('button', { name: 'x2', exact: true }).click();
+    await expect(promo).toContainText('Итого на счёт: x2');
+    await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Сохранено' })).toBeVisible();
+
+    const club = (await (await request.get(`${API}/admin/club`, { headers: auth(owner) })).json()) as {
+      topUpPromo: { enabled: boolean; bonusPct: number; from: string | null };
+    };
+    expect(club.topUpPromo).toMatchObject({ enabled: true, bonusPct: 100, from: null });
+
+    await ensureShift(request);
+    const member = await newClient(request, 'x2-member');
+    const topUp = await moneyPost(request, '/admin/wallet/topup', { userId: member.id, amount: 2_000_000, method: 'cash' });
+    expect(topUp.ok(), await topUp.text()).toBeTruthy();
+    const paid = (await topUp.json()) as { bonus: { amount: number }; balance: { amount: number } };
+    expect([paid.bonus.amount, paid.balance.amount]).toEqual([2_000_000, 4_000_000]);
+  } finally {
+    await off();
+  }
+});
+
+test('the owner sets the screensaver of the free PCs on «Экран игрока»; the PCs get it with the club config (D-87)', async ({
+  page,
+  request,
+}) => {
+  const owner = await tokenFor(request, OWNER_PIN);
+  try {
+    await signIn(page, OWNER_PIN);
+    await page.goto('/#/club');
+    await page.getByRole('switch', { name: 'Заставка включена' }).click();
+    await page.getByRole('button', { name: 'Добавить картинку или видео' }).click();
+    await page.getByTestId('screensaver-items').getByLabel('Ссылка на картинку или видео').fill('https://cdn.example.com/promo.mp4');
+    await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Сохранено' })).toBeVisible();
+
+    const club = (await (await request.get(`${API}/admin/club`, { headers: auth(owner) })).json()) as {
+      screensaver: { enabled: boolean; afterMinutes: number; items: { url: string; type: string }[] };
+    };
+    // A clip by its extension: «Видео» without touching the switch.
+    expect(club.screensaver).toMatchObject({
+      enabled: true,
+      afterMinutes: 5,
+      items: [{ url: 'https://cdn.example.com/promo.mp4', type: 'video' }],
+    });
+    const pc = await registerAgent(request, 'screensaver');
+    const config = (await (await agentCall(request, pc, 'GET', `/agents/${pc.pcId}/config`)).json()) as {
+      shell: { club: { screensaver?: { enabled: boolean; afterSec: number } } };
+    };
+    expect(config.shell.club.screensaver).toMatchObject({ enabled: true, afterSec: 300 });
+
+    const bad = await request.patch(`${API}/admin/club`, {
+      headers: auth(owner),
+      data: { screensaver: { enabled: true, afterMinutes: 5, items: [{ url: 'promo.mp4', type: 'video', durationSec: 10 }] } },
+    });
+    expect(bad.status()).toBe(400);
+  } finally {
+    await request.patch(`${API}/admin/club`, {
+      headers: auth(owner),
+      data: { screensaver: { enabled: false, afterMinutes: 5, items: [] } },
+    });
+  }
+});
+
 test('cashier control flags a cash shortfall and quick refunds, and only the owner sees it', async ({
   page,
   request,
@@ -1128,7 +1206,7 @@ test('a typed amount topped up by card from the client search lands in the X-rep
   expect(x.x.topUpByMethod['cash']).toBe(0);
   expect(x.x.topUpCash).toBe(0);
   expect(x.x.topUpOther).toBe(4_500_000);
-  // The top-bar chip counts it as cashless (its name starts with «Смена ·»: the feed's «Сегодня принято» headline says
+  // The top-bar chip counts it as cashless (its name starts with «Смена ·»: the feed's «Принято за смену» headline says
   // «безнал …» too, and at 1920 px it is on the map next to the chip).
   await expect(page.getByRole('button', { name: /^Смена · .*безнал 45\s000/ })).toBeVisible();
 });
@@ -1733,7 +1811,7 @@ test("the operations feed shows each desk operation once with who, what and how 
 
   await stubPrint(page);
   await signIn(page, CASHIER_PIN);
-  // 1920 px: the feed is a column of its own; today's money is the «Сегодня принято» tile of the KPI strip above it.
+  // 1920 px: the feed is a column of its own; today's money is the «Принято за смену» tile of the KPI strip above it.
   const feed = page.locator('[data-feed="column"]');
   await expect(feed).toBeVisible();
   const seatRow = feed.getByRole('listitem').filter({ hasText: seated.displayName });
@@ -1755,8 +1833,8 @@ test("the operations feed shows each desk operation once with who, what and how 
   expect(rows.reduce((sum, r) => sum + r.drawer, 0)).toBe((await shiftState(request)).expectedCash);
 
   // Today's money (the KPI tile, which opens the split by method) covers at least these two payments.
-  const headline = (await page.getByRole('button', { name: /^Сегодня принято/ }).textContent()) ?? '';
-  const taken = Number(/Сегодня принято ([\d\s]+)/.exec(headline)?.[1]?.replace(/\s/g, '') ?? '0');
+  const headline = (await page.getByRole('button', { name: /^Принято за смену/ }).textContent()) ?? '';
+  const taken = Number(/Принято за смену ([\d\s]+)/.exec(headline)?.[1]?.replace(/\s/g, '') ?? '0');
   expect(taken * 100).toBeGreaterThanOrEqual(quote.total.amount + 4_500_000);
 
   // A reprint is a «Копия».
@@ -1790,7 +1868,7 @@ async function shelf(request: APIRequestContext, title: string, qty: number): Pr
 const cartOf = (page: Page) => page.getByRole('complementary', { name: 'Корзина' });
 const goods = (page: Page) => page.getByRole('list', { name: 'Товары' });
 
-test('the bar sells to a walk-in for cash: stock goes down, X, expected cash and «Сегодня принято» go up, the receipt lists the goods', async ({
+test('the bar sells to a walk-in for cash: stock goes down, X, expected cash and «Принято за смену» go up, the receipt lists the goods', async ({
   page,
   request,
 }) => {
@@ -2783,7 +2861,7 @@ test('the owner drags PCs on the hall plan, lines a group up, turns it and draws
   await request.delete(`${API}/admin/pcs/plan`, { headers: auth(await tokenFor(request, OWNER_PIN)) });
 });
 
-test('a click on a PC opens its quick actions at the tile: top up, extend, end; seat a client on a free one', async ({
+test('a left click picks a PC, a right click opens all its actions; each step opens in a window over the map', async ({
   page,
   request,
 }) => {
@@ -2793,40 +2871,61 @@ test('a click on a PC opens its quick actions at the tile: top up, extend, end; 
   await ensureShift(request);
   await seatMember(request, busy, member.id);
   await signIn(page, CASHIER_PIN);
-
-  // A busy PC: the session's steps by the tile; each opens the seat card's own sheet.
-  await page.locator(`#seat-${busy.pcId}`).click();
   const menu = page.getByRole('menu');
+
+  // A left click only picks: no menu.
+  await page.locator(`#seat-${busy.pcId}`).click();
+  await expect(page.locator(`#seat-${busy.pcId}`)).toHaveAttribute('data-selected', 'true');
+  await expect(menu).toBeHidden();
+
+  // A right click: the session's steps at the pointer; each opens the seat card's own sheet.
+  await page.locator(`#seat-${busy.pcId}`).click({ button: 'right' });
   await expect(menu).toBeVisible();
   await expect(menu.getByRole('menuitem')).toHaveText([
     'Продлить',
     /^Пополнить/,
     'Пересадить на другой ПК…',
     'Бар',
-    'Ещё ⋯',
+    'Управление ПК: сообщение, блокировка, перезагрузка…',
+    'Открыть карточку',
     'Завершить сеанс',
   ]);
   await menu.getByRole('menuitem', { name: /^Пополнить/ }).click();
   await expect(menu).toBeHidden();
   await expect(page.getByRole('dialog', { name: `Пополнить · ${member.displayName}` })).toBeVisible();
   await page.keyboard.press('Escape');
+  // The card is in the window, the right column only says so.
+  const window = page.getByRole('dialog', { name: /^ПК/ });
+  await expect(window).toBeVisible();
+  await expect(page.getByText('Действия открыты в окне над картой')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(window).toBeHidden();
 
-  // Esc folds the menu and keeps the PC picked; a second click on the tile folds it too.
-  await page.locator(`#seat-${busy.pcId}`).click();
+  // Esc folds the menu and keeps the PC picked.
+  await page.locator(`#seat-${busy.pcId}`).click({ button: 'right' });
   await expect(menu).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();
   await expect(page.locator(`#seat-${busy.pcId}`)).toHaveAttribute('data-selected', 'true');
-  await page.locator(`#seat-${busy.pcId}`).click();
-  await expect(menu).toBeVisible();
+  await page.locator(`#seat-${busy.pcId}`).click({ button: 'right' });
   await menu.getByRole('menuitem', { name: 'Завершить сеанс' }).click();
-  await expect(page.getByRole('dialog').filter({ hasText: member.displayName })).toBeVisible();
+  await expect(page.getByRole('dialog').filter({ hasText: member.displayName }).last()).toBeVisible();
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
 
-  // A free PC: «Посадить клиента» puts the cursor in the client field of the seat card.
-  await page.locator(`#seat-${free.pcId}`).click();
+  // A free PC: «Посадить клиента» puts the cursor in the client field of the card, in the window.
+  await page.locator(`#seat-${free.pcId}`).click({ button: 'right' });
+  await expect(menu.getByRole('menuitem', { name: 'Посадить гостя · постоплата' })).toBeVisible();
   await menu.getByRole('menuitem', { name: 'Посадить клиента' }).click();
-  await expect(page.getByLabel('Кто', { exact: true })).toBeFocused();
+  await expect(page.getByRole('dialog').getByLabel('Кто', { exact: true })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+
+  // «Посадить гостя · постоплата»: the guest form, postpaid already chosen.
+  await page.locator(`#seat-${free.pcId}`).click({ button: 'right' });
+  await menu.getByRole('menuitem', { name: 'Посадить гостя · постоплата' }).click();
+  const guestWindow = page.getByRole('dialog', { name: /^ПК/ });
+  await expect(guestWindow.getByRole('button', { name: /Посадить · постоплата/ })).toBeVisible();
 });
 
 test('the map shows the hall as it stands, every PC in view at 1366×768, and the zones on request (SHELL_CHANGES 94)', async ({

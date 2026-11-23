@@ -7,7 +7,14 @@
  */
 import { randomBytes } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import { AuthKind, Locale, SessionEndReason, type AuthResponse, type QrLoginStatus } from '@clubshell/contracts';
+import {
+  AuthKind,
+  Locale,
+  SessionEndReason,
+  type AuthResponse,
+  type QrLoginStatus,
+  type UserPrefs,
+} from '@clubshell/contracts';
 import {
   ApiError,
   body,
@@ -393,4 +400,72 @@ export function authRoutes(app: FastifyInstance): void {
     const { user } = requireUser(req, req.params.userId);
     return loyaltyOf(user);
   });
+
+  // The member's Shell preferences and favourites (beyond the contract, D-86): what the Agent lays over the PC's own
+  // settings at sign-in. A guest has no account to keep them on.
+  app.get<{ Params: { userId: string } }>('/users/:userId/prefs', async (req) => {
+    const { user } = requireUser(req, req.params.userId);
+    if (user.role === 'guest') throw errors.forbidden('guest');
+    const prefs = prefsStore()[user.id] ?? {};
+    return { ...prefs, favorites: prefs.favorites ?? [] };
+  });
+
+  app.put<{ Params: { userId: string } }>('/users/:userId/prefs', async (req) => {
+    const { user } = requireUser(req, req.params.userId);
+    if (user.role === 'guest') throw errors.forbidden('guest');
+    const prefs = readPrefs(body(req));
+    prefsStore()[user.id] = prefs;
+    markDirty();
+    return prefs;
+  });
+}
+
+type WithPrefs = typeof db & { userPrefs?: Record<string, UserPrefs> };
+
+function prefsStore(): Record<string, UserPrefs> {
+  const s = db as WithPrefs;
+  s.userPrefs ??= {};
+  return s.userPrefs;
+}
+
+/** `UserPrefs` as the server checks it (`UserPrefs.Check`): a field left out is "not chosen". */
+function readPrefs(b: Record<string, unknown>): UserPrefs {
+  const prefs: UserPrefs = {};
+  const theme = b['theme'];
+  if (theme !== undefined && theme !== null) {
+    if (typeof theme !== 'string' || theme.trim().length === 0 || theme.length > 64 || /[\\/:*?"<>|]/.test(theme)) {
+      throw errors.validation('theme', 'format');
+    }
+    prefs.theme = theme;
+  }
+  const locale = b['locale'];
+  if (locale !== undefined && locale !== null) {
+    if (typeof locale !== 'string' || !(LOCALES as readonly string[]).includes(locale)) {
+      throw errors.validation('locale', 'enum');
+    }
+    prefs.locale = locale as Locale;
+  }
+  const volume = b['volume'];
+  if (volume !== undefined && volume !== null) {
+    if (typeof volume !== 'number' || !Number.isInteger(volume) || volume < 0 || volume > 100) {
+      throw errors.validation('volume', 'range');
+    }
+    prefs.volume = volume;
+  }
+  for (const key of ['muted', 'uiSounds', 'showMetricsOverlay'] as const) {
+    const value = b[key];
+    if (value !== undefined && value !== null) {
+      if (typeof value !== 'boolean') throw errors.validation(key, 'format');
+      prefs[key] = value;
+    }
+  }
+  const favorites = b['favorites'] ?? [];
+  if (!Array.isArray(favorites)) throw errors.validation('favorites', 'format');
+  if (favorites.length > 60) throw errors.validation('favorites', 'max');
+  if (favorites.some((f) => typeof f !== 'string' || !/^[A-Za-z0-9._:-]{1,64}$/.test(f))) {
+    throw errors.validation('favorites', 'format');
+  }
+  if (new Set(favorites).size !== favorites.length) throw errors.validation('favorites', 'duplicate');
+  prefs.favorites = favorites as string[];
+  return prefs;
 }

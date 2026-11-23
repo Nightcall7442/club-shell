@@ -363,6 +363,7 @@ function SeatTile({
   blocked,
   call,
   onSelect,
+  onMenu,
   repair,
   box,
   compact = false,
@@ -383,6 +384,8 @@ function SeatTile({
   /** The players' calls of this PC. */
   call?: CallGroup;
   onSelect: (e: React.MouseEvent<HTMLButtonElement>) => void;
+  /** Right click (or the context-menu key): the PC's actions at the pointer. */
+  onMenu?: (e: React.MouseEvent<HTMLButtonElement>) => void;
   /** Worst open repair ticket on this PC (from "Состояние ПК"). */
   repair?: 'high' | 'medium';
 }): JSX.Element {
@@ -459,6 +462,11 @@ function SeatTile({
       type="button"
       id={`seat-${seat.pc.id}`}
       onClick={onSelect}
+      onContextMenu={(e) => {
+        if (!onMenu) return;
+        e.preventDefault();
+        onMenu(e);
+      }}
       // Shift+click picks a range: no text selection on the way.
       onMouseDown={(e) => {
         if (e.shiftKey) e.preventDefault();
@@ -1955,6 +1963,21 @@ function SeatPanel({
       <CallGroupActions group={call} compact />
     </section>
   ) : null;
+  const wake = (): void =>
+    void run('wake', async () => {
+      const r = (await adminApi.pcCommands({ pcIds: [seat.pc.id], kind: 'wake' }, newKey())).results[0];
+      if (!r) return { text: t('Ответа по ПК нет'), tone: 'warn' };
+      const ok = r.outcome === 'done' || r.outcome === 'queued';
+      return { text: outcomeText(r), tone: ok ? 'ok' : r.outcome === 'failed' ? 'err' : 'warn' };
+    });
+  // «Включить» of the map's menu: the same step as the card's button.
+  const askedWake = useRef(0);
+  useEffect(() => {
+    if (request?.action !== 'wake' || request.pcId !== seat.pc.id || request.n === askedWake.current) return;
+    askedWake.current = request.n;
+    if (busy === null) wake();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request]);
   // A switched-off PC: «Включить» heads the card — a PC that is on sends it the Wake-on-LAN packet.
   const wakeBanner =
     seat.pc.status === 'offline' && !seat.session ? (
@@ -1970,14 +1993,7 @@ function SeatPanel({
           variant="primary"
           size="sm"
           disabled={busy !== null}
-          onClick={() =>
-            void run('wake', async () => {
-              const r = (await adminApi.pcCommands({ pcIds: [seat.pc.id], kind: 'wake' }, newKey())).results[0];
-              if (!r) return { text: t('Ответа по ПК нет'), tone: 'warn' };
-              const ok = r.outcome === 'done' || r.outcome === 'queued';
-              return { text: outcomeText(r), tone: ok ? 'ok' : r.outcome === 'failed' ? 'err' : 'warn' };
-            })
-          }
+          onClick={wake}
         >
           {busy === 'wake' ? '…' : t('Включить')}
         </Button>
@@ -2899,7 +2915,12 @@ function FreeSeat({
   const openKey = useHeldKey();
   const nameId = useId();
 
+  // Only on another PC: a fresh card (the menu's window) starts clean anyway, and a re-run on mount must not undo
+  // what the menu's step just chose.
+  const shownPc = useRef(seat.pc.id);
   useEffect(() => {
+    if (shownPc.current === seat.pc.id) return;
+    shownPc.current = seat.pc.id;
     setWho(null);
     setMinutes(60);
     setGuest(false);
@@ -2920,8 +2941,10 @@ function FreeSeat({
       setTechOpen(true);
       return;
     }
-    const asGuest = request.action === 'guest' && cashDesk2;
+    const asGuest = (request.action === 'guest' || request.action === 'guestPost') && cashDesk2;
     setGuest(asGuest);
+    // «Гость · постоплата» of the map's menu: the switch already on postpaid (it falls back to prepaid if postpaid is off).
+    setWantPrepaid(request.action !== 'guestPost');
     setFocusField({ guest: asGuest, n: request.n });
   }, [request, cashDesk2]);
   // After the form shows the field asked for (the guest's name is drawn only once «Гость» is on).
@@ -3673,6 +3696,8 @@ export function MapPage(): JSX.Element {
   // The quick actions at the clicked tile, and the step they asked of the seat card.
   const [quick, setQuick] = useState<{ pcId: string; anchor: DOMRect } | null>(null);
   const [request, setRequest] = useState<QuickRequest | null>(null);
+  /** The window over the map a menu step opened: one PC's card, or the panel of the picked set. */
+  const [dialog, setDialog] = useState<{ pcId: string } | 'bulk' | null>(null);
   const [digits, setDigits] = useState('');
   const [tick, setTick] = useState(0);
   const [panel, setPanelState] = useState<'seat' | 'feed'>(readPanel);
@@ -3774,6 +3799,7 @@ export function MapPage(): JSX.Element {
       dimmed={active !== undefined && !active.test(x, repairs.has(x.pc.id))}
       blocked={notTarget(x)}
       onSelect={(e) => onTile(x, e)}
+      onMenu={(e) => onMenu(x, e)}
       box={box}
       compact={compact}
     />
@@ -3831,13 +3857,30 @@ export function MapPage(): JSX.Element {
       toggle(x.pc.id);
       return;
     }
-    // A plain click: that one PC, whatever was picked before, and its quick actions at the tile (a second click on
-    // the same PC folds them).
+    // A plain (left) click only picks that one PC, whatever was picked before; its actions are the right click's.
+    anchor.current = x.pc.id;
+    setMulti(new Set());
+    setQuick(null);
+    pick(x.pc.id);
+  };
+  /** A right click: the PC's menu at the pointer; on a PC of the picked set, the set's panel in a window. */
+  const onMenu = (x: Seat, e: React.MouseEvent<HTMLButtonElement>): void => {
+    if (movePick) {
+      chooseTarget(x);
+      return;
+    }
+    if (multi.size >= 2 && multi.has(x.pc.id)) {
+      setQuick(null);
+      setDialog('bulk');
+      return;
+    }
     anchor.current = x.pc.id;
     setMulti(new Set());
     pick(x.pc.id);
-    const box = e.currentTarget.getBoundingClientRect();
-    setQuick((q) => (q?.pcId === x.pc.id ? null : { pcId: x.pc.id, anchor: box }));
+    // The context-menu key has no pointer: the menu goes next to the tile then.
+    const at =
+      e.clientX === 0 && e.clientY === 0 ? e.currentTarget.getBoundingClientRect() : new DOMRect(e.clientX, e.clientY, 0, 0);
+    setQuick({ pcId: x.pc.id, anchor: at });
   };
   const closeQuick = useCallback(() => setQuick(null), []);
   const onQuick = (target: Seat, action: QuickAction): void => {
@@ -3852,9 +3895,12 @@ export function MapPage(): JSX.Element {
       window.location.hash = '/bar';
       return;
     }
-    setRequest((r) => ({ pcId: target.pc.id, action, n: (r?.n ?? 0) + 1 }));
+    // Every other step in a window over the map: the PC's card with the step already taken.
+    setDialog({ pcId: target.pc.id });
+    if (action !== 'open') setRequest((r) => ({ pcId: target.pc.id, action, n: (r?.n ?? 0) + 1 }));
   };
   const startMove = (from: Seat): void => {
+    setDialog(null);
     setMulti(new Set());
     setSelectMode(false);
     setSheet(null);
@@ -3865,14 +3911,17 @@ export function MapPage(): JSX.Element {
   // Keys: digits then Enter pick a PC by number (in «Выбрать» mode they toggle it, while a move waits they pick its
   // target); Ctrl+A takes every PC shown; Esc closes the sheet, then the set, then the move, then the typed number,
   // then the panel.
-  const keys = useRef({ seats, digits, sheet, selected, multi, selectMode, movePick, shownIds, toggle, chooseTarget });
-  keys.current = { seats, digits, sheet, selected, multi, selectMode, movePick, shownIds, toggle, chooseTarget };
+  const keys = useRef({ seats, digits, sheet, dialog, selected, multi, selectMode, movePick, shownIds, toggle, chooseTarget });
+  keys.current = { seats, digits, sheet, dialog, selected, multi, selectMode, movePick, shownIds, toggle, chooseTarget };
   useEffect(() => {
     let timer = 0;
     const on = (e: KeyboardEvent): void => {
       const k = keys.current;
       if (e.key === 'Escape') {
         if (k.sheet) setSheet(null);
+        // The window of a menu step (its own Esc is the window's while focus is in it; after a sheet over it closed,
+        // focus is back on the page).
+        else if (k.dialog) setDialog(null);
         // In a field (the bulk message, the seat's message) the first Esc only leaves it; the next one clears the set
         // or closes the panel, so a typed message and a picked set are never lost to one key.
         else if (isTyping(e) && e.target instanceof HTMLElement) e.target.blur();
@@ -3968,7 +4017,49 @@ export function MapPage(): JSX.Element {
         })
       : null;
 
-  const seatRegion =
+  const dialogSeat = dialog !== null && dialog !== 'bulk' ? (seats.find((x) => x.pc.id === dialog.pcId) ?? null) : null;
+  const closeDialog = (): void => setDialog(null);
+  // The card in a window (a step of the right-click menu): one card at a time, so the column only says where it is.
+  const inWindow = (dialog === 'bulk' && bulk.length > 0) || dialogSeat !== null;
+  const dialogWindow =
+    dialog === 'bulk' && bulk.length > 0 ? (
+      <Sheet title={t('Выбрано {n} ПК', { n: bulk.length })} caption={t('Действия с ПК')} onClose={closeDialog} size="wide">
+        <BulkPanel
+          seats={bulk}
+          tariffs={data?.tariffs ?? []}
+          onDone={() => void load()}
+          onClear={() => {
+            setDialog(null);
+            setMulti(new Set());
+            setSelectMode(false);
+          }}
+          onStartMove={startMove}
+        />
+      </Sheet>
+    ) : dialogSeat && data ? (
+      <Sheet title={pcLabel(dialogSeat.pc.name)} caption={t('Действия с ПК')} onClose={closeDialog} size="wide">
+        <SeatPanel
+          seat={dialogSeat}
+          members={data.users}
+          tariffs={data.tariffs}
+          sheet={sheet}
+          setSheet={setSheet}
+          onDone={() => void load()}
+          call={callsByPc.get(dialogSeat.pc.id)}
+          onStartMove={() => startMove(dialogSeat)}
+          request={request}
+        />
+      </Sheet>
+    ) : null;
+
+  const seatRegion = inWindow ? (
+    <div className="glass-side flex flex-col items-center justify-center gap-3 px-6 py-9 text-center">
+      <p className="text-[13px] text-dim">{t('Действия открыты в окне над картой')}</p>
+      <Button size="sm" variant="ghost" onClick={closeDialog}>
+        {t('Закрыть окно')}
+      </Button>
+    </div>
+  ) :
     bulk.length > 0 ? (
       <BulkPanel
         seats={bulk}
@@ -3996,7 +4087,6 @@ export function MapPage(): JSX.Element {
           onDone={() => void load()}
           call={callsByPc.get(seat.pc.id)}
           onStartMove={() => startMove(seat)}
-          request={request}
         />
       </>
     ) : (
@@ -4004,7 +4094,7 @@ export function MapPage(): JSX.Element {
         <EmptyState
           icon={<MonitorIcon size={22} />}
           title={t('Выберите место')}
-          text={t('Посадите клиента, продлите, пополните или завершите сеанс. Номер ПК и Enter — выбрать место.')}
+          text={t('Левый клик — выбрать ПК, правый — все действия с ним. Номер ПК и Enter — выбрать место.')}
           hint={
             <>
               {t('номер ПК')}
@@ -4212,10 +4302,12 @@ export function MapPage(): JSX.Element {
           )}
         </div>
 
+        {dialogWindow}
         {quick && !movePick && multi.size === 0 && !selectMode && seats.some((x) => x.pc.id === quick.pcId) && (
           <QuickActions
             seat={seats.find((x) => x.pc.id === quick.pcId)!}
             anchor={quick.anchor}
+            guests={shift.cashDesk2}
             onAction={(action) => onQuick(seats.find((x) => x.pc.id === quick.pcId)!, action)}
             onClose={closeQuick}
           />

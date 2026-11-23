@@ -312,6 +312,17 @@ public sealed class ServerClient : IServerClient, IDisposable
         GetAsync<Loyalty>(Endpoints.UserLoyalty(userId), AuthMode.User, cancellationToken);
 
     /// <inheritdoc />
+    public Task<UserPrefs> GetUserPrefsAsync(Guid userId, CancellationToken cancellationToken) =>
+        GetAsync<UserPrefs>(Endpoints.UserPrefs(userId), AuthMode.User, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<UserPrefs> SaveUserPrefsAsync(Guid userId, UserPrefs prefs, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(prefs);
+        return SendJsonAsync<UserPrefs, UserPrefs>(HttpMethod.Put, Endpoints.UserPrefs(userId), prefs, AuthMode.User, null, cancellationToken);
+    }
+
+    /// <inheritdoc />
     public Task VerifyPinAsync(Guid userId, PinVerifyRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -494,6 +505,11 @@ public sealed class ServerClient : IServerClient, IDisposable
     /// <inheritdoc />
     public Task<TopupIntent> GetTopupIntentAsync(Guid userId, Guid intentId, CancellationToken cancellationToken) =>
         GetAsync<TopupIntent>(Endpoints.WalletTopupIntentStatus(userId, intentId), AuthMode.User, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<WalletRedeemPromoResponse> RedeemPromoAsync(Guid userId, string code, CancellationToken cancellationToken) =>
+        SendJsonAsync<WalletRedeemPromoRequest, WalletRedeemPromoResponse>(
+            HttpMethod.Post, Endpoints.WalletPromo(userId), new WalletRedeemPromoRequest(code), AuthMode.User, Guid.NewGuid(), cancellationToken);
 
     #endregion
 

@@ -12,6 +12,7 @@ import { GameArtwork } from '@/components/media/GameArtwork';
 import { GameTrailer } from '@/components/media/GameTrailer';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { FavoriteButton } from '@/components/ui/FavoriteButton';
 import { Modal } from '@/components/ui/Modal';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useLocale } from '@/hooks/useLocale';
@@ -268,6 +269,7 @@ export function GameHero({
               {t('games.details')}
             </Button>
           )}
+          <FavoriteButton kind="game" id={game.id} title={game.title} variant="labeled" size="xl" />
         </div>
       </div>
 

@@ -14,6 +14,7 @@ import { AdsCarousel } from './AdsCarousel';
 import { PriceList } from './PriceList';
 
 const WAKE_EVENTS = ['keydown', 'pointerdown', 'touchstart', 'wheel'] as const;
+const EMPTY_SLIDES: never[] = [];
 
 /**
  * Attract screen (route `/idle`, no shell): ads carousel behind the price board, clock and a "touch to start"
@@ -28,6 +29,7 @@ export default function IdleScreen(): JSX.Element {
   const club = useClub();
   const pcZone = useSettingsStore((s) => s.pcInfo?.pc.zone ?? '');
   const animations = useThemeStore((s) => s.theme.animations);
+  const ownSlides = useSettingsStore((s) => s.settings.club?.screensaver?.items ?? EMPTY_SLIDES);
 
   const wake = useCallback(() => navigate('/lock', { replace: true }), [navigate]);
 
@@ -71,7 +73,8 @@ export default function IdleScreen(): JSX.Element {
   return (
     <div className="relative h-full w-full overflow-hidden bg-bg">
       {/* No "1 of 3" counter here: it sat on top of the tap-to-start prompt and told a passer-by nothing. */}
-      <AdsCarousel showCounter={false} />
+      {/* The owner's pictures and clips (D-87), else the club playlist, else the built-in slides. */}
+      <AdsCarousel showCounter={false} items={ownSlides.length > 0 ? ownSlides : undefined} />
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgb(var(--c-bg)/0.7)_0%,rgb(var(--c-bg)/0.25)_35%,rgb(var(--c-bg)/0.35)_60%,rgb(var(--c-bg)/0.9)_100%)]"

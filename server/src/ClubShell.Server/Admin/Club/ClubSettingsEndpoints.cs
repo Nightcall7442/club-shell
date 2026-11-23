@@ -44,7 +44,7 @@ public static class ClubSettingsEndpoints
         ["branding", "features", "zones", "pricing", "groups", "bonusTiers", "happyHours", "loyalty", "limits", "catalog", "banners", "rulesText", "stock"];
 
     /// <summary>Sections whose change reaches <c>AgentServerConfig</c> (§5.9).</summary>
-    private static readonly string[] ConfigSections = ["features", "branding", "catalog", "rulesText", "banners"];
+    private static readonly string[] ConfigSections = ["features", "branding", "catalog", "rulesText", "banners", "screensaver"];
 
     /// <summary><c>notifications.bigTopupAt</c> when the owner has not set one (the mock's default, 200 000 sum).</summary>
     public const long DefaultBigTopupAt = 20_000_000;
@@ -106,6 +106,8 @@ public static class ClubSettingsEndpoints
             limits["guestPostpaid"] = true;
         }
 
+        ordered["topUpPromo"] = TopUpPromo.Read(stored["topUpPromo"]?.ToJsonString()).ToJson();
+        ordered["screensaver"] = Screensaver.Read(stored["screensaver"]?.ToJsonString()).ToJson();
         ordered["automation"] = await AutomationAsync(c, staff.ClubId);
         ordered["notifications"] = new JsonObject { ["bigTopupAt"] = stored["notifications"]?["bigTopupAt"]?.DeepClone() ?? DefaultBigTopupAt };
         ordered["webhooks"] = await WebhooksAsync(c, staff.ClubId);
@@ -200,6 +202,22 @@ public static class ClubSettingsEndpoints
             if (body.TryGetProperty("control", out var control))
             {
                 settings["control"] = JsonSerializer.SerializeToNode(Clamp(control, ControlOf(settings["control"]?.ToJsonString())), AdminJson.Options);
+            }
+
+            if (body.TryGetProperty("topUpPromo", out var topUpPromo))
+            {
+                settings["topUpPromo"] = TopUpPromo.Parse(topUpPromo).ToJson();
+            }
+
+            if (body.TryGetProperty("screensaver", out var screensaver))
+            {
+                var next = Screensaver.Parse(screensaver).ToJson();
+                if (!JsonNode.DeepEquals(settings["screensaver"], next))
+                {
+                    changed.Add("screensaver");
+                }
+
+                settings["screensaver"] = next;
             }
 
             if (body.TryGetProperty("notifications", out var notifications))

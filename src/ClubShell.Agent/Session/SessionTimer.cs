@@ -181,7 +181,7 @@ public sealed class SessionTimer : IDisposable
         ArgumentOutOfRangeException.ThrowIfNegative(secondsUsed);
         lock (_gate)
         {
-            _marks = (_settings.CurrentValue.Session.WarningMinutes ?? []).Where(m => m > 0).Distinct().OrderByDescending(m => m).ToArray();
+            _marks = _settings.CurrentValue.Session.EffectiveWarningMinutes().Where(m => m > 0).Distinct().OrderByDescending(m => m).ToArray();
             _running = true;
             _paused = false;
             _openEnded = openEnded;

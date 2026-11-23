@@ -63,7 +63,7 @@ public sealed class UserRow
 /// The player's own profile (S2): <c>getUser</c>, <c>updateUser</c>, <c>getUserStats</c>, <c>getUserAchievements</c>,
 /// <c>getUserLoyalty</c>, and beyond the contract <c>POST /users/{userId}/pin/verify</c> and
 /// <c>/users/{userId}/game-settings</c> — list <c>{items:[]}</c> and <c>DELETE</c> 204, the rest 501 (DESIGN §1: player
-/// settings are not stored in v1).
+/// settings are not stored in v1) — and <c>/users/{userId}/prefs</c>, the player's Shell preferences and favourites (D-86).
 /// </summary>
 public static partial class UserEndpoints
 {
@@ -85,6 +85,8 @@ public static partial class UserEndpoints
         own.MapGet("/loyalty", LoyaltyAsync);
         own.MapGet("/game-settings", () => TypedResults.Ok(new PlayerSettingsListResponse([])));
         own.MapDelete("/game-settings/{gameId:guid}", () => Results.NoContent());
+        own.MapGet("/prefs", PrefsAsync);
+        own.MapPut("/prefs", SavePrefsAsync);
 
         var setting = api.MapGroup("/game-settings/{gameId:guid}").WithMetadata(new AuthRequirement(AuthMode.Agent));
         setting.MapGet("", (RequestDelegate)(_ => throw ApiException.NotImplemented("getPlayerSettings")));
@@ -215,6 +217,61 @@ public static partial class UserEndpoints
             : Array.Empty<string>();
         return TypedResults.Ok(new Loyalty(
             Math.Max(0, (level?.Level ?? 1) - 1), UserRow.Points(spent), next is null ? UserRow.Points(spent) : UserRow.Points(next.MinSpent), perks));
+    }
+
+    /// <summary>
+    /// <c>GET /users/{userId}/prefs</c> (beyond the contract, D-86): the player's Shell preferences and favourites as last
+    /// saved, <c>favorites: []</c> when none; a stored value that no longer reads is answered as nothing chosen. A guest
+    /// has no account to keep them on (<c>403 guest</c>).
+    /// </summary>
+    private static async Task<IResult> PrefsAsync(Guid userId, NpgsqlDataSource db)
+    {
+        await using var c = await db.OpenConnectionAsync();
+        var json = await RequireMemberAsync(c, userId);
+        UserPrefs? prefs = null;
+        try
+        {
+            prefs = System.Text.Json.JsonSerializer.Deserialize<UserPrefs>(json, ServerJson.Options);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // Written by this endpoint only, so this is a hand edit gone wrong: the PC's own settings apply meanwhile.
+        }
+
+        prefs ??= new UserPrefs();
+        return TypedResults.Ok(prefs with { Favorites = prefs.Favorites ?? [] });
+    }
+
+    /// <summary>
+    /// <c>PUT /users/{userId}/prefs</c> (beyond the contract, D-86): replaces the stored preferences with the body
+    /// (<c>UserPrefs</c>; a field left out is "not chosen"); <c>400 validation</c> per <c>UserPrefs.Check</c> — theme a
+    /// file-safe id of at most 64, locale ru/uz/en, volume 0–100, at most 60 unique favourites of at most 64 characters;
+    /// <c>403 guest</c> for a guest. Answers the stored value.
+    /// </summary>
+    private static async Task<IResult> SavePrefsAsync(Guid userId, [FromBody] System.Text.Json.JsonElement body, NpgsqlDataSource db)
+    {
+        var request = Api.Read<UserPrefs>(body);
+        await using var c = await db.OpenConnectionAsync();
+        await RequireMemberAsync(c, userId);
+        if (UserPrefs.Check(request) is var (field, reason))
+        {
+            throw ApiException.Validation(field, reason);
+        }
+
+        var prefs = request with { Favorites = request.Favorites ?? [] };
+        await c.ExecuteAsync(
+            "UPDATE users SET prefs = @json::jsonb WHERE id = @userId",
+            new { userId, json = System.Text.Json.JsonSerializer.Serialize(prefs, ServerJson.Options) });
+        return TypedResults.Ok(prefs);
+    }
+
+    /// <summary>The stored <c>prefs</c> of a member; <c>404</c> for no such player, <c>403 guest</c> for a guest.</summary>
+    private static async Task<string> RequireMemberAsync(NpgsqlConnection c, Guid userId)
+    {
+        var row = await c.QuerySingleOrDefaultAsync<(string Role, string Prefs)?>(
+            "SELECT role, prefs::text FROM users WHERE id = @userId AND deleted_at IS NULL", new { userId })
+            ?? throw ApiException.NotFound("user");
+        return row.Role == "guest" ? throw ApiException.Forbidden("guest", "A guest has no account to keep preferences on") : row.Prefs;
     }
 
     [GeneratedRegex("^[0-9]{4,6}$")]

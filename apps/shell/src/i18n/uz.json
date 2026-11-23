@@ -822,7 +822,22 @@
       "loyalty": "sodiqlik chegirmasi",
       "happyHour": "baxtli soatlar"
     },
-    "dueHintGuest": "Tugatganingizda kassada to'lang."
+    "dueHintGuest": "Tugatganingizda kassada to'lang.",
+    "promo": {
+      "title": "Promokod",
+      "hint": "Klub kodini kiriting — bonus darhol balansga tushadi.",
+      "field": "Promokod",
+      "placeholder": "MASALAN, BONUS10",
+      "apply": "Faollashtirish",
+      "doneTitle": "Promokod faollashtirildi",
+      "done": "{{code}} kodi bo'yicha balansga +{{bonus}}",
+      "unknown": "Bunday kod yo'q — yozilishini tekshiring.",
+      "expired": "Kodning amal qilish muddati tugagan.",
+      "used": "Kod allaqachon ishlatilgan.",
+      "atDesk": "Bu kod — chegirma, u kassada qo'llaniladi.",
+      "tooMany": "Noto'g'ri kodlar juda ko'p. 10 daqiqadan so'ng urinib ko'ring.",
+      "guest": "Promokodlar klub a'zolari uchun. Kassada ro'yxatdan o'ting."
+    }
   },
   "chat": {
     "title": "Chat",
@@ -1319,7 +1334,14 @@
       "body": "{{error}} Siz hali ham bu kompyuterda hisobdasiz, seans yakunlanmagan.",
       "retry": "Qayta urinish"
     },
-    "idleBodyLock": "Kompyuterdan 10 daqiqa davomida hech kim foydalanmadi. {{seconds}} soniyadan keyin ekran bloklanadi — to'langan vaqt saqlanadi."
+    "idleBodyLock": "Kompyuterdan 10 daqiqa davomida hech kim foydalanmadi. {{seconds}} soniyadan keyin ekran bloklanadi — to'langan vaqt saqlanadi.",
+    "payAtDesk": "Kassada toʻlash",
+    "payAtDeskTitle": "Keyin toʻlov kassada yopiladi",
+    "payAtDeskBody": "Siz {{duration}} oʻynadingiz, hozir toʻlash kerak: {{amount}}. Kassada toʻlaganingizda administrator seansni yakunlaydi.",
+    "payAtDeskCallButton": "Administratorni chaqirish",
+    "payAtDeskCall": "Oʻyinchi tugatib, keyin toʻlovni toʻlamoqchi: {{duration}}, {{amount}}",
+    "idleBodyPostpaid": "Kompyuterga 10 daqiqa tegilmadi. {{seconds}} soniyadan keyin administrator chaqiriladi: keyin toʻlov kassada yopiladi.",
+    "idlePostpaidCall": "Kompyuter 10 daqiqa harakatsiz, keyin toʻlov yopilmagan"
   },
   "settings": {
     "title": "Sozlamalar",
@@ -1373,7 +1395,8 @@
     "reboot": "Kompyuterni qayta yuklash",
     "shutdown": "Kompyuterni o'chirish",
     "resetProfile": "Oʻyinchi profilini tiklash",
-    "resetProfileConfirm": "Rostdan tiklansinmi? Oʻyin yopiladi"
+    "resetProfileConfirm": "Rostdan tiklansinmi? Oʻyin yopiladi",
+    "savedToAccount": "Hisobingizda saqlanadi va klubning istalgan kompyuterida sizni kutadi"
   },
   "notifications": {
     "title": "Bildirishnomalar",
@@ -1630,5 +1653,15 @@
       "load": "{{value}}%",
       "hot": "qizib ketgan"
     }
+  },
+  "favorites": {
+    "title": "Sevimlilar",
+    "add": "Sevimlilarga qo‘shish",
+    "remove": "Sevimlilardan olib tashlash",
+    "addNamed": "{{title}}ni sevimlilarga qo‘shish",
+    "removeNamed": "{{title}}ni sevimlilardan olib tashlash",
+    "failed": "Sevimlilarni saqlab bo‘lmadi",
+    "launchApp": "{{title}}ni ochish",
+    "region": "Sevimlilar: tez ishga tushirish uchun o‘yinlar va ilovalar"
   }
 }
