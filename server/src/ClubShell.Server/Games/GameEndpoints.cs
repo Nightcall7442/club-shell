@@ -22,7 +22,9 @@ namespace ClubShell.Server.Games;
 /// pages up to 1000), <c>getGame</c> and <c>sendLaunchReport</c>. <c>X-User-Token</c> only fills <c>lastPlayedAt</c> — the
 /// newest successful launch of the player — and an invalid one is ignored. <c>settingsPaths</c> never leaves the server.
 /// The zone is the PC's own (<c>pcs.zone</c>, what the owner set in the hall), not the <c>zone</c> the agent sends: the
-/// agent's copy of it may be stale. A game with zones is offered only in them; one without, in every zone.
+/// agent's copy of it may be stale. A game with zones is offered only in them; one without, in every zone. The trailer
+/// (<c>videoUrl</c>) is the club server's stored copy once it has one, with the original link as <c>videoSourceUrl</c>
+/// (D-97, <see cref="TrailerStore.Apply"/>); the agent puts the server's address in front of it.
 /// </summary>
 public static class GameEndpoints
 {
@@ -38,7 +40,7 @@ public static class GameEndpoints
         api.MapPost("/{id:guid}/launch-report", LaunchReportAsync).WithMetadata(new AuthRequirement(AuthMode.Agent));
     }
 
-    private static async Task<IResult> ListAsync(HttpContext context, string? page, string? pageSize, NpgsqlDataSource db)
+    private static async Task<IResult> ListAsync(HttpContext context, string? page, string? pageSize, NpgsqlDataSource db, TrailerStore trailers)
     {
         var pc = context.Features.GetRequiredFeature<AgentContext>().Pc;
         var userId = context.Features.Get<UserContext>()?.UserId;
@@ -84,6 +86,7 @@ public static class GameEndpoints
 
         var settings = catalog is null ? null : JsonSerializer.Deserialize<CatalogSettings>(catalog, JsonSerializerOptions.Web);
         var hidden = settings?.Hidden?.ToHashSet() ?? [];
+        var stored = await TrailerStore.RowsAsync(c, pc.ClubId);
         var order = settings?.Order ?? [];
         var all = (await c.QueryAsync<(Guid Id, string Data)>(
                 """
@@ -92,7 +95,10 @@ public static class GameEndpoints
                 """,
                 new { pc.ClubId, zone }))
             .Where(g => !hidden.Contains(g.Id))
-            .Select(g => JsonDefaults.Deserialize<Game>(g.Data)! with { LastPlayedAt = played.TryGetValue(g.Id, out var at) ? at : null })
+            .Select(g => trailers.Apply(JsonDefaults.Deserialize<Game>(g.Data)!, stored.GetValueOrDefault(g.Id)) with
+            {
+                LastPlayedAt = played.TryGetValue(g.Id, out var at) ? at : null,
+            })
             .Where(g => !missing.Blocks(EffectiveAntiCheat(g)))
             .OrderBy(g => Array.IndexOf(order, g.Id) is var i and >= 0 ? i : int.MaxValue)
             .ThenBy(g => g.Title, StringComparer.Ordinal)
@@ -104,7 +110,7 @@ public static class GameEndpoints
         return TypedResults.Ok(new GamesListResponse(items, all.Count, p, size, version.ToString(CultureInfo.InvariantCulture)));
     }
 
-    private static async Task<IResult> GetAsync(HttpContext context, Guid id, NpgsqlDataSource db)
+    private static async Task<IResult> GetAsync(HttpContext context, Guid id, NpgsqlDataSource db, TrailerStore trailers)
     {
         var pc = context.Features.GetRequiredFeature<AgentContext>().Pc;
         await using var c = await db.OpenConnectionAsync();
@@ -112,7 +118,8 @@ public static class GameEndpoints
             "SELECT data::text FROM games WHERE id = @id AND club_id = @ClubId AND deleted_at IS NULL", new { id, pc.ClubId })
             ?? throw ApiException.NotFound("game");
         var played = await LastPlayedAsync(c, context.Features.Get<UserContext>()?.UserId, id);
-        return TypedResults.Ok(JsonDefaults.Deserialize<Game>(data)! with { LastPlayedAt = played.TryGetValue(id, out var at) ? at : null });
+        var game = trailers.Apply(JsonDefaults.Deserialize<Game>(data)!, await TrailerStore.RowAsync(c, id));
+        return TypedResults.Ok(game with { LastPlayedAt = played.TryGetValue(id, out var at) ? at : null });
     }
 
     /// <summary>

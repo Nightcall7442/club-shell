@@ -38,6 +38,7 @@ import {
   knownValues,
 } from '../db.js';
 import { club } from '../club.js';
+import { withTrailer } from '../trailers.js';
 
 const LEASE_TTL_SEC = 14_400;
 const RELEASE_REASONS = Object.values(AccountLeaseReleaseReason);
@@ -101,7 +102,7 @@ export function gamesRoutes(app: FastifyInstance): void {
           !(noFaceit && needs(g, AntiCheatKind.Faceit)),
       )
       .sort((a, b) => rank(a.id) - rank(b.id))
-      .map((g) => withLastPlayed(g, userId));
+      .map((g) => withLastPlayed(withTrailer(g), userId));
     const paged =
       req.query.page || req.query.pageSize
         ? paginate(all, { page: req.query.page, pageSize: req.query.pageSize ?? '1000' }, 1000)
@@ -113,7 +114,7 @@ export function gamesRoutes(app: FastifyInstance): void {
     requireAgent(req);
     const game = findGame(req.params.id);
     if (!game) throw errors.notFound('game');
-    return withLastPlayed(game, optionalUser(req)?.id ?? null);
+    return withLastPlayed(withTrailer(game), optionalUser(req)?.id ?? null);
   });
 
   app.get<{ Params: { id: string }; Querystring: { sessionId?: string } }>(

@@ -1,11 +1,15 @@
 /**
  * A game's trailer (`Game.videoUrl`) over its big art. It waits until the player has stayed on the game for
  * {@link TRAILER_DELAY_MS}, so browsing past games loads no video, then fades in over the art: muted, looped, cropped
- * like the art. Render it right after the `GameArtwork` and before the hero's gradients, so the text stays readable.
+ * like the art (`object-cover` at the element's own size: no poster, no filters, so a 1080p file stays sharp; the art
+ * under it shows until the video's first frame is drawn). Render it right after the `GameArtwork` and before the hero's gradients, so the text stays readable.
  *
  * There is no video element at all while a game runs or launches (the game gets the GPU, memory and network), with the
  * theme's animations off or the system's reduced motion; it pauses while the shell is hidden or not in front. A trailer
  * that fails to load leaves the art as it was and is not tried again for a while.
+ *
+ * From a club server the trailer is the server's own copy (D-97) and `fallback` the link it came from: when the copy
+ * does not play (the server is down, the file is gone), the original link is tried once before giving up.
  */
 import { useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
@@ -32,25 +36,31 @@ function recentlyFailed(url: string): boolean {
 export interface GameTrailerProps {
   /** `Game.videoUrl`: a direct .mp4/.webm link (or a ProgramData-relative path); nothing to play when empty. */
   src: string | null | undefined;
-  /** The art under it (hero, else cover): the video's poster. */
-  poster?: string | null;
+  /** `Game.videoSourceUrl`: the original link of a club server's copy, tried once when `src` fails. */
+  fallback?: string | null | undefined;
 }
 
-export function GameTrailer({ src, poster }: GameTrailerProps): JSX.Element | null {
+export function GameTrailer({ src, fallback }: GameTrailerProps): JSX.Element | null {
   const animations = useThemeStore(selectAnimationsEnabled);
   const reducedMotion = useReducedMotion() === true;
   const gameMode = useGamesStore(selectGameMode);
   const visible = useShellVisible();
-  const { url } = useResolvedAsset(src);
-  const { url: posterUrl } = useResolvedAsset(poster);
-  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const primary = useResolvedAsset(src);
+  const second = useResolvedAsset(fallback);
+  /** URLs that failed while this trailer was shown. */
+  const [failed, setFailed] = useState<readonly string[]>([]);
+  // The fallback is only for a copy that failed: never played while the copy's own URL is still being resolved.
+  const primaryPending = Boolean(src) && primary.url === null && !primary.error;
+  const url =
+    (primaryPending ? [] : [primary.url, second.url]).find(
+      (u): u is string => u !== null && !failed.includes(u) && !recentlyFailed(u),
+    ) ?? null;
   /** The URL whose wait is over (a URL, not a flag: a new trailer never renders with the previous one's go-ahead). */
   const [dueUrl, setDueUrl] = useState<string | null>(null);
   const [shown, setShown] = useState(false);
   const video = useRef<HTMLVideoElement>(null);
 
-  const allowed =
-    url !== null && failedUrl !== url && !recentlyFailed(url) && animations && !reducedMotion && !gameMode;
+  const allowed = url !== null && animations && !reducedMotion && !gameMode;
   const mounted = allowed && dueUrl === url;
   const playing = mounted && shown && visible;
 
@@ -106,21 +116,28 @@ export function GameTrailer({ src, poster }: GameTrailerProps): JSX.Element | nu
     <video
       ref={video}
       src={url}
-      poster={posterUrl ?? undefined}
       muted
+      autoPlay={visible}
       loop
       playsInline
-      preload="auto"
+      preload="metadata"
       disablePictureInPicture
       disableRemotePlayback
       aria-hidden="true"
       tabIndex={-1}
-      onPlaying={() => setShown(true)}
+      onPlaying={(e) => {
+        // The art stays until the first frame is on screen: no poster, no blank or half-decoded frame in between.
+        const el = e.currentTarget as HTMLVideoElement & {
+          requestVideoFrameCallback?: (cb: () => void) => number;
+        };
+        if (typeof el.requestVideoFrameCallback === 'function') el.requestVideoFrameCallback(() => setShown(true));
+        else setShown(true);
+      }}
       onError={(e) => {
         // Only a real media error (not the source being dropped on the way out) counts as a broken link.
         if (e.currentTarget.error !== null) {
           failures.set(url, Date.now());
-          setFailedUrl(url);
+          setFailed((list) => [...list, url]);
         }
       }}
       className={clsx(

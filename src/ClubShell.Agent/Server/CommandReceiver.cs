@@ -643,8 +643,7 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
             return shell;
         }
 
-        string? Abs(string? url) =>
-            url is { Length: > 1 } && url[0] == '/' && url[1] != '/' ? new Uri(server, url).ToString() : url;
+        string? Abs(string? url) => OnServer(url, server);
 
         return shell with
         {
@@ -659,6 +658,13 @@ public sealed class CommandReceiver : IServerCommandSink, IPolicyRefresh, IConfi
             },
         };
     }
+
+    /// <summary>
+    /// A path on the club's server (<c>/api/v1/media/{id}</c>, <c>/api/v1/trailers/{id}</c>) with the server's address in
+    /// front; a full URL, a local path or nothing stays as it is.
+    /// </summary>
+    public static string? OnServer(string? url, Uri? server) =>
+        server is not null && url is { Length: > 1 } && url[0] == '/' && url[1] != '/' ? new Uri(server, url).ToString() : url;
 
     private static TPayload Require<TPayload>(ServerCommand command)
         where TPayload : class

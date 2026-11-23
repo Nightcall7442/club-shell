@@ -40,7 +40,10 @@ public sealed record GameMinSpec(
 /// <param name="Tags">Tags.</param>
 /// <param name="CoverUrl">Cover image (2:3).</param>
 /// <param name="HeroUrl">Wide hero image.</param>
-/// <param name="VideoUrl">Trailer / background video.</param>
+/// <param name="VideoUrl">
+/// Trailer / background video. From a club server: its own stored copy (<c>/api/v1/trailers/{id}</c>, D-97) once it has
+/// one, which the Agent turns into the server's full address; until then the original link.
+/// </param>
 /// <param name="Description">Localized description; may be empty.</param>
 /// <param name="AgeRating">Minimum age; 0 = none.</param>
 /// <param name="Popularity">Server rank score.</param>
@@ -69,6 +72,10 @@ public sealed record GameMinSpec(
 /// children inherit (SHELL_CHANGES 96). Null or false — off; without it such a game fails with
 /// <c>gameLaunchFailed {stage: "elevation"}</c>.
 /// </param>
+/// <param name="VideoSourceUrl">
+/// Where the club server's stored trailer came from (D-97): the original https link, which the Shell tries once when the
+/// stored copy does not play. Null — <see cref="VideoUrl"/> is the original itself, an upload, or there is none.
+/// </param>
 public sealed record Game(
     Guid Id,
     string Title,
@@ -95,7 +102,8 @@ public sealed record Game(
     IReadOnlyList<string>? SettingsPaths = null,
     string? MissingDrive = null,
     IReadOnlyList<GameRegistryValue>? RegistryValues = null,
-    bool? RunAsInvoker = null);
+    bool? RunAsInvoker = null,
+    string? VideoSourceUrl = null);
 
 /// <summary>
 /// A value the Agent writes into the player's HKCU before every launch of the game (SHELL_CHANGES 82), after the player's

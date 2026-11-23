@@ -51,6 +51,65 @@ export async function uploadMedia(
   });
 }
 
+/**
+ * A game's trailer as the club server keeps it (D-97): `searching` — the server is looking for one in the Steam store,
+ * `downloading` — fetching the link once, `ready` — `url` is the stored copy the PCs play, `failed` — see `reason`.
+ */
+export interface AdminTrailer {
+  status: 'searching' | 'downloading' | 'ready' | 'failed';
+  /** `link` — the card's link, `found` — found in the Steam store, `upload` — uploaded here. */
+  origin: 'link' | 'found' | 'upload';
+  sourceUrl: string | null;
+  url: string | null;
+  contentType: string | null;
+  size: number | null;
+  /** `notAVideo`, `streamingFormat`, `tooLarge`, `unavailable`, `unreachable`, `notFound`, `fileLost`. */
+  reason: string | null;
+}
+
+/** The biggest trailer the club server takes (D-97). */
+export const TRAILER_MAX_BYTES = 500 * 1024 * 1024;
+
+/**
+ * Uploads an MP4 (H.264) or WebM trailer of a game as the owner (D-97), reporting the share sent (0..1). XHR, not
+ * fetch: fetch tells nothing of an upload's progress. The server checks the bytes.
+ */
+export function uploadGameTrailer(
+  gameId: string,
+  file: Blob,
+  onProgress?: (share: number) => void,
+): Promise<{ trailer: AdminTrailer }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${BASE}/admin/games/${encodeURIComponent(gameId)}/trailer`);
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && e.total > 0) onProgress?.(e.loaded / e.total);
+    };
+    xhr.onerror = () => reject(new AdminError('network', 'Network error', null));
+    xhr.onload = () => {
+      let parsed: unknown = null;
+      try {
+        parsed = JSON.parse(xhr.responseText);
+      } catch {
+        // not JSON: the status says enough
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(parsed as { trailer: AdminTrailer });
+        return;
+      }
+      const err = (parsed as ServerErrorEnvelope | null)?.error;
+      if (xhr.status === 401) {
+        setToken(null);
+        window.dispatchEvent(new Event('admin:signed-out'));
+      }
+      reject(new AdminError(err?.code ?? 'internal', err?.message ?? xhr.statusText, err?.details ?? null, xhr.status));
+    };
+    xhr.send(file);
+  });
+}
+
 /** The server's origin, what the PC installer takes as `SERVERURL` (the API base without `/api/v1`). */
 export const SERVER_ORIGIN = new URL(BASE, window.location.href).origin;
 const TOKEN_KEY = 'clubshell.admin.token';
@@ -1357,6 +1416,8 @@ export interface AdminGame {
   custom?: boolean;
   /** Trailer the player shell plays behind the game's art: a direct https link to an .mp4/.webm file. */
   videoUrl?: string | null;
+  /** The club server's copy of the trailer and how far it got (D-97); null — none; absent from an older server. */
+  trailer?: AdminTrailer | null;
   /** Zones whose PCs offer the game; empty = every zone. */
   zones?: string[];
   /** Values the agent writes under the player's HKCU before every launch (SHELL_CHANGES 82); absent from an older server. */
@@ -1606,6 +1667,10 @@ export const clubApi = {
   addGame: (input: GameInput): Promise<{ game: AdminGame }> => post('/admin/games', input),
   saveGame: (id: string, input: GameInput): Promise<{ game: AdminGame }> => put(`/admin/games/${id}`, input),
   deleteGame: (id: string): Promise<unknown> => del(`/admin/games/${id}`),
+  /** Takes the game's trailer off (the link and the stored copy); the server does not look for another (D-97). */
+  removeGameTrailer: (id: string): Promise<unknown> => del(`/admin/games/${id}/trailer`),
+  /** «Найти трейлеры»: the server looks in the Steam store for every game without a trailer (D-97). */
+  findTrailers: (): Promise<{ queued: number; gameIds: string[] }> => post('/admin/games/trailers/find', {}),
   /** Zones whose PCs offer the game; an empty list offers it in every zone. */
   saveGameZones: (id: string, zones: string[]): Promise<{ zones: string[] }> =>
     put(`/admin/games/${id}/zones`, { zones }),

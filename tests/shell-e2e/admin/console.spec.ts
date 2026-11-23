@@ -10,6 +10,7 @@
  */
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { expect, test, type APIRequestContext, type APIResponse, type Page } from '@playwright/test';
+import { fileURLToPath } from 'node:url';
 
 const API = 'http://localhost:8091/api/v1';
 const OWNER_PIN = '0000';
@@ -1006,6 +1007,39 @@ test('a game refused for want of administrator rights is flagged, and the owner 
     items: { id: string; runAsInvoker?: boolean }[];
   };
   expect(games.items.find((g) => g.id === id)?.runAsInvoker).toBe(true);
+});
+
+test('the owner uploads a trailer to the club server and sees its status and resolution (D-97)', async ({ page }) => {
+  await signIn(page, OWNER_PIN);
+  await page.goto('/#/catalog');
+  await page.getByRole('row').filter({ hasText: 'Counter-Strike 2' }).getByRole('button', { name: 'Изменить' }).click();
+  const editor = page
+    .locator('section')
+    .filter({ has: page.getByRole('heading', { name: /Игра · Counter-Strike 2/ }) });
+  const trailer = editor.getByTestId('trailer');
+
+  // Not a video: refused by its bytes, whatever the name says.
+  await trailer.getByLabel('Видеофайл ролика').setInputFiles({
+    name: 'trailer.mp4',
+    mimeType: 'video/mp4',
+    buffer: Buffer.from('<!doctype html><title>YouTube</title>'),
+  });
+  await expect(trailer.getByText('Это не видеофайл: нужен MP4 (H.264) или WebM')).toBeVisible();
+
+  // A small real WebM (320×180): stored, played back from the server, flagged as below the club's 1080p.
+  await trailer
+    .getByLabel('Видеофайл ролика')
+    .setInputFiles(fileURLToPath(new URL('../../../tools/MockServer/assets/trailer-sample.webm', import.meta.url)));
+  await expect(trailer.getByRole('status')).toContainText(/Готово · 320×180 · \d+ КБ · загружен/, { timeout: 10_000 });
+  await expect(trailer.getByText(/Ниже 1080p \(320×180\)/)).toBeVisible();
+  await expect(trailer.locator('video')).toHaveAttribute('src', /\/api\/v1\/trailers\/[0-9a-f-]{36}$/);
+  await expect(page.getByRole('row').filter({ hasText: 'Counter-Strike 2' })).toContainText('Есть');
+
+  // «Найти трейлеры»: the mock finds one for every Steam game without one.
+  if (!REAL) {
+    await page.getByRole('button', { name: 'Найти трейлеры' }).click();
+    await expect(page.getByText(/Найдено трейлеров: \d+ из \d+/)).toBeVisible({ timeout: 10_000 });
+  }
 });
 
 test('saving only the zones of a game sends only its zones (SHELL_CHANGES 61)', async ({ page }) => {

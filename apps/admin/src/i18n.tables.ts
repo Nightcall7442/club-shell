@@ -811,9 +811,6 @@ export const UZ: Record<string, string> = {
   Геройские: 'Qahramonlar',
   'Открытый мир': 'Ochiq dunyo',
   'Установить приложение': 'Ilovani oʻrnatish',
-  'Ролик (ссылка на .mp4/.webm)': 'Rolik (.mp4/.webm havolasi)',
-  'Необязательно. Прямая ссылка на сам файл: ролик без звука идёт за картинкой игры на ПК. Ссылка на YouTube не подойдёт.':
-    'Ixtiyoriy. Faylning oʻziga toʻgʻridan-toʻgʻri havola: rolik kompyuterlarda oʻyin rasmi ortida ovozsiz aylanadi. YouTube havolasi toʻgʻri kelmaydi.',
   'Ролик — ссылка https://… на файл .mp4 или .webm': 'Rolik — .mp4 yoki .webm fayliga https://… havola',
   'Значений реестра — не больше {n}': 'Reyestr qiymatlari — {n} tadan koʻp emas',
   'Реестр, строка {n}: нужен вид HKCU\\Software\\…\\Имя = dword:1 или = "текст"':
@@ -1509,6 +1506,46 @@ export const UZ: Record<string, string> = {
   'исправлено на {sum}': '{sum} ga tuzatildi',
   отменено: 'bekor qilindi',
   '≈ {time} · спишется {sum}': '≈ {time} · {sum} yechiladi',
+  '{n} МБ': '{n} MB',
+  '{n} КБ': '{n} KB',
+  'Ищем трейлер в Steam…': 'Steamʼda treyler qidirilmoqda…',
+  'Скачивается… ссылка пока не отвечает, сервер повторит':
+    'Yuklanmoqda… havola hozircha javob bermayapti, server qayta urinadi',
+  'Скачивается…': 'Yuklanmoqda…',
+  загружен: 'yuklangan',
+  'найден в Steam': 'Steamʼda topilgan',
+  'скачан по ссылке': 'havoladan yuklangan',
+  'Не удалось: это не видеофайл (например, YouTube). Нужна прямая ссылка на .mp4 или .webm — или загрузите видео.':
+    'Boʻlmadi: bu video fayl emas (masalan, YouTube). .mp4 yoki .webm faylga toʻgʻridan-toʻgʻri havola kerak — yoki videoni yuklang.',
+  'Не удалось: это потоковое видео (HLS/DASH). Нужна ссылка на один файл .mp4 или .webm.':
+    'Boʻlmadi: bu oqimli video (HLS/DASH). Bitta .mp4 yoki .webm faylga havola kerak.',
+  'Не удалось: файл больше {n} МБ': 'Boʻlmadi: fayl {n} MB dan katta',
+  'Не удалось: по ссылке ничего нет': 'Boʻlmadi: havolada hech narsa yoʻq',
+  'Не удалось: сервер клуба не достучался до ссылки': 'Boʻlmadi: klub serveri havolaga ulana olmadi',
+  'В Steam трейлер не найден — добавьте ссылку или загрузите видео':
+    'Steamʼda treyler topilmadi — havola qoʻshing yoki video yuklang',
+  'Файл ролика пропал с сервера — загрузите его заново': 'Rolik fayli serverdan yoʻqoldi — uni qayta yuklang',
+  'Не удалось скачать ролик': 'Rolikni yuklab boʻlmadi',
+  'Это не видеофайл: нужен MP4 (H.264) или WebM': 'Bu video fayl emas: MP4 (H.264) yoki WebM kerak',
+  'Файл больше {n} МБ': 'Fayl {n} MB dan katta',
+  'Прямая ссылка на файл .mp4/.webm или видео с компьютера: MP4 (H.264), 1920×1080, до 500 МБ. Сервер клуба хранит копию, и ПК играют её без интернета. Пусто — сервер сам поищет трейлер в Steam.':
+    '.mp4/.webm faylga toʻgʻridan-toʻgʻri havola yoki kompyuterdan video: MP4 (H.264), 1920×1080, 500 MB gacha. Klub serveri nusxasini saqlaydi va kompyuterlar uni internetsiz oʻynaydi. Boʻsh — server treylerni Steamʼdan oʻzi qidiradi.',
+  'Загрузка… {n}%': 'Yuklanmoqda… {n}%',
+  'Загрузить видео': 'Video yuklash',
+  'Убрать ролик': 'Rolikni olib tashlash',
+  'Видео можно загрузить после добавления игры': 'Videoni oʻyin qoʻshilgandan keyin yuklash mumkin',
+  'Видеофайл ролика': 'Rolik video fayli',
+  'Загрузка видео': 'Video yuklanmoqda',
+  'Ниже 1080p ({w}×{h}): на ПК ролик будет мягче картинки. Лучше 1920×1080.':
+    '1080p dan past ({w}×{h}): kompyuterlarda rolik rasmdan xiraroq boʻladi. 1920×1080 yaxshiroq.',
+  'Ищем трейлеры…': 'Treylerlar qidirilmoqda…',
+  'Найти трейлеры': 'Treylerlarni topish',
+  'У всех игр уже есть трейлер': 'Barcha oʻyinlarda allaqachon treyler bor',
+  'Ищем трейлеры в Steam: проверено {done} из {n}':
+    'Steamʼda treylerlar qidirilmoqda: {n} tadan {done} tasi tekshirildi',
+  'Найдено трейлеров: {found} из {n}. Сервер клуба скачает их сам.':
+    'Topilgan treylerlar: {n} tadan {found} ta. Klub serveri ularni oʻzi yuklab oladi.',
+  Есть: 'Bor',
 };
 export const EN: Record<string, string> = {
   'Выручка за период': 'Revenue for the period',
@@ -2321,9 +2358,6 @@ export const EN: Record<string, string> = {
   Геройские: 'Hero',
   'Открытый мир': 'Open world',
   'Установить приложение': 'Install the app',
-  'Ролик (ссылка на .mp4/.webm)': 'Trailer (link to an .mp4/.webm)',
-  'Необязательно. Прямая ссылка на сам файл: ролик без звука идёт за картинкой игры на ПК. Ссылка на YouTube не подойдёт.':
-    "Optional. A direct link to the file itself: the trailer plays muted behind the game's art on the PCs. A YouTube link will not work.",
   'Ролик — ссылка https://… на файл .mp4 или .webm': 'The trailer is an https://… link to an .mp4 or .webm file',
   'Значений реестра — не больше {n}': 'No more than {n} registry values',
   'Реестр, строка {n}: нужен вид HKCU\\Software\\…\\Имя = dword:1 или = "текст"':
@@ -3014,4 +3048,43 @@ export const EN: Record<string, string> = {
   'исправлено на {sum}': 'corrected to {sum}',
   отменено: 'cancelled',
   '≈ {time} · спишется {sum}': '≈ {time} · {sum} charged',
+  '{n} МБ': '{n} MB',
+  '{n} КБ': '{n} KB',
+  'Ищем трейлер в Steam…': 'Looking for a trailer on Steam…',
+  'Скачивается… ссылка пока не отвечает, сервер повторит':
+    'Downloading… the link is not answering yet, the server will retry',
+  'Скачивается…': 'Downloading…',
+  загружен: 'uploaded',
+  'найден в Steam': 'found on Steam',
+  'скачан по ссылке': 'downloaded from the link',
+  'Не удалось: это не видеофайл (например, YouTube). Нужна прямая ссылка на .mp4 или .webm — или загрузите видео.':
+    'Failed: this is not a video file (YouTube, for example). Use a direct link to an .mp4 or .webm — or upload the video.',
+  'Не удалось: это потоковое видео (HLS/DASH). Нужна ссылка на один файл .mp4 или .webm.':
+    'Failed: this is streaming video (HLS/DASH). Use a link to a single .mp4 or .webm file.',
+  'Не удалось: файл больше {n} МБ': 'Failed: the file is over {n} MB',
+  'Не удалось: по ссылке ничего нет': 'Failed: nothing at the link',
+  'Не удалось: сервер клуба не достучался до ссылки': 'Failed: the club server could not reach the link',
+  'В Steam трейлер не найден — добавьте ссылку или загрузите видео':
+    'No trailer found on Steam — add a link or upload a video',
+  'Файл ролика пропал с сервера — загрузите его заново': 'The trailer file is gone from the server — upload it again',
+  'Не удалось скачать ролик': 'The trailer could not be downloaded',
+  'Это не видеофайл: нужен MP4 (H.264) или WebM': 'Not a video file: an MP4 (H.264) or WebM is needed',
+  'Файл больше {n} МБ': 'The file is over {n} MB',
+  'Прямая ссылка на файл .mp4/.webm или видео с компьютера: MP4 (H.264), 1920×1080, до 500 МБ. Сервер клуба хранит копию, и ПК играют её без интернета. Пусто — сервер сам поищет трейлер в Steam.':
+    'A direct link to an .mp4/.webm file or a video from your computer: MP4 (H.264), 1920×1080, up to 500 MB. The club server keeps a copy and the PCs play it without the internet. Empty — the server looks for a trailer on Steam itself.',
+  'Загрузка… {n}%': 'Uploading… {n}%',
+  'Загрузить видео': 'Upload video',
+  'Убрать ролик': 'Remove trailer',
+  'Видео можно загрузить после добавления игры': 'You can upload a video once the game is added',
+  'Видеофайл ролика': 'Trailer video file',
+  'Загрузка видео': 'Video upload',
+  'Ниже 1080p ({w}×{h}): на ПК ролик будет мягче картинки. Лучше 1920×1080.':
+    'Below 1080p ({w}×{h}): on the PCs the trailer will look softer than the art. 1920×1080 is better.',
+  'Ищем трейлеры…': 'Looking for trailers…',
+  'Найти трейлеры': 'Find trailers',
+  'У всех игр уже есть трейлер': 'Every game already has a trailer',
+  'Ищем трейлеры в Steam: проверено {done} из {n}': 'Looking for trailers on Steam: {done} of {n} checked',
+  'Найдено трейлеров: {found} из {n}. Сервер клуба скачает их сам.':
+    'Trailers found: {found} of {n}. The club server downloads them itself.',
+  Есть: 'Yes',
 };

@@ -223,7 +223,7 @@ export function HomeHero(): JSX.Element {
                   className="rounded-none"
                   style={{ position: 'absolute', inset: 0, height: '100%', aspectRatio: 'auto' }}
                 />
-                <GameTrailer src={hero.videoUrl} poster={hero.heroUrl ?? hero.coverUrl} />
+                <GameTrailer src={hero.videoUrl} fallback={hero.videoSourceUrl} />
               </motion.div>
             )}
           </AnimatePresence>

@@ -362,7 +362,10 @@ export interface Game {
   coverUrl: string;
   /** Wide hero image. */
   heroUrl?: string | null;
-  /** Trailer / background video. */
+  /**
+   * Trailer / background video. From a club server: its own stored copy (`/api/v1/trailers/{id}`, D-97) once it has
+   * one, which the Agent turns into the server's full address; until then the original link.
+   */
   videoUrl?: string | null;
   /** Localized description; may be empty. */
   description: string;
@@ -403,6 +406,11 @@ export interface Game {
    * (SHELL_CHANGES 96). Null or false — off; without it such a game fails with `gameLaunchFailed {stage: "elevation"}`.
    */
   runAsInvoker?: boolean | null;
+  /**
+   * Where the club server's stored trailer came from (D-97): the original https link, which the Shell tries once when
+   * the stored copy does not play. Null — `Game.VideoUrl` is the original itself, an upload, or there is none.
+   */
+  videoSourceUrl?: string | null;
 }
 
 /** Body of `POST /games/{id}/launch-report` (SERVER_API.md §4.6). */

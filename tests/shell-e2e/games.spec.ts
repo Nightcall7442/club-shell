@@ -289,3 +289,23 @@ test.describe('games library', () => {
     await expect(grid(page)).toBeVisible();
   });
 });
+
+test.describe('game trailer', () => {
+  test("plays the original link once when the club server's copy does not load (D-97)", async ({ page }) => {
+    const PUBG = 'PUBG: BATTLEGROUNDS';
+    const asked: string[] = [];
+    page.on('request', (r) => {
+      const path = new URL(r.url()).pathname;
+      if (/\.(mp4|webm)$/i.test(path)) asked.push(path);
+    });
+    await openLibrary(page);
+    await card(page, PUBG).click();
+    await expect(hero(page, PUBG)).toBeVisible();
+
+    // The mock's copy of PUBG's trailer is missing, as a server's copy lost with its disk would be.
+    await expect.poll(() => asked.includes('/mock-art/pubg-hero.mp4'), { timeout: 10_000 }).toBe(true);
+    expect(asked.indexOf('/mock-trailers/pubg-copy.mp4')).toBeGreaterThanOrEqual(0);
+    expect(asked.indexOf('/mock-trailers/pubg-copy.mp4')).toBeLessThan(asked.indexOf('/mock-art/pubg-hero.mp4'));
+    await expect(hero(page, PUBG).locator('video')).toHaveAttribute('preload', 'metadata');
+  });
+});

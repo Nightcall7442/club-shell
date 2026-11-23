@@ -191,7 +191,7 @@ export function GameHero({
         className="rounded-none"
         style={{ position: 'absolute', inset: 0, height: '100%', aspectRatio: 'auto' }}
       />
-      <GameTrailer key={`trailer-${game.id}`} src={game.videoUrl} poster={game.heroUrl ?? game.coverUrl} />
+      <GameTrailer key={`trailer-${game.id}`} src={game.videoUrl} fallback={game.videoSourceUrl} />
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 bg-gradient-to-r from-bg/95 via-bg/70 to-bg/10"

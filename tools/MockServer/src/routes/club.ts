@@ -52,6 +52,7 @@ import {
 } from '../db.js';
 import { PRODUCT_CATEGORIES, liveProducts, productView, voidOf } from './bar.js';
 import { gamesVolumeOf, hardwareOf } from '../devices.js';
+import { trailerOf, trailerRoutes } from '../trailers.js';
 import { generateLogin, phoneDigits } from '../logins.js';
 import {
   API_TOPUP,
@@ -237,6 +238,8 @@ function bumpCatalog(): void {
 }
 
 export function clubRoutes(app: FastifyInstance): void {
+  trailerRoutes(app, (req) => requireStaff(req, 'owner'));
+
   // ------------------------------------------------------------------------------------------------ staff & auth
   // `clubCode` and `deviceId` (the console's browser id, D-76) are accepted and ignored: the mock holds one club and has no
   // wrong-PIN limit, so it never answers 429.
@@ -1216,6 +1219,10 @@ export function clubRoutes(app: FastifyInstance): void {
         featured: c.catalog.featured.includes(g.id),
         settingsPaths: g.settingsPaths ?? [],
         zones: db.gameZones?.[g.id] ?? [],
+        launcherAppId: g.launcherAppId,
+        exePath: g.exePath,
+        videoUrl: g.videoUrl ?? null,
+        trailer: trailerOf(g),
       })),
       order: c.catalog.order,
     };

@@ -2,9 +2,20 @@
  * Game catalogue of the player shell: the club's games (add, edit, delete — saved at once), and their order, featured
  * and hidden marks — a draft of `catalog` in the club settings, saved with the save bar.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
-import { clubApi, type AdminGame, type ClubSettings, type GameInput, type GameRegistryValue } from '@/api';
+import {
+  AdminError,
+  clubApi,
+  mediaUrl,
+  TRAILER_MAX_BYTES,
+  uploadGameTrailer,
+  type AdminGame,
+  type AdminTrailer,
+  type ClubSettings,
+  type GameInput,
+  type GameRegistryValue,
+} from '@/api';
 import { describe } from '@/errors';
 import { dateLocale, t } from '@/i18n';
 import { CheckIcon, ChevronDownIcon, GamepadIcon, SearchIcon } from '@/icons';
@@ -249,8 +260,226 @@ function Cover({ src, className }: { src: string | null | undefined; className?:
   );
 }
 
+/** «24 МБ», «460 КБ». */
+function fileSize(bytes: number): string {
+  return bytes >= 1024 * 1024
+    ? t('{n} МБ', { n: Math.max(1, Math.round(bytes / 1024 / 1024)) })
+    : t('{n} КБ', { n: Math.max(1, Math.round(bytes / 1024)) });
+}
+
+/** What the club server says of its copy of the trailer (D-97), in the console's words, with the line's tone. */
+function trailerStatus(
+  tr: AdminTrailer,
+  size?: { width: number; height: number } | null,
+): { text: string; tone: 'ok' | 'warn' | 'muted' } {
+  if (tr.status === 'searching') return { text: t('Ищем трейлер в Steam…'), tone: 'muted' };
+  if (tr.status === 'downloading')
+    return {
+      text:
+        tr.reason === 'unreachable' ? t('Скачивается… ссылка пока не отвечает, сервер повторит') : t('Скачивается…'),
+      tone: 'muted',
+    };
+  if (tr.status === 'ready') {
+    const from =
+      tr.origin === 'upload' ? t('загружен') : tr.origin === 'found' ? t('найден в Steam') : t('скачан по ссылке');
+    const parts = [t('Готово'), ...(size ? [`${size.width}×${size.height}`] : []), fileSize(tr.size ?? 0), from];
+    return { text: parts.join(' · '), tone: 'ok' };
+  }
+  const reasons: Record<string, string> = {
+    notAVideo: t(
+      'Не удалось: это не видеофайл (например, YouTube). Нужна прямая ссылка на .mp4 или .webm — или загрузите видео.',
+    ),
+    streamingFormat: t('Не удалось: это потоковое видео (HLS/DASH). Нужна ссылка на один файл .mp4 или .webm.'),
+    tooLarge: t('Не удалось: файл больше {n} МБ', { n: TRAILER_MAX_BYTES / 1024 / 1024 }),
+    unavailable: t('Не удалось: по ссылке ничего нет'),
+    unreachable: t('Не удалось: сервер клуба не достучался до ссылки'),
+    notFound: t('В Steam трейлер не найден — добавьте ссылку или загрузите видео'),
+    fileLost: t('Файл ролика пропал с сервера — загрузите его заново'),
+  };
+  return { text: reasons[tr.reason ?? ''] ?? t('Не удалось скачать ролик'), tone: 'warn' };
+}
+
+/** The upload's refusal in the console's words. */
+function uploadProblem(e: unknown): string {
+  if (e instanceof AdminError && e.details?.['field'] === 'file') {
+    if (e.details['reason'] === 'format') return t('Это не видеофайл: нужен MP4 (H.264) или WebM');
+    if (e.details['reason'] === 'max') return t('Файл больше {n} МБ', { n: TRAILER_MAX_BYTES / 1024 / 1024 });
+  }
+  return describe(e);
+}
+
+/**
+ * The trailer of a game (D-97): the link (as before), «Загрузить видео» with progress, how far the club server got
+ * with its own copy, and the preview — the stored copy once it is there, else the typed link.
+ */
+function TrailerField({
+  game,
+  link,
+  onLink,
+  onChanged,
+}: {
+  game: AdminGame | null;
+  link: string;
+  onLink: (url: string) => void;
+  /** The server's game changed (an upload, a removal): reload the list. */
+  onChanged: () => void;
+}): JSX.Element {
+  const input = useRef<HTMLInputElement>(null);
+  const [progress, setProgress] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [uploaded, setUploaded] = useState<AdminTrailer | null>(null);
+  const [removing, setRemoving] = useState(false);
+  /** The stored copy's frame size, read by the preview (D-97: the owner wants trailers that look good). */
+  const [frame, setFrame] = useState<{ url: string; width: number; height: number } | null>(null);
+  const saved = (game?.videoUrl ?? '') === link.trim();
+  // A fresh upload shows at once; the list catches up.
+  const trailer = uploaded ?? (saved ? (game?.trailer ?? null) : null);
+  const stored = trailer?.status === 'ready' ? mediaUrl(trailer.url) : null;
+  const size = frame && frame.url === stored ? frame : null;
+  const status = trailer ? trailerStatus(trailer, size) : null;
+  // The club's target is 1080p: below it a trailer looks soft on the PCs' screens.
+  const lowRes = size !== null && Math.min(size.width, size.height) < 1080;
+  const typed = VIDEO_URL.test(link.trim()) ? link.trim() : null;
+
+  const pick = async (file: File | undefined): Promise<void> => {
+    if (!file || !game) return;
+    if (file.size > TRAILER_MAX_BYTES) {
+      setError(t('Файл больше {n} МБ', { n: TRAILER_MAX_BYTES / 1024 / 1024 }));
+      return;
+    }
+    setError(null);
+    setProgress(0);
+    try {
+      const r = await uploadGameTrailer(game.id, file, setProgress);
+      setUploaded(r.trailer);
+      // The upload replaces the card's link.
+      onLink('');
+      onChanged();
+    } catch (e) {
+      setError(uploadProblem(e));
+    } finally {
+      setProgress(null);
+      if (input.current) input.current.value = '';
+    }
+  };
+
+  const remove = async (): Promise<void> => {
+    if (!game) return;
+    setRemoving(true);
+    setError(null);
+    try {
+      await clubApi.removeGameTrailer(game.id);
+      setUploaded(null);
+      onLink('');
+      onChanged();
+    } catch (e) {
+      setError(describe(e));
+    } finally {
+      setRemoving(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-2" data-testid="trailer">
+      <Field
+        label={t('Ролик')}
+        hint={t(
+          'Прямая ссылка на файл .mp4/.webm или видео с компьютера: MP4 (H.264), 1920×1080, до 500 МБ. Сервер клуба хранит копию, и ПК играют её без интернета. Пусто — сервер сам поищет трейлер в Steam.',
+        )}
+      >
+        <Input
+          inputMode="url"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="https://…/trailer.mp4"
+          value={link}
+          onChange={(e) => {
+            setUploaded(null);
+            onLink(e.target.value);
+          }}
+        />
+      </Field>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={!game || progress !== null}
+          onClick={() => input.current?.click()}
+        >
+          {progress !== null ? t('Загрузка… {n}%', { n: Math.round(progress * 100) }) : t('Загрузить видео')}
+        </Button>
+        {game && (trailer || game.videoUrl) && progress === null && (
+          <Button size="sm" variant="ghost" disabled={removing} onClick={() => void remove()}>
+            {t('Убрать ролик')}
+          </Button>
+        )}
+        {!game && <span className="text-xs text-muted">{t('Видео можно загрузить после добавления игры')}</span>}
+        <input
+          ref={input}
+          type="file"
+          accept="video/mp4,video/webm,.mp4,.webm"
+          aria-label={t('Видеофайл ролика')}
+          className="hidden"
+          onChange={(e) => void pick(e.target.files?.[0])}
+        />
+      </div>
+      {progress !== null && (
+        <div
+          role="progressbar"
+          aria-label={t('Загрузка видео')}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(progress * 100)}
+          className="h-1 w-56 overflow-hidden rounded-full bg-text/[0.08]"
+        >
+          <div className="h-full bg-accent transition-[width]" style={{ width: `${Math.round(progress * 100)}%` }} />
+        </div>
+      )}
+      {status && (
+        <span
+          role="status"
+          className={clsx(
+            'text-xs',
+            status.tone === 'ok'
+              ? lowRes
+                ? 'text-warning'
+                : 'text-dim'
+              : status.tone === 'warn'
+                ? 'font-medium text-warning'
+                : 'text-muted',
+          )}
+        >
+          {status.text}
+        </span>
+      )}
+      {lowRes && size && (
+        <span className="text-xs font-medium text-warning">
+          {t('Ниже 1080p ({w}×{h}): на ПК ролик будет мягче картинки. Лучше 1920×1080.', {
+            w: size.width,
+            h: size.height,
+          })}
+        </span>
+      )}
+      {error && <span className="text-xs font-medium text-warning">{error}</span>}
+      {(stored ?? typed) && (
+        <TrailerPreview
+          url={(stored ?? typed) as string}
+          onSize={(width, height) => stored && setFrame({ url: stored, width, height })}
+        />
+      )}
+    </div>
+  );
+}
+
 /** The trailer as the PCs play it (muted, looped); a link that is not a playable file says so before it is saved. */
-function TrailerPreview({ url }: { url: string }): JSX.Element {
+function TrailerPreview({
+  url,
+  onSize,
+}: {
+  url: string;
+  /** The video's frame size, once its metadata is in. */
+  onSize?: (width: number, height: number) => void;
+}): JSX.Element {
   const [src, setSrc] = useState(url);
   const [broken, setBroken] = useState(false);
 
@@ -281,6 +510,10 @@ function TrailerPreview({ url }: { url: string }): JSX.Element {
           preload="metadata"
           aria-label={t('Ролик')}
           onError={() => setBroken(true)}
+          onLoadedMetadata={(e) => {
+            const v = e.currentTarget;
+            if (v.videoWidth > 0 && v.videoHeight > 0) onSize?.(v.videoWidth, v.videoHeight);
+          }}
           className="aspect-video w-56 rounded-md border border-line bg-art object-cover"
         />
       )}
@@ -294,12 +527,15 @@ function GameEditor({
   clubZones,
   onDone,
   onCancel,
+  onChanged,
 }: {
   game: AdminGame | null;
   /** The club's zones (club settings); a zone the game names that is no longer among them still shows. */
   clubZones: string[];
   onDone: () => void;
   onCancel: () => void;
+  /** Saved on the server without closing the editor (the trailer): reload the list. */
+  onChanged: () => void;
 }): JSX.Element {
   const [form, setForm] = useState<GameForm>(() => (game ? formOf(game) : EMPTY_FORM));
   const savedZones = game?.zones ?? [];
@@ -434,24 +670,12 @@ function GameEditor({
           >
             <Input placeholder="https://…" value={form.coverUrl} onChange={(e) => set({ coverUrl: e.target.value })} />
           </Field>
-          <div className="flex flex-col gap-2">
-            <Field
-              label={t('Ролик (ссылка на .mp4/.webm)')}
-              hint={t(
-                'Необязательно. Прямая ссылка на сам файл: ролик без звука идёт за картинкой игры на ПК. Ссылка на YouTube не подойдёт.',
-              )}
-            >
-              <Input
-                inputMode="url"
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="https://…/trailer.mp4"
-                value={form.videoUrl}
-                onChange={(e) => set({ videoUrl: e.target.value })}
-              />
-            </Field>
-            {VIDEO_URL.test(form.videoUrl.trim()) && <TrailerPreview url={form.videoUrl.trim()} />}
-          </div>
+          <TrailerField
+            game={game}
+            link={form.videoUrl}
+            onLink={(videoUrl) => set({ videoUrl })}
+            onChanged={onChanged}
+          />
           <FieldGroup label={t('Категории')} hint={t('До {n}', { n: MAX_CATEGORIES })} className="lg:col-span-2">
             <div className="flex flex-wrap gap-1.5">
               {chips.map((c) => {
@@ -581,6 +805,9 @@ export default function CatalogPage(): JSX.Element {
   const [savingPaths, setSavingPaths] = useState(false);
   /** The game open in the editor: `new` — a new one. */
   const [gameEdit, setGameEdit] = useState<string | null>(null);
+  /** «Найти трейлеры»: the games the server searches for (D-97); null — not asked. */
+  const [finding, setFinding] = useState<string[] | null>(null);
+  const [findBusy, setFindBusy] = useState(false);
   const s = useClubSettings();
 
   const savePaths = async (): Promise<void> => {
@@ -610,6 +837,31 @@ export default function CatalogPage(): JSX.Element {
   useEffect(() => {
     void load();
   }, []);
+
+  // While the club server searches for or downloads a trailer, the list follows it.
+  const working = games.some((g) => g.trailer?.status === 'searching' || g.trailer?.status === 'downloading');
+  useEffect(() => {
+    if (!working) return undefined;
+    const timer = window.setTimeout(() => void load(), 2000);
+    return () => window.clearTimeout(timer);
+  }, [working, games]);
+
+  const findTrailers = async (): Promise<void> => {
+    setFindBusy(true);
+    setError(null);
+    try {
+      const r = await clubApi.findTrailers();
+      setFinding(r.gameIds);
+      await load();
+    } catch (e) {
+      setError(describe(e));
+    } finally {
+      setFindBusy(false);
+    }
+  };
+  const searched = finding?.map((id) => games.find((g) => g.id === id)?.trailer ?? null) ?? [];
+  const stillSearching = searched.filter((tr) => tr?.status === 'searching').length;
+  const foundCount = searched.filter((tr) => tr?.status === 'downloading' || tr?.status === 'ready').length;
 
   const catalog: ClubSettings['catalog'] = s.draft?.catalog ?? { order: [], hidden: [], featured: [] };
   const order = useMemo(() => fullOrder(catalog.order, games), [catalog.order, games]);
@@ -655,6 +907,9 @@ export default function CatalogPage(): JSX.Element {
                 onChange={(e) => setQuery(e.target.value)}
               />
             </span>
+            <Button variant="secondary" disabled={findBusy || stillSearching > 0} onClick={() => void findTrailers()}>
+              {findBusy || stillSearching > 0 ? t('Ищем трейлеры…') : t('Найти трейлеры')}
+            </Button>
             <Button variant="primary" onClick={() => openGame('new')}>
               {t('Добавить игру')}
             </Button>
@@ -663,6 +918,21 @@ export default function CatalogPage(): JSX.Element {
       />
       {error && <Note note={{ text: error, tone: 'err' }} />}
       {s.error && <Note note={{ text: s.error, tone: 'err' }} />}
+      {finding && (
+        <Note role="status" tone="ok">
+          {finding.length === 0
+            ? t('У всех игр уже есть трейлер')
+            : stillSearching > 0
+              ? t('Ищем трейлеры в Steam: проверено {done} из {n}', {
+                  done: finding.length - stillSearching,
+                  n: finding.length,
+                })
+              : t('Найдено трейлеров: {found} из {n}. Сервер клуба скачает их сам.', {
+                  found: foundCount,
+                  n: finding.length,
+                })}
+        </Note>
+      )}
 
       {gameEdit && (
         <GameEditor
@@ -670,6 +940,7 @@ export default function CatalogPage(): JSX.Element {
           game={gameEdit === 'new' ? null : (byId.get(gameEdit) ?? null)}
           clubZones={(s.draft?.zones ?? []).map((z) => z.name)}
           onCancel={() => setGameEdit(null)}
+          onChanged={() => void load()}
           onDone={() => {
             setGameEdit(null);
             void load();
@@ -764,6 +1035,19 @@ export default function CatalogPage(): JSX.Element {
                 ) : (
                   <span className="text-muted">{t('Все')}</span>
                 ),
+            },
+            {
+              key: 'trailer',
+              title: t('Ролик'),
+              render: (g) => {
+                const tr = g.trailer;
+                if (tr?.status === 'ready') return <span className="text-text">{t('Есть')}</span>;
+                if (tr?.status === 'searching' || tr?.status === 'downloading')
+                  return <span className="text-muted">{t('Скачивается…')}</span>;
+                if (tr?.status === 'failed' && tr.origin !== 'found')
+                  return <span className="text-warning">{t('Ошибка')}</span>;
+                return <span className="text-muted">{t('Нет')}</span>;
+              },
             },
             {
               key: 'installed',
