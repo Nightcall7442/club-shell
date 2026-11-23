@@ -114,8 +114,17 @@ const VIEW_KEY = 'clubshell.admin.map.view';
  */
 const IGNORED_MINUTES = 60;
 
-/** A result line in the seat panel; a money step adds its slip («Чек») and a walk-in guest how to sign in. */
-type NoteState = { text: string; tone: 'ok' | 'warn' | 'err'; receipt?: ReceiptData; hint?: string } | null;
+/**
+ * A result line in the seat panel; a money step adds its slip («Чек»), a walk-in guest how to sign in and the seat's
+ * code (D-96), shown here once.
+ */
+type NoteState = {
+  text: string;
+  tone: 'ok' | 'warn' | 'err';
+  receipt?: ReceiptData;
+  hint?: string;
+  guestCode?: { code: string; pc: string };
+} | null;
 
 /**
  * A PC status in words: `label` for the tile's title and the seat card, `word` for the tile's bottom line (free,
@@ -722,17 +731,56 @@ function SeatTile({
   );
 }
 
-/** The panel's result line, with «Чек» for a money step and the guest's way in after a walk-in seat. */
+/** The panel's result line, with «Чек» for a money step and the guest's way in (and code) after a walk-in seat. */
 function SeatNote({ note }: { note: NoteState }): JSX.Element | null {
   if (!note) return null;
   return (
-    <Note tone={note.tone} role={note.tone === 'err' ? 'alert' : 'status'}>
-      <span className="flex items-start justify-between gap-3">
-        <span className="min-w-0">{note.text}</span>
-        {note.receipt && <ReceiptButton receipt={note.receipt} size="xs" className="-my-0.5 shrink-0" />}
-      </span>
-      {note.hint && <span className="mt-1.5 block text-xs font-normal text-dim">{note.hint}</span>}
-    </Note>
+    <>
+      <Note tone={note.tone} role={note.tone === 'err' ? 'alert' : 'status'}>
+        <span className="flex items-start justify-between gap-3">
+          <span className="min-w-0">{note.text}</span>
+          {note.receipt && <ReceiptButton receipt={note.receipt} size="xs" className="-my-0.5 shrink-0" />}
+        </span>
+        {note.hint && <span className="mt-1.5 block text-xs font-normal text-dim">{note.hint}</span>}
+      </Note>
+      {note.guestCode && <GuestCode code={note.guestCode.code} pc={note.guestCode.pc} />}
+    </>
+  );
+}
+
+/**
+ * A walk-in guest's seat code (D-96), large: no PC signs a guest in on the desk's word, so the cashier names these four
+ * digits and the guest types them on the PC. The server sends the code once (it keeps only its hash), so it is shown
+ * here with a copy button and not kept anywhere else; `pc` is the PC's label.
+ */
+function GuestCode({ code, pc }: { code: string; pc: string }): JSX.Element {
+  const [copied, setCopied] = useState<boolean | null>(null);
+  const copy = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return (
+    <section
+      aria-label={t('Код для входа гостя на {pc}', { pc })}
+      className="well flex items-center justify-between gap-3 px-3.5 py-3"
+    >
+      <div className="min-w-0">
+        <p className="text-[12.5px] leading-5 text-dim">{t('Назовите гостю код для входа на {pc}', { pc })}</p>
+        <p
+          data-guest-code={code}
+          className="tnum mt-1.5 select-all font-mono text-[40px] font-medium leading-none tracking-[0.3em] text-text"
+        >
+          {code}
+        </p>
+      </div>
+      <Button variant="ghost" size="xs" className="shrink-0" onClick={() => void copy()}>
+        {copied === true ? t('Скопировано') : copied === false ? t('Не скопировалось') : t('Копировать')}
+      </Button>
+    </section>
   );
 }
 
@@ -1429,7 +1477,7 @@ function BulkPanel({
       : t('Постоплата для гостей выключена в настройках клуба');
   const [sessionAsk, setSessionAsk] = useState<{ kind: 'open' | 'end'; seats: Seat[] } | null>(null);
   const [sessionRows, setSessionRows] = useState<
-    { pcId: string; name: string; text: string; tone: 'ok' | 'warn' | 'err' }[] | null
+    { pcId: string; name: string; text: string; tone: 'ok' | 'warn' | 'err'; guestCode?: string }[] | null
   >(null);
   const [sessionBusy, setSessionBusy] = useState(false);
   const tariffOf = (seat: Seat): Tariff | undefined => zoneTariffsOf(tariffs, seat.pc.zone).find((tf) => !tf.isPackage);
@@ -1438,7 +1486,7 @@ function BulkPanel({
     setSessionAsk(null);
     setSessionBusy(true);
     setResults(null);
-    const rows: { pcId: string; name: string; text: string; tone: 'ok' | 'warn' | 'err' }[] = [];
+    const rows: { pcId: string; name: string; text: string; tone: 'ok' | 'warn' | 'err'; guestCode?: string }[] = [];
     let owed = 0;
     for (const seat of list) {
       const name = seat.pc.name;
@@ -1453,7 +1501,7 @@ function BulkPanel({
               tone: 'warn',
             });
           } else {
-            await adminApi.openGuestSession(
+            const r = await adminApi.openGuestSession(
               { pcId: seat.pc.id, tariffId: tf.id, minutes: 60, prepaid: false },
               newKey(),
             );
@@ -1462,6 +1510,7 @@ function BulkPanel({
               name,
               text: t('✓ постоплата открыта · {tariff}', { tariff: tf.name }),
               tone: 'ok',
+              guestCode: r.guestCode,
             });
           }
         } else {
@@ -1557,7 +1606,7 @@ function BulkPanel({
             <p className="text-[13px] font-medium text-text">
               {sessionAsk.kind === 'open'
                 ? t(
-                    'Открыть постоплату для гостей на {n} ПК? Гость нажмёт «Войти» на ПК, оплата — на кассе после игры.',
+                    'Открыть постоплату для гостей на {n} ПК? Касса покажет код каждого ПК — гость введёт его на экране входа, оплата — на кассе после игры.',
                     {
                       n: sessionAsk.seats.length,
                     },
@@ -1594,6 +1643,11 @@ function BulkPanel({
         )}
         {sessionRows && (
           <ul aria-label={t('Сеансы по ПК')} className="well flex flex-col divide-y divide-accent/[0.07] px-3.5">
+            {sessionRows.some((r) => r.guestCode) && (
+              <li className="py-2 text-[12.5px] leading-5 text-dim">
+                {t('Назовите каждому гостю код его ПК: он введёт его на экране входа')}
+              </li>
+            )}
             {sessionRows.map((r) => (
               <li
                 key={r.pcId}
@@ -1613,6 +1667,15 @@ function BulkPanel({
                 >
                   {r.text}
                 </span>
+                {r.guestCode && (
+                  <span
+                    data-guest-code={r.guestCode}
+                    aria-label={t('Код для входа гостя на {pc}', { pc: pcLabel(r.name) })}
+                    className="tnum ml-auto shrink-0 select-all font-mono text-[22px] font-medium leading-none tracking-[0.25em] text-text"
+                  >
+                    {r.guestCode}
+                  </span>
+                )}
               </li>
             ))}
             {sessionBusy && <li className="py-2 text-[13px] text-muted">…</li>}
@@ -1917,7 +1980,7 @@ function MoveSheet({
         <li className="flex gap-2.5">
           <SignInIcon size={16} className="mt-0.5 text-accent" />
           {guest
-            ? t('{pc}: гость входит кнопкой «Гость»', { pc: pcLabel(to.pc.name) })
+            ? t('{pc}: гость входит по новому коду, касса покажет его после пересадки', { pc: pcLabel(to.pc.name) })
             : t('{pc}: игрок входит своим логином', { pc: pcLabel(to.pc.name) })}
         </li>
       </ul>
@@ -3274,6 +3337,7 @@ function FreeSeat({
         : t('Сеанс открыт · постоплата'),
     tone: 'ok',
     hint: guest ? guestSignIn(pcLabel(seat.pc.name)) : undefined,
+    guestCode: guest && r.guestCode ? { code: r.guestCode, pc: pcLabel(seat.pc.name) } : undefined,
     receipt: {
       kind: 'seat',
       at: r.session.startedAt,
@@ -3396,7 +3460,7 @@ function FreeSeat({
               onChange={(e) => setGuestName(e.target.value)}
             />
             <span className="text-[11.5px] leading-4 text-muted">
-              {t('Необязательно. Гость входит кнопкой «Гость» на этом ПК.')}
+              {t('Необязательно. Гость войдёт на этом ПК по коду, который покажет касса.')}
             </span>
           </div>
         ) : (
@@ -3938,7 +4002,7 @@ export function MapPage(): JSX.Element {
   /** A session waiting for its new PC: the map picks the target. */
   const [movePick, setMovePick] = useState<{ fromPcId: string } | null>(null);
   /** «Пересажен на ПК 07 · ждёт входа», shown over the target's panel after a move. */
-  const [moved, setMoved] = useState<{ pcId: string; text: string } | null>(null);
+  const [moved, setMoved] = useState<{ pcId: string; text: string; guestCode?: string; pc?: string } | null>(null);
   const [filter, setFilter] = useState<Filter | null>(null);
   const [viewChoice, setViewChoice] = useState<MapView>(readView);
   const [zoom, setZoom] = useState(1);
@@ -4358,6 +4422,9 @@ export function MapPage(): JSX.Element {
           {moved.text}
         </Note>
       )}
+      {moved && moved.pcId === seat.pc.id && moved.guestCode && (
+        <GuestCode code={moved.guestCode} pc={moved.pc ?? pcLabel(seat.pc.name)} />
+      )}
       <SeatPanel
         seat={seat}
         members={data.users}
@@ -4680,6 +4747,8 @@ export function MapPage(): JSX.Element {
             setMoved({
               pcId: r.to.pcId,
               text: `${t('Пересажен на {pc}', { pc: pcLabel(r.to.name) })} · ${t('ждёт входа')}`,
+              guestCode: r.guestCode,
+              pc: pcLabel(r.to.name),
             });
             void load();
             shift.refresh();

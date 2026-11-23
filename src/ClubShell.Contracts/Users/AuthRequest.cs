@@ -163,11 +163,16 @@ public sealed record QrLoginStatus(
 /// <param name="Hwid">Hardware id.</param>
 /// <param name="DisplayName">Optional display name.</param>
 /// <param name="Locale">Preferred locale.</param>
+/// <param name="Code">
+/// The four-digit code the cash desk gave a walk-in guest for this PC's seat (D-96, beyond the contract); required while
+/// the PC holds such a seat, ignored otherwise. Never logged.
+/// </param>
 public sealed record GuestAuthRequest(
     Guid PcId,
     string Hwid,
     string? DisplayName = null,
-    Locale? Locale = null);
+    Locale? Locale = null,
+    string? Code = null);
 
 /// <summary>
 /// Body of <c>POST /auth/register</c> (D-92, beyond the contract): a player creates their own account on the PC, where the

@@ -313,6 +313,17 @@
     "wrongPinLeft": "PIN noto'g'ri. Qolgan urinishlar: {{attempts}}",
     "wrongPasswordLeft": "Parol noto'g'ri. Qolgan urinishlar: {{attempts}}",
     "pinLockedOut": "Juda ko'p noto'g'ri PIN: parol bilan oching yoki administratorga murojaat qiling.",
+    "guestCode": {
+      "title": "Kassadagi kodni kiriting",
+      "hint": "Administrator ushbu kompyuterda seansingizni ochganda aytgan to'rt raqam.",
+      "label": "Kassadagi kod",
+      "keypad": "Kod raqamlari",
+      "erase": "Raqamni o'chirish",
+      "signingIn": "Kirilmoqda…",
+      "wrong": "Kod noto'g'ri",
+      "wrongLeft": "Kod noto'g'ri. Qolgan urinishlar: {{attempts}}",
+      "lockedOut": "Noto'g'ri kodlar juda ko'p. 15 daqiqa kuting yoki kassaga murojaat qiling."
+    },
     "staff": {
       "button": "Texnik foydalanuvchi",
       "title": "Texnik foydalanuvchi",

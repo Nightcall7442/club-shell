@@ -27,11 +27,13 @@ public static partial class CounterEndpoints
     /// its tariff where its zones allow the target zone, else the desk names an hourly tariff valid there (<c>409 tariffZone
     /// {zone}</c> when missing); postpaid keeps its frozen price (<c>400 tariffId postpaid</c>). The target's other players are
     /// signed out (<c>seatTaken</c>), the player's token on the old PC is deleted; after the commit the session goes to the
-    /// target, its «ended view» to the old PC, then <c>userRevoked seatMoved</c>. The player signs in on the target.
+    /// target, its «ended view» to the old PC, then <c>userRevoked seatMoved</c>. The player signs in on the target; a
+    /// walk-in guest (a transient account, the desk's or a kiosk guest) with a new four-digit code the answer carries once
+    /// (<c>guestCode</c>, D-96), as a desk guest's seat does.
     /// </summary>
     private static async Task<IResult> MoveAsync(
         HttpContext context, [FromBody] JsonElement body, IdempotencyStore store, SessionService sessions, PcRepository pcs, AgentSocketHub hub,
-        AgentOptions agents)
+        AgentOptions agents, Npgsql.NpgsqlDataSource db)
     {
         var staff = StaffOnly(context);
         var r = Api.Read<AdminMoveRequest>(body, "fromPcId", "toPcId");
@@ -43,7 +45,9 @@ public static partial class CounterEndpoints
         var from = await LivePcAsync(pcs, staff, r.FromPcId!.Value);
         var to = await LivePcAsync(pcs, staff, r.ToPcId!.Value);
         var effects = new SessionEffects();
-        var result = await store.ExecuteHttpAsync(context, ShiftEndpoints.Principal(staff), keyRequired: true, body, async (c, tx) =>
+        var code = Guests.NewCode();
+        var guest = false;
+        var result = await store.ExecuteHttpResultAsync(context, ShiftEndpoints.Principal(staff), keyRequired: true, body, async (c, tx) =>
         {
             var now = sessions.Clock.GetUtcNow();
             foreach (var pcId in new[] { from.Id, to.Id }.Order())
@@ -137,6 +141,15 @@ public static partial class CounterEndpoints
             }
 
             await c.ExecuteAsync("DELETE FROM user_tokens WHERE pc_id = @pcId AND user_id = @UserId", new { pcId = from.Id, moved.UserId }, tx);
+
+            // A walk-in guest signs in on the target only with a code (D-96): a new one, whoever started the session.
+            if (await c.ExecuteScalarAsync<bool>("SELECT transient FROM users WHERE id = @UserId", new { moved.UserId }, tx))
+            {
+                moved.GuestCodeHash = Passwords.Hash(code);
+                await c.ExecuteAsync("UPDATE sessions SET guest_code_hash = @GuestCodeHash WHERE id = @Id", new { moved.GuestCodeHash, moved.Id }, tx);
+                guest = true;
+            }
+
             var session = moved.ToWire(now);
             effects.Sessions.Add(session);
             effects.Departed.Add(departed);
@@ -154,7 +167,7 @@ public static partial class CounterEndpoints
                 new AdminSessionUser(moved.UserId, who.DisplayName, who.Role), SignedIn: false)));
         }, strictBody: true);
         await sessions.PublishAsync(effects);
-        return result;
+        return await WithGuestCodeAsync(db, result, guest || result.Replayed ? code : null);
     }
 
     /// <summary>What a move checks of its target PC (D-59).</summary>

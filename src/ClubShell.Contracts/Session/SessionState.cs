@@ -61,6 +61,10 @@ public static class SessionStateExtensions
 /// <param name="IsPrepaid">Prepaid (charged up front) vs postpaid.</param>
 /// <param name="WarningsSent">Minute marks already emitted as <c>session.warning</c>, e.g. <c>[10, 5]</c>.</param>
 /// <param name="PayAtDesk">Postpaid the cash desk opened (D-89, beyond the contract); null — the player may leave.</param>
+/// <param name="GuestCode">
+/// A walk-in guest's seat the cash desk opened (D-96, beyond the contract): the guest signs in on the PC with the four-digit
+/// code the desk gave them (<c>guestLogin</c> with <c>code</c>); null — the session's own player signs in as usual.
+/// </param>
 public sealed record Session(
     Guid Id,
     Guid UserId,
@@ -75,7 +79,8 @@ public sealed record Session(
     Money Cost,
     bool IsPrepaid,
     IReadOnlyList<int> WarningsSent,
-    bool? PayAtDesk = null)
+    bool? PayAtDesk = null,
+    bool? GuestCode = null)
 {
     /// <summary>
     /// <see cref="PayAtDesk"/> (D-89, beyond the contract): postpaid the cash desk opened — paid and ended at the desk, so

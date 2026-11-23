@@ -253,12 +253,33 @@ test.describe('lock screen', () => {
     await expect(panel.getByRole('button', { name: en('lock.qrRefresh') })).toBeVisible();
   });
 
-  test('a guest the desk seated is signed in by itself and the Shell opens its home screen', async ({ page }) => {
+  test('a guest the desk seated signs in with the code from the desk, not by itself (D-96)', async ({ page }) => {
     await openLock(page);
     await expect(page.getByRole('tab', { name: /guest|гость/i })).toHaveCount(0);
 
-    // The cashier seats a walk-in guest on this PC: no tab, no rules box, no «start» — the guest is playing.
-    await simulate(page, 'deskGuest', 'Гость 3');
+    // The cashier seats a walk-in guest on this PC: the lock screen asks for the four digits, nobody is signed in.
+    await simulate(page, 'deskGuest', 'Гость 3', '4821');
+    await expect(page.getByRole('heading', { level: 1, name: en('lock.guestCode.title') })).toBeVisible();
+    await expect(page.getByRole('tab', { name: en('lock.methodPassword') })).toHaveCount(0);
+    const code = page.getByRole('textbox', { name: en('lock.guestCode.label') });
+    await expect(code).toBeFocused();
+    await page.waitForTimeout(1_000);
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { __clubshellMock: { state: { user: unknown } } }).__clubshellMock.state.user,
+      ),
+    ).toBeNull();
+
+    // A wrong code from the keyboard: refused with the tries left, the digits cleared.
+    await page.keyboard.type('0000');
+    await expect(page.getByRole('alert')).toHaveText(en('lock.guestCode.wrongLeft', { attempts: 4 }));
+    await expect(code).toHaveValue('');
+
+    // The right one on the on-screen digits: the guest is playing.
+    const keypad = page.getByRole('group', { name: en('lock.guestCode.keypad') });
+    for (const digit of '4821') {
+      await keypad.getByRole('button', { name: digit, exact: true }).click();
+    }
     await playing(page);
     await expect(page.getByText(en('desktop.guestBadge'), { exact: true })).toBeVisible();
     await expect(
@@ -266,6 +287,22 @@ test.describe('lock screen', () => {
     ).toBeVisible();
     // No lock for a guest: there is no PIN or password to come back with.
     await expect(page.getByRole('button', { name: en('desktop.lock'), exact: true })).toHaveCount(0);
+  });
+
+  test('a desk guest who keeps typing wrong codes is sent to the desk', async ({ page }) => {
+    await openLock(page);
+    await simulate(page, 'deskGuest', 'Гость 6', '1234');
+    await expect(page.getByRole('textbox', { name: en('lock.guestCode.label') })).toBeFocused();
+    for (let left = 4; left >= 0; left--) {
+      await page.keyboard.type('9999');
+      await expect(page.getByRole('alert')).toHaveText(
+        left === 0 ? en('lock.guestCode.lockedOut') : en('lock.guestCode.wrongLeft', { attempts: left }),
+      );
+    }
+    // Even the right code waits now.
+    await page.keyboard.type('1234');
+    await expect(page.getByRole('alert')).toHaveText(en('lock.guestCode.lockedOut'));
+    await expect(page).toHaveURL(/#\/lock$/);
   });
 
   test('the lock screen has the tech user and power buttons with icons', async ({ page }) => {
@@ -513,7 +550,9 @@ test.describe('player accounts', () => {
     page,
   }) => {
     await openLock(page);
-    await simulate(page, 'deskGuest', 'Гость 4');
+    await simulate(page, 'deskGuest', 'Гость 4', '2468');
+    await expect(page.getByRole('textbox', { name: en('lock.guestCode.label') })).toBeFocused();
+    await page.keyboard.type('2468');
     await playing(page);
 
     await simulate(page, 'authExpired', 'tokenExpired');

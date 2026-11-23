@@ -236,6 +236,11 @@ export interface AuthLoginRequest {
    * (`AuthRequest.EndElsewhere`).
    */
   endElsewhere?: boolean | null;
+  /**
+   * `AuthKind.Guest`: the four-digit code the cash desk gave a walk-in guest for this PC's seat
+   * (`GuestAuthRequest.Code`, D-96).
+   */
+  code?: string | null;
 }
 
 /** Response of `auth.login`. */

@@ -252,6 +252,11 @@ export interface GuestAuthRequest {
   displayName?: string | null;
   /** Preferred locale. */
   locale?: Locale | null;
+  /**
+   * The four-digit code the cash desk gave a walk-in guest for this PC's seat (D-96, beyond the contract); required
+   * while the PC holds such a seat, ignored otherwise. Never logged.
+   */
+  code?: string | null;
 }
 
 /** Body of `POST /auth/logout`. */

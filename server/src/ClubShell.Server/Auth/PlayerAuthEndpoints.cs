@@ -101,11 +101,13 @@ public static class PlayerAuthEndpoints
     }
 
     /// <summary>
-    /// «Гость» on the kiosk. A guest seat the desk opened on this PC (D-25: <c>origin = cashier</c>, a staff member, a
-    /// transient account) is taken over: that guest is signed in and gets its session, even when <c>Club:GuestLogin</c> is
-    /// off. Any other open session of the PC is <c>403 pcOccupied</c> (D-26). Otherwise a temporary <c>guest</c> account
-    /// (<see cref="Guests"/>) signed in at once; <c>403 guestDisabled</c> when <c>Club:GuestLogin</c> is off. All of it runs
-    /// in the sign-in's transaction under the PC's lock, so a refused press creates no account. No <c>offlineHash</c>.
+    /// «Гость» on the kiosk. A guest seat the desk opened on this PC (D-24, D-96: a transient account's session with a code)
+    /// is taken over only with its code: none is <c>400 code required</c>, a wrong one <c>401 badCredentials
+    /// {attemptsLeft}</c>, counted per PC like wrong cards (<c>guestCode:&lt;pcId&gt;</c>, 5 in 15 min refuse even the right
+    /// code); the right code signs that guest in to its session, even when <c>Club:GuestLogin</c> is off. Any other open
+    /// session of the PC is <c>403 pcOccupied</c> (D-26). Otherwise a temporary <c>guest</c> account (<see cref="Guests"/>)
+    /// signed in at once; <c>403 guestDisabled</c> when <c>Club:GuestLogin</c> is off. All of it runs in the sign-in's
+    /// transaction under the PC's lock, so a refused press creates no account. No <c>offlineHash</c>.
     /// </summary>
     private static async Task<IResult> GuestAsync(
         HttpContext context, [FromBody] JsonElement body, NpgsqlDataSource db, UserTokens tokens, SessionService sessions, ClubOptions options, TimeProvider clock)
@@ -125,12 +127,28 @@ public static class PlayerAuthEndpoints
         var locale = request.Locale is { } l ? JsonNamingPolicy.CamelCase.ConvertName(l.ToString()) : "ru";
         await using var c = await db.OpenConnectionAsync();
         var club = await SessionService.ClubAsync(c, null, pc.ClubId);
+
+        // A desk guest's seat: the code first, under its own lockout (its own transaction, so a miss is counted even
+        // though nothing is signed in); the sign-in below takes the seat only if it is still that guest's.
+        Guid? deskGuest = null;
+        if (await Guests.DeskGuestOfPcAsync(c, null, pc.Id) is { } seat)
+        {
+            var code = request.Code?.Trim();
+            if (string.IsNullOrEmpty(code))
+            {
+                throw ApiException.Validation("code", "required");
+            }
+
+            deskGuest = await CountFailuresAsync(c, club.NetworkId, $"guestCode:{pc.Id}", Guid.Parse(ApiErrorWriter.TraceId(context)), clock.GetUtcNow(),
+                forgetOnSuccess: true, _ => Task.FromResult<Guid?>(code.Length == 4 && Passwords.Verify(seat.CodeHash, code) ? seat.UserId : null));
+        }
+
         return TypedResults.Ok(await SignInAsync(c, tokens, sessions, club, pc, async tx =>
         {
-            if (await Guests.DeskGuestOfPcAsync(c, tx, pc.Id) is { } deskGuest)
+            if (deskGuest is { } verified && (await Guests.DeskGuestOfPcAsync(c, tx, pc.Id))?.UserId == verified)
             {
-                await c.ExecuteAsync("UPDATE users SET locale = @locale WHERE id = @deskGuest", new { deskGuest, locale }, tx);
-                return deskGuest;
+                await c.ExecuteAsync("UPDATE users SET locale = @locale WHERE id = @verified", new { verified, locale }, tx);
+                return verified;
             }
 
             if (await SessionService.OpenOfPcAsync(c, pc.Id, tx) is not null)

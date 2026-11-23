@@ -387,9 +387,11 @@ public sealed class SessionHandlers : IIpcHandlerGroup
         switch (request.Kind)
         {
             case AuthKind.Guest:
-                // The Shell sends the name a guest typed in the username field (empty: the server names the guest).
+                // The Shell sends the name a guest typed in the username field (empty: the server names the guest), and the
+                // code the cash desk gave a walk-in guest for this PC's seat (D-96).
                 string? displayName = string.IsNullOrWhiteSpace(request.Username) ? null : request.Username.Trim();
-                return await _server.GuestLoginAsync(new GuestAuthRequest(pcId, hwid, displayName, _shellSettings.Get().Locale), cancellationToken).ConfigureAwait(false);
+                string? code = string.IsNullOrWhiteSpace(request.Code) ? null : request.Code.Trim();
+                return await _server.GuestLoginAsync(new GuestAuthRequest(pcId, hwid, displayName, _shellSettings.Get().Locale, code), cancellationToken).ConfigureAwait(false);
             case AuthKind.Qr:
             {
                 QrLoginStatus status = await _server.GetQrLoginStatusAsync(request.QrToken!, cancellationToken).ConfigureAwait(false);
@@ -934,6 +936,12 @@ public sealed class SessionHandlers : IIpcHandlerGroup
                 if (request.Username is { Length: > UserDomainHandlers.MaxDisplayNameLength })
                 {
                     throw IpcError.Validation("username", "length").ToException();
+                }
+
+                // A desk guest's seat code (D-96): four digits when given.
+                if (request.Code is { } code && !string.IsNullOrWhiteSpace(code) && (code.Trim().Length != 4 || !code.Trim().All(char.IsAsciiDigit)))
+                {
+                    throw IpcError.Validation("code", "format").ToException();
                 }
 
                 break;

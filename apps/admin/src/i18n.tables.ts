@@ -998,8 +998,14 @@ export const UZ: Record<string, string> = {
   'Сеанс открыт · постоплата': 'Seans ochildi · keyin toʻlash',
   'Кто садится': 'Kim oʻtiradi',
   'Гость {n}': 'Mehmon {n}',
-  'Необязательно. Гость входит кнопкой «Гость» на этом ПК.':
-    'Ixtiyoriy. Mehmon bu kompyuterda «Mehmon» tugmasi bilan kiradi.',
+  'Необязательно. Гость войдёт на этом ПК по коду, который покажет касса.':
+    'Ixtiyoriy. Mehmon bu kompyuterga kassa koʻrsatadigan kod bilan kiradi.',
+  'Код для входа гостя на {pc}': '{pc} uchun mehmonning kirish kodi',
+  'Назовите гостю код для входа на {pc}': '{pc} ga kirish uchun kodni mehmonga ayting',
+  Скопировано: 'Nusxalandi',
+  'Не скопировалось': 'Nusxalanmadi',
+  'Назовите каждому гостю код его ПК: он введёт его на экране входа':
+    'Har bir mehmonga oʻz kompyuterining kodini ayting: u kirish ekranida kiritadi',
   Оплата: 'Toʻlov',
   Предоплата: 'Oldindan toʻlash',
   Пакеты: 'Paketlar',
@@ -1046,8 +1052,8 @@ export const UZ: Record<string, string> = {
   '58 мм': '58 mm',
   Копия: 'Nusxa',
   'Не является фискальным чеком': 'Fiskal chek emas',
-  '{pc}: вкладка «Гость» → «Я принимаю правила клуба» → «Играть как гость»':
-    "{pc}: «Mehmon» yorligʻi → «Klub qoidalarini qabul qilaman» → «Mehmon sifatida o'ynash»",
+  '{pc}: на экране входа введите код, который назвал администратор':
+    '{pc}: kirish ekranida administrator aytgan kodni kiriting',
   'Чек · посадка': 'Chek · oʻtqazish',
   'Чек · продление': 'Chek · uzaytirish',
   'Чек · пополнение': 'Chek · toʻldirish',
@@ -1098,7 +1104,8 @@ export const UZ: Record<string, string> = {
   'Ctrl+клик, Shift+клик, Ctrl+A': 'Ctrl+bosish, Shift+bosish, Ctrl+A',
   '{n} мин назад': '{n} daqiqa oldin',
   '{n} ч назад': '{n} soat oldin',
-  '{pc}: гость входит кнопкой «Гость»': '{pc}: mehmon «Mehmon» tugmasi bilan kiradi',
+  '{pc}: гость входит по новому коду, касса покажет его после пересадки':
+    '{pc}: mehmon yangi kod bilan kiradi, kassa uni koʻchirishdan keyin koʻrsatadi',
   '{pc}: игрок входит своим логином': '{pc}: oʻyinchi oʻz logini bilan kiradi',
   '{sum} вернётся на баланс клиента': '{sum} mijoz balansiga qaytadi',
   '{title}: закончился — убран из корзины': '{title}: tugadi — savatdan olib tashlandi',
@@ -1450,8 +1457,8 @@ export const UZ: Record<string, string> = {
   'Завершить сеансы': 'Seanslarni yakunlash',
   'Среди выбранных нет ПК с сеансом': 'Tanlanganlar orasida seansli kompyuter yoʻq',
   Подтверждение: 'Tasdiqlash',
-  'Открыть постоплату для гостей на {n} ПК? Гость нажмёт «Войти» на ПК, оплата — на кассе после игры.':
-    '{n} ta kompyuterda mehmonlar uchun keyin toʻlov ochilsinmi? Mehmon kompyuterda «Kirish»ni bosadi, toʻlov — oʻyindan keyin kassada.',
+  'Открыть постоплату для гостей на {n} ПК? Касса покажет код каждого ПК — гость введёт его на экране входа, оплата — на кассе после игры.':
+    '{n} ta kompyuterda mehmonlar uchun keyin toʻlov ochilsinmi? Kassa har bir kompyuterning kodini koʻrsatadi — mehmon uni kirish ekranida kiritadi, toʻlov — oʻyindan keyin kassada.',
   'Завершить {n} сеансов? Время игроков остановится, постоплата встанет к оплате.':
     '{n} ta seans yakunlansinmi? Oʻyinchilar vaqti toʻxtaydi, keyin toʻlov hisobga qoʻyiladi.',
   'нет тарифа': 'tarif yoʻq',
@@ -2499,8 +2506,14 @@ export const EN: Record<string, string> = {
   'Сеанс открыт · постоплата': 'Session opened · postpaid',
   'Кто садится': 'Who sits',
   'Гость {n}': 'Guest {n}',
-  'Необязательно. Гость входит кнопкой «Гость» на этом ПК.':
-    'Optional. The guest signs in with the «Guest» button on this PC.',
+  'Необязательно. Гость войдёт на этом ПК по коду, который покажет касса.':
+    'Optional. The guest signs in on this PC with the code the desk shows.',
+  'Код для входа гостя на {pc}': 'Guest sign-in code for {pc}',
+  'Назовите гостю код для входа на {pc}': 'Tell the guest the code to sign in on {pc}',
+  Скопировано: 'Copied',
+  'Не скопировалось': 'Not copied',
+  'Назовите каждому гостю код его ПК: он введёт его на экране входа':
+    'Tell each guest the code of their PC: they type it on the sign-in screen',
   Оплата: 'Payment',
   Предоплата: 'Prepaid',
   Пакеты: 'Packages',
@@ -2547,8 +2560,8 @@ export const EN: Record<string, string> = {
   '58 мм': '58 mm',
   Копия: 'Copy',
   'Не является фискальным чеком': 'Not a fiscal receipt',
-  '{pc}: вкладка «Гость» → «Я принимаю правила клуба» → «Играть как гость»':
-    '{pc}: the «Guest» tab → «I accept the club rules» → «Play as guest»',
+  '{pc}: на экране входа введите код, который назвал администратор':
+    '{pc}: on the sign-in screen, type the code the administrator gave you',
   'Чек · посадка': 'Receipt · seat',
   'Чек · продление': 'Receipt · extension',
   'Чек · пополнение': 'Receipt · top-up',
@@ -2599,7 +2612,8 @@ export const EN: Record<string, string> = {
   'Ctrl+клик, Shift+клик, Ctrl+A': 'Ctrl+click, Shift+click, Ctrl+A',
   '{n} мин назад': '{n} min ago',
   '{n} ч назад': '{n} h ago',
-  '{pc}: гость входит кнопкой «Гость»': '{pc}: the guest signs in with «Guest»',
+  '{pc}: гость входит по новому коду, касса покажет его после пересадки':
+    '{pc}: the guest signs in with a new code, shown here after the move',
   '{pc}: игрок входит своим логином': '{pc}: the player signs in with their own login',
   '{sum} вернётся на баланс клиента': "{sum} goes back to the client's balance",
   '{title}: закончился — убран из корзины': '{title}: sold out — removed from the cart',
@@ -2948,8 +2962,8 @@ export const EN: Record<string, string> = {
   'Завершить сеансы': 'End sessions',
   'Среди выбранных нет ПК с сеансом': 'None of the selected PCs has a session',
   Подтверждение: 'Confirmation',
-  'Открыть постоплату для гостей на {n} ПК? Гость нажмёт «Войти» на ПК, оплата — на кассе после игры.':
-    'Open guest postpaid on {n} PCs? The guest presses «Sign in» on the PC and pays at the desk after playing.',
+  'Открыть постоплату для гостей на {n} ПК? Касса покажет код каждого ПК — гость введёт его на экране входа, оплата — на кассе после игры.':
+    'Open guest postpaid on {n} PCs? The desk shows each PC’s code — the guest types it on the sign-in screen and pays at the desk after playing.',
   'Завершить {n} сеансов? Время игроков остановится, постоплата встанет к оплате.':
     "End {n} sessions? The players' time stops and postpaid bills become due.",
   'нет тарифа': 'no tariff',

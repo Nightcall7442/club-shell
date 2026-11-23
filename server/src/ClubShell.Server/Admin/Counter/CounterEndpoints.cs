@@ -271,12 +271,13 @@ public static partial class CounterEndpoints
     /// <c>displayName</c> or «Гость &lt;PC number&gt;») and its seat in one transaction, so a refused seat leaves no account,
     /// money or journal entry. Prepaid needs a <c>payment</c> of exactly the price now (D-48, else <c>409 priceChanged
     /// {total}</c>): no extra money sits on a throwaway account; postpaid follows <c>limits.guestPostpaid</c> and takes no
-    /// payment. The guest gets no login code: pressing «Гость» on that PC signs in to this session (D-25). Staff only (the
-    /// club API key has no drawer and opens no seats for guests, <c>403 staffOnly</c>); <c>Idempotency-Key</c> required.
+    /// payment. The seat gets a four-digit code (D-96): only its hash is stored with the session, the plain code is in
+    /// this answer (<c>guestCode</c>) and nowhere else — the guest presses «Гость» on that PC and types it (D-25). Staff only
+    /// (the club API key has no drawer and opens no seats for guests, <c>403 staffOnly</c>); <c>Idempotency-Key</c> required.
     /// </summary>
     private static async Task<IResult> GuestOpenAsync(
         HttpContext context, [FromBody] JsonElement body, IdempotencyStore store, SessionService sessions, PcRepository pcs,
-        AutomationService automation, ILoggerFactory logs)
+        AutomationService automation, ILoggerFactory logs, NpgsqlDataSource db)
     {
         var staff = StaffOnly(context);
         var r = Api.Read<AdminGuestSessionRequest>(body, "pcId", "tariffId", "minutes");
@@ -299,7 +300,8 @@ public static partial class CounterEndpoints
         var pc = await LivePcAsync(pcs, staff, r.PcId!.Value);
         var effects = new SessionEffects();
         TopUpPosted? paid = null;
-        var result = await store.ExecuteHttpAsync(context, ShiftEndpoints.Principal(staff), keyRequired: true, body, async (c, tx) =>
+        var code = Guests.NewCode();
+        var result = await store.ExecuteHttpResultAsync(context, ShiftEndpoints.Principal(staff), keyRequired: true, body, async (c, tx) =>
         {
             var now = sessions.Clock.GetUtcNow();
             await AdvisoryLocks.PcAsync(c, tx, pc.Id);
@@ -319,12 +321,44 @@ public static partial class CounterEndpoints
             }
 
             var session = await sessions.CreateAsync(
-                c, tx, pc, new SessionCreateRequest(pc.Id, guest, r.TariffId!.Value, minutes, prepaid), replay: false, effects, staff);
+                c, tx, pc, new SessionCreateRequest(pc.Id, guest, r.TariffId!.Value, minutes, prepaid), replay: false, effects, staff,
+                guestCodeHash: Passwords.Hash(code));
             return new IdempotentResult(StatusCodes.Status201Created, await SeatedAsync(c, tx, staff, pc, session, paid, effects, now, guest: true));
         });
         await sessions.PublishAsync(effects);
         await AfterTopUpAsync(automation, logs, staff, paid);
-        return result;
+        return await WithGuestCodeAsync(db, result, code);
+    }
+
+    /// <summary>
+    /// The answer of a desk guest's seat with its code (D-96): <c>guestCode</c> is added to the answer, never to the stored
+    /// one, so the plain code is kept nowhere. A replay (the first answer was lost, the cashier never saw it) gives the seat a
+    /// new code and answers that one; the old code stops working. Without <paramref name="code"/>, or once the seat is gone
+    /// (ended meanwhile), the answer is as stored.
+    /// </summary>
+    private static async Task<IResult> WithGuestCodeAsync(NpgsqlDataSource db, IdempotentResult result, string? code)
+    {
+        if (code is null || result.Body is not { } stored || result.Status >= 300
+            || !stored.TryGetProperty("session", out var session) || !session.TryGetProperty("id", out var id))
+        {
+            return IdempotencyStore.ToHttp(result);
+        }
+
+        if (result.Replayed)
+        {
+            code = Guests.NewCode();
+            await using var c = await db.OpenConnectionAsync();
+            if (await c.ExecuteAsync(
+                    "UPDATE sessions SET guest_code_hash = @hash WHERE id = @id AND state <> 'ended' AND guest_code_hash IS NOT NULL",
+                    new { id = id.GetGuid(), hash = Passwords.Hash(code) }) == 0)
+            {
+                return IdempotencyStore.ToHttp(result);
+            }
+        }
+
+        var answer = System.Text.Json.Nodes.JsonNode.Parse(stored.GetRawText())!.AsObject();
+        answer["guestCode"] = code;
+        return Results.Content(answer.ToJsonString(), "application/json; charset=utf-8", statusCode: result.Status);
     }
 
     /// <summary>

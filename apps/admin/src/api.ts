@@ -368,6 +368,11 @@ export interface SessionResult {
   payment?: SessionPaid | null;
   /** End of a walk-in guest's session: the cash that may be given back now (D-37); null for members. */
   payable?: Money | null;
+  /**
+   * A walk-in guest's seat (D-96): the four digits the guest types on the PC to sign in. Sent once, in this answer
+   * only (the server keeps just its hash): the console shows it to the cashier, who names it to the guest.
+   */
+  guestCode?: string;
 }
 
 export interface TopUpResult {
@@ -525,6 +530,8 @@ export interface MoveResponse {
   user: { id: string; displayName: string; role: string };
   /** False: the player signs in on the target. */
   signedIn: boolean;
+  /** A walk-in guest moved (D-96): the new code the guest types on the target PC, in this answer only. */
+  guestCode?: string;
 }
 
 /** `wake` powers an off PC on: a PC that is on sends the Wake-on-LAN packet (`via`). */
@@ -598,8 +605,9 @@ export const adminApi = {
     key?: string,
   ): Promise<SessionResult> => postMoney<SessionResult>('/admin/sessions', input, key),
   /**
-   * A walk-in guest's seat (beyond the contract): the server creates the guest account with the session; the guest
-   * presses «Гость» on that PC. Prepaid needs a payment of exactly the price; the key is required.
+   * A walk-in guest's seat (beyond the contract): the server creates the guest account with the session and answers
+   * the seat's four-digit code (`guestCode`, D-96) that the guest types on that PC. Prepaid needs a payment of exactly
+   * the price; the key is required (a replay answers a new code: the old one stops working).
    */
   openGuestSession: (
     input: {

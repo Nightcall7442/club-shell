@@ -61,6 +61,8 @@ const failedAttempts = new Map<string, number>();
 /** Times of wrong cards per PC (D-75): a card number can be typed and guessed, so it is counted like a password. */
 const cardFailures = new Map<string, number[]>();
 const CARD_WINDOW_MS = 15 * 60_000;
+/** Wrong desk-guest codes per PC (D-96), counted like wrong cards within the same window. */
+const guestCodeFailures = new Map<string, number[]>();
 /** Accounts each PC made on its lock screen (D-92): at most 5 within the hour. */
 const signups = new Map<string, number[]>();
 const SIGNUP_WINDOW_MS = 60 * 60_000;
@@ -308,9 +310,10 @@ export function authRoutes(app: FastifyInstance): void {
   });
 
   /**
-   * «Гость» on the kiosk. A walk-in guest the desk seated on this PC is signed in to that seat (D-24, D-25), even with
-   * kiosk guest login off — and so is any guest's session the desk moved onto this PC (D-61); any other open session of
-   * the PC refuses it (`pcOccupied`, before an account is made); otherwise a new guest, as before.
+   * «Гость» on the kiosk. A walk-in guest's seat the desk opened or moved onto this PC (D-24, D-61) is signed in to
+   * only with its code (D-96): none is `400 code required`, a wrong one `401 badCredentials {attemptsLeft}`, counted
+   * per PC like wrong cards (5 in 15 min refuse even the right code) — even with kiosk guest login off; any other open
+   * session of the PC refuses it (`pcOccupied`, before an account is made); otherwise a new guest, as before.
    */
   app.post('/auth/guest', async (req) => {
     const pc = requireAgent(req);
@@ -321,8 +324,18 @@ export function authRoutes(app: FastifyInstance): void {
     const open = openSessionForPc(pc.id);
     if (open) {
       const owner = findUser(open.userId);
-      const deskSeated = (open.origin === 'cashier' && open.createdByStaffId) || (open.moves?.length ?? 0) > 0;
-      if (deskSeated && owner?.transient) {
+      if (open.guestCodeHash && owner?.transient) {
+        const code = (optStr(b, 'code', 16) ?? '').trim();
+        if (!code) throw errors.validation('code', 'required');
+        const at = Date.now();
+        const failures = (guestCodeFailures.get(pc.id) ?? []).filter((t) => at - t < CARD_WINDOW_MS);
+        if (failures.length >= 5) throw errors.unauthorized('badCredentials', { attemptsLeft: 0 });
+        if (sha256Hex(code) !== open.guestCodeHash) {
+          failures.push(at);
+          guestCodeFailures.set(pc.id, failures);
+          throw errors.unauthorized('badCredentials', { attemptsLeft: 5 - failures.length });
+        }
+        guestCodeFailures.delete(pc.id);
         if (locale) owner.locale = locale;
         markDirty();
         return authResponse(owner, pc);

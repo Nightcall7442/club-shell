@@ -205,6 +205,11 @@ export interface Session {
   warningsSent: number[];
   /** Postpaid the cash desk opened (D-89, beyond the contract); null — the player may leave. */
   payAtDesk?: boolean | null;
+  /**
+   * A walk-in guest's seat the cash desk opened (D-96, beyond the contract): the guest signs in on the PC with the
+   * four-digit code the desk gave them (`guestLogin` with `code`); null — the session's own player signs in as usual.
+   */
+  guestCode?: boolean | null;
 }
 /** Value of `Session.SecondsLeft` for open-ended postpaid sessions. */
 export const SESSION_OPEN_ENDED = -1;

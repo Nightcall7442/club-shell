@@ -14,6 +14,8 @@ export interface AuthCredentials {
   qrToken?: string;
   cardId?: string;
   token?: string;
+  /** `guest`: the four-digit code the cash desk gave a walk-in guest for this PC's seat (D-96). */
+  code?: string;
 }
 
 /** `auth.login` request; `endElsewhere` only when the player confirmed it. */
@@ -25,6 +27,7 @@ export function buildLoginRequest(kind: AuthKind, creds: AuthCredentials, endEls
     qrToken: creds.qrToken ?? null,
     cardId: creds.cardId ?? null,
     token: creds.token ?? null,
+    ...(creds.code ? { code: creds.code } : {}),
     ...(endElsewhere ? { endElsewhere: true } : {}),
   };
 }

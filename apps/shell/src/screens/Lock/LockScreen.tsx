@@ -43,6 +43,7 @@ import { ClubMark } from '@/components/brand/ClubMark';
 import { PcLabel } from '@/components/brand/PcLabel';
 import { useClub } from '@/hooks/useClub';
 import { CardLogin } from './CardLogin';
+import { GuestCodeForm } from './GuestCodeForm';
 import { LoginForm, loginErrorMessage } from './LoginForm';
 import { PowerButtons } from './PowerButtons';
 import { StaffSignInButton } from './StaffSignIn';
@@ -1066,29 +1067,9 @@ export default function LockScreen(): JSX.Element {
     void useGamesStore.getState().load(true);
   }, []);
 
-  // A walk-in guest the desk seated on this PC: no «Гость» tab, no rules box — the guest is signed in at once and the
-  // Shell opens its home screen. Tried once per session: a member's desk session refuses a guest (`403 pcOccupied`),
-  // and they sign in with their own account as before.
-  const sessionId = useSessionStore((s) => s.session?.id ?? null);
-  const loginGuest = useAuthStore((s) => s.loginGuest);
-  const triedGuest = useRef<string | null>(null);
-  useEffect(() => {
-    if (
-      !ready ||
-      !pcReady ||
-      hasUser ||
-      !isOpen ||
-      isLocked ||
-      sessionId === null ||
-      triedGuest.current === sessionId
-    ) {
-      return;
-    }
-    triedGuest.current = sessionId;
-    loginGuest().catch(() => {
-      // Not a guest's seat: the sign-in methods stay for its player.
-    });
-  }, [ready, pcReady, hasUser, isOpen, isLocked, sessionId, loginGuest]);
+  // A walk-in guest the desk seated on this PC (D-96): the guest types the code the cashier named — no PC signs anyone
+  // in on the server's word. A member's desk session has no code: its player signs in with their own account.
+  const guestSeat = useSessionStore((s) => s.session?.guestCode === true);
 
   // A session open before the PC is ready (restored after an Agent restart, opened at the desk) waits here too.
   useEffect(() => {
@@ -1224,6 +1205,8 @@ export default function LockScreen(): JSX.Element {
               ) : (
                 <UnlockForm />
               )
+            ) : guestSeat && isOpen && !hasUser ? (
+              <GuestCodeForm />
             ) : registering && !hasUser ? (
               <>
                 <h1 className="mb-[clamp(0.875rem,2.2vh,1.5rem)] text-center font-display text-3xl font-light leading-tight tracking-tight text-text">

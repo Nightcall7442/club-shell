@@ -168,6 +168,10 @@ pub struct AuthLoginRequest {
     /// activeSessionElsewhere` (`AuthRequest.EndElsewhere`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_elsewhere: Option<bool>,
+    /// `AuthKind.Guest`: the four-digit code the cash desk gave a walk-in guest for this PC's seat
+    /// (`GuestAuthRequest.Code`, D-96).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
 }
 
 /// Response of `auth.login`.
@@ -3375,6 +3379,7 @@ mod tests {
             card_id: None,
             token: None,
             end_elsewhere: None,
+            code: None,
         };
         assert_eq!(
             serde_json::to_string(&login).unwrap(),

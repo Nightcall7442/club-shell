@@ -511,6 +511,10 @@ public sealed record AuthHelloResponse(
 /// The player confirmed «end my session on PC N and sign in here» after <c>409 activeSessionElsewhere</c>
 /// (<see cref="AuthRequest.EndElsewhere"/>).
 /// </param>
+/// <param name="Code">
+/// <see cref="AuthKind.Guest"/>: the four-digit code the cash desk gave a walk-in guest for this PC's seat
+/// (<see cref="GuestAuthRequest.Code"/>, D-96).
+/// </param>
 public sealed record AuthLoginRequest(
     AuthKind Kind,
     string? Username = null,
@@ -518,7 +522,8 @@ public sealed record AuthLoginRequest(
     string? QrToken = null,
     string? CardId = null,
     string? Token = null,
-    bool? EndElsewhere = null)
+    bool? EndElsewhere = null,
+    string? Code = null)
 {
     /// <summary>Builds the server-facing <see cref="AuthRequest"/>.</summary>
     public AuthRequest ToServerRequest(Guid pcId, string hwid) =>

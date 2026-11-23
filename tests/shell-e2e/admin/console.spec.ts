@@ -1392,7 +1392,7 @@ test('a client is seated from the map: the pay box takes what the balance lacks,
 // Cash desk, part 2: walk-in guests, postpaid, packages, settling, drawer moves, the operations feed, printing
 // ---------------------------------------------------------------------------------------------------------------------
 
-test('a walk-in guest is seated from the map with one exact payment and the «Гость» button on that PC signs in to it', async ({
+test('a walk-in guest is seated from the map with one exact payment and signs in on that PC with the code the desk shows (D-96)', async ({
   page,
   request,
 }) => {
@@ -1410,12 +1410,27 @@ test('a walk-in guest is seated from the map with one exact payment and the «Г
   await expect(page.getByLabel('Сумма')).toHaveAttribute('readonly', '');
   await page.getByRole('button', { name: /^Посадить гостя · Наличные/ }).click();
   await expect(page.getByText(/Сеанс открыт/)).toBeVisible();
-  // Nobody has pressed «Гость» on the PC yet, and the clock already runs.
+  // The seat's code, large, once: the cashier names it to the guest.
+  const codeBox = page.getByRole('region', { name: /^Код для входа гостя на/ });
+  await expect(codeBox).toContainText('Назовите гостю код для входа на');
+  const code = (await codeBox.locator('[data-guest-code]').getAttribute('data-guest-code')) ?? '';
+  expect(code).toMatch(/^\d{4}$/);
+  // Nobody has typed it on the PC yet, and the clock already runs.
   await expect(tile).toContainText('ждёт входа');
 
   const seat = await seatOf(request, pc.pcId);
   expect(seat.user?.role).toBe('guest');
-  const login = await agentCall(request, pc, 'POST', '/auth/guest', { pcId: pc.pcId, hwid: pc.hwid });
+  // «Гость» on the PC without the code, or with a wrong one, does not take the seat.
+  const bare = await agentCall(request, pc, 'POST', '/auth/guest', { pcId: pc.pcId, hwid: pc.hwid });
+  expect(bare.status(), await bare.text()).toBe(400);
+  const wrong = await agentCall(request, pc, 'POST', '/auth/guest', {
+    pcId: pc.pcId,
+    hwid: pc.hwid,
+    code: code === '0000' ? '1111' : '0000',
+  });
+  expect(wrong.status(), await wrong.text()).toBe(401);
+  expect(((await wrong.json()) as { error: { details: { attemptsLeft: number } } }).error.details.attemptsLeft).toBe(4);
+  const login = await agentCall(request, pc, 'POST', '/auth/guest', { pcId: pc.pcId, hwid: pc.hwid, code });
   expect(login.status(), await login.text()).toBe(200);
   const guest = (await login.json()) as {
     accessToken: string;
@@ -2403,7 +2418,9 @@ test('a move to a busy, maintenance or still-playing PC is refused with the reas
   await endAt(request, c.pcId);
 });
 
-test('a walk-in guest and a kiosk guest moved to another PC sign in there with «Гость»', async ({ request }) => {
+test('a walk-in guest and a kiosk guest moved to another PC sign in there with the move’s new code', async ({
+  request,
+}) => {
   await ensureShift(request);
   const a = await registerAgent(request, 'g-a');
   const b = await registerAgent(request, 'g-b');
@@ -2431,7 +2448,12 @@ test('a walk-in guest and a kiosk guest moved to another PC sign in there with �
   const deskSession = ((await seated.json()) as { session: { id: string } }).session.id;
   const movedDesk = await moveSession(request, { fromPcId: a.pcId, sessionId: deskSession, toPcId: b.pcId });
   expect(movedDesk.status(), await movedDesk.text()).toBe(200);
-  const onB = await agentCall(request, b, 'POST', '/auth/guest', { pcId: b.pcId, hwid: b.hwid });
+  const codeOf = async (res: APIResponse): Promise<string> => ((await res.json()) as { guestCode: string }).guestCode;
+  const onB = await agentCall(request, b, 'POST', '/auth/guest', {
+    pcId: b.pcId,
+    hwid: b.hwid,
+    code: await codeOf(movedDesk),
+  });
   expect(onB.status(), await onB.text()).toBe(200);
   expect(await guestSession(onB)).toBe(deskSession);
 
@@ -2458,7 +2480,11 @@ test('a walk-in guest and a kiosk guest moved to another PC sign in there with �
   const kioskSession = ((await own.json()) as { id: string }).id;
   const movedKiosk = await moveSession(request, { fromPcId: c.pcId, sessionId: kioskSession, toPcId: d.pcId });
   expect(movedKiosk.status(), await movedKiosk.text()).toBe(200);
-  const onD = await agentCall(request, d, 'POST', '/auth/guest', { pcId: d.pcId, hwid: d.hwid });
+  const onD = await agentCall(request, d, 'POST', '/auth/guest', {
+    pcId: d.pcId,
+    hwid: d.hwid,
+    code: await codeOf(movedKiosk),
+  });
   expect(onD.status(), await onD.text()).toBe(200);
   expect(await guestSession(onD)).toBe(kioskSession);
 
@@ -2643,8 +2669,11 @@ test('several PCs at once: a switched-off one is woken through a PC that is on, 
   await panel.getByRole('button', { name: /^Открыть постоплату \(2 из 3\)/ }).click();
   await panel.getByRole('button', { name: 'Открыть', exact: true }).click();
   const rows = panel.getByRole('list', { name: 'Сеансы по ПК' });
-  for (const pc of [b, c])
+  for (const pc of [b, c]) {
     await expect(rows.locator(`[data-pc-result="${pc.pcId}"]`)).toContainText('постоплата открыта');
+    // Each PC's code is listed by its row: the cashier names it to that PC's guest (D-96).
+    await expect(rows.locator(`[data-pc-result="${pc.pcId}"] [data-guest-code]`)).toHaveText(/^\d{4}$/);
+  }
   for (const pc of [b, c]) {
     const seat = await seatOf(request, pc.pcId);
     expect(seat.session?.isPrepaid).toBe(false);

@@ -15,7 +15,7 @@
  *
  * Cash desk part 2, as on the server: a seat may be postpaid (`prepaid: false`; guests unless `limits.guestPostpaid` is
  * false, members always; a positive `guestDebtLimit` / `memberDebtLimit` caps it); a walk-in guest is seated with
- * `POST /admin/sessions/guest` and signs in with «Гость» on that PC; a desk open signs out anyone else on the PC
+ * `POST /admin/sessions/guest` and signs in on that PC with the seat's code (D-96); a desk open signs out anyone else on the PC
  * (`seatTaken`), a desk end signs the player out (`sessionEnded`); a debt is taken exactly (`settleDebt`) and a guest's
  * refund given back in cash (`/admin/wallet/payout`), never more than the guest paid in cash and got back.
  */
@@ -45,7 +45,9 @@ import {
   optStr,
   othersSignedInOn,
   publicPc,
+  replayGuestCode,
   revokeUserTokens,
+  setGuestCode,
   settleStatus,
   signedInOn,
   str,
@@ -288,7 +290,7 @@ function seat(o: {
   payment: Payment | null;
   priced: PriceQuote;
   guest: boolean;
-}): { status: number; body: unknown } {
+}): { status: number; body: unknown; stored: unknown } {
   const { staff, pc, user, tariff, mins, prepaid, payment, priced } = o;
   const cost = prepaid ? priced.total : zero();
   const paid = bookPayment(staff, user, payment);
@@ -317,6 +319,8 @@ function seat(o: {
     createdByStaffId: staff.id,
     purchases: prepaid ? [{ paid: cost.amount, sec: mins * 60, pkg: tariff.isPackage }] : [],
   };
+  // A walk-in guest signs in on the PC with the seat's code only (D-96).
+  const guestCode = o.guest ? setGuestCode(rec) : null;
   db.sessions.push(rec);
   settleStatus(pc);
   // Whoever was signed in on this PC must not get this session under their name (D-29).
@@ -348,16 +352,19 @@ function seat(o: {
       ...(o.guest ? { guest: true } : {}),
     },
   });
+  const answer = {
+    session,
+    charged: cost,
+    balance: user.balance,
+    user: { id: user.id, displayName: user.displayName, role: user.role },
+    // As the server: a key without a value is left out.
+    ...(paid ? { payment: { transaction: paid.transaction, bonus: uzs(paid.bonus) } } : {}),
+  };
   return {
     status: 201,
-    body: {
-      session,
-      charged: cost,
-      balance: user.balance,
-      user: { id: user.id, displayName: user.displayName, role: user.role },
-      // As the server: a key without a value is left out.
-      ...(paid ? { payment: { transaction: paid.transaction, bonus: uzs(paid.bonus) } } : {}),
-    },
+    // The code is in this answer only, never in the stored one (a replay answers a new code).
+    body: guestCode ? { ...answer, guestCode } : answer,
+    stored: answer,
   };
 }
 
@@ -505,7 +512,8 @@ export function adminRoutes(app: FastifyInstance): void {
   /**
    * A walk-in guest's seat (beyond the contract, D-24): the transient guest account and its session in one step, the
    * account made only after every check passed. Prepaid takes exactly the price now (409 `priceChanged {total}`, D-48),
-   * postpaid follows `limits.guestPostpaid` / `guestDebtLimit`. The guest presses «Гость» on that PC to sign in.
+   * postpaid follows `limits.guestPostpaid` / `guestDebtLimit`. The answer carries the seat's four-digit code once
+   * (`guestCode`, D-96): the guest types it on that PC to sign in.
    */
   app.post('/admin/sessions/guest', async (req, reply) => {
     const staff = requireAdmin(req);
@@ -549,7 +557,7 @@ export function adminRoutes(app: FastifyInstance): void {
         const guest = createGuest(pc, name, null, true);
         return seat({ staff, pc, user: guest, tariff, mins, prepaid, payment, priced, guest: true });
       },
-      { keyRequired: true },
+      { keyRequired: true, replayed: replayGuestCode },
     );
   });
 
@@ -725,6 +733,8 @@ export function adminRoutes(app: FastifyInstance): void {
         if (next) rec.tariffId = next.id;
         rec.pcId = to.id;
         rec.moves = [...(rec.moves ?? []), { fromPcId: from.id, toPcId: to.id, at, staffId: staff.id }];
+        // A walk-in guest signs in on the target with a new code only (D-96), whoever started the session.
+        const guestCode = user.transient ? setGuestCode(rec) : null;
         markDirty();
         settleStatus(from);
         settleStatus(to);
@@ -757,19 +767,17 @@ export function adminRoutes(app: FastifyInstance): void {
             secondsLeft: session.secondsLeft,
           },
         });
-        return {
-          status: 200,
-          body: {
-            session,
-            from: { pcId: from.id, name: from.name },
-            to: { pcId: to.id, name: to.name },
-            tariffChanged,
-            user: { id: user.id, displayName: user.displayName, role: user.role },
-            signedIn: false,
-          },
+        const answer = {
+          session,
+          from: { pcId: from.id, name: from.name },
+          to: { pcId: to.id, name: to.name },
+          tariffChanged,
+          user: { id: user.id, displayName: user.displayName, role: user.role },
+          signedIn: false,
         };
+        return { status: 200, body: guestCode ? { ...answer, guestCode } : answer, stored: answer };
       },
-      { keyRequired: true, strictBody: true },
+      { keyRequired: true, strictBody: true, replayed: replayGuestCode },
     );
   });
 

@@ -313,6 +313,17 @@
     "wrongPinLeft": "Wrong PIN. Attempts left: {{attempts}}",
     "wrongPasswordLeft": "Wrong password. Attempts left: {{attempts}}",
     "pinLockedOut": "Too many wrong PINs: unlock with your password or ask the administrator.",
+    "guestCode": {
+      "title": "Enter the code from the desk",
+      "hint": "The four digits the administrator gave you when opening your session on this PC.",
+      "label": "Code from the desk",
+      "keypad": "Code digits",
+      "erase": "Erase a digit",
+      "signingIn": "Signing in…",
+      "wrong": "Wrong code",
+      "wrongLeft": "Wrong code. Attempts left: {{attempts}}",
+      "lockedOut": "Too many wrong codes. Wait 15 minutes or go to the desk."
+    },
     "staff": {
       "button": "Tech user",
       "title": "Tech user",

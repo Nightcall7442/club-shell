@@ -271,6 +271,11 @@ pub struct Session {
     /// Postpaid the cash desk opened (D-89, beyond the contract); null — the player may leave.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pay_at_desk: Option<bool>,
+    /// A walk-in guest's seat the cash desk opened (D-96, beyond the contract): the guest signs in
+    /// on the PC with the four-digit code the desk gave them (`guestLogin` with `code`); null — the
+    /// session's own player signs in as usual.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guest_code: Option<bool>,
 }
 
 impl Session {
@@ -452,6 +457,7 @@ pub(crate) fn sample_session() -> Session {
         is_prepaid: true,
         warnings_sent: vec![],
         pay_at_desk: None,
+        guest_code: None,
     }
 }
 

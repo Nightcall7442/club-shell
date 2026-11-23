@@ -220,11 +220,11 @@ function Foot(): JSX.Element {
 const methodLabel = (method: string): string => t(PAY_METHOD_LABEL[method as PayMethod] ?? method);
 
 /**
- * How a walk-in guest signs in to the seat the desk opened, in the kiosk's own words per language (its «Гость» tab,
- * the rules box, the button): `pc` is the PC's label.
+ * How a walk-in guest signs in to the seat the desk opened (D-96): the PC's lock screen asks for the code the cashier
+ * names (never printed: the slip only says where to type it). `pc` is the PC's label.
  */
 export function guestSignIn(pc: string): string {
-  return t('{pc}: вкладка «Гость» → «Я принимаю правила клуба» → «Играть как гость»', { pc });
+  return t('{pc}: на экране входа введите код, который назвал администратор', { pc });
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

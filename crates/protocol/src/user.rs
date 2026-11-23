@@ -296,6 +296,10 @@ pub struct GuestAuthRequest {
     /// Preferred locale.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub locale: Option<Locale>,
+    /// The four-digit code the cash desk gave a walk-in guest for this PC's seat (D-96, beyond the
+    /// contract); required while the PC holds such a seat, ignored otherwise. Never logged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
 }
 
 /// Body of `POST /auth/logout`.

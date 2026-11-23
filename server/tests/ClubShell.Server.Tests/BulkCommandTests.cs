@@ -61,7 +61,7 @@ public sealed class BulkCommandTests(ShortAckServerFixture server) : LedgerCheck
         var busy = await Seats.OnlineAsync(Server);
         var seated = await DeskGuests.SeatAsync(Server, owner, busy.PcId);
         var (guest, id) = (seated.GetProperty("user").GetProperty("id").GetGuid(), seated.GetProperty("session").GetProperty("id").GetGuid());
-        using (var signIn = await busy.PostAsync("/api/v1/auth/guest", new { pcId = busy.PcId, hwid = busy.Hwid }))
+        using (var signIn = await busy.PostAsync("/api/v1/auth/guest", new { pcId = busy.PcId, hwid = busy.Hwid, code = DeskGuests.Code(seated) }))
         {
             Assert.Equal(guest, (await Players.ReadAsync(signIn, 200)).GetProperty("user").GetProperty("id").GetGuid());
         }

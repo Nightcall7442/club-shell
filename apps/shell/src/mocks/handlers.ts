@@ -290,8 +290,13 @@ interface MockState {
   lockedByExpiry: boolean;
   /** The member's session is open on another PC (`409 activeSessionElsewhere` until `endElsewhere: true`). */
   elsewhere: { pcId: string; pcName: string } | null;
-  /** The walk-in guest the desk seated on this PC (`simulate.deskGuest`): «guest» sign-in takes their session, as the server. */
-  deskGuest: User | null;
+  /**
+   * The walk-in guest the desk seated on this PC (`simulate.deskGuest`) and the seat's code (D-96): «guest» sign-in with
+   * that code takes their session, as the server; wrong codes are counted like wrong cards.
+   */
+  deskGuest: { user: User; code: string } | null;
+  /** Wrong desk-guest codes on this PC (ms timestamps), as the server's per-PC lockout. */
+  guestCodeFailures: number[];
   /** Every sign-in attempt, without its secrets (tests read `endElsewhere`). */
   loginLog: { kind: string; endElsewhere: boolean }[];
   /** One-shot failures by command (`simulate.failNext`). */
@@ -342,6 +347,7 @@ function freshState(): MockState {
     lastCallAdminAt: 0,
     adminAttempts: [],
     cardFailures: [],
+    guestCodeFailures: [],
     idempotency: new Map(),
     kiosk: clone(KIOSK_STATE),
     updateReady: false,
@@ -920,15 +926,16 @@ export const simulate = {
     }
   },
   /**
-   * The cash desk seats a walk-in guest on this PC (the desk's «Гость»): the session is open and nobody is
-   * signed in yet — the Shell signs the guest in by itself (SHELL_CHANGES: no «Гость» tab).
+   * The cash desk seats a walk-in guest on this PC (the desk's «Гость») with the code it named to the guest (D-96): the
+   * session is open and nobody is signed in yet — the lock screen asks for the code.
    */
-  deskGuest(name = 'Гость 3'): void {
+  deskGuest(name = 'Гость 3', code = '1234'): void {
     if (mockState.user || mockState.session) {
       return;
     }
     const guest = makeGuest(name);
-    mockState.deskGuest = guest;
+    mockState.deskGuest = { user: guest, code };
+    mockState.guestCodeFailures = [];
     const tariff = TARIFFS[0];
     mockState.session = {
       id: newId(),
@@ -944,6 +951,7 @@ export const simulate = {
       cost: tariff ? tariffPriceFor(tariff, 60) : money(0),
       isPrepaid: true,
       warningsSent: [],
+      guestCode: true,
     };
     // As the Agent: the server's session reaches the Shell before anyone signs in on it.
     emitMock('agent://session.updated', clone(mockState.session));
@@ -1121,9 +1129,27 @@ cmd('auth_login', (args): AuthLoginResponse => {
       break;
     }
     case 'guest':
-      // The desk's guest on this PC is taken over (D-25); a member's session here refuses a guest (D-26).
+      // The desk's guest on this PC is taken over with the seat's code only (D-25, D-96); a member's session here
+      // refuses a guest (D-26).
       if (mockState.deskGuest) {
-        user = mockState.deskGuest;
+        const code = (req.code ?? '').trim();
+        if (code.length === 0) {
+          mockError('validation', 'code is required', { field: 'code', reason: 'required' });
+        }
+        const now = Date.now();
+        mockState.guestCodeFailures = mockState.guestCodeFailures.filter((t) => now - t < 15 * 60_000);
+        if (mockState.guestCodeFailures.length >= 5) {
+          mockError('unauthorized', 'Wrong credentials', { reason: 'badCredentials', attemptsLeft: 0 });
+        }
+        if (code !== mockState.deskGuest.code) {
+          mockState.guestCodeFailures.push(now);
+          mockError('unauthorized', 'Wrong credentials', {
+            reason: 'badCredentials',
+            attemptsLeft: Math.max(0, 5 - mockState.guestCodeFailures.length),
+          });
+        }
+        mockState.guestCodeFailures = [];
+        user = mockState.deskGuest.user;
         mockState.deskGuest = null;
       } else if (mockState.session && !mockState.user) {
         mockError('forbidden', 'This PC holds another player session', { reason: 'pcOccupied' });

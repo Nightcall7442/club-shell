@@ -658,6 +658,21 @@ public sealed class PlayerAccountTests : IDisposable
     }
 
     [Fact]
+    public async Task A_desk_guest_seat_code_reaches_the_server_and_a_malformed_one_does_not()
+    {
+        _link.Connectivity = ConnectivityState.Online;
+        _server.GuestLoginAsync(Arg.Any<GuestAuthRequest>(), Arg.Any<CancellationToken>()).Returns(new AuthResponse(_guest, null, "token", "refresh", T0.AddHours(8)));
+
+        IpcEnvelope bad = await SendAsync(IpcMessages.Auth.Login, new AuthLoginRequest(AuthKind.Guest, Code: "12a4"));
+        bad.Error!.Code.Should().Be(ErrorCode.Validation);
+        await _server.DidNotReceive().GuestLoginAsync(Arg.Any<GuestAuthRequest>(), Arg.Any<CancellationToken>());
+
+        IpcEnvelope signedIn = await SendAsync(IpcMessages.Auth.Login, new AuthLoginRequest(AuthKind.Guest, Code: " 0420 "));
+        signedIn.IsError.Should().BeFalse(signedIn.Error?.Message);
+        await _server.Received(1).GuestLoginAsync(Arg.Is<GuestAuthRequest>(r => r.Code == "0420"), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Guest_display_name_and_one_letter_logins_reach_the_server()
     {
         _link.Connectivity = ConnectivityState.Online;

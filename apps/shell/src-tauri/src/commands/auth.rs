@@ -17,6 +17,8 @@ const USERNAME_MAX: usize = 32;
 const PASSWORD_MAX: usize = 128;
 /// QR / card / one-time tokens.
 const TOKEN_MAX: usize = 512;
+/// A desk guest's seat code (D-96): four ASCII digits.
+const GUEST_CODE_LEN: usize = 4;
 
 /// `auth_login` → `auth.login`. Caches the returned user/session. `endElsewhere: true` (the player's
 /// confirmation after `409 activeSessionElsewhere`) is passed through as is: the server ends the
@@ -164,7 +166,19 @@ fn validate_login(mut req: AuthLoginRequest) -> CmdResult<AuthLoginRequest> {
                 TOKEN_MAX,
             )?);
         }
-        AuthKind::Guest => {}
+        AuthKind::Guest => {
+            // The code the cash desk gave a walk-in guest for this PC's seat (D-96): exactly four digits when given.
+            if let Some(code) = req.code.as_deref().map(str::trim) {
+                if code.is_empty() {
+                    req.code = None;
+                } else if code.len() != GUEST_CODE_LEN || !code.bytes().all(|b| b.is_ascii_digit())
+                {
+                    return Err(ShellError::validation("code", "must be 4 digits"));
+                } else {
+                    req.code = Some(code.to_owned());
+                }
+            }
+        }
     }
     Ok(req)
 }
@@ -183,6 +197,7 @@ mod tests {
             card_id: None,
             token: None,
             end_elsewhere: None,
+            code: None,
         }
     }
 
@@ -250,5 +265,22 @@ mod tests {
         assert!(validate_login(login(AuthKind::Card)).is_err());
         assert!(validate_login(login(AuthKind::Token)).is_err());
         assert!(validate_login(login(AuthKind::Guest)).is_ok());
+    }
+
+    #[test]
+    fn a_guest_seat_code_is_four_digits() {
+        let guest = |code: &str| {
+            validate_login(AuthLoginRequest {
+                code: Some(code.into()),
+                ..login(AuthKind::Guest)
+            })
+        };
+        assert_eq!(guest(" 0420 ").unwrap().code.as_deref(), Some("0420"));
+        assert_eq!(guest("  ").unwrap().code, None);
+        for bad in ["123", "12345", "12a4", "١٢٣٤"] {
+            let e = guest(bad).unwrap_err();
+            assert_eq!(e.code, ErrorCode::Validation);
+            assert_eq!(e.details.unwrap()["field"], "code");
+        }
     }
 }

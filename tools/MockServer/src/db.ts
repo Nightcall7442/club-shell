@@ -3,7 +3,7 @@
  * money, paging, validation, ETag, idempotency, auth context) and debounced persistence to `./.mock-db.json`.
  * `--reset` on the command line discards the persisted file and reseeds.
  */
-import { createCipheriv, createHash, createHmac, hkdfSync, randomBytes, randomUUID } from 'node:crypto';
+import { createCipheriv, createHash, createHmac, hkdfSync, randomBytes, randomInt, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -235,6 +235,11 @@ export interface SessionRecord {
   moves?: { fromPcId: string; toPcId: string; at: string; staffId: string }[];
   /** The id the PC gave a session it opened offline (`POST /sessions` `clientSessionId`), as the server keeps it. */
   clientSessionId?: string | null;
+  /**
+   * A walk-in guest's seat the desk opened or moved (D-96): the sha256 of the four digits the guest types on the PC.
+   * The plain code is answered to the desk once and kept nowhere.
+   */
+  guestCodeHash?: string | null;
 }
 
 export interface Purchase {
@@ -420,6 +425,30 @@ export function compareSemver(a: string, b: string): number {
 }
 
 export const sha256Hex = (data: string | Buffer): string => createHash('sha256').update(data).digest('hex');
+
+/** A fresh four-digit code for a desk guest's seat (D-96), from the crypto generator, as the server. */
+export const newGuestCode = (): string => String(randomInt(0, 10_000)).padStart(4, '0');
+
+/** Gives a desk guest's seat a new code (D-96): only its sha256 is kept; the plain code is answered once. */
+export function setGuestCode(rec: SessionRecord): string {
+  const code = newGuestCode();
+  rec.guestCodeHash = sha256Hex(code);
+  return code;
+}
+
+/**
+ * The replay of a desk guest's seat (`idempotent`'s `replayed`): the stored answer has no code, so the seat gets a new
+ * one (the first answer was lost, the cashier never saw it) and the answer carries that; the old code stops working, as
+ * on the server. A seat that ended meanwhile, or a member's, is answered as stored.
+ */
+export function replayGuestCode(stored: unknown): unknown {
+  const body = stored as { session?: { id?: string } } | null;
+  const rec = body?.session?.id ? findSession(body.session.id) : undefined;
+  if (!rec || rec.state === 'ended' || !rec.guestCodeHash) return stored;
+  const code = setGuestCode(rec);
+  markDirty();
+  return { ...(stored as Record<string, unknown>), guestCode: code };
+}
 export const hmacHex = (key: Buffer, message: string): string =>
   createHmac('sha256', key).update(message).digest('hex');
 
@@ -618,7 +647,7 @@ export async function idempotent(
   req: FastifyRequest,
   reply: FastifyReply,
   run: () => Promise<{ status: number; body: unknown; stored?: unknown }>,
-  options: { keyRequired?: boolean; strictBody?: boolean } = {},
+  options: { keyRequired?: boolean; strictBody?: boolean; replayed?: (stored: unknown) => unknown } = {},
 ): Promise<unknown> {
   const header = req.headers['idempotency-key'];
   if (options.keyRequired) {
@@ -633,7 +662,7 @@ export async function idempotent(
       if (options.strictBody && hit.hash !== undefined && hit.hash !== hash)
         throw errors.conflict('idempotencyKeyReused');
       reply.header('Idempotent-Replayed', 'true');
-      return reply.code(hit.status).send(hit.body);
+      return reply.code(hit.status).send(options.replayed ? options.replayed(hit.body) : hit.body);
     }
   }
   const result = await run();
@@ -804,6 +833,7 @@ export function viewSession(s: SessionRecord, nowMs = Date.now()): Session {
     cost,
     isPrepaid: s.isPrepaid,
     warningsSent: s.warningsSent,
+    ...(s.guestCodeHash ? { guestCode: true } : {}),
   };
 }
 

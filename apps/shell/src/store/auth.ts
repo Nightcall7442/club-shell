@@ -107,6 +107,8 @@ export interface LoginOptions {
 export interface AuthActions {
   login(kind: AuthKind, creds?: AuthCredentials, opts?: LoginOptions): Promise<AuthLoginResponse>;
   loginGuest(displayName?: string): Promise<AuthLoginResponse>;
+  /** A walk-in guest's desk seat (D-96): «Гость» with the four-digit code the cash desk gave. */
+  loginGuestCode(code: string): Promise<AuthLoginResponse>;
   /** The player's own account from the lock screen (D-92): made by the server and signed in like a password login. */
   register(req: AuthRegisterRequest): Promise<AuthLoginResponse>;
   /**
@@ -221,6 +223,10 @@ export const useAuthStore = create<AuthStore>()(
 
       loginGuest(displayName) {
         return get().login('guest', displayName ? { username: displayName } : {});
+      },
+
+      loginGuestCode(code) {
+        return get().login('guest', { code });
       },
 
       async register(req) {
