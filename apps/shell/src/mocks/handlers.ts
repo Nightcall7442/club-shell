@@ -294,7 +294,7 @@ interface MockState {
    * The walk-in guest the desk seated on this PC (`simulate.deskGuest`) and the seat's code (D-96): «guest» sign-in with
    * that code takes their session, as the server; wrong codes are counted like wrong cards.
    */
-  deskGuest: { user: User; code: string } | null;
+  deskGuest: { user: User; code: string | null } | null;
   /** Wrong desk-guest codes on this PC (ms timestamps), as the server's per-PC lockout. */
   guestCodeFailures: number[];
   /** Every sign-in attempt, without its secrets (tests read `endElsewhere`). */
@@ -926,10 +926,10 @@ export const simulate = {
     }
   },
   /**
-   * The cash desk seats a walk-in guest on this PC (the desk's «Гость») with the code it named to the guest (D-96): the
-   * session is open and nobody is signed in yet — the lock screen asks for the code.
+   * The cash desk seats a walk-in guest on this PC (the desk's «Гость»): the session is open and nobody is signed in yet —
+   * the lock screen signs the guest in at once (D-98); with `code` (a seat from before D-98) it asks for that code.
    */
-  deskGuest(name = 'Гость 3', code = '1234'): void {
+  deskGuest(name = 'Гость 3', code: string | null = null): void {
     if (mockState.user || mockState.session) {
       return;
     }
@@ -951,7 +951,7 @@ export const simulate = {
       cost: tariff ? tariffPriceFor(tariff, 60) : money(0),
       isPrepaid: true,
       warningsSent: [],
-      guestCode: true,
+      ...(code !== null ? { guestCode: true } : {}),
     };
     // As the Agent: the server's session reaches the Shell before anyone signs in on it.
     emitMock('agent://session.updated', clone(mockState.session));
@@ -1131,7 +1131,11 @@ cmd('auth_login', (args): AuthLoginResponse => {
     case 'guest':
       // The desk's guest on this PC is taken over with the seat's code only (D-25, D-96); a member's session here
       // refuses a guest (D-26).
-      if (mockState.deskGuest) {
+      if (mockState.deskGuest && mockState.deskGuest.code === null) {
+        // The desk's seat without a code (D-98): the guest is signed in at once.
+        user = mockState.deskGuest.user;
+        mockState.deskGuest = null;
+      } else if (mockState.deskGuest) {
         const code = (req.code ?? '').trim();
         if (code.length === 0) {
           mockError('validation', 'code is required', { field: 'code', reason: 'required' });

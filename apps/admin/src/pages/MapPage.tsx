@@ -1606,7 +1606,7 @@ function BulkPanel({
             <p className="text-[13px] font-medium text-text">
               {sessionAsk.kind === 'open'
                 ? t(
-                    'Открыть постоплату для гостей на {n} ПК? Касса покажет код каждого ПК — гость введёт его на экране входа, оплата — на кассе после игры.',
+                    'Открыть постоплату для гостей на {n} ПК? ПК откроются сами — код не нужен, оплата на кассе после игры.',
                     {
                       n: sessionAsk.seats.length,
                     },
@@ -1980,7 +1980,7 @@ function MoveSheet({
         <li className="flex gap-2.5">
           <SignInIcon size={16} className="mt-0.5 text-accent" />
           {guest
-            ? t('{pc}: гость входит по новому коду, касса покажет его после пересадки', { pc: pcLabel(to.pc.name) })
+            ? t('{pc}: ПК откроется для гостя сам — код не нужен', { pc: pcLabel(to.pc.name) })
             : t('{pc}: игрок входит своим логином', { pc: pcLabel(to.pc.name) })}
         </li>
       </ul>
@@ -3460,7 +3460,7 @@ function FreeSeat({
               onChange={(e) => setGuestName(e.target.value)}
             />
             <span className="text-[11.5px] leading-4 text-muted">
-              {t('Необязательно. Гость войдёт на этом ПК по коду, который покажет касса.')}
+              {t('Необязательно. ПК откроется для гостя сам — код и пароль не нужны.')}
             </span>
           </div>
         ) : (

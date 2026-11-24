@@ -139,9 +139,8 @@ public sealed class SignInSafetyTests(KestrelServerFixture server) : LedgerCheck
 
         // A walk-in guest signed in through «Гость».
         var guestPc = await TestAgent.CreateAsync(Server);
-        var guestSeat = await DeskGuests.SeatAsync(Server, cashier, guestPc.PcId);
-        var guestId = guestSeat.GetProperty("user").GetProperty("id").GetGuid();
-        await DeskGuests.PressAsync(guestPc, code: DeskGuests.Code(guestSeat));
+        var guestId = (await DeskGuests.SeatAsync(Server, cashier, guestPc.PcId)).GetProperty("user").GetProperty("id").GetGuid();
+        await DeskGuests.PressAsync(guestPc);
         await ExpectAsync(Server, 200, HttpMethod.Post, "/sessions/end", cashier, new { pcId = guestPc.PcId });
         using var guestAfter = await guestPc.SendAsync(HttpMethod.Get, $"/api/v1/users/{guestId}");
         await Contract.ReadErrorAsync(guestAfter, 401, "unauthorized", "userToken");
@@ -195,9 +194,8 @@ public sealed class TimeUpSignOutTests(LongClockServerFixture server) : LedgerCh
         var cashier = await LoginAsync(Server, CashierPin);
         await OpenShiftAsync(Server, cashier);
         var guestPc = await TestAgent.CreateAsync(Server);
-        var guestSeat = await DeskGuests.SeatAsync(Server, cashier, guestPc.PcId, minutes: 30);
-        var guestId = guestSeat.GetProperty("user").GetProperty("id").GetGuid();
-        await DeskGuests.PressAsync(guestPc, code: DeskGuests.Code(guestSeat));
+        var guestId = (await DeskGuests.SeatAsync(Server, cashier, guestPc.PcId, minutes: 30)).GetProperty("user").GetProperty("id").GetGuid();
+        await DeskGuests.PressAsync(guestPc);
         var (memberPc, member) = await Players.SignedInAsync(Server);
         var (status, _) = await Players.StartAsync(memberPc, member, minutes: 30);
         Assert.Equal(201, status);

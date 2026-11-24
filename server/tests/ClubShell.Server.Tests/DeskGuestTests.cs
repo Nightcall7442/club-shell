@@ -6,8 +6,7 @@ namespace ClubShell.Server.Tests;
 /// <summary>
 /// Walk-in guests at the desk (cash desk part 2, D-24..D-26, D-36, D-37, D-48): <c>POST /admin/sessions/guest</c> creates the
 /// transient account and its seat in one transaction with one exact payment and no bonus; a refusal leaves no account,
-/// money or journal entry. «Гость» on that PC with the seat's code (D-96) signs in to the desk's session (even with kiosk
-/// guests off), but never takes
+/// money or journal entry. «Гость» on that PC signs in to the desk's session (even with kiosk guests off), but never takes
 /// over a kiosk guest's or a member's session (<c>403 pcOccupied</c>). An early desk end gives back only the unused time,
 /// and only what the guest paid in cash leaves the drawer (<c>POST /admin/wallet/payout</c>). Standard costs 1 200 000
 /// tiyin an hour; the seeded bonus tiers start at 5 000 000.
@@ -51,17 +50,8 @@ public sealed class DeskGuestTests(ServerFixture server) : LedgerCheckedTest(ser
             "SELECT (meta ->> 'forSession')::boolean FROM audit_entries WHERE action = 'topUp' AND user_id = @guestId", new { guestId }));
         Assert.False(await SignedInAsync(cashier, agent.PcId));
 
-        // The code is in the answer once, four digits; the seat keeps only its hash and the PC is told it is a guest's seat.
-        var code = DeskGuests.Code(opened);
-        Assert.Matches("^[0-9]{4}$", code);
-        Assert.True(opened.GetProperty("session").GetProperty("guestCode").GetBoolean());
-        var hash = await Players.ScalarAsync<string>(Server, "SELECT guest_code_hash FROM sessions WHERE id = @sessionId", new { sessionId });
-        Assert.StartsWith("pbkdf2$", hash);
-        Assert.DoesNotContain(code, hash);
-        Assert.Equal(0, await Players.ScalarAsync<int>(Server, "SELECT count(*)::int FROM idempotency_keys WHERE response::text LIKE '%guestCode\":\"%'"));
-
-        // «Гость» on that PC with the code: the desk's guest and session, no second account.
-        var auth = await DeskGuests.PressAsync(agent, code: code);
+        // «Гость» on that PC: the desk's guest and session, no second account.
+        var auth = await DeskGuests.PressAsync(agent);
         Assert.Equal((guestId, sessionId), (auth.GetProperty("user").GetProperty("id").GetGuid(), auth.GetProperty("session").GetProperty("id").GetGuid()));
         Assert.Equal(users + 1, await CountAsync("users"));
         Assert.True(await SignedInAsync(cashier, agent.PcId));
@@ -288,64 +278,6 @@ public sealed class DeskGuestTests(ServerFixture server) : LedgerCheckedTest(ser
         }
     }
 
-    [Fact]
-    public async Task The_guest_button_on_a_desk_guest_seat_needs_its_code_and_wrong_codes_are_counted_per_pc()
-    {
-        var cashier = await LoginAsync(Server, CashierPin);
-        await OpenShiftAsync(Server, cashier);
-        var agent = await TestAgent.CreateAsync(Server);
-        var opened = await DeskGuests.SeatAsync(Server, cashier, agent.PcId);
-        var code = DeskGuests.Code(opened);
-        var wrong = code == "0000" ? "1111" : "0000";
-        var users = await CountAsync("users");
-
-        // No code: a validation error, nothing counted and no account made.
-        var missing = await DeskGuests.PressAsync(agent, 400);
-        Assert.Equal(("code", "required"), Field(missing));
-
-        // Wrong codes: 401 with the attempts left, five in 15 minutes refuse even the right code on that PC.
-        for (var left = 4; left >= 0; left--)
-        {
-            var refused = await DeskGuests.PressAsync(agent, 401, left == 2 ? "12a" : wrong);
-            Contract.AssertError(refused, "unauthorized", "badCredentials");
-            Assert.Equal(left, refused.GetProperty("error").GetProperty("details").GetProperty("attemptsLeft").GetInt32());
-        }
-
-        Assert.Equal(0, (await DeskGuests.PressAsync(agent, 401, code)).GetProperty("error").GetProperty("details").GetProperty("attemptsLeft").GetInt32());
-        Assert.Equal(users, await CountAsync("users"));
-        Assert.False(await SignedInAsync(cashier, agent.PcId));
-
-        // The window passes: the right code signs the guest in to the seat.
-        Server.Clock.Advance(TimeSpan.FromMinutes(16));
-        var auth = await DeskGuests.PressAsync(agent, code: code);
-        Assert.Equal(opened.GetProperty("session").GetProperty("id").GetGuid(), auth.GetProperty("session").GetProperty("id").GetGuid());
-        Assert.Equal(users, await CountAsync("users"));
-        await ExpectAsync(Server, 200, HttpMethod.Post, "/sessions/end", cashier, new { pcId = agent.PcId });
-    }
-
-    [Fact]
-    public async Task A_replayed_guest_seat_answers_a_new_code_and_the_old_one_stops_working()
-    {
-        var cashier = await LoginAsync(Server, CashierPin);
-        await OpenShiftAsync(Server, cashier);
-        var agent = await TestAgent.CreateAsync(Server);
-        var price = Amount((await ExpectAsync(Server, 200, HttpMethod.Post, "/quote", cashier, new { tariffId = Players.Standard, pcId = agent.PcId, minutes = 60 })).GetProperty("total"));
-        var body = new { pcId = agent.PcId, tariffId = Players.Standard, minutes = 60, payment = new { amount = price, method = "cash" } };
-        var key = Guid.NewGuid();
-        var first = await RawExpectAsync(Server, 201, HttpMethod.Post, "/sessions/guest", cashier, body, key);
-        var (status, replayed, wasReplayed) = await RawAsync(Server, HttpMethod.Post, "/sessions/guest", cashier, body, key);
-        Assert.Equal((201, true), (status, wasReplayed));
-        Assert.Equal(first.GetProperty("session").GetProperty("id").GetGuid(), replayed.GetProperty("session").GetProperty("id").GetGuid());
-        var (old, fresh) = (DeskGuests.Code(first), DeskGuests.Code(replayed));
-        if (old != fresh)
-        {
-            Contract.AssertError(await DeskGuests.PressAsync(agent, 401, old), "unauthorized", "badCredentials");
-        }
-
-        await DeskGuests.PressAsync(agent, code: fresh);
-        await ExpectAsync(Server, 200, HttpMethod.Post, "/sessions/end", cashier, new { pcId = agent.PcId });
-    }
-
     private Task<int> CountAsync(string table) => Players.ScalarAsync<int>(Server, $"SELECT count(*)::int FROM {table}");
 
     private async Task<(int Users, int Ledger, int Audit)> CountsAsync() => (await CountAsync("users"), await CountAsync("ledger_entries"), await CountAsync("audit_entries"));
@@ -361,7 +293,7 @@ public sealed class DeskGuestTests(ServerFixture server) : LedgerCheckedTest(ser
         (error.GetProperty("error").GetProperty("details").GetProperty("field").GetString(), error.GetProperty("error").GetProperty("details").GetProperty("reason").GetString());
 }
 
-/// <summary>The desk's walk-in guest is signed in by «Гость» and the code even when the club turned kiosk guests off (D-25, D-96).</summary>
+/// <summary>The desk's walk-in guest is signed in by «Гость» even when the club turned kiosk guests off (D-25).</summary>
 public sealed class DeskGuestLoginOffTests(GuestDisabledTests.Fixture server) : LedgerCheckedTest(server), IClassFixture<GuestDisabledTests.Fixture>
 {
     [Fact]
@@ -373,7 +305,7 @@ public sealed class DeskGuestLoginOffTests(GuestDisabledTests.Fixture server) : 
         Contract.AssertError(await DeskGuests.PressAsync(agent, 403), "forbidden", "guestDisabled");
 
         var opened = await DeskGuests.SeatAsync(Server, cashier, agent.PcId);
-        var auth = await DeskGuests.PressAsync(agent, code: DeskGuests.Code(opened));
+        var auth = await DeskGuests.PressAsync(agent);
         Assert.Equal(opened.GetProperty("session").GetProperty("id").GetGuid(), auth.GetProperty("session").GetProperty("id").GetGuid());
         Assert.Equal("guest", auth.GetProperty("user").GetProperty("role").GetString());
         await ExpectAsync(Server, 200, HttpMethod.Post, "/sessions/end", cashier, new { pcId = agent.PcId });
@@ -395,16 +327,10 @@ public static class DeskGuests
         return await RawExpectAsync(server, 201, HttpMethod.Post, "/sessions/guest", token, Body(total), Guid.NewGuid());
     }
 
-    /// <summary>The code of a desk guest's seat (D-96), from the 201 body of <see cref="SeatAsync"/> or of a move.</summary>
-    public static string Code(JsonElement seated) => seated.GetProperty("guestCode").GetString()!;
-
-    /// <summary>
-    /// «Гость» on the PC (<c>guestLogin</c>, as the agent sends it), with the desk's <paramref name="code"/> when given; on
-    /// 200 the PC keeps the guest's token.
-    /// </summary>
-    public static async Task<JsonElement> PressAsync(TestAgent agent, int status = 200, string? code = null)
+    /// <summary>«Гость» on the PC (<c>guestLogin</c>, as the agent sends it); on 200 the PC keeps the guest's token.</summary>
+    public static async Task<JsonElement> PressAsync(TestAgent agent, int status = 200)
     {
-        using var response = await agent.PostAsync("/api/v1/auth/guest", new { pcId = agent.PcId, hwid = agent.Hwid, locale = "ru", code });
+        using var response = await agent.PostAsync("/api/v1/auth/guest", new { pcId = agent.PcId, hwid = agent.Hwid, locale = "ru" });
         var body = await Players.ReadAsync(response, status);
         if (status == 200)
         {

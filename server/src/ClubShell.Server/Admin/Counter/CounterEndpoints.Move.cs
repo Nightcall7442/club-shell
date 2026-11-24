@@ -45,8 +45,6 @@ public static partial class CounterEndpoints
         var from = await LivePcAsync(pcs, staff, r.FromPcId!.Value);
         var to = await LivePcAsync(pcs, staff, r.ToPcId!.Value);
         var effects = new SessionEffects();
-        var code = Guests.NewCode();
-        var guest = false;
         var result = await store.ExecuteHttpResultAsync(context, ShiftEndpoints.Principal(staff), keyRequired: true, body, async (c, tx) =>
         {
             var now = sessions.Clock.GetUtcNow();
@@ -142,12 +140,11 @@ public static partial class CounterEndpoints
 
             await c.ExecuteAsync("DELETE FROM user_tokens WHERE pc_id = @pcId AND user_id = @UserId", new { pcId = from.Id, moved.UserId }, tx);
 
-            // A walk-in guest signs in on the target only with a code (D-96): a new one, whoever started the session.
-            if (await c.ExecuteScalarAsync<bool>("SELECT transient FROM users WHERE id = @UserId", new { moved.UserId }, tx))
+            // A walk-in guest signs in on the target at once (D-98): a code from before is dropped with the move.
+            if (moved.GuestCodeHash is not null)
             {
-                moved.GuestCodeHash = Passwords.Hash(code);
-                await c.ExecuteAsync("UPDATE sessions SET guest_code_hash = @GuestCodeHash WHERE id = @Id", new { moved.GuestCodeHash, moved.Id }, tx);
-                guest = true;
+                moved.GuestCodeHash = null;
+                await c.ExecuteAsync("UPDATE sessions SET guest_code_hash = NULL WHERE id = @Id", new { moved.Id }, tx);
             }
 
             var session = moved.ToWire(now);
@@ -167,7 +164,7 @@ public static partial class CounterEndpoints
                 new AdminSessionUser(moved.UserId, who.DisplayName, who.Role), SignedIn: false)));
         }, strictBody: true);
         await sessions.PublishAsync(effects);
-        return await WithGuestCodeAsync(db, result, guest || result.Replayed ? code : null);
+        return IdempotencyStore.ToHttp(result);
     }
 
     /// <summary>What a move checks of its target PC (D-59).</summary>

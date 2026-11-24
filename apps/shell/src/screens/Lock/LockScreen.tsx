@@ -1067,9 +1067,32 @@ export default function LockScreen(): JSX.Element {
     void useGamesStore.getState().load(true);
   }, []);
 
-  // A walk-in guest the desk seated on this PC (D-96): the guest types the code the cashier named — no PC signs anyone
-  // in on the server's word. A member's desk session has no code: its player signs in with their own account.
+  // A walk-in guest the desk seated on this PC (D-98): no «Гость» tab, no rules box, no code — the guest is signed in at
+  // once and the Shell opens its home screen. Tried once per session: a member's desk session refuses a guest
+  // (`403 pcOccupied`), and they sign in with their own account as before. A seat that still carries a code from before
+  // (D-96, `session.guestCode`) asks for it instead.
   const guestSeat = useSessionStore((s) => s.session?.guestCode === true);
+  const sessionId = useSessionStore((s) => s.session?.id ?? null);
+  const loginGuest = useAuthStore((s) => s.loginGuest);
+  const triedGuest = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      !ready ||
+      !pcReady ||
+      hasUser ||
+      !isOpen ||
+      isLocked ||
+      guestSeat ||
+      sessionId === null ||
+      triedGuest.current === sessionId
+    ) {
+      return;
+    }
+    triedGuest.current = sessionId;
+    loginGuest().catch(() => {
+      // Not a guest's seat: the sign-in methods stay for its player.
+    });
+  }, [ready, pcReady, hasUser, isOpen, isLocked, guestSeat, sessionId, loginGuest]);
 
   // A session open before the PC is ready (restored after an Agent restart, opened at the desk) waits here too.
   useEffect(() => {

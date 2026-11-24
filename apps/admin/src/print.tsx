@@ -219,12 +219,9 @@ function Foot(): JSX.Element {
 
 const methodLabel = (method: string): string => t(PAY_METHOD_LABEL[method as PayMethod] ?? method);
 
-/**
- * How a walk-in guest signs in to the seat the desk opened (D-96): the PC's lock screen asks for the code the cashier
- * names (never printed: the slip only says where to type it). `pc` is the PC's label.
- */
+/** How a walk-in guest gets in to the seat the desk opened (D-98): the PC signs the guest in by itself. `pc` is its label. */
 export function guestSignIn(pc: string): string {
-  return t('{pc}: на экране входа введите код, который назвал администратор', { pc });
+  return t('{pc}: ПК откроется сам — ничего вводить не нужно', { pc });
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

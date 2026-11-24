@@ -165,7 +165,7 @@ public sealed class AgentHarnessS2Tests(LongClockServerFixture server) : LedgerC
         var opened = await DeskGuests.SeatAsync(Server, cashier, pcId);
         var guestId = opened.GetProperty("user").GetProperty("id").GetGuid();
 
-        var auth = await client.GuestLoginAsync(new GuestAuthRequest(pcId, agent.Hwid, null, Locale.Ru, DeskGuests.Code(opened)), CancellationToken.None);
+        var auth = await client.GuestLoginAsync(new GuestAuthRequest(pcId, agent.Hwid, null, Locale.Ru), CancellationToken.None);
         Assert.Equal((guestId, UserRole.Guest), (auth.User.Id, auth.User.Role));
         Assert.Equal(opened.GetProperty("session").GetProperty("id").GetGuid(), auth.Session!.Id);
         Assert.Equal(auth.Session.Id, (await client.GetCurrentSessionAsync(pcId, CancellationToken.None))!.Id);

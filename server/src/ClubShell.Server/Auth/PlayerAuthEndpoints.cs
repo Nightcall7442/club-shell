@@ -101,8 +101,8 @@ public static class PlayerAuthEndpoints
     }
 
     /// <summary>
-    /// «Гость» on the kiosk. A guest seat the desk opened on this PC (D-24, D-96: a transient account's session with a code)
-    /// is taken over only with its code: none is <c>400 code required</c>, a wrong one <c>401 badCredentials
+    /// «Гость» on the kiosk. A guest seat the desk opened on this PC (D-24) is taken over at once (D-98: the desk issues no
+    /// codes). A seat that still carries a code from before (D-96) is taken over only with it: none is <c>400 code required</c>, a wrong one <c>401 badCredentials
     /// {attemptsLeft}</c>, counted per PC like wrong cards (<c>guestCode:&lt;pcId&gt;</c>, 5 in 15 min refuse even the right
     /// code); the right code signs that guest in to its session, even when <c>Club:GuestLogin</c> is off. Any other open
     /// session of the PC is <c>403 pcOccupied</c> (D-26). Otherwise a temporary <c>guest</c> account (<see cref="Guests"/>)
@@ -142,10 +142,16 @@ public static class PlayerAuthEndpoints
             deskGuest = await CountFailuresAsync(c, club.NetworkId, $"guestCode:{pc.Id}", Guid.Parse(ApiErrorWriter.TraceId(context)), clock.GetUtcNow(),
                 forgetOnSuccess: true, _ => Task.FromResult<Guid?>(code.Length == 4 && Passwords.Verify(seat.CodeHash, code) ? seat.UserId : null));
         }
+        else if (await Guests.CodelessDeskGuestOfPcAsync(c, null, pc.Id) is { } codeless)
+        {
+            // The desk's guest seat has no code: the guest is signed in at once (D-98).
+            deskGuest = codeless;
+        }
 
         return TypedResults.Ok(await SignInAsync(c, tokens, sessions, club, pc, async tx =>
         {
-            if (deskGuest is { } verified && (await Guests.DeskGuestOfPcAsync(c, tx, pc.Id))?.UserId == verified)
+            if (deskGuest is { } verified
+                && ((await Guests.DeskGuestOfPcAsync(c, tx, pc.Id))?.UserId == verified || await Guests.CodelessDeskGuestOfPcAsync(c, tx, pc.Id) == verified))
             {
                 await c.ExecuteAsync("UPDATE users SET locale = @locale WHERE id = @verified", new { verified, locale }, tx);
                 return verified;
