@@ -55,8 +55,18 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
 {
     private static readonly TimeSpan DisposeWait = TimeSpan.FromSeconds(5);
 
-    /// <summary>How long after a game process exits a successor (a launcher's hand-over) is looked for.</summary>
-    private static readonly TimeSpan SuccessorWait = TimeSpan.FromSeconds(5);
+    /// <summary>
+    /// How long after an early exit a successor (a launcher's hand-over, a bootstrapper, a game restarting itself after an
+    /// update or a settings change) is looked for. 5 s was too short for a launcher that updates before it hands over:
+    /// the game was reported exited while it came up, and that exit released its lease and closed its launcher (D-99).
+    /// </summary>
+    public static readonly TimeSpan SuccessorWait = TimeSpan.FromSeconds(60);
+
+    /// <summary>The same for a process that ran <see cref="EarlyExit"/> or longer: a player who quits gets the Shell back soon.</summary>
+    public static readonly TimeSpan LateSuccessorWait = TimeSpan.FromSeconds(15);
+
+    /// <summary>A game process that exits within this of its start is likely to hand over to another one.</summary>
+    public static readonly TimeSpan EarlyExit = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan SuccessorPoll = TimeSpan.FromMilliseconds(250);
 
     private readonly IServerClient _server;
@@ -121,7 +131,7 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
         ArgumentNullException.ThrowIfNull(record);
         cancellationToken.ThrowIfCancellationRequested();
         ObjectDisposedException.ThrowIf(_cts.IsCancellationRequested, this);
-        var tracked = new TrackedGame(record);
+        var tracked = new TrackedGame(record) { WatchedSince = _clock.GetTimestamp() };
         if (!_games.TryAdd(record.Running.Pid, tracked))
         {
             throw IpcError.Conflict($"Pid {record.Running.Pid} is already tracked").ToException();
@@ -217,7 +227,8 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
             int? next;
             try
             {
-                next = tracked.Killed ? null : await FindSuccessorAsync(tracked, pid, ct).ConfigureAwait(false);
+                TimeSpan wait = SuccessorWaitFor(_clock.GetElapsedTime(tracked.WatchedSince));
+                next = tracked.Killed ? null : await FindSuccessorAsync(tracked, pid, wait, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -231,6 +242,7 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
 
             _games.TryRemove(pid, out _);
             tracked.Record = tracked.Record with { Running = tracked.Record.Running with { Pid = successor } };
+            tracked.WatchedSince = _clock.GetTimestamp();
             _logger.LogInformation(
                 "{Title}: pid {Pid} exited with code {ExitCode} after {RanSec}s and handed over to pid {Successor}; following it",
                 tracked.Record.Game.Title,
@@ -262,6 +274,9 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
                 _logger.LogWarning(ex, "Credential restore failed for {Title}", record.Game.Title);
             }
         }
+
+        // A launcher client another game kept running for its pooled account may close now.
+        await _injector.KillDeferredAsync(ct).ConfigureAwait(false);
 
         if (record.Lease is { } lease)
         {
@@ -310,16 +325,19 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
         }
     }
 
+    /// <summary>How long a successor is looked for after a process that ran <paramref name="ran"/> exited.</summary>
+    public static TimeSpan SuccessorWaitFor(TimeSpan ran) => ran < EarlyExit ? SuccessorWait : LateSuccessorWait;
+
     /// <summary>
-    /// The process a game's exited launcher handed over to, looked for during <see cref="SuccessorWait"/> (real time):
+    /// The process a game's exited launcher handed over to, looked for during <paramref name="wait"/> (real time):
     /// first what is left in the game's job (children inherit it), else a process with the game's image name in the
     /// same session, started since the launch and not tracked already.
     /// </summary>
-    private async Task<int?> FindSuccessorAsync(TrackedGame tracked, int exitedPid, CancellationToken cancellationToken)
+    private async Task<int?> FindSuccessorAsync(TrackedGame tracked, int exitedPid, TimeSpan wait, CancellationToken cancellationToken)
     {
         GameLaunchRecord record = tracked.Record;
         string? name = string.IsNullOrWhiteSpace(record.Game.ExePath) ? null : Path.GetFileNameWithoutExtension(record.Game.ExePath);
-        long deadline = Environment.TickCount64 + (long)SuccessorWait.TotalMilliseconds;
+        long deadline = Environment.TickCount64 + (long)wait.TotalMilliseconds;
         while (true)
         {
             if (Successor(record, exitedPid, name, tracked.SessionId) is { } found)
@@ -418,6 +436,9 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
         public uint? SessionId { get; }
 
         public Task? Watch { get; set; }
+
+        /// <summary>Monotonic timestamp since the current process is followed.</summary>
+        public long WatchedSince { get; set; }
 
         public bool Killed { get; set; }
 

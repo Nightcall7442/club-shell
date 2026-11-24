@@ -140,6 +140,8 @@ public sealed class GameLaunchService : IDisposable
         }
 
         _pool.LeaseExpired += OnLeaseExpired;
+        // D-99: a launcher client a running game needs is not killed for another game's pooled account.
+        _injector.LauncherInUseBy = launcher => AccountInjector.LauncherKeptBy(launcher, _tracker.All().Select(r => (r.Game.Launcher, r.Game.Title)));
     }
 
     /// <summary>Launcher backends registered.</summary>
@@ -560,6 +562,7 @@ public sealed class GameLaunchService : IDisposable
         }
 
         await _pool.ReleaseAllAsync(AccountLeaseReleaseReason.SessionEnd, cancellationToken).ConfigureAwait(false);
+        await _injector.KillDeferredAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
