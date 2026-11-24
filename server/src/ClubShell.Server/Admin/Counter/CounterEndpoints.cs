@@ -271,7 +271,7 @@ public static partial class CounterEndpoints
     /// <c>displayName</c> or «Гость &lt;PC number&gt;») and its seat in one transaction, so a refused seat leaves no account,
     /// money or journal entry. Prepaid needs a <c>payment</c> of exactly the price now (D-48, else <c>409 priceChanged
     /// {total}</c>): no extra money sits on a throwaway account; postpaid follows <c>limits.guestPostpaid</c> and takes no
-    /// payment. The seat gets a four-digit code (D-96): only its hash is stored with the session, the plain code is in
+    /// payment. The seat gets no code (D-98; D-96's codes are off): the PC signs the guest in at once. What follows on codes only its hash is stored with the session, the plain code is in
     /// this answer (<c>guestCode</c>) and nowhere else — the guest presses «Гость» on that PC and types it (D-25). Staff only
     /// (the club API key has no drawer and opens no seats for guests, <c>403 staffOnly</c>); <c>Idempotency-Key</c> required.
     /// </summary>
@@ -300,7 +300,8 @@ public static partial class CounterEndpoints
         var pc = await LivePcAsync(pcs, staff, r.PcId!.Value);
         var effects = new SessionEffects();
         TopUpPosted? paid = null;
-        var code = Guests.NewCode();
+        // No code (D-98, the owner's choice): the PC signs the desk's guest in at once.
+        string? code = null;
         var result = await store.ExecuteHttpResultAsync(context, ShiftEndpoints.Principal(staff), keyRequired: true, body, async (c, tx) =>
         {
             var now = sessions.Clock.GetUtcNow();
@@ -322,7 +323,7 @@ public static partial class CounterEndpoints
 
             var session = await sessions.CreateAsync(
                 c, tx, pc, new SessionCreateRequest(pc.Id, guest, r.TariffId!.Value, minutes, prepaid), replay: false, effects, staff,
-                guestCodeHash: Passwords.Hash(code));
+                guestCodeHash: code is null ? null : Passwords.Hash(code));
             return new IdempotentResult(StatusCodes.Status201Created, await SeatedAsync(c, tx, staff, pc, session, paid, effects, now, guest: true));
         });
         await sessions.PublishAsync(effects);

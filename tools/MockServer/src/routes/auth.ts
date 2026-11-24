@@ -324,6 +324,12 @@ export function authRoutes(app: FastifyInstance): void {
     const open = openSessionForPc(pc.id);
     if (open) {
       const owner = findUser(open.userId);
+      // The desk's guest seat without a code (D-98): signed in at once.
+      if (!open.guestCodeHash && owner?.transient && (open.origin === 'cashier' || (open.moves?.length ?? 0) > 0)) {
+        if (locale) owner.locale = locale;
+        markDirty();
+        return authResponse(owner, pc);
+      }
       if (open.guestCodeHash && owner?.transient) {
         const code = (optStr(b, 'code', 16) ?? '').trim();
         if (!code) throw errors.validation('code', 'required');

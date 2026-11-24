@@ -114,12 +114,9 @@ test('a guest has no account to star anything on', async ({ page }) => {
   // The cashier seats a walk-in guest on this PC.
   await page.evaluate(() =>
     (
-      window as unknown as { __clubshellMock: { simulate: { deskGuest: (name: string, code: string) => void } } }
-    ).__clubshellMock.simulate.deskGuest('Гость 5', '1357'),
+      window as unknown as { __clubshellMock: { simulate: { deskGuest: (name: string) => void } } }
+    ).__clubshellMock.simulate.deskGuest('Гость 5'),
   );
-  // The guest types the code the desk named (D-96).
-  await expect(page.getByRole('textbox', { name: 'Код с кассы' })).toBeFocused();
-  await page.keyboard.type('1357');
   await expect(page).toHaveURL(/#\/home$/, { timeout: 15_000 });
   await go(page, '#/games');
   await openGame(page, 'Counter-Strike 2');

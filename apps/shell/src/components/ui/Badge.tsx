@@ -19,11 +19,11 @@ export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
 
 const TINT: Record<BadgeTone, string> = {
   neutral: 'border border-accent/20 bg-accent/[0.04] text-text/80',
-  primary: 'bg-primary/15 text-primary',
-  accent: 'bg-accent/15 text-accent',
-  success: 'bg-success/15 text-success',
-  danger: 'bg-danger/15 text-danger',
-  muted: 'bg-muted/15 text-muted',
+  primary: 'bg-primary/[0.08] text-primary',
+  accent: 'bg-accent/[0.08] text-accent',
+  success: 'bg-success/[0.08] text-success',
+  danger: 'bg-danger/[0.08] text-danger',
+  muted: 'bg-muted/[0.08] text-muted',
 };
 
 const SOLID: Record<BadgeTone, string> = {

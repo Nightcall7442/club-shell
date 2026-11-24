@@ -298,7 +298,7 @@ public sealed class MoveTests(LongClockServerFixture server) : LedgerCheckedTest
     }
 
     [Fact]
-    public async Task Desk_and_kiosk_guests_sign_in_with_guest_and_the_moves_new_code_on_the_new_pc()
+    public async Task Desk_and_kiosk_guests_sign_in_with_guest_on_the_new_pc()
     {
         var owner = await LoginAsync(Server, OwnerPin);
         await OpenShiftAsync(Server, owner);
@@ -306,13 +306,8 @@ public sealed class MoveTests(LongClockServerFixture server) : LedgerCheckedTest
         var seated = await DeskGuests.SeatAsync(Server, owner, a.PcId);
         var (guest, id) = (seated.GetProperty("user").GetProperty("id").GetGuid(), seated.GetProperty("session").GetProperty("id").GetGuid());
         var b = await Seats.OnlineAsync(Server);
-        var movedSeat = await Seats.MoveAsync(Server, owner, a.PcId, b.PcId);
-        using (var noCode = await b.PostAsync("/api/v1/auth/guest", new { pcId = b.PcId, hwid = b.Hwid }))
-        {
-            await Players.ReadAsync(noCode, 400);
-        }
-
-        var signedIn = await GuestAsync(b, DeskGuests.Code(movedSeat));
+        await Seats.MoveAsync(Server, owner, a.PcId, b.PcId);
+        var signedIn = await GuestAsync(b);
         Assert.Equal((guest, id), (signedIn.GetProperty("user").GetProperty("id").GetGuid(), signedIn.GetProperty("session").GetProperty("id").GetGuid()));
         await ExpectAsync(Server, 200, HttpMethod.Post, "/sessions/end", owner, new { sessionId = id });
 
@@ -324,8 +319,8 @@ public sealed class MoveTests(LongClockServerFixture server) : LedgerCheckedTest
         Assert.Equal(201, status);
         var kioskSession = created.GetProperty("id").GetGuid();
         var c = await Seats.OnlineAsync(Server);
-        var movedKiosk = await Seats.MoveAsync(Server, owner, kiosk.PcId, c.PcId);
-        var moved = await GuestAsync(c, DeskGuests.Code(movedKiosk));
+        await Seats.MoveAsync(Server, owner, kiosk.PcId, c.PcId);
+        var moved = await GuestAsync(c);
         Assert.Equal((kioskGuest, kioskSession), (moved.GetProperty("user").GetProperty("id").GetGuid(), moved.GetProperty("session").GetProperty("id").GetGuid()));
 
         // The kiosk guest's PC without the session is free again: «Гость» there makes a new guest.
@@ -412,10 +407,10 @@ public sealed class MoveTests(LongClockServerFixture server) : LedgerCheckedTest
         Assert.Equal(target.PcId, await Players.ScalarAsync<Guid>(Server, "SELECT pc_id FROM ledger_entries WHERE session_id = @postId AND type = 'charge'", new { postId }));
     }
 
-    /// <summary>«Гость» on <paramref name="pc"/> (200 expected), with a seat's code; keeps the guest's token on the agent.</summary>
-    private static async Task<JsonElement> GuestAsync(TestAgent pc, string? code = null)
+    /// <summary>«Гость» on <paramref name="pc"/> (200 expected); keeps the guest's token on the agent.</summary>
+    private static async Task<JsonElement> GuestAsync(TestAgent pc)
     {
-        using var response = await pc.PostAsync("/api/v1/auth/guest", new { pcId = pc.PcId, hwid = pc.Hwid, code });
+        using var response = await pc.PostAsync("/api/v1/auth/guest", new { pcId = pc.PcId, hwid = pc.Hwid });
         var body = await Players.ReadAsync(response, 200);
         pc.UserToken = body.GetProperty("accessToken").GetString();
         return body;

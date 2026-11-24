@@ -637,7 +637,7 @@ function SoundSettingsRow({ settings }: { settings: SoundSettings }): JSX.Elemen
           disabled={settings.muted}
           value={Math.round(settings.volume * 100)}
           onChange={(e) => setSound({ volume: Number(e.target.value) / 100 })}
-          className="min-w-0 flex-1 disabled:opacity-40"
+          className="min-w-0 flex-1 disabled:opacity-55"
         />
         <button
           type="button"

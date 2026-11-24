@@ -45,4 +45,21 @@ internal static class Guests
             """,
             new { pcId },
             tx);
+
+    /// <summary>
+    /// A guest seat the desk opened on <paramref name="pcId"/> (or moved there), still open and without a code: the PC signs
+    /// the guest in at once (D-98, the owner's choice — the desk no longer issues codes). A seat with a code from before
+    /// (<see cref="DeskGuestOfPcAsync"/>) still asks for it; a kiosk guest's session where it was started, or a member's, is
+    /// not one.
+    /// </summary>
+    public static Task<Guid?> CodelessDeskGuestOfPcAsync(NpgsqlConnection c, NpgsqlTransaction? tx, Guid pcId) =>
+        c.QuerySingleOrDefaultAsync<Guid?>(
+            """
+            SELECT s.user_id FROM sessions s JOIN users u ON u.id = s.user_id
+            WHERE s.pc_id = @pcId AND s.state <> 'ended' AND u.transient AND s.guest_code_hash IS NULL
+              AND ((s.origin = 'cashier' AND s.created_by_staff_id IS NOT NULL)
+                   OR EXISTS (SELECT 1 FROM session_events e WHERE e.session_id = s.id AND e.source = 'staff' AND e.type = 'moved'))
+            """,
+            new { pcId },
+            tx);
 }

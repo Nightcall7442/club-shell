@@ -107,7 +107,7 @@ const GUEST: Buyer = { kind: 'guest' };
 
 /** A cart line's − / + (32 px, quiet). */
 const STEPPER =
-  'focus-ring btn-tertiary inline-flex h-8 w-8 items-center justify-center rounded-md text-sm font-medium leading-none disabled:cursor-not-allowed disabled:opacity-40';
+  'focus-ring btn-tertiary inline-flex h-8 w-8 items-center justify-center rounded-md text-sm font-medium leading-none disabled:cursor-not-allowed disabled:opacity-55';
 
 /** The buyer of a seat or a client found, with what their PC's session holds back. */
 async function buyerOf(id: string, fallback: ClientHit | null): Promise<Buyer | null> {
@@ -209,13 +209,15 @@ function ProductTile({
         inCart > 0
           ? 'border-accent/50 shadow-[inset_0_0_22px_-10px_rgb(var(--c-accent)/0.55)]'
           : 'border-accent/[0.14] enabled:hover:border-accent/[0.26]',
-        !can ? 'opacity-45' : 'disabled:opacity-50',
+        // Out of stock: the picture, name and price fade, the red «нет на складе» stays readable.
+        can && 'disabled:opacity-50',
       )}
     >
       <GameArt
         src={p.imageUrl}
         variant="product"
         zoom={!disabled}
+        className={clsx(!can && 'opacity-35 grayscale')}
         fallback={
           <span className="absolute inset-0 bg-[linear-gradient(180deg,rgb(var(--c-accent)/0.06),rgb(var(--c-accent)/0)_70%)]">
             <span className="absolute -right-1 top-1/2 -translate-y-1/2 font-display text-[64px] font-medium leading-none text-accent/[0.09]">
@@ -225,7 +227,12 @@ function ProductTile({
         }
       />
       <span className="relative flex items-start justify-between gap-2">
-        <span className="line-clamp-2 text-[13px] font-semibold leading-4 text-white [text-shadow:0_1px_2px_rgb(0_0_0/0.8)]">
+        <span
+          className={clsx(
+            'line-clamp-2 text-[13px] font-semibold leading-4 [text-shadow:0_1px_2px_rgb(0_0_0/0.8)]',
+            can ? 'text-white' : 'text-white/70',
+          )}
+        >
           {p.title}
         </span>
         {inCart > 0 && (
@@ -236,7 +243,9 @@ function ProductTile({
       </span>
       <span className="relative flex flex-col items-start gap-1.5">
         {!can ? (
-          <span className="label-sm font-semibold text-danger-ink">{t('нет на складе')}</span>
+          <span className="label-sm rounded-sm bg-danger/90 px-1.5 py-0.5 font-semibold text-white">
+            {t('нет на складе')}
+          </span>
         ) : p.stockQty != null ? (
           <span className={clsx('label-sm', low ? 'font-semibold text-warning' : 'text-artlabel')}>
             {t('осталось {n}', { n: p.stockQty })}
@@ -245,7 +254,10 @@ function ProductTile({
         <DotoSum
           minor={p.price.amount}
           size={16}
-          className="text-white [text-shadow:0_0_8px_rgb(0_0_0/0.9),0_1px_3px_rgb(0_0_0/0.85)]"
+          className={clsx(
+            'text-white [text-shadow:0_0_8px_rgb(0_0_0/0.9),0_1px_3px_rgb(0_0_0/0.85)]',
+            !can && 'opacity-60',
+          )}
           unitClassName="text-artlabel"
         />
       </span>
@@ -782,7 +794,7 @@ export default function BarPage(): JSX.Element {
                       aria-label={t('Убрать: {title}', { title })}
                       disabled={locked}
                       onClick={() => setQty(l.productId, 0)}
-                      className="focus-ring btn-ghost -mr-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted disabled:cursor-not-allowed disabled:opacity-40"
+                      className="focus-ring btn-ghost -mr-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted disabled:cursor-not-allowed disabled:opacity-55"
                     >
                       <CloseIcon size={13} />
                     </button>
@@ -855,7 +867,7 @@ export default function BarPage(): JSX.Element {
                   aria-label={t('Сменить клиента')}
                   title={t('Сменить клиента')}
                   disabled={locked}
-                  className="focus-ring btn-ghost inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  className="focus-ring btn-ghost inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted disabled:cursor-not-allowed disabled:opacity-55"
                   onClick={() => {
                     setBuyer(GUEST);
                     setShort(null);

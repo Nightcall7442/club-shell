@@ -380,7 +380,7 @@ export function PayBox({
                 key={p}
                 disabled={frozen}
                 className={clsx(
-                  'choice focus-ring tnum h-11 rounded-md px-1 text-[13.5px] font-semibold disabled:cursor-not-allowed disabled:opacity-40',
+                  'choice focus-ring tnum h-11 rounded-md px-1 text-[13.5px] font-semibold disabled:cursor-not-allowed disabled:opacity-55',
                   digits === String(p) && 'choice-on',
                 )}
                 onClick={() => {

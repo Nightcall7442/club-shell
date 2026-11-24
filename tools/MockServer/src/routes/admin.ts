@@ -319,8 +319,8 @@ function seat(o: {
     createdByStaffId: staff.id,
     purchases: prepaid ? [{ paid: cost.amount, sec: mins * 60, pkg: tariff.isPackage }] : [],
   };
-  // A walk-in guest signs in on the PC with the seat's code only (D-96).
-  const guestCode = o.guest ? setGuestCode(rec) : null;
+  // No code (D-98): the PC signs the desk's guest in at once.
+  const guestCode: string | null = null;
   db.sessions.push(rec);
   settleStatus(pc);
   // Whoever was signed in on this PC must not get this session under their name (D-29).
@@ -733,8 +733,9 @@ export function adminRoutes(app: FastifyInstance): void {
         if (next) rec.tariffId = next.id;
         rec.pcId = to.id;
         rec.moves = [...(rec.moves ?? []), { fromPcId: from.id, toPcId: to.id, at, staffId: staff.id }];
-        // A walk-in guest signs in on the target with a new code only (D-96), whoever started the session.
-        const guestCode = user.transient ? setGuestCode(rec) : null;
+        // A walk-in guest signs in on the target at once (D-98): a code from before goes with the move.
+        rec.guestCodeHash = null;
+        const guestCode: string | null = null;
         markDirty();
         settleStatus(from);
         settleStatus(to);
