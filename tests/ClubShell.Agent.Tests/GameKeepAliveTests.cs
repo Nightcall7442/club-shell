@@ -1,7 +1,10 @@
+using ClubShell.Agent.AntiCheat;
 using ClubShell.Agent.Games;
 using ClubShell.Agent.Games.Accounts;
 using ClubShell.Agent.Session;
 using ClubShell.Contracts.Games;
+using ClubShell.Contracts.Ipc;
+using ClubShell.Contracts.Sessions;
 using ClubShell.Core.Abstractions;
 using ClubShell.Core.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -87,5 +90,68 @@ public sealed class GameKeepAliveTests
         AccountInjector.LauncherKeptBy(LauncherType.Epic, running).Should().BeNull();
         AccountInjector.LauncherKeptBy(LauncherType.Exe, running).Should().BeNull("a plain exe has no client to kill");
         AccountInjector.LauncherKeptBy(LauncherType.Steam, []).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(AntiCheatChecks.ServiceStopped, 6, false)]
+    [InlineData(AntiCheatChecks.DriverMissing, 6, false)]
+    [InlineData(AntiCheatChecks.InjectedModule, 2, false)]
+    [InlineData(AntiCheatChecks.InjectedModule, 3, true)]
+    public async Task A_runtime_finding_warns_first_and_kills_only_when_critical_three_samples_in_a_row(string check, int samples, bool killed)
+    {
+        var monitor = AntiCheat(out IAntiCheatGameControl games, out ISessionService sessions, out ClubShell.Agent.Remote.IAdminEventSink shell, out IAntiCheatChecker checker);
+        checker.CheckRuntimeAsync(42, Arg.Any<CancellationToken>()).Returns(new AntiCheatCheckResult(AntiCheatKind.Vanguard, false, check));
+
+        for (int i = 0; i < samples; i++)
+        {
+            await monitor.CheckRunningOnceAsync(CancellationToken.None);
+        }
+
+        await shell.Received(1).PublishMessageAsync(Arg.Is<AdminMessage>(m => m.Text.Contains("Valorant")), Arg.Any<CancellationToken>());
+        await games.Received(killed ? 1 : 0).KillAsync(42, Arg.Any<bool>(), Arg.Any<CancellationToken>());
+        await sessions.Received(killed ? 1 : 0).LockAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_good_sample_between_failures_starts_the_count_again()
+    {
+        var monitor = AntiCheat(out IAntiCheatGameControl games, out _, out _, out IAntiCheatChecker checker);
+        var bad = new AntiCheatCheckResult(AntiCheatKind.Vanguard, false, AntiCheatChecks.InjectedModule);
+        var good = new AntiCheatCheckResult(AntiCheatKind.Vanguard, true);
+        checker.CheckRuntimeAsync(42, Arg.Any<CancellationToken>()).Returns(bad, bad, good, bad, bad, good);
+
+        for (int i = 0; i < 6; i++)
+        {
+            await monitor.CheckRunningOnceAsync(CancellationToken.None);
+        }
+
+        await games.DidNotReceive().KillAsync(Arg.Any<int>(), Arg.Any<bool>(), Arg.Any<CancellationToken>());
+        AntiCheatMonitor.Decide(AntiCheatSeverity.Critical, 3, block: false).Should().Be(AntiCheatMonitor.RuntimeVerdict.None, "blockOnViolation off never kills");
+    }
+
+    private static AntiCheatMonitor AntiCheat(out IAntiCheatGameControl games, out ISessionService sessions, out ClubShell.Agent.Remote.IAdminEventSink shell, out IAntiCheatChecker checker)
+    {
+        Game game = TestSupport.Game("Valorant", LauncherType.Riot) with { AntiCheat = AntiCheatKind.Vanguard };
+        checker = Substitute.For<IAntiCheatChecker>();
+        checker.Kind.Returns(AntiCheatKind.Vanguard);
+        checker.CheckAsync(Arg.Any<CancellationToken>()).Returns(new AntiCheatCheckResult(AntiCheatKind.Vanguard, true));
+        games = Substitute.For<IAntiCheatGameControl>();
+        games.Running.Returns([new RunningGame(game.Id, game.Title, 42, DateTimeOffset.UtcNow, null, GameState.Running)]);
+        sessions = Substitute.For<ISessionService>();
+        sessions.State.Returns(SessionState.Active);
+        shell = Substitute.For<ClubShell.Agent.Remote.IAdminEventSink>();
+        var monitor = new AntiCheatMonitor(
+            [checker],
+            Substitute.For<IServerClient>(),
+            Substitute.For<IAgentEventSink>(),
+            sessions,
+            Substitute.For<IPolicyEnforcer>(),
+            TestSupport.Monitor(new AgentSettings()),
+            new SystemClock(TimeProvider.System),
+            NullLogger<AntiCheatMonitor>.Instance,
+            games,
+            shell);
+        monitor.CheckForLaunchAsync(game, CancellationToken.None).GetAwaiter().GetResult();
+        return monitor;
     }
 }
