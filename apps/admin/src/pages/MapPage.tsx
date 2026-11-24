@@ -3568,7 +3568,7 @@ function FreeSeat({
                       setByAmount(false);
                     }}
                     className={clsx(
-                      'choice focus-ring flex min-h-[72px] flex-col items-start justify-between gap-1 rounded-md px-3 py-2.5 text-left disabled:cursor-not-allowed disabled:opacity-40',
+                      'choice focus-ring flex min-h-[72px] flex-col items-start justify-between gap-1 rounded-md px-3 py-2.5 text-left disabled:cursor-not-allowed disabled:opacity-55',
                       on && 'choice-on',
                     )}
                   >

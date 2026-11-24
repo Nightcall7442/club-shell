@@ -636,7 +636,7 @@ export function CashMoveSheet({
                 disabled={frozen}
                 onClick={() => setKind(k)}
                 className={clsx(
-                  'focus-ring inline-flex h-9 items-center justify-center rounded-seg px-3 text-[13px] disabled:cursor-not-allowed disabled:opacity-40',
+                  'focus-ring inline-flex h-9 items-center justify-center rounded-seg px-3 text-[13px] disabled:cursor-not-allowed disabled:opacity-55',
                   kind === k ? 'bg-accent/[0.12] font-semibold text-accent' : 'font-medium text-dim hover:text-text',
                 )}
               >

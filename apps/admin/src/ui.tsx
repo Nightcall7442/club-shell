@@ -67,7 +67,7 @@ export const Button = forwardRef<
         // `font-sans`: a button in a `num` table cell does not take the cell's mono.
         'focus-ring inline-flex select-none items-center justify-center gap-2 whitespace-nowrap rounded-md font-sans disabled:cursor-not-allowed',
         // A primary not ready yet keeps its cut-corner shape on a neutral fill (no washed-out accent slab); the rest fade.
-        variant === 'primary' ? 'disabled:text-muted disabled:[--fill:rgb(var(--c-text)/0.06)]' : 'disabled:opacity-40',
+        variant === 'primary' ? 'disabled:text-muted disabled:[--fill:rgb(var(--c-text)/0.06)]' : 'disabled:opacity-55',
         BUTTON_SIZE[size],
         BUTTON_VARIANT[variant],
         variant === 'primary' && size === 'xl' && '[--cut:12px]',
@@ -86,7 +86,7 @@ export const Button = forwardRef<
 
 /** A text input, select or textarea: 44 high, a dark well, accent hairline, the focus glow. */
 export const inputCls =
-  'focus-ring h-11 w-full rounded-md border border-accent/[0.16] bg-bg/50 px-3.5 text-sm text-text [color-scheme:dark] placeholder:text-muted hover:border-accent/[0.26] focus-visible:border-transparent read-only:bg-text/[0.03] disabled:opacity-50';
+  'focus-ring h-11 w-full rounded-md border border-accent/[0.16] bg-bg/50 px-3.5 text-sm text-text [color-scheme:dark] placeholder:text-muted hover:border-accent/[0.26] focus-visible:border-transparent read-only:bg-text/[0.03] disabled:opacity-60';
 
 export function Input(props: InputHTMLAttributes<HTMLInputElement>): JSX.Element {
   return <input {...props} className={clsx(inputCls, props.className)} />;
@@ -225,7 +225,7 @@ export function Toggle({
       aria-label={label}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className="focus-ring group inline-flex items-center gap-3 rounded-md text-left text-sm disabled:opacity-40"
+      className="focus-ring group inline-flex items-center gap-3 rounded-md text-left text-sm disabled:opacity-55"
     >
       <span
         aria-hidden="true"
@@ -798,7 +798,7 @@ export const Chip = forwardRef<
       aria-pressed={pressed}
       {...rest}
       className={clsx(
-        'focus-ring inline-flex h-9 shrink-0 select-none items-center gap-2 whitespace-nowrap rounded-chip px-3 text-[13px] font-medium disabled:cursor-not-allowed disabled:opacity-40',
+        'focus-ring inline-flex h-9 shrink-0 select-none items-center gap-2 whitespace-nowrap rounded-chip px-3 text-[13px] font-medium disabled:cursor-not-allowed disabled:opacity-55',
         tone === 'default' &&
           (on
             ? 'bg-accent/10 text-hi shadow-[inset_0_0_0_1px_rgb(var(--c-accent)/0.5)]'
@@ -879,7 +879,7 @@ export function Segmented<T extends string>({
             title={o.disabled ?? o.title}
             onClick={() => onChange(o.id)}
             className={clsx(
-              'focus-ring inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-seg px-3 text-[13px] disabled:cursor-not-allowed disabled:opacity-40',
+              'focus-ring inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-seg px-3 text-[13px] disabled:cursor-not-allowed disabled:opacity-55',
               size === 'lg' ? 'h-9' : 'h-[30px]',
               on ? 'bg-accent/[0.12] font-semibold text-accent' : 'font-medium text-dim hover:text-text',
             )}
