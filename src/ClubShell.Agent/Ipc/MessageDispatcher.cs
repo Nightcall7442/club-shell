@@ -250,6 +250,27 @@ public sealed class ShellUserContext
         return true;
     }
 
+    /// <summary>
+    /// The server extended the player's token (D-100: its sliding lifetime, reported with the heartbeat): the local expiry
+    /// follows it. <see langword="false"/> (nothing changed) when <paramref name="userId"/> is not the signed-in player, the
+    /// sign-in came from the offline cache, or the expiry is the same.
+    /// </summary>
+    public bool ExtendTo(Guid userId, DateTimeOffset expiresAt)
+    {
+        lock (_gate)
+        {
+            if (_user is null || _user.Id != userId || _mode != ConnectivityState.Online || _expiresAt == expiresAt)
+            {
+                return false;
+            }
+
+            _expiresAt = expiresAt;
+        }
+
+        Changed?.Invoke(this, EventArgs.Empty);
+        return true;
+    }
+
     /// <summary>Logs the user out; <see langword="true"/> when someone was logged in.</summary>
     public bool Clear()
     {

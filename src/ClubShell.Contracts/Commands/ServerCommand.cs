@@ -923,6 +923,12 @@ public sealed record HeartbeatAntiCheat(
 /// every boot, so with <c>shell.kioskUser.resetMode</c> <c>auto</c> the agent reboots it after a session instead of
 /// deleting the kiosk's profile (SHELL_CHANGES 78). <see langword="null"/> from an older server.
 /// </param>
+/// <param name="PlayerToken">
+/// Beyond the contract (D-100): the player token of this PC as it stands after the beat — the server slides it while its
+/// player's session is open here, and the agent's copy of the expiry follows, so a player signed in for more than
+/// <c>Auth:UserTokenHours</c> is not signed out by a stale local expiry when the session ends. <see langword="null"/> when
+/// the PC holds no live player token, or from an older server.
+/// </param>
 public sealed record HeartbeatResponse(
     DateTimeOffset ServerTime,
     PcStatus PcStatus,
@@ -931,7 +937,13 @@ public sealed record HeartbeatResponse(
     string CatalogVersion,
     int PendingCommands,
     Session? Session = null,
-    bool? Stateless = null);
+    bool? Stateless = null,
+    HeartbeatPlayerToken? PlayerToken = null);
+
+/// <summary>The PC's player token in a heartbeat answer (beyond the contract, D-100): whose it is and until when it lives.</summary>
+/// <param name="UserId">Player of the token.</param>
+/// <param name="ExpiresAt">Expiry after the beat's slide.</param>
+public sealed record HeartbeatPlayerToken(Guid UserId, DateTimeOffset ExpiresAt);
 
 /// <summary>Well-known values of <see cref="TelemetryEvent.Kind"/>.</summary>
 public static class TelemetryEventKinds

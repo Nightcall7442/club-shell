@@ -75,6 +75,17 @@ public sealed class UserTokens(NpgsqlDataSource db, AuthOptions options, TimePro
             new { pcId, now, expires = now.AddHours(options.UserTokenHours) });
     }
 
+    /// <summary>
+    /// The live player token of <paramref name="pcId"/> — its player and expiry — for the heartbeat answer (D-100): the agent
+    /// takes the slid expiry instead of the one it was issued with. <see langword="null"/> when the PC holds none.
+    /// </summary>
+    public async Task<(Guid UserId, DateTimeOffset ExpiresAt)?> LiveOfPcAsync(Guid pcId)
+    {
+        await using var c = await db.OpenConnectionAsync();
+        return await c.QuerySingleOrDefaultAsync<(Guid UserId, DateTimeOffset ExpiresAt)?>(
+            "SELECT user_id, expires_at FROM user_tokens WHERE pc_id = @pcId AND expires_at > @now", new { pcId, now = clock.GetUtcNow() });
+    }
+
     /// <summary>PCs where <paramref name="userId"/> holds a live token (<c>walletUpdated</c> goes to all of them, DESIGN §6.5).</summary>
     public async Task<IReadOnlyList<Guid>> PcsOfAsync(Guid userId)
     {

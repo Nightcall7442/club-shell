@@ -169,6 +169,14 @@ public interface IAgentApi
     /// </summary>
     Task<StaffVerifyResponse> VerifyStaffPinAsync(Guid pcId, StaffVerifyRequest request, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// <c>POST /agents/{pcId}/players/{userId}/token</c> (beyond the contract, D-100): a player token for the player of the
+    /// session open on this PC, for a sign-in the Agent checked against its offline cache while the server was away. Answered
+    /// like a sign-in, and the token is kept the same way. <c>403 notSessionPlayer</c> when no open session of that player
+    /// is on this PC, <c>403 banned</c> for a banned account; a server without the route answers 404.
+    /// </summary>
+    Task<AuthResponse> IssuePlayerTokenAsync(Guid pcId, Guid userId, CancellationToken cancellationToken);
+
     /// <summary><c>GET /pcs?zone=</c>.</summary>
     Task<PcsResponse> GetPcsAsync(string? zone, CancellationToken cancellationToken);
 

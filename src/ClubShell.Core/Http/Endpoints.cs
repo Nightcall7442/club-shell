@@ -104,6 +104,9 @@ public static class Endpoints
     /// <summary><c>POST /agents/{pcId}/staff/verify</c>.</summary>
     public static string AgentStaffVerify(Guid pcId) => $"agents/{Id(pcId)}/staff/verify";
 
+    /// <summary><c>POST /agents/{pcId}/players/{userId}/token</c> (beyond the contract).</summary>
+    public static string AgentPlayerToken(Guid pcId, Guid userId) => $"agents/{Id(pcId)}/players/{Id(userId)}/token";
+
     /// <summary><c>GET /pcs/{pcId}</c>.</summary>
     public static string Pc(Guid pcId) => $"pcs/{Id(pcId)}";
 

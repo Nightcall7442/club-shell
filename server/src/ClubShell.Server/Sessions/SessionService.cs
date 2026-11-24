@@ -98,6 +98,31 @@ public class SessionRow
         LastTransitionAt = t;
     }
 
+    /// <summary>
+    /// Stops the clock of a running session without leaving its state (D-100: a guest's lock after their sign-in ended): used
+    /// time is taken as at a pause, and a prepaid session has no end until <see cref="StartClock"/>.
+    /// </summary>
+    public void StopClock(DateTimeOffset t)
+    {
+        UsedBeforeSec += Running && RunningSince is { } since && t > since ? (int)Math.Ceiling((t - since).TotalSeconds) : 0;
+        RunningSince = null;
+        PausedAt = t;
+        EndsAt = null;
+    }
+
+    /// <summary>Starts a clock <see cref="StopClock"/> stopped; no-op when it runs.</summary>
+    public void StartClock(DateTimeOffset t)
+    {
+        if (RunningSince is not null || PausedAt is null)
+        {
+            return;
+        }
+
+        RunningSince = t;
+        PausedAt = null;
+        EndsAt = PrepaidEnd();
+    }
+
     public void Resume(DateTimeOffset t)
     {
         RunningSince = t;
@@ -596,6 +621,7 @@ public sealed class SessionService(
         }
         else if (s.State == "locked")
         {
+            s.StartClock(now);
             s.State = "active";
         }
 
@@ -900,10 +926,20 @@ public sealed class SessionService(
         switch (e.Type)
         {
             case SessionEventType.Locked when s.State == "active":
+                // D-100: a temporary guest whose sign-in ended under their prepaid session cannot sign in again; the clock
+                // stops behind that lock, so the paid time neither runs out nor signs the guest out, and the desk's end
+                // refunds what is left. A member's lock, the player's own and the desk's keep the clock running (D-12).
+                if (e.DataAs<SessionLockedData>() is { ClockStopped: true } && s.IsPrepaid
+                    && await c.ExecuteScalarAsync<bool>("SELECT transient FROM users WHERE id = @UserId", new { s.UserId }, tx))
+                {
+                    s.StopClock(t);
+                }
+
                 s.State = "locked";
                 s.LastTransitionAt = t;
                 return true;
             case SessionEventType.Unlocked when s.State == "locked":
+                s.StartClock(t);
                 s.State = "active";
                 s.LastTransitionAt = t;
                 return true;
