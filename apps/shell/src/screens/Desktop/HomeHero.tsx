@@ -338,8 +338,9 @@ export function HomeHero(): JSX.Element {
         {/* Recent games rail, bottom right: switches the stage */}
         {strip.length > 0 && (
           <div className="absolute bottom-[calc(var(--gap)*2)] right-[var(--gutter)] z-10 flex flex-col items-end gap-3">
-            <div className="flex items-center gap-4">
-              <span className="hud-label">{t('desktop.recentlyPlayed')}</span>
+            {/* On a pill: the art behind this corner can be any colour (light theme over a dark scene, and back). */}
+            <div className="flex items-center gap-4 rounded-full bg-bg/75 py-0.5 pl-4 pr-1 backdrop-blur-md">
+              <span className="hud-label text-text/80">{t('desktop.recentlyPlayed')}</span>
               <Button variant="ghost" size="md" iconRight={<ArrowIcon />} onClick={() => navigate('/games')}>
                 {t('desktop.allGames')}
               </Button>

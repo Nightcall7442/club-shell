@@ -118,7 +118,7 @@ export function TariffCard({ tariff, available, current, action, onAction }: Tar
             </Badge>
           )}
           {pkg ? (
-            <Badge tone="accent" size="sm">
+            <Badge tone="neutral" size="sm">
               {t('wallet.package')}
             </Badge>
           ) : (

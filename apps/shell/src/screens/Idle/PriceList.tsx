@@ -161,7 +161,8 @@ export function PriceList({ tariffs, compact = false, className }: PriceListProp
                     className={clsx(
                       'flex items-center justify-between gap-4 rounded-lg px-4',
                       compact ? 'py-2' : 'py-3',
-                      available ? 'bg-text/5' : 'bg-text/[0.03] opacity-60',
+                      // Not on now: a quieter row, still readable — its hours say when it is.
+                      available ? 'bg-text/5' : 'bg-text/[0.03] opacity-85',
                     )}
                   >
                     <div className="min-w-0">

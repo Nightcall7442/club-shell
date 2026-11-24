@@ -91,7 +91,7 @@ export default function IdleScreen(): JSX.Element {
           transition={{ duration, ease: 'easeOut' }}
           className="flex items-start justify-between gap-[var(--gap)]"
         >
-          <div className="flex min-w-0 items-center gap-4">
+          <div className="flex min-w-0 items-center gap-4 rounded-2xl bg-bg/55 py-2 pl-3 pr-5 backdrop-blur-md">
             <ClubMark className="h-8 w-8" />
             <div className="min-w-0">
               <p className="truncate font-display text-3xl font-light tracking-tight text-text">{club.name}</p>
@@ -112,7 +112,10 @@ export default function IdleScreen(): JSX.Element {
           transition={{ duration: animations ? 0.8 : 0, ease: [0.16, 1, 0.3, 1] }}
           className="flex flex-col items-center gap-3"
         >
-          <Clock className="text-[clamp(7rem,13vw,15rem)] tracking-[0.02em]" />
+          {/* A soft plate of the theme's own colour behind the digits: they stay readable over any slide. */}
+          <div className="rounded-[2rem] bg-bg/55 px-[clamp(1.5rem,3vw,3rem)] py-[clamp(0.5rem,1vw,1rem)] backdrop-blur-md">
+            <Clock className="text-[clamp(7rem,13vw,15rem)] tracking-[0.02em]" />
+          </div>
         </motion.div>
 
         <div className="flex items-end justify-between gap-[var(--gap)]">
@@ -138,7 +141,7 @@ export default function IdleScreen(): JSX.Element {
                 className="anim-caret ml-2 inline-block h-[0.8em] w-[0.45em] translate-y-[0.08em] bg-accent"
               />
             </p>
-            <p className="hud-label">{t('idle.subtitle')}</p>
+            <p className="hud-label text-text/80">{t('idle.subtitle')}</p>
           </motion.div>
         </div>
       </div>
