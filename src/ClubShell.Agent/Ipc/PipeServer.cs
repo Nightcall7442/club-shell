@@ -1028,11 +1028,24 @@ public sealed class PipeServer : BackgroundService
     private async Task HousekeepingLoopAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(HousekeepingInterval);
+        DateTimeOffset lastTick = _clock.UtcNow;
         while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
         {
             DateTimeOffset now = _clock.UtcNow;
             IpcSettings ipc = _settings.CurrentValue.Ipc;
             TimeSpan pingLimit = TimeSpan.FromSeconds(Math.Max(1, ipc.HeartbeatIntervalSec) * Math.Max(1, ipc.MissedHeartbeatsBeforeKill));
+            if (ResumedFromSuspend(lastTick, now))
+            {
+                // A free PC slept (or the machine stalled): nobody could ping while it was away, so the gap is not a hung
+                // Shell. Start every connection's count afresh instead of dropping the Shell on wake.
+                _logger.LogInformation("Resumed after {Gap:F0}s without a tick; heartbeat counts restart", (now - lastTick).TotalSeconds);
+                foreach (Connection connection in _connections.Values)
+                {
+                    connection.MarkPing(now);
+                }
+            }
+
+            lastTick = now;
             foreach (Connection connection in _connections.Values)
             {
                 if (connection.Cts.IsCancellationRequested)
@@ -1063,6 +1076,15 @@ public sealed class PipeServer : BackgroundService
             }
         }
     }
+
+    /// <summary>
+    /// Whether the housekeeping timer (every <see cref="HousekeepingInterval"/>) last ticked so long ago that the machine
+    /// must have been suspended or stalled: a gap of more than <see cref="SuspendGap"/>.
+    /// </summary>
+    public static bool ResumedFromSuspend(DateTimeOffset lastTick, DateTimeOffset now) => now - lastTick > SuspendGap;
+
+    /// <summary>A housekeeping gap longer than this is a sleep or a stall, not a Shell that stopped answering.</summary>
+    public static readonly TimeSpan SuspendGap = TimeSpan.FromSeconds(10);
 
     private void KillShell(int pid)
     {

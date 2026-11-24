@@ -601,4 +601,15 @@ public sealed class PipeServerEndToEndTests
             dispatcher.RegisterNoPayload<OkResponse>(Harness.SecuredName, (_, _) => Task.FromResult(OkResponse.Instance), IpcAuthLevel.Hello);
         }
     }
+
+    [Fact]
+    public void A_sleep_is_not_a_hung_shell()
+    {
+        var t0 = new DateTimeOffset(2026, 11, 24, 3, 0, 0, TimeSpan.Zero);
+
+        // The housekeeping timer ticks every second: a normal tick is no suspend; a free PC that slept an hour is one, so
+        // its Shell is not dropped for the pings nobody could send while it slept.
+        PipeServer.ResumedFromSuspend(t0, t0.AddSeconds(1)).Should().BeFalse();
+        PipeServer.ResumedFromSuspend(t0, t0.AddHours(1)).Should().BeTrue();
+    }
 }
