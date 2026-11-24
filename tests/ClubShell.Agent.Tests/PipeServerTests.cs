@@ -605,11 +605,21 @@ public sealed class PipeServerEndToEndTests
     [Fact]
     public void A_sleep_is_not_a_hung_shell()
     {
-        var t0 = new DateTimeOffset(2026, 11, 24, 3, 0, 0, TimeSpan.Zero);
-
         // The housekeeping timer ticks every second: a normal tick is no suspend; a free PC that slept an hour is one, so
         // its Shell is not dropped for the pings nobody could send while it slept.
-        PipeServer.ResumedFromSuspend(t0, t0.AddSeconds(1)).Should().BeFalse();
-        PipeServer.ResumedFromSuspend(t0, t0.AddHours(1)).Should().BeTrue();
+        PipeServer.ResumedFromSuspend(TimeSpan.FromSeconds(1)).Should().BeFalse();
+        PipeServer.ResumedFromSuspend(TimeSpan.FromHours(1)).Should().BeTrue();
+    }
+
+    [Fact]
+    public void A_silent_shell_is_not_killed_under_a_game()
+    {
+        // D-99: killing the Shell during a game restarted it with game mode off (its guard minimized the game); now only the
+        // connection is dropped, and the Shell reconnects.
+        TimeSpan limit = TimeSpan.FromSeconds(15);
+        PipeServer.JudgeHeartbeat(TimeSpan.FromSeconds(10), limit, killShell: true, gameRunning: false).Should().Be(PipeServer.HeartbeatVerdict.Alive);
+        PipeServer.JudgeHeartbeat(TimeSpan.FromSeconds(20), limit, killShell: true, gameRunning: false).Should().Be(PipeServer.HeartbeatVerdict.DropAndKill);
+        PipeServer.JudgeHeartbeat(TimeSpan.FromSeconds(20), limit, killShell: true, gameRunning: true).Should().Be(PipeServer.HeartbeatVerdict.DropOnly);
+        PipeServer.JudgeHeartbeat(TimeSpan.FromSeconds(20), limit, killShell: false, gameRunning: false).Should().Be(PipeServer.HeartbeatVerdict.DropOnly);
     }
 }
