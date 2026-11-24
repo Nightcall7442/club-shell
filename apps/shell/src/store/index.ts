@@ -480,6 +480,9 @@ function wireListeners(): void {
           source: 'system',
         });
         if (c.connected) {
+          // A Shell that restarted (or an Agent that did) while a game runs learns it here: the in-game screens, the
+          // HUD and the idle prompt follow the Agent's own list, not the empty one this Shell started with (D-99).
+          void games().refreshRunning();
           void auth().refresh();
           // The Shell starts at logon, usually before the Agent link is up: the settings read at boot failed and the
           // defaults stayed (the on-screen keyboard on the lock screen although the club policy forbids it).

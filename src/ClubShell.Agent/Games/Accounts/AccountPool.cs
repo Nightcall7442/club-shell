@@ -67,6 +67,9 @@ public sealed class ActiveLease
             ? value.GetString()
             : null;
 
+    /// <summary>The same lease with the expiry (and the rest of the server's copy) of <paramref name="renewed"/>; the secret stays.</summary>
+    internal ActiveLease Renewed(AccountLease renewed) => new(renewed with { Secret = Contract.Secret }, GameId, SessionId, _secret, LeasedAt);
+
     /// <summary><see langword="true"/> when the lease expires within <paramref name="leeway"/> of <paramref name="now"/>.</summary>
     public bool IsExpired(DateTimeOffset now, TimeSpan? leeway = null) => now + (leeway ?? TimeSpan.Zero) >= ExpiresAt;
 
@@ -84,6 +87,9 @@ public sealed class AccountPool : IAsyncDisposable, IDisposable
     private static readonly TimeSpan BaseDelay = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan WatchdogInterval = TimeSpan.FromSeconds(30);
 
+    /// <summary>A lease is renewed once it expires within this (D-99).</summary>
+    public static readonly TimeSpan RenewAhead = TimeSpan.FromMinutes(5);
+
     private readonly IServerClient _server;
     private readonly ITokenStore _tokens;
     private readonly IOptionsMonitor<AgentSettings> _settings;
@@ -92,6 +98,8 @@ public sealed class AccountPool : IAsyncDisposable, IDisposable
     private readonly ConcurrentDictionary<Guid, ActiveLease> _leases = new();
     private readonly CancellationTokenSource _cts = new();
     private readonly object _gate = new();
+    private readonly ConcurrentDictionary<Guid, byte> _notRenewable = new();
+    private readonly ConcurrentDictionary<Guid, byte> _keptExpired = new();
     private Task? _watchdog;
 
     /// <summary>Creates the pool (call <see cref="Start"/> to run the expiry watchdog).</summary>
@@ -104,8 +112,17 @@ public sealed class AccountPool : IAsyncDisposable, IDisposable
         _logger = logger;
     }
 
-    /// <summary>A lease reached its expiry while still held; subscribers should stop the game using it.</summary>
+    /// <summary>
+    /// A lease reached its expiry while still held and <see cref="KeepExpired"/> did not keep it; subscribers stop the
+    /// game using it.
+    /// </summary>
     public event EventHandler<ActiveLease>? LeaseExpired;
+
+    /// <summary>
+    /// <see langword="true"/> for an expired lease that must stay held: its game still runs in an open session (D-99). The
+    /// player paid for the time; a lease that could not be renewed is no reason to close their game.
+    /// </summary>
+    public Func<ActiveLease, bool>? KeepExpired { get; set; }
 
     /// <summary><c>games.accountPool.enabled</c>.</summary>
     public bool Enabled => _settings.CurrentValue.Games.AccountPool.Enabled;
@@ -181,6 +198,8 @@ public sealed class AccountPool : IAsyncDisposable, IDisposable
     /// <summary>Releases a held lease (no-op when unknown); server errors are logged, never thrown.</summary>
     public async Task ReleaseAsync(Guid leaseId, AccountLeaseReleaseReason reason, CloudSaveUpload? cloudSave, CancellationToken cancellationToken)
     {
+        _notRenewable.TryRemove(leaseId, out _);
+        _keptExpired.TryRemove(leaseId, out _);
         if (!_leases.TryRemove(leaseId, out ActiveLease? lease))
         {
             return;
@@ -189,6 +208,15 @@ public sealed class AccountPool : IAsyncDisposable, IDisposable
         await ReleaseOnServerAsync(lease.GameId, leaseId, new AccountLeaseRelease(reason, cloudSave), cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("Released {Lease} ({Reason})", lease, reason);
     }
+
+    /// <summary>
+    /// Releases a lease this pool does not hold (a game taken back after an Agent restart knows its lease by id only);
+    /// server errors are logged, never thrown.
+    /// </summary>
+    public Task ReleaseUnheldAsync(Guid gameId, Guid leaseId, AccountLeaseReleaseReason reason, CancellationToken cancellationToken) =>
+        _leases.ContainsKey(leaseId)
+            ? ReleaseAsync(leaseId, reason, null, cancellationToken)
+            : ReleaseOnServerAsync(gameId, leaseId, new AccountLeaseRelease(reason), cancellationToken);
 
     /// <summary>Releases every held lease.</summary>
     public async Task ReleaseAllAsync(AccountLeaseReleaseReason reason, CancellationToken cancellationToken)
@@ -297,26 +325,87 @@ public sealed class AccountPool : IAsyncDisposable, IDisposable
         using var timer = new PeriodicTimer(WatchdogInterval);
         while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
         {
-            DateTimeOffset now = _clock.UtcNow;
-            foreach (ActiveLease lease in _leases.Values)
-            {
-                if (!lease.IsExpired(now))
-                {
-                    continue;
-                }
-
-                _logger.LogWarning("{Lease} expired while held", lease);
-                try
-                {
-                    LeaseExpired?.Invoke(this, lease);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "LeaseExpired handler threw for {LeaseId}", lease.LeaseId);
-                }
-
-                await ReleaseAsync(lease.LeaseId, AccountLeaseReleaseReason.Exit, null, cancellationToken).ConfigureAwait(false);
-            }
+            await CheckLeasesAsync(cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// One watchdog pass (every 30 s): renews the leases that expire within <see cref="RenewAhead"/>, keeps an expired
+    /// one whose game still runs in an open session (<see cref="KeepExpired"/>), and expires the rest.
+    /// </summary>
+    public async Task CheckLeasesAsync(CancellationToken cancellationToken)
+    {
+        DateTimeOffset now = _clock.UtcNow;
+        foreach (ActiveLease held in _leases.Values)
+        {
+            ActiveLease lease = held;
+            if (lease.IsExpired(now, RenewAhead) && !_notRenewable.ContainsKey(lease.LeaseId))
+            {
+                lease = await RenewAsync(lease, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (!lease.IsExpired(now))
+            {
+                continue;
+            }
+
+            if (KeepExpired?.Invoke(lease) == true)
+            {
+                if (_keptExpired.TryAdd(lease.LeaseId, 0))
+                {
+                    _logger.LogWarning("{Lease} expired while its game runs in an open session; kept, the game goes on", lease);
+                }
+
+                continue;
+            }
+
+            _logger.LogWarning("{Lease} expired while held", lease);
+            try
+            {
+                LeaseExpired?.Invoke(this, lease);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "LeaseExpired handler threw for {LeaseId}", lease.LeaseId);
+            }
+
+            await ReleaseAsync(lease.LeaseId, AccountLeaseReleaseReason.Exit, null, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Renews <paramref name="lease"/> on the server; returns the renewed lease, or the same one when that failed.</summary>
+    private async Task<ActiveLease> RenewAsync(ActiveLease lease, CancellationToken cancellationToken)
+    {
+        try
+        {
+            AccountLease renewed = await _server.RenewAccountLeaseAsync(lease.GameId, lease.LeaseId, cancellationToken).ConfigureAwait(false);
+            if (renewed.LeaseId != lease.LeaseId || renewed.ExpiresAt <= lease.ExpiresAt)
+            {
+                _logger.LogWarning("Renewal of {Lease} returned lease {Returned} expiring {ExpiresAt:O}; not used", lease, renewed.LeaseId, renewed.ExpiresAt);
+                return lease;
+            }
+
+            ActiveLease next = lease.Renewed(renewed);
+            if (!_leases.TryUpdate(lease.LeaseId, next, lease))
+            {
+                return _leases.TryGetValue(lease.LeaseId, out ActiveLease? current) ? current : lease;
+            }
+
+            _keptExpired.TryRemove(lease.LeaseId, out _);
+            _logger.LogInformation("Renewed {Lease}", next);
+            return next;
+        }
+        catch (ServerApiException ex) when (ex.Code is ErrorCode.NotFound or ErrorCode.NotImplemented)
+        {
+            // A server without renewal: the lease is kept as long as its game runs in an open session (KeepExpired).
+            _notRenewable.TryAdd(lease.LeaseId, 0);
+            _logger.LogInformation("Server does not renew {Lease} ({Code})", lease, ex.Code);
+        }
+        catch (Exception ex) when (ex is ServerApiException or HttpRequestException || (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
+        {
+            _logger.LogWarning(ex, "Renewal of {Lease} failed; retried on the next pass", lease);
+        }
+
+        return lease;
     }
 }

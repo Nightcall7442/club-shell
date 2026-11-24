@@ -20,7 +20,10 @@ namespace ClubShell.Agent.Games;
 /// <param name="Lease">Account-pool lease in use, when any.</param>
 /// <param name="Injection">Credential injection to undo on exit, when any.</param>
 /// <param name="AntiCheat">Pre-launch anti-cheat result (echoed in the exit report).</param>
-/// <param name="Job">Job object the game process was assigned to (disposed on exit; kill-on-close).</param>
+/// <param name="Job">
+/// Job object the game process was assigned to (disposed on exit). Not kill-on-close (D-99): the game outlives an Agent
+/// restart and is ended only where that is meant (the session's end, "close game").
+/// </param>
 /// <param name="LaunchDurationMs">Launch latency.</param>
 /// <param name="Process">
 /// Handle to the game's process kept from its creation, when the Agent started the game itself; the exit is read from it,
@@ -55,8 +58,18 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
 {
     private static readonly TimeSpan DisposeWait = TimeSpan.FromSeconds(5);
 
-    /// <summary>How long after a game process exits a successor (a launcher's hand-over) is looked for.</summary>
-    private static readonly TimeSpan SuccessorWait = TimeSpan.FromSeconds(5);
+    /// <summary>
+    /// How long after an early exit a successor (a launcher's hand-over, a bootstrapper, a game restarting itself after an
+    /// update or a settings change) is looked for. 5 s was too short for a launcher that updates before it hands over:
+    /// the game was reported exited while it came up, and that exit released its lease and closed its launcher (D-99).
+    /// </summary>
+    public static readonly TimeSpan SuccessorWait = TimeSpan.FromSeconds(60);
+
+    /// <summary>The same for a process that ran <see cref="EarlyExit"/> or longer: a player who quits gets the Shell back soon.</summary>
+    public static readonly TimeSpan LateSuccessorWait = TimeSpan.FromSeconds(15);
+
+    /// <summary>A game process that exits within this of its start is likely to hand over to another one.</summary>
+    public static readonly TimeSpan EarlyExit = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan SuccessorPoll = TimeSpan.FromMilliseconds(250);
 
     private readonly IServerClient _server;
@@ -71,6 +84,7 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
     private readonly ILogger<GameSessionTracker> _logger;
     private readonly ConcurrentDictionary<int, TrackedGame> _games = new();
     private readonly CancellationTokenSource _cts = new();
+    private readonly RunningGamesFile _file;
 
     /// <summary>Creates the tracker.</summary>
     public GameSessionTracker(
@@ -95,6 +109,51 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
         _settings = settings;
         _clock = clock;
         _logger = logger;
+        _file = new RunningGamesFile(
+            () =>
+            {
+                AgentSettings current = _settings.CurrentValue;
+                return Path.Combine(current.ResolvePersistentPath(current.Paths.Cache), RunningGamesFile.FileName);
+            },
+            logger);
+    }
+
+    /// <summary>The games the previous Agent followed when it stopped (<see cref="RunningGamesFile"/>, D-99).</summary>
+    public IReadOnlyList<RunningGameEntry> LoadPersisted() => _file.Load();
+
+    /// <summary>Start time (UTC) of the process <paramref name="pid"/>, or <see langword="null"/> when there is none.</summary>
+    public static DateTime? ProcessStartUtc(int pid)
+    {
+        try
+        {
+            using System.Diagnostics.Process process = System.Diagnostics.Process.GetProcessById(pid);
+            return process.StartTime.ToUniversalTime();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Rewrites <see cref="RunningGamesFile"/> with the games followed now.</summary>
+    private void Persist()
+    {
+        var entries = _games.Values.Distinct().Select(t =>
+        {
+            GameLaunchRecord r = t.Record;
+            return new RunningGameEntry(
+                r.Game.Id,
+                r.Game.Title,
+                r.Running.Pid,
+                ProcessStartUtc(r.Running.Pid),
+                r.Running.StartedAt,
+                r.Request.SessionId,
+                r.Request.UserId,
+                r.Lease?.LeaseId ?? r.Request.AccountLeaseId,
+                r.AntiCheat.Kind,
+                r.LaunchDurationMs);
+        }).ToList();
+        _file.Save(entries);
     }
 
     /// <summary>A tracked game exited (after cleanup).</summary>
@@ -121,12 +180,13 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
         ArgumentNullException.ThrowIfNull(record);
         cancellationToken.ThrowIfCancellationRequested();
         ObjectDisposedException.ThrowIf(_cts.IsCancellationRequested, this);
-        var tracked = new TrackedGame(record);
+        var tracked = new TrackedGame(record) { WatchedSince = _clock.GetTimestamp() };
         if (!_games.TryAdd(record.Running.Pid, tracked))
         {
             throw IpcError.Conflict($"Pid {record.Running.Pid} is already tracked").ToException();
         }
 
+        Persist();
         tracked.Watch = Task.Run(() => WatchAsync(tracked), CancellationToken.None);
         _logger.LogInformation("Tracking {Title} pid {Pid} (session {SessionId}, lease {LeaseId})", record.Game.Title, record.Running.Pid, record.Request.SessionId, record.Lease?.LeaseId);
         return Task.CompletedTask;
@@ -217,7 +277,8 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
             int? next;
             try
             {
-                next = tracked.Killed ? null : await FindSuccessorAsync(tracked, pid, ct).ConfigureAwait(false);
+                TimeSpan wait = SuccessorWaitFor(_clock.GetElapsedTime(tracked.WatchedSince));
+                next = tracked.Killed ? null : await FindSuccessorAsync(tracked, pid, wait, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -231,6 +292,8 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
 
             _games.TryRemove(pid, out _);
             tracked.Record = tracked.Record with { Running = tracked.Record.Running with { Pid = successor } };
+            tracked.WatchedSince = _clock.GetTimestamp();
+            Persist();
             _logger.LogInformation(
                 "{Title}: pid {Pid} exited with code {ExitCode} after {RanSec}s and handed over to pid {Successor}; following it",
                 tracked.Record.Game.Title,
@@ -244,6 +307,7 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
 
         GameLaunchRecord record = tracked.Record;
         _games.TryRemove(pid, out _);
+        Persist();
         DateTimeOffset now = _clock.UtcNow;
         int playedSec = (int)Math.Max(0, (now - record.Running.StartedAt).TotalSeconds);
         GameState state = tracked.Killed ? GameState.Killed : GameState.Exited;
@@ -263,6 +327,9 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
             }
         }
 
+        // A launcher client another game kept running for its pooled account may close now.
+        await _injector.KillDeferredAsync(ct).ConfigureAwait(false);
+
         if (record.Lease is { } lease)
         {
             CloudSaveUpload? upload = await _saves.UploadAsync(record.Game, lease, ct).ConfigureAwait(false);
@@ -270,6 +337,11 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
             {
                 await _pool.ReleaseAsync(lease.LeaseId, tracked.ReleaseReason ?? AccountLeaseReleaseReason.Exit, upload, ct).ConfigureAwait(false);
             }
+        }
+        else if (record.Request.AccountLeaseId is { } adoptedLease)
+        {
+            // A game taken back after an Agent restart: its lease is known by id only.
+            await _pool.ReleaseUnheldAsync(record.Game.Id, adoptedLease, tracked.ReleaseReason ?? AccountLeaseReleaseReason.Exit, ct).ConfigureAwait(false);
         }
 
         var report = new LaunchReport(
@@ -310,16 +382,19 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
         }
     }
 
+    /// <summary>How long a successor is looked for after a process that ran <paramref name="ran"/> exited.</summary>
+    public static TimeSpan SuccessorWaitFor(TimeSpan ran) => ran < EarlyExit ? SuccessorWait : LateSuccessorWait;
+
     /// <summary>
-    /// The process a game's exited launcher handed over to, looked for during <see cref="SuccessorWait"/> (real time):
+    /// The process a game's exited launcher handed over to, looked for during <paramref name="wait"/> (real time):
     /// first what is left in the game's job (children inherit it), else a process with the game's image name in the
     /// same session, started since the launch and not tracked already.
     /// </summary>
-    private async Task<int?> FindSuccessorAsync(TrackedGame tracked, int exitedPid, CancellationToken cancellationToken)
+    private async Task<int?> FindSuccessorAsync(TrackedGame tracked, int exitedPid, TimeSpan wait, CancellationToken cancellationToken)
     {
         GameLaunchRecord record = tracked.Record;
         string? name = string.IsNullOrWhiteSpace(record.Game.ExePath) ? null : Path.GetFileNameWithoutExtension(record.Game.ExePath);
-        long deadline = Environment.TickCount64 + (long)SuccessorWait.TotalMilliseconds;
+        long deadline = Environment.TickCount64 + (long)wait.TotalMilliseconds;
         while (true)
         {
             if (Successor(record, exitedPid, name, tracked.SessionId) is { } found)
@@ -418,6 +493,9 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
         public uint? SessionId { get; }
 
         public Task? Watch { get; set; }
+
+        /// <summary>Monotonic timestamp since the current process is followed.</summary>
+        public long WatchedSince { get; set; }
 
         public bool Killed { get; set; }
 

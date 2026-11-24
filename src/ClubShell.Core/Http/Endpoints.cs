@@ -167,6 +167,9 @@ public static class Endpoints
     /// <summary><c>POST /games/{id}/accounts/{leaseId}/release</c>.</summary>
     public static string GameAccountLeaseRelease(Guid gameId, Guid leaseId) => $"games/{Id(gameId)}/accounts/{Id(leaseId)}/release";
 
+    /// <summary><c>POST /games/{id}/accounts/{leaseId}/renew</c> (beyond the contract, D-99).</summary>
+    public static string GameAccountLeaseRenew(Guid gameId, Guid leaseId) => $"games/{Id(gameId)}/accounts/{Id(leaseId)}/renew";
+
     /// <summary><c>GET /games/{id}/accounts/{leaseId}/save-upload</c>.</summary>
     public static string GameAccountSaveUpload(Guid gameId, Guid leaseId) => $"games/{Id(gameId)}/accounts/{Id(leaseId)}/save-upload";
 

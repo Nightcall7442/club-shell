@@ -15,9 +15,9 @@ namespace ClubShell.Agent.Session;
 public interface IGameSessionCleanup
 {
     /// <summary>
-    /// Terminates every running game of the session (job object) and waits for the exits. A game is asked to close
-    /// first when the player ended the session, or when <paramref name="graceful"/> — many games write their save on
-    /// the way out (SHELL_CHANGES 23) — and is killed after <c>games.killGraceSec</c>.
+    /// Terminates every running game of the session and waits for the exits. Every game is asked to close first (from
+    /// the player's session, D-99) and is killed after <c>games.killGraceSec</c>; <paramref name="graceful"/> says the
+    /// player's saves are collected after the games (SHELL_CHANGES 23).
     /// </summary>
     Task KillAllAsync(SessionEndReason reason, bool graceful, CancellationToken cancellationToken);
 
@@ -83,6 +83,9 @@ public sealed class SessionCleanup
         _saves = saves;
     }
 
+    /// <summary>Name of the step that closes the games.</summary>
+    public const string GamesKillStep = "games.kill";
+
     /// <summary>Per-step timeout.</summary>
     public TimeSpan StepTimeout { get; set; } = TimeSpan.FromSeconds(20);
 
@@ -104,7 +107,7 @@ public sealed class SessionCleanup
         bool savesOut = _saves?.Attached == true;
         if (_games is not null)
         {
-            steps.Add(("games.kill", ct => _games.KillAllAsync(reason, graceful: savesOut, ct)));
+            steps.Add((GamesKillStep, ct => _games.KillAllAsync(reason, graceful: savesOut, ct)));
         }
 
         if (savesOut)
@@ -139,7 +142,7 @@ public sealed class SessionCleanup
         foreach (var (name, action) in steps)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            results.Add(await RunStepAsync(name, action, cancellationToken).ConfigureAwait(false));
+            results.Add(await RunStepAsync(name, action, TimeoutOf(name), cancellationToken).ConfigureAwait(false));
         }
 
         var errors = results.Where(r => !r.Ok).Select(r => $"{r.Name}: {r.Error}").ToArray();
@@ -148,11 +151,26 @@ public sealed class SessionCleanup
         return report;
     }
 
-    private async Task<CleanupStepResult> RunStepAsync(string name, Func<CancellationToken, Task> action, CancellationToken cancellationToken)
+    /// <summary>
+    /// Timeout of one step: <see cref="StepTimeout"/>, and for the games the close-then-kill (D-99) too — each game gets
+    /// <c>games.killGraceSec</c> to close, then up to as long again for its exit processing.
+    /// </summary>
+    public TimeSpan TimeoutOf(string step)
+    {
+        if (step != GamesKillStep)
+        {
+            return StepTimeout;
+        }
+
+        TimeSpan games = TimeSpan.FromSeconds((2 * Math.Max(0, _settings.CurrentValue.Games.KillGraceSec)) + 15);
+        return games > StepTimeout ? games : StepTimeout;
+    }
+
+    private async Task<CleanupStepResult> RunStepAsync(string name, Func<CancellationToken, Task> action, TimeSpan stepTimeout, CancellationToken cancellationToken)
     {
         var started = _clock.GetTimestamp();
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(StepTimeout);
+        timeout.CancelAfter(stepTimeout);
         try
         {
             await action(timeout.Token).ConfigureAwait(false);
@@ -164,8 +182,8 @@ public sealed class SessionCleanup
         }
         catch (OperationCanceledException)
         {
-            _logger.LogWarning("Cleanup step {Step} timed out after {Timeout}", name, StepTimeout);
-            return new CleanupStepResult(name, false, _clock.GetElapsedTime(started), $"timed out after {StepTimeout}");
+            _logger.LogWarning("Cleanup step {Step} timed out after {Timeout}", name, stepTimeout);
+            return new CleanupStepResult(name, false, _clock.GetElapsedTime(started), $"timed out after {stepTimeout}");
         }
         catch (Exception ex)
         {

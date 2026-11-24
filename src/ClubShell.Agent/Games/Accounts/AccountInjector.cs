@@ -80,6 +80,7 @@ public sealed class AccountInjector
     private readonly ProcessKiller _killer;
     private readonly ILogger<AccountInjector> _logger;
     private readonly Dictionary<LauncherType, ILauncherCredentialStrategy> _strategies;
+    private readonly HashSet<LauncherType> _deferred = new();
 
     /// <summary>Creates the injector with the built-in strategies.</summary>
     public AccountInjector(
@@ -179,7 +180,37 @@ public sealed class AccountInjector
         };
     }
 
-    /// <summary>Kills the launcher client, then applies the launcher's strategy. Throws <see cref="IpcException"/> when the lease cannot be used.</summary>
+    /// <summary>
+    /// The title of a running game that needs <paramref name="launcher"/>'s client (set by the games module), or
+    /// <see langword="null"/>. While one does, the client is never killed (D-99): neither to switch to another pooled
+    /// account nor when another game's pooled account is undone.
+    /// </summary>
+    public Func<LauncherType, string?>? LauncherInUseBy { get; set; }
+
+    /// <summary>Title of the game, among <paramref name="running"/> (launcher and title), that keeps <paramref name="launcher"/>'s client running; <see langword="null"/> when none.</summary>
+    public static string? LauncherKeptBy(LauncherType launcher, IEnumerable<(LauncherType Launcher, string Title)> running)
+    {
+        ArgumentNullException.ThrowIfNull(running);
+        if (LauncherProcessNames(launcher).Count == 0)
+        {
+            return null;
+        }
+
+        foreach ((LauncherType l, string title) in running)
+        {
+            if (l == launcher)
+            {
+                return title;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Kills the launcher client, then applies the launcher's strategy. Throws <see cref="IpcException"/> when the lease
+    /// cannot be used, or when another running game needs the client (switching accounts would close it).
+    /// </summary>
     public async Task<InjectionResult> InjectAsync(Game game, ActiveLease lease, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(game);
@@ -187,6 +218,13 @@ public sealed class AccountInjector
         if (!_strategies.TryGetValue(lease.Launcher, out ILauncherCredentialStrategy? strategy))
         {
             return InjectionResult.None;
+        }
+
+        if (LauncherKillRefusedBy(lease.Launcher) is { } running)
+        {
+            // D-99: the account switch restarts the client, and that closed the game already running on it.
+            _logger.LogWarning("{Launcher} account for {Title} not switched: {Running} runs on that client", lease.Launcher, game.Title, running);
+            throw IpcError.Conflict($"{running} is running on {lease.Launcher}; close it to start {game.Title}", "launcherInUse").ToException();
         }
 
         await KillLauncherAsync(lease.Launcher, cancellationToken).ConfigureAwait(false);
@@ -197,11 +235,28 @@ public sealed class AccountInjector
         return result;
     }
 
-    /// <summary>Restores patched config, kills the launcher client and clears Credential Manager entries. Never throws.</summary>
+    /// <summary>
+    /// Restores patched config, kills the launcher client and clears Credential Manager entries. Never throws. While
+    /// another running game needs the client it is left running (D-99) and killed by <see cref="KillDeferredAsync"/> once
+    /// no game needs it any more.
+    /// </summary>
     public async Task RestoreAsync(InjectionResult result, LauncherType launcher, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(result);
-        await KillLauncherAsync(launcher, cancellationToken).ConfigureAwait(false);
+        if (LauncherKillRefusedBy(launcher) is { } running)
+        {
+            lock (_deferred)
+            {
+                _deferred.Add(launcher);
+            }
+
+            _logger.LogInformation("{Launcher} client left running for {Running}; it is closed when that game ends", launcher, running);
+        }
+        else
+        {
+            await KillLauncherAsync(launcher, cancellationToken).ConfigureAwait(false);
+        }
+
         try
         {
             await result.RestoreAsync(cancellationToken).ConfigureAwait(false);
@@ -261,6 +316,39 @@ public sealed class AccountInjector
                 _logger.LogWarning(ex, "Credential Manager cleanup for {Launcher} failed", launcher);
             }
         }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Kills the launcher clients whose kill <see cref="RestoreAsync"/> put off, once no running game needs them (a game
+    /// exited, the session ended): the pooled account's login does not outlive its games.
+    /// </summary>
+    public async Task KillDeferredAsync(CancellationToken cancellationToken)
+    {
+        List<LauncherType> due;
+        lock (_deferred)
+        {
+            due = _deferred.Where(l => LauncherKillRefusedBy(l) is null).ToList();
+            _deferred.ExceptWith(due);
+        }
+
+        foreach (LauncherType launcher in due)
+        {
+            _logger.LogInformation("{Launcher} client closed: the game that kept it ended", launcher);
+            await KillLauncherAsync(launcher, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private string? LauncherKillRefusedBy(LauncherType launcher)
+    {
+        try
+        {
+            return LauncherProcessNames(launcher).Count == 0 ? null : LauncherInUseBy?.Invoke(launcher);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
+        {
+            _logger.LogDebug(ex, "Running games not readable; {Launcher} treated as free", launcher);
+            return null;
+        }
     }
 
     private Task KillLauncherAsync(LauncherType launcher, CancellationToken cancellationToken) => Task.Run(() =>

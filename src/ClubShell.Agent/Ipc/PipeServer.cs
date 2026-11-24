@@ -457,6 +457,7 @@ public sealed class PipeServer : BackgroundService
     private readonly ILogger<PipeServer> _logger;
     private readonly ConcurrentDictionary<Guid, Connection> _connections = new();
     private readonly ConcurrentDictionary<Guid, Task> _connectionTasks = new();
+    private readonly ConcurrentDictionary<int, DateTime?> _silentShells = new();
     private SemaphoreSlim? _slots;
     private long _accepted;
     private long _rejected;
@@ -476,9 +477,12 @@ public sealed class PipeServer : BackgroundService
         IKioskCredentials kiosk,
         IOptionsMonitor<AgentSettings> settings,
         IClock clock,
-        ILogger<PipeServer> logger)
+        ILogger<PipeServer> logger,
+        IServiceProvider? services = null)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
+        // Resolved per check, not at construction: the games module and this server share dependencies.
+        IsGameRunning = () => services?.GetService<IRunningGamesSource>()?.Snapshot().Count > 0;
         ArgumentNullException.ThrowIfNull(bridge);
         ArgumentNullException.ThrowIfNull(users);
         ArgumentNullException.ThrowIfNull(token);
@@ -504,8 +508,14 @@ public sealed class PipeServer : BackgroundService
     /// <summary>Signer thumbprint for <see cref="ClientValidationMode.SignatureVerified"/>; <see langword="null"/> = the Agent's own signer.</summary>
     public string? ExpectedSignerThumbprint { get; set; }
 
-    /// <summary>Terminate the Shell process when its connection misses <c>ipc.missedHeartbeatsBeforeKill</c> pings (default on).</summary>
+    /// <summary>
+    /// Terminate the Shell process when its connection misses <c>ipc.missedHeartbeatsBeforeKill</c> pings (default on);
+    /// while a game runs only the connection is dropped (D-99).
+    /// </summary>
     public bool KillShellOnHeartbeatLoss { get; set; } = true;
+
+    /// <summary>Whether a game runs now (the heartbeat watchdog leaves the Shell's process alone then). Defaults to the games module.</summary>
+    public Func<bool> IsGameRunning { get; set; }
 
     /// <summary>Server-side request timeout (answered with <c>timeout</c>). Long enough for a game launch.</summary>
     public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromSeconds(120);
@@ -680,7 +690,7 @@ public sealed class PipeServer : BackgroundService
                 continue;
             }
 
-            var connection = new Connection(pipe, client, _clock.UtcNow, ipc, MaxConcurrentRequestsPerConnection, stoppingToken);
+            var connection = new Connection(pipe, client, _clock.UtcNow, _clock.GetTimestamp(), ipc, MaxConcurrentRequestsPerConnection, stoppingToken);
             connection.Elevate = (level, _, _) => SetHello(connection, level >= IpcAuthLevel.Hello);
             _connections[connection.Id] = connection;
             Interlocked.Increment(ref _accepted);
@@ -893,7 +903,7 @@ public sealed class PipeServer : BackgroundService
         bool ping = string.Equals(envelope.Name, IpcMessages.Sys.Ping, StringComparison.Ordinal);
         if (ping)
         {
-            connection.MarkPing(now);
+            connection.MarkPing(_clock.GetTimestamp());
             _ = ProcessAsync(connection, envelope, gated: false, token);
             return;
         }
@@ -976,7 +986,7 @@ public sealed class PipeServer : BackgroundService
         connection.HelloDone = done;
         if (done)
         {
-            connection.MarkPing(_clock.UtcNow);
+            connection.MarkPing(_clock.GetTimestamp());
         }
 
         UpdateShellConnected();
@@ -1028,17 +1038,20 @@ public sealed class PipeServer : BackgroundService
     private async Task HousekeepingLoopAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(HousekeepingInterval);
-        DateTimeOffset lastTick = _clock.UtcNow;
+        long lastTick = _clock.GetTimestamp();
         while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
         {
-            DateTimeOffset now = _clock.UtcNow;
+            // D-99: every gap is measured on the monotonic clock: a wall-clock step (time sync, a DST or admin change)
+            // made a live Shell look silent and killed it.
+            long now = _clock.GetTimestamp();
             IpcSettings ipc = _settings.CurrentValue.Ipc;
             TimeSpan pingLimit = TimeSpan.FromSeconds(Math.Max(1, ipc.HeartbeatIntervalSec) * Math.Max(1, ipc.MissedHeartbeatsBeforeKill));
-            if (ResumedFromSuspend(lastTick, now))
+            TimeSpan sinceTick = _clock.Provider.GetElapsedTime(lastTick, now);
+            if (ResumedFromSuspend(sinceTick))
             {
                 // A free PC slept (or the machine stalled): nobody could ping while it was away, so the gap is not a hung
                 // Shell. Start every connection's count afresh instead of dropping the Shell on wake.
-                _logger.LogInformation("Resumed after {Gap:F0}s without a tick; heartbeat counts restart", (now - lastTick).TotalSeconds);
+                _logger.LogInformation("Resumed after {Gap:F0}s without a tick; heartbeat counts restart", sinceTick.TotalSeconds);
                 foreach (Connection connection in _connections.Values)
                 {
                     connection.MarkPing(now);
@@ -1046,6 +1059,7 @@ public sealed class PipeServer : BackgroundService
             }
 
             lastTick = now;
+            bool gameRunning = GameRunningSafe();
             foreach (Connection connection in _connections.Values)
             {
                 if (connection.Cts.IsCancellationRequested)
@@ -1055,7 +1069,7 @@ public sealed class PipeServer : BackgroundService
 
                 if (!connection.HelloDone)
                 {
-                    if (now - connection.ConnectedAt > HelloTimeout)
+                    if (_clock.Provider.GetElapsedTime(connection.ConnectedTs, now) > HelloTimeout)
                     {
                         _logger.LogWarning("Pipe client {ConnectionId} pid {Pid} sent no auth.hello within {Timeout}s; closing", connection.Id, connection.Client.Pid, HelloTimeout.TotalSeconds);
                         Close(connection, "no auth.hello");
@@ -1064,34 +1078,134 @@ public sealed class PipeServer : BackgroundService
                     continue;
                 }
 
-                if (connection.Client.IsKiosk && now - connection.LastPingAt > pingLimit)
+                if (!connection.Client.IsKiosk)
                 {
-                    _logger.LogError("Shell pid {Pid} missed {Missed} heartbeats ({Limit}s); dropping the connection{Kill}", connection.Client.Pid, ipc.MissedHeartbeatsBeforeKill, pingLimit.TotalSeconds, KillShellOnHeartbeatLoss ? " and terminating the Shell" : string.Empty);
-                    Close(connection, "heartbeat lost");
-                    if (KillShellOnHeartbeatLoss)
-                    {
-                        KillShell(connection.Client.Pid);
-                    }
+                    continue;
                 }
+
+                HeartbeatVerdict verdict = JudgeHeartbeat(_clock.Provider.GetElapsedTime(connection.LastPingTs, now), pingLimit, KillShellOnHeartbeatLoss, gameRunning);
+                if (verdict == HeartbeatVerdict.Alive)
+                {
+                    continue;
+                }
+
+                int pid = connection.Client.Pid;
+                Close(connection, "heartbeat lost");
+                if (verdict == HeartbeatVerdict.DropAndKill)
+                {
+                    _logger.LogError("Shell pid {Pid} missed {Missed} heartbeats ({Limit}s); dropping the connection and terminating the Shell", pid, ipc.MissedHeartbeatsBeforeKill, pingLimit.TotalSeconds);
+                    KillShell(pid, ShellStart(pid));
+                }
+                else if (KillShellOnHeartbeatLoss)
+                {
+                    // A game runs: the Shell is not killed under it. The connection is dropped so that a Shell that is only
+                    // slow reconnects (and restores its game mode); one that stays silent is terminated once no game runs.
+                    _logger.LogError("Shell pid {Pid} missed {Missed} heartbeats ({Limit}s) during a game; connection dropped, the Shell is left running until the game ends", pid, ipc.MissedHeartbeatsBeforeKill, pingLimit.TotalSeconds);
+                    _silentShells[pid] = ShellStart(pid);
+                }
+                else
+                {
+                    _logger.LogError("Shell pid {Pid} missed {Missed} heartbeats ({Limit}s); dropping the connection", pid, ipc.MissedHeartbeatsBeforeKill, pingLimit.TotalSeconds);
+                }
+            }
+
+            ReapSilentShells(gameRunning);
+        }
+    }
+
+    /// <summary>A Shell left running during a game whose connection was dropped: back (it said hello again) or, once no game runs, terminated.</summary>
+    private void ReapSilentShells(bool gameRunning)
+    {
+        foreach ((int pid, DateTime? started) in _silentShells)
+        {
+            if (_connections.Values.Any(c => c.HelloDone && c.Client.Pid == pid && !c.Cts.IsCancellationRequested))
+            {
+                _logger.LogInformation("Shell pid {Pid} reconnected after its heartbeat loss", pid);
+                _silentShells.TryRemove(pid, out _);
+            }
+            else if (!gameRunning)
+            {
+                _logger.LogError("Shell pid {Pid} stayed silent after its heartbeat loss and no game runs any more; terminating it", pid);
+                _silentShells.TryRemove(pid, out _);
+                KillShell(pid, started);
             }
         }
     }
 
+    private bool GameRunningSafe()
+    {
+        try
+        {
+            return IsGameRunning();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
+        {
+            _logger.LogDebug(ex, "Running games not readable; the Shell is treated as in a game");
+            return true;
+        }
+    }
+
+    /// <summary>What a missing heartbeat leads to (D-99).</summary>
+    public enum HeartbeatVerdict
+    {
+        /// <summary>Pinged within the limit.</summary>
+        Alive,
+
+        /// <summary>Drop the connection only: the Shell may reconnect.</summary>
+        DropOnly,
+
+        /// <summary>Drop the connection and terminate the Shell (the watchdog starts a new one).</summary>
+        DropAndKill,
+    }
+
+    /// <summary>
+    /// A kiosk Shell silent for longer than <paramref name="pingLimit"/> loses its connection; it is terminated too
+    /// (<paramref name="killShell"/>) only while no game runs (D-99): a slow Shell reconnects and restores its game mode,
+    /// and its process is not killed under a game.
+    /// </summary>
+    public static HeartbeatVerdict JudgeHeartbeat(TimeSpan sinceLastPing, TimeSpan pingLimit, bool killShell, bool gameRunning) =>
+        sinceLastPing <= pingLimit ? HeartbeatVerdict.Alive
+        : killShell && !gameRunning ? HeartbeatVerdict.DropAndKill
+        : HeartbeatVerdict.DropOnly;
+
     /// <summary>
     /// Whether the housekeeping timer (every <see cref="HousekeepingInterval"/>) last ticked so long ago that the machine
-    /// must have been suspended or stalled: a gap of more than <see cref="SuspendGap"/>.
+    /// must have been suspended or stalled: a gap of more than <see cref="SuspendGap"/> on the monotonic clock.
     /// </summary>
-    public static bool ResumedFromSuspend(DateTimeOffset lastTick, DateTimeOffset now) => now - lastTick > SuspendGap;
+    public static bool ResumedFromSuspend(TimeSpan sinceLastTick) => sinceLastTick > SuspendGap;
 
     /// <summary>A housekeeping gap longer than this is a sleep or a stall, not a Shell that stopped answering.</summary>
     public static readonly TimeSpan SuspendGap = TimeSpan.FromSeconds(10);
 
-    private void KillShell(int pid)
+    private static DateTime? ShellStart(int pid)
     {
         try
         {
             using var process = Process.GetProcessById(pid);
-            process.Kill(entireProcessTree: true);
+            return process.StartTime;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Win32Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Terminates the Shell's own process, never its tree: whatever it started (a game, a launcher) stays (D-99).
+    /// <paramref name="started"/> guards against a pid the Shell's exit freed and another process took.
+    /// </summary>
+    private void KillShell(int pid, DateTime? started)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            if (started is { } expected && process.StartTime != expected)
+            {
+                _logger.LogInformation("Pid {Pid} is no longer the Shell; not terminated", pid);
+                return;
+            }
+
+            process.Kill(entireProcessTree: false);
         }
         catch (ArgumentException)
         {
@@ -1212,12 +1326,13 @@ public sealed class PipeServer : BackgroundService
     {
         private int _cancelled;
 
-        public Connection(NamedPipeServerStream pipe, PipeClientInfo client, DateTimeOffset connectedAt, IpcSettings ipc, int concurrency, CancellationToken stoppingToken)
+        public Connection(NamedPipeServerStream pipe, PipeClientInfo client, DateTimeOffset connectedAt, long connectedTs, IpcSettings ipc, int concurrency, CancellationToken stoppingToken)
         {
             Pipe = pipe;
             Client = client;
             ConnectedAt = connectedAt;
-            LastPingAt = connectedAt;
+            ConnectedTs = connectedTs;
+            LastPingTs = connectedTs;
             Cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
             Gate = new SemaphoreSlim(Math.Max(1, concurrency), Math.Max(1, concurrency));
             Bucket = new TokenBucket(ipc.RequestsPerSecond, connectedAt);
@@ -1239,6 +1354,9 @@ public sealed class PipeServer : BackgroundService
 
         public DateTimeOffset ConnectedAt { get; }
 
+        /// <summary>Monotonic timestamp of the connection (<see cref="TimeProvider.GetTimestamp"/>).</summary>
+        public long ConnectedTs { get; }
+
         public CancellationTokenSource Cts { get; }
 
         public SemaphoreSlim Gate { get; }
@@ -1255,13 +1373,14 @@ public sealed class PipeServer : BackgroundService
 
         public volatile bool HelloDone;
 
-        public DateTimeOffset LastPingAt { get; private set; }
+        /// <summary>Monotonic timestamp of the last ping (or hello).</summary>
+        public long LastPingTs { get; private set; }
 
         public long RequestCount { get; set; }
 
         public string? CloseReason { get; set; }
 
-        public void MarkPing(DateTimeOffset at) => LastPingAt = at;
+        public void MarkPing(long timestamp) => LastPingTs = timestamp;
 
         public void Cancel()
         {

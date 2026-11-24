@@ -64,8 +64,9 @@ public interface IAntiCheatGameControl
 /// Runs the registered <see cref="IAntiCheatChecker"/>s before a launch (<see cref="IAntiCheatGate"/>) and every
 /// <c>anticheat.checkIntervalSec</c> while games with an anti-cheat run. Violations are reported to the server
 /// (<c>POST /anticheat/report</c>, when <c>anticheat.reportViolations</c>) and as the <c>anticheatViolation</c> agent
-/// event; with <c>policy.anticheat.blockOnViolation</c> the launch is refused, a running game is killed and, for
-/// critical findings, the session is locked.
+/// event; with <c>policy.anticheat.blockOnViolation</c> the launch is refused. At runtime the player is warned on a
+/// finding's first sample, and only a critical finding seen <see cref="StrikesToKill"/> samples in a row kills the game
+/// and locks the session (<see cref="Decide"/>, D-99).
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class AntiCheatMonitor : BackgroundService, IAntiCheatGate
@@ -83,10 +84,14 @@ public sealed class AntiCheatMonitor : BackgroundService, IAntiCheatGate
     private readonly IAntiCheatGameControl? _games;
     private readonly ConcurrentDictionary<Guid, AntiCheatKind> _kinds = new();
     private readonly ConcurrentDictionary<(int Pid, string Check), byte> _reported = new();
+    private readonly ConcurrentDictionary<(int Pid, string Check), int> _strikes = new();
+    private readonly ConcurrentDictionary<int, byte> _acted = new();
+    private readonly ClubShell.Agent.Remote.IAdminEventSink? _shell;
 
     /// <summary>Creates the monitor; <paramref name="games"/> enables runtime checks when registered.</summary>
-    public AntiCheatMonitor(IEnumerable<IAntiCheatChecker> checkers, IServerClient server, IAgentEventSink events, ISessionService sessions, IPolicyEnforcer policies, IOptionsMonitor<AgentSettings> settings, IClock clock, ILogger<AntiCheatMonitor> logger, IAntiCheatGameControl? games = null)
+    public AntiCheatMonitor(IEnumerable<IAntiCheatChecker> checkers, IServerClient server, IAgentEventSink events, ISessionService sessions, IPolicyEnforcer policies, IOptionsMonitor<AgentSettings> settings, IClock clock, ILogger<AntiCheatMonitor> logger, IAntiCheatGameControl? games = null, ClubShell.Agent.Remote.IAdminEventSink? shell = null)
     {
+        _shell = shell;
         ArgumentNullException.ThrowIfNull(checkers);
         ArgumentNullException.ThrowIfNull(server);
         ArgumentNullException.ThrowIfNull(events);
@@ -202,7 +207,7 @@ public sealed class AntiCheatMonitor : BackgroundService, IAntiCheatGate
             try
             {
                 await _clock.Delay(interval, stoppingToken).ConfigureAwait(false);
-                await CheckRunningAsync(_games, stoppingToken).ConfigureAwait(false);
+                await CheckRunningOnceAsync(stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -247,6 +252,39 @@ public sealed class AntiCheatMonitor : BackgroundService, IAntiCheatGate
 
     private IAntiCheatChecker? Find(AntiCheatKind kind) => Array.Find(_checkers, c => c.Kind == kind);
 
+    /// <summary>Consecutive failing runtime samples of a critical finding before its game is killed (D-99).</summary>
+    public const int StrikesToKill = 3;
+
+    /// <summary>What a runtime sample that failed leads to.</summary>
+    public enum RuntimeVerdict
+    {
+        /// <summary>Nothing new: already reported, not (yet) a reason to act.</summary>
+        None,
+
+        /// <summary>First failing sample: report it and warn the player.</summary>
+        Warn,
+
+        /// <summary>Kill the game (and lock the session).</summary>
+        Kill,
+    }
+
+    /// <summary>
+    /// D-99: a single sample is no reason to end a game — a service restarting, a driver reloading after an update, a
+    /// probe that timed out. A finding is reported and the player warned on its first sample; only a critical one
+    /// (<see cref="AntiCheatSeverity.Critical"/>) seen <see cref="StrikesToKill"/> samples in a row kills the game, and
+    /// only with <c>blockOnViolation</c>. A warning-level finding (service stopped, driver missing) never does.
+    /// </summary>
+    public static RuntimeVerdict Decide(AntiCheatSeverity severity, int consecutive, bool block) => consecutive switch
+    {
+        _ when block && severity == AntiCheatSeverity.Critical && consecutive >= StrikesToKill => RuntimeVerdict.Kill,
+        1 => RuntimeVerdict.Warn,
+        _ => RuntimeVerdict.None,
+    };
+
+    /// <summary>One runtime pass over the running games (what the loop runs every <c>anticheat.checkIntervalSec</c>).</summary>
+    public Task CheckRunningOnceAsync(CancellationToken cancellationToken) =>
+        _games is null ? Task.CompletedTask : CheckRunningAsync(_games, cancellationToken);
+
     private async Task CheckRunningAsync(IAntiCheatGameControl games, CancellationToken cancellationToken)
     {
         var running = games.Running;
@@ -284,29 +322,61 @@ public sealed class AntiCheatMonitor : BackgroundService, IAntiCheatGate
             {
                 await HandleRuntimeViolationAsync(games, game, result, cancellationToken).ConfigureAwait(false);
             }
+            else
+            {
+                // A good sample ends every streak of the game: only consecutive failures count.
+                foreach (var key in _strikes.Keys.Where(k => k.Pid == game.Pid))
+                {
+                    _ = _strikes.TryRemove(key, out _);
+                }
+            }
         }
 
-        foreach (var key in _reported.Keys)
+        foreach (var key in _reported.Keys.Where(k => !livePids.Contains(k.Pid)))
         {
-            if (!livePids.Contains(key.Pid))
-            {
-                _ = _reported.TryRemove(key, out _);
-            }
+            _ = _reported.TryRemove(key, out _);
+        }
+
+        foreach (var key in _strikes.Keys.Where(k => !livePids.Contains(k.Pid)))
+        {
+            _ = _strikes.TryRemove(key, out _);
+        }
+
+        foreach (var pid in _acted.Keys.Where(p => !livePids.Contains(p)))
+        {
+            _ = _acted.TryRemove(pid, out _);
         }
     }
 
     private async Task HandleRuntimeViolationAsync(IAntiCheatGameControl games, RunningGame game, AntiCheatCheckResult result, CancellationToken cancellationToken)
     {
         var check = result.Reason ?? "unknown";
-        if (!_reported.TryAdd((game.Pid, check), 0))
+        var block = _policies.Current?.Anticheat.BlockOnViolation ?? true;
+        var severity = SeverityOf(check);
+        var strikes = _strikes.AddOrUpdate((game.Pid, check), 1, (_, n) => n + 1);
+        var verdict = Decide(severity, strikes, block);
+        if (verdict == RuntimeVerdict.Kill && !_acted.TryAdd(game.Pid, 0))
         {
             return;
         }
 
-        var block = _policies.Current?.Anticheat.BlockOnViolation ?? true;
-        var severity = SeverityOf(check);
+        if (verdict == RuntimeVerdict.Warn && !_reported.TryAdd((game.Pid, check), 0))
+        {
+            return; // a streak that broke and started again: reported already
+        }
+
+        if (verdict == RuntimeVerdict.None)
+        {
+            _logger.LogInformation("Anti-cheat {Kind}/{Check} ({Severity}) still failing for {Title} (sample {Strikes})", result.Kind, check, severity, game.Title, strikes);
+            return;
+        }
+
         var action = AntiCheatAction.None;
-        if (block)
+        if (verdict == RuntimeVerdict.Warn)
+        {
+            await WarnPlayerAsync(game, severity == AntiCheatSeverity.Critical && block, cancellationToken).ConfigureAwait(false);
+        }
+        else
         {
             try
             {
@@ -333,6 +403,27 @@ public sealed class AntiCheatMonitor : BackgroundService, IAntiCheatGate
         }
 
         await ReportAsync(result.Kind, check, severity, Details(("gameId", game.GameId.ToString("D")), ("title", game.Title), ("pid", game.Pid.ToString(System.Globalization.CultureInfo.InvariantCulture)), ("phase", "runtime")), game.GameId, action, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Tells the player (the in-game toast of <c>admin.message</c>) what the anti-cheat check found.</summary>
+    private async Task WarnPlayerAsync(RunningGame game, bool mayClose, CancellationToken cancellationToken)
+    {
+        if (_shell is null)
+        {
+            return;
+        }
+
+        var text = mayClose
+            ? $"Проверка античита для «{game.Title}» не прошла. Если это повторится, игра будет закрыта — сохраните прогресс."
+            : $"Проверка античита для «{game.Title}» не прошла. Игра продолжается; если она не подключается к серверам, позовите администратора.";
+        try
+        {
+            await _shell.PublishMessageAsync(new AdminMessage(Guid.NewGuid(), "ClubShell", text, ClubShell.Contracts.Users.NotificationLevel.Warning, false, _clock.UtcNow), cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Anti-cheat warning could not be shown to the player");
+        }
     }
 
     private async Task ReportAsync(AntiCheatKind kind, string check, AntiCheatSeverity severity, JsonElement details, Guid? gameId, AntiCheatAction action, CancellationToken cancellationToken)

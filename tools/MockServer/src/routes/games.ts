@@ -184,6 +184,29 @@ export function gamesRoutes(app: FastifyInstance): void {
     return reply.code(204).send();
   });
 
+  // Beyond the contract (D-99): the Agent renews the lease of a game that still runs, ahead of its expiry.
+  app.post<{ Params: { id: string; leaseId: string } }>(
+    '/games/:id/accounts/:leaseId/renew',
+    async (req): Promise<AccountLease> => {
+      const pc = requireAgent(req);
+      expireLeases(Date.now());
+      const lease = findLease(req.params.id, req.params.leaseId);
+      if (!lease || lease.releasedAt !== null || lease.pcId !== pc.id) throw errors.notFound('lease');
+      lease.expiresAt = inSec(LEASE_TTL_SEC);
+      markDirty();
+      const account = db.accountPool.find((a) => a.launcher === lease.launcher && a.username === lease.username);
+      return {
+        leaseId: lease.leaseId,
+        launcher: lease.launcher,
+        username: lease.username,
+        secret: encryptPoolSecret(pc.signingSecret ?? Buffer.alloc(32).toString('base64'), account?.password ?? ''),
+        extra: account?.extra ?? null,
+        expiresAt: lease.expiresAt,
+        cloudSave: null,
+      };
+    },
+  );
+
   app.get<{ Params: { id: string; leaseId: string } }>('/games/:id/accounts/:leaseId/save-upload', async (req) => {
     requireAgent(req);
     const lease = findLease(req.params.id, req.params.leaseId);
