@@ -28,17 +28,23 @@ public interface IUpdateEventSink
 /// <summary>
 /// Update orchestration for both components (ARCHITECTURE.md §11): runs <see cref="UpdateChecker"/> on its
 /// schedule, downloads and verifies applicable packages (<see cref="UpdateDownloader"/>), stages them
-/// (<see cref="IUpdateApplier"/>) and notifies the Shell. A staged update is applied when no session is open and
-/// <see cref="UpdateChecker.MayApplyNow"/> allows it (auto-install inside the apply window), or for mandatory
-/// packages <see cref="MandatoryNoticeDelay"/> after <c>update.ready</c> even during a session. Agent packages are
+/// (<see cref="IUpdateApplier"/>) and notifies the Shell. A staged update is applied only when no session is open
+/// (<see cref="MayApply"/>, D-99): inside the apply window (auto-install), on the server's request, or at once for a
+/// mandatory package — which waits for the session's end like any other, since applying it restarts the Agent or the Shell
+/// under the player's game. Agent packages are
 /// handed to the helper updater (the service restarts); Shell packages go through <see cref="ShellUpdater"/>. At
 /// start-up a leftover rollback marker means the previous apply never reached the target version: the version is
 /// suppressed for <see cref="UpdateChecker.FailedSuppression"/> and the failure logged.
 /// </summary>
 public sealed class AgentUpdater : BackgroundService
 {
-    /// <summary>Delay between <c>update.ready</c> and a forced apply of a mandatory package during a session.</summary>
-    public static TimeSpan MandatoryNoticeDelay { get; } = TimeSpan.FromSeconds(60);
+    /// <summary>
+    /// Whether a staged package may be applied now (D-99): never while a session is open — not even a mandatory one,
+    /// which used to be forced a minute after <c>update.ready</c> and restarted the Agent or the Shell under the player's
+    /// game; on a free PC a mandatory or requested package at once, any other inside the apply window.
+    /// </summary>
+    public static bool MayApply(bool mandatory, bool sessionOpen, bool requested, bool inApplyWindow) =>
+        !sessionOpen && (mandatory || requested || inApplyWindow);
 
     private static readonly TimeSpan EvaluateInterval = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan StalePackageAge = TimeSpan.FromDays(7);
@@ -55,8 +61,6 @@ public sealed class AgentUpdater : BackgroundService
     private readonly SemaphoreSlim _signal = new(0, 1);
     private readonly SemaphoreSlim _work = new(1, 1);
     private RSA? _publicKey;
-    private DateTimeOffset? _agentReadyAt;
-    private DateTimeOffset? _shellReadyAt;
     private bool _disposed;
 
     /// <summary>Creates the updater.</summary>
@@ -116,7 +120,7 @@ public sealed class AgentUpdater : BackgroundService
                 return new UpdateApplyResponse(false);
             }
 
-            if (_sessions.State.IsOpen() && !pending.Mandatory)
+            if (_sessions.State.IsOpen())
             {
                 _logger.LogInformation("{Component} {Version} apply deferred until the session ends", component, pending.Version);
                 return new UpdateApplyResponse(true);
@@ -136,7 +140,7 @@ public sealed class AgentUpdater : BackgroundService
     /// the component; with <see cref="UpdateCommand.ApplyNow"/> the package is applied at once when no session is open
     /// (outside the apply window too). With a player on the PC it is not: the request is remembered (a file in the cache, so
     /// it survives the Agent's own restart) and the package is applied as soon as the session ends —
-    /// <c>scheduled = true</c>. A mandatory package goes by its own rule (<see cref="MandatoryNoticeDelay"/>).
+    /// <c>scheduled = true</c>. A mandatory package waits for the session's end too (<see cref="MayApply"/>).
     /// </summary>
     public async Task<UpdateApplyResponse> HandleCommandAsync(UpdateCommand command, CancellationToken cancellationToken)
     {
@@ -179,7 +183,7 @@ public sealed class AgentUpdater : BackgroundService
 
             if (command.ApplyNow)
             {
-                if (_sessions.State.IsOpen() && !pending.Mandatory)
+                if (_sessions.State.IsOpen())
                 {
                     SetRequested(component, true);
                     _logger.LogInformation("{Component} {Version} requested by the server; applied when the session ends", ComponentName(component), pending.Version);
@@ -370,15 +374,6 @@ public sealed class AgentUpdater : BackgroundService
             if (await _applier.GetPendingAsync(component, cancellationToken).ConfigureAwait(false) is { } pending)
             {
                 keep.Add(pending.PackagePath);
-                if (component == UpdateComponent.Agent)
-                {
-                    _agentReadyAt = _clock.UtcNow;
-                }
-                else
-                {
-                    _shellReadyAt = _clock.UtcNow;
-                }
-
                 await PublishReadyAsync(pending, cancellationToken).ConfigureAwait(false);
             }
         }
@@ -451,20 +446,8 @@ public sealed class AgentUpdater : BackgroundService
             return;
         }
 
-        var now = _clock.UtcNow;
-        var readyAt = component == UpdateComponent.Agent ? _agentReadyAt : _shellReadyAt;
-        var sessionOpen = _sessions.State.IsOpen();
-        bool allowed;
-        if (pending.Mandatory)
-        {
-            allowed = !sessionOpen || (readyAt is { } shown && now - shown >= MandatoryNoticeDelay);
-        }
-        else
-        {
-            // Asked for by the server (the admin console's button): at the first idle moment, window or not.
-            allowed = !sessionOpen && (IsRequested(component) || (_checker.AutoInstall && _checker.IsInApplyWindow()));
-        }
-
+        // Asked for by the server (the admin console's button): at the first idle moment, window or not.
+        bool allowed = MayApply(pending.Mandatory, _sessions.State.IsOpen(), IsRequested(component), _checker.AutoInstall && _checker.IsInApplyWindow());
         if (!allowed)
         {
             return;
@@ -494,15 +477,6 @@ public sealed class AgentUpdater : BackgroundService
             await PublishProgressAsync(new UpdateProgress(component, manifest.Version, UpdatePhase.Staging, 0, manifest.Size, manifest.Size)).ConfigureAwait(false);
             var pending = await _applier.StageAsync(manifest, packagePath, current, cancellationToken).ConfigureAwait(false);
             await PublishProgressAsync(new UpdateProgress(component, manifest.Version, UpdatePhase.Staging, 100, manifest.Size, manifest.Size)).ConfigureAwait(false);
-            if (component == UpdateComponent.Agent)
-            {
-                _agentReadyAt = _clock.UtcNow;
-            }
-            else
-            {
-                _shellReadyAt = _clock.UtcNow;
-            }
-
             await PublishReadyAsync(pending, cancellationToken).ConfigureAwait(false);
             return pending;
         }
@@ -553,7 +527,8 @@ public sealed class AgentUpdater : BackgroundService
 
     private async Task PublishReadyAsync(PendingUpdate pending, CancellationToken cancellationToken)
     {
-        var applyAt = pending.Mandatory ? _clock.UtcNow + MandatoryNoticeDelay : (DateTimeOffset?)null;
+        // Applied once the PC is free (D-99): no forced time to announce, even for a mandatory package.
+        var applyAt = pending.Mandatory && !_sessions.State.IsOpen() ? _clock.UtcNow : (DateTimeOffset?)null;
         try
         {
             await _events.PublishAsync(new UpdateReady(pending.Component, pending.Version, true, pending.Mandatory, applyAt), cancellationToken).ConfigureAwait(false);
