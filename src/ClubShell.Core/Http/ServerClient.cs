@@ -441,6 +441,10 @@ public sealed class ServerClient : IServerClient, IDisposable
     }
 
     /// <inheritdoc />
+    public Task<AccountLease> RenewAccountLeaseAsync(Guid gameId, Guid leaseId, CancellationToken cancellationToken) =>
+        PostEmptyAsync<AccountLease>(Endpoints.GameAccountLeaseRenew(gameId, leaseId), AuthMode.Agent, cancellationToken);
+
+    /// <inheritdoc />
     public Task<SaveUploadTarget> GetSaveUploadTargetAsync(Guid gameId, Guid leaseId, CancellationToken cancellationToken) =>
         GetAsync<SaveUploadTarget>(Endpoints.GameAccountSaveUpload(gameId, leaseId), AuthMode.Agent, cancellationToken);
 

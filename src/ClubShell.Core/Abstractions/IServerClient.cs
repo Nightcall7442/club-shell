@@ -284,6 +284,13 @@ public interface IGamesApi
     /// <summary><c>POST /games/{id}/accounts/{leaseId}/release</c>; 404 is treated as success.</summary>
     Task ReleaseAccountLeaseAsync(Guid gameId, Guid leaseId, AccountLeaseRelease release, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// <c>POST /games/{id}/accounts/{leaseId}/renew</c> (beyond the contract, D-99): extends a lease whose game still
+    /// runs and returns it with its new <see cref="AccountLease.ExpiresAt"/>. A server without the route answers
+    /// <c>404</c>/<c>501</c>; the Agent then keeps the lease without renewing it.
+    /// </summary>
+    Task<AccountLease> RenewAccountLeaseAsync(Guid gameId, Guid leaseId, CancellationToken cancellationToken);
+
     /// <summary><c>GET /games/{id}/accounts/{leaseId}/save-upload</c>.</summary>
     Task<SaveUploadTarget> GetSaveUploadTargetAsync(Guid gameId, Guid leaseId, CancellationToken cancellationToken);
 

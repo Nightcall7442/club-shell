@@ -140,6 +140,7 @@ public sealed class GameLaunchService : IDisposable
         }
 
         _pool.LeaseExpired += OnLeaseExpired;
+        _pool.KeepExpired = LeaseStillNeeded;
         // D-99: a launcher client a running game needs is not killed for another game's pooled account.
         _injector.LauncherInUseBy = launcher => AccountInjector.LauncherKeptBy(launcher, _tracker.All().Select(r => (r.Game.Launcher, r.Game.Title)));
     }
@@ -968,6 +969,15 @@ public sealed class GameLaunchService : IDisposable
         }
     }
 
+    /// <summary>
+    /// D-99: a lease whose game still runs in the session it was taken for stays held when it expires — the Agent renews
+    /// it ahead of time, and a server that cannot renew is no reason to close a game the player is paying for.
+    /// </summary>
+    private bool LeaseStillNeeded(ActiveLease lease) =>
+        _sessions.Current is { } session && session.Id == lease.SessionId && _sessions.State.IsOpen()
+        && _tracker.All().Any(r => r.Lease?.LeaseId == lease.LeaseId);
+
+    /// <summary>A lease expired that no running game of an open session needs (<see cref="LeaseStillNeeded"/>): whatever still uses it is closed.</summary>
     private void OnLeaseExpired(object? sender, ActiveLease lease)
     {
         IReadOnlyList<GameLaunchRecord> targets = _tracker.All().Where(r => r.Lease?.LeaseId == lease.LeaseId).ToList();

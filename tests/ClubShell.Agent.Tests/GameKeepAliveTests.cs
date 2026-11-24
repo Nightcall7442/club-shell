@@ -1,13 +1,19 @@
+using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using ClubShell.Agent.AntiCheat;
 using ClubShell.Agent.Games;
 using ClubShell.Agent.Games.Accounts;
 using ClubShell.Agent.Session;
+using ClubShell.Contracts.Errors;
 using ClubShell.Contracts.Games;
 using ClubShell.Contracts.Ipc;
 using ClubShell.Contracts.Sessions;
 using ClubShell.Core.Abstractions;
 using ClubShell.Core.Configuration;
+using ClubShell.Core.Security;
 using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute.ExceptionExtensions;
 
 namespace ClubShell.Agent.Tests;
 
@@ -153,5 +159,81 @@ public sealed class GameKeepAliveTests
             shell);
         monitor.CheckForLaunchAsync(game, CancellationToken.None).GetAwaiter().GetResult();
         return monitor;
+    }
+
+    [Fact]
+    public async Task A_lease_is_renewed_before_it_runs_out()
+    {
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        (AccountPool pool, IServerClient server, ActiveLease lease) = await PoolWithLease(time);
+        await using (pool)
+        {
+            server.RenewAccountLeaseAsync(lease.GameId, lease.LeaseId, Arg.Any<CancellationToken>())
+                .Returns(lease.Contract with { Secret = "fresh", ExpiresAt = lease.ExpiresAt.AddMinutes(30) });
+
+            time.Advance(TimeSpan.FromMinutes(4));
+            await pool.CheckLeasesAsync(CancellationToken.None);
+            await server.DidNotReceive().RenewAccountLeaseAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+
+            time.Advance(TimeSpan.FromMinutes(2));
+            await pool.CheckLeasesAsync(CancellationToken.None);
+
+            ActiveLease renewed = pool.Get(lease.LeaseId)!;
+            renewed.ExpiresAt.Should().Be(lease.ExpiresAt.AddMinutes(30));
+            renewed.RevealSecret().Should().Be("pw", "the decrypted secret stays");
+        }
+    }
+
+    [Fact]
+    public async Task An_expired_lease_whose_game_runs_in_an_open_session_is_kept()
+    {
+        var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        (AccountPool pool, IServerClient server, ActiveLease lease) = await PoolWithLease(time);
+        await using (pool)
+        {
+            server.RenewAccountLeaseAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+                .ThrowsAsync(new ServerApiException(ErrorCode.NotImplemented, HttpStatusCode.NotImplemented, null, null, "no pool"));
+            bool gameRuns = true;
+            pool.KeepExpired = _ => gameRuns;
+            int expired = 0;
+            pool.LeaseExpired += (_, _) => expired++;
+
+            time.Advance(TimeSpan.FromMinutes(11));
+            await pool.CheckLeasesAsync(CancellationToken.None);
+            await pool.CheckLeasesAsync(CancellationToken.None);
+
+            pool.Get(lease.LeaseId).Should().NotBeNull();
+            expired.Should().Be(0, "the game the player pays for is not closed");
+            await server.Received(1).RenewAccountLeaseAsync(lease.GameId, lease.LeaseId, Arg.Any<CancellationToken>());
+            await server.DidNotReceive().ReleaseAccountLeaseAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<AccountLeaseRelease>(), Arg.Any<CancellationToken>());
+
+            gameRuns = false;
+            await pool.CheckLeasesAsync(CancellationToken.None);
+            expired.Should().Be(1);
+            pool.Get(lease.LeaseId).Should().BeNull();
+        }
+    }
+
+    private static async Task<(AccountPool Pool, IServerClient Server, ActiveLease Lease)> PoolWithLease(FakeTimeProvider time)
+    {
+        byte[] key = Signing.DeriveAccountPoolKey(Encoding.ASCII.GetBytes("secret"));
+        byte[] nonce = RandomNumberGenerator.GetBytes(12);
+        byte[] plain = Encoding.UTF8.GetBytes("pw");
+        byte[] cipher = new byte[plain.Length];
+        byte[] tag = new byte[16];
+        using (var aes = new AesGcm(key, 16))
+        {
+            aes.Encrypt(nonce, plain, cipher, tag);
+        }
+
+        var server = Substitute.For<IServerClient>();
+        Game game = TestSupport.Game("Dota 2", LauncherType.Steam);
+        server.LeaseAccountAsync(game.Id, Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(new AccountLease(
+            Guid.NewGuid(), LauncherType.Steam, "pool01", Convert.ToBase64String([.. nonce, .. cipher, .. tag]), null, time.GetUtcNow().AddMinutes(10)));
+        var tokens = Substitute.For<ITokenStore>();
+        tokens.Agent.Returns(new AgentTokens(Guid.NewGuid(), "access", "refresh", "c2VjcmV0", DateTimeOffset.UtcNow.AddHours(1)));
+        var pool = new AccountPool(server, tokens, TestSupport.Monitor(new AgentSettings()), new SystemClock(time), NullLogger<AccountPool>.Instance);
+        ActiveLease lease = await pool.LeaseAsync(game, Guid.NewGuid(), null, CancellationToken.None);
+        return (pool, server, lease);
     }
 }
