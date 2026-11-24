@@ -90,6 +90,7 @@ public sealed class GameLaunchService : IDisposable
     private readonly IOptionsMonitor<AgentSettings> _settings;
     private readonly IClock _clock;
     private readonly ILogger<GameLaunchService> _logger;
+    private readonly IGameCloseRequester? _closer;
     private bool _disposed;
 
     /// <summary>Creates the service and subscribes to lease expiry.</summary>
@@ -111,9 +112,11 @@ public sealed class GameLaunchService : IDisposable
         IClock clock,
         ILogger<GameLaunchService> logger,
         PlayerSettingsSync? playerSettings = null,
-        GameRegistryDefaults? registryDefaults = null)
+        GameRegistryDefaults? registryDefaults = null,
+        IGameCloseRequester? closer = null)
     {
         ArgumentNullException.ThrowIfNull(launchers);
+        _closer = closer;
         _playerSettings = playerSettings;
         _registryDefaults = registryDefaults;
         _library = library;
@@ -522,21 +525,23 @@ public sealed class GameLaunchService : IDisposable
         _tracker.ListRunning().Select(r => new HeartbeatRunningGame(r.GameId, r.Pid, r.StartedAt)).ToList();
 
     /// <summary>
-    /// Session-end teardown: terminates every tracked game and releases their leases. A game is asked to close first
-    /// (killed after <c>games.killGraceSec</c>) when the player ended the session or when <paramref name="graceful"/> —
-    /// the player's saves are about to be collected (SHELL_CHANGES 23) and many games write theirs on the way out.
+    /// Session-end teardown: terminates every tracked game and releases their leases. Every game is asked to close first
+    /// and killed after <c>games.killGraceSec</c> (D-99); <paramref name="graceful"/> (the player's saves are about to be
+    /// collected, SHELL_CHANGES 23) no longer changes that.
     /// </summary>
     public async Task KillAllAsync(SessionEndReason reason, bool graceful, CancellationToken cancellationToken)
     {
-        bool force = !graceful && reason is not SessionEndReason.User;
+        // D-99: whatever ended the session (the time ran out, the desk, the player), a game is asked to close first and
+        // killed only after games.killGraceSec — a hard TerminateProcess lost the player's unsaved progress at time-up.
+        // An explicit kill (games.kill with force, the desk's "kill game") still kills at once.
 
         // A game still starting would come up after the session is over.
         await CancelLaunchesAsync(null, wait: true, cancellationToken).ConfigureAwait(false);
         IReadOnlyList<GameLaunchRecord> targets = _tracker.All();
         if (targets.Count > 0)
         {
-            _logger.LogInformation("Killing {Count} running games (session end: {Reason})", targets.Count, reason);
-            await KillRecordsAsync(targets, force, AccountLeaseReleaseReason.SessionEnd, cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation("Closing {Count} running games (session end: {Reason}, saves collected after them: {Graceful})", targets.Count, reason, graceful);
+            await KillRecordsAsync(targets, force: false, AccountLeaseReleaseReason.SessionEnd, cancellationToken).ConfigureAwait(false);
             TimeSpan wait = TimeSpan.FromSeconds(_settings.CurrentValue.Games.KillGraceSec) + TimeSpan.FromSeconds(5);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(wait);
@@ -745,8 +750,17 @@ public sealed class GameLaunchService : IDisposable
         var killed = new List<int>();
         foreach (GameLaunchRecord record in targets)
         {
+            _tracker.MarkKilled(record.Running.Pid, releaseReason);
+        }
+
+        if (!force)
+        {
+            await CloseGracefullyAsync(targets, cancellationToken).ConfigureAwait(false);
+        }
+
+        foreach (GameLaunchRecord record in targets)
+        {
             int pid = record.Running.Pid;
-            _tracker.MarkKilled(pid, releaseReason);
             try
             {
                 if (_launchers.TryGetValue(record.Game.Launcher, out IGameLauncher? launcher))
@@ -766,6 +780,40 @@ public sealed class GameLaunchService : IDisposable
         }
 
         return killed;
+    }
+
+    /// <summary>
+    /// D-99: a game is asked to close from the player's session (its windows get <c>WM_CLOSE</c>, as from its own menu, so
+    /// it saves) and gets <c>games.killGraceSec</c> to exit; what is left is then killed. The Agent's own tree kill could
+    /// not do it: from session 0 it never sees the game's windows, so every "graceful" end was a TerminateProcess.
+    /// </summary>
+    private async Task CloseGracefullyAsync(IReadOnlyList<GameLaunchRecord> targets, CancellationToken cancellationToken)
+    {
+        TimeSpan grace = TimeSpan.FromSeconds(Math.Max(0, _settings.CurrentValue.Games.KillGraceSec));
+        if (_closer is null || _kiosk.ActiveSessionId is not { } session || grace <= TimeSpan.Zero || targets.Count == 0)
+        {
+            return;
+        }
+
+        IReadOnlyList<int> exited = await GracefulGameClose.CloseAsync(
+            targets.Select(r => r.Running.Pid).ToList(),
+            grace,
+            (pid, ct) => _closer.RequestCloseAsync(pid, session, ct),
+            WaitForPidExitAsync,
+            cancellationToken).ConfigureAwait(false);
+        _logger.LogInformation("{Exited} of {Count} game(s) closed on their own within {Grace}", exited.Count, targets.Count, grace);
+    }
+
+    private static async Task WaitForPidExitAsync(int pid, CancellationToken cancellationToken)
+    {
+        try
+        {
+            _ = await ProcessWatcher.WatchPidAsync(pid, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is ArgumentException or Win32Exception)
+        {
+            // Gone already.
+        }
     }
 
     /// <summary>

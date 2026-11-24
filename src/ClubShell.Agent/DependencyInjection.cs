@@ -148,6 +148,7 @@ public static class AgentServiceCollectionExtensions
         services.TryAddSingleton<PlayerSettingsSync>();
         services.TryAddSingleton<GameRegistryDefaults>();
         services.TryAddSingleton<GameSessionTracker>();
+        services.TryAddSingleton<IGameCloseRequester, TaskkillCloseRequester>();
         services.TryAddSingleton<GameLaunchService>();
         // The wait for the games disks before a player is let in (SHELL_CHANGES 86).
         services.TryAddSingleton<IReadinessLibrary>(sp => sp.GetRequiredService<GameLibrary>());
