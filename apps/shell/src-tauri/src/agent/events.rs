@@ -9,7 +9,7 @@ use clubshell_protocol::commands::names::events as ev;
 use clubshell_protocol::events::{
     ConnectivityEvent, GameStateChanged, ShellCommand, ShellCommandKind,
 };
-use clubshell_protocol::games::GameState;
+use clubshell_protocol::games::RunningGame;
 use clubshell_protocol::ipc::IpcEnvelope;
 use clubshell_protocol::session::Session;
 use serde_json::Value;
@@ -46,7 +46,11 @@ impl EventForwarder {
             let mut link = state.agent.state();
             let mut filter = EventFilter::default();
             // Publish the current pipe state once so a late-listening webview still learns it.
-            emit_connectivity(&app, &link.borrow_and_update().clone());
+            let status = link.borrow_and_update().clone();
+            if status.is_connected() {
+                restore_game_mode(&state);
+            }
+            emit_connectivity(&app, &status);
             loop {
                 tokio::select! {
                     next = events.recv() => match next {
@@ -58,7 +62,11 @@ impl EventForwarder {
                         if changed.is_err() {
                             break;
                         }
-                        emit_connectivity(&app, &link.borrow_and_update().clone());
+                        let status = link.borrow_and_update().clone();
+                        if status.is_connected() {
+                            restore_game_mode(&state);
+                        }
+                        emit_connectivity(&app, &status);
                     }
                 }
             }
@@ -88,6 +96,43 @@ impl EventFilter {
     }
 }
 
+/// After every hello (a Shell that started or reconnected while a game runs: crash, update, the
+/// Agent's heartbeat watchdog, an Agent restart) the Shell asks the Agent what runs and restores
+/// game mode with those games' pids allowed. Without it the new Shell started with game mode off and
+/// its foreground guard minimized the game every few seconds (D-99).
+fn restore_game_mode(state: &AppState) {
+    let state = state.clone();
+    tauri::async_runtime::spawn(async move {
+        match state
+            .agent
+            .request::<_, clubshell_protocol::commands::GamesRunningResponse>(
+                clubshell_protocol::commands::names::games::RUNNING,
+                &(),
+            )
+            .await
+        {
+            Ok(resp) => {
+                log_reconcile(&resp.items);
+                state.games_reconcile(&resp.items);
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "games.running after hello failed; game mode unchanged")
+            }
+        }
+    });
+}
+
+fn log_reconcile(items: &[RunningGame]) {
+    if !items.is_empty() {
+        let pids: Vec<i32> = items.iter().map(|g| g.pid).collect();
+        tracing::info!(
+            count = items.len(),
+            ?pids,
+            "games running at hello: game mode restored"
+        );
+    }
+}
+
 fn emit_connectivity(app: &AppHandle, status: &ConnectivityStatus) {
     if let Err(e) = app.emit(CONNECTIVITY_EVENT, status) {
         tracing::warn!(error = %e, "cannot emit kiosk://connectivity");
@@ -108,7 +153,7 @@ fn forward(app: &AppHandle, state: &AppState, filter: &mut EventFilter, env: Ipc
         },
         ev::SESSION_ENDED => {
             state.set_session(None);
-            state.set_game_running(false);
+            state.games_clear();
         }
         ev::AUTH_EXPIRED => {
             state.set_user(None);
@@ -131,11 +176,8 @@ fn forward(app: &AppHandle, state: &AppState, filter: &mut EventFilter, env: Ipc
         ev::GAME_STATE_CHANGED => match serde_json::from_value::<GameStateChanged>(payload.clone())
         {
             Ok(change) => {
-                let running = matches!(change.state, GameState::Launching | GameState::Running);
-                if state.game_running() != running {
-                    state.set_game_running(running);
-                    state.kiosk().set_game_mode(running);
-                }
+                // One game exiting ends game mode only when no other game runs (D-99).
+                state.game_state_changed(&change);
                 tracing::info!(game = %change.title, state = %change.state, pid = ?change.pid, exit_code = ?change.exit_code, "game state changed");
             }
             Err(e) => tracing::warn!(error = %e, "game.stateChanged payload malformed"),

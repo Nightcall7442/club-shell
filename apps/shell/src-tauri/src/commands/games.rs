@@ -2,8 +2,9 @@
 //!
 //! `games_launch` is serialized with `apps_launch` through `AppState::launch_lock`, runs with a
 //! 120 s timeout and suspends the kiosk foreground guard (`KioskControl::set_game_mode(true)`)
-//! before the launcher starts so the game window can take the foreground. The guard is re-armed by
-//! the `game.stateChanged{exited|failed|killed}` event (`agent::events`), or right here when the
+//! before the launcher starts so the game window can take the foreground. Game mode is the set of
+//! running games (`crate::game_mode`, D-99): the guard is re-armed when the last one leaves it —
+//! its `game.stateChanged{exited|failed|killed}` event (`agent::events`), or right here when its
 //! launch fails without such an event (transport error).
 
 use std::time::Duration;
@@ -56,12 +57,9 @@ pub async fn games_launch(
     let req = validate_launch(req)?;
     let _launching = state.launch_lock.lock().await;
 
-    // A game already in the foreground keeps its guard state whatever this launch does.
-    let was_running = state.game_running();
-    if !was_running {
-        state.set_game_running(true);
-        state.kiosk().set_game_mode(true);
-    }
+    // Game mode is a set of games (D-99): this launch adds its game, and only a failure of a game
+    // that was not running before takes it out again; another running game keeps game mode.
+    let fresh = state.game_launch_started(req.game_id);
     tracing::info!(game_id = %req.game_id, account_pool = ?req.use_account_pool, "launching game");
     // SHELL_CHANGES 81: the Agent creates the game from session 0, and Windows lets a new window take
     // the foreground only with the foreground owner's leave — the Shell's, now that the player has
@@ -75,14 +73,17 @@ pub async fn games_launch(
         .request_with_timeout::<_, LaunchResult>(names::games::LAUNCH, &req, LAUNCH_TIMEOUT)
         .await;
     match &result {
-        Ok(r) if r.ok => tracing::info!(game_id = %req.game_id, pid = ?r.pid, "game launched"),
+        Ok(r) if r.ok => {
+            tracing::info!(game_id = %req.game_id, pid = ?r.pid, "game launched");
+            state.game_launch_finished(req.game_id, true, fresh);
+        }
         Ok(r) => {
             tracing::warn!(game_id = %req.game_id, error = ?r.error, "launch reported failure");
-            rearm_guard(&state, was_running);
+            state.game_launch_finished(req.game_id, false, fresh);
         }
         Err(e) => {
             tracing::warn!(game_id = %req.game_id, error = %e, "launch failed");
-            rearm_guard(&state, was_running);
+            state.game_launch_finished(req.game_id, false, fresh);
         }
     }
     result
@@ -134,15 +135,6 @@ pub async fn games_install_status(
             &GamesInstallStatusRequest { game_id },
         )
         .await
-}
-
-/// Re-arms the guard after a failed launch unless a game was already running before it, and unless
-/// the `game.stateChanged{failed}` event already did it.
-fn rearm_guard(state: &AppState, was_running: bool) {
-    if !was_running && state.game_running() {
-        state.set_game_running(false);
-        state.kiosk().set_game_mode(false);
-    }
 }
 
 fn validate_launch(mut req: GamesLaunchRequest) -> CmdResult<GamesLaunchRequest> {

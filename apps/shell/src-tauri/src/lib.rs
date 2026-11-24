@@ -10,6 +10,7 @@
 pub mod agent;
 pub mod commands;
 pub mod config;
+pub mod game_mode;
 pub mod gamepad;
 pub mod kiosk;
 pub mod logging;
