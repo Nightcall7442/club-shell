@@ -209,6 +209,15 @@ public sealed class AccountPool : IAsyncDisposable, IDisposable
         _logger.LogInformation("Released {Lease} ({Reason})", lease, reason);
     }
 
+    /// <summary>
+    /// Releases a lease this pool does not hold (a game taken back after an Agent restart knows its lease by id only);
+    /// server errors are logged, never thrown.
+    /// </summary>
+    public Task ReleaseUnheldAsync(Guid gameId, Guid leaseId, AccountLeaseReleaseReason reason, CancellationToken cancellationToken) =>
+        _leases.ContainsKey(leaseId)
+            ? ReleaseAsync(leaseId, reason, null, cancellationToken)
+            : ReleaseOnServerAsync(gameId, leaseId, new AccountLeaseRelease(reason), cancellationToken);
+
     /// <summary>Releases every held lease.</summary>
     public async Task ReleaseAllAsync(AccountLeaseReleaseReason reason, CancellationToken cancellationToken)
     {

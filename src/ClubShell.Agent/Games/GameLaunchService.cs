@@ -37,6 +37,13 @@ public interface IAntiCheatGate
     Task<AntiCheatCheckResult[]> CheckForLaunchAsync(Game game, CancellationToken cancellationToken);
 }
 
+/// <summary>Takes back the games a previous Agent followed (<see cref="GameLaunchService.ReadoptAsync"/>, D-99).</summary>
+public interface IGameReadoption
+{
+    /// <summary>Follows the persisted games again; returns how many were taken back.</summary>
+    Task<int> ReadoptAsync(CancellationToken cancellationToken);
+}
+
 /// <summary>Delivers <c>game.stateChanged</c> events to the Shell (provided by the IPC server).</summary>
 public interface IGameEventSink
 {
@@ -338,7 +345,9 @@ public sealed class GameLaunchService : IDisposable
             // SHELL_CHANGES 83: a game the launcher starts itself (no launcher client in between) goes into its job before
             // its first instruction, so a child it starts at once is caught too, and its handle is kept from creation so
             // that a game which quits at once still reports its real exit code.
-            JobObject created = job = JobObject.Create(null, killOnClose: true);
+            // D-99: not kill-on-close — the job's handle lives in the Agent, and an Agent that exits (an update, a crash)
+            // took every game with it. The game is ended explicitly where that is meant.
+            JobObject created = job = JobObject.Create(null, killOnClose: false);
             int? createdPid = null;
             var context = new LaunchContext(wtsSession, _kiosk.KioskUser, env, (pid, handle) =>
             {
@@ -518,6 +527,72 @@ public sealed class GameLaunchService : IDisposable
 
         List<int> killed = await KillRecordsAsync(targets, request.Force == true, AccountLeaseReleaseReason.Manual, cancellationToken).ConfigureAwait(false);
         return new GamesKillResponse(killed.Count, killed);
+    }
+
+    /// <summary>
+    /// After an Agent restart (D-99): takes back the games the previous Agent followed (<see cref="RunningGamesFile"/>).
+    /// A game still running in the open session it was launched in is followed again — a new job, its exit reported, its
+    /// lease released by id — so time-up, "close game" and the session's end reach it; one whose session is over is closed
+    /// like at a session end. Run after the session restore and the catalogue load. Returns how many were taken back.
+    /// </summary>
+    public async Task<int> ReadoptAsync(CancellationToken cancellationToken)
+    {
+        IReadOnlyList<RunningGameEntry> entries = _tracker.LoadPersisted();
+        Guid? open = _sessions.Current is { } current && _sessions.State.IsOpen() ? current.Id : null;
+        int adopted = 0;
+        var close = new List<GameLaunchRecord>();
+        foreach (RunningGameEntry entry in entries)
+        {
+            if (_tracker.Find(entry.Pid) is not null)
+            {
+                continue;
+            }
+
+            ReadoptAction action = RunningGamesFile.Decide(entry, GameSessionTracker.ProcessStartUtc(entry.Pid), open);
+            Game? game = action == ReadoptAction.Gone ? null : await _library.GetAsync(entry.GameId, cancellationToken).ConfigureAwait(false);
+            if (action == ReadoptAction.Gone || game is null)
+            {
+                _logger.LogInformation("{Title} (pid {Pid}) not taken back: {Why}", entry.Title, entry.Pid, game is null && action != ReadoptAction.Gone ? "not in the catalogue" : "it ended while the Agent was down");
+                if (entry.LeaseId is { } gone)
+                {
+                    await _pool.ReleaseUnheldAsync(entry.GameId, gone, AccountLeaseReleaseReason.Exit, cancellationToken).ConfigureAwait(false);
+                }
+
+                continue;
+            }
+
+            var request = new LaunchRequest(entry.GameId, entry.SessionId, entry.UserId, entry.LeaseId is not null, entry.LeaseId, null, null, 0);
+            var running = new RunningGame(game.Id, game.Title, entry.Pid, entry.StartedAt, entry.LeaseId, GameState.Running);
+            var record = new GameLaunchRecord(game, request, running, null, null, new AntiCheatCheckResult(entry.AntiCheat, true), CreateJob(entry.Pid), entry.LaunchDurationMs);
+            try
+            {
+                await _tracker.TrackAsync(record, cancellationToken).ConfigureAwait(false);
+            }
+            catch (IpcException ex)
+            {
+                _logger.LogWarning("{Title} (pid {Pid}) not taken back: {Message}", game.Title, entry.Pid, ex.Error.Message);
+                record.Job.Dispose();
+                continue;
+            }
+
+            if (action == ReadoptAction.Close)
+            {
+                _logger.LogInformation("{Title} (pid {Pid}) still runs but its session {SessionId} is over; closing it", game.Title, entry.Pid, entry.SessionId);
+                close.Add(record);
+                continue;
+            }
+
+            adopted++;
+            _logger.LogInformation("{Title} (pid {Pid}) taken back after the Agent's restart (session {SessionId})", game.Title, entry.Pid, entry.SessionId);
+            await PublishAsync(new GameStateChanged(game.Id, game.Title, GameState.Running, _clock.UtcNow, entry.Pid), cancellationToken).ConfigureAwait(false);
+        }
+
+        if (close.Count > 0)
+        {
+            await KillRecordsAsync(close, force: false, AccountLeaseReleaseReason.SessionEnd, cancellationToken).ConfigureAwait(false);
+        }
+
+        return adopted;
     }
 
     /// <summary>Handles <c>games.running</c>.</summary>
@@ -951,7 +1026,7 @@ public sealed class GameLaunchService : IDisposable
 
     private JobObject CreateJob(int pid)
     {
-        JobObject job = JobObject.Create(null, killOnClose: true);
+        JobObject job = JobObject.Create(null, killOnClose: false);
         AssignToJob(job, pid);
         return job;
     }

@@ -330,6 +330,7 @@ public static class AgentServiceCollectionExtensions
         // Session-end teardown: kill games + release leases. Resolved lazily to break the
         // SessionManager → SessionCleanup → GameLaunchService → ISessionService(SessionManager) cycle.
         services.TryAddSingleton<ClubShell.Agent.Session.IGameSessionCleanup, SessionGameCleanupAdapter>();
+        services.TryAddSingleton<IGameReadoption, GameReadoptionAdapter>();
 
         // Anti-cheat launch gate for the Games module (IReadOnlyList → array).
         services.TryAddSingleton<ClubShell.Agent.Games.IAntiCheatGate, AntiCheatGateAdapter>();
@@ -539,6 +540,21 @@ internal sealed class AgentEventPublisher : IAgentEventSink
 
         return ValueTask.CompletedTask;
     }
+}
+
+/// <summary>The start-up's game take-back (D-99), resolved lazily like the session-end teardown below.</summary>
+internal sealed class GameReadoptionAdapter : IGameReadoption
+{
+    private readonly IServiceProvider _services;
+
+    public GameReadoptionAdapter(IServiceProvider services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        _services = services;
+    }
+
+    public Task<int> ReadoptAsync(CancellationToken cancellationToken) =>
+        _services.GetRequiredService<GameLaunchService>().ReadoptAsync(cancellationToken);
 }
 
 /// <summary>

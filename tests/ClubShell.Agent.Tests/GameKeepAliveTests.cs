@@ -246,4 +246,40 @@ public sealed class GameKeepAliveTests
         SessionLock.ShouldAutoLock(idle: true, enabled: false, SessionState.Active, guest: false, gameRunning: false).Should().BeFalse();
         SessionLock.ShouldAutoLock(idle: false, enabled: true, SessionState.Active, guest: false, gameRunning: false).Should().BeFalse();
     }
+
+    [Fact]
+    public void The_games_followed_are_kept_on_disk_for_the_next_agent()
+    {
+        string dir = Directory.CreateTempSubdirectory("clubshell-games-").FullName;
+        try
+        {
+            var file = new RunningGamesFile(() => Path.Combine(dir, "cache", RunningGamesFile.FileName), NullLogger.Instance);
+            file.Load().Should().BeEmpty("no file yet");
+            var entry = new RunningGameEntry(Guid.NewGuid(), "Dota 2", 4242, new DateTime(2026, 11, 24, 10, 0, 0, DateTimeKind.Utc), DateTimeOffset.UtcNow, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), AntiCheatKind.None, 900);
+
+            file.Save([entry]);
+            file.Load().Should().ContainSingle().Which.Should().Be(entry);
+
+            file.Save([]);
+            File.Exists(Path.Combine(dir, "cache", RunningGamesFile.FileName)).Should().BeFalse("nothing runs: no file");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void A_restarted_agent_takes_back_the_game_of_the_open_session_only()
+    {
+        var started = new DateTime(2026, 11, 24, 10, 0, 0, DateTimeKind.Utc);
+        var session = Guid.NewGuid();
+        var entry = new RunningGameEntry(Guid.NewGuid(), "Dota 2", 4242, started, DateTimeOffset.UtcNow, session, Guid.NewGuid(), null, AntiCheatKind.None, 900);
+
+        RunningGamesFile.Decide(entry, started, session).Should().Be(ReadoptAction.Adopt);
+        RunningGamesFile.Decide(entry, started, Guid.NewGuid()).Should().Be(ReadoptAction.Close, "its session is over");
+        RunningGamesFile.Decide(entry, started, null).Should().Be(ReadoptAction.Close);
+        RunningGamesFile.Decide(entry, null, session).Should().Be(ReadoptAction.Gone);
+        RunningGamesFile.Decide(entry, started.AddMinutes(5), session).Should().Be(ReadoptAction.Gone, "the pid is another process now");
+    }
 }
