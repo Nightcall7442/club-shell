@@ -13,7 +13,11 @@ using PlaySession = ClubShell.Contracts.Sessions.Session;
 
 namespace ClubShell.Agent.Session;
 
-/// <summary>Source of the player's idle state (the Shell over IPC, or a hook-based detector in the interactive session).</summary>
+/// <summary>
+/// Source of the player's idle state (the Shell over IPC, or a hook-based detector in the interactive session). None is
+/// registered today (D-99): the Agent's own detector ran in session 0, where <c>GetLastInputInfo</c> never sees the
+/// player, and would lock mid-game; the Shell's own idle lock (<c>idleTimeoutSec</c>, paused during a game) does the job.
+/// </summary>
 public interface IIdleSignal
 {
     /// <summary><see langword="true"/> when the player went idle past the configured threshold, <see langword="false"/> on activity.</summary>
@@ -584,17 +588,26 @@ public sealed class SessionLock : IDisposable
         }
     }
 
+    /// <summary>
+    /// Whether an idle signal locks the session: auto-lock on, an active session, not a guest's (a guest has nothing to
+    /// unlock with), and no game running — a player watching a cut-scene or a match replay gives no input (D-99).
+    /// </summary>
+    public static bool ShouldAutoLock(bool idle, bool enabled, SessionState state, bool guest, bool gameRunning) =>
+        idle && enabled && state == SessionState.Active && !guest && !gameRunning;
+
+    /// <summary>Whether a game runs now (an idle signal never locks the session then). Set by the DI layer.</summary>
+    public Func<bool>? IsGameRunning { get; set; }
+
     private void OnIdleChanged(object? sender, bool idle)
     {
-        if (!idle || _disposed || !AutoLockOnIdle || _sessions.State != SessionState.Active)
+        bool gameRunning = IsGameRunning?.Invoke() == true;
+        if (_disposed || !ShouldAutoLock(idle, AutoLockOnIdle, _sessions.State, OwnerIsGuest(), gameRunning))
         {
-            return;
-        }
+            if (idle && AutoLockOnIdle)
+            {
+                _logger.LogDebug("Idle auto-lock skipped (state {State}, game {Game})", _sessions.State, gameRunning);
+            }
 
-        if (OwnerIsGuest())
-        {
-            // A guest has nothing to unlock with: the idle lock would shut them out of the time they paid for.
-            _logger.LogDebug("Idle auto-lock skipped: the session is a guest's");
             return;
         }
 

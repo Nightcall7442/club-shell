@@ -236,4 +236,14 @@ public sealed class GameKeepAliveTests
         ActiveLease lease = await pool.LeaseAsync(game, Guid.NewGuid(), null, CancellationToken.None);
         return (pool, server, lease);
     }
+
+    [Fact]
+    public void An_idle_player_is_never_locked_out_of_a_running_game()
+    {
+        SessionLock.ShouldAutoLock(idle: true, enabled: true, SessionState.Active, guest: false, gameRunning: false).Should().BeTrue();
+        SessionLock.ShouldAutoLock(idle: true, enabled: true, SessionState.Active, guest: false, gameRunning: true).Should().BeFalse("a cut-scene gives no input");
+        SessionLock.ShouldAutoLock(idle: true, enabled: true, SessionState.Active, guest: true, gameRunning: false).Should().BeFalse();
+        SessionLock.ShouldAutoLock(idle: true, enabled: false, SessionState.Active, guest: false, gameRunning: false).Should().BeFalse();
+        SessionLock.ShouldAutoLock(idle: false, enabled: true, SessionState.Active, guest: false, gameRunning: false).Should().BeFalse();
+    }
 }

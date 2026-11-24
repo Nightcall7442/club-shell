@@ -128,7 +128,13 @@ public static class AgentServiceCollectionExtensions
         services.TryAddSingleton<SessionCleanup>();
         services.TryAddSingleton<SessionManager>();
         services.TryAddSingleton<ISessionService>(sp => sp.GetRequiredService<SessionManager>());
-        services.TryAddSingleton<SessionLock>();
+        services.TryAddSingleton(sp =>
+        {
+            SessionLock sessionLock = ActivatorUtilities.CreateInstance<SessionLock>(sp);
+            // Resolved per check: the games module depends on the session subsystem.
+            sessionLock.IsGameRunning = () => sp.GetService<IRunningGamesSource>()?.Snapshot().Count > 0;
+            return sessionLock;
+        });
         // The signed-in player across an Agent restart (G2) and the sign-in that ends under the player (G3, G10).
         services.TryAddSingleton<SignedInUserStore>();
         services.TryAddSingleton<SignInGuard>();
@@ -335,10 +341,11 @@ public static class AgentServiceCollectionExtensions
         // Processes never killed by the allowlist: the Agent itself, the Shell, and running games.
         services.TryAddSingleton<IProtectedProcesses, ProtectedProcessesAdapter>();
 
-        // A single idle detector serving both the session (auto-lock) and power (idle shutdown) subsystems.
+        // The idle detector serves the power subsystem (idle shutdown of a free PC) only. It runs in session 0, where
+        // GetLastInputInfo never sees the player, so it is not the session's idle signal (D-99): it would lock a player
+        // mid-game. The Shell's own idle lock (idleTimeoutSec, paused while a game runs) does that job.
         services.TryAddSingleton<IdleMonitorAdapter>();
         services.TryAddSingleton<IIdleMonitor>(sp => sp.GetRequiredService<IdleMonitorAdapter>());
-        services.TryAddSingleton<IIdleSignal>(sp => sp.GetRequiredService<IdleMonitorAdapter>());
     }
 
     // ---- Hosted services (start order; host stops them in reverse) -------------------------
@@ -645,9 +652,9 @@ internal sealed class ProtectedProcessesAdapter : IProtectedProcesses
 }
 
 /// <summary>
-/// Single idle detector shared by the session auto-lock (<see cref="IIdleSignal"/>) and the power scheduler
-/// (<see cref="IIdleMonitor"/>). The threshold tracks <c>session.autoLockOnIdleSec</c> (the auto-lock crossing); the
-/// power scheduler reads <see cref="Idle"/> directly for its own <c>idleShutdownMin</c> threshold.
+/// Idle detector of the power scheduler (<see cref="IIdleMonitor"/>), which reads <see cref="Idle"/> for its own
+/// <c>idleShutdownMin</c> threshold. It also implements <see cref="IIdleSignal"/> but is not registered as one: from
+/// session 0 it never sees the player's input (D-99).
 /// </summary>
 /// <remarks>
 /// The Agent runs in session 0, so <c>GetLastInputInfo</c> cannot observe the interactive user's input directly; this
