@@ -117,6 +117,17 @@ export interface SessionHandoff {
   released: boolean;
 }
 
+/** `data` of `SessionEventType.Locked` (beyond the contract, D-100); absent for a plain lock. */
+export interface SessionLockedData {
+  /** Who locked it: `player`, `signIn` (the player's sign-in ended under the session) or `staff`. */
+  origin?: string | null;
+  /**
+   * The prepaid clock stops until the unlock: a guest whose sign-in ended under them cannot sign in again, and their
+   * paid time must not run out behind the lock (the server honours it for a temporary guest's prepaid session only).
+   */
+  clockStopped?: boolean | null;
+}
+
 /** Answer of `POST /sessions/quote` and of IPC `session.quote`: the price the server will charge. */
 export interface SessionQuote {
   /** Minutes priced (the package's for a package tariff). */

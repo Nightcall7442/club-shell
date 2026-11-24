@@ -56,6 +56,7 @@ public sealed class PlayerAccountTests : IDisposable
     private readonly MessageDispatcher _dispatcher;
     private readonly User _member;
     private readonly User _guest;
+    private readonly IServiceProvider _services = Substitute.For<IServiceProvider>();
 
     public PlayerAccountTests()
     {
@@ -76,7 +77,10 @@ public sealed class PlayerAccountTests : IDisposable
         kiosk.UserName.Returns("club");
         var handlers = new SessionHandlers(
             _sessions, _lock, _store, _server, _hwid, _users, new ShellTokenStore(_monitor, NullLogger<ShellTokenStore>.Instance), _link,
-            Substitute.For<IPolicyEnforcer>(), kiosk, _shellSettings, Substitute.For<IServiceProvider>(), _monitor, _clock, NullLogger<SessionHandlers>.Instance, _tokens);
+            Substitute.For<IPolicyEnforcer>(), kiosk, _shellSettings, _services, _monitor, _clock, NullLogger<SessionHandlers>.Instance, _tokens)
+        {
+            LoginRetryDelay = TimeSpan.FromMilliseconds(10),
+        };
         var domain = new UserDomainHandlers(_server, _users, _sessions, _link, _lock, _shellSettings, _monitor, _clock, NullLogger<UserDomainHandlers>.Instance);
         _dispatcher = new MessageDispatcher([handlers, domain], _clock, NullLogger<MessageDispatcher>.Instance);
         _member = new User(Guid.NewGuid(), "an", "Anna", null, UserRole.Member, Money.Uzs(50_000), 0, 0, T0.AddDays(-10), T0, Locale.Ru, []);
@@ -856,7 +860,166 @@ public sealed class PlayerAccountTests : IDisposable
         (await SendAsync(IpcMessages.Auth.Status)).PayloadAs<AuthStatusResponse>()!.Mode.Should().Be(ConnectivityState.Offline);
     }
 
+    // ---- D-100: sign-ins that must not end under the player -------------------------------------------
+
+    [Fact]
+    public async Task A_server_blip_at_sign_in_is_asked_again_before_the_offline_cache()
+    {
+        _link.Connectivity = ConnectivityState.Online;
+        await _store.CacheUserAsync("an", OfflineSessionStore.HashPassword("secret", 1000), _member, CancellationToken.None);
+        _server.LoginAsync(Arg.Any<AuthRequest>(), Arg.Any<CancellationToken>())
+            .Returns(_ => throw Unavailable(), _ => new AuthResponse(_member, null, "token-an", "refresh", T0.AddHours(12)));
+
+        IpcEnvelope reply = await SendAsync(IpcMessages.Auth.Login, new AuthLoginRequest(AuthKind.Password, "an", "secret"));
+
+        reply.PayloadAs<AuthLoginResponse>()!.Mode.Should().Be(ConnectivityState.Online, "the second try reached the server");
+        await _server.Received(SessionHandlers.LoginAttempts).LoginAsync(Arg.Any<AuthRequest>(), Arg.Any<CancellationToken>());
+        _users.Mode.Should().Be(ConnectivityState.Online);
+    }
+
+    [Fact]
+    public async Task An_offline_sign_in_drops_any_held_token_and_gets_a_server_token_for_its_session_when_the_server_is_back()
+    {
+        _link.Connectivity = ConnectivityState.Offline;
+        await _tokens.SetUserAsync(new UserTokens(_member.Id, "token-from-yesterday", "r", T0.AddHours(-1)), CancellationToken.None);
+        await _store.CacheUserAsync("an", OfflineSessionStore.HashPassword("secret", 1000), _member, CancellationToken.None);
+
+        IpcEnvelope login = await SendAsync(IpcMessages.Auth.Login, new AuthLoginRequest(AuthKind.Password, "an", "secret"));
+
+        login.PayloadAs<AuthLoginResponse>()!.Mode.Should().Be(ConnectivityState.Offline);
+        _tokens.User.Should().BeNull("an older token would be refused once the server is back, and the refusal would end this sign-in");
+
+        // The session of the offline sign-in, on the server by now; the server is back.
+        var session = new PlaySession(Guid.NewGuid(), _member.Id, PcId, SessionState.Active, T0, T0.AddHours(1), null, TariffId, 3600, 0, Money.Uzs(6_000), true, []);
+        _server.CreateSessionAsync(Arg.Any<SessionCreateRequest>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(session);
+        await _sessions.StartAsync(new SessionCreateRequest(PcId, _member.Id, TariffId, 60, true), CancellationToken.None);
+        _link.Connectivity = ConnectivityState.Online;
+        _server.IssuePlayerTokenAsync(PcId, _member.Id, Arg.Any<CancellationToken>())
+            .Returns(new AuthResponse(_member with { Balance = Money.Uzs(44_000) }, session, "token-fresh", "refresh", T0.AddHours(12)));
+
+        await _guard.UpgradeOfflineSignInAsync(CancellationToken.None);
+
+        _users.Mode.Should().Be(ConnectivityState.Online);
+        _users.ExpiresAt.Should().Be(T0.AddHours(12));
+        _users.User!.Balance.Should().Be(Money.Uzs(44_000));
+        _sessions.State.Should().Be(SessionState.Active);
+        await _publisher.DidNotReceive().PublishAsync(IpcMessages.Events.AuthExpired, Arg.Any<AuthExpired>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_refused_token_for_an_offline_sign_in_with_its_session_open_keeps_the_player_and_asks_again_later()
+    {
+        await SignInOfflineWithSessionAsync(_member);
+        _server.IssuePlayerTokenAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(ServerError(ErrorCode.Forbidden, HttpStatusCode.Forbidden, """{ "reason": "notSessionPlayer" }"""));
+
+        await _guard.UpgradeOfflineSignInAsync(CancellationToken.None);
+        await _guard.UpgradeOfflineSignInAsync(CancellationToken.None);
+
+        _users.User.Should().NotBeNull("the session is still theirs here; it may not be on the server yet");
+        _sessions.State.Should().Be(SessionState.Active);
+        await _server.Received(1).IssuePlayerTokenAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+
+        _time.Advance(SignInGuard.UpgradeRetryPause);
+        await _guard.UpgradeOfflineSignInAsync(CancellationToken.None);
+        await _server.Received(2).IssuePlayerTokenAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task An_offline_sign_in_without_a_session_is_asked_to_sign_in_again_once_the_server_is_back_for_a_while()
+    {
+        _link.Connectivity = ConnectivityState.Offline;
+        await _store.CacheUserAsync("an", OfflineSessionStore.HashPassword("secret", 1000), _member, CancellationToken.None);
+        (await SendAsync(IpcMessages.Auth.Login, new AuthLoginRequest(AuthKind.Password, "an", "secret"))).IsError.Should().BeFalse();
+        _link.Connectivity = ConnectivityState.Online;
+
+        await _guard.UpgradeOfflineSignInAsync(CancellationToken.None);
+        _users.User.Should().NotBeNull("not at the first tick: a session start may follow");
+
+        _time.Advance(SignInGuard.NoSessionGrace);
+        await _guard.UpgradeOfflineSignInAsync(CancellationToken.None);
+
+        _users.User.Should().BeNull();
+        await _server.DidNotReceive().IssuePlayerTokenAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+        await _publisher.Received(1).PublishAsync(IpcMessages.Events.AuthExpired, Arg.Is<AuthExpired>(e => e.Reason == AuthExpiredReason.TokenExpired), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task The_heartbeats_token_expiry_keeps_an_all_nighter_signed_in_after_the_session_ends()
+    {
+        await SignInWithSessionAsync(_member, expiresAt: T0.AddHours(12));
+        _time.Advance(TimeSpan.FromHours(13));
+
+        // The server slid the token while the session ran.
+        await _guard.ApplyServerTokenAsync(new HeartbeatPlayerToken(_member.Id, T0.AddHours(25)), CancellationToken.None);
+        await _guard.ApplyServerTokenAsync(new HeartbeatPlayerToken(Guid.NewGuid(), T0.AddHours(99)), CancellationToken.None);
+
+        _tokens.User!.ExpiresAt.Should().Be(T0.AddHours(25));
+        _users.ExpiresAt.Should().Be(T0.AddHours(25));
+        _server.EndSessionAsync(Arg.Any<Guid>(), Arg.Any<SessionEndReport>(), Arg.Any<CancellationToken>()).ThrowsAsync(Unavailable());
+        await _sessions.EndAsync(SessionEndReason.TimeUp, CancellationToken.None);
+        await _guard.ExpireIfDueAsync(CancellationToken.None);
+        _users.User.Should().NotBeNull("the token lives on on the server");
+    }
+
+    [Fact]
+    public async Task A_guests_prepaid_clock_stops_behind_a_sign_in_lock_and_a_members_keeps_running()
+    {
+        PlaySession session = await SignInWithSessionAsync(_guest);
+
+        await _guard.HandleTokenRejectedAsync(_guest.Id, CancellationToken.None);
+
+        _sessions.State.Should().Be(SessionState.Locked);
+        _sessions.Current!.PausedAt.Should().NotBeNull("a guest cannot sign in again; their paid time must not run out behind the lock");
+        int left = _sessions.GetTimeLeft().SecondsLeft;
+        _time.Advance(TimeSpan.FromMinutes(10));
+        _sessions.GetTimeLeft().SecondsLeft.Should().Be(left);
+        IReadOnlyList<QueuedSessionEvent> queued = await _store.DequeueBatchAsync(50, CancellationToken.None);
+        queued.Select(q => q.Event).Should().Contain(e => e.Type == SessionEventType.Locked && e.SessionId == session.Id
+            && e.DataAs<SessionLockedData>()!.Origin == "signIn" && e.DataAs<SessionLockedData>()!.ClockStopped == true);
+    }
+
+    [Fact]
+    public async Task A_members_sign_in_lock_keeps_the_clock_running()
+    {
+        await SignInWithSessionAsync(_member);
+
+        await _guard.HandleTokenRejectedAsync(_member.Id, CancellationToken.None);
+
+        _sessions.Current!.PausedAt.Should().BeNull("a member signs in again and plays on: the lock follows the club's rule");
+        IReadOnlyList<QueuedSessionEvent> queued = await _store.DequeueBatchAsync(50, CancellationToken.None);
+        queued.Select(q => q.Event).Should().Contain(e => e.Type == SessionEventType.Locked && e.DataAs<SessionLockedData>()!.ClockStopped == null);
+    }
+
+    [Fact]
+    public async Task Auth_status_right_after_an_agent_restart_waits_for_the_sign_in_restore()
+    {
+        var gate = new SignInRestoreGate();
+        _services.GetService(typeof(SignInRestoreGate)).Returns(gate);
+        _link.Connectivity = ConnectivityState.Online;
+
+        Task<IpcEnvelope> status = SendAsync(IpcMessages.Auth.Status);
+        await Task.Delay(50);
+        status.IsCompleted.Should().BeFalse("the player of the running session is still being restored");
+        _users.Set(_member, T0.AddHours(8), ConnectivityState.Online);
+        gate.Complete();
+
+        AuthStatusResponse answer = (await status).PayloadAs<AuthStatusResponse>()!;
+        answer.Authenticated.Should().BeTrue();
+        answer.User!.Id.Should().Be(_member.Id);
+    }
+
     // ---- helpers ----------------------------------------------------------------------------------
+
+    /// <summary>Signs <paramref name="user"/> in from the offline cache (no player token) with a session of theirs, then brings the server back.</summary>
+    private async Task SignInOfflineWithSessionAsync(User user)
+    {
+        _link.Connectivity = ConnectivityState.Online;
+        _users.Set(user, T0.AddHours(1), ConnectivityState.Offline);
+        var session = new PlaySession(Guid.NewGuid(), user.Id, PcId, SessionState.Active, T0, T0.AddHours(1), null, TariffId, 3600, 0, Money.Uzs(6_000), true, []);
+        _server.CreateSessionAsync(Arg.Any<SessionCreateRequest>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(session);
+        await _sessions.StartAsync(new SessionCreateRequest(PcId, user.Id, TariffId, 60, true), CancellationToken.None);
+    }
 
     private SessionLock NewLock() =>
         new(_sessions, _server, _store, _hwid, _clock, _monitor, NullLogger<SessionLock>.Instance, null, _tokens, _sink, _users);

@@ -5,6 +5,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
+import { ACTIVITY_EVENT } from '@/lib/activity';
 import { api, isTauri } from '@/lib/tauri';
 import { useSettingsStore } from '@/store/settings';
 import { useKioskEvent } from './useTauriEvent';
@@ -20,7 +21,8 @@ export interface IdleState {
   reset: () => void;
 }
 
-const ACTIVITY_EVENTS = ['pointermove', 'pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
+/** DOM input, and the gamepad's (`lib/activity`, D-100). */
+const ACTIVITY_EVENTS = ['pointermove', 'pointerdown', 'keydown', 'wheel', 'touchstart', ACTIVITY_EVENT] as const;
 
 function stageFor(seconds: number, idleSec: number, dimSec: number, screensaverSec: number): IdleStage {
   if (screensaverSec > 0 && seconds >= screensaverSec) {
@@ -76,7 +78,13 @@ export function useIdle(thresholdSec?: number): IdleState {
     } else {
       lastActivity.current = Date.now() - p.seconds * 1000;
     }
-    apply(p.seconds, p.stage, p.idle);
+    // The kiosk's `idle`/`stage` are for its own threshold (`shell.json → idle.timeoutSec`); a hook with its own
+    // threshold judges the seconds itself (D-100: the 10-minute prompt fired at the kiosk's 5 minutes).
+    if (thresholdSec === undefined) {
+      apply(p.seconds, p.stage, p.idle);
+    } else {
+      apply(p.idle ? p.seconds : 0);
+    }
   });
 
   useEffect(() => {

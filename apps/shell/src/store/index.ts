@@ -6,6 +6,7 @@
  */
 import type { PcReadiness, Session } from '@clubshell/contracts';
 import i18n, { initI18n } from '@/i18n';
+import { shouldAdoptSignIn } from '@/lib/idlePolicy';
 import { log } from '@/lib/logger';
 import { clearQuoteCache } from '@/lib/quotes';
 import { api, events, isTauri } from '@/lib/tauri';
@@ -121,6 +122,28 @@ function stopBalancePoll(): void {
   }
 }
 
+/**
+ * `auth.status` for a player the Agent restored after the Shell read «nobody» (D-100), at most this often: the Agent
+ * pushes `session.updated` every second, and a session locked after its player's sign-in ended has no player either.
+ */
+export const ADOPT_READ_MS = 5_000;
+let adoptReadAt = 0;
+
+/** A `session.updated` of an open session while the Shell has no player: ask the Agent who is signed in (throttled). */
+export function adoptRestoredSignIn(state: Session['state'], now: number = Date.now()): boolean {
+  if (!shouldAdoptSignIn(useAuthStore.getState().user !== null, state, now, adoptReadAt, ADOPT_READ_MS)) {
+    return false;
+  }
+  adoptReadAt = now;
+  void useAuthStore.getState().adoptSignIn();
+  return true;
+}
+
+/** Tests: forget the throttle. */
+export function resetAdoptThrottle(): void {
+  adoptReadAt = 0;
+}
+
 /** `auth.status` for who locked the session at most this often (the Agent pushes `session.updated` every second). */
 const LOCK_READ_MS = 3_000;
 let lockReadAt = 0;
@@ -225,6 +248,8 @@ function wireListeners(): void {
     events.on('session.updated', (s: Session) => {
       const wasLocked = session().state === 'locked';
       session().setSession(s);
+      // The Agent restarted mid-session and restored its player after the Shell's reconnect read «nobody» (D-100).
+      adoptRestoredSignIn(s.state);
       // A player's lock the desk took over stays `locked`: the Agent says so with a `session.updated`, and
       // `auth.status.lockedByStaff` tells which.
       if (wasLocked && s.state === 'locked' && !auth().lockedByStaff) {

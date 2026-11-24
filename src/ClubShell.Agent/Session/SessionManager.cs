@@ -423,7 +423,10 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
     }
 
     /// <inheritdoc />
-    public async Task<PlaySession> LockAsync(string? reason, CancellationToken cancellationToken)
+    public Task<PlaySession> LockAsync(string? reason, CancellationToken cancellationToken) => LockAsync(reason, null, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<PlaySession> LockAsync(string? reason, SessionLockedData? data, CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -440,7 +443,8 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
             }
 
             _stateBeforeLock = _state;
-            _timerPausedByLock = _state == SessionState.Active && PauseTimerOnLock;
+            bool stopClock = data?.ClockStopped == true && session.IsPrepaid && !session.IsOpenEnded;
+            _timerPausedByLock = _state == SessionState.Active && (PauseTimerOnLock || stopClock);
             if (_timerPausedByLock)
             {
                 _timer.Pause();
@@ -451,7 +455,10 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
             _state = SessionState.Locked;
             _logger.LogInformation("Session {SessionId} locked ({Reason})", session.Id, reason ?? "user");
             await PersistCoreAsync(cancellationToken).ConfigureAwait(false);
-            await RecordAsync(SessionEvent.Of(session.Id, SessionEventType.Locked, now), queue: true, cancellationToken).ConfigureAwait(false);
+            var locked = data is null
+                ? SessionEvent.Of(session.Id, SessionEventType.Locked, now)
+                : new SessionEvent(session.Id, SessionEventType.Locked, now, JsonDefaults.ToElement(data with { ClockStopped = stopClock ? true : null }));
+            await RecordAsync(locked, queue: true, cancellationToken).ConfigureAwait(false);
             return Snapshot()!;
         }
         finally

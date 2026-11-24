@@ -66,6 +66,7 @@ public sealed class HeartbeatService : BackgroundService
 {
     private readonly Readiness.PcReadinessService? _readiness;
     private readonly ServerPcFlags? _flags;
+    private readonly ClubShell.Agent.Session.SignInGuard? _signIn;
     private readonly ProfileResetService? _profileReset;
     private readonly KioskLogonGuard? _logonGuard;
     private readonly ServerConnection _connection;
@@ -112,8 +113,10 @@ public sealed class HeartbeatService : BackgroundService
         Readiness.PcReadinessService? readiness = null,
         ServerPcFlags? flags = null,
         ProfileResetService? profileReset = null,
-        KioskLogonGuard? logonGuard = null)
+        KioskLogonGuard? logonGuard = null,
+        ClubShell.Agent.Session.SignInGuard? signIn = null)
     {
+        _signIn = signIn;
         _readiness = readiness;
         _flags = flags;
         _profileReset = profileReset;
@@ -231,6 +234,19 @@ public sealed class HeartbeatService : BackgroundService
         }
 
         _flags?.Update(response.Stateless);
+        if (_signIn is not null)
+        {
+            try
+            {
+                // D-100: the player token's expiry as the server slid it; a stale local copy would sign an all-nighter out.
+                await _signIn.ApplyServerTokenAsync(response.PlayerToken, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "The server's player token expiry was not taken");
+            }
+        }
+
         await ApplyCacheVersionsAsync(response, cancellationToken).ConfigureAwait(false);
 
         if (response.PendingCommands > 0)

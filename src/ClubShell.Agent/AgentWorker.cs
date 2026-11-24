@@ -96,6 +96,7 @@ public sealed class AgentWorker : BackgroundService
     private readonly SignedInUserStore? _signedIn;
     private readonly Saves.IPlayerSaves? _saves;
     private readonly Users.AccountPrefsSync? _accountPrefs;
+    private readonly SignInRestoreGate? _restoreGate;
 
     private volatile bool _ready;
     private Guid _persistedPcId;
@@ -125,8 +126,10 @@ public sealed class AgentWorker : BackgroundService
         SignInGuard? signIn = null,
         SignedInUserStore? signedIn = null,
         Saves.IPlayerSaves? saves = null,
-        Users.AccountPrefsSync? accountPrefs = null)
+        Users.AccountPrefsSync? accountPrefs = null,
+        SignInRestoreGate? restoreGate = null)
     {
+        _restoreGate = restoreGate;
         ArgumentNullException.ThrowIfNull(hwid);
         ArgumentNullException.ThrowIfNull(provisioner);
         ArgumentNullException.ThrowIfNull(profileReset);
@@ -206,7 +209,16 @@ public sealed class AgentWorker : BackgroundService
 
         try
         {
-            await StartupSequenceAsync(stoppingToken).ConfigureAwait(false);
+            try
+            {
+                await StartupSequenceAsync(stoppingToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                // A start that failed before the restore must not keep auth.status waiting (D-100).
+                _restoreGate?.Complete();
+            }
+
             _ready = true;
             _logger.LogInformation("Agent ready");
             await MaintenanceLoopAsync(stoppingToken).ConfigureAwait(false);
@@ -290,15 +302,31 @@ public sealed class AgentWorker : BackgroundService
             cancellationToken).ConfigureAwait(false);
 
         // 6a. The player of that session, still signed in (G2): restored only when the session is still theirs.
+        bool restored = false;
         if (_signedIn is not null)
         {
             try
             {
-                _ = _signedIn.Restore();
+                restored = _signedIn.Restore();
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogWarning(ex, "Saved sign-in could not be restored");
+            }
+        }
+
+        // D-100: auth.status answers now; a Shell that asked meanwhile (it reconnects before the restore is done) is told
+        // with a session.updated, on which it reads auth.status again.
+        _restoreGate?.Complete();
+        if (restored && _sessions.Current is { } restoredSession)
+        {
+            try
+            {
+                await _publisher.PublishAsync(IpcMessages.Events.SessionUpdated, restoredSession, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "session.updated after the sign-in restore was not published");
             }
         }
 
@@ -419,6 +447,11 @@ public sealed class AgentWorker : BackgroundService
             {
                 await TickStepAsync("outbox", FlushOutboxAsync, cancellationToken).ConfigureAwait(false);
                 await TickStepAsync("session sync", _sessions.SyncWithServerAsync, cancellationToken).ConfigureAwait(false);
+                if (_signIn is not null)
+                {
+                    // After the sync: an offline start is on the server by now, so its player's token can be asked for (D-100).
+                    await TickStepAsync("offline sign-in upgrade", _signIn.UpgradeOfflineSignInAsync, cancellationToken).ConfigureAwait(false);
+                }
             }
 
             await TickStepAsync("health", _ => { ReportHealth(); return Task.CompletedTask; }, cancellationToken).ConfigureAwait(false);

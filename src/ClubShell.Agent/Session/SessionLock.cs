@@ -208,7 +208,10 @@ public sealed class SessionLock : IDisposable
 
     /// <summary>
     /// Locks the session because the player's sign-in ended (<see cref="SessionLockOrigin.SignIn"/>); a staff lock stays a
-    /// staff lock. No-op (returns <see langword="null"/>) when no session is open.
+    /// staff lock. No-op (returns <see langword="null"/>) when no session is open. A guest's prepaid session stops its clock
+    /// behind this lock (D-100): a guest cannot sign in again, and their paid time must not run out into the time-up and
+    /// the sign-out while the desk is called; the desk's end refunds what is left. A member's goes on as designed: they
+    /// sign in again and play on.
     /// </summary>
     public async Task<PlaySession?> LockForSignInAsync(string? reason, CancellationToken cancellationToken)
     {
@@ -219,7 +222,8 @@ public sealed class SessionLock : IDisposable
 
         try
         {
-            return await LockCoreAsync(reason ?? SignInReason, SessionLockOrigin.SignIn, cancellationToken).ConfigureAwait(false);
+            bool stopClock = OwnerIsGuest() && _sessions.Current is { IsPrepaid: true, IsOpenEnded: false };
+            return await LockCoreAsync(reason ?? SignInReason, SessionLockOrigin.SignIn, cancellationToken, new SessionLockedData("signIn", stopClock ? true : null)).ConfigureAwait(false);
         }
         catch (IpcException ex) when (ex.Code == ErrorCode.SessionNotActive)
         {
@@ -339,7 +343,7 @@ public sealed class SessionLock : IDisposable
     private bool OwnerIsGuest() =>
         _users?.User is { Role: UserRole.Guest } user && _sessions.Current is { } session && session.UserId == user.Id;
 
-    private async Task<PlaySession> LockCoreAsync(string? reason, SessionLockOrigin origin, CancellationToken cancellationToken)
+    private async Task<PlaySession> LockCoreAsync(string? reason, SessionLockOrigin origin, CancellationToken cancellationToken, SessionLockedData? data = null)
     {
         var session = _sessions.Current;
         var wasLocked = IsLocked;
@@ -357,7 +361,9 @@ public sealed class SessionLock : IDisposable
         PlaySession snapshot;
         try
         {
-            snapshot = await _sessions.LockAsync(reason, cancellationToken).ConfigureAwait(false);
+            snapshot = data is null
+                ? await _sessions.LockAsync(reason, cancellationToken).ConfigureAwait(false)
+                : await _sessions.LockAsync(reason, data, cancellationToken).ConfigureAwait(false);
         }
         catch
         {

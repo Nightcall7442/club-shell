@@ -132,6 +132,7 @@ public static class AgentServiceCollectionExtensions
         // The signed-in player across an Agent restart (G2) and the sign-in that ends under the player (G3, G10).
         services.TryAddSingleton<SignedInUserStore>();
         services.TryAddSingleton<SignInGuard>();
+        services.TryAddSingleton<SignInRestoreGate>();
         // The member's Shell preferences and favourites on their account (D-86).
         services.TryAddSingleton<AccountPrefsSync>();
     }

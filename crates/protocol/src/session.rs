@@ -166,6 +166,20 @@ pub struct SessionHandoff {
     pub released: bool,
 }
 
+/// `data` of `SessionEventType.Locked` (beyond the contract, D-100); absent for a plain lock.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionLockedData {
+    /// Who locked it: `player`, `signIn` (the player's sign-in ended under the session) or `staff`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    /// The prepaid clock stops until the unlock: a guest whose sign-in ended under them cannot sign
+    /// in again, and their paid time must not run out behind the lock (the server honours it for a
+    /// temporary guest's prepaid session only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clock_stopped: Option<bool>,
+}
+
 /// Answer of `POST /sessions/quote` and of IPC `session.quote`: the price the server will charge.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

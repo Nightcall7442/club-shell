@@ -39,6 +39,13 @@ public interface ISessionService
     /// <summary>Locks the screen; the timer keeps running unless the tariff pauses on lock.</summary>
     Task<Session> LockAsync(string? reason, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Locks the screen with <paramref name="data"/> on the <c>locked</c> event: who locked it and, with
+    /// <see cref="SessionLockedData.ClockStopped"/>, a prepaid clock stopped until the unlock (D-100: a guest's sign-in that
+    /// ended under them).
+    /// </summary>
+    Task<Session> LockAsync(string? reason, SessionLockedData? data, CancellationToken cancellationToken);
+
     /// <summary>Unlocks a locked session (credentials already verified by the caller).</summary>
     Task<Session> UnlockAsync(CancellationToken cancellationToken);
 

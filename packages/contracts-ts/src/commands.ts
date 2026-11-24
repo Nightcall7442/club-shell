@@ -1811,6 +1811,14 @@ export interface HeartbeatKioskUser {
   profileResetFailed?: boolean | null;
 }
 
+/** The PC's player token in a heartbeat answer (beyond the contract, D-100): whose it is and until when it lives. */
+export interface HeartbeatPlayerToken {
+  /** Player of the token. */
+  userId: string;
+  /** Expiry after the beat's slide. */
+  expiresAt: string;
+}
+
 /** Response of `POST /agents/{pcId}/heartbeat`. */
 export interface HeartbeatResponse {
   /** Server clock (used for offset correction). */
@@ -1833,6 +1841,13 @@ export interface HeartbeatResponse {
    * kiosk's profile (SHELL_CHANGES 78). `null` from an older server.
    */
   stateless?: boolean | null;
+  /**
+   * Beyond the contract (D-100): the player token of this PC as it stands after the beat — the server slides it while
+   * its player's session is open here, and the agent's copy of the expiry follows, so a player signed in for more than
+   * `Auth:UserTokenHours` is not signed out by a stale local expiry when the session ends. `null` when the PC holds no
+   * live player token, or from an older server.
+   */
+  playerToken?: HeartbeatPlayerToken | null;
 }
 
 /** Running game summary in a heartbeat. */
