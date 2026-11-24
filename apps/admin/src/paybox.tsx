@@ -397,7 +397,11 @@ export function PayBox({
 
       <div className={clsx(!(fixed && totalShown) && 'mt-[18px]')}>
         <StepLabel label={t('Способ оплаты')} hint={hints ? 'Alt+1…5' : undefined} />
-        <div role="radiogroup" aria-label={t('Способ оплаты')} className="mt-2 grid grid-cols-5 gap-2">
+        <div
+          role="radiogroup"
+          aria-label={t('Способ оплаты')}
+          className="mt-2 grid grid-cols-5 gap-2 max-[439px]:grid-cols-3"
+        >
           {PAY_METHODS.map((m) => (
             <button
               type="button"

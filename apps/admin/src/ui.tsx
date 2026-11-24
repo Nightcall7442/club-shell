@@ -21,6 +21,28 @@ import { t } from '@/i18n';
 import { AlertTriangleIcon, CloseIcon } from '@/icons';
 
 // ---------------------------------------------------------------------------------------------------------------------
+// Screen size
+// ---------------------------------------------------------------------------------------------------------------------
+
+/** A phone (below Tailwind's `md`): the bottom tab bar instead of the rail, cards instead of wide rows. */
+export const PHONE_QUERY = '(max-width: 767px)';
+/** Below `lg`: one column (a phone or a tablet held upright). */
+export const NARROW_QUERY = '(max-width: 1023px)';
+
+/** Whether the media query matches now, following it as the window changes. */
+export function useMedia(query: string): boolean {
+  const [hit, setHit] = useState(() => window.matchMedia(query).matches);
+  useEffect(() => {
+    const m = window.matchMedia(query);
+    const on = (): void => setHit(m.matches);
+    on();
+    m.addEventListener('change', on);
+    return () => m.removeEventListener('change', on);
+  }, [query]);
+  return hit;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 // Buttons
 // ---------------------------------------------------------------------------------------------------------------------
 
@@ -28,8 +50,9 @@ export type ButtonVariant = 'primary' | 'secondary' | 'tertiary' | 'utility' | '
 export type ButtonSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl';
 
 const BUTTON_SIZE: Record<ButtonSize, string> = {
-  xs: 'h-7 px-2.5 text-xs',
-  sm: 'h-9 px-3 text-[13px]',
+  // A finger needs more than a pointer: on a phone the small sizes grow (44 px for `sm`).
+  xs: 'h-7 px-2.5 text-xs max-md:h-9',
+  sm: 'h-9 px-3 text-[13px] max-md:h-11',
   md: 'h-11 px-4 text-sm',
   lg: 'h-[46px] px-4 text-sm',
   xl: 'h-14 pl-[18px] pr-3.5 text-[15px]',
@@ -265,10 +288,12 @@ export function PageHeader({
   return (
     <header className="flex min-h-11 flex-wrap items-center justify-between gap-4">
       <div className="flex min-w-0 flex-wrap items-baseline gap-x-4 gap-y-1">
-        <h1 className="font-display text-2xl font-medium leading-8 tracking-[-0.01em] text-hi">{title}</h1>
+        <h1 className="font-display text-2xl font-medium leading-8 tracking-[-0.01em] text-hi max-md:text-xl max-md:leading-7">
+          {title}
+        </h1>
         {caption && <span className="label text-[10.5px] tracking-[0.14em]">{caption}</span>}
       </div>
-      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+      {actions && <div className="flex flex-wrap items-center gap-2 max-md:w-full">{actions}</div>}
     </header>
   );
 }
@@ -368,9 +393,14 @@ export function Section({
   return (
     <section className={clsx(PANEL_CLASS[variant], 'flex min-w-0 flex-col', className)}>
       {head && (
-        <header className="flex min-h-11 items-center justify-between gap-3 px-5 pt-3">
+        <header className="flex min-h-11 items-center justify-between gap-3 px-5 pt-3 max-md:flex-wrap max-md:gap-y-2 max-md:px-4">
           {title && <h2 className="label text-text">{title}</h2>}
-          {actions && <div className="flex items-center gap-2">{actions}</div>}
+          {/* A phone: the actions get a row of their own under the title (a select keeps its words). */}
+          {actions && (
+            <div className={clsx('flex max-w-full flex-wrap items-center gap-2', title && 'max-md:basis-full')}>
+              {actions}
+            </div>
+          )}
         </header>
       )}
       <div className={clsx('section-body', head && 'section-body-headed', bodyClassName)}>{children}</div>
@@ -400,6 +430,10 @@ export function Sum({
   );
 }
 
+/** A tablet: a table wider than its panel scrolls sideways under its first column, which stays put. */
+const STICKY_FIRST =
+  'max-lg:first:sticky max-lg:first:left-0 max-lg:first:z-[1] max-lg:first:bg-[rgb(var(--c-surface))] max-lg:first:shadow-[1px_0_0_rgb(var(--c-accent)/0.1)]';
+
 /** Strict data table: mono header row, hairline rows, right-aligned numeric columns via `num`. */
 export function Table<T>({
   rows,
@@ -416,6 +450,52 @@ export function Table<T>({
   selectedKey?: string | null;
   empty?: string;
 }): JSX.Element {
+  const phone = useMedia(PHONE_QUERY);
+  if (phone && rows.length > 0) {
+    // A phone: a card per row — the first column as its title, the others as label and value — not clipped columns.
+    const [head, ...rest] = columns;
+    return (
+      <ul className="flex flex-col">
+        {rows.map((r) => {
+          const k = rowKey(r);
+          const selected = selectedKey === k;
+          return (
+            <li
+              key={k}
+              onClick={onRowClick ? () => onRowClick(r) : undefined}
+              className={clsx(
+                'flex flex-col gap-2 border-t border-line/70 px-3 py-3 text-[13px] first:border-t-0',
+                onRowClick && 'cursor-pointer active:bg-text/[0.03]',
+                selected && 'bg-accent/[0.07] shadow-[inset_2px_0_0_rgb(var(--c-accent))]',
+              )}
+            >
+              {head && <div className="min-w-0 font-medium text-text">{head.render(r)}</div>}
+              {rest.length > 0 && (
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5">
+                  {rest.map((c) =>
+                    c.title ? (
+                      <div key={c.key} className="flex min-w-0 flex-col gap-1">
+                        <dt className="label-sm truncate">{c.title}</dt>
+                        <dd
+                          className={clsx('min-w-0 [overflow-wrap:anywhere]', c.num && 'tnum font-mono text-[12.5px]')}
+                        >
+                          {c.render(r)}
+                        </dd>
+                      </div>
+                    ) : (
+                      <dd key={c.key} className="col-span-2 flex min-w-0 flex-wrap justify-end gap-2">
+                        {c.render(r)}
+                      </dd>
+                    ),
+                  )}
+                </dl>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    );
+  }
   return (
     <div className="thin-scrollbar overflow-x-auto">
       {rows.length === 0 ? (
@@ -429,7 +509,7 @@ export function Table<T>({
                 <th
                   key={c.key}
                   style={{ width: c.width }}
-                  className={clsx('label-sm px-3 py-2 font-medium', c.num ? 'text-right' : 'text-left')}
+                  className={clsx('label-sm px-3 py-2 font-medium', STICKY_FIRST, c.num ? 'text-right' : 'text-left')}
                 >
                   {c.title}
                 </th>
@@ -453,7 +533,11 @@ export function Table<T>({
                   {columns.map((c) => (
                     <td
                       key={c.key}
-                      className={clsx('px-3 py-2.5 align-middle', c.num && 'tnum text-right font-mono text-[12.5px]')}
+                      className={clsx(
+                        'px-3 py-2.5 align-middle',
+                        STICKY_FIRST,
+                        c.num && 'tnum text-right font-mono text-[12.5px]',
+                      )}
                     >
                       {c.render(r)}
                     </td>
@@ -562,7 +646,7 @@ export function SheetClose({ onClose, className }: { onClose: () => void; classN
       title="Esc"
       onClick={onClose}
       className={clsx(
-        'focus-ring inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-text/[0.14] bg-bg/50 text-soft hover:border-text/25 hover:text-text',
+        'focus-ring inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-text/[0.14] bg-bg/50 max-md:h-11 max-md:w-11 text-soft hover:border-text/25 hover:text-text',
         className,
       )}
     >
@@ -620,7 +704,8 @@ export function Sheet({
     <div className="thin-scrollbar fixed inset-0 z-50 overflow-y-auto">
       <div aria-hidden="true" className="scrim anim-fade" />
       {/* A short counter screen (1366×768): less margin and air, so a pay sheet fits without scrolling. */}
-      <div className="relative flex min-h-full items-center justify-center p-6 [@media(max-height:840px)]:p-3">
+      {/* A phone: a bottom sheet the width of the screen, over the home indicator. */}
+      <div className="relative flex min-h-full items-center justify-center p-6 max-md:items-end max-md:px-0 max-md:pb-0 max-md:pt-[max(24px,env(safe-area-inset-top))] [@media(max-height:840px)]:p-3 max-md:[@media(max-height:840px)]:px-0 max-md:[@media(max-height:840px)]:pb-0">
         <div
           ref={panel}
           role="dialog"
@@ -636,6 +721,7 @@ export function Sheet({
           }}
           className={clsx(
             'sheet anim-rise relative flex w-full flex-col overflow-hidden outline-none',
+            'max-md:max-w-none max-md:rounded-b-none max-md:border-x-0 max-md:border-b-0 max-md:pb-[env(safe-area-inset-bottom)]',
             isWide ? 'max-w-[640px]' : 'max-w-[496px]',
           )}
         >
@@ -645,7 +731,7 @@ export function Sheet({
               {onClose && <SheetClose onClose={onClose} className="absolute right-3.5 top-3.5 z-10" />}
             </>
           ) : (
-            <header className="flex items-start justify-between gap-3 px-6 pt-5">
+            <header className="flex items-start justify-between gap-3 px-6 pt-5 max-md:px-4">
               <div className="flex min-w-0 flex-col gap-2">
                 {caption && <p className="label-sm">{caption}</p>}
                 <h2 className="font-display text-[22px] font-medium leading-7 tracking-[-0.01em] text-hi">{title}</h2>
@@ -653,11 +739,11 @@ export function Sheet({
               {onClose && <SheetClose onClose={onClose} className="-mr-1" />}
             </header>
           )}
-          <div className="flex flex-col gap-4 px-6 pb-[22px] pt-[18px] [@media(max-height:840px)]:gap-3 [@media(max-height:840px)]:pb-4 [@media(max-height:840px)]:pt-3.5">
+          <div className="flex flex-col gap-4 px-6 pb-[22px] pt-[18px] max-md:px-4 [@media(max-height:840px)]:gap-3 [@media(max-height:840px)]:pb-4 [@media(max-height:840px)]:pt-3.5">
             {children}
           </div>
           {footer && (
-            <footer className="mx-6 flex min-h-14 items-center justify-between gap-3 border-t border-accent/[0.08] py-4 text-[12.5px] text-dim [@media(max-height:840px)]:min-h-11 [@media(max-height:840px)]:py-2.5">
+            <footer className="mx-6 flex max-md:mx-4 min-h-14 items-center justify-between gap-3 border-t border-accent/[0.08] py-4 text-[12.5px] text-dim [@media(max-height:840px)]:min-h-11 [@media(max-height:840px)]:py-2.5">
               {footer}
             </footer>
           )}
@@ -910,7 +996,11 @@ export function Tabs<T extends string>({
     <div
       role="tablist"
       aria-label={label}
-      className={clsx('flex h-10 items-stretch gap-1 border-b border-line', className)}
+      // A phone: the tabs scroll sideways on one line instead of breaking their words.
+      className={clsx(
+        'flex h-10 items-stretch gap-1 border-b border-line max-md:no-scrollbar max-md:overflow-x-auto max-md:overflow-y-hidden',
+        className,
+      )}
     >
       {tabs.map((tab) => {
         const on = tab.id === value;
@@ -922,7 +1012,7 @@ export function Tabs<T extends string>({
             aria-selected={on}
             onClick={() => onChange(tab.id)}
             className={clsx(
-              'focus-ring relative inline-flex items-center gap-2 rounded-t-md px-4 text-sm font-medium',
+              'focus-ring relative inline-flex items-center gap-2 rounded-t-md px-4 text-sm font-medium max-md:shrink-0 max-md:whitespace-nowrap max-md:px-3',
               on ? 'text-hi' : 'text-dim hover:text-text',
             )}
           >
@@ -931,7 +1021,7 @@ export function Tabs<T extends string>({
             {on && (
               <span
                 aria-hidden="true"
-                className="absolute inset-x-3 -bottom-px h-0.5 rounded-full bg-accent shadow-[0_0_10px_rgb(var(--c-accent)/0.8)]"
+                className="absolute inset-x-3 -bottom-px h-0.5 rounded-full bg-accent max-md:bottom-0 shadow-[0_0_10px_rgb(var(--c-accent)/0.8)]"
               />
             )}
           </button>
@@ -995,12 +1085,15 @@ export function KpiCard({
   groupLabel,
   className,
   valueClassName,
+  asideCorner,
 }: {
   label: ReactNode;
   value: ReactNode;
   unit?: ReactNode;
   sub?: ReactNode;
   aside?: ReactNode;
+  /** The aside in the card's top right corner over the label row (a narrow card: the value keeps the full width). */
+  asideCorner?: boolean;
   tone?: 'default' | 'attention' | 'quiet';
   compact?: boolean;
   big?: boolean;
@@ -1039,7 +1132,11 @@ export function KpiCard({
         icon={icon}
         valueClassName={valueClassName}
       />
-      {aside && <div className="flex shrink-0 items-center gap-2">{aside}</div>}
+      {aside && (
+        <div className={clsx('flex shrink-0 items-center gap-2', asideCorner && 'absolute right-1 top-1 gap-1')}>
+          {aside}
+        </div>
+      )}
     </div>
   );
 }
@@ -1066,6 +1163,8 @@ export function KpiBody({
   icon?: ReactNode;
   valueClassName?: string;
 }): JSX.Element {
+  // A long figure (`3 495 000`) in a narrow card on a phone or a tablet: a size smaller and without «сум», read whole, not «3 49…».
+  const long = typeof value === 'string' && value.length >= 8;
   return (
     <span className="kpi-body flex h-full min-w-0 flex-col justify-between gap-0.5">
       <span className={clsx('kpi-label label flex items-center gap-[7px]', tone === 'attention' && 'text-warning')}>
@@ -1078,6 +1177,7 @@ export function KpiBody({
             'num-dot truncate leading-none',
             compact ? 'text-[26px]' : big ? 'kpi-big text-[36px]' : 'kpi-money text-[30px]',
             tone === 'attention' ? 'text-warning' : tone === 'quiet' ? 'text-muted' : 'text-hi',
+            long && 'max-lg:!text-[18px]',
             valueClassName,
           )}
         >
@@ -1086,7 +1186,11 @@ export function KpiBody({
         {unit && (
           <>
             {' '}
-            <span className="shrink-0 text-sm font-medium leading-none text-muted">{unit}</span>
+            <span
+              className={clsx('kpi-unit shrink-0 text-sm font-medium leading-none text-muted', long && 'max-lg:hidden')}
+            >
+              {unit}
+            </span>
           </>
         )}
       </span>
@@ -1123,6 +1227,8 @@ export function Well({
   className?: string;
   children?: ReactNode;
 }): JSX.Element {
+  // A long figure in a half-width well on a phone: a size smaller and without the unit, read whole (as `KpiBody`).
+  const long = typeof value === 'string' && value.length >= 8 && size > 17;
   return (
     <div
       role={groupLabel ? 'group' : undefined}
@@ -1141,6 +1247,7 @@ export function Well({
                 : tone === 'muted'
                   ? 'text-muted'
                   : 'text-hi',
+            long && 'max-md:!text-[17px]',
           )}
           style={{ fontSize: size }}
         >
@@ -1149,7 +1256,11 @@ export function Well({
         {unit && (
           <>
             {' '}
-            <span className="shrink-0 text-[11.5px] font-medium leading-none text-muted">{unit}</span>
+            <span
+              className={clsx('shrink-0 text-[11.5px] font-medium leading-none text-muted', long && 'max-md:hidden')}
+            >
+              {unit}
+            </span>
           </>
         )}
       </span>

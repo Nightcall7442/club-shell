@@ -91,7 +91,7 @@ function Stat({
       unit={value === '0' ? undefined : unit}
       tone={value === '0' && tone !== 'warn' ? 'quiet' : 'default'}
       valueClassName={tone === 'warn' ? '!text-warning' : undefined}
-      className="[-webkit-backdrop-filter:none] [backdrop-filter:none]"
+      className="kpi-row [-webkit-backdrop-filter:none] [backdrop-filter:none]"
     />
   );
 }
@@ -120,7 +120,12 @@ function StatGroup({
         <span aria-hidden="true" className="h-px min-w-6 flex-1 bg-gradient-to-r from-accent/[0.18] to-accent/[0.04]" />
         {aside && <span className="label tracking-[0.14em]">{aside}</span>}
       </div>
-      {children && <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-6">{children}</div>}
+      {/* A phone: one card to a row, so a sum of millions is read whole, not «6…». */}
+      {children && (
+        <div className="grid grid-cols-2 gap-2.5 max-[439px]:grid-cols-1 max-[439px]:gap-2 md:grid-cols-3 xl:grid-cols-6">
+          {children}
+        </div>
+      )}
       {foot && <p className="text-xs leading-5 text-muted">{foot}</p>}
     </div>
   );
@@ -563,7 +568,7 @@ export default function ShiftPage({ isOwner = false }: { isOwner?: boolean }): J
                 feedChoices.length > 1 ? (
                   <select
                     aria-label={t('Смена')}
-                    className={clsx(inputCls, '!h-9 w-60 !text-[13px]')}
+                    className={clsx(inputCls, '!h-9 w-60 !text-[13px] max-md:!h-11 max-md:w-full')}
                     value={feedId}
                     onChange={(e) => setFeedShift(e.target.value)}
                   >

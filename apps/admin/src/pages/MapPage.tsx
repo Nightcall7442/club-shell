@@ -87,7 +87,21 @@ import { guestSignIn, type ReceiptData } from '@/print';
 import { useShift } from '@/shift';
 import { HallPlanView, ZoomControls, hasPlaces } from './mapPlan';
 import { QuickActions, type QuickAction, type QuickRequest } from './quickActions';
-import { Badge, Button, Chip, EmptyState, Field, Kbd, Note, Segmented, Sheet, inputCls } from '@/ui';
+import {
+  Badge,
+  Button,
+  Chip,
+  EmptyState,
+  Field,
+  Kbd,
+  NARROW_QUERY,
+  Note,
+  PHONE_QUERY,
+  Segmented,
+  Sheet,
+  inputCls,
+  useMedia,
+} from '@/ui';
 
 const POLL_MS = 2000;
 const MINUTE_PRESETS = [30, 60, 120, 180];
@@ -202,18 +216,6 @@ function windowsOf(tf: Tariff): string {
 /** Price of one minute by a quote, rounded up to whole сум: what a postpaid seat must afford at the start. */
 function firstMinute(q: PriceQuote, minutes: number): number {
   return Math.ceil(q.total.amount / Math.max(1, minutes) / 100) * 100;
-}
-
-function useMedia(query: string): boolean {
-  const [hit, setHit] = useState(() => window.matchMedia(query).matches);
-  useEffect(() => {
-    const m = window.matchMedia(query);
-    const on = (): void => setHit(m.matches);
-    on();
-    m.addEventListener('change', on);
-    return () => m.removeEventListener('change', on);
-  }, [query]);
-  return hit;
 }
 
 /** What is left to settle after an end, at the map: a debt to take or a guest's refund to give back in cash. */
@@ -4018,6 +4020,10 @@ export function MapPage(): JSX.Element {
   const anchor = useRef<string | null>(null);
   const wide = useMedia(WIDE_QUERY);
   const short = useMedia(SHORT_QUERY);
+  /** One column (a phone, an upright tablet): a tap opens the PC's card in a window, the feed sits under the map. */
+  const narrow = useMedia(NARROW_QUERY);
+  /** A phone: the hall by zones only (a plan of a whole hall in 360 px is a field of dots). */
+  const phone = useMedia(PHONE_QUERY);
   const shift = useShift();
   const calls = useCalls();
 
@@ -4096,7 +4102,7 @@ export function MapPage(): JSX.Element {
   void tick;
   // The plan only when the server sends every PC's place (an older one does not): else the zones, as before.
   const planned = hasPlaces(seats);
-  const view: MapView = planned ? viewChoice : 'zones';
+  const view: MapView = planned && !phone ? viewChoice : 'zones';
   const setView = (v: MapView): void => {
     setViewChoice(v);
     writeView(v);
@@ -4176,6 +4182,8 @@ export function MapPage(): JSX.Element {
     setMulti(new Set());
     setQuick(null);
     pick(x.pc.id);
+    // One column has no card beside the map: a tap opens the PC's card in a window right away.
+    if (narrow) setDialog({ pcId: x.pc.id });
   };
   /** A right click: the PC's menu at the pointer; on a PC of the picked set, the set's panel in a window. */
   const onMenu = (x: Seat, e: React.MouseEvent<HTMLButtonElement>): void => {
@@ -4453,7 +4461,7 @@ export function MapPage(): JSX.Element {
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
+    <div className="flex min-h-0 flex-col gap-3 lg:h-full">
       {error && <Note tone="err">{error}</Note>}
       {movePick && (
         // The move's HUD bar: what the map waits for, and the way out.
@@ -4473,7 +4481,7 @@ export function MapPage(): JSX.Element {
           </Button>
         </div>
       )}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px] min-[1800px]:grid-cols-[minmax(0,1fr)_400px]">
+      <div className="grid grid-cols-1 gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_360px] min-[1800px]:grid-cols-[minmax(0,1fr)_400px]">
         <div className="flex min-h-0 flex-col gap-4">
           <div className="glass-panel edge-top flex min-h-0 flex-1 flex-col px-5 pb-2 pt-[18px]">
             <header className="flex min-h-7 shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-1">
@@ -4496,7 +4504,7 @@ export function MapPage(): JSX.Element {
                   <span className="truncate">{outdatedText}</span>
                 </span>
               )}
-              <span className="label flex items-center gap-2 whitespace-nowrap" aria-live="polite">
+              <span className="label flex items-center gap-2 whitespace-nowrap max-md:hidden" aria-live="polite">
                 {multi.size >= 2 ? (
                   <span className="text-accent">{t('Выбрано {n}', { n: multi.size })}</span>
                 ) : digits ? (
@@ -4533,7 +4541,7 @@ export function MapPage(): JSX.Element {
               </div>
               <span className="min-w-2 flex-1" />
               {view === 'plan' && <ZoomControls zoom={zoom} onZoom={setZoom} />}
-              {planned && (
+              {planned && !phone && (
                 <Segmented
                   label={t('Вид карты')}
                   size="md"
@@ -4593,7 +4601,8 @@ export function MapPage(): JSX.Element {
               bottom edge fades (only the bottom: a top fade would dim the brackets of a selected first-row tile).
             */}
             {view === 'plan' ? (
-              <div className="flex min-h-0 flex-1 flex-col pb-3 pt-3">
+              // One column has no height to share out: the plan gets its own (else it measures zero and shows nothing).
+              <div className="flex min-h-0 flex-1 flex-col pb-3 pt-3 max-lg:h-[min(70vh,640px)] max-lg:flex-none">
                 <HallPlanView
                   seats={seats}
                   plan={data?.hallPlan}
@@ -4650,6 +4659,17 @@ export function MapPage(): JSX.Element {
         </div>
 
         {dialogWindow}
+        {narrow && bulk.length > 0 && !inWindow && (
+          // The picked set's actions, held over the tab bar while the map scrolls.
+          <div className="panel-solid edge-top sticky bottom-2 z-20 flex min-h-14 items-center gap-3 py-2 pl-4 pr-2 lg:hidden">
+            <span className="min-w-0 flex-1 text-[13px] font-medium text-text">
+              {t('Выбрано {n} ПК', { n: bulk.length })}
+            </span>
+            <Button size="md" variant="secondary" onClick={() => setDialog('bulk')}>
+              {t('Действия с ПК')}
+            </Button>
+          </div>
+        )}
         {quick && !movePick && multi.size === 0 && !selectMode && seats.some((x) => x.pc.id === quick.pcId) && (
           <QuickActions
             seat={seats.find((x) => x.pc.id === quick.pcId)!}
@@ -4660,15 +4680,22 @@ export function MapPage(): JSX.Element {
           />
         )}
         <aside className="flex min-h-0 flex-col gap-3">
-          <div
-            className={clsx(
-              'thin-scrollbar flex min-h-0 flex-col gap-3 overflow-y-auto',
-              folded ? 'flex-1' : 'flex-[0_1_auto]',
-            )}
-          >
-            {seatRegion}
-          </div>
-          {wide ? (
+          {!narrow && (
+            <div
+              className={clsx(
+                'thin-scrollbar flex min-h-0 flex-col gap-3 overflow-y-auto',
+                folded ? 'flex-1' : 'flex-[0_1_auto]',
+              )}
+            >
+              {seatRegion}
+            </div>
+          )}
+          {narrow ? (
+            // One column: the PC's card opens in a window, the feed is always open under the map.
+            <div className="glass-side flex min-h-[160px] flex-col px-4 pb-2 pt-3.5">
+              <OperationsFeed placement="panel" className="min-h-0 flex-1" />
+            </div>
+          ) : wide ? (
             // 1800 px and wider: the feed under the seat card never folds (F's right column, spec §6.1).
             <div className="glass-side flex min-h-[280px] flex-1 flex-col px-4 pb-2 pt-3.5">
               <OperationsFeed placement="column" className="min-h-0 flex-1" />

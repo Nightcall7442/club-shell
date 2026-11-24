@@ -54,6 +54,9 @@ import {
   GamepadIcon,
   LogoMark,
   LogoutIcon,
+  MoreIcon,
+  SearchIcon,
+  CloseIcon,
   MapIcon,
   MonitorIcon,
   NetworkIcon,
@@ -71,7 +74,7 @@ import { KpiStrip, type HallCounts } from '@/kpi';
 import { TopUpSheet } from '@/paybox';
 import { useInstall } from '@/pwa';
 import { CashMenu, ShiftChip, ShiftProvider } from '@/shift';
-import { Button, inputCls } from '@/ui';
+import { Button, PHONE_QUERY, inputCls, useMedia } from '@/ui';
 
 /** «3 зоны»: the hall's zone count in the header's caption, with the word's plural form of the console language. */
 function zonesWord(n: number): string {
@@ -366,6 +369,268 @@ function Separator(): JSX.Element {
   return <span aria-hidden="true" className="h-7 w-px shrink-0 bg-accent/[0.12]" />;
 }
 
+/** The phone's desk sections in the bottom tab bar; everything else is under «Ещё». */
+const TAB_IDS = ['map', 'bar', 'shift', 'clients'];
+
+/**
+ * The phone's header: one row — the club and the clock, the shift chip, the bell and the drawer's «±» on the setup
+ * pages, and a search icon that opens the client search over the whole row.
+ */
+function PhoneHeader({
+  clubName,
+  time,
+  counter,
+  searchOpen,
+  onSearch,
+  onShift,
+  search,
+}: {
+  clubName: string | null;
+  time: string;
+  counter: boolean;
+  searchOpen: boolean;
+  onSearch: (open: boolean) => void;
+  onShift: () => void;
+  search: ReactNode;
+}): JSX.Element {
+  if (searchOpen) {
+    return (
+      <header
+        className="relative z-30 flex h-11 min-w-0 items-center gap-2"
+        onBlur={(e) => {
+          // A pick blurs the field (the search's own «done»): the row goes back to the header.
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onSearch(false);
+        }}
+      >
+        <div className="min-w-0 flex-1">{search}</div>
+        <button
+          type="button"
+          onClick={() => onSearch(false)}
+          className="focus-ring h-11 shrink-0 rounded-md px-2 text-[13px] font-medium text-dim hover:text-text"
+        >
+          {t('Отмена')}
+        </button>
+      </header>
+    );
+  }
+  return (
+    <header className="relative z-30 flex h-11 min-w-0 items-center gap-2.5">
+      <div className="flex min-w-0 shrink flex-col gap-1">
+        <span className="truncate font-display text-[13px] font-medium leading-none tracking-[-0.01em] text-text">
+          {clubName ?? 'ClubShell'}
+        </span>
+        <span className="num-dot text-[17px] leading-none tracking-[0.02em] text-text">{time}</span>
+      </div>
+      <Separator />
+      <div className="flex min-w-0 flex-1">
+        <ShiftChip onClick={onShift} />
+      </div>
+      {!counter && (
+        <div className="flex shrink-0 items-center gap-1.5">
+          <CashMenu variant="compact" />
+          <CallsBell variant="compact" />
+        </div>
+      )}
+      <button
+        type="button"
+        aria-label={t('Поиск клиента')}
+        onClick={() => onSearch(true)}
+        className="glass-field focus-ring flex h-10 w-10 shrink-0 items-center justify-center text-dim hover:text-text"
+      >
+        <SearchIcon size={17} strokeWidth={1.7} />
+      </button>
+    </header>
+  );
+}
+
+/** The phone's bottom tab bar: Карта, Бар, Смена, Клиенты and «Ещё» (every other section), over the home indicator. */
+function TabBar({
+  sections,
+  current,
+  moreOpen,
+  onGo,
+  onMore,
+}: {
+  sections: SectionDef[];
+  current: string | undefined;
+  moreOpen: boolean;
+  onGo: (id: string) => void;
+  onMore: () => void;
+}): JSX.Element {
+  const tabs = TAB_IDS.map((id) => sections.find((s) => s.id === id)).filter((s): s is SectionDef => Boolean(s));
+  const inMore = !moreOpen && current !== undefined && !TAB_IDS.includes(current);
+  const item = (key: string, label: string, icon: ReactNode, active: boolean, onClick: () => void): JSX.Element => (
+    <button
+      key={key}
+      type="button"
+      onClick={onClick}
+      aria-current={active ? 'page' : undefined}
+      className={clsx(
+        'focus-ring-inset relative flex min-w-0 flex-1 flex-col items-center justify-center gap-1 transition-colors',
+        active ? 'text-hi' : 'text-muted hover:text-text',
+      )}
+    >
+      {active && (
+        <span
+          aria-hidden="true"
+          className="absolute left-1/2 top-0 h-0.5 w-8 -translate-x-1/2 bg-accent shadow-[0_0_10px_rgb(var(--c-accent)/0.8)]"
+        />
+      )}
+      <span aria-hidden="true" className={clsx('flex', active && 'text-accent')}>
+        {icon}
+      </span>
+      <span
+        className={clsx(
+          'max-w-full truncate px-0.5 text-[10.5px] leading-[13px]',
+          active ? 'font-semibold' : 'font-medium',
+        )}
+      >
+        {label}
+      </span>
+    </button>
+  );
+  return (
+    <nav
+      aria-label={t('Разделы')}
+      className="glass-rail fixed inset-x-0 bottom-0 z-40 flex border-r-0 border-t border-accent/[0.1] pb-[env(safe-area-inset-bottom)]"
+    >
+      <div className="flex h-[60px] w-full">
+        {tabs.map((s) => item(s.id, t(s.title), s.icon, !moreOpen && s.id === current, () => onGo(s.id)))}
+        {item('more', t('Ещё'), <MoreIcon />, moreOpen || inMore, onMore)}
+      </div>
+    </nav>
+  );
+}
+
+/** The language picker: RU · UZ · EN. */
+function LangSwitch({ className }: { className?: string }): JSX.Element {
+  const lang = useLang();
+  return (
+    <div
+      className={clsx(
+        'flex h-10 shrink-0 items-center gap-0.5 rounded-md border border-line bg-surface/50 p-1',
+        className,
+      )}
+    >
+      {LANGS.map((l) => (
+        <button
+          key={l}
+          type="button"
+          aria-pressed={l === lang}
+          onClick={() => setLang(l)}
+          className={clsx(
+            'focus-ring h-[30px] flex-1 rounded-seg px-[9px] font-mono text-[10.5px] uppercase leading-none tracking-[0.08em]',
+            l === lang ? 'bg-accent/[0.12] font-semibold text-accent' : 'font-medium text-muted hover:text-text',
+          )}
+        >
+          {l}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** «Ещё» on a phone: every section by group over the whole screen, the language, who is signed in and «Выйти». */
+function MoreSheet({
+  groups,
+  current,
+  staffName,
+  owner,
+  onGo,
+  onClose,
+  onSignOut,
+}: {
+  groups: { title: string; items: SectionDef[] }[];
+  current: string | undefined;
+  staffName: string;
+  owner: boolean;
+  onGo: (id: string) => void;
+  onClose: () => void;
+  onSignOut: () => void;
+}): JSX.Element {
+  useEffect(() => {
+    const on = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', on);
+    return () => window.removeEventListener('keydown', on);
+  }, [onClose]);
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={t('Разделы')}
+      className="anim-fade fixed inset-x-0 top-0 z-[35] flex flex-col bg-bg/[0.97] pt-[env(safe-area-inset-top)] backdrop-blur-xl [bottom:calc(60px+env(safe-area-inset-bottom))]"
+    >
+      <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-accent/[0.08] px-4">
+        <h2 className="font-display text-lg font-medium tracking-[-0.01em] text-hi">{t('Разделы')}</h2>
+        <button
+          type="button"
+          aria-label={t('Закрыть')}
+          onClick={onClose}
+          className="focus-ring inline-flex h-11 w-11 items-center justify-center rounded-md border border-text/[0.14] bg-bg/50 text-soft"
+        >
+          <CloseIcon size={16} />
+        </button>
+      </header>
+      <div className="thin-scrollbar flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-contain px-4 pb-6 pt-4">
+        {groups
+          .filter((g) => g.items.length > 0)
+          .map((g) => (
+            <section key={g.title} className="flex flex-col gap-2">
+              <h3 className="label-sm">{t(g.title)}</h3>
+              <div className="grid grid-cols-2 gap-2">
+                {g.items.map((s) => {
+                  const active = s.id === current;
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => onGo(s.id)}
+                      aria-current={active ? 'page' : undefined}
+                      className={clsx(
+                        'focus-ring flex min-h-[52px] items-center gap-2.5 rounded-md border px-3 py-2 text-left text-[13px] leading-4 transition-colors',
+                        active
+                          ? 'border-accent/[0.3] bg-accent/[0.1] font-semibold text-hi'
+                          : 'border-accent/[0.1] bg-surface/50 font-medium text-text hover:border-accent/[0.22]',
+                      )}
+                    >
+                      <span aria-hidden="true" className={clsx('flex shrink-0', active ? 'text-accent' : 'text-muted')}>
+                        {s.icon}
+                      </span>
+                      <span className="min-w-0 hyphens-auto [overflow-wrap:anywhere]">{t(s.title)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
+        <section className="flex flex-col gap-2">
+          <h3 className="label-sm">{t('Язык')}</h3>
+          <LangSwitch className="h-11" />
+        </section>
+        <div className="mt-auto flex items-center gap-3 border-t border-accent/[0.08] pt-4">
+          <span
+            aria-hidden="true"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-accent/[0.22] bg-accent/[0.08] font-display text-xs font-semibold text-text"
+          >
+            {initials(staffName)}
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="truncate text-sm font-medium text-text">{staffName}</span>
+            <span className="label-sm">{owner ? t('Владелец') : t('Касса')}</span>
+          </span>
+          <InstallButton variant="rail" />
+          <Button variant="ghost" size="md" onClick={onSignOut}>
+            <LogoutIcon size={18} />
+            {t('Выйти')}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function App(): JSX.Element {
   const lang = useLang();
   const [staff, setStaff] = useState<StaffMember | null>(null);
@@ -383,6 +648,17 @@ export function App(): JSX.Element {
   // A client being topped up from the header's search (on any page, with or without a PC).
   const [topUpFor, setTopUpFor] = useState<ClientHit | null>(null);
   const search = useRef<HTMLInputElement>(null);
+  /** A phone: the bottom tab bar, «Ещё» with every other section, the search behind an icon. */
+  const phone = useMedia(PHONE_QUERY);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  useEffect(() => {
+    setMoreOpen(false);
+    setSearchOpen(false);
+  }, [section, staff, phone]);
+  useEffect(() => {
+    if (searchOpen) search.current?.focus();
+  }, [searchOpen]);
   // The rail scrolls on a short screen (the owner has 16 sections): the active one is always brought into view.
   const railNav = useRef<HTMLElement>(null);
   const railActive = useRef<HTMLButtonElement>(null);
@@ -519,11 +795,12 @@ export function App(): JSX.Element {
 
   const shell = (
     <ShiftProvider key={staff.id} staff={staff} onSignOut={signOut}>
-      <div className="relative isolate h-screen overflow-hidden">
+      <div className="relative isolate h-screen overflow-hidden supports-[height:100dvh]:h-[100dvh]">
         <Wallpaper url={wallpaperUrl} />
-        <div className="relative grid h-full grid-cols-[88px_minmax(0,1fr)]">
+        {/* A phone has no rail (the tab bar at the bottom instead); a tablet's rail is icons only. */}
+        <div className="relative grid h-full grid-cols-[minmax(0,1fr)] md:grid-cols-[64px_minmax(0,1fr)] lg:grid-cols-[88px_minmax(0,1fr)]">
           {/* Rail: the logo, the sections, then who is signed in and «Выйти». */}
-          <aside className="glass-rail relative z-30 flex min-h-0 flex-col pb-4 pt-5">
+          <aside className="glass-rail relative z-30 flex min-h-0 flex-col pb-4 pt-5 max-md:hidden">
             <div className="mb-3 flex shrink-0 justify-center">
               {logoUrl ? (
                 <img src={logoUrl} alt={clubName ?? ''} className="h-10 w-10 rounded-md object-contain" />
@@ -541,9 +818,10 @@ export function App(): JSX.Element {
                 if (items.length === 0) return null;
                 return (
                   <div key={g.title} className={clsx('flex flex-col', gi > 0 && 'mt-2')}>
+                    {gi > 0 && <span aria-hidden="true" className="mx-3 mb-2 h-px bg-accent/[0.1] lg:hidden" />}
                     <span
                       className={clsx(
-                        'px-1.5 text-center font-mono text-[9px] font-medium uppercase leading-[11px] tracking-[0.14em] text-muted',
+                        'px-1.5 text-center max-lg:hidden font-mono text-[9px] font-medium uppercase leading-[11px] tracking-[0.14em] text-muted',
                         owner ? 'pb-1 pt-0.5' : 'pb-1.5 pt-1',
                       )}
                     >
@@ -558,6 +836,7 @@ export function App(): JSX.Element {
                           type="button"
                           onClick={() => go(s.id)}
                           aria-current={active ? 'page' : undefined}
+                          title={t(s.title)}
                           className={clsx(
                             'focus-ring-inset relative flex w-full shrink-0 flex-col items-center px-0.5 text-center outline-none transition-colors',
                             // The owner's sixteen sections sit tighter than the cashier's six.
@@ -579,7 +858,7 @@ export function App(): JSX.Element {
                           <span
                             className={clsx(
                               // Long words hyphenate in the console's language («Автомати-зация»), never spill out.
-                              'hyphens-auto text-[10.5px] leading-[13px] [overflow-wrap:anywhere]',
+                              'hyphens-auto text-[10.5px] leading-[13px] [overflow-wrap:anywhere] max-lg:sr-only',
                               active ? 'font-semibold' : 'font-medium',
                             )}
                           >
@@ -601,7 +880,7 @@ export function App(): JSX.Element {
               >
                 {initials(staff.name)}
               </span>
-              <span className="line-clamp-2 text-center text-[10.5px] font-medium leading-[13px] text-text [overflow-wrap:anywhere]">
+              <span className="line-clamp-2 text-center text-[10.5px] font-medium leading-[13px] text-text [overflow-wrap:anywhere] max-lg:hidden">
                 {staff.name}
               </span>
             </div>
@@ -611,94 +890,154 @@ export function App(): JSX.Element {
               className="focus-ring-inset mx-2.5 mt-3 flex shrink-0 flex-col items-center gap-1.5 border-t border-accent/[0.08] px-1 pt-2.5 text-muted transition-colors hover:text-text"
             >
               <LogoutIcon size={18} />
-              <span className="text-[10.5px] font-medium leading-[13px]">{t('Выйти')}</span>
+              <span className="text-[10.5px] font-medium leading-[13px] max-lg:sr-only">{t('Выйти')}</span>
             </button>
           </aside>
 
           <div
             className={clsx(
-              'grid min-h-0 min-w-0 gap-3.5 px-6 pb-4 pt-[18px]',
-              counter ? 'grid-rows-[auto_auto_minmax(0,1fr)]' : 'grid-rows-[auto_minmax(0,1fr)]',
+              'grid min-h-0 min-w-0 gap-3.5 px-6 pb-4 pt-[18px] max-md:gap-2.5 max-md:px-4 max-md:pb-[calc(64px+env(safe-area-inset-bottom))] max-md:pt-[max(10px,env(safe-area-inset-top))] md:max-lg:px-5',
+              counter && !phone ? 'grid-rows-[auto_auto_minmax(0,1fr)]' : 'grid-rows-[auto_minmax(0,1fr)]',
             )}
           >
-            <header className="relative z-30 flex h-11 min-w-0 items-center gap-[18px]">
-              <div className="flex min-w-0 max-w-[240px] shrink flex-col gap-1.5">
-                <span className="truncate font-display text-[15px] font-medium leading-none tracking-[-0.01em] text-text">
-                  {clubName ?? 'ClubShell'}
-                </span>
-                <span className="label-sm whitespace-nowrap">
-                  {hall
-                    ? `${t(owner ? 'Владелец · {n} ПК' : 'Касса · {n} ПК', { n: hall.total })}${hall.zones > 0 ? ` · ${zonesWord(hall.zones)}` : ''}`
-                    : owner
-                      ? t('Владелец')
-                      : t('Касса')}
-                </span>
-              </div>
-              <Separator />
-              <div className="flex shrink-0 items-baseline gap-3">
-                <span className="num-dot text-[26px] leading-none tracking-[0.02em] text-text">
-                  {now.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}
-                </span>
-                <span
-                  className={clsx(
-                    'hidden whitespace-nowrap text-[13px] leading-4 text-dim',
-                    // The setup pages hold the drawer's «±» and the bell in the header too: the date needs more room.
-                    counter ? 'min-[1400px]:inline' : 'min-[1700px]:inline',
-                  )}
-                >
-                  {now.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' })}
-                </span>
-              </div>
-              <Separator />
-              <ShiftChip onClick={() => go('shift')} />
-              {!counter && (
-                // The setup pages have no strip: the drawer's «±» and the bell sit by the chip (one of each per page).
-                <div className="flex shrink-0 items-center gap-2">
-                  <CashMenu variant="compact" />
-                  <AudioUnlockChip variant="header" />
-                  <CallsBell variant="compact" />
-                </div>
-              )}
-              <div className="min-w-0 flex-1" />
-              <GlobalSearch
-                ref={search}
-                compact={!counter}
-                onTopUp={setTopUpFor}
-                onShowPc={(hit) => {
-                  if (!hit.playing) return;
-                  go('map');
-                  showPc(hit.playing.pcId);
-                }}
+            {phone ? (
+              <PhoneHeader
+                clubName={clubName}
+                time={now.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}
+                counter={counter}
+                searchOpen={searchOpen}
+                onSearch={setSearchOpen}
+                onShift={() => go('shift')}
+                search={
+                  <GlobalSearch
+                    ref={search}
+                    phone
+                    onTopUp={setTopUpFor}
+                    onShowPc={(hit) => {
+                      if (!hit.playing) return;
+                      go('map');
+                      showPc(hit.playing.pcId);
+                    }}
+                  />
+                }
               />
-              <div className="flex h-10 shrink-0 items-center gap-0.5 rounded-md border border-line bg-surface/50 p-1">
-                {LANGS.map((l) => (
-                  <button
-                    key={l}
-                    type="button"
-                    aria-pressed={l === lang}
-                    onClick={() => setLang(l)}
+            ) : (
+              <header className="relative z-30 flex h-11 min-w-0 items-center gap-[18px]">
+                <div className="flex min-w-0 max-w-[240px] shrink flex-col gap-1.5 max-lg:min-w-[96px]">
+                  <span className="truncate font-display text-[15px] font-medium leading-none tracking-[-0.01em] text-text">
+                    {clubName ?? 'ClubShell'}
+                  </span>
+                  <span className="label-sm whitespace-nowrap">
+                    {hall
+                      ? `${t(owner ? 'Владелец · {n} ПК' : 'Касса · {n} ПК', { n: hall.total })}${hall.zones > 0 ? ` · ${zonesWord(hall.zones)}` : ''}`
+                      : owner
+                        ? t('Владелец')
+                        : t('Касса')}
+                  </span>
+                </div>
+                <Separator />
+                <div className="flex shrink-0 items-baseline gap-3">
+                  <span className="num-dot text-[26px] leading-none tracking-[0.02em] text-text">
+                    {now.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                  <span
                     className={clsx(
-                      'focus-ring h-[30px] rounded-seg px-[9px] font-mono text-[10.5px] uppercase leading-none tracking-[0.08em]',
-                      l === lang
-                        ? 'bg-accent/[0.12] font-semibold text-accent'
-                        : 'font-medium text-muted hover:text-text',
+                      'hidden whitespace-nowrap text-[13px] leading-4 text-dim',
+                      // The setup pages hold the drawer's «±» and the bell in the header too: the date needs more room.
+                      counter ? 'min-[1400px]:inline' : 'min-[1700px]:inline',
                     )}
                   >
-                    {l}
-                  </button>
-                ))}
-              </div>
-            </header>
+                    {now.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' })}
+                  </span>
+                </div>
+                <Separator />
+                <ShiftChip onClick={() => go('shift')} />
+                {!counter && (
+                  // The setup pages have no strip: the drawer's «±» and the bell sit by the chip (one of each per page).
+                  <div className="flex shrink-0 items-center gap-2">
+                    <CashMenu variant="compact" />
+                    <AudioUnlockChip variant="header" />
+                    <CallsBell variant="compact" />
+                  </div>
+                )}
+                <div className="min-w-0 flex-1" />
+                <GlobalSearch
+                  ref={search}
+                  compact={!counter}
+                  onTopUp={setTopUpFor}
+                  onShowPc={(hit) => {
+                    if (!hit.playing) return;
+                    go('map');
+                    showPc(hit.playing.pcId);
+                  }}
+                />
+                {/* A tablet: the language as one button that steps RU → UZ → EN (the header has no room for three). */}
+                <button
+                  type="button"
+                  aria-label={t('Язык')}
+                  onClick={() => setLang(LANGS[(LANGS.indexOf(lang) + 1) % LANGS.length] ?? lang)}
+                  className="focus-ring flex h-10 w-11 shrink-0 items-center justify-center rounded-md border border-line bg-surface/50 font-mono text-[10.5px] font-semibold uppercase tracking-[0.08em] text-accent lg:hidden"
+                >
+                  {lang}
+                </button>
+                <div className="flex h-10 shrink-0 items-center gap-0.5 rounded-md border border-line bg-surface/50 p-1 max-lg:hidden">
+                  {LANGS.map((l) => (
+                    <button
+                      key={l}
+                      type="button"
+                      aria-pressed={l === lang}
+                      onClick={() => setLang(l)}
+                      className={clsx(
+                        'focus-ring h-[30px] rounded-seg px-[9px] font-mono text-[10.5px] uppercase leading-none tracking-[0.08em]',
+                        l === lang
+                          ? 'bg-accent/[0.12] font-semibold text-accent'
+                          : 'font-medium text-muted hover:text-text',
+                      )}
+                    >
+                      {l}
+                    </button>
+                  ))}
+                </div>
+              </header>
+            )}
 
-            {counter && <KpiStrip hall={hall} />}
+            {counter && !phone && <KpiStrip hall={hall} />}
 
-            <main className="thin-scrollbar -mx-2 -mb-2 min-h-0 overflow-y-auto px-2 pb-2">
+            <main className="thin-scrollbar -mx-2 -mb-2 min-h-0 overflow-y-auto px-2 pb-2 max-md:overscroll-contain">
+              {/* On a phone the strip scrolls away with the page: the page keeps the screen. */}
+              {counter && phone && <KpiStrip hall={hall} />}
               <Suspense fallback={null}>
                 <Page key={`${current?.id}-${lang}`} isOwner={owner} />
               </Suspense>
             </main>
           </div>
         </div>
+        {phone && (
+          <TabBar
+            sections={allowed}
+            current={current?.id}
+            moreOpen={moreOpen}
+            onGo={(id) => {
+              setMoreOpen(false);
+              go(id);
+            }}
+            onMore={() => setMoreOpen((v) => !v)}
+          />
+        )}
+        {phone && moreOpen && (
+          <MoreSheet
+            groups={GROUPS.map((g) => ({ title: g.title, items: g.items.filter((s) => !s.ownerOnly || owner) }))}
+            current={current?.id}
+            staffName={staff.name}
+            owner={owner}
+            onGo={(id) => {
+              setMoreOpen(false);
+              go(id);
+            }}
+            onClose={() => setMoreOpen(false)}
+            onSignOut={signOut}
+          />
+        )}
       </div>
       {topUpFor && <TopUpSheet payee={topUpFor} onClose={() => setTopUpFor(null)} onDone={() => void refreshTop()} />}
       <CallsRinger />

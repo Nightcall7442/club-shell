@@ -25,14 +25,17 @@ import {
   EmptyState,
   Field,
   Input,
+  NARROW_QUERY,
   Note,
   PageHeader,
   Section,
   Sum,
   Table,
+  SheetClose,
   Toggle,
   Well,
   inputCls,
+  useMedia,
 } from '@/ui';
 
 type NoteState = { text: string; tone: 'ok' | 'err' } | null;
@@ -687,6 +690,9 @@ export default function ClientsPage(): JSX.Element {
   }, []);
 
   const client = items.find((c) => c.id === selected) ?? null;
+  /** One column: the client's card opens over the list (full screen) instead of under it. */
+  const narrow = useMedia(NARROW_QUERY);
+  const cardOpen = selected === 'new' || client !== null;
   const groupOf = (id: string | null): ClientGroup | undefined => groups.find((g) => g.id === id);
   const replace = (c: Client): void => setItems((list) => list.map((x) => (x.id === c.id ? c : x)));
 
@@ -696,7 +702,7 @@ export default function ClientsPage(): JSX.Element {
         title={t('Клиенты')}
         actions={
           <>
-            <div className="relative w-72 max-w-full">
+            <div className="relative w-72 max-w-full max-md:w-full">
               <SearchIcon
                 size={16}
                 className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted"
@@ -757,7 +763,23 @@ export default function ClientsPage(): JSX.Element {
           />
         </Section>
 
-        <aside className="panel-solid min-w-0 overflow-hidden">
+        <aside
+          className={clsx(
+            'panel-solid min-w-0 overflow-hidden',
+            narrow &&
+              (cardOpen
+                ? 'anim-rise thin-scrollbar fixed inset-0 z-[45] overflow-y-auto overscroll-contain rounded-none pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)]'
+                : 'hidden'),
+          )}
+        >
+          {narrow && cardOpen && (
+            <div className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b border-accent/[0.08] bg-art/95 px-4 backdrop-blur">
+              <SheetClose onClose={() => select(null)} />
+              <span className="min-w-0 truncate font-display text-[15px] font-medium text-hi">
+                {client ? client.displayName : t('Новый клиент')}
+              </span>
+            </div>
+          )}
           {selected === 'new' ? (
             <NewClientPanel
               groups={groups}

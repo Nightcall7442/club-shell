@@ -1,5 +1,10 @@
 /** Uzbek and English lines of the console, keyed by the Russian source text (see `i18n.ts`). */
 export const UZ: Record<string, string> = {
+  // Phone layout: the compact KPI sums, the bar's cart bar, the language in «Ещё».
+  млн: 'mln',
+  млрд: 'mlrd',
+  Оплатить: 'Toʻlash',
+  Язык: 'Til',
   'Выручка за период': 'Davr uchun tushum',
   'Выручка сегодня': 'Bugungi tushum',
   Город: 'Shahar',
@@ -1553,6 +1558,11 @@ export const UZ: Record<string, string> = {
   'Ссылка не подошла ({why})': 'Havola toʻgʻri kelmadi ({why})',
 };
 export const EN: Record<string, string> = {
+  // Phone layout: the compact KPI sums, the bar's cart bar, the language in «Ещё».
+  млн: 'M',
+  млрд: 'B',
+  Оплатить: 'Pay',
+  Язык: 'Language',
   'Выручка за период': 'Revenue for the period',
   'Выручка сегодня': 'Revenue today',
   Город: 'City',

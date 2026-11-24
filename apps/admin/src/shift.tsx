@@ -400,6 +400,8 @@ export function CashMenu({ variant = 'compact' }: { variant?: 'kpi' | 'compact' 
   const club = useClub();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The menu hangs from the button's left edge when there is no room to its left (a phone's left KPI card). */
+  const [fromLeft, setFromLeft] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open && !error) return undefined;
@@ -434,7 +436,7 @@ export function CashMenu({ variant = 'compact' }: { variant?: 'kpi' | 'compact' 
   );
   const kpi = variant === 'kpi';
   // Under the button, kept inside the screen: the KPI card's popover opens to the left of its right edge.
-  const below = kpi ? 'right-0 top-[calc(100%+8px)]' : 'left-0 top-[calc(100%+8px)]';
+  const below = kpi && !fromLeft ? 'right-0 top-[calc(100%+8px)]' : 'left-0 top-[calc(100%+8px)]';
   return (
     <div ref={box} className="relative">
       <button
@@ -443,8 +445,10 @@ export function CashMenu({ variant = 'compact' }: { variant?: 'kpi' | 'compact' 
         aria-expanded={open}
         aria-label={t('Внесение и изъятие')}
         title={t('Внесение и изъятие')}
-        onClick={() => {
+        onClick={(e) => {
           setError(null);
+          // 16 rem of menu (w-52 = 13 rem, the note is w-64): from the right edge only when that stays on screen.
+          setFromLeft(e.currentTarget.getBoundingClientRect().right < 16 * 16 + 8);
           setOpen((v) => !v);
         }}
         onKeyDown={(e) => {

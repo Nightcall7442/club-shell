@@ -419,8 +419,10 @@ export const GlobalSearch = forwardRef<
     onShowPc: (hit: ClientHit) => void;
     /** 260 px at any width (the header holds more tools on the owner's setup pages); else 336 px from 1400 px. */
     compact?: boolean;
+    /** A phone: the whole header row, no «/» hint (no keyboard to press it on). */
+    phone?: boolean;
   }
->(function GlobalSearch({ onTopUp, onShowPc, compact }, ref) {
+>(function GlobalSearch({ onTopUp, onShowPc, compact, phone }, ref) {
   const id = useId();
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
@@ -442,54 +444,65 @@ export const GlobalSearch = forwardRef<
   const enter = useHeldEnter(lookup, (fresh) => act(fresh[0], false));
 
   return (
-    <div className={clsx('relative w-[260px] min-w-[10rem] shrink', !compact && 'min-[1400px]:w-[336px]')}>
-      <SearchIcon
-        size={16}
-        strokeWidth={1.7}
-        className="pointer-events-none absolute left-3.5 top-1/2 z-10 -translate-y-1/2 text-muted"
-      />
-      <input
-        ref={ref}
-        type="search"
-        role="combobox"
-        aria-label={t('Поиск клиента')}
-        aria-expanded={open}
-        aria-controls={`${id}-list`}
-        aria-activedescendant={open && active >= 0 ? `${id}-list-${active}` : undefined}
-        aria-autocomplete="list"
-        autoComplete="off"
-        className="glass-field focus-ring h-10 w-full pl-10 pr-10 text-[13px] text-text placeholder:text-muted hover:border-accent/[0.26] focus-visible:border-transparent [&::-webkit-search-cancel-button]:hidden"
-        value={q}
-        placeholder={t('Клиент: имя, телефон, карта')}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setOpen(false)}
-        onChange={(e) => {
-          setQ(e.target.value);
-          setOpen(true);
-        }}
-        onKeyDown={(e) => {
-          if (move(e)) {
-            e.preventDefault();
+    <div
+      className={clsx(
+        // On a phone the list hangs from the whole header row (its positioned parent), not from the field.
+        'min-w-[10rem] shrink',
+        phone ? 'w-full' : 'relative w-[260px] max-lg:w-[200px]',
+        !compact && !phone && 'min-[1400px]:w-[336px]',
+      )}
+    >
+      <div className="relative">
+        <SearchIcon
+          size={16}
+          strokeWidth={1.7}
+          className="pointer-events-none absolute left-3.5 top-1/2 z-10 -translate-y-1/2 text-muted"
+        />
+        <input
+          ref={ref}
+          type="search"
+          role="combobox"
+          aria-label={t('Поиск клиента')}
+          aria-expanded={open}
+          aria-controls={`${id}-list`}
+          aria-activedescendant={open && active >= 0 ? `${id}-list-${active}` : undefined}
+          aria-autocomplete="list"
+          autoComplete="off"
+          className="glass-field focus-ring h-10 w-full pl-10 pr-10 text-[13px] text-text placeholder:text-muted hover:border-accent/[0.26] focus-visible:border-transparent [&::-webkit-search-cancel-button]:hidden"
+          value={q}
+          placeholder={t('Клиент: имя, телефон, карта')}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setOpen(false)}
+          onChange={(e) => {
+            setQ(e.target.value);
             setOpen(true);
-          } else if (e.key === 'Enter') {
-            e.preventDefault();
-            if (e.repeat) return;
-            if (onNew) {
-              openNewClient();
+          }}
+          onKeyDown={(e) => {
+            if (move(e)) {
+              e.preventDefault();
+              setOpen(true);
+            } else if (e.key === 'Enter') {
+              e.preventDefault();
+              if (e.repeat) return;
+              if (onNew) {
+                openNewClient();
+                done();
+                return;
+              }
+              const showPc = e.shiftKey;
+              enter(() => act(items[active], showPc));
+            } else if (e.key === 'Escape') {
+              e.stopPropagation();
               done();
-              return;
             }
-            const showPc = e.shiftKey;
-            enter(() => act(items[active], showPc));
-          } else if (e.key === 'Escape') {
-            e.stopPropagation();
-            done();
-          }
-        }}
-      />
-      <Kbd className="pointer-events-none absolute right-2 top-1/2 z-10 h-6 w-6 -translate-y-1/2 justify-center rounded px-0 text-[11px] text-text">
-        /
-      </Kbd>
+          }}
+        />
+        {!phone && (
+          <Kbd className="pointer-events-none absolute right-2 top-1/2 z-10 h-6 w-6 -translate-y-1/2 justify-center rounded px-0 text-[11px] text-text">
+            /
+          </Kbd>
+        )}
+      </div>
       {open && (
         <HitList
           id={`${id}-list`}
@@ -498,7 +511,7 @@ export const GlobalSearch = forwardRef<
           loading={loading}
           error={error}
           query={q}
-          wide
+          wide={!phone}
           onHover={hover}
           onPick={(hit) => {
             onTopUp(hit);
