@@ -257,6 +257,24 @@ export interface ScreensaverItem {
 }
 
 /**
+ * The club logo on one player screen (D-105, beyond the contract): shown or not, where, how large and whether the club
+ * name stands next to it. The PC label (D-95) moves with it.
+ */
+export interface ShellLogo {
+  /** The logo picture is shown (the accent diamond when the club has none). */
+  show: boolean;
+  /**
+   * `topLeft` (the default), `topCenter`, `topRight`, `center` (above the sign-in card or the idle clock), `bottomLeft`
+   * or `bottomRight` (idle only); the top bar always keeps it on the left.
+   */
+  position: string;
+  /** `s`, `m` (today's size, the default), `l` or `xl` (not in the top bar). */
+  size: string;
+  /** The club name is shown next to the logo. */
+  name: boolean;
+}
+
+/**
  * How the PC's own label shows on the player screen (D-95, beyond the contract), set by the owner under «Интерфейс и
  * логотипы»: what it says, whether it is the large number readable across the hall, and on which screens.
  */
@@ -286,6 +304,69 @@ export interface ShellScreensaver {
   items: ScreensaverItem[];
 }
 
+/** An owner's text in each player language; empty or null — the shell's bundled line for that language. */
+export interface ShellText {
+  /** Russian. */
+  ru?: string | null;
+  /** Uzbek. */
+  uz?: string | null;
+  /** English. */
+  en?: string | null;
+}
+
+/**
+ * The owner's layout of one player screen (D-105, beyond the contract): the logo, the picture behind it and which of
+ * the screen's own elements show. Flags a screen does not have are left at their defaults.
+ */
+export interface ShellScreenLook {
+  /** The club logo on this screen. */
+  logo: ShellLogo;
+  /**
+   * The picture behind this screen, already resolved by the server (the screen's own, else the club wallpaper on the
+   * lock screen and the desktop; the idle screen has none unless set); null — the theme's own background, as without
+   * one.
+   */
+  wallpaperUrl?: string | null;
+  /** Dimming of the picture, percent 0–80; null — the screen's own default. */
+  dim?: number | null;
+  /** Blur the picture; null — the theme's own. */
+  blur?: boolean | null;
+  /** The clock (lock and idle). */
+  clock: boolean;
+  /** The language switcher (lock). */
+  language: boolean;
+  /** The price list (idle). */
+  prices: boolean;
+  /** The «Это место свободно» badge (idle). */
+  freeBadge: boolean;
+  /** Lock: the sign-in card's title. */
+  title?: ShellText | null;
+  /** Lock: the line under the title. */
+  subtitle?: ShellText | null;
+  /** Idle: the call to action («Коснитесь, чтобы начать»). */
+  cta?: ShellText | null;
+}
+
+/**
+ * The player-screen designer of «Интерфейс и логотипы» (D-105, beyond the contract): the layout of the lock screen, the
+ * idle screen and the desktop, the headings font and the plates' tint.
+ */
+export interface ShellLook {
+  /** The lock (sign-in) screen. */
+  lock: ShellScreenLook;
+  /** The idle screen (attract screen of a free PC). */
+  idle: ShellScreenLook;
+  /** The signed-in desktop: the top bar and the background of every section. */
+  desktop: ShellScreenLook;
+  /** Headings font, one of the bundled ones: `unbounded` (the default), `inter` or `mono`. */
+  font: string;
+  /**
+   * `#RRGGBB` tint of the plates and the veil over the pictures on the lock and idle screens; null — the theme's
+   * background. The shell darkens or lightens it until the theme's text reads on it (4.5:1).
+   */
+  tint?: string | null;
+}
+
 /**
  * The club's own look on the player screen (`shell.json → club`), set by the owner in the admin console and pushed with
  * the server config. Every field is optional: without it the Shell keeps its bundled defaults.
@@ -297,7 +378,10 @@ export interface ShellClub {
   accent?: string | null;
   /** Logo image URL. */
   logoUrl?: string | null;
-  /** Wallpaper behind the lock and idle screens. */
+  /**
+   * Wallpaper behind the lock and idle screens. With `look` the screens take theirs from it; this one then also tells
+   * the shell the server's address for the look's own server pictures (the Agent puts it in front here).
+   */
   wallpaperUrl?: string | null;
   /** Active banners, in display order. */
   banners?: ClubBanner[] | null;
@@ -309,6 +393,8 @@ export interface ShellClub {
   selfSignup?: boolean | null;
   /** How the PC's name or number shows; null — the name and zone on every screen, as before. */
   pcLabel?: ShellPcLabel | null;
+  /** The owner's layout of the player screens (D-105); null — today's look on every screen. */
+  look?: ShellLook | null;
 }
 
 /** Server override pushed into `shell.json`. */

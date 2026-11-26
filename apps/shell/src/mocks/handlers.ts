@@ -101,6 +101,7 @@ import type {
   PcMouseSettings,
   ShellConfig,
 } from '@/lib/tauri';
+import { lookFromBranding } from '@/lib/look';
 import { builtinThemes, DEFAULT_THEME } from '@/theme/themes';
 import {
   ACHIEVEMENTS,
@@ -337,7 +338,7 @@ function freshState(): MockState {
     apps: [],
     settings: {
       ...clone(SETTINGS),
-      club: withPcLabel(withSignup(withScreensaver(demoClubRequested() ? clone(DEMO_CLUB) : null))),
+      club: withLook(withPcLabel(withSignup(withScreensaver(demoClubRequested() ? clone(DEMO_CLUB) : null)))),
     },
     gameSettings: clone(PLAYER_GAME_SETTINGS),
     policy: clone(POLICY),
@@ -796,6 +797,65 @@ function withPcLabel(club: ShellClub | null): ShellClub | null {
       topBar: !flags.includes('-topBar'),
     },
   };
+}
+
+/**
+ * Ready-made layouts for `?look=<preset>` (D-105), in the console's storage shape (`settings.branding`).
+ * `poster`: the logo large in the middle, no clock on the lock screen, the owner's texts; `minimal`: a small logo
+ * top right, no name, no price list or badge on the idle screen, Inter headings and a blue-grey tint.
+ */
+function lookPresets(): Record<string, Record<string, unknown>> {
+  return {
+    poster: {
+      font: 'unbounded',
+      lock: {
+        logo: { position: 'center', size: 'xl', name: true },
+        clock: false,
+        dim: 45,
+        title: { ru: 'Вход в зал', uz: 'Zalga kirish', en: 'Welcome to the arena' },
+        subtitle: { ru: 'Карта, QR или логин', en: 'Card, QR or your login' },
+      },
+      idle: { logo: { position: 'center', size: 'xl' }, cta: { ru: 'Нажмите любую клавишу', en: 'Press any key' } },
+      desktop: { logo: { size: 'l' } },
+    },
+    minimal: {
+      font: 'inter',
+      tint: '#16202C',
+      lock: { logo: { position: 'topRight', size: 's', name: false }, language: false, blur: true },
+      idle: {
+        logo: { position: 'bottomLeft', size: 'l', name: true },
+        prices: false,
+        freeBadge: false,
+        wallpaperUrl: '/mock-art/cs2-hero.jpg',
+        dim: 30,
+      },
+      desktop: { logo: { size: 's', name: false } },
+    },
+  };
+}
+
+/**
+ * `?look=<preset>` or `?look=<json>` in the URL: the owner's player-screen designer (D-105), e.g. `?look=poster`,
+ * `?look=minimal` or `?look={"lock":{"logo":{"position":"topCenter","size":"l"}}}` (the console's storage shape, turned
+ * into `shell.club.look` as the server does). `?logo=demo` adds a logo picture.
+ */
+function withLook(club: ShellClub | null): ShellClub | null {
+  if (typeof window === 'undefined') return club;
+  const params = new URLSearchParams(window.location.search);
+  let next = club;
+  if (params.get('logo') === 'demo') next = { ...(next ?? {}), logoUrl: '/mock-art/club-logo.svg' };
+  const raw = params.get('look');
+  if (raw === null) return next;
+  let branding: Record<string, unknown> | undefined = lookPresets()[raw];
+  if (!branding) {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      branding = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
+    } catch {
+      branding = {};
+    }
+  }
+  return { ...(next ?? {}), look: lookFromBranding(branding, next?.wallpaperUrl ?? null) };
 }
 
 /** `?screensaver=<sec>` in the URL: the owner's screensaver (D-87) after that many seconds; `0` — turned off. */

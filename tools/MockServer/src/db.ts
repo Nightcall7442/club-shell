@@ -6,6 +6,7 @@
 import { createCipheriv, createHash, createHmac, hkdfSync, randomBytes, randomInt, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { lookForShell } from './look.js';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import {
   ERROR_CODE_HTTP_STATUS,
@@ -849,7 +850,13 @@ export function viewSession(s: SessionRecord, nowMs = Date.now()): Session {
 /** The slice of `db.club` the kiosk sees, read without importing the club module (it imports this one). */
 interface ClubForShell {
   features?: Record<string, boolean>;
-  branding?: { clubName: string; accent: string; logoUrl: string | null; wallpaperUrl: string | null; theme?: string };
+  branding?: {
+    clubName: string;
+    accent: string;
+    logoUrl: string | null;
+    wallpaperUrl: string | null;
+    theme?: string;
+  } & Record<string, unknown>;
   banners?: { id: string; title: string; imageUrl: string; from: string | null; to: string | null; enabled: boolean }[];
   rulesText?: { ru: string; uz: string; en: string };
   screensaver?: {
@@ -886,6 +893,8 @@ function clubForShell(): ShellClub | null {
     accent: c.branding.accent || null,
     logoUrl: c.branding.logoUrl,
     wallpaperUrl: c.branding.wallpaperUrl,
+    // The owner's player-screen designer (D-105); none — today's screens.
+    look: lookForShell(c.branding),
     banners: live.map((b) => ({ id: b.id, title: b.title, imageUrl: b.imageUrl })),
     rules: c.rulesText ?? null,
     selfSignup: c.limits?.selfSignup === true,

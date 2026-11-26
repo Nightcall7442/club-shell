@@ -39,9 +39,9 @@ import { useWalletStore } from '@/store/wallet';
 import { AdsCarousel } from '@/screens/Idle/AdsCarousel';
 import { describeWindow } from '@/screens/Idle/PriceList';
 import { tariffAvailableNow } from '@/lib/tariffs';
-import { ClubMark } from '@/components/brand/ClubMark';
-import { PcLabel } from '@/components/brand/PcLabel';
-import { useClub } from '@/hooks/useClub';
+import { ClubBrand } from '@/components/brand/ClubBrand';
+import { useScreenLook, useTintStyle } from '@/hooks/useClub';
+import { veil } from '@/lib/look';
 import { CardLogin } from './CardLogin';
 import { GuestCodeForm } from './GuestCodeForm';
 import { LoginForm, loginErrorMessage } from './LoginForm';
@@ -790,6 +790,10 @@ const BellIcon = (
  * The only line about this PC's connection on the sign-in screen, and only while it is down — a player about to sign
  * in needs to know why it might not work; when all is well there is nothing to say.
  */
+/** The lock screen's own veil over the club art, as before the designer (D-105 dims it the owner's way). */
+const ART_VEIL =
+  'linear-gradient(180deg, rgb(var(--c-bg) / 0.8) 0%, rgb(var(--c-bg) / 0.35) 28%, rgb(var(--c-bg) / 0.4) 62%, rgb(var(--c-bg) / 0.92) 100%)';
+
 function LinkWarning(): JSX.Element | null {
   const { t } = useTranslation();
   const agentConnected = useNotificationsStore((s) => s.agentConnected);
@@ -1025,7 +1029,9 @@ export default function LockScreen(): JSX.Element {
   const relogin = useAuthStore((s) => s.relogin);
   const logout = useAuthStore((s) => s.logout);
   const defaultRoute = useSettingsStore((s) => s.shellConfig?.ui.defaultRoute ?? '/home');
-  const club = useClub();
+  const look = useScreenLook('lock');
+  const tint = useTintStyle();
+  const brandAt = look.logo.position;
   const callAdminEnabled = useSettingsStore((s) => s.features.callAdmin);
   const lockScreenPower = useSettingsStore(selectFeature('lockScreenPower'));
   // Off until the server can confirm a scanned code (D-18): a QR that can never sign in only costs the player time.
@@ -1181,32 +1187,56 @@ export default function LockScreen(): JSX.Element {
   const duration = animations ? 0.3 : 0;
 
   return (
-    <div className="relative h-full w-full overflow-hidden">
+    <div className="relative h-full w-full overflow-hidden" style={tint} data-testid="lock-screen">
       {/* The owner's wallpaper from the admin console, when set, wins over the rotating art. */}
-      {!club.wallpaperUrl && art.length > 0 ? (
+      {!look.wallpaperUrl && art.length > 0 ? (
         <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-0">
           <AdsCarousel items={art} showCounter={false} />
-          <div className="absolute inset-0 bg-[linear-gradient(180deg,rgb(var(--c-bg)/0.8)_0%,rgb(var(--c-bg)/0.35)_28%,rgb(var(--c-bg)/0.4)_62%,rgb(var(--c-bg)/0.92)_100%)]" />
+          <div
+            className="absolute inset-0"
+            style={{
+              background: veil(look.dim, ART_VEIL),
+              ...(look.blur ? { backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' } : {}),
+            }}
+          />
         </div>
       ) : (
-        <Background dim={0.6} />
+        <Background dim={0.6} screen="lock" />
       )}
       <div className="relative z-10 flex h-full w-full flex-col gap-[var(--gap)] px-[var(--gutter)] py-[var(--gap)]">
-        <header className="flex items-start justify-between gap-[var(--gap)]">
-          <div className="min-w-0">
-            <div className="flex min-w-0 items-center gap-3">
-              <ClubMark className="h-7 w-7" />
-              <p className="truncate font-display text-2xl font-light tracking-tight text-text">{club.name}</p>
+        {/* The club's mark where the owner put it (D-105); the language and the clock take the other side. */}
+        <header
+          className={clsx(
+            'items-start gap-[var(--gap)]',
+            brandAt === 'topCenter' ? 'grid grid-cols-[1fr_auto_1fr]' : 'flex justify-between',
+            brandAt === 'topRight' && 'flex-row-reverse',
+            // With the mark above the card, the language and clock float in the corner: the card keeps the height.
+            brandAt === 'center' && 'absolute inset-x-[var(--gutter)] top-[var(--gap)] z-10',
+          )}
+        >
+          {brandAt === 'topCenter' && <span aria-hidden="true" />}
+          {brandAt !== 'center' ? <ClubBrand screen="lock" logo={look.logo} /> : <span aria-hidden="true" />}
+          {(look.language || look.clock) && (
+            <div
+              className={clsx(
+                'flex items-center gap-[var(--gap)]',
+                brandAt === 'topCenter' ? 'justify-self-end' : brandAt !== 'topRight' && 'ml-auto',
+              )}
+            >
+              {look.language && <LanguageSwitcher />}
+              {look.clock && <Clock className="text-4xl" />}
             </div>
-            <PcLabel place="lock" className="mt-2" />
-          </div>
-          <div className="flex items-center gap-[var(--gap)]">
-            <LanguageSwitcher />
-            <Clock className="text-4xl" />
-          </div>
+          )}
         </header>
 
-        <main className="flex min-h-0 flex-1 items-center justify-center pb-[var(--vk-h,0px)]">
+        <main
+          className={clsx(
+            'flex min-h-0 flex-1 items-center justify-center pb-[var(--vk-h,0px)]',
+            brandAt === 'center' && 'flex-col gap-[clamp(0.75rem,2.5vh,2rem)]',
+          )}
+        >
+          {/* Above the card, never over it: the card shrinks (and scrolls) before the two overlap. */}
+          {brandAt === 'center' && <ClubBrand screen="lock" logo={look.logo} className="max-w-full shrink-0" />}
           <motion.div
             ref={card}
             initial={{ opacity: 0, y: 24 }}
@@ -1214,7 +1244,7 @@ export default function LockScreen(): JSX.Element {
             transition={{ duration, ease: 'easeOut' }}
             // Frosted over the club's art rather than a solid slab cut out of it; the accent line on top marks the
             // one panel to look at.
-            className="glass-strong themed-scrollbar relative max-h-full w-[min(92vw,34rem)] overflow-y-auto overflow-x-hidden rounded-xl bg-surface/80 p-[clamp(1.25rem,3vh,2rem)] backdrop-blur-xl before:pointer-events-none before:absolute before:inset-x-8 before:top-0 before:h-px before:bg-[linear-gradient(90deg,transparent,rgb(var(--c-accent)/0.85),transparent)]"
+            className="glass-strong themed-scrollbar relative max-h-full min-h-0 w-[min(92vw,34rem)] overflow-y-auto overflow-x-hidden rounded-xl bg-surface/80 p-[clamp(1.25rem,3vh,2rem)] backdrop-blur-xl before:pointer-events-none before:absolute before:inset-x-8 before:top-0 before:h-px before:bg-[linear-gradient(90deg,transparent,rgb(var(--c-accent)/0.85),transparent)]"
           >
             {!ready ? (
               <div className="flex justify-center py-16">
@@ -1242,9 +1272,11 @@ export default function LockScreen(): JSX.Element {
                 {/* Spacing follows the screen height: at 1366×768 the QR card has to fit without a scrollbar. */}
                 <div className="mb-[clamp(0.875rem,2.2vh,1.5rem)] text-center">
                   <h1 className="font-display text-3xl font-light leading-tight tracking-tight text-text">
-                    {t('lock.title')}
+                    {look.text(look.title, t('lock.title'))}
                   </h1>
-                  <p className="mt-1 text-balance text-base text-muted">{t('lock.subtitle')}</p>
+                  <p className="mt-1 text-balance text-base text-muted">
+                    {look.text(look.subtitle, t('lock.subtitle'))}
+                  </p>
                 </div>
                 <ExpiredNote />
                 <ReloginNote />
