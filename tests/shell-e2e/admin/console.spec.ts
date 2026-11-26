@@ -871,6 +871,94 @@ test('the owner uploads the club logo and picks the PCs theme under «Интер
   }
 });
 
+test('the owner lays out the player screens in the designer, sees them in the preview and the PCs get the look (D-104)', async ({
+  page,
+  request,
+}) => {
+  const owner = await tokenFor(request, OWNER_PIN);
+  const before = (await (await request.get(`${API}/admin/club`, { headers: auth(owner) })).json()) as {
+    branding: Record<string, unknown>;
+    features: Record<string, unknown>;
+  };
+  try {
+    await signIn(page, OWNER_PIN);
+    await nav(page).getByText('Интерфейс и логотипы', { exact: true }).click();
+    const preview = page.getByRole('img', { name: /Предпросмотр/ });
+
+    // Lock screen: the logo in the middle, larger, no clock, the owner's title.
+    await page.getByRole('tab', { name: 'Экран входа' }).click();
+    await page.getByRole('radio', { name: 'В центре' }).click();
+    await page.getByRole('group', { name: 'Размер логотипа' }).getByRole('button', { name: 'XL' }).click();
+    await page.getByRole('switch', { name: 'Часы', exact: true }).click();
+    await page.getByRole('textbox', { name: /^Заголовок/ }).fill('Вход в зал');
+    await expect(preview.getByTestId('preview-title')).toHaveText('Вход в зал');
+    await expect(preview.getByTestId('preview-brand')).toHaveAttribute('data-position', 'center');
+
+    // Idle screen: the bottom left only frees up once the prices are off.
+    await page.getByRole('tab', { name: 'Заставка' }).click();
+    await expect(page.getByRole('radio', { name: 'Слева внизу' })).toBeDisabled();
+    await page.getByRole('switch', { name: 'Тарифы', exact: true }).click();
+    await page.getByRole('radio', { name: 'Слева внизу' }).click();
+    await page.getByRole('textbox', { name: /^Призыв/ }).fill('Нажмите любую клавишу');
+    await expect(preview.getByTestId('preview-cta')).toContainText('Нажмите любую клавишу');
+    // The English line stays the shell's own until the owner writes one.
+    await page.getByRole('group', { name: 'Язык текста' }).getByRole('button', { name: 'EN' }).click();
+    await expect(preview.getByTestId('preview-cta')).toContainText('Touch to start');
+
+    // A tint the theme's text cannot read on is warned about and shown as the PCs will show it.
+    await page.getByLabel('Код тона').fill('#C8D2DC');
+    await expect(page.getByText(/На этом тоне текст темы не читается/)).toBeVisible();
+    await page.getByRole('radio', { name: 'JetBrains Mono' }).click();
+
+    await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Сохранено' })).toBeVisible();
+
+    const club = (await (await request.get(`${API}/admin/club`, { headers: auth(owner) })).json()) as {
+      branding: {
+        font: string;
+        tint: string;
+        lock: { logo: { position: string; size: string }; clock: boolean; title: { ru: string } };
+        idle: { logo: { position: string }; prices: boolean; cta: { ru: string } };
+      };
+    };
+    expect(club.branding.font).toBe('mono');
+    expect(club.branding.tint).toBe('#C8D2DC');
+    expect(club.branding.lock).toMatchObject({
+      logo: { position: 'center', size: 'xl' },
+      clock: false,
+      title: { ru: 'Вход в зал' },
+    });
+    expect(club.branding.idle).toMatchObject({
+      logo: { position: 'bottomLeft' },
+      prices: false,
+      cta: { ru: 'Нажмите любую клавишу' },
+    });
+
+    const pc = await registerAgent(request, 'look');
+    const config = (await (await agentCall(request, pc, 'GET', `/agents/${pc.pcId}/config`)).json()) as {
+      shell: { club: { look: { font: string; lock: { logo: { position: string }; clock: boolean } } } };
+    };
+    expect(config.shell.club.look.font).toBe('mono');
+    expect(config.shell.club.look.lock.logo.position).toBe('center');
+    expect(config.shell.club.look.lock.clock).toBe(false);
+
+    // A position the screen cannot take is refused with its field.
+    const bad = await request.patch(`${API}/admin/club`, {
+      headers: auth(owner),
+      data: { branding: { ...club.branding, lock: { logo: { position: 'bottomLeft' } } } },
+    });
+    expect(bad.status()).toBe(400);
+    expect(((await bad.json()) as { error: { details: { field: string } } }).error.details.field).toBe(
+      'branding.lock.logo.position',
+    );
+  } finally {
+    await request.patch(`${API}/admin/club`, {
+      headers: auth(owner),
+      data: { branding: before.branding, features: before.features },
+    });
+  }
+});
+
 test('cashier control flags a cash shortfall and quick refunds, and only the owner sees it', async ({
   page,
   request,

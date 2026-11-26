@@ -7,6 +7,7 @@
 import type { Theme, ThemeColors } from '@clubshell/contracts';
 import { api } from '@/lib/tauri';
 import { hexToRgb, isLight, onColor, shade, solidFill } from './colors';
+import { displayFontStack } from '@/lib/look';
 
 export { contrastRatio, hexToRgb, isLight, luminance, onColor, shade, solidFill } from './colors';
 
@@ -147,6 +148,22 @@ export function setAccentOverride(hex: string | null | undefined): void {
   accentOverride = next;
   if (current) {
     applyTheme(current);
+  }
+}
+
+/**
+ * The owner's headings font (D-104, `shell.club.look.font`): one of the bundled display fonts on `--font-display`;
+ * `null` — the stylesheet's own (Unbounded).
+ */
+export function setDisplayFont(font: string | null | undefined): void {
+  if (typeof document === 'undefined') {
+    return;
+  }
+  const root = document.documentElement;
+  if (!font || font === 'unbounded') {
+    root.style.removeProperty('--font-display');
+  } else {
+    root.style.setProperty('--font-display', displayFontStack(font));
   }
 }
 

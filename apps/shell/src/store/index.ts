@@ -9,7 +9,7 @@ import i18n, { initI18n } from '@/i18n';
 import { log } from '@/lib/logger';
 import { clearQuoteCache } from '@/lib/quotes';
 import { api, events, isTauri } from '@/lib/tauri';
-import { setAccentOverride } from '@/theme/themes';
+import { setAccentOverride, setDisplayFont } from '@/theme/themes';
 import { useAuthStore } from './auth';
 import { useChatStore } from './chat';
 import { isLaunchCancelled, useGamesStore } from './games';
@@ -212,6 +212,8 @@ function wireListeners(): void {
     ),
     // The owner's accent from the admin console, over whichever theme is active.
     useSettingsStore.subscribe((s) => s.settings.club?.accent ?? null, setAccentOverride, { fireImmediately: true }),
+    // The owner's headings font (D-104), one of the bundled ones.
+    useSettingsStore.subscribe((s) => s.settings.club?.look?.font ?? null, setDisplayFont, { fireImmediately: true }),
     useSettingsStore.subscribe(
       (s) => s.settings.locale,
       (locale) => {

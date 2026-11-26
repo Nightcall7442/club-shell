@@ -9,8 +9,21 @@ import { t } from '@/i18n';
 import { Chip } from '@/ui';
 
 /** The column every owner page sits in: 1280 wide at most, its blocks 20 apart. */
-export function OwnerPage({ children, className }: { children: ReactNode; className?: string }): JSX.Element {
-  return <div className={clsx('flex min-w-0 max-w-[1280px] flex-col gap-5', className)}>{children}</div>;
+export function OwnerPage({
+  children,
+  className,
+  wide = false,
+}: {
+  children: ReactNode;
+  className?: string;
+  /** A page with a large preview beside its form (the player-screen designer): up to 1600 px. */
+  wide?: boolean;
+}): JSX.Element {
+  return (
+    <div className={clsx('flex min-w-0 flex-col gap-5', wide ? 'max-w-[1600px]' : 'max-w-[1280px]', className)}>
+      {children}
+    </div>
+  );
 }
 
 /**

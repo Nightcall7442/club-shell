@@ -50,6 +50,7 @@ import {
   type ProductRecord,
   type UserRecord,
 } from '../db.js';
+import { validateLook } from '../look.js';
 import { PRODUCT_CATEGORIES, liveProducts, productView, voidOf } from './bar.js';
 import { gamesVolumeOf, hardwareOf } from '../devices.js';
 import { trailerOf, trailerRoutes } from '../trailers.js';
@@ -593,6 +594,8 @@ export function clubRoutes(app: FastifyInstance): void {
           throw errors.validation(`limits.${name}`, 'format');
       }
     }
+    // The player-screen designer (D-104), refused field by field as by the server.
+    if ('branding' in b) validateLook(b['branding']);
     if ('topUpPromo' in b) c.topUpPromo = parseTopUpPromo(b['topUpPromo']);
     if ('screensaver' in b) c.screensaver = parseScreensaver(b['screensaver']);
     const selfSignupBefore = c.limits.selfSignup === true;

@@ -35,7 +35,8 @@ import { useNotificationsStore } from '@/store/notifications';
 import { selectFeatures, useSettingsStore } from '@/store/settings';
 import { useWalletStore } from '@/store/wallet';
 import { ClubMark } from '@/components/brand/ClubMark';
-import { useClub } from '@/hooks/useClub';
+import { useClub, useScreenLook } from '@/hooks/useClub';
+import { logoBox, nameClass } from '@/lib/look';
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Icons
@@ -313,6 +314,7 @@ function Prompt({ glyph, label, round = true }: { glyph: string; label: string; 
 export function TopBar(): JSX.Element {
   const { t } = useTranslation();
   const club = useClub();
+  const look = useScreenLook('desktop');
   const navigate = useNavigate();
   const features = useSettingsStore(selectFeatures);
   const showClock = useSettingsStore((s) => s.shellConfig?.ui.showClock ?? true);
@@ -336,11 +338,26 @@ export function TopBar(): JSX.Element {
   return (
     <div className="grid h-full w-full grid-cols-[1fr_auto_1fr] items-center gap-[var(--gap)] px-[var(--gutter)]">
       {/* Club mark + PC */}
-      <div className="flex min-w-0 items-center gap-3">
-        <ClubMark className="h-6 w-6" />
+      {/* The owner may hide the logo or the name, or size the logo (D-104); the PC line stays. */}
+      <div className="flex min-w-0 items-center gap-3" data-testid="topbar-brand" data-size={look.logo.size}>
+        {look.logo.show &&
+          (look.logo.size === 'm' ? (
+            <ClubMark className="h-6 w-6" />
+          ) : (
+            <ClubMark size={logoBox('desktop', look.logo.size)} />
+          ))}
         <div className="min-w-0 leading-tight">
-          <div className="truncate font-display text-sm font-normal tracking-tight text-text">{club.name}</div>
-          <PcBadge className="mt-0.5" />
+          {look.logo.name && (
+            <div
+              className={clsx(
+                'truncate font-display font-normal tracking-tight text-text',
+                nameClass('desktop', look.logo.size),
+              )}
+            >
+              {club.name}
+            </div>
+          )}
+          <PcBadge className={clsx(look.logo.name && 'mt-0.5')} />
         </div>
       </div>
 

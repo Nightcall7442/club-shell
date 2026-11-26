@@ -1080,6 +1080,38 @@ export interface PcLabelSettings {
   topBar: boolean;
 }
 
+/** Where the club logo stands on a player screen (D-104); each screen allows its own (see `screenDesigner.tsx`). */
+export type LogoPosition = 'topLeft' | 'topCenter' | 'topRight' | 'center' | 'bottomLeft' | 'bottomRight';
+export type LogoSize = 's' | 'm' | 'l' | 'xl';
+
+/** An owner's line per player language; empty — the shell's own line. */
+export interface LookText {
+  ru?: string;
+  uz?: string;
+  en?: string;
+}
+
+/**
+ * `branding.lock` / `.idle` / `.desktop` (D-104): the player-screen designer. Every field optional, absent — today's
+ * look; the flags a screen does not have are ignored.
+ */
+export interface ScreenLookSettings {
+  logo?: { show?: boolean; position?: LogoPosition; size?: LogoSize; name?: boolean };
+  /** This screen's own picture; absent — the club wallpaper (lock, desktop) or the screensaver slides (idle). */
+  wallpaperUrl?: string | null;
+  /** Dimming 0–80 %; absent — the screen's own. */
+  dim?: number | null;
+  /** Blur the picture; absent — the theme's. */
+  blur?: boolean | null;
+  clock?: boolean;
+  language?: boolean;
+  prices?: boolean;
+  freeBadge?: boolean;
+  title?: LookText;
+  subtitle?: LookText;
+  cta?: LookText;
+}
+
 export interface ClubSettings {
   branding: {
     clubName: string;
@@ -1090,6 +1122,14 @@ export interface ClubSettings {
     theme?: 'default' | 'light' | 'neon';
     /** How the PC's name or number shows on the player screen (D-95); absent — the name and zone everywhere. */
     pcLabel?: PcLabelSettings;
+    /** The player-screen designer (D-104): each screen's layout; absent — today's. */
+    lock?: ScreenLookSettings;
+    idle?: ScreenLookSettings;
+    desktop?: ScreenLookSettings;
+    /** Headings font on the PCs, one of the bundled ones; absent — Unbounded. */
+    font?: 'unbounded' | 'inter' | 'mono';
+    /** `#RRGGBB` tint of the plates on the lock and idle screens; absent — the theme's background. */
+    tint?: string | null;
   };
   features: ShellFeatures;
   zones: Zone[];
