@@ -1551,6 +1551,32 @@ export const UZ: Record<string, string> = {
   'файла нет': 'fayl yoʻq',
   'не скачалась': 'yuklab boʻlmadi',
   'Ссылка не подошла ({why})': 'Havola toʻgʻri kelmadi ({why})',
+  'Скрыть пароль': 'Parolni yashirish',
+  'Показать пароль': 'Parolni koʻrsatish',
+  Показать: 'Koʻrsatish',
+  Сгенерировать: 'Yaratish',
+  'Пароль клиента — сообщите его, он показывается один раз':
+    'Mijoz paroli — unga ayting, u faqat bir marta koʻrsatiladi',
+  'Пароль изменён': 'Parol oʻzgartirildi',
+  'Новый пароль': 'Yangi parol',
+  'Не короче 4 символов. Клиент входит с ним, менять при входе не нужно':
+    'Kamida 4 ta belgi. Mijoz shu parol bilan kiradi, kirishda almashtirish shart emas',
+  'Сменить пароль': 'Parolni almashtirish',
+  'Не короче 4 символов. Пусто — сгенерируем': 'Kamida 4 ta belgi. Boʻsh qolsa — oʻzimiz yaratamiz',
+  'Баланс изменился: теперь {sum}. Проверьте и подтвердите ещё раз.':
+    'Balans oʻzgardi: endi {sum}. Tekshirib, yana bir bor tasdiqlang.',
+  'Удалить {name} и списать долг {sum}? Деньги не возвращаются, история останется в отчётах.':
+    '{name} oʻchirilsinmi va {sum} qarz hisobdan chiqarilsinmi? Pul qaytarilmaydi, tarix hisobotlarda qoladi.',
+  'Удалить {name} и списать {sum} с баланса? Деньги не возвращаются, история останется в отчётах.':
+    '{name} oʻchirilsinmi va balansdan {sum} hisobdan chiqarilsinmi? Pul qaytarilmaydi, tarix hisobotlarda qoladi.',
+  'Долг {sum} будет списан. Клиент пропадёт из списков, его логин и карта освободятся.':
+    '{sum} qarz hisobdan chiqariladi. Mijoz roʻyxatlardan yoʻqoladi, logini va kartasi boʻshaydi.',
+  'На балансе {sum} — при удалении он будет списан, без возврата денег.':
+    'Balansda {sum} — oʻchirishda u hisobdan chiqariladi, pul qaytarilmaydi.',
+  'Удалить и списать баланс': 'Oʻchirish va balansni hisobdan chiqarish',
+  'Операции владельца': 'Egasining amallari',
+  'Операция владельца: не войдёт в смену кассира, наличные — у вас':
+    'Egasining amali: kassir smenasiga kirmaydi, naqd pul — sizda',
 };
 export const EN: Record<string, string> = {
   'Выручка за период': 'Revenue for the period',
@@ -3097,4 +3123,30 @@ export const EN: Record<string, string> = {
   'файла нет': 'no file there',
   'не скачалась': 'not downloaded',
   'Ссылка не подошла ({why})': 'The link did not work ({why})',
+  'Скрыть пароль': 'Hide password',
+  'Показать пароль': 'Show password',
+  Показать: 'Show',
+  Сгенерировать: 'Generate',
+  'Пароль клиента — сообщите его, он показывается один раз':
+    'The client’s password — tell it to them, it is shown only once',
+  'Пароль изменён': 'Password changed',
+  'Новый пароль': 'New password',
+  'Не короче 4 символов. Клиент входит с ним, менять при входе не нужно':
+    'At least 4 characters. The client signs in with it, no change needed at sign-in',
+  'Сменить пароль': 'Change password',
+  'Не короче 4 символов. Пусто — сгенерируем': 'At least 4 characters. Leave empty to generate one',
+  'Баланс изменился: теперь {sum}. Проверьте и подтвердите ещё раз.':
+    'The balance changed: now {sum}. Check and confirm again.',
+  'Удалить {name} и списать долг {sum}? Деньги не возвращаются, история останется в отчётах.':
+    'Delete {name} and write off the {sum} debt? No money changes hands; the history stays in the reports.',
+  'Удалить {name} и списать {sum} с баланса? Деньги не возвращаются, история останется в отчётах.':
+    'Delete {name} and write {sum} off the balance? The money is not refunded; the history stays in the reports.',
+  'Долг {sum} будет списан. Клиент пропадёт из списков, его логин и карта освободятся.':
+    'The {sum} debt will be written off. The client leaves the lists, their login and card are freed.',
+  'На балансе {sum} — при удалении он будет списан, без возврата денег.':
+    '{sum} on the balance — deleting writes it off, without a refund.',
+  'Удалить и списать баланс': 'Delete and write off the balance',
+  'Операции владельца': 'Owner’s operations',
+  'Операция владельца: не войдёт в смену кассира, наличные — у вас':
+    'Owner’s operation: not in the cashier’s shift, the cash is yours',
 };

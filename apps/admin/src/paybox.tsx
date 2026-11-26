@@ -108,16 +108,35 @@ export function useHeldKey(): HeldKey {
   );
 }
 
-/** True once the console knows no shift is open: money buttons stay in place but are off. */
+/**
+ * True once the console knows no shift is open: money buttons stay in place but are off. Never for the owner, whose money
+ * is the owner's own and joins no shift (D-101).
+ */
 export function useShiftClosed(): boolean {
   const { loaded, shift } = useShift();
-  return loaded && !shift;
+  const owner = useClub().staff?.role === 'owner';
+  return loaded && !shift && !owner;
 }
 
-/** Why a money button is off while no shift is open, with the way out; nothing in an open shift. */
+/**
+ * The owner's money at the desk (D-101): a quiet line that it stays out of the cashier's shift — not in its drawer, X/Z or
+ * feed; cash taken is the owner's in hand. Nothing for a cashier.
+ */
+export function OwnerOpNote({ className }: { className?: string }): JSX.Element | null {
+  const owner = useClub().staff?.role === 'owner';
+  if (!owner) return null;
+  return (
+    <p data-owner-note className={clsx('text-xs text-muted', className)}>
+      {t('Операция владельца: не войдёт в смену кассира, наличные — у вас')}
+    </p>
+  );
+}
+
+/** Why a money button is off while no shift is open, with the way out; nothing in an open shift or for the owner. */
 export function ShiftClosedNote(): JSX.Element | null {
   const shift = useShift();
-  if (!shift.loaded || shift.shift) return null;
+  const owner = useClub().staff?.role === 'owner';
+  if (!shift.loaded || shift.shift || owner) return null;
   return (
     <Note tone="warn">
       <span className="flex items-center justify-between gap-3">
@@ -476,6 +495,7 @@ export function PayBox({
         </div>
       )}
 
+      <OwnerOpNote className="mt-3.5" />
       {(closed || (disabled && !closed)) && (
         <div className="mt-3.5 flex flex-col gap-2">
           <ShiftClosedNote />

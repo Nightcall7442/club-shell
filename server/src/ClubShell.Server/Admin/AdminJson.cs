@@ -162,13 +162,15 @@ public sealed record AdminOperationPaid(long Amount, string Method, Guid? Transa
 /// One desk operation of the feed (beyond the contract, D-43): a journal entry with the payment merged in. Amounts in
 /// tiyin; <c>drawer</c> — its signed effect on the cash drawer. Cash desk part 3 (D-68): a bar sale (<c>shopSale</c>) and
 /// its void (<c>shopVoid</c>) carry <c>saleId</c>, <c>method</c>, <c>lines</c>, <c>voided</c> (a sale) and <c>voidOfAt</c> (a
-/// void: when the sale was made); a move (<c>sessionMove</c>) carries <c>fromPc</c>.
+/// void: when the sale was made); a move (<c>sessionMove</c>) carries <c>fromPc</c>. <c>owner</c> (D-101): the owner's own
+/// operation, in no shift — its <c>drawer</c> is the cash the owner took or gave in person, never the drawer's.
 /// </summary>
 public sealed record AdminOperation(
     Guid Id, DateTimeOffset At, string Kind, string StaffName, AdminOperationClient? Client, AdminOperationPc? Pc, string? Tariff, int? Minutes,
     bool? Prepaid, long Amount, long? Charged, AdminOperationQuote? Quote, AdminOperationPaid? Paid, long Drawer, string? ReasonCode, string? Note,
     Guid? SessionId, bool? Package = null, Guid? MovementId = null, Guid? SaleId = null, string? Method = null,
-    IReadOnlyList<AdminOperationLine>? Lines = null, bool? Voided = null, DateTimeOffset? VoidOfAt = null, AdminOperationPc? FromPc = null);
+    IReadOnlyList<AdminOperationLine>? Lines = null, bool? Voided = null, DateTimeOffset? VoidOfAt = null, AdminOperationPc? FromPc = null,
+    bool? Owner = null);
 
 /// <summary>A line of a bar sale as the feed and its receipt show it.</summary>
 public sealed record AdminOperationLine(string Title, int Qty, long Price);
@@ -353,7 +355,7 @@ public sealed record AdminSaleLine(Guid ProductId, string Title, int Qty, long P
 /// named (a member or a guest; null — a walk-in), <c>pc</c> the PC it was brought to.
 /// </summary>
 public sealed record AdminSale(
-    Guid Id, DateTimeOffset At, Guid ShiftId, string Method, long Total, string StaffName, AdminSessionUser? User, AdminOperationPc? Pc,
+    Guid Id, DateTimeOffset At, Guid? ShiftId, string Method, long Total, string StaffName, AdminSessionUser? User, AdminOperationPc? Pc,
     IReadOnlyList<AdminSaleLine> Lines);
 
 /// <summary><c>balance</c>: after a balance sale, else null; <c>products</c>: each line's product after the sale.</summary>

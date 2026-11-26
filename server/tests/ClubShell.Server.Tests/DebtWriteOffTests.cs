@@ -47,7 +47,10 @@ public sealed class DebtWriteOffTests(LongClockServerFixture server) : LedgerChe
         var x = (await ExpectAsync(Server, 200, HttpMethod.Get, "/shift", owner)).GetProperty("x");
         Assert.Equal(before.GetProperty("topUpCash").GetInt64(), x.GetProperty("topUpCash").GetInt64());
         Assert.Equal(before.GetProperty("payouts").GetInt64(), x.GetProperty("payouts").GetInt64());
-        Assert.Equal((200_000L, 1), (x.GetProperty("writeOffs").GetInt64(), x.GetProperty("writeOffCount").GetInt32()));
+        // The owner's write-off is the owner's own operation (D-101): in no shift, so the cashier's X does not list it.
+        Assert.Equal((0L, 0), (x.GetProperty("writeOffs").GetInt64(), x.GetProperty("writeOffCount").GetInt32()));
+        Assert.True(await Players.ScalarAsync<bool>(Server,
+            "SELECT owner_op AND shift_id IS NULL FROM ledger_entries WHERE id = @id", new { id = done.GetProperty("transactionId").GetGuid() }));
 
         var journal = await Players.ScalarAsync<string>(Server,
             "SELECT detail || '|' || amount || '|' || (meta ->> 'sessionId') FROM audit_entries WHERE action = 'debtWriteOff' AND user_id = @guestId", new { guestId });

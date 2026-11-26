@@ -54,11 +54,20 @@ public static class ClientEndpoints
     /// running game: a session open anywhere (<c>409 playing</c>), money on the balance or a debt (<c>409 balance</c> with
     /// the amount — top it off, refund it or write the debt off first). The login and the card are freed for someone new
     /// (the login becomes <c>del-…</c>); every token is revoked and the PCs it was signed in on are told.
+    /// <c>?writeOff=&lt;balance&gt;</c> (D-102): the owner deletes anyway and gives the money up — exactly the balance shown, in
+    /// tiyin (a debt negative; another figure — <c>409 balance</c> with the balance now). In the same transaction the balance
+    /// goes to zero by one <c>adjustment</c> without a payment method (<c>meta.kind = clientDelete</c>; the owner's own
+    /// operation, D-101: in no shift, no cash, no revenue), and the <c>clientDelete</c> entry carries the amount written off.
+    /// Never while playing (<c>409 playing</c>).
     /// </summary>
-    private static async Task<IResult> DeleteAsync(HttpContext context, string id, NpgsqlDataSource db, Pushes pushes, TimeProvider clock)
+    private static async Task<IResult> DeleteAsync(
+        HttpContext context, string id, string? writeOff, NpgsqlDataSource db, Pushes pushes, TimeProvider clock)
     {
         var staff = context.Features.GetRequiredFeature<StaffContext>();
         var userId = ClientId(id);
+        long? giveUp = writeOff is null ? null
+            : long.TryParse(writeOff, System.Globalization.NumberStyles.AllowLeadingSign, System.Globalization.CultureInfo.InvariantCulture, out var shown)
+                ? shown : throw ApiException.Validation("writeOff", "format");
         IReadOnlyList<Guid> revoked;
         await using (var c = await db.OpenConnectionAsync())
         await using (var tx = await c.BeginTransactionAsync())
@@ -71,7 +80,13 @@ public static class ClientEndpoints
             }
 
             var balance = await c.ExecuteScalarAsync<long>("SELECT main_balance FROM wallets WHERE user_id = @userId FOR UPDATE", new { userId }, tx);
-            if (balance != 0)
+            if (balance != 0 && giveUp == balance)
+            {
+                await Ledger.PostAsync(c, tx, userId, allowOverdraft: false, now,
+                    new LedgerLine("adjustment", -balance, balance > 0 ? "Списание баланса при удалении клиента" : "Списание долга при удалении клиента",
+                        staff.ClubId, StaffId: staff.StaffId, Meta: new { kind = "clientDelete" }, OwnerOp: true));
+            }
+            else if (balance != 0)
             {
                 throw new ApiException(StatusCodes.Status409Conflict, ErrorCode.Conflict,
                     balance > 0 ? "Money is left on the balance" : "The client owes the club",
@@ -86,7 +101,8 @@ public static class ClientEndpoints
                 """,
                 new { userId, now }, tx);
             revoked = (await c.QueryAsync<Guid>("DELETE FROM user_tokens WHERE user_id = @userId RETURNING pc_id", new { userId }, tx)).ToList();
-            await Audit.WriteAsync(c, tx, staff, now, "clientDelete", userId, detail: $"{name} · {login}");
+            await Audit.WriteAsync(c, tx, staff, now, "clientDelete", userId, amount: Math.Abs(balance), detail: $"{name} · {login}",
+                meta: balance == 0 ? null : new { writtenOff = balance }, ownerOp: balance != 0);
             await tx.CommitAsync();
         }
 

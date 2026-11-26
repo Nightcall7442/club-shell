@@ -328,6 +328,8 @@ export interface AuditEntry {
   detail: string;
   /** Extra facts the rules and the feed read (e.g. `sessionMinutes`, `discountPct`, `method`, a session's `quote`). */
   meta: Record<string, string | number | boolean | null | Record<string, number>>;
+  /** The owner's own money operation (D-101): in no shift. */
+  owner?: boolean;
 }
 
 /** Thresholds of the cashier-control rules, tuned by the owner. */
@@ -936,6 +938,11 @@ export const PAYOUT_DESCRIPTION = 'Выдано наличными на касс
 export const TOPUP_CANCEL_DESCRIPTION = 'Cancelled top-up';
 /** A cash top-up booked with the club API key says so in its description. */
 export const API_TOPUP = 'via the club API';
+/**
+ * Ledger rows of the owner's own operations (D-101; the mock books only the owner's top-ups so): in no shift, so no X/Z,
+ * drawer or «Принято за смену» counts them.
+ */
+export const OWNER_TRANSACTIONS = new Set<string>();
 
 /**
  * Money movements since `from` — the X report of an open shift, the Z report when it closes (with its drawer moves).
@@ -979,7 +986,7 @@ export function totalsSince(from: string, to: string = now(), shift: ShiftRecord
     }
   }
   for (const tx of db.transactions) {
-    if (tx.createdAt < from || tx.createdAt > to) continue;
+    if (tx.createdAt < from || tx.createdAt > to || OWNER_TRANSACTIONS.has(tx.id)) continue;
     t.count += 1;
     const a = tx.amount.amount;
     switch (tx.type) {

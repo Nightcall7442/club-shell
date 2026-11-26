@@ -390,7 +390,12 @@ export default function ControlPage(): JSX.Element {
                     <span className="flex flex-wrap items-center gap-2">
                       <span className="font-medium">{t(ACTION_LABEL[e.action])}</span>
                       <span className="text-dim">{journalDetail(e)}</span>
-                      {MONEY.has(e.action) && e.shiftId === null && <Badge tone="warn">{t('без смены')}</Badge>}
+                      {/* D-101: the owner's own money is in no shift on purpose. */}
+                      {e.owner ? (
+                        <Badge>{t('Владелец')}</Badge>
+                      ) : (
+                        MONEY.has(e.action) && e.shiftId === null && <Badge tone="warn">{t('без смены')}</Badge>
+                      )}
                     </span>
                   ),
                 },

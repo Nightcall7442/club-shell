@@ -1,10 +1,12 @@
 /**
  * Clients (cashier + owner): search, the client list with group, loyalty level and money, and a side card (variant F:
  * the client's head on the blueprint grid, balance / bonus / visits / spent wells) to top up the balance (the same
- * «Пополнить» sheet as the search's), edit a profile, bind a club card, reset the sign-in password, redeem a promo code
+ * «Пополнить» sheet as the search's), edit a profile, bind a club card, set a new sign-in password, redeem a promo code
  * and see the latest wallet entries — or to register a new client, so they can sign in on a PC: only the name is required
  * (D-92); without a login the server makes one (from the phone or the name), without a password the console generates
- * one, and either is shown to the cashier once. Blacklisting is the owner's call: the server
+ * one, and either is shown to the cashier once. A password the desk types or generates — at registration or later — is
+ * the client's own from then on (D-103: no one-time password, nothing to change at the next sign-in). Blacklisting is the
+ * owner's call: the server
  * answers 403 to a cashier and the panel says. `#/clients/new` (the counter's "+ Новый клиент") opens the registration
  * straight away.
  */
@@ -44,22 +46,81 @@ const USERNAME_MAX = 32;
 
 const PASSWORD_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789';
 
-/** A temporary sign-in password: 8 characters without look-alikes (0/o, 1/l/i), easy to read out at the counter. */
-function tempPassword(): string {
+/** A generated sign-in password: 8 characters without look-alikes (0/o, 1/l/i), easy to read out at the counter. */
+function newPassword(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => PASSWORD_CHARS[b % PASSWORD_CHARS.length]).join(
     '',
   );
 }
 
+/** Shortest password the server takes. */
+const PASSWORD_MIN = 4;
+
 /**
- * A generated password, shown once for the cashier to pass on to the client: a status note whose one `.font-mono` child
- * is the password (the E2E reads it there).
+ * A password the desk sets (D-103): typed, or «Сгенерировать» for one easy to read out (then shown); «Показать» /
+ * «Скрыть» toggles it. The field is the label's control, so `getByLabel(label)` finds the input.
+ */
+function PasswordField({
+  label,
+  hint,
+  value,
+  onChange,
+  className,
+}: {
+  label: string;
+  hint?: string;
+  value: string;
+  onChange: (v: string) => void;
+  className?: string;
+}): JSX.Element {
+  const [shown, setShown] = useState(false);
+  return (
+    <Field label={label} hint={hint} className={className}>
+      <div className="flex gap-2">
+        <Input
+          type={shown ? 'text' : 'password'}
+          autoComplete="new-password"
+          value={value}
+          maxLength={64}
+          className={clsx('min-w-0', shown && 'font-mono')}
+          onChange={(e) => onChange(e.target.value)}
+        />
+        <Button
+          variant="ghost"
+          className="shrink-0"
+          aria-pressed={shown}
+          aria-label={shown ? t('Скрыть пароль') : t('Показать пароль')}
+          onClick={(e) => {
+            e.preventDefault();
+            setShown((v) => !v);
+          }}
+        >
+          {shown ? t('Скрыть') : t('Показать')}
+        </Button>
+        <Button
+          className="shrink-0"
+          onClick={(e) => {
+            e.preventDefault();
+            onChange(newPassword());
+            setShown(true);
+          }}
+        >
+          {t('Сгенерировать')}
+        </Button>
+      </div>
+    </Field>
+  );
+}
+
+/**
+ * A password generated at registration, shown once for the cashier to pass on to the client: a status note whose one
+ * `.font-mono` child is the password (the E2E reads it there). It is the client's own password, not a one-time one.
  */
 function IssuedPassword({ password }: { password: string }): JSX.Element {
   return (
     <Note tone="ok" role="status">
       <span className="block text-[12.5px] leading-5 text-soft">
-        {t('Временный пароль — сообщите клиенту, он показывается один раз')}
+        {t('Пароль клиента — сообщите его, он показывается один раз')}
       </span>
       <span className="mt-1.5 block font-mono text-xl font-semibold leading-7 tracking-[0.12em] text-hi">
         {password}
@@ -209,7 +270,6 @@ function ClientPanel({
   issuedPassword,
   issuedLogin,
   onSaved,
-  onPasswordIssued,
   onToppedUp,
   onDeleted,
 }: {
@@ -221,7 +281,6 @@ function ClientPanel({
   /** The login the server made at registration (D-92), shown once with the password. */
   issuedLogin: string | null;
   onSaved: (c: Client) => void;
-  onPasswordIssued: (password: string) => void;
   /** A top-up went through: the list reloads the balance. */
   onToppedUp: () => void;
 }): JSX.Element {
@@ -240,6 +299,7 @@ function ClientPanel({
   const [promoNote, setPromoNote] = useState<NoteState>(null);
   const [txs, setTxs] = useState<Transaction[]>([]);
   const [topUp, setTopUp] = useState(false);
+  const [password, setPassword] = useState('');
 
   const loadTxs = useCallback(async () => {
     try {
@@ -262,6 +322,7 @@ function ClientPanel({
     setResult(null);
     setPromo('');
     setPromoNote(null);
+    setPassword('');
   }, [client.id]);
   useEffect(() => {
     void loadTxs();
@@ -303,13 +364,14 @@ function ClientPanel({
     }
   };
 
-  const resetPassword = async (): Promise<void> => {
-    const password = tempPassword();
+  // D-103: the password typed (or generated) here is the client's own from now on; the player's tokens are revoked.
+  const changePassword = async (): Promise<void> => {
     setBusy(true);
     setLoginNote(null);
     try {
       await clubApi.setClientPassword(client.id, password);
-      onPasswordIssued(password);
+      setPassword('');
+      setLoginNote({ text: t('Пароль изменён'), tone: 'ok' });
     } catch (e) {
       setLoginNote({ text: describe(e), tone: 'err' });
     } finally {
@@ -435,8 +497,19 @@ function ClientPanel({
           <Note note={loginNote} />
           {issuedLogin && <IssuedLogin login={issuedLogin} />}
           {issuedPassword && <IssuedPassword password={issuedPassword} />}
-          <Button variant="tertiary" className="self-start" disabled={busy} onClick={() => void resetPassword()}>
-            {t('Сбросить пароль')}
+          <PasswordField
+            label={t('Новый пароль')}
+            hint={t('Не короче 4 символов. Клиент входит с ним, менять при входе не нужно')}
+            value={password}
+            onChange={setPassword}
+          />
+          <Button
+            variant="tertiary"
+            className="self-start"
+            disabled={busy || password.length < PASSWORD_MIN}
+            onClick={() => void changePassword()}
+          >
+            {t('Сменить пароль')}
           </Button>
         </CardBlock>
 
@@ -543,7 +616,7 @@ function NewClientPanel({
   const create = async (): Promise<void> => {
     setBusy(true);
     setResult(null);
-    const sent = password || tempPassword();
+    const sent = password || newPassword();
     try {
       const r = await clubApi.addClient({
         displayName: name.trim(),
@@ -593,14 +666,13 @@ function NewClientPanel({
               onChange={(e) => setLogin(e.target.value.toLowerCase().replace(/\s/g, ''))}
             />
           </Field>
-          <Field label={t('Пароль')} hint={t('Не короче 4 символов. Пусто — выдадим временный')}>
-            <Input
-              type="password"
-              autoComplete="new-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </Field>
+          <PasswordField
+            label={t('Пароль')}
+            hint={t('Не короче 4 символов. Пусто — сгенерируем')}
+            value={password}
+            onChange={setPassword}
+            className="col-span-2"
+          />
           <Field label={t('Номер карты')}>
             <Input value={card} className="font-mono" onChange={(e) => setCard(e.target.value)} />
           </Field>
@@ -776,7 +848,6 @@ export default function ClientsPage(): JSX.Element {
               issuedPassword={issued?.id === client.id ? issued.password : null}
               issuedLogin={issued?.id === client.id ? issued.login : null}
               onSaved={replace}
-              onPasswordIssued={(password) => setIssued({ id: client.id, password, login: null })}
               onToppedUp={() => void load(q.trim())}
               onDeleted={(id) => {
                 setItems((list) => list.filter((x) => x.id !== id));
@@ -793,53 +864,75 @@ export default function ClientsPage(): JSX.Element {
 }
 
 /**
- * «Удалить клиента» (D-94, owner only): asked twice. The server refuses while the client plays or has money or a debt
- * on the balance — the reason is said in words, with the amount, so the owner knows what to settle first.
+ * «Удалить клиента» (D-94, owner only): asked twice. The server refuses while the client plays. With money or a debt on
+ * the balance (D-102) the panel says how much and offers «Удалить и списать баланс»: the second click writes exactly that
+ * amount off (no cash, in no shift) and deletes in one step; a balance that changed meanwhile comes back as a refusal with
+ * the new amount, and the owner confirms again.
  */
 function DeleteClient({ client, onDeleted }: { client: Client; onDeleted: () => void }): JSX.Element {
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The balance to write off: the client's as listed, or the server's figure after a refusal.
+  const [balance, setBalance] = useState(client.balance.amount);
   useEffect(() => {
     setConfirm(false);
     setError(null);
-  }, [client.id]);
+    setBalance(client.balance.amount);
+  }, [client.id, client.balance.amount]);
+
+  const sum = (minor: number): string => money({ amount: Math.abs(minor), currency: 'UZS' });
 
   const run = async (): Promise<void> => {
     setBusy(true);
     setError(null);
     try {
-      await clubApi.deleteClient(client.id);
+      await clubApi.deleteClient(client.id, balance === 0 ? undefined : balance);
       onDeleted();
     } catch (e) {
       const details =
         e instanceof AdminError ? (e.details as { reason?: string; balance?: { amount: number } } | null) : null;
       if (details?.reason === 'playing') setError(t('Клиент сейчас играет — сначала завершите сеанс.'));
-      else if (details?.reason === 'balance' && details.balance)
+      else if (details?.reason === 'balance' && details.balance) {
+        setBalance(details.balance.amount);
         setError(
-          details.balance.amount > 0
-            ? t('На балансе {sum} — сначала верните или спишите деньги.', {
-                sum: money({ amount: details.balance.amount, currency: 'UZS' }),
-              })
-            : t('Долг {sum} — сначала оплатите или спишите его.', {
-                sum: money({ amount: -details.balance.amount, currency: 'UZS' }),
-              }),
+          t('Баланс изменился: теперь {sum}. Проверьте и подтвердите ещё раз.', { sum: sum(details.balance.amount) }),
         );
-      else setError(describe(e));
+      } else setError(describe(e));
       setConfirm(false);
     } finally {
       setBusy(false);
     }
   };
 
+  const owes = balance < 0;
   return (
-    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-danger/20 pt-4">
+    <div
+      data-delete-client
+      className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-danger/20 pt-4"
+    >
       <span className="text-sm text-muted">
         {confirm
-          ? t('Удалить {name}? Клиент не сможет войти, история денег останется в отчётах.', {
-              name: client.displayName,
-            })
-          : t('Клиент пропадёт из списков, его логин и карта освободятся.')}
+          ? balance === 0
+            ? t('Удалить {name}? Клиент не сможет войти, история денег останется в отчётах.', {
+                name: client.displayName,
+              })
+            : owes
+              ? t('Удалить {name} и списать долг {sum}? Деньги не возвращаются, история останется в отчётах.', {
+                  name: client.displayName,
+                  sum: sum(balance),
+                })
+              : t('Удалить {name} и списать {sum} с баланса? Деньги не возвращаются, история останется в отчётах.', {
+                  name: client.displayName,
+                  sum: sum(balance),
+                })
+          : balance === 0
+            ? t('Клиент пропадёт из списков, его логин и карта освободятся.')
+            : owes
+              ? t('Долг {sum} будет списан. Клиент пропадёт из списков, его логин и карта освободятся.', {
+                  sum: sum(balance),
+                })
+              : t('На балансе {sum} — при удалении он будет списан, без возврата денег.', { sum: sum(balance) })}
       </span>
       <div className="flex gap-2">
         {confirm && (
@@ -848,7 +941,13 @@ function DeleteClient({ client, onDeleted }: { client: Client; onDeleted: () => 
           </Button>
         )}
         <Button variant="danger" disabled={busy} onClick={() => (confirm ? void run() : setConfirm(true))}>
-          {busy ? '…' : confirm ? t('Да, удалить') : t('Удалить клиента')}
+          {busy
+            ? '…'
+            : confirm
+              ? t('Да, удалить')
+              : balance === 0
+                ? t('Удалить клиента')
+                : t('Удалить и списать баланс')}
         </Button>
       </div>
       {error && <p className="basis-full text-sm text-danger">{error}</p>}

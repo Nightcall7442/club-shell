@@ -226,12 +226,29 @@ public static class ShiftEndpoints
     /// (<c>meta.forSession</c>) is left out, the session row carries the payment; a top-up that settled a debt is
     /// <c>debtPaid</c>. Kiosk self-service is not in it (X/Z has it). <c>shiftId</c> defaults to the open shift; a cashier
     /// reads the open shift and the last closed one (else <c>403 ownerOnly</c>), the owner any. <c>today</c> — the club's
-    /// local day so far from the ledger (ReportsEndpoints' calendar), whether a shift is open or not.
+    /// local day so far from the ledger (ReportsEndpoints' calendar), whether a shift is open or not. The owner's own
+    /// operations (D-101, <c>owner_op</c>) join no shift, so no shift's feed has them; <c>owner=true</c> (owner only, else
+    /// <c>403 ownerOnly</c>; not with <c>shiftId</c>) lists them instead, every row <c>owner: true</c> and <c>shift: null</c>.
     /// </summary>
     private static async Task<IResult> OperationsAsync(
-        HttpContext context, string? shiftId, string? before, string? limit, string? kinds, NpgsqlDataSource db, TimeProvider clock)
+        HttpContext context, string? shiftId, string? before, string? limit, string? kinds, string? owner, NpgsqlDataSource db, TimeProvider clock)
     {
         var staff = context.Features.GetRequiredFeature<StaffContext>();
+        var ownerOps = owner switch
+        {
+            null or "false" => false,
+            "true" => true,
+            _ => throw ApiException.Validation("owner", "format"),
+        };
+        if (ownerOps && !staff.IsOwner)
+        {
+            throw ApiException.Forbidden("ownerOnly", "Only the owner reads the owner's operations");
+        }
+
+        if (ownerOps && shiftId is not null)
+        {
+            throw ApiException.Validation("shiftId", "owner");
+        }
         Guid? wanted = shiftId is null ? null : Guid.TryParse(shiftId, out var parsedShift) ? parsedShift : throw ApiException.Validation("shiftId", "format");
         var take = limit is null ? 50
             : int.TryParse(limit, NumberStyles.None, CultureInfo.InvariantCulture, out var n) ? n is >= 1 and <= 200 ? n : throw ApiException.Validation("limit", n < 1 ? "min" : "max")
@@ -251,7 +268,7 @@ public static class ShiftEndpoints
                    (SELECT id FROM shifts WHERE club_id = @ClubId AND closed_at IS NOT NULL ORDER BY closed_at DESC, id DESC LIMIT 1)
             """,
             new { staff.ClubId });
-        var target = wanted ?? openId;
+        var target = ownerOps ? null : wanted ?? openId;
         var shift = target is null ? null : await c.QuerySingleOrDefaultAsync<ShiftRow>(
             $"SELECT {ShiftRow.Columns} FROM shifts WHERE id = @target AND club_id = @ClubId", new { target, staff.ClubId })
             ?? throw ApiException.NotFound("shift");
@@ -262,22 +279,22 @@ public static class ShiftEndpoints
 
         List<AdminOperation> items = [];
         string? next = null;
-        if (shift is not null)
+        if (shift is not null || ownerOps)
         {
             var actions = wantedKinds.Select(k => k == "debtPaid" ? "topUp" : k).Distinct().ToArray();
             var rows = (await c.QueryAsync<OperationRow>(
                 $"""
-                SELECT a.id, a.at, a.action, a.staff_id, a.staff_name, a.user_id, a.pc_id, a.amount, a.meta::text AS meta,
+                SELECT a.id, a.at, a.action, a.staff_id, a.staff_name, a.user_id, a.pc_id, a.amount, a.meta::text AS meta, a.owner_op,
                        u.display_name AS user_name, u.role AS user_role, p.name AS pc_name,
                        CASE WHEN a.action = 'shopSale'
                             THEN EXISTS (SELECT 1 FROM shop_sales v WHERE v.void_of = (a.meta ->> 'saleId')::uuid)
                             -- D-91: a top-up is taken back only in its own shift, so its cancel is in the same shift's journal.
                             WHEN a.action = 'topUp'
                             THEN EXISTS (SELECT 1 FROM audit_entries x
-                                         WHERE x.club_id = a.club_id AND x.shift_id = a.shift_id AND x.action = 'topUpCancel'
+                                         WHERE x.club_id = a.club_id AND x.shift_id IS NOT DISTINCT FROM a.shift_id AND x.action = 'topUpCancel'
                                            AND x.meta ->> 'cancelOf' = a.meta ->> 'transactionId') END AS voided
                 FROM audit_entries a LEFT JOIN users u ON u.id = a.user_id LEFT JOIN pcs p ON p.id = a.pc_id
-                WHERE a.club_id = @ClubId AND a.shift_id = @Id AND a.action = ANY(@actions)
+                WHERE a.club_id = @ClubId AND {(ownerOps ? "a.owner_op" : "a.shift_id = @Id")} AND a.action = ANY(@actions)
                   AND NOT (a.action = 'topUp' AND coalesce((a.meta ->> 'forSession')::boolean, false))
                   AND (a.action <> 'topUp' OR CASE WHEN coalesce((a.meta ->> 'debt')::boolean, false) THEN @debtPaid ELSE @topUp END)
                   {(cursor is null ? "" : "AND (a.at, a.id) < (@at, @before)")}
@@ -286,7 +303,7 @@ public static class ShiftEndpoints
                 """,
                 new
                 {
-                    staff.ClubId, shift.Id, actions, debtPaid = wantedKinds.Contains("debtPaid"), topUp = wantedKinds.Contains("topUp"),
+                    staff.ClubId, shift?.Id, actions, debtPaid = wantedKinds.Contains("debtPaid"), topUp = wantedKinds.Contains("topUp"),
                     at = cursor?.At, before = cursor?.Id, take = take + 1,
                 })).ToList();
             items = [.. rows.Take(take).Select(row => row.ToWire())];
@@ -324,11 +341,11 @@ public static class ShiftEndpoints
                    coalesce(-sum(amount) FILTER (WHERE type = 'adjustment' AND method = 'cash'), 0)::bigint AS "Payouts",
                    (coalesce(-sum(amount) FILTER (WHERE type = 'charge'), 0) - coalesce(sum(amount) FILTER (WHERE type = 'refund'), 0))::bigint AS "Sessions",
                    coalesce(-sum(amount) FILTER (WHERE type = 'purchase'), 0)::bigint AS "Shop"
-            FROM ledger_entries WHERE club_id = @clubId AND created_at >= @from AND created_at <= @now
+            FROM ledger_entries WHERE club_id = @clubId AND created_at >= @from AND created_at <= @now AND NOT owner_op
             """,
             new { clubId, from, now });
         var bar = await c.QuerySingleAsync<ShopRow>(
-            $"SELECT {ShopRow.Sums} FROM shop_sales WHERE club_id = @clubId AND created_at >= @from AND created_at <= @now", new { clubId, from, now });
+            $"SELECT {ShopRow.Sums} FROM shop_sales WHERE club_id = @clubId AND created_at >= @from AND created_at <= @now AND NOT owner_op", new { clubId, from, now });
         var byMethod = new AdminTopUpByMethod(t.Cash, t.Card, t.Payme, t.Click, t.Uzum, t.Other);
         return new AdminToday(
             today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), from, byMethod,
@@ -361,11 +378,11 @@ public static class ShiftEndpoints
     /// A plain read, first in the action's transaction: <c>shifts</c> is locked last (§4.4), by <see cref="Wallet.Ledger"/>.
     /// A top-up racing the close is refused there too (its line is <c>ShiftRequired</c>); a charge racing it gets
     /// <c>shift_id NULL</c> (§4.3, <c>noShift</c>). The club API key (an integration, no staff member, no drawer) is not gated:
-    /// its rows join the open shift when there is one.
+    /// its rows join the open shift when there is one. Nor is the owner (D-101): the owner's own operations join no shift.
     /// </summary>
     public static async Task RequireOpenAsync(NpgsqlConnection c, NpgsqlTransaction tx, StaffContext staff)
     {
-        if (staff.StaffId is not null
+        if (staff.StaffId is not null && !staff.OwnerOp
             && !await c.ExecuteScalarAsync<bool>("SELECT EXISTS (SELECT 1 FROM shifts WHERE club_id = @ClubId AND closed_at IS NULL)", new { staff.ClubId }, tx))
         {
             throw SessionService.Conflict("shiftClosed");
@@ -564,6 +581,9 @@ public static class ShiftEndpoints
         public string? UserRole { get; init; }
         public string? PcName { get; init; }
 
+        /// <summary>The owner's own operation (D-101): in no shift.</summary>
+        public bool OwnerOp { get; init; }
+
         /// <summary>A bar sale voided since, or a desk top-up taken back since (D-91); null for other rows.</summary>
         public bool? Voided { get; init; }
 
@@ -628,7 +648,7 @@ public static class ShiftEndpoints
                 shop ? Uuid("saleId") : null, method, lines, kind is "shopSale" or "topUp" ? Voided ?? false : null,
                 kind == "shopVoid" && Text("saleAt") is { } saleAt && DateTimeOffset.TryParse(saleAt, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var voidOfAt)
                     ? voidOfAt.ToUniversalTime() : null,
-                fromPc);
+                fromPc, OwnerOp ? true : null);
         }
     }
 }

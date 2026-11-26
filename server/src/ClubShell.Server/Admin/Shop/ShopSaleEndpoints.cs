@@ -27,7 +27,9 @@ namespace ClubShell.Server.Admin;
 /// <c>notSellable</c>, <c>priceChanged</c>, <c>insufficientFunds</c>) rolls the whole cart back. A void (D-56) needs a reason; a
 /// cashier voids within 15 minutes, the owner later; a method sale only in its own shift, a balance sale in any open shift
 /// (a <c>purchase</c> row of +total, never <c>refund</c>); <c>defect</c> does not restock. Lock order (D-69): the sale row →
-/// the wallet → products by id → the shift (the strong lock of a cash void last).
+/// the wallet → products by id → the shift (the strong lock of a cash void last). The owner's sale (D-101) is the owner's own:
+/// no shift needed or joined (<c>shift_id NULL</c>, <c>owner_op</c>), its cash taken by the owner in person; only the owner
+/// voids it, with no shift either.
 /// </summary>
 public static class ShopSaleEndpoints
 {
@@ -113,7 +115,9 @@ public static class ShopSaleEndpoints
             }
 
             var meta = lines.Select(l => new { productId = l.ProductId, title = l.Title, qty = l.Qty, price = l.Price }).ToList();
-            Guid shiftId;
+            // The owner's sale is the owner's own (D-101): no shift; cash goes to the owner, not the drawer.
+            var ownerOp = staff.OwnerOp;
+            Guid? shiftId;
             Guid? ledgerId = null;
             long? balance = null;
             if (payment is null)
@@ -128,13 +132,13 @@ public static class ShopSaleEndpoints
                 ledgerId = Guid.CreateVersion7(now);
                 balance = await Ledger.PostAsync(c, tx, buyer.Id, allowOverdraft: false, now, new LedgerLine(
                     "purchase", -total, Describe("Покупка в баре", lines), staff.ClubId, PcId: pc?.Id, StaffId: staff.StaffId,
-                    Meta: new { saleId, lines = meta }, Id: ledgerId, ShiftRequired: true, Ref: saleId.ToString()));
-                shiftId = await c.ExecuteScalarAsync<Guid>("SELECT shift_id FROM ledger_entries WHERE id = @ledgerId", new { ledgerId }, tx);
+                    Meta: new { saleId, lines = meta }, Id: ledgerId, ShiftRequired: true, Ref: saleId.ToString(), OwnerOp: ownerOp));
+                shiftId = await c.ExecuteScalarAsync<Guid?>("SELECT shift_id FROM ledger_entries WHERE id = @ledgerId", new { ledgerId }, tx);
                 effects.Wallets.Add(buyer.Id);
             }
             else
             {
-                shiftId = (await ShiftEndpoints.LockOpenShiftAsync(c, tx, staff.ClubId, strong: false)).Id;
+                shiftId = ownerOp ? null : (await ShiftEndpoints.LockOpenShiftAsync(c, tx, staff.ClubId, strong: false)).Id;
             }
 
             await c.ExecuteAsync("SAVEPOINT shop_sale", transaction: tx);
@@ -142,10 +146,10 @@ public static class ShopSaleEndpoints
             {
                 await c.ExecuteAsync(
                     """
-                    INSERT INTO shop_sales (id, club_id, shift_id, staff_id, staff_name, kind, user_id, pc_id, method, total, ledger_id, created_at)
-                    VALUES (@saleId, @ClubId, @shiftId, @StaffId, @Name, 'sale', @userId, @pcId, @method, @total, @ledgerId, @now)
+                    INSERT INTO shop_sales (id, club_id, shift_id, staff_id, staff_name, kind, user_id, pc_id, method, total, ledger_id, created_at, owner_op)
+                    VALUES (@saleId, @ClubId, @shiftId, @StaffId, @Name, 'sale', @userId, @pcId, @method, @total, @ledgerId, @now, @ownerOp)
                     """,
-                    new { saleId, staff.ClubId, shiftId, staff.StaffId, staff.Name, userId = buyer?.Id, pcId = pc?.Id, method, total, ledgerId, now }, tx);
+                    new { saleId, staff.ClubId, shiftId, staff.StaffId, staff.Name, userId = buyer?.Id, pcId = pc?.Id, method, total, ledgerId, now, ownerOp }, tx);
             }
             catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation && ex.ConstraintName == "shop_sales_pkey")
             {
@@ -162,7 +166,7 @@ public static class ShopSaleEndpoints
             }
 
             await Audit.WriteAsync(c, tx, staff, now, "shopSale", buyer?.Id, pc?.Id, total, Summary(lines),
-                new { saleId, method, lines = meta, balance }, shiftId);
+                new { saleId, method, lines = meta, balance }, shiftId, ownerOp);
             var sale = new AdminSale(
                 saleId, now, shiftId, method, total, staff.Name, buyer is null ? null : new AdminSessionUser(buyer.Id, buyer.DisplayName, buyer.Role),
                 pc is null ? null : new AdminOperationPc(pc.Id, pc.Name), lines);
@@ -218,8 +222,14 @@ public static class ShopSaleEndpoints
                     new { reason = "voidWindow", minutes = (int)CashierVoidWindow.TotalMinutes });
             }
 
+            // The owner's own sale (D-101): only the owner takes it back, with no shift and no drawer.
+            if (sale.OwnerOp && !staff.IsOwner)
+            {
+                throw ApiException.Forbidden("ownerOnly", "Only the owner voids the owner's own sale");
+            }
+
             var fromBalance = sale.Method == "balance";
-            if (!fromBalance && !await c.ExecuteScalarAsync<bool>(
+            if (!fromBalance && !sale.OwnerOp && !await c.ExecuteScalarAsync<bool>(
                     "SELECT EXISTS (SELECT 1 FROM shifts WHERE id = @ShiftId AND closed_at IS NULL)", new { sale.ShiftId }, tx))
             {
                 throw SessionService.Conflict("saleShiftClosed");
@@ -252,7 +262,7 @@ public static class ShopSaleEndpoints
             }
 
             var voidId = Guid.CreateVersion7(now);
-            Guid shiftId;
+            Guid? shiftId;
             Guid? ledgerId = null;
             long? balance = null;
             if (fromBalance)
@@ -260,9 +270,13 @@ public static class ShopSaleEndpoints
                 ledgerId = Guid.CreateVersion7(now);
                 balance = await Ledger.PostAsync(c, tx, sale.UserId!.Value, allowOverdraft: false, now, new LedgerLine(
                     "purchase", sale.Total, Describe("Отмена покупки в баре", lines), staff.ClubId, PcId: sale.PcId, StaffId: staff.StaffId,
-                    Meta: new { voidOf = saleId }, Id: ledgerId, ShiftRequired: true, Ref: voidId.ToString()));
-                shiftId = await c.ExecuteScalarAsync<Guid>("SELECT shift_id FROM ledger_entries WHERE id = @ledgerId", new { ledgerId }, tx);
+                    Meta: new { voidOf = saleId }, Id: ledgerId, ShiftRequired: true, Ref: voidId.ToString(), OwnerOp: sale.OwnerOp));
+                shiftId = await c.ExecuteScalarAsync<Guid?>("SELECT shift_id FROM ledger_entries WHERE id = @ledgerId", new { ledgerId }, tx);
                 effects.Wallets.Add(sale.UserId.Value);
+            }
+            else if (sale.OwnerOp)
+            {
+                shiftId = null;
             }
             else
             {
@@ -287,11 +301,15 @@ public static class ShopSaleEndpoints
                 await c.ExecuteAsync(
                     """
                     INSERT INTO shop_sales (id, club_id, shift_id, staff_id, staff_name, kind, void_of, user_id, pc_id, method, total, ledger_id,
-                                            reason_code, note, created_at)
+                                            reason_code, note, created_at, owner_op)
                     VALUES (@voidId, @ClubId, @shiftId, @StaffId, @Name, 'void', @saleId, @UserId, @PcId, @Method, @Total, @ledgerId,
-                            @reason, @note, @now)
+                            @reason, @note, @now, @OwnerOp)
                     """,
-                    new { voidId, staff.ClubId, shiftId, staff.StaffId, staff.Name, saleId, sale.UserId, sale.PcId, sale.Method, sale.Total, ledgerId, reason, note, now },
+                    new
+                    {
+                        voidId, staff.ClubId, shiftId, staff.StaffId, staff.Name, saleId, sale.UserId, sale.PcId, sale.Method, sale.Total, ledgerId, reason, note, now,
+                        sale.OwnerOp,
+                    },
                     tx);
             }
             catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation && ex.ConstraintName == "shop_sales_one_void")
@@ -306,8 +324,11 @@ public static class ShopSaleEndpoints
                     saleId, voidId, method = sale.Method, reasonCode = reason, note, saleAt = ServerJson.FormatTime(sale.CreatedAt),
                     lines = lines.Select(l => new { productId = l.ProductId, title = l.Title, qty = l.Qty, price = l.Price }), balance,
                 },
-                shiftId);
-            await ControlAlerts.ShopVoidAsync(c, tx, staff, shiftId, sale.Total, now);
+                shiftId, sale.OwnerOp);
+            if (shiftId is { } voidShift)
+            {
+                await ControlAlerts.ShopVoidAsync(c, tx, staff, voidShift, sale.Total, now);
+            }
             return new IdempotentResult(StatusCodes.Status200OK, AdminJson.ToElement(new AdminSaleVoidResponse(
                 new AdminSaleVoid(voidId, now, saleId, sale.CreatedAt, sale.Method, sale.Total, reason, note, staff.Name),
                 balance is { } b ? Money.Uzs(b) : null,
@@ -453,10 +474,11 @@ public static class ShopSaleEndpoints
 
     private sealed class SaleRow
     {
-        public const string Columns = "id, shift_id, method, total, user_id, pc_id, created_at";
+        public const string Columns = "id, shift_id, method, total, user_id, pc_id, created_at, owner_op";
 
         public Guid Id { get; init; }
-        public Guid ShiftId { get; init; }
+        public Guid? ShiftId { get; init; }
+        public bool OwnerOp { get; init; }
         public string Method { get; init; } = "";
         public long Total { get; init; }
         public Guid? UserId { get; init; }
@@ -468,7 +490,7 @@ public static class ShopSaleEndpoints
     {
         public Guid Id { get; init; }
         public DateTimeOffset CreatedAt { get; init; }
-        public Guid ShiftId { get; init; }
+        public Guid? ShiftId { get; init; }
         public string Method { get; init; } = "";
         public long Total { get; init; }
         public string StaffName { get; init; } = "";

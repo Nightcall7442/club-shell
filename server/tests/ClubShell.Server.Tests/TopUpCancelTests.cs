@@ -143,8 +143,9 @@ public sealed class TopUpCancelTests(ServerFixture server) : LedgerCheckedTest(s
         await FreshShiftAsync(Server, cashier);
         var player = await Players.CreateAsync(Server, balance: 0);
 
+        // The owner's own top-up (D-101) is in no shift: only the owner takes it back.
         var (owners, _) = await TopUpAsync(Server, owner, player.Id, 100_000);
-        Contract.AssertError(await CancelAsync(Server, cashier, owners, 403), "forbidden", "notOwnTopUp");
+        Contract.AssertError(await CancelAsync(Server, cashier, owners, 403), "forbidden", "ownerOnly");
 
         var (late, _) = await TopUpAsync(Server, cashier, player.Id, 100_000, "click");
         Server.Clock.Advance(TimeSpan.FromMinutes(16));
@@ -164,7 +165,8 @@ public sealed class TopUpCancelTests(ServerFixture server) : LedgerCheckedTest(s
             await CancelAsync(Server, cashier, cash, amount: 250_000);
             await CancelAsync(Server, cashier, card);
             Assert.Equal(100_000 + 250_000, await Players.BalanceAsync(Server, player.Id));
-            Assert.Equal(350_000, await ExpectedCashAsync(Server, cashier));
+            // The owner's 100 000 is not in the drawer (D-101).
+            Assert.Equal(250_000, await ExpectedCashAsync(Server, cashier));
         }
         finally
         {

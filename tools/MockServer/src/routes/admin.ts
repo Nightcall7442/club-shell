@@ -795,14 +795,17 @@ export function adminRoutes(app: FastifyInstance): void {
       const amount = int(b, 'amount', 1, 100_000_000);
       const method = payMethod(optStr(b, 'method', 16) ?? 'cash', 'method');
       const settleDebt = optBool(b, 'settleDebt') ?? false;
-      requireShift();
+      // D-101: the owner's top-up is the owner's own — no shift needed, none joined.
+      const owner = !viaApi && staff.role === 'owner';
+      if (!owner) requireShift();
       if (!user) throw errors.notFound('user');
       if (settleDebt) {
         if (user.balance.amount >= 0) throw errors.conflict('noDebt');
         if (amount !== -user.balance.amount) throw errors.conflict('debtChanged', { debt: uzs(-user.balance.amount) });
       }
-      const { bonus, transaction } = topUpWithBonus(user, amount, method, { settleDebt, viaApi });
+      const { bonus, transaction } = topUpWithBonus(user, amount, method, { settleDebt, viaApi, owner });
       record(staff, 'topUp', {
+        ...(owner ? { shiftId: null, owner: true } : {}),
         userId: user.id,
         amount,
         detail: user.displayName,

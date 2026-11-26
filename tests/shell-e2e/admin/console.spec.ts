@@ -1164,7 +1164,7 @@ test('a client registered at the counter signs in on a PC with the issued passwo
   await page.getByLabel('Логин').fill(username);
   await page.getByLabel('Номер карты').fill(`CARD-${username}`);
   await page.getByRole('button', { name: 'Создать' }).click();
-  const issued = page.getByRole('status').filter({ hasText: 'Временный пароль' }).locator('.font-mono');
+  const issued = page.getByRole('status').filter({ hasText: 'Пароль клиента' }).locator('.font-mono');
   await expect(issued).toHaveText(/^[a-z2-9]{8}$/);
   const first = (await issued.textContent()) ?? '';
 
@@ -1214,12 +1214,28 @@ test('a client registered at the counter signs in on a PC with the issued passwo
   expect(await login({ kind: 'password', username, password: 'not-the-one' })).toBe(401);
   expect(await login({ kind: 'card', cardId: `CARD-${username}` })).toBe(200);
 
-  // A reset issues a new temporary password; the old one stops working.
-  await page.getByRole('button', { name: 'Сбросить пароль' }).click();
-  await expect(issued).not.toHaveText(first);
-  const second = (await issued.textContent()) ?? '';
+  // D-103: the desk types the new password itself (shown on demand) — a permanent one; the old one stops working.
+  const field = page.getByLabel('Новый пароль');
+  await expect(page.getByRole('button', { name: 'Сменить пароль' })).toBeDisabled();
+  await field.fill('my-own-77');
+  await expect(field).toHaveAttribute('type', 'password');
+  await page.getByRole('button', { name: 'Показать пароль' }).click();
+  await expect(field).toHaveAttribute('type', 'text');
+  await page.getByRole('button', { name: 'Сменить пароль' }).click();
+  await expect(page.getByText('Пароль изменён')).toBeVisible();
+  await expect(field).toHaveValue('');
   expect(await login({ kind: 'password', username, password: first })).toBe(401);
-  expect(await login({ kind: 'password', username, password: second })).toBe(200);
+  expect(await login({ kind: 'password', username, password: 'my-own-77' })).toBe(200);
+  expect(await login({ kind: 'password', username, password: 'my-own-77' })).toBe(200);
+
+  // «Сгенерировать» fills in one easy to read out, visible before it is saved.
+  await page.getByRole('button', { name: 'Сгенерировать' }).click();
+  await expect(field).toHaveValue(/^[a-z2-9]{8}$/);
+  await expect(field).toHaveAttribute('type', 'text');
+  const generated = await field.inputValue();
+  await page.getByRole('button', { name: 'Сменить пароль' }).click();
+  await expect(page.getByText('Пароль изменён')).toBeVisible();
+  expect(await login({ kind: 'password', username, password: generated })).toBe(200);
 });
 
 test('a client registered by name alone gets a login from the server, shown once with the password (D-92)', async ({
@@ -1236,7 +1252,7 @@ test('a client registered by name alone gets a login from the server, shown once
   await expect(login).toHaveText(/^tursunov\.bobur\d*$/);
   const made = (await login.textContent()) ?? '';
   await expect(page.getByText(`@${made}`, { exact: true })).toBeVisible();
-  await expect(page.getByRole('status').filter({ hasText: 'Временный пароль' }).locator('.font-mono')).toHaveText(
+  await expect(page.getByRole('status').filter({ hasText: 'Пароль клиента' }).locator('.font-mono')).toHaveText(
     /^[a-z2-9]{8}$/,
   );
 
@@ -1246,6 +1262,90 @@ test('a client registered by name alone gets a login from the server, shown once
   await page.getByRole('button', { name: 'Создать' }).click();
   await expect(login).toHaveText(/^tursunov\.bobur\d+$/);
   expect(await login.textContent()).not.toBe(made);
+});
+
+test("the owner's top-up stays out of the cashier's shift and shows in «Операции владельца» (D-101)", async ({
+  page,
+  request,
+}) => {
+  const owner = auth(await tokenFor(request, OWNER_PIN));
+  const cashier = auth(await tokenFor(request, CASHIER_PIN));
+  const username = `e2e-own-${Date.now()}`;
+  const created = await request.post(`${API}/admin/clients`, {
+    headers: owner,
+    data: { username, displayName: 'E2E Владелец' },
+  });
+  expect(created.ok()).toBeTruthy();
+  await closeShift(request);
+  await signIn(page, OWNER_PIN);
+  const before = (await (await request.get(`${API}/admin/shift`, { headers: cashier })).json()) as {
+    x: { topUpCash: number };
+    expectedCash: number;
+  };
+
+  await expect(page.getByRole('heading', { name: 'Карта зала' })).toBeVisible();
+  await page.keyboard.press('/');
+  await page.keyboard.type(username);
+  await page.getByRole('option').filter({ hasText: username }).getByRole('button', { name: 'Пополнить' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Пополнить · E2E Владелец' });
+  await expect(sheet.getByText('Операция владельца: не войдёт в смену кассира, наличные — у вас')).toBeVisible();
+  await sheet.getByLabel('Сумма').fill('30000');
+  await sheet.getByRole('radio', { name: 'Наличные' }).click();
+  await sheet.getByRole('button', { name: /^Пополнить · Наличные/ }).click();
+  await expect(sheet.getByRole('status')).toContainText(/Баланс пополнен · 30\s000 сум/);
+  await sheet.press('Escape');
+
+  // The cashier's X, drawer and feed do not have it.
+  const after = (await (await request.get(`${API}/admin/shift`, { headers: cashier })).json()) as {
+    x: { topUpCash: number };
+    expectedCash: number;
+  };
+  expect([after.x.topUpCash, after.expectedCash]).toEqual([before.x.topUpCash, before.expectedCash]);
+  const feed = (await (await request.get(`${API}/admin/shift/operations`, { headers: cashier })).json()) as {
+    items: { client: { displayName: string } | null }[];
+  };
+  expect(feed.items.some((i) => i.client?.displayName === 'E2E Владелец')).toBe(false);
+  expect((await request.get(`${API}/admin/shift/operations?owner=true`, { headers: cashier })).status()).toBe(403);
+
+  // The owner reads it on the Смена page, marked «Владелец».
+  await page.goto('/#/shift');
+  await page.getByRole('combobox', { name: 'Смена' }).selectOption({ label: 'Операции владельца' });
+  await expect(page.getByRole('heading', { name: 'Операции владельца' })).toBeVisible();
+  const row = page.locator('[data-feed="page"] li').filter({ hasText: 'E2E Владелец' }).first();
+  await expect(row).toBeVisible();
+  await expect(row.locator('[data-owner-op]')).toHaveText(/Владелец/i);
+});
+
+test('the owner deletes a client with money on the balance, writing it off (D-102)', async ({ page, request }) => {
+  const owner = auth(await tokenFor(request, OWNER_PIN));
+  const username = `e2e-del-${Date.now()}`;
+  const created = await request.post(`${API}/admin/clients`, {
+    headers: owner,
+    data: { username, displayName: 'E2E Удаление' },
+  });
+  expect(created.ok()).toBeTruthy();
+  const { client } = (await created.json()) as { client: { id: string } };
+  const top = await request.post(`${API}/admin/wallet/topup`, {
+    headers: { ...owner, 'Idempotency-Key': randomUUID() },
+    data: { userId: client.id, amount: 3_000_000, method: 'cash' },
+  });
+  expect(top.ok()).toBeTruthy();
+  await signIn(page, OWNER_PIN);
+  await page.goto('/#/clients');
+  await page.getByRole('row').filter({ hasText: username }).click();
+
+  const zone = page.locator('[data-delete-client]');
+  await expect(zone).toContainText(/На балансе 30\s000 сум — при удалении он будет списан/);
+  await zone.getByRole('button', { name: 'Удалить и списать баланс' }).click();
+  await expect(zone).toContainText(/Удалить E2E Удаление и списать 30\s000 сум с баланса\?/);
+  const deleted = page.waitForResponse(
+    (r) => r.url().includes(`/admin/clients/${client.id}`) && r.request().method() === 'DELETE',
+  );
+  await zone.getByRole('button', { name: 'Да, удалить' }).click();
+  const answer = await deleted;
+  expect(answer.status()).toBe(200);
+  expect(answer.url()).toContain('writeOff=3000000');
+  await expect(page.getByRole('row').filter({ hasText: username })).toHaveCount(0);
 });
 
 test('the owner lets players create their own account on the PC (D-92)', async ({ page, request }) => {
