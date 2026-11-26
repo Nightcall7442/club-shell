@@ -23,11 +23,11 @@ public sealed class ClientsTests(ServerFixture server) : LedgerCheckedTest(serve
         foreach (var (username, reason) in new[] { ("ab", "min"), ("  ab  ", "min"), (new string('x', 33), "max") })
         {
             Assert.Equal(("username", reason), StaffAdminTests.Details(await ExpectAsync(Server, 400, HttpMethod.Post, "/clients", cashier,
-                new { username, displayName = "Короткое имя", password = Players.Password })));
+                new { gender = "male", username, displayName = "Короткое имя", password = Players.Password })));
         }
 
         var created = (await ExpectAsync(Server, 200, HttpMethod.Post, "/clients", cashier,
-            new { username = $"  Иван-{tag}  ", displayName = "Иван", password = Players.Password })).GetProperty("client");
+            new { gender = "male", username = $"  Иван-{tag}  ", displayName = "Иван", password = Players.Password })).GetProperty("client");
         Assert.Equal($"иван-{tag}", created.GetProperty("username").GetString());
         var id = created.GetProperty("id").GetGuid();
         var agent = await TestAgent.CreateAsync(Server);
@@ -53,7 +53,7 @@ public sealed class ClientsTests(ServerFixture server) : LedgerCheckedTest(serve
         var username = $"Case-{tag}";
         var card = $"CARD-{tag}";
         var client = (await ReplayedAsync(Server, 200, HttpMethod.Post, "/clients", cashier,
-            new { username, displayName = "Регистрация", password = Players.Password, cardId = $"  {card}  ", phone = "+998901112233", groupId = "student", telegram = "@nope" }))
+            new { gender = "male", username, displayName = "Регистрация", password = Players.Password, cardId = $"  {card}  ", phone = "+998901112233", groupId = "student", telegram = "@nope" }))
             .GetProperty("client");
         Assert.Equal((username.ToLowerInvariant(), card, "member", 0L, "student", "+998901112233"), (client.GetProperty("username").GetString(), client.GetProperty("cardId").GetString(),
             client.GetProperty("role").GetString(), client.GetProperty("balance").GetProperty("amount").GetInt64(), client.GetProperty("groupId").GetString(),
@@ -63,11 +63,11 @@ public sealed class ClientsTests(ServerFixture server) : LedgerCheckedTest(serve
 
         foreach (var (body, field, reason) in new (object, string, string)[]
                  {
-                     (new { username = username.ToUpperInvariant(), displayName = "X" }, "username", "taken"),
-                     (new { username = $"other-{tag}", displayName = "X", cardId = card.ToLowerInvariant() }, "cardId", "taken"),
-                     (new { username = $"other-{tag}", displayName = "X", password = "abc" }, "password", "min"),
-                     (new { username = $"other-{tag}", displayName = "" }, "displayName", "required"),
-                     (new { username = $"other-{tag}", displayName = "X", birthYear = 1800 }, "birthYear", "min"),
+                     (new { gender = "male", username = username.ToUpperInvariant(), displayName = "X" }, "username", "taken"),
+                     (new { gender = "male", username = $"other-{tag}", displayName = "X", cardId = card.ToLowerInvariant() }, "cardId", "taken"),
+                     (new { gender = "male", username = $"other-{tag}", displayName = "X", password = "abc" }, "password", "min"),
+                     (new { gender = "male", username = $"other-{tag}", displayName = "" }, "displayName", "required"),
+                     (new { gender = "male", username = $"other-{tag}", displayName = "X", birthYear = 1800 }, "birthYear", "min"),
                  })
         {
             Assert.Equal((field, reason), StaffAdminTests.Details(await ExpectAsync(Server, 400, HttpMethod.Post, "/clients", cashier, body)));
@@ -82,7 +82,7 @@ public sealed class ClientsTests(ServerFixture server) : LedgerCheckedTest(serve
         }
 
         // Without a password nobody knows one; a short name is fine (3–32).
-        var other = (await ExpectAsync(Server, 200, HttpMethod.Post, "/clients", cashier, new { username = tag[..3], displayName = "Без пароля" })).GetProperty("client");
+        var other = (await ExpectAsync(Server, 200, HttpMethod.Post, "/clients", cashier, new { gender = "male", username = tag[..3], displayName = "Без пароля" })).GetProperty("client");
         Assert.StartsWith("pbkdf2$", await Players.ScalarAsync<string>(Server, "SELECT password_hash FROM users WHERE id = @id", new { id = other.GetProperty("id").GetGuid() }));
 
         var otherId = other.GetProperty("id").GetGuid();
@@ -197,9 +197,9 @@ public sealed class ClientsTests(ServerFixture server) : LedgerCheckedTest(serve
         var cashier = await LoginAsync(Server, CashierPin);
         var owner = await LoginAsync(Server, OwnerPin);
         var tag = Guid.NewGuid().ToString("N")[..8];
-        var big = (await ExpectAsync(Server, 200, HttpMethod.Post, "/clients", cashier, new { username = $"big-{tag}", displayName = $"Сотрудник {tag}", groupId = "staff" })).GetProperty("client");
-        var small = (await ExpectAsync(Server, 200, HttpMethod.Post, "/clients", cashier, new { username = $"small-{tag}", displayName = $"Школьник {tag}", groupId = "student" })).GetProperty("client");
-        var none = (await ExpectAsync(Server, 200, HttpMethod.Post, "/clients", cashier, new { username = $"none-{tag}", displayName = $"Без группы {tag}" })).GetProperty("client");
+        var big = (await ExpectAsync(Server, 200, HttpMethod.Post, "/clients", cashier, new { gender = "male", username = $"big-{tag}", displayName = $"Сотрудник {tag}", groupId = "staff" })).GetProperty("client");
+        var small = (await ExpectAsync(Server, 200, HttpMethod.Post, "/clients", cashier, new { gender = "male", username = $"small-{tag}", displayName = $"Школьник {tag}", groupId = "student" })).GetProperty("client");
+        var none = (await ExpectAsync(Server, 200, HttpMethod.Post, "/clients", cashier, new { gender = "male", username = $"none-{tag}", displayName = $"Без группы {tag}" })).GetProperty("client");
 
         var bigId = big.GetProperty("id").GetGuid();
         Assert.Equal($"50 Сотрудник {tag} → Сотрудник", await Players.ScalarAsync<string>(Server,
@@ -320,7 +320,7 @@ public sealed class ClientsTests(ServerFixture server) : LedgerCheckedTest(serve
 
         // The login and the card go to someone new.
         var again = await ExpectAsync(Server, 200, HttpMethod.Post, "/clients", cashier,
-            new { displayName = "Новый", username = player.Username, password = "1234", cardId = card });
+            new { gender = "male", displayName = "Новый", username = player.Username, password = "1234", cardId = card });
         Assert.Equal(player.Username, again.GetProperty("client").GetProperty("username").GetString());
     }
 }

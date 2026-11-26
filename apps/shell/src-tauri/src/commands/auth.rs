@@ -115,6 +115,12 @@ fn validate_register(mut req: AuthRegisterRequest) -> CmdResult<AuthRegisterRequ
     if length > NEW_PASSWORD_MAX {
         return Err(ShellError::validation("password", "max"));
     }
+    // D-104: every new account says the player's gender.
+    match req.gender.as_deref() {
+        None | Some("") => return Err(ShellError::validation("gender", "required")),
+        Some("male" | "female") => {}
+        Some(_) => return Err(ShellError::validation("gender", "enum")),
+    }
     Ok(req)
 }
 
@@ -199,6 +205,27 @@ mod tests {
             end_elsewhere: None,
             code: None,
         }
+    }
+
+    fn register(gender: Option<&str>) -> AuthRegisterRequest {
+        AuthRegisterRequest {
+            display_name: Some("Ali".into()),
+            username: None,
+            password: Some("1234".into()),
+            accept_rules: None,
+            gender: gender.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn register_requires_a_gender_of_two() {
+        for gender in [None, Some(""), Some("other")] {
+            let e = validate_register(register(gender)).unwrap_err();
+            assert_eq!(e.code, ErrorCode::Validation);
+            assert_eq!(e.details.unwrap()["field"], "gender");
+        }
+        assert!(validate_register(register(Some("female"))).is_ok());
+        assert!(validate_register(register(Some("male"))).is_ok());
     }
 
     #[test]

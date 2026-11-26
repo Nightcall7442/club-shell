@@ -468,6 +468,9 @@ pub struct RegisterAuthRequest {
     /// Preferred locale.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub locale: Option<Locale>,
+    /// The player's gender, `male` or `female`; required (D-104).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gender: Option<String>,
 }
 
 /// Seat on the club map (IPC_PROTOCOL.md §6.15).

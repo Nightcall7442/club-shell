@@ -49,6 +49,18 @@ public static class Players
         return player;
     }
 
+    /// <summary>A desk registration body with <c>gender</c> (D-104: required) unless it names one.</summary>
+    public static System.Text.Json.Nodes.JsonObject WithGender(object body, string gender = "male")
+    {
+        var node = JsonSerializer.SerializeToNode(body)!.AsObject();
+        if (!node.ContainsKey("gender"))
+        {
+            node["gender"] = gender;
+        }
+
+        return node;
+    }
+
     /// <summary>The player's profile in the club (group, blacklist, birth year).</summary>
     public static async Task ProfileAsync(ServerFixture server, TestPlayer player, string? groupId = null, bool blacklisted = false, int? birthYear = null)
     {

@@ -232,6 +232,9 @@ pub struct AuthRegisterRequest {
     /// The player accepted the club rules; required when the club has rules.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub accept_rules: Option<bool>,
+    /// The player's gender, `male` or `female`; required (D-104).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gender: Option<String>,
 }
 
 /// Response of `auth.status`.

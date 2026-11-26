@@ -355,6 +355,8 @@ export interface RegisterAuthRequest {
   acceptRules?: boolean | null;
   /** Preferred locale. */
   locale?: Locale | null;
+  /** The player's gender, `male` or `female`; required (D-104). */
+  gender?: string | null;
 }
 
 /** Seat on the club map (IPC_PROTOCOL.md §6.15). */

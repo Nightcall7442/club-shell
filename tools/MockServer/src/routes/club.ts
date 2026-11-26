@@ -49,6 +49,7 @@ import {
   type PcRecord,
   type ProductRecord,
   type UserRecord,
+  genderOf,
 } from '../db.js';
 import { PRODUCT_CATEGORIES, liveProducts, productView, voidOf } from './bar.js';
 import { gamesVolumeOf, hardwareOf } from '../devices.js';
@@ -146,6 +147,7 @@ function clientView(u: UserRecord): Record<string, unknown> {
     phone: p.phone,
     birthYear: p.birthYear,
     cardId: u.cardId,
+    gender: u.gender ?? null,
     spent: spentOf(u.id),
     visits: visitsOf(u.id),
     level: level.level,
@@ -780,6 +782,7 @@ export function clubRoutes(app: FastifyInstance): void {
     } else {
       username = generateLogin(displayName, optStr(b, 'phone', 32), loginTaken);
     }
+    const gender = genderOf(b);
     // No password sent: nobody knows one until the desk sets one (the console always sends one, D-103).
     const password = b['password'] === undefined || b['password'] === null ? uuid() : passwordOf(b);
     const cardId = cardOf(b, null);
@@ -800,6 +803,7 @@ export function clubRoutes(app: FastifyInstance): void {
       createdAt: now(),
       transient: false,
       muted: false,
+      gender,
     };
     db.users.push(user);
     club().clients[user.id] = {
@@ -830,6 +834,7 @@ export function clubRoutes(app: FastifyInstance): void {
       p.blacklisted = bool(b, 'blacklisted');
     }
     if (typeof b['displayName'] === 'string') user.displayName = str(b, 'displayName', 64);
+    if ('gender' in b) user.gender = genderOf(b);
     club().clients[user.id] = p;
     markDirty();
     if (p.groupId !== groupBefore) {

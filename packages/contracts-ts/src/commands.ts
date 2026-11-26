@@ -284,6 +284,8 @@ export interface AuthRegisterRequest {
   password?: string | null;
   /** The player accepted the club rules; required when the club has rules. */
   acceptRules?: boolean | null;
+  /** The player's gender, `male` or `female`; required (D-104). */
+  gender?: string | null;
 }
 
 /** Response of `auth.status`. */

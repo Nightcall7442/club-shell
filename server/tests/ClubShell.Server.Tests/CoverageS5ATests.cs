@@ -19,7 +19,7 @@ public sealed class CoverageS5ATests(ServerFixture server) : LedgerCheckedTest(s
 
         await ExpectAsync(Server, 200, HttpMethod.Get, "/clients?q=", owner);
         var clientId = (await ExpectAsync(Server, 200, HttpMethod.Post, "/clients", owner,
-            new { username = "cover-" + Guid.NewGuid().ToString("N")[..8], displayName = "Покрытие", password = "1234", cardId = (string?)null, birthYear = (int?)null }, Guid.NewGuid()))
+            new { gender = "male", username = "cover-" + Guid.NewGuid().ToString("N")[..8], displayName = "Покрытие", password = "1234", cardId = (string?)null, birthYear = (int?)null }, Guid.NewGuid()))
             .GetProperty("client").GetProperty("id").GetGuid();
         await ExpectAsync(Server, 200, HttpMethod.Patch, $"/clients/{clientId}", owner, new { groupId = "regular", blacklisted = false });
         await ExpectAsync(Server, 200, HttpMethod.Post, $"/clients/{clientId}/card", owner, new { cardId = "COVER-" + Guid.NewGuid().ToString("N")[..6] });

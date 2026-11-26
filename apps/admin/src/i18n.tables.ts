@@ -1577,6 +1577,11 @@ export const UZ: Record<string, string> = {
   'Операции владельца': 'Egasining amallari',
   'Операция владельца: не войдёт в смену кассира, наличные — у вас':
     'Egasining amali: kassir smenasiga kirmaydi, naqd pul — sizda',
+  Пол: 'Jins',
+  Мужской: 'Erkak',
+  Женский: 'Ayol',
+  'Пол не указан': 'Jinsi koʻrsatilmagan',
+  'Укажите пол клиента': 'Mijozning jinsini koʻrsating',
 };
 export const EN: Record<string, string> = {
   'Выручка за период': 'Revenue for the period',
@@ -3149,4 +3154,9 @@ export const EN: Record<string, string> = {
   'Операции владельца': 'Owner’s operations',
   'Операция владельца: не войдёт в смену кассира, наличные — у вас':
     'Owner’s operation: not in the cashier’s shift, the cash is yours',
+  Пол: 'Gender',
+  Мужской: 'Male',
+  Женский: 'Female',
+  'Пол не указан': 'Gender not given',
+  'Укажите пол клиента': 'Choose the client’s gender',
 };

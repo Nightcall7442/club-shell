@@ -296,6 +296,12 @@ public sealed class SessionHandlers : IIpcHandlerGroup
             throw IpcError.Validation("password", password.Length == 0 ? "required" : password.Length < 4 ? "min" : "max").ToException();
         }
 
+        // D-104: the player's gender is required, male or female.
+        if (request.Gender is not ("male" or "female"))
+        {
+            throw IpcError.Validation("gender", string.IsNullOrEmpty(request.Gender) ? "required" : "enum").ToException();
+        }
+
         RequireReady();
         if (_users.User is not null)
         {
@@ -311,7 +317,7 @@ public sealed class SessionHandlers : IIpcHandlerGroup
         RequireOnline();
         string hwid = await _hwid.GetAsync(cancellationToken).ConfigureAwait(false);
         AuthResponse auth = await _server.RegisterPlayerAsync(
-            new RegisterAuthRequest(pcId, hwid, displayName, username, password, request.AcceptRules, _shellSettings.Get().Locale), cancellationToken).ConfigureAwait(false);
+            new RegisterAuthRequest(pcId, hwid, displayName, username, password, request.AcceptRules, _shellSettings.Get().Locale, request.Gender), cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("User {UserId} ({Username}) registered on this PC", auth.User.Id, auth.User.Username);
         return await SignedInOnlineAsync(auth, auth.User.Username, "register", guest: false, cancellationToken).ConfigureAwait(false);
     }

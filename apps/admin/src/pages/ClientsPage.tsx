@@ -4,7 +4,8 @@
  * «Пополнить» sheet as the search's), edit a profile, bind a club card, set a new sign-in password, redeem a promo code
  * and see the latest wallet entries — or to register a new client, so they can sign in on a PC: only the name is required
  * (D-92); without a login the server makes one (from the phone or the name), without a password the console generates
- * one, and either is shown to the cashier once. A password the desk types or generates — at registration or later — is
+ * one, and either is shown to the cashier once. The gender is required for a new account (D-104: «Мужской / Женский», none
+ * picked at first); an older account without one says «Пол не указан» and the card sets it. A password the desk types or generates — at registration or later — is
  * the client's own from then on (D-103: no one-time password, nothing to change at the next sign-in). Blacklisting is the
  * owner's call: the server
  * answers 403 to a cashier and the panel says. `#/clients/new` (the counter's "+ Новый клиент") opens the registration
@@ -13,7 +14,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import type { Transaction } from '@clubshell/contracts';
-import { AdminError, clubApi, type Client, type ClientGroup } from '@/api';
+import { AdminError, clubApi, type Client, type ClientGroup, type Gender } from '@/api';
 import { useClub } from '@/club';
 import { describe } from '@/errors';
 import { money, moneyParts } from '@/format';
@@ -30,6 +31,7 @@ import {
   Note,
   PageHeader,
   Section,
+  Segmented,
   Sum,
   Table,
   Toggle,
@@ -50,6 +52,22 @@ const PASSWORD_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789';
 function newPassword(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => PASSWORD_CHARS[b % PASSWORD_CHARS.length]).join(
     '',
+  );
+}
+
+/** «Мужской / Женский» (D-104): none picked until the desk picks one. */
+function GenderChoice({ value, onChange }: { value: Gender | null; onChange: (g: Gender) => void }): JSX.Element {
+  return (
+    <Segmented<Gender>
+      label={t('Пол')}
+      value={value}
+      size="md"
+      options={[
+        { id: 'male', label: t('Мужской') },
+        { id: 'female', label: t('Женский') },
+      ]}
+      onChange={onChange}
+    />
   );
 }
 
@@ -292,6 +310,7 @@ function ClientPanel({
   const [groupId, setGroupId] = useState(client.groupId);
   const [note, setNote] = useState(client.note);
   const [blacklisted, setBlacklisted] = useState(client.blacklisted);
+  const [gender, setGender] = useState<Gender | null>(client.gender ?? null);
   const owner = useClub().staff?.role === 'owner';
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<NoteState>(null);
@@ -319,6 +338,7 @@ function ClientPanel({
     setGroupId(client.groupId);
     setNote(client.note);
     setBlacklisted(client.blacklisted);
+    setGender(client.gender ?? null);
     setResult(null);
     setPromo('');
     setPromoNote(null);
@@ -340,6 +360,7 @@ function ClientPanel({
         note,
       };
       if (blacklisted !== client.blacklisted) input.blacklisted = blacklisted;
+      if (gender && gender !== client.gender) input.gender = gender;
       const r = await clubApi.updateClient(client.id, input);
       onSaved(r.client);
       setResult({ text: t('Сохранено'), tone: 'ok' });
@@ -461,6 +482,11 @@ function ClientPanel({
                 onChange={(e) => setBirth(e.target.value.replace(/\D/g, ''))}
               />
             </Field>
+          </div>
+          <div className="flex flex-col gap-2">
+            <span className="label-sm">{t('Пол')}</span>
+            <GenderChoice value={gender} onChange={setGender} />
+            {!gender && <span className="text-[11.5px] leading-4 text-muted">{t('Пол не указан')}</span>}
           </div>
           <div className="flex flex-col gap-2">
             <span className="label-sm">{t('Группа')}</span>
@@ -606,6 +632,8 @@ function NewClientPanel({
   const [phone, setPhone] = useState('');
   const [birth, setBirth] = useState('');
   const [groupId, setGroupId] = useState<string | null>(null);
+  const [gender, setGender] = useState<Gender | null>(null);
+  const [genderMissing, setGenderMissing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<NoteState>(null);
   // As the server: a typed login is 3–32 characters (the field already drops spaces and upper case); empty — the server
@@ -614,6 +642,11 @@ function NewClientPanel({
   const loginOk = loginLength === 0 || (loginLength >= USERNAME_MIN && loginLength <= USERNAME_MAX);
 
   const create = async (): Promise<void> => {
+    // D-104: every new account says the client's gender.
+    if (!gender) {
+      setGenderMissing(true);
+      return;
+    }
     setBusy(true);
     setResult(null);
     const sent = password || newPassword();
@@ -626,6 +659,7 @@ function NewClientPanel({
         phone: phone.trim() || undefined,
         birthYear: yearOf(birth),
         groupId,
+        gender,
       });
       onCreated(r.client, { password: password ? null : sent, loginGenerated: !login.trim() });
     } catch (e) {
@@ -688,6 +722,17 @@ function NewClientPanel({
               onChange={(e) => setBirth(e.target.value.replace(/\D/g, ''))}
             />
           </Field>
+        </div>
+        <div className="flex flex-col gap-2">
+          <span className="label-sm">{t('Пол')}</span>
+          <GenderChoice
+            value={gender}
+            onChange={(g) => {
+              setGender(g);
+              setGenderMissing(false);
+            }}
+          />
+          {genderMissing && <span className="text-[11.5px] leading-4 text-danger">{t('Укажите пол клиента')}</span>}
         </div>
         <div className="flex flex-col gap-2">
           <span className="label-sm">{t('Группа')}</span>

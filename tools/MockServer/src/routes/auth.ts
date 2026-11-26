@@ -46,6 +46,7 @@ import {
   type PcRecord,
   type UserRecord,
   knownValues,
+  genderOf,
 } from '../db.js';
 import { club } from '../club.js';
 import { generateLogin, phoneDigits } from '../logins.js';
@@ -380,6 +381,7 @@ export function authRoutes(app: FastifyInstance): void {
     if (!password) throw errors.validation('password', 'required');
     if (password.length < 4 || password.length > 64)
       throw errors.validation('password', password.length < 4 ? 'min' : 'max');
+    const gender = genderOf(b);
     const rules = c.rulesText ?? { ru: '', uz: '', en: '' };
     if ([rules.ru, rules.uz, rules.en].some((r) => (r ?? '').trim()) && optBool(b, 'acceptRules') !== true) {
       throw errors.validation('acceptRules', 'required');
@@ -413,6 +415,7 @@ export function authRoutes(app: FastifyInstance): void {
       bonus: uzs(0),
       muted: false,
       transient: false,
+      gender,
     };
     db.users.push(user);
     const phone = phoneDigits(typed) ? typed : '';

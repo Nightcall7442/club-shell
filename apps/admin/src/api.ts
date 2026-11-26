@@ -1332,7 +1332,12 @@ export interface Client {
   visits: number;
   level: number;
   levelName: string;
+  /** D-104: required for a new account; null — an older account the desk has not set yet; absent from an older server. */
+  gender?: Gender | null;
 }
+
+/** A player's gender (D-104). */
+export type Gender = 'male' | 'female';
 
 export type DeviceKind = 'pc' | 'console' | 'vr' | 'other';
 
@@ -1604,6 +1609,8 @@ export const clubApi = {
     groupId?: string | null;
     password?: string;
     cardId?: string | null;
+    /** D-104: required. */
+    gender: Gender;
   }): Promise<{ client: Client }> => post('/admin/clients', input),
   setClientPassword: (id: string, password: string): Promise<unknown> =>
     post(`/admin/clients/${id}/password`, { password }),

@@ -58,9 +58,18 @@ test.describe('self-signup on the lock screen', () => {
     const form = await openRegistration(page, 'on');
     const submit = form.getByRole('button', { name: ru('lock.register.submit') });
 
-    // The form's own checks first: the name, then two different passwords.
+    // The form's own checks first: the name and the gender (D-104: none picked at first), then two different passwords.
     await submit.click();
     await expect(form.getByText(ru('lock.register.nameRequired'))).toBeVisible();
+    await expect(form.getByText(ru('lock.register.genderRequired'))).toBeVisible();
+    const genders = form.getByRole('radiogroup', { name: ru('lock.register.gender') });
+    await expect(genders.getByRole('radio', { checked: true })).toHaveCount(0);
+    await genders.getByRole('radio', { name: ru('lock.register.genderMale') }).click();
+    await expect(genders.getByRole('radio', { name: ru('lock.register.genderMale') })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await expect(form.getByText(ru('lock.register.genderRequired'))).toHaveCount(0);
     await field(page, ru('lock.register.name')).fill('Самир');
     await field(page, ru('lock.register.login')).fill('samir');
     await field(page, ru('lock.register.password')).fill('4321');
@@ -94,6 +103,7 @@ test.describe('self-signup on the lock screen', () => {
     const form = await openRegistration(page, 'rules');
     await expect(form.getByText('Беречь технику')).toBeVisible();
     await field(page, ru('lock.register.name')).fill('Нодира');
+    await form.getByRole('radio', { name: ru('lock.register.genderFemale') }).click();
     await field(page, ru('lock.register.login')).fill('+998 90 765 43 21');
     await field(page, ru('lock.register.password')).fill('pass');
     await field(page, ru('lock.register.passwordAgain')).fill('pass');

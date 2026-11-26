@@ -242,7 +242,10 @@ async function newClient(
   const username = `e2e-${tag}-${stamp}`.slice(0, 32);
   const displayName = `E2E ${tag} ${stamp.slice(-6)}`;
   const password = `pw-${stamp}`;
-  const res = await request.post(`${API}/admin/clients`, { headers, data: { username, displayName, password } });
+  const res = await request.post(`${API}/admin/clients`, {
+    headers,
+    data: { gender: 'male', username, displayName, password },
+  });
   expect(res.ok(), await res.text()).toBeTruthy();
   const { client } = (await res.json()) as { client: { id: string } };
   return { id: client.id, username, displayName, password };
@@ -681,7 +684,7 @@ test('the price takes the day rate and only the single best discount', async ({ 
     if (groupId) {
       const created = await request.post(`${API}/admin/clients`, {
         headers,
-        data: { username: `e2e-${groupId}-${Date.now()}`, displayName: `E2E ${groupId}`, groupId },
+        data: { gender: 'male', username: `e2e-${groupId}-${Date.now()}`, displayName: `E2E ${groupId}`, groupId },
       });
       expect(created.ok()).toBeTruthy();
       userId = ((await created.json()) as { client: { id: string } }).client.id;
@@ -1087,7 +1090,7 @@ test('a money action retried after a lost answer is applied once (Idempotency-Ke
   const username = `e2e-promo-${Date.now()}`;
   const created = await request.post(`${API}/admin/clients`, {
     headers: auth(owner),
-    data: { username, displayName: 'E2E Промокод' },
+    data: { gender: 'male', username, displayName: 'E2E Промокод' },
   });
   expect(created.ok()).toBeTruthy();
 
@@ -1163,6 +1166,13 @@ test('a client registered at the counter signs in on a PC with the issued passwo
   await expect(page.getByRole('button', { name: 'Создать' })).toBeDisabled();
   await page.getByLabel('Логин').fill(username);
   await page.getByLabel('Номер карты').fill(`CARD-${username}`);
+  // D-104: the gender is required, none picked at first.
+  await page.getByRole('button', { name: 'Создать' }).click();
+  await expect(page.getByText('Укажите пол клиента')).toBeVisible();
+  const genders = page.getByRole('group', { name: 'Пол' });
+  await expect(genders.getByRole('button', { pressed: true })).toHaveCount(0);
+  await genders.getByRole('button', { name: 'Женский' }).click();
+  await expect(page.getByText('Укажите пол клиента')).toHaveCount(0);
   await page.getByRole('button', { name: 'Создать' }).click();
   const issued = page.getByRole('status').filter({ hasText: 'Пароль клиента' }).locator('.font-mono');
   await expect(issued).toHaveText(/^[a-z2-9]{8}$/);
@@ -1246,6 +1256,7 @@ test('a client registered by name alone gets a login from the server, shown once
   await page.getByRole('button', { name: 'Новый клиент' }).click();
   await page.getByLabel('Имя').fill('Турсунов Бобур');
   await expect(page.getByText('Пусто — придумаем по телефону или имени')).toBeVisible();
+  await page.getByRole('group', { name: 'Пол' }).getByRole('button', { name: 'Мужской' }).click();
   await page.getByRole('button', { name: 'Создать' }).click();
 
   const login = page.getByRole('status').filter({ hasText: 'Логин клиента придуман сервером' }).locator('.font-mono');
@@ -1259,6 +1270,7 @@ test('a client registered by name alone gets a login from the server, shown once
   // The next client of the same name gets the next free login.
   await page.getByRole('button', { name: 'Новый клиент' }).click();
   await page.getByLabel('Имя').fill('Турсунов Бобур');
+  await page.getByRole('group', { name: 'Пол' }).getByRole('button', { name: 'Мужской' }).click();
   await page.getByRole('button', { name: 'Создать' }).click();
   await expect(login).toHaveText(/^tursunov\.bobur\d+$/);
   expect(await login.textContent()).not.toBe(made);
@@ -1273,7 +1285,7 @@ test("the owner's top-up stays out of the cashier's shift and shows in «Опе�
   const username = `e2e-own-${Date.now()}`;
   const created = await request.post(`${API}/admin/clients`, {
     headers: owner,
-    data: { username, displayName: 'E2E Владелец' },
+    data: { gender: 'male', username, displayName: 'E2E Владелец' },
   });
   expect(created.ok()).toBeTruthy();
   await closeShift(request);
@@ -1321,7 +1333,7 @@ test('the owner deletes a client with money on the balance, writing it off (D-10
   const username = `e2e-del-${Date.now()}`;
   const created = await request.post(`${API}/admin/clients`, {
     headers: owner,
-    data: { username, displayName: 'E2E Удаление' },
+    data: { gender: 'male', username, displayName: 'E2E Удаление' },
   });
   expect(created.ok()).toBeTruthy();
   const { client } = (await created.json()) as { client: { id: string } };
@@ -1359,6 +1371,7 @@ test('the owner lets players create their own account on the PC (D-92)', async (
       username: `self-${Date.now()}`,
       password: '4321',
       acceptRules: true,
+      gender: 'female',
     });
   try {
     // Off until the owner switches it on.
@@ -1411,12 +1424,12 @@ test('a cashier without an open shift has to open one, with the float the last s
     (await request.post(`${API}/admin/shift/close`, { headers, data: { closingCash: 7_700_000 } })).ok(),
   ).toBeTruthy();
 
-  // Without a shift the counter takes no money.
+  // Without a shift the cashier takes no money (the owner's own money needs none, D-101).
   const overview = (await (await request.get(`${API}/admin/overview`, { headers })).json()) as {
     users: { id: string }[];
   };
   const refused = await request.post(`${API}/admin/wallet/topup`, {
-    headers,
+    headers: auth(await tokenFor(request, CASHIER_PIN)),
     data: { userId: overview.users[0]!.id, amount: 1_000_000, method: 'cash' },
   });
   expect(refused.status()).toBe(409);
@@ -1450,7 +1463,7 @@ test('a typed amount topped up by card from the client search lands in the X-rep
   const username = `e2e-card-${Date.now()}`;
   const created = await request.post(`${API}/admin/clients`, {
     headers,
-    data: { username, displayName: 'E2E Карта' },
+    data: { gender: 'male', username, displayName: 'E2E Карта' },
   });
   expect(created.ok()).toBeTruthy();
   // A fresh shift: its X-report holds only this top-up.
@@ -1492,7 +1505,12 @@ test('a client is seated from the map: the pay box takes what the balance lacks,
   const headers = auth(await tokenFor(request, OWNER_PIN));
   const username = `e2e-seat-${Date.now()}`;
   expect(
-    (await request.post(`${API}/admin/clients`, { headers, data: { username, displayName: 'E2E Посадка' } })).ok(),
+    (
+      await request.post(`${API}/admin/clients`, {
+        headers,
+        data: { gender: 'male', username, displayName: 'E2E Посадка' },
+      })
+    ).ok(),
   ).toBeTruthy();
   const overview = (await (await request.get(`${API}/admin/overview`, { headers })).json()) as {
     seats: { pc: { id: string; number: number; status: string }; session: unknown }[];

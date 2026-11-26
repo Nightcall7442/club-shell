@@ -276,10 +276,13 @@ public sealed record AdminStaffList(IReadOnlyList<AdminStaffMember> Items);
 
 public sealed record AdminStaffCreateResponse(string Id);
 
-/// <summary><c>AdminClient</c>: the user, the club profile and loyalty; <c>bonus</c> is always 0 (D-9), <c>telegram</c> is never sent.</summary>
+/// <summary>
+/// <c>AdminClient</c>: the user, the club profile and loyalty; <c>bonus</c> is always 0 (D-9), <c>telegram</c> is never sent.
+/// <c>gender</c> (beyond the contract, D-104): <c>male | female</c>, null — not given (an account made before).
+/// </summary>
 public sealed record AdminClient(
     Guid Id, string Username, string DisplayName, string Role, Money Balance, Money Bonus, string? GroupId, string Note, bool Blacklisted,
-    string Phone, int? BirthYear, string? CardId, long Spent, int Visits, int Level, string LevelName);
+    string Phone, int? BirthYear, string? CardId, long Spent, int Visits, int Level, string LevelName, string? Gender = null);
 
 public sealed record AdminClientList(IReadOnlyList<AdminClient> Items);
 
@@ -290,7 +293,7 @@ public sealed record AdminClientList(IReadOnlyList<AdminClient> Items);
 /// </summary>
 public sealed record AdminClientLookupItem(
     Guid Id, string DisplayName, string Username, string? PhoneTail, Money Balance, Money Bonus, string? CardId, AdminClientPlaying? Playing,
-    bool Blacklisted);
+    bool Blacklisted, string? Gender = null);
 
 public sealed record AdminClientPlaying(Guid PcId, string PcName);
 
@@ -314,11 +317,16 @@ public sealed record AdminStaffCreateRequest(string? Name, string? Role, string?
 
 public sealed record AdminStaffUpdateRequest(string? Name, bool? Active, string? Pin, bool? PcService = null, bool? DebtWriteOff = null);
 
-/// <summary><c>telegram</c> is prohibited: not a member, so the binder skips it (accepted and ignored).</summary>
+/// <summary>
+/// <c>telegram</c> is prohibited: not a member, so the binder skips it (accepted and ignored). <c>gender</c> (beyond the
+/// contract, D-104): required, <c>male | female</c>.
+/// </summary>
 public sealed record AdminClientCreateRequest(
-    string? DisplayName, string? Username, string? Phone, int? BirthYear, string? GroupId, string? Password, string? CardId);
+    string? DisplayName, string? Username, string? Phone, int? BirthYear, string? GroupId, string? Password, string? CardId, string? Gender = null);
 
-public sealed record AdminClientUpdateRequest(string? DisplayName, string? GroupId, string? Note, string? Phone, int? BirthYear, bool? Blacklisted);
+/// <summary><c>gender</c> (beyond the contract, D-104): <c>male | female</c> when present; it is never cleared.</summary>
+public sealed record AdminClientUpdateRequest(
+    string? DisplayName, string? GroupId, string? Note, string? Phone, int? BirthYear, bool? Blacklisted, string? Gender = null);
 
 public sealed record AdminClientCardRequest(string? CardId);
 
