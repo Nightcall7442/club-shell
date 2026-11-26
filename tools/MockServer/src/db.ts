@@ -100,6 +100,15 @@ export interface UserRecord extends User {
   bonus: Money;
   muted: boolean;
   transient: boolean;
+  /** D-104: required on a new account; absent or null — an older one. */
+  gender?: 'male' | 'female' | null;
+}
+
+/** D-104: the given gender, else `400 gender required` (none) or `enum` (anything else). */
+export function genderOf(b: Record<string, unknown>): 'male' | 'female' {
+  const g = b['gender'];
+  if (g === 'male' || g === 'female') return g;
+  throw errors.validation('gender', g === undefined || g === null || g === '' ? 'required' : 'enum');
 }
 
 export interface PcRecord extends Pc {

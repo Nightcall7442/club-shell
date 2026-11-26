@@ -702,21 +702,21 @@ public sealed class PlayerAccountTests : IDisposable
         _server.RegisterPlayerAsync(Arg.Any<RegisterAuthRequest>(), Arg.Any<CancellationToken>())
             .Returns(new AuthResponse(made, null, "token", "refresh", T0.AddHours(8), OfflineSessionStore.HashPassword("4321", 1000)));
 
-        IpcEnvelope reply = await SendAsync(IpcMessages.Auth.Register, new AuthRegisterRequest(" Самир ", " Samir ", "4321", AcceptRules: true));
+        IpcEnvelope reply = await SendAsync(IpcMessages.Auth.Register, new AuthRegisterRequest(" Самир ", " Samir ", "4321", AcceptRules: true, Gender: "male"));
 
         reply.IsError.Should().BeFalse(reply.Error?.Message);
         AuthLoginResponse signedIn = reply.PayloadAs<AuthLoginResponse>()!;
         (signedIn.User.Id, signedIn.Mode, signedIn.Session).Should().Be((made.Id, ConnectivityState.Online, null));
         _users.User!.Id.Should().Be(made.Id, "the new player is signed in on this PC");
         await _server.Received(1).RegisterPlayerAsync(
-            Arg.Is<RegisterAuthRequest>(r => r.PcId == PcId && r.DisplayName == "Самир" && r.Username == "Samir" && r.Password == "4321" && r.AcceptRules == true),
+            Arg.Is<RegisterAuthRequest>(r => r.PcId == PcId && r.DisplayName == "Самир" && r.Username == "Samir" && r.Password == "4321" && r.AcceptRules == true && r.Gender == "male"),
             Arg.Any<CancellationToken>());
 
         // Kept for an offline sign-in under the login the server stored.
         (await _store.TryOfflineLoginAsync("samir", "4321", CancellationToken.None))!.Id.Should().Be(made.Id);
 
         // Nobody registers over a signed-in player.
-        IpcEnvelope again = await SendAsync(IpcMessages.Auth.Register, new AuthRegisterRequest("Другой", "other", "4321"));
+        IpcEnvelope again = await SendAsync(IpcMessages.Auth.Register, new AuthRegisterRequest("Другой", "other", "4321", Gender: "male"));
         again.Error!.Code.Should().Be(ErrorCode.Conflict);
         again.Error.DetailsAs<ReasonDetails>()!.Reason.Should().Be("sessionActive");
     }
@@ -724,17 +724,20 @@ public sealed class PlayerAccountTests : IDisposable
     [Fact]
     public async Task Registration_checks_the_fields_needs_the_server_and_passes_its_refusals_on()
     {
-        IpcEnvelope offline = await SendAsync(IpcMessages.Auth.Register, new AuthRegisterRequest("Самир", "samir", "4321"));
+        IpcEnvelope offline = await SendAsync(IpcMessages.Auth.Register, new AuthRegisterRequest("Самир", "samir", "4321", Gender: "male"));
         offline.Error!.Code.Should().Be(ErrorCode.AgentOffline, "an account is never made from the offline cache");
 
         _link.Connectivity = ConnectivityState.Online;
         foreach (var (request, field, reason) in new[]
                  {
-                     (new AuthRegisterRequest(" ", "samir", "4321"), "displayName", "required"),
+                     (new AuthRegisterRequest(" ", "samir", "4321", Gender: "male"), "displayName", "required"),
                      (new AuthRegisterRequest(new string('я', 65), "samir", "4321"), "displayName", "max"),
                      (new AuthRegisterRequest("Самир", new string('x', 33), "4321"), "username", "max"),
                      (new AuthRegisterRequest("Самир", "samir", "123"), "password", "min"),
                      (new AuthRegisterRequest("Самир", "samir", null), "password", "required"),
+                     // D-104: the gender is required, male or female.
+                     (new AuthRegisterRequest("Самир", "samir", "4321"), "gender", "required"),
+                     (new AuthRegisterRequest("Самир", "samir", "4321", Gender: "other"), "gender", "enum"),
                  })
         {
             IpcEnvelope refused = await SendAsync(IpcMessages.Auth.Register, request);
@@ -745,7 +748,7 @@ public sealed class PlayerAccountTests : IDisposable
         await _server.DidNotReceive().RegisterPlayerAsync(Arg.Any<RegisterAuthRequest>(), Arg.Any<CancellationToken>());
         _server.RegisterPlayerAsync(Arg.Any<RegisterAuthRequest>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(ServerError(ErrorCode.Forbidden, HttpStatusCode.Forbidden, """{ "reason": "selfSignupDisabled" }"""));
-        IpcEnvelope disabled = await SendAsync(IpcMessages.Auth.Register, new AuthRegisterRequest("Самир", "samir", "4321"));
+        IpcEnvelope disabled = await SendAsync(IpcMessages.Auth.Register, new AuthRegisterRequest("Самир", "samir", "4321", Gender: "male"));
         disabled.Error!.Code.Should().Be(ErrorCode.Forbidden);
         disabled.Error.DetailsAs<ReasonDetails>()!.Reason.Should().Be("selfSignupDisabled");
         _users.User.Should().BeNull();

@@ -468,7 +468,7 @@ public sealed class SessionService(
         if (row.ChargedTotal > 0)
         {
             await Ledger.PostAsync(c, tx, buyer.Id, allowOverdraft: replay, now, new LedgerLine(
-                "charge", -row.ChargedTotal, $"Сеанс {minutes} мин · {tariff.Name}", club.Id, row.Id, pc.Id, StaffId: staff?.StaffId, Meta: quote));
+                "charge", -row.ChargedTotal, $"Сеанс {minutes} мин · {tariff.Name}", club.Id, row.Id, pc.Id, StaffId: staff?.StaffId, Meta: quote, OwnerOp: staff?.OwnerOp ?? false));
             effects.Wallets.Add(buyer.Id);
         }
 
@@ -754,7 +754,7 @@ public sealed class SessionService(
         {
             await Ledger.PostAsync(c, tx, s.UserId, allowOverdraft: false, now, new LedgerLine(
                 "charge", -quote.Total, $"Продление +{minutes} мин · {tariff.Name}", club.Id, s.Id, s.PcId, StaffId: staff?.StaffId,
-                Meta: new { quote, extend = "online" }));
+                Meta: new { quote, extend = "online" }, OwnerOp: staff?.OwnerOp ?? false));
             effects.Wallets.Add(s.UserId);
         }
 

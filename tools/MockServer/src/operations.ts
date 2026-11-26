@@ -8,6 +8,7 @@
  */
 import { isObject, db, errors, findPc, findUser } from './db.js';
 import {
+  OWNER_TRANSACTIONS,
   PAYOUT_DESCRIPTION,
   club,
   openShift,
@@ -72,6 +73,8 @@ export interface Operation {
   voidOfAt?: string | null;
   /** A move: the PC the session came from (`pc` is where it went). */
   fromPc?: { id: string; name: string } | null;
+  /** The owner's own operation (D-101): in no shift. */
+  owner?: boolean;
 }
 
 /** The journal entry as a feed row; null for what the feed does not show. */
@@ -130,6 +133,7 @@ function toOperation(e: AuditEntry): Operation | null {
   }
   const from = kind === 'sessionMove' ? findPc(s('fromPcId') ?? '') : undefined;
   return {
+    ...(e.owner ? { owner: true } : {}),
     id: e.id,
     at: e.at,
     kind,
@@ -228,7 +232,7 @@ function today(): {
   let sessions = 0;
   let shop = 0;
   for (const tx of db.transactions) {
-    if (tx.createdAt < from) continue;
+    if (tx.createdAt < from || OWNER_TRANSACTIONS.has(tx.id)) continue;
     const a = tx.amount.amount;
     if (tx.type === 'topUp') {
       byMethod[topUpMethod(tx.description)] += a;
@@ -255,7 +259,7 @@ function today(): {
  */
 export function operationsPage(
   me: StaffRecord,
-  q: { shiftId?: string; before?: string; limit?: string; kinds?: string },
+  q: { shiftId?: string; before?: string; limit?: string; kinds?: string; owner?: string },
 ): {
   shift: { id: string; staffName: string; openedAt: string; closedAt: string | null; closedBy: string | null } | null;
   items: Operation[];
@@ -279,8 +283,13 @@ export function operationsPage(
   }
   const cursor = q.before ? decode(q.before) : null;
   const c = club();
+  // D-101: `owner=true` lists the owner's own operations (owner only), which no shift has.
+  const ownerOps = q.owner === 'true';
+  if (ownerOps && me.role !== 'owner') throw errors.forbidden('ownerOnly');
   let shift: ShiftRecord | null;
-  if (q.shiftId) {
+  if (ownerOps) {
+    shift = null;
+  } else if (q.shiftId) {
     shift = c.shifts.find((s) => s.id === q.shiftId) ?? null;
     if (!shift) throw errors.notFound('shift');
     const lastClosed = c.shifts.filter((s) => s.closedAt !== null).at(-1);
@@ -289,14 +298,15 @@ export function operationsPage(
   } else {
     shift = openShift();
   }
-  const rows = shift
-    ? c.audit
-        .filter((e) => e.shiftId === shift.id)
-        .map(toOperation)
-        .filter((o): o is Operation => o !== null && (kinds === null || kinds.has(o.kind)))
-        .filter((o) => !cursor || o.at < cursor.at || (o.at === cursor.at && o.id < cursor.id))
-        .sort((a, b) => b.at.localeCompare(a.at) || b.id.localeCompare(a.id))
-    : [];
+  const rows =
+    shift || ownerOps
+      ? c.audit
+          .filter((e) => (ownerOps ? e.owner === true : e.shiftId === shift?.id))
+          .map(toOperation)
+          .filter((o): o is Operation => o !== null && (kinds === null || kinds.has(o.kind)))
+          .filter((o) => !cursor || o.at < cursor.at || (o.at === cursor.at && o.id < cursor.id))
+          .sort((a, b) => b.at.localeCompare(a.at) || b.id.localeCompare(a.id))
+      : [];
   const items = rows.slice(0, limit);
   const last = items.at(-1);
   return {

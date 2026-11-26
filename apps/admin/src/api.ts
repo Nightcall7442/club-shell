@@ -538,7 +538,8 @@ export interface SaleLine {
 export interface Sale {
   id: string;
   at: string;
-  shiftId: string;
+  /** Null: the owner's own sale (D-101), in no shift. */
+  shiftId: string | null;
   method: SaleMethod;
   total: number;
   staffName: string;
@@ -942,6 +943,8 @@ export interface Operation {
   voidOfAt?: string | null;
   /** A move: the PC the session came from (`pc` is where it went). */
   fromPc?: { id: string; name: string } | null;
+  /** The owner's own operation (D-101): in no shift; `drawer` is cash the owner took or gave in person. */
+  owner?: boolean | null;
 }
 
 /**
@@ -1179,6 +1182,8 @@ export interface AuditEntry {
   detail: string;
   /** Facts of the entry; a session's `quote` is an object. */
   meta: Record<string, unknown>;
+  /** The owner's own money operation (D-101): in no shift; absent from an older server. */
+  owner?: boolean;
 }
 
 export type FlagKind = 'shortfall' | 'earlyEnds' | 'earlyEnd' | 'discount' | 'sameClient' | 'noShift' | 'bigCash';
@@ -1327,7 +1332,12 @@ export interface Client {
   visits: number;
   level: number;
   levelName: string;
+  /** D-104: required for a new account; null — an older account the desk has not set yet; absent from an older server. */
+  gender?: Gender | null;
 }
+
+/** A player's gender (D-104). */
+export type Gender = 'male' | 'female';
 
 export type DeviceKind = 'pc' | 'console' | 'vr' | 'other';
 
@@ -1552,12 +1562,22 @@ export const clubApi = {
     input: { kind: CashMoveKind; amount: number; reasonCode: CashReason; note?: string | null },
     key: string,
   ): Promise<{ movement: CashMovement; expectedCash: number }> => postMoney('/admin/shift/cash', input, key),
-  /** The shift's journal, newest first (the open shift by default), and today's money by method. */
+  /**
+   * The shift's journal, newest first (the open shift by default), and today's money by method; `owner` — the owner's own
+   * operations instead (D-101, owner only), which no shift has.
+   */
   operations: (
-    q: { shiftId?: string | null; before?: string | null; kinds?: OperationKind[]; limit?: number } = {},
+    q: {
+      shiftId?: string | null;
+      before?: string | null;
+      kinds?: OperationKind[];
+      limit?: number;
+      owner?: boolean;
+    } = {},
   ): Promise<OperationsPage> => {
     const params = new URLSearchParams();
-    if (q.shiftId) params.set('shiftId', q.shiftId);
+    if (q.owner) params.set('owner', 'true');
+    else if (q.shiftId) params.set('shiftId', q.shiftId);
     if (q.before) params.set('before', q.before);
     if (q.kinds && q.kinds.length > 0) params.set('kinds', q.kinds.join(','));
     if (q.limit) params.set('limit', String(q.limit));
@@ -1597,6 +1617,8 @@ export const clubApi = {
     groupId?: string | null;
     password?: string;
     cardId?: string | null;
+    /** D-104: required. */
+    gender: Gender;
   }): Promise<{ client: Client }> => post('/admin/clients', input),
   setClientPassword: (id: string, password: string): Promise<unknown> =>
     post(`/admin/clients/${id}/password`, { password }),
@@ -1604,8 +1626,12 @@ export const clubApi = {
     post(`/admin/clients/${id}/card`, { cardId }),
   updateClient: (id: string, input: Partial<Client>): Promise<{ client: Client }> =>
     patch(`/admin/clients/${id}`, input),
-  /** D-94, owner only: `409 {reason: playing}` while it plays, `409 {reason: balance, balance}` with money or a debt left. */
-  deleteClient: (id: string): Promise<unknown> => del(`/admin/clients/${id}`),
+  /**
+   * D-94, owner only: `409 {reason: playing}` while it plays, `409 {reason: balance, balance}` with money or a debt left.
+   * `writeOff` (D-102): the balance shown (minor units, a debt negative) is written off in the same step.
+   */
+  deleteClient: (id: string, writeOff?: number): Promise<unknown> =>
+    del(`/admin/clients/${id}${writeOff ? `?writeOff=${writeOff}` : ''}`),
   clientTransactions: (id: string): Promise<{ items: Transaction[] }> => call(`/admin/clients/${id}/transactions`),
   redeemPromo: (userId: string, code: string): Promise<{ balance: Money }> =>
     postMoney('/admin/promo/redeem', { userId, code }),

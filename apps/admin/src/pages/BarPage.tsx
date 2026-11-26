@@ -42,6 +42,7 @@ import { PRODUCT_CATEGORY_LABEL } from '@/labels';
 import {
   PayBox,
   ReceiptButton,
+  OwnerOpNote,
   ShiftClosedNote,
   TopUpSheet,
   methodName,
@@ -946,6 +947,7 @@ export default function BarPage(): JSX.Element {
 
           {!empty && (clientMode ? client !== null : true) && (
             <section aria-label={t('Оплата')} className="flex flex-col gap-3 border-t border-accent/[0.08] pt-4">
+              <OwnerOpNote />
               {client && (!viaMethod || frozen?.via === 'balance') && (
                 <>
                   <ShiftClosedNote />

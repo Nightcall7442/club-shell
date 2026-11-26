@@ -1291,6 +1291,10 @@ cmd('auth_register', (args): AuthLoginResponse => {
   if (password.length < 4) {
     mockError('validation', 'password too short', { field: 'password', reason: password ? 'min' : 'required' });
   }
+  // D-104: the player's gender is required, male or female.
+  if (req.gender !== 'male' && req.gender !== 'female') {
+    mockError('validation', 'gender is required', { field: 'gender', reason: req.gender ? 'enum' : 'required' });
+  }
   const hasRules = [club.rules?.ru, club.rules?.uz, club.rules?.en].some((r) => (r ?? '').trim().length > 0);
   if (hasRules && req.acceptRules !== true) {
     mockError('validation', 'the club rules are not accepted', { field: 'acceptRules', reason: 'required' });

@@ -198,7 +198,7 @@ public sealed class ClientLookupTests(ServerFixture server) : LedgerCheckedTest(
 
         var found = (await LookupAsync(cashier, "karim")).GetProperty("items");
         Assert.Equal(
-            """{"id":"%id","displayName":"Карим Валиев","username":"karim","phoneTail":"4521","balance":{"amount":0,"currency":"UZS"},"bonus":{"amount":0,"currency":"UZS"},"cardId":"CARD-77","playing":null,"blacklisted":false}"""
+            """{"id":"%id","displayName":"Карим Валиев","username":"karim","phoneTail":"4521","balance":{"amount":0,"currency":"UZS"},"bonus":{"amount":0,"currency":"UZS"},"cardId":"CARD-77","playing":null,"blacklisted":false,"gender":"male"}"""
                 .Replace("%id", karim.ToString(), StringComparison.Ordinal),
             found[0].GetRawText());
         var plain = (await LookupAsync(cashier, "farrux")).GetProperty("items")[0];
@@ -265,7 +265,7 @@ public sealed class ClientLookupTests(ServerFixture server) : LedgerCheckedTest(
     }
 
     private async Task<Guid> AddAsync(string token, object body) =>
-        (await ExpectAsync(Server, 200, HttpMethod.Post, "/clients", token, body)).GetProperty("client").GetProperty("id").GetGuid();
+        (await ExpectAsync(Server, 200, HttpMethod.Post, "/clients", token, Players.WithGender(body))).GetProperty("client").GetProperty("id").GetGuid();
 
     private async Task<List<Guid>> IdsAsync(string token, string q) =>
         [.. (await LookupAsync(token, q)).GetProperty("items").EnumerateArray().Select(c => c.GetProperty("id").GetGuid())];

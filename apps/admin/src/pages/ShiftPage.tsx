@@ -51,6 +51,9 @@ const uzs = (minor: number | null | undefined): string =>
 /** Each language by its own name, as language pickers do. */
 const LANG_NAME: Record<Lang, string> = { ru: 'Русский', uz: 'Oʻzbekcha', en: 'English' }; // i18n-ignore
 
+/** The feed choice of the owner's own operations (D-101): not a shift id. */
+const OWNER_FEED = 'owner';
+
 function dateTime(iso: string | null): string {
   if (!iso) return '—';
   return new Date(iso).toLocaleString(dateLocale(), {
@@ -471,13 +474,15 @@ export default function ShiftPage({ isOwner = false }: { isOwner?: boolean }): J
   const diff = counted - expected;
   const debtTotal = debts.reduce((a, d) => a + d.debt.amount, 0);
 
-  // The feed: the open shift by default; a cashier may also read the last closed one, the owner any.
+  // The feed: the open shift by default; a cashier may also read the last closed one, the owner any — and the owner's own
+  // operations (D-101), which are in no shift.
   const feedChoices = [
     ...(shift ? [{ id: shift.id, label: t('Текущая смена') }] : []),
     ...(isOwner ? history : history.slice(0, 1)).map((s) => ({
       id: s.id,
       label: `${dateTime(s.openedAt)} · ${s.staffName}`,
     })),
+    ...(isOwner ? [{ id: OWNER_FEED, label: t('Операции владельца') }] : []),
   ];
   const feedId = feedShift && feedChoices.some((c) => c.id === feedShift) ? feedShift : (feedChoices[0]?.id ?? '');
   const feedKinds: OperationKind[] = FEED_FILTERS.find((f) => f.id === feedFilter)?.kinds ?? [];
@@ -562,7 +567,7 @@ export default function ShiftPage({ isOwner = false }: { isOwner?: boolean }): J
         >
           {hasFeed && (
             <Section
-              title={t('Операции смены')}
+              title={feedId === OWNER_FEED ? t('Операции владельца') : t('Операции смены')}
               className={clsx(twoColumns && 'xl:h-full')}
               actions={
                 feedChoices.length > 1 ? (
@@ -593,7 +598,8 @@ export default function ShiftPage({ isOwner = false }: { isOwner?: boolean }): J
               <div className={clsx('flex min-h-0 flex-1 flex-col', twoColumns && 'xl:relative xl:min-h-[24rem]')}>
                 <OperationsFeed
                   placement="page"
-                  shiftId={feedId}
+                  shiftId={feedId === OWNER_FEED ? null : feedId}
+                  owner={feedId === OWNER_FEED}
                   kinds={feedKinds}
                   className={clsx('max-h-[32rem]', twoColumns && 'xl:absolute xl:inset-0 xl:max-h-none')}
                 />

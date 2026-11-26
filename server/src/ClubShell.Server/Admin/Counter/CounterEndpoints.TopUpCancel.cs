@@ -40,7 +40,9 @@ public static partial class CounterEndpoints
     /// (<c>409 cashShort {available}</c>). Ledger: a <c>topUp</c> row of −amount in the same method and a <c>bonus</c> row of
     /// −bonus (<c>meta {kind: topUpCancel, cancelOf}</c>, <c>ref</c> = the top-up), so every sum by method — X/Z, the
     /// expected cash, «Принято за смену», the reports, a guest's cash payable — nets it out by itself. Journal
-    /// <c>topUpCancel</c>; <c>suspicious</c> as for a bar void. Staff only; <c>Idempotency-Key</c> required, strict.
+    /// <c>topUpCancel</c>; <c>suspicious</c> as for a bar void. Staff only; <c>Idempotency-Key</c> required, strict. The owner's
+/// own top-up (D-101, in no shift): only the owner (<c>403 ownerOnly</c>), at any time, no shift or drawer; its reversal and
+/// correction are the owner's own too. The owner's correction of a cashier's top-up stays in that shift.
     /// </summary>
     private static async Task<IResult> TopUpCancelAsync(
         HttpContext context, [FromBody] JsonElement body, IdempotencyStore store, SessionService sessions, AutomationService automation, ILoggerFactory logs)
@@ -68,7 +70,7 @@ public static partial class CounterEndpoints
             var now = sessions.Clock.GetUtcNow();
             var top = await c.QuerySingleOrDefaultAsync<TopUpRow>(
                 """
-                SELECT l.id, l.op_id, l.user_id, l.amount, l.method, l.staff_id, l.shift_id, l.created_at, u.display_name AS who
+                SELECT l.id, l.op_id, l.user_id, l.amount, l.method, l.staff_id, l.shift_id, l.created_at, l.owner_op, u.display_name AS who
                 FROM ledger_entries l JOIN users u ON u.id = l.user_id
                 WHERE l.id = @transactionId AND l.club_id = @ClubId AND l.type = 'topUp'
                 """,
@@ -86,15 +88,21 @@ public static partial class CounterEndpoints
 
             // Only a top-up the drawer took on its own: a seat's payment went into the session at once, a debt payment
             // would bring the debt back, the API key's money never was in the drawer, and a reversal row is no top-up.
-            var journal = top.Amount <= 0 || top.StaffId is null || top.ShiftId is null ? null : await c.QuerySingleOrDefaultAsync<string?>(
+            // The owner's own top-up (D-101) has no shift: only the owner takes it back, at any time, and no drawer is involved.
+            var journal = top.Amount <= 0 || top.StaffId is null || (top.ShiftId is null && !top.OwnerOp) ? null : await c.QuerySingleOrDefaultAsync<string?>(
                 """
                 SELECT meta::text FROM audit_entries
-                WHERE club_id = @ClubId AND shift_id = @ShiftId AND action = 'topUp' AND meta ->> 'transactionId' = @id
+                WHERE club_id = @ClubId AND shift_id IS NOT DISTINCT FROM @ShiftId AND action = 'topUp' AND meta ->> 'transactionId' = @id
                 """,
                 new { staff.ClubId, top.ShiftId, id = transactionId.ToString() }, tx);
             if (journal is null || Flag(journal, "forSession") || Flag(journal, "debt"))
             {
                 throw SessionService.Conflict("notCorrectable");
+            }
+
+            if (top.OwnerOp && !staff.IsOwner)
+            {
+                throw ApiException.Forbidden("ownerOnly", "Only the owner takes back the owner's own top-up");
             }
 
             if (!staff.IsOwner && top.StaffId != staff.StaffId)
@@ -117,15 +125,19 @@ public static partial class CounterEndpoints
 
             // Cash going back takes the strong lock — wallet → shift, nothing after it (§4.4), as a payout; other methods
             // only keep the close out until this commits.
-            var shift = await ShiftEndpoints.LockOpenShiftAsync(c, tx, staff.ClubId, strong: cashBack > 0);
-            if (shift.Id != top.ShiftId)
+            ShiftEndpoints.OpenShiftLock? shift = null;
+            if (!top.OwnerOp)
             {
-                throw SessionService.Conflict("topUpShiftClosed");
-            }
+                shift = await ShiftEndpoints.LockOpenShiftAsync(c, tx, staff.ClubId, strong: cashBack > 0);
+                if (shift.Id != top.ShiftId)
+                {
+                    throw SessionService.Conflict("topUpShiftClosed");
+                }
 
-            if (cashBack > 0)
-            {
-                await ShiftEndpoints.EnsureDrawerAsync(c, tx, shift, cashBack);
+                if (cashBack > 0)
+                {
+                    await ShiftEndpoints.EnsureDrawerAsync(c, tx, shift, cashBack);
+                }
             }
 
             var bonus = await c.ExecuteScalarAsync<long>(
@@ -138,7 +150,7 @@ public static partial class CounterEndpoints
                 }
 
                 // The right top-up first: the balance never dips below zero between the two, and its bonus is the tier's.
-                paid = await PostTopUpAsync(c, tx, staff, effects, top.UserId, right, method, now, correctionOf: transactionId) with { ReachedBefore = top.Amount };
+                paid = await PostTopUpAsync(c, tx, staff, effects, top.UserId, right, method, now, correctionOf: transactionId, ownerOp: top.OwnerOp) with { ReachedBefore = top.Amount };
             }
 
             var balance = await c.ExecuteScalarAsync<long>("SELECT main_balance FROM wallets WHERE user_id = @UserId", new { top.UserId }, tx);
@@ -157,16 +169,20 @@ public static partial class CounterEndpoints
             var meta = new { kind = TopUpCancelKind, cancelOf = transactionId, reasonCode = reason };
             balance = await Ledger.PostAsync(c, tx, top.UserId, allowOverdraft: false, now,
                 new LedgerLine("topUp", -top.Amount, "Отмена: " + char.ToLowerInvariant(TopUpDescription(method)[0]) + TopUpDescription(method)[1..],
-                    staff.ClubId, Method: method, StaffId: staff.StaffId, Meta: meta, Id: id, ShiftRequired: true, Ref: transactionId.ToString()),
-                new LedgerLine("bonus", -bonus, "Отмена бонуса за пополнение", staff.ClubId, StaffId: staff.StaffId, Meta: meta, Ref: transactionId.ToString()));
+                    staff.ClubId, Method: method, StaffId: staff.StaffId, Meta: meta, Id: id, ShiftRequired: true, Ref: transactionId.ToString(), OwnerOp: top.OwnerOp),
+                new LedgerLine("bonus", -bonus, "Отмена бонуса за пополнение", staff.ClubId, StaffId: staff.StaffId, Meta: meta, Ref: transactionId.ToString(),
+                    OwnerOp: top.OwnerOp));
             await Audit.WriteAsync(c, tx, staff, now, "topUpCancel", top.UserId, amount: top.Amount, detail: top.Who,
                 meta: new
                 {
                     method, bonus, transactionId = id, cancelOf = transactionId, topUpAt = ServerJson.FormatTime(top.CreatedAt), reasonCode = reason, note,
                     correctedTo = paid?.Amount, correctedId = paid?.Id,
                 },
-                shiftId: shift.Id);
-            await ControlAlerts.TopUpCancelAsync(c, tx, staff, shift.Id, top.Amount, top.Who, now);
+                shiftId: shift?.Id, ownerOp: top.OwnerOp);
+            if (shift is not null)
+            {
+                await ControlAlerts.TopUpCancelAsync(c, tx, staff, shift.Id, top.Amount, top.Who, now);
+            }
             effects.Wallets.Add(top.UserId);
             return new IdempotentResult(StatusCodes.Status200OK, AdminJson.ToElement(new AdminTopUpCancelResponse(
                 new AdminTopUpCancelled(id, now, transactionId, top.CreatedAt, top.Amount, bonus, method, reason, note, staff.Name),
@@ -195,6 +211,7 @@ public static partial class CounterEndpoints
         public Guid? StaffId { get; init; }
         public Guid? ShiftId { get; init; }
         public DateTimeOffset CreatedAt { get; init; }
+        public bool OwnerOp { get; init; }
         public string Who { get; init; } = "";
     }
 }
