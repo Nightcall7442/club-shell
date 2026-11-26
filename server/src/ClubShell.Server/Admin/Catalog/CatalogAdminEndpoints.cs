@@ -19,13 +19,16 @@ namespace ClubShell.Server.Admin;
 /// how the game starts (<c>launcherAppId</c>, <c>exePath</c>, <c>args</c>), <c>description</c>, <c>custom</c> — the
 /// club's own game (added or changed by the owner), which the seed no longer touches — and <c>videoUrl</c>, the trailer
 /// the shell plays behind the game's art, and <c>zones</c>, the zones the game is offered in (empty = every zone);
-/// <c>trailer</c> — the club server's copy of it and how far it got (D-97, <see cref="AdminTrailer"/>), null for none.
+/// <c>trailer</c> — the club server's copy of it and how far it got (D-97, <see cref="AdminTrailer"/>), null for none;
+/// <c>runAsAdmin</c> — «Запускать с правами администратора» of an exe game, and <c>gameProcessNames</c> — the image names
+/// of the game's real process a launcher hands over to (ICCup → <c>war3.exe</c>).
 /// </summary>
 public sealed record AdminGame(
     Guid Id, string Title, string? CoverUrl, bool Installed, string Launcher, IReadOnlyList<string> Category, bool Hidden, bool Featured,
     IReadOnlyList<string> SettingsPaths, string? LauncherAppId = null, string? ExePath = null, string? Args = null, string Description = "",
     bool Custom = false, string? VideoUrl = null, IReadOnlyList<string>? Zones = null, IReadOnlyList<GameRegistryValue>? RegistryValues = null,
-    bool RunAsInvoker = false, AdminElevationFailure? ElevationFailure = null, AdminTrailer? Trailer = null);
+    bool RunAsInvoker = false, AdminElevationFailure? ElevationFailure = null, AdminTrailer? Trailer = null,
+    bool RunAsAdmin = false, IReadOnlyList<string>? GameProcessNames = null);
 
 /// <summary>
 /// The newest launch of the game refused for want of administrator rights since the card was last saved (SHELL_CHANGES 96,
@@ -382,9 +385,56 @@ public static partial class CatalogAdminEndpoints
             throw ApiException.Validation("category", "format");
         }
 
+        // Administrator rights or none: both at once is a contradiction, not a choice. Only an exe game starts its own process.
+        if (r.RunAsAdmin == true && r.RunAsInvoker == true)
+        {
+            throw ApiException.Validation("runAsAdmin", "conflict");
+        }
+
+        bool exe = launcher == LauncherType.Exe;
         return new GameInput(
             title, launcher, appId, exePath, AdminInput.OptionalText(Blank(r.Args), "args", 500), cover, category,
-            AdminInput.OptionalText(Blank(r.Description), "description", 1000) ?? "", video, RegistryValues(r.RegistryValues), r.RunAsInvoker);
+            AdminInput.OptionalText(Blank(r.Description), "description", 1000) ?? "", video, RegistryValues(r.RegistryValues), r.RunAsInvoker,
+            exe ? r.RunAsAdmin : false, ProcessNames(r.GameProcessNames));
+    }
+
+    /// <summary>
+    /// <c>gameProcessNames</c> of a card: at most 10 image names (<c>war3.exe</c>, <c>.exe</c> added when left out), no
+    /// path, each up to 64 characters. Absent = keep the game's; empty = none.
+    /// </summary>
+    private static List<string>? ProcessNames(string?[]? raw)
+    {
+        if (raw is null)
+        {
+            return null;
+        }
+
+        var names = new List<string>();
+        foreach (var item in raw)
+        {
+            var name = (item ?? "").Trim().Trim('"').Trim();
+            if (name.Length == 0)
+            {
+                continue;
+            }
+
+            if (!name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            {
+                name += ".exe";
+            }
+
+            if (name.Length > 64 || !ImageName().IsMatch(name))
+            {
+                throw ApiException.Validation("gameProcessNames", "format");
+            }
+
+            if (!names.Contains(name, StringComparer.OrdinalIgnoreCase))
+            {
+                names.Add(name);
+            }
+        }
+
+        return names.Count > 10 ? throw ApiException.Validation("gameProcessNames", "max") : names;
     }
 
     /// <summary>Policy keys the kiosk lockdown writes: never a game's to change.</summary>
@@ -469,19 +519,23 @@ public static partial class CatalogAdminEndpoints
     [GeneratedRegex("^[0-9]{1,10}$", RegexOptions.CultureInvariant)]
     private static partial Regex SteamAppId();
 
+    /// <summary>An image file name, no path: <c>war3.exe</c>, <c>Warcraft III.exe</c>.</summary>
+    [GeneratedRegex(@"^[^\\/:*?""<>|]+\.exe$", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+    private static partial Regex ImageName();
+
     [GeneratedRegex("^[A-Za-z][A-Za-z0-9-]{0,31}$", RegexOptions.CultureInvariant)]
     private static partial Regex CategoryKey();
 
     /// <summary>The request body as sent; <see cref="Parse"/> checks it.</summary>
     private sealed record GameInputBody(
         string? Title, string? Launcher, string? LauncherAppId, string? ExePath, string? Args, string? CoverUrl, string?[]? Category, string? Description,
-        string? VideoUrl, RegistryValueBody?[]? RegistryValues = null, bool? RunAsInvoker = null);
+        string? VideoUrl, RegistryValueBody?[]? RegistryValues = null, bool? RunAsInvoker = null, bool? RunAsAdmin = null, string?[]? GameProcessNames = null);
 
     private sealed record RegistryValueBody(string? Key, string? Name, string? Type, JsonElement Value);
 
     private sealed record GameInput(
         string Title, LauncherType Launcher, string? LauncherAppId, string? ExePath, string? Args, string? CoverUrl, List<string> Category, string Description,
-        string? VideoUrl, List<GameRegistryValue>? RegistryValues, bool? RunAsInvoker = null)
+        string? VideoUrl, List<GameRegistryValue>? RegistryValues, bool? RunAsInvoker = null, bool? RunAsAdmin = null, List<string>? GameProcessNames = null)
     {
         /// <summary>
         /// <paramref name="game"/> started and shown as this input says. A Steam game without a cover gets its store art; a
@@ -504,7 +558,10 @@ public static partial class CatalogAdminEndpoints
                 Category = Category,
                 Description = Description,
                 RegistryValues = RegistryValues ?? game.RegistryValues,
-                RunAsInvoker = RunAsInvoker ?? game.RunAsInvoker,
+                // One flag turned on by a cash desk that knows only it turns the other off.
+                RunAsInvoker = RunAsInvoker ?? (RunAsAdmin == true ? false : game.RunAsInvoker),
+                RunAsAdmin = Launcher != LauncherType.Exe ? null : RunAsAdmin ?? (RunAsInvoker == true ? false : game.RunAsAdmin),
+                GameProcessNames = GameProcessNames ?? game.GameProcessNames,
             };
         }
     }
@@ -544,9 +601,15 @@ public static partial class CatalogAdminEndpoints
                 data.TryGetProperty("registryValues", out var values) && values.ValueKind == JsonValueKind.Array
                     ? [.. values.EnumerateArray().Select(v => JsonDefaults.Deserialize<GameRegistryValue>(v.GetRawText())!)]
                     : [],
-                data.TryGetProperty("runAsInvoker", out var invoker) && invoker.ValueKind == JsonValueKind.True,
-                data.TryGetProperty("runAsInvoker", out var off) && off.ValueKind == JsonValueKind.True ? null : elevation,
-                TrailerStore.Wire(trailer));
+                Flag(data, "runAsInvoker"),
+                Flag(data, "runAsInvoker") || Flag(data, "runAsAdmin") ? null : elevation,
+                TrailerStore.Wire(trailer),
+                Flag(data, "runAsAdmin"),
+                data.TryGetProperty("gameProcessNames", out var names) && names.ValueKind == JsonValueKind.Array
+                    ? [.. names.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!)]
+                    : []);
         }
+
+        private static bool Flag(JsonElement data, string name) => data.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
     }
 }

@@ -411,6 +411,22 @@ export interface Game {
    * the stored copy does not play. Null — `Game.VideoUrl` is the original itself, an upload, or there is none.
    */
   videoSourceUrl?: string | null;
+  /**
+   * «Запускать с правами администратора» (an exe game only, the owner's choice per catalogue entry): the Agent starts
+   * the executable with an elevated token in the player's session and desktop — the player's own full token when the
+   * kiosk account is an administrator, else the service's LocalSystem token without its service-only privileges —
+   * inside the game's job, so that it and its children (a launcher's `war3.exe`, its anti-hack) end with the game. For
+   * a launcher such as ICCup's that truly needs administrator rights (writes into Program Files, loads its anti-hack),
+   * where `runAsInvoker` starts it but leaves it unable to work. Takes precedence over `runAsInvoker`. Null or false —
+   * off.
+   */
+  runAsAdmin?: boolean | null;
+  /**
+   * Image names of the game's real process (`war3.exe`) when the catalogue executable is a launcher that hands over and
+   * may exit (ICCup): the Agent follows the hand-off to a process of one of these names even outside the game's job,
+   * waits longer for it, and protects it from the process allow-list. Null or empty — the executable's own name.
+   */
+  gameProcessNames?: string[] | null;
 }
 
 /** Body of `POST /games/{id}/launch-report` (SERVER_API.md §4.6). */

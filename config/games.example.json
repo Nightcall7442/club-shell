@@ -62,6 +62,41 @@
     "version": null
   },
   {
+    "id": "25fd5de4-08b2-4ebf-b92a-ae470600ae3c",
+    "title": "DotA (iCCup)",
+    "launcher": "exe",
+    "launcherAppId": null,
+    "exePath": "G:\\Warcraft III\\iCCup Launcher.exe",
+    "args": null,
+    "installPath": null,
+    "installed": false,
+    "category": [
+      "moba",
+      "competitive"
+    ],
+    "tags": [
+      "moba",
+      "classic",
+      "warcraft"
+    ],
+    "coverUrl": "",
+    "heroUrl": null,
+    "videoUrl": null,
+    "description": "DotA Allstars on the iCCup ladder: Warcraft III: The Frozen Throne 1.26a through the iCCup Launcher.",
+    "ageRating": 12,
+    "popularity": 80,
+    "lastPlayedAt": null,
+    "requiresAccount": false,
+    "antiCheat": "none",
+    "minSpec": null,
+    "sizeGb": 1.5,
+    "version": "1.26a",
+    "runAsAdmin": false,
+    "gameProcessNames": [
+      "war3.exe"
+    ]
+  },
+  {
     "id": "b3f9dd56-a3ec-4c5e-abf6-412ce22c1e2b",
     "title": "Dota 2",
     "launcher": "steam",

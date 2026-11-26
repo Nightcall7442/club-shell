@@ -387,23 +387,30 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
 
     /// <summary>
     /// The process a game's exited launcher handed over to, looked for during <paramref name="wait"/> (real time):
-    /// first what is left in the game's job (children inherit it), else a process with the game's image name in the
-    /// same session, started since the launch and not tracked already.
+    /// first what is left in the game's job (children inherit it; a configured game image such as <c>war3.exe</c>
+    /// first), else a process with one of the game's image names in the same session, started since the launch and not
+    /// tracked already — one a launcher started outside the job (through a broker) is put into it.
     /// </summary>
     private async Task<int?> FindSuccessorAsync(TrackedGame tracked, int exitedPid, TimeSpan wait, CancellationToken cancellationToken)
     {
         GameLaunchRecord record = tracked.Record;
-        string? name = string.IsNullOrWhiteSpace(record.Game.ExePath) ? null : Path.GetFileNameWithoutExtension(record.Game.ExePath);
+        IReadOnlyList<string> names = GameImages.All(record.Game);
         long deadline = Environment.TickCount64 + (long)wait.TotalMilliseconds;
         while (true)
         {
-            if (Successor(record, exitedPid, name, tracked.SessionId) is { } found)
+            if (Successor(record, exitedPid, names, tracked.SessionId) is { } found)
             {
                 return found;
             }
 
             if (Environment.TickCount64 >= deadline)
             {
+                _logger.LogInformation(
+                    "{Title}: pid {Pid} exited and no process of the game ({Names}) followed within {Wait}s",
+                    record.Game.Title,
+                    exitedPid,
+                    string.Join(", ", names),
+                    (int)wait.TotalSeconds);
                 return null;
             }
 
@@ -411,14 +418,17 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
         }
     }
 
-    private int? Successor(GameLaunchRecord record, int exitedPid, string? name, uint? sessionId)
+    private int? Successor(GameLaunchRecord record, int exitedPid, IReadOnlyList<string> names, uint? sessionId)
     {
         try
         {
-            IReadOnlyList<int> inJob = record.Job.QueryProcessIds().Where(id => id != exitedPid && !_games.ContainsKey(id)).ToList();
-            if (inJob.Count > 0)
+            List<(int Pid, string? Name)> inJob = record.Job.QueryProcessIds()
+                .Where(id => id != exitedPid && !_games.ContainsKey(id))
+                .Select(id => (id, ImageName(id)))
+                .ToList();
+            if (GameImages.ChooseInJob(inJob, record.Game) is { } chosen)
             {
-                return inJob.FirstOrDefault(id => name is not null && ImageNameIs(id, name)) is var named and > 0 ? named : inJob[0];
+                return chosen;
             }
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or ObjectDisposedException or InvalidOperationException)
@@ -426,26 +436,30 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
             _logger.LogDebug(ex, "Job of {Title} not queryable", record.Game.Title);
         }
 
-        if (name is null || sessionId is null)
+        if (names.Count == 0 || sessionId is null)
         {
             return null;
         }
 
         DateTime launchedLocal = record.Running.StartedAt.LocalDateTime.AddSeconds(-5);
-        foreach (System.Diagnostics.Process candidate in System.Diagnostics.Process.GetProcessesByName(name))
+        foreach (string name in names)
         {
-            using (candidate)
+            foreach (System.Diagnostics.Process candidate in System.Diagnostics.Process.GetProcessesByName(name))
             {
-                try
+                using (candidate)
                 {
-                    if (candidate.Id != exitedPid && !_games.ContainsKey(candidate.Id) && (uint)candidate.SessionId == sessionId && candidate.StartTime >= launchedLocal)
+                    try
                     {
-                        return candidate.Id;
+                        if (candidate.Id != exitedPid && !_games.ContainsKey(candidate.Id) && (uint)candidate.SessionId == sessionId && candidate.StartTime >= launchedLocal)
+                        {
+                            AdoptIntoJob(record, candidate.Id, name);
+                            return candidate.Id;
+                        }
                     }
-                }
-                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
-                {
-                    // Exited meanwhile or not queryable.
+                    catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+                    {
+                        // Exited meanwhile or not queryable.
+                    }
                 }
             }
         }
@@ -453,16 +467,30 @@ public sealed class GameSessionTracker : IAsyncDisposable, IDisposable
         return null;
     }
 
-    private static bool ImageNameIs(int pid, string name)
+    /// <summary>A successor found outside the game's job goes into it, so the job's kill-on-close still ends it with the game.</summary>
+    private void AdoptIntoJob(GameLaunchRecord record, int pid, string name)
+    {
+        try
+        {
+            record.Job.Assign(pid);
+            _logger.LogInformation("{Title}: {Name} pid {Pid} started outside the game's job; assigned to it", record.Game.Title, name, pid);
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or ObjectDisposedException or InvalidOperationException or ArgumentException)
+        {
+            _logger.LogInformation(ex, "{Title}: {Name} pid {Pid} runs outside the game's job and cannot join it; it is followed by pid", record.Game.Title, name, pid);
+        }
+    }
+
+    private static string? ImageName(int pid)
     {
         try
         {
             using System.Diagnostics.Process process = System.Diagnostics.Process.GetProcessById(pid);
-            return string.Equals(process.ProcessName, name, StringComparison.OrdinalIgnoreCase);
+            return process.ProcessName;
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
         {
-            return false;
+            return null;
         }
     }
 
