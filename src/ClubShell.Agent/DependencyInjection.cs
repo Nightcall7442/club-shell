@@ -618,9 +618,33 @@ internal sealed class ProtectedProcessesAdapter : IProtectedProcesses
         pid == Environment.ProcessId
         || pid == _launcher.Current?.Pid
         || _games.Find(pid) is not null
-        || InGameJob(pid);
+        || InGameJob(pid)
+        || IsRunningGameImage(pid);
 
     public bool ProtectsChildrenOf(int pid) => pid == Environment.ProcessId || _games.Find(pid) is not null || InGameJob(pid);
+
+    /// <summary>
+    /// A process with a configured game image name (<c>war3.exe</c>, <see cref="Game.GameProcessNames"/>) of a game
+    /// running now: a launcher may start it outside the game's job (through a broker), before the tracker follows it.
+    /// </summary>
+    private bool IsRunningGameImage(int pid)
+    {
+        List<string> names = _games.All().SelectMany(r => GameImages.Configured(r.Game)).ToList();
+        if (names.Count == 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var process = System.Diagnostics.Process.GetProcessById(pid);
+            return GameImages.Matches(process.ProcessName, names);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
 
     private bool InGameJob(int pid)
     {

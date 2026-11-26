@@ -1429,6 +1429,10 @@ export interface AdminGame {
   registryValues?: GameRegistryValue[];
   /** Start the exe without administrator rights though its manifest asks for them (SHELL_CHANGES 96); absent from an older server. */
   runAsInvoker?: boolean;
+  /** «Запускать с правами администратора»: the exe starts elevated in the player's session; absent from an older server. */
+  runAsAdmin?: boolean;
+  /** The game's own processes a launcher hands over to (`war3.exe`); absent from an older server. */
+  gameProcessNames?: string[];
   /** The newest launch refused for want of administrator rights since the card was saved: on which PC and when. */
   elevationFailure?: { pc: string; at: string } | null;
 }
@@ -1457,6 +1461,10 @@ export interface GameInput {
   registryValues?: GameRegistryValue[];
   /** «Запускать без прав администратора» (SHELL_CHANGES 96); absent — the game keeps it. */
   runAsInvoker?: boolean;
+  /** «Запускать с правами администратора» (exe games only; never together with `runAsInvoker`); absent — the game keeps it. */
+  runAsAdmin?: boolean;
+  /** Image names of the game's real process (`war3.exe`), at most 10; absent — the game keeps them, empty — none. */
+  gameProcessNames?: string[];
 }
 
 export interface PriceQuote {

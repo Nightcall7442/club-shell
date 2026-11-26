@@ -315,8 +315,9 @@ public sealed class GameLaunchService : IDisposable
 
             // SHELL_CHANGES 96: a game whose manifest asks for administrator rights starts as the player all the same — the
             // compatibility layer Explorer would apply, which CreateProcessAsUser does not read from the registry. Its
-            // children (a launcher's war3.exe) inherit the environment.
-            if (game.RunAsInvoker == true)
+            // children (a launcher's war3.exe) inherit the environment. A game started with administrator rights instead
+            // (the launcher sees to that) does not get the layer: it would start its children without them.
+            if (game.RunAsInvoker == true && GameImages.ElevationOf(game) != GameElevationMode.Administrator)
             {
                 env[ProcessEnvironment.CompatLayer] = ProcessEnvironment.AddLayers(env.GetValueOrDefault(ProcessEnvironment.CompatLayer), "RunAsInvoker");
             }

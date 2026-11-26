@@ -90,7 +90,8 @@ public sealed class GameRegistryDefaults
     /// whatever is there before every launch — after the player's settings are restored, so the club's value wins: a
     /// game that broke its display mode in the registry (GoldSrc's <c>ScreenWindowed</c>, a crash flag) starts the way
     /// the club set it. Keys under <c>HKCU\Software</c> only, never the policy keys; <c>dword</c> and <c>string</c>. A
-    /// value that cannot be written is a warning and the launch goes on. Returns how many were written.
+    /// value that cannot be written is a warning and the launch goes on. A game started with administrator rights may run
+    /// as LocalSystem, whose HKCU is <c>HKU\S-1-5-18</c>: its values are written there too. Returns how many were written.
     /// </summary>
     public int ApplyCatalogue(Game game)
     {
@@ -100,13 +101,36 @@ public sealed class GameRegistryDefaults
             return 0;
         }
 
+        var sids = new List<string>();
         string sid = _provisioner.Sid;
         if (string.IsNullOrEmpty(sid) || !RegistryHelper.Exists(RegistryHive.Users, sid))
         {
             _logger.LogWarning("Registry values of {Title} skipped: the kiosk user's hive is not loaded", game.Title);
-            return 0;
+        }
+        else
+        {
+            sids.Add(sid);
         }
 
+        if (GameImages.ElevationOf(game) == GameElevationMode.Administrator)
+        {
+            sids.Add(LocalSystemSid);
+        }
+
+        int written = 0;
+        foreach (string target in sids)
+        {
+            written += ApplyCatalogue(game, values, target);
+        }
+
+        return written;
+    }
+
+    /// <summary>HKCU of LocalSystem (always loaded).</summary>
+    private const string LocalSystemSid = "S-1-5-18";
+
+    private int ApplyCatalogue(Game game, IReadOnlyList<GameRegistryValue> values, string sid)
+    {
         int written = 0;
         foreach (GameRegistryValue value in values)
         {
@@ -142,7 +166,7 @@ public sealed class GameRegistryDefaults
 
         if (written > 0)
         {
-            _logger.LogInformation("Wrote {Count} registry value(s) of {Title} from the catalogue into the kiosk's HKCU", written, game.Title);
+            _logger.LogInformation("Wrote {Count} registry value(s) of {Title} from the catalogue into HKU\\{Sid}", written, game.Title, sid);
         }
 
         return written;

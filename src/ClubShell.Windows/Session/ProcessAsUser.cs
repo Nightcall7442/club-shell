@@ -314,4 +314,100 @@ public static class ProcessAsUser
 
         return token;
     }
+
+    /// <summary>
+    /// Privileges of LocalSystem that an elevated administrator does not hold either, removed from the token
+    /// <see cref="GetElevatedToken"/> hands a game: acting as the OS, creating or assigning tokens, auditing and
+    /// permanent objects are the service's business, never a player-facing program's.
+    /// </summary>
+    public static IReadOnlyList<string> ServiceOnlyPrivileges { get; } =
+    [
+        NativeConst.SE_TCB_NAME, NativeConst.SE_ASSIGNPRIMARYTOKEN_NAME, "SeCreateTokenPrivilege", "SeCreatePermanentPrivilege",
+        "SeAuditPrivilege", "SeTrustedCredManAccessPrivilege", "SeRelabelPrivilege",
+    ];
+
+    /// <summary>
+    /// An elevated primary token for a game the owner marked «Запускать с правами администратора», in
+    /// <paramref name="sessionId"/> (requires LocalSystem). The player's own full (linked) token when the account logged
+    /// on there is a UAC-filtered administrator — identity, HKCU and profile stay the player's; otherwise the service's
+    /// LocalSystem token moved to that session, without <see cref="ServiceOnlyPrivileges"/>. The caller owns the token;
+    /// <paramref name="kind"/> says which one it got.
+    /// </summary>
+    public static SafeTokenHandle GetElevatedToken(uint sessionId, out ElevatedTokenKind kind)
+    {
+        using (EnablePrivilege(NativeConst.SE_TCB_NAME))
+        {
+            if (Wtsapi32.WTSQueryUserToken(sessionId, out SafeTokenHandle user))
+            {
+                using (user)
+                {
+                    using SafeTokenHandle? linked = GetLinkedToken(user);
+                    if (linked is not null && Advapi32.TryGetTokenDword(linked, TOKEN_INFORMATION_CLASS.TokenElevation, out uint elevated) && elevated != 0)
+                    {
+                        kind = ElevatedTokenKind.PlayerAdministrator;
+                        return DuplicatePrimary(linked);
+                    }
+                }
+            }
+        }
+
+        if (!Advapi32.OpenProcessToken(Kernel32.GetCurrentProcess(), NativeConst.TOKEN_ALL_ACCESS, out SafeTokenHandle own))
+        {
+            Win32Error.ThrowLastError(nameof(Advapi32.OpenProcessToken));
+        }
+
+        using (own)
+        {
+            SafeTokenHandle system = DuplicatePrimary(own);
+            try
+            {
+                using (EnablePrivilege(NativeConst.SE_TCB_NAME))
+                {
+                    uint target = sessionId;
+                    if (!Advapi32.SetTokenInformation(system, TOKEN_INFORMATION_CLASS.TokenSessionId, ref target, sizeof(uint)))
+                    {
+                        Win32Error.ThrowLastError(nameof(Advapi32.SetTokenInformation));
+                    }
+                }
+
+                foreach (string privilege in ServiceOnlyPrivileges)
+                {
+                    RemovePrivilege(system, privilege);
+                }
+
+                kind = ElevatedTokenKind.LocalSystem;
+                return system;
+            }
+            catch
+            {
+                system.Dispose();
+                throw;
+            }
+        }
+    }
+
+    /// <summary>Removes <paramref name="privilegeName"/> from <paramref name="token"/> for good (SE_PRIVILEGE_REMOVED); one it does not hold is fine.</summary>
+    private static void RemovePrivilege(SafeTokenHandle token, string privilegeName)
+    {
+        if (!Advapi32.LookupPrivilegeValueW(null, privilegeName, out LUID luid))
+        {
+            return;
+        }
+
+        TOKEN_PRIVILEGES state = TOKEN_PRIVILEGES.Single(luid, NativeConst.SE_PRIVILEGE_REMOVED);
+        if (!Advapi32.AdjustTokenPrivileges(token, false, ref state, (uint)NativeString.SizeOf<TOKEN_PRIVILEGES>(), 0, 0))
+        {
+            Win32Error.ThrowLastError(nameof(Advapi32.AdjustTokenPrivileges));
+        }
+    }
+}
+
+/// <summary>Which elevated token <see cref="ProcessAsUser.GetElevatedToken"/> returned.</summary>
+public enum ElevatedTokenKind
+{
+    /// <summary>The player's own full token: the kiosk account is an administrator.</summary>
+    PlayerAdministrator,
+
+    /// <summary>The service's LocalSystem token in the player's session, without the service-only privileges.</summary>
+    LocalSystem,
 }

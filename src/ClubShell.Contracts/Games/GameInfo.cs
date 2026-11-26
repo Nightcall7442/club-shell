@@ -76,6 +76,20 @@ public sealed record GameMinSpec(
 /// Where the club server's stored trailer came from (D-97): the original https link, which the Shell tries once when the
 /// stored copy does not play. Null — <see cref="VideoUrl"/> is the original itself, an upload, or there is none.
 /// </param>
+/// <param name="RunAsAdmin">
+/// «Запускать с правами администратора» (an exe game only, the owner's choice per catalogue entry): the Agent starts the
+/// executable with an elevated token in the player's session and desktop — the player's own full token when the kiosk
+/// account is an administrator, else the service's LocalSystem token without its service-only privileges — inside the
+/// game's job, so that it and its children (a launcher's <c>war3.exe</c>, its anti-hack) end with the game. For a
+/// launcher such as ICCup's that truly needs administrator rights (writes into Program Files, loads its anti-hack),
+/// where <paramref name="RunAsInvoker"/> starts it but leaves it unable to work. Takes precedence over
+/// <paramref name="RunAsInvoker"/>. Null or false — off.
+/// </param>
+/// <param name="GameProcessNames">
+/// Image names of the game's real process (<c>war3.exe</c>) when the catalogue executable is a launcher that hands over
+/// and may exit (ICCup): the Agent follows the hand-off to a process of one of these names even outside the game's job,
+/// waits longer for it, and protects it from the process allow-list. Null or empty — the executable's own name.
+/// </param>
 public sealed record Game(
     Guid Id,
     string Title,
@@ -103,7 +117,9 @@ public sealed record Game(
     string? MissingDrive = null,
     IReadOnlyList<GameRegistryValue>? RegistryValues = null,
     bool? RunAsInvoker = null,
-    string? VideoSourceUrl = null);
+    string? VideoSourceUrl = null,
+    bool? RunAsAdmin = null,
+    IReadOnlyList<string>? GameProcessNames = null);
 
 /// <summary>
 /// A value the Agent writes into the player's HKCU before every launch of the game (SHELL_CHANGES 82), after the player's

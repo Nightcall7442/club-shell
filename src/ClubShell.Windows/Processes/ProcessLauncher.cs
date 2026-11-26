@@ -38,6 +38,13 @@ public sealed record ProcessStartSpec
     /// <summary>Explicit primary token to launch with (wins over <see cref="SessionId"/>). Not disposed by the launcher.</summary>
     public SafeTokenHandle? RunAsUser { get; init; }
 
+    /// <summary>
+    /// Start in <see cref="SessionId"/> with administrator rights (<see cref="ProcessAsUser.GetElevatedToken"/>), the
+    /// environment still the logged-on player's: only for a game the owner marked «Запускать с правами администратора».
+    /// Ignored with <see cref="RunAsUser"/>.
+    /// </summary>
+    public bool Elevated { get; init; }
+
     /// <summary>Priority class (NORMAL_PRIORITY_CLASS by default).</summary>
     public uint Priority { get; init; } = NativeConst.NORMAL_PRIORITY_CLASS;
 
@@ -194,8 +201,9 @@ public sealed class ProcessLauncher
         string workingDir = spec.WorkingDir ?? Path.GetDirectoryName(spec.Exe) ?? Environment.SystemDirectory;
         DateTimeOffset startedAt = DateTimeOffset.UtcNow;
         bool asUser = spec.SessionId is not null || spec.RunAsUser is not null;
+        ElevatedTokenKind? elevated = null;
         LaunchedProcess launched = asUser
-            ? LaunchAsUser(spec, workingDir, startedAt)
+            ? LaunchAsUser(spec, workingDir, startedAt, out elevated)
             : LaunchLocal(spec, workingDir, startedAt);
 
         try
@@ -218,6 +226,10 @@ public sealed class ProcessLauncher
                 spec.SessionId,
                 Redact(BuildCommandLine(spec.Exe, spec.Args), spec.RedactInLog),
                 workingDir);
+            if (elevated is { } kind)
+            {
+                _logger.LogWarning("Pid {Pid} runs with administrator rights ({Token} token): {Exe}", launched.Pid, kind, spec.Exe);
+            }
 
             if (spec.WaitForInputIdleMs > 0)
             {
@@ -329,13 +341,23 @@ public sealed class ProcessLauncher
         return string.IsNullOrWhiteSpace(args) ? quoted : quoted + " " + args;
     }
 
-    private static LaunchedProcess LaunchAsUser(ProcessStartSpec spec, string workingDir, DateTimeOffset startedAt)
+    private static LaunchedProcess LaunchAsUser(ProcessStartSpec spec, string workingDir, DateTimeOffset startedAt, out ElevatedTokenKind? elevated)
     {
         SafeTokenHandle? owned = null;
+        SafeTokenHandle? ownedElevated = null;
+        elevated = null;
         SafeTokenHandle token = spec.RunAsUser ?? (owned = ProcessAsUser.GetUserToken(spec.SessionId.GetValueOrDefault()));
         try
         {
+            // The player's own environment (profile, TEMP) whichever token runs the process.
             using EnvironmentBlock env = EnvironmentBlock.Build(token, spec.Env, spec.DropEnvPrefixes);
+            if (spec.Elevated && spec.RunAsUser is null)
+            {
+                ownedElevated = ProcessAsUser.GetElevatedToken(spec.SessionId.GetValueOrDefault(), out ElevatedTokenKind kind);
+                token = ownedElevated;
+                elevated = kind;
+            }
+
             uint flags = NativeConst.CREATE_UNICODE_ENVIRONMENT | spec.Priority | (spec.Hidden ? NativeConst.CREATE_NO_WINDOW : NativeConst.CREATE_NEW_CONSOLE);
             Action<uint, SafeProcessHandle>? beforeResume = spec.Job is null && spec.BeforeResume is null
                 ? null
@@ -349,6 +371,7 @@ public sealed class ProcessLauncher
         }
         finally
         {
+            ownedElevated?.Dispose();
             owned?.Dispose();
         }
     }

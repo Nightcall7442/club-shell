@@ -167,6 +167,62 @@ public sealed class CatalogOwnerGamesTests(ExampleCatalogFixture server) : IClas
         Assert.True((await CardAsync(owner, id)).GetProperty("runAsInvoker").GetBoolean());
     }
 
+    /// <summary>
+    /// «Запускать с правами администратора» and the game's own image names (ICCup → war3.exe) ride the card to the PCs;
+    /// the two elevation flags exclude each other; a save without the fields keeps them; a launcher game never runs as
+    /// administrator.
+    /// </summary>
+    [Fact]
+    public async Task Run_as_administrator_and_game_process_names_reach_the_pcs()
+    {
+        var owner = await LoginAsync(server, OwnerPin);
+        const string exe = @"G:\Warcraft III\iCCup Launcher.exe";
+        var (status, body) = await SendRawAsync(HttpMethod.Post, "/games", owner, new
+        {
+            title = "DotA (iCCup) test", launcher = "exe", exePath = exe, runAsAdmin = true, gameProcessNames = new[] { " war3.exe ", "War3", "", "Frozen Throne.exe" },
+        });
+        Assert.Equal(200, status);
+        var card = body.GetProperty("game");
+        var id = card.GetProperty("id").GetGuid();
+        Assert.True(card.GetProperty("runAsAdmin").GetBoolean());
+        Assert.False(card.GetProperty("runAsInvoker").GetBoolean());
+        Assert.Equal(["war3.exe", "Frozen Throne.exe"], card.GetProperty("gameProcessNames").EnumerateArray().Select(x => x.GetString()));
+
+        var agent = await TestAgent.CreateAsync(server);
+        var seen = (await AgentGamesAsync(agent)).Single(g => g.GetProperty("id").GetGuid() == id);
+        Assert.True(seen.GetProperty("runAsAdmin").GetBoolean());
+        Assert.Equal(2, seen.GetProperty("gameProcessNames").GetArrayLength());
+
+        // An older cash desk (no fields) keeps both.
+        Assert.Equal(200, (await SendRawAsync(HttpMethod.Put, $"/games/{id}", owner, new { title = "DotA (iCCup) test", launcher = "exe", exePath = exe })).Status);
+        var kept = await CardAsync(owner, id);
+        Assert.True(kept.GetProperty("runAsAdmin").GetBoolean());
+        Assert.Equal(2, kept.GetProperty("gameProcessNames").GetArrayLength());
+
+        // Turning «without administrator rights» on turns «as administrator» off; an empty list drops the names.
+        (status, body) = await SendRawAsync(HttpMethod.Put, $"/games/{id}", owner, new { title = "DotA (iCCup) test", launcher = "exe", exePath = exe, runAsInvoker = true, gameProcessNames = Array.Empty<string>() });
+        Assert.Equal(200, status);
+        Assert.Equal((true, false, 0), (body.GetProperty("game").GetProperty("runAsInvoker").GetBoolean(), body.GetProperty("game").GetProperty("runAsAdmin").GetBoolean(),
+            body.GetProperty("game").GetProperty("gameProcessNames").GetArrayLength()));
+
+        // A launcher game starts no process of its own: the flag does not stick.
+        (status, body) = await SendRawAsync(HttpMethod.Post, "/games", owner, new { title = "Steam admin test", launcher = "steam", launcherAppId = "10", runAsAdmin = true });
+        Assert.Equal(200, status);
+        Assert.False(body.GetProperty("game").GetProperty("runAsAdmin").GetBoolean());
+
+        foreach (var (bad, what, reason) in new (object, string, string)[]
+        {
+            (new { title = "Bad", launcher = "exe", exePath = exe, runAsAdmin = true, runAsInvoker = true }, "runAsAdmin", "conflict"),
+            (new { title = "Bad", launcher = "exe", exePath = exe, gameProcessNames = new[] { @"C:\Games\war3.exe" } }, "gameProcessNames", "format"),
+            (new { title = "Bad", launcher = "exe", exePath = exe, gameProcessNames = Enumerable.Range(0, 11).Select(i => $"g{i}.exe").ToArray() }, "gameProcessNames", "max"),
+        })
+        {
+            (status, body) = await SendRawAsync(HttpMethod.Post, "/games", owner, bad);
+            var details = body.GetProperty("error").GetProperty("details");
+            Assert.Equal((400, what, reason), (status, details.GetProperty("field").GetString(), details.GetProperty("reason").GetString()));
+        }
+    }
+
     private async Task<JsonElement> CardAsync(string owner, Guid id) =>
         (await SendRawAsync(HttpMethod.Get, "/games", owner)).Body.GetProperty("items").EnumerateArray().Single(g => g.GetProperty("id").GetGuid() == id);
 

@@ -1419,8 +1419,16 @@ export const UZ: Record<string, string> = {
   'Для игр и лаунчеров, которые просят права администратора (например ICCup): без этого они не запускаются под игроком.':
     'Administrator huquqini soʻraydigan oʻyin va launcherlar uchun (masalan ICCup): busiz ular oʻyinchi nomidan ishga tushmaydi.',
   'Запускать без прав администратора': 'Administrator huquqisiz ishga tushirish',
-  'На {pc} игра не запустилась ({time}): ей нужны права администратора. Включите «Запускать без прав администратора».':
-    '{pc} da oʻyin ishga tushmadi ({time}): unga administrator huquqi kerak. «Administrator huquqisiz ishga tushirish»ni yoqing.',
+  'На {pc} игра не запустилась ({time}): ей нужны права администратора. Включите «Запускать без прав администратора» или «Запускать с правами администратора».':
+    '{pc} da oʻyin ishga tushmadi ({time}): unga administrator huquqi kerak. «Administrator huquqisiz ishga tushirish» yoki «Administrator huquqi bilan ishga tushirish»ni yoqing.',
+  'Запускать с правами администратора': 'Administrator huquqi bilan ishga tushirish',
+  'Если без прав администратора игра открывается, но не работает (ICCup не ставит античит, не пишет в папку игры). Только эта игра и то, что она запускает, получают права; .exe не должен лежать в папке пользователя.':
+    'Administrator huquqisiz oʻyin ochilsa-yu, ishlamasa (ICCup antichitni oʻrnatmaydi, oʻyin papkasiga yozmaydi). Huquqni faqat shu oʻyin va u ishga tushiradigan dasturlar oladi; .exe foydalanuvchi papkasida boʻlmasligi kerak.',
+  'Процессы игры': 'Oʻyin jarayonlari',
+  'Необязательно. Если .exe — лаунчер, который запускает игру и закрывается: имена файлов игры через запятую, например war3.exe':
+    'Ixtiyoriy. Agar .exe oʻyinni ishga tushirib yopiladigan launcher boʻlsa: oʻyin fayllari nomlari vergul bilan, masalan war3.exe',
+  'Процессов игры — не больше {n}': 'Oʻyin jarayonlari — {n} tadan koʻp emas',
+  'Процессы игры — только имена файлов, например war3.exe': 'Oʻyin jarayonlari — faqat fayl nomlari, masalan war3.exe',
   'Нужны права администратора — откройте и включите запуск без них':
     'Administrator huquqi kerak — oching va ularsiz ishga tushirishni yoqing',
   // Power on and several PCs at once (D-82)
@@ -2967,8 +2975,16 @@ export const EN: Record<string, string> = {
   'Для игр и лаунчеров, которые просят права администратора (например ICCup): без этого они не запускаются под игроком.':
     'For games and launchers that ask for administrator rights (ICCup, for example): without it they do not start as the player.',
   'Запускать без прав администратора': 'Run without administrator rights',
-  'На {pc} игра не запустилась ({time}): ей нужны права администратора. Включите «Запускать без прав администратора».':
-    'The game did not start on {pc} ({time}): it needs administrator rights. Turn on «Run without administrator rights».',
+  'На {pc} игра не запустилась ({time}): ей нужны права администратора. Включите «Запускать без прав администратора» или «Запускать с правами администратора».':
+    'The game did not start on {pc} ({time}): it needs administrator rights. Turn on «Run without administrator rights» or «Run as administrator».',
+  'Запускать с правами администратора': 'Run as administrator',
+  'Если без прав администратора игра открывается, но не работает (ICCup не ставит античит, не пишет в папку игры). Только эта игра и то, что она запускает, получают права; .exe не должен лежать в папке пользователя.':
+    'When the game opens without administrator rights but does not work (ICCup cannot install its anti-hack or write to the game folder). Only this game and what it starts get the rights; the .exe must not be in a user folder.',
+  'Процессы игры': 'Game processes',
+  'Необязательно. Если .exe — лаунчер, который запускает игру и закрывается: имена файлов игры через запятую, например war3.exe':
+    'Optional. When the .exe is a launcher that starts the game and closes: the game\'s file names, comma-separated, for example war3.exe',
+  'Процессов игры — не больше {n}': 'No more than {n} game processes',
+  'Процессы игры — только имена файлов, например war3.exe': 'Game processes are file names only, for example war3.exe',
   'Нужны права администратора — откройте и включите запуск без них':
     'Needs administrator rights: open it and turn on running without them',
   // Power on and several PCs at once (D-82)
