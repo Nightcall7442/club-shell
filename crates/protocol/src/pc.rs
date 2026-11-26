@@ -382,6 +382,23 @@ pub struct ScreensaverItem {
     pub duration_sec: i32,
 }
 
+/// The club logo on one player screen (D-104, beyond the contract): shown or not, where, how large
+/// and whether the club name stands next to it. The PC label (D-95) moves with it.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellLogo {
+    /// The logo picture is shown (the accent diamond when the club has none).
+    pub show: bool,
+    /// `topLeft` (the default), `topCenter`, `topRight`, `center` (above the sign-in card or the
+    /// idle clock), `bottomLeft` or `bottomRight` (idle only); the top bar always keeps it on the
+    /// left.
+    pub position: String,
+    /// `s`, `m` (today's size, the default), `l` or `xl` (not in the top bar).
+    pub size: String,
+    /// The club name is shown next to the logo.
+    pub name: bool,
+}
+
 /// How the PC's own label shows on the player screen (D-95, beyond the contract), set by the owner
 /// under «Интерфейс и логотипы»: what it says, whether it is the large number readable across the
 /// hall, and on which screens.
@@ -425,6 +442,80 @@ pub struct ShellScreensaver {
     pub items: Vec<ScreensaverItem>,
 }
 
+/// An owner's text in each player language; empty or null — the shell's bundled line for that
+/// language.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellText {
+    /// Russian.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ru: Option<String>,
+    /// Uzbek.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uz: Option<String>,
+    /// English.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub en: Option<String>,
+}
+
+/// The owner's layout of one player screen (D-104, beyond the contract): the logo, the picture
+/// behind it and which of the screen's own elements show. Flags a screen does not have are left at
+/// their defaults.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellScreenLook {
+    /// The club logo on this screen.
+    pub logo: ShellLogo,
+    /// The picture behind this screen, already resolved by the server (the screen's own, else the
+    /// club wallpaper on the lock screen and the desktop; the idle screen has none unless set);
+    /// null — the theme's own background, as without one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wallpaper_url: Option<String>,
+    /// Dimming of the picture, percent 0–80; null — the screen's own default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dim: Option<i32>,
+    /// Blur the picture; null — the theme's own.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blur: Option<bool>,
+    /// The clock (lock and idle).
+    pub clock: bool,
+    /// The language switcher (lock).
+    pub language: bool,
+    /// The price list (idle).
+    pub prices: bool,
+    /// The «Это место свободно» badge (idle).
+    pub free_badge: bool,
+    /// Lock: the sign-in card's title.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<ShellText>,
+    /// Lock: the line under the title.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subtitle: Option<ShellText>,
+    /// Idle: the call to action («Коснитесь, чтобы начать»).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cta: Option<ShellText>,
+}
+
+/// The player-screen designer of «Интерфейс и логотипы» (D-104, beyond the contract): the layout of
+/// the lock screen, the idle screen and the desktop, the headings font and the plates' tint.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellLook {
+    /// The lock (sign-in) screen.
+    pub lock: ShellScreenLook,
+    /// The idle screen (attract screen of a free PC).
+    pub idle: ShellScreenLook,
+    /// The signed-in desktop: the top bar and the background of every section.
+    pub desktop: ShellScreenLook,
+    /// Headings font, one of the bundled ones: `unbounded` (the default), `inter` or `mono`.
+    pub font: String,
+    /// `#RRGGBB` tint of the plates and the veil over the pictures on the lock and idle screens;
+    /// null — the theme's background. The shell darkens or lightens it until the theme's text reads
+    /// on it (4.5:1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tint: Option<String>,
+}
+
 /// The club's own look on the player screen (`shell.json → club`), set by the owner in the admin
 /// console and pushed with the server config. Every field is optional: without it the Shell keeps
 /// its bundled defaults.
@@ -440,7 +531,9 @@ pub struct ShellClub {
     /// Logo image URL.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub logo_url: Option<String>,
-    /// Wallpaper behind the lock and idle screens.
+    /// Wallpaper behind the lock and idle screens. With `look` the screens take theirs from it;
+    /// this one then also tells the shell the server's address for the look's own server pictures
+    /// (the Agent puts it in front here).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wallpaper_url: Option<String>,
     /// Active banners, in display order.
@@ -459,6 +552,9 @@ pub struct ShellClub {
     /// How the PC's name or number shows; null — the name and zone on every screen, as before.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pc_label: Option<ShellPcLabel>,
+    /// The owner's layout of the player screens (D-104); null — today's look on every screen.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub look: Option<ShellLook>,
 }
 
 /// Server override pushed into `shell.json`.

@@ -199,6 +199,12 @@ public static class ClubSettingsEndpoints
             PcLabel.Validate(pcLabel);
         }
 
+        // D-104: the player-screen designer (layout of the lock, idle and desktop, font, tint).
+        if (body.TryGetProperty("branding", out var look))
+        {
+            BrandingLook.Validate(look);
+        }
+
         IReadOnlyList<(Guid PcId, ServerCommandEnvelope Command)> queued = [];
         await using (var c = await db.OpenConnectionAsync())
         await using (var tx = await c.BeginTransactionAsync())

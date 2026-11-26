@@ -336,6 +336,70 @@ public sealed record ScreensaverItem(string Url, string Type, int DurationSec);
 public sealed record ShellPcLabel(string Format = "nameZone", bool Large = false, bool Lock = true, bool Idle = true, bool TopBar = true);
 
 /// <summary>
+/// The club logo on one player screen (D-104, beyond the contract): shown or not, where, how large and whether the club
+/// name stands next to it. The PC label (D-95) moves with it.
+/// </summary>
+/// <param name="Show">The logo picture is shown (the accent diamond when the club has none).</param>
+/// <param name="Position">
+/// <c>topLeft</c> (the default), <c>topCenter</c>, <c>topRight</c>, <c>center</c> (above the sign-in card or the idle
+/// clock), <c>bottomLeft</c> or <c>bottomRight</c> (idle only); the top bar always keeps it on the left.
+/// </param>
+/// <param name="Size"><c>s</c>, <c>m</c> (today's size, the default), <c>l</c> or <c>xl</c> (not in the top bar).</param>
+/// <param name="Name">The club name is shown next to the logo.</param>
+public sealed record ShellLogo(bool Show = true, string Position = "topLeft", string Size = "m", bool Name = true);
+
+/// <summary>An owner's text in each player language; empty or null — the shell's bundled line for that language.</summary>
+/// <param name="Ru">Russian.</param>
+/// <param name="Uz">Uzbek.</param>
+/// <param name="En">English.</param>
+public sealed record ShellText(string? Ru = null, string? Uz = null, string? En = null);
+
+/// <summary>
+/// The owner's layout of one player screen (D-104, beyond the contract): the logo, the picture behind it and which of the
+/// screen's own elements show. Flags a screen does not have are left at their defaults.
+/// </summary>
+/// <param name="Logo">The club logo on this screen.</param>
+/// <param name="WallpaperUrl">
+/// The picture behind this screen, already resolved by the server (the screen's own, else the club wallpaper on the lock
+/// screen and the desktop; the idle screen has none unless set); null — the theme's own background, as without one.
+/// </param>
+/// <param name="Dim">Dimming of the picture, percent 0–80; null — the screen's own default.</param>
+/// <param name="Blur">Blur the picture; null — the theme's own.</param>
+/// <param name="Clock">The clock (lock and idle).</param>
+/// <param name="Language">The language switcher (lock).</param>
+/// <param name="Prices">The price list (idle).</param>
+/// <param name="FreeBadge">The «Это место свободно» badge (idle).</param>
+/// <param name="Title">Lock: the sign-in card's title.</param>
+/// <param name="Subtitle">Lock: the line under the title.</param>
+/// <param name="Cta">Idle: the call to action («Коснитесь, чтобы начать»).</param>
+public sealed record ShellScreenLook(
+    ShellLogo Logo,
+    string? WallpaperUrl = null,
+    int? Dim = null,
+    bool? Blur = null,
+    bool Clock = true,
+    bool Language = true,
+    bool Prices = true,
+    bool FreeBadge = true,
+    ShellText? Title = null,
+    ShellText? Subtitle = null,
+    ShellText? Cta = null);
+
+/// <summary>
+/// The player-screen designer of «Интерфейс и логотипы» (D-104, beyond the contract): the layout of the lock screen, the
+/// idle screen and the desktop, the headings font and the plates' tint.
+/// </summary>
+/// <param name="Lock">The lock (sign-in) screen.</param>
+/// <param name="Idle">The idle screen (attract screen of a free PC).</param>
+/// <param name="Desktop">The signed-in desktop: the top bar and the background of every section.</param>
+/// <param name="Font">Headings font, one of the bundled ones: <c>unbounded</c> (the default), <c>inter</c> or <c>mono</c>.</param>
+/// <param name="Tint">
+/// <c>#RRGGBB</c> tint of the plates and the veil over the pictures on the lock and idle screens; null — the theme's
+/// background. The shell darkens or lightens it until the theme's text reads on it (4.5:1).
+/// </param>
+public sealed record ShellLook(ShellScreenLook Lock, ShellScreenLook Idle, ShellScreenLook Desktop, string Font = "unbounded", string? Tint = null);
+
+/// <summary>
 /// The screensaver of the free PCs (D-87, beyond the contract): the attract screen after <paramref name="AfterSec"/>
 /// seconds without input on the lock screen; off — it never starts.
 /// </summary>
@@ -351,11 +415,15 @@ public sealed record ShellScreensaver(bool Enabled, int AfterSec, IReadOnlyList<
 /// <param name="Name">Club name shown on the lock, idle and top bar.</param>
 /// <param name="Accent">Accent colour <c>#RRGGBB</c>, overrides the theme's accent.</param>
 /// <param name="LogoUrl">Logo image URL.</param>
-/// <param name="WallpaperUrl">Wallpaper behind the lock and idle screens.</param>
+/// <param name="WallpaperUrl">
+/// Wallpaper behind the lock and idle screens. With <paramref name="Look"/> the screens take theirs from it; this one
+/// then also tells the shell the server's address for the look's own server pictures (the Agent puts it in front here).
+/// </param>
 /// <param name="Banners">Active banners, in display order.</param>
 /// <param name="Rules">Club rules shown on the support screen.</param>
 /// <param name="Screensaver">The free PCs' screensaver; null — the shell's own idle screen as before.</param>
 /// <param name="PcLabel">How the PC's name or number shows; null — the name and zone on every screen, as before.</param>
+/// <param name="Look">The owner's layout of the player screens (D-104); null — today's look on every screen.</param>
 /// <param name="SelfSignup">
 /// The lock screen offers «Создать аккаунт» (D-92: the owner's <c>limits.selfSignup</c>); null — an older server, off.
 /// </param>
@@ -368,7 +436,8 @@ public sealed record ShellClub(
     ClubRules? Rules = null,
     ShellScreensaver? Screensaver = null,
     bool? SelfSignup = null,
-    ShellPcLabel? PcLabel = null);
+    ShellPcLabel? PcLabel = null,
+    ShellLook? Look = null);
 
 /// <summary>Server override pushed into <c>shell.json</c>.</summary>
 /// <param name="Locale">Default locale.</param>
