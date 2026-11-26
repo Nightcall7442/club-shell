@@ -38,9 +38,10 @@ public sealed class SeedExamplesTests(ExampleCatalogFixture server) : IClassFixt
         Assert.Equal(17, body.GetProperty("total").GetInt32());
         var games = body.GetProperty("items").EnumerateArray().ToList();
 
-        // ICCup: a launcher that needs administrator rights and hands over to war3.exe.
+        // ICCup: a launcher that hands over to war3.exe. Administrator rights are the owner's choice per club (the seed
+        // leaves them off: an elevated game runs with far more power than the player).
         var iccup = games.Single(g => g.GetProperty("title").GetString() == "DotA (iCCup)");
-        Assert.True(iccup.GetProperty("runAsAdmin").GetBoolean());
+        Assert.False(iccup.GetProperty("runAsAdmin").GetBoolean());
         Assert.Equal(["war3.exe"], iccup.GetProperty("gameProcessNames").EnumerateArray().Select(x => x.GetString()));
         Assert.Contains(games, g => g.GetProperty("title").GetString() == "Counter-Strike 2" && g.GetProperty("coverUrl").GetString()!.StartsWith("https://", StringComparison.Ordinal));
         Assert.Contains(games, g => g.GetProperty("title").GetString() == "Minecraft" && g.GetProperty("launcher").GetString() == "exe");

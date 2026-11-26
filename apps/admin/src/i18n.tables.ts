@@ -2992,7 +2992,7 @@ export const EN: Record<string, string> = {
     'When the game opens without administrator rights but does not work (ICCup cannot install its anti-hack or write to the game folder). Only this game and what it starts get the rights; the .exe must not be in a user folder.',
   'Процессы игры': 'Game processes',
   'Необязательно. Если .exe — лаунчер, который запускает игру и закрывается: имена файлов игры через запятую, например war3.exe':
-    'Optional. When the .exe is a launcher that starts the game and closes: the game\'s file names, comma-separated, for example war3.exe',
+    "Optional. When the .exe is a launcher that starts the game and closes: the game's file names, comma-separated, for example war3.exe",
   'Процессов игры — не больше {n}': 'No more than {n} game processes',
   'Процессы игры — только имена файлов, например war3.exe': 'Game processes are file names only, for example war3.exe',
   'Нужны права администратора — откройте и включите запуск без них':
