@@ -3453,7 +3453,7 @@ test('a cashier cannot read or start ClubShell updates', async ({ request }) => 
   expect((await request.post(`${API}/admin/updates/apply`, { headers: cashier, data: {} })).status()).toBe(403);
 });
 
-test("the owner writes a guest's debt off without money: the drawer stays, X counts it apart", async ({
+test("the owner writes a guest's debt off without money: the drawer stays and the cashier's X does not count it (D-101)", async ({
   page,
   request,
 }) => {
@@ -3482,7 +3482,8 @@ test("the owner writes a guest's debt off without money: the drawer stays, X cou
 
   const after = (await shiftState(request)).x;
   expect(after?.topUpByMethod['cash']).toBe(before?.topUpByMethod['cash']);
-  expect((after as { writeOffs?: number } | null)?.writeOffs ?? 0).toBeGreaterThan(
+  // The owner's money operation stays out of the cashier's shift (D-101): X neither counts it nor moves the drawer.
+  expect((after as { writeOffs?: number } | null)?.writeOffs ?? 0).toBe(
     (before as { writeOffs?: number } | null)?.writeOffs ?? 0,
   );
   expect((await overview(request)).guestDebts?.some((d) => d.displayName === name) ?? false).toBe(false);
