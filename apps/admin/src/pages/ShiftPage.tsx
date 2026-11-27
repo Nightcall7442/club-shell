@@ -147,7 +147,9 @@ function TotalsGrid({ x }: { x: ShiftTotals }): JSX.Element {
     [t('Сеансы'), x.sessions],
     [t('Магазин'), x.shop],
     [t('Возвраты'), x.refunds],
-    [t('Бонусы'), x.bonuses],
+    [t('Бонусы начислено'), x.bonuses],
+    // D-106: time the bonus account paid — inside «Сеансы», no money came in for it.
+    ...((x.bonusSpent ?? 0) !== 0 ? ([[t('Бонусами за время'), x.bonusSpent ?? 0]] as [string, number][]) : []),
     // Not money: debts the club gave up (SHELL_CHANGES 90), shown apart from the revenue.
     ...((x.writeOffs ?? 0) > 0
       ? ([[t('Списано долгов ({n})', { n: x.writeOffCount ?? 0 }), x.writeOffs ?? 0]] as [string, number][])

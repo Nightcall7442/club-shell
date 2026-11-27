@@ -139,6 +139,11 @@ export function describe(e: unknown): string {
           sum: moneyExact(amountOf(d['total']) ?? 0),
         });
       // D-91: the player spent part of the top-up already.
+      // D-106: the bonus it gave already went on time — the top-up can be taken back only once that time is given back.
+      if (reason === 'topUpSpent' && d['account'] === 'bonus' && isMoney(d['spendable']))
+        return t('Бонус этого пополнения уже потрачен на время: на бонусах осталось {sum}', {
+          sum: moneyExact(d['spendable'].amount),
+        });
       if (reason === 'topUpSpent' && isMoney(d['spendable']))
         return t('Клиент уже потратил часть: на балансе можно вернуть только {sum}', {
           sum: moneyExact(d['spendable'].amount),

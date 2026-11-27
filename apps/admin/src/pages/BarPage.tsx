@@ -88,6 +88,8 @@ type Buyer =
       displayName: string;
       role: string;
       balance: number;
+      /** The bonus account (D-106): play time only — never the bar; it pays a running postpaid bill first. */
+      bonus: number;
       pcId: string | null;
       pcName: string | null;
       /** The running postpaid bill of their session: the balance it holds back (D-55). */
@@ -137,6 +139,7 @@ async function buyerOf(id: string, fallback: ClientHit | null): Promise<Buyer | 
     displayName: user?.displayName ?? fallback?.displayName ?? '',
     role: user?.role ?? 'member',
     balance: user?.balance.amount ?? fallback?.balance.amount ?? 0,
+    bonus: user?.bonus?.amount ?? fallback?.bonus.amount ?? 0,
     pcId: seat?.pc.id ?? fallback?.playing?.pcId ?? null,
     pcName: seat?.pc.name ?? fallback?.playing?.pcName ?? null,
     postpaid: seat?.session && !seat.session.isPrepaid ? seat.session.cost.amount : null,
@@ -622,7 +625,8 @@ export default function BarPage(): JSX.Element {
   };
 
   const client = buyer.kind === 'client' ? buyer : null;
-  const spendable = client ? Math.max(0, client.balance - (client.postpaid ?? 0)) : 0;
+  // The postpaid bill is play time: the bonus account pays it first (D-106); the bonus itself buys nothing here.
+  const spendable = client ? Math.max(0, client.balance - Math.max(0, (client.postpaid ?? 0) - client.bonus)) : 0;
   const balanceCovers = client !== null && total > 0 && spendable >= total && short === null;
   const viaMethod = !client || !balanceCovers || payByMethod;
   const empty = cartLines.length === 0;
@@ -911,6 +915,9 @@ export default function BarPage(): JSX.Element {
                   <span className="tnum truncate font-mono text-[11px] leading-4 text-muted">
                     {[
                       t('баланс {sum}', { sum: moneyExact(client.balance) }),
+                      client.bonus > 0
+                        ? t('бонусы {sum}', { sum: money({ amount: client.bonus, currency: 'UZS' }) })
+                        : null,
                       client.pcName ? pcLabel(client.pcName) : null,
                     ]
                       .filter(Boolean)
@@ -936,6 +943,11 @@ export default function BarPage(): JSX.Element {
             )}
             {client?.postpaid != null && (
               <Note tone="warn">{t('Идёт постоплата: покупка с баланса сократит время игры')}</Note>
+            )}
+            {client && client.bonus > 0 && (
+              <p data-bar-no-bonus className="text-xs leading-5 text-muted">
+                {t('Бонусы в баре не действуют: только баланс или деньги')}
+              </p>
             )}
           </div>
 

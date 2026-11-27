@@ -409,8 +409,14 @@ function ClientPanel({
     try {
       const r = await clubApi.redeemPromo(client.id, promo.trim());
       setPromo('');
-      setPromoNote({ text: t('Промокод применён · баланс {sum}', { sum: money(r.balance) }), tone: 'ok' });
-      onSaved({ ...client, balance: r.balance });
+      // D-106: the code goes to the bonus account; an older server credited the balance.
+      setPromoNote({
+        text: r.bonusBalance
+          ? t('Промокод применён · бонусы {sum}', { sum: money(r.bonusBalance) })
+          : t('Промокод применён · баланс {sum}', { sum: money(r.balance) }),
+        tone: 'ok',
+      });
+      onSaved({ ...client, balance: r.balance, ...(r.bonusBalance ? { bonus: r.bonusBalance } : {}) });
       void loadTxs();
     } catch (e) {
       setPromoNote({ text: describe(e), tone: 'err' });
@@ -456,7 +462,12 @@ function ClientPanel({
 
         <div className="grid grid-cols-2 gap-2">
           <Well label={t('Баланс')} value={balance.num} unit={balance.unit} size={22} />
-          <Well label={t('Бонусы')} value={bonus.num} unit={bonus.unit} size={22} tone="accent" />
+          <Well label={t('Бонусы')} value={bonus.num} unit={bonus.unit} size={22} tone="accent">
+            {/* D-106: a separate account that pays play time only — never the bar, never cash. */}
+            <span data-bonus-hint className="text-[11px] leading-4 text-muted">
+              {t('только на игровое время')}
+            </span>
+          </Well>
           <Well label={t('Визиты')} value={nf.format(client.visits)} size={18} />
           <Well label={t('Потрачено')} value={spent.num} unit={spent.unit} size={18} />
         </div>
@@ -581,11 +592,13 @@ function ClientPanel({
                         })}
                       </span>
                     </span>
-                    {/* Money is never coloured by sign: «+» in the body colour, a real «−» dimmed. */}
+                    {/* Money is never coloured by sign: «+» in the body colour, a real «−» dimmed; a row of the bonus
+                        account (D-106) in the accent, as its well. */}
                     <span
+                      data-tx-bonus={x.bonus === true ? true : undefined}
                       className={clsx(
                         'tnum shrink-0 whitespace-nowrap font-mono text-[12px] font-semibold',
-                        x.amount.amount < 0 ? 'text-dim' : 'text-text',
+                        x.bonus === true ? 'text-accent' : x.amount.amount < 0 ? 'text-dim' : 'text-text',
                       )}
                     >
                       {x.amount.amount > 0 ? '+' : x.amount.amount < 0 ? '−' : ''}
@@ -1000,6 +1013,12 @@ function DeleteClient({ client, onDeleted }: { client: Client; onDeleted: () => 
                   sum: sum(balance),
                 })
               : t('На балансе {sum} — при удалении он будет списан, без возврата денег.', { sum: sum(balance) })}
+        {/* The bonus account (D-106) is no money: it goes with the client, whatever the balance. */}
+        {client.bonus.amount > 0 && (
+          <span data-delete-bonus className="block">
+            {t('Бонусы {sum} тоже будут списаны.', { sum: sum(client.bonus.amount) })}
+          </span>
+        )}
       </span>
       <div className="flex gap-2">
         {confirm && (

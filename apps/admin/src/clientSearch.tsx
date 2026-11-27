@@ -125,7 +125,15 @@ function HitLine({ hit, extra }: { hit: ClientHit; extra?: ReactNode }): JSX.Ele
       </span>
       {hit.blacklisted && <Badge tone="danger">{t('Чёрный список')}</Badge>}
       {hit.playing && <Badge tone="accent">{pcLabel(hit.playing.pcName)}</Badge>}
-      <span className="tnum shrink-0 font-mono text-[12.5px] font-semibold text-text">{money(hit.balance)}</span>
+      <span className="flex shrink-0 flex-col items-end">
+        <span className="tnum font-mono text-[12.5px] font-semibold text-text">{money(hit.balance)}</span>
+        {/* The bonus account apart (D-106): it buys play time only. */}
+        {hit.bonus.amount > 0 && (
+          <span data-hit-bonus className="tnum font-mono text-[11px] leading-4 text-accent">
+            {t('бонусы {sum}', { sum: money(hit.bonus) })}
+          </span>
+        )}
+      </span>
       {extra}
     </span>
   );

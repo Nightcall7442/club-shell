@@ -307,7 +307,8 @@ public sealed record AdminClientResponse(AdminClient Client);
 
 public sealed record AdminTransactionList(IReadOnlyList<Transaction> Items);
 
-public sealed record AdminPromoRedeemResponse(Money Balance);
+/// <summary><c>bonusBalance</c> (beyond the contract, D-106): the bonus account after the credit — the code goes there, not to <c>balance</c>.</summary>
+public sealed record AdminPromoRedeemResponse(Money Balance, Money? BonusBalance = null);
 
 public sealed record AdminTariffList(IReadOnlyList<Tariff> Items);
 

@@ -676,6 +676,8 @@ export function TopUpSheet({
     method: PayMethod;
     balance: Money;
     change: number | null;
+    /** The tier or x2 bonus credited to the bonus account (D-106). */
+    bonus: number;
     receipt: ReceiptData;
   } | null>(null);
   const heading = title ?? t('Пополнить · {name}', { name: payee.displayName });
@@ -730,6 +732,11 @@ export function TopUpSheet({
             {done.change !== null && done.change > 0 && (
               <span className="mt-1 block font-semibold">{t('Сдача: {sum}', { sum: moneyExact(done.change) })}</span>
             )}
+            {done.bonus > 0 && (
+              <span data-topup-bonus className="mt-1 block">
+                {t('Бонус {sum} — на бонусный счёт, только на время', { sum: moneyExact(done.bonus) })}
+              </span>
+            )}
           </Note>
           <div className="grid grid-cols-2 gap-2">
             <ReceiptButton receipt={done.receipt} />
@@ -751,6 +758,7 @@ export function TopUpSheet({
               method: p.method,
               balance: r.balance,
               change: p.received !== null ? p.received - p.amount : null,
+              bonus: r.bonus?.amount ?? 0,
               receipt: {
                 kind: 'topup',
                 at: r.transaction.createdAt,

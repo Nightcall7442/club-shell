@@ -750,7 +750,7 @@ function TopUpCancelSheet({
           </Note>
           {done.cancelled.bonus > 0 && (
             <p className="text-xs text-muted">
-              {t('Бонус {sum} снят с баланса', { sum: moneyExact(done.cancelled.bonus) })}
+              {t('Бонус {sum} снят с бонусного счёта', { sum: moneyExact(done.cancelled.bonus) })}
             </p>
           )}
           <Button variant="primary" autoFocus onClick={onClose}>

@@ -103,7 +103,7 @@ async function pollBalance(): Promise<void> {
     const before = useWalletStore.getState().balance;
     if (!before || before.amount.amount !== b.amount.amount || before.bonus.amount !== b.bonus.amount) {
       useWalletStore.getState().onUpdated(b);
-      useAuthStore.getState().setBalance(b.amount);
+      useAuthStore.getState().setBalance(b.amount, b.bonus);
     }
   } catch (e) {
     log.debug('balance poll failed', e);
@@ -280,7 +280,7 @@ function wireListeners(): void {
     // ----- wallet / shop -----------------------------------------------------------------------------------------------
     events.on('wallet.updated', (b) => {
       wallet().onUpdated(b);
-      auth().setBalance(b.amount);
+      auth().setBalance(b.amount, b.bonus);
     }),
     // SHELL_CHANGES 86: the sign-in screen opens once the games disks are attached, with a fresh game list.
     events.on('sys.readinessChanged', applyReadiness),

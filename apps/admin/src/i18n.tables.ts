@@ -542,6 +542,7 @@ export const UZ: Record<string, string> = {
   'Проверьте введённые данные': 'Kiritilgan maʼlumotlarni tekshiring',
   Промокод: 'Promokod',
   'Промокод применён · баланс {sum}': 'Promokod qoʻllandi · balans {sum}',
+  'Промокод применён · бонусы {sum}': 'Promokod qoʻllandi · bonus {sum}',
   'Промокодов нет': 'Promokodlar yoʻq',
   Промокоды: 'Promokodlar',
   Профиль: 'Profil',
@@ -1662,6 +1663,21 @@ export const UZ: Record<string, string> = {
   Женский: 'Ayol',
   'Пол не указан': 'Jinsi koʻrsatilmagan',
   'Укажите пол клиента': 'Mijozning jinsini koʻrsating',
+  // D-106: the bonus account, play time only.
+  'бонусы {sum}': 'bonuslar {sum}',
+  'Бонус этого пополнения уже потрачен на время: на бонусах осталось {sum}':
+    'Bu toʻldirishning bonusi allaqachon vaqtga sarflangan: bonusda {sum} qoldi',
+  'Бонус {sum} снят с бонусного счёта': 'Bonus {sum} bonus hisobidan olib tashlandi',
+  'Бонусы в баре не действуют: только баланс или деньги': 'Barda bonuslar ishlamaydi: faqat balans yoki pul',
+  'только на игровое время': 'faqat oʻyin vaqti uchun',
+  'Бонусы {sum} тоже будут списаны.': '{sum} bonus ham hisobdan chiqariladi.',
+  'Бонусами (только на время)': 'Bonusdan (faqat vaqt uchun)',
+  'Бонусы — только на игровое время': 'Bonuslar — faqat oʻyin vaqti uchun',
+  'Бонусов начислено {credited} сум, оплачено бонусами за время {spent} сум — это не деньги':
+    'Bonus berildi {credited} soʻm, vaqt uchun bonusdan toʻlandi {spent} soʻm — bu pul emas',
+  'Бонусы начислено': 'Bonus berildi',
+  'Бонусами за время': 'Vaqt uchun bonusdan',
+  'Бонус {sum} — на бонусный счёт, только на время': 'Bonus {sum} — bonus hisobiga, faqat vaqt uchun',
 };
 export const EN: Record<string, string> = {
   // Phone layout: the compact KPI sums, the bar's cart bar, the language in «Ещё».
@@ -2206,6 +2222,7 @@ export const EN: Record<string, string> = {
   'Проверьте введённые данные': 'Check the entered data',
   Промокод: 'Promo code',
   'Промокод применён · баланс {sum}': 'Promo code applied · balance {sum}',
+  'Промокод применён · бонусы {sum}': 'Promo code applied · bonus {sum}',
   'Промокодов нет': 'No promo codes',
   Промокоды: 'Promo codes',
   Профиль: 'Profile',
@@ -3318,4 +3335,19 @@ export const EN: Record<string, string> = {
   Женский: 'Female',
   'Пол не указан': 'Gender not given',
   'Укажите пол клиента': 'Choose the client’s gender',
+  // D-106: the bonus account, play time only.
+  'бонусы {sum}': 'bonus {sum}',
+  'Бонус этого пополнения уже потрачен на время: на бонусах осталось {sum}':
+    "This top-up's bonus has already gone on play time: {sum} is left on the bonus",
+  'Бонус {sum} снят с бонусного счёта': 'Bonus {sum} taken off the bonus account',
+  'Бонусы в баре не действуют: только баланс или деньги': 'Bonus does not work in the bar: balance or money only',
+  'только на игровое время': 'play time only',
+  'Бонусы {sum} тоже будут списаны.': 'The bonus of {sum} is written off too.',
+  'Бонусами (только на время)': 'From bonus (play time only)',
+  'Бонусы — только на игровое время': 'Bonus — for play time only',
+  'Бонусов начислено {credited} сум, оплачено бонусами за время {spent} сум — это не деньги':
+    'Bonus credited {credited} sum, play time paid with bonus {spent} sum — not money',
+  'Бонусы начислено': 'Bonus credited',
+  'Бонусами за время': 'Play time paid with bonus',
+  'Бонус {sum} — на бонусный счёт, только на время': 'Bonus {sum} — to the bonus account, play time only',
 };

@@ -51,6 +51,7 @@ import {
   settleStatus,
   signedInOn,
   str,
+  timeFunds,
   uuid,
   uzs,
   viewSession,
@@ -107,7 +108,7 @@ function requireAdmin(req: FastifyRequest): StaffRecord {
 interface SeatView {
   pc: ReturnType<typeof publicPc>;
   session: Session | null;
-  user: { id: string; displayName: string; role: string; balance: Money } | null;
+  user: { id: string; displayName: string; role: string; balance: Money; bonus: Money } | null;
   signedIn: boolean | null;
   game: SeatGame | null;
   place: { x: number; y: number; rotation: number };
@@ -158,7 +159,10 @@ function seatOf(pc: PcRecord): SeatView {
   return {
     pc: publicPc(pc),
     session,
-    user: user ? { id: user.id, displayName: user.displayName, role: user.role, balance: user.balance } : null,
+    // D-106: the bonus account apart (beyond the contract).
+    user: user
+      ? { id: user.id, displayName: user.displayName, role: user.role, balance: user.balance, bonus: user.bonus }
+      : null,
     // A desk session nobody has signed in to yet: its clock already runs (D-49).
     signedIn: rec ? signedInOn(rec.userId, pc.id) : null,
     game: gameOf(pc, rec),
@@ -166,8 +170,22 @@ function seatOf(pc: PcRecord): SeatView {
   };
 }
 
-function userView(u: UserRecord): { id: string; displayName: string; username: string; role: string; balance: Money } {
-  return { id: u.id, displayName: u.displayName, username: u.username, role: u.role, balance: u.balance };
+function userView(u: UserRecord): {
+  id: string;
+  displayName: string;
+  username: string;
+  role: string;
+  balance: Money;
+  bonus: Money;
+} {
+  return {
+    id: u.id,
+    displayName: u.displayName,
+    username: u.username,
+    role: u.role,
+    balance: u.balance,
+    bonus: u.bonus,
+  };
 }
 
 /** Money is taken only in an open shift, so the X / Z reports account for every сум. */
@@ -205,8 +223,8 @@ function checkFunds(user: UserRecord, payment: Payment | null, cost: Money): voi
   const debt = Math.max(0, -user.balance.amount);
   const bonus = payment && !user.transient ? topupBonus(Math.max(0, payment.amount - debt)) : 0;
   const incoming = payment ? payment.amount + bonus : 0;
-  if (user.balance.amount + incoming < cost.amount)
-    throw errors.insufficientFunds(cost, uzs(user.balance.amount + incoming));
+  // Play time: the bonus account pays first (D-106).
+  if (timeFunds(user) + incoming < cost.amount) throw errors.insufficientFunds(cost, uzs(timeFunds(user) + incoming));
 }
 
 /**
@@ -256,7 +274,7 @@ function checkPostpaid(user: UserRecord, tariff: Tariff, zone: string): void {
   const limit = cap > 0 ? cap : null;
   if (limit === null) return;
   const first = quote(tariff, 1, user.role === 'guest' ? null : user.id, zone).total;
-  if (first.amount > user.balance.amount + limit) throw errors.insufficientFunds(first, user.balance);
+  if (first.amount > timeFunds(user) + limit) throw errors.insufficientFunds(first, uzs(timeFunds(user)));
 }
 
 /** What a seat of `tariff` is checked for before anything is booked: the PC, the tariff's zone and hours. */
@@ -379,7 +397,7 @@ function payableOf(user: UserRecord): number {
   let payouts = 0;
   for (const tx of db.transactions) {
     if (tx.userId !== user.id) continue;
-    if (tx.type === 'refund') refunds += tx.amount.amount;
+    if (tx.type === 'refund' && tx.bonus !== true) refunds += tx.amount.amount;
     else if (tx.type === 'topUp' && topUpMethod(tx.description) === 'cash') cash += tx.amount.amount;
     else if (tx.type === 'adjustment' && tx.description === PAYOUT_DESCRIPTION) payouts += -tx.amount.amount;
   }
@@ -884,15 +902,24 @@ export function adminRoutes(app: FastifyInstance): void {
         }
         if (corrected === amount) throw errors.validation('amount', 'same');
         const bonus = typeof entry.meta['bonus'] === 'number' ? entry.meta['bonus'] : 0;
-        // What the balance can spend: an open postpaid session's bill so far counts against it.
+        // What the balance can spend: an open postpaid session's bill so far counts against it, less what the bonus
+        // account covers of it (D-106). The bonus it gave must still be on the bonus account; nothing spent goes back.
         const open = openSessionForUser(user.id);
         const owed = open && !open.isPrepaid ? (viewSession(open).cost?.amount ?? 0) : 0;
-        const incoming = corrected === null ? 0 : corrected + (user.transient ? 0 : topupBonus(corrected));
-        const spendable = user.balance.amount - owed;
-        if (spendable + incoming < amount + bonus)
+        const incomingBonus = corrected === null || user.transient ? 0 : topupBonus(corrected);
+        const incoming = corrected === null ? 0 : corrected;
+        const bonusLeft = Math.max(0, user.bonus.amount) + incomingBonus;
+        const spendable = user.balance.amount - Math.max(0, owed - Math.max(0, bonusLeft - bonus));
+        if (spendable + incoming < amount)
           throw errors.conflict('topUpSpent', {
             spendable: uzs(Math.max(0, spendable)),
-            required: uzs(amount + bonus - incoming),
+            required: uzs(amount - incoming),
+          });
+        if (bonusLeft < bonus)
+          throw errors.conflict('topUpSpent', {
+            account: 'bonus',
+            spendable: uzs(Math.max(0, user.bonus.amount)),
+            required: uzs(bonus - incomingBonus),
           });
         const payMethod = method === 'other' ? 'cash' : method;
         let fresh: { bonus: number; transaction: Transaction } | null = null;

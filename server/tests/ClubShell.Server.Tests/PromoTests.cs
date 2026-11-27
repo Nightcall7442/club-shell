@@ -78,7 +78,8 @@ public sealed class PromoTests(ServerFixture server) : LedgerCheckedTest(server)
         Server.Clock.Advance(TimeSpan.FromMilliseconds(5)); // the newest ledger row below is WELCOME's, not tied with the one above
         var redeemed = await ReplayedAsync(Server, 200, HttpMethod.Post, "/promo/redeem", cashier, new { userId = player.Id, code = "welcome" });
         // A promo code credits the bonus account (D-106): the balance stays the money.
-        Assert.Equal(100, redeemed.GetProperty("balance").GetProperty("amount").GetInt64());
+        Assert.Equal((100L, 1_000_300L), (redeemed.GetProperty("balance").GetProperty("amount").GetInt64(),
+            redeemed.GetProperty("bonusBalance").GetProperty("amount").GetInt64()));
         Assert.Equal((100L, 1_000_300L), (await Players.BalanceAsync(Server, player.Id), await Players.BonusAsync(Server, player.Id)));
         var audit = await Players.ScalarAsync<string>(Server,
             "SELECT amount || ' ' || (meta ->> 'code') FROM audit_entries WHERE action = 'promoRedeem' AND user_id = @Id ORDER BY at DESC, id DESC LIMIT 1", new { player.Id });

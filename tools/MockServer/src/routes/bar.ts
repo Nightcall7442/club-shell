@@ -156,7 +156,8 @@ export function spendableOf(user: UserRecord): number {
     // What the end will charge for the time played so far, as `endSession` prices it.
     if (tariff) reserve = tariffPriceFor(tariff, Math.ceil(used / 60)).amount;
   }
-  return Math.max(0, user.balance.amount - Math.max(0, reserve));
+  // The bill is play time: the bonus account pays it first (D-106), the bonus itself buys no goods.
+  return Math.max(0, user.balance.amount - Math.max(0, reserve - Math.max(0, user.bonus.amount)));
 }
 
 /** 403 `forbidden` with the void window (D-56). */

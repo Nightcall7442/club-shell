@@ -22,6 +22,7 @@ import { usePrice } from '@/hooks/usePrice';
 import { useSession } from '@/hooks/useSession';
 import { trackScreen } from '@/lib/analytics';
 import { pickAutoStartTariff } from '@/lib/autoStart';
+import { payForTime, timeFunds } from '@/lib/bonus';
 import { onCardRead } from '@/lib/cardReader';
 import { errorDetails, errorReason } from '@/lib/errorText';
 import { formatDurationSec, formatMoney } from '@/lib/format';
@@ -478,6 +479,10 @@ function MemberTariffPicker({ open, onStarted, onLogout }: StartSessionModalProp
   const walletBalance = useWalletStore((s) => s.balance?.amount ?? null);
   const userBalance = useAuthStore((s) => s.user?.balance ?? null);
   const balance = walletBalance ?? userBalance;
+  // D-106: the bonus account pays play time first.
+  const walletBonus = useWalletStore((s) => s.balance?.bonus ?? null);
+  const userBonus = useAuthStore((s) => s.user?.bonus ?? null);
+  const bonus = walletBonus ?? userBonus;
   const armed = useAuthStore((s) => s.autoStartArmed);
   const disarm = useAuthStore((s) => s.disarmAutoStart);
   const { start, busy, lastEnded } = useSession();
@@ -521,9 +526,9 @@ function MemberTariffPicker({ open, onStarted, onLogout }: StartSessionModalProp
   const options = useMemo(() => (tariff ? tariffMinuteOptions(tariff) : []), [tariff]);
   const effectiveMinutes = options.includes(minutes) ? minutes : (options.find((m) => m >= 60) ?? options[0] ?? 60);
   const price = usePrice(open ? tariff : null, effectiveMinutes);
-  const notEnough = price !== null && balance !== null && price.amount.amount > balance.amount;
-  const after: Money | null =
-    price && balance ? { amount: balance.amount - price.amount.amount, currency: balance.currency } : null;
+  const pay = price && balance ? payForTime(balance, bonus, price.amount) : null;
+  const notEnough = pay !== null && !pay.enough;
+  const after: Money | null = pay?.balanceAfter ?? null;
 
   const submit = async (): Promise<void> => {
     if (!tariff) {
@@ -541,12 +546,19 @@ function MemberTariffPicker({ open, onStarted, onLogout }: StartSessionModalProp
     }
   };
 
-  // The owner's auto-start: right after a fresh sign-in only, with money on the balance, on the cheapest hourly tariff
-  // open now — pay as you go from the balance, which the server stops when the balance runs out. Decided once, when
+  // The owner's auto-start: right after a fresh sign-in only, with money on the balance (or the bonus account, D-106),
+  // on the cheapest hourly tariff open now — pay as you go, which the server stops when the money runs out. Decided once, when
   // the tariffs are in; the picker shows when it does not apply or the start fails.
   const autoTariff = useMemo(
-    () => pickAutoStartTariff({ armed, isGuest: false, balance: balance?.amount ?? null, tariffs, availableNow }),
-    [armed, balance, tariffs, availableNow],
+    () =>
+      pickAutoStartTariff({
+        armed,
+        isGuest: false,
+        balance: balance ? timeFunds(balance, bonus).amount : null,
+        tariffs,
+        availableNow,
+      }),
+    [armed, balance, bonus, tariffs, availableNow],
   );
   const [autoState, setAutoState] = useState<'idle' | 'starting' | 'failed'>('idle');
   useEffect(() => {
@@ -593,7 +605,7 @@ function MemberTariffPicker({ open, onStarted, onLogout }: StartSessionModalProp
       });
   }, [open, armed, autoState, tariffsReady, autoTariff, disarm, start, onStarted, reload, push, pushError, t, locale]);
   // Hidden while the auto-start decides or runs, so the picker does not flash under a session that is starting.
-  const deciding = armed && !tariffsReady && (balance?.amount ?? 0) > 0;
+  const deciding = armed && !tariffsReady && (balance ? timeFunds(balance, bonus).amount : 0) > 0;
   const modalOpen = open && autoState !== 'starting' && !deciding;
 
   return (
@@ -626,6 +638,13 @@ function MemberTariffPicker({ open, onStarted, onLogout }: StartSessionModalProp
       {balance && (
         <p className="mb-4 text-base text-muted">
           {t('wallet.balance')}: <span className="tnum font-bold text-text">{formatMoney(balance, locale)}</span>
+          {bonus && bonus.amount > 0 && (
+            <>
+              {' · '}
+              {t('wallet.bonus')}: <span className="tnum font-bold text-accent">{formatMoney(bonus, locale)}</span>
+              <span className="block text-sm">{t('wallet.bonusOnlyTime')}</span>
+            </>
+          )}
           <span className="block text-sm">{t('session.prepaidHint')}</span>
         </p>
       )}
@@ -692,6 +711,12 @@ function MemberTariffPicker({ open, onStarted, onLogout }: StartSessionModalProp
             <dd className="col-span-2 text-right">
               <PriceNote view={price} />
             </dd>
+          )}
+          {pay && pay.fromBonus.amount > 0 && (
+            <>
+              <dt className="text-muted">{t('wallet.fromBonus')}</dt>
+              <dd className="tnum text-right font-semibold text-accent">−{formatMoney(pay.fromBonus, locale)}</dd>
+            </>
           )}
           {after && (
             <>

@@ -62,7 +62,8 @@ public static class PromoEndpoints
                 ?? throw ApiException.NotFound("user");
             var redeemed = await RedeemCoreAsync(c, tx, staff.ClubId, userId, code, staff.StaffId, now);
             await Audit.WriteAsync(c, tx, staff, now, "promoRedeem", userId, amount: redeemed.Value, detail: $"{name} · {redeemed.Code}", meta: new { code = redeemed.Code });
-            return new IdempotentResult(StatusCodes.Status200OK, AdminJson.ToElement(new AdminPromoRedeemResponse(Money.Uzs(redeemed.Balance))));
+            return new IdempotentResult(StatusCodes.Status200OK, AdminJson.ToElement(new AdminPromoRedeemResponse(
+                Money.Uzs(redeemed.Balance), Money.Uzs(await Ledger.BonusOfAsync(c, userId, tx)))));
         });
         if (!context.Response.Headers.ContainsKey(IdempotencyStore.ReplayedHeader))
         {
@@ -74,7 +75,8 @@ public static class PromoEndpoints
 
     /// <summary>
     /// <c>POST /wallet/{userId}/promo {code}</c> (D-88, beyond the contract): the signed-in member redeems a <c>bonus</c>
-    /// code of the PC's club themselves — <c>{code, bonus, balance}</c>. The same checks as the desk's; a guest or a
+    /// code of the PC's club themselves — <c>{code, bonus, balance}</c> and <c>bonusBalance</c> (D-106: the code goes to the
+    /// bonus account). The same checks as the desk's; a guest or a
     /// walk-in has no account to credit (<c>403 guest</c>); after <see cref="MaxFailures"/> wrong or used-up codes in
     /// <see cref="FailureWindow"/> the player waits (<c>429 rateLimited</c>), so codes are not guessed from a PC.
     /// </summary>
@@ -103,6 +105,7 @@ public static class PromoEndpoints
         }
 
         (long Balance, long Value, string Code) redeemed;
+        long bonusBalance;
         try
         {
             await using var c = await db.OpenConnectionAsync();
@@ -116,6 +119,7 @@ public static class PromoEndpoints
             }
 
             redeemed = await RedeemCoreAsync(c, tx, clubId, userId, code, staffId: null, now);
+            bonusBalance = await Ledger.BonusOfAsync(c, userId, tx);
             await tx.CommitAsync();
         }
         catch (ApiException e) when (e.Status is StatusCodes.Status404NotFound or StatusCodes.Status400BadRequest)
@@ -125,7 +129,9 @@ public static class PromoEndpoints
         }
 
         await PushAsync(pushes, userId, logs);
-        return Results.Json(new { code = redeemed.Code, bonus = Money.Uzs(redeemed.Value), balance = Money.Uzs(redeemed.Balance) }, ServerJson.Options);
+        // bonusBalance (beyond the contract, D-106): the bonus account the code went to.
+        return Results.Json(new { code = redeemed.Code, bonus = Money.Uzs(redeemed.Value), balance = Money.Uzs(redeemed.Balance), bonusBalance = Money.Uzs(bonusBalance) },
+            ServerJson.Options);
     }
 
     /// <summary>

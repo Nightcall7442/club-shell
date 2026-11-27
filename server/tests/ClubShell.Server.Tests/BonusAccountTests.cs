@@ -49,7 +49,8 @@ public sealed class BonusAccountTests(ServerFixture server) : LedgerCheckedTest(
             "INSERT INTO promo_codes (id, club_id, code, kind, value, uses_left) SELECT gen_random_uuid(), id, @code, 'bonus', 300000, 5 FROM clubs",
             new { code });
         var redeemed = await agent.RawPostAsync($"/api/v1/wallet/{player.Id}/promo", new { code });
-        Assert.Equal((200, 10_000_000L), (redeemed.Status, Amount(redeemed.Body.GetProperty("balance"))));
+        Assert.Equal((200, 10_000_000L, 1_300_000L),
+            (redeemed.Status, Amount(redeemed.Body.GetProperty("balance")), Amount(redeemed.Body.GetProperty("bonusBalance"))));
         Assert.Equal((10_000_000L, 1_300_000L), await WalletAsync(player.Id));
 
         // The PC and the desk read both balances apart.

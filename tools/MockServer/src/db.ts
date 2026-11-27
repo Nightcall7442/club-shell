@@ -770,6 +770,8 @@ export function publicUser(u: UserRecord): User {
     lastSeenAt: u.lastSeenAt ?? null,
     locale: u.locale,
     flags: u.flags,
+    // D-106: the bonus account, play time only (beyond the contract).
+    bonus: u.bonus,
   };
 }
 
@@ -794,28 +796,85 @@ export function balanceOf(u: UserRecord): Balance {
   return { userId: u.id, amount: u.balance, bonus: u.bonus, currency: 'UZS', updatedAt: now() };
 }
 
-/** Applies a signed ledger entry to the user's main balance and records it. */
+/** What `user` can spend on play time (D-106): the main balance plus the bonus account. */
+export function timeFunds(user: UserRecord): number {
+  return user.balance.amount + Math.max(0, user.bonus.amount);
+}
+
+/** Which account a ledger entry moves (D-106): `auto` — by its type, as the server's ledger. */
+export type LedgerAccount = 'auto' | 'main' | 'bonus';
+
+/** What session `ref` took from the bonus account and has not given back yet (its bonus charges less bonus refunds). */
+export function bonusTaken(ref: string): number {
+  const net = db.transactions
+    .filter((t) => t.ref === ref && t.bonus === true && (t.type === 'charge' || t.type === 'refund'))
+    .reduce((a, t) => a + t.amount.amount, 0);
+  return Math.max(0, -net);
+}
+
+/**
+ * Applies a signed ledger entry and records it, as the server's ledger does (D-106): a `bonus` entry moves the bonus
+ * account; a `charge` (play time, the only thing bonus money buys) takes the bonus first and the main balance for the rest
+ * (two rows, the bonus one marked `bonus` and described «· бонусы»); a `refund` of a session's time (`ref` = the session)
+ * gives the bonus back first, up to what the session took from it. Everything else moves the main balance only; the bonus
+ * never goes below zero. Returns the main row (or the only one).
+ */
 export function applyTransaction(
   user: UserRecord,
   type: TransactionType,
   amount: Money,
   description: string,
   ref: string | null,
+  account: LedgerAccount = 'auto',
 ): Transaction {
-  user.balance = addMoney(user.balance, amount);
-  const tx: Transaction = {
-    id: uuid(),
-    userId: user.id,
-    type,
-    amount,
-    balanceAfter: user.balance,
-    description,
-    createdAt: now(),
-    ref,
-  };
-  db.transactions.unshift(tx);
+  const a = amount.amount;
+  const fromBonus =
+    account === 'bonus'
+      ? a
+      : account === 'main'
+        ? 0
+        : type === 'bonus'
+          ? a
+          : type === 'charge' && a < 0
+            ? -Math.min(Math.max(0, user.bonus.amount), -a)
+            : type === 'refund' && a > 0 && ref !== null
+              ? Math.min(a, bonusTaken(ref))
+              : 0;
+  const fromMain = a - fromBonus;
+  const at = now();
+  let main: Transaction | null = null;
+  let bonus: Transaction | null = null;
+  if (fromBonus !== 0) {
+    user.bonus = uzs(Math.max(0, user.bonus.amount + fromBonus));
+    bonus = {
+      id: uuid(),
+      userId: user.id,
+      type,
+      amount: uzs(fromBonus),
+      balanceAfter: user.bonus,
+      description: type === 'charge' || type === 'refund' ? `${description} · бонусы` : description,
+      createdAt: at,
+      ref,
+      bonus: true,
+    };
+    db.transactions.unshift(bonus);
+  }
+  if (fromMain !== 0 || fromBonus === 0) {
+    user.balance = addMoney(user.balance, uzs(fromMain));
+    main = {
+      id: uuid(),
+      userId: user.id,
+      type,
+      amount: uzs(fromMain),
+      balanceAfter: user.balance,
+      description,
+      createdAt: at,
+      ref,
+    };
+    db.transactions.unshift(main);
+  }
   markDirty();
-  return tx;
+  return (main ?? bonus)!;
 }
 
 /** Wall-clock view of a session record. */
