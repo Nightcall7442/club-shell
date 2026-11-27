@@ -65,6 +65,7 @@ import { endSession } from './session.js';
 import { createGuest } from './auth.js';
 import { isApiKey, requireStaff, topUpWithBonus } from './club.js';
 import {
+  OWNER_TRANSACTIONS,
   PAYOUT_DESCRIPTION,
   TOPUP_CANCEL_DESCRIPTION,
   WRITE_OFF_DESCRIPTION,
@@ -996,7 +997,7 @@ export function adminRoutes(app: FastifyInstance): void {
   /**
    * Debt write-off (SHELL_CHANGES 90), as the server: exactly the debt (`409 debtChanged {debt}`, none — `noDebt`), not in
    * a session (`409 sessionOpen`), a reason; the owner or a cashier with the mark (`403 writeOffNotAllowed`). An
-   * `adjustment` without money; the journal has `debtWriteOff`; X counts it as `writeOffs`.
+   * `adjustment` without money; the journal has `debtWriteOff`; X counts a cashier's as `writeOffs` (the owner's stays out, D-101).
    */
   app.post('/admin/wallet/write-off', async (req, reply) => {
     const staff = requireAdmin(req);
@@ -1016,8 +1017,12 @@ export function adminRoutes(app: FastifyInstance): void {
         if (debt === 0) throw errors.conflict('noDebt');
         if (amount !== debt) throw errors.conflict('debtChanged', { debt: uzs(debt) });
         const transaction = applyTransaction(user, 'adjustment', uzs(amount), WRITE_OFF_DESCRIPTION + reason, null);
+        // D-101: the owner's write-off is the owner's own — out of the cashier's shift and X.
+        const owner = !isApiKey(req) && staff.role === 'owner';
+        if (owner) OWNER_TRANSACTIONS.add(transaction.id);
         pushToUser(user.id, 'walletUpdated', balanceOf(user));
         record(staff, 'debtWriteOff', {
+          ...(owner ? { shiftId: null, owner: true } : {}),
           userId: user.id,
           amount,
           detail: `${user.displayName}: ${reason}`,
