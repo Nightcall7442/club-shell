@@ -868,9 +868,10 @@ public sealed class SessionHandlers : IIpcHandlerGroup
 
         try
         {
-            if (await _store.GetCachedUserAsync(userId, cancellationToken).ConfigureAwait(false) is { } cached && _users.User is { } user && user.Id == userId && user.Balance != cached.Balance)
+            if (await _store.GetCachedUserAsync(userId, cancellationToken).ConfigureAwait(false) is { } cached && _users.User is { } user && user.Id == userId
+                && (user.Balance != cached.Balance || user.Bonus != cached.Bonus))
             {
-                _users.Update(user with { Balance = cached.Balance });
+                _users.Update(user with { Balance = cached.Balance, Bonus = cached.Bonus });
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -1139,13 +1140,14 @@ public sealed class UserDomainHandlers : IIpcHandlerGroup
             }
         }
 
-        // The signed-in player's snapshot follows every walletUpdated push and offline charge; the bonus comes from the
-        // last full answer of the server.
+        // The signed-in player's snapshot follows every walletUpdated push and offline charge, the bonus account too (D-106);
+        // a server without it — the bonus of the last full answer.
         User current = _users.User is { } signedIn && signedIn.Id == user.Id ? signedIn : user;
         Balance? last = _users.LastBalance;
-        return last is not null && last.UserId == user.Id && last.Amount == current.Balance
+        Money bonus = current.Bonus ?? (last?.UserId == user.Id ? last.Bonus : Money.Zero with { Currency = current.Balance.Currency });
+        return last is not null && last.UserId == user.Id && last.Amount == current.Balance && last.Bonus == bonus
             ? last
-            : new Balance(user.Id, current.Balance, last?.UserId == user.Id ? last.Bonus : Money.Zero with { Currency = current.Balance.Currency }, current.Balance.Currency, last?.UpdatedAt ?? current.LastSeenAt ?? current.CreatedAt);
+            : new Balance(user.Id, current.Balance, bonus, current.Balance.Currency, last?.UpdatedAt ?? current.LastSeenAt ?? current.CreatedAt);
     }
 
     private async Task<WalletTariffsResponse> TariffsAsync(IpcContext context, WalletTariffsRequest? request, CancellationToken cancellationToken)

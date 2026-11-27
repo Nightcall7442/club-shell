@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Globalization;
 using ClubShell.Server.Wallet;
 using Microsoft.Extensions.DependencyInjection;
@@ -27,23 +28,35 @@ public sealed class WalletTests(ServerFixture server) : LedgerCheckedTest(server
         Assert.Equal(201, status);
 
         var page = await Players.ReadAsync(await agent.SendAsync(HttpMethod.Get, $"/api/v1/wallet/{player.Id}/transactions"), 200);
-        Assert.Equal((4, 1, 50), (page.GetProperty("total").GetInt32(), page.GetProperty("page").GetInt32(), page.GetProperty("pageSize").GetInt32()));
+        Assert.Equal((5, 1, 50), (page.GetProperty("total").GetInt32(), page.GetProperty("page").GetInt32(), page.GetProperty("pageSize").GetInt32()));
         var items = page.GetProperty("items").EnumerateArray().ToList();
         Assert.All(items, t => Assert.Equal((player.Id, "UZS"), (t.GetProperty("userId").GetGuid(), t.GetProperty("amount").GetProperty("currency").GetString())));
 
-        var charge = items[0];
-        Assert.Equal("charge", charge.GetProperty("type").GetString());
-        Assert.True(charge.GetProperty("amount").GetProperty("amount").GetInt64() < 0);
-        Assert.Equal(session.GetProperty("id").GetGuid().ToString(), charge.GetProperty("ref").GetString());
-        Assert.Equal(await Players.BalanceAsync(Server, player.Id), charge.GetProperty("balanceAfter").GetProperty("amount").GetInt64());
+        // The hour (1 200 000) is paid by the bonus first (D-106), the rest by the balance: two rows of one operation, the
+        // bonus one marked `bonus` with the bonus balance after it.
+        static bool IsBonus(JsonElement t) => t.TryGetProperty("bonus", out var b) && b.ValueKind == JsonValueKind.True;
+        Assert.All(items[0..2], charge =>
+        {
+            Assert.Equal("charge", charge.GetProperty("type").GetString());
+            Assert.Equal(session.GetProperty("id").GetGuid().ToString(), charge.GetProperty("ref").GetString());
+        });
+        var fromBonus = items[0..2].Single(IsBonus);
+        var fromMain = items[0..2].Single(t => !IsBonus(t));
+        Assert.Equal((-250_000L, 0L), (fromBonus.GetProperty("amount").GetProperty("amount").GetInt64(), fromBonus.GetProperty("balanceAfter").GetProperty("amount").GetInt64()));
+        Assert.Equal((-950_000L, 5_050_000L), (fromMain.GetProperty("amount").GetProperty("amount").GetInt64(), fromMain.GetProperty("balanceAfter").GetProperty("amount").GetInt64()));
+        Assert.Equal(5_050_000, await Players.BalanceAsync(Server, player.Id));
+        Assert.EndsWith(" · бонусы", fromBonus.GetProperty("description").GetString());
 
-        // The top-up and its 5 % tier bonus are one operation at one instant: between themselves they follow the id.
+        // The top-up and its 5 % tier bonus are one operation at one instant: between themselves they follow the id. The
+        // bonus went to the bonus account.
         Assert.Equal(
-            [("bonus", 250_000L), ("topUp", 5_000_000L)],
-            items[1..3].Select(t => (t.GetProperty("type").GetString(), t.GetProperty("amount").GetProperty("amount").GetInt64())).Order());
-        Assert.Equal(6_250_000L, items[1..3].Max(t => t.GetProperty("balanceAfter").GetProperty("amount").GetInt64()));
-        Assert.Equal("Пополнение на кассе наличными", items[1..3].Single(t => t.GetProperty("type").GetString() == "topUp").GetProperty("description").GetString());
-        Assert.Equal(("adjustment", 1_000_000L), (items[3].GetProperty("type").GetString(), items[3].GetProperty("balanceAfter").GetProperty("amount").GetInt64()));
+            [("bonus", 250_000L, 250_000L), ("topUp", 5_000_000L, 6_000_000L)],
+            items[2..4].Select(t => (t.GetProperty("type").GetString(), t.GetProperty("amount").GetProperty("amount").GetInt64(),
+                t.GetProperty("balanceAfter").GetProperty("amount").GetInt64())).Order());
+        Assert.True(IsBonus(items[2..4].Single(t => t.GetProperty("type").GetString() == "bonus")));
+        Assert.Equal("Пополнение на кассе наличными", items[2..4].Single(t => t.GetProperty("type").GetString() == "topUp").GetProperty("description").GetString());
+        Assert.Equal(("adjustment", 1_000_000L), (items[4].GetProperty("type").GetString(), items[4].GetProperty("balanceAfter").GetProperty("amount").GetInt64()));
+        Assert.False(items[4].TryGetProperty("bonus", out _));
     }
 
     [Fact]

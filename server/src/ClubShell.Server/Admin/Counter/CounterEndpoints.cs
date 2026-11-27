@@ -79,10 +79,10 @@ public static partial class CounterEndpoints
         await using var c = await db.OpenConnectionAsync();
         var open = (await c.QueryAsync<SessionRow>($"SELECT {SessionRow.Columns} FROM sessions WHERE club_id = @ClubId AND state <> 'ended'", new { staff.ClubId }))
             .ToDictionary(s => s.PcId);
-        var players = (await c.QueryAsync<(Guid Id, string DisplayName, string Role, long Balance)>(
-                "SELECT u.id, u.display_name, u.role, w.main_balance FROM users u JOIN wallets w ON w.user_id = u.id WHERE u.id = ANY(@ids)",
+        var players = (await c.QueryAsync<(Guid Id, string DisplayName, string Role, long Balance, long Bonus)>(
+                "SELECT u.id, u.display_name, u.role, w.main_balance, w.bonus_balance FROM users u JOIN wallets w ON w.user_id = u.id WHERE u.id = ANY(@ids)",
                 new { ids = open.Values.Select(s => s.UserId).ToArray() }))
-            .ToDictionary(u => u.Id, u => new AdminSeatUser(u.Id, u.DisplayName, u.Role, Money.Uzs(u.Balance)));
+            .ToDictionary(u => u.Id, u => new AdminSeatUser(u.Id, u.DisplayName, u.Role, Money.Uzs(u.Balance), Money.Uzs(u.Bonus)));
 
         // D-49: a desk session nobody has signed in to yet («ждёт входа»; its clock already runs).
         var signedIn = (await c.QueryAsync<Guid>(
@@ -136,9 +136,9 @@ public static partial class CounterEndpoints
         var tariffs = (await c.QueryAsync<TariffRow>(
             $"SELECT {TariffRow.Columns} FROM tariffs WHERE club_id = @ClubId AND deleted_at IS NULL ORDER BY created_at, id", new { staff.ClubId }))
             .Select(t => t.ToWire()).ToList();
-        var members = (await c.QueryAsync<(Guid Id, string DisplayName, string Role, long Balance, string Username)>(
+        var members = (await c.QueryAsync<(Guid Id, string DisplayName, string Role, long Balance, string Username, long Bonus)>(
             """
-            SELECT u.id, u.display_name, u.role, w.main_balance, u.username
+            SELECT u.id, u.display_name, u.role, w.main_balance, u.username, w.bonus_balance
             FROM users u JOIN wallets w ON w.user_id = u.id
             LEFT JOIN client_profiles cp ON cp.user_id = u.id AND cp.club_id = @ClubId
             WHERE u.network_id = @NetworkId AND u.deleted_at IS NULL AND NOT u.transient AND u.role NOT IN ('guest', 'admin')
@@ -146,7 +146,7 @@ public static partial class CounterEndpoints
             ORDER BY u.display_name, u.id
             """,
             new { staff.ClubId, staff.NetworkId }))
-            .Select(u => new AdminMember(u.Id, u.DisplayName, u.Role, Money.Uzs(u.Balance), u.Username)).ToList();
+            .Select(u => new AdminMember(u.Id, u.DisplayName, u.Role, Money.Uzs(u.Balance), u.Username, Money.Uzs(u.Bonus))).ToList();
         // Players of this club left with a postpaid bill («Расчёт с гостями и долги»): guests (their transient accounts are
         // never in the client list) and members (limits.memberDebtLimit), settled by a top-up {settleDebt}.
         var debts = (await c.QueryAsync<(Guid Id, string DisplayName, long Balance, string? Pc, DateTimeOffset? EndedAt, string Role)>(
@@ -196,14 +196,14 @@ public static partial class CounterEndpoints
     /// <summary>
     /// D-37, the safe default: a guest's cash payout never exceeds the balance, the money a desk end gave back (refund rows
     /// exist only for admin/error ends) or the cash the guest actually paid — each less what was paid out already. A card
-    /// or Payme payer gets no cash back, and bonus money (credited to the main balance) can never leave as cash. Joined as
+    /// or Payme payer gets no cash back, and bonus money (its own account, D-106) can never leave as cash. Joined as
     /// <c>m</c> on <c>u</c>/<c>w</c> (<see cref="PayableJoin"/>).
     /// </summary>
     private const string PayableSql = "greatest(0, least(w.main_balance, m.refunds - m.payouts, m.cash - m.payouts))::bigint AS payable";
 
     private const string PayableJoin = """
         CROSS JOIN LATERAL (
-            SELECT coalesce(sum(amount) FILTER (WHERE type = 'refund'), 0) AS refunds,
+            SELECT coalesce(sum(amount) FILTER (WHERE type = 'refund' AND account = 'main'), 0) AS refunds,
                    coalesce(-sum(amount) FILTER (WHERE type = 'adjustment' AND method = 'cash'), 0) AS payouts,
                    coalesce(sum(amount) FILTER (WHERE type = 'topUp' AND method = 'cash'), 0) AS cash
             FROM ledger_entries WHERE user_id = u.id) m

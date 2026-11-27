@@ -58,6 +58,8 @@ public static class ClientEndpoints
     /// tiyin (a debt negative; another figure — <c>409 balance</c> with the balance now). In the same transaction the balance
     /// goes to zero by one <c>adjustment</c> without a payment method (<c>meta.kind = clientDelete</c>; the owner's own
     /// operation, D-101: in no shift, no cash, no revenue), and the <c>clientDelete</c> entry carries the amount written off.
+    /// The bonus account (D-106) is no money: it never refuses a delete, is written off with the client (an <c>adjustment</c>
+    /// of the bonus account, <c>meta.bonusWrittenOff</c> in the journal) and the <c>409 balance</c> names it as <c>bonus</c>.
     /// Never while playing (<c>409 playing</c>).
     /// </summary>
     private static async Task<IResult> DeleteAsync(
@@ -79,18 +81,23 @@ public static class ClientEndpoints
                 throw new ApiException(StatusCodes.Status409Conflict, ErrorCode.Conflict, "The client is playing: end the session first", new { reason = "playing" });
             }
 
-            var balance = await c.ExecuteScalarAsync<long>("SELECT main_balance FROM wallets WHERE user_id = @userId FOR UPDATE", new { userId }, tx);
-            if (balance != 0 && giveUp == balance)
-            {
-                await Ledger.PostAsync(c, tx, userId, allowOverdraft: false, now,
-                    new LedgerLine("adjustment", -balance, balance > 0 ? "Списание баланса при удалении клиента" : "Списание долга при удалении клиента",
-                        staff.ClubId, StaffId: staff.StaffId, Meta: new { kind = "clientDelete" }, OwnerOp: true));
-            }
-            else if (balance != 0)
+            var (balance, bonus) = await c.QuerySingleAsync<(long, long)>(
+                "SELECT main_balance, bonus_balance FROM wallets WHERE user_id = @userId FOR UPDATE", new { userId }, tx);
+            if (balance != 0 && giveUp != balance)
             {
                 throw new ApiException(StatusCodes.Status409Conflict, ErrorCode.Conflict,
                     balance > 0 ? "Money is left on the balance" : "The client owes the club",
-                    new { reason = "balance", balance = Money.Uzs(balance) });
+                    new { reason = "balance", balance = Money.Uzs(balance), bonus = Money.Uzs(bonus) });
+            }
+
+            // The bonus account is no money (D-106): it never holds a delete back and goes with the client.
+            if (balance != 0 || bonus != 0)
+            {
+                await Ledger.PostAsync(c, tx, userId, allowOverdraft: false, now,
+                    new LedgerLine("adjustment", -balance, balance > 0 ? "Списание баланса при удалении клиента" : "Списание долга при удалении клиента",
+                        staff.ClubId, StaffId: staff.StaffId, Meta: new { kind = "clientDelete" }, OwnerOp: true, Account: Ledger.Main),
+                    new LedgerLine("adjustment", -bonus, "Списание бонусов при удалении клиента",
+                        staff.ClubId, StaffId: staff.StaffId, Meta: new { kind = "clientDelete" }, OwnerOp: true, Account: Ledger.Bonus));
             }
 
             var login = await c.ExecuteScalarAsync<string>("SELECT username FROM users WHERE id = @userId", new { userId }, tx);
@@ -102,7 +109,7 @@ public static class ClientEndpoints
                 new { userId, now }, tx);
             revoked = (await c.QueryAsync<Guid>("DELETE FROM user_tokens WHERE user_id = @userId RETURNING pc_id", new { userId }, tx)).ToList();
             await Audit.WriteAsync(c, tx, staff, now, "clientDelete", userId, amount: Math.Abs(balance), detail: $"{name} · {login}",
-                meta: balance == 0 ? null : new { writtenOff = balance }, ownerOp: balance != 0);
+                meta: balance == 0 && bonus == 0 ? null : new { writtenOff = balance, bonusWrittenOff = bonus == 0 ? (long?)null : bonus }, ownerOp: balance != 0);
             await tx.CommitAsync();
         }
 
@@ -465,7 +472,7 @@ public static class ClientEndpoints
         /// <summary>Clients of the network with this club's profile; <c>visits</c> = sessions in this club.</summary>
         public const string Select =
             """
-            SELECT u.id, u.username, u.display_name, u.role, u.card_id, u.gender, w.main_balance, w.lifetime_spent,
+            SELECT u.id, u.username, u.display_name, u.role, u.card_id, u.gender, w.main_balance, w.bonus_balance, w.lifetime_spent,
                    cp.group_id, coalesce(cp.note, '') AS note, coalesce(cp.blacklisted, false) AS blacklisted,
                    coalesce(cp.phone, '') AS phone, cp.birth_year,
                    (SELECT count(*) FROM sessions s WHERE s.user_id = u.id AND s.club_id = @ClubId)::int AS visits
@@ -482,6 +489,7 @@ public static class ClientEndpoints
         public string? CardId { get; init; }
         public string? Gender { get; init; }
         public long MainBalance { get; init; }
+        public long BonusBalance { get; init; }
         public long LifetimeSpent { get; init; }
         public string? GroupId { get; init; }
         public string Note { get; init; } = "";
@@ -495,7 +503,7 @@ public static class ClientEndpoints
         {
             var level = club.LevelOf(LifetimeSpent) ?? club.Loyalty.FirstOrDefault();
             return new AdminClient(
-                Id, Username, DisplayName, Role, Money.Uzs(MainBalance), Money.Uzs(0), GroupId, Note, Blacklisted, Phone, BirthYear, CardId,
+                Id, Username, DisplayName, Role, Money.Uzs(MainBalance), Money.Uzs(BonusBalance), GroupId, Note, Blacklisted, Phone, BirthYear, CardId,
                 LifetimeSpent, Visits, level?.Level ?? 1, level?.Name ?? "", Gender);
         }
     }
@@ -508,7 +516,7 @@ public static class ClientEndpoints
         /// </summary>
         public const string Select =
             """
-            SELECT u.id, u.username, u.display_name, u.card_id, u.gender, w.main_balance, coalesce(cp.phone, '') AS phone,
+            SELECT u.id, u.username, u.display_name, u.card_id, u.gender, w.main_balance, w.bonus_balance, coalesce(cp.phone, '') AS phone,
                    coalesce(cp.blacklisted, false) AS blacklisted,
                    s.pc_id AS playing_pc_id, p.name AS playing_pc_name, greatest(u.last_seen_at, w.updated_at, u.created_at) AS active_at
             FROM users u
@@ -525,6 +533,7 @@ public static class ClientEndpoints
         public string? CardId { get; init; }
         public string? Gender { get; init; }
         public long MainBalance { get; init; }
+        public long BonusBalance { get; init; }
         public string Phone { get; init; } = "";
         public bool Blacklisted { get; init; }
         public Guid? PlayingPcId { get; init; }
@@ -563,7 +572,7 @@ public static class ClientEndpoints
         {
             var phone = PhoneDigits;
             return new AdminClientLookupItem(
-                Id, DisplayName, Username, phone.Length == 0 ? null : phone[^Math.Min(4, phone.Length)..], Money.Uzs(MainBalance), Money.Uzs(0), CardId,
+                Id, DisplayName, Username, phone.Length == 0 ? null : phone[^Math.Min(4, phone.Length)..], Money.Uzs(MainBalance), Money.Uzs(BonusBalance), CardId,
                 PlayingPcId is { } pcId ? new AdminClientPlaying(pcId, PlayingPcName ?? "") : null, Blacklisted, Gender);
         }
     }

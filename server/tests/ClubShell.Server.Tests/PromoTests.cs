@@ -26,7 +26,7 @@ public sealed class PromoTests(ServerFixture server) : LedgerCheckedTest(server)
         Assert.Equal(3, answers.Count(a => a.Status == 200));
         Assert.All(answers.Where(a => a.Status != 200), a => Assert.Equal((400, "exhausted"), (a.Status, Reason(a.Body))));
         Assert.Equal("3 0", await Players.ScalarAsync<string>(Server, "SELECT used || ' ' || uses_left FROM promo_codes WHERE code = @code", new { code }));
-        Assert.Equal(1_500_000, await Players.ScalarAsync<long>(Server, "SELECT sum(main_balance)::bigint FROM wallets WHERE user_id = ANY(@ids)",
+        Assert.Equal(1_500_000, await Players.ScalarAsync<long>(Server, "SELECT sum(bonus_balance)::bigint FROM wallets WHERE user_id = ANY(@ids)",
             new { ids = players.Select(p => p.Id).ToArray() }));
         Assert.Equal(3, await Players.ScalarAsync<int>(Server,
             "SELECT count(*)::int FROM promo_redemptions r JOIN ledger_entries l ON l.op_id = r.op_id WHERE l.type = 'bonus' AND l.user_id = ANY(@ids)",
@@ -44,7 +44,7 @@ public sealed class PromoTests(ServerFixture server) : LedgerCheckedTest(server)
             SendAsync(Server, HttpMethod.Post, "/promo/redeem", cashier, new { userId = player.Id, code = code.ToLowerInvariant() })));
         Assert.Equal([200, 400, 400, 400, 400, 400], answers.Select(a => a.Status).Order());
         Assert.All(answers.Where(a => a.Status == 400), a => Assert.Equal("exhausted", Reason(a.Body)));
-        Assert.Equal(200_000, await Players.BalanceAsync(Server, player.Id));
+        Assert.Equal((0L, 200_000L), (await Players.BalanceAsync(Server, player.Id), await Players.BonusAsync(Server, player.Id)));
         Assert.Equal("1 ", await Players.ScalarAsync<string>(Server, "SELECT used || ' ' || coalesce(uses_left::text, '') FROM promo_codes WHERE code = @code", new { code }));
     }
 
@@ -77,8 +77,9 @@ public sealed class PromoTests(ServerFixture server) : LedgerCheckedTest(server)
         await ExpectAsync(Server, 200, HttpMethod.Post, "/promo/redeem", cashier, new { userId = player.Id, code = later });
         Server.Clock.Advance(TimeSpan.FromMilliseconds(5)); // the newest ledger row below is WELCOME's, not tied with the one above
         var redeemed = await ReplayedAsync(Server, 200, HttpMethod.Post, "/promo/redeem", cashier, new { userId = player.Id, code = "welcome" });
-        Assert.Equal(1_000_400, redeemed.GetProperty("balance").GetProperty("amount").GetInt64());
-        Assert.Equal(1_000_400, await Players.BalanceAsync(Server, player.Id));
+        // A promo code credits the bonus account (D-106): the balance stays the money.
+        Assert.Equal(100, redeemed.GetProperty("balance").GetProperty("amount").GetInt64());
+        Assert.Equal((100L, 1_000_300L), (await Players.BalanceAsync(Server, player.Id), await Players.BonusAsync(Server, player.Id)));
         var audit = await Players.ScalarAsync<string>(Server,
             "SELECT amount || ' ' || (meta ->> 'code') FROM audit_entries WHERE action = 'promoRedeem' AND user_id = @Id ORDER BY at DESC, id DESC LIMIT 1", new { player.Id });
         Assert.Equal("1000000 WELCOME", audit);
@@ -94,9 +95,9 @@ public sealed class PromoTests(ServerFixture server) : LedgerCheckedTest(server)
         var code = await PromoAsync(value: 1_000_000, usesLeft: 5);
         var path = $"/api/v1/wallet/{player.Id}/promo";
         var ok = Expect(await agent.RawPostAsync(path, new { code = code.ToLowerInvariant() }), 200);
-        Assert.Equal((code, 1_000_000L, 1_100_000L),
+        Assert.Equal((code, 1_000_000L, 100_000L),
             (ok.GetProperty("code").GetString(), ok.GetProperty("bonus").GetProperty("amount").GetInt64(), ok.GetProperty("balance").GetProperty("amount").GetInt64()));
-        Assert.Equal(1_100_000, await Players.BalanceAsync(Server, player.Id));
+        Assert.Equal((100_000L, 1_000_000L), (await Players.BalanceAsync(Server, player.Id), await Players.BonusAsync(Server, player.Id)));
         Assert.Equal(1, await Players.ScalarAsync<int>(Server,
             "SELECT count(*)::int FROM promo_redemptions r JOIN promo_codes p ON p.id = r.promo_code_id WHERE p.code = @code AND r.staff_id IS NULL", new { code }));
 

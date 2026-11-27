@@ -44,7 +44,7 @@ public sealed class SessionTickWorker(
             // ponytail: 100 per tick and all open postpaid re-read each second; page by ends_at/id if a club outgrows it.
             var open = (await c.QueryAsync<TickRow>(
                 """
-                SELECT s.*, p.last_heartbeat_at, w.main_balance, t.settled, u.transient, cl.time_zone, cl.settings::text AS club_settings
+                SELECT s.*, p.last_heartbeat_at, w.main_balance, w.bonus_balance, t.settled, u.transient, cl.time_zone, cl.settings::text AS club_settings
                 FROM sessions s JOIN pcs p ON p.id = s.pc_id JOIN wallets w ON w.user_id = s.user_id
                 JOIN users u ON u.id = s.user_id JOIN clubs cl ON cl.id = s.club_id
                 CROSS JOIN LATERAL (SELECT coalesce(p.last_heartbeat_at > @fresh AND coalesce((p.last_heartbeat->>'offlineQueue')::int, 0) = 0, false) AS settled) t
@@ -109,7 +109,7 @@ public sealed class SessionTickWorker(
                     // session's own limit; a late tick still ends there, so only fully played minutes are charged and the
                     // limit holds.
                     var used = s.Used(now);
-                    if (Pricing.Frozen(s.PricePerHourSnapshot, used + 1, s.DayPct, s.DiscountPct) > s.MainBalance + limit)
+                    if (Pricing.Frozen(s.PricePerHourSnapshot, used + 1, s.DayPct, s.DiscountPct) > s.MainBalance + s.BonusBalance + limit)
                     {
                         if (await SignOutLockAsync(c, tx, s))
                         {
@@ -186,7 +186,7 @@ public sealed class SessionTickWorker(
     /// </summary>
     private static async Task WarnAsync(NpgsqlConnection c, NpgsqlTransaction tx, TickRow s, int used, long limit, DateTimeOffset now, SessionEffects effects)
     {
-        var due = PostpaidWarningMinutes.Where(m => Pricing.Frozen(s.PricePerHourSnapshot, used + (m * 60) + 1, s.DayPct, s.DiscountPct) > s.MainBalance + limit).ToArray();
+        var due = PostpaidWarningMinutes.Where(m => Pricing.Frozen(s.PricePerHourSnapshot, used + (m * 60) + 1, s.DayPct, s.DiscountPct) > s.MainBalance + s.BonusBalance + limit).ToArray();
         var kept = s.WarningsSent.Where(m => !PostpaidWarningMinutes.Contains(m) || due.Contains(m)).ToArray();
         var fresh = due.Except(kept).ToArray();
         if (fresh.Length == 0 && kept.Length == s.WarningsSent.Length)
@@ -281,6 +281,9 @@ public sealed class SessionTickWorker(
     {
         public DateTimeOffset? LastHeartbeatAt { get; init; }
         public long MainBalance { get; init; }
+
+        /// <summary>The bonus account pays play time first (D-106): a postpaid bill may run up to both balances + the limit.</summary>
+        public long BonusBalance { get; init; }
 
         /// <summary>A temporary guest account: signed out when its session ends here (D-28).</summary>
         public bool Transient { get; init; }

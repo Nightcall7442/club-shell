@@ -109,7 +109,7 @@ public sealed class DeskPostpaidTests(LongClockServerFixture server) : LedgerChe
             // 20 000 000 against a debt of 6 000 000: the bonus of 14 000 000 (10 %), not of 20 000 000 (15 %).
             var topper = await DebtorAsync(cashier, 6_000_000);
             var topUp = await ExpectAsync(Server, 200, HttpMethod.Post, "/wallet/topup", cashier, new { userId = topper.Id, amount = 20_000_000, method = "cash" });
-            Assert.Equal((1_400_000L, 15_400_000L), (Amount(topUp.GetProperty("bonus")), Amount(topUp.GetProperty("balance"))));
+            Assert.Equal((1_400_000L, 14_000_000L, 1_400_000L), (Amount(topUp.GetProperty("bonus")), Amount(topUp.GetProperty("balance")), await Players.BonusAsync(Server, topper.Id)));
             var ordinaryId = topUp.GetProperty("transaction").GetProperty("id").GetGuid();
             Assert.Equal(1, await Players.ScalarAsync<int>(Server, "SELECT count(*)::int FROM rule_firings WHERE target_key = @key", new { key = $"topup:{ordinaryId}" }));
         }

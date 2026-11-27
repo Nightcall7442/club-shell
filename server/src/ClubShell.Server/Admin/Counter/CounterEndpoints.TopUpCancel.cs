@@ -35,8 +35,10 @@ public static partial class CounterEndpoints
     /// only in the shift that took it, still open (<c>409 topUpShiftClosed</c>). A cashier: their own top-up (<c>403
     /// notOwnTopUp</c>) within 15 minutes (<c>403 cancelWindow {minutes}</c>), and with <c>limits.cashOutOwnerOnly</c> no cash
     /// back (<c>403 ownerOnly</c>); the owner: any desk top-up of the open shift. The player must still have the money:
-    /// what the balance can spend (an open postpaid session's bill counted) must cover the top-up and its bonus, less the
-    /// corrected top-up (<c>409 topUpSpent {spendable, required}</c>). Cash leaves the drawer under the strong shift lock
+    /// what the balance can spend (an open postpaid session's bill counted) must cover the top-up, less the corrected top-up
+    /// (<c>409 topUpSpent {spendable, required}</c>), and the bonus account the bonus it gave (D-106; <c>409 topUpSpent
+    /// {account: bonus, spendable, required}</c>) — a top-up booked before the bonus account had its bonus on the main
+    /// balance, which then covers it and gives it back. Cash leaves the drawer under the strong shift lock
     /// (<c>409 cashShort {available}</c>). Ledger: a <c>topUp</c> row of −amount in the same method and a <c>bonus</c> row of
     /// −bonus (<c>meta {kind: topUpCancel, cancelOf}</c>, <c>ref</c> = the top-up), so every sum by method — X/Z, the
     /// expected cash, «Принято за смену», the reports, a guest's cash payable — nets it out by itself. Journal
@@ -140,8 +142,14 @@ public static partial class CounterEndpoints
                 }
             }
 
-            var bonus = await c.ExecuteScalarAsync<long>(
-                "SELECT coalesce(sum(amount), 0)::bigint FROM ledger_entries WHERE op_id = @OpId AND type = 'bonus'", new { top.OpId }, tx);
+            // The bonus the top-up gave, by the account it went to: the bonus account (D-106), or the main balance for a top-up
+            // booked before it.
+            var bonuses = (await c.QueryAsync<(string Account, long Amount)>(
+                "SELECT account, sum(amount)::bigint FROM ledger_entries WHERE op_id = @OpId AND type = 'bonus' GROUP BY account", new { top.OpId }, tx))
+                .ToDictionary(b => b.Account, b => b.Amount);
+            var bonusOnMain = bonuses.GetValueOrDefault(Ledger.Main);
+            var bonusOnBonus = bonuses.GetValueOrDefault(Ledger.Bonus);
+            var bonus = bonusOnMain + bonusOnBonus;
             if (corrected is { } right)
             {
                 if (right == top.Amount)
@@ -153,15 +161,29 @@ public static partial class CounterEndpoints
                 paid = await PostTopUpAsync(c, tx, staff, effects, top.UserId, right, method, now, correctionOf: transactionId, ownerOp: top.OwnerOp) with { ReachedBefore = top.Amount };
             }
 
-            var balance = await c.ExecuteScalarAsync<long>("SELECT main_balance FROM wallets WHERE user_id = @UserId", new { top.UserId }, tx);
-            var spendable = await ShopSaleEndpoints.SpendableAsync(c, tx, top.UserId, balance, now);
-            if (spendable < top.Amount + bonus)
+            // Nothing spent is taken back, not even in part (D-91): the main balance must still hold the top-up (and an old
+            // top-up's bonus), the bonus account the bonus it gave — what the right top-up brought counts towards both.
+            var (balance, bonusLeft) = await c.QuerySingleAsync<(long, long)>(
+                "SELECT main_balance, bonus_balance FROM wallets WHERE user_id = @UserId", new { top.UserId }, tx);
+            var spendable = await ShopSaleEndpoints.SpendableAsync(c, tx, top.UserId, balance, now, bonusLeft - bonusOnBonus);
+            if (spendable < top.Amount + bonusOnMain)
             {
                 throw new ApiException(StatusCodes.Status409Conflict, ErrorCode.Conflict, "Conflict: topUpSpent", new
                 {
                     reason = "topUpSpent",
-                    spendable = Money.Uzs(Math.Max(0, spendable - (paid is null ? 0 : paid.Amount + paid.Bonus))),
-                    required = Money.Uzs(top.Amount + bonus - (paid is null ? 0 : paid.Amount + paid.Bonus)),
+                    spendable = Money.Uzs(Math.Max(0, spendable - (paid?.Amount ?? 0))),
+                    required = Money.Uzs(top.Amount + bonusOnMain - (paid?.Amount ?? 0)),
+                });
+            }
+
+            if (bonusLeft < bonusOnBonus)
+            {
+                throw new ApiException(StatusCodes.Status409Conflict, ErrorCode.Conflict, "Conflict: topUpSpent", new
+                {
+                    reason = "topUpSpent",
+                    account = Ledger.Bonus,
+                    spendable = Money.Uzs(Math.Max(0, bonusLeft - (paid?.Bonus ?? 0))),
+                    required = Money.Uzs(bonusOnBonus - (paid?.Bonus ?? 0)),
                 });
             }
 
@@ -170,8 +192,10 @@ public static partial class CounterEndpoints
             balance = await Ledger.PostAsync(c, tx, top.UserId, allowOverdraft: false, now,
                 new LedgerLine("topUp", -top.Amount, "Отмена: " + char.ToLowerInvariant(TopUpDescription(method)[0]) + TopUpDescription(method)[1..],
                     staff.ClubId, Method: method, StaffId: staff.StaffId, Meta: meta, Id: id, ShiftRequired: true, Ref: transactionId.ToString(), OwnerOp: top.OwnerOp),
-                new LedgerLine("bonus", -bonus, "Отмена бонуса за пополнение", staff.ClubId, StaffId: staff.StaffId, Meta: meta, Ref: transactionId.ToString(),
-                    OwnerOp: top.OwnerOp));
+                new LedgerLine("bonus", -bonusOnBonus, "Отмена бонуса за пополнение", staff.ClubId, StaffId: staff.StaffId, Meta: meta, Ref: transactionId.ToString(),
+                    OwnerOp: top.OwnerOp, Account: Ledger.Bonus),
+                new LedgerLine("bonus", -bonusOnMain, "Отмена бонуса за пополнение", staff.ClubId, StaffId: staff.StaffId, Meta: meta, Ref: transactionId.ToString(),
+                    OwnerOp: top.OwnerOp, Account: Ledger.Main));
             await Audit.WriteAsync(c, tx, staff, now, "topUpCancel", top.UserId, amount: top.Amount, detail: top.Who,
                 meta: new
                 {

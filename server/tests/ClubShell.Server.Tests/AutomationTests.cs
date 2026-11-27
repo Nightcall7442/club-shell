@@ -45,7 +45,8 @@ public sealed class AutomationTests(LongClockServerFixture server) : LedgerCheck
             .GetProperty("session").GetProperty("id").GetGuid();
         Assert.Equal(100_000, await BonusesAsync(player.Id));
         Assert.Equal("Бонус: visit", await Players.ScalarAsync<string>(Server, "SELECT description FROM ledger_entries WHERE user_id = @Id AND type = 'bonus'", new { player.Id }));
-        Assert.Equal(balance - 600_000 + 100_000, await Players.BalanceAsync(Server, player.Id));
+        // The bonus goes to the bonus account (D-106).
+        Assert.Equal((balance - 600_000, 100_000L), (await Players.BalanceAsync(Server, player.Id), await Players.BonusAsync(Server, player.Id)));
 
         // minutesLeft: at 26 of 30 minutes the message goes out, once, also for a fresh tick worker and automation (a restart).
         Server.Clock.Advance(TimeSpan.FromMinutes(26));

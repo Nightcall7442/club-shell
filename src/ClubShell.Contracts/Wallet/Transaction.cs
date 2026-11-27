@@ -74,10 +74,11 @@ public enum TopupStatus
 /// <param name="UserId">Wallet owner.</param>
 /// <param name="Type">Kind.</param>
 /// <param name="Amount">Signed amount: negative for <see cref="TransactionType.Charge"/> and <see cref="TransactionType.Purchase"/>.</param>
-/// <param name="BalanceAfter">Main balance after this entry.</param>
+/// <param name="BalanceAfter">Main balance after this entry; the bonus balance after it when <paramref name="Bonus"/> is <see langword="true"/>.</param>
 /// <param name="Description">Human-readable description (localized per <c>Accept-Language</c>).</param>
 /// <param name="CreatedAt">Creation time.</param>
 /// <param name="Ref">External reference: order id, session id or payment id.</param>
+/// <param name="Bonus"><see langword="true"/>: the entry moved the bonus account (D-106: play time only), not the main balance.</param>
 public sealed record Transaction(
     Guid Id,
     Guid UserId,
@@ -86,7 +87,8 @@ public sealed record Transaction(
     Money BalanceAfter,
     string Description,
     DateTimeOffset CreatedAt,
-    string? Ref = null);
+    string? Ref = null,
+    bool? Bonus = null);
 
 /// <summary>Pending or settled top-up (IPC_PROTOCOL.md §6.12). Payload of <c>wallet.topupIntent</c>.</summary>
 /// <param name="Id">Intent id.</param>

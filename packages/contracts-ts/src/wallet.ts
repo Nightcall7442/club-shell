@@ -133,7 +133,7 @@ export interface Transaction {
   type: TransactionType;
   /** Signed amount: negative for `TransactionType.Charge` and `TransactionType.Purchase`. */
   amount: Money;
-  /** Main balance after this entry. */
+  /** Main balance after this entry; the bonus balance after it when `bonus` is `true`. */
   balanceAfter: Money;
   /** Human-readable description (localized per `Accept-Language`). */
   description: string;
@@ -141,6 +141,8 @@ export interface Transaction {
   createdAt: string;
   /** External reference: order id, session id or payment id. */
   ref?: string | null;
+  /** `true`: the entry moved the bonus account (D-106: play time only), not the main balance. */
+  bonus?: boolean | null;
 }
 
 /** Day of week as used by tariff time windows. Wire values `mon`..`sun`. */

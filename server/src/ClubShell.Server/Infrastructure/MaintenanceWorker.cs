@@ -79,15 +79,17 @@ public sealed class MaintenanceWorker(NpgsqlDataSource db, MaintenanceOptions op
         }
 
         _nextLedgerCheck = now + TimeSpan.FromDays(1);
-        var broken = (await c.QueryAsync<(Guid UserId, long Balance, long Sum)>(
+        var broken = (await c.QueryAsync<(Guid UserId, long Balance, long Sum, long Bonus, long BonusSum)>(
             """
-            SELECT w.user_id, w.main_balance, coalesce(l.total, 0)::bigint
-            FROM wallets w LEFT JOIN (SELECT user_id, sum(amount) AS total FROM ledger_entries GROUP BY user_id) l ON l.user_id = w.user_id
-            WHERE w.main_balance <> coalesce(l.total, 0)
+            SELECT w.user_id, w.main_balance, coalesce(l.total, 0)::bigint, w.bonus_balance, coalesce(l.bonus, 0)::bigint
+            FROM wallets w LEFT JOIN (SELECT user_id, sum(amount) FILTER (WHERE account = 'main') AS total,
+                                             sum(amount) FILTER (WHERE account = 'bonus') AS bonus
+                                      FROM ledger_entries GROUP BY user_id) l ON l.user_id = w.user_id
+            WHERE w.main_balance <> coalesce(l.total, 0) OR w.bonus_balance <> coalesce(l.bonus, 0)
             """)).ToList();
-        foreach (var (userId, balance, sum) in broken)
+        foreach (var (userId, balance, sum, bonus, bonusSum) in broken)
         {
-            logger.LogError("Wallet {UserId}: cached balance {Balance} differs from the ledger sum {Sum}", userId, balance, sum);
+            logger.LogError("Wallet {UserId}: cached balance {Balance} / bonus {Bonus} differs from the ledger sum {Sum} / {BonusSum}", userId, balance, bonus, sum, bonusSum);
         }
 
         return [.. broken.Select(b => b.UserId)];

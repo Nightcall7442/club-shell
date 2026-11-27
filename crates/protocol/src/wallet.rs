@@ -135,7 +135,7 @@ pub struct Transaction {
     pub r#type: TransactionType,
     /// Signed amount: negative for `TransactionType.Charge` and `TransactionType.Purchase`.
     pub amount: Money,
-    /// Main balance after this entry.
+    /// Main balance after this entry; the bonus balance after it when `bonus` is `true`.
     pub balance_after: Money,
     /// Human-readable description (localized per `Accept-Language`).
     pub description: String,
@@ -145,6 +145,9 @@ pub struct Transaction {
     /// External reference: order id, session id or payment id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub r#ref: Option<String>,
+    /// `true`: the entry moved the bonus account (D-106: play time only), not the main balance.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bonus: Option<bool>,
 }
 
 wire_enum! {
@@ -753,6 +756,7 @@ mod tests {
             description: "d".into(),
             created_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
             r#ref: Some("order-1".into()),
+            bonus: None,
         };
         let json = serde_json::to_string(&tx).unwrap();
         assert!(json.contains(r#""type":"topUp""#));

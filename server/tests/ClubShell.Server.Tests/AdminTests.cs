@@ -376,7 +376,8 @@ public sealed class CounterTests(ServerFixture server) : LedgerCheckedTest(serve
             // 20 000 sum: x2 (+20 000) beats the seeded tier; 5 000 sum is under the promotion's minimum.
             var player = await Players.CreateAsync(Server, balance: 0);
             var doubled = await ExpectAsync(Server, 200, HttpMethod.Post, "/wallet/topup", token, new { userId = player.Id, amount = 2_000_000 }, Guid.NewGuid());
-            Assert.Equal((2_000_000L, 4_000_000L), (doubled.GetProperty("bonus").GetProperty("amount").GetInt64(), doubled.GetProperty("balance").GetProperty("amount").GetInt64()));
+            Assert.Equal((2_000_000L, 2_000_000L, 2_000_000L), (doubled.GetProperty("bonus").GetProperty("amount").GetInt64(), doubled.GetProperty("balance").GetProperty("amount").GetInt64(),
+                await Players.BonusAsync(Server, player.Id)));
             Assert.Equal("Бонус за пополнение: акция +100%",
                 await Players.ScalarAsync<string>(Server, $"SELECT description FROM ledger_entries WHERE user_id = '{player.Id}' AND type = 'bonus'"));
             var small = await ExpectAsync(Server, 200, HttpMethod.Post, "/wallet/topup", token, new { userId = player.Id, amount = 500_000 }, Guid.NewGuid());
@@ -432,11 +433,12 @@ public sealed class CounterTests(ServerFixture server) : LedgerCheckedTest(serve
         }
 
         // Tier 5 % from 50 000 sum: 250 050 tiyin → 250 100 (half-up to a whole sum).
-        Assert.Equal((250_100L, 5_251_100L), (first.GetProperty("bonus").GetProperty("amount").GetInt64(), first.GetProperty("balance").GetProperty("amount").GetInt64()));
+        // The bonus goes to the bonus account (D-106): the balance is the money paid.
+        Assert.Equal((250_100L, 5_001_000L), (first.GetProperty("bonus").GetProperty("amount").GetInt64(), first.GetProperty("balance").GetProperty("amount").GetInt64()));
         var transaction = first.GetProperty("transaction");
         Assert.Equal(("topUp", 5_001_000L, 5_001_000L), (transaction.GetProperty("type").GetString(), transaction.GetProperty("amount").GetProperty("amount").GetInt64(),
             transaction.GetProperty("balanceAfter").GetProperty("amount").GetInt64()));
-        Assert.Equal(5_251_100, await Players.BalanceAsync(Server, player.Id));
+        Assert.Equal((5_001_000L, 250_100L), (await Players.BalanceAsync(Server, player.Id), await Players.BonusAsync(Server, player.Id)));
 
         Assert.Equal(3_000, CounterEndpoints.Bonus(30_000, """[{"minAmount":10000,"bonusPct":10}]""")); // 3 000 exactly
         Assert.Equal(0, CounterEndpoints.Bonus(1_000_000, null));

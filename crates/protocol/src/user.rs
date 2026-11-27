@@ -691,6 +691,10 @@ pub struct User {
     pub locale: Locale,
     /// Free-form server flags (`UserFlags`); empty allowed.
     pub flags: Vec<String>,
+    /// Bonus balance (D-106): spent only on play time, never in the bar or as cash; null from a
+    /// server without the bonus account.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bonus: Option<Money>,
 }
 
 /// Result of a successful login (IPC_PROTOCOL.md §6.20, SERVER_API.md §4.3).
@@ -844,6 +848,7 @@ pub(crate) fn sample_user() -> User {
         last_seen_at: Some(Utc.with_ymd_and_hms(2026, 9, 21, 10, 0, 0).unwrap()),
         locale: Locale::Ru,
         flags: vec![],
+        bonus: None,
     }
 }
 

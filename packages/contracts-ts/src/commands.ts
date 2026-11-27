@@ -1396,7 +1396,7 @@ export interface WalletRedeemPromoRequest {
 export interface WalletRedeemPromoResponse {
   /** The code. */
   code: string;
-  /** Credited to the main balance. */
+  /** Credited to the bonus balance (D-106: play time only). */
   bonus: Money;
   /** Main balance after the credit. */
   balance: Money;

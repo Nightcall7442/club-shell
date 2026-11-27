@@ -7,8 +7,13 @@ using Npgsql;
 
 namespace ClubShell.Server.Admin;
 
-/// <summary>Beyond the contract: <c>writeOffs</c> / <c>writeOffCount</c> — debts written off in the period (SHELL_CHANGES 90), not revenue.</summary>
-public sealed record ReportsTotals(long Sessions, long Shop, long TopUps, int SessionsCount, long WriteOffs = 0, int WriteOffCount = 0);
+/// <summary>
+/// Beyond the contract: <c>writeOffs</c> / <c>writeOffCount</c> — debts written off in the period (SHELL_CHANGES 90), not revenue;
+/// <c>bonusSpent</c> / <c>bonuses</c> (D-106) — the play time the bonus account paid (inside <c>sessions</c>, no money came in for
+/// it) and the bonus credited in the period.
+/// </summary>
+public sealed record ReportsTotals(
+    long Sessions, long Shop, long TopUps, int SessionsCount, long WriteOffs = 0, int WriteOffCount = 0, long BonusSpent = 0, long Bonuses = 0);
 
 public sealed record ReportsDay(string Date, long Sessions, long Shop, long TopUps);
 
@@ -122,8 +127,16 @@ public static class ReportsEndpoints
               AND created_at >= @start AND created_at <= @now
             """,
             new { staff.ClubId, start, now });
+        var bonus = await c.QuerySingleAsync<(long Spent, long Credited)>(
+            """
+            SELECT coalesce(-sum(amount) FILTER (WHERE account = 'bonus' AND type IN ('charge', 'refund')), 0)::bigint,
+                   coalesce(sum(amount) FILTER (WHERE type = 'bonus'), 0)::bigint
+            FROM ledger_entries WHERE club_id = @ClubId AND created_at >= @start AND created_at <= @now
+            """,
+            new { staff.ClubId, start, now });
         var totals = new ReportsTotals(
-            byDay.Sum(d => d.Sessions), byDay.Sum(d => d.Shop), byDay.Sum(d => d.TopUps), sessions.Count, writeOffs.Amount, writeOffs.Count);
+            byDay.Sum(d => d.Sessions), byDay.Sum(d => d.Shop), byDay.Sum(d => d.TopUps), sessions.Count, writeOffs.Amount, writeOffs.Count,
+            bonus.Spent, bonus.Credited);
         return AdminJson.Ok(new Reports(period, totals, byDay, heat, topGames, topProducts, await ShiftEndpoints.OpenedSinceAsync(c, staff.ClubId, start)));
     }
 }

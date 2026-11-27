@@ -413,9 +413,10 @@ public sealed class SessionService(
         var quote = Pricing.Compute(tariff, minutes, buyer.GroupId, buyer.LifetimeSpent, pc.Zone, start, club.Pricing);
         if (!request.Prepaid && !replay && debtLimit is { } limit)
         {
-            // Rule 10 for postpaid (D-10): the first minute must be affordable, as the tick would stop it at once.
+            // Rule 10 for postpaid (D-10): the first minute must be affordable, as the tick would stop it at once; the bonus
+            // account pays play time too (D-106).
             var first = Pricing.Frozen(tariff.PricePerHour, 1, quote.DayPct, quote.DiscountPct);
-            var balance = await c.ExecuteScalarAsync<long>("SELECT main_balance FROM wallets WHERE user_id = @Id", new { buyer.Id }, tx);
+            var balance = await c.ExecuteScalarAsync<long>("SELECT main_balance + bonus_balance FROM wallets WHERE user_id = @Id", new { buyer.Id }, tx);
             if (first > balance + limit)
             {
                 throw InsufficientFunds(first, balance);
@@ -591,7 +592,7 @@ public sealed class SessionService(
     {
         if (!s.IsPrepaid && s.DebtLimit is { } limit)
         {
-            var balance = await c.ExecuteScalarAsync<long>("SELECT main_balance FROM wallets WHERE user_id = @UserId", new { s.UserId }, tx);
+            var balance = await c.ExecuteScalarAsync<long>("SELECT main_balance + bonus_balance FROM wallets WHERE user_id = @UserId", new { s.UserId }, tx);
             var next = Pricing.Frozen(s.PricePerHourSnapshot, s.UsedBeforeSec + 1, s.DayPct, s.DiscountPct);
             if (next > balance + limit)
             {
@@ -1114,15 +1115,18 @@ public sealed class SessionService(
     /// <summary>
     /// The refund for <paramref name="unusedSec"/> seconds of a prepaid session, unfloored: the unused seconds are the
     /// last ones bought, so the charges are walked newest first, each covering its quote's minutes; a package part is
-    /// never refunded, an hourly part pro rata to what that charge took (§5.7).
+    /// never refunded, an hourly part pro rata to what that charge took (§5.7). A charge paid partly from the bonus account
+    /// is two rows of one operation (D-106): they count as one charge.
     /// </summary>
     private static async Task<long> RefundableAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid sessionId, int unusedSec)
     {
         var charges = await c.QueryAsync<(long Paid, int Minutes, bool Package)>(
             """
-            SELECT -amount, coalesce((coalesce(meta->'quote', meta)->>'minutes')::int, 0), coalesce((coalesce(meta->'quote', meta)->>'package')::boolean, false)
+            SELECT -sum(amount)::bigint, coalesce(min((coalesce(meta->'quote', meta)->>'minutes')::int), 0),
+                   coalesce(bool_or((coalesce(meta->'quote', meta)->>'package')::boolean), false)
             FROM ledger_entries WHERE session_id = @sessionId AND type = 'charge'
-            ORDER BY created_at DESC, id DESC
+            GROUP BY op_id
+            ORDER BY max(created_at) DESC, op_id DESC
             """,
             new { sessionId }, tx);
         var refund = 0L;

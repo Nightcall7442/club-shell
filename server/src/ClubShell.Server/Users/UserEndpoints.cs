@@ -19,7 +19,7 @@ public sealed class UserRow
 {
     public const string Select = """
         SELECT u.id, u.username, u.display_name, u.avatar_url, u.role, u.locale, u.flags, u.banned, u.created_at, u.last_seen_at,
-               u.unlock_pin_hash IS NOT NULL AS pin_set, w.main_balance, w.lifetime_spent
+               u.unlock_pin_hash IS NOT NULL AS pin_set, w.main_balance, w.bonus_balance, w.lifetime_spent
         FROM users u JOIN wallets w ON w.user_id = u.id
         """;
 
@@ -44,17 +44,20 @@ public sealed class UserRow
     public bool PinSet { get; init; }
 
     public long MainBalance { get; init; }
+    public long BonusBalance { get; init; }
     public long LifetimeSpent { get; init; }
 
     /// <summary>
     /// One loyalty model (§5.13 item 5): the club's level by lifetime spend, 0-based on the wire; points = spend / 100. The
-    /// stored flags plus <c>banned</c> and <see cref="PinSetFlag"/> as they apply.
+    /// stored flags plus <c>banned</c> and <see cref="PinSetFlag"/> as they apply. <c>bonus</c> (beyond the contract, D-106): the
+    /// bonus account, play time only.
     /// </summary>
     public User ToWire(ClubPricing club) => new(
         Id, Username, DisplayName, AvatarUrl, Enum.Parse<UserRole>(Role, ignoreCase: true), Money.Uzs(MainBalance),
         Math.Max(0, (club.LevelOf(LifetimeSpent)?.Level ?? 1) - 1), Points(LifetimeSpent), CreatedAt, LastSeenAt,
         Enum.Parse<Locale>(Locale, ignoreCase: true),
-        [.. Flags, .. Banned ? new[] { UserFlags.Banned } : [], .. PinSet ? new[] { PinSetFlag } : []]);
+        [.. Flags, .. Banned ? new[] { UserFlags.Banned } : [], .. PinSet ? new[] { PinSetFlag } : []],
+        Money.Uzs(BonusBalance));
 
     public static int Points(long tiyin) => (int)Math.Min(int.MaxValue, tiyin / 100);
 }

@@ -39,12 +39,14 @@ public sealed record AdminStaffMember(string Id, string Name, string Role, bool 
 /// top-ups the club API key posted (never in the drawer); cash desk part 3 (D-57): <c>shop</c> is the bar net of voids,
 /// <c>shopByMethod</c> splits it (the balance part may be negative in a shift that voids an earlier shift's sale),
 /// <c>shopVoids</c>/<c>shopVoidCount</c> the voids made in the shift; D-91: <c>topUpCancels</c>/<c>topUpCancelCount</c> the
-/// desk top-ups taken back in it (already netted out of the top-up sums). A Z saved before those fields reads them as 0.
+/// desk top-ups taken back in it (already netted out of the top-up sums); D-106: <c>bonusSpent</c> the play time the bonus
+/// account paid (net of the bonus its refunds gave back) — inside <c>sessions</c>, never cash; <c>bonuses</c> stays what was
+/// credited. A Z saved before those fields reads them as 0.
 /// </summary>
 public sealed record AdminShiftTotals(
     long TopUpCash, long TopUpOther, long Sessions, long Shop, long Refunds, long Bonuses, int Count, AdminTopUpByMethod TopUpByMethod,
     long CashIn = 0, long CashOut = 0, long Payouts = 0, long ApiCash = 0, AdminShopByMethod? ShopByMethod = null, long ShopVoids = 0,
-    int ShopVoidCount = 0, long WriteOffs = 0, int WriteOffCount = 0, long TopUpCancels = 0, int TopUpCancelCount = 0);
+    int ShopVoidCount = 0, long WriteOffs = 0, int WriteOffCount = 0, long TopUpCancels = 0, int TopUpCancelCount = 0, long BonusSpent = 0);
 
 /// <summary>Top-ups of a shift by <c>ledger_entries.method</c>; <c>other</c> — rows with no method.</summary>
 public sealed record AdminTopUpByMethod(long Cash, long Card, long Payme, long Click, long Uzum, long Other);
@@ -73,9 +75,11 @@ public sealed record AdminShiftCloseResponse(AdminShift Shift, long ExpectedCash
 
 public sealed record AdminZone(string Name, string Color);
 
-public sealed record AdminSeatUser(Guid Id, string DisplayName, string Role, Money Balance);
+/// <summary><c>bonus</c> (beyond the contract, D-106): the bonus account, play time only.</summary>
+public sealed record AdminSeatUser(Guid Id, string DisplayName, string Role, Money Balance, Money Bonus);
 
-public sealed record AdminMember(Guid Id, string DisplayName, string Role, Money Balance, string Username);
+/// <summary><c>bonus</c> (beyond the contract, D-106): the bonus account, play time only.</summary>
+public sealed record AdminMember(Guid Id, string DisplayName, string Role, Money Balance, string Username, Money Bonus);
 
 /// <summary>
 /// <c>signedIn</c> (beyond the contract, D-49): the session's player holds a live token on the PC; null — no session.

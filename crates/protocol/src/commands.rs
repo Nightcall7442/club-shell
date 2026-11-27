@@ -1585,7 +1585,7 @@ pub struct WalletRedeemPromoRequest {
 pub struct WalletRedeemPromoResponse {
     /// The code.
     pub code: String,
-    /// Credited to the main balance.
+    /// Credited to the bonus balance (D-106: play time only).
     pub bonus: Money,
     /// Main balance after the credit.
     pub balance: Money,

@@ -684,8 +684,8 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
     /// <summary>
     /// An offline purchase against the balance cached for the player (no going below zero without the server): refused
     /// with <c>insufficientFunds</c>, or <c>conflict {reason: offlineUnavailable}</c> when no balance is known; taken from
-    /// the cached balance otherwise, so the next offline purchase sees what is left. The server charges the wallet itself
-    /// when the session is replayed.
+    /// the cached balance otherwise — the bonus account first (D-106) — so the next offline purchase sees what is left. The
+    /// server charges the wallet itself when the session is replayed.
     /// </summary>
     private async Task ChargeOfflineAsync(Guid userId, Money cost, CancellationToken cancellationToken)
     {
@@ -701,12 +701,15 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
             throw IpcError.Conflict("The player's balance is not known offline", "offlineUnavailable").ToException();
         }
 
-        if (cached.Balance < cost)
+        // Play time takes the bonus account first (D-106), as the server does when it replays the purchase.
+        var bonus = cached.Bonus is { } b && b.IsSameCurrency(cost) && b.IsPositive ? b : Money.Zero with { Currency = cost.Currency };
+        if (cached.Balance + bonus < cost)
         {
-            throw IpcError.InsufficientFunds(cost, cached.Balance).ToException();
+            throw IpcError.InsufficientFunds(cost, cached.Balance + bonus).ToException();
         }
 
-        await _store.UpdateCachedBalanceAsync(userId, cached.Balance - cost, cancellationToken).ConfigureAwait(false);
+        var fromBonus = bonus < cost ? bonus : cost;
+        await _store.UpdateCachedBalanceAsync(userId, cached.Balance - (cost - fromBonus), bonus - fromBonus, cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("Offline charge of {Cost} taken from the cached balance of {UserId}", cost, userId);
     }
 

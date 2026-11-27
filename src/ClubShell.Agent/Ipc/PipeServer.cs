@@ -372,7 +372,7 @@ public sealed class IpcEventBridge :
         {
             try
             {
-                await store.UpdateCachedBalanceAsync(balance.UserId, balance.Amount, cancellationToken).ConfigureAwait(false);
+                await store.UpdateCachedBalanceAsync(balance.UserId, balance.Amount, balance.Bonus, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
