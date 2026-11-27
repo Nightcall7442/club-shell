@@ -306,7 +306,7 @@ export function HudScreen({ onClose }: { onClose: () => void }): JSX.Element {
               disabled={notEnough}
               onClick={() => void extend()}
             >
-              {t('common.confirm')}
+              {t('kiosk.hudExtendAction')}
             </Button>
             <Button variant="secondary" size="lg" disabled={busy === 'extend'} onClick={() => setConfirming(false)}>
               {t('common.cancel')}

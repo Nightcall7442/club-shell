@@ -145,9 +145,9 @@ function TotalsGrid({ x }: { x: ShiftTotals }): JSX.Element {
     [t('Пополнения наличными'), x.topUpCash],
     [t('Пополнения картой/онлайн'), x.topUpOther],
     [t('Сеансы'), x.sessions],
-    [t('Магазин'), x.shop],
+    [t('Бар'), x.shop],
     [t('Возвраты'), x.refunds],
-    [t('Бонусы начислено'), x.bonuses],
+    [t('Бонусов начислено'), x.bonuses],
     // D-106: time the bonus account paid — inside «Сеансы», no money came in for it.
     ...((x.bonusSpent ?? 0) !== 0 ? ([[t('Бонусами за время'), x.bonusSpent ?? 0]] as [string, number][]) : []),
     // Not money: debts the club gave up (SHELL_CHANGES 90), shown apart from the revenue.
@@ -384,6 +384,8 @@ export default function ShiftPage({ isOwner = false }: { isOwner?: boolean }): J
   const [loaded, setLoaded] = useState(false);
   const [opening, setOpening] = useState(0);
   const [counted, setCounted] = useState(0);
+  // A Z with a difference is asked once more: an untouched «0» would otherwise close the shift with the whole drawer short.
+  const [askDiff, setAskDiff] = useState(false);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<NoteState>(null);
   const [zReport, setZReport] = useState<{ shift: Shift; expectedCash: number } | null>(null);
@@ -457,6 +459,7 @@ export default function ShiftPage({ isOwner = false }: { isOwner?: boolean }): J
       const r = await clubApi.closeShift(counted);
       setZReport(r);
       setCounted(0);
+      setAskDiff(false);
       setNote({ text: t('Смена закрыта'), tone: 'ok' });
       desk.refresh();
       await load();
@@ -640,7 +643,14 @@ export default function ShiftPage({ isOwner = false }: { isOwner?: boolean }): J
                     </Note>
                   )}
                   <Field label={t('Посчитано в кассе')}>
-                    <MoneyInput value={counted} onChange={setCounted} disabled={busy} />
+                    <MoneyInput
+                      value={counted}
+                      onChange={(v) => {
+                        setCounted(v);
+                        setAskDiff(false);
+                      }}
+                      disabled={busy}
+                    />
                   </Field>
                   <Well
                     groupLabel={t('Расхождение')}
@@ -650,9 +660,33 @@ export default function ShiftPage({ isOwner = false }: { isOwner?: boolean }): J
                     size={26}
                     tone={diffTone(diff)}
                   />
-                  <Button variant="primary" size="lg" className="w-full" disabled={busy} onClick={() => void close()}>
-                    {t('Закрыть смену')}
-                  </Button>
+                  {askDiff ? (
+                    <div className="flex flex-col gap-2">
+                      <Note tone="warn">
+                        {t(
+                          'Посчитано не столько, сколько ожидается: в Z-отчёт попадёт расхождение. Пересчитайте кассу или закройте с ним.',
+                        )}
+                      </Note>
+                      <div className="flex flex-col gap-2">
+                        <Button variant="warn" size="lg" disabled={busy} onClick={() => void close()}>
+                          {t('Закрыть с расхождением {sum}', { sum: `${signed(diff)} ${t('сум')}` })}
+                        </Button>
+                        <Button variant="ghost" size="lg" disabled={busy} autoFocus onClick={() => setAskDiff(false)}>
+                          {t('Отмена')}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <Button
+                      variant="primary"
+                      size="lg"
+                      className="w-full"
+                      disabled={busy}
+                      onClick={() => (diff !== 0 ? setAskDiff(true) : void close())}
+                    >
+                      {t('Закрыть смену')}
+                    </Button>
+                  )}
                 </Section>
               )}
 
@@ -709,7 +743,7 @@ export default function ShiftPage({ isOwner = false }: { isOwner?: boolean }): J
               render: (s) => <span className="text-dim">{s.closedBy ?? '—'}</span>,
             },
             { key: 'sessions', title: t('Сеансы'), num: true, render: (s) => <Sum minor={s.totals?.sessions} /> },
-            { key: 'shop', title: t('Магазин'), num: true, render: (s) => <Sum minor={s.totals?.shop} /> },
+            { key: 'shop', title: t('Бар'), num: true, render: (s) => <Sum minor={s.totals?.shop} /> },
             { key: 'cash', title: t('Наличные в кассе'), num: true, render: (s) => <Sum minor={s.closingCash} /> },
             {
               key: 'diff',

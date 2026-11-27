@@ -499,7 +499,11 @@ export default function ShopPage({ isOwner = false }: { isOwner?: boolean }): JS
                         width: '7rem',
                         render: (p: Product) => (
                           <span onClick={(e) => e.stopPropagation()}>
-                            <Toggle checked={p.inStock} onChange={(v) => void toggleStock(p, v)} />
+                            <Toggle
+                              ariaLabel={t('В наличии')}
+                              checked={p.inStock}
+                              onChange={(v) => void toggleStock(p, v)}
+                            />
                           </span>
                         ),
                       },

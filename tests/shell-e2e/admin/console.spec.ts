@@ -497,7 +497,7 @@ const nav = (page: Page) => page.getByRole('navigation');
 
 test('a wrong PIN is refused with a clear message', async ({ page }) => {
   await signIn(page, '9999');
-  await expect(page.getByText('Неверный PIN или сессия истекла')).toBeVisible();
+  await expect(page.getByText('Неверный PIN')).toBeVisible();
 });
 
 test('the PC key pasted as the club code is named for what it is and nothing is sent', async ({ page }) => {
@@ -650,6 +650,8 @@ test('a shift opens with starting cash and closes with the counted difference', 
 
   await page.getByLabel('Посчитано в кассе').fill('90000');
   await page.getByRole('button', { name: 'Закрыть смену' }).click();
+  // A difference is asked once more, with the sum on the button.
+  await page.getByRole('button', { name: /^Закрыть с расхождением −10\s000/ }).click();
   await expect(page.getByText('Смена закрыта')).toBeVisible();
   // Z-report: 100 000 expected, 90 000 counted.
   await expect(page.getByText('−10 000').first()).toBeVisible();
@@ -752,7 +754,7 @@ test('the owner turns on «x2» for top-ups under «Бонусы и акции»
     await signIn(page, OWNER_PIN);
     // One click from the rail: the bonus tab of «Тарифы и цены».
     await nav(page).getByText('Бонусы и акции', { exact: true }).click();
-    await expect(page.getByRole('tab', { name: 'Бонусы, x2 и промокоды' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tab', { name: 'Бонусы и акции' })).toHaveAttribute('aria-selected', 'true');
     const promo = page.getByTestId('topup-promo');
     await page.getByRole('switch', { name: 'Акция включена' }).click();
     await promo.getByRole('button', { name: 'x2', exact: true }).click();

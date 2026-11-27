@@ -98,7 +98,7 @@ test.describe('in-game HUD', () => {
 
     // … confirm extends.
     await extend.click();
-    await confirm.getByRole('button', { name: t('common.confirm') }).click();
+    await confirm.getByRole('button', { name: t('kiosk.hudExtendAction') }).click();
     await expect(page.getByText(t('session.extended', { minutes: 30 }))).toBeVisible();
     await expect.poll(async () => hud.locator('.tnum').first().textContent()).not.toBe(before);
   });

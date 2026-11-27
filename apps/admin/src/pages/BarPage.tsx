@@ -959,7 +959,8 @@ export default function BarPage(): JSX.Element {
 
           {!empty && (clientMode ? client !== null : true) && (
             <section aria-label={t('Оплата')} className="flex flex-col gap-3 border-t border-accent/[0.08] pt-4">
-              <OwnerOpNote />
+              {/* The pay box says it itself; only the balance's own button needs the line here. */}
+              {!(viaMethod && frozen?.via !== 'balance') && <OwnerOpNote />}
               {client && (!viaMethod || frozen?.via === 'balance') && (
                 <>
                   <ShiftClosedNote />

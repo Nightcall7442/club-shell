@@ -1,5 +1,33 @@
 /** Uzbek and English lines of the console, keyed by the Russian source text (see `i18n.ts`). */
 export const UZ: Record<string, string> = {
+  'Посчитано не столько, сколько ожидается: в Z-отчёт попадёт расхождение. Пересчитайте кассу или закройте с ним.':
+    'Sanalgan summa kutilganidan farq qiladi: Z-hisobotga farq tushadi. Kassani qayta sanang yoki farq bilan yoping.',
+  'Закрыть с расхождением {sum}': '{sum} farq bilan yopish',
+  'Бонус за ошибочное пополнение снимется с бонусного счёта': 'Xato toʻldirish uchun bonus bonus hisobidan yechiladi',
+  'Бонус на бонусный счёт': 'Bonus hisobiga bonus',
+  'бонус {sum} на бонусный счёт': 'bonus hisobiga {sum} bonus',
+  'На ПК ещё никто не вошёл, а время уже идёт': 'Kompyuterga hali hech kim kirmadi, vaqt esa ketyapti',
+  'Удалить тариф?': 'Tarif oʻchirilsinmi?',
+  закрыть: 'yopish',
+  'Бонусов начислено': 'Bonus berildi',
+  'Неверный PIN': 'PIN notoʻgʻri',
+  'Вход истёк — войдите снова': 'Kirish muddati tugadi — qayta kiring',
+  'Нет связи с сервером клуба. Проверьте сеть и повторите':
+    'Klub serveri bilan aloqa yoʻq. Tarmoqni tekshirib, qayta urinib koʻring',
+  'Сеанс уже завершён — карта обновлена': 'Seans allaqachon yakunlangan — xarita yangilandi',
+  'Игра не установлена на этом ПК': 'Oʻyin bu kompyuterga oʻrnatilmagan',
+  'Игра не запустилась на ПК': 'Oʻyin kompyuterda ishga tushmadi',
+  'Свободных игровых аккаунтов нет — попробуйте позже': 'Boʻsh oʻyin akkauntlari yoʻq — keyinroq urinib koʻring',
+  'Античит не даёт запустить игру на этом ПК': 'Antichit bu kompyuterda oʻyinni ishga tushirishga yoʻl qoʻymayapti',
+  'ПК не ответил вовремя — повторите': 'Kompyuter oʻz vaqtida javob bermadi — qayta urinib koʻring',
+  'Сервер клуба недоступен — повторите через минуту':
+    'Klub serveri mavjud emas — bir daqiqadan soʻng qayta urinib koʻring',
+  'Ошибка на сервере клуба — повторите. Если повторится, сообщите владельцу':
+    'Klub serverida xato — qayta urinib koʻring. Takrorlansa, egasiga xabar bering',
+  'Версии кассы и сервера не совпадают — обновите страницу':
+    'Kassa va server versiyalari mos emas — sahifani yangilang',
+  'Сервер клуба этого пока не умеет': 'Klub serveri buni hali qila olmaydi',
+  'Действие не выполнено': 'Amal bajarilmadi',
   // Phone layout: the compact KPI sums, the bar's cart bar, the language in «Ещё».
   млн: 'mln',
   млрд: 'mlrd',
@@ -229,7 +257,6 @@ export const UZ: Record<string, string> = {
   Бизнес: 'Biznes',
   Бонус: 'Bonus',
   'Бонус за пополнение': 'Toʻldirish uchun bonus',
-  'Бонус на баланс': 'Balansga bonus',
   'Бонусов нет': 'Bonuslar yoʻq',
   Бонусы: 'Bonuslar',
   'Бонусы и промокоды': 'Bonuslar va promokodlar',
@@ -384,7 +411,6 @@ export const UZ: Record<string, string> = {
   'Не вести учёт': 'Hisobga olmaslik',
   'Не найдено': 'Topilmadi',
   'Не удалось скопировать — выделите ключ вручную': 'Nusxalab boʻlmadi — kalitni qoʻlda belgilang',
-  'Неверный PIN или сессия истекла': 'PIN notoʻgʻri yoki sessiya muddati tugagan',
   'Недостаточно средств на балансе': 'Balansda mablagʻ yetarli emas',
   'Несовершеннолетние — младше': 'Voyaga yetmaganlar — yoshi',
   'Несовершеннолетним нельзя играть в это время': 'Voyaga yetmaganlar bu vaqtda oʻynay olmaydi',
@@ -392,8 +418,6 @@ export const UZ: Record<string, string> = {
   'Нет в наличии': 'Mavjud emas',
   'Нет данных': 'Maʼlumot yoʻq',
   'Нет данных о ПК': 'Kompyuter haqida maʼlumot yoʻq',
-  'Нет связи с сервером. Запущен ли mock-сервер (pnpm mock)?':
-    'Server bilan aloqa yoʻq. Mock-server (pnpm mock) ishga tushirilganmi?',
   'Нет товаров': 'Mahsulotlar yoʻq',
   Ниже: 'Pastga',
   'Никого не нашли': 'Hech kim topilmadi',
@@ -796,7 +820,6 @@ export const UZ: Record<string, string> = {
   'На экране входа появится «Создать аккаунт»: имя, логин или телефон и пароль. Если заданы правила клуба, игрок соглашается с ними. Новый аккаунт — обычный клиент с нулевым балансом; с одного ПК — не больше 5 аккаунтов в час.':
     'Kirish ekranida «Akkaunt yaratish» paydo boʻladi: ism, login yoki telefon va parol. Klub qoidalari boʻlsa, oʻyinchi ularga rozilik bildiradi. Yangi akkaunt — balansi nol boʻlgan oddiy mijoz; bitta kompyuterdan soatiga 5 tadan ortiq akkaunt yaratilmaydi.',
   блок: 'blok',
-  'бонус {sum} на баланс': 'balansga {sum} bonus',
   бронь: 'bron',
   'выключить ПК': 'kompyuterni oʻchirish',
   'до конца сеанса осталось {n} мин': 'seans tugashiga {n} daq qoldi',
@@ -1043,7 +1066,6 @@ export const UZ: Record<string, string> = {
     'Kassir faqat kassaga pul kirita oladi; olish — egasi.',
   'наличными · {name}': 'naqd · {name}',
   'ждёт входа': 'kirishni kutmoqda',
-  'на ПК ещё никто не вошёл, а время уже идёт': 'kompyuterga hali hech kim kirmadi, vaqt esa ketyapti',
   'Постоплата: гость платит на кассе, когда сеанс закончится.':
     'Keyin toʻlash: seans tugagach, mehmon kassada toʻlaydi.',
   'Ещё пакет · {name}': 'Yana paket · {name}',
@@ -1547,7 +1569,6 @@ export const UZ: Record<string, string> = {
   Выключенные: 'Oʻchirilganlar',
   'С сеансом': 'Seansli',
   'Бонус {sum} снят с баланса': 'Bonus {sum} balansdan olib tashlandi',
-  'Бонус за ошибочное пополнение снимется с баланса': 'Xato toʻldirish uchun bonus balansdan olib tashlanadi',
   'Введите сумму — время посчитается по тарифу': 'Summani kiriting — vaqt tarif boʻyicha hisoblanadi',
   'Введите сумму': 'Summani kiriting',
   'Исправить / отменить…': 'Tuzatish / bekor qilish…',
@@ -1675,11 +1696,37 @@ export const UZ: Record<string, string> = {
   'Бонусы — только на игровое время': 'Bonuslar — faqat oʻyin vaqti uchun',
   'Бонусов начислено {credited} сум, оплачено бонусами за время {spent} сум — это не деньги':
     'Bonus berildi {credited} soʻm, vaqt uchun bonusdan toʻlandi {spent} soʻm — bu pul emas',
-  'Бонусы начислено': 'Bonus berildi',
   'Бонусами за время': 'Vaqt uchun bonusdan',
   'Бонус {sum} — на бонусный счёт, только на время': 'Bonus {sum} — bonus hisobiga, faqat vaqt uchun',
 };
 export const EN: Record<string, string> = {
+  'Посчитано не столько, сколько ожидается: в Z-отчёт попадёт расхождение. Пересчитайте кассу или закройте с ним.':
+    'The count differs from what is expected: the Z report will show the difference. Count the drawer again or close with it.',
+  'Закрыть с расхождением {sum}': 'Close with a difference of {sum}',
+  'Бонус за ошибочное пополнение снимется с бонусного счёта':
+    'The bonus of the wrong top-up is taken off the bonus account',
+  'Бонус на бонусный счёт': 'Bonus to the bonus account',
+  'бонус {sum} на бонусный счёт': '{sum} bonus to the bonus account',
+  'На ПК ещё никто не вошёл, а время уже идёт': 'Nobody has signed in on the PC yet, and the clock is running',
+  'Удалить тариф?': 'Delete the tariff?',
+  закрыть: 'close',
+  'Бонусов начислено': 'Bonus credited',
+  'Неверный PIN': 'Wrong PIN',
+  'Вход истёк — войдите снова': 'The sign-in expired — sign in again',
+  'Нет связи с сервером клуба. Проверьте сеть и повторите':
+    'No connection to the club server. Check the network and try again',
+  'Сеанс уже завершён — карта обновлена': 'The session has already ended — the map is updated',
+  'Игра не установлена на этом ПК': 'The game is not installed on this PC',
+  'Игра не запустилась на ПК': 'The game did not start on the PC',
+  'Свободных игровых аккаунтов нет — попробуйте позже': 'No free game accounts — try later',
+  'Античит не даёт запустить игру на этом ПК': 'The anti-cheat blocks the game on this PC',
+  'ПК не ответил вовремя — повторите': 'The PC did not answer in time — try again',
+  'Сервер клуба недоступен — повторите через минуту': 'The club server is unavailable — try again in a minute',
+  'Ошибка на сервере клуба — повторите. Если повторится, сообщите владельцу':
+    'Club server error — try again. If it happens again, tell the owner',
+  'Версии кассы и сервера не совпадают — обновите страницу': 'The console and server versions differ — reload the page',
+  'Сервер клуба этого пока не умеет': 'The club server cannot do this yet',
+  'Действие не выполнено': 'The action failed',
   // Phone layout: the compact KPI sums, the bar's cart bar, the language in «Ещё».
   млн: 'M',
   млрд: 'B',
@@ -1908,7 +1955,6 @@ export const EN: Record<string, string> = {
   Бизнес: 'Business',
   Бонус: 'Bonus',
   'Бонус за пополнение': 'Top-up bonus',
-  'Бонус на баланс': 'Bonus to balance',
   'Бонусов нет': 'No bonuses',
   Бонусы: 'Bonuses',
   'Бонусы и промокоды': 'Bonuses & promo codes',
@@ -2063,7 +2109,6 @@ export const EN: Record<string, string> = {
   'Не вести учёт': "Don't track",
   'Не найдено': 'Not found',
   'Не удалось скопировать — выделите ключ вручную': 'Copy failed — select the key manually',
-  'Неверный PIN или сессия истекла': 'Wrong PIN or session expired',
   'Недостаточно средств на балансе': 'Insufficient balance',
   'Несовершеннолетние — младше': 'Minors — under',
   'Несовершеннолетним нельзя играть в это время': "Minors can't play at this time",
@@ -2071,8 +2116,6 @@ export const EN: Record<string, string> = {
   'Нет в наличии': 'Out of stock',
   'Нет данных': 'No data',
   'Нет данных о ПК': 'No PC data',
-  'Нет связи с сервером. Запущен ли mock-сервер (pnpm mock)?':
-    'No connection to server. Is the mock server running (pnpm mock)?',
   'Нет товаров': 'No products',
   Ниже: 'Move down',
   'Никого не нашли': 'No one found',
@@ -2474,7 +2517,6 @@ export const EN: Record<string, string> = {
   'На экране входа появится «Создать аккаунт»: имя, логин или телефон и пароль. Если заданы правила клуба, игрок соглашается с ними. Новый аккаунт — обычный клиент с нулевым балансом; с одного ПК — не больше 5 аккаунтов в час.':
     'The sign-in screen gets «Create an account»: a name, a username or phone and a password. If the club has rules, the player accepts them. A new account is a plain client with a zero balance; one PC makes at most 5 accounts an hour.',
   блок: 'locked',
-  'бонус {sum} на баланс': '{sum} bonus to balance',
   бронь: 'booked',
   'выключить ПК': 'shut down PC',
   'до конца сеанса осталось {n} мин': '{n} min left in session',
@@ -2719,7 +2761,6 @@ export const EN: Record<string, string> = {
     'A cashier can only put cash in; the owner takes it out.',
   'наличными · {name}': 'in cash · {name}',
   'ждёт входа': 'waiting for sign-in',
-  'на ПК ещё никто не вошёл, а время уже идёт': 'nobody has signed in on the PC yet, and the clock is running',
   'Постоплата: гость платит на кассе, когда сеанс закончится.':
     'Postpaid: the guest pays at the desk when the session ends.',
   'Ещё пакет · {name}': 'Another package · {name}',
@@ -3220,7 +3261,6 @@ export const EN: Record<string, string> = {
   Выключенные: 'Off',
   'С сеансом': 'In session',
   'Бонус {sum} снят с баланса': 'Bonus {sum} taken off the balance',
-  'Бонус за ошибочное пополнение снимется с баланса': 'The bonus of the wrong top-up is taken off the balance',
   'Введите сумму — время посчитается по тарифу': 'Type the amount — the time is worked out by the tariff',
   'Введите сумму': 'Type the amount',
   'Исправить / отменить…': 'Correct / cancel…',
@@ -3347,7 +3387,6 @@ export const EN: Record<string, string> = {
   'Бонусы — только на игровое время': 'Bonus — for play time only',
   'Бонусов начислено {credited} сум, оплачено бонусами за время {spent} сум — это не деньги':
     'Bonus credited {credited} sum, play time paid with bonus {spent} sum — not money',
-  'Бонусы начислено': 'Bonus credited',
   'Бонусами за время': 'Play time paid with bonus',
   'Бонус {sum} — на бонусный счёт, только на время': 'Bonus {sum} — to the bonus account, play time only',
 };

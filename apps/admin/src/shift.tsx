@@ -316,6 +316,7 @@ function ShiftGate({
               setOpening(v);
             }}
             disabled={busy}
+            autoFocus
           />
         </Field>
       </div>
