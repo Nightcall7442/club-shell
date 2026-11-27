@@ -13,6 +13,7 @@ import { DotAmount } from '@/components/ui/DotAmount';
 import { useLocale } from '@/hooks/useLocale';
 import { usePrice } from '@/hooks/usePrice';
 import { useSession } from '@/hooks/useSession';
+import { payForTime } from '@/lib/bonus';
 import { formatMoney } from '@/lib/format';
 import { isShellApiError } from '@/lib/tauri';
 import { tariffAvailableNow } from '@/lib/tariffs';
@@ -20,7 +21,7 @@ import { serverNow } from '@/lib/time';
 import { describeError, useNotificationsStore } from '@/store/notifications';
 import { useSettingsStore } from '@/store/settings';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
-import { selectBalanceAmount, useWalletStore } from '@/store/wallet';
+import { selectBalanceAmount, selectBonusAmount, useWalletStore } from '@/store/wallet';
 import { ModalBackHandler } from './TopUpModal';
 
 export type TariffAction = 'start' | 'extend';
@@ -249,6 +250,7 @@ export function TariffActionModal({
   const { locale } = useLocale();
   const session = useSession();
   const balance = useWalletStore(selectBalanceAmount);
+  const bonus = useWalletStore(selectBonusAmount);
   const push = useNotificationsStore((s) => s.push);
   const pushError = useNotificationsStore((s) => s.pushError);
   const options = useMemo(() => (tariff ? tariffMinuteOptions(tariff) : []), [tariff]);
@@ -263,7 +265,9 @@ export function TariffActionModal({
   }, [open, options]);
 
   const cost = usePrice(open ? tariff : null, minutes);
-  const notEnough = cost !== null && cost.amount.amount > balance.amount;
+  // D-106: the bonus account pays play time first.
+  const pay = cost ? payForTime(balance, bonus, cost.amount) : null;
+  const notEnough = pay !== null && !pay.enough;
 
   const submit = async (): Promise<void> => {
     if (!tariff) {
@@ -335,11 +339,17 @@ export function TariffActionModal({
               <dd className="tnum text-xl font-semibold text-text">{cost ? formatPrice(cost, locale) : '—'}</dd>
             </div>
             {cost && <PriceNote view={cost} className="self-end" />}
-            {cost && (
+            {pay && pay.fromBonus.amount > 0 && (
+              <div className="flex items-center justify-between text-sm">
+                <dt className="text-muted">{t('wallet.fromBonus')}</dt>
+                <dd className="tnum font-semibold text-accent">−{formatMoney(pay.fromBonus, locale)}</dd>
+              </div>
+            )}
+            {pay && (
               <div className="flex items-center justify-between text-sm">
                 <dt className="text-muted">{t('wallet.balanceAfter')}</dt>
                 <dd className={clsx('tnum font-semibold', notEnough ? 'text-danger' : 'text-muted')}>
-                  {formatMoney({ amount: balance.amount - cost.amount.amount, currency: cost.amount.currency }, locale)}
+                  {formatMoney(pay.balanceAfter, locale)}
                 </dd>
               </div>
             )}

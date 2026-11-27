@@ -848,7 +848,7 @@ public sealed record WalletRedeemPromoRequest(string Code);
 
 /// <summary>Response of <c>wallet.redeemPromo</c>: the code as the club wrote it, the bonus credited and the new balance.</summary>
 /// <param name="Code">The code.</param>
-/// <param name="Bonus">Credited to the main balance.</param>
+/// <param name="Bonus">Credited to the bonus balance (D-106: play time only).</param>
 /// <param name="Balance">Main balance after the credit.</param>
 public sealed record WalletRedeemPromoResponse(string Code, Money Bonus, Money Balance);
 

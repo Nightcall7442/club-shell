@@ -79,6 +79,13 @@ public static class Players
         return await c.ExecuteScalarAsync<long>("SELECT main_balance FROM wallets WHERE user_id = @userId", new { userId });
     }
 
+    /// <summary>The bonus account of the player (D-106).</summary>
+    public static async Task<long> BonusAsync(ServerFixture server, Guid userId)
+    {
+        await using var c = await OpenAsync(server);
+        return await c.ExecuteScalarAsync<long>("SELECT bonus_balance FROM wallets WHERE user_id = @userId", new { userId });
+    }
+
     public static async Task ExecuteAsync(ServerFixture server, string sql, object? args = null)
     {
         await using var c = await OpenAsync(server);
@@ -124,7 +131,7 @@ public static class Players
 }
 
 /// <summary>
-/// The ledger invariant (DESIGN §4.3, §10.a): every wallet's cached balance equals the sum of its ledger rows. S2 test classes derive from <see cref="LedgerCheckedTest"/>, so it
+/// The ledger invariant (DESIGN §4.3, §10.a): every wallet's cached balance equals the sum of its ledger rows. (D-106: each account apart) S2 test classes derive from <see cref="LedgerCheckedTest"/>, so it
 /// is asserted after every test.
 /// </summary>
 public static class LedgerInvariant
@@ -134,9 +141,11 @@ public static class LedgerInvariant
         await using var c = await server.Services.GetRequiredService<NpgsqlDataSource>().OpenConnectionAsync();
         var broken = (await c.QueryAsync<string>(
             """
-            SELECT w.user_id::text || ': ' || w.main_balance || ' vs ' || coalesce(l.total, 0)
-            FROM wallets w LEFT JOIN (SELECT user_id, sum(amount) AS total FROM ledger_entries GROUP BY user_id) l ON l.user_id = w.user_id
-            WHERE w.main_balance <> coalesce(l.total, 0)
+            SELECT w.user_id::text || ': ' || w.main_balance || ' vs ' || coalesce(l.total, 0) || ', bonus ' || w.bonus_balance || ' vs ' || coalesce(l.bonus, 0)
+            FROM wallets w LEFT JOIN (SELECT user_id, sum(amount) FILTER (WHERE account = 'main') AS total,
+                                             sum(amount) FILTER (WHERE account = 'bonus') AS bonus
+                                      FROM ledger_entries GROUP BY user_id) l ON l.user_id = w.user_id
+            WHERE w.main_balance <> coalesce(l.total, 0) OR w.bonus_balance <> coalesce(l.bonus, 0)
             """)).ToList();
         Assert.True(broken.Count == 0, "SUM(ledger) <> wallets: " + string.Join("; ", broken));
     }

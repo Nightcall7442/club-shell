@@ -342,15 +342,21 @@ public static class ShopSaleEndpoints
     /// <summary>
     /// What a player may still spend from the balance (D-55): the balance, less — with an open postpaid session — what it
     /// would charge one minute from now beyond what it already charged (a plain read: a tick in the same instant can leave
-    /// a debt of at most about a minute). The member debt limit never applies to goods.
+    /// a debt of at most about a minute). The member debt limit never applies to goods. The bill is play time, which the bonus
+    /// account pays first (D-106): only what <paramref name="bonus"/> (null — the wallet's now) does not cover counts. The
+    /// bonus itself is never spendable here: it buys no goods and no cash.
     /// </summary>
-    internal static async Task<long> SpendableAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid userId, long balance, DateTimeOffset now)
+    internal static async Task<long> SpendableAsync(NpgsqlConnection c, NpgsqlTransaction tx, Guid userId, long balance, DateTimeOffset now, long? bonus = null)
     {
         var open = await c.QuerySingleOrDefaultAsync<SessionRow>(
             $"SELECT {SessionRow.Columns} FROM sessions WHERE user_id = @userId AND state <> 'ended' AND NOT is_prepaid", new { userId }, tx);
-        return open is null
-            ? balance
-            : balance - Math.Max(0, Pricing.Frozen(open.PricePerHourSnapshot, open.Used(now) + 60, open.DayPct, open.DiscountPct) - open.ChargedTotal);
+        if (open is null)
+        {
+            return balance;
+        }
+
+        var due = Math.Max(0, Pricing.Frozen(open.PricePerHourSnapshot, open.Used(now) + 60, open.DayPct, open.DiscountPct) - open.ChargedTotal);
+        return balance - Math.Max(0, due - Math.Max(0, bonus ?? await Ledger.BonusOfAsync(c, userId, tx)));
     }
 
     /// <summary>The cart: 1–20 lines of distinct products, 1–99 of each, else <c>400</c> naming the field.</summary>

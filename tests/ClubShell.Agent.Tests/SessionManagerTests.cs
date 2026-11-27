@@ -689,6 +689,24 @@ public sealed class SessionManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task Offline_time_takes_the_cached_bonus_first_then_the_balance()
+    {
+        // D-106: the bonus account pays play time first, offline as on the server.
+        await _store.CacheUserAsync("player", null, Player(2_000) with { Bonus = Money.Uzs(5_000) }, CancellationToken.None);
+        _server.CreateSessionAsync(Arg.Any<SessionCreateRequest>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>()).ThrowsAsync(Unavailable());
+        _server.GetTariffsAsync(Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(new EtagResponse<TariffsResponse>(new TariffsResponse([StandardTariff()], T0), null, false));
+
+        await _manager.StartAsync(Request(), CancellationToken.None);
+
+        var cached = (await _store.GetCachedUserAsync(UserId, CancellationToken.None))!;
+        cached.Bonus.Should().Be(Money.Uzs(0), "the hour's 6 000 took the whole 5 000 bonus first");
+        cached.Balance.Should().Be(Money.Uzs(1_000), "and the remaining 1 000 from the balance");
+        Func<Task> extend = () => _manager.ExtendAsync(30, null, CancellationToken.None);
+        (await extend.Should().ThrowAsync<IpcException>()).Which.Code.Should().Be(ErrorCode.InsufficientFunds, "3 000 for 30 min > the 1 000 left");
+    }
+
+    [Fact]
     public async Task Offline_start_without_a_known_balance_or_tariff_is_refused()
     {
         _server.CreateSessionAsync(Arg.Any<SessionCreateRequest>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>()).ThrowsAsync(Unavailable());

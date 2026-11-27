@@ -46,6 +46,7 @@ import {
   revokeUserTokens,
   settleStatus,
   str,
+  timeFunds,
   uuid,
   uzs,
   viewSession,
@@ -217,7 +218,8 @@ export function sessionRoutes(app: FastifyInstance): void {
         mins = minutes;
       }
       const cost = prepaid ? tariffPriceFor(tariff, mins) : zero();
-      if (prepaid && user.balance.amount < cost.amount) throw errors.insufficientFunds(cost, user.balance);
+      // Play time: the bonus account pays first (D-106).
+      if (prepaid && timeFunds(user) < cost.amount) throw errors.insufficientFunds(cost, uzs(timeFunds(user)));
       const id = clientSessionId && !findSession(clientSessionId) ? clientSessionId : uuid();
       if (prepaid && cost.amount > 0)
         applyTransaction(user, 'charge', uzs(-cost.amount), `Session ${mins} min · ${tariff.name}`, id);
@@ -357,7 +359,7 @@ export function sessionRoutes(app: FastifyInstance): void {
       if (tariff.maxMinutes != null && s.purchasedSec / 60 + minutes > tariff.maxMinutes)
         throw errors.validation('minutes', 'max');
       const cost = tariffPriceFor(tariff, minutes);
-      if (user.balance.amount < cost.amount) throw errors.insufficientFunds(cost, user.balance);
+      if (timeFunds(user) < cost.amount) throw errors.insufficientFunds(cost, uzs(timeFunds(user)));
       if (cost.amount > 0)
         applyTransaction(user, 'charge', uzs(-cost.amount), `Extension +${minutes} min · ${tariff.name}`, s.id);
       addPurchase(s, { paid: cost.amount, sec: minutes * 60, pkg: tariff.isPackage });

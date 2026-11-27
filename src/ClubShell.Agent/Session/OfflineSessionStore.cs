@@ -883,9 +883,10 @@ public sealed class OfflineSessionStore : IDisposable
 
     /// <summary>
     /// Sets the main balance of every cached row of <paramref name="userId"/> (a <c>walletUpdated</c> push, a charge taken
-    /// offline), so an offline start or extension is checked against what the player really has. No-op when not cached.
+    /// offline), so an offline start or extension is checked against what the player really has; <paramref name="bonus"/>
+    /// (D-106: the bonus account, play time only) likewise when given. No-op when not cached.
     /// </summary>
-    public async Task UpdateCachedBalanceAsync(Guid userId, Money balance, CancellationToken cancellationToken)
+    public async Task UpdateCachedBalanceAsync(Guid userId, Money balance, Money? bonus, CancellationToken cancellationToken)
     {
         await InitializeAsync(cancellationToken).ConfigureAwait(false);
         await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -912,7 +913,7 @@ public sealed class OfflineSessionStore : IDisposable
                 using var update = connection.CreateCommand();
                 // cachedAt is left alone: a balance update does not make the cached password any fresher.
                 update.CommandText = "UPDATE users SET userJson = @userJson WHERE username = @username;";
-                update.Parameters.AddWithValue("@userJson", JsonDefaults.Serialize(user with { Balance = balance }));
+                update.Parameters.AddWithValue("@userJson", JsonDefaults.Serialize(user with { Balance = balance, Bonus = bonus ?? user.Bonus }));
                 update.Parameters.AddWithValue("@username", username);
                 await update.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }

@@ -17,6 +17,7 @@ import { formatPrice } from '@/components/ui/PriceNote';
 import { useLocale } from '@/hooks/useLocale';
 import { useQuote } from '@/hooks/usePrice';
 import { CRITICAL_MINUTES, WARNING_MINUTES } from '@/hooks/useSession';
+import { timeFunds } from '@/lib/bonus';
 import { formatMoney } from '@/lib/format';
 import { log } from '@/lib/logger';
 import { listPrice, priceView, type PriceView } from '@/lib/pricing';
@@ -71,6 +72,8 @@ export function HudScreen({ onClose }: { onClose: () => void }): JSX.Element {
   const { locale } = useLocale();
   const [session, setSession] = useState<Session | null>(null);
   const [balance, setBalance] = useState<Balance['amount'] | null>(null);
+  // D-106: the bonus account, which pays play time first.
+  const [bonus, setBonus] = useState<Balance['bonus'] | null>(null);
   const [tariffs, setTariffs] = useState<Tariff[] | null>(null);
   const [tick, setTick] = useState(0);
   const [busy, setBusy] = useState<'extend' | 'admin' | null>(null);
@@ -87,7 +90,11 @@ export function HudScreen({ onClose }: { onClose: () => void }): JSX.Element {
       (e: unknown) => log.warn('hud: session', e),
     );
     api.profile.get().then(
-      (u: User) => active && setBalance(u.balance),
+      (u: User) => {
+        if (!active) return;
+        setBalance(u.balance);
+        setBonus(u.bonus ?? null);
+      },
       (e: unknown) => log.warn('hud: profile', e),
     );
     // The session's tariff: a package is never extended from here, and its list price is the offline fallback.
@@ -100,7 +107,10 @@ export function HudScreen({ onClose }: { onClose: () => void }): JSX.Element {
     );
     const offs = [
       events.on('session.updated', (s) => setSession(s)),
-      events.on('wallet.updated', (b) => setBalance(b.amount)),
+      events.on('wallet.updated', (b) => {
+        setBalance(b.amount);
+        setBonus(b.bonus);
+      }),
     ];
     return () => {
       active = false;
@@ -154,7 +164,7 @@ export function HudScreen({ onClose }: { onClose: () => void }): JSX.Element {
     : quote.status === 'ok'
       ? priceView(quote, quote.quote.total)
       : null;
-  const notEnough = price !== null && balance !== null && price.amount.amount > balance.amount;
+  const notEnough = price !== null && balance !== null && price.amount.amount > timeFunds(balance, bonus).amount;
 
   // Initial focus once the session and its tariff are known (what the first button is depends on them).
   const focused = useRef(false);
@@ -267,6 +277,15 @@ export function HudScreen({ onClose }: { onClose: () => void }): JSX.Element {
             <div className="hud-label">{t('desktop.balance')}</div>
             <div className="tnum whitespace-nowrap text-xl">
               <DotAmount value={formatMoney(balance, locale)} />
+            </div>
+          </div>
+        )}
+
+        {bonus && bonus.amount > 0 && (
+          <div className="border-l border-[color:var(--hairline)] pl-6 leading-tight" title={t('wallet.bonusOnlyTime')}>
+            <div className="hud-label">{t('wallet.bonus')}</div>
+            <div className="tnum whitespace-nowrap text-xl text-accent">
+              <DotAmount value={formatMoney(bonus, locale)} />
             </div>
           </div>
         )}

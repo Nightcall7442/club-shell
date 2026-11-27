@@ -154,7 +154,8 @@ public sealed class ShellUserContext
     }
 
     /// <summary>
-    /// Takes a wallet snapshot for the signed-in player: <see cref="User.Balance"/> follows <see cref="Balance.Amount"/>.
+    /// Takes a wallet snapshot for the signed-in player: <see cref="User.Balance"/> follows <see cref="Balance.Amount"/>, and
+    /// <see cref="User.Bonus"/> <see cref="Balance.Bonus"/> (D-106).
     /// <see langword="false"/> (nothing changed) when nobody is signed in or the balance is another player's.
     /// </summary>
     public bool UpdateBalance(Balance balance)
@@ -168,7 +169,7 @@ public sealed class ShellUserContext
             }
 
             _balance = balance;
-            _user = _user with { Balance = balance.Amount };
+            _user = _user with { Balance = balance.Amount, Bonus = balance.Bonus };
         }
 
         Changed?.Invoke(this, EventArgs.Empty);

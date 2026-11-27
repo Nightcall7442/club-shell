@@ -31,7 +31,8 @@ public sealed class TopUpCancelTests(ServerFixture server) : LedgerCheckedTest(s
         await FreshShiftAsync(Server, cashier, openingCash: 100_000);
         var player = await Players.CreateAsync(Server, balance: 200_000);
         var (topUp, bonus) = await TopUpAsync(Server, cashier, player.Id, 6_000_000);
-        Assert.Equal((300_000L, 6_500_000L, 6_100_000L), (bonus, await Players.BalanceAsync(Server, player.Id), await ExpectedCashAsync(Server, cashier)));
+        // The bonus goes to the bonus account (D-106), not the balance.
+        Assert.Equal((300_000L, 6_200_000L, 300_000L, 6_100_000L), (bonus, await Players.BalanceAsync(Server, player.Id), await Players.BonusAsync(Server, player.Id), await ExpectedCashAsync(Server, cashier)));
 
         Server.Clock.Advance(TimeSpan.FromMinutes(1));
         var r = await CancelAsync(Server, cashier, topUp);
@@ -39,7 +40,7 @@ public sealed class TopUpCancelTests(ServerFixture server) : LedgerCheckedTest(s
         Assert.Equal((topUp, 6_000_000L, 300_000L, "cash", "wrongAmount", "Кассир Азиз"), (c.GetProperty("transactionId").GetGuid(), c.GetProperty("amount").GetInt64(),
             c.GetProperty("bonus").GetInt64(), c.GetProperty("method").GetString(), c.GetProperty("reasonCode").GetString(), c.GetProperty("staffName").GetString()));
         Assert.Equal((200_000L, JsonValueKind.Null, 100_000L), (Amount(r.GetProperty("balance")), r.GetProperty("topUp").ValueKind, r.GetProperty("expectedCash").GetInt64()));
-        Assert.Equal(200_000, await Players.BalanceAsync(Server, player.Id));
+        Assert.Equal((200_000L, 0L), (await Players.BalanceAsync(Server, player.Id), await Players.BonusAsync(Server, player.Id)));
         Assert.Equal("topUp:6000000 bonus:300000 topUp:-6000000 bonus:-300000", await Players.ScalarAsync<string>(Server,
             "SELECT string_agg(type || ':' || amount, ' ' ORDER BY created_at, abs(amount) DESC) FROM ledger_entries WHERE user_id = @Id AND type IN ('topUp', 'bonus')", new { player.Id }));
         Assert.Equal(0, await Players.ScalarAsync<long>(Server, "SELECT lifetime_spent FROM wallets WHERE user_id = @Id", new { player.Id }));

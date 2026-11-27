@@ -60,8 +60,8 @@ export function tickWallet(nowMs: number): void {
         const bonusPct = user.loyaltyLevel >= 3 ? 15 : user.loyaltyLevel >= 2 ? 10 : 0;
         if (bonusPct > 0) {
           const bonus = uzs(Math.floor((intent.amount.amount * bonusPct) / 100));
-          user.bonus = uzs(user.bonus.amount + bonus.amount);
-          applyTransaction(user, 'bonus', uzs(0), `Loyalty bonus ${bonusPct}% (bonus balance)`, intent.id);
+          // The bonus account (D-106).
+          applyTransaction(user, 'bonus', bonus, `Loyalty bonus ${bonusPct}%`, intent.id);
         }
         pushToUser(user.id, 'walletUpdated', balanceOf(user));
         pushToUser(user.id, 'notification', {

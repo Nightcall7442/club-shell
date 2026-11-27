@@ -223,6 +223,8 @@ export const useWalletStore = create<WalletStore>()(
 
 /** Selector: main balance amount (0 UZS before load). */
 export const selectBalanceAmount = (s: WalletStore): Money => s.balance?.amount ?? { amount: 0, currency: 'UZS' };
+/** Selector: the bonus account (D-106: play time only); 0 when unknown. */
+export const selectBonusAmount = (s: WalletStore): Money => s.balance?.bonus ?? { amount: 0, currency: 'UZS' };
 /** Selector: more ledger pages available. */
 export const selectHistoryHasMore = (s: WalletStore): boolean => s.history.length < s.historyTotal;
 /** Selector factory: tariff by id. */

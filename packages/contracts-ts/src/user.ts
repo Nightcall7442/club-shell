@@ -545,6 +545,11 @@ export interface User {
   locale: Locale;
   /** Free-form server flags (`UserFlags`); empty allowed. */
   flags: string[];
+  /**
+   * Bonus balance (D-106): spent only on play time, never in the bar or as cash; null from a server without the bonus
+   * account.
+   */
+  bonus?: Money | null;
 }
 
 /** Result of a successful login (IPC_PROTOCOL.md §6.20, SERVER_API.md §4.3). */

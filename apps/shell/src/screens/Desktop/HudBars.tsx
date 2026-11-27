@@ -257,21 +257,27 @@ export function ConnectivityIndicator(): JSX.Element | null {
 // Balance
 // ---------------------------------------------------------------------------------------------------------------------
 
-/** Balance in the status line: opens the wallet, where top-ups live; the "+" says so when top-ups are enabled. */
-function BalanceButton({ amount, topUp }: { amount: Money; topUp: boolean }): JSX.Element {
+/**
+ * Balance in the status line: opens the wallet, where top-ups live; the "+" says so when top-ups are enabled. The bonus
+ * account (D-106) sits next to it in the accent, its rule as the hint: it pays play time only.
+ */
+function BalanceButton({ amount, bonus, topUp }: { amount: Money; bonus: Money | null; topUp: boolean }): JSX.Element {
   const { t } = useTranslation();
   const { locale } = useLocale();
   const navigate = useNavigate();
   const money = formatMoney(amount, locale);
   const counting = useTweenedNumber(amount.amount);
+  const shownBonus = bonus !== null && bonus.amount > 0 ? bonus : null;
+  const said = shownBonus
+    ? `${t('desktop.balance')}: ${money}. ${t('wallet.bonus')}: ${formatMoney(shownBonus, locale)} (${t('wallet.bonusOnlyTime')})`
+    : `${t('desktop.balance')}: ${money}`;
+  const hint = [shownBonus ? t('wallet.bonusOnlyTime') : null, topUp ? t('desktop.topUp') : null].filter(Boolean);
   return (
     <button
       type="button"
       data-nav="true"
-      aria-label={
-        topUp ? `${t('desktop.balance')}: ${money}. ${t('desktop.topUp')}` : `${t('desktop.balance')}: ${money}`
-      }
-      title={topUp ? t('desktop.topUp') : undefined}
+      aria-label={topUp ? `${said}. ${t('desktop.topUp')}` : said}
+      title={hint.length > 0 ? hint.join(' · ') : undefined}
       onClick={() => navigate('/wallet')}
       className="focus-ring group flex h-12 items-center gap-3 rounded-md px-3 text-left transition-colors duration-[var(--dur-fast)] hover:bg-text/[0.04]"
     >
@@ -280,6 +286,12 @@ function BalanceButton({ amount, topUp }: { amount: Money; topUp: boolean }): JS
         value={formatMoney({ ...amount, amount: counting }, locale)}
         className="text-[1.45rem] leading-none text-text"
       />
+      {shownBonus && (
+        <span data-bonus className="flex items-center gap-2 border-l border-text/15 pl-3">
+          <span className="hud-label">{t('wallet.bonus')}</span>
+          <DotAmount value={formatMoney(shownBonus, locale)} className="text-[1.15rem] leading-none text-accent" />
+        </span>
+      )}
       {topUp && <PlusButton />}
     </button>
   );
@@ -402,6 +414,8 @@ export function StatusBar(): JSX.Element {
   // The wallet store follows `wallet.updated`; the user record only refreshes on login.
   const walletBalance = useWalletStore((w) => w.balance?.amount ?? null);
   const balance = walletBalance ?? user?.balance ?? null;
+  const walletBonus = useWalletStore((w) => w.balance?.bonus ?? null);
+  const bonus = walletBonus ?? user?.bonus ?? null;
   const role = isGuest ? t('desktop.guestBadge') : user?.role === 'vip' ? t('desktop.vipBadge') : null;
   const pad = useGamepadConnected();
 
@@ -432,7 +446,7 @@ export function StatusBar(): JSX.Element {
         )}
         <span aria-hidden="true" className="mx-1 h-6 w-px bg-text/15" />
         <SessionTimer compact />
-        {balance && <BalanceButton amount={balance} topUp={features.topup} />}
+        {balance && <BalanceButton amount={balance} bonus={bonus} topUp={features.topup} />}
       </div>
 
       <div className="col-start-2">

@@ -15,10 +15,11 @@ import { formatPrice, PriceNote } from '@/components/ui/PriceNote';
 import { useLocale } from '@/hooks/useLocale';
 import { usePrice } from '@/hooks/usePrice';
 import { MMSS_BELOW_SEC, useSession } from '@/hooks/useSession';
+import { payForTime } from '@/lib/bonus';
 import { formatMoney } from '@/lib/format';
 import { hhmmss, mmss } from '@/lib/time';
 import { useNotificationsStore } from '@/store/notifications';
-import { selectBalanceAmount, selectTariff, useWalletStore } from '@/store/wallet';
+import { selectBalanceAmount, selectBonusAmount, selectTariff, useWalletStore } from '@/store/wallet';
 
 /** Minute presets of the extend dialog. */
 export const EXTEND_PRESETS: readonly number[] = [30, 60, 120];
@@ -299,6 +300,7 @@ export function ExtendSessionModal({ open, onClose }: ExtendSessionModalProps): 
   const tariffsLoaded = useWalletStore((s) => s.tariffs.length > 0);
   const loadTariffs = useWalletStore((s) => s.loadTariffs);
   const balance = useWalletStore(selectBalanceAmount);
+  const bonus = useWalletStore(selectBonusAmount);
   const push = useNotificationsStore((s) => s.push);
   const pushError = useNotificationsStore((s) => s.pushError);
 
@@ -321,7 +323,9 @@ export function ExtendSessionModal({ open, onClose }: ExtendSessionModalProps): 
   const prepaid = session?.isPrepaid ?? true;
   const isPackage = tariff?.isPackage === true;
   const cost = usePrice(open && prepaid && !isPackage ? tariff : null, minutes);
-  const after: Money | null = cost ? { amount: balance.amount - cost.amount.amount, currency: balance.currency } : null;
+  // D-106: the bonus account pays play time first.
+  const pay = cost ? payForTime(balance, bonus, cost.amount) : null;
+  const after: Money | null = pay?.balanceAfter ?? null;
   const insufficient = after !== null && after.amount < 0;
   const disabled = !isOpen || isOpenEnded || !prepaid || isPackage || insufficient || submitting || busy;
 
@@ -377,6 +381,12 @@ export function ExtendSessionModal({ open, onClose }: ExtendSessionModalProps): 
           <dd className="text-right font-semibold">{tariff?.name ?? '—'}</dd>
           <dt className="text-muted">{t('wallet.balance')}</dt>
           <dd className="tnum text-right font-semibold">{formatMoney(balance, locale)}</dd>
+          {bonus.amount > 0 && (
+            <>
+              <dt className="text-muted">{t('wallet.bonus')}</dt>
+              <dd className="tnum text-right font-semibold text-accent">{formatMoney(bonus, locale)}</dd>
+            </>
+          )}
           {cost && (
             <>
               <dt className="text-muted">{t('wallet.estimatedCost')}</dt>
@@ -385,6 +395,12 @@ export function ExtendSessionModal({ open, onClose }: ExtendSessionModalProps): 
                 <dd className="col-span-2 text-right">
                   <PriceNote view={cost} />
                 </dd>
+              )}
+              {pay && pay.fromBonus.amount > 0 && (
+                <>
+                  <dt className="text-muted">{t('wallet.fromBonus')}</dt>
+                  <dd className="tnum text-right font-semibold text-accent">−{formatMoney(pay.fromBonus, locale)}</dd>
+                </>
               )}
               <dt className="text-muted">{t('wallet.balanceAfter')}</dt>
               <dd className={clsx('tnum text-right font-semibold', insufficient ? 'text-danger' : 'text-success')}>

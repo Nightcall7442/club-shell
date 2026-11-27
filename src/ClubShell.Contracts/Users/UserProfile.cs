@@ -71,6 +71,7 @@ public static class UserFlags
 /// <param name="LastSeenAt">Last activity.</param>
 /// <param name="Locale">Preferred locale.</param>
 /// <param name="Flags">Free-form server flags (<see cref="UserFlags"/>); empty allowed.</param>
+/// <param name="Bonus">Bonus balance (D-106): spent only on play time, never in the bar or as cash; null from a server without the bonus account.</param>
 public sealed record User(
     Guid Id,
     string Username,
@@ -83,7 +84,8 @@ public sealed record User(
     DateTimeOffset CreatedAt,
     DateTimeOffset? LastSeenAt,
     Locale Locale,
-    IReadOnlyList<string> Flags)
+    IReadOnlyList<string> Flags,
+    Money? Bonus = null)
 {
     /// <summary><see langword="true"/> when <paramref name="flag"/> is present (ordinal comparison).</summary>
     public bool HasFlag(string flag) => Flags.Contains(flag, StringComparer.Ordinal);

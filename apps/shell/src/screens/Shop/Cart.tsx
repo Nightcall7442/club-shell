@@ -15,7 +15,7 @@ import { describeError, useNotificationsStore } from '@/store/notifications';
 import { useSettingsStore } from '@/store/settings';
 import { selectCartCount, selectCartLines, selectCartTotal, useShopStore } from '@/store/shop';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
-import { selectBalanceAmount, useWalletStore } from '@/store/wallet';
+import { selectBalanceAmount, selectBonusAmount, useWalletStore } from '@/store/wallet';
 import { ModalBackHandler } from '@/screens/Wallet/TopUpModal';
 
 export interface CartProps {
@@ -66,6 +66,8 @@ export function Cart({ onInsufficientFunds, className }: CartProps): JSX.Element
   const clearCart = useShopStore((s) => s.clearCart);
   const placeOrder = useShopStore((s) => s.placeOrder);
   const balance = useWalletStore(selectBalanceAmount);
+  // D-106: the bonus account pays play time only — the bar takes the balance alone.
+  const bonus = useWalletStore(selectBonusAmount);
   const pcName = useSettingsStore((s) => s.pcInfo?.pc.name ?? '');
   const push = useNotificationsStore((s) => s.push);
   const pushError = useNotificationsStore((s) => s.pushError);
@@ -207,6 +209,7 @@ export function Cart({ onInsufficientFunds, className }: CartProps): JSX.Element
             </dd>
           </div>
         </dl>
+        {bonus.amount > 0 && <p className="text-sm text-muted">{t('shop.noBonus')}</p>}
         {!empty && !enough && <p className="text-sm text-danger">{t('shop.topUpFirst')}</p>}
         <Button size="lg" block loading={placing} disabled={empty} onClick={() => setConfirming(true)}>
           {placing ? t('shop.placing') : t('shop.placeOrder')}

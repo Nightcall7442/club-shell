@@ -891,20 +891,26 @@ function SumRow({
   minor,
   exact,
   tone,
+  accent,
 }: {
   label: string;
   minor: number;
   exact?: boolean;
   tone?: 'warn' | 'muted';
+  /** The bonus row (D-106): its label and figure in the accent, marked `data-bonus-pays`. */
+  accent?: boolean;
 }): JSX.Element {
   return (
-    <div className="flex min-h-10 items-center justify-between gap-3 px-3.5 py-2">
+    <div
+      data-bonus-pays={accent ? true : undefined}
+      className="flex min-h-10 items-center justify-between gap-3 px-3.5 py-2"
+    >
       <dt className="label-sm">{label}</dt>
       <dd className="flex items-baseline gap-1.5 whitespace-nowrap">
         <span
           className={clsx(
             'num-dot text-xl leading-none',
-            tone === 'warn' ? 'text-warning' : tone === 'muted' ? 'text-muted' : 'text-hi',
+            tone === 'warn' ? 'text-warning' : tone === 'muted' ? 'text-muted' : accent ? 'text-accent' : 'text-hi',
           )}
         >
           {exact ? exactDigits(minor) : moneyParts(minor).num}
@@ -915,12 +921,24 @@ function SumRow({
   );
 }
 
-/** "К оплате N · на балансе M · доплата K": the wells of a seat or an extension, one per line. */
-function PaySummary({ price, balance }: { price: number; balance: number }): JSX.Element {
-  const shortfall = Math.max(0, price - balance);
+/**
+ * What of `price` (play time) the money must still pay (D-106): the bonus account pays first, then the balance; the rest
+ * is the shortfall the desk takes as a top-up.
+ */
+function timeShortfall(price: number, balance: number, bonus: number): number {
+  return Math.max(0, price - Math.min(Math.max(0, bonus), price) - balance);
+}
+
+/**
+ * "К оплате N · бонусами B · на балансе M · доплата K": the wells of a seat or an extension, one per line. The bonus row
+ * only when the client has a bonus: it pays the time first, and only the rest is asked in money.
+ */
+function PaySummary({ price, balance, bonus = 0 }: { price: number; balance: number; bonus?: number }): JSX.Element {
+  const shortfall = timeShortfall(price, balance, bonus);
   return (
     <dl className="well flex flex-col divide-y divide-accent/[0.07]">
       <SumRow label={t('К оплате')} minor={price} />
+      {bonus > 0 && <SumRow label={t('Бонусами (только на время)')} minor={Math.min(bonus, price)} accent />}
       <SumRow label={t('На балансе')} minor={balance} />
       <SumRow label={t('Доплата')} minor={shortfall} tone={shortfall > 0 ? 'warn' : 'muted'} />
     </dl>
@@ -2231,7 +2249,9 @@ function BusySeat({
     hit?.phoneTail ? `••${hit.phoneTail}` : null,
     guest && guestDisplayName(user.displayName) !== nameOf(user) ? guestDisplayName(user.displayName) : null,
   ].filter(Boolean);
-  const payee: Payee = { id: user.id, displayName: nameOf(user), balance: user.balance, bonus: hit?.bonus ?? null };
+  // The bonus account (D-106): the overview's, else the lookup's (an older server).
+  const seatBonus = user.bonus ?? hit?.bonus ?? null;
+  const payee: Payee = { id: user.id, displayName: nameOf(user), balance: user.balance, bonus: seatBonus };
   // The top-up sheet carries the seat (its hero is the game's art; without art, the plain header with this caption).
   const context: TopUpContext = {
     caption: [...where, game?.title ?? null].filter(Boolean).join(' · '),
@@ -2309,9 +2329,13 @@ function BusySeat({
       <div className="flex min-w-0 flex-col justify-between gap-2 pl-4">
         <dt className={clsx('label-sm flex items-baseline justify-between gap-2', art && 'text-artlabel')}>
           {t('Баланс')}
-          {hit && hit.bonus.amount > 0 && (
-            <span className="tnum truncate font-sans text-[11px] font-medium normal-case tracking-normal text-accent">
-              {t('+ бонусы {sum}', { sum: money(hit.bonus) })}
+          {seatBonus && seatBonus.amount > 0 && (
+            <span
+              data-seat-bonus
+              title={t('Бонусы — только на игровое время')}
+              className="tnum truncate font-sans text-[11px] font-medium normal-case tracking-normal text-accent"
+            >
+              {t('бонусы {sum}', { sum: money(seatBonus) })}
             </span>
           )}
         </dt>
@@ -2564,7 +2588,9 @@ function ExtendSheet({
         : t('Считаем цену…')
     : t('Считаем цену…');
   const blocked = quote?.rule ? describeRule(quote.rule) : null;
-  const shortfall = price === undefined ? 0 : Math.max(0, price - user.balance.amount);
+  // D-106: the bonus account pays the time first; only the rest is asked in money.
+  const bonus = guest ? 0 : (user.bonus?.amount ?? 0);
+  const shortfall = price === undefined ? 0 : timeShortfall(price, user.balance.amount, bonus);
   // Enter extends once the prices are in: the button is off (and so unfocusable) until then.
   const extendButton = useRef<HTMLButtonElement>(null);
   const priced = price !== undefined;
@@ -2699,7 +2725,11 @@ function ExtendSheet({
           />
         </div>
       )}
-      {guest ? <ExactSummary price={price ?? 0} /> : <PaySummary price={price ?? 0} balance={user.balance.amount} />}
+      {guest ? (
+        <ExactSummary price={price ?? 0} />
+      ) : (
+        <PaySummary price={price ?? 0} balance={user.balance.amount} bonus={bonus} />
+      )}
       {blocked && <p className="text-xs font-medium text-warning">{blocked}</p>}
       {guest || shortfall > 0 ? (
         <PayBox
@@ -3288,7 +3318,10 @@ function FreeSeat({
     ? (limits?.guestPostpaid ?? true)
       ? null
       : t('Постоплата для гостей выключена в настройках клуба')
-    : capped && who && hourlyQuote && who.balance.amount + memberCap < firstMinute(hourlyQuote, hourlyMinutes)
+    : capped &&
+        who &&
+        hourlyQuote &&
+        who.balance.amount + Math.max(0, who.bonus.amount) + memberCap < firstMinute(hourlyQuote, hourlyMinutes)
       ? t('Баланс и разрешённый долг не покрывают первую минуту')
       : null;
   const prepaid = wantPrepaid || postpaidOff !== null || !cashDesk2;
@@ -3326,7 +3359,8 @@ function FreeSeat({
           : t('Считаем цену…')
       : t('Считаем цену…');
   // Opening a session debits the client's balance, so what it lacks is taken first, here, as a top-up.
-  const shortfall = who && prepaid ? Math.max(0, price - who.balance.amount) : 0;
+  // The bonus account pays the time first (D-106): only the rest is asked in money.
+  const shortfall = who && prepaid ? timeShortfall(price, who.balance.amount, who.bonus.amount) : 0;
   const blocked = seat.pc.status === 'maintenance';
   const someone = guest || who !== null;
   const canSeat = someone && !!selTariffId && quoteFresh && !blocked && !blockedRule && busy === null;
@@ -3607,7 +3641,7 @@ function FreeSeat({
           ) : guest ? (
             <ExactSummary price={price} />
           ) : (
-            <PaySummary price={price} balance={who?.balance.amount ?? 0} />
+            <PaySummary price={price} balance={who?.balance.amount ?? 0} bonus={who?.bonus.amount ?? 0} />
           )}
           {priceQuote && priceQuote.discountPct > 0 && (
             <span className="text-xs font-medium text-accent">

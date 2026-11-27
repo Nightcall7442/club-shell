@@ -92,6 +92,8 @@ export interface ShiftTotals {
   /** Desk top-ups taken back in the shift (D-91), already netted out of the top-up sums, and how many. */
   topUpCancels?: number;
   topUpCancelCount?: number;
+  /** D-106: the play time the bonus account paid, net of the bonus its refunds gave back (inside `sessions`, never cash). */
+  bonusSpent?: number;
 }
 
 /** How a bar sale was paid: a counter method, or the client's balance. */
@@ -970,6 +972,7 @@ export function totalsSince(from: string, to: string = now(), shift: ShiftRecord
     shopVoidCount: 0,
     topUpCancels: 0,
     topUpCancelCount: 0,
+    bonusSpent: 0,
   };
   for (const m of shift?.cashMoves ?? []) {
     if (m.kind === 'in') t.cashIn += m.amount;
@@ -989,6 +992,7 @@ export function totalsSince(from: string, to: string = now(), shift: ShiftRecord
     if (tx.createdAt < from || tx.createdAt > to || OWNER_TRANSACTIONS.has(tx.id)) continue;
     t.count += 1;
     const a = tx.amount.amount;
+    if (tx.bonus === true && (tx.type === 'charge' || tx.type === 'refund')) t.bonusSpent = (t.bonusSpent ?? 0) - a;
     switch (tx.type) {
       case 'topUp': {
         const method = topUpMethod(tx.description);

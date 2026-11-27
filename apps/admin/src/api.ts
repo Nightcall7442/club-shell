@@ -195,6 +195,8 @@ export interface SeatUser {
   displayName: string;
   role: string;
   balance: Money;
+  /** The bonus account (D-106: play time only); absent from an older server. */
+  bonus?: Money;
 }
 
 export type KioskAlert = 'logonLost' | 'profileResetFailed';
@@ -848,6 +850,8 @@ export interface ShiftTotals {
   /** Desk top-ups taken back in the shift (D-91; already out of the top-up sums), and how many. */
   topUpCancels?: number;
   topUpCancelCount?: number;
+  /** D-106: the play time the bonus account paid (inside `sessions`, never cash); absent from an older server. */
+  bonusSpent?: number;
 }
 export interface Shift {
   id: string;
@@ -1539,6 +1543,9 @@ export interface Reports {
     /** Debts written off in the period (not revenue, SHELL_CHANGES 90); absent from an older server. */
     writeOffs?: number;
     writeOffCount?: number;
+    /** D-106: the play time the bonus account paid (inside `sessions`, no money came in) and the bonus credited. */
+    bonusSpent?: number;
+    bonuses?: number;
   };
   byDay: { date: string; sessions: number; shop: number; topUps: number }[];
   /** Seat-hours per weekday (0 = Sunday) × hour. */
@@ -1673,7 +1680,8 @@ export const clubApi = {
   deleteClient: (id: string, writeOff?: number): Promise<unknown> =>
     del(`/admin/clients/${id}${writeOff ? `?writeOff=${writeOff}` : ''}`),
   clientTransactions: (id: string): Promise<{ items: Transaction[] }> => call(`/admin/clients/${id}/transactions`),
-  redeemPromo: (userId: string, code: string): Promise<{ balance: Money }> =>
+  /** `bonusBalance` (D-106): the bonus account the code went to; absent from an older server. */
+  redeemPromo: (userId: string, code: string): Promise<{ balance: Money; bonusBalance?: Money }> =>
     postMoney('/admin/promo/redeem', { userId, code }),
 
   pcs: (): Promise<{ items: HallPc[]; zones: Zone[]; plan?: HallPlan | null }> => call('/admin/pcs'),

@@ -182,8 +182,8 @@ function lookupView(u: UserRecord): Record<string, unknown> {
     username: u.username,
     phoneTail: phone ? phone.slice(-4) : null,
     balance: u.balance,
-    // The server's lookup sends no bonus (v1, D-9).
-    bonus: uzs(0),
+    // The bonus account (D-106).
+    bonus: u.bonus,
     cardId: u.cardId,
     playing: pc ? { pcId: pc.id, pcName: pc.name } : null,
     blacklisted: profileOf(u.id).blacklisted,
@@ -883,7 +883,9 @@ export function clubRoutes(app: FastifyInstance): void {
     const writeOff = req.query.writeOff === undefined ? null : Number(req.query.writeOff);
     if (writeOff !== null && !Number.isInteger(writeOff)) throw errors.validation('writeOff', 'format');
     const balance = user.balance.amount;
-    if (balance !== 0 && writeOff !== balance) throw errors.conflict('balance', { balance: { ...user.balance } });
+    // The bonus account is no money (D-106): it never holds a delete back and goes with the client.
+    if (balance !== 0 && writeOff !== balance)
+      throw errors.conflict('balance', { balance: { ...user.balance }, bonus: { ...user.bonus } });
     // The mock keeps no journal of deletes (the server's `clientDelete` carries the amount written off).
     void me;
     db.users = db.users.filter((u) => u.id !== user.id);
@@ -935,7 +937,8 @@ export function clubRoutes(app: FastifyInstance): void {
         detail: `${user.displayName} · ${code.code}`,
         meta: { code: code.code },
       });
-      return { status: 200, body: { balance: user.balance } };
+      // D-106: the code went to the bonus account (beyond the contract).
+      return { status: 200, body: { balance: user.balance, bonusBalance: user.bonus } };
     });
   });
 
@@ -1452,6 +1455,13 @@ export function clubRoutes(app: FastifyInstance): void {
         shop: rows.reduce((a, r) => a + r.shop, 0),
         topUps: rows.reduce((a, r) => a + r.topUps, 0),
         sessionsCount: db.sessions.filter((s) => s.startedAt >= sinceIso).length,
+        // D-106: the play time the bonus account paid (inside `sessions`) and the bonus credited.
+        bonusSpent: db.transactions
+          .filter((t) => t.createdAt >= sinceIso && t.bonus === true && (t.type === 'charge' || t.type === 'refund'))
+          .reduce((a, t) => a - t.amount.amount, 0),
+        bonuses: db.transactions
+          .filter((t) => t.createdAt >= sinceIso && t.type === 'bonus')
+          .reduce((a, t) => a + t.amount.amount, 0),
       },
       byDay: rows,
       heat,

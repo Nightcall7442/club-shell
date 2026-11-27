@@ -100,14 +100,15 @@ export const Balance = forwardRef<HTMLButtonElement, BalanceProps>(function Bala
   const loading = balance === null && status !== 'error';
 
   // An open postpaid session is charged in one go when it ends: the balance does not move meanwhile, and the billing stops
-  // once the bill reaches the main balance (bonus money does not count there).
+  // once the bill reaches the bonus account plus the main balance — play time takes the bonus first (D-106).
   const due = session.isOpen && session.isOpenEnded && session.cost ? session.cost : null;
   const play = useMemo(() => {
     if (!balance) {
       return null;
     }
     const tariff = playTariff(tariffs, session.tariffId, pcZone ?? tariffZone ?? '', serverNow());
-    const funds = due ? { ...balance.amount, amount: balance.amount.amount - due.amount } : balanceTotal(balance);
+    const total = balanceTotal(balance);
+    const funds = due ? { ...total, amount: total.amount - due.amount } : total;
     const minutes = tariff ? playMinutes(funds, tariff) : 0;
     return tariff && minutes > 0 ? { tariff, minutes } : null;
   }, [balance, due, tariffs, session.tariffId, pcZone, tariffZone]);
@@ -160,16 +161,20 @@ export const Balance = forwardRef<HTMLButtonElement, BalanceProps>(function Bala
                 </p>
               )}
               {balance.bonus.amount > 0 && (
-                <dl className="mt-4 flex flex-wrap items-baseline gap-x-8 gap-y-2 text-base">
-                  <div className="flex items-baseline gap-2">
-                    <dt className="text-muted">{t('wallet.bonus')}</dt>
-                    <dd className="tnum font-semibold text-accent">{formatMoney(balance.bonus, locale)}</dd>
-                  </div>
-                  <div className="flex items-baseline gap-2">
-                    <dt className="text-muted">{t('wallet.total')}</dt>
-                    <dd className="tnum font-semibold text-text">{formatMoney(balanceTotal(balance), locale)}</dd>
-                  </div>
-                </dl>
+                <div data-bonus className="mt-4">
+                  <dl className="flex flex-wrap items-baseline gap-x-8 gap-y-2 text-base">
+                    <div className="flex items-baseline gap-2">
+                      <dt className="text-muted">{t('wallet.bonus')}</dt>
+                      <dd className="tnum font-semibold text-accent">{formatMoney(balance.bonus, locale)}</dd>
+                    </div>
+                    <div className="flex items-baseline gap-2">
+                      <dt className="text-muted">{t('wallet.total')}</dt>
+                      <dd className="tnum font-semibold text-text">{formatMoney(balanceTotal(balance), locale)}</dd>
+                    </div>
+                  </dl>
+                  {/* D-106: the bonus account buys play time only — never the bar, never cash. */}
+                  <p className="mt-1 text-sm text-muted">{t('wallet.bonusOnlyTime')}</p>
+                </div>
               )}
               <p className="tnum mt-3 text-sm text-muted">
                 {t('wallet.updatedAt', {

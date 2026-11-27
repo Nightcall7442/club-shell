@@ -139,7 +139,8 @@ export interface AuthActions {
   setUser(user: User | null): void;
   /** Merges a partial user update (profile edits, `wallet.updated` balance mirror). */
   updateUser(patch: Partial<User>): void;
-  setBalance(balance: Money): void;
+  /** The wallet mirror: the main balance and, when known, the bonus account (D-106). */
+  setBalance(balance: Money, bonus?: Money): void;
   setLockedByStaff(locked: boolean): void;
   onExpired(reason: AuthExpiredReason): void;
   onReadiness(readiness: PcReadiness): void;
@@ -362,8 +363,8 @@ export const useAuthStore = create<AuthStore>()(
         set((s) => (s.user ? { user: { ...s.user, ...patch } } : {}));
       },
 
-      setBalance(balance) {
-        get().updateUser({ balance });
+      setBalance(balance, bonus) {
+        get().updateUser(bonus ? { balance, bonus } : { balance });
       },
 
       setLockedByStaff(locked) {

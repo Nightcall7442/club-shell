@@ -316,7 +316,7 @@ function balanceFor(user: User | null): Balance {
   return {
     userId: user?.id ?? USER_ID,
     amount: user ? { ...user.balance } : uzs(0),
-    bonus: user?.role === 'guest' ? uzs(0) : uzs(5_000),
+    bonus: user?.bonus ? { ...user.bonus } : user?.role === 'guest' ? uzs(0) : uzs(5_000),
     currency: 'UZS',
     updatedAt: nowIso(),
   };
@@ -418,6 +418,8 @@ function setUser(user: User): void {
   mockState.user = clone(user);
   mockState.expiresAt = isoIn(3600);
   mockState.balance = balanceFor(mockState.user);
+  // The server sends the bonus account with the player (D-106).
+  mockState.user.bonus = { ...mockState.balance.bonus };
   persistAuth(user.username);
   enterAccount(user);
 }
@@ -536,20 +538,60 @@ function tariffById(id: string): Tariff {
   return t;
 }
 
+/**
+ * A ledger entry as the server posts it (D-106): a `bonus` entry moves the bonus account; a `charge` (play time) takes the
+ * bonus first and the balance for the rest; a `refund` of a session's time gives the bonus back first, up to what that
+ * session took from it. Everything else — the bar, top-ups — moves the balance only.
+ */
 function pushTransaction(type: Transaction['type'], amount: Money, description: string, ref: string | null): void {
   const user = requireUser();
-  user.balance = money(user.balance.amount + amount.amount);
-  mockState.balance = { ...balanceFor(user), bonus: mockState.balance.bonus };
-  mockState.transactions.unshift({
-    id: newId(),
-    userId: user.id,
-    type,
-    amount,
-    balanceAfter: { ...user.balance },
-    description,
-    createdAt: nowIso(),
-    ref,
-  });
+  const bonus = Math.max(0, mockState.balance.bonus.amount);
+  const taken = (session: string): number =>
+    Math.max(
+      0,
+      -mockState.transactions
+        .filter((t) => t.ref === session && t.bonus === true && (t.type === 'charge' || t.type === 'refund'))
+        .reduce((a, t) => a + t.amount.amount, 0),
+    );
+  const fromBonus =
+    type === 'bonus'
+      ? amount.amount
+      : type === 'charge' && amount.amount < 0
+        ? -Math.min(bonus, -amount.amount)
+        : type === 'refund' && amount.amount > 0 && ref !== null
+          ? Math.min(amount.amount, taken(ref))
+          : 0;
+  const fromMain = amount.amount - fromBonus;
+  const at = nowIso();
+  const nextBonus = money(Math.max(0, bonus + fromBonus));
+  if (fromBonus !== 0) {
+    mockState.transactions.unshift({
+      id: newId(),
+      userId: user.id,
+      type,
+      amount: money(fromBonus),
+      balanceAfter: { ...nextBonus },
+      description: type === 'charge' || type === 'refund' ? `${description} · бонусы` : description,
+      createdAt: at,
+      ref,
+      bonus: true,
+    });
+  }
+  user.balance = money(user.balance.amount + fromMain);
+  user.bonus = { ...nextBonus };
+  mockState.balance = { ...balanceFor(user), bonus: nextBonus };
+  if (fromMain !== 0 || fromBonus === 0) {
+    mockState.transactions.unshift({
+      id: newId(),
+      userId: user.id,
+      type,
+      amount: money(fromMain),
+      balanceAfter: { ...user.balance },
+      description,
+      createdAt: at,
+      ref,
+    });
+  }
   emitMock('agent://wallet.updated', clone(mockState.balance));
 }
 
@@ -576,10 +618,12 @@ function quoteFor(tariff: Tariff, minutes: number | null, user: User | null): Se
   };
 }
 
-function assertFunds(required: Money): void {
+/** 402 unless the balance covers `required`; play time (`forTime`) may take the bonus account too (D-106), the bar never. */
+function assertFunds(required: Money, forTime = false): void {
   const user = requireUser();
-  if (user.balance.amount < required.amount) {
-    mockError('insufficientFunds', 'Insufficient funds', { required, available: { ...user.balance } });
+  const available = money(user.balance.amount + (forTime ? Math.max(0, mockState.balance.bonus.amount) : 0));
+  if (available.amount < required.amount) {
+    mockError('insufficientFunds', 'Insufficient funds', { required, available });
   }
 }
 
@@ -1378,6 +1422,7 @@ cmd('auth_register', (args): AuthLoginResponse => {
     createdAt: nowIso(),
     lastSeenAt: nowIso(),
     flags: [],
+    bonus: money(0),
   };
   registeredAccounts.set(username, { user, password });
   setUser(user);
@@ -1508,7 +1553,7 @@ cmd('session_start', (args): Session => {
   // The server's price (the player's discount), as the quote said.
   const price = req.prepaid && minutes ? quoteFor(tariff, minutes, user).total : money(0);
   if (req.prepaid) {
-    assertFunds(price);
+    assertFunds(price, true);
   } else {
     // Pay as you go at the kiosk: a member's, from the balance, and only online; a guest's time is the desk's.
     if (user.role === 'guest') {
@@ -1517,7 +1562,8 @@ cmd('session_start', (args): Session => {
     if (mockState.serverOffline) {
       mockError('conflict', 'The club server is unreachable', { reason: 'offlineUnavailable' });
     }
-    if (user.balance.amount <= 0) {
+    // The bonus account pays play time too (D-106).
+    if (user.balance.amount + Math.max(0, mockState.balance.bonus.amount) <= 0) {
       mockError('insufficientFunds', 'Insufficient funds', { required: money(100), available: { ...user.balance } });
     }
   }
@@ -1575,7 +1621,7 @@ cmd('session_extend', (args): Session => {
   // As the server: the quote's price — and on a package tariff, the whole package (why the shell hides "+30" there).
   const price = quoteFor(tariff, minutes, mockState.user).total;
   if (s.isPrepaid) {
-    assertFunds(price);
+    assertFunds(price, true);
     pushTransaction('charge', money(-price.amount), `Extend ${minutes} min ${tariff.name}`, s.id);
     s.cost = money(s.cost.amount + price.amount);
     s.secondsLeft += minutes * 60;

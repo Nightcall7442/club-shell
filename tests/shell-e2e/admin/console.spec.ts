@@ -225,6 +225,7 @@ async function shiftState(request: APIRequestContext): Promise<{
     shop?: number;
     shopByMethod?: Record<string, number>;
     shopVoidCount?: number;
+    bonusSpent?: number;
   } | null;
   expectedCash?: number | null;
 }> {
@@ -438,6 +439,12 @@ async function stubAudio(page: Page): Promise<void> {
 }
 
 const beeps = (page: Page): Promise<number> => page.evaluate(() => (window as unknown as { __beeps: number }).__beeps);
+
+/** A money well's figure (`10 000` then «сум» in its own span): whole sum with any space, «сум» right after. */
+function wholeSum(minor: number): RegExp {
+  const whole = String(Math.round(minor / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, '\\s');
+  return new RegExp(`(^|\\D)${whole}\\s?сум`);
+}
 
 /** `2100000` minor units → a pattern for `21 000 сум` with any space the formatter uses. */
 function sumPattern(minor: number): RegExp {
@@ -767,7 +774,8 @@ test('the owner turns on «x2» for top-ups under «Бонусы и акции»
     });
     expect(topUp.ok(), await topUp.text()).toBeTruthy();
     const paid = (await topUp.json()) as { bonus: { amount: number }; balance: { amount: number } };
-    expect([paid.bonus.amount, paid.balance.amount]).toEqual([2_000_000, 4_000_000]);
+    // D-106: the doubled part goes to the bonus account, the balance is the money paid.
+    expect([paid.bonus.amount, paid.balance.amount]).toEqual([2_000_000, 2_000_000]);
   } finally {
     await off();
   }
@@ -1205,11 +1213,92 @@ test('a money action retried after a lost answer is applied once (Idempotency-Ke
   expect(keys).toHaveLength(2);
   expect(keys[0]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   expect(keys[1]).toBe(keys[0]);
-  // WELCOME is 10 000 sum, credited once.
+  // WELCOME is 10 000 sum, credited once — to the bonus account (D-106), not the balance.
   const found = (await (await request.get(`${API}/admin/clients?q=${username}`, { headers: auth(owner) })).json()) as {
-    items: { balance: { amount: number } }[];
+    items: { balance: { amount: number }; bonus: { amount: number } }[];
   };
-  expect(found.items[0]?.balance.amount).toBe(1_000_000);
+  expect([found.items[0]?.balance.amount, found.items[0]?.bonus.amount]).toEqual([0, 1_000_000]);
+});
+
+test('the bonus account (D-106): bonus pays only play time, first; the pay box asks money for the rest; the bar and the cash never see it', async ({
+  page,
+  request,
+}) => {
+  await ensureShift(request);
+  const owner = await tokenFor(request, OWNER_PIN);
+  const member = await newClient(request, 'bonus');
+  // WELCOME: 10 000 sum to the bonus account only.
+  const redeemed = await moneyPost(request, '/admin/promo/redeem', { userId: member.id, code: 'WELCOME' });
+  expect(redeemed.ok(), await redeemed.text()).toBeTruthy();
+  const bonus = ((await redeemed.json()) as { balance: { amount: number }; bonusBalance: { amount: number } })
+    .bonusBalance.amount;
+  expect(bonus).toBe(1_000_000);
+  const x0 = await shiftState(request);
+
+  // The bar takes the balance only: 0 on it, so a balance sale is refused whatever the bonus.
+  const water = await newProduct(request, 'bonus-water', { price: 100_000 });
+  const refused = await barSale(request, [{ product: water, qty: 1 }], { method: 'balance', userId: member.id });
+  expect(refused.status()).toBe(402);
+
+  // The client card: balance and bonus apart, the bonus marked as play time only; the delete zone names it.
+  await signIn(page, OWNER_PIN);
+  await page.goto('/#/clients');
+  await page.getByRole('row').filter({ hasText: member.username }).click();
+  await expect(page.locator('[data-bonus-hint]')).toContainText('только на игровое время');
+  await expect(page.locator('[data-delete-bonus]')).toContainText(/10\s000\sсум/);
+
+  // A seat on the map: the bonus pays the time first, the pay box asks money only for the rest. The panel prices the
+  // zone's first hourly tariff.
+  const hall = (await (await request.get(`${API}/admin/overview`, { headers: auth(owner) })).json()) as {
+    seats: { pc: { id: string; number: number; status: string; zone: string }; session: unknown }[];
+    tariffs: { id: string; isPackage: boolean; zones: string[] }[];
+  };
+  const free = hall.seats.find((s) => s.pc.status === 'free' && !s.session)!;
+  const tariff = hall.tariffs.find(
+    (x) =>
+      !x.isPackage && (x.zones.length === 0 || x.zones.some((z) => z.toLowerCase() === free.pc.zone.toLowerCase())),
+  )!;
+  const quote = (await (
+    await request.post(`${API}/admin/quote`, {
+      headers: auth(owner),
+      data: { tariffId: tariff.id, pcId: free.pc.id, minutes: 120, userId: member.id },
+    })
+  ).json()) as { total: { amount: number } };
+  const price = quote.total.amount;
+  const fromBonus = Math.min(bonus, price);
+  const rest = price - fromBonus;
+  expect(rest).toBeGreaterThan(0);
+  // The cashier seats (the owner's money would stay out of the shift, D-101).
+  await signIn(page, CASHIER_PIN);
+  await expect(page.locator(`#seat-${free.pc.id}`)).toBeVisible();
+  await page.keyboard.type(String(free.pc.number));
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { name: /Посадить на/ })).toBeVisible();
+  await page.getByRole('combobox', { name: 'Кто' }).fill(member.username);
+  const option = page.getByRole('option').filter({ hasText: member.username });
+  await expect(option.locator('[data-hit-bonus]')).toContainText(/10\s000\sсум/);
+  await option.click();
+  await page.getByRole('button', { name: '2 ч', exact: true }).click();
+  await expect(page.locator('[data-bonus-pays]')).toContainText(wholeSum(fromBonus));
+  await page.getByRole('button', { name: /^Посадить · Наличные/ }).click();
+  await expect(page.getByText(/Сеанс открыт/)).toBeVisible();
+
+  const seat = await seatOf(request, free.pc.id);
+  const paid = (
+    (await (await request.get(`${API}/admin/clients?q=${member.username}`, { headers: auth(owner) })).json()) as {
+      items: { balance: { amount: number }; bonus: { amount: number } }[];
+    }
+  ).items[0];
+  expect(seat.session).toBeTruthy();
+  // Only the rest came in as cash; the bonus is used up on the time, the balance holds whatever the payment left over.
+  expect(paid?.bonus.amount).toBe(0);
+  const x1 = await shiftState(request);
+  const cashIn = (x1.x?.topUpByMethod['cash'] ?? 0) - (x0.x?.topUpByMethod['cash'] ?? 0);
+  expect(cashIn).toBeGreaterThanOrEqual(rest);
+  expect(cashIn).toBeLessThan(price);
+  expect((x1.x?.bonusSpent ?? 0) - (x0.x?.bonusSpent ?? 0)).toBe(fromBonus);
+  expect((x1.expectedCash ?? 0) - (x0.expectedCash ?? 0)).toBe(cashIn);
+  await endAt(request, free.pc.id);
 });
 
 test('only the owner reads the API key, Telegram is gone, and signing out revokes the token', async ({
@@ -1943,9 +2032,13 @@ test('a member plays postpaid from the balance and is signed out by the desk end
   await expect(page.getByText(/Сеанс завершён · списано/)).toBeVisible();
   const owner = auth(await tokenFor(request, OWNER_PIN));
   const found = (await (await request.get(`${API}/admin/clients?q=${member.username}`, { headers: owner })).json()) as {
-    items: { balance: { amount: number } }[];
+    items: { balance: { amount: number }; bonus: { amount: number } }[];
   };
-  expect(found.items[0]?.balance.amount).toBeLessThan(balanceBefore);
+  // Play time takes the top-up's bonus first (D-106), then the balance: together they went down.
+  const bonusBefore = ((await topUp.json()) as { bonus: { amount: number } }).bonus.amount;
+  expect((found.items[0]?.balance.amount ?? 0) + (found.items[0]?.bonus.amount ?? 0)).toBeLessThan(
+    balanceBefore + bonusBefore,
+  );
   // The desk end signed the player out of that PC.
   const after = await agentCall(request, pc, 'GET', `/wallet/${member.id}/balance`, undefined, accessToken);
   expect(after.status()).toBe(401);

@@ -182,6 +182,15 @@ export default function ReportsPage(): JSX.Element {
               })}
             </p>
           )}
+          {/* D-106: bonus money paid for time inside «Выручка сеансов» — no money came in for that part. */}
+          {((data.totals.bonusSpent ?? 0) !== 0 || (data.totals.bonuses ?? 0) !== 0) && (
+            <p data-report-bonus className="text-[13px] text-muted">
+              {t('Бонусов начислено {credited} сум, оплачено бонусами за время {spent} сум — это не деньги', {
+                credited: sum(data.totals.bonuses ?? 0),
+                spent: sum(data.totals.bonusSpent ?? 0),
+              })}
+            </p>
+          )}
 
           <Section title={t('Выручка по дням')}>
             <RevenueChart rows={data.byDay} />

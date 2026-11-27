@@ -194,7 +194,8 @@ export function TransactionRow({ transaction: tx }: TransactionRowProps): JSX.El
           {formatMoneySigned(tx.amount, locale)}
         </p>
         <p className="tnum text-xs text-muted">
-          {t('wallet.balanceAfter')}: {formatMoney(tx.balanceAfter, locale)}
+          {/* A row of the bonus account (D-106) shows the bonus left, not the balance. */}
+          {t(tx.bonus === true ? 'wallet.bonusAfter' : 'wallet.balanceAfter')}: {formatMoney(tx.balanceAfter, locale)}
         </p>
       </div>
     </li>
