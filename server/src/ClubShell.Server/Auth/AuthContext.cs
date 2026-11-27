@@ -50,6 +50,12 @@ public sealed record StaffContext(Guid? StaffId, string Name, string Role, Guid 
 {
     public bool IsOwner => Role == "owner";
 
+    /// <summary>
+    /// The owner in person (not the club API key): money this staff member takes or gives at the desk is the owner's own
+    /// operation (D-101) — it joins no cashier shift.
+    /// </summary>
+    public bool OwnerOp => IsOwner && StaffId is not null;
+
     public string WireId => StaffId?.ToString() ?? "apiKey";
 }
 

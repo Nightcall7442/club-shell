@@ -1,5 +1,10 @@
 /** Uzbek and English lines of the console, keyed by the Russian source text (see `i18n.ts`). */
 export const UZ: Record<string, string> = {
+  // Phone layout: the compact KPI sums, the bar's cart bar, the language in «Ещё».
+  млн: 'mln',
+  млрд: 'mlrd',
+  Оплатить: 'Toʻlash',
+  Язык: 'Til',
   'Выручка за период': 'Davr uchun tushum',
   'Выручка сегодня': 'Bugungi tushum',
   Город: 'Shahar',
@@ -646,6 +651,73 @@ export const UZ: Record<string, string> = {
     "Kirish ekrani va ekran saqlovchida katta raqam — zal bo'ylab ko'rinadi",
   'Название и зона': 'Nomi va zona',
   'Название и номер каждого ПК меняются в разделе': "Har bir kompyuter nomi va raqami bo'limda o'zgartiriladi",
+  '«Выключить» и «Перезагрузить»': "«O'chirish» va «Qayta yuklash»",
+  '«Позвать администратора»': '«Administratorni chaqirish»',
+  '«Это место свободно»': "«Bu o'rin bo'sh»",
+  'Акцент почти сливается с фоном темы ({ratio}:1, нужно от 3:1): выделение и ссылки на ПК будут читаться плохо. Возьмите цвет {direction}.':
+    "Urg'u rangi mavzu foniga deyarli qo'shilib ketadi ({ratio}:1, kamida 3:1 kerak): kompyuterlarda belgilash va havolalar yomon o'qiladi. {direction} rang tanlang.",
+  'Без неё идут слайды заставки. Свои слайды из «Экран игрока» важнее картинки.':
+    "Busiz ekran saqlovchi slaydlari ko'rsatiladi. «O'yinchi ekrani»dagi o'z slaydlaringiz rasmdan ustun.",
+  'Без неё — общие обои клуба.': 'Busiz — klubning umumiy fon rasmi.',
+  'Без своей картинки здесь идут слайды заставки. ПК получают изменения сразу после сохранения.':
+    "O'z rasmisiz bu yerda ekran saqlovchi slaydlari ko'rsatiladi. Kompyuterlar o'zgarishlarni saqlangandan so'ng darhol oladi.",
+  'В верхней панели логотип всегда слева: в центре разделы, справа часы и меню.':
+    "Yuqori panelda logotip doim chapda: o'rtada bo'limlar, o'ngda soat va menyu.",
+  'В центре': 'Markazda',
+  'Взять {color}': '{color} ni olish',
+  'Выбор языка': 'Til tanlash',
+  'Где логотип': 'Logotip joyi',
+  Затемнение: 'Qoraytirish',
+  'Как в теме': 'Mavzudagidek',
+  'Кнопки администратора и питания — те же переключатели, что в «Экран игрока».':
+    "Administrator va quvvat tugmalari — «O'yinchi ekrani»dagi o'sha almashtirgichlar.",
+  'Код тона': 'Ton kodi',
+  'На этом тоне текст темы не читается. ПК покажет его {how} — до {color}, как в предпросмотре.':
+    "Bu tonda mavzu matni o'qilmaydi. Kompyuter uni {how} ko'rsatadi — {color} gacha, oldindan ko'rishdagidek.",
+  'Показывать название в верхней панели': "Yuqori panelda klub nomini ko'rsatish",
+  'Показывать название рядом': "Yonida klub nomini ko'rsatish",
+  'По центру вверху': "Yuqorida o'rtada",
+  Подзаголовок: 'Kichik sarlavha',
+  'Подложка под названием, часами и тарифами на экране входа и заставке. Пусто — фон темы.':
+    "Kirish ekrani va ekran saqlovchida nom, soat va tariflar ostidagi fon. Bo'sh — mavzu foni.",
+  'Показывать логотип': "Logotipni ko'rsatish",
+  'Предпросмотр: {screen}': "Oldindan ko'rish: {screen}",
+  Призыв: 'Chaqiruv',
+  'Пустое поле — встроенный текст на языке игрока (он в подсказке поля).':
+    "Bo'sh maydon — o'yinchi tilidagi o'rnatilgan matn (u maydon ichida ko'rsatilgan).",
+  'Рабочий стол': 'Ish stoli',
+  Размер: "O'lcham",
+  'Размер логотипа': "Logotip o'lchami",
+  Размытие: 'Xiralashtirish',
+  Размыть: 'Xiralashtirish',
+  'Своя картинка заставки': "Ekran saqlovchining o'z rasmi",
+  'Своя картинка рабочего стола': "Ish stolining o'z rasmi",
+  'Своя картинка экрана входа': "Kirish ekranining o'z rasmi",
+  'Сильнее — текст читается на любой картинке. Не больше 80%.':
+    "Kuchliroq — matn har qanday rasmda o'qiladi. 80% dan oshmaydi.",
+  'Слева вверху': 'Yuqorida chapda',
+  'Слева внизу': 'Pastda chapda',
+  'Справа вверху': "Yuqorida o'ngda",
+  'Справа внизу': "Pastda o'ngda",
+  'Там тарифы — выключите их, чтобы поставить логотип': "U yerda tariflar — logotipni qo'yish uchun ularni o'chiring",
+  Тексты: 'Matnlar',
+  'Только встроенные шрифты: ПК не качают их из интернета.':
+    "Faqat o'rnatilgan shriftlar: kompyuterlar ularni internetdan yuklamaydi.",
+  'Тон плашек': 'Plashkalar toni',
+  'Тон — цвет в виде #RRGGBB.': "Ton — #RRGGBB ko'rinishidagi rang.",
+  Фон: 'Fon',
+  Часы: 'Soat',
+  'Что показывать': "Nimani ko'rsatish",
+  Чётко: 'Aniq',
+  'Шрифт заголовков': 'Sarlavhalar shrifti',
+  Экран: 'Ekran',
+  'Экран в предпросмотре': "Oldindan ko'rishdagi ekran",
+  'Экраны игрока': "O'yinchi ekranlari",
+  'Язык предпросмотра': "Oldindan ko'rish tili",
+  'Язык текста': 'Matn tili',
+  'как сейчас': 'hozirgidek',
+  светлее: 'ochroq',
+  темнее: "to'qroq",
   'Номер ПК на экране': 'Ekrandagi kompyuter raqami',
   'ПК 05': 'PK 05',
   'Только название': 'Faqat nomi',
@@ -1419,8 +1491,16 @@ export const UZ: Record<string, string> = {
   'Для игр и лаунчеров, которые просят права администратора (например ICCup): без этого они не запускаются под игроком.':
     'Administrator huquqini soʻraydigan oʻyin va launcherlar uchun (masalan ICCup): busiz ular oʻyinchi nomidan ishga tushmaydi.',
   'Запускать без прав администратора': 'Administrator huquqisiz ishga tushirish',
-  'На {pc} игра не запустилась ({time}): ей нужны права администратора. Включите «Запускать без прав администратора».':
-    '{pc} da oʻyin ishga tushmadi ({time}): unga administrator huquqi kerak. «Administrator huquqisiz ishga tushirish»ni yoqing.',
+  'На {pc} игра не запустилась ({time}): ей нужны права администратора. Включите «Запускать без прав администратора» или «Запускать с правами администратора».':
+    '{pc} da oʻyin ishga tushmadi ({time}): unga administrator huquqi kerak. «Administrator huquqisiz ishga tushirish» yoki «Administrator huquqi bilan ishga tushirish»ni yoqing.',
+  'Запускать с правами администратора': 'Administrator huquqi bilan ishga tushirish',
+  'Если без прав администратора игра открывается, но не работает (ICCup не ставит античит, не пишет в папку игры). Только эта игра и то, что она запускает, получают права; .exe не должен лежать в папке пользователя.':
+    'Administrator huquqisiz oʻyin ochilsa-yu, ishlamasa (ICCup antichitni oʻrnatmaydi, oʻyin papkasiga yozmaydi). Huquqni faqat shu oʻyin va u ishga tushiradigan dasturlar oladi; .exe foydalanuvchi papkasida boʻlmasligi kerak.',
+  'Процессы игры': 'Oʻyin jarayonlari',
+  'Необязательно. Если .exe — лаунчер, который запускает игру и закрывается: имена файлов игры через запятую, например war3.exe':
+    'Ixtiyoriy. Agar .exe oʻyinni ishga tushirib yopiladigan launcher boʻlsa: oʻyin fayllari nomlari vergul bilan, masalan war3.exe',
+  'Процессов игры — не больше {n}': 'Oʻyin jarayonlari — {n} tadan koʻp emas',
+  'Процессы игры — только имена файлов, например war3.exe': 'Oʻyin jarayonlari — faqat fayl nomlari, masalan war3.exe',
   'Нужны права администратора — откройте и включите запуск без них':
     'Administrator huquqi kerak — oching va ularsiz ishga tushirishni yoqing',
   // Power on and several PCs at once (D-82)
@@ -1551,8 +1631,44 @@ export const UZ: Record<string, string> = {
   'файла нет': 'fayl yoʻq',
   'не скачалась': 'yuklab boʻlmadi',
   'Ссылка не подошла ({why})': 'Havola toʻgʻri kelmadi ({why})',
+  'Скрыть пароль': 'Parolni yashirish',
+  'Показать пароль': 'Parolni koʻrsatish',
+  Показать: 'Koʻrsatish',
+  Сгенерировать: 'Yaratish',
+  'Пароль клиента — сообщите его, он показывается один раз':
+    'Mijoz paroli — unga ayting, u faqat bir marta koʻrsatiladi',
+  'Пароль изменён': 'Parol oʻzgartirildi',
+  'Новый пароль': 'Yangi parol',
+  'Не короче 4 символов. Клиент входит с ним, менять при входе не нужно':
+    'Kamida 4 ta belgi. Mijoz shu parol bilan kiradi, kirishda almashtirish shart emas',
+  'Сменить пароль': 'Parolni almashtirish',
+  'Не короче 4 символов. Пусто — сгенерируем': 'Kamida 4 ta belgi. Boʻsh qolsa — oʻzimiz yaratamiz',
+  'Баланс изменился: теперь {sum}. Проверьте и подтвердите ещё раз.':
+    'Balans oʻzgardi: endi {sum}. Tekshirib, yana bir bor tasdiqlang.',
+  'Удалить {name} и списать долг {sum}? Деньги не возвращаются, история останется в отчётах.':
+    '{name} oʻchirilsinmi va {sum} qarz hisobdan chiqarilsinmi? Pul qaytarilmaydi, tarix hisobotlarda qoladi.',
+  'Удалить {name} и списать {sum} с баланса? Деньги не возвращаются, история останется в отчётах.':
+    '{name} oʻchirilsinmi va balansdan {sum} hisobdan chiqarilsinmi? Pul qaytarilmaydi, tarix hisobotlarda qoladi.',
+  'Долг {sum} будет списан. Клиент пропадёт из списков, его логин и карта освободятся.':
+    '{sum} qarz hisobdan chiqariladi. Mijoz roʻyxatlardan yoʻqoladi, logini va kartasi boʻshaydi.',
+  'На балансе {sum} — при удалении он будет списан, без возврата денег.':
+    'Balansda {sum} — oʻchirishda u hisobdan chiqariladi, pul qaytarilmaydi.',
+  'Удалить и списать баланс': 'Oʻchirish va balansni hisobdan chiqarish',
+  'Операции владельца': 'Egasining amallari',
+  'Операция владельца: не войдёт в смену кассира, наличные — у вас':
+    'Egasining amali: kassir smenasiga kirmaydi, naqd pul — sizda',
+  Пол: 'Jins',
+  Мужской: 'Erkak',
+  Женский: 'Ayol',
+  'Пол не указан': 'Jinsi koʻrsatilmagan',
+  'Укажите пол клиента': 'Mijozning jinsini koʻrsating',
 };
 export const EN: Record<string, string> = {
+  // Phone layout: the compact KPI sums, the bar's cart bar, the language in «Ещё».
+  млн: 'M',
+  млрд: 'B',
+  Оплатить: 'Pay',
+  Язык: 'Language',
   'Выручка за период': 'Revenue for the period',
   'Выручка сегодня': 'Revenue today',
   Город: 'City',
@@ -2198,6 +2314,72 @@ export const EN: Record<string, string> = {
     'Large number on the sign-in screen and screensaver — readable across the hall',
   'Название и зона': 'Name and zone',
   'Название и номер каждого ПК меняются в разделе': "Each PC's name and number are changed in",
+  '«Выключить» и «Перезагрузить»': '“Shut down” and “Restart”',
+  '«Позвать администратора»': '“Call administrator”',
+  '«Это место свободно»': '“This seat is free”',
+  'Акцент почти сливается с фоном темы ({ratio}:1, нужно от 3:1): выделение и ссылки на ПК будут читаться плохо. Возьмите цвет {direction}.':
+    'The accent nearly blends into the theme background ({ratio}:1, 3:1 needed): highlights and links on the PCs will be hard to read. Pick a {direction} colour.',
+  'Без неё идут слайды заставки. Свои слайды из «Экран игрока» важнее картинки.':
+    'Without it the screensaver slides play. Your own slides from “Player screen” win over the picture.',
+  'Без неё — общие обои клуба.': 'Without it — the club wallpaper.',
+  'Без своей картинки здесь идут слайды заставки. ПК получают изменения сразу после сохранения.':
+    'Without a picture of its own the screensaver slides play here. PCs get the changes right after saving.',
+  'В верхней панели логотип всегда слева: в центре разделы, справа часы и меню.':
+    'In the top bar the logo is always on the left: sections in the middle, the clock and menu on the right.',
+  'В центре': 'Centre',
+  'Взять {color}': 'Use {color}',
+  'Выбор языка': 'Language switcher',
+  'Где логотип': 'Logo position',
+  Затемнение: 'Dimming',
+  'Как в теме': 'As the theme',
+  'Кнопки администратора и питания — те же переключатели, что в «Экран игрока».':
+    'The administrator and power buttons are the same switches as in “Player screen”.',
+  'Код тона': 'Tint code',
+  'На этом тоне текст темы не читается. ПК покажет его {how} — до {color}, как в предпросмотре.':
+    'The theme text is not readable on this tint. The PCs will show it {how} — down to {color}, as in the preview.',
+  'Показывать название в верхней панели': 'Show the club name in the top bar',
+  'Показывать название рядом': 'Show the club name next to it',
+  'По центру вверху': 'Top centre',
+  Подзаголовок: 'Subtitle',
+  'Подложка под названием, часами и тарифами на экране входа и заставке. Пусто — фон темы.':
+    'The backing under the name, clock and prices on the sign-in and idle screens. Empty — the theme background.',
+  'Показывать логотип': 'Show the logo',
+  'Предпросмотр: {screen}': 'Preview: {screen}',
+  Призыв: 'Call to action',
+  'Пустое поле — встроенный текст на языке игрока (он в подсказке поля).':
+    "An empty field — the built-in text in the player's language (shown inside the field).",
+  'Рабочий стол': 'Desktop',
+  Размер: 'Size',
+  'Размер логотипа': 'Logo size',
+  Размытие: 'Blur',
+  Размыть: 'Blur it',
+  'Своя картинка заставки': 'Idle screen picture',
+  'Своя картинка рабочего стола': 'Desktop picture',
+  'Своя картинка экрана входа': 'Sign-in screen picture',
+  'Сильнее — текст читается на любой картинке. Не больше 80%.': 'Stronger — text reads on any picture. At most 80%.',
+  'Слева вверху': 'Top left',
+  'Слева внизу': 'Bottom left',
+  'Справа вверху': 'Top right',
+  'Справа внизу': 'Bottom right',
+  'Там тарифы — выключите их, чтобы поставить логотип': 'The prices are there — turn them off to put the logo there',
+  Тексты: 'Texts',
+  'Только встроенные шрифты: ПК не качают их из интернета.':
+    'Bundled fonts only: the PCs never download them from the internet.',
+  'Тон плашек': 'Plate tint',
+  'Тон — цвет в виде #RRGGBB.': 'The tint is a colour like #RRGGBB.',
+  Фон: 'Background',
+  Часы: 'Clock',
+  'Что показывать': 'What shows',
+  Чётко: 'Sharp',
+  'Шрифт заголовков': 'Headings font',
+  Экран: 'Screen',
+  'Экран в предпросмотре': 'Screen in the preview',
+  'Экраны игрока': 'Player screens',
+  'Язык предпросмотра': 'Preview language',
+  'Язык текста': 'Text language',
+  'как сейчас': 'as now',
+  светлее: 'lighter',
+  темнее: 'darker',
   'Номер ПК на экране': 'PC number on screen',
   'ПК 05': 'PC 05',
   'Только название': 'Name only',
@@ -2967,8 +3149,16 @@ export const EN: Record<string, string> = {
   'Для игр и лаунчеров, которые просят права администратора (например ICCup): без этого они не запускаются под игроком.':
     'For games and launchers that ask for administrator rights (ICCup, for example): without it they do not start as the player.',
   'Запускать без прав администратора': 'Run without administrator rights',
-  'На {pc} игра не запустилась ({time}): ей нужны права администратора. Включите «Запускать без прав администратора».':
-    'The game did not start on {pc} ({time}): it needs administrator rights. Turn on «Run without administrator rights».',
+  'На {pc} игра не запустилась ({time}): ей нужны права администратора. Включите «Запускать без прав администратора» или «Запускать с правами администратора».':
+    'The game did not start on {pc} ({time}): it needs administrator rights. Turn on «Run without administrator rights» or «Run as administrator».',
+  'Запускать с правами администратора': 'Run as administrator',
+  'Если без прав администратора игра открывается, но не работает (ICCup не ставит античит, не пишет в папку игры). Только эта игра и то, что она запускает, получают права; .exe не должен лежать в папке пользователя.':
+    'When the game opens without administrator rights but does not work (ICCup cannot install its anti-hack or write to the game folder). Only this game and what it starts get the rights; the .exe must not be in a user folder.',
+  'Процессы игры': 'Game processes',
+  'Необязательно. Если .exe — лаунчер, который запускает игру и закрывается: имена файлов игры через запятую, например war3.exe':
+    "Optional. When the .exe is a launcher that starts the game and closes: the game's file names, comma-separated, for example war3.exe",
+  'Процессов игры — не больше {n}': 'No more than {n} game processes',
+  'Процессы игры — только имена файлов, например war3.exe': 'Game processes are file names only, for example war3.exe',
   'Нужны права администратора — откройте и включите запуск без них':
     'Needs administrator rights: open it and turn on running without them',
   // Power on and several PCs at once (D-82)
@@ -3097,4 +3287,35 @@ export const EN: Record<string, string> = {
   'файла нет': 'no file there',
   'не скачалась': 'not downloaded',
   'Ссылка не подошла ({why})': 'The link did not work ({why})',
+  'Скрыть пароль': 'Hide password',
+  'Показать пароль': 'Show password',
+  Показать: 'Show',
+  Сгенерировать: 'Generate',
+  'Пароль клиента — сообщите его, он показывается один раз':
+    'The client’s password — tell it to them, it is shown only once',
+  'Пароль изменён': 'Password changed',
+  'Новый пароль': 'New password',
+  'Не короче 4 символов. Клиент входит с ним, менять при входе не нужно':
+    'At least 4 characters. The client signs in with it, no change needed at sign-in',
+  'Сменить пароль': 'Change password',
+  'Не короче 4 символов. Пусто — сгенерируем': 'At least 4 characters. Leave empty to generate one',
+  'Баланс изменился: теперь {sum}. Проверьте и подтвердите ещё раз.':
+    'The balance changed: now {sum}. Check and confirm again.',
+  'Удалить {name} и списать долг {sum}? Деньги не возвращаются, история останется в отчётах.':
+    'Delete {name} and write off the {sum} debt? No money changes hands; the history stays in the reports.',
+  'Удалить {name} и списать {sum} с баланса? Деньги не возвращаются, история останется в отчётах.':
+    'Delete {name} and write {sum} off the balance? The money is not refunded; the history stays in the reports.',
+  'Долг {sum} будет списан. Клиент пропадёт из списков, его логин и карта освободятся.':
+    'The {sum} debt will be written off. The client leaves the lists, their login and card are freed.',
+  'На балансе {sum} — при удалении он будет списан, без возврата денег.':
+    '{sum} on the balance — deleting writes it off, without a refund.',
+  'Удалить и списать баланс': 'Delete and write off the balance',
+  'Операции владельца': 'Owner’s operations',
+  'Операция владельца: не войдёт в смену кассира, наличные — у вас':
+    'Owner’s operation: not in the cashier’s shift, the cash is yours',
+  Пол: 'Gender',
+  Мужской: 'Male',
+  Женский: 'Female',
+  'Пол не указан': 'Gender not given',
+  'Укажите пол клиента': 'Choose the client’s gender',
 };

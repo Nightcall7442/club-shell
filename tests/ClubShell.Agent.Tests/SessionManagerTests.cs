@@ -430,6 +430,38 @@ public sealed class SessionManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_restart_past_the_end_gives_the_player_the_usual_grace_before_ending()
+    {
+        // D-99: an Agent that came back (an update, a crash) after the session's time ran out ended it at once, closing
+        // the game without the last warning and its minute.
+        Guid id = Guid.NewGuid();
+        await _store.SaveSessionAsync(ServerSession(id, secondsLeft: 30), null, CancellationToken.None);
+        _time.Advance(TimeSpan.FromSeconds(120));
+        _server.GetCurrentSessionAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).ThrowsAsync(Unavailable());
+        _server.EndSessionAsync(id, Arg.Any<SessionEndReport>(), Arg.Any<CancellationToken>())
+            .Returns(new SessionEndResult(ServerSession(id, state: SessionState.Ended), Money.Uzs(10_000), Money.Zero));
+
+        await _manager.RestoreAsync(CancellationToken.None);
+
+        _manager.State.Should().Be(SessionState.Ending, "the player gets session.graceSec first");
+        Events().Should().Contain(e => e.Type == SessionEventType.Warning);
+        await _server.DidNotReceive().EndSessionAsync(Arg.Any<Guid>(), Arg.Any<SessionEndReport>(), Arg.Any<CancellationToken>());
+
+        _time.Advance(TimeSpan.FromSeconds(59));
+        await Task.Delay(100);
+        _manager.State.Should().Be(SessionState.Ending);
+
+        _time.Advance(TimeSpan.FromSeconds(2));
+        for (int i = 0; i < 100 && _manager.State != SessionState.Idle; i++)
+        {
+            await Task.Delay(20);
+        }
+
+        _manager.State.Should().Be(SessionState.Idle);
+        await _server.Received(1).EndSessionAsync(id, Arg.Is<SessionEndReport>(r => r.Reason == SessionEndReason.TimeUp), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Extend_AddsMinutes_AndAdoptsTheServerFigures()
     {
         Guid id = Guid.NewGuid();

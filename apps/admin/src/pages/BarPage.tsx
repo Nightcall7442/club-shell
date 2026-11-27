@@ -42,6 +42,7 @@ import { PRODUCT_CATEGORY_LABEL } from '@/labels';
 import {
   PayBox,
   ReceiptButton,
+  OwnerOpNote,
   ShiftClosedNote,
   TopUpSheet,
   methodName,
@@ -51,7 +52,22 @@ import {
 } from '@/paybox';
 import { Receipt, barAutoReceipt, printDocument, type ReceiptData } from '@/print';
 import { useShift } from '@/shift';
-import { Badge, Button, Chip, EmptyState, Kbd, Note, PanelHeader, Segmented, Sheet, inputCls } from '@/ui';
+import {
+  Badge,
+  Button,
+  Chip,
+  EmptyState,
+  Kbd,
+  Note,
+  NARROW_QUERY,
+  PHONE_QUERY,
+  PanelHeader,
+  Segmented,
+  Sheet,
+  SheetClose,
+  inputCls,
+  useMedia,
+} from '@/ui';
 
 /** Most lines in one sale, most units of one line (the server's limits). */
 const MAX_LINES = 20;
@@ -290,6 +306,11 @@ export default function BarPage(): JSX.Element {
   const [done, setDone] = useState<{ text: string; change: number | null; receipt: ReceiptData } | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
   const [topUp, setTopUp] = useState(false);
+  /** A phone: no autofocus on the search (its keyboard would cover the shelf). */
+  const phone = useMedia(PHONE_QUERY);
+  /** One column: the cart is a bar under the shelf (count, total, «Оплатить») that opens as a sheet. */
+  const narrow = useMedia(NARROW_QUERY);
+  const [cartOpen, setCartOpen] = useState(false);
   const balanceKey = useHeldKey();
   const searchRef = useRef<HTMLInputElement>(null);
   const gridRef = useRef<HTMLUListElement>(null);
@@ -618,12 +639,12 @@ export default function BarPage(): JSX.Element {
       : null;
 
   return (
-    <div className="grid h-full min-h-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_400px]">
+    <div className="grid grid-cols-1 gap-4 lg:h-full lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_400px]">
       {/* The shelf: the page's primary surface, like the hall on the map. */}
       <div className="glass-panel edge-top flex min-h-0 flex-col px-5 pb-5 pt-[18px]">
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
           <PanelHeader title={t('Бар')} level={1} />
-          <div className="relative w-[300px] max-w-full">
+          <div className="relative w-[300px] max-w-full max-md:w-full">
             <label htmlFor={searchId} className="sr-only">
               {t('Поиск товара')}
             </label>
@@ -635,7 +656,8 @@ export default function BarPage(): JSX.Element {
               id={searchId}
               ref={searchRef}
               type="search"
-              autoFocus
+              // Not on a phone: its keyboard would cover the shelf the moment the page opens.
+              autoFocus={!phone}
               autoComplete="off"
               className={clsx(inputCls, 'pl-10')}
               placeholder={t('Поиск товара')}
@@ -669,7 +691,7 @@ export default function BarPage(): JSX.Element {
           ref={gridRef}
           aria-label={t('Товары')}
           onKeyDown={moveFocus}
-          className="thin-scrollbar -mx-1.5 mt-2.5 grid min-h-0 flex-1 grid-cols-[repeat(auto-fill,minmax(168px,1fr))] content-start gap-2.5 overflow-y-auto p-1.5"
+          className="thin-scrollbar -mx-1.5 mt-2.5 grid min-h-0 flex-1 grid-cols-[repeat(auto-fill,minmax(168px,1fr))] content-start gap-2.5 overflow-y-auto p-1.5 max-md:grid-cols-2 max-md:gap-2"
         >
           {shown.map((p) => {
             const can = sellable(p);
@@ -701,12 +723,44 @@ export default function BarPage(): JSX.Element {
         </ul>
       </div>
 
-      {/* The cart: the focused object, solid. */}
-      <aside aria-label={t('Корзина')} className="panel-solid flex min-h-0 flex-col overflow-hidden">
-        <div className="flex min-h-[60px] shrink-0 items-center px-4">
+      {narrow && !cartOpen && (!empty || done) && (
+        // The cart folded on a phone: what is in it and the way to pay, held over the tab bar.
+        <div className="panel-solid edge-top sticky bottom-2 z-20 flex min-h-[60px] items-center gap-3 py-2 pl-4 pr-2">
+          <button
+            type="button"
+            onClick={() => setCartOpen(true)}
+            className="focus-ring flex min-w-0 flex-1 flex-col items-start gap-1 rounded-md text-left"
+          >
+            <span className="label-sm">{empty ? t('Корзина') : `${t('Корзина')} · ${units} ${t('шт')}`}</span>
+            {empty ? (
+              <span className="truncate text-[13px] font-medium text-text">{done?.text}</span>
+            ) : (
+              <DotoSum minor={frozen?.total ?? total} size={22} className="text-hi" unitClassName="text-muted" />
+            )}
+          </button>
+          <Button variant={empty ? 'ghost' : 'primary'} size="md" onClick={() => setCartOpen(true)}>
+            {empty ? t('Открыть') : t('Оплатить')}
+          </Button>
+        </div>
+      )}
+      {narrow && cartOpen && (
+        <div aria-hidden="true" className="scrim anim-fade z-[44]" onClick={() => setCartOpen(false)} />
+      )}
+      {/* The cart: the focused object, solid. On a phone, a bottom sheet over the page while it is open. */}
+      <aside
+        aria-label={t('Корзина')}
+        className={clsx(
+          'panel-solid flex min-h-0 flex-col overflow-hidden',
+          narrow &&
+            (cartOpen
+              ? 'anim-rise fixed inset-x-0 bottom-0 md:left-auto md:top-0 md:w-[440px] md:rounded-none max-md:top-[max(48px,env(safe-area-inset-top))] z-[45] rounded-b-none pb-[env(safe-area-inset-bottom)]'
+              : 'hidden'),
+        )}
+      >
+        <div className="flex min-h-[60px] shrink-0 items-center gap-2 px-4">
           <PanelHeader
             size="side"
-            className="w-full"
+            className="min-w-0 flex-1"
             title={t('Корзина')}
             caption={empty ? undefined : `${units} ${t('шт')}`}
             aside={
@@ -723,6 +777,7 @@ export default function BarPage(): JSX.Element {
               )
             }
           />
+          {narrow && <SheetClose onClose={() => setCartOpen(false)} className="-mr-1 ml-1" />}
         </div>
 
         <div className="thin-scrollbar fade-y flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4 [@media(max-height:840px)]:gap-3">
@@ -892,6 +947,7 @@ export default function BarPage(): JSX.Element {
 
           {!empty && (clientMode ? client !== null : true) && (
             <section aria-label={t('Оплата')} className="flex flex-col gap-3 border-t border-accent/[0.08] pt-4">
+              <OwnerOpNote />
               {client && (!viaMethod || frozen?.via === 'balance') && (
                 <>
                   <ShiftClosedNote />

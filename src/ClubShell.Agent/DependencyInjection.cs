@@ -128,10 +128,17 @@ public static class AgentServiceCollectionExtensions
         services.TryAddSingleton<SessionCleanup>();
         services.TryAddSingleton<SessionManager>();
         services.TryAddSingleton<ISessionService>(sp => sp.GetRequiredService<SessionManager>());
-        services.TryAddSingleton<SessionLock>();
+        services.TryAddSingleton(sp =>
+        {
+            SessionLock sessionLock = ActivatorUtilities.CreateInstance<SessionLock>(sp);
+            // Resolved per check: the games module depends on the session subsystem.
+            sessionLock.IsGameRunning = () => sp.GetService<IRunningGamesSource>()?.Snapshot().Count > 0;
+            return sessionLock;
+        });
         // The signed-in player across an Agent restart (G2) and the sign-in that ends under the player (G3, G10).
         services.TryAddSingleton<SignedInUserStore>();
         services.TryAddSingleton<SignInGuard>();
+        services.TryAddSingleton<SignInRestoreGate>();
         // The member's Shell preferences and favourites on their account (D-86).
         services.TryAddSingleton<AccountPrefsSync>();
     }
@@ -148,6 +155,7 @@ public static class AgentServiceCollectionExtensions
         services.TryAddSingleton<PlayerSettingsSync>();
         services.TryAddSingleton<GameRegistryDefaults>();
         services.TryAddSingleton<GameSessionTracker>();
+        services.TryAddSingleton<IGameCloseRequester, TaskkillCloseRequester>();
         services.TryAddSingleton<GameLaunchService>();
         // The wait for the games disks before a player is let in (SHELL_CHANGES 86).
         services.TryAddSingleton<IReadinessLibrary>(sp => sp.GetRequiredService<GameLibrary>());
@@ -323,6 +331,7 @@ public static class AgentServiceCollectionExtensions
         // Session-end teardown: kill games + release leases. Resolved lazily to break the
         // SessionManager → SessionCleanup → GameLaunchService → ISessionService(SessionManager) cycle.
         services.TryAddSingleton<ClubShell.Agent.Session.IGameSessionCleanup, SessionGameCleanupAdapter>();
+        services.TryAddSingleton<IGameReadoption, GameReadoptionAdapter>();
 
         // Anti-cheat launch gate for the Games module (IReadOnlyList → array).
         services.TryAddSingleton<ClubShell.Agent.Games.IAntiCheatGate, AntiCheatGateAdapter>();
@@ -334,10 +343,11 @@ public static class AgentServiceCollectionExtensions
         // Processes never killed by the allowlist: the Agent itself, the Shell, and running games.
         services.TryAddSingleton<IProtectedProcesses, ProtectedProcessesAdapter>();
 
-        // A single idle detector serving both the session (auto-lock) and power (idle shutdown) subsystems.
+        // The idle detector serves the power subsystem (idle shutdown of a free PC) only. It runs in session 0, where
+        // GetLastInputInfo never sees the player, so it is not the session's idle signal (D-99): it would lock a player
+        // mid-game. The Shell's own idle lock (idleTimeoutSec, paused while a game runs) does that job.
         services.TryAddSingleton<IdleMonitorAdapter>();
         services.TryAddSingleton<IIdleMonitor>(sp => sp.GetRequiredService<IdleMonitorAdapter>());
-        services.TryAddSingleton<IIdleSignal>(sp => sp.GetRequiredService<IdleMonitorAdapter>());
     }
 
     // ---- Hosted services (start order; host stops them in reverse) -------------------------
@@ -533,6 +543,21 @@ internal sealed class AgentEventPublisher : IAgentEventSink
     }
 }
 
+/// <summary>The start-up's game take-back (D-99), resolved lazily like the session-end teardown below.</summary>
+internal sealed class GameReadoptionAdapter : IGameReadoption
+{
+    private readonly IServiceProvider _services;
+
+    public GameReadoptionAdapter(IServiceProvider services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        _services = services;
+    }
+
+    public Task<int> ReadoptAsync(CancellationToken cancellationToken) =>
+        _services.GetRequiredService<GameLaunchService>().ReadoptAsync(cancellationToken);
+}
+
 /// <summary>
 /// Session-end teardown for <see cref="SessionCleanup"/>: kills every running game and releases the account-pool
 /// leases. Dependencies are resolved lazily because <see cref="GameLaunchService"/> transitively depends on the
@@ -618,9 +643,33 @@ internal sealed class ProtectedProcessesAdapter : IProtectedProcesses
         pid == Environment.ProcessId
         || pid == _launcher.Current?.Pid
         || _games.Find(pid) is not null
-        || InGameJob(pid);
+        || InGameJob(pid)
+        || IsRunningGameImage(pid);
 
     public bool ProtectsChildrenOf(int pid) => pid == Environment.ProcessId || _games.Find(pid) is not null || InGameJob(pid);
+
+    /// <summary>
+    /// A process with a configured game image name (<c>war3.exe</c>, <see cref="Game.GameProcessNames"/>) of a game
+    /// running now: a launcher may start it outside the game's job (through a broker), before the tracker follows it.
+    /// </summary>
+    private bool IsRunningGameImage(int pid)
+    {
+        List<string> names = _games.All().SelectMany(r => GameImages.Configured(r.Game)).ToList();
+        if (names.Count == 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var process = System.Diagnostics.Process.GetProcessById(pid);
+            return GameImages.Matches(process.ProcessName, names);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
 
     private bool InGameJob(int pid)
     {
@@ -644,9 +693,9 @@ internal sealed class ProtectedProcessesAdapter : IProtectedProcesses
 }
 
 /// <summary>
-/// Single idle detector shared by the session auto-lock (<see cref="IIdleSignal"/>) and the power scheduler
-/// (<see cref="IIdleMonitor"/>). The threshold tracks <c>session.autoLockOnIdleSec</c> (the auto-lock crossing); the
-/// power scheduler reads <see cref="Idle"/> directly for its own <c>idleShutdownMin</c> threshold.
+/// Idle detector of the power scheduler (<see cref="IIdleMonitor"/>), which reads <see cref="Idle"/> for its own
+/// <c>idleShutdownMin</c> threshold. It also implements <see cref="IIdleSignal"/> but is not registered as one: from
+/// session 0 it never sees the player's input (D-99).
 /// </summary>
 /// <remarks>
 /// The Agent runs in session 0, so <c>GetLastInputInfo</c> cannot observe the interactive user's input directly; this

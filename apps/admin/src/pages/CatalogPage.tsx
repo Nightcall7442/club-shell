@@ -90,6 +90,10 @@ interface GameForm {
   registry: string;
   /** «Запускать без прав администратора»: an exe whose manifest asks for them starts as the player (SHELL_CHANGES 96). */
   runAsInvoker: boolean;
+  /** «Запускать с правами администратора»: an exe that truly needs them (ICCup) starts elevated in the player's session. */
+  runAsAdmin: boolean;
+  /** The game's own processes a launcher hands over to (ICCup → war3.exe), comma- or line-separated. */
+  gameProcessNames: string;
 }
 
 const EMPTY_FORM: GameForm = {
@@ -104,7 +108,23 @@ const EMPTY_FORM: GameForm = {
   videoUrl: '',
   registry: '',
   runAsInvoker: false,
+  runAsAdmin: false,
+  gameProcessNames: '',
 };
+
+const MAX_PROCESS_NAMES = 10;
+
+/** The process names as typed: separated by commas or lines, `.exe` added where left out. */
+function processNamesOf(text: string): string[] {
+  const names: string[] = [];
+  for (const raw of text.split(/[,\n]/)) {
+    const name = raw.trim().replace(/^"+|"+$/g, '');
+    if (!name) continue;
+    const full = /\.exe$/i.test(name) ? name : `${name}.exe`;
+    if (!names.some((n) => n.toLowerCase() === full.toLowerCase())) names.push(full);
+  }
+  return names;
+}
 
 const MAX_REGISTRY_VALUES = 20;
 const DWORD_MAX = 4294967295;
@@ -166,6 +186,8 @@ function formOf(g: AdminGame): GameForm {
     videoUrl: g.videoUrl ?? '',
     registry: (g.registryValues ?? []).map(registryLineOf).join('\n'),
     runAsInvoker: g.runAsInvoker ?? false,
+    runAsAdmin: g.runAsAdmin ?? false,
+    gameProcessNames: (g.gameProcessNames ?? []).join(', '),
   };
 }
 
@@ -199,6 +221,12 @@ function problem(f: GameForm): string | null {
     return registry.line > MAX_REGISTRY_VALUES
       ? t('Значений реестра — не больше {n}', { n: MAX_REGISTRY_VALUES })
       : t('Реестр, строка {n}: нужен вид HKCU\\Software\\…\\Имя = dword:1 или = "текст"', { n: registry.line });
+  if (f.launcher === 'exe') {
+    const names = processNamesOf(f.gameProcessNames);
+    if (names.length > MAX_PROCESS_NAMES) return t('Процессов игры — не больше {n}', { n: MAX_PROCESS_NAMES });
+    if (names.some((n) => n.length > 64 || /[\\/:*?"<>|]/.test(n)))
+      return t('Процессы игры — только имена файлов, например war3.exe');
+  }
   return null;
 }
 
@@ -218,8 +246,10 @@ function inputOf(f: GameForm): GameInput {
       const r = parseRegistry(f.registry);
       return 'values' in r ? r.values : [];
     })(),
-    // Only an exe game starts its own process; a launcher game's flag is left off.
-    runAsInvoker: exe && f.runAsInvoker,
+    // Only an exe game starts its own process; a launcher game's flags are left off.
+    runAsInvoker: exe && f.runAsInvoker && !f.runAsAdmin,
+    runAsAdmin: exe && f.runAsAdmin,
+    gameProcessNames: exe ? processNamesOf(f.gameProcessNames) : [],
   };
 }
 
@@ -652,11 +682,11 @@ function GameEditor({
               <Field label={t('Параметры запуска')} hint={t('Необязательно, например -console -novid')}>
                 <Input className="font-mono" value={form.args} onChange={(e) => set({ args: e.target.value })} />
               </Field>
-              {game?.elevationFailure && !form.runAsInvoker && (
+              {game?.elevationFailure && !form.runAsInvoker && !form.runAsAdmin && (
                 <Note
                   note={{
                     text: t(
-                      'На {pc} игра не запустилась ({time}): ей нужны права администратора. Включите «Запускать без прав администратора».',
+                      'На {pc} игра не запустилась ({time}): ей нужны права администратора. Включите «Запускать без прав администратора» или «Запускать с правами администратора».',
                       {
                         pc: game.elevationFailure.pc,
                         time: new Date(game.elevationFailure.at).toLocaleString(dateLocale()),
@@ -670,7 +700,7 @@ function GameEditor({
                 <Toggle
                   label={t('Запускать без прав администратора')}
                   checked={form.runAsInvoker}
-                  onChange={(v) => set({ runAsInvoker: v })}
+                  onChange={(v) => set({ runAsInvoker: v, runAsAdmin: v ? false : form.runAsAdmin })}
                 />
                 <p className="text-[12px] text-muted">
                   {t(
@@ -678,6 +708,31 @@ function GameEditor({
                   )}
                 </p>
               </div>
+              <div className="flex flex-col gap-1">
+                <Toggle
+                  label={t('Запускать с правами администратора')}
+                  checked={form.runAsAdmin}
+                  onChange={(v) => set({ runAsAdmin: v, runAsInvoker: v ? false : form.runAsInvoker })}
+                />
+                <p className="text-[12px] text-muted">
+                  {t(
+                    'Если без прав администратора игра открывается, но не работает (ICCup не ставит античит, не пишет в папку игры). Только эта игра и то, что она запускает, получают права; .exe не должен лежать в папке пользователя.',
+                  )}
+                </p>
+              </div>
+              <Field
+                label={t('Процессы игры')}
+                hint={t(
+                  'Необязательно. Если .exe — лаунчер, который запускает игру и закрывается: имена файлов игры через запятую, например war3.exe',
+                )}
+              >
+                <Input
+                  className="font-mono"
+                  placeholder="war3.exe"
+                  value={form.gameProcessNames}
+                  onChange={(e) => set({ gameProcessNames: e.target.value })}
+                />
+              </Field>
             </>
           ) : (
             <Field

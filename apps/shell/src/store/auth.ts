@@ -130,6 +130,12 @@ export interface AuthActions {
   refresh(): Promise<AuthStatusResponse | null>;
   /** `auth_status` for the lock screen: who locked the session (`lockedByStaff`) and whether a PIN unlocks it. */
   refreshLock(): Promise<void>;
+  /**
+   * `auth_status` when the Agent reports an open session while the Shell has no player (D-100: the Agent restarted and
+   * restored its player after the Shell's first read). Takes the player when the Agent has one; otherwise changes
+   * nothing — no loading state, no error. `true` when a player was taken.
+   */
+  adoptSignIn(): Promise<boolean>;
   setUser(user: User | null): void;
   /** Merges a partial user update (profile edits, `wallet.updated` balance mirror). */
   updateUser(patch: Partial<User>): void;
@@ -310,6 +316,32 @@ export const useAuthStore = create<AuthStore>()(
           log.warn('auth.status failed', error);
           set({ ready: true, status: 'error', error });
           return null;
+        }
+      },
+
+      async adoptSignIn() {
+        try {
+          const res = await api.auth.status();
+          if (!res.authenticated || !res.user || get().user) {
+            return false;
+          }
+          log.info('auth.status: the Agent restored the signed-in player');
+          set({
+            user: res.user,
+            mode: res.mode,
+            expiresAt: res.expiresAt ?? null,
+            ready: true,
+            status: 'ready',
+            error: null,
+            readiness: res.readiness ?? get().readiness,
+            lockedByStaff: res.lockedByStaff === true,
+            pinSet: res.pinSet ?? null,
+          });
+          useSessionStore.getState().setSession(res.session ?? null);
+          return true;
+        } catch (e) {
+          log.debug('auth.status (adopt) failed', asShellError(e));
+          return false;
         }
       },
 

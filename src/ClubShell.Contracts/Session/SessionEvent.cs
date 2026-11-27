@@ -107,6 +107,16 @@ public sealed record SessionExtendedData(int Minutes, Money Cost);
 /// <param name="MinutesLeft">Minutes remaining at the time of the warning.</param>
 public sealed record SessionWarningData(int MinutesLeft);
 
+/// <summary>
+/// <c>data</c> of <see cref="SessionEventType.Locked"/> (beyond the contract, D-100); absent for a plain lock.
+/// </summary>
+/// <param name="Origin">Who locked it: <c>player</c>, <c>signIn</c> (the player's sign-in ended under the session) or <c>staff</c>.</param>
+/// <param name="ClockStopped">
+/// The prepaid clock stops until the unlock: a guest whose sign-in ended under them cannot sign in again, and their paid
+/// time must not run out behind the lock (the server honours it for a temporary guest's prepaid session only).
+/// </param>
+public sealed record SessionLockedData(string? Origin, bool? ClockStopped = null);
+
 /// <summary><c>data</c> of <see cref="SessionEventType.Charged"/>.</summary>
 /// <param name="Amount">Amount charged.</param>
 public sealed record SessionChargedData(Money Amount);

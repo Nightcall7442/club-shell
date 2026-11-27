@@ -104,6 +104,9 @@ public static class Endpoints
     /// <summary><c>POST /agents/{pcId}/staff/verify</c>.</summary>
     public static string AgentStaffVerify(Guid pcId) => $"agents/{Id(pcId)}/staff/verify";
 
+    /// <summary><c>POST /agents/{pcId}/players/{userId}/token</c> (beyond the contract).</summary>
+    public static string AgentPlayerToken(Guid pcId, Guid userId) => $"agents/{Id(pcId)}/players/{Id(userId)}/token";
+
     /// <summary><c>GET /pcs/{pcId}</c>.</summary>
     public static string Pc(Guid pcId) => $"pcs/{Id(pcId)}";
 
@@ -163,6 +166,9 @@ public static class Endpoints
 
     /// <summary><c>POST /games/{id}/accounts/{leaseId}/release</c>.</summary>
     public static string GameAccountLeaseRelease(Guid gameId, Guid leaseId) => $"games/{Id(gameId)}/accounts/{Id(leaseId)}/release";
+
+    /// <summary><c>POST /games/{id}/accounts/{leaseId}/renew</c> (beyond the contract, D-99).</summary>
+    public static string GameAccountLeaseRenew(Guid gameId, Guid leaseId) => $"games/{Id(gameId)}/accounts/{Id(leaseId)}/renew";
 
     /// <summary><c>GET /games/{id}/accounts/{leaseId}/save-upload</c>.</summary>
     public static string GameAccountSaveUpload(Guid gameId, Guid leaseId) => $"games/{Id(gameId)}/accounts/{Id(leaseId)}/save-upload";

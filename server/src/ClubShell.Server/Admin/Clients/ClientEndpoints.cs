@@ -54,11 +54,20 @@ public static class ClientEndpoints
     /// running game: a session open anywhere (<c>409 playing</c>), money on the balance or a debt (<c>409 balance</c> with
     /// the amount — top it off, refund it or write the debt off first). The login and the card are freed for someone new
     /// (the login becomes <c>del-…</c>); every token is revoked and the PCs it was signed in on are told.
+    /// <c>?writeOff=&lt;balance&gt;</c> (D-102): the owner deletes anyway and gives the money up — exactly the balance shown, in
+    /// tiyin (a debt negative; another figure — <c>409 balance</c> with the balance now). In the same transaction the balance
+    /// goes to zero by one <c>adjustment</c> without a payment method (<c>meta.kind = clientDelete</c>; the owner's own
+    /// operation, D-101: in no shift, no cash, no revenue), and the <c>clientDelete</c> entry carries the amount written off.
+    /// Never while playing (<c>409 playing</c>).
     /// </summary>
-    private static async Task<IResult> DeleteAsync(HttpContext context, string id, NpgsqlDataSource db, Pushes pushes, TimeProvider clock)
+    private static async Task<IResult> DeleteAsync(
+        HttpContext context, string id, string? writeOff, NpgsqlDataSource db, Pushes pushes, TimeProvider clock)
     {
         var staff = context.Features.GetRequiredFeature<StaffContext>();
         var userId = ClientId(id);
+        long? giveUp = writeOff is null ? null
+            : long.TryParse(writeOff, System.Globalization.NumberStyles.AllowLeadingSign, System.Globalization.CultureInfo.InvariantCulture, out var shown)
+                ? shown : throw ApiException.Validation("writeOff", "format");
         IReadOnlyList<Guid> revoked;
         await using (var c = await db.OpenConnectionAsync())
         await using (var tx = await c.BeginTransactionAsync())
@@ -71,7 +80,13 @@ public static class ClientEndpoints
             }
 
             var balance = await c.ExecuteScalarAsync<long>("SELECT main_balance FROM wallets WHERE user_id = @userId FOR UPDATE", new { userId }, tx);
-            if (balance != 0)
+            if (balance != 0 && giveUp == balance)
+            {
+                await Ledger.PostAsync(c, tx, userId, allowOverdraft: false, now,
+                    new LedgerLine("adjustment", -balance, balance > 0 ? "Списание баланса при удалении клиента" : "Списание долга при удалении клиента",
+                        staff.ClubId, StaffId: staff.StaffId, Meta: new { kind = "clientDelete" }, OwnerOp: true));
+            }
+            else if (balance != 0)
             {
                 throw new ApiException(StatusCodes.Status409Conflict, ErrorCode.Conflict,
                     balance > 0 ? "Money is left on the balance" : "The client owes the club",
@@ -86,7 +101,8 @@ public static class ClientEndpoints
                 """,
                 new { userId, now }, tx);
             revoked = (await c.QueryAsync<Guid>("DELETE FROM user_tokens WHERE user_id = @userId RETURNING pc_id", new { userId }, tx)).ToList();
-            await Audit.WriteAsync(c, tx, staff, now, "clientDelete", userId, detail: $"{name} · {login}");
+            await Audit.WriteAsync(c, tx, staff, now, "clientDelete", userId, amount: Math.Abs(balance), detail: $"{name} · {login}",
+                meta: balance == 0 ? null : new { writtenOff = balance }, ownerOp: balance != 0);
             await tx.CommitAsync();
         }
 
@@ -173,6 +189,7 @@ public static class ClientEndpoints
         var birthYear = AdminInput.Range(r.BirthYear, "birthYear", 1900, 2100);
         var groupId = AdminInput.OptionalText(r.GroupId, "groupId", 64);
         var card = Card(r.CardId);
+        var gender = Genders.Required(r.Gender);
 
         // PBKDF2 outside the transaction: it holds no lock while it derives.
         var hash = Passwords.Hash(password ?? Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
@@ -194,13 +211,13 @@ public static class ClientEndpoints
             await CardFreeAsync(c, tx, staff, card, id);
             await UniqueAsync(c, tx, () => c.ExecuteAsync(
                 """
-                INSERT INTO users (id, network_id, username, display_name, role, password_hash, card_id, created_at)
-                VALUES (@id, @NetworkId, @username, @displayName, 'member', @hash, @card, @now);
+                INSERT INTO users (id, network_id, username, display_name, role, password_hash, card_id, gender, created_at)
+                VALUES (@id, @NetworkId, @username, @displayName, 'member', @hash, @card, @gender, @now);
                 INSERT INTO wallets (user_id, network_id, updated_at) VALUES (@id, @NetworkId, @now);
                 INSERT INTO client_profiles (club_id, user_id, group_id, phone, birth_year, updated_at)
                 VALUES (@ClubId, @id, @groupId, @phone, @birthYear, @now);
                 """,
-                new { id, staff.NetworkId, staff.ClubId, username, displayName, hash, card, groupId, phone, birthYear, now },
+                new { id, staff.NetworkId, staff.ClubId, username, displayName, hash, card, groupId, phone, birthYear, gender, now },
                 tx));
             await Audit.WriteAsync(c, tx, staff, now, "clientAdd", id, detail: $"{displayName} · {username}");
             if (groupId is not null)
@@ -239,6 +256,7 @@ public static class ClientEndpoints
         var note = AdminInput.OptionalText(r.Note, "note", 2000);
         var phone = AdminInput.OptionalText(r.Phone, "phone", 32);
         var birthYear = AdminInput.Range(r.BirthYear, "birthYear", 1900, 2100);
+        var gender = AdminInput.Has(body, "gender") ? Genders.Required(r.Gender) : null;
         if (AdminInput.Has(body, "blacklisted") && r.Blacklisted is null)
         {
             throw ApiException.Validation("blacklisted", "format");
@@ -266,11 +284,11 @@ public static class ClientEndpoints
                     birth_year = CASE WHEN @hasBirthYear THEN @birthYear ELSE birth_year END,
                     blacklisted = coalesce(@Blacklisted, blacklisted), updated_at = @now
                 WHERE club_id = @ClubId AND user_id = @userId;
-                UPDATE users SET display_name = coalesce(@displayName, display_name) WHERE id = @userId;
+                UPDATE users SET display_name = coalesce(@displayName, display_name), gender = coalesce(@gender, gender) WHERE id = @userId;
                 """,
                 new
                 {
-                    staff.ClubId, userId, now, displayName, groupId, note, phone, birthYear, r.Blacklisted,
+                    staff.ClubId, userId, now, displayName, groupId, note, phone, birthYear, r.Blacklisted, gender,
                     hasGroup = AdminInput.Has(body, "groupId"), hasNote = AdminInput.Has(body, "note"), hasPhone = AdminInput.Has(body, "phone"),
                     hasBirthYear = AdminInput.Has(body, "birthYear"),
                 },
@@ -447,7 +465,7 @@ public static class ClientEndpoints
         /// <summary>Clients of the network with this club's profile; <c>visits</c> = sessions in this club.</summary>
         public const string Select =
             """
-            SELECT u.id, u.username, u.display_name, u.role, u.card_id, w.main_balance, w.lifetime_spent,
+            SELECT u.id, u.username, u.display_name, u.role, u.card_id, u.gender, w.main_balance, w.lifetime_spent,
                    cp.group_id, coalesce(cp.note, '') AS note, coalesce(cp.blacklisted, false) AS blacklisted,
                    coalesce(cp.phone, '') AS phone, cp.birth_year,
                    (SELECT count(*) FROM sessions s WHERE s.user_id = u.id AND s.club_id = @ClubId)::int AS visits
@@ -462,6 +480,7 @@ public static class ClientEndpoints
         public string DisplayName { get; init; } = "";
         public string Role { get; init; } = "";
         public string? CardId { get; init; }
+        public string? Gender { get; init; }
         public long MainBalance { get; init; }
         public long LifetimeSpent { get; init; }
         public string? GroupId { get; init; }
@@ -477,7 +496,7 @@ public static class ClientEndpoints
             var level = club.LevelOf(LifetimeSpent) ?? club.Loyalty.FirstOrDefault();
             return new AdminClient(
                 Id, Username, DisplayName, Role, Money.Uzs(MainBalance), Money.Uzs(0), GroupId, Note, Blacklisted, Phone, BirthYear, CardId,
-                LifetimeSpent, Visits, level?.Level ?? 1, level?.Name ?? "");
+                LifetimeSpent, Visits, level?.Level ?? 1, level?.Name ?? "", Gender);
         }
     }
 
@@ -489,7 +508,7 @@ public static class ClientEndpoints
         /// </summary>
         public const string Select =
             """
-            SELECT u.id, u.username, u.display_name, u.card_id, w.main_balance, coalesce(cp.phone, '') AS phone,
+            SELECT u.id, u.username, u.display_name, u.card_id, u.gender, w.main_balance, coalesce(cp.phone, '') AS phone,
                    coalesce(cp.blacklisted, false) AS blacklisted,
                    s.pc_id AS playing_pc_id, p.name AS playing_pc_name, greatest(u.last_seen_at, w.updated_at, u.created_at) AS active_at
             FROM users u
@@ -504,6 +523,7 @@ public static class ClientEndpoints
         public string Username { get; init; } = "";
         public string DisplayName { get; init; } = "";
         public string? CardId { get; init; }
+        public string? Gender { get; init; }
         public long MainBalance { get; init; }
         public string Phone { get; init; } = "";
         public bool Blacklisted { get; init; }
@@ -544,7 +564,7 @@ public static class ClientEndpoints
             var phone = PhoneDigits;
             return new AdminClientLookupItem(
                 Id, DisplayName, Username, phone.Length == 0 ? null : phone[^Math.Min(4, phone.Length)..], Money.Uzs(MainBalance), Money.Uzs(0), CardId,
-                PlayingPcId is { } pcId ? new AdminClientPlaying(pcId, PlayingPcName ?? "") : null, Blacklisted);
+                PlayingPcId is { } pcId ? new AdminClientPlaying(pcId, PlayingPcName ?? "") : null, Blacklisted, Gender);
         }
     }
 }

@@ -162,13 +162,15 @@ public sealed record AdminOperationPaid(long Amount, string Method, Guid? Transa
 /// One desk operation of the feed (beyond the contract, D-43): a journal entry with the payment merged in. Amounts in
 /// tiyin; <c>drawer</c> — its signed effect on the cash drawer. Cash desk part 3 (D-68): a bar sale (<c>shopSale</c>) and
 /// its void (<c>shopVoid</c>) carry <c>saleId</c>, <c>method</c>, <c>lines</c>, <c>voided</c> (a sale) and <c>voidOfAt</c> (a
-/// void: when the sale was made); a move (<c>sessionMove</c>) carries <c>fromPc</c>.
+/// void: when the sale was made); a move (<c>sessionMove</c>) carries <c>fromPc</c>. <c>owner</c> (D-101): the owner's own
+/// operation, in no shift — its <c>drawer</c> is the cash the owner took or gave in person, never the drawer's.
 /// </summary>
 public sealed record AdminOperation(
     Guid Id, DateTimeOffset At, string Kind, string StaffName, AdminOperationClient? Client, AdminOperationPc? Pc, string? Tariff, int? Minutes,
     bool? Prepaid, long Amount, long? Charged, AdminOperationQuote? Quote, AdminOperationPaid? Paid, long Drawer, string? ReasonCode, string? Note,
     Guid? SessionId, bool? Package = null, Guid? MovementId = null, Guid? SaleId = null, string? Method = null,
-    IReadOnlyList<AdminOperationLine>? Lines = null, bool? Voided = null, DateTimeOffset? VoidOfAt = null, AdminOperationPc? FromPc = null);
+    IReadOnlyList<AdminOperationLine>? Lines = null, bool? Voided = null, DateTimeOffset? VoidOfAt = null, AdminOperationPc? FromPc = null,
+    bool? Owner = null);
 
 /// <summary>A line of a bar sale as the feed and its receipt show it.</summary>
 public sealed record AdminOperationLine(string Title, int Qty, long Price);
@@ -274,10 +276,13 @@ public sealed record AdminStaffList(IReadOnlyList<AdminStaffMember> Items);
 
 public sealed record AdminStaffCreateResponse(string Id);
 
-/// <summary><c>AdminClient</c>: the user, the club profile and loyalty; <c>bonus</c> is always 0 (D-9), <c>telegram</c> is never sent.</summary>
+/// <summary>
+/// <c>AdminClient</c>: the user, the club profile and loyalty; <c>bonus</c> is always 0 (D-9), <c>telegram</c> is never sent.
+/// <c>gender</c> (beyond the contract, D-104): <c>male | female</c>, null — not given (an account made before).
+/// </summary>
 public sealed record AdminClient(
     Guid Id, string Username, string DisplayName, string Role, Money Balance, Money Bonus, string? GroupId, string Note, bool Blacklisted,
-    string Phone, int? BirthYear, string? CardId, long Spent, int Visits, int Level, string LevelName);
+    string Phone, int? BirthYear, string? CardId, long Spent, int Visits, int Level, string LevelName, string? Gender = null);
 
 public sealed record AdminClientList(IReadOnlyList<AdminClient> Items);
 
@@ -288,7 +293,7 @@ public sealed record AdminClientList(IReadOnlyList<AdminClient> Items);
 /// </summary>
 public sealed record AdminClientLookupItem(
     Guid Id, string DisplayName, string Username, string? PhoneTail, Money Balance, Money Bonus, string? CardId, AdminClientPlaying? Playing,
-    bool Blacklisted);
+    bool Blacklisted, string? Gender = null);
 
 public sealed record AdminClientPlaying(Guid PcId, string PcName);
 
@@ -312,11 +317,16 @@ public sealed record AdminStaffCreateRequest(string? Name, string? Role, string?
 
 public sealed record AdminStaffUpdateRequest(string? Name, bool? Active, string? Pin, bool? PcService = null, bool? DebtWriteOff = null);
 
-/// <summary><c>telegram</c> is prohibited: not a member, so the binder skips it (accepted and ignored).</summary>
+/// <summary>
+/// <c>telegram</c> is prohibited: not a member, so the binder skips it (accepted and ignored). <c>gender</c> (beyond the
+/// contract, D-104): required, <c>male | female</c>.
+/// </summary>
 public sealed record AdminClientCreateRequest(
-    string? DisplayName, string? Username, string? Phone, int? BirthYear, string? GroupId, string? Password, string? CardId);
+    string? DisplayName, string? Username, string? Phone, int? BirthYear, string? GroupId, string? Password, string? CardId, string? Gender = null);
 
-public sealed record AdminClientUpdateRequest(string? DisplayName, string? GroupId, string? Note, string? Phone, int? BirthYear, bool? Blacklisted);
+/// <summary><c>gender</c> (beyond the contract, D-104): <c>male | female</c> when present; it is never cleared.</summary>
+public sealed record AdminClientUpdateRequest(
+    string? DisplayName, string? GroupId, string? Note, string? Phone, int? BirthYear, bool? Blacklisted, string? Gender = null);
 
 public sealed record AdminClientCardRequest(string? CardId);
 
@@ -353,7 +363,7 @@ public sealed record AdminSaleLine(Guid ProductId, string Title, int Qty, long P
 /// named (a member or a guest; null — a walk-in), <c>pc</c> the PC it was brought to.
 /// </summary>
 public sealed record AdminSale(
-    Guid Id, DateTimeOffset At, Guid ShiftId, string Method, long Total, string StaffName, AdminSessionUser? User, AdminOperationPc? Pc,
+    Guid Id, DateTimeOffset At, Guid? ShiftId, string Method, long Total, string StaffName, AdminSessionUser? User, AdminOperationPc? Pc,
     IReadOnlyList<AdminSaleLine> Lines);
 
 /// <summary><c>balance</c>: after a balance sale, else null; <c>products</c>: each line's product after the sale.</summary>

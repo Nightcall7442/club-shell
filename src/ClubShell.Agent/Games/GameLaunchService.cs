@@ -37,6 +37,13 @@ public interface IAntiCheatGate
     Task<AntiCheatCheckResult[]> CheckForLaunchAsync(Game game, CancellationToken cancellationToken);
 }
 
+/// <summary>Takes back the games a previous Agent followed (<see cref="GameLaunchService.ReadoptAsync"/>, D-99).</summary>
+public interface IGameReadoption
+{
+    /// <summary>Follows the persisted games again; returns how many were taken back.</summary>
+    Task<int> ReadoptAsync(CancellationToken cancellationToken);
+}
+
 /// <summary>Delivers <c>game.stateChanged</c> events to the Shell (provided by the IPC server).</summary>
 public interface IGameEventSink
 {
@@ -90,6 +97,7 @@ public sealed class GameLaunchService : IDisposable
     private readonly IOptionsMonitor<AgentSettings> _settings;
     private readonly IClock _clock;
     private readonly ILogger<GameLaunchService> _logger;
+    private readonly IGameCloseRequester? _closer;
     private bool _disposed;
 
     /// <summary>Creates the service and subscribes to lease expiry.</summary>
@@ -111,9 +119,11 @@ public sealed class GameLaunchService : IDisposable
         IClock clock,
         ILogger<GameLaunchService> logger,
         PlayerSettingsSync? playerSettings = null,
-        GameRegistryDefaults? registryDefaults = null)
+        GameRegistryDefaults? registryDefaults = null,
+        IGameCloseRequester? closer = null)
     {
         ArgumentNullException.ThrowIfNull(launchers);
+        _closer = closer;
         _playerSettings = playerSettings;
         _registryDefaults = registryDefaults;
         _library = library;
@@ -137,6 +147,9 @@ public sealed class GameLaunchService : IDisposable
         }
 
         _pool.LeaseExpired += OnLeaseExpired;
+        _pool.KeepExpired = LeaseStillNeeded;
+        // D-99: a launcher client a running game needs is not killed for another game's pooled account.
+        _injector.LauncherInUseBy = launcher => AccountInjector.LauncherKeptBy(launcher, _tracker.All().Select(r => (r.Game.Launcher, r.Game.Title)));
     }
 
     /// <summary>Launcher backends registered.</summary>
@@ -315,8 +328,9 @@ public sealed class GameLaunchService : IDisposable
 
             // SHELL_CHANGES 96: a game whose manifest asks for administrator rights starts as the player all the same — the
             // compatibility layer Explorer would apply, which CreateProcessAsUser does not read from the registry. Its
-            // children (a launcher's war3.exe) inherit the environment.
-            if (game.RunAsInvoker == true)
+            // children (a launcher's war3.exe) inherit the environment. A game started with administrator rights instead
+            // (the launcher sees to that) does not get the layer: it would start its children without them.
+            if (game.RunAsInvoker == true && GameImages.ElevationOf(game) != GameElevationMode.Administrator)
             {
                 env[ProcessEnvironment.CompatLayer] = ProcessEnvironment.AddLayers(env.GetValueOrDefault(ProcessEnvironment.CompatLayer), "RunAsInvoker");
             }
@@ -332,7 +346,9 @@ public sealed class GameLaunchService : IDisposable
             // SHELL_CHANGES 83: a game the launcher starts itself (no launcher client in between) goes into its job before
             // its first instruction, so a child it starts at once is caught too, and its handle is kept from creation so
             // that a game which quits at once still reports its real exit code.
-            JobObject created = job = JobObject.Create(null, killOnClose: true);
+            // D-99: not kill-on-close — the job's handle lives in the Agent, and an Agent that exits (an update, a crash)
+            // took every game with it. The game is ended explicitly where that is meant.
+            JobObject created = job = JobObject.Create(null, killOnClose: false);
             int? createdPid = null;
             var context = new LaunchContext(wtsSession, _kiosk.KioskUser, env, (pid, handle) =>
             {
@@ -514,6 +530,72 @@ public sealed class GameLaunchService : IDisposable
         return new GamesKillResponse(killed.Count, killed);
     }
 
+    /// <summary>
+    /// After an Agent restart (D-99): takes back the games the previous Agent followed (<see cref="RunningGamesFile"/>).
+    /// A game still running in the open session it was launched in is followed again — a new job, its exit reported, its
+    /// lease released by id — so time-up, "close game" and the session's end reach it; one whose session is over is closed
+    /// like at a session end. Run after the session restore and the catalogue load. Returns how many were taken back.
+    /// </summary>
+    public async Task<int> ReadoptAsync(CancellationToken cancellationToken)
+    {
+        IReadOnlyList<RunningGameEntry> entries = _tracker.LoadPersisted();
+        Guid? open = _sessions.Current is { } current && _sessions.State.IsOpen() ? current.Id : null;
+        int adopted = 0;
+        var close = new List<GameLaunchRecord>();
+        foreach (RunningGameEntry entry in entries)
+        {
+            if (_tracker.Find(entry.Pid) is not null)
+            {
+                continue;
+            }
+
+            ReadoptAction action = RunningGamesFile.Decide(entry, GameSessionTracker.ProcessStartUtc(entry.Pid), open);
+            Game? game = action == ReadoptAction.Gone ? null : await _library.GetAsync(entry.GameId, cancellationToken).ConfigureAwait(false);
+            if (action == ReadoptAction.Gone || game is null)
+            {
+                _logger.LogInformation("{Title} (pid {Pid}) not taken back: {Why}", entry.Title, entry.Pid, game is null && action != ReadoptAction.Gone ? "not in the catalogue" : "it ended while the Agent was down");
+                if (entry.LeaseId is { } gone)
+                {
+                    await _pool.ReleaseUnheldAsync(entry.GameId, gone, AccountLeaseReleaseReason.Exit, cancellationToken).ConfigureAwait(false);
+                }
+
+                continue;
+            }
+
+            var request = new LaunchRequest(entry.GameId, entry.SessionId, entry.UserId, entry.LeaseId is not null, entry.LeaseId, null, null, 0);
+            var running = new RunningGame(game.Id, game.Title, entry.Pid, entry.StartedAt, entry.LeaseId, GameState.Running);
+            var record = new GameLaunchRecord(game, request, running, null, null, new AntiCheatCheckResult(entry.AntiCheat, true), CreateJob(entry.Pid), entry.LaunchDurationMs);
+            try
+            {
+                await _tracker.TrackAsync(record, cancellationToken).ConfigureAwait(false);
+            }
+            catch (IpcException ex)
+            {
+                _logger.LogWarning("{Title} (pid {Pid}) not taken back: {Message}", game.Title, entry.Pid, ex.Error.Message);
+                record.Job.Dispose();
+                continue;
+            }
+
+            if (action == ReadoptAction.Close)
+            {
+                _logger.LogInformation("{Title} (pid {Pid}) still runs but its session {SessionId} is over; closing it", game.Title, entry.Pid, entry.SessionId);
+                close.Add(record);
+                continue;
+            }
+
+            adopted++;
+            _logger.LogInformation("{Title} (pid {Pid}) taken back after the Agent's restart (session {SessionId})", game.Title, entry.Pid, entry.SessionId);
+            await PublishAsync(new GameStateChanged(game.Id, game.Title, GameState.Running, _clock.UtcNow, entry.Pid), cancellationToken).ConfigureAwait(false);
+        }
+
+        if (close.Count > 0)
+        {
+            await KillRecordsAsync(close, force: false, AccountLeaseReleaseReason.SessionEnd, cancellationToken).ConfigureAwait(false);
+        }
+
+        return adopted;
+    }
+
     /// <summary>Handles <c>games.running</c>.</summary>
     public GamesRunningResponse Running() => new(_tracker.ListRunning());
 
@@ -522,21 +604,23 @@ public sealed class GameLaunchService : IDisposable
         _tracker.ListRunning().Select(r => new HeartbeatRunningGame(r.GameId, r.Pid, r.StartedAt)).ToList();
 
     /// <summary>
-    /// Session-end teardown: terminates every tracked game and releases their leases. A game is asked to close first
-    /// (killed after <c>games.killGraceSec</c>) when the player ended the session or when <paramref name="graceful"/> —
-    /// the player's saves are about to be collected (SHELL_CHANGES 23) and many games write theirs on the way out.
+    /// Session-end teardown: terminates every tracked game and releases their leases. Every game is asked to close first
+    /// and killed after <c>games.killGraceSec</c> (D-99); <paramref name="graceful"/> (the player's saves are about to be
+    /// collected, SHELL_CHANGES 23) no longer changes that.
     /// </summary>
     public async Task KillAllAsync(SessionEndReason reason, bool graceful, CancellationToken cancellationToken)
     {
-        bool force = !graceful && reason is not SessionEndReason.User;
+        // D-99: whatever ended the session (the time ran out, the desk, the player), a game is asked to close first and
+        // killed only after games.killGraceSec — a hard TerminateProcess lost the player's unsaved progress at time-up.
+        // An explicit kill (games.kill with force, the desk's "kill game") still kills at once.
 
         // A game still starting would come up after the session is over.
         await CancelLaunchesAsync(null, wait: true, cancellationToken).ConfigureAwait(false);
         IReadOnlyList<GameLaunchRecord> targets = _tracker.All();
         if (targets.Count > 0)
         {
-            _logger.LogInformation("Killing {Count} running games (session end: {Reason})", targets.Count, reason);
-            await KillRecordsAsync(targets, force, AccountLeaseReleaseReason.SessionEnd, cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation("Closing {Count} running games (session end: {Reason}, saves collected after them: {Graceful})", targets.Count, reason, graceful);
+            await KillRecordsAsync(targets, force: false, AccountLeaseReleaseReason.SessionEnd, cancellationToken).ConfigureAwait(false);
             TimeSpan wait = TimeSpan.FromSeconds(_settings.CurrentValue.Games.KillGraceSec) + TimeSpan.FromSeconds(5);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(wait);
@@ -555,6 +639,7 @@ public sealed class GameLaunchService : IDisposable
         }
 
         await _pool.ReleaseAllAsync(AccountLeaseReleaseReason.SessionEnd, cancellationToken).ConfigureAwait(false);
+        await _injector.KillDeferredAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -745,8 +830,17 @@ public sealed class GameLaunchService : IDisposable
         var killed = new List<int>();
         foreach (GameLaunchRecord record in targets)
         {
+            _tracker.MarkKilled(record.Running.Pid, releaseReason);
+        }
+
+        if (!force)
+        {
+            await CloseGracefullyAsync(targets, cancellationToken).ConfigureAwait(false);
+        }
+
+        foreach (GameLaunchRecord record in targets)
+        {
             int pid = record.Running.Pid;
-            _tracker.MarkKilled(pid, releaseReason);
             try
             {
                 if (_launchers.TryGetValue(record.Game.Launcher, out IGameLauncher? launcher))
@@ -766,6 +860,40 @@ public sealed class GameLaunchService : IDisposable
         }
 
         return killed;
+    }
+
+    /// <summary>
+    /// D-99: a game is asked to close from the player's session (its windows get <c>WM_CLOSE</c>, as from its own menu, so
+    /// it saves) and gets <c>games.killGraceSec</c> to exit; what is left is then killed. The Agent's own tree kill could
+    /// not do it: from session 0 it never sees the game's windows, so every "graceful" end was a TerminateProcess.
+    /// </summary>
+    private async Task CloseGracefullyAsync(IReadOnlyList<GameLaunchRecord> targets, CancellationToken cancellationToken)
+    {
+        TimeSpan grace = TimeSpan.FromSeconds(Math.Max(0, _settings.CurrentValue.Games.KillGraceSec));
+        if (_closer is null || _kiosk.ActiveSessionId is not { } session || grace <= TimeSpan.Zero || targets.Count == 0)
+        {
+            return;
+        }
+
+        IReadOnlyList<int> exited = await GracefulGameClose.CloseAsync(
+            targets.Select(r => r.Running.Pid).ToList(),
+            grace,
+            (pid, ct) => _closer.RequestCloseAsync(pid, session, ct),
+            WaitForPidExitAsync,
+            cancellationToken).ConfigureAwait(false);
+        _logger.LogInformation("{Exited} of {Count} game(s) closed on their own within {Grace}", exited.Count, targets.Count, grace);
+    }
+
+    private static async Task WaitForPidExitAsync(int pid, CancellationToken cancellationToken)
+    {
+        try
+        {
+            _ = await ProcessWatcher.WatchPidAsync(pid, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is ArgumentException or Win32Exception)
+        {
+            // Gone already.
+        }
     }
 
     /// <summary>
@@ -899,7 +1027,7 @@ public sealed class GameLaunchService : IDisposable
 
     private JobObject CreateJob(int pid)
     {
-        JobObject job = JobObject.Create(null, killOnClose: true);
+        JobObject job = JobObject.Create(null, killOnClose: false);
         AssignToJob(job, pid);
         return job;
     }
@@ -917,6 +1045,15 @@ public sealed class GameLaunchService : IDisposable
         }
     }
 
+    /// <summary>
+    /// D-99: a lease whose game still runs in the session it was taken for stays held when it expires — the Agent renews
+    /// it ahead of time, and a server that cannot renew is no reason to close a game the player is paying for.
+    /// </summary>
+    private bool LeaseStillNeeded(ActiveLease lease) =>
+        _sessions.Current is { } session && session.Id == lease.SessionId && _sessions.State.IsOpen()
+        && _tracker.All().Any(r => r.Lease?.LeaseId == lease.LeaseId);
+
+    /// <summary>A lease expired that no running game of an open session needs (<see cref="LeaseStillNeeded"/>): whatever still uses it is closed.</summary>
     private void OnLeaseExpired(object? sender, ActiveLease lease)
     {
         IReadOnlyList<GameLaunchRecord> targets = _tracker.All().Where(r => r.Lease?.LeaseId == lease.LeaseId).ToList();

@@ -470,7 +470,10 @@ public sealed class SessionSettings
     [Range(0, 3600)]
     public int GraceSec { get; set; } = 60;
 
-    /// <summary>Idle auto-lock; 0 = disabled (policy wins when set).</summary>
+    /// <summary>
+    /// Idle auto-lock by an Agent-side idle signal; 0 = disabled (policy wins when set). No such signal is registered (D-99):
+    /// the Shell's <c>idleTimeoutSec</c> locks an idle player, and nothing locks one while a game runs.
+    /// </summary>
     [Range(0, 86400)]
     public int AutoLockOnIdleSec { get; set; }
 

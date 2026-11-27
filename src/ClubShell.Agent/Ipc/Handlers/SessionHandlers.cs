@@ -44,6 +44,18 @@ public sealed class SessionHandlers : IIpcHandlerGroup
     /// <summary>Error reason of a request that needs the club server and is not served offline.</summary>
     public const string OfflineUnavailableReason = "offlineUnavailable";
 
+    /// <summary>Server attempts of a password sign-in before it falls back to the offline cache (D-100).</summary>
+    public const int LoginAttempts = 2;
+
+    /// <summary>
+    /// How long <c>auth.status</c> waits for the sign-in restore after an Agent restart (D-100): under the Shell's request
+    /// timeout (15 s), so a Shell that reconnects first is told the player rather than «nobody».
+    /// </summary>
+    public static readonly TimeSpan StatusRestoreWait = TimeSpan.FromSeconds(10);
+
+    /// <summary>Pause between the server attempts of a sign-in (two tries over about 3 s, D-100).</summary>
+    public TimeSpan LoginRetryDelay { get; set; } = TimeSpan.FromSeconds(1.5);
+
     private readonly SessionManager _sessions;
     private readonly SessionLock _lock;
     private readonly OfflineSessionStore _store;
@@ -242,7 +254,10 @@ public sealed class SessionHandlers : IIpcHandlerGroup
 
         string hwid = await _hwid.GetAsync(cancellationToken).ConfigureAwait(false);
         AuthResponse? auth = null;
-        if (IsOnline)
+        // A password sign-in that would fall back to the offline cache asks the server once more first (D-100): a sign-in
+        // from the cache holds no server token, so a blip of a second must not cost the player a real sign-in.
+        int attempts = request.Kind == AuthKind.Password ? LoginAttempts : 1;
+        for (int attempt = 1; IsOnline && auth is null && attempt <= attempts; attempt++)
         {
             try
             {
@@ -251,12 +266,22 @@ public sealed class SessionHandlers : IIpcHandlerGroup
             catch (ServerApiException ex) when (ex.IsRetryable && ex.Code != ErrorCode.RateLimited)
             {
                 // Not a 429: the offline cache must not sidestep the server's limit on attempts.
-                _logger.LogWarning("Server login failed ({Code}); trying the offline cache", ex.Code);
+                _logger.LogWarning("Server login failed ({Code}), attempt {Attempt} of {Attempts}", ex.Code, attempt, attempts);
             }
             catch (HttpRequestException ex)
             {
-                _logger.LogWarning(ex, "Server unreachable for login; trying the offline cache");
+                _logger.LogWarning(ex, "Server unreachable for login, attempt {Attempt} of {Attempts}", attempt, attempts);
             }
+
+            if (auth is null && attempt < attempts)
+            {
+                await Task.Delay(LoginRetryDelay, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        if (auth is null && IsOnline)
+        {
+            _logger.LogWarning("Server login failed; trying the offline cache");
         }
 
         if (auth is null)
@@ -296,6 +321,12 @@ public sealed class SessionHandlers : IIpcHandlerGroup
             throw IpcError.Validation("password", password.Length == 0 ? "required" : password.Length < 4 ? "min" : "max").ToException();
         }
 
+        // D-104: the player's gender is required, male or female.
+        if (request.Gender is not ("male" or "female"))
+        {
+            throw IpcError.Validation("gender", string.IsNullOrEmpty(request.Gender) ? "required" : "enum").ToException();
+        }
+
         RequireReady();
         if (_users.User is not null)
         {
@@ -311,7 +342,7 @@ public sealed class SessionHandlers : IIpcHandlerGroup
         RequireOnline();
         string hwid = await _hwid.GetAsync(cancellationToken).ConfigureAwait(false);
         AuthResponse auth = await _server.RegisterPlayerAsync(
-            new RegisterAuthRequest(pcId, hwid, displayName, username, password, request.AcceptRules, _shellSettings.Get().Locale), cancellationToken).ConfigureAwait(false);
+            new RegisterAuthRequest(pcId, hwid, displayName, username, password, request.AcceptRules, _shellSettings.Get().Locale, request.Gender), cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("User {UserId} ({Username}) registered on this PC", auth.User.Id, auth.User.Username);
         return await SignedInOnlineAsync(auth, auth.User.Username, "register", guest: false, cancellationToken).ConfigureAwait(false);
     }
@@ -436,9 +467,11 @@ public sealed class SessionHandlers : IIpcHandlerGroup
         }
 
         DateTimeOffset expiresAt = _clock.UtcNow.AddMinutes(Math.Max(1, offline.MaxOfflineMinutes));
-        if (_tokens?.User is { } held && held.UserId != user.Id)
+        if (_tokens?.User is not null)
         {
-            // Another player's token must not be sent on this player's behalf once the server is back.
+            // Another player's token must not be sent on this player's behalf once the server is back, and an older token of
+            // this player may be dead by then: a refusal of it would end this sign-in (D-100). The Agent asks the server for
+            // a token of this sign-in once it is back (SignInGuard.UpgradeOfflineSignInAsync).
             await _tokens.SetUserAsync(null, CancellationToken.None).ConfigureAwait(false);
         }
 
@@ -607,6 +640,13 @@ public sealed class SessionHandlers : IIpcHandlerGroup
 
     private async Task<AuthStatusResponse> StatusAsync(CancellationToken cancellationToken)
     {
+        if (_users.User is null && _services.GetService(typeof(SignInRestoreGate)) is SignInRestoreGate gate && !gate.IsDone)
+        {
+            // Right after an Agent restart: the player of a running session is being restored (D-100). «Nobody» now would
+            // drop them to the lock screen; a restore that takes longer is pushed when done.
+            _ = await gate.WaitAsync(StatusRestoreWait, cancellationToken).ConfigureAwait(false);
+        }
+
         User? user = _users.User;
         PcReadiness? readiness = PcReadiness?.Current;
         // The link as it is now, not as it was at sign-in: a Shell (re)started while the server is down must show offline.

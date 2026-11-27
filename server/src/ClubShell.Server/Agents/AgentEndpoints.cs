@@ -7,8 +7,10 @@ using ClubShell.Server.Admin;
 using ClubShell.Server.Auth;
 using ClubShell.Server.Infrastructure;
 using ClubShell.Server.Realtime;
+using Dapper;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Net.Http.Headers;
+using Npgsql;
 
 namespace ClubShell.Server.Agents;
 
@@ -46,6 +48,7 @@ public static class AgentEndpoints
         pc.MapGet("/policies", PoliciesAsync);
         pc.MapGet("/commands", async (Guid pcId, CommandRepository commands) => TypedResults.Ok(new ServerCommandsResponse(await commands.PendingAsync(pcId))));
         pc.MapPost("/staff/verify", StaffVerifyAsync);
+        pc.MapPost("/players/{userId:guid}/token", PlayerTokenAsync);
         pc.MapPost("/commands/{commandId:guid}/ack", async (Guid pcId, Guid commandId, CommandAck ack, CommandRepository commands) =>
         {
             if (!await commands.AckAsync(pcId, commandId, ack))
@@ -72,6 +75,45 @@ public static class AgentEndpoints
 
         var member = await staff.VerifyForPcAsync(pin, context.Features.GetRequiredFeature<AgentContext>().Pc);
         return TypedResults.Ok(new StaffVerifyResponse(member.StaffId!.Value, member.Name, member.Role));
+    }
+
+    /// <summary>
+    /// Beyond the contract (D-100): <c>POST /agents/{pcId}/players/{userId}/token</c> — the PC signed its player in from its
+    /// offline cache while the server was away and holds no player token, so every player call of theirs would be refused
+    /// (<c>401 userToken</c>). The PC's own credentials are not enough to sign anyone in: a token is issued only for the
+    /// player of the session open on this very PC (<c>403 notSessionPlayer</c> otherwise — no session, another player's,
+    /// or one on another PC), and not to a banned or blacklisted account (<c>403 banned</c>); <c>404 user</c> for an unknown
+    /// one. Under the PC's and the player's locks, like a sign-in; answered like one (the open session included), no
+    /// <c>offlineHash</c>.
+    /// </summary>
+    private static async Task<IResult> PlayerTokenAsync(
+        HttpContext context, Guid userId, NpgsqlDataSource db, UserTokens tokens, Sessions.SessionService sessions, TimeProvider clock, ILoggerFactory logs)
+    {
+        var pc = context.Features.GetRequiredFeature<AgentContext>().Pc;
+        await using var c = await db.OpenConnectionAsync();
+        var club = await Sessions.SessionService.ClubAsync(c, null, pc.ClubId);
+        await using var tx = await c.BeginTransactionAsync();
+        await c.ExecuteAsync("SET LOCAL lock_timeout = '10s'", transaction: tx);
+        await AdvisoryLocks.PcAsync(c, tx, pc.Id);
+        await AdvisoryLocks.UserAsync(c, tx, userId);
+        var buyer = await Sessions.SessionService.BuyerAsync(c, tx, club, userId) ?? throw ApiException.NotFound("user");
+        if (buyer.Banned || buyer.Blacklisted)
+        {
+            throw ApiException.Forbidden("banned", "The account is banned");
+        }
+
+        if (await Sessions.SessionService.OpenOfPcAsync(c, pc.Id, tx) is not { } open || open.UserId != userId)
+        {
+            logs.CreateLogger(typeof(AgentEndpoints).FullName!).LogWarning("PC {PcId} asked for a player token of {UserId}, who has no open session there", pc.Id, userId);
+            throw ApiException.Forbidden("notSessionPlayer", "The player has no open session on this PC");
+        }
+
+        var (token, expiresAt) = await tokens.IssueAsync(c, tx, userId, pc.Id);
+        var now = clock.GetUtcNow();
+        await c.ExecuteAsync("UPDATE users SET last_seen_at = @now WHERE id = @userId", new { userId, now }, tx);
+        await tx.CommitAsync();
+        var user = await c.QuerySingleAsync<Users.UserRow>($"{Users.UserRow.Select} WHERE u.id = @userId", new { userId });
+        return TypedResults.Ok(new AuthResponse(user.ToWire(club.Pricing), open.ToWire(now), token, UserTokens.NewToken(), expiresAt));
     }
 
     private static async Task<IResult> RegisterAsync(
@@ -202,6 +244,7 @@ public static class AgentEndpoints
         var now = clock.GetUtcNow();
         await pcs.RecordHeartbeatAsync(pc.Id, request, now);
         await tokens.SlideAsync(pc.Id);
+        var live = await tokens.LiveOfPcAsync(pc.Id);
         var view = await clubs.GetAgentViewAsync(pc.ClubId);
         return TypedResults.Ok(new HeartbeatResponse(
             ServerTime: now,
@@ -210,7 +253,8 @@ public static class AgentEndpoints
             ConfigVersion: view.ConfigVersion,
             CatalogVersion: view.CatalogVersion.ToString(CultureInfo.InvariantCulture),
             PendingCommands: await commands.PendingCountAsync(pc.Id, hub.LiveDelivered(pc.Id)),
-            Stateless: pc.Stateless));
+            Stateless: pc.Stateless,
+            PlayerToken: live is { } t ? new HeartbeatPlayerToken(t.UserId, t.ExpiresAt.AddTicks(-(t.ExpiresAt.Ticks % TimeSpan.TicksPerMillisecond))) : null));
     }
 
     /// <summary>The contract obliges the server to take up to 120 samples and 1024 events: old agents do not split batches.</summary>

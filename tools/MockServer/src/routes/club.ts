@@ -49,13 +49,16 @@ import {
   type PcRecord,
   type ProductRecord,
   type UserRecord,
+  genderOf,
 } from '../db.js';
+import { validateLook } from '../look.js';
 import { PRODUCT_CATEGORIES, liveProducts, productView, voidOf } from './bar.js';
 import { gamesVolumeOf, hardwareOf } from '../devices.js';
 import { trailerOf, trailerRoutes } from '../trailers.js';
 import { generateLogin, phoneDigits } from '../logins.js';
 import {
   API_TOPUP,
+  OWNER_TRANSACTIONS,
   CASH_REASONS,
   CLUB_EVENTS,
   DEFAULT_CONTROL,
@@ -145,6 +148,7 @@ function clientView(u: UserRecord): Record<string, unknown> {
     phone: p.phone,
     birthYear: p.birthYear,
     cardId: u.cardId,
+    gender: u.gender ?? null,
     spent: spentOf(u.id),
     visits: visitsOf(u.id),
     level: level.level,
@@ -489,7 +493,7 @@ export function clubRoutes(app: FastifyInstance): void {
    * The shift's operations feed (beyond the contract, D-43): its journal newest first, a paid seat as one row, and
    * the open shift's money (D-83). A cashier reads the open shift and the last closed one, the owner any.
    */
-  app.get<{ Querystring: { shiftId?: string; before?: string; limit?: string; kinds?: string } }>(
+  app.get<{ Querystring: { shiftId?: string; before?: string; limit?: string; kinds?: string; owner?: string } }>(
     '/admin/shift/operations',
     async (req) => {
       const me = requireStaff(req);
@@ -593,6 +597,8 @@ export function clubRoutes(app: FastifyInstance): void {
           throw errors.validation(`limits.${name}`, 'format');
       }
     }
+    // The player-screen designer (D-105), refused field by field as by the server.
+    if ('branding' in b) validateLook(b['branding']);
     if ('topUpPromo' in b) c.topUpPromo = parseTopUpPromo(b['topUpPromo']);
     if ('screensaver' in b) c.screensaver = parseScreensaver(b['screensaver']);
     const selfSignupBefore = c.limits.selfSignup === true;
@@ -779,7 +785,8 @@ export function clubRoutes(app: FastifyInstance): void {
     } else {
       username = generateLogin(displayName, optStr(b, 'phone', 32), loginTaken);
     }
-    // No password sent: nobody knows one until the cashier resets it.
+    const gender = genderOf(b);
+    // No password sent: nobody knows one until the desk sets one (the console always sends one, D-103).
     const password = b['password'] === undefined || b['password'] === null ? uuid() : passwordOf(b);
     const cardId = cardOf(b, null);
     const template = db.users.find((u) => u.role === 'member') as UserRecord;
@@ -799,6 +806,7 @@ export function clubRoutes(app: FastifyInstance): void {
       createdAt: now(),
       transient: false,
       muted: false,
+      gender,
     };
     db.users.push(user);
     club().clients[user.id] = {
@@ -829,6 +837,7 @@ export function clubRoutes(app: FastifyInstance): void {
       p.blacklisted = bool(b, 'blacklisted');
     }
     if (typeof b['displayName'] === 'string') user.displayName = str(b, 'displayName', 64);
+    if ('gender' in b) user.gender = genderOf(b);
     club().clients[user.id] = p;
     markDirty();
     if (p.groupId !== groupBefore) {
@@ -850,7 +859,7 @@ export function clubRoutes(app: FastifyInstance): void {
     return { client: clientView(user) };
   });
 
-  /** Sets a new sign-in password for a client (the console generates a temporary one and shows it once). */
+  /** Sets a new sign-in password for a client: typed or generated at the desk, permanent (D-103). */
   app.post<{ Params: { id: string } }>('/admin/clients/:id/password', async (req) => {
     const me = requireStaff(req);
     const user = findUser(req.params.id);
@@ -861,14 +870,22 @@ export function clubRoutes(app: FastifyInstance): void {
     return { ok: true };
   });
 
-  /** D-94: the owner deletes a settled client (no session, nothing on the balance), as the server. */
-  app.delete<{ Params: { id: string } }>('/admin/clients/:id', async (req) => {
+  /**
+   * D-94: the owner deletes a settled client (no session, nothing on the balance), as the server. D-102: `?writeOff=` the
+   * very balance shown writes it off and deletes anyway.
+   */
+  app.delete<{ Params: { id: string }; Querystring: { writeOff?: string } }>('/admin/clients/:id', async (req) => {
     const me = requireStaff(req, 'owner');
     const user = findUser(req.params.id);
     if (!user || user.transient) throw errors.notFound('user');
     if (db.sessions.some((x) => x.userId === user.id && x.state !== 'ended' && x.state !== 'idle'))
       throw errors.conflict('playing');
-    if (user.balance.amount !== 0) throw errors.conflict('balance', { balance: { ...user.balance } });
+    const writeOff = req.query.writeOff === undefined ? null : Number(req.query.writeOff);
+    if (writeOff !== null && !Number.isInteger(writeOff)) throw errors.validation('writeOff', 'format');
+    const balance = user.balance.amount;
+    if (balance !== 0 && writeOff !== balance) throw errors.conflict('balance', { balance: { ...user.balance } });
+    // The mock keeps no journal of deletes (the server's `clientDelete` carries the amount written off).
+    void me;
     db.users = db.users.filter((u) => u.id !== user.id);
     markDirty();
     return { ok: true };
@@ -1460,7 +1477,7 @@ export function topUpWithBonus(
   user: UserRecord,
   amount: number,
   method: string,
-  options: { settleDebt?: boolean; viaApi?: boolean } = {},
+  options: { settleDebt?: boolean; viaApi?: boolean; owner?: boolean } = {},
 ): { bonus: number; transaction: Transaction } {
   const debt = Math.max(0, -user.balance.amount);
   const description = options.viaApi
@@ -1469,8 +1486,12 @@ export function topUpWithBonus(
       ? `Debt paid at the counter (${method})`
       : `Top-up at the counter (${method})`;
   const transaction = applyTransaction(user, 'topUp', uzs(amount), description, null);
+  if (options.owner) OWNER_TRANSACTIONS.add(transaction.id);
   const bonus = options.settleDebt || user.transient ? 0 : topupBonus(Math.max(0, amount - debt));
-  if (bonus > 0) applyTransaction(user, 'bonus', uzs(bonus), 'Бонус за пополнение', null);
+  if (bonus > 0) {
+    const row = applyTransaction(user, 'bonus', uzs(bonus), 'Бонус за пополнение', null);
+    if (options.owner) OWNER_TRANSACTIONS.add(row.id);
+  }
   pushToUser(user.id, 'walletUpdated', balanceOf(user));
   if (!options.settleDebt) clubHooks.topUp(user, amount);
   return { bonus, transaction };

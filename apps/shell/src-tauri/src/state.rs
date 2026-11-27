@@ -1,12 +1,12 @@
 //! Shared Tauri state ([`AppState`]), the command error type ([`ShellError`], `TAURI_COMMANDS.md`
 //! §1.1) and the [`KioskControl`] seam through which the kiosk module is driven by agent events.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use clubshell_protocol::error::{ErrorCode, IpcError, ProtocolError};
-use clubshell_protocol::events::ConnectivityEvent;
+use clubshell_protocol::events::{ConnectivityEvent, GameStateChanged};
+use clubshell_protocol::games::RunningGame;
 use clubshell_protocol::session::Session;
 use clubshell_protocol::user::User;
 use clubshell_winutil::WinUtilError;
@@ -17,6 +17,7 @@ use tokio::sync::watch;
 
 use crate::agent::AgentClient;
 use crate::config::{ConfigError, ShellConfig};
+use crate::game_mode::{RunningGames, Transition};
 
 // ───────────────────────────── ShellError ─────────────────────────────
 
@@ -224,6 +225,8 @@ pub trait KioskControl: Send + Sync {
     /// A game is starting/running (`true`: suspend the foreground guard) or has exited
     /// (`false`: re-arm the guard and re-focus the shell window).
     fn set_game_mode(&self, on: bool);
+    /// A running game's process may own the foreground (game mode restored after a reconnect).
+    fn allow_game_pid(&self, _pid: u32) {}
     /// Drop hooks/guards before the process exits.
     fn shutdown(&self);
 }
@@ -278,8 +281,9 @@ pub struct AppStateInner {
     pub admin_unlock: Mutex<Option<AdminUnlock>>,
     /// Serializes `games_launch` / `apps_launch` (`TAURI_COMMANDS.md` §1 "Concurrency").
     pub launch_lock: tokio::sync::Mutex<()>,
-    /// `true` between `game.stateChanged{launching|running}` and `{exited|failed|killed}`.
-    pub game_running: AtomicBool,
+    /// Games between `game.stateChanged{launching|running}` (or `games_launch`) and
+    /// `{exited|failed|killed}`; game mode is on while it is not empty (D-99).
+    games: Mutex<RunningGames>,
     kiosk: RwLock<Arc<dyn KioskControl>>,
 }
 
@@ -304,7 +308,7 @@ impl AppState {
                 connectivity,
                 admin_unlock: Mutex::new(None),
                 launch_lock: tokio::sync::Mutex::new(()),
-                game_running: AtomicBool::new(false),
+                games: Mutex::new(RunningGames::new()),
                 kiosk: RwLock::new(Arc::new(NoopKiosk)),
             }),
         }
@@ -339,12 +343,58 @@ impl AppState {
         *self.connectivity.borrow()
     }
 
+    /// Any game launching or running (game mode).
     pub fn game_running(&self) -> bool {
-        self.game_running.load(Ordering::Acquire)
+        self.games.lock().is_active()
     }
 
-    pub fn set_game_running(&self, running: bool) {
-        self.game_running.store(running, Ordering::Release);
+    /// Applies one change to the running games and switches the kiosk's game mode when the set
+    /// becomes (non-)empty. The kiosk is driven under the lock so two changes never reach it out of
+    /// order.
+    fn change_games<R>(&self, f: impl FnOnce(&mut RunningGames) -> (Transition, R)) -> R {
+        let mut games = self.games.lock();
+        let (transition, out) = f(&mut games);
+        if let Some(on) = transition {
+            self.kiosk().set_game_mode(on);
+        }
+        if games.is_active() {
+            let kiosk = self.kiosk();
+            for pid in games.pids() {
+                kiosk.allow_game_pid(pid);
+            }
+        }
+        out
+    }
+
+    /// `games_launch` starts: game mode on before the launcher runs. Returns whether the game was not
+    /// running yet (pass it to [`game_launch_finished`](Self::game_launch_finished)).
+    pub fn game_launch_started(&self, game_id: uuid::Uuid) -> bool {
+        self.change_games(|g| g.launch_started(game_id))
+    }
+
+    /// `games_launch` answered (`ok` = the Agent started it).
+    pub fn game_launch_finished(&self, game_id: uuid::Uuid, ok: bool, fresh: bool) {
+        self.change_games(|g| (g.launch_finished(game_id, ok, fresh), ()));
+    }
+
+    /// `game.stateChanged`.
+    pub fn game_state_changed(&self, change: &GameStateChanged) {
+        self.change_games(|g| (g.apply_event(change.game_id, change.state, change.pid), ()));
+    }
+
+    /// `games.running` after a hello: game mode follows what the Agent runs.
+    pub fn games_reconcile(&self, running: &[RunningGame]) {
+        self.change_games(|g| {
+            (
+                g.reconcile(running.iter().map(|r| (r.game_id, r.state, r.pid))),
+                (),
+            )
+        });
+    }
+
+    /// `session.ended`: no game of the player keeps game mode.
+    pub fn games_clear(&self) {
+        self.change_games(|g| (g.clear(), ()));
     }
 
     pub fn set_admin_unlock(&self, token: String, expires_at: DateTime<Utc>) {

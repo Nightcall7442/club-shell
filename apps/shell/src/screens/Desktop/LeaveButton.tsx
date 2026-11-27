@@ -6,12 +6,15 @@
  *   and whoever sat down next played on their account and balance. A postpaid session is never ended by the player:
  *   the button becomes «Оплатить на кассе» (what is owed now, and a call to the administrator) — ending it here let
  *   players walk out unpaid and left their accounts in the red. Only the cash desk ends it, taking the payment.
- * - {@link IdleLeavePrompt}: after {@link IDLE_LEAVE_SEC} without any input, with no game running and the Shell in front,
- *   "Вы ещё здесь?" counts down {@link IDLE_LEAVE_COUNTDOWN_SEC} seconds. A member's prepaid time is theirs, so it then
- *   locks the screen (`session.lock {idle}`: the paid minutes wait; the Agent itself only ever locks on idle). A guest
- *   with prepaid time (who cannot lock: `guestLock`) is signed out (`idle`). A postpaid seat is never ended by idling:
- *   the administrator is called instead (once per idle spell), who closes the bill at the desk. It stays out of the way while a game or a program from the dock is in front: a cutscene or a film
- *   has no input either, and the player would never see the prompt behind it.
+ * - {@link IdleLeavePrompt}: after {@link IDLE_LEAVE_SEC} without any input (keyboard, mouse or gamepad), with nothing
+ *   running and the Shell in front, "Вы ещё здесь?" counts down {@link IDLE_LEAVE_COUNTDOWN_SEC} seconds; any input
+ *   cancels it. A member's prepaid time is theirs, so it then locks the screen (`session.lock {idle}`: the paid minutes
+ *   wait; the Agent itself only ever locks on idle). A guest's prepaid time is paid as well, and a guest cannot lock
+ *   (`guestLock`) nor sign in again: it is never ended on idle (D-100) — no prompt, the time runs as paid.
+ *   Open-ended time of the player's own (pay as you go) is signed out (`idle`). A postpaid seat is never ended by
+ *   idling: the administrator is called instead (once per idle spell), who closes the bill at the desk. It stays out of
+ *   the way while a game or any program is running (from the catalogue or the dock): a cutscene or a film has no input
+ *   either, and the player would never see the prompt behind it.
  *
  * Signing out goes through `auth.logout`; the lock screen then shows what the visit cost (`auth.receipt`).
  */
@@ -22,8 +25,10 @@ import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { useIdle } from '@/hooks/useIdle';
 import { useLocale } from '@/hooks/useLocale';
+import { useRunningPrograms } from '@/hooks/useRunningPrograms';
 import { useSession } from '@/hooks/useSession';
 import { formatDurationSec, formatMoney } from '@/lib/format';
+import { idleOutcome, idlePromptDue } from '@/lib/idlePolicy';
 import { api } from '@/lib/tauri';
 import { useAuthStore } from '@/store/auth';
 import { useGamesStore } from '@/store/games';
@@ -144,14 +149,22 @@ export function IdleLeavePrompt(): JSX.Element | null {
   const s = useSession();
   const { idle, reset } = useIdle(IDLE_LEAVE_SEC);
   const gameRunning = useGamesStore((g) => g.running.some((r) => r.state === 'running' || r.state === 'launching'));
+  // Any program the player runs counts, not only catalogue games (D-100).
+  const { programs } = useRunningPrograms();
+  const busy = gameRunning || programs.length > 0;
   const navigate = useNavigate();
   const pushError = useNotificationsStore((n) => n.pushError);
   const leave = useLeave();
-  // A member's prepaid minutes are kept (lock); open-ended time and a guest's are signed out.
-  const lockInstead = s.isOpen && !s.isOpenEnded && !s.isGuest;
-  // A postpaid seat is never ended by idling (the bill would go unpaid): the administrator is called instead.
-  const postpaid = s.isPayAtDesk;
+  // lib/idlePolicy: a postpaid seat calls the administrator, a member's prepaid minutes are kept behind the lock, a
+  // guest's prepaid minutes are never ended (D-100), the player's own open-ended time is signed out.
+  const outcome = idleOutcome(s);
+  const lockInstead = outcome === 'lock';
+  const postpaid = outcome === 'callAdmin';
   const idleOut = async (): Promise<void> => {
+    if (outcome === 'none' || outcome === 'keep') {
+      reset();
+      return;
+    }
     if (postpaid) {
       try {
         await api.system.callAdmin('help', t('session.idlePostpaidCall'));
@@ -180,12 +193,20 @@ export function IdleLeavePrompt(): JSX.Element | null {
   const [deadline, setDeadline] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
-  const due = idle && s.isOpen && !gameRunning;
+  // A guest's prepaid time runs as paid: nothing to ask (D-100).
+  const due = idlePromptDue(idle, s, busy);
   useEffect(() => {
     // Only when the Shell itself is what the player looks at (not a game or a program from the dock).
     if (due && deadline === null && document.hasFocus()) {
       setNow(Date.now());
       setDeadline(Date.now() + IDLE_LEAVE_COUNTDOWN_SEC * 1000);
+    }
+  }, [due, deadline]);
+
+  // Any input (the hook's idle ends) or a program starting cancels the countdown (D-100).
+  useEffect(() => {
+    if (deadline !== null && !due) {
+      setDeadline(null);
     }
   }, [due, deadline]);
 

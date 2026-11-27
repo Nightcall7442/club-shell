@@ -135,6 +135,19 @@ public abstract class LauncherBase : IGameLauncher
         tookOver |= StopWatches(game.Id, expectedNames);
         HashSet<int> before = command.WaitForGameProcess && !tookOver ? SnapshotMatchingPids(resolved, expectedNames, sessionId) : new HashSet<int>();
 
+        // «Запускать с правами администратора» (the owner's, per game): never for an executable a player could replace.
+        bool elevated = GameImages.ElevationOf(resolved) == GameElevationMode.Administrator;
+        if (elevated && GameImages.AdminRefusal(command.Exe, ProfilesRoot) is { } refusal)
+        {
+            Logger.LogError("{Launcher}: {Title} is not started with administrator rights: {Reason}", Launcher, game.Title, refusal);
+            return LaunchResult.Failure(IpcError.GameLaunchFailed("elevation", refusal), startedAt, leaseId);
+        }
+
+        if (elevated)
+        {
+            Logger.LogWarning("{Launcher}: starting {Title} ({Exe}) with administrator rights, as its catalogue card asks", Launcher, game.Title, command.Exe);
+        }
+
         var spec = new ProcessStartSpec
         {
             Exe = command.Exe,
@@ -144,6 +157,7 @@ public abstract class LauncherBase : IGameLauncher
             SessionId = sessionId,
             RedactInLog = launcherArgs,
             BeforeResume = command.WaitForGameProcess ? null : context.GameCreated,
+            Elevated = elevated,
         };
 
         LaunchedProcess launched;
@@ -153,9 +167,13 @@ public abstract class LauncherBase : IGameLauncher
         }
         catch (Win32Exception ex) when (ex.NativeErrorCode == ElevationRequired)
         {
-            // SHELL_CHANGES 96: the exe's manifest asks for administrator rights (requireAdministrator) and the game is not
-            // marked «Запускать без прав администратора» — said as such, not as a generic failure.
-            Logger.LogWarning("{Launcher}: {Exe} requires administrator rights; turn on «run without administrator rights» for {Title}", Launcher, command.Exe, game.Title);
+            // SHELL_CHANGES 96: the exe's manifest asks for administrator rights (requireAdministrator) and the game is marked
+            // neither «Запускать без прав администратора» nor «Запускать с правами администратора» — said as such.
+            Logger.LogWarning(
+                "{Launcher}: {Exe} requires administrator rights (error 740); turn on «run without administrator rights» or «run as administrator» for {Title}",
+                Launcher,
+                command.Exe,
+                game.Title);
             return LaunchResult.Failure(IpcError.GameLaunchFailed("elevation", $"{Path.GetFileName(command.Exe)} requires administrator rights"), startedAt, leaseId);
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException)
@@ -294,12 +312,14 @@ public abstract class LauncherBase : IGameLauncher
     /// <summary>Builds the command for <paramref name="game"/>; <see langword="null"/> when the launcher client is missing. May throw <see cref="IpcException"/>.</summary>
     protected abstract LaunchCommand? BuildCommand(Game game, LaunchRequest request, LaunchContext context);
 
-    /// <summary>Image names (with or without <c>.exe</c>) that identify the game process; defaults to <see cref="Game.ExePath"/>'s file name.</summary>
-    protected virtual IReadOnlyList<string> ExpectedProcessNames(Game game)
-    {
-        string? name = string.IsNullOrWhiteSpace(game.ExePath) ? null : Path.GetFileNameWithoutExtension(game.ExePath);
-        return name is null ? Array.Empty<string>() : new[] { name };
-    }
+    /// <summary>
+    /// Image names (with or without <c>.exe</c>) that identify the game process; defaults to the catalogue's game images
+    /// (<see cref="Game.GameProcessNames"/>) and <see cref="Game.ExePath"/>'s file name.
+    /// </summary>
+    protected virtual IReadOnlyList<string> ExpectedProcessNames(Game game) => GameImages.All(game);
+
+    /// <summary>Where the user profiles live (<c>C:\Users</c>): an executable there is never started with administrator rights.</summary>
+    private static string ProfilesRoot => Path.Combine(Path.GetPathRoot(Environment.SystemDirectory) ?? @"C:\", "Users");
 
     /// <summary>Joins non-empty argument fragments with single spaces.</summary>
     protected static string? JoinArgs(params string?[] parts)

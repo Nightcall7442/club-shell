@@ -319,11 +319,20 @@ async fn heartbeat_loop(shared: Arc<Shared>) {
     let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut misses = 0u32;
+    // Wall-clock time of the last tick: it keeps running while the PC sleeps, so a long gap means the machine was
+    // suspended, and the pongs missed around it say nothing about the Agent.
+    let mut last_tick = std::time::SystemTime::now();
     loop {
         tokio::select! {
             _ = ticker.tick() => {}
             _ = wait_closed(&mut state) => return,
         }
+        let now = std::time::SystemTime::now();
+        if resumed_from_suspend(last_tick, now, interval) {
+            tracing::info!("resumed after a suspend; heartbeat misses reset");
+            misses = 0;
+        }
+        last_tick = now;
         let seq = shared.ping_seq.fetch_add(1, Ordering::Relaxed) + 1;
         let ping = match IpcEnvelope::request_with(
             names::sys::PING,
@@ -352,6 +361,17 @@ async fn heartbeat_loop(shared: Arc<Shared>) {
             }
         }
     }
+}
+
+/// Whether the wall clock moved much further than the heartbeat interval between two ticks: the PC slept or stalled.
+fn resumed_from_suspend(
+    last: std::time::SystemTime,
+    now: std::time::SystemTime,
+    interval: Duration,
+) -> bool {
+    now.duration_since(last)
+        .map(|gap| gap > interval * 3)
+        .unwrap_or(false)
 }
 
 /// Async client for one pipe connection. Dropping it closes the connection.
@@ -809,6 +829,28 @@ mod tests {
         );
         drop(client);
         let _ = tokio::time::timeout(Duration::from_secs(2), sink).await;
+    }
+
+    #[test]
+    fn a_long_wall_clock_gap_counts_as_a_suspend() {
+        let t0 = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
+        let interval = Duration::from_secs(5);
+        assert!(!resumed_from_suspend(
+            t0,
+            t0 + Duration::from_secs(6),
+            interval
+        ));
+        assert!(resumed_from_suspend(
+            t0,
+            t0 + Duration::from_secs(600),
+            interval
+        ));
+        // A clock set back is not a suspend.
+        assert!(!resumed_from_suspend(
+            t0,
+            t0 - Duration::from_secs(60),
+            interval
+        ));
     }
 
     #[tokio::test]

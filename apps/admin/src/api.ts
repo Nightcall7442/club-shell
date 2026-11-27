@@ -538,7 +538,8 @@ export interface SaleLine {
 export interface Sale {
   id: string;
   at: string;
-  shiftId: string;
+  /** Null: the owner's own sale (D-101), in no shift. */
+  shiftId: string | null;
   method: SaleMethod;
   total: number;
   staffName: string;
@@ -942,6 +943,8 @@ export interface Operation {
   voidOfAt?: string | null;
   /** A move: the PC the session came from (`pc` is where it went). */
   fromPc?: { id: string; name: string } | null;
+  /** The owner's own operation (D-101): in no shift; `drawer` is cash the owner took or gave in person. */
+  owner?: boolean | null;
 }
 
 /**
@@ -1080,6 +1083,38 @@ export interface PcLabelSettings {
   topBar: boolean;
 }
 
+/** Where the club logo stands on a player screen (D-105); each screen allows its own (see `screenDesigner.tsx`). */
+export type LogoPosition = 'topLeft' | 'topCenter' | 'topRight' | 'center' | 'bottomLeft' | 'bottomRight';
+export type LogoSize = 's' | 'm' | 'l' | 'xl';
+
+/** An owner's line per player language; empty — the shell's own line. */
+export interface LookText {
+  ru?: string;
+  uz?: string;
+  en?: string;
+}
+
+/**
+ * `branding.lock` / `.idle` / `.desktop` (D-105): the player-screen designer. Every field optional, absent — today's
+ * look; the flags a screen does not have are ignored.
+ */
+export interface ScreenLookSettings {
+  logo?: { show?: boolean; position?: LogoPosition; size?: LogoSize; name?: boolean };
+  /** This screen's own picture; absent — the club wallpaper (lock, desktop) or the screensaver slides (idle). */
+  wallpaperUrl?: string | null;
+  /** Dimming 0–80 %; absent — the screen's own. */
+  dim?: number | null;
+  /** Blur the picture; absent — the theme's. */
+  blur?: boolean | null;
+  clock?: boolean;
+  language?: boolean;
+  prices?: boolean;
+  freeBadge?: boolean;
+  title?: LookText;
+  subtitle?: LookText;
+  cta?: LookText;
+}
+
 export interface ClubSettings {
   branding: {
     clubName: string;
@@ -1090,6 +1125,14 @@ export interface ClubSettings {
     theme?: 'default' | 'light' | 'neon';
     /** How the PC's name or number shows on the player screen (D-95); absent — the name and zone everywhere. */
     pcLabel?: PcLabelSettings;
+    /** The player-screen designer (D-105): each screen's layout; absent — today's. */
+    lock?: ScreenLookSettings;
+    idle?: ScreenLookSettings;
+    desktop?: ScreenLookSettings;
+    /** Headings font on the PCs, one of the bundled ones; absent — Unbounded. */
+    font?: 'unbounded' | 'inter' | 'mono';
+    /** `#RRGGBB` tint of the plates on the lock and idle screens; absent — the theme's background. */
+    tint?: string | null;
   };
   features: ShellFeatures;
   zones: Zone[];
@@ -1179,6 +1222,8 @@ export interface AuditEntry {
   detail: string;
   /** Facts of the entry; a session's `quote` is an object. */
   meta: Record<string, unknown>;
+  /** The owner's own money operation (D-101): in no shift; absent from an older server. */
+  owner?: boolean;
 }
 
 export type FlagKind = 'shortfall' | 'earlyEnds' | 'earlyEnd' | 'discount' | 'sameClient' | 'noShift' | 'bigCash';
@@ -1327,7 +1372,12 @@ export interface Client {
   visits: number;
   level: number;
   levelName: string;
+  /** D-104: required for a new account; null — an older account the desk has not set yet; absent from an older server. */
+  gender?: Gender | null;
 }
+
+/** A player's gender (D-104). */
+export type Gender = 'male' | 'female';
 
 export type DeviceKind = 'pc' | 'console' | 'vr' | 'other';
 
@@ -1429,6 +1479,10 @@ export interface AdminGame {
   registryValues?: GameRegistryValue[];
   /** Start the exe without administrator rights though its manifest asks for them (SHELL_CHANGES 96); absent from an older server. */
   runAsInvoker?: boolean;
+  /** «Запускать с правами администратора»: the exe starts elevated in the player's session; absent from an older server. */
+  runAsAdmin?: boolean;
+  /** The game's own processes a launcher hands over to (`war3.exe`); absent from an older server. */
+  gameProcessNames?: string[];
   /** The newest launch refused for want of administrator rights since the card was saved: on which PC and when. */
   elevationFailure?: { pc: string; at: string } | null;
 }
@@ -1457,6 +1511,10 @@ export interface GameInput {
   registryValues?: GameRegistryValue[];
   /** «Запускать без прав администратора» (SHELL_CHANGES 96); absent — the game keeps it. */
   runAsInvoker?: boolean;
+  /** «Запускать с правами администратора» (exe games only; never together with `runAsInvoker`); absent — the game keeps it. */
+  runAsAdmin?: boolean;
+  /** Image names of the game's real process (`war3.exe`), at most 10; absent — the game keeps them, empty — none. */
+  gameProcessNames?: string[];
 }
 
 export interface PriceQuote {
@@ -1544,12 +1602,22 @@ export const clubApi = {
     input: { kind: CashMoveKind; amount: number; reasonCode: CashReason; note?: string | null },
     key: string,
   ): Promise<{ movement: CashMovement; expectedCash: number }> => postMoney('/admin/shift/cash', input, key),
-  /** The shift's journal, newest first (the open shift by default), and today's money by method. */
+  /**
+   * The shift's journal, newest first (the open shift by default), and today's money by method; `owner` — the owner's own
+   * operations instead (D-101, owner only), which no shift has.
+   */
   operations: (
-    q: { shiftId?: string | null; before?: string | null; kinds?: OperationKind[]; limit?: number } = {},
+    q: {
+      shiftId?: string | null;
+      before?: string | null;
+      kinds?: OperationKind[];
+      limit?: number;
+      owner?: boolean;
+    } = {},
   ): Promise<OperationsPage> => {
     const params = new URLSearchParams();
-    if (q.shiftId) params.set('shiftId', q.shiftId);
+    if (q.owner) params.set('owner', 'true');
+    else if (q.shiftId) params.set('shiftId', q.shiftId);
     if (q.before) params.set('before', q.before);
     if (q.kinds && q.kinds.length > 0) params.set('kinds', q.kinds.join(','));
     if (q.limit) params.set('limit', String(q.limit));
@@ -1589,6 +1657,8 @@ export const clubApi = {
     groupId?: string | null;
     password?: string;
     cardId?: string | null;
+    /** D-104: required. */
+    gender: Gender;
   }): Promise<{ client: Client }> => post('/admin/clients', input),
   setClientPassword: (id: string, password: string): Promise<unknown> =>
     post(`/admin/clients/${id}/password`, { password }),
@@ -1596,8 +1666,12 @@ export const clubApi = {
     post(`/admin/clients/${id}/card`, { cardId }),
   updateClient: (id: string, input: Partial<Client>): Promise<{ client: Client }> =>
     patch(`/admin/clients/${id}`, input),
-  /** D-94, owner only: `409 {reason: playing}` while it plays, `409 {reason: balance, balance}` with money or a debt left. */
-  deleteClient: (id: string): Promise<unknown> => del(`/admin/clients/${id}`),
+  /**
+   * D-94, owner only: `409 {reason: playing}` while it plays, `409 {reason: balance, balance}` with money or a debt left.
+   * `writeOff` (D-102): the balance shown (minor units, a debt negative) is written off in the same step.
+   */
+  deleteClient: (id: string, writeOff?: number): Promise<unknown> =>
+    del(`/admin/clients/${id}${writeOff ? `?writeOff=${writeOff}` : ''}`),
   clientTransactions: (id: string): Promise<{ items: Transaction[] }> => call(`/admin/clients/${id}/transactions`),
   redeemPromo: (userId: string, code: string): Promise<{ balance: Money }> =>
     postMoney('/admin/promo/redeem', { userId, code }),

@@ -1,7 +1,7 @@
 /**
  * «Создать аккаунт» on the lock screen (D-92), only where the owner allows it (`shell.club.selfSignup`): the player's
- * name, a login or a phone number to sign in with later, the password twice, and the club rules accepted when the
- * club has any. On success the player is signed in, exactly as after a password login (the lock screen goes on to the
+ * name, the gender (D-104: required, two big toggles, none picked at first), a login or a phone number to sign in with
+ * later, the password twice, and the club rules accepted when the club has any. On success the player is signed in, exactly as after a password login (the lock screen goes on to the
  * tariff picker). Every refusal of the server gets its own line on the field it is about.
  */
 import { useMemo, useState, type FormEvent } from 'react';
@@ -18,7 +18,9 @@ import { useAuthStore } from '@/store/auth';
 import { describeError, useNotificationsStore } from '@/store/notifications';
 import { useSettingsStore } from '@/store/settings';
 
-type Field = 'displayName' | 'username' | 'password' | 'passwordAgain' | 'acceptRules' | 'form';
+type Field = 'displayName' | 'gender' | 'username' | 'password' | 'passwordAgain' | 'acceptRules' | 'form';
+type Gender = 'male' | 'female';
+const GENDERS: readonly Gender[] = ['male', 'female'];
 type Errors = Partial<Record<Field, string>>;
 
 /** As the server: a login of 3–32 characters, a password of 4–64. */
@@ -47,6 +49,7 @@ export function RegisterForm({ onCancel, className }: RegisterFormProps): JSX.El
   const clubRulesText = useSettingsStore((s) => s.settings.club?.rules ?? null);
   const rules = useMemo(() => rulesToAccept(clubRulesText, locale), [clubRulesText, locale]);
   const [displayName, setDisplayName] = useState('');
+  const [gender, setGender] = useState<Gender | null>(null);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [again, setAgain] = useState('');
@@ -61,6 +64,7 @@ export function RegisterForm({ onCancel, className }: RegisterFormProps): JSX.El
     const login = username.trim();
     if (!name) next.displayName = t('lock.register.nameRequired');
     else if (name.length > NAME_MAX) next.displayName = t('lock.register.nameTooLong');
+    if (!gender) next.gender = t('lock.register.genderRequired');
     if (!login) next.username = t('lock.register.loginRequired');
     else if (login.length < LOGIN_MIN || login.length > LOGIN_MAX) next.username = t('lock.register.loginTooShort');
     if (password.length < PASSWORD_MIN) next.password = t('lock.register.passwordTooShort');
@@ -82,6 +86,7 @@ export function RegisterForm({ onCancel, className }: RegisterFormProps): JSX.El
         }
         if (field === 'password') return { password: t('lock.register.passwordTooShort') };
         if (field === 'displayName') return { displayName: t('lock.register.nameRequired') };
+        if (field === 'gender') return { gender: t('lock.register.genderRequired') };
         if (field === 'acceptRules') return { acceptRules: t('lock.register.rulesRequired') };
         break;
       case 'forbidden':
@@ -111,6 +116,7 @@ export function RegisterForm({ onCancel, className }: RegisterFormProps): JSX.El
         username: username.trim(),
         password,
         acceptRules: rules ? accepted : null,
+        gender,
       });
       push({
         id: 'self-signup',
@@ -150,6 +156,38 @@ export function RegisterForm({ onCancel, className }: RegisterFormProps): JSX.El
         error={errors.displayName}
         disabled={busy}
       />
+      <div role="radiogroup" aria-label={t('lock.register.gender')} className="flex flex-col gap-2">
+        <span className="text-sm font-medium text-muted">{t('lock.register.gender')}</span>
+        <div className="grid grid-cols-2 gap-3">
+          {GENDERS.map((g) => (
+            <button
+              key={g}
+              type="button"
+              role="radio"
+              aria-checked={gender === g}
+              data-nav="true"
+              disabled={busy}
+              onClick={() => {
+                setGender(g);
+                setErrors((e) => ({ ...e, gender: undefined }));
+              }}
+              className={clsx(
+                'focus-ring h-14 rounded-md border text-lg font-semibold transition-colors',
+                gender === g
+                  ? 'border-accent bg-accent/15 text-text'
+                  : 'border-text/15 bg-text/[0.04] text-muted hover:bg-text/[0.08]',
+              )}
+            >
+              {t(g === 'male' ? 'lock.register.genderMale' : 'lock.register.genderFemale')}
+            </button>
+          ))}
+        </div>
+        {errors.gender && (
+          <p role="alert" className="text-sm font-medium text-danger">
+            {errors.gender}
+          </p>
+        )}
+      </div>
       <Input
         name="username"
         size="lg"

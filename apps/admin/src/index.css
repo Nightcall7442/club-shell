@@ -168,6 +168,14 @@
   .section-body-headed {
     padding-top: 12px;
   }
+  @media (max-width: 767px) {
+    .section-body {
+      padding: 16px;
+    }
+    .section-body-headed {
+      padding-top: 12px;
+    }
+  }
 
   /*
    * KPI cards (`KpiCard`, the strip in `kpi.tsx`): 92 high; on a short screen (≤ 840 px, a 1366×768 counter) 68 high
@@ -205,6 +213,58 @@
     .kpi-card .kpi-sub {
       font-size: 11px;
     }
+  }
+  /* The shift report's figures on a narrow phone (`ShiftPage.tsx`): one row each, the label left, the sum right. */
+  @media (max-width: 439px) {
+    .kpi-row.h-20 {
+      height: 48px;
+      padding-top: 0;
+      padding-bottom: 0;
+    }
+    .kpi-row .kpi-body {
+      width: 100%;
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .kpi-row .kpi-label {
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      letter-spacing: 0.1em;
+    }
+    .kpi-row .kpi-value {
+      flex-shrink: 0;
+    }
+    .kpi-row .kpi-value > .num-dot {
+      font-size: 20px !important;
+    }
+    .kpi-row .kpi-unit {
+      display: inline;
+    }
+  }
+  /* A phone's strip (`kpi.tsx`): two by two, 84 high, labels on one line. */
+  .kpi-phone .kpi-card {
+    height: 84px;
+    padding: 10px 12px;
+  }
+  .kpi-phone .kpi-attention.kpi-card {
+    padding-left: 14px;
+  }
+  .kpi-phone .kpi-card .kpi-big {
+    font-size: 26px;
+  }
+  .kpi-phone .kpi-card .kpi-money {
+    font-size: 21px;
+  }
+  .kpi-phone .kpi-card .kpi-sub {
+    font-size: 11px;
+  }
+  .kpi-phone .kpi-label {
+    overflow: hidden;
+    white-space: nowrap;
+    letter-spacing: 0.1em;
   }
 
   /* ---- Type ---- */
@@ -631,5 +691,14 @@ html[data-lite] .glass-rail {
   #print-root * {
     color: #000 !important;
     background: transparent !important;
+  }
+}
+
+/* A phone: Safari zooms into any field under 16 px when it takes focus, and the console would stay zoomed in. */
+@media (max-width: 767px) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  select,
+  textarea {
+    font-size: 16px !important;
   }
 }

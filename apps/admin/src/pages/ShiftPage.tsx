@@ -51,6 +51,9 @@ const uzs = (minor: number | null | undefined): string =>
 /** Each language by its own name, as language pickers do. */
 const LANG_NAME: Record<Lang, string> = { ru: 'Русский', uz: 'Oʻzbekcha', en: 'English' }; // i18n-ignore
 
+/** The feed choice of the owner's own operations (D-101): not a shift id. */
+const OWNER_FEED = 'owner';
+
 function dateTime(iso: string | null): string {
   if (!iso) return '—';
   return new Date(iso).toLocaleString(dateLocale(), {
@@ -91,7 +94,7 @@ function Stat({
       unit={value === '0' ? undefined : unit}
       tone={value === '0' && tone !== 'warn' ? 'quiet' : 'default'}
       valueClassName={tone === 'warn' ? '!text-warning' : undefined}
-      className="[-webkit-backdrop-filter:none] [backdrop-filter:none]"
+      className="kpi-row [-webkit-backdrop-filter:none] [backdrop-filter:none]"
     />
   );
 }
@@ -120,7 +123,12 @@ function StatGroup({
         <span aria-hidden="true" className="h-px min-w-6 flex-1 bg-gradient-to-r from-accent/[0.18] to-accent/[0.04]" />
         {aside && <span className="label tracking-[0.14em]">{aside}</span>}
       </div>
-      {children && <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-6">{children}</div>}
+      {/* A phone: one card to a row, so a sum of millions is read whole, not «6…». */}
+      {children && (
+        <div className="grid grid-cols-2 gap-2.5 max-[439px]:grid-cols-1 max-[439px]:gap-2 md:grid-cols-3 xl:grid-cols-6">
+          {children}
+        </div>
+      )}
       {foot && <p className="text-xs leading-5 text-muted">{foot}</p>}
     </div>
   );
@@ -466,13 +474,15 @@ export default function ShiftPage({ isOwner = false }: { isOwner?: boolean }): J
   const diff = counted - expected;
   const debtTotal = debts.reduce((a, d) => a + d.debt.amount, 0);
 
-  // The feed: the open shift by default; a cashier may also read the last closed one, the owner any.
+  // The feed: the open shift by default; a cashier may also read the last closed one, the owner any — and the owner's own
+  // operations (D-101), which are in no shift.
   const feedChoices = [
     ...(shift ? [{ id: shift.id, label: t('Текущая смена') }] : []),
     ...(isOwner ? history : history.slice(0, 1)).map((s) => ({
       id: s.id,
       label: `${dateTime(s.openedAt)} · ${s.staffName}`,
     })),
+    ...(isOwner ? [{ id: OWNER_FEED, label: t('Операции владельца') }] : []),
   ];
   const feedId = feedShift && feedChoices.some((c) => c.id === feedShift) ? feedShift : (feedChoices[0]?.id ?? '');
   const feedKinds: OperationKind[] = FEED_FILTERS.find((f) => f.id === feedFilter)?.kinds ?? [];
@@ -557,13 +567,13 @@ export default function ShiftPage({ isOwner = false }: { isOwner?: boolean }): J
         >
           {hasFeed && (
             <Section
-              title={t('Операции смены')}
+              title={feedId === OWNER_FEED ? t('Операции владельца') : t('Операции смены')}
               className={clsx(twoColumns && 'xl:h-full')}
               actions={
                 feedChoices.length > 1 ? (
                   <select
                     aria-label={t('Смена')}
-                    className={clsx(inputCls, '!h-9 w-60 !text-[13px]')}
+                    className={clsx(inputCls, '!h-9 w-60 !text-[13px] max-md:!h-11 max-md:w-full')}
                     value={feedId}
                     onChange={(e) => setFeedShift(e.target.value)}
                   >
@@ -588,7 +598,8 @@ export default function ShiftPage({ isOwner = false }: { isOwner?: boolean }): J
               <div className={clsx('flex min-h-0 flex-1 flex-col', twoColumns && 'xl:relative xl:min-h-[24rem]')}>
                 <OperationsFeed
                   placement="page"
-                  shiftId={feedId}
+                  shiftId={feedId === OWNER_FEED ? null : feedId}
+                  owner={feedId === OWNER_FEED}
                   kinds={feedKinds}
                   className={clsx('max-h-[32rem]', twoColumns && 'xl:absolute xl:inset-0 xl:max-h-none')}
                 />

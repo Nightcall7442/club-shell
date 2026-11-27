@@ -1,6 +1,7 @@
 using ClubShell.Agent.Ipc;
 using ClubShell.Contracts.Commands;
 using ClubShell.Contracts.Ipc;
+using ClubShell.Contracts.Pcs;
 using ClubShell.Contracts.Sessions;
 using ClubShell.Contracts.Users;
 using ClubShell.Core.Abstractions;
@@ -26,8 +27,19 @@ public sealed class SignInGuard : IDisposable
     private readonly IServerClient _server;
     private readonly IClock _clock;
     private readonly ILogger<SignInGuard> _logger;
+    /// <summary>Pause after the server refused a token for an offline sign-in before it is asked again.</summary>
+    public static readonly TimeSpan UpgradeRetryPause = TimeSpan.FromMinutes(1);
+
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly IServiceProvider? _services;
+    /// <summary>
+    /// How long a sign-in from the offline cache without a session here is kept once the server is back before the player
+    /// is asked to sign in again (they may be about to start one).
+    /// </summary>
+    public static readonly TimeSpan NoSessionGrace = TimeSpan.FromSeconds(30);
+
+    private DateTimeOffset _upgradeNotBefore = DateTimeOffset.MinValue;
+    private (Guid UserId, DateTimeOffset At)? _noSessionSince;
     private bool _disposed;
 
     /// <summary>Creates the guard and subscribes to <see cref="IServerClient.UserTokenRejected"/>.</summary>
@@ -110,6 +122,96 @@ public sealed class SignInGuard : IDisposable
 
         _logger.LogInformation("Access token of user {UserId} expired at {ExpiresAt}", user.Id, expiresAt);
         await EndSignInAsync(user, AuthExpiredReason.TokenExpired, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Heartbeat answer (D-100): the server's player token of this PC after its slide. When it is the signed-in player's
+    /// held token, the local expiry (the token store's and the sign-in's) follows the server's, so a player who signed in
+    /// more than <c>Auth:UserTokenHours</c> ago is not signed out by the sign-in-time expiry once their session ends.
+    /// </summary>
+    public async Task ApplyServerTokenAsync(HeartbeatPlayerToken? token, CancellationToken cancellationToken)
+    {
+        if (token is null || _tokens.User is not { } held || held.UserId != token.UserId || held.ExpiresAt == token.ExpiresAt)
+        {
+            return;
+        }
+
+        await _tokens.SetUserAsync(held with { ExpiresAt = token.ExpiresAt }, cancellationToken).ConfigureAwait(false);
+        if (_users.ExtendTo(token.UserId, token.ExpiresAt))
+        {
+            _logger.LogDebug("Player token of {UserId} now lives until {ExpiresAt}", token.UserId, token.ExpiresAt);
+        }
+    }
+
+    /// <summary>
+    /// Maintenance tick while the server is reachable (D-100): a player signed in from the offline cache holds no server
+    /// token, so every player call would be refused. With a session of theirs open on this PC the Agent asks the server for
+    /// a token of that player (<c>POST /agents/{pcId}/players/{userId}/token</c>, which checks the session is theirs) and the
+    /// sign-in becomes an online one. Without a session of theirs here nothing proves the player to the server any more:
+    /// they are asked to sign in again (<c>auth.expired {tokenExpired}</c>) — nothing of theirs is running. A refusal with
+    /// their session still open (not replayed to the server yet) is asked again later.
+    /// </summary>
+    public async Task UpgradeOfflineSignInAsync(CancellationToken cancellationToken)
+    {
+        if (_users.IsSigningOut || _users.User is not { } user || (_tokens.User is { } held && held.UserId == user.Id))
+        {
+            return;
+        }
+
+        if (!OwnSessionOpen(user) || _sessions.Current is not { } session)
+        {
+            // Not at the first tick: the sign-in may have just fallen back to the cache, and a session start may follow.
+            if (_noSessionSince is not { } since || since.UserId != user.Id)
+            {
+                _noSessionSince = (user.Id, _clock.UtcNow);
+                return;
+            }
+
+            if (_clock.UtcNow - since.At < NoSessionGrace)
+            {
+                return;
+            }
+
+            _noSessionSince = null;
+            _logger.LogInformation("User {UserId} signed in from the offline cache without a session here; the server is back, asking for a new sign-in", user.Id);
+            await EndSignInAsync(user, AuthExpiredReason.TokenExpired, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        _noSessionSince = null;
+
+        if (_clock.UtcNow < _upgradeNotBefore)
+        {
+            return;
+        }
+
+        AuthResponse auth;
+        try
+        {
+            auth = await _server.IssuePlayerTokenAsync(session.PcId, user.Id, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ServerApiException ex) when (!ex.IsRetryable)
+        {
+            // Not this player's session on the server yet (an offline start not replayed), or an older server: later.
+            _upgradeNotBefore = _clock.UtcNow + UpgradeRetryPause;
+            _logger.LogInformation("Server token for the offline sign-in of {UserId} refused ({Code} {Reason}); asking again later", user.Id, ex.Code, ex.Reason);
+            return;
+        }
+
+        if (auth.User.Id != user.Id || _users.User?.Id != user.Id)
+        {
+            // The answer is not for the player signed in now (signed out meanwhile): its token must not stay.
+            if (_tokens.User?.UserId == auth.User.Id && _users.User?.Id != auth.User.Id)
+            {
+                await _tokens.SetUserAsync(null, CancellationToken.None).ConfigureAwait(false);
+            }
+
+            return;
+        }
+
+        _upgradeNotBefore = DateTimeOffset.MinValue;
+        _users.Set(auth.User, auth.ExpiresAt, ConnectivityState.Online);
+        _logger.LogInformation("Offline sign-in of {UserId} now holds a server token until {ExpiresAt}", user.Id, auth.ExpiresAt);
     }
 
     /// <summary>

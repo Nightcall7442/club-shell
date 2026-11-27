@@ -70,4 +70,23 @@ public sealed class AgentUpdaterTests : IDisposable
         await _applier.Received(1).ApplyAsync(UpdateComponent.Agent, Arg.Any<CancellationToken>());
         _updater.IsRequested(UpdateComponent.Agent).Should().BeFalse();
     }
+
+    [Fact]
+    public async Task A_mandatory_package_waits_for_the_end_of_the_session_too()
+    {
+        // D-99: applying it restarts the Agent (or the Shell) under the player's game.
+        _applier.GetPendingAsync(UpdateComponent.Agent, Arg.Any<CancellationToken>())
+            .Returns(new PendingUpdate(UpdateComponent.Agent, "1.0.22", Path.Combine(_root, "a.msi"), "00", true, T0, "1.0.21", 0));
+        _sessions.State.Returns(SessionState.Active);
+
+        var answer = await _updater.HandleCommandAsync(new UpdateCommand(UpdateComponent.Agent, ApplyNow: true), CancellationToken.None);
+        var apply = await _updater.ApplyAsync(UpdateComponent.Agent, CancellationToken.None);
+
+        answer.Scheduled.Should().BeTrue();
+        apply.Scheduled.Should().BeTrue();
+        await _applier.DidNotReceive().ApplyAsync(Arg.Any<UpdateComponent>(), Arg.Any<CancellationToken>());
+        AgentUpdater.MayApply(mandatory: true, sessionOpen: true, requested: true, inApplyWindow: true).Should().BeFalse();
+        AgentUpdater.MayApply(mandatory: true, sessionOpen: false, requested: false, inApplyWindow: false).Should().BeTrue();
+        AgentUpdater.MayApply(mandatory: false, sessionOpen: false, requested: false, inApplyWindow: false).Should().BeFalse();
+    }
 }

@@ -144,8 +144,10 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
             await SyncCoreAsync(cancellationToken).ConfigureAwait(false);
             if (_session is not null && _state.IsTimerRunning() && !_session.IsOpenEnded && _timer.SecondsLeft <= 0 && _state != SessionState.Ending)
             {
-                _logger.LogInformation("Session {SessionId} expired while the agent was down; ending", _session.Id);
-                await EndCoreAsync(SessionEndReason.TimeUp, settleWithServer: true, cancellationToken).ConfigureAwait(false);
+                // D-99: the same grace as a time-up the Agent saw itself — an Agent that restarted (an update, a crash)
+                // past the end used to close the player's game at once, without the last warning and its minute.
+                _logger.LogInformation("Session {SessionId} expired while the agent was down; ending after the grace", _session.Id);
+                await BeginTimeUpGraceCoreAsync().ConfigureAwait(false);
             }
         }
         finally
@@ -423,7 +425,10 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
     }
 
     /// <inheritdoc />
-    public async Task<PlaySession> LockAsync(string? reason, CancellationToken cancellationToken)
+    public Task<PlaySession> LockAsync(string? reason, CancellationToken cancellationToken) => LockAsync(reason, null, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<PlaySession> LockAsync(string? reason, SessionLockedData? data, CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -440,7 +445,8 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
             }
 
             _stateBeforeLock = _state;
-            _timerPausedByLock = _state == SessionState.Active && PauseTimerOnLock;
+            bool stopClock = data?.ClockStopped == true && session.IsPrepaid && !session.IsOpenEnded;
+            _timerPausedByLock = _state == SessionState.Active && (PauseTimerOnLock || stopClock);
             if (_timerPausedByLock)
             {
                 _timer.Pause();
@@ -451,7 +457,10 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
             _state = SessionState.Locked;
             _logger.LogInformation("Session {SessionId} locked ({Reason})", session.Id, reason ?? "user");
             await PersistCoreAsync(cancellationToken).ConfigureAwait(false);
-            await RecordAsync(SessionEvent.Of(session.Id, SessionEventType.Locked, now), queue: true, cancellationToken).ConfigureAwait(false);
+            var locked = data is null
+                ? SessionEvent.Of(session.Id, SessionEventType.Locked, now)
+                : new SessionEvent(session.Id, SessionEventType.Locked, now, JsonDefaults.ToElement(data with { ClockStopped = stopClock ? true : null }));
+            await RecordAsync(locked, queue: true, cancellationToken).ConfigureAwait(false);
             return Snapshot()!;
         }
         finally
@@ -1300,26 +1309,36 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
                     return;
                 }
 
-                var grace = TimeSpan.FromSeconds(Math.Max(0, _settings.CurrentValue.Session.GraceSec));
-                _logger.LogInformation("Session {SessionId} time is up; grace {Grace}", _session.Id, grace);
-                if (_state == SessionState.Locked)
-                {
-                    _stateBeforeLock = SessionState.Active;
-                }
-
-                _state = SessionState.Ending;
-                _session = _session with { State = SessionState.Ending };
-                await PersistCoreAsync(CancellationToken.None).ConfigureAwait(false);
-                await RecordAsync(SessionEvent.Warning(_session.Id, _clock.UtcNow, 0), queue: true, CancellationToken.None).ConfigureAwait(false);
-                CancelGrace();
-                _graceCts = new CancellationTokenSource();
-                _ = GraceThenEndAsync(grace, _graceCts.Token);
+                await BeginTimeUpGraceCoreAsync().ConfigureAwait(false);
             }
             finally
             {
                 _gate.Release();
             }
         });
+    }
+
+    /// <summary>
+    /// Time is up: the session goes to <see cref="SessionState.Ending"/>, the player gets the last warning, and it ends
+    /// after <c>session.graceSec</c> (caller holds the gate and checked the session is open and timed).
+    /// </summary>
+    private async Task BeginTimeUpGraceCoreAsync()
+    {
+        var session = _session!;
+        var grace = TimeSpan.FromSeconds(Math.Max(0, _settings.CurrentValue.Session.GraceSec));
+        _logger.LogInformation("Session {SessionId} time is up; grace {Grace}", session.Id, grace);
+        if (_state == SessionState.Locked)
+        {
+            _stateBeforeLock = SessionState.Active;
+        }
+
+        _state = SessionState.Ending;
+        _session = session with { State = SessionState.Ending };
+        await PersistCoreAsync(CancellationToken.None).ConfigureAwait(false);
+        await RecordAsync(SessionEvent.Warning(session.Id, _clock.UtcNow, 0), queue: true, CancellationToken.None).ConfigureAwait(false);
+        CancelGrace();
+        _graceCts = new CancellationTokenSource();
+        _ = GraceThenEndAsync(grace, _graceCts.Token);
     }
 
     private async Task GraceThenEndAsync(TimeSpan grace, CancellationToken cancellationToken)

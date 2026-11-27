@@ -9,6 +9,7 @@
  * *enabled* hook instance (so a Modal's instance shadows the screen underneath it).
  */
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore, type RefObject } from 'react';
+import { markActivity } from '@/lib/activity';
 import { nudgeRange, rangeStepsPerPress } from '@/lib/range';
 import { events, isTauri, type GamepadButtonName } from '@/lib/tauri';
 
@@ -262,6 +263,8 @@ function startRepeat(dir: NavDirection): void {
 }
 
 function handleButton(name: string, pressed: boolean): void {
+  // Pad input is input: the idle prompt and the kiosk's idle timer must not count down on it (D-100).
+  markActivity();
   const inst = topInstance();
   if (!inst) {
     return;

@@ -13,7 +13,11 @@ using PlaySession = ClubShell.Contracts.Sessions.Session;
 
 namespace ClubShell.Agent.Session;
 
-/// <summary>Source of the player's idle state (the Shell over IPC, or a hook-based detector in the interactive session).</summary>
+/// <summary>
+/// Source of the player's idle state (the Shell over IPC, or a hook-based detector in the interactive session). None is
+/// registered today (D-99): the Agent's own detector ran in session 0, where <c>GetLastInputInfo</c> never sees the
+/// player, and would lock mid-game; the Shell's own idle lock (<c>idleTimeoutSec</c>, paused during a game) does the job.
+/// </summary>
 public interface IIdleSignal
 {
     /// <summary><see langword="true"/> when the player went idle past the configured threshold, <see langword="false"/> on activity.</summary>
@@ -208,7 +212,10 @@ public sealed class SessionLock : IDisposable
 
     /// <summary>
     /// Locks the session because the player's sign-in ended (<see cref="SessionLockOrigin.SignIn"/>); a staff lock stays a
-    /// staff lock. No-op (returns <see langword="null"/>) when no session is open.
+    /// staff lock. No-op (returns <see langword="null"/>) when no session is open. A guest's prepaid session stops its clock
+    /// behind this lock (D-100): a guest cannot sign in again, and their paid time must not run out into the time-up and
+    /// the sign-out while the desk is called; the desk's end refunds what is left. A member's goes on as designed: they
+    /// sign in again and play on.
     /// </summary>
     public async Task<PlaySession?> LockForSignInAsync(string? reason, CancellationToken cancellationToken)
     {
@@ -219,7 +226,8 @@ public sealed class SessionLock : IDisposable
 
         try
         {
-            return await LockCoreAsync(reason ?? SignInReason, SessionLockOrigin.SignIn, cancellationToken).ConfigureAwait(false);
+            bool stopClock = OwnerIsGuest() && _sessions.Current is { IsPrepaid: true, IsOpenEnded: false };
+            return await LockCoreAsync(reason ?? SignInReason, SessionLockOrigin.SignIn, cancellationToken, new SessionLockedData("signIn", stopClock ? true : null)).ConfigureAwait(false);
         }
         catch (IpcException ex) when (ex.Code == ErrorCode.SessionNotActive)
         {
@@ -339,7 +347,7 @@ public sealed class SessionLock : IDisposable
     private bool OwnerIsGuest() =>
         _users?.User is { Role: UserRole.Guest } user && _sessions.Current is { } session && session.UserId == user.Id;
 
-    private async Task<PlaySession> LockCoreAsync(string? reason, SessionLockOrigin origin, CancellationToken cancellationToken)
+    private async Task<PlaySession> LockCoreAsync(string? reason, SessionLockOrigin origin, CancellationToken cancellationToken, SessionLockedData? data = null)
     {
         var session = _sessions.Current;
         var wasLocked = IsLocked;
@@ -357,7 +365,9 @@ public sealed class SessionLock : IDisposable
         PlaySession snapshot;
         try
         {
-            snapshot = await _sessions.LockAsync(reason, cancellationToken).ConfigureAwait(false);
+            snapshot = data is null
+                ? await _sessions.LockAsync(reason, cancellationToken).ConfigureAwait(false)
+                : await _sessions.LockAsync(reason, data, cancellationToken).ConfigureAwait(false);
         }
         catch
         {
@@ -584,17 +594,26 @@ public sealed class SessionLock : IDisposable
         }
     }
 
+    /// <summary>
+    /// Whether an idle signal locks the session: auto-lock on, an active session, not a guest's (a guest has nothing to
+    /// unlock with), and no game running — a player watching a cut-scene or a match replay gives no input (D-99).
+    /// </summary>
+    public static bool ShouldAutoLock(bool idle, bool enabled, SessionState state, bool guest, bool gameRunning) =>
+        idle && enabled && state == SessionState.Active && !guest && !gameRunning;
+
+    /// <summary>Whether a game runs now (an idle signal never locks the session then). Set by the DI layer.</summary>
+    public Func<bool>? IsGameRunning { get; set; }
+
     private void OnIdleChanged(object? sender, bool idle)
     {
-        if (!idle || _disposed || !AutoLockOnIdle || _sessions.State != SessionState.Active)
+        bool gameRunning = IsGameRunning?.Invoke() == true;
+        if (_disposed || !ShouldAutoLock(idle, AutoLockOnIdle, _sessions.State, OwnerIsGuest(), gameRunning))
         {
-            return;
-        }
+            if (idle && AutoLockOnIdle)
+            {
+                _logger.LogDebug("Idle auto-lock skipped (state {State}, game {Game})", _sessions.State, gameRunning);
+            }
 
-        if (OwnerIsGuest())
-        {
-            // A guest has nothing to unlock with: the idle lock would shut them out of the time they paid for.
-            _logger.LogDebug("Idle auto-lock skipped: the session is a guest's");
             return;
         }
 

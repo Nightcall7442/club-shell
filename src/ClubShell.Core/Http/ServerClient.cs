@@ -221,6 +221,14 @@ public sealed class ServerClient : IServerClient, IDisposable
     }
 
     /// <inheritdoc />
+    public async Task<AuthResponse> IssuePlayerTokenAsync(Guid pcId, Guid userId, CancellationToken cancellationToken)
+    {
+        var response = await PostEmptyAsync<AuthResponse>(Endpoints.AgentPlayerToken(pcId, userId), AuthMode.Agent, cancellationToken).ConfigureAwait(false);
+        await StoreUserTokensAsync(response, cancellationToken).ConfigureAwait(false);
+        return response;
+    }
+
+    /// <inheritdoc />
     public Task<PcsResponse> GetPcsAsync(string? zone, CancellationToken cancellationToken) =>
         GetAsync<PcsResponse>(Endpoints.Pcs + new QueryBuilder().Add("zone", zone), AuthMode.Agent, cancellationToken);
 
@@ -439,6 +447,10 @@ public sealed class ServerClient : IServerClient, IDisposable
             _logger.LogDebug("Lease {LeaseId} already released", leaseId);
         }
     }
+
+    /// <inheritdoc />
+    public Task<AccountLease> RenewAccountLeaseAsync(Guid gameId, Guid leaseId, CancellationToken cancellationToken) =>
+        PostEmptyAsync<AccountLease>(Endpoints.GameAccountLeaseRenew(gameId, leaseId), AuthMode.Agent, cancellationToken);
 
     /// <inheritdoc />
     public Task<SaveUploadTarget> GetSaveUploadTargetAsync(Guid gameId, Guid leaseId, CancellationToken cancellationToken) =>
@@ -838,7 +850,7 @@ public sealed class ServerClient : IServerClient, IDisposable
             cancellationToken.ThrowIfCancellationRequested();
             var server = _settings.CurrentValue.Server;
             var uri = Endpoints.BuildUri(server.BaseUrl, path);
-            var (response, accessToken) = await SendOnceAsync(method, uri, body, auth, idempotencyKey, etag, server, traceId, cancellationToken).ConfigureAwait(false);
+            var (response, accessToken, userToken) = await SendOnceAsync(method, uri, body, auth, idempotencyKey, etag, server, traceId, cancellationToken).ConfigureAwait(false);
             if (auth is AuthMode.None or AuthMode.Club)
             {
                 // Refresh and register: every answer, an error too, carries X-Server-Time. A registration that follows a
@@ -878,14 +890,14 @@ public sealed class ServerClient : IServerClient, IDisposable
 
             if (auth == AuthMode.User && string.Equals(reason, ReasonUserToken, StringComparison.Ordinal))
             {
-                RaiseUserTokenRejected(error);
+                RaiseUserTokenRejected(error, userToken);
             }
 
             throw error;
         }
     }
 
-    private async Task<(HttpResponseMessage Response, string? AccessToken)> SendOnceAsync(
+    private async Task<(HttpResponseMessage Response, string? AccessToken, UserTokens? UserToken)> SendOnceAsync(
         HttpMethod method,
         Uri uri,
         byte[]? body,
@@ -922,13 +934,13 @@ public sealed class ServerClient : IServerClient, IDisposable
             request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
         }
 
-        var accessToken = Authorize(request, auth, server);
+        var accessToken = Authorize(request, auth, server, out var userToken);
         var started = _clock.GetTimestamp();
         try
         {
             var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
             _logger.LogDebug("{Method} {Path} -> {Status} in {ElapsedMs} ms", method.Method, uri.PathAndQuery, (int)response.StatusCode, _clock.GetElapsedTime(started).TotalMilliseconds);
-            return (response, accessToken);
+            return (response, accessToken, userToken);
         }
         catch (HttpRequestException ex)
         {
@@ -954,8 +966,9 @@ public sealed class ServerClient : IServerClient, IDisposable
         return new ServerApiException(code, status, null, traceId.ToString("D"), $"{code.Describe()}: {exception.Message}", exception);
     }
 
-    private string? Authorize(HttpRequestMessage request, AuthMode auth, ServerSettings server)
+    private string? Authorize(HttpRequestMessage request, AuthMode auth, ServerSettings server, out UserTokens? userToken)
     {
+        userToken = null;
         switch (auth)
         {
             case AuthMode.None:
@@ -993,6 +1006,7 @@ public sealed class ServerClient : IServerClient, IDisposable
                 if (auth == AuthMode.User && _tokens.User is { } user)
                 {
                     request.Headers.Add(UserTokenHeader, user.AccessToken);
+                    userToken = user;
                 }
 
                 return tokens.AccessToken;
@@ -1047,8 +1061,25 @@ public sealed class ServerClient : IServerClient, IDisposable
         return response;
     }
 
-    private void RaiseUserTokenRejected(ServerApiException error)
+    /// <summary>
+    /// <c>401 userToken</c> on a call that carried <paramref name="sent"/>: reported only when that token is still the one held.
+    /// A call without a player token (a sign-in from the offline cache, or none held) proves nothing about anyone's sign-in,
+    /// and the answer to a call that left before a new sign-in is about the token it carried, not the new one.
+    /// </summary>
+    private void RaiseUserTokenRejected(ServerApiException error, UserTokens? sent)
     {
+        if (sent is null)
+        {
+            _logger.LogInformation("A player call without a player token was refused (userToken); no sign-in to end");
+            return;
+        }
+
+        if (_tokens.User is not { } held || !string.Equals(held.AccessToken, sent.AccessToken, StringComparison.Ordinal))
+        {
+            _logger.LogInformation("The refused player token of {UserId} is no longer the one held; the current sign-in is kept", sent.UserId);
+            return;
+        }
+
         string? problem = error.Error?.Details is { ValueKind: JsonValueKind.Object } details
             && details.TryGetProperty("problem", out var value)
             && value.ValueKind == JsonValueKind.String
@@ -1057,7 +1088,7 @@ public sealed class ServerClient : IServerClient, IDisposable
         _logger.LogWarning("The player's token was refused ({Problem})", problem ?? "userToken");
         try
         {
-            UserTokenRejected?.Invoke(this, new UserTokenRejectedEventArgs(_tokens.User?.UserId, problem));
+            UserTokenRejected?.Invoke(this, new UserTokenRejectedEventArgs(sent.UserId, problem));
         }
         catch (Exception ex)
         {

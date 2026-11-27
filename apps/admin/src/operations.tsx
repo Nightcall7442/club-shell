@@ -11,6 +11,9 @@
  *
  * A desk top-up has «Исправить / отменить…» (D-91): the right amount in one step, or the whole top-up back by its method.
  *
+ * The owner's own operations (D-101) are in no shift's feed: `owner` lists them instead (the Смена page's «Операции
+ * владельца»), each row marked «Владелец»; the owner takes their own sale or top-up back from there at any time.
+ *
  * Polls `GET /admin/shift/operations` every 5 s while the page is visible and refetches when the shift's money changes
  * ({@link useShift}`.version`); «Ещё» pages back with the server's cursor. A server without the route (404) hides it.
  */
@@ -315,6 +318,14 @@ function Row({
             roomy ? 'text-[13px] leading-[18px]' : 'text-xs leading-[15px]',
           )}
         >
+          {op.owner && (
+            <span
+              data-owner-op
+              className="inline-flex h-4 shrink-0 items-center rounded-sm border border-accent/40 bg-accent/[0.06] px-1.5 font-mono text-[8.5px] font-semibold uppercase leading-none tracking-[0.12em] text-accent"
+            >
+              {t('Владелец')}
+            </span>
+          )}
           {op.voided && (
             <span className="inline-flex h-4 shrink-0 items-center rounded-sm border border-danger/40 bg-danger/[0.06] px-1.5 font-mono text-[8.5px] font-semibold uppercase leading-none tracking-[0.12em] text-danger-ink">
               {op.kind === 'topUp' ? t('отменено') : t('аннулирован')}
@@ -394,12 +405,15 @@ function Row({
  */
 export function OperationsFeed({
   shiftId = null,
+  owner: ownerOps = false,
   kinds,
   placement,
   headless = false,
   className,
 }: {
   shiftId?: string | null;
+  /** The owner's own operations (D-101) instead of a shift's. */
+  owner?: boolean;
   kinds?: OperationKind[];
   placement: 'column' | 'panel' | 'page';
   headless?: boolean;
@@ -420,8 +434,8 @@ export function OperationsFeed({
   const [error, setError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const kindsKey = (kinds ?? []).join(',');
-  const query = useRef({ shiftId, kinds, paged });
-  query.current = { shiftId, kinds, paged };
+  const query = useRef({ shiftId, kinds, paged, ownerOps });
+  query.current = { shiftId, kinds, paged, ownerOps };
   // Answers of a previous shift / filter that arrive late are dropped.
   const generation = useRef(0);
   // The shift the rows are of (undefined: none answered yet). Following the open shift, the next one (or none, after a
@@ -431,7 +445,11 @@ export function OperationsFeed({
   const load = useCallback(async (): Promise<void> => {
     const gen = generation.current;
     try {
-      const r = await clubApi.operations({ shiftId: query.current.shiftId, kinds: query.current.kinds });
+      const r = await clubApi.operations({
+        shiftId: query.current.shiftId,
+        kinds: query.current.kinds,
+        owner: query.current.ownerOps,
+      });
       if (gen !== generation.current) return;
       const shiftNow = r.shift?.id ?? null;
       const other = shown.current !== undefined && shown.current !== shiftNow;
@@ -458,7 +476,7 @@ export function OperationsFeed({
     setNext(null);
     setPaged(false);
     void load();
-  }, [shiftId, kindsKey, load]);
+  }, [shiftId, kindsKey, ownerOps, load]);
 
   useEffect(() => {
     if (version > 0) void load();
@@ -478,7 +496,7 @@ export function OperationsFeed({
     const gen = generation.current;
     setLoadingMore(true);
     try {
-      const r = await clubApi.operations({ shiftId, kinds, before: next });
+      const r = await clubApi.operations({ shiftId, kinds, before: next, owner: ownerOps });
       if (gen !== generation.current) return;
       setPaged(true);
       setItems((list) => merge(list, r.items));
@@ -553,7 +571,7 @@ export function OperationsFeed({
       {page && items.length === 0 && (
         <EmptyState
           compact
-          title={page.shift ? t('Операций пока нет') : t('Смена не открыта')}
+          title={page.shift || ownerOps ? t('Операций пока нет') : t('Смена не открыта')}
           className="border-t border-accent/[0.07]"
         />
       )}
@@ -606,7 +624,10 @@ function voidable(
   op: Operation,
   { owner, openShiftId, feedShiftId }: { owner: boolean; openShiftId: string | null; feedShiftId: string | null },
 ): boolean {
-  if (op.kind !== 'shopSale' || op.voided || !op.saleId || !openShiftId) return false;
+  if (op.kind !== 'shopSale' || op.voided || !op.saleId) return false;
+  // The owner's own sale (D-101): the owner's to take back, with or without a shift.
+  if (op.owner) return owner;
+  if (!openShiftId) return false;
   if (op.method !== 'balance' && feedShiftId !== openShiftId) return false;
   return owner || Date.now() - Date.parse(op.at) <= VOID_WINDOW_MIN * 60_000;
 }
@@ -624,8 +645,10 @@ function cancellable(
     feedShiftId,
   }: { owner: boolean; me: string | null; openShiftId: string | null; feedShiftId: string | null },
 ): boolean {
-  if (op.kind !== 'topUp' || op.voided || !op.paid?.transactionId || !openShiftId || feedShiftId !== openShiftId)
-    return false;
+  if (op.kind !== 'topUp' || op.voided || !op.paid?.transactionId) return false;
+  // The owner's own top-up (D-101): only the owner, at any time, no shift involved.
+  if (op.owner) return owner;
+  if (!openShiftId || feedShiftId !== openShiftId) return false;
   return owner || (op.staffName === me && Date.now() - Date.parse(op.at) <= CANCEL_WINDOW_MIN * 60_000);
 }
 

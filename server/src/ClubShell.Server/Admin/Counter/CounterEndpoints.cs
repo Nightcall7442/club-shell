@@ -372,8 +372,9 @@ public static partial class CounterEndpoints
         NpgsqlConnection c, NpgsqlTransaction tx, StaffContext staff, PcRow pc, Session session, TopUpPosted? paid, SessionEffects effects,
         DateTimeOffset now, bool guest)
     {
-        // The club API key opens without a shift (RequireOpenAsync does not gate it): its entry then joins none.
-        var shiftId = session.IsPrepaid ? null
+        // The club API key opens without a shift (RequireOpenAsync does not gate it): its entry then joins none. The owner's
+        // seat is the owner's own operation (D-101): it joins no shift at all.
+        var shiftId = session.IsPrepaid || staff.OwnerOp ? null
             : staff.StaffId is null ? (await ShiftEndpoints.TryLockOpenShiftAsync(c, tx, staff.ClubId, strong: false))?.Id
             : (await ShiftEndpoints.LockOpenShiftAsync(c, tx, staff.ClubId, strong: false)).Id;
         foreach (var other in await c.QueryAsync<Guid>(
@@ -397,7 +398,7 @@ public static partial class CounterEndpoints
                 minutes = row.PurchasedSec / 60, prepaid = session.IsPrepaid, tariff = row.Tariff, package = row.IsPackage, discountPct = row.DiscountPct,
                 sessionId = session.Id, quote, paidAmount = paid?.Amount, paidMethod = paid?.Method, transactionId = paid?.Id, guest = guest ? true : (bool?)null,
             },
-            shiftId);
+            shiftId, staff.OwnerOp);
         return AdminJson.ToElement(new AdminSessionResult(
             session, session.Cost, Money.Uzs(row.Balance), User: new AdminSessionUser(session.UserId, row.Who, row.Role),
             Payment: paid is null ? null : new AdminSessionPaid(paid.Transaction, Money.Uzs(paid.Bonus))));
@@ -479,7 +480,8 @@ public static partial class CounterEndpoints
                 {
                     minutes = bought, tariff, package, sessionId = s.Id, quote = await QuoteOfAsync(c, tx, s.Id),
                     paidAmount = paid?.Amount, paidMethod = paid?.Method, transactionId = paid?.Id,
-                });
+                },
+                ownerOp: staff.OwnerOp);
             return new IdempotentResult(StatusCodes.Status200OK, AdminJson.ToElement(new AdminSessionResult(
                 session, Money.Uzs(charged), Money.Uzs(balance), Payment: paid is null ? null : new AdminSessionPaid(paid.Transaction, Money.Uzs(paid.Bonus)))));
         });
@@ -598,8 +600,10 @@ public static partial class CounterEndpoints
     /// </summary>
     private static async Task<TopUpPosted> PostTopUpAsync(
         NpgsqlConnection c, NpgsqlTransaction tx, StaffContext staff, SessionEffects effects, Guid userId, long amount, string method, DateTimeOffset now,
-        bool forSession = false, bool settleDebt = false, Guid? correctionOf = null)
+        bool forSession = false, bool settleDebt = false, Guid? correctionOf = null, bool? ownerOp = null)
     {
+        // The owner's top-up is the owner's own (D-101) — unless it corrects a cashier's, which stays in that shift.
+        var owner = ownerOp ?? staff.OwnerOp;
         var wallet = await c.QuerySingleOrDefaultAsync<(long Balance, string Who, bool Transient)?>(
             """
             SELECT w.main_balance, u.display_name, u.transient FROM wallets w JOIN users u ON u.id = w.user_id
@@ -628,8 +632,9 @@ public static partial class CounterEndpoints
         var id = Guid.CreateVersion7(now);
         var balance = await Ledger.PostAsync(c, tx, userId, allowOverdraft: false, now,
             new LedgerLine("topUp", amount, TopUpDescription(method), staff.ClubId, Method: method, StaffId: staff.StaffId, Id: id,
-                ShiftRequired: staff.StaffId is not null),
-            new LedgerLine("bonus", bonus, promoApplied ? $"Бонус за пополнение: акция +{promoPct}%" : "Бонус за пополнение", staff.ClubId, StaffId: staff.StaffId));
+                ShiftRequired: staff.StaffId is not null, OwnerOp: owner),
+            new LedgerLine("bonus", bonus, promoApplied ? $"Бонус за пополнение: акция +{promoPct}%" : "Бонус за пополнение", staff.ClubId, StaffId: staff.StaffId,
+                OwnerOp: owner));
         var row = await c.QuerySingleAsync<(long BalanceAfter, string Description, DateTimeOffset CreatedAt)>(
             "SELECT balance_after, description, created_at FROM ledger_entries WHERE id = @id", new { id }, tx);
         await Audit.WriteAsync(c, tx, staff, now, "topUp", userId, amount: amount, detail: wallet.Who,
@@ -637,7 +642,8 @@ public static partial class CounterEndpoints
             {
                 method, bonus, promoPct = promoApplied ? promoPct : (int?)null, transactionId = id, forSession = forSession ? true : (bool?)null,
                 debt = settleDebt ? true : (bool?)null, correctionOf,
-            });
+            },
+            ownerOp: owner);
         if (!settleDebt && amount >= await ClubSettingsEndpoints.BigTopupAtAsync(c, tx, staff.ClubId))
         {
             await Webhooks.EnqueueAsync(c, tx, staff.ClubId, "bigTopup", now, $"{wallet.Who}: {Webhooks.Sum(amount)}", new { userId, amount });
@@ -705,9 +711,9 @@ public static partial class CounterEndpoints
             var id = Guid.CreateVersion7(now);
             var balance = await Ledger.PostAsync(c, tx, userId, allowOverdraft: false, now,
                 new LedgerLine("adjustment", amount, "Списание долга: " + reason, staff.ClubId, SessionId: sessionId, StaffId: staff.StaffId, Id: id,
-                    Meta: new { kind = "debtWriteOff", reason }));
+                    Meta: new { kind = "debtWriteOff", reason }, OwnerOp: staff.OwnerOp));
             await Audit.WriteAsync(c, tx, staff, now, "debtWriteOff", userId, amount: amount, detail: $"{wallet.Who}: {reason}",
-                meta: new { reason, sessionId, transactionId = id });
+                meta: new { reason, sessionId, transactionId = id }, ownerOp: staff.OwnerOp);
             effects.Wallets.Add(userId);
             return new IdempotentResult(StatusCodes.Status200OK, AdminJson.ToElement(new { balance = Money.Uzs(balance), writtenOff = Money.Uzs(amount), transactionId = id }));
         });
@@ -764,15 +770,22 @@ public static partial class CounterEndpoints
                     new { reason = "payableChanged", payable = Money.Uzs(payable) });
             }
 
-            var shift = await ShiftEndpoints.LockOpenShiftAsync(c, tx, staff.ClubId, strong: true);
-            await ShiftEndpoints.EnsureDrawerAsync(c, tx, shift, amount);
+            // The owner pays the guest out in person (D-101): no shift, no drawer.
+            ShiftEndpoints.OpenShiftLock? shift = null;
+            if (!staff.OwnerOp)
+            {
+                shift = await ShiftEndpoints.LockOpenShiftAsync(c, tx, staff.ClubId, strong: true);
+                await ShiftEndpoints.EnsureDrawerAsync(c, tx, shift, amount);
+            }
+
             var id = Guid.CreateVersion7(now);
             var balance = await Ledger.PostAsync(c, tx, userId, allowOverdraft: false, now,
-                new LedgerLine("adjustment", -amount, PayoutDescription, staff.ClubId, Method: "cash", StaffId: staff.StaffId, Id: id, ShiftRequired: true));
+                new LedgerLine("adjustment", -amount, PayoutDescription, staff.ClubId, Method: "cash", StaffId: staff.StaffId, Id: id, ShiftRequired: true,
+                    OwnerOp: staff.OwnerOp));
             var row = await c.QuerySingleAsync<(long BalanceAfter, DateTimeOffset CreatedAt)>(
                 "SELECT balance_after, created_at FROM ledger_entries WHERE id = @id", new { id }, tx);
             await Audit.WriteAsync(c, tx, staff, now, "payout", userId, amount: amount, detail: who.DisplayName,
-                meta: new { method = "cash", transactionId = id }, shiftId: shift.Id);
+                meta: new { method = "cash", transactionId = id }, shiftId: shift?.Id, ownerOp: staff.OwnerOp);
             effects.Wallets.Add(userId);
             var transaction = new Transaction(id, userId, TransactionType.Adjustment, Money.Uzs(-amount), Money.Uzs(row.BalanceAfter), PayoutDescription, row.CreatedAt);
             return new IdempotentResult(StatusCodes.Status200OK, AdminJson.ToElement(new AdminPayoutResponse(

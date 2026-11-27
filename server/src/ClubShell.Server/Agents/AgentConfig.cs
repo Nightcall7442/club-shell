@@ -177,16 +177,18 @@ public static class AgentConfig
         var screensaver = settings.TryGetProperty("screensaver", out var ss) && ss.ValueKind == JsonValueKind.Object
             ? Admin.Screensaver.Read(ss.GetRawText()).ToShell()
             : null;
+        var look = Admin.BrandingLook.ToShell(branding);
         return new ShellClub(
             Name: Text(branding, "clubName") ?? clubName,
             Accent: Text(branding, "accent"),
             LogoUrl: Text(branding, "logoUrl"),
-            WallpaperUrl: Text(branding, "wallpaperUrl"),
+            WallpaperUrl: look is null ? Text(branding, "wallpaperUrl") : Admin.BrandingLook.AnchorWallpaper(branding, look),
             Banners: banners.Count > 0 ? banners : null,
             Rules: rules,
             Screensaver: screensaver,
             SelfSignup: Auth.SelfSignup.Enabled(settings),
-            PcLabel: Admin.PcLabel.ToShell(branding));
+            PcLabel: Admin.PcLabel.ToShell(branding),
+            Look: look);
     }
 
     /// <summary>

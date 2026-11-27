@@ -35,8 +35,14 @@ public sealed class SeedExamplesTests(ExampleCatalogFixture server) : IClassFixt
         var agent = await TestAgent.CreateAsync(server);
         var body = await Players.ReadAsync(await agent.SendAsync(HttpMethod.Get, "/api/v1/games"), 200);
 
-        Assert.Equal(16, body.GetProperty("total").GetInt32());
+        Assert.Equal(17, body.GetProperty("total").GetInt32());
         var games = body.GetProperty("items").EnumerateArray().ToList();
+
+        // ICCup: a launcher that hands over to war3.exe. Administrator rights are the owner's choice per club (the seed
+        // leaves them off: an elevated game runs with far more power than the player).
+        var iccup = games.Single(g => g.GetProperty("title").GetString() == "DotA (iCCup)");
+        Assert.False(iccup.GetProperty("runAsAdmin").GetBoolean());
+        Assert.Equal(["war3.exe"], iccup.GetProperty("gameProcessNames").EnumerateArray().Select(x => x.GetString()));
         Assert.Contains(games, g => g.GetProperty("title").GetString() == "Counter-Strike 2" && g.GetProperty("coverUrl").GetString()!.StartsWith("https://", StringComparison.Ordinal));
         Assert.Contains(games, g => g.GetProperty("title").GetString() == "Minecraft" && g.GetProperty("launcher").GetString() == "exe");
         Assert.Contains(games, g => g.GetProperty("title").GetString() == "Counter-Strike 1.6" && g.GetProperty("exePath").GetString() == @"G:\Counter Strike 1.6 PRO\cstrike.exe");

@@ -12,7 +12,8 @@ namespace ClubShell.Server.Wallet;
 /// <paramref name="Meta"/> carries the price quote of a charge (DESIGN §5.1). <paramref name="ShiftRequired"/>: money the
 /// cashier takes, which must land in the open shift's X/Z (else <c>409 shiftClosed</c>, the whole operation refused).
 /// <paramref name="Ref"/>: <c>Transaction.ref</c> when the row is not a session's (a bar sale or its void, D-52); a session's
-/// row refers to its session.
+/// row refers to its session. <paramref name="OwnerOp"/> (D-101): the owner's own operation — the rows join no shift (not even
+/// an open one), <c>ShiftRequired</c> does not apply and they are marked <c>owner_op</c>.
 /// </summary>
 public sealed record LedgerLine(
     string Type,
@@ -26,7 +27,8 @@ public sealed record LedgerLine(
     object? Meta = null,
     Guid? Id = null,
     bool ShiftRequired = false,
-    string? Ref = null);
+    string? Ref = null,
+    bool OwnerOp = false);
 
 /// <summary>
 /// The only writer of money (DESIGN §4.3): inside the caller's transaction it locks the wallet row
@@ -53,9 +55,10 @@ public static class Ledger
         }
 
         var clubId = lines.FirstOrDefault(l => l.ClubId is not null)?.ClubId;
-        var shiftId = clubId is null ? null : await c.QuerySingleOrDefaultAsync<Guid?>(
+        var ownerOp = clubId is not null && lines.Any(l => l.OwnerOp);
+        var shiftId = clubId is null || ownerOp ? null : await c.QuerySingleOrDefaultAsync<Guid?>(
             "SELECT id FROM shifts WHERE club_id = @clubId AND closed_at IS NULL FOR SHARE", new { clubId }, tx);
-        if (shiftId is null && lines.Any(l => l.ShiftRequired))
+        if (shiftId is null && !ownerOp && lines.Any(l => l.ShiftRequired))
         {
             throw new ApiException(StatusCodes.Status409Conflict, ErrorCode.Conflict, "Conflict: shiftClosed", new { reason = "shiftClosed" });
         }
@@ -76,9 +79,9 @@ public static class Ledger
             await c.ExecuteAsync(
                 """
                 INSERT INTO ledger_entries (id, op_id, user_id, network_id, club_id, type, amount, balance_after, method, description,
-                                            ref, session_id, shift_id, staff_id, pc_id, overdraft, meta, created_at)
+                                            ref, session_id, shift_id, staff_id, pc_id, overdraft, meta, created_at, owner_op)
                 VALUES (@id, @opId, @userId, @networkId, @clubId, @type, @amount, @balance, @method, @description,
-                        @reference, @sessionId, @shiftId, @staffId, @pcId, @overdraft, @meta::jsonb, @now)
+                        @reference, @sessionId, @shiftId, @staffId, @pcId, @overdraft, @meta::jsonb, @now, @ownerOp)
                 """,
                 new
                 {
@@ -88,6 +91,7 @@ public static class Ledger
                     reference = line.Ref ?? line.SessionId?.ToString(), sessionId = line.SessionId, staffId = line.StaffId, pcId = line.PcId,
                     overdraft = balance < 0 && line.Amount < 0,
                     meta = line.Meta is null ? null : JsonSerializer.Serialize(line.Meta, ServerJson.Options), now,
+                    ownerOp = ownerOp && line.ClubId is not null,
                 },
                 tx);
         }

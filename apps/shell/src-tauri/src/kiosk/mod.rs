@@ -587,8 +587,14 @@ impl Kiosk {
                             }
                         }
                         GameState::Exited | GameState::Failed | GameState::Killed => {
-                            self.front.clear();
-                            self.window.clear_allowed_pids()
+                            // Only this game's pid leaves the allowlist: another game may still run
+                            // (D-99). The last game's exit leaves game mode, which clears it all.
+                            if let Some(pid) = change.pid.and_then(|p| u32::try_from(p).ok()) {
+                                if self.front.game_pid() == Some(pid) {
+                                    self.front.clear();
+                                }
+                                self.window.disallow_foreground_pid(pid);
+                            }
                         }
                     }
                 }
@@ -717,6 +723,13 @@ impl KioskControl for Kiosk {
         if !on {
             self.overlay.hide_unless(OverlayKind::Lock);
             self.window.clear_allowed_pids();
+        }
+    }
+
+    fn allow_game_pid(&self, pid: u32) {
+        if pid != 0 && !self.window.is_allowed_pid(pid) {
+            self.window.allow_foreground_pid(pid);
+            let _ = clubshell_winutil::window::allow_set_foreground(Some(pid));
         }
     }
 

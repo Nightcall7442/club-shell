@@ -59,6 +59,7 @@ public sealed class AgentWorker : BackgroundService
     private static readonly TimeSpan PolicyTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan SessionRestoreTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan GamesLoadTimeout = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan GamesReadoptTimeout = TimeSpan.FromMinutes(1);
 
     // Logging the kiosk user off, deleting the profile, relaunching the Shell and waiting for the profile to come
     // back so the preserved anti-cheat directories can be restored — around a minute on a healthy PC.
@@ -96,6 +97,8 @@ public sealed class AgentWorker : BackgroundService
     private readonly SignedInUserStore? _signedIn;
     private readonly Saves.IPlayerSaves? _saves;
     private readonly Users.AccountPrefsSync? _accountPrefs;
+    private readonly SignInRestoreGate? _restoreGate;
+    private readonly Games.IGameReadoption? _readoption;
 
     private volatile bool _ready;
     private Guid _persistedPcId;
@@ -125,8 +128,12 @@ public sealed class AgentWorker : BackgroundService
         SignInGuard? signIn = null,
         SignedInUserStore? signedIn = null,
         Saves.IPlayerSaves? saves = null,
-        Users.AccountPrefsSync? accountPrefs = null)
+        Users.AccountPrefsSync? accountPrefs = null,
+        SignInRestoreGate? restoreGate = null,
+        Games.IGameReadoption? readoption = null)
     {
+        _restoreGate = restoreGate;
+        _readoption = readoption;
         ArgumentNullException.ThrowIfNull(hwid);
         ArgumentNullException.ThrowIfNull(provisioner);
         ArgumentNullException.ThrowIfNull(profileReset);
@@ -206,7 +213,16 @@ public sealed class AgentWorker : BackgroundService
 
         try
         {
-            await StartupSequenceAsync(stoppingToken).ConfigureAwait(false);
+            try
+            {
+                await StartupSequenceAsync(stoppingToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                // A start that failed before the restore must not keep auth.status waiting (D-100).
+                _restoreGate?.Complete();
+            }
+
             _ready = true;
             _logger.LogInformation("Agent ready");
             await MaintenanceLoopAsync(stoppingToken).ConfigureAwait(false);
@@ -290,15 +306,31 @@ public sealed class AgentWorker : BackgroundService
             cancellationToken).ConfigureAwait(false);
 
         // 6a. The player of that session, still signed in (G2): restored only when the session is still theirs.
+        bool restored = false;
         if (_signedIn is not null)
         {
             try
             {
-                _ = _signedIn.Restore();
+                restored = _signedIn.Restore();
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogWarning(ex, "Saved sign-in could not be restored");
+            }
+        }
+
+        // D-100: auth.status answers now; a Shell that asked meanwhile (it reconnects before the restore is done) is told
+        // with a session.updated, on which it reads auth.status again.
+        _restoreGate?.Complete();
+        if (restored && _sessions.Current is { } restoredSession)
+        {
+            try
+            {
+                await _publisher.PublishAsync(IpcMessages.Events.SessionUpdated, restoredSession, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "session.updated after the sign-in restore was not published");
             }
         }
 
@@ -316,6 +348,14 @@ public sealed class AgentWorker : BackgroundService
         // 6b. Game catalogue (§7.3): the cached copy, then the server's. Nothing else loads it at start: without this step
         //     the Shell's Games screen was empty after every restart until the catalogue changed on the server.
         await RunStepAsync("games-load", _games.LoadAsync, GamesLoadTimeout, critical: false, cancellationToken).ConfigureAwait(false);
+
+        // 6c. D-99: the games the previous Agent followed (an update or a crash restarted it) still run — their jobs no
+        //     longer die with the Agent. Taken back after the session and the catalogue, so time-up and "close game"
+        //     reach them again and the Shell's games.running shows them.
+        if (_readoption is { } readoption)
+        {
+            await RunStepAsync("games-readopt", async ct => _ = await readoption.ReadoptAsync(ct).ConfigureAwait(false), GamesReadoptTimeout, critical: false, cancellationToken).ConfigureAwait(false);
+        }
 
         // 7. Profile hygiene (§6.1 step 9): a session that never closed cleanly leaves the previous player's profile
         //    on disk. Runs after the restore so a session that is still legitimately open is left alone.
@@ -419,6 +459,11 @@ public sealed class AgentWorker : BackgroundService
             {
                 await TickStepAsync("outbox", FlushOutboxAsync, cancellationToken).ConfigureAwait(false);
                 await TickStepAsync("session sync", _sessions.SyncWithServerAsync, cancellationToken).ConfigureAwait(false);
+                if (_signIn is not null)
+                {
+                    // After the sync: an offline start is on the server by now, so its player's token can be asked for (D-100).
+                    await TickStepAsync("offline sign-in upgrade", _signIn.UpgradeOfflineSignInAsync, cancellationToken).ConfigureAwait(false);
+                }
             }
 
             await TickStepAsync("health", _ => { ReportHealth(); return Task.CompletedTask; }, cancellationToken).ConfigureAwait(false);

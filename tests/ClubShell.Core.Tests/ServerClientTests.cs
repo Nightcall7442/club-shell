@@ -434,6 +434,43 @@ public sealed class ServerClientTests : IDisposable
     }
 
     [Fact]
+    public async Task A_player_call_without_a_player_token_is_refused_but_signs_nobody_out()
+    {
+        // A sign-in from the offline cache holds no server token: the server's 401 userToken says nothing about it.
+        await RegisterAsync();
+        _handler.Responder = _ => Json(HttpStatusCode.Unauthorized, ErrorBody(ErrorCode.Unauthorized, "No user token", "userToken", "t-none"));
+        var raised = false;
+        _client.UserTokenRejected += (_, _) => raised = true;
+
+        Func<Task> act = () => _client.GetBalanceAsync(UserId, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<ServerApiException>()).Which.Reason.Should().Be("userToken");
+        _handler.Requests.Should().ContainSingle().Which.Header("X-User-Token").Should().BeNull();
+        raised.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task A_refusal_of_a_token_replaced_while_the_call_was_in_flight_is_not_reported()
+    {
+        await RegisterAsync();
+        await _tokens.SetUserAsync(new UserTokens(UserId, "user-old", "r", _clock.UtcNow.AddHours(1)), CancellationToken.None);
+        _handler.Responder = _ =>
+        {
+            // A new sign-in lands while the old call is on the wire.
+            _tokens.SetUserAsync(new UserTokens(UserId, "user-new", "r", _clock.UtcNow.AddHours(12)), CancellationToken.None).GetAwaiter().GetResult();
+            return Json(HttpStatusCode.Unauthorized, ErrorBody(ErrorCode.Unauthorized, "User token invalid", "userToken", "t-old"));
+        };
+        var raised = false;
+        _client.UserTokenRejected += (_, _) => raised = true;
+
+        Func<Task> act = () => _client.GetBalanceAsync(UserId, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ServerApiException>();
+        _handler.Requests.Should().ContainSingle().Which.Header("X-User-Token").Should().Be("user-old");
+        raised.Should().BeFalse("the refused token is not the current sign-in's");
+    }
+
+    [Fact]
     public async Task Bad_credentials_at_sign_in_are_neither_refreshed_nor_retried()
     {
         await RegisterAsync();

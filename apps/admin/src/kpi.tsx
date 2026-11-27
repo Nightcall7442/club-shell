@@ -14,12 +14,12 @@ import clsx from 'clsx';
 import { AdminError, clubApi, type Today } from '@/api';
 import { AudioUnlockChip, CallsBell, groupCalls, useCalls } from '@/calls';
 import { pcLabel } from '@/clientSearch';
-import { exactDigits, moneyParts } from '@/format';
+import { exactDigits, moneyParts, moneyShort } from '@/format';
 import { t } from '@/i18n';
 import { BellIcon } from '@/icons';
 import { methodName } from '@/paybox';
 import { CashMenu, cashSplit, useShift } from '@/shift';
-import { KpiBody, KpiCard, Ticks } from '@/ui';
+import { KpiBody, KpiCard, NARROW_QUERY, PHONE_QUERY, Ticks, useMedia } from '@/ui';
 
 const TODAY_POLL_MS = 15_000;
 const nf = new Intl.NumberFormat('ru-RU');
@@ -82,8 +82,28 @@ function todaySplit(today: Today): { taken: number; cash: number; cashless: numb
   };
 }
 
-function OccupancyCard({ hall }: { hall: HallCounts | null }): JSX.Element {
+function OccupancyCard({ hall, phone }: { hall: HallCounts | null; phone: boolean }): JSX.Element {
   const unavailable = hall ? Math.max(0, hall.total - hall.occupied - hall.free) : 0;
+  if (phone) {
+    // Half a phone's width: the count and the free seats under it, without the ticks.
+    return (
+      <KpiCard
+        label={t('Занято')}
+        big
+        value={
+          hall ? (
+            <>
+              {hall.occupied}
+              <span className="ml-1 text-base text-muted">/{hall.total}</span>
+            </>
+          ) : (
+            <span className="text-muted">—</span>
+          )
+        }
+        sub={hall ? t('{n} свободно', { n: hall.free }) : undefined}
+      />
+    );
+  }
   return (
     <KpiCard
       label={t('Занято')}
@@ -124,7 +144,7 @@ function OccupancyCard({ hall }: { hall: HallCounts | null }): JSX.Element {
  * «Принято за смену»: the card is the button and its text reads «Принято за смену 38 400 сум нал … · безнал …» (real
  * spaces between the pieces); the split by method opens under it.
  */
-function TodayCard({ today }: { today: Today | null }): JSX.Element {
+function TodayCard({ today, phone }: { today: Today | null; phone: boolean }): JSX.Element {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -162,13 +182,13 @@ function TodayCard({ today }: { today: Today | null }): JSX.Element {
       >
         <KpiBody
           label={t('Принято за смену')}
-          value={moneyParts(split.taken).num}
+          value={phone ? moneyShort(split.taken) : moneyParts(split.taken).num}
           unit={t('сум')}
           sub={`${t('нал {sum}', { sum: exactDigits(split.cash) })} · ${t('безнал {sum}', { sum: exactDigits(split.cashless) })}`}
         />
       </button>
       {open && (
-        <dl className="panel-solid anim-rise absolute left-0 top-[calc(100%+8px)] z-40 grid w-[19rem] grid-cols-2 gap-x-5 gap-y-1.5 px-4 py-3.5 text-xs">
+        <dl className="panel-solid anim-rise absolute left-0 top-[calc(100%+8px)] z-40 grid w-[19rem] max-w-[calc(100vw-2rem)] grid-cols-2 gap-x-5 gap-y-1.5 px-4 py-3.5 text-xs">
           {(['cash', 'card', 'payme', 'click', 'uzum'] as const).map((m) => (
             <div key={m} className="flex justify-between gap-2">
               <dt className="text-muted">{methodName(m)}</dt>
@@ -201,23 +221,25 @@ function TodayCard({ today }: { today: Today | null }): JSX.Element {
   );
 }
 
-function CashCard(): JSX.Element {
+function CashCard({ phone }: { phone: boolean }): JSX.Element {
   const { shift, x, expectedCash } = useShift();
   const split = x ? cashSplit(x) : null;
   const cash = shift && split ? (expectedCash ?? split.cash) : null;
   return (
     <KpiCard
       label={t('В кассе')}
-      value={cash !== null ? moneyParts(cash).num : '—'}
-      unit={cash !== null ? t('сум') : undefined}
+      value={cash !== null ? (phone ? moneyShort(cash) : moneyParts(cash).num) : '—'}
+      // Narrow: the «±» sits in the corner over the figure's line, so the figure goes without «сум».
+      unit={cash !== null && !phone ? t('сум') : undefined}
       tone={cash !== null ? 'default' : 'quiet'}
       sub={shift && split ? t('безнал {sum} сум', { sum: nf.format(Math.round(split.cashless / 100)) }) : undefined}
       aside={<CashMenu variant="kpi" />}
+      asideCorner={phone}
     />
   );
 }
 
-function CallsCard(): JSX.Element {
+function CallsCard({ phone }: { phone: boolean }): JSX.Element {
   const calls = useCalls();
   const groups = groupCalls(calls ?? []);
   const first = groups[0];
@@ -231,6 +253,7 @@ function CallsCard(): JSX.Element {
         tone="quiet"
         sub={t('Нет вызовов')}
         aside={<AudioUnlockChip variant="kpi" />}
+        asideCorner={phone}
       />
     );
   }
@@ -256,6 +279,7 @@ function CallsCard(): JSX.Element {
           <CallsBell variant="kpi" />
         </>
       }
+      asideCorner={phone}
     />
   );
 }
@@ -263,20 +287,28 @@ function CallsCard(): JSX.Element {
 /** The strip: four cards on a grid of 1 : 1 : 1.45 : 1.12 (three without today's money on an older server). */
 export function KpiStrip({ hall }: { hall: HallCounts | null }): JSX.Element {
   const { today, missing } = useToday();
+  // A phone: two by two, a size smaller, at the top of the page (it scrolls away with it). A tablet: one row of the
+  // same compact cards.
+  const phone = useMedia(PHONE_QUERY);
+  const narrow = useMedia(NARROW_QUERY);
   return (
     <section
       aria-label={t('Сводка смены')}
       className={clsx(
         'relative z-20 grid gap-3',
-        missing
-          ? 'grid-cols-[minmax(0,1fr)_minmax(0,1.45fr)_minmax(0,1.12fr)]'
-          : 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.45fr)_minmax(0,1.12fr)]',
+        phone
+          ? 'kpi-phone mb-3 grid-cols-2 gap-2'
+          : narrow
+            ? clsx('kpi-phone gap-2.5', missing ? 'grid-cols-3' : 'grid-cols-4')
+            : missing
+              ? 'grid-cols-[minmax(0,1fr)_minmax(0,1.45fr)_minmax(0,1.12fr)]'
+              : 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.45fr)_minmax(0,1.12fr)]',
       )}
     >
-      <OccupancyCard hall={hall} />
-      {!missing && <TodayCard today={today} />}
-      <CashCard />
-      <CallsCard />
+      <OccupancyCard hall={hall} phone={narrow} />
+      {!missing && <TodayCard today={today} phone={narrow} />}
+      <CashCard phone={narrow} />
+      <CallsCard phone={narrow} />
     </section>
   );
 }

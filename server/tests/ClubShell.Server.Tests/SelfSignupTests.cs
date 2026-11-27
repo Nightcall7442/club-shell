@@ -57,7 +57,7 @@ public sealed class SelfSignupTests(ServerFixture server) : LedgerCheckedTest(se
         foreach (var (username, reason) in new[] { ("ab", "min"), (new string('x', 33), "max"), ("tursunov.bobur", "taken") })
         {
             Assert.Equal(("username", reason), StaffAdminTests.Details(await ExpectAsync(Server, 400, HttpMethod.Post, "/clients", cashier,
-                new { username, displayName = "Кто-то" })));
+                new { gender = "male", username, displayName = "Кто-то" })));
         }
     }
 
@@ -107,6 +107,8 @@ public sealed class SelfSignupTests(ServerFixture server) : LedgerCheckedTest(se
         Assert.Equal(1, await Players.ScalarAsync<int>(Server,
             "SELECT count(*)::int FROM audit_entries WHERE action = 'clientSelfSignup' AND user_id = @id AND pc_id = @PcId AND staff_id IS NULL", new { id, agent.PcId }));
 
+        Assert.Equal("female", await Players.ScalarAsync<string>(Server, "SELECT gender FROM users WHERE id = @id", new { id }));
+
         // The token is a player's: the account is theirs on this PC; the password signs in again on another PC.
         agent.UserToken = auth.GetProperty("accessToken").GetString();
         using (var me = await agent.SendAsync(HttpMethod.Get, $"/api/v1/users/{id}"))
@@ -125,6 +127,9 @@ public sealed class SelfSignupTests(ServerFixture server) : LedgerCheckedTest(se
                      (Body(agent, "Кто", $"samir-{tag}"), "username", "taken"),
                      (Body(agent, "Кто", $"y-{tag}", password: "abc"), "password", "min"),
                      (Body(agent, "Кто", $"y-{tag}", password: ""), "password", "required"),
+                     // D-104: the gender is required, male or female.
+                     (Body(agent, "Кто", $"y-{tag}", gender: null), "gender", "required"),
+                     (Body(agent, "Кто", $"y-{tag}", gender: "other"), "gender", "enum"),
                  })
         {
             Assert.Equal((field, reason), Details(Expect(await agent.RawPostAsync(Register, body), 400)));
@@ -164,15 +169,16 @@ public sealed class SelfSignupTests(ServerFixture server) : LedgerCheckedTest(se
         await SetAsync(selfSignup: null, rules: null);
     }
 
-    private static object Body(TestAgent agent, string name, string? username = "auto", string password = Players.Password, bool acceptRules = true) => new
+    private static object Body(
+        TestAgent agent, string name, string? username = "auto", string password = Players.Password, bool acceptRules = true, string? gender = "female") => new
     {
         pcId = agent.PcId, hwid = agent.Hwid, displayName = name,
         username = username == "auto" ? $"u-{Guid.NewGuid():N}"[..20] : username,
-        password, acceptRules,
+        password, acceptRules, gender,
     };
 
     private async Task<JsonElement> AddAsync(string cashier, object body) =>
-        (await ExpectAsync(Server, 200, HttpMethod.Post, "/clients", cashier, body)).GetProperty("client");
+        (await ExpectAsync(Server, 200, HttpMethod.Post, "/clients", cashier, Players.WithGender(body))).GetProperty("client");
 
     /// <summary><c>limits.selfSignup</c> and the Russian rules straight in the settings (the console's save is tested above).</summary>
     private Task SetAsync(bool? selfSignup, string? rules) => Players.ExecuteAsync(Server,

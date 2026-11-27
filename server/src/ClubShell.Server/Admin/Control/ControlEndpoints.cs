@@ -8,9 +8,10 @@ using Npgsql;
 
 namespace ClubShell.Server.Admin;
 
+/// <summary>A journal entry; <c>owner</c> (beyond the contract, D-101) — the owner's own operation, in no shift.</summary>
 public sealed record AuditEntry(
     Guid Id, DateTimeOffset At, string StaffId, string StaffName, Guid? ShiftId, string Action, Guid? UserId, Guid? PcId, long Amount, string Detail,
-    IReadOnlyDictionary<string, JsonElement> Meta);
+    IReadOnlyDictionary<string, JsonElement> Meta, bool Owner = false);
 
 public sealed record ControlFlag(
     string Id, string Kind, string Severity, DateTimeOffset At, string StaffId, string StaffName, Guid? ShiftId, Guid? UserId, Guid? PcId, long Amount,
@@ -89,7 +90,7 @@ public static class ControlEndpoints
                 FROM ledger_entries l LEFT JOIN staff s ON s.id = l.staff_id
                 WHERE l.club_id = @ClubId AND l.shift_id IS NULL AND l.created_at >= @from AND l.created_at <= @to
                   AND l.type IN ('topUp', 'charge', 'refund', 'bonus')
-                  AND l.staff_id IS NOT NULL
+                  AND l.staff_id IS NOT NULL AND NOT l.owner_op
                 GROUP BY l.op_id, l.staff_id, s.name
                 """,
                 new { staff.ClubId, from, to }))
@@ -131,7 +132,8 @@ public static class ControlEndpoints
         var earlyByShift = new Dictionary<string, List<AuditEntry>>();
         var topUpsByClient = new Dictionary<string, List<AuditEntry>>();
         var noShiftUsers = new List<(Guid? UserId, DateTimeOffset At)>();
-        foreach (var e in entries)
+        // The owner's own operations (D-101) join no shift on purpose and are nobody's to control.
+        foreach (var e in entries.Where(e => !e.Owner))
         {
             if (e.Action == "shiftClose" && Number(e, "diff") is { } diff && diff < -settings.ShortfallFrom)
             {
@@ -247,7 +249,7 @@ public static class ControlEndpoints
 
     private sealed class EntryRow
     {
-        public const string Columns = "id, at, staff_id, staff_name, shift_id, action, user_id, pc_id, amount, detail, meta::text AS meta";
+        public const string Columns = "id, at, staff_id, staff_name, shift_id, action, user_id, pc_id, amount, detail, meta::text AS meta, owner_op";
 
         public Guid Id { get; init; }
         public DateTimeOffset At { get; init; }
@@ -260,6 +262,7 @@ public static class ControlEndpoints
         public long Amount { get; init; }
         public string Detail { get; init; } = "";
         public string Meta { get; init; } = "{}";
+        public bool OwnerOp { get; init; }
 
         /// <summary>Only scalar facts go out (<c>AdminAuditEntry.meta</c>: string, number, boolean or null).</summary>
         public AuditEntry ToWire()
@@ -268,7 +271,7 @@ public static class ControlEndpoints
             var meta = doc.RootElement.EnumerateObject()
                 .Where(p => p.Value.ValueKind is not (JsonValueKind.Object or JsonValueKind.Array))
                 .ToDictionary(p => p.Name, p => p.Value.Clone());
-            return new AuditEntry(Id, At, StaffId?.ToString() ?? "apiKey", StaffName, ShiftId, Action, UserId, PcId, Amount, Detail, meta);
+            return new AuditEntry(Id, At, StaffId?.ToString() ?? "apiKey", StaffName, ShiftId, Action, UserId, PcId, Amount, Detail, meta, OwnerOp);
         }
     }
 

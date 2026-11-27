@@ -94,6 +94,7 @@ export function record(
     detail?: string;
     meta?: AuditEntry['meta'];
     shiftId?: string | null;
+    owner?: boolean;
   } = {},
 ): AuditEntry {
   const c = club();
@@ -109,6 +110,7 @@ export function record(
     amount: fields.amount ?? 0,
     detail: fields.detail ?? '',
     meta: fields.meta ?? {},
+    ...(fields.owner ? { owner: true } : {}),
   };
   c.audit.unshift(entry);
   if (c.audit.length > MAX_AUDIT) c.audit.length = MAX_AUDIT;

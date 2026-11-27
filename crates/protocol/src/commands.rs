@@ -232,6 +232,9 @@ pub struct AuthRegisterRequest {
     /// The player accepted the club rules; required when the club has rules.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub accept_rules: Option<bool>,
+    /// The player's gender, `male` or `female`; required (D-104).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gender: Option<String>,
 }
 
 /// Response of `auth.status`.
@@ -1928,6 +1931,18 @@ pub struct HeartbeatKioskUser {
     pub profile_reset_failed: Option<bool>,
 }
 
+/// The PC's player token in a heartbeat answer (beyond the contract, D-100): whose it is and until
+/// when it lives.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct HeartbeatPlayerToken {
+    /// Player of the token.
+    pub user_id: Uuid,
+    /// Expiry after the beat's slide.
+    #[serde(with = "crate::wire::ts")]
+    pub expires_at: DateTime<Utc>,
+}
+
 /// Response of `POST /agents/{pcId}/heartbeat`.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -1954,6 +1969,13 @@ pub struct HeartbeatResponse {
     /// an older server.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stateless: Option<bool>,
+    /// Beyond the contract (D-100): the player token of this PC as it stands after the beat — the
+    /// server slides it while its player's session is open here, and the agent's copy of the expiry
+    /// follows, so a player signed in for more than `Auth:UserTokenHours` is not signed out by a
+    /// stale local expiry when the session ends. `null` when the PC holds no live player token, or
+    /// from an older server.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub player_token: Option<HeartbeatPlayerToken>,
 }
 
 /// Running game summary in a heartbeat.

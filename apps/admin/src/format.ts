@@ -21,6 +21,20 @@ export function moneyParts(minor: number): { num: string; unit: string } {
 }
 
 /**
+ * A HUD readout where width is short (a phone's KPI card): `945 000` stays whole, a million and more becomes `6,2 млн`,
+ * a billion `1,4 млрд` (one decimal, none when it is zero). Whole сум; the unit is the caller's.
+ */
+export function moneyShort(minor: number): string {
+  const whole = Math.round(minor / 100);
+  const abs = Math.abs(whole);
+  const sign = whole < 0 ? '−' : '';
+  if (abs < 1_000_000) return `${sign}${nf.format(abs)}`;
+  const [div, word] = abs >= 1_000_000_000 ? [1_000_000_000, t('млрд')] : [1_000_000, t('млн')];
+  const short = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(Math.floor((abs / div) * 10) / 10);
+  return `${sign}${short} ${word}`;
+}
+
+/**
  * UZS to the tiyin: `45 000 сум`, or `45 000,50 сум` when the amount has a minor part. For amounts that must be taken
  * exactly (a debt, a guest's price): a rounded figure would be refused by the server.
  */
