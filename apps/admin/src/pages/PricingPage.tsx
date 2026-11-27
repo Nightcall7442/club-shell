@@ -47,7 +47,7 @@ const TABS: { id: Tab; title: string }[] = [
   { id: 'tariffs', title: 'Тарифы' },
   { id: 'days', title: 'Цены по дням' },
   { id: 'groups', title: 'Группы клиентов' },
-  { id: 'bonus', title: 'Бонусы, x2 и промокоды' },
+  { id: 'bonus', title: 'Бонусы и акции' },
   { id: 'happy', title: 'Счастливые часы' },
   { id: 'loyalty', title: 'Лояльность' },
 ];
@@ -429,12 +429,12 @@ function TariffsTab({ zones, pending }: { zones: string[]; pending: boolean }): 
             {editing !== 'new' &&
               (confirmDelete ? (
                 <span className="flex items-center gap-1">
-                  <span className="text-sm text-muted">{t('Удалить?')}</span>
+                  <span className="mr-1 text-sm text-muted">{t('Удалить тариф?')}</span>
                   <Button variant="danger" size="sm" disabled={busy} onClick={() => void remove()}>
-                    {t('Да')}
+                    {t('Удалить')}
                   </Button>
-                  <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(false)}>
-                    {t('Нет')}
+                  <Button variant="ghost" size="sm" autoFocus onClick={() => setConfirmDelete(false)}>
+                    {t('Отмена')}
                   </Button>
                 </span>
               ) : (

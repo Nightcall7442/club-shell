@@ -38,7 +38,7 @@ const TRIGGERS: { kind: TriggerKind; label: string }[] = [
 
 const ACTIONS: { kind: ActionKind; label: string }[] = [
   { kind: 'message', label: 'Сообщение на экран' },
-  { kind: 'bonus', label: 'Бонус на баланс' },
+  { kind: 'bonus', label: 'Бонус на бонусный счёт' },
   { kind: 'lockPc', label: 'Заблокировать ПК' },
   { kind: 'shutdownPc', label: 'Выключить ПК' },
   { kind: 'notifyOwner', label: 'Уведомить владельца' },
@@ -133,7 +133,7 @@ function actionText(a: RuleAction): string {
     case 'message':
       return t('сообщение на экран: «{text}»', { text: a.text });
     case 'bonus':
-      return t('бонус {sum} на баланс', { sum: uzs(a.amount) });
+      return t('бонус {sum} на бонусный счёт', { sum: uzs(a.amount) });
     case 'lockPc':
       return t('заблокировать ПК');
     case 'shutdownPc':
@@ -220,9 +220,12 @@ function RuleRow({
           className="absolute bottom-3 left-0 top-3 w-0.5 bg-accent shadow-[0_0_10px_rgb(var(--c-accent)/0.8)]"
         />
       )}
-      <Toggle checked={rule.enabled} onChange={onToggle} />
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <h3 className={clsx('truncate text-sm font-semibold', off ? 'text-muted' : 'text-hi')}>{rule.name}</h3>
+      <Toggle ariaLabel={rule.name} checked={rule.enabled} onChange={onToggle} />
+      {/* A phone: the rule's text takes the row beside the switch, the counter and the buttons go under it. */}
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5 max-md:basis-[calc(100%-4.25rem)]">
+        <h3 className={clsx('truncate text-sm font-semibold max-md:whitespace-normal', off ? 'text-muted' : 'text-hi')}>
+          {rule.name}
+        </h3>
         <p className="text-[13px] leading-relaxed text-dim">
           <span className="label mr-1.5">{t('Если')}</span>
           <span className={off ? 'text-muted' : 'text-text'}>{triggerText(rule.trigger)}</span>
@@ -231,7 +234,7 @@ function RuleRow({
           <span className={off ? 'text-muted' : 'text-text'}>{actionText(rule.action)}</span>
         </p>
       </div>
-      <div className="flex flex-col items-end gap-1.5 text-right">
+      <div className="flex flex-col items-end gap-1.5 text-right max-md:w-full max-md:flex-row max-md:items-baseline max-md:gap-3 max-md:text-left">
         <span className="tnum font-mono text-[12.5px] font-medium text-text">
           {t('Сработало: {n}', { n: rule.fired })}
         </span>

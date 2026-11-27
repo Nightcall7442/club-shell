@@ -847,17 +847,17 @@ function GameEditor({
         {game &&
           (confirmDelete ? (
             <span className="flex items-center gap-1">
-              <span className="text-sm text-muted">{t('Удалить игру?')}</span>
+              <span className="mr-1 text-sm text-muted">{t('Удалить игру?')}</span>
               <Button
                 variant="danger"
                 size="sm"
                 disabled={busy}
                 onClick={() => void run(() => clubApi.deleteGame(game.id))}
               >
-                {t('Да')}
+                {t('Удалить')}
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(false)}>
-                {t('Нет')}
+              <Button variant="ghost" size="sm" autoFocus onClick={() => setConfirmDelete(false)}>
+                {t('Отмена')}
               </Button>
             </span>
           ) : (

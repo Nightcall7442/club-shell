@@ -33,7 +33,7 @@ import { ArrowRightIcon, CashIcon } from '@/icons';
 import { PAY_METHOD_LABEL } from '@/labels';
 import { Receipt, printDocument, type ReceiptData } from '@/print';
 import { useShift } from '@/shift';
-import { Button, Kbd, Note, Sheet, StatusDot, type ButtonSize } from '@/ui';
+import { Button, KEY_HINT, Kbd, Note, Sheet, StatusDot, TOUCH_QUERY, useMedia, type ButtonSize } from '@/ui';
 
 /** Counter methods in button order; `code` is the Alt+digit hotkey (layout-independent `KeyboardEvent.code`). */
 export const PAY_METHODS: { id: PayMethod; label: string; hint: string; code: string }[] = [
@@ -224,6 +224,8 @@ export function PayBox({
   /** Does what the money is for; a throw is shown inline under the buttons, a success spends the box. */
   onPay: (p: Payment) => Promise<void>;
 }): JSX.Element {
+  // A touch screen has no keyboard: the key hints are left out there.
+  const keys = !useMedia(TOUCH_QUERY);
   const amountId = useId();
   const receivedId = useId();
   const shift = useShift();
@@ -332,7 +334,7 @@ export function PayBox({
         <StepLabel
           htmlFor={amountId}
           label={amountLabel ?? t('Сумма')}
-          hint={fixed ? t('Ровно эта сумма, до тийина') : t('Ввод с клавиатуры')}
+          hint={fixed ? t('Ровно эта сумма, до тийина') : keys ? t('Ввод с клавиатуры') : undefined}
           mono
           active={!fixed}
         />
@@ -414,12 +416,14 @@ export function PayBox({
         </>
       )}
 
-      <div className={clsx(!(fixed && totalShown) && 'mt-[18px]')}>
-        <StepLabel label={t('Способ оплаты')} hint={hints ? 'Alt+1…5' : undefined} />
+      {/* Five methods in one row: a narrow box (the bar's column, a phone) sets them smaller so «Наличные» stays whole, and
+          only a box too narrow even for that takes three a row. */}
+      <div className={clsx('[container-type:inline-size]', !(fixed && totalShown) && 'mt-[18px]')}>
+        <StepLabel label={t('Способ оплаты')} hint={hints && keys ? 'Alt+1…5' : undefined} />
         <div
           role="radiogroup"
           aria-label={t('Способ оплаты')}
-          className="mt-2 grid grid-cols-5 gap-2 max-[439px]:grid-cols-3"
+          className="mt-2 grid grid-cols-5 gap-2 [@container(max-width:419px)]:gap-1.5 [@container(max-width:349px)]:grid-cols-3"
         >
           {PAY_METHODS.map((m) => (
             <button
@@ -430,7 +434,7 @@ export function PayBox({
               disabled={frozen}
               onClick={() => setMethod(m.id)}
               className={clsx(
-                'choice focus-ring flex h-11 items-center justify-center gap-1.5 rounded-md px-1 text-[13.5px] font-semibold disabled:cursor-not-allowed disabled:opacity-60',
+                'choice focus-ring flex h-11 items-center justify-center gap-1.5 rounded-md px-1 text-[13.5px] font-semibold disabled:cursor-not-allowed disabled:opacity-60 [@container(max-width:419px)]:px-0.5 [@container(max-width:419px)]:text-[12px]',
                 method === m.id && 'choice-on',
               )}
             >
@@ -586,9 +590,9 @@ export function ReceiptButton({
 /**
  * The footer of a money sheet (spec §7.9): whose shift takes the money (the green dot), and «Esc отмена». It never says
  * «Смена открыта» (that line belongs to the shift page alone); without a shift it leaves the left side to the box's own
- * note.
+ * note. Once the money is taken (`done`) there is nothing left to cancel: Esc only closes the sheet, and it says so.
  */
-export function PayFooter(): JSX.Element {
+export function PayFooter({ done = false }: { done?: boolean } = {}): JSX.Element {
   const { shift } = useShift();
   return (
     <>
@@ -600,9 +604,9 @@ export function PayFooter(): JSX.Element {
           </>
         )}
       </span>
-      <span className="flex shrink-0 items-center gap-2 text-xs text-muted">
+      <span className={clsx('flex shrink-0 items-center gap-2 text-xs text-muted', KEY_HINT)}>
         <Kbd className="h-[22px] px-[7px] text-text">Esc</Kbd>
-        {t('отмена')}
+        {done ? t('закрыть') : t('отмена')}
       </span>
     </>
   );
@@ -682,14 +686,16 @@ export function TopUpSheet({
   } | null>(null);
   const heading = title ?? t('Пополнить · {name}', { name: payee.displayName });
   const balance = moneyParts((done?.balance ?? payee.balance).amount);
-  const bonus = payee.bonus ? moneyParts(payee.bonus.amount) : null;
+  // After the top-up the well shows the bonus it credited too (D-106), as the balance well shows the new balance.
+  const bonusNow = payee.bonus || done?.bonus ? (payee.bonus?.amount ?? 0) + (done?.bonus ?? 0) : null;
+  const bonus = bonusNow !== null ? moneyParts(bonusNow) : null;
   return (
     <Sheet
       title={heading}
       onClose={onClose}
       caption={context?.art ? undefined : context?.caption}
       hero={context?.art ? <TopUpHero title={heading} context={context} /> : undefined}
-      footer={<PayFooter />}
+      footer={<PayFooter done={done !== null} />}
     >
       <dl className="grid grid-cols-2 gap-2">
         <div className="well flex h-[60px] flex-col justify-between px-3.5 py-3">
@@ -705,12 +711,7 @@ export function TopUpSheet({
             {bonus ? (
               <>
                 {/* The accent only for a real bonus: an empty «0» does not draw the eye. */}
-                <span
-                  className={clsx(
-                    'num-dot text-xl leading-none',
-                    (payee.bonus?.amount ?? 0) > 0 ? 'text-accent' : 'text-hi',
-                  )}
-                >
+                <span className={clsx('num-dot text-xl leading-none', (bonusNow ?? 0) > 0 ? 'text-accent' : 'text-hi')}>
                   {bonus.num}
                 </span>
                 <span className="text-[11.5px] font-medium leading-none text-muted">{bonus.unit}</span>

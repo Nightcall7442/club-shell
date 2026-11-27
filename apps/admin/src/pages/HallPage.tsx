@@ -286,6 +286,7 @@ function DevicePanel({
       <div className="flex items-center justify-between gap-2 border-t border-accent/[0.08] pt-4">
         {confirm ? (
           <div className="flex items-center gap-1.5">
+            <span className="mr-1 text-sm text-muted">{t('Удалить {name}?', { name: pc.name })}</span>
             <Button
               variant="danger"
               size="sm"
@@ -297,10 +298,10 @@ function DevicePanel({
                 }, null).then((ok) => !ok && setConfirm(false))
               }
             >
-              {t('Удалить {name}?', { name: pc.name })}
+              {t('Удалить')}
             </Button>
-            <Button variant="ghost" size="sm" disabled={busy} onClick={() => setConfirm(false)}>
-              {t('Нет')}
+            <Button variant="ghost" size="sm" disabled={busy} autoFocus onClick={() => setConfirm(false)}>
+              {t('Отмена')}
             </Button>
           </div>
         ) : (

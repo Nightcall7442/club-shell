@@ -404,7 +404,7 @@
     "quickActions": "Tezkor amallar",
     "allGames": "Barcha o'yinlar",
     "topUp": "To'ldirish",
-    "callAdmin": "Adminni chaqirish",
+    "callAdmin": "Administratorni chaqirish",
     "shop": "Ovqat buyurtma qilish",
     "lock": "Bloklash",
     "endSession": "Seansni tugatish",
@@ -889,12 +889,12 @@
     "dueHintGuest": "Tugatganingizda kassada to'lang.",
     "promo": {
       "title": "Promokod",
-      "hint": "Klub kodini kiriting — bonus darhol balansga tushadi.",
+      "hint": "Klub kodini kiriting — bonus darhol bonus hisobiga tushadi. Bonuslar — faqat vaqt uchun.",
       "field": "Promokod",
       "placeholder": "MASALAN, BONUS10",
       "apply": "Faollashtirish",
       "doneTitle": "Promokod faollashtirildi",
-      "done": "{{code}} kodi bo'yicha balansga +{{bonus}}",
+      "done": "{{code}} kodi bo'yicha +{{bonus}} bonus",
       "unknown": "Bunday kod yo'q — yozilishini tekshiring.",
       "expired": "Kodning amal qilish muddati tugagan.",
       "used": "Kod allaqachon ishlatilgan.",
@@ -1596,6 +1596,7 @@
     "muted": "Ovoz o'chirilgan",
     "unmuted": "Ovoz yoqilgan",
     "hudExtendConfirm": "{{minutes}} daqiqani {{price}} ga qo'shasizmi?",
+    "hudExtendAction": "Qo'shish",
     "hudExtendConfirmApprox": "{{minutes}} daqiqani taxminan {{price}} ga qo'shasizmi?"
   },
   "pcSettings": {

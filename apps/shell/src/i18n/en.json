@@ -404,7 +404,7 @@
     "quickActions": "Quick actions",
     "allGames": "All games",
     "topUp": "Top up",
-    "callAdmin": "Call admin",
+    "callAdmin": "Call administrator",
     "shop": "Order food",
     "lock": "Lock",
     "endSession": "End session",
@@ -889,12 +889,12 @@
     "dueHintGuest": "Pay at the desk when you finish.",
     "promo": {
       "title": "Promo code",
-      "hint": "Enter the club's code — the bonus lands on your balance at once.",
+      "hint": "Enter the club's code — the bonus lands on your bonus account at once. Bonus pays for time only.",
       "field": "Promo code",
       "placeholder": "E.G. BONUS10",
       "apply": "Redeem",
       "doneTitle": "Promo code redeemed",
-      "done": "+{{bonus}} to your balance for {{code}}",
+      "done": "+{{bonus}} in bonus for {{code}}",
       "unknown": "No such code — check how it is spelled.",
       "expired": "The code has expired.",
       "used": "The code has already been used.",
@@ -1596,6 +1596,7 @@
     "muted": "Muted",
     "unmuted": "Sound on",
     "hudExtendConfirm": "Add {{minutes}} min for {{price}}?",
+    "hudExtendAction": "Add time",
     "hudExtendConfirmApprox": "Add {{minutes}} min for about {{price}}?"
   },
   "pcSettings": {

@@ -294,7 +294,9 @@ export default function ClubPage(): JSX.Element {
                   key: 'on',
                   title: t('Показ'),
                   width: '4.5rem',
-                  render: (b) => <Toggle checked={b.enabled} onChange={(v) => banner(b.id, { enabled: v })} />,
+                  render: (b) => (
+                    <Toggle ariaLabel={t('Показ')} checked={b.enabled} onChange={(v) => banner(b.id, { enabled: v })} />
+                  ),
                 },
                 {
                   key: 'del',

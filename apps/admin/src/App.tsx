@@ -218,7 +218,16 @@ function Login({ onDone }: { onDone: (staff: StaffMember) => void }): JSX.Elemen
       const needsCode = e instanceof AdminError && e.details?.['field'] === 'clubCode';
       // With a code the server answers an unknown code and a wrong PIN alike (it does not tell which clubs exist).
       const refused = e instanceof AdminError && e.code === 'unauthorized' && code !== '';
-      setError(needsCode ? t('Введите код клуба') : refused ? t('Неверный код клуба или PIN') : describe(e));
+      const wrongPin = e instanceof AdminError && e.code === 'unauthorized';
+      setError(
+        needsCode
+          ? t('Введите код клуба')
+          : refused
+            ? t('Неверный код клуба или PIN')
+            : wrongPin
+              ? t('Неверный PIN')
+              : describe(e),
+      );
       setPin('');
     } finally {
       setBusy(false);

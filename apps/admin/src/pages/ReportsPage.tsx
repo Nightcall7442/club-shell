@@ -58,7 +58,7 @@ function RevenueChart({ rows }: { rows: Reports['byDay'] }): JSX.Element {
           {rows.map((r) => (
             <div
               key={r.date}
-              title={`${shortDate(r.date)} · ${t('Сеансы')} ${uzs(r.sessions)} · ${t('Магазин')} ${uzs(r.shop)}`}
+              title={`${shortDate(r.date)} · ${t('Сеансы')} ${uzs(r.sessions)} · ${t('Бар')} ${uzs(r.shop)}`}
               className="flex h-full min-w-0 flex-1 flex-col justify-end"
             >
               <div className="rounded-t-[2px] bg-dim/40" style={{ height: `${(r.shop / max) * 100}%` }} />
@@ -90,7 +90,7 @@ function RevenueChart({ rows }: { rows: Reports['byDay'] }): JSX.Element {
         </span>
         <span className="flex items-center gap-2">
           <span className="h-2.5 w-2.5 rounded-[2px] bg-dim/40" />
-          {t('Магазин')}
+          {t('Бар')}
         </span>
         <span className="label-sm ml-auto">{t('сум в день')}</span>
       </div>
@@ -170,7 +170,7 @@ export default function ReportsPage(): JSX.Element {
         <>
           <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
             <KpiCard compact label={t('Выручка сеансов')} value={sum(data.totals.sessions)} unit={t('сум')} />
-            <KpiCard compact label={t('Магазин')} value={sum(data.totals.shop)} unit={t('сум')} />
+            <KpiCard compact label={t('Бар')} value={sum(data.totals.shop)} unit={t('сум')} />
             <KpiCard compact label={t('Пополнения')} value={sum(data.totals.topUps)} unit={t('сум')} />
             <KpiCard compact label={t('Сеансов')} value={nf.format(data.totals.sessionsCount)} />
           </div>
@@ -249,7 +249,7 @@ export default function ReportsPage(): JSX.Element {
                   ),
                 },
                 { key: 'sessions', title: t('Сеансы'), num: true, render: (s) => <Sum minor={s.totals?.sessions} /> },
-                { key: 'shop', title: t('Магазин'), num: true, render: (s) => <Sum minor={s.totals?.shop} /> },
+                { key: 'shop', title: t('Бар'), num: true, render: (s) => <Sum minor={s.totals?.shop} /> },
                 { key: 'cash', title: t('Наличные'), num: true, render: (s) => <Sum minor={s.closingCash} /> },
               ]}
             />
