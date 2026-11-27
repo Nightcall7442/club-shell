@@ -652,7 +652,7 @@ function endSession(reason: SessionEndReason): SessionEndResult {
     // As the server: a player's own end (or the idle sign-out) returns nothing; only the desk refunds unused time.
     if (reason === 'admin' && s.secondsLeft > 60 && tariff && !tariff.isPackage) {
       refunded = tariffPriceFor(tariff, Math.floor(s.secondsLeft / 60));
-      pushTransaction('refund', refunded, `Refund: unused ${Math.floor(s.secondsLeft / 60)} min`, s.id);
+      pushTransaction('refund', refunded, 'Возврат за неиспользованное время', s.id);
     }
   } else if (tariff) {
     charged = tariffPriceFor(tariff, Math.ceil(s.secondsUsed / 60));
@@ -660,7 +660,7 @@ function endSession(reason: SessionEndReason): SessionEndResult {
       pushTransaction(
         'charge',
         money(-charged.amount),
-        `Session ${PC.name}, ${Math.ceil(s.secondsUsed / 60)} min ${tariff.name}`,
+        `Постоплата ${Math.ceil(s.secondsUsed / 60)} мин · ${tariff.name}`,
         s.id,
       );
     }
@@ -1569,7 +1569,7 @@ cmd('session_start', (args): Session => {
   }
   const id = newId();
   if (req.prepaid && price.amount > 0) {
-    pushTransaction('charge', money(-price.amount), `Session ${PC.name}, ${minutes} min ${tariff.name}`, id);
+    pushTransaction('charge', money(-price.amount), `Сеанс ${minutes} мин · ${tariff.name}`, id);
   }
   const seconds = req.prepaid && minutes ? minutes * 60 : -1;
   mockState.session = {
@@ -1622,7 +1622,7 @@ cmd('session_extend', (args): Session => {
   const price = quoteFor(tariff, minutes, mockState.user).total;
   if (s.isPrepaid) {
     assertFunds(price, true);
-    pushTransaction('charge', money(-price.amount), `Extend ${minutes} min ${tariff.name}`, s.id);
+    pushTransaction('charge', money(-price.amount), `Продление +${minutes} мин · ${tariff.name}`, s.id);
     s.cost = money(s.cost.amount + price.amount);
     s.secondsLeft += minutes * 60;
     s.endsAt = isoIn(s.secondsLeft);
@@ -1979,7 +1979,12 @@ cmd('wallet_topup_intent', (args): TopupIntent => {
     if (mockState.user?.id !== user.id) {
       return;
     }
-    pushTransaction('topUp', { ...amount }, `Top-up via ${provider === 'cash' ? 'cash at the desk' : provider}`, id);
+    pushTransaction(
+      'topUp',
+      { ...amount },
+      provider === 'cash' ? 'Пополнение на кассе наличными' : `Пополнение через ${provider}`,
+      id,
+    );
     emitMock('agent://notification.push', {
       id: newId(),
       title: 'Top-up received',
@@ -2075,7 +2080,7 @@ cmd('shop_order', (args): Order => {
   pushTransaction(
     'purchase',
     money(-total.amount),
-    `Shop order: ${lines.map((l) => (l.qty > 1 ? `${l.title} ×${l.qty}` : l.title)).join(', ')}`,
+    `Заказ из магазина: ${lines.map((l) => (l.qty > 1 ? `${l.title} ×${l.qty}` : l.title)).join(', ')}`,
     id,
   );
   for (const l of lines) {

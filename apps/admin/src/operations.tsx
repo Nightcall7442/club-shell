@@ -820,7 +820,7 @@ function TopUpCancelSheet({
             <p className="well px-3.5 py-3 text-[13px] font-medium leading-5 text-text">
               {what}
               <span className="mt-0.5 block text-xs font-normal text-muted">
-                {t('Бонус за ошибочное пополнение снимется с баланса')}
+                {t('Бонус за ошибочное пополнение снимется с бонусного счёта')}
               </span>
             </p>
           )}

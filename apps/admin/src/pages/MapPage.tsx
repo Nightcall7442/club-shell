@@ -2327,24 +2327,23 @@ function BusySeat({
         )}
       </div>
       <div className="flex min-w-0 flex-col justify-between gap-2 pl-4">
-        <dt className={clsx('label-sm flex items-baseline justify-between gap-2', art && 'text-artlabel')}>
-          {t('Баланс')}
-          {seatBonus && seatBonus.amount > 0 && (
-            <span
-              data-seat-bonus
-              title={t('Бонусы — только на игровое время')}
-              className="tnum truncate font-sans text-[11px] font-medium normal-case tracking-normal text-accent"
-            >
-              {t('бонусы {sum}', { sum: money(seatBonus) })}
-            </span>
-          )}
-        </dt>
+        <dt className={clsx('label-sm', art && 'text-artlabel')}>{t('Баланс')}</dt>
         <dd className="flex min-w-0 items-baseline gap-[5px] whitespace-nowrap">
           <span className={clsx('num-dot truncate text-[22px] leading-none', art ? 'text-white' : 'text-hi')}>
             {moneyParts(user.balance.amount).num}
           </span>
           <span className={clsx('text-[11.5px] font-medium', art ? 'text-artlabel' : 'text-muted')}>{t('сум')}</span>
         </dd>
+        {/* The bonus under the balance, whole: in the label row a sum of thousands was cut to «бонусы 2 00…». */}
+        {seatBonus && seatBonus.amount > 0 && (
+          <dd
+            data-seat-bonus
+            title={t('Бонусы — только на игровое время')}
+            className="tnum -mt-1 whitespace-nowrap text-[11px] font-medium leading-none text-accent"
+          >
+            {t('бонусы {sum}', { sum: money(seatBonus) })}
+          </dd>
+        )}
       </div>
     </dl>
   );
@@ -2377,7 +2376,7 @@ function BusySeat({
         {banner}
         {seat.signedIn === false && (
           <Note tone="warn" className="text-[12.5px]">
-            {t('на ПК ещё никто не вошёл, а время уже идёт')}
+            {t('На ПК ещё никто не вошёл, а время уже идёт')}
           </Note>
         )}
         {!art && readouts}
@@ -3069,7 +3068,7 @@ function SettleSheet({
       title={payout ? t('Выдать наличными · {name}', { name }) : t('Долг · {name}', { name })}
       caption={target.pc ? pcLabel(target.pc) : undefined}
       onClose={onClose}
-      footer={<PayFooter />}
+      footer={<PayFooter done={done !== null || writtenOff !== null} />}
     >
       {writtenOff ? (
         <>
@@ -4424,7 +4423,7 @@ export function MapPage(): JSX.Element {
         />
       </Sheet>
     ) : dialogSeat && data ? (
-      <Sheet title={pcLabel(dialogSeat.pc.name)} caption={t('Действия с ПК')} onClose={closeDialog} size="wide">
+      <Sheet title={pcLabel(dialogSeat.pc.name)} onClose={closeDialog} size="wide" titleHidden>
         <SeatPanel
           seat={dialogSeat}
           members={data.users}

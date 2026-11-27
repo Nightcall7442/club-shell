@@ -218,7 +218,16 @@ function Login({ onDone }: { onDone: (staff: StaffMember) => void }): JSX.Elemen
       const needsCode = e instanceof AdminError && e.details?.['field'] === 'clubCode';
       // With a code the server answers an unknown code and a wrong PIN alike (it does not tell which clubs exist).
       const refused = e instanceof AdminError && e.code === 'unauthorized' && code !== '';
-      setError(needsCode ? t('Введите код клуба') : refused ? t('Неверный код клуба или PIN') : describe(e));
+      const wrongPin = e instanceof AdminError && e.code === 'unauthorized';
+      setError(
+        needsCode
+          ? t('Введите код клуба')
+          : refused
+            ? t('Неверный код клуба или PIN')
+            : wrongPin
+              ? t('Неверный PIN')
+              : describe(e),
+      );
       setPin('');
     } finally {
       setBusy(false);
@@ -643,6 +652,7 @@ export function App(): JSX.Element {
   const [clubName, setClubName] = useState<string | null>(null);
   const [limits, setLimits] = useState<ClubSettings['limits'] | null>(null);
   const [wallpaperUrl, setWallpaperUrl] = useState<string | null>(null);
+  const [bonusRules, setBonusRules] = useState<ClubState['bonusRules']>(null);
   /** The club's own logo (D-93) at the top of the rail instead of the ClubShell mark. */
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   // A client being topped up from the header's search (on any page, with or without a PC).
@@ -743,6 +753,7 @@ export function App(): JSX.Element {
       .then((s) => {
         setClubName(s.branding.clubName);
         setLimits(s.limits);
+        setBonusRules({ tiers: s.bonusTiers ?? [], promo: s.topUpPromo ?? null });
         setWallpaperUrl(mediaUrl(s.branding.wallpaperUrl));
         setLogoUrl(mediaUrl(s.branding.logoUrl));
         setReceiptLogo(mediaUrl(s.branding.logoUrl));
@@ -754,6 +765,7 @@ export function App(): JSX.Element {
     if (!staff) {
       setClubName(null);
       setLimits(null);
+      setBonusRules(null);
       setWallpaperUrl(null);
       setHall(null);
       return undefined;
@@ -768,8 +780,8 @@ export function App(): JSX.Element {
   }, [staff, loadSettings]);
 
   const club = useMemo<ClubState>(
-    () => ({ clubName, limits, wallpaperUrl, staff, reload: loadSettings }),
-    [clubName, limits, wallpaperUrl, staff, loadSettings],
+    () => ({ clubName, limits, bonusRules, wallpaperUrl, staff, reload: loadSettings }),
+    [clubName, limits, bonusRules, wallpaperUrl, staff, loadSettings],
   );
 
   useEffect(() => {

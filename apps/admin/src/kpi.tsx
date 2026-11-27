@@ -16,7 +16,7 @@ import { AudioUnlockChip, CallsBell, groupCalls, useCalls } from '@/calls';
 import { pcLabel } from '@/clientSearch';
 import { exactDigits, moneyParts, moneyShort } from '@/format';
 import { t } from '@/i18n';
-import { BellIcon } from '@/icons';
+import { BellIcon, ChevronDownIcon } from '@/icons';
 import { methodName } from '@/paybox';
 import { CashMenu, cashSplit, useShift } from '@/shift';
 import { KpiBody, KpiCard, NARROW_QUERY, PHONE_QUERY, Ticks, useMedia } from '@/ui';
@@ -284,13 +284,90 @@ function CallsCard({ phone }: { phone: boolean }): JSX.Element {
   );
 }
 
+const KPI_OPEN_KEY = 'clubshell.admin.kpiOpen';
+
+/**
+ * A phone's strip folded to one line (about 56 px instead of four cards): the four figures side by side, the calls
+ * in amber while somebody calls. A tap unfolds the cards (with «Внесение и изъятие», the split by method and the calls'
+ * list); the choice is remembered on this phone.
+ */
+function PhoneSummary({
+  hall,
+  today,
+  missing,
+  onOpen,
+}: {
+  hall: HallCounts | null;
+  today: Today | null;
+  missing: boolean;
+  onOpen: () => void;
+}): JSX.Element {
+  const { shift, x, expectedCash } = useShift();
+  const calls = groupCalls(useCalls() ?? []);
+  const split = x ? cashSplit(x) : null;
+  const cash = shift && split ? (expectedCash ?? split.cash) : null;
+  const cells: { label: string; value: string; tone?: 'warn' }[] = [
+    { label: t('Занято'), value: hall ? `${hall.occupied}/${hall.total}` : '—' },
+    ...(missing ? [] : [{ label: t('Принято'), value: today ? moneyShort(todaySplit(today).taken) : '—' }]),
+    { label: t('В кассе'), value: cash !== null ? moneyShort(cash) : '—' },
+    { label: t('Вызовы'), value: String(calls.length), tone: calls.length > 0 ? ('warn' as const) : undefined },
+  ];
+  return (
+    <button
+      type="button"
+      aria-expanded={false}
+      aria-label={t('Сводка смены: показать подробно')}
+      onClick={onOpen}
+      className="glass-kpi focus-ring mb-3 flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left"
+    >
+      <span
+        className="grid min-w-0 flex-1 gap-2"
+        style={{ gridTemplateColumns: `repeat(${cells.length}, minmax(0, 1fr))` }}
+      >
+        {cells.map((c) => (
+          <span key={c.label} className="flex min-w-0 flex-col gap-1">
+            <span className={clsx('label-sm truncate', c.tone === 'warn' && 'text-warning')}>{c.label}</span>
+            <span
+              className={clsx(
+                'tnum truncate font-mono text-[13px] font-semibold leading-none',
+                c.tone === 'warn' ? 'text-warning' : 'text-hi',
+              )}
+            >
+              {c.value}
+            </span>
+          </span>
+        ))}
+      </span>
+      <ChevronDownIcon size={16} className="shrink-0 text-muted" />
+    </button>
+  );
+}
+
+function readOpen(): boolean {
+  try {
+    return localStorage.getItem(KPI_OPEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 /** The strip: four cards on a grid of 1 : 1 : 1.45 : 1.12 (three without today's money on an older server). */
 export function KpiStrip({ hall }: { hall: HallCounts | null }): JSX.Element {
   const { today, missing } = useToday();
-  // A phone: two by two, a size smaller, at the top of the page (it scrolls away with it). A tablet: one row of the
-  // same compact cards.
+  // A phone: one folded line at the top of the page (it scrolls away with it), the cards two by two when unfolded. A
+  // tablet: one row of the compact cards.
   const phone = useMedia(PHONE_QUERY);
   const narrow = useMedia(NARROW_QUERY);
+  const [open, setOpenState] = useState(readOpen);
+  const setOpen = (v: boolean): void => {
+    setOpenState(v);
+    try {
+      localStorage.setItem(KPI_OPEN_KEY, v ? '1' : '0');
+    } catch {
+      // remembered for this page only
+    }
+  };
+  if (phone && !open) return <PhoneSummary hall={hall} today={today} missing={missing} onOpen={() => setOpen(true)} />;
   return (
     <section
       aria-label={t('Сводка смены')}
@@ -309,6 +386,17 @@ export function KpiStrip({ hall }: { hall: HallCounts | null }): JSX.Element {
       {!missing && <TodayCard today={today} phone={narrow} />}
       <CashCard phone={narrow} />
       <CallsCard phone={narrow} />
+      {phone && (
+        <button
+          type="button"
+          aria-expanded
+          onClick={() => setOpen(false)}
+          className="focus-ring col-span-2 -mt-1 flex h-8 items-center justify-center gap-1.5 rounded-md text-xs font-medium text-muted"
+        >
+          <ChevronDownIcon size={14} className="rotate-180" />
+          {t('Свернуть сводку')}
+        </button>
+      )}
     </section>
   );
 }

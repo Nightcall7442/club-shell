@@ -15,27 +15,32 @@ export interface DotAmountProps {
  */
 export function DotAmount({ value, className }: DotAmountProps): JSX.Element {
   const parts = value.split(NUMERIC_RUN).filter((p) => p.length > 0);
+  // The groups are separate spans (a narrow gap, not a space): a screen reader would read «45», «000». It reads the value
+  // as formatted instead, and the dot-matrix copy is for the eye only.
   return (
     <span className={clsx('inline-flex items-baseline whitespace-nowrap', className)}>
-      {parts.map((part, i) =>
-        NUMERIC_RUN.test(part) ? (
-          <span key={i} className="num-dot">
-            {/* Doto's space is a full dot cell; a narrow gap keeps "45 000" reading as one number. */}
-            {part
-              .trim()
-              .split(/[\s\u00a0\u202f]+/)
-              .map((group, j) => (
-                <span key={j} className={j > 0 ? 'ml-[0.22em]' : undefined}>
-                  {group}
-                </span>
-              ))}
-          </span>
-        ) : (
-          <span key={i} className="mx-[0.3em] font-sans text-[0.5em] font-medium text-muted">
-            {part.trim()}
-          </span>
-        ),
-      )}
+      <span className="sr-only">{value}</span>
+      <span aria-hidden="true" className="contents">
+        {parts.map((part, i) =>
+          NUMERIC_RUN.test(part) ? (
+            <span key={i} className="num-dot">
+              {/* Doto's space is a full dot cell; a narrow gap keeps "45 000" reading as one number. */}
+              {part
+                .trim()
+                .split(/[\s\u00a0\u202f]+/)
+                .map((group, j) => (
+                  <span key={j} className={j > 0 ? 'ml-[0.22em]' : undefined}>
+                    {group}
+                  </span>
+                ))}
+            </span>
+          ) : (
+            <span key={i} className="mx-[0.3em] font-sans text-[0.5em] font-medium text-muted">
+              {part.trim()}
+            </span>
+          ),
+        )}
+      </span>
     </span>
   );
 }

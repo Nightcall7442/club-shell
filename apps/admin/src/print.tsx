@@ -505,8 +505,8 @@ export function ShiftReport({ r }: { r: ShiftReportData }): JSX.Element {
       <Rule />
       <Row label={t('Сеансы')} value={sum(x.sessions)} />
       <Row label={t('Возвраты')} value={sum(x.refunds)} />
-      <Row label={t('Магазин')} value={sum(x.shop)} />
-      <Row label={t('Бонусы начислено')} value={sum(x.bonuses)} />
+      <Row label={t('Бар')} value={sum(x.shop)} />
+      <Row label={t('Бонусов начислено')} value={sum(x.bonuses)} />
       {(x.bonusSpent ?? 0) !== 0 && <Row label={t('Бонусами за время')} value={sum(x.bonusSpent ?? 0)} />}
       <Row label={t('Операций')} value={String(x.count)} />
       <Rule />

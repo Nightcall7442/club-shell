@@ -8,6 +8,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import type { Seat } from '@/api';
+import { pcLabel } from '@/clientSearch';
 import { t } from '@/i18n';
 
 /** What the menu asks of the seat card (the move and the bar the map does itself). */
@@ -116,6 +117,14 @@ export function QuickActions({
       if (e.key === 'Escape') {
         e.stopPropagation();
         onClose();
+      } else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && box.current) {
+        // ↑ ↓ walk the items, as in any menu (Enter runs the focused one); the map behind does not move.
+        e.preventDefault();
+        e.stopPropagation();
+        const items = [...box.current.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+        const i = items.indexOf(document.activeElement as HTMLElement);
+        const next = items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length];
+        next?.focus();
       }
     };
     const close = (): void => onClose();
@@ -134,7 +143,7 @@ export function QuickActions({
   const items = quickItems(seat, guests);
   const heading: ReactNode = (
     <span className="flex min-w-0 items-baseline justify-between gap-2 px-3 pb-1.5 pt-2.5">
-      <span className="truncate font-display text-[15px] font-medium text-hi">{seat.pc.name}</span>
+      <span className="truncate font-display text-[15px] font-medium text-hi">{pcLabel(seat.pc.name)}</span>
       <span className="label-sm truncate">{seat.user ? seat.user.displayName : t('Свободен')}</span>
     </span>
   );
@@ -142,7 +151,7 @@ export function QuickActions({
     <div
       ref={box}
       role="menu"
-      aria-label={t('Действия с {pc}', { pc: seat.pc.name })}
+      aria-label={t('Действия с {pc}', { pc: pcLabel(seat.pc.name) })}
       className="panel-solid anim-rise fixed z-50 flex flex-col pb-1.5"
       style={{
         width: WIDTH,

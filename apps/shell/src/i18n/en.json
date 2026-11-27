@@ -404,7 +404,7 @@
     "quickActions": "Quick actions",
     "allGames": "All games",
     "topUp": "Top up",
-    "callAdmin": "Call admin",
+    "callAdmin": "Call administrator",
     "shop": "Order food",
     "lock": "Lock",
     "endSession": "End session",
@@ -889,18 +889,46 @@
     "dueHintGuest": "Pay at the desk when you finish.",
     "promo": {
       "title": "Promo code",
-      "hint": "Enter the club's code — the bonus lands on your balance at once.",
+      "hint": "Enter the club's code — the bonus lands on your bonus account at once. Bonus pays for time only.",
       "field": "Promo code",
       "placeholder": "E.G. BONUS10",
       "apply": "Redeem",
       "doneTitle": "Promo code redeemed",
-      "done": "+{{bonus}} to your balance for {{code}}",
+      "done": "+{{bonus}} in bonus for {{code}}",
       "unknown": "No such code — check how it is spelled.",
       "expired": "The code has expired.",
       "used": "The code has already been used.",
       "atDesk": "This code is a discount; it is applied at the desk.",
       "tooMany": "Too many wrong codes. Try again in 10 minutes.",
       "guest": "Promo codes are for club members. Sign up at the desk."
+    },
+    "tx": {
+      "topUp": "Top-up",
+      "topUpCancel": "Top-up cancelled",
+      "debt": "Debt paid",
+      "charge": "Play time",
+      "extend": "Extension",
+      "postpaid": "Postpaid",
+      "refund": "Time refunded",
+      "bonus": "Bonus",
+      "bonusBack": "Bonus taken back",
+      "purchase": "Purchase",
+      "purchaseBack": "Purchase cancelled",
+      "payout": "Paid out in cash",
+      "writeOff": "Debt written off",
+      "adjustment": "Adjustment",
+      "other": "Other",
+      "minutes": "{{n}} min",
+      "fromBonus": "from bonus",
+      "toBonus": "to bonus",
+      "promo": "promo code {{code}}",
+      "forTopUp": "for a top-up",
+      "forTopUpPromo": "for a top-up, promotion +{{pct}}%",
+      "loyalty": "loyalty",
+      "method": {
+        "cash": "in cash",
+        "card": "by card"
+      }
     }
   },
   "chat": {
@@ -1596,6 +1624,7 @@
     "muted": "Muted",
     "unmuted": "Sound on",
     "hudExtendConfirm": "Add {{minutes}} min for {{price}}?",
+    "hudExtendAction": "Add time",
     "hudExtendConfirmApprox": "Add {{minutes}} min for about {{price}}?"
   },
   "pcSettings": {
@@ -1732,5 +1761,10 @@
   "pcLabel": {
     "number": "PC {{number}}",
     "pc": "PC"
+  },
+  "themeNames": {
+    "default": "Obsidian",
+    "light": "Daylight",
+    "neon": "Neon Night"
   }
 }

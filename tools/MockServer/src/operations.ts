@@ -244,7 +244,7 @@ function today(): {
   }
   const shopByMethod: Record<PayMethod, number> = { cash: 0, card: 0, payme: 0, click: 0, uzum: 0 };
   for (const sale of db.shopSales) {
-    if (sale.createdAt < from || sale.method === 'balance') continue;
+    if (sale.createdAt < from || sale.method === 'balance' || sale.owner) continue;
     const signed = sale.kind === 'sale' ? sale.total : -sale.total;
     shopByMethod[sale.method] += signed;
     taken += signed;

@@ -86,7 +86,7 @@ test('the theme follows the member: the PC gets its own back at sign-out and the
   await page.goto('/?mock=auth#/home');
   const html = page.locator('html');
   await expect(html).toHaveAttribute('data-theme', 'default');
-  await page.getByRole('button', { name: /Neon Night/ }).click();
+  await page.getByRole('button', { name: /Неоновая ночь/ }).click();
   await expect(html).toHaveAttribute('data-theme', 'neon');
   await expect.poll(async () => (await lastSave(page))?.theme).toBe('neon');
 

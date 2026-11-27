@@ -929,19 +929,28 @@ export function tickClub(t: number): void {
  * The method a top-up was booked under, read from its description: the counter writes `(card)` and friends, the kiosk
  * `via Payme`, the seed `in cash`.
  */
+/** How a counter top-up was paid, in the server's wording: «наличными», «картой», «через Payme». */
+export function counterMethod(method: string): string {
+  if (method === 'cash') return 'наличными';
+  if (method === 'card') return 'картой';
+  return `через ${method.charAt(0).toUpperCase()}${method.slice(1)}`;
+}
+
 export function topUpMethod(description: string): PayMethod | 'other' {
   if (/cash|налич/i.test(description)) return 'cash';
+  if (/карт/i.test(description)) return 'card';
   return PAY_METHODS.find((m) => new RegExp(`\\b${m}\\b`, 'i').test(description)) ?? 'other';
 }
 
 /** Description of a cash payout to a walk-in guest (an `adjustment` row). */
 export const PAYOUT_DESCRIPTION = 'Выдано наличными на кассе';
 /** The row that takes a desk top-up back (D-91): a `topUp` of −amount, its method still in the description. */
-export const TOPUP_CANCEL_DESCRIPTION = 'Cancelled top-up';
+export const TOPUP_CANCEL_DESCRIPTION = 'Отмена: пополнение';
 /** A cash top-up booked with the club API key says so in its description. */
-export const API_TOPUP = 'via the club API';
+export const API_TOPUP = '(через API клуба)';
 /**
- * Ledger rows of the owner's own operations (D-101; the mock books only the owner's top-ups so): in no shift, so no X/Z,
+ * Ledger rows of the owner's own operations (D-101: top-ups and their cancels, seat payments, payouts, write-offs, bar
+ * balance sales and their voids): in no shift, so no X/Z,
  * drawer or «Принято за смену» counts them.
  */
 export const OWNER_TRANSACTIONS = new Set<string>();

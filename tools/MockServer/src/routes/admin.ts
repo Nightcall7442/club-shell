@@ -69,6 +69,7 @@ import {
   OWNER_TRANSACTIONS,
   PAYOUT_DESCRIPTION,
   TOPUP_CANCEL_DESCRIPTION,
+  counterMethod,
   WRITE_OFF_DESCRIPTION,
   budgetOf,
   minutesFor,
@@ -188,9 +189,34 @@ function userView(u: UserRecord): {
   };
 }
 
-/** Money is taken only in an open shift, so the X / Z reports account for every сум. */
-function requireShift(): void {
-  if (!openShift()) throw errors.conflict('shiftClosed');
+/**
+ * Money is taken only in an open shift, so the X / Z reports account for every сум — except the owner's own money
+ * (D-101, `owner`), which joins no shift.
+ */
+function requireShift(owner = false): void {
+  if (!owner && !openShift()) throw errors.conflict('shiftClosed');
+}
+
+/** The owner at the desk in person (not the club API key, which acts as the owner): an owner operation (D-101). */
+function ownerOp(req: FastifyRequest, staff: StaffRecord): boolean {
+  return !isApiKey(req) && staff.role === 'owner';
+}
+
+/**
+ * Runs `book` and, for an owner operation, marks every ledger row it wrote as the owner's (a charge may write two: the
+ * bonus part and the main part, D-106) — as the server marks the charge of the owner's seat or extension `owner_op`.
+ */
+function asOwner<T>(owner: boolean, book: () => T): T {
+  const before = db.transactions.length;
+  const out = book();
+  if (owner)
+    for (const row of db.transactions.slice(0, db.transactions.length - before)) OWNER_TRANSACTIONS.add(row.id);
+  return out;
+}
+
+/** The journal fields of an owner operation: no shift, marked `owner`; nothing otherwise. */
+function ownerFields(owner: boolean): { shiftId?: null; owner?: true } {
+  return owner ? { shiftId: null, owner: true } : {};
 }
 
 interface Payment {
@@ -235,10 +261,12 @@ function bookPayment(
   staff: StaffRecord,
   user: UserRecord,
   payment: Payment | null,
+  owner: boolean,
 ): { transaction: Transaction; bonus: number } | null {
   if (!payment) return null;
-  const { bonus, transaction } = topUpWithBonus(user, payment.amount, payment.method);
+  const { bonus, transaction } = topUpWithBonus(user, payment.amount, payment.method, { owner });
   record(staff, 'topUp', {
+    ...ownerFields(owner),
     userId: user.id,
     amount: payment.amount,
     detail: user.displayName,
@@ -309,13 +337,17 @@ function seat(o: {
   payment: Payment | null;
   priced: PriceQuote;
   guest: boolean;
+  /** The owner's own seat (D-101): its payment and journal entry join no shift. */
+  owner: boolean;
 }): { status: number; body: unknown; stored: unknown } {
   const { staff, pc, user, tariff, mins, prepaid, payment, priced } = o;
   const cost = prepaid ? priced.total : zero();
-  const paid = bookPayment(staff, user, payment);
+  const paid = bookPayment(staff, user, payment, o.owner);
   const id = uuid();
   if (cost.amount > 0)
-    applyTransaction(user, 'charge', uzs(-cost.amount), `Session ${mins} min · ${tariff.name} (staff)`, id);
+    asOwner(o.owner, () =>
+      applyTransaction(user, 'charge', uzs(-cost.amount), `Сеанс ${mins} мин · ${tariff.name}`, id),
+    );
   const startedAt = now();
   const rec: SessionRecord = {
     id,
@@ -353,6 +385,7 @@ function seat(o: {
   pushToUser(user.id, 'walletUpdated', balanceOf(user));
   clubHooks.sessionOpened(rec);
   record(staff, 'sessionOpen', {
+    ...ownerFields(o.owner),
     userId: user.id,
     pcId: pc.id,
     amount: cost.amount,
@@ -505,7 +538,8 @@ export function adminRoutes(app: FastifyInstance): void {
       const user = findUser(userId);
       const tariff = findTariff(str(b, 'tariffId', 64));
       if (!pc) throw errors.notFound('pc');
-      requireShift();
+      const owner = ownerOp(req, staff);
+      requireShift(owner);
       if (!user) throw errors.notFound('user');
       if (!tariff) throw errors.notFound('tariff');
       checkSeat(pc, tariff, prepaid);
@@ -524,7 +558,7 @@ export function adminRoutes(app: FastifyInstance): void {
       const priced = byAmount?.priced ?? quote(tariff, prepaid ? mins : 60, userId, pc.zone);
       if (prepaid) checkFunds(user, payment, priced.total);
       else checkPostpaid(user, tariff, pc.zone);
-      return seat({ staff, pc, user, tariff, mins, prepaid, payment, priced, guest: false });
+      return seat({ staff, pc, user, tariff, mins, prepaid, payment, priced, guest: false, owner });
     });
   });
 
@@ -555,7 +589,8 @@ export function adminRoutes(app: FastifyInstance): void {
         const amount = budgetOf(b, prepaid);
         const pc = findPc(pcId);
         if (!pc) throw errors.notFound('pc');
-        requireShift();
+        const owner = ownerOp(req, staff);
+        requireShift(owner);
         const tariff = findTariff(tariffId);
         if (!tariff) throw errors.notFound('tariff');
         // A new guest is priced as a walk-in (no group, the loyalty level of zero spend). The price is checked before
@@ -574,7 +609,7 @@ export function adminRoutes(app: FastifyInstance): void {
           if (limit > 0 && first.amount > limit) throw errors.insufficientFunds(first, zero());
         }
         const guest = createGuest(pc, name, null, true);
-        return seat({ staff, pc, user: guest, tariff, mins, prepaid, payment, priced, guest: true });
+        return seat({ staff, pc, user: guest, tariff, mins, prepaid, payment, priced, guest: true, owner });
       },
       { keyRequired: true, replayed: replayGuestCode },
     );
@@ -591,7 +626,8 @@ export function adminRoutes(app: FastifyInstance): void {
       const minutes = int(b, 'minutes', 5, 1440);
       const payment = paymentOf(b);
       const amount = budgetOf(b, true);
-      requireShift();
+      const owner = ownerOp(req, staff);
+      requireShift(owner);
       const rec = targetSession(b);
       const tariff = findTariff(optStr(b, 'tariffId', 64) ?? rec.tariffId);
       const user = findUser(rec.userId);
@@ -609,9 +645,11 @@ export function adminRoutes(app: FastifyInstance): void {
       if (user.transient && payment && payment.amount !== cost.amount)
         throw errors.conflict('priceChanged', { total: cost });
       checkFunds(user, payment, cost);
-      const paid = bookPayment(staff, user, payment);
+      const paid = bookPayment(staff, user, payment, owner);
       if (cost.amount > 0)
-        applyTransaction(user, 'charge', uzs(-cost.amount), `Extension +${mins} min · ${tariff.name} (staff)`, rec.id);
+        asOwner(owner, () =>
+          applyTransaction(user, 'charge', uzs(-cost.amount), `Продление +${mins} мин · ${tariff.name}`, rec.id),
+        );
       addPurchase(rec, { paid: cost.amount, sec: mins * 60, pkg: tariff.isPackage });
       rec.purchasedSec += mins * 60;
       rec.paidAmount = uzs(rec.paidAmount.amount + cost.amount);
@@ -621,6 +659,7 @@ export function adminRoutes(app: FastifyInstance): void {
       pushToPc(rec.pcId, 'sessionUpdated', session);
       pushToUser(user.id, 'walletUpdated', balanceOf(user));
       record(staff, 'sessionExtend', {
+        ...ownerFields(owner),
         userId: user.id,
         pcId: rec.pcId,
         amount: cost.amount,
@@ -883,6 +922,9 @@ export function adminRoutes(app: FastifyInstance): void {
           entry.meta['api'] === true
         )
           throw errors.conflict('notCorrectable');
+        // The owner's own top-up (D-101) has no shift: only the owner takes it back, at any time, with no drawer.
+        const ownerTop = entry.owner === true;
+        if (ownerTop && staff.role !== 'owner') throw errors.forbidden('ownerOnly');
         if (staff.role !== 'owner' && entry.staffId !== staff.id) throw errors.forbidden('notOwnTopUp');
         if (staff.role !== 'owner' && Date.now() - Date.parse(tx.createdAt) > CANCEL_WINDOW_MIN * 60_000)
           throw new ApiError('forbidden', 'Forbidden (cancelWindow)', {
@@ -894,9 +936,9 @@ export function adminRoutes(app: FastifyInstance): void {
         const cashBack = method === 'cash' ? Math.max(0, amount - (corrected ?? 0)) : 0;
         if (cashBack > 0 && staff.role !== 'owner' && club().limits.cashOutOwnerOnly)
           throw errors.forbidden('ownerOnly');
-        const shift = openShift();
-        if (!shift || entry.shiftId !== shift.id) throw errors.conflict('topUpShiftClosed');
-        if (cashBack > 0) {
+        const shift = ownerTop ? null : openShift();
+        if (!ownerTop && (!shift || entry.shiftId !== shift.id)) throw errors.conflict('topUpShiftClosed');
+        if (shift && cashBack > 0) {
           const available = drawerNow(shift);
           if (available < cashBack) throw errors.conflict('cashShort', { available: uzs(available) });
         }
@@ -924,8 +966,9 @@ export function adminRoutes(app: FastifyInstance): void {
         const payMethod = method === 'other' ? 'cash' : method;
         let fresh: { bonus: number; transaction: Transaction } | null = null;
         if (corrected !== null) {
-          fresh = topUpWithBonus(user, corrected, payMethod);
+          fresh = topUpWithBonus(user, corrected, payMethod, { owner: ownerTop });
           record(staff, 'topUp', {
+            ...ownerFields(ownerTop),
             userId: user.id,
             amount: corrected,
             detail: user.displayName,
@@ -936,12 +979,17 @@ export function adminRoutes(app: FastifyInstance): void {
           user,
           'topUp',
           uzs(-amount),
-          `${TOPUP_CANCEL_DESCRIPTION} at the counter (${payMethod})`,
+          `${TOPUP_CANCEL_DESCRIPTION} на кассе ${counterMethod(payMethod)}`,
           tx.id,
         );
-        if (bonus > 0) applyTransaction(user, 'bonus', uzs(-bonus), 'Отмена бонуса за пополнение', tx.id);
+        if (ownerTop) OWNER_TRANSACTIONS.add(back.id);
+        if (bonus > 0) {
+          const row = applyTransaction(user, 'bonus', uzs(-bonus), 'Отмена бонуса за пополнение', tx.id);
+          if (ownerTop) OWNER_TRANSACTIONS.add(row.id);
+        }
         pushToUser(user.id, 'walletUpdated', balanceOf(user));
         record(staff, 'topUpCancel', {
+          ...ownerFields(ownerTop),
           userId: user.id,
           amount,
           detail: user.displayName,
@@ -973,7 +1021,7 @@ export function adminRoutes(app: FastifyInstance): void {
             },
             balance: user.balance,
             topUp: fresh ? { balance: user.balance, transaction: fresh.transaction, bonus: uzs(fresh.bonus) } : null,
-            expectedCash: drawerNow(shift),
+            expectedCash: ((open) => (open ? drawerNow(open) : 0))(openShift()),
           },
         };
       },
@@ -1003,13 +1051,19 @@ export function adminRoutes(app: FastifyInstance): void {
         if (openSessionForUser(user.id)) throw errors.conflict('guestPlaying');
         const payable = payableOf(user);
         if (payable <= 0 || amount !== payable) throw errors.conflict('payableChanged', { payable: uzs(payable) });
-        const shift = openShift();
-        if (!shift) throw errors.conflict('shiftClosed');
-        const available = drawerNow(shift);
-        if (available < amount) throw errors.conflict('cashShort', { available: uzs(available) });
+        // The owner pays the guest out in person (D-101): no shift, no drawer.
+        const owner = staff.role === 'owner';
+        if (!owner) {
+          const shift = openShift();
+          if (!shift) throw errors.conflict('shiftClosed');
+          const available = drawerNow(shift);
+          if (available < amount) throw errors.conflict('cashShort', { available: uzs(available) });
+        }
         const transaction = applyTransaction(user, 'adjustment', uzs(-amount), PAYOUT_DESCRIPTION, null);
+        if (owner) OWNER_TRANSACTIONS.add(transaction.id);
         pushToUser(user.id, 'walletUpdated', balanceOf(user));
         record(staff, 'payout', {
+          ...ownerFields(owner),
           userId: user.id,
           amount,
           detail: user.displayName,

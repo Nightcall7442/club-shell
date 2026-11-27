@@ -404,7 +404,7 @@
     "quickActions": "Tezkor amallar",
     "allGames": "Barcha o'yinlar",
     "topUp": "To'ldirish",
-    "callAdmin": "Adminni chaqirish",
+    "callAdmin": "Administratorni chaqirish",
     "shop": "Ovqat buyurtma qilish",
     "lock": "Bloklash",
     "endSession": "Seansni tugatish",
@@ -889,18 +889,46 @@
     "dueHintGuest": "Tugatganingizda kassada to'lang.",
     "promo": {
       "title": "Promokod",
-      "hint": "Klub kodini kiriting — bonus darhol balansga tushadi.",
+      "hint": "Klub kodini kiriting — bonus darhol bonus hisobiga tushadi. Bonuslar — faqat vaqt uchun.",
       "field": "Promokod",
       "placeholder": "MASALAN, BONUS10",
       "apply": "Faollashtirish",
       "doneTitle": "Promokod faollashtirildi",
-      "done": "{{code}} kodi bo'yicha balansga +{{bonus}}",
+      "done": "{{code}} kodi bo'yicha +{{bonus}} bonus",
       "unknown": "Bunday kod yo'q — yozilishini tekshiring.",
       "expired": "Kodning amal qilish muddati tugagan.",
       "used": "Kod allaqachon ishlatilgan.",
       "atDesk": "Bu kod — chegirma, u kassada qo'llaniladi.",
       "tooMany": "Noto'g'ri kodlar juda ko'p. 10 daqiqadan so'ng urinib ko'ring.",
       "guest": "Promokodlar klub a'zolari uchun. Kassada ro'yxatdan o'ting."
+    },
+    "tx": {
+      "topUp": "To'ldirish",
+      "topUpCancel": "To'ldirish bekor qilindi",
+      "debt": "Qarz to'landi",
+      "charge": "O'yin vaqti",
+      "extend": "Uzaytirish",
+      "postpaid": "Keyin to'lov",
+      "refund": "Vaqt qaytarildi",
+      "bonus": "Bonus",
+      "bonusBack": "Bonus yechildi",
+      "purchase": "Xarid",
+      "purchaseBack": "Xarid bekor qilindi",
+      "payout": "Naqd pulda berildi",
+      "writeOff": "Qarz hisobdan chiqarildi",
+      "adjustment": "Tuzatish",
+      "other": "Boshqa",
+      "minutes": "{{n}} daq",
+      "fromBonus": "bonuslar bilan",
+      "toBonus": "bonus hisobiga",
+      "promo": "promokod {{code}}",
+      "forTopUp": "to'ldirish uchun",
+      "forTopUpPromo": "to'ldirish uchun, aksiya +{{pct}}%",
+      "loyalty": "sodiqlik",
+      "method": {
+        "cash": "naqd pulda",
+        "card": "karta bilan"
+      }
     }
   },
   "chat": {
@@ -1596,6 +1624,7 @@
     "muted": "Ovoz o'chirilgan",
     "unmuted": "Ovoz yoqilgan",
     "hudExtendConfirm": "{{minutes}} daqiqani {{price}} ga qo'shasizmi?",
+    "hudExtendAction": "Qo'shish",
     "hudExtendConfirmApprox": "{{minutes}} daqiqani taxminan {{price}} ga qo'shasizmi?"
   },
   "pcSettings": {
@@ -1732,5 +1761,10 @@
   "pcLabel": {
     "number": "PK {{number}}",
     "pc": "PK"
+  },
+  "themeNames": {
+    "default": "Obsidian",
+    "light": "Kunduzgi",
+    "neon": "Neon tun"
   }
 }

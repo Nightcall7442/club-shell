@@ -8,11 +8,23 @@ const ERROR_COPY: Record<string, string> = {
   sessionAlreadyActive: 'На этом ПК или у клиента уже открыт сеанс',
   policyDenied: 'Действие запрещено правилами клуба',
   notFound: 'Не найдено',
-  unauthorized: 'Неверный PIN или сессия истекла',
+  unauthorized: 'Вход истёк — войдите снова',
   forbidden: 'Доступно только владельцу',
   conflict: 'Действие сейчас невозможно',
   validation: 'Проверьте введённые данные',
-  network: 'Нет связи с сервером. Запущен ли mock-сервер (pnpm mock)?',
+  network: 'Нет связи с сервером клуба. Проверьте сеть и повторите',
+  sessionNotActive: 'Сеанс уже завершён — карта обновлена',
+  gameNotInstalled: 'Игра не установлена на этом ПК',
+  gameLaunchFailed: 'Игра не запустилась на ПК',
+  accountPoolExhausted: 'Свободных игровых аккаунтов нет — попробуйте позже',
+  antiCheatBlocked: 'Античит не даёт запустить игру на этом ПК',
+  agentOffline: 'ПК не на связи',
+  timeout: 'ПК не ответил вовремя — повторите',
+  serverUnavailable: 'Сервер клуба недоступен — повторите через минуту',
+  internal: 'Ошибка на сервере клуба — повторите. Если повторится, сообщите владельцу',
+  protocolError: 'Версии кассы и сервера не совпадают — обновите страницу',
+  versionMismatch: 'Версии кассы и сервера не совпадают — обновите страницу',
+  notImplemented: 'Сервер клуба этого пока не умеет',
 };
 
 const DETAIL_COPY: Record<string, string> = {
@@ -159,9 +171,12 @@ export function describe(e: unknown): string {
     );
     if (detail) return t(DETAIL_COPY[detail] as string);
     const copy = ERROR_COPY[e.code];
-    return copy ? t(copy) : e.message;
+    if (copy) return t(copy);
+    // A code this console does not know: never the server's English line, but what kind of failure it was.
+    return e.status >= 500 ? t(ERROR_COPY['internal'] as string) : t('Действие не выполнено');
   }
-  return e instanceof Error ? e.message : t('Ошибка');
+  // The console's own refusals (`throw new Error(t('Корзина пуста'))`) are already copy.
+  return e instanceof Error ? e.message : t('Действие не выполнено');
 }
 
 /** A refusal's amount to take next time (`debtChanged {debt}`, `payableChanged {payable}`, `priceChanged {total}`). */

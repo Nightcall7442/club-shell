@@ -56,12 +56,12 @@ export function tickWallet(nowMs: number): void {
       const user = findUser(intent.userId);
       intent.status = user ? 'paid' : 'cancelled';
       if (user) {
-        applyTransaction(user, 'topUp', intent.amount, `Top-up via ${intent.provider}`, intent.id);
+        applyTransaction(user, 'topUp', intent.amount, `Пополнение через ${intent.provider}`, intent.id);
         const bonusPct = user.loyaltyLevel >= 3 ? 15 : user.loyaltyLevel >= 2 ? 10 : 0;
         if (bonusPct > 0) {
           const bonus = uzs(Math.floor((intent.amount.amount * bonusPct) / 100));
           // The bonus account (D-106).
-          applyTransaction(user, 'bonus', bonus, `Loyalty bonus ${bonusPct}%`, intent.id);
+          applyTransaction(user, 'bonus', bonus, `Бонус лояльности ${bonusPct}%`, intent.id);
         }
         pushToUser(user.id, 'walletUpdated', balanceOf(user));
         pushToUser(user.id, 'notification', {

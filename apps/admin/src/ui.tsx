@@ -28,6 +28,10 @@ import { AlertTriangleIcon, CloseIcon } from '@/icons';
 export const PHONE_QUERY = '(max-width: 767px)';
 /** Below `lg`: one column (a phone or a tablet held upright). */
 export const NARROW_QUERY = '(max-width: 1023px)';
+/** A touch screen with no mouse (a phone, a tablet): no keyboard either, so key hints (`Enter`, `Esc`, `F2`) are noise. */
+export const TOUCH_QUERY = '(hover: none) and (pointer: coarse)';
+/** The class that hides a key hint on such a screen (the CSS twin of {@link TOUCH_QUERY}). */
+export const KEY_HINT = '[@media(hover:none)_and_(pointer:coarse)]:hidden';
 
 /** Whether the media query matches now, following it as the window changes. */
 export function useMedia(query: string): boolean {
@@ -233,11 +237,14 @@ export function Toggle({
   checked,
   onChange,
   label,
+  ariaLabel,
   disabled,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   label?: string;
+  /** The switch's name when it shows no label of its own (a toggle in a table row). */
+  ariaLabel?: string;
   disabled?: boolean;
 }): JSX.Element {
   return (
@@ -245,7 +252,7 @@ export function Toggle({
       type="button"
       role="switch"
       aria-checked={checked}
-      aria-label={label}
+      aria-label={label ?? ariaLabel}
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className="focus-ring group inline-flex items-center gap-3 rounded-md text-left text-sm disabled:opacity-55"
@@ -674,6 +681,7 @@ export function Sheet({
   caption,
   hero,
   footer,
+  titleHidden,
 }: {
   title: string;
   onClose?: () => void;
@@ -683,6 +691,11 @@ export function Sheet({
   caption?: ReactNode;
   hero?: ReactNode;
   footer?: ReactNode;
+  /**
+   * The content heads itself (the seat card in a window says the PC and what to do): the title stays the dialog's name
+   * for screen readers, the visible header is only the ×, so nothing is said twice.
+   */
+  titleHidden?: boolean;
 }): JSX.Element {
   const panel = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -730,6 +743,11 @@ export function Sheet({
               {hero}
               {onClose && <SheetClose onClose={onClose} className="absolute right-3.5 top-3.5 z-10" />}
             </>
+          ) : titleHidden ? (
+            <header className="flex items-center justify-end px-6 pt-3 max-md:px-4">
+              <h2 className="sr-only">{title}</h2>
+              {onClose && <SheetClose onClose={onClose} className="-mr-1" />}
+            </header>
           ) : (
             <header className="flex items-start justify-between gap-3 px-6 pt-5 max-md:px-4">
               <div className="flex min-w-0 flex-col gap-2">
@@ -776,6 +794,7 @@ export function Kbd({
           ? 'border-on-accent/[0.28] bg-on-accent/10 font-semibold text-on-accent'
           : 'border-accent/[0.18] font-medium text-dim',
         className,
+        KEY_HINT,
       )}
     >
       {children}
@@ -992,10 +1011,33 @@ export function Tabs<T extends string>({
   onChange: (v: T) => void;
   className?: string;
 }): JSX.Element {
+  const list = useRef<HTMLDivElement>(null);
+  // A phone scrolls the row sideways: the open tab is brought into view, so the page never opens on a hidden tab.
+  useEffect(() => {
+    const row = list.current;
+    const on = row?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!row || !on || row.scrollWidth <= row.clientWidth) return;
+    row.scrollLeft = Math.max(0, on.offsetLeft - (row.clientWidth - on.offsetWidth) / 2);
+  }, [value]);
+  // ← → move between the tabs, as in any tablist.
+  const step = (dir: 1 | -1): void => {
+    const i = tabs.findIndex((x) => x.id === value);
+    const next = tabs[(i + dir + tabs.length) % tabs.length];
+    if (!next) return;
+    onChange(next.id);
+    requestAnimationFrame(() => list.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus());
+  };
   return (
     <div
+      ref={list}
       role="tablist"
       aria-label={label}
+      onKeyDown={(e) => {
+        if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+          e.preventDefault();
+          step(e.key === 'ArrowRight' ? 1 : -1);
+        }
+      }}
       // A phone: the tabs scroll sideways on one line instead of breaking their words.
       className={clsx(
         'flex h-10 items-stretch gap-1 border-b border-line max-md:no-scrollbar max-md:overflow-x-auto max-md:overflow-y-hidden',
@@ -1010,6 +1052,7 @@ export function Tabs<T extends string>({
             type="button"
             role="tab"
             aria-selected={on}
+            tabIndex={on ? 0 : -1}
             onClick={() => onChange(tab.id)}
             className={clsx(
               'focus-ring relative inline-flex items-center gap-2 rounded-t-md px-4 text-sm font-medium max-md:shrink-0 max-md:whitespace-nowrap max-md:px-3',
@@ -1164,7 +1207,7 @@ export function KpiBody({
   valueClassName?: string;
 }): JSX.Element {
   // A long figure (`3 495 000`) in a narrow card on a phone or a tablet: a size smaller and without «сум», read whole, not «3 49…».
-  const long = typeof value === 'string' && value.length >= 8;
+  const long = typeof value === 'string' && value.length >= (compact ? 7 : 8);
   return (
     <span className="kpi-body flex h-full min-w-0 flex-col justify-between gap-0.5">
       <span className={clsx('kpi-label label flex items-center gap-[7px]', tone === 'attention' && 'text-warning')}>

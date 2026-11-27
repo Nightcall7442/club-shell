@@ -68,6 +68,7 @@ interface ThemeSwatchProps {
 }
 
 function ThemeSwatch({ theme, active, disabled, onSelect }: ThemeSwatchProps): JSX.Element {
+  const { t } = useTranslation();
   const c = theme.colors;
   const r = Math.max(2, theme.radius / 2);
   return (
@@ -106,7 +107,8 @@ function ThemeSwatch({ theme, active, disabled, onSelect }: ThemeSwatchProps): J
       </span>
       <span className="flex items-center justify-between gap-2">
         <span className="truncate font-semibold" style={{ fontFamily: `"${theme.font}", var(--font), system-ui` }}>
-          {theme.displayName}
+          {/* A bundled theme in the UI language; a club's own theme by the name it was given. */}
+          {t(`themeNames.${theme.name}`, { defaultValue: theme.displayName })}
         </span>
         {active && (
           <svg

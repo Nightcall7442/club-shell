@@ -19,6 +19,7 @@ import { useClub } from '@/club';
 import { describe } from '@/errors';
 import { money, moneyParts } from '@/format';
 import { dateLocale, t } from '@/i18n';
+import { txView } from '@/labels';
 import { PersonIcon, SearchIcon, UsersIcon } from '@/icons';
 import { TopUpSheet } from '@/paybox';
 import {
@@ -576,20 +577,26 @@ function ClientPanel({
             <ul className="flex flex-col">
               {txs.map((x) => {
                 const sum = moneyParts(Math.abs(x.amount.amount));
+                const view = txView(x);
                 return (
                   <li
                     key={x.id}
                     className="flex items-baseline justify-between gap-3 border-t border-accent/[0.07] py-2 first:border-t-0"
                   >
                     <span className="flex min-w-0 flex-col gap-0.5">
-                      <span className="truncate text-[12.5px] font-medium leading-4 text-text">{x.description}</span>
-                      <span className="tnum font-mono text-[10.5px] leading-4 text-muted">
-                        {new Date(x.createdAt).toLocaleString(dateLocale(), {
-                          day: '2-digit',
-                          month: '2-digit',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
+                      <span className="truncate text-[12.5px] font-medium leading-4 text-text" title={x.description}>
+                        {view.label}
+                      </span>
+                      <span className="truncate text-[10.5px] leading-4 text-muted">
+                        <span className="tnum font-mono">
+                          {new Date(x.createdAt).toLocaleString(dateLocale(), {
+                            day: '2-digit',
+                            month: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
+                        {view.detail && <> · {view.detail}</>}
                       </span>
                     </span>
                     {/* Money is never coloured by sign: «+» in the body colour, a real «−» dimmed; a row of the bonus

@@ -128,7 +128,7 @@ export function shopRoutes(app: FastifyInstance): void {
         user,
         'purchase',
         uzs(-total.amount),
-        `Shop order · ${items.map((i) => i.title).join(', ')}`,
+        `Заказ из магазина · ${items.map((i) => i.title).join(', ')}`,
         order.id,
       );
       db.orders.unshift(order);
@@ -178,7 +178,7 @@ export function shopRoutes(app: FastifyInstance): void {
     }
     const owner = findUser(order.userId);
     if (owner) {
-      applyTransaction(owner, 'refund', order.total, 'Refund: cancelled order', order.id);
+      applyTransaction(owner, 'refund', order.total, 'Возврат за отменённый заказ', order.id);
       pushToUser(owner.id, 'walletUpdated', balanceOf(owner));
     }
     markDirty();

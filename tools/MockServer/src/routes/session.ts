@@ -105,13 +105,12 @@ export function endSession(s: SessionRecord, reason: SessionEndReason, nowMs = D
     if ((reason === 'admin' || reason === 'error') && user && s.purchasedSec > used) {
       const amount = Math.floor(Math.min(s.paidAmount.amount, refundable(s, s.purchasedSec - used)) / 100) * 100;
       refunded = uzs(Math.max(0, amount));
-      if (refunded.amount > 0) applyTransaction(user, 'refund', refunded, 'Refund: unused session time', s.id);
+      if (refunded.amount > 0) applyTransaction(user, 'refund', refunded, 'Возврат за неиспользованное время', s.id);
     }
   } else if (tariff && user) {
     charged = tariffPriceFor(tariff, Math.ceil(used / 60));
     s.paidAmount = charged;
-    if (charged.amount > 0)
-      applyTransaction(user, 'charge', uzs(-charged.amount), `Session ${tariff.name} (postpaid)`, s.id);
+    if (charged.amount > 0) applyTransaction(user, 'charge', uzs(-charged.amount), `Постоплата · ${tariff.name}`, s.id);
     record(s.id, 'charged', { amount: charged });
   }
   const pc = findPc(s.pcId);
@@ -222,7 +221,7 @@ export function sessionRoutes(app: FastifyInstance): void {
       if (prepaid && timeFunds(user) < cost.amount) throw errors.insufficientFunds(cost, uzs(timeFunds(user)));
       const id = clientSessionId && !findSession(clientSessionId) ? clientSessionId : uuid();
       if (prepaid && cost.amount > 0)
-        applyTransaction(user, 'charge', uzs(-cost.amount), `Session ${mins} min · ${tariff.name}`, id);
+        applyTransaction(user, 'charge', uzs(-cost.amount), `Сеанс ${mins} мин · ${tariff.name}`, id);
       const rec: SessionRecord = {
         id,
         userId: user.id,
@@ -361,7 +360,7 @@ export function sessionRoutes(app: FastifyInstance): void {
       const cost = tariffPriceFor(tariff, minutes);
       if (timeFunds(user) < cost.amount) throw errors.insufficientFunds(cost, uzs(timeFunds(user)));
       if (cost.amount > 0)
-        applyTransaction(user, 'charge', uzs(-cost.amount), `Extension +${minutes} min · ${tariff.name}`, s.id);
+        applyTransaction(user, 'charge', uzs(-cost.amount), `Продление +${minutes} мин · ${tariff.name}`, s.id);
       addPurchase(s, { paid: cost.amount, sec: minutes * 60, pkg: tariff.isPackage });
       s.purchasedSec += minutes * 60;
       s.paidAmount = uzs(s.paidAmount.amount + cost.amount);

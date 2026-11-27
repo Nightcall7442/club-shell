@@ -176,7 +176,10 @@ export interface ShopSaleRecord {
   id: string;
   kind: 'sale' | 'void';
   voidOf: string | null;
-  shiftId: string;
+  /** Null for the owner's own sale and its void (D-101): in no shift. */
+  shiftId: string | null;
+  /** The owner's own sale or its void (D-101): out of every shift, X/Z, drawer and cashier's feed. */
+  owner?: boolean;
   staffId: string;
   staffName: string;
   userId: string | null;
@@ -1915,23 +1918,23 @@ function seed(): Db {
     products,
     orders: [orderActive, orderDone],
     transactions: [
-      tx(alisher.id, 'purchase', -orderDone.total.amount, 4_500_000, 'Shop order', 26, orderDone.id),
+      tx(alisher.id, 'purchase', -orderDone.total.amount, 4_500_000, 'Заказ из магазина', 26, orderDone.id),
       tx(
         alisher.id,
         'charge',
         -2_400_000,
         4_500_000 + orderDone.total.amount,
-        'Session 2h Standard',
+        'Сеанс 120 мин · Standard',
         27,
         sid('session:alisher-1'),
       ),
-      tx(alisher.id, 'bonus', 50_000, 6_900_000 + orderDone.total.amount, 'Loyalty bonus', 30),
+      tx(alisher.id, 'bonus', 50_000, 6_900_000 + orderDone.total.amount, 'Бонус лояльности', 30),
       tx(
         alisher.id,
         'topUp',
         5_000_000,
         6_850_000 + orderDone.total.amount,
-        'Top-up via Payme',
+        'Пополнение через Payme',
         31,
         sid('topup:alisher-1'),
       ),
@@ -1940,7 +1943,7 @@ function seed(): Db {
         'charge',
         -1_200_000,
         1_850_000 + orderDone.total.amount,
-        'Session 1h Standard',
+        'Сеанс 60 мин · Standard',
         50,
         sid('session:alisher-0'),
       ),
@@ -1949,22 +1952,22 @@ function seed(): Db {
         'refund',
         600_000,
         3_050_000 + orderDone.total.amount,
-        'Refund: unused 30 min',
+        'Возврат за неиспользованное время',
         72,
         sid('session:alisher-r'),
       ),
-      tx(dilnoza.id, 'charge', -6_000_000, 12_000_000, 'Session 3h VIP', 1.6, seededSession.id),
-      tx(dilnoza.id, 'purchase', -cola.price.amount, 18_000_000, 'Shop order', 0.07, orderActive.id),
+      tx(dilnoza.id, 'charge', -6_000_000, 12_000_000, 'Сеанс 180 мин · VIP', 1.6, seededSession.id),
+      tx(dilnoza.id, 'purchase', -cola.price.amount, 18_000_000, 'Заказ из магазина', 0.07, orderActive.id),
       tx(
         dilnoza.id,
         'topUp',
         10_000_000,
         18_000_000 + cola.price.amount,
-        'Top-up via Click',
+        'Пополнение через Click',
         20,
         sid('topup:dilnoza-1'),
       ),
-      tx(bekzod.id, 'topUp', 2_000_000, 300_000, 'Top-up in cash', 48, sid('topup:bekzod-1')),
+      tx(bekzod.id, 'topUp', 2_000_000, 300_000, 'Пополнение на кассе наличными', 48, sid('topup:bekzod-1')),
     ],
     topupIntents: [],
     sessions: [seededSession],

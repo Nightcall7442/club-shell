@@ -187,7 +187,9 @@ export default function IntegrationsPage(): JSX.Element {
                 key: 'on',
                 title: t('Вкл.'),
                 width: '4.5rem',
-                render: (h) => <Toggle checked={h.enabled} onChange={(v) => setHook(h.id, { enabled: v })} />,
+                render: (h) => (
+                  <Toggle ariaLabel={t('Вкл.')} checked={h.enabled} onChange={(v) => setHook(h.id, { enabled: v })} />
+                ),
               },
               {
                 key: 'status',
