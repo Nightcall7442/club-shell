@@ -901,6 +901,34 @@
       "atDesk": "This code is a discount; it is applied at the desk.",
       "tooMany": "Too many wrong codes. Try again in 10 minutes.",
       "guest": "Promo codes are for club members. Sign up at the desk."
+    },
+    "tx": {
+      "topUp": "Top-up",
+      "topUpCancel": "Top-up cancelled",
+      "debt": "Debt paid",
+      "charge": "Play time",
+      "extend": "Extension",
+      "postpaid": "Postpaid",
+      "refund": "Time refunded",
+      "bonus": "Bonus",
+      "bonusBack": "Bonus taken back",
+      "purchase": "Purchase",
+      "purchaseBack": "Purchase cancelled",
+      "payout": "Paid out in cash",
+      "writeOff": "Debt written off",
+      "adjustment": "Adjustment",
+      "other": "Other",
+      "minutes": "{{n}} min",
+      "fromBonus": "from bonus",
+      "toBonus": "to bonus",
+      "promo": "promo code {{code}}",
+      "forTopUp": "for a top-up",
+      "forTopUpPromo": "for a top-up, promotion +{{pct}}%",
+      "loyalty": "loyalty",
+      "method": {
+        "cash": "in cash",
+        "card": "by card"
+      }
     }
   },
   "chat": {
@@ -1733,5 +1761,10 @@
   "pcLabel": {
     "number": "PC {{number}}",
     "pc": "PC"
+  },
+  "themeNames": {
+    "default": "Obsidian",
+    "light": "Daylight",
+    "neon": "Neon Night"
   }
 }

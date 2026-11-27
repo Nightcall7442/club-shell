@@ -4423,7 +4423,7 @@ export function MapPage(): JSX.Element {
         />
       </Sheet>
     ) : dialogSeat && data ? (
-      <Sheet title={pcLabel(dialogSeat.pc.name)} caption={t('Действия с ПК')} onClose={closeDialog} size="wide">
+      <Sheet title={pcLabel(dialogSeat.pc.name)} onClose={closeDialog} size="wide" titleHidden>
         <SeatPanel
           seat={dialogSeat}
           members={data.users}

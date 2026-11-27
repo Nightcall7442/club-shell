@@ -12,7 +12,7 @@ import { DotAmount } from '@/components/ui/DotAmount';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useLocale } from '@/hooks/useLocale';
-import { formatMoney, formatNumber, pluralize } from '@/lib/format';
+import { formatMoney, formatNumber } from '@/lib/format';
 import { useGamesStore } from '@/store/games';
 
 export type StatTone = 'primary' | 'accent' | 'success' | 'neutral';
@@ -209,7 +209,7 @@ export function Stats({ stats, loading }: StatsProps): JSX.Element {
         />
         <StatCard
           label={t('profile.sessions')}
-          value={pluralize('sessions', stats.sessionsCount)}
+          value={formatNumber(stats.sessionsCount, locale)}
           icon={<PlayIcon />}
           tone="accent"
         />

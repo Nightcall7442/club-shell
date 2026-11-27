@@ -1173,7 +1173,8 @@ function PricingView({ initialTab }: { initialTab: Tab }): JSX.Element {
 
   return (
     <OwnerPage>
-      <PageHeader title={t('Тарифы и цены')} caption={t('Настройка клуба')} />
+      {/* The bonus tab is a section of the rail of its own («Бонусы и акции»): the title says which one is open. */}
+      <PageHeader title={tab === 'bonus' ? t('Бонусы и акции') : t('Тарифы и цены')} caption={t('Настройка клуба')} />
 
       {/* Page tabs, not a second navigation landmark: the rail is the console's one `<nav>`. */}
       <Tabs

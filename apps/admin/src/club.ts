@@ -5,11 +5,13 @@
  * and on request, so a setting the owner changes reaches the counter without a sign-out.
  */
 import { createContext, useContext } from 'react';
-import type { ClubSettings, StaffMember } from '@/api';
+import type { BonusTier, ClubSettings, StaffMember, TopUpPromo } from '@/api';
 
 export interface ClubState {
   clubName: string | null;
   limits: ClubSettings['limits'] | null;
+  /** The top-up bonus rules (`bonusTiers`, the «x2» `topUpPromo`): the top-up sheet shows the bonus before it is taken. */
+  bonusRules: { tiers: BonusTier[]; promo: TopUpPromo | null } | null;
   /**
    * `branding.wallpaperUrl`: the club's picture (also the kiosk's lock screen), behind the console and behind the seat
    * card when its game has no art; null — the console shows its bundled default (`art.tsx` `DEFAULT_WALLPAPER`).
@@ -23,6 +25,7 @@ export interface ClubState {
 export const ClubContext = createContext<ClubState>({
   clubName: null,
   limits: null,
+  bonusRules: null,
   wallpaperUrl: null,
   staff: null,
   reload: () => undefined,

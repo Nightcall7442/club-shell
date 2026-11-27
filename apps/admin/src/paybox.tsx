@@ -23,7 +23,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import type { Money } from '@clubshell/contracts';
-import { adminApi, newKey, type PayMethod } from '@/api';
+import { adminApi, newKey, type BonusTier, type PayMethod, type TopUpPromo } from '@/api';
 import { GameArt } from '@/art';
 import { useClub } from '@/club';
 import { describe, isLostAnswer } from '@/errors';
@@ -34,6 +34,44 @@ import { PAY_METHOD_LABEL } from '@/labels';
 import { Receipt, printDocument, type ReceiptData } from '@/print';
 import { useShift } from '@/shift';
 import { Button, KEY_HINT, Kbd, Note, Sheet, StatusDot, TOUCH_QUERY, useMedia, type ButtonSize } from '@/ui';
+
+/**
+ * The bonus a desk top-up of `amount` will credit (D-84, D-106), as the server reckons it: on the new money only — the part
+ * above a debt the top-up first repays — the larger of the tier table's percent and the «x2» promotion's while it runs
+ * (half-up to whole сум). The promotion's days and hours are read on this computer's clock, which at the desk is the
+ * club's. `promoPct` is set when the promotion gives the larger bonus.
+ */
+export function topUpBonusPreview(
+  amount: number,
+  balanceBefore: number,
+  rules: { tiers: BonusTier[]; promo: TopUpPromo | null },
+  at: Date = new Date(),
+): { bonus: number; promoPct: number | null } {
+  const bonusable = Math.max(0, amount - Math.max(0, -balanceBefore));
+  const percent = (pct: number): number => Math.floor((bonusable * pct + 5_000) / 10_000) * 100;
+  const tier = [...rules.tiers].sort((a, b) => b.minAmount - a.minAmount).find((x) => bonusable >= x.minAmount);
+  const promo = rules.promo;
+  const promoPct =
+    bonusable > 0 && promo && bonusable >= promo.minAmount && promoActive(promo, at) ? promo.bonusPct : 0;
+  const byTier = tier ? percent(tier.bonusPct) : 0;
+  const byPromo = percent(promoPct);
+  return { bonus: Math.max(byTier, byPromo), promoPct: byPromo > 0 && byPromo >= byTier ? promoPct : null };
+}
+
+/** Whether the «x2» promotion runs at `at`, by the server's rule (`TopUpPromo.ActiveAt`). */
+function promoActive(p: TopUpPromo, at: Date): boolean {
+  if (!p.enabled || (p.until && at.getTime() >= Date.parse(p.until))) return false;
+  const mins = (hhmm: string | null): number | null =>
+    hhmm && /^\d{2}:\d{2}$/.test(hhmm) ? Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3)) : null;
+  const from = mins(p.from);
+  const to = mins(p.to);
+  const minute = at.getHours() * 60 + at.getMinutes();
+  if (from === null || to === null || from === to) return p.days.length === 0 || p.days.includes(at.getDay());
+  const overnight = to < from;
+  const inside = overnight ? minute >= from || minute < to : minute >= from && minute < to;
+  const day = overnight && minute < to ? (at.getDay() + 6) % 7 : at.getDay();
+  return inside && (p.days.length === 0 || p.days.includes(day));
+}
 
 /** Counter methods in button order; `code` is the Alt+digit hotkey (layout-independent `KeyboardEvent.code`). */
 export const PAY_METHODS: { id: PayMethod; label: string; hint: string; code: string }[] = [
@@ -190,6 +228,7 @@ export function PayBox({
   disabled,
   amountLabel,
   balanceBefore,
+  bonusOf,
   totalShown,
   onPay,
 }: {
@@ -216,6 +255,8 @@ export function PayBox({
   amountLabel?: string;
   /** The payee's balance now (minor units): the field shows what it becomes with the typed amount. */
   balanceBefore?: number;
+  /** The bonus the typed amount will credit (a top-up): shown under the field before the money is taken. */
+  bonusOf?: (amount: number) => { bonus: number; promoPct: number | null } | null;
   /**
    * The host already shows the `exact` amount (the bar's «Итого»): the box leaves out its own read-only «Сумма» line and
    * starts at «Получено наличными».
@@ -257,6 +298,7 @@ export function PayBox({
   const closed = useShiftClosed();
   const tooLow = !fixed && amount > 0 && amount < min;
   const tooHigh = amount > MAX_AMOUNT;
+  const preview = amount > 0 && bonusOf ? bonusOf(amount) : null;
   // Cash handed over below the amount: the cashier has not got the money yet.
   const cashShort = receivedMinor > 0 && receivedMinor < amount;
   const ready =
@@ -383,6 +425,16 @@ export function PayBox({
             </span>
           )}
         </div>
+      )}
+      {preview && preview.bonus > 0 && !tooLow && !tooHigh && (
+        <p data-topup-bonus-preview className="mt-2 text-xs font-medium leading-5 text-accent">
+          {preview.promoPct
+            ? t('+ бонус {sum} по акции +{pct}% — на бонусный счёт, только на время', {
+                sum: moneyExact(preview.bonus),
+                pct: preview.promoPct,
+              })
+            : t('+ бонус {sum} — на бонусный счёт, только на время', { sum: moneyExact(preview.bonus) })}
+        </p>
       )}
       {tooLow && <p className="mt-2 text-xs font-medium text-warning">{t('Не меньше {sum}', { sum: uzs(min) })}</p>}
       {tooHigh && (
@@ -752,6 +804,12 @@ export function TopUpSheet({
           amountLabel={t('Сумма пополнения')}
           verb={t('Пополнить')}
           balanceBefore={payee.balance.amount}
+          bonusOf={
+            club.bonusRules
+              ? (amount) =>
+                  topUpBonusPreview(amount, payee.balance.amount, club.bonusRules ?? { tiers: [], promo: null })
+              : undefined
+          }
           onPay={async (p) => {
             const r = await adminApi.topUp({ userId: payee.id, amount: p.amount, method: p.method }, p.key);
             setDone({

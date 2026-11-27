@@ -299,7 +299,8 @@ async function barSale(
     userId,
     key,
     saleId = randomUUID(),
-  }: { method?: string; userId?: string; key?: string; saleId?: string } = {},
+    token,
+  }: { method?: string; userId?: string; key?: string; saleId?: string; token?: string } = {},
 ): Promise<APIResponse> {
   const total = lines.reduce((sum, l) => sum + l.product.price.amount * l.qty, 0);
   return moneyPost(
@@ -312,7 +313,7 @@ async function barSale(
       ...(userId ? { userId } : {}),
       ...(method === 'balance' ? {} : { payment: { method, amount: total } }),
     },
-    key ? { key } : {},
+    { ...(key ? { key } : {}), ...(token ? { token } : {}) },
   );
 }
 
@@ -769,6 +770,21 @@ test('the owner turns on «x2» for top-ups under «Бонусы и акции»
 
     await ensureShift(request);
     const member = await newClient(request, 'x2-member');
+    // The top-up sheet says the bonus before the money is taken, by the same rule.
+    await page.goto('/#/map');
+    await expect(page.getByRole('heading', { name: 'Карта зала' })).toBeVisible();
+    await page.keyboard.press('/');
+    await page.keyboard.type(member.username);
+    await page
+      .getByRole('option')
+      .filter({ hasText: member.username })
+      .getByRole('button', { name: 'Пополнить' })
+      .click();
+    const sheet = page.getByRole('dialog', { name: /^Пополнить · / });
+    await sheet.getByLabel('Сумма').fill('20000');
+    await expect(sheet.locator('[data-topup-bonus-preview]')).toContainText(/20\s000 сум по акции \+100%/);
+    await sheet.press('Escape');
+    await expect(sheet).toHaveCount(0);
     const topUp = await moneyPost(request, '/admin/wallet/topup', {
       userId: member.id,
       amount: 2_000_000,
@@ -1505,6 +1521,91 @@ test("the owner's top-up stays out of the cashier's shift and shows in «Опе�
   const row = page.locator('[data-feed="page"] li').filter({ hasText: 'E2E Владелец' }).first();
   await expect(row).toBeVisible();
   await expect(row.locator('[data-owner-op]')).toHaveText(/Владелец/i);
+});
+
+test("the owner's bar sale, seat and extension stay out of the cashier's shift; only the owner voids the sale (D-101)", async ({
+  request,
+}) => {
+  const ownerToken = await tokenFor(request, OWNER_PIN);
+  const cashier = auth(await tokenFor(request, CASHIER_PIN));
+  const item = await newProduct(request, 'own-bar', { price: 700_000, stockQty: null });
+  const client = await newClient(request, 'own-seat');
+  const pc = await registerAgent(request, 'own-seat');
+  const tariffId = await standardTariff(request);
+
+  // No shift is needed: the owner sells and seats with the shift closed.
+  await closeShift(request);
+  const offShift = await barSale(request, [{ product: item, qty: 1 }], { token: ownerToken });
+  expect(offShift.status(), await offShift.text()).toBe(201);
+  expect(((await offShift.json()) as { sale: { shiftId: string | null } }).sale.shiftId).toBeNull();
+
+  await ensureShift(request);
+  const before = await shiftState(request);
+  const feedBefore = (await shiftOperations(request)).length;
+
+  const sale = await barSale(request, [{ product: item, qty: 2 }], { token: ownerToken });
+  expect(sale.status(), await sale.text()).toBe(201);
+  const saleId = ((await sale.json()) as { sale: { id: string } }).sale.id;
+
+  const quote = (await (
+    await request.post(`${API}/admin/quote`, {
+      headers: cashier,
+      data: { tariffId, pcId: pc.pcId, minutes: 60, userId: client.id },
+    })
+  ).json()) as { total: { amount: number } };
+  const open = await moneyPost(
+    request,
+    '/admin/sessions',
+    {
+      pcId: pc.pcId,
+      userId: client.id,
+      tariffId,
+      minutes: 60,
+      payment: { amount: quote.total.amount, method: 'cash' },
+    },
+    { token: ownerToken },
+  );
+  expect(open.status(), await open.text()).toBe(201);
+  const extended = await moneyPost(
+    request,
+    '/admin/sessions/extend',
+    { pcId: pc.pcId, minutes: 60, payment: { amount: quote.total.amount, method: 'cash' } },
+    { token: ownerToken },
+  );
+  expect(extended.status(), await extended.text()).toBe(200);
+
+  // The cashier's X, drawer and feed have none of it (the time sold is play time, not the drawer's money).
+  const after = await shiftState(request);
+  expect(after.x?.shop ?? 0).toBe(before.x?.shop ?? 0);
+  expect(after.x?.shopByMethod?.['cash'] ?? 0).toBe(before.x?.shopByMethod?.['cash'] ?? 0);
+  expect(after.x?.topUpByMethod['cash']).toBe(before.x?.topUpByMethod['cash']);
+  expect(after.expectedCash).toBe(before.expectedCash);
+  const feed = await shiftOperations(request);
+  expect(feed.length).toBe(feedBefore);
+
+  // The owner's feed has them.
+  const ownerFeed = (await (
+    await request.get(`${API}/admin/shift/operations?owner=true&limit=200`, { headers: auth(ownerToken) })
+  ).json()) as { items: { kind: string; client: { id: string } | null }[] };
+  const kinds = ownerFeed.items.map((i) => i.kind);
+  expect(kinds).toContain('shopSale');
+  expect(ownerFeed.items.some((i) => i.kind === 'sessionOpen' && i.client?.id === client.id)).toBe(true);
+
+  // Only the owner takes the owner's sale back, and the drawer does not move.
+  const byCashier = await moneyPost(request, `/admin/shop/sales/${saleId}/void`, { reasonCode: 'mistake' });
+  expect(byCashier.status()).toBe(403);
+  expect(await reasonOf(byCashier)).toBe('ownerOnly');
+  const byOwner = await moneyPost(
+    request,
+    `/admin/shop/sales/${saleId}/void`,
+    { reasonCode: 'mistake' },
+    { token: ownerToken },
+  );
+  expect(byOwner.status(), await byOwner.text()).toBe(200);
+  const voided = await shiftState(request);
+  expect(voided.x?.shopVoidCount ?? 0).toBe(before.x?.shopVoidCount ?? 0);
+  expect(voided.expectedCash).toBe(before.expectedCash);
+  await endAt(request, pc.pcId);
 });
 
 test('the owner deletes a client with money on the balance, writing it off (D-102)', async ({ page, request }) => {

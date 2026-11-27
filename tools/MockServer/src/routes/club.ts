@@ -58,6 +58,7 @@ import { trailerOf, trailerRoutes } from '../trailers.js';
 import { generateLogin, phoneDigits } from '../logins.js';
 import {
   API_TOPUP,
+  counterMethod,
   OWNER_TRANSACTIONS,
   CASH_REASONS,
   CLUB_EVENTS,
@@ -1491,10 +1492,10 @@ export function topUpWithBonus(
 ): { bonus: number; transaction: Transaction } {
   const debt = Math.max(0, -user.balance.amount);
   const description = options.viaApi
-    ? `Top-up ${API_TOPUP} (${method})`
+    ? `Пополнение ${counterMethod(method)} ${API_TOPUP}`
     : options.settleDebt
-      ? `Debt paid at the counter (${method})`
-      : `Top-up at the counter (${method})`;
+      ? `Оплата долга на кассе ${counterMethod(method)}`
+      : `Пополнение на кассе ${counterMethod(method)}`;
   const transaction = applyTransaction(user, 'topUp', uzs(amount), description, null);
   if (options.owner) OWNER_TRANSACTIONS.add(transaction.id);
   const bonus = options.settleDebt || user.transient ? 0 : topupBonus(Math.max(0, amount - debt));

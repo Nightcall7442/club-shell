@@ -9,6 +9,7 @@ import { Tabs, type TabItem } from '@/components/ui/Tabs';
 import { useLocale } from '@/hooks/useLocale';
 import { formatMoney, formatMoneySigned, formatRelativeDay, formatTime } from '@/lib/format';
 import { describeError } from '@/store/notifications';
+import { txView, type TxPart } from '@/lib/txView';
 import { selectHistoryHasMore, useWalletStore, type WalletHistoryRange } from '@/store/wallet';
 
 type TypeKey = TransactionTypeValue | 'all';
@@ -160,11 +161,18 @@ export interface TransactionRowProps {
   transaction: Transaction;
 }
 
-/** One ledger row: what (the server's description), the kind and the time, the signed amount and the balance after. */
+/**
+ * One ledger row: what it was in the UI language (by its type, with how it was paid), what the description adds and the
+ * time, the signed amount and the balance after. The server's own description stays in the tooltip.
+ */
 export function TransactionRow({ transaction: tx }: TransactionRowProps): JSX.Element {
   const { t } = useTranslation();
   const { locale } = useLocale();
   const positive = tx.amount.amount > 0;
+  const view = txView(tx);
+  const say = (part: TxPart): string => ('text' in part ? part.text : t(part.key, part.vars ?? {}));
+  const title = view.method ? `${say(view.title)} · ${say(view.method)}` : say(view.title);
+  const detail = [...view.detail.map(say), formatTime(tx.createdAt, locale)].join(' · ');
   return (
     <li className="flex items-center gap-4 border-b border-text/10 py-3 last:border-b-0">
       <span
@@ -177,12 +185,10 @@ export function TransactionRow({ transaction: tx }: TransactionRowProps): JSX.El
         {ICONS[tx.type]}
       </span>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-base font-semibold text-text">
-          {tx.description || t(`wallet.transaction.${tx.type}`)}
+        <p className="truncate text-base font-semibold text-text" title={tx.description || undefined}>
+          {title}
         </p>
-        <p className="tnum text-sm text-muted">
-          {t(`wallet.transaction.${tx.type}`)} · {formatTime(tx.createdAt, locale)}
-        </p>
+        <p className="tnum truncate text-sm text-muted">{detail}</p>
       </div>
       <div className="shrink-0 text-right">
         <p

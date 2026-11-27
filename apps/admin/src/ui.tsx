@@ -681,6 +681,7 @@ export function Sheet({
   caption,
   hero,
   footer,
+  titleHidden,
 }: {
   title: string;
   onClose?: () => void;
@@ -690,6 +691,11 @@ export function Sheet({
   caption?: ReactNode;
   hero?: ReactNode;
   footer?: ReactNode;
+  /**
+   * The content heads itself (the seat card in a window says the PC and what to do): the title stays the dialog's name
+   * for screen readers, the visible header is only the ×, so nothing is said twice.
+   */
+  titleHidden?: boolean;
 }): JSX.Element {
   const panel = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -737,6 +743,11 @@ export function Sheet({
               {hero}
               {onClose && <SheetClose onClose={onClose} className="absolute right-3.5 top-3.5 z-10" />}
             </>
+          ) : titleHidden ? (
+            <header className="flex items-center justify-end px-6 pt-3 max-md:px-4">
+              <h2 className="sr-only">{title}</h2>
+              {onClose && <SheetClose onClose={onClose} className="-mr-1" />}
+            </header>
           ) : (
             <header className="flex items-start justify-between gap-3 px-6 pt-5 max-md:px-4">
               <div className="flex min-w-0 flex-col gap-2">

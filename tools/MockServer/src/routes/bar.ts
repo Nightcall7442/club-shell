@@ -36,7 +36,15 @@ import {
   type ShopSaleRecord,
   type UserRecord,
 } from '../db.js';
-import { PAY_METHODS, clubHooks, drawerNow, openShift, type PayMethod, type StaffRecord } from '../club.js';
+import {
+  OWNER_TRANSACTIONS,
+  PAY_METHODS,
+  clubHooks,
+  drawerNow,
+  openShift,
+  type PayMethod,
+  type StaffRecord,
+} from '../club.js';
 import { record } from '../control.js';
 import { pushToUser } from '../ws.js';
 import { isApiKey, requireStaff } from './club.js';
@@ -175,8 +183,10 @@ export function barRoutes(app: FastifyInstance): void {
       reply,
       async () => {
         const input = readSale(body(req));
+        // D-101: the owner's sale is the owner's own — no shift needed or joined, its cash taken by the owner in person.
+        const owner = staff.role === 'owner';
         const shift = openShift();
-        if (!shift) throw errors.conflict('shiftClosed');
+        if (!shift && !owner) throw errors.conflict('shiftClosed');
         const booked = db.shopSales.find((s) => s.kind === 'sale' && s.id === input.saleId);
         if (booked) throw errors.conflict('saleExists', { sale: saleView(booked) });
         const user = input.userId ? findUser(input.userId) : null;
@@ -225,13 +235,15 @@ export function barRoutes(app: FastifyInstance): void {
         let ledgerId: string | null = null;
         if (balanceSale && user) {
           ledgerId = applyTransaction(user, 'purchase', uzs(-total), `Бар: ${linesDetail(sold)}`, input.saleId).id;
+          if (owner) OWNER_TRANSACTIONS.add(ledgerId);
           pushToUser(user.id, 'walletUpdated', balanceOf(user));
         }
         const sale: ShopSaleRecord = {
           id: input.saleId,
           kind: 'sale',
           voidOf: null,
-          shiftId: shift.id,
+          shiftId: owner ? null : (shift?.id ?? null),
+          ...(owner ? { owner: true } : {}),
           staffId: staff.id,
           staffName: staff.name,
           userId: user?.id ?? null,
@@ -247,6 +259,7 @@ export function barRoutes(app: FastifyInstance): void {
         db.shopSales.push(sale);
         markDirty();
         record(staff, 'shopSale', {
+          ...(owner ? { shiftId: null, owner: true } : {}),
           userId: sale.userId,
           pcId: sale.pcId,
           amount: total,
@@ -270,7 +283,7 @@ export function barRoutes(app: FastifyInstance): void {
             products: input.items.map((item) =>
               productView({ ...(lines.find((l) => l.product.id === item.productId)?.product as ProductRecord) }),
             ),
-            expectedCash: drawerNow(shift),
+            expectedCash: shift ? drawerNow(shift) : 0,
           },
         };
       },
@@ -291,17 +304,22 @@ export function barRoutes(app: FastifyInstance): void {
         if (reasonCode === 'other' && !note) throw errors.validation('note', 'required');
         if (note && note.length < 3 && reasonCode === 'other') throw errors.validation('note', 'min');
         if (note && note.length > 200) throw errors.validation('note', 'max');
-        // The open shift first, then the sale: the server's order.
+        // The open shift first (the owner needs none, D-101), then the sale: the server's order.
+        const isOwner = staff.role === 'owner';
         const shift = openShift();
-        if (!shift) throw errors.conflict('shiftClosed');
+        if (!shift && !isOwner) throw errors.conflict('shiftClosed');
         const sale = db.shopSales.find((s) => s.kind === 'sale' && s.id === req.params.id.toLowerCase());
         if (!sale) throw errors.notFound('sale');
         if (voidOf(sale.id)) throw errors.conflict('alreadyVoided');
-        if (staff.role !== 'owner' && Date.now() - Date.parse(sale.createdAt) > VOID_WINDOW_MIN * 60_000)
-          throw voidWindow();
+        if (!isOwner && Date.now() - Date.parse(sale.createdAt) > VOID_WINDOW_MIN * 60_000) throw voidWindow();
+        // The owner's own sale: only the owner takes it back, with no shift and no drawer.
+        const ownerSale = sale.owner === true;
+        if (ownerSale && !isOwner) throw errors.forbidden('ownerOnly');
         // Cash and other method money goes back only in the shift that took it; a balance sale in any open shift.
-        if (sale.method !== 'balance' && sale.shiftId !== shift.id) throw errors.conflict('saleShiftClosed');
-        if (sale.method === 'cash') {
+        if (!ownerSale && sale.method !== 'balance' && (!shift || sale.shiftId !== shift.id))
+          throw errors.conflict(shift ? 'saleShiftClosed' : 'shiftClosed');
+        if (!ownerSale && sale.method === 'balance' && !shift) throw errors.conflict('shiftClosed');
+        if (!ownerSale && shift && sale.method === 'cash') {
           const available = drawerNow(shift);
           if (available < sale.total) throw errors.conflict('cashShort', { available: uzs(available) });
         }
@@ -324,6 +342,7 @@ export function barRoutes(app: FastifyInstance): void {
         if (sale.method === 'balance' && user) {
           // A `purchase` row of +total, never a `refund` (refunds count as time and raise a guest's payable).
           ledgerId = applyTransaction(user, 'purchase', uzs(sale.total), 'Бар: аннулирование', id).id;
+          if (ownerSale) OWNER_TRANSACTIONS.add(ledgerId);
           balance = user.balance;
           pushToUser(user.id, 'walletUpdated', balanceOf(user));
         }
@@ -333,7 +352,7 @@ export function barRoutes(app: FastifyInstance): void {
           id,
           kind: 'void',
           voidOf: sale.id,
-          shiftId: shift.id,
+          shiftId: ownerSale ? null : (shift?.id ?? null),
           staffId: staff.id,
           staffName: staff.name,
           ledgerId,
@@ -344,6 +363,7 @@ export function barRoutes(app: FastifyInstance): void {
         db.shopSales.push(voided);
         markDirty();
         record(staff, 'shopVoid', {
+          ...(ownerSale ? { shiftId: null, owner: true } : {}),
           userId: sale.userId,
           pcId: sale.pcId,
           amount: sale.total,
@@ -366,7 +386,7 @@ export function barRoutes(app: FastifyInstance): void {
             },
             balance,
             products: restocked.map((p) => productView({ ...p })),
-            expectedCash: drawerNow(shift),
+            expectedCash: shift ? drawerNow(shift) : 0,
           },
         };
       },
