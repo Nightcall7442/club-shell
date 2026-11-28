@@ -723,6 +723,26 @@ public sealed class SessionManagerTests : IDisposable
     }
 
     [Fact]
+    public void Offline_curfew_holds_minors_and_players_without_a_date_of_birth()
+    {
+        // D-108 from the cached player and the server's offline.minorCurfew, on the PC's local clock.
+        var curfew = new MinorCurfewSettings { Enabled = true, MinorAge = 18, From = "22:00", To = "06:00" };
+        var today = DateTime.Today;
+        DateTimeOffset At(int hour, int minute) =>
+            new(today.AddHours(hour).AddMinutes(minute), TimeZoneInfo.Local.GetUtcOffset(today.AddHours(hour)));
+        var minor = Player(0) with { BirthDate = today.AddYears(-15).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) };
+        var adult = Player(0) with { BirthDate = "1990-01-01" };
+
+        SessionManager.MinorCurfewMinutes(minor, curfew, At(21, 30)).Should().Be(30);
+        SessionManager.MinorCurfewMinutes(minor, curfew, At(23, 0)).Should().Be(0, "inside the forbidden hours");
+        SessionManager.MinorCurfewMinutes(minor, curfew, At(5, 59)).Should().Be(0);
+        SessionManager.MinorCurfewMinutes(Player(0), curfew, At(21, 0)).Should().Be(60, "no date of birth is never taken for an adult");
+        SessionManager.MinorCurfewMinutes(adult, curfew, At(23, 0)).Should().BeNull();
+        SessionManager.MinorCurfewMinutes(minor, new MinorCurfewSettings(), At(23, 0)).Should().BeNull("an agent the server told nothing enforces nothing");
+        SessionManager.MinorCurfewMinutes(minor with { Role = Contracts.Users.UserRole.Guest }, curfew, At(23, 0)).Should().BeNull();
+    }
+
+    [Fact]
     public async Task Offline_start_without_a_known_balance_or_tariff_is_refused()
     {
         _server.CreateSessionAsync(Arg.Any<SessionCreateRequest>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>()).ThrowsAsync(Unavailable());

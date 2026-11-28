@@ -70,6 +70,7 @@ const BEYOND_CONTRACT: ReadonlySet<AuditAction> = new Set([
   'stockCreate',
   'stockArchive',
   'topUpCancel',
+  'clientBirthDate',
 ]);
 
 export function inContract(e: AuditEntry): boolean {

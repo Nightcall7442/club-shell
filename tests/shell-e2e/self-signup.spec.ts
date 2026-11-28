@@ -35,6 +35,13 @@ async function openRegistration(page: Page, signup: 'on' | 'rules'): Promise<Loc
   return form;
 }
 
+/** D-107: the date of birth, as three pickers. */
+async function pickBirthDate(form: Locator, day: string, month: string, year: string): Promise<void> {
+  await form.getByLabel(ru('birthDate.day'), { exact: true }).selectOption(day);
+  await form.getByLabel(ru('birthDate.month'), { exact: true }).selectOption(month);
+  await form.getByLabel(ru('birthDate.year'), { exact: true }).selectOption(year);
+}
+
 async function simulate(page: Page, name: string, ...args: unknown[]): Promise<void> {
   await page.waitForFunction(() => Boolean((window as unknown as { __clubshellMock?: unknown }).__clubshellMock));
   await page.evaluate(
@@ -70,6 +77,12 @@ test.describe('self-signup on the lock screen', () => {
       'true',
     );
     await expect(form.getByText(ru('lock.register.genderRequired'))).toHaveCount(0);
+    // D-107: the date of birth is required too; a day the month does not have is no date.
+    await expect(form.getByText(ru('birthDate.problem.required'))).toBeVisible();
+    await pickBirthDate(form, '31', '4', '2001');
+    await submit.click();
+    await expect(form.getByText(ru('birthDate.problem.required'))).toBeVisible();
+    await pickBirthDate(form, '17', '5', '2001');
     await field(page, ru('lock.register.name')).fill('Самир');
     await field(page, ru('lock.register.login')).fill('samir');
     await field(page, ru('lock.register.password')).fill('4321');
@@ -104,6 +117,7 @@ test.describe('self-signup on the lock screen', () => {
     await expect(form.getByText('Беречь технику')).toBeVisible();
     await field(page, ru('lock.register.name')).fill('Нодира');
     await form.getByRole('radio', { name: ru('lock.register.genderFemale') }).click();
+    await pickBirthDate(form, '3', '9', '1999');
     await field(page, ru('lock.register.login')).fill('+998 90 765 43 21');
     await field(page, ru('lock.register.password')).fill('pass');
     await field(page, ru('lock.register.passwordAgain')).fill('pass');

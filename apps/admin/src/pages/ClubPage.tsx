@@ -407,22 +407,47 @@ export default function ClubPage(): JSX.Element {
           </Section>
 
           <Section title={t('Ограничения')}>
-            <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2 md:max-w-xl">
+            {/* D-108: the minors' night curfew — the server ends their sessions at the start and refunds unused time. */}
+            <div className="flex flex-col gap-3 md:max-w-xl">
+              <Toggle
+                label={t('Ночной запрет для несовершеннолетних')}
+                checked={s.limits.minorCurfewEnabled !== false}
+                onChange={(v) => st.set('limits', { ...s.limits, minorCurfewEnabled: v })}
+              />
+              <p className="-mt-1 pl-14 text-[11.5px] leading-4 text-muted">
+                {t(
+                  'В эти часы несовершеннолетний не начнёт и не продлит сеанс ни на ПК, ни на кассе. Идущий сеанс получит предупреждения за 10 и 5 минут и завершится в начале запрета; неоплаченное время вернётся на баланс. Клиент без даты рождения считается несовершеннолетним. Гостей без аккаунта запрет не касается — за них отвечает касса.',
+                )}
+              </p>
+            </div>
+            <div className="grid gap-x-5 gap-y-4 sm:grid-cols-3 md:max-w-xl">
               <Field label={t('Несовершеннолетние — младше')}>
                 <NumberInput
                   value={s.limits.minorAge}
-                  min={0}
+                  min={1}
                   max={99}
                   suffix={t('лет')}
                   onChange={(n) => st.set('limits', { ...s.limits, minorAge: n })}
                 />
               </Field>
-              <Field label={t('Комендантский час с')}>
+              <Field label={t('Запрет с')}>
                 <Input
                   type="time"
                   className="tnum"
+                  data-curfew-from
                   value={s.limits.minorCurfew}
+                  disabled={s.limits.minorCurfewEnabled === false}
                   onChange={(e) => st.set('limits', { ...s.limits, minorCurfew: e.target.value })}
+                />
+              </Field>
+              <Field label={t('Запрет до')}>
+                <Input
+                  type="time"
+                  className="tnum"
+                  data-curfew-to
+                  value={s.limits.minorCurfewEnd ?? '06:00'}
+                  disabled={s.limits.minorCurfewEnabled === false}
+                  onChange={(e) => st.set('limits', { ...s.limits, minorCurfewEnd: e.target.value })}
                 />
               </Field>
             </div>

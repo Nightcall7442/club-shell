@@ -45,7 +45,7 @@ public static class ClubSettingsEndpoints
         ["branding", "features", "zones", "pricing", "groups", "bonusTiers", "happyHours", "loyalty", "limits", "catalog", "banners", "rulesText", "stock"];
 
     /// <summary>Sections whose change reaches <c>AgentServerConfig</c> (§5.9).</summary>
-    private static readonly string[] ConfigSections = ["features", "branding", "catalog", "rulesText", "banners", "screensaver", "selfSignup", "warningMinutes"];
+    private static readonly string[] ConfigSections = ["features", "branding", "catalog", "rulesText", "banners", "screensaver", "selfSignup", "warningMinutes", "curfew"];
 
     /// <summary><c>notifications.bigTopupAt</c> when the owner has not set one (the mock's default, 200 000 sum).</summary>
     public const long DefaultBigTopupAt = 20_000_000;
@@ -85,7 +85,7 @@ public static class ClubSettingsEndpoints
         static long Long(JsonElement e, string name, long fallback) => e.TryGetProperty(name, out var v) && v.TryGetInt64(out var n) ? n : fallback;
     }
 
-    private static async Task<IResult> GetAsync(HttpContext context, NpgsqlDataSource db)
+    private static async Task<IResult> GetAsync(HttpContext context, NpgsqlDataSource db, TimeProvider clock)
     {
         var staff = context.Features.GetRequiredFeature<StaffContext>();
         await using var c = await db.OpenConnectionAsync();
@@ -113,9 +113,25 @@ public static class ClubSettingsEndpoints
             signup["selfSignup"] = false;
         }
 
+        // D-108: the minors' night curfew is on, 22:00–06:00, until the owner changes it (ClubPricing reads the same).
+        if (ordered["limits"] is JsonObject curfew)
+        {
+            curfew["minorCurfewEnabled"] ??= true;
+            curfew["minorCurfewEnd"] ??= "06:00";
+        }
+
+        // D-107: the birthday gift, off with an example amount until the owner turns it on; fired — gifts in the last year.
+        var gift = BirthdayGift.Read(stored["birthdayGift"]?.ToJsonString()).ToJson();
+        var (fired, lastFiredAt) = await c.QuerySingleAsync<(int, DateTimeOffset?)>(
+            "SELECT count(*)::int, max(fired_at) FROM rule_firings WHERE club_id = @ClubId AND rule_id = @rule AND fired_at > @since",
+            new { staff.ClubId, rule = BirthdayGift.RuleId, since = clock.GetUtcNow() - TimeSpan.FromDays(365) });
+        gift["fired"] = fired;
+        gift["lastFiredAt"] = lastFiredAt is { } last ? ServerJson.FormatTime(last) : null;
+
         ordered["topUpPromo"] = TopUpPromo.Read(stored["topUpPromo"]?.ToJsonString()).ToJson();
         ordered["screensaver"] = Screensaver.Read(stored["screensaver"]?.ToJsonString()).ToJson();
         ordered["automation"] = await AutomationAsync(c, staff.ClubId);
+        ordered["birthdayGift"] = gift;
         ordered["notifications"] = new JsonObject { ["bigTopupAt"] = stored["notifications"]?["bigTopupAt"]?.DeepClone() ?? DefaultBigTopupAt };
         ordered["webhooks"] = await WebhooksAsync(c, staff.ClubId);
         var control = ControlOf(stored["control"]?.ToJsonString());
@@ -137,7 +153,7 @@ public static class ClubSettingsEndpoints
             ["callAdmin"] = true, ["gpuPanel"] = false, ["lockScreenPower"] = true,
         },
         "pricing" => new JsonObject { ["weekdayPct"] = new JsonArray(100, 100, 100, 100, 100, 100, 100), ["holidays"] = new JsonArray(), ["holidayPct"] = 100 },
-        "limits" => new JsonObject { ["minorAge"] = 18, ["minorCurfew"] = "22:00" },
+        "limits" => new JsonObject { ["minorAge"] = 18, ["minorCurfew"] = "22:00", ["minorCurfewEnabled"] = true, ["minorCurfewEnd"] = "06:00" },
         "catalog" => new JsonObject { ["order"] = new JsonArray(), ["hidden"] = new JsonArray(), ["featured"] = new JsonArray() },
         "rulesText" => new JsonObject { ["ru"] = "", ["uz"] = "", ["en"] = "" },
         "stock" => new JsonObject { ["lowAt"] = StockEndpoints.DefaultLowAt },
@@ -217,6 +233,7 @@ public static class ClubSettingsEndpoints
             var changed = new List<string>();
             var selfSignup = SelfSignupOn(settings);
             var warningMinutes = Sessions.Billing.ClubPricing.WarningMinutesOf(settings.ToJsonString());
+            var curfew = CurfewOf(settings, timeZone);
             foreach (var key in Plain.Where(k => body.TryGetProperty(k, out _)))
             {
                 var next = JsonNode.Parse(body.GetProperty(key).GetRawText());
@@ -240,6 +257,12 @@ public static class ClubSettingsEndpoints
                 changed.Add("warningMinutes");
             }
 
+            // D-108: the agents enforce the minors' curfew offline from their config (offline.minorCurfew).
+            if (CurfewOf(settings, timeZone) != curfew)
+            {
+                changed.Add("curfew");
+            }
+
             if (body.TryGetProperty("control", out var control))
             {
                 settings["control"] = JsonSerializer.SerializeToNode(Clamp(control, ControlOf(settings["control"]?.ToJsonString())), AdminJson.Options);
@@ -248,6 +271,11 @@ public static class ClubSettingsEndpoints
             if (body.TryGetProperty("topUpPromo", out var topUpPromo))
             {
                 settings["topUpPromo"] = TopUpPromo.Parse(topUpPromo).ToJson();
+            }
+
+            if (body.TryGetProperty("birthdayGift", out var birthdayGift))
+            {
+                settings["birthdayGift"] = BirthdayGift.Parse(birthdayGift).ToJson();
             }
 
             if (body.TryGetProperty("screensaver", out var screensaver))
@@ -314,6 +342,10 @@ public static class ClubSettingsEndpoints
         await ConfigRefresh.SendAsync(commands, queued);
         return AdminJson.Ok(AdminJson.OkBody);
     }
+
+    /// <summary>The curfew as the agent config carries it (<see cref="AgentConfig.MinorCurfewOf"/>), to compare.</summary>
+    private static string CurfewOf(JsonObject settings, string timeZone) =>
+        JsonSerializer.Serialize(AgentConfig.MinorCurfewOf(new ClubAgentView { TimeZone = timeZone, Settings = settings.ToJsonString() }));
 
     private static bool SelfSignupOn(JsonObject settings) =>
         settings["limits"] is JsonObject limits && limits["selfSignup"] is JsonValue on && on.GetValueKind() == JsonValueKind.True;
@@ -410,7 +442,19 @@ public static class ClubSettingsEndpoints
                 }
             }
 
-            foreach (var name in new[] { "guestPostpaid", "cashOutOwnerOnly", "selfSignup" })
+            // D-108: the end of the minors' forbidden hours, HH:mm like their start (limits.minorCurfew, by the contract).
+            if (limits.TryGetProperty("minorCurfewEnd", out var end) && end.ValueKind != JsonValueKind.Null
+                && (end.ValueKind != JsonValueKind.String || ClubTime.Minutes(end.GetString()) is null))
+            {
+                throw ApiException.Validation("limits.minorCurfewEnd", "format");
+            }
+
+            if (limits.TryGetProperty("minorAge", out var age) && age.TryGetInt32(out var years) && years > 99)
+            {
+                throw ApiException.Validation("limits.minorAge", "max");
+            }
+
+            foreach (var name in new[] { "guestPostpaid", "cashOutOwnerOnly", "selfSignup", "minorCurfewEnabled" })
             {
                 if (limits.TryGetProperty(name, out var v) && v.ValueKind is not (JsonValueKind.True or JsonValueKind.False or JsonValueKind.Null))
                 {

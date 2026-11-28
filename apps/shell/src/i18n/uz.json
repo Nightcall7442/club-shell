@@ -174,7 +174,10 @@
       "tariffZone": "Bu tarif shu kompyuter zonasida amal qilmaydi: boshqasini tanlang.",
       "tariffTime": "Bu tarif hozir amal qilmaydi: boshqasini tanlang.",
       "pcMaintenance": "Kompyuter taʼmirda: boshqasiga oʻtiring yoki administratorni chaqiring.",
-      "blacklisted": "Bu akkaunt uchun kirish yopiq: administratorga murojaat qiling."
+      "blacklisted": "Bu akkaunt uchun kirish yopiq: administratorga murojaat qiling.",
+      "minorCurfewHours": "Voyaga yetmaganlar {{from}} dan {{to}} gacha oʻynay olmaydi.",
+      "minorCurfewUntil": "Voyaga yetmaganlar {{from}} dan {{to}} gacha oʻynay olmaydi: hozir koʻpi bilan {{minutes}} daqiqa sotib olish mumkin.",
+      "birthDateRequired": "Tugʻilgan sanangizni koʻrsating: usiz vaqt sotib olib boʻlmaydi."
     },
     "pcNotReady": "Kompyuter hali tayyorlanmoqda: o‘yin disklari ulanmoqda. Biroz kuting.",
     "reason": {
@@ -188,7 +191,9 @@
       "activeSessionElsewhere": "Seansingiz {{pc}} kompyuterida ochiq. U yerda chiqing yoki administratorga murojaat qiling.",
       "activeSessionElsewhereUnknown": "Seansingiz boshqa kompyuterda ochiq. U yerda chiqing yoki administratorga murojaat qiling.",
       "otherUser": "Bu seans boshqa o'yinchiga tegishli.",
-      "userToken": "Kirish qabul qilinmadi: qaytadan kiring."
+      "userToken": "Kirish qabul qilinmadi: qaytadan kiring.",
+      "ageRestrictedHours": "Voyaga yetmaganlar {{from}} dan {{to}} gacha oʻynay olmaydi. Ertalab keling.",
+      "birthDateLocked": "Tugʻilgan sanani faqat klub administratori oʻzgartiradi."
     }
   },
   "lock": {
@@ -1771,5 +1776,25 @@
     "default": "Obsidian",
     "light": "Kunduzgi",
     "neon": "Neon tun"
+  },
+  "birthDate": {
+    "label": "Tugʻilgan sana",
+    "day": "Kun",
+    "month": "Oy",
+    "year": "Yil",
+    "askTitle": "Tugʻilgan sanangizni koʻrsating",
+    "askBody": "Klub har bir oʻyinchidan tugʻilgan sanasini soʻraydi: tugʻilgan kuningizda sizni sovgʻa kutadi.",
+    "onceHint": "Sanani bir marta koʻrsatish mumkin — keyin uni faqat administrator oʻzgartiradi.",
+    "save": "Saqlash",
+    "locked": "Tugʻilgan sana allaqachon koʻrsatilgan: uni faqat administrator oʻzgartira oladi.",
+    "problem": {
+      "required": "Tugʻilgan kun, oy va yilni tanlang.",
+      "format": "Bunday sana yoʻq: kun va oyni tekshiring.",
+      "future": "Tugʻilgan sana kelajakda boʻla olmaydi.",
+      "tooYoung": "Klubda 5 yoshdan oʻynash mumkin.",
+      "tooOld": "Tugʻilgan yilni tekshiring."
+    },
+    "walletHint": "Vaqt sotib olish uchun tugʻilgan sanangizni koʻrsating.",
+    "walletAction": "Tugʻilgan sanani koʻrsatish"
   }
 }

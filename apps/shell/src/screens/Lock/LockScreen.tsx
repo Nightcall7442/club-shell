@@ -43,6 +43,8 @@ import { tariffAvailableNow } from '@/lib/tariffs';
 import { ClubBrand } from '@/components/brand/ClubBrand';
 import { useScreenLook, useTintStyle } from '@/hooks/useClub';
 import { veil } from '@/lib/look';
+import { needsBirthDate } from '@/lib/birthDate';
+import { BirthDateModal } from './BirthDateModal';
 import { CardLogin } from './CardLogin';
 import { GuestCodeForm } from './GuestCodeForm';
 import { LoginForm, loginErrorMessage } from './LoginForm';
@@ -463,11 +465,11 @@ function GuestPayAtDesk({ open, onLogout }: { open: boolean; onLogout?: () => vo
  */
 export function StartSessionModal({ open, onStarted, onLogout }: StartSessionModalProps): JSX.Element {
   const isGuest = useAuthStore(selectIsGuest);
-  return isGuest ? (
-    <GuestPayAtDesk open={open} onLogout={onLogout} />
-  ) : (
-    <MemberTariffPicker open={open} onStarted={onStarted} onLogout={onLogout} />
-  );
+  // D-107: a member without a date of birth gives it first — nothing can be bought without it.
+  const askBirthDate = useAuthStore((s) => needsBirthDate(s.user));
+  if (isGuest) return <GuestPayAtDesk open={open} onLogout={onLogout} />;
+  if (askBirthDate) return <BirthDateModal open={open} onLogout={onLogout} />;
+  return <MemberTariffPicker open={open} onStarted={onStarted} onLogout={onLogout} />;
 }
 
 function MemberTariffPicker({ open, onStarted, onLogout }: StartSessionModalProps): JSX.Element {

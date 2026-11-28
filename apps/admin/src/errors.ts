@@ -30,6 +30,9 @@ const ERROR_COPY: Record<string, string> = {
 const DETAIL_COPY: Record<string, string> = {
   blacklisted: 'Клиент в чёрном списке',
   minorCurfew: 'Несовершеннолетним нельзя играть в это время',
+  // D-107/D-108: a member without a date of birth is never taken for an adult.
+  birthDateRequired: 'Укажите дату рождения клиента',
+  birthDateLocked: 'Дату рождения меняет только касса',
   shiftOpen: 'Смена уже открыта',
   noShift: 'Смена не открыта',
   shiftClosed: 'Смена не открыта — откройте смену, чтобы принимать деньги',
@@ -92,6 +95,15 @@ const VALIDATION_COPY: Record<string, string> = {
   'amount:package': 'Пакет продаётся целиком, не по сумме',
   'amount:same': 'Это та же сумма',
   'registryValues:key': 'Ключ реестра — только под HKCU\\Software и не в разделе Policies',
+  // D-107: the date of birth.
+  'birthDate:required': 'Укажите дату рождения клиента',
+  'birthDate:format': 'Дата рождения — в виде ДД.ММ.ГГГГ',
+  'birthDate:future': 'Дата рождения не может быть в будущем',
+  'birthDate:min': 'Клиенту должно быть не меньше 5 лет',
+  'birthDate:max': 'Проверьте год рождения: больше 100 лет',
+  'limits.minorCurfewEnd:format': 'Время — в виде ЧЧ:ММ',
+  'birthdayGift.amount:min': 'Сумма подарка не может быть отрицательной',
+  'birthdayGift.windowDays:max': 'Окно — не больше 30 дней',
 };
 
 function isMoney(v: unknown): v is Money {
@@ -164,9 +176,23 @@ export function describe(e: unknown): string {
         });
     }
     if (e.code === 'validation') {
+      // D-108: a minor's purchase that would still run when the forbidden hours start.
+      if (d['reason'] === 'curfew' && typeof d['maxMinutes'] === 'number') {
+        const hours = { from: String(d['from'] ?? '22:00'), to: String(d['to'] ?? '06:00') };
+        if (d['noBirthDate'] === true)
+          return t('Дата рождения не указана: до {from} можно не больше {n} мин', { ...hours, n: d['maxMinutes'] });
+        return d['maxMinutes'] > 0
+          ? t('Несовершеннолетним нельзя играть с {from} до {to}: можно не больше {n} мин', {
+              ...hours,
+              n: d['maxMinutes'],
+            })
+          : t('Несовершеннолетним нельзя играть с {from} до {to}', hours);
+      }
       const copy = VALIDATION_COPY[`${String(d['field'])}:${String(d['reason'])}`];
       if (copy) return t(copy);
     }
+    if (d['rule'] === 'minorCurfew' && typeof d['from'] === 'string' && typeof d['to'] === 'string')
+      return t('Несовершеннолетним нельзя играть с {from} до {to}', { from: d['from'], to: d['to'] });
     if (e.code === 'rateLimited') return rateLimited(d);
     const detail = [d['rule'], d['reason'], d['state'], d['code']].find(
       (v): v is string => typeof v === 'string' && v in DETAIL_COPY,

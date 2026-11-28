@@ -297,6 +297,11 @@ export interface ProfileUpdateRequest {
   locale?: Locale | null;
   /** New 4–6 digit PIN used by `session.unlock`. */
   pin?: string | null;
+  /**
+   * The player's date of birth, `YYYY-MM-DD` (D-107): accepted only while the account has none; once set only the
+   * club's desk changes it.
+   */
+  birthDate?: string | null;
 }
 
 /** Response of `auth.qrStart` and `POST /auth/qr/start`. */
@@ -357,6 +362,8 @@ export interface RegisterAuthRequest {
   locale?: Locale | null;
   /** The player's gender, `male` or `female`; required (D-104). */
   gender?: string | null;
+  /** The player's date of birth, `YYYY-MM-DD`; required (D-107). */
+  birthDate?: string | null;
 }
 
 /** Seat on the club map (IPC_PROTOCOL.md §6.15). */
@@ -550,6 +557,8 @@ export interface User {
    * account.
    */
   bonus?: Money | null;
+  /** Date of birth, `YYYY-MM-DD` (D-107); null — not given yet (the Shell asks for it before time is bought). */
+  birthDate?: string | null;
 }
 
 /** Result of a successful login (IPC_PROTOCOL.md §6.20, SERVER_API.md §4.3). */

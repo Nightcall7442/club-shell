@@ -197,6 +197,20 @@ export interface SeatUser {
   balance: Money;
   /** The bonus account (D-106: play time only); absent from an older server. */
   bonus?: Money;
+  /** D-108: true — a minor by the club's age (the «до 18» badge); absent otherwise. */
+  minor?: boolean | null;
+  /** D-107: true — a member whose date of birth is not known yet; absent otherwise. */
+  noBirthDate?: boolean | null;
+}
+
+/**
+ * The minors' night curfew on a seat (D-108): the open session the server ends at `at`, or the one it ended at `at` in the
+ * last 30 minutes (`ended`).
+ */
+export interface SeatCurfew {
+  at: string;
+  ended: boolean;
+  userName: string;
 }
 
 export type KioskAlert = 'logonLost' | 'profileResetFailed';
@@ -233,6 +247,8 @@ export interface Seat {
   game?: SeatGame | null;
   /** Where the PC stands on the hall plan (SHELL_CHANGES 94); absent from an older server — the map shows zones. */
   place?: HallPlace;
+  /** D-108: the minors' curfew note of the seat; null — nothing to say (absent from an older server). */
+  curfew?: SeatCurfew | null;
 }
 
 /** A running game on a seat (`Seat.game`). */
@@ -288,6 +304,8 @@ export interface Overview {
   calls?: Call[];
   /** The club's hall plan (SHELL_CHANGES 94); null — none drawn; absent from an older server. */
   hallPlan?: HallPlan | null;
+  /** D-108: the club's age of majority (`limits.minorAge`) for the seat's «до 18»; absent from an older server. */
+  minorAge?: number;
 }
 
 export type CallCategory = 'help' | 'technical' | 'order' | 'other' | 'problem';
@@ -499,6 +517,10 @@ export interface ClientHit {
   playing: { pcId: string; pcName: string } | null;
   /** In this club's blacklist: the club refuses them a session. */
   blacklisted?: boolean;
+  /** D-107: `YYYY-MM-DD`; null — not given yet; absent from an older server. */
+  birthDate?: string | null;
+  /** D-108: a minor by the club's age; null — no date of birth. */
+  minor?: boolean | null;
 }
 
 /** Money taken with opening or extending: the server tops up and opens in one transaction (a refusal books nothing). */
@@ -1173,7 +1195,13 @@ export interface ClubSettings {
      * (D-109), whole minutes 1..120, at most 8; absent or null — 10, 7, 5. The last minute is always warned too.
      */
     warningMinutes?: number[] | null;
+    /** D-108: the minors' night curfew is on (absent from an older server — on). */
+    minorCurfewEnabled?: boolean;
+    /** D-108: the end of the forbidden hours, `HH:mm` (absent — 06:00). */
+    minorCurfewEnd?: string;
   };
+  /** D-107: the birthday gift («День рождения» of «Автоматизация»); absent from an older server. */
+  birthdayGift?: BirthdayGift;
   catalog: { order: string[]; hidden: string[]; featured: string[] };
   banners: Banner[];
   rulesText: { ru: string; uz: string; en: string };
@@ -1216,7 +1244,9 @@ export type AuditAction =
   | 'cashIn'
   | 'cashOut'
   | 'payout'
-  | 'topUpCancel';
+  | 'topUpCancel'
+  // D-107: a date of birth set (`ControlReport.birthDates`, not in `log`).
+  | 'clientBirthDate';
 
 export interface AuditEntry {
   id: string;
@@ -1361,6 +1391,8 @@ export interface ControlReport {
   log: AuditEntry[];
   /** Desk top-ups taken back in the period (D-91; not in `log`), newest first; absent from an older server. */
   corrections?: AuditEntry[];
+  /** D-107: dates of birth set in the period (desk changes, a player's own once), newest first; absent from an older server. */
+  birthDates?: AuditEntry[];
 }
 
 export interface Client {
@@ -1383,10 +1415,30 @@ export interface Client {
   levelName: string;
   /** D-104: required for a new account; null — an older account the desk has not set yet; absent from an older server. */
   gender?: Gender | null;
+  /** D-107: `YYYY-MM-DD`, required for a new account; null — an older account without one; absent from an older server. */
+  birthDate?: string | null;
+  /** D-107: the age on the club's date; null — no date of birth. */
+  age?: number | null;
+  /** D-108: a minor by the club's `limits.minorAge`; null — no date of birth. */
+  minor?: boolean | null;
 }
 
 /** A player's gender (D-104). */
 export type Gender = 'male' | 'female';
+
+/**
+ * The birthday gift (D-107): `amount` (minor units) on the bonus account once per birthday year, within `windowDays` of
+ * the birthday, with the message `text` on the PC (`{bonus}` — the amount; empty — the server's «С днём рождения! +N
+ * бонусов»). `fired`/`lastFiredAt`: the server's count of the last 365 days, ignored on save.
+ */
+export interface BirthdayGift {
+  enabled: boolean;
+  amount: number;
+  windowDays: number;
+  text: string;
+  fired?: number;
+  lastFiredAt?: string | null;
+}
 
 export type DeviceKind = 'pc' | 'console' | 'vr' | 'other';
 
@@ -1671,6 +1723,8 @@ export const clubApi = {
     cardId?: string | null;
     /** D-104: required. */
     gender: Gender;
+    /** D-107: required, `YYYY-MM-DD`. */
+    birthDate: string;
   }): Promise<{ client: Client }> => post('/admin/clients', input),
   setClientPassword: (id: string, password: string): Promise<unknown> =>
     post(`/admin/clients/${id}/password`, { password }),

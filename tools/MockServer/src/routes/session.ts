@@ -55,6 +55,7 @@ import {
   knownValues,
 } from '../db.js';
 import { quote } from '../club.js';
+import { checkCurfew, checkCurfewEnd, giveBirthday, tickCurfew } from '../minors.js';
 import { broadcast, pushToPc, pushToUser } from '../ws.js';
 
 const END_REASONS = knownValues(SessionEndReason);
@@ -146,6 +147,8 @@ export function tickSessions(nowMs: number): void {
       pushToPc(s.pcId, 'sessionUpdated', view);
     }
   }
+  // D-108: the minors' night curfew — warnings 10 and 5 minutes before, the desk's end at its start.
+  tickCurfew(nowMs, (rec, reason) => endSession(rec, reason, nowMs));
 }
 
 function ownedOpenSession(id: string, userId: string): SessionRecord {
@@ -207,6 +210,10 @@ export function sessionRoutes(app: FastifyInstance): void {
       if (!tariffIsValidFor(tariff, targetPc.zone, weekdayFromJsDay(local.getDay()), localClock(local)))
         throw errors.policyDenied('tariffTime');
       if (!prepaid && user.role === 'guest') throw errors.policyDenied('postpaidNotAllowed');
+      // D-107/D-108: the player's own purchase needs the date of birth; a minor plays only outside the forbidden hours.
+      // The offline replay (`startedAt`) records what the agent already let happen, as the server.
+      const replay = optStr(b, 'startedAt') !== null;
+      if (!replay) checkCurfew(user, true);
       let mins: number;
       if (tariff.isPackage) {
         mins = tariff.packageMinutes ?? minutes ?? 0;
@@ -216,6 +223,7 @@ export function sessionRoutes(app: FastifyInstance): void {
         if (tariff.maxMinutes != null && minutes > tariff.maxMinutes) throw errors.validation('minutes', 'max');
         mins = minutes;
       }
+      if (prepaid && !replay) checkCurfewEnd(user, 0, mins);
       const cost = prepaid ? tariffPriceFor(tariff, mins) : zero();
       // Play time: the bonus account pays first (D-106).
       if (prepaid && timeFunds(user) < cost.amount) throw errors.insufficientFunds(cost, uzs(timeFunds(user)));
@@ -253,6 +261,8 @@ export function sessionRoutes(app: FastifyInstance): void {
       pushToPc(pcId, 'sessionUpdated', session);
       broadcast('pcStatusChanged', { pcId, status: 'busy' });
       if (cost.amount > 0) pushToUser(user.id, 'walletUpdated', balanceOf(user));
+      // D-107: the birthday gift, when it is due.
+      giveBirthday(user, pcId);
       return { status: 201, body: session };
     });
   });
@@ -357,6 +367,8 @@ export function sessionRoutes(app: FastifyInstance): void {
       if (!s.isPrepaid) throw errors.conflict('postpaidSession');
       if (tariff.maxMinutes != null && s.purchasedSec / 60 + minutes > tariff.maxMinutes)
         throw errors.validation('minutes', 'max');
+      checkCurfew(user, true);
+      checkCurfewEnd(user, Math.max(0, viewSession(s).secondsLeft), minutes);
       const cost = tariffPriceFor(tariff, minutes);
       if (timeFunds(user) < cost.amount) throw errors.insufficientFunds(cost, uzs(timeFunds(user)));
       if (cost.amount > 0)

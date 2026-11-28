@@ -78,8 +78,6 @@ import {
   club,
   clubHooks,
   drawerNow,
-  inCurfew,
-  isMinor,
   openShift,
   profileOf,
   quote,
@@ -92,6 +90,7 @@ import {
 } from '../club.js';
 import { record } from '../control.js';
 import { openTicketMarks } from '../health.js';
+import { checkCurfew, checkCurfewEnd, seatCurfew, seatUserMarks } from '../minors.js';
 import { broadcast, isConnected, pendingCommands, pushToPc, pushToUser, sendCommand } from '../ws.js';
 import { callView, liveCalls, moveCalls } from '../calls.js';
 
@@ -109,10 +108,20 @@ function requireAdmin(req: FastifyRequest): StaffRecord {
 interface SeatView {
   pc: ReturnType<typeof publicPc>;
   session: Session | null;
-  user: { id: string; displayName: string; role: string; balance: Money; bonus: Money } | null;
+  user: {
+    id: string;
+    displayName: string;
+    role: string;
+    balance: Money;
+    bonus: Money;
+    minor?: true;
+    noBirthDate?: true;
+  } | null;
   signedIn: boolean | null;
   game: SeatGame | null;
   place: { x: number; y: number; rotation: number };
+  /** D-108: the minors' curfew note of the seat. */
+  curfew: { at: string; ended: boolean; userName: string } | null;
 }
 
 /** The game on a busy seat (D-71): the catalog title and art; an empty cover is null. */
@@ -161,13 +170,22 @@ function seatOf(pc: PcRecord): SeatView {
     pc: publicPc(pc),
     session,
     // D-106: the bonus account apart (beyond the contract).
+    // D-108: «до 18» and a missing date of birth.
     user: user
-      ? { id: user.id, displayName: user.displayName, role: user.role, balance: user.balance, bonus: user.bonus }
+      ? {
+          id: user.id,
+          displayName: user.displayName,
+          role: user.role,
+          balance: user.balance,
+          bonus: user.bonus,
+          ...seatUserMarks(user),
+        }
       : null,
     // A desk session nobody has signed in to yet: its clock already runs (D-49).
     signedIn: rec ? signedInOn(rec.userId, pc.id) : null,
     game: gameOf(pc, rec),
     place: { x: pc.x, y: pc.y, rotation: pc.rotation ?? 0 },
+    curfew: seatCurfew(pc.id, rec, user),
   };
 }
 
@@ -515,6 +533,8 @@ export function adminRoutes(app: FastifyInstance): void {
       hallPlan: hallPlan(),
       // Cash desk part 3: the players' calls the desk has not closed (D-63).
       calls: liveCalls(),
+      // D-108: the club's age of majority for the seat's «до 18».
+      minorAge: club().limits.minorAge,
     };
   });
 
@@ -550,11 +570,12 @@ export function adminRoutes(app: FastifyInstance): void {
           pcId: mine.pcId,
         });
       if (profileOf(userId).blacklisted) throw errors.policyDenied('blacklisted');
-      if (isMinor(userId) && inCurfew()) throw errors.policyDenied('minorCurfew');
+      checkCurfew(user, false);
       if (!prepaid && user.role === 'guest' && !guestPostpaidOn()) throw errors.policyDenied('postpaidNotAllowed');
       // D-90: «по сумме» the server sells the minutes the amount buys, whatever `minutes` says.
       const byAmount = amount === null ? null : minutesFor(tariff, amount, userId, pc.zone);
       const mins = byAmount?.minutes ?? (tariff.isPackage ? (tariff.packageMinutes ?? minutes) : prepaid ? minutes : 0);
+      if (prepaid) checkCurfewEnd(user, 0, mins);
       const priced = byAmount?.priced ?? quote(tariff, prepaid ? mins : 60, userId, pc.zone);
       if (prepaid) checkFunds(user, payment, priced.total);
       else checkPostpaid(user, tariff, pc.zone);
@@ -640,6 +661,9 @@ export function adminRoutes(app: FastifyInstance): void {
       const byAmount =
         amount === null ? null : minutesFor(tariff, amount, user.id, pc?.zone ?? '', Math.floor(rec.purchasedSec / 60));
       const mins = byAmount?.minutes ?? (tariff.isPackage ? (tariff.packageMinutes ?? minutes) : minutes);
+      // D-108: the minor's time already bought plays out first.
+      checkCurfew(user, false);
+      checkCurfewEnd(user, Math.max(0, viewSession(rec).secondsLeft), mins);
       const priced = byAmount?.priced ?? quote(tariff, mins, user.id, pc?.zone ?? '');
       const cost = priced.total;
       if (user.transient && payment && payment.amount !== cost.amount)

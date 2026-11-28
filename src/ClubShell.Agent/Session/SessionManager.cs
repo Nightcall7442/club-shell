@@ -5,6 +5,7 @@ using ClubShell.Contracts.Errors;
 using ClubShell.Contracts.Ipc;
 using ClubShell.Contracts.Serialization;
 using ClubShell.Contracts.Sessions;
+using ClubShell.Contracts.Users;
 using ClubShell.Contracts.Wallet;
 using ClubShell.Core.Abstractions;
 using ClubShell.Core.Configuration;
@@ -639,6 +640,20 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
 
         var cap = Math.Max(1, offline.MaxOfflineMinutes);
         var budgetMinutes = Math.Min(minutes.Value, cap);
+
+        // D-108: the minors' curfew from the cached player's date of birth — refused in the forbidden hours, and an offline
+        // session (capped anyway) ends at their start instead of running into them.
+        if (MinorCurfewMinutes(await _store.GetCachedUserAsync(request.UserId, cancellationToken).ConfigureAwait(false), offline.MinorCurfew, now)
+            is { } untilCurfew)
+        {
+            if (untilCurfew <= 0)
+            {
+                throw IpcError.PolicyDenied("minorCurfew").ToException();
+            }
+
+            budgetMinutes = Math.Min(budgetMinutes, untilCurfew);
+        }
+
         var cost = tariff.PriceFor(budgetMinutes);
         await ChargeOfflineAsync(request.UserId, cost, cancellationToken).ConfigureAwait(false);
 
@@ -660,6 +675,50 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
         var pending = new OfflineSessionCreate(request with { StartedAt = now, ClientSessionId = id, Minutes = budgetMinutes }, key);
         _logger.LogInformation("Offline session {SessionId} created for {Minutes} min (cap {Cap})", id, budgetMinutes, cap);
         return (session, pending);
+    }
+
+    /// <summary>
+    /// D-108 offline: for a cached member who is a minor on the PC's local date — or has no date of birth, never taken for
+    /// an adult — while the club's curfew is on, the whole minutes left until the forbidden hours start (0 inside them);
+    /// null when the curfew does not hold the player (an adult, a guest, the curfew off or unknown to this agent).
+    /// </summary>
+    public static int? MinorCurfewMinutes(User? user, MinorCurfewSettings curfew, DateTimeOffset now)
+    {
+        if (!curfew.Enabled || user is null || user.Role is not (UserRole.Member or UserRole.Vip))
+        {
+            return null;
+        }
+
+        var local = TimeZoneInfo.ConvertTime(now, TimeZoneInfo.Local);
+        var today = DateOnly.FromDateTime(local.DateTime);
+        if (DateOnly.TryParseExact(user.BirthDate, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var birth))
+        {
+            var age = today.Year - birth.Year - (today.Month < birth.Month || (today.Month == birth.Month && today.Day < birth.Day) ? 1 : 0);
+            if (age >= curfew.MinorAge)
+            {
+                return null;
+            }
+        }
+
+        if (!TimeOnly.TryParseExact(curfew.From, "HH:mm", out var from) || !TimeOnly.TryParseExact(curfew.To, "HH:mm", out var to) || from == to)
+        {
+            return null;
+        }
+
+        var time = TimeOnly.FromDateTime(local.DateTime);
+        var inside = from < to ? time >= from && time < to : time >= from || time < to;
+        if (inside)
+        {
+            return 0;
+        }
+
+        var start = local.Date + from.ToTimeSpan();
+        if (start <= local.DateTime)
+        {
+            start = start.AddDays(1);
+        }
+
+        return (int)Math.Floor((start - local.DateTime).TotalMinutes);
     }
 
     /// <summary>

@@ -25,7 +25,7 @@ public sealed record StaffSummary(
 
 public sealed record ControlReport(
     DateTimeOffset From, DateTimeOffset To, ControlSettings Settings, IReadOnlyList<StaffSummary> Staff, IReadOnlyList<ControlFlag> Flags,
-    IReadOnlyList<AuditEntry> Log, IReadOnlyList<AuditEntry>? Corrections = null);
+    IReadOnlyList<AuditEntry> Log, IReadOnlyList<AuditEntry>? Corrections = null, IReadOnlyList<AuditEntry>? BirthDates = null);
 
 /// <summary>
 /// Cashier control (slice S5, port of the mock's <c>control.ts</c>): <c>adminControl</c> reads the staff journal of the
@@ -40,7 +40,8 @@ public sealed record ControlReport(
 /// narrows the flags and the journal, never the per-cashier totals. Beyond the contract (D-91): <c>corrections</c> — the
 /// desk top-ups taken back in the period (journal <c>topUpCancel</c>, outside <c>AdminAuditAction</c>, so not in <c>log</c>),
 /// newest first, narrowed by <c>staffId</c> like the journal; per cashier <c>topUpCancels</c> (how many) and
-/// <c>topUpCancelled</c> (how much).
+/// <c>topUpCancelled</c> (how much). <c>birthDates</c> (D-107): the dates of birth set in the period (journal
+/// <c>clientBirthDate</c>: the desk's changes, a player's own one with no staff member and <c>meta.byPlayer</c>), newest first.
 /// </summary>
 public static class ControlEndpoints
 {
@@ -104,12 +105,23 @@ public static class ControlEndpoints
                 """,
                 new { staff.ClubId, from, to }))
             .Select(e => e.ToWire()).ToList();
+        // D-107: every date of birth set in the period (the desk's changes and a player's own once) — the curfew rests on it.
+        var birthDates = (await c.QueryAsync<EntryRow>(
+                $"""
+                SELECT {EntryRow.Columns} FROM audit_entries
+                WHERE club_id = @ClubId AND at >= @from AND at <= @to AND action = 'clientBirthDate'
+                ORDER BY at DESC, id DESC
+                LIMIT 300
+                """,
+                new { staff.ClubId, from, to }))
+            .Select(e => e.ToWire()).ToList();
         var flags = Flags(entries, shiftless, settings, bigTopupAt);
         var report = new ControlReport(
             from, to, settings, Summaries(entries, flags, settings, corrections),
             staffId is null ? flags : [.. flags.Where(f => f.StaffId == staffId)],
             [.. (staffId is null ? entries : entries.Where(e => e.StaffId == staffId)).Take(300)],
-            [.. (staffId is null ? corrections : corrections.Where(e => e.StaffId == staffId)).Take(300)]);
+            [.. (staffId is null ? corrections : corrections.Where(e => e.StaffId == staffId)).Take(300)],
+            [.. staffId is null ? birthDates : birthDates.Where(e => e.StaffId == staffId)]);
         return AdminJson.Ok(report);
     }
 

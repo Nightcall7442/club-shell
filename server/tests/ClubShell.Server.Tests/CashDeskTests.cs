@@ -198,7 +198,7 @@ public sealed class ClientLookupTests(ServerFixture server) : LedgerCheckedTest(
 
         var found = (await LookupAsync(cashier, "karim")).GetProperty("items");
         Assert.Equal(
-            """{"id":"%id","displayName":"Карим Валиев","username":"karim","phoneTail":"4521","balance":{"amount":0,"currency":"UZS"},"bonus":{"amount":0,"currency":"UZS"},"cardId":"CARD-77","playing":null,"blacklisted":false,"gender":"male"}"""
+            """{"id":"%id","displayName":"Карим Валиев","username":"karim","phoneTail":"4521","balance":{"amount":0,"currency":"UZS"},"bonus":{"amount":0,"currency":"UZS"},"cardId":"CARD-77","playing":null,"blacklisted":false,"gender":"male","birthDate":"1990-05-17","minor":false}"""
                 .Replace("%id", karim.ToString(), StringComparison.Ordinal),
             found[0].GetRawText());
         var plain = (await LookupAsync(cashier, "farrux")).GetProperty("items")[0];

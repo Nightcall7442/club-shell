@@ -62,9 +62,8 @@ public sealed class PurchaseRulesTests(ServerFixture server) : LedgerCheckedTest
     public async Task Minor_in_the_curfew_is_denied()
     {
         var (agent, player) = await Players.SignedInAsync(Server);
-        await Players.ProfileAsync(Server, player, birthYear: Server.Clock.GetUtcNow().Year - 10);
-        // Curfew from 00:00 to 06:00 always contains "now" in this rule's model ([curfew, 24:00) ∪ [00:00, 06:00)).
-        await Players.ExecuteAsync(Server, """UPDATE clubs SET settings = settings || '{"limits":{"minorAge":18,"minorCurfew":"00:00"}}'::jsonb""");
+        await Players.BirthDateAsync(Server, player, Players.BornYearsAgo(Server, 10));
+        await Players.CurfewAsync(Server);
         try
         {
             var (status, body) = await Players.StartAsync(agent, player);

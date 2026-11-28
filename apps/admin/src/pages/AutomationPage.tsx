@@ -4,7 +4,7 @@
  */
 import { useState } from 'react';
 import clsx from 'clsx';
-import type { AutomationRule, RuleAction, RuleTrigger } from '@/api';
+import type { AutomationRule, BirthdayGift, RuleAction, RuleTrigger } from '@/api';
 import { dateLocale, t } from '@/i18n';
 import { money } from '@/format';
 import { BoltIcon } from '@/icons';
@@ -266,6 +266,65 @@ function RuleRow({
   );
 }
 
+/**
+ * «День рождения» (D-107): the server's own rule beside the owner's — a bonus on the bonus account (play time only, D-106)
+ * once per birthday year, the first time the player plays within the window, and the message on the PC. Off with an
+ * example amount until the owner turns it on.
+ */
+function BirthdayRule({ gift, onChange }: { gift: BirthdayGift; onChange: (g: BirthdayGift) => void }): JSX.Element {
+  const up = (patch: Partial<BirthdayGift>): void => onChange({ ...gift, ...patch });
+  const sample = gift.text.trim()
+    ? gift.text.replace('{bonus}', uzs(gift.amount))
+    : t('С днём рождения! +{sum} бонусов', { sum: uzs(gift.amount) });
+  return (
+    <Section title={t('День рождения')} className="mb-5" bodyClassName="gap-4">
+      <div data-birthday-rule className="flex flex-wrap items-start gap-x-6 gap-y-3">
+        <Toggle ariaLabel={t('День рождения')} checked={gift.enabled} onChange={(v) => up({ enabled: v })} />
+        <p className={clsx('min-w-0 flex-1 text-[13px] leading-relaxed', gift.enabled ? 'text-text' : 'text-muted')}>
+          <span className="label mr-1.5">{t('Если')}</span>
+          {gift.windowDays > 0
+            ? t('у клиента день рождения (± {n} дн.) и он играет в клубе', { n: gift.windowDays })
+            : t('у клиента день рождения и он играет в клубе')}
+          <span className={clsx('mx-2', gift.enabled ? 'text-accent' : 'text-muted')}>→</span>
+          <span className="label mr-1.5">{t('то')}</span>
+          {t('бонус {sum} на бонусный счёт и поздравление на экран, раз в год', { sum: uzs(gift.amount) })}
+        </p>
+        <span className="tnum font-mono text-[12.5px] font-medium text-text">
+          {t('За год: {n}', { n: gift.fired ?? 0 })}
+        </span>
+      </div>
+      <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2 md:max-w-xl">
+        <Field label={t('Сумма подарка')}>
+          <MoneyInput compact value={gift.amount} onChange={(v) => up({ amount: v })} />
+        </Field>
+        <Field label={t('Окно, дней до и после')}>
+          <NumberInput
+            value={gift.windowDays}
+            min={0}
+            max={30}
+            suffix={t('дн.')}
+            onChange={(n) => up({ windowDays: Math.min(30, Math.max(0, n)) })}
+          />
+        </Field>
+      </div>
+      <Field
+        label={t('Поздравление на экране')}
+        hint={t('{bonus} — сумма. Пусто — «{sample}»', {
+          bonus: '{bonus}',
+          sample: t('С днём рождения! +{sum} бонусов', { sum: uzs(gift.amount) }),
+        })}
+      >
+        <Input value={gift.text} maxLength={200} onChange={(e) => up({ text: e.target.value })} />
+      </Field>
+      <p className="text-[11.5px] leading-4 text-muted">
+        {t('Игрок увидит: «{text}». Дата рождения — из карточки клиента; бонусы тратятся только на игровое время.', {
+          text: sample,
+        })}
+      </p>
+    </Section>
+  );
+}
+
 function Editor({
   initial,
   onApply,
@@ -473,6 +532,9 @@ export default function AutomationPage(): JSX.Element {
       {st.draft && (
         <div className={clsx('grid items-start gap-5', editing && 'xl:grid-cols-[minmax(0,1fr)_400px]')}>
           <div className="flex min-w-0 flex-col">
+            {st.draft.birthdayGift && (
+              <BirthdayRule gift={st.draft.birthdayGift} onChange={(g) => st.set('birthdayGift', g)} />
+            )}
             {rules.length > 0 && (
               <Section title={t('Правила')} bodyClassName="gap-0 pb-1 pt-0">
                 <ul className="flex flex-col">

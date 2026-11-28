@@ -15,6 +15,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import type { Transaction } from '@clubshell/contracts';
 import { AdminError, clubApi, type Client, type ClientGroup, type Gender } from '@/api';
+import { BirthDateField, MinorBadge, birthDateProblem } from '@/birthDate';
 import { useClub } from '@/club';
 import { describe } from '@/errors';
 import { money, moneyParts } from '@/format';
@@ -166,11 +167,6 @@ function IssuedLogin({ login }: { login: string }): JSX.Element {
   );
 }
 
-function yearOf(text: string): number | null {
-  const n = Number(text);
-  return text.trim() && Number.isInteger(n) ? n : null;
-}
-
 /** Up to two initials of a name. */
 function initialsOf(name: string): string {
   return name
@@ -289,6 +285,7 @@ function CardBlock({
 function ClientPanel({
   client,
   groups,
+  minorAge,
   issuedPassword,
   issuedLogin,
   onSaved,
@@ -299,6 +296,8 @@ function ClientPanel({
   onDeleted: (id: string) => void;
   client: Client;
   groups: ClientGroup[];
+  /** The club's `limits.minorAge` (D-108): «до 18». */
+  minorAge: number;
   issuedPassword: string | null;
   /** The login the server made at registration (D-92), shown once with the password. */
   issuedLogin: string | null;
@@ -310,7 +309,8 @@ function ClientPanel({
   const [phone, setPhone] = useState(client.phone);
   const [card, setCard] = useState(client.cardId ?? '');
   const [loginNote, setLoginNote] = useState<NoteState>(null);
-  const [birth, setBirth] = useState(client.birthYear ? String(client.birthYear) : '');
+  const [birth, setBirth] = useState(client.birthDate ?? '');
+  const [birthError, setBirthError] = useState<string | null>(null);
   const [groupId, setGroupId] = useState(client.groupId);
   const [note, setNote] = useState(client.note);
   const [blacklisted, setBlacklisted] = useState(client.blacklisted);
@@ -338,7 +338,8 @@ function ClientPanel({
     setPhone(client.phone);
     setCard(client.cardId ?? '');
     setLoginNote(null);
-    setBirth(client.birthYear ? String(client.birthYear) : '');
+    setBirth(client.birthDate ?? '');
+    setBirthError(null);
     setGroupId(client.groupId);
     setNote(client.note);
     setBlacklisted(client.blacklisted);
@@ -353,18 +354,23 @@ function ClientPanel({
   }, [loadTxs]);
 
   const save = async (): Promise<void> => {
+    // D-107: a date once given is never cleared; a changed one is checked as the server would.
+    const birthChanged = birth !== (client.birthDate ?? '');
+    const problem = birthChanged ? birthDateProblem(birth) : null;
+    setBirthError(problem);
+    if (problem) return;
     setBusy(true);
     setResult(null);
     try {
       const input: Partial<Client> = {
         displayName: name.trim(),
         phone: phone.trim(),
-        birthYear: yearOf(birth),
         groupId,
         note,
       };
       if (blacklisted !== client.blacklisted) input.blacklisted = blacklisted;
       if (gender && gender !== client.gender) input.gender = gender;
+      if (birthChanged) input.birthDate = birth;
       const r = await clubApi.updateClient(client.id, input);
       onSaved(r.client);
       setResult({ text: t('Сохранено'), tone: 'ok' });
@@ -459,6 +465,12 @@ function ClientPanel({
             </Badge>
           )}
           {client.blacklisted && <Badge tone="danger">{t('Чёрный список')}</Badge>}
+          {client.minor && <MinorBadge minorAge={minorAge} />}
+          {client.role !== 'guest' && client.birthDate === null && (
+            <Badge tone="warn">
+              <span data-no-birth-date>{t('Нет даты рождения')}</span>
+            </Badge>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-2">
@@ -484,19 +496,20 @@ function ClientPanel({
           <Field label={t('Имя')}>
             <Input value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 items-start gap-3">
             <Field label={t('Телефон')}>
               <Input value={phone} inputMode="tel" onChange={(e) => setPhone(e.target.value)} />
             </Field>
-            <Field label={t('Год рождения')}>
-              <Input
-                value={birth}
-                inputMode="numeric"
-                className="tnum"
-                maxLength={4}
-                onChange={(e) => setBirth(e.target.value.replace(/\D/g, ''))}
-              />
-            </Field>
+            <BirthDateField
+              value={birth}
+              minorAge={minorAge}
+              missing={!client.birthDate}
+              error={birthError}
+              onChange={(v) => {
+                setBirth(v);
+                setBirthError(null);
+              }}
+            />
           </div>
           <div className="flex flex-col gap-2">
             <span className="label-sm">{t('Пол')}</span>
@@ -637,10 +650,13 @@ function ClientPanel({
 
 function NewClientPanel({
   groups,
+  minorAge,
   onCreated,
   onCancel,
 }: {
   groups: ClientGroup[];
+  /** The club's `limits.minorAge` (D-108). */
+  minorAge: number;
   /**
    * `issued`: what to show once — the generated password (`null` when the cashier typed one) and whether the server made
    * the login (D-92: left empty), so the cashier tells the client both.
@@ -654,6 +670,7 @@ function NewClientPanel({
   const [card, setCard] = useState('');
   const [phone, setPhone] = useState('');
   const [birth, setBirth] = useState('');
+  const [birthError, setBirthError] = useState<string | null>(null);
   const [groupId, setGroupId] = useState<string | null>(null);
   const [gender, setGender] = useState<Gender | null>(null);
   const [genderMissing, setGenderMissing] = useState(false);
@@ -665,11 +682,11 @@ function NewClientPanel({
   const loginOk = loginLength === 0 || (loginLength >= USERNAME_MIN && loginLength <= USERNAME_MAX);
 
   const create = async (): Promise<void> => {
-    // D-104: every new account says the client's gender.
-    if (!gender) {
-      setGenderMissing(true);
-      return;
-    }
+    // D-104: every new account says the client's gender; D-107: and the date of birth.
+    const problem = birthDateProblem(birth);
+    setBirthError(problem);
+    if (!gender) setGenderMissing(true);
+    if (!gender || problem) return;
     setBusy(true);
     setResult(null);
     const sent = password || newPassword();
@@ -680,9 +697,9 @@ function NewClientPanel({
         password: sent,
         cardId: card.trim() || null,
         phone: phone.trim() || undefined,
-        birthYear: yearOf(birth),
         groupId,
         gender,
+        birthDate: birth,
       });
       onCreated(r.client, { password: password ? null : sent, loginGenerated: !login.trim() });
     } catch (e) {
@@ -736,15 +753,15 @@ function NewClientPanel({
           <Field label={t('Телефон')}>
             <Input value={phone} inputMode="tel" onChange={(e) => setPhone(e.target.value)} />
           </Field>
-          <Field label={t('Год рождения')}>
-            <Input
-              value={birth}
-              inputMode="numeric"
-              className="tnum"
-              maxLength={4}
-              onChange={(e) => setBirth(e.target.value.replace(/\D/g, ''))}
-            />
-          </Field>
+          <BirthDateField
+            value={birth}
+            minorAge={minorAge}
+            error={birthError}
+            onChange={(v) => {
+              setBirth(v);
+              setBirthError(null);
+            }}
+          />
         </div>
         <div className="flex flex-col gap-2">
           <span className="label-sm">{t('Пол')}</span>
@@ -783,6 +800,8 @@ export default function ClientsPage(): JSX.Element {
   const [q, setQ] = useState('');
   const [items, setItems] = useState<Client[]>([]);
   const [groups, setGroups] = useState<ClientGroup[]>([]);
+  // D-108: the club's age of majority, for «до 18».
+  const [minorAge, setMinorAge] = useState(18);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | 'new' | null>(null);
   // A generated password (and a login the server made) stays on screen only until the cashier moves to another client.
@@ -809,7 +828,10 @@ export default function ClientsPage(): JSX.Element {
   useEffect(() => {
     clubApi
       .settings()
-      .then((s) => setGroups(s.groups))
+      .then((s) => {
+        setGroups(s.groups);
+        setMinorAge(s.limits.minorAge);
+      })
       .catch(() => setGroups([]));
   }, []);
 
@@ -920,6 +942,7 @@ export default function ClientsPage(): JSX.Element {
           {selected === 'new' ? (
             <NewClientPanel
               groups={groups}
+              minorAge={minorAge}
               onCancel={() => select(null)}
               onCreated={(c, { password, loginGenerated }) => {
                 setItems((list) => [c, ...list.filter((x) => x.id !== c.id)]);
@@ -932,6 +955,7 @@ export default function ClientsPage(): JSX.Element {
             <ClientPanel
               client={client}
               groups={groups}
+              minorAge={minorAge}
               issuedPassword={issued?.id === client.id ? issued.password : null}
               issuedLogin={issued?.id === client.id ? issued.login : null}
               onSaved={replace}

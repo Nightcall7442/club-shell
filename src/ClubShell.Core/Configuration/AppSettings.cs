@@ -533,6 +533,32 @@ public sealed class OfflineSettings
     /// <summary>Cached user TTL.</summary>
     [Range(1, 100000)]
     public int UserCacheTtlHours { get; set; } = 168;
+
+    /// <summary>
+    /// The minors' night curfew (D-108) as the club server sends it (<c>offline.minorCurfew</c>): enforced on an offline
+    /// purchase with the date of birth of the cached player. Off until the server says.
+    /// </summary>
+    [Required]
+    public MinorCurfewSettings MinorCurfew { get; set; } = new();
+}
+
+/// <summary><c>agent.json → offline.minorCurfew</c> (D-108): the forbidden hours of the PC's local clock.</summary>
+public sealed class MinorCurfewSettings
+{
+    /// <summary>The club's curfew is on.</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>A player younger than this is a minor.</summary>
+    [Range(0, 120)]
+    public int MinorAge { get; set; } = 18;
+
+    /// <summary>The forbidden hours start, <c>HH:mm</c>.</summary>
+    [RegularExpression(@"^\d{2}:\d{2}$")]
+    public string From { get; set; } = "22:00";
+
+    /// <summary>The forbidden hours end, <c>HH:mm</c>.</summary>
+    [RegularExpression(@"^\d{2}:\d{2}$")]
+    public string To { get; set; } = "06:00";
 }
 
 /// <summary><c>agent.json → games</c>.</summary>

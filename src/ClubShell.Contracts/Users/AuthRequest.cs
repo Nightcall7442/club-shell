@@ -186,6 +186,7 @@ public sealed record GuestAuthRequest(
 /// <param name="AcceptRules">The player accepted the club rules; required when the club has rules.</param>
 /// <param name="Locale">Preferred locale.</param>
 /// <param name="Gender">The player's gender, <c>male</c> or <c>female</c>; required (D-104).</param>
+/// <param name="BirthDate">The player's date of birth, <c>YYYY-MM-DD</c>; required (D-107).</param>
 public sealed record RegisterAuthRequest(
     Guid PcId,
     string Hwid,
@@ -194,7 +195,8 @@ public sealed record RegisterAuthRequest(
     string? Password,
     bool? AcceptRules = null,
     Locale? Locale = null,
-    string? Gender = null)
+    string? Gender = null,
+    string? BirthDate = null)
 {
     /// <summary>Copy with the password blanked, for logging.</summary>
     public RegisterAuthRequest Redacted() => this with { Password = Password is null ? null : "***" };

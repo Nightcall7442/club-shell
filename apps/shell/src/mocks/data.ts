@@ -181,6 +181,8 @@ export const USER: User = {
   lastSeenAt: ago(35),
   locale: 'ru',
   flags: [],
+  // D-107: every account has its date of birth (`?birth=none` / `?birth=minor` in the URL change it).
+  birthDate: '1998-04-12',
 };
 
 export const VIP_USER: User = {
@@ -196,6 +198,7 @@ export const VIP_USER: User = {
   lastSeenAt: daysAgo(1),
   locale: 'uz',
   flags: [],
+  birthDate: '1995-07-21',
 };
 
 /** Template for a guest login; the handler assigns a fresh id and name. */

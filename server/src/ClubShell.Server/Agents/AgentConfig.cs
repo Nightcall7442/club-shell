@@ -142,6 +142,17 @@ public static class AgentConfig
     // anticheat/report is implemented (S3): violations queued while offline still reach the server.
     private static readonly JsonElement Anticheat = JsonSerializer.SerializeToElement(new { reportViolations = true });
 
+    /// <summary>
+    /// D-108: the minors' curfew as the agent enforces it while the PC is offline (<c>offline.minorCurfew</c> of agent.json,
+    /// beyond the contract): on, the age of majority and the forbidden hours, club-local (the PC's own clock is the club's).
+    /// An agent that does not know the key ignores it.
+    /// </summary>
+    public static object MinorCurfewOf(ClubAgentView club)
+    {
+        var pricing = Sessions.Billing.ClubPricing.Parse(club.TimeZone, club.Settings);
+        return new { enabled = pricing.CurfewEnabled, minorAge = pricing.MinorAge, from = pricing.MinorCurfew, to = pricing.MinorCurfewEnd };
+    }
+
     public static AgentServerConfig Build(PcRow pc, ClubAgentView club, AgentOptions agents, SessionsOptions sessions) => new(
         Version: club.ConfigVersion,
         PcName: pc.Name,
@@ -152,7 +163,7 @@ public static class AgentConfig
         {
             heartbeatSec = agents.HeartbeatSec, graceSec = sessions.GraceSec, warningMinutes = Sessions.Billing.ClubPricing.WarningMinutesOf(club.Settings),
         }),
-        Offline: JsonSerializer.SerializeToElement(new { maxOfflineMinutes = sessions.MaxOfflineMinutes }),
+        Offline: JsonSerializer.SerializeToElement(new { maxOfflineMinutes = sessions.MaxOfflineMinutes, minorCurfew = MinorCurfewOf(club) }),
         Games: Games,
         // The scheduled update check only where the owner turned on automatic updates (UPDATES.md §8); the admin console's
         // «Обновить ClubShell» works without it.

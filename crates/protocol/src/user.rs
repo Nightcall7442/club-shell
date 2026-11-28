@@ -401,6 +401,10 @@ pub struct ProfileUpdateRequest {
     /// New 4–6 digit PIN used by `session.unlock`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pin: Option<String>,
+    /// The player's date of birth, `YYYY-MM-DD` (D-107): accepted only while the account has none;
+    /// once set only the club's desk changes it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub birth_date: Option<String>,
 }
 
 /// Response of `auth.qrStart` and `POST /auth/qr/start`.
@@ -471,6 +475,9 @@ pub struct RegisterAuthRequest {
     /// The player's gender, `male` or `female`; required (D-104).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gender: Option<String>,
+    /// The player's date of birth, `YYYY-MM-DD`; required (D-107).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub birth_date: Option<String>,
 }
 
 /// Seat on the club map (IPC_PROTOCOL.md §6.15).
@@ -695,6 +702,10 @@ pub struct User {
     /// server without the bonus account.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bonus: Option<Money>,
+    /// Date of birth, `YYYY-MM-DD` (D-107); null — not given yet (the Shell asks for it before time
+    /// is bought).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub birth_date: Option<String>,
 }
 
 /// Result of a successful login (IPC_PROTOCOL.md §6.20, SERVER_API.md §4.3).
@@ -849,6 +860,7 @@ pub(crate) fn sample_user() -> User {
         locale: Locale::Ru,
         flags: vec![],
         bonus: None,
+        birth_date: None,
     }
 }
 

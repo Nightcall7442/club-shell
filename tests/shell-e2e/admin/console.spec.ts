@@ -13,6 +13,8 @@ import { expect, test, type APIRequestContext, type APIResponse, type Page } fro
 import { fileURLToPath } from 'node:url';
 
 const API = 'http://localhost:8091/api/v1';
+/** D-107: every new account has a date of birth; an adult, so the minors' curfew (D-108) never touches a test. */
+const ADULT_BIRTH_DATE = '1995-03-12';
 const OWNER_PIN = '0000';
 const CASHIER_PIN = '1111';
 /** ADMIN_SERVER=real: the console runs against the central server (playwright.config.ts), not the mock. */
@@ -237,6 +239,7 @@ async function shiftState(request: APIRequestContext): Promise<{
 async function newClient(
   request: APIRequestContext,
   tag: string,
+  birthDate = ADULT_BIRTH_DATE,
 ): Promise<{ id: string; username: string; displayName: string; password: string }> {
   const headers = auth(await tokenFor(request, OWNER_PIN));
   const stamp = `${Date.now()}${randomBytes(2).toString('hex')}`;
@@ -245,7 +248,7 @@ async function newClient(
   const password = `pw-${stamp}`;
   const res = await request.post(`${API}/admin/clients`, {
     headers,
-    data: { gender: 'male', username, displayName, password },
+    data: { gender: 'male', birthDate, username, displayName, password },
   });
   expect(res.ok(), await res.text()).toBeTruthy();
   const { client } = (await res.json()) as { client: { id: string } };
@@ -694,7 +697,13 @@ test('the price takes the day rate and only the single best discount', async ({ 
     if (groupId) {
       const created = await request.post(`${API}/admin/clients`, {
         headers,
-        data: { gender: 'male', username: `e2e-${groupId}-${Date.now()}`, displayName: `E2E ${groupId}`, groupId },
+        data: {
+          gender: 'male',
+          birthDate: ADULT_BIRTH_DATE,
+          username: `e2e-${groupId}-${Date.now()}`,
+          displayName: `E2E ${groupId}`,
+          groupId,
+        },
       });
       expect(created.ok()).toBeTruthy();
       userId = ((await created.json()) as { client: { id: string } }).client.id;
@@ -1309,7 +1318,7 @@ test('a money action retried after a lost answer is applied once (Idempotency-Ke
   const username = `e2e-promo-${Date.now()}`;
   const created = await request.post(`${API}/admin/clients`, {
     headers: auth(owner),
-    data: { gender: 'male', username, displayName: 'E2E Промокод' },
+    data: { gender: 'male', birthDate: ADULT_BIRTH_DATE, username, displayName: 'E2E Промокод' },
   });
   expect(created.ok()).toBeTruthy();
 
@@ -1473,6 +1482,15 @@ test('a client registered at the counter signs in on a PC with the issued passwo
   await expect(genders.getByRole('button', { pressed: true })).toHaveCount(0);
   await genders.getByRole('button', { name: 'Женский' }).click();
   await expect(page.getByText('Укажите пол клиента')).toHaveCount(0);
+  // D-107: and the date of birth — required, never in the future, the age beside it.
+  await page.getByRole('button', { name: 'Создать' }).click();
+  await expect(page.getByText('Укажите дату рождения клиента')).toBeVisible();
+  await page.getByLabel('Дата рождения').fill('2999-01-01');
+  await page.getByRole('button', { name: 'Создать' }).click();
+  await expect(page.getByText('Дата рождения не может быть в будущем')).toBeVisible();
+  await page.getByLabel('Дата рождения').fill(ADULT_BIRTH_DATE);
+  await expect(page.locator('[data-age]')).toHaveText(/^возраст \d+$/);
+  await expect(page.locator('[data-minor-badge]')).toHaveCount(0);
   await page.getByRole('button', { name: 'Создать' }).click();
   const issued = page.getByRole('status').filter({ hasText: 'Пароль клиента' }).locator('.font-mono');
   await expect(issued).toHaveText(/^[a-z2-9]{8}$/);
@@ -1557,6 +1575,7 @@ test('a client registered by name alone gets a login from the server, shown once
   await page.getByLabel('Имя').fill('Турсунов Бобур');
   await expect(page.getByText('Пусто — придумаем по телефону или имени')).toBeVisible();
   await page.getByRole('group', { name: 'Пол' }).getByRole('button', { name: 'Мужской' }).click();
+  await page.getByLabel('Дата рождения').fill(ADULT_BIRTH_DATE);
   await page.getByRole('button', { name: 'Создать' }).click();
 
   const login = page.getByRole('status').filter({ hasText: 'Логин клиента придуман сервером' }).locator('.font-mono');
@@ -1571,6 +1590,7 @@ test('a client registered by name alone gets a login from the server, shown once
   await page.getByRole('button', { name: 'Новый клиент' }).click();
   await page.getByLabel('Имя').fill('Турсунов Бобур');
   await page.getByRole('group', { name: 'Пол' }).getByRole('button', { name: 'Мужской' }).click();
+  await page.getByLabel('Дата рождения').fill(ADULT_BIRTH_DATE);
   await page.getByRole('button', { name: 'Создать' }).click();
   await expect(login).toHaveText(/^tursunov\.bobur\d+$/);
   expect(await login.textContent()).not.toBe(made);
@@ -1585,7 +1605,7 @@ test("the owner's top-up stays out of the cashier's shift and shows in «Опе�
   const username = `e2e-own-${Date.now()}`;
   const created = await request.post(`${API}/admin/clients`, {
     headers: owner,
-    data: { gender: 'male', username, displayName: 'E2E Владелец' },
+    data: { gender: 'male', birthDate: ADULT_BIRTH_DATE, username, displayName: 'E2E Владелец' },
   });
   expect(created.ok()).toBeTruthy();
   await closeShift(request);
@@ -1718,7 +1738,7 @@ test('the owner deletes a client with money on the balance, writing it off (D-10
   const username = `e2e-del-${Date.now()}`;
   const created = await request.post(`${API}/admin/clients`, {
     headers: owner,
-    data: { gender: 'male', username, displayName: 'E2E Удаление' },
+    data: { gender: 'male', birthDate: ADULT_BIRTH_DATE, username, displayName: 'E2E Удаление' },
   });
   expect(created.ok()).toBeTruthy();
   const { client } = (await created.json()) as { client: { id: string } };
@@ -1757,6 +1777,7 @@ test('the owner lets players create their own account on the PC (D-92)', async (
       password: '4321',
       acceptRules: true,
       gender: 'female',
+      birthDate: ADULT_BIRTH_DATE,
     });
   try {
     // Off until the owner switches it on.
@@ -1894,7 +1915,7 @@ test('a typed amount topped up by card from the client search lands in the X-rep
   const username = `e2e-card-${Date.now()}`;
   const created = await request.post(`${API}/admin/clients`, {
     headers,
-    data: { gender: 'male', username, displayName: 'E2E Карта' },
+    data: { gender: 'male', birthDate: ADULT_BIRTH_DATE, username, displayName: 'E2E Карта' },
   });
   expect(created.ok()).toBeTruthy();
   // A fresh shift: its X-report holds only this top-up.
@@ -1939,7 +1960,7 @@ test('a client is seated from the map: the pay box takes what the balance lacks,
     (
       await request.post(`${API}/admin/clients`, {
         headers,
-        data: { gender: 'male', username, displayName: 'E2E Посадка' },
+        data: { gender: 'male', birthDate: ADULT_BIRTH_DATE, username, displayName: 'E2E Посадка' },
       })
     ).ok(),
   ).toBeTruthy();
@@ -2033,6 +2054,53 @@ test('a walk-in guest is seated from the map with one exact payment and the «Г
   // The desk end signed the guest out of the PC.
   const after = await agentCall(request, pc, 'GET', `/wallet/${guest.user.id}/balance`, undefined, guest.accessToken);
   expect(after.status()).toBe(401);
+});
+
+test('a minor is marked «до 18» and the desk cannot seat them in the night curfew (D-107, D-108)', async ({
+  page,
+  request,
+}) => {
+  const owner = auth(await tokenFor(request, OWNER_PIN));
+  const now = new Date();
+  const fourteen = new Date(now.getFullYear() - 14, now.getMonth(), now.getDate() - 2);
+  const p = (n: number): string => String(n).padStart(2, '0');
+  const minor = await newClient(
+    request,
+    'minor',
+    `${fourteen.getFullYear()}-${p(fourteen.getMonth() + 1)}-${p(fourteen.getDate())}`,
+  );
+  const before = (
+    (await (await request.get(`${API}/admin/club`, { headers: owner })).json()) as {
+      limits: Record<string, unknown>;
+    }
+  ).limits;
+  // The forbidden hours around the clock (whatever the time zone of the server), so the refusal is certain now.
+  const limits = { ...before, minorCurfewEnabled: true, minorCurfew: '00:00', minorCurfewEnd: '23:59' };
+  expect((await request.patch(`${API}/admin/club`, { headers: owner, data: { limits } })).ok()).toBeTruthy();
+  try {
+    await signIn(page, CASHIER_PIN);
+    await page.goto('/#/clients');
+    await page.getByPlaceholder('Имя, логин или телефон').fill(minor.username);
+    await page.getByRole('row').filter({ hasText: minor.username }).click();
+    await expect(page.locator('[data-minor-badge]').first()).toHaveText('до 18');
+    await expect(page.locator('[data-age]')).toHaveText('возраст 14');
+
+    const overview = (await (await request.get(`${API}/admin/overview`, { headers: owner })).json()) as {
+      seats: { pc: { id: string; number: number; status: string }; session: unknown }[];
+    };
+    const free = overview.seats.find((s) => s.pc.status === 'free' && !s.session)!;
+    await page.goto('/#/map');
+    await expect(page.locator(`#seat-${free.pc.id}`)).toBeVisible();
+    await page.keyboard.type(String(free.pc.number));
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('heading', { name: /Посадить на/ })).toBeVisible();
+    await page.getByRole('combobox', { name: 'Кто' }).fill(minor.username);
+    await page.getByRole('option').filter({ hasText: minor.username }).click();
+    await page.getByRole('button', { name: /^Посадить · Наличные/ }).click();
+    await expect(page.getByText('Несовершеннолетним нельзя играть с 00:00 до 23:59')).toBeVisible();
+  } finally {
+    await request.patch(`${API}/admin/club`, { headers: owner, data: { limits: before } });
+  }
 });
 
 test("a password login on a PC holding someone else's desk session is refused", async ({ request }) => {

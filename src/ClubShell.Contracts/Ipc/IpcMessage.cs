@@ -550,12 +550,14 @@ public sealed record AuthLoginResponse(
 /// <param name="Password">Password, 4–64 characters (the Shell asks for it twice).</param>
 /// <param name="AcceptRules">The player accepted the club rules; required when the club has rules.</param>
 /// <param name="Gender">The player's gender, <c>male</c> or <c>female</c>; required (D-104).</param>
+/// <param name="BirthDate">The player's date of birth, <c>YYYY-MM-DD</c>; required (D-107).</param>
 public sealed record AuthRegisterRequest(
     string? DisplayName,
     string? Username,
     string? Password,
     bool? AcceptRules = null,
-    string? Gender = null);
+    string? Gender = null,
+    string? BirthDate = null);
 
 /// <summary>Request of <c>auth.logout</c>.</summary>
 /// <param name="Reason">Why; defaults to <see cref="SessionEndReason.User"/>. Only <c>user</c>, <c>idle</c>, <c>admin</c> are valid from the Shell.</param>
