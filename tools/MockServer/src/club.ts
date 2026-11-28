@@ -394,6 +394,11 @@ export interface ClubConfig {
     autoExtendMinutes?: number;
     /** Players create their own account on the lock screen (D-92); absent — off. */
     selfSignup?: boolean;
+    /**
+     * Minutes left at which the player is warned that the time (or the money of a capped postpaid) runs out (D-109);
+     * absent or null — 10, 7, 5. The last minute is always warned too.
+     */
+    warningMinutes?: number[] | null;
   };
   catalog: { order: string[]; hidden: string[]; featured: string[] };
   banners: Banner[];

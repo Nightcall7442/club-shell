@@ -45,7 +45,7 @@ public static class ClubSettingsEndpoints
         ["branding", "features", "zones", "pricing", "groups", "bonusTiers", "happyHours", "loyalty", "limits", "catalog", "banners", "rulesText", "stock"];
 
     /// <summary>Sections whose change reaches <c>AgentServerConfig</c> (§5.9).</summary>
-    private static readonly string[] ConfigSections = ["features", "branding", "catalog", "rulesText", "banners", "screensaver", "selfSignup"];
+    private static readonly string[] ConfigSections = ["features", "branding", "catalog", "rulesText", "banners", "screensaver", "selfSignup", "warningMinutes"];
 
     /// <summary><c>notifications.bigTopupAt</c> when the owner has not set one (the mock's default, 200 000 sum).</summary>
     public const long DefaultBigTopupAt = 20_000_000;
@@ -216,6 +216,7 @@ public static class ClubSettingsEndpoints
             var settings = JsonNode.Parse(settingsJson)!.AsObject();
             var changed = new List<string>();
             var selfSignup = SelfSignupOn(settings);
+            var warningMinutes = Sessions.Billing.ClubPricing.WarningMinutesOf(settings.ToJsonString());
             foreach (var key in Plain.Where(k => body.TryGetProperty(k, out _)))
             {
                 var next = JsonNode.Parse(body.GetProperty(key).GetRawText());
@@ -231,6 +232,12 @@ public static class ClubSettingsEndpoints
             if (SelfSignupOn(settings) != selfSignup)
             {
                 changed.Add("selfSignup");
+            }
+
+            // ... and so are its low-time marks (session.warningMinutes, D-109).
+            if (!Sessions.Billing.ClubPricing.WarningMinutesOf(settings.ToJsonString()).SequenceEqual(warningMinutes))
+            {
+                changed.Add("warningMinutes");
             }
 
             if (body.TryGetProperty("control", out var control))
@@ -408,6 +415,26 @@ public static class ClubSettingsEndpoints
                 if (limits.TryGetProperty(name, out var v) && v.ValueKind is not (JsonValueKind.True or JsonValueKind.False or JsonValueKind.Null))
                 {
                     throw ApiException.Validation($"limits.{name}", "format");
+                }
+            }
+
+            // D-109: the low-time marks, whole minutes 1..120, at most 8 (null — the default 10, 7, 5).
+            if (limits.TryGetProperty("warningMinutes", out var marks) && marks.ValueKind != JsonValueKind.Null)
+            {
+                if (marks.ValueKind != JsonValueKind.Array || marks.EnumerateArray().Any(m => !m.TryGetInt32(out _)))
+                {
+                    throw ApiException.Validation("limits.warningMinutes", "format");
+                }
+
+                var minutes = marks.EnumerateArray().Select(m => m.GetInt32()).ToList();
+                if (minutes.Any(m => m < 1))
+                {
+                    throw ApiException.Validation("limits.warningMinutes", "min");
+                }
+
+                if (minutes.Count > Sessions.Billing.ClubPricing.MaxWarningMarks || minutes.Any(m => m > Sessions.Billing.ClubPricing.MaxWarningMinute))
+                {
+                    throw ApiException.Validation("limits.warningMinutes", "max");
                 }
             }
         }

@@ -17,6 +17,7 @@ import {
 const WEEKDAYS = Object.values(Weekday) as Weekday[];
 import {
   applyTransaction,
+  warningMinutesOf,
   arr,
   balanceOf,
   body,
@@ -597,17 +598,29 @@ export function clubRoutes(app: FastifyInstance): void {
         if (v !== undefined && v !== null && typeof v !== 'boolean')
           throw errors.validation(`limits.${name}`, 'format');
       }
+      // D-109: the low-time marks, whole minutes 1..120, at most 8.
+      const marks = limits['warningMinutes'];
+      if (marks !== undefined && marks !== null) {
+        if (!Array.isArray(marks) || marks.some((m) => typeof m !== 'number' || !Number.isInteger(m)))
+          throw errors.validation('limits.warningMinutes', 'format');
+        if ((marks as number[]).some((m) => m < 1)) throw errors.validation('limits.warningMinutes', 'min');
+        if (marks.length > 8 || (marks as number[]).some((m) => m > 120))
+          throw errors.validation('limits.warningMinutes', 'max');
+      }
     }
     // The player-screen designer (D-105), refused field by field as by the server.
     if ('branding' in b) validateLook(b['branding']);
     if ('topUpPromo' in b) c.topUpPromo = parseTopUpPromo(b['topUpPromo']);
     if ('screensaver' in b) c.screensaver = parseScreensaver(b['screensaver']);
     const selfSignupBefore = c.limits.selfSignup === true;
+    const marksBefore = warningMinutesOf(c.limits.warningMinutes).join(',');
     for (const k of keys) {
       if (k in b) (c as unknown as Record<string, unknown>)[k] = b[k];
     }
     // The self-signup switch (D-92) reaches the PCs with their config, as on the server.
     if ((c.limits.selfSignup === true) !== selfSignupBefore) bumpCatalog();
+    // ... and so do the low-time marks (session.warningMinutes, D-109).
+    else if (warningMinutesOf(c.limits.warningMinutes).join(',') !== marksBefore) bumpCatalog();
     if ('control' in b) {
       // Thresholds must stay usable numbers whatever the client sent.
       const n = (v: unknown, fallback: number, min: number, max: number): number =>

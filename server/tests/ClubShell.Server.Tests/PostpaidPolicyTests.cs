@@ -91,54 +91,93 @@ public sealed class PostpaidPolicyTests(LongClockServerFixture server) : LedgerC
 }
 
 /// <summary>
-/// The warning before a postpaid cut-off (SERVER_API.md §4.5): a capped postpaid session is warned when the money left pays
-/// for at most 5, then 1 more minutes — <c>sessionUpdated</c> with the mark in <c>warningsSent</c>, then a
-/// <c>notification</c> push — and ended at the minute boundary it cannot pay. Standard costs 20 000 tiyin a minute: 140 000
-/// pays 7 minutes, so the cut-off is at 420 s, the 5-minute warning at 120 s and the 1-minute one at 360 s.
+/// The warning before a postpaid cut-off (SERVER_API.md §4.5, D-109): a capped postpaid session is warned when the money left
+/// — balance and bonuses — pays for at most 10, 7, 5, then 1 more minutes (the club's marks and the last minute):
+/// <c>sessionUpdated</c> with the mark in <c>warningsSent</c>, which the agent shows as <c>session.warning</c> (no
+/// <c>notification</c> push any more) — and ended at the minute boundary it cannot pay. Standard costs 20 000 tiyin a minute.
 /// </summary>
 public sealed class PostpaidWarningTests(KestrelServerFixture server) : LedgerCheckedTest(server), IClassFixture<KestrelServerFixture>
 {
+    /// <summary>300 000 pays 15 minutes: the cut-off at 900 s, the 10-minute warning at 300 s.</summary>
     [Fact]
-    public async Task A_capped_postpaid_session_is_warned_5_and_1_minutes_before_its_money_runs_out()
+    public async Task A_capped_postpaid_session_is_warned_at_10_7_5_and_1_minutes_before_its_money_runs_out()
     {
-        var (agent, player) = await Players.SignedInAsync(Server, balance: 140_000);
+        var (agent, player) = await Players.SignedInAsync(Server, balance: 300_000);
         using var socket = await WsTestSocket.ConnectAsync((KestrelServerFixture)Server, agent.AccessToken);
         await Wait.UntilAsync(() => Server.Services.GetRequiredService<AgentSocketHub>().IsConnected(agent.PcId));
         var (_, created) = await Players.StartAsync(agent, player, prepaid: false);
         var id = created.GetProperty("id").GetGuid();
         Assert.Empty((await PushAsync(socket, "sessionUpdated")).GetProperty("warningsSent").EnumerateArray());
 
-        // 119 s: 301 s of money left, no warning yet (the first tick only resyncs the session).
-        await AdvanceOnlineAsync(agent, TimeSpan.FromSeconds(119));
+        // 299 s: 601 s of money left, no warning yet (the first tick only resyncs the session).
+        await AdvanceOnlineAsync(agent, TimeSpan.FromSeconds(299));
         Assert.Equal("", Marks(await PushAsync(socket, "sessionUpdated")));
         Assert.Equal("{}", await WarningsAsync(id));
 
+        // The next push after the mark is a sessionUpdated again, never a notification (PushAsync checks the name).
         await AdvanceOnlineAsync(agent, TimeSpan.FromSeconds(1));
-        Assert.Equal("5", Marks(await PushAsync(socket, "sessionUpdated")));
-        var five = await PushAsync(socket, "notification");
-        Assert.Equal("warning", five.GetProperty("level").GetString());
-        Assert.Contains("5 мин", five.GetProperty("body").GetString(), StringComparison.Ordinal);
-        Assert.Equal("{5}", await WarningsAsync(id));
+        Assert.Equal("10", Marks(await PushAsync(socket, "sessionUpdated")));
+        Assert.Equal("{10}", await WarningsAsync(id));
 
-        // A top-up of 40 000 (180 000 pays 9 minutes, the cut-off moves to 540 s) takes the mark back.
+        // A top-up of 40 000 (340 000 pays 17 minutes, the cut-off moves to 1 020 s) takes the mark back.
         await TopUpAsync(player.Id, 40_000);
         await PushAsync(socket, "walletUpdated");
         await AdvanceOnlineAsync(agent, TimeSpan.FromSeconds(1));
         Assert.Equal("", Marks(await PushAsync(socket, "sessionUpdated")));
         Assert.Equal("{}", await WarningsAsync(id));
 
-        // Spent down again: the 5-minute warning at 240 s, the 1-minute one at 480 s, the end at 540 s.
+        // Spent down again: 10 minutes at 420 s, 7 at 600 s, 5 at 720 s, the last minute at 960 s, the end at 1 020 s.
         await AdvanceOnlineAsync(agent, TimeSpan.FromSeconds(119));
-        Assert.Equal("5", Marks(await PushAsync(socket, "sessionUpdated")));
-        await PushAsync(socket, "notification");
-
+        Assert.Equal("10", Marks(await PushAsync(socket, "sessionUpdated")));
+        await AdvanceOnlineAsync(agent, TimeSpan.FromSeconds(180));
+        Assert.Equal("10,7", Marks(await PushAsync(socket, "sessionUpdated")));
+        await AdvanceOnlineAsync(agent, TimeSpan.FromSeconds(120));
+        Assert.Equal("10,7,5", Marks(await PushAsync(socket, "sessionUpdated")));
         await AdvanceOnlineAsync(agent, TimeSpan.FromSeconds(240));
-        Assert.Equal("5,1", Marks(await PushAsync(socket, "sessionUpdated")));
-        Assert.Contains("1 мин", (await PushAsync(socket, "notification")).GetProperty("body").GetString(), StringComparison.Ordinal);
+        Assert.Equal("10,7,5,1", Marks(await PushAsync(socket, "sessionUpdated")));
 
         await AdvanceOnlineAsync(agent, TimeSpan.FromSeconds(60));
         Assert.Equal("ended", await Players.ScalarAsync<string>(Server, "SELECT state FROM sessions WHERE id = @id", new { id }));
         Assert.Equal(0, await Players.BalanceAsync(Server, player.Id));
+    }
+
+    /// <summary>
+    /// The owner's own marks (<c>limits.warningMinutes</c>): saved in the club settings, a new config version with
+    /// <c>session.warningMinutes</c> for the PCs, and the tick warns at them. 140 000 pays 7 minutes: 3 at 240 s, 1 at 360 s.
+    /// </summary>
+    [Fact]
+    public async Task The_owner_chooses_the_marks_in_the_club_settings()
+    {
+        var owner = await LoginAsync(Server, OwnerPin);
+        var (agent, player) = await Players.SignedInAsync(Server, balance: 140_000);
+        var version = await Players.ScalarAsync<int>(Server, "SELECT config_version FROM clubs");
+        try
+        {
+            await ExpectAsync(Server, 200, HttpMethod.Patch, "/club", owner, new { limits = new { minorAge = 18, minorCurfew = "22:00", warningMinutes = new[] { 3 } } });
+            Assert.Equal([3], (await ExpectAsync(Server, 200, HttpMethod.Get, "/club", owner)).GetProperty("limits").GetProperty("warningMinutes").EnumerateArray().Select(m => m.GetInt32()));
+            Assert.Equal(version + 1, await Players.ScalarAsync<int>(Server, "SELECT config_version FROM clubs"));
+            var config = await Players.ReadAsync(await agent.SendAsync(HttpMethod.Get, agent.Path("config")), 200);
+            Assert.Equal([3], config.GetProperty("session").GetProperty("warningMinutes").EnumerateArray().Select(m => m.GetInt32()));
+
+            // The same marks again are no config change.
+            await ExpectAsync(Server, 200, HttpMethod.Patch, "/club", owner, new { limits = new { minorAge = 18, minorCurfew = "22:00", warningMinutes = new[] { 3 } } });
+            Assert.Equal(version + 1, await Players.ScalarAsync<int>(Server, "SELECT config_version FROM clubs"));
+
+            var (_, created) = await Players.StartAsync(agent, player, prepaid: false);
+            var id = created.GetProperty("id").GetGuid();
+            await AdvanceOnlineAsync(agent, TimeSpan.FromSeconds(239));
+            Assert.Equal("{}", await WarningsAsync(id));
+            await AdvanceOnlineAsync(agent, TimeSpan.FromSeconds(1));
+            Assert.Equal("{3}", await WarningsAsync(id));
+            await AdvanceOnlineAsync(agent, TimeSpan.FromSeconds(120));
+            Assert.Equal("{3,1}", await WarningsAsync(id));
+            await AdvanceOnlineAsync(agent, TimeSpan.FromSeconds(60));
+            Assert.Equal("ended", await Players.ScalarAsync<string>(Server, "SELECT state FROM sessions WHERE id = @id", new { id }));
+        }
+        finally
+        {
+            await Players.ExecuteAsync(Server, "UPDATE clubs SET settings = settings - 'limits'");
+        }
     }
 
     /// <summary>A desk seat without a cap is never warned: it is not cut off.</summary>

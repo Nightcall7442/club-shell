@@ -147,7 +147,11 @@ public static class AgentConfig
         PcName: pc.Name,
         Zone: pc.Zone,
         Number: pc.Number,
-        Session: JsonSerializer.SerializeToElement(new { heartbeatSec = agents.HeartbeatSec, graceSec = sessions.GraceSec }),
+        // D-109: the owner's low-time marks (the agent adds the last minute itself).
+        Session: JsonSerializer.SerializeToElement(new
+        {
+            heartbeatSec = agents.HeartbeatSec, graceSec = sessions.GraceSec, warningMinutes = Sessions.Billing.ClubPricing.WarningMinutesOf(club.Settings),
+        }),
         Offline: JsonSerializer.SerializeToElement(new { maxOfflineMinutes = sessions.MaxOfflineMinutes }),
         Games: Games,
         // The scheduled update check only where the owner turned on automatic updates (UPDATES.md §8); the admin console's

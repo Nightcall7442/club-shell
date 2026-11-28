@@ -16,7 +16,7 @@ namespace ClubShell.Server.Sessions;
 /// for PCs with a fresh heartbeat and an empty agent outbox: a prepaid session becomes <c>ending</c> at <c>ends_at</c> and
 /// is ended with <c>timeUp</c> after <see cref="SessionsOptions.GraceSec"/> (grace is free); a postpaid one with a cap ends
 /// at the minute boundary where the next minute exceeds balance + its own limit (<see cref="SessionRow.DebtLimit"/>, D-10),
-/// warned 5 and 1 minutes before; one without a cap (a desk seat, no debt limit set) runs until it is ended. Any
+/// warned at the club's marks (D-109: 10, 7, 5 minutes and the last one by default); one without a cap (a desk seat, no debt limit set) runs until it is ended. Any
 /// other PC is left to its agent (it is the authority then, §5.11) until <see cref="SessionsOptions.MaxOfflineMinutes"/>
 /// of silence. A server-side end queues <c>endSession</c> for the agent (§6.4). Every <see cref="SessionsOptions.ResyncSec"/> an open session is pushed to its PC again. Tests call
 /// <see cref="RunOnceAsync"/> with the fixture's clock; the hosted loop runs only with <c>Workers:Enabled</c>.
@@ -169,25 +169,22 @@ public sealed class SessionTickWorker(
     }
 
     /// <summary>
-    /// Minutes of money left at which a capped postpaid session is warned, as the agent warns a prepaid one before its time
-    /// runs out.
-    /// </summary>
-    public static readonly int[] PostpaidWarningMinutes = [5, 1];
-
-    /// <summary>
     /// Warns a running postpaid session with a cap (a kiosk pay-as-you-go, a desk seat under a debt limit) when the money
-    /// left — balance + its limit — pays for at most 5, then 1 more minutes before this tick would end it (the cut-off is the
-    /// minute boundary where the next minute is not affordable, so «at most N minutes» is <c>frozen(used + N·60 + 1) &gt;
-    /// balance + limit</c>). The mark goes to <c>warnings_sent</c> and the session is pushed (<c>sessionUpdated</c> with
-    /// <c>warningsSent</c>, the field the agent keeps its prepaid <c>session.warning</c> marks in), and a <c>notification</c>
-    /// push tells the player at once. Marks reached together warn once, with the fewer minutes. A mark whose minutes are no
-    /// longer near (the balance was topped up) is taken back, so it warns again later — as the agent re-arms a prepaid mark
-    /// after an extension.
+    /// left — balance + bonuses (D-106: they pay for play time) + its limit — pays for at most N more minutes before this
+    /// tick would end it, for each of the club's marks (D-109, <see cref="ClubPricing.WarningMarks"/>: 10, 7, 5 and the last
+    /// minute by default). The cut-off is the minute boundary where the next minute is not affordable, so «at most N
+    /// minutes» is <c>frozen(used + N·60 + 1) &gt; balance + bonus + limit</c>. The mark goes to <c>warnings_sent</c> and the
+    /// session is pushed (<c>sessionUpdated</c> with <c>warningsSent</c>); the agent shows a mark new to it as
+    /// <c>session.warning</c>, as it does a prepaid one (in RU/UZ/EN, over a game too), so no <c>notification</c> push goes
+    /// with it any more. Marks reached together warn once, with the fewer minutes. A mark whose minutes are no longer near
+    /// (the balance was topped up) is taken back, so it warns again later — as the agent re-arms a prepaid mark after an
+    /// extension.
     /// </summary>
     private static async Task WarnAsync(NpgsqlConnection c, NpgsqlTransaction tx, TickRow s, int used, long limit, DateTimeOffset now, SessionEffects effects)
     {
-        var due = PostpaidWarningMinutes.Where(m => Pricing.Frozen(s.PricePerHourSnapshot, used + (m * 60) + 1, s.DayPct, s.DiscountPct) > s.MainBalance + s.BonusBalance + limit).ToArray();
-        var kept = s.WarningsSent.Where(m => !PostpaidWarningMinutes.Contains(m) || due.Contains(m)).ToArray();
+        var marks = ClubPricing.Parse(s.TimeZone, s.ClubSettings).WarningMarks;
+        var due = marks.Where(m => Pricing.Frozen(s.PricePerHourSnapshot, used + (m * 60) + 1, s.DayPct, s.DiscountPct) > s.MainBalance + s.BonusBalance + limit).ToArray();
+        var kept = s.WarningsSent.Where(m => !marks.Contains(m) || due.Contains(m)).ToArray();
         var fresh = due.Except(kept).ToArray();
         if (fresh.Length == 0 && kept.Length == s.WarningsSent.Length)
         {
@@ -197,14 +194,6 @@ public sealed class SessionTickWorker(
         s.WarningsSent = [.. kept, .. fresh.OrderDescending()];
         await SessionService.SaveAsync(c, tx, s, now);
         effects.Sessions.Add(s.ToWire(now));
-        if (fresh.Length > 0)
-        {
-            var minutes = fresh.Min();
-            effects.Notifications.Add((s.PcId, new Notification(
-                Guid.NewGuid(), "Деньги на балансе заканчиваются",
-                $"Осталось примерно на {minutes} мин игры. Пополните баланс у администратора, иначе сеанс завершится.",
-                NotificationLevel.Warning, TtlSec: 60)));
-        }
     }
 
     /// <summary>

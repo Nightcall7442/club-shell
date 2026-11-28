@@ -1690,6 +1690,52 @@ test('the owner lets players create their own account on the PC (D-92)', async (
   }
 });
 
+test('the owner sets when players are warned that their time runs out; the PCs get the marks (D-109)', async ({
+  page,
+  request,
+}) => {
+  const owner = await tokenFor(request, OWNER_PIN);
+  const pc = await registerAgent(request, 'warn');
+  const marks = async (): Promise<number[]> =>
+    (
+      (await (await agentCall(request, pc, 'GET', `/agents/${pc.pcId}/config`)).json()) as {
+        session: { warningMinutes: number[] };
+      }
+    ).session.warningMinutes;
+  try {
+    // Unset: 10, 7 and 5 minutes (the PC adds the last minute itself).
+    expect(await marks()).toEqual([10, 7, 5]);
+
+    await signIn(page, OWNER_PIN);
+    await page.goto('/#/club');
+    const input = page.getByRole('textbox', { name: 'Предупреждать за' });
+    await expect(input).toHaveAttribute('placeholder', '10, 7, 5');
+    await input.fill('3, 15 ,8');
+    await input.blur();
+    await expect(input).toHaveValue('15, 8, 3');
+    await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Сохранено' })).toBeVisible();
+    expect(await marks()).toEqual([15, 8, 3]);
+
+    await page.reload();
+    await expect(page.getByRole('textbox', { name: 'Предупреждать за' })).toHaveValue('15, 8, 3');
+
+    const bad = await request.patch(`${API}/admin/club`, {
+      headers: auth(owner),
+      data: { limits: { minorAge: 18, minorCurfew: '22:00', warningMinutes: [0] } },
+    });
+    expect(bad.status()).toBe(400);
+  } finally {
+    const club = (await (await request.get(`${API}/admin/club`, { headers: auth(owner) })).json()) as {
+      limits: Record<string, unknown>;
+    };
+    await request.patch(`${API}/admin/club`, {
+      headers: auth(owner),
+      data: { limits: { ...club.limits, warningMinutes: null } },
+    });
+  }
+});
+
 test('a cashier without an open shift has to open one, with the float the last shift closed with', async ({
   page,
   request,

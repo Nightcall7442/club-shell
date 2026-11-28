@@ -265,12 +265,10 @@ export const useNotificationsStore = create<NotificationsStore>()(
       get().push({
         id: `session-warning-${w.minutesLeft}`,
         title: i18n.t('session.warningTitle'),
-        body:
-          w.minutesLeft === 1
-            ? i18n.t('session.lastMinute')
-            : i18n.t('session.warningMinutes', { minutes: w.minutesLeft }),
+        // D-109: «Осталось 10 минут — пополните баланс или продлите время», prepaid time or what the money pays for.
+        body: i18n.t('session.lowTime', { count: w.minutesLeft }),
         level: w.minutesLeft <= 5 ? 'error' : 'warning',
-        ttlSec: 15,
+        ttlSec: 10,
         action: { label: i18n.t('session.addTime'), command: '/wallet', args: null },
         source: 'system',
       });

@@ -13,6 +13,7 @@
 //! Wiring (`lib.rs`): `let kiosk = kiosk::spawn_all(&handle, &state)?; app.manage(kiosk);` — commands
 //! then take `tauri::State<'_, Arc<Kiosk>>` for everything beyond the [`KioskControl`] seam.
 
+pub mod alert;
 pub mod alt_tab;
 pub mod commands;
 pub mod front;
@@ -63,8 +64,10 @@ use crate::tray::Tray;
 
 /// How often the bridge re-checks the admin unlock to show/hide the tray.
 pub const ADMIN_MODE_POLL: Duration = Duration::from_secs(5);
-/// Overlay TTL for admin messages / session warnings shown over a game.
+/// Overlay TTL for admin messages shown over a game.
 pub const TOAST_TTL: Duration = Duration::from_secs(15);
+/// Overlay TTL of a low-time warning over a game (D-109): read at a glance, gone before it is in the way.
+pub const WARNING_TTL: Duration = Duration::from_secs(8);
 /// Player input this recent when the Shell gets the focus during a game means they came to the Shell on purpose.
 pub const GAME_REFOCUS_QUIET: Duration = Duration::from_secs(1);
 /// Path of the Windows touch keyboard host.
@@ -604,9 +607,20 @@ impl Kiosk {
                     self.on_shell_command(state, command);
                 }
             }
-            ev::ADMIN_MESSAGE | ev::SESSION_WARNING => {
+            ev::ADMIN_MESSAGE => {
                 if state.game_running() {
                     self.toast(env.payload.clone(), Some(TOAST_TTL));
+                }
+            }
+            ev::SESSION_WARNING => {
+                // D-109: the chime in a game or not (the Shell's own toast shows outside a game), the
+                // passive toast over a running game. Minute 0 is the end, which `session.ended` shows.
+                if warning_minutes(env.payload.as_ref()).is_some_and(|m| m > 0) && !self.is_locked()
+                {
+                    alert::play_chime();
+                    if state.game_running() {
+                        self.toast(env.payload.clone(), Some(WARNING_TTL));
+                    }
                 }
             }
             ev::ADMIN_REMOTE_CONTROL => {
@@ -649,6 +663,10 @@ impl Kiosk {
     }
 
     fn toast(&self, payload: Option<serde_json::Value>, ttl: Option<Duration>) {
+        // The HUD is open (the player is extending their time): a toast would replace it.
+        if self.overlay.kind() == OverlayKind::Hud {
+            return;
+        }
         if self.is_locked() {
             return;
         }
@@ -669,6 +687,11 @@ impl Kiosk {
     fn refresh_admin_mode(&self, state: &AppState) {
         self.set_admin_mode(state.has_admin_unlock());
     }
+}
+
+/// `minutesLeft` of a `session.warning` payload.
+fn warning_minutes(payload: Option<&serde_json::Value>) -> Option<i64> {
+    payload?.get("minutesLeft")?.as_i64()
 }
 
 impl KioskControl for Kiosk {
@@ -818,6 +841,18 @@ fn spawn_bridge(kiosk: Arc<Kiosk>, state: AppState) -> JoinHandle<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_session_warning_names_its_minutes_and_the_ttl_is_short() {
+        let w = serde_json::json!({ "sessionId": "x", "minutesLeft": 7, "secondsLeft": 420, "endsAt": null });
+        assert_eq!(warning_minutes(Some(&w)), Some(7));
+        assert_eq!(
+            warning_minutes(Some(&serde_json::json!({ "text": "hi" }))),
+            None
+        );
+        assert_eq!(warning_minutes(None), None);
+        assert!(WARNING_TTL < TOAST_TTL && WARNING_TTL.as_secs() >= 5);
+    }
 
     #[test]
     fn snapshot_wire_shape() {

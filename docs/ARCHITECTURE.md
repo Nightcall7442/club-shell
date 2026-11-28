@@ -492,7 +492,7 @@ unless the key ends with `Ms`.
     "launchTimeoutSec": 30
   },
   "session": {
-    "warningMinutes": [15, 12, 9, 6, 3, 1],       // session.warning: every 3 min from 15 min left, and the last minute
+    "warningMinutes": [10, 7, 5],                 // session.warning at 10, 7, 5 min left (+ always the last minute; club list from the server, D-109)
     "heartbeatSec": 30,
     "graceSec": 60,                               // after endsAt before forced lock
     "autoLockOnIdleSec": 0,                       // 0 = disabled (policy.kiosk.idleTimeoutSec wins if set)

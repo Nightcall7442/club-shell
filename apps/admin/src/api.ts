@@ -1168,6 +1168,11 @@ export interface ClubSettings {
     autoExtendMinutes?: number;
     /** Players create their own account on the lock screen (D-92); absent or false — off, registration at the desk. */
     selfSignup?: boolean;
+    /**
+     * Minutes left at which the player is warned that the time — prepaid, or what the balance still pays for — runs out
+     * (D-109), whole minutes 1..120, at most 8; absent or null — 10, 7, 5. The last minute is always warned too.
+     */
+    warningMinutes?: number[] | null;
   };
   catalog: { order: string[]; hidden: string[]; featured: string[] };
   banners: Banner[];
