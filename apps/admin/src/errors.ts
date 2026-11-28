@@ -40,6 +40,8 @@ const DETAIL_COPY: Record<string, string> = {
   digits4to8: 'PIN — от 4 до 8 цифр',
   expired: 'Срок действия истёк',
   exhausted: 'Лимит использований исчерпан',
+  // A `discountPct` promo code: no discount by code in v1, only bonus codes are redeemed.
+  discountAtCheckout: 'Скидочный промокод не применяется — нужен бонусный',
   postpaidNotAllowed: 'Постоплата для гостей выключена в настройках клуба',
   tariffTime: 'Тариф сейчас не действует',
   tariffZone: 'Тариф не для этой зоны',
