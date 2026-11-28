@@ -1171,8 +1171,9 @@ public sealed class SessionService(
     /// <summary>
     /// Rules 4–7 of §5.2 for a purchase at <paramref name="at"/> on a PC of <paramref name="zone"/>; the offline replay only
     /// rule 4. Rule 5 (D-108): a minor in the forbidden hours is <c>403 policyDenied minorCurfew</c>, a member without a date
-    /// of birth then <c>birthDateRequired</c> (never taken for an adult); the player's own purchase on the PC
-    /// (<paramref name="kiosk"/>) needs the date at any hour (D-107: the shell asks for it first).
+    /// of birth then <c>birthDateRequired</c> (never taken for an adult). Outside those hours a missing date of birth does not
+    /// block the player's own purchase on the PC (owner's decision: sign-in and play without questions; the desk fills the
+    /// date in).
     /// </summary>
     private static void CheckRules(string zone, Buyer buyer, TariffRow tariff, ClubInfo club, DateTimeOffset at, bool offlineReplay, bool kiosk)
     {
@@ -1184,11 +1185,6 @@ public sealed class SessionService(
         if (offlineReplay)
         {
             return;
-        }
-
-        if (kiosk && buyer.Role is "member" or "vip" && buyer.BirthDate is null)
-        {
-            throw BirthDateRequired();
         }
 
         if (club.Pricing.InCurfew(buyer.Role, buyer.BirthDate, at))
