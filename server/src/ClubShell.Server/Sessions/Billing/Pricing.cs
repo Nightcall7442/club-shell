@@ -106,6 +106,44 @@ public sealed class ClubPricing
     /// </summary>
     public int AutoExtendMinutes { get; init; }
 
+    /// <summary>
+    /// <c>limits.warningMinutes</c> (beyond the contract, D-109): the minutes left at which the player is warned that the
+    /// time — prepaid, or what the money still pays for on a capped postpaid — runs out; by default 10, 7 and 5. The last
+    /// minute is always warned as well (<see cref="WarningMarks"/>). Unset — the default; <c>[]</c> — the last minute only.
+    /// </summary>
+    public int[] WarningMinutes { get; init; } = [.. DefaultWarningMinutes];
+
+    /// <summary>The marks without the owner's choice (D-109).</summary>
+    public static readonly IReadOnlyList<int> DefaultWarningMinutes = [10, 7, 5];
+
+    /// <summary>The final warning every session gets, whatever the club's list.</summary>
+    public const int LastMinuteWarning = 1;
+
+    /// <summary>The most marks a club may set and the most minutes one may be (<c>400 limits.warningMinutes max</c>).</summary>
+    public const int MaxWarningMarks = 8;
+
+    public const int MaxWarningMinute = 120;
+
+    /// <summary>The marks in force, descending: <see cref="WarningMinutes"/> and the last minute.</summary>
+    public int[] WarningMarks => [.. WarningMinutes.Append(LastMinuteWarning).Distinct().OrderDescending()];
+
+    /// <summary>
+    /// The owner's marks as the PC gets them (<c>AgentServerConfig.session.warningMinutes</c>): descending, distinct, in
+    /// range, without the last minute (the agent adds it itself, and a list with it would read as an old shipped default
+    /// there). A value of the wrong kind cannot be stored (<c>ClubSettingsEndpoints</c> refuses it); here it means the default.
+    /// </summary>
+    public static int[] WarningMinutesOf(string? settingsJson)
+    {
+        using var doc = JsonDocument.Parse(string.IsNullOrEmpty(settingsJson) ? "{}" : settingsJson);
+        return WarningMinutesOf(doc.RootElement.TryGetProperty("limits", out var limits) && limits.ValueKind == JsonValueKind.Object
+            && limits.TryGetProperty("warningMinutes", out var marks) ? marks : default);
+    }
+
+    private static int[] WarningMinutesOf(JsonElement marks) =>
+        marks.ValueKind != JsonValueKind.Array || marks.EnumerateArray().Any(m => !m.TryGetInt32(out _))
+            ? [.. DefaultWarningMinutes]
+            : [.. marks.EnumerateArray().Select(m => m.GetInt32()).Where(m => m is > LastMinuteWarning and <= MaxWarningMinute).Distinct().OrderDescending()];
+
     public static ClubPricing Parse(string timeZone, string? settingsJson)
     {
         var doc = string.IsNullOrEmpty(settingsJson) ? null : JsonSerializer.Deserialize<SettingsDoc>(settingsJson, JsonSerializerOptions.Web);
@@ -125,6 +163,7 @@ public sealed class ClubPricing
             MemberDebtLimit = doc?.Limits?.MemberDebtLimit is > 0 and var memberLimit ? memberLimit : null,
             CashOutOwnerOnly = doc?.Limits?.CashOutOwnerOnly ?? false,
             AutoExtendMinutes = Math.Clamp(doc?.Limits?.AutoExtendMinutes ?? 0, 0, 720),
+            WarningMinutes = WarningMinutesOf(settingsJson),
         };
     }
 

@@ -987,7 +987,7 @@ Errors: `rateLimited` (1 per 30 s), `validation`.
 | Name | Payload | When |
 |------|---------|------|
 | `session.updated` | `Session` | any state/field change (≤ 1/s coalesced; `secondsLeft` updates every 1 s are NOT sent — Shell counts locally and resyncs with `session.timeLeft`) |
-| `session.warning` | `{ sessionId: uuid, minutesLeft: int, secondsLeft: int, endsAt: datetime }` | at each `session.warningMinutes` mark and once at 0 |
+| `session.warning` | `{ sessionId: uuid, minutesLeft: int, secondsLeft: int, endsAt: datetime }` | at each `session.warningMinutes` mark (D-109: the club's list, default 10, 7, 5, and always 1) once per session — prepaid time left, or on a capped postpaid the minutes the money still pays for (from the server's `warningsSent`; `secondsLeft` is then `minutesLeft × 60`) — re-armed by an extension or top-up; and once at 0 |
 | `session.ended` | `{ session: Session, reason: SessionEndReason, charged: Money }` | after end/timeout/admin |
 | `wallet.updated` | `Balance` | balance changed (top-up, charge, purchase) — only the signed-in player's (a server push for another player is dropped); `user.balance` in `auth.status` follows it |
 | `chat.message` | `ChatMessage` | new message in a room the PC/user belongs to |

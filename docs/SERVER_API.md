@@ -396,10 +396,11 @@ may go before the server ends the session (the *debt limit*, taken when the sess
 | Desk (`POST /admin/sessions`, `/admin/sessions/guest` with `prepaid: false`) | allowed; limit `limits.memberDebtLimit`, **unset or 0 = no cap** | allowed unless `limits.guestPostpaid` is `false` (**on by default**); limit `limits.guestDebtLimit`, unset or 0 = no cap |
 | Offline replay (`startedAt` + `clientSessionId`) | recorded as the Agent let it happen, limit 0, no `402` | as the desk's `guestPostpaid` |
 
-A session with a cap is warned before the cut-off: when the money left (balance + limit) pays for at most 5, then at
-most 1 more minutes, the server adds the mark (`5`, `1`) to `Session.warningsSent`, pushes `sessionUpdated`, then a
-`notification` push (`level: warning`, «Осталось примерно на N мин игры…»). A top-up that moves the cut-off away takes
-the mark back. A session without a cap is never cut off by the server and never warned. Postpaid sessions opened before
+A session with a cap is warned before the cut-off (D-109): when the money left (balance + bonuses + limit) pays for at
+most N more minutes, for each of the club's marks `limits.warningMinutes` (default `10, 7, 5`) and the last minute, the
+server adds the mark to `Session.warningsSent` and pushes `sessionUpdated`; the Agent shows a mark new to it as
+`session.warning` (no `notification` push). Marks reached together warn once, with the fewest minutes. A top-up that
+moves the cut-off away takes the mark back. A session without a cap is never cut off by the server and never warned. Postpaid sessions opened before
 the debt limit existed keep the limit the server applied then (member: `memberDebtLimit` or 0; guest:
 `guestDebtLimit` or no cap).
 

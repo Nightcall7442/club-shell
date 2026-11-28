@@ -895,7 +895,7 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
             return;
         }
 
-        AdoptServerFields(remote);
+        var moneyWarning = AdoptServerFields(remote);
         var now = _clock.UtcNow;
         if (remote.State == SessionState.Paused && _state == SessionState.Active)
         {
@@ -921,10 +921,19 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
 
         await PersistCoreAsync(cancellationToken).ConfigureAwait(false);
         await PublishUpdatedAsync(cancellationToken).ConfigureAwait(false);
+        if (moneyWarning is { } minutes && _state.IsTimerRunning())
+        {
+            // The server already counted this postpaid mark (D-109): the Shell is told, the server is not told again.
+            _logger.LogInformation("Session {SessionId}: money for {MinutesLeft} min left", _session.Id, minutes);
+            await RecordAsync(SessionEvent.Warning(_session.Id, now, minutes), queue: false, cancellationToken).ConfigureAwait(false);
+        }
     }
 
-    /// <summary>Takes billing fields and the server's remaining time (drift correction) for the current session.</summary>
-    private void AdoptServerFields(PlaySession fromServer)
+    /// <summary>
+    /// Takes billing fields and the server's remaining time (drift correction) for the current session. Returns the minutes
+    /// of a postpaid money mark the server just reached (<see cref="SessionTimer.AdoptServerWarnings"/>), or null.
+    /// </summary>
+    private int? AdoptServerFields(PlaySession fromServer)
     {
         var local = _session!;
         if (fromServer.IsOpenEnded != local.IsOpenEnded)
@@ -940,6 +949,8 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
             _timer.Resync(fromServer.SecondsLeft, _clock.UtcNow);
         }
 
+        var moneyWarning = fromServer.IsOpenEnded ? _timer.AdoptServerWarnings(fromServer.WarningsSent ?? []) : null;
+
         _session = local with
         {
             UserId = fromServer.UserId,
@@ -949,6 +960,7 @@ public sealed class SessionManager : ISessionService, IAsyncDisposable, IDisposa
             SecondsLeft = fromServer.SecondsLeft,
             StartedAt = fromServer.StartedAt,
         };
+        return moneyWarning;
     }
 
     private async Task<SessionEndResult> EndCoreAsync(SessionEndReason reason, bool settleWithServer, CancellationToken cancellationToken)

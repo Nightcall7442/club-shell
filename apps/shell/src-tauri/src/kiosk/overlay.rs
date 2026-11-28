@@ -8,6 +8,22 @@
 //! renders from it. `lock` and `hud` take the mouse and keyboard; every other kind is click-through so
 //! the game keeps receiving input. `hud` is the player's in-game quick panel, toggled by the `hud`
 //! hotkey and auto-hidden after [`HUD_TTL`] as a backstop should the webview stop responding.
+//!
+//! A click-through kind (a low-time warning, an admin text, ads) is also **never activated** (D-109):
+//! tao's `show()` is `ShowWindow(SW_SHOW)`, which activates the window, so a borderless game lost the
+//! keyboard focus to every toast (and a game that minimizes on focus loss went to the taskbar). Such
+//! a kind is made non-focusable (`WS_EX_NOACTIVATE`) and shown natively with `SW_SHOWNOACTIVATE`
+//! on top of the topmost band, on the main thread after tauri's own queued setters. tao then
+//! believes the window hidden, so [`Overlay::hide`] hides it natively too.
+//!
+//! What a window can and cannot cover: a game in a window or in borderless (windowed) fullscreen is
+//! composed by DWM, so the topmost overlay is drawn over it. So is most "exclusive" fullscreen of
+//! DirectX 10–12 games on Windows 10/11 (fullscreen optimizations turn it into a flip-model
+//! borderless swap chain). A game that really owns the display — DirectX 9 exclusive mode, or
+//! fullscreen optimizations turned off for it — is not composed: no window shows over it (only an
+//! overlay injected into the game's own swap chain could, as Steam or Discord do, which this kiosk
+//! does not do: it would trip anti-cheats). There the player still hears the chime
+//! ([`super::alert`]) and the HUD hotkey still opens the panel (the game leaves exclusive mode).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -63,6 +79,22 @@ enum HudAction {
     Keep,
 }
 
+/// How a kind goes on screen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Presentation {
+    /// Takes the mouse and keyboard: shown and focused (the game loses the focus, on purpose).
+    Interactive,
+    /// Click-through and never activated: the game keeps the focus and stays in front (D-109).
+    Passive,
+}
+
+const fn presentation(kind: OverlayKind) -> Presentation {
+    match kind {
+        OverlayKind::Lock | OverlayKind::Hud => Presentation::Interactive,
+        _ => Presentation::Passive,
+    }
+}
+
 const fn hud_action(current: OverlayKind) -> HudAction {
     match current {
         OverlayKind::Hud => HudAction::Hide,
@@ -111,9 +143,9 @@ impl Overlay {
         self.kind() != OverlayKind::Hidden
     }
 
-    /// Kinds that take pointer and keyboard input (everything else is click-through).
+    /// Kinds that take pointer and keyboard input (everything else is click-through and passive).
     const fn interactive(kind: OverlayKind) -> bool {
-        matches!(kind, OverlayKind::Lock | OverlayKind::Hud)
+        matches!(presentation(kind), Presentation::Interactive)
     }
 
     /// Hotkey: hides the HUD when it is up, shows it otherwise (any other overlay kind is replaced).
@@ -170,12 +202,16 @@ impl Overlay {
             return self.hide();
         }
         let window = self.ensure_window()?;
-        window.set_ignore_cursor_events(!Self::interactive(kind))?;
+        let interactive = Self::interactive(kind);
+        window.set_focusable(interactive)?;
+        window.set_ignore_cursor_events(!interactive)?;
         apply_bounds(&window, *self.bounds.read())?;
-        window.show()?;
-        window.set_always_on_top(true)?;
-        if Self::interactive(kind) {
+        if interactive {
+            window.show()?;
+            window.set_always_on_top(true)?;
             let _ = window.set_focus();
+        } else {
+            self.show_passive(&window)?;
         }
         *self.kind.lock() = kind;
         let generation = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
@@ -208,11 +244,47 @@ impl Overlay {
         let previous = std::mem::replace(&mut *self.kind.lock(), OverlayKind::Hidden);
         if let Some(window) = self.window() {
             window.hide()?;
+            self.hide_passive(&window)?;
         }
         if previous != OverlayKind::Hidden {
             self.emit(OverlayKind::Hidden, None);
             tracing::info!(was = ?previous, "overlay hidden");
         }
+        Ok(())
+    }
+
+    /// Shows a click-through kind without activating it (see the module docs). Queued on the main
+    /// thread behind the setters above: tauri runs those there, and tao, which thinks the window
+    /// hidden, would hide it again if it applied them after this.
+    #[cfg(windows)]
+    fn show_passive(&self, window: &WebviewWindow) -> CmdResult<()> {
+        let hwnd = window.hwnd()?.0 as isize;
+        self.app.run_on_main_thread(move || {
+            if let Err(e) = clubshell_winutil::window::show_no_activate(hwnd) {
+                tracing::warn!(error = %e, "overlay show (no activate) failed");
+            }
+        })?;
+        Ok(())
+    }
+
+    #[cfg(not(windows))]
+    fn show_passive(&self, window: &WebviewWindow) -> CmdResult<()> {
+        window.show()?;
+        Ok(())
+    }
+
+    /// The native counterpart of [`show_passive`](Self::show_passive): tao's `hide()` does nothing
+    /// for a window it did not show itself.
+    #[cfg(windows)]
+    fn hide_passive(&self, window: &WebviewWindow) -> CmdResult<()> {
+        let hwnd = window.hwnd()?.0 as isize;
+        self.app
+            .run_on_main_thread(move || clubshell_winutil::window::hide_window(hwnd))?;
+        Ok(())
+    }
+
+    #[cfg(not(windows))]
+    fn hide_passive(&self, _window: &WebviewWindow) -> CmdResult<()> {
         Ok(())
     }
 
@@ -285,6 +357,15 @@ mod tests {
         })
         .unwrap();
         assert_eq!(ev, serde_json::json!({ "kind": "ads" }));
+    }
+
+    #[test]
+    fn only_the_lock_and_the_hud_take_the_focus_from_a_game() {
+        assert_eq!(presentation(OverlayKind::Lock), Presentation::Interactive);
+        assert_eq!(presentation(OverlayKind::Hud), Presentation::Interactive);
+        // A low-time warning, an admin text and ads never activate: the game keeps the keyboard.
+        assert_eq!(presentation(OverlayKind::Message), Presentation::Passive);
+        assert_eq!(presentation(OverlayKind::Ads), Presentation::Passive);
     }
 
     #[test]

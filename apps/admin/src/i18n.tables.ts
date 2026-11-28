@@ -255,6 +255,9 @@ export const UZ: Record<string, string> = {
   'Баланс пополнен · теперь {sum}': 'Balans toʻldirildi · endi {sum}',
   'Пополнить на {sum}': '{sum} ga toʻldirish',
   'Долги гостей': 'Mehmonlar qarzi',
+  'Предупреждать за': 'Ogohlantirish',
+  'Минуты через запятую, по умолчанию 10, 7, 5. В последнюю минуту — всегда. И для купленного времени, и когда деньгам на балансе осталось на столько минут. Видно и поверх игры.':
+    'Daqiqalar vergul bilan, odatda 10, 7, 5. Oxirgi daqiqada — har doim. Sotib olingan vaqt uchun ham, balansdagi pul shuncha daqiqaga qolganda ham. O‘yin ustida ham ko‘rinadi.',
   'Автопродление сеанса': 'Seansni avtomatik uzaytirish',
   'Когда оплаченное время кончается, а на балансе клиента хватает денег, сеанс продлевается сам.':
     'Toʻlangan vaqt tugaganda mijoz balansida pul yetarli boʻlsa, seans oʻzi uzayadi.',
@@ -2025,6 +2028,9 @@ export const EN: Record<string, string> = {
   'Баланс пополнен · теперь {sum}': 'Balance topped up · now {sum}',
   'Пополнить на {sum}': 'Top up {sum}',
   'Долги гостей': 'Guest debts',
+  'Предупреждать за': 'Warn at',
+  'Минуты через запятую, по умолчанию 10, 7, 5. В последнюю минуту — всегда. И для купленного времени, и когда деньгам на балансе осталось на столько минут. Видно и поверх игры.':
+    'Minutes left, comma-separated; 10, 7, 5 by default. The last minute always. For bought time and when the balance pays for only that many minutes. Shown over a game too.',
   'Автопродление сеанса': 'Auto-extend sessions',
   'Когда оплаченное время кончается, а на балансе клиента хватает денег, сеанс продлевается сам.':
     'When the paid time runs out and the client has enough on balance, the session extends itself.',

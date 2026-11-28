@@ -102,6 +102,7 @@ import type {
   ShellConfig,
 } from '@/lib/tauri';
 import { lookFromBranding } from '@/lib/look';
+import { rearmWarnings, startWarnings, stepMoneyWarnings, stepWarnings, warningMarks } from '@/lib/lowTime';
 import { builtinThemes, DEFAULT_THEME } from '@/theme/themes';
 import {
   ACHIEVEMENTS,
@@ -631,7 +632,25 @@ function assertFunds(required: Money, forTime = false): void {
 // Session engine
 // ---------------------------------------------------------------------------------------------------------------------
 
-const WARNING_MARKS = [15, 5, 1] as const;
+/**
+ * The club's low-time marks (D-109) as the Agent has them from the server config: 10, 7, 5 and the last minute unless a
+ * test sets its own (`simulate.warningMinutes`).
+ */
+let warningMinutes: number[] | null = null;
+
+/** As the Agent and the server: one `session.warning`, and, while a game runs, the native overlay's toast (Rust side). */
+function emitWarning(s: Session, minutesLeft: number): void {
+  const warning = {
+    sessionId: s.id,
+    minutesLeft,
+    secondsLeft: s.secondsLeft >= 0 ? s.secondsLeft : minutesLeft * 60,
+    endsAt: s.endsAt,
+  };
+  emitMock('agent://session.warning', warning);
+  if (minutesLeft > 0 && (mockState.kiosk.gameMode || mockState.running.length > 0) && !mockState.lockedByStaff) {
+    emitMock('kiosk://overlay', { kind: 'message', payload: warning });
+  }
+}
 
 function emitSession(): void {
   // Nobody signed in (a session kept after the token ran out): nothing to tell the lock screen.
@@ -694,16 +713,10 @@ function tick(): void {
     if (s.secondsLeft > 0) {
       s.secondsLeft -= 1;
       s.endsAt = isoIn(s.secondsLeft);
-      for (const m of WARNING_MARKS) {
-        if (s.secondsLeft === m * 60 && !s.warningsSent.includes(m)) {
-          s.warningsSent.push(m);
-          emitMock('agent://session.warning', {
-            sessionId: s.id,
-            minutesLeft: m,
-            secondsLeft: s.secondsLeft,
-            endsAt: s.endsAt,
-          });
-        }
+      const step = stepWarnings(warningMarks(warningMinutes), s.warningsSent, s.secondsLeft);
+      s.warningsSent = step.sent;
+      if (step.warn !== null) {
+        emitWarning(s, step.warn);
       }
       if (s.secondsLeft === 0) {
         emitMock('agent://session.warning', { sessionId: s.id, minutesLeft: 0, secondsLeft: 0, endsAt: s.endsAt });
@@ -714,6 +727,22 @@ function tick(): void {
       const tariff = TARIFFS.find((t) => t.id === s.tariffId);
       if (tariff) {
         s.cost = tariffPriceFor(tariff, Math.ceil(s.secondsUsed / 60));
+        // The member's own pay as you go is capped by the money (balance + bonuses, D-106): the server warns when it
+        // pays for 10, 7, 5 and 1 more minutes (D-109). A desk's postpaid seat here has no cap.
+        if (!s.payAtDesk && mockState.user) {
+          const available = mockState.user.balance.amount + Math.max(0, mockState.balance.bonus.amount);
+          const step = stepMoneyWarnings(
+            warningMarks(warningMinutes),
+            s.warningsSent,
+            available,
+            s.secondsUsed,
+            (seconds) => tariffPriceFor(tariff, Math.ceil(seconds / 60)).amount,
+          );
+          s.warningsSent = step.sent;
+          if (step.warn !== null) {
+            emitWarning(s, step.warn);
+          }
+        }
       }
     }
     emitSession();
@@ -1099,6 +1128,24 @@ export const simulate = {
     if (value) club.screensaver = { enabled: value.enabled, afterSec: value.afterSec, items: value.items ?? [] };
     else delete club.screensaver;
     mockState.settings = { ...mockState.settings, club };
+  },
+  /**
+   * The prepaid time left jumps to `seconds` (tests of the low-time warnings, D-109): marks above it re-arm, marks it is
+   * already past count as sent, and the next ticks warn as the Agent would.
+   */
+  timeLeft(seconds: number): void {
+    const s = mockState.session;
+    if (!s || s.secondsLeft < 0) {
+      return;
+    }
+    s.secondsLeft = seconds;
+    s.endsAt = isoIn(seconds);
+    s.warningsSent = startWarnings(warningMarks(warningMinutes), seconds + 1, rearmWarnings(s.warningsSent, seconds));
+    emitSession();
+  },
+  /** The club's own low-time marks (`limits.warningMinutes`), as the next config would bring them; null — 10, 7, 5. */
+  warningMinutes(marks: number[] | null): void {
+    warningMinutes = marks;
   },
   /** The cash desk's postpaid: the session runs open-ended, paid at the desk when it ends. */
   postpaidSession(): void {
@@ -1626,7 +1673,7 @@ cmd('session_extend', (args): Session => {
     s.cost = money(s.cost.amount + price.amount);
     s.secondsLeft += minutes * 60;
     s.endsAt = isoIn(s.secondsLeft);
-    s.warningsSent = s.warningsSent.filter((m) => m * 60 > s.secondsLeft);
+    s.warningsSent = rearmWarnings(s.warningsSent, s.secondsLeft);
   }
   emitSession();
   return clone(s);

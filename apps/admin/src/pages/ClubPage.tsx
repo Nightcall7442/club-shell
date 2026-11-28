@@ -172,6 +172,49 @@ function DebtLimitInput({
   );
 }
 
+/** The default low-time marks (D-109), shown as the placeholder of an unset list. */
+const DEFAULT_WARNING_MINUTES = [10, 7, 5];
+
+/** «10, 7, 5» → [10, 7, 5]: whole minutes 1..120, descending, distinct, at most 8; null when nothing is typed. */
+function parseWarningMinutes(text: string): number[] | null {
+  const marks = text
+    .split(/[\s,;]+/)
+    .filter((part) => part !== '')
+    .map((part) => Math.floor(Number(part)))
+    .filter((m) => Number.isFinite(m) && m >= 1 && m <= 120);
+  return marks.length === 0 ? null : [...new Set(marks)].sort((a, b) => b - a).slice(0, 8);
+}
+
+/** The owner's low-time marks: a comma list of minutes, kept as typed until it parses. */
+function WarningMinutesInput({
+  value,
+  onChange,
+}: {
+  value: number[] | null;
+  onChange: (marks: number[] | null) => void;
+}): JSX.Element {
+  const [text, setText] = useState(value?.join(', ') ?? '');
+  return (
+    <div className="relative">
+      <input
+        inputMode="numeric"
+        aria-label={t('Предупреждать за')}
+        className={clsx(inputCls, 'tnum pr-12')}
+        placeholder={DEFAULT_WARNING_MINUTES.join(', ')}
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value);
+          onChange(parseWarningMinutes(e.target.value));
+        }}
+        onBlur={() => setText(parseWarningMinutes(text)?.join(', ') ?? '')}
+      />
+      <span className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-xs text-muted">
+        {t('мин')}
+      </span>
+    </div>
+  );
+}
+
 export default function ClubPage(): JSX.Element {
   const st = useClubSettings();
   const [rulesLang, setRulesLang] = useState<Lang>('ru');
@@ -380,6 +423,19 @@ export default function ClubPage(): JSX.Element {
                   className="tnum"
                   value={s.limits.minorCurfew}
                   onChange={(e) => st.set('limits', { ...s.limits, minorCurfew: e.target.value })}
+                />
+              </Field>
+            </div>
+            <div className="mt-1 flex flex-col gap-3 border-t border-accent/[0.08] pt-5 md:max-w-xl">
+              <Field
+                label={t('Предупреждать за')}
+                hint={t(
+                  'Минуты через запятую, по умолчанию 10, 7, 5. В последнюю минуту — всегда. И для купленного времени, и когда деньгам на балансе осталось на столько минут. Видно и поверх игры.',
+                )}
+              >
+                <WarningMinutesInput
+                  value={s.limits.warningMinutes ?? null}
+                  onChange={(v) => st.set('limits', { ...s.limits, warningMinutes: v })}
                 />
               </Field>
             </div>
