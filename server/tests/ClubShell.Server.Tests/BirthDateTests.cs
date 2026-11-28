@@ -63,10 +63,18 @@ public sealed class BirthDateTests(ServerFixture server) : LedgerCheckedTest(ser
         var (agent, player) = await Players.SignedInAsync(Server);
         await Players.BirthDateAsync(Server, player, null);
 
-        // Without it the player's own purchase is refused, whatever the hour.
-        var (status, body) = await Players.StartAsync(agent, player);
-        Assert.Equal(403, status);
-        Assert.Equal("birthDateRequired", PurchaseRulesTests.Details(body).GetProperty("rule").GetString());
+        // Without it the player's own purchase is refused in the forbidden hours only (unknown age, D-108).
+        await Players.CurfewAsync(Server);
+        try
+        {
+            var (status, body) = await Players.StartAsync(agent, player);
+            Assert.Equal(403, status);
+            Assert.Equal("birthDateRequired", PurchaseRulesTests.Details(body).GetProperty("rule").GetString());
+        }
+        finally
+        {
+            await Players.ExecuteAsync(Server, "UPDATE clubs SET settings = settings - 'limits'");
+        }
 
         Assert.Equal(400, (int)(await PatchAsync(agent, player, new { birthDate = "2999-01-01" })).StatusCode);
         using (var given = await PatchAsync(agent, player, new { birthDate = "2004-06-07" }))
@@ -87,6 +95,15 @@ public sealed class BirthDateTests(ServerFixture server) : LedgerCheckedTest(ser
             Assert.Equal("2004-06-07", (await Players.ReadAsync(me, 200)).GetProperty("birthDate").GetString());
         }
 
+        Assert.Equal(201, (await Players.StartAsync(agent, player)).Status);
+    }
+
+    [Fact]
+    public async Task By_day_a_player_without_a_date_starts_on_the_PC_without_questions()
+    {
+        // Owner's decision: sign in and play, no questions on the PC; the desk fills the date in.
+        var (agent, player) = await Players.SignedInAsync(Server);
+        await Players.BirthDateAsync(Server, player, null);
         Assert.Equal(201, (await Players.StartAsync(agent, player)).Status);
     }
 

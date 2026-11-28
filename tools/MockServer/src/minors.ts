@@ -4,8 +4,8 @@
  * - a new account needs `birthDate` (`YYYY-MM-DD`, an age of 5–100, not in the future: `400 birthDate
  *   required|format|future|min|max`); the player gives a missing one once (`PATCH /users/{id}`), then `403
  *   birthDateLocked`;
- * - the player's own purchase on the PC needs it (`403 policyDenied birthDateRequired`); a minor — or a member without
- *   one — in the forbidden hours (`limits.minorCurfew`…`limits.minorCurfewEnd`, on unless `minorCurfewEnabled` is
+ * - outside the forbidden hours a missing date blocks nothing (owner: sign in and play, no questions); a minor — or a
+ *   member without one (`403 policyDenied birthDateRequired`) — in the forbidden hours (`limits.minorCurfew`…`limits.minorCurfewEnd`, on unless `minorCurfewEnabled` is
  *   false) gets `403 policyDenied minorCurfew {from, to}`; prepaid time that would still run at their start is refused
  *   with `400 validation minutes curfew {maxMinutes, from, to}`;
  * - a minor's open session is warned 10 and 5 minutes before and ended at the start (`admin`: unused time refunded,
@@ -128,10 +128,8 @@ export function curfewDenied(): ApiError {
   return new ApiError('policyDenied', curfewText(), { rule: 'minorCurfew', reason: 'minorCurfew', ...curfewHours() });
 }
 
-/** Rule 5 of a purchase (D-108): `kiosk` — the player's own on the PC, which needs the date at any hour (D-107). */
-export function checkCurfew(user: UserRecord, kiosk: boolean, at = new Date()): void {
-  if (kiosk && !user.transient && (user.role === 'member' || user.role === 'vip') && !user.birthDate)
-    throw birthDateRequired();
+/** Rule 5 of a purchase (D-108); a missing date blocks only in the forbidden hours. */
+export function checkCurfew(user: UserRecord, _kiosk: boolean, at = new Date()): void {
   if (curfewHolds(user, at) && inCurfewHours(at)) throw user.birthDate ? curfewDenied() : birthDateRequired();
 }
 
